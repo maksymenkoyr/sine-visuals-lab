@@ -191,6 +191,17 @@ const RIPPLE_SPEED = 1.1; // units/sec a ring expands at
 const RIPPLE_WIDTH = 1.6; // gaussian tightness — lower = wider ring
 const RIPPLE_DECAY_PER_SEC = 0.55; // lower = the ring lives longer and travels farther
 
+// Ceiling every focus setting converges to on a full-strength beat (see the
+// focusCurve comment in FRAG). Was 26 before focus setting stopped scaling
+// this directly — lowered alongside that change because a shared ceiling
+// now gets reached far more often (any focus setting, given a strong
+// enough beat, not just uFocus=1), and 26 pushes pow(ridge, sharp) close
+// enough to a step function that the underlying value-noise contour lines
+// read as a banded "pixel ladder" rather than a smooth thin ridge,
+// especially where the domain warp bunches several octaves' contours
+// together near the vortex point.
+const FOCUS_SHARP_MAX = 18;
+
 // Own accumulator for the domain-warp drift: never reset, only advanced, so
 // dragging the Drift slider mid-run changes the *rate* going forward and
 // never jumps the field (see the file header and flowClock.ts).
@@ -338,10 +349,32 @@ void main() {
   // "resting" and "on-beat" instead of shifting the whole range up — a
   // uniform lift is what made higher settings read as merely thinner lines
   // rather than a bigger snap.
-  float focusDrive = uFocus * uBeatPulse;
-  float sharp = mix(4.0, 26.0, focusDrive) * (1.0 - bassBulge * 0.25);
+  //
+  // uFocus bends the *response curve* on beatPulse instead of scaling
+  // sharp's own ceiling: every focus setting maps a full-strength beat
+  // (uBeatPulse -> 1) to the same sharp = ${FOCUS_SHARP_MAX}. What changes
+  // is how strong a beat has to be to get there — low focus needs a hit
+  // close to uBeatPulse's own max (a steep curve, so ordinary beats barely
+  // move it), high focus reaches nearly full sharpness off a modest pulse
+  // (a shallow curve). Without this bend, sharp's ceiling was itself
+  // mix(4, FOCUS_SHARP_MAX, uFocus) — a second, hidden min/max scale
+  // on top of the swing this comment block already fixed once, so low
+  // focus could never reach the same peak no matter how hard the beat hit.
+  float focusCurve = mix(2.4, 0.35, uFocus);
+  float focusDrive = pow(uBeatPulse, focusCurve);
+  float sharp = mix(4.0, ${FOCUS_SHARP_MAX}.0, focusDrive) * (1.0 - bassBulge * 0.25);
   float ridgeGain = sqrt(sharp / 4.0); // a thinner ridge is proportionally brightened, so Focus snaps intensity too, not just width
-  float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7);
+  // Warp compresses screen space into q-space, and near its own fold points
+  // that compression runs unbounded — arbitrarily fine screen-space detail,
+  // no antialiasing trick fixes that after the fact. Ordinarily this stays
+  // hidden: the six octaves' ridge contours pass through those fold points
+  // at very different widths and never gang up. A focus snap breaks that —
+  // every octave goes thin at once, so right where warp already folds
+  // several of their contours close together, they all render as hard
+  // near-coincident lines simultaneously, reading as a dense "pixel ladder"
+  // fan. Easing warp back exactly when focusDrive peaks loosens that fold
+  // just when sharpness would otherwise expose it hardest.
+  float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7) * mix(1.0, 0.72, focusDrive);
   for (int i = 0; i < 6; i++) {
     if (i >= iterations) break;
     float band = sampleBands(float(i) / 6.0);
@@ -352,7 +385,17 @@ void main() {
     ) * warpAmt;
     float v = noise(q * 2.3 + flow * (1.0 + fi * 0.2));
     float ridge = 1.0 - abs(v * 2.0 - 1.0);
-    acc += amp * (0.5 + band * 0.8) * pow(ridge, sharp) * ridgeGain;
+    // Anti-alias the ridge against its own screen-space footprint. pow()
+    // has no concept of pixel size, so whenever the true line width (which
+    // shrinks as sharp climbs) drops below what a pixel's worth of noise
+    // change (fwidth(v)) can resolve, the rasterizer can only stair-step
+    // between "in" and "out" — the "pixel ladder" artifact, worst right
+    // when uFocus slams sharp up fast on a beat. Capping the exponent used
+    // here (never the uniform "sharp" itself, so ridgeGain's brightness
+    // still tracks the real, unclamped snap) keeps the rendered line at
+    // least ~1px wide regardless of how fast focusDrive moves.
+    float aaSharp = min(sharp, 0.3 / max(fwidth(v), 1e-4));
+    acc += amp * (0.5 + band * 0.8) * pow(ridge, aaSharp) * ridgeGain;
     amp *= 0.6;
   }
 
@@ -368,7 +411,25 @@ void main() {
   acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * uBeatPulse * 1.5 + ring * 0.8
        + dropDrive * 0.5 + dropFlash * 1.2;
   acc = max(0.0, acc - 0.08); // dark water floor, so filaments read as bright threads
-  vec3 col = palette(acc * 0.3 + uTime * 0.02 - bassBulge * 0.15, uPalA, uPalB, uPalC, uPalD) * acc;
+  // Hue phase rides brightness (a ridge crest tints differently than the
+  // dim water around it) through a cosine, which wraps through its full
+  // hue cycle for roughly a unit change of phase. Raw acc can swing several
+  // units within a couple of pixels right at a sharp ridge edge — most of
+  // all exactly on a beat, when ridgeGain is also elevated — and cycling
+  // through hues that fast across so few pixels is what actually read as a
+  // rainbow "pixel ladder" tracing every ridge (not luminance banding —
+  // lowering sharp's own ceiling barely touched it, which is what ruled
+  // luminance out). Clamping huePhase's own range would have killed the
+  // fringing too, but it also flattened the deliberate hue spread between
+  // dim water and bright crests everywhere, not just at the hard edges.
+  // Instead, damp the palette's cosine *modulation* — never its average
+  // color — by how fast huePhase is moving per pixel (fwidth): a slowly
+  // drifting phase (ridge interiors, open water) keeps its full designed
+  // color swing, while a phase that's trying to wrap within a pixel or two
+  // fades toward the average color instead of aliasing through the wrap.
+  float huePhase = acc * 0.3 + uTime * 0.02 - bassBulge * 0.15;
+  float hueDamp = exp(-24.0 * fwidth(huePhase) * fwidth(huePhase));
+  vec3 col = (uPalA + uPalB * cos(6.28318 * (uPalC * huePhase + uPalD)) * hueDamp) * acc;
   col = col / (1.0 + col); // tonemap — the shader had no ceiling before, so bright hits clipped flat
 
   outColor = vec4(col, 1.0);
