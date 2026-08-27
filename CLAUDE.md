@@ -3,7 +3,7 @@
 A browser-based, real-time WebGL2 audio visualizer with a phone→TV pairing mode.
 Two entry points: `index.html` → `src/app.ts` (phone/controller + gallery) and
 `tv.html` → `src/tv.ts` (the paired display). See `README.md` for the pitch and
-`docs/architecture.md` for how the pieces fit together.
+`docs/index.md` for how the pieces fit together.
 
 ## Two rules for keeping this documentation honest
 
@@ -36,10 +36,7 @@ a standing claim, so specifics there are expected to age out immediately.
 
 | Touching... | Read first |
 |---|---|
-| Anything cross-module / the overall data flow | `docs/architecture.md` |
-| Adding or modifying a scene | `docs/adding-a-scene.md` — carries the one auto-tune invariant with no owning file |
-| The live-tuning workflow (param bus, mark, probe, contact sheet) | `docs/tuning.md` |
-| What's mid-flight right now | `docs/status.md` |
+| Any broad question — architecture, adding a scene, tuning, what's in flight | `docs/index.md` — the documentation map |
 | The wire format between phone and TV | `src/net/protocol.ts` header — includes the legacy-decode sunset condition |
 | Why a setting resolves the way it does under Auto | `src/render/autoTune.ts` and `src/render/musicProfile.ts` headers |
 | The settings/uniform system itself | `src/render/sceneSettings.ts` header |
