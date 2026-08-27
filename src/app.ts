@@ -4,7 +4,8 @@ import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { FeatureExtractor } from "./audio/features.ts";
 import { NUM_BANDS, type CaptureHandle, type FeatureFrame } from "./audio/types.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
-import { detectTier, tierSettings, type Tier, type TierSettings } from "./render/tier.ts";
+import { detectTier, parseTier, tierSettings, type Tier, type TierSettings } from "./render/tier.ts";
+import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type Viewport } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, PALETTES, type Palette } from "./render/palette.ts";
@@ -135,12 +136,8 @@ let lastAnim: AnimFrame | null = null;
 let lastRenderFpsMs = 0;
 let lastFps = 0;
 
-/** Caps scene.render()'s rate independently of rAF — a 120Hz phone gets no
- *  visible benefit from raymarching twice as often, only twice the cost. 30fps
- *  on floor tier, 60 elsewhere. Everything else in loop() (feature extraction,
- *  beat/flow decay, host broadcast) still runs on every rAF tick. */
-const RENDER_FPS_CAP = 60;
-const RENDER_FPS_CAP_FLOOR = 30;
+// Render-rate cap and its jitter-tolerant gate live in framePace.ts (shared
+// with tv.ts) — see that file for why the gate needs a tolerance at all.
 let lastRenderMs = 0;
 
 /** Closed-loop counterpart to detectTier()'s one-shot boot benchmark — steps
@@ -148,10 +145,6 @@ let lastRenderMs = 0;
  *  (thermal throttling) and back up once comfortable. Created once tier is
  *  known, in boot(). */
 let governor: QualityGovernor | null = null;
-
-function targetFrameIntervalMs(): number {
-  return 1000 / (tier.tier === "floor" ? RENDER_FPS_CAP_FLOOR : RENDER_FPS_CAP);
-}
 
 function activeConn(): AnyConn | null {
   return hostConn ?? rendererConn;
@@ -473,10 +466,19 @@ async function boot(): Promise<void> {
     syntheticStartMs = performance.now();
   }
 
-  tier = tierSettings(await detectTier());
+  // `?tier=` (dev-only) lets a headless capture tool force a specific tier
+  // instead of running detectTier()'s benchmark — SwiftShader (what
+  // tools/tune-sheet.mjs runs on) is genuinely slow, so an unpinned capture
+  // self-detects "low"/"floor" and renders at a fraction of the resolution
+  // and octave count real hardware gets, making any contact sheet measure
+  // the wrong thing. Pinning also skips the governor entirely: a fixed
+  // tier is for reproducible capture, not for exercising the closed-loop
+  // stepper (that's what the unpinned path and tests/governor.test.ts are for).
+  const pinnedTier = import.meta.env.DEV ? parseTier(params.get("tier")) : null;
+  tier = tierSettings(pinnedTier ?? (await detectTier()));
   mainHost = createSceneHost(gl, tier);
   if (!tierAllows(scene, tier.tier)) scene = availableScenes()[0] ?? scene;
-  governor = createQualityGovernor(tier, targetFrameIntervalMs());
+  governor = pinnedTier ? null : createQualityGovernor(tier, targetFrameIntervalMs(tier.tier));
 
   if (bypassGallery) {
     // Plain ?room=CODE — join as a mic-less renderer (e.g. a second laptop just watching).
@@ -579,6 +581,8 @@ async function boot(): Promise<void> {
         fps: lastFps,
         vis: lastVis,
         anim: lastAnim,
+        renderScale: tier.renderScale,
+        govLevel: governor?.level ?? 0,
       }),
     });
   }
@@ -695,7 +699,7 @@ function loop(): void {
   lastAnim = anim;
   advanceAutoTune(dtSec, anim.profile);
 
-  if (nowRafMs - lastRenderMs < targetFrameIntervalMs()) return;
+  if (!shouldRenderFrame(nowRafMs, lastRenderMs, targetFrameIntervalMs(tier.tier))) return;
   if (lastRenderFpsMs > 0) {
     const renderDtMs = nowRafMs - lastRenderFpsMs;
     if (renderDtMs > 0) lastFps = 1000 / renderDtMs;

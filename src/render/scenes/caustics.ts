@@ -37,7 +37,14 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.7,
     // Beat-snap only reads as a snap on music with actual beats to snap to.
-    auto: { pulse: 0.35, attack: 0.25 },
+    // Was { pulse: 0.35, attack: 0.25 } — but `pulse` alone floors near 0.92
+    // on almost any locked-tempo track (it's 60% tempoLock, which saturates
+    // for basically all steady music), so the old weights resolved focus to
+    // ~0.90 and held it there for the whole track, not just a snap. Lower
+    // weights keep the auto swing real without pushing focus that close to
+    // its own ceiling on ordinary percussive material (see focusCurve below
+    // for the other half of this fix — the dwell time at a given focus).
+    auto: { pulse: 0.2, attack: 0.15 },
   },
   {
     key: "breathe",
@@ -202,6 +209,14 @@ const RIPPLE_DECAY_PER_SEC = 0.55; // lower = the ring lives longer and travels 
 // together near the vortex point.
 const FOCUS_SHARP_MAX = 18;
 
+// How hard the palette's cosine modulation damps where hue phase is
+// changing faster than a pixel can resolve smoothly (see the hueDamp
+// comment in FRAG). Computed on the palette's actual per-channel cosine
+// argument now, not a scalar proxy, so this one constant applies correctly
+// across every palette rather than implicitly assuming uPalC == 1 (true
+// only for "neon" — see src/render/palette.ts's presets).
+const HUE_DAMP_K = 1.2;
+
 // Own accumulator for the domain-warp drift: never reset, only advanced, so
 // dragging the Drift slider mid-run changes the *rate* going forward and
 // never jumps the field (see the file header and flowClock.ts).
@@ -360,7 +375,19 @@ void main() {
   // mix(4, FOCUS_SHARP_MAX, uFocus) — a second, hidden min/max scale
   // on top of the swing this comment block already fixed once, so low
   // focus could never reach the same peak no matter how hard the beat hit.
-  float focusCurve = mix(2.4, 0.35, uFocus);
+  //
+  // The shallow end was 0.35, not 0.6: in real (auto-on) playback uFocus
+  // spends most of a track sitting well above its 0.7 default (see the
+  // focus spec's auto comment), and at 0.35 the resulting focusDrive decays
+  // slowly enough that sharp sits near FOCUS_SHARP_MAX for most of the gap
+  // between beats too, not just the beat itself — a near-continuous peak
+  // rather than a snap, which is exactly the regime where the ridge's
+  // anti-aliasing (aaSharp below) and the palette's hue-phase damping
+  // (hueDamp further down) are weakest. 0.6 shortens that dwell tail
+  // substantially while leaving the peak-sharpness invariant above exactly
+  // intact (pow(1.0, c) == 1.0 for any c, so a full-strength beat still
+  // reaches FOCUS_SHARP_MAX at every focus setting).
+  float focusCurve = mix(2.4, 0.6, uFocus);
   float focusDrive = pow(uBeatPulse, focusCurve);
   float sharp = mix(4.0, ${FOCUS_SHARP_MAX}.0, focusDrive) * (1.0 - bassBulge * 0.25);
   float ridgeGain = sqrt(sharp / 4.0); // a thinner ridge is proportionally brightened, so Focus snaps intensity too, not just width
@@ -373,8 +400,11 @@ void main() {
   // several of their contours close together, they all render as hard
   // near-coincident lines simultaneously, reading as a dense "pixel ladder"
   // fan. Easing warp back exactly when focusDrive peaks loosens that fold
-  // just when sharpness would otherwise expose it hardest.
-  float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7) * mix(1.0, 0.72, focusDrive);
+  // just when sharpness would otherwise expose it hardest. Strengthened
+  // from 0.72 to 0.6 alongside focusCurve's floor above — a longer dwell
+  // near peak sharpness in real playback means this easing has to hold for
+  // longer than a momentary snap, not just soften the instant of the beat.
+  float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7) * mix(1.0, 0.6, focusDrive);
   for (int i = 0; i < 6; i++) {
     if (i >= iterations) break;
     float band = sampleBands(float(i) / 6.0);
@@ -427,9 +457,18 @@ void main() {
   // drifting phase (ridge interiors, open water) keeps its full designed
   // color swing, while a phase that's trying to wrap within a pixel or two
   // fades toward the average color instead of aliasing through the wrap.
+  //
+  // The damp is measured on the palette's actual per-channel cosine
+  // argument (hueArg = 2π(uPalC·huePhase + uPalD)), not on huePhase alone —
+  // uPalC varies per channel and per palette ("neon" is [1,1,1], but "acid"
+  // is [1.2, 0.9, 0.6] and "fire" is [1.0, 0.7, 0.4]), so a palette's
+  // fastest channel wraps sooner than a shared scalar constant can account
+  // for. fwidth/exp are componentwise on vec3 in GLSL ES 3.00, so each
+  // channel damps on its own actual wrap rate.
   float huePhase = acc * 0.3 + uTime * 0.02 - bassBulge * 0.15;
-  float hueDamp = exp(-24.0 * fwidth(huePhase) * fwidth(huePhase));
-  vec3 col = (uPalA + uPalB * cos(6.28318 * (uPalC * huePhase + uPalD)) * hueDamp) * acc;
+  vec3 hueArg = 6.28318 * (uPalC * huePhase + uPalD);
+  vec3 hueDamp = exp(-${HUE_DAMP_K.toFixed(2)} * fwidth(hueArg) * fwidth(hueArg));
+  vec3 col = (uPalA + uPalB * cos(hueArg) * hueDamp) * acc;
   col = col / (1.0 + col); // tonemap — the shader had no ceiling before, so bright hits clipped flat
 
   outColor = vec4(col, 1.0);

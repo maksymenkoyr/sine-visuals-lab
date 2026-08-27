@@ -26,6 +26,16 @@ export function tierSettings(tier: Tier): TierSettings {
   return { tier, ...TIER_TABLE[tier] };
 }
 
+/** Dev-only escape hatch for `?tier=` — lets a headless capture tool (which
+ *  runs on SwiftShader and would otherwise self-detect "low"/"floor", never
+ *  the render quality a real device gets) force a specific tier and skip
+ *  `detectTier()`'s benchmark entirely. Returns null for anything that
+ *  isn't exactly one of TIER_TABLE's keys, so a typo/absence falls through
+ *  to the normal auto-detect path rather than silently picking a tier. */
+export function parseTier(value: string | null): Tier | null {
+  return value !== null && Object.hasOwn(TIER_TABLE, value) ? (value as Tier) : null;
+}
+
 const BENCH_SIZE = 256;
 const BENCH_FRAMES = 12;
 // A deliberately heavy raymarch-shaped loop, so the benchmark stresses the

@@ -18,6 +18,12 @@ export interface ProbeInput {
   fps: number;
   vis: FeatureFrame | null;
   anim: AnimFrame | null;
+  /** Governor-controlled canvas scale (1 = full detected-tier resolution)
+   *  and step index (0 = no downgrade yet) — surfaced so a capture session
+   *  can tell "the scene looks soft" apart from "the governor quietly
+   *  downgraded it" instead of guessing from pixels. */
+  renderScale: number;
+  govLevel: number;
 }
 
 export interface ProbeSettingValue {
@@ -33,6 +39,8 @@ export interface ProbeSnapshot {
   fps: number;
   tier: string;
   scene: string;
+  renderScale: number;
+  govLevel: number;
   bands: { low: number; mid: number; high: number; energy: number };
   beat: { fired: boolean; bpm: number; phase: number };
   section: number;
@@ -60,6 +68,8 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
     fps: input.fps,
     tier: input.tier,
     scene: sceneId,
+    renderScale: input.renderScale,
+    govLevel: input.govLevel,
     bands: { low: anim?.low ?? 0, mid: anim?.mid ?? 0, high: anim?.high ?? 0, energy: vis?.energy ?? 0 },
     beat: { fired: vis?.beat ?? false, bpm: vis?.bpm ?? 0, phase: anim?.beatPhase ?? 0 },
     section: anim?.sectionIntensity ?? 0,
@@ -73,7 +83,7 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
 export function formatProbe(snap: ProbeSnapshot): string {
   const lines: string[] = [];
   lines.push(
-    `t=${snap.t.toFixed(2)} fps=${snap.fps.toFixed(0)} tier=${snap.tier} scene=${snap.scene}`,
+    `t=${snap.t.toFixed(2)} fps=${snap.fps.toFixed(0)} tier=${snap.tier} scene=${snap.scene} scale=${snap.renderScale.toFixed(2)} gov=${snap.govLevel}`,
   );
   lines.push(
     `low=${snap.bands.low.toFixed(2)} mid=${snap.bands.mid.toFixed(2)} high=${snap.bands.high.toFixed(2)} energy=${snap.bands.energy.toFixed(2)}`,
