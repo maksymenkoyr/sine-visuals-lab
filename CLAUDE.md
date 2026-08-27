@@ -32,6 +32,10 @@ a standing claim, so specifics there are expected to age out immediately.
 - `npm run dev` — visualizer + controller over HTTPS (required for mic access).
 - `npm run dev:worker` — the Cloudflare Worker backend, for phone/TV pairing.
 
+`npm run typecheck` and `npm run test` also run in CI on every pull request, and
+gate the deploy that a push to `main` triggers — see
+`.github/workflows/deploy.yml`.
+
 ## Read this before touching X
 
 | Touching... | Read first |

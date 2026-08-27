@@ -1,0 +1,53 @@
+# Checks every pull request; builds and deploys the Worker on every push to main.
+#
+# The build step is not optional decoration: `wrangler deploy` uploads ./dist
+# (the [assets] block in wrangler.toml) but never builds it, and dist/ is
+# gitignored — so only a fresh build from the checked-out commit guarantees the
+# deployed assets match the source that shipped alongside them.
+name: CI & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Serialize deploys so two merges landing close together can't race each other
+# onto the Worker.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+env:
+  # The tools/tune-*.mjs scripts are the only playwright consumers and they never
+  # run in CI, so skip its postinstall browser download.
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # The gates named in CLAUDE.md. typecheck covers both tsconfigs, so the
+      # Worker source is checked before it ships.
+      - run: npm run typecheck
+      - run: npm run test
+
+      - run: npm run build
+
+      - name: Deploy to Cloudflare
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
