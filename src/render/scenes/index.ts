@@ -9,15 +9,29 @@ import { risoScene } from "./riso.ts";
 import { ferrofluidScene } from "./ferrofluid.ts";
 import { meshGridScene } from "./meshGrid.ts";
 
+// Registration order is gallery display order (listScenes() preserves Map
+// insertion order) — the two featured scenes go first, drafts follow.
+registerScene(causticsScene);
+registerScene(meshGridScene);
 registerScene(spectrumScene);
 registerScene(particlesScene);
 registerScene(tunnelScene);
 registerScene(cymaticsScene);
 registerScene(moireScene);
-registerScene(causticsScene);
 registerScene(risoScene);
 registerScene(ferrofluidScene);
-registerScene(meshGridScene);
+
+/** Scenes still rough enough to sit behind the gallery's "draft" toggle —
+ *  the two featured scenes (Caustics, Mesh Grid) are deliberately absent. */
+export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
+  "spectrum",
+  "particles",
+  "tunnel",
+  "cymatics",
+  "moire",
+  "riso",
+  "ferrofluid",
+]);
 
 export {
   spectrumScene,

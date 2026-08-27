@@ -1,4 +1,4 @@
-import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
+import { DRAFT_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
 import { captureMic, captureDisplayAudio } from "./audio/capture.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { FeatureExtractor } from "./audio/features.ts";
@@ -544,7 +544,12 @@ async function boot(): Promise<void> {
       scenes: () =>
         listScenes().map((s) => {
           const enabled = tierAllows(s, tier.tier);
-          return { scene: s, enabled, reason: enabled ? undefined : "Needs a faster device" };
+          return {
+            scene: s,
+            enabled,
+            draft: DRAFT_SCENE_IDS.has(s.id),
+            reason: enabled ? undefined : "Needs a faster device",
+          };
         }),
       tier: () => tier,
       liveFrame: () => lastVis,

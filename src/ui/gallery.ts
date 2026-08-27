@@ -10,6 +10,9 @@ export interface GallerySceneEntry {
   scene: Scene;
   /** Whether this device's GPU tier can run the scene fullscreen. */
   enabled: boolean;
+  /** Rougher, unpolished scenes sit behind the gallery's collapsed "draft"
+   *  section and carry a small badge — see DRAFT_SCENE_IDS in scenes/index.ts. */
+  draft: boolean;
   /** Shown on a disabled tile, e.g. "Needs a faster device". */
   reason?: string;
 }
@@ -58,8 +61,25 @@ const tileStyle = `
 `;
 const canvasStyle = `width: 100%; display: block; aspect-ratio: 16 / 9; border-radius: 12px; background: #000;`;
 const captionStyle = `display: flex; justify-content: space-between; align-items: baseline; padding: 10px 6px 4px;`;
-const nameStyle = `font-size: 14px; font-weight: 600;`;
-const reasonStyle = `font-size: 11px; opacity: 0.6;`;
+// The name sits alongside its (optional) draft badge in one flex group so the
+// badge stays right next to the name rather than being pushed to the tile's
+// far edge by captionStyle's space-between — `reason` still owns that edge.
+const nameGroupStyle = `display: flex; align-items: baseline; gap: 7px; min-width: 0;`;
+const nameStyle = `
+  font-size: 14px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+`;
+const badgeStyle = `
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #fffa; background: #fff2; border: 1px solid #fff3;
+  border-radius: 999px; padding: 1px 7px; flex-shrink: 0;
+`;
+const reasonStyle = `font-size: 11px; opacity: 0.6; flex-shrink: 0;`;
+const draftToggleStyle = `
+  display: block; margin: 20px auto 0; padding: 8px 14px;
+  background: none; border: none; color: #fff9; font: inherit; font-size: 13px;
+  cursor: pointer; border-radius: 999px;
+`;
 
 const PREVIEW_W = 480;
 const PREVIEW_H = 270;
@@ -125,7 +145,17 @@ export function createGallery(deps: GalleryDeps): Gallery {
   const grid = document.createElement("div");
   grid.style.cssText = gridStyle;
 
-  root.append(header, errorBanner, grid);
+  // Collapsed by default — see expandDrafts/collapseDrafts below. Built lazily
+  // so a first-time visitor never pays for compiling seven draft shaders.
+  const draftToggle = document.createElement("button");
+  draftToggle.style.cssText = draftToggleStyle;
+  draftToggle.style.display = "none";
+
+  const draftGrid = document.createElement("div");
+  draftGrid.style.cssText = gridStyle;
+  draftGrid.style.display = "none";
+
+  root.append(header, errorBanner, grid, draftToggle, draftGrid);
   document.body.appendChild(root);
 
   let preview: PreviewRenderer | null = null;
@@ -133,6 +163,14 @@ export function createGallery(deps: GalleryDeps): Gallery {
   let lastDrawMs = 0;
   let visible = false;
   let rrIndex = 0;
+
+  // Draft-section state. Rebuilt (along with everything else) on every show(),
+  // so these describe the *current* build cycle, not something persisted
+  // across it — draftsExpanded is the one flag that survives a rebuild.
+  let pendingDrafts: GallerySceneEntry[] = [];
+  let pendingDraftStartIndex = 0;
+  let draftsBuilt = false;
+  let draftsExpanded = false;
 
   const observer = new IntersectionObserver(
     (entries) => {
@@ -144,54 +182,109 @@ export function createGallery(deps: GalleryDeps): Gallery {
     { threshold: 0.01 },
   );
 
+  function buildTile(entry: GallerySceneEntry, i: number, into: HTMLElement): void {
+    const btn = document.createElement("button");
+    btn.style.cssText = tileStyle + (entry.enabled ? "" : "opacity: 0.45;");
+
+    const canvas = document.createElement("canvas");
+    canvas.width = PREVIEW_W;
+    canvas.height = PREVIEW_H;
+    canvas.style.cssText = canvasStyle;
+    // Draft tiles may be built into a still-collapsed (display: none) section —
+    // mark them not-visible up front so tick()'s round-robin never draws one
+    // in the brief window before the IntersectionObserver's first callback.
+    if (entry.draft) canvas.dataset.visible = "0";
+
+    const caption = document.createElement("div");
+    caption.style.cssText = captionStyle;
+    const nameGroup = document.createElement("div");
+    nameGroup.style.cssText = nameGroupStyle;
+    const name = document.createElement("span");
+    name.textContent = entry.scene.name;
+    name.style.cssText = nameStyle;
+    nameGroup.appendChild(name);
+    if (entry.draft) {
+      const badge = document.createElement("span");
+      badge.textContent = "DRAFT";
+      badge.style.cssText = badgeStyle;
+      nameGroup.appendChild(badge);
+    }
+    caption.appendChild(nameGroup);
+    if (!entry.enabled && entry.reason) {
+      const reason = document.createElement("span");
+      reason.textContent = entry.reason;
+      reason.style.cssText = reasonStyle;
+      caption.appendChild(reason);
+    }
+
+    btn.append(canvas, caption);
+    btn.addEventListener("click", () => {
+      if (entry.enabled) deps.onPick(entry.scene.id);
+      else deps.onDisabledPick(entry.scene.id, entry.reason ?? "unavailable");
+    });
+    into.appendChild(btn);
+    observer.observe(canvas);
+    preview?.host.mount(entry.scene);
+
+    tiles.push({
+      scene: entry.scene,
+      canvas,
+      sink: preview?.attach(canvas) ?? null,
+      feed: createSyntheticFeed({ bpm: 116 + i * 4, phaseOffsetSec: i * 0.17 }),
+      palette: PALETTES[i % PALETTES.length],
+      anim: createAnimClock(),
+      lastDrawMs: 0,
+    });
+  }
+
+  function updateToggleLabel(): void {
+    draftToggle.textContent = draftsExpanded ? "▾ Hide draft scenes" : `▸ Show ${pendingDrafts.length} draft scenes`;
+  }
+
+  function expandDrafts(): void {
+    if (!draftsBuilt) {
+      pendingDrafts.forEach((entry, j) => buildTile(entry, pendingDraftStartIndex + j, draftGrid));
+      draftsBuilt = true;
+    }
+    draftGrid.style.display = "grid";
+    draftsExpanded = true;
+    updateToggleLabel();
+  }
+
+  function collapseDrafts(): void {
+    draftGrid.style.display = "none";
+    draftsExpanded = false;
+    updateToggleLabel();
+  }
+
+  draftToggle.addEventListener("click", () => {
+    if (draftsExpanded) collapseDrafts();
+    else expandDrafts();
+  });
+
   function buildTiles(): void {
     for (const t of tiles) observer.unobserve(t.canvas);
     grid.innerHTML = "";
+    draftGrid.innerHTML = "";
     tiles = [];
+    draftsBuilt = false;
 
     const entries = deps.scenes();
     preview?.setSize(PREVIEW_W, PREVIEW_H);
 
-    entries.forEach((entry, i) => {
-      const btn = document.createElement("button");
-      btn.style.cssText = tileStyle + (entry.enabled ? "" : "opacity: 0.45;");
+    const featured = entries.filter((e) => !e.draft);
+    pendingDrafts = entries.filter((e) => e.draft);
+    pendingDraftStartIndex = featured.length;
 
-      const canvas = document.createElement("canvas");
-      canvas.width = PREVIEW_W;
-      canvas.height = PREVIEW_H;
-      canvas.style.cssText = canvasStyle;
+    featured.forEach((entry, i) => buildTile(entry, i, grid));
 
-      const caption = document.createElement("div");
-      caption.style.cssText = captionStyle;
-      const name = document.createElement("span");
-      name.textContent = entry.scene.name;
-      name.style.cssText = nameStyle;
-      caption.appendChild(name);
-      if (!entry.enabled && entry.reason) {
-        const reason = document.createElement("span");
-        reason.textContent = entry.reason;
-        reason.style.cssText = reasonStyle;
-        caption.appendChild(reason);
-      }
+    draftToggle.style.display = pendingDrafts.length > 0 ? "block" : "none";
+    updateToggleLabel();
 
-      btn.append(canvas, caption);
-      btn.addEventListener("click", () => {
-        if (entry.enabled) deps.onPick(entry.scene.id);
-        else deps.onDisabledPick(entry.scene.id, entry.reason ?? "unavailable");
-      });
-      grid.appendChild(btn);
-      observer.observe(canvas);
-
-      tiles.push({
-        scene: entry.scene,
-        canvas,
-        sink: preview?.attach(canvas) ?? null,
-        feed: createSyntheticFeed({ bpm: 116 + i * 4, phaseOffsetSec: i * 0.17 }),
-        palette: PALETTES[i % PALETTES.length],
-        anim: createAnimClock(),
-        lastDrawMs: 0,
-      });
-    });
+    // Re-expand across a rebuild (e.g. returning from a viz) so browsing the
+    // draft section doesn't silently re-collapse it out from under the user.
+    if (draftsExpanded) expandDrafts();
+    else draftGrid.style.display = "none";
   }
 
   return {
@@ -202,7 +295,6 @@ export function createGallery(deps: GalleryDeps): Gallery {
         errorBanner.style.display = "block";
       }
       buildTiles();
-      for (const t of tiles) preview?.host.mount(t.scene);
       root.style.display = "block";
       visible = true;
       lastDrawMs = 0;
