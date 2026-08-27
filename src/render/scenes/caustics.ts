@@ -333,7 +333,12 @@ void main() {
   int iterations = int(mix(3.0, 6.0, uQuality));
   float acc = 0.0;
   float amp = 1.0;
-  float focusDrive = uFocus * (0.35 + 0.65 * uBeatPulse);
+  // No baseline floor: at rest (uBeatPulse near 0) sharp stays near the fog
+  // end regardless of uFocus, so raising the slider widens the swing between
+  // "resting" and "on-beat" instead of shifting the whole range up — a
+  // uniform lift is what made higher settings read as merely thinner lines
+  // rather than a bigger snap.
+  float focusDrive = uFocus * uBeatPulse;
   float sharp = mix(4.0, 26.0, focusDrive) * (1.0 - bassBulge * 0.25);
   float ridgeGain = sqrt(sharp / 4.0); // a thinner ridge is proportionally brightened, so Focus snaps intensity too, not just width
   float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7);
