@@ -48,10 +48,10 @@ import {
   type VisualSample,
 } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
-import { createDeviceMenu, type DeviceMenu } from "./ui/deviceMenu.ts";
+import { createDeviceMenu, type DeviceMenu, type DeviceMenuDeps } from "./ui/deviceMenu.ts";
 import { createControlPanel } from "./ui/controlPanel.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
-import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
+import { navigate, onRouteChange, seedHistory, currentRoute, parseOptions, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
 
 type Mode = "solo" | "host" | "renderer";
@@ -104,6 +104,10 @@ let mainHost: SceneHost | null = null;
 
 let gallery: Gallery | null = null;
 let deviceMenu: DeviceMenu | null = null;
+/** Dev-only spotlight/scrub hooks for the device menu, filled by boot's DEV
+ *  branch. Stays empty in production, so those deps are absent and the menu
+ *  falls back to its normal behaviour — see DeviceMenuDeps. */
+let tuningMenuHooks: Partial<DeviceMenuDeps> = {};
 let immersive: ImmersiveMode | null = null;
 let inViz = false;
 /** `?room=CODE` (no role=host) — a mic-less renderer joining someone else's
@@ -209,7 +213,7 @@ function fatalError(message: string): void {
 }
 
 async function chooseCapture(): Promise<CaptureHandle> {
-  const params = new URLSearchParams(location.search);
+  const params = parseOptions(location.search, location.hash);
   if (params.get("source") === "display") return captureDisplayAudio();
   return captureMic();
 }
@@ -348,6 +352,9 @@ function wireDeviceMenu(): void {
     getAutoStrength: () => getAutoStrength(),
     onAutoStrengthChange: (value) => setAutoStrength(value),
     toggleButton: menuBtn,
+    // Empty outside a dev build (see boot's DEV branch), which is what makes
+    // every row above behave exactly as it did before the tuning kit existed.
+    ...tuningMenuHooks,
   });
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
 }
@@ -462,7 +469,7 @@ async function boot(): Promise<void> {
     return;
   }
 
-  const params = new URLSearchParams(location.search);
+  const params = parseOptions(location.search, location.hash);
   const joinCode = params.get("room");
   const wantsHostRole = params.get("role") === "host";
   bypassGallery = !!joinCode && !wantsHostRole;
@@ -507,6 +514,15 @@ async function boot(): Promise<void> {
       invite.show();
       window.setTimeout(() => invite.hide(), 8000);
     });
+  }
+
+  // Loaded before the menu is built so its dev-only hooks can be passed as
+  // ordinary deps rather than reached for through a late-arriving global.
+  // Same literal DEV guard as initTuning below — both branches, and the
+  // module graph behind them, are dead code in a production build.
+  if (import.meta.env.DEV) {
+    const { createTuningMenuHooks } = await import("./tuning/menu.ts");
+    tuningMenuHooks = createTuningMenuHooks();
   }
 
   wireDeviceMenu();

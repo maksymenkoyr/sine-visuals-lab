@@ -2,7 +2,11 @@
 export type Route = { kind: "gallery" } | { kind: "viz"; sceneId: string };
 
 const GALLERY: Route = { kind: "gallery" };
-const VIZ_RE = /^#\/v\/([^/]+)\/?$/;
+// The scene id stops at the first `?` or `&` so a hash-carried query string
+// (`#/v/mesh?audio=synthetic`) still resolves to the scene rather than being
+// swallowed whole into the id. See hashQuery/parseOptions below for why such
+// URLs exist at all.
+const VIZ_RE = /^#\/v\/([^/?&]+)\/?(?:[?&](.*))?$/;
 
 /** Pure hash -> Route. Deliberately does not validate the scene id against
  *  the registry — an unknown id is still a well-formed viz route, and it's
@@ -13,6 +17,29 @@ export function parseRoute(hash: string): Route {
   const m = VIZ_RE.exec(hash);
   if (!m || !m[1]) return GALLERY;
   return { kind: "viz", sceneId: decodeURIComponent(m[1]).toLowerCase() };
+}
+
+/** Everything after the first `?` or `&` in a hash, or "" if there is none.
+ *  Route-agnostic on purpose — a gallery hash can carry options too. */
+export function hashQuery(hash: string): string {
+  const i = hash.search(/[?&]/);
+  return i === -1 ? "" : hash.slice(i + 1);
+}
+
+/**
+ * Boot options, read from the real query string and from any query the hash
+ * carries. Both forms are in the wild: the pairing QR builds a real
+ * `?room=...` query, while every documented tuning URL puts `?audio=synthetic`
+ * after the hash — which silently did nothing before this existed, since
+ * `location.search` is empty for those. A real query wins on conflict, being
+ * the less ambiguous of the two.
+ */
+export function parseOptions(search: string, hash: string): URLSearchParams {
+  const options = new URLSearchParams(search);
+  for (const [key, value] of new URLSearchParams(hashQuery(hash))) {
+    if (!options.has(key)) options.set(key, value);
+  }
+  return options;
 }
 
 export function routeToHash(route: Route): string {

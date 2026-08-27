@@ -9,6 +9,7 @@ import type { AnimFrame } from "../render/animClock.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import { getSceneSetting } from "../render/sceneSettings.ts";
 import { getOverride, isAutoPinned } from "./overrides.ts";
+import { isFocused } from "./focus.ts";
 import { isAutoEnabled, resolveSceneSetting } from "../render/autoTune.ts";
 
 export interface ProbeInput {
@@ -26,6 +27,10 @@ export interface ProbeSettingValue {
   /** "override" (pinned by the tuning bus), "auto" (music-driven), or
    *  "manual" (auto disabled for this key, resolved === base). */
   mode: "override" | "auto" | "manual";
+  /** Spotlighted by the current tuning session (focus.ts). Carried here so a
+   *  probe answers "did the dial we're discussing actually move" in one read,
+   *  rather than needing the params file open alongside it. */
+  focused?: boolean;
 }
 
 export interface ProbeSnapshot {
@@ -52,7 +57,9 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
         : spec.auto && isAutoEnabled(sceneId, spec.key)
           ? "auto"
           : "manual";
-    settingValues[spec.key] = { base, resolved, mode };
+    settingValues[spec.key] = isFocused(spec.key)
+      ? { base, resolved, mode, focused: true }
+      : { base, resolved, mode };
   }
 
   return {
@@ -83,7 +90,10 @@ export function formatProbe(snap: ProbeSnapshot): string {
   );
   for (const [key, v] of Object.entries(snap.settings)) {
     const tag = v.mode === "override" ? "pinned" : v.mode === "auto" ? `auto ${(v.resolved - v.base >= 0 ? "+" : "") + (v.resolved - v.base).toFixed(2)}` : "manual";
-    lines.push(`  ${key}=${v.resolved.toFixed(3)} (base ${v.base.toFixed(3)}, ${tag})`);
+    // Spotlighted rows lead with a marker so they're findable by eye in a
+    // long readout — the same rows the device menu is highlighting.
+    const mark = v.focused ? "->" : "  ";
+    lines.push(`${mark} ${key}=${v.resolved.toFixed(3)} (base ${v.base.toFixed(3)}, ${tag})`);
   }
   return lines.join("\n");
 }

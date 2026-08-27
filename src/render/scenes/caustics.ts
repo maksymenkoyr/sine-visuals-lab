@@ -184,11 +184,26 @@ const SETTINGS: SceneSetting[] = [
     // Only lean into drop behavior on a track that actually has real dynamic swings.
     auto: { dynamics: 0.45 },
   },
+  {
+    // Promoted from a `RIPPLE_WIDTH = 1.6` constant that was interpolated
+    // straight into the shader source, so every trial value cost a rebuild.
+    // Draft until a session decides whether ring thickness is worth a user
+    // control or should be baked back at whatever value wins — see
+    // docs/tuning.md.
+    key: "rippleWidth",
+    label: "Ripple width",
+    description: "How thick each expanding ring reads",
+    group: "Beat",
+    min: 0.4,
+    max: 4,
+    step: 0.05,
+    default: 1.6,
+    draft: true,
+  },
 ];
 
 const MAX_RIPPLES = 4;
 const RIPPLE_SPEED = 1.1; // units/sec a ring expands at
-const RIPPLE_WIDTH = 1.6; // gaussian tightness — lower = wider ring
 const RIPPLE_DECAY_PER_SEC = 0.55; // lower = the ring lives longer and travels farther
 
 // Own accumulator for the domain-warp drift: never reset, only advanced, so
@@ -325,7 +340,7 @@ void main() {
     float age = uRippleAge[i];
     float ringR = age * ${RIPPLE_SPEED};
     float ringDist = pLen - ringR;
-    ringSum += exp(-ringDist * ringDist * ${RIPPLE_WIDTH}) * exp(-age * ${RIPPLE_DECAY_PER_SEC});
+    ringSum += exp(-ringDist * ringDist * uRippleWidth) * exp(-age * ${RIPPLE_DECAY_PER_SEC});
   }
   float ring = uRipple * ringSum;
   vec2 q = p + radialDir * ring * 0.6;

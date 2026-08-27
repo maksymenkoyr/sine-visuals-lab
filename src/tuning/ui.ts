@@ -1,8 +1,9 @@
 /**
- * Tiny dev-only overlay: a switch for the clip buffer (see capture.ts —
- * it's a continuous background sample loop, so it's opt-in rather than
- * always-on) and a flash toast confirming a mark/clip actually saved.
- * Mounted once from debug.ts's initTuning(); never imported in prod.
+ * Tiny dev-only overlay: this page's tuning slot (session.ts), a switch for
+ * the clip buffer (see capture.ts — it's a continuous background sample loop,
+ * so it's opt-in rather than always-on), and a flash toast confirming a
+ * mark/clip actually saved. Mounted once from debug.ts's initTuning(); never
+ * imported in prod.
  */
 
 export interface TuningUI {
@@ -10,7 +11,7 @@ export interface TuningUI {
   flash(label: string, ok?: boolean): void;
 }
 
-export function mountTuningUI(onBufferToggle: (on: boolean) => void): TuningUI {
+export function mountTuningUI(onBufferToggle: (on: boolean) => void, slot?: string | null): TuningUI {
   const panel = document.createElement("div");
   panel.className = "__tuning-overlay";
   panel.style.cssText =
@@ -28,6 +29,19 @@ export function mountTuningUI(onBufferToggle: (on: boolean) => void): TuningUI {
   label.style.cssText = "display:flex;align-items:center;gap:6px;cursor:pointer;";
   label.textContent = "clip buffer";
   label.prepend(checkbox);
+
+  // Two tuning windows look identical otherwise, and telling them apart
+  // matters the moment you're driving one while a tool drives the other.
+  // Absent slot = not a tuning session, so there's nothing to badge.
+  if (slot) {
+    const badge = document.createElement("span");
+    badge.textContent = slot;
+    badge.title = `Tuning slot ${slot}`;
+    badge.style.cssText =
+      "font-weight:600;letter-spacing:.06em;background:#fbbf24;color:#000;" +
+      "border-radius:4px;padding:1px 5px;margin-right:2px;";
+    panel.appendChild(badge);
+  }
 
   panel.appendChild(label);
   document.body.appendChild(panel);

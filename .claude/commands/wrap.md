@@ -16,7 +16,17 @@ Close out this working session:
    to `tuning/VOCAB.md` in its documented format:
    `"phrase" -> scene: setting/param, direction, ~magnitude`.
 
-3. **Check for doc rot.** For any symbol, file, or param name this session
+3. **Resolve every setting this session promoted.** Grep the scenes touched
+   this session for `draft: true`. A draft is a constant that was promoted to
+   a dial so it could be scrubbed, and leaving it undecided is how a scene
+   silently fills with half-considered controls. For each one, say which it
+   should be — kept (drop the flag and give it a real label, description and
+   `auto` weights), still a draft (say why it's unresolved), or baked (fold
+   the scrubbed value back into a constant and delete the entry). Take the
+   scrubbed values from the `tuning/params*.json` files. See the
+   promote → scrub → keep/draft/bake loop in `docs/tuning.md`.
+
+4. **Check for doc rot.** For any symbol, file, or param name this session
    renamed, removed, or changed the meaning of, grep `CLAUDE.md` and `docs/*.md`
    for the old name. Fix any reference you find — this is the enforcement
    mechanism behind rule 2 in `CLAUDE.md` ("never write down anything

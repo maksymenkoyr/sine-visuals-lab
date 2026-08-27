@@ -80,6 +80,27 @@ export interface DeviceMenuDeps {
   onAutoStrengthChange: (value: number) => void;
   /** The button that opens this menu — excluded from the tap-outside-to-close check. */
   toggleButton: HTMLElement;
+
+  // --- Dev-only tuning hooks. All optional and left undefined in production;
+  // src/app.ts supplies them from inside its `import.meta.env.DEV` branch, so
+  // a prod build carries neither the wiring nor the tuning kit behind it. The
+  // menu's behaviour with all three absent is exactly what it was before. ---
+
+  /** Settings currently spotlighted by a tuning session, keyed by
+   *  SceneSetting.key — see src/tuning/focus.ts. */
+  getFocus?: (key: string) => { note?: string; from?: number; to?: number } | undefined;
+  /** Fires when that set changes, so the highlight can repaint without a
+   *  rebuild. Returns an unsubscribe. */
+  onFocusChange?: (listener: () => void) => () => void;
+  /**
+   * Where a slider drag goes during a tuning session, instead of
+   * onSceneSettingChange. The distinction matters: the normal handler writes
+   * your real saved settings and takes the key off auto, which is right for a
+   * user and wrong for a session that's only trying values out. This one
+   * routes to the in-memory override layer and reports the value back to
+   * disk. Absent -> rows behave normally.
+   */
+  onSceneSettingScrub?: (sceneId: string, spec: SceneSetting, value: number) => void;
 }
 
 export interface DeviceMenu {
@@ -171,6 +192,28 @@ const settingResetBtnStyle = `
 const settingSliderStyle = `width: 100%; accent-color: ${SCENE_ACCENT};`;
 const settingCheckboxStyle = `accent-color: ${SCENE_ACCENT}; width: 15px; height: 15px; margin: 0;`;
 const settingDescriptionStyle = `font-size: 11px; opacity: 0.5; margin-top: 4px; line-height: 1.35;`;
+// Spotlight (dev-only). A ring plus a lift out of the dimmed field, rather
+// than a color swap — the row still has to read as the same control, and the
+// slider keeps its own accent so you can see what you're dragging.
+const FOCUS_ACCENT = "#fbbf24";
+const settingRowFocusedStyle =
+  `${settingRowStyle} margin-left: -6px; margin-right: -6px; padding: 6px; border-radius: 8px;` +
+  ` background: ${FOCUS_ACCENT}14; box-shadow: inset 0 0 0 1px ${FOCUS_ACCENT}80;`;
+// Everything not spotlighted recedes. Kept mild: these rows are still
+// legible and still draggable — the point is to guide the eye, not to lock
+// the rest of the panel.
+const settingRowDimmedStyle = `${settingRowStyle} opacity: 0.35;`;
+// Dev section: same divider treatment as a group heading, but muted rather
+// than accented — it's scaffolding, not part of the scene's design.
+const draftSectionStyle = `margin-top: 14px; padding-top: 10px; border-top: 1px solid #fff1;`;
+// Keeps the native disclosure triangle — the section is collapsed by default,
+// so it needs to look openable without being explained.
+const draftSummaryStyle =
+  `font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.45;` +
+  ` cursor: pointer;`;
+const focusNoteStyle =
+  `font-size: 11px; margin-top: 5px; line-height: 1.35; color: ${FOCUS_ACCENT};` +
+  ` display: flex; align-items: baseline; gap: 5px;`;
 // Third accent (amber), distinct from mic-green and scene-violet, so the
 // Bands box reads as its own system — same reasoning as SCENE_ACCENT above.
 const BANDS_ACCENT = "#f59e0b";
@@ -596,8 +639,33 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     readout: HTMLSpanElement;
     isDragging: () => boolean;
     updateRowResetVisibility: (value: number) => void;
+    /** Repaints this row's spotlight state. No-op with no focus dep wired. */
+    applyFocus: (anyFocused: boolean) => HTMLElement | null;
   }
   let sceneRowHandles: SceneRowHandle[] = [];
+
+  /**
+   * Repaint the spotlight across every row, and scroll the first spotlighted
+   * one into view. Separate from renderSceneSettings so a focus change costs
+   * a class swap rather than a rebuild — rebuilding mid-drag would drop the
+   * slider you're holding.
+   */
+  function applyFocusHighlight(scroll: boolean): void {
+    if (!deps.getFocus) return;
+    const anyFocused = sceneRowHandles.some(({ spec }) => deps.getFocus?.(spec.key) !== undefined);
+    let first: HTMLElement | null = null;
+    for (const handle of sceneRowHandles) {
+      const row = handle.applyFocus(anyFocused);
+      if (row && !first) first = row;
+    }
+    if (!scroll || !first) return;
+    // A spotlighted draft is inside the collapsed Dev section, where
+    // scrollIntoView would land on nothing. Pointing at a dial has to reveal
+    // it, so open its section first.
+    const section = first.closest("details");
+    if (section) section.open = true;
+    first.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
 
   function refreshAutoMaster(): void {
     autoMasterBtn.style.cssText = deps.isSceneAuto(deps.currentSceneId())
@@ -619,19 +687,37 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   function renderSceneSettings(): void {
     const sceneId = deps.currentSceneId();
-    const specs = deps.getSceneSettings(sceneId);
+    const declared = deps.getSceneSettings(sceneId);
     sceneRows.innerHTML = "";
     sceneRowHandles = [];
-    sceneBox.style.display = specs.length === 0 ? "none" : "block";
+
+    // Drafts are settings promoted from a constant so they can be scrubbed,
+    // but not yet decided on — they exist for a tuning session and are
+    // invisible to a user. getFocus is the tuning session's fingerprint: it's
+    // only ever supplied from app.ts's DEV branch.
+    const tuning = deps.getFocus !== undefined;
+    const specs = declared.filter((spec) => !spec.draft);
+    const drafts = tuning ? declared.filter((spec) => spec.draft) : [];
+
+    sceneBox.style.display = specs.length === 0 && drafts.length === 0 ? "none" : "block";
     refreshAutoMaster();
 
+    // Drafts render last, under their own heading, so a scene's real controls
+    // never get pushed down by whatever's being tried out this session.
+    let container: HTMLElement = sceneRows;
     let lastGroup: string | undefined;
-    for (const spec of specs) {
-      if (spec.group !== undefined && spec.group !== lastGroup) {
+    for (const spec of [...specs, ...drafts]) {
+      if (spec.draft && container === sceneRows) {
+        container = mountDraftSection(drafts.length);
+        lastGroup = undefined;
+      }
+      // A draft's own group is preserved for the day it graduates, but it
+      // doesn't get a heading here — the Dev section is its heading.
+      if (!spec.draft && spec.group !== undefined && spec.group !== lastGroup) {
         const groupHeading = document.createElement("div");
         groupHeading.textContent = spec.group;
         groupHeading.style.cssText = lastGroup === undefined ? settingGroupFirstStyle : settingGroupStyle;
-        sceneRows.appendChild(groupHeading);
+        container.appendChild(groupHeading);
       }
       lastGroup = spec.group;
 
@@ -730,16 +816,23 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           dragging = false;
         });
 
+        // A tuning session takes the drag; otherwise it writes saved settings
+        // as it always has. See DeviceMenuDeps.onSceneSettingScrub.
+        const commit = (value: number): void => {
+          if (deps.onSceneSettingScrub) deps.onSceneSettingScrub(sceneId, spec, value);
+          else deps.onSceneSettingChange(sceneId, spec, value);
+        };
+
         slider.addEventListener("input", () => {
           const value = Number(slider.value);
           setDisplay(value, false);
-          deps.onSceneSettingChange(sceneId, spec, value);
+          commit(value);
           refreshChip();
         });
 
         rowResetBtn.addEventListener("click", () => {
           setDisplay(spec.default, false);
-          deps.onSceneSettingChange(sceneId, spec, spec.default);
+          commit(spec.default);
           refreshChip();
         });
 
@@ -754,11 +847,40 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
         row.append(labelRow, slider);
 
+        // Spotlight furniture, built once and shown on demand — a focus
+        // change shouldn't have to rebuild the row (see applyFocusHighlight).
+        const focusNote = document.createElement("div");
+        focusNote.style.cssText = focusNoteStyle;
+        focusNote.style.display = "none";
+        row.appendChild(focusNote);
+
+        function applyFocus(anyFocused: boolean): HTMLElement | null {
+          const entry = deps.getFocus?.(spec.key);
+          if (entry) {
+            row.style.cssText = settingRowFocusedStyle;
+            const range =
+              entry.from !== undefined && entry.to !== undefined ? ` (try ${entry.from}–${entry.to})` : "";
+            focusNote.textContent = `→ ${entry.note ?? "this one"}${range}`;
+            focusNote.style.display = "";
+          } else {
+            row.style.cssText = anyFocused ? settingRowDimmedStyle : settingRowStyle;
+            focusNote.style.display = "none";
+          }
+          return entry ? row : null;
+        }
+
         // The live-update loop below only ever touches rows with spec.auto
         // set (see its own guard), which a checkbox row never has — so
         // there's nothing to register for one, and slider/dragging only
         // exist in this branch to begin with.
-        sceneRowHandles.push({ spec, slider, readout, isDragging: () => dragging, updateRowResetVisibility });
+        sceneRowHandles.push({
+          spec,
+          slider,
+          readout,
+          isDragging: () => dragging,
+          updateRowResetVisibility,
+          applyFocus,
+        });
       }
 
       if (spec.description) {
@@ -768,13 +890,42 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         row.appendChild(description);
       }
 
-      sceneRows.appendChild(row);
+      container.appendChild(row);
     }
+
+    applyFocusHighlight(false);
+  }
+
+  /**
+   * The collapsed "Dev" section drafts live in. Collapsed by default because
+   * a session accumulates promoted dials it isn't currently using, and an
+   * open pile of them buries the scene's real controls — the point of
+   * promoting is to reach one dial, not to redesign the panel.
+   */
+  function mountDraftSection(count: number): HTMLElement {
+    const details = document.createElement("details");
+    details.style.cssText = draftSectionStyle;
+    const summary = document.createElement("summary");
+    summary.textContent = `Dev · ${count} draft${count === 1 ? "" : "s"}`;
+    summary.style.cssText = draftSummaryStyle;
+    const body = document.createElement("div");
+    details.append(summary, body);
+    sceneRows.appendChild(details);
+    return body;
   }
 
   sceneResetBtn.addEventListener("click", () => {
     deps.onSceneSettingsReset(deps.currentSceneId());
     renderSceneSettings();
+  });
+
+  // Being pointed at a dial should surface it rather than wait for you to go
+  // looking — that's the whole value of the channel. Dev-only: with no
+  // onFocusChange dep wired this never subscribes. open() is a hoisted
+  // declaration further down.
+  deps.onFocusChange?.(() => {
+    if (!isOpen) open();
+    applyFocusHighlight(true);
   });
 
   // Global auto-tune strength knob — how far auto is allowed to push a

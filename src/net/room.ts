@@ -4,6 +4,7 @@ import { ClockSync } from "./clock.ts";
 import { JitterBuffer, type TimedFrame } from "./jitterBuffer.ts";
 import { SlewLimiter } from "./slewLimiter.ts";
 import type { Viewport } from "../render/scene.ts";
+import { parseOptions } from "../router.ts";
 
 /** Fallback target: how far behind the room clock a device without exclusive
  *  local capture renders, so a slow/jittery network path never shows up as
@@ -62,6 +63,16 @@ function readDeviceId(): string {
   if (!id) {
     id = crypto.randomUUID();
     localStorage.setItem(KEY, id);
+  }
+  // localStorage is per-origin, not per-tab, so two dev windows would join a
+  // room under the same device id — and the room DO routes setDevice commands
+  // by that id (getWebSockets(targetId)), so a command aimed at one would hit
+  // both and the roster would show colliding entries. A tuning slot makes the
+  // id unique per window. Dev-only, and only when a slot was asked for: a
+  // real user has exactly one of these per device by design.
+  if (import.meta.env.DEV) {
+    const slot = parseOptions(location.search, location.hash).get("tune");
+    if (slot) return `${id}#${slot.trim().toUpperCase()}`;
   }
   return id;
 }

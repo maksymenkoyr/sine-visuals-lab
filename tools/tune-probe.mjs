@@ -6,7 +6,7 @@
 //
 // Typical use: point at a synthetic-audio URL so the numbers are
 // reproducible run to run —
-//   node tools/tune-probe.mjs "https://localhost:5173/#/v/mesh?audio=synthetic&bpm=120"
+//   node tools/tune-probe.mjs "https://localhost:5173/?audio=synthetic&bpm=120#/v/mesh"
 import { chromium } from "playwright";
 
 const args = process.argv.slice(2);

@@ -16,6 +16,7 @@ import {
 } from "./capture.ts";
 import { buildProbeSnapshot, formatProbe, type ProbeInput, type ProbeSnapshot } from "./probe.ts";
 import { applyTuningParams, initTuningBus, type TuningParams } from "./bus.ts";
+import { DEFAULT_SLOT, tuningSlot } from "./session.ts";
 import { mountTuningUI } from "./ui.ts";
 
 export interface TuningDeps {
@@ -39,7 +40,12 @@ async function saveCapture(
   png: string,
   meta: ProbeSnapshot,
 ): Promise<{ ok: boolean; ts: number }> {
-  const body: { png: string; meta: CaptureMeta } = { png, meta: { ...meta, kind } };
+  const body: { png: string; meta: CaptureMeta; slot: string } = {
+    png,
+    meta: { ...meta, kind },
+    // Tags the file on disk, so two sessions' captures stay tellable apart.
+    slot: tuningSlot() ?? DEFAULT_SLOT,
+  };
   const res = await fetch("/__tuning/mark", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -55,7 +61,7 @@ export function initTuning(deps: TuningDeps): void {
   const ui = mountTuningUI((on) => {
     if (on) startClipBuffer();
     else stopClipBuffer();
-  });
+  }, tuningSlot());
 
   const mark = () => captureSheet({ frames: 1 }).then((png) => saveCapture("mark", png, buildProbeSnapshot(deps.getInput())));
   const clip = (opts?: ClipCaptureOpts) =>
