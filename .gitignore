@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.wrangler/
+.env
+.env.local
+.DS_Store
+tuning/marks/
+.claude/settings.local.json
+.claude/RESUME.md
+.claude/worktrees/

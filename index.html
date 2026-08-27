@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#000000" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2245%22 fill=%22black%22/><circle cx=%2250%22 cy=%2250%22 r=%2225%22 fill=%22%2300ffcc%22/></svg>"
+    />
+    <title>Audio Visualizations</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+        overscroll-behavior: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      #gl {
+        display: none;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+      }
+      #hud {
+        position: fixed;
+        left: 12px;
+        bottom: 12px;
+        color: #fff9;
+        font: 500 12px/1.4 ui-monospace, monospace;
+        z-index: 5;
+        pointer-events: none;
+        white-space: pre;
+        transition: opacity 0.4s;
+      }
+      #roomCode {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        color: #fffc;
+        font: 600 13px/1.4 ui-monospace, monospace;
+        letter-spacing: 0.05em;
+        z-index: 5;
+        background: #0008;
+        padding: 4px 10px;
+        border-radius: 999px;
+        display: none;
+        cursor: pointer;
+      }
+      .iconBtn {
+        position: fixed;
+        width: 38px;
+        height: 38px;
+        border-radius: 999px;
+        background: #0008;
+        color: #fffc;
+        border: none;
+        font-size: 17px;
+        line-height: 38px;
+        text-align: center;
+        z-index: 5;
+        cursor: pointer;
+        display: none;
+        padding: 0;
+        transition: opacity 0.4s;
+      }
+      #menuBtn {
+        bottom: 10px;
+        right: 10px;
+      }
+      #fsBtn {
+        bottom: 10px;
+        right: 56px;
+      }
+      #panelBtn {
+        top: 10px;
+        left: 10px;
+      }
+      #backBtn {
+        top: 10px;
+        left: 56px;
+      }
+      /* "Immersed" fullscreen: after a few seconds idle the chrome fades and
+       *  the cursor hides; any pointer/key activity brings it back (see
+       *  src/ui/fullscreen.ts). The HUD isn't included — it already fades
+       *  itself, and a fatal error shown through it must stay readable. */
+      #roomCode {
+        transition: opacity 0.4s;
+      }
+      body.chrome-idle {
+        cursor: none;
+      }
+      body.chrome-idle .iconBtn,
+      body.chrome-idle #roomCode {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #micPrompt {
+        position: fixed;
+        left: 50%;
+        bottom: 70px;
+        transform: translateX(-50%);
+        z-index: 6;
+        display: none;
+        font: 600 13px/1.4 system-ui, sans-serif;
+        padding: 10px 18px;
+        border-radius: 999px;
+        border: 1px solid #fff5;
+        background: #000c;
+        color: #fff;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="hud"></div>
+    <div id="roomCode"></div>
+    <button id="panelBtn" class="iconBtn" aria-label="Room panel">&#9638;</button>
+    <button id="backBtn" class="iconBtn" aria-label="Back to gallery">&#8249;</button>
+    <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false">&#9974;</button>
+    <button id="menuBtn" class="iconBtn" aria-label="Scene menu">&#9881;</button>
+    <button id="micPrompt">Tap to enable mic</button>
+    <script type="module" src="/src/app.ts"></script>
+  </body>
+</html>

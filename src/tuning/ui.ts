@@ -1,0 +1,53 @@
+/**
+ * Tiny dev-only overlay: a switch for the clip buffer (see capture.ts —
+ * it's a continuous background sample loop, so it's opt-in rather than
+ * always-on) and a flash toast confirming a mark/clip actually saved.
+ * Mounted once from debug.ts's initTuning(); never imported in prod.
+ */
+
+export interface TuningUI {
+  /** Briefly shows `label` in the corner. ok=false renders it as an error. */
+  flash(label: string, ok?: boolean): void;
+}
+
+export function mountTuningUI(onBufferToggle: (on: boolean) => void): TuningUI {
+  const panel = document.createElement("div");
+  panel.style.cssText =
+    "position:fixed;bottom:12px;right:12px;z-index:99999;font:12px/1.4 -apple-system,monospace;" +
+    "background:rgba(0,0,0,.7);color:#fff;padding:6px 10px;border-radius:6px;" +
+    "display:flex;align-items:center;gap:6px;user-select:none;";
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.id = "__tuning-clip-buffer";
+  checkbox.addEventListener("change", () => onBufferToggle(checkbox.checked));
+
+  const label = document.createElement("label");
+  label.htmlFor = checkbox.id;
+  label.style.cssText = "display:flex;align-items:center;gap:6px;cursor:pointer;";
+  label.textContent = "clip buffer";
+  label.prepend(checkbox);
+
+  panel.appendChild(label);
+  document.body.appendChild(panel);
+
+  const toast = document.createElement("div");
+  toast.style.cssText =
+    "position:fixed;top:12px;right:12px;z-index:99999;font:13px/1.4 -apple-system,monospace;" +
+    "color:#fff;padding:6px 12px;border-radius:6px;opacity:0;pointer-events:none;" +
+    "transition:opacity .15s ease;";
+  document.body.appendChild(toast);
+
+  let hideTimer: ReturnType<typeof setTimeout> | null = null;
+  function flash(text: string, ok = true): void {
+    toast.textContent = text;
+    toast.style.background = ok ? "rgba(22,163,74,.92)" : "rgba(220,38,38,.92)";
+    toast.style.opacity = "1";
+    if (hideTimer !== null) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      toast.style.opacity = "0";
+    }, 900);
+  }
+
+  return { flash };
+}
