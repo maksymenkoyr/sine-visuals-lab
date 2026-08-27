@@ -107,6 +107,6 @@ export function initTuning(deps: TuningDeps): void {
   });
 
   console.info(
-    "[tuning] live — window.__viz ready, Option/Alt+M to mark a frame, Option/Alt+C to clip (see the switch, bottom-right, for before/after)",
+    "[tuning] live — window.__viz ready, Option/Alt+M to mark a frame, Option/Alt+C to clip (see the switch, top-left, for before/after)",
   );
 }
