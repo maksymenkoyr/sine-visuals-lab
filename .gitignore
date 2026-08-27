@@ -6,6 +6,7 @@ dist/
 .env.local
 .DS_Store
 tuning/marks/
+docs/.obsidian/
 .claude/settings.local.json
 .claude/RESUME.md
 .claude/worktrees/

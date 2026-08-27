@@ -4,11 +4,11 @@ A browser-based, real-time audio visualizer rendered with WebGL2, with a
 phone-to-TV pairing mode: point a phone's microphone at a room, and drive a
 full-screen visualization on a paired TV over a low-latency WebSocket link.
 
-Nine scenes — caustics, cymatics, ferrofluid, a wireframe mesh dome, moiré,
-particles, riso-print halftone, spectrum, and tunnel — each audio-reactive,
-with per-scene sensitivity, contrast, and smoothing controls, plus an
-auto-tune engine that adapts those controls to the music's own character
-(tempo, dynamics, brightness) in real time.
+A gallery of audio-reactive scenes, each with per-scene sensitivity, contrast,
+and smoothing controls, plus an auto-tune engine that adapts those controls to
+the music's own character in real time. Caustics and Mesh Grid are featured;
+the rest sit behind the gallery's draft toggle (`DRAFT_SCENE_IDS` in
+`src/render/scenes/index.ts`).
 
 ## Quick start
 
@@ -36,11 +36,8 @@ Two entry points: `index.html` (the phone/controller view) and `tv.html`
 
 ## Documentation
 
-Start at [`CLAUDE.md`](CLAUDE.md) — it routes to everything else:
-[`docs/architecture.md`](docs/architecture.md) (how mic input becomes a pixel,
-and how it gets to a second device), [`docs/adding-a-scene.md`](docs/adding-a-scene.md),
-[`docs/tuning.md`](docs/tuning.md) (the live-tuning workflow), and
-[`docs/status.md`](docs/status.md) (what's in flight right now).
+[`CLAUDE.md`](CLAUDE.md) carries the working rules; [`docs/index.md`](docs/index.md)
+is the documentation map.
 
 ## License
 
