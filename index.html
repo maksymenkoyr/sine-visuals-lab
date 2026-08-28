@@ -52,38 +52,42 @@
         display: none;
         cursor: pointer;
       }
+      /* Round glass chrome, same language as the controls panel
+       * (src/ui/controlsTheme.ts — which also owns the "active" ring rule,
+       * keyed off aria-pressed). */
       .iconBtn {
         position: fixed;
-        width: 38px;
-        height: 38px;
+        width: 32px;
+        height: 32px;
         border-radius: 999px;
-        background: #0008;
-        color: #fffc;
-        border: none;
-        font-size: 17px;
-        line-height: 38px;
+        background: rgba(8, 11, 10, 0.3);
+        -webkit-backdrop-filter: blur(18px) saturate(0.6) brightness(0.5);
+        backdrop-filter: blur(18px) saturate(0.6) brightness(0.5);
+        color: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        font: 400 13px/30px "Share Tech Mono", ui-monospace, monospace;
         text-align: center;
         z-index: 5;
         cursor: pointer;
         display: none;
         padding: 0;
-        transition: opacity 0.4s;
+        transition: opacity 0.4s, border-color 0.15s, color 0.15s;
       }
       #menuBtn {
-        bottom: 10px;
-        right: 10px;
+        bottom: 16px;
+        right: 16px;
       }
       #fsBtn {
-        bottom: 10px;
-        right: 56px;
-      }
-      #panelBtn {
-        top: 10px;
-        left: 10px;
+        bottom: 16px;
+        right: 58px;
       }
       #backBtn {
-        top: 10px;
-        left: 56px;
+        top: 16px;
+        left: 16px;
+      }
+      #panelBtn {
+        top: 16px;
+        left: 58px;
       }
       /* "Immersed" fullscreen: after a few seconds idle the chrome fades and
        *  the cursor hides; any pointer/key activity brings it back (see
