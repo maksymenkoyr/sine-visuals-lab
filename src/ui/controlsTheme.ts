@@ -114,7 +114,20 @@ const stylesheet = `
  * bigger target than its 3px track) or its control has focus: the label
  * tints toward the row's accent, the track glows through a hairline border,
  * and the slider zooms up so the thumb is easy to grab precisely. */
-.vc-row { position: relative; --vc-accent: #fff; }
+/* The row frames itself with padding that negative margins cancel out, so
+ * the ring + glow around the whole title-and-slider block costs no layout. */
+.vc-row {
+  position: relative; --vc-accent: #fff;
+  padding: 6px 8px; margin: -6px -8px; border-radius: 4px;
+  box-shadow: 0 0 0 1px transparent;
+  transition: box-shadow 0.18s ease, background-color 0.18s ease;
+}
+.vc-row:hover, .vc-row:focus-within {
+  background-color: color-mix(in srgb, var(--vc-accent) 6%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--vc-accent) 45%, transparent),
+    0 0 14px color-mix(in srgb, var(--vc-accent) 22%, transparent);
+}
 .vc-label { color: #fff; transition: color 0.18s ease, text-shadow 0.18s ease; }
 .vc-row:hover .vc-label, .vc-row:focus-within .vc-label {
   color: var(--vc-accent);
