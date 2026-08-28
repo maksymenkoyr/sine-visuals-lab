@@ -202,7 +202,15 @@ const rowRightStyle = `display: flex; align-items: center; gap: 7px; flex-shrink
 const readoutStyle = `display: flex; align-items: baseline; gap: 4px; color: #fff;`;
 // Seven-segment digits; DSEG7 has no letters, so text readouts ("Off"/"On")
 // fall back to the mono face via digitsTextStyle.
-const digitsStyle = `font-family: ${FONT_DIGITS}; font-size: 11.5px; letter-spacing: 1px;`;
+// The transparent stroke draws nothing; it's there to widen the text's ink
+// overflow. DSEG7's ink runs edge to edge (ascent = em, descent = 0), so a
+// digit's top and bottom segments sit flush with the metric box a text swap
+// repaints. On a fractional baseline their antialiased edge row falls just
+// outside that box and survives the swap — a "7" turning into a "1" left a
+// faint hairline of the old top segment above the new digit. Every engine
+// folds text-stroke width into ink overflow, unlike @font-face metric
+// overrides, which WebKit ignores.
+const digitsStyle = `font-family: ${FONT_DIGITS}; font-size: 11.5px; letter-spacing: 1px; -webkit-text-stroke: 1px transparent;`;
 const digitsTextStyle = `font: 400 11px/1 ${FONT_MONO};`;
 const unitStyle = `font: 400 10.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.75);`;
 // "A" chip: filled when auto owns the row, outlined when the user does.
