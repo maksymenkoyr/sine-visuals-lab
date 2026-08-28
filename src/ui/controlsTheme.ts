@@ -110,6 +110,15 @@ const stylesheet = `
 .vc-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 2px; }
 .vc-scroll::-webkit-scrollbar-track { background: transparent; }
 
+/* The digit badge on a keyboard block heading (a card title or a scene group
+ * heading — see deviceMenu.ts's markBlock/renumberBlocks). Reads as an index,
+ * not part of the title, so it's dimmer and set apart with a little trailing
+ * space rather than inline with the letters. Text filled in by JS. */
+.vc-block-n {
+  display: inline-block; min-width: 1.1em; margin-right: 0.6em;
+  color: rgba(255, 255, 255, 0.32); font-variant-numeric: tabular-nums;
+}
+
 /* A row "wakes" when the pointer is anywhere over it (the row is a far
  * bigger target than its 3px track) or its control has focus: the label
  * tints toward the row's accent, the track glows through a hairline border,

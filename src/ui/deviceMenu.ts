@@ -13,6 +13,7 @@ import {
   shapeLevel,
 } from "../audio/sensitivity.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
+import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import {
@@ -51,14 +52,29 @@ import {
  * while you tune it, so it also stays open across palette taps.
  *
  * Row grammar (createControlRow): label · seven-segment readout + unit ·
- * "A" chip · ↺. The chip *is* the auto indicator — filled when auto owns
- * the value, outlined when the user has taken the row manual, absent when
- * the setting has no auto weights (see autoTune.ts). ↺ only appears once a
- * value is off its default, doubling as a "you changed this" marker. The
- * hint under a row (a setting's `description`) stays collapsed until
- * hover/focus, and while auto holds the row it reads as an invitation to
- * take over instead. Each card's accent names its system — the constants
- * and their meanings live in controlsTheme.ts.
+ * "A" chip · "T" chip · ↺. The A chip *is* the auto indicator — filled when
+ * auto owns the value, outlined when the user has taken the row manual,
+ * absent when the setting has no auto weights (see autoTune.ts). The T chip
+ * mutes the row to its floor (0 for a zeroAtMin row, spec.min otherwise) and
+ * restores the value it had on a second press; any other write to the row
+ * (drag, ↺, a card Reset, auto taking over) forgets that restore point and
+ * unlights it — it's a toggle, not a memory. ↺ only appears once a value is
+ * off its default, doubling as a "you changed this" marker. A chip's letter
+ * *is* its hotkey when the row has keyboard focus. The hint under a row (a
+ * setting's `description`) stays collapsed until hover/focus, and while auto
+ * holds the row it reads as an invitation to take over instead. Each card's
+ * accent names its system — the constants and their meanings live in
+ * controlsTheme.ts.
+ *
+ * Keyboard layer, live only while the panel is open (see onKeyDown): Tab /
+ * Shift+Tab walk a ring over every .vc-slider/.vc-toggle in document order,
+ * wrapping at both ends and skipping every chip and button — so Tab alone
+ * never leaves the panel and never lands anywhere but a control. On whichever
+ * control has focus, A toggles auto, R resets, T mutes/restores (see above).
+ * Digit keys 1-9 jump to a numbered block — each card title and each scene
+ * group heading carries a .vc-block badge, renumbered by renumberBlocks()
+ * whenever the block set can change (i.e. on every renderSceneSettings) — and
+ * focus the first control inside it.
  *
  * Scene selection lives in the gallery — this panel doesn't duplicate it.
  * Every read and write goes through DeviceMenuDeps (wired in app.ts); the
@@ -187,6 +203,12 @@ const autoChipBaseStyle = `
 const autoChipLitStyle = (accent: string) =>
   `${autoChipBaseStyle} background: ${accent}; border: 1px solid ${accent}; color: #070a09;`;
 const autoChipManualStyle = (accent: string) =>
+  `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
+// "T" chip: mutes the row to its floor and back (see the header comment).
+// Shares the A chip's geometry; filled in a neutral tone rather than the
+// row's accent since "muted" is a state, not one of the per-card systems.
+const offChipLitStyle = `${autoChipBaseStyle} background: rgba(255,255,255,0.82); border: 1px solid rgba(255,255,255,0.82); color: #070a09;`;
+const offChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
 const rowResetStyle = `
   font: 400 11px/1 ${FONT_MONO}; color: rgba(255,255,255,0.45); background: none; border: none;
@@ -346,7 +368,8 @@ interface CardSpec {
 }
 
 /** A glass card: scanline overlay, header row (title + optional right slot),
- *  and a body the caller fills. */
+ *  and a body the caller fills. Returns `title` too, so a caller that's also
+ *  a keyboard block (see markBlock) can badge it. */
 function createCard(spec: CardSpec) {
   const el = document.createElement("div");
   el.style.cssText = glassCardStyle;
@@ -365,7 +388,29 @@ function createCard(spec: CardSpec) {
 
   body.appendChild(header);
   el.append(scanlines, body);
-  return { el, body };
+  return { el, body, title };
+}
+
+/** Marks a heading as a keyboard block — see the header comment's keyboard
+ *  paragraph. Idempotent (safe to call on every render of a heading that's
+ *  rebuilt fresh each time, and a no-op on one that's already marked), so a
+ *  static card title can be marked once at construction while a per-scene
+ *  group heading gets marked on every renderSceneSettings without doubling
+ *  up. The badge itself is filled in later by renumberBlocks. */
+function markBlock(heading: HTMLElement): void {
+  if (heading.classList.contains("vc-block")) return;
+  heading.classList.add("vc-block");
+  const badge = document.createElement("span");
+  badge.className = "vc-block-n";
+  heading.prepend(badge);
+}
+
+/** The other half of markBlock — used where a heading's block-ness depends on
+ *  the active scene (the Scene card title, see renderSceneSettings). */
+function unmarkBlock(heading: HTMLElement): void {
+  if (!heading.classList.contains("vc-block")) return;
+  heading.classList.remove("vc-block");
+  heading.querySelector(".vc-block-n")?.remove();
 }
 
 interface ControlRowSpec {
@@ -399,6 +444,36 @@ interface ControlRowSpec {
   };
 }
 
+/** Wires A/R/T on a row's own focusable control (the slider or the toggle
+ *  pill) — kept on the control itself, not the document, so the keys always
+ *  act on whichever row the Tab ring last focused. Routes through the row's
+ *  existing click handlers (`.click()`) rather than re-implementing them, so
+ *  a hotkey and its chip can never drift apart. `auto` is omitted for rows
+ *  with no auto weights (the A key then no-ops, matching the hidden chip). */
+function wireRowKeys(
+  control: HTMLElement,
+  actions: { auto?: () => void; reset: () => void; toggleOff: () => void },
+): void {
+  control.addEventListener("keydown", (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    switch (e.key.toLowerCase()) {
+      case "a":
+        if (!actions.auto) return;
+        e.preventDefault();
+        actions.auto();
+        break;
+      case "r":
+        e.preventDefault();
+        actions.reset();
+        break;
+      case "t":
+        e.preventDefault();
+        actions.toggleOff();
+        break;
+    }
+  });
+}
+
 /** One slider row in the panel's grammar — label, readout, chip, ↺, slider,
  *  hint. Gain rows (log-mapped) and scene setting rows (linear) are the same
  *  shape, so the construction and pos<->value mapping live here once. */
@@ -427,19 +502,26 @@ function createControlRow(spec: ControlRowSpec) {
 
   const chip = document.createElement("button");
   chip.textContent = "A";
-  chip.title = `Auto-tune ${spec.label}`;
+  chip.title = `Auto-tune ${spec.label} (A)`;
   chip.style.cssText = autoChipManualStyle(spec.accent);
   // A row with no auto weights has nothing for the chip to do — leave it out
   // rather than show a toggle that can't change anything.
   if (!spec.auto) chip.style.display = "none";
 
+  // Mutes the row to its floor and restores it on a second press — see the
+  // header comment's row-grammar paragraph for the full contract.
+  const offChip = document.createElement("button");
+  offChip.textContent = "T";
+  offChip.title = `Turn ${spec.label} off (T)`;
+  offChip.style.cssText = offChipManualStyle(spec.accent);
+
   // visibility (not display) keeps the row from reflowing while dragging.
   const resetBtn = document.createElement("button");
   resetBtn.textContent = "↺";
-  resetBtn.title = `Reset ${spec.label}`;
+  resetBtn.title = `Reset ${spec.label} (R)`;
   resetBtn.style.cssText = rowResetStyle;
 
-  right.append(readout, chip, resetBtn);
+  right.append(readout, chip, offChip, resetBtn);
   head.append(label, right);
 
   const slider = document.createElement("input");
@@ -531,6 +613,20 @@ function createControlRow(spec: ControlRowSpec) {
     setHint(on);
   }
 
+  // Non-null while the row is muted (T pressed) — the value to restore on the
+  // next T. Any write to the row that isn't the mute/restore itself forgets
+  // this, via clearOff(), so the chip never claims a restore point that no
+  // longer means anything.
+  let offStoredValue: number | null = null;
+  function refreshOffChip(): void {
+    offChip.style.cssText = offStoredValue !== null ? offChipLitStyle : offChipManualStyle(spec.accent);
+  }
+  function clearOff(): void {
+    if (offStoredValue === null) return;
+    offStoredValue = null;
+    refreshOffChip();
+  }
+
   let onCommit: (value: number) => void = () => {};
   function commit(value: number): void {
     display(value, false);
@@ -548,18 +644,43 @@ function createControlRow(spec: ControlRowSpec) {
   slider.addEventListener("pointercancel", () => {
     dragging = false;
   });
-  slider.addEventListener("input", () => commit(sliderToValue()));
-  resetBtn.addEventListener("click", () => commit(spec.defaultValue));
+  slider.addEventListener("input", () => {
+    clearOff();
+    commit(sliderToValue());
+  });
+  resetBtn.addEventListener("click", () => {
+    clearOff();
+    commit(spec.defaultValue);
+  });
+  offChip.addEventListener("click", () => {
+    if (offStoredValue !== null) {
+      const restore = offStoredValue;
+      offStoredValue = null;
+      commit(restore);
+      refreshOffChip();
+    } else {
+      offStoredValue = sliderToValue();
+      refreshOffChip();
+      commit(spec.zeroAtMin ? 0 : spec.min);
+    }
+  });
 
   if (spec.auto) {
     chip.addEventListener("click", () => {
       const auto = spec.auto!;
       const on = !auto.isEnabled();
       auto.toggle(on);
+      if (on) clearOff();
       refreshChip();
       display(on ? auto.resolveLive() : auto.getManual(), on);
     });
   }
+
+  wireRowKeys(slider, {
+    auto: spec.auto ? () => chip.click() : undefined,
+    reset: () => resetBtn.click(),
+    toggleOff: () => offChip.click(),
+  });
 
   return {
     el,
@@ -576,6 +697,10 @@ function createControlRow(spec: ControlRowSpec) {
       display(spec.auto.resolveLive(), true);
     },
     refreshChip,
+    /** Forgets this row's T restore point — for the card-level Reset chips
+     *  (Bands, Input), which write straight through setValue() rather than
+     *  this row's own resetBtn. */
+    clearOff,
     /** Show whatever's right for the row now: the live auto value if auto
      *  owns it, the manual store otherwise. */
     sync(manualValue: () => number): void {
@@ -598,7 +723,9 @@ interface ToggleRowSpec {
 /** A boolean setting's row: same head as a slider row, a pill toggle where
  *  the slider would be. Never auto-tunable (see autoTune.ts — a display
  *  toggle between two discrete states doesn't fit the continuous glide
- *  model), so no chip and nothing to refresh per frame. */
+ *  model), so no chip and nothing to refresh per frame. Its own on/off state
+ *  already *is* an "off state", so the T hotkey just flips it rather than
+ *  adding a redundant chip — see wireRowKeys below. */
 function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   const el = document.createElement("div");
   el.className = "vc-row";
@@ -615,7 +742,7 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   readout.style.cssText = `${digitsTextStyle} color: #fff;`;
   const resetBtn = document.createElement("button");
   resetBtn.textContent = "↺";
-  resetBtn.title = `Reset ${spec.label}`;
+  resetBtn.title = `Reset ${spec.label} (R)`;
   resetBtn.style.cssText = rowResetStyle;
   right.append(readout, resetBtn);
   head.append(label, right);
@@ -649,6 +776,11 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   resetBtn.addEventListener("click", () => {
     apply(spec.defaultValue);
     spec.set(spec.defaultValue);
+  });
+
+  wireRowKeys(toggle, {
+    reset: () => resetBtn.click(),
+    toggleOff: () => toggle.click(),
   });
 
   return el;
@@ -779,8 +911,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     right: createChipButton("Reset", "Reset band gains", () => {
       deps.onBandGainsReset(deps.currentSceneId());
       refreshBandGainRows();
+      for (const group of ["low", "mid", "high"] as const) bandGainRows[group].clearOff();
     }),
   });
+  markBlock(bandsCard.title);
   bandsCard.body.append(bandGainRows.low.el, spacer(), bandGainRows.mid.el, spacer(), bandGainRows.high.el);
 
   // The split itself is fixed (no crossover sliders to drag), so the strip
@@ -800,6 +934,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoStrengthDigits.style.cssText = digitsStyle;
   autoStrengthReadout.appendChild(autoStrengthDigits);
   const autoCard = createCard({ title: "Auto strength", accent: AUTO_SKY, right: autoStrengthReadout });
+  markBlock(autoCard.title);
   autoCard.el.style.flex = "1";
   autoCard.el.style.minWidth = "0";
   const autoStrengthRow = document.createElement("div");
@@ -808,8 +943,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoStrengthSlider.type = "range";
   autoStrengthSlider.className = "vc-slider";
   autoStrengthSlider.setAttribute("aria-label", "Auto strength");
-  autoStrengthSlider.min = "0";
-  autoStrengthSlider.max = "2";
+  autoStrengthSlider.min = String(AUTO_STRENGTH_MIN);
+  autoStrengthSlider.max = String(AUTO_STRENGTH_MAX);
   autoStrengthSlider.step = "any";
   autoStrengthRow.style.setProperty("--vc-accent", AUTO_SKY);
   autoStrengthSlider.style.marginTop = "0";
@@ -821,13 +956,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   function showAutoStrength(value: number): void {
     autoStrengthSlider.value = String(value);
-    autoStrengthSlider.style.setProperty("--vc-fill", `${(value / 2) * 100}%`);
+    autoStrengthSlider.style.setProperty(
+      "--vc-fill",
+      `${((value - AUTO_STRENGTH_MIN) / (AUTO_STRENGTH_MAX - AUTO_STRENGTH_MIN)) * 100}%`,
+    );
     autoStrengthDigits.textContent = value.toFixed(2);
   }
   function refreshAutoStrengthDisplay(): void {
     showAutoStrength(deps.getAutoStrength());
   }
   autoStrengthSlider.addEventListener("input", () => {
+    autoStrengthOffStored = null;
     const value = Number(autoStrengthSlider.value);
     showAutoStrength(value);
     deps.onAutoStrengthChange(value);
@@ -927,9 +1066,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         onChange(defaultValue);
         row.setValue(defaultValue);
         row.refreshChip();
+        row.clearOff();
       }
     }),
   });
+  markBlock(inputCard.title);
   inputCard.el.style.cssText += inputCardWashStyle;
   inputCard.body.append(inputRows[0].row.el, spacer(), inputRows[1].row.el, spacer(), inputRows[2].row.el);
 
@@ -949,6 +1090,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   sceneCard.body.appendChild(sceneRows);
   let sceneRowHandles: ReturnType<typeof createControlRow>[] = [];
 
+  // Walks every .vc-block heading in document order and writes its digit —
+  // called whenever the block set can change (only renderSceneSettings does:
+  // group headings come and go with the active scene). Blanks anything past
+  // the ninth rather than doubling up on "9", so a scene with more groups
+  // than digit keys degrades to "those last ones aren't reachable by number"
+  // instead of a wrong or ambiguous badge.
+  function renumberBlocks(): void {
+    const blocks = root.querySelectorAll<HTMLElement>(".vc-block");
+    blocks.forEach((heading, i) => {
+      const badge = heading.querySelector<HTMLElement>(".vc-block-n");
+      if (badge) badge.textContent = i < 9 ? String(i + 1) : "";
+    });
+  }
+
   function renderSceneSettings(): void {
     const sceneId = deps.currentSceneId();
     const specs = deps.getSceneSettings(sceneId);
@@ -959,11 +1114,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
     let lastGroup: string | undefined;
     let first = true;
+    let hasGroups = false;
     for (const spec of specs) {
       if (spec.group !== undefined && spec.group !== lastGroup) {
+        hasGroups = true;
         const groupHeading = document.createElement("div");
         groupHeading.textContent = spec.group;
         groupHeading.style.cssText = lastGroup === undefined ? groupHeadingFirstStyle : groupHeadingStyle;
+        markBlock(groupHeading);
         sceneRows.appendChild(groupHeading);
       } else if (!first) {
         sceneRows.appendChild(spacer());
@@ -1009,6 +1167,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       sceneRows.appendChild(row.el);
       sceneRowHandles.push(row);
     }
+
+    // The Scene card title is itself the block only when the active scene
+    // emits no group headings (e.g. Mesh Grid) — otherwise it and the first
+    // group heading would both resolve to the same first row.
+    if (specs.length > 0 && !hasGroups) markBlock(sceneCard.title);
+    else unmarkBlock(sceneCard.title);
+    renumberBlocks();
   }
 
   // Palette: the only picker left in the panel.
@@ -1054,11 +1219,42 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     footerStatus.textContent = lit ? "Auto on" : "Auto off";
   }
 
-  autoMasterBtn.addEventListener("click", () => {
+  // Shared by the master button's own click and the Auto strength row's A
+  // hotkey (see wireRowKeys below) — the master switch *is* that block's auto
+  // control, so A on the strength slider reaches for it rather than no-oping.
+  function toggleAutoMaster(): void {
     const sceneId = deps.currentSceneId();
     deps.onSceneAutoToggle(sceneId, !deps.isSceneAuto(sceneId));
     renderSceneSettings();
     syncInputRows();
+  }
+  autoMasterBtn.addEventListener("click", toggleAutoMaster);
+
+  // R/T for the strength slider itself — same reset/restore-point contract as
+  // a row built through createControlRow (see the header comment), hand-
+  // rolled since this one-off row isn't built through it.
+  let autoStrengthOffStored: number | null = null;
+  function resetAutoStrength(): void {
+    autoStrengthOffStored = null;
+    showAutoStrength(AUTO_STRENGTH_DEFAULT);
+    deps.onAutoStrengthChange(AUTO_STRENGTH_DEFAULT);
+  }
+  function toggleAutoStrengthOff(): void {
+    if (autoStrengthOffStored !== null) {
+      const restore = autoStrengthOffStored;
+      autoStrengthOffStored = null;
+      showAutoStrength(restore);
+      deps.onAutoStrengthChange(restore);
+    } else {
+      autoStrengthOffStored = Number(autoStrengthSlider.value);
+      showAutoStrength(AUTO_STRENGTH_MIN);
+      deps.onAutoStrengthChange(AUTO_STRENGTH_MIN);
+    }
+  }
+  wireRowKeys(autoStrengthSlider, {
+    auto: toggleAutoMaster,
+    reset: resetAutoStrength,
+    toggleOff: toggleAutoStrengthOff,
   });
 
   controlsCol.append(bandsCard.el, autoRow, inputCard.el, sceneCard.el, paletteCard.el, footer);
@@ -1078,18 +1274,70 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     close();
   }
 
-  // "H" hides the panel. Ignored while typing somewhere (a range slider
-  // keeping focus after a drag is fine — that's still "in the panel").
+  // Shared by every document-level hotkey below (H, Tab, the digits):
+  // ignored while typing somewhere (a range slider keeping focus after a
+  // drag is fine — that's still "in the panel", there's just nothing to
+  // type in the panel itself).
+  function isTypingTarget(t: EventTarget | null): boolean {
+    if (!(t instanceof HTMLElement)) return false;
+    const tag = t.tagName;
+    if (tag === "TEXTAREA" || t.isContentEditable) return true;
+    if (tag === "INPUT" && (t as HTMLInputElement).type !== "range") return true;
+    return false;
+  }
+
+  // The Tab ring: every param control, in document order — see the header
+  // comment. Derived from the DOM each call rather than cached, so a Scene
+  // card rebuilt by renderSceneSettings can never leave it stale.
+  function ringElements(): HTMLElement[] {
+    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle")];
+  }
+
+  function handleTab(e: KeyboardEvent): void {
+    const elements = ringElements();
+    if (elements.length === 0) return;
+    const idx = document.activeElement instanceof HTMLElement ? elements.indexOf(document.activeElement) : -1;
+    // idx === -1 (focus elsewhere in the panel, or nowhere) enters the ring
+    // at its first element going forward, its last going backward.
+    const next = e.shiftKey
+      ? elements[idx > 0 ? idx - 1 : elements.length - 1]
+      : elements[idx >= 0 && idx < elements.length - 1 ? idx + 1 : 0];
+    e.preventDefault();
+    next.focus();
+  }
+
+  // A digit key resolves the nth .vc-block heading (numbered by
+  // renumberBlocks) and focuses the first ring control after it in document
+  // order — found by document position rather than by walking a specific
+  // container, since a block heading is sometimes a card title (siblings:
+  // its card's body) and sometimes a group heading (siblings: the following
+  // rows in the same Scene card body).
+  function jumpToBlock(n: number): void {
+    const heading = [...root.querySelectorAll<HTMLElement>(".vc-block")][n - 1];
+    if (!heading) return;
+    const target = ringElements().find(
+      (el) => (heading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    );
+    if (!target) return;
+    target.focus();
+    target.scrollIntoView({ block: "nearest" });
+  }
+
   function onKeyDown(e: KeyboardEvent) {
-    if (e.key !== "h" && e.key !== "H") return;
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    const t = e.target as HTMLElement | null;
-    if (t) {
-      const tag = t.tagName;
-      if (tag === "TEXTAREA" || t.isContentEditable) return;
-      if (tag === "INPUT" && (t as HTMLInputElement).type !== "range") return;
+    if (isTypingTarget(e.target)) return;
+    if (e.key === "h" || e.key === "H") {
+      close();
+      return;
     }
-    close();
+    if (e.key === "Tab") {
+      handleTab(e);
+      return;
+    }
+    if (e.key.length === 1 && e.key >= "1" && e.key <= "9") {
+      e.preventDefault();
+      jumpToBlock(Number(e.key));
+    }
   }
 
   function open() {
