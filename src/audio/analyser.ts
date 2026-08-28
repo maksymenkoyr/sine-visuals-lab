@@ -1,6 +1,14 @@
 import { NUM_BANDS } from "./types.ts";
 import { MAX_HZ_CAP, bandEdgesHz } from "./bandScale.ts";
 
+// The analyser's fixed floor/ceiling. Shared (not just mirrored) by
+// features.ts's auto-gain-off fallback and app.ts's captureRawBands, so the
+// "before processing" display and the auto-gain-off "processed" display are
+// provably normalized against the same window rather than two copies of the
+// same two numbers drifting apart.
+export const ANALYSER_MIN_DB = -100;
+export const ANALYSER_MAX_DB = -10;
+
 export interface BandAnalyser {
   node: AnalyserNode;
   /** Raw per-band magnitude in dB (unnormalized), low band -> high band. */
@@ -29,8 +37,8 @@ export function createBandAnalyser(
   // We do our own attack/release smoothing in features.ts; disable the
   // built-in one so it doesn't fight our envelope logic.
   node.smoothingTimeConstant = 0;
-  node.minDecibels = -100;
-  node.maxDecibels = -10;
+  node.minDecibels = ANALYSER_MIN_DB;
+  node.maxDecibels = ANALYSER_MAX_DB;
 
   // Analysis tap only. Never connect to context.destination — routing a
   // live mic to room speakers would create audible feedback.
