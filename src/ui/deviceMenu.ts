@@ -78,6 +78,11 @@ export interface DeviceMenuDeps {
   onSceneAutoToggle: (sceneId: string, on: boolean) => void;
   getAutoStrength: () => number;
   onAutoStrengthChange: (value: number) => void;
+  /** Global per-band adaptive-normalization switch — see src/audio/autoGain.ts.
+   *  Off falls back to a fixed mapping against the analyser's own dB window,
+   *  matching the spectrum strip's "before processing" feed. */
+  getAutoGainEnabled: () => boolean;
+  onAutoGainChange: (value: boolean) => void;
   /** The button that opens this menu — excluded from the tap-outside-to-close check. */
   toggleButton: HTMLElement;
 }
@@ -139,6 +144,20 @@ const boxHeadingRowStyle = `display: flex; align-items: center; gap: 6px;`;
 const subHeadingRowStyle = `${boxHeadingRowStyle} margin-top: 14px;`;
 const boxHeadingStyle = `font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; flex: 1;`;
 const micIconStyle = `display: flex; color: ${MIC_GREEN}; flex-shrink: 0;`;
+// Standalone row, same mic-green system as the Sensitivity box below (this
+// switch governs the input those controls shape) but its own compact box
+// rather than another row inside sensitivityBox, since it has no slider and
+// sits above the spectrum strip it directly explains.
+const autoGainBoxStyle = `
+  border: 1px solid ${MIC_GREEN}66; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+`;
+const autoGainLabelStyle = `
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.85; color: ${MIC_GREEN};
+`;
+const autoGainRightStyle = `display: flex; align-items: center; gap: 8px;`;
+const autoGainReadoutStyle = `font-size: 11px; opacity: 0.6; font-variant-numeric: tabular-nums;`;
+const autoGainCheckboxStyle = `accent-color: ${MIC_GREEN}; width: 15px; height: 15px; margin: 0; flex-shrink: 0;`;
 const sliderRowStyle = `padding: 10px 2px 0;`;
 // A function, not a constant, since createGainRow instances live in more
 // than one accent color now (mic-green Sensitivity/Acceleration/Smoothing, amber Bands).
@@ -477,6 +496,45 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // is drawn on. Always mounted (unlike sceneBox), since it's not tied to
   // which scene is active.
   const spectrumStrip = createSpectrumStrip();
+
+  // Sits above the strip it directly explains: with it on, the strip's two
+  // feeds ("before processing" vs. the default processed view) can look very
+  // different even with every slider below at reset, because the adaptive
+  // per-band auto-gain in src/audio/features.ts has no slider of its own.
+  // Off trades that for a fixed mapping — same one "before processing" uses —
+  // so the two feeds agree on scale, and Bands boosts (which otherwise clamp
+  // against an already-maxed-out band) have real headroom to work with.
+  const autoGainBox = document.createElement("div");
+  autoGainBox.style.cssText = autoGainBoxStyle;
+  autoGainBox.title =
+    "Automatically rescales each frequency band to fill the display. Off shows the mic's real levels — raise Sensitivity to compensate, and Bands boosts finally have headroom to work with.";
+
+  const autoGainLabel = document.createElement("span");
+  autoGainLabel.textContent = "Auto-gain";
+  autoGainLabel.style.cssText = autoGainLabelStyle;
+
+  const autoGainReadout = document.createElement("span");
+  autoGainReadout.style.cssText = autoGainReadoutStyle;
+
+  const autoGainCheckbox = document.createElement("input");
+  autoGainCheckbox.type = "checkbox";
+  autoGainCheckbox.style.cssText = autoGainCheckboxStyle;
+
+  function applyAutoGainChecked(enabled: boolean): void {
+    autoGainCheckbox.checked = enabled;
+    autoGainReadout.textContent = enabled ? "On" : "Off";
+  }
+  applyAutoGainChecked(deps.getAutoGainEnabled());
+
+  autoGainCheckbox.addEventListener("change", () => {
+    applyAutoGainChecked(autoGainCheckbox.checked);
+    deps.onAutoGainChange(autoGainCheckbox.checked);
+  });
+
+  const autoGainRight = document.createElement("div");
+  autoGainRight.style.cssText = autoGainRightStyle;
+  autoGainRight.append(autoGainReadout, autoGainCheckbox);
+  autoGainBox.append(autoGainLabel, autoGainRight);
 
   const sensitivityBox = document.createElement("div");
   sensitivityBox.style.cssText = sensitivityBoxStyle;
@@ -898,6 +956,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const paletteList = document.createElement("div");
 
   root.append(
+    autoGainBox,
     spectrumStrip.el,
     bandsBox,
     autoRow,

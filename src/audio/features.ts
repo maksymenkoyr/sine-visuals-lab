@@ -1,9 +1,14 @@
 import { NUM_BANDS, type FeatureFrame } from "./types.ts";
+import { ANALYSER_MIN_DB, ANALYSER_MAX_DB } from "./analyser.ts";
 
 // Adaptive floor/ceiling per band: a leaky min/max that tracks the room's
 // own quiet and loud levels. This is what makes a muffled laptop mic and a
 // hot phone mic converge to similarly-scaled output. Values are exponential
 // time constants (1/tau, per second) — bigger = faster to react.
+//
+// Bypassable via update()'s `autoGain` param (see src/audio/autoGain.ts for
+// the persisted on/off switch) — off falls back to a fixed mapping against
+// the analyser's own dB window, matching app.ts's "before processing" feed.
 const FLOOR_RISE_RATE = 0.8; // floor creeping up while it's quiet (~1.25s)
 const FLOOR_FALL_RATE = 8; // floor dropping to follow a true drop in level (~0.1s)
 const PEAK_RISE_RATE = 25; // ceiling jumping up on a loud hit (~0.04s, fast attack)
@@ -82,20 +87,34 @@ export class FeatureExtractor {
   private bpm = 0;
   private lastBeatTime = 0;
 
-  /** @param rawBandsDb per-band FFT magnitude in dB, from BandAnalyser.readBandsDb(). */
-  update(rawBandsDb: Float32Array, time: number): FeatureFrame {
+  /**
+   * @param rawBandsDb per-band FFT magnitude in dB, from BandAnalyser.readBandsDb().
+   * @param autoGain When false, bypasses the per-band adaptive floor/peak
+   *   normalization below in favor of a fixed mapping against the analyser's
+   *   own dB window (ANALYSER_MIN_DB/MAX_DB) — the same one
+   *   app.ts's captureRawBands uses for the "before processing" display, so
+   *   the two agree on scale. The floor/peak trackers, flux, and onset/BPM
+   *   detection below keep running on the adaptive `norm` regardless — only
+   *   what lands in `bands[]`/`energy` changes — so turning this off doesn't
+   *   degrade beat detection, which is calibrated against the adaptive value.
+   *   Defaults to true so every existing call site keeps today's behavior.
+   */
+  update(rawBandsDb: Float32Array, time: number, autoGain = true): FeatureFrame {
     const dt = this.lastTime === null ? 1 / 60 : Math.max(1e-4, time - this.lastTime);
     this.lastTime = time;
 
     const bands = new Float32Array(NUM_BANDS);
     let flux = 0;
     let rawDbSum = 0;
+    const fixedSpan = ANALYSER_MAX_DB - ANALYSER_MIN_DB;
 
     for (let b = 0; b < NUM_BANDS; b++) {
       const db = sanitizeDb(rawBandsDb[b]);
       rawDbSum += db;
 
-      // Leaky min/max adapts the [floor, peak] window to this room/mic.
+      // Leaky min/max adapts the [floor, peak] window to this room/mic. Kept
+      // running even with autoGain off, since onset/BPM detection below
+      // always reads `norm`.
       const floorRate = db < this.floor[b] ? FLOOR_FALL_RATE : FLOOR_RISE_RATE;
       this.floor[b] += (db - this.floor[b]) * expBlend(floorRate, dt);
       const peakRate = db > this.peak[b] ? PEAK_RISE_RATE : PEAK_FALL_RATE;
@@ -104,8 +123,9 @@ export class FeatureExtractor {
       const range = Math.max(MIN_RANGE_DB, this.peak[b] - this.floor[b]);
       const norm = clamp01((db - this.floor[b]) / range);
 
-      const rate = norm > this.env[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
-      this.env[b] += (norm - this.env[b]) * Math.min(1, rate * dt);
+      const target = autoGain ? norm : clamp01((db - ANALYSER_MIN_DB) / fixedSpan);
+      const rate = target > this.env[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
+      this.env[b] += (target - this.env[b]) * Math.min(1, rate * dt);
       bands[b] = this.env[b];
 
       flux += Math.max(0, norm - this.prevNorm[b]);

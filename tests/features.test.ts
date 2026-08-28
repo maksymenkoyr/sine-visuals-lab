@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { FeatureExtractor } from "../src/audio/features.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
+import { ANALYSER_MIN_DB, ANALYSER_MAX_DB } from "../src/audio/analyser.ts";
 
 const QUIET_DB = -90;
 const LOUD_DB = -20;
@@ -102,5 +103,79 @@ describe("FeatureExtractor", () => {
       frame = extractor.update(bandsFrame(LOUD_DB), time);
     }
     expect(frame!.energy).toBeGreaterThan(0.6);
+  });
+
+  it("with autoGain off, maps a band's absolute dB straight to [0,1] against the analyser's fixed window", () => {
+    const extractor = new FeatureExtractor();
+    const dt = 1 / 60;
+    let time = 0;
+    let frame;
+
+    // Prime with a steady quiet level so the adaptive floor/peak trackers
+    // (which keep running regardless — see features.ts) would, if consulted,
+    // read this next jump as loud. autoGain=false must ignore them.
+    for (let i = 0; i < 120; i++) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time, false);
+    }
+    const fixedSpan = ANALYSER_MAX_DB - ANALYSER_MIN_DB;
+    expect(frame!.bands[0]).toBeCloseTo((QUIET_DB - ANALYSER_MIN_DB) / fixedSpan, 2);
+
+    // Jump to the fixed window's midpoint dB — attack is fast enough (rate*dt
+    // >= 1) to land on the target in a single frame.
+    const midDb = (ANALYSER_MIN_DB + ANALYSER_MAX_DB) / 2;
+    time += dt;
+    frame = extractor.update(bandsFrame(midDb), time, false);
+    expect(frame!.bands[0]).toBeCloseTo(0.5, 2);
+  });
+
+  it("adaptive (on) and fixed (off) modes diverge for the same moderately loud signal", () => {
+    const dt = 1 / 60;
+    function run(autoGain: boolean): number {
+      const extractor = new FeatureExtractor();
+      let time = 0;
+      let frame;
+      for (let i = 0; i < 120; i++) {
+        time += dt;
+        frame = extractor.update(bandsFrame(QUIET_DB), time, autoGain);
+      }
+      for (let i = 0; i < 60; i++) {
+        time += dt;
+        frame = extractor.update(bandsFrame(QUIET_DB, { 5: -70 }), time, autoGain);
+      }
+      return frame!.bands[5];
+    }
+
+    // Adaptive mode has already re-normalized around -70dB as "loud" relative
+    // to the quiet room; fixed mode reports it as what it absolutely is —
+    // still well below the analyser's -10dB ceiling.
+    expect(run(true)).toBeGreaterThan(0.6);
+    expect(run(false)).toBeLessThan(0.45);
+  });
+
+  it("locks onto tempo the same way with autoGain off — beat detection reads the adaptive tracker regardless", () => {
+    const extractor = new FeatureExtractor();
+    const bpm = 120;
+    const intervalSec = 60 / bpm;
+    const dt = 1 / 60;
+    let time = 0;
+    let frame;
+    let nextClickAt = intervalSec;
+
+    for (let i = 0; i < 120; i++) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time, false);
+    }
+
+    const endTime = time + 8;
+    while (time < endTime) {
+      time += dt;
+      const isClick = time >= nextClickAt;
+      if (isClick) nextClickAt += intervalSec;
+      frame = extractor.update(bandsFrame(QUIET_DB, isClick ? { 0: LOUD_DB, 12: LOUD_DB } : {}), time, false);
+    }
+
+    expect(frame!.bpm).toBeGreaterThan(bpm - 5);
+    expect(frame!.bpm).toBeLessThan(bpm + 5);
   });
 });
