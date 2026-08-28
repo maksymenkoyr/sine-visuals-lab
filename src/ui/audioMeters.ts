@@ -36,8 +36,9 @@ import {
  *  - Character: one row per entry in MUSIC_DIALS (never a hardcoded list),
  *    each marking NEUTRAL with a tick — what autoTune.ts resolves every "A"
  *    chip against, otherwise invisible. Copy comes from DIAL_LABELS.
- *  - Scope: a waveform trace with a clip warning, and stereo width/balance,
- *    read straight off this device's mic by stereo.ts. Local-only by
+ *  - Scope (first): a rolling waveform of the last few seconds with a clip
+ *    warning, and stereo width/balance, read straight off this device's
+ *    mic by stereo.ts. Local-only by
  *    construction — these never cross src/net/protocol.ts's wire frame, so a
  *    mic-less renderer has nothing to show here and the card hides itself.
  *
@@ -63,7 +64,16 @@ const PEAK_FALL_PER_SEC = 1.2; // matches spectrumStrip.ts's peak-hold decay
 const TEXT_REFRESH_MS = 100;
 /** Readings that feed no single system — same neutral as the Palette card. */
 const NEUTRAL_ACCENT = "rgba(255,255,255,0.7)";
-const WAVE_HEIGHT_CSS_PX = 44;
+const WAVE_HEIGHT_CSS_PX = 64;
+// The waveform is a rolling history, not a snapshot: one analyser buffer is
+// ~40ms — a single kick — and at speech level it drew as a flat hairline.
+// Each column holds the min/max over WAVE_COLUMN_MS, so a card's width
+// spans the last several seconds regardless of frame rate, and beats read
+// as blobs the way they do in an audio editor. The vertical range zooms to
+// the loudest column on screen, floored at WAVE_RANGE_FLOOR so silence and
+// mic hiss aren't blown up to look like signal.
+const WAVE_COLUMN_MS = 16;
+const WAVE_RANGE_FLOOR = 0.05;
 const FADE = "background-color 0.3s ease-out";
 
 // The meter sits where a row's slider would, at the slider's height, so meter
@@ -301,7 +311,7 @@ export function createAudioMeters(): AudioMeters {
     label: "Waveform",
     accent: NEUTRAL_ACCENT,
     unit: "%",
-    description: "The signal as it arrives. Red means the mic is clipping — turn the source down.",
+    description: "The last few seconds of sound, zoomed to fit. Red means the mic is clipping — turn the source down.",
   });
   // The trace takes the meter's place under the head.
   const waveCanvas = document.createElement("canvas");
@@ -315,10 +325,24 @@ export function createAudioMeters(): AudioMeters {
   scopeCard.el.style.display = "none";
   let scopeShown = false;
 
-  root.append(signalCard.el, rhythmCard.el, characterCard.el, scopeCard.el);
+  // The scope leads: it's the one live picture of the sound itself, and the
+  // first thing to check when the visuals seem off.
+  root.append(scopeCard.el, signalCard.el, rhythmCard.el, characterCard.el);
+
+  // Ring buffer of columns, one pixel each — oldest at `head`, newest just
+  // before it — plus the column currently being accumulated.
+  let histMin = new Float32Array(0);
+  let histMax = new Float32Array(0);
+  let histClip = new Uint8Array(0);
+  let head = 0;
+  let colMin = 0;
+  let colMax = 0;
+  let colClip = false;
+  let colStartMs: number | null = null;
 
   // devicePixelRatio-scaled backing store, resized whenever the card's
-  // layout width changes — same as spectrumStrip.ts.
+  // layout width changes — same as spectrumStrip.ts. The history is one
+  // column per CSS pixel, so it's rebuilt (cleared) with the width.
   let waveCssWidth = 0;
   function ensureWaveSize(): void {
     const rect = waveCanvas.getBoundingClientRect();
@@ -329,28 +353,71 @@ export function createAudioMeters(): AudioMeters {
     waveCanvas.width = Math.round(w * dpr);
     waveCanvas.height = Math.round(WAVE_HEIGHT_CSS_PX * dpr);
     waveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    histMin = new Float32Array(w);
+    histMax = new Float32Array(w);
+    histClip = new Uint8Array(w);
+    head = 0;
   }
 
-  // Min/max envelope per pixel column (not decimation) so a one-sample
-  // transient still shows as a spike — see waveform.ts's downsampleForDisplay.
-  function drawWave(mono: Float32Array, clipped: boolean): void {
+  function commitColumn(): void {
+    histMin[head] = colMin;
+    histMax[head] = colMax;
+    histClip[head] = colClip ? 1 : 0;
+    head = (head + 1) % histMin.length;
+    colMin = 0;
+    colMax = 0;
+    colClip = false;
+  }
+
+  /** Folds this frame's buffer into the current column, and closes it (or
+   *  several, after a stall) once WAVE_COLUMN_MS has passed. */
+  function pushWave(mono: Float32Array, clipped: boolean, nowMs: number): void {
     ensureWaveSize();
+    const { min, max } = downsampleForDisplay(mono, 1);
+    colMin = Math.min(colMin, min[0]);
+    colMax = Math.max(colMax, max[0]);
+    colClip = colClip || clipped;
+    if (colStartMs === null) colStartMs = nowMs;
+    const elapsed = nowMs - colStartMs;
+    if (elapsed < WAVE_COLUMN_MS) return;
+    // A long stall (tab hidden) shouldn't paint a screen of stale columns:
+    // cap the catch-up at the visible width.
+    let n = Math.min(histMin.length, Math.floor(elapsed / WAVE_COLUMN_MS));
+    for (; n > 0; n--) commitColumn();
+    colStartMs = nowMs - (elapsed % WAVE_COLUMN_MS);
+  }
+
+  function drawWave(): void {
     const w = waveCssWidth;
     const h = WAVE_HEIGHT_CSS_PX;
     const mid = h / 2;
+    const len = histMin.length;
     waveCtx.clearRect(0, 0, w, h);
+
+    let range = WAVE_RANGE_FLOOR;
+    for (let i = 0; i < len; i++) range = Math.max(range, histMax[i], -histMin[i]);
+    range = Math.max(range, colMax, -colMin);
+    const scale = (mid * 0.92) / range;
+
+    // Oldest on the left; the live, still-open column at the right edge.
+    let lastClip = -1;
+    for (let x = 0; x <= len; x++) {
+      const live = x === len;
+      const i = (head + x) % len;
+      const lo = live ? colMin : histMin[i];
+      const hi = live ? colMax : histMax[i];
+      const clip = live ? (colClip ? 1 : 0) : histClip[i];
+      if (clip !== lastClip) {
+        waveCtx.fillStyle = clip ? HOT_RED : "rgba(255,255,255,0.8)";
+        lastClip = clip;
+      }
+      const y0 = mid - hi * scale;
+      const y1 = mid - lo * scale;
+      waveCtx.fillRect(live ? w - 1 : x, y0, 1, Math.max(1, y1 - y0));
+    }
+
     waveCtx.fillStyle = "rgba(255,255,255,0.18)";
     waveCtx.fillRect(0, mid - 0.5, w, 1);
-
-    const { min, max } = downsampleForDisplay(mono, w);
-    waveCtx.strokeStyle = clipped ? HOT_RED : "rgba(255,255,255,0.85)";
-    waveCtx.lineWidth = 1;
-    waveCtx.beginPath();
-    for (let x = 0; x < w; x++) {
-      waveCtx.moveTo(x + 0.5, mid - max[x] * mid * 0.95);
-      waveCtx.lineTo(x + 0.5, mid - min[x] * mid * 0.95);
-    }
-    waveCtx.stroke();
   }
 
   let lastMs: number | null = null;
@@ -413,7 +480,8 @@ export function createAudioMeters(): AudioMeters {
       }
       if (!mono) return;
       const clipped = isClipping(mono);
-      drawWave(mono, clipped);
+      pushWave(mono, clipped, nowMs);
+      drawWave();
       if (text) {
         if (clipped) waveform.setReadout("CLIP", { textual: true, color: HOT_RED, unit: "" });
         else waveform.setReadout(pct(peak(mono)));
