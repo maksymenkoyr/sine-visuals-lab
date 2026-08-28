@@ -6,10 +6,11 @@
  * Everything else in src/ui/ styles itself with inline cssText, and most of
  * the panel still does; what can't be expressed inline lives here as class
  * rules: slider track/thumb pseudo-elements, the hover/focus-revealed row
- * hints, the boolean toggle's knob, the thin scroll rail, the narrow-viewport
- * column stacking, and the "active" ring on a chrome button. The accent
- * constants are here rather than in deviceMenu.ts because the spectrum strip
- * paints the same hues onto a canvas — one owner, no drifting duplicates.
+ * hints, the boolean toggle's knob, the band faders' hit areas over the
+ * spectrum canvas, the thin scroll rail, the narrow-viewport column stacking,
+ * and the "active" ring on a chrome button. The accent constants are here
+ * rather than in deviceMenu.ts because the spectrum strip paints the same
+ * hues onto a canvas — one owner, no drifting duplicates.
  *
  * Fonts are self-hosted through Vite from their npm packages (licenses in
  * THIRD-PARTY-NOTICES.md): Chakra Petch for labels, Share Tech Mono for
@@ -29,8 +30,10 @@ import dseg7Url from "dseg/fonts/DSEG7-Classic/DSEG7Classic-Regular.woff2?url";
 export const INPUT_GREEN = "#8ce6a0";
 /** This scene's own look — its declared settings. */
 export const SCENE_VIOLET = "#c3a5f9";
-/** Low/mid/high band gain. */
+/** The band fader bank — how hard each part of the spectrum drives the visuals. */
 export const BANDS_AMBER = "#f9b96c";
+/** A fader that's been pulled all the way down to Off (spectrumStrip.ts, bandFaders.ts). */
+export const FADER_OFF = "#f08a8a";
 /** The global auto system — strength knob and master switch. */
 export const AUTO_SKY = "#59bbfb";
 
@@ -200,6 +203,19 @@ const stylesheet = `
 }
 .vc-row:hover .vc-slider::-moz-range-thumb,
 .vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(1.7); }
+
+/* A band fader's hit area (bandFaders.ts): an invisible column over the
+ * spectrum canvas, which draws the fader itself. touch-action: none is the
+ * opposite of the slider's pan-y on purpose — a vertical drag here moves the
+ * fader, it must never scroll the stacked panel. The focus ring is inset so
+ * it stays inside the card's overflow: hidden. */
+.vc-fader {
+  position: absolute; top: 0; touch-action: none; cursor: ns-resize;
+  outline: none; border-radius: 3px;
+}
+.vc-fader:focus-visible {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-accent) 70%, transparent);
+}
 
 .vc-toggle {
   position: relative; width: 28px; height: 14px; margin: 6px 0 0; padding: 0;

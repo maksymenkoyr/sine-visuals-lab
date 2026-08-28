@@ -31,8 +31,8 @@ export const SMOOTHING_DEFAULT = 1;
 // prior rename) does, migrate that data over once rather than losing it —
 // see the Acceleration store below, migrating off "vibe.dynamics".
 //
-// Exported for src/audio/bandGains.ts, which is the same per-scene
-// float-in-localStorage shape three times over (low/mid/high gain).
+// Exported for src/audio/bandGains.ts, which uses the same per-scene
+// float-in-localStorage shape for each of its fader stores.
 export function createPerSceneSetting(
   storageKey: string,
   min: number,

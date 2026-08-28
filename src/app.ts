@@ -25,7 +25,14 @@ import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/s
 import { getBandSplit } from "./audio/bandSplit.ts";
 import { isAutoGainEnabled, setAutoGainEnabled } from "./audio/autoGain.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
-import { applyBandGains, getBandGain, getBandGains, resetBandGains, setBandGain } from "./audio/bandGains.ts";
+import {
+  applyBandGains,
+  getBandGain,
+  getBandGains,
+  pinnedBands,
+  resetBandGains,
+  setBandGain,
+} from "./audio/bandGains.ts";
 import {
   advanceAutoTune,
   resolveSceneSetting,
@@ -276,7 +283,7 @@ function wireDeviceMenu(): void {
     currentSceneId: () => scene.id,
     currentSceneName: () => scene.name,
     currentPaletteId: () => palette.id,
-    // What the spectrum card's header reports as the audio source. A
+    // What the Bands card's status line reports as the audio source. A
     // renderer has no local analyser — its bands arrive over the room.
     getAudioStatus: () => ({
       source: syntheticFeed ? "synthetic" : mode === "renderer" ? "remote" : bandAnalyser ? "mic" : "none",
@@ -307,8 +314,8 @@ function wireDeviceMenu(): void {
     onSceneSettingsReset: (sceneId) => resetSceneSettings(sceneId, getScene(sceneId)?.settings ?? []),
     getBandSplit: () => getBandSplit(),
     getBandEdgesHz: () => bandAnalyser?.bandEdgesHz ?? nominalBandEdgesHz(),
-    getBandGain: (sceneId, group) => getBandGain(sceneId, group),
-    onBandGainChange: (sceneId, group, value) => setBandGain(sceneId, group, value),
+    getBandGain: (sceneId, fader) => getBandGain(sceneId, fader),
+    onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
@@ -687,17 +694,18 @@ function loop(): void {
   }
 
   // Applied once, upstream of every consumer below — deviceMenu's spectrum
-  // strip included — so the Bands box's Low/Mid/High sliders show up
-  // everywhere consistently: the "processed" feed the strip draws is built
-  // from this same frame (see deviceMenu.ts's update()), so a killed band
-  // reads as killed there too, not just in the render path. lastVis itself
-  // stays ungained — it still feeds hostConn.sendFrame, which shouldn't
-  // hear a purely local gain tweak.
+  // strip included — so the Bands card's faders show up everywhere
+  // consistently: the "processed" feed the strip draws is built from this
+  // same frame (see deviceMenu.ts's update()), so a band cut to Off reads as
+  // Off there too, not just in the render path. lastVis itself stays
+  // ungained — it still feeds hostConn.sendFrame, which shouldn't hear a
+  // purely local gain tweak — and is also what the strip draws as the ghost
+  // behind a faded bar.
   const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
 
   // Fed even when null (mic permission still pending) so the spectrum strip
   // can render its "waiting for audio" idle state instead of going dead.
-  deviceMenu?.update(gained, lastRawBands);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands());
 
   if (!lastVis) return;
 
