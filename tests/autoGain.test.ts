@@ -12,9 +12,9 @@ describe("auto-gain persistence", () => {
 
   // vitest runs under environment: "node" (vitest.config.ts), so there is no
   // localStorage global at all here — this also proves the module tolerates that.
-  it("defaults to on", () => {
-    expect(AUTO_GAIN_DEFAULT).toBe(true);
-    expect(isAutoGainEnabled()).toBe(true);
+  it("defaults to off", () => {
+    expect(AUTO_GAIN_DEFAULT).toBe(false);
+    expect(isAutoGainEnabled()).toBe(false);
   });
 
   it("round-trips a set", () => {

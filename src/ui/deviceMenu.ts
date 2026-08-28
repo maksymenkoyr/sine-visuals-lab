@@ -507,7 +507,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const autoGainBox = document.createElement("div");
   autoGainBox.style.cssText = autoGainBoxStyle;
   autoGainBox.title =
-    "Automatically rescales each frequency band to fill the display. Off shows the mic's real levels — raise Sensitivity to compensate, and Bands boosts finally have headroom to work with.";
+    "On automatically rescales each frequency band to fill the display, converging different mics/rooms toward the same look — but flattens bass-vs-treble balance and clamps Bands boosts against an already-full band. Off (default) shows the mic's real levels; raise Sensitivity if it reads too quiet.";
 
   const autoGainLabel = document.createElement("span");
   autoGainLabel.textContent = "Auto-gain";

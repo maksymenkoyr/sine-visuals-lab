@@ -8,13 +8,15 @@
  * within a session, seeded once from localStorage, so behavior stays correct
  * even where localStorage is unavailable (node test env, Safari private mode).
  *
- * Default is on — this is a debug/preference escape hatch for comparing the
- * spectrum strip's "before processing" and processed views on equal footing
- * (see src/ui/spectrumStrip.ts), not a change to default behavior.
+ * Default is off — the fixed mapping it falls back to (see features.ts)
+ * preserves the music's real bass-to-treble tilt, which the adaptive path
+ * flattens by design. A user who wants the old flattening/convergence
+ * behavior (e.g. a very quiet or very loud room) can still switch it on; that
+ * choice is what persists here.
  */
 
 const STORAGE_KEY = "vibe.autoGain";
-export const AUTO_GAIN_DEFAULT = true;
+export const AUTO_GAIN_DEFAULT = false;
 
 function loadInitial(): boolean {
   try {
