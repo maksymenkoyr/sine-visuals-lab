@@ -2,7 +2,7 @@ import type { AnimFrame } from "../render/animClock.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
-import { AUTO_SKY, BANDS_AMBER, FONT_MONO, HOT_RED, INPUT_GREEN, withAlpha } from "./controlsTheme.ts";
+import { AUTO_SKY, FONT_MONO, HOT_RED, INPUT_GREEN, withAlpha } from "./controlsTheme.ts";
 import {
   createCard,
   digitsStyle,
@@ -51,7 +51,11 @@ export interface AudioMeters {
   /** Fed every frame while the panel is open. `frame`/`anim` null before
    *  audio is up (idle readouts); `mono` null on any device without a local
    *  analyser (Scope card hidden). */
-  update(frame: FeatureFrame | null, anim: AnimFrame | null, mono: Float32Array | null): void;
+  update(
+    frame: FeatureFrame | null,
+    anim: AnimFrame | null,
+    mono: Float32Array | null,
+  ): void;
 }
 
 const PEAK_FALL_PER_SEC = 1.2; // matches spectrumStrip.ts's peak-hold decay
@@ -86,23 +90,29 @@ const tickStyle = `position: absolute; top: -2px; bottom: -2px; width: 1px; back
 // brightens with beatClock's tempoLock (an unconfident guess stays dim);
 // each beat it jumps to white inside a BEAT_COLOR halo and eases back into
 // the colour as the halo fades — white-to-orange is the beat.
-const rhythmRowStyle = `display: flex; gap: 14px; align-items: stretch;`;
+// A .vc-row's ring reaches 8px past its content into the card padding; the
+// block reaches the same 8px on its right, and the gap between the two is
+// what's left of that reach — so card edge → ring, ring → block, and block →
+// card edge are all the same 4px.
+const rhythmRowStyle = `display: flex; gap: 12px; align-items: stretch;`;
 const tempoBlockStyle = (accent: string) => `
   width: 74px; flex-shrink: 0; display: grid; place-items: center; text-align: center;
-  margin: -6px 0; border-radius: 4px;
+  margin: -6px -8px -6px 0; border-radius: 4px;
   background-color: color-mix(in srgb, ${accent} 6%, transparent);
   box-shadow: 0 0 0 1px color-mix(in srgb, ${accent} 45%, transparent);
 `;
-const DOT_EASE = "background-color 0.55s ease-out, box-shadow 0.55s ease-out, transform 0.55s ease-out";
+const BEAT_COLOR = HOT_RED;
+const DOT_EASE =
+  "background-color 0.55s ease-out, box-shadow 0.55s ease-out, transform 0.55s ease-out";
 const tempoDotStyle = `
-  width: 7px; height: 7px; border-radius: 50%; margin: 6px auto 0;
-  background-color: ${withAlpha(BANDS_AMBER, 0.25)}; box-shadow: 0 0 0 0 transparent;
+  width: 6px; height: 6px; border-radius: 50%; margin: 5px auto 0;
+  background-color: ${withAlpha(BEAT_COLOR, 0.25)}; box-shadow: 0 0 0 0 transparent;
   transition: ${DOT_EASE};
 `;
 const tempoDigitsStyle = `${digitsStyle} font-size: 13px; color: #fff; transition: color 0.4s ease-out;`;
 const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
-const BEAT_COLOR = BANDS_AMBER;
-const TEMPO_TITLE = "Tempo. The dot flashes white on every beat and settles back to orange, brighter as the tracker gets sure.";
+const TEMPO_TITLE =
+  "Tempo. The dot flashes white on every beat and settles back to its colour, brighter as the tracker gets sure.";
 // The raw estimate flits between candidates (half/double-time, a fill), but
 // a song's tempo hardly ever changes — so the readout only adopts a new
 // value once the estimate has sat within TEMPO_SETTLE_TOL of it for
@@ -327,13 +337,15 @@ export function createAudioMeters(): AudioMeters {
     label: "Level",
     accent: INPUT_GREEN,
     unit: "%",
-    description: "How loud the room is on a fixed quiet-to-loud scale. Doesn't auto-adjust: a quiet room reads low and stays low.",
+    description:
+      "How loud the room is on a fixed quiet-to-loud scale. Doesn't auto-adjust: a quiet room reads low and stays low.",
   });
   const energy = createMeterRow({
     label: "Energy",
     accent: INPUT_GREEN,
     unit: "%",
-    description: "The same sound after auto-gain, which keeps it mid-range whether the room is quiet or loud. This is what the scene actually reacts to.",
+    description:
+      "The same sound after auto-gain, which keeps it mid-range whether the room is quiet or loud. This is what the scene actually reacts to.",
   });
   const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN });
   signalCard.body.append(level.el, spacer(), energy.el);
@@ -343,7 +355,8 @@ export function createAudioMeters(): AudioMeters {
     label: "Section",
     accent: NEUTRAL_ACCENT,
     unit: "%",
-    description: "How intense this part of the track is against the last while. Flashes red on a drop.",
+    description:
+      "How intense this part of the track is against the last while. Flashes red on a drop.",
   });
   section.el.style.flex = "1";
   section.el.style.minWidth = "0";
@@ -456,7 +469,8 @@ export function createAudioMeters(): AudioMeters {
     waveCtx.clearRect(0, 0, w, h);
 
     let range = WAVE_RANGE_FLOOR;
-    for (let i = 0; i < len; i++) range = Math.max(range, histMax[i], -histMin[i]);
+    for (let i = 0; i < len; i++)
+      range = Math.max(range, histMax[i], -histMin[i]);
     range = Math.max(range, colMax, -colMin);
     const scale = (mid * 0.92) / range;
 
@@ -491,7 +505,8 @@ export function createAudioMeters(): AudioMeters {
     el: root,
     update(frame, anim, mono): void {
       const nowMs = performance.now();
-      const dtSec = lastMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastMs) / 1000);
+      const dtSec =
+        lastMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastMs) / 1000);
       lastMs = nowMs;
       const text = nowMs - lastTextMs >= TEXT_REFRESH_MS;
       if (text) lastTextMs = nowMs;
@@ -508,13 +523,21 @@ export function createAudioMeters(): AudioMeters {
       tempo.settle(frame?.bpm ?? 0, dtSec);
       section.setValue(anim ? anim.sectionIntensity : null, dtSec);
       if (anim?.dropOnset) section.flash(HOT_RED);
-      if (text) section.setReadout(anim ? pct(anim.sectionIntensity) : "--", anim ? {} : IDLE);
+      if (text)
+        section.setReadout(
+          anim ? pct(anim.sectionIntensity) : "--",
+          anim ? {} : IDLE,
+        );
 
       // ---- Character ----
       for (const { dial, row } of dialRows) {
         const v = anim ? anim.profile[dial] : null;
         row.setValue(v, dtSec);
-        if (text) row.setReadout(v === null ? "--" : v.toFixed(2), v === null ? IDLE : {});
+        if (text)
+          row.setReadout(
+            v === null ? "--" : v.toFixed(2),
+            v === null ? IDLE : {},
+          );
       }
 
       // ---- Scope ----
@@ -529,7 +552,12 @@ export function createAudioMeters(): AudioMeters {
       drawWave();
       wavePeak = Math.max(peak(mono), wavePeak - PEAK_FALL_PER_SEC * dtSec);
       if (text) {
-        if (clipped) waveform.setReadout("CLIP", { textual: true, color: HOT_RED, unit: "" });
+        if (clipped)
+          waveform.setReadout("CLIP", {
+            textual: true,
+            color: HOT_RED,
+            unit: "",
+          });
         else waveform.setReadout(pct(wavePeak));
       }
     },
