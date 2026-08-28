@@ -11,7 +11,8 @@
 2. Each entry in `settings: SceneSetting[]` (spec'd in `sceneSettings.ts`) becomes
    a `uniform float u<Key>` in your shader, plus a slider/checkbox in the device
    menu. `min`/`max`/`step`/`default` are the slider; `label`/`description`/`group`
-   are what the user sees; `type: "boolean"` renders a checkbox instead.
+   are what the user sees (`description` is the hint that unfolds under the row
+   on hover/focus); `type: "boolean"` renders a toggle instead.
 3. Register the scene as a side effect in `src/render/scenes/index.ts`
    (`registerScene(yourScene)`) and export it there like its neighbours.
 4. If it should degrade or disable below some hardware tier, set `minTier` on the
