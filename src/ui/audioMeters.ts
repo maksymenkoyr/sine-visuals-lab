@@ -2,7 +2,7 @@ import type { AnimFrame } from "../render/animClock.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
-import { AUTO_SKY, BANDS_AMBER, FONT_MONO, HOT_RED, INPUT_GREEN, SCENE_VIOLET } from "./controlsTheme.ts";
+import { AUTO_SKY, BANDS_AMBER, FONT_MONO, HOT_RED, INPUT_GREEN, withAlpha } from "./controlsTheme.ts";
 import {
   createCard,
   digitsStyle,
@@ -82,10 +82,10 @@ const tickStyle = `position: absolute; top: -2px; bottom: -2px; width: 1px; back
 // block's shape (deviceMenu.ts), framed like a woken .vc-row (the same ring
 // and tint controlsTheme.ts gives the Section row on hover, with the same
 // 6px reach past the row's content) so the two read as one line. Digits,
-// caption, and a beat dot beneath. The dot's resting tint brightens with
-// beatClock's tempoLock (an unconfident guess stays dim), and each beat it
-// jumps to the next of BEAT_COLORS with a glow and eases back — a different
-// colour per beat, cycling once per bar from the downbeat.
+// caption, and a beat dot beneath. The dot rests at a dim BEAT_COLOR that
+// brightens with beatClock's tempoLock (an unconfident guess stays dim);
+// each beat it jumps to white inside a BEAT_COLOR halo and eases back into
+// the colour as the halo fades — white-to-orange is the beat.
 const rhythmRowStyle = `display: flex; gap: 14px; align-items: stretch;`;
 const tempoBlockStyle = (accent: string) => `
   width: 74px; flex-shrink: 0; display: grid; place-items: center; text-align: center;
@@ -96,14 +96,13 @@ const tempoBlockStyle = (accent: string) => `
 const DOT_EASE = "background-color 0.55s ease-out, box-shadow 0.55s ease-out, transform 0.55s ease-out";
 const tempoDotStyle = `
   width: 7px; height: 7px; border-radius: 50%; margin: 6px auto 0;
-  background-color: rgba(255,255,255,0.2); box-shadow: 0 0 0 0 transparent;
+  background-color: ${withAlpha(BANDS_AMBER, 0.25)}; box-shadow: 0 0 0 0 transparent;
   transition: ${DOT_EASE};
 `;
 const tempoDigitsStyle = `${digitsStyle} font-size: 13px; color: #fff; transition: color 0.4s ease-out;`;
 const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
-/** One per beat of a four-beat bar, downbeat first. */
-const BEAT_COLORS = [BANDS_AMBER, INPUT_GREEN, AUTO_SKY, SCENE_VIOLET];
-const TEMPO_TITLE = "Tempo. The dot pulses on every beat, a different colour for each beat of the bar, and brightens as the tracker gets sure.";
+const BEAT_COLOR = BANDS_AMBER;
+const TEMPO_TITLE = "Tempo. The dot flashes white on every beat and settles back to orange, brighter as the tracker gets sure.";
 // The raw estimate flits between candidates (half/double-time, a fill), but
 // a song's tempo hardly ever changes — so the readout only adopts a new
 // value once the estimate has sat within TEMPO_SETTLE_TOL of it for
@@ -252,7 +251,7 @@ function createTempoBlock(accent: string) {
   inner.append(digits, caption, dot);
   el.appendChild(inner);
 
-  let restColor = "rgba(255,255,255,0.2)";
+  let restColor = withAlpha(BEAT_COLOR, 0.25);
   let lit = false;
   let lastLockStep = -1;
   let shownBpm = 0;
@@ -269,13 +268,13 @@ function createTempoBlock(accent: string) {
   return {
     el,
     /** Per frame. `lock` (0..1) sets the resting tint; a lit dot eases back
-     *  to it on the frame after its beat. `beatIndex` picks the colour. */
-    update(lock: number, beat: boolean, beatIndex: number): void {
+     *  to it on the frame after its beat. */
+    update(lock: number, beat: boolean): void {
       // Quantised so the resting tint isn't rewritten every frame.
       const step = Math.round(lock * 20);
       if (step !== lastLockStep) {
         lastLockStep = step;
-        restColor = `rgba(255,255,255,${(0.2 + 0.5 * (step / 20)).toFixed(3)})`;
+        restColor = withAlpha(BEAT_COLOR, 0.25 + 0.6 * (step / 20));
         digits.style.color = `rgba(255,255,255,${(0.45 + 0.55 * (step / 20)).toFixed(3)})`;
       }
       if (lit) {
@@ -285,10 +284,9 @@ function createTempoBlock(accent: string) {
       if (beat) {
         // Jump with no easing, then re-arm the easing so the next settle()
         // fades — same shape as blink(), with glow and size along for the ride.
-        const color = BEAT_COLORS[((beatIndex % BEAT_COLORS.length) + BEAT_COLORS.length) % BEAT_COLORS.length];
         dot.style.transition = "none";
-        dot.style.backgroundColor = color;
-        dot.style.boxShadow = `0 0 6px 1px ${color}`;
+        dot.style.backgroundColor = "#fff";
+        dot.style.boxShadow = `0 0 6px 1px ${BEAT_COLOR}`;
         dot.style.transform = "scale(1.6)";
         void dot.offsetWidth;
         dot.style.transition = DOT_EASE;
@@ -506,11 +504,7 @@ export function createAudioMeters(): AudioMeters {
         energy.setReadout(frame ? pct(frame.energy) : "--", frame ? {} : IDLE);
       }
       // ---- Rhythm ----
-      // Which beat of the bar this is, from the phase-locked bar clock (see
-      // beatClock.ts) — offset by an eighth so an onset landing a hair before
-      // the clock's tick still counts as that beat, not the one before.
-      const beatIndex = Math.floor((((anim?.barPhase ?? 0) + 0.125) % 1) * BEAT_COLORS.length);
-      tempo.update(anim?.tempoLock ?? 0, !!frame?.beat, beatIndex);
+      tempo.update(anim?.tempoLock ?? 0, !!frame?.beat);
       tempo.settle(frame?.bpm ?? 0, dtSec);
       section.setValue(anim ? anim.sectionIntensity : null, dtSec);
       if (anim?.dropOnset) section.flash(HOT_RED);
