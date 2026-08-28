@@ -27,13 +27,19 @@ const FLUX_THRESHOLD_MULT = 1.6;
 const FLUX_THRESHOLD_MARGIN = 0.03;
 const ONSET_REFRACTORY_SEC = 0.1; // ~600 BPM ceiling, prevents double-triggers
 
-// BPM estimation from recent inter-onset intervals — every pair of recent
-// onsets, not just neighbours (see registerOnset).
+// BPM estimation — a comb over the gaps between every pair of recent onsets
+// (see registerOnset). Candidate periods step through the tempo window;
+// COMB_TOL_BEATS is how far off an integer number of beats a gap may land
+// and still count for a candidate; ONE_BEAT_BONUS breaks the tie between a
+// tempo and its double (both fit a clean track's gaps) toward the one whose
+// single beat is actually being hit.
 const MAX_ONSET_HISTORY = 16;
 const MAX_PAIR_GAP_SEC = 4;
 const BPM_MIN = 70;
 const BPM_MAX = 180;
-const IOI_BUCKET_SEC = 0.02;
+const PERIOD_STEP_SEC = 0.005;
+const COMB_TOL_BEATS = 0.12;
+const ONE_BEAT_BONUS = 0.5;
 
 // getFloatFrequencyData returns -Infinity for a bin with exactly zero
 // energy (true silence) — it is NOT clamped by the analyser's
@@ -56,19 +62,6 @@ const LEVEL_DB_CEIL = -15; // a loud room
 function clamp01(x: number): number {
   if (!Number.isFinite(x)) return 0;
   return x < 0 ? 0 : x > 1 ? 1 : x;
-}
-
-/**
- * Fold a raw inter-onset interval into the [BPM_MIN, BPM_MAX] window by
- * repeatedly doubling/halving — a detector firing on every other beat (or
- * twice per beat) still yields the right tempo class.
- */
-function intervalToBpmBucket(intervalSec: number): number | null {
-  if (intervalSec <= 0) return null;
-  let bpm = 60 / intervalSec;
-  while (bpm < BPM_MIN) bpm *= 2;
-  while (bpm > BPM_MAX) bpm /= 2;
-  return bpm;
 }
 
 export class FeatureExtractor {
@@ -147,48 +140,60 @@ export class FeatureExtractor {
     if (this.onsetTimes.length > MAX_ONSET_HISTORY) this.onsetTimes.shift();
     if (this.onsetTimes.length < 3) return;
 
-    // Bucket the gap between every pair of recent onsets (tempo-folded) and
-    // take the mode — a cheap stand-in for autocorrelation. Adjacent gaps
-    // alone were fooled by a detector firing twice per hit (the attack, then
-    // its tail just past the refractory): the gaps alternate short/long and
-    // neither is the beat — a 100bpm metronome read as 130. Across all
-    // pairs the true spacing and its multiples turn up far more often than
-    // any spurious offset, so extra or missed onsets stop mattering.
+    // The gap between every pair of recent onsets, then a comb: each
+    // candidate period is scored by how many gaps land on a whole number of
+    // its beats. This is what survives a messy detector — extra onsets (a
+    // click's tail firing just past the refractory) and missed ones only
+    // add gaps that fit no candidate well, while the true spacing and all
+    // its multiples keep fitting the true period. Two earlier schemes
+    // failed on a plain 100bpm metronome: the mode of adjacent gaps (the
+    // tail made them alternate 0.14s/0.46s, and 0.46s is 130bpm), then the
+    // mode of all pair gaps folded into range by halving — folding is only
+    // right for power-of-two multiples, so three-beat gaps voted for 133
+    // and it read 115.
     const times = this.onsetTimes;
     const n = times.length;
-    const buckets = new Map<number, number>();
+    const gaps: number[] = [];
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
         const gap = times[j] - times[i];
         if (gap > MAX_PAIR_GAP_SEC) break; // ascending, so later j are further still
-        const bpm = intervalToBpmBucket(gap);
-        if (bpm === null) continue;
-        const key = Math.round(60 / bpm / IOI_BUCKET_SEC);
-        buckets.set(key, (buckets.get(key) ?? 0) + 1);
+        gaps.push(gap);
       }
     }
-    // Score each bucket with its neighbours, since frame-rate jitter splits
-    // one interval across two adjacent buckets; then take the count-weighted
-    // centre of the winning neighbourhood as the interval.
-    let bestKey = 0;
+
+    const periodMin = 60 / BPM_MAX;
+    const periodMax = 60 / BPM_MIN;
+    let bestPeriod = 0;
     let bestScore = 0;
-    for (const [key, count] of buckets) {
-      const score = count + (buckets.get(key - 1) ?? 0) + (buckets.get(key + 1) ?? 0);
+    for (let period = periodMin; period <= periodMax + 1e-9; period += PERIOD_STEP_SEC) {
+      let score = 0;
+      for (const gap of gaps) {
+        const beats = gap / period;
+        const k = Math.round(beats);
+        if (k < 1) continue;
+        const err = Math.abs(beats - k);
+        if (err >= COMB_TOL_BEATS) continue;
+        score += (1 - err / COMB_TOL_BEATS) * (k === 1 ? 1 + ONE_BEAT_BONUS : 1);
+      }
       if (score > bestScore) {
         bestScore = score;
-        bestKey = key;
+        bestPeriod = period;
       }
     }
-    if (bestKey > 0) {
-      let weighted = 0;
-      let total = 0;
-      for (let k = bestKey - 1; k <= bestKey + 1; k++) {
-        const c = buckets.get(k) ?? 0;
-        weighted += k * c;
-        total += c;
-      }
-      const intervalSec = (weighted / total) * IOI_BUCKET_SEC;
-      this.bpm = 60 / intervalSec;
+    if (bestPeriod === 0) return;
+
+    // Refine past the candidate grid: the mean beat length implied by every
+    // gap that fits the winner.
+    let sum = 0;
+    let count = 0;
+    for (const gap of gaps) {
+      const beats = gap / bestPeriod;
+      const k = Math.round(beats);
+      if (k < 1 || Math.abs(beats - k) >= COMB_TOL_BEATS) continue;
+      sum += gap / k;
+      count++;
     }
+    if (count > 0) this.bpm = 60 / (sum / count);
   }
 }
