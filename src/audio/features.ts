@@ -27,8 +27,10 @@ const FLUX_THRESHOLD_MULT = 1.6;
 const FLUX_THRESHOLD_MARGIN = 0.03;
 const ONSET_REFRACTORY_SEC = 0.1; // ~600 BPM ceiling, prevents double-triggers
 
-// BPM estimation from recent inter-onset intervals.
-const MAX_ONSET_HISTORY = 12;
+// BPM estimation from recent inter-onset intervals — every pair of recent
+// onsets, not just neighbours (see registerOnset).
+const MAX_ONSET_HISTORY = 16;
+const MAX_PAIR_GAP_SEC = 4;
 const BPM_MIN = 70;
 const BPM_MAX = 180;
 const IOI_BUCKET_SEC = 0.02;
@@ -145,25 +147,47 @@ export class FeatureExtractor {
     if (this.onsetTimes.length > MAX_ONSET_HISTORY) this.onsetTimes.shift();
     if (this.onsetTimes.length < 3) return;
 
-    // Bucket recent inter-onset intervals (tempo-folded) and take the mode —
-    // robust to a few spurious/missed onsets without needing full autocorrelation.
+    // Bucket the gap between every pair of recent onsets (tempo-folded) and
+    // take the mode — a cheap stand-in for autocorrelation. Adjacent gaps
+    // alone were fooled by a detector firing twice per hit (the attack, then
+    // its tail just past the refractory): the gaps alternate short/long and
+    // neither is the beat — a 100bpm metronome read as 130. Across all
+    // pairs the true spacing and its multiples turn up far more often than
+    // any spurious offset, so extra or missed onsets stop mattering.
+    const times = this.onsetTimes;
+    const n = times.length;
     const buckets = new Map<number, number>();
-    for (let i = 1; i < this.onsetTimes.length; i++) {
-      const bpm = intervalToBpmBucket(this.onsetTimes[i] - this.onsetTimes[i - 1]);
-      if (bpm === null) continue;
-      const key = Math.round(60 / bpm / IOI_BUCKET_SEC);
-      buckets.set(key, (buckets.get(key) ?? 0) + 1);
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const gap = times[j] - times[i];
+        if (gap > MAX_PAIR_GAP_SEC) break; // ascending, so later j are further still
+        const bpm = intervalToBpmBucket(gap);
+        if (bpm === null) continue;
+        const key = Math.round(60 / bpm / IOI_BUCKET_SEC);
+        buckets.set(key, (buckets.get(key) ?? 0) + 1);
+      }
     }
+    // Score each bucket with its neighbours, since frame-rate jitter splits
+    // one interval across two adjacent buckets; then take the count-weighted
+    // centre of the winning neighbourhood as the interval.
     let bestKey = 0;
-    let bestCount = 0;
+    let bestScore = 0;
     for (const [key, count] of buckets) {
-      if (count > bestCount) {
-        bestCount = count;
+      const score = count + (buckets.get(key - 1) ?? 0) + (buckets.get(key + 1) ?? 0);
+      if (score > bestScore) {
+        bestScore = score;
         bestKey = key;
       }
     }
     if (bestKey > 0) {
-      const intervalSec = bestKey * IOI_BUCKET_SEC;
+      let weighted = 0;
+      let total = 0;
+      for (let k = bestKey - 1; k <= bestKey + 1; k++) {
+        const c = buckets.get(k) ?? 0;
+        weighted += k * c;
+        total += c;
+      }
+      const intervalSec = (weighted / total) * IOI_BUCKET_SEC;
       this.bpm = 60 / intervalSec;
     }
   }

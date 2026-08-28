@@ -62,6 +62,48 @@ describe("FeatureExtractor", () => {
     expect(frame!.bpm).toBeLessThan(bpm + 5);
   });
 
+  it("still reads the click tempo when every click also fires a second onset from its tail", () => {
+    // A metronome at 100bpm whose clicks each trigger the detector twice —
+    // the attack, then the tail 140ms later (just past the refractory).
+    // Adjacent gaps then alternate 0.14s / 0.46s and neither is the beat;
+    // 0.46s is 130bpm, which is what this used to read.
+    const extractor = new FeatureExtractor();
+    const bpm = 100;
+    const intervalSec = 60 / bpm;
+    const tailSec = 0.14;
+    const dt = 1 / 60;
+    let time = 0;
+    let frame;
+    let nextClickAt = intervalSec;
+    let nextTailAt = Infinity;
+
+    for (let i = 0; i < 120; i++) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time);
+    }
+
+    const endTime = time + 10;
+    while (time < endTime) {
+      time += dt;
+      const isClick = time >= nextClickAt;
+      if (isClick) {
+        nextTailAt = nextClickAt + tailSec;
+        nextClickAt += intervalSec;
+      }
+      const isTail = time >= nextTailAt;
+      if (isTail) nextTailAt = Infinity;
+      const loud: Record<number, number> = isClick
+        ? { 0: LOUD_DB, 12: LOUD_DB }
+        : isTail
+          ? { 3: LOUD_DB, 15: LOUD_DB }
+          : {};
+      frame = extractor.update(bandsFrame(QUIET_DB, loud), time);
+    }
+
+    expect(frame!.bpm).toBeGreaterThan(bpm - 5);
+    expect(frame!.bpm).toBeLessThan(bpm + 5);
+  });
+
   it("attacks fast: a step up reaches ~90% of its target within 2 frames at 60fps", () => {
     const extractor = new FeatureExtractor();
     const dt = 1 / 60;
