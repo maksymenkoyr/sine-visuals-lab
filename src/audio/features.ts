@@ -30,16 +30,25 @@ const ONSET_REFRACTORY_SEC = 0.1; // ~600 BPM ceiling, prevents double-triggers
 // BPM estimation — a comb over the gaps between every pair of recent onsets
 // (see registerOnset). Candidate periods step through the tempo window;
 // COMB_TOL_BEATS is how far off an integer number of beats a gap may land
-// and still count for a candidate; ONE_BEAT_BONUS breaks the tie between a
-// tempo and its double (both fit a clean track's gaps) toward the one whose
-// single beat is actually being hit.
-const MAX_ONSET_HISTORY = 16;
+// and still count for a candidate. A gap of k beats votes with weight 1/k:
+// the beat-to-beat gap is the fundamental evidence, and a fast candidate
+// that only fits the true gaps as its 2nd/3rd multiples (a sub-harmonic
+// grid, e.g. a click plus a loud echo a third of a beat later) must not
+// out-vote the tempo whose single beat is actually being hit.
+// Onsets are kept by age, not count: a mic's noise floor fires spurious
+// onsets between real hits (the adaptive window collapses in near-silence
+// and every wobble clears the threshold), and a fixed count of the most
+// recent onsets would then hold only a couple of real beats. Each onset
+// carries a weight — how far its flux cleared the threshold, capped — so
+// pairs of weak noise onsets barely vote against pairs of real hits.
+const ONSET_WINDOW_SEC = 6;
+const MAX_ONSETS = 48; // hard cap for the O(n²) pair walk
+const ONSET_WEIGHT_CAP = 4;
 const MAX_PAIR_GAP_SEC = 4;
 const BPM_MIN = 70;
 const BPM_MAX = 180;
 const PERIOD_STEP_SEC = 0.005;
 const COMB_TOL_BEATS = 0.12;
-const ONE_BEAT_BONUS = 0.5;
 // A rival tempo must out-score the current one by this factor to replace
 // it — without it, two near-equal candidates (a tempo and something close
 // to a simple ratio of it) can trade places on every onset.
@@ -77,7 +86,7 @@ export class FeatureExtractor {
   private fluxBaseline = 0;
   private lastTime: number | null = null;
   private lastOnsetTime = -Infinity;
-  private onsetTimes: number[] = [];
+  private onsets: { time: number; weight: number }[] = [];
   private bpm = 0;
   private lastBeatTime = 0;
 
@@ -118,7 +127,7 @@ export class FeatureExtractor {
 
     if (beat) {
       this.lastOnsetTime = time;
-      this.registerOnset(time);
+      this.registerOnset(time, flux / threshold);
     }
 
     let energy = 0;
@@ -138,11 +147,12 @@ export class FeatureExtractor {
     return { time, bands, energy, beat, bpm: this.bpm, beatPhase, level };
   }
 
-  private registerOnset(time: number): void {
+  /** @param strength flux over the firing threshold — 1 is a bare trigger. */
+  private registerOnset(time: number, strength: number): void {
     this.lastBeatTime = time;
-    this.onsetTimes.push(time);
-    if (this.onsetTimes.length > MAX_ONSET_HISTORY) this.onsetTimes.shift();
-    if (this.onsetTimes.length < 3) return;
+    this.onsets.push({ time, weight: Math.min(ONSET_WEIGHT_CAP, Math.max(1, strength)) });
+    while (this.onsets.length > MAX_ONSETS || this.onsets[0].time < time - ONSET_WINDOW_SEC) this.onsets.shift();
+    if (this.onsets.length < 3) return;
 
     // The gap between every pair of recent onsets, then a comb: each
     // candidate period is scored by how many gaps land on a whole number of
@@ -155,26 +165,30 @@ export class FeatureExtractor {
     // mode of all pair gaps folded into range by halving — folding is only
     // right for power-of-two multiples, so three-beat gaps voted for 133
     // and it read 115.
-    const times = this.onsetTimes;
-    const n = times.length;
+    const onsets = this.onsets;
+    const n = onsets.length;
+    // A pair's vote is worth the weaker of its two onsets: a real hit
+    // paired with a noise blip is still a noise gap.
     const gaps: number[] = [];
+    const weights: number[] = [];
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
-        const gap = times[j] - times[i];
+        const gap = onsets[j].time - onsets[i].time;
         if (gap > MAX_PAIR_GAP_SEC) break; // ascending, so later j are further still
         gaps.push(gap);
+        weights.push(Math.min(onsets[i].weight, onsets[j].weight));
       }
     }
 
     const combScore = (period: number): number => {
       let score = 0;
-      for (const gap of gaps) {
-        const beats = gap / period;
+      for (let g = 0; g < gaps.length; g++) {
+        const beats = gaps[g] / period;
         const k = Math.round(beats);
         if (k < 1) continue;
         const err = Math.abs(beats - k);
         if (err >= COMB_TOL_BEATS) continue;
-        score += (1 - err / COMB_TOL_BEATS) * (k === 1 ? 1 + ONE_BEAT_BONUS : 1);
+        score += ((1 - err / COMB_TOL_BEATS) * weights[g]) / k;
       }
       return score;
     };
@@ -205,14 +219,14 @@ export class FeatureExtractor {
     // Refine past the candidate grid: the mean beat length implied by every
     // gap that fits the winner.
     let sum = 0;
-    let count = 0;
-    for (const gap of gaps) {
-      const beats = gap / bestPeriod;
+    let total = 0;
+    for (let g = 0; g < gaps.length; g++) {
+      const beats = gaps[g] / bestPeriod;
       const k = Math.round(beats);
       if (k < 1 || Math.abs(beats - k) >= COMB_TOL_BEATS) continue;
-      sum += gap / k;
-      count++;
+      sum += (gaps[g] / k) * weights[g];
+      total += weights[g];
     }
-    if (count > 0) this.bpm = 60 / (sum / count);
+    if (total > 0) this.bpm = 60 / (sum / total);
   }
 }

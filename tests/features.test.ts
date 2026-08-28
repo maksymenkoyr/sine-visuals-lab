@@ -104,6 +104,45 @@ describe("FeatureExtractor", () => {
     expect(frame!.bpm).toBeLessThan(bpm + 5);
   });
 
+  it("still reads the click tempo through mic noise that fires spurious onsets", () => {
+    // Between metronome clicks a real mic isn't silent: the floor/peak
+    // window collapses onto the noise and its wobble clears the onset
+    // threshold at random. Those onsets must not outvote the clicks.
+    const extractor = new FeatureExtractor();
+    const bpm = 100;
+    const intervalSec = 60 / bpm;
+    const dt = 1 / 60;
+    let seed = 12345;
+    const rand = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+    const noisy = (loud: Record<number, number>) => {
+      const bands = new Float32Array(NUM_BANDS);
+      for (let i = 0; i < NUM_BANDS; i++) bands[i] = QUIET_DB + (rand() - 0.5) * 8;
+      for (const [i, v] of Object.entries(loud)) bands[Number(i)] = v;
+      return bands;
+    };
+    let time = 0;
+    let frame;
+    let nextClickAt = intervalSec;
+    let spurious = 0;
+
+    for (let i = 0; i < 120; i++) {
+      time += dt;
+      frame = extractor.update(noisy({}), time);
+    }
+    const endTime = time + 12;
+    while (time < endTime) {
+      time += dt;
+      const isClick = time >= nextClickAt;
+      if (isClick) nextClickAt += intervalSec;
+      frame = extractor.update(noisy(isClick ? { 0: LOUD_DB, 12: LOUD_DB } : {}), time);
+      if (frame.beat && !isClick) spurious++;
+    }
+
+    expect(spurious).toBeGreaterThan(0); // the scenario must actually be noisy
+    expect(frame!.bpm).toBeGreaterThan(bpm - 5);
+    expect(frame!.bpm).toBeLessThan(bpm + 5);
+  });
+
   it("attacks fast: a step up reaches ~90% of its target within 2 frames at 60fps", () => {
     const extractor = new FeatureExtractor();
     const dt = 1 / 60;
