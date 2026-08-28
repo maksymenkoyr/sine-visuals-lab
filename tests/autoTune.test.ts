@@ -292,3 +292,26 @@ describe("auto-exception migration from the legacy @contrast key", () => {
     expect(persisted["scene-a"]).toEqual({ "@acceleration": false, "@sensitivity": false });
   });
 });
+
+describe("caustics Focus snap auto weights", () => {
+  // Regression guard on the weight change in caustics.ts's `focus` spec.
+  // The old weights ({ pulse: 0.35, attack: 0.25 }) resolved focus to ~0.90
+  // on a steady percussive track and held it there for the whole track —
+  // `pulse` alone floors near 0.92 once tempo locks (it's 60% tempoLock,
+  // which saturates for almost any music with a steady beat), so this
+  // wasn't a rare edge case. The caustics shader's resting sharpness floor
+  // scales directly with uFocus (focusFloor = 0.35 * uFocus), so sitting
+  // that close to 1 kept the *resting* state elevated for the whole track,
+  // not just responding to individual beats. This asserts the new weights
+  // keep the resolved value meaningfully below that ceiling.
+  const focusSpec = causticsScene.settings!.find((s) => s.key === "focus")!;
+  const steadyPercussive: DialValues = { ...NEUTRAL, pulse: 0.92, attack: 0.6 };
+
+  it("stays inside the verified sharpness band on a steady percussive track", () => {
+    expect(computeAutoTarget(focusSpec, steadyPercussive, 1)).toBeLessThanOrEqual(0.85);
+  });
+
+  it("stays bounded even at maximum Auto strength", () => {
+    expect(computeAutoTarget(focusSpec, steadyPercussive, 2)).toBeLessThanOrEqual(0.95);
+  });
+});

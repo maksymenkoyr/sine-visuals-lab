@@ -37,7 +37,16 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.7,
     // Beat-snap only reads as a snap on music with actual beats to snap to.
-    auto: { pulse: 0.35, attack: 0.25 },
+    // Was { pulse: 0.35, attack: 0.25 } — but `pulse` alone floors near 0.92
+    // on almost any locked-tempo track (it's 60% tempoLock, which saturates
+    // for basically all steady music), so the old weights resolved focus to
+    // ~0.90 and held it there for the whole track, not just a snap. Since
+    // uFocus scales the resting floor below (focusFloor = 0.35 * uFocus),
+    // sitting that close to 1 kept the *resting* state elevated for the
+    // whole track too, not just responding to a specific beat. Lower
+    // weights keep the auto swing real without pinning the floor that high
+    // on ordinary percussive material.
+    auto: { pulse: 0.2, attack: 0.15 },
   },
   {
     key: "breathe",
@@ -191,6 +200,25 @@ const RIPPLE_SPEED = 1.1; // units/sec a ring expands at
 const RIPPLE_WIDTH = 1.6; // gaussian tightness — lower = wider ring
 const RIPPLE_DECAY_PER_SEC = 0.55; // lower = the ring lives longer and travels farther
 
+// Ceiling every focus setting converges to on a full-strength beat (see the
+// focusDrive comment in FRAG). Was 26 before focus setting stopped scaling
+// this directly — lowered alongside that change because a shared ceiling
+// now gets reached far more often (any focus setting, given a strong
+// enough beat, not just uFocus=1), and 26 pushes pow(ridge, sharp) close
+// enough to a step function that the underlying value-noise contour lines
+// read as a banded "pixel ladder" rather than a smooth thin ridge,
+// especially where the domain warp bunches several octaves' contours
+// together near the vortex point.
+const FOCUS_SHARP_MAX = 18;
+
+// How hard the palette's cosine modulation damps where hue phase is
+// changing faster than a pixel can resolve smoothly (see the hueDamp
+// comment in FRAG). Computed on the palette's actual per-channel cosine
+// argument now, not a scalar proxy, so this one constant applies correctly
+// across every palette rather than implicitly assuming uPalC == 1 (true
+// only for "neon" — see src/render/palette.ts's presets).
+const HUE_DAMP_K = 1.2;
+
 // Own accumulator for the domain-warp drift: never reset, only advanced, so
 // dragging the Drift slider mid-run changes the *rate* going forward and
 // never jumps the field (see the file header and flowClock.ts).
@@ -333,14 +361,45 @@ void main() {
   int iterations = int(mix(3.0, 6.0, uQuality));
   float acc = 0.0;
   float amp = 1.0;
-  // No baseline floor: at rest (uBeatPulse near 0) sharp stays near the fog
-  // end regardless of uFocus, so raising the slider widens the swing between
-  // "resting" and "on-beat" instead of shifting the whole range up — a
-  // uniform lift is what made higher settings read as merely thinner lines
-  // rather than a bigger snap.
-  float focusDrive = uFocus * uBeatPulse;
-  float sharp = mix(4.0, 26.0, focusDrive) * (1.0 - bassBulge * 0.25);
+  // Resting floor, scaled by uFocus — this is the scene's original design
+  // (focusDrive = uFocus * (0.35 + 0.65*beatPulse)), reinstated after
+  // dropping it (an earlier fix, "widen the beat swing instead of lifting
+  // the whole range") turned out to cost more than it fixed once the
+  // ceiling-convergence invariant below existed too: together they made
+  // sharp collapse to pure fog between every beat and swing the full
+  // distance to the ceiling on every single one — a much bigger, more
+  // constant swing than the scene ever had, which read as the pattern
+  // dissolving and reforming twice a second rather than a clean snap
+  // ("chaotic decay," "waves moving too much"). A straight linear mix from
+  // this floor to a *fixed* ceiling (not a response curve shaped by
+  // uFocus — that was a later addition this revert also drops, since nothing
+  // asked for it and it's part of what steepened the decay) reconstructs the
+  // original's swing and decay rate almost exactly, while still keeping the
+  // one thing worth keeping from the ceiling-convergence fix: the peak
+  // (uBeatPulse -> 1) always reaches FOCUS_SHARP_MAX regardless of uFocus,
+  // so low focus still isn't capped to a soft peak — only the floor moves
+  // with the slider now, exactly as it did originally.
+  float focusFloor = 0.35 * uFocus;
+  float focusDrive = mix(focusFloor, 1.0, uBeatPulse);
+  float sharp = mix(4.0, ${FOCUS_SHARP_MAX}.0, focusDrive) * (1.0 - bassBulge * 0.25);
   float ridgeGain = sqrt(sharp / 4.0); // a thinner ridge is proportionally brightened, so Focus snaps intensity too, not just width
+  // Warp compresses screen space into q-space, and near its own fold points
+  // that compression runs unbounded — arbitrarily fine screen-space detail,
+  // no antialiasing trick fixes that after the fact. Ordinarily this stays
+  // hidden: the six octaves' ridge contours pass through those fold points
+  // at very different widths and never gang up. A focus snap breaks that —
+  // every octave goes thin at once, so right where warp already folds
+  // several of their contours close together, they all render as hard
+  // near-coincident lines simultaneously, reading as a dense "pixel ladder"
+  // fan. A previous fix eased warpAmt down in sync with focusDrive to
+  // loosen that fold right when sharpness would otherwise expose it
+  // hardest — removed again here: it was the only change in this scene's
+  // history that moves ridge *positions* (not just their thinness or
+  // brightness), so the warp field was physically reshaping on every beat,
+  // which is real, newly-introduced motion. It also didn't demonstrably
+  // reduce the ladder it was added for (see that round's own verification
+  // notes) — not worth the added motion for an unproven benefit. warpAmt
+  // is back to depending only on the music, not on the beat snap itself.
   float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7);
   for (int i = 0; i < 6; i++) {
     if (i >= iterations) break;
@@ -352,7 +411,17 @@ void main() {
     ) * warpAmt;
     float v = noise(q * 2.3 + flow * (1.0 + fi * 0.2));
     float ridge = 1.0 - abs(v * 2.0 - 1.0);
-    acc += amp * (0.5 + band * 0.8) * pow(ridge, sharp) * ridgeGain;
+    // Anti-alias the ridge against its own screen-space footprint. pow()
+    // has no concept of pixel size, so whenever the true line width (which
+    // shrinks as sharp climbs) drops below what a pixel's worth of noise
+    // change (fwidth(v)) can resolve, the rasterizer can only stair-step
+    // between "in" and "out" — the "pixel ladder" artifact, worst right
+    // when uFocus slams sharp up fast on a beat. Capping the exponent used
+    // here (never the uniform "sharp" itself, so ridgeGain's brightness
+    // still tracks the real, unclamped snap) keeps the rendered line at
+    // least ~1px wide regardless of how fast focusDrive moves.
+    float aaSharp = min(sharp, 0.3 / max(fwidth(v), 1e-4));
+    acc += amp * (0.5 + band * 0.8) * pow(ridge, aaSharp) * ridgeGain;
     amp *= 0.6;
   }
 
@@ -368,7 +437,34 @@ void main() {
   acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * uBeatPulse * 1.5 + ring * 0.8
        + dropDrive * 0.5 + dropFlash * 1.2;
   acc = max(0.0, acc - 0.08); // dark water floor, so filaments read as bright threads
-  vec3 col = palette(acc * 0.3 + uTime * 0.02 - bassBulge * 0.15, uPalA, uPalB, uPalC, uPalD) * acc;
+  // Hue phase rides brightness (a ridge crest tints differently than the
+  // dim water around it) through a cosine, which wraps through its full
+  // hue cycle for roughly a unit change of phase. Raw acc can swing several
+  // units within a couple of pixels right at a sharp ridge edge — most of
+  // all exactly on a beat, when ridgeGain is also elevated — and cycling
+  // through hues that fast across so few pixels is what actually read as a
+  // rainbow "pixel ladder" tracing every ridge (not luminance banding —
+  // lowering sharp's own ceiling barely touched it, which is what ruled
+  // luminance out). Clamping huePhase's own range would have killed the
+  // fringing too, but it also flattened the deliberate hue spread between
+  // dim water and bright crests everywhere, not just at the hard edges.
+  // Instead, damp the palette's cosine *modulation* — never its average
+  // color — by how fast huePhase is moving per pixel (fwidth): a slowly
+  // drifting phase (ridge interiors, open water) keeps its full designed
+  // color swing, while a phase that's trying to wrap within a pixel or two
+  // fades toward the average color instead of aliasing through the wrap.
+  //
+  // The damp is measured on the palette's actual per-channel cosine
+  // argument (hueArg = 2π(uPalC·huePhase + uPalD)), not on huePhase alone —
+  // uPalC varies per channel and per palette ("neon" is [1,1,1], but "acid"
+  // is [1.2, 0.9, 0.6] and "fire" is [1.0, 0.7, 0.4]), so a palette's
+  // fastest channel wraps sooner than a shared scalar constant can account
+  // for. fwidth/exp are componentwise on vec3 in GLSL ES 3.00, so each
+  // channel damps on its own actual wrap rate.
+  float huePhase = acc * 0.3 + uTime * 0.02 - bassBulge * 0.15;
+  vec3 hueArg = 6.28318 * (uPalC * huePhase + uPalD);
+  vec3 hueDamp = exp(-${HUE_DAMP_K.toFixed(2)} * fwidth(hueArg) * fwidth(hueArg));
+  vec3 col = (uPalA + uPalB * cos(hueArg) * hueDamp) * acc;
   col = col / (1.0 + col); // tonemap — the shader had no ceiling before, so bright hits clipped flat
 
   outColor = vec4(col, 1.0);

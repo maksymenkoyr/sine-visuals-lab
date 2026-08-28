@@ -11,7 +11,12 @@ const MIN_QUALITY = 0.1;
 
 const EWMA_ALPHA = 0.1;
 const OVER_BUDGET_MULT = 1.25;
-const UNDER_BUDGET_MULT = 1.05;
+// 1.05 gave less headroom above a healthy budget than ordinary rAF jitter
+// provides, so the EWMA never settled inside it for long enough to
+// accumulate a full recovery streak — quality that had stepped down
+// essentially never stepped back up within a session. 1.12 leaves an
+// 1.12-1.25 deadband that a genuinely comfortable stretch can sit inside.
+const UNDER_BUDGET_MULT = 1.12;
 // Recovery is deliberately far more cautious than the drop: a device that
 // just throttled shouldn't get its quality bumped back the moment one
 // comfortable stretch shows up.
@@ -22,6 +27,29 @@ const STEP_UP_FRAMES = 180;
 // step down immediately looks "comfortable" (frame time just dropped) and
 // triggers a step back up, oscillating every frame.
 const COOLDOWN_MS = 2000;
+
+// Any single measured gap beyond this is off-scale for a closed-loop
+// stepper: it can't distinguish 4x over budget from 400x, the corrective
+// action is identical either way, and letting a 400x sample straight into a
+// ten-frame-memory EWMA poisons it for dozens of frames afterward. This is
+// also what keeps a stretch where nothing was rendering (the gallery, a
+// backgrounded tab, a scene switch — recordFrame simply isn't called during
+// any of those) from arriving as one multi-second "frame" and forcing an
+// immediate downgrade the moment rendering resumes.
+const MAX_SAMPLE_MULT = 4;
+
+// A render can only land on a display refresh, so the interval it actually
+// achieves is quantized to whole vsyncs — a 144Hz panel capped at 60fps
+// renders every 3rd tick (~20.8ms), a 75Hz one every 2nd (~26.7ms). Neither
+// is the GPU struggling, but both would read as over budget against a flat
+// 16.7ms target (the 144Hz case lands almost exactly on
+// targetFrameMs * OVER_BUDGET_MULT, decided by float noise). Budgeting
+// against the fastest interval this session has actually achieved — instead
+// of the nominal cap — accounts for that quantization without just
+// widening OVER_BUDGET_MULT itself (which would also blunt real-overload
+// detection). Bounded, so a device that has simply never been fast can't
+// excuse its own slowness into never stepping down.
+const MAX_ACHIEVABLE_MULT = 1.5;
 
 export interface QualityGovernor {
   /** Call once per *rendered* frame — i.e. only on ticks that actually
@@ -55,6 +83,9 @@ export function createQualityGovernor(tier: TierSettings, targetFrameMs: number)
   let overStreak = 0;
   let underStreak = 0;
   let cooldownUntilMs = 0;
+  // Fastest interval actually observed this session — see
+  // MAX_ACHIEVABLE_MULT above for why this replaces a flat targetFrameMs.
+  let fastestMs = Infinity;
 
   function applyLevel(): void {
     const f = QUALITY_STEPS[level];
@@ -70,11 +101,13 @@ export function createQualityGovernor(tier: TierSettings, targetFrameMs: number)
 
     recordFrame(nowMs: number): void {
       if (lastMs !== null) {
-        const dtMs = Math.max(0, nowMs - lastMs);
+        const dtMs = Math.min(targetFrameMs * MAX_SAMPLE_MULT, Math.max(0, nowMs - lastMs));
         ewmaMs += (dtMs - ewmaMs) * EWMA_ALPHA;
+        fastestMs = Math.min(fastestMs, dtMs);
+        const budgetMs = Math.min(targetFrameMs * MAX_ACHIEVABLE_MULT, Math.max(targetFrameMs, fastestMs));
 
         if (nowMs >= cooldownUntilMs) {
-          if (ewmaMs > targetFrameMs * OVER_BUDGET_MULT) {
+          if (ewmaMs > budgetMs * OVER_BUDGET_MULT) {
             overStreak++;
             underStreak = 0;
             if (overStreak >= STEP_DOWN_FRAMES && level < QUALITY_STEPS.length - 1) {
@@ -83,7 +116,7 @@ export function createQualityGovernor(tier: TierSettings, targetFrameMs: number)
               overStreak = 0;
               cooldownUntilMs = nowMs + COOLDOWN_MS;
             }
-          } else if (ewmaMs < targetFrameMs * UNDER_BUDGET_MULT) {
+          } else if (ewmaMs < budgetMs * UNDER_BUDGET_MULT) {
             underStreak++;
             overStreak = 0;
             if (underStreak >= STEP_UP_FRAMES && level > 0) {

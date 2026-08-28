@@ -104,4 +104,92 @@ describe("createQualityGovernor", () => {
     expect(tier.raymarchSteps).toBeGreaterThan(0);
     expect(tier.quality).toBeGreaterThan(0);
   });
+
+  // Regression coverage for the false-downgrade bug: a render-rate cap with
+  // no gate tolerance turned ordinary rAF jitter on a healthy 60Hz display
+  // into a stream of "skipped frame -> next frame reads 2x slower" samples,
+  // which the old flat targetFrameMs budget misread as sustained overload.
+  // framePace.ts's gate tolerance is what stops the skips from happening in
+  // the first place; these tests cover the governor's own second line of
+  // defense — budgeting against the fastest interval actually achieved,
+  // rather than a flat target — in case a skip (or any other jitter source)
+  // still occasionally slips through.
+
+  it("a 60Hz cadence with ordinary rAF jitter never downgrades", () => {
+    const tier = baseline();
+    const gov = createQualityGovernor(tier, TARGET_MS);
+    let t = 0;
+    // Deterministic pseudo-random jitter in [-3%, +3%] — small LCG so the
+    // sequence is reproducible without pulling in a random source.
+    let seed = 1;
+    for (let i = 0; i < 600; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      const jitter = (seed / 0x7fffffff) * 0.06 - 0.03;
+      t += TARGET_MS * (1 + jitter);
+      gov.recordFrame(t);
+    }
+    expect(gov.level).toBe(0);
+  });
+
+  it("a vsync-quantized cadence from a faster panel is not mistaken for load", () => {
+    // 144Hz capped at 60fps renders every 3rd vsync (~1.25x target); 75Hz
+    // renders every 2nd (~1.6x target). Neither is the GPU struggling.
+    for (const mult of [1.25, 1.6]) {
+      const tier = baseline();
+      const gov = createQualityGovernor(tier, TARGET_MS);
+      let t = 0;
+      for (let i = 0; i < 600; i++) {
+        t += TARGET_MS * mult;
+        gov.recordFrame(t);
+      }
+      expect(gov.level).toBe(0);
+    }
+  });
+
+  it("a multi-second gap with nothing rendering doesn't force a downgrade", () => {
+    const tier = baseline();
+    const gov = createQualityGovernor(tier, TARGET_MS);
+    let t = 0;
+    for (let i = 0; i < 300; i++) {
+      t += TARGET_MS;
+      gov.recordFrame(t);
+    }
+    t += 5000; // e.g. a gallery<->viz round trip, or a backgrounded tab
+    gov.recordFrame(t);
+    for (let i = 0; i < 300; i++) {
+      t += TARGET_MS;
+      gov.recordFrame(t);
+    }
+    expect(gov.level).toBe(0);
+  });
+
+  it("a single pathological frame doesn't downgrade", () => {
+    const tier = baseline();
+    const gov = createQualityGovernor(tier, TARGET_MS);
+    let t = 0;
+    for (let i = 0; i < 300; i++) {
+      t += TARGET_MS;
+      gov.recordFrame(t);
+    }
+    t += 400; // one genuinely slow frame (GC pause, tab-switch jank, ...)
+    gov.recordFrame(t);
+    for (let i = 0; i < 300; i++) {
+      t += TARGET_MS;
+      gov.recordFrame(t);
+    }
+    expect(gov.level).toBe(0);
+  });
+
+  it("a device uniformly 2.5x over budget still steps down", () => {
+    // Guards against the achieved-interval budget (MAX_ACHIEVABLE_MULT)
+    // becoming a blanket excuse — real, sustained overload must still trip.
+    const tier = baseline();
+    const gov = createQualityGovernor(tier, TARGET_MS);
+    let t = 0;
+    for (let i = 0; i < 200; i++) {
+      t += TARGET_MS * 2.5;
+      gov.recordFrame(t);
+    }
+    expect(gov.level).toBeGreaterThan(0);
+  });
 });

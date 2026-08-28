@@ -6,6 +6,7 @@ import { getPalette, type Palette } from "./render/palette.ts";
 import { createAnimClock } from "./render/animClock.ts";
 import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
+import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
 
@@ -30,17 +31,10 @@ let live = false;
 const animClock = createAnimClock();
 let lastRafMs = 0;
 
-/** See app.ts's identical comment — caps scene.render()'s rate independently
- *  of rAF; a TV panel gets no benefit from raymarching faster than it can
- *  actually update. */
-const RENDER_FPS_CAP = 60;
-const RENDER_FPS_CAP_FLOOR = 30;
+// Render-rate cap and its jitter-tolerant gate live in framePace.ts (shared
+// with app.ts) — see that file for why the gate needs a tolerance at all.
 let lastRenderMs = 0;
 let governor: QualityGovernor | null = null;
-
-function targetFrameIntervalMs(): number {
-  return 1000 / (tier.tier === "floor" ? RENDER_FPS_CAP_FLOOR : RENDER_FPS_CAP);
-}
 
 function availableScenes(): Scene[] {
   return listScenes().filter((s) => tierAllows(s, tier.tier));
@@ -75,7 +69,7 @@ async function main(): Promise<void> {
   tier = tierSettings(await detectTier());
   sceneCtx = { gl, tier };
   if (!tierAllows(scene, tier.tier)) scene = availableScenes()[0] ?? scene;
-  governor = createQualityGovernor(tier, targetFrameIntervalMs());
+  governor = createQualityGovernor(tier, targetFrameIntervalMs(tier.tier));
   scene.init(sceneCtx);
 
   const code = await createRoomCode();
@@ -139,7 +133,7 @@ async function main(): Promise<void> {
     const anim = animClock.advance(dtSec, frame);
     advanceAutoTune(dtSec, anim.profile);
 
-    if (nowRafMs - lastRenderMs < targetFrameIntervalMs()) return;
+    if (!shouldRenderFrame(nowRafMs, lastRenderMs, targetFrameIntervalMs(tier.tier))) return;
     lastRenderMs = nowRafMs;
 
     const resized = resizeCanvasToDisplaySize(canvas, tier.renderScale);

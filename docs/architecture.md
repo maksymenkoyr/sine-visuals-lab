@@ -62,5 +62,6 @@ app.ts` drives `AnimFrame` straight from its own local `FeatureFrame`s.
 
 `src/render/tier.ts` (`detectTier`) picks a quality tier once at startup; `src/
 render/governor.ts` (the quality governor) can step it down at runtime under
-sustained frame-time pressure. A scene's `minTier` (on the `Scene` interface)
+sustained frame-time pressure, judged against the render-rate cap that `src/
+render/framePace.ts` owns. A scene's `minTier` (on the `Scene` interface)
 opts it out of running below a given tier at all.
