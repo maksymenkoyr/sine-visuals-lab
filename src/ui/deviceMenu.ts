@@ -146,6 +146,11 @@ export interface DeviceMenuDeps {
   onSceneAutoToggle: (sceneId: string, on: boolean) => void;
   getAutoStrength: () => number;
   onAutoStrengthChange: (value: number) => void;
+  /** Global per-band adaptive-normalization switch — see src/audio/autoGain.ts.
+   *  Off (the default) falls back to a fixed mapping against the analyser's
+   *  own dB window, matching the spectrum strip's raw feed. */
+  getAutoGainEnabled: () => boolean;
+  onAutoGainChange: (value: boolean) => void;
   /** The button that opens this menu — excluded from the tap-outside-to-close
    *  check, and ringed (aria-pressed) while the panel is open. */
   toggleButton: HTMLElement;
@@ -1058,6 +1063,27 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function syncInputRows(): void {
     for (const { row, getManual } of inputRows) row.sync(getManual);
   }
+
+  // Auto-gain: the per-band adaptive normalization in features.ts. Off (the
+  // default) shows the mic's real levels — bass louder than treble, like real
+  // music — which the adaptive path otherwise flattens by re-normalizing each
+  // band to its own recent range; on converges different mics/rooms toward
+  // the same look at the cost of that balance, and clamps a Bands boost
+  // against an already-full band. Sits first in this card since it changes
+  // what the three rows below it are even shaping. Global per device, like
+  // Bands' crossover (getBandSplit), so it's deliberately left out of this
+  // card's own Reset chip below — that chip resets per-scene taste
+  // (Sensitivity/Acceleration/Smoothing), not a device-wide input preference.
+  const autoGainRow = createToggleRow({
+    label: "Auto-gain",
+    accent: INPUT_GREEN,
+    defaultValue: 0,
+    description:
+      "Rescales each band to fill the display. Off shows the mic's real levels; on flattens bass-vs-treble balance but converges different mics/rooms toward the same look.",
+    get: () => (deps.getAutoGainEnabled() ? 1 : 0),
+    set: (value) => deps.onAutoGainChange(value >= 0.5),
+  });
+
   const inputCard = createCard({
     title: "Input",
     accent: INPUT_GREEN,
@@ -1072,7 +1098,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
   markBlock(inputCard.title);
   inputCard.el.style.cssText += inputCardWashStyle;
-  inputCard.body.append(inputRows[0].row.el, spacer(), inputRows[1].row.el, spacer(), inputRows[2].row.el);
+  inputCard.body.append(
+    autoGainRow,
+    spacer(),
+    inputRows[0].row.el,
+    spacer(),
+    inputRows[1].row.el,
+    spacer(),
+    inputRows[2].row.el,
+  );
 
   // Scene: per-scene look knobs (e.g. Caustics' focus/breathe/ripple/flash).
   // Rebuilt on every open() since the set of rows depends on which scene is

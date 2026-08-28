@@ -23,6 +23,7 @@ import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
+import { isAutoGainEnabled, setAutoGainEnabled } from "./audio/autoGain.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
 import { applyBandGains, getBandGain, getBandGains, resetBandGains, setBandGain } from "./audio/bandGains.ts";
 import {
@@ -347,6 +348,8 @@ function wireDeviceMenu(): void {
       ),
     getAutoStrength: () => getAutoStrength(),
     onAutoStrengthChange: (value) => setAutoStrength(value),
+    getAutoGainEnabled: () => isAutoGainEnabled(),
+    onAutoGainChange: (value) => setAutoGainEnabled(value),
     toggleButton: menuBtn,
   });
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
@@ -624,7 +627,7 @@ function currentVisual(): FeatureFrame | null {
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
-    return extractor.update(dbBands, now);
+    return extractor.update(dbBands, now, isAutoGainEnabled());
   }
 
   if (mode === "host") {
@@ -635,7 +638,7 @@ function currentVisual(): FeatureFrame | null {
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
-    const f = extractor.update(dbBands, now);
+    const f = extractor.update(dbBands, now, isAutoGainEnabled());
     hostConn.sendFrame(f);
     return sampleToVisual(hostConn.sample());
   }
