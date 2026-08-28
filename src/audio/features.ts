@@ -45,11 +45,39 @@ const FLUX_THRESHOLD_MULT = 1.6;
 const FLUX_THRESHOLD_MARGIN = 0.03;
 const ONSET_REFRACTORY_SEC = 0.1; // ~600 BPM ceiling, prevents double-triggers
 
-// BPM estimation from recent inter-onset intervals.
-const MAX_ONSET_HISTORY = 12;
+// BPM estimation — a comb over the gaps between every pair of recent onsets
+// (see registerOnset). Candidate periods step through the tempo window;
+// COMB_TOL_SEC is how far off a whole number of beats a gap may land and
+// still count for a candidate — in seconds, not beats, because onset
+// times are quantised to frames and the same jitter must not cost a fast
+// tempo more credibility than a slow one (in beats it did, and 170bpm
+// lost to its half). A gap of k beats votes with weight 1/k:
+// the beat-to-beat gap is the fundamental evidence, and a fast candidate
+// that only fits the true gaps as its 2nd/3rd multiples (a sub-harmonic
+// grid, e.g. a click plus a loud echo a third of a beat later) must not
+// out-vote the tempo whose single beat is actually being hit.
+// Onsets are kept by age, not count: a mic's noise floor fires spurious
+// onsets between real hits (the adaptive window collapses in near-silence
+// and every wobble clears the threshold), and a fixed count of the most
+// recent onsets would then hold only a couple of real beats. Each onset
+// carries a weight — how far its flux cleared the threshold, capped — so
+// pairs of weak noise onsets barely vote against pairs of real hits.
+const ONSET_WINDOW_SEC = 6;
+const MAX_ONSETS = 48; // hard cap for the O(n²) pair walk
+const ONSET_WEIGHT_CAP = 4;
+const MAX_PAIR_GAP_SEC = 4;
 const BPM_MIN = 70;
 const BPM_MAX = 180;
-const IOI_BUCKET_SEC = 0.02;
+const PERIOD_STEP_SEC = 0.005;
+const COMB_TOL_SEC = 0.05; // ~one and a half frames at 30fps
+// Tighter for the final beat-length measurement than for picking the
+// winner: a slightly-off onset still helps choose the tempo, but
+// averaging it in would shift the number shown.
+const REFINE_TOL_SEC = 0.025;
+// A rival tempo must out-score the current one by this factor to replace
+// it — without it, two near-equal candidates (a tempo and something close
+// to a simple ratio of it) can trade places on every onset.
+const TEMPO_SWITCH_MARGIN = 1.25;
 
 // getFloatFrequencyData returns -Infinity for a bin with exactly zero
 // energy (true silence) — it is NOT clamped by the analyser's
@@ -74,19 +102,6 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
-/**
- * Fold a raw inter-onset interval into the [BPM_MIN, BPM_MAX] window by
- * repeatedly doubling/halving — a detector firing on every other beat (or
- * twice per beat) still yields the right tempo class.
- */
-function intervalToBpmBucket(intervalSec: number): number | null {
-  if (intervalSec <= 0) return null;
-  let bpm = 60 / intervalSec;
-  while (bpm < BPM_MIN) bpm *= 2;
-  while (bpm > BPM_MAX) bpm /= 2;
-  return bpm;
-}
-
 export class FeatureExtractor {
   private floor = new Float32Array(NUM_BANDS).fill(-100);
   private peak = new Float32Array(NUM_BANDS).fill(-40);
@@ -103,7 +118,7 @@ export class FeatureExtractor {
   private fluxBaseline = 0;
   private lastTime: number | null = null;
   private lastOnsetTime = -Infinity;
-  private onsetTimes: number[] = [];
+  private onsets: { time: number; weight: number }[] = [];
   private bpm = 0;
   private lastBeatTime = 0;
 
@@ -125,12 +140,12 @@ export class FeatureExtractor {
 
     const bands = new Float32Array(NUM_BANDS);
     let flux = 0;
-    let rawDbSum = 0;
+    let rawPowSum = 0;
     const fixedSpan = ANALYSER_MAX_DB - ANALYSER_MIN_DB;
 
     for (let b = 0; b < NUM_BANDS; b++) {
       const db = sanitizeDb(rawBandsDb[b]);
-      rawDbSum += db;
+      rawPowSum += Math.pow(10, db / 10);
 
       // Leaky min/max adapts the [floor, peak] window to this room/mic. Kept
       // running even with autoGain off, since onset/BPM detection below
@@ -167,7 +182,7 @@ export class FeatureExtractor {
 
     if (beat) {
       this.lastOnsetTime = time;
-      this.registerOnset(time);
+      this.registerOnset(time, flux / threshold);
     }
 
     let energy = 0;
@@ -176,38 +191,95 @@ export class FeatureExtractor {
 
     const beatPhase = this.bpm > 0 ? (((time - this.lastBeatTime) / (60 / this.bpm)) % 1 + 1) % 1 : 0;
 
-    const meanRawDb = rawDbSum / NUM_BANDS;
+    // Averaged as power, then back to dB — not a mean of the dB values. Most
+    // of the 24 bands sit at the noise floor for any ordinary sound, and a
+    // mean of dB let those drag the result down to LEVEL_DB_FLOOR, so level
+    // read ~0 for everything short of a loud broadband roar. Power averaging
+    // lets the loud bands carry it, which is what loudness is.
+    const meanRawDb = 10 * Math.log10(rawPowSum / NUM_BANDS);
     const level = clamp01((meanRawDb - LEVEL_DB_FLOOR) / (LEVEL_DB_CEIL - LEVEL_DB_FLOOR));
 
     return { time, bands, energy, beat, bpm: this.bpm, beatPhase, level };
   }
 
-  private registerOnset(time: number): void {
+  /** @param strength flux over the firing threshold — 1 is a bare trigger. */
+  private registerOnset(time: number, strength: number): void {
     this.lastBeatTime = time;
-    this.onsetTimes.push(time);
-    if (this.onsetTimes.length > MAX_ONSET_HISTORY) this.onsetTimes.shift();
-    if (this.onsetTimes.length < 3) return;
+    this.onsets.push({ time, weight: Math.min(ONSET_WEIGHT_CAP, Math.max(1, strength)) });
+    while (this.onsets.length > MAX_ONSETS || this.onsets[0].time < time - ONSET_WINDOW_SEC) this.onsets.shift();
+    if (this.onsets.length < 3) return;
 
-    // Bucket recent inter-onset intervals (tempo-folded) and take the mode —
-    // robust to a few spurious/missed onsets without needing full autocorrelation.
-    const buckets = new Map<number, number>();
-    for (let i = 1; i < this.onsetTimes.length; i++) {
-      const bpm = intervalToBpmBucket(this.onsetTimes[i] - this.onsetTimes[i - 1]);
-      if (bpm === null) continue;
-      const key = Math.round(60 / bpm / IOI_BUCKET_SEC);
-      buckets.set(key, (buckets.get(key) ?? 0) + 1);
-    }
-    let bestKey = 0;
-    let bestCount = 0;
-    for (const [key, count] of buckets) {
-      if (count > bestCount) {
-        bestCount = count;
-        bestKey = key;
+    // The gap between every pair of recent onsets, then a comb: each
+    // candidate period is scored by how many gaps land on a whole number of
+    // its beats. This is what survives a messy detector — extra onsets (a
+    // click's tail firing just past the refractory) and missed ones only
+    // add gaps that fit no candidate well, while the true spacing and all
+    // its multiples keep fitting the true period. Two earlier schemes
+    // failed on a plain 100bpm metronome: the mode of adjacent gaps (the
+    // tail made them alternate 0.14s/0.46s, and 0.46s is 130bpm), then the
+    // mode of all pair gaps folded into range by halving — folding is only
+    // right for power-of-two multiples, so three-beat gaps voted for 133
+    // and it read 115.
+    const onsets = this.onsets;
+    const n = onsets.length;
+    // A pair's vote is worth the weaker of its two onsets: a real hit
+    // paired with a noise blip is still a noise gap.
+    const gaps: number[] = [];
+    const weights: number[] = [];
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const gap = onsets[j].time - onsets[i].time;
+        if (gap > MAX_PAIR_GAP_SEC) break; // ascending, so later j are further still
+        gaps.push(gap);
+        weights.push(Math.min(onsets[i].weight, onsets[j].weight));
       }
     }
-    if (bestKey > 0) {
-      const intervalSec = bestKey * IOI_BUCKET_SEC;
-      this.bpm = 60 / intervalSec;
+
+    const combScore = (period: number): number => {
+      let score = 0;
+      for (let g = 0; g < gaps.length; g++) {
+        const k = Math.round(gaps[g] / period);
+        if (k < 1) continue;
+        const err = Math.abs(gaps[g] - k * period);
+        if (err >= COMB_TOL_SEC) continue;
+        score += ((1 - err / COMB_TOL_SEC) * weights[g]) / k;
+      }
+      return score;
+    };
+
+    const periodMin = 60 / BPM_MAX;
+    const periodMax = 60 / BPM_MIN;
+    let bestPeriod = 0;
+    let bestScore = 0;
+    for (let period = periodMin; period <= periodMax + 1e-9; period += PERIOD_STEP_SEC) {
+      const score = combScore(period);
+      if (score > bestScore) {
+        bestScore = score;
+        bestPeriod = period;
+      }
     }
+    if (bestPeriod === 0) return;
+
+    // Hysteresis: stay on the current tempo unless the rival clearly wins.
+    // The refinement below still follows genuine drift, since it re-measures
+    // the beat length from whatever gaps fit.
+    if (this.bpm > 0) {
+      const current = 60 / this.bpm;
+      if (current >= periodMin && current <= periodMax && bestScore < combScore(current) * TEMPO_SWITCH_MARGIN) {
+        bestPeriod = current;
+      }
+    }
+
+    // Refine past the candidate grid: the mean beat length implied by every
+    // gap that fits the winner.
+    let sum = 0;
+    let total = 0;
+    for (let g = 0; g < gaps.length; g++) {
+      const k = Math.round(gaps[g] / bestPeriod);
+      if (k < 1 || Math.abs(gaps[g] - k * bestPeriod) >= REFINE_TOL_SEC) continue;
+      sum += (gaps[g] / k) * weights[g];
+      total += weights[g];
+    }
+    if (total > 0) this.bpm = 60 / (sum / total);
   }
 }

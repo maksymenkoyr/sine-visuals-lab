@@ -41,7 +41,8 @@ export interface AnimFrame {
   sectionIntensity: number;
   dropPulse: number;
   dropOnset: boolean;
-  /** Six-dial description of the track's character — see musicProfile.ts.
+  /** The dials in MUSIC_DIALS' description of the track's character — see
+   *  musicProfile.ts.
    *  What autoTune.ts resolves scene settings against; also the hook future
    *  VJ-autopilot features (auto palette, auto scene switching) read. */
   profile: DialValues;

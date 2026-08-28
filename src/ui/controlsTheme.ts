@@ -45,6 +45,10 @@ export const STRIP_HIGH = "#f6b15b";
 export const LIVE_DOT = "#83dc97";
 /** Rule under the spectrum card header. */
 export const HAIRLINE = "#efb062";
+/** The warning ramp: the Input card's level wash as it nears clipping, and
+ *  the meters' clip/drop flashes (src/ui/audioMeters.ts). yellow-500 / red-500. */
+export const HOT_YELLOW = "#eab308";
+export const HOT_RED = "#ef4444";
 
 export const FONT_LABEL = "'Chakra Petch', system-ui, sans-serif";
 export const FONT_MONO = "'Share Tech Mono', ui-monospace, monospace";
@@ -95,7 +99,16 @@ const stylesheet = `
   color: #fff; font-family: ${FONT_LABEL};
 }
 .vc-root.vc-open { display: flex; }
-.vc-spectrum-col { width: 377px; flex: none; }
+/* The spectrum card stays put; the meters (src/ui/audioMeters.ts) scroll
+ * in their own strip beneath it, the way the controls column scrolls. */
+.vc-spectrum-col {
+  width: 377px; flex: none; display: flex; flex-direction: column; gap: 4px;
+  max-height: calc(100vh - 74px);
+}
+.vc-spectrum-col > * { flex-shrink: 0; }
+.vc-spectrum-col > .vc-meters { flex-shrink: 1; min-height: 0; overflow-y: auto; }
+.vc-meters { display: flex; flex-direction: column; gap: 4px; }
+.vc-meters > * { flex-shrink: 0; }
 .vc-controls-col {
   width: 314px; flex: none; display: flex; flex-direction: column; gap: 4px;
   max-height: calc(100vh - 74px); overflow-y: auto;
@@ -104,8 +117,14 @@ const stylesheet = `
 .vc-controls-col > * { flex-shrink: 0; }
 @media (max-width: ${STACK_BELOW_PX}px) {
   .vc-root { flex-direction: column; width: min(320px, 88vw); overflow-y: auto; }
-  .vc-root > * { flex-shrink: 0; }
-  .vc-spectrum-col, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
+  .vc-root > *, .vc-spectrum-col > * { flex-shrink: 0; }
+  /* Dissolve the spectrum column so its card and the meters become root
+   * items in their own right: spectrum, then the controls, then the meters
+   * last — a phone shouldn't have to scroll past a screen of readouts to
+   * reach a slider. */
+  .vc-spectrum-col { display: contents; }
+  .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
+  .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
 }
 
 .vc-scroll { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
@@ -137,6 +156,10 @@ const stylesheet = `
   box-shadow: 0 0 0 1px transparent;
   transition: box-shadow 0.18s ease, background-color 0.18s ease;
 }
+/* A meter row (audioMeters.ts) has no control to focus, so the row itself
+ * is focusable — a tap unfolds its hint the way tapping a slider does. The
+ * hover/focus ring below is the focus indicator; no second outline. */
+.vc-row[tabindex]:focus { outline: none; }
 .vc-row:hover, .vc-row:focus-within {
   background-color: color-mix(in srgb, var(--vc-accent) 6%, transparent);
   box-shadow:

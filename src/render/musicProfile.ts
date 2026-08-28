@@ -1,8 +1,8 @@
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 
 /**
- * Describes *the track*, not the current instant — seven continuous [0,1]
- * dials, each easing toward its latest measurement over a long (multi-
+ * Describes *the track*, not the current instant — the continuous [0,1]
+ * dials in MUSIC_DIALS, each easing toward its latest measurement over a long (multi-
  * second to half-minute) window so a single loud drum fill or one quiet bar
  * doesn't masquerade as a change in what's playing. Every dial starts at,
  * and holds at while there's nothing to measure, NEUTRAL (0.5) — so cold
@@ -35,6 +35,40 @@ export const MUSIC_DIALS: readonly MusicDial[] = [
 ];
 
 export type DialValues = Record<MusicDial, number>;
+
+/** Plain-language name and one-line explanation per dial, for the meters in
+ *  src/ui/audioMeters.ts. Keyed by MusicDial so a new dial can't ship
+ *  without its copy. The derivations these describe are commented below. */
+export const DIAL_LABELS: Readonly<Record<MusicDial, { label: string; description: string }>> = {
+  pulse: {
+    label: "Pulse",
+    description: "How steadily the beat is hitting. These dials are what Auto listens to.",
+  },
+  tempo: {
+    label: "Tempo",
+    description: "Slow to fast on a dance-music scale — the middle is house tempo.",
+  },
+  brightness: {
+    label: "Brightness",
+    description: "Dark and bassy to bright and airy.",
+  },
+  density: {
+    label: "Density",
+    description: "Sparse and open to wall-of-sound busy.",
+  },
+  dynamics: {
+    label: "Dynamics",
+    description: "Flat and even to big swings between quiet and loud.",
+  },
+  attack: {
+    label: "Attack",
+    description: "Soft swells to sharp hits.",
+  },
+  loudness: {
+    label: "Loudness",
+    description: "How loud the room is right now — the one dial that keeps its last reading through silence.",
+  },
+};
 
 export const NEUTRAL: Readonly<DialValues> = {
   pulse: 0.5,

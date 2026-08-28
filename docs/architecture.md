@@ -36,6 +36,14 @@ the user (or `src/tuning/overrides.ts` in dev) has pinned it manually.
 scene), read by `src/app.ts`, which is the phone/controller/gallery entry
 (`index.html`).
 
+The controls panel's meters (`src/ui/audioMeters.ts`, under the spectrum card
+in `src/ui/deviceMenu.ts`) are the one place that reads outside this pipeline:
+their Scope card is fed by `src/audio/waveformAnalyser.ts` (math in
+`waveform.ts`), which reads time-domain samples straight off this device's own
+mic, entirely separate from
+`FeatureFrame`/`AnimFrame` and never touching the wire in "Phone to TV" below —
+a viewer with no local mic doesn't get that card at all.
+
 ## Phone to TV
 
 `src/tv.ts` is the paired-display entry (`tv.html`). The two devices don't share a

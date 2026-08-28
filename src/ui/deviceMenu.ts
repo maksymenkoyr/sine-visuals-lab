@@ -18,22 +18,38 @@ import { type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { createBandFaders } from "./bandFaders.ts";
+import { createAudioMeters } from "./audioMeters.ts";
+import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
-  FONT_DIGITS,
   FONT_LABEL,
   FONT_MONO,
   GLASS_FILTER,
   HAIRLINE,
+  HOT_RED,
+  HOT_YELLOW,
   INPUT_GREEN,
   LIVE_DOT,
   SCENE_VIOLET,
   ensureControlsStyles,
-  glassCardStyle,
-  scanlineStyle,
   withAlpha,
 } from "./controlsTheme.ts";
+import {
+  chipBtnLitStyle,
+  chipBtnStyle,
+  createCard,
+  createChipButton,
+  digitsStyle,
+  digitsTextStyle,
+  groupHeading,
+  readoutStyle,
+  rowHeadStyle,
+  rowLabelStyle,
+  rowRightStyle,
+  spacer,
+  unitStyle,
+} from "./controlsKit.ts";
 
 /**
  * The controller's controls panel — the "Viz Controls" design.
@@ -42,12 +58,16 @@ import {
  * (scene name, audio source, and the live bars with the band faders drawn
  * over them — see src/ui/bandFaders.ts) beside the controls column, whose
  * cards run Auto strength (with the Auto master block welded to it) → Input
- * → Scene → Palette → a footer strip. Below the breakpoint in
- * controlsTheme.ts the columns stack into one scrolling column. It's
- * corner-docked, not a modal: the whole point is to watch the scene react
- * while you tune it, so it also stays open across palette taps.
+ * → Scene → Palette → a footer strip. Under the Bands card, the read-only
+ * meters (audioMeters.ts) scroll in their own strip. Below the breakpoint
+ * in controlsTheme.ts everything stacks into one scrolling column with the
+ * meters last, so the knobs stay in reach. It's corner-docked, not a modal:
+ * the whole point is to watch the scene react while you tune it, so it
+ * also stays open across palette taps.
  *
- * Row grammar (createControlRow): label · seven-segment readout + unit ·
+ * Row grammar (createControlRow; the meters follow it too, with a meter in
+ * the slider's place — the shared pieces live in controlsKit.ts): label ·
+ * seven-segment readout + unit ·
  * "A" chip · "T" chip · ↺. The A chip *is* the auto indicator — filled when
  * auto owns the value, outlined when the user has taken the row manual,
  * absent when the setting has no auto weights (see autoTune.ts). The T chip
@@ -156,17 +176,20 @@ export interface DeviceMenuDeps {
 export interface DeviceMenu {
   toggle(): void;
   close(): void;
-  /** Fed every frame while in a viz (any may be null: frame/ungained before
-   *  audio is up, rawBands additionally on a mic-less renderer device) —
-   *  drives the Input card's level wash and the spectrum strip's feeds.
-   *  `frame` has the band faders applied; `ungained` is the same frame
-   *  before them (the strip's ghost bars); `pinned` is which bands the gain
-   *  stage clamped (bandGains.ts's pinnedBands). */
+  /** Fed every frame while in a viz (any may be null: frame/ungained/anim
+   *  before audio is up, rawBands/mono additionally on a mic-less renderer
+   *  device) — drives the Input card's level wash, the spectrum strip's
+   *  feeds, and the meters. `frame` has the band faders applied; `ungained`
+   *  is the same frame before them (the strip's ghost bars); `pinned` is
+   *  which bands the gain stage clamped (bandGains.ts's pinnedBands);
+   *  `anim`/`mono` feed the meters (audioMeters.ts). */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
     ungained: FeatureFrame | null,
     pinned: Uint8Array | null,
+    anim: AnimFrame | null,
+    mono: Float32Array | null,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
@@ -175,44 +198,10 @@ export interface DeviceMenu {
 
 // ---- styles --------------------------------------------------------------
 // Layout-level rules (columns, slider, hint reveal, toggle) are class rules in
-// controlsTheme.ts; everything per-element is inline here, in the same
+// controlsTheme.ts; the card and row-head grammar shared with the meters is
+// in controlsKit.ts; everything else per-element is inline here, in the same
 // cssText-constant convention as the rest of src/ui/.
 
-const cardBodyStyle = `position: relative; padding: 10px 12px 12px;`;
-const cardHeaderStyle = `display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px;`;
-const cardTitleStyle = (accent: string) =>
-  `font: 500 10.5px/1 ${FONT_MONO}; letter-spacing: 0.13em; text-transform: uppercase; color: ${accent};`;
-// Small bordered text button — "Reset" in card headers, "RAW" in the
-// spectrum header. Lit variant = currently active.
-const chipBtnStyle = `
-  font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.55);
-  background: transparent; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px;
-  padding: 2.5px 7px; cursor: pointer;
-`;
-const chipBtnLitStyle = `${chipBtnStyle} color: #fff; border-color: rgba(255,255,255,0.5);`;
-
-const rowHeadStyle = `display: flex; align-items: center; justify-content: space-between; gap: 8px;`;
-// Color lives in the .vc-label rule (controlsTheme.ts) so the hover/focus
-// tint can override it — an inline color would win over the stylesheet.
-const rowLabelStyle = `
-  font: 300 14.5px/1.2 ${FONT_LABEL}; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-`;
-const rowRightStyle = `display: flex; align-items: center; gap: 7px; flex-shrink: 0;`;
-const readoutStyle = `display: flex; align-items: baseline; gap: 4px; color: #fff;`;
-// Seven-segment digits; DSEG7 has no letters, so text readouts ("Off"/"On")
-// fall back to the mono face via digitsTextStyle.
-// The transparent stroke draws nothing; it's there to widen the text's ink
-// overflow. DSEG7's ink runs edge to edge (ascent = em, descent = 0), so a
-// digit's top and bottom segments sit flush with the metric box a text swap
-// repaints. On a fractional baseline their antialiased edge row falls just
-// outside that box and survives the swap — a "7" turning into a "1" left a
-// faint hairline of the old top segment above the new digit. Every engine
-// folds text-stroke width into ink overflow, unlike @font-face metric
-// overrides, which WebKit ignores.
-const digitsStyle = `font-family: ${FONT_DIGITS}; font-size: 11.5px; letter-spacing: 1px; -webkit-text-stroke: 1px transparent;`;
-const digitsTextStyle = `font: 400 11px/1 ${FONT_MONO};`;
-const unitStyle = `font: 400 10.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.75);`;
 // "A" chip: filled when auto owns the row, outlined when the user does.
 const autoChipBaseStyle = `
   width: 17px; height: 16px; display: grid; place-items: center; border-radius: 3px;
@@ -232,19 +221,6 @@ const rowResetStyle = `
   font: 400 11px/1 ${FONT_MONO}; color: rgba(255,255,255,0.45); background: none; border: none;
   padding: 0; cursor: pointer; flex-shrink: 0;
 `;
-const rowSpacerStyle = `height: 12px;`;
-// A divider-with-caption between blocks of scene rows — a step down from a
-// card title, not a second one.
-const groupHeadingStyle = `
-  font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
-  color: rgba(255,255,255,0.45); margin: 14px 0 8px; padding-top: 10px;
-  border-top: 1px solid rgba(255,255,255,0.1);
-`;
-const groupHeadingFirstStyle = `
-  font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
-  color: rgba(255,255,255,0.45); margin: 2px 0 8px;
-`;
-
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
 const AUTO_STRENGTH_HINT = "How hard auto pushes every A control";
 
@@ -312,8 +288,6 @@ const footerBtnStyle = `
 // green -> yellow over the next slice, then yellow -> red in the last
 // PEAK_START..1 sliver — a silent "the scene has stopped reacting, you're
 // pinned at max" cue that the flat level wash alone doesn't give.
-const HOT_YELLOW = "#eab308"; // yellow-500
-const HOT_RED = "#ef4444"; // red-500
 const HOT_START = 0.96; // last 4%: green -> yellow
 const PEAK_START = 0.99; // last 1%: yellow -> red
 const WASH_ALPHA = 0x26; // resting fill alpha
@@ -368,46 +342,6 @@ function washColor(level: number): string {
 }
 
 // ---- builders ------------------------------------------------------------
-
-function createChipButton(text: string, title: string, onClick: () => void): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.textContent = text;
-  btn.title = title;
-  btn.style.cssText = chipBtnStyle;
-  btn.addEventListener("click", onClick);
-  return btn;
-}
-
-interface CardSpec {
-  title: string;
-  accent: string;
-  /** Right-hand header slot — a Reset chip, a readout, … */
-  right?: HTMLElement;
-}
-
-/** A glass card: scanline overlay, header row (title + optional right slot),
- *  and a body the caller fills. Returns `title` too, so a caller that's also
- *  a keyboard block (see markBlock) can badge it. */
-function createCard(spec: CardSpec) {
-  const el = document.createElement("div");
-  el.style.cssText = glassCardStyle;
-  const scanlines = document.createElement("div");
-  scanlines.style.cssText = scanlineStyle;
-  const body = document.createElement("div");
-  body.style.cssText = cardBodyStyle;
-
-  const header = document.createElement("div");
-  header.style.cssText = cardHeaderStyle;
-  const title = document.createElement("div");
-  title.textContent = spec.title;
-  title.style.cssText = cardTitleStyle(spec.accent);
-  header.appendChild(title);
-  if (spec.right) header.appendChild(spec.right);
-
-  body.appendChild(header);
-  el.append(scanlines, body);
-  return { el, body, title };
-}
 
 /** Marks a heading as a keyboard block — see the header comment's keyboard
  *  paragraph. Idempotent (safe to call on every render of a heading that's
@@ -836,12 +770,6 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   return el;
 }
 
-function spacer(): HTMLElement {
-  const el = document.createElement("div");
-  el.style.cssText = rowSpacerStyle;
-  return el;
-}
-
 function statusText(status: AudioStatus): string {
   switch (status.source) {
     case "mic":
@@ -878,6 +806,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onChange: (fader, gain) => deps.onBandGainChange(deps.currentSceneId(), fader, gain),
   });
   const spectrumStrip = bandFaders.strip;
+  // The meters beneath the Bands card — see audioMeters.ts.
+  const audioMeters = createAudioMeters();
 
   const spectrumCol = document.createElement("div");
   spectrumCol.className = "vc-spectrum-col";
@@ -897,6 +827,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   bandsHeaderRight.style.cssText = rowRightStyle;
   bandsHeaderRight.append(rawChip, bandsResetChip);
   const bandsCard = createCard({ title: "Bands", accent: BANDS_AMBER, right: bandsHeaderRight });
+  // Named for the stacked layout in controlsTheme.ts, where this card and
+  // the meters strip become root items of their own.
+  bandsCard.el.classList.add("vc-spectrum-card");
   markBlock(bandsCard.title);
 
   // Status line: which scene, whether audio is flowing, and from where.
@@ -935,7 +868,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
 
   bandsCard.body.append(spectrumHeader, hairline, fadersRow);
-  spectrumCol.appendChild(bandsCard.el);
+  spectrumCol.append(bandsCard.el, audioMeters.el);
 
   let lastStatusText = "";
   function refreshSpectrumHeader(): void {
@@ -1194,11 +1127,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (const spec of specs) {
       if (spec.group !== undefined && spec.group !== lastGroup) {
         hasGroups = true;
-        const groupHeading = document.createElement("div");
-        groupHeading.textContent = spec.group;
-        groupHeading.style.cssText = lastGroup === undefined ? groupHeadingFirstStyle : groupHeadingStyle;
-        markBlock(groupHeading);
-        sceneRows.appendChild(groupHeading);
+        const heading = groupHeading(spec.group, lastGroup === undefined);
+        markBlock(heading);
+        sceneRows.appendChild(heading);
       } else if (!first) {
         sceneRows.appendChild(spacer());
       }
@@ -1460,10 +1391,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       rawBands: Float32Array | null,
       ungained: FeatureFrame | null,
       pinned: Uint8Array | null,
+      anim: AnimFrame | null,
+      mono: Float32Array | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
+      audioMeters.update(frame, anim, mono);
       // Raw (pre-sensitivity) energy, so the level wash reflects the actual
       // mic signal regardless of where the sensitivity slider is set.
       const level = frame?.energy ?? 0;
