@@ -29,8 +29,11 @@ const ONSET_REFRACTORY_SEC = 0.1; // ~600 BPM ceiling, prevents double-triggers
 
 // BPM estimation — a comb over the gaps between every pair of recent onsets
 // (see registerOnset). Candidate periods step through the tempo window;
-// COMB_TOL_BEATS is how far off an integer number of beats a gap may land
-// and still count for a candidate. A gap of k beats votes with weight 1/k:
+// COMB_TOL_SEC is how far off a whole number of beats a gap may land and
+// still count for a candidate — in seconds, not beats, because onset
+// times are quantised to frames and the same jitter must not cost a fast
+// tempo more credibility than a slow one (in beats it did, and 170bpm
+// lost to its half). A gap of k beats votes with weight 1/k:
 // the beat-to-beat gap is the fundamental evidence, and a fast candidate
 // that only fits the true gaps as its 2nd/3rd multiples (a sub-harmonic
 // grid, e.g. a click plus a loud echo a third of a beat later) must not
@@ -48,7 +51,11 @@ const MAX_PAIR_GAP_SEC = 4;
 const BPM_MIN = 70;
 const BPM_MAX = 180;
 const PERIOD_STEP_SEC = 0.005;
-const COMB_TOL_BEATS = 0.12;
+const COMB_TOL_SEC = 0.05; // ~one and a half frames at 30fps
+// Tighter for the final beat-length measurement than for picking the
+// winner: a slightly-off onset still helps choose the tempo, but
+// averaging it in would shift the number shown.
+const REFINE_TOL_SEC = 0.025;
 // A rival tempo must out-score the current one by this factor to replace
 // it — without it, two near-equal candidates (a tempo and something close
 // to a simple ratio of it) can trade places on every onset.
@@ -183,12 +190,11 @@ export class FeatureExtractor {
     const combScore = (period: number): number => {
       let score = 0;
       for (let g = 0; g < gaps.length; g++) {
-        const beats = gaps[g] / period;
-        const k = Math.round(beats);
+        const k = Math.round(gaps[g] / period);
         if (k < 1) continue;
-        const err = Math.abs(beats - k);
-        if (err >= COMB_TOL_BEATS) continue;
-        score += ((1 - err / COMB_TOL_BEATS) * weights[g]) / k;
+        const err = Math.abs(gaps[g] - k * period);
+        if (err >= COMB_TOL_SEC) continue;
+        score += ((1 - err / COMB_TOL_SEC) * weights[g]) / k;
       }
       return score;
     };
@@ -221,9 +227,8 @@ export class FeatureExtractor {
     let sum = 0;
     let total = 0;
     for (let g = 0; g < gaps.length; g++) {
-      const beats = gaps[g] / bestPeriod;
-      const k = Math.round(beats);
-      if (k < 1 || Math.abs(beats - k) >= COMB_TOL_BEATS) continue;
+      const k = Math.round(gaps[g] / bestPeriod);
+      if (k < 1 || Math.abs(gaps[g] - k * bestPeriod) >= REFINE_TOL_SEC) continue;
       sum += (gaps[g] / k) * weights[g];
       total += weights[g];
     }

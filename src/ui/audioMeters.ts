@@ -119,10 +119,14 @@ const TEMPO_TITLE =
 // TEMPO_SETTLE_TOL of the window's median, at least TEMPO_SETTLE_SHARE of
 // them). A majority rather than an unbroken run: on a real mic the estimate
 // can blip for an onset or two, and a run that resets on every blip never
-// settles at all. Display-only; nothing downstream reads this.
-const TEMPO_SETTLE_SEC = 2.5;
+// settles at all. Once shown, a value only moves for an agreed value at
+// least TEMPO_HOLD_BPM away — enough to stop 124/125 flicker, small enough
+// that an early reading a couple of bpm off is corrected rather than
+// held. Display-only; nothing downstream reads this.
+const TEMPO_SETTLE_SEC = 1.5;
 const TEMPO_SETTLE_TOL = 0.03;
 const TEMPO_SETTLE_SHARE = 0.6;
+const TEMPO_HOLD_BPM = 2;
 const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
 
 /** Jump an element to `color` with no fade, then re-arm the fade so the
@@ -326,7 +330,7 @@ function createTempoBlock(accent: string) {
       if (agree < samples.length * TEMPO_SETTLE_SHARE) return;
 
       const next = median > 0 ? Math.round(sum / agree) : 0;
-      if (next === shownBpm || (shownBpm > 0 && next > 0 && Math.abs(next - shownBpm) <= tol)) return;
+      if (next === shownBpm || (shownBpm > 0 && next > 0 && Math.abs(next - shownBpm) < TEMPO_HOLD_BPM)) return;
       shownBpm = next;
       digits.textContent = shownBpm > 0 ? String(shownBpm) : "--";
     },
