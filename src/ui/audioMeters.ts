@@ -2,7 +2,7 @@ import type { AnimFrame } from "../render/animClock.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
-import { AUTO_SKY, HOT_RED, INPUT_GREEN } from "./controlsTheme.ts";
+import { AUTO_SKY, BANDS_AMBER, FONT_MONO, HOT_RED, INPUT_GREEN } from "./controlsTheme.ts";
 import {
   createCard,
   digitsStyle,
@@ -27,9 +27,10 @@ import {
  *    — the only way to see features.ts's adaptive floor/peak doing its job,
  *    since its whole point is to make that invisible downstream. (No
  *    low/mid/high here: the spectrum strip already shows them.)
- *  - Rhythm: bpm with a beat dot, the meter being beatClock's tempoLock so an
- *    unlocked guess reads as unconfident rather than as a confident wrong
- *    number; and sectionIntensity with a drop flash.
+ *  - Rhythm: sectionIntensity with a drop flash, and a compact tempo block
+ *    beside it — bpm under a beat dot whose resting tint follows
+ *    beatClock's tempoLock, so an unlocked guess reads as unconfident
+ *    rather than as a confident wrong number.
  *  - Character: one row per entry in MUSIC_DIALS (never a hardcoded list),
  *    each marking NEUTRAL with a tick — what autoTune.ts resolves every "A"
  *    chip against, otherwise invisible. Copy comes from DIAL_LABELS.
@@ -77,7 +78,28 @@ const fillStyle = (accent: string) =>
   `position: absolute; top: 0; left: 0; height: 100%; width: 0; border-radius: 2px; background-color: ${accent}; transition: ${FADE};`;
 const capStyle = `position: absolute; top: -1px; bottom: -1px; width: 1.5px; left: 0; background: #fff; visibility: hidden;`;
 const tickStyle = `position: absolute; top: -2px; bottom: -2px; width: 1px; background: rgba(255,255,255,0.55);`;
-const beatDotStyle = `width: 6px; height: 6px; border-radius: 50%; background-color: rgba(255,255,255,0.25); transition: ${FADE};`;
+// Tempo is a compact block welded beside the Section row — the Auto master
+// block's shape (deviceMenu.ts): a beat dot over the bpm digits. The dot's
+// resting tint brightens with beatClock's tempoLock (an unconfident guess
+// stays dim), and each beat it jumps to a lit colour with a glow and eases
+// back — white on a beat, amber on the first beat of the bar, so the colour
+// says where in the bar you are, not just that something hit.
+const rhythmRowStyle = `display: flex; gap: 14px; align-items: stretch;`;
+const tempoBlockStyle = `
+  width: 74px; flex-shrink: 0; display: grid; place-items: center; text-align: center;
+  border: 1px solid rgba(255,255,255,0.18); border-radius: 3px;
+`;
+const DOT_EASE = "background-color 0.55s ease-out, box-shadow 0.55s ease-out, transform 0.55s ease-out";
+const tempoDotStyle = `
+  width: 9px; height: 9px; border-radius: 50%; margin: 0 auto 5px;
+  background-color: rgba(255,255,255,0.2); box-shadow: 0 0 0 0 transparent;
+  transition: ${DOT_EASE};
+`;
+const tempoDigitsStyle = `${digitsStyle} font-size: 13px; color: #fff; transition: color 0.4s ease-out;`;
+const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
+const BEAT_COLOR = "#fff";
+const DOWNBEAT_COLOR = BANDS_AMBER;
+const TEMPO_TITLE = "Detected tempo. The dot pulses on every beat — amber on the first beat of each bar — and brightens as the tracker gets sure.";
 const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
 
 /** Jump an element to `color` with no fade, then re-arm the fade so the
@@ -168,8 +190,6 @@ function createMeterRow(spec: MeterRowSpec) {
 
   return {
     el,
-    /** Extra head slot, before the readout — the Tempo row's beat dot. */
-    right,
     /** Fraction of the track (null empties it). `dtSec` drives the peak cap's fall. */
     setValue(value: number | null, dtSec: number): void {
       if (flashed) {
@@ -207,6 +227,70 @@ function createMeterRow(spec: MeterRowSpec) {
     },
   };
 }
+function createTempoBlock() {
+  const el = document.createElement("div");
+  el.style.cssText = tempoBlockStyle;
+  el.title = TEMPO_TITLE;
+  const inner = document.createElement("div");
+  const dot = document.createElement("div");
+  dot.style.cssText = tempoDotStyle;
+  const digits = document.createElement("div");
+  digits.style.cssText = tempoDigitsStyle;
+  const caption = document.createElement("div");
+  caption.style.cssText = tempoCaptionStyle;
+  caption.textContent = "BPM";
+  inner.append(dot, digits, caption);
+  el.appendChild(inner);
+
+  let restColor = "rgba(255,255,255,0.2)";
+  let lit = false;
+  let lastText = "";
+  let lastLockStep = -1;
+
+  function settle(): void {
+    dot.style.backgroundColor = restColor;
+    dot.style.boxShadow = "0 0 0 0 transparent";
+    dot.style.transform = "scale(1)";
+  }
+
+  return {
+    el,
+    /** Per frame. `lock` (0..1) sets the resting tint; a lit dot eases back
+     *  to it on the frame after its beat. */
+    update(lock: number, beat: boolean, downbeat: boolean): void {
+      // Quantised so the resting tint isn't rewritten every frame.
+      const step = Math.round(lock * 20);
+      if (step !== lastLockStep) {
+        lastLockStep = step;
+        restColor = `rgba(255,255,255,${(0.2 + 0.5 * (step / 20)).toFixed(3)})`;
+        digits.style.color = `rgba(255,255,255,${(0.45 + 0.55 * (step / 20)).toFixed(3)})`;
+      }
+      if (lit) {
+        settle();
+        lit = false;
+      }
+      if (beat) {
+        // Jump with no easing, then re-arm the easing so the next settle()
+        // fades — same shape as blink(), with glow and size along for the ride.
+        const color = downbeat ? DOWNBEAT_COLOR : BEAT_COLOR;
+        dot.style.transition = "none";
+        dot.style.backgroundColor = color;
+        dot.style.boxShadow = `0 0 10px 2px ${color}`;
+        dot.style.transform = "scale(1.6)";
+        void dot.offsetWidth;
+        dot.style.transition = DOT_EASE;
+        lit = true;
+      }
+    },
+    setReadout(bpm: number): void {
+      const text = bpm > 0 ? String(Math.round(bpm)) : "--";
+      if (text === lastText) return;
+      lastText = text;
+      digits.textContent = text;
+    },
+  };
+}
+
 const IDLE: ReadoutOpts = { textual: true, unit: "" };
 const pct = (v: number) => String(Math.round(clamp(v, 0, 1) * 100));
 
@@ -231,23 +315,20 @@ export function createAudioMeters(): AudioMeters {
   signalCard.body.append(level.el, spacer(), energy.el);
 
   // ---- Rhythm ----
-  const tempo = createMeterRow({
-    label: "Tempo",
-    accent: NEUTRAL_ACCENT,
-    unit: "bpm",
-    description: "Detected tempo. The dot blinks on each beat; the bar is how sure the tracker is.",
-  });
-  const beatDot = document.createElement("div");
-  beatDot.style.cssText = beatDotStyle;
-  tempo.right.prepend(beatDot);
   const section = createMeterRow({
     label: "Section",
     accent: NEUTRAL_ACCENT,
     unit: "%",
     description: "How intense this part of the track is against the last while. Flashes red on a drop.",
   });
+  section.el.style.flex = "1";
+  section.el.style.minWidth = "0";
+  const tempo = createTempoBlock();
+  const rhythmRow = document.createElement("div");
+  rhythmRow.style.cssText = rhythmRowStyle;
+  rhythmRow.append(section.el, tempo.el);
   const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT });
-  rhythmCard.body.append(tempo.el, spacer(), section.el);
+  rhythmCard.body.appendChild(rhythmRow);
 
   // ---- Character ----
   const dialRows = MUSIC_DIALS.map((dial) => ({
@@ -378,7 +459,6 @@ export function createAudioMeters(): AudioMeters {
 
   let lastMs: number | null = null;
   let lastTextMs = 0;
-  let beatLit = false;
   // Peak-hold for the waveform readout: one buffer's peak jumps around too
   // fast to read, so it holds and falls at the meters' cap rate.
   let wavePeak = 0;
@@ -400,20 +480,16 @@ export function createAudioMeters(): AudioMeters {
         energy.setReadout(frame ? pct(frame.energy) : "--", frame ? {} : IDLE);
       }
       // ---- Rhythm ----
-      tempo.setValue(anim ? anim.tempoLock : null, dtSec);
-      if (beatLit) {
-        beatDot.style.backgroundColor = "";
-        beatLit = false;
-      }
-      if (frame?.beat) {
-        blink(beatDot, "#fff");
-        beatLit = true;
-      }
+      // The bar clock is phase-locked (see beatClock.ts), so "first beat of
+      // the bar" is barPhase wrapping — within an eighth of a bar of 0 either
+      // side, since the onset lands a hair before or after the clock's tick.
+      const barPhase = anim?.barPhase ?? 0;
+      const downbeat = barPhase < 0.125 || barPhase > 0.875;
+      tempo.update(anim?.tempoLock ?? 0, !!frame?.beat, downbeat);
       section.setValue(anim ? anim.sectionIntensity : null, dtSec);
       if (anim?.dropOnset) section.flash(HOT_RED);
       if (text) {
-        const bpm = frame?.bpm ?? 0;
-        tempo.setReadout(bpm > 0 ? String(Math.round(bpm)) : "--", bpm > 0 ? {} : IDLE);
+        tempo.setReadout(frame?.bpm ?? 0);
         section.setReadout(anim ? pct(anim.sectionIntensity) : "--", anim ? {} : IDLE);
       }
 
