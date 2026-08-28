@@ -16,13 +16,8 @@ import type { SceneSetting } from "../render/sceneSettings.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
-import {
-  BAND_GAIN_DEFAULT,
-  BAND_GAIN_LOG_FLOOR,
-  BAND_GAIN_MAX,
-  type BandGroup,
-} from "../audio/bandGains.ts";
-import { createSpectrumStrip } from "./spectrumStrip.ts";
+import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
+import { createBandFaders } from "./bandFaders.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
@@ -43,10 +38,11 @@ import {
 /**
  * The controller's controls panel — the "Viz Controls" design.
  *
- * Two glass columns anchored top-right over the live scene: the spectrum
- * card (scene name, audio source, live bars) beside the controls column,
- * whose cards run Bands → Auto strength (with the Auto master block welded
- * to it) → Input → Scene → Palette → a footer strip. Below the breakpoint in
+ * Two glass columns anchored top-right over the live scene: the Bands card
+ * (scene name, audio source, and the live bars with the band faders drawn
+ * over them — see src/ui/bandFaders.ts) beside the controls column, whose
+ * cards run Auto strength (with the Auto master block welded to it) → Input
+ * → Scene → Palette → a footer strip. Below the breakpoint in
  * controlsTheme.ts the columns stack into one scrolling column. It's
  * corner-docked, not a modal: the whole point is to watch the scene react
  * while you tune it, so it also stays open across palette taps.
@@ -67,10 +63,11 @@ import {
  * controlsTheme.ts.
  *
  * Keyboard layer, live only while the panel is open (see onKeyDown): Tab /
- * Shift+Tab walk a ring over every .vc-slider/.vc-toggle in document order,
- * wrapping at both ends and skipping every chip and button — so Tab alone
- * never leaves the panel and never lands anywhere but a control. On whichever
- * control has focus, A toggles auto, R resets, T mutes/restores (see above).
+ * Shift+Tab walk a ring over every .vc-slider/.vc-toggle/.vc-fader in
+ * document order, wrapping at both ends and skipping every chip and button —
+ * so Tab alone never leaves the panel and never lands anywhere but a control.
+ * On whichever control has focus, A toggles auto, R resets, T mutes/restores
+ * (see above; a fader's arrow keys are its own, in bandFaders.ts).
  * Digit keys 1-9 jump to a numbered block — each card title and each scene
  * group heading carries a .vc-block badge, renumbered by renumberBlocks()
  * whenever the block set can change (i.e. on every renderSceneSettings) — and
@@ -99,7 +96,7 @@ export interface DeviceMenuDeps {
   currentSceneName: () => string;
   currentPaletteId: () => string;
   onPickPalette: (id: string) => void;
-  /** Shown in the spectrum card header — where the bars are coming from. */
+  /** Shown in the Bands card's status line — where the bars are coming from. */
   getAudioStatus: () => AudioStatus;
   getSensitivity: (sceneId: string) => number;
   onSensitivityChange: (sceneId: string, value: number) => void;
@@ -116,16 +113,16 @@ export interface DeviceMenuDeps {
     value: number,
   ) => void;
   onSceneSettingsReset: (sceneId: string) => void;
-  /** Low/mid/high crossover, global per device (not per scene) — fixed, no
-   *  longer user-facing, but still needed to color the spectrum strip's bars
-   *  by group. See src/audio/bandSplit.ts. */
+  /** Low/mid/high crossover, global per device (not per scene) — fixed, not
+   *  user-facing, and unrelated to the faders: it only colors the spectrum
+   *  strip's bars by pulse group. See src/audio/bandSplit.ts. */
   getBandSplit: () => BandSplit;
   /** This device's real Hz band edges once the analyser exists; falls back to
-   *  the nominal ladder before mic access is granted. */
+   *  the nominal ladder before mic access is granted. Also labels the faders. */
   getBandEdgesHz: () => Float32Array;
-  /** Per-scene low/mid/high band gain — see src/audio/bandGains.ts. */
-  getBandGain: (sceneId: string, group: BandGroup) => number;
-  onBandGainChange: (sceneId: string, group: BandGroup, value: number) => void;
+  /** Per-scene band fader gains, by fader index — see src/audio/bandGains.ts. */
+  getBandGain: (sceneId: string, fader: number) => number;
+  onBandGainChange: (sceneId: string, fader: number, value: number) => void;
   onBandGainsReset: (sceneId: string) => void;
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
@@ -159,10 +156,18 @@ export interface DeviceMenuDeps {
 export interface DeviceMenu {
   toggle(): void;
   close(): void;
-  /** Fed every frame while in a viz (either may be null: frame before audio is
-   *  up, rawBands additionally on a mic-less renderer device) — drives the
-   *  Input card's level wash and the spectrum strip's two feeds. */
-  update(frame: FeatureFrame | null, rawBands: Float32Array | null): void;
+  /** Fed every frame while in a viz (any may be null: frame/ungained before
+   *  audio is up, rawBands additionally on a mic-less renderer device) —
+   *  drives the Input card's level wash and the spectrum strip's feeds.
+   *  `frame` has the band faders applied; `ungained` is the same frame
+   *  before them (the strip's ghost bars); `pinned` is which bands the gain
+   *  stage clamped (bandGains.ts's pinnedBands). */
+  update(
+    frame: FeatureFrame | null,
+    rawBands: Float32Array | null,
+    ungained: FeatureFrame | null,
+    pinned: Uint8Array | null,
+  ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
   isOpen(): boolean;
@@ -249,8 +254,8 @@ const autoMasterLabelStyle = (lit: boolean) =>
 const autoMasterSubStyle = (lit: boolean) =>
   `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: ${lit ? withAlpha("#8dccf9", 0.8) : "rgba(255,255,255,0.4)"};`;
 
-// Spectrum card header.
-const spectrumBodyStyle = `position: relative; padding: 11px 14px 12px;`;
+// The Bands card's status line (scene name · live dot · audio source), under
+// its title row and above the strip.
 const spectrumHeaderStyle = `display: flex; align-items: center; justify-content: space-between; gap: 8px;`;
 const spectrumTitleStyle = `
   font: 500 12px/1.2 ${FONT_MONO}; letter-spacing: 0.18em; text-transform: uppercase;
@@ -821,21 +826,40 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const root = document.createElement("div");
   root.className = "vc-root vc-scroll";
 
-  // ---- spectrum column ----
-  // Live spectrum, its own card — a standing "is the mic actually hearing
-  // anything" check. Always mounted (unlike the scene card), since it's not
-  // tied to which scene is active.
-  const spectrumStrip = createSpectrumStrip();
+  // ---- spectrum column: the Bands card ----
+  // The live spectrum and the band gains are one card: the strip is the
+  // control (bandFaders.ts draws the faders over the bars), so what you
+  // tune and what you watch are the same pixels — and a standing "is the
+  // mic actually hearing anything" check comes free. Always mounted (unlike
+  // the Scene card) since it isn't tied to which scene is active; the
+  // per-scene fader values are pushed in by refreshBandFaders on open() and
+  // after a Reset, the same way the Input rows are synced.
+  const bandFaders = createBandFaders({
+    onChange: (fader, gain) => deps.onBandGainChange(deps.currentSceneId(), fader, gain),
+  });
+  const spectrumStrip = bandFaders.strip;
 
   const spectrumCol = document.createElement("div");
   spectrumCol.className = "vc-spectrum-col";
-  const spectrumCard = document.createElement("div");
-  spectrumCard.style.cssText = glassCardStyle;
-  const spectrumScan = document.createElement("div");
-  spectrumScan.style.cssText = scanlineStyle;
-  const spectrumBody = document.createElement("div");
-  spectrumBody.style.cssText = spectrumBodyStyle;
 
+  // "Listening post": lit shows the raw mic signal exactly as it comes in —
+  // no adaptive envelope, no gain, no sensitivity; unlit (default) shows the
+  // processed signal that's actually driving the visuals.
+  const rawChip = createChipButton("RAW", "Listening post — show the raw mic signal instead of what the visuals see", () => {
+    spectrumStrip.setShowRaw(!spectrumStrip.showRaw());
+    rawChip.style.cssText = spectrumStrip.showRaw() ? chipBtnLitStyle : chipBtnStyle;
+  });
+  const bandsResetChip = createChipButton("Reset", "Every fader back to 1×", () => {
+    deps.onBandGainsReset(deps.currentSceneId());
+    refreshBandFaders();
+  });
+  const bandsHeaderRight = document.createElement("div");
+  bandsHeaderRight.style.cssText = rowRightStyle;
+  bandsHeaderRight.append(rawChip, bandsResetChip);
+  const bandsCard = createCard({ title: "Bands", accent: BANDS_AMBER, right: bandsHeaderRight });
+  markBlock(bandsCard.title);
+
+  // Status line: which scene, whether audio is flowing, and from where.
   const spectrumHeader = document.createElement("div");
   spectrumHeader.style.cssText = spectrumHeaderStyle;
   const spectrumTitle = document.createElement("div");
@@ -846,22 +870,32 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   liveDot.style.cssText = liveDotStyle(false);
   const statusLabel = document.createElement("div");
   statusLabel.style.cssText = statusTextStyle;
-  // "Listening post": lit shows the raw mic signal exactly as it comes in —
-  // no adaptive envelope, no sensitivity gain; unlit (default) shows the
-  // processed signal that's actually driving the visuals.
-  const rawChip = createChipButton("RAW", "Listening post — show the raw mic signal instead of what the visuals see", () => {
-    spectrumStrip.setShowRaw(!spectrumStrip.showRaw());
-    rawChip.style.cssText = spectrumStrip.showRaw() ? chipBtnLitStyle : chipBtnStyle;
-  });
-  spectrumStatus.append(liveDot, statusLabel, rawChip);
+  spectrumStatus.append(liveDot, statusLabel);
   spectrumHeader.append(spectrumTitle, spectrumStatus);
 
   const hairline = document.createElement("div");
   hairline.style.cssText = hairlineStyle;
 
-  spectrumBody.append(spectrumHeader, hairline, spectrumStrip.el);
-  spectrumCard.append(spectrumScan, spectrumBody);
-  spectrumCol.appendChild(spectrumCard);
+  // The fader bank sits in a .vc-row so it wakes (glow, hint) on hover and
+  // on focus-within exactly like a slider row.
+  const fadersRow = document.createElement("div");
+  fadersRow.className = "vc-row";
+  fadersRow.style.setProperty("--vc-accent", BANDS_AMBER);
+  const fadersHint = document.createElement("div");
+  fadersHint.className = "vc-hint";
+  fadersHint.textContent = "Middle is 1× — drag up to boost a band, down to cut it, all the way down to switch it off";
+  fadersRow.append(bandFaders.el, fadersHint);
+  // R/T on a focused fader, through the same wiring as every row; no A —
+  // the faders have no auto weights.
+  bandFaders.faders.forEach((el, i) => {
+    wireRowKeys(el, {
+      reset: () => bandFaders.reset(i),
+      toggleOff: () => bandFaders.toggleOff(i),
+    });
+  });
+
+  bandsCard.body.append(spectrumHeader, hairline, fadersRow);
+  spectrumCol.appendChild(bandsCard.el);
 
   let lastStatusText = "";
   function refreshSpectrumHeader(): void {
@@ -875,61 +909,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
+  const faderGains = new Float32Array(BAND_FADER_COUNT);
+  function refreshBandFaders(): void {
+    const sceneId = deps.currentSceneId();
+    for (let i = 0; i < BAND_FADER_COUNT; i++) faderGains[i] = deps.getBandGain(sceneId, i);
+    bandFaders.setGains(faderGains);
+    bandFaders.clearOff();
+  }
+
+  // The split is fixed (it only tints the bars by pulse group), so the strip
+  // needs it set up once — the Hz edges do still depend on the analyser's
+  // real sample rate, though, which isn't known until mic access is granted,
+  // so this is re-run on every open(). The edges also label the faders.
+  function refreshBandsSplit(): void {
+    bandFaders.setEdgesHz(deps.getBandEdgesHz());
+    spectrumStrip.setSplit(deps.getBandSplit());
+  }
+
   // ---- controls column ----
   const controlsCol = document.createElement("div");
   controlsCol.className = "vc-controls-col vc-scroll";
-
-  // Bands: low/mid/high band gain — the DJ-mixer control (see bandGains.ts):
-  // how hard each group drives the visuals, not where the dividing lines sit
-  // (those are fixed — see getBandSplit below). Global per device like the
-  // Auto card, not rebuilt per scene; only the Scene card needs that.
-  function makeBandGainRow(label: string, group: BandGroup, description: string) {
-    const row = createControlRow({
-      label,
-      accent: BANDS_AMBER,
-      min: BAND_GAIN_LOG_FLOOR,
-      max: BAND_GAIN_MAX,
-      defaultValue: BAND_GAIN_DEFAULT,
-      mapping: "log",
-      zeroAtMin: true,
-      unit: "×",
-      format: formatGain,
-      description,
-    });
-    row.onChange((value) => deps.onBandGainChange(deps.currentSceneId(), group, value));
-    return row;
-  }
-  const bandGainRows: Record<BandGroup, ReturnType<typeof createControlRow>> = {
-    low: makeBandGainRow("Low", "low", "How hard the bass drives the visuals — all the way down kills it"),
-    mid: makeBandGainRow("Mid", "mid", "How hard the mids drive the visuals — all the way down kills them"),
-    high: makeBandGainRow("High", "high", "How hard the hats and air drive the visuals — all the way down kills them"),
-  };
-  function refreshBandGainRows(): void {
-    const sceneId = deps.currentSceneId();
-    for (const group of ["low", "mid", "high"] as const) {
-      bandGainRows[group].setValue(deps.getBandGain(sceneId, group));
-    }
-  }
-  const bandsCard = createCard({
-    title: "Bands",
-    accent: BANDS_AMBER,
-    right: createChipButton("Reset", "Reset band gains", () => {
-      deps.onBandGainsReset(deps.currentSceneId());
-      refreshBandGainRows();
-      for (const group of ["low", "mid", "high"] as const) bandGainRows[group].clearOff();
-    }),
-  });
-  markBlock(bandsCard.title);
-  bandsCard.body.append(bandGainRows.low.el, spacer(), bandGainRows.mid.el, spacer(), bandGainRows.high.el);
-
-  // The split itself is fixed (no crossover sliders to drag), so the strip
-  // only needs its group coloring set up once — the edges do still depend on
-  // the analyser's real sample rate, though, which isn't known until mic
-  // access is granted, so this is re-run on every open().
-  function refreshBandsSplit(): void {
-    spectrumStrip.setEdgesHz(deps.getBandEdgesHz());
-    spectrumStrip.setSplit(deps.getBandSplit());
-  }
 
   // Auto strength: how far auto is allowed to push a setting from its default
   // (see autoTune.ts's computeAutoTarget). Global per device.
@@ -1291,7 +1290,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     toggleOff: toggleAutoStrengthOff,
   });
 
-  controlsCol.append(bandsCard.el, autoRow, inputCard.el, sceneCard.el, paletteCard.el, footer);
+  controlsCol.append(autoRow, inputCard.el, sceneCard.el, paletteCard.el, footer);
   root.append(spectrumCol, controlsCol);
   document.body.appendChild(root);
 
@@ -1324,7 +1323,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // comment. Derived from the DOM each call rather than cached, so a Scene
   // card rebuilt by renderSceneSettings can never leave it stale.
   function ringElements(): HTMLElement[] {
-    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle")];
+    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-fader")];
   }
 
   function handleTab(e: KeyboardEvent): void {
@@ -1380,7 +1379,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     syncInputRows();
     renderSceneSettings();
     refreshBandsSplit();
-    refreshBandGainRows();
+    refreshBandFaders();
     refreshAutoStrengthDisplay();
     root.classList.add("vc-open");
     deps.toggleButton.setAttribute("aria-pressed", "true");
@@ -1413,7 +1412,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     close,
     isOpen: () => isOpen,
-    update(frame: FeatureFrame | null, rawBands: Float32Array | null) {
+    update(
+      frame: FeatureFrame | null,
+      rawBands: Float32Array | null,
+      ungained: FeatureFrame | null,
+      pinned: Uint8Array | null,
+    ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
@@ -1447,7 +1451,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // The strip's raw feed shows the mic as-is; the default processed feed
       // is the exact same sensitivity+acceleration pipeline the render path
       // applies before scene.render() (see applySensitivity in app.ts) — so
-      // it always shows literally what the visuals are reacting to.
+      // it always shows literally what the visuals are reacting to. The
+      // ghost is that same pipeline over the pre-fader frame, and it goes in
+      // first: applySensitivity hands back one shared scratch buffer off its
+      // fast path, so the ghost must be copied into the strip before the
+      // second call overwrites it.
+      spectrumStrip.setGhost(ungained ? applySensitivity(ungained, sensitivity, acceleration).bands : null);
+      spectrumStrip.setPinned(pinned);
       const processedBands = frame ? applySensitivity(frame, sensitivity, acceleration).bands : null;
       spectrumStrip.update(rawBands, processedBands);
 
