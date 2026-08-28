@@ -6,10 +6,11 @@
  * Everything else in src/ui/ styles itself with inline cssText, and most of
  * the panel still does; what can't be expressed inline lives here as class
  * rules: slider track/thumb pseudo-elements, the hover/focus-revealed row
- * hints, the boolean toggle's knob, the thin scroll rail, the narrow-viewport
- * column stacking, and the "active" ring on a chrome button. The accent
- * constants are here rather than in deviceMenu.ts because the spectrum strip
- * paints the same hues onto a canvas — one owner, no drifting duplicates.
+ * hints, the boolean toggle's knob, the band faders' hit areas over the
+ * spectrum canvas, the thin scroll rail, the narrow-viewport column stacking,
+ * and the "active" ring on a chrome button. The accent constants are here
+ * rather than in deviceMenu.ts because the spectrum strip paints the same
+ * hues onto a canvas — one owner, no drifting duplicates.
  *
  * Fonts are self-hosted through Vite from their npm packages (licenses in
  * THIRD-PARTY-NOTICES.md): Chakra Petch for labels, Share Tech Mono for
@@ -29,8 +30,10 @@ import dseg7Url from "dseg/fonts/DSEG7-Classic/DSEG7Classic-Regular.woff2?url";
 export const INPUT_GREEN = "#8ce6a0";
 /** This scene's own look — its declared settings. */
 export const SCENE_VIOLET = "#c3a5f9";
-/** Low/mid/high band gain. */
+/** The band fader bank — how hard each part of the spectrum drives the visuals. */
 export const BANDS_AMBER = "#f9b96c";
+/** A fader that's been pulled all the way down to Off (spectrumStrip.ts, bandFaders.ts). */
+export const FADER_OFF = "#f08a8a";
 /** The global auto system — strength knob and master switch. */
 export const AUTO_SKY = "#59bbfb";
 
@@ -129,10 +132,22 @@ const stylesheet = `
 .vc-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 2px; }
 .vc-scroll::-webkit-scrollbar-track { background: transparent; }
 
+/* The digit badge on a keyboard block heading (a card title or a scene group
+ * heading — see deviceMenu.ts's markBlock/renumberBlocks). Reads as an index,
+ * not part of the title, so it's dimmer and set apart with a little trailing
+ * space rather than inline with the letters. Text filled in by JS. */
+.vc-block-n {
+  display: inline-block; min-width: 1.1em; margin-right: 0.6em;
+  color: rgba(255, 255, 255, 0.32); font-variant-numeric: tabular-nums;
+}
+
 /* A row "wakes" when the pointer is anywhere over it (the row is a far
  * bigger target than its 3px track) or its control has focus: the label
  * tints toward the row's accent, the track glows through a hairline border,
- * and the slider zooms up so the thumb is easy to grab precisely. */
+ * and the slider zooms up so the thumb is easy to grab precisely. On top of
+ * that flat zoom, --vc-thumb-boost multiplies in a little extra as the
+ * pointer nears the thumb specifically — set by deviceMenu.ts's
+ * wireThumbMagnet, unset (falls back to 1) everywhere else. */
 /* The row frames itself with padding that negative margins cancel out, so
  * the ring + glow around the whole title-and-slider block costs no layout. */
 .vc-row {
@@ -194,7 +209,7 @@ const stylesheet = `
 }
 .vc-row:hover .vc-slider::-webkit-slider-thumb,
 .vc-row:focus-within .vc-slider::-webkit-slider-thumb {
-  transform: scaleX(1.7);
+  transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1)));
   box-shadow: 0 0 6px color-mix(in srgb, var(--vc-accent) 60%, transparent);
 }
 .vc-slider::-moz-range-track {
@@ -213,10 +228,23 @@ const stylesheet = `
   transition: transform 0.18s ease;
 }
 .vc-row:hover .vc-slider::-moz-range-thumb,
-.vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(1.7); }
+.vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1))); }
+
+/* A band fader's hit area (bandFaders.ts): an invisible column over the
+ * spectrum canvas, which draws the fader itself. touch-action: none is the
+ * opposite of the slider's pan-y on purpose — a vertical drag here moves the
+ * fader, it must never scroll the stacked panel. The focus ring is inset so
+ * it stays inside the card's overflow: hidden. */
+.vc-fader {
+  position: absolute; top: 0; touch-action: none; cursor: ns-resize;
+  outline: none; border-radius: 3px;
+}
+.vc-fader:focus-visible {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-accent) 70%, transparent);
+}
 
 .vc-toggle {
-  position: relative; width: 28px; height: 14px; margin: 6px 0 0; padding: 0;
+  position: relative; width: 28px; height: 14px; margin: 6px 0 0 auto; padding: 0;
   border: none; border-radius: 7px; background: rgba(255, 255, 255, 0.18);
   cursor: pointer; display: block; transition: background 0.15s ease, box-shadow 0.18s ease;
 }

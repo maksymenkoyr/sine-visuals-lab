@@ -34,8 +34,16 @@ export const rowLabelStyle = `
 export const rowRightStyle = `display: flex; align-items: center; gap: 7px; flex-shrink: 0;`;
 export const readoutStyle = `display: flex; align-items: baseline; gap: 4px; color: #fff;`;
 // Seven-segment digits; DSEG7 has no letters, so text readouts ("Off"/"On",
-// "mono") fall back to the mono face via digitsTextStyle.
-export const digitsStyle = `font-family: ${FONT_DIGITS}; font-size: 11.5px; letter-spacing: 1px;`;
+// "--") fall back to the mono face via digitsTextStyle.
+// The transparent stroke draws nothing; it's there to widen the text's ink
+// overflow. DSEG7's ink runs edge to edge (ascent = em, descent = 0), so a
+// digit's top and bottom segments sit flush with the metric box a text swap
+// repaints. On a fractional baseline their antialiased edge row falls just
+// outside that box and survives the swap — a "7" turning into a "1" left a
+// faint hairline of the old top segment above the new digit. Every engine
+// folds text-stroke width into ink overflow, unlike @font-face metric
+// overrides, which WebKit ignores.
+export const digitsStyle = `font-family: ${FONT_DIGITS}; font-size: 11.5px; letter-spacing: 1px; -webkit-text-stroke: 1px transparent;`;
 export const digitsTextStyle = `font: 400 11px/1 ${FONT_MONO};`;
 export const unitStyle = `font: 400 10.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.75);`;
 
@@ -69,8 +77,9 @@ export interface CardSpec {
 }
 
 /** A glass card: scanline overlay, header row (title + optional right slot),
- *  and a body the caller fills. */
-export function createCard(spec: CardSpec): { el: HTMLDivElement; body: HTMLDivElement } {
+ *  and a body the caller fills. Returns `title` too, so a caller that's also
+ *  a keyboard block (deviceMenu.ts's markBlock) can badge it. */
+export function createCard(spec: CardSpec): { el: HTMLDivElement; body: HTMLDivElement; title: HTMLDivElement } {
   const el = document.createElement("div");
   el.style.cssText = glassCardStyle;
   const scanlines = document.createElement("div");
@@ -88,7 +97,7 @@ export function createCard(spec: CardSpec): { el: HTMLDivElement; body: HTMLDivE
 
   body.appendChild(header);
   el.append(scanlines, body);
-  return { el, body };
+  return { el, body, title };
 }
 
 export function spacer(): HTMLElement {

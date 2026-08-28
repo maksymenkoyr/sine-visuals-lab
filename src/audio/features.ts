@@ -1,13 +1,25 @@
 import { NUM_BANDS, type FeatureFrame } from "./types.ts";
+import { ANALYSER_MIN_DB, ANALYSER_MAX_DB } from "./analyser.ts";
 
 // Adaptive floor/ceiling per band: a leaky min/max that tracks the room's
 // own quiet and loud levels. This is what makes a muffled laptop mic and a
 // hot phone mic converge to similarly-scaled output. Values are exponential
 // time constants (1/tau, per second) — bigger = faster to react.
+//
+// Bypassable via update()'s `autoGain` param (see src/audio/autoGain.ts for
+// the persisted on/off switch) — off falls back to a fixed mapping against
+// the analyser's own dB window, matching app.ts's "before processing" feed.
 const FLOOR_RISE_RATE = 0.8; // floor creeping up while it's quiet (~1.25s)
 const FLOOR_FALL_RATE = 8; // floor dropping to follow a true drop in level (~0.1s)
 const PEAK_RISE_RATE = 25; // ceiling jumping up on a loud hit (~0.04s, fast attack)
 const PEAK_FALL_RATE = 1.5; // ceiling relaxing back down between hits (~0.67s)
+// How long the ceiling holds at a fresh peak before PEAK_FALL_RATE is allowed
+// to relax it — standard peak-hold-meter behavior. Without this the ceiling
+// starts sagging immediately after every hit, so the gap between beats reads
+// as louder than it is (the room didn't get quieter, the ceiling just gave
+// up). 0.3s comfortably spans the gap between beats up to 200bpm while still
+// following a genuine drop in level within a second.
+const PEAK_HOLD_SEC = 0.3;
 const MIN_RANGE_DB = 12; // never let (peak - floor) collapse below this
 
 function expBlend(rate: number, dt: number): number {
@@ -16,12 +28,18 @@ function expBlend(rate: number, dt: number): number {
 
 // Attack/release envelope applied to the normalized band value, so visuals
 // punch on transients but don't strobe on FFT-frame-to-frame noise. Attack is
-// fast (~1-2 frames to 90% at 60fps) since a slow attack is pure perceived
-// lag; release stays slow — that's what actually prevents strobing.
+// fast (exactly 2 frames to ~90% via expBlend, independent of frame rate —
+// see expBlend above, not a per-frame Math.min(1, rate*dt) which would
+// saturate at 1.0 for any rate*dt >= 1 and so run frame-rate-dependent above
+// ~70fps) since a slow attack is pure perceived lag; release stays slow —
+// that's what actually prevents strobing.
 const ATTACK_PER_SEC = 70;
 const RELEASE_PER_SEC = 6;
 
-// Onset detection over the summed positive spectral flux.
+// Onset detection over the summed positive spectral flux. Left as a plain
+// Math.min(1, rate*dt) coefficient, unlike the envelope above: at rate 3 it's
+// 0.05 at 60fps versus expBlend's 0.0488 — it never saturates at any
+// realistic frame rate, so there's no frame-rate bug here to fix.
 const FLUX_ADAPTIVE_RATE = 3; // how fast the local flux baseline adapts
 const FLUX_THRESHOLD_MULT = 1.6;
 const FLUX_THRESHOLD_MARGIN = 0.03;
@@ -87,6 +105,13 @@ function clamp01(x: number): number {
 export class FeatureExtractor {
   private floor = new Float32Array(NUM_BANDS).fill(-100);
   private peak = new Float32Array(NUM_BANDS).fill(-40);
+  // Absolute AudioContext.currentTime a band's peak may next decay at — see
+  // PEAK_HOLD_SEC. Float64, not Float32: this stores an unbounded, ever-growing
+  // clock reading (unlike the other per-band arrays, which hold bounded [0,1]
+  // or dB values), and Float32 precision degrades to ~8ms after a day of
+  // uptime, comparable to PEAK_HOLD_SEC itself. -Infinity so the very first
+  // frames are never spuriously held.
+  private peakHoldUntil = new Float64Array(NUM_BANDS).fill(-Infinity);
   private env = new Float32Array(NUM_BANDS);
   private prevNorm = new Float32Array(NUM_BANDS);
 
@@ -97,30 +122,53 @@ export class FeatureExtractor {
   private bpm = 0;
   private lastBeatTime = 0;
 
-  /** @param rawBandsDb per-band FFT magnitude in dB, from BandAnalyser.readBandsDb(). */
-  update(rawBandsDb: Float32Array, time: number): FeatureFrame {
+  /**
+   * @param rawBandsDb per-band FFT magnitude in dB, from BandAnalyser.readBandsDb().
+   * @param autoGain When false, bypasses the per-band adaptive floor/peak
+   *   normalization below in favor of a fixed mapping against the analyser's
+   *   own dB window (ANALYSER_MIN_DB/MAX_DB) — the same one
+   *   app.ts's captureRawBands uses for the "before processing" display, so
+   *   the two agree on scale. The floor/peak trackers, flux, and onset/BPM
+   *   detection below keep running on the adaptive `norm` regardless — only
+   *   what lands in `bands[]`/`energy` changes — so turning this off doesn't
+   *   degrade beat detection, which is calibrated against the adaptive value.
+   *   Defaults to true so every existing call site keeps today's behavior.
+   */
+  update(rawBandsDb: Float32Array, time: number, autoGain = true): FeatureFrame {
     const dt = this.lastTime === null ? 1 / 60 : Math.max(1e-4, time - this.lastTime);
     this.lastTime = time;
 
     const bands = new Float32Array(NUM_BANDS);
     let flux = 0;
     let rawPowSum = 0;
+    const fixedSpan = ANALYSER_MAX_DB - ANALYSER_MIN_DB;
 
     for (let b = 0; b < NUM_BANDS; b++) {
       const db = sanitizeDb(rawBandsDb[b]);
       rawPowSum += Math.pow(10, db / 10);
 
-      // Leaky min/max adapts the [floor, peak] window to this room/mic.
+      // Leaky min/max adapts the [floor, peak] window to this room/mic. Kept
+      // running even with autoGain off, since onset/BPM detection below
+      // always reads `norm`.
       const floorRate = db < this.floor[b] ? FLOOR_FALL_RATE : FLOOR_RISE_RATE;
       this.floor[b] += (db - this.floor[b]) * expBlend(floorRate, dt);
-      const peakRate = db > this.peak[b] ? PEAK_RISE_RATE : PEAK_FALL_RATE;
-      this.peak[b] += (db - this.peak[b]) * expBlend(peakRate, dt);
+
+      // Ceiling rises immediately on a new peak (and refreshes the hold
+      // window); otherwise it only starts relaxing back down once the hold
+      // window has elapsed, rather than sagging in every gap between hits.
+      if (db > this.peak[b]) {
+        this.peak[b] += (db - this.peak[b]) * expBlend(PEAK_RISE_RATE, dt);
+        this.peakHoldUntil[b] = time + PEAK_HOLD_SEC;
+      } else if (time >= this.peakHoldUntil[b]) {
+        this.peak[b] += (db - this.peak[b]) * expBlend(PEAK_FALL_RATE, dt);
+      }
 
       const range = Math.max(MIN_RANGE_DB, this.peak[b] - this.floor[b]);
       const norm = clamp01((db - this.floor[b]) / range);
 
-      const rate = norm > this.env[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
-      this.env[b] += (norm - this.env[b]) * Math.min(1, rate * dt);
+      const target = autoGain ? norm : clamp01((db - ANALYSER_MIN_DB) / fixedSpan);
+      const rate = target > this.env[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
+      this.env[b] += (target - this.env[b]) * expBlend(rate, dt);
       bands[b] = this.env[b];
 
       flux += Math.max(0, norm - this.prevNorm[b]);
