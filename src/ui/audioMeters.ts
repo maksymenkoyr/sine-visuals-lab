@@ -1,9 +1,8 @@
 import type { AnimFrame } from "../render/animClock.ts";
 import type { FeatureFrame } from "../audio/types.ts";
-import type { StereoRead } from "../audio/stereo.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
-import { AUTO_SKY, FONT_MONO, HOT_RED, INPUT_GREEN } from "./controlsTheme.ts";
+import { AUTO_SKY, HOT_RED, INPUT_GREEN } from "./controlsTheme.ts";
 import {
   createCard,
   digitsStyle,
@@ -35,10 +34,11 @@ import {
  *    each marking NEUTRAL with a tick — what autoTune.ts resolves every "A"
  *    chip against, otherwise invisible. Copy comes from DIAL_LABELS.
  *  - Scope (first): a rolling waveform of the last few seconds with a clip
- *    warning, and stereo width/balance, read straight off this device's
- *    mic by stereo.ts. Local-only by
- *    construction — these never cross src/net/protocol.ts's wire frame, so a
- *    mic-less renderer has nothing to show here and the card hides itself.
+ *    warning, read straight off this device's mic by waveformAnalyser.ts.
+ *    Local-only by construction — samples never cross src/net/protocol.ts's
+ *    wire frame, so a mic-less renderer has nothing to show here and the
+ *    card hides itself. (No stereo width/balance: a phone or laptop mic is
+ *    mono, so they'd read "mono" nearly always.)
  *
  * Fills move every frame; readout text at ~10Hz (the same reasoning as
  * deviceMenu.ts's AUTO_UI_REFRESH_MS — text writes cost layout, and eyes
@@ -48,14 +48,9 @@ import {
 export interface AudioMeters {
   el: HTMLElement;
   /** Fed every frame while the panel is open. `frame`/`anim` null before
-   *  audio is up (idle readouts); `mono`/`stereo` null on any device without
-   *  a local analyser (Scope card hidden). */
-  update(
-    frame: FeatureFrame | null,
-    anim: AnimFrame | null,
-    mono: Float32Array | null,
-    stereo: StereoRead | null,
-  ): void;
+   *  audio is up (idle readouts); `mono` null on any device without a local
+   *  analyser (Scope card hidden). */
+  update(frame: FeatureFrame | null, anim: AnimFrame | null, mono: Float32Array | null): void;
 }
 
 const PEAK_FALL_PER_SEC = 1.2; // matches spectrumStrip.ts's peak-hold decay
@@ -85,29 +80,6 @@ const tickStyle = `position: absolute; top: -2px; bottom: -2px; width: 1px; back
 const beatDotStyle = `width: 6px; height: 6px; border-radius: 50%; background-color: rgba(255,255,255,0.25); transition: ${FADE};`;
 const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
 
-// Balance is a compact block welded beside the Width row — the Auto master
-// block's shape (deviceMenu.ts) — because it's one signed number, not a
-// 0..1 quantity a left-anchored meter can show. The wash behind the number
-// leans toward whichever side is louder.
-const stereoRowStyle = `display: flex; gap: 14px; align-items: stretch;`;
-const balanceBlockStyle = `
-  width: 74px; flex-shrink: 0; display: grid; place-items: center; text-align: center;
-  border: 1px solid rgba(255,255,255,0.18); border-radius: 3px;
-  background-repeat: no-repeat; background-size: 100% 100%;
-`;
-const balanceValueStyle = `display: flex; align-items: baseline; justify-content: center; gap: 1px; color: #fff;`;
-const balanceSignStyle = `font: 400 11px/1 ${FONT_MONO};`; // DSEG7 has no "+"
-const balanceCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
-const BALANCE_WASH = "rgba(255,255,255,0.16)";
-const BALANCE_TITLE = "Balance — which side is louder. Minus is left, plus is right; the wash leans the same way.";
-
-const MONO_HINT = "This source is mono — a phone or laptop mic usually is — so there's no left and right to compare.";
-const WIDTH_HINT = "How wide the stereo picture is: 0 is mono, 100 is as much side as centre.";
-// Width and balance are traits of the mix, not events: one analyser buffer
-// is ~40ms and the per-buffer ratio jitters, so both ease toward the latest
-// read over about this long before they're shown.
-const STEREO_SMOOTH_SEC = 0.3;
-
 /** Jump an element to `color` with no fade, then re-arm the fade so the
  *  next color write eases back — a one-frame event made visible. */
 function blink(el: HTMLElement, color: string): void {
@@ -126,7 +98,9 @@ interface MeterRowSpec {
   accent: string;
   /** Mono suffix after the digits ("%", "bpm"). */
   unit?: string;
-  description: string;
+  /** The hint that unfolds on hover/tap. Omit for a row that explains
+   *  itself (the waveform) — no hint, and nothing to focus for. */
+  description?: string;
   /** A fixed mark at this fraction of the track — the dials' NEUTRAL. */
   tickAt?: number;
 }
@@ -142,7 +116,7 @@ interface ReadoutOpts {
 function createMeterRow(spec: MeterRowSpec) {
   const el = document.createElement("div");
   el.className = "vc-row";
-  el.tabIndex = 0;
+  if (spec.description) el.tabIndex = 0;
   el.style.setProperty("--vc-accent", spec.accent);
 
   const head = document.createElement("div");
@@ -183,7 +157,8 @@ function createMeterRow(spec: MeterRowSpec) {
 
   const hint = document.createElement("div");
   hint.className = "vc-hint";
-  hint.textContent = spec.description;
+  hint.textContent = spec.description ?? "";
+  if (!spec.description) hint.style.display = "none";
 
   el.append(head, meter, hint);
 
@@ -230,62 +205,8 @@ function createMeterRow(spec: MeterRowSpec) {
       blink(fill, color);
       flashed = true;
     },
-    setHint(text: string): void {
-      if (hint.textContent !== text) hint.textContent = text;
-    },
   };
 }
-function createBalanceBlock() {
-  const el = document.createElement("div");
-  el.style.cssText = balanceBlockStyle;
-  el.title = BALANCE_TITLE;
-  const inner = document.createElement("div");
-  const value = document.createElement("div");
-  value.style.cssText = balanceValueStyle;
-  const sign = document.createElement("span");
-  sign.style.cssText = balanceSignStyle;
-  const digits = document.createElement("span");
-  digits.style.cssText = digitsStyle;
-  value.append(sign, digits);
-  const caption = document.createElement("div");
-  caption.style.cssText = balanceCaptionStyle;
-  caption.textContent = "BALANCE";
-  inner.append(value, caption);
-  el.appendChild(inner);
-
-  let lastHalf = NaN;
-  let lastKey = "";
-  return {
-    el,
-    /** Per frame: the wash from the centre out to the louder side, in
-     *  whole percent so it's only rewritten when it visibly moves. */
-    setWash(balance: number | null): void {
-      const half = balance === null ? 0 : Math.round(clamp(balance, -1, 1) * 50);
-      if (half === lastHalf) return;
-      lastHalf = half;
-      if (half === 0) {
-        el.style.backgroundImage = "none";
-        return;
-      }
-      const a = Math.min(50, 50 + half);
-      const b = Math.max(50, 50 + half);
-      el.style.backgroundImage = `linear-gradient(90deg, transparent ${a}%, ${BALANCE_WASH} ${a}%, ${BALANCE_WASH} ${b}%, transparent ${b}%)`;
-    },
-    /** At the text tick: signed percent, "--" while there's no stereo. */
-    setReadout(balance: number | null): void {
-      const n = balance === null ? null : Math.round(clamp(balance, -1, 1) * 100);
-      const s = n === null || n === 0 ? "" : n < 0 ? "-" : "+";
-      const text = n === null ? "--" : String(Math.abs(n));
-      const key = s + text;
-      if (key === lastKey) return;
-      lastKey = key;
-      sign.textContent = s;
-      digits.textContent = text;
-      digits.style.cssText = n === null ? digitsTextStyle : digitsStyle;
-    },
-  };
-}
-
 const IDLE: ReadoutOpts = { textual: true, unit: "" };
 const pct = (v: number) => String(Math.round(clamp(v, 0, 1) * 100));
 
@@ -349,22 +270,14 @@ export function createAudioMeters(): AudioMeters {
     label: "Waveform",
     accent: NEUTRAL_ACCENT,
     unit: "peak",
-    description: "The last few seconds of sound, zoomed to fit. The number is the loudest recent sample out of 100 — at 100 the mic is clipping, the trace turns red, and the source needs turning down.",
   });
   // The trace takes the meter's place under the head.
   const waveCanvas = document.createElement("canvas");
   waveCanvas.style.cssText = waveCanvasStyle;
   waveform.el.children[1].replaceWith(waveCanvas);
   const waveCtx = waveCanvas.getContext("2d")!;
-  const width = createMeterRow({ label: "Width", accent: NEUTRAL_ACCENT, unit: "%", description: WIDTH_HINT });
-  width.el.style.flex = "1";
-  width.el.style.minWidth = "0";
-  const balance = createBalanceBlock();
-  const stereoRow = document.createElement("div");
-  stereoRow.style.cssText = stereoRowStyle;
-  stereoRow.append(width.el, balance.el);
   const scopeCard = createCard({ title: "Scope", accent: NEUTRAL_ACCENT });
-  scopeCard.body.append(waveform.el, spacer(), stereoRow);
+  scopeCard.body.appendChild(waveform.el);
   scopeCard.el.style.display = "none";
   let scopeShown = false;
 
@@ -466,15 +379,13 @@ export function createAudioMeters(): AudioMeters {
   let lastMs: number | null = null;
   let lastTextMs = 0;
   let beatLit = false;
-  let widthSmooth = 0;
-  let balanceSmooth = 0;
   // Peak-hold for the waveform readout: one buffer's peak jumps around too
   // fast to read, so it holds and falls at the meters' cap rate.
   let wavePeak = 0;
 
   return {
     el: root,
-    update(frame, anim, mono, stereo): void {
+    update(frame, anim, mono): void {
       const nowMs = performance.now();
       const dtSec = lastMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastMs) / 1000);
       lastMs = nowMs;
@@ -527,27 +438,6 @@ export function createAudioMeters(): AudioMeters {
       if (text) {
         if (clipped) waveform.setReadout("CLIP", { textual: true, color: HOT_RED, unit: "" });
         else waveform.setReadout(pct(wavePeak));
-      }
-      const hasStereo = !!stereo && stereo.hasStereo;
-      if (hasStereo) {
-        const k = 1 - Math.exp(-dtSec / STEREO_SMOOTH_SEC);
-        widthSmooth += (stereo.width - widthSmooth) * k;
-        balanceSmooth += (stereo.balance - balanceSmooth) * k;
-      } else {
-        widthSmooth = 0;
-        balanceSmooth = 0;
-      }
-      width.setValue(hasStereo ? widthSmooth : null, dtSec);
-      balance.setWash(hasStereo ? balanceSmooth : null);
-      if (text) {
-        balance.setReadout(hasStereo ? balanceSmooth : null);
-        if (hasStereo) {
-          width.setReadout(pct(widthSmooth));
-          width.setHint(WIDTH_HINT);
-        } else {
-          width.setReadout("mono", IDLE);
-          width.setHint(MONO_HINT);
-        }
       }
     },
   };

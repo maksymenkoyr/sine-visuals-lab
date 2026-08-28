@@ -24,7 +24,6 @@ import {
 import { createSpectrumStrip } from "./spectrumStrip.ts";
 import { createAudioMeters } from "./audioMeters.ts";
 import type { AnimFrame } from "../render/animClock.ts";
-import type { StereoRead } from "../audio/stereo.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
@@ -163,14 +162,13 @@ export interface DeviceMenu {
   close(): void;
   /** Fed every frame while in a viz — drives the Input card's level wash,
    *  the spectrum strip's two feeds, and the meters. `frame`/`anim` are null
-   *  before audio is up; `rawBands`/`mono`/`stereo` additionally on a
-   *  mic-less renderer device, which has no local analyser. */
+   *  before audio is up; `rawBands`/`mono` additionally on a mic-less
+   *  renderer device, which has no local analyser. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
     anim: AnimFrame | null,
     mono: Float32Array | null,
-    stereo: StereoRead | null,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
@@ -1080,12 +1078,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       rawBands: Float32Array | null,
       anim: AnimFrame | null,
       mono: Float32Array | null,
-      stereo: StereoRead | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono, stereo);
+      audioMeters.update(frame, anim, mono);
       // Raw (pre-sensitivity) energy, so the level wash reflects the actual
       // mic signal regardless of where the sensitivity slider is set.
       const level = frame?.energy ?? 0;

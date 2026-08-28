@@ -1,7 +1,7 @@
 import { DRAFT_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
 import { captureMic, captureDisplayAudio } from "./audio/capture.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
-import { createStereoAnalyser, type StereoAnalyser, type StereoRead } from "./audio/stereo.ts";
+import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
 import { FeatureExtractor } from "./audio/features.ts";
 import { NUM_BANDS, type CaptureHandle, type FeatureFrame } from "./audio/types.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
@@ -83,11 +83,11 @@ let soloFallbackTriggered = false;
 
 let capture: CaptureHandle | null = null;
 let bandAnalyser: BandAnalyser | null = null;
-/** Time-domain sibling of bandAnalyser — waveform/stereo for the config
- *  panel's scope strip (src/ui/scopeStrip.ts). Never touches FeatureExtractor
+/** Time-domain sibling of bandAnalyser — the waveform for the controls
+ *  panel's Scope card (src/ui/audioMeters.ts). Never touches FeatureExtractor
  *  or the wire frame: this is display-only data local to this device, not a
- *  render-driving signal. See stereo.ts's header for why. */
-let stereoAnalyser: StereoAnalyser | null = null;
+ *  render-driving signal. See waveformAnalyser.ts's header for why. */
+let waveformAnalyser: WaveformAnalyser | null = null;
 const extractor = new FeatureExtractor();
 /** Set on first mic/display-capture attempt; cached so re-entering a viz
  *  never re-prompts. Cleared back to null on failure so a retry is possible. */
@@ -127,11 +127,10 @@ let lastVis: FeatureFrame | null = null;
  *  hitting the mic, not just what the visuals do with it. Reused in place
  *  every tick, same as bandAnalyser's own internal scratch buffer. */
 let lastRawBands: Float32Array | null = null;
-/** This tick's mono waveform and stereo read, straight off stereoAnalyser —
- *  same solo/host-only availability as lastRawBands above, for the same
- *  reason (no local mic on a renderer device). Feeds the scope strip. */
+/** This tick's waveform samples, straight off waveformAnalyser — same
+ *  solo/host-only availability as lastRawBands above, for the same reason
+ *  (no local mic on a renderer device). Feeds the Scope card. */
 let lastMono: Float32Array | null = null;
-let lastStereo: StereoRead | null = null;
 const rawBandsScratch = new Float32Array(NUM_BANDS);
 
 const animClock = createAnimClock();
@@ -227,7 +226,7 @@ function ensureAudio(): Promise<void> {
   const attempt = (async () => {
     capture = await chooseCapture();
     bandAnalyser = createBandAnalyser(capture.context, capture.sourceNode);
-    stereoAnalyser = createStereoAnalyser(capture.context, capture.sourceNode, capture.stream);
+    waveformAnalyser = createWaveformAnalyser(capture.context, capture.sourceNode);
     micDenied = false;
   })();
   audioPromise = attempt.catch((err) => {
@@ -261,7 +260,7 @@ async function fallBackToSolo(reason: string): Promise<void> {
   try {
     capture = await chooseCapture();
     bandAnalyser = createBandAnalyser(capture.context, capture.sourceNode);
-    stereoAnalyser = createStereoAnalyser(capture.context, capture.sourceNode, capture.stream);
+    waveformAnalyser = createWaveformAnalyser(capture.context, capture.sourceNode);
     mode = "solo";
     roomCodeEl.style.display = "none";
   } catch (err) {
@@ -623,28 +622,13 @@ function captureRawBands(dbBands: Float32Array, range: { min: number; max: numbe
   return rawBandsScratch;
 }
 
-/** Reads stereoAnalyser (if present) into lastMono/lastStereo, or clears both
- *  — called from every currentVisual() branch that has (or lacks) a local
- *  mic, same shape as captureRawBands/lastRawBands above. */
-function captureStereo(): void {
-  if (!stereoAnalyser) {
-    lastMono = null;
-    lastStereo = null;
-    return;
-  }
-  const read = stereoAnalyser.read();
-  lastMono = read.mono;
-  lastStereo = read;
-}
-
 function currentVisual(): FeatureFrame | null {
   if (syntheticFeed) {
     lastRawBands = null;
     // Synthetic frames are generated directly, not sampled from a real
-    // signal — there's nothing for the scope strip to trace, so it correctly
-    // shows its "local only" idle state here (see scopeStrip.ts).
+    // signal — there's nothing for the scope to trace, so its card
+    // correctly stays hidden here (see audioMeters.ts).
     lastMono = null;
-    lastStereo = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
@@ -652,13 +636,12 @@ function currentVisual(): FeatureFrame | null {
     if (!bandAnalyser || !capture) {
       lastRawBands = null;
       lastMono = null;
-      lastStereo = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
-    captureStereo();
+    lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
     return extractor.update(dbBands, now);
   }
 
@@ -666,13 +649,12 @@ function currentVisual(): FeatureFrame | null {
     if (!bandAnalyser || !capture || !hostConn) {
       lastRawBands = null;
       lastMono = null;
-      lastStereo = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
-    captureStereo();
+    lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
     const f = extractor.update(dbBands, now);
     hostConn.sendFrame(f);
     return sampleToVisual(hostConn.sample());
@@ -681,7 +663,6 @@ function currentVisual(): FeatureFrame | null {
   // renderer — no local mic, so no raw signal to show.
   lastRawBands = null;
   lastMono = null;
-  lastStereo = null;
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
@@ -750,7 +731,7 @@ function loop(): void {
 
   // Fed even when null (mic permission still pending) so the spectrum strip
   // can render its "waiting for audio" idle state instead of going dead.
-  deviceMenu?.update(gained, lastRawBands, anim, lastMono, lastStereo);
+  deviceMenu?.update(gained, lastRawBands, anim, lastMono);
 
   if (!lastVis || !anim) return;
 
