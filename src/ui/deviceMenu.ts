@@ -492,6 +492,7 @@ function createControlRow(spec: ControlRowSpec) {
   label.textContent = spec.label;
   label.className = "vc-label";
   label.style.cssText = rowLabelStyle;
+  label.style.cursor = "pointer";
   const right = document.createElement("div");
   right.style.cssText = rowRightStyle;
 
@@ -555,6 +556,7 @@ function createControlRow(spec: ControlRowSpec) {
   hint.className = "vc-hint";
 
   el.append(head, slider, hint);
+  label.addEventListener("click", () => slider.focus());
 
   // Log-mapped so the midpoint lands close to defaultValue instead of skewing
   // toward the wide "more reactive" end. With zeroAtMin, position 0 is carved
@@ -741,6 +743,7 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   label.textContent = spec.label;
   label.className = "vc-label";
   label.style.cssText = rowLabelStyle;
+  label.style.cursor = "pointer";
   const right = document.createElement("div");
   right.style.cssText = rowRightStyle;
   const readout = document.createElement("span");
@@ -764,6 +767,7 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   if (!spec.description) hint.style.display = "none";
 
   el.append(head, toggle, hint);
+  label.addEventListener("click", () => toggle.focus());
 
   function apply(value: number): void {
     const on = value >= 0.5;
@@ -958,6 +962,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoStrengthHint.textContent = AUTO_STRENGTH_HINT;
   autoStrengthRow.append(autoStrengthSlider, autoStrengthHint);
   autoCard.body.appendChild(autoStrengthRow);
+  autoCard.title.style.cursor = "pointer";
+  autoCard.title.addEventListener("click", () => autoStrengthSlider.focus());
 
   function showAutoStrength(value: number): void {
     autoStrengthSlider.value = String(value);
