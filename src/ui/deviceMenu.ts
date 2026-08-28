@@ -166,8 +166,10 @@ const chipBtnStyle = `
 const chipBtnLitStyle = `${chipBtnStyle} color: #fff; border-color: rgba(255,255,255,0.5);`;
 
 const rowHeadStyle = `display: flex; align-items: center; justify-content: space-between; gap: 8px;`;
+// Color lives in the .vc-label rule (controlsTheme.ts) so the hover/focus
+// tint can override it — an inline color would win over the stylesheet.
 const rowLabelStyle = `
-  font: 300 14.5px/1.2 ${FONT_LABEL}; color: #fff; min-width: 0;
+  font: 300 14.5px/1.2 ${FONT_LABEL}; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 `;
 const rowRightStyle = `display: flex; align-items: center; gap: 7px; flex-shrink: 0;`;
@@ -408,6 +410,7 @@ function createControlRow(spec: ControlRowSpec) {
   head.style.cssText = rowHeadStyle;
   const label = document.createElement("div");
   label.textContent = spec.label;
+  label.className = "vc-label";
   label.style.cssText = rowLabelStyle;
   const right = document.createElement("div");
   right.style.cssText = rowRightStyle;
@@ -443,17 +446,23 @@ function createControlRow(spec: ControlRowSpec) {
   slider.type = "range";
   slider.className = "vc-slider";
   slider.setAttribute("aria-label", spec.label);
-  slider.style.setProperty("--vc-accent", spec.accent);
+  // The accent rides the row (not just the slider) so the hover/focus
+  // highlight on the title and track share it — see controlsTheme.ts.
+  el.style.setProperty("--vc-accent", spec.accent);
   const isLog = spec.mapping === "log";
+  // Continuous, not stepped: a declared `step` is the uniform's meaningful
+  // resolution, not a detent, and snapping to it made a 0..1 row jump in
+  // twenty visible hops across the track. Only a step of 1 or more marks a
+  // genuinely discrete control (integer counts), which keeps its detents.
+  const discrete = !isLog && spec.step !== undefined && spec.step >= 1;
   if (isLog) {
     slider.min = "0";
     slider.max = "100";
-    slider.step = "1";
   } else {
     slider.min = String(spec.min);
     slider.max = String(spec.max);
-    slider.step = String(spec.step ?? "any");
   }
+  slider.step = discrete ? String(spec.step) : "any";
 
   const hint = document.createElement("div");
   hint.className = "vc-hint";
@@ -476,7 +485,7 @@ function createControlRow(spec: ControlRowSpec) {
     if (spec.zeroAtMin && value <= 0) return 0;
     const loPos = spec.zeroAtMin ? 1 : 0;
     const t = Math.log(value / spec.min) / Math.log(spec.max / spec.min);
-    return Math.round(loPos + t * (100 - loPos));
+    return loPos + t * (100 - loPos);
   }
   function sliderToValue(): number {
     return isLog ? posToValue(Number(slider.value)) : Number(slider.value);
@@ -598,6 +607,7 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   head.style.cssText = rowHeadStyle;
   const label = document.createElement("div");
   label.textContent = spec.label;
+  label.className = "vc-label";
   label.style.cssText = rowLabelStyle;
   const right = document.createElement("div");
   right.style.cssText = rowRightStyle;
@@ -614,7 +624,7 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   toggle.className = "vc-toggle";
   toggle.setAttribute("role", "switch");
   toggle.setAttribute("aria-label", spec.label);
-  toggle.style.setProperty("--vc-accent", spec.accent);
+  el.style.setProperty("--vc-accent", spec.accent);
 
   const hint = document.createElement("div");
   hint.className = "vc-hint";
@@ -800,8 +810,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoStrengthSlider.setAttribute("aria-label", "Auto strength");
   autoStrengthSlider.min = "0";
   autoStrengthSlider.max = "2";
-  autoStrengthSlider.step = "0.05";
-  autoStrengthSlider.style.setProperty("--vc-accent", AUTO_SKY);
+  autoStrengthSlider.step = "any";
+  autoStrengthRow.style.setProperty("--vc-accent", AUTO_SKY);
   autoStrengthSlider.style.marginTop = "0";
   const autoStrengthHint = document.createElement("div");
   autoStrengthHint.className = "vc-hint";

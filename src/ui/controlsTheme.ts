@@ -110,7 +110,16 @@ const stylesheet = `
 .vc-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 2px; }
 .vc-scroll::-webkit-scrollbar-track { background: transparent; }
 
-.vc-row { position: relative; }
+/* A row "wakes" when the pointer is anywhere over it (the row is a far
+ * bigger target than its 3px track) or its control has focus: the label
+ * tints toward the row's accent, the track glows through a hairline border,
+ * and the slider zooms up so the thumb is easy to grab precisely. */
+.vc-row { position: relative; --vc-accent: #fff; }
+.vc-label { color: #fff; transition: color 0.18s ease, text-shadow 0.18s ease; }
+.vc-row:hover .vc-label, .vc-row:focus-within .vc-label {
+  color: var(--vc-accent);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--vc-accent) 35%, transparent);
+}
 .vc-hint {
   max-height: 0; opacity: 0; overflow: hidden; margin-top: 0;
   transition: max-height 0.18s ease, opacity 0.18s ease, margin-top 0.18s ease;
@@ -118,31 +127,65 @@ const stylesheet = `
 }
 .vc-row:hover .vc-hint, .vc-row:focus-within .vc-hint { max-height: 48px; opacity: 1; margin-top: 5px; }
 
-/* The whole input is the touch target (taller than the 3px track it draws). */
+/* The whole input is the touch target (taller than the 3px track it draws).
+ * The accent comes from the enclosing .vc-row. */
 .vc-slider {
   -webkit-appearance: none; appearance: none;
   display: block; width: 100%; height: 22px; margin: 2px 0 0; padding: 0;
   background: transparent; cursor: pointer; touch-action: pan-y;
-  --vc-fill: 0%; --vc-accent: #fff;
+  --vc-fill: 0%;
+  transform-origin: 50% 50%;
+  transition: transform 0.18s ease;
 }
 .vc-slider:focus { outline: none; }
+.vc-row:hover .vc-slider, .vc-row:focus-within .vc-slider { transform: scale(1.015, 1.6); }
 .vc-slider::-webkit-slider-runnable-track {
   height: 3px; border-radius: 2px;
   background: linear-gradient(var(--vc-accent), var(--vc-accent)) no-repeat 0 0 / var(--vc-fill) 100%, rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 0 0 transparent;
+  transition: box-shadow 0.18s ease;
+}
+.vc-row:hover .vc-slider::-webkit-slider-runnable-track,
+.vc-row:focus-within .vc-slider::-webkit-slider-runnable-track {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--vc-accent) 45%, transparent),
+    0 0 8px color-mix(in srgb, var(--vc-accent) 30%, transparent);
 }
 .vc-slider::-webkit-slider-thumb {
   -webkit-appearance: none; width: 3px; height: 11px; margin-top: -4px;
   border: none; border-radius: 2px; background: #fff;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
-.vc-slider::-moz-range-track { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.18); }
+.vc-row:hover .vc-slider::-webkit-slider-thumb,
+.vc-row:focus-within .vc-slider::-webkit-slider-thumb {
+  transform: scaleX(1.7);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--vc-accent) 60%, transparent);
+}
+.vc-slider::-moz-range-track {
+  height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.18);
+  transition: box-shadow 0.18s ease;
+}
+.vc-row:hover .vc-slider::-moz-range-track,
+.vc-row:focus-within .vc-slider::-moz-range-track {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--vc-accent) 45%, transparent),
+    0 0 8px color-mix(in srgb, var(--vc-accent) 30%, transparent);
+}
 .vc-slider::-moz-range-progress { height: 3px; border-radius: 2px; background: var(--vc-accent); }
-.vc-slider::-moz-range-thumb { width: 3px; height: 11px; border: none; border-radius: 2px; background: #fff; }
+.vc-slider::-moz-range-thumb {
+  width: 3px; height: 11px; border: none; border-radius: 2px; background: #fff;
+  transition: transform 0.18s ease;
+}
+.vc-row:hover .vc-slider::-moz-range-thumb,
+.vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(1.7); }
 
 .vc-toggle {
   position: relative; width: 28px; height: 14px; margin: 6px 0 0; padding: 0;
   border: none; border-radius: 7px; background: rgba(255, 255, 255, 0.18);
-  cursor: pointer; display: block; transition: background 0.15s ease;
-  --vc-accent: #fff;
+  cursor: pointer; display: block; transition: background 0.15s ease, box-shadow 0.18s ease;
+}
+.vc-row:hover .vc-toggle, .vc-row:focus-within .vc-toggle {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--vc-accent) 45%, transparent);
 }
 .vc-toggle::after {
   content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px;
