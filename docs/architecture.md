@@ -36,6 +36,13 @@ the user (or `src/tuning/overrides.ts` in dev) has pinned it manually.
 scene), read by `src/app.ts`, which is the phone/controller/gallery entry
 (`index.html`).
 
+The config panel's listening post (`src/ui/deviceMenu.ts`, plus
+`spectrumStrip.ts`/`audioMeters.ts`/`scopeStrip.ts`) is the one place that reads
+outside this pipeline: `src/audio/stereo.ts` and `waveform.ts` read time-domain
+samples straight off this device's own mic, entirely separate from
+`FeatureFrame`/`AnimFrame` and never touching the wire in "Phone to TV" below —
+a viewer with no local mic sees that part of the panel in its idle state.
+
 ## Phone to TV
 
 `src/tv.ts` is the paired-display entry (`tv.html`). The two devices don't share a

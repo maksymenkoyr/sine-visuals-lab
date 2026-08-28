@@ -22,6 +22,10 @@ import {
   type BandGroup,
 } from "../audio/bandGains.ts";
 import { createSpectrumStrip } from "./spectrumStrip.ts";
+import { createAudioMeters } from "./audioMeters.ts";
+import { createScopeStrip } from "./scopeStrip.ts";
+import type { AnimFrame } from "../render/animClock.ts";
+import type { StereoRead } from "../audio/stereo.ts";
 
 export interface MenuItem {
   id: string;
@@ -85,10 +89,20 @@ export interface DeviceMenuDeps {
 export interface DeviceMenu {
   toggle(): void;
   close(): void;
-  /** Fed every frame while in a viz (either may be null: frame before audio is
-   *  up, rawBands additionally on a mic-less renderer device) — drives the
-   *  Sensitivity box's level wash and the spectrum strip's two feeds. */
-  update(frame: FeatureFrame | null, rawBands: Float32Array | null): void;
+  /** Fed every frame while in a viz. frame/rawBands may be null before audio
+   *  is up (rawBands additionally on a mic-less renderer device); anim may be
+   *  null a tick before the anim clock has advanced; mono/stereo are
+   *  local-only (null on a mic-less renderer — see scopeStrip.ts) and never
+   *  cross the wire the way frame/anim's fields effectively do. Drives the
+   *  Sensitivity box's level wash, the spectrum strip's two feeds, the
+   *  transport/level/bands/dials meters, and the waveform/stereo scope. */
+  update(
+    frame: FeatureFrame | null,
+    rawBands: Float32Array | null,
+    anim: AnimFrame | null,
+    mono: Float32Array | null,
+    stereo: StereoRead | null,
+  ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
   isOpen(): boolean;
@@ -477,6 +491,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // is drawn on. Always mounted (unlike sceneBox), since it's not tied to
   // which scene is active.
   const spectrumStrip = createSpectrumStrip();
+
+  // The rest of the listening post — everything else the pipeline already
+  // derives (transport, level-vs-energy, band onsets, section, dials) plus
+  // the two things it never captured before (waveform, stereo). See their
+  // own headers for why they're split into two components. Always mounted,
+  // same reasoning as spectrumStrip above.
+  const audioMeters = createAudioMeters();
+  const scopeStrip = createScopeStrip();
 
   const sensitivityBox = document.createElement("div");
   sensitivityBox.style.cssText = sensitivityBoxStyle;
@@ -899,6 +921,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   root.append(
     spectrumStrip.el,
+    audioMeters.el,
+    scopeStrip.el,
     bandsBox,
     autoRow,
     sensitivityBox,
@@ -985,10 +1009,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     close,
     isOpen: () => isOpen,
-    update(frame: FeatureFrame | null, rawBands: Float32Array | null) {
+    update(
+      frame: FeatureFrame | null,
+      rawBands: Float32Array | null,
+      anim: AnimFrame | null,
+      mono: Float32Array | null,
+      stereo: StereoRead | null,
+    ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
+
+      audioMeters.update(frame, anim);
+      scopeStrip.update(mono, stereo);
       // Raw (pre-sensitivity) energy, so the level wash reflects the actual
       // mic signal regardless of where the sensitivity slider is set.
       const level = frame?.energy ?? 0;
