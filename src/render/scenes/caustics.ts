@@ -40,10 +40,12 @@ const SETTINGS: SceneSetting[] = [
     // Was { pulse: 0.35, attack: 0.25 } — but `pulse` alone floors near 0.92
     // on almost any locked-tempo track (it's 60% tempoLock, which saturates
     // for basically all steady music), so the old weights resolved focus to
-    // ~0.90 and held it there for the whole track, not just a snap. Lower
-    // weights keep the auto swing real without pushing focus that close to
-    // its own ceiling on ordinary percussive material (see focusCurve below
-    // for the other half of this fix — the dwell time at a given focus).
+    // ~0.90 and held it there for the whole track, not just a snap. Since
+    // uFocus scales the resting floor below (focusFloor = 0.35 * uFocus),
+    // sitting that close to 1 kept the *resting* state elevated for the
+    // whole track too, not just responding to a specific beat. Lower
+    // weights keep the auto swing real without pinning the floor that high
+    // on ordinary percussive material.
     auto: { pulse: 0.2, attack: 0.15 },
   },
   {
@@ -199,7 +201,7 @@ const RIPPLE_WIDTH = 1.6; // gaussian tightness — lower = wider ring
 const RIPPLE_DECAY_PER_SEC = 0.55; // lower = the ring lives longer and travels farther
 
 // Ceiling every focus setting converges to on a full-strength beat (see the
-// focusCurve comment in FRAG). Was 26 before focus setting stopped scaling
+// focusDrive comment in FRAG). Was 26 before focus setting stopped scaling
 // this directly — lowered alongside that change because a shared ceiling
 // now gets reached far more often (any focus setting, given a strong
 // enough beat, not just uFocus=1), and 26 pushes pow(ridge, sharp) close
@@ -359,36 +361,26 @@ void main() {
   int iterations = int(mix(3.0, 6.0, uQuality));
   float acc = 0.0;
   float amp = 1.0;
-  // No baseline floor: at rest (uBeatPulse near 0) sharp stays near the fog
-  // end regardless of uFocus, so raising the slider widens the swing between
-  // "resting" and "on-beat" instead of shifting the whole range up — a
-  // uniform lift is what made higher settings read as merely thinner lines
-  // rather than a bigger snap.
-  //
-  // uFocus bends the *response curve* on beatPulse instead of scaling
-  // sharp's own ceiling: every focus setting maps a full-strength beat
-  // (uBeatPulse -> 1) to the same sharp = ${FOCUS_SHARP_MAX}. What changes
-  // is how strong a beat has to be to get there — low focus needs a hit
-  // close to uBeatPulse's own max (a steep curve, so ordinary beats barely
-  // move it), high focus reaches nearly full sharpness off a modest pulse
-  // (a shallow curve). Without this bend, sharp's ceiling was itself
-  // mix(4, FOCUS_SHARP_MAX, uFocus) — a second, hidden min/max scale
-  // on top of the swing this comment block already fixed once, so low
-  // focus could never reach the same peak no matter how hard the beat hit.
-  //
-  // The shallow end was 0.35, not 0.6: in real (auto-on) playback uFocus
-  // spends most of a track sitting well above its 0.7 default (see the
-  // focus spec's auto comment), and at 0.35 the resulting focusDrive decays
-  // slowly enough that sharp sits near FOCUS_SHARP_MAX for most of the gap
-  // between beats too, not just the beat itself — a near-continuous peak
-  // rather than a snap, which is exactly the regime where the ridge's
-  // anti-aliasing (aaSharp below) and the palette's hue-phase damping
-  // (hueDamp further down) are weakest. 0.6 shortens that dwell tail
-  // substantially while leaving the peak-sharpness invariant above exactly
-  // intact (pow(1.0, c) == 1.0 for any c, so a full-strength beat still
-  // reaches FOCUS_SHARP_MAX at every focus setting).
-  float focusCurve = mix(2.4, 0.6, uFocus);
-  float focusDrive = pow(uBeatPulse, focusCurve);
+  // Resting floor, scaled by uFocus — this is the scene's original design
+  // (focusDrive = uFocus * (0.35 + 0.65*beatPulse)), reinstated after
+  // dropping it (an earlier fix, "widen the beat swing instead of lifting
+  // the whole range") turned out to cost more than it fixed once the
+  // ceiling-convergence invariant below existed too: together they made
+  // sharp collapse to pure fog between every beat and swing the full
+  // distance to the ceiling on every single one — a much bigger, more
+  // constant swing than the scene ever had, which read as the pattern
+  // dissolving and reforming twice a second rather than a clean snap
+  // ("chaotic decay," "waves moving too much"). A straight linear mix from
+  // this floor to a *fixed* ceiling (not a response curve shaped by
+  // uFocus — that was a later addition this revert also drops, since nothing
+  // asked for it and it's part of what steepened the decay) reconstructs the
+  // original's swing and decay rate almost exactly, while still keeping the
+  // one thing worth keeping from the ceiling-convergence fix: the peak
+  // (uBeatPulse -> 1) always reaches FOCUS_SHARP_MAX regardless of uFocus,
+  // so low focus still isn't capped to a soft peak — only the floor moves
+  // with the slider now, exactly as it did originally.
+  float focusFloor = 0.35 * uFocus;
+  float focusDrive = mix(focusFloor, 1.0, uBeatPulse);
   float sharp = mix(4.0, ${FOCUS_SHARP_MAX}.0, focusDrive) * (1.0 - bassBulge * 0.25);
   float ridgeGain = sqrt(sharp / 4.0); // a thinner ridge is proportionally brightened, so Focus snaps intensity too, not just width
   // Warp compresses screen space into q-space, and near its own fold points
@@ -399,12 +391,16 @@ void main() {
   // every octave goes thin at once, so right where warp already folds
   // several of their contours close together, they all render as hard
   // near-coincident lines simultaneously, reading as a dense "pixel ladder"
-  // fan. Easing warp back exactly when focusDrive peaks loosens that fold
-  // just when sharpness would otherwise expose it hardest. Strengthened
-  // from 0.72 to 0.6 alongside focusCurve's floor above — a longer dwell
-  // near peak sharpness in real playback means this easing has to hold for
-  // longer than a momentary snap, not just soften the instant of the beat.
-  float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7) * mix(1.0, 0.6, focusDrive);
+  // fan. A previous fix eased warpAmt down in sync with focusDrive to
+  // loosen that fold right when sharpness would otherwise expose it
+  // hardest — removed again here: it was the only change in this scene's
+  // history that moves ridge *positions* (not just their thinness or
+  // brightness), so the warp field was physically reshaping on every beat,
+  // which is real, newly-introduced motion. It also didn't demonstrably
+  // reduce the ladder it was added for (see that round's own verification
+  // notes) — not worth the added motion for an unproven benefit. warpAmt
+  // is back to depending only on the music, not on the beat snap itself.
+  float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7);
   for (int i = 0; i < 6; i++) {
     if (i >= iterations) break;
     float band = sampleBands(float(i) / 6.0);
