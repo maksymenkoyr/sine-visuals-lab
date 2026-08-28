@@ -114,11 +114,15 @@ const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.1
 const TEMPO_TITLE =
   "Tempo. The dot flashes white on every beat and settles back to its colour, brighter as the tracker gets sure.";
 // The raw estimate flits between candidates (half/double-time, a fill), but
-// a song's tempo hardly ever changes — so the readout only adopts a new
-// value once the estimate has sat within TEMPO_SETTLE_TOL of it for
-// TEMPO_SETTLE_SEC. Display-only; nothing downstream reads this.
-const TEMPO_SETTLE_SEC = 2;
-const TEMPO_SETTLE_TOL = 2;
+// a song's tempo hardly ever changes — so the readout shows the value that
+// most of the last TEMPO_SETTLE_SEC of readings agree on (within
+// TEMPO_SETTLE_TOL of the window's median, at least TEMPO_SETTLE_SHARE of
+// them). A majority rather than an unbroken run: on a real mic the estimate
+// can blip for an onset or two, and a run that resets on every blip never
+// settles at all. Display-only; nothing downstream reads this.
+const TEMPO_SETTLE_SEC = 2.5;
+const TEMPO_SETTLE_TOL = 0.03;
+const TEMPO_SETTLE_SHARE = 0.6;
 const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
 
 /** Jump an element to `color` with no fade, then re-arm the fade so the
@@ -265,8 +269,7 @@ function createTempoBlock(accent: string) {
   let lit = false;
   let lastLockStep = -1;
   let shownBpm = 0;
-  let candidateBpm = 0;
-  let candidateSec = 0;
+  const samples: { atMs: number; bpm: number }[] = [];
   digits.textContent = "--";
 
   function settle(): void {
@@ -303,23 +306,28 @@ function createTempoBlock(accent: string) {
         lit = true;
       }
     },
-    /** Per frame, with the raw estimate (0 = none): settles it before
-     *  showing — see TEMPO_SETTLE_SEC. */
-    settle(bpm: number, dtSec: number): void {
-      const target = bpm > 0 ? Math.round(bpm) : 0;
-      if (Math.abs(target - shownBpm) <= TEMPO_SETTLE_TOL) {
-        candidateSec = 0;
-        return;
+    /** At the text tick, with the raw estimate (0 = none): settles it
+     *  before showing — see TEMPO_SETTLE_SEC. */
+    settle(bpm: number, nowMs: number): void {
+      samples.push({ atMs: nowMs, bpm });
+      while (samples.length && samples[0].atMs < nowMs - TEMPO_SETTLE_SEC * 1000) samples.shift();
+      if (samples.length < 2 || nowMs - samples[0].atMs < TEMPO_SETTLE_SEC * 800) return;
+
+      const sorted = samples.map((s) => s.bpm).sort((a, b) => a - b);
+      const median = sorted[sorted.length >> 1];
+      const tol = Math.max(1, median * TEMPO_SETTLE_TOL);
+      let agree = 0;
+      let sum = 0;
+      for (const v of sorted) {
+        if (Math.abs(v - median) > tol) continue;
+        agree++;
+        sum += v;
       }
-      if (Math.abs(target - candidateBpm) <= TEMPO_SETTLE_TOL) {
-        candidateSec += dtSec;
-      } else {
-        candidateBpm = target;
-        candidateSec = 0;
-      }
-      if (candidateSec < TEMPO_SETTLE_SEC) return;
-      shownBpm = candidateBpm;
-      candidateSec = 0;
+      if (agree < samples.length * TEMPO_SETTLE_SHARE) return;
+
+      const next = median > 0 ? Math.round(sum / agree) : 0;
+      if (next === shownBpm || (shownBpm > 0 && next > 0 && Math.abs(next - shownBpm) <= tol)) return;
+      shownBpm = next;
       digits.textContent = shownBpm > 0 ? String(shownBpm) : "--";
     },
   };
@@ -520,14 +528,15 @@ export function createAudioMeters(): AudioMeters {
       }
       // ---- Rhythm ----
       tempo.update(anim?.tempoLock ?? 0, !!frame?.beat);
-      tempo.settle(frame?.bpm ?? 0, dtSec);
       section.setValue(anim ? anim.sectionIntensity : null, dtSec);
       if (anim?.dropOnset) section.flash(HOT_RED);
-      if (text)
+      if (text) {
+        tempo.settle(frame?.bpm ?? 0, nowMs);
         section.setReadout(
           anim ? pct(anim.sectionIntensity) : "--",
           anim ? {} : IDLE,
         );
+      }
 
       // ---- Character ----
       for (const { dial, row } of dialRows) {

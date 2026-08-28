@@ -40,6 +40,10 @@ const BPM_MAX = 180;
 const PERIOD_STEP_SEC = 0.005;
 const COMB_TOL_BEATS = 0.12;
 const ONE_BEAT_BONUS = 0.5;
+// A rival tempo must out-score the current one by this factor to replace
+// it — without it, two near-equal candidates (a tempo and something close
+// to a simple ratio of it) can trade places on every onset.
+const TEMPO_SWITCH_MARGIN = 1.25;
 
 // getFloatFrequencyData returns -Infinity for a bin with exactly zero
 // energy (true silence) — it is NOT clamped by the analyser's
@@ -162,11 +166,7 @@ export class FeatureExtractor {
       }
     }
 
-    const periodMin = 60 / BPM_MAX;
-    const periodMax = 60 / BPM_MIN;
-    let bestPeriod = 0;
-    let bestScore = 0;
-    for (let period = periodMin; period <= periodMax + 1e-9; period += PERIOD_STEP_SEC) {
+    const combScore = (period: number): number => {
       let score = 0;
       for (const gap of gaps) {
         const beats = gap / period;
@@ -176,12 +176,31 @@ export class FeatureExtractor {
         if (err >= COMB_TOL_BEATS) continue;
         score += (1 - err / COMB_TOL_BEATS) * (k === 1 ? 1 + ONE_BEAT_BONUS : 1);
       }
+      return score;
+    };
+
+    const periodMin = 60 / BPM_MAX;
+    const periodMax = 60 / BPM_MIN;
+    let bestPeriod = 0;
+    let bestScore = 0;
+    for (let period = periodMin; period <= periodMax + 1e-9; period += PERIOD_STEP_SEC) {
+      const score = combScore(period);
       if (score > bestScore) {
         bestScore = score;
         bestPeriod = period;
       }
     }
     if (bestPeriod === 0) return;
+
+    // Hysteresis: stay on the current tempo unless the rival clearly wins.
+    // The refinement below still follows genuine drift, since it re-measures
+    // the beat length from whatever gaps fit.
+    if (this.bpm > 0) {
+      const current = 60 / this.bpm;
+      if (current >= periodMin && current <= periodMax && bestScore < combScore(current) * TEMPO_SWITCH_MARGIN) {
+        bestPeriod = current;
+      }
+    }
 
     // Refine past the candidate grid: the mean beat length implied by every
     // gap that fits the winner.
