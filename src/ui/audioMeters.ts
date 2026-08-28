@@ -3,12 +3,11 @@ import type { FeatureFrame } from "../audio/types.ts";
 import type { StereoRead } from "../audio/stereo.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
-import { AUTO_SKY, HOT_RED, INPUT_GREEN, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";
+import { AUTO_SKY, FONT_MONO, HOT_RED, INPUT_GREEN } from "./controlsTheme.ts";
 import {
   createCard,
   digitsStyle,
   digitsTextStyle,
-  groupHeading,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
@@ -27,9 +26,8 @@ import {
  *
  *  - Signal: FeatureFrame.level (pre-AGC, absolute) beside .energy (post-AGC)
  *    — the only way to see features.ts's adaptive floor/peak doing its job,
- *    since its whole point is to make that invisible downstream — then the
- *    low/mid/high groups from AnimFrame with their onset flashes (the first
- *    consumers of midOnset/highOnset anywhere).
+ *    since its whole point is to make that invisible downstream. (No
+ *    low/mid/high here: the spectrum strip already shows them.)
  *  - Rhythm: bpm with a beat dot, the meter being beatClock's tempoLock so an
  *    unlocked guess reads as unconfident rather than as a confident wrong
  *    number; and sectionIntensity with a drop flash.
@@ -87,9 +85,28 @@ const tickStyle = `position: absolute; top: -2px; bottom: -2px; width: 1px; back
 const beatDotStyle = `width: 6px; height: 6px; border-radius: 50%; background-color: rgba(255,255,255,0.25); transition: ${FADE};`;
 const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
 
-const MONO_HINT = "This source is mono — a phone mic usually is. Tab audio comes through in stereo.";
-const WIDTH_HINT = "How wide the stereo picture is: 0 is mono, 100 is fully wide.";
-const BALANCE_HINT = "Which side is louder — the fill grows toward it.";
+// Balance is a compact block welded beside the Width row — the Auto master
+// block's shape (deviceMenu.ts) — because it's one signed number, not a
+// 0..1 quantity a left-anchored meter can show. The wash behind the number
+// leans toward whichever side is louder.
+const stereoRowStyle = `display: flex; gap: 14px; align-items: stretch;`;
+const balanceBlockStyle = `
+  width: 74px; flex-shrink: 0; display: grid; place-items: center; text-align: center;
+  border: 1px solid rgba(255,255,255,0.18); border-radius: 3px;
+  background-repeat: no-repeat; background-size: 100% 100%;
+`;
+const balanceValueStyle = `display: flex; align-items: baseline; justify-content: center; gap: 1px; color: #fff;`;
+const balanceSignStyle = `font: 400 11px/1 ${FONT_MONO};`; // DSEG7 has no "+"
+const balanceCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
+const BALANCE_WASH = "rgba(255,255,255,0.16)";
+const BALANCE_TITLE = "Balance — which side is louder. Minus is left, plus is right; the wash leans the same way.";
+
+const MONO_HINT = "This source is mono — a phone or laptop mic usually is — so there's no left and right to compare.";
+const WIDTH_HINT = "How wide the stereo picture is: 0 is mono, 100 is as much side as centre.";
+// Width and balance are traits of the mix, not events: one analyser buffer
+// is ~40ms and the per-buffer ratio jitters, so both ease toward the latest
+// read over about this long before they're shown.
+const STEREO_SMOOTH_SEC = 0.3;
 
 /** Jump an element to `color` with no fade, then re-arm the fade so the
  *  next color write eases back — a one-frame event made visible. */
@@ -112,9 +129,6 @@ interface MeterRowSpec {
   description: string;
   /** A fixed mark at this fraction of the track — the dials' NEUTRAL. */
   tickAt?: number;
-  /** The fill grows out from the centre toward either end (balance), and
-   *  the value runs -1..1 instead of 0..1. No peak cap. */
-  centered?: boolean;
 }
 
 interface ReadoutOpts {
@@ -164,7 +178,7 @@ function createMeterRow(spec: MeterRowSpec) {
   }
   const cap = document.createElement("div");
   cap.style.cssText = capStyle;
-  if (!spec.centered) track.appendChild(cap);
+  track.appendChild(cap);
   meter.appendChild(track);
 
   const hint = document.createElement("div");
@@ -191,13 +205,6 @@ function createMeterRow(spec: MeterRowSpec) {
         fill.style.width = "0";
         cap.style.visibility = "hidden";
         peakFrac = 0;
-        return;
-      }
-      if (spec.centered) {
-        const v = clamp(value, -1, 1);
-        const half = Math.abs(v) * 50;
-        fill.style.left = v < 0 ? `${50 - half}%` : "50%";
-        fill.style.width = `${half}%`;
         return;
       }
       const v = clamp(value, 0, 1);
@@ -228,7 +235,56 @@ function createMeterRow(spec: MeterRowSpec) {
     },
   };
 }
-type MeterRow = ReturnType<typeof createMeterRow>;
+function createBalanceBlock() {
+  const el = document.createElement("div");
+  el.style.cssText = balanceBlockStyle;
+  el.title = BALANCE_TITLE;
+  const inner = document.createElement("div");
+  const value = document.createElement("div");
+  value.style.cssText = balanceValueStyle;
+  const sign = document.createElement("span");
+  sign.style.cssText = balanceSignStyle;
+  const digits = document.createElement("span");
+  digits.style.cssText = digitsStyle;
+  value.append(sign, digits);
+  const caption = document.createElement("div");
+  caption.style.cssText = balanceCaptionStyle;
+  caption.textContent = "BALANCE";
+  inner.append(value, caption);
+  el.appendChild(inner);
+
+  let lastHalf = NaN;
+  let lastKey = "";
+  return {
+    el,
+    /** Per frame: the wash from the centre out to the louder side, in
+     *  whole percent so it's only rewritten when it visibly moves. */
+    setWash(balance: number | null): void {
+      const half = balance === null ? 0 : Math.round(clamp(balance, -1, 1) * 50);
+      if (half === lastHalf) return;
+      lastHalf = half;
+      if (half === 0) {
+        el.style.backgroundImage = "none";
+        return;
+      }
+      const a = Math.min(50, 50 + half);
+      const b = Math.max(50, 50 + half);
+      el.style.backgroundImage = `linear-gradient(90deg, transparent ${a}%, ${BALANCE_WASH} ${a}%, ${BALANCE_WASH} ${b}%, transparent ${b}%)`;
+    },
+    /** At the text tick: signed percent, "--" while there's no stereo. */
+    setReadout(balance: number | null): void {
+      const n = balance === null ? null : Math.round(clamp(balance, -1, 1) * 100);
+      const s = n === null || n === 0 ? "" : n < 0 ? "-" : "+";
+      const text = n === null ? "--" : String(Math.abs(n));
+      const key = s + text;
+      if (key === lastKey) return;
+      lastKey = key;
+      sign.textContent = s;
+      digits.textContent = text;
+      digits.style.cssText = n === null ? digitsTextStyle : digitsStyle;
+    },
+  };
+}
 
 const IDLE: ReadoutOpts = { textual: true, unit: "" };
 const pct = (v: number) => String(Math.round(clamp(v, 0, 1) * 100));
@@ -242,34 +298,16 @@ export function createAudioMeters(): AudioMeters {
     label: "Level",
     accent: INPUT_GREEN,
     unit: "%",
-    description: "Raw loudness at the mic, before auto-gain.",
+    description: "How loud the room is on a fixed quiet-to-loud scale. Doesn't auto-adjust: a quiet room reads low and stays low.",
   });
   const energy = createMeterRow({
     label: "Energy",
     accent: INPUT_GREEN,
     unit: "%",
-    description: "What the scene reacts to, after auto-gain levels the room — the gap to Level is the gain at work.",
+    description: "The same sound after auto-gain, which keeps it mid-range whether the room is quiet or loud. This is what the scene actually reacts to.",
   });
-  const bandRows: { row: MeterRow; read: (anim: AnimFrame) => { value: number; onset: boolean } }[] = [
-    {
-      row: createMeterRow({ label: "Low", accent: STRIP_LOW, unit: "%", description: "Bass, kicks and sub — blinks on a hit." }),
-      read: (anim) => ({ value: anim.low, onset: anim.lowOnset }),
-    },
-    {
-      row: createMeterRow({ label: "Mid", accent: STRIP_MID, unit: "%", description: "Vocals, chords, snares — blinks on a hit." }),
-      read: (anim) => ({ value: anim.mid, onset: anim.midOnset }),
-    },
-    {
-      row: createMeterRow({ label: "High", accent: STRIP_HIGH, unit: "%", description: "Hats and air — blinks on a hit." }),
-      read: (anim) => ({ value: anim.high, onset: anim.highOnset }),
-    },
-  ];
   const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN });
-  signalCard.body.append(level.el, spacer(), energy.el, groupHeading("Bands"));
-  bandRows.forEach(({ row }, i) => {
-    if (i > 0) signalCard.body.appendChild(spacer());
-    signalCard.body.appendChild(row.el);
-  });
+  signalCard.body.append(level.el, spacer(), energy.el);
 
   // ---- Rhythm ----
   const tempo = createMeterRow({
@@ -310,8 +348,8 @@ export function createAudioMeters(): AudioMeters {
   const waveform = createMeterRow({
     label: "Waveform",
     accent: NEUTRAL_ACCENT,
-    unit: "%",
-    description: "The last few seconds of sound, zoomed to fit. Red means the mic is clipping — turn the source down.",
+    unit: "peak",
+    description: "The last few seconds of sound, zoomed to fit. The number is the loudest recent sample out of 100 — at 100 the mic is clipping, the trace turns red, and the source needs turning down.",
   });
   // The trace takes the meter's place under the head.
   const waveCanvas = document.createElement("canvas");
@@ -319,9 +357,14 @@ export function createAudioMeters(): AudioMeters {
   waveform.el.children[1].replaceWith(waveCanvas);
   const waveCtx = waveCanvas.getContext("2d")!;
   const width = createMeterRow({ label: "Width", accent: NEUTRAL_ACCENT, unit: "%", description: WIDTH_HINT });
-  const balance = createMeterRow({ label: "Balance", accent: NEUTRAL_ACCENT, description: BALANCE_HINT, centered: true });
+  width.el.style.flex = "1";
+  width.el.style.minWidth = "0";
+  const balance = createBalanceBlock();
+  const stereoRow = document.createElement("div");
+  stereoRow.style.cssText = stereoRowStyle;
+  stereoRow.append(width.el, balance.el);
   const scopeCard = createCard({ title: "Scope", accent: NEUTRAL_ACCENT });
-  scopeCard.body.append(waveform.el, spacer(), width.el, spacer(), balance.el);
+  scopeCard.body.append(waveform.el, spacer(), stereoRow);
   scopeCard.el.style.display = "none";
   let scopeShown = false;
 
@@ -423,6 +466,11 @@ export function createAudioMeters(): AudioMeters {
   let lastMs: number | null = null;
   let lastTextMs = 0;
   let beatLit = false;
+  let widthSmooth = 0;
+  let balanceSmooth = 0;
+  // Peak-hold for the waveform readout: one buffer's peak jumps around too
+  // fast to read, so it holds and falls at the meters' cap rate.
+  let wavePeak = 0;
 
   return {
     el: root,
@@ -440,13 +488,6 @@ export function createAudioMeters(): AudioMeters {
         level.setReadout(frame ? pct(frame.level) : "--", frame ? {} : IDLE);
         energy.setReadout(frame ? pct(frame.energy) : "--", frame ? {} : IDLE);
       }
-      for (const { row, read } of bandRows) {
-        const r = anim ? read(anim) : null;
-        row.setValue(r ? r.value : null, dtSec);
-        if (r?.onset) row.flash();
-        if (text) row.setReadout(r ? pct(r.value) : "--", r ? {} : IDLE);
-      }
-
       // ---- Rhythm ----
       tempo.setValue(anim ? anim.tempoLock : null, dtSec);
       if (beatLit) {
@@ -482,25 +523,30 @@ export function createAudioMeters(): AudioMeters {
       const clipped = isClipping(mono);
       pushWave(mono, clipped, nowMs);
       drawWave();
+      wavePeak = Math.max(peak(mono), wavePeak - PEAK_FALL_PER_SEC * dtSec);
       if (text) {
         if (clipped) waveform.setReadout("CLIP", { textual: true, color: HOT_RED, unit: "" });
-        else waveform.setReadout(pct(peak(mono)));
+        else waveform.setReadout(pct(wavePeak));
       }
       const hasStereo = !!stereo && stereo.hasStereo;
-      width.setValue(hasStereo ? stereo.width : null, dtSec);
-      balance.setValue(hasStereo ? stereo.balance : null, dtSec);
+      if (hasStereo) {
+        const k = 1 - Math.exp(-dtSec / STEREO_SMOOTH_SEC);
+        widthSmooth += (stereo.width - widthSmooth) * k;
+        balanceSmooth += (stereo.balance - balanceSmooth) * k;
+      } else {
+        widthSmooth = 0;
+        balanceSmooth = 0;
+      }
+      width.setValue(hasStereo ? widthSmooth : null, dtSec);
+      balance.setWash(hasStereo ? balanceSmooth : null);
       if (text) {
+        balance.setReadout(hasStereo ? balanceSmooth : null);
         if (hasStereo) {
-          width.setReadout(pct(stereo.width));
-          const side = Math.round(Math.abs(stereo.balance) * 100);
-          balance.setReadout(String(side), { unit: side === 0 ? "" : stereo.balance < 0 ? "L" : "R" });
+          width.setReadout(pct(widthSmooth));
           width.setHint(WIDTH_HINT);
-          balance.setHint(BALANCE_HINT);
         } else {
           width.setReadout("mono", IDLE);
-          balance.setReadout("mono", IDLE);
           width.setHint(MONO_HINT);
-          balance.setHint(MONO_HINT);
         }
       }
     },

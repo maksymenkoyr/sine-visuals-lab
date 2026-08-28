@@ -89,11 +89,11 @@ export class FeatureExtractor {
 
     const bands = new Float32Array(NUM_BANDS);
     let flux = 0;
-    let rawDbSum = 0;
+    let rawPowSum = 0;
 
     for (let b = 0; b < NUM_BANDS; b++) {
       const db = sanitizeDb(rawBandsDb[b]);
-      rawDbSum += db;
+      rawPowSum += Math.pow(10, db / 10);
 
       // Leaky min/max adapts the [floor, peak] window to this room/mic.
       const floorRate = db < this.floor[b] ? FLOOR_FALL_RATE : FLOOR_RISE_RATE;
@@ -128,7 +128,12 @@ export class FeatureExtractor {
 
     const beatPhase = this.bpm > 0 ? (((time - this.lastBeatTime) / (60 / this.bpm)) % 1 + 1) % 1 : 0;
 
-    const meanRawDb = rawDbSum / NUM_BANDS;
+    // Averaged as power, then back to dB — not a mean of the dB values. Most
+    // of the 24 bands sit at the noise floor for any ordinary sound, and a
+    // mean of dB let those drag the result down to LEVEL_DB_FLOOR, so level
+    // read ~0 for everything short of a loud broadband roar. Power averaging
+    // lets the loud bands carry it, which is what loudness is.
+    const meanRawDb = 10 * Math.log10(rawPowSum / NUM_BANDS);
     const level = clamp01((meanRawDb - LEVEL_DB_FLOOR) / (LEVEL_DB_CEIL - LEVEL_DB_FLOOR));
 
     return { time, bands, energy, beat, bpm: this.bpm, beatPhase, level };

@@ -19,6 +19,29 @@ describe("deriveStereoRead", () => {
     expect(read.balance).toBeCloseTo(0, 5);
   });
 
+  it("uncorrelated L/R (a quarter cycle apart) reads as fully wide, correlation 0", () => {
+    const n = 1024;
+    const l = sine(n, 10);
+    const r = new Float32Array(n);
+    for (let i = 0; i < n; i++) r[i] = Math.cos((2 * Math.PI * 10 * i) / n);
+    const read = deriveStereoRead(l, r, new Float32Array(n));
+    // Side and mid carry equal power here, so the side-to-mid ratio is 1 —
+    // the top of the meter, not the 0.5 that side's share of the total gives.
+    expect(read.width).toBeCloseTo(1, 3);
+    expect(read.correlation).toBeCloseTo(0, 3);
+  });
+
+  it("a slightly widened mix sits low on the meter, not at zero", () => {
+    const n = 1024;
+    const l = sine(n, 10);
+    const r = new Float32Array(n);
+    // Mostly the same signal, with a 20% uncorrelated component on the right.
+    for (let i = 0; i < n; i++) r[i] = l[i] + 0.2 * Math.cos((2 * Math.PI * 10 * i) / n);
+    const read = deriveStereoRead(l, r, new Float32Array(n));
+    expect(read.width).toBeGreaterThan(0.05);
+    expect(read.width).toBeLessThan(0.3);
+  });
+
   it("an inverted right channel reads as fully wide and negatively correlated", () => {
     const l = sine(1024, 10);
     const r = l.map((v) => -v);

@@ -227,7 +227,7 @@ function ensureAudio(): Promise<void> {
   const attempt = (async () => {
     capture = await chooseCapture();
     bandAnalyser = createBandAnalyser(capture.context, capture.sourceNode);
-    stereoAnalyser = createStereoAnalyser(capture.context, capture.sourceNode);
+    stereoAnalyser = createStereoAnalyser(capture.context, capture.sourceNode, capture.stream);
     micDenied = false;
   })();
   audioPromise = attempt.catch((err) => {
@@ -261,7 +261,7 @@ async function fallBackToSolo(reason: string): Promise<void> {
   try {
     capture = await chooseCapture();
     bandAnalyser = createBandAnalyser(capture.context, capture.sourceNode);
-    stereoAnalyser = createStereoAnalyser(capture.context, capture.sourceNode);
+    stereoAnalyser = createStereoAnalyser(capture.context, capture.sourceNode, capture.stream);
     mode = "solo";
     roomCodeEl.style.display = "none";
   } catch (err) {

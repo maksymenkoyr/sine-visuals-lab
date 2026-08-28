@@ -18,21 +18,22 @@
 const SILENCE_RMS = 1e-6;
 
 export interface StereoRead {
-  /** False for a source the graph reports as carrying a single channel (see
-   *  createStereoAnalyser) — width/balance/correlation would just be
-   *  measurement noise on a channel duplicated by the splitter, not a real
-   *  stereo signal, so they're held at their mono defaults instead. This is
-   *  "the source declared itself mono," not "the two channels happen to
-   *  currently be identical" — a real stereo source playing a mono sample
-   *  still reports hasStereo: true and simply reads as width 0. */
+  /** False while the source has only ever carried one channel (see
+   *  createStereoAnalyser for how that's decided) — width/balance/
+   *  correlation would just be measurement noise on a channel duplicated by
+   *  the splitter, not a real stereo signal, so they're held at their mono
+   *  defaults instead. */
   hasStereo: boolean;
   /** (L+R)/2 — the mono mix this device's waveform scope draws regardless of
    *  channel count. Same buffer identity across reads; copy before holding. */
   mono: Float32Array;
   /** -1 (all left) .. 0 (centered) .. +1 (all right), from each channel's rms. */
   balance: number;
-  /** 0 (mono/centered content) .. 1 (fully wide/out-of-phase content) —
-   *  rmsSide / (rmsMid + rmsSide), the side channel's share of the mix. */
+  /** 0 (mono/centered content) .. 1 (fully wide) — the side-to-mid rms
+   *  ratio, clamped: 1 means as much side as mid, which is what uncorrelated
+   *  or out-of-phase content produces. The ratio rather than side's share of
+   *  the total (rmsS / (rmsM + rmsS)) because that squeezed ordinary stereo
+   *  music into the bottom third of a meter. */
   width: number;
   /** -1 (fully out of phase) .. +1 (fully in phase), normalized L/R
    *  correlation. A mono source reports +1 (trivially, perfectly
@@ -74,7 +75,7 @@ export function deriveStereoRead(left: Float32Array, right: Float32Array | null,
   const rmsS = Math.sqrt(sumS2 / n);
 
   const balance = hasStereo && rmsL + rmsR > SILENCE_RMS ? (rmsR - rmsL) / (rmsR + rmsL) : 0;
-  const width = hasStereo && rmsM + rmsS > SILENCE_RMS ? rmsS / (rmsM + rmsS) : 0;
+  const width = hasStereo && rmsM + rmsS > SILENCE_RMS ? Math.min(1, rmsS / (rmsM + SILENCE_RMS)) : 0;
   const correlation = hasStereo
     ? sumL2 + sumR2 > SILENCE_RMS
       ? sumLR / (Math.sqrt(sumL2 * sumR2) + SILENCE_RMS)
@@ -90,15 +91,31 @@ export interface StereoAnalyser {
 
 /**
  * Splits sourceNode into two channels and reads both via
- * getFloatTimeDomainData. hasStereo is read once, from sourceNode.channelCount
- * — for a MediaStreamAudioSourceNode this reflects the underlying track's own
- * channel count (default channelCountMode "max"), so this is "does the
- * source carry two channels," not a live per-frame check. Good enough for a
- * mic (always mono) vs. tab/device audio (often stereo) without needing the
- * full CaptureHandle just to inspect its MediaStream.
+ * getFloatTimeDomainData.
+ *
+ * Whether the source is stereo is decided in two layers, because neither
+ * alone is reliable. sourceNode.channelCount is NOT the answer: on a
+ * MediaStreamAudioSourceNode it's the node's own mixing setting (default 2)
+ * whatever the track carries, so a mono mic reads as "stereo" with L and R
+ * bit-identical — width pinned at 0, which is worse than saying mono.
+ *  1. The track's own settings, when `stream` is given and the browser
+ *     reports channelCount: a declared-mono track skips the right analyser
+ *     entirely.
+ *  2. Otherwise (or when the track claims two channels) a source is treated
+ *     as mono until a read shows any side signal at all. Duplicated channels
+ *     are bit-identical, so their side is exactly 0 — real stereo content
+ *     flips this on its first non-silent buffer and it stays flipped. A
+ *     mono-mastered file on a stereo track therefore also reads "mono",
+ *     which is the honest answer.
  */
-export function createStereoAnalyser(context: AudioContext, sourceNode: AudioNode, fftSize = 2048): StereoAnalyser {
-  const hasStereo = sourceNode.channelCount >= 2;
+export function createStereoAnalyser(
+  context: AudioContext,
+  sourceNode: AudioNode,
+  stream?: MediaStream,
+  fftSize = 2048,
+): StereoAnalyser {
+  const trackChannels = stream?.getAudioTracks()[0]?.getSettings().channelCount;
+  const declaredStereo = trackChannels === undefined || trackChannels >= 2;
 
   const splitter = context.createChannelSplitter(2);
   // Analysis tap only, same feedback guard as analyser.ts: never connect
@@ -110,21 +127,29 @@ export function createStereoAnalyser(context: AudioContext, sourceNode: AudioNod
   splitter.connect(left, 0);
 
   let right: AnalyserNode | null = null;
-  if (hasStereo) {
+  if (declaredStereo) {
     right = context.createAnalyser();
     right.fftSize = fftSize;
     splitter.connect(right, 1);
   }
 
   const leftBuf = new Float32Array(left.fftSize);
-  const rightBuf = hasStereo ? new Float32Array(fftSize) : null;
+  const rightBuf = declaredStereo ? new Float32Array(fftSize) : null;
   const monoBuf = new Float32Array(left.fftSize);
+  let seenSide = false;
 
   return {
     read(): StereoRead {
       left.getFloatTimeDomainData(leftBuf);
       if (right && rightBuf) right.getFloatTimeDomainData(rightBuf);
-      return deriveStereoRead(leftBuf, rightBuf, monoBuf);
+      const read = deriveStereoRead(leftBuf, rightBuf, monoBuf);
+      if (read.width > 0) seenSide = true;
+      if (read.hasStereo && !seenSide) {
+        // Both channels identical so far — report the mono defaults rather
+        // than a stereo read that can only ever say "0".
+        return { hasStereo: false, mono: read.mono, balance: 0, width: 0, correlation: 1 };
+      }
+      return read;
     },
   };
 }
