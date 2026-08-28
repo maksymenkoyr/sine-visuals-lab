@@ -24,7 +24,15 @@ import { createQualityGovernor, type QualityGovernor } from "./render/governor.t
 import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
-import { applyBandGains, getBandGain, getBandGains, resetBandGains, setBandGain } from "./audio/bandGains.ts";
+import {
+  applyBandGains,
+  getBandGain,
+  getBandGains,
+  getBandTilt,
+  resetBandGains,
+  setBandGain,
+  setBandTilt,
+} from "./audio/bandGains.ts";
 import {
   advanceAutoTune,
   resolveSceneSetting,
@@ -308,6 +316,8 @@ function wireDeviceMenu(): void {
     getBandEdgesHz: () => bandAnalyser?.bandEdgesHz ?? nominalBandEdgesHz(),
     getBandGain: (sceneId, group) => getBandGain(sceneId, group),
     onBandGainChange: (sceneId, group, value) => setBandGain(sceneId, group, value),
+    getBandTilt: (sceneId) => getBandTilt(sceneId),
+    onBandTiltChange: (sceneId, value) => setBandTilt(sceneId, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
@@ -684,7 +694,7 @@ function loop(): void {
   }
 
   // Applied once, upstream of every consumer below — deviceMenu's spectrum
-  // strip included — so the Bands box's Low/Mid/High sliders show up
+  // strip included — so the Bands box's Low/Mid/High and Tilt sliders show up
   // everywhere consistently: the "processed" feed the strip draws is built
   // from this same frame (see deviceMenu.ts's update()), so a killed band
   // reads as killed there too, not just in the render path. lastVis itself

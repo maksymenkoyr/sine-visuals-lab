@@ -19,6 +19,9 @@ import {
   BAND_GAIN_DEFAULT,
   BAND_GAIN_LOG_FLOOR,
   BAND_GAIN_MAX,
+  BAND_TILT_DEFAULT,
+  BAND_TILT_MAX,
+  BAND_TILT_MIN,
   type BandGroup,
 } from "../audio/bandGains.ts";
 import { createSpectrumStrip } from "./spectrumStrip.ts";
@@ -110,6 +113,10 @@ export interface DeviceMenuDeps {
   /** Per-scene low/mid/high band gain — see src/audio/bandGains.ts. */
   getBandGain: (sceneId: string, group: BandGroup) => number;
   onBandGainChange: (sceneId: string, group: BandGroup, value: number) => void;
+  /** Per-scene band tilt, the smooth lean toward highs or lows — same file. */
+  getBandTilt: (sceneId: string) => number;
+  onBandTiltChange: (sceneId: string, value: number) => void;
+  /** Resets the group gains and the tilt together. */
   onBandGainsReset: (sceneId: string) => void;
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
@@ -675,6 +682,13 @@ function statusText(status: AudioStatus): string {
 
 const formatGain = (value: number) => value.toFixed(1);
 const formatSetting = (value: number) => value.toFixed(2);
+// Bipolar readout: an explicit sign on either side of flat, and anything that
+// would round to zero reads as plain "0" rather than "-0.00".
+const formatTilt = (value: number) => {
+  const rounded = Number(value.toFixed(2));
+  if (rounded === 0) return "0";
+  return `${rounded > 0 ? "+" : "−"}${Math.abs(rounded).toFixed(2)}`;
+};
 
 // ---- the panel -----------------------------------------------------------
 
@@ -742,8 +756,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const controlsCol = document.createElement("div");
   controlsCol.className = "vc-controls-col vc-scroll";
 
-  // Bands: low/mid/high band gain — the DJ-mixer control (see bandGains.ts):
-  // how hard each group drives the visuals, not where the dividing lines sit
+  // Bands: low/mid/high band gain plus tilt — the DJ-mixer controls (see
+  // bandGains.ts): how hard each group drives the visuals, and which end of
+  // the spectrum the picture leans toward — not where the dividing lines sit
   // (those are fixed — see getBandSplit below). Global per device like the
   // Auto card, not rebuilt per scene; only the Scene card needs that.
   function makeBandGainRow(label: string, group: BandGroup, description: string) {
@@ -767,21 +782,45 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     mid: makeBandGainRow("Mid", "mid", "How hard the mids drive the visuals — all the way down kills them"),
     high: makeBandGainRow("High", "high", "How hard the hats and air drive the visuals — all the way down kills them"),
   };
+  // Tilt is the one bipolar row in the card: a linear slider whose midpoint is
+  // flat, not a log-mapped gain, so it gets its own spec rather than
+  // makeBandGainRow. No zeroAtMin — that's the log rows' explicit kill, and
+  // here 0 is the resting default, not "off".
+  const bandTiltRow = createControlRow({
+    label: "Tilt",
+    accent: BANDS_AMBER,
+    min: BAND_TILT_MIN,
+    max: BAND_TILT_MAX,
+    defaultValue: BAND_TILT_DEFAULT,
+    mapping: "linear",
+    format: formatTilt,
+    description: "Lean the picture toward the highs (right) or the lows (left) — a smooth roll-off, not a hard split",
+  });
+  bandTiltRow.onChange((value) => deps.onBandTiltChange(deps.currentSceneId(), value));
   function refreshBandGainRows(): void {
     const sceneId = deps.currentSceneId();
     for (const group of ["low", "mid", "high"] as const) {
       bandGainRows[group].setValue(deps.getBandGain(sceneId, group));
     }
+    bandTiltRow.setValue(deps.getBandTilt(sceneId));
   }
   const bandsCard = createCard({
     title: "Bands",
     accent: BANDS_AMBER,
-    right: createChipButton("Reset", "Reset band gains", () => {
+    right: createChipButton("Reset", "Reset band gains and tilt", () => {
       deps.onBandGainsReset(deps.currentSceneId());
       refreshBandGainRows();
     }),
   });
-  bandsCard.body.append(bandGainRows.low.el, spacer(), bandGainRows.mid.el, spacer(), bandGainRows.high.el);
+  bandsCard.body.append(
+    bandGainRows.low.el,
+    spacer(),
+    bandGainRows.mid.el,
+    spacer(),
+    bandGainRows.high.el,
+    spacer(),
+    bandTiltRow.el,
+  );
 
   // The split itself is fixed (no crossover sliders to drag), so the strip
   // only needs its group coloring set up once — the edges do still depend on
