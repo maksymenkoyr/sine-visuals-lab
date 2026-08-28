@@ -273,7 +273,14 @@ function wireDeviceMenu(): void {
   deviceMenu = createDeviceMenu({
     getPalettes: () => menuItems(PALETTES),
     currentSceneId: () => scene.id,
+    currentSceneName: () => scene.name,
     currentPaletteId: () => palette.id,
+    // What the spectrum card's header reports as the audio source. A
+    // renderer has no local analyser — its bands arrive over the room.
+    getAudioStatus: () => ({
+      source: syntheticFeed ? "synthetic" : mode === "renderer" ? "remote" : bandAnalyser ? "mic" : "none",
+      sampleRate: capture?.context.sampleRate ?? null,
+    }),
     onPickPalette: (id) => applyPalette(getPalette(id)),
     getSensitivity: (sceneId) => getSensitivity(sceneId),
     onSensitivityChange: (sceneId, value) => {

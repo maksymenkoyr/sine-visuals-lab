@@ -13,7 +13,7 @@ a raw stream. `src/audio/analyser.ts` runs the FFT and splits it into bands
 features.ts` turns raw bands into a `FeatureFrame` — this is where the adaptive
 floor/peak AGC lives, so everything downstream sees a signal already normalized to
 the room's own loudness. `src/audio/sensitivity.ts` applies the user's Sensitivity/
-Contrast(Acceleration)/Smoothing controls on top of that.
+Acceleration/Smoothing controls on top of that.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
