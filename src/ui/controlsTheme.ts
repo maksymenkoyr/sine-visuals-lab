@@ -202,7 +202,7 @@ const stylesheet = `
 .vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(1.7); }
 
 .vc-toggle {
-  position: relative; width: 28px; height: 14px; margin: 6px 0 0; padding: 0;
+  position: relative; width: 28px; height: 14px; margin: 6px 0 0 auto; padding: 0;
   border: none; border-radius: 7px; background: rgba(255, 255, 255, 0.18);
   cursor: pointer; display: block; transition: background 0.15s ease, box-shadow 0.18s ease;
 }
