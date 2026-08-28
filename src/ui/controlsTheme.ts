@@ -122,7 +122,10 @@ const stylesheet = `
 /* A row "wakes" when the pointer is anywhere over it (the row is a far
  * bigger target than its 3px track) or its control has focus: the label
  * tints toward the row's accent, the track glows through a hairline border,
- * and the slider zooms up so the thumb is easy to grab precisely. */
+ * and the slider zooms up so the thumb is easy to grab precisely. On top of
+ * that flat zoom, --vc-thumb-boost multiplies in a little extra as the
+ * pointer nears the thumb specifically — set by deviceMenu.ts's
+ * wireThumbMagnet, unset (falls back to 1) everywhere else. */
 /* The row frames itself with padding that negative margins cancel out, so
  * the ring + glow around the whole title-and-slider block costs no layout. */
 .vc-row {
@@ -180,7 +183,7 @@ const stylesheet = `
 }
 .vc-row:hover .vc-slider::-webkit-slider-thumb,
 .vc-row:focus-within .vc-slider::-webkit-slider-thumb {
-  transform: scaleX(1.7);
+  transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1)));
   box-shadow: 0 0 6px color-mix(in srgb, var(--vc-accent) 60%, transparent);
 }
 .vc-slider::-moz-range-track {
@@ -199,7 +202,7 @@ const stylesheet = `
   transition: transform 0.18s ease;
 }
 .vc-row:hover .vc-slider::-moz-range-thumb,
-.vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(1.7); }
+.vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1))); }
 
 .vc-toggle {
   position: relative; width: 28px; height: 14px; margin: 6px 0 0; padding: 0;
