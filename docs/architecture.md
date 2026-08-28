@@ -13,7 +13,7 @@ a raw stream. `src/audio/analyser.ts` runs the FFT and splits it into bands
 features.ts` turns raw bands into a `FeatureFrame` — this is where the adaptive
 floor/peak AGC lives, so everything downstream sees a signal already normalized to
 the room's own loudness. `src/audio/sensitivity.ts` applies the user's Sensitivity/
-Contrast(Acceleration)/Smoothing controls on top of that.
+Acceleration/Smoothing controls on top of that.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
@@ -36,12 +36,12 @@ the user (or `src/tuning/overrides.ts` in dev) has pinned it manually.
 scene), read by `src/app.ts`, which is the phone/controller/gallery entry
 (`index.html`).
 
-The config panel's listening post (`src/ui/deviceMenu.ts`, plus
-`spectrumStrip.ts`/`audioMeters.ts`/`scopeStrip.ts`) is the one place that reads
-outside this pipeline: `src/audio/stereo.ts` and `waveform.ts` read time-domain
-samples straight off this device's own mic, entirely separate from
+The controls panel's meters (`src/ui/audioMeters.ts`, under the spectrum card
+in `src/ui/deviceMenu.ts`) are the one place that reads outside this pipeline:
+their Scope card is fed by `src/audio/stereo.ts` and `waveform.ts`, which read
+time-domain samples straight off this device's own mic, entirely separate from
 `FeatureFrame`/`AnimFrame` and never touching the wire in "Phone to TV" below —
-a viewer with no local mic sees that part of the panel in its idle state.
+a viewer with no local mic doesn't get that card at all.
 
 ## Phone to TV
 

@@ -23,27 +23,98 @@ import {
 } from "../audio/bandGains.ts";
 import { createSpectrumStrip } from "./spectrumStrip.ts";
 import { createAudioMeters } from "./audioMeters.ts";
-import { createScopeStrip } from "./scopeStrip.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import type { StereoRead } from "../audio/stereo.ts";
+import {
+  AUTO_SKY,
+  BANDS_AMBER,
+  FONT_LABEL,
+  FONT_MONO,
+  GLASS_FILTER,
+  HAIRLINE,
+  HOT_RED,
+  HOT_YELLOW,
+  INPUT_GREEN,
+  LIVE_DOT,
+  SCENE_VIOLET,
+  ensureControlsStyles,
+  glassCardStyle,
+  scanlineStyle,
+  withAlpha,
+} from "./controlsTheme.ts";
+import {
+  chipBtnLitStyle,
+  chipBtnStyle,
+  createCard,
+  createChipButton,
+  digitsStyle,
+  digitsTextStyle,
+  groupHeading,
+  readoutStyle,
+  rowHeadStyle,
+  rowLabelStyle,
+  rowRightStyle,
+  spacer,
+  unitStyle,
+} from "./controlsKit.ts";
+
+/**
+ * The controller's controls panel — the "Viz Controls" design.
+ *
+ * Two glass columns anchored top-right over the live scene: the spectrum
+ * card (scene name, audio source, live bars) beside the controls column,
+ * whose cards run Bands → Auto strength (with the Auto master block welded
+ * to it) → Input → Scene → Palette → a footer strip. Under the spectrum
+ * card, the read-only meters (audioMeters.ts) scroll in their own strip.
+ * Below the breakpoint in controlsTheme.ts everything stacks into one
+ * scrolling column with the meters last, so the knobs stay in reach. It's
+ * corner-docked, not a modal: the whole point is to watch the scene react
+ * while you tune it, so it also stays open across palette taps.
+ *
+ * Row grammar (createControlRow; the meters follow it too, with a meter in
+ * the slider's place — the shared pieces live in controlsKit.ts): label ·
+ * seven-segment readout + unit ·
+ * "A" chip · ↺. The chip *is* the auto indicator — filled when auto owns
+ * the value, outlined when the user has taken the row manual, absent when
+ * the setting has no auto weights (see autoTune.ts). ↺ only appears once a
+ * value is off its default, doubling as a "you changed this" marker. The
+ * hint under a row (a setting's `description`) stays collapsed until
+ * hover/focus, and while auto holds the row it reads as an invitation to
+ * take over instead. Each card's accent names its system — the constants
+ * and their meanings live in controlsTheme.ts.
+ *
+ * Scene selection lives in the gallery — this panel doesn't duplicate it.
+ * Every read and write goes through DeviceMenuDeps (wired in app.ts); the
+ * panel never imports a store.
+ */
 
 export interface MenuItem {
   id: string;
   name: string;
 }
 
+export type AudioSource = "mic" | "remote" | "synthetic" | "none";
+export interface AudioStatus {
+  source: AudioSource;
+  /** The local AudioContext's rate, when there is one. */
+  sampleRate: number | null;
+}
+
 export interface DeviceMenuDeps {
   getPalettes: () => MenuItem[];
   currentSceneId: () => string;
+  currentSceneName: () => string;
   currentPaletteId: () => string;
   onPickPalette: (id: string) => void;
+  /** Shown in the spectrum card header — where the bars are coming from. */
+  getAudioStatus: () => AudioStatus;
   getSensitivity: (sceneId: string) => number;
   onSensitivityChange: (sceneId: string, value: number) => void;
   getAcceleration: (sceneId: string) => number;
   onAccelerationChange: (sceneId: string, value: number) => void;
   getSmoothing: (sceneId: string) => number;
   onSmoothingChange: (sceneId: string, value: number) => void;
-  /** Empty for scenes with nothing to tune — the box hides itself. */
+  /** Empty for scenes with nothing to tune — the card hides itself. */
   getSceneSettings: (sceneId: string) => SceneSetting[];
   getSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   onSceneSettingChange: (
@@ -82,20 +153,18 @@ export interface DeviceMenuDeps {
   onSceneAutoToggle: (sceneId: string, on: boolean) => void;
   getAutoStrength: () => number;
   onAutoStrengthChange: (value: number) => void;
-  /** The button that opens this menu — excluded from the tap-outside-to-close check. */
+  /** The button that opens this menu — excluded from the tap-outside-to-close
+   *  check, and ringed (aria-pressed) while the panel is open. */
   toggleButton: HTMLElement;
 }
 
 export interface DeviceMenu {
   toggle(): void;
   close(): void;
-  /** Fed every frame while in a viz. frame/rawBands may be null before audio
-   *  is up (rawBands additionally on a mic-less renderer device); anim may be
-   *  null a tick before the anim clock has advanced; mono/stereo are
-   *  local-only (null on a mic-less renderer — see scopeStrip.ts) and never
-   *  cross the wire the way frame/anim's fields effectively do. Drives the
-   *  Sensitivity box's level wash, the spectrum strip's two feeds, the
-   *  transport/level/bands/dials meters, and the waveform/stereo scope. */
+  /** Fed every frame while in a viz — drives the Input card's level wash,
+   *  the spectrum strip's two feeds, and the meters. `frame`/`anim` are null
+   *  before audio is up; `rawBands`/`mono`/`stereo` additionally on a
+   *  mic-less renderer device, which has no local analyser. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -108,345 +177,112 @@ export interface DeviceMenu {
   isOpen(): boolean;
 }
 
-// Corner-docked over the live scene, not a full-screen modal — the whole point of
-// these controls is to watch the scene react while you tune it.
-const panelStyle = `
-  position: fixed; right: 10px; bottom: 58px; z-index: 30; display: none;
-  width: min(320px, 88vw); max-height: calc(100vh - 120px); overflow-y: auto;
-  background: rgba(17, 17, 17, 0.82);
-  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
-  border: 1px solid #fff2; border-radius: 16px; padding: 20px;
-  color: #fff; font-family: system-ui, sans-serif;
+// ---- styles --------------------------------------------------------------
+// Layout-level rules (columns, slider, hint reveal, toggle) are class rules in
+// controlsTheme.ts; the card and row-head grammar shared with the meters is
+// in controlsKit.ts; everything else per-element is inline here, in the same
+// cssText-constant convention as the rest of src/ui/.
+
+// "A" chip: filled when auto owns the row, outlined when the user does.
+const autoChipBaseStyle = `
+  width: 17px; height: 16px; display: grid; place-items: center; border-radius: 3px;
+  font: 500 9.5px/1 ${FONT_MONO}; cursor: pointer; padding: 0; flex-shrink: 0;
 `;
-const headingStyle = `font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.5; margin: 16px 0 8px;`;
-const itemStyle = `
-  display: block; width: 100%; text-align: left; padding: 10px 12px; margin-bottom: 6px;
-  border-radius: 8px; border: 1px solid #fff1; background: #fff0; color: #fff;
-  font: inherit; font-size: 14px; cursor: pointer;
+const autoChipLitStyle = (accent: string) =>
+  `${autoChipBaseStyle} background: ${accent}; border: 1px solid ${accent}; color: #070a09;`;
+const autoChipManualStyle = (accent: string) =>
+  `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
+const rowResetStyle = `
+  font: 400 11px/1 ${FONT_MONO}; color: rgba(255,255,255,0.45); background: none; border: none;
+  padding: 0; cursor: pointer; flex-shrink: 0;
 `;
-const MIC_GREEN = "#22c55e";
-// Live level is painted as two stacked background washes (sized per frame in
-// update()), not separate bars — a bar stacked over the slider read as a
-// second, draggable control it wasn't. Each layer is a two-stop flat-color
-// gradient sized independently via background-size, so only that one property
-// animates each frame:
-//  - the tick: a 2px hard edge at the raw (pre-sensitivity) mic level, always
-//    mic-green — it's a different quantity from the fill below.
-//  - the fill: a solid wash out to the shaped (post-sensitivity) level — i.e.
+const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
+const AUTO_STRENGTH_HINT = "How hard auto pushes every A control";
+
+// Auto strength card + the master block welded to its right.
+const autoRowStyle = `display: flex; gap: 4px; align-items: stretch;`;
+const autoMasterBaseStyle = `
+  width: 74px; flex-shrink: 0; display: grid; place-items: center; text-align: center;
+  cursor: pointer; padding: 0; border-radius: 3px;
+  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
+`;
+const autoMasterStyle = `${autoMasterBaseStyle} background: rgba(8,11,10,0.2); border: 1px solid ${withAlpha(AUTO_SKY, 0.3)};`;
+const autoMasterLitStyle = `${autoMasterBaseStyle} background: ${withAlpha("#1479b0", 0.28)}; border: 1px solid ${withAlpha(AUTO_SKY, 0.6)};`;
+const autoMasterLabelStyle = (lit: boolean) =>
+  `font: 500 13px/1.2 ${FONT_LABEL}; color: ${lit ? "#a0e7ff" : "rgba(255,255,255,0.55)"};`;
+const autoMasterSubStyle = (lit: boolean) =>
+  `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: ${lit ? withAlpha("#8dccf9", 0.8) : "rgba(255,255,255,0.4)"};`;
+
+// Spectrum card header.
+const spectrumBodyStyle = `position: relative; padding: 11px 14px 12px;`;
+const spectrumHeaderStyle = `display: flex; align-items: center; justify-content: space-between; gap: 8px;`;
+const spectrumTitleStyle = `
+  font: 500 12px/1.2 ${FONT_MONO}; letter-spacing: 0.18em; text-transform: uppercase;
+  color: rgba(255,255,255,0.85); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+`;
+const spectrumStatusStyle = `display: flex; align-items: center; gap: 6px; flex-shrink: 0;`;
+const liveDotStyle = (on: boolean) =>
+  `width: 4px; height: 4px; border-radius: 50%; background: ${on ? LIVE_DOT : "rgba(255,255,255,0.3)"};`;
+const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.5);`;
+const hairlineStyle = `height: 1px; background: ${withAlpha(HAIRLINE, 0.45)}; margin: 8px 0 9px;`;
+
+// Palette chips.
+const paletteListStyle = `display: flex; flex-wrap: wrap; gap: 4px;`;
+const paletteChipStyle = `
+  font: 400 10.5px/1.2 ${FONT_MONO}; letter-spacing: 0.06em; color: rgba(255,255,255,0.7);
+  background: transparent; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px;
+  padding: 4px 8px; cursor: pointer;
+`;
+const paletteChipLitStyle = `${paletteChipStyle} color: #fff; background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.5);`;
+
+// Footer strip.
+const footerStyle = `
+  display: flex; align-items: center; justify-content: space-between; padding: 7px 12px;
+  background: rgba(8,11,10,0.26);
+  -webkit-backdrop-filter: blur(20px) saturate(.6) brightness(.5); backdrop-filter: blur(20px) saturate(.6) brightness(.5);
+  border: 1px solid rgba(255,255,255,0.13); border-radius: 3px;
+  font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.5);
+`;
+const footerBtnStyle = `
+  font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit;
+  background: none; border: none; padding: 0; cursor: pointer;
+`;
+
+// The Input card doubles as a level meter: two stacked background washes
+// (sized per frame in update()) under the glass, not separate bars — a bar
+// stacked over a slider read as a second, draggable control it wasn't:
+//  - the tick: a 2px hard edge at the raw (pre-sensitivity) mic level,
+//    always input-green — it's a different quantity from the fill below.
+//  - the fill: a solid wash out to the shaped (post-sensitivity) level —
 //    where the scene is actually reacting right now. Its color rides the
 //    --wash custom property (see washColor()) so only that one value needs
 //    writing each frame as the level nears clipping.
 // The gap between tick and fill edge is the sensitivity, visibly.
-const sensitivityBoxStyle = `
-  border: 1px solid ${MIC_GREEN}66; border-radius: 10px; padding: 12px; margin-bottom: 4px;
-  --wash: ${MIC_GREEN}26;
+//
+// Hot-zone ramp for the fill wash: green all the way up to HOT_START, then
+// green -> yellow over the next slice, then yellow -> red in the last
+// PEAK_START..1 sliver — a silent "the scene has stopped reacting, you're
+// pinned at max" cue that the flat level wash alone doesn't give.
+const HOT_START = 0.96; // last 4%: green -> yellow
+const PEAK_START = 0.99; // last 1%: yellow -> red
+const WASH_ALPHA = 0x26; // resting fill alpha
+const WASH_HOT_ALPHA = 0x40; // fill alpha at full clip — needs to be more opaque to read as a warning
+
+const inputCardWashStyle = `
+  --wash: ${withAlpha(INPUT_GREEN, WASH_ALPHA / 255)};
   background-image:
-    linear-gradient(90deg, transparent calc(100% - 2px), ${MIC_GREEN}aa 0),
+    linear-gradient(90deg, transparent calc(100% - 2px), ${withAlpha(INPUT_GREEN, 0.67)} 0),
     linear-gradient(var(--wash), var(--wash));
   background-repeat: no-repeat, no-repeat;
   background-size: 0% 100%, 0% 100%;
   transition: background-size 80ms linear;
 `;
-const boxHeadingRowStyle = `display: flex; align-items: center; gap: 6px;`;
-// Second+ gain row within the same box (e.g. Acceleration below Sensitivity) —
-// same layout, just separated from the row above it.
-const subHeadingRowStyle = `${boxHeadingRowStyle} margin-top: 14px;`;
-const boxHeadingStyle = `font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; flex: 1;`;
-const micIconStyle = `display: flex; color: ${MIC_GREEN}; flex-shrink: 0;`;
-const sliderRowStyle = `padding: 10px 2px 0;`;
-// A function, not a constant, since createGainRow instances live in more
-// than one accent color now (mic-green Sensitivity/Acceleration/Smoothing, amber Bands).
-const gainSliderStyle = (accent: string) => `width: 100%; accent-color: ${accent};`;
-const readoutStyle = `
-  flex-shrink: 0; font-variant-numeric: tabular-nums; font-size: 13px; opacity: 0.85;
-`;
-const resetBtnStyle = `
-  background: #fff0; color: #fff; border: 1px solid #fff2; border-radius: 6px;
-  padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; opacity: 0.8;
-`;
-// Distinct accent from mic green, so the two boxes read as separate systems
-// (mic input gain vs. this scene's own look) at a glance.
-const SCENE_ACCENT = "#a78bfa";
-const sceneBoxStyle = `
-  border: 1px solid ${SCENE_ACCENT}66; border-radius: 10px; padding: 12px; margin-bottom: 4px;
-`;
-const sceneHeadingRowStyle = `display: flex; align-items: center; justify-content: space-between;`;
-const sceneHeadingStyle = `
-  font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.85; color: ${SCENE_ACCENT};
-`;
-const settingRowStyle = `margin-top: 10px;`;
-const settingLabelRowStyle = `display: flex; align-items: center; gap: 6px; font-size: 12px; opacity: 0.85; margin-bottom: 4px;`;
-const settingLabelStyle = `flex: 1;`;
-const settingReadoutStyle = `flex-shrink: 0; font-variant-numeric: tabular-nums;`;
-const settingResetBtnStyle = `
-  background: #fff0; color: #fff; border: none; border-radius: 4px; padding: 0 2px;
-  font: inherit; font-size: 13px; line-height: 1; cursor: pointer; opacity: 0.7; flex-shrink: 0;
-`;
-const settingSliderStyle = `width: 100%; accent-color: ${SCENE_ACCENT};`;
-const settingCheckboxStyle = `accent-color: ${SCENE_ACCENT}; width: 15px; height: 15px; margin: 0;`;
-const settingDescriptionStyle = `font-size: 11px; opacity: 0.5; margin-top: 4px; line-height: 1.35;`;
-// Third accent (amber), distinct from mic-green and scene-violet, so the
-// Bands box reads as its own system — same reasoning as SCENE_ACCENT above.
-const BANDS_ACCENT = "#f59e0b";
-const bandsBoxStyle = `
-  border: 1px solid ${BANDS_ACCENT}66; border-radius: 10px; padding: 12px; margin-bottom: 4px;
-`;
-const bandsHeadingRowStyle = `display: flex; align-items: center; justify-content: space-between;`;
-const bandsHeadingStyle = `
-  font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.85; color: ${BANDS_ACCENT};
-`;
-// Sits inside the (already-labelled) "Scene" box, so it's a step down from
-// headingStyle rather than a repeat of it — a divider-with-caption between
-// blocks of sliders, not a second top-level heading.
-const settingGroupStyle = `
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.55;
-  margin-top: 14px; padding-top: 10px; border-top: 1px solid #fff1;
-`;
-const settingGroupFirstStyle = `font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.55; margin-top: 8px;`;
-// "A" chip: same base metrics as the ↺ reset button so rows don't jitter,
-// but always visible when auto-capable (unlike the reset button, which is a
-// change indicator) — lit means auto is driving this row right now.
-const autoChipStyle = `
-  background: #fff0; border: 1px solid #fff3; border-radius: 4px; padding: 0 5px;
-  font: inherit; font-size: 10px; font-weight: 600; line-height: 1.5; cursor: pointer;
-  flex-shrink: 0; opacity: 0.5; color: #fff;
-`;
-const autoChipLitStyle = `
-  background: ${SCENE_ACCENT}33; border: 1px solid ${SCENE_ACCENT}; border-radius: 4px; padding: 0 5px;
-  font: inherit; font-size: 10px; font-weight: 600; line-height: 1.5; cursor: pointer;
-  flex-shrink: 0; opacity: 1; color: ${SCENE_ACCENT};
-`;
-const autoChipLitMicStyle = `
-  background: ${MIC_GREEN}33; border: 1px solid ${MIC_GREEN}; border-radius: 4px; padding: 0 5px;
-  font: inherit; font-size: 10px; font-weight: 600; line-height: 1.5; cursor: pointer;
-  flex-shrink: 0; opacity: 1; color: ${MIC_GREEN};
-`;
-// Fourth accent (sky-blue), distinct from mic-green/bands-amber/scene-violet
-// — the global auto system (strength knob + master switch) is its own
-// system, same reasoning as the other boxes' accents.
-const AUTO_ACCENT = "#38bdf8";
-// flex: 1 + min-width: 0 so this box shares the row with autoMasterBtn below
-// instead of spanning the panel's full width — see autoRowStyle.
-const autoBoxStyle = `
-  border: 1px solid ${AUTO_ACCENT}66; border-radius: 10px; padding: 12px;
-  flex: 1; min-width: 0;
-`;
-const autoHeadingStyle = `
-  font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.85; color: ${AUTO_ACCENT}; flex: 1;
-`;
-const autoStrengthSliderStyle = `width: 100%; accent-color: ${AUTO_ACCENT};`;
-// Wraps autoBox + autoMasterBtn side by side — the button renders outside
-// the box's border, not inside it. align-items: stretch so the button
-// matches the box's height instead of floating at its vertical centre.
-const autoRowStyle = `display: flex; align-items: stretch; gap: 8px; margin-bottom: 4px;`;
-// The global "Auto" master switch (toggles every auto-capable row — scene
-// settings plus Sensitivity/Dynamics, see app.ts's isSceneAuto wiring) sits
-// outside the Auto box, in the row wrapper, so it shares that box's accent
-// without being nested inside its border.
-const autoMasterStyle = `
-  background: #fff0; border: 1px solid ${AUTO_ACCENT}66; border-radius: 10px; padding: 4px 14px;
-  font: inherit; font-size: 12px; cursor: pointer; opacity: 0.85; color: #fff; flex-shrink: 0;
-`;
-const autoMasterLitStyle = `
-  background: ${AUTO_ACCENT}33; border: 1px solid ${AUTO_ACCENT}; border-radius: 10px; padding: 4px 14px;
-  font: inherit; font-size: 12px; cursor: pointer; opacity: 1; color: ${AUTO_ACCENT}; flex-shrink: 0;
-`;
-// Feather "mic" icon — recolored to MIC_GREEN via currentColor.
-const MIC_ICON_SVG = `
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-       stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-    <line x1="12" y1="19" x2="12" y2="23"></line>
-    <line x1="8" y1="23" x2="16" y2="23"></line>
-  </svg>
-`;
-
-interface GainRowSpec {
-  label: string;
-  /** The log curve's lower end. With zeroAtMin, this is a floor the curve
-   *  approaches, not the row's actual minimum — see zeroAtMin below. */
-  min: number;
-  max: number;
-  defaultValue: number;
-  /** Only the first (Sensitivity) row gets the mic icon — subsequent rows in the same box don't repeat it. */
-  icon?: string;
-  /** Separates this row from one above it in the same box; omit for the first row. */
-  spaced?: boolean;
-  /** accent-color for this row's slider thumb/track. Defaults to mic-green
-   *  (Sensitivity/Acceleration/Smoothing's own color) when omitted. */
-  accent?: string;
-  /** When set, the slider's bottom position snaps to exactly 0 (an explicit
-   *  kill, DJ-mixer style) instead of continuing the log curve down to
-   *  `min` — log(0) has no position, so 0 needs this special case. The
-   *  curve itself still spans `min`..`max` across the rest of the track. */
-  zeroAtMin?: boolean;
-  /** Wires an auto chip into the heading row — see autoTune.ts. Omit to leave the row manual-only. */
-  auto?: {
-    isEnabled: () => boolean;
-    toggle: (on: boolean) => void;
-    resolveLive: () => number;
-    /** The manually-stored value — read when the chip turns auto off, since
-     *  that reveals whatever's stored, not whatever the slider happened to be showing. */
-    getManual: () => number;
-  };
-}
-
-/** A labeled log-mapped slider row: heading (icon + label + value + Reset) plus
- *  the slider itself. Sensitivity, Acceleration, and Smoothing are three
- *  instances of this same shape, so the construction and pos<->value mapping
- *  live here once. */
-function createGainRow(spec: GainRowSpec) {
-  const headingRow = document.createElement("div");
-  headingRow.style.cssText = spec.spaced
-    ? subHeadingRowStyle
-    : boxHeadingRowStyle;
-
-  // Always reserve the icon's width, even for rows without one, so labels
-  // in the same box stay left-aligned with each other.
-  const children: HTMLElement[] = [];
-  const icon = document.createElement("span");
-  if (spec.icon) icon.innerHTML = spec.icon;
-  icon.style.cssText = micIconStyle + "width: 13px;";
-  children.push(icon);
-
-  const heading = document.createElement("div");
-  heading.textContent = spec.label;
-  heading.style.cssText = boxHeadingStyle;
-  children.push(heading);
-
-  const readout = document.createElement("span");
-  readout.style.cssText = readoutStyle;
-  children.push(readout);
-
-  // Before Reset (matching the per-setting rows' label/readout/chip/reset order).
-  const autoChip = document.createElement("button");
-  autoChip.textContent = "A";
-  autoChip.title = `Auto-tune ${spec.label}`;
-  autoChip.style.cssText = autoChipStyle;
-  if (spec.auto) children.push(autoChip);
-
-  const resetBtn = document.createElement("button");
-  resetBtn.textContent = "Reset";
-  resetBtn.style.cssText = resetBtnStyle;
-  children.push(resetBtn);
-
-  headingRow.append(...children);
-
-  const sliderRow = document.createElement("div");
-  sliderRow.style.cssText = sliderRowStyle;
-  const slider = document.createElement("input");
-  slider.type = "range";
-  slider.min = "0";
-  slider.max = "100";
-  slider.style.cssText = gainSliderStyle(spec.accent ?? MIC_GREEN);
-  sliderRow.append(slider);
-
-  // Log-mapped so the midpoint lands close to defaultValue (1x) instead of
-  // skewing toward the wide "more reactive" end. With zeroAtMin, position 0
-  // is carved out as an explicit kill and the log curve covers 1..100
-  // instead of 0..100 — position 0 can't sit on the curve since log(0) is
-  // undefined, and reserving a single position for it (vs. e.g. letting the
-  // curve asymptote toward 0) is what makes the kill a deliberate, findable
-  // stop rather than something you might land on by accident.
-  function posToValue(pos: number): number {
-    if (spec.zeroAtMin && pos <= 0) return 0;
-    const loPos = spec.zeroAtMin ? 1 : 0;
-    const t = (pos - loPos) / (100 - loPos);
-    return spec.min * Math.pow(spec.max / spec.min, t);
-  }
-  function valueToPos(value: number): number {
-    if (spec.zeroAtMin && value <= 0) return 0;
-    const loPos = spec.zeroAtMin ? 1 : 0;
-    const t = Math.log(value / spec.min) / Math.log(spec.max / spec.min);
-    return Math.round(loPos + t * (100 - loPos));
-  }
-  function setReadout(value: number, auto: boolean): void {
-    if (spec.zeroAtMin && value <= 0) {
-      readout.textContent = `Off${auto ? " ~" : ""}`;
-      return;
-    }
-    readout.textContent = `${value.toFixed(1)}×${auto ? " ~" : ""}`;
-  }
-
-  let onCommit: (value: number) => void = () => {};
-  function commit(value: number): void {
-    setReadout(value, false);
-    onCommit(value);
-    refreshChip();
-  }
-
-  let dragging = false;
-  slider.addEventListener("pointerdown", () => {
-    dragging = true;
-  });
-  slider.addEventListener("pointerup", () => {
-    dragging = false;
-  });
-  slider.addEventListener("input", () =>
-    commit(posToValue(Number(slider.value))),
-  );
-  resetBtn.addEventListener("click", () => {
-    slider.value = String(valueToPos(spec.defaultValue));
-    commit(spec.defaultValue);
-  });
-
-  function refreshChip(): void {
-    if (!spec.auto) return;
-    const on = spec.auto.isEnabled();
-    autoChip.style.cssText = on ? autoChipLitMicStyle : autoChipStyle;
-  }
-
-  if (spec.auto) {
-    autoChip.addEventListener("click", () => {
-      const auto = spec.auto!;
-      const on = !auto.isEnabled();
-      auto.toggle(on);
-      refreshChip();
-      setValueInternal(on ? auto.resolveLive() : auto.getManual(), on);
-    });
-  }
-
-  function setValueInternal(value: number, auto: boolean): void {
-    slider.value = String(valueToPos(value));
-    setReadout(value, auto);
-  }
-
-  return {
-    headingRow,
-    sliderRow,
-    setValue(value: number): void {
-      setValueInternal(value, false);
-    },
-    onChange(cb: (value: number) => void): void {
-      onCommit = cb;
-    },
-    /** Called from the throttled per-frame refresh — pulls the live
-     *  auto-resolved value while auto is on and this row isn't being dragged. */
-    refreshAuto(): void {
-      if (!spec.auto || dragging || !spec.auto.isEnabled()) return;
-      setValueInternal(spec.auto.resolveLive(), true);
-    },
-    refreshChip,
-  };
-}
-
-// Hot-zone ramp for the Sensitivity box's fill wash: green all the way up to
-// HOT_START, then green -> yellow over the next slice, then yellow -> red in
-// the last PEAK_START..1 sliver — a silent "the scene has stopped reacting,
-// you're pinned at max" cue that the flat level wash alone doesn't give.
-const HOT_YELLOW = "#eab308"; // yellow-500
-const HOT_RED = "#ef4444"; // red-500
-const HOT_START = 0.96; // last 4%: green -> yellow
-const PEAK_START = 0.99; // last 1%: yellow -> red
-const WASH_ALPHA = 0x26; // resting fill alpha (matches the old flat wash)
-const WASH_HOT_ALPHA = 0x40; // fill alpha at full clip — needs to be more opaque to read as a warning
 
 function hexToRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16);
+  const n = parseInt(hex.slice(1, 7), 16);
   return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
 }
-const MIC_GREEN_RGB = hexToRgb(MIC_GREEN);
+const INPUT_GREEN_RGB = hexToRgb(INPUT_GREEN);
 const HOT_YELLOW_RGB = hexToRgb(HOT_YELLOW);
 const HOT_RED_RGB = hexToRgb(HOT_RED);
 
@@ -460,16 +296,16 @@ function toHex(n: number): string {
   return Math.round(n).toString(16).padStart(2, "0");
 }
 
-/** The fill wash's color for a shaped level in [0,1]: mic-green below
+/** The fill wash's color for a shaped level in [0,1]: input-green below
  *  HOT_START, ramping through yellow to red as the level nears 1 (clipped). */
 function washColor(level: number): string {
-  let rgb = MIC_GREEN_RGB;
+  let rgb = INPUT_GREEN_RGB;
   let alpha = WASH_ALPHA;
   if (level >= HOT_START) {
     const t = Math.min(1, (level - HOT_START) / (PEAK_START - HOT_START));
     rgb =
       level < PEAK_START
-        ? lerpRgb(MIC_GREEN_RGB, HOT_YELLOW_RGB, t)
+        ? lerpRgb(INPUT_GREEN_RGB, HOT_YELLOW_RGB, t)
         : lerpRgb(
             HOT_YELLOW_RGB,
             HOT_RED_RGB,
@@ -480,480 +316,700 @@ function washColor(level: number): string {
   return `#${toHex(rgb[0])}${toHex(rgb[1])}${toHex(rgb[2])}${toHex(alpha)}`;
 }
 
-/** Tap-to-open picker for this device's palette and per-scene mic sensitivity.
- *  Scene selection lives in the gallery — this panel no longer duplicates it. */
-export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
-  const root = document.createElement("div");
-  root.style.cssText = panelStyle;
+// ---- builders ------------------------------------------------------------
 
-  // Live spectrum, above everything else — a standing "is the mic actually
-  // hearing anything" check, and the surface the Bands sliders' marker line
-  // is drawn on. Always mounted (unlike sceneBox), since it's not tied to
-  // which scene is active.
-  const spectrumStrip = createSpectrumStrip();
+interface ControlRowSpec {
+  label: string;
+  accent: string;
+  min: number;
+  max: number;
+  /** Linear rows only — the slider's native step. */
+  step?: number;
+  defaultValue: number;
+  /** log: the slider is a 0..100 position mapped so the midpoint lands near
+   *  defaultValue (the gain rows); linear: the slider is the value itself. */
+  mapping: "log" | "linear";
+  /** Log rows only. When set, the slider's bottom position snaps to exactly 0
+   *  (an explicit kill, DJ-mixer style) instead of continuing the log curve
+   *  down to `min` — log(0) has no position, so 0 needs this special case.
+   *  The curve itself still spans `min`..`max` across the rest of the track. */
+  zeroAtMin?: boolean;
+  /** Mono suffix after the digits ("×"). */
+  unit?: string;
+  format: (value: number) => string;
+  description?: string;
+  /** Wires the auto chip — see autoTune.ts. Omit to leave the row manual-only. */
+  auto?: {
+    isEnabled: () => boolean;
+    toggle: (on: boolean) => void;
+    resolveLive: () => number;
+    /** The manually-stored value — read when the chip turns auto off, since
+     *  that reveals whatever's stored, not whatever the slider happened to be showing. */
+    getManual: () => number;
+  };
+}
 
-  // The rest of the listening post — everything else the pipeline already
-  // derives (transport, level-vs-energy, band onsets, section, dials) plus
-  // the two things it never captured before (waveform, stereo). See their
-  // own headers for why they're split into two components. Always mounted,
-  // same reasoning as spectrumStrip above.
-  const audioMeters = createAudioMeters();
-  const scopeStrip = createScopeStrip();
+/** One slider row in the panel's grammar — label, readout, chip, ↺, slider,
+ *  hint. Gain rows (log-mapped) and scene setting rows (linear) are the same
+ *  shape, so the construction and pos<->value mapping live here once. */
+function createControlRow(spec: ControlRowSpec) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
 
-  const sensitivityBox = document.createElement("div");
-  sensitivityBox.style.cssText = sensitivityBoxStyle;
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = spec.label;
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  const right = document.createElement("div");
+  right.style.cssText = rowRightStyle;
 
-  const sensitivityRow = createGainRow({
-    label: "Sensitivity",
-    min: SENSITIVITY_MIN,
-    max: SENSITIVITY_MAX,
-    defaultValue: SENSITIVITY_DEFAULT,
-    icon: MIC_ICON_SVG,
-    auto: {
-      isEnabled: () => deps.isSettingAutoEnabled(deps.currentSceneId(), deps.getSensitivitySpec().key),
-      toggle: (on) => deps.onSettingAutoToggle(deps.currentSceneId(), deps.getSensitivitySpec(), on),
-      resolveLive: () => deps.resolveSensitivityValue(deps.currentSceneId()),
-      getManual: () => deps.getSensitivity(deps.currentSceneId()),
-    },
-  });
-  sensitivityRow.onChange((value) =>
-    deps.onSensitivityChange(deps.currentSceneId(), value),
-  );
+  const readout = document.createElement("div");
+  readout.style.cssText = readoutStyle;
+  const digits = document.createElement("span");
+  digits.style.cssText = digitsStyle;
+  const unit = document.createElement("span");
+  unit.style.cssText = unitStyle;
+  unit.textContent = spec.unit ?? "";
+  if (!spec.unit) unit.style.display = "none";
+  readout.append(digits, unit);
 
-  // Widens or narrows the gap between quiet and loud, independent of the
-  // overall gain Sensitivity controls — see shapeAcceleration for the curve.
-  const accelerationRow = createGainRow({
-    label: "Acceleration",
-    min: ACCELERATION_MIN,
-    max: ACCELERATION_MAX,
-    defaultValue: ACCELERATION_DEFAULT,
-    spaced: true,
-    auto: {
-      isEnabled: () => deps.isSettingAutoEnabled(deps.currentSceneId(), deps.getAccelerationSpec().key),
-      toggle: (on) => deps.onSettingAutoToggle(deps.currentSceneId(), deps.getAccelerationSpec(), on),
-      resolveLive: () => deps.resolveAccelerationValue(deps.currentSceneId()),
-      getManual: () => deps.getAcceleration(deps.currentSceneId()),
-    },
-  });
-  accelerationRow.onChange((value) =>
-    deps.onAccelerationChange(deps.currentSceneId(), value),
-  );
+  const chip = document.createElement("button");
+  chip.textContent = "A";
+  chip.title = `Auto-tune ${spec.label}`;
+  chip.style.cssText = autoChipManualStyle(spec.accent);
+  // A row with no auto weights has nothing for the chip to do — leave it out
+  // rather than show a toggle that can't change anything.
+  if (!spec.auto) chip.style.display = "none";
 
-  // How fast the visuals chase the audio, independent of Sensitivity's gain
-  // and Acceleration's curve — see smoothingRateScale for the rate mapping.
-  const smoothingRow = createGainRow({
-    label: "Smoothing",
-    min: SMOOTHING_MIN,
-    max: SMOOTHING_MAX,
-    defaultValue: SMOOTHING_DEFAULT,
-    spaced: true,
-    auto: {
-      isEnabled: () => deps.isSettingAutoEnabled(deps.currentSceneId(), deps.getSmoothingSpec().key),
-      toggle: (on) => deps.onSettingAutoToggle(deps.currentSceneId(), deps.getSmoothingSpec(), on),
-      resolveLive: () => deps.resolveSmoothingValue(deps.currentSceneId()),
-      getManual: () => deps.getSmoothing(deps.currentSceneId()),
-    },
-  });
-  smoothingRow.onChange((value) =>
-    deps.onSmoothingChange(deps.currentSceneId(), value),
-  );
+  // visibility (not display) keeps the row from reflowing while dragging.
+  const resetBtn = document.createElement("button");
+  resetBtn.textContent = "↺";
+  resetBtn.title = `Reset ${spec.label}`;
+  resetBtn.style.cssText = rowResetStyle;
 
-  // Sensitivity/Acceleration/Smoothing share this row shape and, below, the
-  // same three auto-refresh call sites (master toggle, open(), live-drift
-  // refresh). Looping over one array there — instead of one hand-written
-  // block per row — is what keeps a future fourth row from shipping
-  // half-wired to Auto the way Smoothing initially did.
-  const gainRows: { row: ReturnType<typeof createGainRow>; specKey: () => string; manualValue: () => number }[] = [
-    {
-      row: sensitivityRow,
-      specKey: () => deps.getSensitivitySpec().key,
-      manualValue: () => deps.getSensitivity(deps.currentSceneId()),
-    },
-    {
-      row: accelerationRow,
-      specKey: () => deps.getAccelerationSpec().key,
-      manualValue: () => deps.getAcceleration(deps.currentSceneId()),
-    },
-    {
-      row: smoothingRow,
-      specKey: () => deps.getSmoothingSpec().key,
-      manualValue: () => deps.getSmoothing(deps.currentSceneId()),
-    },
-  ];
+  right.append(readout, chip, resetBtn);
+  head.append(label, right);
 
-  sensitivityBox.append(...gainRows.flatMap(({ row }) => [row.headingRow, row.sliderRow]));
-
-  // Per-scene look knobs (e.g. Caustics' focus/breathe/ripple/flash). Rebuilt
-  // on every open() since the set of sliders depends on which scene is active.
-  const sceneBox = document.createElement("div");
-  sceneBox.style.cssText = sceneBoxStyle;
-  sceneBox.style.display = "none";
-
-  const sceneHeadingRow = document.createElement("div");
-  sceneHeadingRow.style.cssText = sceneHeadingRowStyle;
-  const sceneHeading = document.createElement("div");
-  sceneHeading.textContent = "Scene";
-  sceneHeading.style.cssText = sceneHeadingStyle;
-  const sceneHeadingRight = document.createElement("div");
-  sceneHeadingRight.style.cssText = `display: flex; align-items: center; gap: 6px;`;
-  // The global Auto master switch lives in the Auto box (below), not here —
-  // it already toggles every auto-capable row, incl. Sensitivity/Dynamics,
-  // via app.ts's isSceneAuto wiring, so this heading only needs Reset.
-  const autoMasterBtn = document.createElement("button");
-  autoMasterBtn.textContent = "Auto";
-  autoMasterBtn.title = "Auto-tune everything — sensitivity, acceleration, smoothing, and every scene setting";
-  autoMasterBtn.style.cssText = autoMasterStyle;
-  const sceneResetBtn = document.createElement("button");
-  sceneResetBtn.textContent = "Reset";
-  sceneResetBtn.style.cssText = resetBtnStyle;
-  sceneHeadingRight.append(sceneResetBtn);
-  sceneHeadingRow.append(sceneHeading, sceneHeadingRight);
-
-  const sceneRows = document.createElement("div");
-  sceneBox.append(sceneHeadingRow, sceneRows);
-
-  interface SceneRowHandle {
-    spec: SceneSetting;
-    slider: HTMLInputElement;
-    readout: HTMLSpanElement;
-    isDragging: () => boolean;
-    updateRowResetVisibility: (value: number) => void;
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.className = "vc-slider";
+  slider.setAttribute("aria-label", spec.label);
+  // The accent rides the row (not just the slider) so the hover/focus
+  // highlight on the title and track share it — see controlsTheme.ts.
+  el.style.setProperty("--vc-accent", spec.accent);
+  const isLog = spec.mapping === "log";
+  // Continuous, not stepped: a declared `step` is the uniform's meaningful
+  // resolution, not a detent, and snapping to it made a 0..1 row jump in
+  // twenty visible hops across the track. Only a step of 1 or more marks a
+  // genuinely discrete control (integer counts), which keeps its detents.
+  const discrete = !isLog && spec.step !== undefined && spec.step >= 1;
+  if (isLog) {
+    slider.min = "0";
+    slider.max = "100";
+  } else {
+    slider.min = String(spec.min);
+    slider.max = String(spec.max);
   }
-  let sceneRowHandles: SceneRowHandle[] = [];
+  slider.step = discrete ? String(spec.step) : "any";
 
-  function refreshAutoMaster(): void {
-    autoMasterBtn.style.cssText = deps.isSceneAuto(deps.currentSceneId())
-      ? autoMasterLitStyle
-      : autoMasterStyle;
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+
+  el.append(head, slider, hint);
+
+  // Log-mapped so the midpoint lands close to defaultValue instead of skewing
+  // toward the wide "more reactive" end. With zeroAtMin, position 0 is carved
+  // out as an explicit kill and the log curve covers 1..100 instead of 0..100
+  // — reserving a single position for it (vs. letting the curve asymptote
+  // toward 0) is what makes the kill a deliberate, findable stop rather than
+  // something you might land on by accident.
+  function posToValue(pos: number): number {
+    if (spec.zeroAtMin && pos <= 0) return 0;
+    const loPos = spec.zeroAtMin ? 1 : 0;
+    const t = (pos - loPos) / (100 - loPos);
+    return spec.min * Math.pow(spec.max / spec.min, t);
+  }
+  function valueToPos(value: number): number {
+    if (spec.zeroAtMin && value <= 0) return 0;
+    const loPos = spec.zeroAtMin ? 1 : 0;
+    const t = Math.log(value / spec.min) / Math.log(spec.max / spec.min);
+    return loPos + t * (100 - loPos);
+  }
+  function sliderToValue(): number {
+    return isLog ? posToValue(Number(slider.value)) : Number(slider.value);
+  }
+  function valueToSlider(value: number): number {
+    return isLog ? valueToPos(value) : value;
   }
 
-  autoMasterBtn.addEventListener("click", () => {
-    const sceneId = deps.currentSceneId();
-    const on = !deps.isSceneAuto(sceneId);
-    deps.onSceneAutoToggle(sceneId, on);
-    renderSceneSettings();
-    for (const { row, specKey, manualValue } of gainRows) {
-      row.refreshChip();
-      if (deps.isSettingAutoEnabled(sceneId, specKey())) row.refreshAuto();
-      else row.setValue(manualValue());
+  function setReadout(value: number): void {
+    if (spec.zeroAtMin && value <= 0) {
+      digits.textContent = "Off";
+      digits.style.cssText = digitsTextStyle;
+      unit.style.display = "none";
+      return;
     }
+    digits.textContent = spec.format(value);
+    digits.style.cssText = digitsStyle;
+    if (spec.unit) unit.style.display = "";
+  }
+
+  function setHint(auto: boolean): void {
+    const text = auto ? AUTO_HOLDING_HINT : spec.description ?? "";
+    hint.textContent = text;
+    hint.style.display = text ? "" : "none";
+  }
+
+  function display(value: number, auto: boolean): void {
+    const sliderValue = valueToSlider(value);
+    slider.value = String(sliderValue);
+    const lo = Number(slider.min);
+    const hi = Number(slider.max);
+    const pct = hi > lo ? ((sliderValue - lo) / (hi - lo)) * 100 : 0;
+    slider.style.setProperty("--vc-fill", `${Math.max(0, Math.min(100, pct))}%`);
+    setReadout(value);
+    resetBtn.style.visibility = Math.abs(value - spec.defaultValue) > 1e-6 ? "visible" : "hidden";
+    setHint(auto);
+  }
+
+  function refreshChip(): void {
+    if (!spec.auto) return;
+    const on = spec.auto.isEnabled();
+    chip.style.cssText = on ? autoChipLitStyle(spec.accent) : autoChipManualStyle(spec.accent);
+    setHint(on);
+  }
+
+  let onCommit: (value: number) => void = () => {};
+  function commit(value: number): void {
+    display(value, false);
+    onCommit(value);
+    refreshChip();
+  }
+
+  let dragging = false;
+  slider.addEventListener("pointerdown", () => {
+    dragging = true;
   });
+  slider.addEventListener("pointerup", () => {
+    dragging = false;
+  });
+  slider.addEventListener("pointercancel", () => {
+    dragging = false;
+  });
+  slider.addEventListener("input", () => commit(sliderToValue()));
+  resetBtn.addEventListener("click", () => commit(spec.defaultValue));
+
+  if (spec.auto) {
+    chip.addEventListener("click", () => {
+      const auto = spec.auto!;
+      const on = !auto.isEnabled();
+      auto.toggle(on);
+      refreshChip();
+      display(on ? auto.resolveLive() : auto.getManual(), on);
+    });
+  }
+
+  return {
+    el,
+    setValue(value: number): void {
+      display(value, false);
+    },
+    onChange(cb: (value: number) => void): void {
+      onCommit = cb;
+    },
+    /** Called from the throttled per-frame refresh — pulls the live
+     *  auto-resolved value while auto is on and this row isn't being dragged. */
+    refreshAuto(): void {
+      if (!spec.auto || dragging || !spec.auto.isEnabled()) return;
+      display(spec.auto.resolveLive(), true);
+    },
+    refreshChip,
+    /** Show whatever's right for the row now: the live auto value if auto
+     *  owns it, the manual store otherwise. */
+    sync(manualValue: () => number): void {
+      refreshChip();
+      if (spec.auto && spec.auto.isEnabled()) display(spec.auto.resolveLive(), true);
+      else display(manualValue(), false);
+    },
+  };
+}
+
+interface ToggleRowSpec {
+  label: string;
+  accent: string;
+  defaultValue: number;
+  description?: string;
+  get: () => number;
+  set: (value: number) => void;
+}
+
+/** A boolean setting's row: same head as a slider row, a pill toggle where
+ *  the slider would be. Never auto-tunable (see autoTune.ts — a display
+ *  toggle between two discrete states doesn't fit the continuous glide
+ *  model), so no chip and nothing to refresh per frame. */
+function createToggleRow(spec: ToggleRowSpec): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = spec.label;
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  const right = document.createElement("div");
+  right.style.cssText = rowRightStyle;
+  const readout = document.createElement("span");
+  readout.style.cssText = `${digitsTextStyle} color: #fff;`;
+  const resetBtn = document.createElement("button");
+  resetBtn.textContent = "↺";
+  resetBtn.title = `Reset ${spec.label}`;
+  resetBtn.style.cssText = rowResetStyle;
+  right.append(readout, resetBtn);
+  head.append(label, right);
+
+  const toggle = document.createElement("button");
+  toggle.className = "vc-toggle";
+  toggle.setAttribute("role", "switch");
+  toggle.setAttribute("aria-label", spec.label);
+  el.style.setProperty("--vc-accent", spec.accent);
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  hint.textContent = spec.description ?? "";
+  if (!spec.description) hint.style.display = "none";
+
+  el.append(head, toggle, hint);
+
+  function apply(value: number): void {
+    const on = value >= 0.5;
+    toggle.setAttribute("aria-checked", String(on));
+    readout.textContent = on ? "On" : "Off";
+    resetBtn.style.visibility = Math.abs(value - spec.defaultValue) > 1e-6 ? "visible" : "hidden";
+  }
+  apply(spec.get());
+
+  toggle.addEventListener("click", () => {
+    const value = toggle.getAttribute("aria-checked") === "true" ? 0 : 1;
+    apply(value);
+    spec.set(value);
+  });
+  resetBtn.addEventListener("click", () => {
+    apply(spec.defaultValue);
+    spec.set(spec.defaultValue);
+  });
+
+  return el;
+}
+
+function statusText(status: AudioStatus): string {
+  switch (status.source) {
+    case "mic":
+      return status.sampleRate ? `Mic live · ${Math.round(status.sampleRate / 1000)}k` : "Mic live";
+    case "remote":
+      return "Remote feed";
+    case "synthetic":
+      return "Synthetic";
+    default:
+      return "Waiting";
+  }
+}
+
+const formatGain = (value: number) => value.toFixed(1);
+const formatSetting = (value: number) => value.toFixed(2);
+
+// ---- the panel -----------------------------------------------------------
+
+export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
+  ensureControlsStyles();
+
+  const root = document.createElement("div");
+  root.className = "vc-root vc-scroll";
+
+  // ---- spectrum column ----
+  // Live spectrum, its own card — a standing "is the mic actually hearing
+  // anything" check. Always mounted (unlike the scene card), since it's not
+  // tied to which scene is active.
+  const spectrumStrip = createSpectrumStrip();
+  // The meters beneath it — see audioMeters.ts.
+  const audioMeters = createAudioMeters();
+
+  const spectrumCol = document.createElement("div");
+  spectrumCol.className = "vc-spectrum-col";
+  const spectrumCard = document.createElement("div");
+  spectrumCard.className = "vc-spectrum-card";
+  spectrumCard.style.cssText = glassCardStyle;
+  const spectrumScan = document.createElement("div");
+  spectrumScan.style.cssText = scanlineStyle;
+  const spectrumBody = document.createElement("div");
+  spectrumBody.style.cssText = spectrumBodyStyle;
+
+  const spectrumHeader = document.createElement("div");
+  spectrumHeader.style.cssText = spectrumHeaderStyle;
+  const spectrumTitle = document.createElement("div");
+  spectrumTitle.style.cssText = spectrumTitleStyle;
+  const spectrumStatus = document.createElement("div");
+  spectrumStatus.style.cssText = spectrumStatusStyle;
+  const liveDot = document.createElement("div");
+  liveDot.style.cssText = liveDotStyle(false);
+  const statusLabel = document.createElement("div");
+  statusLabel.style.cssText = statusTextStyle;
+  // "Listening post": lit shows the raw mic signal exactly as it comes in —
+  // no adaptive envelope, no sensitivity gain; unlit (default) shows the
+  // processed signal that's actually driving the visuals.
+  const rawChip = createChipButton("RAW", "Listening post — show the raw mic signal instead of what the visuals see", () => {
+    spectrumStrip.setShowRaw(!spectrumStrip.showRaw());
+    rawChip.style.cssText = spectrumStrip.showRaw() ? chipBtnLitStyle : chipBtnStyle;
+  });
+  spectrumStatus.append(liveDot, statusLabel, rawChip);
+  spectrumHeader.append(spectrumTitle, spectrumStatus);
+
+  const hairline = document.createElement("div");
+  hairline.style.cssText = hairlineStyle;
+
+  spectrumBody.append(spectrumHeader, hairline, spectrumStrip.el);
+  spectrumCard.append(spectrumScan, spectrumBody);
+  spectrumCol.append(spectrumCard, audioMeters.el);
+
+  let lastStatusText = "";
+  function refreshSpectrumHeader(): void {
+    spectrumTitle.textContent = deps.currentSceneName();
+    const status = deps.getAudioStatus();
+    const text = statusText(status);
+    if (text !== lastStatusText) {
+      lastStatusText = text;
+      statusLabel.textContent = text;
+      liveDot.style.cssText = liveDotStyle(status.source !== "none");
+    }
+  }
+
+  // ---- controls column ----
+  const controlsCol = document.createElement("div");
+  controlsCol.className = "vc-controls-col vc-scroll";
+
+  // Bands: low/mid/high band gain — the DJ-mixer control (see bandGains.ts):
+  // how hard each group drives the visuals, not where the dividing lines sit
+  // (those are fixed — see getBandSplit below). Global per device like the
+  // Auto card, not rebuilt per scene; only the Scene card needs that.
+  function makeBandGainRow(label: string, group: BandGroup, description: string) {
+    const row = createControlRow({
+      label,
+      accent: BANDS_AMBER,
+      min: BAND_GAIN_LOG_FLOOR,
+      max: BAND_GAIN_MAX,
+      defaultValue: BAND_GAIN_DEFAULT,
+      mapping: "log",
+      zeroAtMin: true,
+      unit: "×",
+      format: formatGain,
+      description,
+    });
+    row.onChange((value) => deps.onBandGainChange(deps.currentSceneId(), group, value));
+    return row;
+  }
+  const bandGainRows: Record<BandGroup, ReturnType<typeof createControlRow>> = {
+    low: makeBandGainRow("Low", "low", "How hard the bass drives the visuals — all the way down kills it"),
+    mid: makeBandGainRow("Mid", "mid", "How hard the mids drive the visuals — all the way down kills them"),
+    high: makeBandGainRow("High", "high", "How hard the hats and air drive the visuals — all the way down kills them"),
+  };
+  function refreshBandGainRows(): void {
+    const sceneId = deps.currentSceneId();
+    for (const group of ["low", "mid", "high"] as const) {
+      bandGainRows[group].setValue(deps.getBandGain(sceneId, group));
+    }
+  }
+  const bandsCard = createCard({
+    title: "Bands",
+    accent: BANDS_AMBER,
+    right: createChipButton("Reset", "Reset band gains", () => {
+      deps.onBandGainsReset(deps.currentSceneId());
+      refreshBandGainRows();
+    }),
+  });
+  bandsCard.body.append(bandGainRows.low.el, spacer(), bandGainRows.mid.el, spacer(), bandGainRows.high.el);
+
+  // The split itself is fixed (no crossover sliders to drag), so the strip
+  // only needs its group coloring set up once — the edges do still depend on
+  // the analyser's real sample rate, though, which isn't known until mic
+  // access is granted, so this is re-run on every open().
+  function refreshBandsSplit(): void {
+    spectrumStrip.setEdgesHz(deps.getBandEdgesHz());
+    spectrumStrip.setSplit(deps.getBandSplit());
+  }
+
+  // Auto strength: how far auto is allowed to push a setting from its default
+  // (see autoTune.ts's computeAutoTarget). Global per device.
+  const autoStrengthReadout = document.createElement("div");
+  autoStrengthReadout.style.cssText = readoutStyle;
+  const autoStrengthDigits = document.createElement("span");
+  autoStrengthDigits.style.cssText = digitsStyle;
+  autoStrengthReadout.appendChild(autoStrengthDigits);
+  const autoCard = createCard({ title: "Auto strength", accent: AUTO_SKY, right: autoStrengthReadout });
+  autoCard.el.style.flex = "1";
+  autoCard.el.style.minWidth = "0";
+  const autoStrengthRow = document.createElement("div");
+  autoStrengthRow.className = "vc-row";
+  const autoStrengthSlider = document.createElement("input");
+  autoStrengthSlider.type = "range";
+  autoStrengthSlider.className = "vc-slider";
+  autoStrengthSlider.setAttribute("aria-label", "Auto strength");
+  autoStrengthSlider.min = "0";
+  autoStrengthSlider.max = "2";
+  autoStrengthSlider.step = "any";
+  autoStrengthRow.style.setProperty("--vc-accent", AUTO_SKY);
+  autoStrengthSlider.style.marginTop = "0";
+  const autoStrengthHint = document.createElement("div");
+  autoStrengthHint.className = "vc-hint";
+  autoStrengthHint.textContent = AUTO_STRENGTH_HINT;
+  autoStrengthRow.append(autoStrengthSlider, autoStrengthHint);
+  autoCard.body.appendChild(autoStrengthRow);
+
+  function showAutoStrength(value: number): void {
+    autoStrengthSlider.value = String(value);
+    autoStrengthSlider.style.setProperty("--vc-fill", `${(value / 2) * 100}%`);
+    autoStrengthDigits.textContent = value.toFixed(2);
+  }
+  function refreshAutoStrengthDisplay(): void {
+    showAutoStrength(deps.getAutoStrength());
+  }
+  autoStrengthSlider.addEventListener("input", () => {
+    const value = Number(autoStrengthSlider.value);
+    showAutoStrength(value);
+    deps.onAutoStrengthChange(value);
+  });
+
+  // The global "Auto" master switch — toggles every auto-capable row, scene
+  // settings plus Sensitivity/Acceleration/Smoothing (see app.ts's
+  // isSceneAuto wiring). Welded to the strength card's right edge, sharing
+  // its accent without being nested inside its border.
+  const autoMasterBtn = document.createElement("button");
+  autoMasterBtn.title = "Auto-tune everything — sensitivity, acceleration, smoothing, and every scene setting";
+  const autoMasterLabel = document.createElement("div");
+  autoMasterLabel.textContent = "Auto";
+  const autoMasterSub = document.createElement("div");
+  const autoMasterInner = document.createElement("div");
+  autoMasterInner.append(autoMasterLabel, autoMasterSub);
+  autoMasterBtn.appendChild(autoMasterInner);
+
+  const autoRow = document.createElement("div");
+  autoRow.style.cssText = autoRowStyle;
+  autoRow.append(autoCard.el, autoMasterBtn);
+
+  // Input: Sensitivity/Acceleration/Smoothing — three instances of the same
+  // log-mapped row, sharing the auto-refresh call sites below (master
+  // toggle, open(), live-drift refresh) through one array, which is what
+  // keeps a future fourth row from shipping half-wired to Auto.
+  function makeInputRow(
+    label: string,
+    range: { min: number; max: number; defaultValue: number },
+    spec: () => SceneSetting,
+    getManual: () => number,
+    resolveLive: () => number,
+    onChange: (value: number) => void,
+    description: string,
+  ) {
+    const row = createControlRow({
+      label,
+      accent: INPUT_GREEN,
+      min: range.min,
+      max: range.max,
+      defaultValue: range.defaultValue,
+      mapping: "log",
+      unit: "×",
+      format: formatGain,
+      description,
+      auto: {
+        isEnabled: () => deps.isSettingAutoEnabled(deps.currentSceneId(), spec().key),
+        toggle: (on) => deps.onSettingAutoToggle(deps.currentSceneId(), spec(), on),
+        resolveLive,
+        getManual,
+      },
+    });
+    row.onChange(onChange);
+    return { row, getManual, defaultValue: range.defaultValue, onChange };
+  }
+  const inputRows = [
+    makeInputRow(
+      "Sensitivity",
+      { min: SENSITIVITY_MIN, max: SENSITIVITY_MAX, defaultValue: SENSITIVITY_DEFAULT },
+      deps.getSensitivitySpec,
+      () => deps.getSensitivity(deps.currentSceneId()),
+      () => deps.resolveSensitivityValue(deps.currentSceneId()),
+      (value) => deps.onSensitivityChange(deps.currentSceneId(), value),
+      "How hard the visuals react to the room",
+    ),
+    // Widens or narrows the gap between quiet and loud, independent of the
+    // overall gain Sensitivity controls — see shapeAcceleration for the curve.
+    makeInputRow(
+      "Acceleration",
+      { min: ACCELERATION_MIN, max: ACCELERATION_MAX, defaultValue: ACCELERATION_DEFAULT },
+      deps.getAccelerationSpec,
+      () => deps.getAcceleration(deps.currentSceneId()),
+      () => deps.resolveAccelerationValue(deps.currentSceneId()),
+      (value) => deps.onAccelerationChange(deps.currentSceneId(), value),
+      "Distance between the quiet parts and the loud parts",
+    ),
+    // How fast the visuals chase the audio, independent of Sensitivity's gain
+    // and Acceleration's curve — see smoothingRateScale for the rate mapping.
+    makeInputRow(
+      "Smoothing",
+      { min: SMOOTHING_MIN, max: SMOOTHING_MAX, defaultValue: SMOOTHING_DEFAULT },
+      deps.getSmoothingSpec,
+      () => deps.getSmoothing(deps.currentSceneId()),
+      () => deps.resolveSmoothingValue(deps.currentSceneId()),
+      (value) => deps.onSmoothingChange(deps.currentSceneId(), value),
+      "How quickly the picture follows the sound",
+    ),
+  ];
+  function syncInputRows(): void {
+    for (const { row, getManual } of inputRows) row.sync(getManual);
+  }
+  const inputCard = createCard({
+    title: "Input",
+    accent: INPUT_GREEN,
+    right: createChipButton("Reset", "Reset sensitivity, acceleration and smoothing", () => {
+      for (const { row, defaultValue, onChange } of inputRows) {
+        onChange(defaultValue);
+        row.setValue(defaultValue);
+        row.refreshChip();
+      }
+    }),
+  });
+  inputCard.el.style.cssText += inputCardWashStyle;
+  inputCard.body.append(inputRows[0].row.el, spacer(), inputRows[1].row.el, spacer(), inputRows[2].row.el);
+
+  // Scene: per-scene look knobs (e.g. Caustics' focus/breathe/ripple/flash).
+  // Rebuilt on every open() since the set of rows depends on which scene is
+  // active.
+  const sceneCard = createCard({
+    title: "Scene",
+    accent: SCENE_VIOLET,
+    right: createChipButton("Reset", "Reset every scene setting", () => {
+      deps.onSceneSettingsReset(deps.currentSceneId());
+      renderSceneSettings();
+    }),
+  });
+  sceneCard.el.style.display = "none";
+  const sceneRows = document.createElement("div");
+  sceneCard.body.appendChild(sceneRows);
+  let sceneRowHandles: ReturnType<typeof createControlRow>[] = [];
 
   function renderSceneSettings(): void {
     const sceneId = deps.currentSceneId();
     const specs = deps.getSceneSettings(sceneId);
     sceneRows.innerHTML = "";
     sceneRowHandles = [];
-    sceneBox.style.display = specs.length === 0 ? "none" : "block";
+    sceneCard.el.style.display = specs.length === 0 ? "none" : "";
     refreshAutoMaster();
 
     let lastGroup: string | undefined;
+    let first = true;
     for (const spec of specs) {
       if (spec.group !== undefined && spec.group !== lastGroup) {
-        const groupHeading = document.createElement("div");
-        groupHeading.textContent = spec.group;
-        groupHeading.style.cssText = lastGroup === undefined ? settingGroupFirstStyle : settingGroupStyle;
-        sceneRows.appendChild(groupHeading);
+        sceneRows.appendChild(groupHeading(spec.group, lastGroup === undefined));
+      } else if (!first) {
+        sceneRows.appendChild(spacer());
       }
       lastGroup = spec.group;
-
-      const row = document.createElement("div");
-      row.style.cssText = settingRowStyle;
-
-      const labelRow = document.createElement("div");
-      labelRow.style.cssText = settingLabelRowStyle;
-      const label = document.createElement("span");
-      label.textContent = spec.label;
-      label.style.cssText = settingLabelStyle;
-      const readout = document.createElement("span");
-      readout.style.cssText = settingReadoutStyle;
-      // A row with no auto weights has nothing for the chip to do — hide it
-      // rather than show a toggle that can't change anything (see autoTune.ts).
-      // Checkbox rows (spec.type === "boolean") never carry auto weights —
-      // auto-tuning a display toggle between two discrete states doesn't fit
-      // this chip's continuous glide model — so canAuto is always false
-      // there and the chip stays hidden, same as any other auto-less row.
-      const canAuto = !!spec.auto;
-      const chip = document.createElement("button");
-      chip.textContent = "A";
-      chip.title = `Auto-tune ${spec.label}`;
-      chip.style.cssText = autoChipStyle;
-      chip.style.display = canAuto ? "" : "none";
-      // Only shown once this control has actually been moved off its default —
-      // doubles as a "you changed this one" marker, and visibility (not
-      // display) keeps the row from reflowing while dragging.
-      const rowResetBtn = document.createElement("button");
-      rowResetBtn.textContent = "↺";
-      rowResetBtn.title = `Reset ${spec.label}`;
-      rowResetBtn.style.cssText = settingResetBtnStyle;
-      labelRow.append(label, readout, chip, rowResetBtn);
-
-      function updateRowResetVisibility(value: number): void {
-        rowResetBtn.style.visibility =
-          Math.abs(value - spec.default) > 1e-6 ? "visible" : "hidden";
-      }
+      first = false;
 
       if (spec.type === "boolean") {
-        // Never auto-tunable (see the canAuto comment above), so this reads
-        // straight from the manual store with no chip/resolve/slew involved.
-        const current = deps.getSceneSettingValue(sceneId, spec);
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.style.cssText = settingCheckboxStyle;
-
-        function applyChecked(value: number): void {
-          checkbox.checked = value >= 0.5;
-          readout.textContent = checkbox.checked ? "On" : "Off";
-          updateRowResetVisibility(value);
-        }
-        applyChecked(current);
-
-        checkbox.addEventListener("change", () => {
-          const value = checkbox.checked ? 1 : 0;
-          applyChecked(value);
-          deps.onSceneSettingChange(sceneId, spec, value);
-        });
-
-        rowResetBtn.addEventListener("click", () => {
-          applyChecked(spec.default);
-          deps.onSceneSettingChange(sceneId, spec, spec.default);
-        });
-
-        row.append(labelRow, checkbox);
-      } else {
-        const slider = document.createElement("input");
-        slider.type = "range";
-        slider.min = String(spec.min);
-        slider.max = String(spec.max);
-        slider.step = String(spec.step);
-        slider.style.cssText = settingSliderStyle;
-
-        function refreshChip(): void {
-          if (!canAuto) return;
-          const on = deps.isSettingAutoEnabled(sceneId, spec.key);
-          chip.style.cssText = on ? autoChipLitStyle : autoChipStyle;
-        }
-
-        function setDisplay(value: number, auto: boolean): void {
-          slider.value = String(value);
-          readout.textContent = `${value.toFixed(2)}${auto ? " ~" : ""}`;
-          updateRowResetVisibility(value);
-        }
-
-        const autoNow = canAuto && deps.isSettingAutoEnabled(sceneId, spec.key);
-        setDisplay(autoNow ? deps.resolveSceneSettingValue(sceneId, spec) : deps.getSceneSettingValue(sceneId, spec), autoNow);
-        refreshChip();
-
-        let dragging = false;
-        slider.addEventListener("pointerdown", () => {
-          dragging = true;
-        });
-        slider.addEventListener("pointerup", () => {
-          dragging = false;
-        });
-
-        slider.addEventListener("input", () => {
-          const value = Number(slider.value);
-          setDisplay(value, false);
-          deps.onSceneSettingChange(sceneId, spec, value);
-          refreshChip();
-        });
-
-        rowResetBtn.addEventListener("click", () => {
-          setDisplay(spec.default, false);
-          deps.onSceneSettingChange(sceneId, spec, spec.default);
-          refreshChip();
-        });
-
-        if (canAuto) {
-          chip.addEventListener("click", () => {
-            const on = !deps.isSettingAutoEnabled(sceneId, spec.key);
-            deps.onSettingAutoToggle(sceneId, spec, on);
-            refreshChip();
-            setDisplay(on ? deps.resolveSceneSettingValue(sceneId, spec) : deps.getSceneSettingValue(sceneId, spec), on);
-          });
-        }
-
-        row.append(labelRow, slider);
-
-        // The live-update loop below only ever touches rows with spec.auto
-        // set (see its own guard), which a checkbox row never has — so
-        // there's nothing to register for one, and slider/dragging only
-        // exist in this branch to begin with.
-        sceneRowHandles.push({ spec, slider, readout, isDragging: () => dragging, updateRowResetVisibility });
+        sceneRows.appendChild(
+          createToggleRow({
+            label: spec.label,
+            accent: SCENE_VIOLET,
+            defaultValue: spec.default,
+            description: spec.description,
+            get: () => deps.getSceneSettingValue(sceneId, spec),
+            set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
+          }),
+        );
+        continue;
       }
 
-      if (spec.description) {
-        const description = document.createElement("div");
-        description.textContent = spec.description;
-        description.style.cssText = settingDescriptionStyle;
-        row.appendChild(description);
-      }
-
-      sceneRows.appendChild(row);
+      const row = createControlRow({
+        label: spec.label,
+        accent: SCENE_VIOLET,
+        min: spec.min,
+        max: spec.max,
+        step: spec.step,
+        defaultValue: spec.default,
+        mapping: "linear",
+        format: formatSetting,
+        description: spec.description,
+        auto: spec.auto
+          ? {
+              isEnabled: () => deps.isSettingAutoEnabled(sceneId, spec.key),
+              toggle: (on) => deps.onSettingAutoToggle(sceneId, spec, on),
+              resolveLive: () => deps.resolveSceneSettingValue(sceneId, spec),
+              getManual: () => deps.getSceneSettingValue(sceneId, spec),
+            }
+          : undefined,
+      });
+      row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
+      row.sync(() => deps.getSceneSettingValue(sceneId, spec));
+      sceneRows.appendChild(row.el);
+      sceneRowHandles.push(row);
     }
   }
 
-  sceneResetBtn.addEventListener("click", () => {
-    deps.onSceneSettingsReset(deps.currentSceneId());
-    renderSceneSettings();
-  });
-
-  // Global auto-tune strength knob — how far auto is allowed to push a
-  // setting from its default (see autoTune.ts's computeAutoTarget). Global
-  // per device like bandsBox below, not rebuilt per scene.
-  const autoBox = document.createElement("div");
-  autoBox.style.cssText = autoBoxStyle;
-
-  const autoHeadingRow = document.createElement("div");
-  autoHeadingRow.style.cssText = boxHeadingRowStyle;
-  const autoHeading = document.createElement("div");
-  autoHeading.textContent = "Auto strength";
-  autoHeading.style.cssText = autoHeadingStyle;
-  const autoStrengthReadout = document.createElement("span");
-  autoStrengthReadout.style.cssText = settingReadoutStyle;
-  autoHeadingRow.append(autoHeading, autoStrengthReadout);
-
-  const autoStrengthSlider = document.createElement("input");
-  autoStrengthSlider.type = "range";
-  autoStrengthSlider.min = "0";
-  autoStrengthSlider.max = "2";
-  autoStrengthSlider.step = "0.05";
-  autoStrengthSlider.style.cssText = autoStrengthSliderStyle;
-
-  function refreshAutoStrengthDisplay(): void {
-    const value = deps.getAutoStrength();
-    autoStrengthSlider.value = String(value);
-    autoStrengthReadout.textContent = value.toFixed(2);
-  }
-
-  autoStrengthSlider.addEventListener("input", () => {
-    const value = Number(autoStrengthSlider.value);
-    autoStrengthReadout.textContent = value.toFixed(2);
-    deps.onAutoStrengthChange(value);
-  });
-
-  autoBox.append(autoHeadingRow, autoStrengthSlider);
-
-  // Button sits outside autoBox's border, not inside it — see autoRowStyle.
-  const autoRow = document.createElement("div");
-  autoRow.style.cssText = autoRowStyle;
-  autoRow.append(autoBox, autoMasterBtn);
-
-  // Low/mid/high band gain — the DJ-mixer control (see bandGains.ts):
-  // how hard each group drives the visuals, not where the dividing lines
-  // sit (those are fixed — see getBandSplit below). Global per device like
-  // autoBox above, not rebuilt per scene; only sceneBox needs that since its
-  // set of rows depends on which scene is active.
-  const bandsBox = document.createElement("div");
-  bandsBox.style.cssText = bandsBoxStyle;
-
-  const bandsHeadingRow = document.createElement("div");
-  bandsHeadingRow.style.cssText = bandsHeadingRowStyle;
-  const bandsHeading = document.createElement("div");
-  bandsHeading.textContent = "Bands";
-  bandsHeading.style.cssText = bandsHeadingStyle;
-  const bandsResetBtn = document.createElement("button");
-  bandsResetBtn.textContent = "Reset";
-  bandsResetBtn.style.cssText = resetBtnStyle;
-  bandsHeadingRow.append(bandsHeading, bandsResetBtn);
-
-  function makeBandGainRow(label: string, group: BandGroup, spaced: boolean) {
-    const gainRow = createGainRow({
-      label,
-      min: BAND_GAIN_LOG_FLOOR,
-      max: BAND_GAIN_MAX,
-      defaultValue: BAND_GAIN_DEFAULT,
-      accent: BANDS_ACCENT,
-      zeroAtMin: true,
-      spaced,
-    });
-    gainRow.onChange((value) =>
-      deps.onBandGainChange(deps.currentSceneId(), group, value),
-    );
-    return gainRow;
-  }
-
-  const lowGainRow = makeBandGainRow("Low", "low", false);
-  const midGainRow = makeBandGainRow("Mid", "mid", true);
-  const highGainRow = makeBandGainRow("High", "high", true);
-  const bandGainRows = { low: lowGainRow, mid: midGainRow, high: highGainRow };
-
-  bandsBox.append(
-    bandsHeadingRow,
-    lowGainRow.headingRow,
-    lowGainRow.sliderRow,
-    midGainRow.headingRow,
-    midGainRow.sliderRow,
-    highGainRow.headingRow,
-    highGainRow.sliderRow,
-  );
-
-  // The split itself is fixed now (no more crossover sliders to drag), so
-  // the strip only needs its group coloring set up once, not refreshed on
-  // every open() — the edges do still depend on the analyser's real sample
-  // rate, though, which isn't known until mic access is granted, so this
-  // still needs to be called at least once open() has a chance to run.
-  function refreshBandsSplit(): void {
-    spectrumStrip.setEdgesHz(deps.getBandEdgesHz());
-    spectrumStrip.setSplit(deps.getBandSplit());
-  }
-
-  function refreshBandGainRow(group: BandGroup): void {
-    const sceneId = deps.currentSceneId();
-    bandGainRows[group].setValue(deps.getBandGain(sceneId, group));
-  }
-  function refreshBandGainRows(): void {
-    refreshBandGainRow("low");
-    refreshBandGainRow("mid");
-    refreshBandGainRow("high");
-  }
-
-  bandsResetBtn.addEventListener("click", () => {
-    deps.onBandGainsReset(deps.currentSceneId());
-    refreshBandGainRows();
-  });
-
-  const paletteHeading = document.createElement("div");
-  paletteHeading.textContent = "Palette";
-  paletteHeading.style.cssText = headingStyle;
+  // Palette: the only picker left in the panel.
+  const paletteCard = createCard({ title: "Palette", accent: "rgba(255,255,255,0.7)" });
   const paletteList = document.createElement("div");
+  paletteList.style.cssText = paletteListStyle;
+  paletteCard.body.appendChild(paletteList);
 
-  root.append(
-    spectrumStrip.el,
-    audioMeters.el,
-    scopeStrip.el,
-    bandsBox,
-    autoRow,
-    sensitivityBox,
-    sceneBox,
-    paletteHeading,
-    paletteList,
-  );
+  function renderPalettes(): void {
+    paletteList.innerHTML = "";
+    const currentId = deps.currentPaletteId();
+    for (const item of deps.getPalettes()) {
+      const btn = document.createElement("button");
+      btn.textContent = item.name;
+      btn.style.cssText = item.id === currentId ? paletteChipLitStyle : paletteChipStyle;
+      btn.addEventListener("click", () => {
+        deps.onPickPalette(item.id);
+        // Stay open — the scene isn't hidden behind a backdrop, so tapping
+        // through palettes to watch the scene recolor is the point.
+        renderPalettes();
+      });
+      paletteList.appendChild(btn);
+    }
+  }
+
+  // Footer strip: auto state at a glance, and a way out.
+  const footer = document.createElement("div");
+  footer.style.cssText = footerStyle;
+  const footerStatus = document.createElement("span");
+  const hideBtn = document.createElement("button");
+  hideBtn.textContent = "Hide UI  H";
+  hideBtn.title = "Close the panel (H)";
+  hideBtn.style.cssText = footerBtnStyle;
+  hideBtn.addEventListener("click", () => close());
+  footer.append(footerStatus, hideBtn);
+
+  function refreshAutoMaster(): void {
+    const lit = deps.isSceneAuto(deps.currentSceneId());
+    autoMasterBtn.style.cssText = lit ? autoMasterLitStyle : autoMasterStyle;
+    autoMasterLabel.style.cssText = autoMasterLabelStyle(lit);
+    autoMasterSub.style.cssText = autoMasterSubStyle(lit);
+    autoMasterSub.textContent = lit ? "ON" : "OFF";
+    footerStatus.textContent = lit ? "Auto on" : "Auto off";
+  }
+
+  autoMasterBtn.addEventListener("click", () => {
+    const sceneId = deps.currentSceneId();
+    deps.onSceneAutoToggle(sceneId, !deps.isSceneAuto(sceneId));
+    renderSceneSettings();
+    syncInputRows();
+  });
+
+  controlsCol.append(bandsCard.el, autoRow, inputCard.el, sceneCard.el, paletteCard.el, footer);
+  root.append(spectrumCol, controlsCol);
   document.body.appendChild(root);
 
-  function renderList(
-    container: HTMLElement,
-    items: MenuItem[],
-    currentId: string,
-    onPick: (id: string) => void,
-  ) {
-    container.innerHTML = "";
-    for (const item of items) {
-      const btn = document.createElement("button");
-      btn.textContent = item.id === currentId ? `● ${item.name}` : item.name;
-      btn.style.cssText =
-        itemStyle + (item.id === currentId ? "border-color:#fff6;" : "");
-      btn.addEventListener("click", () => {
-        onPick(item.id);
-        // Stay open — the scene isn't hidden behind a backdrop any more, so
-        // tapping through palettes to watch the scene recolor is the point.
-        renderList(container, items, deps.currentPaletteId(), onPick);
-      });
-      container.appendChild(btn);
-    }
-  }
-
+  // ---- open / close ----
   let isOpen = false;
 
   // With no full-screen backdrop to catch outside taps, listen on the document
@@ -966,39 +1022,49 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     close();
   }
 
-  function open() {
-    renderList(
-      paletteList,
-      deps.getPalettes(),
-      deps.currentPaletteId(),
-      deps.onPickPalette,
-    );
-    const sceneId = deps.currentSceneId();
-    for (const { row, specKey, manualValue } of gainRows) {
-      row.refreshChip();
-      if (deps.isSettingAutoEnabled(sceneId, specKey())) row.refreshAuto();
-      else row.setValue(manualValue());
+  // "H" hides the panel. Ignored while typing somewhere (a range slider
+  // keeping focus after a drag is fine — that's still "in the panel").
+  function onKeyDown(e: KeyboardEvent) {
+    if (e.key !== "h" && e.key !== "H") return;
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const t = e.target as HTMLElement | null;
+    if (t) {
+      const tag = t.tagName;
+      if (tag === "TEXTAREA" || t.isContentEditable) return;
+      if (tag === "INPUT" && (t as HTMLInputElement).type !== "range") return;
     }
+    close();
+  }
+
+  function open() {
+    refreshSpectrumHeader();
+    renderPalettes();
+    syncInputRows();
     renderSceneSettings();
     refreshBandsSplit();
     refreshBandGainRows();
     refreshAutoStrengthDisplay();
-    root.style.display = "block";
+    root.classList.add("vc-open");
+    deps.toggleButton.setAttribute("aria-pressed", "true");
     isOpen = true;
     document.addEventListener("pointerdown", onDocPointerDown);
+    document.addEventListener("keydown", onKeyDown);
   }
 
   function close() {
-    root.style.display = "none";
+    root.classList.remove("vc-open");
+    deps.toggleButton.setAttribute("aria-pressed", "false");
     isOpen = false;
     document.removeEventListener("pointerdown", onDocPointerDown);
+    document.removeEventListener("keydown", onKeyDown);
   }
 
   // Cache of the last --wash value written, so update() (called every rAF
   // tick while open) only touches the DOM when the fill color actually moves.
   let lastWash = "";
   // ~10Hz — auto-driven values move on a multi-second timescale, so per-frame
-  // DOM writes here would be pure cost.
+  // DOM writes here would be pure cost. The spectrum header rides the same
+  // tick; its status changes even more rarely.
   const AUTO_UI_REFRESH_MS = 100;
   let lastAutoRefreshMs = 0;
 
@@ -1019,9 +1085,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-
-      audioMeters.update(frame, anim);
-      scopeStrip.update(mono, stereo);
+      audioMeters.update(frame, anim, mono, stereo);
       // Raw (pre-sensitivity) energy, so the level wash reflects the actual
       // mic signal regardless of where the sensitivity slider is set.
       const level = frame?.energy ?? 0;
@@ -1039,21 +1103,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       );
       const rawPct = Math.round(raw * 100);
       const shapedPct = Math.round(shaped * 100);
-      sensitivityBox.style.backgroundSize = `${rawPct}% 100%, ${shapedPct}% 100%`;
+      inputCard.el.style.backgroundSize = `${rawPct}% 100%, ${shapedPct}% 100%`;
 
       // Driven off the unrounded shaped level (not shapedPct) so the ramp
       // starts exactly at HOT_START rather than snapping in 1%-wide steps.
       const wash = washColor(shaped);
       if (wash !== lastWash) {
-        sensitivityBox.style.setProperty("--wash", wash);
+        inputCard.el.style.setProperty("--wash", wash);
         lastWash = wash;
       }
 
-      // "Before processing" for the spectrum strip shows the raw feed as-is;
-      // the default processed feed is the exact same sensitivity+acceleration
-      // pipeline the render path applies before scene.render() (see
-      // applySensitivity in app.ts) — so it always shows literally what the
-      // visuals are reacting to.
+      // The strip's raw feed shows the mic as-is; the default processed feed
+      // is the exact same sensitivity+acceleration pipeline the render path
+      // applies before scene.render() (see applySensitivity in app.ts) — so
+      // it always shows literally what the visuals are reacting to.
       const processedBands = frame ? applySensitivity(frame, sensitivity, acceleration).bands : null;
       spectrumStrip.update(rawBands, processedBands);
 
@@ -1061,14 +1124,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (nowMs - lastAutoRefreshMs < AUTO_UI_REFRESH_MS) return;
       lastAutoRefreshMs = nowMs;
 
-      for (const { row } of gainRows) row.refreshAuto();
-      for (const row of sceneRowHandles) {
-        if (row.isDragging() || !row.spec.auto || !deps.isSettingAutoEnabled(sceneId, row.spec.key)) continue;
-        const value = deps.resolveSceneSettingValue(sceneId, row.spec);
-        row.slider.value = String(value);
-        row.readout.textContent = `${value.toFixed(2)} ~`;
-        row.updateRowResetVisibility(value);
-      }
+      refreshSpectrumHeader();
+      for (const { row } of inputRows) row.refreshAuto();
+      for (const row of sceneRowHandles) row.refreshAuto();
     },
   };
 }
