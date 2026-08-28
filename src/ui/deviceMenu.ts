@@ -484,12 +484,40 @@ function wireRowKeys(
   });
 }
 
+// How far from the thumb (in px) the magnetic pull starts, and how much
+// extra scale it stacks on top of the row's existing 1.7x hover/focus boost
+// (controlsTheme.ts) at zero distance — see wireThumbMagnet below.
+const THUMB_MAGNET_RADIUS_PX = 48;
+const THUMB_MAGNET_MAX_BOOST = 1.3;
+
+/** Makes a slider's thumb grow further as the pointer nears it, on top of
+ *  the row's existing hover/focus scale-up — a bigger target exactly where
+ *  the pointer already is, rather than uniformly across the row. Written as
+ *  a --vc-thumb-boost custom property that the thumb's transform multiplies
+ *  in (controlsTheme.ts), so it composes with that existing rule instead of
+ *  fighting it, and costs nothing when the pointer is elsewhere (falls back
+ *  to 1). Purely a mouse nicety — keyboard/touch interaction never sets it. */
+function wireThumbMagnet(row: HTMLElement, slider: HTMLInputElement): void {
+  row.addEventListener("mousemove", (e) => {
+    const rect = slider.getBoundingClientRect();
+    const lo = Number(slider.min);
+    const hi = Number(slider.max);
+    const frac = hi > lo ? (Number(slider.value) - lo) / (hi - lo) : 0;
+    const thumbX = rect.left + frac * rect.width;
+    const t = Math.max(0, 1 - Math.abs(e.clientX - thumbX) / THUMB_MAGNET_RADIUS_PX);
+    const boost = 1 + (THUMB_MAGNET_MAX_BOOST - 1) * t * t;
+    row.style.setProperty("--vc-thumb-boost", boost.toFixed(3));
+  });
+  row.addEventListener("mouseleave", () => row.style.removeProperty("--vc-thumb-boost"));
+}
+
 /** One slider row in the panel's grammar — label, readout, chip, ↺, slider,
  *  hint. Gain rows (log-mapped) and scene setting rows (linear) are the same
  *  shape, so the construction and pos<->value mapping live here once. */
 function createControlRow(spec: ControlRowSpec) {
   const el = document.createElement("div");
   el.className = "vc-row";
+  el.style.cursor = "pointer";
 
   const head = document.createElement("div");
   head.style.cssText = rowHeadStyle;
@@ -497,7 +525,6 @@ function createControlRow(spec: ControlRowSpec) {
   label.textContent = spec.label;
   label.className = "vc-label";
   label.style.cssText = rowLabelStyle;
-  label.style.cursor = "pointer";
   const right = document.createElement("div");
   right.style.cssText = rowRightStyle;
 
@@ -561,7 +588,8 @@ function createControlRow(spec: ControlRowSpec) {
   hint.className = "vc-hint";
 
   el.append(head, slider, hint);
-  label.addEventListener("click", () => slider.focus());
+  el.addEventListener("click", () => slider.focus());
+  wireThumbMagnet(el, slider);
 
   // Log-mapped so the midpoint lands close to defaultValue instead of skewing
   // toward the wide "more reactive" end. With zeroAtMin, position 0 is carved
@@ -741,6 +769,7 @@ interface ToggleRowSpec {
 function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   const el = document.createElement("div");
   el.className = "vc-row";
+  el.style.cursor = "pointer";
 
   const head = document.createElement("div");
   head.style.cssText = rowHeadStyle;
@@ -748,7 +777,6 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   label.textContent = spec.label;
   label.className = "vc-label";
   label.style.cssText = rowLabelStyle;
-  label.style.cursor = "pointer";
   const right = document.createElement("div");
   right.style.cssText = rowRightStyle;
   const readout = document.createElement("span");
@@ -772,7 +800,7 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   if (!spec.description) hint.style.display = "none";
 
   el.append(head, toggle, hint);
-  label.addEventListener("click", () => toggle.focus());
+  el.addEventListener("click", () => toggle.focus());
 
   function apply(value: number): void {
     const on = value >= 0.5;
@@ -961,8 +989,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoStrengthHint.textContent = AUTO_STRENGTH_HINT;
   autoStrengthRow.append(autoStrengthSlider, autoStrengthHint);
   autoCard.body.appendChild(autoStrengthRow);
-  autoCard.title.style.cursor = "pointer";
-  autoCard.title.addEventListener("click", () => autoStrengthSlider.focus());
+  autoCard.el.style.cursor = "pointer";
+  autoCard.el.addEventListener("click", () => autoStrengthSlider.focus());
+  wireThumbMagnet(autoCard.el, autoStrengthSlider);
 
   function showAutoStrength(value: number): void {
     autoStrengthSlider.value = String(value);
