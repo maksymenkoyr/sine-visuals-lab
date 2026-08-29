@@ -143,6 +143,15 @@ const SETTINGS: SceneSetting[] = [
     default: -9.5,
   },
   {
+    key: "zoom",
+    label: "Zoom",
+    description: "Below 1 zooms out -- the terrain shrinks and its side edges come into view with sky around it; above 1 zooms in",
+    min: 0.3,
+    max: 2,
+    step: 0.05,
+    default: 1,
+  },
+  {
     key: "flow",
     label: "Waterfall",
     description: "How far back in time the horizon reads",
@@ -490,7 +499,10 @@ vec3 toView(vec3 world) {
 vec4 toClip(vec3 view) {
   float z = max(view.z, NEAR);
   float zc = z * (FAR + NEAR) / (FAR - NEAR) - 2.0 * FAR * NEAR / (FAR - NEAR);
-  return vec4(view.x * focalY() / roomAspect(), view.y * focalY(), zc, z);
+  // Zoom scales the projection like a focal length. The grid's width in
+  // MESH_VERT deliberately uses the un-zoomed focalY(), so zooming out
+  // shrinks the terrain in frame instead of widening it to fill the frame.
+  return vec4(view.x * focalY() * uZoom / roomAspect(), view.y * focalY() * uZoom, zc, z);
 }
 
 // Room-space v (0 = bottom, 1 = top) of the terrain's far edge at rest height.
@@ -630,6 +642,9 @@ void main() {
   float worldZ = GRID_DEPTH * pow(zNorm, Z_POWER);
   // Frustum half-width at this row's *view-space* depth (of the row at rest
   // height), so the trapezoid stays correct whatever the Camera Tilt is.
+  // Uses the un-zoomed focalY() on purpose: the grid's width is that of the
+  // zoom-1 frustum, so Zoom scales the terrain in frame rather than
+  // re-stretching it to fill the frame (see toClip).
   float rowViewZ = max(toView(vec3(0.0, 0.0, worldZ)).z, NEAR);
   float halfW = WIDTH_MARGIN * rowViewZ * roomAspect() / focalY();
   vec3 worldPos = vec3(aPos.x * halfW, height, worldZ);
@@ -656,7 +671,7 @@ void main() {
 
   // Perspective-scaled point size, so dots read consistently near and far.
   float ampFactor = mix(1.0, mix(0.2, 1.0, amp), uDotReactivity);
-  gl_PointSize = (0.3 + 1.2 * uDots) * ampFactor * (110.0 / viewZ);
+  gl_PointSize = (0.3 + 1.2 * uDots) * ampFactor * (110.0 / viewZ) * uZoom;
 }
 `;
 
