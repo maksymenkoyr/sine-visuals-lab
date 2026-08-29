@@ -219,7 +219,12 @@ export interface DeviceMenu {
    *  feeds, and the meters. `frame` has the band faders applied; `ungained`
    *  is the same frame before them (the strip's ghost bars); `pinned` is
    *  which bands the gain stage clamped (bandGains.ts's pinnedBands);
-   *  `anim`/`mono` feed the meters (audioMeters.ts). */
+   *  `anim`/`mono` feed the meters (audioMeters.ts). `rateScale` is
+   *  app.ts's already-resolved sensitivity.ts's smoothingRateScale for this
+   *  tick's Smoothing value — forwarded to the meters so their own BPM
+   *  settle and waveform peak-hold bypass at Smoothing's Off stop the same
+   *  way the rest of the pipeline does; not re-resolved here, since
+   *  resolveSmoothing() slews its auto value and this runs every rAF tick. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -227,6 +232,7 @@ export interface DeviceMenu {
     pinned: Uint8Array | null,
     anim: AnimFrame | null,
     mono: Float32Array | null,
+    rateScale: number,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
@@ -869,9 +875,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   spectrumCol.className = "vc-spectrum-col";
 
   // "Listening post": lit shows the raw mic signal exactly as it comes in —
-  // no adaptive envelope, no gain, no sensitivity; unlit (default) shows the
-  // processed signal that's actually driving the visuals.
-  const rawChip = createChipButton("RAW", "Listening post — show the raw mic signal instead of what the visuals see", () => {
+  // no adaptive envelope (features.ts), no Bands gain. NOT "no sensitivity":
+  // Sensitivity/Acceleration are applied later, only on the render path
+  // (applySensitivity in app.ts, after this strip is already fed) — so the
+  // processed side shown here never had them either. This is a different RAW
+  // chip from the meters panel's (audioMeters.ts): that one's Smoothing's Off
+  // stop makes a genuine no-op; this one always differs whenever Auto-gain is
+  // on, since the two sides normalize against different windows regardless
+  // of Smoothing (see features.ts's autoGain doc).
+  const rawChip = createChipButton("RAW", "Listening post — the raw mic signal, before the adaptive envelope and Bands gain", () => {
     spectrumStrip.setShowRaw(!spectrumStrip.showRaw());
     rawChip.style.cssText = spectrumStrip.showRaw() ? chipBtnLitStyle : chipBtnStyle;
   });
@@ -1078,7 +1090,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // keeps a future fourth row from shipping half-wired to Auto.
   function makeInputRow(
     label: string,
-    range: { min: number; max: number; defaultValue: number },
+    range: { min: number; max: number; defaultValue: number; zeroAtMin?: boolean },
     spec: () => SceneSetting,
     getManual: () => number,
     resolveLive: () => number,
@@ -1092,6 +1104,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       max: range.max,
       defaultValue: range.defaultValue,
       mapping: "log",
+      zeroAtMin: range.zeroAtMin,
       unit: "×",
       format: formatGain,
       description,
@@ -1128,14 +1141,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     ),
     // How fast the visuals chase the audio, independent of Sensitivity's gain
     // and Acceleration's curve — see smoothingRateScale for the rate mapping.
+    // zeroAtMin: unlike Sensitivity/Acceleration, this row's slider bottom is
+    // a carved-out Off stop rather than SMOOTHING_MIN — genuinely unsmoothed,
+    // not just the calmest setting (see sensitivity.ts's header). Auto-tune
+    // never lands here on its own: SMOOTHING_SPEC.min in autoTune.ts stays
+    // SMOOTHING_MIN, so this is reachable only by a deliberate drag or R-reset-then-drag.
     makeInputRow(
       "Smoothing",
-      { min: SMOOTHING_MIN, max: SMOOTHING_MAX, defaultValue: SMOOTHING_DEFAULT },
+      { min: SMOOTHING_MIN, max: SMOOTHING_MAX, defaultValue: SMOOTHING_DEFAULT, zeroAtMin: true },
       deps.getSmoothingSpec,
       () => deps.getSmoothing(deps.currentSceneId()),
       () => deps.resolveSmoothingValue(deps.currentSceneId()),
       (value) => deps.onSmoothingChange(deps.currentSceneId(), value),
-      "How quickly the picture follows the sound",
+      "How quickly the picture follows the sound — drag to the bottom for Off, the meters panel's RAW chip with nothing left to bypass",
     ),
   ];
   function syncInputRows(): void {
@@ -1569,11 +1587,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       pinned: Uint8Array | null,
       anim: AnimFrame | null,
       mono: Float32Array | null,
+      rateScale: number,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono, rawBands);
+      audioMeters.update(frame, anim, mono, rawBands, rateScale);
       // The tick is FeatureFrame.level — absolute, fixed-window loudness,
       // untouched by Auto-gain — so it reads the room regardless of that
       // toggle. The fill starts from .energy, which Auto-gain does shape,

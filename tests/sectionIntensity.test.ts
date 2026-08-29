@@ -74,4 +74,27 @@ describe("section intensity", () => {
       expect(s.rawIntensity).toBeLessThanOrEqual(1);
     }
   });
+
+  // rateScale=Infinity is what sensitivity.ts's smoothingRateScale returns
+  // at the Smoothing row's Off stop (deviceMenu.ts) — INTENSITY_SLEW must
+  // assign the target directly rather than compute a Math.min(1,
+  // rate*dt*scale) coefficient, so `intensity` lands on exactly the same
+  // value rawIntensity already shows (the meters panel's RAW chip). See
+  // sectionIntensity.ts's advance() doc.
+  it("at rateScale=Infinity, intensity jumps to exactly rawIntensity every tick", () => {
+    const s = createSectionIntensity();
+    for (let i = 0; i < 1800; i++) s.advance(DT, 0.1, Infinity); // settle a baseline first
+    s.advance(DT, 0.95, Infinity); // a hard step
+    expect(s.intensity).toBe(s.rawIntensity);
+  });
+
+  it("never produces NaN at rateScale=Infinity across a long, varied run", () => {
+    const s = createSectionIntensity();
+    for (let i = 0; i < 3000; i++) {
+      const e = 0.5 + 0.5 * Math.sin(i * 0.01);
+      s.advance(DT, e, Infinity);
+      expect(Number.isFinite(s.intensity)).toBe(true);
+      expect(s.intensity).toBe(s.rawIntensity);
+    }
+  });
 });
