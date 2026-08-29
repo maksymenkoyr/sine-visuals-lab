@@ -291,12 +291,21 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "bgMesh",
     label: "Background Mesh",
-    description: "Faint procedural lattice in the sky above the horizon",
+    description: "Procedural lattice across the sky above the horizon (and around the disc in the Circle layout), breathing with overall energy",
     min: 0,
     max: 1,
     step: 1,
     default: 0,
     type: "boolean",
+  },
+  {
+    key: "bgMeshIntensity",
+    label: "Background Mesh Intensity",
+    description: "How bright the background lattice is",
+    min: 0.05,
+    max: 2,
+    step: 0.05,
+    default: 0.6,
   },
   {
     key: "scanlines",
@@ -878,9 +887,13 @@ float triLattice(vec2 p) {
   float d3 = abs(fract(dot(p, a3)) - 0.5);
   float d = min(min(d1, d2), d3);
   // fwidth-based line width keeps this a clean fine mesh instead of
-  // aliasing into speckle noise.
+  // aliasing into speckle noise; the soft halo under it is what keeps a
+  // hairline legible on a dense display, where the crisp core alone is a
+  // single dim pixel.
   float aa = max(fwidth(d) * 1.5, 0.003);
-  return 1.0 - smoothstep(0.0, aa, d);
+  float core = 1.0 - smoothstep(0.0, aa, d);
+  float halo = 0.35 * exp(-d * 14.0);
+  return core + halo;
 }
 
 void main() {
@@ -891,10 +904,14 @@ void main() {
     float hv = horizonV();
     vec2 p = vec2((rUv.x - 0.5) * roomAspect(), rUv.y - hv) * 14.0;
     float lattice = triLattice(p);
-    // Only in the sky: fades in just above the horizon, out toward the top.
-    float mask = smoothstep(hv, hv + 0.12, rUv.y) * (1.0 - smoothstep(hv + 0.25, 1.0, rUv.y));
+    // Fades in just above the horizon and stays across the whole sky, only
+    // easing off toward the top. Below the horizon the runway covers the
+    // backdrop anyway, but in the Circle layout the disc floats in it, so
+    // the lattice continues underneath at reduced weight.
+    float below = uCircle > 0.5 ? 0.5 : 0.0;
+    float mask = mix(below, 1.0, smoothstep(hv, hv + 0.1, rUv.y)) * (1.0 - 0.5 * smoothstep(hv + 0.3, 1.0, rUv.y));
     vec3 latticeCol = max(palette(0.5, uPalA, uPalB, uPalC, uPalD), 0.0);
-    col += latticeCol * lattice * mask * (0.04 + 0.08 * uEnergy);
+    col += latticeCol * lattice * mask * uBgMeshIntensity * (0.3 + 0.5 * uEnergy);
   }
 
   // Matches MESH_FRAG's scanline effect so it reads as one continuous CRT
