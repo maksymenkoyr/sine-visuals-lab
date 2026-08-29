@@ -39,6 +39,14 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 //  - Row spacing in world Z is non-linear (`Z_POWER`) so rows spread more
 //    evenly on screen under perspective; time per row stays uniform because
 //    the history lookup uses the normalized row fraction, not world Z.
+//  - The Circle checkbox re-maps the same grid onto a disc: columns become
+//    the angle (the mirrored spectrum makes the seam at the back close on
+//    itself) and rows the radius, with the newest ring on the outside so the
+//    nearest, biggest ring is still the one that snaps to the beat. History
+//    converges on the center, where the displacement is faded to nothing —
+//    that's what keeps the pole from spiking (the old polar version of this
+//    scene never handled it). Everything downstream (lines, color, fog, dots,
+//    display modes) is layout-agnostic.
 //  - No directional lighting. Color comes from the room palette
 //    (`palette()` in palette.ts, like every other scene) driven by the
 //    per-vertex spectrum amplitude, with a push toward white at peaks that
@@ -86,6 +94,9 @@ const GRID_DEPTH = 160.0; // world z of the far (oldest) row; the front row is a
 const Z_POWER = 1.4; // >1 spreads rows toward the horizon so they stay legible under perspective
 const HEIGHT_SCALE = 6.0; // world units of displacement at amplitude 1, waveHeight 1
 const WIDTH_MARGIN = 1.15; // grid half-width as a multiple of the frustum half-width at that depth
+const CIRCLE_CENTER_Z = 50.0; // Circle layout: world z of the disc's center
+const CIRCLE_RADIUS = 40.0; // Circle layout: radius of the disc's outer (newest) rim
+const CIRCLE_TILT_DEG = 24; // Circle layout: disc plane tilted toward the viewer (far rim raised)
 const FOG_K = 1.0 / 110.0; // 1/(view depth) at which fog reaches 1/e
 const LINE_PX = 1.2; // grid line width in pixels before anti-aliasing
 const NOISE_PERIOD = 64.0; // lattice period of the noise field's time axis (see noisePeriodic)
@@ -150,6 +161,16 @@ const SETTINGS: SceneSetting[] = [
     max: 2,
     step: 0.05,
     default: 1,
+  },
+  {
+    key: "circle",
+    label: "Circle",
+    description: "Lay the spectrogram out as a disc instead of a runway: newest frame at the outer rim, history shrinking inward and fading at the center, bass at the front. Raise Camera Height and tilt down for a top-down view",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 0,
+    type: "boolean",
   },
   {
     key: "flow",
@@ -470,6 +491,9 @@ const settingsUniformsGlsl = SETTINGS.map((s) => `uniform float ${settingUniform
 // settingsUniformsGlsl to be declared first.
 const CAMERA_GLSL = `
 #define GRID_DEPTH ${GRID_DEPTH.toFixed(1)}
+#define CIRCLE_CENTER_Z ${CIRCLE_CENTER_Z.toFixed(1)}
+#define CIRCLE_RADIUS ${CIRCLE_RADIUS.toFixed(1)}
+#define CIRCLE_TILT ${((CIRCLE_TILT_DEG * Math.PI) / 180).toFixed(5)}
 #define NEAR 0.5
 #define FAR 400.0
 
@@ -505,9 +529,13 @@ vec4 toClip(vec3 view) {
   return vec4(view.x * focalY() * uZoom / roomAspect(), view.y * focalY() * uZoom, zc, z);
 }
 
-// Room-space v (0 = bottom, 1 = top) of the terrain's far edge at rest height.
+// Room-space v (0 = bottom, 1 = top) of the terrain's far edge at rest height
+// (the disc's far rim in the Circle layout).
 float horizonV() {
-  vec4 c = toClip(toView(vec3(0.0, 0.0, GRID_DEPTH)));
+  vec3 farEdge = uCircle > 0.5
+    ? vec3(0.0, CIRCLE_RADIUS * sin(CIRCLE_TILT), CIRCLE_CENTER_Z + CIRCLE_RADIUS * cos(CIRCLE_TILT))
+    : vec3(0.0, 0.0, GRID_DEPTH);
+  vec4 c = toClip(toView(farEdge));
   return (c.y / c.w) * 0.5 + 0.5;
 }
 `;
@@ -627,27 +655,51 @@ void main() {
 
   float height = amp * uWaveHeight * HEIGHT_SCALE;
 
+  bool circle = uCircle > 0.5;
+
   // Undulation sampled in (normalized x, absolute frame) space so it scrolls
   // with the data. noiseScale sets the pattern size on both axes together.
-  vec2 noiseCoord = vec2(aPos.x * 15.0 * uNoiseScale, uNoisePhase - framesBack * NOISE_Z_RATE * uNoiseScale);
+  // The Circle layout wraps the columns into a ring whose seam is at
+  // aPos.x = +-1; the spectrum is already mirrored there, and folding the
+  // noise's x the same way closes the seam for it too.
+  float noiseX = circle ? fx : aPos.x;
+  vec2 noiseCoord = vec2(noiseX * 15.0 * uNoiseScale, uNoisePhase - framesBack * NOISE_Z_RATE * uNoiseScale);
   float nz = noisePeriodic(noiseCoord);
   height += (2.0 * nz - 1.0) * uNoise * uWaveHeight * 0.2 * HEIGHT_SCALE; // *0.2: keeps noise as texture, not a dominant swing
 
-  height += uValley * aPos.x * aPos.x;
+  vec3 worldPos;
+  if (circle) {
+    // Disc: time runs inward, so the outer rim is the newest (and nearest)
+    // ring and the oldest frames converge on the center. The displacement
+    // is faded out over the same innermost stretch the fog fades (below),
+    // so the pole, where every column meets, stays flat instead of spiking.
+    float rN = 1.0 - zNorm;
+    float theta = aPos.x * 3.14159265;   // 0 = front (bass), +-pi = back (treble, the closed seam)
+    height *= smoothstep(0.0, 0.25, rN);
+    height += uValley * rN * rN;         // bowl (or dome) instead of a valley
+    float r = CIRCLE_RADIUS * rN;
+    // The disc is tilted toward the viewer (far rim raised) so it reads as a
+    // disc rather than a sliver from the low default camera; displacement
+    // follows the disc's own normal.
+    vec3 local = vec3(sin(theta) * r, height, -cos(theta) * r);
+    float ct = cos(CIRCLE_TILT), st = sin(CIRCLE_TILT);
+    worldPos = vec3(local.x, local.y * ct + local.z * st, CIRCLE_CENTER_Z - local.y * st + local.z * ct);
+  } else {
+    height += uValley * aPos.x * aPos.x;
+    // Trapezoid grid hugging the frustum: half-width grows with depth so the
+    // surface overflows the frame at every row (see file header). Rows are
+    // spread non-linearly in world z so they stay legible under perspective.
+    float worldZ = GRID_DEPTH * pow(zNorm, Z_POWER);
+    // Frustum half-width at this row's *view-space* depth (of the row at rest
+    // height), so the trapezoid stays correct whatever the Camera Tilt is.
+    // Uses the un-zoomed focalY() on purpose: the grid's width is that of the
+    // zoom-1 frustum, so Zoom scales the terrain in frame rather than
+    // re-stretching it to fill the frame (see toClip).
+    float rowViewZ = max(toView(vec3(0.0, 0.0, worldZ)).z, NEAR);
+    float halfW = WIDTH_MARGIN * rowViewZ * roomAspect() / focalY();
+    worldPos = vec3(aPos.x * halfW, height, worldZ);
+  }
   vHeight = height; // to MESH_FRAG, for the Contour Lines checkbox
-
-  // Trapezoid grid hugging the frustum: half-width grows with depth so the
-  // surface overflows the frame at every row (see file header). Rows are
-  // spread non-linearly in world z so they stay legible under perspective.
-  float worldZ = GRID_DEPTH * pow(zNorm, Z_POWER);
-  // Frustum half-width at this row's *view-space* depth (of the row at rest
-  // height), so the trapezoid stays correct whatever the Camera Tilt is.
-  // Uses the un-zoomed focalY() on purpose: the grid's width is that of the
-  // zoom-1 frustum, so Zoom scales the terrain in frame rather than
-  // re-stretching it to fill the frame (see toClip).
-  float rowViewZ = max(toView(vec3(0.0, 0.0, worldZ)).z, NEAR);
-  float halfW = WIDTH_MARGIN * rowViewZ * roomAspect() / focalY();
-  vec3 worldPos = vec3(aPos.x * halfW, height, worldZ);
 
   vec3 view = toView(worldPos);
   vec4 clip = toClip(view);
