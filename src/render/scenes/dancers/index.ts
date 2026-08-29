@@ -3,7 +3,14 @@
  * field. The rig (rig.ts) is solved on the CPU from the choreographer's pose
  * (choreo.ts, moves.ts) and uploaded as a packed vec4 array; the shader
  * below owns the camera, the march and the lighting, and delegates the
- * figure's shape and colour to a skin (stickSkin.ts, skeletonSkin.ts).
+ * figure's shape and colour to whichever skin in SKINS the `skin` setting
+ * selects (stickSkin.ts, skeletonSkin.ts).
+ *
+ * Skin contract: a GLSL string defining `<prefix>_map(vec3 p)` (signed
+ * distance, world space) and `<prefix>_shade(p, n, rd, rim, ao)` (lit
+ * colour), built only from RIG_GLSL's bone helpers and SDF_GLSL's
+ * primitives. Every skin compiles into the one program; `map()` branches on
+ * a uniform, which is coherent across the whole draw and costs nothing.
  *
  * Cost: the march starts at the figure's bounding sphere, so background
  * pixels exit after one analytic test; inside, every step evaluates every
@@ -20,11 +27,27 @@ import {
   CH_LIFT,
   RIG_GLSL,
 } from "./rig.ts";
+import { SDF_GLSL } from "./sdf.ts";
 import { createChoreographer } from "./choreo.ts";
 import type { MoveClocks } from "./moves.ts";
 import { STICK_SKIN_GLSL } from "./stickSkin.ts";
+import { SKELETON_SKIN_GLSL } from "./skeletonSkin.ts";
 
 export const DANCERS_ID = "dancers";
+
+interface Skin {
+  /** Shown in the device menu's picker. */
+  name: string;
+  /** Function-name prefix inside `glsl`. */
+  prefix: string;
+  glsl: string;
+}
+
+/** Index order is the `skin` setting's value; the first entry is the default. */
+export const SKINS: readonly Skin[] = [
+  { name: "Skeleton", prefix: "skel", glsl: SKELETON_SKIN_GLSL },
+  { name: "Stick", prefix: "stick", glsl: STICK_SKIN_GLSL },
+];
 
 const SETTINGS: SceneSetting[] = [
   {
@@ -47,7 +70,31 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.4,
   },
+  {
+    key: "skin",
+    label: "Skin",
+    description: `What the dancer is made of: ${SKINS.map((s, i) => `${i} = ${s.name}`).join(", ")}.`,
+    group: "Look",
+    min: 0,
+    max: SKINS.length - 1,
+    step: 1,
+    default: 0,
+  },
+  {
+    key: "glow",
+    label: "Rim glow",
+    description: "Palette-coloured light catching the figure's edges.",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+  },
 ];
+
+const skinDispatch = (fn: "map" | "shade", args: string): string =>
+  SKINS.map((s, i) => `${i > 0 ? "else " : ""}if (gSkin == ${i}) return ${s.prefix}_${fn}(${args});`).join("\n  ") +
+  `\n  return ${SKINS[0].prefix}_${fn}(${args});`;
 
 const FRAG = `
 const int MAX_STEPS = 96;
@@ -60,10 +107,20 @@ uniform float uCamDolly;
 uniform float uCamTilt;
 uniform float uCamRoll;
 
-${RIG_GLSL}
-${STICK_SKIN_GLSL}
+// Which of SKINS draws this frame — set once in main() from uSkin.
+int gSkin = 0;
+float map(vec3 p);
 
-float map(vec3 p) { return stick_map(p); }
+${SDF_GLSL}
+${RIG_GLSL}
+${SKINS.map((s) => s.glsl).join("\n")}
+
+float map(vec3 p) {
+  ${skinDispatch("map", "p")}
+}
+vec3 shade(vec3 p, vec3 n, vec3 rd, vec3 rim, float ao) {
+  ${skinDispatch("shade", "p, n, rd, rim, ao")}
+}
 
 // Tetrahedral normal: four map() taps instead of six.
 vec3 calcNormal(vec3 p, float eps) {
@@ -75,25 +132,33 @@ vec3 calcNormal(vec3 p, float eps) {
     k.xxx * map(p + k.xxx * eps));
 }
 
+// Two taps along the normal: crevices (sockets, between ribs) darken.
+float ambientOcclusion(vec3 p, vec3 n) {
+  float a = clamp(map(p + n * 0.025) / 0.025, 0.0, 1.0);
+  float b = clamp(map(p + n * 0.07) / 0.07, 0.0, 1.0);
+  return mix(0.45, 1.0, a * 0.6 + b * 0.4);
+}
+
 void main() {
+  gSkin = int(clamp(uSkin, 0.0, float(${SKINS.length - 1})) + 0.5);
+
   vec2 uv = roomUv(vUv) - 0.5;
   uv.x *= uResolution.x / uResolution.y;
   float cr = cos(uCamRoll), sr = sin(uCamRoll);
   uv = vec2(uv.x * cr - uv.y * sr, uv.x * sr + uv.y * cr);
 
   // A low camera looking slightly up at the pelvis, dollied in on the beat.
-  vec3 eye = vec3(0.0, 0.8, 4.0 - uCamDolly);
+  vec3 eye = vec3(0.0, 0.8, 3.45 - uCamDolly);
   vec3 target = vec3(0.0, 1.02 + uCamTilt, 0.0);
   vec3 fwd = normalize(target - eye);
   vec3 right = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
   vec3 up = cross(right, fwd);
-  vec3 rd = normalize(fwd * 1.45 + uv.x * right + uv.y * up);
+  vec3 rd = normalize(fwd * 1.5 + uv.x * right + uv.y * up);
 
   vec3 col = vec3(0.012, 0.011, 0.016);
   // Faint floor glow under the figure so it stands on something.
-  float floorT = (0.0 - eye.y) / min(rd.y, -1e-4);
   if (rd.y < 0.0) {
-    vec3 fp = eye + rd * floorT;
+    vec3 fp = eye + rd * ((0.0 - eye.y) / rd.y);
     float ring = exp(-dot(fp.xz, fp.xz) * 1.2);
     col += palette(0.6, uPalA, uPalB, uPalC, uPalD) * ring * (0.035 + 0.03 * uBeatPulse);
   }
@@ -121,9 +186,10 @@ void main() {
     }
     if (hit) {
       vec3 n = calcNormal(p, 0.0015 + 0.002 * (1.0 - uDetail));
+      float ao = uDetail > 0.6 ? ambientOcclusion(p, n) : 1.0;
       float fresnel = pow(1.0 - max(0.0, dot(n, -rd)), 3.0);
-      vec3 rim = palette(0.15 + p.y * 0.2, uPalA, uPalB, uPalC, uPalD) * fresnel * 0.5;
-      col = stick_shade(p, n, rd, rim);
+      vec3 rim = palette(0.15 + p.y * 0.2, uPalA, uPalB, uPalC, uPalD) * fresnel * uGlow;
+      col = shade(p, n, rd, rim, ao);
     }
   }
 
@@ -134,7 +200,6 @@ void main() {
 export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
   minQuality: "mid",
   settings: SETTINGS,
-  extraUniformDecls: "", // uBones and the camera uniforms are declared inside FRAG next to their users
   extraUniforms: (() => {
     const choreographer = createChoreographer();
     const world = createRigWorld();

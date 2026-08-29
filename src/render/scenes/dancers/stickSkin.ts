@@ -21,11 +21,11 @@ float stick_map(vec3 p) {
   return d;
 }
 
-vec3 stick_shade(vec3 p, vec3 n, vec3 rd, vec3 rim) {
+vec3 stick_shade(vec3 p, vec3 n, vec3 rd, vec3 rim, float ao) {
   vec3 albedo = vec3(0.86, 0.84, 0.80);
   vec3 key = normalize(vec3(0.45, 0.8, 0.5));
   vec3 fill = normalize(vec3(-0.7, 0.2, 0.4));
   float diff = max(0.0, dot(n, key)) * 0.9 + max(0.0, dot(n, fill)) * 0.25;
-  return albedo * (0.08 + diff) + rim;
+  return (albedo * (0.08 + diff) + rim) * ao;
 }
 `;
