@@ -91,6 +91,13 @@ export interface ProfileInputs {
 }
 
 export interface MusicProfile extends DialValues {
+  /** This tick's pre-ease measurement for every dial — what each `ease()`
+   *  call above is chasing, before the multi-second smoothing. attack holds
+   *  NEUTRAL on the un-primed first frame (no flux to measure yet); loudness
+   *  freezes at its last target through silence, matching the dial itself
+   *  (see the loudness comment below). For the meters panel's RAW chip
+   *  (src/ui/audioMeters.ts). */
+  readonly targets: DialValues;
   advance(dtSec: number, frame: FeatureFrame, inputs: ProfileInputs): void;
 }
 
@@ -173,6 +180,15 @@ export function createMusicProfile(): MusicProfile {
   let fluxSlow = 0;
   const prevBands = new Float32Array(NUM_BANDS);
   let primed = false;
+  const targets: DialValues = {
+    pulse: 0.5,
+    tempo: 0.5,
+    brightness: 0.5,
+    density: 0.5,
+    dynamics: 0.5,
+    attack: 0.5,
+    loudness: 0.5,
+  };
 
   const state: MusicProfile = {
     pulse,
@@ -182,6 +198,7 @@ export function createMusicProfile(): MusicProfile {
     dynamics,
     attack,
     loudness,
+    targets,
     advance(dtSec: number, frame: FeatureFrame, inputs: ProfileInputs): void {
       const dt = Math.max(1e-4, dtSec);
       const tempoLock = clamp01(inputs.tempoLock);
@@ -204,15 +221,18 @@ export function createMusicProfile(): MusicProfile {
         ? clamp01(0.4 * clamp01(onsetRate / ONSET_RATE_REF) + 0.6 * tempoLock)
         : 0.5;
       pulse = ease(pulse, pulseTarget, PULSE_EASE_RATE, dt);
+      targets.pulse = pulseTarget;
 
       // --- tempo ---
       const bpmNorm = clamp01((frame.bpm - BPM_LOW) / (BPM_HIGH - BPM_LOW));
       const tempoTarget = 0.5 + (bpmNorm - 0.5) * tempoLock; // folds toward neutral while unlocked
       tempo = ease(tempo, tempoTarget, TEMPO_EASE_RATE, dt);
+      targets.tempo = tempoTarget;
 
       // --- brightness (spectral centroid) & density (active-band fraction) ---
       const brightnessTarget = bandSum > 1e-4 ? clamp01(weightedSum / bandSum / (NUM_BANDS - 1)) : 0.5;
       brightness = ease(brightness, brightnessTarget, BRIGHTNESS_EASE_RATE, dt);
+      targets.brightness = brightnessTarget;
 
       let densityTarget = 0.5;
       if (hasSignal) {
@@ -222,6 +242,7 @@ export function createMusicProfile(): MusicProfile {
         densityTarget = clamp01(active / NUM_BANDS);
       }
       density = ease(density, densityTarget, DENSITY_EASE_RATE, dt);
+      targets.density = densityTarget;
 
       // --- dynamics ---
       const intensity = clamp01(inputs.sectionIntensity);
@@ -229,11 +250,13 @@ export function createMusicProfile(): MusicProfile {
       dynMad += (Math.abs(intensity - dynMean) - dynMad) * Math.min(1, DYNAMICS_MAD_RATE * dt);
       const dynamicsTarget = hasSignal ? clamp01(dynMad / DYNAMICS_MAD_REF) : 0.5;
       dynamics = ease(dynamics, dynamicsTarget, DYNAMICS_EASE_RATE, dt);
+      targets.dynamics = dynamicsTarget;
 
       // --- attack ---
       if (!primed) {
         prevBands.set(frame.bands);
         primed = true;
+        targets.attack = 0.5; // no flux measurement yet
       } else {
         let flux = 0;
         for (let b = 0; b < NUM_BANDS; b++) flux += Math.max(0, frame.bands[b] - prevBands[b]);
@@ -245,16 +268,19 @@ export function createMusicProfile(): MusicProfile {
         const ratio = fluxSlow > 1e-4 ? fluxFast / fluxSlow : 1;
         const attackTarget = hasSignal ? clamp01((ratio - 1) / (ATTACK_REF - 1)) : 0.5;
         attack = ease(attack, attackTarget, ATTACK_EASE_RATE, dt);
+        targets.attack = attackTarget;
       }
 
       // --- loudness ---
       // Unlike every other dial, this does NOT fall back to a neutral target
       // through silence — genuine silence really is quiet, and easing toward
       // 0.5 (or 0) between tracks would yank the mic block's auto values
-      // around for no musical reason. Just hold the last reading.
+      // around for no musical reason. Just hold the last reading — and hold
+      // targets.loudness too, so RAW mode doesn't contradict that freeze.
       if (hasSignal) {
         const loudnessTarget = clamp01(frame.level);
         loudness = ease(loudness, loudnessTarget, LOUDNESS_EASE_RATE, dt);
+        targets.loudness = loudnessTarget;
       }
 
       (state as { pulse: number }).pulse = pulse;
