@@ -1,16 +1,16 @@
 import type { SceneSetting } from "./sceneSettings.ts";
 import { getSceneSetting } from "./sceneSettings.ts";
 import {
-  ACCELERATION_DEFAULT,
-  ACCELERATION_MAX,
-  ACCELERATION_MIN,
-  getAcceleration,
+  EXPANSION_DEFAULT,
+  EXPANSION_MAX,
+  EXPANSION_MIN,
+  getExpansion,
   getSensitivity,
   getSmoothing,
   SENSITIVITY_DEFAULT,
   SENSITIVITY_MAX,
   SENSITIVITY_MIN,
-  shapeAcceleration,
+  shapeExpansion,
   SMOOTHING_DEFAULT,
   SMOOTHING_MAX,
   SMOOTHING_MIN,
@@ -57,9 +57,9 @@ import { getPin } from "../tuning/pins.ts";
 export type AutoWeights = Partial<Record<MusicDial, number>>;
 
 // Expansion applied to each dial before weighting — see the comment above.
-// Uses shapeAcceleration (audio/sensitivity.ts) because it's already exactly
+// Uses shapeExpansion (audio/sensitivity.ts) because it's already exactly
 // the right shape for this: an S-curve fixed at 0/0.5/1 with a finite (not
-// infinite) slope through the pivot, so shapeAcceleration(0.5, k) === 0.5
+// infinite) slope through the pivot, so shapeExpansion(0.5, k) === 0.5
 // always holds — preserving the "all dials neutral -> spec.default exactly"
 // invariant this whole module rests on regardless of the expansion factor.
 const DIAL_EXPAND = 2.5;
@@ -71,17 +71,17 @@ export const AUTO_STRENGTH_MIN = 0;
 export const AUTO_STRENGTH_MAX = 2;
 export const AUTO_STRENGTH_DEFAULT = 1;
 
-/** Reserved settings keys for the Sensitivity/Acceleration/Smoothing pseudo-
+/** Reserved settings keys for the Sensitivity/Expansion/Smoothing pseudo-
  *  params — can't collide with a real SceneSetting.key, which must be a
  *  valid GLSL identifier tail. */
 export const SENSITIVITY_AUTO_KEY = "@sensitivity";
-export const ACCELERATION_AUTO_KEY = "@acceleration";
+export const EXPANSION_AUTO_KEY = "@expansion";
 export const SMOOTHING_AUTO_KEY = "@smoothing";
 
-// The auto key from this control's previous name — see the migration in
-// loadExceptions() below, and the parallel legacyKey migration for the
+// The auto keys from this control's previous names — see the migration in
+// loadExceptions() below, and the parallel legacyKeys migration for the
 // manual-value store in audio/sensitivity.ts.
-const LEGACY_CONTRAST_AUTO_KEY = "@contrast";
+const LEGACY_EXPANSION_AUTO_KEYS = ["@acceleration", "@contrast"] as const;
 
 const SENSITIVITY_SPEC: SceneSetting = {
   key: SENSITIVITY_AUTO_KEY,
@@ -105,23 +105,23 @@ const SENSITIVITY_SPEC: SceneSetting = {
   auto: { loudness: -0.5, dynamics: 0.25, density: -0.2 },
 };
 
-const ACCELERATION_SPEC: SceneSetting = {
-  key: ACCELERATION_AUTO_KEY,
-  label: "Acceleration",
-  min: ACCELERATION_MIN,
-  max: ACCELERATION_MAX,
+const EXPANSION_SPEC: SceneSetting = {
+  key: EXPANSION_AUTO_KEY,
+  label: "Expansion",
+  min: EXPANSION_MIN,
+  max: EXPANSION_MAX,
   step: 0.05,
-  default: ACCELERATION_DEFAULT,
-  // Acceleration widens/narrows the gap between quiet and loud
-  // (shapeAcceleration's S-curve). A track that's already dynamic (big macro
-  // swings) needs less artificial acceleration piled on top; a compressed,
+  default: EXPANSION_DEFAULT,
+  // Expansion widens/narrows the gap between quiet and loud
+  // (shapeExpansion's S-curve). A track that's already dynamic (big macro
+  // swings) needs less artificial expansion piled on top; a compressed,
   // flat one benefits from more to recover some perceived punch. Negative
   // weight on the same `dynamics` dial as Sensitivity's positive one is
   // deliberate — the two pull in opposite directions on purpose, they're not
   // redundant.
   //
   // Also negative on `loudness`, same reasoning as Sensitivity above: a
-  // quiet room gets more acceleration to recover punch, a loud one gets less.
+  // quiet room gets more expansion to recover punch, a loud one gets less.
   auto: { loudness: -0.3, dynamics: -0.25 },
 };
 
@@ -142,21 +142,24 @@ const SMOOTHING_SPEC: SceneSetting = {
 
 type ExceptionStore = Record<string, Record<string, false>>;
 
-// One-time rewrite of the old "@contrast" auto-exception key to
-// "@acceleration", in place, on whatever shape loadExceptions() handed back.
-// Skipping this would silently flip any scene where Contrast had been set to
-// manual back to auto after the rename — the exception simply wouldn't be
-// found under its new key. Returns whether anything changed, so the caller
-// can persist the rewritten shape immediately rather than re-migrating (a
-// no-op, but wasted work) on every future load.
-function migrateContrastKey(store: ExceptionStore): boolean {
+// One-time rewrite of any LEGACY_EXPANSION_AUTO_KEYS auto-exception key to
+// EXPANSION_AUTO_KEY, in place, on whatever shape loadExceptions() handed
+// back. Skipping this would silently flip any scene where the control had
+// been set to manual under an old name back to auto after the rename — the
+// exception simply wouldn't be found under its new key. Returns whether
+// anything changed, so the caller can persist the rewritten shape
+// immediately rather than re-migrating (a no-op, but wasted work) on every
+// future load.
+function migrateLegacyExpansionKeys(store: ExceptionStore): boolean {
   let changed = false;
   for (const sceneId of Object.keys(store)) {
     const sceneExceptions = store[sceneId];
-    if (!(LEGACY_CONTRAST_AUTO_KEY in sceneExceptions)) continue;
-    sceneExceptions[ACCELERATION_AUTO_KEY] = sceneExceptions[LEGACY_CONTRAST_AUTO_KEY];
-    delete sceneExceptions[LEGACY_CONTRAST_AUTO_KEY];
-    changed = true;
+    for (const legacyKey of LEGACY_EXPANSION_AUTO_KEYS) {
+      if (!(legacyKey in sceneExceptions)) continue;
+      if (!(EXPANSION_AUTO_KEY in sceneExceptions)) sceneExceptions[EXPANSION_AUTO_KEY] = sceneExceptions[legacyKey];
+      delete sceneExceptions[legacyKey];
+      changed = true;
+    }
   }
   return changed;
 }
@@ -167,7 +170,7 @@ function loadExceptions(): ExceptionStore {
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
-    if (migrateContrastKey(parsed)) localStorage.setItem(STORAGE_KEY_EXCEPTIONS, JSON.stringify(parsed));
+    if (migrateLegacyExpansionKeys(parsed)) localStorage.setItem(STORAGE_KEY_EXCEPTIONS, JSON.stringify(parsed));
     return parsed;
   } catch {
     return {};
@@ -226,7 +229,7 @@ export function setAutoEnabled(sceneId: string, key: string, on: boolean): void 
 /** Whether every auto-capable setting on this scene is currently auto —
  *  drives the scene's master toggle. Settings with neither an `auto` nor a
  *  `macro` field can't be toggled, so they don't count against it. Pass
- *  Sensitivity/Acceleration/Smoothing specs alongside a scene's own settings
+ *  Sensitivity/Expansion/Smoothing specs alongside a scene's own settings
  *  if the master toggle should cover them too (see app.ts). */
 export function isSceneAuto(sceneId: string, specs: readonly SceneSetting[]): boolean {
   const relevant = specs.filter((s) => s.auto || s.macro);
@@ -263,7 +266,7 @@ export function computeAutoTarget(spec: SceneSetting, profile: DialValues, autoS
   for (const dial of MUSIC_DIALS) {
     const w = spec.auto[dial];
     if (w === undefined) continue;
-    deviation += w * (shapeAcceleration(profile[dial], DIAL_EXPAND) - 0.5);
+    deviation += w * (shapeExpansion(profile[dial], DIAL_EXPAND) - 0.5);
   }
   const raw = spec.default + autoStrength * deviation * (spec.max - spec.min);
   return clampToSpec(spec, raw);
@@ -348,15 +351,15 @@ export function resolveSceneSetting(sceneId: string, spec: SceneSetting): number
   return resolve(sceneId, spec, getSceneSetting(sceneId, spec));
 }
 
-/** Same idea for the Sensitivity/Acceleration/Smoothing pseudo-params, which
+/** Same idea for the Sensitivity/Expansion/Smoothing pseudo-params, which
  *  live in their own store (audio/sensitivity.ts) rather than
  *  sceneSettings.ts. */
 export function resolveSensitivity(sceneId: string): number {
   return resolve(sceneId, SENSITIVITY_SPEC, getSensitivity(sceneId));
 }
 
-export function resolveAcceleration(sceneId: string): number {
-  return resolve(sceneId, ACCELERATION_SPEC, getAcceleration(sceneId));
+export function resolveExpansion(sceneId: string): number {
+  return resolve(sceneId, EXPANSION_SPEC, getExpansion(sceneId));
 }
 
 export function resolveSmoothing(sceneId: string): number {
@@ -373,8 +376,8 @@ export function getSensitivitySpec(): SceneSetting {
   return SENSITIVITY_SPEC;
 }
 
-export function getAccelerationSpec(): SceneSetting {
-  return ACCELERATION_SPEC;
+export function getExpansionSpec(): SceneSetting {
+  return EXPANSION_SPEC;
 }
 
 export function getSmoothingSpec(): SceneSetting {

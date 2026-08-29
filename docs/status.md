@@ -6,38 +6,44 @@ regenerate it at session close.
 
 ## In flight
 
-- **Power card collapse + all-folded triangle** — branch `worktree-power-collapse`
-  (worktree at `.claude/worktrees/power-collapse`, locked), 1 commit ahead of
-  `main`, unmerged:
-  - `8dd5184` Power card collapses too; all-folded triangle-collapses the
-    column — rebuilt from scratch after #27 landed on `main` mid-session and
-    removed the fold-all/onFoldChange/setAllFolded plumbing this depended on.
-- **Auto-gain becomes an amount + Signal history trace** — branch
-  `worktree-autogain-amount-scope` (worktree at
-  `.claude/worktrees/autogain-amount-scope`, locked), 2 commits ahead of
-  `main`, unmerged.
+- **Auto-gain amount + Signal history + Expansion rename + LUFS Loudness card**
+  — PR #18 (draft), branch `worktree-autogain-amount-scope` (worktree at
+  `.claude/worktrees/autogain-amount-scope`, locked). Merged with `main` after
+  fifteen PRs (#19–#35) landed underneath it — conflicts in `features.ts`
+  (blend + `smoothingScale`), `app.ts`, `deviceMenu.ts`, `audioMeters.ts`
+  (fold guards, `rawBands`/`rateScale`), `autoTune.ts`, and two test files
+  resolved; typecheck and tests green on the merged tree.
+- **Power card collapse + all-folded triangle** — branch
+  `worktree-power-collapse` (worktree at `.claude/worktrees/power-collapse`),
+  1 commit ahead of `main`; check whether #29 on `main` already covers it.
 - **Mesh Grid rebuilt as a hidden-line spectrogram terrain** — branch
   `worktree-mesh-grid-terrain` (worktree at
-  `.claude/worktrees/mesh-grid-terrain`, locked), 1 commit ahead of `main`,
-  unmerged.
+  `.claude/worktrees/mesh-grid-terrain`), 1 commit ahead of `main`.
 - **Caustics: Treble sparkle split into a macro** — branch
-  `worktree-sparkle-macro` (worktree at `.claude/worktrees/sparkle-macro`,
-  locked), 1 commit ahead of `main`, unmerged.
+  `worktree-sparkle-macro` (worktree at `.claude/worktrees/sparkle-macro`);
+  #28 on `main` looks like the same change — probably done.
 - **Tuning: point-at-dials workflow** — branch `worktree-tuning-spotlight`
-  (worktree at `.claude/worktrees/tuning-spotlight`), 2 commits ahead of
-  `main`, unmerged.
-- **docs/architecture.md diagram-first rewrite** — branch
-  `worktree-docs-index` (worktree at `.claude/worktrees/docs-index`), 1
-  commit ahead of `main`, unmerged.
+  (worktree at `.claude/worktrees/tuning-spotlight`), 2 commits ahead.
+- **docs/architecture.md diagram-first rewrite** — branch `worktree-docs-index`
+  (worktree at `.claude/worktrees/docs-index`), 1 commit ahead. PR #18 also
+  touches that file (two sentences on `fixedEnergy` and the Loudness card), so
+  whichever lands second needs a small rebase.
 
 ## Open questions
 
-- None recorded yet.
+- Does a *partial* auto-gain amount earn its place on a real room, or do people
+  only land on 0 or 100? If the latter, a broadband-adaptive third mode (one
+  shared floor/peak across bands) is the better middle ground than a per-band
+  blend.
+- The LUFS meter reads a mono downmix, so stereo display-audio reads 3–6 dB
+  low against a true two-channel BS.1770 sum. Fine for a phone mic; revisit if
+  display capture becomes the main use.
 
 ## Next up
 
-- Merge or continue whichever of the worktrees above are actually finished —
-  six have accumulated since the last snapshot, several concurrent with this
-  session's own work on the same panel files (`#27` landed on `main` mid-session
-  and required rebuilding this session's change from scratch; worth checking
-  the others for the same kind of collision before merging).
+- Review and land PR #18 (`gh pr ready 18`), then rebase `worktree-docs-index`.
+- Prune worktrees whose change already landed on `main` (`sparkle-macro`,
+  possibly `power-collapse`).
+- Explainer artifact for the auto-gain window (live simulation of the
+  `features.ts` trackers with the amount slider):
+  https://claude.ai/code/artifact/5aef9f8d-a361-4929-adb2-0831943fc375

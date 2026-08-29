@@ -1,6 +1,7 @@
 import type { AnimFrame } from "../render/animClock.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
+import type { LufsReading } from "../audio/lufs.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
 import { AUTO_SKY, FONT_MONO, HOT_RED, INPUT_GREEN, withAlpha } from "./controlsTheme.ts";
 import {
@@ -29,8 +30,18 @@ import {
  *
  *  - Signal: FeatureFrame.level (pre-AGC, absolute) beside .energy (post-AGC)
  *    — the only way to see features.ts's adaptive floor/peak doing its job,
- *    since its whole point is to make that invisible downstream. (No
- *    low/mid/high here: the spectrum strip already shows them.)
+ *    since its whole point is to make that invisible downstream — and under
+ *    them a History trace of both over the last HISTORY_SPAN_SEC, with
+ *    FeatureExtractor.fixedEnergy (energy as it would read with auto-gain
+ *    at its minimum) as a dim reference line. The gap between energy and
+ *    that reference is exactly what the Input card's Auto-gain amount is
+ *    adding; sliding it down closes the gap. (No low/mid/high here: the
+ *    spectrum strip already shows them.)
+ *  - Loudness: the broadcast measurement — BS.1770 / EBU R128 LUFS from
+ *    lufsAnalyser.ts (math in lufs.ts). Momentary on the bar with the
+ *    LUFS_TARGET_* marks, Short-term as the big number, Integrated beneath
+ *    with a Reset chip. Local-only like the Scope, since it needs this
+ *    device's own samples; hidden on a mic-less renderer.
  *  - Rhythm: sectionIntensity with a drop flash, and a compact tempo block
  *    beside it — bpm under a beat dot whose resting tint follows
  *    beatClock's tempoLock, so an unlocked guess reads as unconfident
@@ -89,20 +100,30 @@ export interface AudioMeters {
   /** Fed every frame while the panel is open. `frame`/`anim` null before
    *  audio is up (idle readouts); `mono`/`rawBands` null on any device
    *  without a local analyser (Scope card hidden; Energy reads idle under
-   *  RAW — see file header). A folded card skips its computation and DOM
-   *  writes for the frame — folding buys back the layout/canvas cost, not
-   *  just the screen space. `rateScale` is app.ts's already-resolved
-   *  sensitivity.ts's smoothingRateScale for this tick — non-finite (the
-   *  Smoothing row's Off stop) bypasses this file's own BPM settle and
-   *  waveform peak-hold, the same way `raw` already does, so RAW and
-   *  processed agree exactly (see file header). */
+   *  RAW — see file header); `fixedEnergy` null on any device without a
+   *  local FeatureExtractor (the History trace drops its reference line);
+   *  `lufs` null on any device without a local lufsAnalyser (Loudness card
+   *  hidden). A folded card skips its computation and DOM writes for the
+   *  frame — folding buys back the layout/canvas cost, not just the screen
+   *  space. `rateScale` is app.ts's already-resolved sensitivity.ts's
+   *  smoothingRateScale for this tick — non-finite (the Smoothing row's Off
+   *  stop) bypasses this file's own BPM settle and waveform peak-hold, the
+   *  same way `raw` already does, so RAW and processed agree exactly (see
+   *  file header). */
   update(
     frame: FeatureFrame | null,
     anim: AnimFrame | null,
     mono: Float32Array | null,
     rawBands: Float32Array | null,
     rateScale: number,
+    fixedEnergy: number | null,
+    lufs: LufsReading | null,
   ): void;
+}
+
+export interface AudioMetersDeps {
+  /** The Loudness card's Reset chip: start the integrated reading over. */
+  onLufsReset: () => void;
 }
 
 const PEAK_FALL_PER_SEC = 1.2; // matches spectrumStrip.ts's peak-hold decay
@@ -158,6 +179,27 @@ const tempoDotStyle = `
 `;
 const tempoDigitsStyle = `${digitsStyle} font-size: 13px; color: #fff; transition: color 0.4s ease-out;`;
 const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
+// Loudness card. The bar spans LUFS_SCALE_MIN..MAX — a broadcast meter's
+// range, with the two targets people actually aim at marked: EBU R128's
+// −23 for broadcast, and the level streaming services normalise to
+// (LUFS_TARGET_STREAMING), above which the bar and digits go hot since a
+// louder mix will just be turned down on delivery. The block beside the bar
+// is the Tempo block's shape, wider for a signed one-decimal reading.
+const LUFS_SCALE_MIN = -60;
+const LUFS_SCALE_MAX = 0;
+const LUFS_TARGET_EBU = -23;
+const LUFS_TARGET_STREAMING = -14;
+const LUFS_HOT = LUFS_TARGET_STREAMING;
+const lufsFrac = (v: number) => (v - LUFS_SCALE_MIN) / (LUFS_SCALE_MAX - LUFS_SCALE_MIN);
+const lufsBlockStyle = (accent: string) => `${tempoBlockStyle(accent)} width: 96px;`;
+const lufsDigitsStyle = `${tempoDigitsStyle} font-size: 15px;`;
+const lufsSubStyle = `${tempoCaptionStyle} letter-spacing: 0.06em; white-space: nowrap;`;
+const tickLabelStyle = `
+  position: absolute; top: 6px; transform: translateX(-50%);
+  font: 400 8px/1 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.45); white-space: nowrap;
+`;
+const LUFS_TITLE =
+  "Short-term loudness: the last 3 s, K-weighted like a broadcast meter. I is the gated average since Reset.";
 const TEMPO_TITLE =
   "Tempo. The dot flashes white on every beat and settles back to its colour, brighter as the tracker gets sure.";
 // The raw estimate flits between candidates (half/double-time, a fill), but
@@ -175,6 +217,19 @@ const TEMPO_SETTLE_TOL = 0.03;
 const TEMPO_SETTLE_SHARE = 0.6;
 const TEMPO_HOLD_BPM = 2;
 const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
+// The Signal card's history trace: level, energy, and the fixed-mapping
+// reference over the last HISTORY_SPAN_SEC, one column per CSS pixel so the
+// card's width always spans exactly that long. Each column keeps the max of
+// what it saw, so a beat's peak survives however many frames a column
+// covers. Long enough to see the adaptive window re-settle after a change
+// in room level (a couple of seconds — see features.ts's FLOOR_RISE_RATE)
+// with the before and after both still on screen.
+const HISTORY_SPAN_SEC = 10;
+const HISTORY_HEIGHT_CSS_PX = 48;
+const histCanvasStyle = `display: block; width: 100%; height: ${HISTORY_HEIGHT_CSS_PX}px; margin-top: 4px;`;
+const HISTORY_LEVEL_COLOR = "rgba(255,255,255,0.85)";
+const HISTORY_ENERGY_COLOR = INPUT_GREEN;
+const HISTORY_FIXED_COLOR = withAlpha(INPUT_GREEN, 0.4);
 
 /** Jump an element to `color` with no fade, then re-arm the fade so the
  *  next color write eases back — a one-frame event made visible. */
@@ -197,8 +252,10 @@ interface MeterRowSpec {
   /** The hint that unfolds on hover/tap. Omit for a row that explains
    *  itself (the waveform) — no hint, and nothing to focus for. */
   description?: string;
-  /** A fixed mark at this fraction of the track — the dials' NEUTRAL. */
-  tickAt?: number;
+  /** Fixed marks at these fractions of the track — the dials' NEUTRAL, the
+   *  Loudness card's targets. A labelled tick gets its text just under the
+   *  track. */
+  ticks?: { at: number; label?: string }[];
 }
 
 interface ReadoutOpts {
@@ -240,12 +297,23 @@ function createMeterRow(spec: MeterRowSpec) {
   const fill = document.createElement("div");
   fill.style.cssText = fillStyle(spec.accent);
   track.appendChild(fill);
-  if (spec.tickAt !== undefined) {
+  let labelled = false;
+  for (const t of spec.ticks ?? []) {
     const tick = document.createElement("div");
     tick.style.cssText = tickStyle;
-    tick.style.left = `${spec.tickAt * 100}%`;
+    tick.style.left = `${t.at * 100}%`;
     track.appendChild(tick);
+    if (!t.label) continue;
+    const text = document.createElement("div");
+    text.style.cssText = tickLabelStyle;
+    text.style.left = `${t.at * 100}%`;
+    text.textContent = t.label;
+    track.appendChild(text);
+    labelled = true;
   }
+  // Labels hang below the track, past the meter's fixed height — give them
+  // room so they don't sit on the (collapsed) hint.
+  if (labelled) meter.style.marginBottom = "8px";
   const cap = document.createElement("div");
   cap.style.cssText = capStyle;
   track.appendChild(cap);
@@ -261,13 +329,16 @@ function createMeterRow(spec: MeterRowSpec) {
   let peakFrac = 0;
   let flashed = false;
   let lastReadoutKey = "";
+  // What the fill settles back to after a flash — the accent unless
+  // setFillColor has moved it (the Loudness bar going hot).
+  let restColor = spec.accent;
 
   return {
     el,
     /** Fraction of the track (null empties it). `dtSec` drives the peak cap's fall. */
     setValue(value: number | null, dtSec: number): void {
       if (flashed) {
-        fill.style.backgroundColor = spec.accent;
+        fill.style.backgroundColor = restColor;
         flashed = false;
       }
       if (value === null) {
@@ -294,10 +365,17 @@ function createMeterRow(spec: MeterRowSpec) {
       unit.style.display = u ? "" : "none";
     },
     /** A one-frame event (an onset, a drop): the fill jumps to `color` and
-     *  fades back to the accent on the next setValue(). */
+     *  fades back to the resting colour on the next setValue(). */
     flash(color = "#fff"): void {
       blink(fill, color);
       flashed = true;
+    },
+    /** A sustained state (the Loudness bar past its hot mark): the colour
+     *  the fill rests at from now on. Keyed, so a per-frame call is free. */
+    setFillColor(color: string): void {
+      if (color === restColor) return;
+      restColor = color;
+      if (!flashed) fill.style.backgroundColor = color;
     },
   };
 }
@@ -404,6 +482,45 @@ function createTempoBlock(accent: string) {
   };
 }
 
+/** The Loudness card's welded block: Short-term as the big seven-segment
+ *  reading (toFixed's ASCII minus renders in DSEG7), "LUFS" under it, and
+ *  the Integrated reading beneath that. Digits go hot past LUFS_HOT. */
+function createLufsBlock(accent: string) {
+  const el = document.createElement("div");
+  el.style.cssText = lufsBlockStyle(accent);
+  el.title = LUFS_TITLE;
+  const inner = document.createElement("div");
+  const digits = document.createElement("div");
+  digits.style.cssText = lufsDigitsStyle;
+  digits.textContent = "--";
+  const caption = document.createElement("div");
+  caption.style.cssText = tempoCaptionStyle;
+  caption.textContent = "LUFS";
+  const sub = document.createElement("div");
+  sub.style.cssText = lufsSubStyle;
+  sub.textContent = "I --";
+  inner.append(digits, caption, sub);
+  el.appendChild(inner);
+
+  const fmt = (v: number) => (Number.isFinite(v) ? v.toFixed(1) : "--");
+  let lastKey = "";
+  return {
+    el,
+    /** At the text tick. */
+    set(reading: LufsReading): void {
+      const s = fmt(reading.shortTerm);
+      const i = fmt(reading.integrated);
+      const hot = reading.shortTerm > LUFS_HOT;
+      const key = `${s}|${i}|${hot ? 1 : 0}`;
+      if (key === lastKey) return;
+      lastKey = key;
+      digits.textContent = s;
+      digits.style.color = hot ? HOT_RED : "#fff";
+      sub.textContent = `I ${i}`;
+    },
+  };
+}
+
 const IDLE: ReadoutOpts = { textual: true, unit: "" };
 const pct = (v: number) => String(Math.round(clamp(v, 0, 1) * 100));
 const meanOf = (v: Float32Array) => {
@@ -421,7 +538,7 @@ const metersHeaderLabelStyle = `${groupHeadingFirstStyle} margin: 0;`;
 const RAW_CHIP_TITLE =
   "Every reading below its pre-smoothing value: Section, Character and BPM jitter frame to frame instead of easing. That easing is built into the pipeline, not a setting — Reset won't close the gap. Drag Smoothing (Input card) to Off instead: at Off, every eased reading lands on exactly what RAW already shows, so there's nothing left to toggle.";
 
-export function createAudioMeters(): AudioMeters {
+export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const root = document.createElement("div");
   root.className = "vc-meters vc-scroll";
 
@@ -452,8 +569,48 @@ export function createAudioMeters(): AudioMeters {
     description:
       "The same sound after auto-gain, which keeps it mid-range whether the room is quiet or loud. This is what the scene actually reacts to.",
   });
+  const history = createMeterRow({
+    label: "History",
+    accent: INPUT_GREEN,
+    unit: "s",
+    description:
+      "The last few seconds of Level (white) and Energy (green). The dim green line is what Energy would read with Auto-gain at 0 — the gap between the two greens is what the Auto-gain slider is adding.",
+  });
+  // The trace takes the meter's place under the head, like the waveform.
+  const histCanvas = document.createElement("canvas");
+  histCanvas.style.cssText = histCanvasStyle;
+  history.el.children[1].replaceWith(histCanvas);
+  const histCtx = histCanvas.getContext("2d")!;
+  history.setReadout(String(HISTORY_SPAN_SEC));
   const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN, foldId: "signal" });
-  signalCard.body.append(level.el, spacer(), energy.el);
+  signalCard.body.append(level.el, spacer(), energy.el, spacer(), history.el);
+
+  // ---- Loudness ----
+  const lufsRow = createMeterRow({
+    label: "Momentary",
+    accent: NEUTRAL_ACCENT,
+    description:
+      "Loudness the way broadcast meters measure it (BS.1770, K-weighted). The bar and this number are the last 400 ms; the big number the last 3 s; I the gated average since Reset. −23 is the EBU R128 broadcast target; streaming services normalise to about −14, and the bar goes red above it.",
+    ticks: [
+      { at: lufsFrac(LUFS_TARGET_EBU), label: String(LUFS_TARGET_EBU) },
+      { at: lufsFrac(LUFS_TARGET_STREAMING), label: String(LUFS_TARGET_STREAMING) },
+    ],
+  });
+  lufsRow.el.style.flex = "1";
+  lufsRow.el.style.minWidth = "0";
+  const lufsBlock = createLufsBlock(NEUTRAL_ACCENT);
+  const lufsWelded = document.createElement("div");
+  lufsWelded.style.cssText = rhythmRowStyle;
+  lufsWelded.append(lufsRow.el, lufsBlock.el);
+  const lufsCard = createCard({
+    title: "Loudness",
+    accent: NEUTRAL_ACCENT,
+    foldId: "lufs",
+    right: createChipButton("Reset", "Start the integrated reading over", deps.onLufsReset),
+  });
+  lufsCard.body.appendChild(lufsWelded);
+  lufsCard.el.style.display = "none";
+  let lufsShown = false;
 
   // ---- Rhythm ----
   const section = createMeterRow({
@@ -479,7 +636,7 @@ export function createAudioMeters(): AudioMeters {
       label: DIAL_LABELS[dial].label,
       accent: AUTO_SKY,
       description: DIAL_LABELS[dial].description,
-      tickAt: NEUTRAL[dial],
+      ticks: [{ at: NEUTRAL[dial] }],
     }),
   }));
   const characterCard = createCard({ title: "Character", accent: AUTO_SKY, foldId: "character" });
@@ -506,7 +663,7 @@ export function createAudioMeters(): AudioMeters {
 
   // The scope leads: it's the one live picture of the sound itself, and the
   // first thing to check when the visuals seem off.
-  root.append(metersHeader, scopeCard.el, signalCard.el, rhythmCard.el, characterCard.el);
+  root.append(metersHeader, scopeCard.el, signalCard.el, lufsCard.el, rhythmCard.el, characterCard.el);
 
   // Ring buffer of columns, one pixel each — oldest at `head`, newest just
   // before it — plus the column currently being accumulated.
@@ -609,6 +766,108 @@ export function createAudioMeters(): AudioMeters {
     waveCtx.fillRect(0, mid - 0.5, w, 1);
   }
 
+  // History ring buffers, one column per CSS pixel like the waveform's —
+  // oldest at `histHead`, newest just before it — plus the column being
+  // accumulated. `histFixed` holds NaN for a column with no reference
+  // (renderer/synthetic), and the trace skips those.
+  let histLevel = new Float32Array(0);
+  let histEnergy = new Float32Array(0);
+  let histFixed = new Float32Array(0);
+  let histHead = 0;
+  let histColLevel = 0;
+  let histColEnergy = 0;
+  let histColFixed = Number.NaN;
+  let histColStartMs: number | null = null;
+  let histCssWidth = 0;
+  // Column duration follows the width so the trace always spans exactly
+  // HISTORY_SPAN_SEC; recomputed with the buffers in ensureHistSize.
+  let histColumnMs = 1000;
+
+  // Backing store sized to the card's width at devicePixelRatio; the CSS
+  // height is a constant, never re-read from the element (assigning
+  // canvas.height rewrites the attribute).
+  /** False while the canvas has no layout — same reasoning as
+   *  ensureWaveSize above. */
+  function ensureHistSize(): boolean {
+    const rect = histCanvas.getBoundingClientRect();
+    const w = Math.round(rect.width);
+    if (w <= 0) return false;
+    if (w === histCssWidth) return true;
+    histCssWidth = w;
+    const dpr = window.devicePixelRatio || 1;
+    histCanvas.width = Math.round(w * dpr);
+    histCanvas.height = Math.round(HISTORY_HEIGHT_CSS_PX * dpr);
+    histCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    histLevel = new Float32Array(w);
+    histEnergy = new Float32Array(w);
+    histFixed = new Float32Array(w).fill(Number.NaN);
+    histHead = 0;
+    histColumnMs = (HISTORY_SPAN_SEC * 1000) / w;
+    return true;
+  }
+
+  function commitHistColumn(): void {
+    histLevel[histHead] = histColLevel;
+    histEnergy[histHead] = histColEnergy;
+    histFixed[histHead] = histColFixed;
+    histHead = (histHead + 1) % histLevel.length;
+    histColLevel = 0;
+    histColEnergy = 0;
+    histColFixed = Number.NaN;
+  }
+
+  /** Folds this frame's readings into the current column (max-hold), and
+   *  closes it — or several, after a stall — once histColumnMs has passed. */
+  function pushHistory(frame: FeatureFrame, fixedEnergy: number | null, nowMs: number): void {
+    if (!ensureHistSize()) return;
+    histColLevel = Math.max(histColLevel, frame.level);
+    histColEnergy = Math.max(histColEnergy, frame.energy);
+    if (fixedEnergy !== null)
+      histColFixed = Number.isNaN(histColFixed) ? fixedEnergy : Math.max(histColFixed, fixedEnergy);
+    if (histColStartMs === null) histColStartMs = nowMs;
+    const elapsed = nowMs - histColStartMs;
+    if (elapsed < histColumnMs) return;
+    let n = Math.min(histLevel.length, Math.floor(elapsed / histColumnMs));
+    for (; n > 0; n--) commitHistColumn();
+    histColStartMs = nowMs - (elapsed % histColumnMs);
+  }
+
+  /** One polyline over the ring buffer plus the live column at the right
+   *  edge; a NaN reading lifts the pen so a missing reference leaves a gap
+   *  rather than a line to zero. */
+  function traceHistory(buf: Float32Array, live: number, color: string, width: number): void {
+    const len = buf.length;
+    const h = HISTORY_HEIGHT_CSS_PX;
+    const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (h - 2);
+    histCtx.strokeStyle = color;
+    histCtx.lineWidth = width;
+    histCtx.beginPath();
+    let pen = false;
+    for (let x = 0; x <= len; x++) {
+      const v = x === len ? live : buf[(histHead + x) % len];
+      if (Number.isNaN(v)) {
+        pen = false;
+        continue;
+      }
+      const px = x === len ? histCssWidth - 1 : x;
+      if (pen) histCtx.lineTo(px, yOf(v));
+      else histCtx.moveTo(px, yOf(v));
+      pen = true;
+    }
+    histCtx.stroke();
+  }
+
+  function drawHistory(): void {
+    const w = histCssWidth;
+    const h = HISTORY_HEIGHT_CSS_PX;
+    histCtx.clearRect(0, 0, w, h);
+    histCtx.fillStyle = "rgba(255,255,255,0.18)";
+    histCtx.fillRect(0, Math.round(h / 2) - 0.5, w, 1);
+    traceHistory(histFixed, histColFixed, HISTORY_FIXED_COLOR, 1);
+    traceHistory(histEnergy, histColEnergy, HISTORY_ENERGY_COLOR, 1.5);
+    traceHistory(histLevel, histColLevel, HISTORY_LEVEL_COLOR, 1);
+  }
+
   let lastMs: number | null = null;
   let lastTextMs = 0;
   // Peak-hold for the waveform readout: one buffer's peak jumps around too
@@ -617,7 +876,7 @@ export function createAudioMeters(): AudioMeters {
 
   return {
     el: root,
-    update(frame, anim, mono, rawBands, rateScale): void {
+    update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs): void {
       const nowMs = performance.now();
       const dtSec =
         lastMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastMs) / 1000);
@@ -651,7 +910,15 @@ export function createAudioMeters(): AudioMeters {
             energyVal === null ? IDLE : {},
           );
         }
+        if (frame) {
+          pushHistory(frame, fixedEnergy, nowMs);
+          drawHistory();
+        }
+      } else {
+        // Folded: don't accumulate a column while hidden, same as the Scope.
+        histColStartMs = null;
       }
+
       // ---- Rhythm ----
       if (!rhythmCard.fold?.isFolded()) {
         const sectionVal = anim ? (raw ? anim.raw.sectionIntensity : anim.sectionIntensity) : null;
@@ -677,6 +944,23 @@ export function createAudioMeters(): AudioMeters {
               v === null ? "--" : v.toFixed(2),
               v === null ? IDLE : {},
             );
+        }
+      }
+
+      // ---- Loudness ----
+      const showLufs = lufs !== null;
+      if (showLufs !== lufsShown) {
+        lufsShown = showLufs;
+        lufsCard.el.style.display = showLufs ? "" : "none";
+      }
+      if (lufs && !lufsCard.fold?.isFolded()) {
+        const m = lufs.momentary;
+        const live = Number.isFinite(m);
+        lufsRow.setValue(live ? lufsFrac(m) : 0, dtSec);
+        lufsRow.setFillColor(m > LUFS_HOT ? HOT_RED : NEUTRAL_ACCENT);
+        if (text) {
+          lufsRow.setReadout(live ? m.toFixed(1) : "--", live ? {} : IDLE);
+          lufsBlock.set(lufs);
         }
       }
 
