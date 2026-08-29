@@ -20,6 +20,7 @@ import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createAudioMeters } from "./audioMeters.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
+import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
@@ -69,12 +70,14 @@ import {
  * also stays open across palette taps.
  *
  * Every card in that left column — Bands and each meter card — collapses to
- * just its title bar (createCard's foldId, controlsKit.ts): click the caret
- * or anywhere on the header outside a Reset-style chip. The fold-all chip
- * above Bands folds or opens the whole column at once. Fold state is this
- * panel's own view state (panelFolds.ts) — unlike every scene/audio/palette
- * read and write below, which goes through DeviceMenuDeps, this doesn't,
- * since nothing outside src/ui/ ever needs to know which card is folded.
+ * just its title bar (createCard's foldId, controlsKit.ts): click the
+ * chevron or anywhere on the header outside a Reset-style chip. The whole
+ * column can also go away at once — "Hide meters" in the footer strip, or M
+ * — which leaves Power and the controls where they are rather than
+ * reflowing anything. Fold and hide state are this panel's own view state
+ * (panelFolds.ts) — unlike every scene/audio/palette read and write below,
+ * which goes through DeviceMenuDeps, this doesn't, since nothing outside
+ * src/ui/ ever needs to know which card is folded.
  *
  * Row grammar (createControlRow; the meters follow it too, with a meter in
  * the slider's place — the shared pieces live in controlsKit.ts): label ·
@@ -99,7 +102,7 @@ import {
  * live once the panel is already open.
  *
  * Keyboard layer, live only while the panel is open (see onKeyDown): H
- * closes it. Tab / Shift+Tab walk a ring over every
+ * closes it, M hides/shows the meters column. Tab / Shift+Tab walk a ring over every
  * .vc-slider/.vc-toggle/.vc-fader in document order, wrapping at both ends
  * and skipping every chip and button — so Tab alone never leaves the panel
  * and never lands anywhere but a control. On whichever control has focus, A
@@ -296,6 +299,7 @@ const footerStyle = `
   border: 1px solid rgba(255,255,255,0.13); border-radius: 3px;
   font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.5);
 `;
+const footerBtnsStyle = `display: flex; gap: 16px;`;
 const footerBtnStyle = `
   font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit;
   background: none; border: none; padding: 0; cursor: pointer;
@@ -852,10 +856,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onChange: (fader, gain) => deps.onBandGainChange(deps.currentSceneId(), fader, gain),
   });
   const spectrumStrip = bandFaders.strip;
-  // The meters beneath the Bands card — see audioMeters.ts. Its own cards
-  // fold independently; onFoldChange only keeps the fold-all chip's label
-  // in sync when one of them changes on its own.
-  const audioMeters = createAudioMeters({ onFoldChange: () => refreshFoldAllChip() });
+  // The meters beneath the Bands card — see audioMeters.ts.
+  const audioMeters = createAudioMeters();
 
   const spectrumCol = document.createElement("div");
   spectrumCol.className = "vc-spectrum-col";
@@ -879,38 +881,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     accent: BANDS_AMBER,
     right: bandsHeaderRight,
     foldId: "bands",
-    onFoldChange: () => refreshFoldAllChip(),
   });
   // Named for the stacked layout in controlsTheme.ts, where this card and
   // the meters strip become root items of their own.
   bandsCard.el.classList.add("vc-spectrum-card");
   markBlock(bandsCard.title);
-
-  // One chip, above every card in this column, that folds or opens all of
-  // them at once — Bands plus every card in audioMeters.ts's strip, via its
-  // allFolded()/setAllFolded(), so neither side needs the other's card ids.
-  // It's column-scoped rather than living in the Bands header so it doesn't
-  // read as belonging to Bands specifically; refreshFoldAllChip keeps its
-  // label truthful when a card is folded/unfolded on its own.
-  function columnAllFolded(): boolean {
-    return (bandsCard.fold?.isFolded() ?? false) && audioMeters.allFolded();
-  }
-  const foldAllChip = createChipButton("Fold all", "Fold every card in this column", () => {
-    const next = !columnAllFolded();
-    bandsCard.fold?.setFolded(next);
-    audioMeters.setAllFolded(next);
-    refreshFoldAllChip();
-  });
-  function refreshFoldAllChip(): void {
-    const folded = columnAllFolded();
-    foldAllChip.textContent = folded ? "Open all" : "Fold all";
-    foldAllChip.title = folded ? "Open every card in this column" : "Fold every card in this column";
-    foldAllChip.style.cssText = folded ? chipBtnLitStyle : chipBtnStyle;
-  }
-  refreshFoldAllChip();
-  const foldBar = document.createElement("div");
-  foldBar.className = "vc-fold-bar";
-  foldBar.appendChild(foldAllChip);
 
   // Status line: which scene, whether audio is flowing, and from where.
   const spectrumHeader = document.createElement("div");
@@ -948,7 +923,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
 
   bandsCard.body.append(spectrumHeader, hairline, fadersRow);
-  spectrumCol.append(foldBar, bandsCard.el, audioMeters.el);
+  spectrumCol.append(bandsCard.el, audioMeters.el);
 
   let lastStatusText = "";
   function refreshSpectrumHeader(): void {
@@ -1323,16 +1298,35 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  // Footer strip: auto state at a glance, and a way out.
+  // Footer strip: auto state at a glance, the meters column's on/off, and a
+  // way out. The column toggle lives here, in the column that never hides,
+  // rather than above Bands: a chip up there had to be its own row, which
+  // pushed the whole column down out of line with Power and Auto strength.
   const footer = document.createElement("div");
   footer.style.cssText = footerStyle;
   const footerStatus = document.createElement("span");
+  const footerBtns = document.createElement("span");
+  footerBtns.style.cssText = footerBtnsStyle;
+  const metersBtn = document.createElement("button");
+  metersBtn.style.cssText = footerBtnStyle;
+  metersBtn.addEventListener("click", () => setMetersHidden(!isFolded(METERS_COLUMN)));
   const hideBtn = document.createElement("button");
   hideBtn.textContent = "Hide UI  H";
   hideBtn.title = "Close the panel (H)";
   hideBtn.style.cssText = footerBtnStyle;
   hideBtn.addEventListener("click", () => close());
-  footer.append(footerStatus, hideBtn);
+  footerBtns.append(metersBtn, hideBtn);
+  footer.append(footerStatus, footerBtns);
+
+  function setMetersHidden(hidden: boolean): void {
+    setFolded(METERS_COLUMN, hidden);
+    root.classList.toggle("vc-meters-hidden", hidden);
+    metersBtn.textContent = hidden ? "Show meters  M" : "Hide meters  M";
+    metersBtn.title = hidden
+      ? "Bring back the Bands card and the meters (M)"
+      : "Hide the Bands card and the meters, keep the controls (M)";
+  }
+  setMetersHidden(isFolded(METERS_COLUMN));
 
   function refreshAutoMaster(): void {
     const lit = deps.isSceneAuto(deps.currentSceneId());
@@ -1461,6 +1455,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (isTypingTarget(e.target)) return;
     if (e.key === "h" || e.key === "H") {
       close();
+      return;
+    }
+    if (e.key === "m" || e.key === "M") {
+      setMetersHidden(!isFolded(METERS_COLUMN));
       return;
     }
     if (e.key === "Tab") {

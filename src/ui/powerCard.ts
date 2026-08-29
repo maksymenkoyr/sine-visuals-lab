@@ -1,14 +1,16 @@
 import type { PowerMode } from "../render/powerMode.ts";
 import type { Tier } from "../render/tier.ts";
-import { AUTO_SKY, POWER_TEAL } from "./controlsTheme.ts";
+import { AUTO_SKY, FONT_MONO, POWER_TEAL, withAlpha } from "./controlsTheme.ts";
 import {
   chipBtnLitStyle,
   chipBtnStyle,
   createCard,
+  digitsStyle,
   digitsTextStyle,
+  groupHeadingStyle,
   rowHeadStyle,
   rowLabelStyle,
-  rowRightStyle,
+  unitStyle,
 } from "./controlsKit.ts";
 
 /**
@@ -21,6 +23,16 @@ import {
  * energy-saver mode, an OS refresh-rate cap), where it has deliberately
  * stood down rather than cutting quality for nothing (see governor.ts's
  * "Authority probe").
+ *
+ * Shape, top to bottom: the status line right under the title (the Bands
+ * card's scene · live-dot · source line is the model — small caps mono with
+ * a coloured dot, hover/tap for the long explanation), then the one control
+ * — Energy saving, a row in the panel's grammar with a chip group where a
+ * slider would sit — then a "Readouts" group of diagnostics. Those are
+ * deliberately not rows: a row's 14.5px label is for something you act on,
+ * and four of them made this card read as a settings form. They're a small
+ * mono caption beside a seven-segment value, the same register as the band
+ * captions under the spectrum strip.
  *
  * Read-only except the three mode chips; every value comes from
  * PowerCardDeps.getPowerStatus(), polled at the panel's existing ~10Hz
@@ -63,12 +75,9 @@ export interface PowerCard {
 }
 
 const IDLE_DOT = "rgba(255,255,255,0.3)";
-const modeListStyle = `display: flex; gap: 4px; margin-top: 2px;`;
-const modeChipStyle = `${chipBtnStyle} flex: 1; text-align: center;`;
-const modeChipLitStyle = `${chipBtnLitStyle} flex: 1; text-align: center;`;
-const dotStyle = (color: string) =>
-  `width: 4px; height: 4px; border-radius: 50%; background: ${color}; flex-shrink: 0;`;
-const textReadoutStyle = `${digitsTextStyle} color: #fff;`;
+const modeListStyle = `display: flex; gap: 4px; margin-top: 4px;`;
+const modeChipStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
+const modeChipLitStyle = `${chipBtnLitStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
 
 const MODE_OPTIONS: { mode: PowerMode; text: string; title: string }[] = [
   { mode: "auto", text: "Auto", title: "Let the quality governor decide — the recommended setting" },
@@ -98,7 +107,7 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
     const btn = document.createElement("button");
     btn.textContent = opt.text;
     btn.title = opt.title;
-    btn.style.cssText = chipBtnStyle;
+    btn.style.cssText = modeChipStyle;
     btn.addEventListener("click", () => deps.onPowerModeChange(opt.mode));
     return { mode: opt.mode, btn };
   });
@@ -135,14 +144,14 @@ function describeStatus(status: PowerStatus, accent: string): { text: string; do
   }
   if (status.mode === "off") {
     return {
-      text: "Pinned — full quality",
+      text: "Pinned · full quality",
       dot: IDLE_DOT,
       detail: "Energy saving is off: quality never drops, even under sustained load.",
     };
   }
   if (status.mode === "on") {
     return {
-      text: "Forced — 30fps cap",
+      text: "Forced · 30 fps cap",
       dot: accent,
       detail: "Energy saving is forced on: the render rate is capped, full resolution is kept.",
     };
@@ -157,7 +166,7 @@ function describeStatus(status: PowerStatus, accent: string): { text: string; do
   }
   if (status.level > 0) {
     return {
-      text: `Saving — step ${status.level}/${status.maxLevel}`,
+      text: `Saving · step ${status.level}/${status.maxLevel}`,
       dot: accent,
       detail: "Sustained GPU load — quality stepped down automatically, and recovers once frames are comfortable again.",
     };
@@ -165,13 +174,20 @@ function describeStatus(status: PowerStatus, accent: string): { text: string; do
   return { text: "Full quality", dot: IDLE_DOT, detail: "Rendering at the detected tier's full quality." };
 }
 
-// The status text varies a lot in length ("Full quality" vs. "Paced by the
-// browser") — too long to sit beside the "Status" label in a 200px column
-// without squeezing the label down to an ellipsis (rowHeadStyle's
-// justify-content: space-between never shrinks the right side). So unlike
-// createReadoutRow below, this row puts its content on its own line under
-// the label, the same shape createModeRow uses for its chip group.
-const statusLineStyle = `display: flex; align-items: center; gap: 6px; margin-top: 4px;`;
+// The status line: the same small-caps mono register as the Bands card's
+// "● SYNTHETIC" source line (deviceMenu.ts's statusTextStyle), a shade
+// brighter since here it's the headline, not a footnote. It's a .vc-row so
+// hovering or tapping it unfolds the explanation the way every row's hint
+// does; the hairline beneath closes the header block the way the Bands
+// card's does.
+const statusLineStyle = `display: flex; align-items: center; gap: 7px; min-height: 16px;`;
+const statusTextStyle = `
+  font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase;
+  color: rgba(255,255,255,0.8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+`;
+const statusDotStyle = (color: string) =>
+  `width: 4px; height: 4px; border-radius: 50%; background: ${color}; flex-shrink: 0; transition: background-color 0.3s ease;`;
+const hairlineStyle = `height: 1px; background: ${withAlpha(POWER_TEAL, 0.35)}; margin: 10px 0 12px;`;
 
 function createStatusRow(accent: string) {
   const el = document.createElement("div");
@@ -179,86 +195,113 @@ function createStatusRow(accent: string) {
   el.tabIndex = 0;
   el.style.setProperty("--vc-accent", accent);
 
-  const head = document.createElement("div");
-  head.style.cssText = rowHeadStyle;
-  const label = document.createElement("div");
-  label.textContent = "Status";
-  label.className = "vc-label";
-  label.style.cssText = rowLabelStyle;
-  head.appendChild(label);
-
   const line = document.createElement("div");
   line.style.cssText = statusLineStyle;
   const dot = document.createElement("div");
+  dot.style.cssText = statusDotStyle(IDLE_DOT);
   const text = document.createElement("span");
-  text.style.cssText = textReadoutStyle;
+  text.style.cssText = statusTextStyle;
   line.append(dot, text);
 
   const hint = document.createElement("div");
   hint.className = "vc-hint";
 
-  el.append(head, line, hint);
+  el.append(line, hint);
 
   return {
     el,
     refresh(status: PowerStatus): void {
       const described = describeStatus(status, accent);
       text.textContent = described.text;
-      dot.style.cssText = dotStyle(described.dot);
+      el.title = described.detail;
+      dot.style.backgroundColor = described.dot;
       hint.textContent = described.detail;
     },
   };
 }
 
-/** A plain label/value row with no control beneath it — FPS, resolution,
- *  step, tier. Still `.vc-row` for the same padding and hover "wake" as
- *  every other row in the panel (audioMeters.ts's meter rows follow the
- *  same convention for their own read-only readouts). */
-function createReadoutRow(label: string, accent: string) {
+// One diagnostic line: caption left, value right. The value is a run of
+// parts so mixed content ("2880 × 1800", "0 / 4") sets its digits in the
+// seven-segment face and the joiners in the mono face DSEG7 lacks — the
+// same split every readout in the panel makes between digits and unit.
+const readoutListStyle = `display: flex; flex-direction: column; gap: 7px;`;
+const readoutLineStyle = `display: flex; align-items: baseline; justify-content: space-between; gap: 8px;`;
+const readoutCaptionStyle = `
+  font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
+  color: rgba(255,255,255,0.5); white-space: nowrap;
+`;
+const readoutValueStyle = `display: flex; align-items: baseline; gap: 3px; color: #fff; flex-shrink: 0;`;
+const readoutDigitsStyle = `${digitsStyle} font-size: 11px;`;
+const readoutTextStyle = `${digitsTextStyle} letter-spacing: 0.08em; text-transform: uppercase;`;
+const readoutJoinStyle = `${unitStyle} font-size: 10px;`;
+
+type ReadoutPart = { kind: "digits" | "text" | "join"; text: string };
+const digits = (text: string): ReadoutPart => ({ kind: "digits", text });
+const text = (text: string): ReadoutPart => ({ kind: "text", text });
+const join = (text: string): ReadoutPart => ({ kind: "join", text });
+
+function createReadoutLine(caption: string) {
   const el = document.createElement("div");
-  el.className = "vc-row";
-  el.style.setProperty("--vc-accent", accent);
+  el.style.cssText = readoutLineStyle;
+  const captionEl = document.createElement("div");
+  captionEl.textContent = caption;
+  captionEl.style.cssText = readoutCaptionStyle;
+  const value = document.createElement("div");
+  value.style.cssText = readoutValueStyle;
+  el.append(captionEl, value);
 
-  const head = document.createElement("div");
-  head.style.cssText = rowHeadStyle;
-  const labelEl = document.createElement("div");
-  labelEl.textContent = label;
-  labelEl.className = "vc-label";
-  labelEl.style.cssText = rowLabelStyle;
-  const right = document.createElement("div");
-  right.style.cssText = rowRightStyle;
-  const text = document.createElement("span");
-  text.style.cssText = textReadoutStyle;
-  right.appendChild(text);
-  head.append(labelEl, right);
-  el.appendChild(head);
-
+  let last = "";
   return {
     el,
-    setText(value: string): void {
-      text.textContent = value;
+    set(parts: ReadoutPart[]): void {
+      const key = parts.map((p) => `${p.kind}:${p.text}`).join("|");
+      if (key === last) return;
+      last = key;
+      value.replaceChildren(
+        ...parts.map((p) => {
+          const span = document.createElement("span");
+          span.textContent = p.text;
+          span.style.cssText =
+            p.kind === "digits" ? readoutDigitsStyle : p.kind === "text" ? readoutTextStyle : readoutJoinStyle;
+          return span;
+        }),
+      );
     },
   };
 }
 
 export function createPowerCard(deps: PowerCardDeps): PowerCard {
   const card = createCard({ title: "Power", accent: POWER_TEAL });
-  const modeRow = createModeRow(deps, POWER_TEAL);
   const statusRow = createStatusRow(POWER_TEAL);
-  const fpsRow = createReadoutRow("FPS", POWER_TEAL);
-  const resRow = createReadoutRow("Resolution", POWER_TEAL);
-  const stepRow = createReadoutRow("Step", POWER_TEAL);
-  const tierRow = createReadoutRow("Tier", POWER_TEAL);
-  card.body.append(modeRow.el, statusRow.el, fpsRow.el, resRow.el, stepRow.el, tierRow.el);
+  const hairline = document.createElement("div");
+  hairline.style.cssText = hairlineStyle;
+  const modeRow = createModeRow(deps, POWER_TEAL);
+
+  const readoutsHeading = document.createElement("div");
+  readoutsHeading.textContent = "Readouts";
+  readoutsHeading.style.cssText = groupHeadingStyle;
+  const readouts = document.createElement("div");
+  readouts.style.cssText = readoutListStyle;
+  const fps = createReadoutLine("FPS");
+  const res = createReadoutLine("Resolution");
+  const step = createReadoutLine("Step");
+  const tier = createReadoutLine("Tier");
+  readouts.append(fps.el, res.el, step.el, tier.el);
+
+  card.body.append(statusRow.el, hairline, modeRow.el, readoutsHeading, readouts);
 
   function refresh(): void {
     const status = deps.getPowerStatus();
-    modeRow.refresh(status.mode);
     statusRow.refresh(status);
-    fpsRow.setText(status.fps > 0 ? String(Math.round(status.fps)) : "--");
-    resRow.setText(`${status.bufferWidth}×${status.bufferHeight}`);
-    stepRow.setText(status.level === null ? "--" : `${status.level} / ${status.maxLevel}`);
-    tierRow.setText(status.tier);
+    modeRow.refresh(status.mode);
+    fps.set(status.fps > 0 ? [digits(String(Math.round(status.fps)))] : [text("--")]);
+    res.set([digits(String(status.bufferWidth)), join("×"), digits(String(status.bufferHeight))]);
+    step.set(
+      status.level === null
+        ? [text("--")]
+        : [digits(String(status.level)), join("/"), digits(String(status.maxLevel))],
+    );
+    tier.set([text(status.tier)]);
   }
   refresh();
 
