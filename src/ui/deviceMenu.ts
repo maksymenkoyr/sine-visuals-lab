@@ -292,13 +292,17 @@ const footerBtnStyle = `
 // The Input card doubles as a level meter: two stacked background washes
 // (sized per frame in update()) under the glass, not separate bars — a bar
 // stacked over a slider read as a second, draggable control it wasn't:
-//  - the tick: a 2px hard edge at the raw (pre-sensitivity) mic level,
-//    always input-green — it's a different quantity from the fill below.
-//  - the fill: a solid wash out to the shaped (post-sensitivity) level —
-//    where the scene is actually reacting right now. Its color rides the
-//    --wash custom property (see washColor()) so only that one value needs
-//    writing each frame as the level nears clipping.
-// The gap between tick and fill edge is the sensitivity, visibly.
+//  - the tick: a 2px hard edge at FeatureFrame.level, the room's absolute
+//    loudness against a fixed dB window — always input-green, and unmoved by
+//    the Auto-gain toggle below or by Sensitivity, since neither ever
+//    touches it.
+//  - the fill: a solid wash out to the shaped (post-Auto-gain,
+//    post-sensitivity) level — where the scene is actually reacting right
+//    now. Its color rides the --wash custom property (see washColor()) so
+//    only that one value needs writing each frame as the level nears
+//    clipping.
+// The gap between tick and fill edge is Auto-gain and Sensitivity together,
+// visibly: flip Auto-gain on in a quiet room and the gap visibly opens.
 //
 // Hot-zone ramp for the fill wash: green all the way up to HOT_START, then
 // green -> yellow over the next slice, then yellow -> red in the last
@@ -1457,10 +1461,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
       audioMeters.update(frame, anim, mono, rawBands);
-      // Raw (pre-sensitivity) energy, so the level wash reflects the actual
-      // mic signal regardless of where the sensitivity slider is set.
-      const level = frame?.energy ?? 0;
-      const raw = Math.min(1, Math.max(0, level));
+      // The tick is FeatureFrame.level — absolute, fixed-window loudness,
+      // untouched by Auto-gain — so it reads the room regardless of that
+      // toggle. The fill starts from .energy, which Auto-gain does shape,
+      // then runs the same sensitivity+acceleration curve the render path
+      // applies, so it reads what the scene is actually reacting to.
+      const tick = Math.min(1, Math.max(0, frame?.level ?? 0));
+      const energy = Math.min(1, Math.max(0, frame?.energy ?? 0));
       const sceneId = deps.currentSceneId();
       const sensitivity = deps.isSettingAutoEnabled(sceneId, deps.getSensitivitySpec().key)
         ? deps.resolveSensitivityValue(sceneId)
@@ -1470,11 +1477,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         : deps.getAcceleration(sceneId);
       const shaped = Math.min(
         1,
-        Math.max(0, shapeAcceleration(shapeLevel(raw, sensitivity), acceleration)),
+        Math.max(0, shapeAcceleration(shapeLevel(energy, sensitivity), acceleration)),
       );
-      const rawPct = Math.round(raw * 100);
+      const tickPct = Math.round(tick * 100);
       const shapedPct = Math.round(shaped * 100);
-      inputCard.el.style.backgroundSize = `${rawPct}% 100%, ${shapedPct}% 100%`;
+      inputCard.el.style.backgroundSize = `${tickPct}% 100%, ${shapedPct}% 100%`;
 
       // Driven off the unrounded shaped level (not shapedPct) so the ramp
       // starts exactly at HOT_START rather than snapping in 1%-wide steps.
