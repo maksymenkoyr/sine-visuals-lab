@@ -20,8 +20,10 @@ regenerate it at session close.
   `worktree-mesh-grid-terrain` (worktree at
   `.claude/worktrees/mesh-grid-terrain`, locked), draft PR #22, rebased onto
   `main` after #31's tier → quality rename, unmerged. On top of the rebuild:
-  Camera Distance / Height / Tilt, Zoom, a Circle layout with Circle Squeeze,
-  and defaults lifted from a saved mark. Ready for a look on real music.
+  Camera Distance / Height / Tilt, Zoom, Circle and Sphere layouts with Circle
+  Squeeze, a Background Mesh that can be a flat backdrop or a sky dome, and
+  every default lifted from the latest saved mark. Ready for a look on real
+  music.
 - **Caustics: Treble sparkle split into a macro** — branch
   `worktree-sparkle-macro` (worktree at `.claude/worktrees/sparkle-macro`,
   locked), 1 commit ahead of `main`, unmerged.

@@ -39,6 +39,17 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 //  - Row spacing in world Z is non-linear (`Z_POWER`) so rows spread more
 //    evenly on screen under perspective; time per row stays uniform because
 //    the history lookup uses the normalized row fraction, not world Z.
+//  - The Sphere checkbox re-maps the grid onto a globe (and overrides Circle):
+//    columns are longitude, rows latitude, with time mirrored about the
+//    equator so the newest ring is the equator — the biggest, nearest ring —
+//    and history ripples toward both poles. The poles get the same
+//    displacement fade as the disc's center. Circle Squeeze and CIRCLE_TILT
+//    apply to the ball too, so it's really an ellipsoid tipped toward you.
+//  - The Background Dome checkbox lifts the sky lattice off the flat room
+//    plane onto a sphere around the camera, evaluated per pixel from the
+//    reconstructed view ray (`viewRay`, sharing `camBasis()` with `toView`
+//    so the dome and the terrain agree on where "up" and the horizon are).
+//    Its mask is by elevation above `farEdgePoint()`, not by screen v.
 //  - The Circle checkbox re-maps the same grid onto a disc: columns become
 //    the angle (the mirrored spectrum makes the seam at the back close on
 //    itself) and rows the radius, with the newest ring on the outside so the
@@ -97,6 +108,8 @@ const WIDTH_MARGIN = 1.15; // grid half-width as a multiple of the frustum half-
 const CIRCLE_CENTER_Z = 50.0; // Circle layout: world z of the disc's center
 const CIRCLE_RADIUS = 40.0; // Circle layout: radius of the disc's outer (newest) rim
 const CIRCLE_TILT_DEG = 24; // Circle layout: disc plane tilted toward the viewer (far rim raised)
+const SPHERE_RADIUS = 30.0; // Sphere layout: radius of the globe at rest (shares CIRCLE_CENTER_Z and CIRCLE_TILT)
+const DOME_SCALE = 14.0; // Background Dome: lattice cells per radian of sky
 const FOG_K = 1.0 / 110.0; // 1/(view depth) at which fog reaches 1/e
 const LINE_PX = 1.2; // grid line width in pixels before anti-aliasing
 const NOISE_PERIOD = 64.0; // lattice period of the noise field's time axis (see noisePeriodic)
@@ -113,7 +126,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0.1,
     max: 5,
     step: 0.1,
-    default: 1.3,
+    default: 1.5,
     // Displacement amplitude follows macro dynamics; dark mixes get more bulk.
     auto: { dynamics: 0.3, brightness: -0.2 },
   },
@@ -133,16 +146,16 @@ const SETTINGS: SceneSetting[] = [
     min: 2,
     max: 60,
     step: 1,
-    default: 26,
+    default: 24,
   },
   {
     key: "cameraHeight",
     label: "Camera Height",
     description: "Camera height above the terrain's rest level -- low is a grazing view, high looks down on it",
     min: 1,
-    max: 40,
+    max: 60,
     step: 0.5,
-    default: 26,
+    default: 40,
   },
   {
     key: "cameraTilt",
@@ -151,21 +164,31 @@ const SETTINGS: SceneSetting[] = [
     min: -35,
     max: 15,
     step: 0.5,
-    default: -10,
+    default: -16.5,
   },
   {
     key: "zoom",
     label: "Zoom",
     description: "Below 1 zooms out -- the terrain shrinks and its side edges come into view with sky around it; above 1 zooms in",
     min: 0.3,
-    max: 2,
+    max: 3,
     step: 0.05,
-    default: 0.9,
+    default: 2,
   },
   {
     key: "circle",
     label: "Circle",
-    description: "Lay the spectrogram out as a disc instead of a runway: newest frame at the outer rim, history shrinking inward and fading at the center, bass at the front. Raise Camera Height and tilt down for a top-down view",
+    description: "Lay the spectrogram out as a disc instead of a runway: newest frame at the outer rim, history shrinking inward and fading at the center, bass at the front (Sphere overrides this when both are on)",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 1,
+    type: "boolean",
+  },
+  {
+    key: "sphere",
+    label: "Sphere",
+    description: "Wrap the spectrogram around a globe: newest ring at the equator, history rippling toward both poles, bass at the front. Circle Squeeze flattens it into an ellipsoid. Overrides Circle",
     min: 0,
     max: 1,
     step: 1,
@@ -175,11 +198,11 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "circleSqueeze",
     label: "Circle Squeeze",
-    description: "Circle layout only: the disc's depth as a fraction of its width -- below 1 is an ellipse wider than deep, 1 is a true circle",
+    description: "Circle and Sphere layouts: depth as a fraction of width -- below 1 is an ellipse/ellipsoid wider than deep, 1 is a true circle/sphere",
     min: 0.3,
     max: 1.5,
     step: 0.05,
-    default: 0.75,
+    default: 0.55,
   },
   {
     key: "flow",
@@ -188,7 +211,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.6,
+    default: 0.35,
     // Faster, pulsier music wants tighter immediacy over a deep waterfall trail.
     auto: { tempo: -0.25, pulse: -0.2 },
   },
@@ -199,7 +222,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 5,
     step: 0.05,
-    default: 1.35,
+    default: 2.35,
     // Busy, bright mixes churn the turbulence baseline more.
     auto: { density: 0.3, brightness: 0.1 },
   },
@@ -266,7 +289,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.01,
-    default: 0.3,
+    default: 1,
     // Vertex-dot presence tracks hats/cymbals and transient hits.
     auto: { brightness: 0.3, attack: 0.15 },
   },
@@ -295,7 +318,17 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 1,
-    default: 0,
+    default: 1,
+    type: "boolean",
+  },
+  {
+    key: "bgMeshDome",
+    label: "Background Dome",
+    description: "Curve the background mesh into a sky dome around the camera, like a planetarium ceiling, instead of a flat backdrop -- it pans with Camera Tilt and scales with Zoom",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 1,
     type: "boolean",
   },
   {
@@ -352,7 +385,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 1,
-    default: 0,
+    default: 1,
     type: "boolean",
   },
   {
@@ -372,7 +405,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0.05,
     max: 3,
     step: 0.05,
-    default: 0.5,
+    default: 2.4,
   },
   {
     key: "contourLines",
@@ -381,7 +414,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 1,
-    default: 0,
+    default: 1,
     type: "boolean",
   },
   {
@@ -391,7 +424,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0.05,
     max: 2,
     step: 0.05,
-    default: 0.4,
+    default: 0.95,
   },
 ];
 
@@ -512,6 +545,8 @@ const CAMERA_GLSL = `
 #define CIRCLE_CENTER_Z ${CIRCLE_CENTER_Z.toFixed(1)}
 #define CIRCLE_RADIUS ${CIRCLE_RADIUS.toFixed(1)}
 #define CIRCLE_TILT ${((CIRCLE_TILT_DEG * Math.PI) / 180).toFixed(5)}
+#define SPHERE_RADIUS ${SPHERE_RADIUS.toFixed(1)}
+#define DOME_SCALE ${DOME_SCALE.toFixed(1)}
 #define NEAR 0.5
 #define FAR 400.0
 
@@ -528,12 +563,27 @@ float roomAspect() {
   return (uResolution.x / max(uViewport.z, 0.0001)) / (uResolution.y / max(uViewport.w, 0.0001));
 }
 
-vec3 toView(vec3 world) {
+// Camera basis as a matrix whose columns are right, up, forward — one
+// definition shared by toView (world -> view) and the Background Dome's ray
+// reconstruction in BG_FRAG (view -> world), so they can never disagree.
+mat3 camBasis() {
   vec3 forward = camForward();
   vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
   vec3 up = cross(right, forward);
-  vec3 rel = world - camPos();
-  return vec3(dot(rel, right), dot(rel, up), dot(rel, forward));
+  return mat3(right, up, forward);
+}
+
+vec3 toView(vec3 world) {
+  return (world - camPos()) * camBasis(); // row-vector form: dot with each column
+}
+
+// World-space direction of the view ray through a room-space uv, honouring
+// Zoom. For the Background Dome, which paints the sky per pixel.
+vec3 viewRay(vec2 rUv) {
+  vec2 ndc = rUv * 2.0 - 1.0;
+  float f = focalY() * uZoom;
+  vec3 d = normalize(vec3(ndc.x * roomAspect() / f, ndc.y / f, 1.0));
+  return camBasis() * d;
 }
 
 // Room-space clip coordinates with a genuine perspective depth: NDC z runs
@@ -547,14 +597,29 @@ vec4 toClip(vec3 view) {
   return vec4(view.x * focalY() * uZoom / roomAspect(), view.y * focalY() * uZoom, zc, z);
 }
 
-// Room-space v (0 = bottom, 1 = top) of the terrain's far edge at rest height
-// (the disc's far rim in the Circle layout).
+// The world point the background's horizon glow is anchored to: the
+// terrain's far edge at rest height, the disc's far rim in the Circle
+// layout, or the globe's far side in the Sphere layout.
+vec3 farEdgePoint() {
+  if (uSphere > 0.5) return vec3(0.0, 0.0, CIRCLE_CENTER_Z + SPHERE_RADIUS * uCircleSqueeze);
+  if (uCircle > 0.5) {
+    float r = CIRCLE_RADIUS * uCircleSqueeze;
+    return vec3(0.0, r * sin(CIRCLE_TILT), CIRCLE_CENTER_Z + r * cos(CIRCLE_TILT));
+  }
+  return vec3(0.0, 0.0, GRID_DEPTH);
+}
+
+// Room-space v (0 = bottom, 1 = top) of farEdgePoint().
 float horizonV() {
-  vec3 farEdge = uCircle > 0.5
-    ? vec3(0.0, CIRCLE_RADIUS * uCircleSqueeze * sin(CIRCLE_TILT), CIRCLE_CENTER_Z + CIRCLE_RADIUS * uCircleSqueeze * cos(CIRCLE_TILT))
-    : vec3(0.0, 0.0, GRID_DEPTH);
-  vec4 c = toClip(toView(farEdge));
+  vec4 c = toClip(toView(farEdgePoint()));
   return (c.y / c.w) * 0.5 + 0.5;
+}
+
+// Elevation angle (radians, + = above the camera's eye level) of
+// farEdgePoint() — the Background Dome's horizon, in the sky's own coords.
+float horizonElevation() {
+  vec3 rel = farEdgePoint() - camPos();
+  return atan(rel.y, length(rel.xz));
 }
 `;
 
@@ -654,7 +719,16 @@ float sampleHistory(float binF, float rowF) {
 
 void main() {
   float fx = abs(aPos.x);              // 0 at the center (bass), 1 at either edge (treble)
-  float zNorm = aPos.y * 0.5 + 0.5;    // 0 = front (newest) row, 1 = far edge
+  bool sphere = uSphere > 0.5;
+  bool circle = !sphere && uCircle > 0.5; // Sphere wins when both are on
+  // 0 = newest row, 1 = oldest. On the runway/disc that's front to back; on
+  // the globe time is mirrored about the equator so both hemispheres carry
+  // the full history (newest ring at the equator, oldest at the poles).
+  float zNorm = sphere ? abs(aPos.y) : aPos.y * 0.5 + 0.5;
+  // Where the wrapped layouts' columns converge (disc center, globe poles),
+  // the displacement is faded out below — and so are the dots, which would
+  // otherwise stack additively into a hot spot there.
+  float poleFade = (sphere || circle) ? smoothstep(0.0, 0.25, 1.0 - zNorm) : 1.0;
 
   // Rows are the audio spectrum's history (newest at the front), columns the
   // spectrum itself folded about the center: bass ridge in the middle,
@@ -673,27 +747,40 @@ void main() {
 
   float height = amp * uWaveHeight * HEIGHT_SCALE;
 
-  bool circle = uCircle > 0.5;
-
   // Undulation sampled in (normalized x, absolute frame) space so it scrolls
   // with the data. noiseScale sets the pattern size on both axes together.
-  // The Circle layout wraps the columns into a ring whose seam is at
-  // aPos.x = +-1; the spectrum is already mirrored there, and folding the
+  // The Circle and Sphere layouts wrap the columns into a ring whose seam is
+  // at aPos.x = +-1; the spectrum is already mirrored there, and folding the
   // noise's x the same way closes the seam for it too.
-  float noiseX = circle ? fx : aPos.x;
+  float noiseX = (circle || sphere) ? fx : aPos.x;
   vec2 noiseCoord = vec2(noiseX * 15.0 * uNoiseScale, uNoisePhase - framesBack * NOISE_Z_RATE * uNoiseScale);
   float nz = noisePeriodic(noiseCoord);
   height += (2.0 * nz - 1.0) * uNoise * uWaveHeight * 0.2 * HEIGHT_SCALE; // *0.2: keeps noise as texture, not a dominant swing
 
   vec3 worldPos;
-  if (circle) {
+  if (sphere) {
+    // Globe: the newest ring is the equator and history ripples toward both
+    // poles, where every column meets — so, as with the disc's center, the
+    // displacement is faded to nothing there instead of spiking. Height is
+    // pushed along the surface normal; Circle Squeeze flattens the ball's
+    // depth into an ellipsoid and CIRCLE_TILT tips its axis toward the viewer.
+    float lat = aPos.y * 1.57079633;     // -pi/2 (bottom pole) .. +pi/2 (top pole), 0 = equator (newest)
+    float theta = aPos.x * 3.14159265;   // 0 = front (bass), +-pi = back (treble, the closed seam)
+    height *= poleFade;
+    height += uValley * zNorm * zNorm;   // poles pushed out (or in)
+    vec3 n = vec3(cos(lat) * sin(theta), sin(lat), -cos(lat) * cos(theta));
+    vec3 local = n * (SPHERE_RADIUS + height);
+    local.z *= uCircleSqueeze;
+    float ct = cos(CIRCLE_TILT), st = sin(CIRCLE_TILT);
+    worldPos = vec3(local.x, local.y * ct + local.z * st, CIRCLE_CENTER_Z - local.y * st + local.z * ct);
+  } else if (circle) {
     // Disc: time runs inward, so the outer rim is the newest (and nearest)
     // ring and the oldest frames converge on the center. The displacement
     // is faded out over the same innermost stretch the fog fades (below),
     // so the pole, where every column meets, stays flat instead of spiking.
     float rN = 1.0 - zNorm;
     float theta = aPos.x * 3.14159265;   // 0 = front (bass), +-pi = back (treble, the closed seam)
-    height *= smoothstep(0.0, 0.25, rN);
+    height *= poleFade;
     height += uValley * rN * rN;         // bowl (or dome) instead of a valley
     float r = CIRCLE_RADIUS * rN;
     // The disc is tilted toward the viewer (far rim raised) so it reads as a
@@ -736,12 +823,15 @@ void main() {
   vGrid = (aPos * 0.5 + 0.5) * (uGridDims - 1.0);
   vZ = zNorm;
   // Depth fog, with an explicit fade over the last stretch of rows so the far
-  // edge is guaranteed to reach exactly the background color.
-  vFog = exp(-pow(viewZ * FOG_K, 2.0)) * (1.0 - smoothstep(0.75, 1.0, zNorm));
+  // edge is guaranteed to reach exactly the background color. Not on the
+  // globe: fogging an opaque ball's poles to the backdrop would read as holes,
+  // and the displacement fade above already calms them.
+  float edgeFade = sphere ? 1.0 : (1.0 - smoothstep(0.75, 1.0, zNorm));
+  vFog = exp(-pow(viewZ * FOG_K, 2.0)) * edgeFade;
 
   // Perspective-scaled point size, so dots read consistently near and far.
   float ampFactor = mix(1.0, mix(0.2, 1.0, amp), uDotReactivity);
-  gl_PointSize = (0.3 + 1.2 * uDots) * ampFactor * (110.0 / viewZ) * uZoom;
+  gl_PointSize = (0.3 + 1.2 * uDots) * ampFactor * (110.0 / viewZ) * uZoom * poleFade;
 }
 `;
 
@@ -901,15 +991,30 @@ void main() {
   vec3 col = bgColor(rUv);
 
   if (uBgMesh > 0.5) {
-    float hv = horizonV();
-    vec2 p = vec2((rUv.x - 0.5) * roomAspect(), rUv.y - hv) * 14.0;
-    float lattice = triLattice(p);
-    // Fades in just above the horizon and stays across the whole sky, only
-    // easing off toward the top. Below the horizon the runway covers the
-    // backdrop anyway, but in the Circle layout the disc floats in it, so
-    // the lattice continues underneath at reduced weight.
-    float below = uCircle > 0.5 ? 0.5 : 0.0;
-    float mask = mix(below, 1.0, smoothstep(hv, hv + 0.1, rUv.y)) * (1.0 - 0.5 * smoothstep(hv + 0.3, 1.0, rUv.y));
+    // Below the horizon the runway covers the backdrop anyway, but in the
+    // Circle and Sphere layouts the shape floats in it, so the lattice
+    // continues underneath at reduced weight.
+    float below = (uCircle > 0.5 || uSphere > 0.5) ? 0.5 : 0.0;
+    float lattice, mask;
+    if (uBgMeshDome > 0.5) {
+      // Sky dome: the lattice lives on a sphere around the camera, in
+      // (azimuth, elevation) coordinates, so its lines are meridians and
+      // parallels that converge overhead and curve with perspective — a
+      // planetarium ceiling that pans with Camera Tilt and scales with Zoom.
+      // Masked by elevation above the terrain's far edge, not screen v.
+      vec3 dir = viewRay(rUv);
+      float az = atan(dir.x, dir.z) + uTime * 0.01;
+      float el = asin(clamp(dir.y, -1.0, 1.0));
+      lattice = triLattice(vec2(az, el) * DOME_SCALE);
+      float he = horizonElevation();
+      mask = mix(below, 1.0, smoothstep(he, he + 0.08, el)) * (1.0 - 0.5 * smoothstep(he + 0.5, 1.5, el));
+    } else {
+      // Flat backdrop: the lattice sits on the room plane, fading in just
+      // above the horizon and staying across the sky, easing off at the top.
+      float hv = horizonV();
+      lattice = triLattice(vec2((rUv.x - 0.5) * roomAspect(), rUv.y - hv) * 14.0);
+      mask = mix(below, 1.0, smoothstep(hv, hv + 0.1, rUv.y)) * (1.0 - 0.5 * smoothstep(hv + 0.3, 1.0, rUv.y));
+    }
     vec3 latticeCol = max(palette(0.5, uPalA, uPalB, uPalC, uPalD), 0.0);
     col += latticeCol * lattice * mask * uBgMeshIntensity * (0.3 + 0.5 * uEnergy);
   }
