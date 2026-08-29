@@ -191,6 +191,15 @@ export interface DeviceMenuDeps {
   onSceneAutoToggle: (sceneId: string, on: boolean) => void;
   getAutoStrength: () => number;
   onAutoStrengthChange: (value: number) => void;
+  /** Dev-only: read/write/clear an unclamped pin for a param row (see
+   *  tuning/pins.ts) — its presence is what turns a row's readout into a
+   *  typable field, and its absence in a production build is what hides
+   *  that affordance entirely. */
+  devPin?: {
+    get(sceneId: string, key: string): number | undefined;
+    set(sceneId: string, key: string, value: number): void;
+    clear(sceneId: string, key: string): void;
+  };
   /** Global per-band adaptive-normalization switch — see src/audio/autoGain.ts.
    *  Off (the default) falls back to a fixed mapping against the analyser's
    *  own dB window, matching the spectrum strip's raw feed. */
@@ -436,6 +445,20 @@ interface ControlRowSpec {
      *  that reveals whatever's stored, not whatever the slider happened to be showing. */
     getManual: () => number;
   };
+  /** Dev-only: makes the readout typable, bound to a scene+key already —
+   *  see DeviceMenuDeps.devPin. Omit to leave the readout the plain
+   *  non-interactive span it's always been (any prod build, or a row this
+   *  affordance doesn't apply to). */
+  pin?: {
+    get(): number | undefined;
+    set(value: number): void;
+    clear(): void;
+    /** What to fall back to once a pin is cleared by an invalid/empty typed
+     *  value — the row's already-resolved live value (auto/override-aware,
+     *  same getter the row's own auto path uses), not a raw manual read, so
+     *  clearing a pin never fights whatever else currently owns the row. */
+    resolve(): number;
+  };
 }
 
 /** Wires A/R/T on a row's own focusable control (the slider or the toggle
@@ -521,6 +544,105 @@ function createControlRow(spec: ControlRowSpec) {
   unit.textContent = spec.unit ?? "";
   if (!spec.unit) unit.style.display = "none";
   readout.append(digits, unit);
+
+  // Last value display() actually rendered — the typed field's prefill, and
+  // (with editingPin) whether display() needs to keep the field showing
+  // instead of the digits it would otherwise reassert every refresh.
+  let lastValue = spec.defaultValue;
+  let editingPin = false;
+
+  // Dev-only typed entry — see ControlRowSpec.pin. The digits span becomes
+  // the click trigger for a plain text field swapped in over it (not reached
+  // by Tab — the panel's ring (ringElements() below) only walks
+  // .vc-slider/.vc-toggle/.vc-fader, so this is mouse/touch-only, matching
+  // the rest of the row's pointer-only affordances like the thumb magnet). A
+  // `*` marks a pinned (out-of-range) value in BANDS_AMBER, a cross-card
+  // color chosen so it reads as "outside the slider" regardless of which
+  // card's own accent this row is using.
+  let pinMark: HTMLSpanElement | null = null;
+  let pinInput: HTMLInputElement | null = null;
+  if (spec.pin) {
+    pinMark = document.createElement("span");
+    pinMark.textContent = "*";
+    pinMark.title = "Pinned — typed value outside the slider's range";
+    pinMark.style.cssText = `color: ${BANDS_AMBER}; font: 400 11px/1 ${FONT_MONO}; display: none;`;
+    readout.appendChild(pinMark);
+
+    digits.style.cursor = "text";
+    digits.title = "Click to type a value";
+
+    pinInput = document.createElement("input");
+    pinInput.type = "text";
+    pinInput.inputMode = "decimal";
+    pinInput.className = "vc-pin-input";
+    pinInput.style.cssText = `${digitsStyle} background: transparent; border: none; outline: none; width: 4.5em; display: none;`;
+    readout.insertBefore(pinInput, digits);
+
+    // stopPropagation on both the trigger and the field itself so el's own
+    // click-to-focus-slider handler (below) never steals focus back out.
+    digits.addEventListener("click", (e) => {
+      e.stopPropagation();
+      pinOpenEdit();
+    });
+    pinInput.addEventListener("click", (e) => e.stopPropagation());
+    // Escape sets this so the blur that display:none triggers on the
+    // focused field (browsers fire it automatically) is a no-op instead of
+    // re-committing whatever text was left in the box.
+    let suppressBlurCommit = false;
+    pinInput.addEventListener("blur", () => {
+      if (suppressBlurCommit) {
+        suppressBlurCommit = false;
+        return;
+      }
+      pinCommitTyped();
+    });
+    pinInput.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        pinInput!.blur(); // triggers the blur listener above -> commits
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        suppressBlurCommit = true;
+        pinCloseEdit();
+      }
+    });
+  }
+  // Bound to the assigned functions further down (pinOpenEdit etc. are
+  // function declarations, hoisted within this same call), once display(),
+  // commit(), and clearOff() exist below to close over.
+  function pinOpenEdit(): void {
+    if (!pinInput) return;
+    editingPin = true;
+    pinInput.value = String(lastValue);
+    digits.style.display = "none";
+    pinInput.style.display = "";
+    pinInput.focus();
+    pinInput.select();
+  }
+  function pinCloseEdit(): void {
+    if (!pinInput) return;
+    editingPin = false;
+    pinInput.style.display = "none";
+    digits.style.display = "";
+  }
+  function pinCommitTyped(): void {
+    if (!spec.pin || !pinInput) return;
+    const text = pinInput.value.trim();
+    const value = Number(text);
+    pinCloseEdit();
+    if (text === "" || !Number.isFinite(value)) {
+      spec.pin.clear();
+      display(spec.pin.resolve(), false);
+    } else if (value >= spec.min && value <= spec.max) {
+      spec.pin.clear();
+      clearOff();
+      commit(value);
+    } else {
+      spec.pin.set(value);
+      display(value, false);
+    }
+  }
 
   const chip = document.createElement("button");
   chip.textContent = "A";
@@ -619,6 +741,7 @@ function createControlRow(spec: ControlRowSpec) {
   }
 
   function display(value: number, auto: boolean): void {
+    lastValue = value;
     const sliderValue = valueToSlider(value);
     slider.value = String(sliderValue);
     const lo = Number(slider.min);
@@ -626,6 +749,17 @@ function createControlRow(spec: ControlRowSpec) {
     const pct = hi > lo ? ((sliderValue - lo) / (hi - lo)) * 100 : 0;
     slider.style.setProperty("--vc-fill", `${Math.max(0, Math.min(100, pct))}%`);
     setReadout(value);
+    // setReadout just overwrote digits.style.cssText wholesale, which would
+    // silently pop the digits back over an open typed-entry field on every
+    // refresh (e.g. an auto row's ~100ms tick) — reassert the field's
+    // visibility every call rather than only where it was opened.
+    if (spec.pin) {
+      if (editingPin) {
+        digits.style.display = "none";
+        pinInput!.style.display = "";
+      }
+      pinMark!.style.display = spec.pin.get() !== undefined ? "" : "none";
+    }
     resetBtn.style.visibility = Math.abs(value - spec.defaultValue) > 1e-6 ? "visible" : "hidden";
     setHint(auto);
   }
@@ -670,13 +804,18 @@ function createControlRow(spec: ControlRowSpec) {
   });
   slider.addEventListener("input", () => {
     clearOff();
+    spec.pin?.clear();
     commit(sliderToValue());
   });
   resetBtn.addEventListener("click", () => {
     clearOff();
+    spec.pin?.clear();
     commit(spec.defaultValue);
   });
   offChip.addEventListener("click", () => {
+    // Any of the row's own controls taking over clears a pin the same way —
+    // see the slider/reset handlers above.
+    spec.pin?.clear();
     if (offStoredValue !== null) {
       const restore = offStoredValue;
       offStoredValue = null;
@@ -694,7 +833,13 @@ function createControlRow(spec: ControlRowSpec) {
       const auto = spec.auto!;
       const on = !auto.isEnabled();
       auto.toggle(on);
-      if (on) clearOff();
+      if (on) {
+        clearOff();
+        // A pin beats auto in resolve()'s precedence, so without this the
+        // chip would light up while the row visibly stayed put — clearing it
+        // here is what actually hands the row to auto.
+        spec.pin?.clear();
+      }
       refreshChip();
       display(on ? auto.resolveLive() : auto.getManual(), on);
     });
@@ -715,9 +860,11 @@ function createControlRow(spec: ControlRowSpec) {
       onCommit = cb;
     },
     /** Called from the throttled per-frame refresh — pulls the live
-     *  auto-resolved value while auto is on and this row isn't being dragged. */
+     *  auto-resolved value while auto is on and this row isn't being dragged
+     *  or mid-edit in the typed-entry field (editingPin — same reasoning as
+     *  dragging: don't overwrite what the user is actively doing). */
     refreshAuto(): void {
-      if (!spec.auto || dragging || !spec.auto.isEnabled()) return;
+      if (!spec.auto || dragging || editingPin || !spec.auto.isEnabled()) return;
       display(spec.auto.resolveLive(), true);
     },
     refreshChip,
@@ -726,11 +873,13 @@ function createControlRow(spec: ControlRowSpec) {
      *  this row's own resetBtn. */
     clearOff,
     /** Show whatever's right for the row now: the live auto value if auto
-     *  owns it, the manual store otherwise. */
+     *  owns it (resolveLive() already reflects a pin ahead of auto — see
+     *  autoTune.ts's resolve() — so no separate check is needed there), a
+     *  pin ahead of the manual store otherwise. */
     sync(manualValue: () => number): void {
       refreshChip();
       if (spec.auto && spec.auto.isEnabled()) display(spec.auto.resolveLive(), true);
-      else display(manualValue(), false);
+      else display(spec.pin?.get() ?? manualValue(), false);
     },
   };
 }
@@ -1072,6 +1221,25 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoRow.style.cssText = autoRowStyle;
   autoRow.append(autoCard.el, autoMasterBtn);
 
+  // Binds a row's typed-entry field to deps.devPin for one (scene, key) —
+  // undefined (no typable readout) whenever devPin itself is, i.e. every
+  // production build. `sceneId` is a getter rather than a plain string
+  // because the Input card's three rows are built once and outlive scene
+  // switches (see makeInputRow below); a scene-setting row is rebuilt fresh
+  // per scene by renderSceneSettings and could just close over a constant,
+  // but taking a getter here either way keeps this one function correct for
+  // both callers instead of needing two shapes.
+  function pinConfig(sceneId: () => string, key: string, resolve: () => number): ControlRowSpec["pin"] {
+    const pin = deps.devPin;
+    if (!pin) return undefined;
+    return {
+      get: () => pin.get(sceneId(), key),
+      set: (value) => pin.set(sceneId(), key, value),
+      clear: () => pin.clear(sceneId(), key),
+      resolve,
+    };
+  }
+
   // Input: Sensitivity/Acceleration/Smoothing — three instances of the same
   // log-mapped row, sharing the auto-refresh call sites below (master
   // toggle, open(), live-drift refresh) through one array, which is what
@@ -1101,6 +1269,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         resolveLive,
         getManual,
       },
+      pin: pinConfig(() => deps.currentSceneId(), spec().key, resolveLive),
     });
     row.onChange(onChange);
     return { row, getManual, defaultValue: range.defaultValue, onChange };
@@ -1255,6 +1424,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
             getManual: () => deps.getSceneSettingValue(sceneId, spec),
           }
         : undefined,
+      pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));

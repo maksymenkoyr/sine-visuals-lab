@@ -9,6 +9,7 @@ import type { AnimFrame } from "../render/animClock.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import { getSceneSetting } from "../render/sceneSettings.ts";
 import { getOverride, isAutoPinned } from "./overrides.ts";
+import { getPin } from "./pins.ts";
 import { isAutoEnabled, resolveSceneSetting } from "../render/autoTune.ts";
 
 export interface ProbeInput {
@@ -29,9 +30,11 @@ export interface ProbeInput {
 export interface ProbeSettingValue {
   base: number;
   resolved: number;
-  /** "override" (pinned by the tuning bus), "auto" (music-driven), or
-   *  "manual" (auto disabled for this key, resolved === base). */
-  mode: "override" | "auto" | "manual";
+  /** "override" (pinned by the tuning bus, incl. auto-pin), "pin" (typed
+   *  into the row past its spec range — see tuning/pins.ts), "auto"
+   *  (music-driven), or "manual" (auto disabled for this key,
+   *  resolved === base). */
+  mode: "override" | "pin" | "auto" | "manual";
 }
 
 export interface ProbeSnapshot {
@@ -58,12 +61,20 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
     // `auto` one is — see autoTune.ts's header — so it counts here too, or
     // every sparkle sub-param would misreport as "manual" while it's
     // actively tracking its driver.
+    // Mirrors resolve()'s precedence exactly (autoTune.ts): an override
+    // beats a pin beats auto-pin, so this can't mislabel a row whose value
+    // actually came from a pin as "override" just because auto-pin also
+    // happens to be on.
     const mode: ProbeSettingValue["mode"] =
-      getOverride(sceneId, spec.key) !== undefined || isAutoPinned()
+      getOverride(sceneId, spec.key) !== undefined
         ? "override"
-        : (spec.auto || spec.macro) && isAutoEnabled(sceneId, spec.key)
-          ? "auto"
-          : "manual";
+        : getPin(sceneId, spec.key) !== undefined
+          ? "pin"
+          : isAutoPinned()
+            ? "override"
+            : (spec.auto || spec.macro) && isAutoEnabled(sceneId, spec.key)
+              ? "auto"
+              : "manual";
     settingValues[spec.key] = { base, resolved, mode };
   }
 
@@ -96,7 +107,14 @@ export function formatProbe(snap: ProbeSnapshot): string {
     `beat=${snap.beat.fired ? 1 : 0} bpm=${snap.beat.bpm.toFixed(1)} phase=${snap.beat.phase.toFixed(2)} | section=${snap.section.toFixed(2)} drop=${snap.drop.toFixed(2)}`,
   );
   for (const [key, v] of Object.entries(snap.settings)) {
-    const tag = v.mode === "override" ? "pinned" : v.mode === "auto" ? `auto ${(v.resolved - v.base >= 0 ? "+" : "") + (v.resolved - v.base).toFixed(2)}` : "manual";
+    const tag =
+      v.mode === "override"
+        ? "pinned"
+        : v.mode === "pin"
+          ? "typed"
+          : v.mode === "auto"
+            ? `auto ${(v.resolved - v.base >= 0 ? "+" : "") + (v.resolved - v.base).toFixed(2)}`
+            : "manual";
     lines.push(`  ${key}=${v.resolved.toFixed(3)} (base ${v.base.toFixed(3)}, ${tag})`);
   }
   return lines.join("\n");
