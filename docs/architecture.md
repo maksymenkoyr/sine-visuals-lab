@@ -42,7 +42,10 @@ their Scope card is fed by `src/audio/waveformAnalyser.ts` (math in
 `waveform.ts`), which reads time-domain samples straight off this device's own
 mic, entirely separate from
 `FeatureFrame`/`AnimFrame` and never touching the wire in "Phone to TV" below —
-a viewer with no local mic doesn't get that card at all.
+a viewer with no local mic doesn't get that card at all. Their Signal card's
+history trace likewise reads `FeatureExtractor.fixedEnergy`, a local
+diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
+`FeatureFrame` field.
 
 ## Phone to TV
 

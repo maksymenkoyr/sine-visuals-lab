@@ -25,8 +25,13 @@ import {
  *
  *  - Signal: FeatureFrame.level (pre-AGC, absolute) beside .energy (post-AGC)
  *    — the only way to see features.ts's adaptive floor/peak doing its job,
- *    since its whole point is to make that invisible downstream. (No
- *    low/mid/high here: the spectrum strip already shows them.)
+ *    since its whole point is to make that invisible downstream — and under
+ *    them a History trace of both over the last HISTORY_SPAN_SEC, with
+ *    FeatureExtractor.fixedEnergy (energy as it would read with auto-gain
+ *    at its minimum) as a dim reference line. The gap between energy and
+ *    that reference is exactly what the Input card's Auto-gain amount is
+ *    adding; sliding it down closes the gap. (No low/mid/high here: the
+ *    spectrum strip already shows them.)
  *  - Rhythm: sectionIntensity with a drop flash, and a compact tempo block
  *    beside it — bpm under a beat dot whose resting tint follows
  *    beatClock's tempoLock, so an unlocked guess reads as unconfident
@@ -50,11 +55,13 @@ export interface AudioMeters {
   el: HTMLElement;
   /** Fed every frame while the panel is open. `frame`/`anim` null before
    *  audio is up (idle readouts); `mono` null on any device without a local
-   *  analyser (Scope card hidden). */
+   *  analyser (Scope card hidden); `fixedEnergy` null on any device without
+   *  a local FeatureExtractor (the History trace drops its reference line). */
   update(
     frame: FeatureFrame | null,
     anim: AnimFrame | null,
     mono: Float32Array | null,
+    fixedEnergy: number | null,
   ): void;
 }
 
@@ -128,6 +135,19 @@ const TEMPO_SETTLE_TOL = 0.03;
 const TEMPO_SETTLE_SHARE = 0.6;
 const TEMPO_HOLD_BPM = 2;
 const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
+// The Signal card's history trace: level, energy, and the fixed-mapping
+// reference over the last HISTORY_SPAN_SEC, one column per CSS pixel so the
+// card's width always spans exactly that long. Each column keeps the max of
+// what it saw, so a beat's peak survives however many frames a column
+// covers. Long enough to see the adaptive window re-settle after a change
+// in room level (a couple of seconds — see features.ts's FLOOR_RISE_RATE)
+// with the before and after both still on screen.
+const HISTORY_SPAN_SEC = 10;
+const HISTORY_HEIGHT_CSS_PX = 48;
+const histCanvasStyle = `display: block; width: 100%; height: ${HISTORY_HEIGHT_CSS_PX}px; margin-top: 4px;`;
+const HISTORY_LEVEL_COLOR = "rgba(255,255,255,0.85)";
+const HISTORY_ENERGY_COLOR = INPUT_GREEN;
+const HISTORY_FIXED_COLOR = withAlpha(INPUT_GREEN, 0.4);
 
 /** Jump an element to `color` with no fade, then re-arm the fade so the
  *  next color write eases back — a one-frame event made visible. */
@@ -359,8 +379,21 @@ export function createAudioMeters(): AudioMeters {
     description:
       "The same sound after auto-gain, which keeps it mid-range whether the room is quiet or loud. This is what the scene actually reacts to.",
   });
+  const history = createMeterRow({
+    label: "History",
+    accent: INPUT_GREEN,
+    unit: "s",
+    description:
+      "The last few seconds of Level (white) and Energy (green). The dim green line is what Energy would read with Auto-gain at 0 — the gap between the two greens is what the Auto-gain slider is adding.",
+  });
+  // The trace takes the meter's place under the head, like the waveform.
+  const histCanvas = document.createElement("canvas");
+  histCanvas.style.cssText = histCanvasStyle;
+  history.el.children[1].replaceWith(histCanvas);
+  const histCtx = histCanvas.getContext("2d")!;
+  history.setReadout(String(HISTORY_SPAN_SEC));
   const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN });
-  signalCard.body.append(level.el, spacer(), energy.el);
+  signalCard.body.append(level.el, spacer(), energy.el, spacer(), history.el);
 
   // ---- Rhythm ----
   const section = createMeterRow({
@@ -507,6 +540,104 @@ export function createAudioMeters(): AudioMeters {
     waveCtx.fillRect(0, mid - 0.5, w, 1);
   }
 
+  // History ring buffers, one column per CSS pixel like the waveform's —
+  // oldest at `histHead`, newest just before it — plus the column being
+  // accumulated. `histFixed` holds NaN for a column with no reference
+  // (renderer/synthetic), and the trace skips those.
+  let histLevel = new Float32Array(0);
+  let histEnergy = new Float32Array(0);
+  let histFixed = new Float32Array(0);
+  let histHead = 0;
+  let histColLevel = 0;
+  let histColEnergy = 0;
+  let histColFixed = Number.NaN;
+  let histColStartMs: number | null = null;
+  let histCssWidth = 0;
+  // Column duration follows the width so the trace always spans exactly
+  // HISTORY_SPAN_SEC; recomputed with the buffers in ensureHistSize.
+  let histColumnMs = 1000;
+
+  // Backing store sized to the card's width at devicePixelRatio; the CSS
+  // height is a constant, never re-read from the element (assigning
+  // canvas.height rewrites the attribute).
+  function ensureHistSize(): void {
+    const rect = histCanvas.getBoundingClientRect();
+    const w = Math.max(1, Math.round(rect.width));
+    if (w === histCssWidth) return;
+    histCssWidth = w;
+    const dpr = window.devicePixelRatio || 1;
+    histCanvas.width = Math.round(w * dpr);
+    histCanvas.height = Math.round(HISTORY_HEIGHT_CSS_PX * dpr);
+    histCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    histLevel = new Float32Array(w);
+    histEnergy = new Float32Array(w);
+    histFixed = new Float32Array(w).fill(Number.NaN);
+    histHead = 0;
+    histColumnMs = (HISTORY_SPAN_SEC * 1000) / w;
+  }
+
+  function commitHistColumn(): void {
+    histLevel[histHead] = histColLevel;
+    histEnergy[histHead] = histColEnergy;
+    histFixed[histHead] = histColFixed;
+    histHead = (histHead + 1) % histLevel.length;
+    histColLevel = 0;
+    histColEnergy = 0;
+    histColFixed = Number.NaN;
+  }
+
+  /** Folds this frame's readings into the current column (max-hold), and
+   *  closes it — or several, after a stall — once histColumnMs has passed. */
+  function pushHistory(frame: FeatureFrame, fixedEnergy: number | null, nowMs: number): void {
+    ensureHistSize();
+    histColLevel = Math.max(histColLevel, frame.level);
+    histColEnergy = Math.max(histColEnergy, frame.energy);
+    if (fixedEnergy !== null)
+      histColFixed = Number.isNaN(histColFixed) ? fixedEnergy : Math.max(histColFixed, fixedEnergy);
+    if (histColStartMs === null) histColStartMs = nowMs;
+    const elapsed = nowMs - histColStartMs;
+    if (elapsed < histColumnMs) return;
+    let n = Math.min(histLevel.length, Math.floor(elapsed / histColumnMs));
+    for (; n > 0; n--) commitHistColumn();
+    histColStartMs = nowMs - (elapsed % histColumnMs);
+  }
+
+  /** One polyline over the ring buffer plus the live column at the right
+   *  edge; a NaN reading lifts the pen so a missing reference leaves a gap
+   *  rather than a line to zero. */
+  function traceHistory(buf: Float32Array, live: number, color: string, width: number): void {
+    const len = buf.length;
+    const h = HISTORY_HEIGHT_CSS_PX;
+    const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (h - 2);
+    histCtx.strokeStyle = color;
+    histCtx.lineWidth = width;
+    histCtx.beginPath();
+    let pen = false;
+    for (let x = 0; x <= len; x++) {
+      const v = x === len ? live : buf[(histHead + x) % len];
+      if (Number.isNaN(v)) {
+        pen = false;
+        continue;
+      }
+      const px = x === len ? histCssWidth - 1 : x;
+      if (pen) histCtx.lineTo(px, yOf(v));
+      else histCtx.moveTo(px, yOf(v));
+      pen = true;
+    }
+    histCtx.stroke();
+  }
+
+  function drawHistory(): void {
+    const w = histCssWidth;
+    const h = HISTORY_HEIGHT_CSS_PX;
+    histCtx.clearRect(0, 0, w, h);
+    histCtx.fillStyle = "rgba(255,255,255,0.18)";
+    histCtx.fillRect(0, Math.round(h / 2) - 0.5, w, 1);
+    traceHistory(histFixed, histColFixed, HISTORY_FIXED_COLOR, 1);
+    traceHistory(histEnergy, histColEnergy, HISTORY_ENERGY_COLOR, 1.5);
+    traceHistory(histLevel, histColLevel, HISTORY_LEVEL_COLOR, 1);
+  }
+
   let lastMs: number | null = null;
   let lastTextMs = 0;
   // Peak-hold for the waveform readout: one buffer's peak jumps around too
@@ -515,7 +646,7 @@ export function createAudioMeters(): AudioMeters {
 
   return {
     el: root,
-    update(frame, anim, mono): void {
+    update(frame, anim, mono, fixedEnergy): void {
       const nowMs = performance.now();
       const dtSec =
         lastMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastMs) / 1000);
@@ -529,6 +660,10 @@ export function createAudioMeters(): AudioMeters {
       if (text) {
         level.setReadout(frame ? pct(frame.level) : "--", frame ? {} : IDLE);
         energy.setReadout(frame ? pct(frame.energy) : "--", frame ? {} : IDLE);
+      }
+      if (frame) {
+        pushHistory(frame, fixedEnergy, nowMs);
+        drawHistory();
       }
       // ---- Rhythm ----
       tempo.update(anim?.tempoLock ?? 0, !!frame?.beat);

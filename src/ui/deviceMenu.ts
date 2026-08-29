@@ -16,6 +16,7 @@ import type { SceneSetting } from "../render/sceneSettings.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
+import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createAudioMeters } from "./audioMeters.ts";
@@ -163,11 +164,12 @@ export interface DeviceMenuDeps {
   onSceneAutoToggle: (sceneId: string, on: boolean) => void;
   getAutoStrength: () => number;
   onAutoStrengthChange: (value: number) => void;
-  /** Global per-band adaptive-normalization switch — see src/audio/autoGain.ts.
-   *  Off (the default) falls back to a fixed mapping against the analyser's
-   *  own dB window, matching the spectrum strip's raw feed. */
-  getAutoGainEnabled: () => boolean;
-  onAutoGainChange: (value: boolean) => void;
+  /** Global per-band adaptive-normalization amount — see src/audio/autoGain.ts.
+   *  AUTO_GAIN_MIN (the default) is the fixed mapping against the analyser's
+   *  own dB window, matching the spectrum strip's raw feed; AUTO_GAIN_MAX is
+   *  fully adaptive. */
+  getAutoGain: () => number;
+  onAutoGainChange: (value: number) => void;
   /** The button that opens this menu — excluded from the tap-outside-to-close
    *  check, and ringed (aria-pressed) while the panel is open. */
   toggleButton: HTMLElement;
@@ -182,7 +184,9 @@ export interface DeviceMenu {
    *  feeds, and the meters. `frame` has the band faders applied; `ungained`
    *  is the same frame before them (the strip's ghost bars); `pinned` is
    *  which bands the gain stage clamped (bandGains.ts's pinnedBands);
-   *  `anim`/`mono` feed the meters (audioMeters.ts). */
+   *  `anim`/`mono`/`fixedEnergy` feed the meters (audioMeters.ts) —
+   *  `fixedEnergy` is FeatureExtractor.fixedEnergy, null wherever this
+   *  device isn't running its own extractor (renderer, synthetic feed). */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -190,6 +194,7 @@ export interface DeviceMenu {
     pinned: Uint8Array | null,
     anim: AnimFrame | null,
     mono: Float32Array | null,
+    fixedEnergy: number | null,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
@@ -1039,25 +1044,36 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (const { row, getManual } of inputRows) row.sync(getManual);
   }
 
-  // Auto-gain: the per-band adaptive normalization in features.ts. Off (the
-  // default) shows the mic's real levels — bass louder than treble, like real
-  // music — which the adaptive path otherwise flattens by re-normalizing each
-  // band to its own recent range; on converges different mics/rooms toward
-  // the same look at the cost of that balance, and clamps a Bands boost
-  // against an already-full band. Sits first in this card since it changes
-  // what the three rows below it are even shaping. Global per device, like
-  // Bands' crossover (getBandSplit), so it's deliberately left out of this
-  // card's own Reset chip below — that chip resets per-scene taste
-  // (Sensitivity/Acceleration/Smoothing), not a device-wide input preference.
-  const autoGainRow = createToggleRow({
+  // Auto-gain: how much of the per-band adaptive normalization in features.ts
+  // reaches the output. At the bottom (the default) the mic's real levels
+  // show — bass louder than treble, like real music — which the adaptive
+  // path otherwise flattens by re-normalizing each band to its own recent
+  // range; at the top different mics/rooms converge toward the same look at
+  // the cost of that balance, and a Bands boost clamps against an
+  // already-full band. Between, some of each. Linear, not log-mapped like
+  // the three gain rows below: it's a mix amount, and 50% should sit at the
+  // middle of the track. Sits first in this card since it changes what the
+  // three rows below it are even shaping. Global per device, like Bands'
+  // crossover (getBandSplit), so it's deliberately left out of this card's
+  // own Reset chip below — that chip resets per-scene taste
+  // (Sensitivity/Acceleration/Smoothing), not a device-wide input
+  // preference. Never auto-tuned (no `auto` block): auto mode reads
+  // FeatureFrame.level, which this doesn't touch, but an amount that moves
+  // by itself would make the Signal card's history trace unreadable.
+  const autoGainRow = createControlRow({
     label: "Auto-gain",
     accent: INPUT_GREEN,
-    defaultValue: 0,
+    min: AUTO_GAIN_MIN,
+    max: AUTO_GAIN_MAX,
+    defaultValue: AUTO_GAIN_DEFAULT,
+    mapping: "linear",
+    unit: "%",
+    format: (value) => String(Math.round(value * 100)),
     description:
-      "Rescales each band to fill the display. Off shows the mic's real levels; on flattens bass-vs-treble balance but converges different mics/rooms toward the same look.",
-    get: () => (deps.getAutoGainEnabled() ? 1 : 0),
-    set: (value) => deps.onAutoGainChange(value >= 0.5),
+      "How much each band is rescaled to fill the display. 0 shows the mic's real levels; higher flattens bass-vs-treble balance but converges different mics and rooms toward the same look.",
   });
+  autoGainRow.onChange((value) => deps.onAutoGainChange(value));
+  autoGainRow.setValue(deps.getAutoGain());
 
   const inputCard = createCard({
     title: "Input",
@@ -1074,7 +1090,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   markBlock(inputCard.title);
   inputCard.el.style.cssText += inputCardWashStyle;
   inputCard.body.append(
-    autoGainRow,
+    autoGainRow.el,
     spacer(),
     inputRows[0].row.el,
     spacer(),
@@ -1393,11 +1409,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       pinned: Uint8Array | null,
       anim: AnimFrame | null,
       mono: Float32Array | null,
+      fixedEnergy: number | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono);
+      audioMeters.update(frame, anim, mono, fixedEnergy);
       // Raw (pre-sensitivity) energy, so the level wash reflects the actual
       // mic signal regardless of where the sensitivity slider is set.
       const level = frame?.energy ?? 0;

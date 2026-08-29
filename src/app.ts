@@ -24,7 +24,7 @@ import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
-import { isAutoGainEnabled, setAutoGainEnabled } from "./audio/autoGain.ts";
+import { getAutoGain, setAutoGain } from "./audio/autoGain.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
 import {
   applyBandGains,
@@ -139,6 +139,10 @@ let lastRawBands: Float32Array | null = null;
  *  solo/host-only availability as lastRawBands above, for the same reason
  *  (no local mic on a renderer device). Feeds the Scope card. */
 let lastMono: Float32Array | null = null;
+// FeatureExtractor.fixedEnergy from this device's own extractor — the Signal
+// card's history trace draws it as the "auto-gain fully off" reference. Null
+// wherever no local extractor ran this frame (renderer, synthetic feed).
+let lastFixedEnergy: number | null = null;
 const rawBandsScratch = new Float32Array(NUM_BANDS);
 
 const animClock = createAnimClock();
@@ -367,8 +371,8 @@ function wireDeviceMenu(): void {
       ),
     getAutoStrength: () => getAutoStrength(),
     onAutoStrengthChange: (value) => setAutoStrength(value),
-    getAutoGainEnabled: () => isAutoGainEnabled(),
-    onAutoGainChange: (value) => setAutoGainEnabled(value),
+    getAutoGain: () => getAutoGain(),
+    onAutoGainChange: (value) => setAutoGain(value),
     toggleButton: menuBtn,
   });
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
@@ -639,6 +643,7 @@ function currentVisual(): FeatureFrame | null {
     // signal — there's nothing for the scope to trace, so its card
     // correctly stays hidden here (see audioMeters.ts).
     lastMono = null;
+    lastFixedEnergy = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
@@ -646,26 +651,31 @@ function currentVisual(): FeatureFrame | null {
     if (!bandAnalyser || !capture) {
       lastRawBands = null;
       lastMono = null;
+      lastFixedEnergy = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    return extractor.update(dbBands, now, isAutoGainEnabled());
+    const f = extractor.update(dbBands, now, getAutoGain());
+    lastFixedEnergy = extractor.fixedEnergy;
+    return f;
   }
 
   if (mode === "host") {
     if (!bandAnalyser || !capture || !hostConn) {
       lastRawBands = null;
       lastMono = null;
+      lastFixedEnergy = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, isAutoGainEnabled());
+    const f = extractor.update(dbBands, now, getAutoGain());
+    lastFixedEnergy = extractor.fixedEnergy;
     hostConn.sendFrame(f);
     return sampleToVisual(hostConn.sample());
   }
@@ -673,6 +683,7 @@ function currentVisual(): FeatureFrame | null {
   // renderer — no local mic, so no raw signal to show.
   lastRawBands = null;
   lastMono = null;
+  lastFixedEnergy = null;
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
@@ -742,7 +753,7 @@ function loop(): void {
 
   // Fed even when null (mic permission still pending) so the spectrum strip
   // can render its "waiting for audio" idle state instead of going dead.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, lastFixedEnergy);
 
   if (!lastVis || !anim) return;
 
