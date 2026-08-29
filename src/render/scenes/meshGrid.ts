@@ -116,6 +116,33 @@ const SETTINGS: SceneSetting[] = [
     default: 4,
   },
   {
+    key: "cameraDistance",
+    label: "Camera Distance",
+    description: "How far back from the front row the camera sits -- further pushes the whole terrain away",
+    min: 2,
+    max: 60,
+    step: 1,
+    default: 16,
+  },
+  {
+    key: "cameraHeight",
+    label: "Camera Height",
+    description: "Camera height above the terrain's rest level -- low is a grazing view, high looks down on it",
+    min: 1,
+    max: 40,
+    step: 0.5,
+    default: 9,
+  },
+  {
+    key: "cameraTilt",
+    label: "Camera Tilt",
+    description: "Camera pitch in degrees -- negative looks down (horizon rises), positive looks up",
+    min: -35,
+    max: 15,
+    step: 0.5,
+    default: -9.5,
+  },
+  {
     key: "flow",
     label: "Waterfall",
     description: "How far back in time the horizon reads",
@@ -426,14 +453,22 @@ const settingsUniformsGlsl = SETTINGS.map((s) => `uniform float ${settingUniform
 // Camera, projection and the horizon line, shared verbatim by MESH_VERT,
 // MESH_FRAG and BG_FRAG so the background's horizon glow lands exactly on
 // the terrain's far edge in both fullscreen and Panorama (all three derive
-// it from the same projection of the same world point). Requires
-// COMMON_UNIFORMS_GLSL (uResolution, uViewport) to be declared first.
+// it from the same projection of the same world point). The camera itself
+// is driven by the Camera Distance / Height / Tilt settings: it sits on the
+// center line, behind the front row (which is at world z = 0), and pitches
+// about its own X axis — no yaw or roll, so the bass ridge always stays
+// centered. Requires COMMON_UNIFORMS_GLSL (uResolution, uViewport) and
+// settingsUniformsGlsl to be declared first.
 const CAMERA_GLSL = `
 #define GRID_DEPTH ${GRID_DEPTH.toFixed(1)}
 #define NEAR 0.5
 #define FAR 400.0
-const vec3 CAM_POS = vec3(0.0, 9.0, -8.0);     // low, a few units behind the front row
-const vec3 CAM_TARGET = vec3(0.0, -4.0, 70.0); // pitched gently down so the horizon sits above center
+
+vec3 camPos() { return vec3(0.0, uCameraHeight, -uCameraDistance); }
+vec3 camForward() {
+  float p = radians(uCameraTilt);
+  return vec3(0.0, sin(p), cos(p));
+}
 
 float focalY() { return 1.0 / tan(radians(60.0) * 0.5); }
 
@@ -443,10 +478,10 @@ float roomAspect() {
 }
 
 vec3 toView(vec3 world) {
-  vec3 forward = normalize(CAM_TARGET - CAM_POS);
+  vec3 forward = camForward();
   vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
   vec3 up = cross(right, forward);
-  vec3 rel = world - CAM_POS;
+  vec3 rel = world - camPos();
   return vec3(dot(rel, right), dot(rel, up), dot(rel, forward));
 }
 
@@ -593,7 +628,10 @@ void main() {
   // surface overflows the frame at every row (see file header). Rows are
   // spread non-linearly in world z so they stay legible under perspective.
   float worldZ = GRID_DEPTH * pow(zNorm, Z_POWER);
-  float halfW = WIDTH_MARGIN * (worldZ - CAM_POS.z) * roomAspect() / focalY();
+  // Frustum half-width at this row's *view-space* depth (of the row at rest
+  // height), so the trapezoid stays correct whatever the Camera Tilt is.
+  float rowViewZ = max(toView(vec3(0.0, 0.0, worldZ)).z, NEAR);
+  float halfW = WIDTH_MARGIN * rowViewZ * roomAspect() / focalY();
   vec3 worldPos = vec3(aPos.x * halfW, height, worldZ);
 
   vec3 view = toView(worldPos);
