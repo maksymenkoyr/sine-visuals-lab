@@ -65,6 +65,14 @@ import {
  * the whole point is to watch the scene react while you tune it, so it
  * also stays open across palette taps.
  *
+ * Every card in that left column — Bands and each meter card — collapses to
+ * just its title bar (createCard's foldId, controlsKit.ts): click the caret
+ * or anywhere on the header outside a Reset-style chip. The fold-all chip
+ * above Bands folds or opens the whole column at once. Fold state is this
+ * panel's own view state (panelFolds.ts) — unlike every scene/audio/palette
+ * read and write below, which goes through DeviceMenuDeps, this doesn't,
+ * since nothing outside src/ui/ ever needs to know which card is folded.
+ *
  * Row grammar (createControlRow; the meters follow it too, with a meter in
  * the slider's place — the shared pieces live in controlsKit.ts): label ·
  * seven-segment readout + unit ·
@@ -96,7 +104,10 @@ import {
  * are its own, in bandFaders.ts). Digit keys 1-9 jump to a numbered block —
  * each card title and each scene group heading carries a .vc-block badge,
  * renumbered by renumberBlocks() whenever the block set can change (i.e. on
- * every renderSceneSettings) — and focus the first control inside it.
+ * every renderSceneSettings) — and focus the first control inside it,
+ * unfolding the block's card first if it's folded (see jumpToBlock). The
+ * fold caret is a button, so like every other chip it sits outside the Tab
+ * ring on purpose.
  *
  * Scene selection lives in the gallery — this panel doesn't duplicate it.
  * Every read and write goes through DeviceMenuDeps (wired in app.ts); the
@@ -811,8 +822,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onChange: (fader, gain) => deps.onBandGainChange(deps.currentSceneId(), fader, gain),
   });
   const spectrumStrip = bandFaders.strip;
-  // The meters beneath the Bands card — see audioMeters.ts.
-  const audioMeters = createAudioMeters();
+  // The meters beneath the Bands card — see audioMeters.ts. Its own cards
+  // fold independently; onFoldChange only keeps the fold-all chip's label
+  // in sync when one of them changes on its own.
+  const audioMeters = createAudioMeters({ onFoldChange: () => refreshFoldAllChip() });
 
   const spectrumCol = document.createElement("div");
   spectrumCol.className = "vc-spectrum-col";
@@ -831,11 +844,43 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const bandsHeaderRight = document.createElement("div");
   bandsHeaderRight.style.cssText = rowRightStyle;
   bandsHeaderRight.append(rawChip, bandsResetChip);
-  const bandsCard = createCard({ title: "Bands", accent: BANDS_AMBER, right: bandsHeaderRight });
+  const bandsCard = createCard({
+    title: "Bands",
+    accent: BANDS_AMBER,
+    right: bandsHeaderRight,
+    foldId: "bands",
+    onFoldChange: () => refreshFoldAllChip(),
+  });
   // Named for the stacked layout in controlsTheme.ts, where this card and
   // the meters strip become root items of their own.
   bandsCard.el.classList.add("vc-spectrum-card");
   markBlock(bandsCard.title);
+
+  // One chip, above every card in this column, that folds or opens all of
+  // them at once — Bands plus every card in audioMeters.ts's strip, via its
+  // allFolded()/setAllFolded(), so neither side needs the other's card ids.
+  // It's column-scoped rather than living in the Bands header so it doesn't
+  // read as belonging to Bands specifically; refreshFoldAllChip keeps its
+  // label truthful when a card is folded/unfolded on its own.
+  function columnAllFolded(): boolean {
+    return (bandsCard.fold?.isFolded() ?? false) && audioMeters.allFolded();
+  }
+  const foldAllChip = createChipButton("Fold all", "Fold every card in this column", () => {
+    const next = !columnAllFolded();
+    bandsCard.fold?.setFolded(next);
+    audioMeters.setAllFolded(next);
+    refreshFoldAllChip();
+  });
+  function refreshFoldAllChip(): void {
+    const folded = columnAllFolded();
+    foldAllChip.textContent = folded ? "Open all" : "Fold all";
+    foldAllChip.title = folded ? "Open every card in this column" : "Fold every card in this column";
+    foldAllChip.style.cssText = folded ? chipBtnLitStyle : chipBtnStyle;
+  }
+  refreshFoldAllChip();
+  const foldBar = document.createElement("div");
+  foldBar.className = "vc-fold-bar";
+  foldBar.appendChild(foldAllChip);
 
   // Status line: which scene, whether audio is flowing, and from where.
   const spectrumHeader = document.createElement("div");
@@ -873,7 +918,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
 
   bandsCard.body.append(spectrumHeader, hairline, fadersRow);
-  spectrumCol.append(bandsCard.el, audioMeters.el);
+  spectrumCol.append(foldBar, bandsCard.el, audioMeters.el);
 
   let lastStatusText = "";
   function refreshSpectrumHeader(): void {
@@ -1300,9 +1345,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   // The Tab ring: every param control, in document order — see the header
   // comment. Derived from the DOM each call rather than cached, so a Scene
-  // card rebuilt by renderSceneSettings can never leave it stale.
+  // card rebuilt by renderSceneSettings can never leave it stale. Filtered
+  // to controls with a layout box: a folded card's body is display:none, and
+  // a control inside it would otherwise sit in the ring and fail to focus.
   function ringElements(): HTMLElement[] {
-    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-fader")];
+    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-fader")].filter(
+      (el) => el.getClientRects().length > 0,
+    );
   }
 
   function handleTab(e: KeyboardEvent): void {
@@ -1327,6 +1376,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function jumpToBlock(n: number): void {
     const heading = [...root.querySelectorAll<HTMLElement>(".vc-block")][n - 1];
     if (!heading) return;
+    // A folded card's controls have no layout box and are invisible to
+    // ringElements() below — unfold first, or the jump would silently land
+    // on the next block's control instead.
+    const card = heading.closest<HTMLElement>(".vc-card");
+    if (card?.classList.contains("vc-folded")) card.querySelector<HTMLButtonElement>(".vc-fold")?.click();
     const target = ringElements().find(
       (el) => (heading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
     );

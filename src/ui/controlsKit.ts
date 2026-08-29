@@ -1,4 +1,5 @@
 import { FONT_DIGITS, FONT_LABEL, FONT_MONO, glassCardStyle, scanlineStyle } from "./controlsTheme.ts";
+import { isFolded, setFolded } from "./panelFolds.ts";
 
 /**
  * The DOM grammar the controls panel (src/ui/deviceMenu.ts) and its meters
@@ -8,10 +9,18 @@ import { FONT_DIGITS, FONT_LABEL, FONT_MONO, glassCardStyle, scanlineStyle } fro
  * meter row are both built on. Tokens (fonts, accents, the stylesheet) live
  * in controlsTheme.ts; this is only what's assembled from them. One owner,
  * so the meters can't drift from the panel's rows by re-typing these.
+ *
+ * A card opts into a persisted collapse toggle via CardSpec.foldId: a caret
+ * in its header, a click anywhere on the header outside `right`, and its
+ * fold state remembered in panelFolds.ts. Un-opted cards (the controls
+ * column, today) are unaffected. The header's margin-bottom and the body's
+ * bottom padding live in controlsTheme.ts's .vc-card-head/.vc-card-pad
+ * rules rather than the inline styles below, so .vc-folded can zero them —
+ * an inline style would otherwise win over that class rule.
  */
 
-const cardBodyStyle = `position: relative; padding: 10px 12px 12px;`;
-const cardHeaderStyle = `display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px;`;
+const cardPadStyle = `position: relative; padding: 10px 12px 0;`;
+const cardHeaderStyle = `display: flex; align-items: center; justify-content: space-between; gap: 8px;`;
 const cardTitleStyle = (accent: string) =>
   `font: 500 10.5px/1 ${FONT_MONO}; letter-spacing: 0.13em; text-transform: uppercase; color: ${accent};`;
 
@@ -74,20 +83,41 @@ export interface CardSpec {
   accent: string;
   /** Right-hand header slot — a Reset chip, a readout, … */
   right?: HTMLElement;
+  /** Opts this card into a persisted collapse toggle (panelFolds.ts): a
+   *  caret in the header, and a click anywhere on the header outside
+   *  `right`. Unique per mounted card ("bands", "scope", "signal", …). */
+  foldId?: string;
+  /** Called after every fold/unfold this card makes on its own (a header
+   *  click or its caret), with the new state — lets a caller (the fold-all
+   *  chip) stay in sync without polling. Not called by `fold.setFolded`,
+   *  which is the caller driving the card, not the other way round. */
+  onFoldChange?: (folded: boolean) => void;
+}
+
+export interface CardFold {
+  isFolded(): boolean;
+  setFolded(folded: boolean): void;
 }
 
 /** A glass card: scanline overlay, header row (title + optional right slot),
  *  and a body the caller fills. Returns `title` too, so a caller that's also
- *  a keyboard block (deviceMenu.ts's markBlock) can badge it. */
-export function createCard(spec: CardSpec): { el: HTMLDivElement; body: HTMLDivElement; title: HTMLDivElement } {
+ *  a keyboard block (deviceMenu.ts's markBlock) can badge it, and `fold`
+ *  when `spec.foldId` is set, so a caller can drive the same toggle (the
+ *  fold-all chip) or read whether it's currently folded (ringElements). */
+export function createCard(
+  spec: CardSpec,
+): { el: HTMLDivElement; body: HTMLDivElement; title: HTMLDivElement; fold?: CardFold } {
   const el = document.createElement("div");
+  el.className = "vc-card";
   el.style.cssText = glassCardStyle;
   const scanlines = document.createElement("div");
   scanlines.style.cssText = scanlineStyle;
-  const body = document.createElement("div");
-  body.style.cssText = cardBodyStyle;
+  const pad = document.createElement("div");
+  pad.className = "vc-card-pad";
+  pad.style.cssText = cardPadStyle;
 
   const header = document.createElement("div");
+  header.className = "vc-card-head";
   header.style.cssText = cardHeaderStyle;
   const title = document.createElement("div");
   title.textContent = spec.title;
@@ -95,9 +125,58 @@ export function createCard(spec: CardSpec): { el: HTMLDivElement; body: HTMLDivE
   header.appendChild(title);
   if (spec.right) header.appendChild(spec.right);
 
-  body.appendChild(header);
-  el.append(scanlines, body);
-  return { el, body, title };
+  const body = document.createElement("div");
+  body.className = "vc-card-body";
+
+  let fold: CardFold | undefined;
+  if (spec.foldId) {
+    const foldId = spec.foldId;
+    body.id = `vc-card-${foldId}`;
+    const foldBtn = document.createElement("button");
+    foldBtn.type = "button";
+    foldBtn.className = "vc-fold";
+    foldBtn.setAttribute("aria-controls", body.id);
+    header.appendChild(foldBtn);
+    header.style.cursor = "pointer";
+
+    const apply = (folded: boolean): void => {
+      el.classList.toggle("vc-folded", folded);
+      foldBtn.textContent = folded ? "▸" : "▾";
+      foldBtn.setAttribute("aria-expanded", String(!folded));
+      foldBtn.title = folded ? `Expand ${spec.title}` : `Collapse ${spec.title}`;
+    };
+    apply(isFolded(foldId));
+
+    const toggle = (): void => {
+      const next = !el.classList.contains("vc-folded");
+      apply(next);
+      setFolded(foldId, next);
+      spec.onFoldChange?.(next);
+    };
+    // stopPropagation so a caret click doesn't also fire the header's own
+    // click-to-toggle listener below and double-toggle.
+    foldBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggle();
+    });
+    header.addEventListener("click", (e) => {
+      if (spec.right?.contains(e.target as Node)) return;
+      toggle();
+    });
+
+    fold = {
+      isFolded: () => el.classList.contains("vc-folded"),
+      setFolded: (next: boolean) => {
+        if (next === el.classList.contains("vc-folded")) return;
+        apply(next);
+        setFolded(foldId, next);
+      },
+    };
+  }
+
+  pad.append(header, body);
+  el.append(scanlines, pad);
+  return { el, body, title, fold };
 }
 
 export function spacer(): HTMLElement {
