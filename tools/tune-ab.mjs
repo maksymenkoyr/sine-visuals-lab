@@ -8,7 +8,7 @@
 //   node tools/tune-ab.mjs <url> <paramsA.json> <paramsB.json> <outPrefix> [--settle MS]
 //
 // paramsA.json / paramsB.json shape (passed straight to window.__viz.setParams):
-//   { "scene": "meshGrid", "autoPin": true, "settings": { "amplitude": 1.8 } }
+//   { "scene": "mesh", "autoPin": true, "settings": { "waveHeight": 1.8 } }
 //
 // url should carry ?audio=synthetic&bpm=... for the comparison to be
 // meaningful — real mic input differs between the two pages by construction.

@@ -1,19 +1,25 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildGridIndices,
   buildGridPositions,
   buildGridTriangles,
   createSpectrumHistory,
-  gridSizeForQuality,
+  gridDimsForQuality,
   historyRowFor,
+  mirroredBinFor,
 } from "../src/render/scenes/meshGrid.ts";
 
 describe("meshGrid grid geometry", () => {
-  it("sizes the grid from the detail proxy, largest first", () => {
-    expect(gridSizeForQuality(1.0)).toBe(220); // high
-    expect(gridSizeForQuality(0.7)).toBe(160); // mid
-    expect(gridSizeForQuality(0.4)).toBe(100); // low
-    expect(gridSizeForQuality(0.25)).toBe(72); // floor
+  it("never grows the grid as the detail proxy drops", () => {
+    const qualities = [1.0, 0.7, 0.4, 0.25]; // high, mid, low, floor
+    for (let i = 1; i < qualities.length; i++) {
+      const better = gridDimsForQuality(qualities[i - 1]);
+      const worse = gridDimsForQuality(qualities[i]);
+      expect(worse.cols).toBeLessThanOrEqual(better.cols);
+      expect(worse.rows).toBeLessThanOrEqual(better.rows);
+    }
+    const floor = gridDimsForQuality(0);
+    expect(floor.cols).toBeGreaterThan(1);
+    expect(floor.rows).toBeGreaterThan(1);
   });
 
   it("builds n*n positions in [-1,1], corners included", () => {
@@ -27,33 +33,18 @@ describe("meshGrid grid geometry", () => {
     expect(positions[lastIdx + 1]).toBeCloseTo(1);
   });
 
-  it("indexes only horizontal + vertical edges without diagonals", () => {
-    const n = 4;
-    const indices = buildGridIndices(n, false);
-    const expectedSegments = n * (n - 1) * 2; // horizontal + vertical
-    expect(indices.length).toBe(expectedSegments * 2);
-  });
-
-  it("adds one diagonal per cell when withDiagonals is true", () => {
-    const n = 4;
-    const withoutDiag = buildGridIndices(n, false);
-    const withDiag = buildGridIndices(n, true);
-    const diagSegments = (n - 1) * (n - 1);
-    expect(withDiag.length).toBe(withoutDiag.length + diagSegments * 2);
-  });
-
-  it("every line index is within [0, n*n) and no segment joins a vertex to itself", () => {
-    const n = 6;
-    const indices = buildGridIndices(n, true);
-    for (let i = 0; i < indices.length; i += 2) {
-      const a = indices[i];
-      const b = indices[i + 1];
-      expect(a).toBeGreaterThanOrEqual(0);
-      expect(a).toBeLessThan(n * n);
-      expect(b).toBeGreaterThanOrEqual(0);
-      expect(b).toBeLessThan(n * n);
-      expect(a).not.toBe(b);
-    }
+  it("lays a non-square grid out row-major with x across the columns", () => {
+    const cols = 4;
+    const rows = 3;
+    const positions = buildGridPositions(cols, rows);
+    expect(positions.length).toBe(cols * rows * 2);
+    // Second vertex is one column over on the first row: x moves, y doesn't.
+    expect(positions[2]).toBeCloseTo(-1 + 2 / (cols - 1));
+    expect(positions[3]).toBeCloseTo(-1);
+    // First vertex of the second row: x back to the start, y one row up.
+    const secondRow = cols * 2;
+    expect(positions[secondRow]).toBeCloseTo(-1);
+    expect(positions[secondRow + 1]).toBeCloseTo(-1 + 2 / (rows - 1));
   });
 
   it("builds two triangles per cell, all indices in range and non-degenerate", () => {
@@ -67,6 +58,32 @@ describe("meshGrid grid geometry", () => {
       expect(c).toBeLessThan(n * n);
       expect(new Set([a, b, c]).size).toBe(3); // no degenerate triangle
     }
+  });
+
+  it("triangulates a non-square grid with every index inside cols*rows", () => {
+    const cols = 5;
+    const rows = 3;
+    const tris = buildGridTriangles(cols, rows);
+    expect(tris.length).toBe((cols - 1) * (rows - 1) * 2 * 3);
+    for (const idx of tris) {
+      expect(idx).toBeGreaterThanOrEqual(0);
+      expect(idx).toBeLessThan(cols * rows);
+    }
+  });
+});
+
+describe("meshGrid spectrum mapping", () => {
+  it("folds the spectrum about the center: bass at x=0, top bin at both edges", () => {
+    const bands = 24;
+    expect(mirroredBinFor(0, bands)).toBe(0);
+    expect(mirroredBinFor(1, bands)).toBe(bands - 1);
+    expect(mirroredBinFor(-1, bands)).toBe(bands - 1);
+    expect(mirroredBinFor(0.5, bands)).toBeCloseTo(mirroredBinFor(-0.5, bands));
+    expect(mirroredBinFor(0.5, bands)).toBeCloseTo((bands - 1) / 2);
+  });
+
+  it("never reads past the top bin for x outside [-1, 1]", () => {
+    expect(mirroredBinFor(1.5, 24)).toBe(23);
   });
 });
 
@@ -88,12 +105,12 @@ describe("meshGrid spectrum history", () => {
     expect(historyRowFor(7, 0, 0, 120)).toBeCloseTo(7);
   });
 
-  it("historyRowFor(newestRow, h, 0) is always the newest row, regardless of h", () => {
+  it("historyRowFor(newestRow, z, 0) is always the newest row, regardless of z", () => {
     expect(historyRowFor(42, 1, 0, 120)).toBeCloseTo(42);
     expect(historyRowFor(42, 0.5, 0, 120)).toBeCloseTo(42);
   });
 
-  it("historyRowFor reaches back proportionally to h*flow*frames and wraps into [0, frames)", () => {
+  it("historyRowFor reaches back proportionally to z*flow*frames and wraps into [0, frames)", () => {
     const frames = 120;
     expect(historyRowFor(50, 1, 1, frames)).toBeCloseTo(50 - frames + frames); // 50 - 120 wraps
     expect(historyRowFor(50, 1, 1, frames)).toBeCloseTo((50 - frames + frames) % frames);

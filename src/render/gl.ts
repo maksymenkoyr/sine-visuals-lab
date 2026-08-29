@@ -7,10 +7,11 @@ export function createGL(
     alpha: false,
     // Every fullscreen-shader scene is a single opaque triangle with no
     // occlusion to resolve, so this stayed off historically. meshGrid.ts is
-    // the first scene with real overlapping 3D geometry (a solid surface
-    // pass plus wireframe/dots drawn on top of it) and needs a true depth
-    // test for its silhouette; every other scene simply never touches
-    // DEPTH_TEST, so the attachment costs them nothing.
+    // the first scene with real overlapping 3D geometry (a terrain whose
+    // near ridges must occlude the rows behind them, plus dot sprites
+    // depth-tested against it) and needs a true depth test for that
+    // hidden-line look; every other scene simply never touches DEPTH_TEST,
+    // so the attachment costs them nothing.
     depth: true,
     stencil: false,
     powerPreference: "high-performance",

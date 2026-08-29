@@ -6,56 +6,74 @@ import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 
-// A wireframe dome whose concentric rings are a live radial spectrogram:
-// bass at the center, treble at the rim, with each ring reading further back
-// in time toward the edge, so the whole surface is a rolling polar history
-// of the spectrum rather than a single frozen frame.
+// A hidden-line terrain that is a live spectrogram waterfall: across the
+// grid (X) is frequency, mirrored so the bass sits as a ridge down the
+// middle and the treble runs out to both edges; into the grid (Z) is time,
+// with the newest spectrum frame at the front row and older frames receding
+// toward a fogged horizon. The surface is a rolling history of the spectrum
+// rather than a single frozen frame.
 //
 // Design notes on how it's built:
 //
-//  - No directional/diffuse lighting. Color comes purely from a per-vertex
-//    amplitude value run through a fixed-stop gradient (gradientMap4 below),
-//    not from shading geometry — flat, graphic, closer to a heat-map than a
-//    lit 3D object.
-//  - Real world units, not a normalized -1..1 disc: the grid is laid out at
-//    `cellSize` (1) world-unit spacing, so its half-extent is WORLD_SCALE
-//    below. The camera sits close and slightly overflows the frame — chosen
-//    for a dense, engulfing read rather than a clean establishing shot of
-//    the whole dome.
-//  - The visible rim is a circular mask by raw grid-index distance from
-//    center, but the *radial* `h` used everywhere else (ring/bin lookup,
-//    meshBend) is normalized by the grid's *diagonal* half-extent instead.
-//    Since a square's diagonal is sqrt(2) times its half-width, h only
-//    reaches ~0.707 at the visible rim — meshBend's "(1 - 2h^2)" term stays
-//    near zero there and only goes fully negative at the corners the circle
-//    mask clips away, which is what keeps the rim curling the right way.
-//  - meshBend is a large absolute number (slider range -50..50), not a 0..1
-//    knob — center-to-rim curvature in world units, not a normalized amount.
-//  - Height and per-vertex color amplitude each come from their own tree of
-//    sine terms in (angle, radius, time), blended by a `radialMix` control
-//    so the surface can lean toward clean radial rings or a freeform ripple.
-//    jaggedness is a self-contained angular faceting term layered on top,
-//    active only where radialMix leans radial.
+//  - Newest row at the *front*. The big, legible rows nearest the camera are
+//    the ones that should snap to the beat; putting the newest frame at the
+//    horizon instead would leave the front `flow * HISTORY_FRAMES` frames
+//    stale and the whole scene would visibly lag the music.
+//  - Real perspective depth. `toClip` in CAMERA_GLSL writes a genuine
+//    near/far-mapped z, and the fill pass writes depth, so near ridges occlude
+//    far ones — the hidden-line look is the depth buffer doing its job, not a
+//    draw-order trick. (An earlier version of this scene wrote a constant
+//    NDC z for every vertex, which is why its surface folded over itself.)
+//  - Grid lines are drawn *procedurally in the fragment shader* of the fill
+//    pass, from the interpolated cell coordinate `vGrid` and `fwidth`, rather
+//    than as a separate gl.LINES pass. The GL context has no MSAA
+//    (`antialias: false` in gl.ts), so 1-px hardware lines would alias into
+//    moiré in the far field; the analytic lines are anti-aliased, fade out on
+//    their own as cell spacing approaches a pixel, and are exactly on the
+//    surface so they need no polygon offset and can never z-fight it.
+//  - The grid is a trapezoid that hugs the view frustum: each row's world
+//    half-width is the frustum's half-width at that depth (times
+//    WIDTH_MARGIN), so the surface always slightly overflows the frame with
+//    no receding side edges, and on-screen column spacing stays constant
+//    front to back. Frequency-to-X is therefore consistent in screen space.
+//  - Row spacing in world Z is non-linear (`Z_POWER`) so rows spread more
+//    evenly on screen under perspective; time per row stays uniform because
+//    the history lookup uses the normalized row fraction, not world Z.
+//  - No directional lighting. Color comes from the room palette
+//    (`palette()` in palette.ts, like every other scene) driven by the
+//    per-vertex spectrum amplitude, with a push toward white at peaks that
+//    Color Intensity and the spectral-flux envelope both feed, and a
+//    `col / (1 + col)` tonemap (same trick as caustics.ts) so loud passages
+//    glow instead of clipping flat.
+//  - The far edge dissolves into the background instead of showing a
+//    silhouette: the fill pass fog-mixes toward `bgColor()` — the *same*
+//    function BG_FRAG paints the frame with (horizon glow included) — so
+//    there is no seam where the mesh ends. Keep those two in lockstep by
+//    only ever editing `BG_COLOR_GLSL`.
+//  - Surface Fill is the occluder's *tint*, not its opacity: a depth-writing
+//    surface can't be made see-through by alpha (alpha doesn't affect the
+//    depth test). Wireframe Only is the one true see-through mode — it draws
+//    the surface pass additively with depth writes off and the fill color
+//    zeroed.
 //  - Height is temporally smoothed by an exponential filter applied to the
 //    spectrum bands on the CPU before they reach the history texture, rather
-//    than to the ~31k vertices themselves each frame (see `dampen()` below)
-//    — cheap, and since per-vertex height is a smooth function of a handful
-//    of nearby bins, smoothing the input gets close to smoothing the output.
-//  - Flowing Noise and Radial Mix both get a small attack/release envelope
-//    driven by spectral flux (onset strength), on top of their slider
-//    baseline, so transients visibly push the surface rather than only the
-//    steady-state controls doing so — Flux Reactivity is a single knob over
-//    both amounts together.
+//    than to every vertex each frame (see `dampen()` below) — cheap, and since
+//    per-vertex height is a smooth function of a couple of nearby bins,
+//    smoothing the input gets close to smoothing the output.
+//  - Flowing Noise gets a small attack/release envelope driven by spectral
+//    flux (onset strength) on top of its slider baseline, and the same
+//    envelope brightens the peak glow, so transients visibly push the surface
+//    rather than only the steady-state controls doing so — Flux Reactivity is
+//    a single knob over both.
+//  - The noise field travels *with* the data (sampled in frame-count space,
+//    not grid space), so the terrain's undulation scrolls toward the camera
+//    with the spectrogram instead of the spectrogram sliding over a static
+//    bump map. Its time axis is wrapped on the noise lattice (`noisePeriodic`)
+//    so the scroll phase can stay small forever — a raw ever-growing frame
+//    count would eventually starve the hash of float precision.
 //
-// Deliberately out of scope: a real post-processing stack (gamma, a
-// frame-wide gradient remap, tiled/mirrored background, feedback) would
-// need an offscreen framebuffer and multi-pass compositor this project
-// doesn't have elsewhere. The Background Mesh checkbox is an explicitly
-// approximate stand-in for that kind of background, not a full pass — see
-// its comment.
-//
-// Beyond the core dome, this scene also exposes a handful of display modes
-// in a "technical/digital" instrument-panel register — Scanlines,
+// Beyond the core terrain, this scene also exposes a handful of display
+// modes in a "technical/digital" instrument-panel register — Scanlines,
 // Posterize, Wireframe Only, Scan Sweep, Contour Lines — evoking CRT
 // monitors, radar/HUD sweeps, quantized signal readouts, and topographic
 // contour maps. Each is cheap enough to run inside the existing single-pass
@@ -64,27 +82,23 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 const ID = "mesh";
 
 const HISTORY_FRAMES = 200; // rows in the rolling spectrogram history ring
-const WORLD_SCALE = 60.0; // grid half-extent in world units (cellSize=1 spacing)
+const GRID_DEPTH = 160.0; // world z of the far (oldest) row; the front row is at z=0
+const Z_POWER = 1.4; // >1 spreads rows toward the horizon so they stay legible under perspective
+const HEIGHT_SCALE = 6.0; // world units of displacement at amplitude 1, waveHeight 1
+const WIDTH_MARGIN = 1.15; // grid half-width as a multiple of the frustum half-width at that depth
+const FOG_K = 1.0 / 110.0; // 1/(view depth) at which fog reaches 1/e
+const LINE_PX = 1.2; // grid line width in pixels before anti-aliasing
+const NOISE_PERIOD = 64.0; // lattice period of the noise field's time axis (see noisePeriodic)
+const NOISE_Z_RATE = 0.25; // noise-lattice cells the field scrolls per spectrum frame at noiseScale 1
 
 // Every knob the algorithm actually supports is exposed as a live setting
 // rather than a baked-in constant, so the space it covers is fully
 // explorable rather than locked to one fixed look.
 const SETTINGS: SceneSetting[] = [
   {
-    key: "bend",
-    label: "Mesh Bend",
-    description: "Center-to-rim curvature (negative = bowl, center pulled down)",
-    min: -50,
-    max: 50,
-    step: 0.5,
-    default: -10,
-    // A fuller mix supports a flatter, less bowl-shaped center (bend moves toward 0).
-    auto: { density: 0.2 },
-  },
-  {
     key: "waveHeight",
     label: "Wave Height",
-    description: "Amplitude of the audio-driven surface displacement",
+    description: "Height of the spectrum ridges",
     min: 0.1,
     max: 5,
     step: 0.1,
@@ -93,9 +107,18 @@ const SETTINGS: SceneSetting[] = [
     auto: { dynamics: 0.3, brightness: -0.2 },
   },
   {
+    key: "valley",
+    label: "Valley",
+    description: "Curvature across the terrain (positive = edges rise into a canyon, negative = a ridge)",
+    min: -20,
+    max: 20,
+    step: 0.5,
+    default: 4,
+  },
+  {
     key: "flow",
     label: "Waterfall",
-    description: "How far back in time the outer rings read",
+    description: "How far back in time the horizon reads",
     min: 0,
     max: 1,
     step: 0.05,
@@ -106,7 +129,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "noise",
     label: "Flowing Noise",
-    description: "Turbulence baseline -- surges further on audio transients",
+    description: "Terrain undulation baseline -- surges further on audio transients",
     min: 0,
     max: 5,
     step: 0.05,
@@ -117,34 +140,16 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "noiseScale",
     label: "Noise Scale",
-    description: "Turbulence pattern size -- lower is coarser/blobbier",
+    description: "Undulation pattern size -- lower is broader/rolling hills",
     min: 0.01,
     max: 1,
     step: 0.01,
     default: 0.1,
   },
   {
-    key: "jaggedness",
-    label: "Jaggedness",
-    description: "Faceted angular ripple layered onto the surface",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0,
-  },
-  {
-    key: "radialMix",
-    label: "Radial Mix",
-    description: "Baseline balance between radial rings and the freeform ripple (surges toward rings on transients)",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.25,
-  },
-  {
     key: "fluxReactivity",
     label: "Flux Reactivity",
-    description: "How hard audio transients push Flowing Noise and Radial Mix",
+    description: "How hard audio transients push Flowing Noise and the peak glow",
     min: 0,
     max: 3,
     step: 0.1,
@@ -161,19 +166,19 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "fill",
-    label: "Surface Fill",
-    description: "Opacity of the solid undercoat beneath the wireframe",
+    label: "Surface Tint",
+    description: "Brightness of the dark surface beneath the grid lines (it always occludes; see Wireframe Only)",
     min: 0,
     max: 1,
     step: 0.05,
     default: 1.0,
-    // Denser mixes support more solid undercoat; sparse/bright ones read better more see-through.
+    // Denser mixes support a more present surface; sparse/bright ones read better closer to black.
     auto: { density: 0.15, brightness: -0.1 },
   },
   {
     key: "fillReactivity",
-    label: "Fill Reactivity",
-    description: "How much the fill's opacity itself tracks loudness",
+    label: "Tint Reactivity",
+    description: "How much the surface tint lights up with loudness",
     min: 0,
     max: 1,
     step: 0.05,
@@ -182,7 +187,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "lineReactivity",
     label: "Line Reactivity",
-    description: "How much the wireframe's opacity tracks loudness",
+    description: "How much the grid lines' brightness tracks loudness (quiet lines never fully vanish)",
     min: 0,
     max: 1,
     step: 0.05,
@@ -195,14 +200,14 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.01,
-    default: 0.78,
+    default: 0.3,
     // Vertex-dot presence tracks hats/cymbals and transient hits.
     auto: { brightness: 0.3, attack: 0.15 },
   },
   {
     key: "dotReactivity",
     label: "Dot Reactivity",
-    description: "How much dot size/opacity tracks loudness",
+    description: "How much dot size/brightness tracks loudness",
     min: 0,
     max: 1,
     step: 0.05,
@@ -211,7 +216,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "colorIntensity",
     label: "Color Intensity",
-    description: "Push the color gradient toward gold/white, or pull it back toward shadow",
+    description: "Push peaks toward white-hot, or pull the whole surface back toward the palette's shadows",
     min: 0.2,
     max: 3,
     step: 0.05,
@@ -220,7 +225,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "bgMesh",
     label: "Background Mesh",
-    description: "Procedural tiled lattice filling the background behind the dome",
+    description: "Faint procedural lattice in the sky above the horizon",
     min: 0,
     max: 1,
     step: 1,
@@ -249,7 +254,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "posterize",
     label: "Posterize",
-    description: "Quantize the color gradient into hard bands instead of a smooth blend",
+    description: "Quantize the colors into hard bands instead of a smooth blend",
     min: 0,
     max: 1,
     step: 1,
@@ -268,7 +273,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "wireframeOnly",
     label: "Wireframe Only",
-    description: "Hide the solid fill entirely -- lines and dots only, a bare circuit-board read",
+    description: "Drop the occluding surface -- see-through lines and dots only, a bare circuit-board read",
     min: 0,
     max: 1,
     step: 1,
@@ -278,7 +283,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "scanSweep",
     label: "Scan Sweep",
-    description: "A rotating bright arc, like a radar display's sweep line",
+    description: "A bright row sweeping from the front to the horizon, like a radar display's sweep line",
     min: 0,
     max: 1,
     step: 1,
@@ -288,7 +293,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "sweepSpeed",
     label: "Sweep Speed",
-    description: "How fast the sweep arc rotates",
+    description: "How fast the sweep row travels",
     min: 0.05,
     max: 3,
     step: 0.05,
@@ -322,62 +327,38 @@ function settingFor(key: string): SceneSetting {
   return spec;
 }
 
-/** Grid resolution per side, scaled off the quality detail proxy — the same
- *  signal shaders use to scale raymarch/density cost (see quality.ts). */
-export function gridSizeForQuality(quality: number): number {
-  if (quality >= 0.9) return 220;
-  if (quality >= 0.65) return 160;
-  if (quality >= 0.35) return 100;
-  return 72;
+/** Grid resolution scaled off the quality detail proxy — the same signal
+ *  shaders use to scale raymarch/density cost (see quality.ts). Columns and
+ *  rows are sized independently: X only has to resolve the mirrored
+ *  NUM_BANDS spectrum, while Z wants roughly one row per history frame the
+ *  waterfall shows. Both are non-increasing as quality drops. */
+export function gridDimsForQuality(quality: number): { cols: number; rows: number } {
+  if (quality >= 0.9) return { cols: 96, rows: 128 };
+  if (quality >= 0.65) return { cols: 80, rows: 96 };
+  if (quality >= 0.35) return { cols: 64, rows: 64 };
+  return { cols: 48, rows: 48 };
 }
 
-/** n*n vertices in [-1,1], row-major (row = index/n, col = index%n). */
-export function buildGridPositions(n: number): Float32Array {
-  const positions = new Float32Array(n * n * 2);
-  for (let row = 0; row < n; row++) {
-    for (let col = 0; col < n; col++) {
-      const i = (row * n + col) * 2;
-      positions[i] = (col / (n - 1)) * 2 - 1;
-      positions[i + 1] = (row / (n - 1)) * 2 - 1;
+/** cols*rows vertices in [-1,1]², row-major (row = index/cols, col = index%cols).
+ *  x spans the columns, y spans the rows. */
+export function buildGridPositions(cols: number, rows: number = cols): Float32Array {
+  const positions = new Float32Array(cols * rows * 2);
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const i = (row * cols + col) * 2;
+      positions[i] = (col / (cols - 1)) * 2 - 1;
+      positions[i + 1] = (row / (rows - 1)) * 2 - 1;
     }
   }
   return positions;
 }
 
-/** Index pairs for gl.LINES over an n*n grid: every horizontal and vertical
- *  edge, plus one diagonal per cell when `withDiagonals` for a triangulated
- *  wireframe texture, skipped at low quality to halve the line count where
- *  per-line cost matters most. */
-export function buildGridIndices(n: number, withDiagonals: boolean): Uint32Array {
-  const segments: number[] = [];
-  const idx = (row: number, col: number) => row * n + col;
-
-  for (let row = 0; row < n; row++) {
-    for (let col = 0; col < n - 1; col++) {
-      segments.push(idx(row, col), idx(row, col + 1));
-    }
-  }
-  for (let col = 0; col < n; col++) {
-    for (let row = 0; row < n - 1; row++) {
-      segments.push(idx(row, col), idx(row + 1, col));
-    }
-  }
-  if (withDiagonals) {
-    for (let row = 0; row < n - 1; row++) {
-      for (let col = 0; col < n - 1; col++) {
-        segments.push(idx(row, col), idx(row + 1, col + 1));
-      }
-    }
-  }
-  return new Uint32Array(segments);
-}
-
-/** Two CCW triangles per cell over an n*n grid, for the solid fill pass. */
-export function buildGridTriangles(n: number): Uint32Array {
+/** Two CCW triangles per cell over a cols*rows grid, for the surface pass. */
+export function buildGridTriangles(cols: number, rows: number = cols): Uint32Array {
   const tris: number[] = [];
-  const idx = (row: number, col: number) => row * n + col;
-  for (let row = 0; row < n - 1; row++) {
-    for (let col = 0; col < n - 1; col++) {
+  const idx = (row: number, col: number) => row * cols + col;
+  for (let row = 0; row < rows - 1; row++) {
+    for (let col = 0; col < cols - 1; col++) {
       const a = idx(row, col);
       const b = idx(row, col + 1);
       const c = idx(row + 1, col);
@@ -390,8 +371,8 @@ export function buildGridTriangles(n: number): Uint32Array {
 
 /** A rolling ring buffer of the last `frames` spectrum frames (each `bands`
  *  wide), row-major, uploaded to a texture and sampled in the vertex shader
- *  so the mesh's concentric rings read as a genuine polar spectrogram
- *  (further out = further back in time) rather than a synthetic wave. */
+ *  so the terrain's rows read as a genuine spectrogram waterfall (further
+ *  back = further back in time) rather than a synthetic wave. */
 export function createSpectrumHistory(bands: number, frames: number) {
   const data = new Float32Array(bands * frames);
   let cursor = 0; // row that will be written on the next push
@@ -411,21 +392,30 @@ export function createSpectrumHistory(bands: number, frames: number) {
   };
 }
 
-/** Mirrors the vertex shader's `mod(newestRow - h*flow*frames, frames)`
- *  row lookup — kept as a standalone pure function so the wrap-around math
- *  is unit-testable without a GL context. Returns a fractional row; callers
+/** Mirrors the vertex shader's `mod(newestRow - z*flow*frames, frames)`
+ *  row lookup, where `z` is the row's normalized depth (0 = front row) —
+ *  kept as a standalone pure function so the wrap-around math is
+ *  unit-testable without a GL context. Returns a fractional row; callers
  *  that need an integer row should floor it, matching the shader's nearest
  *  sampling. */
-export function historyRowFor(newestRow: number, h: number, flow: number, frames: number): number {
-  const back = h * flow * frames;
+export function historyRowFor(newestRow: number, z: number, flow: number, frames: number): number {
+  const back = z * flow * frames;
   let row = (newestRow - back) % frames;
   if (row < 0) row += frames;
   return row;
 }
 
+/** Mirrors the vertex shader's spectrum-bin lookup for a grid x in [-1, 1]:
+ *  the spectrum is folded about the center so bin 0 (bass) sits at x=0 and
+ *  the top bin at both edges. Fractional; the shader interpolates between
+ *  the two neighbouring bins. */
+export function mirroredBinFor(x: number, bands: number): number {
+  return Math.min(1, Math.abs(x)) * (bands - 1);
+}
+
 /** Exponential dampening: moves a `rate`-weighted fraction of the way from
  *  `prev` toward `target` per 120fps-normalized frame, framerate-independent
- *  via `rate^(120*dt)`. Smooths the ~24 spectrum bands on the CPU each frame
+ *  via `rate^(120*dt)`. Smooths the spectrum bands on the CPU each frame
  *  before they reach the history texture (see file header). */
 function dampen(prev: number, target: number, rate: number, dt: number): number {
   return prev + (target - prev) * (1 - Math.pow(rate, 120 * dt));
@@ -433,29 +423,94 @@ function dampen(prev: number, target: number, rate: number, dt: number): number 
 
 const settingsUniformsGlsl = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
 
+// Camera, projection and the horizon line, shared verbatim by MESH_VERT,
+// MESH_FRAG and BG_FRAG so the background's horizon glow lands exactly on
+// the terrain's far edge in both fullscreen and Panorama (all three derive
+// it from the same projection of the same world point). Requires
+// COMMON_UNIFORMS_GLSL (uResolution, uViewport) to be declared first.
+const CAMERA_GLSL = `
+#define GRID_DEPTH ${GRID_DEPTH.toFixed(1)}
+#define NEAR 0.5
+#define FAR 400.0
+const vec3 CAM_POS = vec3(0.0, 9.0, -8.0);     // low, a few units behind the front row
+const vec3 CAM_TARGET = vec3(0.0, -4.0, 70.0); // pitched gently down so the horizon sits above center
+
+float focalY() { return 1.0 / tan(radians(60.0) * 0.5); }
+
+// Aspect of the full room-space canvas, not this device's slice of it.
+float roomAspect() {
+  return (uResolution.x / max(uViewport.z, 0.0001)) / (uResolution.y / max(uViewport.w, 0.0001));
+}
+
+vec3 toView(vec3 world) {
+  vec3 forward = normalize(CAM_TARGET - CAM_POS);
+  vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
+  vec3 up = cross(right, forward);
+  vec3 rel = world - CAM_POS;
+  return vec3(dot(rel, right), dot(rel, up), dot(rel, forward));
+}
+
+// Room-space clip coordinates with a genuine perspective depth: NDC z runs
+// -1 at NEAR to +1 at FAR, so the depth test orders the surface correctly.
+vec4 toClip(vec3 view) {
+  float z = max(view.z, NEAR);
+  float zc = z * (FAR + NEAR) / (FAR - NEAR) - 2.0 * FAR * NEAR / (FAR - NEAR);
+  return vec4(view.x * focalY() / roomAspect(), view.y * focalY(), zc, z);
+}
+
+// Room-space v (0 = bottom, 1 = top) of the terrain's far edge at rest height.
+float horizonV() {
+  vec4 c = toClip(toView(vec3(0.0, 0.0, GRID_DEPTH)));
+  return (c.y / c.w) * 0.5 + 0.5;
+}
+`;
+
+// The frame's backdrop, as one function so the terrain's fog can dissolve
+// into exactly what BG_FRAG painted (see file header). Requires
+// COMMON_UNIFORMS_GLSL, PALETTE_GLSL and CAMERA_GLSL. Takes a room-space uv.
+const BG_COLOR_GLSL = `
+vec3 bgColor(vec2 rUv) {
+  vec2 p = rUv - 0.5;
+  p.x *= roomAspect();
+  float vig = smoothstep(1.1, 0.1, length(p));
+  vec3 base = max(palette(0.02 + uEnergy * 0.03, uPalA, uPalB, uPalC, uPalD), 0.0) * 0.06 * vig;
+  // A soft band of light along the horizon, breathing with overall energy —
+  // the thing the terrain's far rows fade into.
+  float glow = exp(-pow((rUv.y - horizonV()) * 8.0, 2.0)) * (0.14 + 0.10 * uEnergy);
+  return base + max(palette(0.3, uPalA, uPalB, uPalC, uPalD), 0.0) * glow;
+}
+`;
+
 const MESH_VERT = `#version 300 es
 precision highp float;
 precision highp sampler2D;
 layout(location = 0) in vec2 aPos;
-out vec3 vColor;
-out float vAlpha;
+out vec2 vGrid;   // cell coordinates (column, row) for the procedural grid lines
+out float vAmp;   // spectrum amplitude at this vertex
+out float vZ;     // normalized depth, 0 = front (newest) row, 1 = far edge
+out float vFog;   // 1 = fully visible, 0 = dissolved into the background
 out float vHeight; // raw surface displacement, for the Contour Lines checkbox in MESH_FRAG
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${CAMERA_GLSL}
 uniform sampler2D uHistory;
 uniform float uNewestRow;
-// uRadialMix and uNoise are both declared above by settingsUniformsGlsl
-// (they're real settings, sliders a user can move) but render() overwrites
-// them every frame with a flux-modulated value on top of that slider
-// baseline -- see render()'s comment.
-uniform float uIsFillPass;  // 1.0 during the solid-surface pass, 0.0 for wireframe/dots
+uniform float uNoisePhase; // scroll phase of the noise field's time axis, kept in [0, NOISE_PERIOD) by render()
+uniform vec2 uGridDims;    // (cols, rows) of the grid this quality preset built
+// uNoise is declared above by settingsUniformsGlsl (it's a real setting, a
+// slider a user can move) but render() overwrites it every frame with a
+// flux-modulated value on top of that slider baseline -- see render()'s
+// comment.
 uniform float uIsPointPass; // 1.0 only during the dots (gl.POINTS) draw
 
-#define PI 3.14159265359
-#define SQRT2 1.41421356237
 #define HISTORY_FRAMES ${HISTORY_FRAMES.toFixed(1)}
 #define NUM_BANDS ${NUM_BANDS.toFixed(1)}
-#define WORLD_SCALE ${WORLD_SCALE.toFixed(1)}
+#define Z_POWER ${Z_POWER.toFixed(2)}
+#define HEIGHT_SCALE ${HEIGHT_SCALE.toFixed(1)}
+#define WIDTH_MARGIN ${WIDTH_MARGIN.toFixed(2)}
+#define FOG_K ${FOG_K.toFixed(6)}
+#define NOISE_PERIOD ${NOISE_PERIOD.toFixed(1)}
+#define NOISE_Z_RATE ${NOISE_Z_RATE.toFixed(3)}
 
 float hash21(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -464,66 +519,32 @@ float hash21(vec2 p) {
 }
 
 // Value noise -- cheaper than a Perlin/gradient-noise permutation table
-// while keeping the same broad turbulent character.
-float noise(vec2 p) {
+// while keeping the same broad turbulent character. Periodic along y with
+// period NOISE_PERIOD lattice cells (the lattice index is wrapped, so the
+// interpolation across the wrap is seamless), which lets the time axis
+// scroll forever from a bounded phase — see file header.
+float noisePeriodic(vec2 p) {
   vec2 i = floor(p);
   vec2 f = fract(p);
-  float a = hash21(i);
-  float b = hash21(i + vec2(1.0, 0.0));
-  float c = hash21(i + vec2(0.0, 1.0));
-  float d = hash21(i + vec2(1.0, 1.0));
+  float iy0 = mod(i.y, NOISE_PERIOD);
+  float iy1 = mod(i.y + 1.0, NOISE_PERIOD);
+  float a = hash21(vec2(i.x, iy0));
+  float b = hash21(vec2(i.x + 1.0, iy0));
+  float c = hash21(vec2(i.x, iy1));
+  float d = hash21(vec2(i.x + 1.0, iy1));
   vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-// A fixed 4-stop gradient (deep violet -> magenta -> gold -> white) driven
-// by per-vertex amplitude, rather than a raw amplitude-to-hue HSV ramp --
-// reads with presence even at low amplitude instead of sitting flat and
-// dark, and gives a warm "hot end" for colorIntensity to push toward.
-// Applied as a direct per-vertex lookup, not a whole-frame post-process
-// (this project has no offscreen pass to apply one elsewhere in the scene).
-vec3 gradientMap4(float t) {
-  vec3 c0 = vec3(0.0510, 0.0078, 0.1294); // #0d0221 shadows
-  vec3 c1 = vec3(0.9686, 0.1451, 0.5216); // #f72585 midtones
-  vec3 c2 = vec3(1.0000, 0.8392, 0.0392); // #ffd60a highlights
-  vec3 c3 = vec3(1.0000, 1.0000, 1.0000); // #ffffff
-  t = clamp(t, 0.0, 1.0);
-  if (t < 1.0 / 3.0) return mix(c0, c1, t * 3.0);
-  if (t < 2.0 / 3.0) return mix(c1, c2, (t - 1.0 / 3.0) * 3.0);
-  return mix(c2, c3, (t - 2.0 / 3.0) * 3.0);
-}
-
-void main() {
-  vec2 flatPos = aPos * WORLD_SCALE;      // real-unit grid-index offset from center (cellSize=1)
-  float rNorm = length(aPos);              // 0 at center, 1 at the visible circular rim
-  // circleShape masks by raw distance (rim at rNorm=1), but the radial h
-  // used for bin/ring lookup and meshBend is normalized by the grid's
-  // *diagonal* half-extent -- so h only reaches ~1/sqrt(2) at the visible
-  // rim, not 1. See file header.
-  float h = clamp(rNorm / SQRT2, 0.0, 1.0);
-  float g = atan(flatPos.y, flatPos.x);    // angle around the center
-
-  // Bass/mid energy: this project already tracks slewed low/mid band energy
-  // for every scene (bandEnergy.ts), so reuse that rather than re-deriving
-  // it from frame.bands here.
-  float er = uLow;
-  float en = uMid;
-  float t = uTime;
-
-  // Concentric rings are the audio spectrum mapped radially (bass at the
-  // center, treble at the rim), read from a rolling history texture at a row
-  // further into the past the further out you sample -- a genuine polar
-  // spectrogram. Bin mapping is linear in h (spectrumSpread=0 for this
-  // preset, which is the only thing that would curve it).
-  //
-  // Manual bilinear sampling across both axes: R32F textures can't use
-  // hardware LINEAR filtering without OES_texture_float_linear, which isn't
-  // guaranteed on the TV-class hardware this project targets.
-  float binF = h * (NUM_BANDS - 1.0);
+// Manual bilinear sampling of the history texture across both axes: R32F
+// textures can't use hardware LINEAR filtering without
+// OES_texture_float_linear, which isn't guaranteed on the TV-class hardware
+// this project targets. binF is clamped to the spectrum, rowF wraps.
+float sampleHistory(float binF, float rowF) {
+  binF = clamp(binF, 0.0, NUM_BANDS - 1.0);
   float bin0 = floor(binF);
   float bin1 = min(bin0 + 1.0, NUM_BANDS - 1.0);
   float binFrac = fract(binF);
-  float rowF = mod(uNewestRow - h * uFlow * HISTORY_FRAMES, HISTORY_FRAMES);
   float row0 = floor(rowF);
   float row1 = mod(row0 + 1.0, HISTORY_FRAMES);
   float rowFrac = fract(rowF);
@@ -535,61 +556,49 @@ void main() {
   float amp10 = texture(uHistory, vec2(u1, v0)).r;
   float amp01 = texture(uHistory, vec2(u0, v1)).r;
   float amp11 = texture(uHistory, vec2(u1, v1)).r;
-  float x = mix(mix(amp00, amp10, binFrac), mix(amp01, amp11, binFrac), rowFrac);
+  return mix(mix(amp00, amp10, binFrac), mix(amp01, amp11, binFrac), rowFrac);
+}
 
-  // Two structurally parallel sine-term trees, blended by radialMix (q):
-  // one leaning radial/ring-like, one a freeform ripple.
-  float q = clamp(uRadialMix, 0.0, 1.0);
-  float wq = 1.0 - q;
+void main() {
+  float fx = abs(aPos.x);              // 0 at the center (bass), 1 at either edge (treble)
+  float zNorm = aPos.y * 0.5 + 0.5;    // 0 = front (newest) row, 1 = far edge
 
-  // Per-vertex color amplitude (drives hue/sat/val below) -- a lighter mix
-  // than height's tree since it's a secondary, mostly-cosmetic signal.
-  float colorRipple = (0.3 * sin(4.0 * g + 2.0 * t) + 0.3 * sin(6.0 * h - 1.5 * t)) * x * wq
-    + (0.4 * sin(8.0 * h - 2.0 * g + t) + 0.4 * sin(6.0 * g + 5.0 * h - 1.2 * t)) * x * wq
-    + (sin(3.0 * g - 1.5 * t) * en * 0.6 + sin(2.0 * g + 4.0 * h - 2.5 * t) * (er + en) * 0.5) * wq;
-  float colorAmp = clamp(x + colorRipple, 0.0, 1.0);
+  // Rows are the audio spectrum's history (newest at the front), columns the
+  // spectrum itself folded about the center: bass ridge in the middle,
+  // treble at both edges.
+  //
+  // A small blur across neighbouring bins: adjacent bands can differ a lot
+  // frame to frame, and with only a couple of columns per bin a plain
+  // bilinear read turns every such step into a vertical cliff. The kernel
+  // keeps the ridges but rounds their shoulders into terrain.
+  float binF = fx * (NUM_BANDS - 1.0);
+  float framesBack = zNorm * uFlow * HISTORY_FRAMES;
+  float rowF = mod(uNewestRow - framesBack, HISTORY_FRAMES);
+  float amp = (sampleHistory(binF - 0.7, rowF) + 2.0 * sampleHistory(binF, rowF) + sampleHistory(binF + 0.7, rowF)) * 0.25;
+  amp = clamp(amp, 0.0, 1.0);
+  vAmp = amp;
 
-  // Height: same q/(1-q) blend, its own sine tree.
-  float heightSig = 0.0;
-  heightSig += x * (1.0 + er) * 1.5 * q;
-  heightSig += sin(15.0 * h - 6.0 * er - 2.0 * t) * er * 0.8 * q;
-  heightSig += x * (1.0 + er) * 1.5 * wq;
-  heightSig += sin(8.0 * h - 2.0 * t) * er * 0.8 * wq;
-  heightSig += (sin(3.0 * g - 1.5 * t) * en * 0.6 + sin(2.0 * g + 4.0 * h - 2.5 * t) * (er + en) * 0.5) * wq;
-  heightSig += (sin(10.0 * h) * sin(4.0 * g) * er * 0.7 + sin(15.0 * h - 3.0 * t) * en * 0.5) * wq;
-  heightSig += 0.2 * sin(8.0 * g + 20.0 * h + 0.5 * t) * wq;
+  float height = amp * uWaveHeight * HEIGHT_SCALE;
 
-  // Jaggedness: an angular faceting term, active only where radialMix leans
-  // radial (q) so it reads as texture on the rings rather than the ripple.
-  heightSig += uJaggedness * q * (0.3 * sin(4.0 * g + t) + 0.2 * sin(8.0 * g - 1.5 * t) + 0.15 * sin(12.0 * g + 0.7 * t));
+  // Undulation sampled in (normalized x, absolute frame) space so it scrolls
+  // with the data. noiseScale sets the pattern size on both axes together.
+  vec2 noiseCoord = vec2(aPos.x * 15.0 * uNoiseScale, uNoisePhase - framesBack * NOISE_Z_RATE * uNoiseScale);
+  float nz = noisePeriodic(noiseCoord);
+  height += (2.0 * nz - 1.0) * uNoise * uWaveHeight * 0.2 * HEIGHT_SCALE; // *0.2: keeps noise as texture, not a dominant swing
 
-  float j = heightSig * uWaveHeight;
-  vec2 noiseCoord = flatPos * uNoiseScale;
-  float nz = noise(noiseCoord + vec2(t * 0.09, -t * 0.07));
-  j += (2.0 * nz - 1.0) * uNoise * uWaveHeight * 0.2; // *0.2: keeps noise as texture, not a dominant swing
-
-  float bendTerm = uBend * (1.0 - 2.0 * h * h);
-  float height = j + bendTerm;
+  height += uValley * aPos.x * aPos.x;
   vHeight = height; // to MESH_FRAG, for the Contour Lines checkbox
 
-  vec3 worldPos = vec3(flatPos.x, height, flatPos.y);
+  // Trapezoid grid hugging the frustum: half-width grows with depth so the
+  // surface overflows the frame at every row (see file header). Rows are
+  // spread non-linearly in world z so they stay legible under perspective.
+  float worldZ = GRID_DEPTH * pow(zNorm, Z_POWER);
+  float halfW = WIDTH_MARGIN * (worldZ - CAM_POS.z) * roomAspect() / focalY();
+  vec3 worldPos = vec3(aPos.x * halfW, height, worldZ);
 
-  // Fixed camera: close and slightly overflowing the frame, tuned to
-  // WORLD_SCALE above so the dome fills the view without a full establishing
-  // shot's worth of empty space around it.
-  vec3 camPos = vec3(52.0, 34.0, 9.0);
-  vec3 camTarget = vec3(0.0, -8.0, -1.0);
-  vec3 forward = normalize(camTarget - camPos);
-  vec3 worldUp = vec3(0.0, 1.0, 0.0);
-  vec3 right = normalize(cross(forward, worldUp));
-  vec3 up2 = cross(right, forward);
-  vec3 rel = worldPos - camPos;
-  vec3 view = vec3(dot(rel, right), dot(rel, up2), dot(rel, forward));
-  view.z = max(view.z, 0.5);
-
-  float focalY = 1.0 / tan(radians(75.0) * 0.5); // three.js PerspectiveCamera default fov=75
-  float roomAspect = (uResolution.x / max(uViewport.z, 0.0001)) / (uResolution.y / max(uViewport.w, 0.0001));
-  vec4 clip = vec4(view.x * focalY / roomAspect, view.y * focalY, view.z * 0.02, view.z);
+  vec3 view = toView(worldPos);
+  vec4 clip = toClip(view);
+  float viewZ = max(view.z, NEAR);
 
   // Panorama slice, applied in NDC (post perspective-divide): project into
   // the full room's clip space, remap by this device's viewport rect, then
@@ -599,99 +608,117 @@ void main() {
   vec2 uv01 = ndc * 0.5 + 0.5;
   uv01 = (uv01 - uViewport.xy) / uViewport.zw;
   clip.xy = (uv01 * 2.0 - 1.0) * clip.w;
-
   gl_Position = clip;
 
+  vGrid = (aPos * 0.5 + 0.5) * (uGridDims - 1.0);
+  vZ = zNorm;
+  // Depth fog, with an explicit fade over the last stretch of rows so the far
+  // edge is guaranteed to reach exactly the background color.
+  vFog = exp(-pow(viewZ * FOG_K, 2.0)) * (1.0 - smoothstep(0.75, 1.0, zNorm));
+
   // Perspective-scaled point size, so dots read consistently near and far.
-  float ampFactor = mix(1.0, mix(0.15, 1.0, colorAmp), uDotReactivity);
-  gl_PointSize = (0.7 + 0.2 * uDots) * ampFactor * (300.0 / view.z);
-
-  // colorIntensity pushes the *input* to the gradient lookup toward its hot
-  // end, rather than overshooting the output color past white.
-  vec3 col = gradientMap4(colorAmp * uColorIntensity);
-
-  // Scan Sweep: a bright arc at a rotating angle, like a radar display's
-  // sweep line. A broad angular glow rather than a hairline, so computing it
-  // once per vertex (not per fragment) reads fine at this grid density --
-  // no varying needed, just folded straight into the vertex color like the
-  // gradient above.
-  if (uScanSweep > 0.5) {
-    float sweepAngle = mod(uTime * uSweepSpeed, 2.0 * PI);
-    float angDiff = g - sweepAngle;
-    angDiff -= 2.0 * PI * floor((angDiff + PI) / (2.0 * PI)); // wrap to [-PI, PI]
-    float sweepGlow = pow(max(0.0, 1.0 - abs(angDiff) / 0.4), 3.0);
-    col += vec3(0.6, 1.0, 0.9) * sweepGlow; // cyan-ish, reads as "scanner" rather than matching the fire palette
-  }
-
-  // Fill pass is darkened (surfaceShade 0.55) so it reads as underlying
-  // surface, not competing with the full-bright (1.0) wireframe/dots on top.
-  float shade = mix(1.0, 0.55, uIsFillPass);
-  vColor = col * shade;
-
-  // Alpha: fillOpacity/lineReactivity/dotSize/dotReactivity all blend
-  // between flat and colorAmp-driven -- quiet regions genuinely go
-  // transparent here, not just dim.
-  float fillAlpha = uFill * mix(1.0, colorAmp, uFillReactivity);
-  float wireAlpha = (1.0 - uDots * uDots) * mix(1.0, colorAmp, uLineReactivity);
-  float dotFadeIn = clamp(uDots * 3.0, 0.0, 1.0);
-  float dotAlpha = dotFadeIn * mix(1.0, clamp(0.1 + colorAmp * 1.2, 0.0, 1.0), uDotReactivity);
-  float alpha = mix(mix(wireAlpha, dotAlpha, uIsPointPass), fillAlpha, uIsFillPass);
-
-  // Circular silhouette instead of the grid's natural square edge, with a
-  // soft antialiased fade rather than a hard discard at the rim.
-  float discFade = 1.0 - smoothstep(0.97, 1.0, rNorm);
-  vAlpha = alpha * discFade;
+  float ampFactor = mix(1.0, mix(0.2, 1.0, amp), uDotReactivity);
+  gl_PointSize = (0.3 + 1.2 * uDots) * ampFactor * (110.0 / viewZ);
 }
 `;
 
 const MESH_FRAG = `#version 300 es
 precision highp float;
-in vec3 vColor;
-in float vAlpha;
+in vec2 vGrid;
+in float vAmp;
+in float vZ;
+in float vFog;
 in float vHeight;
 uniform float uIsPointPass;
-// Re-declared here even though settingsUniformsGlsl already declares these
-// in MESH_VERT -- each shader stage in a WebGL2 program needs its own
-// uniform declaration to reference it, even when both stages share the same
-// linked program and value (uIsFillPass/uIsPointPass above already did
-// this for the same reason).
-uniform float uScanlines;
-uniform float uScanlineIntensity;
-uniform float uPosterize;
-uniform float uPosterizeSteps;
-uniform float uContourLines;
-uniform float uContourDensity;
+uniform float uFluxEnv; // spectral-flux envelope from render(), brightens the peak glow
+// The common + settings blocks are re-declared here even though MESH_VERT
+// already declares them -- each shader stage in a WebGL2 program needs its
+// own uniform declaration to reference it, even when both stages share the
+// same linked program and value.
+${COMMON_UNIFORMS_GLSL}
+${settingsUniformsGlsl}
+${PALETTE_GLSL}
+${ROOM_UV_GLSL}
+${CAMERA_GLSL}
+${BG_COLOR_GLSL}
 out vec4 outColor;
 
+#define LINE_PX ${LINE_PX.toFixed(2)}
+
 void main() {
-  float mask = 1.0;
+  float a = pow(clamp(vAmp, 0.0, 1.0), 0.6);
+  vec3 base = max(palette(0.05 + 0.4 * a + 0.12 * vZ, uPalA, uPalB, uPalC, uPalD), 0.0);
+  // White-hot push at peaks: Color Intensity moves the threshold, the flux
+  // envelope (transients) makes the glow flare.
+  float hot = smoothstep(0.55, 1.0, a * uColorIntensity) * (1.5 + 3.0 * uFluxEnv * uFluxReactivity);
+
   if (uIsPointPass > 0.5) {
-    // Circular sprite with a soft antialiased rim (gl_PointCoord distance test).
+    // Circular sprite with a soft antialiased rim (gl_PointCoord distance
+    // test), drawn additively -- bright only where the spectrum peaks.
     vec2 pc = gl_PointCoord - 0.5;
     float r2 = dot(pc, pc);
     if (r2 > 0.25) discard;
-    mask = smoothstep(0.25, 0.16, r2);
+    float mask = smoothstep(0.25, 0.16, r2);
+    vec3 dot = (base * 0.6 + vec3(1.0) * hot) * mask * vFog * mix(1.0, a, uDotReactivity) * 0.8;
+    outColor = vec4(dot, 1.0);
+    return;
   }
 
-  vec3 rgb = vColor;
+  // Procedural grid lines from the interpolated cell coordinate: distance to
+  // the nearest column/row line, anti-aliased against its own screen-space
+  // footprint (fwidth), and faded out per axis as the cell spacing closes in
+  // on a pixel so the far field never aliases into moire. Rows (time
+  // slices) lead, columns support, so the waterfall's motion reads first.
+  vec2 d = abs(fract(vGrid + 0.5) - 0.5);
+  vec2 fw = fwidth(vGrid);
+  vec2 l = (1.0 - smoothstep(vec2(0.0), fw * LINE_PX, d)) * (1.0 - smoothstep(vec2(0.3), vec2(0.9), fw));
+  float line = max(l.x * 0.7, l.y);
+
+  // Lines keep a visible floor even when quiet; loudness brightens them and
+  // pushes them toward white via hot.
+  float lineLum = mix(1.0, 0.3 + 0.7 * a, uLineReactivity);
+  vec3 lineCol = base * lineLum * (1.0 + 2.0 * uColorIntensity * a) + vec3(1.0) * hot;
+
+  // Scan Sweep: a bright row travelling front-to-horizon, like a radar
+  // display's sweep line. Cyan-ish so it reads as "scanner" rather than
+  // matching the palette.
+  if (uScanSweep > 0.5) {
+    float sweepPos = fract(uTime * uSweepSpeed * 0.25);
+    lineCol += vec3(0.6, 1.0, 0.9) * exp(-pow((vZ - sweepPos) * 25.0, 2.0));
+  }
+
+  // The occluding surface under the lines: near-black, palette-tinted, lit a
+  // little by loudness. Zeroed in Wireframe Only (that pass is additive).
+  vec3 fillCol = base * 0.06 * uFill * mix(0.4, 0.4 + 1.6 * a, uFillReactivity);
+  vec3 col = uWireframeOnly > 0.5 ? lineCol * line : fillCol + lineCol * line;
 
   // Contour Lines: bands the *actual height field*, not the audio-driven
   // color -- the only display mode here that visualizes geometry rather
   // than signal. vHeight is interpolated per-fragment (not per-vertex) so
   // the band edges stay smooth across each triangle instead of following
-  // the flat facets.
+  // the flat facets. Width is set in screen space (fwidth) so a band edge
+  // is a crisp line whether the surface is steep or nearly flat there.
   if (uContourLines > 0.5) {
-    float bands = fract(vHeight * uContourDensity);
-    float edge = 1.0 - smoothstep(0.0, 0.05, min(bands, 1.0 - bands));
-    rgb += vec3(0.25, 0.85, 1.0) * edge * 0.7;
+    float bands = vHeight * uContourDensity;
+    float toEdge = abs(fract(bands + 0.5) - 0.5);
+    float edge = 1.0 - smoothstep(0.0, max(fwidth(bands) * 1.5, 0.002), toEdge);
+    col += vec3(0.25, 0.85, 1.0) * edge * 0.7 * vFog;
   }
+
+  col = col / (1.0 + col); // tonemap -- loud passages glow instead of clipping flat
+
+  // Fog after the tonemap (the background isn't tonemapped): the opaque
+  // surface dissolves into exactly what BG_FRAG painted; the additive
+  // Wireframe Only pass simply fades out.
+  vec2 rUv = roomUv(gl_FragCoord.xy / uResolution);
+  col = uWireframeOnly > 0.5 ? col * vFog : mix(bgColor(rUv), col, vFog);
 
   // Posterize: quantized in the fragment shader (on the already-interpolated
   // color), not per-vertex -- doing it per-vertex would let GPU interpolation
   // smear the hard steps back into a gradient across each triangle.
   if (uPosterize > 0.5) {
     float steps = max(2.0, uPosterizeSteps);
-    rgb = floor(rgb * steps + 0.5) / steps;
+    col = floor(col * steps + 0.5) / steps;
   }
 
   // Scanlines: needs gl_FragCoord, so this has to live in a fragment shader
@@ -700,19 +727,19 @@ void main() {
   if (uScanlines > 0.5) {
     float row = step(0.5, fract(gl_FragCoord.y * 0.5));
     float scanFactor = mix(1.0, mix(1.0, 0.3, row), uScanlineIntensity);
-    rgb *= scanFactor;
+    col *= scanFactor;
   }
 
-  outColor = vec4(rgb, vAlpha * mask);
+  outColor = vec4(col, 1.0);
 }
 `;
 
 // Opaque backing pass: previewRenderer.ts documents that scenes must fully
 // cover the frame (the gallery detaches the shared offscreen buffer each
-// tick and nothing ever clears it) — the mesh's alpha-blended passes leave
-// gaps (quiet/transparent regions, the area outside the circular mask), so
-// this still runs underneath — a dark vignette, optionally with the
-// Background Mesh checkbox's procedural lattice on top.
+// tick and nothing ever clears it). The terrain never reaches the sky, and
+// its far rows fog into this, so this always runs underneath — bgColor()
+// (vignette + horizon glow), optionally with the Background Mesh checkbox's
+// procedural lattice above the horizon.
 const BG_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -721,13 +748,13 @@ ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
+${CAMERA_GLSL}
+${BG_COLOR_GLSL}
 
-#define PI 3.14159265359
-
-// A cheap analytic background lattice, not a real multi-pass post-effect
-// (this project has no compositor for one): three ridge gratings at
-// 60-degree offsets tile into a fine triangular mesh, evoking the dome's own
-// wireframe without being geometrically tied to its actual grid lines.
+// A cheap analytic lattice, not a real multi-pass post-effect (this project
+// has no compositor for one): three ridge gratings at 60-degree offsets tile
+// into a fine triangular mesh, echoing the terrain's grid in the sky without
+// being geometrically tied to it.
 float triLattice(vec2 p) {
   vec2 a1 = vec2(1.0, 0.0);
   vec2 a2 = vec2(0.5, 0.8660254);
@@ -737,34 +764,27 @@ float triLattice(vec2 p) {
   float d3 = abs(fract(dot(p, a3)) - 0.5);
   float d = min(min(d1, d2), d3);
   // fwidth-based line width keeps this a clean fine mesh instead of
-  // aliasing into speckle noise, whatever the local pixel-space frequency
-  // ends up being after the radial warp below.
+  // aliasing into speckle noise.
   float aa = max(fwidth(d) * 1.5, 0.003);
   return 1.0 - smoothstep(0.0, aa, d);
 }
 
 void main() {
-  vec2 uv = roomUv(vUv) - 0.5;
-  uv.x *= uResolution.x / uResolution.y;
-  float r = length(uv);
-  float vig = smoothstep(1.1, 0.1, r);
-  vec3 base = palette(0.02 + uEnergy * 0.03, uPalA, uPalB, uPalC, uPalD) * 0.06;
-  vec3 col = base * vig;
+  vec2 rUv = roomUv(vUv);
+  vec3 col = bgColor(rUv);
 
   if (uBgMesh > 0.5) {
-    // Radial warp so the lattice reads as receding away from the dome
-    // rather than a flat tiled overlay. Denser and dimmer further out.
-    vec2 warped = uv * (2.0 + r * 6.0) * 5.5;
-    float lattice = triLattice(warped);
-    float fade = smoothstep(0.08, 0.35, r) * (1.0 - smoothstep(0.75, 1.15, r));
-    vec3 gold = vec3(1.0, 0.7, 0.15);
-    vec3 shadow = vec3(0.15, 0.02, 0.08);
-    vec3 latticeCol = mix(shadow, gold, clamp(uEnergy * 1.5, 0.0, 1.0));
-    col += latticeCol * lattice * fade * 0.5;
+    float hv = horizonV();
+    vec2 p = vec2((rUv.x - 0.5) * roomAspect(), rUv.y - hv) * 14.0;
+    float lattice = triLattice(p);
+    // Only in the sky: fades in just above the horizon, out toward the top.
+    float mask = smoothstep(hv, hv + 0.12, rUv.y) * (1.0 - smoothstep(hv + 0.25, 1.0, rUv.y));
+    vec3 latticeCol = max(palette(0.5, uPalA, uPalB, uPalC, uPalD), 0.0);
+    col += latticeCol * lattice * mask * (0.04 + 0.08 * uEnergy);
   }
 
   // Matches MESH_FRAG's scanline effect so it reads as one continuous CRT
-  // overlay across the whole frame, not just the dome.
+  // overlay across the whole frame, not just the terrain.
   if (uScanlines > 0.5) {
     float row = step(0.5, fract(gl_FragCoord.y * 0.5));
     float scanFactor = mix(1.0, mix(1.0, 0.3, row), uScanlineIntensity);
@@ -781,22 +801,23 @@ export const meshGridScene: Scene = (() => {
   let meshProg: GLProgram | null = null;
   let gridVao: WebGLVertexArrayObject | null = null;
   let posBuf: WebGLBuffer | null = null;
-  let lineIdxBuf: WebGLBuffer | null = null;
   let triIdxBuf: WebGLBuffer | null = null;
-  let lineIndexCount = 0;
   let triIndexCount = 0;
   let vertexCount = 0;
+  let gridCols = 0;
+  let gridRows = 0;
   let historyTex: WebGLTexture | null = null;
   let historyLoc: WebGLUniformLocation | null = null;
   let history: ReturnType<typeof createSpectrumHistory> | null = null;
   const bandsBuf = new Float32Array(NUM_BANDS);
 
-  // CPU-side exponential dampening of the spectrum bands (see file header)
-  // plus a spectral-flux envelope driving the Flowing Noise/Radial Mix
-  // audio modulations.
+  // CPU-side exponential dampening of the spectrum bands (see file header),
+  // a spectral-flux envelope driving the Flowing Noise / peak-glow audio
+  // modulations, and the noise field's scroll phase.
   let smoothedBands: Float32Array | null = null;
   let prevRawBands: Float32Array | null = null;
   let fluxEnv = 0;
+  let noisePhase = 0;
   let lastFrameTime: number | null = null;
 
   return {
@@ -812,14 +833,13 @@ export const meshGridScene: Scene = (() => {
       meshProg = createProgram(gl, MESH_FRAG, MESH_VERT);
       historyLoc = gl.getUniformLocation(meshProg.program, "uHistory");
 
-      const n = gridSizeForQuality(ctx.quality.detail);
-      const withDiagonals = ctx.quality.detail >= 0.5;
-      const positions = buildGridPositions(n);
-      const lineIndices = buildGridIndices(n, withDiagonals);
-      const triIndices = buildGridTriangles(n);
-      lineIndexCount = lineIndices.length;
+      const { cols, rows } = gridDimsForQuality(ctx.quality.detail);
+      gridCols = cols;
+      gridRows = rows;
+      const positions = buildGridPositions(cols, rows);
+      const triIndices = buildGridTriangles(cols, rows);
       triIndexCount = triIndices.length;
-      vertexCount = n * n;
+      vertexCount = cols * rows;
 
       gridVao = gl.createVertexArray();
       gl.bindVertexArray(gridVao);
@@ -828,9 +848,6 @@ export const meshGridScene: Scene = (() => {
       gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
       gl.enableVertexAttribArray(0);
       gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-      lineIdxBuf = gl.createBuffer();
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, lineIdxBuf);
-      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lineIndices, gl.STATIC_DRAW);
       triIdxBuf = gl.createBuffer();
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triIdxBuf);
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, triIndices, gl.STATIC_DRAW);
@@ -849,6 +866,7 @@ export const meshGridScene: Scene = (() => {
       smoothedBands = new Float32Array(NUM_BANDS);
       prevRawBands = new Float32Array(NUM_BANDS);
       fluxEnv = 0;
+      noisePhase = 0;
       lastFrameTime = null;
     },
 
@@ -859,9 +877,9 @@ export const meshGridScene: Scene = (() => {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
       bgProg.use();
-      // BG_FRAG now declares the full settingsUniformsGlsl block too (it
-      // uses a few of them -- Background Mesh, Scanlines -- and the rest are
-      // simply unset/no-op uniforms, same as meshProg's uNewestRow pattern).
+      // BG_FRAG declares the full settingsUniformsGlsl block too (it uses a
+      // few of them -- Background Mesh, Scanlines -- and the rest are simply
+      // unset/no-op uniforms, same as meshProg's uNewestRow pattern).
       uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
       drawFullscreenQuad(gl, quadVao);
 
@@ -873,7 +891,7 @@ export const meshGridScene: Scene = (() => {
 
       // Spectral flux: sum of positive frame-to-frame increases across
       // bands, averaged -- an "onset strength" signal driving the Flowing
-      // Noise/Radial Mix modulations below via a fast-attack/slow-release
+      // Noise / peak-glow modulations below via a fast-attack/slow-release
       // envelope (10ms/200ms).
       let fluxRaw = 0;
       for (let i = 0; i < NUM_BANDS; i++) {
@@ -907,69 +925,82 @@ export const meshGridScene: Scene = (() => {
         newestRow * NUM_BANDS,
       );
 
+      // resolveSceneSetting (not getSceneSetting) for every base read below —
+      // uploadCommonUniforms already wrote the auto-resolved values; reading
+      // the raw manual value here would silently re-stomp an auto-tuned
+      // slider back to manual every frame (see autoTune.ts).
+      //
+      // The noise field advances one spectrum frame per push, scaled by
+      // Noise Scale, and wraps on the shader's lattice period so the phase
+      // stays small forever (see file header). Accumulating incrementally
+      // also means a Noise Scale change doesn't jump the field.
+      const noiseScale = resolveSceneSetting(ID, settingFor("noiseScale"));
+      noisePhase = (noisePhase + NOISE_Z_RATE * noiseScale) % NOISE_PERIOD;
+
       meshProg.use();
       uploadCommonUniforms(meshProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, historyTex);
       gl.uniform1i(historyLoc, 0);
       meshProg.setF("uNewestRow", newestRow);
+      meshProg.setF("uNoisePhase", noisePhase);
+      meshProg.setF("uFluxEnv", fluxEnv);
+      meshProg.setV2("uGridDims", gridCols, gridRows);
 
-      // Flowing Noise/Radial Mix: base slider value plus/minus a flux term,
-      // scaled by Flux Reactivity as a single knob over both together (flux
-      // pushes noise up, pulls radialMix down).
-      //
-      // resolveSceneSetting (not getSceneSetting) for the bases below —
-      // these reads happen after uploadCommonUniforms already wrote
-      // uNoise/uRadialMix from the auto-resolved value; reading the raw
-      // manual value here would silently re-stomp an auto-tuned slider back
-      // to manual every frame (see autoTune.ts).
+      // Flowing Noise: base slider value plus a flux term, scaled by Flux
+      // Reactivity (which also scales the peak glow's flux term in MESH_FRAG).
       const fluxReactivity = resolveSceneSetting(ID, settingFor("fluxReactivity"));
       const noiseBase = resolveSceneSetting(ID, settingFor("noise"));
       const effectiveNoise = Math.max(0, Math.min(5, noiseBase + 2.8 * fluxReactivity * fluxEnv));
       meshProg.setF("uNoise", effectiveNoise);
-      const radialMixBase = resolveSceneSetting(ID, settingFor("radialMix"));
-      const effectiveRadialMix = Math.max(0, Math.min(1, radialMixBase - 2.2 * fluxReactivity * fluxEnv));
-      meshProg.setF("uRadialMix", effectiveRadialMix);
 
       // Nothing else in the gallery's shared context ever clears depth (see
-      // gl.ts) — this scene owns clearing its own, every frame.
+      // gl.ts) — this scene owns clearing its own, every frame. The clear
+      // honours depthMask, so set it explicitly first.
+      gl.depthMask(true);
       gl.clear(gl.DEPTH_BUFFER_BIT);
       gl.enable(gl.DEPTH_TEST);
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.bindVertexArray(gridVao);
 
-      // Fill: alpha-blended solid undercoat. Writes depth even though
-      // fillReactivity=1
-      // for this preset — kept on so the coarser grids used at lower quality
-      // don't show obvious see-through overlap; see file header). Skipped
-      // entirely when Wireframe Only is on -- a pure CPU/render() branch,
-      // no shader involvement, since it's just "don't issue this draw call."
+      // Surface pass: the opaque occluder with the grid lines drawn into it.
+      // Polygon offset pushes it back a hair so the dot sprites, which sit
+      // exactly on the surface, pass the depth test (WebGL2 has no offset
+      // for points). Wireframe Only instead draws it additively without
+      // depth writes, the one true see-through mode -- see file header.
       const wireframeOnly = resolveSceneSetting(ID, settingFor("wireframeOnly")) > 0.5;
-      if (!wireframeOnly) {
+      if (wireframeOnly) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);
+        gl.depthMask(false);
+      } else {
+        gl.disable(gl.BLEND);
         gl.depthMask(true);
-        meshProg.setF("uIsFillPass", 1.0);
-        meshProg.setF("uIsPointPass", 0.0);
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triIdxBuf);
-        gl.drawElements(gl.TRIANGLES, triIndexCount, gl.UNSIGNED_INT, 0);
+        gl.enable(gl.POLYGON_OFFSET_FILL);
+        gl.polygonOffset(1.0, 1.0);
       }
+      meshProg.setF("uIsPointPass", 0.0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triIdxBuf);
+      gl.drawElements(gl.TRIANGLES, triIndexCount, gl.UNSIGNED_INT, 0);
+      gl.disable(gl.POLYGON_OFFSET_FILL);
 
-      // Wireframe + dots: depth-tested against the fill, don't write depth
-      // themselves (both draw over the same surface).
-      gl.depthMask(false);
-      meshProg.setF("uIsFillPass", 0.0);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, lineIdxBuf);
-      gl.drawElements(gl.LINES, lineIndexCount, gl.UNSIGNED_INT, 0);
-
-      meshProg.setF("uIsPointPass", 1.0);
-      gl.drawArrays(gl.POINTS, 0, vertexCount);
+      // Dots: additive sprites, depth-tested against the surface, no depth
+      // writes of their own.
+      const dots = resolveSceneSetting(ID, settingFor("dots"));
+      if (dots > 0.01) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);
+        gl.depthMask(false);
+        meshProg.setF("uIsPointPass", 1.0);
+        gl.drawArrays(gl.POINTS, 0, vertexCount);
+      }
 
       gl.bindVertexArray(null);
       // The gallery renders every scene into one shared context each tick —
-      // must not leak depth or blend state onto the next tile.
+      // must not leak depth, blend or polygon-offset state onto the next tile.
       gl.disable(gl.DEPTH_TEST);
       gl.depthMask(true);
       gl.disable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ZERO);
     },
 
     dispose(ctx: SceneContext) {
@@ -979,7 +1010,6 @@ export const meshGridScene: Scene = (() => {
       if (quadVao) gl.deleteVertexArray(quadVao);
       if (gridVao) gl.deleteVertexArray(gridVao);
       if (posBuf) gl.deleteBuffer(posBuf);
-      if (lineIdxBuf) gl.deleteBuffer(lineIdxBuf);
       if (triIdxBuf) gl.deleteBuffer(triIdxBuf);
       if (historyTex) gl.deleteTexture(historyTex);
       bgProg = null;
@@ -987,7 +1017,6 @@ export const meshGridScene: Scene = (() => {
       quadVao = null;
       gridVao = null;
       posBuf = null;
-      lineIdxBuf = null;
       triIdxBuf = null;
       historyTex = null;
       historyLoc = null;
@@ -995,6 +1024,7 @@ export const meshGridScene: Scene = (() => {
       smoothedBands = null;
       prevRawBands = null;
       fluxEnv = 0;
+      noisePhase = 0;
       lastFrameTime = null;
     },
   };

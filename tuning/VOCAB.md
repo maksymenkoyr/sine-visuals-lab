@@ -8,3 +8,4 @@ not the prose.
 Format: `"phrase" -> scene: setting/param, direction, ~magnitude`
 
 See `docs/tuning.md` for the workflow this feeds into.
+"the grid should actually read / not a dark blob" -> mesh: rebuilt as terrain waterfall; HEIGHT_SCALE 10 -> 6 (ridges below the camera, reads as ground), 3-tap bin blur (no cliffs), dots 0.78 -> 0.3
