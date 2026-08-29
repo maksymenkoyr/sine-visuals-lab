@@ -17,6 +17,7 @@ import {
 } from "../audio/sensitivity.ts";
 import { MUSIC_DIALS, NEUTRAL, type DialValues, type MusicDial } from "./musicProfile.ts";
 import { getOverride, isAutoPinned } from "../tuning/overrides.ts";
+import { getPin } from "../tuning/pins.ts";
 
 /**
  * Layers "let the music pick a good value" on top of sceneSettings.ts's
@@ -309,9 +310,16 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
   // Dev-only tuning override — see tuning/overrides.ts. Wrapped in DEV so a
   // prod build never pays for the check and the override module tree-shakes
   // out entirely (Vite replaces import.meta.env.DEV with a literal false).
+  // A pin (tuning/pins.ts — a typed-in out-of-range value, persisted) beats
+  // auto-pin but loses to a file override: applyTuningParams clears every
+  // override and rewrites only the keys in its payload, so a stale pin from
+  // an earlier manual session must never shadow a key a scripted run
+  // explicitly set.
   if (import.meta.env.DEV) {
     const override = getOverride(sceneId, spec.key);
     if (override !== undefined) return override;
+    const pin = getPin(sceneId, spec.key);
+    if (pin !== undefined) return pin;
     if (isAutoPinned()) return manualValue;
   }
 

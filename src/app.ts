@@ -23,6 +23,7 @@ import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
+import { getPin, setPin, clearPin } from "./tuning/pins.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
 import { isAutoGainEnabled, setAutoGainEnabled } from "./audio/autoGain.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
@@ -413,6 +414,12 @@ function wireDeviceMenu(): void {
       bufferWidth: canvas.width,
       bufferHeight: canvas.height,
     }),
+    // Rollup replaces import.meta.env.DEV with a literal `false` in a
+    // production build, folding this to `undefined` and — since pins.ts
+    // carries no module-scope side effect (see its header) — letting the
+    // whole module tree-shake out, the same way autoTune.ts's own DEV-gated
+    // import of tuning/overrides.ts already does.
+    devPin: import.meta.env.DEV ? { get: getPin, set: setPin, clear: clearPin } : undefined,
     toggleButton: menuBtn,
   });
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
