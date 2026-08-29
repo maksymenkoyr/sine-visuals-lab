@@ -10,19 +10,24 @@ import { isFolded, setFolded } from "./panelFolds.ts";
  * in controlsTheme.ts; this is only what's assembled from them. One owner,
  * so the meters can't drift from the panel's rows by re-typing these.
  *
- * A card opts into a persisted collapse toggle via CardSpec.foldId: a caret
- * in its header, a click anywhere on the header outside `right`, and its
- * fold state remembered in panelFolds.ts. Un-opted cards (the controls
- * column, today) are unaffected. The header's margin-bottom and the body's
- * bottom padding live in controlsTheme.ts's .vc-card-head/.vc-card-pad
- * rules rather than the inline styles below, so .vc-folded can zero them —
- * an inline style would otherwise win over that class rule.
+ * A card opts into a persisted collapse toggle via CardSpec.foldId: a
+ * chevron at the far right of its header, a click anywhere on the header
+ * outside `right`, and its fold state remembered in panelFolds.ts. Un-opted
+ * cards (the controls column, today) are unaffected. The header's
+ * margin-bottom and the pad's padding live in controlsTheme.ts's
+ * .vc-card-head/.vc-card-pad rules rather than the inline styles below, so
+ * .vc-folded can tighten them — an inline style would otherwise win over
+ * that class rule. While folded the `right` slot is hidden too (a Reset or
+ * RAW chip has nothing to act on), so a folded header is just title +
+ * chevron.
  */
 
-const cardPadStyle = `position: relative; padding: 10px 12px 0;`;
-const cardHeaderStyle = `display: flex; align-items: center; justify-content: space-between; gap: 8px;`;
+const cardPadStyle = `position: relative;`;
+const cardHeaderStyle = `display: flex; align-items: center; gap: 8px;`;
+// flex: 1 so the title takes the slack and everything after it — the
+// `right` slot, then the chevron — clusters at the row's end.
 const cardTitleStyle = (accent: string) =>
-  `font: 500 10.5px/1 ${FONT_MONO}; letter-spacing: 0.13em; text-transform: uppercase; color: ${accent};`;
+  `flex: 1; min-width: 0; font: 500 10.5px/1 ${FONT_MONO}; letter-spacing: 0.13em; text-transform: uppercase; color: ${accent};`;
 
 // Small bordered text button — "Reset" in card headers, "RAW" in the
 // spectrum header. Lit variant = currently active.
@@ -84,26 +89,20 @@ export interface CardSpec {
   /** Right-hand header slot — a Reset chip, a readout, … */
   right?: HTMLElement;
   /** Opts this card into a persisted collapse toggle (panelFolds.ts): a
-   *  caret in the header, and a click anywhere on the header outside
+   *  chevron in the header, and a click anywhere on the header outside
    *  `right`. Unique per mounted card ("bands", "scope", "signal", …). */
   foldId?: string;
-  /** Called after every fold/unfold this card makes on its own (a header
-   *  click or its caret), with the new state — lets a caller (the fold-all
-   *  chip) stay in sync without polling. Not called by `fold.setFolded`,
-   *  which is the caller driving the card, not the other way round. */
-  onFoldChange?: (folded: boolean) => void;
 }
 
 export interface CardFold {
   isFolded(): boolean;
-  setFolded(folded: boolean): void;
 }
 
 /** A glass card: scanline overlay, header row (title + optional right slot),
  *  and a body the caller fills. Returns `title` too, so a caller that's also
  *  a keyboard block (deviceMenu.ts's markBlock) can badge it, and `fold`
- *  when `spec.foldId` is set, so a caller can drive the same toggle (the
- *  fold-all chip) or read whether it's currently folded (ringElements). */
+ *  when `spec.foldId` is set, so a caller can read whether it's currently
+ *  folded (audioMeters.ts skips a folded card's per-frame work). */
 export function createCard(
   spec: CardSpec,
 ): { el: HTMLDivElement; body: HTMLDivElement; title: HTMLDivElement; fold?: CardFold } {
@@ -123,7 +122,10 @@ export function createCard(
   title.textContent = spec.title;
   title.style.cssText = cardTitleStyle(spec.accent);
   header.appendChild(title);
-  if (spec.right) header.appendChild(spec.right);
+  if (spec.right) {
+    spec.right.classList.add("vc-card-right");
+    header.appendChild(spec.right);
+  }
 
   const body = document.createElement("div");
   body.className = "vc-card-body";
@@ -132,6 +134,8 @@ export function createCard(
   if (spec.foldId) {
     const foldId = spec.foldId;
     body.id = `vc-card-${foldId}`;
+    // The chevron itself is drawn by the .vc-fold rule (controlsTheme.ts)
+    // and turned by .vc-folded — no glyph, so it's crisp at any size.
     const foldBtn = document.createElement("button");
     foldBtn.type = "button";
     foldBtn.className = "vc-fold";
@@ -141,7 +145,6 @@ export function createCard(
 
     const apply = (folded: boolean): void => {
       el.classList.toggle("vc-folded", folded);
-      foldBtn.textContent = folded ? "▸" : "▾";
       foldBtn.setAttribute("aria-expanded", String(!folded));
       foldBtn.title = folded ? `Expand ${spec.title}` : `Collapse ${spec.title}`;
     };
@@ -151,9 +154,8 @@ export function createCard(
       const next = !el.classList.contains("vc-folded");
       apply(next);
       setFolded(foldId, next);
-      spec.onFoldChange?.(next);
     };
-    // stopPropagation so a caret click doesn't also fire the header's own
+    // stopPropagation so a chevron click doesn't also fire the header's own
     // click-to-toggle listener below and double-toggle.
     foldBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -164,14 +166,7 @@ export function createCard(
       toggle();
     });
 
-    fold = {
-      isFolded: () => el.classList.contains("vc-folded"),
-      setFolded: (next: boolean) => {
-        if (next === el.classList.contains("vc-folded")) return;
-        apply(next);
-        setFolded(foldId, next);
-      },
-    };
+    fold = { isFolded: () => el.classList.contains("vc-folded") };
   }
 
   pad.append(header, body);

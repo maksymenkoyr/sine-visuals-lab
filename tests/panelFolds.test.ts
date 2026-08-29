@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isFolded, setFolded, setFoldedAll } from "../src/ui/panelFolds.ts";
+import { isFolded, setFolded, METERS_COLUMN } from "../src/ui/panelFolds.ts";
 
 describe("panel fold persistence", () => {
   // vitest runs under environment: "node" (vitest.config.ts), so there is no
@@ -22,14 +22,11 @@ describe("panel fold persistence", () => {
     expect(isFolded("rhythm")).toBe(false);
   });
 
-  it("setFoldedAll applies the same state to every listed id", () => {
-    setFoldedAll(["bands", "scope", "character"], true);
-    expect(isFolded("bands")).toBe(true);
-    expect(isFolded("scope")).toBe(true);
-    expect(isFolded("character")).toBe(true);
-    setFoldedAll(["bands", "scope", "character"], false);
+  it("hides the meters column under its own id without touching a card's", () => {
+    setFolded(METERS_COLUMN, true);
+    expect(isFolded(METERS_COLUMN)).toBe(true);
     expect(isFolded("bands")).toBe(false);
-    expect(isFolded("scope")).toBe(false);
-    expect(isFolded("character")).toBe(false);
+    setFolded(METERS_COLUMN, false);
+    expect(isFolded(METERS_COLUMN)).toBe(false);
   });
 });
