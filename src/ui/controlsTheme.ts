@@ -96,14 +96,28 @@ const stylesheet = `
 }
 
 /* Anchored top-right; the columns stop short of the bottom-right chrome
- * buttons (index.html) so the gear that closes the panel stays reachable. */
+ * buttons (index.html) so the gear that closes the panel stays reachable.
+ *
+ * pointer-events: none plus "> *" restoring auto on direct children: a flex
+ * row's own box is always as tall as its tallest child (align-items can't
+ * shrink the container, only stop shorter children from stretching to match
+ * it), so when one side folds short next to a tall neighbor, the row's own
+ * box still covers the gap beside the short side. Left catching clicks,
+ * that gap would count as "inside" for deviceMenu.ts's onDocPointerDown
+ * (root.contains(target)) and swallow a click meant to close the panel.
+ * Disabling pointer events on the row itself and re-enabling them on its
+ * children (their own boxes correctly hug their real content) lets a click
+ * in the gap fall through to whatever's actually behind it. Same reasoning
+ * applies to .vc-cols-wrap below. */
 .vc-root {
   position: fixed; top: 16px; right: 16px; z-index: 30;
   display: none; gap: 4px; align-items: flex-start;
   max-height: calc(100vh - 74px);
   color: #fff; font-family: ${FONT_LABEL};
+  pointer-events: none;
 }
 .vc-root.vc-open { display: flex; }
+.vc-root > * { pointer-events: auto; }
 /* Power (src/ui/powerCard.ts): energy saving's Auto/On/Off override and its
  * status readouts. Leftmost — narrower than the other two columns since it
  * holds one compact card, not a scrolling stack. */
@@ -134,7 +148,16 @@ const stylesheet = `
  * too, down to one small triangle that reopens everything. Scoped to this
  * wrapper's direct children so a lone folded card (the common case) never
  * triggers it. */
-.vc-cols-wrap { display: flex; flex-direction: row; flex: none; gap: 4px; }
+/* align-items: flex-start keeps a folded (short) column from stretching to
+ * match its taller neighbor; pointer-events here follows .vc-root's rule
+ * above, for the same reason — this row's own box is still as tall as
+ * whichever column is tallest, so it needs to let clicks in the gap beside
+ * a short column pass through rather than swallowing them as "inside". */
+.vc-cols-wrap {
+  display: flex; flex-direction: row; align-items: flex-start; flex: none; gap: 4px;
+  pointer-events: none;
+}
+.vc-cols-wrap > * { pointer-events: auto; }
 .vc-cols-wrap.vc-cols-folded > .vc-power-col,
 .vc-cols-wrap.vc-cols-folded > .vc-spectrum-col { display: none; }
 .vc-cols-toggle {
