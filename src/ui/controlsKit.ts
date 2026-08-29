@@ -10,16 +10,17 @@ import { isFolded, setFolded } from "./panelFolds.ts";
  * in controlsTheme.ts; this is only what's assembled from them. One owner,
  * so the meters can't drift from the panel's rows by re-typing these.
  *
- * A card opts into a persisted collapse toggle via CardSpec.foldId: a
- * chevron at the far right of its header, a click anywhere on the header
- * outside `right`, and its fold state remembered in panelFolds.ts. Un-opted
- * cards (the controls column, today) are unaffected. The header's
- * margin-bottom and the pad's padding live in controlsTheme.ts's
- * .vc-card-head/.vc-card-pad rules rather than the inline styles below, so
- * .vc-folded can tighten them — an inline style would otherwise win over
- * that class rule. While folded the `right` slot is hidden too (a Reset or
- * RAW chip has nothing to act on), so a folded header is just title +
- * chevron.
+ * A card opts into a persisted collapse toggle via CardSpec.foldId: a caret
+ * in its header, a click anywhere on the header outside `right`, and its
+ * fold state remembered in panelFolds.ts. Un-opted cards (the controls
+ * column, today) are unaffected. The header's margin-bottom and the body's
+ * bottom padding live in controlsTheme.ts's .vc-card-head/.vc-card-pad
+ * rules rather than the inline styles below, so .vc-folded can zero them —
+ * an inline style would otherwise win over that class rule.
+ *
+ * createAdvancedSection is the equivalent disclosure for a run of rows
+ * inside a card's body rather than a whole card — see its own comment for
+ * why it starts collapsed where a card's fold starts open.
  */
 
 const cardPadStyle = `position: relative;`;
@@ -185,4 +186,51 @@ export function groupHeading(text: string, first = false): HTMLElement {
   el.textContent = text;
   el.style.cssText = first ? groupHeadingFirstStyle : groupHeadingStyle;
   return el;
+}
+
+const advancedToggleStyle = `
+  display: block; width: 100%; text-align: left; margin: 4px 0 2px; padding: 4px 0;
+  font: 400 10px/1.3 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.45);
+  background: transparent; border: none; cursor: pointer;
+`;
+
+export interface AdvancedSection {
+  el: HTMLElement;
+  /** Append rows here — hidden via `display: none` while collapsed. */
+  body: HTMLElement;
+}
+
+/** A per-group disclosure for rows a scene marked SceneSetting.advanced —
+ *  real settings, rarely touched (the constants a macro's sub-params
+ *  redistribute, say), that would otherwise double a group's row count for
+ *  everyone. Same idea as a card's foldId (panelFolds.ts persists it the
+ *  same way) but starts collapsed on first render rather than open — nobody
+ *  needs to see these before they've reached for the group's main slider.
+ *
+ *  Uses `display: none`, not a height animation: deviceMenu.ts's Tab ring
+ *  filters controls by getClientRects(), so a collapsed body's rows drop out
+ *  of the tab order for free. Deliberately not a markBlock() target either —
+ *  block digit badges stop at nine, and a scene's own group headings already
+ *  spend most of that budget. */
+export function createAdvancedSection(id: string, label: string): AdvancedSection {
+  const wrap = document.createElement("div");
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.style.cssText = advancedToggleStyle;
+  const body = document.createElement("div");
+
+  const apply = (open: boolean): void => {
+    body.style.display = open ? "" : "none";
+    toggle.textContent = `${open ? "▾ Hide" : "▸ Show"} ${label}`;
+  };
+  apply(!isFolded(id, true));
+
+  toggle.addEventListener("click", () => {
+    const next = body.style.display === "none";
+    apply(next);
+    setFolded(id, !next);
+  });
+
+  wrap.append(toggle, body);
+  return { el: wrap, body };
 }

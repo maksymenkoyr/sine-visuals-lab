@@ -54,10 +54,14 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
   for (const spec of settings) {
     const base = getSceneSetting(sceneId, spec);
     const resolved = resolveSceneSetting(sceneId, spec);
+    // A macro-driven spec (spec.macro) is auto-capable the same way an
+    // `auto` one is — see autoTune.ts's header — so it counts here too, or
+    // every sparkle sub-param would misreport as "manual" while it's
+    // actively tracking its driver.
     const mode: ProbeSettingValue["mode"] =
       getOverride(sceneId, spec.key) !== undefined || isAutoPinned()
         ? "override"
-        : spec.auto && isAutoEnabled(sceneId, spec.key)
+        : (spec.auto || spec.macro) && isAutoEnabled(sceneId, spec.key)
           ? "auto"
           : "manual";
     settingValues[spec.key] = { base, resolved, mode };

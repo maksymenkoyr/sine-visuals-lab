@@ -12,7 +12,11 @@
    a `uniform float u<Key>` in your shader, plus a slider/checkbox in the device
    menu. `min`/`max`/`step`/`default` are the slider; `label`/`description`/`group`
    are what the user sees (`description` is the hint that unfolds under the row
-   on hover/focus); `type: "boolean"` renders a toggle instead.
+   on hover/focus); `type: "boolean"` renders a toggle instead. Mark a setting
+   `advanced: true` to tuck it behind a collapsed "show N more" disclosure within
+   its group (`src/ui/controlsKit.ts`'s `createAdvancedSection`) — for a real,
+   tunable constant that most people will only ever move as part of a `macro`
+   group, not something worth doubling the group's row count for everyone.
 3. Register the scene as a side effect in `src/render/scenes/index.ts`
    (`registerScene(yourScene)`) and export it there like its neighbours.
 4. If it should degrade or disable below some hardware tier, set `minTier` on the
@@ -34,6 +38,14 @@ that reads as "needs more tuning" rather than "this is a bug."
 This isn't enforced by the type system — it falls out of how `autoTune.ts`
 resolves a setting, but only if you don't fight it. Don't hand-bias a weight
 table to compensate for a default you don't like; fix the default instead.
+
+**Same rule for `macro`, anchored to the driver instead of NEUTRAL.** A
+setting with a `macro` (its own knob folded into a master, e.g. caustics'
+Sparkle sub-params following `sparkle`) must reproduce its plain `default`
+when the driver sits at *its* default — see `computeMacroTarget` in
+`autoTune.ts`. A weight of `0` is a legitimate choice, not a bug: it opts a
+sub-param out of the master entirely (see `sparkleGrain`) rather than forcing
+every knob under a group to move together.
 
 **Auto is the default for every setting, with no extra work on your part.**
 `vibe.sceneAuto` (the manual-pin store `autoTune.ts` reads) only ever lists

@@ -41,6 +41,7 @@ import {
 import {
   chipBtnLitStyle,
   chipBtnStyle,
+  createAdvancedSection,
   createCard,
   createChipButton,
   digitsStyle,
@@ -1167,6 +1168,52 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
+  // Builds one setting's row (boolean toggle or slider) into `container` —
+  // shared by the direct-to-sceneRows path and the advanced-section path
+  // below, so a row behaves identically wherever it lands.
+  function appendSettingRow(container: HTMLElement, sceneId: string, spec: SceneSetting): void {
+    if (spec.type === "boolean") {
+      container.appendChild(
+        createToggleRow({
+          label: spec.label,
+          accent: SCENE_VIOLET,
+          defaultValue: spec.default,
+          description: spec.description,
+          get: () => deps.getSceneSettingValue(sceneId, spec),
+          set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
+        }),
+      );
+      return;
+    }
+
+    const row = createControlRow({
+      label: spec.label,
+      accent: SCENE_VIOLET,
+      min: spec.min,
+      max: spec.max,
+      step: spec.step,
+      defaultValue: spec.default,
+      mapping: "linear",
+      format: formatSetting,
+      description: spec.description,
+      // A macro-driven setting (spec.macro) is auto-capable the same way an
+      // `auto` one is — it just tracks another setting instead of the music
+      // profile — so it gets the same A chip and live-refresh wiring.
+      auto: spec.auto || spec.macro
+        ? {
+            isEnabled: () => deps.isSettingAutoEnabled(sceneId, spec.key),
+            toggle: (on) => deps.onSettingAutoToggle(sceneId, spec, on),
+            resolveLive: () => deps.resolveSceneSettingValue(sceneId, spec),
+            getManual: () => deps.getSceneSettingValue(sceneId, spec),
+          }
+        : undefined,
+    });
+    row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
+    row.sync(() => deps.getSceneSettingValue(sceneId, spec));
+    container.appendChild(row.el);
+    sceneRowHandles.push(row);
+  }
+
   function renderSceneSettings(): void {
     const sceneId = deps.currentSceneId();
     const specs = deps.getSceneSettings(sceneId);
@@ -1178,55 +1225,46 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let lastGroup: string | undefined;
     let first = true;
     let hasGroups = false;
-    for (const spec of specs) {
-      if (spec.group !== undefined && spec.group !== lastGroup) {
+    // The currently-open advanced-section body a run of consecutive
+    // spec.advanced entries is being appended into, or null between runs —
+    // reset whenever a group heading appears so a run never spans a group.
+    let advancedBody: HTMLElement | null = null;
+    for (let i = 0; i < specs.length; i++) {
+      const spec = specs[i];
+      const groupChanged = spec.group !== undefined && spec.group !== lastGroup;
+      if (groupChanged) {
         hasGroups = true;
-        const heading = groupHeading(spec.group, lastGroup === undefined);
+        advancedBody = null;
+        const heading = groupHeading(spec.group!, lastGroup === undefined);
         markBlock(heading);
         sceneRows.appendChild(heading);
-      } else if (!first) {
-        sceneRows.appendChild(spacer());
       }
       lastGroup = spec.group;
-      first = false;
 
-      if (spec.type === "boolean") {
-        sceneRows.appendChild(
-          createToggleRow({
-            label: spec.label,
-            accent: SCENE_VIOLET,
-            defaultValue: spec.default,
-            description: spec.description,
-            get: () => deps.getSceneSettingValue(sceneId, spec),
-            set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
-          }),
-        );
+      if (spec.advanced) {
+        if (!advancedBody) {
+          if (!groupChanged && !first) sceneRows.appendChild(spacer());
+          let count = 1;
+          for (let j = i + 1; j < specs.length && specs[j].advanced; j++) count++;
+          const noun = count === 1 ? "control" : "controls";
+          const section = createAdvancedSection(
+            `scene:${sceneId}:${spec.group ?? ""}:advanced`,
+            `${count} ${(spec.group ?? "").toLowerCase()} ${noun}`.trim(),
+          );
+          sceneRows.appendChild(section.el);
+          advancedBody = section.body;
+        } else {
+          advancedBody.appendChild(spacer());
+        }
+        appendSettingRow(advancedBody, sceneId, spec);
+        first = false;
         continue;
       }
+      advancedBody = null;
 
-      const row = createControlRow({
-        label: spec.label,
-        accent: SCENE_VIOLET,
-        min: spec.min,
-        max: spec.max,
-        step: spec.step,
-        defaultValue: spec.default,
-        mapping: "linear",
-        format: formatSetting,
-        description: spec.description,
-        auto: spec.auto
-          ? {
-              isEnabled: () => deps.isSettingAutoEnabled(sceneId, spec.key),
-              toggle: (on) => deps.onSettingAutoToggle(sceneId, spec, on),
-              resolveLive: () => deps.resolveSceneSettingValue(sceneId, spec),
-              getManual: () => deps.getSceneSettingValue(sceneId, spec),
-            }
-          : undefined,
-      });
-      row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
-      row.sync(() => deps.getSceneSettingValue(sceneId, spec));
-      sceneRows.appendChild(row.el);
-      sceneRowHandles.push(row);
+      if (!groupChanged && !first) sceneRows.appendChild(spacer());
+      first = false;
+      appendSettingRow(sceneRows, sceneId, spec);
     }
 
     // The Scene card title is itself the block only when the active scene
