@@ -556,7 +556,16 @@ async function boot(): Promise<void> {
   });
 
   window.addEventListener("keydown", (e) => {
+    // Modifier guard so ⌘/Ctrl+F (browser find) and ⌘/Ctrl+S (save page)
+    // pass through untouched instead of driving these — mirrors the guard
+    // deviceMenu.ts's own document-level handler already uses.
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.key === "f" || e.key === "F") immersive?.toggle();
+    // Only live in a viz — the exact condition that shows menuBtn itself
+    // (enterViz/exitToGallery below), so the key and the gear it mirrors
+    // appear and disappear together. Reuses the same toggle() the gear's
+    // click handler calls, rather than reimplementing open/close here.
+    if ((e.key === "s" || e.key === "S") && inViz) deviceMenu?.toggle();
     if (e.key === "Escape") {
       if (immersive?.active()) {
         immersive.exit();

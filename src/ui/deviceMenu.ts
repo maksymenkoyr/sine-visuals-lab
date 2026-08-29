@@ -82,16 +82,21 @@ import {
  * accent names its system — the constants and their meanings live in
  * controlsTheme.ts.
  *
- * Keyboard layer, live only while the panel is open (see onKeyDown): Tab /
- * Shift+Tab walk a ring over every .vc-slider/.vc-toggle/.vc-fader in
- * document order, wrapping at both ends and skipping every chip and button —
- * so Tab alone never leaves the panel and never lands anywhere but a control.
- * On whichever control has focus, A toggles auto, R resets, T mutes/restores
- * (see above; a fader's arrow keys are its own, in bandFaders.ts).
- * Digit keys 1-9 jump to a numbered block — each card title and each scene
- * group heading carries a .vc-block badge, renumbered by renumberBlocks()
- * whenever the block set can change (i.e. on every renderSceneSettings) — and
- * focus the first control inside it.
+ * The panel itself is opened and closed from outside with S (wired in
+ * app.ts, live only in a viz — see that handler), mirroring a click on
+ * deps.toggleButton (the gear); H, below, is the reverse direction, only
+ * live once the panel is already open.
+ *
+ * Keyboard layer, live only while the panel is open (see onKeyDown): H
+ * closes it. Tab / Shift+Tab walk a ring over every
+ * .vc-slider/.vc-toggle/.vc-fader in document order, wrapping at both ends
+ * and skipping every chip and button — so Tab alone never leaves the panel
+ * and never lands anywhere but a control. On whichever control has focus, A
+ * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
+ * are its own, in bandFaders.ts). Digit keys 1-9 jump to a numbered block —
+ * each card title and each scene group heading carries a .vc-block badge,
+ * renumbered by renumberBlocks() whenever the block set can change (i.e. on
+ * every renderSceneSettings) — and focus the first control inside it.
  *
  * Scene selection lives in the gallery — this panel doesn't duplicate it.
  * Every read and write goes through DeviceMenuDeps (wired in app.ts); the
