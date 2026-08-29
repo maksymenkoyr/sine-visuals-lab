@@ -6,13 +6,29 @@ regenerate it at session close.
 
 ## In flight
 
-- **Tuning hotkey fix + clip capture** — branch `worktree-tuning-hotkey-fix`
-  (worktree at `.claude/worktrees/tuning-hotkey-fix`, locked), 2 commits ahead of
+- **Power card collapse + all-folded triangle** — branch `worktree-power-collapse`
+  (worktree at `.claude/worktrees/power-collapse`, locked), 1 commit ahead of
   `main`, unmerged:
-  - `5dbf48b` Fix mark hotkey not firing on macOS (Option remaps `e.key`)
-  - `d54c9b5` Add clip capture (before/after), UI toggle, flash feedback, and a
-    mark watcher — adds `src/tuning/ui.ts` and `tools/tune-watch.mjs`, expands
-    `src/tuning/capture.ts` and `src/tuning/debug.ts`.
+  - `8dd5184` Power card collapses too; all-folded triangle-collapses the
+    column — rebuilt from scratch after #27 landed on `main` mid-session and
+    removed the fold-all/onFoldChange/setAllFolded plumbing this depended on.
+- **Auto-gain becomes an amount + Signal history trace** — branch
+  `worktree-autogain-amount-scope` (worktree at
+  `.claude/worktrees/autogain-amount-scope`, locked), 2 commits ahead of
+  `main`, unmerged.
+- **Mesh Grid rebuilt as a hidden-line spectrogram terrain** — branch
+  `worktree-mesh-grid-terrain` (worktree at
+  `.claude/worktrees/mesh-grid-terrain`, locked), 1 commit ahead of `main`,
+  unmerged.
+- **Caustics: Treble sparkle split into a macro** — branch
+  `worktree-sparkle-macro` (worktree at `.claude/worktrees/sparkle-macro`,
+  locked), 1 commit ahead of `main`, unmerged.
+- **Tuning: point-at-dials workflow** — branch `worktree-tuning-spotlight`
+  (worktree at `.claude/worktrees/tuning-spotlight`), 2 commits ahead of
+  `main`, unmerged.
+- **docs/architecture.md diagram-first rewrite** — branch
+  `worktree-docs-index` (worktree at `.claude/worktrees/docs-index`), 1
+  commit ahead of `main`, unmerged.
 
 ## Open questions
 
@@ -20,5 +36,8 @@ regenerate it at session close.
 
 ## Next up
 
-- Merge or continue `worktree-tuning-hotkey-fix` once its clip-capture UI has
-  been used in a real tuning session.
+- Merge or continue whichever of the worktrees above are actually finished —
+  six have accumulated since the last snapshot, several concurrent with this
+  session's own work on the same panel files (`#27` landed on `main` mid-session
+  and required rebuilding this session's change from scratch; worth checking
+  the others for the same kind of collision before merging).
