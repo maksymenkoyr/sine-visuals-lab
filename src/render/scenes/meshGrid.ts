@@ -322,8 +322,8 @@ function settingFor(key: string): SceneSetting {
   return spec;
 }
 
-/** Grid resolution per side, scaled off the tier quality proxy — the same
- *  signal shaders use to scale raymarch/density cost (see tier.ts). */
+/** Grid resolution per side, scaled off the quality detail proxy — the same
+ *  signal shaders use to scale raymarch/density cost (see quality.ts). */
 export function gridSizeForQuality(quality: number): number {
   if (quality >= 0.9) return 220;
   if (quality >= 0.65) return 160;
@@ -346,7 +346,7 @@ export function buildGridPositions(n: number): Float32Array {
 
 /** Index pairs for gl.LINES over an n*n grid: every horizontal and vertical
  *  edge, plus one diagonal per cell when `withDiagonals` for a triangulated
- *  wireframe texture, skipped on low tiers to halve the line count where
+ *  wireframe texture, skipped at low quality to halve the line count where
  *  per-line cost matters most. */
 export function buildGridIndices(n: number, withDiagonals: boolean): Uint32Array {
   const segments: number[] = [];
@@ -812,8 +812,8 @@ export const meshGridScene: Scene = (() => {
       meshProg = createProgram(gl, MESH_FRAG, MESH_VERT);
       historyLoc = gl.getUniformLocation(meshProg.program, "uHistory");
 
-      const n = gridSizeForQuality(ctx.tier.quality);
-      const withDiagonals = ctx.tier.quality >= 0.5;
+      const n = gridSizeForQuality(ctx.quality.detail);
+      const withDiagonals = ctx.quality.detail >= 0.5;
       const positions = buildGridPositions(n);
       const lineIndices = buildGridIndices(n, withDiagonals);
       const triIndices = buildGridTriangles(n);
@@ -941,7 +941,7 @@ export const meshGridScene: Scene = (() => {
 
       // Fill: alpha-blended solid undercoat. Writes depth even though
       // fillReactivity=1
-      // for this preset — kept on so the coarser grids used at lower tiers
+      // for this preset — kept on so the coarser grids used at lower quality
       // don't show obvious see-through overlap; see file header). Skipped
       // entirely when Wireframe Only is on -- a pure CPU/render() branch,
       // no shader involvement, since it's just "don't issue this draw call."

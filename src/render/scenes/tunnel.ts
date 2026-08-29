@@ -26,7 +26,7 @@ void main() {
     float radius = 1.0 + wobble + 0.12 * sin(p.z * 0.4 + uBeatPhase * TWO_PI);
     float dist = abs(length(p.xy) - radius);
 
-    glow += (0.015 / (dist + 0.015)) * (0.4 + uEnergy) * uQuality;
+    glow += (0.015 / (dist + 0.015)) * (0.4 + uEnergy) * uDetail;
 
     if (dist < 0.015) {
       float band = sampleBands(bandF);
@@ -45,4 +45,4 @@ void main() {
 }
 `;
 
-export const tunnelScene = createFullscreenScene("tunnel", "Tunnel", FRAG, { minTier: "low" });
+export const tunnelScene = createFullscreenScene("tunnel", "Tunnel", FRAG, { minQuality: "low" });

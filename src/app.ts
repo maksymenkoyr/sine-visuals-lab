@@ -5,7 +5,13 @@ import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformA
 import { FeatureExtractor } from "./audio/features.ts";
 import { NUM_BANDS, type CaptureHandle, type FeatureFrame } from "./audio/types.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
-import { detectTier, parseTier, tierSettings, type Tier, type TierSettings } from "./render/tier.ts";
+import {
+  detectQuality,
+  parseQualityPreset,
+  qualitySettings,
+  type QualityPreset,
+  type QualitySettings,
+} from "./render/quality.ts";
 import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type Viewport } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
@@ -27,6 +33,7 @@ import { getPin, setPin, clearPin } from "./tuning/pins.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
 import { isAutoGainEnabled, setAutoGainEnabled } from "./audio/autoGain.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
+import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
 import {
   applyBandGains,
@@ -78,11 +85,11 @@ const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
 const micPrompt = document.getElementById("micPrompt") as HTMLButtonElement;
 
-const TIER_ORDER: Tier[] = ["floor", "low", "mid", "high"];
+const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
 /** No new frame in this long -> the host is gone even if our own socket to the relay is still open. */
 const STALE_TIMEOUT_MS = 3000;
-const tierAllows = (s: Scene, t: Tier): boolean =>
-  !s.minTier || TIER_ORDER.indexOf(t) >= TIER_ORDER.indexOf(s.minTier);
+const presetAllows = (s: Scene, p: QualityPreset): boolean =>
+  !s.minQuality || PRESET_ORDER.indexOf(p) >= PRESET_ORDER.indexOf(s.minQuality);
 
 let mode: Mode = "solo";
 let roomCode: string | null = null;
@@ -114,7 +121,21 @@ let syntheticStartMs = 0;
 let scene: Scene = getScene("spectrum")!;
 let palette: Palette = getPalette("neon");
 let viewport: Viewport = FULL_VIEWPORT;
-let tier: TierSettings = tierSettings("mid");
+let quality: QualitySettings = qualitySettings("mid");
+/** What detectQuality()'s boot benchmark actually found (or the dev
+ *  `?quality=` pin) — kept separate from `quality` itself so the Power
+ *  card can mark it "recommended" even while a user override
+ *  (qualityChoice) is in effect. See effectivePreset() below. */
+let detectedPreset: QualityPreset = "mid";
+/** True once boot() found `?quality=`/`?tier=` — see the comment at that
+ *  call site for why a pinned preset skips the governor entirely. Kept as
+ *  module state (not a boot()-local) so applyQualityChoice can rebuild the
+ *  governor consistently with what boot() did. */
+let pinned = false;
+let qualityChoice: QualityChoice = getQualityChoice();
+/** Auto follows the boot benchmark; any other choice pins that preset
+ *  instead — see src/render/qualityPref.ts. */
+const effectivePreset = (): QualityPreset => (qualityChoice === "auto" ? detectedPreset : qualityChoice);
 /** The main fullscreen GL context — created once at boot and kept alive for
  *  the whole session; only which scene is mounted on it changes. */
 let mainHost: SceneHost | null = null;
@@ -160,10 +181,11 @@ let lastFps = 0;
 // with tv.ts) — see that file for why the gate needs a tolerance at all.
 let lastRenderMs = 0;
 
-/** Closed-loop counterpart to detectTier()'s one-shot boot benchmark — steps
- *  the shared `tier` object's numeric knobs down under sustained load
- *  (thermal throttling) and back up once comfortable. Created once tier is
- *  known, in boot(). */
+/** Closed-loop counterpart to detectQuality()'s one-shot boot benchmark —
+ *  steps the shared `quality` object's numeric knobs down under sustained
+ *  load (thermal throttling) and back up once comfortable. Created once
+ *  quality is known, in boot(), and rebuilt by applyQualityChoice()
+ *  whenever the user changes which preset it steps from. */
 let governor: QualityGovernor | null = null;
 
 /** Energy saving mode (src/render/powerMode.ts) — Auto leaves the governor
@@ -174,24 +196,41 @@ let governor: QualityGovernor | null = null;
 let powerMode: PowerMode = getPowerMode();
 
 /** The render-rate cap actually in force this frame. Forced Energy saving
- *  On halves it to RENDER_FPS_CAP_FLOOR regardless of tier — a deliberate
- *  saver — everything else uses the tier's own cap. The governor's own
+ *  On halves it to RENDER_FPS_CAP_FLOOR regardless of preset — a deliberate
+ *  saver — everything else uses the preset's own cap. The governor's own
  *  internal budget (its targetFrameMs, fixed at construction) is left at
- *  the tier's normal interval always: it only ever steps while enabled,
+ *  the preset's normal interval always: it only ever steps while enabled,
  *  which On/Off take away, so the two can't disagree in the one mode
  *  (Auto) where the governor is actually watching. */
 function renderIntervalMs(): number {
-  return powerMode === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(tier.tier);
+  return powerMode === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(quality.preset);
 }
 
 /** Applies a mode change to the live governor: Auto hands it back control
  *  (from a clean measurement — see QualityGovernor.setEnabled), On/Off pin
- *  quality to the tier baseline and stop it stepping. Also the boot-time
+ *  quality to the preset baseline and stop it stepping. Also the boot-time
  *  entry point, so a persisted On/Off from a previous session takes effect
  *  before the first frame renders. */
 function applyPowerMode(mode: PowerMode): void {
   powerMode = mode;
   governor?.setEnabled(mode === "auto");
+}
+
+/** Applies a quality-choice change (src/render/qualityPref.ts) to the live
+ *  session: mutates the shared `quality` object in place — rather than
+ *  reassigning it — so mainHost's SceneContext, the gallery, and the
+ *  governor's own closure (which snapshots it as `baseline` at construction)
+ *  all pick it up without a remount. The governor itself is rebuilt rather
+ *  than re-baselined: its targetFrameMs also depends on the preset (the
+ *  floor preset caps at RENDER_FPS_CAP_FLOOR), and a rebuild resets its
+ *  measurement state for free — the same clean-slate rule setEnabled(true)
+ *  already follows. No-op on the numeric knobs while pinned (a dev
+ *  `?quality=`/`?tier=` override): see boot()'s comment on `pinned`. */
+function applyQualityChoice(choice: QualityChoice): void {
+  qualityChoice = choice;
+  Object.assign(quality, qualitySettings(effectivePreset()));
+  governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
+  applyPowerMode(powerMode);
 }
 
 function activeConn(): AnyConn | null {
@@ -218,7 +257,7 @@ async function requestWakeLock(): Promise<void> {
 }
 
 function availableScenes(): Scene[] {
-  return listScenes().filter((s) => tierAllows(s, tier.tier));
+  return listScenes().filter((s) => presetAllows(s, quality.preset));
 }
 
 /** Routes both local picks (device menu) and remote commands (control panel on
@@ -404,12 +443,19 @@ function wireDeviceMenu(): void {
       setPowerMode(mode);
       applyPowerMode(mode);
     },
+    getQualityChoice: () => qualityChoice,
+    onQualityChoiceChange: (choice) => {
+      setQualityChoice(choice);
+      applyQualityChoice(choice);
+    },
     getPowerStatus: () => ({
       mode: powerMode,
-      tier: tier.tier,
+      choice: qualityChoice,
+      recommended: detectedPreset,
       fps: lastFps,
       level: governor?.level ?? null,
       maxLevel: governor?.maxLevel ?? 0,
+      fraction: governor?.fraction ?? 1,
       standingDown: governor?.standingDown ?? false,
       bufferWidth: canvas.width,
       bufferHeight: canvas.height,
@@ -444,7 +490,7 @@ function wireRoomControls(conn: AnyConn): void {
   conn.onCommand((cmd) => {
     if (cmd.scene) {
       const s = getScene(cmd.scene);
-      if (s && tierAllows(s, tier.tier)) {
+      if (s && presetAllows(s, quality.preset)) {
         if (inViz) applyScene(s);
         else {
           // Commanded while idle on the gallery (e.g. a mosaic/panorama
@@ -471,7 +517,7 @@ async function enterViz(next: Scene): Promise<void> {
   mainHost!.mount(next);
   scene = next;
 
-  showHud(`${mode}${roomCode ? ` (${roomCode})` : ""}  tier: ${tier.tier}  scene: ${scene.name}  palette: ${palette.name}`);
+  showHud(`${mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id, viewport);
 
   menuBtn.style.display = "block";
@@ -506,7 +552,7 @@ function applyRoute(route: Route): void {
   }
   if (inViz && route.sceneId === scene.id) return; // our own applyScene() echo
   const s = getScene(route.sceneId);
-  if (!s || !tierAllows(s, tier.tier)) {
+  if (!s || !presetAllows(s, quality.preset)) {
     showHud(s ? "scene unavailable on this device" : "unknown scene", true);
     navigate({ kind: "gallery" }, "replace");
     return;
@@ -546,19 +592,24 @@ async function boot(): Promise<void> {
     syntheticStartMs = performance.now();
   }
 
-  // `?tier=` (dev-only) lets a headless capture tool force a specific tier
-  // instead of running detectTier()'s benchmark — SwiftShader (what
-  // tools/tune-sheet.mjs runs on) is genuinely slow, so an unpinned capture
-  // self-detects "low"/"floor" and renders at a fraction of the resolution
-  // and octave count real hardware gets, making any contact sheet measure
-  // the wrong thing. Pinning also skips the governor entirely: a fixed
-  // tier is for reproducible capture, not for exercising the closed-loop
-  // stepper (that's what the unpinned path and tests/governor.test.ts are for).
-  const pinnedTier = import.meta.env.DEV ? parseTier(params.get("tier")) : null;
-  tier = tierSettings(pinnedTier ?? (await detectTier()));
-  mainHost = createSceneHost(gl, tier);
-  if (!tierAllows(scene, tier.tier)) scene = availableScenes()[0] ?? scene;
-  governor = pinnedTier ? null : createQualityGovernor(tier, targetFrameIntervalMs(tier.tier));
+  // `?quality=` (dev-only, `?tier=` accepted as an alias) lets a headless
+  // capture tool force a specific preset instead of running
+  // detectQuality()'s benchmark — SwiftShader (what tools/tune-sheet.mjs
+  // runs on) is genuinely slow, so an unpinned capture self-detects
+  // "low"/"floor" and renders at a fraction of the resolution and octave
+  // count real hardware gets, making any contact sheet measure the wrong
+  // thing. Pinning also skips the governor entirely: a fixed preset is for
+  // reproducible capture, not for exercising the closed-loop stepper
+  // (that's what the unpinned path and tests/governor.test.ts are for). A
+  // pin still reads as `detectedPreset` (see effectivePreset() above), so
+  // the Power card's "recommended" marker tracks it too.
+  const devPin = import.meta.env.DEV ? parseQualityPreset(params) : null;
+  pinned = devPin !== null;
+  detectedPreset = devPin ?? (await detectQuality());
+  quality = qualitySettings(effectivePreset());
+  mainHost = createSceneHost(gl, quality);
+  if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
+  governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
 
   if (bypassGallery) {
@@ -635,7 +686,7 @@ async function boot(): Promise<void> {
     gallery = createGallery({
       scenes: () =>
         listScenes().map((s) => {
-          const enabled = tierAllows(s, tier.tier);
+          const enabled = presetAllows(s, quality.preset);
           return {
             scene: s,
             enabled,
@@ -643,7 +694,7 @@ async function boot(): Promise<void> {
             reason: enabled ? undefined : "Needs a faster device",
           };
         }),
-      tier: () => tier,
+      quality: () => quality,
       liveFrame: () => lastVis,
       onPick: (id) => {
         void ensureAudio(); // fires inside the click, before any await, so the gesture survives
@@ -667,11 +718,11 @@ async function boot(): Promise<void> {
       getInput: () => ({
         sceneId: scene.id,
         settings: scene.settings ?? [],
-        tier: tier.tier,
+        quality: quality.preset,
         fps: lastFps,
         vis: lastVis,
         anim: lastAnim,
-        renderScale: tier.renderScale,
+        renderScale: quality.renderScale,
         govLevel: governor?.level ?? 0,
       }),
     });
@@ -815,7 +866,7 @@ function loop(): void {
   lastRenderFpsMs = nowRafMs;
   lastRenderMs = nowRafMs;
 
-  const resized = resizeCanvasToDisplaySize(canvas, tier.renderScale);
+  const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
   const displayFrame = applySensitivity(gained!, resolveSensitivity(scene.id), resolveAcceleration(scene.id));

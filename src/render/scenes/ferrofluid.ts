@@ -77,6 +77,6 @@ void main() {
 `;
 
 // The most expensive scene (see comment above) — worse than tunnel.ts, which
-// itself is gated to minTier "low". uMaxSteps alone isn't enough protection:
-// gate the gallery/scene picker too, or a floor-tier device can select it.
-export const ferrofluidScene = createFullscreenScene("ferrofluid", "Ferrofluid", FRAG, { minTier: "mid" });
+// itself is gated to minQuality "low". uMaxSteps alone isn't enough protection:
+// gate the gallery/scene picker too, or a floor-quality device can select it.
+export const ferrofluidScene = createFullscreenScene("ferrofluid", "Ferrofluid", FRAG, { minQuality: "mid" });

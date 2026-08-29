@@ -22,6 +22,7 @@ import { createAudioMeters } from "./audioMeters.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
+import type { QualityChoice } from "../render/qualityPref.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -210,6 +211,11 @@ export interface DeviceMenuDeps {
    *  Auto-gain above. */
   getPowerMode: () => PowerMode;
   onPowerModeChange: (mode: PowerMode) => void;
+  /** Quality choice (src/render/qualityPref.ts) — the Power card's
+   *  Auto/High/Mid/Low/Floor override for which preset the governor steps
+   *  from. Device-wide, like Power mode above. */
+  getQualityChoice: () => QualityChoice;
+  onQualityChoiceChange: (choice: QualityChoice) => void;
   /** Snapshot for the Power card's status line and readouts — what the
    *  governor actually decided this session, and why. Polled at the panel's
    *  existing ~10Hz auto-refresh tick, not per frame. */
@@ -993,6 +999,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const powerCard = createPowerCard({
     getPowerMode: deps.getPowerMode,
     onPowerModeChange: deps.onPowerModeChange,
+    getQualityChoice: deps.getQualityChoice,
+    onQualityChoiceChange: deps.onQualityChoiceChange,
     getPowerStatus: deps.getPowerStatus,
   });
   const powerCol = document.createElement("div");

@@ -68,13 +68,15 @@ app.ts` drives `AnimFrame` straight from its own local `FeatureFrame`s.
 
 ## Where the quality/perf ceiling comes from
 
-`src/render/tier.ts` (`detectTier`) picks a quality tier once at startup; `src/
-render/governor.ts` (the quality governor) can step it down at runtime under
+`src/render/quality.ts` (`detectQuality`) picks a quality preset once at
+startup; `src/render/qualityPref.ts` lets the user override it from the Power
+card, defaulting to Auto (the detected preset); `src/render/governor.ts` (the
+quality governor) can step the effective preset down at runtime under
 sustained frame-time pressure, judged against the render-rate cap that `src/
 render/framePace.ts` owns — probing that a step down actually helped before
 trusting it, so a pace this page doesn't control (a browser energy-saver mode,
-an OS refresh-rate cap) can't be mistaken for GPU load. A scene's `minTier`
-(on the `Scene` interface) opts it out of running below a given tier at all.
+an OS refresh-rate cap) can't be mistaken for GPU load. A scene's `minQuality`
+(on the `Scene` interface) opts it out of running below a given preset at all.
 `src/render/powerMode.ts` is the user-facing override — Energy saving's
 Auto/On/Off in the controls panel's Power card (`src/ui/powerCard.ts`) — that
 takes the governor out of the loop entirely rather than fighting it.

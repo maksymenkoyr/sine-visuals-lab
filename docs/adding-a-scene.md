@@ -19,8 +19,8 @@
    group, not something worth doubling the group's row count for everyone.
 3. Register the scene as a side effect in `src/render/scenes/index.ts`
    (`registerScene(yourScene)`) and export it there like its neighbours.
-4. If it should degrade or disable below some hardware tier, set `minTier` on the
-   `Scene` object — see `src/render/tier.ts` for what each tier means.
+4. If it should degrade or disable below some hardware quality, set `minQuality`
+   on the `Scene` object — see `src/render/quality.ts` for what each preset means.
 
 Typecheck (`npm run typecheck`) catches a mismatched uniform name or a `Scene`
 missing a required method; nothing here needs a special build step.

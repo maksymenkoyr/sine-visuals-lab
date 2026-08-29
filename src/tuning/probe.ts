@@ -15,11 +15,11 @@ import { isAutoEnabled, resolveSceneSetting } from "../render/autoTune.ts";
 export interface ProbeInput {
   sceneId: string;
   settings: SceneSetting[];
-  tier: string;
+  quality: string;
   fps: number;
   vis: FeatureFrame | null;
   anim: AnimFrame | null;
-  /** Governor-controlled canvas scale (1 = full detected-tier resolution)
+  /** Governor-controlled canvas scale (1 = full detected-preset resolution)
    *  and step index (0 = no downgrade yet) — surfaced so a capture session
    *  can tell "the scene looks soft" apart from "the governor quietly
    *  downgraded it" instead of guessing from pixels. */
@@ -40,7 +40,7 @@ export interface ProbeSettingValue {
 export interface ProbeSnapshot {
   t: number;
   fps: number;
-  tier: string;
+  quality: string;
   scene: string;
   renderScale: number;
   govLevel: number;
@@ -81,7 +81,7 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
   return {
     t: vis?.time ?? 0,
     fps: input.fps,
-    tier: input.tier,
+    quality: input.quality,
     scene: sceneId,
     renderScale: input.renderScale,
     govLevel: input.govLevel,
@@ -98,7 +98,7 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
 export function formatProbe(snap: ProbeSnapshot): string {
   const lines: string[] = [];
   lines.push(
-    `t=${snap.t.toFixed(2)} fps=${snap.fps.toFixed(0)} tier=${snap.tier} scene=${snap.scene} scale=${snap.renderScale.toFixed(2)} gov=${snap.govLevel}`,
+    `t=${snap.t.toFixed(2)} fps=${snap.fps.toFixed(0)} quality=${snap.quality} scene=${snap.scene} scale=${snap.renderScale.toFixed(2)} gov=${snap.govLevel}`,
   );
   lines.push(
     `low=${snap.bands.low.toFixed(2)} mid=${snap.bands.mid.toFixed(2)} high=${snap.bands.high.toFixed(2)} energy=${snap.bands.energy.toFixed(2)}`,
