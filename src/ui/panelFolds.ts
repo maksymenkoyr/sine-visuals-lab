@@ -1,7 +1,9 @@
 /**
  * Persisted fold state for the controls panel's cards (createCard in
  * controlsKit.ts) — which cards in the left column are collapsed to just
- * their title bar. Global per device, not per scene: like
+ * their title bar — plus one non-card id, METERS_COLUMN, for whether that
+ * whole column is hidden (deviceMenu.ts's footer toggle / M). Global per
+ * device, not per scene: like
  * src/audio/bandSplit.ts, this describes how you like to look at the panel,
  * not one scene's settings. Same in-memory-cache-over-localStorage pattern as
  * that module: the cache is the source of truth for get/set within a
@@ -21,6 +23,10 @@ export interface PanelFolds {
 }
 
 const STORAGE_KEY = "vibe.panelFolds";
+
+/** The id the whole meters column (Bands + the meters strip) hides under —
+ *  namespaced so it can never collide with a card's foldId. */
+export const METERS_COLUMN = "column:meters";
 
 function loadInitial(): PanelFolds {
   try {
@@ -60,9 +66,4 @@ export function setFolded(cardId: string, folded: boolean): void {
     cache = rest;
   }
   persist();
-}
-
-/** Applies the same fold state to every id in `cardIds` — the fold-all chip. */
-export function setFoldedAll(cardIds: readonly string[], folded: boolean): void {
-  for (const id of cardIds) setFolded(id, folded);
 }

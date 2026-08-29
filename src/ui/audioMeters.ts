@@ -52,9 +52,7 @@ import {
  * Each card is independently collapsible (controlsKit.ts's createCard
  * foldId, remembered in panelFolds.ts) and update() skips a folded card's
  * work entirely — folding buys back the per-frame cost, not just the
- * screen space. allFolded()/setAllFolded() are how deviceMenu.ts's fold-all
- * chip drives this whole strip alongside its own Bands card, without either
- * side needing to know the other's card ids.
+ * screen space.
  *
  * The RAW chip above the cards flips every row that has a pre-smoothing
  * counterpart to it, for diagnosing "is this a bad measurement or just a
@@ -74,21 +72,8 @@ import {
  * buys back that cost.
  */
 
-export interface AudioMetersOpts {
-  /** Called after any card in this strip folds/unfolds on its own (a header
-   *  click or its caret) — lets a caller (deviceMenu.ts's fold-all chip)
-   *  relabel itself without polling every card each frame. */
-  onFoldChange?: () => void;
-}
-
 export interface AudioMeters {
   el: HTMLElement;
-  /** True once every card in this strip is folded — the fold-all chip's
-   *  read side (combined with its own Bands card's fold state). */
-  allFolded(): boolean;
-  /** Applies the same fold state to every card in this strip — the fold-all
-   *  chip's write side. */
-  setAllFolded(folded: boolean): void;
   /** Fed every frame while the panel is open. `frame`/`anim` null before
    *  audio is up (idle readouts); `mono`/`rawBands` null on any device
    *  without a local analyser (Scope card hidden; Energy reads idle under
@@ -416,10 +401,9 @@ const metersHeaderLabelStyle = `${groupHeadingFirstStyle} margin: 0;`;
 const RAW_CHIP_TITLE =
   "Every reading below its pre-smoothing value: Section, Character and BPM jitter frame to frame instead of easing, and the waveform stops auto-zooming to the loudest column on screen.";
 
-export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
+export function createAudioMeters(): AudioMeters {
   const root = document.createElement("div");
   root.className = "vc-meters vc-scroll";
-  const onFoldChange = () => opts.onFoldChange?.();
 
   let showRaw = false;
   const metersHeader = document.createElement("div");
@@ -448,7 +432,7 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
     description:
       "The same sound after auto-gain, which keeps it mid-range whether the room is quiet or loud. This is what the scene actually reacts to.",
   });
-  const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN, foldId: "signal", onFoldChange });
+  const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN, foldId: "signal" });
   signalCard.body.append(level.el, spacer(), energy.el);
 
   // ---- Rhythm ----
@@ -465,7 +449,7 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
   const rhythmRow = document.createElement("div");
   rhythmRow.style.cssText = rhythmRowStyle;
   rhythmRow.append(section.el, tempo.el);
-  const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm", onFoldChange });
+  const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm" });
   rhythmCard.body.appendChild(rhythmRow);
 
   // ---- Character ----
@@ -478,7 +462,7 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
       tickAt: NEUTRAL[dial],
     }),
   }));
-  const characterCard = createCard({ title: "Character", accent: AUTO_SKY, foldId: "character", onFoldChange });
+  const characterCard = createCard({ title: "Character", accent: AUTO_SKY, foldId: "character" });
   dialRows.forEach(({ row }, i) => {
     if (i > 0) characterCard.body.appendChild(spacer());
     characterCard.body.appendChild(row.el);
@@ -495,7 +479,7 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
   waveCanvas.style.cssText = waveCanvasStyle;
   waveform.el.children[1].replaceWith(waveCanvas);
   const waveCtx = waveCanvas.getContext("2d")!;
-  const scopeCard = createCard({ title: "Scope", accent: NEUTRAL_ACCENT, foldId: "scope", onFoldChange });
+  const scopeCard = createCard({ title: "Scope", accent: NEUTRAL_ACCENT, foldId: "scope" });
   scopeCard.body.appendChild(waveform.el);
   scopeCard.el.style.display = "none";
   let scopeShown = false;
@@ -503,7 +487,6 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
   // The scope leads: it's the one live picture of the sound itself, and the
   // first thing to check when the visuals seem off.
   root.append(metersHeader, scopeCard.el, signalCard.el, rhythmCard.el, characterCard.el);
-  const cards = [scopeCard, signalCard, rhythmCard, characterCard];
 
   // Ring buffer of columns, one pixel each — oldest at `head`, newest just
   // before it — plus the column currently being accumulated.
@@ -617,12 +600,6 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
 
   return {
     el: root,
-    allFolded(): boolean {
-      return cards.every((card) => card.fold?.isFolded() ?? false);
-    },
-    setAllFolded(folded): void {
-      for (const card of cards) card.fold?.setFolded(folded);
-    },
     update(frame, anim, mono, rawBands): void {
       const nowMs = performance.now();
       const dtSec =
