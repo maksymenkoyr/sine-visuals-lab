@@ -6,7 +6,7 @@ import { FeatureExtractor } from "./audio/features.ts";
 import { NUM_BANDS, type CaptureHandle, type FeatureFrame } from "./audio/types.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
 import { detectTier, parseTier, tierSettings, type Tier, type TierSettings } from "./render/tier.ts";
-import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type Viewport } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, PALETTES, type Palette } from "./render/palette.ts";
@@ -25,6 +25,7 @@ import { createQualityGovernor, type QualityGovernor } from "./render/governor.t
 import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
 import { isAutoGainEnabled, setAutoGainEnabled } from "./audio/autoGain.ts";
+import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
 import {
   applyBandGains,
@@ -163,6 +164,34 @@ let lastRenderMs = 0;
  *  (thermal throttling) and back up once comfortable. Created once tier is
  *  known, in boot(). */
 let governor: QualityGovernor | null = null;
+
+/** Energy saving mode (src/render/powerMode.ts) — Auto leaves the governor
+ *  above in charge, On/Off take it out of the loop. Read once at module
+ *  init (device-wide, persisted), then only ever changed through
+ *  applyPowerMode below so the governor and the render-rate cap stay in
+ *  sync with it. */
+let powerMode: PowerMode = getPowerMode();
+
+/** The render-rate cap actually in force this frame. Forced Energy saving
+ *  On halves it to RENDER_FPS_CAP_FLOOR regardless of tier — a deliberate
+ *  saver — everything else uses the tier's own cap. The governor's own
+ *  internal budget (its targetFrameMs, fixed at construction) is left at
+ *  the tier's normal interval always: it only ever steps while enabled,
+ *  which On/Off take away, so the two can't disagree in the one mode
+ *  (Auto) where the governor is actually watching. */
+function renderIntervalMs(): number {
+  return powerMode === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(tier.tier);
+}
+
+/** Applies a mode change to the live governor: Auto hands it back control
+ *  (from a clean measurement — see QualityGovernor.setEnabled), On/Off pin
+ *  quality to the tier baseline and stop it stepping. Also the boot-time
+ *  entry point, so a persisted On/Off from a previous session takes effect
+ *  before the first frame renders. */
+function applyPowerMode(mode: PowerMode): void {
+  powerMode = mode;
+  governor?.setEnabled(mode === "auto");
+}
 
 function activeConn(): AnyConn | null {
   return hostConn ?? rendererConn;
@@ -369,6 +398,21 @@ function wireDeviceMenu(): void {
     onAutoStrengthChange: (value) => setAutoStrength(value),
     getAutoGainEnabled: () => isAutoGainEnabled(),
     onAutoGainChange: (value) => setAutoGainEnabled(value),
+    getPowerMode: () => powerMode,
+    onPowerModeChange: (mode) => {
+      setPowerMode(mode);
+      applyPowerMode(mode);
+    },
+    getPowerStatus: () => ({
+      mode: powerMode,
+      tier: tier.tier,
+      fps: lastFps,
+      level: governor?.level ?? null,
+      maxLevel: governor?.maxLevel ?? 0,
+      standingDown: governor?.standingDown ?? false,
+      bufferWidth: canvas.width,
+      bufferHeight: canvas.height,
+    }),
     toggleButton: menuBtn,
   });
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
@@ -508,6 +552,7 @@ async function boot(): Promise<void> {
   mainHost = createSceneHost(gl, tier);
   if (!tierAllows(scene, tier.tier)) scene = availableScenes()[0] ?? scene;
   governor = pinnedTier ? null : createQualityGovernor(tier, targetFrameIntervalMs(tier.tier));
+  applyPowerMode(powerMode);
 
   if (bypassGallery) {
     // Plain ?room=CODE — join as a mic-less renderer (e.g. a second laptop just watching).
@@ -755,7 +800,7 @@ function loop(): void {
 
   if (!lastVis || !anim) return;
 
-  if (!shouldRenderFrame(nowRafMs, lastRenderMs, targetFrameIntervalMs(tier.tier))) return;
+  if (!shouldRenderFrame(nowRafMs, lastRenderMs, renderIntervalMs())) return;
   if (lastRenderFpsMs > 0) {
     const renderDtMs = nowRafMs - lastRenderFpsMs;
     if (renderDtMs > 0) lastFps = 1000 / renderDtMs;

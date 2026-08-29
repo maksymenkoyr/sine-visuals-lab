@@ -19,6 +19,8 @@ import { type BandSplit } from "../audio/bandSplit.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createAudioMeters } from "./audioMeters.ts";
+import { createPowerCard, type PowerStatus } from "./powerCard.ts";
+import type { PowerMode } from "../render/powerMode.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -184,6 +186,15 @@ export interface DeviceMenuDeps {
    *  own dB window, matching the spectrum strip's raw feed. */
   getAutoGainEnabled: () => boolean;
   onAutoGainChange: (value: boolean) => void;
+  /** Energy saving mode (src/render/powerMode.ts) — the Power card's
+   *  Auto/On/Off override for the quality governor. Device-wide, like
+   *  Auto-gain above. */
+  getPowerMode: () => PowerMode;
+  onPowerModeChange: (mode: PowerMode) => void;
+  /** Snapshot for the Power card's status line and readouts — what the
+   *  governor actually decided this session, and why. Polled at the panel's
+   *  existing ~10Hz auto-refresh tick, not per frame. */
+  getPowerStatus: () => PowerStatus;
   /** The button that opens this menu — excluded from the tap-outside-to-close
    *  check, and ringed (aria-pressed) while the panel is open. */
   toggleButton: HTMLElement;
@@ -814,6 +825,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const root = document.createElement("div");
   root.className = "vc-root vc-scroll";
 
+  // ---- power column: energy saving mode ----
+  // Leftmost — a compact card, not a scrolling stack, so it isn't wired into
+  // the digit-block keyboard jump (renumberBlocks/markBlock): its only
+  // controls are plain chip buttons, outside the .vc-slider/.vc-toggle/
+  // .vc-fader Tab ring, the same as the palette chips they're modeled on.
+  const powerCard = createPowerCard({
+    getPowerMode: deps.getPowerMode,
+    onPowerModeChange: deps.onPowerModeChange,
+    getPowerStatus: deps.getPowerStatus,
+  });
+  const powerCol = document.createElement("div");
+  powerCol.className = "vc-power-col";
+  powerCol.appendChild(powerCard.el);
+
   // ---- spectrum column: the Bands card ----
   // The live spectrum and the band gains are one card: the strip is the
   // control (bandFaders.ts draws the faders over the bars), so what you
@@ -1319,7 +1344,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
 
   controlsCol.append(autoRow, inputCard.el, sceneCard.el, paletteCard.el, footer);
-  root.append(spectrumCol, controlsCol);
+  root.append(powerCol, spectrumCol, controlsCol);
   document.body.appendChild(root);
 
   // ---- open / close ----
@@ -1509,6 +1534,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       lastAutoRefreshMs = nowMs;
 
       refreshSpectrumHeader();
+      powerCard.refresh();
       for (const { row } of inputRows) row.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
     },

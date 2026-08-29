@@ -36,6 +36,9 @@ export const BANDS_AMBER = "#f9b96c";
 export const FADER_OFF = "#f08a8a";
 /** The global auto system — strength knob and master switch. */
 export const AUTO_SKY = "#59bbfb";
+/** Energy saving mode — the governor's Auto/On/Off override and its status
+ *  readouts (src/ui/powerCard.ts). */
+export const POWER_TEAL = "#4dd4c0";
 
 /** Spectrum strip bar tints, one step darker than the card accents they echo. */
 export const STRIP_LOW = "#89e29d";
@@ -54,8 +57,10 @@ export const FONT_LABEL = "'Chakra Petch', system-ui, sans-serif";
 export const FONT_MONO = "'Share Tech Mono', ui-monospace, monospace";
 export const FONT_DIGITS = `'DSEG7-Classic', ${FONT_MONO}`;
 
-/** Below this viewport width the two panel columns stack into one. */
-export const STACK_BELOW_PX = 720;
+/** Below this viewport width the panel's columns stack into one. Sized for
+ *  three columns (Power + Bands + controls, ~899px plus gaps) — see the
+ *  stacked media query below for how Power folds into that single column. */
+export const STACK_BELOW_PX = 940;
 
 /** `#rrggbb` + alpha in [0,1] -> `#rrggbbaa`. */
 export function withAlpha(hex: string, alpha: number): string {
@@ -99,6 +104,14 @@ const stylesheet = `
   color: #fff; font-family: ${FONT_LABEL};
 }
 .vc-root.vc-open { display: flex; }
+/* Power (src/ui/powerCard.ts): energy saving's Auto/On/Off override and its
+ * status readouts. Leftmost — narrower than the other two columns since it
+ * holds one compact card, not a scrolling stack. */
+.vc-power-col {
+  width: 200px; flex: none; display: flex; flex-direction: column; gap: 4px;
+  max-height: calc(100vh - 74px);
+}
+.vc-power-col > * { flex-shrink: 0; }
 /* The spectrum card stays put; the meters (src/ui/audioMeters.ts) scroll
  * in their own strip beneath it, the way the controls column scrolls. */
 .vc-spectrum-col {
@@ -123,7 +136,7 @@ const stylesheet = `
    * last — a phone shouldn't have to scroll past a screen of readouts to
    * reach a slider. */
   .vc-spectrum-col { display: contents; }
-  .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
+  .vc-power-col, .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
   .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
 }
 
