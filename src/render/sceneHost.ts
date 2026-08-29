@@ -1,5 +1,5 @@
 import type { Scene, SceneContext } from "./scene.ts";
-import type { TierSettings } from "./tier.ts";
+import type { QualitySettings } from "./quality.ts";
 
 export interface SceneHost {
   readonly ctx: SceneContext;
@@ -19,8 +19,8 @@ export interface SceneHost {
 // context) at once.
 const owners = new Map<Scene, SceneHost>();
 
-export function createSceneHost(gl: WebGL2RenderingContext, tier: TierSettings): SceneHost {
-  const ctx: SceneContext = { gl, tier };
+export function createSceneHost(gl: WebGL2RenderingContext, quality: QualitySettings): SceneHost {
+  const ctx: SceneContext = { gl, quality };
   const mounted = new Set<Scene>();
 
   const host: SceneHost = {

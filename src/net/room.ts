@@ -134,7 +134,7 @@ abstract class RoomConnectionBase {
   private rosterListeners: Array<(r: RosterEntry[]) => void> = [];
   private commandListeners: Array<(c: DeviceCommand) => void> = [];
   // Announcing a device is a "last write wins" fire-once call made right at
-  // startup, often before the handshake finishes (e.g. while detectTier()'s
+  // startup, often before the handshake finishes (e.g. while detectQuality()'s
   // benchmark is still running) — queue it and flush on open rather than
   // silently dropping it, or the device would never appear in anyone's roster.
   private pendingHello: { scene: string; palette: string; viewport?: Viewport } | null = null;

@@ -1,5 +1,5 @@
 import type { Scene } from "../render/scene.ts";
-import type { TierSettings } from "../render/tier.ts";
+import type { QualitySettings } from "../render/quality.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import { createSyntheticFeed } from "../audio/synthetic.ts";
 import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRenderer.ts";
@@ -8,7 +8,7 @@ import { PALETTES, type Palette } from "../render/palette.ts";
 
 export interface GallerySceneEntry {
   scene: Scene;
-  /** Whether this device's GPU tier can run the scene fullscreen. */
+  /** Whether this device's GPU quality preset can run the scene fullscreen. */
   enabled: boolean;
   /** Rougher, unpolished scenes sit behind the gallery's collapsed "draft"
    *  section and carry a small badge — see DRAFT_SCENE_IDS in scenes/index.ts. */
@@ -19,7 +19,7 @@ export interface GallerySceneEntry {
 
 export interface GalleryDeps {
   scenes: () => GallerySceneEntry[];
-  tier: () => TierSettings;
+  quality: () => QualitySettings;
   /** The real (mic-driven) frame, once audio is running — null before then,
    *  which is what makes tiles fall back to their synthetic groove. */
   liveFrame: () => FeatureFrame | null;
@@ -94,19 +94,20 @@ const FRAME_INTERVAL_MS = 1000 / PREVIEW_FPS;
 const PREVIEW_QUALITY_SCALE = 0.4;
 const PREVIEW_TILES_PER_TICK = 3;
 
-/** Derives a permanently-reduced tier for gallery previews from the device's
- *  detected tier — a snapshot, not a live reference, so it stays fixed
- *  regardless of what the main viz's quality governor (governor.ts) later
- *  does to the fullscreen tier object. Never scales *up*: Math.min keeps a
- *  floor-tier device's own (already low) ceiling as the limit. */
-function reducedPreviewTier(t: TierSettings): TierSettings {
+/** Derives a permanently-reduced quality for gallery previews from the
+ *  device's detected/chosen quality — a snapshot, not a live reference, so it
+ *  stays fixed regardless of what the main viz's quality governor
+ *  (governor.ts) later does to the fullscreen settings object. Never scales
+ *  *up*: Math.min keeps a floor-preset device's own (already low) ceiling as
+ *  the limit. */
+function reducedPreviewQuality(q: QualitySettings): QualitySettings {
   return {
-    tier: t.tier,
-    renderScale: Math.min(t.renderScale, 0.5),
-    maxParticles: Math.round(t.maxParticles * PREVIEW_QUALITY_SCALE),
-    raymarchSteps: Math.max(8, Math.round(t.raymarchSteps * PREVIEW_QUALITY_SCALE)),
+    preset: q.preset,
+    renderScale: Math.min(q.renderScale, 0.5),
+    maxParticles: Math.round(q.maxParticles * PREVIEW_QUALITY_SCALE),
+    raymarchSteps: Math.max(8, Math.round(q.raymarchSteps * PREVIEW_QUALITY_SCALE)),
     bloomPasses: 0,
-    quality: Math.min(t.quality, PREVIEW_QUALITY_SCALE),
+    detail: Math.min(q.detail, PREVIEW_QUALITY_SCALE),
   };
 }
 
@@ -289,7 +290,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
 
   return {
     show(): void {
-      preview ??= createPreviewRenderer(reducedPreviewTier(deps.tier()));
+      preview ??= createPreviewRenderer(reducedPreviewQuality(deps.quality()));
       if (!preview) {
         errorBanner.textContent = "WebGL2 preview unavailable on this device.";
         errorBanner.style.display = "block";

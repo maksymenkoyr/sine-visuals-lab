@@ -9,7 +9,7 @@ import {
 } from "../src/render/scenes/meshGrid.ts";
 
 describe("meshGrid grid geometry", () => {
-  it("sizes the grid from the tier quality proxy, largest first", () => {
+  it("sizes the grid from the detail proxy, largest first", () => {
     expect(gridSizeForQuality(1.0)).toBe(220); // high
     expect(gridSizeForQuality(0.7)).toBe(160); // mid
     expect(gridSizeForQuality(0.4)).toBe(100); // low

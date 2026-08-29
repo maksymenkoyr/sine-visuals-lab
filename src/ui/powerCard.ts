@@ -1,5 +1,6 @@
 import type { PowerMode } from "../render/powerMode.ts";
-import type { Tier } from "../render/tier.ts";
+import type { QualityChoice } from "../render/qualityPref.ts";
+import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_TEAL, withAlpha } from "./controlsTheme.ts";
 import {
   chipBtnLitStyle,
@@ -15,26 +16,27 @@ import {
 
 /**
  * The Power card — leftmost column in the panel (deviceMenu.ts), left of the
- * Bands card. A 3-way Auto/On/Off override for the quality governor
- * (src/render/governor.ts, src/render/powerMode.ts), plus a status line and
- * readouts explaining what the governor actually decided this session and
- * why — including the one state a frame-gap-only governor can reach that
- * isn't "GPU load": paced by something outside the page (a browser
- * energy-saver mode, an OS refresh-rate cap), where it has deliberately
- * stood down rather than cutting quality for nothing (see governor.ts's
- * "Authority probe").
+ * Bands card. A quality-preset override plus a 3-way Auto/On/Off override for
+ * the quality governor (src/render/governor.ts, src/render/powerMode.ts),
+ * plus a status line and readouts explaining what the governor actually
+ * decided this session and why — including the one state a frame-gap-only
+ * governor can reach that isn't "GPU load": paced by something outside the
+ * page (a browser energy-saver mode, an OS refresh-rate cap), where it has
+ * deliberately stood down rather than cutting quality for nothing (see
+ * governor.ts's "Authority probe").
  *
  * Shape, top to bottom: the status line right under the title (the Bands
  * card's scene · live-dot · source line is the model — small caps mono with
- * a coloured dot, hover/tap for the long explanation), then the one control
- * — Energy saving, a row in the panel's grammar with a chip group where a
- * slider would sit — then a "Readouts" group of diagnostics. Those are
- * deliberately not rows: a row's 14.5px label is for something you act on,
- * and four of them made this card read as a settings form. They're a small
- * mono caption beside a seven-segment value, the same register as the band
- * captions under the spectrum strip.
+ * a coloured dot, hover/tap for the long explanation), then two controls —
+ * Quality (src/render/qualityPref.ts) and Energy saving, both rows in the
+ * panel's grammar with a chip group where a slider would sit — then a
+ * "Readouts" group of diagnostics. Those are deliberately not rows: a row's
+ * 14.5px label is for something you act on, and four of them made this card
+ * read as a settings form. They're a small mono caption beside a
+ * seven-segment value, the same register as the band captions under the
+ * spectrum strip.
  *
- * Read-only except the three mode chips; every value comes from
+ * Read-only except the mode chips; every value comes from
  * PowerCardDeps.getPowerStatus(), polled at the panel's existing ~10Hz
  * auto-refresh tick (see deviceMenu.ts's update()), not per frame. The mode
  * chips are never auto-tunable and stay out of the Tab ring, same as the
@@ -43,18 +45,25 @@ import {
 
 export interface PowerStatus {
   mode: PowerMode;
-  /** Detected quality tier — what "full quality" means on this device. */
-  tier: Tier;
+  /** The user's quality-preset choice — Auto or a pinned preset. */
+  choice: QualityChoice;
+  /** What Auto currently resolves to — detectQuality()'s benchmark result,
+   *  or the dev `?quality=`/`?tier=` pin. Marked as recommended in the
+   *  Quality row regardless of whether the user has overridden it. */
+  recommended: QualityPreset;
   /** Rendered-frame rate (app.ts's lastFps). */
   fps: number;
-  /** Governor step index, 0 = full tier quality; null while a dev `?tier=`
-   *  pin has skipped the governor entirely (see app.ts's boot()). */
+  /** Governor step index, 0 = full quality; null while a dev
+   *  `?quality=`/`?tier=` pin has skipped the governor entirely (see
+   *  app.ts's boot()). */
   level: number | null;
   maxLevel: number;
+  /** QUALITY_STEPS[level] as a fraction of baseline — the Detail readout. */
+  fraction: number;
   /** The governor's authority probe found a step down bought nothing —
    *  something outside the page is setting the render pace, not GPU load. */
   standingDown: boolean;
-  /** The live drawing-buffer size in device pixels — what tier.renderScale
+  /** The live drawing-buffer size in device pixels — what quality.renderScale
    *  actually produced this frame (see src/render/gl.ts's
    *  resizeCanvasToDisplaySize). */
   bufferWidth: number;
@@ -64,6 +73,8 @@ export interface PowerStatus {
 export interface PowerCardDeps {
   getPowerMode: () => PowerMode;
   onPowerModeChange: (mode: PowerMode) => void;
+  getQualityChoice: () => QualityChoice;
+  onQualityChoiceChange: (choice: QualityChoice) => void;
   getPowerStatus: () => PowerStatus;
 }
 
@@ -129,6 +140,86 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
   };
 }
 
+// Quality row's chip group wraps rather than squeezing five chips onto one
+// line — the column (controlsTheme.ts's .vc-power-col) is 200px, too narrow
+// for [Auto][High][Mid][Low][Floor] on a single row at a legible size.
+const qualityListStyle = `display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;`;
+const qualityChipStyle = `${chipBtnStyle} flex: 1 1 auto; text-align: center; padding-top: 4px; padding-bottom: 4px; min-width: 38px;`;
+const qualityChipLitStyle = `${chipBtnLitStyle} flex: 1 1 auto; text-align: center; padding-top: 4px; padding-bottom: 4px; min-width: 38px;`;
+// Independent of selected/lit: an inset underline in the accent color marks
+// whichever chip Auto currently resolves to, so the recommendation stays
+// visible even when the user has picked something else — and composes with
+// the lit background when it's also the selected chip.
+const recommendedShadow = `inset 0 -2px 0 ${withAlpha(POWER_TEAL, 0.55)}`;
+
+const QUALITY_OPTIONS: { choice: QualityChoice; text: string }[] = [
+  { choice: "auto", text: "Auto" },
+  { choice: "high", text: "High" },
+  { choice: "mid", text: "Mid" },
+  { choice: "low", text: "Low" },
+  { choice: "floor", text: "Floor" },
+];
+
+const PRESET_LABEL: Record<QualityPreset, string> = { high: "High", mid: "Mid", low: "Low", floor: "Floor" };
+
+/** The new editable row: a wrapping chip group covering Auto plus every
+ *  QualityPreset. Mirrors createModeRow's shape (label, chips, hint) but
+ *  layers a second visual signal — the recommended chip's underline — on
+ *  top of the ordinary selected/unselected one. */
+function createQualityRow(deps: PowerCardDeps, accent: string) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.style.setProperty("--vc-accent", accent);
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = "Quality";
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  head.appendChild(label);
+
+  const list = document.createElement("div");
+  list.style.cssText = qualityListStyle;
+  const buttons = QUALITY_OPTIONS.map((opt) => {
+    const btn = document.createElement("button");
+    btn.textContent = opt.text;
+    btn.style.cssText = qualityChipStyle;
+    btn.addEventListener("click", () => deps.onQualityChoiceChange(opt.choice));
+    return { choice: opt.choice, btn };
+  });
+  list.append(...buttons.map((b) => b.btn));
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+
+  el.append(head, list, hint);
+
+  return {
+    el,
+    refresh(choice: QualityChoice, recommended: QualityPreset): void {
+      for (const { choice: c, btn } of buttons) {
+        const selected = c === choice;
+        const isRecommended = c === recommended;
+        btn.style.cssText = selected ? qualityChipLitStyle : qualityChipStyle;
+        if (isRecommended) btn.style.boxShadow = recommendedShadow;
+        btn.title =
+          c === "auto"
+            ? `Follow this device's detected quality (currently ${PRESET_LABEL[recommended]})`
+            : isRecommended
+              ? `${PRESET_LABEL[c]} — this device's recommended quality`
+              : PRESET_LABEL[c];
+      }
+      hint.textContent =
+        choice === "auto"
+          ? `Auto — following this device (${PRESET_LABEL[recommended]})`
+          : choice === recommended
+            ? `${PRESET_LABEL[choice]} — matches this device's recommendation`
+            : `${PRESET_LABEL[choice]} — overriding the recommended ${PRESET_LABEL[recommended]}`;
+    },
+  };
+}
+
 /** What the status line and its hint say for a given snapshot — the
  *  "indication when suggested" this card exists to surface: standingDown is
  *  the one state that means "the browser is limiting frames, not this
@@ -137,9 +228,9 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
 function describeStatus(status: PowerStatus, accent: string): { text: string; dot: string; detail: string } {
   if (status.level === null) {
     return {
-      text: "Tier pinned",
+      text: "Quality pinned",
       dot: IDLE_DOT,
-      detail: "A dev ?tier= override is active for this session — the governor never runs.",
+      detail: "A dev ?quality= override is active for this session — the governor never runs.",
     };
   }
   if (status.mode === "off") {
@@ -166,12 +257,12 @@ function describeStatus(status: PowerStatus, accent: string): { text: string; do
   }
   if (status.level > 0) {
     return {
-      text: `Saving · step ${status.level}/${status.maxLevel}`,
+      text: `Saving · ${Math.round(status.fraction * 100)}% detail`,
       dot: accent,
       detail: "Sustained GPU load — quality stepped down automatically, and recovers once frames are comfortable again.",
     };
   }
-  return { text: "Full quality", dot: IDLE_DOT, detail: "Rendering at the detected tier's full quality." };
+  return { text: "Full quality", dot: IDLE_DOT, detail: "Rendering at the chosen quality's full detail." };
 }
 
 // The status line: the same small-caps mono register as the Bands card's
@@ -221,7 +312,7 @@ function createStatusRow(accent: string) {
 }
 
 // One diagnostic line: caption left, value right. The value is a run of
-// parts so mixed content ("2880 × 1800", "0 / 4") sets its digits in the
+// parts so mixed content ("2880 × 1800", "60 %") sets its digits in the
 // seven-segment face and the joiners in the mono face DSEG7 lacks — the
 // same split every readout in the panel makes between digits and unit.
 const readoutListStyle = `display: flex; flex-direction: column; gap: 7px;`;
@@ -275,6 +366,7 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   const statusRow = createStatusRow(POWER_TEAL);
   const hairline = document.createElement("div");
   hairline.style.cssText = hairlineStyle;
+  const qualityRow = createQualityRow(deps, POWER_TEAL);
   const modeRow = createModeRow(deps, POWER_TEAL);
 
   const readoutsHeading = document.createElement("div");
@@ -284,24 +376,19 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   readouts.style.cssText = readoutListStyle;
   const fps = createReadoutLine("FPS");
   const res = createReadoutLine("Resolution");
-  const step = createReadoutLine("Step");
-  const tier = createReadoutLine("Tier");
-  readouts.append(fps.el, res.el, step.el, tier.el);
+  const detail = createReadoutLine("Detail");
+  readouts.append(fps.el, res.el, detail.el);
 
-  card.body.append(statusRow.el, hairline, modeRow.el, readoutsHeading, readouts);
+  card.body.append(statusRow.el, hairline, qualityRow.el, modeRow.el, readoutsHeading, readouts);
 
   function refresh(): void {
     const status = deps.getPowerStatus();
     statusRow.refresh(status);
+    qualityRow.refresh(status.choice, status.recommended);
     modeRow.refresh(status.mode);
     fps.set(status.fps > 0 ? [digits(String(Math.round(status.fps)))] : [text("--")]);
     res.set([digits(String(status.bufferWidth)), join("×"), digits(String(status.bufferHeight))]);
-    step.set(
-      status.level === null
-        ? [text("--")]
-        : [digits(String(status.level)), join("/"), digits(String(status.maxLevel))],
-    );
-    tier.set([text(status.tier)]);
+    detail.set(status.level === null ? [text("--")] : [digits(String(Math.round(status.fraction * 100))), join("%")]);
   }
   refresh();
 

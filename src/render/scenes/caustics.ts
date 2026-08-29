@@ -483,7 +483,7 @@ void main() {
   float ring = uRipple * ringSum;
   vec2 q = p + radialDir * ring * 0.6;
 
-  int iterations = int(mix(3.0, 6.0, uQuality));
+  int iterations = int(mix(3.0, 6.0, uDetail));
   float acc = 0.0;
   float amp = 1.0;
   // Resting floor, scaled by uFocus — this is the scene's original design

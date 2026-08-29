@@ -1,39 +1,41 @@
 import { createProgram, createFullscreenQuad, drawFullscreenQuad } from "./gl.ts";
 
-export type Tier = "high" | "mid" | "low" | "floor";
+export type QualityPreset = "high" | "mid" | "low" | "floor";
 
-export interface TierSettings {
-  tier: Tier;
+export interface QualitySettings {
+  preset: QualityPreset;
   renderScale: number;
   maxParticles: number;
   raymarchSteps: number;
   bloomPasses: number;
-  /** 0..1 proxy uploaded as uQuality (density/bloom scaling in shaders).
-   *  Was derived ad-hoc from `tier` at render time; now a first-class field
+  /** 0..1 proxy uploaded as uDetail (density/bloom scaling in shaders).
+   *  Was derived ad-hoc from `preset` at render time; now a first-class field
    *  so governor.ts can step it down/up alongside renderScale and
-   *  raymarchSteps without needing to know about the tier label at all. */
-  quality: number;
+   *  raymarchSteps without needing to know about the preset label at all. */
+  detail: number;
 }
 
-const TIER_TABLE: Record<Tier, Omit<TierSettings, "tier">> = {
-  high: { renderScale: 1.0, maxParticles: 200_000, raymarchSteps: 96, bloomPasses: 3, quality: 1.0 },
-  mid: { renderScale: 0.75, maxParticles: 50_000, raymarchSteps: 64, bloomPasses: 2, quality: 0.7 },
-  low: { renderScale: 0.5, maxParticles: 12_000, raymarchSteps: 40, bloomPasses: 1, quality: 0.4 },
-  floor: { renderScale: 0.5, maxParticles: 4_000, raymarchSteps: 28, bloomPasses: 0, quality: 0.25 },
+const PRESET_TABLE: Record<QualityPreset, Omit<QualitySettings, "preset">> = {
+  high: { renderScale: 1.0, maxParticles: 200_000, raymarchSteps: 96, bloomPasses: 3, detail: 1.0 },
+  mid: { renderScale: 0.75, maxParticles: 50_000, raymarchSteps: 64, bloomPasses: 2, detail: 0.7 },
+  low: { renderScale: 0.5, maxParticles: 12_000, raymarchSteps: 40, bloomPasses: 1, detail: 0.4 },
+  floor: { renderScale: 0.5, maxParticles: 4_000, raymarchSteps: 28, bloomPasses: 0, detail: 0.25 },
 };
 
-export function tierSettings(tier: Tier): TierSettings {
-  return { tier, ...TIER_TABLE[tier] };
+export function qualitySettings(preset: QualityPreset): QualitySettings {
+  return { preset, ...PRESET_TABLE[preset] };
 }
 
-/** Dev-only escape hatch for `?tier=` — lets a headless capture tool (which
- *  runs on SwiftShader and would otherwise self-detect "low"/"floor", never
- *  the render quality a real device gets) force a specific tier and skip
- *  `detectTier()`'s benchmark entirely. Returns null for anything that
- *  isn't exactly one of TIER_TABLE's keys, so a typo/absence falls through
- *  to the normal auto-detect path rather than silently picking a tier. */
-export function parseTier(value: string | null): Tier | null {
-  return value !== null && Object.hasOwn(TIER_TABLE, value) ? (value as Tier) : null;
+/** Dev-only escape hatch for `?quality=` (accepts the older `?tier=` too, as a
+ *  silent alias) — lets a headless capture tool (which runs on SwiftShader
+ *  and would otherwise self-detect "low"/"floor", never the render quality a
+ *  real device gets) force a specific preset and skip `detectQuality()`'s
+ *  benchmark entirely. Returns null for anything that isn't exactly one of
+ *  PRESET_TABLE's keys, so a typo/absence falls through to the normal
+ *  auto-detect path rather than silently picking a preset. */
+export function parseQualityPreset(params: URLSearchParams): QualityPreset | null {
+  const value = params.get("quality") ?? params.get("tier");
+  return value !== null && Object.hasOwn(PRESET_TABLE, value) ? (value as QualityPreset) : null;
 }
 
 const BENCH_SIZE = 256;
@@ -61,7 +63,7 @@ void main() {
  * WEBGL_debug_renderer_info, and catches a slow phone as readily as a
  * slow TV.
  */
-export async function detectTier(): Promise<Tier> {
+export async function detectQuality(): Promise<QualityPreset> {
   if (typeof document === "undefined") return "mid";
 
   const canvas = document.createElement("canvas");

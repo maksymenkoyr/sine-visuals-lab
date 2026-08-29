@@ -1,7 +1,7 @@
-import type { TierSettings } from "./tier.ts";
+import type { QualitySettings } from "./quality.ts";
 
-// Discrete quality ladder, expressed as a fraction of the tier-detected
-// baseline. renderScale, raymarchSteps, and quality all move together on a
+// Discrete quality ladder, expressed as a fraction of the preset-detected
+// baseline. renderScale, raymarchSteps, and detail all move together on a
 // step so they never drift out of proportion with each other.
 const QUALITY_STEPS = [1.0, 0.8, 0.6, 0.45, 0.3];
 
@@ -88,18 +88,22 @@ const CADENCE_SHIFT_FRAC = 0.15;
 export interface QualityGovernor {
   /** Call once per *rendered* frame — i.e. only on ticks that actually
    *  called scene.render(), not every requestAnimationFrame tick — with the
-   *  current wall-clock time in ms. Steps the shared TierSettings object's
+   *  current wall-clock time in ms. Steps the shared QualitySettings object's
    *  numeric knobs down under sustained load and back up once comfortable
-   *  again. Never touches `tier.tier` itself: that label drives which
-   *  scenes are selectable (see tierAllows in app.ts/tv.ts), and changing
+   *  again. Never touches `quality.preset` itself: that label drives which
+   *  scenes are selectable (see presetAllows in app.ts/tv.ts), and changing
    *  it mid-session would make the running scene or gallery entries vanish. */
   recordFrame(nowMs: number): void;
-  /** Current step index, 0 = full detected-tier quality. For a debug HUD
+  /** Current step index, 0 = full detected-preset quality. For a debug HUD
    *  and the Power card's status readout. */
   readonly level: number;
   /** The last valid index into the quality ladder — level's ceiling. Lets a
    *  caller render "n/max" without hardcoding the ladder's length. */
   readonly maxLevel: number;
+  /** QUALITY_STEPS[level] — the current step as a fraction of baseline, for
+   *  the Power card's Detail readout. Kept alongside level/maxLevel rather
+   *  than making the caller re-derive it from the ladder. */
+  readonly fraction: number;
   /** True once a step-down probe found no improvement — something outside
    *  this page (a browser energy-saver mode, an OS refresh-rate cap) is
    *  setting the render pace, not GPU load — and the governor has stopped
@@ -107,26 +111,26 @@ export interface QualityGovernor {
   readonly standingDown: boolean;
   /** Energy saving On/Off (see src/render/powerMode.ts) takes the governor
    *  out of the loop entirely rather than fighting it: `false` pins quality
-   *  to the tier baseline and stops stepping; `true` resumes closed-loop
+   *  to the preset baseline and stops stepping; `true` resumes closed-loop
    *  stepping from a clean measurement (a stale EWMA/fastestMs from
    *  whatever ran while disabled must not carry over). Idempotent. */
   setEnabled(on: boolean): void;
 }
 
 /**
- * Closed-loop counterpart to detectTier()'s one-shot boot benchmark
- * (tier.ts). That benchmark measures a cold device; phones and TV SoCs
+ * Closed-loop counterpart to detectQuality()'s one-shot boot benchmark
+ * (quality.ts). That benchmark measures a cold device; phones and TV SoCs
  * throttle under sustained load, so its result stops describing reality
  * partway through a session. This watches actual rendered-frame timing
  * against `targetFrameMs` (the render-rate cap's interval) and adjusts —
  * see the "Authority probe" comment above for why a step down has to prove
  * itself before it's trusted.
  */
-export function createQualityGovernor(tier: TierSettings, targetFrameMs: number): QualityGovernor {
+export function createQualityGovernor(quality: QualitySettings, targetFrameMs: number): QualityGovernor {
   const baseline = {
-    renderScale: tier.renderScale,
-    raymarchSteps: tier.raymarchSteps,
-    quality: tier.quality,
+    renderScale: quality.renderScale,
+    raymarchSteps: quality.raymarchSteps,
+    detail: quality.detail,
   };
   let level = 0;
   let ewmaMs = targetFrameMs;
@@ -148,9 +152,9 @@ export function createQualityGovernor(tier: TierSettings, targetFrameMs: number)
 
   function applyLevel(): void {
     const f = QUALITY_STEPS[level];
-    tier.renderScale = Math.max(MIN_RENDER_SCALE, baseline.renderScale * f);
-    tier.raymarchSteps = Math.max(MIN_RAYMARCH_STEPS, Math.round(baseline.raymarchSteps * f));
-    tier.quality = Math.max(MIN_QUALITY, baseline.quality * f);
+    quality.renderScale = Math.max(MIN_RENDER_SCALE, baseline.renderScale * f);
+    quality.raymarchSteps = Math.max(MIN_RAYMARCH_STEPS, Math.round(baseline.raymarchSteps * f));
+    quality.detail = Math.max(MIN_QUALITY, baseline.detail * f);
   }
 
   // Re-armed on setEnabled(true): a stale EWMA/fastestMs learned while the
@@ -174,6 +178,9 @@ export function createQualityGovernor(tier: TierSettings, targetFrameMs: number)
     },
     get maxLevel() {
       return QUALITY_STEPS.length - 1;
+    },
+    get fraction() {
+      return QUALITY_STEPS[level];
     },
     get standingDown() {
       return standingDown;
