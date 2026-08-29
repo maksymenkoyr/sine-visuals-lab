@@ -61,6 +61,27 @@ const SETTINGS: SceneSetting[] = [
     default: 0.6,
   },
   {
+    key: "groove",
+    label: "Groove",
+    description: "How eagerly the dancer climbs from a sway to the big moves as a track builds.",
+    group: "Dance",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+  },
+  {
+    key: "jaw",
+    label: "Jaw chatter",
+    description: "How far bass hits open the jaw.",
+    group: "Dance",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    advanced: true,
+  },
+  {
     key: "bob",
     label: "Camera bob",
     description: "How much the camera nudges in on each beat.",
@@ -206,10 +227,10 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
     const boneBuf = createBoneBuffer();
     const clocks: MoveClocks = {
       beatPhase: 0, barPhase: 0, tempoLock: 0, beatPulse: 0, lowPulse: 0,
-      sectionIntensity: 0, dropPulse: 0, flowPhase: 0, timeSec: 0,
+      sectionIntensity: 0, dropPulse: 0, flowPhase: 0, timeSec: 0, bpm: 0,
     };
 
-    return (_frame, anim, getSetting) => {
+    return (frame, anim, getSetting) => {
       clocks.beatPhase = anim.beatPhase;
       clocks.barPhase = anim.barPhase;
       clocks.tempoLock = anim.tempoLock;
@@ -219,10 +240,13 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
       clocks.dropPulse = anim.dropPulse;
       clocks.flowPhase = anim.flowPhase;
       clocks.timeSec = anim.timeSec;
+      clocks.bpm = frame.bpm;
 
       const out = choreographer.advance(clocks, anim.dtSec, {
         energy: getSetting("motion"),
         bob: getSetting("bob"),
+        groove: getSetting("groove"),
+        jaw: getSetting("jaw"),
       });
       forwardKinematics(out.pose, world);
       groundToFloor(world, out.pose[CH_LIFT]);

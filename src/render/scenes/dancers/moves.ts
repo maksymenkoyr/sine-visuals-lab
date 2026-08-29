@@ -8,10 +8,15 @@
  * rather than raw pitch/yaw/roll, because the signs those need fall out of
  * rig.ts's rest rotations and are easy to get backwards. The helpers *add*
  * to the pose so layers compose.
+ *
+ * The beat-locked moves form a ladder (MOVE_LADDER) that pickMoveLevel()
+ * climbs as the section gets more intense; `sway` is the free layer under
+ * all of them and the only thing left when there is no beat to lock to.
  */
 import { B, CH_LIFT, CH_ROOT_X, CH_ROOT_Z, boneChannel, createPose, type Pose } from "./rig.ts";
 
-/** The slice of AnimFrame the moves read — see animClock.ts for each field. */
+/** The slice of AnimFrame (plus FeatureFrame.bpm) the moves read — see
+ *  animClock.ts for what each clock means. */
 export interface MoveClocks {
   beatPhase: number;
   barPhase: number;
@@ -22,15 +27,18 @@ export interface MoveClocks {
   dropPulse: number;
   flowPhase: number;
   timeSec: number;
+  bpm: number;
 }
 
 /** Writes a full pose into `out` (overwriting it). `energy` in [0,1] scales
- *  every amplitude, so energy 0 is the rest pose for every move. */
+ *  the motion; for `sway` that means energy 0 is exactly the rest stance,
+ *  while the beat moves keep their shape (see shapeAmp) and only go still. */
 export type Move = (c: MoveClocks, energy: number, out: Pose) => void;
 
 export type Side = "L" | "R";
 /** +1 for the L side (at +X), -1 for R — the sign that mirrors a lateral motion. */
 const sideSign = (side: Side): number => (side === "L" ? 1 : -1);
+const SIDES: readonly Side[] = ["L", "R"];
 
 // ---- Pose algebra ----------------------------------------------------------
 
@@ -97,6 +105,7 @@ export function rootShift(pose: Pose, x: number, z: number): void {
   pose[CH_ROOT_X] += x;
   pose[CH_ROOT_Z] += z;
 }
+/** Hop: raise the whole figure off the floor. */
 export function lift(pose: Pose, height: number): void {
   pose[CH_LIFT] += Math.max(0, height);
 }
@@ -105,10 +114,21 @@ export function lift(pose: Pose, height: number): void {
 
 const TAU = Math.PI * 2;
 
+/** 0 on the beat, 1 halfway to the next — the crouch of a bounce. */
+const dip = (beatPhase: number): number => 0.5 - 0.5 * Math.cos(TAU * beatPhase);
+/** A hop that peaks exactly on the beat and is gone by the half-beat. */
+const hop = (beatPhase: number): number => Math.max(0, Math.cos(TAU * beatPhase)) ** 2;
+/** Weight cycle: +1 on the L foot, -1 on the R, shifting every beat. */
+const weight = (barPhase: number): number => Math.sin(TAU * 2 * barPhase);
+/** Amplitude for a beat move's *shape* (where the arms sit, how wide the
+ *  stance is): partly energy-independent so hands-up still reads as hands
+ *  up at low energy, while the motion riding on it scales with `energy`. */
+const shapeAmp = (energy: number): number => 0.4 + 0.6 * energy;
+
 /** A resting stance — slight knee bend and a little arm hang-away — that
  *  every move builds on so the figure never locks its knees straight. */
 export function stance(pose: Pose): void {
-  for (const side of ["L", "R"] as const) {
+  for (const side of SIDES) {
     legSwing(pose, side, 0.02, 0.06);
     kneeFlex(pose, side, 0.08);
     armSwing(pose, side, 0.04, 0.12);
@@ -126,23 +146,132 @@ export const sway: Move = (c, energy, out) => {
   const s = Math.sin(f * 1.1);
   const s2 = Math.sin(f * 2.2 + 0.7);
   const s3 = Math.sin(f * 0.55 + 1.3);
-  rootShift(out, 0.05 * e * s, 0.02 * e * s3);
-  hips(out, 0.07 * e * s, 0.05 * e * s3);
-  torso(out, 0.04 * e * (0.5 + 0.5 * s2), -0.1 * e * s3, -0.08 * e * s);
-  head(out, 0.06 * e * s2, 0.12 * e * s3, 0.08 * e * s);
+  rootShift(out, 0.06 * e * s, 0.02 * e * s3);
+  hips(out, 0.09 * e * s, 0.06 * e * s3);
+  torso(out, 0.05 * e * (0.5 + 0.5 * s2), -0.14 * e * s3, -0.1 * e * s);
+  head(out, 0.08 * e * s2, 0.16 * e * s3, 0.1 * e * s);
   // Weight drifts side to side: the unweighted knee softens.
-  kneeFlex(out, "L", 0.22 * e * Math.max(0, s));
-  kneeFlex(out, "R", 0.22 * e * Math.max(0, -s));
-  for (const side of ["L", "R"] as const) {
+  kneeFlex(out, "L", 0.28 * e * Math.max(0, s));
+  kneeFlex(out, "R", 0.28 * e * Math.max(0, -s));
+  for (const side of SIDES) {
     const k = sideSign(side);
-    armSwing(out, side, 0.18 * e * Math.sin(f * 1.1 + k * 0.6), 0.06 * e * (0.5 + 0.5 * s2));
-    elbowFlex(out, side, 0.2 * e * (0.5 + 0.5 * Math.sin(f * 1.7 + k)));
+    armSwing(out, side, 0.22 * e * Math.sin(f * 1.1 + k * 0.6), 0.08 * e * (0.5 + 0.5 * s2));
+    elbowFlex(out, side, 0.25 * e * (0.5 + 0.5 * Math.sin(f * 1.7 + k)));
   }
 };
 
-export const MOVE_NAMES = ["sway"] as const;
-export type MoveName = (typeof MOVE_NAMES)[number];
-export const MOVES: Readonly<Record<MoveName, Move>> = { sway };
+/** Two-step groove: weight shifts every beat, the free knee drives forward,
+ *  hips and shoulders counter-twist, arms swing in depth against the legs. */
+export const groove: Move = (c, energy, out) => {
+  restPose(out);
+  stance(out);
+  const e = energy;
+  const a = shapeAmp(energy);
+  const w = weight(c.barPhase);
+  const d = dip(c.beatPhase);
+  rootShift(out, 0.08 * e * w, 0.0);
+  hips(out, 0.14 * e * w, 0.18 * e * w);
+  torso(out, 0.06 * e + 0.05 * e * d, -0.3 * e * w, -0.12 * e * w);
+  head(out, 0.14 * e * d, 0.18 * e * w, 0.07 * e * w);
+  for (const side of SIDES) {
+    const k = sideSign(side);
+    const free = Math.max(0, -k * w); // this leg is unweighted when the weight is on the other
+    kneeFlex(out, side, 0.12 * a + 0.2 * e * d + 0.7 * e * free);
+    legSwing(out, side, 0.4 * e * free, 0.04 * a);
+    armSwing(out, side, 0.4 * e * k * w, 0.18 * a);
+    elbowFlex(out, side, 0.6 * a + 0.5 * e * (0.5 + 0.5 * k * w));
+  }
+};
+
+/** Bounce: both knees pump on the beat, arms tucked up and pumping, a small
+ *  hop landing on every beat. */
+export const bounce: Move = (c, energy, out) => {
+  restPose(out);
+  stance(out);
+  const e = energy;
+  const a = shapeAmp(energy);
+  const d = dip(c.beatPhase);
+  const w = weight(c.barPhase);
+  lift(out, 0.11 * e * hop(c.beatPhase));
+  rootShift(out, 0.04 * e * w, 0.0);
+  hips(out, 0.05 * e * w, 0.0);
+  torso(out, 0.14 * e * d, 0.1 * e * w, 0.0);
+  head(out, 0.18 * e * d, 0.0, 0.05 * e * w);
+  for (const side of SIDES) {
+    const k = sideSign(side);
+    legSwing(out, side, 0.18 * e * d, 0.05 * a);
+    kneeFlex(out, side, 0.15 * a + 0.55 * e * d);
+    armSwing(out, side, 0.55 * a, 0.35 * a);
+    elbowFlex(out, side, 1.6 * a + 0.5 * e * (1.0 - d) * (0.5 + 0.5 * k * w));
+  }
+};
+
+/** Hands up: arms overhead waving on the bar, wide stance, head thrown back,
+ *  weight rocking side to side with a hop on each beat. */
+export const handsUp: Move = (c, energy, out) => {
+  restPose(out);
+  stance(out);
+  const e = energy;
+  const a = shapeAmp(energy);
+  const d = dip(c.beatPhase);
+  const w = weight(c.barPhase);
+  const bar = Math.sin(TAU * c.barPhase);
+  lift(out, 0.09 * e * hop(c.beatPhase));
+  rootShift(out, 0.1 * e * w, 0.0);
+  hips(out, 0.1 * e * w, 0.08 * e * bar);
+  torso(out, -0.06 * a, 0.12 * e * Math.sin(TAU * 2 * c.barPhase), 0.16 * e * bar);
+  head(out, -0.3 * a, 0.12 * e * bar, 0.08 * e * w);
+  for (const side of SIDES) {
+    const k = sideSign(side);
+    legSwing(out, side, 0.1 * e * d, 0.28 * a);
+    kneeFlex(out, side, 0.1 * a + 0.32 * e * d);
+    armSwing(out, side, 0.35 * a, 2.5 * a + 0.3 * e * Math.sin(TAU * c.barPhase + k * 1.57));
+    elbowFlex(out, side, 0.35 * a + 0.3 * e * Math.sin(TAU * 2 * c.barPhase + k * 1.5));
+    wristBend(out, side, 0.4 * e * Math.sin(TAU * 4 * c.barPhase + k));
+  }
+};
+
+/** The drop: a crouch with arms flung up and out, head thrown back, jaw
+ *  open. A pose, not a move — choreo.ts blends toward it on dropPulse. */
+export function dropPose(out: Pose): Pose {
+  restPose(out);
+  for (const side of SIDES) {
+    legSwing(out, side, 0.5, 0.35);
+    kneeFlex(out, side, 1.1);
+    armSwing(out, side, 0.3, 2.6, 0.2);
+    elbowFlex(out, side, 0.2);
+  }
+  torso(out, 0.3, 0, 0);
+  head(out, -0.55, 0, 0);
+  jawOpen(out, 0.35);
+  return out;
+}
+
+/** Beat-locked moves in intensity order; index 0 is "sway only". */
+export const MOVE_LADDER: readonly (Move | null)[] = [null, groove, bounce, handsUp];
+export const MOVE_NAMES: readonly string[] = ["sway", "groove", "bounce", "handsUp"];
+
+// The picker climbs a rung when intensity passes an UP threshold and only
+// drops back below the matching DOWN threshold — the gap is what stops a
+// track hovering near a threshold from flickering between moves.
+const LEVEL_UP = [0.3, 0.55, 0.8];
+const LEVEL_DOWN = [0.2, 0.45, 0.7];
+/** How far the `groove` setting can push the effective intensity. */
+export const GROOVE_BIAS = 0.5;
+
+/** Effective intensity: the section's intensity biased by the groove
+ *  setting, which at its 0.5 default adds exactly nothing. */
+export function effectiveIntensity(sectionIntensity: number, groove: number): number {
+  return Math.min(1, Math.max(0, sectionIntensity + (groove - 0.5) * GROOVE_BIAS));
+}
+
+/** The rung of MOVE_LADDER to dance at, given the previous rung. Pure. */
+export function pickMoveLevel(prev: number, intensity: number): number {
+  let level = prev;
+  while (level < LEVEL_UP.length && intensity >= LEVEL_UP[level]) level++;
+  while (level > 0 && intensity < LEVEL_DOWN[level - 1]) level--;
+  return level;
+}
 
 /** Scratch pose factory for callers that blend several moves per frame. */
 export const newPose = createPose;
