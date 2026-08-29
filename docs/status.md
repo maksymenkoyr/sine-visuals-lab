@@ -6,38 +6,42 @@ regenerate it at session close.
 
 ## In flight
 
-- **Power card collapse + all-folded triangle** — branch `worktree-power-collapse`
-  (worktree at `.claude/worktrees/power-collapse`, locked), 1 commit ahead of
-  `main`, unmerged:
-  - `8dd5184` Power card collapses too; all-folded triangle-collapses the
-    column — rebuilt from scratch after #27 landed on `main` mid-session and
-    removed the fold-all/onFoldChange/setAllFolded plumbing this depended on.
-- **Auto-gain becomes an amount + Signal history trace** — branch
-  `worktree-autogain-amount-scope` (worktree at
-  `.claude/worktrees/autogain-amount-scope`, locked), 2 commits ahead of
-  `main`, unmerged.
+- **Dancers scene** — branch `worktree-dancers-scene` (worktree at
+  `.claude/worktrees/dancers-scene`), 5 commits ahead of `main`, draft PR
+  open. A raymarched skeleton dancing to the beat: CPU-solved rig
+  (`src/render/scenes/dancers/rig.ts`) → packed `uBones` → SDF skins, a move
+  ladder with a downbeat-latched picker (`choreo.ts`), auto-weighted settings,
+  and the new `type: "enum"` setting + chip picker row in `deviceMenu.ts`.
+  Registered as a draft at `minQuality: "mid"`. Typecheck + tests green;
+  verified headless at high/mid, in the gallery tile, and at 90/124/170 bpm
+  with synthetic audio. Not yet judged on real music.
 - **Mesh Grid rebuilt as a hidden-line spectrogram terrain** — branch
-  `worktree-mesh-grid-terrain` (worktree at
-  `.claude/worktrees/mesh-grid-terrain`, locked), 1 commit ahead of `main`,
+  `worktree-mesh-grid-terrain` (worktree locked), 9 commits ahead of `main`,
   unmerged.
-- **Caustics: Treble sparkle split into a macro** — branch
-  `worktree-sparkle-macro` (worktree at `.claude/worktrees/sparkle-macro`,
-  locked), 1 commit ahead of `main`, unmerged.
-- **Tuning: point-at-dials workflow** — branch `worktree-tuning-spotlight`
-  (worktree at `.claude/worktrees/tuning-spotlight`), 2 commits ahead of
+- **Auto-gain becomes an amount + Signal history trace** — branch
+  `worktree-autogain-amount-scope` (worktree locked), 5 commits ahead of
   `main`, unmerged.
-- **docs/architecture.md diagram-first rewrite** — branch
-  `worktree-docs-index` (worktree at `.claude/worktrees/docs-index`), 1
-  commit ahead of `main`, unmerged.
+- **Tuning: point-at-dials workflow** — branch `worktree-tuning-spotlight`,
+  2 commits ahead of `main`, unmerged.
+- **docs/architecture.md diagram-first rewrite** — branch `worktree-docs-index`,
+  1 commit ahead of `main`, unmerged.
 
 ## Open questions
 
-- None recorded yet.
+- Dancers: does the procedural groove hold up on real music, or does it want
+  captured motion (which would mean an asset pipeline the repo doesn't have)?
+- Dancers: `minQuality: "mid"` was chosen by analogy with Ferrofluid, not
+  measured on a low-preset device — the bounding-sphere early-out may make
+  `"low"` affordable.
+- `tuning/params.json` ships with `"autoPin": true`, so every setting probes
+  as `pinned` in DEV until `__viz.setParams({ autoPin: false })` — intended,
+  or a leftover from a tuning session?
 
 ## Next up
 
-- Merge or continue whichever of the worktrees above are actually finished —
-  six have accumulated since the last snapshot, several concurrent with this
-  session's own work on the same panel files (`#27` landed on `main` mid-session
-  and required rebuilding this session's change from scratch; worth checking
-  the others for the same kind of collision before merging).
+- Merge the Dancers draft PR once it's been watched with real music; then the
+  agreed follow-ups in order: more procedural skins (neon, blob), then decide
+  whether "other characters" justifies an asset pipeline. A crowd would need
+  a rasterised-bone path rather than more raymarching.
+- Merge or continue the other four worktrees — Mesh Grid terrain has grown to
+  nine commits and is the most likely to collide with `main`.
