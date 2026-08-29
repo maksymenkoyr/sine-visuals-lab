@@ -4,9 +4,13 @@ import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
 import { AUTO_SKY, FONT_MONO, HOT_RED, INPUT_GREEN, withAlpha } from "./controlsTheme.ts";
 import {
+  chipBtnLitStyle,
+  chipBtnStyle,
   createCard,
+  createChipButton,
   digitsStyle,
   digitsTextStyle,
+  groupHeadingFirstStyle,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
@@ -51,6 +55,23 @@ import {
  * screen space. allFolded()/setAllFolded() are how deviceMenu.ts's fold-all
  * chip drives this whole strip alongside its own Bands card, without either
  * side needing to know the other's card ids.
+ *
+ * The RAW chip above the cards flips every row that has a pre-smoothing
+ * counterpart to it, for diagnosing "is this a bad measurement or just a
+ * slow ease": Section reads sectionIntensity's un-slewed target
+ * (anim.raw.sectionIntensity), the Character dials read musicProfile's
+ * pre-ease targets (anim.raw.profile), BPM skips this file's own settle()
+ * pass and shows the estimator's raw candidate, and the waveform trace
+ * stops auto-zooming to the loudest column (fixed full-scale instead) while
+ * its peak readout drops the peak-hold decay. Level and the beat dot are
+ * already raw and don't change. Energy has no pre-envelope value threaded
+ * through AnimFrame, so it reads the mean of `rawBands` instead — the same
+ * pre-AGC/pre-envelope feed app.ts's captureRawBands hands the spectrum
+ * strip's own listening-post chip. That feed is local-only, so Energy reads
+ * idle under RAW on a mic-less renderer, same as the Scope card hiding
+ * itself. A folded card still skips its own work when RAW is on — the flag
+ * only changes what a card computes while it's open, not whether folding
+ * buys back that cost.
  */
 
 export interface AudioMetersOpts {
@@ -69,14 +90,16 @@ export interface AudioMeters {
    *  chip's write side. */
   setAllFolded(folded: boolean): void;
   /** Fed every frame while the panel is open. `frame`/`anim` null before
-   *  audio is up (idle readouts); `mono` null on any device without a local
-   *  analyser (Scope card hidden). A folded card skips its computation and
-   *  DOM writes for the frame — folding buys back the layout/canvas cost,
-   *  not just the screen space. */
+   *  audio is up (idle readouts); `mono`/`rawBands` null on any device
+   *  without a local analyser (Scope card hidden; Energy reads idle under
+   *  RAW — see file header). A folded card skips its computation and DOM
+   *  writes for the frame — folding buys back the layout/canvas cost, not
+   *  just the screen space. */
   update(
     frame: FeatureFrame | null,
     anim: AnimFrame | null,
     mono: Float32Array | null,
+    rawBands: Float32Array | null,
   ): void;
 }
 
@@ -295,6 +318,7 @@ function createTempoBlock(accent: string) {
   let lit = false;
   let lastLockStep = -1;
   let shownBpm = 0;
+  let wasRaw = false;
   const samples: { atMs: number; bpm: number }[] = [];
   digits.textContent = "--";
 
@@ -333,10 +357,26 @@ function createTempoBlock(accent: string) {
       }
     },
     /** At the text tick, with the raw estimate (0 = none): settles it
-     *  before showing — see TEMPO_SETTLE_SEC. */
-    settle(bpm: number, nowMs: number): void {
+     *  before showing — see TEMPO_SETTLE_SEC. `raw` (the meters' RAW chip)
+     *  bypasses the settle pass entirely and shows the estimate as-is;
+     *  samples keep accumulating underneath so settle() picks up cleanly
+     *  once RAW goes back off. */
+    settle(bpm: number, nowMs: number, raw: boolean): void {
       samples.push({ atMs: nowMs, bpm });
       while (samples.length && samples[0].atMs < nowMs - TEMPO_SETTLE_SEC * 1000) samples.shift();
+
+      if (raw) {
+        wasRaw = true;
+        digits.textContent = bpm > 0 ? String(Math.round(bpm)) : "--";
+        return;
+      }
+      if (wasRaw) {
+        // Force a repaint back to the settled value: the digits currently
+        // show whatever the raw estimate last landed on, which the guards
+        // below won't necessarily overwrite on their own.
+        wasRaw = false;
+        digits.textContent = shownBpm > 0 ? String(shownBpm) : "--";
+      }
       if (samples.length < 2 || nowMs - samples[0].atMs < TEMPO_SETTLE_SEC * 800) return;
 
       const sorted = samples.map((s) => s.bpm).sort((a, b) => a - b);
@@ -361,11 +401,37 @@ function createTempoBlock(accent: string) {
 
 const IDLE: ReadoutOpts = { textual: true, unit: "" };
 const pct = (v: number) => String(Math.round(clamp(v, 0, 1) * 100));
+const meanOf = (v: Float32Array) => {
+  let sum = 0;
+  for (let i = 0; i < v.length; i++) sum += v[i];
+  return v.length > 0 ? sum / v.length : 0;
+};
+
+// A slim control strip above the cards, not itself a card — "Meters" reads
+// as a section label the same way groupHeading marks a block of rows
+// elsewhere, with the RAW chip in the same right-hand slot a card's own
+// header chip would sit in (see createCard's `right`).
+const metersHeaderStyle = `display: flex; align-items: center; justify-content: space-between; margin: 2px 0 10px;`;
+const metersHeaderLabelStyle = `${groupHeadingFirstStyle} margin: 0;`;
+const RAW_CHIP_TITLE =
+  "Every reading below its pre-smoothing value: Section, Character and BPM jitter frame to frame instead of easing, and the waveform stops auto-zooming to the loudest column on screen.";
 
 export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
   const root = document.createElement("div");
   root.className = "vc-meters vc-scroll";
   const onFoldChange = () => opts.onFoldChange?.();
+
+  let showRaw = false;
+  const metersHeader = document.createElement("div");
+  metersHeader.style.cssText = metersHeaderStyle;
+  const metersHeaderLabel = document.createElement("div");
+  metersHeaderLabel.textContent = "Meters";
+  metersHeaderLabel.style.cssText = metersHeaderLabelStyle;
+  const rawChip = createChipButton("RAW", RAW_CHIP_TITLE, () => {
+    showRaw = !showRaw;
+    rawChip.style.cssText = showRaw ? chipBtnLitStyle : chipBtnStyle;
+  });
+  metersHeader.append(metersHeaderLabel, rawChip);
 
   // ---- Signal ----
   const level = createMeterRow({
@@ -436,7 +502,7 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
 
   // The scope leads: it's the one live picture of the sound itself, and the
   // first thing to check when the visuals seem off.
-  root.append(scopeCard.el, signalCard.el, rhythmCard.el, characterCard.el);
+  root.append(metersHeader, scopeCard.el, signalCard.el, rhythmCard.el, characterCard.el);
   const cards = [scopeCard, signalCard, rhythmCard, characterCard];
 
   // Ring buffer of columns, one pixel each — oldest at `head`, newest just
@@ -503,17 +569,23 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
     colStartMs = nowMs - (elapsed % WAVE_COLUMN_MS);
   }
 
-  function drawWave(): void {
+  /** `raw`: skip the auto-zoom and draw against the fixed ±1 full-scale
+   *  range instead — the honest picture the zoom otherwise hides, at the
+   *  cost of reading as a near-flat hairline outside a loud passage. */
+  function drawWave(raw: boolean): void {
     const w = waveCssWidth;
     const h = WAVE_HEIGHT_CSS_PX;
     const mid = h / 2;
     const len = histMin.length;
     waveCtx.clearRect(0, 0, w, h);
 
-    let range = WAVE_RANGE_FLOOR;
-    for (let i = 0; i < len; i++)
-      range = Math.max(range, histMax[i], -histMin[i]);
-    range = Math.max(range, colMax, -colMin);
+    let range = 1;
+    if (!raw) {
+      range = WAVE_RANGE_FLOOR;
+      for (let i = 0; i < len; i++)
+        range = Math.max(range, histMax[i], -histMin[i]);
+      range = Math.max(range, colMax, -colMin);
+    }
     const scale = (mid * 0.92) / range;
 
     // Oldest on the left; the live, still-open column at the right edge.
@@ -551,33 +623,47 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
     setAllFolded(folded): void {
       for (const card of cards) card.fold?.setFolded(folded);
     },
-    update(frame, anim, mono): void {
+    update(frame, anim, mono, rawBands): void {
       const nowMs = performance.now();
       const dtSec =
         lastMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastMs) / 1000);
       lastMs = nowMs;
       const text = nowMs - lastTextMs >= TEXT_REFRESH_MS;
       if (text) lastTextMs = nowMs;
+      const raw = showRaw;
 
       // ---- Signal ----
+      // Level is already raw and doesn't change; Energy's raw counterpart
+      // is rawBands (see file header), local-only like mono/the Scope card.
       if (!signalCard.fold?.isFolded()) {
+        const energyVal = raw
+          ? rawBands
+            ? meanOf(rawBands)
+            : null
+          : frame
+            ? frame.energy
+            : null;
         level.setValue(frame ? frame.level : null, dtSec);
-        energy.setValue(frame ? frame.energy : null, dtSec);
+        energy.setValue(energyVal, dtSec);
         if (text) {
           level.setReadout(frame ? pct(frame.level) : "--", frame ? {} : IDLE);
-          energy.setReadout(frame ? pct(frame.energy) : "--", frame ? {} : IDLE);
+          energy.setReadout(
+            energyVal === null ? "--" : pct(energyVal),
+            energyVal === null ? IDLE : {},
+          );
         }
       }
       // ---- Rhythm ----
       if (!rhythmCard.fold?.isFolded()) {
+        const sectionVal = anim ? (raw ? anim.raw.sectionIntensity : anim.sectionIntensity) : null;
         tempo.update(anim?.tempoLock ?? 0, !!frame?.beat);
-        section.setValue(anim ? anim.sectionIntensity : null, dtSec);
+        section.setValue(sectionVal, dtSec);
         if (anim?.dropOnset) section.flash(HOT_RED);
         if (text) {
-          tempo.settle(frame?.bpm ?? 0, nowMs);
+          tempo.settle(frame?.bpm ?? 0, nowMs, raw);
           section.setReadout(
-            anim ? pct(anim.sectionIntensity) : "--",
-            anim ? {} : IDLE,
+            sectionVal === null ? "--" : pct(sectionVal),
+            sectionVal === null ? IDLE : {},
           );
         }
       }
@@ -585,7 +671,7 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
       // ---- Character ----
       if (!characterCard.fold?.isFolded()) {
         for (const { dial, row } of dialRows) {
-          const v = anim ? anim.profile[dial] : null;
+          const v = anim ? (raw ? anim.raw.profile[dial] : anim.profile[dial]) : null;
           row.setValue(v, dtSec);
           if (text)
             row.setReadout(
@@ -611,8 +697,9 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
       }
       const clipped = isClipping(mono);
       pushWave(mono, clipped, nowMs);
-      drawWave();
-      wavePeak = Math.max(peak(mono), wavePeak - PEAK_FALL_PER_SEC * dtSec);
+      drawWave(raw);
+      const instPeak = peak(mono);
+      wavePeak = Math.max(instPeak, wavePeak - PEAK_FALL_PER_SEC * dtSec);
       if (text) {
         if (clipped)
           waveform.setReadout("CLIP", {
@@ -620,7 +707,7 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
             color: HOT_RED,
             unit: "",
           });
-        else waveform.setReadout(pct(wavePeak));
+        else waveform.setReadout(pct(raw ? instPeak : wavePeak));
       }
     },
   };

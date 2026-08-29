@@ -29,6 +29,10 @@ export interface SectionIntensity {
    *  song's own observed dynamic range — low in a quiet verse, high in a
    *  chorus or drop. Adapts to the track, not an absolute loudness level. */
   readonly intensity: number;
+  /** This tick's target for `intensity`, before INTENSITY_SLEW — the section's
+   *  raw position in the track's dynamic range, jumping frame to frame rather
+   *  than easing. For the meters panel's RAW chip (src/ui/audioMeters.ts). */
+  readonly rawIntensity: number;
   /** One-shot edge (like FeatureFrame.beat), true only on the tick intensity
    *  is rising fast enough to read as a drop/section change. */
   readonly dropOnset: boolean;
@@ -47,6 +51,7 @@ export function createSectionIntensity(): SectionIntensity {
 
   const state: SectionIntensity = {
     intensity: 0,
+    rawIntensity: 0,
     dropOnset: false,
     dropPulse: 0,
     advance(dtSec: number, energy: number): void {
@@ -70,6 +75,7 @@ export function createSectionIntensity(): SectionIntensity {
       if (dropOnset) dropPulse = 1;
 
       (state as { intensity: number }).intensity = intensity;
+      (state as { rawIntensity: number }).rawIntensity = target;
       (state as { dropOnset: boolean }).dropOnset = dropOnset;
       (state as { dropPulse: number }).dropPulse = dropPulse;
     },

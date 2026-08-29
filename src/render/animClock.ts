@@ -46,6 +46,10 @@ export interface AnimFrame {
    *  What autoTune.ts resolves scene settings against; also the hook future
    *  VJ-autopilot features (auto palette, auto scene switching) read. */
   profile: DialValues;
+  /** Pre-smoothing counterparts of sectionIntensity/profile above, for the
+   *  meters panel's RAW chip (src/ui/audioMeters.ts). JS-side only — never
+   *  uploaded as uniforms, the same way lowOnset/midOnset aren't. */
+  raw: { sectionIntensity: number; profile: DialValues };
 }
 
 export interface AnimClock {
@@ -106,6 +110,10 @@ export function createAnimClock(): AnimClock {
           dynamics: profile.dynamics,
           attack: profile.attack,
           loudness: profile.loudness,
+        },
+        raw: {
+          sectionIntensity: section.rawIntensity,
+          profile: { ...profile.targets },
         },
       };
     },

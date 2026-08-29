@@ -1456,7 +1456,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono);
+      audioMeters.update(frame, anim, mono, rawBands);
       // Raw (pre-sensitivity) energy, so the level wash reflects the actual
       // mic signal regardless of where the sensitivity slider is set.
       const level = frame?.energy ?? 0;
