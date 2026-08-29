@@ -44,13 +44,35 @@ import {
  * Fills move every frame; readout text at ~10Hz (the same reasoning as
  * deviceMenu.ts's AUTO_UI_REFRESH_MS — text writes cost layout, and eyes
  * can't read faster anyway). Only the waveform is a canvas.
+ *
+ * Each card is independently collapsible (controlsKit.ts's createCard
+ * foldId, remembered in panelFolds.ts) and update() skips a folded card's
+ * work entirely — folding buys back the per-frame cost, not just the
+ * screen space. allFolded()/setAllFolded() are how deviceMenu.ts's fold-all
+ * chip drives this whole strip alongside its own Bands card, without either
+ * side needing to know the other's card ids.
  */
+
+export interface AudioMetersOpts {
+  /** Called after any card in this strip folds/unfolds on its own (a header
+   *  click or its caret) — lets a caller (deviceMenu.ts's fold-all chip)
+   *  relabel itself without polling every card each frame. */
+  onFoldChange?: () => void;
+}
 
 export interface AudioMeters {
   el: HTMLElement;
+  /** True once every card in this strip is folded — the fold-all chip's
+   *  read side (combined with its own Bands card's fold state). */
+  allFolded(): boolean;
+  /** Applies the same fold state to every card in this strip — the fold-all
+   *  chip's write side. */
+  setAllFolded(folded: boolean): void;
   /** Fed every frame while the panel is open. `frame`/`anim` null before
    *  audio is up (idle readouts); `mono` null on any device without a local
-   *  analyser (Scope card hidden). */
+   *  analyser (Scope card hidden). A folded card skips its computation and
+   *  DOM writes for the frame — folding buys back the layout/canvas cost,
+   *  not just the screen space. */
   update(
     frame: FeatureFrame | null,
     anim: AnimFrame | null,
@@ -340,9 +362,10 @@ function createTempoBlock(accent: string) {
 const IDLE: ReadoutOpts = { textual: true, unit: "" };
 const pct = (v: number) => String(Math.round(clamp(v, 0, 1) * 100));
 
-export function createAudioMeters(): AudioMeters {
+export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
   const root = document.createElement("div");
   root.className = "vc-meters vc-scroll";
+  const onFoldChange = () => opts.onFoldChange?.();
 
   // ---- Signal ----
   const level = createMeterRow({
@@ -359,7 +382,7 @@ export function createAudioMeters(): AudioMeters {
     description:
       "The same sound after auto-gain, which keeps it mid-range whether the room is quiet or loud. This is what the scene actually reacts to.",
   });
-  const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN });
+  const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN, foldId: "signal", onFoldChange });
   signalCard.body.append(level.el, spacer(), energy.el);
 
   // ---- Rhythm ----
@@ -376,7 +399,7 @@ export function createAudioMeters(): AudioMeters {
   const rhythmRow = document.createElement("div");
   rhythmRow.style.cssText = rhythmRowStyle;
   rhythmRow.append(section.el, tempo.el);
-  const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT });
+  const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm", onFoldChange });
   rhythmCard.body.appendChild(rhythmRow);
 
   // ---- Character ----
@@ -389,7 +412,7 @@ export function createAudioMeters(): AudioMeters {
       tickAt: NEUTRAL[dial],
     }),
   }));
-  const characterCard = createCard({ title: "Character", accent: AUTO_SKY });
+  const characterCard = createCard({ title: "Character", accent: AUTO_SKY, foldId: "character", onFoldChange });
   dialRows.forEach(({ row }, i) => {
     if (i > 0) characterCard.body.appendChild(spacer());
     characterCard.body.appendChild(row.el);
@@ -406,7 +429,7 @@ export function createAudioMeters(): AudioMeters {
   waveCanvas.style.cssText = waveCanvasStyle;
   waveform.el.children[1].replaceWith(waveCanvas);
   const waveCtx = waveCanvas.getContext("2d")!;
-  const scopeCard = createCard({ title: "Scope", accent: NEUTRAL_ACCENT });
+  const scopeCard = createCard({ title: "Scope", accent: NEUTRAL_ACCENT, foldId: "scope", onFoldChange });
   scopeCard.body.appendChild(waveform.el);
   scopeCard.el.style.display = "none";
   let scopeShown = false;
@@ -414,6 +437,7 @@ export function createAudioMeters(): AudioMeters {
   // The scope leads: it's the one live picture of the sound itself, and the
   // first thing to check when the visuals seem off.
   root.append(scopeCard.el, signalCard.el, rhythmCard.el, characterCard.el);
+  const cards = [scopeCard, signalCard, rhythmCard, characterCard];
 
   // Ring buffer of columns, one pixel each — oldest at `head`, newest just
   // before it — plus the column currently being accumulated.
@@ -430,10 +454,15 @@ export function createAudioMeters(): AudioMeters {
   // layout width changes — same as spectrumStrip.ts. The history is one
   // column per CSS pixel, so it's rebuilt (cleared) with the width.
   let waveCssWidth = 0;
-  function ensureWaveSize(): void {
+  /** False while the canvas has no layout (the card is folded, or the panel
+   *  is closed) — same reasoning as spectrumStrip.ts's ensureSize: sizing to
+   *  a clamped 1px here would rebuild (clear) the wave history the moment
+   *  the card is hidden, then stretch a 1px backing store across it on show. */
+  function ensureWaveSize(): boolean {
     const rect = waveCanvas.getBoundingClientRect();
-    const w = Math.max(1, Math.round(rect.width));
-    if (w === waveCssWidth) return;
+    const w = Math.round(rect.width);
+    if (w <= 0) return false;
+    if (w === waveCssWidth) return true;
     waveCssWidth = w;
     const dpr = window.devicePixelRatio || 1;
     waveCanvas.width = Math.round(w * dpr);
@@ -443,6 +472,7 @@ export function createAudioMeters(): AudioMeters {
     histMax = new Float32Array(w);
     histClip = new Uint8Array(w);
     head = 0;
+    return true;
   }
 
   function commitColumn(): void {
@@ -458,7 +488,7 @@ export function createAudioMeters(): AudioMeters {
   /** Folds this frame's buffer into the current column, and closes it (or
    *  several, after a stall) once WAVE_COLUMN_MS has passed. */
   function pushWave(mono: Float32Array, clipped: boolean, nowMs: number): void {
-    ensureWaveSize();
+    if (!ensureWaveSize()) return;
     const { min, max } = downsampleForDisplay(mono, 1);
     colMin = Math.min(colMin, min[0]);
     colMax = Math.max(colMax, max[0]);
@@ -515,6 +545,12 @@ export function createAudioMeters(): AudioMeters {
 
   return {
     el: root,
+    allFolded(): boolean {
+      return cards.every((card) => card.fold?.isFolded() ?? false);
+    },
+    setAllFolded(folded): void {
+      for (const card of cards) card.fold?.setFolded(folded);
+    },
     update(frame, anim, mono): void {
       const nowMs = performance.now();
       const dtSec =
@@ -524,33 +560,39 @@ export function createAudioMeters(): AudioMeters {
       if (text) lastTextMs = nowMs;
 
       // ---- Signal ----
-      level.setValue(frame ? frame.level : null, dtSec);
-      energy.setValue(frame ? frame.energy : null, dtSec);
-      if (text) {
-        level.setReadout(frame ? pct(frame.level) : "--", frame ? {} : IDLE);
-        energy.setReadout(frame ? pct(frame.energy) : "--", frame ? {} : IDLE);
+      if (!signalCard.fold?.isFolded()) {
+        level.setValue(frame ? frame.level : null, dtSec);
+        energy.setValue(frame ? frame.energy : null, dtSec);
+        if (text) {
+          level.setReadout(frame ? pct(frame.level) : "--", frame ? {} : IDLE);
+          energy.setReadout(frame ? pct(frame.energy) : "--", frame ? {} : IDLE);
+        }
       }
       // ---- Rhythm ----
-      tempo.update(anim?.tempoLock ?? 0, !!frame?.beat);
-      section.setValue(anim ? anim.sectionIntensity : null, dtSec);
-      if (anim?.dropOnset) section.flash(HOT_RED);
-      if (text) {
-        tempo.settle(frame?.bpm ?? 0, nowMs);
-        section.setReadout(
-          anim ? pct(anim.sectionIntensity) : "--",
-          anim ? {} : IDLE,
-        );
+      if (!rhythmCard.fold?.isFolded()) {
+        tempo.update(anim?.tempoLock ?? 0, !!frame?.beat);
+        section.setValue(anim ? anim.sectionIntensity : null, dtSec);
+        if (anim?.dropOnset) section.flash(HOT_RED);
+        if (text) {
+          tempo.settle(frame?.bpm ?? 0, nowMs);
+          section.setReadout(
+            anim ? pct(anim.sectionIntensity) : "--",
+            anim ? {} : IDLE,
+          );
+        }
       }
 
       // ---- Character ----
-      for (const { dial, row } of dialRows) {
-        const v = anim ? anim.profile[dial] : null;
-        row.setValue(v, dtSec);
-        if (text)
-          row.setReadout(
-            v === null ? "--" : v.toFixed(2),
-            v === null ? IDLE : {},
-          );
+      if (!characterCard.fold?.isFolded()) {
+        for (const { dial, row } of dialRows) {
+          const v = anim ? anim.profile[dial] : null;
+          row.setValue(v, dtSec);
+          if (text)
+            row.setReadout(
+              v === null ? "--" : v.toFixed(2),
+              v === null ? IDLE : {},
+            );
+        }
       }
 
       // ---- Scope ----
@@ -560,6 +602,13 @@ export function createAudioMeters(): AudioMeters {
         scopeCard.el.style.display = showScope ? "" : "none";
       }
       if (!mono) return;
+      if (scopeCard.fold?.isFolded()) {
+        // Don't accumulate a column while hidden — on unfold this starts a
+        // fresh one instead of the elapsed gap reading as a stall and
+        // committing a burst of catch-up columns (see pushWave).
+        colStartMs = null;
+        return;
+      }
       const clipped = isClipping(mono);
       pushWave(mono, clipped, nowMs);
       drawWave();

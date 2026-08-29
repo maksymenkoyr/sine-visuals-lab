@@ -127,6 +127,33 @@ const stylesheet = `
   .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
 }
 
+/* A card's header/body split (controlsKit.ts's createCard): margin-bottom
+ * and padding-bottom live here, not in the inline cssText the pad/header
+ * otherwise carry, so .vc-folded below can zero them — an inline style
+ * would win over a class rule and the collapse would leave a gap. */
+.vc-card-head { margin-bottom: 9px; }
+.vc-card-pad { padding-bottom: 12px; }
+.vc-card.vc-folded .vc-card-head { margin-bottom: 0; }
+.vc-card.vc-folded .vc-card-pad { padding-bottom: 8px; }
+.vc-card.vc-folded .vc-card-body { display: none; }
+
+/* The collapse caret a foldId'd card's header carries (▾ open, ▸ folded) —
+ * same chevron glyphs as gallery.ts's draft-section toggle. Borderless so it
+ * reads as part of the header, not another chip. */
+.vc-fold {
+  background: transparent; border: none; padding: 0 1px; margin: 0 0 0 2px;
+  flex-shrink: 0; cursor: pointer; line-height: 1;
+  font: 400 10px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.45);
+  transition: color 0.15s ease;
+}
+.vc-card-head:hover .vc-fold, .vc-fold:focus-visible { color: #fff; }
+.vc-fold:focus-visible { outline: none; text-shadow: 0 0 6px rgba(255, 255, 255, 0.6); }
+
+/* The fold-all strip above the Bands card (deviceMenu.ts) — column-scoped,
+ * so it sits outside every card rather than crowding a third chip into the
+ * Bands header. */
+.vc-fold-bar { display: flex; justify-content: flex-end; }
+
 .vc-scroll { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
 .vc-scroll::-webkit-scrollbar { width: 4px; }
 .vc-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 2px; }
