@@ -1,7 +1,7 @@
 import {
-  ACCELERATION_DEFAULT,
-  ACCELERATION_MAX,
-  ACCELERATION_MIN,
+  EXPANSION_DEFAULT,
+  EXPANSION_MAX,
+  EXPANSION_MIN,
   applySensitivity,
   SENSITIVITY_DEFAULT,
   SENSITIVITY_MAX,
@@ -9,7 +9,7 @@ import {
   SMOOTHING_DEFAULT,
   SMOOTHING_MAX,
   SMOOTHING_MIN,
-  shapeAcceleration,
+  shapeExpansion,
   shapeLevel,
 } from "../audio/sensitivity.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
@@ -121,8 +121,8 @@ export interface DeviceMenuDeps {
   getAudioStatus: () => AudioStatus;
   getSensitivity: (sceneId: string) => number;
   onSensitivityChange: (sceneId: string, value: number) => void;
-  getAcceleration: (sceneId: string) => number;
-  onAccelerationChange: (sceneId: string, value: number) => void;
+  getExpansion: (sceneId: string) => number;
+  onExpansionChange: (sceneId: string, value: number) => void;
   getSmoothing: (sceneId: string) => number;
   onSmoothingChange: (sceneId: string, value: number) => void;
   /** Empty for scenes with nothing to tune — the card hides itself. */
@@ -148,18 +148,18 @@ export interface DeviceMenuDeps {
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   resolveSensitivityValue: (sceneId: string) => number;
-  resolveAccelerationValue: (sceneId: string) => number;
+  resolveExpansionValue: (sceneId: string) => number;
   resolveSmoothingValue: (sceneId: string) => number;
-  /** Synthetic SceneSettings for the Sensitivity/Acceleration/Smoothing
+  /** Synthetic SceneSettings for the Sensitivity/Expansion/Smoothing
    *  pseudo-params, so they can drive an auto chip through the same
    *  isSettingAutoEnabled/onSettingAutoToggle contract as a real scene
    *  setting row. */
   getSensitivitySpec: () => SceneSetting;
-  getAccelerationSpec: () => SceneSetting;
+  getExpansionSpec: () => SceneSetting;
   getSmoothingSpec: () => SceneSetting;
   isSettingAutoEnabled: (sceneId: string, key: string) => boolean;
   onSettingAutoToggle: (sceneId: string, spec: SceneSetting, on: boolean) => void;
-  /** Whether every auto-capable setting on this scene (incl. Sensitivity/Acceleration/Smoothing) is auto. */
+  /** Whether every auto-capable setting on this scene (incl. Sensitivity/Expansion/Smoothing) is auto. */
   isSceneAuto: (sceneId: string) => boolean;
   onSceneAutoToggle: (sceneId: string, on: boolean) => void;
   getAutoStrength: () => number;
@@ -958,11 +958,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
 
   // The global "Auto" master switch — toggles every auto-capable row, scene
-  // settings plus Sensitivity/Acceleration/Smoothing (see app.ts's
+  // settings plus Sensitivity/Expansion/Smoothing (see app.ts's
   // isSceneAuto wiring). Welded to the strength card's right edge, sharing
   // its accent without being nested inside its border.
   const autoMasterBtn = document.createElement("button");
-  autoMasterBtn.title = "Auto-tune everything — sensitivity, acceleration, smoothing, and every scene setting";
+  autoMasterBtn.title = "Auto-tune everything — sensitivity, expansion, smoothing, and every scene setting";
   const autoMasterLabel = document.createElement("div");
   autoMasterLabel.textContent = "Auto";
   const autoMasterSub = document.createElement("div");
@@ -974,7 +974,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoRow.style.cssText = autoRowStyle;
   autoRow.append(autoCard.el, autoMasterBtn);
 
-  // Input: Sensitivity/Acceleration/Smoothing — three instances of the same
+  // Input: Sensitivity/Expansion/Smoothing — three instances of the same
   // log-mapped row, sharing the auto-refresh call sites below (master
   // toggle, open(), live-drift refresh) through one array, which is what
   // keeps a future fourth row from shipping half-wired to Auto.
@@ -1018,18 +1018,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       "How hard the visuals react to the room",
     ),
     // Widens or narrows the gap between quiet and loud, independent of the
-    // overall gain Sensitivity controls — see shapeAcceleration for the curve.
+    // overall gain Sensitivity controls — see shapeExpansion for the curve.
     makeInputRow(
-      "Acceleration",
-      { min: ACCELERATION_MIN, max: ACCELERATION_MAX, defaultValue: ACCELERATION_DEFAULT },
-      deps.getAccelerationSpec,
-      () => deps.getAcceleration(deps.currentSceneId()),
-      () => deps.resolveAccelerationValue(deps.currentSceneId()),
-      (value) => deps.onAccelerationChange(deps.currentSceneId(), value),
+      "Expansion",
+      { min: EXPANSION_MIN, max: EXPANSION_MAX, defaultValue: EXPANSION_DEFAULT },
+      deps.getExpansionSpec,
+      () => deps.getExpansion(deps.currentSceneId()),
+      () => deps.resolveExpansionValue(deps.currentSceneId()),
+      (value) => deps.onExpansionChange(deps.currentSceneId(), value),
       "Distance between the quiet parts and the loud parts",
     ),
     // How fast the visuals chase the audio, independent of Sensitivity's gain
-    // and Acceleration's curve — see smoothingRateScale for the rate mapping.
+    // and Expansion's curve — see smoothingRateScale for the rate mapping.
     makeInputRow(
       "Smoothing",
       { min: SMOOTHING_MIN, max: SMOOTHING_MAX, defaultValue: SMOOTHING_DEFAULT },
@@ -1056,7 +1056,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // three rows below it are even shaping. Global per device, like Bands'
   // crossover (getBandSplit), so it's deliberately left out of this card's
   // own Reset chip below — that chip resets per-scene taste
-  // (Sensitivity/Acceleration/Smoothing), not a device-wide input
+  // (Sensitivity/Expansion/Smoothing), not a device-wide input
   // preference. Never auto-tuned (no `auto` block): auto mode reads
   // FeatureFrame.level, which this doesn't touch, but an amount that moves
   // by itself would make the Signal card's history trace unreadable.
@@ -1078,7 +1078,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const inputCard = createCard({
     title: "Input",
     accent: INPUT_GREEN,
-    right: createChipButton("Reset", "Reset sensitivity, acceleration and smoothing", () => {
+    right: createChipButton("Reset", "Reset sensitivity, expansion and smoothing", () => {
       for (const { row, defaultValue, onChange } of inputRows) {
         onChange(defaultValue);
         row.setValue(defaultValue);
@@ -1423,12 +1423,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const sensitivity = deps.isSettingAutoEnabled(sceneId, deps.getSensitivitySpec().key)
         ? deps.resolveSensitivityValue(sceneId)
         : deps.getSensitivity(sceneId);
-      const acceleration = deps.isSettingAutoEnabled(sceneId, deps.getAccelerationSpec().key)
-        ? deps.resolveAccelerationValue(sceneId)
-        : deps.getAcceleration(sceneId);
+      const expansion = deps.isSettingAutoEnabled(sceneId, deps.getExpansionSpec().key)
+        ? deps.resolveExpansionValue(sceneId)
+        : deps.getExpansion(sceneId);
       const shaped = Math.min(
         1,
-        Math.max(0, shapeAcceleration(shapeLevel(raw, sensitivity), acceleration)),
+        Math.max(0, shapeExpansion(shapeLevel(raw, sensitivity), expansion)),
       );
       const rawPct = Math.round(raw * 100);
       const shapedPct = Math.round(shaped * 100);
@@ -1443,16 +1443,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
 
       // The strip's raw feed shows the mic as-is; the default processed feed
-      // is the exact same sensitivity+acceleration pipeline the render path
+      // is the exact same sensitivity+expansion pipeline the render path
       // applies before scene.render() (see applySensitivity in app.ts) — so
       // it always shows literally what the visuals are reacting to. The
       // ghost is that same pipeline over the pre-fader frame, and it goes in
       // first: applySensitivity hands back one shared scratch buffer off its
       // fast path, so the ghost must be copied into the strip before the
       // second call overwrites it.
-      spectrumStrip.setGhost(ungained ? applySensitivity(ungained, sensitivity, acceleration).bands : null);
+      spectrumStrip.setGhost(ungained ? applySensitivity(ungained, sensitivity, expansion).bands : null);
       spectrumStrip.setPinned(pinned);
-      const processedBands = frame ? applySensitivity(frame, sensitivity, acceleration).bands : null;
+      const processedBands = frame ? applySensitivity(frame, sensitivity, expansion).bands : null;
       spectrumStrip.update(rawBands, processedBands);
 
       const nowMs = performance.now();

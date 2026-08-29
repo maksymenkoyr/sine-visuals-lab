@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
-  ACCELERATION_DEFAULT,
-  ACCELERATION_MAX,
-  ACCELERATION_MIN,
+  EXPANSION_DEFAULT,
+  EXPANSION_MAX,
+  EXPANSION_MIN,
   SENSITIVITY_DEFAULT,
   SENSITIVITY_MAX,
   SENSITIVITY_MIN,
@@ -10,13 +10,13 @@ import {
   SMOOTHING_MAX,
   SMOOTHING_MIN,
   applySensitivity,
-  getAcceleration,
+  getExpansion,
   getSensitivity,
   getSmoothing,
-  setAcceleration,
+  setExpansion,
   setSensitivity,
   setSmoothing,
-  shapeAcceleration,
+  shapeExpansion,
   shapeLevel,
   smoothingRateScale,
 } from "../src/audio/sensitivity.ts";
@@ -43,23 +43,23 @@ describe("sensitivity persistence", () => {
   });
 });
 
-describe("acceleration persistence", () => {
+describe("expansion persistence", () => {
   it("returns the default for a scene that's never been set", () => {
-    expect(getAcceleration("nonexistent-scene")).toBe(ACCELERATION_DEFAULT);
+    expect(getExpansion("nonexistent-scene")).toBe(EXPANSION_DEFAULT);
   });
 
   it("clamps out-of-range values on set", () => {
-    setAcceleration("clamp-test-acceleration", 999);
-    expect(getAcceleration("clamp-test-acceleration")).toBe(ACCELERATION_MAX);
-    setAcceleration("clamp-test-acceleration", -5);
-    expect(getAcceleration("clamp-test-acceleration")).toBe(ACCELERATION_MIN);
+    setExpansion("clamp-test-expansion", 999);
+    expect(getExpansion("clamp-test-expansion")).toBe(EXPANSION_MAX);
+    setExpansion("clamp-test-expansion", -5);
+    expect(getExpansion("clamp-test-expansion")).toBe(EXPANSION_MIN);
   });
 
   it("is independent of sensitivity's per-scene storage", () => {
     setSensitivity("shared-scene", 2);
-    setAcceleration("shared-scene", 3);
+    setExpansion("shared-scene", 3);
     expect(getSensitivity("shared-scene")).toBe(2);
-    expect(getAcceleration("shared-scene")).toBe(3);
+    expect(getExpansion("shared-scene")).toBe(3);
   });
 });
 
@@ -75,12 +75,12 @@ describe("smoothing persistence", () => {
     expect(getSmoothing("clamp-test-smoothing")).toBe(SMOOTHING_MIN);
   });
 
-  it("is independent of sensitivity's and acceleration's per-scene storage", () => {
+  it("is independent of sensitivity's and expansion's per-scene storage", () => {
     setSensitivity("shared-scene-2", 2);
-    setAcceleration("shared-scene-2", 3);
+    setExpansion("shared-scene-2", 3);
     setSmoothing("shared-scene-2", 0.5);
     expect(getSensitivity("shared-scene-2")).toBe(2);
-    expect(getAcceleration("shared-scene-2")).toBe(3);
+    expect(getExpansion("shared-scene-2")).toBe(3);
     expect(getSmoothing("shared-scene-2")).toBe(0.5);
   });
 });
@@ -122,37 +122,37 @@ describe("shapeLevel", () => {
   });
 });
 
-describe("shapeAcceleration", () => {
-  it("is fixed at 0, 0.5, and 1 regardless of acceleration", () => {
-    for (const c of [ACCELERATION_MIN, 1, 2, ACCELERATION_MAX]) {
-      expect(shapeAcceleration(0, c)).toBeCloseTo(0);
-      expect(shapeAcceleration(0.5, c)).toBeCloseTo(0.5);
-      expect(shapeAcceleration(1, c)).toBeCloseTo(1);
+describe("shapeExpansion", () => {
+  it("is fixed at 0, 0.5, and 1 regardless of expansion", () => {
+    for (const c of [EXPANSION_MIN, 1, 2, EXPANSION_MAX]) {
+      expect(shapeExpansion(0, c)).toBeCloseTo(0);
+      expect(shapeExpansion(0.5, c)).toBeCloseTo(0.5);
+      expect(shapeExpansion(1, c)).toBeCloseTo(1);
     }
   });
 
-  it("is the identity at the default acceleration", () => {
+  it("is the identity at the default expansion", () => {
     for (const x of [0.1, 0.3, 0.7, 0.9]) {
-      expect(shapeAcceleration(x, ACCELERATION_DEFAULT)).toBeCloseTo(x);
+      expect(shapeExpansion(x, EXPANSION_DEFAULT)).toBeCloseTo(x);
     }
   });
 
-  it("widens the gap above and below the midpoint when acceleration > 1", () => {
-    expect(shapeAcceleration(0.7, 2)).toBeGreaterThan(0.7);
-    expect(shapeAcceleration(0.3, 2)).toBeLessThan(0.3);
+  it("widens the gap above and below the midpoint when expansion > 1", () => {
+    expect(shapeExpansion(0.7, 2)).toBeGreaterThan(0.7);
+    expect(shapeExpansion(0.3, 2)).toBeLessThan(0.3);
   });
 
-  it("narrows the gap above and below the midpoint when acceleration < 1", () => {
-    expect(shapeAcceleration(0.7, 0.5)).toBeLessThan(0.7);
-    expect(shapeAcceleration(0.7, 0.5)).toBeGreaterThan(0.5);
-    expect(shapeAcceleration(0.3, 0.5)).toBeGreaterThan(0.3);
-    expect(shapeAcceleration(0.3, 0.5)).toBeLessThan(0.5);
+  it("narrows the gap above and below the midpoint when expansion < 1", () => {
+    expect(shapeExpansion(0.7, 0.5)).toBeLessThan(0.7);
+    expect(shapeExpansion(0.7, 0.5)).toBeGreaterThan(0.5);
+    expect(shapeExpansion(0.3, 0.5)).toBeGreaterThan(0.3);
+    expect(shapeExpansion(0.3, 0.5)).toBeLessThan(0.5);
   });
 
   it("stays within [0,1] at both extremes", () => {
-    for (const c of [ACCELERATION_MIN, ACCELERATION_MAX]) {
+    for (const c of [EXPANSION_MIN, EXPANSION_MAX]) {
       for (const x of [0.01, 0.3, 0.7, 0.99]) {
-        const out = shapeAcceleration(x, c);
+        const out = shapeExpansion(x, c);
         expect(out).toBeGreaterThanOrEqual(0);
         expect(out).toBeLessThanOrEqual(1);
       }
@@ -161,21 +161,21 @@ describe("shapeAcceleration", () => {
 
   it("has a bounded slope at the pivot, unlike the old power curve", () => {
     // The old pow-based curve had infinite slope at 0.5 — at high
-    // acceleration a level drifting 0.45 -> 0.55 would slam across most of
+    // expansion a level drifting 0.45 -> 0.55 would slam across most of
     // the range. The tanh curve's pivot step should stay well under that.
-    const step = shapeAcceleration(0.55, ACCELERATION_MAX) - shapeAcceleration(0.45, ACCELERATION_MAX);
+    const step = shapeExpansion(0.55, EXPANSION_MAX) - shapeExpansion(0.45, EXPANSION_MAX);
     expect(step).toBeLessThan(0.25);
   });
 
   it("eases into the ends: the step near 0/1 is smaller than the step at the pivot", () => {
-    const pivotStep = shapeAcceleration(0.55, ACCELERATION_MAX) - shapeAcceleration(0.5, ACCELERATION_MAX);
-    const endStep = shapeAcceleration(1, ACCELERATION_MAX) - shapeAcceleration(0.95, ACCELERATION_MAX);
+    const pivotStep = shapeExpansion(0.55, EXPANSION_MAX) - shapeExpansion(0.5, EXPANSION_MAX);
+    const endStep = shapeExpansion(1, EXPANSION_MAX) - shapeExpansion(0.95, EXPANSION_MAX);
     expect(endStep).toBeLessThan(pivotStep);
   });
 
   it("round-trips: expanding then compressing by the inverse factor recovers the input", () => {
     for (const x of [0.1, 0.3, 0.5, 0.7, 0.9]) {
-      expect(shapeAcceleration(shapeAcceleration(x, 2), 0.5)).toBeCloseTo(x, 5);
+      expect(shapeExpansion(shapeExpansion(x, 2), 0.5)).toBeCloseTo(x, 5);
     }
   });
 });
@@ -183,14 +183,14 @@ describe("shapeAcceleration", () => {
 describe("applySensitivity", () => {
   it("is a no-op at both defaults (fast path, same object)", () => {
     const f = frame([0, 0.3, 0.7, 1], 0.5);
-    const out = applySensitivity(f, SENSITIVITY_DEFAULT, ACCELERATION_DEFAULT);
+    const out = applySensitivity(f, SENSITIVITY_DEFAULT, EXPANSION_DEFAULT);
     expect(out).toBe(f);
   });
 
-  it("leaves 0 and 1 as fixed points regardless of sensitivity or acceleration", () => {
+  it("leaves 0 and 1 as fixed points regardless of sensitivity or expansion", () => {
     const f = frame([0, 1], 0);
     for (const s of [SENSITIVITY_MIN, 2, SENSITIVITY_MAX]) {
-      for (const c of [ACCELERATION_MIN, 2, ACCELERATION_MAX]) {
+      for (const c of [EXPANSION_MIN, 2, EXPANSION_MAX]) {
         const out = applySensitivity(f, s, c);
         expect(out.bands[0]).toBeCloseTo(0);
         expect(out.bands[1]).toBeCloseTo(1);
@@ -200,27 +200,27 @@ describe("applySensitivity", () => {
 
   it("raises mid-range values when sensitivity > 1 (more reactive)", () => {
     const f = frame([0.3], 0.3);
-    const out = applySensitivity(f, 2, ACCELERATION_DEFAULT);
+    const out = applySensitivity(f, 2, EXPANSION_DEFAULT);
     expect(out.bands[0]).toBeGreaterThan(0.3);
     expect(out.energy).toBeGreaterThan(0.3);
   });
 
   it("lowers mid-range values when sensitivity < 1 (calmer)", () => {
     const f = frame([0.3], 0.3);
-    const out = applySensitivity(f, 0.5, ACCELERATION_DEFAULT);
+    const out = applySensitivity(f, 0.5, EXPANSION_DEFAULT);
     expect(out.bands[0]).toBeLessThan(0.3);
     expect(out.energy).toBeLessThan(0.3);
   });
 
-  it("applies acceleration on top of sensitivity, in that order", () => {
+  it("applies expansion on top of sensitivity, in that order", () => {
     const f = frame([0.7], 0.7);
     // bands is a reused scratch buffer (see applySensitivity), so read each
     // result's scalar before the next call overwrites it in place.
-    const sensitivityOnlyBand = applySensitivity(f, 2, ACCELERATION_DEFAULT).bands[0];
-    const sensitivityOnlyEnergy = applySensitivity(f, 2, ACCELERATION_DEFAULT).energy;
+    const sensitivityOnlyBand = applySensitivity(f, 2, EXPANSION_DEFAULT).bands[0];
+    const sensitivityOnlyEnergy = applySensitivity(f, 2, EXPANSION_DEFAULT).energy;
     const bothBand = applySensitivity(f, 2, 2).bands[0];
     const bothEnergy = applySensitivity(f, 2, 2).energy;
-    // Acceleration > 1 further widens whatever sensitivity already produced above the midpoint.
+    // Expansion > 1 further widens whatever sensitivity already produced above the midpoint.
     expect(bothBand).toBeGreaterThan(sensitivityOnlyBand);
     expect(bothEnergy).toBeGreaterThan(sensitivityOnlyEnergy);
   });
@@ -228,7 +228,7 @@ describe("applySensitivity", () => {
   it("stays within [0,1] at both extremes", () => {
     const f = frame([0.01, 0.5, 0.99], 0.5);
     for (const s of [SENSITIVITY_MIN, SENSITIVITY_MAX]) {
-      for (const c of [ACCELERATION_MIN, ACCELERATION_MAX]) {
+      for (const c of [EXPANSION_MIN, EXPANSION_MAX]) {
         const out = applySensitivity(f, s, c);
         for (const b of out.bands) {
           expect(b).toBeGreaterThanOrEqual(0);
@@ -254,14 +254,14 @@ describe("applySensitivity", () => {
   });
 });
 
-describe("acceleration store migration from the legacy vibe.dynamics key", () => {
+describe("expansion store migration from the legacy vibe.dynamics key", () => {
   // The per-scene stores are created once at module load, seeded from
   // whatever localStorage holds at that moment — so exercising the
   // legacyKey migration means installing a fake localStorage with
   // "vibe.dynamics" data *before* a fresh import of the module, via
   // vi.resetModules(). Every other describe block in this file imports the
   // module statically and never touches localStorage, so this is isolated
-  // to its own block rather than mixed into "acceleration persistence".
+  // to its own block rather than mixed into "expansion persistence".
   function makeFakeLocalStorage() {
     const store = new Map<string, string>();
     return {
@@ -279,7 +279,7 @@ describe("acceleration store migration from the legacy vibe.dynamics key", () =>
     vi.resetModules();
   });
 
-  it("migrates a legacy vibe.dynamics value to vibe.acceleration and removes the old key", async () => {
+  it("migrates a legacy vibe.dynamics value to vibe.expansion and removes the old key", async () => {
     const fake = makeFakeLocalStorage();
     fake.setItem("vibe.dynamics", JSON.stringify({ "scene-a": 2.5 }));
     (globalThis as { localStorage?: unknown }).localStorage = fake;
@@ -287,21 +287,36 @@ describe("acceleration store migration from the legacy vibe.dynamics key", () =>
     vi.resetModules();
     const fresh = await import("../src/audio/sensitivity.ts");
 
-    expect(fresh.getAcceleration("scene-a")).toBe(2.5);
+    expect(fresh.getExpansion("scene-a")).toBe(2.5);
     expect(fake.raw.has("vibe.dynamics")).toBe(false);
-    expect(JSON.parse(fake.raw.get("vibe.acceleration")!)).toEqual({ "scene-a": 2.5 });
+    expect(JSON.parse(fake.raw.get("vibe.expansion")!)).toEqual({ "scene-a": 2.5 });
   });
 
-  it("prefers an existing vibe.acceleration value over a legacy one, and leaves the legacy key alone", async () => {
+  it("migrates the intermediate vibe.acceleration key, preferring it over an even older vibe.dynamics, and removes both", async () => {
     const fake = makeFakeLocalStorage();
     fake.setItem("vibe.dynamics", JSON.stringify({ "scene-a": 2.5 }));
-    fake.setItem("vibe.acceleration", JSON.stringify({ "scene-a": 1.5 }));
+    fake.setItem("vibe.acceleration", JSON.stringify({ "scene-a": 3 }));
     (globalThis as { localStorage?: unknown }).localStorage = fake;
 
     vi.resetModules();
     const fresh = await import("../src/audio/sensitivity.ts");
 
-    expect(fresh.getAcceleration("scene-a")).toBe(1.5);
+    expect(fresh.getExpansion("scene-a")).toBe(3);
+    expect(fake.raw.has("vibe.acceleration")).toBe(false);
+    expect(fake.raw.has("vibe.dynamics")).toBe(false);
+    expect(JSON.parse(fake.raw.get("vibe.expansion")!)).toEqual({ "scene-a": 3 });
+  });
+
+  it("prefers an existing vibe.expansion value over a legacy one, and leaves the legacy key alone", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.dynamics", JSON.stringify({ "scene-a": 2.5 }));
+    fake.setItem("vibe.expansion", JSON.stringify({ "scene-a": 1.5 }));
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+
+    vi.resetModules();
+    const fresh = await import("../src/audio/sensitivity.ts");
+
+    expect(fresh.getExpansion("scene-a")).toBe(1.5);
     expect(fake.raw.has("vibe.dynamics")).toBe(true);
   });
 });

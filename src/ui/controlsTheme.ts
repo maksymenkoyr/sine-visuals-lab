@@ -26,7 +26,7 @@ import "@fontsource/chakra-petch/latin-500.css";
 import "@fontsource/share-tech-mono/latin-400.css";
 import dseg7Url from "dseg/fonts/DSEG7-Classic/DSEG7Classic-Regular.woff2?url";
 
-/** Mic input gain — Sensitivity/Acceleration/Smoothing and the live level wash. */
+/** Mic input gain — Sensitivity/Expansion/Smoothing and the live level wash. */
 export const INPUT_GREEN = "#8ce6a0";
 /** This scene's own look — its declared settings. */
 export const SCENE_VIOLET = "#c3a5f9";

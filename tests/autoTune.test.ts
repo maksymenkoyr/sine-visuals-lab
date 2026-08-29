@@ -2,13 +2,13 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { causticsScene } from "../src/render/scenes/caustics.ts";
 import { meshGridScene } from "../src/render/scenes/meshGrid.ts";
 import { setSceneSetting, type SceneSetting } from "../src/render/sceneSettings.ts";
-import { setSensitivity, setAcceleration, setSmoothing } from "../src/audio/sensitivity.ts";
+import { setSensitivity, setExpansion, setSmoothing } from "../src/audio/sensitivity.ts";
 import { NEUTRAL, type DialValues } from "../src/render/musicProfile.ts";
 import {
   computeAutoTarget,
   resolveSceneSetting,
   resolveSensitivity,
-  resolveAcceleration,
+  resolveExpansion,
   resolveSmoothing,
   advanceAutoTune,
   isAutoEnabled,
@@ -18,10 +18,10 @@ import {
   setAutoStrength,
   seedAuto,
   getSensitivitySpec,
-  getAccelerationSpec,
+  getExpansionSpec,
   getSmoothingSpec,
   SENSITIVITY_AUTO_KEY,
-  ACCELERATION_AUTO_KEY,
+  EXPANSION_AUTO_KEY,
   SMOOTHING_AUTO_KEY,
 } from "../src/render/autoTune.ts";
 
@@ -29,7 +29,7 @@ const ALL_SETTINGS: SceneSetting[] = [
   ...(causticsScene.settings ?? []),
   ...(meshGridScene.settings ?? []),
   getSensitivitySpec(),
-  getAccelerationSpec(),
+  getExpansionSpec(),
   getSmoothingSpec(),
 ];
 
@@ -37,7 +37,7 @@ describe("computeAutoTarget", () => {
   // The load-bearing property the whole "safe to ship on by default" claim
   // rests on: at every dial neutral, auto must reproduce the plain default
   // bit-for-bit, for every real setting this pass ships weights for (every
-  // caustics and mesh grid setting, plus Sensitivity, Acceleration, and
+  // caustics and mesh grid setting, plus Sensitivity, Expansion, and
   // Smoothing — see ALL_SETTINGS above).
   it.each(ALL_SETTINGS.map((s) => [s.label, s] as const))(
     "returns exactly spec.default for %s when every dial is neutral",
@@ -54,7 +54,7 @@ describe("computeAutoTarget", () => {
 
   // Regression test for why this whole change exists: a typical (near-
   // neutral) dial reading used to move a setting by well under one slider
-  // step. computeAutoTarget shapes each dial through shapeAcceleration before
+  // step. computeAutoTarget shapes each dial through shapeExpansion before
   // weighting it, which must widen — not just preserve — that deviation for
   // a realistic, mid-range dial reading.
   it("widens the deviation for a near-neutral dial reading (the fix for auto barely moving anything)", () => {
@@ -166,7 +166,7 @@ describe("auto state and resolution", () => {
 
   it("isSceneAuto is true only while every auto-capable setting passed to it is auto", () => {
     const sceneId = "scene-auto-6";
-    const specs = [SPEC, getSensitivitySpec(), getAccelerationSpec(), getSmoothingSpec()];
+    const specs = [SPEC, getSensitivitySpec(), getExpansionSpec(), getSmoothingSpec()];
     expect(isSceneAuto(sceneId, specs)).toBe(true);
     setAutoEnabled(sceneId, SPEC.key, false);
     expect(isSceneAuto(sceneId, specs)).toBe(false);
@@ -191,22 +191,22 @@ describe("auto state and resolution", () => {
     expect(autoValue).toBeGreaterThan(manualValue);
   });
 
-  it("resolveAcceleration is a full parallel to resolveSensitivity, including its opposite-signed weight", () => {
+  it("resolveExpansion is a full parallel to resolveSensitivity, including its opposite-signed weight", () => {
     const sceneId = "scene-auto-8";
     setAutoStrength(1);
-    setAcceleration(sceneId, 1); // manual store's default
+    setExpansion(sceneId, 1); // manual store's default
 
-    setAutoEnabled(sceneId, ACCELERATION_AUTO_KEY, false);
-    const manualValue = resolveAcceleration(sceneId);
+    setAutoEnabled(sceneId, EXPANSION_AUTO_KEY, false);
+    const manualValue = resolveExpansion(sceneId);
 
-    const highDynamics: DialValues = { ...NEUTRAL, dynamics: 1 }; // Acceleration's weight on the `dynamics` dial is negative
-    setAutoEnabled(sceneId, ACCELERATION_AUTO_KEY, true);
-    seedAuto(sceneId, ACCELERATION_AUTO_KEY, manualValue);
+    const highDynamics: DialValues = { ...NEUTRAL, dynamics: 1 }; // Expansion's weight on the `dynamics` dial is negative
+    setAutoEnabled(sceneId, EXPANSION_AUTO_KEY, true);
+    seedAuto(sceneId, EXPANSION_AUTO_KEY, manualValue);
     advanceAutoTune(1, highDynamics);
-    const autoValue = resolveAcceleration(sceneId);
+    const autoValue = resolveExpansion(sceneId);
 
-    // A track that's already dynamic should pull Acceleration DOWN (less
-    // artificial acceleration), the opposite direction from Sensitivity's pull.
+    // A track that's already dynamic should pull Expansion DOWN (less
+    // artificial expansion), the opposite direction from Sensitivity's pull.
     expect(autoValue).toBeLessThan(manualValue);
   });
 
@@ -228,25 +228,25 @@ describe("auto state and resolution", () => {
     expect(autoValue).toBeLessThan(manualValue);
   });
 
-  it("manual Sensitivity/Acceleration/Smoothing stores are untouched by auto — resolve() only reads them, never writes", () => {
+  it("manual Sensitivity/Expansion/Smoothing stores are untouched by auto — resolve() only reads them, never writes", () => {
     const sceneId = "scene-auto-9";
     setSensitivity(sceneId, 2);
-    setAcceleration(sceneId, 2);
+    setExpansion(sceneId, 2);
     setSmoothing(sceneId, 2);
     setAutoStrength(1);
     advanceAutoTune(1, { ...NEUTRAL, dynamics: 1, density: 0 });
     resolveSensitivity(sceneId);
-    resolveAcceleration(sceneId);
+    resolveExpansion(sceneId);
     resolveSmoothing(sceneId);
     // Auto resolution must never mutate the manual store — only reading it
     // when a param is manual, and only the device menu's explicit
-    // onSensitivityChange/onAccelerationChange/onSmoothingChange (app.ts)
-    // should ever call setSensitivity/setAcceleration/setSmoothing.
+    // onSensitivityChange/onExpansionChange/onSmoothingChange (app.ts)
+    // should ever call setSensitivity/setExpansion/setSmoothing.
     setAutoEnabled(sceneId, SENSITIVITY_AUTO_KEY, false);
-    setAutoEnabled(sceneId, ACCELERATION_AUTO_KEY, false);
+    setAutoEnabled(sceneId, EXPANSION_AUTO_KEY, false);
     setAutoEnabled(sceneId, SMOOTHING_AUTO_KEY, false);
     expect(resolveSensitivity(sceneId)).toBeCloseTo(2);
-    expect(resolveAcceleration(sceneId)).toBeCloseTo(2);
+    expect(resolveExpansion(sceneId)).toBeCloseTo(2);
     expect(resolveSmoothing(sceneId)).toBeCloseTo(2);
   });
 });
@@ -273,7 +273,7 @@ describe("auto-exception migration from the legacy @contrast key", () => {
     vi.resetModules();
   });
 
-  it("rewrites a scene's '@contrast' manual exception to '@acceleration' and persists the rewrite", async () => {
+  it("rewrites a scene's '@contrast' manual exception to '@expansion' and persists the rewrite", async () => {
     const fake = makeFakeLocalStorage();
     fake.setItem("vibe.sceneAuto", JSON.stringify({ "scene-a": { "@contrast": false, "@sensitivity": false } }));
     (globalThis as { localStorage?: unknown }).localStorage = fake;
@@ -282,14 +282,37 @@ describe("auto-exception migration from the legacy @contrast key", () => {
     const fresh = await import("../src/render/autoTune.ts");
 
     // The old key must not still count as manual (it would silently flip
-    // Acceleration back to auto if left unmigrated), and the new key must.
+    // Expansion back to auto if left unmigrated), and the new key must.
     expect(fresh.isAutoEnabled("scene-a", "@contrast")).toBe(true);
-    expect(fresh.isAutoEnabled("scene-a", fresh.ACCELERATION_AUTO_KEY)).toBe(false);
+    expect(fresh.isAutoEnabled("scene-a", fresh.EXPANSION_AUTO_KEY)).toBe(false);
     // Sensitivity's unrelated exception survives the rewrite untouched.
     expect(fresh.isAutoEnabled("scene-a", fresh.SENSITIVITY_AUTO_KEY)).toBe(false);
 
     const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto")!);
-    expect(persisted["scene-a"]).toEqual({ "@acceleration": false, "@sensitivity": false });
+    expect(persisted["scene-a"]).toEqual({ "@expansion": false, "@sensitivity": false });
+  });
+
+  it("rewrites the intermediate '@acceleration' key too, and a scene already on '@expansion' keeps its own value", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem(
+      "vibe.sceneAuto",
+      JSON.stringify({
+        "scene-a": { "@acceleration": false },
+        // Both present: the current key wins, the stale one is just dropped.
+        "scene-b": { "@expansion": false, "@contrast": false },
+      }),
+    );
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+
+    vi.resetModules();
+    const fresh = await import("../src/render/autoTune.ts");
+
+    expect(fresh.isAutoEnabled("scene-a", "@acceleration")).toBe(true);
+    expect(fresh.isAutoEnabled("scene-a", fresh.EXPANSION_AUTO_KEY)).toBe(false);
+    expect(fresh.isAutoEnabled("scene-b", fresh.EXPANSION_AUTO_KEY)).toBe(false);
+
+    const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto")!);
+    expect(persisted).toEqual({ "scene-a": { "@expansion": false }, "scene-b": { "@expansion": false } });
   });
 });
 

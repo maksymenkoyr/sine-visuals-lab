@@ -12,10 +12,10 @@ import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, PALETTES, type Palette } from "./render/palette.ts";
 import {
   applySensitivity,
-  getAcceleration,
+  getExpansion,
   getSensitivity,
   getSmoothing,
-  setAcceleration,
+  setExpansion,
   setSensitivity,
   setSmoothing,
 } from "./audio/sensitivity.ts";
@@ -38,10 +38,10 @@ import {
   advanceAutoTune,
   resolveSceneSetting,
   resolveSensitivity,
-  resolveAcceleration,
+  resolveExpansion,
   resolveSmoothing,
   getSensitivitySpec,
-  getAccelerationSpec,
+  getExpansionSpec,
   getSmoothingSpec,
   isAutoEnabled,
   setAutoEnabled,
@@ -311,10 +311,10 @@ function wireDeviceMenu(): void {
       setAutoEnabled(sceneId, getSensitivitySpec().key, false);
       setSensitivity(sceneId, value);
     },
-    getAcceleration: (sceneId) => getAcceleration(sceneId),
-    onAccelerationChange: (sceneId, value) => {
-      setAutoEnabled(sceneId, getAccelerationSpec().key, false);
-      setAcceleration(sceneId, value);
+    getExpansion: (sceneId) => getExpansion(sceneId),
+    onExpansionChange: (sceneId, value) => {
+      setAutoEnabled(sceneId, getExpansionSpec().key, false);
+      setExpansion(sceneId, value);
     },
     getSmoothing: (sceneId) => getSmoothing(sceneId),
     onSmoothingChange: (sceneId, value) => {
@@ -335,20 +335,20 @@ function wireDeviceMenu(): void {
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
-    resolveAccelerationValue: (sceneId) => resolveAcceleration(sceneId),
+    resolveExpansionValue: (sceneId) => resolveExpansion(sceneId),
     resolveSmoothingValue: (sceneId) => resolveSmoothing(sceneId),
     getSensitivitySpec: () => getSensitivitySpec(),
-    getAccelerationSpec: () => getAccelerationSpec(),
+    getExpansionSpec: () => getExpansionSpec(),
     getSmoothingSpec: () => getSmoothingSpec(),
     isSettingAutoEnabled: (sceneId, key) => isAutoEnabled(sceneId, key),
     onSettingAutoToggle: (sceneId, spec, on) => {
       if (on) {
-        // Pseudo-params (Sensitivity/Acceleration/Smoothing) live in their
+        // Pseudo-params (Sensitivity/Expansion/Smoothing) live in their
         // own store rather than sceneSettings.ts — this map picks the right
         // manual-value getter by key, falling back to a real scene setting.
         const pseudoGetters: Record<string, (sceneId: string) => number> = {
           [getSensitivitySpec().key]: getSensitivity,
-          [getAccelerationSpec().key]: getAcceleration,
+          [getExpansionSpec().key]: getExpansion,
           [getSmoothingSpec().key]: getSmoothing,
         };
         const current = (pseudoGetters[spec.key] ?? ((id: string) => getSceneSetting(id, spec)))(sceneId);
@@ -360,13 +360,13 @@ function wireDeviceMenu(): void {
       isSceneAuto(sceneId, [
         ...(getScene(sceneId)?.settings ?? []),
         getSensitivitySpec(),
-        getAccelerationSpec(),
+        getExpansionSpec(),
         getSmoothingSpec(),
       ]),
     onSceneAutoToggle: (sceneId, on) =>
       setSceneAuto(
         sceneId,
-        [...(getScene(sceneId)?.settings ?? []), getSensitivitySpec(), getAccelerationSpec(), getSmoothingSpec()],
+        [...(getScene(sceneId)?.settings ?? []), getSensitivitySpec(), getExpansionSpec(), getSmoothingSpec()],
         on,
       ),
     getAutoStrength: () => getAutoStrength(),
@@ -768,7 +768,7 @@ function loop(): void {
   const resized = resizeCanvasToDisplaySize(canvas, tier.renderScale);
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
-  const displayFrame = applySensitivity(gained!, resolveSensitivity(scene.id), resolveAcceleration(scene.id));
+  const displayFrame = applySensitivity(gained!, resolveSensitivity(scene.id), resolveExpansion(scene.id));
   scene.render(mainHost!.ctx, displayFrame, viewport, palette, anim);
   governor?.recordFrame(nowRafMs);
 }

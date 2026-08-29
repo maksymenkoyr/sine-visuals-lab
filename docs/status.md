@@ -10,8 +10,12 @@ regenerate it at session close.
   `worktree-autogain-amount-scope`, 1 commit ahead of `main`. Auto-gain is now
   a 0–100 % blend (`src/audio/autoGain.ts`, blended in
   `FeatureExtractor.update`), the Input card's toggle is a slider row, and the
-  Signal card has a History trace of level/energy/`fixedEnergy`. Typecheck and
-  tests green; panel verified in headless Chromium with a fake mic.
+  Signal card has a History trace of level/energy/`fixedEnergy`. Also renames
+  the Acceleration control to **Expansion** (the audio-engineering term for
+  widening the quiet-to-loud gap), with both persisted keys migrated —
+  `legacyKeys` in `createPerSceneSetting`, `LEGACY_EXPANSION_AUTO_KEYS` in
+  `autoTune.ts`. Typecheck and tests green; panel verified in headless
+  Chromium with a fake mic.
 - **Docs pilot** — branch `worktree-docs-index` (worktree at
   `.claude/worktrees/docs-index`), 1 commit ahead: a diagram-first rewrite of
   `docs/architecture.md`. No PR yet. Note #18 also touches

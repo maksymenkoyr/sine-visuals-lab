@@ -11,7 +11,7 @@ import { createPerSceneSetting } from "./sensitivity.ts";
  * high pulse groups in bandEnergy.ts and the strip's bar tints) but "how
  * much does this part of the spectrum matter to the picture".
  *
- * Per-scene like sensitivity.ts/acceleration, not global like bandSplit.ts,
+ * Per-scene like sensitivity.ts/expansion, not global like bandSplit.ts,
  * since a gain is a preference for one scene's look, not a description of
  * the room. The UI is src/ui/bandFaders.ts, drawn over the spectrum strip
  * inside deviceMenu.ts's Bands card.

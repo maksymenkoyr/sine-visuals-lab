@@ -7,10 +7,10 @@ import {
   advanceAutoTune,
   resolveSceneSetting,
   resolveSensitivity,
-  resolveAcceleration,
+  resolveExpansion,
   resolveSmoothing,
   getSensitivitySpec,
-  getAccelerationSpec,
+  getExpansionSpec,
   getSmoothingSpec,
   setAutoEnabled,
 } from "../src/render/autoTune.ts";
@@ -25,7 +25,7 @@ const ALL_SETTINGS: SceneSetting[] = [
   ...(causticsScene.settings ?? []),
   ...(meshGridScene.settings ?? []),
   getSensitivitySpec(),
-  getAccelerationSpec(),
+  getExpansionSpec(),
   getSmoothingSpec(),
 ];
 
@@ -100,7 +100,7 @@ describe("override wins over resolve()", () => {
 describe("regression: inert when no overrides are active", () => {
   // The property that matters most — with the tuning layer completely
   // unused (no overrides, no pin), resolveSceneSetting/resolveSensitivity/
-  // resolveAcceleration/resolveSmoothing must behave exactly as they did
+  // resolveExpansion/resolveSmoothing must behave exactly as they did
   // before tuning/overrides.ts existed, for every real setting on the two
   // scenes the workflow targets first.
   it.each(ALL_SETTINGS.map((s) => [s.label, s] as const))(
@@ -115,11 +115,11 @@ describe("regression: inert when no overrides are active", () => {
     },
   );
 
-  it("resolveSensitivity/Acceleration/Smoothing are untouched when no override or pin is active", () => {
+  it("resolveSensitivity/Expansion/Smoothing are untouched when no override or pin is active", () => {
     const sceneId = "scene-regress-pseudo";
     advanceAutoTune(1, NEUTRAL);
     expect(resolveSensitivity(sceneId)).toBeCloseTo(getSensitivitySpec().default, 10);
-    expect(resolveAcceleration(sceneId)).toBeCloseTo(getAccelerationSpec().default, 10);
+    expect(resolveExpansion(sceneId)).toBeCloseTo(getExpansionSpec().default, 10);
     expect(resolveSmoothing(sceneId)).toBeCloseTo(getSmoothingSpec().default, 10);
   });
 });
