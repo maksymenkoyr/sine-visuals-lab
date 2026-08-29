@@ -11,6 +11,7 @@ import {
   groupHeadingStyle,
   rowHeadStyle,
   rowLabelStyle,
+  spacer,
   unitStyle,
 } from "./controlsKit.ts";
 
@@ -379,7 +380,7 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   const detail = createReadoutLine("Detail");
   readouts.append(fps.el, res.el, detail.el);
 
-  card.body.append(statusRow.el, hairline, qualityRow.el, modeRow.el, readoutsHeading, readouts);
+  card.body.append(statusRow.el, hairline, qualityRow.el, spacer(), modeRow.el, readoutsHeading, readouts);
 
   function refresh(): void {
     const status = deps.getPowerStatus();
