@@ -18,8 +18,10 @@ regenerate it at session close.
   `main`, unmerged.
 - **Mesh Grid rebuilt as a hidden-line spectrogram terrain** — branch
   `worktree-mesh-grid-terrain` (worktree at
-  `.claude/worktrees/mesh-grid-terrain`, locked), 1 commit ahead of `main`,
-  unmerged.
+  `.claude/worktrees/mesh-grid-terrain`, locked), draft PR #22, rebased onto
+  `main` after #31's tier → quality rename, unmerged. On top of the rebuild:
+  Camera Distance / Height / Tilt, Zoom, a Circle layout with Circle Squeeze,
+  and defaults lifted from a saved mark. Ready for a look on real music.
 - **Caustics: Treble sparkle split into a macro** — branch
   `worktree-sparkle-macro` (worktree at `.claude/worktrees/sparkle-macro`,
   locked), 1 commit ahead of `main`, unmerged.
@@ -32,7 +34,9 @@ regenerate it at session close.
 
 ## Open questions
 
-- None recorded yet.
+- Mesh Grid's defaults were tuned on synthetic audio plus one saved mark. The
+  peak-glow threshold in `MESH_FRAG` and the Circle layout's `CIRCLE_TILT_DEG`
+  may want a nudge once it's been watched on real music.
 
 ## Next up
 
