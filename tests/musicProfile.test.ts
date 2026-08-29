@@ -231,4 +231,25 @@ describe("music profile", () => {
     for (let i = 0; i < 600; i++) p.advance(DT, silentFrame(i * DT), NEUTRAL_INPUTS);
     expect(p.targets.loudness).toBeCloseTo(targetBeforeSilence, 5);
   });
+
+  // rateScale=Infinity is what sensitivity.ts's smoothingRateScale returns
+  // at the Smoothing row's Off stop (deviceMenu.ts) — ease() must assign the
+  // target directly rather than compute a Math.min(1, rate*dt*scale)
+  // coefficient, so every dial lands exactly on `targets`, which is what the
+  // meters panel's RAW chip already shows. Exercised over a musical feed
+  // (not just constant bands) so attack/pulse/tempo actually vary tick to
+  // tick, not just brightness/density/dynamics/loudness.
+  it("at rateScale=Infinity, every dial equals its target exactly, every tick", () => {
+    const p = createMusicProfile();
+    const feed = createSyntheticFeed({ bpm: 128 });
+    for (let i = 0; i < 900; i++) {
+      const t = i * DT;
+      const inputs: ProfileInputs = { tempoLock: 0.5 + 0.5 * Math.sin(t * 0.1), sectionIntensity: 0.5 + 0.5 * Math.sin(t * 0.05) };
+      p.advance(DT, feed.frame(t), inputs, Infinity);
+      for (const dial of Object.keys(NEUTRAL) as (keyof typeof NEUTRAL)[]) {
+        expect(Number.isFinite(p[dial])).toBe(true);
+        expect(p[dial]).toBe(p.targets[dial]);
+      }
+    }
+  });
 });

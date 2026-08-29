@@ -133,8 +133,19 @@ export class FeatureExtractor {
    *   what lands in `bands[]`/`energy` changes — so turning this off doesn't
    *   degrade beat detection, which is calibrated against the adaptive value.
    *   Defaults to true so every existing call site keeps today's behavior.
+   * @param smoothingScale Multiplies ATTACK_PER_SEC/RELEASE_PER_SEC below —
+   *   sensitivity.ts's smoothingRateScale, defaulting to 1 (today's
+   *   behavior). Non-finite (the Smoothing row's Off stop) assigns `target`
+   *   to the envelope directly rather than computing a coefficient, so
+   *   `bands`/`energy` land exactly on the adaptive-or-fixed mapping above —
+   *   the same one app.ts's captureRawBands computes — with none of
+   *   expBlend's floating-point rounding at "coefficient 1". Only this
+   *   envelope is scaled; the floor/peak trackers above and the flux
+   *   baseline below stay at their own fixed rates regardless — they're
+   *   measurement, not display smoothing, and the meters panel's RAW chip
+   *   already shows their output untouched.
    */
-  update(rawBandsDb: Float32Array, time: number, autoGain = true): FeatureFrame {
+  update(rawBandsDb: Float32Array, time: number, autoGain = true, smoothingScale = 1): FeatureFrame {
     const dt = this.lastTime === null ? 1 / 60 : Math.max(1e-4, time - this.lastTime);
     this.lastTime = time;
 
@@ -167,8 +178,12 @@ export class FeatureExtractor {
       const norm = clamp01((db - this.floor[b]) / range);
 
       const target = autoGain ? norm : clamp01((db - ANALYSER_MIN_DB) / fixedSpan);
-      const rate = target > this.env[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
-      this.env[b] += (target - this.env[b]) * expBlend(rate, dt);
+      if (Number.isFinite(smoothingScale)) {
+        const rate = target > this.env[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
+        this.env[b] += (target - this.env[b]) * expBlend(rate, dt * smoothingScale);
+      } else {
+        this.env[b] = target;
+      }
       bands[b] = this.env[b];
 
       flux += Math.max(0, norm - this.prevNorm[b]);

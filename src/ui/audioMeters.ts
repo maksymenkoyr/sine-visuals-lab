@@ -59,17 +59,29 @@ import {
  * slow ease": Section reads sectionIntensity's un-slewed target
  * (anim.raw.sectionIntensity), the Character dials read musicProfile's
  * pre-ease targets (anim.raw.profile), BPM skips this file's own settle()
- * pass and shows the estimator's raw candidate, and the waveform trace
- * stops auto-zooming to the loudest column (fixed full-scale instead) while
- * its peak readout drops the peak-hold decay. Level and the beat dot are
- * already raw and don't change. Energy has no pre-envelope value threaded
- * through AnimFrame, so it reads the mean of `rawBands` instead — the same
+ * pass and shows the estimator's raw candidate, and the waveform's peak
+ * readout drops the peak-hold decay. Level and the beat dot are already raw
+ * and don't change. Energy has no pre-envelope value threaded through
+ * AnimFrame, so it reads the mean of `rawBands` instead — the same
  * pre-AGC/pre-envelope feed app.ts's captureRawBands hands the spectrum
  * strip's own listening-post chip. That feed is local-only, so Energy reads
  * idle under RAW on a mic-less renderer, same as the Scope card hiding
  * itself. A folded card still skips its own work when RAW is on — the flag
  * only changes what a card computes while it's open, not whether folding
- * buys back that cost.
+ * buys back that cost. The waveform's auto-zoom is NOT part of this: it's a
+ * drawing choice (what range fills the card), not audio processing, so it
+ * stays on in both modes.
+ *
+ * Every one of those "un-eased" values is what its smoothed sibling is
+ * eternally chasing — none of it is a param a Reset chip can zero out.
+ * `rateScale` (this file's update(), threaded from app.ts's
+ * sensitivity.ts's smoothingRateScale) is what actually closes the gap: at
+ * the Smoothing row's Off stop it's Infinity, and every stage upstream of
+ * this file (features.ts's envelope, sectionIntensity.ts's INTENSITY_SLEW,
+ * musicProfile.ts's eases) plus this file's own BPM settle and waveform
+ * peak-hold snap straight to their targets — see sensitivity.ts's header for
+ * the full account of why RAW is then a genuine no-op rather than merely
+ * fast.
  */
 
 export interface AudioMeters {
@@ -79,12 +91,17 @@ export interface AudioMeters {
    *  without a local analyser (Scope card hidden; Energy reads idle under
    *  RAW — see file header). A folded card skips its computation and DOM
    *  writes for the frame — folding buys back the layout/canvas cost, not
-   *  just the screen space. */
+   *  just the screen space. `rateScale` is app.ts's already-resolved
+   *  sensitivity.ts's smoothingRateScale for this tick — non-finite (the
+   *  Smoothing row's Off stop) bypasses this file's own BPM settle and
+   *  waveform peak-hold, the same way `raw` already does, so RAW and
+   *  processed agree exactly (see file header). */
   update(
     frame: FeatureFrame | null,
     anim: AnimFrame | null,
     mono: Float32Array | null,
     rawBands: Float32Array | null,
+    rateScale: number,
   ): void;
 }
 
@@ -342,10 +359,13 @@ function createTempoBlock(accent: string) {
       }
     },
     /** At the text tick, with the raw estimate (0 = none): settles it
-     *  before showing — see TEMPO_SETTLE_SEC. `raw` (the meters' RAW chip)
-     *  bypasses the settle pass entirely and shows the estimate as-is;
-     *  samples keep accumulating underneath so settle() picks up cleanly
-     *  once RAW goes back off. */
+     *  before showing — see TEMPO_SETTLE_SEC. `raw` bypasses the settle pass
+     *  entirely and shows the estimate as-is — true for the meters' RAW
+     *  chip, and also (from update() below) whenever `rateScale` is
+     *  non-finite (Smoothing's Off stop), so the processed reading lands on
+     *  the exact same unsettled number RAW already shows rather than merely
+     *  a fast-settling one. Samples keep accumulating underneath either way,
+     *  so settle() picks up cleanly the moment `raw` goes back to false. */
     settle(bpm: number, nowMs: number, raw: boolean): void {
       samples.push({ atMs: nowMs, bpm });
       while (samples.length && samples[0].atMs < nowMs - TEMPO_SETTLE_SEC * 1000) samples.shift();
@@ -399,7 +419,7 @@ const meanOf = (v: Float32Array) => {
 const metersHeaderStyle = `display: flex; align-items: center; justify-content: space-between; margin: 2px 0 10px;`;
 const metersHeaderLabelStyle = `${groupHeadingFirstStyle} margin: 0;`;
 const RAW_CHIP_TITLE =
-  "Every reading below its pre-smoothing value: Section, Character and BPM jitter frame to frame instead of easing, and the waveform stops auto-zooming to the loudest column on screen.";
+  "Every reading below its pre-smoothing value: Section, Character and BPM jitter frame to frame instead of easing. That easing is built into the pipeline, not a setting — Reset won't close the gap. Drag Smoothing (Input card) to Off instead: at Off, every eased reading lands on exactly what RAW already shows, so there's nothing left to toggle.";
 
 export function createAudioMeters(): AudioMeters {
   const root = document.createElement("div");
@@ -552,23 +572,20 @@ export function createAudioMeters(): AudioMeters {
     colStartMs = nowMs - (elapsed % WAVE_COLUMN_MS);
   }
 
-  /** `raw`: skip the auto-zoom and draw against the fixed ±1 full-scale
-   *  range instead — the honest picture the zoom otherwise hides, at the
-   *  cost of reading as a near-flat hairline outside a loud passage. */
-  function drawWave(raw: boolean): void {
+  /** Zooms to the loudest column on screen, in both RAW and processed modes
+   *  — this is a drawing choice (what range fills the card), not audio
+   *  processing, so unlike the rest of the RAW chip it never changes with
+   *  it (see file header). */
+  function drawWave(): void {
     const w = waveCssWidth;
     const h = WAVE_HEIGHT_CSS_PX;
     const mid = h / 2;
     const len = histMin.length;
     waveCtx.clearRect(0, 0, w, h);
 
-    let range = 1;
-    if (!raw) {
-      range = WAVE_RANGE_FLOOR;
-      for (let i = 0; i < len; i++)
-        range = Math.max(range, histMax[i], -histMin[i]);
-      range = Math.max(range, colMax, -colMin);
-    }
+    let range = WAVE_RANGE_FLOOR;
+    for (let i = 0; i < len; i++) range = Math.max(range, histMax[i], -histMin[i]);
+    range = Math.max(range, colMax, -colMin);
     const scale = (mid * 0.92) / range;
 
     // Oldest on the left; the live, still-open column at the right edge.
@@ -600,7 +617,7 @@ export function createAudioMeters(): AudioMeters {
 
   return {
     el: root,
-    update(frame, anim, mono, rawBands): void {
+    update(frame, anim, mono, rawBands, rateScale): void {
       const nowMs = performance.now();
       const dtSec =
         lastMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastMs) / 1000);
@@ -608,6 +625,11 @@ export function createAudioMeters(): AudioMeters {
       const text = nowMs - lastTextMs >= TEXT_REFRESH_MS;
       if (text) lastTextMs = nowMs;
       const raw = showRaw;
+      // Smoothing's Off stop (sensitivity.ts's smoothingRateScale returns
+      // Infinity there) — bypasses this file's own BPM settle and waveform
+      // peak-hold the same way `raw` does, so RAW has nothing left to show
+      // that the processed reading doesn't already match (see file header).
+      const smoothingOff = !Number.isFinite(rateScale);
 
       // ---- Signal ----
       // Level is already raw and doesn't change; Energy's raw counterpart
@@ -637,7 +659,7 @@ export function createAudioMeters(): AudioMeters {
         section.setValue(sectionVal, dtSec);
         if (anim?.dropOnset) section.flash(HOT_RED);
         if (text) {
-          tempo.settle(frame?.bpm ?? 0, nowMs, raw);
+          tempo.settle(frame?.bpm ?? 0, nowMs, raw || smoothingOff);
           section.setReadout(
             sectionVal === null ? "--" : pct(sectionVal),
             sectionVal === null ? IDLE : {},
@@ -674,9 +696,12 @@ export function createAudioMeters(): AudioMeters {
       }
       const clipped = isClipping(mono);
       pushWave(mono, clipped, nowMs);
-      drawWave(raw);
+      drawWave();
       const instPeak = peak(mono);
-      wavePeak = Math.max(instPeak, wavePeak - PEAK_FALL_PER_SEC * dtSec);
+      // finite - Infinity is exactly -Infinity (IEEE754), and Math.max
+      // against that is exactly instPeak — no separate smoothingOff branch
+      // needed here, unlike the ease()-style blends elsewhere.
+      wavePeak = Math.max(instPeak, wavePeak - PEAK_FALL_PER_SEC * rateScale * dtSec);
       if (text) {
         if (clipped)
           waveform.setReadout("CLIP", {

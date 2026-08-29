@@ -8,6 +8,21 @@ import { NUM_BANDS, type FeatureFrame } from "./types.ts";
  * user preference ("react harder" / "calm down", "more punch" / "flatter",
  * "snappier" / "smoother") remembered per scene, since each scene's shader
  * weights uEnergy/uBands differently.
+ *
+ * Smoothing is a multiplier on the pipeline's own easing, not the easing
+ * itself — SMOOTHING_DEFAULT (1x) means "the designed amount", not "none",
+ * and nothing in [SMOOTHING_MIN, SMOOTHING_MAX] ever reaches zero (see
+ * smoothingRateScale below). Only the Smoothing row's explicit Off stop
+ * (zeroAtMin in deviceMenu.ts, stored as 0 — below SMOOTHING_MIN, which
+ * stays the slider's log-curve floor) reaches genuinely unsmoothed: at 0,
+ * smoothingRateScale returns Infinity, and every stage it reaches
+ * (features.ts's envelope, sectionIntensity.ts's INTENSITY_SLEW,
+ * musicProfile.ts's eases, audioMeters.ts's BPM settle and waveform
+ * peak-hold) snaps straight to its target that same tick. That's what makes
+ * the meters panel's RAW chip a true no-op: RAW already shows each of those
+ * targets, so at Smoothing Off (with band gains at 1x and auto-gain off —
+ * Sensitivity/Acceleration don't reach the meters at all, see app.ts) there
+ * is nothing left for RAW to bypass.
  */
 
 export const SENSITIVITY_MIN = 0.25;
@@ -110,7 +125,14 @@ const accelerationStore = createPerSceneSetting(
 export const getAcceleration = accelerationStore.get;
 export const setAcceleration = accelerationStore.set;
 
-const smoothingStore = createPerSceneSetting("vibe.smoothing", SMOOTHING_MIN, SMOOTHING_MAX, SMOOTHING_DEFAULT);
+// Floor is 0, not SMOOTHING_MIN — the Smoothing row alone gets an explicit
+// Off stop (zeroAtMin in deviceMenu.ts), carved out below the slider's log
+// curve rather than extending it. SMOOTHING_MIN itself stays 0.25: it's
+// still the curve's own floor (posToValue/valueToPos need a nonzero base)
+// and autoTune.ts's SMOOTHING_SPEC.min, so auto-tune never resolves smoothing
+// to Off on its own — that's a deliberate manual gesture, not something an
+// estimator should silently pick.
+const smoothingStore = createPerSceneSetting("vibe.smoothing", 0, SMOOTHING_MAX, SMOOTHING_DEFAULT);
 export const getSmoothing = smoothingStore.get;
 export const setSmoothing = smoothingStore.set;
 
@@ -172,6 +194,11 @@ export function shapeAcceleration(level: number, acceleration: number): number {
  * that keeps geometry-driving uniforms from jumping most of the way to a
  * new value in one frame, so "snappier" gets a shorter leash than
  * "smoother". Continuous at 1x (both branches equal 1 there).
+ *
+ * At 0 (the Smoothing row's Off stop) this is 1/sqrt(0) = Infinity — every
+ * stage it reaches is written to treat a non-finite scale as "assign the
+ * target directly" rather than compute a coefficient, so Off means exactly
+ * unsmoothed, not merely fast.
  */
 export function smoothingRateScale(smoothing: number): number {
   return smoothing >= 1 ? 1 / smoothing : 1 / Math.sqrt(smoothing);

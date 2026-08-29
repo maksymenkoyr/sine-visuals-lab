@@ -24,6 +24,7 @@ import {
   setAcceleration,
   setSensitivity,
   setSmoothing,
+  smoothingRateScale,
 } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
@@ -744,7 +745,13 @@ function captureRawBands(dbBands: Float32Array, range: { min: number; max: numbe
   return rawBandsScratch;
 }
 
-function currentVisual(): FeatureFrame | null {
+/** @param rateScale sensitivity.ts's smoothingRateScale(resolveSmoothing(scene.id)),
+ *  computed once per tick by loop() and reused for animClock.advance() below
+ *  — resolveSmoothing() slews its auto value, so calling it a second time
+ *  per tick would double that slew. Forwarded into extractor.update() so a
+ *  local capture's own envelope (features.ts) honors the same Smoothing
+ *  the render path and the anim clock do, including its Off stop. */
+function currentVisual(rateScale: number): FeatureFrame | null {
   if (syntheticFeed) {
     lastRawBands = null;
     // Synthetic frames are generated directly, not sampled from a real
@@ -764,7 +771,7 @@ function currentVisual(): FeatureFrame | null {
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    return extractor.update(dbBands, now, isAutoGainEnabled());
+    return extractor.update(dbBands, now, isAutoGainEnabled(), rateScale);
   }
 
   if (mode === "host") {
@@ -777,7 +784,7 @@ function currentVisual(): FeatureFrame | null {
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, isAutoGainEnabled());
+    const f = extractor.update(dbBands, now, isAutoGainEnabled(), rateScale);
     hostConn.sendFrame(f);
     return sampleToVisual(hostConn.sample());
   }
@@ -816,10 +823,17 @@ function loop(): void {
   const dtSec = Math.max(1e-4, (nowRafMs - lastRafMs) / 1000);
   lastRafMs = nowRafMs;
 
+  // Resolved exactly once per tick and reused everywhere below (extractor,
+  // anim clock, the meters) — resolveSmoothing() slews its own auto value
+  // via a mutated module-level map (autoTune.ts's `slewed`), so calling it
+  // a second time this tick would double-apply that slew.
+  const smoothing = resolveSmoothing(scene.id);
+  const rateScale = smoothingRateScale(smoothing);
+
   // Always sampled — in host mode this is also what feeds hostConn.sendFrame,
   // so a paired TV/renderer keeps getting frames even while this device is
   // just sitting on the gallery with nothing on screen.
-  lastVis = currentVisual();
+  lastVis = currentVisual(rateScale);
 
   if (!inViz) {
     gallery?.tick(nowRafMs);
@@ -846,7 +860,7 @@ function loop(): void {
   // itself (beat/flow/band-pulse/section-intensity decay) still run on every
   // rAF tick regardless of the render-rate cap below — only the GPU draw is
   // rate-capped.
-  const anim = gained ? animClock.advance(dtSec, gained, resolveSmoothing(scene.id)) : null;
+  const anim = gained ? animClock.advance(dtSec, gained, smoothing) : null;
   if (anim) {
     lastAnim = anim;
     advanceAutoTune(dtSec, anim.profile);
@@ -854,7 +868,9 @@ function loop(): void {
 
   // Fed even when null (mic permission still pending) so the spectrum strip
   // can render its "waiting for audio" idle state instead of going dead.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono);
+  // `rateScale` lets the meters panel (audioMeters.ts) bypass its own BPM
+  // settle and waveform peak-hold at Smoothing's Off stop, same as above.
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale);
 
   if (!lastVis || !anim) return;
 
