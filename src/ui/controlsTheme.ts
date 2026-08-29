@@ -340,6 +340,13 @@ const stylesheet = `
 .vc-toggle[aria-checked="true"] { background: var(--vc-accent); }
 .vc-toggle[aria-checked="true"]::after { transform: translateX(14px); background: #070a09; }
 
+/* An enum setting's chip strip (deviceMenu.ts createPickerRow): the strip is
+ * the focusable ring stop, so it rings as a whole rather than chip by chip. */
+.vc-picker { outline: none; border-radius: 4px; margin-top: 6px; }
+.vc-picker:focus-visible {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--vc-accent) 70%, transparent);
+}
+
 /* Chrome buttons (index.html) ring while their thing is active: the gear
  * while this panel is open, fullscreen while immersed. */
 .iconBtn[aria-pressed="true"] { border-color: rgba(255, 255, 255, 0.5); color: #fff; }

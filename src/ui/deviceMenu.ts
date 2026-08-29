@@ -110,7 +110,7 @@ import {
  *
  * Keyboard layer, live only while the panel is open (see onKeyDown): H
  * closes it, M hides/shows the meters column. Tab / Shift+Tab walk a ring over every
- * .vc-slider/.vc-toggle/.vc-fader in document order, wrapping at both ends
+ * .vc-slider/.vc-toggle/.vc-picker/.vc-fader in document order, wrapping at both ends
  * and skipping every chip and button — so Tab alone never leaves the panel
  * and never lands anywhere but a control. On whichever control has focus, A
  * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
@@ -973,6 +973,113 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   return el;
 }
 
+interface PickerRowSpec {
+  label: string;
+  accent: string;
+  /** Names in value order — the stored value is the chosen index. */
+  options: readonly string[];
+  defaultValue: number;
+  description?: string;
+  get: () => number;
+  set: (value: number) => void;
+}
+
+/** An enum setting's row: same head as a toggle row, a strip of named chips
+ *  (the palette picker's chips) where the slider would be. The strip is the
+ *  one focusable control so it sits in the Tab ring like a slider; ←/→ (and
+ *  the T hotkey) cycle the choice. Never auto-tunable, for the same reason
+ *  a toggle isn't — see createToggleRow. */
+function createPickerRow(spec: PickerRowSpec): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = spec.label;
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  const right = document.createElement("div");
+  right.style.cssText = rowRightStyle;
+  const readout = document.createElement("span");
+  readout.style.cssText = `${digitsTextStyle} color: #fff;`;
+  const resetBtn = document.createElement("button");
+  resetBtn.textContent = "↺";
+  resetBtn.title = `Reset ${spec.label} (R)`;
+  resetBtn.style.cssText = rowResetStyle;
+  right.append(readout, resetBtn);
+  head.append(label, right);
+
+  const strip = document.createElement("div");
+  strip.className = "vc-picker";
+  strip.tabIndex = 0;
+  strip.setAttribute("role", "radiogroup");
+  strip.setAttribute("aria-label", spec.label);
+  strip.style.cssText = paletteListStyle;
+  el.style.setProperty("--vc-accent", spec.accent);
+  const chips = spec.options.map((name, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = name;
+    btn.setAttribute("role", "radio");
+    btn.tabIndex = -1; // the strip is the ring's stop, not each chip
+    btn.addEventListener("click", () => {
+      apply(i);
+      spec.set(i);
+      strip.focus();
+    });
+    strip.appendChild(btn);
+    return btn;
+  });
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  hint.textContent = spec.description ?? "";
+  if (!spec.description) hint.style.display = "none";
+
+  el.append(head, strip, hint);
+
+  const clampIndex = (value: number): number =>
+    Math.min(spec.options.length - 1, Math.max(0, Math.round(value)));
+
+  let current = clampIndex(spec.get());
+  function apply(value: number): void {
+    current = clampIndex(value);
+    chips.forEach((chip, i) => {
+      chip.style.cssText = i === current ? paletteChipLitStyle : paletteChipStyle;
+      chip.setAttribute("aria-checked", String(i === current));
+    });
+    readout.textContent = spec.options[current];
+    resetBtn.style.visibility = current !== clampIndex(spec.defaultValue) ? "visible" : "hidden";
+  }
+  apply(current);
+
+  const cycle = (step: number): void => {
+    const next = (current + step + spec.options.length) % spec.options.length;
+    apply(next);
+    spec.set(next);
+  };
+  strip.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      cycle(1);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      cycle(-1);
+    }
+  });
+  resetBtn.addEventListener("click", () => {
+    apply(spec.defaultValue);
+    spec.set(clampIndex(spec.defaultValue));
+  });
+
+  wireRowKeys(strip, {
+    reset: () => resetBtn.click(),
+    toggleOff: () => cycle(1),
+  });
+
+  return el;
+}
+
 function statusText(status: AudioStatus): string {
   switch (status.source) {
     case "mic":
@@ -1411,10 +1518,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
-  // Builds one setting's row (boolean toggle or slider) into `container` —
+  // Builds one setting's row (enum picker, boolean toggle or slider) into `container` —
   // shared by the direct-to-sceneRows path and the advanced-section path
   // below, so a row behaves identically wherever it lands.
   function appendSettingRow(container: HTMLElement, sceneId: string, spec: SceneSetting): void {
+    if (spec.type === "enum" && spec.options) {
+      container.appendChild(
+        createPickerRow({
+          label: spec.label,
+          accent: SCENE_VIOLET,
+          options: spec.options,
+          defaultValue: spec.default,
+          description: spec.description,
+          get: () => deps.getSceneSettingValue(sceneId, spec),
+          set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
+        }),
+      );
+      return;
+    }
     if (spec.type === "boolean") {
       container.appendChild(
         createToggleRow({
@@ -1658,7 +1779,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // to controls with a layout box: a folded card's body is display:none, and
   // a control inside it would otherwise sit in the ring and fail to focus.
   function ringElements(): HTMLElement[] {
-    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-fader")].filter(
+    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker, .vc-fader")].filter(
       (el) => el.getClientRects().length > 0,
     );
   }

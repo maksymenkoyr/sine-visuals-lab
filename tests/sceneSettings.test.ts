@@ -54,4 +54,18 @@ describe("scene settings persistence", () => {
     expect(getSceneSetting("scene-d", FOCUS)).toBe(FOCUS.default);
     expect(getSceneSetting("scene-d", BREATHE)).toBe(BREATHE.default);
   });
+
+  it("rounds an enum setting to a whole option index and clamps it to the options", () => {
+    const SKIN: SceneSetting = {
+      key: "skin", label: "Skin", type: "enum", options: ["Skeleton", "Stick", "Neon"],
+      min: 0, max: 2, step: 1, default: 0,
+    };
+    // A fractional value (a slider drag, a tuning override) must land on a chip.
+    setSceneSetting("enum-test", SKIN, 0.7);
+    expect(getSceneSetting("enum-test", SKIN)).toBe(1);
+    setSceneSetting("enum-test", SKIN, 7);
+    expect(getSceneSetting("enum-test", SKIN)).toBe(SKIN.max);
+    setSceneSetting("enum-test", SKIN, -3);
+    expect(getSceneSetting("enum-test", SKIN)).toBe(SKIN.min);
+  });
 });

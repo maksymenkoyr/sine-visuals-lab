@@ -59,6 +59,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.6,
+    auto: { pulse: 0.25, loudness: 0.2, dynamics: 0.15 },
   },
   {
     key: "groove",
@@ -69,6 +70,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
+    auto: { pulse: 0.3, attack: 0.15 },
   },
   {
     key: "jaw",
@@ -80,6 +82,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     advanced: true,
+    auto: { brightness: -0.25, attack: 0.2 },
   },
   {
     key: "bob",
@@ -90,12 +93,15 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.4,
+    auto: { attack: 0.3, pulse: 0.15, tempo: -0.2 },
   },
   {
     key: "skin",
     label: "Skin",
-    description: `What the dancer is made of: ${SKINS.map((s, i) => `${i} = ${s.name}`).join(", ")}.`,
+    description: "What the dancer is made of. Every skin dances the same moves.",
     group: "Look",
+    type: "enum",
+    options: SKINS.map((s) => s.name),
     min: 0,
     max: SKINS.length - 1,
     step: 1,
@@ -110,6 +116,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
+    auto: { brightness: 0.3 },
   },
 ];
 
