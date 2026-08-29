@@ -13,3 +13,4 @@ See `docs/tuning.md` for the workflow this feeds into.
 "still missing a param to just zoom out" -> mesh: zoom (new; focal-length scale with grid width pinned to the zoom-1 frustum, so <1 shrinks the terrain in frame instead of stretching it), 1 -> ~0.5 for a floating-slab read
 "can we make circle switch" -> mesh: circle (new boolean; same grid mapped to a disc, newest ring outside, CIRCLE_TILT_DEG 24 so it reads as a disc from the low default camera)
 "squeeze the circle a bit into an ellipsoid" -> mesh: CIRCLE_SQUEEZE 1 -> 0.75 (depth radius vs width radius); defaults from mark 1788009526338: waveHeight 1.1 -> 1.3, valley 4 -> 1.5, cameraDistance 16 -> 26, cameraHeight 9 -> 26, cameraTilt -9.5 -> -10, zoom 1 -> 0.9
+"put the squeeze in a slider" -> mesh: circleSqueeze (new; was CIRCLE_SQUEEZE), default 0.75
