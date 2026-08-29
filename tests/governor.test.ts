@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createQualityGovernor } from "../src/render/governor.ts";
+import { createQualityGovernor, type QualityGovernor } from "../src/render/governor.ts";
 import type { TierSettings } from "../src/render/tier.ts";
 
 function baseline(): TierSettings {
@@ -7,6 +7,18 @@ function baseline(): TierSettings {
 }
 
 const TARGET_MS = 1000 / 60;
+
+/** A synthetic device whose GPU work actually scales with the governor's
+ *  current quality fraction — dt runs at `overMult` x target at level 0 and
+ *  eases toward target at the floor. Needed wherever a test wants the
+ *  governor's step-down probe to see genuine improvement (see governor.ts's
+ *  "Authority probe"): a constant per-frame dt regardless of level is
+ *  indistinguishable, from the governor's point of view, from a pace it has
+ *  no authority over, and now correctly makes it stand down instead. */
+function dtForLevel(gov: QualityGovernor, overMult: number): number {
+  const fraction = 1 - gov.level / gov.maxLevel; // 1 at level 0, 0 at the floor
+  return TARGET_MS * (1 + (overMult - 1) * fraction);
+}
 
 describe("createQualityGovernor", () => {
   it("does nothing on comfortable frame times", () => {
@@ -23,17 +35,19 @@ describe("createQualityGovernor", () => {
     expect(tier.quality).toBeCloseTo(0.7, 6);
   });
 
-  it("steps quality down under sustained slow frames", () => {
+  it("steps quality down under sustained slow frames a cut actually fixes", () => {
     const tier = baseline();
     const gov = createQualityGovernor(tier, TARGET_MS);
     let t = 0;
-    // Well over budget (2x target) for far longer than the step-down streak
-    // requirement, with no cooldown-driven gaps.
+    // Well over budget at full quality, genuinely GPU-bound (dtForLevel eases
+    // toward target as the governor cuts quality) — long enough to clear the
+    // step-down streak, the probe's cooldown, and its evaluation.
     for (let i = 0; i < 200; i++) {
-      t += TARGET_MS * 2;
+      t += dtForLevel(gov, 2);
       gov.recordFrame(t);
     }
     expect(gov.level).toBeGreaterThan(0);
+    expect(gov.standingDown).toBe(false);
     expect(tier.renderScale).toBeLessThan(0.75);
     expect(tier.raymarchSteps).toBeLessThan(64);
     expect(tier.quality).toBeLessThan(0.7);
@@ -44,7 +58,7 @@ describe("createQualityGovernor", () => {
     const gov = createQualityGovernor(tier, TARGET_MS);
     let t = 0;
     for (let i = 0; i < 500; i++) {
-      t += TARGET_MS * 2;
+      t += dtForLevel(gov, 2);
       gov.recordFrame(t);
     }
     expect(tier.tier).toBe("mid");
@@ -56,7 +70,7 @@ describe("createQualityGovernor", () => {
     let t = 0;
 
     for (let i = 0; i < 200; i++) {
-      t += TARGET_MS * 2;
+      t += dtForLevel(gov, 2);
       gov.recordFrame(t);
     }
     const droppedLevel = gov.level;
@@ -77,7 +91,7 @@ describe("createQualityGovernor", () => {
     let t = 0;
 
     for (let i = 0; i < 200; i++) {
-      t += TARGET_MS * 2;
+      t += dtForLevel(gov, 2);
       gov.recordFrame(t);
     }
     const droppedLevel = gov.level;
@@ -180,16 +194,107 @@ describe("createQualityGovernor", () => {
     expect(gov.level).toBe(0);
   });
 
-  it("a device uniformly 2.5x over budget still steps down", () => {
+  it("a device uniformly 2.5x over budget (GPU-bound) still steps down", () => {
     // Guards against the achieved-interval budget (MAX_ACHIEVABLE_MULT)
-    // becoming a blanket excuse — real, sustained overload must still trip.
+    // becoming a blanket excuse — real, sustained, fixable overload must
+    // still trip.
     const tier = baseline();
     const gov = createQualityGovernor(tier, TARGET_MS);
     let t = 0;
     for (let i = 0; i < 200; i++) {
-      t += TARGET_MS * 2.5;
+      t += dtForLevel(gov, 2.5);
       gov.recordFrame(t);
     }
     expect(gov.level).toBeGreaterThan(0);
+    expect(gov.standingDown).toBe(false);
+  });
+
+  // Coverage for the Energy Saver bug this file's probe/standingDown
+  // machinery exists to fix — see governor.ts's "Authority probe" comment.
+
+  it("stands down instead of cutting quality when a step down buys nothing", () => {
+    const tier = baseline();
+    const gov = createQualityGovernor(tier, TARGET_MS);
+    let t = 0;
+    // A constant ~2x-target interval regardless of quality level — the
+    // signature of something outside the page setting the pace (e.g.
+    // Chrome's Energy Saver halving the display refresh rate), not GPU load.
+    for (let i = 0; i < 300; i++) {
+      t += TARGET_MS * 2;
+      gov.recordFrame(t);
+    }
+    expect(gov.standingDown).toBe(true);
+    expect(gov.level).toBe(0);
+    expect(tier.renderScale).toBeCloseTo(0.75, 6);
+    expect(tier.raymarchSteps).toBe(64);
+    expect(tier.quality).toBeCloseTo(0.7, 6);
+  });
+
+  it("re-arms and resumes stepping once the observed cadence actually shifts", () => {
+    const tier = baseline();
+    const gov = createQualityGovernor(tier, TARGET_MS);
+    let t = 0;
+    for (let i = 0; i < 300; i++) {
+      t += TARGET_MS * 2;
+      gov.recordFrame(t);
+    }
+    expect(gov.standingDown).toBe(true);
+
+    // The cadence itself changes — and this time it's genuinely GPU-bound,
+    // so a cut helps. Covers both "the throttle lifted" and "the page got
+    // heavier while still throttled": either way, only a cadence shift can
+    // make a standing-down governor look again.
+    for (let i = 0; i < 300; i++) {
+      t += dtForLevel(gov, 4);
+      gov.recordFrame(t);
+    }
+    expect(gov.standingDown).toBe(false);
+    expect(gov.level).toBeGreaterThan(0);
+  });
+
+  it("setEnabled(false) pins quality to baseline and stops stepping", () => {
+    const tier = baseline();
+    const gov = createQualityGovernor(tier, TARGET_MS);
+    let t = 0;
+    for (let i = 0; i < 200; i++) {
+      t += dtForLevel(gov, 2);
+      gov.recordFrame(t);
+    }
+    expect(gov.level).toBeGreaterThan(0);
+
+    gov.setEnabled(false);
+    expect(gov.level).toBe(0);
+    expect(tier.renderScale).toBeCloseTo(0.75, 6);
+    expect(tier.raymarchSteps).toBe(64);
+    expect(tier.quality).toBeCloseTo(0.7, 6);
+
+    // Still overloaded, but disabled — must not step while off.
+    for (let i = 0; i < 200; i++) {
+      t += TARGET_MS * 3;
+      gov.recordFrame(t);
+    }
+    expect(gov.level).toBe(0);
+    expect(tier.renderScale).toBeCloseTo(0.75, 6);
+  });
+
+  it("setEnabled(true) resets stale measurement so detection still works", () => {
+    const tier = baseline();
+    const gov = createQualityGovernor(tier, TARGET_MS);
+    let t = 0;
+    // Disable, then run a long, wildly different regime under it — this
+    // must not poison ewmaMs/fastestMs for when it's re-enabled.
+    gov.setEnabled(false);
+    for (let i = 0; i < 500; i++) {
+      t += TARGET_MS * 6;
+      gov.recordFrame(t);
+    }
+    gov.setEnabled(true);
+
+    for (let i = 0; i < 200; i++) {
+      t += dtForLevel(gov, 2);
+      gov.recordFrame(t);
+    }
+    expect(gov.level).toBeGreaterThan(0);
+    expect(gov.standingDown).toBe(false);
   });
 });
