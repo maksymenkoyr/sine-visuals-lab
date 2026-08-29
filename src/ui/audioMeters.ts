@@ -422,7 +422,7 @@ export function createAudioMeters(opts: AudioMetersOpts = {}): AudioMeters {
   const waveform = createMeterRow({
     label: "Waveform",
     accent: NEUTRAL_ACCENT,
-    unit: "peak",
+    unit: "%",
   });
   // The trace takes the meter's place under the head.
   const waveCanvas = document.createElement("canvas");
