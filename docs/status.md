@@ -6,19 +6,39 @@ regenerate it at session close.
 
 ## In flight
 
-- **Tuning hotkey fix + clip capture** — branch `worktree-tuning-hotkey-fix`
-  (worktree at `.claude/worktrees/tuning-hotkey-fix`, locked), 2 commits ahead of
-  `main`, unmerged:
-  - `5dbf48b` Fix mark hotkey not firing on macOS (Option remaps `e.key`)
-  - `d54c9b5` Add clip capture (before/after), UI toggle, flash feedback, and a
-    mark watcher — adds `src/tuning/ui.ts` and `tools/tune-watch.mjs`, expands
-    `src/tuning/capture.ts` and `src/tuning/debug.ts`.
+- **Auto-gain amount + Signal history trace** — PR #18 (draft), branch
+  `worktree-autogain-amount-scope`, 1 commit ahead of `main`. Auto-gain is now
+  a 0–100 % blend (`src/audio/autoGain.ts`, blended in
+  `FeatureExtractor.update`), the Input card's toggle is a slider row, and the
+  Signal card has a History trace of level/energy/`fixedEnergy`. Typecheck and
+  tests green; panel verified in headless Chromium with a fake mic.
+- **Docs pilot** — branch `worktree-docs-index` (worktree at
+  `.claude/worktrees/docs-index`), 1 commit ahead: a diagram-first rewrite of
+  `docs/architecture.md`. No PR yet. Note #18 also touches
+  `docs/architecture.md` (one sentence on `fixedEnergy`), so whichever lands
+  second needs a small rebase.
+- **Tuning spotlight** — branch `worktree-tuning-spotlight` (worktree at
+  `.claude/worktrees/tuning-spotlight`), 2 commits ahead: point the tuning loop
+  at `MUSIC_DIALS` instead of guessing, and run two sessions at once. No PR yet.
+- `.claude/worktrees/shortcut-s-panel-toggle` exists but is at `main` with no
+  commits — either unstarted or abandoned.
 
 ## Open questions
 
-- None recorded yet.
+- Does a *partial* auto-gain amount earn its place once used on a real room, or
+  do people only ever land on 0 or 100? If the latter, the slider should go
+  back to a toggle and the interesting middle ground is a broadband-adaptive
+  third mode (one shared floor/peak across bands) rather than a per-band blend.
+- Should the History trace's fixed reference line also show when the panel is
+  on a renderer device? Today it's null there by design (no local extractor).
 
 ## Next up
 
-- Merge or continue `worktree-tuning-hotkey-fix` once its clip-capture UI has
-  been used in a real tuning session.
+- Review and land PR #18; then rebase `worktree-docs-index` onto it (or vice
+  versa) to resolve the `docs/architecture.md` overlap.
+- Decide the fate of `shortcut-s-panel-toggle` and remove the worktree if it's
+  dead.
+- Explainer artifact for the auto-gain window (live simulation of the
+  `features.ts` trackers with the amount slider) lives at
+  https://claude.ai/code/artifact/5aef9f8d-a361-4929-adb2-0831943fc375 — handy
+  when tuning the amount on a real mic.
