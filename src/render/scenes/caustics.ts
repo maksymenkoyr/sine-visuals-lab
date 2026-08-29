@@ -26,6 +26,26 @@ import type { SceneSetting } from "../sceneSettings.ts";
 // — a chorus or drop reads as a sustained, brighter, faster, more turbulent
 // surface, with a one-shot double-ring flash at the exact moment intensity
 // spikes.
+// The master treble-sparkle knob. Defined outside SETTINGS so the sub-params
+// below it (density, brightness ceiling, grain, spread, sustain — all in the
+// "Sparkle" group, all `advanced`) can name it directly as their `macro`
+// driver: a spec reference costs nothing extra to resolve and can't drift out
+// of sync with a key string. See the Sparkle group's own comment further down
+// for what each sub-param actually does; this one just carries the auto
+// weights and stays the everyday slider.
+const SPARKLE: SceneSetting = {
+  key: "sparkle",
+  label: "Treble sparkle",
+  description: "Hats and cymbals glint on the ridge crests",
+  group: "Sparkle",
+  min: 0,
+  max: 1,
+  step: 0.05,
+  default: 0.4,
+  // Directly the hats/cymbals dial.
+  auto: { brightness: 0.45, attack: 0.15 },
+};
+
 const SETTINGS: SceneSetting[] = [
   {
     key: "focus",
@@ -169,17 +189,77 @@ const SETTINGS: SceneSetting[] = [
     // Busy mids churn the filaments; a bright mix reads as more mid-heavy too.
     auto: { density: 0.35, brightness: 0.1 },
   },
+  SPARKLE,
+  // The constants that used to be hardcoded on the sparkle line in FRAG —
+  // how bright, how many, how fine, how far the glints spread, and whether
+  // they persist through a sustained wash instead of only flashing on a hit.
+  // Each tracks SPARKLE as a macro: dragging the master knob moves all five
+  // together, and each snaps to manual (stops following) the moment it's
+  // touched directly, same as any auto-capable setting. Kept `advanced` —
+  // real, but not worth doubling the Sparkle group's row count for settings
+  // most people will only ever move via the master.
   {
-    key: "sparkle",
-    label: "Treble sparkle",
-    description: "Hats and cymbals glint on the ridge crests",
-    group: "Spectrum",
+    key: "sparkleBright",
+    label: "Sparkle brightness",
+    description: "How bright each glint gets at its peak",
+    group: "Sparkle",
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.4,
-    // Directly the hats/cymbals dial.
-    auto: { brightness: 0.45, attack: 0.15 },
+    default: 0.5, // -> the old fixed 1.5x gain (see the *3.0 in FRAG)
+    advanced: true,
+    macro: { driver: SPARKLE, weight: 0.5 },
+  },
+  {
+    key: "sparkleDensity",
+    label: "Sparkle density",
+    description: "How many glints appear at once",
+    group: "Sparkle",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5, // -> the old fixed pow() exponent of 8.0
+    advanced: true,
+    macro: { driver: SPARKLE, weight: 0.35 },
+  },
+  {
+    key: "sparkleGrain",
+    label: "Sparkle grain",
+    description: "How fine each glint is",
+    group: "Sparkle",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5, // -> the old fixed noise scale of 38.0
+    advanced: true,
+    // Left off the master: glint size reads as a taste choice, not an
+    // intensity one, and tying it to SPARKLE would make "stronger" also
+    // silently resize every glint.
+    macro: { driver: SPARKLE, weight: 0 },
+  },
+  {
+    key: "sparkleSpread",
+    label: "Sparkle spread",
+    description: "How far into dim water glints can reach",
+    group: "Sparkle",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5, // -> the old fixed crest-gate smoothstep(0.15, 0.6, acc)
+    advanced: true,
+    macro: { driver: SPARKLE, weight: 0.2 },
+  },
+  {
+    key: "sparkleSustain",
+    label: "Sparkle sustain",
+    description: "Cymbal wash glints continuously, not just on hits",
+    group: "Sparkle",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0, // -> today's behavior: glints only follow the onset pulse
+    advanced: true,
+    macro: { driver: SPARKLE, weight: 0.3 },
   },
   {
     key: "dropReactivity",
@@ -218,6 +298,51 @@ const FOCUS_SHARP_MAX = 18;
 // across every palette rather than implicitly assuming uPalC == 1 (true
 // only for "neon" — see src/render/palette.ts's presets).
 const HUE_DAMP_K = 1.2;
+
+// The treble-sparkle sub-params (see the Sparkle group in SETTINGS above)
+// each interpolate between two endpoints of what used to be one hardcoded
+// shader constant. Named here — spliced into FRAG below via template
+// interpolation, exactly like FOCUS_SHARP_MAX/HUE_DAMP_K above — so the
+// numbers exist in one place and the pure functions beneath them can pin
+// each sub-param's default to the old constant it replaces in
+// tests/caustics.test.ts, the same role driftRatePerSec's export plays for
+// the drift sliders.
+const SPARKLE_DENSITY_EXP_LO = 13.0; // uSparkleDensity = 0 -> sparsest glints
+const SPARKLE_DENSITY_EXP_HI = 3.0; // uSparkleDensity = 1 -> densest glints
+const SPARKLE_GRAIN_FREQ_LO = 60.0; // uSparkleGrain = 0 -> finest glints
+const SPARKLE_GRAIN_FREQ_HI = 16.0; // uSparkleGrain = 1 -> coarsest glints
+const SPARKLE_SPREAD_LO_AT_0 = 0.35;
+const SPARKLE_SPREAD_LO_AT_1 = -0.05;
+const SPARKLE_SPREAD_HI_AT_0 = 0.8;
+const SPARKLE_SPREAD_HI_AT_1 = 0.4;
+const SPARKLE_BRIGHT_GAIN = 3.0; // uSparkleBright is a 0..1 fraction of this ceiling
+
+/** uSparkleDensity (0..1) -> the pow() exponent gating how many noise peaks
+ *  survive as glints. Default 0.5 -> 8.0, today's old hardcoded exponent. */
+export function sparkleDensityExponent(sparkleDensity: number): number {
+  return SPARKLE_DENSITY_EXP_LO + (SPARKLE_DENSITY_EXP_HI - SPARKLE_DENSITY_EXP_LO) * sparkleDensity;
+}
+
+/** uSparkleGrain (0..1) -> the noise field's spatial frequency. Default 0.5
+ *  -> 38.0, today's old hardcoded scale. */
+export function sparkleGrainFreq(sparkleGrain: number): number {
+  return SPARKLE_GRAIN_FREQ_LO + (SPARKLE_GRAIN_FREQ_HI - SPARKLE_GRAIN_FREQ_LO) * sparkleGrain;
+}
+
+/** uSparkleSpread (0..1) -> the crest-gate smoothstep's [lo, hi] edges.
+ *  Default 0.5 -> [0.15, 0.6], today's old hardcoded gate. */
+export function sparkleSpreadRange(sparkleSpread: number): { lo: number; hi: number } {
+  return {
+    lo: SPARKLE_SPREAD_LO_AT_0 + (SPARKLE_SPREAD_LO_AT_1 - SPARKLE_SPREAD_LO_AT_0) * sparkleSpread,
+    hi: SPARKLE_SPREAD_HI_AT_0 + (SPARKLE_SPREAD_HI_AT_1 - SPARKLE_SPREAD_HI_AT_0) * sparkleSpread,
+  };
+}
+
+/** uSparkleBright (0..1) -> the linear gain on the whole sparkle term.
+ *  Default 0.5 -> 1.5, today's old hardcoded gain. */
+export function sparkleBrightGain(sparkleBright: number): number {
+  return sparkleBright * SPARKLE_BRIGHT_GAIN;
+}
 
 // Own accumulator for the domain-warp drift: never reset, only advanced, so
 // dragging the Drift slider mid-run changes the *rate* going forward and
@@ -426,10 +551,25 @@ void main() {
   }
 
   // Treble sparkle: fine glints gated to where the pattern is already bright
-  // (ridge crests), only appearing with a high-band onset.
-  float crestGate = smoothstep(0.15, 0.6, acc);
-  float sparkleNoise = noise(q * 38.0 + vec2(uDriftPhase * 2.0));
-  acc += uSparkle * uHighPulse * crestGate * pow(sparkleNoise, 8.0) * 1.5;
+  // (ridge crests), driven by a high-band onset pulse — or, once
+  // uSparkleSustain is dialed up, kept alive through a sustained wash too.
+  // uSparkleBright/Density/Grain/Spread/Sustain used to be fixed constants
+  // here (1.5, 8.0, 38.0, smoothstep(0.15, 0.6, ...), pulse-only); each
+  // defaults to reproduce its old constant exactly (see the Sparkle group in
+  // SETTINGS above) and is a macro of uSparkle, so the master knob still
+  // moves all of them together.
+  float sparkleLo = mix(${SPARKLE_SPREAD_LO_AT_0.toFixed(2)}, ${SPARKLE_SPREAD_LO_AT_1.toFixed(2)}, uSparkleSpread);
+  float sparkleHi = mix(${SPARKLE_SPREAD_HI_AT_0.toFixed(2)}, ${SPARKLE_SPREAD_HI_AT_1.toFixed(2)}, uSparkleSpread);
+  float crestGate = smoothstep(sparkleLo, sparkleHi, acc);
+  // uHigh is the slewed continuous high-band level (vs. uHighPulse's
+  // decaying onset spike) — max() rather than a blend so sustain=0 leaves
+  // the pulse-only drive bit-for-bit untouched.
+  float sparkleDrive = max(uHighPulse, uSparkleSustain * uHigh);
+  float sparkleFreq = mix(${SPARKLE_GRAIN_FREQ_LO.toFixed(1)}, ${SPARKLE_GRAIN_FREQ_HI.toFixed(1)}, uSparkleGrain);
+  float sparkleNoise = noise(q * sparkleFreq + vec2(uDriftPhase * 2.0));
+  float sparkleExp = mix(${SPARKLE_DENSITY_EXP_LO.toFixed(1)}, ${SPARKLE_DENSITY_EXP_HI.toFixed(1)}, uSparkleDensity);
+  float sparkleGain = uSparkleBright * ${SPARKLE_BRIGHT_GAIN.toFixed(1)};
+  acc += uSparkle * sparkleDrive * crestGate * pow(sparkleNoise, sparkleExp) * sparkleGain;
 
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;

@@ -6,6 +6,7 @@ import { setSensitivity, setAcceleration, setSmoothing } from "../src/audio/sens
 import { NEUTRAL, type DialValues } from "../src/render/musicProfile.ts";
 import {
   computeAutoTarget,
+  computeMacroTarget,
   resolveSceneSetting,
   resolveSensitivity,
   resolveAcceleration,
@@ -95,6 +96,66 @@ describe("computeAutoTarget", () => {
     const spec: SceneSetting = { key: "z", label: "Z", min: 0, max: 2, step: 0.05, default: 0.7 };
     const extreme: DialValues = { pulse: 1, tempo: 1, brightness: 1, density: 1, dynamics: 1, attack: 1, loudness: 1 };
     expect(computeAutoTarget(spec, extreme, 2)).toBe(spec.default);
+  });
+});
+
+describe("computeMacroTarget", () => {
+  const macroSpecs = ALL_SETTINGS.filter((s) => s.macro);
+
+  it("has at least one real macro-driven setting to exercise (today: caustics' Sparkle sub-params)", () => {
+    expect(macroSpecs.length).toBeGreaterThan(0);
+  });
+
+  // The load-bearing property behind "the sparkle macro ships as a visual
+  // no-op": at the driver sitting on its own default (SPARKLE's 0.4, the
+  // exact value nobody's touched anything yet), every real macro-driven
+  // setting on every registered scene must reproduce its own plain default
+  // bit-for-bit — same identity-at-rest contract computeAutoTarget has at
+  // NEUTRAL dials, just anchored to a driver's default instead.
+  it.each(macroSpecs.map((s) => [s.label, s] as const))(
+    "returns exactly spec.default for %s when its driver sits at its own default",
+    (_label, spec) => {
+      expect(computeMacroTarget(spec, spec.macro!.driver.default)).toBe(spec.default);
+    },
+  );
+
+  it("stays within [min, max] at the driver's extremes, for every real macro-driven setting", () => {
+    for (const spec of macroSpecs) {
+      const { driver } = spec.macro!;
+      for (const driverValue of [driver.min, driver.max]) {
+        const v = computeMacroTarget(spec, driverValue);
+        expect(v).toBeGreaterThanOrEqual(spec.min);
+        expect(v).toBeLessThanOrEqual(spec.max);
+      }
+    }
+  });
+
+  it("raises the target when a positively-weighted driver rises", () => {
+    const driver: SceneSetting = { key: "d", label: "D", min: 0, max: 1, step: 0.05, default: 0.5 };
+    const spec: SceneSetting = { key: "p", label: "P", min: 0, max: 2, step: 0.05, default: 1, macro: { driver, weight: 0.4 } };
+    const low = computeMacroTarget(spec, 0.1);
+    const high = computeMacroTarget(spec, 0.9);
+    expect(high).toBeGreaterThan(low);
+  });
+
+  it("lowers the target when a negatively-weighted driver rises", () => {
+    const driver: SceneSetting = { key: "d", label: "D", min: 0, max: 1, step: 0.05, default: 0.5 };
+    const spec: SceneSetting = { key: "n", label: "N", min: 0, max: 2, step: 0.05, default: 1, macro: { driver, weight: -0.4 } };
+    const low = computeMacroTarget(spec, 0.1);
+    const high = computeMacroTarget(spec, 0.9);
+    expect(high).toBeLessThan(low);
+  });
+
+  it("stays flat regardless of the driver when weight is 0 (sparkleGrain's convention: independent of the master)", () => {
+    const driver: SceneSetting = { key: "d", label: "D", min: 0, max: 1, step: 0.05, default: 0.5 };
+    const spec: SceneSetting = { key: "f", label: "F", min: 0, max: 2, step: 0.05, default: 1, macro: { driver, weight: 0 } };
+    expect(computeMacroTarget(spec, driver.min)).toBe(spec.default);
+    expect(computeMacroTarget(spec, driver.max)).toBe(spec.default);
+  });
+
+  it("resolves to spec.default for a spec with no macro field", () => {
+    const spec: SceneSetting = { key: "q", label: "Q", min: 0, max: 2, step: 0.05, default: 0.7 };
+    expect(computeMacroTarget(spec, 999)).toBe(spec.default);
   });
 });
 
