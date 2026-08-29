@@ -1,5 +1,5 @@
 import type { FeatureFrame } from "../audio/types.ts";
-import type { TierSettings } from "./tier.ts";
+import type { QualitySettings } from "./quality.ts";
 import type { Palette } from "./palette.ts";
 import type { SceneSetting } from "./sceneSettings.ts";
 import type { AnimFrame } from "./animClock.ts";
@@ -16,14 +16,14 @@ export const FULL_VIEWPORT: Viewport = { x: 0, y: 0, w: 1, h: 1 };
 
 export interface SceneContext {
   gl: WebGL2RenderingContext;
-  tier: TierSettings;
+  quality: QualitySettings;
 }
 
 export interface Scene {
   id: string;
   name: string;
-  /** Lowest tier this scene is willing to run on; omitted = runs everywhere. */
-  minTier?: "mid" | "low" | "floor";
+  /** Lowest quality preset this scene is willing to run on; omitted = runs everywhere. */
+  minQuality?: "mid" | "low" | "floor";
   /** User-tunable parameters shown in the device menu, uploaded as uniform float u<Key>. */
   settings?: SceneSetting[];
   init(ctx: SceneContext): void;

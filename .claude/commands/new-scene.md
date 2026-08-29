@@ -12,8 +12,8 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
    u<Key>` and a device-menu control.
 3. Register it: add to `src/render/scenes/index.ts` (`registerScene(...)`) and
    export it alongside its neighbours.
-4. Set `minTier` if the scene should degrade or disable below some hardware
-   tier (`src/render/tier.ts`).
+4. Set `minQuality` if the scene should degrade or disable below some hardware
+   quality preset (`src/render/quality.ts`).
 5. **Check the invariant before calling it done** — see `docs/adding-a-scene.md`
    for the full statement: every setting with an `auto` weight table must
    reproduce its plain `default` when all dials sit at `NEUTRAL`

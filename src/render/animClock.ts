@@ -46,13 +46,22 @@ export interface AnimFrame {
    *  What autoTune.ts resolves scene settings against; also the hook future
    *  VJ-autopilot features (auto palette, auto scene switching) read. */
   profile: DialValues;
+  /** Pre-smoothing counterparts of sectionIntensity/profile above, for the
+   *  meters panel's RAW chip (src/ui/audioMeters.ts). JS-side only — never
+   *  uploaded as uniforms, the same way lowOnset/midOnset aren't. */
+  raw: { sectionIntensity: number; profile: DialValues };
 }
 
 export interface AnimClock {
   /** Advances every underlying clock by dtSec and returns the combined
    *  frame. Call once per render tick, using the frame that's actually
    *  driving the visuals this tick. `smoothing` defaults to 1x (today's
-   *  behavior) — see sensitivity.ts's smoothingRateScale. */
+   *  behavior) — see sensitivity.ts's smoothingRateScale. Its derived
+   *  rateScale now reaches bandEnergy, sectionIntensity's INTENSITY_SLEW and
+   *  musicProfile's eases alike, so `smoothing` at the Smoothing row's Off
+   *  stop (0 -> Infinity) makes sectionIntensity/profile land exactly on the
+   *  `raw` counterparts already exposed below — see the meters panel's RAW
+   *  chip (src/ui/audioMeters.ts). */
   advance(dtSec: number, frame: FeatureFrame, smoothing?: number): AnimFrame;
 }
 
@@ -72,8 +81,8 @@ export function createAnimClock(): AnimClock {
       const flowPhase = flow.advance(dtSec, frame.energy);
       beat.advance(dtSec, frame.bpm, frame.beat);
       bandEnergy.advance(dtSec, frame.bands, rateScale);
-      section.advance(dtSec, frame.energy);
-      profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity });
+      section.advance(dtSec, frame.energy, rateScale);
+      profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
 
       beatPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
       if (frame.beat) beatPulse = 1;
@@ -106,6 +115,10 @@ export function createAnimClock(): AnimClock {
           dynamics: profile.dynamics,
           attack: profile.attack,
           loudness: profile.loudness,
+        },
+        raw: {
+          sectionIntensity: section.rawIntensity,
+          profile: { ...profile.targets },
         },
       };
     },

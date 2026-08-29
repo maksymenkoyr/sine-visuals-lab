@@ -1,15 +1,15 @@
-import type { Tier } from "./tier.ts";
+import type { QualityPreset } from "./quality.ts";
 
 /** Caps scene.render()'s rate independently of rAF — a 120Hz phone gets no
  *  visible benefit from raymarching twice as often, only twice the cost.
- *  30fps on floor tier, 60 elsewhere. Everything else in app.ts's/tv.ts's
+ *  30fps on the floor preset, 60 elsewhere. Everything else in app.ts's/tv.ts's
  *  loop() (feature extraction, beat/flow decay, host broadcast) still runs
  *  on every rAF tick regardless of this cap. */
 export const RENDER_FPS_CAP = 60;
 export const RENDER_FPS_CAP_FLOOR = 30;
 
-export function targetFrameIntervalMs(tier: Tier): number {
-  return 1000 / (tier === "floor" ? RENDER_FPS_CAP_FLOOR : RENDER_FPS_CAP);
+export function targetFrameIntervalMs(preset: QualityPreset): number {
+  return 1000 / (preset === "floor" ? RENDER_FPS_CAP_FLOOR : RENDER_FPS_CAP);
 }
 
 // A panel refreshing at exactly the cap delivers rAF ticks whose spacing

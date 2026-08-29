@@ -49,4 +49,52 @@ describe("section intensity", () => {
       expect(s.intensity).toBeLessThanOrEqual(1);
     }
   });
+
+  // rawIntensity feeds the meters panel's RAW chip (src/ui/audioMeters.ts):
+  // it should track a step change immediately, while the slewed `intensity`
+  // it's derived from lags behind on the same tick, then the two converge.
+  it("rawIntensity leads intensity on a step and converges once it settles", () => {
+    const s = createSectionIntensity();
+    for (let i = 0; i < QUIET_SETTLE_TICKS; i++) s.advance(DT, 0.1);
+
+    s.advance(DT, 0.95); // a single loud tick right after a quiet baseline
+    expect(s.rawIntensity).toBeGreaterThan(s.intensity);
+
+    for (let i = 0; i < 300; i++) s.advance(DT, 0.95); // hold loud until INTENSITY_SLEW settles
+    expect(Math.abs(s.rawIntensity - s.intensity)).toBeLessThan(0.05);
+  });
+
+  it("keeps rawIntensity finite and in [0,1] across a long, varied run", () => {
+    const s = createSectionIntensity();
+    for (let i = 0; i < 3000; i++) {
+      const e = 0.5 + 0.5 * Math.sin(i * 0.01);
+      s.advance(DT, e);
+      expect(Number.isFinite(s.rawIntensity)).toBe(true);
+      expect(s.rawIntensity).toBeGreaterThanOrEqual(0);
+      expect(s.rawIntensity).toBeLessThanOrEqual(1);
+    }
+  });
+
+  // rateScale=Infinity is what sensitivity.ts's smoothingRateScale returns
+  // at the Smoothing row's Off stop (deviceMenu.ts) — INTENSITY_SLEW must
+  // assign the target directly rather than compute a Math.min(1,
+  // rate*dt*scale) coefficient, so `intensity` lands on exactly the same
+  // value rawIntensity already shows (the meters panel's RAW chip). See
+  // sectionIntensity.ts's advance() doc.
+  it("at rateScale=Infinity, intensity jumps to exactly rawIntensity every tick", () => {
+    const s = createSectionIntensity();
+    for (let i = 0; i < 1800; i++) s.advance(DT, 0.1, Infinity); // settle a baseline first
+    s.advance(DT, 0.95, Infinity); // a hard step
+    expect(s.intensity).toBe(s.rawIntensity);
+  });
+
+  it("never produces NaN at rateScale=Infinity across a long, varied run", () => {
+    const s = createSectionIntensity();
+    for (let i = 0; i < 3000; i++) {
+      const e = 0.5 + 0.5 * Math.sin(i * 0.01);
+      s.advance(DT, e, Infinity);
+      expect(Number.isFinite(s.intensity)).toBe(true);
+      expect(s.intensity).toBe(s.rawIntensity);
+    }
+  });
 });

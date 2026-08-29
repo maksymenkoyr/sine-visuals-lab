@@ -322,6 +322,51 @@ describe("FeatureExtractor", () => {
     expect(Math.abs(at60 - at120)).toBeLessThan(0.01);
   });
 
+  // smoothingScale=Infinity is what sensitivity.ts's smoothingRateScale
+  // returns at the Smoothing row's Off stop (deviceMenu.ts) — the envelope
+  // must assign `target` to `env[b]` directly rather than compute an
+  // expBlend coefficient of 1, so a band jumps to exactly the adaptive-or-
+  // fixed mapping computed this same tick, with none of expBlend's
+  // floating-point rounding. With autoGain off that mapping is the same
+  // fixed window app.ts's captureRawBands uses for the meters panel's RAW
+  // chip, so this is what makes RAW a true no-op at Smoothing Off — down to
+  // `env` being a Float32Array, same as captureRawBands's own scratch
+  // buffer: Math.fround below rounds the expectation to float32 the same
+  // way that assignment does, since two independent float64 computations
+  // agree exactly only after both are rounded to the same precision.
+  it("at smoothingScale=Infinity with autoGain off, a band jumps to exactly the fixed-window mapping in one tick", () => {
+    const extractor = new FeatureExtractor();
+    const dt = 1 / 60;
+    let time = 0;
+    let frame;
+
+    for (let i = 0; i < 60; i++) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time, 0, Infinity);
+    }
+    const fixedSpan = ANALYSER_MAX_DB - ANALYSER_MIN_DB;
+    expect(frame!.bands[0]).toBe(Math.fround(Math.min(1, Math.max(0, (QUIET_DB - ANALYSER_MIN_DB) / fixedSpan))));
+
+    const midDb = (ANALYSER_MIN_DB + ANALYSER_MAX_DB) / 2;
+    time += dt;
+    frame = extractor.update(bandsFrame(midDb), time, 0, Infinity);
+    expect(frame!.bands[0]).toBe(Math.fround(Math.min(1, Math.max(0, (midDb - ANALYSER_MIN_DB) / fixedSpan))));
+  });
+
+  it("never produces NaN at smoothingScale=Infinity across a long, varied run", () => {
+    const extractor = new FeatureExtractor();
+    const dt = 1 / 60;
+    let time = 0;
+    let frame;
+    for (let i = 0; i < 1200; i++) {
+      time += dt;
+      const db = QUIET_DB + (LOUD_DB - QUIET_DB) * (0.5 + 0.5 * Math.sin(i * 0.05));
+      frame = extractor.update(bandsFrame(QUIET_DB, { 5: db }), time, 1, Infinity);
+      for (const b of frame.bands) expect(Number.isFinite(b)).toBe(true);
+      expect(Number.isFinite(frame.energy)).toBe(true);
+    }
+  });
+
   it("peak hold delays the ceiling's decay: a dip while held, then a rise once the hold window elapses", () => {
     // Signature verified against a reference implementation without hold
     // (the ceiling decaying unconditionally, as it did before this change):

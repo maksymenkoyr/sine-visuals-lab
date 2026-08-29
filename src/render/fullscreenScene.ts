@@ -24,7 +24,7 @@ export function createFullscreenScene(
   name: string,
   fragBody: string,
   opts: {
-    minTier?: Scene["minTier"];
+    minQuality?: Scene["minQuality"];
     settings?: SceneSetting[];
     /** Extra GLSL uniform declarations this scene needs beyond
      *  COMMON_UNIFORMS_GLSL — for small per-scene arrays/values driven by
@@ -70,7 +70,7 @@ ${fragBody}
   return {
     id,
     name,
-    minTier: opts.minTier,
+    minQuality: opts.minQuality,
     settings: opts.settings,
 
     init(ctx: SceneContext) {

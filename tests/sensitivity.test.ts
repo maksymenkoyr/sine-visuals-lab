@@ -68,11 +68,21 @@ describe("smoothing persistence", () => {
     expect(getSmoothing("nonexistent-scene")).toBe(SMOOTHING_DEFAULT);
   });
 
-  it("clamps out-of-range values on set", () => {
+  it("clamps out-of-range values on set — floored at 0, not SMOOTHING_MIN", () => {
     setSmoothing("clamp-test-smoothing", 999);
     expect(getSmoothing("clamp-test-smoothing")).toBe(SMOOTHING_MAX);
+    // Unlike sensitivity/expansion above, a negative value clamps to 0:
+    // the store's own floor (see sensitivity.ts's comment on smoothingStore),
+    // below SMOOTHING_MIN, so the Smoothing row's zeroAtMin Off stop
+    // (deviceMenu.ts) is reachable and holds exactly.
     setSmoothing("clamp-test-smoothing", -5);
-    expect(getSmoothing("clamp-test-smoothing")).toBe(SMOOTHING_MIN);
+    expect(getSmoothing("clamp-test-smoothing")).toBe(0);
+  });
+
+  it("holds exactly 0 (the Off stop) rather than snapping to SMOOTHING_MIN", () => {
+    setSmoothing("off-test-smoothing", 0);
+    expect(getSmoothing("off-test-smoothing")).toBe(0);
+    expect(smoothingRateScale(getSmoothing("off-test-smoothing"))).toBe(Infinity);
   });
 
   it("is independent of sensitivity's and expansion's per-scene storage", () => {

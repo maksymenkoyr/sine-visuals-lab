@@ -8,6 +8,11 @@
  * autoTune.ts's resolve() consults this first, gated behind
  * import.meta.env.DEV — with no overrides active (or in a prod build, where
  * that check compiles away) resolution is bit-for-bit identical to today.
+ *
+ * pins.ts is this layer's persisted sibling — same idea, but for a value
+ * typed into a param row that survives a reload. resolve() checks an
+ * override before a pin, so a stale pin can never shadow a key a scripted
+ * params.json push explicitly sets.
  */
 
 const overrides = new Map<string, number>();

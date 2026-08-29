@@ -148,8 +148,19 @@ export class FeatureExtractor {
    *   detection, which is calibrated against the adaptive value. Defaults to
    *   1 (fully adaptive) so a call site that doesn't pass it keeps the
    *   original behavior.
+   * @param smoothingScale Multiplies ATTACK_PER_SEC/RELEASE_PER_SEC below —
+   *   sensitivity.ts's smoothingRateScale, defaulting to 1 (today's
+   *   behavior). Non-finite (the Smoothing row's Off stop) assigns `target`
+   *   to the envelope directly rather than computing a coefficient, so
+   *   `bands`/`energy` land exactly on the adaptive-or-fixed mapping above —
+   *   the same one app.ts's captureRawBands computes — with none of
+   *   expBlend's floating-point rounding at "coefficient 1". Only this
+   *   envelope is scaled; the floor/peak trackers above and the flux
+   *   baseline below stay at their own fixed rates regardless — they're
+   *   measurement, not display smoothing, and the meters panel's RAW chip
+   *   already shows their output untouched.
    */
-  update(rawBandsDb: Float32Array, time: number, autoGain = 1): FeatureFrame {
+  update(rawBandsDb: Float32Array, time: number, autoGain = 1, smoothingScale = 1): FeatureFrame {
     const blend = clamp01(autoGain);
     const dt = this.lastTime === null ? 1 / 60 : Math.max(1e-4, time - this.lastTime);
     this.lastTime = time;
@@ -184,12 +195,22 @@ export class FeatureExtractor {
 
       const fixed = clamp01((db - ANALYSER_MIN_DB) / fixedSpan);
       const target = fixed + (norm - fixed) * blend;
-      const rate = target > this.env[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
-      this.env[b] += (target - this.env[b]) * expBlend(rate, dt);
+      if (Number.isFinite(smoothingScale)) {
+        const rate = target > this.env[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
+        this.env[b] += (target - this.env[b]) * expBlend(rate, dt * smoothingScale);
+      } else {
+        this.env[b] = target;
+      }
       bands[b] = this.env[b];
 
-      const rateFixed = fixed > this.envFixed[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
-      this.envFixed[b] += (fixed - this.envFixed[b]) * expBlend(rateFixed, dt);
+      // Same envelope (and the same Smoothing Off short-circuit) over the
+      // fixed mapping alone, so the reference line tracks the real one.
+      if (Number.isFinite(smoothingScale)) {
+        const rateFixed = fixed > this.envFixed[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
+        this.envFixed[b] += (fixed - this.envFixed[b]) * expBlend(rateFixed, dt * smoothingScale);
+      } else {
+        this.envFixed[b] = fixed;
+      }
 
       flux += Math.max(0, norm - this.prevNorm[b]);
       this.prevNorm[b] = norm;

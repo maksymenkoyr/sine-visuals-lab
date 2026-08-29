@@ -28,8 +28,8 @@ uniform float uMidPulse;
 uniform float uHighPulse;
 uniform float uSectionIntensity; // phrase-level loudness trend — see sectionIntensity.ts
 uniform float uDropPulse;        // decaying flash on a detected section change/drop
-uniform float uMaxSteps; // tier.raymarchSteps, for raymarched scenes
-uniform float uQuality;  // 0..1 tier proxy, for density/bloom scaling
+uniform float uMaxSteps; // quality.raymarchSteps, for raymarched scenes
+uniform float uDetail;   // 0..1 quality proxy, for density/bloom scaling
 uniform vec3 uPalA;
 uniform vec3 uPalB;
 uniform vec3 uPalC;
@@ -94,8 +94,8 @@ export function uploadCommonUniforms(
   prog.setF("uHighPulse", anim.highPulse);
   prog.setF("uSectionIntensity", anim.sectionIntensity);
   prog.setF("uDropPulse", anim.dropPulse);
-  prog.setF("uMaxSteps", ctx.tier.raymarchSteps);
-  prog.setF("uQuality", ctx.tier.quality);
+  prog.setF("uMaxSteps", ctx.quality.raymarchSteps);
+  prog.setF("uDetail", ctx.quality.detail);
   for (const s of settings) {
     prog.setF(settingUniformName(s.key), resolveSceneSetting(sceneId, s));
   }

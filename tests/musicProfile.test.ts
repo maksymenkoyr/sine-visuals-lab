@@ -193,6 +193,62 @@ describe("music profile", () => {
         expect(Number.isFinite(p[dial])).toBe(true);
         expect(p[dial]).toBeGreaterThanOrEqual(0);
         expect(p[dial]).toBeLessThanOrEqual(1);
+        // targets feeds the meters panel's RAW chip (audioMeters.ts) — same
+        // range guarantee as the eased dial it's the pre-ease measurement for.
+        expect(Number.isFinite(p.targets[dial])).toBe(true);
+        expect(p.targets[dial]).toBeGreaterThanOrEqual(0);
+        expect(p.targets[dial]).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  // targets is what the meters panel's RAW chip shows in place of the eased
+  // dials: it should track a hard spectral swap immediately, while brightness
+  // itself (settled dark over a long run) barely moves on that single tick.
+  it("targets.brightness reacts within a frame while brightness itself lags", () => {
+    const p = createMusicProfile();
+    const bass = bassHeavyBands();
+    for (let i = 0; i < 600; i++) p.advance(DT, constantBandsFrame(i * DT, bass), NEUTRAL_INPUTS);
+    const brightnessBeforeSwap = p.brightness;
+    expect(brightnessBeforeSwap).toBeLessThan(0.4);
+
+    p.advance(DT, constantBandsFrame(600 * DT, trebleHeavyBands()), NEUTRAL_INPUTS);
+    expect(p.targets.brightness).toBeGreaterThan(0.6);
+    expect(p.brightness).toBeCloseTo(brightnessBeforeSwap, 1);
+  });
+
+  // loudness itself freezes (doesn't ease to NEUTRAL) through silence — see
+  // the dedicated test above. targets.loudness must hold the same last
+  // reading rather than reporting silence as a raw 0, or RAW mode would
+  // contradict the dial it's meant to be the unsmoothed view of.
+  it("freezes targets.loudness through silence, matching the loudness dial itself", () => {
+    const p = createMusicProfile();
+    const bands = fullMixBands(0);
+    for (let i = 0; i < 300; i++) p.advance(DT, constantBandsFrame(i * DT, bands, 0.9), NEUTRAL_INPUTS);
+    const targetBeforeSilence = p.targets.loudness;
+    expect(targetBeforeSilence).toBeGreaterThan(0.6);
+
+    for (let i = 0; i < 600; i++) p.advance(DT, silentFrame(i * DT), NEUTRAL_INPUTS);
+    expect(p.targets.loudness).toBeCloseTo(targetBeforeSilence, 5);
+  });
+
+  // rateScale=Infinity is what sensitivity.ts's smoothingRateScale returns
+  // at the Smoothing row's Off stop (deviceMenu.ts) — ease() must assign the
+  // target directly rather than compute a Math.min(1, rate*dt*scale)
+  // coefficient, so every dial lands exactly on `targets`, which is what the
+  // meters panel's RAW chip already shows. Exercised over a musical feed
+  // (not just constant bands) so attack/pulse/tempo actually vary tick to
+  // tick, not just brightness/density/dynamics/loudness.
+  it("at rateScale=Infinity, every dial equals its target exactly, every tick", () => {
+    const p = createMusicProfile();
+    const feed = createSyntheticFeed({ bpm: 128 });
+    for (let i = 0; i < 900; i++) {
+      const t = i * DT;
+      const inputs: ProfileInputs = { tempoLock: 0.5 + 0.5 * Math.sin(t * 0.1), sectionIntensity: 0.5 + 0.5 * Math.sin(t * 0.05) };
+      p.advance(DT, feed.frame(t), inputs, Infinity);
+      for (const dial of Object.keys(NEUTRAL) as (keyof typeof NEUTRAL)[]) {
+        expect(Number.isFinite(p[dial])).toBe(true);
+        expect(p[dial]).toBe(p.targets[dial]);
       }
     }
   });

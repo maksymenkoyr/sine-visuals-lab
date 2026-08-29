@@ -16,6 +16,7 @@ import {
 } from "./capture.ts";
 import { buildProbeSnapshot, formatProbe, type ProbeInput, type ProbeSnapshot } from "./probe.ts";
 import { applyTuningParams, initTuningBus, type TuningParams } from "./bus.ts";
+import { clearAllPins } from "./pins.ts";
 import { mountTuningUI } from "./ui.ts";
 
 export interface TuningDeps {
@@ -30,6 +31,9 @@ interface VizDebugApi {
   clip(opts?: ClipCaptureOpts): Promise<{ ok: boolean; ts: number }>;
   setParams(params: TuningParams): void;
   setClipBuffer(on: boolean): void;
+  /** Drops every typed-in dev pin (tuning/pins.ts) on every scene — for a
+   *  headless driver to neutralize a developer's leftover pins before a run. */
+  clearPins(): void;
 }
 
 type CaptureMeta = ProbeSnapshot & { kind: "mark" | "clip" };
@@ -69,6 +73,7 @@ export function initTuning(deps: TuningDeps): void {
     clip,
     setParams: (params) => applyTuningParams(params),
     setClipBuffer: (on) => (on ? startClipBuffer() : stopClipBuffer()),
+    clearPins: () => clearAllPins(),
   };
   (window as unknown as { __viz: VizDebugApi }).__viz = api;
 

@@ -21,6 +21,10 @@ import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createAudioMeters } from "./audioMeters.ts";
+import { createPowerCard, type PowerStatus } from "./powerCard.ts";
+import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
+import type { PowerMode } from "../render/powerMode.ts";
+import type { QualityChoice } from "../render/qualityPref.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -40,6 +44,7 @@ import {
 import {
   chipBtnLitStyle,
   chipBtnStyle,
+  createAdvancedSection,
   createCard,
   createChipButton,
   digitsStyle,
@@ -67,6 +72,22 @@ import {
  * the whole point is to watch the scene react while you tune it, so it
  * also stays open across palette taps.
  *
+ * Every card in that left column — Power, Bands, and each meter card —
+ * collapses to just its title bar (createCard's foldId, controlsKit.ts):
+ * click the chevron or anywhere on the header outside a Reset-style chip.
+ * The Bands+meters column can also go away at once — "Hide meters" in the
+ * footer strip, or M — which leaves Power and the controls where they are
+ * rather than reflowing anything. Separately, once every card in Power and
+ * that column is folded, there's nothing left to show but a stack of title
+ * bars, so the pair collapses horizontally too, down to one small triangle
+ * (columnsWrap's vc-cols-folded below) that reopens everything — driven by
+ * a MutationObserver over each card's vc-folded class rather than a
+ * fold-all callback threaded through createCard, so it costs the rest of
+ * the panel nothing. Fold and hide state are this panel's own view state
+ * (panelFolds.ts) — unlike every scene/audio/palette read and write below,
+ * which goes through DeviceMenuDeps, this doesn't, since nothing outside
+ * src/ui/ ever needs to know which card is folded.
+ *
  * Row grammar (createControlRow; the meters follow it too, with a meter in
  * the slider's place — the shared pieces live in controlsKit.ts): label ·
  * seven-segment readout + unit ·
@@ -84,16 +105,24 @@ import {
  * accent names its system — the constants and their meanings live in
  * controlsTheme.ts.
  *
- * Keyboard layer, live only while the panel is open (see onKeyDown): Tab /
- * Shift+Tab walk a ring over every .vc-slider/.vc-toggle/.vc-fader in
- * document order, wrapping at both ends and skipping every chip and button —
- * so Tab alone never leaves the panel and never lands anywhere but a control.
- * On whichever control has focus, A toggles auto, R resets, T mutes/restores
- * (see above; a fader's arrow keys are its own, in bandFaders.ts).
- * Digit keys 1-9 jump to a numbered block — each card title and each scene
- * group heading carries a .vc-block badge, renumbered by renumberBlocks()
- * whenever the block set can change (i.e. on every renderSceneSettings) — and
- * focus the first control inside it.
+ * The panel itself is opened and closed from outside with S (wired in
+ * app.ts, live only in a viz — see that handler), mirroring a click on
+ * deps.toggleButton (the gear); H, below, is the reverse direction, only
+ * live once the panel is already open.
+ *
+ * Keyboard layer, live only while the panel is open (see onKeyDown): H
+ * closes it, M hides/shows the meters column. Tab / Shift+Tab walk a ring over every
+ * .vc-slider/.vc-toggle/.vc-fader in document order, wrapping at both ends
+ * and skipping every chip and button — so Tab alone never leaves the panel
+ * and never lands anywhere but a control. On whichever control has focus, A
+ * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
+ * are its own, in bandFaders.ts). Digit keys 1-9 jump to a numbered block —
+ * each card title and each scene group heading carries a .vc-block badge,
+ * renumbered by renumberBlocks() whenever the block set can change (i.e. on
+ * every renderSceneSettings) — and focus the first control inside it,
+ * unfolding the block's card first if it's folded (see jumpToBlock). The
+ * fold caret is a button, so like every other chip it sits outside the Tab
+ * ring on purpose.
  *
  * Scene selection lives in the gallery — this panel doesn't duplicate it.
  * Every read and write goes through DeviceMenuDeps (wired in app.ts); the
@@ -168,12 +197,35 @@ export interface DeviceMenuDeps {
   onSceneAutoToggle: (sceneId: string, on: boolean) => void;
   getAutoStrength: () => number;
   onAutoStrengthChange: (value: number) => void;
+  /** Dev-only: read/write/clear an unclamped pin for a param row (see
+   *  tuning/pins.ts) — its presence is what turns a row's readout into a
+   *  typable field, and its absence in a production build is what hides
+   *  that affordance entirely. */
+  devPin?: {
+    get(sceneId: string, key: string): number | undefined;
+    set(sceneId: string, key: string, value: number): void;
+    clear(sceneId: string, key: string): void;
+  };
   /** Global per-band adaptive-normalization amount — see src/audio/autoGain.ts.
    *  AUTO_GAIN_MIN (the default) is the fixed mapping against the analyser's
    *  own dB window, matching the spectrum strip's raw feed; AUTO_GAIN_MAX is
    *  fully adaptive. */
   getAutoGain: () => number;
   onAutoGainChange: (value: number) => void;
+  /** Energy saving mode (src/render/powerMode.ts) — the Power card's
+   *  Auto/On/Off override for the quality governor. Device-wide, like
+   *  Auto-gain above. */
+  getPowerMode: () => PowerMode;
+  onPowerModeChange: (mode: PowerMode) => void;
+  /** Quality choice (src/render/qualityPref.ts) — the Power card's
+   *  Auto/High/Mid/Low/Floor override for which preset the governor steps
+   *  from. Device-wide, like Power mode above. */
+  getQualityChoice: () => QualityChoice;
+  onQualityChoiceChange: (choice: QualityChoice) => void;
+  /** Snapshot for the Power card's status line and readouts — what the
+   *  governor actually decided this session, and why. Polled at the panel's
+   *  existing ~10Hz auto-refresh tick, not per frame. */
+  getPowerStatus: () => PowerStatus;
   /** The button that opens this menu — excluded from the tap-outside-to-close
    *  check, and ringed (aria-pressed) while the panel is open. */
   toggleButton: HTMLElement;
@@ -188,11 +240,16 @@ export interface DeviceMenu {
    *  feeds, and the meters. `frame` has the band faders applied; `ungained`
    *  is the same frame before them (the strip's ghost bars); `pinned` is
    *  which bands the gain stage clamped (bandGains.ts's pinnedBands);
-   *  `anim`/`mono`/`fixedEnergy` feed the meters (audioMeters.ts) —
+   *  `anim`/`mono`/`fixedEnergy`/`lufs` feed the meters (audioMeters.ts) —
    *  `fixedEnergy` is FeatureExtractor.fixedEnergy, null wherever this
    *  device isn't running its own extractor (renderer, synthetic feed);
    *  `lufs` is this device's lufsAnalyser reading, null on the same paths
-   *  (the Loudness card hides itself). */
+   *  (the Loudness card hides itself). `rateScale` is app.ts's
+   *  already-resolved sensitivity.ts's smoothingRateScale for this tick's
+   *  Smoothing value — forwarded to the meters so their own BPM settle and
+   *  waveform peak-hold bypass at Smoothing's Off stop the same way the rest
+   *  of the pipeline does; not re-resolved here, since resolveSmoothing()
+   *  slews its auto value and this runs every rAF tick. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -200,6 +257,7 @@ export interface DeviceMenu {
     pinned: Uint8Array | null,
     anim: AnimFrame | null,
     mono: Float32Array | null,
+    rateScale: number,
     fixedEnergy: number | null,
     lufs: LufsReading | null,
   ): void;
@@ -280,6 +338,7 @@ const footerStyle = `
   border: 1px solid rgba(255,255,255,0.13); border-radius: 3px;
   font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.5);
 `;
+const footerBtnsStyle = `display: flex; gap: 16px;`;
 const footerBtnStyle = `
   font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit;
   background: none; border: none; padding: 0; cursor: pointer;
@@ -288,13 +347,17 @@ const footerBtnStyle = `
 // The Input card doubles as a level meter: two stacked background washes
 // (sized per frame in update()) under the glass, not separate bars — a bar
 // stacked over a slider read as a second, draggable control it wasn't:
-//  - the tick: a 2px hard edge at the raw (pre-sensitivity) mic level,
-//    always input-green — it's a different quantity from the fill below.
-//  - the fill: a solid wash out to the shaped (post-sensitivity) level —
-//    where the scene is actually reacting right now. Its color rides the
-//    --wash custom property (see washColor()) so only that one value needs
-//    writing each frame as the level nears clipping.
-// The gap between tick and fill edge is the sensitivity, visibly.
+//  - the tick: a 2px hard edge at FeatureFrame.level, the room's absolute
+//    loudness against a fixed dB window — always input-green, and unmoved by
+//    the Auto-gain toggle below or by Sensitivity, since neither ever
+//    touches it.
+//  - the fill: a solid wash out to the shaped (post-Auto-gain,
+//    post-sensitivity) level — where the scene is actually reacting right
+//    now. Its color rides the --wash custom property (see washColor()) so
+//    only that one value needs writing each frame as the level nears
+//    clipping.
+// The gap between tick and fill edge is Auto-gain and Sensitivity together,
+// visibly: flip Auto-gain on in a quiet room and the gap visibly opens.
 //
 // Hot-zone ramp for the fill wash: green all the way up to HOT_START, then
 // green -> yellow over the next slice, then yellow -> red in the last
@@ -406,6 +469,20 @@ interface ControlRowSpec {
      *  that reveals whatever's stored, not whatever the slider happened to be showing. */
     getManual: () => number;
   };
+  /** Dev-only: makes the readout typable, bound to a scene+key already —
+   *  see DeviceMenuDeps.devPin. Omit to leave the readout the plain
+   *  non-interactive span it's always been (any prod build, or a row this
+   *  affordance doesn't apply to). */
+  pin?: {
+    get(): number | undefined;
+    set(value: number): void;
+    clear(): void;
+    /** What to fall back to once a pin is cleared by an invalid/empty typed
+     *  value — the row's already-resolved live value (auto/override-aware,
+     *  same getter the row's own auto path uses), not a raw manual read, so
+     *  clearing a pin never fights whatever else currently owns the row. */
+    resolve(): number;
+  };
 }
 
 /** Wires A/R/T on a row's own focusable control (the slider or the toggle
@@ -491,6 +568,105 @@ function createControlRow(spec: ControlRowSpec) {
   unit.textContent = spec.unit ?? "";
   if (!spec.unit) unit.style.display = "none";
   readout.append(digits, unit);
+
+  // Last value display() actually rendered — the typed field's prefill, and
+  // (with editingPin) whether display() needs to keep the field showing
+  // instead of the digits it would otherwise reassert every refresh.
+  let lastValue = spec.defaultValue;
+  let editingPin = false;
+
+  // Dev-only typed entry — see ControlRowSpec.pin. The digits span becomes
+  // the click trigger for a plain text field swapped in over it (not reached
+  // by Tab — the panel's ring (ringElements() below) only walks
+  // .vc-slider/.vc-toggle/.vc-fader, so this is mouse/touch-only, matching
+  // the rest of the row's pointer-only affordances like the thumb magnet). A
+  // `*` marks a pinned (out-of-range) value in BANDS_AMBER, a cross-card
+  // color chosen so it reads as "outside the slider" regardless of which
+  // card's own accent this row is using.
+  let pinMark: HTMLSpanElement | null = null;
+  let pinInput: HTMLInputElement | null = null;
+  if (spec.pin) {
+    pinMark = document.createElement("span");
+    pinMark.textContent = "*";
+    pinMark.title = "Pinned — typed value outside the slider's range";
+    pinMark.style.cssText = `color: ${BANDS_AMBER}; font: 400 11px/1 ${FONT_MONO}; display: none;`;
+    readout.appendChild(pinMark);
+
+    digits.style.cursor = "text";
+    digits.title = "Click to type a value";
+
+    pinInput = document.createElement("input");
+    pinInput.type = "text";
+    pinInput.inputMode = "decimal";
+    pinInput.className = "vc-pin-input";
+    pinInput.style.cssText = `${digitsStyle} background: transparent; border: none; outline: none; width: 4.5em; display: none;`;
+    readout.insertBefore(pinInput, digits);
+
+    // stopPropagation on both the trigger and the field itself so el's own
+    // click-to-focus-slider handler (below) never steals focus back out.
+    digits.addEventListener("click", (e) => {
+      e.stopPropagation();
+      pinOpenEdit();
+    });
+    pinInput.addEventListener("click", (e) => e.stopPropagation());
+    // Escape sets this so the blur that display:none triggers on the
+    // focused field (browsers fire it automatically) is a no-op instead of
+    // re-committing whatever text was left in the box.
+    let suppressBlurCommit = false;
+    pinInput.addEventListener("blur", () => {
+      if (suppressBlurCommit) {
+        suppressBlurCommit = false;
+        return;
+      }
+      pinCommitTyped();
+    });
+    pinInput.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        pinInput!.blur(); // triggers the blur listener above -> commits
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        suppressBlurCommit = true;
+        pinCloseEdit();
+      }
+    });
+  }
+  // Bound to the assigned functions further down (pinOpenEdit etc. are
+  // function declarations, hoisted within this same call), once display(),
+  // commit(), and clearOff() exist below to close over.
+  function pinOpenEdit(): void {
+    if (!pinInput) return;
+    editingPin = true;
+    pinInput.value = String(lastValue);
+    digits.style.display = "none";
+    pinInput.style.display = "";
+    pinInput.focus();
+    pinInput.select();
+  }
+  function pinCloseEdit(): void {
+    if (!pinInput) return;
+    editingPin = false;
+    pinInput.style.display = "none";
+    digits.style.display = "";
+  }
+  function pinCommitTyped(): void {
+    if (!spec.pin || !pinInput) return;
+    const text = pinInput.value.trim();
+    const value = Number(text);
+    pinCloseEdit();
+    if (text === "" || !Number.isFinite(value)) {
+      spec.pin.clear();
+      display(spec.pin.resolve(), false);
+    } else if (value >= spec.min && value <= spec.max) {
+      spec.pin.clear();
+      clearOff();
+      commit(value);
+    } else {
+      spec.pin.set(value);
+      display(value, false);
+    }
+  }
 
   const chip = document.createElement("button");
   chip.textContent = "A";
@@ -589,6 +765,7 @@ function createControlRow(spec: ControlRowSpec) {
   }
 
   function display(value: number, auto: boolean): void {
+    lastValue = value;
     const sliderValue = valueToSlider(value);
     slider.value = String(sliderValue);
     const lo = Number(slider.min);
@@ -596,6 +773,17 @@ function createControlRow(spec: ControlRowSpec) {
     const pct = hi > lo ? ((sliderValue - lo) / (hi - lo)) * 100 : 0;
     slider.style.setProperty("--vc-fill", `${Math.max(0, Math.min(100, pct))}%`);
     setReadout(value);
+    // setReadout just overwrote digits.style.cssText wholesale, which would
+    // silently pop the digits back over an open typed-entry field on every
+    // refresh (e.g. an auto row's ~100ms tick) — reassert the field's
+    // visibility every call rather than only where it was opened.
+    if (spec.pin) {
+      if (editingPin) {
+        digits.style.display = "none";
+        pinInput!.style.display = "";
+      }
+      pinMark!.style.display = spec.pin.get() !== undefined ? "" : "none";
+    }
     resetBtn.style.visibility = Math.abs(value - spec.defaultValue) > 1e-6 ? "visible" : "hidden";
     setHint(auto);
   }
@@ -640,13 +828,18 @@ function createControlRow(spec: ControlRowSpec) {
   });
   slider.addEventListener("input", () => {
     clearOff();
+    spec.pin?.clear();
     commit(sliderToValue());
   });
   resetBtn.addEventListener("click", () => {
     clearOff();
+    spec.pin?.clear();
     commit(spec.defaultValue);
   });
   offChip.addEventListener("click", () => {
+    // Any of the row's own controls taking over clears a pin the same way —
+    // see the slider/reset handlers above.
+    spec.pin?.clear();
     if (offStoredValue !== null) {
       const restore = offStoredValue;
       offStoredValue = null;
@@ -664,7 +857,13 @@ function createControlRow(spec: ControlRowSpec) {
       const auto = spec.auto!;
       const on = !auto.isEnabled();
       auto.toggle(on);
-      if (on) clearOff();
+      if (on) {
+        clearOff();
+        // A pin beats auto in resolve()'s precedence, so without this the
+        // chip would light up while the row visibly stayed put — clearing it
+        // here is what actually hands the row to auto.
+        spec.pin?.clear();
+      }
       refreshChip();
       display(on ? auto.resolveLive() : auto.getManual(), on);
     });
@@ -685,9 +884,11 @@ function createControlRow(spec: ControlRowSpec) {
       onCommit = cb;
     },
     /** Called from the throttled per-frame refresh — pulls the live
-     *  auto-resolved value while auto is on and this row isn't being dragged. */
+     *  auto-resolved value while auto is on and this row isn't being dragged
+     *  or mid-edit in the typed-entry field (editingPin — same reasoning as
+     *  dragging: don't overwrite what the user is actively doing). */
     refreshAuto(): void {
-      if (!spec.auto || dragging || !spec.auto.isEnabled()) return;
+      if (!spec.auto || dragging || editingPin || !spec.auto.isEnabled()) return;
       display(spec.auto.resolveLive(), true);
     },
     refreshChip,
@@ -696,11 +897,13 @@ function createControlRow(spec: ControlRowSpec) {
      *  this row's own resetBtn. */
     clearOff,
     /** Show whatever's right for the row now: the live auto value if auto
-     *  owns it, the manual store otherwise. */
+     *  owns it (resolveLive() already reflects a pin ahead of auto — see
+     *  autoTune.ts's resolve() — so no separate check is needed there), a
+     *  pin ahead of the manual store otherwise. */
     sync(manualValue: () => number): void {
       refreshChip();
       if (spec.auto && spec.auto.isEnabled()) display(spec.auto.resolveLive(), true);
-      else display(manualValue(), false);
+      else display(spec.pin?.get() ?? manualValue(), false);
     },
   };
 }
@@ -806,6 +1009,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const root = document.createElement("div");
   root.className = "vc-root vc-scroll";
 
+  // ---- power column: energy saving mode ----
+  // Leftmost — a compact card, not a scrolling stack, so it isn't wired into
+  // the digit-block keyboard jump (renumberBlocks/markBlock): its only
+  // controls are plain chip buttons, outside the .vc-slider/.vc-toggle/
+  // .vc-fader Tab ring, the same as the palette chips they're modeled on.
+  const powerCard = createPowerCard({
+    getPowerMode: deps.getPowerMode,
+    onPowerModeChange: deps.onPowerModeChange,
+    getQualityChoice: deps.getQualityChoice,
+    onQualityChoiceChange: deps.onQualityChoiceChange,
+    getPowerStatus: deps.getPowerStatus,
+  });
+  const powerCol = document.createElement("div");
+  powerCol.className = "vc-power-col";
+  powerCol.appendChild(powerCard.el);
+
   // ---- spectrum column: the Bands card ----
   // The live spectrum and the band gains are one card: the strip is the
   // control (bandFaders.ts draws the faders over the bars), so what you
@@ -825,9 +1044,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   spectrumCol.className = "vc-spectrum-col";
 
   // "Listening post": lit shows the raw mic signal exactly as it comes in —
-  // no adaptive envelope, no gain, no sensitivity; unlit (default) shows the
-  // processed signal that's actually driving the visuals.
-  const rawChip = createChipButton("RAW", "Listening post — show the raw mic signal instead of what the visuals see", () => {
+  // no adaptive envelope (features.ts), no Bands gain. NOT "no sensitivity":
+  // Sensitivity/Expansion are applied later, only on the render path
+  // (applySensitivity in app.ts, after this strip is already fed) — so the
+  // processed side shown here never had them either. This is a different RAW
+  // chip from the meters panel's (audioMeters.ts): that one's Smoothing's Off
+  // stop makes a genuine no-op; this one always differs whenever Auto-gain is
+  // on, since the two sides normalize against different windows regardless
+  // of Smoothing (see features.ts's autoGain doc).
+  const rawChip = createChipButton("RAW", "Listening post — the raw mic signal, before the adaptive envelope and Bands gain", () => {
     spectrumStrip.setShowRaw(!spectrumStrip.showRaw());
     rawChip.style.cssText = spectrumStrip.showRaw() ? chipBtnLitStyle : chipBtnStyle;
   });
@@ -838,7 +1063,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const bandsHeaderRight = document.createElement("div");
   bandsHeaderRight.style.cssText = rowRightStyle;
   bandsHeaderRight.append(rawChip, bandsResetChip);
-  const bandsCard = createCard({ title: "Bands", accent: BANDS_AMBER, right: bandsHeaderRight });
+  const bandsCard = createCard({
+    title: "Bands",
+    accent: BANDS_AMBER,
+    right: bandsHeaderRight,
+    foldId: "bands",
+  });
   // Named for the stacked layout in controlsTheme.ts, where this card and
   // the meters strip become root items of their own.
   bandsCard.el.classList.add("vc-spectrum-card");
@@ -881,6 +1111,48 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   bandsCard.body.append(spectrumHeader, hairline, fadersRow);
   spectrumCol.append(bandsCard.el, audioMeters.el);
+
+  // Power travels with this column for the purposes of the all-folded
+  // triangle collapse below: they're wrapped together so the CSS
+  // (vc-cols-wrap, controlsTheme.ts) can hide both as a unit. columnsToggle
+  // stays in the DOM at all times and is the one element vc-cols-folded
+  // keeps visible; clicking it unfolds every folded card by clicking its
+  // own chevron (jumpToBlock below does the same for a single card).
+  const columnsToggle = document.createElement("button");
+  columnsToggle.type = "button";
+  columnsToggle.className = "vc-cols-toggle";
+  columnsToggle.textContent = "▸";
+  columnsToggle.title = "Open every card in this column";
+  columnsToggle.addEventListener("click", () => {
+    for (const chevron of columnsWrap.querySelectorAll<HTMLButtonElement>(".vc-card.vc-folded .vc-fold")) {
+      chevron.click();
+    }
+  });
+  const columnsWrap = document.createElement("div");
+  columnsWrap.className = "vc-cols-wrap";
+  columnsWrap.append(columnsToggle, powerCol, spectrumCol);
+
+  // Recomputed off each card's own vc-folded class (via the observer below)
+  // rather than a callback threaded through createCard/audioMeters.ts.
+  // When "Hide meters" is active, Bands and the meter cards are excluded
+  // from the check (isFolded(METERS_COLUMN), not an offsetParent probe —
+  // that forces a synchronous layout on every class mutation in the
+  // column, which stalled the panel once enough cards had folded), so
+  // folding Power alone while meters are hidden also counts as "everything
+  // folded".
+  function refreshColumnsFold(): void {
+    const cards = [...columnsWrap.querySelectorAll<HTMLElement>(".vc-card")];
+    const relevant = isFolded(METERS_COLUMN) ? cards.filter((c) => c === powerCard.el) : cards;
+    columnsWrap.classList.toggle(
+      "vc-cols-folded",
+      relevant.length > 0 && relevant.every((c) => c.classList.contains("vc-folded")),
+    );
+  }
+  new MutationObserver(refreshColumnsFold).observe(columnsWrap, {
+    attributes: true,
+    attributeFilter: ["class"],
+    subtree: true,
+  });
 
   let lastStatusText = "";
   function refreshSpectrumHeader(): void {
@@ -981,13 +1253,32 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoRow.style.cssText = autoRowStyle;
   autoRow.append(autoCard.el, autoMasterBtn);
 
+  // Binds a row's typed-entry field to deps.devPin for one (scene, key) —
+  // undefined (no typable readout) whenever devPin itself is, i.e. every
+  // production build. `sceneId` is a getter rather than a plain string
+  // because the Input card's three rows are built once and outlive scene
+  // switches (see makeInputRow below); a scene-setting row is rebuilt fresh
+  // per scene by renderSceneSettings and could just close over a constant,
+  // but taking a getter here either way keeps this one function correct for
+  // both callers instead of needing two shapes.
+  function pinConfig(sceneId: () => string, key: string, resolve: () => number): ControlRowSpec["pin"] {
+    const pin = deps.devPin;
+    if (!pin) return undefined;
+    return {
+      get: () => pin.get(sceneId(), key),
+      set: (value) => pin.set(sceneId(), key, value),
+      clear: () => pin.clear(sceneId(), key),
+      resolve,
+    };
+  }
+
   // Input: Sensitivity/Expansion/Smoothing — three instances of the same
   // log-mapped row, sharing the auto-refresh call sites below (master
   // toggle, open(), live-drift refresh) through one array, which is what
   // keeps a future fourth row from shipping half-wired to Auto.
   function makeInputRow(
     label: string,
-    range: { min: number; max: number; defaultValue: number },
+    range: { min: number; max: number; defaultValue: number; zeroAtMin?: boolean },
     spec: () => SceneSetting,
     getManual: () => number,
     resolveLive: () => number,
@@ -1001,6 +1292,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       max: range.max,
       defaultValue: range.defaultValue,
       mapping: "log",
+      zeroAtMin: range.zeroAtMin,
       unit: "×",
       format: formatGain,
       description,
@@ -1010,6 +1302,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         resolveLive,
         getManual,
       },
+      pin: pinConfig(() => deps.currentSceneId(), spec().key, resolveLive),
     });
     row.onChange(onChange);
     return { row, getManual, defaultValue: range.defaultValue, onChange };
@@ -1037,14 +1330,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     ),
     // How fast the visuals chase the audio, independent of Sensitivity's gain
     // and Expansion's curve — see smoothingRateScale for the rate mapping.
+    // zeroAtMin: unlike Sensitivity/Expansion, this row's slider bottom is
+    // a carved-out Off stop rather than SMOOTHING_MIN — genuinely unsmoothed,
+    // not just the calmest setting (see sensitivity.ts's header). Auto-tune
+    // never lands here on its own: SMOOTHING_SPEC.min in autoTune.ts stays
+    // SMOOTHING_MIN, so this is reachable only by a deliberate drag or R-reset-then-drag.
     makeInputRow(
       "Smoothing",
-      { min: SMOOTHING_MIN, max: SMOOTHING_MAX, defaultValue: SMOOTHING_DEFAULT },
+      { min: SMOOTHING_MIN, max: SMOOTHING_MAX, defaultValue: SMOOTHING_DEFAULT, zeroAtMin: true },
       deps.getSmoothingSpec,
       () => deps.getSmoothing(deps.currentSceneId()),
       () => deps.resolveSmoothingValue(deps.currentSceneId()),
       (value) => deps.onSmoothingChange(deps.currentSceneId(), value),
-      "How quickly the picture follows the sound",
+      "How quickly the picture follows the sound — drag to the bottom for Off, the meters panel's RAW chip with nothing left to bypass",
     ),
   ];
   function syncInputRows(): void {
@@ -1136,6 +1434,53 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
+  // Builds one setting's row (boolean toggle or slider) into `container` —
+  // shared by the direct-to-sceneRows path and the advanced-section path
+  // below, so a row behaves identically wherever it lands.
+  function appendSettingRow(container: HTMLElement, sceneId: string, spec: SceneSetting): void {
+    if (spec.type === "boolean") {
+      container.appendChild(
+        createToggleRow({
+          label: spec.label,
+          accent: SCENE_VIOLET,
+          defaultValue: spec.default,
+          description: spec.description,
+          get: () => deps.getSceneSettingValue(sceneId, spec),
+          set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
+        }),
+      );
+      return;
+    }
+
+    const row = createControlRow({
+      label: spec.label,
+      accent: SCENE_VIOLET,
+      min: spec.min,
+      max: spec.max,
+      step: spec.step,
+      defaultValue: spec.default,
+      mapping: "linear",
+      format: formatSetting,
+      description: spec.description,
+      // A macro-driven setting (spec.macro) is auto-capable the same way an
+      // `auto` one is — it just tracks another setting instead of the music
+      // profile — so it gets the same A chip and live-refresh wiring.
+      auto: spec.auto || spec.macro
+        ? {
+            isEnabled: () => deps.isSettingAutoEnabled(sceneId, spec.key),
+            toggle: (on) => deps.onSettingAutoToggle(sceneId, spec, on),
+            resolveLive: () => deps.resolveSceneSettingValue(sceneId, spec),
+            getManual: () => deps.getSceneSettingValue(sceneId, spec),
+          }
+        : undefined,
+      pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
+    });
+    row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
+    row.sync(() => deps.getSceneSettingValue(sceneId, spec));
+    container.appendChild(row.el);
+    sceneRowHandles.push(row);
+  }
+
   function renderSceneSettings(): void {
     const sceneId = deps.currentSceneId();
     const specs = deps.getSceneSettings(sceneId);
@@ -1147,55 +1492,46 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let lastGroup: string | undefined;
     let first = true;
     let hasGroups = false;
-    for (const spec of specs) {
-      if (spec.group !== undefined && spec.group !== lastGroup) {
+    // The currently-open advanced-section body a run of consecutive
+    // spec.advanced entries is being appended into, or null between runs —
+    // reset whenever a group heading appears so a run never spans a group.
+    let advancedBody: HTMLElement | null = null;
+    for (let i = 0; i < specs.length; i++) {
+      const spec = specs[i];
+      const groupChanged = spec.group !== undefined && spec.group !== lastGroup;
+      if (groupChanged) {
         hasGroups = true;
-        const heading = groupHeading(spec.group, lastGroup === undefined);
+        advancedBody = null;
+        const heading = groupHeading(spec.group!, lastGroup === undefined);
         markBlock(heading);
         sceneRows.appendChild(heading);
-      } else if (!first) {
-        sceneRows.appendChild(spacer());
       }
       lastGroup = spec.group;
-      first = false;
 
-      if (spec.type === "boolean") {
-        sceneRows.appendChild(
-          createToggleRow({
-            label: spec.label,
-            accent: SCENE_VIOLET,
-            defaultValue: spec.default,
-            description: spec.description,
-            get: () => deps.getSceneSettingValue(sceneId, spec),
-            set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
-          }),
-        );
+      if (spec.advanced) {
+        if (!advancedBody) {
+          if (!groupChanged && !first) sceneRows.appendChild(spacer());
+          let count = 1;
+          for (let j = i + 1; j < specs.length && specs[j].advanced; j++) count++;
+          const noun = count === 1 ? "control" : "controls";
+          const section = createAdvancedSection(
+            `scene:${sceneId}:${spec.group ?? ""}:advanced`,
+            `${count} ${(spec.group ?? "").toLowerCase()} ${noun}`.trim(),
+          );
+          sceneRows.appendChild(section.el);
+          advancedBody = section.body;
+        } else {
+          advancedBody.appendChild(spacer());
+        }
+        appendSettingRow(advancedBody, sceneId, spec);
+        first = false;
         continue;
       }
+      advancedBody = null;
 
-      const row = createControlRow({
-        label: spec.label,
-        accent: SCENE_VIOLET,
-        min: spec.min,
-        max: spec.max,
-        step: spec.step,
-        defaultValue: spec.default,
-        mapping: "linear",
-        format: formatSetting,
-        description: spec.description,
-        auto: spec.auto
-          ? {
-              isEnabled: () => deps.isSettingAutoEnabled(sceneId, spec.key),
-              toggle: (on) => deps.onSettingAutoToggle(sceneId, spec, on),
-              resolveLive: () => deps.resolveSceneSettingValue(sceneId, spec),
-              getManual: () => deps.getSceneSettingValue(sceneId, spec),
-            }
-          : undefined,
-      });
-      row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
-      row.sync(() => deps.getSceneSettingValue(sceneId, spec));
-      sceneRows.appendChild(row.el);
-      sceneRowHandles.push(row);
+      if (!groupChanged && !first) sceneRows.appendChild(spacer());
+      first = false;
+      appendSettingRow(sceneRows, sceneId, spec);
     }
 
     // The Scene card title is itself the block only when the active scene
@@ -1229,16 +1565,39 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  // Footer strip: auto state at a glance, and a way out.
+  // Footer strip: auto state at a glance, the meters column's on/off, and a
+  // way out. The column toggle lives here, in the column that never hides,
+  // rather than above Bands: a chip up there had to be its own row, which
+  // pushed the whole column down out of line with Power and Auto strength.
   const footer = document.createElement("div");
   footer.style.cssText = footerStyle;
   const footerStatus = document.createElement("span");
+  const footerBtns = document.createElement("span");
+  footerBtns.style.cssText = footerBtnsStyle;
+  const metersBtn = document.createElement("button");
+  metersBtn.style.cssText = footerBtnStyle;
+  metersBtn.addEventListener("click", () => setMetersHidden(!isFolded(METERS_COLUMN)));
   const hideBtn = document.createElement("button");
   hideBtn.textContent = "Hide UI  H";
   hideBtn.title = "Close the panel (H)";
   hideBtn.style.cssText = footerBtnStyle;
   hideBtn.addEventListener("click", () => close());
-  footer.append(footerStatus, hideBtn);
+  footerBtns.append(metersBtn, hideBtn);
+  footer.append(footerStatus, footerBtns);
+
+  function setMetersHidden(hidden: boolean): void {
+    setFolded(METERS_COLUMN, hidden);
+    root.classList.toggle("vc-meters-hidden", hidden);
+    metersBtn.textContent = hidden ? "Show meters  M" : "Hide meters  M";
+    metersBtn.title = hidden
+      ? "Bring back the Bands card and the meters (M)"
+      : "Hide the Bands card and the meters, keep the controls (M)";
+    // Hiding/showing the column changes which cards have a layout box
+    // without touching any card's own vc-folded class, so the observer
+    // above never fires for it on its own — recompute here instead.
+    refreshColumnsFold();
+  }
+  setMetersHidden(isFolded(METERS_COLUMN));
 
   function refreshAutoMaster(): void {
     const lit = deps.isSceneAuto(deps.currentSceneId());
@@ -1288,7 +1647,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
 
   controlsCol.append(autoRow, inputCard.el, sceneCard.el, paletteCard.el, footer);
-  root.append(spectrumCol, controlsCol);
+  root.append(columnsWrap, controlsCol);
   document.body.appendChild(root);
 
   // ---- open / close ----
@@ -1318,9 +1677,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   // The Tab ring: every param control, in document order — see the header
   // comment. Derived from the DOM each call rather than cached, so a Scene
-  // card rebuilt by renderSceneSettings can never leave it stale.
+  // card rebuilt by renderSceneSettings can never leave it stale. Filtered
+  // to controls with a layout box: a folded card's body is display:none, and
+  // a control inside it would otherwise sit in the ring and fail to focus.
   function ringElements(): HTMLElement[] {
-    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-fader")];
+    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-fader")].filter(
+      (el) => el.getClientRects().length > 0,
+    );
   }
 
   function handleTab(e: KeyboardEvent): void {
@@ -1345,6 +1708,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function jumpToBlock(n: number): void {
     const heading = [...root.querySelectorAll<HTMLElement>(".vc-block")][n - 1];
     if (!heading) return;
+    // A folded card's controls have no layout box and are invisible to
+    // ringElements() below — unfold first, or the jump would silently land
+    // on the next block's control instead.
+    const card = heading.closest<HTMLElement>(".vc-card");
+    if (card?.classList.contains("vc-folded")) card.querySelector<HTMLButtonElement>(".vc-fold")?.click();
     const target = ringElements().find(
       (el) => (heading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
     );
@@ -1358,6 +1726,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (isTypingTarget(e.target)) return;
     if (e.key === "h" || e.key === "H") {
       close();
+      return;
+    }
+    if (e.key === "m" || e.key === "M") {
+      setMetersHidden(!isFolded(METERS_COLUMN));
       return;
     }
     if (e.key === "Tab") {
@@ -1416,17 +1788,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       pinned: Uint8Array | null,
       anim: AnimFrame | null,
       mono: Float32Array | null,
+      rateScale: number,
       fixedEnergy: number | null,
       lufs: LufsReading | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono, fixedEnergy, lufs);
-      // Raw (pre-sensitivity) energy, so the level wash reflects the actual
-      // mic signal regardless of where the sensitivity slider is set.
-      const level = frame?.energy ?? 0;
-      const raw = Math.min(1, Math.max(0, level));
+      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs);
+      // The tick is FeatureFrame.level — absolute, fixed-window loudness,
+      // untouched by Auto-gain — so it reads the room regardless of that
+      // amount. The fill starts from .energy, which Auto-gain does shape,
+      // then runs the same sensitivity+expansion curve the render path
+      // applies, so it reads what the scene is actually reacting to.
+      const tick = Math.min(1, Math.max(0, frame?.level ?? 0));
+      const energy = Math.min(1, Math.max(0, frame?.energy ?? 0));
       const sceneId = deps.currentSceneId();
       const sensitivity = deps.isSettingAutoEnabled(sceneId, deps.getSensitivitySpec().key)
         ? deps.resolveSensitivityValue(sceneId)
@@ -1436,11 +1812,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         : deps.getExpansion(sceneId);
       const shaped = Math.min(
         1,
-        Math.max(0, shapeExpansion(shapeLevel(raw, sensitivity), expansion)),
+        Math.max(0, shapeExpansion(shapeLevel(energy, sensitivity), expansion)),
       );
-      const rawPct = Math.round(raw * 100);
+      const tickPct = Math.round(tick * 100);
       const shapedPct = Math.round(shaped * 100);
-      inputCard.el.style.backgroundSize = `${rawPct}% 100%, ${shapedPct}% 100%`;
+      inputCard.el.style.backgroundSize = `${tickPct}% 100%, ${shapedPct}% 100%`;
 
       // Driven off the unrounded shaped level (not shapedPct) so the ramp
       // starts exactly at HOT_START rather than snapping in 1%-wide steps.
@@ -1468,6 +1844,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       lastAutoRefreshMs = nowMs;
 
       refreshSpectrumHeader();
+      powerCard.refresh();
       for (const { row } of inputRows) row.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
     },

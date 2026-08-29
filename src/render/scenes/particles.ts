@@ -25,9 +25,9 @@ void main() {
 
   float bass = sampleBands(0.06);
 
-  // Denser field on higher tiers; a few extra neighbor cells cost little
+  // Denser field at higher detail; a few extra neighbor cells cost little
   // since this whole pass is O(9) per pixel regardless of density.
-  float cellsScale = mix(0.85, 1.25, uQuality);
+  float cellsScale = mix(0.85, 1.25, uDetail);
   vec2 cellUv = p * cellsScale;
 
   vec3 col = vec3(0.0);

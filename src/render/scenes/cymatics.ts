@@ -14,7 +14,7 @@ float wavefield(vec2 p) {
   float w = 0.0;
   for (int i = 0; i < 24; i++) {
     float fi = float(i);
-    if (uQuality < 0.5 && mod(fi, 2.0) > 0.5) continue; // stride on low tiers
+    if (uDetail < 0.5 && mod(fi, 2.0) > 0.5) continue; // stride on low detail
     float band = uBands[i];
     if (band < 0.015) continue;
     float m = 1.0 + floor(fi / 4.0);  // radial order   1..6

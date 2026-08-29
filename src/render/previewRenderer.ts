@@ -3,7 +3,7 @@ import { createSceneHost, type SceneHost } from "./sceneHost.ts";
 import { FULL_VIEWPORT, type Scene } from "./scene.ts";
 import type { Palette } from "./palette.ts";
 import type { FeatureFrame } from "../audio/types.ts";
-import type { TierSettings } from "./tier.ts";
+import type { QualitySettings } from "./quality.ts";
 import type { AnimFrame } from "./animClock.ts";
 
 /** Where a rendered preview frame gets copied to. Two implementations
@@ -33,7 +33,7 @@ export interface PreviewRenderer {
  *  out per frame — see fullscreenScene.ts / sceneHost.ts for why scenes
  *  can't each get their own GL context instead. Returns null if WebGL2 is
  *  unavailable at all (callers should fall back to static tiles). */
-export function createPreviewRenderer(tier: TierSettings): PreviewRenderer | null {
+export function createPreviewRenderer(quality: QualitySettings): PreviewRenderer | null {
   let width = 1;
   let height = 1;
   let shared: OffscreenCanvas | HTMLCanvasElement;
@@ -57,7 +57,7 @@ export function createPreviewRenderer(tier: TierSettings): PreviewRenderer | nul
     }
   }
 
-  const host = createSceneHost(gl, tier);
+  const host = createSceneHost(gl, quality);
 
   return {
     host,

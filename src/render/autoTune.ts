@@ -17,6 +17,7 @@ import {
 } from "../audio/sensitivity.ts";
 import { MUSIC_DIALS, NEUTRAL, type DialValues, type MusicDial } from "./musicProfile.ts";
 import { getOverride, isAutoPinned } from "../tuning/overrides.ts";
+import { getPin } from "../tuning/pins.ts";
 
 /**
  * Layers "let the music pick a good value" on top of sceneSettings.ts's
@@ -29,6 +30,14 @@ import { getOverride, isAutoPinned } from "../tuning/overrides.ts";
  * including every key on a scene added after this feature shipped — is
  * auto by default. That's the whole mechanism behind "a new scene's
  * sliders are auto from the first run with no extra work."
+ *
+ * A SceneSetting's `macro` field is the same displacement shape as `auto`,
+ * aimed at another setting instead of the music profile: computeMacroTarget
+ * mirrors computeAutoTarget exactly, with the driver's live value standing
+ * in for a dial reading, and the same "driver at its own default -> exactly
+ * spec.default" identity at rest. It shares this module's exceptions store
+ * and slew, so dragging a macro-driven setting "goes manual" the same way
+ * dragging an auto one does — see resolve() below.
  */
 
 // Weight-authoring convention (see the `auto:` tables in caustics.ts and
@@ -218,17 +227,17 @@ export function setAutoEnabled(sceneId: string, key: string, on: boolean): void 
 }
 
 /** Whether every auto-capable setting on this scene is currently auto —
- *  drives the scene's master toggle. Settings with no `auto` field can't be
- *  toggled, so they don't count against it. Pass Sensitivity/Expansion/
- *  Smoothing specs alongside a scene's own settings if the master toggle
- *  should cover them too (see app.ts). */
+ *  drives the scene's master toggle. Settings with neither an `auto` nor a
+ *  `macro` field can't be toggled, so they don't count against it. Pass
+ *  Sensitivity/Expansion/Smoothing specs alongside a scene's own settings
+ *  if the master toggle should cover them too (see app.ts). */
 export function isSceneAuto(sceneId: string, specs: readonly SceneSetting[]): boolean {
-  const relevant = specs.filter((s) => s.auto);
+  const relevant = specs.filter((s) => s.auto || s.macro);
   return relevant.length > 0 && relevant.every((s) => isAutoEnabled(sceneId, s.key));
 }
 
 export function setSceneAuto(sceneId: string, specs: readonly SceneSetting[], on: boolean): void {
-  for (const s of specs) if (s.auto) setAutoEnabled(sceneId, s.key, on);
+  for (const s of specs) if (s.auto || s.macro) setAutoEnabled(sceneId, s.key, on);
 }
 
 export function getAutoStrength(): number {
@@ -263,6 +272,21 @@ export function computeAutoTarget(spec: SceneSetting, profile: DialValues, autoS
   return clampToSpec(spec, raw);
 }
 
+/**
+ * Same shape as computeAutoTarget, but displaced by a driver setting's value
+ * instead of the music profile. At driverValue === spec.macro.driver.default
+ * the displacement term is exactly 0, so this returns spec.default
+ * bit-for-bit — same identity-at-rest property, same reason it's safe to
+ * ship auto-following by default.
+ */
+export function computeMacroTarget(spec: SceneSetting, driverValue: number): number {
+  const m = spec.macro;
+  if (!m) return spec.default;
+  const deviation = m.weight * (driverValue - m.driver.default);
+  const raw = spec.default + deviation * (spec.max - spec.min);
+  return clampToSpec(spec, raw);
+}
+
 // Glides the resolved value toward its target over a few seconds so a
 // section change reads as a swell, not a snap — the same reasoning as
 // sectionIntensity.ts's INTENSITY_SLEW. ~2s time constant.
@@ -289,15 +313,28 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
   // Dev-only tuning override — see tuning/overrides.ts. Wrapped in DEV so a
   // prod build never pays for the check and the override module tree-shakes
   // out entirely (Vite replaces import.meta.env.DEV with a literal false).
+  // A pin (tuning/pins.ts — a typed-in out-of-range value, persisted) beats
+  // auto-pin but loses to a file override: applyTuningParams clears every
+  // override and rewrites only the keys in its payload, so a stale pin from
+  // an earlier manual session must never shadow a key a scripted run
+  // explicitly set.
   if (import.meta.env.DEV) {
     const override = getOverride(sceneId, spec.key);
     if (override !== undefined) return override;
+    const pin = getPin(sceneId, spec.key);
+    if (pin !== undefined) return pin;
     if (isAutoPinned()) return manualValue;
   }
 
-  if (!spec.auto || !isAutoEnabled(sceneId, spec.key)) return manualValue;
+  if ((!spec.auto && !spec.macro) || !isAutoEnabled(sceneId, spec.key)) return manualValue;
 
-  const target = computeAutoTarget(spec, latestProfile, strength);
+  // A macro-driven setting has no auto weights of its own — its target
+  // tracks the driver's own resolved value (itself auto/override/manual as
+  // usual), not the music profile directly. Drivers don't carry a `macro` of
+  // their own, so this recurses exactly one level deep.
+  const target = spec.auto
+    ? computeAutoTarget(spec, latestProfile, strength)
+    : computeMacroTarget(spec, resolveSceneSetting(sceneId, spec.macro!.driver));
   const key = slewKey(sceneId, spec.key);
   const current = slewed.get(key);
   // First time this param is seen, snap to target rather than gliding from

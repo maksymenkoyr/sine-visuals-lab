@@ -8,7 +8,12 @@ audio, without reloading the page or stopping playback.
 Everything here is dev-only. `src/tuning/overrides.ts` is gated on
 `import.meta.env.DEV`, so none of it compiles into a production build, and it can
 never clobber a real user's saved settings (`sceneSettings.ts`'s localStorage
-store) — overrides sit in front of that store, not inside it.
+store) — overrides sit in front of that store, not inside it. `src/tuning/pins.ts`
+is the same idea with one difference: a pin is set by hand, from the panel's own
+typed-entry field (below), not by the param bus, and it persists across a
+reload where an override doesn't. `resolve()` (`src/render/autoTune.ts`) checks
+an override first, then a pin, then auto-pin, so a value the param bus explicitly
+sets always wins over a pin left over from an earlier by-hand session.
 
 ## Reproducibility
 
@@ -28,16 +33,23 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
    `viz:params`, and serves `GET /__tuning/params` for a client that connects
    after the edit. `src/tuning/bus.ts` applies the payload to the override layer
    on the next frame. Audio keeps playing; nothing reloads.
+
+   The controls panel is a second, by-hand entry point into the same idea: any
+   scene-setting or Input-card row's readout is a click-to-edit field. Type a
+   value inside the slider's range and it's just the setting, saved like a drag.
+   Type one outside that range and it becomes a pin instead (`src/tuning/pins.ts`)
+   — unclamped, marked with `*`, persisted, and cleared by dragging the slider,
+   pressing its ↺, or handing the row to auto.
 2. **Mark.** Alt+M (wired in `src/tuning/debug.ts`) captures one frame plus a
    probe snapshot and POSTs it to `/__tuning/mark`; the plugin writes
    `tuning/marks/<timestamp>.png` and `<timestamp>.json` (both gitignored — marks
    are working scratch, not committed artifacts).
 3. **Numeric probe.** `src/tuning/probe.ts` builds a compact per-frame snapshot:
    each setting's `base` (plain default), `resolved` (what actually reached the
-   shader), and `mode` (`"override" | "auto" | "manual"`). Its own stated
-   principle, worth keeping: *answer with numbers, not pixels* — read the probe
-   before trusting your eyes on whether a change landed. Drive it headlessly with
-   `tools/tune-probe.mjs`.
+   shader), and `mode` (`ProbeSettingValue["mode"]` — override/pin/auto/manual).
+   Its own stated principle, worth keeping: *answer with numbers, not pixels* —
+   read the probe before trusting your eyes on whether a change landed. Drive it
+   headlessly with `tools/tune-probe.mjs`.
 4. **Contact sheet.** `tools/tune-sheet.mjs` (backed by `src/tuning/capture.ts`)
    tiles N frames into one PNG — `--frames`, `--every`, `--settle` control the
    sampling. Use this to see a setting's effect across a stretch of audio at a
@@ -48,8 +60,10 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
 ## The debug surface
 
 `window.__viz` (wired from `src/app.ts`, DEV-only) exposes `probe()`, `probeText()`,
-`capture()`, `mark()`, `setParams()` — the same primitives the CLI tools above
-drive headlessly, available from the browser console for quick checks.
+`capture()`, `mark()`, `setParams()`, `clearPins()` — the same primitives the CLI
+tools above drive headlessly, available from the browser console for quick checks.
+`clearPins()` is for a scripted run: it drops every pin left over from an earlier
+by-hand panel session before that run pushes its own params.
 
 ## Recording what you learn
 

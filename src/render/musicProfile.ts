@@ -91,7 +91,21 @@ export interface ProfileInputs {
 }
 
 export interface MusicProfile extends DialValues {
-  advance(dtSec: number, frame: FeatureFrame, inputs: ProfileInputs): void;
+  /** This tick's pre-ease measurement for every dial — what each `ease()`
+   *  call above is chasing, before the multi-second smoothing. attack holds
+   *  NEUTRAL on the un-primed first frame (no flux to measure yet); loudness
+   *  freezes at its last target through silence, matching the dial itself
+   *  (see the loudness comment below). For the meters panel's RAW chip
+   *  (src/ui/audioMeters.ts). */
+  readonly targets: DialValues;
+  /** rateScale multiplies every PULSE_EASE_RATE..LOUDNESS_EASE_RATE ease
+   *  below only — sensitivity.ts's smoothingRateScale, defaulting to 1
+   *  (today's behavior). The internal trackers (onsetRate, dynMean/dynMad,
+   *  fluxFast/fluxSlow) stay at their own fixed rates regardless: they feed
+   *  `targets`, which the meters panel's RAW chip already shows unsmoothed.
+   *  Non-finite (Smoothing's Off stop) makes every dial land exactly on its
+   *  target — see ease() below. */
+  advance(dtSec: number, frame: FeatureFrame, inputs: ProfileInputs, rateScale?: number): void;
 }
 
 function clamp01(x: number): number {
@@ -99,8 +113,15 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
-function ease(current: number, target: number, rate: number, dt: number): number {
-  return current + (target - current) * Math.min(1, rate * dt);
+// Non-finite scale (Smoothing's Off stop, see sensitivity.ts's
+// smoothingRateScale) assigns `target` directly rather than computing a
+// Math.min(1, rate*dt*scale) coefficient of 1 — `current + (target -
+// current) * 1` isn't always bit-identical to `target` in IEEE754, and the
+// meters panel's RAW chip (audioMeters.ts) reads `targets` directly, so Off
+// must make the eased dial land on exactly the same value, not merely close.
+function ease(current: number, target: number, rate: number, dt: number, scale: number): number {
+  if (!Number.isFinite(scale)) return target;
+  return current + (target - current) * Math.min(1, rate * dt * scale);
 }
 
 // How fast each dial eases toward its latest measurement. All slow on
@@ -173,6 +194,15 @@ export function createMusicProfile(): MusicProfile {
   let fluxSlow = 0;
   const prevBands = new Float32Array(NUM_BANDS);
   let primed = false;
+  const targets: DialValues = {
+    pulse: 0.5,
+    tempo: 0.5,
+    brightness: 0.5,
+    density: 0.5,
+    dynamics: 0.5,
+    attack: 0.5,
+    loudness: 0.5,
+  };
 
   const state: MusicProfile = {
     pulse,
@@ -182,7 +212,8 @@ export function createMusicProfile(): MusicProfile {
     dynamics,
     attack,
     loudness,
-    advance(dtSec: number, frame: FeatureFrame, inputs: ProfileInputs): void {
+    targets,
+    advance(dtSec: number, frame: FeatureFrame, inputs: ProfileInputs, rateScale = 1): void {
       const dt = Math.max(1e-4, dtSec);
       const tempoLock = clamp01(inputs.tempoLock);
 
@@ -203,16 +234,19 @@ export function createMusicProfile(): MusicProfile {
       const pulseTarget = hasSignal
         ? clamp01(0.4 * clamp01(onsetRate / ONSET_RATE_REF) + 0.6 * tempoLock)
         : 0.5;
-      pulse = ease(pulse, pulseTarget, PULSE_EASE_RATE, dt);
+      pulse = ease(pulse, pulseTarget, PULSE_EASE_RATE, dt, rateScale);
+      targets.pulse = pulseTarget;
 
       // --- tempo ---
       const bpmNorm = clamp01((frame.bpm - BPM_LOW) / (BPM_HIGH - BPM_LOW));
       const tempoTarget = 0.5 + (bpmNorm - 0.5) * tempoLock; // folds toward neutral while unlocked
-      tempo = ease(tempo, tempoTarget, TEMPO_EASE_RATE, dt);
+      tempo = ease(tempo, tempoTarget, TEMPO_EASE_RATE, dt, rateScale);
+      targets.tempo = tempoTarget;
 
       // --- brightness (spectral centroid) & density (active-band fraction) ---
       const brightnessTarget = bandSum > 1e-4 ? clamp01(weightedSum / bandSum / (NUM_BANDS - 1)) : 0.5;
-      brightness = ease(brightness, brightnessTarget, BRIGHTNESS_EASE_RATE, dt);
+      brightness = ease(brightness, brightnessTarget, BRIGHTNESS_EASE_RATE, dt, rateScale);
+      targets.brightness = brightnessTarget;
 
       let densityTarget = 0.5;
       if (hasSignal) {
@@ -221,19 +255,22 @@ export function createMusicProfile(): MusicProfile {
         for (let b = 0; b < NUM_BANDS; b++) if (frame.bands[b] > threshold) active++;
         densityTarget = clamp01(active / NUM_BANDS);
       }
-      density = ease(density, densityTarget, DENSITY_EASE_RATE, dt);
+      density = ease(density, densityTarget, DENSITY_EASE_RATE, dt, rateScale);
+      targets.density = densityTarget;
 
       // --- dynamics ---
       const intensity = clamp01(inputs.sectionIntensity);
       dynMean += (intensity - dynMean) * Math.min(1, DYNAMICS_MEAN_RATE * dt);
       dynMad += (Math.abs(intensity - dynMean) - dynMad) * Math.min(1, DYNAMICS_MAD_RATE * dt);
       const dynamicsTarget = hasSignal ? clamp01(dynMad / DYNAMICS_MAD_REF) : 0.5;
-      dynamics = ease(dynamics, dynamicsTarget, DYNAMICS_EASE_RATE, dt);
+      dynamics = ease(dynamics, dynamicsTarget, DYNAMICS_EASE_RATE, dt, rateScale);
+      targets.dynamics = dynamicsTarget;
 
       // --- attack ---
       if (!primed) {
         prevBands.set(frame.bands);
         primed = true;
+        targets.attack = 0.5; // no flux measurement yet
       } else {
         let flux = 0;
         for (let b = 0; b < NUM_BANDS; b++) flux += Math.max(0, frame.bands[b] - prevBands[b]);
@@ -244,17 +281,20 @@ export function createMusicProfile(): MusicProfile {
         fluxSlow += (flux - fluxSlow) * Math.min(1, FLUX_SLOW_RATE * dt);
         const ratio = fluxSlow > 1e-4 ? fluxFast / fluxSlow : 1;
         const attackTarget = hasSignal ? clamp01((ratio - 1) / (ATTACK_REF - 1)) : 0.5;
-        attack = ease(attack, attackTarget, ATTACK_EASE_RATE, dt);
+        attack = ease(attack, attackTarget, ATTACK_EASE_RATE, dt, rateScale);
+        targets.attack = attackTarget;
       }
 
       // --- loudness ---
       // Unlike every other dial, this does NOT fall back to a neutral target
       // through silence — genuine silence really is quiet, and easing toward
       // 0.5 (or 0) between tracks would yank the mic block's auto values
-      // around for no musical reason. Just hold the last reading.
+      // around for no musical reason. Just hold the last reading — and hold
+      // targets.loudness too, so RAW mode doesn't contradict that freeze.
       if (hasSignal) {
         const loudnessTarget = clamp01(frame.level);
-        loudness = ease(loudness, loudnessTarget, LOUDNESS_EASE_RATE, dt);
+        loudness = ease(loudness, loudnessTarget, LOUDNESS_EASE_RATE, dt, rateScale);
+        targets.loudness = loudnessTarget;
       }
 
       (state as { pulse: number }).pulse = pulse;

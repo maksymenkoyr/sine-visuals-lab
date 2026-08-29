@@ -29,13 +29,25 @@ export interface SectionIntensity {
    *  song's own observed dynamic range — low in a quiet verse, high in a
    *  chorus or drop. Adapts to the track, not an absolute loudness level. */
   readonly intensity: number;
+  /** This tick's target for `intensity`, before INTENSITY_SLEW — the section's
+   *  raw position in the track's dynamic range, jumping frame to frame rather
+   *  than easing. For the meters panel's RAW chip (src/ui/audioMeters.ts). */
+  readonly rawIntensity: number;
   /** One-shot edge (like FeatureFrame.beat), true only on the tick intensity
    *  is rising fast enough to read as a drop/section change. */
   readonly dropOnset: boolean;
   /** Decaying [0,1] flash that jumps to 1 on dropOnset — smoother to animate
    *  against than the raw boolean, same shape as beatPulse. */
   readonly dropPulse: number;
-  advance(dtSec: number, energy: number): void;
+  /** rateScale multiplies INTENSITY_SLEW only — sensitivity.ts's
+   *  smoothingRateScale, defaulting to 1 (today's behavior). The fastLevel/
+   *  floor/ceil trackers above stay at their own fixed rates regardless:
+   *  they're the room/track measurement rawIntensity already exposes
+   *  unsmoothed, not display easing. Non-finite (Smoothing's Off stop)
+   *  assigns `target` to `intensity` directly, so it lands exactly on
+   *  rawIntensity with none of the blend's floating-point rounding at
+   *  "coefficient 1" — see the meters panel's RAW chip (audioMeters.ts). */
+  advance(dtSec: number, energy: number, rateScale?: number): void;
 }
 
 export function createSectionIntensity(): SectionIntensity {
@@ -47,9 +59,10 @@ export function createSectionIntensity(): SectionIntensity {
 
   const state: SectionIntensity = {
     intensity: 0,
+    rawIntensity: 0,
     dropOnset: false,
     dropPulse: 0,
-    advance(dtSec: number, energy: number): void {
+    advance(dtSec: number, energy: number, rateScale = 1): void {
       const e = clamp01(energy);
       fastLevel += (e - fastLevel) * Math.min(1, FAST_LEVEL_RATE * dtSec);
 
@@ -62,7 +75,11 @@ export function createSectionIntensity(): SectionIntensity {
       const target = clamp01((fastLevel - floor) / range);
 
       const prevIntensity = intensity;
-      intensity += (target - intensity) * Math.min(1, INTENSITY_SLEW * dtSec);
+      if (Number.isFinite(rateScale)) {
+        intensity += (target - intensity) * Math.min(1, INTENSITY_SLEW * rateScale * dtSec);
+      } else {
+        intensity = target;
+      }
 
       const rate = dtSec > 1e-4 ? (intensity - prevIntensity) / dtSec : 0;
       const dropOnset = rate > DROP_RATE_THRESHOLD;
@@ -70,6 +87,7 @@ export function createSectionIntensity(): SectionIntensity {
       if (dropOnset) dropPulse = 1;
 
       (state as { intensity: number }).intensity = intensity;
+      (state as { rawIntensity: number }).rawIntensity = target;
       (state as { dropOnset: boolean }).dropOnset = dropOnset;
       (state as { dropPulse: number }).dropPulse = dropPulse;
     },

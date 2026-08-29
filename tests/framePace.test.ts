@@ -2,13 +2,13 @@ import { describe, it, expect } from "vitest";
 import { RENDER_FPS_CAP, RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "../src/render/framePace.ts";
 
 describe("targetFrameIntervalMs", () => {
-  it("is 1000/30 on floor tier", () => {
+  it("is 1000/30 on the floor preset", () => {
     expect(targetFrameIntervalMs("floor")).toBeCloseTo(1000 / RENDER_FPS_CAP_FLOOR, 6);
   });
 
-  it("is 1000/60 on every other tier", () => {
-    for (const tier of ["high", "mid", "low"] as const) {
-      expect(targetFrameIntervalMs(tier)).toBeCloseTo(1000 / RENDER_FPS_CAP, 6);
+  it("is 1000/60 on every other preset", () => {
+    for (const preset of ["high", "mid", "low"] as const) {
+      expect(targetFrameIntervalMs(preset)).toBeCloseTo(1000 / RENDER_FPS_CAP, 6);
     }
   });
 });

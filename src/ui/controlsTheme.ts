@@ -36,6 +36,9 @@ export const BANDS_AMBER = "#f9b96c";
 export const FADER_OFF = "#f08a8a";
 /** The global auto system — strength knob and master switch. */
 export const AUTO_SKY = "#59bbfb";
+/** Energy saving mode — the governor's Auto/On/Off override and its status
+ *  readouts (src/ui/powerCard.ts). */
+export const POWER_TEAL = "#4dd4c0";
 
 /** Spectrum strip bar tints, one step darker than the card accents they echo. */
 export const STRIP_LOW = "#89e29d";
@@ -54,8 +57,10 @@ export const FONT_LABEL = "'Chakra Petch', system-ui, sans-serif";
 export const FONT_MONO = "'Share Tech Mono', ui-monospace, monospace";
 export const FONT_DIGITS = `'DSEG7-Classic', ${FONT_MONO}`;
 
-/** Below this viewport width the two panel columns stack into one. */
-export const STACK_BELOW_PX = 720;
+/** Below this viewport width the panel's columns stack into one. Sized for
+ *  three columns (Power + Bands + controls, ~899px plus gaps) — see the
+ *  stacked media query below for how Power folds into that single column. */
+export const STACK_BELOW_PX = 940;
 
 /** `#rrggbb` + alpha in [0,1] -> `#rrggbbaa`. */
 export function withAlpha(hex: string, alpha: number): string {
@@ -91,14 +96,36 @@ const stylesheet = `
 }
 
 /* Anchored top-right; the columns stop short of the bottom-right chrome
- * buttons (index.html) so the gear that closes the panel stays reachable. */
+ * buttons (index.html) so the gear that closes the panel stays reachable.
+ *
+ * pointer-events: none plus "> *" restoring auto on direct children: a flex
+ * row's own box is always as tall as its tallest child (align-items can't
+ * shrink the container, only stop shorter children from stretching to match
+ * it), so when one side folds short next to a tall neighbor, the row's own
+ * box still covers the gap beside the short side. Left catching clicks,
+ * that gap would count as "inside" for deviceMenu.ts's onDocPointerDown
+ * (root.contains(target)) and swallow a click meant to close the panel.
+ * Disabling pointer events on the row itself and re-enabling them on its
+ * children (their own boxes correctly hug their real content) lets a click
+ * in the gap fall through to whatever's actually behind it. Same reasoning
+ * applies to .vc-cols-wrap below. */
 .vc-root {
   position: fixed; top: 16px; right: 16px; z-index: 30;
   display: none; gap: 4px; align-items: flex-start;
   max-height: calc(100vh - 74px);
   color: #fff; font-family: ${FONT_LABEL};
+  pointer-events: none;
 }
 .vc-root.vc-open { display: flex; }
+.vc-root > * { pointer-events: auto; }
+/* Power (src/ui/powerCard.ts): energy saving's Auto/On/Off override and its
+ * status readouts. Leftmost — narrower than the other two columns since it
+ * holds one compact card, not a scrolling stack. */
+.vc-power-col {
+  width: 200px; flex: none; display: flex; flex-direction: column; gap: 4px;
+  max-height: calc(100vh - 74px);
+}
+.vc-power-col > * { flex-shrink: 0; }
 /* The spectrum card stays put; the meters (src/ui/audioMeters.ts) scroll
  * in their own strip beneath it, the way the controls column scrolls. */
 .vc-spectrum-col {
@@ -115,6 +142,33 @@ const stylesheet = `
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
+/* Power + the spectrum column travel together (deviceMenu.ts's columnsWrap):
+ * once every card in both is folded, there's nothing left to show but a
+ * stack of title bars, so vc-cols-folded collapses the pair horizontally
+ * too, down to one small triangle that reopens everything. Scoped to this
+ * wrapper's direct children so a lone folded card (the common case) never
+ * triggers it. */
+/* align-items: flex-start keeps a folded (short) column from stretching to
+ * match its taller neighbor; pointer-events here follows .vc-root's rule
+ * above, for the same reason — this row's own box is still as tall as
+ * whichever column is tallest, so it needs to let clicks in the gap beside
+ * a short column pass through rather than swallowing them as "inside". */
+.vc-cols-wrap {
+  display: flex; flex-direction: row; align-items: flex-start; flex: none; gap: 4px;
+  pointer-events: none;
+}
+.vc-cols-wrap > * { pointer-events: auto; }
+.vc-cols-wrap.vc-cols-folded > .vc-power-col,
+.vc-cols-wrap.vc-cols-folded > .vc-spectrum-col { display: none; }
+.vc-cols-toggle {
+  display: none; flex: none; width: 22px; height: 22px; padding: 0;
+  align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 3px; color: rgba(255, 255, 255, 0.55); cursor: pointer;
+  font: 400 12px/1 ${FONT_MONO};
+}
+.vc-cols-wrap.vc-cols-folded > .vc-cols-toggle { display: flex; }
+.vc-cols-toggle:hover, .vc-cols-toggle:focus-visible { color: #fff; }
 @media (max-width: ${STACK_BELOW_PX}px) {
   .vc-root { flex-direction: column; width: min(320px, 88vw); overflow-y: auto; }
   .vc-root > *, .vc-spectrum-col > * { flex-shrink: 0; }
@@ -123,9 +177,60 @@ const stylesheet = `
    * last — a phone shouldn't have to scroll past a screen of readouts to
    * reach a slider. */
   .vc-spectrum-col { display: contents; }
-  .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
+  .vc-power-col, .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
   .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
+  /* The horizontal triangle-collapse only makes sense beside other columns;
+   * a single stacked mobile column has nothing to shrink next to, so
+   * dissolve the wrapper the same way .vc-spectrum-col dissolves above and
+   * undo vc-cols-folded's hiding — per-card folding still applies normally.
+   * Same selectors and specificity as the base rules above, so this wins
+   * only because it comes later in the stylesheet while the media query
+   * is active. */
+  .vc-cols-wrap { display: contents; }
+  .vc-cols-wrap.vc-cols-folded > .vc-power-col { display: block; }
+  .vc-cols-wrap.vc-cols-folded > .vc-spectrum-col { display: contents; }
+  .vc-cols-wrap.vc-cols-folded > .vc-cols-toggle { display: none; }
 }
+
+/* A card's header/body split (controlsKit.ts's createCard): the header's
+ * margin-bottom and the pad's padding live here, not in the inline cssText
+ * the pad/header otherwise carry, so .vc-folded below can tighten them — an
+ * inline style would win over a class rule and the collapse would leave a
+ * gap. Folded, the pad is padded evenly top and bottom so the title bar
+ * sits centred in what's left, and the right-hand slot (a Reset/RAW chip,
+ * with nothing to act on) goes with the body. */
+.vc-card-head { margin-bottom: 9px; }
+.vc-card-pad { padding: 10px 12px 12px; }
+.vc-card.vc-folded .vc-card-head { margin-bottom: 0; }
+.vc-card.vc-folded .vc-card-pad { padding: 9px 12px; }
+.vc-card.vc-folded .vc-card-body { display: none; }
+/* !important: the slot arrives with an inline display (rowRightStyle's
+ * flex) that would otherwise win over this rule. */
+.vc-card.vc-folded .vc-card-right { display: none !important; }
+
+/* The collapse chevron at the end of a foldId'd card's header: a bordered
+ * corner turned to point down (open) or right (folded), drawn rather than a
+ * glyph so it's the same crisp stroke as the chip borders around it. The
+ * button box is bigger than the stroke for a comfortable target. */
+.vc-fold {
+  position: relative; width: 16px; height: 16px; margin: -2px -3px -2px 0; padding: 0;
+  background: transparent; border: none; flex-shrink: 0; cursor: pointer;
+  color: rgba(255, 255, 255, 0.4); transition: color 0.15s ease;
+}
+.vc-fold::before {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px;
+  border-right: 1px solid currentColor; border-bottom: 1px solid currentColor;
+  transform: translate(-50%, -70%) rotate(45deg);
+  transition: transform 0.18s ease;
+}
+.vc-card.vc-folded .vc-fold::before { transform: translate(-65%, -50%) rotate(-45deg); }
+.vc-card-head:hover .vc-fold, .vc-fold:focus-visible { color: #fff; }
+.vc-fold:focus-visible { outline: none; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.7)); }
+
+/* The whole meters column (Bands + the meters strip) hidden by the footer's
+ * "Hide meters" button / M (deviceMenu.ts). Outranks the stacked layout's
+ * display: contents below on specificity, so it holds there too. */
+.vc-root.vc-meters-hidden .vc-spectrum-col { display: none; }
 
 .vc-scroll { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
 .vc-scroll::-webkit-scrollbar { width: 4px; }

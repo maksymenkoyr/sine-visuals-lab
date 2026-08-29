@@ -1,6 +1,6 @@
 import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
-import { detectTier, tierSettings, type Tier, type TierSettings } from "./render/tier.ts";
+import { detectQuality, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type SceneContext, type Viewport } from "./render/scene.ts";
 import { getPalette, type Palette } from "./render/palette.ts";
 import { createAnimClock } from "./render/animClock.ts";
@@ -16,14 +16,14 @@ const STALE_TIMEOUT_MS = 3000;
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const badge = document.getElementById("badge") as HTMLDivElement;
 
-const TIER_ORDER: Tier[] = ["floor", "low", "mid", "high"];
-const tierAllows = (s: Scene, t: Tier): boolean =>
-  !s.minTier || TIER_ORDER.indexOf(t) >= TIER_ORDER.indexOf(s.minTier);
+const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
+const presetAllows = (s: Scene, p: QualityPreset): boolean =>
+  !s.minQuality || PRESET_ORDER.indexOf(p) >= PRESET_ORDER.indexOf(s.minQuality);
 
 let scene: Scene = getScene("spectrum")!;
 let palette: Palette = getPalette("neon");
 let viewport: Viewport = FULL_VIEWPORT;
-let tier: TierSettings = tierSettings("mid");
+let quality: QualitySettings = qualitySettings("mid");
 let sceneCtx: SceneContext;
 
 let conn: RendererConnection;
@@ -37,7 +37,7 @@ let lastRenderMs = 0;
 let governor: QualityGovernor | null = null;
 
 function availableScenes(): Scene[] {
-  return listScenes().filter((s) => tierAllows(s, tier.tier));
+  return listScenes().filter((s) => presetAllows(s, quality.preset));
 }
 
 function switchScene(next: Scene): void {
@@ -66,10 +66,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  tier = tierSettings(await detectTier());
-  sceneCtx = { gl, tier };
-  if (!tierAllows(scene, tier.tier)) scene = availableScenes()[0] ?? scene;
-  governor = createQualityGovernor(tier, targetFrameIntervalMs(tier.tier));
+  quality = qualitySettings(await detectQuality());
+  sceneCtx = { gl, quality };
+  if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
+  governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   scene.init(sceneCtx);
 
   const code = await createRoomCode();
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   conn.onCommand((cmd) => {
     if (cmd.scene) {
       const s = getScene(cmd.scene);
-      if (s && tierAllows(s, tier.tier)) switchScene(s);
+      if (s && presetAllows(s, quality.preset)) switchScene(s);
     }
     if (cmd.palette) palette = getPalette(cmd.palette);
     if (cmd.viewport) viewport = cmd.viewport;
@@ -133,10 +133,10 @@ async function main(): Promise<void> {
     const anim = animClock.advance(dtSec, frame);
     advanceAutoTune(dtSec, anim.profile);
 
-    if (!shouldRenderFrame(nowRafMs, lastRenderMs, targetFrameIntervalMs(tier.tier))) return;
+    if (!shouldRenderFrame(nowRafMs, lastRenderMs, targetFrameIntervalMs(quality.preset))) return;
     lastRenderMs = nowRafMs;
 
-    const resized = resizeCanvasToDisplaySize(canvas, tier.renderScale);
+    const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);
 
     scene.render(sceneCtx, frame, viewport, palette, anim);
