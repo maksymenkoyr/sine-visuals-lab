@@ -128,6 +128,24 @@ const stylesheet = `
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
+/* Power + the spectrum column travel together (deviceMenu.ts's columnsWrap):
+ * once every card in both is folded, there's nothing left to show but a
+ * stack of title bars, so vc-cols-folded collapses the pair horizontally
+ * too, down to one small triangle that reopens everything. Scoped to this
+ * wrapper's direct children so a lone folded card (the common case) never
+ * triggers it. */
+.vc-cols-wrap { display: flex; flex-direction: row; flex: none; gap: 4px; }
+.vc-cols-wrap.vc-cols-folded > .vc-power-col,
+.vc-cols-wrap.vc-cols-folded > .vc-spectrum-col { display: none; }
+.vc-cols-toggle {
+  display: none; flex: none; width: 22px; height: 22px; padding: 0;
+  align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 3px; color: rgba(255, 255, 255, 0.55); cursor: pointer;
+  font: 400 12px/1 ${FONT_MONO};
+}
+.vc-cols-wrap.vc-cols-folded > .vc-cols-toggle { display: flex; }
+.vc-cols-toggle:hover, .vc-cols-toggle:focus-visible { color: #fff; }
 @media (max-width: ${STACK_BELOW_PX}px) {
   .vc-root { flex-direction: column; width: min(320px, 88vw); overflow-y: auto; }
   .vc-root > *, .vc-spectrum-col > * { flex-shrink: 0; }
@@ -138,6 +156,17 @@ const stylesheet = `
   .vc-spectrum-col { display: contents; }
   .vc-power-col, .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
   .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
+  /* The horizontal triangle-collapse only makes sense beside other columns;
+   * a single stacked mobile column has nothing to shrink next to, so
+   * dissolve the wrapper the same way .vc-spectrum-col dissolves above and
+   * undo vc-cols-folded's hiding — per-card folding still applies normally.
+   * Same selectors and specificity as the base rules above, so this wins
+   * only because it comes later in the stylesheet while the media query
+   * is active. */
+  .vc-cols-wrap { display: contents; }
+  .vc-cols-wrap.vc-cols-folded > .vc-power-col { display: block; }
+  .vc-cols-wrap.vc-cols-folded > .vc-spectrum-col { display: contents; }
+  .vc-cols-wrap.vc-cols-folded > .vc-cols-toggle { display: none; }
 }
 
 /* A card's header/body split (controlsKit.ts's createCard): the header's

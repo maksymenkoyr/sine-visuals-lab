@@ -271,7 +271,7 @@ function createReadoutLine(caption: string) {
 }
 
 export function createPowerCard(deps: PowerCardDeps): PowerCard {
-  const card = createCard({ title: "Power", accent: POWER_TEAL });
+  const card = createCard({ title: "Power", accent: POWER_TEAL, foldId: "power" });
   const statusRow = createStatusRow(POWER_TEAL);
   const hairline = document.createElement("div");
   hairline.style.cssText = hairlineStyle;
