@@ -17,6 +17,7 @@ import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../
 import { type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
+import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createAudioMeters } from "./audioMeters.ts";
@@ -145,6 +146,9 @@ export interface DeviceMenuDeps {
   getBandGain: (sceneId: string, fader: number) => number;
   onBandGainChange: (sceneId: string, fader: number, value: number) => void;
   onBandGainsReset: (sceneId: string) => void;
+  /** The Loudness card's Reset chip — starts the integrated LUFS reading
+   *  over (src/audio/lufsAnalyser.ts). */
+  onLufsReset: () => void;
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   resolveSensitivityValue: (sceneId: string) => number;
@@ -186,7 +190,9 @@ export interface DeviceMenu {
    *  which bands the gain stage clamped (bandGains.ts's pinnedBands);
    *  `anim`/`mono`/`fixedEnergy` feed the meters (audioMeters.ts) —
    *  `fixedEnergy` is FeatureExtractor.fixedEnergy, null wherever this
-   *  device isn't running its own extractor (renderer, synthetic feed). */
+   *  device isn't running its own extractor (renderer, synthetic feed);
+   *  `lufs` is this device's lufsAnalyser reading, null on the same paths
+   *  (the Loudness card hides itself). */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -195,6 +201,7 @@ export interface DeviceMenu {
     anim: AnimFrame | null,
     mono: Float32Array | null,
     fixedEnergy: number | null,
+    lufs: LufsReading | null,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
@@ -812,7 +819,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
   const spectrumStrip = bandFaders.strip;
   // The meters beneath the Bands card — see audioMeters.ts.
-  const audioMeters = createAudioMeters();
+  const audioMeters = createAudioMeters({ onLufsReset: deps.onLufsReset });
 
   const spectrumCol = document.createElement("div");
   spectrumCol.className = "vc-spectrum-col";
@@ -1410,11 +1417,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       anim: AnimFrame | null,
       mono: Float32Array | null,
       fixedEnergy: number | null,
+      lufs: LufsReading | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono, fixedEnergy);
+      audioMeters.update(frame, anim, mono, fixedEnergy, lufs);
       // Raw (pre-sensitivity) energy, so the level wash reflects the actual
       // mic signal regardless of where the sensitivity slider is set.
       const level = frame?.energy ?? 0;

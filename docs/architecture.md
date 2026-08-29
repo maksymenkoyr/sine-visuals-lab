@@ -45,7 +45,9 @@ mic, entirely separate from
 a viewer with no local mic doesn't get that card at all. Their Signal card's
 history trace likewise reads `FeatureExtractor.fixedEnergy`, a local
 diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
-`FeatureFrame` field.
+`FeatureFrame` field. The Loudness card is the same kind of read: BS.1770 LUFS
+from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
+this device's own capture, hidden on a mic-less renderer like the Scope.
 
 ## Phone to TV
 

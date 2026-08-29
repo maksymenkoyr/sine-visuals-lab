@@ -2,6 +2,8 @@ import { DRAFT_SCENE_IDS } from "./render/scenes/index.ts"; // also registers bu
 import { captureMic, captureDisplayAudio } from "./audio/capture.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
+import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
+import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
 import { NUM_BANDS, type CaptureHandle, type FeatureFrame } from "./audio/types.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
@@ -96,6 +98,10 @@ let bandAnalyser: BandAnalyser | null = null;
  *  or the wire frame: this is display-only data local to this device, not a
  *  render-driving signal. See waveformAnalyser.ts's header for why. */
 let waveformAnalyser: WaveformAnalyser | null = null;
+/** K-weighted loudness tap for the panel's Loudness card
+ *  (src/audio/lufsAnalyser.ts) — display-only and local, like the waveform
+ *  analyser above. */
+let lufsAnalyser: LufsAnalyser | null = null;
 const extractor = new FeatureExtractor();
 /** Set on first mic/display-capture attempt; cached so re-entering a viz
  *  never re-prompts. Cleared back to null on failure so a retry is possible. */
@@ -143,6 +149,9 @@ let lastMono: Float32Array | null = null;
 // card's history trace draws it as the "auto-gain fully off" reference. Null
 // wherever no local extractor ran this frame (renderer, synthetic feed).
 let lastFixedEnergy: number | null = null;
+/** This tick's LUFS reading off lufsAnalyser — same solo/host-only
+ *  availability as lastMono, for the Loudness card. */
+let lastLufs: LufsReading | null = null;
 const rawBandsScratch = new Float32Array(NUM_BANDS);
 
 const animClock = createAnimClock();
@@ -239,6 +248,7 @@ function ensureAudio(): Promise<void> {
     capture = await chooseCapture();
     bandAnalyser = createBandAnalyser(capture.context, capture.sourceNode);
     waveformAnalyser = createWaveformAnalyser(capture.context, capture.sourceNode);
+    lufsAnalyser = createLufsAnalyser(capture.context, capture.sourceNode);
     micDenied = false;
   })();
   audioPromise = attempt.catch((err) => {
@@ -273,6 +283,7 @@ async function fallBackToSolo(reason: string): Promise<void> {
     capture = await chooseCapture();
     bandAnalyser = createBandAnalyser(capture.context, capture.sourceNode);
     waveformAnalyser = createWaveformAnalyser(capture.context, capture.sourceNode);
+    lufsAnalyser = createLufsAnalyser(capture.context, capture.sourceNode);
     mode = "solo";
     roomCodeEl.style.display = "none";
   } catch (err) {
@@ -333,6 +344,7 @@ function wireDeviceMenu(): void {
     getBandGain: (sceneId, fader) => getBandGain(sceneId, fader),
     onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
+    onLufsReset: () => lufsAnalyser?.reset(),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
     resolveExpansionValue: (sceneId) => resolveExpansion(sceneId),
@@ -643,6 +655,7 @@ function currentVisual(): FeatureFrame | null {
     // signal — there's nothing for the scope to trace, so its card
     // correctly stays hidden here (see audioMeters.ts).
     lastMono = null;
+    lastLufs = null;
     lastFixedEnergy = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
@@ -651,6 +664,7 @@ function currentVisual(): FeatureFrame | null {
     if (!bandAnalyser || !capture) {
       lastRawBands = null;
       lastMono = null;
+      lastLufs = null;
       lastFixedEnergy = null;
       return null;
     }
@@ -658,6 +672,7 @@ function currentVisual(): FeatureFrame | null {
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+    lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, getAutoGain());
     lastFixedEnergy = extractor.fixedEnergy;
     return f;
@@ -667,6 +682,7 @@ function currentVisual(): FeatureFrame | null {
     if (!bandAnalyser || !capture || !hostConn) {
       lastRawBands = null;
       lastMono = null;
+      lastLufs = null;
       lastFixedEnergy = null;
       return null;
     }
@@ -674,6 +690,7 @@ function currentVisual(): FeatureFrame | null {
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+    lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, getAutoGain());
     lastFixedEnergy = extractor.fixedEnergy;
     hostConn.sendFrame(f);
@@ -683,6 +700,7 @@ function currentVisual(): FeatureFrame | null {
   // renderer — no local mic, so no raw signal to show.
   lastRawBands = null;
   lastMono = null;
+  lastLufs = null;
   lastFixedEnergy = null;
   if (rendererConn) {
     const s = rendererConn.sample();
@@ -753,7 +771,7 @@ function loop(): void {
 
   // Fed even when null (mic permission still pending) so the spectrum strip
   // can render its "waiting for audio" idle state instead of going dead.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, lastFixedEnergy);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, lastFixedEnergy, lastLufs);
 
   if (!lastVis || !anim) return;
 

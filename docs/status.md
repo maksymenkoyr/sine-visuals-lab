@@ -14,8 +14,13 @@ regenerate it at session close.
   the Acceleration control to **Expansion** (the audio-engineering term for
   widening the quiet-to-loud gap), with both persisted keys migrated —
   `legacyKeys` in `createPerSceneSetting`, `LEGACY_EXPANSION_AUTO_KEYS` in
-  `autoTune.ts`. Typecheck and tests green; panel verified in headless
-  Chromium with a fake mic.
+  `autoTune.ts`. Also adds a **Loudness** card: BS.1770 / EBU R128 LUFS
+  (`src/audio/lufs.ts` pure math, `lufsAnalyser.ts` the K-weighting chain),
+  Momentary on the bar with the `LUFS_TARGET_*` marks, Short-term big,
+  Integrated with a Reset chip — display-only, hidden without a local mic.
+  Typecheck and tests green; panel verified in headless Chromium with a fake
+  mic (LUFS readings finite, Reset restarts Integrated, synthetic feed hides
+  the card).
 - **Docs pilot** — branch `worktree-docs-index` (worktree at
   `.claude/worktrees/docs-index`), 1 commit ahead: a diagram-first rewrite of
   `docs/architecture.md`. No PR yet. Note #18 also touches
