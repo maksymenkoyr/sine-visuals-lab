@@ -97,6 +97,7 @@ const WIDTH_MARGIN = 1.15; // grid half-width as a multiple of the frustum half-
 const CIRCLE_CENTER_Z = 50.0; // Circle layout: world z of the disc's center
 const CIRCLE_RADIUS = 40.0; // Circle layout: radius of the disc's outer (newest) rim
 const CIRCLE_TILT_DEG = 24; // Circle layout: disc plane tilted toward the viewer (far rim raised)
+const CIRCLE_SQUEEZE = 0.75; // Circle layout: depth radius as a fraction of the width radius (an ellipse, wider than deep)
 const FOG_K = 1.0 / 110.0; // 1/(view depth) at which fog reaches 1/e
 const LINE_PX = 1.2; // grid line width in pixels before anti-aliasing
 const NOISE_PERIOD = 64.0; // lattice period of the noise field's time axis (see noisePeriodic)
@@ -113,7 +114,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0.1,
     max: 5,
     step: 0.1,
-    default: 1.1,
+    default: 1.3,
     // Displacement amplitude follows macro dynamics; dark mixes get more bulk.
     auto: { dynamics: 0.3, brightness: -0.2 },
   },
@@ -124,7 +125,7 @@ const SETTINGS: SceneSetting[] = [
     min: -20,
     max: 20,
     step: 0.5,
-    default: 4,
+    default: 1.5,
   },
   {
     key: "cameraDistance",
@@ -133,7 +134,7 @@ const SETTINGS: SceneSetting[] = [
     min: 2,
     max: 60,
     step: 1,
-    default: 16,
+    default: 26,
   },
   {
     key: "cameraHeight",
@@ -142,7 +143,7 @@ const SETTINGS: SceneSetting[] = [
     min: 1,
     max: 40,
     step: 0.5,
-    default: 9,
+    default: 26,
   },
   {
     key: "cameraTilt",
@@ -151,7 +152,7 @@ const SETTINGS: SceneSetting[] = [
     min: -35,
     max: 15,
     step: 0.5,
-    default: -9.5,
+    default: -10,
   },
   {
     key: "zoom",
@@ -160,7 +161,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0.3,
     max: 2,
     step: 0.05,
-    default: 1,
+    default: 0.9,
   },
   {
     key: "circle",
@@ -494,6 +495,7 @@ const CAMERA_GLSL = `
 #define CIRCLE_CENTER_Z ${CIRCLE_CENTER_Z.toFixed(1)}
 #define CIRCLE_RADIUS ${CIRCLE_RADIUS.toFixed(1)}
 #define CIRCLE_TILT ${((CIRCLE_TILT_DEG * Math.PI) / 180).toFixed(5)}
+#define CIRCLE_SQUEEZE ${CIRCLE_SQUEEZE.toFixed(2)}
 #define NEAR 0.5
 #define FAR 400.0
 
@@ -533,7 +535,7 @@ vec4 toClip(vec3 view) {
 // (the disc's far rim in the Circle layout).
 float horizonV() {
   vec3 farEdge = uCircle > 0.5
-    ? vec3(0.0, CIRCLE_RADIUS * sin(CIRCLE_TILT), CIRCLE_CENTER_Z + CIRCLE_RADIUS * cos(CIRCLE_TILT))
+    ? vec3(0.0, CIRCLE_RADIUS * CIRCLE_SQUEEZE * sin(CIRCLE_TILT), CIRCLE_CENTER_Z + CIRCLE_RADIUS * CIRCLE_SQUEEZE * cos(CIRCLE_TILT))
     : vec3(0.0, 0.0, GRID_DEPTH);
   vec4 c = toClip(toView(farEdge));
   return (c.y / c.w) * 0.5 + 0.5;
@@ -681,7 +683,7 @@ void main() {
     // The disc is tilted toward the viewer (far rim raised) so it reads as a
     // disc rather than a sliver from the low default camera; displacement
     // follows the disc's own normal.
-    vec3 local = vec3(sin(theta) * r, height, -cos(theta) * r);
+    vec3 local = vec3(sin(theta) * r, height, -cos(theta) * r * CIRCLE_SQUEEZE); // squeezed in depth: an ellipse
     float ct = cos(CIRCLE_TILT), st = sin(CIRCLE_TILT);
     worldPos = vec3(local.x, local.y * ct + local.z * st, CIRCLE_CENTER_Z - local.y * st + local.z * ct);
   } else {
