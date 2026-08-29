@@ -69,12 +69,18 @@ import {
  * the whole point is to watch the scene react while you tune it, so it
  * also stays open across palette taps.
  *
- * Every card in that left column — Bands and each meter card — collapses to
- * just its title bar (createCard's foldId, controlsKit.ts): click the
- * chevron or anywhere on the header outside a Reset-style chip. The whole
- * column can also go away at once — "Hide meters" in the footer strip, or M
- * — which leaves Power and the controls where they are rather than
- * reflowing anything. Fold and hide state are this panel's own view state
+ * Every card in that left column — Power, Bands, and each meter card —
+ * collapses to just its title bar (createCard's foldId, controlsKit.ts):
+ * click the chevron or anywhere on the header outside a Reset-style chip.
+ * The Bands+meters column can also go away at once — "Hide meters" in the
+ * footer strip, or M — which leaves Power and the controls where they are
+ * rather than reflowing anything. Separately, once every card in Power and
+ * that column is folded, there's nothing left to show but a stack of title
+ * bars, so the pair collapses horizontally too, down to one small triangle
+ * (columnsWrap's vc-cols-folded below) that reopens everything — driven by
+ * a MutationObserver over each card's vc-folded class rather than a
+ * fold-all callback threaded through createCard, so it costs the rest of
+ * the panel nothing. Fold and hide state are this panel's own view state
  * (panelFolds.ts) — unlike every scene/audio/palette read and write below,
  * which goes through DeviceMenuDeps, this doesn't, since nothing outside
  * src/ui/ ever needs to know which card is folded.
@@ -925,6 +931,48 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   bandsCard.body.append(spectrumHeader, hairline, fadersRow);
   spectrumCol.append(bandsCard.el, audioMeters.el);
 
+  // Power travels with this column for the purposes of the all-folded
+  // triangle collapse below: they're wrapped together so the CSS
+  // (vc-cols-wrap, controlsTheme.ts) can hide both as a unit. columnsToggle
+  // stays in the DOM at all times and is the one element vc-cols-folded
+  // keeps visible; clicking it unfolds every folded card by clicking its
+  // own chevron (jumpToBlock below does the same for a single card).
+  const columnsToggle = document.createElement("button");
+  columnsToggle.type = "button";
+  columnsToggle.className = "vc-cols-toggle";
+  columnsToggle.textContent = "▸";
+  columnsToggle.title = "Open every card in this column";
+  columnsToggle.addEventListener("click", () => {
+    for (const chevron of columnsWrap.querySelectorAll<HTMLButtonElement>(".vc-card.vc-folded .vc-fold")) {
+      chevron.click();
+    }
+  });
+  const columnsWrap = document.createElement("div");
+  columnsWrap.className = "vc-cols-wrap";
+  columnsWrap.append(columnsToggle, powerCol, spectrumCol);
+
+  // Recomputed off each card's own vc-folded class (via the observer below)
+  // rather than a callback threaded through createCard/audioMeters.ts.
+  // When "Hide meters" is active, Bands and the meter cards are excluded
+  // from the check (isFolded(METERS_COLUMN), not an offsetParent probe —
+  // that forces a synchronous layout on every class mutation in the
+  // column, which stalled the panel once enough cards had folded), so
+  // folding Power alone while meters are hidden also counts as "everything
+  // folded".
+  function refreshColumnsFold(): void {
+    const cards = [...columnsWrap.querySelectorAll<HTMLElement>(".vc-card")];
+    const relevant = isFolded(METERS_COLUMN) ? cards.filter((c) => c === powerCard.el) : cards;
+    columnsWrap.classList.toggle(
+      "vc-cols-folded",
+      relevant.length > 0 && relevant.every((c) => c.classList.contains("vc-folded")),
+    );
+  }
+  new MutationObserver(refreshColumnsFold).observe(columnsWrap, {
+    attributes: true,
+    attributeFilter: ["class"],
+    subtree: true,
+  });
+
   let lastStatusText = "";
   function refreshSpectrumHeader(): void {
     spectrumTitle.textContent = deps.currentSceneName();
@@ -1325,6 +1373,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     metersBtn.title = hidden
       ? "Bring back the Bands card and the meters (M)"
       : "Hide the Bands card and the meters, keep the controls (M)";
+    // Hiding/showing the column changes which cards have a layout box
+    // without touching any card's own vc-folded class, so the observer
+    // above never fires for it on its own — recompute here instead.
+    refreshColumnsFold();
   }
   setMetersHidden(isFolded(METERS_COLUMN));
 
@@ -1376,7 +1428,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
 
   controlsCol.append(autoRow, inputCard.el, sceneCard.el, paletteCard.el, footer);
-  root.append(powerCol, spectrumCol, controlsCol);
+  root.append(columnsWrap, controlsCol);
   document.body.appendChild(root);
 
   // ---- open / close ----
