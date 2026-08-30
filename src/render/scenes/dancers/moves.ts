@@ -28,6 +28,9 @@ export interface MoveClocks {
   flowPhase: number;
   timeSec: number;
   bpm: number;
+  /** The profile's `pulse` dial (musicProfile.ts): how steadily the beat is
+   *  hitting, NEUTRAL 0.5 on cold start and silence. */
+  pulse: number;
 }
 
 /** Writes a full pose into `out` (overwriting it). `energy` in [0,1] scales
@@ -146,17 +149,17 @@ export const sway: Move = (c, energy, out) => {
   const s = Math.sin(f * 1.1);
   const s2 = Math.sin(f * 2.2 + 0.7);
   const s3 = Math.sin(f * 0.55 + 1.3);
-  rootShift(out, 0.06 * e * s, 0.02 * e * s3);
-  hips(out, 0.09 * e * s, 0.06 * e * s3);
-  torso(out, 0.05 * e * (0.5 + 0.5 * s2), -0.14 * e * s3, -0.1 * e * s);
-  head(out, 0.08 * e * s2, 0.16 * e * s3, 0.1 * e * s);
+  rootShift(out, 0.09 * e * s, 0.03 * e * s3);
+  hips(out, 0.14 * e * s, 0.09 * e * s3);
+  torso(out, 0.08 * e * (0.5 + 0.5 * s2), -0.22 * e * s3, -0.14 * e * s);
+  head(out, 0.12 * e * s2, 0.24 * e * s3, 0.14 * e * s);
   // Weight drifts side to side: the unweighted knee softens.
-  kneeFlex(out, "L", 0.28 * e * Math.max(0, s));
-  kneeFlex(out, "R", 0.28 * e * Math.max(0, -s));
+  kneeFlex(out, "L", 0.4 * e * Math.max(0, s));
+  kneeFlex(out, "R", 0.4 * e * Math.max(0, -s));
   for (const side of SIDES) {
     const k = sideSign(side);
-    armSwing(out, side, 0.22 * e * Math.sin(f * 1.1 + k * 0.6), 0.08 * e * (0.5 + 0.5 * s2));
-    elbowFlex(out, side, 0.25 * e * (0.5 + 0.5 * Math.sin(f * 1.7 + k)));
+    armSwing(out, side, 0.35 * e * Math.sin(f * 1.1 + k * 0.6), 0.1 * e * (0.5 + 0.5 * s2));
+    elbowFlex(out, side, 0.4 * e * (0.5 + 0.5 * Math.sin(f * 1.7 + k)));
   }
 };
 
@@ -169,17 +172,17 @@ export const groove: Move = (c, energy, out) => {
   const a = shapeAmp(energy);
   const w = weight(c.barPhase);
   const d = dip(c.beatPhase);
-  rootShift(out, 0.08 * e * w, 0.0);
-  hips(out, 0.14 * e * w, 0.18 * e * w);
-  torso(out, 0.06 * e + 0.05 * e * d, -0.3 * e * w, -0.12 * e * w);
-  head(out, 0.14 * e * d, 0.18 * e * w, 0.07 * e * w);
+  rootShift(out, 0.14 * e * w, 0.0);
+  hips(out, 0.25 * e * w, 0.3 * e * w);
+  torso(out, 0.1 * e + 0.1 * e * d, -0.6 * e * w, -0.2 * e * w);
+  head(out, 0.25 * e * d, 0.3 * e * w, 0.1 * e * w);
   for (const side of SIDES) {
     const k = sideSign(side);
     const free = Math.max(0, -k * w); // this leg is unweighted when the weight is on the other
-    kneeFlex(out, side, 0.12 * a + 0.2 * e * d + 0.7 * e * free);
-    legSwing(out, side, 0.4 * e * free, 0.04 * a);
-    armSwing(out, side, 0.4 * e * k * w, 0.18 * a);
-    elbowFlex(out, side, 0.6 * a + 0.5 * e * (0.5 + 0.5 * k * w));
+    kneeFlex(out, side, 0.15 * a + 0.4 * e * d + 1.2 * e * free);
+    legSwing(out, side, 0.9 * e * free, 0.06 * a);
+    armSwing(out, side, 0.9 * e * k * w, 0.2 * a);
+    elbowFlex(out, side, 0.6 * a + 0.9 * e * (0.5 + 0.5 * k * w));
   }
 };
 
@@ -192,17 +195,22 @@ export const bounce: Move = (c, energy, out) => {
   const a = shapeAmp(energy);
   const d = dip(c.beatPhase);
   const w = weight(c.barPhase);
-  lift(out, 0.11 * e * hop(c.beatPhase));
-  rootShift(out, 0.04 * e * w, 0.0);
-  hips(out, 0.05 * e * w, 0.0);
-  torso(out, 0.14 * e * d, 0.1 * e * w, 0.0);
-  head(out, 0.18 * e * d, 0.0, 0.05 * e * w);
+  // The camera is in front, so what sells this is vertical (the squat and
+  // the hop) and lateral (the arms flaring) motion — depth-only motion
+  // barely reads from there.
+  const up = 1.0 - d; // 1 on the beat, 0 in the crouch
+  lift(out, 0.18 * e * hop(c.beatPhase));
+  rootShift(out, 0.08 * e * w, 0.0);
+  hips(out, 0.12 * e * w, 0.0);
+  torso(out, 0.4 * e * d, 0.2 * e * w, 0.08 * e * w);
+  head(out, 0.4 * e * d, 0.0, 0.12 * e * w);
   for (const side of SIDES) {
     const k = sideSign(side);
-    legSwing(out, side, 0.18 * e * d, 0.05 * a);
-    kneeFlex(out, side, 0.15 * a + 0.55 * e * d);
-    armSwing(out, side, 0.55 * a, 0.35 * a);
-    elbowFlex(out, side, 1.6 * a + 0.5 * e * (1.0 - d) * (0.5 + 0.5 * k * w));
+    legSwing(out, side, 0.6 * e * d, 0.1 * a);
+    kneeFlex(out, side, 0.15 * a + 1.4 * e * d);
+    // Arms punch up and out on the beat, fold back in on the crouch.
+    armSwing(out, side, 0.5 * a + 0.5 * e * up, 0.3 * a + 0.7 * e * up);
+    elbowFlex(out, side, 1.3 * a + 0.9 * e * up * (0.5 + 0.5 * k * w) - 0.6 * e * up);
   }
 };
 
@@ -216,18 +224,18 @@ export const handsUp: Move = (c, energy, out) => {
   const d = dip(c.beatPhase);
   const w = weight(c.barPhase);
   const bar = Math.sin(TAU * c.barPhase);
-  lift(out, 0.09 * e * hop(c.beatPhase));
-  rootShift(out, 0.1 * e * w, 0.0);
-  hips(out, 0.1 * e * w, 0.08 * e * bar);
-  torso(out, -0.06 * a, 0.12 * e * Math.sin(TAU * 2 * c.barPhase), 0.16 * e * bar);
-  head(out, -0.3 * a, 0.12 * e * bar, 0.08 * e * w);
+  lift(out, 0.16 * e * hop(c.beatPhase));
+  rootShift(out, 0.16 * e * w, 0.0);
+  hips(out, 0.2 * e * w, 0.15 * e * bar);
+  torso(out, -0.06 * a, 0.25 * e * Math.sin(TAU * 2 * c.barPhase), 0.3 * e * bar);
+  head(out, -0.3 * a, 0.2 * e * bar, 0.12 * e * w);
   for (const side of SIDES) {
     const k = sideSign(side);
-    legSwing(out, side, 0.1 * e * d, 0.28 * a);
-    kneeFlex(out, side, 0.1 * a + 0.32 * e * d);
-    armSwing(out, side, 0.35 * a, 2.5 * a + 0.3 * e * Math.sin(TAU * c.barPhase + k * 1.57));
-    elbowFlex(out, side, 0.35 * a + 0.3 * e * Math.sin(TAU * 2 * c.barPhase + k * 1.5));
-    wristBend(out, side, 0.4 * e * Math.sin(TAU * 4 * c.barPhase + k));
+    legSwing(out, side, 0.2 * e * d, 0.28 * a);
+    kneeFlex(out, side, 0.1 * a + 0.6 * e * d);
+    armSwing(out, side, 0.35 * a, 2.5 * a + 0.6 * e * Math.sin(TAU * c.barPhase + k * 1.57));
+    elbowFlex(out, side, 0.35 * a + 0.6 * e * Math.sin(TAU * 2 * c.barPhase + k * 1.5));
+    wristBend(out, side, 0.6 * e * Math.sin(TAU * 4 * c.barPhase + k));
   }
 };
 
@@ -258,11 +266,32 @@ const LEVEL_UP = [0.3, 0.55, 0.8];
 const LEVEL_DOWN = [0.2, 0.45, 0.7];
 /** How far the `groove` setting can push the effective intensity. */
 export const GROOVE_BIAS = 0.5;
+/** Where a held beat alone puts the picker: inside the groove rung at a
+ *  NEUTRAL pulse dial, and below bounce, so a steady verse grooves. */
+export const BEAT_FLOOR = 0.4;
+/** How far the pulse dial moves that floor either way — a beat that hits
+ *  hard and steadily lifts it into bounce, a barely-there one lets it go. */
+export const PULSE_GAIN = 0.4;
 
-/** Effective intensity: the section's intensity biased by the groove
- *  setting, which at its 0.5 default adds exactly nothing. */
-export function effectiveIntensity(sectionIntensity: number, groove: number): number {
-  return Math.min(1, Math.max(0, sectionIntensity + (groove - 0.5) * GROOVE_BIAS));
+/** Effective intensity — what the picker climbs on.
+ *
+ *  sectionIntensity alone is the wrong gauge: it measures where this phrase
+ *  sits within the track's *own* dynamic range and its floor creeps up
+ *  through any steady section (sectionIntensity.ts), so on a song that
+ *  isn't actively building it drifts back to ~0 within half a minute —
+ *  which read as "the dancer stops dancing thirty seconds into every
+ *  song". A beat you can hear is a beat you step to, so a held tempo sets a
+ *  floor under the picker (BEAT_FLOOR, moved by the pulse dial) and the
+ *  section only decides how far above the groove to go: a build or a chorus
+ *  still climbs to bounce/hands-up, and when the section settles the dancer
+ *  settles back to the groove, never below it while the beat holds.
+ *
+ *  The groove setting biases the result and at its 0.5 default adds exactly
+ *  nothing. */
+export function effectiveIntensity(sectionIntensity: number, tempoLock: number, pulse: number, groove: number): number {
+  const beatFloor = tempoLock * (BEAT_FLOOR + PULSE_GAIN * (pulse - 0.5));
+  const drive = Math.max(sectionIntensity, beatFloor);
+  return Math.min(1, Math.max(0, drive + (groove - 0.5) * GROOVE_BIAS));
 }
 
 /** The rung of MOVE_LADDER to dance at, given the previous rung. Pure. */

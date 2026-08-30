@@ -7,6 +7,7 @@ import {
   forwardKinematics,
 } from "../src/render/scenes/dancers/rig.ts";
 import {
+  BEAT_FLOOR,
   GROOVE_BIAS,
   MOVE_LADDER,
   MOVE_NAMES,
@@ -33,6 +34,7 @@ const clocks = (over: Partial<MoveClocks> = {}): MoveClocks => ({
   flowPhase: 3.7,
   timeSec: 10,
   bpm: 124,
+  pulse: 0.5,
   ...over,
 });
 
@@ -121,7 +123,10 @@ describe("dancers moves", () => {
         if (i > 0) for (let k = 0; k < cur.length; k++) maxDelta = Math.max(maxDelta, Math.abs(cur[k] - prev[k]));
         prev.set(cur);
       }
-      expect(maxDelta).toBeLessThan(0.05);
+      // A phase-wrap cliff is a whole radian in one step; the fastest
+      // legitimate motion (a knee driving up in a 240-step bar at energy 1)
+      // stays well under this.
+      expect(maxDelta).toBeLessThan(0.15);
     }
   });
 });
@@ -139,10 +144,25 @@ describe("dancers move picker", () => {
   });
 
   it("the groove setting is bias-free at its default and monotone either side", () => {
-    for (const x of [0, 0.25, 0.5, 0.75, 1]) expect(effectiveIntensity(x, 0.5)).toBe(x);
-    expect(effectiveIntensity(0.5, 1)).toBeCloseTo(0.5 + 0.5 * GROOVE_BIAS);
-    expect(effectiveIntensity(0.5, 0)).toBeCloseTo(0.5 - 0.5 * GROOVE_BIAS);
-    expect(effectiveIntensity(0.95, 1)).toBe(1);
-    expect(effectiveIntensity(0.05, 0)).toBe(0);
+    for (const x of [0, 0.25, 0.5, 0.75, 1]) expect(effectiveIntensity(x, 0, 0.5, 0.5)).toBe(x);
+    expect(effectiveIntensity(0.5, 0, 0.5, 1)).toBeCloseTo(0.5 + 0.5 * GROOVE_BIAS);
+    expect(effectiveIntensity(0.5, 0, 0.5, 0)).toBeCloseTo(0.5 - 0.5 * GROOVE_BIAS);
+    expect(effectiveIntensity(0.95, 0, 0.5, 1)).toBe(1);
+    expect(effectiveIntensity(0.05, 0, 0.5, 0)).toBe(0);
+  });
+
+  it("a held beat puts a floor under the picker that a decayed section can't undercut", () => {
+    // A steady section: sectionIntensity has crept back to ~0 (see
+    // sectionIntensity.ts) but the beat is still there — so the dancer grooves.
+    expect(effectiveIntensity(0.1, 1, 0.5, 0.5)).toBe(BEAT_FLOOR);
+    expect(pickMoveLevel(0, effectiveIntensity(0.1, 1, 0.5, 0.5))).toBe(1);
+    // ...and after a chorus settles it comes back down to groove, not below it.
+    expect(pickMoveLevel(3, effectiveIntensity(0.1, 1, 0.5, 0.5))).toBe(1);
+    // A strong pulse dial lifts the floor into bounce; a barely-there beat drops it out of groove.
+    expect(pickMoveLevel(0, effectiveIntensity(0, 1, 1, 0.5))).toBe(2);
+    expect(pickMoveLevel(0, effectiveIntensity(0, 1, 0, 0.5))).toBe(0);
+    // The section still wins when it's above the floor; no beat, no floor.
+    expect(effectiveIntensity(0.9, 1, 0.5, 0.5)).toBe(0.9);
+    expect(effectiveIntensity(0.1, 0, 1, 0.5)).toBeCloseTo(0.1);
   });
 });

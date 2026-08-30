@@ -234,7 +234,7 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
     const boneBuf = createBoneBuffer();
     const clocks: MoveClocks = {
       beatPhase: 0, barPhase: 0, tempoLock: 0, beatPulse: 0, lowPulse: 0,
-      sectionIntensity: 0, dropPulse: 0, flowPhase: 0, timeSec: 0, bpm: 0,
+      sectionIntensity: 0, dropPulse: 0, flowPhase: 0, timeSec: 0, bpm: 0, pulse: 0.5,
     };
 
     return (frame, anim, getSetting) => {
@@ -248,6 +248,7 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
       clocks.flowPhase = anim.flowPhase;
       clocks.timeSec = anim.timeSec;
       clocks.bpm = frame.bpm;
+      clocks.pulse = anim.profile.pulse;
 
       const out = choreographer.advance(clocks, anim.dtSec, {
         energy: getSetting("motion"),

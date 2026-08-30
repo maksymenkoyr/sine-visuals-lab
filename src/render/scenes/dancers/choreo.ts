@@ -9,9 +9,13 @@
  *   1. `sway`, the free layer that needs no beat;
  *   2. the beat-locked move for the current rung, crossfaded from the
  *      previous rung over one bar — rung changes latch only on a bar
- *      boundary so a new move lands on a downbeat;
- *   3. the tempoLock gate: at tempoLock 0 the output *is* sway, which is
- *      what masks a frozen beatPhase when the beat is lost;
+ *      boundary so a new move lands on a downbeat; the rung comes from
+ *      moves.ts's effectiveIntensity, where a held beat alone is enough to
+ *      groove and the section decides how far above that to climb;
+ *   3. the beat gate: a slow-release follower of tempoLock. At 0 the output
+ *      *is* sway, which is what masks a frozen beatPhase when the beat is
+ *      lost; the slow release is what stops a one-bar bpm dropout from
+ *      dumping the dancer;
  *   4. the drop pose, blended in on dropPulse with a slewed attack;
  *   5. jaw chatter on bass onsets;
  *   6. a per-channel slew — the backstop: whatever the layers above do, no
@@ -62,6 +66,9 @@ const TILT_MAX = 0.035;
 const ROLL_MAX = 0.02;
 /** Without a beat to latch to, the picker re-evaluates on this timer instead. */
 const FREE_LATCH_SEC = 2;
+/** How fast the beat gate lets go once tempoLock drops — a few seconds, so a
+ *  bpm dropout of a bar or two rides through (see advance()). */
+const LOCK_RELEASE_RATE = 0.8;
 const FADE_MIN_SEC = 0.6;
 const FADE_MAX_SEC = 3;
 const DROP_ATTACK_RATE = 12; // ~100 ms to full: a hit, not a teleport (tests/dancersChoreo.test.ts bounds it)
@@ -94,6 +101,7 @@ export function createChoreographer(): Choreographer {
   let lastBarPhase = 0;
   let freeTimer = 0;
   let dropBlend = 0;
+  let danceLock = 0;
   const cam = { camDolly: 0, camTilt: 0, camRoll: 0 };
   const jawCh = boneChannel(B.jaw);
 
@@ -108,14 +116,22 @@ export function createChoreographer(): Choreographer {
       const energy = params.energy;
       sway(clocks, energy, swayPose);
 
+      // The beat gate follows tempoLock up at once but lets go slowly: the
+      // tracker dropping bpm to 0 for a bar (a break, a quiet intro bar, the
+      // grid slipping on a fill) shouldn't dump the dancer to sway and make
+      // it re-earn the beat over the couple of seconds tempoLock takes to
+      // climb back. beatClock.ts's phase stalls while bpm is 0, so what the
+      // release holds is the pose frozen where the beat left it, easing out.
+      danceLock = Math.max(clocks.tempoLock, danceLock * (1 - Math.min(1, LOCK_RELEASE_RATE * dtSec)));
+
       // Rung changes latch on the downbeat (or a timer when there's no beat).
       const wrapped = clocks.barPhase < lastBarPhase;
       lastBarPhase = clocks.barPhase;
       freeTimer += dtSec;
-      const locked = clocks.tempoLock >= 0.5;
+      const locked = danceLock >= 0.5;
       if ((locked && wrapped) || (!locked && freeTimer >= FREE_LATCH_SEC)) {
         freeTimer = 0;
-        const next = pickMoveLevel(level, effectiveIntensity(clocks.sectionIntensity, params.groove));
+        const next = pickMoveLevel(level, effectiveIntensity(clocks.sectionIntensity, danceLock, clocks.pulse, params.groove));
         if (next !== level) {
           outgoing = level;
           level = next;
@@ -134,7 +150,7 @@ export function createChoreographer(): Choreographer {
       }
 
       // The gate: no beat, no beat-locked motion.
-      lerpPose(swayPose, beatPose, clocks.tempoLock, target);
+      lerpPose(swayPose, beatPose, danceLock, target);
 
       const dropTarget = Math.min(1, clocks.dropPulse * DROP_GAIN);
       dropBlend = slew(dropBlend, dropTarget, dropTarget > dropBlend ? DROP_ATTACK_RATE : DROP_RELEASE_RATE, dtSec);

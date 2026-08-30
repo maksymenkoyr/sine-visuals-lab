@@ -32,6 +32,7 @@ function run(
       flowPhase: t * 1.2,
       timeSec: t,
       bpm,
+      pulse: 0.5,
       ...script(t),
     };
     last = ch.advance(clocks, DT, params);
@@ -52,7 +53,7 @@ describe("dancers choreographer", () => {
     framesA.forEach((a, i) => expect([...a]).toEqual([...framesB[i]]));
     // And that free dance is sway itself once the slew has settled.
     const expected = createPose();
-    sway({ beatPhase: 0, barPhase: 0, tempoLock: 0, beatPulse: 0, lowPulse: 0, sectionIntensity: 1, dropPulse: 0, flowPhase: (3 * 60 - 1) * DT * 1.2, timeSec: 0, bpm: 128 }, PARAMS.energy, expected);
+    sway({ beatPhase: 0, barPhase: 0, tempoLock: 0, beatPulse: 0, lowPulse: 0, sectionIntensity: 1, dropPulse: 0, flowPhase: (3 * 60 - 1) * DT * 1.2, timeSec: 0, bpm: 128, pulse: 0.5 }, PARAMS.energy, expected);
     const lastA = framesA[framesA.length - 1];
     for (let k = 0; k < expected.length; k++) expect(lastA[k]).toBeCloseTo(expected[k], 1);
   });
@@ -76,10 +77,40 @@ describe("dancers choreographer", () => {
       },
     );
     expect(Math.max(...levels)).toBe(3);
-    expect(levels[levels.length - 1]).toBe(0);
+    // Back down to the groove — never below it while the beat holds.
+    expect(levels[levels.length - 1]).toBe(1);
     // It visits the rungs in order on the way up (no skipping past groove).
     const firstNonZero = levels.find((l) => l > 0);
     expect(firstNonZero).toBe(1);
+  });
+
+  it("keeps grooving through a steady section whose intensity has decayed to nothing", () => {
+    // What a real track does thirty seconds into a verse: tempo held, section ~0.
+    const last = run(12, () => ({ sectionIntensity: 0.05 }));
+    expect(last.level).toBe(1);
+  });
+
+  it("releases the beat gate slowly, so a one-bar bpm dropout doesn't dump the dancer to sway", () => {
+    const swayRef = createPose();
+    const distFromSway = (pose: Float32Array, c: MoveClocks): number => {
+      sway(c, PARAMS.energy, swayRef);
+      let m = 0;
+      for (let k = 0; k < pose.length; k++) m = Math.max(m, Math.abs(pose[k] - swayRef[k]));
+      return m;
+    };
+    let shortlyAfter = 0;
+    let longAfter = 0;
+    run(
+      8,
+      (t) => ({ sectionIntensity: 0.9, tempoLock: t < 4 ? 1 : 0 }),
+      PARAMS,
+      (t, f, c) => {
+        if (Math.abs(t - 4.4) < DT / 2) shortlyAfter = distFromSway(f.pose, c);
+        if (Math.abs(t - 7.9) < DT / 2) longAfter = distFromSway(f.pose, c);
+      },
+    );
+    expect(shortlyAfter).toBeGreaterThan(0.8); // 0.4 s after the dropout the arms are still up
+    expect(longAfter).toBeLessThan(0.2); // seconds later it has let go
   });
 
   it("never snaps: a crossfade, a drop and a jaw hit all stay under the per-frame slew budget", () => {
