@@ -54,11 +54,21 @@ export const SKINS: readonly Skin[] = [
   { name: "Stick", prefix: "stick", glsl: STICK_SKIN_GLSL },
 ];
 
+/** The `style` setting's options, in value order: a clip family to dance
+ *  (clipFormat.ts's ClipMeta.family), or null for the whole library. */
+const STYLES: readonly { name: string; family: string | null }[] = [
+  { name: "Mix", family: null },
+  { name: "Street", family: "street" },
+  { name: "Party", family: "party" },
+  { name: "Swing", family: "swing" },
+  { name: "Modern", family: "modern" },
+];
+
 const SETTINGS: SceneSetting[] = [
   {
     key: "motion",
     label: "Move energy",
-    description: "How big every move is — bounce height, arm swing, step width.",
+    description: "How much of each move comes through — all the way up is as it was captured.",
     group: "Dance",
     min: 0,
     max: 1,
@@ -69,13 +79,25 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "groove",
     label: "Groove",
-    description: "How eagerly the dancer climbs from a sway to the big moves as a track builds.",
+    description: "How eagerly the dancer reaches for the big moves as a track builds.",
     group: "Dance",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.5,
     auto: { pulse: 0.3, attack: 0.15 },
+  },
+  {
+    key: "style",
+    label: "Style",
+    description: "Which family of moves to dance, or a mix of everything.",
+    group: "Dance",
+    type: "enum",
+    options: STYLES.map((s) => s.name),
+    min: 0,
+    max: STYLES.length - 1,
+    step: 1,
+    default: 0,
   },
   {
     key: "jaw",
@@ -250,6 +272,7 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
         .then((r) => r.arrayBuffer())
         .then((buf) => {
           library = decodeClipLibrary(buf);
+          choreographer.setLibrary(library);
         })
         .catch((err: unknown) => console.warn("dancers: clip library unavailable", err));
     }
@@ -276,6 +299,7 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
         bob: getSetting("bob"),
         groove: getSetting("groove"),
         jaw: getSetting("jaw"),
+        family: STYLES[Math.round(getSetting("style"))]?.family ?? null,
       });
       const barsElapsed = bars.advance(anim.barPhase);
       let pose: Pose = out.pose;

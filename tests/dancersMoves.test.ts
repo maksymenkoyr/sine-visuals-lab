@@ -9,14 +9,12 @@ import {
 import {
   BEAT_FLOOR,
   GROOVE_BIAS,
-  MOVE_LADDER,
-  MOVE_NAMES,
   armSwing,
+  dropPose,
   effectiveIntensity,
   elbowFlex,
   kneeFlex,
   legSwing,
-  pickMoveLevel,
   restPose,
   stance,
   sway,
@@ -107,42 +105,27 @@ describe("dancers moves", () => {
     expect([...a]).toEqual([...b]);
   });
 
-  it("every move is continuous through a full bar, including the phase wrap", () => {
-    const moves = MOVE_LADDER.filter((m): m is NonNullable<typeof m> => m !== null);
-    expect(moves.length).toBe(MOVE_NAMES.length - 1);
-    const steps = 240;
-    for (const move of [sway, ...moves]) {
-      const prev = createPose();
-      const cur = createPose();
-      let maxDelta = 0;
-      for (let i = 0; i <= steps + 8; i++) {
-        // Runs past the wrap so bar 1.0 -> 0.0 (and beat 4 -> 0) is covered.
-        const bar = (i / steps) % 1;
-        const beat = ((i * 4) / steps) % 1;
-        move(clocks({ barPhase: bar, beatPhase: beat, flowPhase: 2 + i / steps }), 1, cur);
-        if (i > 0) for (let k = 0; k < cur.length; k++) maxDelta = Math.max(maxDelta, Math.abs(cur[k] - prev[k]));
-        prev.set(cur);
-      }
-      // A phase-wrap cliff is a whole radian in one step; the fastest
-      // legitimate motion (a knee driving up in a 240-step bar at energy 1)
-      // stays well under this.
-      expect(maxDelta).toBeLessThan(0.15);
+  it("sway is continuous through a long stretch of the free clock", () => {
+    const prev = createPose();
+    const cur = createPose();
+    let maxDelta = 0;
+    for (let i = 0; i <= 600; i++) {
+      sway(clocks({ flowPhase: 2 + i / 60 }), 1, cur);
+      if (i > 0) for (let k = 0; k < cur.length; k++) maxDelta = Math.max(maxDelta, Math.abs(cur[k] - prev[k]));
+      prev.set(cur);
     }
+    expect(maxDelta).toBeLessThan(0.05);
+  });
+
+  it("the drop pose crouches with the arms flung up", () => {
+    const pose = dropPose(createPose());
+    solve(pose);
+    expect(tailOf(B.L_forearm)[1]).toBeGreaterThan(head(B.L_upperArm)[1]);
+    expect(tailOf(B.L_shin)[2]).toBeLessThan(head(B.L_shin)[2] - 0.2);
   });
 });
 
-describe("dancers move picker", () => {
-  it("climbs on the UP thresholds and only falls back below the DOWN ones", () => {
-    expect(pickMoveLevel(0, 0.29)).toBe(0);
-    expect(pickMoveLevel(0, 0.31)).toBe(1);
-    expect(pickMoveLevel(1, 0.28)).toBe(1); // inside the hysteresis band: stays
-    expect(pickMoveLevel(1, 0.19)).toBe(0);
-    expect(pickMoveLevel(0, 0.9)).toBe(3); // climbs every rung at once
-    expect(pickMoveLevel(3, 0.72)).toBe(3);
-    expect(pickMoveLevel(3, 0.69)).toBe(2);
-    expect(pickMoveLevel(3, 0.1)).toBe(0);
-  });
-
+describe("dancers picker intensity", () => {
   it("the groove setting is bias-free at its default and monotone either side", () => {
     for (const x of [0, 0.25, 0.5, 0.75, 1]) expect(effectiveIntensity(x, 0, 0.5, 0.5)).toBe(x);
     expect(effectiveIntensity(0.5, 0, 0.5, 1)).toBeCloseTo(0.5 + 0.5 * GROOVE_BIAS);
@@ -155,12 +138,9 @@ describe("dancers move picker", () => {
     // A steady section: sectionIntensity has crept back to ~0 (see
     // sectionIntensity.ts) but the beat is still there — so the dancer grooves.
     expect(effectiveIntensity(0.1, 1, 0.5, 0.5)).toBe(BEAT_FLOOR);
-    expect(pickMoveLevel(0, effectiveIntensity(0.1, 1, 0.5, 0.5))).toBe(1);
-    // ...and after a chorus settles it comes back down to groove, not below it.
-    expect(pickMoveLevel(3, effectiveIntensity(0.1, 1, 0.5, 0.5))).toBe(1);
-    // A strong pulse dial lifts the floor into bounce; a barely-there beat drops it out of groove.
-    expect(pickMoveLevel(0, effectiveIntensity(0, 1, 1, 0.5))).toBe(2);
-    expect(pickMoveLevel(0, effectiveIntensity(0, 1, 0, 0.5))).toBe(0);
+    // A strong pulse dial lifts the floor; a barely-there beat lowers it.
+    expect(effectiveIntensity(0, 1, 1, 0.5)).toBeGreaterThan(BEAT_FLOOR);
+    expect(effectiveIntensity(0, 1, 0, 0.5)).toBeLessThan(BEAT_FLOOR);
     // The section still wins when it's above the floor; no beat, no floor.
     expect(effectiveIntensity(0.9, 1, 0.5, 0.5)).toBe(0.9);
     expect(effectiveIntensity(0.1, 0, 1, 0.5)).toBeCloseTo(0.1);

@@ -1,17 +1,16 @@
 /**
  * The choreographer: turns the per-frame clocks into the pose the rig solves,
- * with every discontinuity smoothed away. Stateful (it remembers which rung
- * of the move ladder it is on, the crossfade in flight, the drop blend and
- * the camera bob), so it follows the repo's createX()/advance() shape rather
- * than being a pure function like the moves — see beatClock.ts.
+ * with every discontinuity smoothed away. Stateful (it owns the clip player,
+ * the beat gate, the drop blend and the camera bob), so it follows the
+ * repo's createX()/advance() shape rather than being a pure function like
+ * the moves — see beatClock.ts.
  *
  * Layering, bottom to top:
- *   1. `sway`, the free layer that needs no beat;
- *   2. the beat-locked move for the current rung, crossfaded from the
- *      previous rung over one bar — rung changes latch only on a bar
- *      boundary so a new move lands on a downbeat; the rung comes from
- *      moves.ts's effectiveIntensity, where a held beat alone is enough to
- *      groove and the section decides how far above that to climb;
+ *   1. `sway`, the free layer that needs no beat and no clips;
+ *   2. the captured move the clip player is dancing (player.ts), picked on
+ *      bar boundaries from moves.ts's effectiveIntensity — a held beat alone
+ *      is enough to dance, and the section decides how big a move — scaled
+ *      toward the sway by the `motion` setting;
  *   3. the beat gate: a slow-release follower of tempoLock. At 0 the output
  *      *is* sway, which is what masks a frozen beatPhase when the beat is
  *      lost; the slow release is what stops a one-bar bpm dropout from
@@ -21,32 +20,29 @@
  *   6. a per-channel slew — the backstop: whatever the layers above do, no
  *      channel changes faster than POSE_SLEW_RATE allows.
  */
-import { B, createPose, mulBoneEuler, type Pose } from "./rig.ts";
-import {
-  MOVE_LADDER,
-  dropPose,
-  effectiveIntensity,
-  lerpPose,
-  pickMoveLevel,
-  sway,
-  type MoveClocks,
-} from "./moves.ts";
+import { B, createPose, lerpPose, mulBoneEuler, type Pose } from "./rig.ts";
+import { dropPose, effectiveIntensity, sway, type MoveClocks } from "./moves.ts";
+import type { ClipLibrary } from "./clipFormat.ts";
+import { createClipPlayer, type ClipPlayer } from "./player.ts";
 
 export interface ChoreoParams {
-  /** 0..1 amplitude of every move (the `motion` setting). */
+  /** 0..1 how much of each move comes through (the `motion` setting): 1 is
+   *  as captured, 0 keeps MOTION_FLOOR of it. */
   energy: number;
   /** 0..1 how much the camera bobs on the beat (the `bob` setting). */
   bob: number;
-  /** 0..1 bias on how eagerly the picker climbs the ladder (the `groove` setting). */
+  /** 0..1 bias on how big a move the picker asks for (the `groove` setting). */
   groove: number;
   /** 0..1 how far bass hits open the jaw (the `jaw` setting). */
   jaw: number;
+  /** Clip family to dance, or null for the whole library (the `style` setting). */
+  family: string | null;
 }
 
 export interface ChoreoFrame {
   pose: Pose;
-  /** Rung of MOVE_LADDER currently danced (after any crossfade lands). */
-  level: number;
+  /** Name of the clip being danced, or null while swaying. */
+  clip: string | null;
   /** Camera dolly toward the figure, in world units. */
   camDolly: number;
   /** Camera aim raised, in world units at the target. */
@@ -57,6 +53,8 @@ export interface ChoreoFrame {
 
 export interface Choreographer {
   advance(clocks: MoveClocks, dtSec: number, params: ChoreoParams): ChoreoFrame;
+  /** Hands over the clip library once it has loaded; until then, sway. */
+  setLibrary(library: ClipLibrary | null): void;
 }
 
 export const POSE_SLEW_RATE = 14; // per second — a snap settles in a few frames, a beat still reads as a beat
@@ -64,13 +62,11 @@ const CAM_SLEW_RATE = 30;
 const DOLLY_MAX = 0.14;
 const TILT_MAX = 0.035;
 const ROLL_MAX = 0.02;
-/** Without a beat to latch to, the picker re-evaluates on this timer instead. */
-const FREE_LATCH_SEC = 2;
 /** How fast the beat gate lets go once tempoLock drops — a few seconds, so a
  *  bpm dropout of a bar or two rides through (see advance()). */
 const LOCK_RELEASE_RATE = 0.8;
-const FADE_MIN_SEC = 0.6;
-const FADE_MAX_SEC = 3;
+/** How much of a move comes through at `motion` 0. */
+const MOTION_FLOOR = 0.7;
 const DROP_ATTACK_RATE = 12; // ~100 ms to full: a hit, not a teleport (tests/dancersChoreo.test.ts bounds it)
 const DROP_RELEASE_RATE = 6;
 const DROP_GAIN = 1.2;
@@ -80,40 +76,24 @@ function slew(current: number, target: number, rate: number, dtSec: number): num
   return current + (target - current) * Math.min(1, rate * dtSec);
 }
 
-const smoothstep = (t: number): number => {
-  const x = Math.min(1, Math.max(0, t));
-  return x * x * (3 - 2 * x);
-};
-
 export function createChoreographer(): Choreographer {
   const swayPose = createPose();
-  const inPose = createPose();
-  const outPose = createPose();
   const beatPose = createPose();
   const target = createPose();
   const pose = createPose();
   const drop = dropPose(createPose());
   let primed = false;
-
-  let level = 0;
-  let outgoing = 0;
-  let fade = 1; // 0..1 progress of the crossfade from `outgoing` to `level`
-  let lastBarPhase = 0;
-  let freeTimer = 0;
-  let dropBlend = 0;
+  let player: ClipPlayer | null = null;
   let danceLock = 0;
+  let dropBlend = 0;
   const cam = { camDolly: 0, camTilt: 0, camRoll: 0 };
 
-  const evalLevel = (rung: number, clocks: MoveClocks, energy: number, out: Pose): void => {
-    const move = MOVE_LADDER[rung];
-    if (move) move(clocks, energy, out);
-    else out.set(swayPose);
-  };
-
   return {
+    setLibrary(library) {
+      player = library && library.clips.length > 0 ? createClipPlayer(library) : null;
+    },
     advance(clocks, dtSec, params) {
-      const energy = params.energy;
-      sway(clocks, energy, swayPose);
+      sway(clocks, params.energy, swayPose);
 
       // The beat gate follows tempoLock up at once but lets go slowly: the
       // tracker dropping bpm to 0 for a bar (a break, a quiet intro bar, the
@@ -123,29 +103,14 @@ export function createChoreographer(): Choreographer {
       // release holds is the pose frozen where the beat left it, easing out.
       danceLock = Math.max(clocks.tempoLock, danceLock * (1 - Math.min(1, LOCK_RELEASE_RATE * dtSec)));
 
-      // Rung changes latch on the downbeat (or a timer when there's no beat).
-      const wrapped = clocks.barPhase < lastBarPhase;
-      lastBarPhase = clocks.barPhase;
-      freeTimer += dtSec;
-      const locked = danceLock >= 0.5;
-      if ((locked && wrapped) || (!locked && freeTimer >= FREE_LATCH_SEC)) {
-        freeTimer = 0;
-        const next = pickMoveLevel(level, effectiveIntensity(clocks.sectionIntensity, danceLock, clocks.pulse, params.groove));
-        if (next !== level) {
-          outgoing = level;
-          level = next;
-          fade = 0;
-        }
-      }
-
-      const barSec = clocks.bpm > 0 ? 240 / clocks.bpm : 1.5;
-      fade = Math.min(1, fade + dtSec / Math.min(FADE_MAX_SEC, Math.max(FADE_MIN_SEC, barSec)));
-      evalLevel(level, clocks, energy, inPose);
-      if (fade < 1) {
-        evalLevel(outgoing, clocks, energy, outPose);
-        lerpPose(outPose, inPose, smoothstep(fade), beatPose);
+      const intensity = effectiveIntensity(clocks.sectionIntensity, danceLock, clocks.pulse, params.groove);
+      const clip = player?.advance(clocks.barPhase, { intensity, family: params.family, dropPulse: clocks.dropPulse, bpm: clocks.bpm }, beatPose) ?? null;
+      if (clip) {
+        // `motion` scales the move toward the sway, not toward rest, so a
+        // subdued dancer still stands like a dancer.
+        lerpPose(swayPose, beatPose, MOTION_FLOOR + (1 - MOTION_FLOOR) * params.energy, beatPose);
       } else {
-        beatPose.set(inPose);
+        beatPose.set(swayPose);
       }
 
       // The gate: no beat, no beat-locked motion.
@@ -153,7 +118,7 @@ export function createChoreographer(): Choreographer {
 
       const dropTarget = Math.min(1, clocks.dropPulse * DROP_GAIN);
       dropBlend = slew(dropBlend, dropTarget, dropTarget > dropBlend ? DROP_ATTACK_RATE : DROP_RELEASE_RATE, dtSec);
-      if (dropBlend > 1e-3) lerpPose(target, drop, dropBlend * (0.5 + 0.5 * energy), target);
+      if (dropBlend > 1e-3) lerpPose(target, drop, dropBlend * (0.5 + 0.5 * params.energy), target);
 
       mulBoneEuler(target, B.jaw, params.jaw * clocks.lowPulse * JAW_MAX, 0, 0);
 
@@ -170,7 +135,7 @@ export function createChoreographer(): Choreographer {
       cam.camTilt = slew(cam.camTilt, bob * clocks.beatPulse * TILT_MAX, CAM_SLEW_RATE, dtSec);
       cam.camRoll = slew(cam.camRoll, bob * clocks.lowPulse * ROLL_MAX, CAM_SLEW_RATE, dtSec);
 
-      return { pose, level, ...cam };
+      return { pose, clip: clip ? clip.name : null, ...cam };
     },
   };
 }

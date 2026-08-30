@@ -1,21 +1,22 @@
 /**
- * The dance moves: pure functions from the music clocks to a Pose. Every
- * move is continuous in every phase it reads (no `fract` cliffs), which is
- * the first line of defence against the figure snapping; choreo.ts adds the
- * crossfades and slews on top.
+ * The procedural side of the dance: the free sway the figure falls back to
+ * when there is no beat (or no clip library yet), the resting stance, the
+ * drop pose, and the intent helpers (armSwing, kneeFlex, …) they are written
+ * with. The moves themselves come from captured clips — clipFormat.ts and
+ * player.ts — since sine waves never read as a dance move.
  *
- * Move authors work through the intent helpers below (armSwing, kneeFlex, …)
- * rather than raw pitch/yaw/roll, because the signs those need fall out of
- * rig.ts's rest rotations and are easy to get backwards. The helpers *add*
- * to the pose so layers compose.
+ * Move authors work through the intent helpers rather than raw rotations,
+ * because the signs those need fall out of rig.ts's rest rotations and are
+ * easy to get backwards. The helpers *compose onto* the pose so layers stack.
  *
- * The beat-locked moves form a ladder (MOVE_LADDER) that pickMoveLevel()
- * climbs as the section gets more intense; `sway` is the free layer under
- * all of them and the only thing left when there is no beat to lock to.
+ * effectiveIntensity() is what the clip picker climbs on: a held beat sets a
+ * floor (a beat you can hear is a beat you step to) and the section decides
+ * how far above it to go — see its comment for why sectionIntensity alone
+ * was the wrong gauge.
  */
 import { B, CH_LIFT, CH_ROOT_X, CH_ROOT_Z, createPose, lerpPose, mulBoneEuler, resetPose, type Pose } from "./rig.ts";
 
-/** The slice of AnimFrame (plus FeatureFrame.bpm) the moves read — see
+/** The slice of AnimFrame (plus FeatureFrame.bpm) the dance reads — see
  *  animClock.ts for what each clock means. */
 export interface MoveClocks {
   beatPhase: number;
@@ -34,8 +35,7 @@ export interface MoveClocks {
 }
 
 /** Writes a full pose into `out` (overwriting it). `energy` in [0,1] scales
- *  the motion; for `sway` that means energy 0 is exactly the rest stance,
- *  while the beat moves keep their shape (see shapeAmp) and only go still. */
+ *  the motion; for `sway` energy 0 is exactly the rest stance. */
 export type Move = (c: MoveClocks, energy: number, out: Pose) => void;
 
 export type Side = "L" | "R";
@@ -103,23 +103,10 @@ export function lift(pose: Pose, height: number): void {
   pose[CH_LIFT] += Math.max(0, height);
 }
 
-// ---- Moves -----------------------------------------------------------------
-
-const TAU = Math.PI * 2;
-
-/** 0 on the beat, 1 halfway to the next — the crouch of a bounce. */
-const dip = (beatPhase: number): number => 0.5 - 0.5 * Math.cos(TAU * beatPhase);
-/** A hop that peaks exactly on the beat and is gone by the half-beat. */
-const hop = (beatPhase: number): number => Math.max(0, Math.cos(TAU * beatPhase)) ** 2;
-/** Weight cycle: +1 on the L foot, -1 on the R, shifting every beat. */
-const weight = (barPhase: number): number => Math.sin(TAU * 2 * barPhase);
-/** Amplitude for a beat move's *shape* (where the arms sit, how wide the
- *  stance is): partly energy-independent so hands-up still reads as hands
- *  up at low energy, while the motion riding on it scales with `energy`. */
-const shapeAmp = (energy: number): number => 0.4 + 0.6 * energy;
+// ---- Procedural poses -------------------------------------------------------
 
 /** A resting stance — slight knee bend and a little arm hang-away — that
- *  every move builds on so the figure never locks its knees straight. */
+ *  the sway builds on so the figure never locks its knees straight. */
 export function stance(pose: Pose): void {
   for (const side of SIDES) {
     legSwing(pose, side, 0.02, 0.06);
@@ -130,7 +117,7 @@ export function stance(pose: Pose): void {
 }
 
 /** Free layer: a loose sway driven only by flowPhase, so it needs no beat.
- *  Everything beat-locked fades in over this as tempoLock rises. */
+ *  The clips fade in over this as the beat gate rises (choreo.ts). */
 export const sway: Move = (c, energy, out) => {
   restPose(out);
   stance(out);
@@ -153,82 +140,6 @@ export const sway: Move = (c, energy, out) => {
   }
 };
 
-/** Two-step groove: weight shifts every beat, the free knee drives forward,
- *  hips and shoulders counter-twist, arms swing in depth against the legs. */
-export const groove: Move = (c, energy, out) => {
-  restPose(out);
-  stance(out);
-  const e = energy;
-  const a = shapeAmp(energy);
-  const w = weight(c.barPhase);
-  const d = dip(c.beatPhase);
-  rootShift(out, 0.14 * e * w, 0.0);
-  hips(out, 0.25 * e * w, 0.3 * e * w);
-  torso(out, 0.1 * e + 0.1 * e * d, -0.6 * e * w, -0.2 * e * w);
-  head(out, 0.25 * e * d, 0.3 * e * w, 0.1 * e * w);
-  for (const side of SIDES) {
-    const k = sideSign(side);
-    const free = Math.max(0, -k * w); // this leg is unweighted when the weight is on the other
-    kneeFlex(out, side, 0.15 * a + 0.4 * e * d + 1.2 * e * free);
-    legSwing(out, side, 0.9 * e * free, 0.06 * a);
-    armSwing(out, side, 0.9 * e * k * w, 0.2 * a);
-    elbowFlex(out, side, 0.6 * a + 0.9 * e * (0.5 + 0.5 * k * w));
-  }
-};
-
-/** Bounce: both knees pump on the beat, arms tucked up and pumping, a small
- *  hop landing on every beat. */
-export const bounce: Move = (c, energy, out) => {
-  restPose(out);
-  stance(out);
-  const e = energy;
-  const a = shapeAmp(energy);
-  const d = dip(c.beatPhase);
-  const w = weight(c.barPhase);
-  // The camera is in front, so what sells this is vertical (the squat and
-  // the hop) and lateral (the arms flaring) motion — depth-only motion
-  // barely reads from there.
-  const up = 1.0 - d; // 1 on the beat, 0 in the crouch
-  lift(out, 0.18 * e * hop(c.beatPhase));
-  rootShift(out, 0.08 * e * w, 0.0);
-  hips(out, 0.12 * e * w, 0.0);
-  torso(out, 0.4 * e * d, 0.2 * e * w, 0.08 * e * w);
-  head(out, 0.4 * e * d, 0.0, 0.12 * e * w);
-  for (const side of SIDES) {
-    const k = sideSign(side);
-    legSwing(out, side, 0.6 * e * d, 0.1 * a);
-    kneeFlex(out, side, 0.15 * a + 1.4 * e * d);
-    // Arms punch up and out on the beat, fold back in on the crouch.
-    armSwing(out, side, 0.5 * a + 0.5 * e * up, 0.3 * a + 0.7 * e * up);
-    elbowFlex(out, side, 1.3 * a + 0.9 * e * up * (0.5 + 0.5 * k * w) - 0.6 * e * up);
-  }
-};
-
-/** Hands up: arms overhead waving on the bar, wide stance, head thrown back,
- *  weight rocking side to side with a hop on each beat. */
-export const handsUp: Move = (c, energy, out) => {
-  restPose(out);
-  stance(out);
-  const e = energy;
-  const a = shapeAmp(energy);
-  const d = dip(c.beatPhase);
-  const w = weight(c.barPhase);
-  const bar = Math.sin(TAU * c.barPhase);
-  lift(out, 0.16 * e * hop(c.beatPhase));
-  rootShift(out, 0.16 * e * w, 0.0);
-  hips(out, 0.2 * e * w, 0.15 * e * bar);
-  torso(out, -0.06 * a, 0.25 * e * Math.sin(TAU * 2 * c.barPhase), 0.3 * e * bar);
-  head(out, -0.3 * a, 0.2 * e * bar, 0.12 * e * w);
-  for (const side of SIDES) {
-    const k = sideSign(side);
-    legSwing(out, side, 0.2 * e * d, 0.28 * a);
-    kneeFlex(out, side, 0.1 * a + 0.6 * e * d);
-    armSwing(out, side, 0.35 * a, 2.5 * a + 0.6 * e * Math.sin(TAU * c.barPhase + k * 1.57));
-    elbowFlex(out, side, 0.35 * a + 0.6 * e * Math.sin(TAU * 2 * c.barPhase + k * 1.5));
-    wristBend(out, side, 0.6 * e * Math.sin(TAU * 4 * c.barPhase + k));
-  }
-};
-
 /** The drop: a crouch with arms flung up and out, head thrown back, jaw
  *  open. A pose, not a move — choreo.ts blends toward it on dropPulse. */
 export function dropPose(out: Pose): Pose {
@@ -245,25 +156,18 @@ export function dropPose(out: Pose): Pose {
   return out;
 }
 
-/** Beat-locked moves in intensity order; index 0 is "sway only". */
-export const MOVE_LADDER: readonly (Move | null)[] = [null, groove, bounce, handsUp];
-export const MOVE_NAMES: readonly string[] = ["sway", "groove", "bounce", "handsUp"];
+// ---- What the picker climbs on ---------------------------------------------
 
-// The picker climbs a rung when intensity passes an UP threshold and only
-// drops back below the matching DOWN threshold — the gap is what stops a
-// track hovering near a threshold from flickering between moves.
-const LEVEL_UP = [0.3, 0.55, 0.8];
-const LEVEL_DOWN = [0.2, 0.45, 0.7];
 /** How far the `groove` setting can push the effective intensity. */
 export const GROOVE_BIAS = 0.5;
-/** Where a held beat alone puts the picker: inside the groove rung at a
- *  NEUTRAL pulse dial, and below bounce, so a steady verse grooves. */
+/** Where a held beat alone puts the picker: a mid-low energy move at a
+ *  NEUTRAL pulse dial, so a steady verse still dances. */
 export const BEAT_FLOOR = 0.4;
 /** How far the pulse dial moves that floor either way — a beat that hits
- *  hard and steadily lifts it into bounce, a barely-there one lets it go. */
+ *  hard and steadily asks for bigger moves, a barely-there one lets it go. */
 export const PULSE_GAIN = 0.4;
 
-/** Effective intensity — what the picker climbs on.
+/** Effective intensity — what the clip picker matches clip energy against.
  *
  *  sectionIntensity alone is the wrong gauge: it measures where this phrase
  *  sits within the track's *own* dynamic range and its floor creeps up
@@ -271,10 +175,10 @@ export const PULSE_GAIN = 0.4;
  *  isn't actively building it drifts back to ~0 within half a minute —
  *  which read as "the dancer stops dancing thirty seconds into every
  *  song". A beat you can hear is a beat you step to, so a held tempo sets a
- *  floor under the picker (BEAT_FLOOR, moved by the pulse dial) and the
- *  section only decides how far above the groove to go: a build or a chorus
- *  still climbs to bounce/hands-up, and when the section settles the dancer
- *  settles back to the groove, never below it while the beat holds.
+ *  floor (BEAT_FLOOR, moved by the pulse dial) and the section only decides
+ *  how far above it to go: a build or a chorus still asks for the big
+ *  moves, and when the section settles the dancer settles back to a
+ *  groove, never to standing still while the beat holds.
  *
  *  The groove setting biases the result and at its 0.5 default adds exactly
  *  nothing. */
@@ -284,14 +188,5 @@ export function effectiveIntensity(sectionIntensity: number, tempoLock: number, 
   return Math.min(1, Math.max(0, drive + (groove - 0.5) * GROOVE_BIAS));
 }
 
-/** The rung of MOVE_LADDER to dance at, given the previous rung. Pure. */
-export function pickMoveLevel(prev: number, intensity: number): number {
-  let level = prev;
-  while (level < LEVEL_UP.length && intensity >= LEVEL_UP[level]) level++;
-  while (level > 0 && intensity < LEVEL_DOWN[level - 1]) level--;
-  return level;
-}
-
-/** Scratch pose factory for callers that blend several moves per frame. */
+/** Scratch pose factory for callers that blend several poses per frame. */
 export const newPose = createPose;
-export { TAU };

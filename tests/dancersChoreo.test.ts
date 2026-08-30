@@ -2,21 +2,27 @@ import { describe, it, expect } from "vitest";
 import { B, bonePitch, createPose } from "../src/render/scenes/dancers/rig.ts";
 import { sway, type MoveClocks } from "../src/render/scenes/dancers/moves.ts";
 import { createChoreographer, type ChoreoParams } from "../src/render/scenes/dancers/choreo.ts";
+import { makeLibrary } from "./dancersClips.helper.ts";
 
 const DT = 1 / 60;
-const PARAMS: ChoreoParams = { energy: 0.6, bob: 0.4, groove: 0.5, jaw: 0.5 };
+const PARAMS: ChoreoParams = { energy: 0.6, bob: 0.4, groove: 0.5, jaw: 0.5, family: null };
 
-/** Drives a choreographer through `seconds` of a scripted track. */
+type Frame = ReturnType<ReturnType<typeof createChoreographer>["advance"]>;
+
+/** Drives a choreographer (with the synthetic library unless `withLibrary`
+ *  is false) through `seconds` of a scripted track. */
 function run(
   seconds: number,
   script: (t: number) => Partial<MoveClocks>,
   params: ChoreoParams = PARAMS,
-  onFrame?: (t: number, frame: ReturnType<ReturnType<typeof createChoreographer>["advance"]>, clocks: MoveClocks) => void,
+  onFrame?: (t: number, frame: Frame, clocks: MoveClocks) => void,
+  withLibrary = true,
 ) {
   const ch = createChoreographer();
+  if (withLibrary) ch.setLibrary(makeLibrary());
   const bpm = 128;
   let beats = 0;
-  let last = null as ReturnType<typeof ch.advance> | null;
+  let last = null as Frame | null;
   for (let i = 0; i < seconds * 60; i++) {
     const t = i * DT;
     beats += DT * (bpm / 60);
@@ -58,64 +64,33 @@ describe("dancers choreographer", () => {
     for (let k = 0; k < expected.length; k++) expect(lastA[k]).toBeCloseTo(expected[k], 1);
   });
 
-  it("climbs the move ladder as the section builds and comes back down, changing rungs only on a downbeat", () => {
-    const levels: number[] = [];
-    let lastBar = 0;
-    let lastLevel = 0;
+  it("sways until a library arrives, then dances a clip", () => {
+    const noLib = run(2, () => ({}), PARAMS, undefined, false);
+    expect(noLib.clip).toBeNull();
+    const withLib = run(2, () => ({}));
+    expect(withLib.clip).not.toBeNull();
+  });
+
+  it("asks for bigger moves as the section builds and settles back to a groove, never to standing still", () => {
+    const seen = new Map<string, number>();
+    let lastClip: string | null = null;
     run(
-      24,
-      (t) => ({ sectionIntensity: t < 12 ? t / 12 : 1 - (t - 12) / 12 }),
+      40,
+      (t) => ({ sectionIntensity: t < 20 ? t / 20 : 1 - (t - 20) / 20 }),
       PARAMS,
-      (_t, f, c) => {
-        if (f.level !== lastLevel) {
-          // A rung change lands on the frame the bar wrapped.
-          expect(c.barPhase).toBeLessThan(lastBar);
-          lastLevel = f.level;
-        }
-        lastBar = c.barPhase;
-        levels.push(f.level);
+      (t, f) => {
+        if (f.clip) seen.set(f.clip, t);
+        lastClip = f.clip;
       },
     );
-    expect(Math.max(...levels)).toBe(3);
-    // Back down to the groove — never below it while the beat holds.
-    expect(levels[levels.length - 1]).toBe(1);
-    // It visits the rungs in order on the way up (no skipping past groove).
-    const firstNonZero = levels.find((l) => l > 0);
-    expect(firstNonZero).toBe(1);
+    expect(seen.has("wild")).toBe(true); // the chorus got the big move
+    // At the end the section has decayed to 0 but the beat holds: still a clip,
+    // and a modest one.
+    expect(lastClip).not.toBeNull();
+    expect(["chill", "groove"]).toContain(lastClip);
   });
 
-  it("keeps grooving through a steady section whose intensity has decayed to nothing", () => {
-    // What a real track does thirty seconds into a verse: tempo held, section ~0.
-    const last = run(12, () => ({ sectionIntensity: 0.05 }));
-    expect(last.level).toBe(1);
-  });
-
-  it("releases the beat gate slowly, so a one-bar bpm dropout doesn't dump the dancer to sway", () => {
-    const swayRef = createPose();
-    const distFromSway = (pose: Float32Array, c: MoveClocks): number => {
-      sway(c, PARAMS.energy, swayRef);
-      let m = 0;
-      for (let k = 0; k < pose.length; k++) m = Math.max(m, Math.abs(pose[k] - swayRef[k]));
-      return m;
-    };
-    let shortlyAfter = 0;
-    let longAfter = 0;
-    run(
-      8,
-      (t) => ({ sectionIntensity: 0.9, tempoLock: t < 4 ? 1 : 0 }),
-      PARAMS,
-      (t, f, c) => {
-        if (Math.abs(t - 4.4) < DT / 2) shortlyAfter = distFromSway(f.pose, c);
-        if (Math.abs(t - 7.9) < DT / 2) longAfter = distFromSway(f.pose, c);
-      },
-    );
-    // Pose channels are quaternion components, so a ~2 rad arm swing shows
-    // up as a component delta of ~0.8; the thresholds are halves of that.
-    expect(shortlyAfter).toBeGreaterThan(0.4); // 0.4 s after the dropout the arms are still up
-    expect(longAfter).toBeLessThan(0.1); // seconds later it has let go
-  });
-
-  it("never snaps: a crossfade, a drop and a jaw hit all stay under the per-frame slew budget", () => {
+  it("never snaps: a handover, a drop and a jaw hit all stay under the per-frame slew budget", () => {
     let maxDelta = 0;
     let prev: Float32Array | null = null;
     let drop = 0;
@@ -133,9 +108,8 @@ describe("dancers choreographer", () => {
       },
     );
     // The drop's attack is the fastest thing in the system by design; this
-    // bound is what "hits hard but doesn't teleport" means: no joint turns
-    // more than ~11° in one frame (a true snap to the drop pose would be
-    // several times that).
+    // bound is what "hits hard but doesn't teleport" means: no quaternion
+    // component moves more than 0.2 in one frame (~23° for a pure rotation).
     expect(maxDelta).toBeLessThan(0.2);
   });
 
@@ -163,5 +137,30 @@ describe("dancers choreographer", () => {
     expect(last.camDolly).toBe(0);
     expect(last.camTilt).toBe(0);
     expect(last.camRoll).toBe(0);
+  });
+
+  it("releases the beat gate slowly, so a one-bar bpm dropout doesn't dump the dancer to sway", () => {
+    const swayRef = createPose();
+    const distFromSway = (pose: Float32Array, c: MoveClocks): number => {
+      sway(c, PARAMS.energy, swayRef);
+      let m = 0;
+      for (let k = 0; k < pose.length; k++) m = Math.max(m, Math.abs(pose[k] - swayRef[k]));
+      return m;
+    };
+    let shortlyAfter = 0;
+    let longAfter = 0;
+    run(
+      8,
+      (t) => ({ sectionIntensity: 0.9, tempoLock: t < 4 ? 1 : 0 }),
+      PARAMS,
+      (t, f, c) => {
+        if (Math.abs(t - 4.4) < DT / 2) shortlyAfter = distFromSway(f.pose, c);
+        if (Math.abs(t - 7.9) < DT / 2) longAfter = distFromSway(f.pose, c);
+      },
+    );
+    // Pose channels are quaternion components; the synthetic clips swing
+    // ~0.8 rad, so a component delta of ~0.3 is "still dancing".
+    expect(shortlyAfter).toBeGreaterThan(0.15); // 0.4 s after the dropout the move is still mostly there
+    expect(longAfter).toBeLessThan(0.06); // seconds later it has let go
   });
 });
