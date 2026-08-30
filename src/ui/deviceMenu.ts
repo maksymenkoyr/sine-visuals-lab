@@ -599,7 +599,11 @@ function createControlRow(spec: ControlRowSpec) {
     pinInput.type = "text";
     pinInput.inputMode = "decimal";
     pinInput.className = "vc-pin-input";
-    pinInput.style.cssText = `${digitsStyle} background: transparent; border: none; outline: none; width: 4.5em; display: none;`;
+    // Color/border/background live in the .vc-pin-input rule (controlsTheme.ts),
+    // not here — an inline color would win over it and inputs don't inherit
+    // color the way a span does, which is how this used to render black
+    // text on the panel's dark glass.
+    pinInput.style.cssText = `${digitsStyle} width: 4.5em; display: none;`;
     readout.insertBefore(pinInput, digits);
 
     // stopPropagation on both the trigger and the field itself so el's own
