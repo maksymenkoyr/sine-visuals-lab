@@ -13,7 +13,7 @@ a raw stream. `src/audio/analyser.ts` runs the FFT and splits it into bands
 features.ts` turns raw bands into a `FeatureFrame` — this is where the adaptive
 floor/peak AGC lives, so everything downstream sees a signal already normalized to
 the room's own loudness. `src/audio/sensitivity.ts` applies the user's Sensitivity/
-Acceleration/Smoothing controls on top of that.
+Expansion/Smoothing controls on top of that.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
@@ -42,7 +42,12 @@ their Scope card is fed by `src/audio/waveformAnalyser.ts` (math in
 `waveform.ts`), which reads time-domain samples straight off this device's own
 mic, entirely separate from
 `FeatureFrame`/`AnimFrame` and never touching the wire in "Phone to TV" below —
-a viewer with no local mic doesn't get that card at all.
+a viewer with no local mic doesn't get that card at all. Their Signal card's
+history trace likewise reads `FeatureExtractor.fixedEnergy`, a local
+diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
+`FeatureFrame` field. The Loudness card is the same kind of read: BS.1770 LUFS
+from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
+this device's own capture, hidden on a mic-less renderer like the Scope.
 
 ## Phone to TV
 

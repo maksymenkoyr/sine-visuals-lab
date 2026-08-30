@@ -1,22 +1,37 @@
 import { NUM_BANDS, type FeatureFrame } from "./types.ts";
 
 /**
- * Per-scene mic sensitivity, acceleration, and smoothing: three visual gain
+ * Per-scene mic sensitivity, expansion, and smoothing: three visual gain
  * stages on top of FeatureExtractor's auto-normalized [0,1] output. The
  * extractor's leaky floor/peak tracker already adapts to a room's
  * quiet/loud levels, so none of these is a gain-staging fix — they're a
  * user preference ("react harder" / "calm down", "more punch" / "flatter",
  * "snappier" / "smoother") remembered per scene, since each scene's shader
  * weights uEnergy/uBands differently.
+ *
+ * Smoothing is a multiplier on the pipeline's own easing, not the easing
+ * itself — SMOOTHING_DEFAULT (1x) means "the designed amount", not "none",
+ * and nothing in [SMOOTHING_MIN, SMOOTHING_MAX] ever reaches zero (see
+ * smoothingRateScale below). Only the Smoothing row's explicit Off stop
+ * (zeroAtMin in deviceMenu.ts, stored as 0 — below SMOOTHING_MIN, which
+ * stays the slider's log-curve floor) reaches genuinely unsmoothed: at 0,
+ * smoothingRateScale returns Infinity, and every stage it reaches
+ * (features.ts's envelope, sectionIntensity.ts's INTENSITY_SLEW,
+ * musicProfile.ts's eases, audioMeters.ts's BPM settle and waveform
+ * peak-hold) snaps straight to its target that same tick. That's what makes
+ * the meters panel's RAW chip a true no-op: RAW already shows each of those
+ * targets, so at Smoothing Off (with band gains at 1x and auto-gain off —
+ * Sensitivity/Expansion don't reach the meters at all, see app.ts) there
+ * is nothing left for RAW to bypass.
  */
 
 export const SENSITIVITY_MIN = 0.25;
 export const SENSITIVITY_MAX = 4;
 export const SENSITIVITY_DEFAULT = 1;
 
-export const ACCELERATION_MIN = 0.25;
-export const ACCELERATION_MAX = 4;
-export const ACCELERATION_DEFAULT = 1;
+export const EXPANSION_MIN = 0.25;
+export const EXPANSION_MAX = 4;
+export const EXPANSION_DEFAULT = 1;
 
 export const SMOOTHING_MIN = 0.25;
 export const SMOOTHING_MAX = 4;
@@ -27,9 +42,10 @@ export const SMOOTHING_DEFAULT = 1;
 // localStorage is unavailable (node test env, Safari private mode) — only
 // cross-reload persistence depends on it, not same-session behavior.
 //
-// legacyKey: if the storageKey has nothing saved yet but an old key (from a
+// legacyKeys: if the storageKey has nothing saved yet but an old key (from a
 // prior rename) does, migrate that data over once rather than losing it —
-// see the Acceleration store below, migrating off "vibe.dynamics".
+// see the Expansion store below. Newest-first: the first key found wins,
+// and every listed key is removed so the migration can't repeat.
 //
 // Exported for src/audio/bandGains.ts, which uses the same per-scene
 // float-in-localStorage shape for each of its fader stores.
@@ -38,7 +54,7 @@ export function createPerSceneSetting(
   min: number,
   max: number,
   defaultValue: number,
-  legacyKey?: string,
+  legacyKeys: readonly string[] = [],
 ) {
   function loadInitial(): Record<string, number> {
     try {
@@ -47,13 +63,17 @@ export function createPerSceneSetting(
         const parsed = JSON.parse(raw);
         return parsed && typeof parsed === "object" ? parsed : {};
       }
-      if (!legacyKey) return {};
-      const legacyRaw = localStorage.getItem(legacyKey);
-      if (!legacyRaw) return {};
-      const legacyParsed = JSON.parse(legacyRaw);
-      const migrated = legacyParsed && typeof legacyParsed === "object" ? legacyParsed : {};
+      let migrated: Record<string, number> | null = null;
+      for (const legacyKey of legacyKeys) {
+        const legacyRaw = localStorage.getItem(legacyKey);
+        if (legacyRaw && migrated === null) {
+          const legacyParsed = JSON.parse(legacyRaw);
+          migrated = legacyParsed && typeof legacyParsed === "object" ? legacyParsed : {};
+        }
+        localStorage.removeItem(legacyKey);
+      }
+      if (migrated === null) return {};
       localStorage.setItem(storageKey, JSON.stringify(migrated));
-      localStorage.removeItem(legacyKey);
       return migrated;
     } catch {
       return {};
@@ -96,21 +116,29 @@ const sensitivityStore = createPerSceneSetting(
 export const getSensitivity = sensitivityStore.get;
 export const setSensitivity = sensitivityStore.set;
 
-// "vibe.dynamics" is the storage key from this control's *first* name
-// (Dynamics, later renamed to Contrast, now Acceleration) — migrated once
-// via legacyKey rather than frozen in place a second time, so scenes tuned
-// under either earlier name keep their saved values.
-const accelerationStore = createPerSceneSetting(
-  "vibe.acceleration",
-  ACCELERATION_MIN,
-  ACCELERATION_MAX,
-  ACCELERATION_DEFAULT,
-  "vibe.dynamics",
+// This control has been renamed more than once (Dynamics → Contrast →
+// Acceleration → Expansion — "expansion" being what audio engineering calls
+// widening the quiet-to-loud gap). Contrast never got its own key; the
+// other two did, and both are migrated via legacyKeys rather than frozen
+// in place, so scenes tuned under any earlier name keep their saved values.
+const expansionStore = createPerSceneSetting(
+  "vibe.expansion",
+  EXPANSION_MIN,
+  EXPANSION_MAX,
+  EXPANSION_DEFAULT,
+  ["vibe.acceleration", "vibe.dynamics"],
 );
-export const getAcceleration = accelerationStore.get;
-export const setAcceleration = accelerationStore.set;
+export const getExpansion = expansionStore.get;
+export const setExpansion = expansionStore.set;
 
-const smoothingStore = createPerSceneSetting("vibe.smoothing", SMOOTHING_MIN, SMOOTHING_MAX, SMOOTHING_DEFAULT);
+// Floor is 0, not SMOOTHING_MIN — the Smoothing row alone gets an explicit
+// Off stop (zeroAtMin in deviceMenu.ts), carved out below the slider's log
+// curve rather than extending it. SMOOTHING_MIN itself stays 0.25: it's
+// still the curve's own floor (posToValue/valueToPos need a nonzero base)
+// and autoTune.ts's SMOOTHING_SPEC.min, so auto-tune never resolves smoothing
+// to Off on its own — that's a deliberate manual gesture, not something an
+// estimator should silently pick.
+const smoothingStore = createPerSceneSetting("vibe.smoothing", 0, SMOOTHING_MAX, SMOOTHING_DEFAULT);
 export const getSmoothing = smoothingStore.get;
 export const setSmoothing = smoothingStore.set;
 
@@ -128,26 +156,26 @@ export function shapeLevel(level: number, sensitivity: number): number {
 // Steepness at the far ends of the slider. 3 puts 4× at roughly the old
 // pow-based curve's overall strength, so per-scene values saved under that
 // curve still feel about right after the swap.
-const ACCELERATION_K = 3;
+const EXPANSION_K = 3;
 
 /**
- * The acceleration response curve: a tanh S-curve pivoting at the midpoint
+ * The expansion response curve: a tanh S-curve pivoting at the midpoint
  * (0.5). Unlike shapeLevel (which lifts or lowers everything together), this
  * pushes values *above* the midpoint higher and values *below* it lower —
  * widening the gap between quiet and loud, so the visual response ramps
- * more sharply as the music gets louder — at intensity `acceleration`.
- * Fixed at 0, 0.5, and 1. acceleration > 1 widens the gap (more punch);
- * acceleration < 1 narrows it (flatter, more compressed); 1 is identity.
+ * more sharply as the music gets louder — at intensity `expansion`.
+ * Fixed at 0, 0.5, and 1. expansion > 1 widens the gap (more punch);
+ * expansion < 1 narrows it (flatter, more compressed); 1 is identity.
  *
  * Chosen over a plain power curve (the old shapeDynamics) because a power
  * curve has infinite slope right at the pivot: a level drifting across 0.5
  * slams from one side to the other. tanh has a finite, steepest-at-the-middle
  * slope that tapers smoothly into both ends instead.
  */
-export function shapeAcceleration(level: number, acceleration: number): number {
-  const s = Math.log(acceleration); // 0 at 1x -> identity
+export function shapeExpansion(level: number, expansion: number): number {
+  const s = Math.log(expansion); // 0 at 1x -> identity
   if (Math.abs(s) < 1e-6) return level;
-  const k = Math.abs(s) * ACCELERATION_K;
+  const k = Math.abs(s) * EXPANSION_K;
   const half = Math.tanh(k / 2);
   if (s > 0) {
     // > 1x expands: steep-but-finite through the pivot, easing into 0 and 1.
@@ -164,7 +192,7 @@ export function shapeAcceleration(level: number, acceleration: number): number {
 /**
  * Smoothing scales every visual envelope's decay/slew rate — how fast the
  * visuals chase the audio, independent of Sensitivity's gain and
- * Acceleration's curve. The slow half (smoothing > 1) is linear: 4x smoothing means
+ * Expansion's curve. The slow half (smoothing > 1) is linear: 4x smoothing means
  * quarter-rate, so a scene fully settles into a calm swell. The fast half
  * is square-rooted instead of linear: at 0.25x this is only 2x the rate,
  * not 4x. That asymmetry is deliberate, not stylistic — the level slew this
@@ -172,6 +200,11 @@ export function shapeAcceleration(level: number, acceleration: number): number {
  * that keeps geometry-driving uniforms from jumping most of the way to a
  * new value in one frame, so "snappier" gets a shorter leash than
  * "smoother". Continuous at 1x (both branches equal 1 there).
+ *
+ * At 0 (the Smoothing row's Off stop) this is 1/sqrt(0) = Infinity — every
+ * stage it reaches is written to treat a non-finite scale as "assign the
+ * target directly" rather than compute a coefficient, so Off means exactly
+ * unsmoothed, not merely fast.
  */
 export function smoothingRateScale(smoothing: number): number {
   return smoothing >= 1 ? 1 / smoothing : 1 / Math.sqrt(smoothing);
@@ -181,24 +214,24 @@ export function smoothingRateScale(smoothing: number): number {
 const scratchBands = new Float32Array(NUM_BANDS);
 
 /**
- * Applies the sensitivity gain and then the acceleration curve to a frame's
+ * Applies the sensitivity gain and then the expansion curve to a frame's
  * [0,1] band/energy values. beat/bpm/beatPhase/time/level pass through
  * untouched — both are a visual gain, not a beat-detection threshold, and
  * `level` specifically must stay the raw, un-gained reading: it's auto
  * mode's input signal for driving these very sliders (see musicProfile.ts),
  * so shaping it here would feed the gain stage its own output.
  */
-export function applySensitivity(frame: FeatureFrame, sensitivity: number, acceleration: number): FeatureFrame {
-  if (sensitivity === SENSITIVITY_DEFAULT && acceleration === ACCELERATION_DEFAULT) return frame;
+export function applySensitivity(frame: FeatureFrame, sensitivity: number, expansion: number): FeatureFrame {
+  if (sensitivity === SENSITIVITY_DEFAULT && expansion === EXPANSION_DEFAULT) return frame;
 
   for (let b = 0; b < NUM_BANDS; b++) {
-    scratchBands[b] = shapeAcceleration(shapeLevel(frame.bands[b], sensitivity), acceleration);
+    scratchBands[b] = shapeExpansion(shapeLevel(frame.bands[b], sensitivity), expansion);
   }
 
   return {
     time: frame.time,
     bands: scratchBands,
-    energy: shapeAcceleration(shapeLevel(frame.energy, sensitivity), acceleration),
+    energy: shapeExpansion(shapeLevel(frame.energy, sensitivity), expansion),
     beat: frame.beat,
     bpm: frame.bpm,
     beatPhase: frame.beatPhase,

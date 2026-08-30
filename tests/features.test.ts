@@ -197,7 +197,7 @@ describe("FeatureExtractor", () => {
     // read this next jump as loud. autoGain=false must ignore them.
     for (let i = 0; i < 120; i++) {
       time += dt;
-      frame = extractor.update(bandsFrame(QUIET_DB), time, false);
+      frame = extractor.update(bandsFrame(QUIET_DB), time, 0);
     }
     const fixedSpan = ANALYSER_MAX_DB - ANALYSER_MIN_DB;
     expect(frame!.bands[0]).toBeCloseTo((QUIET_DB - ANALYSER_MIN_DB) / fixedSpan, 2);
@@ -208,14 +208,14 @@ describe("FeatureExtractor", () => {
     const midDb = (ANALYSER_MIN_DB + ANALYSER_MAX_DB) / 2;
     for (let i = 0; i < 10; i++) {
       time += dt;
-      frame = extractor.update(bandsFrame(midDb), time, false);
+      frame = extractor.update(bandsFrame(midDb), time, 0);
     }
     expect(frame!.bands[0]).toBeCloseTo(0.5, 2);
   });
 
   it("adaptive (on) and fixed (off) modes diverge for the same moderately loud signal", () => {
     const dt = 1 / 60;
-    function run(autoGain: boolean): number {
+    function run(autoGain: number): number {
       const extractor = new FeatureExtractor();
       let time = 0;
       let frame;
@@ -233,8 +233,38 @@ describe("FeatureExtractor", () => {
     // Adaptive mode has already re-normalized around -70dB as "loud" relative
     // to the quiet room; fixed mode reports it as what it absolutely is —
     // still well below the analyser's -10dB ceiling.
-    expect(run(true)).toBeGreaterThan(0.6);
-    expect(run(false)).toBeLessThan(0.45);
+    expect(run(1)).toBeGreaterThan(0.6);
+    expect(run(0)).toBeLessThan(0.45);
+
+    // A partial amount lands strictly between the two, and the fixed-side
+    // diagnostic is unaffected by where the blend sits.
+    const half = run(0.5);
+    expect(half).toBeGreaterThan(run(0));
+    expect(half).toBeLessThan(run(1));
+  });
+
+  it("reports fixedEnergy as what energy would read with autoGain at 0, whatever the blend", () => {
+    const dt = 1 / 60;
+    function run(autoGain: number): { energy: number; fixedEnergy: number } {
+      const extractor = new FeatureExtractor();
+      let time = 0;
+      let frame;
+      for (let i = 0; i < 120; i++) {
+        time += dt;
+        frame = extractor.update(bandsFrame(QUIET_DB), time, autoGain);
+      }
+      for (let i = 0; i < 60; i++) {
+        time += dt;
+        frame = extractor.update(bandsFrame(QUIET_DB, { 5: -70 }), time, autoGain);
+      }
+      return { energy: frame!.energy, fixedEnergy: extractor.fixedEnergy };
+    }
+    const off = run(0);
+    const on = run(1);
+    // At 0 the diagnostic *is* the output; at 1 it still reads the same
+    // number — the blend never leaks into it.
+    expect(off.fixedEnergy).toBeCloseTo(off.energy, 6);
+    expect(on.fixedEnergy).toBeCloseTo(off.energy, 6);
   });
 
   it("locks onto tempo the same way with autoGain off — beat detection reads the adaptive tracker regardless", () => {
@@ -248,7 +278,7 @@ describe("FeatureExtractor", () => {
 
     for (let i = 0; i < 120; i++) {
       time += dt;
-      frame = extractor.update(bandsFrame(QUIET_DB), time, false);
+      frame = extractor.update(bandsFrame(QUIET_DB), time, 0);
     }
 
     const endTime = time + 8;
@@ -256,7 +286,7 @@ describe("FeatureExtractor", () => {
       time += dt;
       const isClick = time >= nextClickAt;
       if (isClick) nextClickAt += intervalSec;
-      frame = extractor.update(bandsFrame(QUIET_DB, isClick ? { 0: LOUD_DB, 12: LOUD_DB } : {}), time, false);
+      frame = extractor.update(bandsFrame(QUIET_DB, isClick ? { 0: LOUD_DB, 12: LOUD_DB } : {}), time, 0);
     }
 
     expect(frame!.bpm).toBeGreaterThan(bpm - 5);
@@ -290,6 +320,51 @@ describe("FeatureExtractor", () => {
     const at60 = run(60);
     const at120 = run(120);
     expect(Math.abs(at60 - at120)).toBeLessThan(0.01);
+  });
+
+  // smoothingScale=Infinity is what sensitivity.ts's smoothingRateScale
+  // returns at the Smoothing row's Off stop (deviceMenu.ts) — the envelope
+  // must assign `target` to `env[b]` directly rather than compute an
+  // expBlend coefficient of 1, so a band jumps to exactly the adaptive-or-
+  // fixed mapping computed this same tick, with none of expBlend's
+  // floating-point rounding. With autoGain off that mapping is the same
+  // fixed window app.ts's captureRawBands uses for the meters panel's RAW
+  // chip, so this is what makes RAW a true no-op at Smoothing Off — down to
+  // `env` being a Float32Array, same as captureRawBands's own scratch
+  // buffer: Math.fround below rounds the expectation to float32 the same
+  // way that assignment does, since two independent float64 computations
+  // agree exactly only after both are rounded to the same precision.
+  it("at smoothingScale=Infinity with autoGain off, a band jumps to exactly the fixed-window mapping in one tick", () => {
+    const extractor = new FeatureExtractor();
+    const dt = 1 / 60;
+    let time = 0;
+    let frame;
+
+    for (let i = 0; i < 60; i++) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time, 0, Infinity);
+    }
+    const fixedSpan = ANALYSER_MAX_DB - ANALYSER_MIN_DB;
+    expect(frame!.bands[0]).toBe(Math.fround(Math.min(1, Math.max(0, (QUIET_DB - ANALYSER_MIN_DB) / fixedSpan))));
+
+    const midDb = (ANALYSER_MIN_DB + ANALYSER_MAX_DB) / 2;
+    time += dt;
+    frame = extractor.update(bandsFrame(midDb), time, 0, Infinity);
+    expect(frame!.bands[0]).toBe(Math.fround(Math.min(1, Math.max(0, (midDb - ANALYSER_MIN_DB) / fixedSpan))));
+  });
+
+  it("never produces NaN at smoothingScale=Infinity across a long, varied run", () => {
+    const extractor = new FeatureExtractor();
+    const dt = 1 / 60;
+    let time = 0;
+    let frame;
+    for (let i = 0; i < 1200; i++) {
+      time += dt;
+      const db = QUIET_DB + (LOUD_DB - QUIET_DB) * (0.5 + 0.5 * Math.sin(i * 0.05));
+      frame = extractor.update(bandsFrame(QUIET_DB, { 5: db }), time, 1, Infinity);
+      for (const b of frame.bands) expect(Number.isFinite(b)).toBe(true);
+      expect(Number.isFinite(frame.energy)).toBe(true);
+    }
   });
 
   it("peak hold delays the ceiling's decay: a dip while held, then a rise once the hold window elapses", () => {

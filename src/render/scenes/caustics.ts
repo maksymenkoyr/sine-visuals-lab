@@ -24,7 +24,7 @@ import type { SceneSetting } from "../sceneSettings.ts";
 // / crest glints), and uDropReactivity ties everything to
 // sectionIntensity.ts's slow-tracked "which part of the song is this" signal
 // — a chorus or drop reads as a sustained, brighter, faster, more turbulent
-// surface, with a one-shot double-ring flash at the exact moment intensity
+// surface, with a one-shot extra-strong ring at the exact moment intensity
 // spikes.
 // The master treble-sparkle knob. Defined outside SETTINGS so the sub-params
 // below it (density, brightness ceiling, grain, spread, sustain — all in the
@@ -83,7 +83,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "ripple",
     label: "Beat ripple",
-    description: "Wide overlapping rings expand from the center on each beat",
+    description: "Each beat drops a ring that spreads from the center to the edge, like a drop on water; rings overlap instead of replacing each other",
     group: "Beat",
     min: 0,
     max: 1,
@@ -275,10 +275,31 @@ const SETTINGS: SceneSetting[] = [
   },
 ];
 
-const MAX_RIPPLES = 4;
+// Beat ripple pool. Every ring in flight is summed in the shader, so a new
+// beat only ever adds a ring — it never replaces one. The pool is sized so
+// that the slot a fresh ring reclaims (always the most-faded one, see
+// createRipplePool) has long since left the screen at any musical tempo:
+// with fewer slots and round-robin reuse, the fifth beat of a bar used to
+// erase a ring that was still a third as bright as when it started, which
+// read as the whole pattern being redrawn on that beat.
+const MAX_RIPPLES = 8;
 const RIPPLE_SPEED = 1.1; // units/sec a ring expands at
-const RIPPLE_WIDTH = 1.6; // gaussian tightness — lower = wider ring
-const RIPPLE_DECAY_PER_SEC = 0.55; // lower = the ring lives longer and travels farther
+const RIPPLE_WIDTH = 4.0; // gaussian tightness of a ring's height profile — lower = wider ring
+const RIPPLE_DECAY_PER_SEC = 0.45; // lower = the ring lives longer and travels farther
+// A drop starts as a dimple that grows into the ring rather than appearing
+// fully formed, so a beat reads as a strike on the water, not a cut.
+const RIPPLE_ATTACK_SEC = 0.06;
+// A drop moment gets one ring this much stronger than an ordinary beat.
+// Used to claim two coincident slots instead, which was the same picture
+// but burned a slot's worth of ring history for nothing.
+const RIPPLE_DROP_AMP = 1.8;
+// The refraction the shader applies is the *slope* of the ring's height
+// profile, not its height (see the ripple comment in FRAG). This scales the
+// gaussian derivative so its peak is exactly 1 per unit of ring strength;
+// RIPPLE_REFRACT below is then the peak displacement, in p-space units, of
+// a full-strength ring at uRipple = 1.
+const RIPPLE_SLOPE_NORM = Math.sqrt(2 * RIPPLE_WIDTH) * Math.exp(0.5);
+const RIPPLE_REFRACT = 0.3;
 
 // Ceiling every focus setting converges to on a full-strength beat (see the
 // focusDrive comment in FRAG). Was 26 before focus setting stopped scaling
@@ -402,22 +423,49 @@ export function driftRatePerSec(s: DriftInputs): number {
   return DRIFT_BASE_RATE * s.drift * modulation;
 }
 
-function createRipplePool() {
-  const age = new Float32Array(MAX_RIPPLES).fill(1000); // large = inactive, fully decayed
-  let nextSlot = 0;
+/** A ring's strength over its life: a short attack from 0 (the strike),
+ *  then an exponential fade slow enough that a ring is still clearly
+ *  visible by the time it reaches the far corner of a 16:9 frame (p-space
+ *  radius ~3 at this scene's 3x zoom). Pure so tests/caustics.test.ts can
+ *  pin that "rings reach the edge" property directly. */
+export function rippleEnvelope(ageSec: number): number {
+  if (ageSec <= 0) return 0;
+  return (1 - Math.exp(-ageSec / RIPPLE_ATTACK_SEC)) * Math.exp(-ageSec * RIPPLE_DECAY_PER_SEC);
+}
+
+/** Pool of rings in flight. Per-slot radius and strength are computed here
+ *  each tick and uploaded as two uniform arrays, so the shader only does the
+ *  spatial part. Exported for tests/caustics.test.ts. */
+export function createRipplePool() {
+  const age = new Float32Array(MAX_RIPPLES).fill(1e6); // huge = never triggered, fully faded
+  const amp = new Float32Array(MAX_RIPPLES); // 0 = inactive
+  const radius = new Float32Array(MAX_RIPPLES);
+  const strength = new Float32Array(MAX_RIPPLES);
   return {
-    age,
-    /** Claims the next slot(s) for a fresh ring. `count` > 1 seeds several
-     *  adjacent slots at once (a fatter, more emphatic sweep) for the
-     *  once-in-a-while drop moment rather than an ordinary beat. */
-    trigger(count = 1): void {
-      for (let i = 0; i < count; i++) {
-        age[nextSlot] = 0;
-        nextSlot = (nextSlot + 1) % MAX_RIPPLES;
-      }
+    /** Current ring radius per slot, in p-space units. */
+    radius,
+    /** Current ring strength per slot: amplitude x rippleEnvelope(age). */
+    strength,
+    /** Starts a fresh ring in whichever slot has been fading the longest.
+     *  Never the youngest — a beat must not erase the ring the last beat
+     *  sent out, only add its own. */
+    trigger(amplitude = 1): void {
+      let slot = 0;
+      for (let i = 1; i < MAX_RIPPLES; i++) if (age[i] > age[slot]) slot = i;
+      age[slot] = 0;
+      amp[slot] = amplitude;
+      radius[slot] = 0;
+      strength[slot] = 0;
     },
     tick(dtSec: number): void {
-      for (let i = 0; i < MAX_RIPPLES; i++) age[i] += dtSec;
+      for (let i = 0; i < MAX_RIPPLES; i++) {
+        age[i] += dtSec;
+        // An inactive slot reports radius 0 (not a huge stale one) so the
+        // arrays stay readable in tests and probes; strength 0 already
+        // makes it contribute nothing.
+        radius[i] = amp[i] > 0 ? age[i] * RIPPLE_SPEED : 0;
+        strength[i] = amp[i] * rippleEnvelope(age[i]);
+      }
     },
   };
 }
@@ -462,26 +510,53 @@ void main() {
   float pLen0 = length(p);
   vec2 dir0 = pLen0 > 1e-4 ? p / pLen0 : vec2(1.0, 0.0);
   float bassBulge = uBass * uLowPulse;
-  p += dir0 * bassBulge * 0.22 * exp(-pLen0 * 0.8);
+  // Faded to zero at the origin: dir0 flips sign across the center, so a
+  // displacement that's still nonzero there tears the field at a single
+  // point — every filament near the middle gets dragged into a pinch.
+  p += dir0 * bassBulge * 0.22 * exp(-pLen0 * 0.8) * smoothstep(0.0, 0.4, pLen0);
 
   // This scene's own drift phase (uDriftPhase, uploaded by extraUniforms
   // below) replaces the shared uFlowPhase so drift speed is dialable.
   vec2 flow = vec2(uDriftPhase * 0.15, -uDriftPhase * 0.09);
 
-  // Beat ripple pool: up to 4 rings can be in flight at once, so a new beat
-  // overlaps the last ring instead of cutting it off. Each is a gaussian
-  // lobe expanding from center; ringDist relative to a slot's own age.
+  // Beat ripple pool: every ring in flight (MAX_RIPPLES slots, radius and
+  // strength per slot from createRipplePool) is summed here, so a new beat
+  // adds a ring on top of the ones still travelling instead of replacing
+  // them. Each ring is modelled as a gaussian bump in the water's height at
+  // its current radius, and the pattern is refracted through it the way a
+  // real ripple bends the caustics beneath it: the sampling point shifts
+  // radially by the surface *slope* (the bump's derivative), not by its
+  // height. That matters for two reasons. The slope is an odd function
+  // around the crest — the pattern is pushed outward just inside the ring
+  // and drawn back just outside it — so a passing ring reads as a wave
+  // sweeping through the filaments, where the old height-based push shifted
+  // everything near the ring toward the center in one lump. And the slope
+  // of a bump sitting at radius 0 (a ring that just spawned) is zero at the
+  // origin and grows linearly away from it, so a fresh ring is a smooth
+  // dimple. The old lobe was at full height exactly at the origin, where
+  // radialDir flips sign — a tear that dragged every nearby filament into a
+  // single pinch point on each beat.
+  //
+  // The mirrored term (pLen + r) is what a radially symmetric wave actually
+  // looks like on the other side of the origin. It only matters while a
+  // ring is still small, and its job is to keep the total slope exactly
+  // zero at the origin for every radius, not just at spawn.
   float pLen = length(p);
   vec2 radialDir = pLen > 1e-4 ? p / pLen : vec2(1.0, 0.0);
-  float ringSum = 0.0;
+  float ringCrest = 0.0; // summed ring height here — lights the crest
+  float ringSlope = 0.0; // summed radial slope here — refracts the pattern
   for (int i = 0; i < ${MAX_RIPPLES}; i++) {
-    float age = uRippleAge[i];
-    float ringR = age * ${RIPPLE_SPEED};
-    float ringDist = pLen - ringR;
-    ringSum += exp(-ringDist * ringDist * ${RIPPLE_WIDTH}) * exp(-age * ${RIPPLE_DECAY_PER_SEC});
+    float s = uRippleStrength[i];
+    float r = uRippleRadius[i];
+    float dOut = pLen - r;
+    float dIn = pLen + r;
+    float gOut = exp(-dOut * dOut * ${RIPPLE_WIDTH.toFixed(2)});
+    float gIn = exp(-dIn * dIn * ${RIPPLE_WIDTH.toFixed(2)});
+    ringCrest += s * (gOut + gIn);
+    ringSlope += s * (dOut * gOut + dIn * gIn);
   }
-  float ring = uRipple * ringSum;
-  vec2 q = p + radialDir * ring * 0.6;
+  float ring = uRipple * ringCrest;
+  vec2 q = p + radialDir * uRipple * ringSlope * ${(RIPPLE_SLOPE_NORM * RIPPLE_REFRACT).toFixed(4)};
 
   int iterations = int(mix(3.0, 6.0, uDetail));
   float acc = 0.0;
@@ -613,7 +688,7 @@ void main() {
 
 export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG, {
   settings: SETTINGS,
-  extraUniformDecls: `uniform float uDriftPhase;\nuniform float uRippleAge[${MAX_RIPPLES}];`,
+  extraUniformDecls: `uniform float uDriftPhase;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
   extraUniforms: (() => {
     let driftPhase = 0;
     const ripples = createRipplePool();
@@ -634,16 +709,18 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
 
       ripples.tick(anim.dtSec);
       const rippleSrc = getSetting("rippleSrc");
-      // rippleSrc < 0.5: any broadband beat rings out. >= 0.5: bass onsets only.
-      if (anim.lowOnset || (frame.beat && rippleSrc < 0.5)) ripples.trigger(1);
-      // A drop is rarer and bigger than an ordinary beat — claim two slots
-      // for a fatter double-ring instead of the usual single lobe. Edge-
-      // triggered locally since anim.dropOnset is already a one-shot pulse,
-      // but the guard keeps this robust if that ever changes.
-      if (anim.dropOnset && !prevDropOnset) ripples.trigger(2);
+      // A drop is rarer and bigger than an ordinary beat — one stronger ring
+      // in place of (not on top of) the beat that usually lands on the same
+      // tick. Edge-triggered locally since anim.dropOnset is already a
+      // one-shot pulse, but the guard keeps this robust if that ever
+      // changes.
+      const drop = anim.dropOnset && !prevDropOnset;
       prevDropOnset = anim.dropOnset;
+      if (drop) ripples.trigger(RIPPLE_DROP_AMP);
+      // rippleSrc < 0.5: any broadband beat rings out. >= 0.5: bass onsets only.
+      else if (anim.lowOnset || (frame.beat && rippleSrc < 0.5)) ripples.trigger(1);
 
-      return { uDriftPhase: driftPhase, uRippleAge: ripples.age };
+      return { uDriftPhase: driftPhase, uRippleRadius: ripples.radius, uRippleStrength: ripples.strength };
     };
   })(),
 });

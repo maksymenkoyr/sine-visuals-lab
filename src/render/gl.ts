@@ -50,6 +50,7 @@ export interface GLProgram {
   setV4(name: string, x: number, y: number, z: number, w: number): void;
   setFv(name: string, arr: Float32Array | number[]): void;
   setV3v(name: string, arr: Float32Array | number[]): void;
+  setV4v(name: string, arr: Float32Array | number[]): void;
   dispose(): void;
 }
 
@@ -91,6 +92,7 @@ export function createProgram(
     setV4: (name, x, y, z, w) => gl.uniform4f(loc(name), x, y, z, w),
     setFv: (name, arr) => gl.uniform1fv(loc(name), arr as Float32Array),
     setV3v: (name, arr) => gl.uniform3fv(loc(name), arr as Float32Array),
+    setV4v: (name, arr) => gl.uniform4fv(loc(name), arr as Float32Array),
     dispose: () => gl.deleteProgram(program),
   };
 }

@@ -6,9 +6,10 @@ import { ANALYSER_MIN_DB, ANALYSER_MAX_DB } from "./analyser.ts";
 // hot phone mic converge to similarly-scaled output. Values are exponential
 // time constants (1/tau, per second) — bigger = faster to react.
 //
-// Bypassable via update()'s `autoGain` param (see src/audio/autoGain.ts for
-// the persisted on/off switch) — off falls back to a fixed mapping against
-// the analyser's own dB window, matching app.ts's "before processing" feed.
+// Blended in by update()'s `autoGain` amount (see src/audio/autoGain.ts for
+// the persisted value) against a fixed mapping over the analyser's own dB
+// window, matching app.ts's "before processing" feed — at 0 only the fixed
+// mapping reaches the output.
 const FLOOR_RISE_RATE = 0.8; // floor creeping up while it's quiet (~1.25s)
 const FLOOR_FALL_RATE = 8; // floor dropping to follow a true drop in level (~0.1s)
 const PEAK_RISE_RATE = 25; // ceiling jumping up on a loud hit (~0.04s, fast attack)
@@ -113,7 +114,18 @@ export class FeatureExtractor {
   // frames are never spuriously held.
   private peakHoldUntil = new Float64Array(NUM_BANDS).fill(-Infinity);
   private env = new Float32Array(NUM_BANDS);
+  // The same envelope over the fixed mapping alone, kept regardless of the
+  // blend so `fixedEnergy` can always say what `energy` would read with
+  // auto-gain fully off — a local diagnostic (the Signal card's history
+  // trace in src/ui/audioMeters.ts), never part of the FeatureFrame itself.
+  private envFixed = new Float32Array(NUM_BANDS);
+  private lastFixedEnergy = 0;
   private prevNorm = new Float32Array(NUM_BANDS);
+
+  /** `energy` as it would be with autoGain at 0 — see envFixed. */
+  get fixedEnergy(): number {
+    return this.lastFixedEnergy;
+  }
 
   private fluxBaseline = 0;
   private lastTime: number | null = null;
@@ -124,17 +136,32 @@ export class FeatureExtractor {
 
   /**
    * @param rawBandsDb per-band FFT magnitude in dB, from BandAnalyser.readBandsDb().
-   * @param autoGain When false, bypasses the per-band adaptive floor/peak
-   *   normalization below in favor of a fixed mapping against the analyser's
-   *   own dB window (ANALYSER_MIN_DB/MAX_DB) — the same one
+   * @param autoGain How much of the per-band adaptive floor/peak
+   *   normalization below reaches the output, 0..1 (see autoGain.ts). Each
+   *   band's target is a linear blend from the fixed mapping against the
+   *   analyser's own dB window (ANALYSER_MIN_DB/MAX_DB — the same one
    *   app.ts's captureRawBands uses for the "before processing" display, so
-   *   the two agree on scale. The floor/peak trackers, flux, and onset/BPM
-   *   detection below keep running on the adaptive `norm` regardless — only
-   *   what lands in `bands[]`/`energy` changes — so turning this off doesn't
-   *   degrade beat detection, which is calibrated against the adaptive value.
-   *   Defaults to true so every existing call site keeps today's behavior.
+   *   the two agree on scale) at 0, to the adaptive value at 1. The
+   *   floor/peak trackers, flux, and onset/BPM detection below keep running
+   *   on the adaptive `norm` regardless — only what lands in
+   *   `bands[]`/`energy` changes — so turning this down doesn't degrade beat
+   *   detection, which is calibrated against the adaptive value. Defaults to
+   *   1 (fully adaptive) so a call site that doesn't pass it keeps the
+   *   original behavior.
+   * @param smoothingScale Multiplies ATTACK_PER_SEC/RELEASE_PER_SEC below —
+   *   sensitivity.ts's smoothingRateScale, defaulting to 1 (today's
+   *   behavior). Non-finite (the Smoothing row's Off stop) assigns `target`
+   *   to the envelope directly rather than computing a coefficient, so
+   *   `bands`/`energy` land exactly on the adaptive-or-fixed mapping above —
+   *   the same one app.ts's captureRawBands computes — with none of
+   *   expBlend's floating-point rounding at "coefficient 1". Only this
+   *   envelope is scaled; the floor/peak trackers above and the flux
+   *   baseline below stay at their own fixed rates regardless — they're
+   *   measurement, not display smoothing, and the meters panel's RAW chip
+   *   already shows their output untouched.
    */
-  update(rawBandsDb: Float32Array, time: number, autoGain = true): FeatureFrame {
+  update(rawBandsDb: Float32Array, time: number, autoGain = 1, smoothingScale = 1): FeatureFrame {
+    const blend = clamp01(autoGain);
     const dt = this.lastTime === null ? 1 / 60 : Math.max(1e-4, time - this.lastTime);
     this.lastTime = time;
 
@@ -166,10 +193,24 @@ export class FeatureExtractor {
       const range = Math.max(MIN_RANGE_DB, this.peak[b] - this.floor[b]);
       const norm = clamp01((db - this.floor[b]) / range);
 
-      const target = autoGain ? norm : clamp01((db - ANALYSER_MIN_DB) / fixedSpan);
-      const rate = target > this.env[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
-      this.env[b] += (target - this.env[b]) * expBlend(rate, dt);
+      const fixed = clamp01((db - ANALYSER_MIN_DB) / fixedSpan);
+      const target = fixed + (norm - fixed) * blend;
+      if (Number.isFinite(smoothingScale)) {
+        const rate = target > this.env[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
+        this.env[b] += (target - this.env[b]) * expBlend(rate, dt * smoothingScale);
+      } else {
+        this.env[b] = target;
+      }
       bands[b] = this.env[b];
+
+      // Same envelope (and the same Smoothing Off short-circuit) over the
+      // fixed mapping alone, so the reference line tracks the real one.
+      if (Number.isFinite(smoothingScale)) {
+        const rateFixed = fixed > this.envFixed[b] ? ATTACK_PER_SEC : RELEASE_PER_SEC;
+        this.envFixed[b] += (fixed - this.envFixed[b]) * expBlend(rateFixed, dt * smoothingScale);
+      } else {
+        this.envFixed[b] = fixed;
+      }
 
       flux += Math.max(0, norm - this.prevNorm[b]);
       this.prevNorm[b] = norm;
@@ -186,8 +227,13 @@ export class FeatureExtractor {
     }
 
     let energy = 0;
-    for (let b = 0; b < NUM_BANDS; b++) energy += bands[b];
+    let fixedEnergy = 0;
+    for (let b = 0; b < NUM_BANDS; b++) {
+      energy += bands[b];
+      fixedEnergy += this.envFixed[b];
+    }
     energy = clamp01(energy / NUM_BANDS);
+    this.lastFixedEnergy = clamp01(fixedEnergy / NUM_BANDS);
 
     const beatPhase = this.bpm > 0 ? (((time - this.lastBeatTime) / (60 / this.bpm)) % 1 + 1) % 1 : 0;
 

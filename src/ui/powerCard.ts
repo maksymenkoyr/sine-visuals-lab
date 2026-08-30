@@ -11,6 +11,7 @@ import {
   groupHeadingStyle,
   rowHeadStyle,
   rowLabelStyle,
+  spacer,
   unitStyle,
 } from "./controlsKit.ts";
 
@@ -279,6 +280,14 @@ const statusTextStyle = `
 const statusDotStyle = (color: string) =>
   `width: 4px; height: 4px; border-radius: 50%; background: ${color}; flex-shrink: 0; transition: background-color 0.3s ease;`;
 const hairlineStyle = `height: 1px; background: ${withAlpha(POWER_TEAL, 0.35)}; margin: 10px 0 12px;`;
+// Small pill after the title text, flagging the governor's readouts/modes as
+// still settling — same mono/uppercase register as the title, dimmer.
+const betaBadgeStyle = `
+  display: inline-block; margin-left: 6px; font: 500 8px/1 ${FONT_MONO}; letter-spacing: 0.08em;
+  text-transform: uppercase; color: ${POWER_TEAL}; background: ${withAlpha(POWER_TEAL, 0.15)};
+  border: 1px solid ${withAlpha(POWER_TEAL, 0.4)}; border-radius: 999px; padding: 1px 6px;
+  vertical-align: middle;
+`;
 
 function createStatusRow(accent: string) {
   const el = document.createElement("div");
@@ -363,6 +372,10 @@ function createReadoutLine(caption: string) {
 
 export function createPowerCard(deps: PowerCardDeps): PowerCard {
   const card = createCard({ title: "Power", accent: POWER_TEAL, foldId: "power" });
+  const betaBadge = document.createElement("span");
+  betaBadge.textContent = "Beta";
+  betaBadge.style.cssText = betaBadgeStyle;
+  card.title.appendChild(betaBadge);
   const statusRow = createStatusRow(POWER_TEAL);
   const hairline = document.createElement("div");
   hairline.style.cssText = hairlineStyle;
@@ -379,7 +392,7 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   const detail = createReadoutLine("Detail");
   readouts.append(fps.el, res.el, detail.el);
 
-  card.body.append(statusRow.el, hairline, qualityRow.el, modeRow.el, readoutsHeading, readouts);
+  card.body.append(statusRow.el, hairline, qualityRow.el, spacer(), modeRow.el, readoutsHeading, readouts);
 
   function refresh(): void {
     const status = deps.getPowerStatus();

@@ -1,7 +1,7 @@
 import {
-  ACCELERATION_DEFAULT,
-  ACCELERATION_MAX,
-  ACCELERATION_MIN,
+  EXPANSION_DEFAULT,
+  EXPANSION_MAX,
+  EXPANSION_MIN,
   applySensitivity,
   SENSITIVITY_DEFAULT,
   SENSITIVITY_MAX,
@@ -9,13 +9,15 @@ import {
   SMOOTHING_DEFAULT,
   SMOOTHING_MAX,
   SMOOTHING_MIN,
-  shapeAcceleration,
+  shapeExpansion,
   shapeLevel,
 } from "../audio/sensitivity.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
+import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
+import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createAudioMeters } from "./audioMeters.ts";
@@ -110,11 +112,16 @@ import {
  *
  * Keyboard layer, live only while the panel is open (see onKeyDown): H
  * closes it, M hides/shows the meters column. Tab / Shift+Tab walk a ring over every
- * .vc-slider/.vc-toggle/.vc-fader in document order, wrapping at both ends
+ * .vc-slider/.vc-toggle/.vc-picker/.vc-fader in document order, wrapping at both ends
  * and skipping every chip and button — so Tab alone never leaves the panel
  * and never lands anywhere but a control. On whichever control has focus, A
  * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
- * are its own, in bandFaders.ts). Digit keys 1-9 jump to a numbered block —
+ * are its own, in bandFaders.ts). D is dev-only (DeviceMenuDeps.devDefault):
+ * on a scene-setting row, it persists the row's current value as its new
+ * default, so R/↺ from then on snaps back to that instead of the value
+ * baked into the scene's SceneSetting spec (see tuning/defaults.ts) — a
+ * production build never sets devDefault, so the key no-ops there. Digit
+ * keys 1-9 jump to a numbered block —
  * each card title and each scene group heading carries a .vc-block badge,
  * renumbered by renumberBlocks() whenever the block set can change (i.e. on
  * every renderSceneSettings) — and focus the first control inside it,
@@ -149,8 +156,8 @@ export interface DeviceMenuDeps {
   getAudioStatus: () => AudioStatus;
   getSensitivity: (sceneId: string) => number;
   onSensitivityChange: (sceneId: string, value: number) => void;
-  getAcceleration: (sceneId: string) => number;
-  onAccelerationChange: (sceneId: string, value: number) => void;
+  getExpansion: (sceneId: string) => number;
+  onExpansionChange: (sceneId: string, value: number) => void;
   getSmoothing: (sceneId: string) => number;
   onSmoothingChange: (sceneId: string, value: number) => void;
   /** Empty for scenes with nothing to tune — the card hides itself. */
@@ -173,21 +180,24 @@ export interface DeviceMenuDeps {
   getBandGain: (sceneId: string, fader: number) => number;
   onBandGainChange: (sceneId: string, fader: number, value: number) => void;
   onBandGainsReset: (sceneId: string) => void;
+  /** The Loudness card's Reset chip — starts the integrated LUFS reading
+   *  over (src/audio/lufsAnalyser.ts). */
+  onLufsReset: () => void;
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   resolveSensitivityValue: (sceneId: string) => number;
-  resolveAccelerationValue: (sceneId: string) => number;
+  resolveExpansionValue: (sceneId: string) => number;
   resolveSmoothingValue: (sceneId: string) => number;
-  /** Synthetic SceneSettings for the Sensitivity/Acceleration/Smoothing
+  /** Synthetic SceneSettings for the Sensitivity/Expansion/Smoothing
    *  pseudo-params, so they can drive an auto chip through the same
    *  isSettingAutoEnabled/onSettingAutoToggle contract as a real scene
    *  setting row. */
   getSensitivitySpec: () => SceneSetting;
-  getAccelerationSpec: () => SceneSetting;
+  getExpansionSpec: () => SceneSetting;
   getSmoothingSpec: () => SceneSetting;
   isSettingAutoEnabled: (sceneId: string, key: string) => boolean;
   onSettingAutoToggle: (sceneId: string, spec: SceneSetting, on: boolean) => void;
-  /** Whether every auto-capable setting on this scene (incl. Sensitivity/Acceleration/Smoothing) is auto. */
+  /** Whether every auto-capable setting on this scene (incl. Sensitivity/Expansion/Smoothing) is auto. */
   isSceneAuto: (sceneId: string) => boolean;
   onSceneAutoToggle: (sceneId: string, on: boolean) => void;
   getAutoStrength: () => number;
@@ -201,11 +211,21 @@ export interface DeviceMenuDeps {
     set(sceneId: string, key: string, value: number): void;
     clear(sceneId: string, key: string): void;
   };
-  /** Global per-band adaptive-normalization switch — see src/audio/autoGain.ts.
-   *  Off (the default) falls back to a fixed mapping against the analyser's
-   *  own dB window, matching the spectrum strip's raw feed. */
-  getAutoGainEnabled: () => boolean;
-  onAutoGainChange: (value: boolean) => void;
+  /** Dev-only: read/write a per-(scene,key) override of a scene setting's
+   *  shipped default — see tuning/defaults.ts. Its presence is what turns on
+   *  a scene-setting row's D hotkey ("set current value as default") and its
+   *  absence in a production build hides that affordance, same as devPin
+   *  above. */
+  devDefault?: {
+    get(sceneId: string, key: string): number | undefined;
+    set(sceneId: string, key: string, value: number): void;
+  };
+  /** Global per-band adaptive-normalization amount — see src/audio/autoGain.ts.
+   *  AUTO_GAIN_MIN (the default) is the fixed mapping against the analyser's
+   *  own dB window, matching the spectrum strip's raw feed; AUTO_GAIN_MAX is
+   *  fully adaptive. */
+  getAutoGain: () => number;
+  onAutoGainChange: (value: number) => void;
   /** Energy saving mode (src/render/powerMode.ts) — the Power card's
    *  Auto/On/Off override for the quality governor. Device-wide, like
    *  Auto-gain above. */
@@ -234,7 +254,16 @@ export interface DeviceMenu {
    *  feeds, and the meters. `frame` has the band faders applied; `ungained`
    *  is the same frame before them (the strip's ghost bars); `pinned` is
    *  which bands the gain stage clamped (bandGains.ts's pinnedBands);
-   *  `anim`/`mono` feed the meters (audioMeters.ts). */
+   *  `anim`/`mono`/`fixedEnergy`/`lufs` feed the meters (audioMeters.ts) —
+   *  `fixedEnergy` is FeatureExtractor.fixedEnergy, null wherever this
+   *  device isn't running its own extractor (renderer, synthetic feed);
+   *  `lufs` is this device's lufsAnalyser reading, null on the same paths
+   *  (the Loudness card hides itself). `rateScale` is app.ts's
+   *  already-resolved sensitivity.ts's smoothingRateScale for this tick's
+   *  Smoothing value — forwarded to the meters so their own BPM settle and
+   *  waveform peak-hold bypass at Smoothing's Off stop the same way the rest
+   *  of the pipeline does; not re-resolved here, since resolveSmoothing()
+   *  slews its auto value and this runs every rAF tick. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -242,6 +271,9 @@ export interface DeviceMenu {
     pinned: Uint8Array | null,
     anim: AnimFrame | null,
     mono: Float32Array | null,
+    rateScale: number,
+    fixedEnergy: number | null,
+    lufs: LufsReading | null,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
@@ -465,6 +497,13 @@ interface ControlRowSpec {
      *  clearing a pin never fights whatever else currently owns the row. */
     resolve(): number;
   };
+  /** Dev-only: makes D (while this row's control has focus) persist the
+   *  row's current value as its new default — see DeviceMenuDeps.devDefault.
+   *  Omit to leave the D hotkey a no-op for this row (any prod build, or a
+   *  row this affordance doesn't apply to). */
+  devDefault?: {
+    set(value: number): void;
+  };
 }
 
 /** Wires A/R/T on a row's own focusable control (the slider or the toggle
@@ -475,7 +514,7 @@ interface ControlRowSpec {
  *  with no auto weights (the A key then no-ops, matching the hidden chip). */
 function wireRowKeys(
   control: HTMLElement,
-  actions: { auto?: () => void; reset: () => void; toggleOff: () => void },
+  actions: { auto?: () => void; reset: () => void; toggleOff: () => void; setDefault?: () => void },
 ): void {
   control.addEventListener("keydown", (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
@@ -492,6 +531,11 @@ function wireRowKeys(
       case "t":
         e.preventDefault();
         actions.toggleOff();
+        break;
+      case "d":
+        if (!actions.setDefault) return;
+        e.preventDefault();
+        actions.setDefault();
         break;
     }
   });
@@ -581,7 +625,11 @@ function createControlRow(spec: ControlRowSpec) {
     pinInput.type = "text";
     pinInput.inputMode = "decimal";
     pinInput.className = "vc-pin-input";
-    pinInput.style.cssText = `${digitsStyle} background: transparent; border: none; outline: none; width: 4.5em; display: none;`;
+    // Color/border/background live in the .vc-pin-input rule (controlsTheme.ts),
+    // not here — an inline color would win over it and inputs don't inherit
+    // color the way a span does, which is how this used to render black
+    // text on the panel's dark glass.
+    pinInput.style.cssText = `${digitsStyle} width: 4.5em; display: none;`;
     readout.insertBefore(pinInput, digits);
 
     // stopPropagation on both the trigger and the field itself so el's own
@@ -855,6 +903,17 @@ function createControlRow(spec: ControlRowSpec) {
     auto: spec.auto ? () => chip.click() : undefined,
     reset: () => resetBtn.click(),
     toggleOff: () => offChip.click(),
+    // Persists the row's current value, then mutates spec.defaultValue in
+    // place — resetBtn's click handler and display() both read it fresh off
+    // this same captured spec object on every call, so ↺/R immediately
+    // target the new default with no row rebuild needed.
+    setDefault: spec.devDefault
+      ? () => {
+          spec.devDefault!.set(lastValue);
+          spec.defaultValue = lastValue;
+          resetBtn.style.visibility = "hidden";
+        }
+      : undefined,
   });
 
   return {
@@ -967,6 +1026,113 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   return el;
 }
 
+interface PickerRowSpec {
+  label: string;
+  accent: string;
+  /** Names in value order — the stored value is the chosen index. */
+  options: readonly string[];
+  defaultValue: number;
+  description?: string;
+  get: () => number;
+  set: (value: number) => void;
+}
+
+/** An enum setting's row: same head as a toggle row, a strip of named chips
+ *  (the palette picker's chips) where the slider would be. The strip is the
+ *  one focusable control so it sits in the Tab ring like a slider; ←/→ (and
+ *  the T hotkey) cycle the choice. Never auto-tunable, for the same reason
+ *  a toggle isn't — see createToggleRow. */
+function createPickerRow(spec: PickerRowSpec): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = spec.label;
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  const right = document.createElement("div");
+  right.style.cssText = rowRightStyle;
+  const readout = document.createElement("span");
+  readout.style.cssText = `${digitsTextStyle} color: #fff;`;
+  const resetBtn = document.createElement("button");
+  resetBtn.textContent = "↺";
+  resetBtn.title = `Reset ${spec.label} (R)`;
+  resetBtn.style.cssText = rowResetStyle;
+  right.append(readout, resetBtn);
+  head.append(label, right);
+
+  const strip = document.createElement("div");
+  strip.className = "vc-picker";
+  strip.tabIndex = 0;
+  strip.setAttribute("role", "radiogroup");
+  strip.setAttribute("aria-label", spec.label);
+  strip.style.cssText = paletteListStyle;
+  el.style.setProperty("--vc-accent", spec.accent);
+  const chips = spec.options.map((name, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = name;
+    btn.setAttribute("role", "radio");
+    btn.tabIndex = -1; // the strip is the ring's stop, not each chip
+    btn.addEventListener("click", () => {
+      apply(i);
+      spec.set(i);
+      strip.focus();
+    });
+    strip.appendChild(btn);
+    return btn;
+  });
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  hint.textContent = spec.description ?? "";
+  if (!spec.description) hint.style.display = "none";
+
+  el.append(head, strip, hint);
+
+  const clampIndex = (value: number): number =>
+    Math.min(spec.options.length - 1, Math.max(0, Math.round(value)));
+
+  let current = clampIndex(spec.get());
+  function apply(value: number): void {
+    current = clampIndex(value);
+    chips.forEach((chip, i) => {
+      chip.style.cssText = i === current ? paletteChipLitStyle : paletteChipStyle;
+      chip.setAttribute("aria-checked", String(i === current));
+    });
+    readout.textContent = spec.options[current];
+    resetBtn.style.visibility = current !== clampIndex(spec.defaultValue) ? "visible" : "hidden";
+  }
+  apply(current);
+
+  const cycle = (step: number): void => {
+    const next = (current + step + spec.options.length) % spec.options.length;
+    apply(next);
+    spec.set(next);
+  };
+  strip.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      cycle(1);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      cycle(-1);
+    }
+  });
+  resetBtn.addEventListener("click", () => {
+    apply(spec.defaultValue);
+    spec.set(clampIndex(spec.defaultValue));
+  });
+
+  wireRowKeys(strip, {
+    reset: () => resetBtn.click(),
+    toggleOff: () => cycle(1),
+  });
+
+  return el;
+}
+
 function statusText(status: AudioStatus): string {
   switch (status.source) {
     case "mic":
@@ -1020,15 +1186,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
   const spectrumStrip = bandFaders.strip;
   // The meters beneath the Bands card — see audioMeters.ts.
-  const audioMeters = createAudioMeters();
+  const audioMeters = createAudioMeters({ onLufsReset: deps.onLufsReset });
 
   const spectrumCol = document.createElement("div");
   spectrumCol.className = "vc-spectrum-col";
 
   // "Listening post": lit shows the raw mic signal exactly as it comes in —
-  // no adaptive envelope, no gain, no sensitivity; unlit (default) shows the
-  // processed signal that's actually driving the visuals.
-  const rawChip = createChipButton("RAW", "Listening post — show the raw mic signal instead of what the visuals see", () => {
+  // no adaptive envelope (features.ts), no Bands gain. NOT "no sensitivity":
+  // Sensitivity/Expansion are applied later, only on the render path
+  // (applySensitivity in app.ts, after this strip is already fed) — so the
+  // processed side shown here never had them either. This is a different RAW
+  // chip from the meters panel's (audioMeters.ts): that one's Smoothing's Off
+  // stop makes a genuine no-op; this one always differs whenever Auto-gain is
+  // on, since the two sides normalize against different windows regardless
+  // of Smoothing (see features.ts's autoGain doc).
+  const rawChip = createChipButton("RAW", "Listening post — the raw mic signal, before the adaptive envelope and Bands gain", () => {
     spectrumStrip.setShowRaw(!spectrumStrip.showRaw());
     rawChip.style.cssText = spectrumStrip.showRaw() ? chipBtnLitStyle : chipBtnStyle;
   });
@@ -1213,11 +1385,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
 
   // The global "Auto" master switch — toggles every auto-capable row, scene
-  // settings plus Sensitivity/Acceleration/Smoothing (see app.ts's
+  // settings plus Sensitivity/Expansion/Smoothing (see app.ts's
   // isSceneAuto wiring). Welded to the strength card's right edge, sharing
   // its accent without being nested inside its border.
   const autoMasterBtn = document.createElement("button");
-  autoMasterBtn.title = "Auto-tune everything — sensitivity, acceleration, smoothing, and every scene setting";
+  autoMasterBtn.title = "Auto-tune everything — sensitivity, expansion, smoothing, and every scene setting";
   const autoMasterLabel = document.createElement("div");
   autoMasterLabel.textContent = "Auto";
   const autoMasterSub = document.createElement("div");
@@ -1248,13 +1420,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     };
   }
 
-  // Input: Sensitivity/Acceleration/Smoothing — three instances of the same
+  // Input: Sensitivity/Expansion/Smoothing — three instances of the same
   // log-mapped row, sharing the auto-refresh call sites below (master
   // toggle, open(), live-drift refresh) through one array, which is what
   // keeps a future fourth row from shipping half-wired to Auto.
   function makeInputRow(
     label: string,
-    range: { min: number; max: number; defaultValue: number },
+    range: { min: number; max: number; defaultValue: number; zeroAtMin?: boolean },
     spec: () => SceneSetting,
     getManual: () => number,
     resolveLive: () => number,
@@ -1268,6 +1440,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       max: range.max,
       defaultValue: range.defaultValue,
       mapping: "log",
+      zeroAtMin: range.zeroAtMin,
       unit: "×",
       format: formatGain,
       description,
@@ -1293,56 +1466,72 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       "How hard the visuals react to the room",
     ),
     // Widens or narrows the gap between quiet and loud, independent of the
-    // overall gain Sensitivity controls — see shapeAcceleration for the curve.
+    // overall gain Sensitivity controls — see shapeExpansion for the curve.
     makeInputRow(
-      "Acceleration",
-      { min: ACCELERATION_MIN, max: ACCELERATION_MAX, defaultValue: ACCELERATION_DEFAULT },
-      deps.getAccelerationSpec,
-      () => deps.getAcceleration(deps.currentSceneId()),
-      () => deps.resolveAccelerationValue(deps.currentSceneId()),
-      (value) => deps.onAccelerationChange(deps.currentSceneId(), value),
+      "Expansion",
+      { min: EXPANSION_MIN, max: EXPANSION_MAX, defaultValue: EXPANSION_DEFAULT },
+      deps.getExpansionSpec,
+      () => deps.getExpansion(deps.currentSceneId()),
+      () => deps.resolveExpansionValue(deps.currentSceneId()),
+      (value) => deps.onExpansionChange(deps.currentSceneId(), value),
       "Distance between the quiet parts and the loud parts",
     ),
     // How fast the visuals chase the audio, independent of Sensitivity's gain
-    // and Acceleration's curve — see smoothingRateScale for the rate mapping.
+    // and Expansion's curve — see smoothingRateScale for the rate mapping.
+    // zeroAtMin: unlike Sensitivity/Expansion, this row's slider bottom is
+    // a carved-out Off stop rather than SMOOTHING_MIN — genuinely unsmoothed,
+    // not just the calmest setting (see sensitivity.ts's header). Auto-tune
+    // never lands here on its own: SMOOTHING_SPEC.min in autoTune.ts stays
+    // SMOOTHING_MIN, so this is reachable only by a deliberate drag or R-reset-then-drag.
     makeInputRow(
       "Smoothing",
-      { min: SMOOTHING_MIN, max: SMOOTHING_MAX, defaultValue: SMOOTHING_DEFAULT },
+      { min: SMOOTHING_MIN, max: SMOOTHING_MAX, defaultValue: SMOOTHING_DEFAULT, zeroAtMin: true },
       deps.getSmoothingSpec,
       () => deps.getSmoothing(deps.currentSceneId()),
       () => deps.resolveSmoothingValue(deps.currentSceneId()),
       (value) => deps.onSmoothingChange(deps.currentSceneId(), value),
-      "How quickly the picture follows the sound",
+      "How quickly the picture follows the sound — drag to the bottom for Off, the meters panel's RAW chip with nothing left to bypass",
     ),
   ];
   function syncInputRows(): void {
     for (const { row, getManual } of inputRows) row.sync(getManual);
   }
 
-  // Auto-gain: the per-band adaptive normalization in features.ts. Off (the
-  // default) shows the mic's real levels — bass louder than treble, like real
-  // music — which the adaptive path otherwise flattens by re-normalizing each
-  // band to its own recent range; on converges different mics/rooms toward
-  // the same look at the cost of that balance, and clamps a Bands boost
-  // against an already-full band. Sits first in this card since it changes
-  // what the three rows below it are even shaping. Global per device, like
-  // Bands' crossover (getBandSplit), so it's deliberately left out of this
-  // card's own Reset chip below — that chip resets per-scene taste
-  // (Sensitivity/Acceleration/Smoothing), not a device-wide input preference.
-  const autoGainRow = createToggleRow({
+  // Auto-gain: how much of the per-band adaptive normalization in features.ts
+  // reaches the output. At the bottom (the default) the mic's real levels
+  // show — bass louder than treble, like real music — which the adaptive
+  // path otherwise flattens by re-normalizing each band to its own recent
+  // range; at the top different mics/rooms converge toward the same look at
+  // the cost of that balance, and a Bands boost clamps against an
+  // already-full band. Between, some of each. Linear, not log-mapped like
+  // the three gain rows below: it's a mix amount, and 50% should sit at the
+  // middle of the track. Sits first in this card since it changes what the
+  // three rows below it are even shaping. Global per device, like Bands'
+  // crossover (getBandSplit), so it's deliberately left out of this card's
+  // own Reset chip below — that chip resets per-scene taste
+  // (Sensitivity/Expansion/Smoothing), not a device-wide input
+  // preference. Never auto-tuned (no `auto` block): auto mode reads
+  // FeatureFrame.level, which this doesn't touch, but an amount that moves
+  // by itself would make the Signal card's history trace unreadable.
+  const autoGainRow = createControlRow({
     label: "Auto-gain",
     accent: INPUT_GREEN,
-    defaultValue: 0,
+    min: AUTO_GAIN_MIN,
+    max: AUTO_GAIN_MAX,
+    defaultValue: AUTO_GAIN_DEFAULT,
+    mapping: "linear",
+    unit: "%",
+    format: (value) => String(Math.round(value * 100)),
     description:
-      "Rescales each band to fill the display. Off shows the mic's real levels; on flattens bass-vs-treble balance but converges different mics/rooms toward the same look.",
-    get: () => (deps.getAutoGainEnabled() ? 1 : 0),
-    set: (value) => deps.onAutoGainChange(value >= 0.5),
+      "How much each band is rescaled to fill the display. 0 shows the mic's real levels; higher flattens bass-vs-treble balance but converges different mics and rooms toward the same look.",
   });
+  autoGainRow.onChange((value) => deps.onAutoGainChange(value));
+  autoGainRow.setValue(deps.getAutoGain());
 
   const inputCard = createCard({
     title: "Input",
     accent: INPUT_GREEN,
-    right: createChipButton("Reset", "Reset sensitivity, acceleration and smoothing", () => {
+    right: createChipButton("Reset", "Reset sensitivity, expansion and smoothing", () => {
       for (const { row, defaultValue, onChange } of inputRows) {
         onChange(defaultValue);
         row.setValue(defaultValue);
@@ -1354,7 +1543,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   markBlock(inputCard.title);
   inputCard.el.style.cssText += inputCardWashStyle;
   inputCard.body.append(
-    autoGainRow,
+    autoGainRow.el,
     spacer(),
     inputRows[0].row.el,
     spacer(),
@@ -1393,10 +1582,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
-  // Builds one setting's row (boolean toggle or slider) into `container` —
+  // Builds one setting's row (enum picker, boolean toggle or slider) into `container` —
   // shared by the direct-to-sceneRows path and the advanced-section path
   // below, so a row behaves identically wherever it lands.
   function appendSettingRow(container: HTMLElement, sceneId: string, spec: SceneSetting): void {
+    if (spec.type === "enum" && spec.options) {
+      container.appendChild(
+        createPickerRow({
+          label: spec.label,
+          accent: SCENE_VIOLET,
+          options: spec.options,
+          defaultValue: spec.default,
+          description: spec.description,
+          get: () => deps.getSceneSettingValue(sceneId, spec),
+          set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
+        }),
+      );
+      return;
+    }
     if (spec.type === "boolean") {
       container.appendChild(
         createToggleRow({
@@ -1411,13 +1614,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       return;
     }
 
+    const devDefault = deps.devDefault;
     const row = createControlRow({
       label: spec.label,
       accent: SCENE_VIOLET,
       min: spec.min,
       max: spec.max,
       step: spec.step,
-      defaultValue: spec.default,
+      defaultValue: devDefault?.get(sceneId, spec.key) ?? spec.default,
       mapping: "linear",
       format: formatSetting,
       description: spec.description,
@@ -1433,6 +1637,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           }
         : undefined,
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
+      devDefault: devDefault ? { set: (value) => devDefault.set(sceneId, spec.key, value) } : undefined,
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));
@@ -1640,7 +1845,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // to controls with a layout box: a folded card's body is display:none, and
   // a control inside it would otherwise sit in the ring and fail to focus.
   function ringElements(): HTMLElement[] {
-    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-fader")].filter(
+    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker, .vc-fader")].filter(
       (el) => el.getClientRects().length > 0,
     );
   }
@@ -1747,15 +1952,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       pinned: Uint8Array | null,
       anim: AnimFrame | null,
       mono: Float32Array | null,
+      rateScale: number,
+      fixedEnergy: number | null,
+      lufs: LufsReading | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono, rawBands);
+      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs);
       // The tick is FeatureFrame.level — absolute, fixed-window loudness,
       // untouched by Auto-gain — so it reads the room regardless of that
-      // toggle. The fill starts from .energy, which Auto-gain does shape,
-      // then runs the same sensitivity+acceleration curve the render path
+      // amount. The fill starts from .energy, which Auto-gain does shape,
+      // then runs the same sensitivity+expansion curve the render path
       // applies, so it reads what the scene is actually reacting to.
       const tick = Math.min(1, Math.max(0, frame?.level ?? 0));
       const energy = Math.min(1, Math.max(0, frame?.energy ?? 0));
@@ -1763,12 +1971,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const sensitivity = deps.isSettingAutoEnabled(sceneId, deps.getSensitivitySpec().key)
         ? deps.resolveSensitivityValue(sceneId)
         : deps.getSensitivity(sceneId);
-      const acceleration = deps.isSettingAutoEnabled(sceneId, deps.getAccelerationSpec().key)
-        ? deps.resolveAccelerationValue(sceneId)
-        : deps.getAcceleration(sceneId);
+      const expansion = deps.isSettingAutoEnabled(sceneId, deps.getExpansionSpec().key)
+        ? deps.resolveExpansionValue(sceneId)
+        : deps.getExpansion(sceneId);
       const shaped = Math.min(
         1,
-        Math.max(0, shapeAcceleration(shapeLevel(energy, sensitivity), acceleration)),
+        Math.max(0, shapeExpansion(shapeLevel(energy, sensitivity), expansion)),
       );
       const tickPct = Math.round(tick * 100);
       const shapedPct = Math.round(shaped * 100);
@@ -1783,16 +1991,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
 
       // The strip's raw feed shows the mic as-is; the default processed feed
-      // is the exact same sensitivity+acceleration pipeline the render path
+      // is the exact same sensitivity+expansion pipeline the render path
       // applies before scene.render() (see applySensitivity in app.ts) — so
       // it always shows literally what the visuals are reacting to. The
       // ghost is that same pipeline over the pre-fader frame, and it goes in
       // first: applySensitivity hands back one shared scratch buffer off its
       // fast path, so the ghost must be copied into the strip before the
       // second call overwrites it.
-      spectrumStrip.setGhost(ungained ? applySensitivity(ungained, sensitivity, acceleration).bands : null);
+      spectrumStrip.setGhost(ungained ? applySensitivity(ungained, sensitivity, expansion).bands : null);
       spectrumStrip.setPinned(pinned);
-      const processedBands = frame ? applySensitivity(frame, sensitivity, acceleration).bands : null;
+      const processedBands = frame ? applySensitivity(frame, sensitivity, expansion).bands : null;
       spectrumStrip.update(rawBands, processedBands);
 
       const nowMs = performance.now();
