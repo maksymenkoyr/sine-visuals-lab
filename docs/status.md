@@ -7,20 +7,25 @@ regenerate it at session close.
 ## In flight
 
 - **Dancers scene** — branch `worktree-dancers-scene` (worktree at
-  `.claude/worktrees/dancers-scene`), 5 commits ahead of `main`, draft PR
-  open. A raymarched skeleton dancing to the beat: CPU-solved rig
-  (`src/render/scenes/dancers/rig.ts`) → packed `uBones` → SDF skins, a move
-  ladder with a downbeat-latched picker (`choreo.ts`), auto-weighted settings,
-  and the new `type: "enum"` setting + chip picker row in `deviceMenu.ts`.
-  Registered as a draft at `minQuality: "mid"`. Typecheck + tests green;
-  verified headless at high/mid, in the gallery tile, and at 90/124/170 bpm
-  with synthetic audio. Not yet judged on real music.
+  `.claude/worktrees/dancers-scene`), 11 commits ahead of `main`, draft PR #36.
+  A raymarched skeleton dancing captured moves: procedural sine-wave
+  choreography was judged "no moves", so the dance now comes from CMU mocap
+  clips — `src/render/scenes/dancers/clipFormat.ts` + `clips.bin` (built by
+  `tools/clip-convert.mjs` from `tools/clip-cuts.json`), phase-locked to the
+  bar clock by `player.ts` with a bar-boundary picker and two handovers
+  (crossfade / inertialization, the advanced `Handover` setting), under
+  `choreo.ts`'s beat gate, drop pose and jaw. `Pose` is now a quaternion per
+  bone. Sixteen clips across the four `style` families. Typecheck + tests
+  green; every clip checked on a headless contact sheet at its native tempo;
+  picker path and both handovers run on synthetic audio. **Not yet judged on
+  real music.** The first bundled data file in the repo — see step 5 of
+  `docs/adding-a-scene.md`.
+- **Chladni scene** — branch `worktree-chladni-scene` (worktree locked),
+  1 commit ahead of `main`, unmerged.
+- **Always-on dev controls** — branch `worktree-agent-ae8a69d86e9c44e97`,
+  1 commit ahead of `main`, unmerged.
 - **Mesh Grid rebuilt as a hidden-line spectrogram terrain** — branch
-  `worktree-mesh-grid-terrain` (worktree locked), 9 commits ahead of `main`,
-  unmerged.
-- **Auto-gain becomes an amount + Signal history trace** — branch
-  `worktree-autogain-amount-scope` (worktree locked), 5 commits ahead of
-  `main`, unmerged.
+  `worktree-mesh-grid-terrain`, 13 commits ahead of `main`, unmerged.
 - **Tuning: point-at-dials workflow** — branch `worktree-tuning-spotlight`,
   2 commits ahead of `main`, unmerged.
 - **docs/architecture.md diagram-first rewrite** — branch `worktree-docs-index`,
@@ -28,20 +33,22 @@ regenerate it at session close.
 
 ## Open questions
 
-- Dancers: does the procedural groove hold up on real music, or does it want
-  captured motion (which would mean an asset pipeline the repo doesn't have)?
+- Dancers: which handover reads better on real music — crossfade or inertial?
+  Both ship behind the `Handover` setting so the user can compare; keep one.
+- Dancers: the tempo the CMU dancers moved to is pinned by hand in
+  `tools/clip-cuts.json` (CMU has no music); a clip that feels off-beat is a
+  wrong `bpm`/`start` there, not a player bug.
 - Dancers: `minQuality: "mid"` was chosen by analogy with Ferrofluid, not
-  measured on a low-preset device — the bounding-sphere early-out may make
-  `"low"` affordable.
+  measured on a low-preset device.
 - `tuning/params.json` ships with `"autoPin": true`, so every setting probes
   as `pinned` in DEV until `__viz.setParams({ autoPin: false })` — intended,
   or a leftover from a tuning session?
 
 ## Next up
 
-- Merge the Dancers draft PR once it's been watched with real music; then the
-  agreed follow-ups in order: more procedural skins (neon, blob), then decide
-  whether "other characters" justifies an asset pipeline. A crowd would need
-  a rasterised-bone path rather than more raymarching.
-- Merge or continue the other four worktrees — Mesh Grid terrain has grown to
-  nine commits and is the most likely to collide with `main`.
+- Watch Dancers on real music, pick a handover, then undraft and merge PR #36.
+- Internet dances (Floss, Woah, Griddy) via a film-yourself → offline SMPL
+  (WHAM / 4D-Humans) path into the same converter — simple routines only,
+  no registered choreography. More CMU moves are cut-list entries.
+- Merge or continue the other worktrees — Mesh Grid terrain is the most likely
+  to collide with `main`.

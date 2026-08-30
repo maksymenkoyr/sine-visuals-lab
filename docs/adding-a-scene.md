@@ -22,6 +22,13 @@
    (`registerScene(yourScene)`) and export it there like its neighbours.
 4. If it should degrade or disable below some hardware quality, set `minQuality`
    on the `Scene` object — see `src/render/quality.ts` for what each preset means.
+5. If the scene needs data it can't compute (the dancers' captured moves are
+   the precedent — `src/render/scenes/dancers/clipFormat.ts` and the `clips.bin`
+   beside it), generate it with a script under `tools/` and commit the output;
+   import it with Vite's `?url` and `fetch` it when the scene is created,
+   guarded so the module still imports under node (the tests import every
+   scene), and dance something sensible until it arrives. Third-party data
+   gets an entry in `THIRD-PARTY-NOTICES.md` like the fonts do.
 
 Typecheck (`npm run typecheck`) catches a mismatched uniform name or a `Scene`
 missing a required method; nothing here needs a special build step.
