@@ -464,7 +464,7 @@ vec2 hash22(vec2 p) {
 const LIFT_THRESHOLD = 0.05;
 // Plate-space units per second of bounce displacement per unit bounce, at
 // the 60 fps reference step.
-const HOP_RATE = 0.6;
+const HOP_RATE = 1.0;
 // On a fully lifted antinode, each bounce lands this fraction of its own
 // length downhill of |field| at Settling pull 1 — the bias of the random
 // walk. It fades to zero toward the lift knee, so quiet sand never migrates.
