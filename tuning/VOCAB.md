@@ -20,3 +20,5 @@ See `docs/tuning.md` for the workflow this feeds into.
 "dome not doming, just a flat wall / behind the mesh" -> mesh: bgMeshDome recast from a sphere around the camera to a DOME_RADIUS 160 ball around the scene (ray-cast, far root), lattice in (az, el) about the ball center so it curves over and under the shape; shapeCover() dims it to 0.15 inside the disc/globe silhouette
 "dome more spherical / move it back" -> mesh: Background Dome becomes a globe the camera is outside of (near + far surface drawn, far at 0.35), placed by new domeDistance (default 200) and sized by new domeRadius (default 150) sliders
 "can waves go from center to outside" -> mesh: wavesOutward (new boolean, default on): newest ring at the disc center / globe poles, rippling out to the rim / equator
+"looks like two dome grids" -> mesh: Background Dome draws only the first face the ray meets (near face from outside, far face from inside); the double near+far pass is gone
+"make center spiky" -> mesh: centerSpike (new slider 0..3, default 1): displacement boosted toward the disc center / globe poles instead of faded flat; 0 restores the calm pole

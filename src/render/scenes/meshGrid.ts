@@ -42,7 +42,7 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 //  - The Sphere checkbox re-maps the grid onto a globe (and overrides Circle):
 //    columns are longitude, rows latitude, with time mirrored about the
 //    equator so both hemispheres carry the full history. The poles get the
-//    same displacement fade as the disc's center. Circle Squeeze and
+//    same Center Spike treatment as the disc's center. Circle Squeeze and
 //    CIRCLE_TILT apply to the ball too, so it's really an ellipsoid tipped
 //    toward you.
 //  - The Background Dome checkbox lifts the sky lattice off the flat room
@@ -51,9 +51,10 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 //    ray (`viewRay`, sharing `camBasis()` with `toView` so the ball and the
 //    terrain agree on where "up" is). A sphere centered on the camera is
 //    what a sky dome "should" be, but through a zoomed-in window it's a flat
-//    wall; a ball the camera is *outside* of shows its limb and both
-//    hemispheres, which is what reads as a sphere. Pulling it forward over
-//    the camera turns it back into a dome seen from inside. In Wireframe
+//    wall; a ball the camera is *outside* of shows its limb, with the
+//    lattice bunching toward it, which is what reads as a sphere. Only the
+//    first face the ray meets is drawn (an opaque globe). Pulling it forward
+//    over the camera turns it back into a dome seen from inside. In Wireframe
 //    Only the shape writes no depth, so `shapeCover()` dims the lattice
 //    inside the disc's/globe's silhouette to keep it reading as behind.
 //  - The Circle checkbox re-maps the same grid onto a disc: columns become
@@ -61,12 +62,14 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 //    itself) and rows the radius. Waves Outward picks which way time runs:
 //    newest at the center so waves spread to the rim, or newest on the rim so
 //    the nearest, biggest ring snaps to the beat and history converges on
-//    the center. Either way the center is where every column meets, and the
-//    displacement is faded to nothing there — that's what keeps the pole
-//    from spiking (the old polar version of this scene never handled it).
-//    The vertex shader keeps geometry (`gNorm`) and age (`tNorm`) apart for
-//    this; everything downstream (lines, color, fog, dots, display modes) is
-//    layout-agnostic.
+//    the center. Either way the center is where every column meets, and
+//    Center Spike decides what happens there: at 0 the displacement is
+//    faded to nothing (a calm pole — the old polar version of this scene
+//    never handled it and spiked by accident); above that the pole is
+//    boosted on purpose into a crown of spikes. The dots always fade at the
+//    pole. The vertex shader keeps geometry (`gNorm`) and age (`tNorm`)
+//    apart for this; everything downstream (lines, color, fog, dots,
+//    display modes) is layout-agnostic.
 //  - No directional lighting. Color comes from the room palette
 //    (`palette()` in palette.ts, like every other scene) driven by the
 //    per-vertex spectrum amplitude, with a push toward white at peaks that
@@ -222,6 +225,15 @@ const SETTINGS: SceneSetting[] = [
     step: 1,
     default: 1,
     type: "boolean",
+  },
+  {
+    key: "centerSpike",
+    label: "Center Spike",
+    description: "Circle and Sphere layouts: how much the displacement is boosted at the disc's center (the globe's poles), where every column meets -- 0 keeps the pole calm and flat, higher makes it a crown of spikes",
+    min: 0,
+    max: 3,
+    step: 0.1,
+    default: 1,
   },
   {
     key: "flow",
@@ -768,9 +780,14 @@ void main() {
   // Outward, from the center/poles out.
   float tNorm = ((circle || sphere) && uWavesOutward > 0.5) ? 1.0 - gNorm : gNorm;
   // Where the wrapped layouts' columns converge (disc center, globe poles),
-  // the displacement is faded out below — and so are the dots, which would
-  // otherwise stack additively into a hot spot there.
+  // the dots are faded out — they would otherwise stack additively into a
+  // hot spot there. The displacement gets the same fade at Center Spike 0
+  // (a calm, flat pole); above that it's instead *boosted* toward the pole,
+  // where every column's own bin height meets at one point, so the pole
+  // becomes a crown of spikes fanning out of the center.
   float poleFade = (sphere || circle) ? smoothstep(0.0, 0.25, 1.0 - gNorm) : 1.0;
+  float spikeGain = 1.0 + uCenterSpike * exp(-(1.0 - gNorm) * 6.0);
+  float poleDisp = (sphere || circle) ? mix(poleFade, spikeGain, min(uCenterSpike, 1.0)) : 1.0;
 
   // Rows are the audio spectrum's history (newest at the front), columns the
   // spectrum itself folded about the center: bass ridge in the middle,
@@ -809,7 +826,7 @@ void main() {
     // tips its axis toward the viewer.
     float lat = aPos.y * 1.57079633;     // -pi/2 (bottom pole) .. +pi/2 (top pole), 0 = equator
     float theta = aPos.x * 3.14159265;   // 0 = front (bass), +-pi = back (treble, the closed seam)
-    height *= poleFade;
+    height *= poleDisp;
     height += uValley * gNorm * gNorm;   // poles pushed out (or in)
     vec3 n = vec3(cos(lat) * sin(theta), sin(lat), -cos(lat) * cos(theta));
     vec3 local = n * (SPHERE_RADIUS + height);
@@ -823,7 +840,7 @@ void main() {
     // stays flat instead of spiking.
     float rN = 1.0 - gNorm;
     float theta = aPos.x * 3.14159265;   // 0 = front (bass), +-pi = back (treble, the closed seam)
-    height *= poleFade;
+    height *= poleDisp;
     height += uValley * rN * rN;         // bowl (or dome) instead of a valley
     float r = CIRCLE_RADIUS * rN;
     // The disc is tilted toward the viewer (far rim raised) so it reads as a
@@ -1076,11 +1093,12 @@ void main() {
       // ball and taking (azimuth, elevation) about the ball's center gives
       // meridians and parallels that converge at its poles — curvature you
       // can see, unlike a sphere centered on the camera, which is a flat
-      // wall through a narrow (zoomed-in) window. With the camera outside
-      // the ball (the default), both the near and far surface are drawn,
-      // the far one fainter: a wireframe globe whose two hemispheres cross,
-      // with a bright limb where they meet. Pull the ball forward over the
-      // camera and only the far surface exists: a dome seen from inside.
+      // wall through a narrow (zoomed-in) window. Only the first surface
+      // the ray meets is drawn — an opaque globe: its near face with the
+      // camera outside (the default; the lattice bunches toward the limb,
+      // which is what reads as a ball), its far face with the camera
+      // inside (a dome seen from within). Drawing both faces was tried and
+      // reads as two grids fighting, not as one sphere.
       vec3 o = camPos();
       vec3 d = viewRay(rUv);
       vec3 oc = o - vec3(0.0, 0.0, CIRCLE_CENTER_Z + uDomeDistance);
@@ -1090,20 +1108,13 @@ void main() {
       lattice = 0.0;
       if (disc > 0.0) {
         float sq = sqrt(disc);
-        float tNear = -b - sq;
-        float tFar = -b + sq;
-        bool outside = tNear > 0.0;
-        if (tFar > 0.0) {
-          vec3 p = oc + d * tFar;
+        float t = -b - sq;                 // near face...
+        if (t <= 0.0) t = -b + sq;         // ...or, from inside, the far one
+        if (t > 0.0) {
+          vec3 p = oc + d * t;
           float az = atan(p.x, p.z) + uTime * 0.01;
           float el = asin(clamp(p.y / uDomeRadius, -1.0, 1.0));
-          lattice += triLattice(vec2(az, el) * DOME_SCALE) * (outside ? 0.35 : 1.0);
-        }
-        if (outside) {
-          vec3 p = oc + d * tNear;
-          float az = atan(p.x, p.z) + uTime * 0.01;
-          float el = asin(clamp(p.y / uDomeRadius, -1.0, 1.0));
-          lattice += triLattice(vec2(az, el) * DOME_SCALE);
+          lattice = triLattice(vec2(az, el) * DOME_SCALE);
         }
       }
       // On the runway the terrain covers the ground, so fade the lattice out
