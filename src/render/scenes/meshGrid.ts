@@ -121,7 +121,6 @@ const CIRCLE_CENTER_Z = 50.0; // Circle layout: world z of the disc's center
 const CIRCLE_RADIUS = 40.0; // Circle layout: radius of the disc's outer (newest) rim
 const CIRCLE_TILT_DEG = 24; // Circle layout: disc plane tilted toward the viewer (far rim raised)
 const SPHERE_RADIUS = 30.0; // Sphere layout: radius of the globe at rest (shares CIRCLE_CENTER_Z and CIRCLE_TILT)
-const DOME_SCALE = 14.0; // Background Dome: lattice cells per radian of the ball's own angle
 const FOG_K = 1.0 / 110.0; // 1/(view depth) at which fog reaches 1/e
 const LINE_PX = 1.2; // grid line width in pixels before anti-aliasing
 const NOISE_PERIOD = 64.0; // lattice period of the noise field's time axis (see noisePeriodic)
@@ -152,13 +151,22 @@ const SETTINGS: SceneSetting[] = [
     default: 1.5,
   },
   {
+    key: "gridDensity",
+    label: "Grid Density",
+    description: "Multiplies the mesh's vertex grid (rebuilt when changed): above 1 is a finer, cloth-like mesh with more detail per wave, below 1 a coarser one",
+    min: 0.5,
+    max: 3,
+    step: 0.25,
+    default: 2,
+  },
+  {
     key: "cameraDistance",
     label: "Camera Distance",
     description: "How far back from the front row the camera sits -- further pushes the whole terrain away",
     min: 2,
     max: 60,
     step: 1,
-    default: 24,
+    default: 6,
   },
   {
     key: "cameraHeight",
@@ -173,10 +181,10 @@ const SETTINGS: SceneSetting[] = [
     key: "cameraTilt",
     label: "Camera Tilt",
     description: "Camera pitch in degrees -- negative looks down (horizon rises), positive looks up",
-    min: -35,
+    min: -75,
     max: 15,
     step: 0.5,
-    default: -16.5,
+    default: -35,
   },
   {
     key: "zoom",
@@ -185,7 +193,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0.3,
     max: 3,
     step: 0.05,
-    default: 2,
+    default: 1.4,
   },
   {
     key: "circle",
@@ -214,7 +222,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0.3,
     max: 1.5,
     step: 0.05,
-    default: 0.55,
+    default: 1,
   },
   {
     key: "wavesOutward",
@@ -233,7 +241,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 3,
     step: 0.1,
-    default: 1,
+    default: 1.5,
   },
   {
     key: "flow",
@@ -289,9 +297,9 @@ const SETTINGS: SceneSetting[] = [
     label: "Surface Tint",
     description: "Brightness of the dark surface beneath the grid lines (it always occludes; see Wireframe Only)",
     min: 0,
-    max: 1,
+    max: 4,
     step: 0.05,
-    default: 1.0,
+    default: 3,
     // Denser mixes support a more present surface; sparse/bright ones read better closer to black.
     auto: { density: 0.15, brightness: -0.1 },
   },
@@ -369,7 +377,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 400,
     step: 5,
-    default: 200,
+    default: 0,
   },
   {
     key: "domeRadius",
@@ -378,7 +386,16 @@ const SETTINGS: SceneSetting[] = [
     min: 20,
     max: 400,
     step: 5,
-    default: 150,
+    default: 200,
+  },
+  {
+    key: "domeDensity",
+    label: "Dome Density",
+    description: "How fine the Background Dome's lattice is (cells per radian of the globe)",
+    min: 4,
+    max: 80,
+    step: 1,
+    default: 45,
   },
   {
     key: "bgMeshIntensity",
@@ -387,7 +404,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0.05,
     max: 2,
     step: 0.05,
-    default: 0.6,
+    default: 0.4,
   },
   {
     key: "scanlines",
@@ -434,7 +451,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 1,
-    default: 1,
+    default: 0,
     type: "boolean",
   },
   {
@@ -463,7 +480,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 1,
-    default: 1,
+    default: 0,
     type: "boolean",
   },
   {
@@ -484,8 +501,9 @@ function settingFor(key: string): SceneSetting {
   return spec;
 }
 
-/** Grid resolution scaled off the quality detail proxy — the same signal
- *  shaders use to scale raymarch/density cost (see quality.ts). Columns and
+/** Base grid resolution scaled off the quality detail proxy — the same
+ *  signal shaders use to scale raymarch/density cost (see quality.ts); the
+ *  Grid Density setting multiplies it (buildGrid in the scene). Columns and
  *  rows are sized independently: X only has to resolve the mirrored
  *  NUM_BANDS spectrum, while Z wants roughly one row per history frame the
  *  waterfall shows. Both are non-increasing as quality drops. */
@@ -595,7 +613,6 @@ const CAMERA_GLSL = `
 #define CIRCLE_RADIUS ${CIRCLE_RADIUS.toFixed(1)}
 #define CIRCLE_TILT ${((CIRCLE_TILT_DEG * Math.PI) / 180).toFixed(5)}
 #define SPHERE_RADIUS ${SPHERE_RADIUS.toFixed(1)}
-#define DOME_SCALE ${DOME_SCALE.toFixed(1)}
 #define NEAR 0.5
 #define FAR 400.0
 
@@ -697,6 +714,7 @@ out float vAmp;   // spectrum amplitude at this vertex
 out float vZ;     // normalized age, 0 = newest row, 1 = oldest (front to back on the runway)
 out float vFog;   // 1 = fully visible, 0 = dissolved into the background
 out float vHeight; // raw surface displacement, for the Contour Lines checkbox in MESH_FRAG
+out float vPole;   // 0 away from the disc center / globe poles, 1 at them, scaled by Center Spike -- the pole's glow in MESH_FRAG
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
 ${CAMERA_GLSL}
@@ -865,6 +883,7 @@ void main() {
     worldPos = vec3(aPos.x * halfW, height, worldZ);
   }
   vHeight = height; // to MESH_FRAG, for the Contour Lines checkbox
+  vPole = (sphere || circle) ? (spikeGain - 1.0) : 0.0;
 
   vec3 view = toView(worldPos);
   vec4 clip = toClip(view);
@@ -886,7 +905,11 @@ void main() {
   // edge is guaranteed to reach exactly the background color. Not on the
   // globe: fogging an opaque ball's poles to the backdrop would read as holes,
   // and the displacement fade above already calms them.
-  float edgeFade = sphere ? 1.0 : (1.0 - smoothstep(0.75, 1.0, gNorm));
+  // On the disc that far stretch is the center; with Center Spike up the
+  // center is the point of the whole layout, so the fade is lifted there.
+  float farFade = smoothstep(0.75, 1.0, gNorm);
+  if (circle) farFade *= 1.0 - min(uCenterSpike, 1.0);
+  float edgeFade = sphere ? 1.0 : (1.0 - farFade);
   vFog = exp(-pow(viewZ * FOG_K, 2.0)) * edgeFade;
 
   // Perspective-scaled point size, so dots read consistently near and far.
@@ -902,6 +925,7 @@ in float vAmp;
 in float vZ;
 in float vFog;
 in float vHeight;
+in float vPole;
 uniform float uIsPointPass;
 uniform float uFluxEnv; // spectral-flux envelope from render(), brightens the peak glow
 // The common + settings blocks are re-declared here even though MESH_VERT
@@ -963,7 +987,12 @@ void main() {
   // The occluding surface under the lines: near-black, palette-tinted, lit a
   // little by loudness. Zeroed in Wireframe Only (that pass is additive).
   vec3 fillCol = base * 0.06 * uFill * mix(0.4, 0.4 + 1.6 * a, uFillReactivity);
-  vec3 col = uWireframeOnly > 0.5 ? lineCol * line : fillCol + lineCol * line;
+  // The Center Spike's crown glows: where every column converges the grid
+  // lines fade out (the moire guard above), so the pole would otherwise be a
+  // dark hole in the middle of the spike. Tinted by the palette's hot end
+  // and pushed toward white with loudness.
+  vec3 poleGlow = (base * 0.8 + vec3(1.0) * (0.3 + 0.7 * a)) * vPole * 0.6;
+  vec3 col = uWireframeOnly > 0.5 ? (lineCol * line + poleGlow) : (fillCol + lineCol * line + poleGlow);
 
   // Contour Lines: bands the *actual height field*, not the audio-driven
   // color -- the only display mode here that visualizes geometry rather
@@ -1114,7 +1143,7 @@ void main() {
           vec3 p = oc + d * t;
           float az = atan(p.x, p.z) + uTime * 0.01;
           float el = asin(clamp(p.y / uDomeRadius, -1.0, 1.0));
-          lattice = triLattice(vec2(az, el) * DOME_SCALE);
+          lattice = triLattice(vec2(az, el) * uDomeDensity);
         }
       }
       // On the runway the terrain covers the ground, so fade the lattice out
@@ -1171,6 +1200,39 @@ export const meshGridScene: Scene = (() => {
   let fluxEnv = 0;
   let noisePhase = 0;
   let lastFrameTime: number | null = null;
+  let builtDensity = 0;
+
+  // (Re)builds the vertex grid at the quality preset's resolution times Grid
+  // Density. Called from init and again from render whenever the slider
+  // moves — a one-off upload, so it's fine to do on the render thread.
+  function buildGrid(ctx: SceneContext, density: number) {
+    const { gl } = ctx;
+    const base = gridDimsForQuality(ctx.quality.detail);
+    const cols = Math.max(2, Math.round(base.cols * density));
+    const rows = Math.max(2, Math.round(base.rows * density));
+    gridCols = cols;
+    gridRows = rows;
+    builtDensity = density;
+    const positions = buildGridPositions(cols, rows);
+    const triIndices = buildGridTriangles(cols, rows);
+    triIndexCount = triIndices.length;
+    vertexCount = cols * rows;
+
+    if (gridVao) gl.deleteVertexArray(gridVao);
+    if (posBuf) gl.deleteBuffer(posBuf);
+    if (triIdxBuf) gl.deleteBuffer(triIdxBuf);
+    gridVao = gl.createVertexArray();
+    gl.bindVertexArray(gridVao);
+    posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    triIdxBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triIdxBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, triIndices, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+  }
 
   return {
     id: ID,
@@ -1185,25 +1247,7 @@ export const meshGridScene: Scene = (() => {
       meshProg = createProgram(gl, MESH_FRAG, MESH_VERT);
       historyLoc = gl.getUniformLocation(meshProg.program, "uHistory");
 
-      const { cols, rows } = gridDimsForQuality(ctx.quality.detail);
-      gridCols = cols;
-      gridRows = rows;
-      const positions = buildGridPositions(cols, rows);
-      const triIndices = buildGridTriangles(cols, rows);
-      triIndexCount = triIndices.length;
-      vertexCount = cols * rows;
-
-      gridVao = gl.createVertexArray();
-      gl.bindVertexArray(gridVao);
-      posBuf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-      gl.enableVertexAttribArray(0);
-      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-      triIdxBuf = gl.createBuffer();
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triIdxBuf);
-      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, triIndices, gl.STATIC_DRAW);
-      gl.bindVertexArray(null);
+      buildGrid(ctx, resolveSceneSetting(ID, settingFor("gridDensity")));
 
       history = createSpectrumHistory(NUM_BANDS, HISTORY_FRAMES);
       historyTex = gl.createTexture();
@@ -1288,6 +1332,9 @@ export const meshGridScene: Scene = (() => {
       // also means a Noise Scale change doesn't jump the field.
       const noiseScale = resolveSceneSetting(ID, settingFor("noiseScale"));
       noisePhase = (noisePhase + NOISE_Z_RATE * noiseScale) % NOISE_PERIOD;
+
+      const gridDensity = resolveSceneSetting(ID, settingFor("gridDensity"));
+      if (gridDensity !== builtDensity) buildGrid(ctx, gridDensity);
 
       meshProg.use();
       uploadCommonUniforms(meshProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
