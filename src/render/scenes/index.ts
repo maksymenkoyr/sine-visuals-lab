@@ -8,6 +8,7 @@ import { causticsScene } from "./caustics.ts";
 import { risoScene } from "./riso.ts";
 import { ferrofluidScene } from "./ferrofluid.ts";
 import { meshGridScene } from "./meshGrid.ts";
+import { chladniScene } from "./chladni.ts";
 import { dancersScene } from "./dancers/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
@@ -18,6 +19,7 @@ registerScene(spectrumScene);
 registerScene(particlesScene);
 registerScene(tunnelScene);
 registerScene(cymaticsScene);
+registerScene(chladniScene);
 registerScene(moireScene);
 registerScene(risoScene);
 registerScene(ferrofluidScene);
@@ -30,6 +32,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "particles",
   "tunnel",
   "cymatics",
+  "chladni",
   "moire",
   "riso",
   "ferrofluid",
@@ -46,5 +49,6 @@ export {
   risoScene,
   ferrofluidScene,
   meshGridScene,
+  chladniScene,
   dancersScene,
 };
