@@ -234,3 +234,109 @@ export function createAdvancedSection(id: string, label: string): AdvancedSectio
   wrap.append(toggle, body);
   return { el: wrap, body };
 }
+
+// The "reacts to" strip (a setting row) and its always-visible head chip —
+// src/render/signals.ts's descriptive link from a setting to the live
+// signals that drive it. Deliberately dumb: this file only draws pills and
+// reports clicks; deviceMenu.ts owns resolving a SignalLink, reading it each
+// tick, and what a click on a pill with a monitor anchor actually does
+// (unfold/scroll/flash a meters row) — the same "shared grammar, no domain
+// knowledge" split as the rest of this file.
+const signalChipStyle = (accent: string) => `
+  font: 400 9px/1.2 ${FONT_MONO}; letter-spacing: 0.02em; color: ${accent};
+  background: color-mix(in srgb, ${accent} 12%, transparent);
+  border: 1px solid color-mix(in srgb, ${accent} 45%, transparent); border-radius: 4px;
+  padding: 2.5px 6px; cursor: pointer; display: flex; align-items: center; gap: 2px;
+`;
+const signalStripPillsStyle = `display: flex; flex-wrap: wrap; gap: 6px;`;
+const signalPillStyle = (accent: string, clickable: boolean) => `
+  display: inline-flex; align-items: center; gap: 5px;
+  font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.02em; color: rgba(255,255,255,0.75);
+  padding: 2px 7px; border-radius: 9px; cursor: ${clickable ? "pointer" : "default"};
+  border: 1px solid color-mix(in srgb, ${accent} 35%, transparent);
+  background: color-mix(in srgb, ${accent} 7%, transparent);
+  transition: opacity 0.18s ease;
+`;
+const signalPillTrackStyle = `position: relative; width: 20px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.18);`;
+const signalPillFillStyle = (accent: string) =>
+  `position: absolute; top: 0; left: 0; height: 100%; width: 0; border-radius: 2px; background-color: ${accent};`;
+
+export interface SignalPillSpec {
+  label: string;
+  description: string;
+  /** Present only when the underlying SignalSpec has a `monitor` anchor —
+   *  see signals.ts. Omit to render the pill inert (no cursor, no click). */
+  onReveal?: () => void;
+}
+
+export interface SignalStrip {
+  /** The always-visible head-cluster indicator — caller places it in the
+   *  row's own `right` slot, beside A/T/↺. */
+  chip: HTMLElement;
+  /** The pill row — caller places it as a sibling of `.vc-hint`, not inside
+   *  it, so the two reveal independently (see the .vc-reads rule,
+   *  controlsTheme.ts) and the pills survive the hint's own text being
+   *  replaced wholesale while auto owns the row. */
+  strip: HTMLElement;
+  /** Per-pill live value in [0,1] and whether its link is currently active
+   *  (SignalLink.activeWhen) — same order as the specs passed in. */
+  update(states: { value: number; active: boolean }[]): void;
+}
+
+/** One setting row's audio-driven links, rendered as a small always-on chip
+ *  plus a hover-revealed pill strip. Order of `specs` is fixed for the
+ *  strip's lifetime — a scene's `reads` array doesn't change at runtime, so
+ *  update() takes a plain parallel array rather than a keyed one. */
+export function createSignalStrip(specs: SignalPillSpec[], accent: string): SignalStrip {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.style.cssText = signalChipStyle(accent);
+  chip.textContent = `∿${specs.length}`;
+  chip.title = `Reacts to ${specs.length} live signal${specs.length === 1 ? "" : "s"} — hover for detail`;
+
+  const strip = document.createElement("div");
+  strip.className = "vc-reads";
+  const pillsWrap = document.createElement("div");
+  pillsWrap.style.cssText = signalStripPillsStyle;
+  strip.appendChild(pillsWrap);
+
+  chip.addEventListener("click", (e) => {
+    e.stopPropagation();
+    strip.classList.toggle("vc-reads-open");
+  });
+
+  const pills = specs.map((spec) => {
+    const pill = document.createElement("div");
+    pill.style.cssText = signalPillStyle(accent, !!spec.onReveal);
+    pill.title = spec.description;
+    const label = document.createElement("span");
+    label.textContent = spec.label;
+    const track = document.createElement("div");
+    track.style.cssText = signalPillTrackStyle;
+    const fill = document.createElement("div");
+    fill.style.cssText = signalPillFillStyle(accent);
+    track.appendChild(fill);
+    pill.append(label, track);
+    if (spec.onReveal) {
+      const reveal = spec.onReveal;
+      pill.addEventListener("click", (e) => {
+        e.stopPropagation();
+        reveal();
+      });
+    }
+    pillsWrap.appendChild(pill);
+    return { pill, fill };
+  });
+
+  return {
+    chip,
+    strip,
+    update(states): void {
+      for (let i = 0; i < pills.length; i++) {
+        const s = states[i];
+        pills[i].fill.style.width = `${Math.max(0, Math.min(1, s.value)) * 100}%`;
+        pills[i].pill.style.opacity = s.active ? "1" : "0.4";
+      }
+    },
+  };
+}

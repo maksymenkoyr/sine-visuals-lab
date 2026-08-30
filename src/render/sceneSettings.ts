@@ -1,3 +1,5 @@
+import type { SignalLink } from "./signals.ts";
+
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
  * u<Key>` (see fullscreenScene.ts). Mirrors src/audio/sensitivity.ts: an
@@ -48,6 +50,16 @@ export interface SceneSetting {
    *  where doubling every group's slider count would drown out the settings
    *  people actually reach for. */
   advanced?: boolean;
+  /** The live signals this setting's effect is driven by — see
+   *  src/render/signals.ts (SignalLink's own doc comment there covers the
+   *  `activeWhen` shape). Purely descriptive: the device menu uses it to
+   *  show a live reading beside the row and point at the meter that
+   *  displays it. Nothing reads this at render time — the actual driving
+   *  happens in the scene's own JS/GLSL — so a stale entry is a wrong label
+   *  rather than a broken scene, which is what tests/signals.test.ts exists
+   *  to catch. Omit for a setting that's pure geometry or colour, with
+   *  nothing in the audio pipeline behind it. */
+  reads?: readonly SignalLink[];
 }
 
 const STORAGE_KEY = "vibe.sceneSettings";

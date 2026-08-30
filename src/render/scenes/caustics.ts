@@ -1,5 +1,6 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
+import type { SignalLink } from "../signals.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
 // Domain-warped value noise, sharpened into thin ridges. Two renderer-side
@@ -91,11 +92,21 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     // Rings read best against punchy, uncluttered material.
     auto: { attack: 0.35, pulse: 0.25, density: -0.2 },
+    // Three signals across two layers, not one — see the trigger logic
+    // itself, below. A bass onset always fires a ring; a broadband beat only
+    // fires one alongside it while Ripple source sits under its own
+    // threshold — RIPPLE_SRC_BEAT_THRESHOLD below is the single source of
+    // truth both this predicate and the trigger logic read.
+    reads: [
+      "anim.dropOnset",
+      "anim.lowOnset",
+      { signal: "feature.beat", activeWhen: (get) => get("rippleSrc") < RIPPLE_SRC_BEAT_THRESHOLD },
+    ] satisfies readonly SignalLink[],
   },
   {
     key: "rippleSrc",
     label: "Ripple source",
-    description: "0 = any beat rings out, 1 = bass hits only",
+    description: "Bass hits always ring out. Below 0.5, ordinary beats ring out too; at 0.5 and above, only bass hits do.",
     group: "Beat",
     min: 0,
     max: 1,
@@ -103,6 +114,12 @@ const SETTINGS: SceneSetting[] = [
     default: 0.3,
     // On a busy mix, restrict rings to bass hits so they don't machine-gun.
     auto: { density: 0.3 },
+    // The two signals this switches between — dragging the slider across
+    // RIPPLE_SRC_BEAT_THRESHOLD is what the Beat pill dimming makes visible.
+    reads: [
+      "anim.lowOnset",
+      { signal: "feature.beat", activeWhen: (get) => get("rippleSrc") < RIPPLE_SRC_BEAT_THRESHOLD },
+    ] satisfies readonly SignalLink[],
   },
   {
     key: "flash",
@@ -283,6 +300,10 @@ const SETTINGS: SceneSetting[] = [
 // erase a ring that was still a third as bright as when it started, which
 // read as the whole pattern being redrawn on that beat.
 const MAX_RIPPLES = 8;
+// Below this, a broadband beat rings out alongside a bass onset; at or above
+// it, only a bass onset does — see the trigger logic below and the "ripple"
+// SceneSetting's `reads`, which points its Beat pill at this same constant.
+const RIPPLE_SRC_BEAT_THRESHOLD = 0.5;
 const RIPPLE_SPEED = 1.1; // units/sec a ring expands at
 const RIPPLE_WIDTH = 4.0; // gaussian tightness of a ring's height profile — lower = wider ring
 const RIPPLE_DECAY_PER_SEC = 0.45; // lower = the ring lives longer and travels farther
@@ -717,8 +738,10 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
       const drop = anim.dropOnset && !prevDropOnset;
       prevDropOnset = anim.dropOnset;
       if (drop) ripples.trigger(RIPPLE_DROP_AMP);
-      // rippleSrc < 0.5: any broadband beat rings out. >= 0.5: bass onsets only.
-      else if (anim.lowOnset || (frame.beat && rippleSrc < 0.5)) ripples.trigger(1);
+      // A bass onset always rings; a broadband beat rings too, but only
+      // below RIPPLE_SRC_BEAT_THRESHOLD — see that constant's own comment,
+      // and the "ripple"/"rippleSrc" SceneSettings' `reads` above.
+      else if (anim.lowOnset || (frame.beat && rippleSrc < RIPPLE_SRC_BEAT_THRESHOLD)) ripples.trigger(1);
 
       return { uDriftPhase: driftPhase, uRippleRadius: ripples.radius, uRippleStrength: ripples.strength };
     };

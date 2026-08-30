@@ -283,6 +283,20 @@ const stylesheet = `
 }
 .vc-row:hover .vc-hint, .vc-row:focus-within .vc-hint { max-height: 48px; opacity: 1; margin-top: 5px; }
 
+/* A row's "reacts to" strip (controlsKit.ts's createSignalStrip) — a sibling
+ * of .vc-hint above, not nested inside it, so the two reveal independently:
+ * while auto owns the row, deviceMenu.ts replaces the hint's text wholesale
+ * (AUTO_HOLDING_HINT) but never touches this element, so the pills stay put.
+ * Reveals on hover/focus like the hint, or pinned open by its own head chip
+ * (.vc-reads-open, toggled on click) regardless of hover state. */
+.vc-reads {
+  max-height: 0; opacity: 0; overflow: hidden; margin-top: 0;
+  transition: max-height 0.18s ease, opacity 0.18s ease, margin-top 0.18s ease;
+}
+.vc-row:hover .vc-reads, .vc-row:focus-within .vc-reads, .vc-reads.vc-reads-open {
+  max-height: 60px; opacity: 1; margin-top: 6px;
+}
+
 /* The whole input is the touch target (taller than the 3px track it draws).
  * The accent comes from the enclosing .vc-row. */
 .vc-slider {

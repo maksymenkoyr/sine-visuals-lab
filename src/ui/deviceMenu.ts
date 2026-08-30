@@ -14,6 +14,7 @@ import {
 } from "../audio/sensitivity.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
+import { SIGNALS, type SignalSpec } from "../render/signals.ts";
 import { type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
@@ -47,6 +48,7 @@ import {
   createAdvancedSection,
   createCard,
   createChipButton,
+  createSignalStrip,
   digitsStyle,
   digitsTextStyle,
   groupHeading,
@@ -504,6 +506,22 @@ interface ControlRowSpec {
   devDefault?: {
     set(value: number): void;
   };
+  /** SceneSetting.reads (sceneSettings.ts), resolved to concrete signals and
+   *  callbacks by appendSettingRow below — see ResolvedSignalRead. Omit for
+   *  a setting with no `reads` entries. */
+  reads?: readonly ResolvedSignalRead[];
+}
+
+/** One SceneSetting.reads entry (sceneSettings.ts's SignalLink) resolved
+ *  against the active scene: `active` closes over the sibling-setting getter
+ *  a SignalLink.activeWhen predicate needs (built once in appendSettingRow,
+ *  not per frame), and `onReveal`, present only when the SignalSpec itself
+ *  has a `monitor` anchor, is the click target for its pill — unfold/scroll/
+ *  flash the meter row that shows it (audioMeters.ts's revealRow). */
+interface ResolvedSignalRead {
+  signal: SignalSpec;
+  active: () => boolean;
+  onReveal?: () => void;
 }
 
 /** Wires A/R/T on a row's own focusable control (the slider or the toggle
@@ -719,6 +737,24 @@ function createControlRow(spec: ControlRowSpec) {
   resetBtn.title = `Reset ${spec.label} (R)`;
   resetBtn.style.cssText = rowResetStyle;
 
+  // src/render/signals.ts's link from this setting to the live values that
+  // drive it — a small always-on chip in `right` (leftmost, read as a badge
+  // on the row rather than another action) plus a hover-revealed pill strip
+  // appended below, outside .vc-hint (see the .vc-reads rule,
+  // controlsTheme.ts, for why that placement matters). Omit both entirely
+  // for the common case of no `reads` — most rows have none.
+  const signalIndicator = spec.reads?.length
+    ? createSignalStrip(
+        spec.reads.map((r) => ({
+          label: r.signal.label,
+          description: r.signal.description,
+          onReveal: r.onReveal,
+        })),
+        spec.accent,
+      )
+    : null;
+  if (signalIndicator) right.appendChild(signalIndicator.chip);
+
   right.append(readout, chip, offChip, resetBtn);
   head.append(label, right);
 
@@ -748,6 +784,7 @@ function createControlRow(spec: ControlRowSpec) {
   hint.className = "vc-hint";
 
   el.append(head, slider, hint);
+  if (signalIndicator) el.appendChild(signalIndicator.strip);
   el.addEventListener("click", () => slider.focus());
   wireThumbMagnet(el, slider);
 
@@ -945,6 +982,21 @@ function createControlRow(spec: ControlRowSpec) {
       refreshChip();
       if (spec.auto && spec.auto.isEnabled()) display(spec.auto.resolveLive(), true);
       else display(spec.pin?.get() ?? manualValue(), false);
+    },
+    /** Called every rAF tick DeviceMenu.update() runs, unconditionally and
+     *  unthrottled — a no-op when this row has no `reads`, otherwise pushes
+     *  each linked SignalSpec's live read() (0 while frame/anim aren't up
+     *  yet) and activeWhen predicate into the strip. Unthrottled to match
+     *  the meters' own "fills move every frame" rule (audioMeters.ts) — a
+     *  beat-driven pill should feel as live as the meter it points at. */
+    updateSignalPills(frame: FeatureFrame | null, anim: AnimFrame | null): void {
+      if (!signalIndicator || !spec.reads) return;
+      signalIndicator.update(
+        spec.reads.map((r) => ({
+          value: frame && anim ? r.signal.read(frame, anim) : 0,
+          active: r.active(),
+        })),
+      );
     },
   };
 }
@@ -1585,7 +1637,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Builds one setting's row (enum picker, boolean toggle or slider) into `container` —
   // shared by the direct-to-sceneRows path and the advanced-section path
   // below, so a row behaves identically wherever it lands.
-  function appendSettingRow(container: HTMLElement, sceneId: string, spec: SceneSetting): void {
+  // `specs` is the active scene's full settings list, needed only to resolve
+  // a SignalLink.activeWhen predicate against a *sibling* setting by key
+  // (spec.reads below) — every other branch here only ever touches `spec`
+  // itself.
+  function appendSettingRow(container: HTMLElement, sceneId: string, spec: SceneSetting, specs: SceneSetting[]): void {
     if (spec.type === "enum" && spec.options) {
       container.appendChild(
         createPickerRow({
@@ -1614,6 +1670,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       return;
     }
 
+    // A sibling setting's live (auto-aware) value, by key — what a
+    // SignalLink.activeWhen predicate reads (see signals.ts's SignalLink doc
+    // comment). Falls back to 0 for an unknown key rather than throwing: a
+    // typo here is exactly what tests/signals.test.ts's key check exists to
+    // catch ahead of time, not something a live panel should crash over.
+    const getSiblingSetting = (key: string): number => {
+      const sibling = specs.find((s) => s.key === key);
+      return sibling ? deps.resolveSceneSettingValue(sceneId, sibling) : 0;
+    };
+    const reads: ResolvedSignalRead[] | undefined = spec.reads?.map((link) => {
+      const id = typeof link === "string" ? link : link.signal;
+      const activeWhen = typeof link === "string" ? undefined : link.activeWhen;
+      const signalSpec = SIGNALS[id];
+      return {
+        signal: signalSpec,
+        active: activeWhen ? () => activeWhen(getSiblingSetting) : () => true,
+        onReveal: signalSpec.monitor
+          ? () => {
+              if (isFolded(METERS_COLUMN)) setMetersHidden(false);
+              audioMeters.revealRow(signalSpec.monitor!.card, signalSpec.monitor!.row);
+            }
+          : undefined,
+      };
+    });
+
     const devDefault = deps.devDefault;
     const row = createControlRow({
       label: spec.label,
@@ -1638,6 +1719,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         : undefined,
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
       devDefault: devDefault ? { set: (value) => devDefault.set(sceneId, spec.key, value) } : undefined,
+      reads,
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));
@@ -1687,7 +1769,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         } else {
           advancedBody.appendChild(spacer());
         }
-        appendSettingRow(advancedBody, sceneId, spec);
+        appendSettingRow(advancedBody, sceneId, spec, specs);
         first = false;
         continue;
       }
@@ -1695,7 +1777,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
       if (!groupChanged && !first) sceneRows.appendChild(spacer());
       first = false;
-      appendSettingRow(sceneRows, sceneId, spec);
+      appendSettingRow(sceneRows, sceneId, spec, specs);
     }
 
     // The Scene card title is itself the block only when the active scene
@@ -1960,6 +2042,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
       audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs);
+      // Unthrottled, same reasoning as audioMeters' own fills — see
+      // createControlRow's updateSignalPills doc comment. A no-op per row
+      // with no `reads`, so this costs nothing for the common case.
+      for (const row of sceneRowHandles) row.updateSignalPills(frame, anim);
       // The tick is FeatureFrame.level — absolute, fixed-window loudness,
       // untouched by Auto-gain — so it reads the room regardless of that
       // amount. The fill starts from .energy, which Auto-gain does shape,
