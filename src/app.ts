@@ -32,6 +32,18 @@ import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
+import {
+  applyLook,
+  captureLook,
+  decodeLook,
+  deleteLook,
+  encodeLook,
+  hasUndo as hasLookUndo,
+  listLooks,
+  primeUndo,
+  saveLook,
+  takeUndo,
+} from "./render/sceneLooks.ts";
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
 import { getDefaultOverride, setDefaultOverride } from "./tuning/defaults.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
@@ -410,6 +422,22 @@ function wireDeviceMenu(): void {
       setSceneSetting(sceneId, spec, value);
     },
     onSceneSettingsReset: (sceneId) => resetSceneSettings(sceneId, getScene(sceneId)?.settings ?? []),
+    listLooks,
+    onSaveLook: (sceneId, name) => saveLook(captureLook(name, sceneId, getScene(sceneId)?.settings ?? [])),
+    onApplyLook: (look) => {
+      const specs = getScene(look.sceneId)?.settings ?? [];
+      primeUndo(look.sceneId, specs);
+      applyLook(look, specs);
+    },
+    onDeleteLook: deleteLook,
+    decodeLook,
+    buildShareLink: (look) =>
+      `${location.origin}${location.pathname}?look=${encodeLook(look)}#/v/${encodeURIComponent(look.sceneId)}`,
+    hasLookUndo,
+    onUndoLook: (sceneId) => {
+      const look = takeUndo(sceneId);
+      if (look) applyLook(look, getScene(sceneId)?.settings ?? []);
+    },
     getBandSplit: () => getBandSplit(),
     getBandEdgesHz: () => bandAnalyser?.bandEdgesHz ?? nominalBandEdgesHz(),
     getBandGain: (sceneId, fader) => getBandGain(sceneId, fader),
@@ -721,6 +749,35 @@ async function boot(): Promise<void> {
       },
       onDisabledPick: (id, reason) => showHud(`${id}: ${reason}`, true),
     });
+
+    // A shared look link (?look=<code>#/v/<id>, see looksCard.ts's
+    // buildShareLink) — applied once here, before routing, so enterViz below
+    // mounts the scene with the look's tuning already in place. The param is
+    // stripped either way so a reload can't re-apply it over edits made
+    // since, or repeat a broken link on every refresh.
+    const lookCode = params.get("look");
+    if (lookCode) {
+      const look = decodeLook(lookCode);
+      const targetScene = look ? getScene(look.sceneId) : undefined;
+      if (!look) {
+        // Deferred: the hash below (e.g. #/v/mesh, still present even when
+        // the ?look= code itself is corrupt) routes normally either way, and
+        // applyRoute -> enterViz below writes its own HUD line synchronously
+        // — a same-tick showHud here would be overwritten before anyone
+        // reads it.
+        setTimeout(() => showHud("that look link didn't parse", true), 0);
+      } else if (!targetScene) {
+        setTimeout(() => showHud("that look is for an unknown scene", true), 0);
+      } else {
+        saveLook(look);
+        const specs = targetScene.settings ?? [];
+        primeUndo(look.sceneId, specs);
+        applyLook(look, specs);
+        navigate({ kind: "viz", sceneId: look.sceneId }, "replace");
+      }
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
+
     seedHistory();
     onRouteChange(applyRoute);
     applyRoute(currentRoute());

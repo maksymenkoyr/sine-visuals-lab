@@ -13,6 +13,8 @@ import {
   shapeLevel,
 } from "../audio/sensitivity.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
+import type { SceneLook } from "../render/sceneLooks.ts";
+import { createLooksCard } from "./looksCard.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
@@ -169,6 +171,16 @@ export interface DeviceMenuDeps {
     value: number,
   ) => void;
   onSceneSettingsReset: (sceneId: string) => void;
+  /** Named, shareable snapshots of the Scene card's own settings — see
+   *  src/render/sceneLooks.ts. Rendered by the Looks card, next to Scene. */
+  listLooks: (sceneId: string) => SceneLook[];
+  onSaveLook: (sceneId: string, name: string) => void;
+  onApplyLook: (look: SceneLook) => void;
+  onDeleteLook: (sceneId: string, name: string) => void;
+  decodeLook: (code: string) => SceneLook | null;
+  buildShareLink: (look: SceneLook) => string;
+  hasLookUndo: (sceneId: string) => boolean;
+  onUndoLook: (sceneId: string) => void;
   /** Low/mid/high crossover, global per device (not per scene) — fixed, not
    *  user-facing, and unrelated to the faders: it only colors the spectrum
    *  strip's bars by pulse group. See src/audio/bandSplit.ts. */
@@ -1568,6 +1580,27 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   sceneCard.body.appendChild(sceneRows);
   let sceneRowHandles: ReturnType<typeof createControlRow>[] = [];
 
+  // Looks: named snapshots of the Scene card's own settings above — see
+  // src/render/sceneLooks.ts. Hidden the same way sceneCard is when the
+  // active scene has no settings to snapshot (renderSceneSettings below).
+  const looksCard = createLooksCard({
+    currentSceneId: deps.currentSceneId,
+    listLooks: deps.listLooks,
+    onSaveLook: deps.onSaveLook,
+    onApplyLook: (look) => {
+      deps.onApplyLook(look);
+      renderSceneSettings();
+    },
+    onDeleteLook: deps.onDeleteLook,
+    decodeLook: deps.decodeLook,
+    buildShareLink: deps.buildShareLink,
+    hasUndo: deps.hasLookUndo,
+    onUndoLook: (sceneId) => {
+      deps.onUndoLook(sceneId);
+      renderSceneSettings();
+    },
+  });
+
   // Walks every .vc-block heading in document order and writes its digit —
   // called whenever the block set can change (only renderSceneSettings does:
   // group headings come and go with the active scene). Blanks anything past
@@ -1651,6 +1684,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     sceneRows.innerHTML = "";
     sceneRowHandles = [];
     sceneCard.el.style.display = specs.length === 0 ? "none" : "";
+    looksCard.el.style.display = specs.length === 0 ? "none" : "";
+    looksCard.refresh();
     refreshAutoMaster();
 
     let lastGroup: string | undefined;
@@ -1810,7 +1845,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     toggleOff: toggleAutoStrengthOff,
   });
 
-  controlsCol.append(autoRow, inputCard.el, sceneCard.el, paletteCard.el, footer);
+  controlsCol.append(autoRow, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, footer);
   root.append(columnsWrap, controlsCol);
   document.body.appendChild(root);
 
