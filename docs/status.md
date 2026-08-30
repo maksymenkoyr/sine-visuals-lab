@@ -10,9 +10,12 @@ regenerate it at session close.
   (worktree at `.claude/worktrees/storm-scene`), draft PR #41.
   A volumetric raymarched cumulus (density = baked lobe shape × tileable 3D
   noise, both as 3D textures) lit from inside by a JS-side strike pool on
-  every beat; `minQuality: "low"`, registered as a draft tile. Started as a
+  every beat; `minQuality: "low"`, registered as a draft tile. A `Mode`
+  picker (`MODES`) switches Gas / Particles / Both, and `Particle style`
+  (`PARTICLE_STYLES`) picks the point behaviour — Cloud, Swarm (dragged into
+  each bolt), Sparks (embers thrown off the strikes). Started as a
   `gl.POINTS` particle cloud, rewritten to a gas volume on request in the
-  same session. Verified headlessly at high/low quality, in the gallery, and
+  same session, then the particles came back as modes. Verified headlessly at high/low quality, in the gallery, and
   with the auto→manual probe sign-off; `tests/storm.test.ts` covers the pure
   helpers and both `ALL_SETTINGS` invariant suites include it. **Not yet
   judged on real music.**

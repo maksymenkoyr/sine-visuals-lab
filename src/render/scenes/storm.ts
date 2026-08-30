@@ -50,7 +50,8 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 //    per-strike haze — weak now, since the volume itself carries the flash.
 //    The composite is tonemapped (1 - exp(-c)) instead of clipped, so a big
 //    flash saturates gracefully rather than holding flat white the way the
-//    old additive point cloud did.
+//    additive point pass below does (it has no tonemap behind it, which is
+//    why its own gains are kept modest).
 //  - Cost is bounded by uMaxSteps (MAX_STEPS is the compile-time cap) and by
 //    two cheap gates: a step whose silhouette is ~0 costs one fetch and then
 //    strides on at double length, and lighting is skipped where the density
@@ -69,10 +70,68 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 //    skipped tick never reaches render(), and anim.dtSec is the tick
 //    interval, not the time since this scene last drew. A pulse that has
 //    risen since the last draw can't be missed, whichever tick it rose on.
+//
+// Modes (the `mode` setting, options MODES): the volume above is only one of
+// them. Gas is the march alone; Particles skips it (uMode reaches VOLUME_FRAG,
+// which then returns just the background — sky, per-strike haze, drop flash —
+// so the pass stays a handful of instructions) and draws a point cloud
+// instead; Both draws the volume and then the points additively over it, at
+// half the draw count so the gas underneath stays readable.
+//
+// The point cloud is a static VBO sampled at init from the same lobes the
+// silhouette was baked from (buildCloud, seeded with CLOUD_SEED so the two
+// agree), with a per-particle seed and a strike slot (`aSlot` = i %
+// MAX_STRIKES). Any prefix of the buffer is a representative subsample — that
+// is what lets Cloud density simply shrink the draw count. The budget comes
+// from ctx.quality.maxParticles through particleCountForQuality and is baked
+// at init (switching preset mid-run only lands on the next scene switch, the
+// same caveat meshGrid.ts's grid size has); uCountBoost inflates sparse
+// clouds so a gallery tile still reads as a cloud rather than dust.
+//
+// What a particle does is the `particleStyle` setting (options
+// PARTICLE_STYLES), branched on in POINT_VERT:
+//
+//  - Cloud: the particles *are* the cloud — static lobe-sampled positions
+//    with a slow sinusoidal churn, an ambient skylit base colour, the same
+//    per-strike broad-body-plus-hot-core lighting the march does, and treble
+//    sparks.
+//  - Swarm: not a cloud but a flow. Each particle orbits the cloud volume
+//    (radius, height and phase from its seed, turning at a rate off Swirl
+//    speed and the tempo) with an analytic curl-ish wander on top, and every
+//    live strike *pulls* it: an inverse-square-ish attraction toward the
+//    closest point on the bolt, strong enough that a full-strength strike
+//    drags the nearby swarm most of the way onto it over the flash. The pull
+//    also brightens and whitens the particle, so the swarm streaks into the
+//    lightning.
+//  - Sparks: embers thrown off the bolts. Each particle belongs to one strike
+//    slot and lives only while that slot's strike is young — createStrikePool
+//    stamps `birth` per slot and render() uploads uStrikeBirth/uStrikeAmp, so
+//    the shader ballistically integrates the ember from a random point on
+//    that segment (launch direction and speed off the seed, drag, gravity)
+//    and puts it off-screen outside its lifetime. Dead particles cost nothing
+//    beyond a vertex, so this style draws its whole buffer up to
+//    SPARK_MAX_DRAW rather than a density prefix.
 const ID = "storm";
 
 const MAX_STRIKES = 8;
 const LOBE_COUNT = 9;
+// The particle budget, and the ceiling on how many embers one strike throws
+// (every particle in a slot is born at once, so the sparks draw is capped
+// well below MAX_PARTICLES to keep the burst affordable).
+const MAX_PARTICLES = 120_000;
+const MIN_PARTICLES = 4_000;
+const SPARK_MAX_DRAW = 40_000;
+// Samples that fall outside the bounding ellipsoid are redrawn this many
+// times before being pulled back to the surface — pulling on the first miss
+// piled every gaussian tail onto the ellipsoid and drew a hard, dense rim.
+const SAMPLE_RETRIES = 8;
+/** The `mode` setting's options, in value order. */
+const MODES: readonly string[] = ["Gas", "Particles", "Both"];
+const MODE_GAS = 0;
+const MODE_PARTICLES = 1;
+/** The `particleStyle` setting's options, in value order — see POINT_VERT. */
+const PARTICLE_STYLES: readonly string[] = ["Cloud", "Swarm", "Sparks"];
+const STYLE_SPARKS = 2;
 // Bounding ellipsoid half-extents of the cloud, in cloud-space units — where
 // the lobe centres are allowed to sit and where the strikes are kept. The
 // camera (CAMERA_GLSL) is placed so this fills a comfortable share of the
@@ -129,6 +188,32 @@ const CLOUD_SEED = 1;
 // snap comment in caustics.ts), so a large pulse weight is really a constant
 // offset in disguise.
 const SETTINGS: SceneSetting[] = [
+  // "Look" leads so the two pickers sit at the top of the device menu: they
+  // decide what the rest of the settings are even acting on.
+  {
+    key: "mode",
+    label: "Mode",
+    description: "Gas is the raymarched cloud; Particles is a point cloud instead; Both draws the points over the gas.",
+    group: "Look",
+    type: "enum",
+    options: MODES,
+    min: 0,
+    max: MODES.length - 1,
+    step: 1,
+    default: 0,
+  },
+  {
+    key: "particleStyle",
+    label: "Particle style",
+    description: "Cloud is the gas made of points; Swarm flows and is dragged into each bolt; Sparks are embers thrown off the strikes.",
+    group: "Look",
+    type: "enum",
+    options: PARTICLE_STYLES,
+    min: 0,
+    max: PARTICLE_STYLES.length - 1,
+    step: 1,
+    default: 0,
+  },
   {
     key: "strike",
     label: "Strike intensity",
@@ -176,7 +261,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "density",
     label: "Cloud density",
-    description: "How thick the gas is — how much light it swallows on the way through",
+    description: "How thick the gas is — and, in the particle modes, how many particles are drawn",
     group: "Cloud",
     min: 0,
     max: 1,
@@ -223,7 +308,7 @@ const SETTINGS: SceneSetting[] = [
     // — two declarations of the same name is a shader compile error.
     key: "grain",
     label: "Detail",
-    description: "How hard the noise erodes the cloud into separate billows",
+    description: "How hard the noise erodes the cloud into separate billows, and how big each particle sprite is",
     group: "Cloud",
     min: 0,
     max: 1,
@@ -339,6 +424,61 @@ export function buildLobes(rng: () => number, count = LOBE_COUNT): Lobe[] {
  *  instead of the biggest one taking most of the lightning. */
 function pickLobe(rng: () => number, lobes: Lobe[]): Lobe {
   return lobes[Math.min(lobes.length - 1, Math.floor(rng() * lobes.length))];
+}
+
+/** Picks a lobe by volume (r^3), so a big lobe gets its share of the particle
+ *  budget and the point cloud reads as one mass rather than a ring of equal
+ *  puffs. Strikes use the uniform pickLobe instead. */
+function pickLobeByVolume(rng: () => number, lobes: Lobe[]): Lobe {
+  let total = 0;
+  for (const l of lobes) total += l.r ** 3;
+  let x = rng() * total;
+  for (const l of lobes) {
+    x -= l.r ** 3;
+    if (x <= 0) return l;
+  }
+  return lobes[lobes.length - 1];
+}
+
+/** Samples the particle cloud. Positions are xyz triples in cloud space;
+ *  seeds are per-particle [0,1) values the shader uses for size, churn phase,
+ *  orbit, ember launch and sparkle selection. Deterministic for a given seed,
+ *  and — because buildLobes is the first thing drawn from the seeded rng, as
+ *  in cloudVolumes() — the lobes it returns for CLOUD_SEED are exactly the
+ *  ones the silhouette volume was baked from, so points and gas share a
+ *  cloud. Particles are laid down in no lobe order, so any prefix of the
+ *  buffer is a representative subsample and Cloud density can just shorten
+ *  the draw. */
+export function buildCloud(count: number, seed = CLOUD_SEED): {
+  positions: Float32Array;
+  seeds: Float32Array;
+  lobes: Lobe[];
+} {
+  const rng = createRng(seed);
+  const lobes = buildLobes(rng);
+  const positions = new Float32Array(count * 3);
+  const seeds = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const l = pickLobeByVolume(rng, lobes);
+    let p: [number, number, number] = [0, 0, 0];
+    for (let attempt = 0; attempt <= SAMPLE_RETRIES; attempt++) {
+      p = [l.cx + l.r * gaussian(rng), l.cy + l.r * 0.7 * gaussian(rng), l.cz + l.r * gaussian(rng)];
+      if (insideCloud(p[0], p[1], p[2])) break;
+    }
+    p = clampToEllipsoid(p);
+    positions[i * 3] = p[0];
+    positions[i * 3 + 1] = p[1];
+    positions[i * 3 + 2] = p[2];
+    seeds[i] = rng();
+  }
+  return { positions, seeds, lobes };
+}
+
+/** The particle budget this scene actually allocates for a quality preset's
+ *  `maxParticles`: enough that the floor preset still reads as a cloud, and
+ *  capped where additive fill rate stops paying for itself. */
+export function particleCountForQuality(maxParticles: number): number {
+  return Math.max(MIN_PARTICLES, Math.min(MAX_PARTICLES, Math.floor(maxParticles)));
 }
 
 // --- The noise volume -------------------------------------------------------
@@ -573,6 +713,11 @@ export function createStrikePool(lobes: Lobe[], rng: () => number = Math.random)
   const posA = new Float32Array(MAX_STRIKES * 3);
   const posB = new Float32Array(MAX_STRIKES * 3);
   const strength = new Float32Array(MAX_STRIKES);
+  // Wall-clock (anim.timeSec) instant each slot last fired, for the Sparks
+  // style: the shader ages its embers against uTime directly rather than
+  // against `age` here, so it needs the absolute birth, not the elapsed time.
+  // -1e6 = never fired, which puts every ember well past its lifetime.
+  const birth = new Float32Array(MAX_STRIKES).fill(-1e6);
   let sinceLast = 1e6;
   return {
     /** Segment start per slot, xyz triples in cloud space. */
@@ -581,19 +726,25 @@ export function createStrikePool(lobes: Lobe[], rng: () => number = Math.random)
     posB,
     /** Current light strength per slot: amplitude x strikeEnvelope(age). */
     strength,
+    /** Amplitude each slot fired at, un-enveloped. 0 = never fired. */
+    amp,
+    /** anim.timeSec each slot fired at; -1e6 for a slot that never has. */
+    birth,
     /** Fires a strike in whichever slot has been fading the longest — never
      *  the youngest, so a beat can't cut off the flash the last one started.
      *  Strength is set immediately so the attack lands on this very frame.
      *  Returns false (and does nothing) inside the refractory window after
      *  the previous strike unless `force` — that's what folds a low onset and
-     *  a broadband beat on adjacent frames into one strike. */
-    trigger(amplitude = 1, force = false): boolean {
+     *  a broadband beat on adjacent frames into one strike. `nowSec` is the
+     *  clock the Sparks style ages embers against (anim.timeSec). */
+    trigger(amplitude = 1, force = false, nowSec = 0): boolean {
       if (!force && sinceLast < STRIKE_REFRACTORY_SEC) return false;
       sinceLast = 0;
       let slot = 0;
       for (let i = 1; i < MAX_STRIKES; i++) if (age[i] > age[slot]) slot = i;
       age[slot] = 0;
       amp[slot] = amplitude;
+      birth[slot] = nowSec;
       seed[slot] = rng() * 1000;
       const seg = sampleStrikeSegment(rng, lobes);
       posA[slot * 3] = seg[0];
@@ -624,6 +775,15 @@ const STRIKE_UNIFORMS_GLSL = `
 uniform vec3 uStrikeA[${MAX_STRIKES}];
 uniform vec3 uStrikeB[${MAX_STRIKES}];
 uniform float uStrikeStrength[${MAX_STRIKES}];
+`;
+
+// Only the Sparks style reads these, so they live apart from the strike
+// uniforms every pass wants: the absolute instant each slot fired and the
+// amplitude it fired at, both un-enveloped (an ember has its own lifetime,
+// which outlasts strikeEnvelope's flash).
+const SPARK_UNIFORMS_GLSL = `
+uniform float uStrikeBirth[${MAX_STRIKES}];
+uniform float uStrikeAmp[${MAX_STRIKES}];
 `;
 
 // The one camera in this scene, in both directions. Forward (cloudToView +
@@ -827,6 +987,16 @@ void main() {
   float aspect = roomAspect();
   vec3 bg = background(uv, aspect);
 
+  // Particles mode: no march at all. The point pass draws the cloud, so all
+  // this pass owes it is something to draw over — sky, the haze around each
+  // live bolt, and the drop flash. Every pixel is still written (nothing else
+  // in the shared gallery context clears colour).
+  if (int(uMode + 0.5) == ${MODE_PARTICLES}) {
+    vec3 flat_ = bg + boltColor() * 0.1 * uDropPulse * uDropStorm;
+    outColor = vec4(1.0 - exp(-flat_ * 1.25), 1.0);
+    return;
+  }
+
   // The ray, built in the camera's own space and pushed back into cloud
   // space: the exact inverse of cloudToView (see CAMERA_GLSL).
   vec2 ndc = uv * 2.0 - 1.0;
@@ -923,6 +1093,208 @@ void main() {
 }
 `;
 
+// The point cloud. One program for all three styles: uParticleStyle is a
+// uniform, so the branch is coherent across the whole draw and costs nothing
+// beyond the instructions of the branch actually taken.
+const POINT_VERT = `#version 300 es
+precision highp float;
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in float aSeed;
+layout(location = 2) in float aSlot; // which strike slot this particle belongs to (Sparks)
+out vec3 vColor;
+${COMMON_UNIFORMS_GLSL}
+${settingsUniformsGlsl}
+${STRIKE_UNIFORMS_GLSL}
+${SPARK_UNIFORMS_GLSL}
+uniform float uCountBoost;
+${PALETTE_GLSL}
+${CAMERA_GLSL}
+
+#define MAX_STRIKES ${MAX_STRIKES}
+#define EXTENT_X ${CLOUD_EXTENT_X.toFixed(2)}
+#define EXTENT_Y ${CLOUD_EXTENT_Y.toFixed(2)}
+#define EXTENT_Z ${CLOUD_EXTENT_Z.toFixed(2)}
+#define STYLE_SWARM 1
+#define STYLE_SPARKS ${STYLE_SPARKS}
+#define TAU 6.2831853
+// How much of the way onto the bolt a full-strength strike drags a Swarm
+// particle sitting right on top of it. Below 1, so the swarm streaks toward
+// the lightning over the flash without collapsing onto the segment.
+#define PULL_K 0.5
+
+float hash11(float x) {
+  return fract(sin(x * 127.1) * 43758.5453);
+}
+
+vec3 closestOnSegment(vec3 p, vec3 a, vec3 b) {
+  vec3 ab = b - a;
+  float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+  return a + ab * t;
+}
+
+float distToSegment(vec3 p, vec3 a, vec3 b) {
+  return length(p - closestOnSegment(p, a, b));
+}
+
+void main() {
+  float seed = aSeed;
+  float t = uTime;
+  int style = int(uParticleStyle + 0.5);
+
+  float reachR = mix(0.15, 0.6, uReach);
+  float gain = mix(0.3, 1.2, uStrike);
+  vec3 boltTint = mix(vec3(0.72, 0.82, 1.0), palette(0.15, uPalA, uPalB, uPalC, uPalD), 0.3);
+
+  vec3 p = aPos;
+  vec3 color = vec3(0.0);
+  float sizeScale = 1.0;
+
+  if (style == STYLE_SPARKS) {
+    // Embers thrown off one bolt. Everything is a function of this slot's
+    // birth instant and the particle's own seed, so no state is kept: a
+    // particle whose slot is idle (or whose ember has burnt out) is pushed
+    // off-screen at zero size and costs nothing past this branch.
+    int slot = int(aSlot + 0.5);
+    float age = t - uStrikeBirth[slot];
+    float life = mix(0.6, 1.4, hash11(seed * 2.9));
+    if (age < 0.0 || age > life) {
+      gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
+      gl_PointSize = 0.0;
+      return;
+    }
+    vec3 origin = mix(uStrikeA[slot], uStrikeB[slot], hash11(seed * 1.7));
+    // A uniform direction on the sphere, then biased up and away from the
+    // cloud's axis so the embers arc out of the bolt instead of raining
+    // straight back into it.
+    float th = hash11(seed * 4.1) * TAU;
+    float zc = hash11(seed * 6.7) * 2.0 - 1.0;
+    float rc = sqrt(max(0.0, 1.0 - zc * zc));
+    vec3 dir = normalize(
+      vec3(rc * cos(th), zc, rc * sin(th))
+      + vec3(0.0, 0.55, 0.0)
+      + 0.45 * normalize(origin + vec3(1e-3)));
+    vec3 vel = dir * mix(1.5, 4.0, hash11(seed * 8.3));
+    // Ballistic with drag: the closed form of v' = -3v, plus gravity.
+    p = origin + vel * (1.0 - exp(-2.0 * age)) / 2.0 - vec3(0.0, 2.5 * age * age * 0.5, 0.0);
+
+    float fade = 1.0 - age / life;
+    float twinkle = 0.6 + 0.4 * hash11(seed + floor(t * 30.0));
+    float bright = uStrikeAmp[slot] * fade * fade * twinkle;
+    // White-blue at the bolt, cooling to a warm ember as it falls.
+    vec3 ember = mix(vec3(1.0, 0.5, 0.16), palette(0.08, uPalA, uPalB, uPalC, uPalD), 0.35);
+    color = mix(boltTint * 1.5, ember, clamp((age / life) * 1.6, 0.0, 1.0)) * bright * gain;
+    sizeScale = mix(1.0, 0.35, age / life);
+  } else if (style == STYLE_SWARM) {
+    // Not a cloud: every particle orbits the volume on its own radius,
+    // height and phase, at a rate off Swirl speed and the tempo.
+    // sqrt of a uniform draw, with the height tapered off by the radius, so
+    // the swarm fills the cloud's own ellipsoid rather than reading as a
+    // cylinder standing side-on to the camera.
+    float rad = sqrt(mix(0.03, 1.0, hash11(seed * 5.3)));
+    float rate = (0.35 + 1.1 * uSwirl) * (0.6 + 0.4 * clamp(uBpm / 120.0, 0.3, 2.0));
+    float a = hash11(seed * 2.3) * TAU + t * rate;
+    vec3 q = vec3(
+      cos(a) * EXTENT_X * rad,
+      (hash11(seed * 9.1) * 2.0 - 1.0) * EXTENT_Y * sqrt(max(0.0, 1.0 - rad * rad * 0.9)),
+      sin(a) * EXTENT_Z * rad);
+    // Curl-ish wander: sines of position and time, so neighbours drift
+    // together as a flow rather than jittering apart as noise.
+    q += 0.22 * vec3(
+      sin(q.z * 2.3 + t * 0.8 + seed * 11.0),
+      sin(q.x * 2.7 - t * 0.6 + seed * 7.0),
+      sin(q.y * 3.1 + t * 0.7 + seed * 5.0));
+    q += 0.1 * sin(q.yzx * 4.1 + t * 1.3);
+
+    // Live strikes drag the swarm: an inverse-square-ish attraction toward
+    // the closest point on each bolt, alongside the usual strike light.
+    float pullR = mix(0.5, 1.2, uReach);
+    vec3 pull = vec3(0.0);
+    float light = 0.0;
+    for (int i = 0; i < MAX_STRIKES; i++) {
+      float s = uStrikeStrength[i];
+      if (s <= 0.001) continue;
+      vec3 toBolt = closestOnSegment(q, uStrikeA[i], uStrikeB[i]) - q;
+      float d2 = dot(toBolt, toBolt);
+      pull += toBolt * (s * PULL_K / (1.0 + d2 / (pullR * pullR)));
+      float dr = sqrt(d2) / reachR;
+      // Body glow only — no hot core: the pull already piles the swarm onto
+      // the bolt, and a core term on top of that pile reads as a white slab.
+      light += s * 0.5 / (1.0 + dr * dr);
+    }
+    p = q + pull;
+    light *= gain;
+    float dragged = clamp(length(pull) * 1.0, 0.0, 1.0);
+
+    vec3 base = mix(palette(0.55 + 0.2 * seed, uPalA, uPalB, uPalC, uPalD), vec3(0.55, 0.65, 1.0), 0.25) * 0.45;
+    float ambient = uAmbient * (0.5 + uEnergy) * (0.55 + 0.45 * hash11(seed * 3.7));
+    float spark = uSpark * uHighPulse * step(0.96, hash11(seed * 7.1 + floor(t * 10.0)));
+    color = base * ambient
+      + mix(boltTint, vec3(1.0), dragged) * (light + dragged * 0.4)
+      + vec3(1.0) * spark;
+  } else {
+    // Cloud: the particles are the gas. Slow internal churn so it never sits
+    // perfectly still, then the same broad-body-plus-hot-core strike light
+    // the march computes per step.
+    p = aPos + 0.05 * vec3(
+      sin(t * 0.7 + seed * 31.0),
+      sin(t * 0.9 + seed * 17.0),
+      sin(t * 0.6 + seed * 23.0));
+
+    float light = 0.0;
+    for (int i = 0; i < MAX_STRIKES; i++) {
+      float s = uStrikeStrength[i];
+      if (s <= 0.001) continue;
+      float d = distToSegment(p, uStrikeA[i], uStrikeB[i]);
+      float dr = d / reachR;
+      light += s * (1.0 / (1.0 + dr * dr) + 2.0 * exp(-d * d / 0.004));
+    }
+    // Gain is kept modest on purpose: the particles are additive with no
+    // tonemap behind them, so a peak much above ~2 just holds pure white
+    // until the envelope has decayed most of the way, then drops off a cliff.
+    light *= gain;
+
+    // Resting glow: brighter toward the top of the cloud, as if skylit, and
+    // dimmer with distance so the far side reads as behind the near side.
+    float heightShade = 0.55 + 0.45 * clamp((aPos.y + EXTENT_Y) / (2.0 * EXTENT_Y), 0.0, 1.0);
+    float depthShade = mix(1.0, 0.5, smoothstep(CAM_DIST - 1.2, CAM_DIST + 1.2, cloudToView(p).z));
+    float ambient = uAmbient * (0.5 + uEnergy) * heightShade * depthShade * (0.7 + 0.3 * hash11(seed * 3.7));
+    // Treble sparks: a scattered few particles glint on high-band hits.
+    float spark = uSpark * uHighPulse * step(0.96, hash11(seed * 7.1 + floor(t * 10.0)));
+
+    vec3 base = mix(vec3(0.32, 0.34, 0.5), palette(0.6 + 0.1 * seed, uPalA, uPalB, uPalC, uPalD), 0.5) * 0.4;
+    color = base * ambient + mix(boltTint, vec3(1.0), clamp(light, 0.0, 1.0)) * light + vec3(1.0) * spark;
+  }
+
+  vColor = color;
+
+  vec3 view = cloudToView(p);
+  vec2 ndc = viewToRoomNdc(view);
+  vec2 uv01 = ndc * 0.5 + 0.5;
+  uv01 = (uv01 - uViewport.xy) / uViewport.zw;
+  gl_Position = vec4(uv01 * 2.0 - 1.0, 0.0, 1.0);
+
+  // Sized in device pixels against a 1080p reference so the cloud reads the
+  // same in a gallery tile and at 4K; uCountBoost keeps sparse clouds dense.
+  // The floor is where the soft disc in POINT_FRAG still covers whole
+  // pixels — below it a gallery tile's sprites thin out to almost nothing.
+  float px = mix(2.0, 10.0, uGrain) * (uResolution.y / 1080.0) * uCountBoost
+    * (CAM_DIST / view.z) * (0.6 + 0.8 * seed) * sizeScale;
+  gl_PointSize = clamp(px, 2.5, 40.0);
+}
+`;
+
+const POINT_FRAG = `#version 300 es
+precision highp float;
+in vec3 vColor;
+out vec4 outColor;
+
+void main() {
+  float r = length(gl_PointCoord - 0.5);
+  float mask = smoothstep(0.5, 0.1, r);
+  outColor = vec4(vColor * mask, 1.0);
+}
+`;
+
 // ---------------------------------------------------------------------------
 
 // Both volumes are identical for every mount and neither is cheap to build
@@ -942,11 +1314,26 @@ function cloudVolumes() {
   return cachedShape;
 }
 
+// The CPU-side point cloud is reused across mounts of the same count — init
+// runs on every gallery<->viz transition, so sampling the whole budget each
+// time would be a visible hitch.
+let cachedCloud: { count: number; cloud: ReturnType<typeof buildCloud> } | null = null;
+function cloudFor(n: number) {
+  if (!cachedCloud || cachedCloud.count !== n) cachedCloud = { count: n, cloud: buildCloud(n) };
+  return cachedCloud.cloud;
+}
+
 export const stormScene: Scene = (() => {
   let prog: GLProgram | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;
   let noiseTex: WebGLTexture | null = null;
   let shapeTex: WebGLTexture | null = null;
+  let pointProg: GLProgram | null = null;
+  let pointVao: WebGLVertexArrayObject | null = null;
+  let posBuf: WebGLBuffer | null = null;
+  let seedBuf: WebGLBuffer | null = null;
+  let slotBuf: WebGLBuffer | null = null;
+  let count = 0;
   let pool: ReturnType<typeof createStrikePool> | null = null;
   // Last-drawn pulse levels and clock, for the rise detection and render-dt
   // measurement the file header explains.
@@ -1021,6 +1408,34 @@ export const stormScene: Scene = (() => {
       gl.uniform1i(gl.getUniformLocation(prog.program, "uNoise"), 0);
       gl.uniform1i(gl.getUniformLocation(prog.program, "uShape"), 1);
 
+      // The point cloud, sampled from the same lobes the shape volume was
+      // baked from (buildCloud seeds buildLobes exactly as cloudVolumes does),
+      // so in Both mode the points sit inside the gas rather than beside it.
+      pointProg = createProgram(gl, POINT_FRAG, POINT_VERT);
+      count = particleCountForQuality(ctx.quality.maxParticles);
+      const cloud = cloudFor(count);
+      const slots = new Float32Array(count);
+      for (let i = 0; i < count; i++) slots[i] = i % MAX_STRIKES;
+
+      pointVao = gl.createVertexArray();
+      gl.bindVertexArray(pointVao);
+      posBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, cloud.positions, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+      seedBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, seedBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, cloud.seeds, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
+      slotBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, slotBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, slots, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+      gl.bindVertexArray(null);
+
       pool = createStrikePool(lobes);
       prevBeatPulse = 0;
       prevLowPulse = 0;
@@ -1029,7 +1444,7 @@ export const stormScene: Scene = (() => {
     },
 
     render(ctx, frame, viewport, palette, anim) {
-      if (!prog || !quadVao || !pool || !noiseTex || !shapeTex) return;
+      if (!prog || !quadVao || !pool || !noiseTex || !shapeTex || !pointProg || !pointVao) return;
       const { gl } = ctx;
 
       // resolveSceneSetting (not getSceneSetting) — the raw manual value
@@ -1038,6 +1453,9 @@ export const stormScene: Scene = (() => {
       const afterglow = resolveSceneSetting(ID, settingFor("afterglow"));
       const flicker = resolveSceneSetting(ID, settingFor("flicker"));
       const dropStorm = resolveSceneSetting(ID, settingFor("dropStorm"));
+      const density = resolveSceneSetting(ID, settingFor("density"));
+      const mode = Math.round(resolveSceneSetting(ID, settingFor("mode")));
+      const style = Math.round(resolveSceneSetting(ID, settingFor("particleStyle")));
 
       // Time since this scene last drew — see the file header for why this
       // isn't anim.dtSec. Guards the first frame and any backwards jump.
@@ -1057,9 +1475,9 @@ export const stormScene: Scene = (() => {
         // A drop is a burst of ordinary-strength strikes in different lobes
         // (a cloud-wide flash), not one overdriven strike — three at full
         // amplitude already saturate most of the cloud.
-        for (let i = 0; i < STRIKE_DROP_BURST; i++) pool.trigger(0.8 + 0.6 * dropStorm, true);
+        for (let i = 0; i < STRIKE_DROP_BURST; i++) pool.trigger(0.8 + 0.6 * dropStorm, true, anim.timeSec);
       } else if (lowRose || beatRose) {
-        pool.trigger(0.7 + 0.5 * (lowRose ? anim.lowPulse : 0));
+        pool.trigger(0.7 + 0.5 * (lowRose ? anim.lowPulse : 0), false, anim.timeSec);
       }
 
       gl.disable(gl.DEPTH_TEST);
@@ -1077,11 +1495,43 @@ export const stormScene: Scene = (() => {
       gl.bindTexture(gl.TEXTURE_3D, shapeTex);
       gl.activeTexture(gl.TEXTURE0);
 
+      // The volume pass goes first in every mode: it paints every pixel (in
+      // Particles mode it returns the background alone), so the points can be
+      // laid over it additively with nothing to clear.
       drawFullscreenQuad(gl, quadVao);
+
+      if (mode !== MODE_GAS) {
+        pointProg.use();
+        uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+        pointProg.setV3v("uStrikeA", pool.posA);
+        pointProg.setV3v("uStrikeB", pool.posB);
+        pointProg.setFv("uStrikeStrength", pool.strength);
+        pointProg.setFv("uStrikeBirth", pool.birth);
+        pointProg.setFv("uStrikeAmp", pool.amp);
+        pointProg.setF("uCountBoost", Math.min(3, Math.max(1, Math.sqrt(MAX_PARTICLES / count))));
+
+        // Sparks draws its whole buffer (every particle belongs to a strike
+        // slot, and one outside its lifetime is discarded in the vertex
+        // shader), capped so a single strike's burst stays affordable. The
+        // other styles draw a prefix, which is what Cloud density thins. Both
+        // halves whatever that comes to, so the gas stays readable through
+        // the points.
+        const full = style === STYLE_SPARKS
+          ? Math.min(count, SPARK_MAX_DRAW)
+          : Math.floor(count * Math.max(0.05, density));
+        const drawn = mode === MODE_PARTICLES ? full : Math.floor(full / 2);
+
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE);
+        gl.bindVertexArray(pointVao);
+        gl.drawArrays(gl.POINTS, 0, drawn);
+        gl.bindVertexArray(null);
+      }
 
       // The gallery renders every scene into one shared context each tick —
       // leave the state every other scene expects to find.
       gl.disable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.disable(gl.DEPTH_TEST);
       gl.depthMask(true);
     },
@@ -1089,7 +1539,12 @@ export const stormScene: Scene = (() => {
     dispose(ctx: SceneContext) {
       const { gl } = ctx;
       prog?.dispose();
+      pointProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
+      if (pointVao) gl.deleteVertexArray(pointVao);
+      if (posBuf) gl.deleteBuffer(posBuf);
+      if (seedBuf) gl.deleteBuffer(seedBuf);
+      if (slotBuf) gl.deleteBuffer(slotBuf);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_3D, null);
       gl.activeTexture(gl.TEXTURE0);
@@ -1100,6 +1555,12 @@ export const stormScene: Scene = (() => {
       quadVao = null;
       noiseTex = null;
       shapeTex = null;
+      pointProg = null;
+      pointVao = null;
+      posBuf = null;
+      seedBuf = null;
+      slotBuf = null;
+      count = 0;
       pool = null;
       prevBeatPulse = 0;
       prevLowPulse = 0;

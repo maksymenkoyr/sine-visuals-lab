@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildCloud,
   buildLobes,
   buildNoiseVolume,
   buildShapeVolume,
   createRng,
   createStrikePool,
   insideCloud,
+  particleCountForQuality,
   sampleStrikeSegment,
   shapeAt,
   strikeEnvelope,
@@ -132,6 +134,89 @@ describe("storm strike pool", () => {
       expect(len).toBeGreaterThan(0);
       expect(len).toBeLessThanOrEqual(0.6 + 1e-9);
     }
+  });
+
+  it("stamps the birth time on the slot it reclaims, and only that slot", () => {
+    const pool = createStrikePool(lobes, createRng(6));
+    expect(Array.from(pool.birth).every((b) => b === -1e6)).toBe(true);
+    expect(pool.trigger(1, false, 12.5)).toBe(true);
+    const first = Array.from(pool.birth).findIndex((b) => b !== -1e6);
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(pool.birth[first]).toBe(12.5);
+    Array.from(pool.birth).forEach((b, i) => {
+      if (i !== first) expect(b).toBe(-1e6);
+    });
+
+    pool.tick(0.2, 0.4, 0.5);
+    expect(pool.trigger(0.8, false, 12.7)).toBe(true);
+    const second = Array.from(pool.birth).findIndex((b) => b === 12.7);
+    expect(second).not.toBe(first);
+    // The earlier strike's embers keep ageing against their own birth.
+    expect(pool.birth[first]).toBe(12.5);
+  });
+
+  it("leaves a slot that has never fired at its never-born birth", () => {
+    const pool = createStrikePool(lobes, createRng(7));
+    pool.trigger(1, false, 3);
+    for (let i = 0; i < 60; i++) pool.tick(1 / 60, 0.4, 0.5);
+    const idle = Array.from(pool.birth).filter((b) => b === -1e6);
+    // Every slot but the one that fired — an ember of any lifetime is long
+    // dead at (now - -1e6), which is what keeps idle slots from drawing.
+    expect(idle).toHaveLength(pool.birth.length - 1);
+  });
+});
+
+describe("storm cloud sampler", () => {
+  it("is deterministic for a given seed", () => {
+    const a = buildCloud(2000, 9);
+    const b = buildCloud(2000, 9);
+    expect(Array.from(a.positions)).toEqual(Array.from(b.positions));
+    expect(Array.from(a.seeds)).toEqual(Array.from(b.seeds));
+  });
+
+  it("lays out count xyz triples, every one inside the bounding ellipsoid, with seeds in [0,1)", () => {
+    const { positions, seeds } = buildCloud(5000, 3);
+    expect(positions.length).toBe(15000);
+    expect(seeds.length).toBe(5000);
+    for (let i = 0; i < 5000; i++) {
+      expect(insideCloud(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2])).toBe(true);
+      expect(seeds[i]).toBeGreaterThanOrEqual(0);
+      expect(seeds[i]).toBeLessThan(1);
+    }
+  });
+
+  it("samples the same lobes the shape volume is baked from", () => {
+    // Both draw their lobes first from a fresh rng on the same seed, which is
+    // what puts the points inside the gas rather than beside it in Both mode.
+    expect(buildCloud(16, 4).lobes).toEqual(buildLobes(createRng(4)));
+  });
+
+  it("any prefix is a representative subsample \u2014 the first half and second half share a centroid", () => {
+    // Cloud density draws a prefix of the buffer; if particles were laid
+    // down lobe by lobe, thinning the cloud would delete whole lobes.
+    const n = 40000;
+    const { positions } = buildCloud(n, 11);
+    const centroid = (from: number, to: number) => {
+      const c = [0, 0, 0];
+      for (let i = from; i < to; i++) {
+        c[0] += positions[i * 3];
+        c[1] += positions[i * 3 + 1];
+        c[2] += positions[i * 3 + 2];
+      }
+      return c.map((v) => v / (to - from));
+    };
+    const a = centroid(0, n / 2);
+    const b = centroid(n / 2, n);
+    for (let k = 0; k < 3; k++) expect(Math.abs(a[k] - b[k])).toBeLessThan(0.05);
+  });
+});
+
+describe("storm particle budget", () => {
+  it("caps the high preset and floors the floor preset", () => {
+    expect(particleCountForQuality(200_000)).toBe(120_000);
+    expect(particleCountForQuality(4_000)).toBe(4_000);
+    expect(particleCountForQuality(1_600)).toBe(4_000); // a floor-preset gallery tile
+    expect(particleCountForQuality(50_000)).toBe(50_000);
   });
 });
 
