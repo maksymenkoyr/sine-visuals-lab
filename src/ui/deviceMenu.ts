@@ -606,6 +606,24 @@ function wireThumbMagnet(row: HTMLElement, slider: HTMLInputElement): void {
   row.addEventListener("mouseleave", () => row.style.removeProperty("--vc-thumb-boost"));
 }
 
+/** 1/2/3 on a focused slider jump it straight to 0%/50%/100% of its own
+ *  min..max — a fast way to zero out, center, or max a row without dragging.
+ *  Sets .value then redispatches "input" rather than duplicating each
+ *  slider's own commit logic, so this stays a one-line addition at every call
+ *  site regardless of what that site's "input" listener does. */
+function wireSliderQuickJump(slider: HTMLInputElement): void {
+  slider.addEventListener("keydown", (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const frac = { "1": 0, "2": 0.5, "3": 1 }[e.key];
+    if (frac === undefined) return;
+    e.preventDefault();
+    const lo = Number(slider.min);
+    const hi = Number(slider.max);
+    slider.value = String(lo + frac * (hi - lo));
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
 /** One slider row in the panel's grammar — label, readout, chip, ↺, slider,
  *  hint. Gain rows (log-mapped) and scene setting rows (linear) are the same
  *  shape, so the construction and pos<->value mapping live here once. */
@@ -807,6 +825,7 @@ function createControlRow(spec: ControlRowSpec) {
   if (signalIndicator) el.appendChild(signalIndicator.strip);
   el.addEventListener("click", () => slider.focus());
   wireThumbMagnet(el, slider);
+  wireSliderQuickJump(slider);
 
   // Log-mapped so the midpoint lands close to defaultValue instead of skewing
   // toward the wide "more reactive" end. With zeroAtMin, position 0 is carved
@@ -1437,6 +1456,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoCard.el.style.cursor = "pointer";
   autoCard.el.addEventListener("click", () => autoStrengthSlider.focus());
   wireThumbMagnet(autoCard.el, autoStrengthSlider);
+  wireSliderQuickJump(autoStrengthSlider);
 
   function showAutoStrength(value: number): void {
     autoStrengthSlider.value = String(value);
