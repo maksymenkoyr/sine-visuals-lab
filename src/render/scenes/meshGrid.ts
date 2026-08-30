@@ -373,7 +373,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "domeDistance",
     label: "Dome Distance",
-    description: "How far behind the shape's center the Background Dome's globe sits; 0 centers it on the shape",
+    description: "How far behind the shape's center the Background Dome's globe sits; 0 centers it exactly on the disc/globe, sharing its tilted axis",
     min: 0,
     max: 400,
     step: 5,
@@ -1140,9 +1140,15 @@ void main() {
         float t = -b - sq;                 // near face...
         if (t <= 0.0) t = -b + sq;         // ...or, from inside, the far one
         if (t > 0.0) {
+          // The lattice's poles lie on the disc's/globe's own axis (the
+          // CIRCLE_TILT frame shapeCover() uses), so the dome is not just
+          // concentric with the shape but co-axial: its meridians converge
+          // on the same point the mesh's columns do.
           vec3 p = oc + d * t;
-          float az = atan(p.x, p.z) + uTime * 0.01;
-          float el = asin(clamp(p.y / uDomeRadius, -1.0, 1.0));
+          float ct = cos(CIRCLE_TILT), st = sin(CIRCLE_TILT);
+          vec3 lp = vec3(p.x, p.y * ct - p.z * st, p.y * st + p.z * ct);
+          float az = atan(lp.x, lp.z) + uTime * 0.01;
+          float el = asin(clamp(lp.y / uDomeRadius, -1.0, 1.0));
           lattice = triLattice(vec2(az, el) * uDomeDensity);
         }
       }
