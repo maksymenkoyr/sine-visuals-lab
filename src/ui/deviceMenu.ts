@@ -103,10 +103,13 @@ import {
  * (drag, ↺, a card Reset, auto taking over) forgets that restore point and
  * unlights it — it's a toggle, not a memory. ↺ only appears once a value is
  * off its default, doubling as a "you changed this" marker. A chip's letter
- * *is* its hotkey when the row has keyboard focus. The hint under a row (a
- * setting's `description`) stays collapsed until hover/focus, and while auto
- * holds the row it reads as an invitation to take over instead. Each card's
- * accent names its system — the constants and their meanings live in
+ * *is* its hotkey once the row's control has keyboard focus — and
+ * wireHoverFocus gives it that focus on genuine pointer movement over the
+ * row, matching the identical hover/focus styling below, so pointing at a
+ * row is enough; no click needed first. The hint under a row (a setting's
+ * `description`) stays collapsed until hover/focus, and while auto holds the
+ * row it reads as an invitation to take over instead. Each card's accent
+ * names its system — the constants and their meanings live in
  * controlsTheme.ts.
  *
  * The panel itself is opened and closed from outside with S (wired in
@@ -124,7 +127,11 @@ import {
  * on a scene-setting row, it persists the row's current value as its new
  * default, so R/↺ from then on snaps back to that instead of the value
  * baked into the scene's SceneSetting spec (see tuning/defaults.ts) — a
- * production build never sets devDefault, so the key no-ops there. Digit
+ * production build never sets devDefault, so the key no-ops there. A focused
+ * slider also takes Home/End to its min/max — the browser's own native
+ * range-input behavior, left alone by onKeyDown below — plus z/x
+ * (wireSliderQuickJump) to jump straight to the middle of the track or the
+ * top, the one landing Home/End can't reach. Digit
  * keys 1-9 jump to a numbered block —
  * each card title and each scene group heading carries a .vc-block badge,
  * renumbered by renumberBlocks() whenever the block set can change (i.e. on
@@ -544,6 +551,18 @@ interface ResolvedSignalRead {
   onReveal?: () => void;
 }
 
+/** Shared by every document-level hotkey (H, Tab, the digits) and by
+ *  wireHoverFocus below: ignored while typing somewhere (a range slider
+ *  keeping focus after a drag is fine — that's still "in the panel", there's
+ *  just nothing to type in the panel itself). */
+function isTypingTarget(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false;
+  const tag = t.tagName;
+  if (tag === "TEXTAREA" || t.isContentEditable) return true;
+  if (tag === "INPUT" && (t as HTMLInputElement).type !== "range") return true;
+  return false;
+}
+
 /** Wires A/R/T on a row's own focusable control (the slider or the toggle
  *  pill) — kept on the control itself, not the document, so the keys always
  *  act on whichever row the Tab ring last focused. Routes through the row's
@@ -604,6 +623,61 @@ function wireThumbMagnet(row: HTMLElement, slider: HTMLInputElement): void {
     row.style.setProperty("--vc-thumb-boost", boost.toFixed(3));
   });
   row.addEventListener("mouseleave", () => row.style.removeProperty("--vc-thumb-boost"));
+}
+
+// The last real mouse position seen anywhere in the panel — shared across
+// every wireHoverFocus call (there's exactly one device menu instance) rather
+// than kept per-row, because the case this exists to catch is cross-row:
+// scrolling `.vc-controls-col` (or a keyboard jumpToBlock's scrollIntoView)
+// with a stationary cursor carries a *different* row under it and fires a
+// synthetic mousemove there at the unchanged coordinates. A per-row last-seen
+// position wouldn't catch that — the newly-arrived row has never seen this
+// position before even though the real cursor didn't move — so the check has
+// to be panel-wide to recognize "nothing actually moved."
+let lastHoverX = -1;
+let lastHoverY = -1;
+
+/** Focuses `control` on real pointer movement over `row` — a hover row reads
+ *  as focused already (controlsTheme.ts styles :hover and :focus-within
+ *  identically), so this makes the keyboard agree without a click first.
+ *  Must use `preventScroll` — the panel's columns are `.vc-scroll`, and a bare
+ *  focus() would scroll the row into view, sliding it out from under the
+ *  cursor (see bandFaders.ts's own hit.focus() for the same reason). Never
+ *  steals focus from a typing target (the pin input's blur commits its
+ *  value, so mid-type is off limits) — checked against document.activeElement,
+ *  not the event target, since the pointer is over this row, not the input
+ *  holding focus elsewhere. */
+function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
+  row.addEventListener("mousemove", (e) => {
+    if (e.clientX === lastHoverX && e.clientY === lastHoverY) return;
+    lastHoverX = e.clientX;
+    lastHoverY = e.clientY;
+    if (document.activeElement === control || isTypingTarget(document.activeElement)) return;
+    control.focus({ preventScroll: true });
+  });
+}
+
+/** z centers a focused slider, x maxes it out — a fast way to land on either
+ *  without dragging. No key for the low end: Home already jumps a native
+ *  range input to its min for free (onKeyDown, below, doesn't intercept it),
+ *  so the only capability worth adding is the one Home/End don't cover.
+ *  Plain single keys, not a chord — z/x collide with nothing else live while
+ *  a slider has focus (A/R/T/D, the panel's H/M/Tab/1-9, the arrows, and
+ *  Home/End are all spoken for; z/x aren't). Sets .value then redispatches
+ *  "input" rather than duplicating each slider's own commit logic, so this
+ *  stays a one-line addition at every call site regardless of what that
+ *  site's "input" listener does. */
+function wireSliderQuickJump(slider: HTMLInputElement): void {
+  slider.addEventListener("keydown", (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const frac = { z: 0.5, x: 1 }[e.key];
+    if (frac === undefined) return;
+    e.preventDefault();
+    const lo = Number(slider.min);
+    const hi = Number(slider.max);
+    slider.value = String(lo + frac * (hi - lo));
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+  });
 }
 
 /** One slider row in the panel's grammar — label, readout, chip, ↺, slider,
@@ -806,7 +880,9 @@ function createControlRow(spec: ControlRowSpec) {
   el.append(head, slider, hint);
   if (signalIndicator) el.appendChild(signalIndicator.strip);
   el.addEventListener("click", () => slider.focus());
+  wireHoverFocus(el, slider);
   wireThumbMagnet(el, slider);
+  wireSliderQuickJump(slider);
 
   // Log-mapped so the midpoint lands close to defaultValue instead of skewing
   // toward the wide "more reactive" end. With zeroAtMin, position 0 is carved
@@ -1071,6 +1147,7 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
 
   el.append(head, toggle, hint);
   el.addEventListener("click", () => toggle.focus());
+  wireHoverFocus(el, toggle);
 
   function apply(value: number): void {
     const on = value >= 0.5;
@@ -1142,6 +1219,7 @@ function createPickerRow(spec: PickerRowSpec): HTMLElement {
   strip.setAttribute("aria-label", spec.label);
   strip.style.cssText = paletteListStyle;
   el.style.setProperty("--vc-accent", spec.accent);
+  wireHoverFocus(el, strip);
   const chips = spec.options.map((name, i) => {
     const btn = document.createElement("button");
     btn.textContent = name;
@@ -1327,6 +1405,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       reset: () => bandFaders.reset(i),
       toggleOff: () => bandFaders.toggleOff(i),
     });
+    // Scoped to the hit div itself, not fadersRow: fadersRow also contains the
+    // spectrum plot and the gain/Hz readouts, which aren't any one band's
+    // control, so hovering the row as a whole would resolve to an arbitrary
+    // fader. Each hit div already covers exactly its own band's hit region
+    // (bandFaders.ts's `left`/`width`), so it's its own correct hover scope.
+    wireHoverFocus(el, el);
   });
 
   bandsCard.body.append(spectrumHeader, hairline, fadersRow);
@@ -1436,7 +1520,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoCard.body.appendChild(autoStrengthRow);
   autoCard.el.style.cursor = "pointer";
   autoCard.el.addEventListener("click", () => autoStrengthSlider.focus());
+  // Scoped to the row, not autoCard.el like the click handler above: click's
+  // wider scope (hovering the card title still focuses the slider) is a
+  // deliberate convenience, but hover-focus firing there too would mean just
+  // reading the card's title steals focus onto the slider.
+  wireHoverFocus(autoStrengthRow, autoStrengthSlider);
   wireThumbMagnet(autoCard.el, autoStrengthSlider);
+  wireSliderQuickJump(autoStrengthSlider);
 
   function showAutoStrength(value: number): void {
     autoStrengthSlider.value = String(value);
@@ -1962,18 +2052,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const t = e.target as Node | null;
     if (t && (root.contains(t) || deps.toggleButton.contains(t))) return;
     close();
-  }
-
-  // Shared by every document-level hotkey below (H, Tab, the digits):
-  // ignored while typing somewhere (a range slider keeping focus after a
-  // drag is fine — that's still "in the panel", there's just nothing to
-  // type in the panel itself).
-  function isTypingTarget(t: EventTarget | null): boolean {
-    if (!(t instanceof HTMLElement)) return false;
-    const tag = t.tagName;
-    if (tag === "TEXTAREA" || t.isContentEditable) return true;
-    if (tag === "INPUT" && (t as HTMLInputElement).type !== "range") return true;
-    return false;
   }
 
   // The Tab ring: every param control, in document order — see the header
