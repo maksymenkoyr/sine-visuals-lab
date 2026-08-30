@@ -33,6 +33,7 @@ import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
+import { getDefaultOverride, setDefaultOverride } from "./tuning/defaults.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
 import { getAutoGain, setAutoGain } from "./audio/autoGain.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
@@ -483,6 +484,7 @@ function wireDeviceMenu(): void {
     // whole module tree-shake out, the same way autoTune.ts's own DEV-gated
     // import of tuning/overrides.ts already does.
     devPin: import.meta.env.DEV ? { get: getPin, set: setPin, clear: clearPin } : undefined,
+    devDefault: import.meta.env.DEV ? { get: getDefaultOverride, set: setDefaultOverride } : undefined,
     toggleButton: menuBtn,
   });
   menuBtn.addEventListener("click", () => deviceMenu!.toggle());
