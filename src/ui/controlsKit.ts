@@ -188,6 +188,60 @@ export function groupHeading(text: string, first = false): HTMLElement {
   return el;
 }
 
+// A trace's colour key: a short line swatch (these are lines on the canvas,
+// not points) beside a caption in the same small-mono voice as tickLabelStyle
+// and tempoCaptionStyle. Always visible — unlike .vc-hint, a legend that
+// hides on hover isn't doing a legend's job.
+const traceLegendStyle = `display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px;`;
+const traceLegendEntryStyle = `display: flex; align-items: center; gap: 5px; transition: opacity 0.2s ease;`;
+const traceLegendSwatchStyle = (color: string) =>
+  `width: 10px; height: 2px; border-radius: 1px; background: ${color};`;
+const traceLegendLabelStyle = `font: 400 8.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.55);`;
+const traceLegendNoteStyle = `font: 400 8.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.4);`;
+
+export interface TraceLegendSpec {
+  color: string;
+  label: string;
+  /** Short non-uppercase aside after the label, e.g. what the line means —
+   *  for a legend standing in for a hover hint a lone trace has no room for. */
+  note?: string;
+}
+
+/** Builds a legend from traceLegendStyle; entries stay in the order given.
+ *  setEntryEnabled dims an entry (e.g. a reference line the source can't
+ *  supply right now) without removing it, keyed so a per-frame call is free. */
+export function createTraceLegend(entries: TraceLegendSpec[]) {
+  const el = document.createElement("div");
+  el.style.cssText = traceLegendStyle;
+  const rows = entries.map((spec) => {
+    const row = document.createElement("div");
+    row.style.cssText = traceLegendEntryStyle;
+    const swatch = document.createElement("div");
+    swatch.style.cssText = traceLegendSwatchStyle(spec.color);
+    const label = document.createElement("div");
+    label.textContent = spec.label;
+    label.style.cssText = traceLegendLabelStyle;
+    row.append(swatch, label);
+    if (spec.note) {
+      const note = document.createElement("div");
+      note.textContent = spec.note;
+      note.style.cssText = traceLegendNoteStyle;
+      row.appendChild(note);
+    }
+    el.appendChild(row);
+    return row;
+  });
+  const lastEnabled: boolean[] = entries.map(() => true);
+  return {
+    el,
+    setEntryEnabled(i: number, enabled: boolean): void {
+      if (lastEnabled[i] === enabled) return;
+      lastEnabled[i] = enabled;
+      rows[i].style.opacity = enabled ? "1" : "0.35";
+    },
+  };
+}
+
 const advancedToggleStyle = `
   display: block; width: 100%; text-align: left; margin: 4px 0 2px; padding: 4px 0;
   font: 400 10px/1.3 ${FONT_MONO}; letter-spacing: 0.04em; color: rgba(255,255,255,0.45);

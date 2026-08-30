@@ -51,6 +51,7 @@ import {
   createCard,
   createChipButton,
   createSignalStrip,
+  createTraceLegend,
   digitsStyle,
   digitsTextStyle,
   groupHeading,
@@ -1394,10 +1395,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const fadersRow = document.createElement("div");
   fadersRow.className = "vc-row";
   fadersRow.style.setProperty("--vc-accent", BANDS_AMBER);
+  // Always-on, unlike fadersHint below: explains the sky-blue marker
+  // spectrumStrip.ts's drawCentroidMarker draws over the bars (same
+  // AUTO_SKY constant, so the swatch can't drift from the line). A sibling
+  // of .vc-hint, not nested in it, so it doesn't inherit the hover-reveal —
+  // see the createSignalStrip .vc-reads reasoning above for why that split
+  // matters. Not the same reading as the Character card's Centroid row:
+  // that one is range-adapted against the track's own recent swing and has
+  // no position on this strip's band-index axis, so the note doesn't claim
+  // the two match.
+  const spectrumLegend = createTraceLegend([
+    { color: AUTO_SKY, label: "Brightness", note: "where the spectrum's energy balances" },
+  ]);
   const fadersHint = document.createElement("div");
   fadersHint.className = "vc-hint";
   fadersHint.textContent = "Middle is 1× — drag up to boost a band, down to cut it, all the way down to switch it off";
-  fadersRow.append(bandFaders.el, fadersHint);
+  fadersRow.append(bandFaders.el, spectrumLegend.el, fadersHint);
   // R/T on a focused fader, through the same wiring as every row; no A —
   // the faders have no auto weights.
   bandFaders.faders.forEach((el, i) => {
