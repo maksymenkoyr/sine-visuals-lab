@@ -10,3 +10,4 @@ docs/.obsidian/
 .claude/settings.local.json
 .claude/RESUME.md
 .claude/worktrees/
+tools/.cache/

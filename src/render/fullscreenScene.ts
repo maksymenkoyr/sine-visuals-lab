@@ -14,6 +14,10 @@ import {
   uploadCommonUniforms,
 } from "./sceneCommon.ts";
 
+/** What a scene's `extraUniforms` may return per name — see the option's
+ *  doc comment for which GL upload each shape maps to. */
+export type ExtraUniformValue = number | Float32Array | { vec4: Float32Array };
+
 /**
  * Builds a Scene from just a fragment shader body. The body must assign
  * `outColor` and may use: vUv, roomUv(), palette(), and everything in
@@ -32,13 +36,17 @@ export function createFullscreenScene(
      *  don't belong on every scene's common uniform set. */
     extraUniformDecls?: string;
     /** Computes this frame's extra uniform values, called once per render
-     *  after the common/setting uniforms are bound. Array values upload via
-     *  setFv (same path as uBands); everything else via setF. */
+     *  after the common/setting uniforms are bound. A bare Float32Array
+     *  uploads via setFv (a `float[]`, same path as uBands); wrap it as
+     *  `{ vec4: arr }` for a `vec4[]` (setV4v — four floats per element,
+     *  which is how a packed transform array like dancers/rig.ts's bone
+     *  list stays inside the fragment-uniform vector budget); everything
+     *  else via setF. */
     extraUniforms?: (
       frame: FeatureFrame,
       anim: AnimFrame,
       getSetting: (key: string) => number,
-    ) => Record<string, number | Float32Array>;
+    ) => Record<string, ExtraUniformValue>;
   } = {},
 ): Scene {
   let prog: GLProgram | null = null;
@@ -87,7 +95,8 @@ ${fragBody}
         const extras = opts.extraUniforms(frame, anim, getSetting);
         for (const [name, value] of Object.entries(extras)) {
           if (value instanceof Float32Array) prog.setFv(name, value);
-          else prog.setF(name, value);
+          else if (typeof value === "number") prog.setF(name, value);
+          else prog.setV4v(name, value.vec4);
         }
       }
       drawFullscreenQuad(gl, vao);

@@ -20,8 +20,12 @@ export interface SceneSetting {
   step: number;
   default: number;
   /** "boolean" renders as a checkbox (still stored/uploaded as 0/1) instead
-   *  of a range slider. Omit for the default numeric slider. */
-  type?: "boolean";
+   *  of a range slider; "enum" renders as a row of named chips whose index
+   *  is the stored/uploaded value (set `options`, and min/max/step to
+   *  0/options.length-1/1). Omit for the default numeric slider. */
+  type?: "boolean" | "enum";
+  /** The names an "enum" setting picks between, in value order. */
+  options?: readonly string[];
   /** How this parameter responds to music character. Signed weights per dial;
    *  omit for a parameter that should stay manual. See autoTune.ts. Inline
    *  type-only import avoids a runtime cycle with autoTune.ts, which imports
@@ -73,6 +77,8 @@ function persist(): void {
 
 function clamp(spec: SceneSetting, value: number): number {
   if (!Number.isFinite(value)) return spec.default;
+  // An enum's value is an index — a stored 0.7 must not linger between chips.
+  if (spec.type === "enum") value = Math.round(value);
   return Math.min(spec.max, Math.max(spec.min, value));
 }
 
