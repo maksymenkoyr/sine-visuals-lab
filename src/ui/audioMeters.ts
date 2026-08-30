@@ -1,9 +1,19 @@
 import type { AnimFrame } from "../render/animClock.ts";
+import type { MeterCardId, MeterRowId } from "../render/signals.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
-import { AUTO_SKY, FONT_MONO, HOT_RED, INPUT_GREEN, withAlpha } from "./controlsTheme.ts";
+import {
+  AUTO_SKY,
+  FONT_MONO,
+  HOT_RED,
+  INPUT_GREEN,
+  STRIP_HIGH,
+  STRIP_LOW,
+  STRIP_MID,
+  withAlpha,
+} from "./controlsTheme.ts";
 import {
   chipBtnLitStyle,
   chipBtnStyle,
@@ -35,17 +45,24 @@ import {
  *    FeatureExtractor.fixedEnergy (energy as it would read with auto-gain
  *    at its minimum) as a dim reference line. The gap between energy and
  *    that reference is exactly what the Input card's Auto-gain amount is
- *    adding; sliding it down closes the gap. (No low/mid/high here: the
- *    spectrum strip already shows them.)
+ *    adding; sliding it down closes the gap. (No raw low/mid/high energy
+ *    spectrum strip already shows that. Their post-bandEnergy pulses live
+ *    in Rhythm's Hits row instead — see below.)
  *  - Loudness: the broadcast measurement — BS.1770 / EBU R128 LUFS from
  *    lufsAnalyser.ts (math in lufs.ts). Momentary on the bar with the
  *    LUFS_TARGET_* marks, Short-term as the big number, Integrated beneath
  *    with a Reset chip. Local-only like the Scope, since it needs this
  *    device's own samples; hidden on a mic-less renderer.
- *  - Rhythm: sectionIntensity with a drop flash, and a compact tempo block
+ *  - Rhythm: sectionIntensity with a drop flash, a compact tempo block
  *    beside it — bpm under a beat dot whose resting tint follows
  *    beatClock's tempoLock, so an unlocked guess reads as unconfident
- *    rather than as a confident wrong number.
+ *    rather than as a confident wrong number — and a Hits row beneath both:
+ *    AnimFrame's low/mid/high pulse envelopes (bandEnergy.ts), the
+ *    continuous counterpart of the one-shot lowOnset/midOnset/highOnset
+ *    edges a scene can trigger from directly (see src/render/signals.ts,
+ *    which reads this same envelope so a signal pill stays live on a
+ *    render-rate-capped path where the one-shot edge itself would be
+ *    silently dropped).
  *  - Character: one row per entry in MUSIC_DIALS (never a hardcoded list),
  *    each marking NEUTRAL with a tick — what autoTune.ts resolves every "A"
  *    chip against, otherwise invisible. Copy comes from DIAL_LABELS.
@@ -119,6 +136,12 @@ export interface AudioMeters {
     fixedEnergy: number | null,
     lufs: LufsReading | null,
   ): void;
+  /** Unfolds `card` if needed (the same click-the-chevron move
+   *  deviceMenu.ts's jumpToBlock makes for a folded settings card), scrolls
+   *  `row` into view and flashes it — the "reacts to" strip's jump target
+   *  (src/ui/deviceMenu.ts). A no-op if `row` was never registered (a
+   *  MeterRowId with no matching createMeterRow/welded-block call). */
+  revealRow(card: MeterCardId, row: MeterRowId): void;
 }
 
 export interface AudioMetersDeps {
@@ -292,6 +315,29 @@ function blink(el: HTMLElement, color: string): void {
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
+}
+
+const ROW_FLASH_MS = 900;
+/** Same jump-then-fade shape as blink(), applied to a row's own ring
+ *  (.vc-row's hover box-shadow, controlsTheme.ts) instead of a fill's
+ *  background — AudioMeters.revealRow's "you're looking at the right row"
+ *  cue, since a jumped-to row isn't necessarily under the pointer. */
+function flashRow(el: HTMLElement): void {
+  el.style.transition = "none";
+  el.style.boxShadow = "0 0 0 1px #fff, 0 0 16px 2px rgba(255,255,255,0.5)";
+  void el.offsetWidth; // commit the jump before the fade is re-enabled
+  el.style.transition = "box-shadow 0.6s ease-out";
+  // The fade-to-nothing has to start on a later paint than the jump above,
+  // or the browser coalesces both writes into one frame and nothing visibly
+  // eases — same reasoning as blink()'s reflow, one step further because
+  // this fades to a cleared style rather than to a value a later real update
+  // will overwrite on its own.
+  requestAnimationFrame(() => {
+    el.style.boxShadow = "";
+  });
+  setTimeout(() => {
+    el.style.transition = "";
+  }, ROW_FLASH_MS);
 }
 
 interface MeterRowSpec {
@@ -532,6 +578,78 @@ function createTempoBlock(accent: string) {
   };
 }
 
+const hitBarWrapStyle = `display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1; min-width: 0;`;
+const hitBarTrackStyle = `position: relative; width: 100%; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.18);`;
+const hitBarLabelStyle = `font: 400 8.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.45);`;
+
+/** One band's mini bar in the Hits row below — width tracks bandEnergy's
+ *  pulse envelope directly (no peak-hold, no per-frame flash call needed:
+ *  the envelope's own decay from onset back to baseline is the blink). */
+function createHitBar(label: string, accent: string) {
+  const el = document.createElement("div");
+  el.style.cssText = hitBarWrapStyle;
+  const track = document.createElement("div");
+  track.style.cssText = hitBarTrackStyle;
+  const fill = document.createElement("div");
+  fill.style.cssText = fillStyle(accent);
+  track.appendChild(fill);
+  const lbl = document.createElement("div");
+  lbl.textContent = label;
+  lbl.style.cssText = hitBarLabelStyle;
+  el.append(track, lbl);
+  return {
+    el,
+    setValue(v: number): void {
+      fill.style.width = `${clamp(v, 0, 1) * 100}%`;
+    },
+  };
+}
+
+/** Rhythm's third row: bandEnergy's low/mid/high pulse envelopes
+ *  (AnimFrame.lowPulse/midPulse/highPulse) — the continuous form of the
+ *  lowOnset/midOnset/highOnset edges a scene can trigger from directly
+ *  (caustics' Beat ripple, among others). Distinct from the spectrum
+ *  strip's bars, which show raw per-band energy, not this file's own
+ *  onset-shaped pulses. Same tints as the spectrum strip's own low/mid/high
+ *  bars (STRIP_LOW/MID/HIGH) so the two read as the same three ranges. */
+function createHitsRow() {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.tabIndex = 0;
+  el.style.setProperty("--vc-accent", NEUTRAL_ACCENT);
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = "Hits";
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  head.appendChild(label);
+
+  const bars = document.createElement("div");
+  bars.style.cssText = `display: flex; gap: 10px; margin-top: 6px;`;
+  const low = createHitBar("Low", STRIP_LOW);
+  const mid = createHitBar("Mid", STRIP_MID);
+  const high = createHitBar("High", STRIP_HIGH);
+  bars.append(low.el, mid.el, high.el);
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  hint.textContent =
+    "Per-band onset pulses — the edges a scene can drive a discrete effect from (a beat ripple's bass trigger, say) instead of a continuous level.";
+
+  el.append(head, bars, hint);
+
+  return {
+    el,
+    setValues(lowV: number, midV: number, highV: number): void {
+      low.setValue(lowV);
+      mid.setValue(midV);
+      high.setValue(highV);
+    },
+  };
+}
+
 /** The Loudness card's welded block: Short-term as the big seven-segment
  *  reading (toFixed's ASCII minus renders in DSEG7), "LUFS" under it, and
  *  the Integrated reading beneath that. Digits go hot past LUFS_HOT. */
@@ -682,8 +800,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const rhythmRow = document.createElement("div");
   rhythmRow.style.cssText = rhythmRowStyle;
   rhythmRow.append(section.el, tempo.el);
+  const hits = createHitsRow();
   const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm" });
-  rhythmCard.body.appendChild(rhythmRow);
+  rhythmCard.body.append(rhythmRow, spacer(), hits.el);
 
   // ---- Character ----
   const dialRows = MUSIC_DIALS.map((dial) => ({
@@ -930,6 +1049,24 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // fast to read, so it holds and falls at the meters' cap rate.
   let wavePeak = 0;
 
+  // src/render/signals.ts's monitor anchors — populated on demand as a
+  // SignalSpec starts pointing at a card/row, never exhaustively (see
+  // MeterCardId/MeterRowId's own doc comments). section.el and tempo.el are
+  // the actual flash/scroll targets, not their shared rhythmRow wrapper, so
+  // a jump highlights only the half of the welded row the signal is about.
+  const cardElements: Record<MeterCardId, HTMLElement> = {
+    scope: scopeCard.el,
+    signal: signalCard.el,
+    lufs: lufsCard.el,
+    rhythm: rhythmCard.el,
+    character: characterCard.el,
+  };
+  const rowElements = new Map<MeterRowId, HTMLElement>([
+    ["section", section.el],
+    ["tempo", tempo.el],
+    ["hits", hits.el],
+  ]);
+
   return {
     el: root,
     update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs): void {
@@ -989,6 +1126,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
             sectionVal === null ? IDLE : {},
           );
         }
+        // Already raw the way the beat dot is (see file header) — no
+        // pre-envelope counterpart threaded through AnimFrame to switch to.
+        hits.setValues(anim?.lowPulse ?? 0, anim?.midPulse ?? 0, anim?.highPulse ?? 0);
       }
 
       // ---- Character ----
@@ -1052,6 +1192,14 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           });
         else waveform.setReadout(pct(raw ? instPeak : wavePeak));
       }
+    },
+    revealRow(card, row): void {
+      const cardEl = cardElements[card];
+      if (cardEl.classList.contains("vc-folded")) cardEl.querySelector<HTMLButtonElement>(".vc-fold")?.click();
+      const rowEl = rowElements.get(row);
+      if (!rowEl) return;
+      rowEl.scrollIntoView({ block: "nearest" });
+      flashRow(rowEl);
     },
   };
 }

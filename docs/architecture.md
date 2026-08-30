@@ -49,6 +49,11 @@ diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
 from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
 this device's own capture, hidden on a mic-less renderer like the Scope.
 
+`src/render/signals.ts` is the seam between those meters and a scene's own
+`settings`: a scene can mark a `SceneSetting` with `reads`, naming which of
+this file's `FeatureFrame`/`AnimFrame` values actually drive it, and the
+device menu renders that as a live pill pointing back at the meter row above.
+
 ## Phone to TV
 
 `src/tv.ts` is the paired-display entry (`tv.html`). The two devices don't share a
