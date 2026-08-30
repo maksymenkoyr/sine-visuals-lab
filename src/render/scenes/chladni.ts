@@ -60,6 +60,16 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 // at a random spot — a real plate spills sand; refilling keeps the count
 // constant. Silence drives nothing, so the figure freezes in place.
 //
+// Grains never interact — the sim has no notion of a grain's radius, so
+// nothing stops two from occupying the same spot. Rendered at a fixed count,
+// a big Grain size therefore just paints over itself: covered area grows
+// with size^2 while the sand drawn stays fixed, so past MAX_BED_COVERAGE
+// every pixel is whichever grain landed on top last, and both the grain
+// texture and the figure underneath stop reading. drawnGrainCount treats the
+// bed as a fixed amount of sand instead — bigger grains, fewer of them drawn
+// — while the sim keeps stepping every grain regardless, so the drawn subset
+// is a stable prefix rather than a re-seeded bed each time the slider moves.
+//
 // dt for the sim comes from frame.time deltas, not anim.dtSec: the anim
 // clock advances every rAF tick while render() is frame-pace-capped, so
 // dtSec under-counts the wall time a rendered frame actually covers.
@@ -234,6 +244,28 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
 export const REFERENCE_GRAINS = 200_000;
 export function grainGain(count: number): number {
   return Math.max(0.5, Math.min(6, Math.sqrt(REFERENCE_GRAINS / Math.max(1, count))));
+}
+
+/** The bed may cover at most this fraction of the plate. Past it, every
+ *  pixel is the topmost grain and both the sand and the figure stop
+ *  reading — see the file header. */
+export const MAX_BED_COVERAGE = 0.55;
+
+/** E[(0.75 + 0.5u)^2] for u ~ Uniform(0,1): the size-jitter POINT_VERT
+ *  applies per grain, folded into the average covered area per grain. */
+const SIZE_JITTER_M2 = 1 + 0.5 ** 2 / 12;
+
+/** How many of `count` grains to draw so the bed stays under
+ *  MAX_BED_COVERAGE: bigger grains mean fewer of them, as with a fixed
+ *  amount of real sand rather than a fixed grain count. `grainPx` is the
+ *  on-screen grain diameter (Grain size after the resolution scale
+ *  POINT_VERT applies, before the shard-area and halo growth also applied
+ *  there — both roughly wash out between the shard and the disc it
+ *  replaced), `platePx2` the plate's area in pixels. */
+export function drawnGrainCount(count: number, grainPx: number, platePx2: number): number {
+  const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * SIZE_JITTER_M2;
+  const fits = Math.floor((MAX_BED_COVERAGE * platePx2) / Math.max(1e-6, areaPerGrain));
+  return Math.max(1, Math.min(count, fits));
 }
 
 const SETTINGS: SceneSetting[] = [
@@ -660,6 +692,19 @@ void main() {
   vec3 col = palette(0.1 + 0.4 * vAmp, uPalA, uPalB, uPalC, uPalD);
   // Settled sand is chalkier than the palette; thrown grains keep its full hue.
   col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.15 * (1.0 - vAmp));
+  // At Grain size's chunky end, overlapping grains of the same hue would
+  // merge into one flat patch (no grain-grain collision keeps them from
+  // spreading apart — see file header): shade each facet distinctly and
+  // darken a rim just inside the edge, so a big shard reads as a chunk of
+  // grit rather than a paint blob. A one- or two-pixel grain stays flat
+  // (chunky -> 0) so it doesn't dither away.
+  float grainPx = vSizePx / vScale;
+  float chunky = smoothstep(3.0, 7.0, grainPx);
+  float facetIndex = floor(mod(ang + PI, 2.0 * PI) / (2.0 * k));
+  float facetShade = 0.75 + 0.45 * fract(sin(facetIndex * 12.9898 + vRot * 78.233) * 43758.5453);
+  float rim = smoothstep(0.5 - edge * 4.0, 0.5 - edge * 0.6, rn) * chunky;
+  float chunkShade = mix(1.0, facetShade, chunky) * (1.0 - 0.35 * rim);
+  vec3 grainCol = col * chunkShade;
   float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * uBeatPulse * 0.8);
   // Treble glow: a soft halo across the enlarged sprite, tinted toward
   // white, falling to zero at the sprite edge. Normalised by sprite area
@@ -674,7 +719,7 @@ void main() {
   // whatever lies under it, like real sand; the halo carries no alpha, so
   // it adds. Overlapping big grains stay hard-edged instead of summing
   // into a smear.
-  outColor = vec4(col * bright * core + haloCol, core);
+  outColor = vec4(grainCol * bright * core + haloCol, core);
 }
 `;
 
@@ -804,8 +849,18 @@ function createChladniScene(): Scene {
       setModes(bgProg, modes);
       drawFullscreenQuad(gl, quadVao);
 
-      // Sand: one point per grain. Premultiplied blend — opaque grain cores
-      // occlude, halos add (see POINT_FRAG).
+      // Sand: one point per grain, up to drawnGrainCount — see file header
+      // for why a fixed grain count can't just render bigger at Grain size.
+      // Premultiplied blend — opaque grain cores occlude, halos add (see
+      // POINT_FRAG).
+      const resScale = Math.max(1, gl.drawingBufferHeight / 720);
+      const grainPx = resolveSceneSetting(ID, settingFor("grainSize")) * resScale;
+      const squarePlate = resolveSceneSetting(ID, settingFor("squarePlate")) > 0.5;
+      const platePx2 = squarePlate
+        ? (2 * SQUARE_PLATE_HALF * Math.min(gl.drawingBufferWidth, gl.drawingBufferHeight)) ** 2
+        : gl.drawingBufferWidth * gl.drawingBufferHeight;
+      const drawn = drawnGrainCount(grainCount, grainPx, platePx2);
+
       pointProg.use();
       uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
       setModes(pointProg, modes);
@@ -817,7 +872,7 @@ function createChladniScene(): Scene {
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.bindVertexArray(pointVao);
-      gl.drawArrays(gl.POINTS, 0, grainCount);
+      gl.drawArrays(gl.POINTS, 0, drawn);
       gl.bindVertexArray(null);
 
       // The gallery renders every scene into one shared context each tick —
