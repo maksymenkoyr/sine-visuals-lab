@@ -46,10 +46,15 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 //    displacement fade as the disc's center. Circle Squeeze and CIRCLE_TILT
 //    apply to the ball too, so it's really an ellipsoid tipped toward you.
 //  - The Background Dome checkbox lifts the sky lattice off the flat room
-//    plane onto a sphere around the camera, evaluated per pixel from the
-//    reconstructed view ray (`viewRay`, sharing `camBasis()` with `toView`
-//    so the dome and the terrain agree on where "up" and the horizon are).
-//    Its mask is by elevation above `farEdgePoint()`, not by screen v.
+//    plane onto the inside of a ball around the *scene* (DOME_RADIUS about
+//    the disc's center), ray-cast per pixel from the reconstructed view ray
+//    (`viewRay`, sharing `camBasis()` with `toView` so the dome and the
+//    terrain agree on where "up" is). Centering the ball on the scene rather
+//    than the camera is what makes its curvature visible: the camera sits
+//    off-center inside it, so meridians wrap over and under the shape. In
+//    Wireframe Only the shape writes no depth, so `shapeCover()` dims the
+//    lattice inside the disc's/globe's silhouette to keep it reading as
+//    behind.
 //  - The Circle checkbox re-maps the same grid onto a disc: columns become
 //    the angle (the mirrored spectrum makes the seam at the back close on
 //    itself) and rows the radius, with the newest ring on the outside so the
@@ -109,7 +114,8 @@ const CIRCLE_CENTER_Z = 50.0; // Circle layout: world z of the disc's center
 const CIRCLE_RADIUS = 40.0; // Circle layout: radius of the disc's outer (newest) rim
 const CIRCLE_TILT_DEG = 24; // Circle layout: disc plane tilted toward the viewer (far rim raised)
 const SPHERE_RADIUS = 30.0; // Sphere layout: radius of the globe at rest (shares CIRCLE_CENTER_Z and CIRCLE_TILT)
-const DOME_SCALE = 14.0; // Background Dome: lattice cells per radian of sky
+const DOME_SCALE = 14.0; // Background Dome: lattice cells per radian of the ball's own angle
+const DOME_RADIUS = 160.0; // Background Dome: radius of the lattice ball around the scene (camera stays inside at every setting)
 const FOG_K = 1.0 / 110.0; // 1/(view depth) at which fog reaches 1/e
 const LINE_PX = 1.2; // grid line width in pixels before anti-aliasing
 const NOISE_PERIOD = 64.0; // lattice period of the noise field's time axis (see noisePeriodic)
@@ -324,7 +330,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "bgMeshDome",
     label: "Background Dome",
-    description: "Curve the background mesh into a sky dome around the camera, like a planetarium ceiling, instead of a flat backdrop -- it pans with Camera Tilt and scales with Zoom",
+    description: "Wrap the background mesh around the whole scene as a lattice ball seen from inside, instead of a flat backdrop -- its lines curve over and under the shape and sit behind it",
     min: 0,
     max: 1,
     step: 1,
@@ -547,6 +553,7 @@ const CAMERA_GLSL = `
 #define CIRCLE_TILT ${((CIRCLE_TILT_DEG * Math.PI) / 180).toFixed(5)}
 #define SPHERE_RADIUS ${SPHERE_RADIUS.toFixed(1)}
 #define DOME_SCALE ${DOME_SCALE.toFixed(1)}
+#define DOME_RADIUS ${DOME_RADIUS.toFixed(1)}
 #define NEAR 0.5
 #define FAR 400.0
 
@@ -986,6 +993,37 @@ float triLattice(vec2 p) {
   return core + halo;
 }
 
+// How much of the background lattice the floating shape (disc or globe)
+// hides along a view ray: 1 = unobstructed, lower = behind the shape. The
+// Wireframe Only surface writes no depth, so without this the backdrop
+// would show through it at full strength and read as being in front.
+// Works in the shape's own tilted, squeezed frame (the inverse of what
+// MESH_VERT applies), so it tracks Circle Squeeze and CIRCLE_TILT exactly.
+float shapeCover(vec3 o, vec3 d) {
+  if (uSphere < 0.5 && uCircle < 0.5) return 1.0;
+  float ct = cos(CIRCLE_TILT), st = sin(CIRCLE_TILT);
+  vec3 ro = o - vec3(0.0, 0.0, CIRCLE_CENTER_Z);
+  vec3 lo = vec3(ro.x, ro.y * ct - ro.z * st, ro.y * st + ro.z * ct);
+  vec3 ld = vec3(d.x, d.y * ct - d.z * st, d.y * st + d.z * ct);
+  float inside = 0.0;
+  if (uSphere > 0.5) {
+    // Ellipsoid -> unit-ish sphere by un-squeezing z, then the ray's closest
+    // approach to the center, normalized by the radius, with a soft rim.
+    lo.z /= uCircleSqueeze;
+    ld.z /= uCircleSqueeze;
+    float a = dot(ld, ld), b = dot(lo, ld);
+    float h2 = max(dot(lo, lo) - b * b / a, 0.0);
+    if (b < 0.0) inside = smoothstep(1.03, 0.97, sqrt(h2) / SPHERE_RADIUS);
+  } else if (abs(ld.y) > 1e-4) {
+    float t = -lo.y / ld.y;
+    if (t > 0.0) {
+      vec2 hit = (lo + ld * t).xz / vec2(CIRCLE_RADIUS, CIRCLE_RADIUS * uCircleSqueeze);
+      inside = smoothstep(1.03, 0.97, length(hit));
+    }
+  }
+  return mix(1.0, 0.15, inside);
+}
+
 void main() {
   vec2 rUv = roomUv(vUv);
   vec3 col = bgColor(rUv);
@@ -997,17 +1035,35 @@ void main() {
     float below = (uCircle > 0.5 || uSphere > 0.5) ? 0.5 : 0.0;
     float lattice, mask;
     if (uBgMeshDome > 0.5) {
-      // Sky dome: the lattice lives on a sphere around the camera, in
-      // (azimuth, elevation) coordinates, so its lines are meridians and
-      // parallels that converge overhead and curve with perspective — a
-      // planetarium ceiling that pans with Camera Tilt and scales with Zoom.
-      // Masked by elevation above the terrain's far edge, not screen v.
-      vec3 dir = viewRay(rUv);
-      float az = atan(dir.x, dir.z) + uTime * 0.01;
-      float el = asin(clamp(dir.y, -1.0, 1.0));
-      lattice = triLattice(vec2(az, el) * DOME_SCALE);
-      float he = horizonElevation();
-      mask = mix(below, 1.0, smoothstep(he, he + 0.08, el)) * (1.0 - 0.5 * smoothstep(he + 0.5, 1.5, el));
+      // Dome: the lattice lives on the inside of a ball around the *scene*
+      // (centered on the disc, radius DOME_RADIUS), and the camera sits
+      // inside it, off-center. Ray-casting each pixel to that ball and
+      // taking (azimuth, elevation) about the ball's center gives meridians
+      // and parallels that visibly wrap over and under the scene and
+      // converge at its zenith and nadir — curvature you can see from any
+      // camera, unlike a sphere centered on the camera, which is a flat
+      // wall through a narrow (zoomed-in) window.
+      vec3 o = camPos();
+      vec3 d = viewRay(rUv);
+      vec3 oc = o - vec3(0.0, 0.0, CIRCLE_CENTER_Z);
+      float b = dot(oc, d);
+      float c = dot(oc, oc) - DOME_RADIUS * DOME_RADIUS;
+      float disc = b * b - c;
+      if (disc > 0.0) {
+        vec3 p = oc + d * (-b + sqrt(disc)); // the far root: the ball's inside, seen from within
+        float az = atan(p.x, p.z) + uTime * 0.01;
+        float el = asin(clamp(p.y / DOME_RADIUS, -1.0, 1.0));
+        lattice = triLattice(vec2(az, el) * DOME_SCALE);
+      } else {
+        lattice = 0.0;
+      }
+      // On the runway the terrain covers the ground, so fade the lattice out
+      // below the far edge; the floating shapes get the whole ball, dimmed
+      // behind their own silhouette so it reads as behind them.
+      float ground = (uCircle > 0.5 || uSphere > 0.5)
+        ? 1.0
+        : smoothstep(horizonElevation(), horizonElevation() + 0.08, asin(clamp(d.y, -1.0, 1.0)));
+      mask = ground * shapeCover(o, d);
     } else {
       // Flat backdrop: the lattice sits on the room plane, fading in just
       // above the horizon and staying across the sky, easing off at the top.
