@@ -229,10 +229,11 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
 }
 
 /** Per-grain brightness gain so a sparse floor-quality bed reads about as
- *  bright as a dense high-quality one. Anchored at REFERENCE_GRAINS = gain 1. */
-export const REFERENCE_GRAINS = 50_000;
+ *  bright as a dense high-quality one. Anchored at the top quality tier's
+ *  grain count = gain 1, so no preset renders dimmer than the best one. */
+export const REFERENCE_GRAINS = 200_000;
 export function grainGain(count: number): number {
-  return Math.max(0.5, Math.min(3, Math.sqrt(REFERENCE_GRAINS / Math.max(1, count))));
+  return Math.max(0.5, Math.min(6, Math.sqrt(REFERENCE_GRAINS / Math.max(1, count))));
 }
 
 const SETTINGS: SceneSetting[] = [
@@ -327,7 +328,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0.5,
     max: 3,
     step: 0.1,
-    default: 1.4,
+    default: 1.8,
   },
   {
     key: "fieldGlow",
@@ -502,10 +503,10 @@ void main() {
 
   // How hard the plate is being driven right now: sustained energy plus a
   // bass-onset kick. Silence -> ~0 -> the figure freezes.
-  // Vibration on a square curve so the low half of the slider is a usable
-  // whisper; the default lands where a linear 0.4 would.
-  float shake = uShake * uShake * 1.6;
-  float drive = shake * (0.15 + 1.6 * uEnergy) + uKick * uLowPulse * 1.5;
+  // Vibration on a sub-linear curve so the low half of the slider is a usable
+  // whisper while the top of the slider still throws sand hard.
+  float shake = pow(uShake, 1.5) * 2.0;
+  float drive = shake * (0.25 + 2.4 * uEnergy) + uKick * uLowPulse * 1.5;
 
   float f = field(p);
   float a = abs(f) * 0.5;
@@ -561,7 +562,7 @@ void main() {
 
   float a = amp(p);
   vec3 plate = vec3(0.030, 0.031, 0.036);
-  vec3 glow = palette(0.55 + 0.2 * a, uPalA, uPalB, uPalC, uPalD) * a * a * uFieldGlow * 0.4 * (0.3 + uEnergy);
+  vec3 glow = palette(0.55 + 0.2 * a, uPalA, uPalB, uPalC, uPalD) * a * a * uFieldGlow * 0.75 * (0.3 + uEnergy);
   // The rim only exists on the square plate; the full-frame plate has no edge to show.
   float rim = (1.0 - smoothstep(0.0, 0.012, 1.0 - border)) * uSquarePlate;
   vec3 col = (plate + glow + rim * 0.10) * inside;
@@ -582,6 +583,8 @@ out float vGlow;
 out float vSizePx;
 out float vScale;
 out float vShade;
+out float vFacets;
+out float vRot;
 
 void main() {
   int side = int(uSide);
@@ -595,13 +598,23 @@ void main() {
   // pile reads as grains rather than a smooth blob.
   vec2 jitter = hash22(vec2(texel) * 0.731 + 3.17);
   vShade = 0.8 + 0.4 * jitter.y;
+  // Each grain is a faceted shard (3 or 4 sides, POINT_FRAG), not a disc —
+  // real sand is angular. Random facet count and rotation per grain, same
+  // hash family as the size/shade jitter above.
+  vec2 shard = hash22(vec2(texel) * 0.911 + 5.7);
+  vFacets = shard.x < 0.5 ? 3.0 : 4.0;
+  vRot = shard.y * 6.2832;
   // Treble glow: the sprite grows by a fixed pixel margin to make room for
   // a halo (see POINT_FRAG), mostly on the hat/cymbal onset pulse so it
   // flashes rather than fogs.
   float glint = step(1.0 - 1.0 / ${GLINT_ONE_IN.toFixed(1)}, hash21(vec2(texel) * 0.517 + 9.1));
   vGlow = glint * clamp(uHighGlow * (0.8 * uHigh + 1.4 * uHighPulse), 0.0, 1.0);
   float resScale = max(1.0, uResolution.y / 720.0);
-  float size = uGrainSize * (0.75 + 0.5 * jitter.x) * resScale;
+  // A shard inscribed in the old disc covers less area than it (a triangle
+  // 0.41x, a square 0.64x); grow the size by the matching factor so a faceted
+  // bed reads as bright as the round one it replaced.
+  float shardGrow = vFacets < 3.5 ? 1.556 : 1.253;
+  float size = uGrainSize * shardGrow * (0.75 + 0.5 * jitter.x) * resScale;
   vSizePx = size + 2.0 * ${HALO_PX.toFixed(1)} * resScale * vGlow;
   vScale = vSizePx / size;
   gl_PointSize = vSizePx;
@@ -615,11 +628,14 @@ in float vGlow;
 in float vSizePx;
 in float vScale;
 in float vShade;
+in float vFacets;
+in float vRot;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
 uniform float uGrainGain;
 ${PALETTE_GLSL}
+const float PI = 3.14159265;
 
 void main() {
   vec2 d = gl_PointCoord - 0.5;
@@ -628,16 +644,23 @@ void main() {
   // The sprite was enlarged by vScale for the halo; the grain itself keeps
   // its own size at the centre, so measure the core in grain radii.
   float r = sqrt(r2) * vScale;
-  // A hard disc: the anti-aliased rim is one pixel wide on a big grain (so a
-  // big grain is a grain, not a blur) and never more than a fraction of the
-  // radius on a small one, which keeps a one-pixel grain's centre bright.
+  // A hard-edged faceted shard (3 or 4 sides, random rotation, see
+  // POINT_VERT): a regular-polygon distance field, radius in the facet's own
+  // direction rather than the disc's. rn <= r always, so the shard sits
+  // inside the disc's r2 > 0.25 discard above and never gets clipped by it.
+  float ang = atan(d.y, d.x) + vRot;
+  float k = PI / vFacets;
+  float rn = r * cos(k) / cos(mod(ang + k, 2.0 * k) - k);
+  // The anti-aliased rim is one pixel wide on a big grain (so a big grain is
+  // a grain, not a blur) and never more than a fraction of the radius on a
+  // small one, which keeps a one-pixel grain's centre bright.
   float edge = min(vScale / max(vSizePx, 1.0), 0.22);
-  float core = 1.0 - smoothstep(0.5 - edge, 0.5, r);
+  float core = 1.0 - smoothstep(0.5 - edge, 0.5, rn);
   // Settled grains sit on the base tone; thrown grains run up the palette.
   vec3 col = palette(0.1 + 0.4 * vAmp, uPalA, uPalB, uPalC, uPalD);
   // Settled sand is chalkier than the palette; thrown grains keep its full hue.
   col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.15 * (1.0 - vAmp));
-  float bright = (0.5 + 1.1 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * uBeatPulse * 0.8);
+  float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * uBeatPulse * 0.8);
   // Treble glow: a soft halo across the enlarged sprite, tinted toward
   // white, falling to zero at the sprite edge. Normalised by sprite area
   // (in 720p pixels) so the bloom a line reaches depends on how many grains
