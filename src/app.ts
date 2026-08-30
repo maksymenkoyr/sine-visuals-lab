@@ -35,7 +35,14 @@ import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/s
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
 import { getDefaultOverride, setDefaultOverride } from "./tuning/defaults.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
-import { getAutoGain, setAutoGain } from "./audio/autoGain.ts";
+import {
+  getAutoGain,
+  setAutoGain,
+  resolveAutoGain,
+  feedAutoGainMeasurement,
+  isAutoGainAuto,
+  setAutoGainAuto,
+} from "./audio/autoGain.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
@@ -455,7 +462,13 @@ function wireDeviceMenu(): void {
     getAutoStrength: () => getAutoStrength(),
     onAutoStrengthChange: (value) => setAutoStrength(value),
     getAutoGain: () => getAutoGain(),
-    onAutoGainChange: (value) => setAutoGain(value),
+    onAutoGainChange: (value) => {
+      setAutoGainAuto(false);
+      setAutoGain(value);
+    },
+    isAutoGainAuto: () => isAutoGainAuto(),
+    onAutoGainAutoToggle: (on) => setAutoGainAuto(on),
+    resolveAutoGain: () => resolveAutoGain(),
     getPowerMode: () => powerMode,
     onPowerModeChange: (mode) => {
       setPowerMode(mode);
@@ -794,8 +807,11 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, getAutoGain(), rateScale);
+    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
     lastFixedEnergy = extractor.fixedEnergy;
+    // Feeds next tick's resolveAutoGain(), not this one's — see
+    // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
+    feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
     return f;
   }
 
@@ -812,8 +828,11 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, getAutoGain(), rateScale);
+    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
     lastFixedEnergy = extractor.fixedEnergy;
+    // Feeds next tick's resolveAutoGain(), not this one's — see
+    // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
+    feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
     hostConn.sendFrame(f);
     return sampleToVisual(hostConn.sample());
   }

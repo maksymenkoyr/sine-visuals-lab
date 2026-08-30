@@ -411,4 +411,41 @@ describe("FeatureExtractor", () => {
     expect(at0_4s).toBeLessThan(at0_1s);
     expect(at0_9s).toBeGreaterThan(at0_4s);
   });
+
+  it("bandSpanDb widens as the per-band range actually seen grows", () => {
+    const narrow = new FeatureExtractor();
+    const wide = new FeatureExtractor();
+    const dt = 1 / 60;
+    let time = 0;
+
+    // `narrow` only ever sees one level; `wide` alternates between quiet and
+    // loud, so its floor/peak trackers open up further.
+    for (let i = 0; i < 300; i++) {
+      time += dt;
+      narrow.update(bandsFrame(-60), time);
+      wide.update(bandsFrame(i % 2 === 0 ? QUIET_DB : LOUD_DB), time);
+    }
+
+    expect(wide.bandSpanDb).toBeGreaterThan(narrow.bandSpanDb);
+  });
+
+  // autoGain.ts's auto mode leans on bandSpanDb reading the room, not the
+  // setting it's used to drive — this pins that no-feedback-loop property.
+  // features.ts's own `autoGain` param doc already says the floor/peak
+  // trackers run unconditionally; this is what actually holds it to that.
+  it("bandSpanDb reads the same regardless of the autoGain argument passed to update()", () => {
+    const withAutoGain = new FeatureExtractor();
+    const withoutAutoGain = new FeatureExtractor();
+    const dt = 1 / 60;
+    let time = 0;
+
+    for (let i = 0; i < 300; i++) {
+      time += dt;
+      const db = bandsFrame(i % 2 === 0 ? QUIET_DB : LOUD_DB);
+      withAutoGain.update(db, time, 1);
+      withoutAutoGain.update(db, time, 0);
+    }
+
+    expect(withoutAutoGain.bandSpanDb).toBeCloseTo(withAutoGain.bandSpanDb, 5);
+  });
 });
