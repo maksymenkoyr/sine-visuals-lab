@@ -12,9 +12,15 @@
  * primitives. Every skin compiles into the one program; `map()` branches on
  * a uniform, which is coherent across the whole draw and costs nothing.
  *
- * Cost: the march starts at the figure's bounding sphere, so background
- * pixels exit after one analytic test; inside, every step evaluates every
- * bone, so this sits with ferrofluid.ts at minQuality "mid".
+ * Cost, and the `renderer` setting: the raymarcher starts at the figure's
+ * bounding sphere, so background pixels exit after one analytic test, but
+ * inside it every step evaluates every bone — thousands of SDF taps per
+ * covered pixel, which no TV GPU affords. So the same rig can also be
+ * drawn by the two cheap renderers in fastRenderers.ts (analytic capsules,
+ * or flat projected capsules), and the raymarcher hands over to Capsules
+ * below the Mid preset (RAYMARCH_MIN_DETAIL); that is what lets the scene
+ * register at minQuality "floor". The `fastMarch` toggle trims the
+ * raymarcher itself (FAST_MARCH_*) for when its look is wanted cheaper.
  */
 import { createFullscreenScene } from "../../fullscreenScene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
@@ -37,6 +43,7 @@ import { clipPhaseAt, createBarCounter, type BlendMode } from "./player.ts";
 import clipsUrl from "./clips.bin?url";
 import { STICK_SKIN_GLSL } from "./stickSkin.ts";
 import { SKELETON_SKIN_GLSL } from "./skeletonSkin.ts";
+import { FAST_RENDERERS_GLSL } from "./fastRenderers.ts";
 
 export const DANCERS_ID = "dancers";
 
@@ -63,6 +70,20 @@ const STYLES: readonly { name: string; family: string | null }[] = [
   { name: "Swing", family: "swing" },
   { name: "Modern", family: "modern" },
 ];
+
+/** The `renderer` setting's options, in value order — see fastRenderers.ts. */
+const RENDERERS: readonly string[] = ["Raymarch", "Capsules", "Flat"];
+const RENDERER_RAYMARCH = 0;
+const RENDERER_CAPSULES = 1;
+const RENDERER_FLAT = 2;
+/** uDetail below which the raymarcher hands over to Capsules — the `low`
+ *  and `floor` presets in quality.ts. */
+const RAYMARCH_MIN_DETAIL = 0.5;
+/** What the `fastMarch` toggle trims: the step budget, the hit epsilon,
+ *  and the detail the skins build at (below the skeleton skin's LOD cutoff). */
+const FAST_MARCH_STEPS = 0.6;
+const FAST_MARCH_EPS = 1.6;
+const FAST_MARCH_DETAIL = 0.45;
 
 /** The `blend` setting's options, in value order — player.ts's BlendMode. */
 const BLENDS: readonly { name: string; mode: BlendMode }[] = [
@@ -154,6 +175,31 @@ const SETTINGS: SceneSetting[] = [
     default: 0,
   },
   {
+    key: "renderer",
+    label: "Renderer",
+    description:
+      "Raymarch is the full look; Capsules and Flat draw the same dance for a fraction of the cost. Below the Mid quality preset, Raymarch hands over to Capsules.",
+    group: "Look",
+    type: "enum",
+    options: RENDERERS,
+    min: 0,
+    max: RENDERERS.length - 1,
+    step: 1,
+    default: 0,
+  },
+  {
+    key: "fastMarch",
+    label: "Fast march",
+    description: "Trim the raymarcher: fewer steps, a looser surface, no ambient occlusion, coarser bone detail.",
+    group: "Look",
+    type: "boolean",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 0,
+    advanced: true,
+  },
+  {
     key: "glow",
     label: "Rim glow",
     description: "Palette-coloured light catching the figure's edges.",
@@ -176,6 +222,7 @@ const int MAX_STEPS = 96;
 // leaves it, and pixels whose ray misses it are background outright.
 const vec3 FIG_CENTER = vec3(0.0, 0.98, 0.0);
 const float FIG_RADIUS = 1.5;
+const float FOCAL = 1.5;
 
 uniform float uCamDolly;
 uniform float uCamTilt;
@@ -183,10 +230,13 @@ uniform float uCamRoll;
 
 // Which of SKINS draws this frame — set once in main() from uSkin.
 int gSkin = 0;
+// The detail the skins build at: uDetail, or less under the fast march.
+float gDetail = 1.0;
 float map(vec3 p);
 
 ${SDF_GLSL}
 ${RIG_GLSL}
+${FAST_RENDERERS_GLSL}
 ${SKINS.map((s) => s.glsl).join("\n")}
 
 float map(vec3 p) {
@@ -213,8 +263,18 @@ float ambientOcclusion(vec3 p, vec3 n) {
   return mix(0.45, 1.0, a * 0.6 + b * 0.4);
 }
 
+vec3 rimLight(vec3 p, vec3 n, vec3 rd) {
+  float fresnel = pow(1.0 - max(0.0, dot(n, -rd)), 3.0);
+  return palette(0.15 + p.y * 0.2, uPalA, uPalB, uPalC, uPalD) * fresnel * uGlow;
+}
+
 void main() {
   gSkin = int(clamp(uSkin, 0.0, float(${SKINS.length - 1})) + 0.5);
+  bool fastMarch = uFastMarch > 0.5;
+  gDetail = fastMarch ? min(uDetail, ${FAST_MARCH_DETAIL.toFixed(2)}) : uDetail;
+  // Below the Mid preset the raymarcher is out of budget: fall back to Capsules.
+  int renderer = int(clamp(uRenderer, 0.0, ${(RENDERERS.length - 1).toFixed(1)}) + 0.5);
+  if (renderer == ${RENDERER_RAYMARCH} && uDetail < ${RAYMARCH_MIN_DETAIL.toFixed(2)}) renderer = ${RENDERER_CAPSULES};
 
   vec2 uv = roomUv(vUv) - 0.5;
   uv.x *= uResolution.x / uResolution.y;
@@ -227,7 +287,7 @@ void main() {
   vec3 fwd = normalize(target - eye);
   vec3 right = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
   vec3 up = cross(right, fwd);
-  vec3 rd = normalize(fwd * 1.5 + uv.x * right + uv.y * up);
+  vec3 rd = normalize(fwd * FOCAL + uv.x * right + uv.y * up);
 
   vec3 col = vec3(0.012, 0.011, 0.016);
   // Faint floor glow under the figure so it stands on something.
@@ -237,6 +297,20 @@ void main() {
     col += palette(0.6, uPalA, uPalB, uPalC, uPalD) * ring * (0.035 + 0.03 * uBeatPulse);
   }
 
+  if (renderer == ${RENDERER_FLAT}) {
+    vec3 p, n;
+    float cover = flatTrace(uv, eye, right, up, fwd, FOCAL, p, n);
+    if (cover > 0.0) col = mix(col, shade(p, n, rd, rimLight(p, n, rd), 1.0), cover);
+    outColor = vec4(col, 1.0);
+    return;
+  }
+  if (renderer == ${RENDERER_CAPSULES}) {
+    vec3 p, n;
+    if (capsulesTrace(eye, rd, p, n)) col = shade(p, n, rd, rimLight(p, n, rd), 1.0);
+    outColor = vec4(col, 1.0);
+    return;
+  }
+
   vec3 oc = eye - FIG_CENTER;
   float b = dot(oc, rd);
   float h = b * b - (dot(oc, oc) - FIG_RADIUS * FIG_RADIUS);
@@ -244,7 +318,9 @@ void main() {
     h = sqrt(h);
     float t = max(0.0, -b - h);
     float tFar = -b + h;
-    int steps = int(min(float(MAX_STEPS), uMaxSteps));
+    // The fast march: fewer steps, a looser hit, no occlusion, coarser skins.
+    int steps = int(min(float(MAX_STEPS), uMaxSteps) * (fastMarch ? ${FAST_MARCH_STEPS.toFixed(2)} : 1.0));
+    float epsScale = fastMarch ? ${FAST_MARCH_EPS.toFixed(2)} : 1.0;
     bool hit = false;
     vec3 p = eye;
     for (int i = 0; i < MAX_STEPS; i++) {
@@ -253,17 +329,15 @@ void main() {
       float d = map(p);
       // Looser hits at low detail / few steps: a gallery tile with a dozen
       // steps should still close on the surface rather than leave holes.
-      float eps = 0.0008 + t * (0.0008 + 0.0025 * (1.0 - uDetail));
+      float eps = (0.0008 + t * (0.0008 + 0.0025 * (1.0 - gDetail))) * epsScale;
       if (d < eps) { hit = true; break; }
       t += d;
       if (t > tFar) break;
     }
     if (hit) {
-      vec3 n = calcNormal(p, 0.0015 + 0.002 * (1.0 - uDetail));
-      float ao = uDetail > 0.6 ? ambientOcclusion(p, n) : 1.0;
-      float fresnel = pow(1.0 - max(0.0, dot(n, -rd)), 3.0);
-      vec3 rim = palette(0.15 + p.y * 0.2, uPalA, uPalB, uPalC, uPalD) * fresnel * uGlow;
-      col = shade(p, n, rd, rim, ao);
+      vec3 n = calcNormal(p, 0.0015 + 0.002 * (1.0 - gDetail));
+      float ao = gDetail > 0.6 ? ambientOcclusion(p, n) : 1.0;
+      col = shade(p, n, rd, rimLight(p, n, rd), ao);
     }
   }
 
@@ -272,7 +346,9 @@ void main() {
 `;
 
 export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
-  minQuality: "mid",
+  // The cheap renderers run anywhere; the raymarcher hands over to them
+  // below Mid (RAYMARCH_MIN_DETAIL), so no preset is out of reach.
+  minQuality: "floor",
   settings: SETTINGS,
   extraUniforms: (() => {
     const choreographer = createChoreographer();

@@ -15,11 +15,15 @@ regenerate it at session close.
   bar clock by `player.ts` with a bar-boundary picker and two handovers
   (crossfade / inertialization, the advanced `Handover` setting), under
   `choreo.ts`'s beat gate, drop pose and jaw. `Pose` is now a quaternion per
-  bone. Sixteen clips across the four `style` families. Typecheck + tests
-  green; every clip checked on a headless contact sheet at its native tempo;
-  picker path and both handovers run on synthetic audio. **Not yet judged on
-  real music.** The first bundled data file in the repo — see step 5 of
-  `docs/adding-a-scene.md`.
+  bone. Sixteen clips across the four `style` families. Three renderers
+  behind the `Renderer` setting — the raymarcher, analytic capsules and flat
+  projected capsules (`fastRenderers.ts`) — plus a `Fast march` trim; the
+  raymarcher hands over to Capsules below Mid, so the scene now registers at
+  `minQuality: "floor"` and runs on the TV presets. Typecheck + tests green;
+  every clip checked on a headless contact sheet at its native tempo; picker
+  path, both handovers and all renderers run on synthetic audio. **Not yet
+  judged on real music.** The first bundled data file in the repo — see
+  step 5 of `docs/adding-a-scene.md`.
 - **Chladni scene** — branch `worktree-chladni-scene` (worktree locked),
   1 commit ahead of `main`, unmerged.
 - **Always-on dev controls** — branch `worktree-agent-ae8a69d86e9c44e97`,
@@ -38,8 +42,8 @@ regenerate it at session close.
 - Dancers: the tempo the CMU dancers moved to is pinned by hand in
   `tools/clip-cuts.json` (CMU has no music); a clip that feels off-beat is a
   wrong `bpm`/`start` there, not a player bug.
-- Dancers: `minQuality: "mid"` was chosen by analogy with Ferrofluid, not
-  measured on a low-preset device.
+- Dancers: the cheap renderers are untested on an actual TV — the desktop
+  is vsync-bound at every setting, so the real frame time there is unknown.
 - `tuning/params.json` ships with `"autoPin": true`, so every setting probes
   as `pinned` in DEV until `__viz.setParams({ autoPin: false })` — intended,
   or a leftover from a tuning session?

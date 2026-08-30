@@ -10,7 +10,7 @@
 export const STICK_SKIN_GLSL = `
 float stick_map(vec3 p) {
   // Fatter at low detail so thin limbs survive a half-resolution buffer.
-  float r = 0.036 * mix(1.5, 1.0, uDetail);
+  float r = 0.036 * mix(1.5, 1.0, gDetail);
   float d = 1e9;
   for (int i = 0; i < BONE_COUNT; i++) {
     d = min(d, sdCapsuleY(boneLocal(i, p), boneLen(i), r));

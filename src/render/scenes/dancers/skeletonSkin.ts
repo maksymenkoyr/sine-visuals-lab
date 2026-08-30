@@ -142,7 +142,7 @@ float skel_foot(vec3 q, float len, float lod) {
 #define SKEL_PART(boneId, pad, expr) { vec3 q = boneLocal(boneId, p); float len = boneLen(boneId); if (sdCapsuleY(q, len, pad) < d) d = min(d, expr); }
 
 float skel_map(vec3 p) {
-  float lod = uDetail;
+  float lod = gDetail;
   float fat = mix(1.5, 1.0, lod); // thin shafts survive a half-resolution buffer
   float d = 1e9;
   SKEL_PART(B_HEAD, 0.13, skel_skull(q, lod))
