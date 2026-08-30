@@ -7,6 +7,8 @@ import {
   ringSeconds,
   grainTextureSide,
   grainGain,
+  drawnGrainCount,
+  MAX_BED_COVERAGE,
   MODE_TABLE,
   ACTIVE_MODES,
   FUNDAMENTAL_HZ_SMALL,
@@ -86,6 +88,57 @@ describe("grain texture sizing", () => {
     expect(grainGain(12_000)).toBeGreaterThan(grainGain(200_000));
     expect(grainGain(1)).toBe(6);
     expect(grainGain(1e9)).toBe(0.5);
+  });
+});
+
+describe("bed coverage", () => {
+  it("draws every grain when the bed is far under the coverage cap", () => {
+    const count = qualitySettings("floor").maxParticles;
+    // A tiny plate and a modest grain size: nowhere near MAX_BED_COVERAGE.
+    expect(drawnGrainCount(count, 4, 1920 * 1080)).toBe(count);
+  });
+
+  it("thins the bed once coverage would exceed the cap, roughly as 1/size^2", () => {
+    const count = qualitySettings("high").maxParticles;
+    const platePx2 = 1920 * 1080;
+    const small = drawnGrainCount(count, 4, platePx2);
+    const big = drawnGrainCount(count, 40, platePx2);
+    expect(big).toBeLessThan(small);
+    // Doubling grain diameter should roughly quarter the drawn count once
+    // both points are bound by the cap rather than by `count` itself.
+    const a = drawnGrainCount(count, 20, platePx2);
+    const b = drawnGrainCount(count, 40, platePx2);
+    expect(a).toBeLessThan(count);
+    expect(b / a).toBeCloseTo(0.25, 1);
+  });
+
+  it("never draws more than count or fewer than one grain", () => {
+    expect(drawnGrainCount(200_000, 1000, 1920 * 1080)).toBeGreaterThanOrEqual(1);
+    expect(drawnGrainCount(200_000, 0.01, 1920 * 1080)).toBe(200_000);
+    expect(drawnGrainCount(1, 1000, 1920 * 1080)).toBe(1);
+  });
+
+  it("is monotonically non-increasing in grain size", () => {
+    const count = qualitySettings("high").maxParticles;
+    const platePx2 = 3840 * 2160;
+    let prev = drawnGrainCount(count, 0.5, platePx2);
+    for (let size = 1; size <= 60; size += 1) {
+      const drawn = drawnGrainCount(count, size, platePx2);
+      expect(drawn).toBeLessThanOrEqual(prev);
+      prev = drawn;
+    }
+  });
+
+  it("the covered area at the returned count never exceeds MAX_BED_COVERAGE by more than one grain", () => {
+    const count = qualitySettings("high").maxParticles;
+    const platePx2 = 1920 * 1080;
+    for (const grainPx of [10, 20, 30, 50]) {
+      const drawn = drawnGrainCount(count, grainPx, platePx2);
+      const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * (1 + 0.5 ** 2 / 12);
+      if (drawn < count) {
+        expect((drawn * areaPerGrain) / platePx2).toBeLessThanOrEqual(MAX_BED_COVERAGE + 1e-6);
+      }
+    }
   });
 });
 
