@@ -12,27 +12,27 @@ import { chladniScene } from "./chladni.ts";
 import { dancersScene } from "./dancers/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
-// insertion order) — the two featured scenes go first, drafts follow.
+// insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
+// below) go first, drafts follow.
+registerScene(chladniScene);
 registerScene(causticsScene);
 registerScene(meshGridScene);
 registerScene(spectrumScene);
 registerScene(particlesScene);
 registerScene(tunnelScene);
 registerScene(cymaticsScene);
-registerScene(chladniScene);
 registerScene(moireScene);
 registerScene(risoScene);
 registerScene(ferrofluidScene);
 registerScene(dancersScene);
 
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
- *  the two featured scenes (Caustics, Mesh Grid) are deliberately absent. */
+ *  the featured scenes registered above it are deliberately absent. */
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "spectrum",
   "particles",
   "tunnel",
   "cymatics",
-  "chladni",
   "moire",
   "riso",
   "ferrofluid",

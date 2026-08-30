@@ -82,9 +82,9 @@ describe("grain texture sizing", () => {
   });
 
   it("gain is 1 at the reference count and larger for sparser beds", () => {
-    expect(grainGain(50_000)).toBeCloseTo(1, 10);
-    expect(grainGain(4_000)).toBeGreaterThan(grainGain(200_000));
-    expect(grainGain(1)).toBe(3);
+    expect(grainGain(200_000)).toBeCloseTo(1, 10);
+    expect(grainGain(12_000)).toBeGreaterThan(grainGain(200_000));
+    expect(grainGain(1)).toBe(6);
     expect(grainGain(1e9)).toBe(0.5);
   });
 });

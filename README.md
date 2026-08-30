@@ -6,9 +6,9 @@ full-screen visualization on a paired TV over a low-latency WebSocket link.
 
 A gallery of audio-reactive scenes, each with per-scene sensitivity, contrast,
 and smoothing controls, plus an auto-tune engine that adapts those controls to
-the music's own character in real time. Caustics and Mesh Grid are featured;
-the rest sit behind the gallery's draft toggle (`DRAFT_SCENE_IDS` in
-`src/render/scenes/index.ts`).
+the music's own character in real time. Scenes absent from `DRAFT_SCENE_IDS`
+(in `src/render/scenes/index.ts`) are featured; the rest sit behind the
+gallery's draft toggle.
 
 ## Quick start
 
