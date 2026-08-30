@@ -5,7 +5,7 @@ import { NUM_BANDS } from "../src/audio/types.ts";
 describe("protocol", () => {
   it("round-trips every field within quantization tolerance", () => {
     const bands = new Float32Array(NUM_BANDS).map((_, i) => (i % NUM_BANDS) / (NUM_BANDS - 1));
-    const frame = { bands, energy: 0.73, beat: true, bpm: 128.4, beatPhase: 0.61, level: 0.42 };
+    const frame = { bands, energy: 0.73, onset: true, bpm: 128.4, onsetPhase: 0.61, level: 0.42 };
     const roomTimeMs = 1_755_000_123_456.789;
 
     const buf = encodeFeatureFrame(frame, roomTimeMs);
@@ -16,44 +16,44 @@ describe("protocol", () => {
       expect(decoded!.bands[i]).toBeCloseTo(bands[i], 2); // 8-bit quantization
     }
     expect(decoded!.energy).toBeCloseTo(frame.energy, 2);
-    expect(decoded!.beat).toBe(true);
-    expect(decoded!.beatPhase).toBeCloseTo(frame.beatPhase, 3); // 16-bit quantization
+    expect(decoded!.onset).toBe(true);
+    expect(decoded!.onsetPhase).toBeCloseTo(frame.onsetPhase, 3); // 16-bit quantization
     expect(decoded!.bpm).toBeCloseTo(frame.bpm, 1); // stored as bpm*10
     expect(decoded!.level).toBeCloseTo(frame.level, 2); // 8-bit quantization
     expect(decoded!.roomTimeMs).toBeCloseTo(roomTimeMs, 6); // float64, effectively exact
   });
 
-  it("round-trips beat=false and boundary values", () => {
+  it("round-trips onset=false and boundary values", () => {
     const bands = new Float32Array(NUM_BANDS); // all zero
-    const frame = { bands, energy: 0, beat: false, bpm: 0, beatPhase: 0, level: 0 };
+    const frame = { bands, energy: 0, onset: false, bpm: 0, onsetPhase: 0, level: 0 };
 
     const decoded = decodeFeatureFrame(encodeFeatureFrame(frame, 0));
 
-    expect(decoded!.beat).toBe(false);
+    expect(decoded!.onset).toBe(false);
     expect(decoded!.energy).toBe(0);
     expect(decoded!.bpm).toBe(0);
-    expect(decoded!.beatPhase).toBe(0);
+    expect(decoded!.onsetPhase).toBe(0);
     expect(decoded!.level).toBe(0);
     expect(decoded!.roomTimeMs).toBe(0);
   });
 
   it("clamps out-of-range inputs instead of wrapping or corrupting the buffer", () => {
     const bands = new Float32Array(NUM_BANDS).fill(1.5); // out of [0,1]
-    const frame = { bands, energy: -0.5, beat: true, bpm: 99999, beatPhase: 2, level: 1.5 };
+    const frame = { bands, energy: -0.5, onset: true, bpm: 99999, onsetPhase: 2, level: 1.5 };
 
     const decoded = decodeFeatureFrame(encodeFeatureFrame(frame, 1000));
 
     expect(decoded!.bands[0]).toBeCloseTo(1, 2);
     expect(decoded!.energy).toBe(0);
     expect(decoded!.bpm).toBeCloseTo(6553.5, 1); // Uint16 ceiling at bpm*10
-    expect(decoded!.beatPhase).toBeCloseTo(1, 3);
+    expect(decoded!.onsetPhase).toBeCloseTo(1, 3);
     expect(decoded!.level).toBeCloseTo(1, 2);
   });
 
   it("rejects buffers of the wrong length or wrong message type", () => {
     expect(decodeFeatureFrame(new ArrayBuffer(10))).toBeNull();
     const good = encodeFeatureFrame(
-      { bands: new Float32Array(NUM_BANDS), energy: 0, beat: false, bpm: 0, beatPhase: 0, level: 0 },
+      { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, bpm: 0, onsetPhase: 0, level: 0 },
       0,
     );
     const corrupted = good.slice(0);
@@ -74,9 +74,9 @@ describe("protocol", () => {
     for (let i = 0; i < NUM_BANDS; i++, o += 1) view.setUint8(o, 128);
     view.setUint8(o, 200); // energy
     o += 1;
-    view.setUint8(o, 1); // beat
+    view.setUint8(o, 1); // onset
     o += 1;
-    view.setUint16(o, 30000, true); // beatPhase
+    view.setUint16(o, 30000, true); // onsetPhase
     o += 2;
     view.setUint16(o, 1200, true); // bpm*10
     o += 2;

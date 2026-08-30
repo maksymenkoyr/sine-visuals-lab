@@ -82,7 +82,7 @@ export interface BandEnergy {
   lowPulse: number;
   midPulse: number;
   highPulse: number;
-  /** One-shot edges (like FeatureFrame.beat, but per group) — true only on
+  /** One-shot edges (like FeatureFrame.onset, but per group) — true only on
    *  the exact tick that group's level newly crossed its adaptive threshold. */
   lowOnset: boolean;
   midOnset: boolean;

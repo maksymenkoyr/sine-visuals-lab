@@ -80,7 +80,10 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
       // tile's loudness dial isn't just permanently frozen at NEUTRAL.
       const level = energy;
 
-      return { time: timeSec, bands, energy, beat, bpm, beatPhase, level };
+      // beat/beatPhase above are genuinely a synthetic metronome's beat grid
+      // (they drive the kick/bass/hat envelopes too) — onset/onsetPhase is
+      // just what FeatureFrame calls that same edge/phase pair.
+      return { time: timeSec, bands, energy, onset: beat, bpm, onsetPhase: beatPhase, level };
     },
   };
 }

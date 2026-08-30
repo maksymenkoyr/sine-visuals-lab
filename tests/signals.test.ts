@@ -58,7 +58,7 @@ describe("signals registry", () => {
     const idsOf = (spec: typeof ripple) =>
       (spec.reads ?? []).map((l) => (typeof l === "string" ? l : l.signal));
 
-    expect(idsOf(ripple).sort()).toEqual(["anim.dropOnset", "anim.lowOnset", "feature.beat"].sort());
-    expect(idsOf(rippleSrc).sort()).toEqual(["anim.lowOnset", "feature.beat"].sort());
+    expect(idsOf(ripple).sort()).toEqual(["anim.dropOnset", "anim.lowOnset", "feature.onset"].sort());
+    expect(idsOf(rippleSrc).sort()).toEqual(["anim.lowOnset", "feature.onset"].sort());
   });
 });

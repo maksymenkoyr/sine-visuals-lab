@@ -18,16 +18,17 @@ export interface AnimFrame {
   flowPhase: number;
   /** Decaying [0,1] flash that jumps to 1 on each beat. */
   beatPulse: number;
-  /** One-shot broadband onset edge, mirroring FeatureFrame.beat — true only
+  /** One-shot broadband onset edge, mirroring FeatureFrame.onset — true only
    *  on the tick it fired. JS-side only, same family as lowOnset/midOnset/
    *  highOnset/dropOnset below: a scene wanting a discrete trigger (not
-   *  beatPulse's continuous decay) reads this instead of FeatureFrame.beat
+   *  beatPulse's continuous decay) reads this instead of FeatureFrame.onset
    *  directly, so every scene goes through the render loop's edge latch
    *  (see src/render/renderLatch.ts) rather than risking a tick the render
    *  cap skipped. */
   onset: boolean;
   /** Phase-locked beat/bar clock — see beatClock.ts. Never restarts mid-beat
-   *  the way FeatureFrame.beatPhase can. */
+   *  the way FeatureFrame.onsetPhase can (that field has no reader today —
+   *  this superseded it). */
   beatPhase: number;
   barPhase: number;
   tempoLock: number;
@@ -87,20 +88,20 @@ export function createAnimClock(): AnimClock {
     advance(dtSec: number, frame: FeatureFrame, smoothing = SMOOTHING_DEFAULT): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
       const flowPhase = flow.advance(dtSec, frame.energy);
-      beat.advance(dtSec, frame.bpm, frame.beat);
+      beat.advance(dtSec, frame.bpm, frame.onset);
       bandEnergy.advance(dtSec, frame.bands, rateScale);
       section.advance(dtSec, frame.energy, rateScale);
       profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
 
       beatPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
-      if (frame.beat) beatPulse = 1;
+      if (frame.onset) beatPulse = 1;
 
       return {
         dtSec,
         timeSec: frame.time,
         flowPhase,
         beatPulse,
-        onset: frame.beat,
+        onset: frame.onset,
         beatPhase: beat.beatPhase,
         barPhase: beat.barPhase,
         tempoLock: beat.tempoLock,

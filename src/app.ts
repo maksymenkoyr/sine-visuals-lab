@@ -934,9 +934,9 @@ function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
     time: s.timeSec,
     bands: s.bands,
     energy: s.energy,
-    beat: s.beatFired,
+    onset: s.onsetFired,
     bpm: s.bpm,
-    beatPhase: s.beatPhase,
+    onsetPhase: s.beatPhase,
     level: s.level,
   };
 }

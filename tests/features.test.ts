@@ -136,7 +136,7 @@ describe("FeatureExtractor", () => {
       const isClick = time >= nextClickAt;
       if (isClick) nextClickAt += intervalSec;
       frame = extractor.update(noisy(isClick ? { 0: LOUD_DB, 12: LOUD_DB } : {}), time);
-      if (frame.beat && !isClick) spurious++;
+      if (frame.onset && !isClick) spurious++;
     }
 
     expect(spurious).toBeGreaterThan(0); // the scenario must actually be noisy
@@ -459,7 +459,7 @@ describe("FeatureExtractor", () => {
         time += dt;
         frame = extractor.update(bandsFrame(QUIET_DB), time);
       }
-      expect(frame!.beat).toBe(false);
+      expect(frame!.onset).toBe(false);
       expect(extractor.fluxRatio).toBeLessThan(1);
     });
 
@@ -479,14 +479,14 @@ describe("FeatureExtractor", () => {
       // One broadband hit.
       time += dt;
       frame = extractor.update(bandsFrame(LOUD_DB), time);
-      expect(frame!.beat).toBe(true);
+      expect(frame!.onset).toBe(true);
       expect(extractor.fluxRatio).toBeGreaterThanOrEqual(1);
 
       // Immediately after, still within the refractory window: no new beat,
       // but fluxRatio keeps reporting every frame rather than freezing.
       time += dt;
       frame = extractor.update(bandsFrame(LOUD_DB), time);
-      expect(frame!.beat).toBe(false);
+      expect(frame!.onset).toBe(false);
       expect(Number.isFinite(extractor.fluxRatio)).toBe(true);
     });
   });

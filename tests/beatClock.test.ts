@@ -5,7 +5,7 @@ const DT = 1 / 60;
 
 describe("beat clock", () => {
   it("advances monotonically through a burst of onsets, never restarting to 0", () => {
-    // Regression test for the bug this replaces: FeatureFrame.beatPhase
+    // Regression test for the bug this replaces: FeatureFrame.onsetPhase
     // reset to exactly 0 on every fired onset, so a burst of hats/fills
     // stuttered anything animating off it. Feed a dense onset burst (well
     // past the 0.1s refractory the old detector allowed) and assert the

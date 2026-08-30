@@ -1136,7 +1136,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // ---- Rhythm ----
       if (!rhythmCard.fold?.isFolded()) {
         const sectionVal = anim ? (raw ? anim.raw.sectionIntensity : anim.sectionIntensity) : null;
-        tempo.update(anim?.tempoLock ?? 0, !!frame?.beat);
+        tempo.update(anim?.tempoLock ?? 0, !!frame?.onset);
         section.setValue(sectionVal, dtSec);
         if (anim?.dropOnset) section.flash(HOT_RED);
         if (text) {
@@ -1153,7 +1153,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         // mic-less renderer or the synthetic feed) — no RAW counterpart,
         // same reasoning as the hit pulses above.
         onset.setValue(fluxRatio === null ? null : fluxRatio / ONSET_METER_MAX, dtSec);
-        if (frame?.beat) onset.flash();
+        if (frame?.onset) onset.flash();
         if (text)
           onset.setReadout(
             fluxRatio === null ? "--" : fluxRatio.toFixed(2),

@@ -19,7 +19,7 @@ import type { AnimFrame } from "./animClock.ts";
 // only reads AnimFrame's one-shot fields (never FeatureFrame's) can no
 // longer miss one, regardless of render cap or refresh rate.
 //
-// Modeled on jitterBuffer.ts's consumeBeatIfDue — the same "hold a flag
+// Modeled on jitterBuffer.ts's consumeOnsetIfDue — the same "hold a flag
 // until someone consumes it" shape, here local to one device's render loop
 // instead of a network room's playout clock.
 //

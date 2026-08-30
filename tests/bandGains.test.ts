@@ -26,7 +26,7 @@ import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 
 function frame(fill: number): FeatureFrame {
   const bands = new Float32Array(NUM_BANDS).fill(fill);
-  return { time: 1.5, bands, energy: 0.5, beat: true, bpm: 120, beatPhase: 0.3, level: 0.6 };
+  return { time: 1.5, bands, energy: 0.5, onset: true, bpm: 120, onsetPhase: 0.3, level: 0.6 };
 }
 
 function flat(): Float32Array {
@@ -229,14 +229,14 @@ describe("applyBandGains", () => {
     expect(pinnedBands()[NUM_BANDS - 1]).toBe(0);
   });
 
-  it("passes energy/level/time/beat/bpm/beatPhase through unchanged — this is a per-band control, not broadband", () => {
+  it("passes energy/level/time/onset/bpm/onsetPhase through unchanged — this is a per-band control, not broadband", () => {
     const f = frame(0.3);
     const out = applyBandGains(f, withFader(3, 2));
     expect(out.energy).toBe(f.energy);
     expect(out.level).toBe(f.level);
     expect(out.time).toBe(f.time);
-    expect(out.beat).toBe(f.beat);
+    expect(out.onset).toBe(f.onset);
     expect(out.bpm).toBe(f.bpm);
-    expect(out.beatPhase).toBe(f.beatPhase);
+    expect(out.onsetPhase).toBe(f.onsetPhase);
   });
 });

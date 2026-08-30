@@ -154,7 +154,7 @@ export class FeatureExtractor {
   private lastOnsetTime = -Infinity;
   private onsets: { time: number; weight: number }[] = [];
   private bpm = 0;
-  private lastBeatTime = 0;
+  private lastOnsetPhaseTime = 0;
   // flux/threshold from the most recent update(), stored unconditionally —
   // including on frames that don't fire, so a near-miss is visible too. A
   // local diagnostic like fixedEnergy/bandSpanDb above, never part of
@@ -262,9 +262,9 @@ export class FeatureExtractor {
     // baseline), so this never divides by zero.
     this.lastFluxRatio = flux / threshold;
     const canFire = time - this.lastOnsetTime > ONSET_REFRACTORY_SEC;
-    const beat = canFire && flux > threshold;
+    const onset = canFire && flux > threshold;
 
-    if (beat) {
+    if (onset) {
       this.lastOnsetTime = time;
       this.registerOnset(time, flux / threshold);
     }
@@ -278,7 +278,7 @@ export class FeatureExtractor {
     energy = clamp01(energy / NUM_BANDS);
     this.lastFixedEnergy = clamp01(fixedEnergy / NUM_BANDS);
 
-    const beatPhase = this.bpm > 0 ? (((time - this.lastBeatTime) / (60 / this.bpm)) % 1 + 1) % 1 : 0;
+    const onsetPhase = this.bpm > 0 ? (((time - this.lastOnsetPhaseTime) / (60 / this.bpm)) % 1 + 1) % 1 : 0;
 
     // Averaged as power, then back to dB — not a mean of the dB values. Most
     // of the 24 bands sit at the noise floor for any ordinary sound, and a
@@ -288,12 +288,12 @@ export class FeatureExtractor {
     const meanRawDb = 10 * Math.log10(rawPowSum / NUM_BANDS);
     const level = clamp01((meanRawDb - LEVEL_DB_FLOOR) / (LEVEL_DB_CEIL - LEVEL_DB_FLOOR));
 
-    return { time, bands, energy, beat, bpm: this.bpm, beatPhase, level };
+    return { time, bands, energy, onset, bpm: this.bpm, onsetPhase, level };
   }
 
   /** @param strength flux over the firing threshold — 1 is a bare trigger. */
   private registerOnset(time: number, strength: number): void {
-    this.lastBeatTime = time;
+    this.lastOnsetPhaseTime = time;
     this.onsets.push({ time, weight: Math.min(ONSET_WEIGHT_CAP, Math.max(1, strength)) });
     while (this.onsets.length > MAX_ONSETS || this.onsets[0].time < time - ONSET_WINDOW_SEC) this.onsets.shift();
     if (this.onsets.length < 3) return;

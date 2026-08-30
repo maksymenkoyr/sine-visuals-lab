@@ -1,6 +1,6 @@
 // A phase-locked beat/bar clock — the tempo analog of flowClock.ts's phase
 // accumulator. The naive version of "where are we in the beat" is
-// FeatureFrame.beatPhase, which the extractor (and jitterBuffer, for remote
+// FeatureFrame.onsetPhase, which the extractor (and jitterBuffer, for remote
 // frames) resets to exactly 0 on *every* detected onset. With only a 100ms
 // refractory window and no beat-grid quantization, a hi-hat, fill or false
 // positive resets it just as readily as an actual downbeat, so anything

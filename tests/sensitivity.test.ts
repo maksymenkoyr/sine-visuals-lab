@@ -25,7 +25,7 @@ import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 function frame(bands: number[], energy: number): FeatureFrame {
   const arr = new Float32Array(NUM_BANDS);
   bands.forEach((v, i) => (arr[i] = v));
-  return { time: 1.5, bands: arr, energy, beat: true, bpm: 120, beatPhase: 0.3, level: 0.6 };
+  return { time: 1.5, bands: arr, energy, onset: true, bpm: 120, onsetPhase: 0.3, level: 0.6 };
 }
 
 describe("sensitivity persistence", () => {
@@ -250,13 +250,13 @@ describe("applySensitivity", () => {
     }
   });
 
-  it("passes time/beat/bpm/beatPhase/level through unchanged", () => {
+  it("passes time/onset/bpm/onsetPhase/level through unchanged", () => {
     const f = frame([0.3], 0.3);
     const out = applySensitivity(f, 2, 2);
     expect(out.time).toBe(f.time);
-    expect(out.beat).toBe(f.beat);
+    expect(out.onset).toBe(f.onset);
     expect(out.bpm).toBe(f.bpm);
-    expect(out.beatPhase).toBe(f.beatPhase);
+    expect(out.onsetPhase).toBe(f.onsetPhase);
     // level must stay raw — it's auto mode's own input signal (see
     // musicProfile.ts), so shaping it here would feed the gain stage its
     // own output.

@@ -41,7 +41,7 @@ export type MeterCardId = "scope" | "signal" | "lufs" | "rhythm" | "character";
  *  currently points at need an id (see MeterCardId above). */
 export type MeterRowId = "section" | "tempo" | "hits";
 
-export type SignalId = "feature.beat" | "anim.lowOnset" | "anim.dropOnset";
+export type SignalId = "feature.onset" | "anim.lowOnset" | "anim.dropOnset";
 
 export interface SignalSpec {
   id: SignalId;
@@ -86,11 +86,11 @@ export type SignalLink =
     };
 
 export const SIGNALS: Record<SignalId, SignalSpec> = {
-  "feature.beat": signal({
-    id: "feature.beat",
+  "feature.onset": signal({
+    id: "feature.onset",
     label: "Beat",
     description:
-      "The broadband beat/onset flag straight off the audio pipeline (FeatureFrame.beat) — read here as AnimFrame.beatPulse, its decaying continuous form (animClock.ts), which is also what the Rhythm card's beat dot lights from.",
+      "The broadband onset flag straight off the audio pipeline (FeatureFrame.onset) — read here as AnimFrame.beatPulse, its decaying continuous form (animClock.ts), which is also what the Rhythm card's beat dot lights from.",
     kind: "edge",
     read: (_frame, anim) => anim.beatPulse,
     monitor: { card: "rhythm", row: "tempo" },

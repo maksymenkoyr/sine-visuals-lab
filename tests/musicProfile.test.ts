@@ -7,13 +7,13 @@ const DT = 1 / 60;
 const NEUTRAL_INPUTS: ProfileInputs = { tempoLock: 0, sectionIntensity: 0.5 };
 
 function silentFrame(t: number): FeatureFrame {
-  return { time: t, bands: new Float32Array(NUM_BANDS), energy: 0, beat: false, bpm: 0, beatPhase: 0, level: 0 };
+  return { time: t, bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, bpm: 0, onsetPhase: 0, level: 0 };
 }
 
 function constantBandsFrame(t: number, bands: Float32Array, level = 0.6): FeatureFrame {
   let energy = 0;
   for (let b = 0; b < NUM_BANDS; b++) energy += bands[b];
-  return { time: t, bands, energy: energy / NUM_BANDS, beat: false, bpm: 0, beatPhase: 0, level };
+  return { time: t, bands, energy: energy / NUM_BANDS, onset: false, bpm: 0, onsetPhase: 0, level };
 }
 
 function bassHeavyBands(): Float32Array {

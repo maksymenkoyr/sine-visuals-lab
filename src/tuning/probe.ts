@@ -86,7 +86,7 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
     renderScale: input.renderScale,
     govLevel: input.govLevel,
     bands: { low: anim?.low ?? 0, mid: anim?.mid ?? 0, high: anim?.high ?? 0, energy: vis?.energy ?? 0 },
-    beat: { fired: vis?.beat ?? false, bpm: vis?.bpm ?? 0, phase: anim?.beatPhase ?? 0 },
+    beat: { fired: vis?.onset ?? false, bpm: vis?.bpm ?? 0, phase: anim?.beatPhase ?? 0 },
     section: anim?.sectionIntensity ?? 0,
     drop: anim?.dropPulse ?? 0,
     settings: settingValues,

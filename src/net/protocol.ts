@@ -5,8 +5,11 @@ import { NUM_BANDS } from "../audio/types.ts";
  *   [0]      msg type (1 = feature frame)
  *   [1..24]  bands, Uint8 each (0..1 -> 0..255)
  *   [25]     energy, Uint8
- *   [26]     flags (bit0 = beat)
- *   [27..28] beatPhase, Uint16 (0..1 -> 0..65535)
+ *   [26]     flags (bit0 = onset)
+ *   [27..28] onsetPhase, Uint16 (0..1 -> 0..65535) — no consumer reads this
+ *            today (FeatureFrame.onsetPhase's own doc has the story); kept
+ *            on the wire only because dropping it means a version bump —
+ *            see the legacy-decode note below for what that costs.
  *   [29..30] bpm * 10, Uint16
  *   [31]     level, Uint8 (0..1 -> 0..255)
  *   [32..39] roomTimeMs, Float64
@@ -17,6 +20,11 @@ import { NUM_BANDS } from "../audio/types.ts";
  * that hasn't picked up this change yet still decodes frames from a host
  * that has, instead of going black. Drop that fallback once mixed-version
  * pairing is no longer a concern.
+ *
+ * Field names here (`onset`/`onsetPhase`) are TS-side only — the format is
+ * purely positional/length-discriminated (see LEGACY_FRAME_BYTES), so
+ * renaming a field never touches the bytes on the wire or breaks a paired
+ * device running older code.
  */
 const MSG_FEATURE_FRAME = 1;
 const FRAME_BYTES = 1 + NUM_BANDS + 1 + 1 + 2 + 2 + 1 + 8;
@@ -29,9 +37,9 @@ function clamp01(x: number): number {
 export interface EncodableFrame {
   bands: Float32Array; // length NUM_BANDS, [0,1]
   energy: number;
-  beat: boolean;
+  onset: boolean;
   bpm: number;
-  beatPhase: number;
+  onsetPhase: number;
   level: number;
 }
 
@@ -46,9 +54,9 @@ export function encodeFeatureFrame(frame: EncodableFrame, roomTimeMs: number): A
   }
   view.setUint8(o, Math.round(clamp01(frame.energy) * 255));
   o += 1;
-  view.setUint8(o, frame.beat ? 1 : 0);
+  view.setUint8(o, frame.onset ? 1 : 0);
   o += 1;
-  view.setUint16(o, Math.round(clamp01(frame.beatPhase) * 65535), true);
+  view.setUint16(o, Math.round(clamp01(frame.onsetPhase) * 65535), true);
   o += 2;
   view.setUint16(o, Math.min(65535, Math.round(Math.max(0, frame.bpm) * 10)), true);
   o += 2;
@@ -61,9 +69,9 @@ export function encodeFeatureFrame(frame: EncodableFrame, roomTimeMs: number): A
 export interface DecodedFrame {
   bands: Float32Array;
   energy: number;
-  beat: boolean;
+  onset: boolean;
   bpm: number;
-  beatPhase: number;
+  onsetPhase: number;
   level: number;
   roomTimeMs: number;
 }
@@ -81,9 +89,9 @@ export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
 
   const energy = view.getUint8(o) / 255;
   o += 1;
-  const beat = view.getUint8(o) !== 0;
+  const onset = view.getUint8(o) !== 0;
   o += 1;
-  const beatPhase = view.getUint16(o, true) / 65535;
+  const onsetPhase = view.getUint16(o, true) / 65535;
   o += 2;
   const bpm = view.getUint16(o, true) / 10;
   o += 2;
@@ -93,5 +101,5 @@ export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
   if (!legacy) o += 1;
   const roomTimeMs = view.getFloat64(o, true);
 
-  return { bands, energy, beat, bpm, beatPhase, level, roomTimeMs };
+  return { bands, energy, onset, bpm, onsetPhase, level, roomTimeMs };
 }
