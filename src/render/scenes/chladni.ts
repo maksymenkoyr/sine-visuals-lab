@@ -43,19 +43,22 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 // webOS/Tizen targets vite.config.ts builds for), and 1/65535 of the plate
 // is sub-pixel even at 4K; half-float would be *too coarse* for positions,
 // so the packing is the design, not a fallback. Per rendered frame the sim
-// fragment shader steps every grain the way a real grain moves: sand only
-// lifts where the plate's acceleration (local amplitude a = |field|/2 times
-// how hard the music drives the plate) beats gravity — below that threshold
-// friction holds the grain still even though the plate vibrates under it.
-// A lifted grain bounces a random distance that grows with the excess
-// acceleration, landing slightly downhill of |field| (the analytic gradient)
-// — a biased random walk, so the drift is always a fraction of the jitter
-// and grains never read as sliding. The still band around every nodal line
-// keeps whatever sand was already lying there: that's the sand between the
-// lines on a real plate, and a louder drive narrows the band into a crisp
-// line. A grain that bounces off the plate edge respawns at a random spot —
-// a real plate spills sand; refilling keeps the count constant. Silence
-// drives nothing, so the figure freezes in place.
+// fragment shader steps every grain the way a real grain moves. The plate's
+// local acceleration is the amplitude a = |field|/2 times how hard the music
+// drives the plate. Below the lift threshold a grain only rattles in place,
+// in proportion to that acceleration; above it the grain bounces a random
+// distance that grows with the excess (a soft knee, not a wall — quiet
+// plates shimmer, loud ones throw the sand). Migration toward the nodal
+// lines is a second-order effect of the bouncing, as on a real plate: each
+// bounce lands a small fraction of its length downhill of |field| (the
+// analytic gradient), and that fraction itself fades to nothing where the
+// plate barely moves. So sand in the quiet zones beside a line jiggles but
+// never migrates — the sand lying between the figures on a real plate —
+// while sand on the antinodes dances its way to the lines over seconds. A
+// louder drive narrows the quiet zones into crisp lines. Nothing slides:
+// every move is a bounce. A grain that bounces off the plate edge respawns
+// at a random spot — a real plate spills sand; refilling keeps the count
+// constant. Silence drives nothing, so the figure freezes in place.
 //
 // dt for the sim comes from frame.time deltas, not anim.dtSec: the anim
 // clock advances every rAF tick while render() is frame-pace-capped, so
@@ -225,9 +228,8 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
   };
 }
 
-/** Per-grain brightness gain so a sparse floor-quality bed and a dense
- *  high-quality one land near the same overall exposure under additive
- *  blending. Anchored at REFERENCE_GRAINS = gain 1. */
+/** Per-grain brightness gain so a sparse floor-quality bed reads about as
+ *  bright as a dense high-quality one. Anchored at REFERENCE_GRAINS = gain 1. */
 export const REFERENCE_GRAINS = 50_000;
 export function grainGain(count: number): number {
   return Math.max(0.5, Math.min(3, Math.sqrt(REFERENCE_GRAINS / Math.max(1, count))));
@@ -284,7 +286,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "shake",
     label: "Vibration",
-    description: "How hard the music shakes the plate — sand only lifts where the plate beats gravity, so a soft drive leaves sand lying between the lines",
+    description: "How hard the music shakes the plate — a quiet plate shimmers its sand, a loud one throws it",
     group: "Sand",
     min: 0,
     max: 1,
@@ -296,7 +298,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "settle",
     label: "Settling pull",
-    description: "How far each bounce drifts a grain toward the still lines",
+    description: "How readily bouncing sand finds the still lines — sand the plate barely moves never migrates",
     group: "Sand",
     min: 0,
     max: 1,
@@ -456,27 +458,30 @@ vec2 hash22(vec2 p) {
 }
 `;
 
-// Plate acceleration (amplitude x drive, g-ish units) a grain needs before
-// it lifts off; below it friction holds the grain still. This is what leaves
-// sand lying between the lines at a moderate drive.
+// Plate acceleration (amplitude x drive, g-ish units) at the knee between a
+// grain rattling in place and bouncing free. This is what leaves sand lying
+// between the lines at a moderate drive.
 const LIFT_THRESHOLD = 0.05;
-// Plate-space units per second of bounce displacement per unit of
-// acceleration above the threshold.
-const HOP_RATE = 0.35;
-// Each bounce lands this fraction of its own length downhill of |field| at
-// Settling pull 1 — the bias of the random walk.
-const PULL_BIAS = 0.6;
-// A very slow creep toward the line centre for sand inside the still band,
-// so a held figure tightens over seconds instead of freezing a ragged ridge
-// at the band edge. Plate-space units per second per unit acceleration —
-// keep this well below a pixel per frame or the lines shimmer.
-const CREEP = 0.02;
+// Plate-space units per second of bounce displacement per unit bounce, at
+// the 60 fps reference step.
+const HOP_RATE = 0.6;
+// On a fully lifted antinode, each bounce lands this fraction of its own
+// length downhill of |field| at Settling pull 1 — the bias of the random
+// walk. It fades to zero toward the lift knee, so quiet sand never migrates.
+const PULL_BIAS = 0.3;
 // A step may never cross more than this fraction of one nodal cell, so high
 // modes can't overshoot a line and oscillate.
 const STEP_CELL_FRACTION = 0.25;
-// How many extra grain-diameters a fully glowing grain's sprite grows by,
-// to make room for its halo (Treble glow — see POINT_VERT / POINT_FRAG).
-const GLOW_SIZE_GAIN = 4.0;
+// Treble glow (see POINT_VERT / POINT_FRAG): hats make the sand glint. One
+// grain in GLINT_ONE_IN carries a halo of HALO_PX pixels (at 720p) — a
+// fixed pixel radius, not a multiple of the grain size, so the halo is a
+// bloom around the grain and never a bigger grain. Spreading the light over
+// a few grains instead of all of them keeps each halo above the 8-bit
+// framebuffer's quantisation floor and the fill-rate cost down.
+const HALO_PX = 10.0;
+const GLINT_ONE_IN = 8;
+// Bloom a fully glowing line reaches, summed over its glinting grains.
+const HALO_GAIN = 11.0;
 
 const SIM_FRAG = `#version 300 es
 precision highp float;
@@ -497,25 +502,33 @@ void main() {
 
   // How hard the plate is being driven right now: sustained energy plus a
   // bass-onset kick. Silence -> ~0 -> the figure freezes.
-  float drive = uShake * (0.15 + 1.6 * uEnergy) + uKick * uLowPulse * 1.5;
+  // Vibration on a square curve so the low half of the slider is a usable
+  // whisper; the default lands where a linear 0.4 would.
+  float shake = uShake * uShake * 1.6;
+  float drive = shake * (0.15 + 1.6 * uEnergy) + uKick * uLowPulse * 1.5;
 
   float f = field(p);
   float a = abs(f) * 0.5;
 
-  // Local plate acceleration. A grain only lifts where it beats the
-  // threshold; the bounce grows with the excess.
+  // Local plate acceleration, and a soft lift: accel^2 / T below the knee
+  // (a rattle in place), accel - T above it (a free bounce).
   float accel = a * drive;
-  float excess = max(0.0, accel - ${LIFT_THRESHOLD.toFixed(2)});
-  float step = ${HOP_RATE.toFixed(2)} * excess * uSimDt;
+  float bounce = accel * accel / (accel + ${LIFT_THRESHOLD.toFixed(2)});
+
+  // Random bounce. sqrt(dt) so the random walk diffuses at the same rate at
+  // any frame pace; the step is HOP_RATE-sized at the 60 fps reference.
+  float step = ${HOP_RATE.toFixed(2)} * bounce * sqrt(uSimDt * 60.0) / 60.0;
   vec2 hop = (hash22(seed) - 0.5) * 2.0 * step;
 
-  // Each bounce lands a little downhill of |field| — a biased random walk,
-  // never a slide — plus a slow creep for the sand inside the still band.
-  // Capped per step so a high mode can't overshoot a line.
+  // Drift toward the line, second-order in the bounce: nothing where the
+  // plate barely moves, a small fraction of the bounce on an antinode. A
+  // velocity, so it scales with dt. Capped per step so a high mode can't
+  // overshoot a line.
   vec2 g = fieldGrad(p);
   vec2 dir = g / (length(g) + 1e-4) * sign(f);
   float stepCap = ${STEP_CELL_FRACTION.toFixed(2)} * 2.0 / max(uMaxOrder, 1.0);
-  float pull = min(stepCap, step * ${PULL_BIAS.toFixed(2)} * uSettle + ${CREEP.toFixed(3)} * accel * uSimDt);
+  float bias = ${PULL_BIAS.toFixed(2)} * uSettle * smoothstep(0.0, 3.0 * ${LIFT_THRESHOLD.toFixed(2)}, accel);
+  float pull = min(stepCap, ${HOP_RATE.toFixed(2)} * bounce * bias * uSimDt);
 
   p += hop - dir * pull;
 
@@ -567,6 +580,7 @@ ${CHLADNI_GLSL}
 out float vAmp;
 out float vGlow;
 out float vSizePx;
+out float vScale;
 out float vShade;
 
 void main() {
@@ -581,11 +595,15 @@ void main() {
   // pile reads as grains rather than a smooth blob.
   vec2 jitter = hash22(vec2(texel) * 0.731 + 3.17);
   vShade = 0.8 + 0.4 * jitter.y;
-  // Treble glow: the sprite grows to make room for a halo (see POINT_FRAG),
-  // mostly on the hat/cymbal onset pulse so it flashes rather than fogs.
-  vGlow = clamp(uHighGlow * (0.8 * uHigh + 1.4 * uHighPulse), 0.0, 1.0);
-  float size = uGrainSize * (0.75 + 0.5 * jitter.x) * max(1.0, uResolution.y / 720.0);
-  vSizePx = size * (1.0 + ${GLOW_SIZE_GAIN.toFixed(1)} * vGlow);
+  // Treble glow: the sprite grows by a fixed pixel margin to make room for
+  // a halo (see POINT_FRAG), mostly on the hat/cymbal onset pulse so it
+  // flashes rather than fogs.
+  float glint = step(1.0 - 1.0 / ${GLINT_ONE_IN.toFixed(1)}, hash21(vec2(texel) * 0.517 + 9.1));
+  vGlow = glint * clamp(uHighGlow * (0.8 * uHigh + 1.4 * uHighPulse), 0.0, 1.0);
+  float resScale = max(1.0, uResolution.y / 720.0);
+  float size = uGrainSize * (0.75 + 0.5 * jitter.x) * resScale;
+  vSizePx = size + 2.0 * ${HALO_PX.toFixed(1)} * resScale * vGlow;
+  vScale = vSizePx / size;
   gl_PointSize = vSizePx;
 }
 `;
@@ -595,6 +613,7 @@ precision highp float;
 in float vAmp;
 in float vGlow;
 in float vSizePx;
+in float vScale;
 in float vShade;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
@@ -606,27 +625,33 @@ void main() {
   vec2 d = gl_PointCoord - 0.5;
   float r2 = dot(d, d);
   if (r2 > 0.25) discard;
-  // The sprite was scaled up by scale for the halo; the grain itself keeps
-  // its original size at the centre, so measure the core in grain radii.
-  float scale = 1.0 + ${GLOW_SIZE_GAIN.toFixed(1)} * vGlow;
-  float r = sqrt(r2) * scale;
+  // The sprite was enlarged by vScale for the halo; the grain itself keeps
+  // its own size at the centre, so measure the core in grain radii.
+  float r = sqrt(r2) * vScale;
   // A hard disc: the anti-aliased rim is one pixel wide on a big grain (so a
   // big grain is a grain, not a blur) and never more than a fraction of the
   // radius on a small one, which keeps a one-pixel grain's centre bright.
-  float edge = min(scale / max(vSizePx, 1.0), 0.22);
+  float edge = min(vScale / max(vSizePx, 1.0), 0.22);
   float core = 1.0 - smoothstep(0.5 - edge, 0.5, r);
   // Settled grains sit on the base tone; thrown grains run up the palette.
   vec3 col = palette(0.1 + 0.4 * vAmp, uPalA, uPalB, uPalC, uPalD);
   // Settled sand is chalkier than the palette; thrown grains keep its full hue.
-  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.3 * (1.0 - vAmp));
-  float bright = (0.1 + 0.55 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * uBeatPulse * 1.2);
-  // Treble glow: a soft halo across the whole (enlarged) sprite, tinted
-  // toward white, faint per grain so it only reads where sand piles up.
-  // Divided by scale so a bigger halo spreads the light rather than
-  // adding more of it.
-  float halo = exp(-r2 * 6.0) * vGlow;
-  vec3 haloCol = mix(col, vec3(1.0), 0.45) * halo * 1.2 * bright / scale;
-  outColor = vec4(col * bright * core + haloCol, 1.0);
+  col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.15 * (1.0 - vAmp));
+  float bright = (0.5 + 1.1 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * uBeatPulse * 0.8);
+  // Treble glow: a soft halo across the enlarged sprite, tinted toward
+  // white, falling to zero at the sprite edge. Normalised by sprite area
+  // (in 720p pixels) so the bloom a line reaches depends on how many grains
+  // glint there, not on grain size or resolution.
+  float halo = 1.0 - 4.0 * r2;
+  halo = halo * halo * vGlow;
+  float resScale = max(1.0, uResolution.y / 720.0);
+  float haloNorm = ${HALO_GAIN.toFixed(1)} * resScale * resScale / (vSizePx * vSizePx);
+  vec3 haloCol = mix(col, vec3(1.0), 0.45) * halo * haloNorm * bright;
+  // Premultiplied alpha: the grain is opaque (alpha = core) and occludes
+  // whatever lies under it, like real sand; the halo carries no alpha, so
+  // it adds. Overlapping big grains stay hard-edged instead of summing
+  // into a smear.
+  outColor = vec4(col * bright * core + haloCol, core);
 }
 `;
 
@@ -756,7 +781,8 @@ function createChladniScene(): Scene {
       setModes(bgProg, modes);
       drawFullscreenQuad(gl, quadVao);
 
-      // Sand: one point per grain, additive so piles on the lines add up.
+      // Sand: one point per grain. Premultiplied blend — opaque grain cores
+      // occlude, halos add (see POINT_FRAG).
       pointProg.use();
       uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
       setModes(pointProg, modes);
@@ -766,7 +792,7 @@ function createChladniScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, posTex[read]);
       gl.uniform1i(pointPosLoc, 0);
       gl.enable(gl.BLEND);
-      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.bindVertexArray(pointVao);
       gl.drawArrays(gl.POINTS, 0, grainCount);
       gl.bindVertexArray(null);

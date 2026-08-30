@@ -33,7 +33,7 @@ regenerate it at session close.
 
 - Chladni: should it graduate out of `DRAFT_SCENE_IDS`? It reads well on
   synthetic audio; needs a pass on real music. The sand constants
-  (`LIFT_THRESHOLD`, `HOP_RATE`, `PULL_BIAS`, `CREEP`) and the resonance
+  (`LIFT_THRESHOLD`, `HOP_RATE`, `PULL_BIAS`) and the resonance
   window/sharpening range (`WINDOW_BANDS_*`, `SHARPEN_*` in `chladni.ts`)
   were set by eye at 720p against the synthetic feed's low energy — on real
   music the plate is driven harder, so lines should go crisper and the
