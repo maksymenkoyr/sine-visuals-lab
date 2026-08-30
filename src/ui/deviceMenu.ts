@@ -238,6 +238,14 @@ export interface DeviceMenuDeps {
    *  fully adaptive. */
   getAutoGain: () => number;
   onAutoGainChange: (value: number) => void;
+  /** The row's own "A" chip — auto-resolves the amount from the room's
+   *  measured span rather than MUSIC_DIALS (see autoGain.ts's header for
+   *  why). Independent of the master Auto button: that toggle is scoped to
+   *  isSceneAuto's per-scene exceptions, and this setting is device-global
+   *  like getAutoGain above. */
+  isAutoGainAuto: () => boolean;
+  onAutoGainAutoToggle: (on: boolean) => void;
+  resolveAutoGain: () => number;
   /** Energy saving mode (src/render/powerMode.ts) — the Power card's
    *  Auto/On/Off override for the quality governor. Device-wide, like
    *  Auto-gain above. */
@@ -1507,6 +1515,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ];
   function syncInputRows(): void {
     for (const { row, getManual } of inputRows) row.sync(getManual);
+    // Auto-gain isn't in inputRows (see its own comment below on why it's
+    // built separately) but needs the same resync wherever this is called.
+    autoGainRow.sync(() => deps.getAutoGain());
   }
 
   // Auto-gain: how much of the per-band adaptive normalization in features.ts
@@ -1522,9 +1533,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // crossover (getBandSplit), so it's deliberately left out of this card's
   // own Reset chip below — that chip resets per-scene taste
   // (Sensitivity/Expansion/Smoothing), not a device-wide input
-  // preference. Never auto-tuned (no `auto` block): auto mode reads
-  // FeatureFrame.level, which this doesn't touch, but an amount that moves
-  // by itself would make the Signal card's history trace unreadable.
+  // preference. Its "A" chip resolves from the room's own measured span
+  // (FeatureExtractor.bandSpanDb), not MUSIC_DIALS like the rows below —
+  // no dial describes how much of the analyser's window the room is
+  // actually using, which is exactly what this amount fixes — and eases
+  // slowly (autoGain.ts's EASE_RATE) so the Signal card's history trace
+  // still reads as room drift, not something chasing the beat.
   const autoGainRow = createControlRow({
     label: "Auto-gain",
     accent: INPUT_GREEN,
@@ -1536,9 +1550,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     format: (value) => String(Math.round(value * 100)),
     description:
       "How much each band is rescaled to fill the display. 0 shows the mic's real levels; higher flattens bass-vs-treble balance but converges different mics and rooms toward the same look.",
+    auto: {
+      isEnabled: () => deps.isAutoGainAuto(),
+      toggle: (on) => deps.onAutoGainAutoToggle(on),
+      resolveLive: () => deps.resolveAutoGain(),
+      getManual: () => deps.getAutoGain(),
+    },
   });
   autoGainRow.onChange((value) => deps.onAutoGainChange(value));
-  autoGainRow.setValue(deps.getAutoGain());
+  autoGainRow.sync(() => deps.getAutoGain());
 
   const inputCard = createCard({
     title: "Input",
@@ -2045,6 +2065,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       refreshSpectrumHeader();
       powerCard.refresh();
       for (const { row } of inputRows) row.refreshAuto();
+      autoGainRow.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
     },
   };

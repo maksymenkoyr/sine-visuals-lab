@@ -127,12 +127,35 @@ export class FeatureExtractor {
     return this.lastFixedEnergy;
   }
 
+  /** Mean per-band `peak - floor`, in dB — how much of the room/mic's actual
+   *  range the trackers above have found, regardless of `autoGain`: they run
+   *  unconditionally (see the `autoGain` param doc on update() below), so
+   *  this reads the room, not the setting it's used to drive. A local
+   *  diagnostic like fixedEnergy, never part of FeatureFrame — autoGain.ts's
+   *  auto mode is the one consumer, easing the Auto-gain amount toward what
+   *  this says the room needs. */
+  get bandSpanDb(): number {
+    let sum = 0;
+    for (let b = 0; b < NUM_BANDS; b++) sum += this.peak[b] - this.floor[b];
+    return sum / NUM_BANDS;
+  }
+
   private fluxBaseline = 0;
   private lastTime: number | null = null;
+  private lastDt = 1 / 60;
   private lastOnsetTime = -Infinity;
   private onsets: { time: number; weight: number }[] = [];
   private bpm = 0;
   private lastBeatTime = 0;
+
+  /** The AudioContext-clock delta update() computed last call — what
+   *  app.ts should feed autoGain.ts's feedAutoGainMeasurement() as dtSec,
+   *  so that ease runs on the same clock bandSpanDb's trackers do rather
+   *  than a rAF delta (unreliable at high refresh rates — see the
+   *  render-cap-one-shots note). */
+  get dtSec(): number {
+    return this.lastDt;
+  }
 
   /**
    * @param rawBandsDb per-band FFT magnitude in dB, from BandAnalyser.readBandsDb().
@@ -164,6 +187,7 @@ export class FeatureExtractor {
     const blend = clamp01(autoGain);
     const dt = this.lastTime === null ? 1 / 60 : Math.max(1e-4, time - this.lastTime);
     this.lastTime = time;
+    this.lastDt = dt;
 
     const bands = new Float32Array(NUM_BANDS);
     let flux = 0;
