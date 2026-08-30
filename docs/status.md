@@ -11,7 +11,9 @@ regenerate it at session close.
   textures, kicked on antinodes and settling on nodal lines; every plate
   mode is a resonance driven by the band energy at its own frequency
   (`createPlateResponse`), the strongest few summed — a physical response,
-  not a scripted mode sweep. Plate fills the screen by default. Branch
+  not a scripted mode sweep. Sand only lifts where the plate beats a lift
+  threshold, so a still band around each line keeps sand lying between the
+  figures like a real plate. Plate fills the screen by default. Branch
   `worktree-chladni-scene`
   (worktree at `.claude/worktrees/chladni-scene`), registered as a draft
   scene. Typecheck/tests green, headless-verified at high and floor quality,
@@ -30,10 +32,13 @@ regenerate it at session close.
 ## Open questions
 
 - Chladni: should it graduate out of `DRAFT_SCENE_IDS`? It reads well on
-  synthetic audio; needs a pass on real music. The hop/pull constants
-  (`HOP_FLOOR`, `PULL_RATE`) and the resonance window/sharpening range
-  (`WINDOW_BANDS_*`, `SHARPEN_*` in `chladni.ts`) were set by eye at 720p —
-  a damped plate under a dense mix may blur into mush.
+  synthetic audio; needs a pass on real music. The sand constants
+  (`LIFT_THRESHOLD`, `HOP_RATE`, `PULL_BIAS`, `CREEP`) and the resonance
+  window/sharpening range (`WINDOW_BANDS_*`, `SHARPEN_*` in `chladni.ts`)
+  were set by eye at 720p against the synthetic feed's low energy — on real
+  music the plate is driven harder, so lines should go crisper and the
+  between-line scatter thinner; if it loses the scatter entirely,
+  `LIFT_THRESHOLD` is the knob.
 - Chladni on a Panorama room: grain positions live in plate space and the
   plate is sized from this device's `uResolution` aspect, the same
   approximation every fullscreen scene makes — unverified on a multi-device
