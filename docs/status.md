@@ -8,11 +8,13 @@ regenerate it at session close.
 
 - **Storm scene** — `src/render/scenes/storm.ts`, branch `worktree-storm-scene`
   (worktree at `.claude/worktrees/storm-scene`), draft PR #41.
-  A real `gl.POINTS` cloud (first consumer of `ctx.quality.maxParticles`) lit
-  from inside by a JS-side strike pool on every beat; registered as a draft
-  tile. Verified headlessly at high and floor quality, in the gallery, and
+  A volumetric raymarched cumulus (density = baked lobe shape × tileable 3D
+  noise, both as 3D textures) lit from inside by a JS-side strike pool on
+  every beat; `minQuality: "low"`, registered as a draft tile. Started as a
+  `gl.POINTS` particle cloud, rewritten to a gas volume on request in the
+  same session. Verified headlessly at high/low quality, in the gallery, and
   with the auto→manual probe sign-off; `tests/storm.test.ts` covers the pure
-  helpers and both `ALL_SETTINGS` invariant suites now include it. **Not yet
+  helpers and both `ALL_SETTINGS` invariant suites include it. **Not yet
   judged on real music.**
 - **Dev mode: D hotkey to set current value as default** — PR #40, branch
   `worktree-dev-default-hotkey` (worktree locked).
