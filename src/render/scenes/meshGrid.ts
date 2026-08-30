@@ -39,19 +39,17 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 //  - Row spacing in world Z is non-linear (`Z_POWER`) so rows spread more
 //    evenly on screen under perspective; time per row stays uniform because
 //    the history lookup uses the normalized row fraction, not world Z.
-//  - Waveform Rings changes what a row *is*: not a spectrum slice (angle =
-//    frequency, so every ring is a different jagged profile and the disc
-//    reads as noise) but one value all the way around — the frame's
-//    absolute level (`frame.level`, deliberately not the AGC-normalized
-//    `energy`, so quiet really is flat) as its swing about a slow baseline,
-//    stored about 0.5 so rings can be troughs as well as crests, plus a Beat
-//    Ripple crest. The history texture is unchanged in shape; render() just
-//    pushes a uniform row (and resets the history on a mode switch). A
-//    true time-domain waveform isn't available to scenes (see
-//    waveformAnalyser.ts: it's a display-only tap that never reaches the
-//    wire frame), so the envelope at frame rate is what "waveform" means here.
-//  - Beat Expand swells the disc/globe with a fast-decay beat envelope
-//    (`uBeatEnv`), through `shapeScale()` so the horizon and the
+//  - What a row holds is each band's *change* against its own recent
+//    average (Wave Memory), signed and stored about 0.5, not the band's
+//    level. The bands arrive per-band AGC-normalized, so their standing
+//    shape is the same every frame and a plain spectrogram of them reads as
+//    one static pattern scrolling by; and a single loudness value per row
+//    (an earlier version) collapses to the beat impulse, which is identical
+//    every beat. The change is where the music is. The vertex shader reads
+//    the row as a signed height and lights troughs like crests. See render().
+//  - Beat Expand swells the disc/globe with a two-stage beat envelope
+//    (`uBeatEnv`: release then attack, both from Beat Smooth, so it breathes
+//    rather than snaps), through `shapeScale()` so the horizon and the
 //    background's silhouette dimming swell with it.
 //  - The Sphere checkbox re-maps the grid onto a globe (and overrides Circle):
 //    columns are longitude, rows latitude, with time mirrored about the
@@ -162,7 +160,7 @@ const SETTINGS: SceneSetting[] = [
     min: -20,
     max: 20,
     step: 0.5,
-    default: 1.5,
+    default: 0,
   },
   {
     key: "gridDensity",
@@ -180,7 +178,7 @@ const SETTINGS: SceneSetting[] = [
     min: 2,
     max: 60,
     step: 1,
-    default: 6,
+    default: 10,
   },
   {
     key: "cameraHeight",
@@ -189,7 +187,7 @@ const SETTINGS: SceneSetting[] = [
     min: 1,
     max: 60,
     step: 0.5,
-    default: 40,
+    default: 30,
   },
   {
     key: "cameraTilt",
@@ -198,7 +196,7 @@ const SETTINGS: SceneSetting[] = [
     min: -75,
     max: 15,
     step: 0.5,
-    default: -35,
+    default: -26.5,
   },
   {
     key: "zoom",
@@ -207,7 +205,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0.3,
     max: 3,
     step: 0.05,
-    default: 1.4,
+    default: 0.7,
   },
   {
     key: "circle",
@@ -226,7 +224,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 1,
-    default: 0,
+    default: 1,
     type: "boolean",
   },
   {
@@ -249,23 +247,22 @@ const SETTINGS: SceneSetting[] = [
     type: "boolean",
   },
   {
-    key: "waveform",
-    label: "Waveform Rings",
-    description: "Each ring is one moment's loudness swing (absolute level about its recent average, not auto-scaled) instead of a spectrum slice, so the waves are clean concentric ripples -- crests and troughs -- carrying the music's envelope; off, rings are spectrum slices (angle = frequency)",
-    min: 0,
-    max: 1,
-    step: 1,
-    default: 1,
-    type: "boolean",
+    key: "waveMemory",
+    label: "Wave Memory",
+    description: "Seconds of recent spectrum each band's height is measured against: a wave is how much a band is louder or quieter than its own recent average, so the surface shows what's changing in the music rather than its standing shape -- short is twitchy and reacts to every hit, long is slower swells",
+    min: 0.1,
+    max: 3,
+    step: 0.1,
+    default: 0.8,
   },
   {
-    key: "beatRipple",
-    label: "Beat Ripple",
-    description: "Waveform Rings: extra height launched into a ring on every detected beat, so each kick sends its own ripple out",
-    min: 0,
-    max: 2,
-    step: 0.05,
-    default: 1,
+    key: "waveGain",
+    label: "Wave Gain",
+    description: "How hard a band's change is pushed into the wave before it soft-clips -- higher makes small changes visible",
+    min: 0.5,
+    max: 8,
+    step: 0.25,
+    default: 3,
   },
   {
     key: "beatExpand",
@@ -274,7 +271,16 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.3,
+    default: 0.15,
+  },
+  {
+    key: "beatSmooth",
+    label: "Beat Smooth",
+    description: "Seconds the beat swell takes to relax; it also rises over a quarter of this instead of snapping, so higher is a slower, softer breath",
+    min: 0.05,
+    max: 1.5,
+    step: 0.05,
+    default: 0.4,
   },
   {
     key: "centerSpike",
@@ -283,7 +289,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 3,
     step: 0.1,
-    default: 1.5,
+    default: 0,
   },
   {
     key: "flow",
@@ -303,7 +309,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 5,
     step: 0.05,
-    default: 2.35,
+    default: 0,
     // Busy, bright mixes churn the turbulence baseline more.
     auto: { density: 0.3, brightness: 0.1 },
   },
@@ -332,7 +338,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 0.95,
     step: 0.05,
-    default: 0.95,
+    default: 0.9,
   },
   {
     key: "fill",
@@ -370,7 +376,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.01,
-    default: 1,
+    default: 0.5,
     // Vertex-dot presence tracks hats/cymbals and transient hits.
     auto: { brightness: 0.3, attack: 0.15 },
   },
@@ -428,7 +434,7 @@ const SETTINGS: SceneSetting[] = [
     min: 20,
     max: 400,
     step: 5,
-    default: 200,
+    default: 120,
   },
   {
     key: "domeDensity",
@@ -437,7 +443,7 @@ const SETTINGS: SceneSetting[] = [
     min: 4,
     max: 80,
     step: 1,
-    default: 45,
+    default: 28,
   },
   {
     key: "bgMeshIntensity",
@@ -446,7 +452,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0.05,
     max: 2,
     step: 0.05,
-    default: 0.4,
+    default: 0.5,
   },
   {
     key: "scanlines",
@@ -658,9 +664,9 @@ const CAMERA_GLSL = `
 #define NEAR 0.5
 #define FAR 400.0
 
-// Beat envelope from render() (1 on a detected beat, decaying over ~a tenth
-// of a second) -- Beat Expand swells the disc/globe by it. shapeScale() is
-// the one multiplier every use of CIRCLE_RADIUS / SPHERE_RADIUS goes
+// Beat envelope from render() (rises toward 1 on a detected beat and relaxes
+// over Beat Smooth) -- Beat Expand swells the disc/globe by it. shapeScale()
+// is the one multiplier every use of CIRCLE_RADIUS / SPHERE_RADIUS goes
 // through (layout, horizon, shapeCover) so the swell is consistent.
 uniform float uBeatEnv;
 float shapeScale() { return 1.0 + uBeatExpand * uBeatEnv; }
@@ -869,11 +875,11 @@ void main() {
   float rowF = mod(uNewestRow - framesBack, HISTORY_FRAMES);
   float amp = (sampleHistory(binF - 0.7, rowF) + 2.0 * sampleHistory(binF, rowF) + sampleHistory(binF + 0.7, rowF)) * 0.25;
   amp = clamp(amp, 0.0, 1.0);
-  // Waveform Rings store the row as 0.5 = rest so the ripple can go both
-  // ways: the height is signed, and the color/dot amplitude is its
-  // magnitude, so troughs light up like crests.
-  float signedAmp = uWaveform > 0.5 ? (amp - 0.5) * 2.0 : amp;
-  amp = uWaveform > 0.5 ? abs(signedAmp) : amp;
+  // A row is signed change, stored about 0.5 = rest (see render()): the
+  // height goes both ways, and the color/dot amplitude is its magnitude, so
+  // a band dropping out lights up like one coming in.
+  float signedAmp = (amp - 0.5) * 2.0;
+  amp = abs(signedAmp);
   vAmp = amp;
 
   float height = signedAmp * uWaveHeight * HEIGHT_SCALE;
@@ -1258,11 +1264,10 @@ export const meshGridScene: Scene = (() => {
   let smoothedBands: Float32Array | null = null;
   let prevRawBands: Float32Array | null = null;
   let fluxEnv = 0;
-  let beatEnv = 0;
-  const ringRow = new Float32Array(NUM_BANDS); // Waveform Rings: one value across the row
-  let levelBase = 0; // Waveform Rings: slow baseline the level swings about
-  let ringV = 0.5; // Waveform Rings: the eased ring value (0.5 = rest)
-  let historyMode: boolean | null = null; // which mode's rows the history holds (see render)
+  let beatPulse = 0; // beat impulse with its release applied (stage one of the envelope)
+  let beatEnv = 0; // beatPulse with the attack applied (stage two) -- what the shaders get
+  let bandBase: Float32Array | null = null; // per-band slow average the wave is measured against
+  const waveRow = new Float32Array(NUM_BANDS); // the row pushed into the history each frame
   let noisePhase = 0;
   let lastFrameTime: number | null = null;
   let builtDensity = 0;
@@ -1324,12 +1329,19 @@ export const meshGridScene: Scene = (() => {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.bindTexture(gl.TEXTURE_2D, null);
 
+      // The history's rest value is 0.5 (a row is signed change, see render),
+      // so it starts flat rather than as one giant trough.
+      history.data.fill(0.5);
+      gl.bindTexture(gl.TEXTURE_2D, historyTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NUM_BANDS, HISTORY_FRAMES, gl.RED, gl.FLOAT, history.data);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+
       smoothedBands = new Float32Array(NUM_BANDS);
       prevRawBands = new Float32Array(NUM_BANDS);
+      bandBase = null;
       fluxEnv = 0;
+      beatPulse = 0;
       beatEnv = 0;
-      levelBase = 0;
-      historyMode = null;
       noisePhase = 0;
       lastFrameTime = null;
     },
@@ -1378,38 +1390,40 @@ export const meshGridScene: Scene = (() => {
         smoothedBands[i] = dampen(smoothedBands[i], frame.bands[i], dampening, dt);
       }
 
-      // Beat envelope: 1 on a detected beat, decaying over ~a tenth of a
-      // second. Drives Beat Expand (uBeatEnv) and the Beat Ripple below.
-      if (frame.beat) beatEnv = 1;
-      else beatEnv *= Math.exp(-dt / 0.12);
+      // Beat envelope, two exponential stages so it neither snaps up nor
+      // decays as a bare spike: the impulse relaxes over Beat Smooth
+      // (release), and what the shaders get follows that with an attack a
+      // quarter as long. Drives Beat Expand (uBeatEnv).
+      const beatSmooth = resolveSceneSetting(ID, settingFor("beatSmooth"));
+      if (frame.beat) beatPulse = 1;
+      else beatPulse *= Math.exp(-dt / beatSmooth);
+      beatEnv += (beatPulse - beatEnv) * (1 - Math.exp(-dt / (beatSmooth * 0.25)));
 
-      // Waveform Rings: the row is one value all the way around — the
-      // frame's absolute level (frame.level: not through the AGC, so a quiet
-      // passage really is flat) as its swing about a slow baseline, stored
-      // around 0.5 (rest) so the ring can be a trough as well as a crest,
-      // like a waveform; the beat impulse is a crest. Not dampened: the
-      // ripples should stay crisp. Otherwise the row is the smoothed spectrum.
-      const waveform = resolveSceneSetting(ID, settingFor("waveform")) > 0.5;
-      if (waveform !== historyMode) {
-        // Mode switch (or first frame): reset the history to this mode's
-        // rest value, or the whole disc would start as one giant trough.
-        history.data.fill(waveform ? 0.5 : 0);
-        gl.bindTexture(gl.TEXTURE_2D, historyTex);
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NUM_BANDS, HISTORY_FRAMES, gl.RED, gl.FLOAT, history.data);
-        historyMode = waveform;
-        levelBase = frame.level;
-        ringV = 0.5;
+      // What a row is: each band's *change* against its own recent average
+      // (Wave Memory), soft-clipped by Wave Gain and stored about 0.5 so a
+      // band going quiet is a trough and one coming in a crest. The bands
+      // arrive per-band AGC-normalized (see audio/types.ts), so their
+      // standing shape — bass always tall — is the same every frame and
+      // would make every row look alike; the change is where the music is:
+      // a kick pushes the bass side of a ring, a hat the treble side, a pad
+      // nothing. Blurred one bin each way so neighbouring bands don't turn
+      // into cliffs around the ring.
+      if (!bandBase) bandBase = new Float32Array(smoothedBands);
+      const waveMemory = resolveSceneSetting(ID, settingFor("waveMemory"));
+      const waveGain = resolveSceneSetting(ID, settingFor("waveGain"));
+      const baseBlend = 1 - Math.exp(-dt / waveMemory);
+      for (let i = 0; i < NUM_BANDS; i++) {
+        bandBase[i] += (smoothedBands[i] - bandBase[i]) * baseBlend;
+        waveRow[i] = smoothedBands[i] - bandBase[i];
       }
-      if (waveform) {
-        levelBase += (frame.level - levelBase) * (1 - Math.exp(-dt / 0.6));
-        const beatRipple = resolveSceneSetting(ID, settingFor("beatRipple"));
-        const target = 0.5 + 1.5 * (frame.level - levelBase) + 0.35 * beatRipple * beatEnv;
-        // Eased over ~50ms (a few rows) so a jump in level is a wave with a
-        // slope, not a one-row cliff; still far crisper than Motion Dampening.
-        ringV += (Math.max(0, Math.min(1, target)) - ringV) * (1 - Math.exp(-dt / 0.05));
-        ringRow.fill(ringV);
+      let prev = waveRow[0];
+      for (let i = 0; i < NUM_BANDS; i++) {
+        const next = i + 1 < NUM_BANDS ? waveRow[i + 1] : waveRow[i];
+        const blurred = (prev + 2 * waveRow[i] + next) * 0.25;
+        prev = waveRow[i];
+        waveRow[i] = 0.5 + 0.5 * Math.tanh(waveGain * blurred);
       }
-      const newestRow = history.push(waveform ? ringRow : smoothedBands);
+      const newestRow = history.push(waveRow);
       gl.bindTexture(gl.TEXTURE_2D, historyTex);
       gl.texSubImage2D(
         gl.TEXTURE_2D,
@@ -1526,10 +1540,10 @@ export const meshGridScene: Scene = (() => {
       history = null;
       smoothedBands = null;
       prevRawBands = null;
+      bandBase = null;
       fluxEnv = 0;
+      beatPulse = 0;
       beatEnv = 0;
-      levelBase = 0;
-      historyMode = null;
       noisePhase = 0;
       lastFrameTime = null;
     },
