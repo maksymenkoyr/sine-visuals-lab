@@ -4,6 +4,7 @@ import { detectQuality, qualitySettings, type QualityPreset, type QualitySetting
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type SceneContext, type Viewport } from "./render/scene.ts";
 import { getPalette, type Palette } from "./render/palette.ts";
 import { createAnimClock } from "./render/animClock.ts";
+import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
@@ -29,6 +30,10 @@ let sceneCtx: SceneContext;
 let conn: RendererConnection;
 let live = false;
 const animClock = createAnimClock();
+// See renderLatch.ts / app.ts's own instance: turns anim.dtSec into wall
+// time since the last *rendered* frame and keeps a one-shot edge alive
+// across ticks the render cap skips.
+const renderLatch = createRenderLatch();
 let lastRafMs = 0;
 
 // Render-rate cap and its jitter-tolerant gate live in framePace.ts (shared
@@ -132,6 +137,7 @@ async function main(): Promise<void> {
     // decay above stay on every rAF tick.
     const anim = animClock.advance(dtSec, frame);
     advanceAutoTune(dtSec, anim.profile);
+    renderLatch.accumulate(anim);
 
     if (!shouldRenderFrame(nowRafMs, lastRenderMs, targetFrameIntervalMs(quality.preset))) return;
     lastRenderMs = nowRafMs;
@@ -139,7 +145,7 @@ async function main(): Promise<void> {
     const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);
 
-    scene.render(sceneCtx, frame, viewport, palette, anim);
+    scene.render(sceneCtx, frame, viewport, palette, renderLatch.consume(anim, nowRafMs));
     governor?.recordFrame(nowRafMs);
   }
 

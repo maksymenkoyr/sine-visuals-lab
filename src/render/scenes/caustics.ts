@@ -740,8 +740,12 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
       if (drop) ripples.trigger(RIPPLE_DROP_AMP);
       // A bass onset always rings; a broadband beat rings too, but only
       // below RIPPLE_SRC_BEAT_THRESHOLD — see that constant's own comment,
-      // and the "ripple"/"rippleSrc" SceneSettings' `reads` above.
-      else if (anim.lowOnset || (frame.beat && rippleSrc < RIPPLE_SRC_BEAT_THRESHOLD)) ripples.trigger(1);
+      // and the "ripple"/"rippleSrc" SceneSettings' `reads` above. Reads
+      // anim.onset, not frame.beat directly — see AnimFrame's own doc: a
+      // scene reading FeatureFrame.beat can miss the tick it fired on
+      // whenever the render cap skips it, which is exactly the bug this
+      // scene used to have (renderLatch.ts's header has the story).
+      else if (anim.lowOnset || (anim.onset && rippleSrc < RIPPLE_SRC_BEAT_THRESHOLD)) ripples.trigger(1);
 
       return { uDriftPhase: driftPhase, uRippleRadius: ripples.radius, uRippleStrength: ripples.strength };
     };

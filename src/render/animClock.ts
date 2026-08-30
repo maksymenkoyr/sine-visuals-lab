@@ -18,6 +18,14 @@ export interface AnimFrame {
   flowPhase: number;
   /** Decaying [0,1] flash that jumps to 1 on each beat. */
   beatPulse: number;
+  /** One-shot broadband onset edge, mirroring FeatureFrame.beat — true only
+   *  on the tick it fired. JS-side only, same family as lowOnset/midOnset/
+   *  highOnset/dropOnset below: a scene wanting a discrete trigger (not
+   *  beatPulse's continuous decay) reads this instead of FeatureFrame.beat
+   *  directly, so every scene goes through the render loop's edge latch
+   *  (see src/render/renderLatch.ts) rather than risking a tick the render
+   *  cap skipped. */
+  onset: boolean;
   /** Phase-locked beat/bar clock — see beatClock.ts. Never restarts mid-beat
    *  the way FeatureFrame.beatPhase can. */
   beatPhase: number;
@@ -92,6 +100,7 @@ export function createAnimClock(): AnimClock {
         timeSec: frame.time,
         flowPhase,
         beatPulse,
+        onset: frame.beat,
         beatPhase: beat.beatPhase,
         barPhase: beat.barPhase,
         tempoLock: beat.tempoLock,

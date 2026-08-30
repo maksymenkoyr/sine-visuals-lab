@@ -29,6 +29,7 @@ import {
   smoothingRateScale,
 } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
+import { createRenderLatch } from "./render/renderLatch.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
@@ -199,6 +200,13 @@ let lastLufs: LufsReading | null = null;
 const rawBandsScratch = new Float32Array(NUM_BANDS);
 
 const animClock = createAnimClock();
+// Latches one-shot AnimFrame edges (onset/lowOnset/.../dropOnset) across
+// ticks the render cap skips, and turns anim.dtSec into wall time since the
+// last *rendered* frame rather than the last rAF tick — see renderLatch.ts.
+// deviceMenu/audioMeters and advanceAutoTune below still see the raw,
+// un-latched `anim` (they run every tick); only what reaches scene.render()
+// goes through the latch.
+const renderLatch = createRenderLatch();
 let lastRafMs = 0;
 let hudHideTimer: number | undefined;
 
@@ -971,6 +979,9 @@ function loop(): void {
   if (anim) {
     lastAnim = anim;
     advanceAutoTune(dtSec, anim.profile);
+    // Every tick, whether or not it renders — see renderLatch.ts. A tick
+    // that turns out not to render still needs its edges remembered.
+    renderLatch.accumulate(anim);
   }
 
   // Fed even when null (mic permission still pending) so the spectrum strip
@@ -993,7 +1004,7 @@ function loop(): void {
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
   const displayFrame = applySensitivity(gained!, resolveSensitivity(scene.id), resolveExpansion(scene.id));
-  scene.render(mainHost!.ctx, displayFrame, viewport, palette, anim);
+  scene.render(mainHost!.ctx, displayFrame, viewport, palette, renderLatch.consume(anim, nowRafMs));
   governor?.recordFrame(nowRafMs);
 }
 
