@@ -39,6 +39,20 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 //  - Row spacing in world Z is non-linear (`Z_POWER`) so rows spread more
 //    evenly on screen under perspective; time per row stays uniform because
 //    the history lookup uses the normalized row fraction, not world Z.
+//  - Waveform Rings changes what a row *is*: not a spectrum slice (angle =
+//    frequency, so every ring is a different jagged profile and the disc
+//    reads as noise) but one value all the way around — the frame's
+//    absolute level (`frame.level`, deliberately not the AGC-normalized
+//    `energy`, so quiet really is flat) as its swing about a slow baseline,
+//    stored about 0.5 so rings can be troughs as well as crests, plus a Beat
+//    Ripple crest. The history texture is unchanged in shape; render() just
+//    pushes a uniform row (and resets the history on a mode switch). A
+//    true time-domain waveform isn't available to scenes (see
+//    waveformAnalyser.ts: it's a display-only tap that never reaches the
+//    wire frame), so the envelope at frame rate is what "waveform" means here.
+//  - Beat Expand swells the disc/globe with a fast-decay beat envelope
+//    (`uBeatEnv`), through `shapeScale()` so the horizon and the
+//    background's silhouette dimming swell with it.
 //  - The Sphere checkbox re-maps the grid onto a globe (and overrides Circle):
 //    columns are longitude, rows latitude, with time mirrored about the
 //    equator so both hemispheres carry the full history. The poles get the
@@ -233,6 +247,34 @@ const SETTINGS: SceneSetting[] = [
     step: 1,
     default: 1,
     type: "boolean",
+  },
+  {
+    key: "waveform",
+    label: "Waveform Rings",
+    description: "Each ring is one moment's loudness swing (absolute level about its recent average, not auto-scaled) instead of a spectrum slice, so the waves are clean concentric ripples -- crests and troughs -- carrying the music's envelope; off, rings are spectrum slices (angle = frequency)",
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 1,
+    type: "boolean",
+  },
+  {
+    key: "beatRipple",
+    label: "Beat Ripple",
+    description: "Waveform Rings: extra height launched into a ring on every detected beat, so each kick sends its own ripple out",
+    min: 0,
+    max: 2,
+    step: 0.05,
+    default: 1,
+  },
+  {
+    key: "beatExpand",
+    label: "Beat Expand",
+    description: "How much the whole disc/globe swells on each beat and relaxes back",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
   },
   {
     key: "centerSpike",
@@ -616,6 +658,13 @@ const CAMERA_GLSL = `
 #define NEAR 0.5
 #define FAR 400.0
 
+// Beat envelope from render() (1 on a detected beat, decaying over ~a tenth
+// of a second) -- Beat Expand swells the disc/globe by it. shapeScale() is
+// the one multiplier every use of CIRCLE_RADIUS / SPHERE_RADIUS goes
+// through (layout, horizon, shapeCover) so the swell is consistent.
+uniform float uBeatEnv;
+float shapeScale() { return 1.0 + uBeatExpand * uBeatEnv; }
+
 vec3 camPos() { return vec3(0.0, uCameraHeight, -uCameraDistance); }
 vec3 camForward() {
   float p = radians(uCameraTilt);
@@ -667,9 +716,9 @@ vec4 toClip(vec3 view) {
 // terrain's far edge at rest height, the disc's far rim in the Circle
 // layout, or the globe's far side in the Sphere layout.
 vec3 farEdgePoint() {
-  if (uSphere > 0.5) return vec3(0.0, 0.0, CIRCLE_CENTER_Z + SPHERE_RADIUS * uCircleSqueeze);
+  if (uSphere > 0.5) return vec3(0.0, 0.0, CIRCLE_CENTER_Z + SPHERE_RADIUS * shapeScale() * uCircleSqueeze);
   if (uCircle > 0.5) {
-    float r = CIRCLE_RADIUS * uCircleSqueeze;
+    float r = CIRCLE_RADIUS * shapeScale() * uCircleSqueeze;
     return vec3(0.0, r * sin(CIRCLE_TILT), CIRCLE_CENTER_Z + r * cos(CIRCLE_TILT));
   }
   return vec3(0.0, 0.0, GRID_DEPTH);
@@ -820,9 +869,14 @@ void main() {
   float rowF = mod(uNewestRow - framesBack, HISTORY_FRAMES);
   float amp = (sampleHistory(binF - 0.7, rowF) + 2.0 * sampleHistory(binF, rowF) + sampleHistory(binF + 0.7, rowF)) * 0.25;
   amp = clamp(amp, 0.0, 1.0);
+  // Waveform Rings store the row as 0.5 = rest so the ripple can go both
+  // ways: the height is signed, and the color/dot amplitude is its
+  // magnitude, so troughs light up like crests.
+  float signedAmp = uWaveform > 0.5 ? (amp - 0.5) * 2.0 : amp;
+  amp = uWaveform > 0.5 ? abs(signedAmp) : amp;
   vAmp = amp;
 
-  float height = amp * uWaveHeight * HEIGHT_SCALE;
+  float height = signedAmp * uWaveHeight * HEIGHT_SCALE;
 
   // Undulation sampled in (normalized x, absolute frame) space so it scrolls
   // with the data. noiseScale sets the pattern size on both axes together.
@@ -847,7 +901,7 @@ void main() {
     height *= poleDisp;
     height += uValley * gNorm * gNorm;   // poles pushed out (or in)
     vec3 n = vec3(cos(lat) * sin(theta), sin(lat), -cos(lat) * cos(theta));
-    vec3 local = n * (SPHERE_RADIUS + height);
+    vec3 local = n * (SPHERE_RADIUS * shapeScale() + height);
     local.z *= uCircleSqueeze;
     float ct = cos(CIRCLE_TILT), st = sin(CIRCLE_TILT);
     worldPos = vec3(local.x, local.y * ct + local.z * st, CIRCLE_CENTER_Z - local.y * st + local.z * ct);
@@ -860,7 +914,7 @@ void main() {
     float theta = aPos.x * 3.14159265;   // 0 = front (bass), +-pi = back (treble, the closed seam)
     height *= poleDisp;
     height += uValley * rN * rN;         // bowl (or dome) instead of a valley
-    float r = CIRCLE_RADIUS * rN;
+    float r = CIRCLE_RADIUS * shapeScale() * rN;
     // The disc is tilted toward the viewer (far rim raised) so it reads as a
     // disc rather than a sliver from the low default camera; displacement
     // follows the disc's own normal.
@@ -1095,11 +1149,11 @@ float shapeCover(vec3 o, vec3 d) {
     ld.z /= uCircleSqueeze;
     float a = dot(ld, ld), b = dot(lo, ld);
     float h2 = max(dot(lo, lo) - b * b / a, 0.0);
-    if (b < 0.0) inside = smoothstep(1.03, 0.97, sqrt(h2) / SPHERE_RADIUS);
+    if (b < 0.0) inside = smoothstep(1.03, 0.97, sqrt(h2) / (SPHERE_RADIUS * shapeScale()));
   } else if (abs(ld.y) > 1e-4) {
     float t = -lo.y / ld.y;
     if (t > 0.0) {
-      vec2 hit = (lo + ld * t).xz / vec2(CIRCLE_RADIUS, CIRCLE_RADIUS * uCircleSqueeze);
+      vec2 hit = (lo + ld * t).xz / (vec2(CIRCLE_RADIUS, CIRCLE_RADIUS * uCircleSqueeze) * shapeScale());
       inside = smoothstep(1.03, 0.97, length(hit));
     }
   }
@@ -1204,6 +1258,11 @@ export const meshGridScene: Scene = (() => {
   let smoothedBands: Float32Array | null = null;
   let prevRawBands: Float32Array | null = null;
   let fluxEnv = 0;
+  let beatEnv = 0;
+  const ringRow = new Float32Array(NUM_BANDS); // Waveform Rings: one value across the row
+  let levelBase = 0; // Waveform Rings: slow baseline the level swings about
+  let ringV = 0.5; // Waveform Rings: the eased ring value (0.5 = rest)
+  let historyMode: boolean | null = null; // which mode's rows the history holds (see render)
   let noisePhase = 0;
   let lastFrameTime: number | null = null;
   let builtDensity = 0;
@@ -1268,6 +1327,9 @@ export const meshGridScene: Scene = (() => {
       smoothedBands = new Float32Array(NUM_BANDS);
       prevRawBands = new Float32Array(NUM_BANDS);
       fluxEnv = 0;
+      beatEnv = 0;
+      levelBase = 0;
+      historyMode = null;
       noisePhase = 0;
       lastFrameTime = null;
     },
@@ -1283,6 +1345,10 @@ export const meshGridScene: Scene = (() => {
       // few of them -- Background Mesh, Scanlines -- and the rest are simply
       // unset/no-op uniforms, same as meshProg's uNewestRow pattern).
       uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      // Last frame's beat envelope (this frame's is computed below): the
+      // background's shapeCover() silhouette lags the swell by one frame,
+      // which is invisible.
+      bgProg.setF("uBeatEnv", beatEnv);
       drawFullscreenQuad(gl, quadVao);
 
       // dt for the CPU-side smoothing below. frame.time is the room/monotonic
@@ -1312,7 +1378,38 @@ export const meshGridScene: Scene = (() => {
         smoothedBands[i] = dampen(smoothedBands[i], frame.bands[i], dampening, dt);
       }
 
-      const newestRow = history.push(smoothedBands);
+      // Beat envelope: 1 on a detected beat, decaying over ~a tenth of a
+      // second. Drives Beat Expand (uBeatEnv) and the Beat Ripple below.
+      if (frame.beat) beatEnv = 1;
+      else beatEnv *= Math.exp(-dt / 0.12);
+
+      // Waveform Rings: the row is one value all the way around — the
+      // frame's absolute level (frame.level: not through the AGC, so a quiet
+      // passage really is flat) as its swing about a slow baseline, stored
+      // around 0.5 (rest) so the ring can be a trough as well as a crest,
+      // like a waveform; the beat impulse is a crest. Not dampened: the
+      // ripples should stay crisp. Otherwise the row is the smoothed spectrum.
+      const waveform = resolveSceneSetting(ID, settingFor("waveform")) > 0.5;
+      if (waveform !== historyMode) {
+        // Mode switch (or first frame): reset the history to this mode's
+        // rest value, or the whole disc would start as one giant trough.
+        history.data.fill(waveform ? 0.5 : 0);
+        gl.bindTexture(gl.TEXTURE_2D, historyTex);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NUM_BANDS, HISTORY_FRAMES, gl.RED, gl.FLOAT, history.data);
+        historyMode = waveform;
+        levelBase = frame.level;
+        ringV = 0.5;
+      }
+      if (waveform) {
+        levelBase += (frame.level - levelBase) * (1 - Math.exp(-dt / 0.6));
+        const beatRipple = resolveSceneSetting(ID, settingFor("beatRipple"));
+        const target = 0.5 + 1.5 * (frame.level - levelBase) + 0.35 * beatRipple * beatEnv;
+        // Eased over ~50ms (a few rows) so a jump in level is a wave with a
+        // slope, not a one-row cliff; still far crisper than Motion Dampening.
+        ringV += (Math.max(0, Math.min(1, target)) - ringV) * (1 - Math.exp(-dt / 0.05));
+        ringRow.fill(ringV);
+      }
+      const newestRow = history.push(waveform ? ringRow : smoothedBands);
       gl.bindTexture(gl.TEXTURE_2D, historyTex);
       gl.texSubImage2D(
         gl.TEXTURE_2D,
@@ -1350,6 +1447,7 @@ export const meshGridScene: Scene = (() => {
       meshProg.setF("uNewestRow", newestRow);
       meshProg.setF("uNoisePhase", noisePhase);
       meshProg.setF("uFluxEnv", fluxEnv);
+      meshProg.setF("uBeatEnv", beatEnv);
       meshProg.setV2("uGridDims", gridCols, gridRows);
 
       // Flowing Noise: base slider value plus a flux term, scaled by Flux
@@ -1429,6 +1527,9 @@ export const meshGridScene: Scene = (() => {
       smoothedBands = null;
       prevRawBands = null;
       fluxEnv = 0;
+      beatEnv = 0;
+      levelBase = 0;
+      historyMode = null;
       noisePhase = 0;
       lastFrameTime = null;
     },
