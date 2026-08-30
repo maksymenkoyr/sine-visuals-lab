@@ -410,7 +410,8 @@ function fetchTrial(source, trial) {
   mkdirSync(cacheDir, { recursive: true });
   const path = join(cacheDir, `${trial}.bvh`);
   if (existsSync(path)) return readFileSync(path, "utf8");
-  const subject = trial.split("_")[0];
+  // The mirror pads the subject directory to three digits; the file keeps the CMU name.
+  const subject = trial.split("_")[0].padStart(3, "0");
   const url = `${source}/${subject}/${trial}.bvh`;
   console.log(`fetching ${url}`);
   return fetch(url).then(async (r) => {
@@ -512,23 +513,24 @@ function buildClip(cut, bvh) {
 
 const cuts = JSON.parse(readFileSync(cutsPath, "utf8"));
 if (estimateOnly) {
-  const bvh = parseBvh(await fetchTrial(cuts.source, estimateOnly));
-  const est = estimateTempo(bvh);
-  console.log(`${estimateOnly}: ${bvh.frames} frames (${(bvh.frames / SOURCE_FPS).toFixed(1)} s)`);
-  for (const c of est.candidates) console.log(`  ${c.bpm.toFixed(1)} bpm (lag ${c.lag}) score ${c.score.toFixed(3)}`);
-  console.log(`  first beat frame ${est.firstBeatFrame} at ${est.bpm.toFixed(1)} bpm`);
-  const gaps = est.hits.slice(1).map((h, i) => h - est.hits[i]);
-  console.log(`  hits (frames): ${est.hits.join(" ")}`);
-  console.log(`  gaps: ${gaps.join(" ")}`);
-  // Where the actor faces over the trial, in degrees of yaw from +Z, every half second.
-  const rt = buildRetarget(bvh);
-  const headings = [];
-  for (let f = 0; f < bvh.frames; f += SOURCE_FPS / 2) {
-    const src = sourceWorld(bvh, f);
-    const fwd = rot(qmul(src.rotW[rt.hips], qconj(bvhRot0(bvh, rt.hips))), [0, 0, 1]);
-    headings.push(`${f}:${((Math.atan2(fwd[0], fwd[2]) * 180) / Math.PI).toFixed(0)}°`);
+  for (const trial of estimateOnly.split(",")) {
+    const bvh = parseBvh(await fetchTrial(cuts.source, trial));
+    const est = estimateTempo(bvh);
+    console.log(`${trial}: ${bvh.frames} frames (${(bvh.frames / SOURCE_FPS).toFixed(1)} s)`);
+    console.log(`  tempo candidates: ${est.candidates.map((c) => `${c.bpm.toFixed(0)}bpm/lag${c.lag}/${c.score.toFixed(2)}`).join(" ")}`);
+    const gaps = est.hits.slice(1).map((h, i) => h - est.hits[i]);
+    console.log(`  hits: ${est.hits.join(" ")}`);
+    console.log(`  gaps: ${gaps.join(" ")}`);
+    // Where the actor faces over the trial, in degrees of yaw from +Z, every second.
+    const rt = buildRetarget(bvh);
+    const headings = [];
+    for (let f = 0; f < bvh.frames; f += SOURCE_FPS) {
+      const src = sourceWorld(bvh, f);
+      const fwd = rot(qmul(src.rotW[rt.hips], qconj(bvhRot0(bvh, rt.hips))), [0, 0, 1]);
+      headings.push(`${f}:${((Math.atan2(fwd[0], fwd[2]) * 180) / Math.PI).toFixed(0)}`);
+    }
+    console.log(`  heading: ${headings.join(" ")}`);
   }
-  console.log(`  heading: ${headings.join(" ")}`);
   process.exit(0);
 }
 
