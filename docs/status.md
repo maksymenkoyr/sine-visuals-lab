@@ -26,8 +26,20 @@ regenerate it at session close.
   path, both handovers and all renderers run on synthetic audio. **Not yet
   judged on real music.** The first bundled data file in the repo — see
   step 5 of `docs/adding-a-scene.md`.
-- **Chladni scene** — branch `worktree-chladni-scene` (worktree locked),
-  3 commits ahead of `main`, unmerged.
+- **Chladni scene** — a simulated sand-on-vibrating-plate scene
+  (`src/render/scenes/chladni.ts`): grains in ping-pong RGBA8 position
+  textures; every plate mode is a resonance driven by the band energy at its
+  own frequency (`createPlateResponse`), the strongest few summed. Sand
+  rattles in proportion to the plate everywhere, dances on the antinodes,
+  and migrates to the lines only as a second-order effect of bouncing
+  (`LIFT_THRESHOLD`, `HOP_RATE`, `PULL_BIAS`), so sand lies between the
+  figures like a real plate and nothing slides. Opaque grains, glint halo on
+  hats. Plate fills the screen by default. Branch `worktree-chladni-scene`
+  (worktree at `.claude/worktrees/chladni-scene`), draft PR #38, merged with
+  `main` after #36/#37/#39/#40 landed (conflicts in `scenes/index.ts`,
+  `tests/autoTune.test.ts` and this file resolved). Registered as a draft
+  scene; typecheck/tests green, headless-verified, being tuned on real music
+  by the user.
 - **Always-on dev controls** — branch `worktree-agent-ae8a69d86e9c44e97`,
   1 commit ahead of `main`, unmerged.
 - **Mesh Grid rebuilt as a hidden-line spectrogram terrain** — branch
@@ -64,6 +76,15 @@ regenerate it at session close.
   Gain and the beat swell are the things most likely to want a nudge on real
   music; the runway and Circle layouts are kept behind toggles — drop them
   if the sphere is the scene.
+- Chladni: should it graduate out of `DRAFT_SCENE_IDS`? The sand constants
+  (`LIFT_THRESHOLD`, `HOP_RATE`, `PULL_BIAS`) and the resonance
+  window/sharpening range (`WINDOW_BANDS_*`, `SHARPEN_*` in `chladni.ts`)
+  were set by eye at 720p against the synthetic feed's low energy; the user
+  is tuning motion on real music (last asks: more movement, less sticking).
+- Chladni on a Panorama room: grain positions live in plate space and the
+  plate is sized from this device's `uResolution` aspect, the same
+  approximation every fullscreen scene makes — unverified on a multi-device
+  room.
 - Dancers: which handover reads better on real music — crossfade or inertial?
   Both ship behind the `Handover` setting so the user can compare; keep one.
 - Dancers: the tempo the CMU dancers moved to is pinned by hand in
@@ -85,6 +106,9 @@ regenerate it at session close.
 ## Next up
 
 - Watch Mesh Grid's sphere-in-dome on real music; then undraft and merge PR #22.
+- Chladni: keep tuning on real music, then undraft PR #38; consider a
+  "spill" toggle (keep vs. refill grains that leave the plate) if the
+  constant refill reads busy.
 - Watch Dancers on real music, pick a handover, then undraft and merge PR #36.
 - Internet dances (Floss, Woah, Griddy) via a film-yourself → offline SMPL
   (WHAM / 4D-Humans) path into the same converter — simple routines only,
