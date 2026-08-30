@@ -194,6 +194,10 @@ let lastMono: Float32Array | null = null;
 // card's history trace draws it as the "auto-gain fully off" reference. Null
 // wherever no local extractor ran this frame (renderer, synthetic feed).
 let lastFixedEnergy: number | null = null;
+// FeatureExtractor.fluxRatio from this device's own extractor — the Rhythm
+// card's Onset row. Same solo/host-only availability as lastFixedEnergy
+// above and for the same reason.
+let lastFluxRatio: number | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
  *  availability as lastMono, for the Loudness card. */
 let lastLufs: LufsReading | null = null;
@@ -856,6 +860,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastMono = null;
     lastLufs = null;
     lastFixedEnergy = null;
+    lastFluxRatio = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
@@ -865,6 +870,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastMono = null;
       lastLufs = null;
       lastFixedEnergy = null;
+      lastFluxRatio = null;
       return null;
     }
     const now = capture.context.currentTime;
@@ -874,6 +880,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
     lastFixedEnergy = extractor.fixedEnergy;
+    lastFluxRatio = extractor.fluxRatio;
     // Feeds next tick's resolveAutoGain(), not this one's — see
     // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
     feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
@@ -886,6 +893,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastMono = null;
       lastLufs = null;
       lastFixedEnergy = null;
+      lastFluxRatio = null;
       return null;
     }
     const now = capture.context.currentTime;
@@ -895,6 +903,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
     lastFixedEnergy = extractor.fixedEnergy;
+    lastFluxRatio = extractor.fluxRatio;
     // Feeds next tick's resolveAutoGain(), not this one's — see
     // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
     feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
@@ -907,6 +916,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   lastMono = null;
   lastLufs = null;
   lastFixedEnergy = null;
+  lastFluxRatio = null;
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
@@ -988,7 +998,7 @@ function loop(): void {
   // can render its "waiting for audio" idle state instead of going dead.
   // `rateScale` lets the meters panel (audioMeters.ts) bypass its own BPM
   // settle and waveform peak-hold at Smoothing's Off stop, same as above.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastFluxRatio);
 
   if (!lastVis || !anim) return;
 

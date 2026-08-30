@@ -140,6 +140,14 @@ export class FeatureExtractor {
     return sum / NUM_BANDS;
   }
 
+  /** How hard the broadband onset detector's flux cleared its adaptive
+   *  threshold this frame: 1 is a bare trigger, above 1 fired, below 1 is a
+   *  near-miss. See registerOnset's own doc for the same ratio (there
+   *  clamped for the tempo comb) — this is the unclamped instant reading. */
+  get fluxRatio(): number {
+    return this.lastFluxRatio;
+  }
+
   private fluxBaseline = 0;
   private lastTime: number | null = null;
   private lastDt = 1 / 60;
@@ -147,6 +155,13 @@ export class FeatureExtractor {
   private onsets: { time: number; weight: number }[] = [];
   private bpm = 0;
   private lastBeatTime = 0;
+  // flux/threshold from the most recent update(), stored unconditionally —
+  // including on frames that don't fire, so a near-miss is visible too. A
+  // local diagnostic like fixedEnergy/bandSpanDb above, never part of
+  // FeatureFrame: the onset flag it explains is a boolean by design, but a
+  // tuning session wants to see how hard a hit cleared the bar (or how
+  // close it came) — the Rhythm card's Onset row in audioMeters.ts.
+  private lastFluxRatio = 0;
 
   /** The AudioContext-clock delta update() computed last call — what
    *  app.ts should feed autoGain.ts's feedAutoGainMeasurement() as dtSec,
@@ -242,6 +257,10 @@ export class FeatureExtractor {
 
     this.fluxBaseline += (flux - this.fluxBaseline) * Math.min(1, FLUX_ADAPTIVE_RATE * dt);
     const threshold = this.fluxBaseline * FLUX_THRESHOLD_MULT + FLUX_THRESHOLD_MARGIN;
+    // Unconditional, not just on a fire — see fluxRatio's own doc. threshold
+    // is always > 0 (FLUX_THRESHOLD_MARGIN keeps it off zero at a silent
+    // baseline), so this never divides by zero.
+    this.lastFluxRatio = flux / threshold;
     const canFire = time - this.lastOnsetTime > ONSET_REFRACTORY_SEC;
     const beat = canFire && flux > threshold;
 

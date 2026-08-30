@@ -285,7 +285,8 @@ export interface DeviceMenu {
    *  Smoothing value — forwarded to the meters so their own BPM settle and
    *  waveform peak-hold bypass at Smoothing's Off stop the same way the rest
    *  of the pipeline does; not re-resolved here, since resolveSmoothing()
-   *  slews its auto value and this runs every rAF tick. */
+   *  slews its auto value and this runs every rAF tick. `fluxRatio` is
+   *  FeatureExtractor.fluxRatio, null on the same paths as `fixedEnergy`. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -296,6 +297,7 @@ export interface DeviceMenu {
     rateScale: number,
     fixedEnergy: number | null,
     lufs: LufsReading | null,
+    fluxRatio: number | null,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
@@ -2092,11 +2094,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       rateScale: number,
       fixedEnergy: number | null,
       lufs: LufsReading | null,
+      fluxRatio: number | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs);
+      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, fluxRatio);
       // Unthrottled, same reasoning as audioMeters' own fills — see
       // createControlRow's updateSignalPills doc comment. A no-op per row
       // with no `reads`, so this costs nothing for the common case.
