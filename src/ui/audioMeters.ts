@@ -19,6 +19,7 @@ import {
   chipBtnStyle,
   createCard,
   createChipButton,
+  createTraceLegend,
   digitsStyle,
   digitsTextStyle,
   groupHeadingFirstStyle,
@@ -252,10 +253,12 @@ const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_
 // with the before and after both still on screen. traceLegend below reads
 // its swatch colours from the same HISTORY_*_COLOR constants the strokes
 // use, so the two can't drift apart; its reference entry dims when this
-// frame's source has no fixed-mapping reading to show (see pushHistory).
+// frame's source has no fixed-mapping reading to show (see createTraceStrip's
+// push). The Character card's Centroid trace (below, no legend — one series
+// needs none) shares this same span and the createTraceStrip machinery.
 const HISTORY_SPAN_SEC = 10;
 const HISTORY_HEIGHT_CSS_PX = 48;
-const histCanvasStyle = `display: block; width: 100%; height: ${HISTORY_HEIGHT_CSS_PX}px; margin-top: 4px;`;
+const CENTROID_TRACE_HEIGHT_CSS_PX = 28;
 const HISTORY_LEVEL_COLOR = "rgba(255,255,255,0.85)";
 const HISTORY_ENERGY_COLOR = INPUT_GREEN;
 // A different hue from Energy's green, not just a dimmer shade of it — the
@@ -263,46 +266,122 @@ const HISTORY_ENERGY_COLOR = INPUT_GREEN;
 // for the auto-gain/auto-tune system (AUTO_SKY, Character card).
 const HISTORY_FIXED_COLOR = withAlpha(AUTO_SKY, 0.75);
 
-// A trace's colour key: a short line swatch (these are lines on the canvas,
-// not points) beside a caption in the same small-mono voice as tickLabelStyle
-// and tempoCaptionStyle. Always visible — unlike .vc-hint, a legend that
-// hides on hover isn't doing a legend's job.
-const traceLegendStyle = `display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px;`;
-const traceLegendEntryStyle = `display: flex; align-items: center; gap: 5px; transition: opacity 0.2s ease;`;
-const traceLegendSwatchStyle = (color: string) =>
-  `width: 10px; height: 2px; border-radius: 1px; background: ${color};`;
-const traceLegendLabelStyle = `font: 400 8.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.55);`;
-
-interface TraceLegendSpec {
+interface TraceStripSeries {
   color: string;
-  label: string;
+  width: number;
 }
 
-/** Builds a legend from traceLegendStyle; entries stay in the order given.
- *  setEntryEnabled dims an entry (e.g. a reference line the source can't
- *  supply right now) without removing it, keyed so a per-frame call is free. */
-function createTraceLegend(entries: TraceLegendSpec[]) {
-  const el = document.createElement("div");
-  el.style.cssText = traceLegendStyle;
-  const rows = entries.map((spec) => {
-    const row = document.createElement("div");
-    row.style.cssText = traceLegendEntryStyle;
-    const swatch = document.createElement("div");
-    swatch.style.cssText = traceLegendSwatchStyle(spec.color);
-    const label = document.createElement("div");
-    label.textContent = spec.label;
-    label.style.cssText = traceLegendLabelStyle;
-    row.append(swatch, label);
-    el.appendChild(row);
-    return row;
-  });
-  const lastEnabled: boolean[] = entries.map(() => true);
+/** A rolling ring-buffer history trace, one column per CSS pixel over
+ *  HISTORY_SPAN_SEC, one line per series — the Signal card's History (three
+ *  series: level, energy, the fixed-mapping reference) and the Character
+ *  card's Centroid trace (one series, no legend) both drive one of these.
+ *  Each series' column is a max-hold of what push() saw since the column
+ *  before last closed, so a transient survives however many frames the
+ *  column spans; a null sample leaves that series' column NaN, which
+ *  traceHistory's caller (below) reads as "lift the pen" rather than a
+ *  reading of zero — the same reference-line gap HISTORY_FIXED_COLOR relies
+ *  on for a source with no fixed-mapping reading this tick. */
+function createTraceStrip(series: TraceStripSeries[], heightPx: number) {
+  const canvas = document.createElement("canvas");
+  canvas.style.cssText = `display: block; width: 100%; height: ${heightPx}px; margin-top: 4px;`;
+  const ctx = canvas.getContext("2d")!;
+
+  let bufs: Float32Array[] = series.map(() => new Float32Array(0));
+  let head = 0;
+  // The column being accumulated, one slot per series — NaN means "nothing
+  // folded in yet this column", not "zero". commitColumn() below relies on
+  // Number.isNaN to tell first-touch-this-column apart from a genuine 0.
+  let colVals: number[] = series.map(() => Number.NaN);
+  let colStartMs: number | null = null;
+  let cssWidth = 0;
+  // Follows the width so the trace always spans exactly HISTORY_SPAN_SEC.
+  let columnMs = 1000;
+
+  function ensureSize(): boolean {
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.round(rect.width);
+    if (w <= 0) return false;
+    if (w === cssWidth) return true;
+    cssWidth = w;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(heightPx * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    bufs = series.map(() => new Float32Array(w).fill(Number.NaN));
+    head = 0;
+    columnMs = (HISTORY_SPAN_SEC * 1000) / w;
+    return true;
+  }
+
+  function commitColumn(): void {
+    for (let i = 0; i < series.length; i++) bufs[i][head] = colVals[i];
+    head = (head + 1) % bufs[0].length;
+    colVals = colVals.map(() => Number.NaN);
+  }
+
+  /** One polyline over the ring buffer plus the live (in-progress) column at
+   *  the right edge; a NaN reading lifts the pen so a missing sample leaves
+   *  a gap rather than a line to zero. */
+  function traceHistory(buf: Float32Array, live: number, color: string, width: number): void {
+    const len = buf.length;
+    const h = heightPx;
+    const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (h - 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    let pen = false;
+    for (let x = 0; x <= len; x++) {
+      const v = x === len ? live : buf[(head + x) % len];
+      if (Number.isNaN(v)) {
+        pen = false;
+        continue;
+      }
+      const px = x === len ? cssWidth - 1 : x;
+      if (pen) ctx.lineTo(px, yOf(v));
+      else ctx.moveTo(px, yOf(v));
+      pen = true;
+    }
+    ctx.stroke();
+  }
+
   return {
-    el,
-    setEntryEnabled(i: number, enabled: boolean): void {
-      if (lastEnabled[i] === enabled) return;
-      lastEnabled[i] = enabled;
-      rows[i].style.opacity = enabled ? "1" : "0.35";
+    canvas,
+    /** One sample per series, `null` where this tick has no reading for that
+     *  series (e.g. no fixed-mapping reference) — max-held into the current
+     *  column, closing it (or several, after a stall) once `columnMs` has
+     *  passed. Call every tick the card is open; skip entirely while folded,
+     *  same as resetColumn() below. */
+    push(values: (number | null)[], nowMs: number): void {
+      if (!ensureSize()) return;
+      for (let i = 0; i < series.length; i++) {
+        const v = values[i];
+        if (v === null) continue;
+        colVals[i] = Number.isNaN(colVals[i]) ? v : Math.max(colVals[i], v);
+      }
+      if (colStartMs === null) colStartMs = nowMs;
+      const elapsed = nowMs - colStartMs;
+      if (elapsed < columnMs) return;
+      let n = Math.min(bufs[0].length, Math.floor(elapsed / columnMs));
+      for (; n > 0; n--) commitColumn();
+      colStartMs = nowMs - (elapsed % columnMs);
+    },
+    /** Redraws every series in the order given to createTraceStrip — the
+     *  last one lands on top, same as the Signal card putting Level over
+     *  Energy over the fixed-mapping reference. */
+    draw(): void {
+      const w = cssWidth;
+      const h = heightPx;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "rgba(255,255,255,0.18)";
+      ctx.fillRect(0, Math.round(h / 2) - 0.5, w, 1);
+      for (let i = 0; i < series.length; i++) {
+        traceHistory(bufs[i], colVals[i], series[i].color, series[i].width);
+      }
+    },
+    /** Don't accumulate a column while the card holding this strip is
+     *  hidden (folded) — same reasoning as the waveform's own fold guard. */
+    resetColumn(): void {
+      colStartMs = null;
     },
   };
 }
@@ -748,17 +827,24 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       "The last few seconds of Level and Energy. The gap between Energy and No auto-gain is what the Auto-gain slider is adding.",
   });
   // The trace takes the meter's place under the head, like the waveform.
-  const histCanvas = document.createElement("canvas");
-  histCanvas.style.cssText = histCanvasStyle;
-  history.el.children[1].replaceWith(histCanvas);
-  const histCtx = histCanvas.getContext("2d")!;
+  // Series order (fixed, energy, level) is the paint order: level lands on
+  // top, matching HISTORY_*_COLOR's original z-order.
+  const historyStrip = createTraceStrip(
+    [
+      { color: HISTORY_FIXED_COLOR, width: 1 },
+      { color: HISTORY_ENERGY_COLOR, width: 1.5 },
+      { color: HISTORY_LEVEL_COLOR, width: 1 },
+    ],
+    HISTORY_HEIGHT_CSS_PX,
+  );
+  history.el.children[1].replaceWith(historyStrip.canvas);
   history.setReadout(String(HISTORY_SPAN_SEC));
   const histLegend = createTraceLegend([
     { color: HISTORY_LEVEL_COLOR, label: "Level" },
     { color: HISTORY_ENERGY_COLOR, label: "Energy" },
     { color: HISTORY_FIXED_COLOR, label: "No auto-gain" },
   ]);
-  histCanvas.after(histLegend.el);
+  historyStrip.canvas.after(histLegend.el);
   const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN, foldId: "signal" });
   signalCard.body.append(level.el, spacer(), energy.el, spacer(), history.el);
 
@@ -824,9 +910,16 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const centroidRow = createMeterRow({
     label: "Centroid",
     accent: AUTO_SKY,
-    description: "Live spectral centroid, range-adapted to this track's own recent swing — 0.5 is its own recent middle, not an absolute mid-spectrum reading. The fast counterpart to Brightness above.",
+    description: "Live spectral centroid, range-adapted to this track's own recent swing — 0.5 is its own recent middle, not an absolute mid-spectrum reading. The fast counterpart to Brightness above. Below the bar, the last few seconds of it — the shape brightness moves in, since an instant reading alone just jitters.",
     ticks: [{ at: 0.5 }],
   });
+  // Inserted before the hint (el's 3rd child), so it sits under the meter
+  // like the Signal card's History — always visible, not hover-revealed.
+  // One series, so no legend; RAW briefly mixes raw/processed samples in
+  // the same trace right after a toggle, until HISTORY_SPAN_SEC rolls the
+  // pre-toggle column out — harmless, and self-heals.
+  const centroidTrace = createTraceStrip([{ color: AUTO_SKY, width: 1.5 }], CENTROID_TRACE_HEIGHT_CSS_PX);
+  centroidRow.el.insertBefore(centroidTrace.canvas, centroidRow.el.children[2]);
   const characterCard = createCard({ title: "Character", accent: AUTO_SKY, foldId: "character" });
   dialRows.forEach(({ row }, i) => {
     if (i > 0) characterCard.body.appendChild(spacer());
@@ -956,108 +1049,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     waveCtx.fillRect(0, mid - 0.5, w, 1);
   }
 
-  // History ring buffers, one column per CSS pixel like the waveform's —
-  // oldest at `histHead`, newest just before it — plus the column being
-  // accumulated. `histFixed` holds NaN for a column with no reference
-  // (renderer/synthetic), and the trace skips those.
-  let histLevel = new Float32Array(0);
-  let histEnergy = new Float32Array(0);
-  let histFixed = new Float32Array(0);
-  let histHead = 0;
-  let histColLevel = 0;
-  let histColEnergy = 0;
-  let histColFixed = Number.NaN;
-  let histColStartMs: number | null = null;
-  let histCssWidth = 0;
-  // Column duration follows the width so the trace always spans exactly
-  // HISTORY_SPAN_SEC; recomputed with the buffers in ensureHistSize.
-  let histColumnMs = 1000;
-
-  // Backing store sized to the card's width at devicePixelRatio; the CSS
-  // height is a constant, never re-read from the element (assigning
-  // canvas.height rewrites the attribute).
-  /** False while the canvas has no layout — same reasoning as
-   *  ensureWaveSize above. */
-  function ensureHistSize(): boolean {
-    const rect = histCanvas.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    if (w <= 0) return false;
-    if (w === histCssWidth) return true;
-    histCssWidth = w;
-    const dpr = window.devicePixelRatio || 1;
-    histCanvas.width = Math.round(w * dpr);
-    histCanvas.height = Math.round(HISTORY_HEIGHT_CSS_PX * dpr);
-    histCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    histLevel = new Float32Array(w);
-    histEnergy = new Float32Array(w);
-    histFixed = new Float32Array(w).fill(Number.NaN);
-    histHead = 0;
-    histColumnMs = (HISTORY_SPAN_SEC * 1000) / w;
-    return true;
-  }
-
-  function commitHistColumn(): void {
-    histLevel[histHead] = histColLevel;
-    histEnergy[histHead] = histColEnergy;
-    histFixed[histHead] = histColFixed;
-    histHead = (histHead + 1) % histLevel.length;
-    histColLevel = 0;
-    histColEnergy = 0;
-    histColFixed = Number.NaN;
-  }
-
-  /** Folds this frame's readings into the current column (max-hold), and
-   *  closes it — or several, after a stall — once histColumnMs has passed. */
-  function pushHistory(frame: FeatureFrame, fixedEnergy: number | null, nowMs: number): void {
-    if (!ensureHistSize()) return;
-    histColLevel = Math.max(histColLevel, frame.level);
-    histColEnergy = Math.max(histColEnergy, frame.energy);
-    if (fixedEnergy !== null)
-      histColFixed = Number.isNaN(histColFixed) ? fixedEnergy : Math.max(histColFixed, fixedEnergy);
-    if (histColStartMs === null) histColStartMs = nowMs;
-    const elapsed = nowMs - histColStartMs;
-    if (elapsed < histColumnMs) return;
-    let n = Math.min(histLevel.length, Math.floor(elapsed / histColumnMs));
-    for (; n > 0; n--) commitHistColumn();
-    histColStartMs = nowMs - (elapsed % histColumnMs);
-  }
-
-  /** One polyline over the ring buffer plus the live column at the right
-   *  edge; a NaN reading lifts the pen so a missing reference leaves a gap
-   *  rather than a line to zero. */
-  function traceHistory(buf: Float32Array, live: number, color: string, width: number): void {
-    const len = buf.length;
-    const h = HISTORY_HEIGHT_CSS_PX;
-    const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (h - 2);
-    histCtx.strokeStyle = color;
-    histCtx.lineWidth = width;
-    histCtx.beginPath();
-    let pen = false;
-    for (let x = 0; x <= len; x++) {
-      const v = x === len ? live : buf[(histHead + x) % len];
-      if (Number.isNaN(v)) {
-        pen = false;
-        continue;
-      }
-      const px = x === len ? histCssWidth - 1 : x;
-      if (pen) histCtx.lineTo(px, yOf(v));
-      else histCtx.moveTo(px, yOf(v));
-      pen = true;
-    }
-    histCtx.stroke();
-  }
-
-  function drawHistory(): void {
-    const w = histCssWidth;
-    const h = HISTORY_HEIGHT_CSS_PX;
-    histCtx.clearRect(0, 0, w, h);
-    histCtx.fillStyle = "rgba(255,255,255,0.18)";
-    histCtx.fillRect(0, Math.round(h / 2) - 0.5, w, 1);
-    traceHistory(histFixed, histColFixed, HISTORY_FIXED_COLOR, 1);
-    traceHistory(histEnergy, histColEnergy, HISTORY_ENERGY_COLOR, 1.5);
-    traceHistory(histLevel, histColLevel, HISTORY_LEVEL_COLOR, 1);
-  }
-
   let lastMs: number | null = null;
   let lastTextMs = 0;
   // Peak-hold for the waveform readout: one buffer's peak jumps around too
@@ -1120,13 +1111,13 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           );
         }
         if (frame) {
-          pushHistory(frame, fixedEnergy, nowMs);
-          drawHistory();
+          historyStrip.push([fixedEnergy, frame.energy, frame.level], nowMs);
+          historyStrip.draw();
           histLegend.setEntryEnabled(2, fixedEnergy !== null);
         }
       } else {
         // Folded: don't accumulate a column while hidden, same as the Scope.
-        histColStartMs = null;
+        historyStrip.resetColumn();
       }
 
       // ---- Rhythm ----
@@ -1165,6 +1156,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
             cv === null ? "--" : cv.toFixed(2),
             cv === null ? IDLE : {},
           );
+        centroidTrace.push([cv], nowMs);
+        centroidTrace.draw();
+      } else {
+        // Folded: don't accumulate a column while hidden, same as History.
+        centroidTrace.resetColumn();
       }
 
       // ---- Loudness ----
