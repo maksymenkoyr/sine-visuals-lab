@@ -43,7 +43,22 @@ regenerate it at session close.
 - **Always-on dev controls** — branch `worktree-agent-ae8a69d86e9c44e97`,
   1 commit ahead of `main`, unmerged.
 - **Mesh Grid rebuilt as a hidden-line spectrogram terrain** — branch
-  `worktree-mesh-grid-terrain`, 15 commits ahead of `main`, unmerged.
+  `worktree-mesh-grid-terrain` (worktree at
+  `.claude/worktrees/mesh-grid-terrain`), draft PR #22, merged with `main`
+  after #18–#42 landed underneath it (conflict in this file only), unmerged.
+  On top of the rebuild: Camera Distance / Height / Tilt, Zoom, Circle and
+  Sphere layouts with Circle Squeeze, Waves Outward, Center Spike, a Grid
+  Density that rebuilds the mesh, a Background Mesh that can be a flat
+  backdrop or a co-axial lattice dome (Dome Distance / Radius / Density),
+  and Beat Expand with a Beat Smooth attack/release. What a row *holds* was
+  reworked last: each band's change against its own recent average (Wave
+  Memory, Wave Gain) — see the header of `src/render/scenes/meshGrid.ts` for
+  why neither the AGC'd spectrum nor a single level value works. Defaults
+  are a fresh-start sphere centered inside the dome. Ready for a look on
+  real music.
+- **Caustics: Treble sparkle split into a macro** — branch
+  `worktree-sparkle-macro` (worktree at `.claude/worktrees/sparkle-macro`,
+  locked), 1 commit ahead of `main`, unmerged.
 - **Tuning: point-at-dials workflow** — branch `worktree-tuning-spotlight`,
   2 commits ahead of `main`, far behind it.
 - **docs/architecture.md diagram-first rewrite** — branch `worktree-docs-index`,
@@ -57,6 +72,10 @@ regenerate it at session close.
 
 ## Open questions
 
+- Mesh Grid's defaults were tuned on synthetic audio. Wave Memory / Wave
+  Gain and the beat swell are the things most likely to want a nudge on real
+  music; the runway and Circle layouts are kept behind toggles — drop them
+  if the sphere is the scene.
 - Chladni: should it graduate out of `DRAFT_SCENE_IDS`? The sand constants
   (`LIFT_THRESHOLD`, `HOP_RATE`, `PULL_BIAS`) and the resonance
   window/sharpening range (`WINDOW_BANDS_*`, `SHARPEN_*` in `chladni.ts`)
@@ -86,6 +105,7 @@ regenerate it at session close.
 
 ## Next up
 
+- Watch Mesh Grid's sphere-in-dome on real music; then undraft and merge PR #22.
 - Chladni: keep tuning on real music, then undraft PR #38; consider a
   "spill" toggle (keep vs. refill grains that leave the plate) if the
   constant refill reads busy.
@@ -93,8 +113,7 @@ regenerate it at session close.
 - Internet dances (Floss, Woah, Griddy) via a film-yourself → offline SMPL
   (WHAM / 4D-Humans) path into the same converter — simple routines only,
   no registered choreography. More CMU moves are cut-list entries.
-- Rebase `worktree-docs-index`; merge or continue the other worktrees — Mesh
-  Grid terrain is the most likely to collide with `main`.
+- Rebase `worktree-docs-index`; merge or continue the other worktrees.
 - Explainer artifact for the auto-gain window (live simulation of the
   `features.ts` trackers with the amount slider):
   https://claude.ai/code/artifact/5aef9f8d-a361-4929-adb2-0831943fc375
