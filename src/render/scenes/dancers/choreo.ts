@@ -21,7 +21,7 @@
  *   6. a per-channel slew — the backstop: whatever the layers above do, no
  *      channel changes faster than POSE_SLEW_RATE allows.
  */
-import { B, boneChannel, createPose, type Pose } from "./rig.ts";
+import { B, createPose, mulBoneEuler, type Pose } from "./rig.ts";
 import {
   MOVE_LADDER,
   dropPose,
@@ -103,7 +103,6 @@ export function createChoreographer(): Choreographer {
   let dropBlend = 0;
   let danceLock = 0;
   const cam = { camDolly: 0, camTilt: 0, camRoll: 0 };
-  const jawCh = boneChannel(B.jaw);
 
   const evalLevel = (rung: number, clocks: MoveClocks, energy: number, out: Pose): void => {
     const move = MOVE_LADDER[rung];
@@ -156,7 +155,7 @@ export function createChoreographer(): Choreographer {
       dropBlend = slew(dropBlend, dropTarget, dropTarget > dropBlend ? DROP_ATTACK_RATE : DROP_RELEASE_RATE, dtSec);
       if (dropBlend > 1e-3) lerpPose(target, drop, dropBlend * (0.5 + 0.5 * energy), target);
 
-      target[jawCh] += params.jaw * clocks.lowPulse * JAW_MAX;
+      mulBoneEuler(target, B.jaw, params.jaw * clocks.lowPulse * JAW_MAX, 0, 0);
 
       if (!primed) {
         pose.set(target);

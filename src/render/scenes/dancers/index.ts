@@ -20,16 +20,21 @@ import { createFullscreenScene } from "../../fullscreenScene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import {
   createBoneBuffer,
+  createPose,
   createRigWorld,
   forwardKinematics,
   groundToFloor,
   packBones,
   CH_LIFT,
   RIG_GLSL,
+  type Pose,
 } from "./rig.ts";
 import { SDF_GLSL } from "./sdf.ts";
 import { createChoreographer } from "./choreo.ts";
 import type { MoveClocks } from "./moves.ts";
+import { decodeClipLibrary, sampleClip, type ClipLibrary } from "./clipFormat.ts";
+import { clipPhaseAt, createBarCounter } from "./player.ts";
+import clipsUrl from "./clips.bin?url";
 import { STICK_SKIN_GLSL } from "./stickSkin.ts";
 import { SKELETON_SKIN_GLSL } from "./skeletonSkin.ts";
 
@@ -237,6 +242,22 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
       sectionIntensity: 0, dropPulse: 0, flowPhase: 0, timeSec: 0, bpm: 0, pulse: 0.5,
     };
 
+    // The clip library arrives asynchronously; until it does (or if it
+    // can't — tests import this module under node) the dancer sways.
+    let library: ClipLibrary | null = null;
+    if (typeof window !== "undefined" && typeof fetch === "function") {
+      fetch(clipsUrl)
+        .then((r) => r.arrayBuffer())
+        .then((buf) => {
+          library = decodeClipLibrary(buf);
+        })
+        .catch((err: unknown) => console.warn("dancers: clip library unavailable", err));
+    }
+    // DEV: `?clip=<name>` loops one clip on the beat, for checking a conversion.
+    const forcedClipName = import.meta.env.DEV && typeof location !== "undefined" ? new URLSearchParams(location.search).get("clip") : null;
+    const bars = createBarCounter();
+    const clipPose = createPose();
+
     return (frame, anim, getSetting) => {
       clocks.beatPhase = anim.beatPhase;
       clocks.barPhase = anim.barPhase;
@@ -256,8 +277,15 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
         groove: getSetting("groove"),
         jaw: getSetting("jaw"),
       });
-      forwardKinematics(out.pose, world);
-      groundToFloor(world, out.pose[CH_LIFT]);
+      const barsElapsed = bars.advance(anim.barPhase);
+      let pose: Pose = out.pose;
+      const forced = forcedClipName && library ? library.byName.get(forcedClipName) : undefined;
+      if (forced) {
+        sampleClip(forced, clipPhaseAt(forced, frame.bpm, barsElapsed), clipPose);
+        pose = clipPose;
+      }
+      forwardKinematics(pose, world);
+      groundToFloor(world, pose[CH_LIFT]);
       packBones(world, boneBuf);
 
       return {

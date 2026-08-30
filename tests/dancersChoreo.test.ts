@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { B, boneChannel, createPose } from "../src/render/scenes/dancers/rig.ts";
+import { B, bonePitch, createPose } from "../src/render/scenes/dancers/rig.ts";
 import { sway, type MoveClocks } from "../src/render/scenes/dancers/moves.ts";
 import { createChoreographer, type ChoreoParams } from "../src/render/scenes/dancers/choreo.ts";
 
@@ -109,8 +109,10 @@ describe("dancers choreographer", () => {
         if (Math.abs(t - 7.9) < DT / 2) longAfter = distFromSway(f.pose, c);
       },
     );
-    expect(shortlyAfter).toBeGreaterThan(0.8); // 0.4 s after the dropout the arms are still up
-    expect(longAfter).toBeLessThan(0.2); // seconds later it has let go
+    // Pose channels are quaternion components, so a ~2 rad arm swing shows
+    // up as a component delta of ~0.8; the thresholds are halves of that.
+    expect(shortlyAfter).toBeGreaterThan(0.4); // 0.4 s after the dropout the arms are still up
+    expect(longAfter).toBeLessThan(0.1); // seconds later it has let go
   });
 
   it("never snaps: a crossfade, a drop and a jaw hit all stay under the per-frame slew budget", () => {
@@ -138,7 +140,6 @@ describe("dancers choreographer", () => {
   });
 
   it("blends the drop pose in on dropPulse and releases it again", () => {
-    const jawCh = boneChannel(B.jaw);
     let peak = 0;
     let drop = 0;
     const last = run(
@@ -150,11 +151,11 @@ describe("dancers choreographer", () => {
       },
       PARAMS,
       (t, f) => {
-        if (t > 2 && t < 3) peak = Math.max(peak, f.pose[jawCh]);
+        if (t > 2 && t < 3) peak = Math.max(peak, bonePitch(f.pose, B.jaw));
       },
     );
     expect(peak).toBeGreaterThan(0.15); // the drop pose opens the jaw
-    expect(last.pose[jawCh]).toBeLessThan(0.02); // and it has closed again
+    expect(bonePitch(last.pose, B.jaw)).toBeLessThan(0.02); // and it has closed again
   });
 
   it("keeps the camera still when bob is 0, however hard the beat hits", () => {

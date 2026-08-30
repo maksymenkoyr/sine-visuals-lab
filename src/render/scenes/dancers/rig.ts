@@ -14,11 +14,16 @@
  * symmetric rig.
  *
  * A Pose is a flat Float32Array of channels (CH_* and boneChannel()): root
- * x/z offset, lift above the floor, then pitch/yaw/roll per bone in radians.
- * A bone's rotation is expressed in its parent's frame and applied before its
- * rest rotation:  worldRot(b) = worldRot(parent) · euler(pose, b) · rest(b).
- * moves.ts hides the sign conventions that fall out of that behind intent
- * helpers (armSwing, kneeFlex, …) so move authors never touch raw signs.
+ * x/z offset, lift above the floor, then a unit quaternion (x,y,z,w) per
+ * bone. A bone's rotation is expressed in its parent's frame and applied
+ * before its rest rotation:  worldRot(b) = worldRot(parent) · q(b) · rest(b).
+ * Quaternions rather than Euler angles because captured motion (clips.ts)
+ * swings limbs through angles where Euler channels gimbal and wrap, and
+ * because blending two poses (lerpPose) has to be a rotation blend. The
+ * Euler-flavoured intent helpers in moves.ts (armSwing, kneeFlex, …) still
+ * exist for the procedural sway; they convert on the way in via
+ * mulBoneEuler(). forwardKinematics() normalises each bone's quaternion, so
+ * slews and lerps may leave a pose slightly off-unit without harm.
  *
  * Panorama: index.ts builds its ray from roomUv() with the local aspect, the
  * same approximation ferrofluid.ts and tunnel.ts accept, so a slice sees its
@@ -137,30 +142,118 @@ export const CH_ROOT_Z = 1;
 /** Height of the lowest foot above the floor — a hop. Never negative. */
 export const CH_LIFT = 2;
 const CH_BONES = 3;
-export const POSE_LENGTH = CH_BONES + BONE_COUNT * 3;
+/** Floats per bone in a Pose: the quaternion's x, y, z, w. */
+export const POSE_BONE_STRIDE = 4;
+export const POSE_LENGTH = CH_BONES + BONE_COUNT * POSE_BONE_STRIDE;
 
-/** Channel index of a bone's pitch (about X); +1 is yaw (Y), +2 is roll (Z). */
+/** Channel index of a bone's quaternion x; +1, +2, +3 are y, z, w. */
 export function boneChannel(boneIndex: number): number {
-  return CH_BONES + boneIndex * 3;
+  return CH_BONES + boneIndex * POSE_BONE_STRIDE;
 }
 
 export type Pose = Float32Array;
 
+/** Root at the origin, no lift, every bone at its rest rotation. */
+export function resetPose(pose: Pose): Pose {
+  pose.fill(0);
+  for (let b = 0; b < BONE_COUNT; b++) pose[boneChannel(b) + 3] = 1;
+  return pose;
+}
+
 export function createPose(): Pose {
-  return new Float32Array(POSE_LENGTH);
+  return resetPose(new Float32Array(POSE_LENGTH));
+}
+
+const scratchEuler = new Float32Array(4);
+
+/** Overwrites a bone's rotation with yaw·pitch·roll (see quatFromEuler). */
+export function setBoneEuler(pose: Pose, boneIndex: number, pitch: number, yaw: number, roll: number): void {
+  quatFromEuler(pitch, yaw, roll, pose, boneChannel(boneIndex));
+}
+
+/** Composes yaw·pitch·roll onto a bone's current rotation (applied after
+ *  what's already there, in the bone's own frame) — how the Euler intent
+ *  helpers in moves.ts layer onto a pose. */
+export function mulBoneEuler(pose: Pose, boneIndex: number, pitch: number, yaw: number, roll: number): void {
+  const ch = boneChannel(boneIndex);
+  quatFromEuler(pitch, yaw, roll, scratchEuler, 0);
+  quatMul(pose, ch, scratchEuler, 0, pose, ch);
+}
+
+/** The rotation angle about X a bone carries — exact only when it has no
+ *  yaw or roll, which is the case for the jaw. */
+export function bonePitch(pose: Pose, boneIndex: number): number {
+  const ch = boneChannel(boneIndex);
+  return 2 * Math.atan2(pose[ch], pose[ch + 3]);
+}
+
+/** Root channels lerp; every bone nlerps (shortest arc). Aliasing `out` with
+ *  `a` or `b` is fine. */
+export function lerpPose(a: Pose, b: Pose, t: number, out: Pose): void {
+  for (let i = 0; i < CH_BONES; i++) out[i] = a[i] + (b[i] - a[i]) * t;
+  for (let bone = 0; bone < BONE_COUNT; bone++) quatNlerp(a, boneChannel(bone), b, boneChannel(bone), t, out, boneChannel(bone));
+}
+
+/** The reference T-pose captured motion is retargeted against (clips.ts,
+ *  tools/clip-convert.mjs): arms straight out sideways at shoulder height,
+ *  everything else at rest. */
+export function tPose(out: Pose): Pose {
+  resetPose(out);
+  setBoneEuler(out, B.L_upperArm, 0, 0, Math.PI / 2);
+  setBoneEuler(out, B.R_upperArm, 0, 0, -Math.PI / 2);
+  return out;
 }
 
 // ---- Quaternion helpers (x, y, z, w) ---------------------------------------
 
 type Q = Float32Array; // 4 floats, scratch-friendly
 
-function qMul(a: ArrayLike<number>, ai: number, b: ArrayLike<number>, bi: number, out: Q, oi: number): void {
+/** out = a ⊗ b. `out` may alias either input. */
+export function quatMul(a: ArrayLike<number>, ai: number, b: ArrayLike<number>, bi: number, out: Q, oi: number): void {
   const ax = a[ai], ay = a[ai + 1], az = a[ai + 2], aw = a[ai + 3];
   const bx = b[bi], by = b[bi + 1], bz = b[bi + 2], bw = b[bi + 3];
   out[oi] = aw * bx + ax * bw + ay * bz - az * by;
   out[oi + 1] = aw * by - ax * bz + ay * bw + az * bx;
   out[oi + 2] = aw * bz + ax * by - ay * bx + az * bw;
   out[oi + 3] = aw * bw - ax * bx - ay * by - az * bz;
+}
+
+/** out = q⁻¹ for a unit quaternion (its conjugate). */
+export function quatConjugate(q: ArrayLike<number>, qi: number, out: Q, oi: number): void {
+  out[oi] = -q[qi];
+  out[oi + 1] = -q[qi + 1];
+  out[oi + 2] = -q[qi + 2];
+  out[oi + 3] = q[qi + 3];
+}
+
+/** Scales q[qi..] to unit length in place; a zero quaternion becomes identity. */
+export function quatNormalize(q: Q, qi: number): void {
+  const n = Math.hypot(q[qi], q[qi + 1], q[qi + 2], q[qi + 3]);
+  if (n < 1e-8) {
+    q[qi] = q[qi + 1] = q[qi + 2] = 0;
+    q[qi + 3] = 1;
+    return;
+  }
+  const s = 1 / n;
+  q[qi] *= s;
+  q[qi + 1] *= s;
+  q[qi + 2] *= s;
+  q[qi + 3] *= s;
+}
+
+/** Normalised lerp along the shorter arc — a rotation blend good to a few
+ *  degrees of timing error for the sub-90° deltas a dance blend meets. */
+export function quatNlerp(a: ArrayLike<number>, ai: number, b: ArrayLike<number>, bi: number, t: number, out: Q, oi: number): void {
+  const ax = a[ai], ay = a[ai + 1], az = a[ai + 2], aw = a[ai + 3];
+  let bx = b[bi], by = b[bi + 1], bz = b[bi + 2], bw = b[bi + 3];
+  if (ax * bx + ay * by + az * bz + aw * bw < 0) {
+    bx = -bx; by = -by; bz = -bz; bw = -bw;
+  }
+  out[oi] = ax + (bx - ax) * t;
+  out[oi + 1] = ay + (by - ay) * t;
+  out[oi + 2] = az + (bz - az) * t;
+  out[oi + 3] = aw + (bw - aw) * t;
+  quatNormalize(out, oi);
 }
 
 /** out = q ⊗ v ⊗ q⁻¹ — rotates v by the unit quaternion at q[qi..]. */
@@ -201,11 +294,13 @@ export function createRigWorld(): RigWorld {
   return { pos: new Float32Array(BONE_COUNT * 3), rot: new Float32Array(BONE_COUNT * 4) };
 }
 
-const scratchEuler = new Float32Array(4);
+const scratchLocal = new Float32Array(4);
 const scratchQ = new Float32Array(4);
 const scratchV = new Float32Array(3);
 const restQ = new Float32Array(BONE_COUNT * 4);
 for (let i = 0; i < BONE_COUNT; i++) restQ.set(BONES[i].rest, i * 4);
+/** Where the pelvis head sits at rest, before groundToFloor() re-pins it. */
+export { ROOT_REST_Y };
 
 /** Solves every bone's world transform from a Pose. The root sits at
  *  ROOT_REST_Y until groundToFloor() pins the feet. */
@@ -213,20 +308,24 @@ export function forwardKinematics(pose: Pose, out: RigWorld): void {
   for (let b = 0; b < BONE_COUNT; b++) {
     const spec = BONES[b];
     const ch = boneChannel(b);
-    quatFromEuler(pose[ch], pose[ch + 1], pose[ch + 2], scratchEuler, 0);
+    scratchLocal[0] = pose[ch];
+    scratchLocal[1] = pose[ch + 1];
+    scratchLocal[2] = pose[ch + 2];
+    scratchLocal[3] = pose[ch + 3];
+    quatNormalize(scratchLocal, 0);
     const p = spec.parent;
     if (p < 0) {
       out.pos[b * 3] = pose[CH_ROOT_X] + spec.offset[0];
       out.pos[b * 3 + 1] = ROOT_REST_Y + spec.offset[1];
       out.pos[b * 3 + 2] = pose[CH_ROOT_Z] + spec.offset[2];
-      qMul(scratchEuler, 0, restQ, b * 4, out.rot, b * 4);
+      quatMul(scratchLocal, 0, restQ, b * 4, out.rot, b * 4);
     } else {
       quatRotate(out.rot, p * 4, spec.offset[0], spec.offset[1], spec.offset[2], scratchV, 0);
       out.pos[b * 3] = out.pos[p * 3] + scratchV[0];
       out.pos[b * 3 + 1] = out.pos[p * 3 + 1] + scratchV[1];
       out.pos[b * 3 + 2] = out.pos[p * 3 + 2] + scratchV[2];
-      qMul(out.rot, p * 4, scratchEuler, 0, scratchQ, 0);
-      qMul(scratchQ, 0, restQ, b * 4, out.rot, b * 4);
+      quatMul(out.rot, p * 4, scratchLocal, 0, scratchQ, 0);
+      quatMul(scratchQ, 0, restQ, b * 4, out.rot, b * 4);
     }
   }
 }

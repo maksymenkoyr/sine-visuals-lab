@@ -1,0 +1,6 @@
+{
+  "source": "https://raw.githubusercontent.com/una-dinosauria/cmu-mocap/master/data",
+  "clips": [
+    { "name": "macarena", "trial": "143_35", "family": "party", "start": 146, "beats": 8, "bpm": 162 }
+  ]
+}

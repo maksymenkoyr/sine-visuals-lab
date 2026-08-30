@@ -13,7 +13,7 @@
  * climbs as the section gets more intense; `sway` is the free layer under
  * all of them and the only thing left when there is no beat to lock to.
  */
-import { B, CH_LIFT, CH_ROOT_X, CH_ROOT_Z, boneChannel, createPose, type Pose } from "./rig.ts";
+import { B, CH_LIFT, CH_ROOT_X, CH_ROOT_Z, createPose, lerpPose, mulBoneEuler, resetPose, type Pose } from "./rig.ts";
 
 /** The slice of AnimFrame (plus FeatureFrame.bpm) the moves read — see
  *  animClock.ts for what each clock means. */
@@ -45,21 +45,11 @@ const SIDES: readonly Side[] = ["L", "R"];
 
 // ---- Pose algebra ----------------------------------------------------------
 
-export function restPose(out: Pose): Pose {
-  out.fill(0);
-  return out;
-}
+export const restPose = resetPose;
+export { lerpPose };
 
-export function lerpPose(a: Pose, b: Pose, t: number, out: Pose): void {
-  for (let i = 0; i < out.length; i++) out[i] = a[i] + (b[i] - a[i]) * t;
-}
-
-function add(pose: Pose, bone: number, pitch: number, yaw: number, roll: number): void {
-  const ch = boneChannel(bone);
-  pose[ch] += pitch;
-  pose[ch + 1] += yaw;
-  pose[ch + 2] += roll;
-}
+/** Layers yaw·pitch·roll onto what the bone already carries (rig.ts). */
+const add = mulBoneEuler;
 
 // ---- Intent helpers ---------------------------------------------------------
 // Sign notes (see rig.ts): limbs hang with rest Rz(π), so in the parent's

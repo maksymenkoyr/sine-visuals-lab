@@ -8,14 +8,20 @@ import {
   POSE_LENGTH,
   RIG_GLSL,
   VEC4_PER_BONE,
+  POSE_BONE_STRIDE,
   boneChannel,
+  bonePitch,
   boneTail,
   createBoneBuffer,
   createPose,
   createRigWorld,
   forwardKinematics,
   groundToFloor,
+  lerpPose,
+  mulBoneEuler,
   packBones,
+  setBoneEuler,
+  tPose,
 } from "../src/render/scenes/dancers/rig.ts";
 
 const tail = new Float32Array(3);
@@ -98,12 +104,7 @@ describe("dancers forward kinematics", () => {
     const world = createRigWorld();
     const pose = createPose();
     for (let trial = 0; trial < 200; trial++) {
-      for (let b = 0; b < BONE_COUNT; b++) {
-        const ch = boneChannel(b);
-        pose[ch] = (rand() - 0.5) * 2;
-        pose[ch + 1] = (rand() - 0.5) * 2;
-        pose[ch + 2] = (rand() - 0.5) * 2;
-      }
+      for (let b = 0; b < BONE_COUNT; b++) setBoneEuler(pose, b, (rand() - 0.5) * 2, (rand() - 0.5) * 2, (rand() - 0.5) * 2);
       forwardKinematics(pose, world);
       groundToFloor(world, 0);
       expect(lowestFootPoint(world)).toBeCloseTo(FLOOR_Y + FOOT_RADIUS, 5);
@@ -116,8 +117,8 @@ describe("dancers forward kinematics", () => {
   it("packs (position, length) and a unit rotation per bone in VEC4_PER_BONE vec4s", () => {
     const world = createRigWorld();
     const pose = createPose();
-    pose[boneChannel(B.L_upperArm)] = 0.7;
-    pose[boneChannel(B.spine) + 1] = -0.4;
+    setBoneEuler(pose, B.L_upperArm, 0.7, 0, 0);
+    setBoneEuler(pose, B.spine, 0, -0.4, 0);
     forwardKinematics(pose, world);
     groundToFloor(world, 0);
     const buf = createBoneBuffer();
@@ -134,8 +135,45 @@ describe("dancers forward kinematics", () => {
     }
   });
 
-  it("sizes a pose as root x/z + lift + three angles per bone", () => {
-    expect(POSE_LENGTH).toBe(3 + BONE_COUNT * 3);
-    expect(createPose().length).toBe(POSE_LENGTH);
+  it("sizes a pose as root x/z + lift + a quaternion per bone, starting at identity", () => {
+    expect(POSE_LENGTH).toBe(3 + BONE_COUNT * POSE_BONE_STRIDE);
+    const pose = createPose();
+    expect(pose.length).toBe(POSE_LENGTH);
+    for (let b = 0; b < BONE_COUNT; b++) {
+      const ch = boneChannel(b);
+      expect([pose[ch], pose[ch + 1], pose[ch + 2], pose[ch + 3]]).toEqual([0, 0, 0, 1]);
+    }
+  });
+
+  it("composes Euler intent onto a bone and reads a pure pitch back", () => {
+    const pose = createPose();
+    mulBoneEuler(pose, B.jaw, 0.2, 0, 0);
+    mulBoneEuler(pose, B.jaw, 0.15, 0, 0);
+    expect(bonePitch(pose, B.jaw)).toBeCloseTo(0.35, 6);
+  });
+
+  it("lerps root channels and blends bones along the shorter arc, staying unit", () => {
+    const a = createPose();
+    const b = createPose();
+    setBoneEuler(b, B.L_upperArm, 0, 0, 3); // a large swing, whose quaternion sits near w≈0
+    b[0] = 1;
+    const out = createPose();
+    lerpPose(a, b, 0.5, out);
+    expect(out[0]).toBeCloseTo(0.5, 6);
+    const ch = boneChannel(B.L_upperArm);
+    expect(Math.hypot(out[ch], out[ch + 1], out[ch + 2], out[ch + 3])).toBeCloseTo(1, 5);
+    // Halfway along the arc: half the angle, and the same sign of w as both ends.
+    expect(2 * Math.atan2(out[ch + 2], out[ch + 3])).toBeCloseTo(1.5, 1);
+  });
+
+  it("puts the hands straight out sideways at shoulder height in the T-pose", () => {
+    const world = createRigWorld();
+    forwardKinematics(tPose(createPose()), world);
+    for (const [hand, sign] of [[B.L_hand, 1], [B.R_hand, -1]] as const) {
+      boneTail(world, hand, tail, 0);
+      expect(Math.sign(tail[0])).toBe(sign);
+      expect(Math.abs(tail[0])).toBeGreaterThan(0.85); // shoulder offset + arm chain reaches out
+      expect(tail[1]).toBeCloseTo(world.pos[B.L_upperArm * 3 + 1], 1); // level with the shoulder
+    }
   });
 });
