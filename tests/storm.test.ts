@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   BOLT_SEGMENTS,
+  MORPH_MAX_STEP,
   SHAPE_VARIANTS,
+  advanceMorphPhase,
   buildBoltPath,
   buildCloud,
   buildLobeSets,
@@ -419,6 +421,69 @@ describe("storm noise volume", () => {
         expect(seam).toBeLessThan(interior * 3 + 1);
       }
     }
+  });
+});
+
+describe("storm morph phase", () => {
+  const DT = 1 / 60;
+
+  it("is frozen with Morph speed and Morph on beat both off", () => {
+    let phase = 0;
+    for (let i = 0; i < 600; i++) phase = advanceMorphPhase(phase, DT, 0, 0, i % 30 === 0 ? 1 : 0);
+    expect(phase).toBe(0);
+  });
+
+  it("only ever moves forward, whatever the settings and however big the frame", () => {
+    let phase = 0;
+    for (const speed of [0, 0.05, 0.35, 1]) {
+      for (const beat of [0, 0.4, 1]) {
+        for (const dt of [0, DT, 0.25]) {
+          for (const amp of [0, 0.5, 1]) {
+            const next = advanceMorphPhase(phase, dt, speed, beat, amp);
+            expect(next).toBeGreaterThanOrEqual(phase);
+            phase = next;
+          }
+        }
+      }
+    }
+  });
+
+  it("glides faster the higher Morph speed is", () => {
+    const slow = advanceMorphPhase(0, 1, 0.2, 0, 0);
+    const mid = advanceMorphPhase(0, 1, 0.5, 0, 0);
+    const fast = advanceMorphPhase(0, 1, 1, 0, 0);
+    expect(mid).toBeGreaterThan(slow);
+    expect(fast).toBeGreaterThan(mid);
+    // Fast enough to walk the whole loop of silhouettes inside a few seconds
+    // at the top of the slider — the point of the control.
+    expect(fast * 20).toBeGreaterThan(SHAPE_VARIANTS);
+  });
+
+  it("a beat adds a step on top of the glide, in proportion to Morph on beat", () => {
+    const quiet = advanceMorphPhase(0, DT, 0.35, 0.4, 0);
+    const hit = advanceMorphPhase(0, DT, 0.35, 0.4, 1);
+    const harder = advanceMorphPhase(0, DT, 0.35, 1, 1);
+    expect(hit).toBeGreaterThan(quiet);
+    expect(harder).toBeGreaterThan(hit);
+    // ...and none at all with the slider off, however hard the beat.
+    expect(advanceMorphPhase(0, DT, 0.35, 0, 1)).toBe(quiet);
+  });
+
+  it("caps one frame's step, so a drop's burst can't teleport the shape past a variant", () => {
+    for (const dt of [DT, 0.25]) {
+      for (const amp of [1, 5, 1000]) {
+        expect(advanceMorphPhase(0, dt, 1, 1, amp)).toBeLessThanOrEqual(MORPH_MAX_STEP + 1e-9);
+      }
+    }
+    expect(advanceMorphPhase(0, DT, 1, 1, 1000)).toBeGreaterThan(0);
+  });
+
+  it("survives a non-finite phase, dt or setting rather than poisoning the accumulator", () => {
+    expect(Number.isFinite(advanceMorphPhase(Number.NaN, DT, 0.5, 0.5, 1))).toBe(true);
+    expect(Number.isFinite(advanceMorphPhase(0, Number.NaN, 0.5, 0.5, 1))).toBe(true);
+    expect(Number.isFinite(advanceMorphPhase(0, DT, Number.NaN, Number.NaN, Number.NaN))).toBe(true);
+    // A backwards frame is a no-op, not a rewind.
+    expect(advanceMorphPhase(2, -1, 1, 0, 0)).toBe(2);
   });
 });
 

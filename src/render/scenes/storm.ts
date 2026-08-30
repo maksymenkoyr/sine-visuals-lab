@@ -4,7 +4,13 @@ import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
-import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
+import {
+  COMMON_UNIFORMS_GLSL,
+  ROOM_UV_GLSL,
+  SAMPLE_BANDS_GLSL,
+  settingUniformName,
+  uploadCommonUniforms,
+} from "../sceneCommon.ts";
 
 // A storm cloud lit from the inside by lightning on every beat — the intra-
 // cloud kind, with a hard attack, a couple of return-stroke flickers and an
@@ -46,10 +52,21 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 //    of a single RGBA8 volume (buildShapeVolume over buildLobeSets), and the
 //    `cloudShape` setting walks a phase along them. shapePhaseWeights turns
 //    that phase into per-channel weights, uploaded as uShapeMix, so shape()
-//    stays one fetch and one dot however the cloud is morphing. A slow drift
-//    (SHAPE_DRIFT against uFlowPhase) is added to the phase so the cloud
-//    keeps changing with the slider parked, and the phase wraps, so the
-//    variants are a loop rather than a line.
+//    stays one fetch and one dot however the cloud is morphing. On top of
+//    the slider sits morphPhase, this scene's own accumulator
+//    (advanceMorphPhase): Morph speed sets the rate it glides at and Morph
+//    on beat kicks it forward a step on each beat, so the cloud keeps
+//    changing with the slider parked and lurches on the music. It is an
+//    accumulated phase advanced by a live rate, never elapsed time scaled by
+//    one (caustics.ts's driftPhase makes the same point at length), and it
+//    wraps, so the variants are a loop rather than a line.
+//  - Spectrum -> space (spectrumGain): with the `spectrumMap` switch on, the
+//    cloud's resting light is scaled by the band level that belongs where
+//    the sample sits — across the screen (Screen) or across the cloud's own
+//    x axis, pre-rotation, so the mapping rides the swirl (Cloud). It
+//    multiplies the ambient/emissive side of the lighting only, never
+//    extinction and never the strike light, so it colours how the cloud is
+//    lit without changing what shape it is or how the lightning carries.
 //  - shapeAt fades into the bounding ellipsoid the march is clipped to
 //    (BOUND_*), so the silhouette is never cut flat by the march bound. The
 //    bound is per-axis: wide enough in x/z to hold the outermost lobe's
@@ -130,6 +147,9 @@ const MIN_PARTICLES = 4_000;
 const SAMPLE_RETRIES = 8;
 /** The `mode` setting's options, in value order. */
 const MODES: readonly string[] = ["Mesh", "Gas", "Voxel", "Points"];
+/** The `spectrumMap` setting's options, in value order — see spectrumGain. */
+const SPECTRUM_MAPS: readonly string[] = ["Off", "Screen", "Cloud"];
+const SPECTRUM_MAP_CLOUD = 2;
 const MODE_MESH = 0;
 const MODE_VOXEL = 2;
 const MODE_POINTS = 3;
@@ -175,9 +195,22 @@ const SHAPE_SIZE = 64;
 /** How many silhouettes `cloudShape` morphs through — one per channel of the
  *  shape volume, which is what fixes this at four. */
 export const SHAPE_VARIANTS = 4;
-// How fast the shape phase drifts on its own, per unit of uFlowPhase, so a
-// parked slider still leaves the cloud slowly changing.
-const SHAPE_DRIFT = 0.03;
+// The morph accumulator (advanceMorphPhase), in variants:
+//  - MORPH_BASE_RATE is the glide rate per second that Morph speed scales,
+//    over a mix(0.2, 3.0) span: the fastest setting walks the whole loop of
+//    silhouettes in a few seconds, the slowest is about the barely-there
+//    drift a parked slider used to get on its own.
+//  - MORPH_BEAT_KICK is the largest step one beat can add, and
+//  - MORPH_MAX_STEP caps the total of glide plus kick in a single frame, so
+//    a drop's burst of beats nudges the shape along instead of teleporting
+//    it past a variant (which the re-mesh throttle would then chase).
+//  - MORPH_OFF_KNEE gives the slider a genuine Off stop: below it the glide
+//    ramps to a true zero, so "Morph speed 0, Morph on beat 0" is a frozen
+//    silhouette rather than a slow crawl.
+const MORPH_BASE_RATE = 0.12;
+const MORPH_BEAT_KICK = 0.3;
+export const MORPH_MAX_STEP = 0.35;
+const MORPH_OFF_KNEE = 0.05;
 // How far past its radius a lobe's density reaches, and how wide the smooth
 // union between two lobes is — both in the same cloud-space units as Lobe.r.
 const SHAPE_REACH = 1.9;
@@ -237,6 +270,21 @@ const SETTINGS: SceneSetting[] = [
     max: MODES.length - 1,
     step: 1,
     default: 0,
+  },
+  {
+    // Manual by design, like every enum: an auto table would be picking a
+    // mapping for the viewer, and Off/Screen/Cloud are three different looks
+    // rather than three amounts of one.
+    key: "spectrumMap",
+    label: "Spectrum map",
+    description: "Lights the cloud by frequency: Screen splits the spectrum left-to-right across the frame, Cloud pins it to the cloud so it spins with the swirl.",
+    group: "Look",
+    type: "enum",
+    options: SPECTRUM_MAPS,
+    min: 0,
+    max: SPECTRUM_MAPS.length - 1,
+    step: 1,
+    default: 1,
   },
   {
     key: "strike",
@@ -316,6 +364,28 @@ const SETTINGS: SceneSetting[] = [
     auto: { density: 0.3, dynamics: 0.2 },
   },
   {
+    key: "morphSpeed",
+    label: "Morph speed",
+    description: "How fast the cloud glides from one silhouette to the next — Off holds the shape still",
+    group: "Cloud",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.35,
+    auto: { tempo: 0.3 },
+  },
+  {
+    key: "morphBeat",
+    label: "Morph on beat",
+    description: "How far each beat lurches the cloud's shape forward",
+    group: "Cloud",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.4,
+    auto: { pulse: 0.2, attack: 0.2 },
+  },
+  {
     key: "swirl",
     label: "Swirl speed",
     description: "How fast the cloud turns",
@@ -372,6 +442,17 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.3,
     auto: { brightness: 0.35 },
+  },
+  {
+    key: "spectrumGlow",
+    label: "Spectrum glow",
+    description: "How hard the band level under a part of the cloud drives how brightly it is lit (needs Spectrum map)",
+    group: "Sparkle",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    auto: { brightness: 0.25, density: 0.2 },
   },
   {
     key: "dropStorm",
@@ -729,6 +810,41 @@ export function shapePhaseWeights(phase: number, variants = SHAPE_VARIANTS): { a
   if (p < 0) p += n;
   const a = Math.min(n - 1, Math.floor(p));
   return { a, b: (a + 1) % n, f: p - a };
+}
+
+/** One frame of the shape morph, in variants — the phase `cloudShape` is
+ *  offset by, so the cloud keeps moving with the slider parked.
+ *
+ *  An accumulator, deliberately: the rate is a live setting, and scaling
+ *  already-elapsed time by a live value teleports the phase the moment the
+ *  value changes (caustics.ts's driftPhase header explains the same trap at
+ *  length). So this integrates a rate instead, and only ever moves forward —
+ *  the morph is a loop through the variants, not something that can rewind
+ *  under a slider drag.
+ *
+ *  `beatAmp` is the amplitude of a beat that rose on *this* frame and 0 on
+ *  every other, so the kick lands once per beat rather than for as long as a
+ *  pulse stays high. Both the kick on its own and the frame's whole step are
+ *  capped, so a drop firing several strikes at once nudges the shape along
+ *  instead of jumping it past a variant. */
+export function advanceMorphPhase(
+  prev: number,
+  dtSec: number,
+  morphSpeed: number,
+  morphBeat: number,
+  beatAmp: number,
+): number {
+  const from = Number.isFinite(prev) ? prev : 0;
+  const dt = Number.isFinite(dtSec) ? Math.max(0, dtSec) : 0;
+  const speed = Number.isFinite(morphSpeed) ? Math.min(1, Math.max(0, morphSpeed)) : 0;
+  const beat = Number.isFinite(morphBeat) ? Math.min(1, Math.max(0, morphBeat)) : 0;
+  const amp = Number.isFinite(beatAmp) ? Math.max(0, beatAmp) : 0;
+  // The Off stop: the speed curve bottoms out at a slow crawl rather than a
+  // standstill, which is right everywhere except at the slider's own zero,
+  // where a speed control has to actually stop.
+  const glide = MORPH_BASE_RATE * (0.2 + 2.8 * speed) * Math.min(1, speed / MORPH_OFF_KNEE);
+  const kick = Math.min(MORPH_BEAT_KICK * beat * amp, MORPH_BEAT_KICK);
+  return from + Math.min(MORPH_MAX_STEP, dt * glide + kick);
 }
 
 /** shapeAt sampled over the bounding box as `size`^3 texels of RGBA8,
@@ -1132,6 +1248,34 @@ float strikeLight(vec3 p, float reachR) {
 }
 `;
 
+// Spectrum -> space. Which band belongs at a point, and how much brighter
+// that band's level lights it: the `spectrumMap` switch picks whether the
+// spectrum is laid across the screen (left = low) or across the cloud's own
+// x axis. The cloud mapping reads the *pre-rotation* position, which is what
+// makes it ride the swirl instead of staying pinned to the frame.
+//
+// The gain multiplies ambient/emissive light only — never extinction, never
+// the strike light — so a quiet band leaves that part of the cloud dim
+// rather than thin, and lightning stays the same size whatever is playing.
+// Needs sampleBands (SAMPLE_BANDS_GLSL) and the settings uniforms in scope.
+const SPECTRUM_GLSL = `
+#define EXTENT_X ${CLOUD_EXTENT_X.toFixed(2)}
+#define SPECTRUM_MAP_CLOUD ${SPECTRUM_MAP_CLOUD}.0
+
+float bandAt(vec3 pCloud, vec2 ndc) {
+  float x01 = uSpectrumMap >= SPECTRUM_MAP_CLOUD - 0.5
+    ? clamp(pCloud.x / (2.0 * EXTENT_X) + 0.5, 0.0, 0.999)
+    : ndc.x * 0.5 + 0.5;
+  return sampleBands(x01);
+}
+
+float spectrumGain(vec3 pCloud, vec2 ndc) {
+  float amt = uSpectrumGlow * step(0.5, uSpectrumMap);
+  if (amt <= 0.001) return 1.0;
+  return mix(1.0, 0.35 + 1.8 * bandAt(pCloud, ndc), amt);
+}
+`;
+
 // The colour of everything electric here — bolt, in-cloud flash, lattice
 // highlight: a cold white-blue pulled a little way toward the palette so the
 // storm still belongs to the current vibe.
@@ -1218,7 +1362,9 @@ uniform highp sampler3D uShape; // the baked silhouettes, one per channel
 uniform vec4 uShapeMix;         // shapePhaseWeights, as a per-channel weight
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
+${SAMPLE_BANDS_GLSL}
 ${CAMERA_GLSL}
+${SPECTRUM_GLSL}
 ${BOLT_COLOR_GLSL}
 
 #define MAX_STRIKES ${MAX_STRIKES}
@@ -1409,6 +1555,11 @@ void main() {
       vec3 tint = boltColor();
       vec3 skyTop = mix(vec3(0.42, 0.48, 0.62), palette(0.55, uPalA, uPalB, uPalC, uPalD), 0.35);
       vec3 acc = vec3(0.0);
+      // The screen mapping doesn't depend on where along the ray the sample
+      // is, so it resolves once per fragment; only the cloud mapping has to
+      // be evaluated per step.
+      bool cloudMap = uSpectrumMap >= SPECTRUM_MAP_CLOUD - 0.5;
+      float screenGain = spectrumGain(vec3(0.0), ndc);
 
       for (int i = 0; i < MAX_STEPS; i++) {
         if (i >= steps) break;
@@ -1467,7 +1618,11 @@ void main() {
           }
           float heightFrac = clamp((sp.y + BOUND.y) / (2.0 * BOUND.y), 0.0, 1.0);
           vec3 ambient = skyTop * mix(0.35, 1.0, heightFrac) * uAmbient * (0.5 + uEnergy);
-          acc += T * a * (sun + ambient + tint * glow * gain);
+          // The band under this sample scales what the gas is lit by, not
+          // what it absorbs, and never the lightning — so a loud band reads
+          // as a brighter part of the same cloud.
+          float sg = cloudMap ? spectrumGain(sp, ndc) : screenGain;
+          acc += T * a * ((sun + ambient) * sg + tint * glow * gain);
           T *= 1.0 - a;
         }
         acc += T * tint * core * gain * stepLen * 4.0;
@@ -1504,7 +1659,9 @@ ${settingsUniformsGlsl}
 ${STRIKE_UNIFORMS_GLSL}
 uniform float uIsNode; // 1.0 only during the nodes (gl.POINTS) draw
 ${PALETTE_GLSL}
+${SAMPLE_BANDS_GLSL}
 ${CAMERA_GLSL}
+${SPECTRUM_GLSL}
 ${PROJECT_GLSL}
 ${BOLT_COLOR_GLSL}
 
@@ -1532,9 +1689,13 @@ void main() {
 
   // Digital: a cold cyan wire pulled part-way toward the palette, skylit
   // brighter toward the top of the cloud the way the gas is.
+  vec3 view = cloudToView(p);
   vec3 wire = mix(vec3(0.25, 0.85, 1.0), palette(0.45 + 0.2 * seed, uPalA, uPalB, uPalC, uPalD), 0.5);
   float height = clamp((aPos.y + EXTENT_Y) / (2.0 * EXTENT_Y), 0.0, 1.0);
-  float lit = 0.18 + 0.9 * uAmbient * (0.5 + uEnergy) * (0.45 + 0.55 * height);
+  // Same spectrum mapping the gas gets, on the same term: how brightly this
+  // node is lit, never how hard the flash reaches it.
+  float lit = (0.18 + 0.9 * uAmbient * (0.5 + uEnergy) * (0.45 + 0.55 * height))
+    * spectrumGain(p, viewToRoomNdc(view));
   // Treble shimmer: scattered nodes and wires glint on high-band hits.
   float shimmer = uSpark * uHighPulse * step(0.93, hash11(seed * 7.1 + floor(uTime * 12.0)));
 
@@ -1542,7 +1703,6 @@ void main() {
     + mix(boltColor(), vec3(1.0), clamp(light, 0.0, 1.0)) * light
     + vec3(0.6, 0.9, 1.0) * shimmer) * mix(1.0, 2.2, uIsNode);
 
-  vec3 view = cloudToView(p);
   gl_Position = cloudToClip(p);
   gl_PointSize = clamp(mix(1.8, 5.0, uGrain) * (uResolution.y / 1080.0) * (CAM_DIST / view.z), 1.5, 14.0);
 }
@@ -1633,7 +1793,9 @@ ${settingsUniformsGlsl}
 ${STRIKE_UNIFORMS_GLSL}
 uniform float uCountBoost;
 ${PALETTE_GLSL}
+${SAMPLE_BANDS_GLSL}
 ${CAMERA_GLSL}
+${SPECTRUM_GLSL}
 ${PROJECT_GLSL}
 ${BOLT_COLOR_GLSL}
 
@@ -1667,7 +1829,9 @@ void main() {
   // dimmer with distance so the far side reads as behind the near side.
   float heightShade = 0.55 + 0.45 * clamp((aPos.y + EXTENT_Y) / (2.0 * EXTENT_Y), 0.0, 1.0);
   float depthShade = mix(1.0, 0.5, smoothstep(CAM_DIST - 1.2, CAM_DIST + 1.2, view.z));
-  float ambient = uAmbient * (0.5 + uEnergy) * heightShade * depthShade * (0.7 + 0.3 * hash11(seed * 3.7));
+  // Same spectrum mapping the gas and the lattice get, on the same term.
+  float ambient = uAmbient * (0.5 + uEnergy) * heightShade * depthShade * (0.7 + 0.3 * hash11(seed * 3.7))
+    * spectrumGain(p, viewToRoomNdc(view));
   // Treble sparks: a scattered few particles glint on high-band hits.
   float spark = uSpark * uHighPulse * step(0.96, hash11(seed * 7.1 + floor(t * 10.0)));
 
@@ -1764,6 +1928,9 @@ export const stormScene: Scene = (() => {
   let prevLowPulse = 0;
   let prevDropPulse = 0;
   let lastTimeSec: number | null = null;
+  // The shape morph's own accumulated phase, in variants — see
+  // advanceMorphPhase. Wraps through shapePhaseWeights, so it only grows.
+  let morphPhase = 0;
   const bandsBuf = new Float32Array(NUM_BANDS);
   const boltVerts = BOLT_SEGMENTS + 1;
 
@@ -1899,6 +2066,7 @@ export const stormScene: Scene = (() => {
       prevLowPulse = 0;
       prevDropPulse = 0;
       lastTimeSec = null;
+      morphPhase = 0;
     },
 
     render(ctx, frame, viewport, palette, anim) {
@@ -1914,16 +2082,9 @@ export const stormScene: Scene = (() => {
       const dropStorm = resolveSceneSetting(ID, settingFor("dropStorm"));
       const density = resolveSceneSetting(ID, settingFor("density"));
       const cloudShape = resolveSceneSetting(ID, settingFor("cloudShape"));
+      const morphSpeed = resolveSceneSetting(ID, settingFor("morphSpeed"));
+      const morphBeat = resolveSceneSetting(ID, settingFor("morphBeat"));
       const mode = Math.round(resolveSceneSetting(ID, settingFor("mode")));
-
-      // Where the cloud sits between its silhouettes: the slider spans the
-      // whole loop, and the drift keeps it moving with the slider parked.
-      const phase = cloudShape * (SHAPE_VARIANTS - 1) + anim.flowPhase * SHAPE_DRIFT;
-      const w = shapePhaseWeights(phase);
-      const { lobeSets } = cloudVolumes();
-      // New strikes go in whichever silhouette is closest to what is drawn,
-      // so a bolt stays buried in gas that is actually there.
-      pool.setLobes(lobeSets[w.f < 0.5 ? w.a : w.b]);
 
       // Time since this scene last drew — see the file header for why this
       // isn't anim.dtSec. Guards the first frame and any backwards jump.
@@ -1939,6 +2100,24 @@ export const stormScene: Scene = (() => {
       prevBeatPulse = anim.beatPulse;
       prevLowPulse = anim.lowPulse;
       prevDropPulse = anim.dropPulse;
+
+      // The shape morph rides the very rises the strikes do — the same
+      // booleans, so the lurch and the lightning are the same beat rather
+      // than two detections that could disagree. beatAmp is non-zero only on
+      // the frame a pulse rose, which is what makes the kick a step per beat
+      // instead of a shove for as long as the pulse stays up.
+      const beatAmp = dropRose ? 1 : lowRose || beatRose ? Math.min(1, 0.7 + 0.5 * (lowRose ? anim.lowPulse : 0)) : 0;
+      morphPhase = advanceMorphPhase(morphPhase, dt, morphSpeed, morphBeat, beatAmp);
+
+      // Where the cloud sits between its silhouettes: the slider spans the
+      // whole loop, and the morph accumulator carries it on from there.
+      const phase = cloudShape * (SHAPE_VARIANTS - 1) + morphPhase;
+      const w = shapePhaseWeights(phase);
+      const { lobeSets } = cloudVolumes();
+      // New strikes go in whichever silhouette is closest to what is drawn,
+      // so a bolt stays buried in gas that is actually there.
+      pool.setLobes(lobeSets[w.f < 0.5 ? w.a : w.b]);
+
       if (dropRose) {
         // A drop is a burst of ordinary-strength strikes in different lobes
         // (a cloud-wide flash), not one overdriven strike — three at full
@@ -2132,6 +2311,7 @@ export const stormScene: Scene = (() => {
       prevLowPulse = 0;
       prevDropPulse = 0;
       lastTimeSec = null;
+      morphPhase = 0;
     },
   };
 })();
