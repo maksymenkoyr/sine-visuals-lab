@@ -20,7 +20,7 @@ const clip = (beats: number, nativeBpm: number): ClipMeta => ({
   name: "c", family: "test", beats, nativeBpm, frames: beats * 16, energy: 0.5, bigness: 0.5, mirrorOf: -1, source: "",
 });
 
-const params = (over: Partial<PlayerParams> = {}): PlayerParams => ({ intensity: 0.5, family: null, dropPulse: 0, bpm: 120, ...over });
+const params = (over: Partial<PlayerParams> = {}): PlayerParams => ({ intensity: 0.5, family: null, dropPulse: 0, bpm: 120, blend: "crossfade", ...over });
 
 /** Runs a player over `bars` bars at 60 steps per bar, calling back each step. */
 function runPlayer(player: ReturnType<typeof createClipPlayer>, bars: number, p: (bar: number) => PlayerParams, onStep?: (bars: number, name: string | null, pose: Float32Array) => void) {
@@ -159,6 +159,32 @@ describe("dancers clip player", () => {
     // 60 steps per bar; a synthetic clip's fastest channel moves ~0.05 per
     // step, and a fade over FADE_BARS bars adds at most the pose gap / (FADE_BARS·60).
     expect(maxDelta).toBeLessThan(0.08 + 2 / (FADE_BARS * 60));
+  });
+
+  it("inertialization: the handover frame is continuous, and the offset is gone after FADE_BARS", () => {
+    const lib = makeLibrary();
+    const player = createClipPlayer(lib, 7);
+    let prev: Float32Array | null = null;
+    let maxDelta = 0;
+    let switchAt = -1;
+    let last: string | null = null;
+    let settled: { pose: Float32Array; clip: string; bars: number } | null = null;
+    runPlayer(player, 12, (bar) => params({ intensity: bar < 4 ? 0.1 : 1, blend: "inertial" }), (bars, name, pose) => {
+      if (last && name !== last && switchAt < 0) switchAt = bars;
+      last = name;
+      if (prev) for (let i = 0; i < pose.length; i++) maxDelta = Math.max(maxDelta, Math.abs(pose[i] - prev[i]));
+      prev = Float32Array.from(pose);
+      if (switchAt >= 0 && !settled && bars > switchAt + FADE_BARS + 0.05) settled = { pose: Float32Array.from(pose), clip: name!, bars };
+    });
+    expect(switchAt).toBeGreaterThan(0);
+    // No jump anywhere — the old pose carries straight into the new clip.
+    expect(maxDelta).toBeLessThan(0.08 + 2 / (FADE_BARS * 60));
+    // Once the offset has decayed, the output is the bare clip sample.
+    const s = settled!;
+    const c = lib.byName.get(s.clip)!;
+    const expected = createPose();
+    sampleClip(c, clipPhaseAt(c, 120, s.bars - Math.floor(switchAt)), expected);
+    for (let i = 0; i < expected.length; i++) expect(s.pose[i]).toBeCloseTo(expected[i], 5);
   });
 
   it("a drop pulse switches to the biggest clip at the next bar", () => {

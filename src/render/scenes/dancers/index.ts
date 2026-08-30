@@ -33,7 +33,7 @@ import { SDF_GLSL } from "./sdf.ts";
 import { createChoreographer } from "./choreo.ts";
 import type { MoveClocks } from "./moves.ts";
 import { decodeClipLibrary, sampleClip, type ClipLibrary } from "./clipFormat.ts";
-import { clipPhaseAt, createBarCounter } from "./player.ts";
+import { clipPhaseAt, createBarCounter, type BlendMode } from "./player.ts";
 import clipsUrl from "./clips.bin?url";
 import { STICK_SKIN_GLSL } from "./stickSkin.ts";
 import { SKELETON_SKIN_GLSL } from "./skeletonSkin.ts";
@@ -62,6 +62,12 @@ const STYLES: readonly { name: string; family: string | null }[] = [
   { name: "Party", family: "party" },
   { name: "Swing", family: "swing" },
   { name: "Modern", family: "modern" },
+];
+
+/** The `blend` setting's options, in value order — player.ts's BlendMode. */
+const BLENDS: readonly { name: string; mode: BlendMode }[] = [
+  { name: "Crossfade", mode: "crossfade" },
+  { name: "Inertial", mode: "inertial" },
 ];
 
 const SETTINGS: SceneSetting[] = [
@@ -98,6 +104,19 @@ const SETTINGS: SceneSetting[] = [
     max: STYLES.length - 1,
     step: 1,
     default: 0,
+  },
+  {
+    key: "blend",
+    label: "Handover",
+    description: "How one move hands over to the next: slide between them, or stop dead and settle into the new one.",
+    group: "Dance",
+    type: "enum",
+    options: BLENDS.map((b) => b.name),
+    min: 0,
+    max: BLENDS.length - 1,
+    step: 1,
+    default: 0,
+    advanced: true,
   },
   {
     key: "jaw",
@@ -300,6 +319,7 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
         groove: getSetting("groove"),
         jaw: getSetting("jaw"),
         family: STYLES[Math.round(getSetting("style"))]?.family ?? null,
+        blend: BLENDS[Math.round(getSetting("blend"))]?.mode ?? "crossfade",
       });
       const barsElapsed = bars.advance(anim.barPhase);
       let pose: Pose = out.pose;

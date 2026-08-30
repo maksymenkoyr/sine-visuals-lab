@@ -5,7 +5,7 @@ import { createChoreographer, type ChoreoParams } from "../src/render/scenes/dan
 import { makeLibrary } from "./dancersClips.helper.ts";
 
 const DT = 1 / 60;
-const PARAMS: ChoreoParams = { energy: 0.6, bob: 0.4, groove: 0.5, jaw: 0.5, family: null };
+const PARAMS: ChoreoParams = { energy: 0.6, bob: 0.4, groove: 0.5, jaw: 0.5, family: null, blend: "crossfade" };
 
 type Frame = ReturnType<ReturnType<typeof createChoreographer>["advance"]>;
 

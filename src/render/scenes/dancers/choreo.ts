@@ -23,7 +23,7 @@
 import { B, createPose, lerpPose, mulBoneEuler, type Pose } from "./rig.ts";
 import { dropPose, effectiveIntensity, sway, type MoveClocks } from "./moves.ts";
 import type { ClipLibrary } from "./clipFormat.ts";
-import { createClipPlayer, type ClipPlayer } from "./player.ts";
+import { createClipPlayer, type BlendMode, type ClipPlayer } from "./player.ts";
 
 export interface ChoreoParams {
   /** 0..1 how much of each move comes through (the `motion` setting): 1 is
@@ -37,6 +37,8 @@ export interface ChoreoParams {
   jaw: number;
   /** Clip family to dance, or null for the whole library (the `style` setting). */
   family: string | null;
+  /** How one move hands over to the next (the `blend` setting) — see player.ts. */
+  blend: BlendMode;
 }
 
 export interface ChoreoFrame {
@@ -104,7 +106,8 @@ export function createChoreographer(): Choreographer {
       danceLock = Math.max(clocks.tempoLock, danceLock * (1 - Math.min(1, LOCK_RELEASE_RATE * dtSec)));
 
       const intensity = effectiveIntensity(clocks.sectionIntensity, danceLock, clocks.pulse, params.groove);
-      const clip = player?.advance(clocks.barPhase, { intensity, family: params.family, dropPulse: clocks.dropPulse, bpm: clocks.bpm }, beatPose) ?? null;
+      const clip =
+        player?.advance(clocks.barPhase, { intensity, family: params.family, dropPulse: clocks.dropPulse, bpm: clocks.bpm, blend: params.blend }, beatPose) ?? null;
       if (clip) {
         // `motion` scales the move toward the sway, not toward rest, so a
         // subdued dancer still stands like a dancer.

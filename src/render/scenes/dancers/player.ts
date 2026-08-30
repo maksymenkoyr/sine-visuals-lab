@@ -21,12 +21,20 @@
  * track doesn't always dance the same. A drop pulse forces the biggest move
  * available at the next bar.
  *
- * Handover: a crossfade (nlerp) over FADE_BARS; both clips are phase-locked
- * so the blend never fights the beat. Pure and DOM/GL-free —
- * tests/dancersPlayer.test.ts drives it.
+ * Handover, two ways (BlendMode, the `blend` setting): a crossfade (nlerp)
+ * over FADE_BARS, where both clips keep dancing and the pose slides from
+ * one to the other — both are phase-locked so the blend never fights the
+ * beat; or inertialization, where at the switch the offset between the
+ * pose being shown and the new clip's pose is captured and decayed to zero
+ * over FADE_BARS while only the new clip plays — the old move stops dead
+ * and the new one takes over from where the body actually is, so a drop
+ * hits harder and nothing mid-blend looks like neither move. Pure and
+ * DOM/GL-free — tests/dancersPlayer.test.ts drives it.
  */
 import { sampleClip, type Clip, type ClipLibrary, type ClipMeta } from "./clipFormat.ts";
-import { createPose, lerpPose, type Pose } from "./rig.ts";
+import { BONE_COUNT, boneChannel, createPose, lerpPose, quatConjugate, quatMul, quatNlerp, type Pose } from "./rig.ts";
+
+export type BlendMode = "crossfade" | "inertial";
 
 export const BEATS_PER_BAR = 4;
 /** bpm / nativeBpm above which the clip goes half-time. */
@@ -101,6 +109,8 @@ export interface PlayerParams {
   /** The section clock's drop flash; above 0.5 it forces a big move. */
   dropPulse: number;
   bpm: number;
+  /** How one move hands over to the next. */
+  blend: BlendMode;
 }
 
 export interface ClipPlayer {
@@ -162,6 +172,34 @@ export function createClipPlayer(library: ClipLibrary, seed = 1): ClipPlayer {
   const history: string[] = [];
   const inPose = createPose();
   const outPose = createPose();
+  // Inertialization state: the pose shown last frame, and the offset from
+  // the new clip captured at the switch (root deltas + a quaternion per bone).
+  const lastOut = createPose();
+  let haveLast = false;
+  const offset = createPose();
+  let inertial = false;
+  const IDENTITY = new Float32Array([0, 0, 0, 1]);
+  const scratchQ = new Float32Array(4);
+
+  const captureOffset = (next: Clip): void => {
+    sampleClip(next, 0, inPose);
+    for (let i = 0; i < 3; i++) offset[i] = lastOut[i] - inPose[i];
+    for (let b = 0; b < BONE_COUNT; b++) {
+      const ch = boneChannel(b);
+      quatConjugate(inPose, ch, scratchQ, 0);
+      quatMul(lastOut, ch, scratchQ, 0, offset, ch);
+    }
+  };
+
+  /** out = new pose with `w` of the captured offset still applied. */
+  const applyOffset = (w: number, out: Pose): void => {
+    for (let i = 0; i < 3; i++) out[i] = inPose[i] + offset[i] * w;
+    for (let b = 0; b < BONE_COUNT; b++) {
+      const ch = boneChannel(b);
+      quatNlerp(IDENTITY, 0, offset, ch, w, scratchQ, 0);
+      quatMul(scratchQ, 0, inPose, ch, out, ch);
+    }
+  };
 
   const player: ClipPlayer = {
     get current() {
@@ -183,9 +221,16 @@ export function createClipPlayer(library: ClipLibrary, seed = 1): ClipPlayer {
           dropPending = false;
           if (next && next !== current) {
             if (current) {
-              outgoing = current;
-              outgoingStart = currentStart;
               switchBar = bar;
+              if (params.blend === "inertial" && haveLast) {
+                captureOffset(next);
+                inertial = true;
+                outgoing = null;
+              } else {
+                outgoing = current;
+                outgoingStart = currentStart;
+                inertial = false;
+              }
               history.push(current.name);
               if (history.length > HISTORY) history.shift();
             }
@@ -198,14 +243,19 @@ export function createClipPlayer(library: ClipLibrary, seed = 1): ClipPlayer {
       if (!current) return null;
 
       sampleClip(current, clipPhaseAt(current, params.bpm, elapsed - currentStart), inPose);
-      const fade = outgoing ? (elapsed - switchBar) / FADE_BARS : 1;
+      const fade = outgoing || inertial ? (elapsed - switchBar) / FADE_BARS : 1;
       if (outgoing && fade < 1) {
         sampleClip(outgoing, clipPhaseAt(outgoing, params.bpm, elapsed - outgoingStart), outPose);
         lerpPose(outPose, inPose, smoothstep(fade), out);
+      } else if (inertial && fade < 1) {
+        applyOffset(1 - smoothstep(fade), out);
       } else {
         outgoing = null;
+        inertial = false;
         out.set(inPose);
       }
+      lastOut.set(out);
+      haveLast = true;
       return current;
     },
   };
