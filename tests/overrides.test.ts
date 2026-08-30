@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { causticsScene } from "../src/render/scenes/caustics.ts";
 import { meshGridScene } from "../src/render/scenes/meshGrid.ts";
+import { stormScene } from "../src/render/scenes/storm.ts";
 import { setSceneSetting, type SceneSetting } from "../src/render/sceneSettings.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 import {
@@ -26,6 +27,7 @@ afterEach(() => {
 const ALL_SETTINGS: SceneSetting[] = [
   ...(causticsScene.settings ?? []),
   ...(meshGridScene.settings ?? []),
+  ...(stormScene.settings ?? []),
   getSensitivitySpec(),
   getExpansionSpec(),
   getSmoothingSpec(),
