@@ -346,6 +346,18 @@ const SETTINGS: SceneSetting[] = [
     auto: { loudness: 0.15 },
   },
   {
+    key: "highGlow",
+    label: "Treble glow",
+    description: "Hats and cymbals make the sand glow — each grain blooms with a soft halo",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    // Directly the hats/cymbals dial, as caustics' sparkle.
+    auto: { brightness: 0.35, attack: 0.15 },
+  },
+  {
     key: "beatFlash",
     label: "Beat flash",
     description: "Brightness punch on each beat",
@@ -451,6 +463,9 @@ const PULL_RATE = 1.5;
 // A step may never cross more than this fraction of one nodal cell, so high
 // modes can't overshoot a line and oscillate.
 const STEP_CELL_FRACTION = 0.25;
+// How many extra grain-diameters a fully glowing grain's sprite grows by,
+// to make room for its halo (Treble glow — see POINT_VERT / POINT_FRAG).
+const GLOW_SIZE_GAIN = 4.0;
 
 const SIM_FRAG = `#version 300 es
 precision highp float;
@@ -534,6 +549,7 @@ uniform sampler2D uPosTex;
 uniform float uSide;
 ${CHLADNI_GLSL}
 out float vAmp;
+out float vGlow;
 
 void main() {
   int side = int(uSide);
@@ -543,13 +559,18 @@ void main() {
   vec2 room = 0.5 + p * plateHalf();
   vec2 dev = (room - uViewport.xy) / uViewport.zw;
   gl_Position = vec4(dev * 2.0 - 1.0, 0.0, 1.0);
-  gl_PointSize = uGrainSize * max(1.0, uResolution.y / 720.0);
+  // Treble glow: the sprite grows to make room for a halo (see POINT_FRAG),
+  // on the slewed high-band level plus its onset pulse.
+  vGlow = clamp(uHighGlow * (1.6 * uHigh + 1.0 * uHighPulse), 0.0, 1.0);
+  float size = uGrainSize * max(1.0, uResolution.y / 720.0);
+  gl_PointSize = size * (1.0 + ${GLOW_SIZE_GAIN.toFixed(1)} * vGlow);
 }
 `;
 
 const POINT_FRAG = `#version 300 es
 precision highp float;
 in float vAmp;
+in float vGlow;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
@@ -560,13 +581,23 @@ void main() {
   vec2 d = gl_PointCoord - 0.5;
   float r2 = dot(d, d);
   if (r2 > 0.25) discard;
-  float soft = 1.0 - smoothstep(0.08, 0.25, r2);
+  // The sprite was scaled up by scale for the halo; the grain itself keeps
+  // its original size at the centre, so measure the core in grain radii.
+  float scale = 1.0 + ${GLOW_SIZE_GAIN.toFixed(1)} * vGlow;
+  float r = sqrt(r2) * scale;
+  float core = 1.0 - smoothstep(0.28, 0.5, r);
   // Settled grains sit on the base tone; thrown grains run up the palette.
   vec3 col = palette(0.1 + 0.4 * vAmp, uPalA, uPalB, uPalC, uPalD);
   // Settled sand is chalkier than the palette; thrown grains keep its full hue.
   col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.3 * (1.0 - vAmp));
   float bright = (0.1 + 0.55 * uGrainGlow) * uGrainGain * (1.0 + uBeatFlash * uBeatPulse * 1.2);
-  outColor = vec4(col * bright * soft, 1.0);
+  // Treble glow: a soft halo across the whole (enlarged) sprite, tinted
+  // toward white, faint per grain so it only reads where sand piles up.
+  // Divided by scale so a bigger halo spreads the light rather than
+  // adding more of it.
+  float halo = exp(-r2 * 6.0) * vGlow;
+  vec3 haloCol = mix(col, vec3(1.0), 0.45) * halo * 1.6 * bright / scale;
+  outColor = vec4(col * bright * core + haloCol, 1.0);
 }
 `;
 
