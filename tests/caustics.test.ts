@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  causticDensityScale,
   createRipplePool,
   driftRatePerSec,
+  focusSharp,
+  fogFloorCut,
+  fogRestingSharp,
   rippleEnvelope,
   sparkleBrightGain,
   sparkleDensityExponent,
@@ -153,6 +157,86 @@ describe("caustics sparkle sub-param mapping", () => {
   it("brightness spans 0 (hard off) to 3.0 (double the old gain) across its range", () => {
     expect(sparkleBrightGain(0)).toBeCloseTo(0, 10);
     expect(sparkleBrightGain(1)).toBeCloseTo(3.0, 10);
+  });
+});
+
+// focusSharp is the single function this scene's git history keeps breaking
+// one invariant of at a time (see the FOCUS_SNAP_RATIO comment): a fixed
+// ceiling that made every focus setting snap to the same peak (so the
+// slider stopped moving the actual snap), or a floor that scaled together
+// with the peak (so the slider read as "merely thinner lines", not more
+// snap). These pin all three properties simultaneously.
+describe("caustics focus snap / fog", () => {
+  it("uFocus = 0 means no snap at all, at any beatPulse", () => {
+    for (const fog of [0, 0.4, 1]) {
+      const rest = focusSharp(fog, 0, 0);
+      for (const beatPulse of [0.3, 0.7, 1]) {
+        expect(focusSharp(fog, 0, beatPulse)).toBeCloseTo(rest, 10);
+      }
+    }
+  });
+
+  it("the resting look (beatPulse = 0) never depends on uFocus", () => {
+    for (const fog of [0, 0.4, 1]) {
+      const rest = focusSharp(fog, 0, 0);
+      for (const focus of [0.25, 0.5, 0.75, 1]) {
+        expect(focusSharp(fog, focus, 0)).toBeCloseTo(rest, 10);
+      }
+    }
+  });
+
+  it("sharp is non-decreasing in uFocus at any fixed fog/beatPulse (the historical inversion regression)", () => {
+    for (const fog of [0, 0.4, 0.7, 1]) {
+      for (const beatPulse of [0, 0.3, 0.7, 1]) {
+        let prev = focusSharp(fog, 0, beatPulse);
+        for (let focus = 0.1; focus <= 1; focus += 0.1) {
+          const s = focusSharp(fog, focus, beatPulse);
+          expect(s).toBeGreaterThanOrEqual(prev - 1e-9);
+          prev = s;
+        }
+      }
+    }
+  });
+
+  it("stays filamentary at the defaults, matching the scene's original swing (~2x, never collapsing to pure fog)", () => {
+    const rest = focusSharp(0.4, 0.7, 0);
+    const peak = focusSharp(0.4, 0.7, 1);
+    expect(rest).toBeGreaterThan(8);
+    expect(peak / rest).toBeCloseTo(1.91, 1);
+  });
+
+  it("never exceeds FOCUS_SHARP_MAX (the anti pixel-ladder ceiling) regardless of inputs", () => {
+    for (let i = 0; i < 200; i++) {
+      const s = focusSharp(Math.random(), Math.random(), Math.random());
+      expect(s).toBeLessThanOrEqual(18 + 1e-9);
+    }
+  });
+
+  it("fog's default (0.4) reproduces the scene's old fixed resting floor/cut closely", () => {
+    expect(fogRestingSharp(0.4)).toBeCloseTo(9.2, 5);
+    expect(fogFloorCut(0.4)).toBeCloseTo(0.08, 1);
+  });
+
+  it("fog reaches past what focus alone could ever produce at rest, and past today's floor cut", () => {
+    expect(fogRestingSharp(1)).toBeLessThan(4);
+    expect(fogFloorCut(1)).toBe(0);
+  });
+});
+
+describe("caustics caustic density", () => {
+  it("the default (0.5) reproduces the old fixed noise-sampling frequency exactly (scale = 1)", () => {
+    expect(causticDensityScale(0.5)).toBeCloseTo(1, 10);
+  });
+
+  it("the endpoints span roughly a moderate 0.43x..2.3x range, monotone across it", () => {
+    expect(causticDensityScale(0)).toBeCloseTo(0.435, 2);
+    expect(causticDensityScale(1)).toBeCloseTo(2.297, 2);
+    let prev = causticDensityScale(0);
+    for (let d = 0.1; d <= 1; d += 0.1) {
+      const s = causticDensityScale(d);
+      expect(s).toBeGreaterThan(prev);
+      prev = s;
+    }
   });
 });
 

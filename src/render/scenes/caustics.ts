@@ -13,8 +13,17 @@ import type { SignalLink } from "../signals.ts";
 // teleport bug flowClock.ts exists to prevent (scaling an *already
 // accumulated* phase is safe; scaling elapsed time by a live value is not).
 // Settings map audio onto light and motion rather than position snapping:
-// uFocus snaps the ridges thin *and* bright on each beat (both used to move
-// together only in width), uBreathe locks a once-per-bar zoom to the beat
+// uFog sets the resting look (how thin/bright the ridges sit between beats,
+// and how much of the dim wash the dark-water floor cut clips away), uFocus
+// is purely how much *harder* a beat sharpens the ridges above that resting
+// state — 0 means no snap at all, and the resting look itself never moves
+// with uFocus (see focusSharp below; this split replaced an earlier design
+// where one slider tried to own both and could only ever get one of "peak
+// reachable at any setting", "resting look stays put", "doesn't collapse to
+// fog between beats" right at a time — see this file's git history),
+// uCausticDensity scales the noise field's spatial frequency (more/fewer,
+// finer/fatter filaments; 0.5 is exactly the old fixed frequency),
+// uBreathe locks a once-per-bar zoom to the beat
 // clock, uRipple sends a pool of overlapping drop-rings out from center so a
 // new beat doesn't cut the last ring off, uFlash is a brightness punch,
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
@@ -49,24 +58,49 @@ const SPARKLE: SceneSetting = {
 
 const SETTINGS: SceneSetting[] = [
   {
+    key: "causticDensity",
+    label: "Caustic density",
+    description: "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high",
+    group: "Pattern",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5, // -> the old fixed noise-sampling frequency, exactly
+    // Pure framing geometry the user tunes to taste, same reasoning as
+    // sparkleGrain's weight: 0 — not something the music profile should
+    // silently redecide underneath a chosen look.
+  },
+  {
+    key: "fog",
+    label: "Fog",
+    description: "How thin and bright the ridges sit at rest, between beats",
+    group: "Pattern",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.4, // -> today's old fixed resting sharpness/floor-cut, closely
+    // A busy mix wants the filaments legible (less fog); a dark mix reads as
+    // moodier with more haze around them.
+    auto: { density: -0.3, brightness: -0.2 },
+  },
+  {
     key: "focus",
     label: "Focus snap",
-    description: "Ridges pull thin and bright on each beat",
+    description: "How much harder a beat sharpens the ridges above their resting state; 0 = no snap at all",
     group: "Beat",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.7,
     // Beat-snap only reads as a snap on music with actual beats to snap to.
-    // Was { pulse: 0.35, attack: 0.25 } — but `pulse` alone floors near 0.92
-    // on almost any locked-tempo track (it's 60% tempoLock, which saturates
-    // for basically all steady music), so the old weights resolved focus to
-    // ~0.90 and held it there for the whole track, not just a snap. Since
-    // uFocus scales the resting floor below (focusFloor = 0.35 * uFocus),
-    // sitting that close to 1 kept the *resting* state elevated for the
-    // whole track too, not just responding to a specific beat. Lower
-    // weights keep the auto swing real without pinning the floor that high
-    // on ordinary percussive material.
+    // Kept low (not the ~0.9 that `pulse` alone would floor near on almost
+    // any locked-tempo track — 60% tempoLock saturates for basically all
+    // steady music) because sitting near 1 all track would have the beat
+    // snap saturate against FOCUS_SHARP_MAX on nearly every hit rather than
+    // responding to a specific one — the resting look itself no longer
+    // moves with this slider (see the Fog setting above and focusSharp
+    // below), so the old worry about pinning the *floor* up doesn't apply
+    // any more, but a saturated snap is just as flat a result.
     auto: { pulse: 0.2, attack: 0.15 },
   },
   {
@@ -335,19 +369,82 @@ const RIPPLE_DROP_AMP = 1.8;
 const RIPPLE_SLOPE_NORM = Math.sqrt(2 * RIPPLE_WIDTH) * Math.exp(0.5);
 const RIPPLE_REFRACT = 0.3;
 
-// Ceiling the on-beat peak reaches at uFocus = 1 (see the sharpCeil comment
-// in FRAG — every other focus value gets a proportionally lower ceiling).
-// Was 26 in a brief period where every focus setting shared this same
-// ceiling regardless of the slider — lowered then because that shared
-// ceiling got reached far more often (any focus setting, given a strong
-// enough beat, not just uFocus=1), and 26 pushes pow(ridge, sharp) close
-// enough to a step function that the underlying value-noise contour lines
-// read as a banded "pixel ladder" rather than a smooth thin ridge,
-// especially where the domain warp bunches several octaves' contours
-// together near the vortex point. Kept at 18 here even though the ceiling
-// is no longer shared — still the same visual line-width danger zone at
-// uFocus = 1, and nothing about restoring per-focus scaling changes that.
+// Hard ceiling on sharp regardless of uFog/uFocus. Was 26 in a brief period
+// where every focus setting shared this same ceiling as its *peak* — lowered
+// then because that shared ceiling got reached far more often (any focus
+// setting, given a strong enough beat, not just uFocus=1), and 26 pushes
+// pow(ridge, sharp) close enough to a step function that the underlying
+// value-noise contour lines read as a banded "pixel ladder" rather than a
+// smooth thin ridge, especially where the domain warp bunches several
+// octaves' contours together near the vortex point. Kept at 18 — still the
+// same visual line-width danger zone.
 const FOCUS_SHARP_MAX = 18;
+
+// uFog's two endpoints (see focusSharp below). CRISP is deliberately *below*
+// today's old fixed floor of 4 (uFocus's floor used to bottom out there) —
+// Fog is the setting that now owns "how thin/bright the resting look gets",
+// so it needs its own reach past what Focus alone ever offered. HAZY drops
+// the floor cut to 0 too: nothing is clipped away, so the dim wash between
+// filaments glows instead of reading as flat black water.
+const FOG_SHARP_CRISP = 14.0;
+const FOG_SHARP_HAZY = 2.0;
+const FOG_FLOOR_CRISP = 0.13; // uFog = 0 -> today's old fixed dark-water cut (0.08) is inside this range
+const FOG_FLOOR_HAZY = 0.0;
+
+// uFocus=1 on a full beat (uBeatPulse=1) multiplies the resting sharpness by
+// (1 + FOCUS_SNAP_RATIO) — see focusSharp below. Chosen so the defaults (fog
+// 0.4, focus 0.7) land close to the swing this scene's very first version
+// had before any of its later focus-formula rewrites (rest ~9.4, peak ~19.4,
+// ~2.07x — see this file's git history and tests/caustics.test.ts's
+// "stays filamentary" case): every rewrite since has either scaled the rest
+// and peak together (the slider read as "merely thinner lines", not more
+// snap) or pinned the peak to the same value at every setting (the slider
+// stopped moving the actual snap, only the quiet resting state) — see the
+// long history of this exact tradeoff across 5fe4b3c, db884a0, b44000d, and
+// 9b52b66. Decoupling "resting state" (uFog, above) from "how much a beat
+// pushes above it" (uFocus, here) is what makes both failure modes
+// impossible at once: uFocus=0 always means literally no snap (sharp never
+// moves off whatever uFog set), and the resting state never moves with
+// uFocus no matter how the slider is dragged.
+const FOCUS_SNAP_RATIO = 1.3;
+
+// uCausticDensity's reach: 0.5 is exactly today's old fixed noise-sampling
+// frequency (densScale = 1); the endpoints are ±1.2 octaves off that, mild
+// enough that both ends still read as this scene's own pool-caustics look
+// rather than a different pattern entirely.
+const DENSITY_SPAN_OCTAVES = 2.4;
+
+/** uFog (0..1) -> the sharpness the ridges sit at with no beat driving them.
+ *  Default 0.4 reproduces today's old fixed floor (4) closely. */
+export function fogRestingSharp(fog: number): number {
+  return FOG_SHARP_CRISP + (FOG_SHARP_HAZY - FOG_SHARP_CRISP) * fog;
+}
+
+/** uFog (0..1) -> the dark-water floor cut applied to `acc` before tonemap.
+ *  Default 0.4 reproduces today's old fixed cut (0.08) almost exactly. */
+export function fogFloorCut(fog: number): number {
+  return FOG_FLOOR_CRISP + (FOG_FLOOR_HAZY - FOG_FLOOR_CRISP) * fog;
+}
+
+/** The ridge sharpness FRAG actually renders with: uFog sets the resting
+ *  value, uFocus scales how much *harder* a full beat pushes above it — a
+ *  pure multiplier on the resting value, never a replacement for it, so
+ *  uFocus=0 holds sharp exactly at rest (no snap) and the resting value
+ *  itself never depends on uFocus at any beatPulse. Clamped to
+ *  FOCUS_SHARP_MAX, the same anti-ladder ceiling every past version of this
+ *  formula has respected. Exported so tests/caustics.test.ts can pin the
+ *  monotonicity and rest-independence invariants this file's history keeps
+ *  breaking one at a time. */
+export function focusSharp(fog: number, focus: number, beatPulse: number): number {
+  const rest = fogRestingSharp(fog);
+  return Math.min(rest * (1 + focus * beatPulse * FOCUS_SNAP_RATIO), FOCUS_SHARP_MAX);
+}
+
+/** uCausticDensity (0..1) -> the noise-sampling frequency multiplier. Default
+ *  0.5 -> 1.0, today's old fixed frequency exactly. */
+export function causticDensityScale(density: number): number {
+  return Math.pow(2, (density - 0.5) * DENSITY_SPAN_OCTAVES);
+}
 
 // How hard the palette's cosine modulation damps where hue phase is
 // changing faster than a pixel can resolve smoothly (see the hueDamp
@@ -559,9 +656,19 @@ void main() {
   // point — every filament near the middle gets dragged into a pinch.
   p += dir0 * bassBulge * 0.22 * exp(-pLen0 * 0.8) * smoothstep(0.0, 0.4, pLen0);
 
+  // uCausticDensity scales the noise field's own sampling frequency — more,
+  // finer filaments at higher values. Applied once, here, to the drift phase
+  // (flow); every later use of q inherits it because q is built by
+  // accumulating onto a scaled starting point (see q's definition below),
+  // not by re-scaling p at each octave separately. flow is scaled by the
+  // same factor so a finer/coarser pattern doesn't also drift visibly
+  // faster/slower on screen — screen-space drift speed is flowRate /
+  // (samplingFreq), and densScale cancels between the two.
+  float densScale = pow(2.0, (uCausticDensity - 0.5) * ${DENSITY_SPAN_OCTAVES.toFixed(2)});
+
   // This scene's own drift phase (uDriftPhase, uploaded by extraUniforms
   // below) replaces the shared uFlowPhase so drift speed is dialable.
-  vec2 flow = vec2(uDriftPhase * 0.15, -uDriftPhase * 0.09);
+  vec2 flow = vec2(uDriftPhase * 0.15, -uDriftPhase * 0.09) * densScale;
 
   // Beat ripple pool: every ring in flight (MAX_RIPPLES slots, radius and
   // strength per slot from createRipplePool) is summed here, so a new beat
@@ -600,33 +707,25 @@ void main() {
     ringSlope += s * (dOut * gOut + dIn * gIn);
   }
   float ring = uRipple * ringCrest;
-  vec2 q = p + radialDir * uRipple * ringSlope * ${(RIPPLE_SLOPE_NORM * RIPPLE_REFRACT).toFixed(4)};
+  // Scaled by densScale here, once — every later octave builds on q by
+  // accumulating onto it (see the loop below), so the whole pattern inherits
+  // the frequency change from this one multiply rather than re-scaling p at
+  // each octave separately.
+  vec2 q = (p + radialDir * uRipple * ringSlope * ${(RIPPLE_SLOPE_NORM * RIPPLE_REFRACT).toFixed(4)}) * densScale;
 
   int iterations = int(mix(3.0, 6.0, uDetail));
   float acc = 0.0;
   float amp = 1.0;
-  // focusFrac is the *shape* of the beat response — 0.35 at rest, 1.0 on a
-  // full beat — fixed regardless of uFocus, which is what makes the resting
-  // floor and decay rate below reproduce the scene's original swing/decay
-  // almost exactly (verified via tune-sheet.mjs contact sheets; see git
-  // history for the "chaotic decay" regression a uFocus-shaped curve caused
-  // here once). uFocus itself instead scales sharpCeil, the ceiling that
-  // shape mixes toward — so it scales both ends of the range together
-  // (floor = 4 + (sharpCeil-4)*0.35, same value a fixed-ceiling floor
-  // formula of 4 + 0.35*14*uFocus would give) rather than only the floor.
-  // A fixed ceiling (an earlier version of this line) made every focus
-  // setting snap to the *same* peak sharpness/brightness on a hard beat —
-  // "no matter how hard the beat hits, low Focus still gets a soft peak"
-  // was fixed, but the cost was the opposite complaint: dragging the
-  // slider changed only the quiet in-between state, so the snap itself
-  // — the thing the slider is named for — looked identical at every
-  // setting. Scaling the ceiling too means uFocus = 0 now genuinely holds
-  // sharp at the floor (4, no snap at all) and uFocus = 1 reproduces
-  // today's on-beat peak (FOCUS_SHARP_MAX) exactly, with every value
-  // between scaling the whole swing proportionally.
-  float focusFrac = mix(0.35, 1.0, uBeatPulse);
-  float sharpCeil = mix(4.0, ${FOCUS_SHARP_MAX}.0, uFocus);
-  float sharp = mix(4.0, sharpCeil, focusFrac) * (1.0 - bassBulge * 0.25);
+  // uFog sets the resting sharpness (sharpRest); uFocus is a pure multiplier
+  // on top of it, driven by uBeatPulse, so uFocus=0 always holds sharp
+  // exactly at sharpRest (no snap, at any beatPulse) and sharpRest itself
+  // never moves with uFocus (see focusSharp's own doc comment above, and
+  // this file's git history for the two different ways earlier versions of
+  // this line each conflated the two: scaling floor and peak together, or
+  // pinning the peak identical at every focus setting).
+  float sharpRest = mix(${FOG_SHARP_CRISP.toFixed(1)}, ${FOG_SHARP_HAZY.toFixed(1)}, uFog);
+  float sharp = min(sharpRest * (1.0 + uFocus * uBeatPulse * ${FOCUS_SNAP_RATIO.toFixed(2)}), ${FOCUS_SHARP_MAX}.0)
+    * (1.0 - bassBulge * 0.25);
   float ridgeGain = sqrt(sharp / 4.0); // a thinner ridge is proportionally brightened, so Focus snaps intensity too, not just width
   // Warp compresses screen space into q-space, and near its own fold points
   // that compression runs unbounded — arbitrarily fine screen-space detail,
@@ -664,7 +763,7 @@ void main() {
     // when uFocus slams sharp up fast on a beat. Capping the exponent used
     // here (never the uniform "sharp" itself, so ridgeGain's brightness
     // still tracks the real, unclamped snap) keeps the rendered line at
-    // least ~1px wide regardless of how fast focusDrive moves.
+    // least ~1px wide regardless of how fast sharp moves.
     float aaSharp = min(sharp, 0.3 / max(fwidth(v), 1e-4));
     acc += amp * (0.5 + band * 0.8) * pow(ridge, aaSharp) * ridgeGain;
     amp *= 0.6;
@@ -686,7 +785,7 @@ void main() {
   // the pulse-only drive bit-for-bit untouched.
   float sparkleDrive = max(uHighPulse, uSparkleSustain * uHigh);
   float sparkleFreq = mix(${SPARKLE_GRAIN_FREQ_LO.toFixed(1)}, ${SPARKLE_GRAIN_FREQ_HI.toFixed(1)}, uSparkleGrain);
-  float sparkleNoise = noise(q * sparkleFreq + vec2(uDriftPhase * 2.0));
+  float sparkleNoise = noise(q * sparkleFreq + vec2(uDriftPhase * 2.0) * densScale);
   float sparkleExp = mix(${SPARKLE_DENSITY_EXP_LO.toFixed(1)}, ${SPARKLE_DENSITY_EXP_HI.toFixed(1)}, uSparkleDensity);
   float sparkleGain = uSparkleBright * ${SPARKLE_BRIGHT_GAIN.toFixed(1)};
   acc += uSparkle * sparkleDrive * crestGate * pow(sparkleNoise, sparkleExp) * sparkleGain;
@@ -696,7 +795,10 @@ void main() {
 
   acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * uBeatPulse * 1.5 + ring * 0.8
        + dropDrive * 0.5 + dropFlash * 1.2;
-  acc = max(0.0, acc - 0.08); // dark water floor, so filaments read as bright threads
+  // Dark-water floor: uFog=0 clips almost exactly today's old fixed cut
+  // (0.08), so filaments read as bright threads on black water; uFog=1 clips
+  // nothing at all, so the dim wash the haze sits in actually glows instead.
+  acc = max(0.0, acc - mix(${FOG_FLOOR_CRISP.toFixed(2)}, ${FOG_FLOOR_HAZY.toFixed(2)}, uFog));
   // Hue phase rides brightness (a ridge crest tints differently than the
   // dim water around it) through a cosine, which wraps through its full
   // hue cycle for roughly a unit change of phase. Raw acc can swing several
