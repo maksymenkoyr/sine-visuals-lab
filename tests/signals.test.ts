@@ -49,6 +49,17 @@ describe("signals registry", () => {
     }
   });
 
+  it("every bandRange is one of the values spectrumStrip's highlight understands", () => {
+    // "all"/"low" are the only two the caller (deviceMenu.ts) resolves
+    // today — a typo'd third value would otherwise silently fall through
+    // to "no highlight" instead of failing here.
+    const known = new Set(["all", "low"]);
+    for (const spec of Object.values(SIGNALS)) {
+      if (spec.bandRange === undefined) continue;
+      expect(known.has(spec.bandRange)).toBe(true);
+    }
+  });
+
   it("caustics' Beat ripple and Ripple source both read the signals the trigger logic actually uses", () => {
     const scenes = listScenes();
     const caustics = scenes.find((s) => s.id === "caustics")!;

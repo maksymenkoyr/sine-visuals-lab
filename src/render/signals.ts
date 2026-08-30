@@ -59,6 +59,15 @@ export interface SignalSpec {
    *  yet: the setting row's pill still renders its own live value, it just
    *  offers no jump. */
   monitor?: { card: MeterCardId; row: MeterRowId };
+  /** Which bands this signal actually watches, for the spectrum strip's
+   *  hover highlight (spectrumStrip.ts's setHighlight, wired in
+   *  deviceMenu.ts) — resolved against the live band split (bandSplit.ts)
+   *  by the caller, not a fixed index range, since the split is
+   *  user-configurable. "all" for a broadband read (features.ts's flux
+   *  sums every band); "low" for the low group bandEnergy.ts tracks (bands
+   *  [0, split.lowMid)). Omit for a signal that isn't a frequency read at
+   *  all (anim.dropOnset is section loudness) — no highlight for those. */
+  bandRange?: "all" | "low";
 }
 
 function signal(spec: SignalSpec): SignalSpec {
@@ -94,6 +103,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.beatPulse,
     monitor: { card: "rhythm", row: "tempo" },
+    bandRange: "all",
   }),
   "anim.lowOnset": signal({
     id: "anim.lowOnset",
@@ -103,6 +113,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.lowPulse,
     monitor: { card: "rhythm", row: "hits" },
+    bandRange: "low",
   }),
   "anim.dropOnset": signal({
     id: "anim.dropOnset",
