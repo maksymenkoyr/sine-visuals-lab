@@ -7,7 +7,7 @@ regenerate it at session close.
 ## In flight
 
 - **Storm scene** — `src/render/scenes/storm.ts`, branch `worktree-storm-scene`
-  (worktree at `.claude/worktrees/storm-scene`), draft PR opened this session.
+  (worktree at `.claude/worktrees/storm-scene`), draft PR #41.
   A real `gl.POINTS` cloud (first consumer of `ctx.quality.maxParticles`) lit
   from inside by a JS-side strike pool on every beat; registered as a draft
   tile. Verified headlessly at high and floor quality, in the gallery, and
