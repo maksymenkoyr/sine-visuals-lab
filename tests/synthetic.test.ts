@@ -28,7 +28,7 @@ describe("createSyntheticFeed", () => {
     const period = 60 / 120;
     for (let t = 0; t < DURATION_SEC; t += DT) {
       const frame = feed.frame(t);
-      if (frame.beat) {
+      if (frame.onset) {
         expect(t - lastBeatTime).toBeGreaterThan(period - DT * 2);
         lastBeatTime = t;
         beats++;
@@ -37,11 +37,11 @@ describe("createSyntheticFeed", () => {
     expect(beats).toBe(20); // 10s at 120bpm = 20 beats
   });
 
-  it("wraps beatPhase to below 0.1 right after a beat fires", () => {
+  it("wraps onsetPhase to below 0.1 right after a beat fires", () => {
     const feed = createSyntheticFeed({ bpm: 120 });
     for (let t = 0; t < DURATION_SEC; t += DT) {
       const frame = feed.frame(t);
-      if (frame.beat) expect(frame.beatPhase).toBeLessThan(0.1);
+      if (frame.onset) expect(frame.onsetPhase).toBeLessThan(0.1);
     }
   });
 

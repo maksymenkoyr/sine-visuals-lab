@@ -29,6 +29,7 @@ import {
   smoothingRateScale,
 } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
+import { createRenderLatch } from "./render/renderLatch.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
@@ -193,12 +194,23 @@ let lastMono: Float32Array | null = null;
 // card's history trace draws it as the "auto-gain fully off" reference. Null
 // wherever no local extractor ran this frame (renderer, synthetic feed).
 let lastFixedEnergy: number | null = null;
+// FeatureExtractor.fluxRatio from this device's own extractor — the Rhythm
+// card's Onset row. Same solo/host-only availability as lastFixedEnergy
+// above and for the same reason.
+let lastFluxRatio: number | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
  *  availability as lastMono, for the Loudness card. */
 let lastLufs: LufsReading | null = null;
 const rawBandsScratch = new Float32Array(NUM_BANDS);
 
 const animClock = createAnimClock();
+// Latches one-shot AnimFrame edges (onset/lowOnset/.../dropOnset) across
+// ticks the render cap skips, and turns anim.dtSec into wall time since the
+// last *rendered* frame rather than the last rAF tick — see renderLatch.ts.
+// deviceMenu/audioMeters and advanceAutoTune below still see the raw,
+// un-latched `anim` (they run every tick); only what reaches scene.render()
+// goes through the latch.
+const renderLatch = createRenderLatch();
 let lastRafMs = 0;
 let hudHideTimer: number | undefined;
 
@@ -848,6 +860,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastMono = null;
     lastLufs = null;
     lastFixedEnergy = null;
+    lastFluxRatio = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
@@ -857,6 +870,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastMono = null;
       lastLufs = null;
       lastFixedEnergy = null;
+      lastFluxRatio = null;
       return null;
     }
     const now = capture.context.currentTime;
@@ -866,6 +880,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
     lastFixedEnergy = extractor.fixedEnergy;
+    lastFluxRatio = extractor.fluxRatio;
     // Feeds next tick's resolveAutoGain(), not this one's — see
     // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
     feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
@@ -878,6 +893,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastMono = null;
       lastLufs = null;
       lastFixedEnergy = null;
+      lastFluxRatio = null;
       return null;
     }
     const now = capture.context.currentTime;
@@ -887,6 +903,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
     lastFixedEnergy = extractor.fixedEnergy;
+    lastFluxRatio = extractor.fluxRatio;
     // Feeds next tick's resolveAutoGain(), not this one's — see
     // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
     feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
@@ -899,6 +916,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   lastMono = null;
   lastLufs = null;
   lastFixedEnergy = null;
+  lastFluxRatio = null;
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
@@ -916,9 +934,9 @@ function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
     time: s.timeSec,
     bands: s.bands,
     energy: s.energy,
-    beat: s.beatFired,
+    onset: s.onsetFired,
     bpm: s.bpm,
-    beatPhase: s.beatPhase,
+    onsetPhase: s.beatPhase,
     level: s.level,
   };
 }
@@ -971,13 +989,16 @@ function loop(): void {
   if (anim) {
     lastAnim = anim;
     advanceAutoTune(dtSec, anim.profile);
+    // Every tick, whether or not it renders — see renderLatch.ts. A tick
+    // that turns out not to render still needs its edges remembered.
+    renderLatch.accumulate(anim);
   }
 
   // Fed even when null (mic permission still pending) so the spectrum strip
   // can render its "waiting for audio" idle state instead of going dead.
   // `rateScale` lets the meters panel (audioMeters.ts) bypass its own BPM
   // settle and waveform peak-hold at Smoothing's Off stop, same as above.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastFluxRatio);
 
   if (!lastVis || !anim) return;
 
@@ -993,7 +1014,7 @@ function loop(): void {
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
   const displayFrame = applySensitivity(gained!, resolveSensitivity(scene.id), resolveExpansion(scene.id));
-  scene.render(mainHost!.ctx, displayFrame, viewport, palette, anim);
+  scene.render(mainHost!.ctx, displayFrame, viewport, palette, renderLatch.consume(anim, nowRafMs));
   governor?.recordFrame(nowRafMs);
 }
 

@@ -33,7 +33,7 @@ export interface SectionIntensity {
    *  raw position in the track's dynamic range, jumping frame to frame rather
    *  than easing. For the meters panel's RAW chip (src/ui/audioMeters.ts). */
   readonly rawIntensity: number;
-  /** One-shot edge (like FeatureFrame.beat), true only on the tick intensity
+  /** One-shot edge (like FeatureFrame.onset), true only on the tick intensity
    *  is rising fast enough to read as a drop/section change. */
   readonly dropOnset: boolean;
   /** Decaying [0,1] flash that jumps to 1 on dropOnset — smoother to animate

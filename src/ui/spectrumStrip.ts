@@ -66,6 +66,13 @@ export interface SpectrumStrip {
   setFaders(gains: ArrayLike<number>): void;
   /** Which fader is grabbed or focused (-1: none) — its knob fills solid. */
   setFocused(index: number): void;
+  /** Bands `[lo, hi)` to highlight — every band outside the range dims,
+   *  answering "which frequencies does this setting actually listen to"
+   *  while a signal-linked control is being touched (deviceMenu.ts). `null`
+   *  clears it back to the normal, undimmed view. Like setFocused, this
+   *  only updates the held state — call redraw() after to actually repaint,
+   *  since a hover/hotkey doesn't come with a new audio tick. */
+  setHighlight(range: { lo: number; hi: number } | null): void;
   /** Called every tick with both feeds; either may be null (raw: no local
    *  analyser yet, e.g. mic pending or a mic-less renderer device; processed:
    *  audio not yet flowing at all). An idle "waiting for audio" state shows
@@ -87,6 +94,7 @@ const BAR_GAP_PX = 2;
 const BAR_RADIUS_PX = 1;
 const PEAK_FALL_PER_SEC = 1.2; // slow decay so a transient kick is still visible a few frames later
 const GHOST_ALPHA = 0.18;
+const DIM_ALPHA = 0.22; // a band outside the current highlight range
 const KNOB_W = 16;
 const KNOB_H = 10;
 const CENTROID_FLAG_W = 8;
@@ -132,6 +140,7 @@ export function createSpectrumStrip(): SpectrumStrip {
   const gains = new Float32Array(BAND_FADER_COUNT).fill(1);
   const weights = new Float32Array(NUM_BANDS).fill(1);
   let focused = -1;
+  let highlight: { lo: number; hi: number } | null = null;
 
   // devicePixelRatio-scaled backing store, resized whenever the card's
   // layout width changes (the panel's column widths differ between the
@@ -194,7 +203,12 @@ export function createSpectrumStrip(): SpectrumStrip {
 
     for (let b = 0; b < NUM_BANDS; b++) {
       const x = xForEdgeIndex(b, width);
-      const color = groupColor(b, split);
+      const groupCol = groupColor(b, split);
+      // Outside a highlighted range, a band dims to its group tint at low
+      // alpha regardless of level — "not one of the bands this control
+      // listens to" reads the same whether that band is loud or silent.
+      const inHighlight = !highlight || (b >= highlight.lo && b < highlight.hi);
+      const color = inHighlight ? groupCol : withAlpha(groupCol, DIM_ALPHA);
 
       // What this bar would be with its fader at 1× — only where a fader is
       // actually doing something, so a flat bank draws nothing extra.
@@ -210,9 +224,11 @@ export function createSpectrumStrip(): SpectrumStrip {
       ctx.fillStyle = color;
       fillBar(x, plotHeight - barH, barWidth, barH);
 
-      // Peak-hold cap; white while the gain stage is clamping this band.
+      // Peak-hold cap; white while the gain stage is clamping this band —
+      // except a dimmed band, where the white cap would fight the "this
+      // doesn't matter right now" read the dim is making.
       const peakY = plotHeight - peaks[b] * plotHeight;
-      ctx.fillStyle = !showRaw && pinnedBuf[b] ? "#fff" : color;
+      ctx.fillStyle = !showRaw && pinnedBuf[b] && inHighlight ? "#fff" : color;
       ctx.fillRect(x, peakY, barWidth, 1.5);
     }
   }
@@ -358,6 +374,9 @@ export function createSpectrumStrip(): SpectrumStrip {
     },
     setFocused(index: number): void {
       focused = index;
+    },
+    setHighlight(range: { lo: number; hi: number } | null): void {
+      highlight = range;
     },
     setGhost(bands: Float32Array | null): void {
       hasGhost = !!bands;

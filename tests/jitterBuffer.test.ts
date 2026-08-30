@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { JitterBuffer } from "../src/net/jitterBuffer.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 
-function frame(roomTimeMs: number, energy: number, beat = false, bpm = 0, level = energy) {
-  return { bands: new Float32Array(NUM_BANDS).fill(energy), energy, beat, bpm, level, roomTimeMs };
+function frame(roomTimeMs: number, energy: number, onset = false, bpm = 0, level = energy) {
+  return { bands: new Float32Array(NUM_BANDS).fill(energy), energy, onset, bpm, level, roomTimeMs };
 }
 
 describe("JitterBuffer", () => {
@@ -52,16 +52,16 @@ describe("JitterBuffer", () => {
     expect(buf.beatPhaseAt(500)).toBeCloseTo(0, 5); // wraps to next beat
   });
 
-  it("fires consumeBeatIfDue exactly once per beat, only once the target time reaches it", () => {
+  it("fires consumeOnsetIfDue exactly once per beat, only once the target time reaches it", () => {
     const buf = new JitterBuffer();
     buf.push(frame(1000, 0.5, true, 120));
 
-    expect(buf.consumeBeatIfDue(999)).toBe(false); // not due yet
-    expect(buf.consumeBeatIfDue(1000)).toBe(true); // due now
-    expect(buf.consumeBeatIfDue(1001)).toBe(false); // already fired
+    expect(buf.consumeOnsetIfDue(999)).toBe(false); // not due yet
+    expect(buf.consumeOnsetIfDue(1000)).toBe(true); // due now
+    expect(buf.consumeOnsetIfDue(1001)).toBe(false); // already fired
 
     buf.push(frame(1500, 0.6, true, 120));
-    expect(buf.consumeBeatIfDue(1400)).toBe(false);
-    expect(buf.consumeBeatIfDue(1500)).toBe(true);
+    expect(buf.consumeOnsetIfDue(1400)).toBe(false);
+    expect(buf.consumeOnsetIfDue(1500)).toBe(true);
   });
 });

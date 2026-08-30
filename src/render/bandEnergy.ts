@@ -4,7 +4,7 @@ import { getBandSplit, bandSplitVersion } from "../audio/bandSplit.ts";
 // Splits the 24 log-spaced bands into low/mid/high groups and derives, per
 // group: a slewed continuous level (safe to drive geometry with — it can't
 // strobe) and a decaying onset pulse plus one-shot edge (the same
-// beatPulse/beat shape already used for the whole spectrum in app.ts, just
+// beatPulse/onset shape already used for the whole spectrum in app.ts, just
 // scoped to a frequency range) so a kick and a hat can drive visibly
 // different things instead of both hiding inside one broadband uEnergy.
 //
@@ -140,7 +140,7 @@ export interface BandEnergy {
   lowPulse: number;
   midPulse: number;
   highPulse: number;
-  /** One-shot edges (like FeatureFrame.beat, but per group) — true only on
+  /** One-shot edges (like FeatureFrame.onset, but per group) — true only on
    *  the exact tick that group's rate-of-rise cleared its adaptive flux
    *  threshold with that group's refractory elapsed. */
   lowOnset: boolean;

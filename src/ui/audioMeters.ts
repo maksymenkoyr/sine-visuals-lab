@@ -130,7 +130,10 @@ export interface AudioMeters {
    *  smoothingRateScale for this tick — non-finite (the Smoothing row's Off
    *  stop) bypasses this file's own BPM settle and waveform peak-hold, the
    *  same way `raw` already does, so RAW and processed agree exactly (see
-   *  file header). */
+   *  file header). `fluxRatio` is FeatureExtractor.fluxRatio — how hard the
+   *  broadband onset detector's flux cleared its adaptive threshold this
+   *  frame (1 is a bare trigger, below 1 a near-miss) — null on the same
+   *  devices as `fixedEnergy` (the Onset row reads idle). */
   update(
     frame: FeatureFrame | null,
     anim: AnimFrame | null,
@@ -139,6 +142,7 @@ export interface AudioMeters {
     rateScale: number,
     fixedEnergy: number | null,
     lufs: LufsReading | null,
+    fluxRatio: number | null,
   ): void;
   /** Unfolds `card` if needed (the same click-the-chevron move
    *  deviceMenu.ts's jumpToBlock makes for a folded settings card), scrolls
@@ -155,6 +159,10 @@ export interface AudioMetersDeps {
 
 const PEAK_FALL_PER_SEC = 1.2; // matches spectrumStrip.ts's peak-hold decay
 const TEXT_REFRESH_MS = 100;
+// Track width for the Onset row, in units of fluxRatio (1 = the firing
+// line). An ordinary hit clears 1 by some margin but rarely reaches this —
+// picked so the bar has headroom rather than pinning at full on every beat.
+const ONSET_METER_MAX = 2.5;
 /** Readings that feed no single system — same neutral as the Palette card. */
 const NEUTRAL_ACCENT = "rgba(255,255,255,0.7)";
 const WAVE_HEIGHT_CSS_PX = 64;
@@ -890,8 +898,20 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   rhythmRow.style.cssText = rhythmRowStyle;
   rhythmRow.append(section.el, tempo.el);
   const hits = createHitsRow();
+  // The onset detector's own input: how hard this frame's spectral flux
+  // cleared its adaptive threshold (FeatureExtractor.fluxRatio). The tick
+  // marks the firing line — right of it, the beat dot just flashed; left of
+  // it, a near-miss. Track runs to ONSET_METER_MAX so an ordinary hit (~1-2)
+  // reads with headroom rather than pinning the bar every time.
+  const onset = createMeterRow({
+    label: "Onset",
+    accent: NEUTRAL_ACCENT,
+    ticks: [{ at: 1 / ONSET_METER_MAX, label: "fires" }],
+    description:
+      "How hard the broadband onset detector's flux cleared its threshold this frame — past the mark is a beat, short of it a near-miss.",
+  });
   const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm" });
-  rhythmCard.body.append(rhythmRow, spacer(), hits.el);
+  rhythmCard.body.append(rhythmRow, spacer(), hits.el, spacer(), onset.el);
 
   // ---- Character ----
   const dialRows = MUSIC_DIALS.map((dial) => ({
@@ -1076,7 +1096,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
 
   return {
     el: root,
-    update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs): void {
+    update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, fluxRatio): void {
       const nowMs = performance.now();
       const dtSec =
         lastMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastMs) / 1000);
@@ -1123,7 +1143,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // ---- Rhythm ----
       if (!rhythmCard.fold?.isFolded()) {
         const sectionVal = anim ? (raw ? anim.raw.sectionIntensity : anim.sectionIntensity) : null;
-        tempo.update(anim?.tempoLock ?? 0, !!frame?.beat);
+        tempo.update(anim?.tempoLock ?? 0, !!frame?.onset);
         section.setValue(sectionVal, dtSec);
         if (anim?.dropOnset) section.flash(HOT_RED);
         if (text) {
@@ -1136,6 +1156,16 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         // Already raw the way the beat dot is (see file header) — no
         // pre-envelope counterpart threaded through AnimFrame to switch to.
         hits.setValues(anim?.lowPulse ?? 0, anim?.midPulse ?? 0, anim?.highPulse ?? 0);
+        // Local diagnostic, same availability as fixedEnergy (null on a
+        // mic-less renderer or the synthetic feed) — no RAW counterpart,
+        // same reasoning as the hit pulses above.
+        onset.setValue(fluxRatio === null ? null : fluxRatio / ONSET_METER_MAX, dtSec);
+        if (frame?.onset) onset.flash();
+        if (text)
+          onset.setReadout(
+            fluxRatio === null ? "--" : fluxRatio.toFixed(2),
+            fluxRatio === null ? IDLE : {},
+          );
       }
 
       // ---- Character ----

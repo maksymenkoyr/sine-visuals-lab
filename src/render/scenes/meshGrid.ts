@@ -1394,8 +1394,11 @@ export const meshGridScene: Scene = (() => {
       // decays as a bare spike: the impulse relaxes over Beat Smooth
       // (release), and what the shaders get follows that with an attack a
       // quarter as long. Drives Beat Expand (uBeatEnv).
+      // anim.onset, not frame.onset directly: a one-shot FeatureFrame edge
+      // can land on a tick the render cap skips, and this render() only
+      // runs on rendered ticks — see renderLatch.ts.
       const beatSmooth = resolveSceneSetting(ID, settingFor("beatSmooth"));
-      if (frame.beat) beatPulse = 1;
+      if (anim.onset) beatPulse = 1;
       else beatPulse *= Math.exp(-dt / beatSmooth);
       beatEnv += (beatPulse - beatEnv) * (1 - Math.exp(-dt / (beatSmooth * 0.25)));
 

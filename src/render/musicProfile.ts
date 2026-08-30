@@ -230,7 +230,7 @@ export function createMusicProfile(): MusicProfile {
 
       // --- pulse ---
       onsetRate *= Math.exp(-dt * ONSET_RATE_DECAY);
-      if (frame.beat) onsetRate += 1;
+      if (frame.onset) onsetRate += 1;
       const pulseTarget = hasSignal
         ? clamp01(0.4 * clamp01(onsetRate / ONSET_RATE_REF) + 0.6 * tempoLock)
         : 0.5;

@@ -6,7 +6,7 @@ import type { SignalLink } from "../signals.ts";
 // Domain-warped value noise, sharpened into thin ridges. Two renderer-side
 // clocks feed it instead of raw audio: a phase-locked beat/bar clock
 // (beatClock.ts) that only ever nudges toward a detected beat rather than
-// resetting on every onset — the old FeatureFrame.beatPhase restarted on
+// resetting on every onset — the old FeatureFrame.onsetPhase restarted on
 // every hat/fill, which is what made Tempo breathe and Beat ripple stutter —
 // and this scene's own drift accumulator below, kept separate from the
 // shared uFlowPhase so its speed is user-dialable without reintroducing the
@@ -134,7 +134,7 @@ const SETTINGS: SceneSetting[] = [
     reads: [
       "anim.dropOnset",
       "anim.lowOnset",
-      { signal: "feature.beat", activeWhen: (get) => get("rippleSrc") < RIPPLE_SRC_BEAT_THRESHOLD },
+      { signal: "feature.onset", activeWhen: (get) => get("rippleSrc") < RIPPLE_SRC_BEAT_THRESHOLD },
     ] satisfies readonly SignalLink[],
   },
   {
@@ -152,7 +152,7 @@ const SETTINGS: SceneSetting[] = [
     // RIPPLE_SRC_BEAT_THRESHOLD is what the Beat pill dimming makes visible.
     reads: [
       "anim.lowOnset",
-      { signal: "feature.beat", activeWhen: (get) => get("rippleSrc") < RIPPLE_SRC_BEAT_THRESHOLD },
+      { signal: "feature.onset", activeWhen: (get) => get("rippleSrc") < RIPPLE_SRC_BEAT_THRESHOLD },
     ] satisfies readonly SignalLink[],
   },
   {
@@ -867,8 +867,12 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
       if (drop) ripples.trigger(RIPPLE_DROP_AMP);
       // A bass onset always rings; a broadband beat rings too, but only
       // below RIPPLE_SRC_BEAT_THRESHOLD — see that constant's own comment,
-      // and the "ripple"/"rippleSrc" SceneSettings' `reads` above.
-      else if (anim.lowOnset || (frame.beat && rippleSrc < RIPPLE_SRC_BEAT_THRESHOLD)) ripples.trigger(1);
+      // and the "ripple"/"rippleSrc" SceneSettings' `reads` above. Reads
+      // anim.onset, not frame.onset directly — see AnimFrame's own doc: a
+      // scene reading FeatureFrame.onset can miss the tick it fired on
+      // whenever the render cap skips it, which is exactly the bug this
+      // scene used to have (renderLatch.ts's header has the story).
+      else if (anim.lowOnset || (anim.onset && rippleSrc < RIPPLE_SRC_BEAT_THRESHOLD)) ripples.trigger(1);
 
       return { uDriftPhase: driftPhase, uRippleRadius: ripples.radius, uRippleStrength: ripples.strength };
     };

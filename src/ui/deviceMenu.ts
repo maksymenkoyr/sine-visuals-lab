@@ -17,7 +17,7 @@ import type { SceneLook } from "../render/sceneLooks.ts";
 import { createLooksCard } from "./looksCard.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { SIGNALS, type SignalSpec } from "../render/signals.ts";
-import { type FeatureFrame } from "../audio/types.ts";
+import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
 import type { LufsReading } from "../audio/lufs.ts";
@@ -293,7 +293,8 @@ export interface DeviceMenu {
    *  Smoothing value — forwarded to the meters so their own BPM settle and
    *  waveform peak-hold bypass at Smoothing's Off stop the same way the rest
    *  of the pipeline does; not re-resolved here, since resolveSmoothing()
-   *  slews its auto value and this runs every rAF tick. */
+   *  slews its auto value and this runs every rAF tick. `fluxRatio` is
+   *  FeatureExtractor.fluxRatio, null on the same paths as `fixedEnergy`. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -304,6 +305,7 @@ export interface DeviceMenu {
     rateScale: number,
     fixedEnergy: number | null,
     lufs: LufsReading | null,
+    fluxRatio: number | null,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
@@ -1790,6 +1792,52 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
+  // "all"/"low" (SignalSpec.bandRange, signals.ts) resolved against the
+  // *live* split rather than a fixed index range, since bandSplit.ts's
+  // crossover is user-configurable.
+  function resolveBandRange(kind: "all" | "low", split: BandSplit): { lo: number; hi: number } {
+    return kind === "low" ? { lo: 0, hi: split.lowMid } : { lo: 0, hi: NUM_BANDS };
+  }
+
+  // Lights the bands a signal-linked row actually listens to on the
+  // spectrum strip while the row is being touched — hover, keyboard focus,
+  // or a drag — and clears back to the normal view on release. A no-op for
+  // a row with no `reads`, or whose reads are all band-agnostic (drop
+  // detection: section loudness, not a frequency read). Recomputed on
+  // every `input` (not just on entry) since dragging Ripple source across
+  // its own threshold changes which signal is actually active mid-drag —
+  // see RIPPLE_SRC_BEAT_THRESHOLD's own comment in caustics.ts.
+  function wireBandHighlight(el: HTMLElement, reads: ResolvedSignalRead[] | undefined): void {
+    const withRange = reads?.filter((r) => r.signal.bandRange !== undefined);
+    if (!withRange?.length) return;
+
+    function show(): void {
+      const split = deps.getBandSplit();
+      let lo = NUM_BANDS;
+      let hi = 0;
+      let any = false;
+      for (const r of withRange!) {
+        if (!r.active()) continue;
+        const range = resolveBandRange(r.signal.bandRange!, split);
+        lo = Math.min(lo, range.lo);
+        hi = Math.max(hi, range.hi);
+        any = true;
+      }
+      spectrumStrip.setHighlight(any ? { lo, hi } : null);
+      spectrumStrip.redraw();
+    }
+    function hide(): void {
+      spectrumStrip.setHighlight(null);
+      spectrumStrip.redraw();
+    }
+
+    el.addEventListener("pointerenter", show);
+    el.addEventListener("focusin", show);
+    el.addEventListener("input", show); // dragging can switch which read is active
+    el.addEventListener("pointerleave", hide);
+    el.addEventListener("focusout", hide);
+  }
+
   // Builds one setting's row (enum picker, boolean toggle or slider) into `container` —
   // shared by the direct-to-sceneRows path and the advanced-section path
   // below, so a row behaves identically wherever it lands.
@@ -1881,6 +1929,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));
     container.appendChild(row.el);
     sceneRowHandles.push(row);
+    wireBandHighlight(row.el, reads);
   }
 
   function renderSceneSettings(): void {
@@ -2183,11 +2232,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       rateScale: number,
       fixedEnergy: number | null,
       lufs: LufsReading | null,
+      fluxRatio: number | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs);
+      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, fluxRatio);
       // Unthrottled, same reasoning as audioMeters' own fills — see
       // createControlRow's updateSignalPills doc comment. A no-op per row
       // with no `reads`, so this costs nothing for the common case.
