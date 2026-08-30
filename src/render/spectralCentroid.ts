@@ -55,6 +55,33 @@ function expBlend(rate: number, dt: number): number {
   return 1 - Math.exp(-rate * dt);
 }
 
+/** Band-index-weighted spectral centroid, normalized to [0,1] across the
+ *  band ladder — a log-frequency centroid, since the bands themselves are
+ *  log-spaced (see the file header). Returns null below SILENCE_PEAK: no
+ *  spectrum to locate, not a meaningless reading.
+ *
+ *  Exported as the one shared implementation of this formula: `advance()`
+ *  below calls it for `raw`, and spectrumStrip.ts's live centroid marker
+ *  calls it directly against whatever buffer it's currently drawing (raw
+ *  mic or processed, per its own RAW chip), so the marker can never drift
+ *  out of sync with the exact bars it's pointing at. That's also why it
+ *  takes a plain buffer rather than reading `raw`/`centroid` above: this is
+ *  a stateless measurement, and the marker's buffer is neither of those —
+ *  it's a third one entirely (see spectrumStrip.ts's own header for which). */
+export function bandIndexCentroid(bands: Float32Array): number | null {
+  let bandSum = 0;
+  let weightedSum = 0;
+  let peakBand = 0;
+  for (let b = 0; b < NUM_BANDS; b++) {
+    const v = bands[b];
+    bandSum += v;
+    weightedSum += b * v;
+    if (v > peakBand) peakBand = v;
+  }
+  if (peakBand <= SILENCE_PEAK || bandSum <= 1e-4) return null;
+  return Math.min(1, Math.max(0, weightedSum / bandSum / (NUM_BANDS - 1)));
+}
+
 export interface SpectralCentroid {
   /** Ranged against this track's own recent floor/peak and slewed — the
    *  field to drive a scene's color/motion from. 0.5 is this track's own
@@ -81,18 +108,8 @@ export function createSpectralCentroid(): SpectralCentroid {
     advance(dtSec: number, bands: Float32Array, rateScale = 1): void {
       const dt = Math.max(1e-4, dtSec);
 
-      let bandSum = 0;
-      let weightedSum = 0;
-      let peakBand = 0;
-      for (let b = 0; b < NUM_BANDS; b++) {
-        const v = bands[b];
-        bandSum += v;
-        weightedSum += b * v;
-        if (v > peakBand) peakBand = v;
-      }
-      if (peakBand <= SILENCE_PEAK || bandSum <= 1e-4) return; // freeze through silence
-
-      const raw = Math.min(1, Math.max(0, weightedSum / bandSum / (NUM_BANDS - 1)));
+      const raw = bandIndexCentroid(bands);
+      if (raw === null) return; // freeze through silence
       state.raw = raw;
 
       if (!primed) {

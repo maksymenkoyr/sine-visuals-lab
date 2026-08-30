@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { NUM_BANDS } from "../src/audio/types.ts";
-import { createSpectralCentroid } from "../src/render/spectralCentroid.ts";
+import { bandIndexCentroid, createSpectralCentroid } from "../src/render/spectralCentroid.ts";
 
 const DT = 1 / 60;
 
@@ -111,5 +111,43 @@ describe("spectralCentroid", () => {
     const at30 = run(30);
     const at120 = run(120);
     expect(Math.abs(at30 - at120)).toBeLessThan(0.05);
+  });
+});
+
+describe("bandIndexCentroid", () => {
+  // The stateless formula spectrumStrip.ts's live marker calls directly
+  // against whatever buffer it's currently drawing (see that file's
+  // header) — covered separately from the stateful SpectralCentroid tests
+  // above since it has no smoothing/freezing behavior of its own to verify.
+  it("separates a bass-heavy vs. treble-heavy spectrum", () => {
+    const dark = bandIndexCentroid(bassHeavyBands());
+    const bright = bandIndexCentroid(trebleHeavyBands());
+    expect(dark).not.toBeNull();
+    expect(bright).not.toBeNull();
+    expect(dark!).toBeLessThan(0.4);
+    expect(bright!).toBeGreaterThan(0.6);
+  });
+
+  it("is null on a silent bands array — no spectrum to locate", () => {
+    expect(bandIndexCentroid(new Float32Array(NUM_BANDS))).toBeNull();
+  });
+
+  it("is null just below the silence gate and defined just above it", () => {
+    const quiet = new Float32Array(NUM_BANDS).fill(0.02);
+    expect(bandIndexCentroid(quiet)).toBeNull();
+
+    const audible = new Float32Array(NUM_BANDS).fill(0.02);
+    audible[12] = 0.5;
+    expect(bandIndexCentroid(audible)).not.toBeNull();
+  });
+
+  it("stays within [0,1] at the band-ladder extremes", () => {
+    const high = new Float32Array(NUM_BANDS);
+    high[NUM_BANDS - 1] = 1;
+    expect(bandIndexCentroid(high)).toBeCloseTo(1, 5);
+
+    const low = new Float32Array(NUM_BANDS);
+    low[0] = 1;
+    expect(bandIndexCentroid(low)).toBeCloseTo(0, 5);
   });
 });
