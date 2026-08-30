@@ -2,6 +2,8 @@ import { DRAFT_SCENE_IDS } from "./render/scenes/index.ts"; // also registers bu
 import { captureMic, captureDisplayAudio } from "./audio/capture.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
+import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
+import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
 import { NUM_BANDS, type CaptureHandle, type FeatureFrame } from "./audio/types.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
@@ -18,10 +20,10 @@ import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, PALETTES, type Palette } from "./render/palette.ts";
 import {
   applySensitivity,
-  getAcceleration,
+  getExpansion,
   getSensitivity,
   getSmoothing,
-  setAcceleration,
+  setExpansion,
   setSensitivity,
   setSmoothing,
   smoothingRateScale,
@@ -32,7 +34,7 @@ import { createQualityGovernor, type QualityGovernor } from "./render/governor.t
 import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
 import { getBandSplit } from "./audio/bandSplit.ts";
-import { isAutoGainEnabled, setAutoGainEnabled } from "./audio/autoGain.ts";
+import { getAutoGain, setAutoGain } from "./audio/autoGain.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
@@ -48,10 +50,10 @@ import {
   advanceAutoTune,
   resolveSceneSetting,
   resolveSensitivity,
-  resolveAcceleration,
+  resolveExpansion,
   resolveSmoothing,
   getSensitivitySpec,
-  getAccelerationSpec,
+  getExpansionSpec,
   getSmoothingSpec,
   isAutoEnabled,
   setAutoEnabled,
@@ -106,6 +108,10 @@ let bandAnalyser: BandAnalyser | null = null;
  *  or the wire frame: this is display-only data local to this device, not a
  *  render-driving signal. See waveformAnalyser.ts's header for why. */
 let waveformAnalyser: WaveformAnalyser | null = null;
+/** K-weighted loudness tap for the panel's Loudness card
+ *  (src/audio/lufsAnalyser.ts) — display-only and local, like the waveform
+ *  analyser above. */
+let lufsAnalyser: LufsAnalyser | null = null;
 const extractor = new FeatureExtractor();
 /** Set on first mic/display-capture attempt; cached so re-entering a viz
  *  never re-prompts. Cleared back to null on failure so a retry is possible. */
@@ -163,6 +169,13 @@ let lastRawBands: Float32Array | null = null;
  *  solo/host-only availability as lastRawBands above, for the same reason
  *  (no local mic on a renderer device). Feeds the Scope card. */
 let lastMono: Float32Array | null = null;
+// FeatureExtractor.fixedEnergy from this device's own extractor — the Signal
+// card's history trace draws it as the "auto-gain fully off" reference. Null
+// wherever no local extractor ran this frame (renderer, synthetic feed).
+let lastFixedEnergy: number | null = null;
+/** This tick's LUFS reading off lufsAnalyser — same solo/host-only
+ *  availability as lastMono, for the Loudness card. */
+let lastLufs: LufsReading | null = null;
 const rawBandsScratch = new Float32Array(NUM_BANDS);
 
 const animClock = createAnimClock();
@@ -305,6 +318,7 @@ function ensureAudio(): Promise<void> {
     capture = await chooseCapture();
     bandAnalyser = createBandAnalyser(capture.context, capture.sourceNode);
     waveformAnalyser = createWaveformAnalyser(capture.context, capture.sourceNode);
+    lufsAnalyser = createLufsAnalyser(capture.context, capture.sourceNode);
     micDenied = false;
   })();
   audioPromise = attempt.catch((err) => {
@@ -339,6 +353,7 @@ async function fallBackToSolo(reason: string): Promise<void> {
     capture = await chooseCapture();
     bandAnalyser = createBandAnalyser(capture.context, capture.sourceNode);
     waveformAnalyser = createWaveformAnalyser(capture.context, capture.sourceNode);
+    lufsAnalyser = createLufsAnalyser(capture.context, capture.sourceNode);
     mode = "solo";
     roomCodeEl.style.display = "none";
   } catch (err) {
@@ -377,10 +392,10 @@ function wireDeviceMenu(): void {
       setAutoEnabled(sceneId, getSensitivitySpec().key, false);
       setSensitivity(sceneId, value);
     },
-    getAcceleration: (sceneId) => getAcceleration(sceneId),
-    onAccelerationChange: (sceneId, value) => {
-      setAutoEnabled(sceneId, getAccelerationSpec().key, false);
-      setAcceleration(sceneId, value);
+    getExpansion: (sceneId) => getExpansion(sceneId),
+    onExpansionChange: (sceneId, value) => {
+      setAutoEnabled(sceneId, getExpansionSpec().key, false);
+      setExpansion(sceneId, value);
     },
     getSmoothing: (sceneId) => getSmoothing(sceneId),
     onSmoothingChange: (sceneId, value) => {
@@ -399,22 +414,23 @@ function wireDeviceMenu(): void {
     getBandGain: (sceneId, fader) => getBandGain(sceneId, fader),
     onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
+    onLufsReset: () => lufsAnalyser?.reset(),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
-    resolveAccelerationValue: (sceneId) => resolveAcceleration(sceneId),
+    resolveExpansionValue: (sceneId) => resolveExpansion(sceneId),
     resolveSmoothingValue: (sceneId) => resolveSmoothing(sceneId),
     getSensitivitySpec: () => getSensitivitySpec(),
-    getAccelerationSpec: () => getAccelerationSpec(),
+    getExpansionSpec: () => getExpansionSpec(),
     getSmoothingSpec: () => getSmoothingSpec(),
     isSettingAutoEnabled: (sceneId, key) => isAutoEnabled(sceneId, key),
     onSettingAutoToggle: (sceneId, spec, on) => {
       if (on) {
-        // Pseudo-params (Sensitivity/Acceleration/Smoothing) live in their
+        // Pseudo-params (Sensitivity/Expansion/Smoothing) live in their
         // own store rather than sceneSettings.ts — this map picks the right
         // manual-value getter by key, falling back to a real scene setting.
         const pseudoGetters: Record<string, (sceneId: string) => number> = {
           [getSensitivitySpec().key]: getSensitivity,
-          [getAccelerationSpec().key]: getAcceleration,
+          [getExpansionSpec().key]: getExpansion,
           [getSmoothingSpec().key]: getSmoothing,
         };
         const current = (pseudoGetters[spec.key] ?? ((id: string) => getSceneSetting(id, spec)))(sceneId);
@@ -426,19 +442,19 @@ function wireDeviceMenu(): void {
       isSceneAuto(sceneId, [
         ...(getScene(sceneId)?.settings ?? []),
         getSensitivitySpec(),
-        getAccelerationSpec(),
+        getExpansionSpec(),
         getSmoothingSpec(),
       ]),
     onSceneAutoToggle: (sceneId, on) =>
       setSceneAuto(
         sceneId,
-        [...(getScene(sceneId)?.settings ?? []), getSensitivitySpec(), getAccelerationSpec(), getSmoothingSpec()],
+        [...(getScene(sceneId)?.settings ?? []), getSensitivitySpec(), getExpansionSpec(), getSmoothingSpec()],
         on,
       ),
     getAutoStrength: () => getAutoStrength(),
     onAutoStrengthChange: (value) => setAutoStrength(value),
-    getAutoGainEnabled: () => isAutoGainEnabled(),
-    onAutoGainChange: (value) => setAutoGainEnabled(value),
+    getAutoGain: () => getAutoGain(),
+    onAutoGainChange: (value) => setAutoGain(value),
     getPowerMode: () => powerMode,
     onPowerModeChange: (mode) => {
       setPowerMode(mode);
@@ -758,6 +774,8 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     // signal — there's nothing for the scope to trace, so its card
     // correctly stays hidden here (see audioMeters.ts).
     lastMono = null;
+    lastLufs = null;
+    lastFixedEnergy = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
@@ -765,26 +783,35 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     if (!bandAnalyser || !capture) {
       lastRawBands = null;
       lastMono = null;
+      lastLufs = null;
+      lastFixedEnergy = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    return extractor.update(dbBands, now, isAutoGainEnabled(), rateScale);
+    lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
+    const f = extractor.update(dbBands, now, getAutoGain(), rateScale);
+    lastFixedEnergy = extractor.fixedEnergy;
+    return f;
   }
 
   if (mode === "host") {
     if (!bandAnalyser || !capture || !hostConn) {
       lastRawBands = null;
       lastMono = null;
+      lastLufs = null;
+      lastFixedEnergy = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, isAutoGainEnabled(), rateScale);
+    lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
+    const f = extractor.update(dbBands, now, getAutoGain(), rateScale);
+    lastFixedEnergy = extractor.fixedEnergy;
     hostConn.sendFrame(f);
     return sampleToVisual(hostConn.sample());
   }
@@ -792,6 +819,8 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   // renderer — no local mic, so no raw signal to show.
   lastRawBands = null;
   lastMono = null;
+  lastLufs = null;
+  lastFixedEnergy = null;
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
@@ -870,7 +899,7 @@ function loop(): void {
   // can render its "waiting for audio" idle state instead of going dead.
   // `rateScale` lets the meters panel (audioMeters.ts) bypass its own BPM
   // settle and waveform peak-hold at Smoothing's Off stop, same as above.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs);
 
   if (!lastVis || !anim) return;
 
@@ -885,7 +914,7 @@ function loop(): void {
   const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
-  const displayFrame = applySensitivity(gained!, resolveSensitivity(scene.id), resolveAcceleration(scene.id));
+  const displayFrame = applySensitivity(gained!, resolveSensitivity(scene.id), resolveExpansion(scene.id));
   scene.render(mainHost!.ctx, displayFrame, viewport, palette, anim);
   governor?.recordFrame(nowRafMs);
 }
