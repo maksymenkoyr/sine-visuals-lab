@@ -65,7 +65,10 @@ import {
  *    silently dropped).
  *  - Character: one row per entry in MUSIC_DIALS (never a hardcoded list),
  *    each marking NEUTRAL with a tick — what autoTune.ts resolves every "A"
- *    chip against, otherwise invisible. Copy comes from DIAL_LABELS.
+ *    chip against, otherwise invisible. Copy comes from DIAL_LABELS. Plus
+ *    one hand-added Centroid row (not a MUSIC_DIALS entry) for
+ *    spectralCentroid.ts's fast, range-adapted counterpart to the slow
+ *    Brightness dial just above it.
  *  - Scope (first): a rolling waveform of the last few seconds with a clip
  *    warning, read straight off this device's mic by waveformAnalyser.ts.
  *    Local-only by construction — samples never cross src/net/protocol.ts's
@@ -814,11 +817,23 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       ticks: [{ at: NEUTRAL[dial] }],
     }),
   }));
+  // Fast counterpart to the (slow, eased) Brightness dial above — see
+  // spectralCentroid.ts. Hand-added rather than folded into dialRows: it's
+  // not one of MUSIC_DIALS, just placed alongside them because it's the
+  // live signal Brightness is the track-level summary of.
+  const centroidRow = createMeterRow({
+    label: "Centroid",
+    accent: AUTO_SKY,
+    description: "Live spectral centroid, range-adapted to this track's own recent swing — 0.5 is its own recent middle, not an absolute mid-spectrum reading. The fast counterpart to Brightness above.",
+    ticks: [{ at: 0.5 }],
+  });
   const characterCard = createCard({ title: "Character", accent: AUTO_SKY, foldId: "character" });
   dialRows.forEach(({ row }, i) => {
     if (i > 0) characterCard.body.appendChild(spacer());
     characterCard.body.appendChild(row.el);
   });
+  characterCard.body.appendChild(spacer());
+  characterCard.body.appendChild(centroidRow.el);
 
   // ---- Scope ----
   const waveform = createMeterRow({
@@ -1065,6 +1080,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["section", section.el],
     ["tempo", tempo.el],
     ["hits", hits.el],
+    ["centroid", centroidRow.el],
   ]);
 
   return {
@@ -1142,6 +1158,13 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
               v === null ? IDLE : {},
             );
         }
+        const cv = anim ? (raw ? anim.centroidRaw : anim.centroid) : null;
+        centroidRow.setValue(cv, dtSec);
+        if (text)
+          centroidRow.setReadout(
+            cv === null ? "--" : cv.toFixed(2),
+            cv === null ? IDLE : {},
+          );
       }
 
       // ---- Loudness ----

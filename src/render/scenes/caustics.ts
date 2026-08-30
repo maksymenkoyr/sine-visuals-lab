@@ -206,6 +206,19 @@ const SETTINGS: SceneSetting[] = [
     // Busy mids churn the filaments; a bright mix reads as more mid-heavy too.
     auto: { density: 0.35, brightness: 0.1 },
   },
+  {
+    key: "centroidHue",
+    label: "Spectral hue",
+    description: "Palette drifts one way when the mix is brighter than usual for this track, the other way when it's darker",
+    group: "Spectrum",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+    // Already music-driven by construction (it reads the live centroid
+    // directly, see FRAG's huePhase) — no auto table needed on top of that.
+    reads: ["anim.centroid"],
+  },
   SPARKLE,
   // The constants that used to be hardcoded on the sparkle line in FRAG —
   // how bright, how many, how fine, how far the glints spread, and whether
@@ -340,6 +353,13 @@ const FOCUS_SHARP_MAX = 18;
 // across every palette rather than implicitly assuming uPalC == 1 (true
 // only for "neon" — see src/render/palette.ts's presets).
 const HUE_DAMP_K = 1.2;
+
+// How far uCentroid's swing around its own 0.5 midpoint (see
+// spectralCentroid.ts) can push huePhase at uCentroidHue = 1 — modest
+// against the acc*0.3 ridge term and uTime*0.02 drift already driving
+// huePhase, so it reads as a tint that leans with the mix's own brightness
+// rather than a competing color cycle.
+const CENTROID_HUE_GAIN = 0.5;
 
 // The treble-sparkle sub-params (see the Sparkle group in SETTINGS above)
 // each interpolate between two endpoints of what used to be one hardcoded
@@ -697,7 +717,8 @@ void main() {
   // fastest channel wraps sooner than a shared scalar constant can account
   // for. fwidth/exp are componentwise on vec3 in GLSL ES 3.00, so each
   // channel damps on its own actual wrap rate.
-  float huePhase = acc * 0.3 + uTime * 0.02 - bassBulge * 0.15;
+  float huePhase = acc * 0.3 + uTime * 0.02 - bassBulge * 0.15
+    + (uCentroid - 0.5) * uCentroidHue * ${CENTROID_HUE_GAIN.toFixed(2)};
   vec3 hueArg = 6.28318 * (uPalC * huePhase + uPalD);
   vec3 hueDamp = exp(-${HUE_DAMP_K.toFixed(2)} * fwidth(hueArg) * fwidth(hueArg));
   vec3 col = (uPalA + uPalB * cos(hueArg) * hueDamp) * acc;
