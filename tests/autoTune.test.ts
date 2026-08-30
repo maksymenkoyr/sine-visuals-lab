@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { causticsScene } from "../src/render/scenes/caustics.ts";
 import { meshGridScene } from "../src/render/scenes/meshGrid.ts";
 import { chladniScene } from "../src/render/scenes/chladni.ts";
+import { dancersScene } from "../src/render/scenes/dancers/index.ts";
 import { setSceneSetting, type SceneSetting } from "../src/render/sceneSettings.ts";
 import { setSensitivity, setExpansion, setSmoothing } from "../src/audio/sensitivity.ts";
 import { NEUTRAL, type DialValues } from "../src/render/musicProfile.ts";
@@ -31,6 +32,7 @@ const ALL_SETTINGS: SceneSetting[] = [
   ...(causticsScene.settings ?? []),
   ...(meshGridScene.settings ?? []),
   ...(chladniScene.settings ?? []),
+  ...(dancersScene.settings ?? []),
   getSensitivitySpec(),
   getExpansionSpec(),
   getSmoothingSpec(),

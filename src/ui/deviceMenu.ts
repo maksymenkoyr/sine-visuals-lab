@@ -112,11 +112,16 @@ import {
  *
  * Keyboard layer, live only while the panel is open (see onKeyDown): H
  * closes it, M hides/shows the meters column. Tab / Shift+Tab walk a ring over every
- * .vc-slider/.vc-toggle/.vc-fader in document order, wrapping at both ends
+ * .vc-slider/.vc-toggle/.vc-picker/.vc-fader in document order, wrapping at both ends
  * and skipping every chip and button — so Tab alone never leaves the panel
  * and never lands anywhere but a control. On whichever control has focus, A
  * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
- * are its own, in bandFaders.ts). Digit keys 1-9 jump to a numbered block —
+ * are its own, in bandFaders.ts). D is dev-only (DeviceMenuDeps.devDefault):
+ * on a scene-setting row, it persists the row's current value as its new
+ * default, so R/↺ from then on snaps back to that instead of the value
+ * baked into the scene's SceneSetting spec (see tuning/defaults.ts) — a
+ * production build never sets devDefault, so the key no-ops there. Digit
+ * keys 1-9 jump to a numbered block —
  * each card title and each scene group heading carries a .vc-block badge,
  * renumbered by renumberBlocks() whenever the block set can change (i.e. on
  * every renderSceneSettings) — and focus the first control inside it,
@@ -205,6 +210,15 @@ export interface DeviceMenuDeps {
     get(sceneId: string, key: string): number | undefined;
     set(sceneId: string, key: string, value: number): void;
     clear(sceneId: string, key: string): void;
+  };
+  /** Dev-only: read/write a per-(scene,key) override of a scene setting's
+   *  shipped default — see tuning/defaults.ts. Its presence is what turns on
+   *  a scene-setting row's D hotkey ("set current value as default") and its
+   *  absence in a production build hides that affordance, same as devPin
+   *  above. */
+  devDefault?: {
+    get(sceneId: string, key: string): number | undefined;
+    set(sceneId: string, key: string, value: number): void;
   };
   /** Global per-band adaptive-normalization amount — see src/audio/autoGain.ts.
    *  AUTO_GAIN_MIN (the default) is the fixed mapping against the analyser's
@@ -483,6 +497,13 @@ interface ControlRowSpec {
      *  clearing a pin never fights whatever else currently owns the row. */
     resolve(): number;
   };
+  /** Dev-only: makes D (while this row's control has focus) persist the
+   *  row's current value as its new default — see DeviceMenuDeps.devDefault.
+   *  Omit to leave the D hotkey a no-op for this row (any prod build, or a
+   *  row this affordance doesn't apply to). */
+  devDefault?: {
+    set(value: number): void;
+  };
 }
 
 /** Wires A/R/T on a row's own focusable control (the slider or the toggle
@@ -493,7 +514,7 @@ interface ControlRowSpec {
  *  with no auto weights (the A key then no-ops, matching the hidden chip). */
 function wireRowKeys(
   control: HTMLElement,
-  actions: { auto?: () => void; reset: () => void; toggleOff: () => void },
+  actions: { auto?: () => void; reset: () => void; toggleOff: () => void; setDefault?: () => void },
 ): void {
   control.addEventListener("keydown", (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
@@ -510,6 +531,11 @@ function wireRowKeys(
       case "t":
         e.preventDefault();
         actions.toggleOff();
+        break;
+      case "d":
+        if (!actions.setDefault) return;
+        e.preventDefault();
+        actions.setDefault();
         break;
     }
   });
@@ -599,7 +625,11 @@ function createControlRow(spec: ControlRowSpec) {
     pinInput.type = "text";
     pinInput.inputMode = "decimal";
     pinInput.className = "vc-pin-input";
-    pinInput.style.cssText = `${digitsStyle} background: transparent; border: none; outline: none; width: 4.5em; display: none;`;
+    // Color/border/background live in the .vc-pin-input rule (controlsTheme.ts),
+    // not here — an inline color would win over it and inputs don't inherit
+    // color the way a span does, which is how this used to render black
+    // text on the panel's dark glass.
+    pinInput.style.cssText = `${digitsStyle} width: 4.5em; display: none;`;
     readout.insertBefore(pinInput, digits);
 
     // stopPropagation on both the trigger and the field itself so el's own
@@ -873,6 +903,17 @@ function createControlRow(spec: ControlRowSpec) {
     auto: spec.auto ? () => chip.click() : undefined,
     reset: () => resetBtn.click(),
     toggleOff: () => offChip.click(),
+    // Persists the row's current value, then mutates spec.defaultValue in
+    // place — resetBtn's click handler and display() both read it fresh off
+    // this same captured spec object on every call, so ↺/R immediately
+    // target the new default with no row rebuild needed.
+    setDefault: spec.devDefault
+      ? () => {
+          spec.devDefault!.set(lastValue);
+          spec.defaultValue = lastValue;
+          resetBtn.style.visibility = "hidden";
+        }
+      : undefined,
   });
 
   return {
@@ -980,6 +1021,113 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   wireRowKeys(toggle, {
     reset: () => resetBtn.click(),
     toggleOff: () => toggle.click(),
+  });
+
+  return el;
+}
+
+interface PickerRowSpec {
+  label: string;
+  accent: string;
+  /** Names in value order — the stored value is the chosen index. */
+  options: readonly string[];
+  defaultValue: number;
+  description?: string;
+  get: () => number;
+  set: (value: number) => void;
+}
+
+/** An enum setting's row: same head as a toggle row, a strip of named chips
+ *  (the palette picker's chips) where the slider would be. The strip is the
+ *  one focusable control so it sits in the Tab ring like a slider; ←/→ (and
+ *  the T hotkey) cycle the choice. Never auto-tunable, for the same reason
+ *  a toggle isn't — see createToggleRow. */
+function createPickerRow(spec: PickerRowSpec): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = spec.label;
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  const right = document.createElement("div");
+  right.style.cssText = rowRightStyle;
+  const readout = document.createElement("span");
+  readout.style.cssText = `${digitsTextStyle} color: #fff;`;
+  const resetBtn = document.createElement("button");
+  resetBtn.textContent = "↺";
+  resetBtn.title = `Reset ${spec.label} (R)`;
+  resetBtn.style.cssText = rowResetStyle;
+  right.append(readout, resetBtn);
+  head.append(label, right);
+
+  const strip = document.createElement("div");
+  strip.className = "vc-picker";
+  strip.tabIndex = 0;
+  strip.setAttribute("role", "radiogroup");
+  strip.setAttribute("aria-label", spec.label);
+  strip.style.cssText = paletteListStyle;
+  el.style.setProperty("--vc-accent", spec.accent);
+  const chips = spec.options.map((name, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = name;
+    btn.setAttribute("role", "radio");
+    btn.tabIndex = -1; // the strip is the ring's stop, not each chip
+    btn.addEventListener("click", () => {
+      apply(i);
+      spec.set(i);
+      strip.focus();
+    });
+    strip.appendChild(btn);
+    return btn;
+  });
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  hint.textContent = spec.description ?? "";
+  if (!spec.description) hint.style.display = "none";
+
+  el.append(head, strip, hint);
+
+  const clampIndex = (value: number): number =>
+    Math.min(spec.options.length - 1, Math.max(0, Math.round(value)));
+
+  let current = clampIndex(spec.get());
+  function apply(value: number): void {
+    current = clampIndex(value);
+    chips.forEach((chip, i) => {
+      chip.style.cssText = i === current ? paletteChipLitStyle : paletteChipStyle;
+      chip.setAttribute("aria-checked", String(i === current));
+    });
+    readout.textContent = spec.options[current];
+    resetBtn.style.visibility = current !== clampIndex(spec.defaultValue) ? "visible" : "hidden";
+  }
+  apply(current);
+
+  const cycle = (step: number): void => {
+    const next = (current + step + spec.options.length) % spec.options.length;
+    apply(next);
+    spec.set(next);
+  };
+  strip.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      cycle(1);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      cycle(-1);
+    }
+  });
+  resetBtn.addEventListener("click", () => {
+    apply(spec.defaultValue);
+    spec.set(clampIndex(spec.defaultValue));
+  });
+
+  wireRowKeys(strip, {
+    reset: () => resetBtn.click(),
+    toggleOff: () => cycle(1),
   });
 
   return el;
@@ -1434,10 +1582,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
-  // Builds one setting's row (boolean toggle or slider) into `container` —
+  // Builds one setting's row (enum picker, boolean toggle or slider) into `container` —
   // shared by the direct-to-sceneRows path and the advanced-section path
   // below, so a row behaves identically wherever it lands.
   function appendSettingRow(container: HTMLElement, sceneId: string, spec: SceneSetting): void {
+    if (spec.type === "enum" && spec.options) {
+      container.appendChild(
+        createPickerRow({
+          label: spec.label,
+          accent: SCENE_VIOLET,
+          options: spec.options,
+          defaultValue: spec.default,
+          description: spec.description,
+          get: () => deps.getSceneSettingValue(sceneId, spec),
+          set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
+        }),
+      );
+      return;
+    }
     if (spec.type === "boolean") {
       container.appendChild(
         createToggleRow({
@@ -1452,13 +1614,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       return;
     }
 
+    const devDefault = deps.devDefault;
     const row = createControlRow({
       label: spec.label,
       accent: SCENE_VIOLET,
       min: spec.min,
       max: spec.max,
       step: spec.step,
-      defaultValue: spec.default,
+      defaultValue: devDefault?.get(sceneId, spec.key) ?? spec.default,
       mapping: "linear",
       format: formatSetting,
       description: spec.description,
@@ -1474,6 +1637,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           }
         : undefined,
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
+      devDefault: devDefault ? { set: (value) => devDefault.set(sceneId, spec.key, value) } : undefined,
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));
@@ -1681,7 +1845,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // to controls with a layout box: a folded card's body is display:none, and
   // a control inside it would otherwise sit in the ring and fail to focus.
   function ringElements(): HTMLElement[] {
-    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-fader")].filter(
+    return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker, .vc-fader")].filter(
       (el) => el.getClientRects().length > 0,
     );
   }

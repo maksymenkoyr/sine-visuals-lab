@@ -363,6 +363,26 @@ const stylesheet = `
 .vc-toggle[aria-checked="true"] { background: var(--vc-accent); }
 .vc-toggle[aria-checked="true"]::after { transform: translateX(14px); background: #070a09; }
 
+/* An enum setting's chip strip (deviceMenu.ts createPickerRow): the strip is
+ * the focusable ring stop, so it rings as a whole rather than chip by chip. */
+.vc-picker { outline: none; border-radius: 4px; margin-top: 6px; }
+.vc-picker:focus-visible {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--vc-accent) 70%, transparent);
+}
+
+/* Dev-only typed-value field (deviceMenu.ts's pinOpenEdit), swapped in over a
+ * row's digits on click. Inputs don't inherit color from an ancestor span the
+ * way inline text does, so this needs its own color rather than relying on
+ * readoutStyle's — and living here rather than in the inline cssText lets the
+ * row's --vc-accent reach it, matching the underline to whichever card the
+ * row belongs to. */
+.vc-pin-input {
+  box-sizing: border-box; color: #fff; caret-color: var(--vc-accent);
+  border: none; border-bottom: 1px solid var(--vc-accent); border-radius: 1px;
+  outline: none; padding: 0 2px 1px; margin: 0 -2px;
+  background: color-mix(in srgb, var(--vc-accent) 12%, transparent);
+}
+
 /* Chrome buttons (index.html) ring while their thing is active: the gear
  * while this panel is open, fullscreen while immersed. */
 .iconBtn[aria-pressed="true"] { border-color: rgba(255, 255, 255, 0.5); color: #fff; }
