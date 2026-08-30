@@ -1,15 +1,21 @@
 import { describe, it, expect } from "vitest";
 import {
+  BOLT_SEGMENTS,
+  SHAPE_VARIANTS,
+  buildBoltPath,
   buildCloud,
+  buildLobeSets,
   buildLobes,
   buildNoiseVolume,
   buildShapeVolume,
+  buildSurfaceNet,
   createRng,
   createStrikePool,
   insideCloud,
   particleCountForQuality,
   sampleStrikeSegment,
   shapeAt,
+  shapePhaseWeights,
   strikeEnvelope,
   type Lobe,
 } from "../src/render/scenes/storm.ts";
@@ -132,37 +138,165 @@ describe("storm strike pool", () => {
       expect(insideCloud(bx, by, bz)).toBe(true);
       const len = Math.hypot(bx - ax, by - ay, bz - az);
       expect(len).toBeGreaterThan(0);
-      expect(len).toBeLessThanOrEqual(0.6 + 1e-9);
+      expect(len).toBeLessThanOrEqual(0.85 + 1e-9);
     }
   });
 
-  it("stamps the birth time on the slot it reclaims, and only that slot", () => {
+  it("draws the fired slot's bolt path between its own endpoints and marks only it dirty", () => {
     const pool = createStrikePool(lobes, createRng(6));
-    expect(Array.from(pool.birth).every((b) => b === -1e6)).toBe(true);
-    expect(pool.trigger(1, false, 12.5)).toBe(true);
-    const first = Array.from(pool.birth).findIndex((b) => b !== -1e6);
-    expect(first).toBeGreaterThanOrEqual(0);
-    expect(pool.birth[first]).toBe(12.5);
-    Array.from(pool.birth).forEach((b, i) => {
-      if (i !== first) expect(b).toBe(-1e6);
-    });
+    expect(Array.from(pool.pathDirty).every((d) => d === 0)).toBe(true);
+    expect(pool.trigger(1)).toBe(true);
+    const slot = Array.from(pool.pathDirty).indexOf(1);
+    expect(slot).toBeGreaterThanOrEqual(0);
+    expect(Array.from(pool.pathDirty).filter((d) => d === 1)).toHaveLength(1);
 
-    pool.tick(0.2, 0.4, 0.5);
-    expect(pool.trigger(0.8, false, 12.7)).toBe(true);
-    const second = Array.from(pool.birth).findIndex((b) => b === 12.7);
-    expect(second).not.toBe(first);
-    // The earlier strike's embers keep ageing against their own birth.
-    expect(pool.birth[first]).toBe(12.5);
+    const verts = BOLT_SEGMENTS + 1;
+    const o = slot * verts * 3;
+    for (let k = 0; k < 3; k++) {
+      expect(pool.path[o + k]).toBeCloseTo(pool.posA[slot * 3 + k], 6);
+      expect(pool.path[o + (verts - 1) * 3 + k]).toBeCloseTo(pool.posB[slot * 3 + k], 6);
+    }
+    // Every other slot's path is still untouched.
+    for (let i = 0; i < pool.pathDirty.length; i++) {
+      if (i === slot) continue;
+      const zeros = Array.from(pool.path.subarray(i * verts * 3, (i + 1) * verts * 3));
+      expect(zeros.every((v) => v === 0)).toBe(true);
+    }
   });
 
-  it("leaves a slot that has never fired at its never-born birth", () => {
-    const pool = createStrikePool(lobes, createRng(7));
-    pool.trigger(1, false, 3);
-    for (let i = 0; i < 60; i++) pool.tick(1 / 60, 0.4, 0.5);
-    const idle = Array.from(pool.birth).filter((b) => b === -1e6);
-    // Every slot but the one that fired — an ember of any lifetime is long
-    // dead at (now - -1e6), which is what keeps idle slots from drawing.
-    expect(idle).toHaveLength(pool.birth.length - 1);
+  it("places new strikes in whatever lobes it was last pointed at", () => {
+    // The cloud morphs, so render() re-points the pool as the shape phase
+    // moves; a strike has to land in the silhouette that is actually drawn.
+    const far: Lobe[] = [{ cx: 0, cy: 0.5, cz: 0, r: 0.05 }];
+    const pool = createStrikePool(lobes, createRng(8));
+    pool.setLobes(far);
+    expect(pool.trigger(1)).toBe(true);
+    const slot = Array.from(pool.strength).findIndex((s) => s > 0);
+    expect(Math.hypot(pool.posA[slot * 3] - 0, pool.posA[slot * 3 + 1] - 0.5, pool.posA[slot * 3 + 2] - 0))
+      .toBeLessThan(0.2);
+  });
+});
+
+describe("storm bolt path", () => {
+  const ends: [number[], number[]] = [[-0.4, 0.1, 0.2], [0.5, -0.2, -0.1]];
+
+  it("is one vertex per segment plus one, exactly on the strike's endpoints", () => {
+    const path = buildBoltPath(createRng(1), ends[0], ends[1]);
+    expect(path.length).toBe((BOLT_SEGMENTS + 1) * 3);
+    for (let k = 0; k < 3; k++) {
+      // Float32 storage, so "exactly" is to the precision the buffer holds.
+      expect(path[k]).toBeCloseTo(ends[0][k], 6);
+      expect(path[BOLT_SEGMENTS * 3 + k]).toBeCloseTo(ends[1][k], 6);
+    }
+  });
+
+  it("kinks every interior vertex, but never far off the straight line", () => {
+    // The displacement halves per level, so the whole train sums to well
+    // under half the segment's length however deep the recursion goes.
+    const [a, b] = ends;
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    let offAxis = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const path = buildBoltPath(createRng(seed), a, b);
+      for (let i = 1; i < BOLT_SEGMENTS; i++) {
+        const p = [path[i * 3], path[i * 3 + 1], path[i * 3 + 2]];
+        const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        const ap = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
+        const t = (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / (len * len);
+        const d = Math.hypot(ap[0] - t * ab[0], ap[1] - t * ab[1], ap[2] - t * ab[2]);
+        expect(d).toBeLessThan(len * 0.5);
+        if (d > 1e-4) offAxis++;
+      }
+    }
+    expect(offAxis).toBeGreaterThan(0);
+  });
+
+  it("is deterministic for a given rng, and different for a different one", () => {
+    const a = Array.from(buildBoltPath(createRng(4), ends[0], ends[1]));
+    const b = Array.from(buildBoltPath(createRng(4), ends[0], ends[1]));
+    const c = Array.from(buildBoltPath(createRng(5), ends[0], ends[1]));
+    expect(a).toEqual(b);
+    expect(a).not.toEqual(c);
+  });
+
+  it("writes into a shared buffer at the offset it is given, touching nothing else", () => {
+    const verts = BOLT_SEGMENTS + 1;
+    const out = new Float32Array(verts * 3 * 2);
+    buildBoltPath(createRng(2), ends[0], ends[1], out, verts * 3);
+    expect(Array.from(out.subarray(0, verts * 3)).every((v) => v === 0)).toBe(true);
+    expect(out[verts * 3]).toBeCloseTo(ends[0][0], 6);
+  });
+});
+
+describe("storm shape phase", () => {
+  it("blends two adjacent variants, with weights summing to 1", () => {
+    for (let p = -3; p <= 9; p += 0.13) {
+      const { a, b, f } = shapePhaseWeights(p);
+      expect(a).toBeGreaterThanOrEqual(0);
+      expect(a).toBeLessThan(SHAPE_VARIANTS);
+      expect(b).toBe((a + 1) % SHAPE_VARIANTS);
+      expect(f).toBeGreaterThanOrEqual(0);
+      expect(f).toBeLessThan(1);
+      expect((1 - f) + f).toBeCloseTo(1, 12);
+    }
+  });
+
+  it("is a pure variant at every whole phase, and loops back to the first", () => {
+    expect(shapePhaseWeights(0)).toEqual({ a: 0, b: 1, f: 0 });
+    expect(shapePhaseWeights(2)).toEqual({ a: 2, b: 3, f: 0 });
+    // The variants are a loop: the phase past the last one wraps to variant 0
+    // rather than parking, which is what lets the slow drift keep morphing.
+    expect(shapePhaseWeights(SHAPE_VARIANTS)).toEqual({ a: 0, b: 1, f: 0 });
+    expect(shapePhaseWeights(SHAPE_VARIANTS - 1).b).toBe(0);
+  });
+});
+
+describe("storm surface net", () => {
+  const RES = 24;
+  const BOUNDS: [number, number, number] = [1, 1, 1];
+  const RADIUS = 0.6;
+  // A sphere as an analytic density: 1 at the centre, falling linearly to 0
+  // at the bounds, so the iso surface below is a sphere of a known radius.
+  const sphere = (iso: number) => (i: number, j: number, k: number) => {
+    const x = (i / RES) * 2 - 1;
+    const y = (j / RES) * 2 - 1;
+    const z = (k / RES) * 2 - 1;
+    return iso + (RADIUS - Math.hypot(x, y, z));
+  };
+
+  it("puts every vertex in a thin shell at the iso radius, with lines in range", () => {
+    const { positions, lines } = buildSurfaceNet(sphere(0.5), 0.5, RES, BOUNDS);
+    expect(positions.length).toBeGreaterThan(0);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.length % 2).toBe(0);
+    const cell = 2 / RES;
+    for (let i = 0; i < positions.length; i += 3) {
+      const r = Math.hypot(positions[i], positions[i + 1], positions[i + 2]);
+      expect(Math.abs(r - RADIUS)).toBeLessThan(cell);
+    }
+    for (const idx of lines) expect(idx).toBeLessThan(positions.length / 3);
+  });
+
+  it("returns an empty mesh for a field that never crosses the iso value", () => {
+    const empty = buildSurfaceNet(() => 0, 0.5, RES, BOUNDS);
+    expect(empty.positions.length).toBe(0);
+    expect(empty.lines.length).toBe(0);
+    const solid = buildSurfaceNet(() => 1, 0.5, RES, BOUNDS);
+    expect(solid.positions.length).toBe(0);
+    expect(solid.lines.length).toBe(0);
+  });
+
+  it("links a vertex only to neighbouring cells, so no line spans the shape", () => {
+    const { positions, lines } = buildSurfaceNet(sphere(0.5), 0.5, RES, BOUNDS);
+    // One cell apart in one axis, plus the sub-cell slack the centroid
+    // placement can add on the other two.
+    const maxLen = (2 / RES) * 3;
+    for (let i = 0; i < lines.length; i += 2) {
+      const a = lines[i] * 3;
+      const b = lines[i + 1] * 3;
+      const d = Math.hypot(positions[a] - positions[b], positions[a + 1] - positions[b + 1], positions[a + 2] - positions[b + 2]);
+      expect(d).toBeLessThan(maxLen);
+    }
   });
 });
 
@@ -317,24 +451,39 @@ describe("storm shape field", () => {
     expect(shapeAt(pair, 0, 0, 0)).toBeGreaterThan(Math.max(left, right));
   });
 
-  it("bakes to size^3 bytes that are zero on every face of the box", () => {
-    const size = 16;
-    const lobes = buildLobes(createRng(3));
-    const data = buildShapeVolume(size, lobes);
-    expect(data.length).toBe(size * size * size);
-    const at = (x: number, y: number, z: number) => data[(z * size + y) * size + x];
-    for (let a = 0; a < size; a++) {
-      for (let b = 0; b < size; b++) {
-        // Every box face lies outside the bounding ellipsoid, which is what
-        // makes the shader's CLAMP_TO_EDGE lookup safe.
-        expect(at(0, a, b)).toBe(0);
-        expect(at(size - 1, a, b)).toBe(0);
-        expect(at(a, 0, b)).toBe(0);
-        expect(at(a, size - 1, b)).toBe(0);
-        expect(at(a, b, 0)).toBe(0);
-        expect(at(a, b, size - 1)).toBe(0);
+  it("bakes one silhouette per channel, every one zero on every face of the box", () => {
+    // The real lobe sets, at a resolution fine enough to stand in for the one
+    // the scene bakes: the fade into the bounding ellipsoid is what drives a
+    // face texel to zero, and a coarse volume samples it before it has faded.
+    const size = 32;
+    const lobeSets = buildLobeSets();
+    const data = buildShapeVolume(size, lobeSets);
+    expect(data.length).toBe(size * size * size * 4);
+    const at = (x: number, y: number, z: number, c: number) => data[((z * size + y) * size + x) * 4 + c];
+    for (let c = 0; c < 4; c++) {
+      for (let a = 0; a < size; a++) {
+        for (let b = 0; b < size; b++) {
+          // Every box face lies outside the bounding ellipsoid, which is what
+          // makes the shader's CLAMP_TO_EDGE lookup safe — in every channel,
+          // since shape() now reads all four.
+          expect(at(0, a, b, c)).toBe(0);
+          expect(at(size - 1, a, b, c)).toBe(0);
+          expect(at(a, 0, b, c)).toBe(0);
+          expect(at(a, size - 1, b, c)).toBe(0);
+          expect(at(a, b, 0, c)).toBe(0);
+          expect(at(a, b, size - 1, c)).toBe(0);
+        }
       }
     }
-    expect(Math.max(...data)).toBeGreaterThan(200);
+    expect(data.reduce((m, v) => Math.max(m, v), 0)).toBeGreaterThan(200);
+  });
+
+  it("gives every variant its own cloud, and keeps variant 0 the one the points sample", () => {
+    const sets = buildLobeSets();
+    expect(sets).toHaveLength(SHAPE_VARIANTS);
+    // buildCloud draws its lobes from a fresh rng on CLOUD_SEED, exactly as
+    // variant 0 does — that is what puts the points inside the gas at phase 0.
+    expect(buildCloud(16).lobes).toEqual(sets[0]);
+    for (let i = 1; i < sets.length; i++) expect(sets[i]).not.toEqual(sets[0]);
   });
 });
