@@ -232,7 +232,10 @@ const HISTORY_HEIGHT_CSS_PX = 48;
 const histCanvasStyle = `display: block; width: 100%; height: ${HISTORY_HEIGHT_CSS_PX}px; margin-top: 4px;`;
 const HISTORY_LEVEL_COLOR = "rgba(255,255,255,0.85)";
 const HISTORY_ENERGY_COLOR = INPUT_GREEN;
-const HISTORY_FIXED_COLOR = withAlpha(INPUT_GREEN, 0.4);
+// A different hue from Energy's green, not just a dimmer shade of it — the
+// two need to read apart at a glance, and blue is already this UI's colour
+// for the auto-gain/auto-tune system (AUTO_SKY, Character card).
+const HISTORY_FIXED_COLOR = withAlpha(AUTO_SKY, 0.75);
 
 // A trace's colour key: a short line swatch (these are lines on the canvas,
 // not points) beside a caption in the same small-mono voice as tickLabelStyle
