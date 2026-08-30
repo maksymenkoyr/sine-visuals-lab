@@ -4,6 +4,7 @@ import { createBeatClock, type BeatClock } from "./beatClock.ts";
 import { createBandEnergy, type BandEnergy } from "./bandEnergy.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
+import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroid.ts";
 import { SMOOTHING_DEFAULT, smoothingRateScale } from "../audio/sensitivity.ts";
 
 // Bundles every per-frame renderer-side clock a scene might want, so
@@ -50,6 +51,13 @@ export interface AnimFrame {
    *  meters panel's RAW chip (src/ui/audioMeters.ts). JS-side only — never
    *  uploaded as uniforms, the same way lowOnset/midOnset aren't. */
   raw: { sectionIntensity: number; profile: DialValues };
+  /** Fast, range-adapted spectral centroid — see spectralCentroid.ts for why
+   *  it differs from profile.brightness (that's a slow track descriptor;
+   *  this is a live signal safe to drive a scene's color/motion from). */
+  centroid: number;
+  /** The unsmoothed, absolute counterpart to centroid — see
+   *  spectralCentroid.ts. */
+  centroidRaw: number;
 }
 
 export interface AnimClock {
@@ -73,6 +81,7 @@ export function createAnimClock(): AnimClock {
   const bandEnergy: BandEnergy = createBandEnergy();
   const section: SectionIntensity = createSectionIntensity();
   const profile: MusicProfile = createMusicProfile();
+  const centroid: SpectralCentroid = createSpectralCentroid();
   let beatPulse = 0;
 
   return {
@@ -83,6 +92,7 @@ export function createAnimClock(): AnimClock {
       bandEnergy.advance(dtSec, frame.bands, rateScale);
       section.advance(dtSec, frame.energy, rateScale);
       profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
+      centroid.advance(dtSec, frame.bands, rateScale);
 
       beatPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
       if (frame.beat) beatPulse = 1;
@@ -120,6 +130,8 @@ export function createAnimClock(): AnimClock {
           sectionIntensity: section.rawIntensity,
           profile: { ...profile.targets },
         },
+        centroid: centroid.centroid,
+        centroidRaw: centroid.raw,
       };
     },
   };

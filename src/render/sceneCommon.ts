@@ -28,6 +28,7 @@ uniform float uMidPulse;
 uniform float uHighPulse;
 uniform float uSectionIntensity; // phrase-level loudness trend — see sectionIntensity.ts
 uniform float uDropPulse;        // decaying flash on a detected section change/drop
+uniform float uCentroid; // range-adapted spectral centroid — see spectralCentroid.ts; 0.5 is this track's own recent middle
 uniform float uMaxSteps; // quality.raymarchSteps, for raymarched scenes
 uniform float uDetail;   // 0..1 quality proxy, for density/bloom scaling
 uniform vec3 uPalA;
@@ -94,6 +95,7 @@ export function uploadCommonUniforms(
   prog.setF("uHighPulse", anim.highPulse);
   prog.setF("uSectionIntensity", anim.sectionIntensity);
   prog.setF("uDropPulse", anim.dropPulse);
+  prog.setF("uCentroid", anim.centroid);
   prog.setF("uMaxSteps", ctx.quality.raymarchSteps);
   prog.setF("uDetail", ctx.quality.detail);
   for (const s of settings) {
