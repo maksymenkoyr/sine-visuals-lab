@@ -2,7 +2,8 @@ import { NUM_BANDS } from "../audio/types.ts";
 import { formatHz } from "../audio/bandScale.ts";
 import type { BandSplit } from "../audio/bandSplit.ts";
 import { BAND_FADER_COUNT, BAND_GAIN_MIN, FADER_CENTER_POS, faderWeights, gainToFaderPos } from "../audio/bandGains.ts";
-import { BANDS_AMBER, FADER_OFF, FONT_MONO, STRIP_HIGH, STRIP_LOW, STRIP_MID, withAlpha } from "./controlsTheme.ts";
+import { bandIndexCentroid } from "../render/spectralCentroid.ts";
+import { AUTO_SKY, BANDS_AMBER, FADER_OFF, FONT_MONO, STRIP_HIGH, STRIP_LOW, STRIP_MID, withAlpha } from "./controlsTheme.ts";
 
 /**
  * Live spectrum analyser strip for the controls panel, with the band faders
@@ -31,6 +32,17 @@ import { BANDS_AMBER, FADER_OFF, FONT_MONO, STRIP_HIGH, STRIP_LOW, STRIP_MID, wi
  *  - pinned: which bands the gain stage clamped this frame (bandGains.ts's
  *    pinnedBands); their peak cap turns white, the one cue that a boost has
  *    stopped doing anything.
+ *
+ * On top of the bars, a sky-blue marker flags the spectral centroid
+ * (spectralCentroid.ts's exported bandIndexCentroid, the same formula
+ * AnimFrame.centroid is built from) — but computed fresh each draw against
+ * whichever buffer is actually on screen (rawBuf or processedBuf, per the
+ * RAW chip), not read from AnimFrame. It has to be: this chart's x-axis is
+ * one column per band index, so the centroid has a literal, checkable
+ * position on it — "where the bars' mass balances" — and that's only true
+ * against the exact bars currently drawn. AnimFrame.centroid is derived
+ * from a different buffer mid-pipeline and is range-adapted besides, so it
+ * has no x-position on this axis at all.
  *
  * Plain 2D canvas, not WebGL — the gallery's preview tiles already spend a
  * GL context each; a bar chart doesn't need one. The canvas is transparent:
@@ -85,6 +97,8 @@ const GHOST_ALPHA = 0.18;
 const DIM_ALPHA = 0.22; // a band outside the current highlight range
 const KNOB_W = 16;
 const KNOB_H = 10;
+const CENTROID_FLAG_W = 8;
+const CENTROID_FLAG_H = 6;
 
 const AXIS_TICKS_HZ = [100, 1000, 10000];
 
@@ -275,6 +289,34 @@ export function createSpectrumStrip(): SpectrumStrip {
     }
   }
 
+  // Drawn after drawFaders so it's never occluded by a knob/rail. Tracks
+  // whichever buffer drawBars is currently showing (see this file's header)
+  // rather than a value passed in, so toggling RAW moves the marker in
+  // lockstep with the bars it's describing.
+  function drawCentroidMarker(width: number, plotHeight: number): void {
+    const bands = showRaw ? rawBuf : processedBuf;
+    const hasData = showRaw ? hasRaw : hasProcessed;
+    if (!hasData) return;
+    const t = bandIndexCentroid(bands);
+    if (t === null) return;
+
+    const x = t * width;
+    ctx.strokeStyle = withAlpha(AUTO_SKY, 0.85);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, plotHeight);
+    ctx.stroke();
+
+    ctx.fillStyle = AUTO_SKY;
+    ctx.beginPath();
+    ctx.moveTo(x - CENTROID_FLAG_W / 2, 0);
+    ctx.lineTo(x + CENTROID_FLAG_W / 2, 0);
+    ctx.lineTo(x, CENTROID_FLAG_H);
+    ctx.closePath();
+    ctx.fill();
+  }
+
   function drawAxis(width: number, plotHeight: number): void {
     if (edgesHz.length !== NUM_BANDS + 1) return;
     ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
@@ -305,6 +347,7 @@ export function createSpectrumStrip(): SpectrumStrip {
     drawBars(width, plotHeight, dtSec);
     drawAxis(width, plotHeight);
     drawFaders(width, plotHeight);
+    drawCentroidMarker(width, plotHeight);
   }
 
   function requestRedraw(): void {

@@ -39,9 +39,9 @@ export type MeterCardId = "scope" | "signal" | "lufs" | "rhythm" | "character";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). */
-export type MeterRowId = "section" | "tempo" | "hits";
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid";
 
-export type SignalId = "feature.onset" | "anim.lowOnset" | "anim.dropOnset";
+export type SignalId = "feature.onset" | "anim.lowOnset" | "anim.dropOnset" | "anim.centroid";
 
 export interface SignalSpec {
   id: SignalId;
@@ -123,5 +123,14 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.dropPulse,
     monitor: { card: "rhythm", row: "section" },
+  }),
+  "anim.centroid": signal({
+    id: "anim.centroid",
+    label: "Centroid",
+    description:
+      "The live spectral centroid (AnimFrame.centroid, spectralCentroid.ts) — a fast, range-adapted counterpart to the slow Brightness dial above it on the Character card.",
+    kind: "level",
+    read: (_frame, anim) => anim.centroid,
+    monitor: { card: "character", row: "centroid" },
   }),
 };

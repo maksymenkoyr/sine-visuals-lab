@@ -26,6 +26,8 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     sectionIntensity: 0,
     dropPulse: 0,
     dropOnset: false,
+    centroid: 0,
+    centroidRaw: 0,
     profile: { pulse: 0, tempo: 0, brightness: 0, density: 0, dynamics: 0, attack: 0, loudness: 0 },
     raw: { sectionIntensity: 0, profile: { pulse: 0, tempo: 0, brightness: 0, density: 0, dynamics: 0, attack: 0, loudness: 0 } },
     ...overrides,

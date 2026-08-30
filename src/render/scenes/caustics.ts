@@ -206,6 +206,19 @@ const SETTINGS: SceneSetting[] = [
     // Busy mids churn the filaments; a bright mix reads as more mid-heavy too.
     auto: { density: 0.35, brightness: 0.1 },
   },
+  {
+    key: "centroidHue",
+    label: "Spectral hue",
+    description: "Palette drifts one way when the mix is brighter than usual for this track, the other way when it's darker",
+    group: "Spectrum",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+    // Already music-driven by construction (it reads the live centroid
+    // directly, see FRAG's huePhase) — no auto table needed on top of that.
+    reads: ["anim.centroid"],
+  },
   SPARKLE,
   // The constants that used to be hardcoded on the sparkle line in FRAG —
   // how bright, how many, how fine, how far the glints spread, and whether
@@ -322,15 +335,18 @@ const RIPPLE_DROP_AMP = 1.8;
 const RIPPLE_SLOPE_NORM = Math.sqrt(2 * RIPPLE_WIDTH) * Math.exp(0.5);
 const RIPPLE_REFRACT = 0.3;
 
-// Ceiling every focus setting converges to on a full-strength beat (see the
-// focusDrive comment in FRAG). Was 26 before focus setting stopped scaling
-// this directly — lowered alongside that change because a shared ceiling
-// now gets reached far more often (any focus setting, given a strong
+// Ceiling the on-beat peak reaches at uFocus = 1 (see the sharpCeil comment
+// in FRAG — every other focus value gets a proportionally lower ceiling).
+// Was 26 in a brief period where every focus setting shared this same
+// ceiling regardless of the slider — lowered then because that shared
+// ceiling got reached far more often (any focus setting, given a strong
 // enough beat, not just uFocus=1), and 26 pushes pow(ridge, sharp) close
 // enough to a step function that the underlying value-noise contour lines
 // read as a banded "pixel ladder" rather than a smooth thin ridge,
 // especially where the domain warp bunches several octaves' contours
-// together near the vortex point.
+// together near the vortex point. Kept at 18 here even though the ceiling
+// is no longer shared — still the same visual line-width danger zone at
+// uFocus = 1, and nothing about restoring per-focus scaling changes that.
 const FOCUS_SHARP_MAX = 18;
 
 // How hard the palette's cosine modulation damps where hue phase is
@@ -340,6 +356,13 @@ const FOCUS_SHARP_MAX = 18;
 // across every palette rather than implicitly assuming uPalC == 1 (true
 // only for "neon" — see src/render/palette.ts's presets).
 const HUE_DAMP_K = 1.2;
+
+// How far uCentroid's swing around its own 0.5 midpoint (see
+// spectralCentroid.ts) can push huePhase at uCentroidHue = 1 — modest
+// against the acc*0.3 ridge term and uTime*0.02 drift already driving
+// huePhase, so it reads as a tint that leans with the mix's own brightness
+// rather than a competing color cycle.
+const CENTROID_HUE_GAIN = 0.5;
 
 // The treble-sparkle sub-params (see the Sparkle group in SETTINGS above)
 // each interpolate between two endpoints of what used to be one hardcoded
@@ -582,27 +605,28 @@ void main() {
   int iterations = int(mix(3.0, 6.0, uDetail));
   float acc = 0.0;
   float amp = 1.0;
-  // Resting floor, scaled by uFocus — this is the scene's original design
-  // (focusDrive = uFocus * (0.35 + 0.65*beatPulse)), reinstated after
-  // dropping it (an earlier fix, "widen the beat swing instead of lifting
-  // the whole range") turned out to cost more than it fixed once the
-  // ceiling-convergence invariant below existed too: together they made
-  // sharp collapse to pure fog between every beat and swing the full
-  // distance to the ceiling on every single one — a much bigger, more
-  // constant swing than the scene ever had, which read as the pattern
-  // dissolving and reforming twice a second rather than a clean snap
-  // ("chaotic decay," "waves moving too much"). A straight linear mix from
-  // this floor to a *fixed* ceiling (not a response curve shaped by
-  // uFocus — that was a later addition this revert also drops, since nothing
-  // asked for it and it's part of what steepened the decay) reconstructs the
-  // original's swing and decay rate almost exactly, while still keeping the
-  // one thing worth keeping from the ceiling-convergence fix: the peak
-  // (uBeatPulse -> 1) always reaches FOCUS_SHARP_MAX regardless of uFocus,
-  // so low focus still isn't capped to a soft peak — only the floor moves
-  // with the slider now, exactly as it did originally.
-  float focusFloor = 0.35 * uFocus;
-  float focusDrive = mix(focusFloor, 1.0, uBeatPulse);
-  float sharp = mix(4.0, ${FOCUS_SHARP_MAX}.0, focusDrive) * (1.0 - bassBulge * 0.25);
+  // focusFrac is the *shape* of the beat response — 0.35 at rest, 1.0 on a
+  // full beat — fixed regardless of uFocus, which is what makes the resting
+  // floor and decay rate below reproduce the scene's original swing/decay
+  // almost exactly (verified via tune-sheet.mjs contact sheets; see git
+  // history for the "chaotic decay" regression a uFocus-shaped curve caused
+  // here once). uFocus itself instead scales sharpCeil, the ceiling that
+  // shape mixes toward — so it scales both ends of the range together
+  // (floor = 4 + (sharpCeil-4)*0.35, same value a fixed-ceiling floor
+  // formula of 4 + 0.35*14*uFocus would give) rather than only the floor.
+  // A fixed ceiling (an earlier version of this line) made every focus
+  // setting snap to the *same* peak sharpness/brightness on a hard beat —
+  // "no matter how hard the beat hits, low Focus still gets a soft peak"
+  // was fixed, but the cost was the opposite complaint: dragging the
+  // slider changed only the quiet in-between state, so the snap itself
+  // — the thing the slider is named for — looked identical at every
+  // setting. Scaling the ceiling too means uFocus = 0 now genuinely holds
+  // sharp at the floor (4, no snap at all) and uFocus = 1 reproduces
+  // today's on-beat peak (FOCUS_SHARP_MAX) exactly, with every value
+  // between scaling the whole swing proportionally.
+  float focusFrac = mix(0.35, 1.0, uBeatPulse);
+  float sharpCeil = mix(4.0, ${FOCUS_SHARP_MAX}.0, uFocus);
+  float sharp = mix(4.0, sharpCeil, focusFrac) * (1.0 - bassBulge * 0.25);
   float ridgeGain = sqrt(sharp / 4.0); // a thinner ridge is proportionally brightened, so Focus snaps intensity too, not just width
   // Warp compresses screen space into q-space, and near its own fold points
   // that compression runs unbounded — arbitrarily fine screen-space detail,
@@ -697,7 +721,8 @@ void main() {
   // fastest channel wraps sooner than a shared scalar constant can account
   // for. fwidth/exp are componentwise on vec3 in GLSL ES 3.00, so each
   // channel damps on its own actual wrap rate.
-  float huePhase = acc * 0.3 + uTime * 0.02 - bassBulge * 0.15;
+  float huePhase = acc * 0.3 + uTime * 0.02 - bassBulge * 0.15
+    + (uCentroid - 0.5) * uCentroidHue * ${CENTROID_HUE_GAIN.toFixed(2)};
   vec3 hueArg = 6.28318 * (uPalC * huePhase + uPalD);
   vec3 hueDamp = exp(-${HUE_DAMP_K.toFixed(2)} * fwidth(hueArg) * fwidth(hueArg));
   vec3 col = (uPalA + uPalB * cos(hueArg) * hueDamp) * acc;
