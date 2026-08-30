@@ -1,17 +1,21 @@
 import { describe, it, expect } from "vitest";
 import {
   buildModeTable,
-  createModeSelector,
-  spectralCentroid,
+  createPlateResponse,
+  modeFrequencyHz,
+  bandPosition,
+  ringSeconds,
   grainTextureSide,
   grainGain,
-  holdSeconds,
-  morphSeconds,
   MODE_TABLE,
-  ENERGY_GATE,
-  type ModeSelectorInputs,
+  ACTIVE_MODES,
+  FUNDAMENTAL_HZ_SMALL,
+  FUNDAMENTAL_HZ_LARGE,
+  type PlateResponseInputs,
 } from "../src/render/scenes/chladni.ts";
 import { qualitySettings } from "../src/render/quality.ts";
+import { MIN_HZ, MAX_HZ_CAP } from "../src/audio/bandScale.ts";
+import { NUM_BANDS } from "../src/audio/types.ts";
 
 describe("chladni mode table", () => {
   it("only holds n < m pairs (n == m is identically zero for the antisymmetric family)", () => {
@@ -37,27 +41,35 @@ describe("chladni mode table", () => {
     }
   });
 
-  it("starts at the simplest figure, (1, 2)", () => {
+  it("starts at the fundamental, (1, 2)", () => {
     expect(MODE_TABLE[0]).toMatchObject({ n: 1, m: 2 });
   });
 });
 
-describe("spectralCentroid", () => {
-  it("is 0 for silence rather than NaN", () => {
-    expect(spectralCentroid(new Float32Array(24))).toBe(0);
+describe("mode resonances", () => {
+  it("the fundamental sits at FUNDAMENTAL_HZ_SMALL on the smallest plate and at FUNDAMENTAL_HZ_LARGE on the largest", () => {
+    expect(modeFrequencyHz(MODE_TABLE[0], 0)).toBeCloseTo(FUNDAMENTAL_HZ_SMALL, 6);
+    expect(modeFrequencyHz(MODE_TABLE[0], 1)).toBeCloseTo(FUNDAMENTAL_HZ_LARGE, 6);
   });
 
-  it("is 0 for pure bass and 1 for pure treble", () => {
-    const bass = new Float32Array(24);
-    bass[0] = 1;
-    const treble = new Float32Array(24);
-    treble[23] = 1;
-    expect(spectralCentroid(bass)).toBe(0);
-    expect(spectralCentroid(treble)).toBe(1);
+  it("rises monotonically down the table at any plate size", () => {
+    for (const complexity of [0, 0.5, 1]) {
+      for (let i = 1; i < MODE_TABLE.length; i++) {
+        expect(modeFrequencyHz(MODE_TABLE[i], complexity)).toBeGreaterThanOrEqual(
+          modeFrequencyHz(MODE_TABLE[i - 1], complexity),
+        );
+      }
+    }
   });
 
-  it("is 0.5 for a flat spectrum", () => {
-    expect(spectralCentroid(new Float32Array(24).fill(0.3))).toBeCloseTo(0.5, 10);
+  it("bandPosition maps the ladder's ends to 0 and NUM_BANDS", () => {
+    expect(bandPosition(MIN_HZ)).toBeCloseTo(0, 10);
+    expect(bandPosition(MAX_HZ_CAP)).toBeCloseTo(NUM_BANDS, 10);
+  });
+
+  it("ring spans its documented range", () => {
+    expect(ringSeconds(0)).toBeCloseTo(0.1, 10);
+    expect(ringSeconds(1)).toBeCloseTo(1.5, 10);
   });
 });
 
@@ -77,122 +89,105 @@ describe("grain texture sizing", () => {
   });
 });
 
-describe("setting curves", () => {
-  it("hold spans 0.5s..8s across the slider", () => {
-    expect(holdSeconds(0)).toBeCloseTo(0.5, 10);
-    expect(holdSeconds(1)).toBeCloseTo(8, 10);
-  });
-
-  it("morph is slow at 0 and a near-snap at 1", () => {
-    expect(morphSeconds(0)).toBeCloseTo(3, 10);
-    expect(morphSeconds(1)).toBeLessThan(0.15);
-    expect(morphSeconds(0.5)).toBeLessThan(morphSeconds(0));
-  });
-});
-
-function inputs(overrides: Partial<ModeSelectorInputs> = {}): ModeSelectorInputs {
-  return {
-    centroid: 0.5,
-    energy: 0.5,
-    beat: false,
-    tempoLocked: false,
-    dropOnset: false,
-    complexity: 1,
-    holdSec: 1,
-    morphSec: 0.5,
-    ...overrides,
-  };
+function inputs(overrides: Partial<PlateResponseInputs> = {}): PlateResponseInputs {
+  return { complexity: 1, resonance: 0.6, ring: 0.4, ...overrides };
 }
 
-describe("mode selector", () => {
+/** Bands with all the energy in one band. */
+function tone(band: number, level = 1): Float32Array {
+  const b = new Float32Array(NUM_BANDS);
+  b[band] = level;
+  return b;
+}
+
+const SILENCE = new Float32Array(NUM_BANDS);
+
+function run(response: ReturnType<typeof createPlateResponse>, bands: Float32Array, seconds: number, inp = inputs()) {
   const dt = 1 / 60;
+  let modes = response.advance(0, bands, inp);
+  for (let t = 0; t < seconds; t += dt) modes = response.advance(dt, bands, inp);
+  return modes;
+}
 
-  it("starts fully on A with A === B", () => {
-    const sel = createModeSelector(MODE_TABLE, 2);
-    const s = sel.advance(dt, inputs({ centroid: 0 }));
-    expect(s.blend).toBe(1);
-    expect(s.index).toBe(2);
+describe("plate response", () => {
+  it("starts on the fundamental alone and holds it through silence", () => {
+    const r = createPlateResponse();
+    const modes = run(r, SILENCE, 2);
+    expect(modes).toHaveLength(ACTIVE_MODES);
+    expect(modes[0]).toMatchObject({ n: 1, m: 2, weight: 1 });
+    for (let k = 1; k < ACTIVE_MODES; k++) expect(modes[k].weight).toBe(0);
   });
 
-  it("holds through centroid jitter inside the hold time", () => {
-    const sel = createModeSelector(MODE_TABLE, 2);
-    for (let t = 0; t < 0.9; t += dt) {
-      const s = sel.advance(dt, inputs({ centroid: t % 0.1 < 0.05 ? 0.9 : 0.1, holdSec: 1 }));
-      expect(s.index).toBe(2);
-      expect(s.blend).toBe(1);
+  it("weights always sum to 1", () => {
+    const r = createPlateResponse();
+    for (const band of [0, 7, 15, 23]) {
+      const modes = run(r, tone(band), 1);
+      const sum = modes.reduce((s, m) => s + m.weight, 0);
+      expect(sum).toBeCloseTo(1, 6);
+      expect(modes[0].weight).toBeGreaterThanOrEqual(modes[ACTIVE_MODES - 1].weight);
     }
   });
 
-  it("switches once the hold expires, moving at most a few entries toward the target", () => {
-    const sel = createModeSelector(MODE_TABLE, 0);
-    // Feed a high centroid long enough for the eased pitch to land there.
-    let s = sel.state;
-    for (let t = 0; t < 1.2; t += dt) s = sel.advance(dt, inputs({ centroid: 1, holdSec: 1 }));
-    expect(s.blend).toBeLessThan(1); // a transition is under way
-    expect(s.index).toBe(0); // A is still shown while morphing
-    for (let t = 0; t < 0.5; t += dt) s = sel.advance(dt, inputs({ centroid: 1, holdSec: 1 }));
-    expect(s.blend).toBe(1);
-    expect(s.index).toBeGreaterThan(0);
-    expect(s.index).toBeLessThanOrEqual(3);
-    expect(s.a).toBe(s.b);
+  it("a bass tone on a big plate rings the fundamental; a treble tone on a small plate rings a fine mode", () => {
+    const bass = run(createPlateResponse(), tone(0), 1, inputs({ complexity: 1 }));
+    expect(bass[0]).toMatchObject({ n: 1, m: 2 });
+
+    const treble = run(createPlateResponse(), tone(NUM_BANDS - 1), 1, inputs({ complexity: 0 }));
+    const idx = MODE_TABLE.findIndex((m) => m.n === treble[0].n && m.m === treble[0].m);
+    expect(idx).toBeGreaterThan(MODE_TABLE.length / 2);
   });
 
-  it("with a tempo locked, waits for a beat before switching", () => {
-    const sel = createModeSelector(MODE_TABLE, 0);
-    let s = sel.state;
-    for (let t = 0; t < 1.5; t += dt) s = sel.advance(dt, inputs({ centroid: 1, holdSec: 1, tempoLocked: true }));
-    expect(s.blend).toBe(1);
-    expect(s.index).toBe(0);
-    s = sel.advance(dt, inputs({ centroid: 1, holdSec: 1, tempoLocked: true, beat: true }));
-    expect(s.blend).toBeLessThan(1);
+  it("the same mid tone rings a low mode on a small plate and a fine mode on a big one", () => {
+    const mid = 12; // ~800 Hz
+    const small = run(createPlateResponse(), tone(mid), 1, inputs({ complexity: 0 }));
+    const big = run(createPlateResponse(), tone(mid), 1, inputs({ complexity: 1 }));
+    const idxOf = (m: { n: number; m: number }) => MODE_TABLE.findIndex((t) => t.n === m.n && t.m === m.m);
+    expect(idxOf(small[0])).toBeLessThan(4);
+    expect(idxOf(big[0])).toBeGreaterThan(MODE_TABLE.length / 2);
   });
 
-  it("with a tempo locked but no beats arriving, switches anyway after a couple of holds", () => {
-    const sel = createModeSelector(MODE_TABLE, 0);
-    let s = sel.state;
-    for (let t = 0; t < 2.5; t += dt) s = sel.advance(dt, inputs({ centroid: 1, holdSec: 1, tempoLocked: true }));
-    expect(s.blend).toBeLessThan(1);
+  it("a tone off the end of the plate's range barely rings anything — the figure holds", () => {
+    // A big plate's finest mode sits near 1.2 kHz; a 14 kHz tone is far past it.
+    const r = createPlateResponse();
+    const modes = run(r, tone(NUM_BANDS - 1), 1, inputs({ complexity: 1 }));
+    expect(Math.max(...r.amplitudes)).toBeLessThan(1e-3);
+    expect(modes[0]).toMatchObject({ n: 1, m: 2, weight: 1 });
   });
 
-  it("blend reaches 1 after the morph duration, then A becomes B", () => {
-    const sel = createModeSelector(MODE_TABLE, 0);
-    let s = sel.state;
-    for (let t = 0; t < 1.2; t += dt) s = sel.advance(dt, inputs({ centroid: 1, holdSec: 1, morphSec: 0.5 }));
-    const target = s.b;
-    expect(s.blend).toBeLessThan(1);
-    s = sel.advance(0.5, inputs({ centroid: 1, holdSec: 1, morphSec: 0.5 }));
-    expect(s.blend).toBe(1);
-    expect(s.a).toBe(target);
+  it("a sharper resonance hands the dominant mode a bigger share", () => {
+    const damped = run(createPlateResponse(), tone(10), 1, inputs({ resonance: 0 }));
+    const sharp = run(createPlateResponse(), tone(10), 1, inputs({ resonance: 1 }));
+    expect(sharp[0].weight).toBeGreaterThan(damped[0].weight);
   });
 
-  it("a drop leaps immediately, ignoring the hold", () => {
-    const sel = createModeSelector(MODE_TABLE, 5);
-    const s = sel.advance(dt, inputs({ centroid: 1, holdSec: 8, dropOnset: true }));
-    expect(s.blend).toBeLessThan(1);
-    expect(MODE_TABLE.indexOf(s.b)).toBe(9);
+  it("keeps ringing after the tone stops, decaying over the Ring time, and the figure holds", () => {
+    const r = createPlateResponse();
+    const during = run(r, tone(10), 1);
+    const held = { n: during[0].n, m: during[0].m };
+    const peak = Math.max(...r.amplitudes);
+    const after = run(r, SILENCE, 0.5);
+    expect(Math.max(...r.amplitudes)).toBeLessThan(peak);
+    expect(Math.max(...r.amplitudes)).toBeGreaterThan(0);
+    expect(after[0]).toMatchObject(held);
   });
 
-  it("never re-tunes while the plate isn't being driven", () => {
-    const sel = createModeSelector(MODE_TABLE, 2);
-    let s = sel.state;
-    for (let t = 0; t < 5; t += dt) {
-      s = sel.advance(dt, inputs({ centroid: 1, holdSec: 0.5, energy: ENERGY_GATE / 2, dropOnset: true }));
-    }
-    expect(s.index).toBe(2);
-    expect(s.blend).toBe(1);
+  it("a longer Ring decays slower", () => {
+    const short = createPlateResponse();
+    run(short, tone(10), 1, inputs({ ring: 0 }));
+    run(short, SILENCE, 0.3, inputs({ ring: 0 }));
+    const long = createPlateResponse();
+    run(long, tone(10), 1, inputs({ ring: 1 }));
+    run(long, SILENCE, 0.3, inputs({ ring: 1 }));
+    expect(Math.max(...long.amplitudes)).toBeGreaterThan(Math.max(...short.amplitudes));
   });
 
-  it("stays inside the table at both complexity extremes", () => {
-    for (const complexity of [0, 1]) {
-      for (const centroid of [0, 1]) {
-        const sel = createModeSelector(MODE_TABLE, 20);
-        let s = sel.state;
-        for (let t = 0; t < 60; t += 0.1) s = sel.advance(0.1, inputs({ centroid, complexity, holdSec: 0.5, morphSec: 0.1 }));
-        expect(s.index).toBeGreaterThanOrEqual(0);
-        expect(s.index).toBeLessThanOrEqual(MODE_TABLE.length - 1);
-        if (complexity === 0) expect(s.index).toBe(0);
-        if (complexity === 1 && centroid === 1) expect(s.index).toBe(MODE_TABLE.length - 1);
-      }
-    }
+  it("moves to a new figure when the tone moves", () => {
+    // Default plate (complexity 0.5) spans roughly 150 Hz .. 4.4 kHz; both
+    // tones sit inside that.
+    const r = createPlateResponse();
+    const first = run(r, tone(6), 1, inputs({ complexity: 0.5 }));
+    const held = { n: first[0].n, m: first[0].m };
+    const second = run(r, tone(17), 2, inputs({ complexity: 0.5 }));
+    expect(second[0]).not.toMatchObject(held);
   });
 });

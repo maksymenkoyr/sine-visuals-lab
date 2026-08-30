@@ -8,8 +8,11 @@ regenerate it at session close.
 
 - **Chladni scene** — a simulated sand-on-vibrating-plate scene
   (`src/render/scenes/chladni.ts`): grains in ping-pong RGBA8 position
-  textures, kicked on antinodes and settling on nodal lines; music picks the
-  plate mode via `createModeSelector`. Branch `worktree-chladni-scene`
+  textures, kicked on antinodes and settling on nodal lines; every plate
+  mode is a resonance driven by the band energy at its own frequency
+  (`createPlateResponse`), the strongest few summed — a physical response,
+  not a scripted mode sweep. Plate fills the screen by default. Branch
+  `worktree-chladni-scene`
   (worktree at `.claude/worktrees/chladni-scene`), registered as a draft
   scene. Typecheck/tests green, headless-verified at high and floor quality,
   auto→manual probe sign-off done. Draft PR opened this session.
@@ -27,8 +30,10 @@ regenerate it at session close.
 ## Open questions
 
 - Chladni: should it graduate out of `DRAFT_SCENE_IDS`? It reads well on
-  synthetic audio; needs a pass on real music, and the hop/pull constants
-  (`HOP_FLOOR`, `PULL_RATE` in `chladni.ts`) were set by eye at 720p.
+  synthetic audio; needs a pass on real music. The hop/pull constants
+  (`HOP_FLOOR`, `PULL_RATE`) and the resonance window/sharpening range
+  (`WINDOW_BANDS_*`, `SHARPEN_*` in `chladni.ts`) were set by eye at 720p —
+  a damped plate under a dense mix may blur into mush.
 - Chladni on a Panorama room: grain positions live in plate space and the
   plate is sized from this device's `uResolution` aspect, the same
   approximation every fullscreen scene makes — unverified on a multi-device

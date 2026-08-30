@@ -1,4 +1,5 @@
 import { NUM_BANDS } from "../../audio/types.ts";
+import { MIN_HZ, MAX_HZ_CAP } from "../../audio/bandScale.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
@@ -6,26 +7,35 @@ import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 
-// A Chladni plate, simulated rather than painted: a square free plate driven
-// at one resonant mode at a time, with a bed of sand grains that each get
-// kicked wherever the plate moves (the antinodes) and come to rest where it
-// doesn't (the nodal lines). The classic figures aren't drawn anywhere in
-// this file — they *emerge* from grain motion, and re-emerge grain by grain
-// when the music moves the plate to a new mode. Contrast cymatics.ts, which
-// is an analytic circular-plate sum rendered per pixel; this one has state.
+// A Chladni plate, simulated rather than painted: a plate whose resonant
+// modes are each driven by the music's energy at that mode's own resonant
+// frequency, with a bed of sand grains that get kicked wherever the plate
+// moves (the antinodes) and come to rest where it doesn't (the nodal
+// lines). The classic figures aren't drawn anywhere in this file — they
+// *emerge* from grain motion, and re-form grain by grain when a different
+// mode takes over. Contrast cymatics.ts, which is an analytic circular-plate
+// sum rendered per pixel; this one has state.
 //
 // The plate. Plate space is p in [-1,1]^2. The mode shape is the standard
-// free-square-plate approximation
+// square-plate approximation
 //     chladni(p; n, m, s) = cos(n pi x) cos(m pi y) + s cos(m pi x) cos(n pi y)
-// with s = +/-1 picking one of the two symmetry families. n == m with
-// s = -1 is identically zero, so buildModeTable only holds pairs with
-// n < m, sorted by n^2 + m^2 — the eigenfrequency proxy — so walking the
-// table is "sweeping the driving frequency up". Music picks a table index
-// (createModeSelector: spectral centroid -> index, with a hold time and a
-// beat-gated switch so the figure holds and then *jumps*, the way a real
-// plate flips between figures as the frequency sweeps through resonance),
-// and the shader crossfades chladni(A) -> chladni(B) over the Morph setting
-// so grains migrate to the new lines instead of teleporting.
+// with s = +/-1 picking one of the two symmetry families (the mixing of the
+// two degenerate modes is real physics — it's where the diagonal symmetry
+// of square-plate figures comes from). n == m with s = -1 is identically
+// zero, so buildModeTable only holds pairs with n < m, sorted by n^2 + m^2,
+// which is also each mode's resonant frequency relative to the fundamental.
+//
+// The response. A real plate under broadband music answers as a sum of
+// every mode near any energy in the signal, each ringing with its own
+// damping — a pure tone gives one clean figure, a chord blurs neighbours
+// together. createPlateResponse models exactly that: each table mode has a
+// resonant frequency f1 * (n^2 + m^2) / 5 (Pattern complexity sets f1 —
+// physically the plate's size), is excited by the band energy under a
+// resonance window at that frequency (Resonance sets the window's
+// sharpness), and rings with a fast attack and a Ring-controlled release.
+// The strongest few modes by response are summed in the shader, weighted
+// by that response, so mode changes are the plate's own dynamics rather
+// than a scripted crossfade.
 //
 // The sand. Grain positions live in a ping-pong pair of RGBA8 textures,
 // 16-bit fixed point per axis (R,G = x, B,A = y). RGBA8 is renderable on
@@ -35,11 +45,11 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 // so the packing is the design, not a fallback. Per rendered frame the sim
 // fragment shader steps every grain: a random hop scaled by the local
 // amplitude a = |field|/2 (a grain on an antinode gets thrown, a grain on a
-// node stays put), a settling pull down the analytic gradient of |field|,
-// and a respawn at a random spot for any grain that hops off the plate
-// edge — a real plate spills sand; refilling keeps the count constant and
-// the "rain" of fresh grains onto antinodes reads as alive. Both hop and
-// pull are scaled by how hard the plate is being driven (energy, plus a
+// node stays put), a settling pull down the analytic gradient of |field| (a
+// shortcut — real grains reach the lines statistically, over minutes), and
+// a respawn at a random spot for any grain that hops off the plate edge —
+// a real plate spills sand; refilling keeps the count constant. Both hop
+// and pull are scaled by how hard the plate is being driven (energy, plus a
 // bass-onset kick), so silence freezes the figure in place.
 //
 // dt for the sim comes from frame.time deltas, not anim.dtSec: the anim
@@ -47,21 +57,21 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUni
 // dtSec under-counts the wall time a rendered frame actually covers.
 const ID = "chladni";
 
-/** One free-plate mode: the (n, m) orders and the symmetry-family sign. */
+/** One plate mode: the (n, m) orders and the symmetry-family sign. */
 export interface PlateMode {
   n: number;
   m: number;
   sign: 1 | -1;
 }
 
-/** Highest mode order the table reaches. (9, 8) is already a fine lattice
+/** Highest mode order the table reaches. (8, 9) is already a fine lattice
  *  at TV distance; past that the nodal cells fall below grain size. */
 export const MAX_ORDER = 9;
 
 /** Every (n, m) with 1 <= n < m <= maxOrder, ascending by n^2 + m^2 (the
- *  square plate's eigenfrequency proxy), signs alternating so a sweep up
- *  the table visits both symmetry families. See the file header for why
- *  n == m is excluded. */
+ *  square plate's eigenfrequency proxy), signs alternating so neighbouring
+ *  resonances come from both symmetry families. See the file header for
+ *  why n == m is excluded. */
 export function buildModeTable(maxOrder: number = MAX_ORDER): PlateMode[] {
   const pairs: { n: number; m: number }[] = [];
   for (let n = 1; n < maxOrder; n++) {
@@ -73,143 +83,141 @@ export function buildModeTable(maxOrder: number = MAX_ORDER): PlateMode[] {
 
 export const MODE_TABLE: readonly PlateMode[] = buildModeTable();
 
-/** Energy-weighted mean band index, normalised to [0,1] (0 = all bass,
- *  1 = all treble). Returns 0 for silence rather than NaN. */
-export function spectralCentroid(bands: ArrayLike<number>): number {
-  const count = bands.length;
-  if (count < 2) return 0;
-  let sum = 0;
-  let weighted = 0;
-  for (let i = 0; i < count; i++) {
-    const b = Math.max(0, bands[i]);
-    sum += b;
-    weighted += b * i;
-  }
-  if (sum < 1e-6) return 0;
-  return weighted / sum / (count - 1);
-}
-
 /** Side of the square position texture that holds `count` grains. */
 export function grainTextureSide(count: number): number {
   return Math.max(1, Math.ceil(Math.sqrt(Math.max(1, count))));
 }
 
-export interface ModeSelectorInputs {
-  /** Spectral centroid this tick, [0,1]. */
-  centroid: number;
-  /** FeatureFrame.energy — below ENERGY_GATE no new switch starts. */
-  energy: number;
-  /** True on the tick an onset/beat fired. */
-  beat: boolean;
-  /** Whether a tempo is currently held (beat gating only applies then). */
-  tempoLocked: boolean;
-  /** True on the tick a section change/drop fired — forces a leap. */
-  dropOnset: boolean;
-  /** Pattern complexity setting, [0,1]: how far up the table music can reach. */
+// The plate's fundamental — the (1, 2) mode's resonance — across the
+// Pattern complexity slider. Every mode sits at (n^2 + m^2) / FUNDAMENTAL_ORDER
+// times the fundamental, so complexity slides the whole table across the band
+// ladder: a small stiff plate (0) needs treble to reach even its low modes,
+// a big plate (1) has its finest lattices ringing already in the mids.
+export const FUNDAMENTAL_HZ_SMALL = 560;
+export const FUNDAMENTAL_HZ_LARGE = MIN_HZ;
+/** n^2 + m^2 of the fundamental (1, 2) mode. */
+const FUNDAMENTAL_ORDER = 5;
+
+/** Resonant frequency of `mode` on a plate at `complexity` (0..1). */
+export function modeFrequencyHz(mode: PlateMode, complexity: number): number {
+  const c = Math.max(0, Math.min(1, complexity));
+  const f1 = FUNDAMENTAL_HZ_SMALL * Math.pow(FUNDAMENTAL_HZ_LARGE / FUNDAMENTAL_HZ_SMALL, c);
+  return (f1 * (mode.n * mode.n + mode.m * mode.m)) / FUNDAMENTAL_ORDER;
+}
+
+/** Where `hz` falls on the band ladder, in band units: MIN_HZ -> 0,
+ *  MAX_HZ_CAP -> NUM_BANDS, band i's centre at i + 0.5. Unclamped. */
+export function bandPosition(hz: number): number {
+  return (NUM_BANDS * Math.log(Math.max(1e-3, hz) / MIN_HZ)) / Math.log(MAX_HZ_CAP / MIN_HZ);
+}
+
+export interface PlateResponseInputs {
+  /** Pattern complexity setting, [0,1] — sets the fundamental, see above. */
   complexity: number;
-  /** Minimum seconds a figure holds before it may switch. */
-  holdSec: number;
-  /** Seconds the A -> B crossfade takes. */
-  morphSec: number;
+  /** Resonance setting, [0,1]: 0 = damped plate (wide window, neighbours
+   *  blur together), 1 = high Q (one mode wins cleanly). */
+  resonance: number;
+  /** Ring setting, [0,1]: how long a mode keeps ringing after its tone stops. */
+  ring: number;
 }
 
-export interface ModeState {
-  a: PlateMode;
-  b: PlateMode;
-  /** 0 = fully A, 1 = fully B. */
-  blend: number;
-  /** Table index of the mode being shown (A while morphing). */
-  index: number;
+export interface ActiveMode extends PlateMode {
+  /** This mode's share of the plate's motion; the active set sums to 1. */
+  weight: number;
 }
 
-/** Energy below which the plate isn't being driven enough to re-tune. */
-export const ENERGY_GATE = 0.03;
-/** Seconds the centroid eases over before it's read as a target. */
-const CENTROID_EASE_SEC = 0.5;
-/** Centroid -> table position curve; < 1 lifts the mid-range so ordinary
- *  music (centroid near 0.4) doesn't sit on the simplest few modes. */
-const CENTROID_GAMMA = 0.8;
-/** Most table entries one ordinary switch may move — keeps a sweep feeling
- *  like a sweep instead of a random jump. */
-const MAX_STEP = 3;
-/** Entries a drop leaps, ignoring MAX_STEP and the hold. */
-const DROP_LEAP = 4;
-/** After this many hold periods without a beat, switch anyway — a tempo
- *  lock whose beats stop arriving must not pin the figure forever. */
-const BEAT_WAIT_HOLDS = 2;
-const MIN_MORPH_SEC = 0.05;
+/** How many modes the shader sums. The response is sharpened enough that
+ *  the rest carry a negligible share. */
+export const ACTIVE_MODES = 4;
 
-export interface ModeSelector {
-  advance(dtSec: number, inputs: ModeSelectorInputs): ModeState;
-  readonly state: ModeState;
+/** Resonance window width in band units across the Resonance slider. */
+const WINDOW_BANDS_DAMPED = 1.6;
+const WINDOW_BANDS_SHARP = 0.35;
+/** Response-sharpening exponent across the Resonance slider — a high-Q
+ *  plate's dominant mode wins by a wide margin. */
+const SHARPEN_DAMPED = 1;
+const SHARPEN_SHARP = 4;
+/** Ring slider -> release seconds; attack is a fixed fraction of it. */
+const RING_SEC_MIN = 0.1;
+const RING_SEC_MAX = 1.5;
+const ATTACK_FRACTION = 0.15;
+const ATTACK_SEC_MIN = 0.03;
+/** Below this summed response the plate isn't being excited at all: the
+ *  last active set holds, so silence freezes the figure rather than
+ *  collapsing it to nothing. */
+const RESPONSE_FLOOR = 1e-9;
+
+export function ringSeconds(ring: number): number {
+  return RING_SEC_MIN + Math.max(0, Math.min(1, ring)) * (RING_SEC_MAX - RING_SEC_MIN);
 }
 
-export function createModeSelector(table: readonly PlateMode[] = MODE_TABLE, startIndex = 2): ModeSelector {
-  const last = table.length - 1;
-  let index = Math.max(0, Math.min(last, startIndex));
-  let target = index;
-  let blend = 1;
-  let sinceSwitch = 0;
-  let pitch: number | null = null;
+export interface PlateResponse {
+  /** Steps every mode's ringing amplitude by this frame's band energies and
+   *  returns the ACTIVE_MODES strongest, weights normalised to sum 1,
+   *  strongest first. The returned array is reused between calls. */
+  advance(dtSec: number, bands: ArrayLike<number>, inputs: PlateResponseInputs): readonly ActiveMode[];
+  /** Per-table-mode ringing amplitude, for tests and the probe. */
+  readonly amplitudes: Float32Array;
+}
 
-  const state: ModeState = { a: table[index], b: table[index], blend, index };
-
-  function begin(next: number): void {
-    target = Math.max(0, Math.min(last, next));
-    if (target === index) return;
-    state.b = table[target];
-    blend = 0;
-    sinceSwitch = 0;
+export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): PlateResponse {
+  const amplitudes = new Float32Array(table.length);
+  const sharpened = new Float32Array(table.length);
+  const order = table.map((_, i) => i);
+  const active: ActiveMode[] = [];
+  for (let k = 0; k < ACTIVE_MODES; k++) {
+    const mode = table[Math.min(k, table.length - 1)];
+    active.push({ ...mode, weight: k === 0 ? 1 : 0 });
   }
 
   return {
-    state,
-    advance(dtSec, inputs) {
+    amplitudes,
+    advance(dtSec, bands, inputs) {
       const dt = Number.isFinite(dtSec) && dtSec > 0 ? dtSec : 0;
-      const c = Math.max(0, Math.min(1, inputs.centroid));
-      if (pitch === null) pitch = c;
-      else pitch += (c - pitch) * (1 - Math.exp(-dt / CENTROID_EASE_SEC));
+      const resonance = Math.max(0, Math.min(1, inputs.resonance));
+      const sigma = WINDOW_BANDS_DAMPED + (WINDOW_BANDS_SHARP - WINDOW_BANDS_DAMPED) * resonance;
+      const sharpen = SHARPEN_DAMPED + (SHARPEN_SHARP - SHARPEN_DAMPED) * resonance;
+      const release = ringSeconds(inputs.ring);
+      const attack = Math.max(ATTACK_SEC_MIN, release * ATTACK_FRACTION);
+      const bandCount = Math.min(bands.length, NUM_BANDS);
 
-      sinceSwitch += dt;
-
-      if (blend < 1) {
-        const morph = Math.max(MIN_MORPH_SEC, inputs.morphSec);
-        blend = Math.min(1, blend + dt / morph);
-        if (blend >= 1) {
-          index = target;
-          state.a = table[index];
+      for (let k = 0; k < table.length; k++) {
+        const pos = bandPosition(modeFrequencyHz(table[k], inputs.complexity));
+        // Excitation: band energy under a normalised Gaussian window at
+        // this mode's resonance. A mode past the top of the ladder sees
+        // only the tail of the last band.
+        let num = 0;
+        // Normalised by the window's full mass, not the in-range sum, so a
+        // resonance off the end of the ladder only sees the tail of the
+        // last band instead of being renormalised up to full strength.
+        const den = sigma * Math.sqrt(2 * Math.PI);
+        for (let i = 0; i < bandCount; i++) {
+          const d = (i + 0.5 - pos) / sigma;
+          const w = Math.exp(-0.5 * d * d);
+          num += w * Math.max(0, bands[i]);
         }
-      } else {
-        const complexity = Math.max(0, Math.min(1, inputs.complexity));
-        const desired = Math.round(Math.pow(pitch, CENTROID_GAMMA) * complexity * last);
-        const driven = inputs.energy >= ENERGY_GATE;
-        if (driven && inputs.dropOnset) {
-          begin(index + (desired >= index ? DROP_LEAP : -DROP_LEAP));
-        } else if (driven && desired !== index && sinceSwitch >= inputs.holdSec) {
-          const beatOk = !inputs.tempoLocked || inputs.beat || sinceSwitch >= inputs.holdSec * BEAT_WAIT_HOLDS;
-          if (beatOk) {
-            const step = Math.max(-MAX_STEP, Math.min(MAX_STEP, desired - index));
-            begin(index + step);
-          }
-        }
+        const excitation = num / den;
+        const tau = excitation > amplitudes[k] ? attack : release;
+        amplitudes[k] += (excitation - amplitudes[k]) * (1 - Math.exp(-dt / tau));
+        sharpened[k] = Math.pow(amplitudes[k], sharpen);
       }
 
-      state.blend = blend;
-      state.index = index;
-      return state;
+      order.sort((a, b) => sharpened[b] - sharpened[a]);
+      let sum = 0;
+      for (let k = 0; k < ACTIVE_MODES; k++) sum += sharpened[order[k]];
+      if (sum < RESPONSE_FLOOR) return active;
+
+      for (let k = 0; k < ACTIVE_MODES; k++) {
+        const mode = table[order[k]];
+        const slot = active[k];
+        slot.n = mode.n;
+        slot.m = mode.m;
+        slot.sign = mode.sign;
+        slot.weight = sharpened[order[k]] / sum;
+      }
+      return active;
     },
   };
-}
-
-/** Pattern hold setting [0,1] -> seconds a figure holds before switching. */
-export function holdSeconds(hold: number): number {
-  return 0.5 + Math.max(0, Math.min(1, hold)) * 7.5;
-}
-
-/** Morph speed setting [0,1] -> seconds the crossfade takes (0 = slow drift,
- *  1 = near-instant snap). */
-export function morphSeconds(morph: number): number {
-  return 3.0 * Math.pow(0.033, Math.max(0, Math.min(1, morph)));
 }
 
 /** Per-grain brightness gain so a sparse floor-quality bed and a dense
@@ -224,48 +232,48 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "complexity",
     label: "Pattern complexity",
-    description: "How fine a figure the music can reach — low keeps a few bold lines, high allows a dense lattice",
+    description: "In effect the plate's size: a bigger plate's resonances sit lower, so the music reaches finer figures",
     group: "Plate",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.5,
-    // Bright, busy mixes push the plate up to finer modes.
+    // Bright, busy mixes reach the plate's finer modes.
     auto: { brightness: 0.35, density: 0.2 },
   },
   {
-    key: "hold",
-    label: "Pattern hold",
-    description: "How long a figure holds before the plate may flip to the next one",
+    key: "resonance",
+    label: "Resonance",
+    description: "How sharply the plate picks one figure: high = one clean mode wins, low = a damped plate blurs neighbouring modes together",
+    group: "Plate",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    // A dense mix needs a sharper plate to stay legible.
+    auto: { density: 0.2, pulse: 0.15 },
+  },
+  {
+    key: "ring",
+    label: "Ring",
+    description: "How long a figure keeps ringing after its tone stops",
     group: "Plate",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.4,
-    // Fast, steady music flips sooner; slow material holds a figure longer.
-    auto: { tempo: -0.25, pulse: -0.15 },
-  },
-  {
-    key: "morph",
-    label: "Morph speed",
-    description: "How fast the plate re-tunes between figures — low drifts the grains across, high snaps",
-    group: "Plate",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    // Sharp, percussive material wants a snappier re-tune.
-    auto: { attack: 0.3 },
+    // Fast, percussive music wants a quicker-decaying plate.
+    auto: { tempo: -0.25, attack: -0.15 },
   },
   {
     key: "squarePlate",
     label: "Square plate",
-    description: "On: the classic square plate, centered. Off: the plate stretches to fill the screen",
+    description: "On: the classic square plate, centered. Off: the plate is the whole screen",
     group: "Plate",
     min: 0,
     max: 1,
     step: 1,
-    default: 1,
+    default: 0,
     type: "boolean",
   },
   {
@@ -360,14 +368,13 @@ function settingFor(key: string): SceneSetting {
 const SETTINGS_UNIFORMS_GLSL = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
 
 /** Fraction of the room's shorter axis the square plate's half-side spans. */
-const PLATE_HALF = 0.46;
+const SQUARE_PLATE_HALF = 0.46;
 
 // Shared by all three programs so the plate function, its gradient, the
 // plate-to-room mapping and the position packing can't drift apart.
 const CHLADNI_GLSL = `
-uniform vec4 uModeA; // n, m, sign, unused
-uniform vec4 uModeB;
-uniform float uModeBlend;
+const int ACTIVE_MODES = ${ACTIVE_MODES};
+uniform vec4 uModes[ACTIVE_MODES]; // n, m, sign, weight
 const float PI = 3.14159265;
 
 float chladni(vec2 p, vec4 mode) {
@@ -384,17 +391,27 @@ vec2 chladniGrad(vec2 p, vec4 mode) {
   return g1 + mode.z * g2;
 }
 
-float field(vec2 p) { return mix(chladni(p, uModeA), chladni(p, uModeB), uModeBlend); }
-vec2 fieldGrad(vec2 p) { return mix(chladniGrad(p, uModeA), chladniGrad(p, uModeB), uModeBlend); }
+// The plate's motion: the active modes summed by their share of the
+// response. Weights sum to 1, so |field| <= 2 and amp() stays in [0,1].
+float field(vec2 p) {
+  float f = 0.0;
+  for (int k = 0; k < ACTIVE_MODES; k++) f += uModes[k].w * chladni(p, uModes[k]);
+  return f;
+}
+vec2 fieldGrad(vec2 p) {
+  vec2 g = vec2(0.0);
+  for (int k = 0; k < ACTIVE_MODES; k++) g += uModes[k].w * chladniGrad(p, uModes[k]);
+  return g;
+}
 float amp(vec2 p) { return abs(field(p)) * 0.5; }
 
-// Half-extent of the plate in room uv. Square: fits the shorter axis.
-// Stretched: fills the frame with a small margin.
+// Half-extent of the plate in room uv. Square: fits the shorter axis with
+// a margin. Otherwise the plate is the whole frame.
 vec2 plateHalf() {
   float aspect = uResolution.x / uResolution.y;
-  vec2 square = aspect >= 1.0 ? vec2(${PLATE_HALF.toFixed(2)} / aspect, ${PLATE_HALF.toFixed(2)})
-                              : vec2(${PLATE_HALF.toFixed(2)}, ${PLATE_HALF.toFixed(2)} * aspect);
-  return uSquarePlate > 0.5 ? square : vec2(${PLATE_HALF.toFixed(2)});
+  float h = ${SQUARE_PLATE_HALF.toFixed(2)};
+  vec2 square = aspect >= 1.0 ? vec2(h / aspect, h) : vec2(h, h * aspect);
+  return uSquarePlate > 0.5 ? square : vec2(0.5);
 }
 
 // 16-bit fixed point per axis across RGBA8 — see file header.
@@ -444,6 +461,7 @@ ${SETTINGS_UNIFORMS_GLSL}
 uniform sampler2D uPosTex;
 uniform float uSimDt;
 uniform float uSeed;
+uniform float uMaxOrder; // highest m among the active modes, for the step cap
 ${CHLADNI_GLSL}
 
 void main() {
@@ -465,8 +483,7 @@ void main() {
   // mode can't overshoot a line.
   vec2 g = fieldGrad(p);
   vec2 dir = g / (length(g) + 1e-4) * sign(f);
-  float maxOrder = max(max(uModeA.y, uModeB.y), 1.0);
-  float stepCap = ${STEP_CELL_FRACTION.toFixed(2)} * 2.0 / maxOrder;
+  float stepCap = ${STEP_CELL_FRACTION.toFixed(2)} * 2.0 / max(uMaxOrder, 1.0);
   float pull = min(stepCap, uSettle * (0.3 + drive) * (0.02 + a) * ${PULL_RATE.toFixed(2)} * uSimDt);
 
   p += hop - dir * pull;
@@ -501,7 +518,8 @@ void main() {
   float a = amp(p);
   vec3 plate = vec3(0.030, 0.031, 0.036);
   vec3 glow = palette(0.55 + 0.2 * a, uPalA, uPalB, uPalC, uPalD) * a * a * uFieldGlow * 0.4 * (0.3 + uEnergy);
-  float rim = 1.0 - smoothstep(0.0, 0.012, 1.0 - border);
+  // The rim only exists on the square plate; the full-frame plate has no edge to show.
+  float rim = (1.0 - smoothstep(0.0, 0.012, 1.0 - border)) * uSquarePlate;
   vec3 col = (plate + glow + rim * 0.10) * inside;
   col *= 1.0 + uBeatFlash * uBeatPulse * 0.3;
   outColor = vec4(col, 1.0);
@@ -578,14 +596,15 @@ function createChladniScene(): Scene {
   let read = 0;
   let side = 1;
   let grainCount = 0;
-  let selector: ModeSelector | null = null;
+  let response: PlateResponse | null = null;
   let lastFrameTime: number | null = null;
   const bandsBuf = new Float32Array(NUM_BANDS);
 
-  function setMode(prog: GLProgram, state: ModeState): void {
-    prog.setV4("uModeA", state.a.n, state.a.m, state.a.sign, 0);
-    prog.setV4("uModeB", state.b.n, state.b.m, state.b.sign, 0);
-    prog.setF("uModeBlend", state.blend);
+  function setModes(prog: GLProgram, modes: readonly ActiveMode[]): void {
+    for (let k = 0; k < ACTIVE_MODES; k++) {
+      const mode = modes[k];
+      prog.setV4(`uModes[${k}]`, mode.n, mode.m, mode.sign, mode.weight);
+    }
   }
 
   return {
@@ -628,28 +647,25 @@ function createChladniScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, null);
 
       read = 0;
-      selector = createModeSelector();
+      response = createPlateResponse();
       lastFrameTime = null;
     },
 
     render(ctx, frame, viewport, palette, anim) {
-      if (!simProg || !bgProg || !pointProg || !quadVao || !pointVao || !selector) return;
+      if (!simProg || !bgProg || !pointProg || !quadVao || !pointVao || !response) return;
       const { gl } = ctx;
 
       // See file header for why frame.time and not anim.dtSec.
       const dt = lastFrameTime === null ? 1 / 60 : Math.max(0, Math.min(0.1, frame.time - lastFrameTime));
       lastFrameTime = frame.time;
 
-      const state = selector.advance(dt, {
-        centroid: spectralCentroid(frame.bands),
-        energy: frame.energy,
-        beat: frame.beat || anim.lowOnset,
-        tempoLocked: anim.tempoLock > 0.5,
-        dropOnset: anim.dropOnset,
+      const modes = response.advance(dt, frame.bands, {
         complexity: resolveSceneSetting(ID, settingFor("complexity")),
-        holdSec: holdSeconds(resolveSceneSetting(ID, settingFor("hold"))),
-        morphSec: morphSeconds(resolveSceneSetting(ID, settingFor("morph"))),
+        resonance: resolveSceneSetting(ID, settingFor("resonance")),
+        ring: resolveSceneSetting(ID, settingFor("ring")),
       });
+      let maxOrder = 1;
+      for (const mode of modes) if (mode.weight > 0.05) maxOrder = Math.max(maxOrder, mode.m);
 
       gl.disable(gl.BLEND);
 
@@ -659,7 +675,8 @@ function createChladniScene(): Scene {
       gl.viewport(0, 0, side, side);
       simProg.use();
       uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
-      setMode(simProg, state);
+      setModes(simProg, modes);
+      simProg.setF("uMaxOrder", maxOrder);
       simProg.setF("uSimDt", dt);
       simProg.setF("uSeed", Math.random() * 100);
       gl.activeTexture(gl.TEXTURE0);
@@ -676,13 +693,13 @@ function createChladniScene(): Scene {
       // Plate.
       bgProg.use();
       uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
-      setMode(bgProg, state);
+      setModes(bgProg, modes);
       drawFullscreenQuad(gl, quadVao);
 
       // Sand: one point per grain, additive so piles on the lines add up.
       pointProg.use();
       uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
-      setMode(pointProg, state);
+      setModes(pointProg, modes);
       pointProg.setF("uSide", side);
       pointProg.setF("uGrainGain", grainGain(grainCount));
       gl.activeTexture(gl.TEXTURE0);
@@ -720,7 +737,7 @@ function createChladniScene(): Scene {
       pointVao = null;
       simPosLoc = null;
       pointPosLoc = null;
-      selector = null;
+      response = null;
       lastFrameTime = null;
     },
   };
