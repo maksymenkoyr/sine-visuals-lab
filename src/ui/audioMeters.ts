@@ -223,13 +223,60 @@ const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_
 // what it saw, so a beat's peak survives however many frames a column
 // covers. Long enough to see the adaptive window re-settle after a change
 // in room level (a couple of seconds — see features.ts's FLOOR_RISE_RATE)
-// with the before and after both still on screen.
+// with the before and after both still on screen. traceLegend below reads
+// its swatch colours from the same HISTORY_*_COLOR constants the strokes
+// use, so the two can't drift apart; its reference entry dims when this
+// frame's source has no fixed-mapping reading to show (see pushHistory).
 const HISTORY_SPAN_SEC = 10;
 const HISTORY_HEIGHT_CSS_PX = 48;
 const histCanvasStyle = `display: block; width: 100%; height: ${HISTORY_HEIGHT_CSS_PX}px; margin-top: 4px;`;
 const HISTORY_LEVEL_COLOR = "rgba(255,255,255,0.85)";
 const HISTORY_ENERGY_COLOR = INPUT_GREEN;
 const HISTORY_FIXED_COLOR = withAlpha(INPUT_GREEN, 0.4);
+
+// A trace's colour key: a short line swatch (these are lines on the canvas,
+// not points) beside a caption in the same small-mono voice as tickLabelStyle
+// and tempoCaptionStyle. Always visible — unlike .vc-hint, a legend that
+// hides on hover isn't doing a legend's job.
+const traceLegendStyle = `display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px;`;
+const traceLegendEntryStyle = `display: flex; align-items: center; gap: 5px; transition: opacity 0.2s ease;`;
+const traceLegendSwatchStyle = (color: string) =>
+  `width: 10px; height: 2px; border-radius: 1px; background: ${color};`;
+const traceLegendLabelStyle = `font: 400 8.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.55);`;
+
+interface TraceLegendSpec {
+  color: string;
+  label: string;
+}
+
+/** Builds a legend from traceLegendStyle; entries stay in the order given.
+ *  setEntryEnabled dims an entry (e.g. a reference line the source can't
+ *  supply right now) without removing it, keyed so a per-frame call is free. */
+function createTraceLegend(entries: TraceLegendSpec[]) {
+  const el = document.createElement("div");
+  el.style.cssText = traceLegendStyle;
+  const rows = entries.map((spec) => {
+    const row = document.createElement("div");
+    row.style.cssText = traceLegendEntryStyle;
+    const swatch = document.createElement("div");
+    swatch.style.cssText = traceLegendSwatchStyle(spec.color);
+    const label = document.createElement("div");
+    label.textContent = spec.label;
+    label.style.cssText = traceLegendLabelStyle;
+    row.append(swatch, label);
+    el.appendChild(row);
+    return row;
+  });
+  const lastEnabled: boolean[] = entries.map(() => true);
+  return {
+    el,
+    setEntryEnabled(i: number, enabled: boolean): void {
+      if (lastEnabled[i] === enabled) return;
+      lastEnabled[i] = enabled;
+      rows[i].style.opacity = enabled ? "1" : "0.35";
+    },
+  };
+}
 
 /** Jump an element to `color` with no fade, then re-arm the fade so the
  *  next color write eases back — a one-frame event made visible. */
@@ -574,7 +621,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     accent: INPUT_GREEN,
     unit: "s",
     description:
-      "The last few seconds of Level (white) and Energy (green). The dim green line is what Energy would read with Auto-gain at 0 — the gap between the two greens is what the Auto-gain slider is adding.",
+      "The last few seconds of Level and Energy. The gap between Energy and No auto-gain is what the Auto-gain slider is adding.",
   });
   // The trace takes the meter's place under the head, like the waveform.
   const histCanvas = document.createElement("canvas");
@@ -582,6 +629,12 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   history.el.children[1].replaceWith(histCanvas);
   const histCtx = histCanvas.getContext("2d")!;
   history.setReadout(String(HISTORY_SPAN_SEC));
+  const histLegend = createTraceLegend([
+    { color: HISTORY_LEVEL_COLOR, label: "Level" },
+    { color: HISTORY_ENERGY_COLOR, label: "Energy" },
+    { color: HISTORY_FIXED_COLOR, label: "No auto-gain" },
+  ]);
+  histCanvas.after(histLegend.el);
   const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN, foldId: "signal" });
   signalCard.body.append(level.el, spacer(), energy.el, spacer(), history.el);
 
@@ -913,6 +966,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         if (frame) {
           pushHistory(frame, fixedEnergy, nowMs);
           drawHistory();
+          histLegend.setEntryEnabled(2, fixedEnergy !== null);
         }
       } else {
         // Folded: don't accumulate a column while hidden, same as the Scope.
