@@ -147,7 +147,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
   grid.style.cssText = gridStyle;
 
   // Collapsed by default — see expandDrafts/collapseDrafts below. Built lazily
-  // so a first-time visitor never pays for compiling seven draft shaders.
+  // so a first-time visitor never pays for compiling the draft shaders.
   const draftToggle = document.createElement("button");
   draftToggle.style.cssText = draftToggleStyle;
   draftToggle.style.display = "none";
