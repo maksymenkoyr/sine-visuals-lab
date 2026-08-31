@@ -16,8 +16,13 @@ regenerate it at session close.
   (quantized march) beside Gas and Points; every strike also draws a jagged
   bolt polyline (`buildBoltPath`), and `cloudShape` morphs between baked
   shape variants (`shapePhaseWeights`). Swarm/Sparks styles were cut as too
-  chaotic. History: point cloud → gas volume → digital modes, each on user
-  feedback in one session. Verified headlessly at high/low quality, in the gallery, and
+  chaotic. v4: morphSpeed/morphBeat (accumulated phase, genuine Off stop,
+  beat-kicked), spectrumMap Off/Screen/Cloud + spectrumGlow (bands drive
+  regional ambient light), and a lighting pass (HG-style strike scattering,
+  differential strike shadow, flashTint white→blue→violet shared across
+  modes, hue-preserving tonemap, depth fade on the lattice). Optimisation
+  attempts measured as no-wins (march is step-bound) and reverted. History:
+  point cloud → gas volume → digital modes → morph/spectrum/lighting. Verified headlessly at high/low quality, in the gallery, and
   with the auto→manual probe sign-off; `tests/storm.test.ts` covers the pure
   helpers and both `ALL_SETTINGS` invariant suites include it. **Not yet
   judged on real music.**
