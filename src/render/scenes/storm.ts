@@ -81,11 +81,27 @@ import {
 //    buried but streaks through where the gas above it is thin. The geometry
 //    passes light themselves with exactly that formula, factored out as
 //    STRIKE_LIGHT_GLSL so the lattice and the points can't drift from it.
+//  - What the march adds on top of that falloff, and what the geometry
+//    passes can't: a phase term (henyeyGreenstein) so a bolt behind the gas
+//    in-scatters harder than one in front of it, and one shadow tap toward
+//    the brightest live strike so a clump between here and the channel
+//    darkens. Both fade in over STRIKE_SHADE_MIN..FULL rather than switching
+//    on, or the gate itself draws a ring. Every mode does share the colour:
+//    flashTint grades one flash from white-hot at the channel through the
+//    storm's blue to a violet fringe at the edge of its reach, so the gas,
+//    the lattice and the points redden alike. The gas's own body is lit by a
+//    sun ramp whose shadowed end is a cool blue floor (SHADE_COL) rather
+//    than black — bounced skylight is what a cloud's interior is actually
+//    lit by, and that colour shift with depth is most of what makes the mass
+//    read as a body instead of a grey card. depthFade is the geometry modes'
+//    stand-in for the same cue.
 //  - Everything accumulates front-to-back with `T` as remaining transmittance
 //    (early-out at T < 0.02) over a background of sky gradient plus a faint
-//    per-strike haze — weak now, since the volume itself carries the flash.
-//    The composite is tonemapped (1 - exp(-c)) instead of clipped, so a big
-//    flash saturates gracefully rather than holding flat white the way the
+//    per-strike haze, and a tighter second lobe of it that stands in for a
+//    lens bloom — the only way to give a bolt presence in the geometry modes
+//    without a post pass this repo doesn't have. The composite is tonemapped
+//    (tonemap) instead of clipped, so a big flash saturates toward white
+//    while holding its hue, rather than holding flat white the way the
 //    additive geometry passes do (they have no tonemap behind them, which is
 //    why their own gains are kept modest).
 //  - Cost is bounded by uMaxSteps (MAX_STEPS is the compile-time cap) and by
@@ -1279,9 +1295,26 @@ float spectrumGain(vec3 pCloud, vec2 ndc) {
 // The colour of everything electric here — bolt, in-cloud flash, lattice
 // highlight: a cold white-blue pulled a little way toward the palette so the
 // storm still belongs to the current vibe.
+//
+// flashTint is the same colour graded by how hard a point is being lit, and
+// it is what every mode's strike light is tinted with, so the flash reddens
+// the same way in the gas, across the lattice and over the points. A flash
+// arrives white-hot at the channel, cools to the storm's blue through the
+// body of the glow and goes violet out at the edge of its reach — light that
+// has scattered furthest through the gas has been filtered the most, and the
+// fringe is what stops a strike from reading as one flat blue blob.
 const BOLT_COLOR_GLSL = `
 vec3 boltColor() {
   return mix(vec3(0.72, 0.82, 1.0), palette(0.15, uPalA, uPalB, uPalC, uPalD), 0.3);
+}
+
+// Takes the body colour rather than calling boltColor() itself: the march
+// evaluates this per step, and palette() inside the step loop was the single
+// most expensive thing this pass added.
+vec3 flashTint(vec3 body, float light) {
+  vec3 fringe = mix(body, vec3(0.60, 0.38, 1.0), 0.45);
+  float l = clamp(light, 0.0, 1.0);
+  return mix(mix(fringe, body, smoothstep(0.0, 0.12, l)), vec3(1.0), smoothstep(0.30, 1.0, l));
 }
 `;
 
@@ -1336,6 +1369,19 @@ float roomAspect() {
 vec2 viewToRoomNdc(vec3 v) {
   return vec2(v.x * FOCAL_Y / roomAspect(), v.y * FOCAL_Y) / v.z;
 }
+
+// Aerial perspective for the geometry passes: how much dimmer a point is for
+// sitting on the far side of the cloud. It is the only depth cue they have —
+// both draw additively with no depth buffer — so the lattice and the points
+// share one falloff rather than each inventing its own.
+//
+// The near end sits above 1.0 on purpose. Fading only downward buys the
+// depth cue by dimming the whole mass, which in Mesh cost the lattice more
+// brightness than the separation was worth; pivoting around the cloud's own
+// centre (viewZ == CAM_DIST) spends the same contrast without darkening it.
+float depthFade(float viewZ) {
+  return mix(1.32, 0.52, smoothstep(CAM_DIST - 1.4, CAM_DIST + 1.4, viewZ));
+}
 `;
 
 // Cloud space -> the clip position of the room-space slice this scene owns.
@@ -1379,6 +1425,28 @@ ${BOLT_COLOR_GLSL}
 #define VOXEL_BANDS 5.0
 #define VOXEL_MIN 0.07
 #define VOXEL_MAX 0.18
+// The scattering asymmetry (henyeyGreenstein, in Schlick's parameterisation
+// — HG_K is 1.55g - 0.55g^3 for an asymmetry g of about 0.42) and how far
+// the phase term is allowed to pull the strike light off isotropic. Cloud
+// droplets are far more forward-scattering than this; the full lobe swings
+// the halo hard enough that a bolt in front of the cloud all but
+// disappears, so the term is blended in at HG_MIX rather than used raw.
+#define HG_K 0.61
+#define HG_MIX 0.6
+// One shadow tap from the sample toward the brightest live strike, so the
+// flash carves the gas instead of glowing through it: how far along it
+// looks, and how hard the clump it finds occludes. Below STRIKE_SHADE_MIN
+// there is too little light here for either the tap or the phase term to
+// show, so neither is paid for; between there and STRIKE_SHADE_FULL both
+// fade in, which is what keeps the gate from drawing a ring.
+#define STRIKE_SHADOW_DIST 0.30
+#define STRIKE_SHADOW_K 3.5
+#define STRIKE_SHADE_MIN 0.03
+#define STRIKE_SHADE_FULL 0.20
+// The bolt's screen-space bloom (see background): how much tighter the inner
+// lobe is than the haze around it, and how hard it draws.
+#define BOLT_BLOOM_TIGHT 11.0
+#define BOLT_BLOOM_GAIN 0.4
 
 // Half-extents of the ellipsoid the march is clipped to, and where shape()
 // fades out — see BOUND_X/Y/Z in storm.ts for why they differ per axis.
@@ -1386,6 +1454,13 @@ const vec3 BOUND = vec3(${BOUND_X.toFixed(4)}, ${BOUND_Y.toFixed(4)}, ${BOUND_Z.
 // A hidden sun, above and slightly behind the viewer's right shoulder —
 // written out normalized so it stays a plain constant.
 const vec3 SUN_DIR = vec3(0.32148, 0.91852, 0.21106);
+// The two ends of the sun ramp: direct sunlight, and the cool blue that
+// stands in for the light that only reached the shadowed interior after
+// bouncing around inside the cloud.
+const vec3 SUN_COL = vec3(1.0, 0.95, 0.88);
+const vec3 SHADE_COL = vec3(0.13, 0.18, 0.31);
+// 1 / (1 - exp(-2)), so the powder term tops out at exactly 1.
+#define POWDER_NORM 1.1565
 
 float remap(float v, float lo, float hi, float nlo, float nhi) {
   return nlo + (v - lo) * (nhi - nlo) / max(hi - lo, 1e-5);
@@ -1401,6 +1476,32 @@ float distToSegment(vec3 p, vec3 a, vec3 b) {
   vec3 ab = b - a;
   float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
   return length(p - (a + ab * t));
+}
+
+// Henyey-Greenstein, normalized against the isotropic phase function so it
+// averages to 1 over the sphere — multiplying the in-scattered strike light
+// by it moves light around rather than adding any. Water droplets scatter
+// hard forward, which is why a cloud lit from behind glows and the same
+// cloud lit from the front stays grey: a sample with the bolt further along
+// the view ray than it is gets the bright end of this.
+float henyeyGreenstein(float cosTheta) {
+  // Schlick's approximation of the real thing, with HG_K standing in for the
+  // asymmetry: within a couple of percent of it across the whole lobe, and
+  // it costs a square where the exact form costs a sqrt of a cube — worth
+  // the swap for a term the march evaluates at every lit step.
+  float d = 1.0 - HG_K * cosTheta;
+  return (1.0 - HG_K * HG_K) / max(d * d, 1e-4);
+}
+
+// Soft shoulder instead of a hard clip. Compressing the peak channel and
+// carrying the whole colour down with it keeps a flash's blue as it
+// saturates, where compressing each channel on its own slides everything hot
+// to white; the small per-channel blend back in is what still lets the very
+// core of a strike go white the way an overexposure does.
+vec3 tonemap(vec3 c) {
+  float pk = max(max(c.r, c.g), c.b);
+  vec3 hue = c * ((1.0 - exp(-pk * 1.25)) / max(pk, 1e-4));
+  return mix(hue, 1.0 - exp(-c * 1.25), 0.35);
 }
 
 // The analytic silhouette, read from the volume shapeAt() was baked into —
@@ -1476,13 +1577,14 @@ float densityCheap(vec3 p) {
 // Sky behind the volume: a near-black gradient plus a faint haze around each
 // live bolt, projected through the forward camera. Deliberately weak — the
 // volume itself carries most of the flash.
-vec3 background(vec2 uv, float aspect) {
+vec3 background(vec2 uv, float aspect, float bloom) {
   vec2 q = (uv * 2.0 - 1.0) * vec2(aspect, 1.0);
   vec3 sky = mix(vec3(0.02, 0.02, 0.035), palette(0.55, uPalA, uPalB, uPalC, uPalD) * 0.06, 0.5);
   vec3 col = sky * (1.1 - 0.5 * uv.y);
 
   float sigma = mix(0.12, 0.35, uReach);
-  float glow = 0.0;
+  float halo = 0.0;
+  float core = 0.0;
   for (int i = 0; i < MAX_STRIKES; i++) {
     float s = uStrikeStrength[i];
     if (s <= 0.001) continue;
@@ -1494,24 +1596,36 @@ vec3 background(vec2 uv, float aspect) {
     float t = clamp(dot(q - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
     float d = length(q - (a + ab * t));
     float sig = sigma * CAM_DIST / (0.5 * (va.z + vb.z));
-    glow += s * exp(-(d * d) / (sig * sig));
+    float x = (d * d) / (sig * sig);
+    halo += s * exp(-x);
+    // A second, tighter lobe hugging the channel — a lens bloom rather than
+    // a cloud glow. It is what gives the bolt presence in Mesh and Points,
+    // where there is no gas to carry the flash and the polyline is otherwise
+    // a one-pixel scratch; the repo has no post pass, so the projection this
+    // haze already does is the only place to get it from.
+    core += s * exp(-x * BOLT_BLOOM_TIGHT);
   }
-  return col + boltColor() * glow * 0.12 * mix(0.5, 2.0, uStrike);
+  return col + boltColor() * (halo * 0.12 + core * bloom) * mix(0.5, 2.0, uStrike);
 }
 
 void main() {
   vec2 uv = roomUv(vUv);
   float aspect = roomAspect();
-  vec3 bg = background(uv, aspect);
   int mode = int(uMode + 0.5);
+  // The bloom is what a geometry mode has instead of gas around the channel,
+  // so it draws at full strength there and at a fraction of it in the
+  // marched modes, where the volume is already carrying the flash and a
+  // screen-space halo on top only reads as a sprite pasted over the cloud.
+  bool geometry = mode == MODE_MESH || mode == MODE_POINTS;
+  vec3 bg = background(uv, aspect, geometry ? BOLT_BLOOM_GAIN : BOLT_BLOOM_GAIN * 0.3);
 
   // The geometry modes: no march at all. The lattice or the point pass draws
   // the cloud, so all this pass owes them is something to draw over — sky,
   // the haze around each live bolt, and the drop flash. Every pixel is still
   // written (nothing else in the shared gallery context clears colour).
-  if (mode == MODE_MESH || mode == MODE_POINTS) {
+  if (geometry) {
     vec3 flat_ = bg + boltColor() * 0.1 * uDropPulse * uDropStorm;
-    outColor = vec4(1.0 - exp(-flat_ * 1.25), 1.0);
+    outColor = vec4(tonemap(flat_), 1.0);
     return;
   }
 
@@ -1583,19 +1697,68 @@ void main() {
         // Computed before the density gate below: the plasma emits whether or
         // not there is gas at this sample, so a bolt crossing a hole the
         // erosion punched still reads as a streak instead of vanishing.
+        //
+        // The in-scattered body is the same 1/(1+r^2) falloff every mode
+        // uses. The loop also keeps the offset to the brightest contributor,
+        // which is the direction the phase term and the shadow tap below both
+        // work along: they are applied once, to the summed glow, rather than
+        // per strike. Away from the rare frames with two strikes at once the
+        // brightest one *is* the light, and a per-strike phase cost the
+        // march about a fifth of its frame time for a difference that never
+        // showed in a screenshot.
         float glow = 0.0;
         float core = 0.0;
+        float bestG = 0.0;
+        vec3 bestToL = vec3(0.0);
         for (int k = 0; k < MAX_STRIKES; k++) {
           float s = uStrikeStrength[k];
           if (s <= 0.001) continue;
-          float dist = distToSegment(p, uStrikeA[k], uStrikeB[k]);
-          float dr = dist / reachR;
-          glow += s / (1.0 + dr * dr);
-          core += s * 2.0 * exp(-dist * dist / 0.004);
+          vec3 ab = uStrikeB[k] - uStrikeA[k];
+          float ct = clamp(dot(p - uStrikeA[k], ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+          vec3 toL = uStrikeA[k] + ab * ct - p;
+          float d2 = dot(toL, toL);
+          float body = s / (1.0 + d2 / (reachR * reachR));
+          glow += body;
+          core += s * 2.0 * exp(-d2 / 0.004);
+          if (body > bestG) {
+            bestG = body;
+            bestToL = toL;
+          }
         }
 
         float d = density(sp, sh, octaves);
         if (d > 0.002) {
+          // The phase term, and what the flash has to burn through to get
+          // here — one tap toward the strike that matters at this sample.
+          // The occluder is the silhouette alone rather than the full
+          // density: the erosion detail is far finer than a flash's own
+          // falloff, so all it added was noise, and a shape() tap is one
+          // fetch where densityCheap is two. Both are skipped where the
+          // strike is too faint here for either to show, so between beats
+          // the whole block costs a compare; the tap is also skipped in
+          // Voxel, which has no shadowing by design.
+          if (bestG > STRIKE_SHADE_MIN) {
+            vec3 ld = normalize(bestToL);
+            // Faded in across the gate rather than switched on at it. The
+            // phase term alone swings the glow by a factor of five, so a
+            // hard threshold drew a ring exactly where the shading started.
+            float w = smoothstep(STRIKE_SHADE_MIN, STRIKE_SHADE_FULL, bestG);
+            float lit = mix(1.0, henyeyGreenstein(dot(ld, rd)), HG_MIX);
+            // The occluder is how much *denser* the silhouette gets toward
+            // the channel, not how dense it is here. The strike is buried
+            // inside the cloud, so an absolute tap is a near-constant
+            // exp(-K) across the whole flash: it dims the strike instead of
+            // shaping it, which is how this pass first lost most of a
+            // bolt's reach. The difference only darkens where there is a
+            // clump between this sample and the channel, and leaves the
+            // light's own falloff alone.
+            if (!voxel) lit *= exp(-STRIKE_SHADOW_K * max(shape(p + ld * STRIKE_SHADOW_DIST) - sh, 0.0));
+            glow *= mix(1.0, lit, w);
+          }
+          // Out in the far tail of a flash, or between beats, there is no
+          // light here to shade and this costs the plain falloff and a
+          // compare.
+          vec3 flash = glow > 0.0 ? flashTint(tint, glow) * glow * gain : vec3(0.0);
           float a = 1.0 - exp(-d * sigma * stepLen);
           // Voxel shading is flat by design: the sun's shadow taps would
           // soften exactly the faceting this mode exists for, and skipping
@@ -1608,13 +1771,27 @@ void main() {
             sun = mix(vec3(1.0, 0.96, 0.92), palette(0.35, uPalA, uPalB, uPalC, uPalD), 0.45)
               * 0.85 * mix(0.35, 1.0, uAmbient);
           } else {
-            float s1 = densityCheap(p + SUN_DIR * 0.15);
-            float s2 = uDetail < 0.5 ? 0.0 : densityCheap(p + SUN_DIR * 0.4);
-            float shadow = exp(-1.5 * (s1 + s2));
+            // Two taps toward the sun. The near one reads the eroded
+            // density; the far one only has to answer "is there cloud mass
+            // up there", and the silhouette answers that in one fetch where
+            // densityCheap needs two — at half a unit away the erosion
+            // detail is long gone through exp() anyway. That saved fetch is
+            // what pays for the strike shadow tap above.
+            float s1 = densityCheap(p + SUN_DIR * 0.18);
+            float s2 = uDetail < 0.5 ? 0.0 : shape(p + SUN_DIR * 0.5);
+            float shadow = exp(-1.9 * s1 - 1.15 * s2);
             // Powder: thin gas scatters less back toward the camera, which is
             // what keeps the wispy rim from reading as bright as the core.
-            float powder = 1.0 - exp(-d * 2.0);
-            sun = vec3(1.0, 0.95, 0.9) * shadow * 0.9 * mix(0.35, 1.0, uAmbient) * mix(1.0, powder, 0.35);
+            // Normalized so full density is a clean 1.0 — unnormalized it was
+            // a few percent of light quietly thrown away everywhere.
+            float powder = (1.0 - exp(-d * 2.0)) * POWDER_NORM;
+            // Deep gas isn't black, it's blue: what light reaches it has
+            // bounced its way in off the sky, so the shadowed end of the ramp
+            // is a cool floor rather than nothing. That colour shift with
+            // depth is most of what makes the mass read as a solid body
+            // rather than a flat grey card.
+            sun = mix(SHADE_COL, SUN_COL, shadow)
+              * 0.9 * mix(0.35, 1.0, uAmbient) * mix(1.0, powder, 0.35);
           }
           float heightFrac = clamp((sp.y + BOUND.y) / (2.0 * BOUND.y), 0.0, 1.0);
           vec3 ambient = skyTop * mix(0.35, 1.0, heightFrac) * uAmbient * (0.5 + uEnergy);
@@ -1622,7 +1799,7 @@ void main() {
           // what it absorbs, and never the lightning — so a loud band reads
           // as a brighter part of the same cloud.
           float sg = cloudMap ? spectrumGain(sp, ndc) : screenGain;
-          acc += T * a * ((sun + ambient) * sg + tint * glow * gain);
+          acc += T * a * ((sun + ambient) * sg + flash);
           T *= 1.0 - a;
         }
         acc += T * tint * core * gain * stepLen * 4.0;
@@ -1641,9 +1818,7 @@ void main() {
   // Whole-frame flash on a drop, in front of the volume rather than behind it.
   col += boltColor() * 0.1 * uDropPulse * uDropStorm;
 
-  // Soft shoulder instead of a hard clip: a strike can push the cloud far
-  // past 1.0 and still resolve as light rather than a flat white hole.
-  outColor = vec4(1.0 - exp(-col * 1.25), 1.0);
+  outColor = vec4(tonemap(col), 1.0);
 }
 `;
 
@@ -1693,14 +1868,17 @@ void main() {
   vec3 wire = mix(vec3(0.25, 0.85, 1.0), palette(0.45 + 0.2 * seed, uPalA, uPalB, uPalC, uPalD), 0.5);
   float height = clamp((aPos.y + EXTENT_Y) / (2.0 * EXTENT_Y), 0.0, 1.0);
   // Same spectrum mapping the gas gets, on the same term: how brightly this
-  // node is lit, never how hard the flash reaches it.
+  // node is lit, never how hard the flash reaches it. depthFade is the point
+  // cloud's own aerial perspective, on the same numbers — without it every
+  // wire in the lattice comes back at the same brightness and the whole mass
+  // reads as one flat tangle instead of a body with a far side.
   float lit = (0.18 + 0.9 * uAmbient * (0.5 + uEnergy) * (0.45 + 0.55 * height))
-    * spectrumGain(p, viewToRoomNdc(view));
+    * depthFade(view.z) * spectrumGain(p, viewToRoomNdc(view));
   // Treble shimmer: scattered nodes and wires glint on high-band hits.
   float shimmer = uSpark * uHighPulse * step(0.93, hash11(seed * 7.1 + floor(uTime * 12.0)));
 
   vColor = (wire * lit
-    + mix(boltColor(), vec3(1.0), clamp(light, 0.0, 1.0)) * light
+    + flashTint(boltColor(), light) * light
     + vec3(0.6, 0.9, 1.0) * shimmer) * mix(1.0, 2.2, uIsNode);
 
   gl_Position = cloudToClip(p);
@@ -1828,15 +2006,15 @@ void main() {
   // Resting glow: brighter toward the top of the cloud, as if skylit, and
   // dimmer with distance so the far side reads as behind the near side.
   float heightShade = 0.55 + 0.45 * clamp((aPos.y + EXTENT_Y) / (2.0 * EXTENT_Y), 0.0, 1.0);
-  float depthShade = mix(1.0, 0.5, smoothstep(CAM_DIST - 1.2, CAM_DIST + 1.2, view.z));
-  // Same spectrum mapping the gas and the lattice get, on the same term.
-  float ambient = uAmbient * (0.5 + uEnergy) * heightShade * depthShade * (0.7 + 0.3 * hash11(seed * 3.7))
+  // Same spectrum mapping the gas and the lattice get, on the same term, and
+  // the same depthFade the lattice uses.
+  float ambient = uAmbient * (0.5 + uEnergy) * heightShade * depthFade(view.z) * (0.7 + 0.3 * hash11(seed * 3.7))
     * spectrumGain(p, viewToRoomNdc(view));
   // Treble sparks: a scattered few particles glint on high-band hits.
   float spark = uSpark * uHighPulse * step(0.96, hash11(seed * 7.1 + floor(t * 10.0)));
 
   vec3 base = mix(vec3(0.32, 0.34, 0.5), palette(0.6 + 0.1 * seed, uPalA, uPalB, uPalC, uPalD), 0.5) * 0.4;
-  vColor = base * ambient + mix(boltColor(), vec3(1.0), clamp(light, 0.0, 1.0)) * light + vec3(1.0) * spark;
+  vColor = base * ambient + flashTint(boltColor(), light) * light + vec3(1.0) * spark;
 
   gl_Position = cloudToClip(p);
 
