@@ -678,15 +678,18 @@ void main() {
   float r = sqrt(r2) * vScale;
   // A hard-edged faceted shard (3 or 4 sides, random rotation, see
   // POINT_VERT): a regular-polygon distance field, radius in the facet's own
-  // direction rather than the disc's. rn <= r always, so the shard sits
-  // inside the disc's r2 > 0.25 discard above and never gets clipped by it.
+  // direction rather than the disc's. rn >= r always (the polygon is
+  // inscribed in the disc, touching it only at the corners), so the shard
+  // sits inside the disc's r2 > 0.25 discard above and never gets clipped by it.
   float ang = atan(d.y, d.x) + vRot;
   float k = PI / vFacets;
-  float rn = r * cos(k) / cos(mod(ang + k, 2.0 * k) - k);
+  float rn = r * cos(mod(ang + k, 2.0 * k) - k) / cos(k);
   // The anti-aliased rim is one pixel wide on a big grain (so a big grain is
   // a grain, not a blur) and never more than a fraction of the radius on a
-  // small one, which keeps a one-pixel grain's centre bright.
-  float edge = min(vScale / max(vSizePx, 1.0), 0.22);
+  // small one, which keeps a one-pixel grain's centre bright. Divided by
+  // cos(k) to match rn's steeper gradient (vs. the disc's r), so a triangle's
+  // facets don't come out aliased relative to a square's.
+  float edge = min(vScale / (cos(k) * max(vSizePx, 1.0)), 0.22);
   float core = 1.0 - smoothstep(0.5 - edge, 0.5, rn);
   // Settled grains sit on the base tone; thrown grains run up the palette.
   vec3 col = palette(0.1 + 0.4 * vAmp, uPalA, uPalB, uPalC, uPalD);
