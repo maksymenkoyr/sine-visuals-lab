@@ -29,7 +29,12 @@ import type { SignalLink } from "../signals.ts";
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
 // driftRatePerSec below, not a shader uniform driving the rate directly —
 // with driftBeat/driftKick/driftLoud each dialing in how much beat pulses,
-// bass onsets and overall loudness surge that speed), uBass/uTurbulence/
+// bass onsets and overall loudness surge that speed — driftKick alone also
+// adds a bounded forward jolt directly to the drift phase itself (see
+// KICK_JOLT_PHASE and advanceKickJolt below), because a rate-only surge can
+// only ever integrate a kick's sharp attack into a smooth ramp, the same
+// shape a higher uDrift already produces; no amount of gain on a rate term
+// makes that read as a hit rather than a glide), uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
 // / crest glints), and uDropReactivity ties everything to
 // sectionIntensity.ts's slow-tracked "which part of the song is this" signal
@@ -194,12 +199,12 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "driftKick",
     label: "Kick surge",
-    description: "Drift pumps on bass hits specifically, ignoring hats and snares",
+    description: "Drift pumps on bass hits, ignoring hats and snares — a gentle speed-up at low settings, a distinct jolt at high ones",
     group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.2,
+    default: 0.45, // -> weighted toward the jolt (see advanceKickJolt's driftKick^2), so a lower default would ship with the jolt this setting exists for effectively invisible
     // Dark/bass-heavy mixes carry more kick presence to pump on.
     auto: { brightness: -0.3, attack: 0.2 },
   },
@@ -531,6 +536,24 @@ const LOUD_SURGE_GAIN = 1.5;
 // which is still a clear, coherent sprint.
 const SURGE_CAP = 5;
 
+// A kick strike also adds a bounded *position* offset on top of driftPhase,
+// separate from the rate term above — see the file header. A rate-only surge
+// integrates a kick's sharp attack into a smooth ramp (the same shape a
+// higher Drift speed already produces, just briefly), so no amount of gain
+// on the rate term can ever make it read as a hit rather than a glide. This
+// term is what actually produces the "pump", and is weighted toward the top
+// of the driftKick slider (driftKick^2 in advanceKickJolt below) so low
+// settings stay purely the existing smooth rate surge.
+// -> ~0.3 of a noise cell in flow's own units (flow = uDriftPhase * 0.15,
+// noise sampled at q*1.7/q*2.3) — clearly visible, well short of a teleport.
+const KICK_JOLT_PHASE = 2.0;
+// One-pole slew rate toward the jolt's target (see advanceKickJolt). Fast
+// enough to read as a strike; not instant, because lowPulse itself steps
+// 0->1 in a single tick (bandEnergy.ts) and stepping driftPhase that fast
+// would tear the field instead of reading as a strike — the same reasoning
+// RIPPLE_ATTACK_SEC applies to a fresh ring, below.
+const KICK_JOLT_SLEW_PER_SEC = 18;
+
 export interface DriftInputs {
   /** The Drift speed slider, 0..1 (0.5 = original scene speed, 1 = 2x). */
   drift: number;
@@ -562,6 +585,18 @@ export function driftRatePerSec(s: DriftInputs): number {
     s.driftLoud * Math.max(0, s.energy) * LOUD_SURGE_GAIN;
   const modulation = Math.min(driftBoost * surge, SURGE_CAP);
   return DRIFT_BASE_RATE * s.drift * modulation;
+}
+
+/** Bounded forward offset added on top of driftPhase for a kick strike — see
+ *  KICK_JOLT_PHASE's own comment above for why driftRatePerSec's rate term
+ *  can't produce this on its own. Slewed toward its target (never jumped),
+ *  so it stays within [0, KICK_JOLT_PHASE] for any driftKick/lowPulse in
+ *  [0, 1] and any non-negative dtSec, converging on its own as lowPulse
+ *  decays — no separate release handling needed. Exported so
+ *  tests/caustics.test.ts can pin its bounds, weighting and decay directly. */
+export function advanceKickJolt(prevJolt: number, driftKick: number, lowPulse: number, dtSec: number): number {
+  const target = KICK_JOLT_PHASE * driftKick * driftKick * lowPulse;
+  return prevJolt + (target - prevJolt) * Math.min(1, KICK_JOLT_SLEW_PER_SEC * dtSec);
 }
 
 /** A ring's strength over its life: a short attack from 0 (the strike),
@@ -839,14 +874,16 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
   extraUniformDecls: `uniform float uDriftPhase;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
   extraUniforms: (() => {
     let driftPhase = 0;
+    let kickJolt = 0;
     const ripples = createRipplePool();
     let prevDropOnset = false;
 
     return (frame, anim, getSetting) => {
+      const driftKick = getSetting("driftKick");
       driftPhase += anim.dtSec * driftRatePerSec({
         drift: getSetting("drift"),
         driftBeat: getSetting("driftBeat"),
-        driftKick: getSetting("driftKick"),
+        driftKick,
         driftLoud: getSetting("driftLoud"),
         beatPulse: anim.beatPulse,
         lowPulse: anim.lowPulse,
@@ -854,6 +891,10 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
         dropReactivity: getSetting("dropReactivity"),
         sectionIntensity: anim.sectionIntensity,
       });
+      // Not gated behind Drift speed the way the rate term above is — a
+      // kick strike should still land even with drift=0 (see the file
+      // header's driftKick comment).
+      kickJolt = advanceKickJolt(kickJolt, driftKick, anim.lowPulse, anim.dtSec);
 
       ripples.tick(anim.dtSec);
       const rippleSrc = getSetting("rippleSrc");
@@ -874,7 +915,7 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
       // scene used to have (renderLatch.ts's header has the story).
       else if (anim.lowOnset || (anim.onset && rippleSrc < RIPPLE_SRC_BEAT_THRESHOLD)) ripples.trigger(1);
 
-      return { uDriftPhase: driftPhase, uRippleRadius: ripples.radius, uRippleStrength: ripples.strength };
+      return { uDriftPhase: driftPhase + kickJolt, uRippleRadius: ripples.radius, uRippleStrength: ripples.strength };
     };
   })(),
 });
