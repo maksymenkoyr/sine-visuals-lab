@@ -1,13 +1,25 @@
 /**
  * Tiny dev-only overlay: a switch for the clip buffer (see capture.ts —
  * it's a continuous background sample loop, so it's opt-in rather than
- * always-on) and a flash toast confirming a mark/clip actually saved.
- * Mounted once from debug.ts's initTuning(); never imported in prod.
+ * always-on), a flash toast confirming a mark/clip actually saved, and a
+ * persistent notice() panel for Alt+D's bake preview/confirmation — flash()
+ * fades in under a second, too brief to read a multi-line preview and gone
+ * before the page reload a real bake triggers, so that flow gets its own
+ * dismissible block instead. Mounted once from debug.ts's initTuning();
+ * never imported in prod.
  */
+
+export interface NoticeHandle {
+  close(): void;
+}
 
 export interface TuningUI {
   /** Briefly shows `label` in the corner. ok=false renders it as an error. */
   flash(label: string, ok?: boolean): void;
+  /** Shows a persistent, dismissible block of `lines` under the clip-buffer
+   *  switch — replaces whatever notice is already showing. ok=false renders
+   *  it as an error. */
+  notice(lines: string[], ok?: boolean): NoticeHandle;
 }
 
 export function mountTuningUI(onBufferToggle: (on: boolean) => void): TuningUI {
@@ -58,5 +70,36 @@ export function mountTuningUI(onBufferToggle: (on: boolean) => void): TuningUI {
     }, 900);
   }
 
-  return { flash };
+  // The persistent sibling to flash() above — appended to the same top-left
+  // panel as the clip-buffer switch, so it survives a full page reload
+  // reattaching this module (debug.ts relays the text through
+  // sessionStorage; this just renders whatever it's handed).
+  const noticeBox = document.createElement("div");
+  noticeBox.style.cssText =
+    "display:none;flex-direction:column;gap:2px;margin-top:4px;padding-top:4px;" +
+    "border-top:1px solid rgba(255,255,255,.2);white-space:pre;";
+  panel.appendChild(noticeBox);
+
+  function notice(lines: string[], ok = true): NoticeHandle {
+    noticeBox.textContent = "";
+    noticeBox.style.color = ok ? "#fff" : "#f88";
+    const text = document.createElement("div");
+    text.textContent = lines.join("\n");
+    const close = document.createElement("span");
+    close.textContent = "✕";
+    close.style.cssText = "cursor:pointer;opacity:.7;align-self:flex-end;";
+    close.addEventListener("click", () => {
+      noticeBox.style.display = "none";
+    });
+    noticeBox.appendChild(text);
+    noticeBox.appendChild(close);
+    noticeBox.style.display = "flex";
+    return {
+      close(): void {
+        noticeBox.style.display = "none";
+      },
+    };
+  }
+
+  return { flash, notice };
 }
