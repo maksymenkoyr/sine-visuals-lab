@@ -18,13 +18,16 @@ import {
 // on the beat in every mode, so the flash is something you see rather than
 // something you infer from the gas going bright.
 //
-// The cloud has one silhouette and four faces (the `mode` setting, options
-// MODES). Mesh, the default, is that silhouette contoured on the CPU into a
-// lattice of glowing lines and nodes — the cloud as a wireframe of itself.
-// Gas is the raymarched volume. Voxel is the same march with the sample
-// position quantized and the shading posterized, so the gas comes out blocky.
-// Points is the volume's own lobes sampled as a point cloud. Whatever the
-// mode, the strike pool is the same and the bolt pass draws over the top.
+// The cloud has one silhouette and several faces (the `mode` setting, options
+// MODES). Filaments, the default, traces hair-thin strands through a curl
+// field and draws them as additive 1px lines over a dimmed march of the
+// volume — the cloud as a lit tangle. Mesh is that silhouette contoured on
+// the CPU into a lattice of glowing lines and nodes — the cloud as a
+// wireframe of itself. Gas is the raymarched volume. Voxel is the same march
+// with the sample position quantized and the shading posterized, so the gas
+// comes out blocky. Points is the volume's own lobes sampled as a point
+// cloud. Whatever the mode, the strike pool is the same and the bolt pass
+// draws over the top.
 //
 // How it's built:
 //
@@ -142,6 +145,20 @@ import {
 // trips that about once a second, and between re-meshes MESH_VERT's own churn
 // keeps the lattice breathing.
 //
+// The tangle (Filaments mode): the same seed points, each traced FIL_STEPS
+// Euler steps through a curl-noise flow volume (buildFlowVolume) and drawn as
+// a run of additive 1px gl.LINES. The trace happens in the vertex shader —
+// the buffer holds a seed point, a per-strand random value and a step index,
+// nothing more (buildFilamentVertices) — so the tangle re-traces itself every
+// frame as the field crawls, with no CPU work and no re-upload. A strand's
+// brightness is multiplied by the same baked silhouette the march reads, so
+// cloudShape and the morph accumulator eat the tangle into a different mass
+// for free; a strike shoves each vertex along its own flow direction, bounded
+// by FIL_IMPULSE_MAX, so the lightning moves the hair rather than only
+// lighting it. Hairs are faint one at a time and the mass comes from their
+// overlap, so on medium quality and up the volume march runs first as a dim
+// underlay (FIL_GLOW_*) and the strands go over it.
+//
 // The point cloud (Points mode) is a static VBO sampled at init from the same
 // lobes variant 0's silhouette was baked from (buildCloud, seeded with
 // CLOUD_SEED so the two agree). Any prefix of the buffer is a representative
@@ -161,14 +178,17 @@ const MIN_PARTICLES = 4_000;
 // times before being pulled back to the surface — pulling on the first miss
 // piled every gaussian tail onto the ellipsoid and drew a hard, dense rim.
 const SAMPLE_RETRIES = 8;
-/** The `mode` setting's options, in value order. */
-const MODES: readonly string[] = ["Mesh", "Gas", "Voxel", "Points"];
+/** The `mode` setting's options, in value order. Filaments is the default;
+ *  it is appended rather than put first so every mode that shipped before it
+ *  keeps the index a saved setting already refers to. */
+const MODES: readonly string[] = ["Mesh", "Gas", "Voxel", "Points", "Filaments"];
 /** The `spectrumMap` setting's options, in value order — see spectrumGain. */
 const SPECTRUM_MAPS: readonly string[] = ["Off", "Screen", "Cloud"];
 const SPECTRUM_MAP_CLOUD = 2;
 const MODE_MESH = 0;
 const MODE_VOXEL = 2;
 const MODE_POINTS = 3;
+const MODE_FILAMENTS = 4;
 // Bounding ellipsoid half-extents of the cloud, in cloud-space units — where
 // the lobe centres are allowed to sit and where the strikes are kept. The
 // camera (CAMERA_GLSL) is placed so this fills a comfortable share of the
@@ -241,6 +261,57 @@ const NOISE_WORLEY_AMPS = [0.65, 0.35];
 // gallery doesn't reshuffle the cloud.
 const CLOUD_SEED = 1;
 
+// --- Filaments -------------------------------------------------------------
+//
+// The flow volume (buildFlowVolume): the curl of a tileable value-noise
+// potential, one potential per axis. Curl noise is divergence-free by
+// construction, which is exactly what a strand wants to follow — a
+// plain-gradient field would funnel every strand into the same sinks, where
+// curl keeps them swirling past each other. Same lattice-wrapping trick as
+// buildNoiseVolume, so REPEAT wrap makes the coordinate a plain scale of the
+// cloud-space position here too.
+const FLOW_SIZE = 48;
+// Amplitudes fall exactly as fast as the cell counts rise, so every octave
+// contributes the same amount of *gradient* — the curl is what gets sampled,
+// and an fbm weighted for a flat value spectrum has its finest octave
+// dominate the derivative.
+const FLOW_VALUE_CELLS = [3, 6, 12];
+const FLOW_VALUE_AMPS = [0.6, 0.3, 0.15];
+// The fixed scale the raw curl is divided by before it is encoded into
+// 0..255. Fixed rather than measured per volume so the field a given seed
+// produces never depends on what else is in it: measured over the built
+// volume, this puts the bulk of the distribution inside [-1, 1] with only
+// the extreme tail clipping.
+const FLOW_NORM = 5;
+// Steps along the flow each strand is traced for, and how far one step
+// carries in cloud units. Their product is a strand's length, kept well
+// under the cloud's own width so a hair reads as a hair rather than as a
+// wire strung across the whole mass — and short, because the trace is
+// O(FIL_STEPS^2) fetches per strand.
+const FIL_STEPS = 10;
+const FIL_STEP_LEN = 0.06;
+// Cloud units -> flow texture coordinate. One repeat of the volume every
+// 1/FLOW_FREQ units, with the coarsest lattice (FLOW_VALUE_CELLS[0]) setting
+// the largest swirl in it.
+const FLOW_FREQ = 1.1;
+// One strand costs 2 * FIL_STEPS vertices, so the budget buys a fraction of
+// what Points gets particles. The floor is where the tangle stops reading as
+// one mass on the cheap presets, and the ceiling is where adding strands
+// stops making it look any denser and only costs vertex-stage fetches.
+const FIL_STRAND_DIVISOR = 6;
+const FIL_MIN_STRANDS = 1_200;
+const FIL_MAX_STRANDS = 12_000;
+// The largest displacement a strike's light can shove a strand along its own
+// flow direction, in cloud units.
+const FIL_IMPULSE_MAX = 0.1;
+// The glow underlay: the volume march the strands are drawn over, at a
+// fraction of its usual cost. Below this quality proxy the underlay is
+// skipped entirely and the strands draw over the plain background.
+const FIL_GLOW_MIN_DETAIL = 0.6;
+const FIL_GLOW_STEPS = 0.5;
+const FIL_GLOW_DENSITY = 0.25;
+const FIL_GLOW_AMBIENT = 0.22;
+
 /** Segments in one bolt's polyline; a path is this many vertices plus one. */
 export const BOLT_SEGMENTS = 12;
 // Sideways displacement of the coarsest midpoint, as a fraction of the
@@ -278,14 +349,14 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "mode",
     label: "Mode",
-    description: "Mesh is the cloud as a digital lattice; Gas is the raymarched volume; Voxel is that volume gone blocky; Points is a point cloud.",
+    description: "Filaments traces the cloud as a tangle of glowing strands; Mesh is a digital lattice; Gas is the raymarched volume; Voxel is that volume gone blocky; Points is a point cloud.",
     group: "Look",
     type: "enum",
     options: MODES,
     min: 0,
     max: MODES.length - 1,
     step: 1,
-    default: 0,
+    default: MODE_FILAMENTS,
   },
   {
     // Manual by design, like every enum: an auto table would be picking a
@@ -402,6 +473,17 @@ const SETTINGS: SceneSetting[] = [
     auto: { pulse: 0.2, attack: 0.2 },
   },
   {
+    key: "flow",
+    label: "Flow",
+    description: "How fast the filament tangle crawls along its flow field, and how hard a strike shoves it",
+    group: "Cloud",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.4,
+    auto: { tempo: 0.3, pulse: 0.15 },
+  },
+  {
     key: "swirl",
     label: "Swirl speed",
     description: "How fast the cloud turns",
@@ -440,7 +522,7 @@ const SETTINGS: SceneSetting[] = [
     // — two declarations of the same name is a shader compile error.
     key: "grain",
     label: "Detail",
-    description: "How hard the noise erodes the cloud into billows, how big a voxel is, and how big each point or lattice node draws",
+    description: "How hard the noise erodes the cloud into billows, how big a voxel is, how big each point or lattice node draws, and how brightly a filament burns",
     group: "Cloud",
     min: 0,
     max: 1,
@@ -633,6 +715,54 @@ export function particleCountForQuality(maxParticles: number): number {
   return Math.max(MIN_PARTICLES, Math.min(MAX_PARTICLES, Math.floor(maxParticles)));
 }
 
+/** How many strands Filaments mode traces out of the same budget. A strand
+ *  costs 2 * FIL_STEPS vertices where a particle costs one, so this is a
+ *  fraction of the particle count — with its own floor, since the cheap
+ *  presets' budgets divide down to a handful of hairs. */
+export function filamentStrandCount(maxParticles: number): number {
+  const n = Math.floor(particleCountForQuality(maxParticles) / FIL_STRAND_DIVISOR);
+  return Math.max(FIL_MIN_STRANDS, Math.min(FIL_MAX_STRANDS, n));
+}
+
+/** The strand vertex buffers, laid out for one gl.LINES draw: for strand `s`
+ *  and step `j`, the pair of vertices (j, j+1). Both carry the strand's seed
+ *  point and per-strand random value unchanged — where the vertex actually
+ *  lands is the shader's business (it integrates `step` steps along the flow
+ *  volume), so nothing here has to be rebuilt when the field moves.
+ *
+ *  Strands are taken as a prefix of the point cloud's own samples, which
+ *  buildCloud guarantees is a representative subsample — so Cloud density can
+ *  shorten the draw here exactly as it does in Points. */
+export function buildFilamentVertices(
+  seedPositions: Float32Array,
+  seedValues: Float32Array,
+  strands: number,
+  steps = FIL_STEPS,
+): { positions: Float32Array; seeds: Float32Array; steps: Float32Array } {
+  const verts = strands * steps * 2;
+  const positions = new Float32Array(verts * 3);
+  const seeds = new Float32Array(verts);
+  const stepIndex = new Float32Array(verts);
+  let o = 0;
+  for (let s = 0; s < strands; s++) {
+    const x = seedPositions[s * 3];
+    const y = seedPositions[s * 3 + 1];
+    const z = seedPositions[s * 3 + 2];
+    const seed = seedValues[s];
+    for (let j = 0; j < steps; j++) {
+      for (let end = 0; end < 2; end++) {
+        positions[o * 3] = x;
+        positions[o * 3 + 1] = y;
+        positions[o * 3 + 2] = z;
+        seeds[o] = seed;
+        stepIndex[o] = j + end;
+        o++;
+      }
+    }
+  }
+  return { positions, seeds, steps: stepIndex };
+}
+
 // --- The noise volume -------------------------------------------------------
 //
 // Two channels, both tileable: R is value-noise fbm ("where is there gas at
@@ -777,6 +907,86 @@ function noiseAt(data: Uint8Array, size: number, x: number, y: number, z: number
   const c01 = mix(at(x0, y0, z1), at(x1, y0, z1), tx);
   const c11 = mix(at(x0, y1, z1), at(x1, y1, z1), tx);
   return mix(mix(c00, c10, ty), mix(c01, c11, ty), tz);
+}
+
+// --- The flow volume --------------------------------------------------------
+//
+// Filaments mode's field: the curl of a vector potential whose three
+// components are independent tileable value-noise fbms. Curl noise is
+// divergence-free, so a strand traced through it swirls past its neighbours
+// instead of being funnelled into a sink the way a plain gradient field would
+// funnel it — that difference is the whole reason the tangle reads as hair
+// rather than as a comb.
+//
+// The potential is evaluated onto a grid first and the curl taken as central
+// differences *on that grid*, one texel apart with wrapped indices. Both
+// halves of that matter: sampling the potential once per texel instead of six
+// times per derivative is what keeps the build affordable, and differencing
+// wrapped grid neighbours is what makes the curl itself periodic — a field
+// sampled with REPEAT has no seam to cross.
+
+/** The flow field, `size`^3 texels of RGB8 in x-fastest order: a curl-noise
+ *  vector per texel, each component scaled by FLOW_NORM and encoded from
+ *  [-1, 1] into 0..255 the way a normal map is. Deterministic for a given
+ *  seed; pure and node-safe, like buildNoiseVolume. */
+export function buildFlowVolume(size: number = FLOW_SIZE, seed = 1): Uint8Array {
+  const rng = createRng(seed);
+  const n = size * size * size;
+  // Three potentials, sampled onto the same grid the curl is taken over.
+  const pot: Float32Array[] = [];
+  for (let c = 0; c < 3; c++) {
+    const tables = FLOW_VALUE_CELLS.map((cells) => valueLattice(rng, cells));
+    const grid = new Float32Array(n);
+    let o = 0;
+    for (let z = 0; z < size; z++) {
+      const w = z / size;
+      for (let y = 0; y < size; y++) {
+        const v = y / size;
+        for (let x = 0; x < size; x++) {
+          const u = x / size;
+          let s = 0;
+          for (let k = 0; k < FLOW_VALUE_CELLS.length; k++) {
+            s += FLOW_VALUE_AMPS[k] * sampleValue(tables[k], FLOW_VALUE_CELLS[k], u, v, w);
+          }
+          grid[o++] = s;
+        }
+      }
+    }
+    pot.push(grid);
+  }
+
+  const at = (c: number, x: number, y: number, z: number) =>
+    pot[c][(wrapIndex(z, size) * size + wrapIndex(y, size)) * size + wrapIndex(x, size)];
+  // Central difference over two texels, in the same units the potential's
+  // domain is measured in (the volume spans 1).
+  const inv = size / 2;
+  const data = new Uint8Array(n * 3);
+  let o = 0;
+  for (let z = 0; z < size; z++) {
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const dxdy = (at(0, x, y + 1, z) - at(0, x, y - 1, z)) * inv;
+        const dxdz = (at(0, x, y, z + 1) - at(0, x, y, z - 1)) * inv;
+        const dydx = (at(1, x + 1, y, z) - at(1, x - 1, y, z)) * inv;
+        const dydz = (at(1, x, y, z + 1) - at(1, x, y, z - 1)) * inv;
+        const dzdx = (at(2, x + 1, y, z) - at(2, x - 1, y, z)) * inv;
+        const dzdy = (at(2, x, y + 1, z) - at(2, x, y - 1, z)) * inv;
+        const cx = dzdy - dydz;
+        const cy = dxdz - dzdx;
+        const cz = dydx - dxdy;
+        data[o++] = encodeSigned(cx / FLOW_NORM);
+        data[o++] = encodeSigned(cy / FLOW_NORM);
+        data[o++] = encodeSigned(cz / FLOW_NORM);
+      }
+    }
+  }
+  return data;
+}
+
+/** [-1, 1] -> 0..255, clamping outside. The exact inverse of the shader's
+ *  `texture(...).rgb * 2.0 - 1.0`. */
+function encodeSigned(v: number): number {
+  return Math.max(0, Math.min(255, Math.round((Math.max(-1, Math.min(1, v)) * 0.5 + 0.5) * 255)));
 }
 
 // --- The shape field -------------------------------------------------------
@@ -1406,6 +1616,11 @@ ${STRIKE_UNIFORMS_GLSL}
 uniform highp sampler3D uNoise; // R: value fbm, G: inverted worley — tiled
 uniform highp sampler3D uShape; // the baked silhouettes, one per channel
 uniform vec4 uShapeMix;         // shapePhaseWeights, as a per-channel weight
+// 1.0 while this draw is Filaments mode's glow underlay: the march runs, on
+// the scaled uMaxSteps/uDensity/uAmbient render() uploads for that one draw,
+// and the strands go over the top of it. 0.0 everywhere else, including
+// Filaments on a preset too cheap to afford the underlay.
+uniform float uGlowUnderlay;
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
 ${SAMPLE_BANDS_GLSL}
@@ -1420,6 +1635,7 @@ ${BOLT_COLOR_GLSL}
 #define MODE_MESH ${MODE_MESH}
 #define MODE_VOXEL ${MODE_VOXEL}
 #define MODE_POINTS ${MODE_POINTS}
+#define MODE_FILAMENTS ${MODE_FILAMENTS}
 // How many levels Voxel mode's shading is posterized into, and how big one
 // voxel is at each end of Detail.
 #define VOXEL_BANDS 5.0
@@ -1612,18 +1828,27 @@ void main() {
   vec2 uv = roomUv(vUv);
   float aspect = roomAspect();
   int mode = int(uMode + 0.5);
+  bool geometry = mode == MODE_MESH || mode == MODE_POINTS || mode == MODE_FILAMENTS;
+  // Filaments is a geometry mode that still marches: the strands are hairs
+  // with nothing between them, so a dim volume behind them is what gives the
+  // tangle a body to sit in. Same pass, same shader — render() just uploads
+  // a scaled step count, density and ambient for that one draw.
+  bool march = !geometry || uGlowUnderlay > 0.5;
   // The bloom is what a geometry mode has instead of gas around the channel,
   // so it draws at full strength there and at a fraction of it in the
   // marched modes, where the volume is already carrying the flash and a
   // screen-space halo on top only reads as a sprite pasted over the cloud.
-  bool geometry = mode == MODE_MESH || mode == MODE_POINTS;
-  vec3 bg = background(uv, aspect, geometry ? BOLT_BLOOM_GAIN : BOLT_BLOOM_GAIN * 0.3);
+  // With the underlay up there is some gas carrying it, so Filaments sits
+  // between the two.
+  float bloom = BOLT_BLOOM_GAIN * (geometry ? (march ? 0.5 : 1.0) : 0.3);
+  vec3 bg = background(uv, aspect, bloom);
 
-  // The geometry modes: no march at all. The lattice or the point pass draws
-  // the cloud, so all this pass owes them is something to draw over — sky,
-  // the haze around each live bolt, and the drop flash. Every pixel is still
-  // written (nothing else in the shared gallery context clears colour).
-  if (geometry) {
+  // The geometry modes: no march at all. The lattice, the point pass or the
+  // strands draw the cloud, so all this pass owes them is something to draw
+  // over — sky, the haze around each live bolt, and the drop flash. Every
+  // pixel is still written (nothing else in the shared gallery context clears
+  // colour).
+  if (!march) {
     vec3 flat_ = bg + boltColor() * 0.1 * uDropPulse * uDropStorm;
     outColor = vec4(tonemap(flat_), 1.0);
     return;
@@ -2040,6 +2265,138 @@ void main() {
 }
 `;
 
+// The strands (Filaments mode). Each is a particle traced through the flow
+// volume: the vertex buffer holds nothing but a seed point, a per-strand
+// random value and a step index, and the vertex shader integrates that many
+// Euler steps along the field to find where this vertex actually is. A strand
+// is emitted as FIL_STEPS gl.LINES pairs, so step j appears twice (once
+// ending segment j-1, once starting segment j) and both copies integrate to
+// the same point — O(K^2) fetches per strand, all of it vertex-stage, which
+// buys a tangle that costs nothing on the CPU and re-traces itself every
+// frame as the field crawls.
+//
+// Why the sampler isn't called uFlow: the `flow` setting already owns that
+// name (settingUniformName), and two declarations of one name is a shader
+// compile error — the same trap the `grain` setting's comment describes.
+const FILAMENT_VERT = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+layout(location = 0) in vec3 aPos;   // the strand's seed point, in cloud space
+layout(location = 1) in float aSeed; // per-strand [0,1)
+layout(location = 2) in float aStep; // how far along the strand this vertex is
+out vec3 vColor;
+${COMMON_UNIFORMS_GLSL}
+${settingsUniformsGlsl}
+${STRIKE_UNIFORMS_GLSL}
+uniform float uCountBoost;
+uniform highp sampler3D uFlowTex; // the curl field — buildFlowVolume
+uniform highp sampler3D uShape;   // the baked silhouettes, one per channel
+uniform vec4 uShapeMix;           // shapePhaseWeights, as a per-channel weight
+${PALETTE_GLSL}
+${SAMPLE_BANDS_GLSL}
+${CAMERA_GLSL}
+${SPECTRUM_GLSL}
+${PROJECT_GLSL}
+${BOLT_COLOR_GLSL}
+
+#define MAX_STRIKES ${MAX_STRIKES}
+#define EXTENT_Y ${CLOUD_EXTENT_Y.toFixed(2)}
+#define FIL_STEPS ${FIL_STEPS}
+#define FIL_STEP_LEN ${FIL_STEP_LEN.toFixed(4)}
+#define FLOW_FREQ ${FLOW_FREQ.toFixed(4)}
+#define FIL_IMPULSE_MAX ${FIL_IMPULSE_MAX.toFixed(4)}
+const vec3 BOUND = vec3(${BOUND_X.toFixed(4)}, ${BOUND_Y.toFixed(4)}, ${BOUND_Z.toFixed(4)});
+${STRIKE_LIGHT_GLSL}
+
+float hash11(float x) {
+  return fract(sin(x * 127.1) * 43758.5453);
+}
+
+// How fast the tangle crawls, off the Flow setting.
+float flowRate() {
+  return mix(0.15, 1.6, uFlow);
+}
+
+// Where the flow field is read — the same scrolling idea flowSpace() uses for
+// the gas: the whole field drifts downwind and churns against itself, so the
+// strands re-trace along a slowly moving field instead of hanging in place.
+// The volume tiles, so this is a plain scale of the cloud-space position.
+vec3 flowCoord(vec3 p) {
+  vec3 q = p * FLOW_FREQ + vec3(uFlowPhase * 0.05, 0.0, uFlowPhase * 0.025) * flowRate();
+  return q + 0.03 * sin(q.zxy * 2.0 + uTime * 0.2 * flowRate());
+}
+
+// textureLod, not texture: a vertex shader has no derivatives to pick a level
+// from, so the level is named rather than left to the implementation.
+vec3 flowVec(vec3 p) {
+  return textureLod(uFlowTex, flowCoord(p), 0.0).rgb * 2.0 - 1.0;
+}
+
+void main() {
+  // Trace this vertex's own prefix of the strand. The bound is constant and
+  // the live count comes off the attribute, per the break idiom the march
+  // uses for uMaxSteps.
+  vec3 p = aPos;
+  for (int i = 0; i < FIL_STEPS; i++) {
+    if (float(i) >= aStep) break;
+    p += FIL_STEP_LEN * flowVec(p);
+  }
+
+  vec3 tangent = flowVec(p);
+  float tl = length(tangent);
+  vec3 dir = tl > 1e-4 ? tangent / tl : vec3(0.0, 1.0, 0.0);
+
+  // The same per-strike falloff every geometry pass uses, at the points'
+  // gain — the strands overlap as heavily as the particles do, and this pass
+  // has no tonemap behind it either.
+  float light = strikeLight(p, mix(0.15, 0.6, uReach)) * mix(0.12, 0.45, uStrike);
+  // A strike shoves the tangle rather than only tinting it: bounded, and
+  // along the strand's own flow direction, so a shoved strand still lies
+  // along the field instead of being blown off it.
+  p += dir * (FIL_IMPULSE_MAX * clamp(light * 3.0, 0.0, 1.0) * mix(0.35, 1.0, uFlow));
+
+  // The silhouette the gas and the lattice draw, sampled where this vertex
+  // ended up: it is what fades a strand out at the cloud's edge, and what
+  // lets cloudShape/morphPhase eat the tangle into a different mass with no
+  // CPU rebuild — the seed points never move, only what is lit does.
+  float sh = dot(textureLod(uShape, p / (2.0 * BOUND) + 0.5, 0.0), uShapeMix);
+  float mask = smoothstep(0.01, 0.20, sh);
+
+  vec3 view = cloudToView(p);
+  // The POINT_VERT terms, so every mode is lit by the same cloud: skylit
+  // brighter toward the top, aerial perspective with depth, the spectrum
+  // mapping on the ambient side only, and treble sparks.
+  float heightShade = 0.55 + 0.45 * clamp((aPos.y + EXTENT_Y) / (2.0 * EXTENT_Y), 0.0, 1.0);
+  float ambient = uAmbient * (0.5 + uEnergy) * heightShade * depthFade(view.z)
+    * (0.7 + 0.3 * hash11(aSeed * 3.7)) * spectrumGain(p, viewToRoomNdc(view));
+  float spark = uSpark * uHighPulse * step(0.96, hash11(aSeed * 7.1 + floor(uTime * 10.0)));
+
+  // A hair is faint on its own and the tangle is bright where it bunches, so
+  // the gain stays low and the overlap does the work. Detail is what a 1px
+  // line has instead of a point size, and uCountBoost keeps a sparse cloud
+  // (a gallery tile's) from thinning out to nothing.
+  float trail = 1.0 - 0.45 * (aStep / float(FIL_STEPS));
+  float gain = mix(0.35, 1.1, uGrain) * uCountBoost * mask * trail;
+
+  vec3 strand = mix(vec3(0.25, 0.85, 1.0), palette(0.5 + 0.15 * aSeed, uPalA, uPalB, uPalC, uPalD), 0.45);
+  vColor = strand * ambient * gain
+    + flashTint(boltColor(), light) * light * mask * trail
+    + vec3(0.6, 0.9, 1.0) * spark * mask;
+
+  gl_Position = cloudToClip(p);
+}
+`;
+
+const FILAMENT_FRAG = `#version 300 es
+precision highp float;
+in vec3 vColor;
+out vec4 outColor;
+
+void main() {
+  outColor = vec4(vColor, 1.0);
+}
+`;
+
 // ---------------------------------------------------------------------------
 
 // None of these depend on anything but the seed, and none is cheap to build
@@ -2076,6 +2433,12 @@ function cloudFor(n: number) {
   return cachedCloud.cloud;
 }
 
+let cachedFlow: Uint8Array | null = null;
+function flowVolume(): Uint8Array {
+  if (!cachedFlow) cachedFlow = buildFlowVolume(FLOW_SIZE, CLOUD_SEED);
+  return cachedFlow;
+}
+
 export const stormScene: Scene = (() => {
   let prog: GLProgram | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;
@@ -2093,6 +2456,13 @@ export const stormScene: Scene = (() => {
   let boltVao: WebGLVertexArrayObject | null = null;
   let boltPosBuf: WebGLBuffer | null = null;
   let boltSlotBuf: WebGLBuffer | null = null;
+  let flowTex: WebGLTexture | null = null;
+  let filProg: GLProgram | null = null;
+  let filVao: WebGLVertexArrayObject | null = null;
+  let filPosBuf: WebGLBuffer | null = null;
+  let filSeedBuf: WebGLBuffer | null = null;
+  let filStepBuf: WebGLBuffer | null = null;
+  let strandCount = 0;
   let count = 0;
   let meshRes = MESH_RES_HIGH;
   let meshVertCount = 0;
@@ -2172,6 +2542,36 @@ export const stormScene: Scene = (() => {
       gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
 
+      // The flow field the strands are traced through. RGB8 is three bytes a
+      // texel, so a row is only 4-byte aligned by luck — UNPACK_ALIGNMENT has
+      // to come down for the upload and go back afterwards, since the pack
+      // state is context-wide and the gallery shares this context.
+      flowTex = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_3D, flowTex);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage3D(
+        gl.TEXTURE_3D,
+        0,
+        gl.RGB8,
+        FLOW_SIZE,
+        FLOW_SIZE,
+        FLOW_SIZE,
+        0,
+        gl.RGB,
+        gl.UNSIGNED_BYTE,
+        flowVolume(),
+      );
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      // Tileable for the same reason the noise volume is: the coordinate is a
+      // plain scale of the cloud-space position, with no wrap handling.
+      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.REPEAT);
+      gl.activeTexture(gl.TEXTURE0);
+
       // Sampler bindings are program state, so they only have to be set once.
       prog.use();
       gl.uniform1i(gl.getUniformLocation(prog.program, "uNoise"), 0);
@@ -2197,6 +2597,33 @@ export const stormScene: Scene = (() => {
       gl.enableVertexAttribArray(1);
       gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
       gl.bindVertexArray(null);
+
+      // The strands: static line-pair vertices over a prefix of the same
+      // samples, since where a vertex lands is decided in the shader.
+      filProg = createProgram(gl, FILAMENT_FRAG, FILAMENT_VERT);
+      strandCount = filamentStrandCount(ctx.quality.maxParticles);
+      const strands = buildFilamentVertices(cloud.positions, cloud.seeds, strandCount);
+      filVao = gl.createVertexArray();
+      gl.bindVertexArray(filVao);
+      filPosBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, filPosBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, strands.positions, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+      filSeedBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, filSeedBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, strands.seeds, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
+      filStepBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, filStepBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, strands.steps, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+      gl.bindVertexArray(null);
+      filProg.use();
+      gl.uniform1i(gl.getUniformLocation(filProg.program, "uShape"), 1);
+      gl.uniform1i(gl.getUniformLocation(filProg.program, "uFlowTex"), 2);
 
       // The lattice. Its contents change as the cloud morphs, so both buffers
       // are DYNAMIC_DRAW at a fixed capacity and a re-mesh is a bufferSubData
@@ -2250,6 +2677,7 @@ export const stormScene: Scene = (() => {
     render(ctx, frame, viewport, palette, anim) {
       if (!prog || !quadVao || !pool || !noiseTex || !shapeTex || !pointProg || !pointVao) return;
       if (!meshProg || !meshVao || !boltProg || !boltVao) return;
+      if (!filProg || !filVao || !flowTex) return;
       const { gl } = ctx;
 
       // resolveSceneSetting (not getSceneSetting) — the raw manual value
@@ -2259,6 +2687,7 @@ export const stormScene: Scene = (() => {
       const flicker = resolveSceneSetting(ID, settingFor("flicker"));
       const dropStorm = resolveSceneSetting(ID, settingFor("dropStorm"));
       const density = resolveSceneSetting(ID, settingFor("density"));
+      const ambient = resolveSceneSetting(ID, settingFor("ambient"));
       const cloudShape = resolveSceneSetting(ID, settingFor("cloudShape"));
       const morphSpeed = resolveSceneSetting(ID, settingFor("morphSpeed"));
       const morphBeat = resolveSceneSetting(ID, settingFor("morphBeat"));
@@ -2312,19 +2741,33 @@ export const stormScene: Scene = (() => {
       prog.setV3v("uStrikeA", pool.posA);
       prog.setV3v("uStrikeB", pool.posB);
       prog.setFv("uStrikeStrength", pool.strength);
-      prog.setV4(
-        "uShapeMix",
-        (w.a === 0 ? 1 - w.f : 0) + (w.b === 0 ? w.f : 0),
-        (w.a === 1 ? 1 - w.f : 0) + (w.b === 1 ? w.f : 0),
-        (w.a === 2 ? 1 - w.f : 0) + (w.b === 2 ? w.f : 0),
-        (w.a === 3 ? 1 - w.f : 0) + (w.b === 3 ? w.f : 0),
-      );
+      // The two live silhouettes' weights, per channel of the shape volume.
+      // Filaments reads the same volume from its vertex shader, so this is
+      // computed once and uploaded to both programs.
+      const shapeMix = [0, 1, 2, 3].map((c) => (w.a === c ? 1 - w.f : 0) + (w.b === c ? w.f : 0));
+      prog.setV4("uShapeMix", shapeMix[0], shapeMix[1], shapeMix[2], shapeMix[3]);
+      // Filaments' glow underlay: the same march, at half the steps and a
+      // fraction of the density and ambient. The scaled values go up as the
+      // ordinary setting uniforms *after* uploadCommonUniforms rather than as
+      // separate scale factors inside VOLUME_FRAG, which keeps the march
+      // reading as one cloud lit one way. Skipped on the cheap presets, where
+      // the strands draw over the plain background instead.
+      const glowUnderlay = mode === MODE_FILAMENTS && ctx.quality.detail >= FIL_GLOW_MIN_DETAIL;
+      prog.setF("uGlowUnderlay", glowUnderlay ? 1 : 0);
+      if (glowUnderlay) {
+        prog.setF("uMaxSteps", ctx.quality.raymarchSteps * FIL_GLOW_STEPS);
+        prog.setF("uDensity", density * FIL_GLOW_DENSITY);
+        prog.setF("uAmbient", ambient * FIL_GLOW_AMBIENT);
+      }
       // Another scene in the shared gallery context may have bound something
-      // else to these units since the last draw, so rebind both every frame.
+      // else to these units since the last draw, so rebind all three every
+      // frame.
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_3D, noiseTex);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_3D, shapeTex);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_3D, flowTex);
       gl.activeTexture(gl.TEXTURE0);
 
       // The volume pass goes first in every mode: it paints every pixel (in
@@ -2398,6 +2841,20 @@ export const stormScene: Scene = (() => {
         gl.bindVertexArray(pointVao);
         gl.drawArrays(gl.POINTS, 0, Math.floor(count * Math.max(0.05, density)));
         gl.bindVertexArray(null);
+      } else if (mode === MODE_FILAMENTS) {
+        filProg.use();
+        uploadCommonUniforms(filProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+        filProg.setV3v("uStrikeA", pool.posA);
+        filProg.setV3v("uStrikeB", pool.posB);
+        filProg.setFv("uStrikeStrength", pool.strength);
+        filProg.setV4("uShapeMix", shapeMix[0], shapeMix[1], shapeMix[2], shapeMix[3]);
+        filProg.setF("uCountBoost", Math.min(3, Math.max(1, Math.sqrt(FIL_MAX_STRANDS / strandCount))));
+        // A prefix of the strand buffer is a prefix of the point cloud, so
+        // Cloud density thins the tangle here the way it thins the points.
+        const strands = Math.floor(strandCount * Math.max(0.05, density));
+        gl.bindVertexArray(filVao);
+        gl.drawArrays(gl.LINES, 0, strands * FIL_STEPS * 2);
+        gl.bindVertexArray(null);
       }
 
       // The bolts, over whatever the mode drew. Only a slot that fired since
@@ -2447,22 +2904,30 @@ export const stormScene: Scene = (() => {
       pointProg?.dispose();
       meshProg?.dispose();
       boltProg?.dispose();
+      filProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
       if (pointVao) gl.deleteVertexArray(pointVao);
       if (meshVao) gl.deleteVertexArray(meshVao);
       if (boltVao) gl.deleteVertexArray(boltVao);
+      if (filVao) gl.deleteVertexArray(filVao);
       if (posBuf) gl.deleteBuffer(posBuf);
       if (seedBuf) gl.deleteBuffer(seedBuf);
       if (meshPosBuf) gl.deleteBuffer(meshPosBuf);
       if (meshIdxBuf) gl.deleteBuffer(meshIdxBuf);
       if (boltPosBuf) gl.deleteBuffer(boltPosBuf);
       if (boltSlotBuf) gl.deleteBuffer(boltSlotBuf);
+      if (filPosBuf) gl.deleteBuffer(filPosBuf);
+      if (filSeedBuf) gl.deleteBuffer(filSeedBuf);
+      if (filStepBuf) gl.deleteBuffer(filStepBuf);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_3D, null);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_3D, null);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_3D, null);
       if (noiseTex) gl.deleteTexture(noiseTex);
       if (shapeTex) gl.deleteTexture(shapeTex);
+      if (flowTex) gl.deleteTexture(flowTex);
       prog = null;
       quadVao = null;
       noiseTex = null;
@@ -2479,6 +2944,13 @@ export const stormScene: Scene = (() => {
       boltVao = null;
       boltPosBuf = null;
       boltSlotBuf = null;
+      flowTex = null;
+      filProg = null;
+      filVao = null;
+      filPosBuf = null;
+      filSeedBuf = null;
+      filStepBuf = null;
+      strandCount = 0;
       count = 0;
       meshVertCount = 0;
       meshIndexCount = 0;

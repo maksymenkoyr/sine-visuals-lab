@@ -150,10 +150,14 @@ describe("regression: inert when no overrides or pins are active", () => {
   // exactly as they did before tuning/overrides.ts and tuning/pins.ts
   // existed, for every real setting on the two scenes the workflow targets
   // first.
-  it.each(ALL_SETTINGS.map((s) => [s.label, s] as const))(
+  it.each(ALL_SETTINGS.map((s, i) => [s.label, s, i] as const))(
     "resolveSceneSetting(%s) matches manual value with auto off and no override or pin",
-    (_label, spec) => {
-      const sceneId = `scene-regress-${spec.key}`;
+    (_label, spec, row) => {
+      // One scene id per row rather than per key: two scenes may legitimately
+      // use the same key (meshGrid and storm both have a `flow`), and the auto
+      // slew is state on the (scene, key) pair — sharing an id would leave
+      // this row resolving part-way from the previous row's default.
+      const sceneId = `scene-regress-${row}-${spec.key}`;
       setSceneSetting(sceneId, spec, spec.default);
       advanceAutoTune(1, NEUTRAL);
       expect(getOverride(sceneId, spec.key)).toBeUndefined();

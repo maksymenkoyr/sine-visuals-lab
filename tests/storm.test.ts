@@ -6,9 +6,12 @@ import {
   advanceMorphPhase,
   buildBoltPath,
   buildCloud,
+  buildFilamentVertices,
+  buildFlowVolume,
   buildLobeSets,
   buildLobes,
   buildNoiseVolume,
+  filamentStrandCount,
   buildShapeVolume,
   buildSurfaceNet,
   createRng,
@@ -419,6 +422,118 @@ describe("storm noise volume", () => {
         const seam = meanDelta(axis, SIZE - 1, 0, channel);
         const interior = meanDelta(axis, SIZE / 2, SIZE / 2 + 1, channel);
         expect(seam).toBeLessThan(interior * 3 + 1);
+      }
+    }
+  });
+});
+
+describe("storm flow volume", () => {
+  // Small, like the noise volume's suite: every lattice is defined over the
+  // unit cube, so the properties hold at any size.
+  const SIZE = 24;
+  const data = buildFlowVolume(SIZE, 5);
+  const at = (x: number, y: number, z: number, channel: number) =>
+    data[(((z * SIZE + y) * SIZE + x) * 3) + channel];
+
+  it("is three channels of every texel, in range, and deterministic for a given seed", () => {
+    expect(data.length).toBe(SIZE * SIZE * SIZE * 3);
+    // Every byte is in range and whole — what that really tests is that
+    // encodeSigned clamps, since a raw curl far past FLOW_NORM would
+    // otherwise wrap around inside the Uint8Array rather than pin to an end.
+    let min = 255;
+    let max = 0;
+    for (let i = 0; i < data.length; i++) {
+      min = Math.min(min, data[i]);
+      max = Math.max(max, data[i]);
+    }
+    expect(min).toBeGreaterThanOrEqual(0);
+    expect(max).toBeLessThanOrEqual(255);
+    expect(min).toBeLessThan(100);
+    expect(max).toBeGreaterThan(155);
+    const digest = (v: Uint8Array) => v.reduce((a, b, i) => (a + b * (i % 7 + 1)) % 1e9, 0);
+    expect(digest(buildFlowVolume(SIZE, 5))).toBe(digest(data));
+    expect(digest(buildFlowVolume(SIZE, 6))).not.toBe(digest(data));
+  });
+
+  it("is a signed field centred on zero, with real variance in every channel", () => {
+    // Curl has no reason to prefer a direction, so each channel's decoded
+    // mean sits on 0 (byte 127.5) — a mean far off it would mean the
+    // differencing had picked up a bias. The spread is what says FLOW_NORM
+    // is in the right ballpark: too large and the field hugs its mean, too
+    // small and it clips to the ends.
+    const n = SIZE * SIZE * SIZE;
+    for (const channel of [0, 1, 2]) {
+      let sum = 0;
+      let sumSq = 0;
+      let saturated = 0;
+      for (let i = 0; i < n; i++) {
+        const v = data[i * 3 + channel];
+        sum += v;
+        sumSq += v * v;
+        if (v === 0 || v === 255) saturated++;
+      }
+      const mean = sum / n;
+      expect(Math.abs(mean - 127.5)).toBeLessThan(3);
+      expect(Math.sqrt(sumSq / n - mean * mean)).toBeGreaterThan(15);
+      expect(saturated / n).toBeLessThan(0.02);
+    }
+  });
+
+  it("tiles: the wrap-around seam is as smooth as any interior step", () => {
+    // Sampled with REPEAT, so texel `size` is texel 0. The curl is taken as
+    // central differences over wrapped grid indices, which is what makes the
+    // field itself periodic — not just the potential behind it. Magnitudes,
+    // not equality: neighbouring texels never match anywhere.
+    const meanDelta = (axis: 0 | 1 | 2, a: number, b: number, channel: number) => {
+      let total = 0;
+      let count = 0;
+      for (let i = 0; i < SIZE; i++) {
+        for (let j = 0; j < SIZE; j++) {
+          const pa = axis === 0 ? at(a, i, j, channel) : axis === 1 ? at(i, a, j, channel) : at(i, j, a, channel);
+          const pb = axis === 0 ? at(b, i, j, channel) : axis === 1 ? at(i, b, j, channel) : at(i, j, b, channel);
+          total += Math.abs(pa - pb);
+          count++;
+        }
+      }
+      return total / count;
+    };
+
+    for (const channel of [0, 1, 2]) {
+      for (const axis of [0, 1, 2] as const) {
+        const seam = meanDelta(axis, SIZE - 1, 0, channel);
+        const interior = meanDelta(axis, SIZE / 2, SIZE / 2 + 1, channel);
+        expect(seam).toBeLessThan(interior * 3 + 1);
+      }
+    }
+  });
+});
+
+describe("storm filament strands", () => {
+  it("spends a fraction of the particle budget, with a floor and a ceiling", () => {
+    expect(filamentStrandCount(200_000)).toBeLessThan(particleCountForQuality(200_000));
+    expect(filamentStrandCount(4_000)).toBe(filamentStrandCount(0));
+    expect(filamentStrandCount(1e9)).toBe(filamentStrandCount(1e10));
+    expect(filamentStrandCount(50_000)).toBeGreaterThan(filamentStrandCount(12_000));
+  });
+
+  it("emits each strand as consecutive line pairs sharing one seed point", () => {
+    const strands = 3;
+    const steps = 4;
+    const cloud = buildCloud(strands);
+    const v = buildFilamentVertices(cloud.positions, cloud.seeds, strands, steps);
+    expect(v.positions.length).toBe(strands * steps * 2 * 3);
+    expect(v.seeds.length).toBe(strands * steps * 2);
+    for (let s = 0; s < strands; s++) {
+      for (let j = 0; j < steps; j++) {
+        const o = (s * steps + j) * 2;
+        // The pair straddles one step of the trace...
+        expect(v.steps[o]).toBe(j);
+        expect(v.steps[o + 1]).toBe(j + 1);
+        // ...and every vertex of the strand carries the same seed, since the
+        // shader is what turns a step index into a position.
+        expect(v.seeds[o]).toBe(cloud.seeds[s]);
+        expect(v.positions[o * 3]).toBe(cloud.positions[s * 3]);
+        expect(v.positions[(o + 1) * 3 + 2]).toBe(cloud.positions[s * 3 + 2]);
       }
     }
   });
