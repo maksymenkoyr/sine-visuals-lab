@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  advanceKickJolt,
   advanceLurch,
   causticDensityScale,
   createLurchState,
@@ -158,6 +159,66 @@ describe("caustics beat lurch (advanceLurch)", () => {
     const dt = 1 / 1000;
     for (let i = 0; i < 10000; i++) advanceLurch(st, dt, false, 0);
     expect(st.phase).toBeGreaterThan(0.33 * 4); // >4x the old ceiling
+  });
+});
+
+describe("caustics kick jolt", () => {
+  // A rate-only surge can only ever integrate a kick's sharp attack into a
+  // smooth ramp — see driftRatePerSec's own comment. These pin the position
+  // offset that actually produces a strike: it must stay bounded, weighted
+  // toward the top of the driftKick slider, and relax back to ~0 as
+  // lowPulse decays, all without ever depending on Drift speed.
+
+  it("is 0 when driftKick is 0, even with a full low-band pulse", () => {
+    expect(advanceKickJolt(0, 0, 1, 1 / 60)).toBe(0);
+  });
+
+  it("is 0 when lowPulse is 0, even with driftKick maxed", () => {
+    expect(advanceKickJolt(0, 1, 0, 1 / 60)).toBe(0);
+  });
+
+  it("converges toward, but never past, its bound (KICK_JOLT_PHASE = 2.0) when driven at max for a full second", () => {
+    let jolt = 0;
+    for (let i = 0; i < 600; i++) jolt = advanceKickJolt(jolt, 1, 1, 1 / 600);
+    expect(jolt).toBeGreaterThan(1.9);
+    expect(jolt).toBeLessThanOrEqual(2.0);
+  });
+
+  it("is weighted toward the top of the slider: driftKick=0.25 reaches only a small fraction of driftKick=1's steady state", () => {
+    const settle = (driftKick: number) => {
+      let jolt = 0;
+      for (let i = 0; i < 600; i++) jolt = advanceKickJolt(jolt, driftKick, 1, 1 / 600);
+      return jolt;
+    };
+    // driftKick^2 -> 0.25 reaches 1/16th of the max, not 1/4.
+    expect(settle(0.25) / settle(1)).toBeCloseTo(0.0625, 2);
+  });
+
+  it("relaxes back to ~0 within 1s after lowPulse decays, matching a real kick's envelope", () => {
+    let jolt = advanceKickJolt(0, 1, 1, 1 / 600); // struck once
+    let lowPulse = 1;
+    const dt = 1 / 600;
+    for (let i = 0; i < 600; i++) {
+      lowPulse *= Math.exp(-dt * 3.5); // bandEnergy.ts's low-group pulseDecayRate
+      jolt = advanceKickJolt(jolt, 1, lowPulse, dt);
+    }
+    expect(jolt).toBeLessThan(0.1); // <5% of KICK_JOLT_PHASE (2.0) after 1s
+  });
+
+  it("does not depend on Drift speed — a kick still jolts the phase when drift is frozen at 0", () => {
+    // advanceKickJolt has no drift parameter at all; this documents that
+    // independence directly rather than leaving it implicit.
+    expect(advanceKickJolt(0, 1, 1, 1 / 60)).toBeGreaterThan(0);
+  });
+
+  it("never produces NaN or a value outside [0, KICK_JOLT_PHASE] across a broad random sweep", () => {
+    let jolt = 0;
+    for (let i = 0; i < 500; i++) {
+      jolt = advanceKickJolt(jolt, Math.random(), Math.random(), Math.random() * (1 / 30));
+      expect(Number.isFinite(jolt)).toBe(true);
+      expect(jolt).toBeGreaterThanOrEqual(0);
+      expect(jolt).toBeLessThanOrEqual(2.0);
+    }
   });
 });
 
