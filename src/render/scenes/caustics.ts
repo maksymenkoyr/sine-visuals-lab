@@ -28,8 +28,11 @@ import type { SignalLink } from "../signals.ts";
 // new beat doesn't cut the last ring off, uFlash is a brightness punch,
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
 // driftRatePerSec below, not a shader uniform driving the rate directly —
-// with driftBeat/driftKick/driftLoud each dialing in how much beat pulses,
-// bass onsets and overall loudness surge that speed), uBass/uTurbulence/
+// with driftKick/driftLoud dialing in how much bass onsets and overall
+// loudness surge that speed). driftBeat is a separate, additive impulse
+// (advanceLurch below) fired on anim.onset rather than a rate multiplier —
+// see driftRatePerSec's own comment for why a beat can't read as a lurch by
+// modulating a rate. uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
 // / crest glints), and uDropReactivity ties everything to
 // sectionIntensity.ts's slow-tracked "which part of the song is this" signal
@@ -176,8 +179,12 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    // Wander speed tracks the music's own speed.
-    auto: { tempo: 0.4, pulse: 0.25 },
+    // Wander speed tracks the music's own tempo. Deliberately no `pulse`
+    // weight: driftBeat already tracks punchiness (pulse: 0.35 below), and
+    // weighting both the same way meant Auto walked them up together on the
+    // same music, compounding the "these read as the same knob" problem the
+    // old multiplicative Beat surge design had.
+    auto: { tempo: 0.4 },
   },
   {
     key: "driftBeat",
@@ -215,6 +222,20 @@ const SETTINGS: SceneSetting[] = [
     // Swells with volume read best on tracks with real quiet->loud range;
     // an already-dense mix doesn't need more.
     auto: { dynamics: 0.3, density: -0.15 },
+  },
+  {
+    key: "driftChurn",
+    label: "Beat churn",
+    description: "Each beat reorganizes the filaments in place, instead of only pushing them along",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+    // Same auto weights as Beat surge (pulse/attack) — punchy music wants
+    // both — but its own independent runtime magnitude and a distinct
+    // visual channel; see uChurnDrive's comment in FRAG and extraUniforms.
+    auto: { pulse: 0.3, attack: 0.2 },
   },
   {
     key: "bass",
@@ -520,26 +541,31 @@ export function sparkleBrightGain(sparkleBright: number): number {
 const DRIFT_BASE_RATE = 2.0;
 // Gain each surge slider applies at its own max, audio driver at 1. Tuned so
 // driftLoud's default (0.4) reproduces the old hardcoded energy response
-// exactly: 0.4 * 1.5 = 0.6, the previous DRIFT_ENERGY_GAIN.
-const BEAT_SURGE_GAIN = 2.0;
+// exactly: 0.4 * 1.5 = 0.6, the previous DRIFT_ENERGY_GAIN. Beat surge used
+// to be a third term here (driftBeat * beatPulse * 2.0) — multiplying the
+// rate meant it could only ever read as "drift, briefly faster": the shader
+// integrates a rate, so a brief bump in it is a slope change, not a
+// discontinuity the eye can catch, and beatPulse's own 1/6s decay area
+// capped the whole effect under 2% of one noise cell even maxed. It's now
+// advanceLurch below — an additive impulse on the phase itself, independent
+// of Drift speed and of Kick/Loudness surge here.
 const KICK_SURGE_GAIN = 2.0;
 const LOUD_SURGE_GAIN = 1.5;
-// Hard ceiling on the combined speed multiplier. Uncapped, maxing every
-// surge slider against loud audio plus a maxed Drop reactivity boost
-// (driftBoost up to 1.8) reaches ~11.7x — reads as chaotic scrambling
-// rather than "fast". 5 keeps the top end at 10x the base rate (drift=1),
-// which is still a clear, coherent sprint.
+// Hard ceiling on the combined speed multiplier. Uncapped, maxing both
+// remaining surge sliders against loud audio plus a maxed Drop reactivity
+// boost (driftBoost up to 1.8) reaches ~5.4x — 5 keeps the top end close to
+// that while staying a clear, coherent sprint rather than a hard clamp
+// nobody reaches.
 const SURGE_CAP = 5;
 
 export interface DriftInputs {
   /** The Drift speed slider, 0..1 (0.5 = original scene speed, 1 = 2x). */
   drift: number;
-  /** Beat/kick/loudness surge sliders, each 0..1. */
-  driftBeat: number;
+  /** Kick/loudness surge sliders, each 0..1. Beat surge is not here — see
+   *  advanceLurch below. */
   driftKick: number;
   driftLoud: number;
-  /** anim.beatPulse / anim.lowPulse, each already a decaying 0..1 pulse. */
-  beatPulse: number;
+  /** anim.lowPulse, already a decaying 0..1 pulse. */
   lowPulse: number;
   /** frame.energy, broadband loudness — may be negative before floor tracking settles. */
   energy: number;
@@ -557,11 +583,50 @@ export function driftRatePerSec(s: DriftInputs): number {
   const driftBoost = 1 + s.sectionIntensity * s.dropReactivity * 0.8;
   const surge =
     1 +
-    s.driftBeat * s.beatPulse * BEAT_SURGE_GAIN +
     s.driftKick * s.lowPulse * KICK_SURGE_GAIN +
     s.driftLoud * Math.max(0, s.energy) * LOUD_SURGE_GAIN;
   const modulation = Math.min(driftBoost * surge, SURGE_CAP);
   return DRIFT_BASE_RATE * s.drift * modulation;
+}
+
+// Beat surge: a damped impulse added directly to the drift phase, fired on
+// anim.onset (the render-latched edge — see renderLatch.ts and this scene's
+// own onset comment further down) rather than modulating driftRatePerSec's
+// rate. Magnitude (LURCH_IMPULSE) and snap (LURCH_DECAY_PER_SEC) are
+// independent knobs here, which the old beatPulse-multiplied design could
+// never offer: beatPulse's own fixed ~1/6s decay area welded "how far" to
+// "how sharp" together, and that fixed area was the real ceiling on how
+// strong a lurch could ever look. Being additive rather than multiplicative
+// on drift also means it fires even at Drift speed 0.
+const LURCH_DECAY_PER_SEC = 9; // tau ~110ms — controls snap
+const LURCH_IMPULSE = 14.4; // controls distance: total displacement per beat
+// is amount * LURCH_IMPULSE / LURCH_DECAY_PER_SEC (1.6 phase units at
+// driftBeat=1, ~5x the old design's maxed displacement).
+// The onset refractory is 100ms (features.ts), so back-to-back onsets could
+// otherwise stack velocity indefinitely; this caps it at 1.5 fires' worth.
+const LURCH_VEL_CAP = LURCH_IMPULSE * 1.5;
+// Beat churn's gain on warpAmt (FRAG) — see uChurnDrive's own comment there,
+// and extraUniforms' churnPulse, for its own independent decaying envelope.
+const CHURN_GAIN = 0.8;
+
+export interface LurchState {
+  vel: number;
+  phase: number;
+}
+
+export function createLurchState(): LurchState {
+  return { vel: 0, phase: 0 };
+}
+
+/** Advances a damped impulse in place: `fired` kicks the velocity up by
+ *  `amount * LURCH_IMPULSE` (capped), then the phase integrates that
+ *  velocity and the velocity decays exponentially — a fast, symmetric
+ *  attack-and-coast, unlike rippleEnvelope's asymmetric ring shape. Pure and
+ *  exported for tests/caustics.test.ts. */
+export function advanceLurch(st: LurchState, dtSec: number, fired: boolean, amount: number): void {
+  if (fired) st.vel = Math.min(st.vel + amount * LURCH_IMPULSE, LURCH_VEL_CAP);
+  st.phase += st.vel * dtSec;
+  st.vel *= Math.exp(-dtSec * LURCH_DECAY_PER_SEC);
 }
 
 /** A ring's strength over its life: a short attack from 0 (the strike),
@@ -735,16 +800,25 @@ void main() {
   // every octave goes thin at once, so right where warp already folds
   // several of their contours close together, they all render as hard
   // near-coincident lines simultaneously, reading as a dense "pixel ladder"
-  // fan. A previous fix eased warpAmt down in sync with focusDrive to
-  // loosen that fold right when sharpness would otherwise expose it
-  // hardest — removed again here: it was the only change in this scene's
-  // history that moves ridge *positions* (not just their thinness or
-  // brightness), so the warp field was physically reshaping on every beat,
-  // which is real, newly-introduced motion. It also didn't demonstrably
-  // reduce the ladder it was added for (see that round's own verification
-  // notes) — not worth the added motion for an unproven benefit. warpAmt
-  // is back to depending only on the music, not on the beat snap itself.
-  float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7);
+  // fan. An earlier attempt eased warpAmt down in sync with focusDrive to
+  // loosen that fold right when sharpness would otherwise expose it hardest
+  // — removed at the time (see this file's git history) because it moved
+  // ridge *positions* on every beat as a side effect of an anti-aliasing fix
+  // that didn't demonstrably work, i.e. unwanted motion for no proven
+  // benefit. uChurnDrive below reopens that same channel — warpAmt moving on
+  // the beat — but deliberately this time, as the entire point of the Beat
+  // churn setting, gated by its own slider rather than riding automatically
+  // on Focus snap. It's driven by its own decaying pulse (churnPulse in
+  // extraUniforms below), not the drift lurch's velocity: the lurch's
+  // velocity is kicked by driftBeat's amount, so deriving churn from it
+  // would tie Beat churn's strength to Beat surge and leave churn inert
+  // whenever driftBeat was 0. churnPulse instead fires on the same
+  // anim.onset tick and shares the lurch's LURCH_DECAY_PER_SEC decay, so the
+  // shove and the churn snap together in time without their magnitudes
+  // being coupled. aaSharp below still bounds the pixel-ladder artifact
+  // independent of warpAmt; a maxed Beat churn against a maxed Focus snap is
+  // the case to eyeball for it.
+  float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7 + uChurnDrive * ${CHURN_GAIN.toFixed(2)});
   for (int i = 0; i < 6; i++) {
     if (i >= iterations) break;
     float band = sampleBands(float(i) / 6.0);
@@ -836,24 +910,36 @@ void main() {
 
 export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG, {
   settings: SETTINGS,
-  extraUniformDecls: `uniform float uDriftPhase;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
+  extraUniformDecls: `uniform float uDriftPhase;\nuniform float uChurnDrive;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
   extraUniforms: (() => {
     let driftPhase = 0;
+    const lurch = createLurchState();
+    // Beat churn's own envelope: a plain decaying pulse, jumping to 1 on
+    // anim.onset and decaying at the same LURCH_DECAY_PER_SEC as the lurch —
+    // so a beat's shove and its churn snap on the same tick with the same
+    // sharpness — but with its own magnitude, gated only by driftChurn. It
+    // must NOT be lurch.vel: that's kicked by driftBeat's amount, so at
+    // driftBeat=0 the lurch never gains velocity and a churn derived from it
+    // would silently do nothing however high driftChurn was set, defeating
+    // the point of a second, independent dial.
+    let churnPulse = 0;
     const ripples = createRipplePool();
     let prevDropOnset = false;
 
     return (frame, anim, getSetting) => {
       driftPhase += anim.dtSec * driftRatePerSec({
         drift: getSetting("drift"),
-        driftBeat: getSetting("driftBeat"),
         driftKick: getSetting("driftKick"),
         driftLoud: getSetting("driftLoud"),
-        beatPulse: anim.beatPulse,
         lowPulse: anim.lowPulse,
         energy: frame.energy,
         dropReactivity: getSetting("dropReactivity"),
         sectionIntensity: anim.sectionIntensity,
       });
+      advanceLurch(lurch, anim.dtSec, anim.onset, getSetting("driftBeat"));
+      churnPulse *= Math.exp(-anim.dtSec * LURCH_DECAY_PER_SEC);
+      if (anim.onset) churnPulse = 1;
+      const churnDrive = getSetting("driftChurn") * churnPulse;
 
       ripples.tick(anim.dtSec);
       const rippleSrc = getSetting("rippleSrc");
@@ -874,7 +960,12 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
       // scene used to have (renderLatch.ts's header has the story).
       else if (anim.lowOnset || (anim.onset && rippleSrc < RIPPLE_SRC_BEAT_THRESHOLD)) ripples.trigger(1);
 
-      return { uDriftPhase: driftPhase, uRippleRadius: ripples.radius, uRippleStrength: ripples.strength };
+      return {
+        uDriftPhase: driftPhase + lurch.phase,
+        uChurnDrive: churnDrive,
+        uRippleRadius: ripples.radius,
+        uRippleStrength: ripples.strength,
+      };
     };
   })(),
 });

@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  advanceLurch,
   causticDensityScale,
+  createLurchState,
   createRipplePool,
   driftRatePerSec,
   focusSharp,
@@ -14,14 +16,14 @@ import {
   type DriftInputs,
 } from "../src/render/scenes/caustics.ts";
 
-// Baseline: everything off except the Drift speed slider itself.
+// Baseline: everything off except the Drift speed slider itself. Beat surge
+// is no longer part of DriftInputs — it's the separate advanceLurch impulse
+// tested below, added onto uDriftPhase rather than modulating this rate.
 function base(overrides: Partial<DriftInputs> = {}): DriftInputs {
   return {
     drift: 0,
-    driftBeat: 0,
     driftKick: 0,
     driftLoud: 0,
-    beatPulse: 0,
     lowPulse: 0,
     energy: 0,
     dropReactivity: 0,
@@ -43,23 +45,18 @@ describe("caustics drift rate", () => {
     expect(driftRatePerSec(base({ drift: 1 }))).toBeCloseTo(2.0, 10);
   });
 
-  it("drift=0 is always frozen, regardless of audio or reactivity", () => {
-    expect(driftRatePerSec(base({ drift: 0, driftBeat: 1, driftKick: 1, driftLoud: 1, beatPulse: 1, lowPulse: 1, energy: 1, dropReactivity: 1, sectionIntensity: 1 }))).toBe(0);
+  it("drift=0 freezes the wander term, regardless of audio or reactivity", () => {
+    expect(driftRatePerSec(base({ drift: 0, driftKick: 1, driftLoud: 1, lowPulse: 1, energy: 1, dropReactivity: 1, sectionIntensity: 1 }))).toBe(0);
   });
 
   it("a surge slider at 0 contributes nothing even with its driver maxed", () => {
     const withoutSurge = driftRatePerSec(base({ drift: 0.5 }));
-    const driverMaxedSliderZero = driftRatePerSec(base({ drift: 0.5, beatPulse: 1, lowPulse: 1, energy: 1 }));
+    const driverMaxedSliderZero = driftRatePerSec(base({ drift: 0.5, lowPulse: 1, energy: 1 }));
     expect(driverMaxedSliderZero).toBeCloseTo(withoutSurge, 10);
   });
 
-  it("Beat surge at 1 with a full beat pulse adds its documented gain (2.0x)", () => {
-    // rate = base * drift * (driftBoost=1) * (1 + 1*1*2.0) = base * 0.5 * 3.0
-    expect(driftRatePerSec(base({ drift: 0.5, driftBeat: 1, beatPulse: 1 }))).toBeCloseTo(3.0, 10);
-  });
-
-  it("Kick surge at 1 with a full low-band pulse adds its documented gain (2.0x), independent of beatPulse", () => {
-    expect(driftRatePerSec(base({ drift: 0.5, driftKick: 1, lowPulse: 1, beatPulse: 0 }))).toBeCloseTo(3.0, 10);
+  it("Kick surge at 1 with a full low-band pulse adds its documented gain (2.0x)", () => {
+    expect(driftRatePerSec(base({ drift: 0.5, driftKick: 1, lowPulse: 1 }))).toBeCloseTo(3.0, 10);
   });
 
   it("Loudness surge's default (0.4) at full energy reproduces the old hardcoded DRIFT_ENERGY_GAIN (0.6)", () => {
@@ -79,21 +76,20 @@ describe("caustics drift rate", () => {
     expect(driftRatePerSec(base({ drift: 0.5, dropReactivity: 1, sectionIntensity: 1 }))).toBeCloseTo(1.8, 10);
   });
 
-  it("every input maxed clamps to SURGE_CAP (5x the base rate) rather than compounding unbounded", () => {
+  it("every remaining input maxed clamps to SURGE_CAP (5x the base rate) rather than compounding unbounded", () => {
     const rate = driftRatePerSec(
       base({
         drift: 1,
-        driftBeat: 1,
         driftKick: 1,
         driftLoud: 1,
-        beatPulse: 1,
         lowPulse: 1,
         energy: 1,
         dropReactivity: 1,
         sectionIntensity: 1,
       }),
     );
-    // DRIFT_BASE_RATE(2.0) * drift(1) * min(driftBoost*surge, 5) = 2.0 * 5 = 10.0
+    // driftBoost = 1.8, surge = 1 + 2.0 + 1.5 = 4.5, driftBoost*surge = 8.1 > 5
+    // DRIFT_BASE_RATE(2.0) * drift(1) * min(8.1, 5) = 10.0
     expect(rate).toBeCloseTo(10.0, 10);
     expect(Number.isFinite(rate)).toBe(true);
   });
@@ -102,10 +98,8 @@ describe("caustics drift rate", () => {
     for (let i = 0; i < 500; i++) {
       const s: DriftInputs = {
         drift: Math.random(),
-        driftBeat: Math.random(),
         driftKick: Math.random(),
         driftLoud: Math.random(),
-        beatPulse: Math.random(),
         lowPulse: Math.random(),
         energy: Math.random() * 2 - 1, // occasionally negative
         dropReactivity: Math.random(),
@@ -115,6 +109,55 @@ describe("caustics drift rate", () => {
       expect(Number.isFinite(rate)).toBe(true);
       expect(rate).toBeGreaterThanOrEqual(0);
     }
+  });
+});
+
+describe("caustics beat lurch (advanceLurch)", () => {
+  it("amount=0 never moves the phase, regardless of firing", () => {
+    const st = createLurchState();
+    for (let i = 0; i < 200; i++) advanceLurch(st, 1 / 60, i % 10 === 0, 0);
+    expect(st.phase).toBe(0);
+    expect(st.vel).toBe(0);
+  });
+
+  it("a single fire's total displacement converges to amount * LURCH_IMPULSE / LURCH_DECAY_PER_SEC", () => {
+    // Integrating the velocity's exponential decay to convergence gives the
+    // impulse's total area; run long enough (10 tau) that the tail is
+    // negligible. LURCH_IMPULSE=14.4, LURCH_DECAY_PER_SEC=9 -> 1.6 at amount=1.
+    // advanceLurch steps phase before decaying velocity (matching the scene's
+    // own frame-by-frame order), so a finite dt systematically overshoots the
+    // continuous integral by a small, dt-proportional amount — this asserts
+    // within that discretization error, not exact convergence.
+    const st = createLurchState();
+    advanceLurch(st, 0, true, 1); // fire once, no phase advance yet
+    const dt = 1 / 1000;
+    for (let i = 0; i < 10000; i++) advanceLurch(st, dt, false, 0); // ~10 tau
+    expect(st.phase).toBeCloseTo(1.6, 1);
+  });
+
+  it("phase is monotonically non-decreasing under repeated fires", () => {
+    const st = createLurchState();
+    let prevPhase = st.phase;
+    for (let i = 0; i < 500; i++) {
+      advanceLurch(st, 1 / 60, Math.random() < 0.3, Math.random());
+      expect(st.phase).toBeGreaterThanOrEqual(prevPhase);
+      prevPhase = st.phase;
+    }
+  });
+
+  it("velocity never exceeds LURCH_VEL_CAP even under back-to-back fires with no decay time", () => {
+    const st = createLurchState();
+    for (let i = 0; i < 50; i++) advanceLurch(st, 0, true, 1); // fire repeatedly, dt=0 so no decay
+    // LURCH_IMPULSE=14.4, cap = 14.4*1.5 = 21.6
+    expect(st.vel).toBeCloseTo(21.6, 10);
+  });
+
+  it("a maxed Beat surge (amount=1) displaces far more than the old multiplicative design's maxed 0.33 phase units", () => {
+    const st = createLurchState();
+    advanceLurch(st, 0, true, 1);
+    const dt = 1 / 1000;
+    for (let i = 0; i < 10000; i++) advanceLurch(st, dt, false, 0);
+    expect(st.phase).toBeGreaterThan(0.33 * 4); // >4x the old ceiling
   });
 });
 

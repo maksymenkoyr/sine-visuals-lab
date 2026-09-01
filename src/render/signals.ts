@@ -99,10 +99,10 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "feature.onset",
     label: "Beat",
     description:
-      "The broadband onset flag straight off the audio pipeline (FeatureFrame.onset) — read here as AnimFrame.beatPulse, its decaying continuous form (animClock.ts), which is also what the Rhythm card's beat dot lights from.",
+      "The broadband onset flag straight off the audio pipeline (FeatureFrame.onset) — read here as AnimFrame.beatPulse, its decaying continuous form (animClock.ts), which is also what the Rhythm card's beat dot lights from and its Hits row's Beat bar tracks.",
     kind: "edge",
     read: (_frame, anim) => anim.beatPulse,
-    monitor: { card: "rhythm", row: "tempo" },
+    monitor: { card: "rhythm", row: "hits" },
     bandRange: "all",
   }),
   "anim.lowOnset": signal({
