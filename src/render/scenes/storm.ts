@@ -98,6 +98,24 @@ import {
 //    lit by, and that colour shift with depth is most of what makes the mass
 //    read as a body instead of a grey card. depthFade is the geometry modes'
 //    stand-in for the same cue.
+//  - Ambient glow reaches a genuine ember. Every resting-light term used to
+//    carry a hard floor, so the cloud was always legible and a strike could
+//    only brighten it; those floors now slide (ambientFloor — see the
+//    "Resting light" block, where AMB_FLOOR_KNEE pins the old value at the
+//    setting's own default and AMB_FLOOR_NORM carries the same anchor to the
+//    lattice's additive floor). The strike side — the in-scattered glow, the
+//    bolt core, the afterglow, every geometry pass's strikeLight — is
+//    deliberately not scaled by any of it, which is what lets lightning
+//    *reveal* a cloud you couldn't see.
+//  - What the gas is made of is the `gasType` setting, resolved through
+//    GAS_RECIPES: a handful of plain uniforms (GAS_UNIFORMS_GLSL), no extra
+//    texture and no change to what buildNoiseVolume bakes. Each field is a
+//    factor on an expression the march already had — the noise frequency and
+//    per-axis stretch in flowSpace, the Worley weight in puffMask, the
+//    erosion, the extinction, the powder, and a tint on the scattered colour
+//    (never on the flash). Cumulus's entry is all identity values, which is
+//    where "the default is unchanged" is enforced: it is arithmetic that
+//    cancels, not a value that happens to match.
 //  - Everything accumulates front-to-back with `T` as remaining transmittance
 //    (early-out at T < 0.02) over a background of sky gradient plus a faint
 //    per-strike haze, and a tighter second lobe of it that stands in for a
@@ -157,7 +175,10 @@ import {
 // by FIL_IMPULSE_MAX, so the lightning moves the hair rather than only
 // lighting it. Hairs are faint one at a time and the mass comes from their
 // overlap, so on medium quality and up the volume march runs first as a dim
-// underlay (FIL_GLOW_*) and the strands go over it.
+// underlay (FIL_GLOW_*) and the strands go over it. Its steps and density are
+// dimmed by what render() uploads; FIL_GLOW_AMBIENT is applied inside the
+// march instead, so the dimming reaches how much light the underlay gets
+// without also reaching how dark the cloud is allowed to rest (ambientFloor).
 //
 // The point cloud (Points mode) is a static VBO sampled at init from the same
 // lobes variant 0's silhouette was baked from (buildCloud, seeded with
@@ -184,6 +205,9 @@ const SAMPLE_RETRIES = 8;
 const MODES: readonly string[] = ["Mesh", "Gas", "Voxel", "Points", "Filaments"];
 /** The `spectrumMap` setting's options, in value order — see spectrumGain. */
 const SPECTRUM_MAPS: readonly string[] = ["Off", "Screen", "Cloud"];
+/** The `gasType` setting's options, in value order — one per entry of
+ *  GAS_RECIPES, which is what each of them actually means. */
+export const GAS_TYPES: readonly string[] = ["Cumulus", "Wisp", "Smoke", "Nebula"];
 const SPECTRUM_MAP_CLOUD = 2;
 const MODE_MESH = 0;
 const MODE_VOXEL = 2;
@@ -311,6 +335,9 @@ const FIL_GLOW_MIN_DETAIL = 0.6;
 const FIL_GLOW_STEPS = 0.5;
 const FIL_GLOW_DENSITY = 0.25;
 const FIL_GLOW_AMBIENT = 0.22;
+// How much of the gas type's frequency multiplier (GAS_RECIPES.freq) reaches
+// the strands' own flow field — see flowCoord in FILAMENT_VERT.
+const GAS_FREQ_STRANDS = 0.5;
 
 /** Segments in one bolt's polyline; a path is this many vertices plus one. */
 export const BOLT_SEGMENTS = 12;
@@ -429,6 +456,21 @@ const SETTINGS: SceneSetting[] = [
     auto: { attack: 0.3 },
   },
   {
+    // Manual by design, like every enum (see spectrumMap): the four gases are
+    // four characters, not four amounts of one thing, and GAS_RECIPES is what
+    // each of them means.
+    key: "gasType",
+    label: "Gas",
+    description: "What the cloud is made of: Cumulus is the puffy default, Wisp a thin streaky stratus, Smoke a dark torn charcoal, Nebula a glowing translucent haze",
+    group: "Cloud",
+    type: "enum",
+    options: GAS_TYPES,
+    min: 0,
+    max: GAS_TYPES.length - 1,
+    step: 1,
+    default: 0,
+  },
+  {
     key: "density",
     label: "Cloud density",
     description: "How thick the gas is — and, in Points mode, how many particles are drawn",
@@ -508,7 +550,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "ambient",
     label: "Ambient glow",
-    description: "Resting brightness of the cloud between strikes",
+    description: "Resting brightness of the cloud between strikes — near zero leaves an ember for the lightning to reveal",
     group: "Cloud",
     min: 0,
     max: 1,
@@ -572,8 +614,115 @@ function settingFor(key: string): SceneSetting {
   return spec;
 }
 
+// --- Resting light ---------------------------------------------------------
+//
+// Every term that lights the cloud between strikes used to carry a hard floor
+// — mix(0.35, 1.0, uAmbient) in the march, a bare 0.18 in the lattice — so
+// Ambient glow at 0 still left a legible grey cloud, and lightning could only
+// ever brighten something already visible. What replaced the constant floor
+// is a floor that *moves* with the slider (ambientFloor in AMBIENT_LIFT_GLSL,
+// which every one of those terms now goes through):
+//
+//   mix(AMB_FLOOR_REST, AMB_FLOOR_FULL, min(1.0, a / AMB_FLOOR_KNEE))
+//
+// The knee is the `ambient` setting's own default, and AMB_FLOOR_FULL is the
+// exact floor the march has always had — so at and above the default every
+// lighting expression evaluates to what it evaluated to before, not merely
+// close to it, and the range the change actually unlocks is the quarter of
+// the slider underneath, where the floor slides away to AMB_FLOOR_REST and
+// the cloud stops being a cloud and becomes an ember. Anchoring by clamping
+// rather than by solving an exponent is what buys the "identical above the
+// knee" half; it costs a corner in the slider's response at the knee, which
+// is the same trade MORPH_OFF_KNEE makes at the other end of its own slider.
+//
+// Nothing on the strike side goes through any of it (see STRIKE_LIGHT_GLSL
+// and `flash` in the march): that independence is the whole point, since it
+// is what lets a bolt *reveal* an ember-dark cloud rather than merely
+// brighten a lit one.
+const AMB_FLOOR_REST = 0.03;
+const AMB_FLOOR_FULL = 0.35;
+/** Where the floor reaches AMB_FLOOR_FULL and stops: the `ambient` setting's
+ *  own default, so the default frame is the frame it always was. */
+const AMB_FLOOR_KNEE = settingFor("ambient").default;
+
 // ---------------------------------------------------------------------------
 // Pure helpers — no GL at import time, exported for tests/storm.test.ts.
+
+/** What one `gasType` option does to the cloud. Every field is a *factor* on
+ *  an expression the march already had, never a replacement for one, so the
+ *  whole system collapses to a no-op at identity — which is exactly what the
+ *  Cumulus entry is, and what tests/storm.test.ts pins. */
+export interface GasRecipe {
+  /** Multiplies the noise frequency in flowSpace(), so the same field reads
+   *  as bigger or smaller billows — and, at half strength, how tightly the
+   *  Filaments strands curl. */
+  freq: number;
+  /** Per-axis stretch on top of `freq`, applied in the same place: a value
+   *  below 1 on an axis draws the noise out along it. Flattening y while
+   *  drawing x/z out is what makes a stratus sheet out of a cumulus. */
+  stretch: [number, number, number];
+  /** Multiplies erosionAmount() — how deep the fbm eats into the
+   *  silhouette, so how torn the mass is. */
+  erosion: number;
+  /** Weight on the inverted-Worley channel inside puffMask(): the perlin-
+   *  worley remap's low end. Above 1 the Worley cells fill in and the mass
+   *  rounds off; below 1 they cut, and the billows tear into filaments. */
+  worley: number;
+  /** Multiplies the extinction coefficient — how much light one unit of gas
+   *  swallows, so how solid or how translucent the cloud reads. */
+  extinction: number;
+  /** Scales how hard the powder term darkens thin gas. Near zero the gas
+   *  stops self-shading and glows from the inside instead. */
+  powder: number;
+  /** Multiplies the scattered colour — the sun ramp and the skylight, never
+   *  the strike. Components above 1 lift that gas type's resting response as
+   *  well as tinting it. */
+  tint: [number, number, number];
+}
+
+/** One recipe per GAS_TYPES entry, in the same order (the setting's value is
+ *  the index). Cumulus is all identity values by construction: every
+ *  expression the recipe touches reduces to what it was before the setting
+ *  existed, which is what makes the default frame unchanged rather than
+ *  merely close. */
+export const GAS_RECIPES: readonly GasRecipe[] = [
+  // Cumulus — today's puffy cauliflower, untouched.
+  { freq: 1, stretch: [1, 1, 1], erosion: 1, worley: 1, extinction: 1, powder: 1, tint: [1, 1, 1] },
+  // Wisp — stratus: finer noise drawn out sideways and flattened hard in y,
+  // thin enough to see through, with the Worley cutting rather than filling.
+  {
+    freq: 1.5,
+    stretch: [0.5, 2.4, 0.75],
+    erosion: 1.2,
+    worley: 0.7,
+    extinction: 0.65,
+    powder: 0.85,
+    tint: [0.85, 0.95, 1.15],
+  },
+  // Smoke — charcoal: dense, deeply eroded so it curls and tears, and lit
+  // down to a desaturated grey so the mass reads dark against its own flash.
+  {
+    freq: 1.15,
+    stretch: [0.9, 1.3, 0.9],
+    erosion: 1.3,
+    worley: 0.85,
+    extinction: 1.9,
+    powder: 1.25,
+    tint: [0.78, 0.74, 0.76],
+  },
+  // Nebula — the opposite end: coarse and translucent, barely self-shading,
+  // with the sun ramp graded magenta at the lit end and teal-violet at the
+  // shadowed one so it glows from within instead of turning.
+  {
+    freq: 0.7,
+    stretch: [1, 1, 1],
+    erosion: 0.8,
+    worley: 1.3,
+    extinction: 0.45,
+    powder: 0.3,
+    tint: [1.6, 0.95, 1.75],
+  },
+];
 
 /** mulberry32: a small deterministic PRNG so the cloud (and tests) are
  *  reproducible for a given seed. Returns values in [0, 1). */
@@ -1444,6 +1593,46 @@ uniform vec3 uStrikeB[${MAX_STRIKES}];
 uniform float uStrikeStrength[${MAX_STRIKES}];
 `;
 
+// The resting light — see the "Resting light" block above. Included by every
+// stage that used to carry a hard floor on its ambient term (the march and
+// the lattice); the point cloud and the strands are already plain multiples
+// of uAmbient, so they reach an ember, and then nothing, on their own.
+const AMBIENT_LIFT_GLSL = `
+#define AMB_FLOOR_REST ${AMB_FLOOR_REST.toFixed(4)}
+#define AMB_FLOOR_FULL ${AMB_FLOOR_FULL.toFixed(4)}
+#define AMB_FLOOR_KNEE_INV ${(1 / AMB_FLOOR_KNEE).toFixed(5)}
+// 1 / AMB_FLOOR_FULL: normalizes the floor to exactly 1.0 at and above the
+// knee, for the terms whose old floor was an additive constant rather than
+// the low end of a mix().
+#define AMB_FLOOR_NORM ${(1 / AMB_FLOOR_FULL).toFixed(5)}
+
+// Reads uAmbient rather than taking it: the floor is how dark the cloud is
+// allowed to rest, which is the setting itself — not something a caller
+// working with a scaled copy of it (Filaments' underlay) should be able to
+// pull further down.
+float ambientFloor() {
+  return mix(AMB_FLOOR_REST, AMB_FLOOR_FULL, min(1.0, max(uAmbient, 0.0) * AMB_FLOOR_KNEE_INV));
+}
+
+float ambientLift(float a) {
+  return mix(ambientFloor(), 1.0, a);
+}
+`;
+
+// The gasType recipe (GAS_RECIPES), as plain uniforms — no extra texture and
+// no change to what the noise volume holds, only factors on expressions the
+// march already had. Cumulus uploads identity values, so this whole block is
+// arithmetic that cancels at the default.
+const GAS_UNIFORMS_GLSL = `
+uniform float uGasFreq;
+uniform vec3 uGasStretch;
+uniform float uGasErosion;
+uniform float uGasWorley;
+uniform float uGasExtinct;
+uniform float uGasPowder;
+uniform vec3 uGasTint;
+`;
+
 // The per-strike light at a point in cloud space: the broad in-scattered
 // body, radius off Flash reach, that the march computes per step. Shared by
 // every geometry pass — the lattice and the points — so a change to how
@@ -1617,10 +1806,14 @@ uniform highp sampler3D uNoise; // R: value fbm, G: inverted worley — tiled
 uniform highp sampler3D uShape; // the baked silhouettes, one per channel
 uniform vec4 uShapeMix;         // shapePhaseWeights, as a per-channel weight
 // 1.0 while this draw is Filaments mode's glow underlay: the march runs, on
-// the scaled uMaxSteps/uDensity/uAmbient render() uploads for that one draw,
-// and the strands go over the top of it. 0.0 everywhere else, including
-// Filaments on a preset too cheap to afford the underlay.
+// the scaled uMaxSteps/uDensity render() uploads for that one draw, and the
+// strands go over the top of it. 0.0 everywhere else, including Filaments on
+// a preset too cheap to afford the underlay. The underlay's *lighting* is
+// dimmed here rather than by a scaled uAmbient upload — see FIL_GLOW_AMBIENT
+// below and the note in render().
 uniform float uGlowUnderlay;
+${AMBIENT_LIFT_GLSL}
+${GAS_UNIFORMS_GLSL}
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
 ${SAMPLE_BANDS_GLSL}
@@ -1663,6 +1856,9 @@ ${BOLT_COLOR_GLSL}
 // lobe is than the haze around it, and how hard it draws.
 #define BOLT_BLOOM_TIGHT 11.0
 #define BOLT_BLOOM_GAIN 0.4
+// How much of Ambient glow reaches Filaments' glow underlay — see
+// FIL_GLOW_AMBIENT in storm.ts.
+#define FIL_GLOW_AMBIENT ${FIL_GLOW_AMBIENT.toFixed(4)}
 
 // Half-extents of the ellipsoid the march is clipped to, and where shape()
 // fades out — see BOUND_X/Y/Z in storm.ts for why they differ per axis.
@@ -1729,14 +1925,18 @@ float shape(vec3 p) {
 }
 
 // Where the noise is read: the whole field drifts slowly downwind and churns
-// against itself, so the gas rolls even with Swirl at zero.
+// against itself, so the gas rolls even with Swirl at zero. The gas type's
+// frequency and per-axis stretch land on the drifted position and *before*
+// the churn, so the churn keeps the same amplitude relative to the features
+// it is rippling however fine they get; the drift is a cloud-space velocity
+// either way, so a finer gas doesn't scud faster.
 vec3 flowSpace(vec3 p) {
-  vec3 q = p + vec3(uFlowPhase * 0.06, 0.0, uFlowPhase * 0.03);
+  vec3 q = (p + vec3(uFlowPhase * 0.06, 0.0, uFlowPhase * 0.03)) * uGasFreq * uGasStretch;
   return q + 0.08 * sin(q.zxy * 2.0 + uTime * 0.3);
 }
 
 float erosionAmount() {
-  return mix(0.1, 0.7, uGrain);
+  return mix(0.1, 0.7, uGrain) * uGasErosion;
 }
 
 // The fbm sum sits close to its mean by construction; stretching it around
@@ -1746,9 +1946,12 @@ float contrast(float v) {
 }
 
 // Schneider's perlin-worley: the inverted worley channel raises the value
-// noise's floor into rounded billow cores instead of wispy filaments.
+// noise's floor into rounded billow cores instead of wispy filaments. How
+// much of that channel is let in is the gas type's dial between the two —
+// above 1 the cells fill the floor in and the mass rounds off, below it they
+// cut and the billows tear back into filaments.
 float puffMask(vec2 n) {
-  return clamp(remap(n.r, 1.0 - n.g, 1.0, 0.0, 1.0), 0.0, 1.0);
+  return clamp(remap(n.r, 1.0 - n.g * uGasWorley, 1.0, 0.0, 1.0), 0.0, 1.0);
 }
 
 // Full density: octave 0 doubles as the puff mask, so the fetch count is
@@ -1888,7 +2091,16 @@ void main() {
       float t = tNear + hash12(gl_FragCoord.xy + fract(uTime) * 137.0) * stepLen;
 
       int octaves = uDetail < 0.5 ? 2 : MAX_OCTAVES;
-      float sigma = mix(3.0, 10.0, uDensity);
+      float sigma = mix(3.0, 10.0, uDensity) * uGasExtinct;
+      // The resting light: how much of the setting this draw gets (the
+      // underlay gets a fraction of it, which is what dims the gas the
+      // strands are laid over), the lift the sun ramp is scaled by, and the
+      // plain multiple the skylight is. The scaling is here rather than in a
+      // scaled uAmbient upload so ambientFloor() still sees the setting the
+      // viewer actually set — the underlay is dimmer gas, not a darker
+      // cloud.
+      float ambAmt = uAmbient * (uGlowUnderlay > 0.5 ? FIL_GLOW_AMBIENT : 1.0);
+      float lift = ambientLift(ambAmt);
       float reachR = mix(0.15, 0.6, uReach);
       float gain = mix(0.5, 2.0, uStrike);
       vec3 tint = boltColor();
@@ -1994,7 +2206,7 @@ void main() {
             // no shadow term the flat lighting is the mode's whole colour,
             // and plain white made the cloud read as grey card.
             sun = mix(vec3(1.0, 0.96, 0.92), palette(0.35, uPalA, uPalB, uPalC, uPalD), 0.45)
-              * 0.85 * mix(0.35, 1.0, uAmbient);
+              * 0.85 * lift;
           } else {
             // Two taps toward the sun. The near one reads the eroded
             // density; the far one only has to answer "is there cloud mass
@@ -2016,15 +2228,18 @@ void main() {
             // depth is most of what makes the mass read as a solid body
             // rather than a flat grey card.
             sun = mix(SHADE_COL, SUN_COL, shadow)
-              * 0.9 * mix(0.35, 1.0, uAmbient) * mix(1.0, powder, 0.35);
+              * 0.9 * lift * mix(1.0, powder, 0.35 * uGasPowder);
           }
           float heightFrac = clamp((sp.y + BOUND.y) / (2.0 * BOUND.y), 0.0, 1.0);
-          vec3 ambient = skyTop * mix(0.35, 1.0, heightFrac) * uAmbient * (0.5 + uEnergy);
+          vec3 ambient = skyTop * mix(0.35, 1.0, heightFrac) * ambAmt * (0.5 + uEnergy);
           // The band under this sample scales what the gas is lit by, not
           // what it absorbs, and never the lightning — so a loud band reads
           // as a brighter part of the same cloud.
           float sg = cloudMap ? spectrumGain(sp, ndc) : screenGain;
-          acc += T * a * ((sun + ambient) * sg + flash);
+          // The gas type's tint grades what the cloud is *lit* by and never
+          // the flash, for the same reason the spectrum gain doesn't: a
+          // charcoal smoke should still be lit white-hot by its own bolt.
+          acc += T * a * ((sun + ambient) * uGasTint * sg + flash);
           T *= 1.0 - a;
         }
         acc += T * tint * core * gain * stepLen * 4.0;
@@ -2058,6 +2273,7 @@ ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
 ${STRIKE_UNIFORMS_GLSL}
 uniform float uIsNode; // 1.0 only during the nodes (gl.POINTS) draw
+${AMBIENT_LIFT_GLSL}
 ${PALETTE_GLSL}
 ${SAMPLE_BANDS_GLSL}
 ${CAMERA_GLSL}
@@ -2097,7 +2313,13 @@ void main() {
   // cloud's own aerial perspective, on the same numbers — without it every
   // wire in the lattice comes back at the same brightness and the whole mass
   // reads as one flat tangle instead of a body with a far side.
-  float lit = (0.18 + 0.9 * uAmbient * (0.5 + uEnergy) * (0.45 + 0.55 * height))
+  // The 0.18 used to be a flat floor at every Ambient glow setting; it is
+  // still exactly 0.18 at and above the slider's default and falls away to an
+  // ember below it, on the same sliding floor the march's sun ramp rides
+  // (normalized here because this floor was additive, not the low end of a
+  // mix — see AMB_FLOOR_NORM).
+  float lit = (0.18 * ambientFloor() * AMB_FLOOR_NORM
+      + 0.9 * uAmbient * (0.5 + uEnergy) * (0.45 + 0.55 * height))
     * depthFade(view.z) * spectrumGain(p, viewToRoomNdc(view));
   // Treble shimmer: scattered nodes and wires glint on high-band hits.
   float shimmer = uSpark * uHighPulse * step(0.93, hash11(seed * 7.1 + floor(uTime * 12.0)));
@@ -2292,6 +2514,7 @@ uniform float uCountBoost;
 uniform highp sampler3D uFlowTex; // the curl field — buildFlowVolume
 uniform highp sampler3D uShape;   // the baked silhouettes, one per channel
 uniform vec4 uShapeMix;           // shapePhaseWeights, as a per-channel weight
+uniform float uGasFreq;           // GAS_RECIPES.freq — see flowCoord below
 ${PALETTE_GLSL}
 ${SAMPLE_BANDS_GLSL}
 ${CAMERA_GLSL}
@@ -2304,6 +2527,7 @@ ${BOLT_COLOR_GLSL}
 #define FIL_STEPS ${FIL_STEPS}
 #define FIL_STEP_LEN ${FIL_STEP_LEN.toFixed(4)}
 #define FLOW_FREQ ${FLOW_FREQ.toFixed(4)}
+#define GAS_FREQ_STRANDS ${GAS_FREQ_STRANDS.toFixed(2)}
 #define FIL_IMPULSE_MAX ${FIL_IMPULSE_MAX.toFixed(4)}
 const vec3 BOUND = vec3(${BOUND_X.toFixed(4)}, ${BOUND_Y.toFixed(4)}, ${BOUND_Z.toFixed(4)});
 ${STRIKE_LIGHT_GLSL}
@@ -2321,8 +2545,14 @@ float flowRate() {
 // the gas: the whole field drifts downwind and churns against itself, so the
 // strands re-trace along a slowly moving field instead of hanging in place.
 // The volume tiles, so this is a plain scale of the cloud-space position.
+// The gas type's frequency reaches the strands too, at half strength: a
+// wispier gas curls the tangle tighter, but a strand traced at the gas's
+// full frequency multiplier stops reading as a hair and starts reading as a
+// scribble, since FIL_STEPS is fixed and a tighter field spends them all
+// inside one swirl. Identity at freq 1 whatever the mix.
 vec3 flowCoord(vec3 p) {
-  vec3 q = p * FLOW_FREQ + vec3(uFlowPhase * 0.05, 0.0, uFlowPhase * 0.025) * flowRate();
+  vec3 q = p * FLOW_FREQ * mix(1.0, uGasFreq, GAS_FREQ_STRANDS)
+    + vec3(uFlowPhase * 0.05, 0.0, uFlowPhase * 0.025) * flowRate();
   return q + 0.03 * sin(q.zxy * 2.0 + uTime * 0.2 * flowRate());
 }
 
@@ -2437,6 +2667,20 @@ let cachedFlow: Uint8Array | null = null;
 function flowVolume(): Uint8Array {
   if (!cachedFlow) cachedFlow = buildFlowVolume(FLOW_SIZE, CLOUD_SEED);
   return cachedFlow;
+}
+
+/** One gas type's recipe, as the plain uniforms GAS_UNIFORMS_GLSL declares.
+ *  Every value is a factor on an expression the march already had, so
+ *  Cumulus's all-identity entry uploads a shader that computes exactly what
+ *  it computed before the setting existed. */
+function uploadGasRecipe(p: GLProgram, r: GasRecipe): void {
+  p.setF("uGasFreq", r.freq);
+  p.setV3v("uGasStretch", r.stretch);
+  p.setF("uGasErosion", r.erosion);
+  p.setF("uGasWorley", r.worley);
+  p.setF("uGasExtinct", r.extinction);
+  p.setF("uGasPowder", r.powder);
+  p.setV3v("uGasTint", r.tint);
 }
 
 export const stormScene: Scene = (() => {
@@ -2687,11 +2931,13 @@ export const stormScene: Scene = (() => {
       const flicker = resolveSceneSetting(ID, settingFor("flicker"));
       const dropStorm = resolveSceneSetting(ID, settingFor("dropStorm"));
       const density = resolveSceneSetting(ID, settingFor("density"));
-      const ambient = resolveSceneSetting(ID, settingFor("ambient"));
       const cloudShape = resolveSceneSetting(ID, settingFor("cloudShape"));
       const morphSpeed = resolveSceneSetting(ID, settingFor("morphSpeed"));
       const morphBeat = resolveSceneSetting(ID, settingFor("morphBeat"));
       const mode = Math.round(resolveSceneSetting(ID, settingFor("mode")));
+      const gas = GAS_RECIPES[
+        Math.min(GAS_RECIPES.length - 1, Math.max(0, Math.round(resolveSceneSetting(ID, settingFor("gasType")))))
+      ];
 
       // Time since this scene last drew — see the file header for why this
       // isn't anim.dtSec. Guards the first frame and any backwards jump.
@@ -2746,18 +2992,22 @@ export const stormScene: Scene = (() => {
       // computed once and uploaded to both programs.
       const shapeMix = [0, 1, 2, 3].map((c) => (w.a === c ? 1 - w.f : 0) + (w.b === c ? w.f : 0));
       prog.setV4("uShapeMix", shapeMix[0], shapeMix[1], shapeMix[2], shapeMix[3]);
+      uploadGasRecipe(prog, gas);
       // Filaments' glow underlay: the same march, at half the steps and a
-      // fraction of the density and ambient. The scaled values go up as the
+      // fraction of the density. Those two scaled values go up as the
       // ordinary setting uniforms *after* uploadCommonUniforms rather than as
       // separate scale factors inside VOLUME_FRAG, which keeps the march
-      // reading as one cloud lit one way. Skipped on the cheap presets, where
-      // the strands draw over the plain background instead.
+      // reading as one cloud lit one way. Ambient can't ride along: it now
+      // sets where the cloud's resting floor sits as well as how bright it
+      // is (ambientFloor), and only the second of those should follow the
+      // underlay down — so FIL_GLOW_AMBIENT is applied in the shader off
+      // uGlowUnderlay. Skipped on the cheap presets, where the strands draw
+      // over the plain background instead.
       const glowUnderlay = mode === MODE_FILAMENTS && ctx.quality.detail >= FIL_GLOW_MIN_DETAIL;
       prog.setF("uGlowUnderlay", glowUnderlay ? 1 : 0);
       if (glowUnderlay) {
         prog.setF("uMaxSteps", ctx.quality.raymarchSteps * FIL_GLOW_STEPS);
         prog.setF("uDensity", density * FIL_GLOW_DENSITY);
-        prog.setF("uAmbient", ambient * FIL_GLOW_AMBIENT);
       }
       // Another scene in the shared gallery context may have bound something
       // else to these units since the last draw, so rebind all three every
@@ -2849,6 +3099,9 @@ export const stormScene: Scene = (() => {
         filProg.setFv("uStrikeStrength", pool.strength);
         filProg.setV4("uShapeMix", shapeMix[0], shapeMix[1], shapeMix[2], shapeMix[3]);
         filProg.setF("uCountBoost", Math.min(3, Math.max(1, Math.sqrt(FIL_MAX_STRANDS / strandCount))));
+        // The strands take the frequency alone (flowCoord); the rest of the
+        // recipe reaches them through the underlay march they are drawn over.
+        filProg.setF("uGasFreq", gas.freq);
         // A prefix of the strand buffer is a prefix of the point cloud, so
         // Cloud density thins the tangle here the way it thins the points.
         const strands = Math.floor(strandCount * Math.max(0.05, density));

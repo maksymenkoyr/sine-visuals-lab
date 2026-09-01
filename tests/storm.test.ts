@@ -16,6 +16,8 @@ import {
   buildSurfaceNet,
   createRng,
   createStrikePool,
+  GAS_RECIPES,
+  GAS_TYPES,
   insideCloud,
   particleCountForQuality,
   sampleStrikeSegment,
@@ -665,5 +667,65 @@ describe("storm shape field", () => {
     // variant 0 does — that is what puts the points inside the gas at phase 0.
     expect(buildCloud(16).lobes).toEqual(sets[0]);
     for (let i = 1; i < sets.length; i++) expect(sets[i]).not.toEqual(sets[0]);
+  });
+});
+
+describe("storm gas recipes", () => {
+  it("has exactly one recipe per gas type", () => {
+    expect(GAS_RECIPES).toHaveLength(GAS_TYPES.length);
+  });
+
+  it("keeps Cumulus at identity, so the default cloud is arithmetic that cancels", () => {
+    // Every field of a recipe is a factor on an expression the march already
+    // had, and Cumulus is what the setting defaults to — so this is what
+    // makes "the default frame is unchanged" true by construction rather
+    // than by eye. A non-identity value here is a silent visual regression
+    // in every marched mode at once.
+    expect(GAS_TYPES[0]).toBe("Cumulus");
+    expect(GAS_RECIPES[0]).toEqual({
+      freq: 1,
+      stretch: [1, 1, 1],
+      erosion: 1,
+      worley: 1,
+      extinction: 1,
+      powder: 1,
+      tint: [1, 1, 1],
+    });
+  });
+
+  it("keeps every recipe finite and inside sane bounds", () => {
+    for (const r of GAS_RECIPES) {
+      // A frequency or stretch at zero collapses the noise lookup onto one
+      // texel; an extinction at zero makes the gas invisible whatever the
+      // density slider says. The upper bounds are just "still a cloud".
+      expect(r.freq).toBeGreaterThan(0.25);
+      expect(r.freq).toBeLessThan(4);
+      expect(r.stretch).toHaveLength(3);
+      for (const s of r.stretch) {
+        expect(Number.isFinite(s)).toBe(true);
+        expect(s).toBeGreaterThan(0.1);
+        expect(s).toBeLessThan(6);
+      }
+      expect(r.erosion).toBeGreaterThan(0.25);
+      expect(r.erosion).toBeLessThan(4);
+      expect(r.worley).toBeGreaterThan(0.25);
+      expect(r.worley).toBeLessThan(4);
+      expect(r.extinction).toBeGreaterThan(0.1);
+      expect(r.extinction).toBeLessThan(4);
+      expect(r.powder).toBeGreaterThanOrEqual(0);
+      expect(r.powder).toBeLessThan(4);
+      expect(r.tint).toHaveLength(3);
+      for (const c of r.tint) {
+        expect(Number.isFinite(c)).toBe(true);
+        expect(c).toBeGreaterThan(0);
+        expect(c).toBeLessThan(4);
+      }
+    }
+  });
+
+  it("gives every type a character of its own", () => {
+    // Four options that render the same cloud would be four dead chips.
+    const seen = new Set(GAS_RECIPES.map((r) => JSON.stringify(r)));
+    expect(seen.size).toBe(GAS_RECIPES.length);
   });
 });
