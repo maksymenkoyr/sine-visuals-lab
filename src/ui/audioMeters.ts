@@ -175,6 +175,16 @@ const WAVE_HEIGHT_CSS_PX = 64;
 // mic hiss aren't blown up to look like signal.
 const WAVE_COLUMN_MS = 16;
 const WAVE_RANGE_FLOOR = 0.05;
+// Both this waveform and createTraceStrip below close more than one column
+// in a single push() whenever a frame outlasts a column — routine once a
+// scene is GPU-bound, since a column follows the strip's pixel width while
+// push() follows rAF, uncapped by the render-rate cap (see app.ts's loop()).
+// Rather than commit those extra columns empty, the sample that closed the
+// burst is held across all of them: the reading was there for that whole
+// stretch, we just weren't asked for it more often. Past COLUMN_CARRY_MS the
+// hold would be a lie — rAF was paused (a hidden tab), not slow — so those
+// columns stay empty and draw the same gap they always have.
+const COLUMN_CARRY_MS = 250;
 const FADE = "background-color 0.3s ease-out";
 
 // The meter sits where a row's slider would, at the slider's height, so meter
@@ -285,10 +295,14 @@ interface TraceStripSeries {
  *  card's Centroid trace (one series, no legend) both drive one of these.
  *  Each series' column is a max-hold of what push() saw since the column
  *  before last closed, so a transient survives however many frames the
- *  column spans; a null sample leaves that series' column NaN, which
- *  traceHistory's caller (below) reads as "lift the pen" rather than a
- *  reading of zero — the same reference-line gap HISTORY_FIXED_COLOR relies
- *  on for a source with no fixed-mapping reading this tick. */
+ *  column spans; when push() closes several columns in one call (see
+ *  COLUMN_CARRY_MS above) the sample that closed them is held across all
+ *  but blank past the carry bound. A column stays NaN when nothing was ever
+ *  sampled for it — a null reading this series had no value for, or a carry
+ *  bound stretch with no reading at all — which traceHistory's caller
+ *  (below) reads as "lift the pen" rather than a reading of zero, the same
+ *  gap HISTORY_FIXED_COLOR relies on for a source with no fixed-mapping
+ *  reading this tick. */
 function createTraceStrip(series: TraceStripSeries[], heightPx: number) {
   const canvas = document.createElement("canvas");
   canvas.style.cssText = `display: block; width: 100%; height: ${heightPx}px; margin-top: 4px;`;
@@ -300,6 +314,8 @@ function createTraceStrip(series: TraceStripSeries[], heightPx: number) {
   // folded in yet this column", not "zero". commitColumn() below relies on
   // Number.isNaN to tell first-touch-this-column apart from a genuine 0.
   let colVals: number[] = series.map(() => Number.NaN);
+  // A burst's filler once past COLUMN_CARRY_MS — never mutated.
+  const blank: number[] = series.map(() => Number.NaN);
   let colStartMs: number | null = null;
   let cssWidth = 0;
   // Follows the width so the trace always spans exactly HISTORY_SPAN_SEC.
@@ -321,10 +337,9 @@ function createTraceStrip(series: TraceStripSeries[], heightPx: number) {
     return true;
   }
 
-  function commitColumn(): void {
-    for (let i = 0; i < series.length; i++) bufs[i][head] = colVals[i];
+  function commitColumn(vals: number[]): void {
+    for (let i = 0; i < series.length; i++) bufs[i][head] = vals[i];
     head = (head + 1) % bufs[0].length;
-    colVals = colVals.map(() => Number.NaN);
   }
 
   /** One polyline over the ring buffer plus the live (in-progress) column at
@@ -370,7 +385,15 @@ function createTraceStrip(series: TraceStripSeries[], heightPx: number) {
       const elapsed = nowMs - colStartMs;
       if (elapsed < columnMs) return;
       let n = Math.min(bufs[0].length, Math.floor(elapsed / columnMs));
-      for (; n > 0; n--) commitColumn();
+      // A frame that outlasts a column closes several at once (see
+      // COLUMN_CARRY_MS above) — this push's sample is a reading for now, so
+      // it lands in the newest column, while the ones before it in the same
+      // burst hold that same sample (ordinary frame pacing) or go blank (a
+      // stall: nothing was actually sampled through that stretch).
+      const filler = elapsed > COLUMN_CARRY_MS ? blank : colVals;
+      for (; n > 1; n--) commitColumn(filler);
+      commitColumn(colVals);
+      colVals = colVals.map(() => Number.NaN);
       colStartMs = nowMs - (elapsed % columnMs);
     },
     /** Redraws every series in the order given to createTraceStrip — the
@@ -1004,18 +1027,17 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     return true;
   }
 
-  function commitColumn(): void {
-    histMin[head] = colMin;
-    histMax[head] = colMax;
-    histClip[head] = colClip ? 1 : 0;
+  function commitColumn(min: number, max: number, clip: boolean): void {
+    histMin[head] = min;
+    histMax[head] = max;
+    histClip[head] = clip ? 1 : 0;
     head = (head + 1) % histMin.length;
-    colMin = 0;
-    colMax = 0;
-    colClip = false;
   }
 
   /** Folds this frame's buffer into the current column, and closes it (or
-   *  several, after a stall) once WAVE_COLUMN_MS has passed. */
+   *  several, after a frame that outlasts WAVE_COLUMN_MS — held across the
+   *  burst, or blank past COLUMN_CARRY_MS — once WAVE_COLUMN_MS has
+   *  passed). */
   function pushWave(mono: Float32Array, clipped: boolean, nowMs: number): void {
     if (!ensureWaveSize()) return;
     const { min, max } = downsampleForDisplay(mono, 1);
@@ -1026,9 +1048,15 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     const elapsed = nowMs - colStartMs;
     if (elapsed < WAVE_COLUMN_MS) return;
     // A long stall (tab hidden) shouldn't paint a screen of stale columns:
-    // cap the catch-up at the visible width.
+    // cap the catch-up at the visible width, and rest at silence rather than
+    // holding a reading through time nothing was actually sampled.
     let n = Math.min(histMin.length, Math.floor(elapsed / WAVE_COLUMN_MS));
-    for (; n > 0; n--) commitColumn();
+    const stalled = elapsed > COLUMN_CARRY_MS;
+    for (; n > 1; n--) commitColumn(stalled ? 0 : colMin, stalled ? 0 : colMax, !stalled && colClip);
+    commitColumn(colMin, colMax, colClip);
+    colMin = 0;
+    colMax = 0;
+    colClip = false;
     colStartMs = nowMs - (elapsed % WAVE_COLUMN_MS);
   }
 
