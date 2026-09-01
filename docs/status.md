@@ -15,17 +15,22 @@ regenerate it at session close.
   lattice over the density field, `buildSurfaceNet`) and adds Voxel
   (quantized march) beside Gas and Points; every strike also draws a jagged
   bolt polyline (`buildBoltPath`), and `cloudShape` morphs between baked
-  shape variants (`shapePhaseWeights`). Swarm/Sparks styles were cut as too
-  chaotic. v4: morphSpeed/morphBeat (accumulated phase, genuine Off stop,
-  beat-kicked), spectrumMap Off/Screen/Cloud + spectrumGlow (bands drive
-  regional ambient light), and a lighting pass (HG-style strike scattering,
-  differential strike shadow, flashTint white→blue→violet shared across
-  modes, hue-preserving tonemap, depth fade on the lattice). Optimisation
-  attempts measured as no-wins (march is step-bound) and reverted. History:
-  point cloud → gas volume → digital modes → morph/spectrum/lighting. Verified headlessly at high/low quality, in the gallery, and
-  with the auto→manual probe sign-off; `tests/storm.test.ts` covers the pure
-  helpers and both `ALL_SETTINGS` invariant suites include it. **Not yet
-  judged on real music.**
+  shape variants (`shapePhaseWeights`). v4: morphSpeed/morphBeat, spectrumMap
+  Off/Screen/Cloud + spectrumGlow, and a lighting pass (HG-style strike
+  scattering, differential strike shadow, flashTint, hue-preserving tonemap).
+  v5 (from a user-supplied reference video, frames described in the PR):
+  **Filaments** is the new default mode — strands traced through a baked
+  curl field (`buildFlowVolume`) drawn as additive line tangles over a
+  dimmed gas underlay, shoved and lit by strikes, with a `flow` slider;
+  the ambient floor now slides to near-black below its default
+  (`AMBIENT_LIFT_GLSL`, bit-identical at/above it) so an ember-dark cloud
+  is revealed by lightning; and a `gasType` enum (`GAS_RECIPES`: Cumulus
+  identity, Wisp, Smoke, Nebula) reshapes the gas through uniforms only.
+  History: point cloud → gas volume → digital modes → morph/spectrum/
+  lighting → filaments/embers/gas-types. Verified headlessly at high/low
+  quality, in the gallery, and with the probe sign-off;
+  `tests/storm.test.ts` covers the pure helpers and both `ALL_SETTINGS`
+  invariant suites include it. **Not yet judged on real music.**
 - **Dev mode: D hotkey to set current value as default** — PR #40, branch
   `worktree-dev-default-hotkey` (worktree locked).
 - **Chladni scene** — PR #38 (draft), branch `worktree-chladni-scene`
