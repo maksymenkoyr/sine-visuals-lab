@@ -283,6 +283,11 @@ const HISTORY_ENERGY_COLOR = INPUT_GREEN;
 // two need to read apart at a glance, and blue is already this UI's colour
 // for the auto-gain/auto-tune system (AUTO_SKY, Character card).
 const HISTORY_FIXED_COLOR = withAlpha(AUTO_SKY, 0.75);
+const BEAT_TRACE_HEIGHT_CSS_PX = 28;
+// The predicted-grid series in the Rhythm card's Beat trace: same blue as
+// the auto-gain/auto-tune system, distinct from BEAT_COLOR so "detected"
+// (red) and "predicted" (blue) never read as the same line.
+const BEAT_GRID_COLOR = AUTO_SKY;
 
 interface TraceStripSeries {
   color: string;
@@ -718,13 +723,16 @@ function createHitBar(label: string, accent: string) {
   };
 }
 
-/** Rhythm's third row: bandEnergy's low/mid/high pulse envelopes
- *  (AnimFrame.lowPulse/midPulse/highPulse) — the continuous form of the
- *  lowOnset/midOnset/highOnset edges a scene can trigger from directly
- *  (caustics' Beat ripple, among others). Distinct from the spectrum
- *  strip's bars, which show raw per-band energy, not this file's own
- *  onset-shaped pulses. Same tints as the spectrum strip's own low/mid/high
- *  bars (STRIP_LOW/MID/HIGH) so the two read as the same three ranges. */
+/** Rhythm's third row: the broadband beat pulse (AnimFrame.beatPulse) beside
+ *  bandEnergy's low/mid/high pulse envelopes (lowPulse/midPulse/highPulse) —
+ *  the continuous form of the onset/lowOnset/midOnset/highOnset edges a
+ *  scene can trigger from directly (caustics' Beat surge lurch and Beat
+ *  ripple, among others). Distinct from the spectrum strip's bars, which
+ *  show raw per-band energy, not this file's own onset-shaped pulses. Beat
+ *  is tinted BEAT_COLOR (the beat dot's own tint, so the two read as one
+ *  concept) and set off by a divider, since it's broadband rather than a
+ *  fourth band; Low/Mid/High keep the spectrum strip's STRIP_LOW/MID/HIGH
+ *  tints so the two read as the same three ranges. */
 function createHitsRow() {
   const el = document.createElement("div");
   el.className = "vc-row";
@@ -741,21 +749,25 @@ function createHitsRow() {
 
   const bars = document.createElement("div");
   bars.style.cssText = `display: flex; gap: 10px; margin-top: 6px;`;
+  const beat = createHitBar("Beat", BEAT_COLOR);
+  const divider = document.createElement("div");
+  divider.style.cssText = `width: 1px; align-self: stretch; margin: 2px 0; background: rgba(255,255,255,0.12);`;
   const low = createHitBar("Low", STRIP_LOW);
   const mid = createHitBar("Mid", STRIP_MID);
   const high = createHitBar("High", STRIP_HIGH);
-  bars.append(low.el, mid.el, high.el);
+  bars.append(beat.el, divider, low.el, mid.el, high.el);
 
   const hint = document.createElement("div");
   hint.className = "vc-hint";
   hint.textContent =
-    "Per-band onset pulses — the edges a scene can drive a discrete effect from (a beat ripple's bass trigger, say) instead of a continuous level.";
+    "Beat is the broadband onset's decaying pulse (what Beat surge/churn ride in Caustics); Low/Mid/High are the per-band onset pulses a scene can drive a discrete effect from (a beat ripple's bass trigger, say) instead of a continuous level.";
 
   el.append(head, bars, hint);
 
   return {
     el,
-    setValues(lowV: number, midV: number, highV: number): void {
+    setValues(beatV: number, lowV: number, midV: number, highV: number): void {
+      beat.setValue(beatV);
       low.setValue(lowV);
       mid.setValue(midV);
       high.setValue(highV);
@@ -933,8 +945,34 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     description:
       "How hard the broadband onset detector's flux cleared its threshold this frame — past the mark is a beat, short of it a near-miss.",
   });
+  // Beats as actually detected (anim.beatPulse, red — same as the Hits
+  // row's Beat bar and the tempo dot) against the phase-locked grid
+  // beatClock predicts (a spike at each anim.beatPhase wrap, blue, height
+  // anim.tempoLock so an unconfident tracker draws a short tick and a locked
+  // one a tall one — the same "unconfident reads as unconfident" convention
+  // the beat dot itself uses). Detections landing on a grid tick read as
+  // locked; a detection between ticks reads as a double; a tick with no
+  // detection reads as a miss. Same createTraceStrip machinery as the
+  // Signal card's History and the Character card's Centroid trace.
+  const beat = createMeterRow({
+    label: "Beat",
+    accent: NEUTRAL_ACCENT,
+    unit: "s",
+    description:
+      "Detected beats (red) against the tracker's predicted grid (blue, tall when locked, short when unsure). On the grid is locked; between ticks is a double; a tick with nothing under it is a miss.",
+  });
+  const beatTrace = createTraceStrip(
+    [
+      { color: BEAT_GRID_COLOR, width: 1.5 },
+      { color: BEAT_COLOR, width: 1.5 },
+    ],
+    BEAT_TRACE_HEIGHT_CSS_PX,
+  );
+  beat.el.children[1].replaceWith(beatTrace.canvas);
+  beat.setReadout(String(HISTORY_SPAN_SEC));
+  let prevBeatPhase: number | null = null;
   const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm" });
-  rhythmCard.body.append(rhythmRow, spacer(), hits.el, spacer(), onset.el);
+  rhythmCard.body.append(rhythmRow, spacer(), hits.el, spacer(), beat.el, spacer(), onset.el);
 
   // ---- Character ----
   const dialRows = MUSIC_DIALS.map((dial) => ({
@@ -1183,7 +1221,20 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
         // Already raw the way the beat dot is (see file header) — no
         // pre-envelope counterpart threaded through AnimFrame to switch to.
-        hits.setValues(anim?.lowPulse ?? 0, anim?.midPulse ?? 0, anim?.highPulse ?? 0);
+        hits.setValues(anim?.beatPulse ?? 0, anim?.lowPulse ?? 0, anim?.midPulse ?? 0, anim?.highPulse ?? 0);
+        // A wrap (this frame's beatPhase less than last frame's) is the grid
+        // tick; its height is tempoLock, so an unlocked guess draws short
+        // rather than a confident-looking full-height spike. null (not 0)
+        // while idle, matching every other series' "lift the pen" idle read.
+        if (anim) {
+          const wrapped = prevBeatPhase !== null && anim.beatPhase < prevBeatPhase;
+          prevBeatPhase = anim.beatPhase;
+          beatTrace.push([wrapped ? anim.tempoLock : 0, anim.beatPulse], nowMs);
+        } else {
+          prevBeatPhase = null;
+          beatTrace.push([null, null], nowMs);
+        }
+        beatTrace.draw();
         // Local diagnostic, same availability as fixedEnergy (null on a
         // mic-less renderer or the synthetic feed) — no RAW counterpart,
         // same reasoning as the hit pulses above.
@@ -1194,6 +1245,12 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
             fluxRatio === null ? "--" : fluxRatio.toFixed(2),
             fluxRatio === null ? IDLE : {},
           );
+      } else {
+        // Folded: don't accumulate a column while hidden, same as History
+        // and Centroid — and forget the last phase so unfolding mid-track
+        // doesn't read the jump across the fold as a wrap.
+        beatTrace.resetColumn();
+        prevBeatPhase = null;
       }
 
       // ---- Character ----
