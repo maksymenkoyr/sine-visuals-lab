@@ -124,11 +124,7 @@ import {
  * and skipping every chip and button — so Tab alone never leaves the panel
  * and never lands anywhere but a control. On whichever control has focus, A
  * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
- * are its own, in bandFaders.ts). D is dev-only (DeviceMenuDeps.devDefault):
- * on a scene-setting row, it persists the row's current value as its new
- * default, so R/↺ from then on snaps back to that instead of the value
- * baked into the scene's SceneSetting spec (see tuning/defaults.ts) — a
- * production build never sets devDefault, so the key no-ops there. A focused
+ * are its own, in bandFaders.ts). A focused
  * slider also takes Home/End to its min/max — the browser's own native
  * range-input behavior, left alone by onKeyDown below — plus z/x
  * (wireSliderQuickJump) to jump straight to the middle of the track or the
@@ -232,15 +228,6 @@ export interface DeviceMenuDeps {
     get(sceneId: string, key: string): number | undefined;
     set(sceneId: string, key: string, value: number): void;
     clear(sceneId: string, key: string): void;
-  };
-  /** Dev-only: read/write a per-(scene,key) override of a scene setting's
-   *  shipped default — see tuning/defaults.ts. Its presence is what turns on
-   *  a scene-setting row's D hotkey ("set current value as default") and its
-   *  absence in a production build hides that affordance, same as devPin
-   *  above. */
-  devDefault?: {
-    get(sceneId: string, key: string): number | undefined;
-    set(sceneId: string, key: string, value: number): void;
   };
   /** Global per-band adaptive-normalization amount — see src/audio/autoGain.ts.
    *  AUTO_GAIN_MIN (the default) is the fixed mapping against the analyser's
@@ -529,13 +516,6 @@ interface ControlRowSpec {
      *  clearing a pin never fights whatever else currently owns the row. */
     resolve(): number;
   };
-  /** Dev-only: makes D (while this row's control has focus) persist the
-   *  row's current value as its new default — see DeviceMenuDeps.devDefault.
-   *  Omit to leave the D hotkey a no-op for this row (any prod build, or a
-   *  row this affordance doesn't apply to). */
-  devDefault?: {
-    set(value: number): void;
-  };
   /** SceneSetting.reads (sceneSettings.ts), resolved to concrete signals and
    *  callbacks by appendSettingRow below — see ResolvedSignalRead. Omit for
    *  a setting with no `reads` entries. */
@@ -574,7 +554,7 @@ function isTypingTarget(t: EventTarget | null): boolean {
  *  with no auto weights (the A key then no-ops, matching the hidden chip). */
 function wireRowKeys(
   control: HTMLElement,
-  actions: { auto?: () => void; reset: () => void; toggleOff: () => void; setDefault?: () => void },
+  actions: { auto?: () => void; reset: () => void; toggleOff: () => void },
 ): void {
   control.addEventListener("keydown", (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
@@ -591,11 +571,6 @@ function wireRowKeys(
       case "t":
         e.preventDefault();
         actions.toggleOff();
-        break;
-      case "d":
-        if (!actions.setDefault) return;
-        e.preventDefault();
-        actions.setDefault();
         break;
     }
   });
@@ -1039,17 +1014,6 @@ function createControlRow(spec: ControlRowSpec) {
     auto: spec.auto ? () => chip.click() : undefined,
     reset: () => resetBtn.click(),
     toggleOff: () => offChip.click(),
-    // Persists the row's current value, then mutates spec.defaultValue in
-    // place — resetBtn's click handler and display() both read it fresh off
-    // this same captured spec object on every call, so ↺/R immediately
-    // target the new default with no row rebuild needed.
-    setDefault: spec.devDefault
-      ? () => {
-          spec.devDefault!.set(lastValue);
-          spec.defaultValue = lastValue;
-          resetBtn.style.visibility = "hidden";
-        }
-      : undefined,
   });
 
   return {
@@ -1899,14 +1863,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       };
     });
 
-    const devDefault = deps.devDefault;
     const row = createControlRow({
       label: spec.label,
       accent: SCENE_VIOLET,
       min: spec.min,
       max: spec.max,
       step: spec.step,
-      defaultValue: devDefault?.get(sceneId, spec.key) ?? spec.default,
+      defaultValue: spec.default,
       mapping: "linear",
       format: formatSetting,
       description: spec.description,
@@ -1922,7 +1885,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           }
         : undefined,
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
-      devDefault: devDefault ? { set: (value) => devDefault.set(sceneId, spec.key, value) } : undefined,
       reads,
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
