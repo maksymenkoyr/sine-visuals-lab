@@ -303,7 +303,7 @@ const SETTINGS: SceneSetting[] = [
   // The constants that used to be hardcoded on the sparkle line in FRAG —
   // how bright, how many, how fine, how far the glints spread, and whether
   // they persist through a sustained wash instead of only flashing on a hit.
-  // Each tracks SPARKLE as a macro: dragging the master knob moves all five
+  // Each tracks SPARKLE as a macro: dragging the master knob moves them all
   // together, and each snaps to manual (stops following) the moment it's
   // touched directly, same as any auto-capable setting. Kept `advanced` —
   // real, but not worth doubling the Sparkle group's row count for settings
@@ -384,24 +384,29 @@ const SETTINGS: SceneSetting[] = [
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.3 },
   },
+  // Spray injection rides on the glints rather than replacing them: every
+  // cell of the glint field is its own tiny nozzle, so sprays appear in as
+  // many places as glints do, share their coordinate (grain, drift, Sparkle
+  // distortion), their crest gate and their treble drive — and add nothing
+  // at 0, so the sparkle term above stays bit-for-bit what it was.
   {
     key: "injection",
     label: "Spray injection",
-    description: "Fine droplets erupt from the center and atomize outward, like fuel forced through a nozzle — its own continuous animation, separate from the beat",
-    group: "Injection",
+    description: "Glints also spray fine droplets outward, like fuel atomizing through a nozzle — spreading from many points across the pattern",
+    group: "Sparkle",
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0, // off until touched — a new, dramatic look, not something existing saved looks should suddenly grow
-    // Runs on its own clock rather than the music profile's dials, same
-    // reasoning as causticDensity above: a taste choice, not one Auto should
-    // silently dial in under a chosen look.
+    default: 0, // off until touched — an added look, not something existing saved looks should suddenly grow
+    // Same reasoning as sparkleGrain: a shape/taste choice, not an
+    // intensity one, so the master knob leaves it alone.
+    macro: { driver: SPARKLE, weight: 0 },
   },
   {
     key: "injectionReverse",
     label: "Reverse injection",
-    description: "Droplets appear scattered and get pulled back into the nozzle and vanish there, instead of spraying out and fading away",
-    group: "Injection",
+    description: "Droplets get sucked back into their nozzle and vanish there, instead of spraying out and fading away",
+    group: "Sparkle",
     min: 0,
     max: 1,
     step: 1,
@@ -609,16 +614,22 @@ export function sparkleBrightGain(sparkleBright: number): number {
   return sparkleBright * SPARKLE_BRIGHT_GAIN;
 }
 
-// Spray injection (see the Injection group in SETTINGS above and the FRAG
-// block below). Cell size and cycle rate are fixed rather than dialable —
-// this is meant to stay "its own continuous animation", not a second set of
+// Spray injection (see uInjection in the Sparkle group of SETTINGS above and
+// the FRAG block below). The droplet field is laid out in the glint noise's
+// own coordinate — sparkleQ * sparkleFreq — at INJECTION_CELLS_PER_GRAIN
+// cells per noise unit, so one nozzle cell spans a few glint wavelengths and
+// Sparkle grain resizes the droplets right along with the glints. Everything
+// below is in those cell units. Rate and reach are fixed rather than
+// dialable: uInjection is meant to be "how much spray", not a second set of
 // Drift/Beat-style controls duplicating the ridge system.
-const INJECTION_CELL_SCALE = 6.0; // droplet field density, in p-space units per cell
-const INJECTION_RATE = 0.55; // cycles/sec each cell's droplet completes
-const INJECTION_REACH = 1.6; // p-space distance from the nozzle a droplet is fully atomized by
-const INJECTION_NEAR_R = 0.32; // droplet radius (ip-space) right at the nozzle, before atomizing
-const INJECTION_FAR_R = 0.09; // droplet radius once fully atomized
-const INJECTION_GAIN = 0.85; // overall brightness multiplier on the summed field
+const INJECTION_CELLS_PER_GRAIN = 0.25; // nozzle cells per glint-noise unit
+const INJECTION_DROPS = 4; // droplets in flight per nozzle at any moment (a GLSL loop bound — int)
+const INJECTION_RATE = 0.9; // cycles/sec each droplet completes
+const INJECTION_REACH = 0.55; // how far from its nozzle a droplet is fully atomized by
+const INJECTION_NOZZLE_JITTER = 0.5; // nozzle offset from its cell center, so nozzles don't sit on a grid
+const INJECTION_NEAR_R = 0.14; // droplet radius right at the nozzle, before atomizing
+const INJECTION_FAR_R = 0.05; // droplet radius once fully atomized
+const INJECTION_GAIN = 1.3; // brightness of the summed field relative to a glint's own peak
 
 // Own accumulator for the domain-warp drift: never reset, only advanced, so
 // dragging the Drift slider mid-run changes the *rate* going forward and
@@ -1109,44 +1120,54 @@ void main() {
   float sparkleGain = uSparkleBright * ${SPARKLE_BRIGHT_GAIN.toFixed(1)};
   acc += uSparkle * sparkleDrive * crestGate * pow(sparkleNoise, sparkleExp) * sparkleGain;
 
-  // Spray injection: fine droplets erupt from the nozzle at the scene's own
-  // origin and atomize outward, each cell on its own hashed phase so
-  // droplets emerge continuously rather than firing in lockstep — a
-  // separate, always-running animation (uTime-driven, not gated to
-  // anim.onset the way the ridge/ripple/sparkle terms above are). Droplet
-  // radius shrinks with actual distance from the nozzle (INJECTION_REACH),
-  // not with time, so it reads as a stream atomizing into mist regardless
-  // of travel direction. Reverse Injection isn't the same path played
-  // backwards in time — it changes *what* fades: normally a droplet stays
-  // fully opaque leaving the nozzle and only dissipateFade lets it fade out
-  // once fully atomized at the far end; reversed, dissipateFade is dropped
-  // entirely, so the droplet stays opaque all the way back and only
+  // Spray injection, added on top of the glints rather than in place of
+  // them. The glint field is tiled into nozzle cells — in sparkleQ *
+  // sparkleFreq, the exact coordinate the glints sample, drifting with the
+  // same uDriftPhase offset — and each cell holds one nozzle spraying
+  // INJECTION_DROPS droplets outward on hashed directions and phases, so
+  // sprays appear everywhere glints can and never fire in lockstep. The
+  // motion runs on uTime (its own continuous clock, not gated to
+  // anim.onset), but the brightness is gated exactly like a glint —
+  // uSparkle * sparkleDrive * crestGate * sparkleGain — so spray shows up
+  // where and when the hats sparkle, and adds nothing until uInjection is
+  // raised. Droplet radius shrinks with actual distance from its nozzle
+  // (INJECTION_REACH), not with time, so it reads as a stream atomizing
+  // into mist regardless of travel direction; the ease-out on dist makes
+  // droplets leave fast and slow as they atomize (and, reversed, gather
+  // speed as they're pulled in). Reverse Injection isn't the same path
+  // played backwards in time — it changes *what* fades: normally a droplet
+  // stays fully opaque leaving the nozzle and only dissipateFade lets it
+  // fade out once fully atomized at the far end; reversed, dissipateFade is
+  // dropped entirely, so the droplet stays opaque all the way back and only
   // nearNozzleFade — which depends purely on distance, not on time or
   // direction — pulls it to zero exactly as it arrives, reading as suction
   // rather than fading mist.
   float injectionField = 0.0;
   if (uInjection > 0.0) {
-    vec2 ip = p * ${INJECTION_CELL_SCALE.toFixed(1)};
+    vec2 ip = (sparkleQ * sparkleFreq + vec2(uDriftPhase * 2.0) * densScale) * ${INJECTION_CELLS_PER_GRAIN.toFixed(2)};
     for (int gx = -1; gx <= 1; gx++) {
       for (int gy = -1; gy <= 1; gy++) {
         vec2 cellId = floor(ip) + vec2(float(gx), float(gy));
-        vec2 rnd = hash22(cellId + 91.7);
-        float cyclePos = fract(uTime * ${INJECTION_RATE.toFixed(2)} + rnd.x);
-        float travel = uInjectionReverse > 0.5 ? 1.0 - cyclePos : cyclePos;
-        vec2 target = cellId + 0.5 + (rnd - 0.5) * 0.8;
-        vec2 dropIp = mix(vec2(0.0), target, smoothstep(0.0, 1.0, travel));
-        float d = length(ip - dropIp);
-        float distFromNozzle = length(dropIp) / ${INJECTION_CELL_SCALE.toFixed(1)};
-        float dropR = mix(${INJECTION_NEAR_R.toFixed(2)}, ${INJECTION_FAR_R.toFixed(2)}, clamp(distFromNozzle / ${INJECTION_REACH.toFixed(2)}, 0.0, 1.0));
-        float glow = exp(-d * d / (dropR * dropR) * 2.2);
-        float spawnFade = smoothstep(0.0, 0.06, cyclePos);
-        float nearNozzleFade = smoothstep(0.0, 0.12, distFromNozzle);
-        float dissipateFade = uInjectionReverse > 0.5 ? 1.0 : smoothstep(1.0, 0.75, cyclePos);
-        injectionField += glow * spawnFade * nearNozzleFade * dissipateFade;
+        vec2 nozzle = cellId + 0.5 + (hash22(cellId + 91.7) - 0.5) * ${INJECTION_NOZZLE_JITTER.toFixed(2)};
+        for (int k = 0; k < ${INJECTION_DROPS}; k++) {
+          vec2 rnd = hash22(cellId * 3.1 + float(k) * 17.3 + 5.2);
+          float cyclePos = fract(uTime * ${INJECTION_RATE.toFixed(2)} + rnd.x);
+          float travel = uInjectionReverse > 0.5 ? 1.0 - cyclePos : cyclePos;
+          float ang = rnd.y * TWO_PI;
+          float dist = (1.0 - (1.0 - travel) * (1.0 - travel)) * ${INJECTION_REACH.toFixed(2)};
+          vec2 dropIp = nozzle + vec2(cos(ang), sin(ang)) * dist;
+          float d = length(ip - dropIp);
+          float dropR = mix(${INJECTION_NEAR_R.toFixed(2)}, ${INJECTION_FAR_R.toFixed(2)}, dist / ${INJECTION_REACH.toFixed(2)});
+          float glow = exp(-d * d / (dropR * dropR) * 2.2);
+          float spawnFade = smoothstep(0.0, 0.06, cyclePos);
+          float nearNozzleFade = smoothstep(0.0, 0.12 * ${INJECTION_REACH.toFixed(2)}, dist);
+          float dissipateFade = uInjectionReverse > 0.5 ? 1.0 : smoothstep(1.0, 0.75, cyclePos);
+          injectionField += glow * spawnFade * nearNozzleFade * dissipateFade;
+        }
       }
     }
   }
-  acc += uInjection * injectionField * ${INJECTION_GAIN.toFixed(2)};
+  acc += uSparkle * sparkleDrive * crestGate * sparkleGain * uInjection * injectionField * ${INJECTION_GAIN.toFixed(2)};
 
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
