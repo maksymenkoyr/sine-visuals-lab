@@ -100,12 +100,16 @@ respect.
 
 ## How to agree
 
-Until an automated CLA check is set up, agree by posting the following
-comment on your first pull request, from the GitHub account making the
-contribution:
+When you open your first pull request, the CLA Assistant check will prompt
+you to sign this Agreement. Accepting it there, from the GitHub account
+making the contribution, constitutes your electronic signature to this
+Agreement, recorded against that account.
+
+If the automated check is unavailable, you can instead agree by posting the
+following comment on your pull request:
 
 > I have read the CLA at CLA.md and I hereby agree to its terms for all my
 > past and future contributions to this project.
 
 That comment, together with your GitHub account identity and the pull request
-record, constitutes your electronic signature to this Agreement.
+record, likewise constitutes your electronic signature to this Agreement.
