@@ -1,10 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
+  BOLT_BRANCH_SEGMENTS,
+  BOLT_MAX_BRANCHES,
+  BOLT_PATH_VERTS,
+  BOLT_RIBBON_VERTS,
   BOLT_SEGMENTS,
+  BOLT_VERT_FLOATS,
   MORPH_MAX_STEP,
   SHAPE_VARIANTS,
+  STRIKE_LEN_MAX,
   advanceMorphPhase,
-  buildBoltPath,
+  buildBoltTree,
   buildCloud,
   buildFilamentVertices,
   buildFlowVolume,
@@ -145,11 +151,11 @@ describe("storm strike pool", () => {
       expect(insideCloud(bx, by, bz)).toBe(true);
       const len = Math.hypot(bx - ax, by - ay, bz - az);
       expect(len).toBeGreaterThan(0);
-      expect(len).toBeLessThanOrEqual(0.85 + 1e-9);
+      expect(len).toBeLessThanOrEqual(STRIKE_LEN_MAX + 1e-9);
     }
   });
 
-  it("draws the fired slot's bolt path between its own endpoints and marks only it dirty", () => {
+  it("draws the fired slot's bolt tree between its own endpoints and marks only it dirty", () => {
     const pool = createStrikePool(lobes, createRng(6));
     expect(Array.from(pool.pathDirty).every((d) => d === 0)).toBe(true);
     expect(pool.trigger(1)).toBe(true);
@@ -157,16 +163,18 @@ describe("storm strike pool", () => {
     expect(slot).toBeGreaterThanOrEqual(0);
     expect(Array.from(pool.pathDirty).filter((d) => d === 1)).toHaveLength(1);
 
-    const verts = BOLT_SEGMENTS + 1;
-    const o = slot * verts * 3;
+    const stride = BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS;
+    const o = slot * stride;
+    // The main channel leads the slot's slice and still ends on the segment
+    // the strike lights the gas with.
     for (let k = 0; k < 3; k++) {
       expect(pool.path[o + k]).toBeCloseTo(pool.posA[slot * 3 + k], 6);
-      expect(pool.path[o + (verts - 1) * 3 + k]).toBeCloseTo(pool.posB[slot * 3 + k], 6);
+      expect(pool.path[o + BOLT_SEGMENTS * 2 * BOLT_VERT_FLOATS + k]).toBeCloseTo(pool.posB[slot * 3 + k], 6);
     }
-    // Every other slot's path is still untouched.
+    // Every other slot's slice is still untouched.
     for (let i = 0; i < pool.pathDirty.length; i++) {
       if (i === slot) continue;
-      const zeros = Array.from(pool.path.subarray(i * verts * 3, (i + 1) * verts * 3));
+      const zeros = Array.from(pool.path.subarray(i * stride, (i + 1) * stride));
       expect(zeros.every((v) => v === 0)).toBe(true);
     }
   });
@@ -184,29 +192,65 @@ describe("storm strike pool", () => {
   });
 });
 
-describe("storm bolt path", () => {
+describe("storm bolt tree", () => {
   const ends: [number[], number[]] = [[-0.4, 0.1, 0.2], [0.5, -0.2, -0.1]];
+  const STRIDE = BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS;
 
-  it("is one vertex per segment plus one, exactly on the strike's endpoints", () => {
-    const path = buildBoltPath(createRng(1), ends[0], ends[1]);
-    expect(path.length).toBe((BOLT_SEGMENTS + 1) * 3);
+  /** One path vertex out of the ribbon layout: buildBoltTree writes each of
+   *  them twice, once per side, so the pair at 2i is the vertex at i. */
+  const vertAt = (buf: Float32Array, i: number, base = 0) => {
+    const o = base + i * 2 * BOLT_VERT_FLOATS;
+    return {
+      p: [buf[o], buf[o + 1], buf[o + 2]],
+      tan: [buf[o + 3], buf[o + 4], buf[o + 5]],
+      w: buf[o + 6],
+      level: buf[o + 7],
+      mirrorP: [buf[o + BOLT_VERT_FLOATS], buf[o + BOLT_VERT_FLOATS + 1], buf[o + BOLT_VERT_FLOATS + 2]],
+      mirrorW: buf[o + BOLT_VERT_FLOATS + 6],
+    };
+  };
+
+  /** The path-vertex index each polyline of the tree starts at: the main
+   *  channel, then one fixed-size slot per branch. */
+  const lineStarts = (): number[] => {
+    const starts = [0];
+    for (let j = 0; j < BOLT_MAX_BRANCHES; j++) {
+      starts.push(BOLT_SEGMENTS + 1 + j * (BOLT_BRANCH_SEGMENTS + 1));
+    }
+    return starts;
+  };
+
+  it("fills exactly one strike's budget, with the main channel first and on the strike's endpoints", () => {
+    const tree = buildBoltTree(createRng(1), ends[0], ends[1]);
+    expect(tree.length).toBe(STRIDE);
     for (let k = 0; k < 3; k++) {
       // Float32 storage, so "exactly" is to the precision the buffer holds.
-      expect(path[k]).toBeCloseTo(ends[0][k], 6);
-      expect(path[BOLT_SEGMENTS * 3 + k]).toBeCloseTo(ends[1][k], 6);
+      expect(vertAt(tree, 0).p[k]).toBeCloseTo(ends[0][k], 6);
+      expect(vertAt(tree, BOLT_SEGMENTS).p[k]).toBeCloseTo(ends[1][k], 6);
     }
   });
 
-  it("kinks every interior vertex, but never far off the straight line", () => {
+  it("writes both sides of every ribbon vertex: same point, opposite width", () => {
+    const tree = buildBoltTree(createRng(3), ends[0], ends[1]);
+    for (let i = 0; i < BOLT_PATH_VERTS; i++) {
+      const v = vertAt(tree, i);
+      expect(v.p).toEqual(v.mirrorP);
+      expect(v.mirrorW).toBe(-v.w);
+      expect(Number.isFinite(v.w)).toBe(true);
+      expect(Math.hypot(v.tan[0], v.tan[1], v.tan[2])).toBeCloseTo(1, 5);
+    }
+  });
+
+  it("kinks every interior vertex of the channel, but never far off the straight line", () => {
     // The displacement halves per level, so the whole train sums to well
     // under half the segment's length however deep the recursion goes.
     const [a, b] = ends;
     const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
     let offAxis = 0;
     for (let seed = 1; seed <= 20; seed++) {
-      const path = buildBoltPath(createRng(seed), a, b);
+      const tree = buildBoltTree(createRng(seed), a, b);
       for (let i = 1; i < BOLT_SEGMENTS; i++) {
-        const p = [path[i * 3], path[i * 3 + 1], path[i * 3 + 2]];
+        const p = vertAt(tree, i).p;
         const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         const ap = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
         const t = (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / (len * len);
@@ -218,20 +262,79 @@ describe("storm bolt path", () => {
     expect(offAxis).toBeGreaterThan(0);
   });
 
+  it("tapers every polyline to nothing at both tips, monotonically from its widest vertex", () => {
+    // Zero tips are what let the whole tree draw as one triangle strip, and
+    // the taper is what makes a branch read as a branch rather than a bar.
+    for (let seed = 1; seed <= 20; seed++) {
+      const tree = buildBoltTree(createRng(seed), ends[0], ends[1]);
+      const starts = lineStarts();
+      starts.forEach((start, line) => {
+        const n = line === 0 ? BOLT_SEGMENTS + 1 : BOLT_BRANCH_SEGMENTS + 1;
+        const w = Array.from({ length: n }, (_, i) => vertAt(tree, start + i).w);
+        expect(w[0]).toBe(0);
+        expect(w[n - 1]).toBe(0);
+        const peak = w.indexOf(Math.max(...w));
+        for (let i = 1; i <= peak; i++) expect(w[i]).toBeGreaterThanOrEqual(w[i - 1]);
+        for (let i = peak + 1; i < n; i++) expect(w[i]).toBeLessThanOrEqual(w[i - 1]);
+      });
+    }
+  });
+
+  it("branches off vertices that lie on an earlier polyline, thinner than what they left", () => {
+    let branches = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const tree = buildBoltTree(createRng(seed), ends[0], ends[1]);
+      const starts = lineStarts();
+      const mainPeak = Math.max(...Array.from({ length: BOLT_SEGMENTS + 1 }, (_, i) => vertAt(tree, i).w));
+      for (let j = 1; j < starts.length; j++) {
+        const start = starts[j];
+        const w = Array.from({ length: BOLT_BRANCH_SEGMENTS + 1 }, (_, i) => vertAt(tree, start + i).w);
+        const peak = Math.max(...w);
+        if (peak === 0) continue; // an unfilled branch slot: padding, not a branch
+        branches++;
+        expect(peak).toBeLessThan(mainPeak);
+        expect(vertAt(tree, start).level).toBeGreaterThanOrEqual(1);
+        // The root sits exactly on a vertex of the channel it forked from,
+        // which is what hides the join.
+        const root = vertAt(tree, start).p;
+        let onParent = false;
+        for (let i = 0; i < start && !onParent; i++) {
+          const p = vertAt(tree, i).p;
+          onParent = Math.hypot(p[0] - root[0], p[1] - root[1], p[2] - root[2]) < 1e-6;
+        }
+        expect(onParent).toBe(true);
+      }
+    }
+    expect(branches).toBeGreaterThan(20 * 2);
+  });
+
+  it("keeps every vertex in the region a strike could plausibly reach", () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const a = sampleStrikeSegment(createRng(seed), buildLobes(createRng(seed + 1)));
+      const tree = buildBoltTree(createRng(seed), a.slice(0, 3), a.slice(3));
+      for (let i = 0; i < BOLT_PATH_VERTS; i++) {
+        const p = vertAt(tree, i).p;
+        expect(p.every((v) => Number.isFinite(v))).toBe(true);
+        // The cloud's own ellipsoid, loosened for the midpoint jitter and for
+        // a branch tip clamped to the surface.
+        expect(insideCloud(p[0] / 1.6, p[1] / 1.6, p[2] / 1.6)).toBe(true);
+      }
+    }
+  });
+
   it("is deterministic for a given rng, and different for a different one", () => {
-    const a = Array.from(buildBoltPath(createRng(4), ends[0], ends[1]));
-    const b = Array.from(buildBoltPath(createRng(4), ends[0], ends[1]));
-    const c = Array.from(buildBoltPath(createRng(5), ends[0], ends[1]));
+    const a = Array.from(buildBoltTree(createRng(4), ends[0], ends[1]));
+    const b = Array.from(buildBoltTree(createRng(4), ends[0], ends[1]));
+    const c = Array.from(buildBoltTree(createRng(5), ends[0], ends[1]));
     expect(a).toEqual(b);
     expect(a).not.toEqual(c);
   });
 
   it("writes into a shared buffer at the offset it is given, touching nothing else", () => {
-    const verts = BOLT_SEGMENTS + 1;
-    const out = new Float32Array(verts * 3 * 2);
-    buildBoltPath(createRng(2), ends[0], ends[1], out, verts * 3);
-    expect(Array.from(out.subarray(0, verts * 3)).every((v) => v === 0)).toBe(true);
-    expect(out[verts * 3]).toBeCloseTo(ends[0][0], 6);
+    const out = new Float32Array(STRIDE * 2);
+    buildBoltTree(createRng(2), ends[0], ends[1], out, STRIDE);
+    expect(Array.from(out.subarray(0, STRIDE)).every((v) => v === 0)).toBe(true);
+    expect(vertAt(out, 0, STRIDE).p[0]).toBeCloseTo(ends[0][0], 6);
   });
 });
 

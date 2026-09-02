@@ -20,8 +20,8 @@ import {
 //
 // The cloud has one silhouette and several faces (the `mode` setting, options
 // MODES). Filaments, the default, traces hair-thin strands through a curl
-// field and draws them as additive 1px lines over a dimmed march of the
-// volume — the cloud as a lit tangle. Mesh is that silhouette contoured on
+// field and draws them as additive 1px lines on near-black — the cloud as a
+// lit tangle, and nothing else. Mesh is that silhouette contoured on
 // the CPU into a lattice of glowing lines and nodes — the cloud as a
 // wireframe of itself. Gas is the raymarched volume. Voxel is the same march
 // with the sample position quantized and the shading posterized, so the gas
@@ -144,15 +144,23 @@ import {
 //    interval, not the time since this scene last drew. A pulse that has
 //    risen since the last draw can't be missed, whichever tick it rose on.
 //
-// The bolt (every mode): a trigger also draws a path — buildBoltPath, a
-// midpoint-displacement polyline between the segment's own endpoints — into
-// the pool's per-slot `path` storage and marks the slot dirty. render()
-// re-uploads only the dirty slots into a DYNAMIC_DRAW VBO, then draws every
-// live slot twice: once as soft POINTS beads along the path (line width is
-// stuck at 1 on WebGL whatever gl.lineWidth is asked for, so the beads are
-// what give a bolt any width at all) and once as a white-hot LINE_STRIP core.
-// Brightness is the slot's strikeEnvelope value times the `bolt` setting,
-// riding uBeatPulse on top so it visibly answers the beat.
+// The bolt (every mode): a trigger also draws a branched tree — buildBoltTree
+// — into the pool's per-slot `path` storage and marks the slot dirty. The
+// main channel is a midpoint-displacement polyline between the segment's own
+// endpoints; primary branches leave interior vertices of it at an angle and
+// may fork once more, all of it deterministic in the strike's rng and packed
+// into a fixed per-strike budget (BOLT_PATH_VERTS). render() re-uploads only
+// the dirty slots into a DYNAMIC_DRAW VBO and draws each live slot as one
+// TRIANGLE_STRIP: line width is stuck at 1 on WebGL whatever gl.lineWidth is
+// asked for, so BOLT_VERT expands the path into a camera-facing ribbon
+// instead — two vertices per path vertex, pushed apart along the screen-space
+// normal of the path's own direction, by a width that tapers to nothing at
+// every tip. Brightness is the slot's strikeEnvelope value times the `bolt`
+// setting, riding uBeatPulse on top so it visibly answers the beat; `bolt`
+// also sets how wide the ribbon draws and how far the branches come up, so
+// the one slider spans a bare thin channel to a thick forked tree. The wide
+// screen-space halo around a channel is a separate thing entirely — it comes
+// off the strike endpoints in the volume pass's background().
 //
 // The lattice (Mesh mode): the same silhouette, contoured on the CPU. What
 // the mesher contours is baked per variant into meshDensityGrids — analytic
@@ -174,11 +182,9 @@ import {
 // for free; a strike shoves each vertex along its own flow direction, bounded
 // by FIL_IMPULSE_MAX, so the lightning moves the hair rather than only
 // lighting it. Hairs are faint one at a time and the mass comes from their
-// overlap, so on medium quality and up the volume march runs first as a dim
-// underlay (FIL_GLOW_*) and the strands go over it. Its steps and density are
-// dimmed by what render() uploads; FIL_GLOW_AMBIENT is applied inside the
-// march instead, so the dimming reaches how much light the underlay gets
-// without also reaching how dark the cloud is allowed to rest (ambientFloor).
+// overlap; nothing is drawn behind them — no gas, no dimmed march — so the
+// tangle sits on the same flat background every other geometry mode gets and
+// the strands are the whole image.
 //
 // The point cloud (Points mode) is a static VBO sampled at init from the same
 // lobes variant 0's silhouette was baked from (buildCloud, seeded with
@@ -231,11 +237,12 @@ const BOUND_Y = CLOUD_EXTENT_Y * 1.7;
 const BOUND_Z = CLOUD_EXTENT_Z * 1.45;
 const STRIKE_REFRACTORY_SEC = 0.06;
 const STRIKE_DROP_BURST = 3;
-// How long a strike's segment is. Long enough that the drawn bolt reads as a
-// bolt across a cloud a few units wide, short enough to stay buried in one
-// part of it rather than spanning the whole mass.
-const STRIKE_LEN_MIN = 0.4;
-const STRIKE_LEN_MAX = 0.85;
+// How long a strike's segment is: a channel that crosses most of the cloud
+// rather than one lobe of it. sampleStrikeSegment still keeps both endpoints
+// inside the bounding ellipsoid, so however long the draw comes out the light
+// source is buried in gas at both ends. Exported for tests/storm.test.ts.
+const STRIKE_LEN_MIN = 0.55;
+export const STRIKE_LEN_MAX = 1.3;
 const CAM_DIST = 3.2;
 const CAM_FOV_DEG = 50;
 // Compile-time cap on the march; the live count is uMaxSteps (quality.ts).
@@ -328,23 +335,62 @@ const FIL_MAX_STRANDS = 12_000;
 // The largest displacement a strike's light can shove a strand along its own
 // flow direction, in cloud units.
 const FIL_IMPULSE_MAX = 0.1;
-// The glow underlay: the volume march the strands are drawn over, at a
-// fraction of its usual cost. Below this quality proxy the underlay is
-// skipped entirely and the strands draw over the plain background.
-const FIL_GLOW_MIN_DETAIL = 0.6;
-const FIL_GLOW_STEPS = 0.5;
-const FIL_GLOW_DENSITY = 0.25;
-const FIL_GLOW_AMBIENT = 0.22;
 // How much of the gas type's frequency multiplier (GAS_RECIPES.freq) reaches
 // the strands' own flow field — see flowCoord in FILAMENT_VERT.
 const GAS_FREQ_STRANDS = 0.5;
 
-/** Segments in one bolt's polyline; a path is this many vertices plus one. */
-export const BOLT_SEGMENTS = 12;
+/** Segments in a bolt's main channel; the channel is this many vertices plus
+ *  one. */
+export const BOLT_SEGMENTS = 16;
+/** Segments in one branch, main or sub — every branch is the same length in
+ *  vertices so a branch slot is a fixed stride into the strike's budget. */
+export const BOLT_BRANCH_SEGMENTS = 6;
+/** Branch slots a strike's tree is allowed. Primary branches and their
+ *  sub-branches draw from the one pool, so a bolt with fewer primaries can
+ *  spend the difference going a level deeper. */
+export const BOLT_MAX_BRANCHES = 6;
+/** Path vertices one strike's whole tree is packed into: the main channel
+ *  plus every branch slot, filled or not. Fixed, so a slot's slice of the
+ *  shared vertex buffer never moves. */
+export const BOLT_PATH_VERTS = BOLT_SEGMENTS + 1 + BOLT_MAX_BRANCHES * (BOLT_BRANCH_SEGMENTS + 1);
+/** Ribbon vertices per strike: buildBoltTree writes every path vertex twice,
+ *  once per side of the ribbon (see its header). */
+export const BOLT_RIBBON_VERTS = BOLT_PATH_VERTS * 2;
+/** Floats per ribbon vertex: position, tangent, signed half-width, level. */
+export const BOLT_VERT_FLOATS = 8;
 // Sideways displacement of the coarsest midpoint, as a fraction of the
-// segment's length — halved at every finer level, so no vertex ends up
-// further than about twice this off the straight line.
+// polyline's own length — halved at every finer level, so no vertex ends up
+// further than about twice this off the straight line. Branches kink harder
+// for their length than the channel they came off, which is what keeps a
+// short branch from reading as a straight whisker.
 const BOLT_JITTER = 0.22;
+const BOLT_BRANCH_JITTER = 0.34;
+// How many primary branches leave the main channel, and how likely each of
+// them is to fork once more while a branch slot is left.
+const BOLT_BRANCH_MIN = 3;
+const BOLT_BRANCH_MAX = 4;
+const BOLT_SUB_CHANCE = 0.65;
+// A branch's length as a fraction of its parent's, and how far off the
+// parent's own direction it leaves, in radians. Both ends of the angle range
+// stay well short of a right angle: a branch that leaves sideways reads as a
+// separate bolt rather than as part of this one.
+const BOLT_BRANCH_LEN_MIN = 0.22;
+const BOLT_BRANCH_LEN_MAX = 0.5;
+const BOLT_BRANCH_ANGLE_MIN = 0.35;
+const BOLT_BRANCH_ANGLE_MAX = 0.95;
+// A branch's peak width as a fraction of its parent's width where it leaves.
+const BOLT_BRANCH_WIDTH = 0.62;
+// The width profile along a polyline: sin(pi * t) raised to this, so a
+// channel is 0 wide at both tips (which is what lets one triangle strip run
+// through every polyline in the tree — the joins between them collapse) and
+// broad across its middle rather than a lens. Below 1 it plateaus; the lower
+// it goes the more of the channel is at full width.
+const BOLT_TAPER_POW = 0.35;
+// The ribbon's half-width in pixels across the width of its plateau, at the
+// two ends of the `bolt` setting, on a 1080-tall slice. Half-width: the drawn
+// channel is twice this, and the fragment shader's core sits inside it.
+const BOLT_HALF_MIN_PX = 1.2;
+const BOLT_HALF_MAX_PX = 7.0;
 
 // The lattice: cells along each axis of the bounding box at full detail and
 // at the cheap presets. The mesher is O(res^3) and the baked density grids
@@ -447,7 +493,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "bolt",
     label: "Bolt",
-    description: "How brightly the jagged bolt itself draws on each beat",
+    description: "How much bolt each beat draws: from a thin bare channel up to a thick, brightly forked one",
     group: "Beat",
     min: 0,
     max: 1,
@@ -1419,33 +1465,36 @@ export function sampleStrikeSegment(rng: () => number, lobes: Lobe[]): [number, 
   return [a[0], a[1], a[2], b[0], b[1], b[2]];
 }
 
-/** The bolt's visible geometry: a BOLT_SEGMENTS-segment polyline from `a` to
- *  `b`, jagged by midpoint displacement — the midpoint of a span is pushed
- *  sideways off the line between its own ends, and each finer level is pushed
- *  half as far, which is what gives lightning its self-similar kink. The
- *  endpoints stay exactly on a and b (the pool's segment is what lights the
- *  gas, so the drawn bolt has to run between the same two points), and no
- *  vertex strays further than about 2 * BOLT_JITTER of the length off the
- *  straight line. Writes into `out` at `offset` when given — the pool keeps
- *  every slot's path in one flat array — and returns the array written.
+/** One polyline of a bolt while the tree is being built: its vertices in
+ *  cloud space, its straight-line length, the width its middle draws at as a
+ *  fraction of the main channel's, and how many forks it is from that
+ *  channel. */
+type BoltLine = { pts: Float32Array; len: number; peak: number; level: number };
+
+/** The kink every polyline in a bolt is drawn with: midpoint displacement —
+ *  the midpoint of a span is pushed sideways off the line between its own
+ *  ends, and each finer level is pushed half as far, which is what gives
+ *  lightning its self-similar shape. The endpoints stay exactly on `a` and
+ *  `b`, and no vertex strays further than about 2 * `jitter` of the length
+ *  off the straight line.
  *
  *  Spans are split by index rather than by halving a power-of-two grid, so
  *  the segment count needn't be a power of two: each recursion sets exactly
  *  its own midpoint, and every interior vertex is some span's midpoint. */
-export function buildBoltPath(
+function jagPolyline(
   rng: () => number,
   a: readonly number[],
   b: readonly number[],
-  out: Float32Array = new Float32Array((BOLT_SEGMENTS + 1) * 3),
-  offset = 0,
+  segments: number,
+  jitter: number,
 ): Float32Array {
-  const last = BOLT_SEGMENTS;
-  out[offset] = a[0];
-  out[offset + 1] = a[1];
-  out[offset + 2] = a[2];
-  out[offset + last * 3] = b[0];
-  out[offset + last * 3 + 1] = b[1];
-  out[offset + last * 3 + 2] = b[2];
+  const out = new Float32Array((segments + 1) * 3);
+  out[0] = a[0];
+  out[1] = a[1];
+  out[2] = a[2];
+  out[segments * 3] = b[0];
+  out[segments * 3 + 1] = b[1];
+  out[segments * 3 + 2] = b[2];
 
   let ax = b[0] - a[0];
   let ay = b[1] - a[1];
@@ -1458,8 +1507,8 @@ export function buildBoltPath(
   const displace = (lo: number, hi: number, amp: number): void => {
     const mid = (lo + hi) >> 1;
     if (mid === lo || mid === hi) return;
-    const o0 = offset + lo * 3;
-    const o1 = offset + hi * 3;
+    const o0 = lo * 3;
+    const o1 = hi * 3;
     let mx = (out[o0] + out[o1]) * 0.5;
     let my = (out[o0 + 1] + out[o1 + 1]) * 0.5;
     let mz = (out[o0 + 2] + out[o1 + 2]) * 0.5;
@@ -1479,14 +1528,187 @@ export function buildBoltPath(
       my += dy * m;
       mz += dz * m;
     }
-    const om = offset + mid * 3;
+    const om = mid * 3;
     out[om] = mx;
     out[om + 1] = my;
     out[om + 2] = mz;
     displace(lo, mid, amp * 0.5);
     displace(mid, hi, amp * 0.5);
   };
-  displace(0, last, BOLT_JITTER * len);
+  displace(0, segments, jitter * len);
+  return out;
+}
+
+/** Width along a polyline at fraction `t` of its length, before the peak it
+ *  is scaled by: 0 at both tips and a long plateau between them (see
+ *  BOLT_TAPER_POW). Zero tips are load-bearing — they are what lets one
+ *  triangle strip run through the whole tree, since the quads that join one
+ *  polyline's end to the next one's start collapse to nothing. */
+function boltWidthAt(t: number): number {
+  // The ends are returned rather than computed: sin(pi) is a hair off zero in
+  // floating point, and raising that to a fractional power lifts it back into
+  // a width, which would leave the "collapsed" joins as slivers.
+  if (!(t > 0) || t >= 1) return 0;
+  return Math.pow(Math.sin(Math.PI * t), BOLT_TAPER_POW);
+}
+
+/** Unit tangent at vertex `i` of a polyline — a central difference in the
+ *  interior, one-sided at the ends. The vertex shader turns this into the
+ *  screen-space normal it offsets the ribbon along, so it has to exist at
+ *  every vertex; a polyline that doubled back on itself exactly would get the
+ *  fallback, which is only ever a cosmetic wobble of one quad. */
+function polylineTangent(pts: Float32Array, i: number, out: number[]): void {
+  const n = pts.length / 3;
+  const lo = Math.max(0, i - 1) * 3;
+  const hi = Math.min(n - 1, i + 1) * 3;
+  let dx = pts[hi] - pts[lo];
+  let dy = pts[hi + 1] - pts[lo + 1];
+  let dz = pts[hi + 2] - pts[lo + 2];
+  const d = Math.hypot(dx, dy, dz);
+  if (d > 1e-6) {
+    dx /= d;
+    dy /= d;
+    dz /= d;
+  } else {
+    dx = 0;
+    dy = 1;
+    dz = 0;
+  }
+  out[0] = dx;
+  out[1] = dy;
+  out[2] = dz;
+}
+
+/** The bolt's visible geometry: a branched tree of jagged polylines packed
+ *  into one strike's fixed slice of the vertex buffer, ready to draw as a
+ *  single camera-facing ribbon.
+ *
+ *  The tree is the main channel from `a` to `b` — the pool's own segment is
+ *  what lights the gas, so the drawn bolt has to run between the same two
+ *  points — plus primary branches leaving interior vertices of it at an
+ *  angle, plus one deeper level of forks off those while branch slots remain
+ *  (BOLT_MAX_BRANCHES). Everything is deterministic in `rng`.
+ *
+ *  Layout: BOLT_PATH_VERTS path vertices, each written *twice* back to back
+ *  — once per side of the ribbon — as BOLT_VERT_FLOATS floats: position,
+ *  tangent, signed half-width and fork level. The sign of the width is which
+ *  side of the ribbon the vertex is; its magnitude is how wide the channel is
+ *  there, tapering to 0 at every tip. Every polyline is written end to end
+ *  and the leftover slots are padded with zero-width copies of the last
+ *  vertex, so one TRIANGLE_STRIP over the whole slice draws the tree and
+ *  nothing else: the joins between polylines, and the padding, are quads with
+ *  two zero-width corners and no area.
+ *
+ *  Writes into `out` at `offset` when given — the pool keeps every slot's
+ *  tree in one flat array — and returns the array written. */
+export function buildBoltTree(
+  rng: () => number,
+  a: readonly number[],
+  b: readonly number[],
+  out: Float32Array = new Float32Array(BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS),
+  offset = 0,
+): Float32Array {
+  const mainLen = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) || 1e-6;
+  const main: BoltLine = {
+    pts: jagPolyline(rng, a, b, BOLT_SEGMENTS, BOLT_JITTER),
+    len: mainLen,
+    peak: 1,
+    level: 0,
+  };
+  const lines: BoltLine[] = [main];
+
+  // A fork off an interior vertex of `parent`: the parent's own direction
+  // there, swung off by an angle around a random perpendicular, run out to a
+  // fraction of the parent's length and pulled back inside the cloud if it
+  // would leave. Starting exactly on a parent vertex is what makes the join
+  // invisible — both polylines are zero-width there.
+  const forkFrom = (parent: BoltLine): BoltLine => {
+    const n = parent.pts.length / 3;
+    const i = 1 + Math.floor(rng() * (n - 2));
+    const root = [parent.pts[i * 3], parent.pts[i * 3 + 1], parent.pts[i * 3 + 2]];
+    const tan: number[] = [0, 0, 0];
+    polylineTangent(parent.pts, i, tan);
+    // A random direction with its along-the-parent component removed — the
+    // same idiom the midpoint displacement uses, for the same reason.
+    let px = rng() * 2 - 1;
+    let py = rng() * 2 - 1;
+    let pz = rng() * 2 - 1;
+    const along = px * tan[0] + py * tan[1] + pz * tan[2];
+    px -= along * tan[0];
+    py -= along * tan[1];
+    pz -= along * tan[2];
+    const pn = Math.hypot(px, py, pz);
+    if (pn > 1e-6) {
+      px /= pn;
+      py /= pn;
+      pz /= pn;
+    } else {
+      px = 1;
+      py = 0;
+      pz = 0;
+    }
+    const ang = BOLT_BRANCH_ANGLE_MIN + rng() * (BOLT_BRANCH_ANGLE_MAX - BOLT_BRANCH_ANGLE_MIN);
+    const ca = Math.cos(ang);
+    const sa = Math.sin(ang);
+    const len = parent.len * (BOLT_BRANCH_LEN_MIN + rng() * (BOLT_BRANCH_LEN_MAX - BOLT_BRANCH_LEN_MIN));
+    const tip = clampToEllipsoid([
+      root[0] + (tan[0] * ca + px * sa) * len,
+      root[1] + (tan[1] * ca + py * sa) * len,
+      root[2] + (tan[2] * ca + pz * sa) * len,
+    ]);
+    return {
+      pts: jagPolyline(rng, root, tip, BOLT_BRANCH_SEGMENTS, BOLT_BRANCH_JITTER),
+      len: Math.hypot(tip[0] - root[0], tip[1] - root[1], tip[2] - root[2]) || 1e-6,
+      peak: parent.peak * boltWidthAt(i / (n - 1)) * BOLT_BRANCH_WIDTH,
+      level: parent.level + 1,
+    };
+  };
+
+  const primaries: BoltLine[] = [];
+  const wanted = BOLT_BRANCH_MIN + Math.floor(rng() * (BOLT_BRANCH_MAX - BOLT_BRANCH_MIN + 1));
+  for (let k = 0; k < wanted && lines.length <= BOLT_MAX_BRANCHES; k++) {
+    const br = forkFrom(main);
+    lines.push(br);
+    primaries.push(br);
+  }
+  for (const p of primaries) {
+    if (lines.length > BOLT_MAX_BRANCHES) break;
+    if (rng() >= BOLT_SUB_CHANCE) continue;
+    lines.push(forkFrom(p));
+  }
+
+  let v = 0;
+  const tan: number[] = [0, 0, 0];
+  const put = (x: number, y: number, z: number, w: number, level: number): void => {
+    for (let s = 0; s < 2; s++) {
+      const o = offset + (v * 2 + s) * BOLT_VERT_FLOATS;
+      out[o] = x;
+      out[o + 1] = y;
+      out[o + 2] = z;
+      out[o + 3] = tan[0];
+      out[o + 4] = tan[1];
+      out[o + 5] = tan[2];
+      out[o + 6] = s === 0 ? w : -w;
+      out[o + 7] = level;
+    }
+    v++;
+  };
+  for (const line of lines) {
+    const n = line.pts.length / 3;
+    for (let i = 0; i < n && v < BOLT_PATH_VERTS; i++) {
+      polylineTangent(line.pts, i, tan);
+      put(line.pts[i * 3], line.pts[i * 3 + 1], line.pts[i * 3 + 2], boltWidthAt(i / (n - 1)) * line.peak, line.level);
+    }
+  }
+  // Unfilled branch slots: zero-width copies of the last vertex written, so
+  // the strip runs off the end of the tree without drawing anything.
+  const tailX = out[offset + (v * 2 - 2) * BOLT_VERT_FLOATS];
+  const tailY = out[offset + (v * 2 - 2) * BOLT_VERT_FLOATS + 1];
+  const tailZ = out[offset + (v * 2 - 2) * BOLT_VERT_FLOATS + 2];
+  tan[0] = 0;
+  tan[1] = 1;
+  tan[2] = 0;
+  while (v < BOLT_PATH_VERTS) put(tailX, tailY, tailZ, 0, 0);
   return out;
 }
 
@@ -1521,7 +1743,7 @@ export function createStrikePool(lobes: Lobe[], rng: () => number = Math.random)
   const posA = new Float32Array(MAX_STRIKES * 3);
   const posB = new Float32Array(MAX_STRIKES * 3);
   const strength = new Float32Array(MAX_STRIKES);
-  const path = new Float32Array(MAX_STRIKES * (BOLT_SEGMENTS + 1) * 3);
+  const path = new Float32Array(MAX_STRIKES * BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS);
   const pathDirty = new Uint8Array(MAX_STRIKES);
   let activeLobes = lobes;
   let sinceLast = 1e6;
@@ -1534,8 +1756,9 @@ export function createStrikePool(lobes: Lobe[], rng: () => number = Math.random)
     strength,
     /** Amplitude each slot fired at, un-enveloped. 0 = never fired. */
     amp,
-    /** Every slot's drawn bolt polyline, back to back: slot i owns the
-     *  BOLT_SEGMENTS + 1 vertices starting at i * (BOLT_SEGMENTS + 1). */
+    /** Every slot's drawn bolt tree, back to back: slot i owns the
+     *  BOLT_RIBBON_VERTS ribbon vertices starting at i * BOLT_RIBBON_VERTS.
+     *  buildBoltTree's header has the per-vertex layout. */
     path,
     /** 1 where a slot's path has changed since it was last uploaded. */
     pathDirty,
@@ -1567,7 +1790,7 @@ export function createStrikePool(lobes: Lobe[], rng: () => number = Math.random)
       posB[slot * 3] = seg[3];
       posB[slot * 3 + 1] = seg[4];
       posB[slot * 3 + 2] = seg[5];
-      buildBoltPath(rng, seg.slice(0, 3), seg.slice(3), path, slot * (BOLT_SEGMENTS + 1) * 3);
+      buildBoltTree(rng, seg.slice(0, 3), seg.slice(3), path, slot * BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS);
       pathDirty[slot] = 1;
       strength[slot] = amplitude;
       return true;
@@ -1805,13 +2028,6 @@ ${STRIKE_UNIFORMS_GLSL}
 uniform highp sampler3D uNoise; // R: value fbm, G: inverted worley — tiled
 uniform highp sampler3D uShape; // the baked silhouettes, one per channel
 uniform vec4 uShapeMix;         // shapePhaseWeights, as a per-channel weight
-// 1.0 while this draw is Filaments mode's glow underlay: the march runs, on
-// the scaled uMaxSteps/uDensity render() uploads for that one draw, and the
-// strands go over the top of it. 0.0 everywhere else, including Filaments on
-// a preset too cheap to afford the underlay. The underlay's *lighting* is
-// dimmed here rather than by a scaled uAmbient upload — see FIL_GLOW_AMBIENT
-// below and the note in render().
-uniform float uGlowUnderlay;
 ${AMBIENT_LIFT_GLSL}
 ${GAS_UNIFORMS_GLSL}
 ${PALETTE_GLSL}
@@ -1856,9 +2072,6 @@ ${BOLT_COLOR_GLSL}
 // lobe is than the haze around it, and how hard it draws.
 #define BOLT_BLOOM_TIGHT 11.0
 #define BOLT_BLOOM_GAIN 0.4
-// How much of Ambient glow reaches Filaments' glow underlay — see
-// FIL_GLOW_AMBIENT in storm.ts.
-#define FIL_GLOW_AMBIENT ${FIL_GLOW_AMBIENT.toFixed(4)}
 
 // Half-extents of the ellipsoid the march is clipped to, and where shape()
 // fades out — see BOUND_X/Y/Z in storm.ts for why they differ per axis.
@@ -2032,18 +2245,12 @@ void main() {
   float aspect = roomAspect();
   int mode = int(uMode + 0.5);
   bool geometry = mode == MODE_MESH || mode == MODE_POINTS || mode == MODE_FILAMENTS;
-  // Filaments is a geometry mode that still marches: the strands are hairs
-  // with nothing between them, so a dim volume behind them is what gives the
-  // tangle a body to sit in. Same pass, same shader — render() just uploads
-  // a scaled step count, density and ambient for that one draw.
-  bool march = !geometry || uGlowUnderlay > 0.5;
+  bool march = !geometry;
   // The bloom is what a geometry mode has instead of gas around the channel,
   // so it draws at full strength there and at a fraction of it in the
   // marched modes, where the volume is already carrying the flash and a
   // screen-space halo on top only reads as a sprite pasted over the cloud.
-  // With the underlay up there is some gas carrying it, so Filaments sits
-  // between the two.
-  float bloom = BOLT_BLOOM_GAIN * (geometry ? (march ? 0.5 : 1.0) : 0.3);
+  float bloom = BOLT_BLOOM_GAIN * (geometry ? 1.0 : 0.3);
   vec3 bg = background(uv, aspect, bloom);
 
   // The geometry modes: no march at all. The lattice, the point pass or the
@@ -2092,15 +2299,9 @@ void main() {
 
       int octaves = uDetail < 0.5 ? 2 : MAX_OCTAVES;
       float sigma = mix(3.0, 10.0, uDensity) * uGasExtinct;
-      // The resting light: how much of the setting this draw gets (the
-      // underlay gets a fraction of it, which is what dims the gas the
-      // strands are laid over), the lift the sun ramp is scaled by, and the
-      // plain multiple the skylight is. The scaling is here rather than in a
-      // scaled uAmbient upload so ambientFloor() still sees the setting the
-      // viewer actually set — the underlay is dimmer gas, not a darker
-      // cloud.
-      float ambAmt = uAmbient * (uGlowUnderlay > 0.5 ? FIL_GLOW_AMBIENT : 1.0);
-      float lift = ambientLift(ambAmt);
+      // The resting light: the lift the sun ramp is scaled by. The skylight
+      // below takes uAmbient as a plain multiple.
+      float lift = ambientLift(uAmbient);
       float reachR = mix(0.15, 0.6, uReach);
       float gain = mix(0.5, 2.0, uStrike);
       vec3 tint = boltColor();
@@ -2231,7 +2432,7 @@ void main() {
               * 0.9 * lift * mix(1.0, powder, 0.35 * uGasPowder);
           }
           float heightFrac = clamp((sp.y + BOUND.y) / (2.0 * BOUND.y), 0.0, 1.0);
-          vec3 ambient = skyTop * mix(0.35, 1.0, heightFrac) * ambAmt * (0.5 + uEnergy);
+          vec3 ambient = skyTop * mix(0.35, 1.0, heightFrac) * uAmbient * (0.5 + uEnergy);
           // The band under this sample scales what the gas is lit by, not
           // what it absorbs, and never the lightning — so a loud band reads
           // as a brighter part of the same cloud.
@@ -2351,57 +2552,105 @@ void main() {
 }
 `;
 
-// The bolt itself. Line width is 1 on WebGL whatever gl.lineWidth is asked
-// for, so a bolt is drawn twice: once as soft beads (POINTS, sized off Flash
-// reach) which give it width and a halo, then once as the thin white core.
+// The bolt itself, as a camera-facing ribbon. Line width is stuck at 1 on
+// WebGL whatever gl.lineWidth is asked for, so the channel is expanded into
+// geometry instead: buildBoltTree writes every path vertex twice, and this
+// stage pushes the two copies apart along the screen-space normal of the
+// path's direction there. The width comes off the vertex's own attribute, so
+// the ribbon tapers to nothing at every tip and the whole tree — main channel
+// and branches — draws as one triangle strip (see buildBoltTree's layout).
+//
+// The screen normal is measured rather than derived: the path's cloud-space
+// tangent is projected through the same cloudToClip every other geometry pass
+// uses, one step along it, and the difference is the direction the channel
+// runs in on screen. That way the swirl, the tilt and the bass swell are all
+// accounted for without this stage knowing any of them exist.
 const BOLT_VERT = `#version 300 es
 precision highp float;
 layout(location = 0) in vec3 aPos;
-layout(location = 1) in float aSlot; // which strike slot this vertex belongs to
-out vec3 vColor;
+layout(location = 1) in vec3 aTan;   // unit tangent of the path at this vertex
+layout(location = 2) in vec2 aShape; // x: signed half-width, y: fork level
+out vec3 vGlow;
+out vec3 vCore;
+out float vSide;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
-${STRIKE_UNIFORMS_GLSL}
-uniform float uCorePass; // 1.0 for the thin core, 0.0 for the beads
+uniform float uBoltStrength; // this slot's strikeEnvelope value
 ${PALETTE_GLSL}
 ${CAMERA_GLSL}
 ${PROJECT_GLSL}
 ${BOLT_COLOR_GLSL}
 
-#define MAX_STRIKES ${MAX_STRIKES}
+// How far along the tangent the second projection is taken. Small enough that
+// the difference is the tangent's own screen direction rather than a chord
+// across the cloud, large enough not to be lost in the divide.
+#define TAN_STEP 0.01
+// The ribbon's half-width in pixels at each end of the Bolt setting, before
+// perspective, and how far perspective is allowed to push it either way.
+#define BOLT_HALF_MIN_PX ${BOLT_HALF_MIN_PX.toFixed(2)}
+#define BOLT_HALF_MAX_PX ${BOLT_HALF_MAX_PX.toFixed(2)}
+#define BOLT_PERSP_MIN 0.5
+#define BOLT_PERSP_MAX 2.2
+// Below this the ribbon is dropped to nothing instead of drawn: a quad
+// narrower than a pixel rasterizes as a dotted sparkle rather than a faint
+// line, which is what the far tips and the low end of the Bolt setting would
+// otherwise be made of.
+#define BOLT_MIN_HALF_PX 0.5
+// Branches ride the Bolt setting harder than the channel does, so the slider
+// reads as "how much bolt" rather than only "how bright": raised to the fork
+// level, it leaves a bare channel at the low end and a full tree at the top.
+#define BOLT_BRANCH_KNEE_LO 0.10
+#define BOLT_BRANCH_KNEE_HI 0.75
+// A branch is a dimmer channel as well as a thinner one.
+#define BOLT_BRANCH_DIM 0.85
 
 void main() {
-  int slot = int(aSlot + 0.5);
   // The same envelope that lights the gas, so the drawn bolt flashes and
   // flickers with the light it is supposed to be casting — and rides the beat
   // on top of that, which is the connection this mode exists to make.
-  float bright = uStrikeStrength[slot] * uBolt * (1.0 + 0.25 * uBeatPulse);
+  float bright = uBoltStrength * uBolt * (1.0 + 0.25 * uBeatPulse);
+  float branchAmt = smoothstep(BOLT_BRANCH_KNEE_LO, BOLT_BRANCH_KNEE_HI, uBolt);
+  float fork = pow(max(branchAmt, 1e-4), aShape.y);
+  bright *= mix(1.0, BOLT_BRANCH_DIM, min(aShape.y, 1.0));
+
   vec3 tint = boltColor();
-  vColor = mix(tint * 1.1, mix(tint, vec3(1.0), 0.85) * 3.2, uCorePass) * bright;
+  vGlow = tint * 1.1 * bright;
+  vCore = mix(tint, vec3(1.0), 0.85) * 2.6 * bright;
+  vSide = sign(aShape.x);
+
+  // The slice of the shared canvas this scene owns, in pixels — clip space
+  // here is normalized to that slice, not to the whole drawing buffer.
+  vec2 vpPx = max(uResolution * uViewport.zw, vec2(1.0));
+  vec4 clip = cloudToClip(aPos);
+  vec4 ahead = cloudToClip(aPos + aTan * TAN_STEP);
+  vec2 run = (ahead.xy - clip.xy) * vpPx;
+  vec2 nrm = dot(run, run) > 1e-12 ? normalize(vec2(-run.y, run.x)) : vec2(1.0, 0.0);
 
   vec3 view = cloudToView(aPos);
-  gl_Position = cloudToClip(aPos);
-  // Big enough that consecutive beads overlap into a tube rather than reading
-  // as a dotted line — a bolt is BOLT_SEGMENTS segments long however far away
-  // it is, so the spacing scales with the size.
-  gl_PointSize = clamp(mix(14.0, 36.0, uReach) * (uResolution.y / 1080.0) * (CAM_DIST / view.z), 5.0, 72.0);
+  float persp = clamp(CAM_DIST / view.z, BOLT_PERSP_MIN, BOLT_PERSP_MAX);
+  float halfPx = abs(aShape.x) * fork * mix(BOLT_HALF_MIN_PX, BOLT_HALF_MAX_PX, uBolt)
+    * (vpPx.y / 1080.0) * persp;
+  halfPx *= step(BOLT_MIN_HALF_PX, halfPx);
+  gl_Position = vec4(clip.xy + nrm * sign(aShape.x) * halfPx * 2.0 / vpPx, 0.0, 1.0);
 }
 `;
 
+// Across the ribbon: a white-hot core with a soft additive shoulder, so the
+// channel reads as a lit filament rather than a flat band. Both terms fall to
+// nothing at the edge, which is also all the antialiasing a ribbon a few
+// pixels wide needs.
 const BOLT_FRAG = `#version 300 es
 precision highp float;
-in vec3 vColor;
+in vec3 vGlow;
+in vec3 vCore;
+in float vSide;
 out vec4 outColor;
-uniform float uCorePass;
 
 void main() {
-  float mask = 1.0;
-  if (uCorePass < 0.5) {
-    float r = length(gl_PointCoord - 0.5);
-    mask = smoothstep(0.5, 0.0, r);
-    mask *= mask;
-  }
-  outColor = vec4(vColor * mask, 1.0);
+  float e = clamp(1.0 - abs(vSide), 0.0, 1.0);
+  float glow = e * e;
+  float core = pow(e, 8.0);
+  outColor = vec4(vGlow * glow + vCore * core, 1.0);
 }
 `;
 
@@ -2698,8 +2947,7 @@ export const stormScene: Scene = (() => {
   let meshIdxBuf: WebGLBuffer | null = null;
   let boltProg: GLProgram | null = null;
   let boltVao: WebGLVertexArrayObject | null = null;
-  let boltPosBuf: WebGLBuffer | null = null;
-  let boltSlotBuf: WebGLBuffer | null = null;
+  let boltBuf: WebGLBuffer | null = null;
   let flowTex: WebGLTexture | null = null;
   let filProg: GLProgram | null = null;
   let filVao: WebGLVertexArrayObject | null = null;
@@ -2724,7 +2972,6 @@ export const stormScene: Scene = (() => {
   // advanceMorphPhase. Wraps through shapePhaseWeights, so it only grows.
   let morphPhase = 0;
   const bandsBuf = new Float32Array(NUM_BANDS);
-  const boltVerts = BOLT_SEGMENTS + 1;
 
   return {
     id: ID,
@@ -2890,24 +3137,22 @@ export const stormScene: Scene = (() => {
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, MESH_MAX_INDICES * 4, gl.DYNAMIC_DRAW);
       gl.bindVertexArray(null);
 
-      // The bolts: one vertex buffer holding every slot's path back to back,
-      // so a strike only re-uploads its own slice. The slot attribute is
-      // constant per vertex and never changes.
+      // The bolts: one interleaved vertex buffer holding every slot's tree
+      // back to back, so a strike only re-uploads its own slice. Which slot a
+      // draw is drawing is a uniform rather than an attribute — the draw loop
+      // is already per slot.
       boltProg = createProgram(gl, BOLT_FRAG, BOLT_VERT);
-      const slots = new Float32Array(MAX_STRIKES * boltVerts);
-      for (let i = 0; i < slots.length; i++) slots[i] = Math.floor(i / boltVerts);
       boltVao = gl.createVertexArray();
       gl.bindVertexArray(boltVao);
-      boltPosBuf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, boltPosBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, MAX_STRIKES * boltVerts * 3 * 4, gl.DYNAMIC_DRAW);
+      boltBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, boltBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, MAX_STRIKES * BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS * 4, gl.DYNAMIC_DRAW);
       gl.enableVertexAttribArray(0);
-      gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-      boltSlotBuf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, boltSlotBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, slots, gl.STATIC_DRAW);
+      gl.vertexAttribPointer(0, 3, gl.FLOAT, false, BOLT_VERT_FLOATS * 4, 0);
       gl.enableVertexAttribArray(1);
-      gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
+      gl.vertexAttribPointer(1, 3, gl.FLOAT, false, BOLT_VERT_FLOATS * 4, 3 * 4);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 2, gl.FLOAT, false, BOLT_VERT_FLOATS * 4, 6 * 4);
       gl.bindVertexArray(null);
 
       pool = createStrikePool(lobeSets[0]);
@@ -2993,22 +3238,6 @@ export const stormScene: Scene = (() => {
       const shapeMix = [0, 1, 2, 3].map((c) => (w.a === c ? 1 - w.f : 0) + (w.b === c ? w.f : 0));
       prog.setV4("uShapeMix", shapeMix[0], shapeMix[1], shapeMix[2], shapeMix[3]);
       uploadGasRecipe(prog, gas);
-      // Filaments' glow underlay: the same march, at half the steps and a
-      // fraction of the density. Those two scaled values go up as the
-      // ordinary setting uniforms *after* uploadCommonUniforms rather than as
-      // separate scale factors inside VOLUME_FRAG, which keeps the march
-      // reading as one cloud lit one way. Ambient can't ride along: it now
-      // sets where the cloud's resting floor sits as well as how bright it
-      // is (ambientFloor), and only the second of those should follow the
-      // underlay down — so FIL_GLOW_AMBIENT is applied in the shader off
-      // uGlowUnderlay. Skipped on the cheap presets, where the strands draw
-      // over the plain background instead.
-      const glowUnderlay = mode === MODE_FILAMENTS && ctx.quality.detail >= FIL_GLOW_MIN_DETAIL;
-      prog.setF("uGlowUnderlay", glowUnderlay ? 1 : 0);
-      if (glowUnderlay) {
-        prog.setF("uMaxSteps", ctx.quality.raymarchSteps * FIL_GLOW_STEPS);
-        prog.setF("uDensity", density * FIL_GLOW_DENSITY);
-      }
       // Another scene in the shared gallery context may have bound something
       // else to these units since the last draw, so rebind all three every
       // frame.
@@ -3111,16 +3340,17 @@ export const stormScene: Scene = (() => {
       }
 
       // The bolts, over whatever the mode drew. Only a slot that fired since
-      // the last frame re-uploads its path.
+      // the last frame re-uploads its tree.
       gl.bindVertexArray(boltVao);
       let anyLive = false;
+      const boltFloats = BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS;
       for (let i = 0; i < MAX_STRIKES; i++) {
         if (pool.pathDirty[i]) {
-          gl.bindBuffer(gl.ARRAY_BUFFER, boltPosBuf);
+          gl.bindBuffer(gl.ARRAY_BUFFER, boltBuf);
           gl.bufferSubData(
             gl.ARRAY_BUFFER,
-            i * boltVerts * 3 * 4,
-            pool.path.subarray(i * boltVerts * 3, (i + 1) * boltVerts * 3),
+            i * boltFloats * 4,
+            pool.path.subarray(i * boltFloats, (i + 1) * boltFloats),
           );
           pool.pathDirty[i] = 0;
         }
@@ -3129,16 +3359,13 @@ export const stormScene: Scene = (() => {
       if (anyLive) {
         boltProg.use();
         uploadCommonUniforms(boltProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
-        boltProg.setFv("uStrikeStrength", pool.strength);
-        // Beads first, for width and a halo, then the thin core over them —
-        // see BOLT_VERT for why a bolt is drawn twice.
-        for (const corePass of [0, 1]) {
-          boltProg.setF("uCorePass", corePass);
-          for (let i = 0; i < MAX_STRIKES; i++) {
-            if (pool.strength[i] <= 0.001) continue;
-            if (corePass === 0) gl.drawArrays(gl.POINTS, i * boltVerts, boltVerts);
-            else gl.drawArrays(gl.LINE_STRIP, i * boltVerts, boltVerts);
-          }
+        // One strip per live slot: the whole tree — channel, branches and the
+        // unused branch slots — is one run of vertices whose joins have no
+        // area (see buildBoltTree), so a bolt is one draw however it forked.
+        for (let i = 0; i < MAX_STRIKES; i++) {
+          if (pool.strength[i] <= 0.001) continue;
+          boltProg.setF("uBoltStrength", pool.strength[i]);
+          gl.drawArrays(gl.TRIANGLE_STRIP, i * BOLT_RIBBON_VERTS, BOLT_RIBBON_VERTS);
         }
       }
       gl.bindVertexArray(null);
@@ -3167,8 +3394,7 @@ export const stormScene: Scene = (() => {
       if (seedBuf) gl.deleteBuffer(seedBuf);
       if (meshPosBuf) gl.deleteBuffer(meshPosBuf);
       if (meshIdxBuf) gl.deleteBuffer(meshIdxBuf);
-      if (boltPosBuf) gl.deleteBuffer(boltPosBuf);
-      if (boltSlotBuf) gl.deleteBuffer(boltSlotBuf);
+      if (boltBuf) gl.deleteBuffer(boltBuf);
       if (filPosBuf) gl.deleteBuffer(filPosBuf);
       if (filSeedBuf) gl.deleteBuffer(filSeedBuf);
       if (filStepBuf) gl.deleteBuffer(filStepBuf);
@@ -3195,8 +3421,7 @@ export const stormScene: Scene = (() => {
       meshIdxBuf = null;
       boltProg = null;
       boltVao = null;
-      boltPosBuf = null;
-      boltSlotBuf = null;
+      boltBuf = null;
       flowTex = null;
       filProg = null;
       filVao = null;
