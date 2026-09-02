@@ -27,16 +27,33 @@ describe("section intensity", () => {
     const s = createSectionIntensity();
     for (let i = 0; i < QUIET_SETTLE_TICKS; i++) s.advance(DT, 0.1);
 
+    // Exactly one edge for the whole swell: intensity keeps rising fast for a
+    // run of consecutive ticks, and a consumer that bursts per onset (Storm's
+    // strike burst) must see one drop, not one per tick of the climb.
     let onsets = 0;
     for (let i = 0; i < 90; i++) {
       s.advance(DT, 0.95);
       if (s.dropOnset) onsets++;
     }
-    expect(onsets).toBeGreaterThanOrEqual(1);
+    expect(onsets).toBe(1);
     expect(s.dropPulse).toBeGreaterThan(0);
 
     for (let i = 0; i < 300; i++) s.advance(DT, 0.95); // hold loud — no further onset
     expect(s.dropPulse).toBeLessThan(0.05);
+  });
+
+  it("re-arms after a swell settles, so a later second drop fires its own edge", () => {
+    const s = createSectionIntensity();
+    for (let i = 0; i < QUIET_SETTLE_TICKS; i++) s.advance(DT, 0.1);
+
+    let onsets = 0;
+    const count = (): void => {
+      if (s.dropOnset) onsets++;
+    };
+    for (let i = 0; i < 300; i++) (s.advance(DT, 0.95), count()); // first swell, settles loud
+    for (let i = 0; i < 600; i++) (s.advance(DT, 0.1), count()); // back to a quiet passage
+    for (let i = 0; i < 300; i++) (s.advance(DT, 0.95), count()); // second swell
+    expect(onsets).toBe(2);
   });
 
   it("never produces NaN or out-of-range intensity across a long, varied run", () => {

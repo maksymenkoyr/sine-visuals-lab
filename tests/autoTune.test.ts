@@ -3,6 +3,7 @@ import { causticsScene } from "../src/render/scenes/caustics.ts";
 import { meshGridScene } from "../src/render/scenes/meshGrid.ts";
 import { chladniScene } from "../src/render/scenes/chladni.ts";
 import { dancersScene } from "../src/render/scenes/dancers/index.ts";
+import { stormScene } from "../src/render/scenes/storm.ts";
 import { setSceneSetting, type SceneSetting } from "../src/render/sceneSettings.ts";
 import { setSensitivity, setExpansion, setSmoothing } from "../src/audio/sensitivity.ts";
 import { NEUTRAL, type DialValues } from "../src/render/musicProfile.ts";
@@ -33,6 +34,7 @@ const ALL_SETTINGS: SceneSetting[] = [
   ...(meshGridScene.settings ?? []),
   ...(chladniScene.settings ?? []),
   ...(dancersScene.settings ?? []),
+  ...(stormScene.settings ?? []),
   getSensitivitySpec(),
   getExpansionSpec(),
   getSmoothingSpec(),
