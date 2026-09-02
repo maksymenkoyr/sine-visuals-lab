@@ -33,6 +33,11 @@ regenerate it at session close.
   per-cell glow envelopes (`createCellGlow`) so most of the cloud rests
   dark and regions light up on beat rises, mid/high pulse rises, and along
   each strike's channel — the gain touches resting light only.
+  Post-v6 fix prompted by "lightning reacts to sounds weirdly":
+  `sectionIntensity.ts`'s `dropOnset` was a level, not the edge its doc
+  promised — every tick of a real-music swell read as its own drop, so
+  Storm machine-gunned its drop burst (and Caustics/Dancers multi-fired
+  too); now a latched one-shot edge with release hysteresis.
   History: point cloud → gas volume → digital modes → morph/spectrum/
   lighting → filaments/embers/gas-types → branched bolts/dark sections.
   Verified headlessly at high/low quality, in the gallery, and with the

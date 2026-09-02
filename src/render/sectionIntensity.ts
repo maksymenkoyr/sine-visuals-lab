@@ -56,6 +56,7 @@ export function createSectionIntensity(): SectionIntensity {
   let ceil = 0.3; // non-zero seed so an early loud onset doesn't read as a "drop" from a degenerate 0-width range
   let intensity = 0;
   let dropPulse = 0;
+  let wasDropping = false;
 
   const state: SectionIntensity = {
     intensity: 0,
@@ -82,7 +83,15 @@ export function createSectionIntensity(): SectionIntensity {
       }
 
       const rate = dtSec > 1e-4 ? (intensity - prevIntensity) / dtSec : 0;
-      const dropOnset = rate > DROP_RATE_THRESHOLD;
+      // dropOnset is a one-shot *edge*, not the level "rising fast right now":
+      // intensity climbs above DROP_RATE_THRESHOLD for a run of consecutive
+      // ticks during a single swell, and consumers (Storm's strike burst,
+      // Caustics' rings) treat each true tick as its own drop. The latch fires
+      // once per swell; release sits below the trigger so rate wobbling at the
+      // threshold can't re-fire mid-swell.
+      const dropping = rate > (wasDropping ? DROP_RATE_THRESHOLD * 0.5 : DROP_RATE_THRESHOLD);
+      const dropOnset = dropping && !wasDropping;
+      wasDropping = dropping;
       dropPulse *= Math.exp(-dtSec * DROP_PULSE_DECAY);
       if (dropOnset) dropPulse = 1;
 
