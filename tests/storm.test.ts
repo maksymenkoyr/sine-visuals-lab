@@ -20,8 +20,14 @@ import {
   filamentStrandCount,
   buildShapeVolume,
   buildSurfaceNet,
+  buildCellSites,
+  CELL_SITES,
+  cellIndexAt,
+  cellWarp,
+  createCellGlow,
   createRng,
   createStrikePool,
+  CELL_DECAY_TAU,
   GAS_RECIPES,
   GAS_TYPES,
   insideCloud,
@@ -830,5 +836,162 @@ describe("storm gas recipes", () => {
     // Four options that render the same cloud would be four dead chips.
     const seen = new Set(GAS_RECIPES.map((r) => JSON.stringify(r)));
     expect(seen.size).toBe(GAS_RECIPES.length);
+  });
+});
+
+describe("storm dark sections", () => {
+  const CELLS = CELL_SITES.length / 3;
+  /** A deterministic sweep of points inside the cloud — what "every cell is
+   *  reachable" is measured over. */
+  function sweep(n: number, seed = 11): [number, number, number][] {
+    const rng = createRng(seed);
+    const out: [number, number, number][] = [];
+    while (out.length < n) {
+      const p: [number, number, number] = [(rng() * 2 - 1) * 1.6, (rng() * 2 - 1) * 0.8, (rng() * 2 - 1) * 1.2];
+      if (insideCloud(p[0], p[1], p[2])) out.push(p);
+    }
+    return out;
+  }
+
+  it("builds the same partition every time from a seed, and a different one from another", () => {
+    expect(Array.from(buildCellSites())).toEqual(Array.from(CELL_SITES));
+    expect(Array.from(buildCellSites(CELLS, 99))).not.toEqual(Array.from(CELL_SITES));
+  });
+
+  it("warps a point by a bounded amount, so a cell can't be torn across the cloud", () => {
+    for (const [x, y, z] of sweep(400, 12)) {
+      const [wx, wy, wz] = cellWarp(x, y, z);
+      // Each axis is one bounded sin*cos term, so the whole displacement sits
+      // inside a box — and the displacement is what makes a border wavy
+      // rather than a plane, so it also has to be non-zero over most of the
+      // cloud.
+      expect(Math.abs(wx - x)).toBeLessThanOrEqual(0.23);
+      expect(Math.abs(wy - y)).toBeLessThanOrEqual(0.23);
+      expect(Math.abs(wz - z)).toBeLessThanOrEqual(0.23);
+    }
+    const moved = sweep(200, 13).filter(([x, y, z]) => {
+      const [wx, wy, wz] = cellWarp(x, y, z);
+      return Math.hypot(wx - x, wy - y, wz - z) > 0.05;
+    });
+    expect(moved.length).toBeGreaterThan(100);
+  });
+
+  it("returns an in-range cell for every point, and the same one every time", () => {
+    for (const p of sweep(600, 14)) {
+      const c = cellIndexAt(p[0], p[1], p[2]);
+      expect(Number.isInteger(c)).toBe(true);
+      expect(c).toBeGreaterThanOrEqual(0);
+      expect(c).toBeLessThan(CELLS);
+      expect(cellIndexAt(p[0], p[1], p[2])).toBe(c);
+    }
+  });
+
+  it("reaches every cell over a sweep of the cloud, none of them a sliver", () => {
+    // The point of the Lloyd relaxation: an unrelaxed layout leaves cells so
+    // small that a section lighting up in one is invisible.
+    const points = sweep(3000, 15);
+    const hits = new Array<number>(CELLS).fill(0);
+    for (const p of points) hits[cellIndexAt(p[0], p[1], p[2])]++;
+    for (const h of hits) expect(h / points.length).toBeGreaterThan(0.02);
+  });
+
+  it("keeps a point's cell stable under a hair of jitter, away from the borders", () => {
+    // The GLSL twin works in floats where this works in doubles, so the two
+    // may disagree inside a boundary shell — which is exactly where the
+    // shader's own blend makes the answer not matter. Away from a border they
+    // must agree, and this is the property that stands in for it.
+    let stable = 0;
+    const points = sweep(500, 16);
+    for (const [x, y, z] of points) {
+      const c = cellIndexAt(x, y, z);
+      if (cellIndexAt(x + 1e-5, y - 1e-5, z + 1e-5) === c) stable++;
+    }
+    expect(stable / points.length).toBeGreaterThan(0.99);
+  });
+
+  it("lights a cell to full and never past it", () => {
+    const g = createCellGlow(CELLS, createRng(1));
+    g.light(3, 0.4);
+    expect(g.glow[3]).toBeCloseTo(0.4, 6);
+    g.light(3, 0.2); // a weaker trigger can't dim a section that is already lit
+    expect(g.glow[3]).toBeCloseTo(0.4, 6);
+    g.light(3, 5);
+    expect(g.glow[3]).toBe(1);
+    expect(Array.from(g.glow).every((v) => v <= 1)).toBe(true);
+  });
+
+  it("ignores a cell index outside the pool", () => {
+    const g = createCellGlow(CELLS, createRng(1));
+    g.light(-1, 1);
+    g.light(CELLS, 1);
+    g.light(Number.NaN, 1);
+    expect(Array.from(g.glow).every((v) => v === 0)).toBe(true);
+  });
+
+  it("decays on its own time constant and settles at exactly zero", () => {
+    const g = createCellGlow(CELLS, createRng(1));
+    g.light(0, 1);
+    g.tick(CELL_DECAY_TAU);
+    expect(g.glow[0]).toBeCloseTo(Math.exp(-1), 5);
+    // Many small steps agree with one big one: the fade is the same however
+    // the frames land, which is the whole reason it is measured rather than
+    // counted per frame.
+    const h = createCellGlow(CELLS, createRng(1));
+    h.light(0, 1);
+    for (let i = 0; i < 100; i++) h.tick(CELL_DECAY_TAU / 100);
+    expect(h.glow[0]).toBeCloseTo(g.glow[0], 5);
+    for (let i = 0; i < 400; i++) g.tick(0.1);
+    expect(g.glow[0]).toBe(0);
+  });
+
+  it("treats a bad or backwards dt as no time passing", () => {
+    const g = createCellGlow(CELLS, createRng(1));
+    g.light(0, 1);
+    g.tick(-1);
+    g.tick(Number.NaN);
+    expect(g.glow[0]).toBe(1);
+  });
+
+  it("lights the cells along a strike's channel, its midpoint's fully", () => {
+    const g = createCellGlow(CELLS, createRng(1));
+    // Slot 1 of a two-slot pool, so the offset arithmetic is exercised.
+    const posA = new Float32Array([0, 0, 0, -1.2, -0.4, -0.8]);
+    const posB = new Float32Array([0, 0, 0, 1.2, 0.4, 0.8]);
+    g.lightSegment(posA, posB, 1);
+    expect(g.glow[cellIndexAt(0, 0, 0)]).toBe(1);
+    const lit = Array.from(g.glow).filter((v) => v > 0);
+    expect(lit.length).toBeGreaterThan(1); // a channel this long crosses more than one cell
+    expect(Math.min(...lit)).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it("lights sections at random from its own rng, the same ones for the same seed", () => {
+    const g = createCellGlow(CELLS, createRng(2));
+    g.lightRandom(1, 2);
+    expect(Array.from(g.glow).filter((v) => v > 0).length).toBeGreaterThanOrEqual(1);
+    const h = createCellGlow(CELLS, createRng(2));
+    h.lightRandom(1, 2);
+    expect(Array.from(h.glow)).toEqual(Array.from(g.glow));
+  });
+
+  it("reset takes every section back to dark", () => {
+    const g = createCellGlow(CELLS, createRng(1));
+    g.lightRandom(1, CELLS);
+    g.reset();
+    expect(Array.from(g.glow).every((v) => v === 0)).toBe(true);
+  });
+
+  it("tells the caller which slot a strike landed in, so its section can be lit", () => {
+    const lobes = buildLobes(createRng(7));
+    const pool = createStrikePool(lobes, createRng(9));
+    expect(pool.lastSlot).toBe(-1);
+    expect(pool.trigger(1)).toBe(true);
+    const slot = pool.lastSlot;
+    expect(Array.from(pool.pathDirty).indexOf(1)).toBe(slot);
+    expect(pool.strength[slot]).toBeGreaterThan(0);
+    // A refused trigger leaves the last slot alone rather than reporting a
+    // strike that never happened.
+    pool.tick(0.001, 0.4, 0.5);
+    expect(pool.trigger(1)).toBe(false);
+    expect(pool.lastSlot).toBe(slot);
   });
 });

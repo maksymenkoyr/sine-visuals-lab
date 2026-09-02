@@ -107,6 +107,22 @@ import {
 //    bolt core, the afterglow, every geometry pass's strikeLight — is
 //    deliberately not scaled by any of it, which is what lets lightning
 //    *reveal* a cloud you couldn't see.
+//  - The cloud does not rest evenly lit. It is cut into cells — a Voronoi
+//    partition over CELL_SITES read at a noise-warped position, so the
+//    borders are torn rather than planar, and Lloyd-relaxed so no cell is a
+//    sliver (the "Dark sections" block has the design, and cellIndexAt /
+//    sectionGain are its two agreeing halves). Each cell carries a glow
+//    envelope: a beat lights a couple at random, a mid or treble rise lights
+//    one more gently in between, and every strike lights the cells its own
+//    channel runs through — so a bolt leaves its section glowing long after
+//    the flash. The envelopes decay on this scene's own measured render
+//    interval, slowly enough that a lit section reads as an afterglow over a
+//    beat or two. Where it lands: the resting light of every mode and
+//    nothing else, on the same terms the spectrum gain multiplies, which is
+//    what keeps lightning able to reveal a section the sections have gone
+//    dark. How dark that is comes off the `sections` setting, whose Off stop
+//    is an exact identity, and it fades out under the ember end of Ambient
+//    glow — a cloud already dimmed to nothing can't be sectioned.
 //  - What the gas is made of is the `gasType` setting, resolved through
 //    GAS_RECIPES: a handful of plain uniforms (GAS_UNIFORMS_GLSL), no extra
 //    texture and no change to what buildNoiseVolume bakes. Each field is a
@@ -500,6 +516,17 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { attack: 0.3 },
+  },
+  {
+    key: "sections",
+    label: "Dark sections",
+    description: "Rests the cloud in dark regions and lights them one or two at a time — on beats, on treble hits, and wherever a bolt lands",
+    group: "Beat",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.7,
+    auto: { dynamics: 0.3, attack: 0.2 },
   },
   {
     // Manual by design, like every enum (see spectrumMap): the four gases are
@@ -1747,7 +1774,14 @@ export function createStrikePool(lobes: Lobe[], rng: () => number = Math.random)
   const pathDirty = new Uint8Array(MAX_STRIKES);
   let activeLobes = lobes;
   let sinceLast = 1e6;
+  let lastSlot = -1;
   return {
+    /** The slot the most recent successful trigger() fired in, or -1 before
+     *  the first one — how the caller finds the segment it just made without
+     *  the pool having to know what a cell is. */
+    get lastSlot(): number {
+      return lastSlot;
+    },
     /** Segment start per slot, xyz triples in cloud space. */
     posA,
     /** Segment end per slot. */
@@ -1793,6 +1827,7 @@ export function createStrikePool(lobes: Lobe[], rng: () => number = Math.random)
       buildBoltTree(rng, seg.slice(0, 3), seg.slice(3), path, slot * BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS);
       pathDirty[slot] = 1;
       strength[slot] = amplitude;
+      lastSlot = slot;
       return true;
     },
     tick(dtSec: number, afterglow: number, flicker: number): void {
@@ -1801,6 +1836,237 @@ export function createStrikePool(lobes: Lobe[], rng: () => number = Math.random)
         age[i] += dtSec;
         strength[i] = amp[i] > 0 ? amp[i] * strikeEnvelope(age[i], seed[i], afterglow, flicker) : 0;
       }
+    },
+  };
+}
+
+// --- Dark sections ---------------------------------------------------------
+//
+// The cloud is cut into cells and each cell carries its own glow envelope, so
+// the mass rests mostly dark and lights up a region at a time. Two halves:
+//
+//  - The partition is a Voronoi diagram over CELL_SITES, read at a *warped*
+//    position (cellWarp): a fixed, timeless trig displacement of cloud space,
+//    so the boundary between two cells is a wavy sheet rather than the flat
+//    plane a plain Voronoi bisector would draw. It exists twice — cellIndexAt
+//    here and sectionGain in SECTION_GLSL — because the JS side has to know
+//    which cell a strike landed in and the shader has to know which cell a
+//    sample is in. The two agree everywhere except inside a boundary shell a
+//    float's width thick, which is exactly where the shader's own blend makes
+//    the answer not matter.
+//  - The sites are laid out by Lloyd relaxation (buildCellSites) against a
+//    fixed sample set drawn from the bounding ellipsoid, rather than left
+//    where the rng dropped them: unrelaxed sites leave one cell holding half
+//    the cloud and another holding a sliver, and a sliver never reads as a
+//    section lighting up. Deterministic — same seed, same partition, every
+//    mount, and the same one the JS and GLSL halves share.
+//
+// The envelopes are a plain Float32Array (createCellGlow), decayed with the
+// scene's own measured render interval — the same dt the strike pool is aged
+// by, for the same 120Hz reason (see the file header) — and uploaded whole as
+// uCellGlow. What lights a cell: a beat lights SECTION_BEAT_CELLS of them at
+// once, a mid/treble rise lights a single one more gently so the cloud keeps
+// flickering section by section between beats, and every strike lights the
+// cells along its own channel, brightest at the midpoint. The decay constant
+// is slow next to strikeEnvelope's — a strike is a flash, a lit section is an
+// afterglow that outlasts it by a beat or two.
+const MAX_CELLS = 12;
+const CELL_SEED = 7;
+// Amplitude of the boundary wobble, in cloud units, against cells that come
+// out roughly half a unit across: enough that a border reads as a torn edge
+// rather than a cut, and short of the point where a cell's warped preimage
+// tears into disconnected islands.
+const CELL_WARP = 0.22;
+// How wide the blend between two neighbouring cells is, in cloud units — the
+// difference of the two nearest site distances, so this is roughly the real
+// width of the gradient. A hard switch here reads as sliced glass.
+const CELL_BLEND = 0.32;
+// The relaxation: how many points the centroids are measured over and how
+// many rounds of it. Both fixed, so the layout is a constant of the build.
+const CELL_LLOYD_SAMPLES = 2400;
+const CELL_LLOYD_ITERS = 6;
+/** Time constant of a cell's glow decay, in seconds — a lit section fades
+ *  over a beat or two at ordinary tempos, where strikeEnvelope's flash is
+ *  gone in a fraction of one. */
+export const CELL_DECAY_TAU = 1;
+/** How many cells one beat lights, and how brightly a mid/treble rise lights
+ *  a single one on its own. */
+const SECTION_BEAT_CELLS = 2;
+const SECTION_BAND_LEVEL = 0.55;
+// How dark an unlit cell rests and how far past its own resting brightness a
+// freshly lit one goes, both at Dark sections full — see SECTION_GLSL, which
+// is where the two are actually used. The dark end is a fraction of the
+// resting light rather than a subtraction from it, so a section goes dark in
+// the same proportion whatever else is lighting the cloud.
+const SECTION_DARK = 0.08;
+const SECTION_LIT = 2;
+/** Where the sections stop darkening the cloud, as a fraction of
+ *  AMB_FLOOR_KNEE: below that much Ambient glow the cloud is already an
+ *  ember and there is nothing left to section. */
+const SECTION_EMBER = 0.6;
+/** Where along a strike's segment the cells it lights are sampled, and how
+ *  brightly each tap lights the cell it lands in: the midpoint's cell is
+ *  fully lit, the cells the rest of the channel runs through less so. */
+const SECTION_STRIKE_TAPS: readonly (readonly [number, number])[] = [
+  [0.15, 0.6],
+  [0.5, 1],
+  [0.85, 0.6],
+];
+
+/** The fixed trig displacement the partition is read through — see the block
+ *  above. Timeless and seedless on purpose: the cells have to sit still in
+ *  cloud space, or a "section" would crawl across the mass instead of being a
+ *  part of it. Mirrored by cellWarp() in SECTION_GLSL. */
+export function cellWarp(x: number, y: number, z: number): [number, number, number] {
+  return [
+    x + CELL_WARP * Math.sin(y * 3.1 + 1.7) * Math.cos(z * 2.3),
+    y + CELL_WARP * Math.sin(z * 2.7 + 0.6) * Math.cos(x * 3.3),
+    z + CELL_WARP * Math.sin(x * 2.9 + 2.4) * Math.cos(y * 2.1),
+  ];
+}
+
+/** The cells' site points, xyz triples in warped cloud space, evenly spread
+ *  through the cloud by Lloyd relaxation. Deterministic for a seed. */
+export function buildCellSites(count = MAX_CELLS, seed = CELL_SEED): Float32Array {
+  const rng = createRng(seed);
+  // Rejection-sampled inside the bounding ellipsoid, then warped: the sites
+  // live in the same space cellIndexAt does its lookup in.
+  const sampleInside = (): [number, number, number] => {
+    for (;;) {
+      const x = (rng() * 2 - 1) * CLOUD_EXTENT_X;
+      const y = (rng() * 2 - 1) * CLOUD_EXTENT_Y;
+      const z = (rng() * 2 - 1) * CLOUD_EXTENT_Z;
+      if (insideCloud(x, y, z)) return cellWarp(x, y, z);
+    }
+  };
+  const sites = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const s = sampleInside();
+    sites[i * 3] = s[0];
+    sites[i * 3 + 1] = s[1];
+    sites[i * 3 + 2] = s[2];
+  }
+  const samples = new Float32Array(CELL_LLOYD_SAMPLES * 3);
+  for (let i = 0; i < CELL_LLOYD_SAMPLES; i++) {
+    const s = sampleInside();
+    samples[i * 3] = s[0];
+    samples[i * 3 + 1] = s[1];
+    samples[i * 3 + 2] = s[2];
+  }
+  const sum = new Float64Array(count * 3);
+  const hits = new Float64Array(count);
+  for (let it = 0; it < CELL_LLOYD_ITERS; it++) {
+    sum.fill(0);
+    hits.fill(0);
+    for (let i = 0; i < CELL_LLOYD_SAMPLES; i++) {
+      const x = samples[i * 3];
+      const y = samples[i * 3 + 1];
+      const z = samples[i * 3 + 2];
+      let best = 0;
+      let bestD = Infinity;
+      for (let c = 0; c < count; c++) {
+        const dx = x - sites[c * 3];
+        const dy = y - sites[c * 3 + 1];
+        const dz = z - sites[c * 3 + 2];
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d < bestD) {
+          bestD = d;
+          best = c;
+        }
+      }
+      sum[best * 3] += x;
+      sum[best * 3 + 1] += y;
+      sum[best * 3 + 2] += z;
+      hits[best] += 1;
+    }
+    // A site that won nothing keeps its place rather than collapsing to the
+    // origin — with relaxed sites it never happens, but a division by zero
+    // here would take every cell with it.
+    for (let c = 0; c < count; c++) {
+      if (hits[c] === 0) continue;
+      sites[c * 3] = sum[c * 3] / hits[c];
+      sites[c * 3 + 1] = sum[c * 3 + 1] / hits[c];
+      sites[c * 3 + 2] = sum[c * 3 + 2] / hits[c];
+    }
+  }
+  return sites;
+}
+
+/** The partition, in the same space the shader's own copy works in. Built
+ *  once per page: it is a constant of the seed. */
+export const CELL_SITES = buildCellSites();
+
+/** Which cell a cloud-space point belongs to — the JS twin of sectionGain's
+ *  nearest-site search, and what tells a strike which section it lit. */
+export function cellIndexAt(x: number, y: number, z: number, sites: Float32Array = CELL_SITES): number {
+  const [wx, wy, wz] = cellWarp(x, y, z);
+  const n = Math.floor(sites.length / 3);
+  let best = 0;
+  let bestD = Infinity;
+  for (let c = 0; c < n; c++) {
+    const dx = wx - sites[c * 3];
+    const dy = wy - sites[c * 3 + 1];
+    const dz = wz - sites[c * 3 + 2];
+    const d = dx * dx + dy * dy + dz * dz;
+    if (d < bestD) {
+      bestD = d;
+      best = c;
+    }
+  }
+  return best;
+}
+
+/** The per-cell glow envelopes, shaped for uniform1fv so render() uploads the
+ *  array as is. Everything that lights a cell raises its envelope rather than
+ *  adding to it, so two triggers on one beat can't pile a section past full.
+ *  Exported for tests/storm.test.ts. */
+export function createCellGlow(cells = MAX_CELLS, rng: () => number = Math.random) {
+  const glow = new Float32Array(cells);
+  const light = (cell: number, amount: number): void => {
+    if (!(cell >= 0) || cell >= cells) return;
+    glow[cell] = Math.min(1, Math.max(glow[cell], amount));
+  };
+  return {
+    /** One envelope per cell, in CELL_SITES order. */
+    glow,
+    light,
+    /** Lights the cell holding a point. */
+    lightAt(x: number, y: number, z: number, amount: number): void {
+      light(cellIndexAt(x, y, z), amount);
+    },
+    /** Lights `n` cells picked at random — what a beat does. Picks are
+     *  independent, so a beat may land twice in one cell; forcing them apart
+     *  made the choice read as a rota rather than as lightning. */
+    lightRandom(amount: number, n = 1): void {
+      for (let i = 0; i < n; i++) light(Math.min(cells - 1, Math.floor(rng() * cells)), amount);
+    },
+    /** Lights the cells a strike's channel runs through: full where its
+     *  midpoint sits, weaker at the ends, so a bolt leaves the section it
+     *  landed in glowing after its own flash has gone. Takes the pool's own
+     *  endpoint arrays and a slot, which is the shape they already have. */
+    lightSegment(posA: Float32Array, posB: Float32Array, slot: number): void {
+      const o = slot * 3;
+      for (const [t, amount] of SECTION_STRIKE_TAPS) {
+        light(
+          cellIndexAt(
+            posA[o] + (posB[o] - posA[o]) * t,
+            posA[o + 1] + (posB[o + 1] - posA[o + 1]) * t,
+            posA[o + 2] + (posB[o + 2] - posA[o + 2]) * t,
+          ),
+          amount,
+        );
+      }
+    },
+    /** Exponential decay on the scene's own render interval. */
+    tick(dtSec: number): void {
+      const dt = Number.isFinite(dtSec) ? Math.max(0, dtSec) : 0;
+      const k = Math.exp(-dt / CELL_DECAY_TAU);
+      for (let i = 0; i < cells; i++) glow[i] = glow[i] > 1e-4 ? glow[i] * k : 0;
+    },
+    /** Back to fully dark — init(), so a remount doesn't inherit the last
+     *  mount's lit sections. */
+    reset(): void {
+      glow.fill(0);
     },
   };
 }
@@ -1839,6 +2105,91 @@ float ambientFloor() {
 
 float ambientLift(float a) {
   return mix(ambientFloor(), 1.0, a);
+}
+`;
+
+// The dark sections — the GLSL half of the partition described in the "Dark
+// sections" block above, and the one place the per-cell envelopes reach the
+// image. Splice it into a stage after AMBIENT_LIFT_GLSL (it reads that
+// block's knee) and after the settings uniforms (it reads uSections and
+// uAmbient).
+//
+// What it returns is a plain multiplier on a stage's *resting* light: a dark
+// cell's share of the ambient/spectrum term, up through 1 and a little past
+// it where a section has just been lit. Nothing on the strike side goes
+// through it, for the same reason nothing on the strike side goes through
+// ambientFloor: lightning lights what it reaches whatever the sections are
+// doing, and the cell envelope is the glow it leaves behind rather than the
+// flash itself.
+//
+// Two details that are load-bearing rather than decorative:
+//  - The early-out at uSections ~ 0 is what makes the setting's Off stop an
+//    exact identity — a frame at 0 is the frame this scene drew before the
+//    setting existed, not a frame that rounds to it.
+//  - The dark floor fades out where the cloud is already an ember. Ambient
+//    glow near zero and Dark sections high otherwise multiply into a cloud
+//    that is simply not there — a mass that has already dimmed to nothing
+//    can't be sectioned. The gate is a fraction (SECTION_EMBER) of
+//    ambientFloor's own knee rather than a number of its own, so it opens
+//    fully well below the Ambient glow default and only bites down in the
+//    ember range the sliding floor exists for.
+const SECTION_GLSL = `
+#define MAX_CELLS ${MAX_CELLS}
+#define CELL_WARP ${CELL_WARP.toFixed(4)}
+#define CELL_BLEND ${CELL_BLEND.toFixed(4)}
+// How dark an unlit cell rests, and how far past 1 a freshly lit one goes,
+// both at Dark sections full.
+#define SECTION_DARK ${SECTION_DARK.toFixed(4)}
+#define SECTION_LIT ${SECTION_LIT.toFixed(4)}
+// The share of ambientFloor's knee below which the sections stop darkening
+// the cloud any further — see the ember note above.
+#define SECTION_EMBER ${SECTION_EMBER.toFixed(4)}
+
+uniform vec3 uCellSite[MAX_CELLS];
+uniform float uCellGlow[MAX_CELLS];
+
+// The twin of cellWarp() in storm.ts — keep the two expressions identical.
+vec3 cellWarp(vec3 p) {
+  return p + CELL_WARP * vec3(
+    sin(p.y * 3.1 + 1.7) * cos(p.z * 2.3),
+    sin(p.z * 2.7 + 0.6) * cos(p.x * 3.3),
+    sin(p.x * 2.9 + 2.4) * cos(p.y * 2.1));
+}
+
+float sectionGain(vec3 pCloud) {
+  if (uSections <= 0.001) return 1.0;
+  vec3 q = cellWarp(pCloud);
+  // Nearest and second-nearest site, kept as squared distances through the
+  // loop — the difference of the two real ones is only needed once, at the
+  // blend below.
+  float d1 = 1e9;
+  float d2 = 1e9;
+  float e1 = 0.0;
+  float e2 = 0.0;
+  for (int i = 0; i < MAX_CELLS; i++) {
+    vec3 dv = q - uCellSite[i];
+    float d = dot(dv, dv);
+    if (d < d1) {
+      d2 = d1; e2 = e1;
+      d1 = d; e1 = uCellGlow[i];
+    } else if (d < d2) {
+      d2 = d; e2 = uCellGlow[i];
+    }
+  }
+  // Half way to the neighbour's envelope at the boundary itself, and this
+  // cell's own a blend-width in: a hard switch reads as sliced glass, and the
+  // difference of the two distances is what makes the ramp the same width
+  // wherever on the border it is crossed.
+  float w = clamp((sqrt(d2) - sqrt(d1)) / CELL_BLEND, 0.0, 1.0);
+  // Square root, not the envelope itself: the envelope decays exponentially,
+  // and read linearly a lit section is back down among the dark ones inside
+  // half its own time constant — the flash goes, and the glow it was supposed
+  // to leave behind goes with it. The root holds a section visibly lit for
+  // most of its decay and then drops it, which is the shape the eye reads as
+  // an afterglow.
+  float e = sqrt(clamp(mix(0.5 * (e1 + e2), e1, w), 0.0, 1.0));
+  float amt = uSections * clamp(max(uAmbient, 0.0) * AMB_FLOOR_KNEE_INV / SECTION_EMBER, 0.0, 1.0);
+  return mix(mix(1.0, SECTION_DARK, amt), 1.0 + SECTION_LIT * uSections, e);
 }
 `;
 
@@ -2029,6 +2380,7 @@ uniform highp sampler3D uNoise; // R: value fbm, G: inverted worley — tiled
 uniform highp sampler3D uShape; // the baked silhouettes, one per channel
 uniform vec4 uShapeMix;         // shapePhaseWeights, as a per-channel weight
 ${AMBIENT_LIFT_GLSL}
+${SECTION_GLSL}
 ${GAS_UNIFORMS_GLSL}
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
@@ -2437,10 +2789,15 @@ void main() {
           // what it absorbs, and never the lightning — so a loud band reads
           // as a brighter part of the same cloud.
           float sg = cloudMap ? spectrumGain(sp, ndc) : screenGain;
+          // Which section of the cloud this sample is in, and whether that
+          // section is lit — on the resting light only, exactly like the
+          // spectrum gain and for the same reason: the flash below is what
+          // lightning does to the gas, and it reaches a dark section whole.
+          float sect = sectionGain(sp);
           // The gas type's tint grades what the cloud is *lit* by and never
           // the flash, for the same reason the spectrum gain doesn't: a
           // charcoal smoke should still be lit white-hot by its own bolt.
-          acc += T * a * ((sun + ambient) * uGasTint * sg + flash);
+          acc += T * a * ((sun + ambient) * uGasTint * sg * sect + flash);
           T *= 1.0 - a;
         }
         acc += T * tint * core * gain * stepLen * 4.0;
@@ -2475,6 +2832,7 @@ ${settingsUniformsGlsl}
 ${STRIKE_UNIFORMS_GLSL}
 uniform float uIsNode; // 1.0 only during the nodes (gl.POINTS) draw
 ${AMBIENT_LIFT_GLSL}
+${SECTION_GLSL}
 ${PALETTE_GLSL}
 ${SAMPLE_BANDS_GLSL}
 ${CAMERA_GLSL}
@@ -2519,9 +2877,11 @@ void main() {
   // ember below it, on the same sliding floor the march's sun ramp rides
   // (normalized here because this floor was additive, not the low end of a
   // mix — see AMB_FLOOR_NORM).
+  // sectionGain is on this same resting term and nothing else — the flash
+  // below reaches a dark section of the lattice whole.
   float lit = (0.18 * ambientFloor() * AMB_FLOOR_NORM
       + 0.9 * uAmbient * (0.5 + uEnergy) * (0.45 + 0.55 * height))
-    * depthFade(view.z) * spectrumGain(p, viewToRoomNdc(view));
+    * depthFade(view.z) * spectrumGain(p, viewToRoomNdc(view)) * sectionGain(p);
   // Treble shimmer: scattered nodes and wires glint on high-band hits.
   float shimmer = uSpark * uHighPulse * step(0.93, hash11(seed * 7.1 + floor(uTime * 12.0)));
 
@@ -2666,6 +3026,11 @@ ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
 ${STRIKE_UNIFORMS_GLSL}
 uniform float uCountBoost;
+// Included for the floor's knee alone: this pass's own resting light has
+// never carried a floor (it is a plain multiple of uAmbient), but sectionGain
+// measures the ember it must not darken any further against that same knee.
+${AMBIENT_LIFT_GLSL}
+${SECTION_GLSL}
 ${PALETTE_GLSL}
 ${SAMPLE_BANDS_GLSL}
 ${CAMERA_GLSL}
@@ -2705,7 +3070,7 @@ void main() {
   // Same spectrum mapping the gas and the lattice get, on the same term, and
   // the same depthFade the lattice uses.
   float ambient = uAmbient * (0.5 + uEnergy) * heightShade * depthFade(view.z) * (0.7 + 0.3 * hash11(seed * 3.7))
-    * spectrumGain(p, viewToRoomNdc(view));
+    * spectrumGain(p, viewToRoomNdc(view)) * sectionGain(p);
   // Treble sparks: a scattered few particles glint on high-band hits.
   float spark = uSpark * uHighPulse * step(0.96, hash11(seed * 7.1 + floor(t * 10.0)));
 
@@ -2764,6 +3129,9 @@ uniform highp sampler3D uFlowTex; // the curl field — buildFlowVolume
 uniform highp sampler3D uShape;   // the baked silhouettes, one per channel
 uniform vec4 uShapeMix;           // shapePhaseWeights, as a per-channel weight
 uniform float uGasFreq;           // GAS_RECIPES.freq — see flowCoord below
+// As in POINT_VERT: included for the floor knee sectionGain measures against.
+${AMBIENT_LIFT_GLSL}
+${SECTION_GLSL}
 ${PALETTE_GLSL}
 ${SAMPLE_BANDS_GLSL}
 ${CAMERA_GLSL}
@@ -2847,7 +3215,7 @@ void main() {
   // mapping on the ambient side only, and treble sparks.
   float heightShade = 0.55 + 0.45 * clamp((aPos.y + EXTENT_Y) / (2.0 * EXTENT_Y), 0.0, 1.0);
   float ambient = uAmbient * (0.5 + uEnergy) * heightShade * depthFade(view.z)
-    * (0.7 + 0.3 * hash11(aSeed * 3.7)) * spectrumGain(p, viewToRoomNdc(view));
+    * (0.7 + 0.3 * hash11(aSeed * 3.7)) * spectrumGain(p, viewToRoomNdc(view)) * sectionGain(p);
   float spark = uSpark * uHighPulse * step(0.96, hash11(aSeed * 7.1 + floor(uTime * 10.0)));
 
   // A hair is faint on its own and the tangle is bright where it bunches, so
@@ -2962,11 +3330,16 @@ export const stormScene: Scene = (() => {
   let meshPhase = Number.NaN; // NaN = never meshed
   let meshTimeSec = -1e6;
   let pool: ReturnType<typeof createStrikePool> | null = null;
+  let cells: ReturnType<typeof createCellGlow> | null = null;
   // Last-drawn pulse levels and clock, for the rise detection and render-dt
   // measurement the file header explains.
   let prevBeatPulse = 0;
   let prevLowPulse = 0;
   let prevDropPulse = 0;
+  // The band rises the sections read on top of the beat — same edge detection,
+  // same reason (see the file header).
+  let prevMidPulse = 0;
+  let prevHighPulse = 0;
   let lastTimeSec: number | null = null;
   // The shape morph's own accumulated phase, in variants — see
   // advanceMorphPhase. Wraps through shapePhaseWeights, so it only grows.
@@ -3156,15 +3529,18 @@ export const stormScene: Scene = (() => {
       gl.bindVertexArray(null);
 
       pool = createStrikePool(lobeSets[0]);
+      cells = createCellGlow();
       prevBeatPulse = 0;
       prevLowPulse = 0;
       prevDropPulse = 0;
+      prevMidPulse = 0;
+      prevHighPulse = 0;
       lastTimeSec = null;
       morphPhase = 0;
     },
 
     render(ctx, frame, viewport, palette, anim) {
-      if (!prog || !quadVao || !pool || !noiseTex || !shapeTex || !pointProg || !pointVao) return;
+      if (!prog || !quadVao || !pool || !cells || !noiseTex || !shapeTex || !pointProg || !pointVao) return;
       if (!meshProg || !meshVao || !boltProg || !boltVao) return;
       if (!filProg || !filVao || !flowTex) return;
       const { gl } = ctx;
@@ -3192,12 +3568,21 @@ export const stormScene: Scene = (() => {
       // Age the pool first, then fire this frame's strikes, so a fresh strike
       // is uploaded at full strength on the very frame the beat landed.
       pool.tick(dt, afterglow, flicker);
+      // The sections fade on the same measured interval the pool ages on —
+      // one clock, and the one this scene actually draws at.
+      cells.tick(dt);
       const beatRose = anim.beatPulse > prevBeatPulse + 1e-3 || frame.beat;
       const lowRose = anim.lowPulse > prevLowPulse + 1e-3 || anim.lowOnset;
       const dropRose = anim.dropPulse > prevDropPulse + 1e-3 || anim.dropOnset;
+      // The upper bands get the same rise detection, for the sections alone:
+      // they are what keeps the cloud flickering section by section between
+      // beats instead of only on them.
+      const bandRose = anim.midPulse > prevMidPulse + 1e-3 || anim.highPulse > prevHighPulse + 1e-3;
       prevBeatPulse = anim.beatPulse;
       prevLowPulse = anim.lowPulse;
       prevDropPulse = anim.dropPulse;
+      prevMidPulse = anim.midPulse;
+      prevHighPulse = anim.highPulse;
 
       // The shape morph rides the very rises the strikes do — the same
       // booleans, so the lurch and the lightning are the same beat rather
@@ -3216,14 +3601,26 @@ export const stormScene: Scene = (() => {
       // so a bolt stays buried in gas that is actually there.
       pool.setLobes(lobeSets[w.f < 0.5 ? w.a : w.b]);
 
+      // Every strike lights the sections its own channel runs through, which
+      // is the "lit up by lightning" half of the sections: the bolt's flash
+      // is gone in a fraction of a second, the section it landed in keeps
+      // glowing for a beat or two after it.
+      const lightStruck = (fired: boolean): void => {
+        if (fired && cells && pool && pool.lastSlot >= 0) cells.lightSegment(pool.posA, pool.posB, pool.lastSlot);
+      };
       if (dropRose) {
         // A drop is a burst of ordinary-strength strikes in different lobes
         // (a cloud-wide flash), not one overdriven strike — three at full
         // amplitude already saturate most of the cloud.
-        for (let i = 0; i < STRIKE_DROP_BURST; i++) pool.trigger(0.8 + 0.6 * dropStorm, true);
+        for (let i = 0; i < STRIKE_DROP_BURST; i++) lightStruck(pool.trigger(0.8 + 0.6 * dropStorm, true));
       } else if (lowRose || beatRose) {
-        pool.trigger(0.7 + 0.5 * (lowRose ? anim.lowPulse : 0), false);
+        lightStruck(pool.trigger(0.7 + 0.5 * (lowRose ? anim.lowPulse : 0), false));
       }
+      // On top of whatever the strike lit: a beat picks its own sections, so
+      // the cloud answers the beat even where no bolt reached, and a mid or
+      // treble rise lights a single one more gently in between.
+      if (dropRose || lowRose || beatRose) cells.lightRandom(1, SECTION_BEAT_CELLS);
+      else if (bandRose) cells.lightRandom(SECTION_BAND_LEVEL, 1);
 
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
@@ -3232,6 +3629,14 @@ export const stormScene: Scene = (() => {
       prog.setV3v("uStrikeA", pool.posA);
       prog.setV3v("uStrikeB", pool.posB);
       prog.setFv("uStrikeStrength", pool.strength);
+      // The partition and its envelopes, for whichever stage is about to draw
+      // the cloud — the sites never change, the envelopes change every frame,
+      // and both are cheap enough to send unconditionally.
+      const uploadCells = (p: GLProgram): void => {
+        p.setV3v("uCellSite", CELL_SITES);
+        p.setFv("uCellGlow", cells!.glow);
+      };
+      uploadCells(prog);
       // The two live silhouettes' weights, per channel of the shape volume.
       // Filaments reads the same volume from its vertex shader, so this is
       // computed once and uploaded to both programs.
@@ -3301,6 +3706,7 @@ export const stormScene: Scene = (() => {
           meshProg.setV3v("uStrikeA", pool.posA);
           meshProg.setV3v("uStrikeB", pool.posB);
           meshProg.setFv("uStrikeStrength", pool.strength);
+          uploadCells(meshProg);
           gl.bindVertexArray(meshVao);
           meshProg.setF("uIsNode", 0);
           if (meshIndexCount > 0) gl.drawElements(gl.LINES, meshIndexCount, gl.UNSIGNED_INT, 0);
@@ -3314,6 +3720,7 @@ export const stormScene: Scene = (() => {
         pointProg.setV3v("uStrikeA", pool.posA);
         pointProg.setV3v("uStrikeB", pool.posB);
         pointProg.setFv("uStrikeStrength", pool.strength);
+        uploadCells(pointProg);
         pointProg.setF("uCountBoost", Math.min(3, Math.max(1, Math.sqrt(MAX_PARTICLES / count))));
         // Any prefix of the buffer is a representative subsample, which is
         // what Cloud density thins here.
@@ -3326,6 +3733,7 @@ export const stormScene: Scene = (() => {
         filProg.setV3v("uStrikeA", pool.posA);
         filProg.setV3v("uStrikeB", pool.posB);
         filProg.setFv("uStrikeStrength", pool.strength);
+        uploadCells(filProg);
         filProg.setV4("uShapeMix", shapeMix[0], shapeMix[1], shapeMix[2], shapeMix[3]);
         filProg.setF("uCountBoost", Math.min(3, Math.max(1, Math.sqrt(FIL_MAX_STRANDS / strandCount))));
         // The strands take the frequency alone (flowCoord); the rest of the
@@ -3435,9 +3843,12 @@ export const stormScene: Scene = (() => {
       meshPhase = Number.NaN;
       meshTimeSec = -1e6;
       pool = null;
+      cells = null;
       prevBeatPulse = 0;
       prevLowPulse = 0;
       prevDropPulse = 0;
+      prevMidPulse = 0;
+      prevHighPulse = 0;
       lastTimeSec = null;
       morphPhase = 0;
     },
