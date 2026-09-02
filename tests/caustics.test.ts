@@ -394,8 +394,13 @@ describe("caustics sparkle sub-param mapping", () => {
     expect(sparkleDensityExponent(1)).toBeCloseTo(3.0, 10);
   });
 
-  it("grain's default (0.5) reproduces the old fixed noise scale of 38.0", () => {
-    expect(sparkleGrainFreq(0.5)).toBeCloseTo(38.0, 10);
+  it("grain's default (0.5) lands at 53.0 — the finest end (SPARKLE_GRAIN_FREQ_LO) was raised from the old fixed 60.0 to 90.0 so the dial can reach finer glints, which moves the default off the old 38.0 too", () => {
+    expect(sparkleGrainFreq(0.5)).toBeCloseTo(53.0, 10);
+  });
+
+  it("grain's extremes span the widened finest/coarsest range", () => {
+    expect(sparkleGrainFreq(0)).toBeCloseTo(90.0, 10);
+    expect(sparkleGrainFreq(1)).toBeCloseTo(16.0, 10);
   });
 
   it("spread's default (0.5) reproduces the old fixed crest-gate smoothstep(0.15, 0.6, acc)", () => {
