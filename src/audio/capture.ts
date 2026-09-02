@@ -47,6 +47,8 @@ export async function captureMic(deviceId?: string): Promise<CaptureHandle> {
  * Capture a shared tab/window/screen's audio (Chrome/Edge desktop). This is
  * the cleanest possible signal for a desktop host: no room noise, no mic
  * coloration, and no gesture-gated permission prompt beyond the picker.
+ * See sourcePref.ts's header for exactly which browser/OS combinations this
+ * actually yields audio on.
  */
 export async function captureDisplayAudio(): Promise<CaptureHandle> {
   const stream = await navigator.mediaDevices.getDisplayMedia({
