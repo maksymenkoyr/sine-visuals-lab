@@ -1950,8 +1950,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
 
     // The Scene card title is itself the block only when the active scene
-    // emits no group headings (e.g. Mesh Grid) — otherwise it and the first
-    // group heading would both resolve to the same first row.
+    // has settings but emits no group headings — otherwise it and the first
+    // group heading would both resolve to the same first row. Every scene
+    // with settings groups them today (tests/settingGroups.test.ts requires
+    // it — see SETTING_GROUPS in sceneSettings.ts), so this branch is dead
+    // until some future scene's settings all go ungrouped again.
     if (specs.length > 0 && !hasGroups) markBlock(sceneCard.title);
     else unmarkBlock(sceneCard.title);
     renumberBlocks();

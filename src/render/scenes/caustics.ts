@@ -46,16 +46,16 @@ import type { SignalLink } from "../signals.ts";
 // spikes.
 // The master treble-sparkle knob. Defined outside SETTINGS so the sub-params
 // below it (density, brightness ceiling, grain, spread, sustain — all in the
-// "Sparkle" group, all `advanced`) can name it directly as their `macro`
+// "Look" group, all `advanced`) can name it directly as their `macro`
 // driver: a spec reference costs nothing extra to resolve and can't drift out
-// of sync with a key string. See the Sparkle group's own comment further down
-// for what each sub-param actually does; this one just carries the auto
+// of sync with a key string. See the sparkle sub-params' own comment further
+// down for what each one actually does; this one just carries the auto
 // weights and stays the everyday slider.
 const SPARKLE: SceneSetting = {
   key: "sparkle",
   label: "Treble sparkle",
   description: "Hats and cymbals glint on the ridge crests",
-  group: "Sparkle",
+  group: "Look",
   min: 0,
   max: 1,
   step: 0.05,
@@ -69,7 +69,7 @@ const SETTINGS: SceneSetting[] = [
     key: "causticDensity",
     label: "Caustic density",
     description: "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high",
-    group: "Pattern",
+    group: "Form",
     min: 0,
     max: 1,
     step: 0.05,
@@ -79,43 +79,10 @@ const SETTINGS: SceneSetting[] = [
     // silently redecide underneath a chosen look.
   },
   {
-    key: "fog",
-    label: "Fog",
-    description: "How thin and bright the ridges sit at rest, between beats",
-    group: "Pattern",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.4, // -> today's old fixed resting sharpness/floor-cut, closely
-    // A busy mix wants the filaments legible (less fog); a dark mix reads as
-    // moodier with more haze around them.
-    auto: { density: -0.3, brightness: -0.2 },
-  },
-  {
-    key: "focus",
-    label: "Focus snap",
-    description: "How much harder a beat sharpens the ridges above their resting state; 0 = no snap at all",
-    group: "Beat",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.7,
-    // Beat-snap only reads as a snap on music with actual beats to snap to.
-    // Kept low (not the ~0.9 that `pulse` alone would floor near on almost
-    // any locked-tempo track — 60% tempoLock saturates for basically all
-    // steady music) because sitting near 1 all track would have the beat
-    // snap saturate against FOCUS_SHARP_MAX on nearly every hit rather than
-    // responding to a specific one — the resting look itself no longer
-    // moves with this slider (see the Fog setting above and focusSharp
-    // below), so the old worry about pinning the *floor* up doesn't apply
-    // any more, but a saturated snap is just as flat a result.
-    auto: { pulse: 0.2, attack: 0.15 },
-  },
-  {
     key: "breathe",
     label: "Tempo breathe",
     description: "Slow zoom locked to the beat, once per bar",
-    group: "Beat",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -127,7 +94,7 @@ const SETTINGS: SceneSetting[] = [
     key: "ripple",
     label: "Beat ripple",
     description: "Each beat drops a ring that spreads from the center to the edge, like a drop on water; rings overlap instead of replacing each other",
-    group: "Beat",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -149,7 +116,7 @@ const SETTINGS: SceneSetting[] = [
     key: "rippleSrc",
     label: "Ripple source",
     description: "Bass hits always ring out. Below 0.5, ordinary beats ring out too; at 0.5 and above, only bass hits do.",
-    group: "Beat",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -162,18 +129,6 @@ const SETTINGS: SceneSetting[] = [
       "anim.lowOnset",
       { signal: "feature.onset", activeWhen: (get) => get("rippleSrc") < RIPPLE_SRC_BEAT_THRESHOLD },
     ] satisfies readonly SignalLink[],
-  },
-  {
-    key: "flash",
-    label: "Beat flash",
-    description: "Overall brightness punch on each beat",
-    group: "Beat",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    // Same reasoning as ripple, for brightness punch instead of ring shape.
-    auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
   },
   {
     key: "drift",
@@ -246,7 +201,7 @@ const SETTINGS: SceneSetting[] = [
     key: "bass",
     label: "Bass swell",
     description: "Low end bulges and warms the center",
-    group: "Spectrum",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -258,7 +213,7 @@ const SETTINGS: SceneSetting[] = [
     key: "turbulence",
     label: "Mid turbulence",
     description: "Vocals and synths churn the filaments",
-    group: "Spectrum",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -267,10 +222,70 @@ const SETTINGS: SceneSetting[] = [
     auto: { density: 0.35, brightness: 0.1 },
   },
   {
+    key: "dropReactivity",
+    label: "Drop reactivity",
+    description: "Choruses and drops push brightness, turbulence, ripple and drift",
+    // Motion, not Look — its dominant, most-visible effect is displacing the
+    // field itself (turbulence/ripple/drift all move things), even though
+    // the label leads with "brightness" and it touches that too.
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    // Only lean into drop behavior on a track that actually has real dynamic swings.
+    auto: { dynamics: 0.45 },
+  },
+  {
+    key: "fog",
+    label: "Fog",
+    description: "How thin and bright the ridges sit at rest, between beats",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.4, // -> today's old fixed resting sharpness/floor-cut, closely
+    // A busy mix wants the filaments legible (less fog); a dark mix reads as
+    // moodier with more haze around them.
+    auto: { density: -0.3, brightness: -0.2 },
+  },
+  {
+    key: "focus",
+    label: "Focus snap",
+    description: "How much harder a beat sharpens the ridges above their resting state; 0 = no snap at all",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.7,
+    // Beat-snap only reads as a snap on music with actual beats to snap to.
+    // Kept low (not the ~0.9 that `pulse` alone would floor near on almost
+    // any locked-tempo track — 60% tempoLock saturates for basically all
+    // steady music) because sitting near 1 all track would have the beat
+    // snap saturate against FOCUS_SHARP_MAX on nearly every hit rather than
+    // responding to a specific one — the resting look itself no longer
+    // moves with this slider (see the Fog setting above and focusSharp
+    // below), so the old worry about pinning the *floor* up doesn't apply
+    // any more, but a saturated snap is just as flat a result.
+    auto: { pulse: 0.2, attack: 0.15 },
+  },
+  {
+    key: "flash",
+    label: "Beat flash",
+    description: "Overall brightness punch on each beat",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    // Same reasoning as ripple, for brightness punch instead of ring shape.
+    auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
+  },
+  {
     key: "centroidHue",
     label: "Spectral hue",
     description: "Palette drifts one way when the mix is brighter than usual for this track, the other way when it's darker",
-    group: "Spectrum",
+    group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
@@ -286,13 +301,13 @@ const SETTINGS: SceneSetting[] = [
   // Each tracks SPARKLE as a macro: dragging the master knob moves all five
   // together, and each snaps to manual (stops following) the moment it's
   // touched directly, same as any auto-capable setting. Kept `advanced` —
-  // real, but not worth doubling the Sparkle group's row count for settings
+  // real, but not worth doubling the Look group's row count for settings
   // most people will only ever move via the master.
   {
     key: "sparkleBright",
     label: "Sparkle brightness",
     description: "How bright each glint gets at its peak",
-    group: "Sparkle",
+    group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
@@ -304,7 +319,7 @@ const SETTINGS: SceneSetting[] = [
     key: "sparkleDensity",
     label: "Sparkle density",
     description: "How many glints appear at once",
-    group: "Sparkle",
+    group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
@@ -316,7 +331,7 @@ const SETTINGS: SceneSetting[] = [
     key: "sparkleGrain",
     label: "Sparkle grain",
     description: "How fine each glint is",
-    group: "Sparkle",
+    group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
@@ -331,7 +346,7 @@ const SETTINGS: SceneSetting[] = [
     key: "sparkleSpread",
     label: "Sparkle spread",
     description: "How far into dim water glints can reach",
-    group: "Sparkle",
+    group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
@@ -343,25 +358,13 @@ const SETTINGS: SceneSetting[] = [
     key: "sparkleSustain",
     label: "Sparkle sustain",
     description: "Cymbal wash glints continuously, not just on hits",
-    group: "Sparkle",
+    group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0, // -> today's behavior: glints only follow the onset pulse
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.3 },
-  },
-  {
-    key: "dropReactivity",
-    label: "Drop reactivity",
-    description: "Choruses and drops push brightness, turbulence, ripple and drift",
-    group: "Dynamics",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    // Only lean into drop behavior on a track that actually has real dynamic swings.
-    auto: { dynamics: 0.45 },
   },
 ];
 

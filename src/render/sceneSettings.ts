@@ -7,6 +7,32 @@ import type { SignalLink } from "./signals.ts";
  * even where localStorage is unavailable (node test env, Safari private
  * mode) — only cross-reload persistence depends on it.
  */
+
+/**
+ * The shared vocabulary for `SceneSetting.group`. A heading answers "what
+ * part of the picture does this change?" — never "what drives it": a knob
+ * that pulses geometry on the beat is Motion, one that pulses brightness is
+ * Look, and the row's own `reads` chip already says it's beat-driven, so a
+ * driver-named group would just restate that. Apply this ladder, first
+ * match wins, whenever a setting's group is unclear:
+ *
+ *   moves the viewpoint?                  -> Camera
+ *   applied to the already-drawn image?   -> Post
+ *   changes *where things are* over time? -> Motion
+ *   changes *colour or light*?            -> Look
+ *   otherwise (shape, structure, scale)   -> Form
+ *
+ * Camera outranks Motion on purpose — something like "camera bob" moves over
+ * time, but belongs with the rest of the framing controls, not the scene's
+ * internal motion. Scene-specific nouns (a scene's "Plate", "Sand",
+ * "Sparkle") don't get their own group; they stay in the row labels instead,
+ * so every scene reuses this same five-word vocabulary. Order here is
+ * render order for a scene that uses every group — see the positional
+ * grouping note on `group` below.
+ */
+export const SETTING_GROUPS = ["Form", "Motion", "Look", "Camera", "Post"] as const;
+export type SettingGroup = (typeof SETTING_GROUPS)[number];
+
 export interface SceneSetting {
   /** Uniform suffix — "focus" becomes uFocus. Keep it a valid GLSL identifier tail. */
   key: string;
@@ -14,9 +40,13 @@ export interface SceneSetting {
   label: string;
   /** One-line plain-language note shown under the slider. Omit for no caption. */
   description?: string;
-  /** Optional section heading. Consecutive settings sharing a group render
-   *  under one heading in the device menu; omit entirely for a flat list. */
-  group?: string;
+  /** Optional section heading, from SETTING_GROUPS above. Consecutive
+   *  settings sharing a group render under one heading in the device menu;
+   *  omit entirely for a flat list. Rendering is positional — a group is a
+   *  run of *consecutive* array entries, so a scene using more than one
+   *  group must keep each group's settings contiguous and in
+   *  SETTING_GROUPS order (tests/settingGroups.test.ts enforces this). */
+  group?: SettingGroup;
   min: number;
   max: number;
   step: number;
