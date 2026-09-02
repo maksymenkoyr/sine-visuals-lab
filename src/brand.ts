@@ -15,4 +15,4 @@
  * is expected to change.
  */
 export const PRODUCT_NAME = "Sine Visuals Lab";
-export const SOURCE_URL = "https://github.com/maksymenkoyr/audio-visualization";
+export const SOURCE_URL = "https://github.com/maksymenkoyr/sine-visuals-lab";
