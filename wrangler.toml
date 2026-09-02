@@ -2,6 +2,13 @@ name = "audio-viz-room"
 main = "server/worker.ts"
 compatibility_date = "2026-08-01"
 
+# Explicit: adding [[routes]] below silently disabled the workers.dev subdomain
+# on deploy (confirmed via the account API), despite wrangler's docs claiming
+# workers_dev defaults to true regardless of routes. Kept on as a free fallback
+# while sinevisualslab.com's cert/DNS were provisioning, and for checking a
+# deploy before it's live on the real domain.
+workers_dev = true
+
 [[durable_objects.bindings]]
 name = "ROOM"
 class_name = "Room"
@@ -15,3 +22,18 @@ new_sqlite_classes = ["Room"]
 # Paths that don't match a file in dist/ (i.e. /api/*) fall through to fetch().
 [assets]
 directory = "./dist"
+
+# Custom Domains, not route patterns: this Worker serves the site as well as the
+# API, so every path on these hostnames must reach it. Cloudflare creates the
+# proxied DNS record and the certificate from these entries.
+#
+# These live here rather than in the dashboard on purpose: `wrangler deploy`
+# overrides dashboard-configured routes whenever config omits them, and every
+# push to main deploys (.github/workflows/deploy.yml).
+[[routes]]
+pattern = "sinevisualslab.com"
+custom_domain = true
+
+[[routes]]
+pattern = "www.sinevisualslab.com"
+custom_domain = true
