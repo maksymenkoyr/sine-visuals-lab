@@ -28,16 +28,36 @@ import type { SignalLink } from "../signals.ts";
 // new beat doesn't cut the last ring off, uFlash is a brightness punch,
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
 // driftRatePerSec below, not a shader uniform driving the rate directly —
-// with driftKick/driftLoud dialing in how much bass onsets and overall
-// loudness surge that speed. driftBeat is a separate, additive impulse
-// (advanceLurch below) fired on anim.onset rather than a rate multiplier —
-// see driftRatePerSec's own comment for why a beat can't read as a lurch by
-// modulating a rate. driftKick also adds its own bounded forward jolt
-// directly to the phase (KICK_JOLT_PHASE/advanceKickJolt below), independent
-// of Drift speed, for the same reason a rate term alone can't read as a kick
-// strike rather than a glide. driftChurn reshapes the filaments themselves
-// on each beat (uChurnDrive in FRAG) instead of moving the phase at all — a
-// third, distinct beat channel from the other two. uBass/uTurbulence/
+// with driftKick dialing in how much bass onsets pump that speed. driftBeat
+// is a separate, additive impulse (advanceLurch below) fired on anim.onset
+// rather than a rate multiplier — see driftRatePerSec's own comment for why
+// a beat can't read as a lurch by modulating a rate. driftKick also adds its
+// own bounded forward jolt directly to the phase (KICK_JOLT_PHASE/
+// advanceKickJolt below), independent of Drift speed, for the same reason a
+// rate term alone can't read as a kick strike rather than a glide. driftChurn
+// reshapes the filaments themselves on each beat (uChurnDrive in FRAG)
+// instead of moving the phase at all — a third, distinct beat channel from
+// the other two. driftLoud is a geometric speed swing about a neutral pivot
+// (loudSpeedFactor below): quiet passages run proportionally slower, loud
+// ones proportionally faster, so the dial reads as dynamic range rather than
+// extra speed. It's driven by loudSwell — a value advanceLoudSwell derives
+// from FeatureFrame.level, calibrated in-scene against its own
+// slow-contracting extremes — not frame.energy: energy is AGC-normalized per
+// band, and that AGC "re-adapts in ~1.25s and erases quiet-vs-loud by
+// design" (see FeatureFrame.energy's own doc comment in audio/types.ts),
+// which is exactly the dynamic range this dial exists to show. level
+// survives that AGC (audio/types.ts and autoTune.ts both call it "the one
+// field that survives it"), but its resting point is playback/mic-gain
+// dependent, which is what advanceLoudSwell's own calibration is for — see
+// that function's comment for why this isn't sectionIntensity.ts's job
+// (different input, and a deliberately faster calibration timescale).
+// driftLoud also drives uLoudSwell (loudSwellDrive below), an ungated visual
+// swell — a loud passage widens the pool's aperture and lifts the dark-water
+// floor into a glow; a quiet one tightens and deepens it — the fourth
+// distinct non-rate channel alongside Beat surge's lurch, Kick surge's jolt,
+// and Beat churn's reshaping. Not gated behind Drift speed, same reasoning as
+// driftKick's jolt: it's a look, not motion along the phase, so it must still
+// land for anyone who wants a still, breathing pool. uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
 // / crest glints), and uDropReactivity ties everything to
 // sectionIntensity.ts's slow-tracked "which part of the song is this" signal
@@ -218,7 +238,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "driftLoud",
     label: "Loudness surge",
-    description: "Drift swells smoothly with overall volume",
+    description: "Drift speeds up in loud passages and nearly stills in quiet ones; the pool's aperture and floor glow swell with it too",
     group: "Motion",
     min: 0,
     max: 1,
@@ -417,6 +437,17 @@ const FOG_SHARP_HAZY = 2.0;
 const FOG_FLOOR_CRISP = 0.13; // uFog = 0 -> today's old fixed dark-water cut (0.08) is inside this range
 const FOG_FLOOR_HAZY = 0.0;
 
+// uLoudSwell's (loudSwellDrive above) two visual channels, both small at the
+// Loudness surge default (0.4) — see that constant's own comment — and both
+// on ground nothing else modulates at runtime: SWELL_ZOOM rides the same `p
+// *=` aperture line as uBreathe but is aperiodic and sustained rather than
+// bar-locked, and SWELL_FLOOR_LIFT rides the same dark-water floor cut uFog
+// sets at rest, so a loud passage glows into that dim wash and a quiet one
+// deepens it, distinct from uFlash/uEnergy/dropDrive, which all brighten the
+// ridge *crests* instead.
+const SWELL_ZOOM = 0.25;
+const SWELL_FLOOR_LIFT = 0.8;
+
 // uFocus=1 on a full beat (uBeatPulse=1) multiplies the resting sharpness by
 // (1 + FOCUS_SNAP_RATIO) — see focusSharp below. Chosen so the defaults (fog
 // 0.4, focus 0.7) land close to the swing this scene's very first version
@@ -544,24 +575,126 @@ export function sparkleBrightGain(sparkleBright: number): number {
 // actually cancels out to flowClock.ts's own base rate of 1.0/sec at the
 // slider's new midpoint — see driftRatePerSec below.
 const DRIFT_BASE_RATE = 2.0;
-// Gain each surge slider applies at its own max, audio driver at 1. Tuned so
-// driftLoud's default (0.4) reproduces the old hardcoded energy response
-// exactly: 0.4 * 1.5 = 0.6, the previous DRIFT_ENERGY_GAIN. Beat surge used
-// to be a third term here (driftBeat * beatPulse * 2.0) — multiplying the
-// rate meant it could only ever read as "drift, briefly faster": the shader
-// integrates a rate, so a brief bump in it is a slope change, not a
-// discontinuity the eye can catch, and beatPulse's own 1/6s decay area
-// capped the whole effect under 2% of one noise cell even maxed. It's now
-// advanceLurch below — an additive impulse on the phase itself, independent
-// of Drift speed and of Kick/Loudness surge here.
+// Gain the Kick surge slider applies at its own max, audio driver at 1.
+// Loudness surge no longer lives in this additive sum — see loudSpeedFactor
+// below and the file header's driftLoud paragraph: it's a geometric swing
+// applied as a separate multiplier after SURGE_CAP, not a summand inside it,
+// so a maxed Kick surge and a maxed Loudness surge no longer compete for the
+// same headroom. Beat surge used to be a third term here (driftBeat *
+// beatPulse * 2.0) — multiplying the rate meant it could only ever read as
+// "drift, briefly faster": the shader integrates a rate, so a brief bump in
+// it is a slope change, not a discontinuity the eye can catch, and
+// beatPulse's own 1/6s decay area capped the whole effect under 2% of one
+// noise cell even maxed. It's now advanceLurch below — an additive impulse
+// on the phase itself, independent of Drift speed and of Kick surge here.
 const KICK_SURGE_GAIN = 2.0;
-const LOUD_SURGE_GAIN = 1.5;
-// Hard ceiling on the combined speed multiplier. Uncapped, maxing both
-// remaining surge sliders against loud audio plus a maxed Drop reactivity
-// boost (driftBoost up to 1.8) reaches ~5.4x — 5 keeps the top end close to
-// that while staying a clear, coherent sprint rather than a hard clamp
-// nobody reaches.
+// Hard ceiling on driftBoost * kick surge (loudness's own swing is applied
+// after this — see loudSpeedFactor/DRIFT_RATE_MAX below, not this cap).
+// Uncapped, a maxed Kick surge against a maxed Drop reactivity boost
+// (driftBoost up to 1.8) reaches ~5.4x — 5 keeps the top end close to that
+// while staying a clear, coherent sprint rather than a hard clamp nobody
+// reaches.
 const SURGE_CAP = 5;
+
+// Loudness surge's geometric swing (see the file header's driftLoud
+// paragraph for why this reads loudSwell, not frame.energy). Geometric about
+// a neutral pivot — LOUD_SWING^0 = 1 — so a fully quiet passage runs exactly
+// as many times *slower* as a fully loud one runs faster, and loudSwell=0.5
+// (silence, a legacy wire sender defaulting level to 0.5 per protocol.ts, or
+// too little observed range to calibrate — see advanceLoudSwell) is an exact
+// identity: the dial does nothing on material with no measurable dynamics,
+// rather than reading as noise. driftLoud^2 is the same top-weighting idiom
+// advanceKickJolt below uses (driftKick^2), so the default (0.4) keeps
+// roughly today's swing on a realistic chorus (~1.2x) while driftLoud=1
+// spans a dramatic quiet<->loud range (0.125x .. 8x).
+const LOUD_SWING = 4;
+const LOUD_DEPTH_MAX = 1.5;
+
+/** driftLoud (0..1) and loudSwell (0..1, 0.5 = neutral) -> a multiplier on
+ *  the drift rate. Exported so tests/caustics.test.ts can pin the identity/
+ *  monotonicity properties directly. */
+export function loudSpeedFactor(driftLoud: number, loudSwell: number): number {
+  return Math.pow(LOUD_SWING, LOUD_DEPTH_MAX * driftLoud * driftLoud * (2 * loudSwell - 1));
+}
+
+// Absolute ceiling on the rate driftRatePerSec returns, applied after
+// loudSpeedFactor. Every other term maxed (drift=1, driftBoost=1.8 capped
+// with a maxed Kick surge into SURGE_CAP=5, loudSpeedFactor=8 at
+// loudSwell=1) would otherwise reach DRIFT_BASE_RATE(2) * 5 * 8 = 80/sec;
+// this keeps the top end a fast, coherent sprint instead of an incoherent
+// blur.
+const DRIFT_RATE_MAX = 20;
+
+// Loudness surge's driver: FeatureFrame.level, fast-tracked and calibrated
+// against its own leaky floor/ceiling. This is the deliberate inverse of
+// sectionIntensity.ts, which contracts its own floor/ceiling on a
+// phrase-length timescale (~3.3s/~12s) so a long quiet passage climbs back
+// toward mid — correct for "which section of the song is this", exactly
+// wrong for "quiet should stay quiet". Contracting an order of magnitude
+// slower (~30s) is what makes this gain-independent instead: it settles
+// into the room/playback's own observed range and stays there, rather than
+// re-normalizing away the very quiet-vs-loud contrast it exists to show. It
+// also reads a different signal (`level`, not `energy`), so this isn't a
+// duplicate of that module — it's a different job on a different input.
+const LOUD_FAST_RATE_PER_SEC = 5; // ~0.2s: a loud bar registers at once, without chasing individual transients
+const LOUD_ENV_EXPAND_RATE_PER_SEC = 1 / 0.3; // ~0.3s: a new extreme is grabbed almost immediately
+const LOUD_ENV_CONTRACT_RATE_PER_SEC = 1 / 30; // ~30s: an old extreme is forgotten slowly — see above
+const LOUD_MIN_RANGE = 0.15; // below this observed range, confidence blends the output toward neutral instead of amplifying noise
+const LOUD_NEUTRAL = 0.5;
+
+export interface LoudSwellState {
+  fast: number;
+  floor: number;
+  ceil: number;
+  init: boolean;
+}
+
+export function createLoudSwellState(): LoudSwellState {
+  return { fast: LOUD_NEUTRAL, floor: LOUD_NEUTRAL, ceil: LOUD_NEUTRAL, init: false };
+}
+
+function clamp01(x: number): number {
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
+/** Advances the loudness calibration in place and returns loudSwell (0..1,
+ *  0.5 = neutral): `level`'s position within its own recently observed
+ *  range. The first call seeds floor/ceil/fast from that sample (so startup
+ *  acquires rather than reporting a false full range) and returns neutral.
+ *  Pure aside from `st`, and exported so tests/caustics.test.ts can pin the
+ *  gain-invariance (any constant input settles at neutral), extremes-tracking
+ *  and slow-forgetting properties directly. */
+export function advanceLoudSwell(st: LoudSwellState, dtSec: number, level: number): number {
+  const lvl = clamp01(level);
+  if (!st.init) {
+    st.fast = lvl;
+    st.floor = lvl;
+    st.ceil = lvl;
+    st.init = true;
+    return LOUD_NEUTRAL;
+  }
+
+  st.fast += (lvl - st.fast) * Math.min(1, LOUD_FAST_RATE_PER_SEC * dtSec);
+
+  const expand = Math.min(1, LOUD_ENV_EXPAND_RATE_PER_SEC * dtSec);
+  const contract = Math.min(1, LOUD_ENV_CONTRACT_RATE_PER_SEC * dtSec);
+  st.floor += (st.fast - st.floor) * (st.fast < st.floor ? expand : contract);
+  st.ceil += (st.fast - st.ceil) * (st.fast > st.ceil ? expand : contract);
+
+  const range = st.ceil - st.floor;
+  const raw = range > 1e-4 ? clamp01((st.fast - st.floor) / range) : LOUD_NEUTRAL;
+  const confidence = clamp01(range / LOUD_MIN_RANGE);
+  return LOUD_NEUTRAL + confidence * (raw - LOUD_NEUTRAL);
+}
+
+// loudSwellDrive is uLoudSwell's JS-side source — the same driftLoud^2 *
+// (2*loudSwell - 1) shape as loudSpeedFactor's exponent, but left linear and
+// signed ([-1, 1], 0 at neutral) rather than exponentiated, since FRAG uses
+// it as a direct multiplier on aperture/floor terms rather than a rate
+// ratio. See the file header's driftLoud paragraph for what it drives.
+export function loudSwellDrive(driftLoud: number, loudSwell: number): number {
+  return driftLoud * driftLoud * (2 * loudSwell - 1);
+}
 
 // A kick strike also adds a bounded *position* offset on top of driftPhase,
 // separate from the rate term above — see the file header. A rate-only surge
@@ -584,14 +717,16 @@ const KICK_JOLT_SLEW_PER_SEC = 18;
 export interface DriftInputs {
   /** The Drift speed slider, 0..1 (0.5 = original scene speed, 1 = 2x). */
   drift: number;
-  /** Kick/loudness surge sliders, each 0..1. Beat surge is not here — see
-   *  advanceLurch below. */
+  /** Kick surge slider, 0..1. Beat surge is not here — see advanceLurch
+   *  below. */
   driftKick: number;
+  /** Loudness surge slider, 0..1 — see loudSpeedFactor above. */
   driftLoud: number;
   /** anim.lowPulse, already a decaying 0..1 pulse. */
   lowPulse: number;
-  /** frame.energy, broadband loudness — may be negative before floor tracking settles. */
-  energy: number;
+  /** loudSwell (0..1, 0.5 = neutral) — advanceLoudSwell's calibrated
+   *  loudness, not frame.energy; see loudSpeedFactor above for why. */
+  loudSwell: number;
   /** Drop reactivity slider (0..1) and sectionIntensity (0..1) — same boost
    *  the shader's dropDrive/dropFlash terms use, so drift speeds up with the
    *  song's own intensity in the same choruses/drops that brighten it. */
@@ -604,12 +739,10 @@ export interface DriftInputs {
  *  this is the function that would have caught the 2x-attenuation bug. */
 export function driftRatePerSec(s: DriftInputs): number {
   const driftBoost = 1 + s.sectionIntensity * s.dropReactivity * 0.8;
-  const surge =
-    1 +
-    s.driftKick * s.lowPulse * KICK_SURGE_GAIN +
-    s.driftLoud * Math.max(0, s.energy) * LOUD_SURGE_GAIN;
+  const surge = 1 + s.driftKick * s.lowPulse * KICK_SURGE_GAIN;
   const modulation = Math.min(driftBoost * surge, SURGE_CAP);
-  return DRIFT_BASE_RATE * s.drift * modulation;
+  const loud = loudSpeedFactor(s.driftLoud, s.loudSwell);
+  return Math.min(DRIFT_BASE_RATE * s.drift * modulation * loud, DRIFT_RATE_MAX);
 }
 
 // Beat surge: a damped impulse added directly to the drift phase, fired on
@@ -744,6 +877,10 @@ void main() {
   // in/out with tempo detection instead of popping.
   float breatheAmt = uBreathe * uTempoLock * 0.10 * cos(uBarPhase * TWO_PI);
   p *= 1.0 + breatheAmt;
+  // Loudness swell's aperture: a loud passage opens the pool wider, a quiet
+  // one tightens it — aperiodic and sustained, unlike uBreathe's bar-locked
+  // zoom above. See SWELL_ZOOM's own comment for why this line, not a new one.
+  p *= 1.0 - ${SWELL_ZOOM.toFixed(2)} * uLoudSwell;
 
   // Bass swell: a sustained radial bulge near center, strongest right on a
   // low-band onset and fading outward — distinct from the beat ripple, which
@@ -907,7 +1044,11 @@ void main() {
   // Dark-water floor: uFog=0 clips almost exactly today's old fixed cut
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips
   // nothing at all, so the dim wash the haze sits in actually glows instead.
-  acc = max(0.0, acc - mix(${FOG_FLOOR_CRISP.toFixed(2)}, ${FOG_FLOOR_HAZY.toFixed(2)}, uFog));
+  // Loudness swell's floor lift: a loud passage glows the dim wash between
+  // filaments instead of clipping it away; a quiet one deepens the cut
+  // toward flat black water. See SWELL_FLOOR_LIFT's own comment.
+  acc = max(0.0, acc - mix(${FOG_FLOOR_CRISP.toFixed(2)}, ${FOG_FLOOR_HAZY.toFixed(2)}, uFog)
+    * max(0.0, 1.0 - ${SWELL_FLOOR_LIFT.toFixed(2)} * uLoudSwell));
   // Hue phase rides brightness (a ridge crest tints differently than the
   // dim water around it) through a cosine, which wraps through its full
   // hue cycle for roughly a unit change of phase. Raw acc can swing several
@@ -945,10 +1086,11 @@ void main() {
 
 export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG, {
   settings: SETTINGS,
-  extraUniformDecls: `uniform float uDriftPhase;\nuniform float uChurnDrive;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
+  extraUniformDecls: `uniform float uDriftPhase;\nuniform float uChurnDrive;\nuniform float uLoudSwell;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
   extraUniforms: (() => {
     let driftPhase = 0;
     const lurch = createLurchState();
+    const loudSwellState = createLoudSwellState();
     // Beat churn's own envelope: a plain decaying pulse, jumping to 1 on
     // anim.onset and decaying at the same LURCH_DECAY_PER_SEC as the lurch —
     // so a beat's shove and its churn snap on the same tick with the same
@@ -964,12 +1106,14 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
 
     return (frame, anim, getSetting) => {
       const driftKick = getSetting("driftKick");
+      const driftLoud = getSetting("driftLoud");
+      const loudSwell = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
       driftPhase += anim.dtSec * driftRatePerSec({
         drift: getSetting("drift"),
         driftKick,
-        driftLoud: getSetting("driftLoud"),
+        driftLoud,
         lowPulse: anim.lowPulse,
-        energy: frame.energy,
+        loudSwell,
         dropReactivity: getSetting("dropReactivity"),
         sectionIntensity: anim.sectionIntensity,
       });
@@ -1004,6 +1148,7 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
       return {
         uDriftPhase: driftPhase + lurch.phase + kickJolt,
         uChurnDrive: churnDrive,
+        uLoudSwell: loudSwellDrive(driftLoud, loudSwell),
         uRippleRadius: ripples.radius,
         uRippleStrength: ripples.strength,
       };
