@@ -151,14 +151,17 @@ import {
 //    land on adjacent frames (they usually do). A drop fires a burst of
 //    STRIKE_DROP_BURST strikes that bypass the refractory.
 //  - Beats are detected as *rises* in anim.beatPulse / lowPulse / dropPulse
-//    rather than from the one-shot flags (frame.beat, anim.lowOnset,
+//    rather than from the one-shot flags (frame.onset, anim.lowOnset,
 //    anim.dropOnset), and the pool is aged by this scene's own render
-//    interval rather than anim.dtSec. Both for the same reason: app.ts/tv.ts
-//    advance the anim clock on every rAF tick but rate-cap scene.render()
-//    (framePace.ts), so on a 120Hz display a one-shot that lands on a
-//    skipped tick never reaches render(), and anim.dtSec is the tick
-//    interval, not the time since this scene last drew. A pulse that has
-//    risen since the last draw can't be missed, whichever tick it rose on.
+//    interval rather than anim.dtSec. Both were written for the same reason:
+//    app.ts/tv.ts advance the anim clock on every rAF tick but rate-cap
+//    scene.render() (framePace.ts), so on a 120Hz display a one-shot that
+//    landed on a skipped tick never reached render(), and anim.dtSec was the
+//    tick interval, not the time since this scene last drew. The loop has
+//    since grown renderLatch.ts, which latches one-shots and passes a
+//    render-dt, making this local workaround redundant in principle; it still
+//    behaves correctly (a pulse that has risen since the last draw can't be
+//    missed, whichever tick it rose on) and is kept until the scene settles.
 //
 // The bolt (every mode): a trigger also draws a branched tree — buildBoltTree
 // — into the pool's per-slot `path` storage and marks the slot dirty. The
@@ -3571,7 +3574,7 @@ export const stormScene: Scene = (() => {
       // The sections fade on the same measured interval the pool ages on —
       // one clock, and the one this scene actually draws at.
       cells.tick(dt);
-      const beatRose = anim.beatPulse > prevBeatPulse + 1e-3 || frame.beat;
+      const beatRose = anim.beatPulse > prevBeatPulse + 1e-3 || frame.onset;
       const lowRose = anim.lowPulse > prevLowPulse + 1e-3 || anim.lowOnset;
       const dropRose = anim.dropPulse > prevDropPulse + 1e-3 || anim.dropOnset;
       // The upper bands get the same rise detection, for the sections alone:

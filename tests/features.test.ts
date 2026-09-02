@@ -136,7 +136,7 @@ describe("FeatureExtractor", () => {
       const isClick = time >= nextClickAt;
       if (isClick) nextClickAt += intervalSec;
       frame = extractor.update(noisy(isClick ? { 0: LOUD_DB, 12: LOUD_DB } : {}), time);
-      if (frame.beat && !isClick) spurious++;
+      if (frame.onset && !isClick) spurious++;
     }
 
     expect(spurious).toBeGreaterThan(0); // the scenario must actually be noisy
@@ -410,5 +410,84 @@ describe("FeatureExtractor", () => {
 
     expect(at0_4s).toBeLessThan(at0_1s);
     expect(at0_9s).toBeGreaterThan(at0_4s);
+  });
+
+  it("bandSpanDb widens as the per-band range actually seen grows", () => {
+    const narrow = new FeatureExtractor();
+    const wide = new FeatureExtractor();
+    const dt = 1 / 60;
+    let time = 0;
+
+    // `narrow` only ever sees one level; `wide` alternates between quiet and
+    // loud, so its floor/peak trackers open up further.
+    for (let i = 0; i < 300; i++) {
+      time += dt;
+      narrow.update(bandsFrame(-60), time);
+      wide.update(bandsFrame(i % 2 === 0 ? QUIET_DB : LOUD_DB), time);
+    }
+
+    expect(wide.bandSpanDb).toBeGreaterThan(narrow.bandSpanDb);
+  });
+
+  // autoGain.ts's auto mode leans on bandSpanDb reading the room, not the
+  // setting it's used to drive — this pins that no-feedback-loop property.
+  // features.ts's own `autoGain` param doc already says the floor/peak
+  // trackers run unconditionally; this is what actually holds it to that.
+  it("bandSpanDb reads the same regardless of the autoGain argument passed to update()", () => {
+    const withAutoGain = new FeatureExtractor();
+    const withoutAutoGain = new FeatureExtractor();
+    const dt = 1 / 60;
+    let time = 0;
+
+    for (let i = 0; i < 300; i++) {
+      time += dt;
+      const db = bandsFrame(i % 2 === 0 ? QUIET_DB : LOUD_DB);
+      withAutoGain.update(db, time, 1);
+      withoutAutoGain.update(db, time, 0);
+    }
+
+    expect(withoutAutoGain.bandSpanDb).toBeCloseTo(withAutoGain.bandSpanDb, 5);
+  });
+
+  describe("fluxRatio", () => {
+    it("sits near zero against a silent, unchanging floor", () => {
+      const extractor = new FeatureExtractor();
+      const dt = 1 / 60;
+      let time = 0;
+      let frame;
+      for (let i = 0; i < 120; i++) {
+        time += dt;
+        frame = extractor.update(bandsFrame(QUIET_DB), time);
+      }
+      expect(frame!.onset).toBe(false);
+      expect(extractor.fluxRatio).toBeLessThan(1);
+    });
+
+    it("crosses 1 exactly on the frame a broadband hit fires, and stays reportable on non-firing frames", () => {
+      const extractor = new FeatureExtractor();
+      const dt = 1 / 60;
+      let time = 0;
+      let frame;
+
+      // Prime a quiet floor so there's a baseline to jump against.
+      for (let i = 0; i < 120; i++) {
+        time += dt;
+        frame = extractor.update(bandsFrame(QUIET_DB), time);
+      }
+      expect(extractor.fluxRatio).toBeLessThan(1);
+
+      // One broadband hit.
+      time += dt;
+      frame = extractor.update(bandsFrame(LOUD_DB), time);
+      expect(frame!.onset).toBe(true);
+      expect(extractor.fluxRatio).toBeGreaterThanOrEqual(1);
+
+      // Immediately after, still within the refractory window: no new beat,
+      // but fluxRatio keeps reporting every frame rather than freezing.
+      time += dt;
+      frame = extractor.update(bandsFrame(LOUD_DB), time);
+      expect(frame!.onset).toBe(false);
+      expect(Number.isFinite(extractor.fluxRatio)).toBe(true);
+    });
   });
 });

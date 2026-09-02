@@ -17,7 +17,8 @@ Expansion/Smoothing controls on top of that.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
-clock, per-band energy and onset pulses, section intensity. Scenes never read
+clock, per-band energy and onset pulses, section intensity, spectral centroid
+(`src/render/spectralCentroid.ts`). Scenes never read
 `FeatureFrame` fields directly for anything animated; they read `AnimFrame`,
 because it's already shaped for motion (see the field comments in `animClock.ts`
 for why each one is derived rather than a straight passthrough).
@@ -48,6 +49,11 @@ diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
 `FeatureFrame` field. The Loudness card is the same kind of read: BS.1770 LUFS
 from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
 this device's own capture, hidden on a mic-less renderer like the Scope.
+
+`src/render/signals.ts` is the seam between those meters and a scene's own
+`settings`: a scene can mark a `SceneSetting` with `reads`, naming which of
+this file's `FeatureFrame`/`AnimFrame` values actually drive it, and the
+device menu renders that as a live pill pointing back at the meter row above.
 
 ## Phone to TV
 

@@ -3,7 +3,7 @@ import { NUM_BANDS } from "../audio/types.ts";
 export interface TimedFrame {
   bands: Float32Array;
   energy: number;
-  beat: boolean;
+  onset: boolean;
   bpm: number;
   level: number;
   roomTimeMs: number;
@@ -23,14 +23,14 @@ const MAX_HISTORY_MS = 2000;
  * local capture — the two are treated identically) and reconstructs a
  * smooth continuous signal at any requested room-clock instant: bands and
  * energy are linearly interpolated between the bracketing samples, and beat
- * phase is extrapolated from BPM + the last known beat time rather than
+ * phase is extrapolated from BPM + the last known onset time rather than
  * following the 30Hz packet cadence. This is what lets every device in a
  * room render the same visual instant regardless of when packets arrived.
  */
 export class JitterBuffer {
   private frames: TimedFrame[] = [];
-  private lastBeatRoomTimeMs = -Infinity;
-  private lastFiredBeatRoomTimeMs = -Infinity;
+  private lastOnsetRoomTimeMs = -Infinity;
+  private lastFiredOnsetRoomTimeMs = -Infinity;
   private bpm = 0;
 
   // Reused across sampleAt() calls to avoid a per-render-tick allocation.
@@ -51,7 +51,7 @@ export class JitterBuffer {
     const cutoff = frame.roomTimeMs - MAX_HISTORY_MS;
     while (this.frames.length > 2 && this.frames[0].roomTimeMs < cutoff) this.frames.shift();
 
-    if (frame.beat) this.lastBeatRoomTimeMs = frame.roomTimeMs;
+    if (frame.onset) this.lastOnsetRoomTimeMs = frame.roomTimeMs;
     if (frame.bpm > 0) this.bpm = frame.bpm;
   }
 
@@ -96,17 +96,17 @@ export class JitterBuffer {
   }
 
   beatPhaseAt(targetMs: number): number {
-    if (this.bpm <= 0 || this.lastBeatRoomTimeMs === -Infinity) return 0;
+    if (this.bpm <= 0 || this.lastOnsetRoomTimeMs === -Infinity) return 0;
     const beatDurMs = 60000 / this.bpm;
-    const phase = ((targetMs - this.lastBeatRoomTimeMs) / beatDurMs) % 1;
+    const phase = ((targetMs - this.lastOnsetRoomTimeMs) / beatDurMs) % 1;
     return phase < 0 ? phase + 1 : phase;
   }
 
-  /** One-shot: true the first time `targetMs` has caught up to a not-yet-fired beat. */
-  consumeBeatIfDue(targetMs: number): boolean {
-    if (this.lastBeatRoomTimeMs <= this.lastFiredBeatRoomTimeMs) return false;
-    if (targetMs < this.lastBeatRoomTimeMs) return false;
-    this.lastFiredBeatRoomTimeMs = this.lastBeatRoomTimeMs;
+  /** One-shot: true the first time `targetMs` has caught up to a not-yet-fired onset. */
+  consumeOnsetIfDue(targetMs: number): boolean {
+    if (this.lastOnsetRoomTimeMs <= this.lastFiredOnsetRoomTimeMs) return false;
+    if (targetMs < this.lastOnsetRoomTimeMs) return false;
+    this.lastFiredOnsetRoomTimeMs = this.lastOnsetRoomTimeMs;
     return true;
   }
 

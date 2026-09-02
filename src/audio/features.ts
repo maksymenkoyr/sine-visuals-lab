@@ -127,12 +127,50 @@ export class FeatureExtractor {
     return this.lastFixedEnergy;
   }
 
+  /** Mean per-band `peak - floor`, in dB — how much of the room/mic's actual
+   *  range the trackers above have found, regardless of `autoGain`: they run
+   *  unconditionally (see the `autoGain` param doc on update() below), so
+   *  this reads the room, not the setting it's used to drive. A local
+   *  diagnostic like fixedEnergy, never part of FeatureFrame — autoGain.ts's
+   *  auto mode is the one consumer, easing the Auto-gain amount toward what
+   *  this says the room needs. */
+  get bandSpanDb(): number {
+    let sum = 0;
+    for (let b = 0; b < NUM_BANDS; b++) sum += this.peak[b] - this.floor[b];
+    return sum / NUM_BANDS;
+  }
+
+  /** How hard the broadband onset detector's flux cleared its adaptive
+   *  threshold this frame: 1 is a bare trigger, above 1 fired, below 1 is a
+   *  near-miss. See registerOnset's own doc for the same ratio (there
+   *  clamped for the tempo comb) — this is the unclamped instant reading. */
+  get fluxRatio(): number {
+    return this.lastFluxRatio;
+  }
+
   private fluxBaseline = 0;
   private lastTime: number | null = null;
+  private lastDt = 1 / 60;
   private lastOnsetTime = -Infinity;
   private onsets: { time: number; weight: number }[] = [];
   private bpm = 0;
-  private lastBeatTime = 0;
+  private lastOnsetPhaseTime = 0;
+  // flux/threshold from the most recent update(), stored unconditionally —
+  // including on frames that don't fire, so a near-miss is visible too. A
+  // local diagnostic like fixedEnergy/bandSpanDb above, never part of
+  // FeatureFrame: the onset flag it explains is a boolean by design, but a
+  // tuning session wants to see how hard a hit cleared the bar (or how
+  // close it came) — the Rhythm card's Onset row in audioMeters.ts.
+  private lastFluxRatio = 0;
+
+  /** The AudioContext-clock delta update() computed last call — what
+   *  app.ts should feed autoGain.ts's feedAutoGainMeasurement() as dtSec,
+   *  so that ease runs on the same clock bandSpanDb's trackers do rather
+   *  than a rAF delta (unreliable at high refresh rates — see the
+   *  render-cap-one-shots note). */
+  get dtSec(): number {
+    return this.lastDt;
+  }
 
   /**
    * @param rawBandsDb per-band FFT magnitude in dB, from BandAnalyser.readBandsDb().
@@ -164,6 +202,7 @@ export class FeatureExtractor {
     const blend = clamp01(autoGain);
     const dt = this.lastTime === null ? 1 / 60 : Math.max(1e-4, time - this.lastTime);
     this.lastTime = time;
+    this.lastDt = dt;
 
     const bands = new Float32Array(NUM_BANDS);
     let flux = 0;
@@ -218,10 +257,14 @@ export class FeatureExtractor {
 
     this.fluxBaseline += (flux - this.fluxBaseline) * Math.min(1, FLUX_ADAPTIVE_RATE * dt);
     const threshold = this.fluxBaseline * FLUX_THRESHOLD_MULT + FLUX_THRESHOLD_MARGIN;
+    // Unconditional, not just on a fire — see fluxRatio's own doc. threshold
+    // is always > 0 (FLUX_THRESHOLD_MARGIN keeps it off zero at a silent
+    // baseline), so this never divides by zero.
+    this.lastFluxRatio = flux / threshold;
     const canFire = time - this.lastOnsetTime > ONSET_REFRACTORY_SEC;
-    const beat = canFire && flux > threshold;
+    const onset = canFire && flux > threshold;
 
-    if (beat) {
+    if (onset) {
       this.lastOnsetTime = time;
       this.registerOnset(time, flux / threshold);
     }
@@ -235,7 +278,7 @@ export class FeatureExtractor {
     energy = clamp01(energy / NUM_BANDS);
     this.lastFixedEnergy = clamp01(fixedEnergy / NUM_BANDS);
 
-    const beatPhase = this.bpm > 0 ? (((time - this.lastBeatTime) / (60 / this.bpm)) % 1 + 1) % 1 : 0;
+    const onsetPhase = this.bpm > 0 ? (((time - this.lastOnsetPhaseTime) / (60 / this.bpm)) % 1 + 1) % 1 : 0;
 
     // Averaged as power, then back to dB — not a mean of the dB values. Most
     // of the 24 bands sit at the noise floor for any ordinary sound, and a
@@ -245,12 +288,12 @@ export class FeatureExtractor {
     const meanRawDb = 10 * Math.log10(rawPowSum / NUM_BANDS);
     const level = clamp01((meanRawDb - LEVEL_DB_FLOOR) / (LEVEL_DB_CEIL - LEVEL_DB_FLOOR));
 
-    return { time, bands, energy, beat, bpm: this.bpm, beatPhase, level };
+    return { time, bands, energy, onset, bpm: this.bpm, onsetPhase, level };
   }
 
   /** @param strength flux over the firing threshold — 1 is a bare trigger. */
   private registerOnset(time: number, strength: number): void {
-    this.lastBeatTime = time;
+    this.lastOnsetPhaseTime = time;
     this.onsets.push({ time, weight: Math.min(ONSET_WEIGHT_CAP, Math.max(1, strength)) });
     while (this.onsets.length > MAX_ONSETS || this.onsets[0].time < time - ONSET_WINDOW_SEC) this.onsets.shift();
     if (this.onsets.length < 3) return;

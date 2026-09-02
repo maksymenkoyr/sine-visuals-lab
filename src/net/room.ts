@@ -34,8 +34,8 @@ export interface VisualSample {
   energy: number;
   bpm: number;
   beatPhase: number;
-  /** One-shot: true only on the render tick where a beat first becomes due. */
-  beatFired: boolean;
+  /** One-shot: true only on the render tick where an onset first becomes due. */
+  onsetFired: boolean;
   /** Room-clock time, wrapped to stay small — safe to feed straight into a `uTime` uniform. */
   timeSec: number;
   /** Absolute input loudness [0,1] — see FeatureFrame.level. */
@@ -247,7 +247,7 @@ abstract class RoomConnectionBase {
       energy: s.energy,
       bpm: s.bpm,
       beatPhase: this.buffer.beatPhaseAt(targetMs),
-      beatFired: this.buffer.consumeBeatIfDue(targetMs),
+      onsetFired: this.buffer.consumeOnsetIfDue(targetMs),
       timeSec: roomTimeToSeconds(targetMs),
       level: s.level,
     };

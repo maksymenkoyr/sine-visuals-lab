@@ -5,6 +5,7 @@ import { createSyntheticFeed } from "../audio/synthetic.ts";
 import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRenderer.ts";
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
+import { PRODUCT_NAME, SOURCE_URL } from "../brand.ts";
 
 export interface GallerySceneEntry {
   scene: Scene;
@@ -46,6 +47,7 @@ const rootStyle = `
 const headerStyle = `max-width: 1100px; margin: 0 auto 24px;`;
 const titleStyle = `font-size: 22px; font-weight: 700;`;
 const subtitleStyle = `font-size: 13px; opacity: 0.55; margin-top: 4px;`;
+const sourceLinkStyle = `font-size: 12px; opacity: 0.45; margin-top: 6px; display: inline-block; color: inherit;`;
 const errorStyle = `
   max-width: 1100px; margin: 0 auto 16px; padding: 10px 14px; border-radius: 8px;
   background: #4a1a1a; border: 1px solid #f66a; font-size: 13px; display: none;
@@ -133,12 +135,19 @@ export function createGallery(deps: GalleryDeps): Gallery {
   const header = document.createElement("div");
   header.style.cssText = headerStyle;
   const title = document.createElement("div");
-  title.textContent = "Audio Visualizations";
+  title.textContent = PRODUCT_NAME;
   title.style.cssText = titleStyle;
   const subtitle = document.createElement("div");
   subtitle.textContent = "Pick a visual — tap to start with your mic.";
   subtitle.style.cssText = subtitleStyle;
-  header.append(title, subtitle);
+  // The AGPL §13 network-source offer — see src/brand.ts.
+  const sourceLink = document.createElement("a");
+  sourceLink.textContent = "Source (AGPL-3.0)";
+  sourceLink.href = SOURCE_URL;
+  sourceLink.target = "_blank";
+  sourceLink.rel = "noopener";
+  sourceLink.style.cssText = sourceLinkStyle;
+  header.append(title, subtitle, sourceLink);
 
   const errorBanner = document.createElement("div");
   errorBanner.style.cssText = errorStyle;
@@ -147,7 +156,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
   grid.style.cssText = gridStyle;
 
   // Collapsed by default — see expandDrafts/collapseDrafts below. Built lazily
-  // so a first-time visitor never pays for compiling seven draft shaders.
+  // so a first-time visitor never pays for compiling the draft shaders.
   const draftToggle = document.createElement("button");
   draftToggle.style.cssText = draftToggleStyle;
   draftToggle.style.display = "none";

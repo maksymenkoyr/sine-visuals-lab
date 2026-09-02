@@ -13,8 +13,11 @@ import {
   shapeLevel,
 } from "../audio/sensitivity.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
+import type { SceneLook } from "../render/sceneLooks.ts";
+import { createLooksCard } from "./looksCard.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
-import { type FeatureFrame } from "../audio/types.ts";
+import { SIGNALS, type SignalSpec } from "../render/signals.ts";
+import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
 import type { LufsReading } from "../audio/lufs.ts";
@@ -47,6 +50,8 @@ import {
   createAdvancedSection,
   createCard,
   createChipButton,
+  createSignalStrip,
+  createTraceLegend,
   digitsStyle,
   digitsTextStyle,
   groupHeading,
@@ -99,10 +104,13 @@ import {
  * (drag, ↺, a card Reset, auto taking over) forgets that restore point and
  * unlights it — it's a toggle, not a memory. ↺ only appears once a value is
  * off its default, doubling as a "you changed this" marker. A chip's letter
- * *is* its hotkey when the row has keyboard focus. The hint under a row (a
- * setting's `description`) stays collapsed until hover/focus, and while auto
- * holds the row it reads as an invitation to take over instead. Each card's
- * accent names its system — the constants and their meanings live in
+ * *is* its hotkey once the row's control has keyboard focus — and
+ * wireHoverFocus gives it that focus on genuine pointer movement over the
+ * row, matching the identical hover/focus styling below, so pointing at a
+ * row is enough; no click needed first. The hint under a row (a setting's
+ * `description`) stays collapsed until hover/focus, and while auto holds the
+ * row it reads as an invitation to take over instead. Each card's accent
+ * names its system — the constants and their meanings live in
  * controlsTheme.ts.
  *
  * The panel itself is opened and closed from outside with S (wired in
@@ -116,7 +124,12 @@ import {
  * and skipping every chip and button — so Tab alone never leaves the panel
  * and never lands anywhere but a control. On whichever control has focus, A
  * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
- * are its own, in bandFaders.ts). Digit keys 1-9 jump to a numbered block —
+ * are its own, in bandFaders.ts). A focused
+ * slider also takes Home/End to its min/max — the browser's own native
+ * range-input behavior, left alone by onKeyDown below — plus z/x
+ * (wireSliderQuickJump) to jump straight to the middle of the track or the
+ * top, the one landing Home/End can't reach. Digit
+ * keys 1-9 jump to a numbered block —
  * each card title and each scene group heading carries a .vc-block badge,
  * renumbered by renumberBlocks() whenever the block set can change (i.e. on
  * every renderSceneSettings) — and focus the first control inside it,
@@ -164,6 +177,16 @@ export interface DeviceMenuDeps {
     value: number,
   ) => void;
   onSceneSettingsReset: (sceneId: string) => void;
+  /** Named, shareable snapshots of the Scene card's own settings — see
+   *  src/render/sceneLooks.ts. Rendered by the Looks card, next to Scene. */
+  listLooks: (sceneId: string) => SceneLook[];
+  onSaveLook: (sceneId: string, name: string) => void;
+  onApplyLook: (look: SceneLook) => void;
+  onDeleteLook: (sceneId: string, name: string) => void;
+  decodeLook: (code: string) => SceneLook | null;
+  buildShareLink: (look: SceneLook) => string;
+  hasLookUndo: (sceneId: string) => boolean;
+  onUndoLook: (sceneId: string) => void;
   /** Low/mid/high crossover, global per device (not per scene) — fixed, not
    *  user-facing, and unrelated to the faders: it only colors the spectrum
    *  strip's bars by pulse group. See src/audio/bandSplit.ts. */
@@ -212,6 +235,14 @@ export interface DeviceMenuDeps {
    *  fully adaptive. */
   getAutoGain: () => number;
   onAutoGainChange: (value: number) => void;
+  /** The row's own "A" chip — auto-resolves the amount from the room's
+   *  measured span rather than MUSIC_DIALS (see autoGain.ts's header for
+   *  why). Independent of the master Auto button: that toggle is scoped to
+   *  isSceneAuto's per-scene exceptions, and this setting is device-global
+   *  like getAutoGain above. */
+  isAutoGainAuto: () => boolean;
+  onAutoGainAutoToggle: (on: boolean) => void;
+  resolveAutoGain: () => number;
   /** Energy saving mode (src/render/powerMode.ts) — the Power card's
    *  Auto/On/Off override for the quality governor. Device-wide, like
    *  Auto-gain above. */
@@ -249,7 +280,8 @@ export interface DeviceMenu {
    *  Smoothing value — forwarded to the meters so their own BPM settle and
    *  waveform peak-hold bypass at Smoothing's Off stop the same way the rest
    *  of the pipeline does; not re-resolved here, since resolveSmoothing()
-   *  slews its auto value and this runs every rAF tick. */
+   *  slews its auto value and this runs every rAF tick. `fluxRatio` is
+   *  FeatureExtractor.fluxRatio, null on the same paths as `fixedEnergy`. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -260,6 +292,7 @@ export interface DeviceMenu {
     rateScale: number,
     fixedEnergy: number | null,
     lufs: LufsReading | null,
+    fluxRatio: number | null,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
@@ -483,6 +516,34 @@ interface ControlRowSpec {
      *  clearing a pin never fights whatever else currently owns the row. */
     resolve(): number;
   };
+  /** SceneSetting.reads (sceneSettings.ts), resolved to concrete signals and
+   *  callbacks by appendSettingRow below — see ResolvedSignalRead. Omit for
+   *  a setting with no `reads` entries. */
+  reads?: readonly ResolvedSignalRead[];
+}
+
+/** One SceneSetting.reads entry (sceneSettings.ts's SignalLink) resolved
+ *  against the active scene: `active` closes over the sibling-setting getter
+ *  a SignalLink.activeWhen predicate needs (built once in appendSettingRow,
+ *  not per frame), and `onReveal`, present only when the SignalSpec itself
+ *  has a `monitor` anchor, is the click target for its pill — unfold/scroll/
+ *  flash the meter row that shows it (audioMeters.ts's revealRow). */
+interface ResolvedSignalRead {
+  signal: SignalSpec;
+  active: () => boolean;
+  onReveal?: () => void;
+}
+
+/** Shared by every document-level hotkey (H, Tab, the digits) and by
+ *  wireHoverFocus below: ignored while typing somewhere (a range slider
+ *  keeping focus after a drag is fine — that's still "in the panel", there's
+ *  just nothing to type in the panel itself). */
+function isTypingTarget(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false;
+  const tag = t.tagName;
+  if (tag === "TEXTAREA" || t.isContentEditable) return true;
+  if (tag === "INPUT" && (t as HTMLInputElement).type !== "range") return true;
+  return false;
 }
 
 /** Wires A/R/T on a row's own focusable control (the slider or the toggle
@@ -540,6 +601,61 @@ function wireThumbMagnet(row: HTMLElement, slider: HTMLInputElement): void {
     row.style.setProperty("--vc-thumb-boost", boost.toFixed(3));
   });
   row.addEventListener("mouseleave", () => row.style.removeProperty("--vc-thumb-boost"));
+}
+
+// The last real mouse position seen anywhere in the panel — shared across
+// every wireHoverFocus call (there's exactly one device menu instance) rather
+// than kept per-row, because the case this exists to catch is cross-row:
+// scrolling `.vc-controls-col` (or a keyboard jumpToBlock's scrollIntoView)
+// with a stationary cursor carries a *different* row under it and fires a
+// synthetic mousemove there at the unchanged coordinates. A per-row last-seen
+// position wouldn't catch that — the newly-arrived row has never seen this
+// position before even though the real cursor didn't move — so the check has
+// to be panel-wide to recognize "nothing actually moved."
+let lastHoverX = -1;
+let lastHoverY = -1;
+
+/** Focuses `control` on real pointer movement over `row` — a hover row reads
+ *  as focused already (controlsTheme.ts styles :hover and :focus-within
+ *  identically), so this makes the keyboard agree without a click first.
+ *  Must use `preventScroll` — the panel's columns are `.vc-scroll`, and a bare
+ *  focus() would scroll the row into view, sliding it out from under the
+ *  cursor (see bandFaders.ts's own hit.focus() for the same reason). Never
+ *  steals focus from a typing target (the pin input's blur commits its
+ *  value, so mid-type is off limits) — checked against document.activeElement,
+ *  not the event target, since the pointer is over this row, not the input
+ *  holding focus elsewhere. */
+function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
+  row.addEventListener("mousemove", (e) => {
+    if (e.clientX === lastHoverX && e.clientY === lastHoverY) return;
+    lastHoverX = e.clientX;
+    lastHoverY = e.clientY;
+    if (document.activeElement === control || isTypingTarget(document.activeElement)) return;
+    control.focus({ preventScroll: true });
+  });
+}
+
+/** z centers a focused slider, x maxes it out — a fast way to land on either
+ *  without dragging. No key for the low end: Home already jumps a native
+ *  range input to its min for free (onKeyDown, below, doesn't intercept it),
+ *  so the only capability worth adding is the one Home/End don't cover.
+ *  Plain single keys, not a chord — z/x collide with nothing else live while
+ *  a slider has focus (A/R/T/D, the panel's H/M/Tab/1-9, the arrows, and
+ *  Home/End are all spoken for; z/x aren't). Sets .value then redispatches
+ *  "input" rather than duplicating each slider's own commit logic, so this
+ *  stays a one-line addition at every call site regardless of what that
+ *  site's "input" listener does. */
+function wireSliderQuickJump(slider: HTMLInputElement): void {
+  slider.addEventListener("keydown", (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const frac = { z: 0.5, x: 1 }[e.key];
+    if (frac === undefined) return;
+    e.preventDefault();
+    const lo = Number(slider.min);
+    const hi = Number(slider.max);
+    slider.value = String(lo + frac * (hi - lo));
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+  });
 }
 
 /** One slider row in the panel's grammar — label, readout, chip, ↺, slider,
@@ -693,6 +809,24 @@ function createControlRow(spec: ControlRowSpec) {
   resetBtn.title = `Reset ${spec.label} (R)`;
   resetBtn.style.cssText = rowResetStyle;
 
+  // src/render/signals.ts's link from this setting to the live values that
+  // drive it — a small always-on chip in `right` (leftmost, read as a badge
+  // on the row rather than another action) plus a hover-revealed pill strip
+  // appended below, outside .vc-hint (see the .vc-reads rule,
+  // controlsTheme.ts, for why that placement matters). Omit both entirely
+  // for the common case of no `reads` — most rows have none.
+  const signalIndicator = spec.reads?.length
+    ? createSignalStrip(
+        spec.reads.map((r) => ({
+          label: r.signal.label,
+          description: r.signal.description,
+          onReveal: r.onReveal,
+        })),
+        spec.accent,
+      )
+    : null;
+  if (signalIndicator) right.appendChild(signalIndicator.chip);
+
   right.append(readout, chip, offChip, resetBtn);
   head.append(label, right);
 
@@ -722,8 +856,11 @@ function createControlRow(spec: ControlRowSpec) {
   hint.className = "vc-hint";
 
   el.append(head, slider, hint);
+  if (signalIndicator) el.appendChild(signalIndicator.strip);
   el.addEventListener("click", () => slider.focus());
+  wireHoverFocus(el, slider);
   wireThumbMagnet(el, slider);
+  wireSliderQuickJump(slider);
 
   // Log-mapped so the midpoint lands close to defaultValue instead of skewing
   // toward the wide "more reactive" end. With zeroAtMin, position 0 is carved
@@ -909,6 +1046,21 @@ function createControlRow(spec: ControlRowSpec) {
       if (spec.auto && spec.auto.isEnabled()) display(spec.auto.resolveLive(), true);
       else display(spec.pin?.get() ?? manualValue(), false);
     },
+    /** Called every rAF tick DeviceMenu.update() runs, unconditionally and
+     *  unthrottled — a no-op when this row has no `reads`, otherwise pushes
+     *  each linked SignalSpec's live read() (0 while frame/anim aren't up
+     *  yet) and activeWhen predicate into the strip. Unthrottled to match
+     *  the meters' own "fills move every frame" rule (audioMeters.ts) — a
+     *  beat-driven pill should feel as live as the meter it points at. */
+    updateSignalPills(frame: FeatureFrame | null, anim: AnimFrame | null): void {
+      if (!signalIndicator || !spec.reads) return;
+      signalIndicator.update(
+        spec.reads.map((r) => ({
+          value: frame && anim ? r.signal.read(frame, anim) : 0,
+          active: r.active(),
+        })),
+      );
+    },
   };
 }
 
@@ -962,6 +1114,7 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
 
   el.append(head, toggle, hint);
   el.addEventListener("click", () => toggle.focus());
+  wireHoverFocus(el, toggle);
 
   function apply(value: number): void {
     const on = value >= 0.5;
@@ -1033,6 +1186,7 @@ function createPickerRow(spec: PickerRowSpec): HTMLElement {
   strip.setAttribute("aria-label", spec.label);
   strip.style.cssText = paletteListStyle;
   el.style.setProperty("--vc-accent", spec.accent);
+  wireHoverFocus(el, strip);
   const chips = spec.options.map((name, i) => {
     const btn = document.createElement("button");
     btn.textContent = name;
@@ -1207,10 +1361,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const fadersRow = document.createElement("div");
   fadersRow.className = "vc-row";
   fadersRow.style.setProperty("--vc-accent", BANDS_AMBER);
+  // Always-on, unlike fadersHint below: explains the sky-blue marker
+  // spectrumStrip.ts's drawCentroidMarker draws over the bars (same
+  // AUTO_SKY constant, so the swatch can't drift from the line). A sibling
+  // of .vc-hint, not nested in it, so it doesn't inherit the hover-reveal —
+  // see the createSignalStrip .vc-reads reasoning above for why that split
+  // matters. Not the same reading as the Character card's Centroid row:
+  // that one is range-adapted against the track's own recent swing and has
+  // no position on this strip's band-index axis, so the note doesn't claim
+  // the two match.
+  const spectrumLegend = createTraceLegend([
+    { color: AUTO_SKY, label: "Brightness", note: "where the spectrum's energy balances" },
+  ]);
   const fadersHint = document.createElement("div");
   fadersHint.className = "vc-hint";
   fadersHint.textContent = "Middle is 1× — drag up to boost a band, down to cut it, all the way down to switch it off";
-  fadersRow.append(bandFaders.el, fadersHint);
+  fadersRow.append(bandFaders.el, spectrumLegend.el, fadersHint);
   // R/T on a focused fader, through the same wiring as every row; no A —
   // the faders have no auto weights.
   bandFaders.faders.forEach((el, i) => {
@@ -1218,6 +1384,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       reset: () => bandFaders.reset(i),
       toggleOff: () => bandFaders.toggleOff(i),
     });
+    // Scoped to the hit div itself, not fadersRow: fadersRow also contains the
+    // spectrum plot and the gain/Hz readouts, which aren't any one band's
+    // control, so hovering the row as a whole would resolve to an arbitrary
+    // fader. Each hit div already covers exactly its own band's hit region
+    // (bandFaders.ts's `left`/`width`), so it's its own correct hover scope.
+    wireHoverFocus(el, el);
   });
 
   bandsCard.body.append(spectrumHeader, hairline, fadersRow);
@@ -1327,7 +1499,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoCard.body.appendChild(autoStrengthRow);
   autoCard.el.style.cursor = "pointer";
   autoCard.el.addEventListener("click", () => autoStrengthSlider.focus());
+  // Scoped to the row, not autoCard.el like the click handler above: click's
+  // wider scope (hovering the card title still focuses the slider) is a
+  // deliberate convenience, but hover-focus firing there too would mean just
+  // reading the card's title steals focus onto the slider.
+  wireHoverFocus(autoStrengthRow, autoStrengthSlider);
   wireThumbMagnet(autoCard.el, autoStrengthSlider);
+  wireSliderQuickJump(autoStrengthSlider);
 
   function showAutoStrength(value: number): void {
     autoStrengthSlider.value = String(value);
@@ -1458,6 +1636,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ];
   function syncInputRows(): void {
     for (const { row, getManual } of inputRows) row.sync(getManual);
+    // Auto-gain isn't in inputRows (see its own comment below on why it's
+    // built separately) but needs the same resync wherever this is called.
+    autoGainRow.sync(() => deps.getAutoGain());
   }
 
   // Auto-gain: how much of the per-band adaptive normalization in features.ts
@@ -1473,9 +1654,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // crossover (getBandSplit), so it's deliberately left out of this card's
   // own Reset chip below — that chip resets per-scene taste
   // (Sensitivity/Expansion/Smoothing), not a device-wide input
-  // preference. Never auto-tuned (no `auto` block): auto mode reads
-  // FeatureFrame.level, which this doesn't touch, but an amount that moves
-  // by itself would make the Signal card's history trace unreadable.
+  // preference. Its "A" chip resolves from the room's own measured span
+  // (FeatureExtractor.bandSpanDb), not MUSIC_DIALS like the rows below —
+  // no dial describes how much of the analyser's window the room is
+  // actually using, which is exactly what this amount fixes — and eases
+  // slowly (autoGain.ts's EASE_RATE) so the Signal card's history trace
+  // still reads as room drift, not something chasing the beat.
   const autoGainRow = createControlRow({
     label: "Auto-gain",
     accent: INPUT_GREEN,
@@ -1487,9 +1671,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     format: (value) => String(Math.round(value * 100)),
     description:
       "How much each band is rescaled to fill the display. 0 shows the mic's real levels; higher flattens bass-vs-treble balance but converges different mics and rooms toward the same look.",
+    auto: {
+      isEnabled: () => deps.isAutoGainAuto(),
+      toggle: (on) => deps.onAutoGainAutoToggle(on),
+      resolveLive: () => deps.resolveAutoGain(),
+      getManual: () => deps.getAutoGain(),
+    },
   });
   autoGainRow.onChange((value) => deps.onAutoGainChange(value));
-  autoGainRow.setValue(deps.getAutoGain());
+  autoGainRow.sync(() => deps.getAutoGain());
 
   const inputCard = createCard({
     title: "Input",
@@ -1531,6 +1721,27 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   sceneCard.body.appendChild(sceneRows);
   let sceneRowHandles: ReturnType<typeof createControlRow>[] = [];
 
+  // Looks: named snapshots of the Scene card's own settings above — see
+  // src/render/sceneLooks.ts. Hidden the same way sceneCard is when the
+  // active scene has no settings to snapshot (renderSceneSettings below).
+  const looksCard = createLooksCard({
+    currentSceneId: deps.currentSceneId,
+    listLooks: deps.listLooks,
+    onSaveLook: deps.onSaveLook,
+    onApplyLook: (look) => {
+      deps.onApplyLook(look);
+      renderSceneSettings();
+    },
+    onDeleteLook: deps.onDeleteLook,
+    decodeLook: deps.decodeLook,
+    buildShareLink: deps.buildShareLink,
+    hasUndo: deps.hasLookUndo,
+    onUndoLook: (sceneId) => {
+      deps.onUndoLook(sceneId);
+      renderSceneSettings();
+    },
+  });
+
   // Walks every .vc-block heading in document order and writes its digit —
   // called whenever the block set can change (only renderSceneSettings does:
   // group headings come and go with the active scene). Blanks anything past
@@ -1545,10 +1756,60 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
+  // "all"/"low" (SignalSpec.bandRange, signals.ts) resolved against the
+  // *live* split rather than a fixed index range, since bandSplit.ts's
+  // crossover is user-configurable.
+  function resolveBandRange(kind: "all" | "low", split: BandSplit): { lo: number; hi: number } {
+    return kind === "low" ? { lo: 0, hi: split.lowMid } : { lo: 0, hi: NUM_BANDS };
+  }
+
+  // Lights the bands a signal-linked row actually listens to on the
+  // spectrum strip while the row is being touched — hover, keyboard focus,
+  // or a drag — and clears back to the normal view on release. A no-op for
+  // a row with no `reads`, or whose reads are all band-agnostic (drop
+  // detection: section loudness, not a frequency read). Recomputed on
+  // every `input` (not just on entry) since dragging Ripple source across
+  // its own threshold changes which signal is actually active mid-drag —
+  // see RIPPLE_SRC_BEAT_THRESHOLD's own comment in caustics.ts.
+  function wireBandHighlight(el: HTMLElement, reads: ResolvedSignalRead[] | undefined): void {
+    const withRange = reads?.filter((r) => r.signal.bandRange !== undefined);
+    if (!withRange?.length) return;
+
+    function show(): void {
+      const split = deps.getBandSplit();
+      let lo = NUM_BANDS;
+      let hi = 0;
+      let any = false;
+      for (const r of withRange!) {
+        if (!r.active()) continue;
+        const range = resolveBandRange(r.signal.bandRange!, split);
+        lo = Math.min(lo, range.lo);
+        hi = Math.max(hi, range.hi);
+        any = true;
+      }
+      spectrumStrip.setHighlight(any ? { lo, hi } : null);
+      spectrumStrip.redraw();
+    }
+    function hide(): void {
+      spectrumStrip.setHighlight(null);
+      spectrumStrip.redraw();
+    }
+
+    el.addEventListener("pointerenter", show);
+    el.addEventListener("focusin", show);
+    el.addEventListener("input", show); // dragging can switch which read is active
+    el.addEventListener("pointerleave", hide);
+    el.addEventListener("focusout", hide);
+  }
+
   // Builds one setting's row (enum picker, boolean toggle or slider) into `container` —
   // shared by the direct-to-sceneRows path and the advanced-section path
   // below, so a row behaves identically wherever it lands.
-  function appendSettingRow(container: HTMLElement, sceneId: string, spec: SceneSetting): void {
+  // `specs` is the active scene's full settings list, needed only to resolve
+  // a SignalLink.activeWhen predicate against a *sibling* setting by key
+  // (spec.reads below) — every other branch here only ever touches `spec`
+  // itself.
+  function appendSettingRow(container: HTMLElement, sceneId: string, spec: SceneSetting, specs: SceneSetting[]): void {
     if (spec.type === "enum" && spec.options) {
       container.appendChild(
         createPickerRow({
@@ -1577,6 +1838,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       return;
     }
 
+    // A sibling setting's live (auto-aware) value, by key — what a
+    // SignalLink.activeWhen predicate reads (see signals.ts's SignalLink doc
+    // comment). Falls back to 0 for an unknown key rather than throwing: a
+    // typo here is exactly what tests/signals.test.ts's key check exists to
+    // catch ahead of time, not something a live panel should crash over.
+    const getSiblingSetting = (key: string): number => {
+      const sibling = specs.find((s) => s.key === key);
+      return sibling ? deps.resolveSceneSettingValue(sceneId, sibling) : 0;
+    };
+    const reads: ResolvedSignalRead[] | undefined = spec.reads?.map((link) => {
+      const id = typeof link === "string" ? link : link.signal;
+      const activeWhen = typeof link === "string" ? undefined : link.activeWhen;
+      const signalSpec = SIGNALS[id];
+      return {
+        signal: signalSpec,
+        active: activeWhen ? () => activeWhen(getSiblingSetting) : () => true,
+        onReveal: signalSpec.monitor
+          ? () => {
+              if (isFolded(METERS_COLUMN)) setMetersHidden(false);
+              audioMeters.revealRow(signalSpec.monitor!.card, signalSpec.monitor!.row);
+            }
+          : undefined,
+      };
+    });
+
     const row = createControlRow({
       label: spec.label,
       accent: SCENE_VIOLET,
@@ -1599,11 +1885,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           }
         : undefined,
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
+      reads,
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));
     container.appendChild(row.el);
     sceneRowHandles.push(row);
+    wireBandHighlight(row.el, reads);
   }
 
   function renderSceneSettings(): void {
@@ -1612,6 +1900,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     sceneRows.innerHTML = "";
     sceneRowHandles = [];
     sceneCard.el.style.display = specs.length === 0 ? "none" : "";
+    looksCard.el.style.display = specs.length === 0 ? "none" : "";
+    looksCard.refresh();
     refreshAutoMaster();
 
     let lastGroup: string | undefined;
@@ -1648,7 +1938,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         } else {
           advancedBody.appendChild(spacer());
         }
-        appendSettingRow(advancedBody, sceneId, spec);
+        appendSettingRow(advancedBody, sceneId, spec, specs);
         first = false;
         continue;
       }
@@ -1656,7 +1946,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
       if (!groupChanged && !first) sceneRows.appendChild(spacer());
       first = false;
-      appendSettingRow(sceneRows, sceneId, spec);
+      appendSettingRow(sceneRows, sceneId, spec, specs);
     }
 
     // The Scene card title is itself the block only when the active scene
@@ -1771,7 +2061,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     toggleOff: toggleAutoStrengthOff,
   });
 
-  controlsCol.append(autoRow, inputCard.el, sceneCard.el, paletteCard.el, footer);
+  controlsCol.append(autoRow, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, footer);
   root.append(columnsWrap, controlsCol);
   document.body.appendChild(root);
 
@@ -1786,18 +2076,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const t = e.target as Node | null;
     if (t && (root.contains(t) || deps.toggleButton.contains(t))) return;
     close();
-  }
-
-  // Shared by every document-level hotkey below (H, Tab, the digits):
-  // ignored while typing somewhere (a range slider keeping focus after a
-  // drag is fine — that's still "in the panel", there's just nothing to
-  // type in the panel itself).
-  function isTypingTarget(t: EventTarget | null): boolean {
-    if (!(t instanceof HTMLElement)) return false;
-    const tag = t.tagName;
-    if (tag === "TEXTAREA" || t.isContentEditable) return true;
-    if (tag === "INPUT" && (t as HTMLInputElement).type !== "range") return true;
-    return false;
   }
 
   // The Tab ring: every param control, in document order — see the header
@@ -1916,11 +2194,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       rateScale: number,
       fixedEnergy: number | null,
       lufs: LufsReading | null,
+      fluxRatio: number | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs);
+      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, fluxRatio);
+      // Unthrottled, same reasoning as audioMeters' own fills — see
+      // createControlRow's updateSignalPills doc comment. A no-op per row
+      // with no `reads`, so this costs nothing for the common case.
+      for (const row of sceneRowHandles) row.updateSignalPills(frame, anim);
       // The tick is FeatureFrame.level — absolute, fixed-window loudness,
       // untouched by Auto-gain — so it reads the room regardless of that
       // amount. The fill starts from .energy, which Auto-gain does shape,
@@ -1971,6 +2254,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       refreshSpectrumHeader();
       powerCard.refresh();
       for (const { row } of inputRows) row.refreshAuto();
+      autoGainRow.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
     },
   };

@@ -33,6 +33,18 @@ const MID_BANDS = [8, 9, 10, 11, 12, 13, 14, 15];
 const HIGH_BANDS = [16, 17, 18, 19, 20, 21, 22, 23];
 const NOISE_FLOOR = 0.04;
 
+// A slow verse<->chorus amplitude arc, layered on top of the beat-scale
+// envelopes below. Without this, every band's variation was beat-to-beat
+// only — energy and level swung in lockstep with the metronome but carried
+// no longer, quieter/louder arc across a stretch of audio, so a feature
+// driven by real dynamic range (Caustics' Loudness surge, see
+// render/scenes/caustics.ts's advanceLoudSwell) had nothing to calibrate
+// against on this feed: it would settle near neutral forever regardless of
+// whether the feature actually worked. Long enough (multiple bars at typical
+// tempos) to read as a section change, not a tremolo.
+const SECTION_PERIOD_SEC = 26;
+const SECTION_DEPTH = 0.7; // 0 = no section dynamics, 1 = quiet section hits pure noise floor
+
 /** Produces a plausible ~120bpm FeatureFrame with no real audio input, so
  *  gallery preview tiles look alive before the mic is ever granted. Once
  *  real audio starts flowing, callers just stop calling this and switch to
@@ -62,12 +74,19 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
       const hatEnv = beatPhase > 0.5 ? Math.exp(-(beatPhase - 0.5) * 20) : 0;
       const shimmer = 0.5 + 0.5 * Math.sin(t * 2 * Math.PI * 0.07);
 
+      // 0 at a section trough (quiet verse), 1 at its peak (chorus/drop) —
+      // smooth both ways, unrelated to the beat grid above so it reads as a
+      // section change rather than another beat-locked pulse.
+      const sectionPhase = (t / SECTION_PERIOD_SEC) % 1;
+      const sectionSwell = 0.5 - 0.5 * Math.cos(sectionPhase * 2 * Math.PI);
+      const sectionGain = 1 - SECTION_DEPTH * (1 - sectionSwell);
+
       for (let b = 0; b < NUM_BANDS; b++) {
         let v = NOISE_FLOOR;
-        if (KICK_BANDS.includes(b)) v += kickEnv * 0.9;
-        if (BASS_BANDS.includes(b)) v += bassEnv * bassPattern * 0.7;
-        if (MID_BANDS.includes(b)) v += midEnv * hash01(b, bar) * 0.6;
-        if (HIGH_BANDS.includes(b)) v += hatEnv * 0.5 + shimmer * hash01(b, 99) * 0.25;
+        if (KICK_BANDS.includes(b)) v += kickEnv * 0.9 * sectionGain;
+        if (BASS_BANDS.includes(b)) v += bassEnv * bassPattern * 0.7 * sectionGain;
+        if (MID_BANDS.includes(b)) v += midEnv * hash01(b, bar) * 0.6 * sectionGain;
+        if (HIGH_BANDS.includes(b)) v += (hatEnv * 0.5 + shimmer * hash01(b, 99) * 0.25) * sectionGain;
         bands[b] = clamp01(v);
       }
 
@@ -76,11 +95,17 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
       energy = clamp01(energy / NUM_BANDS + 0.15);
 
       // No real mic here, so there's no separate raw-vs-AGC'd distinction to
-      // fake — reuse `energy` as a stand-in absolute level so a preview
-      // tile's loudness dial isn't just permanently frozen at NEUTRAL.
-      const level = energy;
+      // fake — but unlike energy (per-band normalized, beat-scale), level is
+      // meant to be an absolute loudness reading, so it rides sectionSwell
+      // directly rather than reusing energy's shape: a clean, wide
+      // quiet->loud arc independent of exactly which bands happen to be
+      // firing on a given tick.
+      const level = clamp01(0.15 + 0.8 * sectionSwell);
 
-      return { time: timeSec, bands, energy, beat, bpm, beatPhase, level };
+      // beat/beatPhase above are genuinely a synthetic metronome's beat grid
+      // (they drive the kick/bass/hat envelopes too) — onset/onsetPhase is
+      // just what FeatureFrame calls that same edge/phase pair.
+      return { time: timeSec, bands, energy, onset: beat, bpm, onsetPhase: beatPhase, level };
     },
   };
 }

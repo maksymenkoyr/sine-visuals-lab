@@ -4,17 +4,35 @@ import { detectQuality, qualitySettings, type QualityPreset, type QualitySetting
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type SceneContext, type Viewport } from "./render/scene.ts";
 import { getPalette, type Palette } from "./render/palette.ts";
 import { createAnimClock } from "./render/animClock.ts";
+import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
+import { SOURCE_URL } from "./brand.ts";
 
 /** No new frame this long -> treat the room as if no host is present and go back to the join screen. */
 const STALE_TIMEOUT_MS = 3000;
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const badge = document.getElementById("badge") as HTMLDivElement;
+
+// The AGPL §13 network-source offer — see src/brand.ts. Same visual language
+// as #badge (tv.html), opposite corner, dimmer: present but not competing
+// with the visualization.
+const sourceLink = document.createElement("a");
+sourceLink.textContent = "Source (AGPL-3.0)";
+sourceLink.href = SOURCE_URL;
+sourceLink.target = "_blank";
+sourceLink.rel = "noopener";
+sourceLink.style.cssText = `
+  position: fixed; bottom: 16px; left: 16px; z-index: 5;
+  color: #fff6; font: 600 12px/1.4 ui-monospace, monospace;
+  letter-spacing: 0.05em; background: #0008; padding: 4px 10px;
+  border-radius: 999px; text-decoration: none;
+`;
+document.body.appendChild(sourceLink);
 
 const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
 const presetAllows = (s: Scene, p: QualityPreset): boolean =>
@@ -29,6 +47,10 @@ let sceneCtx: SceneContext;
 let conn: RendererConnection;
 let live = false;
 const animClock = createAnimClock();
+// See renderLatch.ts / app.ts's own instance: turns anim.dtSec into wall
+// time since the last *rendered* frame and keeps a one-shot edge alive
+// across ticks the render cap skips.
+const renderLatch = createRenderLatch();
 let lastRafMs = 0;
 
 // Render-rate cap and its jitter-tolerant gate live in framePace.ts (shared
@@ -122,9 +144,9 @@ async function main(): Promise<void> {
       time: s.timeSec,
       bands: s.bands,
       energy: s.energy,
-      beat: s.beatFired,
+      onset: s.onsetFired,
       bpm: s.bpm,
-      beatPhase: s.beatPhase,
+      onsetPhase: s.beatPhase,
       level: s.level,
     };
 
@@ -132,6 +154,7 @@ async function main(): Promise<void> {
     // decay above stay on every rAF tick.
     const anim = animClock.advance(dtSec, frame);
     advanceAutoTune(dtSec, anim.profile);
+    renderLatch.accumulate(anim);
 
     if (!shouldRenderFrame(nowRafMs, lastRenderMs, targetFrameIntervalMs(quality.preset))) return;
     lastRenderMs = nowRafMs;
@@ -139,7 +162,7 @@ async function main(): Promise<void> {
     const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);
 
-    scene.render(sceneCtx, frame, viewport, palette, anim);
+    scene.render(sceneCtx, frame, viewport, palette, renderLatch.consume(anim, nowRafMs));
     governor?.recordFrame(nowRafMs);
   }
 

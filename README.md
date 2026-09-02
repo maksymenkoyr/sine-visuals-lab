@@ -1,4 +1,4 @@
-# Audio Visualization
+# Sine Visuals Lab
 
 A browser-based, real-time audio visualizer rendered with WebGL2, with a
 phone-to-TV pairing mode: point a phone's microphone at a room, and drive a
@@ -6,9 +6,9 @@ full-screen visualization on a paired TV over a low-latency WebSocket link.
 
 A gallery of audio-reactive scenes, each with per-scene sensitivity, contrast,
 and smoothing controls, plus an auto-tune engine that adapts those controls to
-the music's own character in real time. Caustics and Mesh Grid are featured;
-the rest sit behind the gallery's draft toggle (`DRAFT_SCENE_IDS` in
-`src/render/scenes/index.ts`).
+the music's own character in real time. Scenes absent from `DRAFT_SCENE_IDS`
+(in `src/render/scenes/index.ts`) are featured; the rest sit behind the
+gallery's draft toggle.
 
 ## Quick start
 
@@ -40,6 +40,17 @@ Two entry points: `index.html` (the phone/controller view) and `tv.html`
 [`CLAUDE.md`](CLAUDE.md) carries the working rules; [`docs/index.md`](docs/index.md)
 is the documentation map.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Contributions require agreeing to the
+Contributor License Agreement in [CLA.md](CLA.md) — the why and how are
+explained there.
+
+## Privacy
+
+Microphone audio is processed entirely on your device and never transmitted —
+see [PRIVACY.md](PRIVACY.md) for the full statement.
+
 ## License
 
 Licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)
@@ -47,3 +58,7 @@ Licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-
 
 Third-party dependencies bundled into the client build are listed in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+The Sine Visuals Lab name and logo are trademarks of Yaroslav Maksymenko and
+are **not** covered by the AGPL license. Forks are welcome under the license,
+but must ship under their own name.

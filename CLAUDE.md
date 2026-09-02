@@ -44,6 +44,7 @@ gate the deploy that a push to `main` triggers — see
 | The wire format between phone and TV | `src/net/protocol.ts` header — includes the legacy-decode sunset condition |
 | Why a setting resolves the way it does under Auto | `src/render/autoTune.ts` and `src/render/musicProfile.ts` headers |
 | The settings/uniform system itself | `src/render/sceneSettings.ts` header |
+| The saved-look share-code format | `src/render/sceneLooks.ts` header — links in the wild outlive the schema |
 | The build target (`es2017`) | `vite.config.ts`, the comment at the `target:` line |
 
 ## Standing rules not worth their own doc

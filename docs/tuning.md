@@ -44,26 +44,42 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
    probe snapshot and POSTs it to `/__tuning/mark`; the plugin writes
    `tuning/marks/<timestamp>.png` and `<timestamp>.json` (both gitignored — marks
    are working scratch, not committed artifacts).
-3. **Numeric probe.** `src/tuning/probe.ts` builds a compact per-frame snapshot:
+3. **Bake.** Once a setting's dialled-in value is the one you want to ship,
+   Alt+D (also `src/tuning/debug.ts`) rewrites it straight into the scene's
+   own `default:` literal on disk — this is a real source edit, not a local
+   preference, so it becomes the app's default for every user once committed
+   and pushed. It's a two-press flow: the first Alt+D previews the file and
+   the exact old→new numbers without writing anything; a second Alt+D within
+   the window commits it, which triggers Vite's full reload (no scene module
+   has an HMR boundary) — the confirmation survives that reload as a
+   persistent notice. A setting currently held by a pin or an override is
+   skipped and named in the notice, since baking it would just be clamped
+   back on the next load. Review the resulting `git diff` before committing —
+   a trailing `// comment` explaining the old value survives the rewrite
+   verbatim and can go stale.
+4. **Numeric probe.** `src/tuning/probe.ts` builds a compact per-frame snapshot:
    each setting's `base` (plain default), `resolved` (what actually reached the
    shader), and `mode` (`ProbeSettingValue["mode"]` — override/pin/auto/manual).
    Its own stated principle, worth keeping: *answer with numbers, not pixels* —
    read the probe before trusting your eyes on whether a change landed. Drive it
    headlessly with `tools/tune-probe.mjs`.
-4. **Contact sheet.** `tools/tune-sheet.mjs` (backed by `src/tuning/capture.ts`)
+5. **Contact sheet.** `tools/tune-sheet.mjs` (backed by `src/tuning/capture.ts`)
    tiles N frames into one PNG — `--frames`, `--every`, `--settle` control the
    sampling. Use this to see a setting's effect across a stretch of audio at a
    glance, instead of scrubbing frame by frame.
-5. **A/B.** `tools/tune-ab.mjs` runs two param sets in parallel pages against the
+6. **A/B.** `tools/tune-ab.mjs` runs two param sets in parallel pages against the
    same synthetic-audio timecode, for a direct side-by-side.
 
 ## The debug surface
 
 `window.__viz` (wired from `src/app.ts`, DEV-only) exposes `probe()`, `probeText()`,
-`capture()`, `mark()`, `setParams()`, `clearPins()` — the same primitives the CLI
-tools above drive headlessly, available from the browser console for quick checks.
-`clearPins()` is for a scripted run: it drops every pin left over from an earlier
-by-hand panel session before that run pushes its own params.
+`capture()`, `mark()`, `setParams()`, `clearPins()`, `bakeDefaults()` — the same
+primitives the CLI tools above (and Alt+D) drive headlessly, available from the
+browser console for quick checks. `clearPins()` is for a scripted run: it drops
+every pin left over from an earlier by-hand panel session before that run pushes
+its own params. `bakeDefaults()` always dry-runs (mirrors Alt+D's first press,
+never writes) — a script that wants the actual write posts to `/__tuning/defaults`
+itself, the same endpoint the hotkey's second press calls.
 
 ## Recording what you learn
 

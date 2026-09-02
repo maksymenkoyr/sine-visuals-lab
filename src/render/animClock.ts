@@ -4,6 +4,7 @@ import { createBeatClock, type BeatClock } from "./beatClock.ts";
 import { createBandEnergy, type BandEnergy } from "./bandEnergy.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
+import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroid.ts";
 import { SMOOTHING_DEFAULT, smoothingRateScale } from "../audio/sensitivity.ts";
 
 // Bundles every per-frame renderer-side clock a scene might want, so
@@ -18,8 +19,17 @@ export interface AnimFrame {
   flowPhase: number;
   /** Decaying [0,1] flash that jumps to 1 on each beat. */
   beatPulse: number;
+  /** One-shot broadband onset edge, mirroring FeatureFrame.onset — true only
+   *  on the tick it fired. JS-side only, same family as lowOnset/midOnset/
+   *  highOnset/dropOnset below: a scene wanting a discrete trigger (not
+   *  beatPulse's continuous decay) reads this instead of FeatureFrame.onset
+   *  directly, so every scene goes through the render loop's edge latch
+   *  (see src/render/renderLatch.ts) rather than risking a tick the render
+   *  cap skipped. */
+  onset: boolean;
   /** Phase-locked beat/bar clock — see beatClock.ts. Never restarts mid-beat
-   *  the way FeatureFrame.beatPhase can. */
+   *  the way FeatureFrame.onsetPhase can (that field has no reader today —
+   *  this superseded it). */
   beatPhase: number;
   barPhase: number;
   tempoLock: number;
@@ -50,6 +60,13 @@ export interface AnimFrame {
    *  meters panel's RAW chip (src/ui/audioMeters.ts). JS-side only — never
    *  uploaded as uniforms, the same way lowOnset/midOnset aren't. */
   raw: { sectionIntensity: number; profile: DialValues };
+  /** Fast, range-adapted spectral centroid — see spectralCentroid.ts for why
+   *  it differs from profile.brightness (that's a slow track descriptor;
+   *  this is a live signal safe to drive a scene's color/motion from). */
+  centroid: number;
+  /** The unsmoothed, absolute counterpart to centroid — see
+   *  spectralCentroid.ts. */
+  centroidRaw: number;
 }
 
 export interface AnimClock {
@@ -73,25 +90,28 @@ export function createAnimClock(): AnimClock {
   const bandEnergy: BandEnergy = createBandEnergy();
   const section: SectionIntensity = createSectionIntensity();
   const profile: MusicProfile = createMusicProfile();
+  const centroid: SpectralCentroid = createSpectralCentroid();
   let beatPulse = 0;
 
   return {
     advance(dtSec: number, frame: FeatureFrame, smoothing = SMOOTHING_DEFAULT): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
       const flowPhase = flow.advance(dtSec, frame.energy);
-      beat.advance(dtSec, frame.bpm, frame.beat);
+      beat.advance(dtSec, frame.bpm, frame.onset);
       bandEnergy.advance(dtSec, frame.bands, rateScale);
       section.advance(dtSec, frame.energy, rateScale);
       profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
+      centroid.advance(dtSec, frame.bands, rateScale);
 
       beatPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
-      if (frame.beat) beatPulse = 1;
+      if (frame.onset) beatPulse = 1;
 
       return {
         dtSec,
         timeSec: frame.time,
         flowPhase,
         beatPulse,
+        onset: frame.onset,
         beatPhase: beat.beatPhase,
         barPhase: beat.barPhase,
         tempoLock: beat.tempoLock,
@@ -120,6 +140,8 @@ export function createAnimClock(): AnimClock {
           sectionIntensity: section.rawIntensity,
           profile: { ...profile.targets },
         },
+        centroid: centroid.centroid,
+        centroidRaw: centroid.raw,
       };
     },
   };

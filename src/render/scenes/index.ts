@@ -8,11 +8,14 @@ import { causticsScene } from "./caustics.ts";
 import { risoScene } from "./riso.ts";
 import { ferrofluidScene } from "./ferrofluid.ts";
 import { meshGridScene } from "./meshGrid.ts";
+import { chladniScene } from "./chladni.ts";
 import { dancersScene } from "./dancers/index.ts";
 import { stormScene } from "./storm.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
-// insertion order) — the two featured scenes go first, drafts follow.
+// insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
+// below) go first, drafts follow.
+registerScene(chladniScene);
 registerScene(causticsScene);
 registerScene(meshGridScene);
 registerScene(spectrumScene);
@@ -26,7 +29,7 @@ registerScene(dancersScene);
 registerScene(stormScene);
 
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
- *  the two featured scenes (Caustics, Mesh Grid) are deliberately absent. */
+ *  the featured scenes registered above it are deliberately absent. */
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "spectrum",
   "particles",
@@ -49,6 +52,7 @@ export {
   risoScene,
   ferrofluidScene,
   meshGridScene,
+  chladniScene,
   dancersScene,
   stormScene,
 };

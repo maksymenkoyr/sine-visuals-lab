@@ -18,12 +18,17 @@ export interface FeatureFrame {
    *  render/musicProfile.ts) has something to actually react to when the
    *  room gets quieter or louder. */
   level: number;
-  /** True on the frame where an onset/beat was detected. */
-  beat: boolean;
+  /** True on the frame a spectral-flux onset was detected — broadband, no
+   *  tempo attached (see features.ts). Not the same concept as a musical
+   *  beat: that's AnimFrame.beatPhase/tempoLock (render/beatClock.ts), which
+   *  this fires into as raw evidence. */
+  onset: boolean;
   /** Estimated tempo in BPM (0 if not yet locked). */
   bpm: number;
-  /** Phase within the current beat, [0,1), extrapolated between detections. */
-  beatPhase: number;
+  /** Phase since the last onset, [0,1) — resets on every onset, unlike
+   *  AnimFrame.beatPhase, which never restarts mid-beat. No consumer reads
+   *  this today; kept for wire compatibility (see protocol.ts). */
+  onsetPhase: number;
 }
 
 export type CaptureSourceKind = "mic" | "display" | "device";
