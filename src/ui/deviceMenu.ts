@@ -28,6 +28,7 @@ import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
+import type { AudioSourceChoice } from "../audio/sourcePref.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -147,7 +148,7 @@ export interface MenuItem {
   name: string;
 }
 
-export type AudioSource = "mic" | "remote" | "synthetic" | "none";
+export type AudioSource = "mic" | "display" | "remote" | "synthetic" | "none";
 export interface AudioStatus {
   source: AudioSource;
   /** The local AudioContext's rate, when there is one. */
@@ -162,6 +163,16 @@ export interface DeviceMenuDeps {
   onPickPalette: (id: string) => void;
   /** Shown in the Bands card's status line — where the bars are coming from. */
   getAudioStatus: () => AudioStatus;
+  /** This device's mic-vs-screen capture preference (src/audio/sourcePref.ts)
+   *  — drives the Input card's Source row. Null on a renderer or the
+   *  synthetic feed (no local capture to choose a source for), which is what
+   *  hides the row — the same null-hides-itself convention as the Loudness
+   *  card's `lufs` frame field. */
+  getAudioSourceChoice: () => AudioSourceChoice | null;
+  onAudioSourceChange: (choice: AudioSourceChoice) => void;
+  /** Whether this browser can offer the Screen option at all — see
+   *  sourcePref.ts's header for the exact browser/OS matrix. */
+  canCaptureDisplay: () => boolean;
   getSensitivity: (sceneId: string) => number;
   onSensitivityChange: (sceneId: string, value: number) => void;
   getExpansion: (sceneId: string) => number;
@@ -1254,6 +1265,8 @@ function statusText(status: AudioStatus): string {
   switch (status.source) {
     case "mic":
       return status.sampleRate ? `Mic live · ${Math.round(status.sampleRate / 1000)}k` : "Mic live";
+    case "display":
+      return status.sampleRate ? `Screen live · ${Math.round(status.sampleRate / 1000)}k` : "Screen live";
     case "remote":
       return "Remote feed";
     case "synthetic":
@@ -1641,6 +1654,74 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     autoGainRow.sync(() => deps.getAutoGain());
   }
 
+  // Source: mic vs. captured screen/tab audio (src/audio/sourcePref.ts). Not
+  // gain-mapped like the rows below, so it's not built through
+  // createControlRow — a label plus a chip group where a slider would sit,
+  // same pattern as powerCard.ts's Energy-saving row (its chips are outside
+  // the Tab ring for the same reason: cycling through settings numbers, not
+  // switching device, is what Tab is for). Sits first in the card, above
+  // Auto-gain, since it decides what everything below is even listening to.
+  // Deliberately left out of this card's Reset chip below, same as
+  // Auto-gain — that chip resets per-scene taste, not a device-wide input
+  // choice — and out of inputRows, since it has no Auto behavior to wire
+  // through that array's shared call sites.
+  const sourceListStyle = `display: flex; gap: 4px; margin-top: 4px;`;
+  const sourceChipStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
+  const sourceChipLitStyle = `${chipBtnLitStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
+  const SOURCE_OPTIONS: { choice: AudioSourceChoice; text: string; title: string }[] = [
+    { choice: "mic", text: "Mic", title: "The room's microphone" },
+    {
+      choice: "display",
+      text: "Screen",
+      title: "A shared screen or tab's audio — cleaner than the room mic",
+    },
+  ];
+  function createSourceRow() {
+    const el = document.createElement("div");
+    el.className = "vc-row";
+    el.style.setProperty("--vc-accent", INPUT_GREEN);
+
+    const head = document.createElement("div");
+    head.style.cssText = rowHeadStyle;
+    const label = document.createElement("div");
+    label.textContent = "Source";
+    label.className = "vc-label";
+    label.style.cssText = rowLabelStyle;
+    head.appendChild(label);
+
+    const list = document.createElement("div");
+    list.style.cssText = sourceListStyle;
+    const buttons = SOURCE_OPTIONS.map((opt) => {
+      const btn = document.createElement("button");
+      btn.textContent = opt.text;
+      btn.title = opt.title;
+      btn.style.cssText = sourceChipStyle;
+      btn.addEventListener("click", () => deps.onAudioSourceChange(opt.choice));
+      return { choice: opt.choice, btn };
+    });
+    list.append(...buttons.map((b) => b.btn));
+
+    const hint = document.createElement("div");
+    hint.className = "vc-hint";
+
+    el.append(head, list, hint);
+
+    return {
+      el,
+      refresh(): void {
+        const choice = deps.getAudioSourceChoice();
+        el.style.display = choice === null ? "none" : "";
+        const canDisplay = deps.canCaptureDisplay();
+        for (const { choice: c, btn } of buttons) {
+          btn.style.cssText = c === choice ? sourceChipLitStyle : sourceChipStyle;
+          btn.hidden = c === "display" && !canDisplay;
+        }
+        hint.textContent = SOURCE_OPTIONS.find((o) => o.choice === choice)?.title ?? "";
+      },
+    };
+  }
+  const sourceRow = createSourceRow();
+
   // Auto-gain: how much of the per-band adaptive normalization in features.ts
   // reaches the output. At the bottom (the default) the mic's real levels
   // show — bass louder than treble, like real music — which the adaptive
@@ -1696,6 +1777,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   markBlock(inputCard.title);
   inputCard.el.style.cssText += inputCardWashStyle;
   inputCard.body.append(
+    sourceRow.el,
+    spacer(),
     autoGainRow.el,
     spacer(),
     inputRows[0].row.el,
@@ -2148,6 +2231,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function open() {
     refreshSpectrumHeader();
     renderPalettes();
+    sourceRow.refresh();
     syncInputRows();
     renderSceneSettings();
     refreshBandsSplit();
@@ -2253,6 +2337,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
       refreshSpectrumHeader();
       powerCard.refresh();
+      sourceRow.refresh();
       for (const { row } of inputRows) row.refreshAuto();
       autoGainRow.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
