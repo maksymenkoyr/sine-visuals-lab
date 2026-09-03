@@ -11,6 +11,7 @@ import { meshGridScene } from "./meshGrid.ts";
 import { chladniScene } from "./chladni.ts";
 import { dancersScene } from "./dancers/index.ts";
 import { stormScene } from "./storm.ts";
+import { plumeScene } from "./plume.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
@@ -27,6 +28,7 @@ registerScene(risoScene);
 registerScene(ferrofluidScene);
 registerScene(dancersScene);
 registerScene(stormScene);
+registerScene(plumeScene);
 
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
  *  the featured scenes registered above it are deliberately absent. */
@@ -40,6 +42,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "ferrofluid",
   "dancers",
   "storm",
+  "plume",
 ]);
 
 export {
@@ -55,4 +58,5 @@ export {
   chladniScene,
   dancersScene,
   stormScene,
+  plumeScene,
 };

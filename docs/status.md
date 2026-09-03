@@ -6,91 +6,66 @@ regenerate it at session close.
 
 ## In flight
 
-- **Storm scene** — `src/render/scenes/storm.ts`, branch `worktree-storm-scene`
-  (worktree at `.claude/worktrees/storm-scene`), draft PR #41, now merged with
-  current `main` (conflicts were docs-only; `frame.beat` → `frame.onset`
-  applied). A volumetric raymarched cumulus lit from inside by a JS-side
-  strike pool; `minQuality: "low"`, registered as a draft tile. v3: `Mode`
-  leads with Mesh (surface-nets lattice, `buildSurfaceNet`) + Voxel beside
-  Gas and Points; `cloudShape` morphs baked variants (`shapePhaseWeights`).
-  v4: morphSpeed/morphBeat, spectrumMap Off/Screen/Cloud + spectrumGlow,
-  lighting pass (HG strike scattering, flashTint, hue-preserving tonemap).
-  v5: **Filaments** default mode (strands through a baked curl field,
-  `buildFlowVolume`, `flow` slider); ambient floor slides to near-black below
-  its default (`AMBIENT_LIFT_GLSL`); `gasType` enum (`GAS_RECIPES`).
-  v6: Filaments' gas underlay gone (pure strands + bolt bloom); the bolt is a
-  branched tree (`buildBoltTree`) drawn as a tapered camera-facing ribbon —
-  longer, thicker, forked — riding the `bolt` slider; **Dark sections**
-  (`sections`): warp-wobbled Lloyd-relaxed Voronoi partition
-  (`buildCellSites`, `SECTION_GLSL`) with per-cell glow envelopes
-  (`createCellGlow`) lit on beat rises, mid/high rises, and each strike's
-  channel — gain touches resting light only.
-  Post-v6 fix, prompted by "lightning reacts to sounds weirdly":
-  `sectionIntensity.ts`'s `dropOnset` was a level, not the edge its doc
-  promised — every tick of a real-music swell read as its own drop, so Storm
-  machine-gunned its drop burst; now a latched one-shot edge with release
-  hysteresis. Verified headlessly at high/low quality, in the gallery, with
-  the probe sign-off; `tests/storm.test.ts` covers the pure helpers and both
-  `ALL_SETTINGS` invariant suites include it. **Not yet judged on real
-  music.**
-- **Controls panel: History/Centroid/Scope traces drawing as dashed under
-  load** — branch `worktree-trace-strip-dash-fix`, draft PR #60 (see the PR
-  for the carry-fix details; Scope still needs a real-mic check).
-- **Caustics: Kick surge gets a position jolt** — branch
-  `worktree-caustics-kick-surge` (worktree locked), draft PR #59. Tests and
-  headless verification green per the PR description.
-- **Always-on dev controls** — branch `worktree-agent-ae8a69d86e9c44e97`
-  (worktree idle, not locked), no PR opened yet.
-- **`caustics-beat-lurch` worktree** (locked) is at the same commit as
-  `main` — no work done there yet; either a session about to start or a
-  stale lock worth releasing if nothing's using it.
+- **Plume scene** (this session) — branch `worktree-plume-scene`, draft PR
+  opened at session close, rebased onto `main` after Storm landed. A
+  beat-burst particle cloud built from a UE4 reference short:
+  `src/render/scenes/plume.ts` extends Chladni's RGBA8 ping-pong state to 3D
+  position + velocity via MRT (first `gl.drawBuffers` use in the repo),
+  continuous emission (`churn`) with a per-beat directional splatter, lit
+  premultiplied sprites. Registered as a draft; its settings joined the
+  NEUTRAL roster in `tests/autoTune.test.ts`; `tests/plume.test.ts` covers
+  the packing/seed/gain helpers. Typecheck and tests green; verified
+  headlessly at high/low/floor and in the gallery, probe shows weighted
+  settings `auto`, unweighted `manual`. Implemented by a Sonnet subagent from
+  the approved plan, tuned by hand against the reference frames. **Not yet
+  judged on real music.**
+- **Sibling scene sessions** — `worktree-neon-fluid` and
+  `worktree-powder-scene` worktrees are locked with no commits yet; every new
+  scene touches `src/render/scenes/index.ts` and `tests/autoTune.test.ts`, so
+  expect trivial keep-both conflicts there (Plume just had them with Storm).
+- **Auto dial ranking** — draft PR #73 (`worktree-auto-dial-ranking`).
+- **docs/architecture.md rebuild** — draft PR #74 (`worktree-docs-architecture`).
+- **Setting groups vocabulary** — PR #69 (`worktree-setting-groups`), not
+  draft; Plume uses plain group strings pending it.
+- **Business/legal docs** — PR #72; **stage-1 wrap snapshot** — PR #70.
+- **Merged this session:** Storm scene (#41) and the audio source picker (#71).
 
 ### Old scratch branches — check before reviving
 
 `band-faders`, `fix-vc-toggle-alignment`, `focus-snap-ladder-fix`,
-`governor-fix-and-caustics-followup`, `lp-merge`, `quality-preset-setting`,
-`worktree-audio-visualization+auto-gain-toggle`, `worktree-band-tilt`,
-`worktree-collapse-panel-cards`, `worktree-shortcut-s-panel-toggle`,
-`worktree-docs-index`, `worktree-tuning-spotlight` are all a week or more
-behind `main`, each just a few commits ahead. `main` has since gained a
-spectrum-strip fader redesign, quality presets, and panel-fold work through
-other PRs, so several of these read like earlier attempts at the same thing —
-diff each against current `main` before reviving rather than assuming it's
-still needed. `worktree-docs-index` in particular rewrote
-`docs/architecture.md` to be the doc map; `docs/index.md` has since landed on
-`main` separately as "the vault entry point and single doc-list owner", which
-may make that branch's premise redundant.
+`governor-fix-and-caustics-followup`, `lp-merge`, `power-mode-governor-probe`
+and the older `worktree-*` scratch branches (`docs-index`, `tuning-spotlight`,
+`agent-ae8a69d86e9c44e97`, …) are weeks behind `main`; diff each against
+current `main` before reviving. `worktree-docs-index` rewrote
+`docs/architecture.md` to be the doc map, which `docs/index.md` on `main`
+and PR #74 may both have superseded.
 
 ## Open questions
 
+- Plume's low/floor tiers compensate for fewer particles by growing sprite
+  size (`pointGain` in `plume.ts`), which reads as a chunky voxel cloud at
+  `floor` — acceptable, or gate with `minQuality`?
+- Plume colour is palette-driven (body at `hue`, hot stop two-thirds around
+  the gradient) — red-on-blue only with the Neon palette. Worth a dedicated
+  two-colour picker, or leave to the palette?
+- Should the Plume PR wait for PR #69's shared group vocabulary, or merge
+  with plain groups and migrate?
 - Storm's local render-cap workaround (pulse-rise edge detection + its own
-  measured dt, see its header) predates `renderLatch.ts` landing on `main` —
-  now that the loop latches one-shots and passes a render-dt, the workaround
-  is redundant in principle. It still behaves correctly; simplify it once
-  Storm is otherwise settled, not mid-review.
-- Does the Scope waveform's carry fix (PR #60) actually clear the centre-line
-  notches under load, the way History/Centroid were confirmed to? Needs a
-  manual check with a real or fake-device mic session, not synthetic feed.
-- Storm's drop burst and strike gain were set by eye against the synthetic
-  feed; a pass with real music and the `/tune` loop is still owed.
-- Dancers: which handover reads better on real music — crossfade or inertial?
-  Both ship behind the `Handover` setting; keep one.
+  measured dt, see its header) predates `renderLatch.ts` — redundant in
+  principle, still correct; simplify once Storm is settled on real music.
+- Storm and Dancers still owe a pass on real music (Storm's drop burst and
+  strike gain were set against the synthetic feed; Dancers' `Handover`
+  setting ships both crossfade and inertial — keep one).
 - Does a *partial* auto-gain amount earn its place on a real room, or do
   people only land on 0 or 100?
-- `worktree-docs-index`: revive (rebase the architecture.md rewrite onto
-  current `main`) or drop as superseded by `docs/index.md`?
-- The dozen old scratch branches above: prune, or is anything in them still
-  wanted?
 
 ## Next up
 
-- Review and land the Storm draft PR #41 (now conflict-free against `main`);
-  then decide whether it graduates out of `DRAFT_SCENE_IDS`.
-- Watch Dancers and Storm on real music.
-- Review/merge draft PR #60 (trace/waveform fix) and draft PR #59 (Caustics
-  Kick surge).
-- Decide the fate of the idle `worktree-agent-ae8a69d86e9c44e97` branch and
-  the old scratch branches listed above.
+- Review the draft Plume PR; watch it on real music alongside Storm.
+- Plume follow-ups noted in its PR body: HDR-ish accumulation + tonemap for a
+  denser core, depth-aware sorting/lighting, wall-collected particles.
+- Review PRs #73 and #74; merge #69 and migrate scene groups to it.
+- Decide whether Storm graduates out of `DRAFT_SCENE_IDS`.
 - Explainer artifact for the auto-gain window (live simulation of the
   `features.ts` trackers with the amount slider):
   https://claude.ai/code/artifact/5aef9f8d-a361-4929-adb2-0831943fc375
