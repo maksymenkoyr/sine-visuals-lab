@@ -12,7 +12,9 @@
    a `uniform float u<Key>` in your shader, plus a slider/checkbox in the device
    menu. `min`/`max`/`step`/`default` are the slider; `label`/`description`/`group`
    are what the user sees (`description` is the hint that unfolds under the row
-   on hover/focus); `type: "boolean"` renders a toggle instead, and `type: "enum"` with
+   on hover/focus; `group` is a closed vocabulary — see `SETTING_GROUPS`'s own
+   doc comment in `sceneSettings.ts` for the rule that picks one);
+   `type: "boolean"` renders a toggle instead, and `type: "enum"` with
    `options` renders a strip of named chips whose index is the stored value. Mark a setting
    `advanced: true` to tuck it behind a collapsed "show N more" disclosure within
    its group (`src/ui/controlsKit.ts`'s `createAdvancedSection`) — for a real,

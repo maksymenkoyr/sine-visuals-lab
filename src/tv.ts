@@ -10,12 +10,29 @@ import { createQualityGovernor, type QualityGovernor } from "./render/governor.t
 import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
+import { SOURCE_URL } from "./brand.ts";
 
 /** No new frame this long -> treat the room as if no host is present and go back to the join screen. */
 const STALE_TIMEOUT_MS = 3000;
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const badge = document.getElementById("badge") as HTMLDivElement;
+
+// The AGPL §13 network-source offer — see src/brand.ts. Same visual language
+// as #badge (tv.html), opposite corner, dimmer: present but not competing
+// with the visualization.
+const sourceLink = document.createElement("a");
+sourceLink.textContent = "Source (AGPL-3.0)";
+sourceLink.href = SOURCE_URL;
+sourceLink.target = "_blank";
+sourceLink.rel = "noopener";
+sourceLink.style.cssText = `
+  position: fixed; bottom: 16px; left: 16px; z-index: 5;
+  color: #fff6; font: 600 12px/1.4 ui-monospace, monospace;
+  letter-spacing: 0.05em; background: #0008; padding: 4px 10px;
+  border-radius: 999px; text-decoration: none;
+`;
+document.body.appendChild(sourceLink);
 
 const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
 const presetAllows = (s: Scene, p: QualityPreset): boolean =>
