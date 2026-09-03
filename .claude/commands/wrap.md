@@ -23,4 +23,11 @@ Close out this working session:
    countable"): a reference that names a real symbol will surface itself here
    the moment that symbol changes.
 
+   Then check for *formatting* rot, which the grep above can't see:
+   `` grep -n '`[^`]*/$' CLAUDE.md docs/*.md `` must return nothing. A hit is a
+   path split across a line wrap (`` `src/audio/ `` then `` features.ts` `` on
+   the next line) — unreadable and unclickable, yet a rename grep still matches
+   both halves. Rewrap the sentence, or use the basename convention from
+   `docs/architecture.md`.
+
 Report what you changed in `docs/status.md` and whether any doc needed a fix.
