@@ -63,5 +63,12 @@ Close out this working session:
    shows how well it's doing (precision, cost, calibration) across every run
    recorded so far.
 
+   Then check for *formatting* rot, which the grep above can't see:
+   `` grep -n '`[^`]*/$' CLAUDE.md docs/*.md `` must return nothing. A hit is a
+   path split across a line wrap (`` `src/audio/ `` then `` features.ts` `` on
+   the next line) — unreadable and unclickable, yet a rename grep still matches
+   both halves. Rewrap the sentence, or use the basename convention from
+   `docs/architecture.md`.
+
 Report what you changed in `docs/status.md`, which scene records and
 materials you updated, and whether any doc needed a fix.

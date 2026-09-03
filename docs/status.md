@@ -18,12 +18,20 @@ _2026-10-12_
   review stage in the handoff stats (cost and lines fixed), and #488 limits
   the Chladni bake test against a same-machine yardstick instead of a fixed
   600 ms, after that test flaked on a slow CI runner.
+- **`docs/architecture.md` rebuilt as diagrams-first** — branch
+  `worktree-docs-architecture` (#74). Same content as before, reshaped: two
+  mermaid flowcharts, basename naming, bold lead-ins; plus a routing-table
+  row in `CLAUDE.md` so the doc has a reader, and a broken-path grep in
+  `/wrap` so formatting rot is caught like rename rot. Replaces the stranded
+  `worktree-docs-index` rewrite, which can be deleted. **First time a mermaid
+  diagram exists in this vault — judge whether it reads better before
+  repeating the treatment.**
 - **Other open PRs:** #481, #479 and #463 (three `GLProgram.setI` builds of
   #349 from the model trials), #471 status and agent trials (also edits this
   file), the r10–r12 batch #461–#469, #458 issue difficulty, #441 legal
   fixes, #433 worktree pruning, #430 drives hot path, #403 tempo, #401 custom
   slider value, #400 Echoes, #378 real-song tuning, #335 Physarum 2, #236
-  Cast mode, #160 Magnet slider, #74 architecture doc.
+  Cast mode, #160 Magnet slider.
 
 ## Open questions
 

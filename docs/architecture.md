@@ -5,139 +5,179 @@ screen, and how that pixel ends up on a second device. Everything here is a map 
 *relationships between files*. For what any one module actually does, read that
 module's header — this doc doesn't restate it.
 
+**Naming convention:** modules are named by basename and live under `src/` unless
+written out — `analyser.ts` means `src/audio/analyser.ts`. Only basenames that
+collide are written in full: `src/audio/capture.ts` vs `src/tuning/capture.ts`
+(the tuning contact-sheet capture, see `docs/tuning.md`), `src/net/room.ts` vs
+`server/room.ts`, and `src/render/scenes/index.ts`.
+
 ## Mic to pixel, on one device
 
-`src/audio/capture.ts` opens the mic or, on a desktop host, a shared screen/tab's
-audio — a user choice persisted by `src/audio/sourcePref.ts`, surfaced in the start
-prompt and the Input card's Source row, where `src/audio/inputDevice.ts` also picks
-which input device the mic means (e.g. a USB interface fed from a DJ mixer) — and
-hands back a raw stream.
-`src/audio/analyser.ts` runs the FFT and splits it into bands
-(`src/audio/bandSplit.ts` / `bandScale.ts` decide the band edges). `src/audio/
-features.ts` turns raw bands into a `FeatureFrame` — this is where the adaptive
-floor/peak AGC lives, so everything downstream sees a signal already normalized to
-the room's own loudness. That same adaptive shape is why `src/audio/
-silenceGate.ts` exists: its two marks weight `features.ts`'s own broadband onset,
-and (via `src/render/animClock.ts`) `src/render/bandEnergy.ts`'s per-band onsets,
-against `FeatureFrame.level` — the one absolute-loudness reading in the pipeline —
-so a quiet room's own hiss can't fire on its own. Both marks can also be handed
-to an auto mode (on by default) that tracks the room's own quiet level instead
-of a manual drag, fed each tick by `feedSilenceGateMeasurement` — mirroring
-`src/audio/autoGain.ts`'s own auto flag rather than resolving through
-`musicProfile.ts`'s dials. `src/audio/sensitivity.ts` applies the user's
-Sensitivity/Expansion/Smoothing controls on top of that. Beside the bands,
-`src/audio/stemSplit.ts` reads the analyser's full FFT bins, before the AGC (which
-would level held sound away), and splits them into a drum part and a held part
-for the Hats and Lead signals; `app.ts` writes both into the frame, so a TV gets
-them over the wire rather than working them out itself.
+```mermaid
+flowchart LR
+  mic(["mic / screen audio"]) --> capture["src/audio/capture.ts"]
+  capture --> analyser["analyser.ts<br/>FFT → bands"]
+  analyser --> features["features.ts<br/>adaptive floor/peak AGC"]
+  features --> sensitivity["sensitivity.ts<br/>Sensitivity / Expansion / Smoothing"]
+  sensitivity -->|FeatureFrame| animClock["animClock.ts"]
+  animClock -->|AnimFrame| sceneHost["sceneHost.ts"]
+  sceneHost --> scene["Scene.render"]
+  scene --> pixels(["pixels"])
+  autoTune["autoTune.ts"] -.->|resolves settings| scene
+  musicProfile["musicProfile.ts"] -.->|dials| autoTune
+```
 
-Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
-`FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
-clock (`src/render/beatClock.ts`), the always-evenly-spaced metronome built on
-top of it (`src/render/metronome.ts`), per-band energy and onset pulses, section
-intensity, spectral centroid (`src/render/spectralCentroid.ts`). Scenes never read
-`FeatureFrame` fields directly for anything animated; they read `AnimFrame`,
-because it's already shaped for motion (see the field comments in `animClock.ts`
-for why each one is derived rather than a straight passthrough).
+**Capture and normalize.** `src/audio/capture.ts` opens the mic or, on a desktop
+host, a shared screen/tab's audio — a user choice persisted by `sourcePref.ts`,
+surfaced in the start prompt and the Input card's Source row, where `inputDevice.ts`
+also picks which input device the mic means (e.g. a USB interface fed from a DJ
+mixer) — and hands back a raw stream. `analyser.ts` runs the FFT and splits it into
+bands (`bandSplit.ts` and `bandScale.ts` decide the edges). `features.ts` turns raw
+bands into a `FeatureFrame` — this is where the adaptive floor/peak AGC lives, so
+everything downstream sees a signal already normalized to the room's own loudness.
+`sensitivity.ts` applies the user's Sensitivity/Expansion/Smoothing controls on top
+of that.
 
-`src/render/sceneHost.ts`'s `SceneHost` owns the actual `mount`/`render`/`unmount`
-calls against a `Scene` (`src/render/scene.ts`) — the interface every scene in
-`src/render/scenes/` implements. Most scenes are built via `src/render/
-fullscreenScene.ts`'s `createFullscreenScene`, which wraps a single fragment
-shader body with the common uniform plumbing (`src/render/sceneCommon.ts`) and the
-setting → uniform wiring described in `docs/adding-a-scene.md`. `src/render/
-autoTune.ts` sits between a scene's declared `settings` and what actually reaches
-the shader, resolving each one against `src/render/musicProfile.ts`'s dials unless
-the user (or `src/tuning/overrides.ts` in dev) has pinned it manually.
+**A quiet room can't fire on its own hiss.** The adaptive shape above is why
+`silenceGate.ts` exists: its two marks weight `features.ts`'s own broadband onset
+and, via `animClock.ts`, `bandEnergy.ts`'s per-band onsets, against
+`FeatureFrame.level` — the one absolute-loudness reading in the pipeline. Both marks
+can also be handed to an auto mode (on by default) that tracks the room's own quiet
+level instead of a manual drag, fed each tick by `feedSilenceGateMeasurement` —
+mirroring `autoGain.ts`'s own auto flag rather than resolving through
+`musicProfile.ts`'s dials.
 
-`src/router.ts` decides which scene mounts (`#/` → gallery, `#/v/<sceneId>` → one
-scene), read by `src/app.ts`, which is the laptop/phone/gallery entry
+**Stems are split before the AGC.** Beside the bands, `stemSplit.ts` reads the
+analyser's full FFT bins, before the AGC (which would level held sound away), and
+splits them into a drum part and a held part for the Hats and Lead signals. `app.ts`
+writes both into the frame, so a TV gets them over the wire rather than working them
+out itself.
+
+**Shape it for motion.** Each render tick, `animClock.ts`'s `createAnimClock` takes
+the current `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked
+beat/bar clock (`beatClock.ts`), the always-evenly-spaced metronome built on top of
+it (`metronome.ts`), per-band energy and onset pulses, section intensity, spectral
+centroid (`spectralCentroid.ts`). **Scenes never read `FeatureFrame` fields
+directly for anything animated; they read `AnimFrame`**, because it's already
+shaped for motion (see the field comments in `animClock.ts` for why each one is
+derived rather than a straight passthrough).
+
+**Render it.** `sceneHost.ts`'s `SceneHost` owns the `mount`/`render`/`unmount`
+calls against a `Scene` (`scene.ts`) — the interface every scene in
+`src/render/scenes/` implements. Most scenes are built via `fullscreenScene.ts`'s
+`createFullscreenScene`, which wraps a single fragment shader body with the common
+uniform plumbing (`sceneCommon.ts`) and the setting → uniform wiring described in
+`docs/adding-a-scene.md`.
+
+**Auto-tune sits in the middle.** `autoTune.ts` sits between a scene's declared
+`settings` and what actually reaches the shader, resolving each one against
+`musicProfile.ts`'s dials unless the user (or `overrides.ts` in dev) has pinned it
+manually.
+
+**Routing.** `router.ts` decides which scene mounts (`#/` → gallery,
+`#/v/<sceneId>` → one scene), read by `app.ts`, the laptop/phone/gallery entry
 (`index.html`).
 
-The controls panel's meters (`src/ui/audioMeters.ts`, under the spectrum card
-in `src/ui/deviceMenu.ts`) are the one place that reads outside this pipeline:
-their Dynamics card's Waveform row is fed by `src/audio/waveformAnalyser.ts`
-(math in `waveform.ts`), which reads time-domain samples straight off this
-device's own mic, entirely separate from
-`FeatureFrame`/`AnimFrame` and never touching the wire in "Laptop, phone and TV" below —
-a viewer with no local mic doesn't get that row at all. The same card's
-History trace likewise reads `FeatureExtractor.fixedEnergy`, a local
-diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
-`FeatureFrame` field — its own Gate row right after it reads
-that same extractor's `gateDimmer` diagnostic the same way. Its Loudness row
-is the same kind of read: BS.1770 LUFS
-from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
-this device's own capture, hidden on a mic-less renderer. (The Waveform row
-is not: there it draws the followed device's waveform, off the frame's wave
-tail in `src/net/protocol.ts`.)
+**The meters read around the pipeline, not from it.** The controls panel's meters
+(`audioMeters.ts`, under the spectrum card in `deviceMenu.ts`) are the one place
+that reads outside this pipeline. The Dynamics card's Waveform row is fed by
+`waveformAnalyser.ts` (math in `waveform.ts`), which reads time-domain samples
+straight off this device's own mic — entirely separate from
+`FeatureFrame`/`AnimFrame` and never touching the wire in "Laptop, phone and TV"
+below, so a viewer with no local mic doesn't get that row at all. The same card's
+History trace likewise reads `FeatureExtractor.fixedEnergy`, a local diagnostic off
+this device's own extractor (see `features.ts`), not a `FeatureFrame` field — its
+Gate row right after it reads that same extractor's `gateDimmer` diagnostic the
+same way. Its Loudness row is the same kind of read: BS.1770 LUFS from
+`lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off this device's own
+capture, hidden on a mic-less renderer. (The Waveform row is not: there it draws
+the followed device's waveform, off the frame's wave tail in `protocol.ts`.)
 
-`src/render/signals.ts` is the seam between those meters and a scene's own
-`settings`: a scene can mark a `SceneSetting` with `reads`, naming which of
-this file's `FeatureFrame`/`AnimFrame` values actually drive it, and the
-device menu renders that as a live pill pointing back at the meter row above.
+**Signal links point a setting back at its meter.** `signals.ts` is the seam
+between those meters and a scene's own `settings`: a scene can mark a
+`SceneSetting` with `reads`, naming which of this file's `FeatureFrame`/`AnimFrame`
+values actually drive it, and the device menu renders that as a live pill pointing
+back at the meter row above.
 
 ## Laptop, phone and TV
 
 A room's devices don't share a process; they share a WebSocket, relayed through a
 Cloudflare Durable Object, and each has a role (`RoomRole`: host, controller or
-renderer). The laptop is the **host**: it listens, runs everything in the first
+renderer).
+
+```mermaid
+flowchart LR
+  host(["host — laptop"]) -->|FeatureFrame| protocol["protocol.ts<br/>encode to a fixed-size frame"]
+  protocol -->|WebSocket| room["Room — server/room.ts<br/>relays bytes, never parses"]
+  controller(["controller — phone"]) -.->|JSON messages| room
+  room -->|WebSocket| netRoom["src/net/room.ts<br/>RENDER_DELAY_MS + jitter/slew"]
+  netRoom --> clock["clock.ts<br/>ClockSync"]
+  clock --> renderer(["renderer — tv.ts"])
+```
+
+**Roles.** The laptop is the **host**: it listens, runs everything in the first
 section, and streams its `FeatureFrame`s (`HostConnection`). A phone is a
-**controller**: `src/app.ts` in its mic-less renderer mode, with the whole panel
+**controller**: `app.ts` in its mic-less renderer mode, with the whole panel
 (`ControllerConnection`); what it edits is its own preview, and it reaches the
 room's *look* only when its Play does, which the owner allows per device (by
 default only the owner's does; `server/roomDevices.ts` `mayPlay`). A TV is a
-**renderer** (`src/tv.ts`, `tv.html`): it draws the host's frames with the room's
-look and has no panel or audio of its own.
+**renderer** (`tv.ts`, `tv.html`): it draws the host's frames with the room's look
+and has no panel or audio of its own.
 
-- `src/net/protocol.ts` encodes/decodes `FeatureFrame` to/from a fixed-size binary
-  frame. Read its header comment before touching the wire format — it documents
-  the current layout and a legacy-decode fallback with its own sunset condition.
-- `server/room.ts` (the Durable Object, class `Room`, bound as `ROOM` per
-  `wrangler.toml`) is only the Cloudflare adapter. What a room does is
-  `server/roomCore.ts`, which the tests drive with fake sockets; who may join and
-  who may send what is `server/roomRules.ts`. The room still never parses a
-  `FeatureFrame` — bytes pass through untouched — so a frame change within
-  `LOOK_LIMITS.maxBinaryBytes` (`server/lookDoc.ts`) needs no worker deploy; the
-  room drops a frame longer than that cap, so a layout that outgrows it needs the
-  cap raised and the worker deployed too. A change to the JSON messages or to the
-  rules always does, because the room validates those.
-- `server/lookDoc.ts` is the look: a scene id, a palette id and the raw text of
-  every localStorage store that changes how a scene looks. Which keys count is
-  `isRoomKey` in `src/net/syncedStores.ts`; the room never interprets a setting.
-  A claimed room keeps its look (and the hashes of its keys), so a TV that joins
-  late or reconnects gets the current state without asking the phone.
-- `src/net/lookSync.ts` keeps a device and the room's look in step: the phone's
-  publisher (patches, acks, the merge after a reconnect) and the TV's replica. A
-  phone and a TV also install `src/net/roomStorage.ts`'s overlay first, so
-  applying a room's look never overwrites the device's own saved settings.
-- `src/net/roomMessages.ts` is the JSON vocabulary spoken beside the frames.
-- `src/net/room.ts` (client side) holds a connection class per role, with
-  `src/net/reconnect.ts` for the ones that rejoin on their own. `RENDER_DELAY_MS`
-  and the jitter/slew machinery (`src/net/jitterBuffer.ts`,
-  `src/net/slewLimiter.ts`) exist so a renderer's `uTime` moves smoothly even
-  when packets don't arrive smoothly. `src/net/clock.ts` (`ClockSync`) is what
-  lets a renderer interpret a host's `roomTimeMs` as its own local time.
+**Encoding.** `protocol.ts` encodes/decodes `FeatureFrame` to/from a fixed-size
+binary frame. Read its header comment before touching the wire format — it
+documents the current layout and a legacy-decode fallback with its own sunset
+condition.
 
-Pairing is done by scanning QR codes, or by typing the code a waiting TV shows
-into the laptop's room view. The laptop shows a QR that makes a phone its
-controller (`src/net/hostRoom.ts` keeps the laptop's room across reloads); the TV
-shows its own, and the phone that scans it tells the TV which room to join
-(`src/net/adopt.ts`, `src/net/pendingSlot.ts`, `src/net/tvPhase.ts`) — the request
-is delivered only to the waiting screen that holds the QR's nonce. Either side can
-start over: the TV's Reset forgets its room, and the laptop's Reset room ends the
-room for every device (`endRoom` in `src/net/roomMessages.ts`) before opening a new
-one. `src/net/bootPlan.ts` decides what a page's URL means, `src/net/sessions.ts`
-keeps the secrets a rejoin needs, and `src/ui/joinScreen.ts` draws the QR and the
-code field.
+**Relay.** `server/room.ts` (the Durable Object, class `Room`, bound as `ROOM` per
+`wrangler.toml`) is only the Cloudflare adapter. What a room does is
+`server/roomCore.ts`, which the tests drive with fake sockets; who may join and who
+may send what is `server/roomRules.ts`. **The room never parses a `FeatureFrame`**
+— bytes pass through untouched — so a frame change within `LOOK_LIMITS.maxBinaryBytes`
+(`server/lookDoc.ts`) needs no worker deploy; the room drops a frame longer than
+that cap, so a layout that outgrows it needs the cap raised and the worker deployed
+too. A change to the JSON messages or to the rules always does, because the room
+validates those.
 
-Not everything travels. What stays on the laptop — its audio input and its own
+**The look.** `server/lookDoc.ts` is the look: a scene id, a palette id and the raw
+text of every localStorage store that changes how a scene looks. Which keys count is
+`isRoomKey` in `syncedStores.ts`; the room never interprets a setting. A claimed
+room keeps its look (and the hashes of its keys), so a TV that joins late or
+reconnects gets the current state without asking the phone.
+
+**Keeping the look in step.** `lookSync.ts` keeps a device and the room's look in
+step: the phone's publisher (patches, acks, the merge after a reconnect) and the
+TV's replica. A phone and a TV also install `roomStorage.ts`'s overlay first, so
+applying a room's look never overwrites the device's own saved settings.
+`roomMessages.ts` is the JSON vocabulary spoken beside the frames.
+
+**Smoothing on arrival.** `src/net/room.ts` (client side) holds a connection class
+per role, with `reconnect.ts` for the ones that rejoin on their own.
+`RENDER_DELAY_MS` and the jitter/slew machinery (`jitterBuffer.ts`,
+`slewLimiter.ts`) exist so a renderer's `uTime` moves smoothly even when packets
+don't arrive smoothly. `clock.ts` (`ClockSync`) is what lets a renderer interpret a
+host's `roomTimeMs` as its own local time.
+
+**Pairing.** Pairing is done by scanning QR codes, or by typing the code a waiting
+TV shows into the laptop's room view. The laptop shows a QR that makes a phone its
+controller (`hostRoom.ts` keeps the laptop's room across reloads); the TV shows its
+own, and the phone that scans it tells the TV which room to join (`adopt.ts`,
+`pendingSlot.ts`, `tvPhase.ts`) — the request is delivered only to the waiting
+screen that holds the QR's nonce. Either side can start over: the TV's Reset
+forgets its room, and the laptop's Reset room ends the room for every device
+(`endRoom` in `roomMessages.ts`) before opening a new one. `bootPlan.ts` decides
+what a page's URL means, `sessions.ts` keeps the secrets a rejoin needs, and
+`joinScreen.ts` draws the QR and the code field.
+
+**Not everything travels.** What stays on the laptop — its audio input and its own
 auto-tracked analysis marks — is named by `PRIVATE_KEYS` and `VOLATILE_PREFIXES`
 in `syncedStores.ts` (`isRoomKey` there is the question of what joins the look),
 and the TV resolves Sensitivity, Expansion and Smoothing itself from the frames,
 so its Auto readouts are its own.
 
-A device that's alone in a room (no pairing) never touches any of this — `src/
-app.ts` drives `AnimFrame` straight from its own local `FeatureFrame`s.
+**A solo device skips all of this.** A device that's alone in a room (no pairing)
+never touches the net path — `app.ts` drives `AnimFrame` straight from its own
+local `FeatureFrame`s.
 
 ## Pop-out output window
 
@@ -175,9 +215,9 @@ framebuffer.
 
 ## Text and logo over the picture
 
-The Overlay (an event or DJ name and a logo) is drawn by `src/render/
-overlayLayer.ts` right after the compositor's pass (the section above) in all
-three renderers — `src/app.ts`, `src/output.ts` and `src/tv.ts` — so it sits
+The Overlay (an event or DJ name and a logo) is drawn by
+`src/render/overlayLayer.ts` right after the compositor's pass (the section above)
+in all three renderers — `src/app.ts`, `src/output.ts` and `src/tv.ts` — so it sits
 over crossfades and held effects (Blackout and Freeze included) on the main
 canvas, the pop-out and a TV without any scene knowing, and it is in whatever
 records the canvas. Its
@@ -189,18 +229,23 @@ other store; the exception is a logo too big for the look's size limits
 
 ## Where the quality/perf ceiling comes from
 
-`src/render/quality.ts` (`detectQuality`) picks a quality preset once at
-startup; `src/render/qualityPref.ts` lets the user override it from the Power
-card — `QUALITY_CHOICE_DEFAULT` in that file decides what a fresh device
-starts on, Auto being the choice that instead follows the detected preset;
-`src/render/governor.ts` (the quality governor) can step the effective preset
-down at runtime under sustained frame-time pressure, judged against the
-render-rate cap that `src/render/framePace.ts` owns — probing that a step
-down actually helped before trusting it, so a pace this page doesn't control
-(a browser energy-saver mode, an OS refresh-rate cap) can't be mistaken for
-GPU load. A scene's `minQuality` (on the `Scene` interface) opts it out of
-running below a given preset at all. `src/render/powerMode.ts` is the
-user-facing override — Energy saving's Auto/On/Off in the controls panel's
-Power card (`src/ui/powerCard.ts`) — that takes the governor out of the loop
-entirely rather than fighting it; `POWER_MODE_DEFAULT` in that file decides
-whether the governor is in the loop at all on a fresh device.
+**Detect once, then let the user override.** `quality.ts` (`detectQuality`) picks a
+quality preset once at startup; `qualityPref.ts` lets the user override it from the
+Power card — `QUALITY_CHOICE_DEFAULT` in that file decides what a fresh device
+starts on, Auto being the choice that instead follows the detected preset.
+
+**Step down under pressure — but verify the step helped.** `governor.ts` (the
+quality governor) can step the effective preset down at runtime under sustained
+frame-time pressure, judged against the render-rate cap that `framePace.ts` owns —
+probing that a step down actually helped before trusting it, so a pace this page
+doesn't control (a browser energy-saver mode, an OS refresh-rate cap) can't be
+mistaken for GPU load.
+
+**Scenes set their own floor.** A scene's `minQuality` (on the `Scene` interface)
+opts it out of running below a given preset at all.
+
+**Energy saving removes the governor rather than fighting it.** `powerMode.ts` is
+the user-facing override — Energy saving's Auto/On/Off in the controls panel's
+Power card (`powerCard.ts`) — that takes the governor out of the loop entirely;
+`POWER_MODE_DEFAULT` in that file decides whether the governor is in the loop at
+all on a fresh device.
