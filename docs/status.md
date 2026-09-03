@@ -44,6 +44,14 @@ regenerate it at session close.
 - **`caustics-beat-lurch` worktree** (locked) is at the same commit as
   `main` — no work done there yet; either a session about to start or a
   stale lock worth releasing if nothing's using it.
+- **`docs/architecture.md` rebuilt as diagrams-first** — branch
+  `worktree-docs-architecture`. Same content as before, reshaped: two mermaid
+  flowcharts, basename naming, bold lead-ins; plus a routing-table row in
+  `CLAUDE.md` so the doc has a reader, and a broken-path grep in `/wrap` so
+  formatting rot is caught like rename rot. Replaces the stranded
+  `worktree-docs-index` rewrite, which was pushed after its PR had merged and
+  named symbols that no longer exist. **First time a mermaid diagram exists in
+  this vault — judge whether it reads better before repeating the treatment.**
 
 ### Old scratch branches — check before reviving
 
@@ -51,15 +59,13 @@ regenerate it at session close.
 `governor-fix-and-caustics-followup`, `lp-merge`, `quality-preset-setting`,
 `worktree-audio-visualization+auto-gain-toggle`, `worktree-band-tilt`,
 `worktree-collapse-panel-cards`, `worktree-shortcut-s-panel-toggle`,
-`worktree-docs-index`, `worktree-tuning-spotlight` are all a week or more
-behind `main`, each just a few commits ahead. `main` has since gained a
-spectrum-strip fader redesign, quality presets, and panel-fold work through
-other PRs, so several of these read like earlier attempts at the same thing —
-diff each against current `main` before reviving rather than assuming it's
-still needed. `worktree-docs-index` in particular rewrote
-`docs/architecture.md` to be the doc map; `docs/index.md` has since landed on
-`main` separately as "the vault entry point and single doc-list owner", which
-may make that branch's premise redundant.
+`worktree-tuning-spotlight` are all a week or more behind `main`, each just a
+few commits ahead. `main` has since gained a spectrum-strip fader redesign,
+quality presets, and panel-fold work through other PRs, so several of these
+read like earlier attempts at the same thing — diff each against current
+`main` before reviving rather than assuming it's still needed.
+`worktree-docs-index` is superseded by `worktree-docs-architecture` (in
+flight above) and can be deleted.
 
 ## Open questions
 
@@ -77,8 +83,6 @@ may make that branch's premise redundant.
   Both ship behind the `Handover` setting; keep one.
 - Does a *partial* auto-gain amount earn its place on a real room, or do
   people only land on 0 or 100?
-- `worktree-docs-index`: revive (rebase the architecture.md rewrite onto
-  current `main`) or drop as superseded by `docs/index.md`?
 - The dozen old scratch branches above: prune, or is anything in them still
   wanted?
 

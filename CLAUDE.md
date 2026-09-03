@@ -41,6 +41,7 @@ gate the deploy that a push to `main` triggers — see
 | Touching... | Read first |
 |---|---|
 | Any broad question — architecture, adding a scene, tuning, what's in flight | `docs/index.md` — the documentation map |
+| How the pieces are wired — mic→pixel, phone→TV, the quality ceiling | `docs/architecture.md` — diagrams first, prose only for the *why* |
 | The wire format between phone and TV | `src/net/protocol.ts` header — includes the legacy-decode sunset condition |
 | Why a setting resolves the way it does under Auto | `src/render/autoTune.ts` and `src/render/musicProfile.ts` headers |
 | The settings/uniform system itself | `src/render/sceneSettings.ts` header |
