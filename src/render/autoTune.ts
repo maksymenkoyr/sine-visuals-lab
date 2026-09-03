@@ -10,7 +10,6 @@ import {
   SENSITIVITY_DEFAULT,
   SENSITIVITY_MAX,
   SENSITIVITY_MIN,
-  shapeExpansion,
   SMOOTHING_DEFAULT,
   SMOOTHING_MAX,
   SMOOTHING_MIN,
@@ -45,24 +44,14 @@ import { getPin } from "../tuning/pins.ts";
 // |weight| under ~0.8. Not enforced in code — just keeps deviations from
 // feeling like a different scene entirely.
 //
-// That "|weight| under 0.8 -> +/-40% of range" arithmetic only holds for a
-// dial pinned at a true 0 or 1, which real music essentially never produces
-// (musicProfile.ts's dials sit close to 0.5 most of the time — even its own
-// synthetic-extreme tests only assert >0.6/<0.4). Left alone, a typical
-// track's deviation from a mid-range dial reading was landing under one
-// slider step — invisible. DIAL_EXPAND below (applied in computeAutoTarget)
-// compensates by pushing a real-world dial reading further from 0.5 before
-// it's weighted, so the same weight table now produces a genuinely visible
-// swing on ordinary music, not just on synthetic extremes.
+// The "|weight| under 0.8 -> +/-40% of range" arithmetic assumes dials
+// actually reach 0 and 1 on real music — and now they do: musicProfile.ts
+// ranks each trait against the session (seeded by a shipped prior), so the
+// calmest/wildest material of a night genuinely pins its dials. An earlier
+// DIAL_EXPAND S-curve here inflated near-neutral readings to compensate
+// for dials that never left ~0.5; ranking removed the miscalibration it
+// papered over, so the deviation is plain weight × (dial − 0.5) again.
 export type AutoWeights = Partial<Record<MusicDial, number>>;
-
-// Expansion applied to each dial before weighting — see the comment above.
-// Uses shapeExpansion (audio/sensitivity.ts) because it's already exactly
-// the right shape for this: an S-curve fixed at 0/0.5/1 with a finite (not
-// infinite) slope through the pivot, so shapeExpansion(0.5, k) === 0.5
-// always holds — preserving the "all dials neutral -> spec.default exactly"
-// invariant this whole module rests on regardless of the expansion factor.
-const DIAL_EXPAND = 2.5;
 
 const STORAGE_KEY_EXCEPTIONS = "vibe.sceneAuto";
 const STORAGE_KEY_STRENGTH = "vibe.autoStrength";
@@ -266,7 +255,7 @@ export function computeAutoTarget(spec: SceneSetting, profile: DialValues, autoS
   for (const dial of MUSIC_DIALS) {
     const w = spec.auto[dial];
     if (w === undefined) continue;
-    deviation += w * (shapeExpansion(profile[dial], DIAL_EXPAND) - 0.5);
+    deviation += w * (profile[dial] - 0.5);
   }
   const raw = spec.default + autoStrength * deviation * (spec.max - spec.min);
   return clampToSpec(spec, raw);

@@ -58,6 +58,36 @@ describe("beat clock", () => {
     expect(clock.tempoLock).toBeGreaterThan(0.8);
   });
 
+  // The regression test for the stuck-tempoLock bug: the extractor retains
+  // its bpm through a breakdown on purpose (features.ts's BPM_RETAIN_SEC),
+  // so "bpm > 0" alone must not keep the lock pinned at 1 — lock has to key
+  // off whether beats are actually landing. Before the fix, every
+  // pulse/tempo-weighted auto setting read tempoLock = 1 for the whole
+  // session, through silence and beatless bridges alike.
+  it("drops tempoLock during a breakdown — onsets stop but bpm stays known", () => {
+    const clock = createBeatClock();
+    // A held tempo with steady onsets locks it in.
+    for (let i = 0; i < 600; i++) clock.advance(DT, 120, i % 30 === 0);
+    expect(clock.tempoLock).toBeGreaterThan(0.8);
+    // Breakdown: bpm still reported (the extractor remembers the period),
+    // but no onsets land. One bar of silence must NOT drop the lock (drum
+    // breaks and funk stops go a bar without onsets routinely)…
+    for (let i = 0; i < 120; i++) clock.advance(DT, 120, false); // 2s = 1 bar at 120
+    expect(clock.tempoLock).toBeGreaterThan(0.8);
+    // …but well past the two-bar timeout it must fall.
+    for (let i = 0; i < 480; i++) clock.advance(DT, 120, false); // +8s
+    expect(clock.tempoLock).toBeLessThan(0.1);
+  });
+
+  it("re-locks quickly when the beat returns after a breakdown", () => {
+    const clock = createBeatClock();
+    for (let i = 0; i < 600; i++) clock.advance(DT, 120, i % 30 === 0);
+    for (let i = 0; i < 600; i++) clock.advance(DT, 120, false); // lock decays
+    expect(clock.tempoLock).toBeLessThan(0.1);
+    for (let i = 0; i < 300; i++) clock.advance(DT, 120, i % 30 === 0); // drums back, 5s
+    expect(clock.tempoLock).toBeGreaterThan(0.8);
+  });
+
   it("ramps tempoLock down once bpm returns to 0", () => {
     const clock = createBeatClock();
     for (let i = 0; i < 300; i++) clock.advance(DT, 120, i % 30 === 0);

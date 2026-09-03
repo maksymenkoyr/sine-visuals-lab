@@ -144,6 +144,50 @@ describe("FeatureExtractor", () => {
     expect(frame!.bpm).toBeLessThan(bpm + 5);
   });
 
+  // The other half of the stuck-tempoLock fix: bpm is "do I still know the
+  // period" — retained through a breakdown-length gap so the beat clock's
+  // phase keeps running, but forgotten (back to 0) once no onset has fired
+  // for BPM_RETAIN_SEC. Before the fix it was assigned once and never
+  // cleared for the life of the session.
+  it("retains bpm through a breakdown-length gap but forgets it after a long silence", () => {
+    const extractor = new FeatureExtractor();
+    const bpm = 120;
+    const intervalSec = 60 / bpm;
+    const dt = 1 / 60;
+    let time = 0;
+    let frame;
+    let nextClickAt = intervalSec;
+
+    for (let i = 0; i < 120; i++) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time);
+    }
+    const clicksEnd = time + 8;
+    while (time < clicksEnd) {
+      time += dt;
+      const isClick = time >= nextClickAt;
+      if (isClick) nextClickAt += intervalSec;
+      frame = extractor.update(bandsFrame(QUIET_DB, isClick ? { 0: LOUD_DB, 12: LOUD_DB } : {}), time);
+    }
+    expect(frame!.bpm).toBeGreaterThan(bpm - 5);
+
+    // 15s of silence — a breakdown. The period must survive it.
+    const breakdownEnd = time + 15;
+    while (time < breakdownEnd) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time);
+    }
+    expect(frame!.bpm).toBeGreaterThan(bpm - 5);
+
+    // Another 20s (35s total without an onset) — past BPM_RETAIN_SEC.
+    const silenceEnd = time + 20;
+    while (time < silenceEnd) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time);
+    }
+    expect(frame!.bpm).toBe(0);
+  });
+
   it("attacks fast: a step up reaches ~90% of its target within 2 frames at 60fps", () => {
     const extractor = new FeatureExtractor();
     const dt = 1 / 60;
