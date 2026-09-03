@@ -329,8 +329,8 @@ export interface SignalStrip {
   chip: HTMLElement;
   /** The pill row — caller places it as a sibling of `.vc-hint`, not inside
    *  it, so the two reveal independently (see the .vc-reads rule,
-   *  controlsTheme.ts) and the pills survive the hint's own text being
-   *  replaced wholesale while auto owns the row. */
+   *  controlsTheme.ts) and the pills survive the hint growing its auto
+   *  takeover line while auto owns the row. */
   strip: HTMLElement;
   /** Per-pill live value in [0,1] and whether its link is currently active
    *  (SignalLink.activeWhen) — same order as the specs passed in. */

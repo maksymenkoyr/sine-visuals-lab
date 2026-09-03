@@ -110,7 +110,7 @@ import {
  * row, matching the identical hover/focus styling below, so pointing at a
  * row is enough; no click needed first. The hint under a row (a setting's
  * `description`) stays collapsed until hover/focus, and while auto holds the
- * row it reads as an invitation to take over instead. Each card's accent
+ * row a second line beneath it invites the user to take over. Each card's accent
  * names its system — the constants and their meanings live in
  * controlsTheme.ts.
  *
@@ -863,8 +863,18 @@ function createControlRow(spec: ControlRowSpec) {
   }
   slider.step = discrete ? String(spec.step) : "any";
 
+  // Two lines: the setting's own description, always present when it has
+  // one, and beneath it the auto takeover note, shown only while auto holds
+  // the row — an addition, never a replacement, so the description stays
+  // readable whichever side owns the value.
   const hint = document.createElement("div");
   hint.className = "vc-hint";
+  const hintDesc = document.createElement("div");
+  hintDesc.textContent = spec.description ?? "";
+  const hintAuto = document.createElement("div");
+  hintAuto.className = "vc-hint-auto";
+  hintAuto.textContent = AUTO_HOLDING_HINT;
+  hint.append(hintDesc, hintAuto);
 
   el.append(head, slider, hint);
   if (signalIndicator) el.appendChild(signalIndicator.strip);
@@ -911,9 +921,9 @@ function createControlRow(spec: ControlRowSpec) {
   }
 
   function setHint(auto: boolean): void {
-    const text = auto ? AUTO_HOLDING_HINT : spec.description ?? "";
-    hint.textContent = text;
-    hint.style.display = text ? "" : "none";
+    hintDesc.style.display = spec.description ? "" : "none";
+    hintAuto.style.display = auto ? "" : "none";
+    hint.style.display = spec.description || auto ? "" : "none";
   }
 
   function display(value: number, auto: boolean): void {
