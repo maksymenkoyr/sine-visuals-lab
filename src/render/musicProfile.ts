@@ -11,6 +11,12 @@ import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
  * weights; see that file for why all-dials-neutral must resolve to a
  * setting's plain default.
  *
+ * The trait dials are *session-ranked* (see the ranking comment above
+ * createRanker below): 0 and 1 mean "the calmest/wildest this trait has
+ * read tonight", seeded by a shipped prior so an extreme track reads
+ * extreme from the first seconds. That's what makes the dials actually
+ * span their range on real music instead of clustering near 0.5.
+ *
  * `loudness` is the one deliberate exception to "holds at NEUTRAL through
  * silence": it describes a state (how loud the room is right now), not a
  * trait of the track, so on silence it FREEZES at its last reading instead
@@ -135,12 +141,63 @@ const ATTACK_EASE_RATE = 0.25; // ~4s
 const LOUDNESS_EASE_RATE = 0.3; // ~3s — faster than the others on purpose: a
 // state (how loud is it right now), not a slow-to-establish trait of the track.
 
+// Session ranking: each trait dial scores its raw measurement against the
+// range heard so far tonight, instead of dividing by a hand-picked
+// reference constant. The old *_REF constants pinned nearly every real
+// track to ~0.5 ("medium") — raw traits vary far less between tracks than
+// the guessed scales assumed — so autoTune.ts's deviations (weight × (dial
+// − 0.5)) were near-zero on everything and Auto barely moved. Ranked, 0
+// and 1 mean "the calmest/wildest this trait has read tonight".
+//
+// Each ranker is the leaky floor/peak idea features.ts applies per band,
+// one level up and much slower: a raw outside [low, high] claims the range
+// within seconds (RANK_EXPAND_RATE) and the range re-tightens toward
+// what's actually playing over minutes (RANK_SHRINK_RATE). The range
+// starts at a shipped prior — where that raw lands across music in general
+// — so an extreme track scores extreme from the first seconds instead of
+// reading neutral until the session has heard its opposite. Priors were
+// measured over the synthetic feeds (createSyntheticFeed across the tempo
+// window) plus spectral-extreme material; the cold-start tests in
+// tests/musicProfile.test.ts pin them. The session range never tightens
+// below RANK_MIN_SPREAD of the prior's spread, so a monotonous night
+// doesn't amplify measurement noise into full-range dial swings. Rankers
+// only update while there's signal — silence neither defines "quietest
+// tonight" nor drags the range anywhere.
+const RANK_EXPAND_RATE = 0.1; // ~10s for a new extreme to claim the range
+const RANK_SHRINK_RATE = 1 / 240; // ~4min for the range to re-tighten
+const RANK_MIN_SPREAD = 0.25; // fraction of the prior spread that always survives
+
+interface Ranker {
+  update(raw: number, dt: number): void;
+  score(raw: number): number;
+}
+
+function createRanker([priorLow, priorHigh]: readonly [number, number]): Ranker {
+  let low = priorLow;
+  let high = priorHigh;
+  const minSpread = (priorHigh - priorLow) * RANK_MIN_SPREAD;
+  return {
+    update(raw: number, dt: number): void {
+      low += (raw - low) * Math.min(1, (raw < low ? RANK_EXPAND_RATE : RANK_SHRINK_RATE) * dt);
+      high += (raw - high) * Math.min(1, (raw > high ? RANK_EXPAND_RATE : RANK_SHRINK_RATE) * dt);
+      const gap = minSpread - (high - low);
+      if (gap > 0) {
+        low -= gap / 2;
+        high += gap / 2;
+      }
+    },
+    score(raw: number): number {
+      return clamp01((raw - low) / (high - low));
+    },
+  };
+}
+
 // pulse: blends how often onsets are firing with how confidently they've
 // locked to a steady tempo. tempoLock already *is* a regularity signal — it
 // only ramps up while beatClock keeps re-confirming the same interval —
 // so this doesn't need its own IOI-variance calculation.
 const ONSET_RATE_DECAY = 2.5; // per second, leaky onset-density tracker
-const ONSET_RATE_REF = 1.0; // steady-state value for a beat holding around ~150bpm
+const ONSET_RATE_PRIOR = [0, 1.5] as const; // a driving four-on-the-floor at the top of the tempo window reads full
 
 // tempo: bpm normalized across a dance-music range, folded toward NEUTRAL
 // while unlocked so a momentary bad guess doesn't push the dial to an
@@ -148,10 +205,17 @@ const ONSET_RATE_REF = 1.0; // steady-state value for a beat holding around ~150
 const BPM_LOW = 70;
 const BPM_HIGH = 180;
 
+// brightness: the spectral centroid of the band vector, ranked. Real music
+// concentrates in a narrow slice of the theoretical 0..1 centroid range
+// (bass always dominates log bands), which is exactly why the un-ranked
+// centroid read near-constant across tracks.
+const BRIGHTNESS_PRIOR = [0.2, 0.7] as const;
+
 // density: fraction of the 24 bands sitting within ACTIVE_FRACTION of the
 // frame's own peak band. A solo instrument lights up a handful of bands; a
 // full mix lights up most of them, regardless of overall loudness.
 const ACTIVE_FRACTION = 0.35;
+const DENSITY_PRIOR = [0.1, 0.9] as const;
 
 // Shared silence gate: below this peak-band level there's nothing to
 // measure. brightness/density fall back to their own neutral targets below
@@ -167,7 +231,7 @@ const SILENCE_PEAK = 0.03;
 // swing, not one section change.
 const DYNAMICS_MEAN_RATE = 0.1; // ~10s
 const DYNAMICS_MAD_RATE = 0.04; // ~25s
-const DYNAMICS_MAD_REF = 0.16; // MAD at/above this reads as "fully dynamic"
+const DYNAMICS_MAD_PRIOR = [0, 0.2] as const; // MAD of a hard verse/chorus swell tops out around here
 
 // attack: fast/slow envelope pair over summed positive band-to-band flux —
 // the same flux features.ts computes for onset detection, recomputed here
@@ -176,7 +240,7 @@ const DYNAMICS_MAD_REF = 0.16; // MAD at/above this reads as "fully dynamic"
 // slow floor; a sustained one doesn't.
 const FLUX_FAST_RATE = 6; // ~0.17s, tracks the moment
 const FLUX_SLOW_RATE = 0.5; // ~2s, tracks the sustained floor
-const ATTACK_REF = 1.4; // fastFlux/slowFlux ratio that reads as "fully percussive"
+const ATTACK_RATIO_PRIOR = [0.8, 2] as const; // fastFlux/slowFlux: ~1 sustained, well above on percussive hits
 
 export function createMusicProfile(): MusicProfile {
   let pulse = 0.5;
@@ -194,6 +258,11 @@ export function createMusicProfile(): MusicProfile {
   let fluxSlow = 0;
   const prevBands = new Float32Array(NUM_BANDS);
   let primed = false;
+  const pulseRank = createRanker(ONSET_RATE_PRIOR);
+  const brightnessRank = createRanker(BRIGHTNESS_PRIOR);
+  const densityRank = createRanker(DENSITY_PRIOR);
+  const dynamicsRank = createRanker(DYNAMICS_MAD_PRIOR);
+  const attackRank = createRanker(ATTACK_RATIO_PRIOR);
   const targets: DialValues = {
     pulse: 0.5,
     tempo: 0.5,
@@ -231,9 +300,11 @@ export function createMusicProfile(): MusicProfile {
       // --- pulse ---
       onsetRate *= Math.exp(-dt * ONSET_RATE_DECAY);
       if (frame.onset) onsetRate += 1;
-      const pulseTarget = hasSignal
-        ? clamp01(0.4 * clamp01(onsetRate / ONSET_RATE_REF) + 0.6 * tempoLock)
-        : 0.5;
+      let pulseTarget = 0.5;
+      if (hasSignal) {
+        pulseRank.update(onsetRate, dt);
+        pulseTarget = clamp01(0.4 * pulseRank.score(onsetRate) + 0.6 * tempoLock);
+      }
       pulse = ease(pulse, pulseTarget, PULSE_EASE_RATE, dt, rateScale);
       targets.pulse = pulseTarget;
 
@@ -243,8 +314,13 @@ export function createMusicProfile(): MusicProfile {
       tempo = ease(tempo, tempoTarget, TEMPO_EASE_RATE, dt, rateScale);
       targets.tempo = tempoTarget;
 
-      // --- brightness (spectral centroid) & density (active-band fraction) ---
-      const brightnessTarget = bandSum > 1e-4 ? clamp01(weightedSum / bandSum / (NUM_BANDS - 1)) : 0.5;
+      // --- brightness (ranked spectral centroid) & density (ranked active-band fraction) ---
+      let brightnessTarget = 0.5;
+      if (bandSum > 1e-4) {
+        const centroid = clamp01(weightedSum / bandSum / (NUM_BANDS - 1));
+        brightnessRank.update(centroid, dt);
+        brightnessTarget = brightnessRank.score(centroid);
+      }
       brightness = ease(brightness, brightnessTarget, BRIGHTNESS_EASE_RATE, dt, rateScale);
       targets.brightness = brightnessTarget;
 
@@ -253,7 +329,9 @@ export function createMusicProfile(): MusicProfile {
         let active = 0;
         const threshold = peak * ACTIVE_FRACTION;
         for (let b = 0; b < NUM_BANDS; b++) if (frame.bands[b] > threshold) active++;
-        densityTarget = clamp01(active / NUM_BANDS);
+        const fraction = active / NUM_BANDS;
+        densityRank.update(fraction, dt);
+        densityTarget = densityRank.score(fraction);
       }
       density = ease(density, densityTarget, DENSITY_EASE_RATE, dt, rateScale);
       targets.density = densityTarget;
@@ -262,7 +340,11 @@ export function createMusicProfile(): MusicProfile {
       const intensity = clamp01(inputs.sectionIntensity);
       dynMean += (intensity - dynMean) * Math.min(1, DYNAMICS_MEAN_RATE * dt);
       dynMad += (Math.abs(intensity - dynMean) - dynMad) * Math.min(1, DYNAMICS_MAD_RATE * dt);
-      const dynamicsTarget = hasSignal ? clamp01(dynMad / DYNAMICS_MAD_REF) : 0.5;
+      let dynamicsTarget = 0.5;
+      if (hasSignal) {
+        dynamicsRank.update(dynMad, dt);
+        dynamicsTarget = dynamicsRank.score(dynMad);
+      }
       dynamics = ease(dynamics, dynamicsTarget, DYNAMICS_EASE_RATE, dt, rateScale);
       targets.dynamics = dynamicsTarget;
 
@@ -280,7 +362,11 @@ export function createMusicProfile(): MusicProfile {
         fluxFast += (flux - fluxFast) * Math.min(1, FLUX_FAST_RATE * dt);
         fluxSlow += (flux - fluxSlow) * Math.min(1, FLUX_SLOW_RATE * dt);
         const ratio = fluxSlow > 1e-4 ? fluxFast / fluxSlow : 1;
-        const attackTarget = hasSignal ? clamp01((ratio - 1) / (ATTACK_REF - 1)) : 0.5;
+        let attackTarget = 0.5;
+        if (hasSignal) {
+          attackRank.update(ratio, dt);
+          attackTarget = attackRank.score(ratio);
+        }
         attack = ease(attack, attackTarget, ATTACK_EASE_RATE, dt, rateScale);
         targets.attack = attackTarget;
       }

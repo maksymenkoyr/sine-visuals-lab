@@ -16,7 +16,16 @@ const CORRECTION_GAIN = 0.15;
 const MAX_CORRECTION_BEATS = 0.05; // per onset — keeps phase monotonic frame to frame, never a jump
 const BEATS_PER_BAR = 4;
 const LOCK_RISE_RATE = 0.5; // tempoLock ramps up over a couple seconds of a held tempo
-const LOCK_FALL_RATE = 3; // and drops out quickly once bpm goes back to 0
+const LOCK_FALL_RATE = 3; // and drops out quickly once the beat stops arriving
+// How many expected beats may pass with no onset at all before tempoLock
+// starts falling. "bpm > 0" alone can't be the lock criterion: the
+// extractor deliberately retains its bpm through a breakdown (see
+// features.ts's BPM_RETAIN_SEC — "do I still know the period" vs "is there
+// a beat now"), so lock must key off whether beats are actually landing.
+// Two bars, not one: drum breaks, funk stops and half-bar rests routinely
+// go a full bar without a detected onset, and dropping lock there would
+// yank every pulse-weighted setting mid-groove.
+const LOCK_TIMEOUT_BEATS = 2 * BEATS_PER_BAR;
 
 function wrap01(x: number): number {
   const w = x % 1;
@@ -30,8 +39,10 @@ export interface BeatClock {
   /** beatPhase over a BEATS_PER_BAR-beat bar, for effects that should read
    *  once every few beats rather than every single one. */
   readonly barPhase: number;
-  /** 0..1, ramps toward 1 while a tempo is held and toward 0 once bpm drops
-   *  to 0 — lets tempo-driven effects fade in/out instead of popping. */
+  /** 0..1, ramps toward 1 while beats keep landing on a held tempo and
+   *  toward 0 once they stop (LOCK_TIMEOUT_BEATS without an onset, or bpm
+   *  dropping to 0) — lets tempo-driven effects fade in/out instead of
+   *  popping. */
   readonly tempoLock: number;
   /** Advances the clock by dtSec, given this frame's estimated tempo and
    *  whether an onset fired. Call once per render tick. */
@@ -42,6 +53,7 @@ export function createBeatClock(): BeatClock {
   let phase = 0; // in beats, free-running, never reset
   let smoothedBpm = 0;
   let tempoLock = 0;
+  let beatsSinceOnset = 0; // expected beats elapsed since the last onset — see LOCK_TIMEOUT_BEATS
 
   const clock: BeatClock = {
     beatPhase: 0,
@@ -61,8 +73,12 @@ export function createBeatClock(): BeatClock {
         }
       }
 
-      const lockRate = bpm > 0 ? LOCK_RISE_RATE : LOCK_FALL_RATE;
-      const lockTarget = bpm > 0 ? 1 : 0;
+      if (beatFired) beatsSinceOnset = 0;
+      else beatsSinceOnset += dtSec * (smoothedBpm / 60);
+
+      const locked = bpm > 0 && beatsSinceOnset < LOCK_TIMEOUT_BEATS;
+      const lockRate = locked ? LOCK_RISE_RATE : LOCK_FALL_RATE;
+      const lockTarget = locked ? 1 : 0;
       tempoLock += (lockTarget - tempoLock) * Math.min(1, lockRate * dtSec);
 
       (clock as { beatPhase: number }).beatPhase = wrap01(phase);

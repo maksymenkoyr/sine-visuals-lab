@@ -232,7 +232,46 @@ describe("music profile", () => {
     expect(p.targets.loudness).toBeCloseTo(targetBeforeSilence, 5);
   });
 
-  // rateScale=Infinity is what sensitivity.ts's smoothingRateScale returns
+  // Session-ranking cold start: the rankers are seeded with shipped priors,
+  // so material at the extreme of what music in general does must score
+  // extreme from the first seconds — no warm-up blindness where everything
+  // reads "medium" until the session has heard its opposite.
+  it("scores spectral extremes as extreme within seconds of a cold start (shipped priors)", () => {
+    const bright = createMusicProfile();
+    const treble = trebleHeavyBands();
+    for (let i = 0; i < 120; i++) bright.advance(DT, constantBandsFrame(i * DT, treble), NEUTRAL_INPUTS); // 2s
+    expect(bright.targets.brightness).toBeGreaterThan(0.8);
+
+    const dark = createMusicProfile();
+    const bass = bassHeavyBands();
+    for (let i = 0; i < 120; i++) dark.advance(DT, constantBandsFrame(i * DT, bass), NEUTRAL_INPUTS);
+    expect(dark.targets.brightness).toBeLessThan(0.2);
+  });
+
+  // The min-spread guard: a monotonous night must not shrink a ranker's
+  // range so tight that tiny spectral wobbles read as full-range dial
+  // swings — the session range never collapses below RANK_MIN_SPREAD of the
+  // shipped prior's spread.
+  it("does not turn small wobbles into full-range brightness swings after minutes of monotony", () => {
+    const p = createMusicProfile();
+    const bands = new Float32Array(NUM_BANDS);
+    let lo = 1;
+    let hi = 0;
+    for (let i = 0; i < 60 * 300; i++) {
+      // A bass pad with a gentle wobble on the top bands — a small centroid
+      // oscillation around an otherwise constant spectrum, for 5 minutes.
+      const wobble = 0.02 + 0.015 * Math.sin(i * DT * 1.3);
+      for (let b = 0; b < NUM_BANDS; b++) bands[b] = b < 4 ? 0.8 : wobble;
+      p.advance(DT, constantBandsFrame(i * DT, bands), NEUTRAL_INPUTS);
+      if (i > 60 * 240) {
+        // Track the swing over the final minute, after any collapse would
+        // have happened.
+        if (p.targets.brightness < lo) lo = p.targets.brightness;
+        if (p.targets.brightness > hi) hi = p.targets.brightness;
+      }
+    }
+    expect(hi - lo).toBeLessThan(0.5);
+  });
   // at the Smoothing row's Off stop (deviceMenu.ts) — ease() must assign the
   // target directly rather than compute a Math.min(1, rate*dt*scale)
   // coefficient, so every dial lands exactly on `targets`, which is what the

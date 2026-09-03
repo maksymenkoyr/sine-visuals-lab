@@ -79,6 +79,17 @@ const REFINE_TOL_SEC = 0.025;
 // it — without it, two near-equal candidates (a tempo and something close
 // to a simple ratio of it) can trade places on every onset.
 const TEMPO_SWITCH_MARGIN = 1.25;
+// How long a known tempo survives with no onsets at all before it's
+// forgotten (bpm back to 0). This is "do I still know the period", NOT "is
+// there a beat right now" — the latter is beatClock.ts's tempoLock, which
+// drops within a couple of bars of missed beats. Long on purpose: a
+// breakdown or an ambient bridge shouldn't erase the period, so the phase
+// keeps running and re-locks instantly when the drums return; but before
+// this existed bpm was assigned once and never cleared, so tempoLock (keyed
+// off bpm) saturated at 1 for the whole session — through silence, speech,
+// beatless pads — and every pulse/tempo-weighted auto setting read a stuck
+// dial.
+const BPM_RETAIN_SEC = 30;
 
 // getFloatFrequencyData returns -Infinity for a bin with exactly zero
 // energy (true silence) — it is NOT clamped by the analyser's
@@ -267,6 +278,12 @@ export class FeatureExtractor {
     if (onset) {
       this.lastOnsetTime = time;
       this.registerOnset(time, flux / threshold);
+    } else if (this.bpm > 0 && time - this.lastOnsetTime > BPM_RETAIN_SEC) {
+      // Forget the period after a long stretch with no onsets at all — see
+      // BPM_RETAIN_SEC. The onsets array needs no clearing here: entries
+      // expire by age (ONSET_WINDOW_SEC, far shorter than the retain
+      // window) at the next registerOnset before they could vote.
+      this.bpm = 0;
     }
 
     let energy = 0;

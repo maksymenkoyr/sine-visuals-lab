@@ -59,17 +59,16 @@ describe("computeAutoTarget", () => {
     expect(computeAutoTarget(spec, extreme, 0)).toBe(spec.default);
   });
 
-  // Regression test for why this whole change exists: a typical (near-
-  // neutral) dial reading used to move a setting by well under one slider
-  // step. computeAutoTarget shapes each dial through shapeExpansion before
-  // weighting it, which must widen — not just preserve — that deviation for
-  // a realistic, mid-range dial reading.
-  it("widens the deviation for a near-neutral dial reading (the fix for auto barely moving anything)", () => {
+  // The dials themselves now span 0..1 on real music (musicProfile.ts ranks
+  // each trait against the session, seeded by a shipped prior), so no
+  // expansion S-curve is applied here anymore: the deviation is exactly
+  // weight × (dial − 0.5) × range. The DIAL_EXPAND shaping this replaces
+  // compensated for dials that clustered near 0.5 — a miscalibration fixed
+  // upstream, not papered over here.
+  it("applies the weight linearly — deviation is exactly weight × (dial − 0.5) × range", () => {
     const spec: SceneSetting = { key: "w", label: "W", min: 0, max: 1, step: 0.05, default: 0.5, auto: { brightness: 0.35 } };
-    // A small, realistic excursion — not a synthetic extreme.
-    const target = computeAutoTarget(spec, { ...NEUTRAL, brightness: 0.55 }, 1);
-    const naiveDeviation = 0.35 * (0.55 - 0.5); // what the old, unshaped formula would have produced
-    expect(Math.abs(target - spec.default)).toBeGreaterThan(Math.abs(naiveDeviation) * 1.5);
+    const target = computeAutoTarget(spec, { ...NEUTRAL, brightness: 0.9 }, 1);
+    expect(target).toBeCloseTo(spec.default + 0.35 * (0.9 - 0.5), 10);
   });
 
   it("stays within [min, max] for extreme dials at strength 2, including mesh grid's non-0..1 ranges", () => {
