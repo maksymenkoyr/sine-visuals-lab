@@ -7,8 +7,10 @@ module's header — this doc doesn't restate it.
 
 ## Mic to pixel, on one device
 
-`src/audio/capture.ts` opens the mic (or, on a host, display audio) and hands back
-a raw stream. `src/audio/analyser.ts` runs the FFT and splits it into bands
+`src/audio/capture.ts` opens the mic or, on a desktop host, a shared screen/tab's
+audio — a user choice persisted by `src/audio/sourcePref.ts`, surfaced in the start
+prompt and the Input card's Source row — and hands back a raw stream.
+`src/audio/analyser.ts` runs the FFT and splits it into bands
 (`src/audio/bandSplit.ts` / `bandScale.ts` decide the band edges). `src/audio/
 features.ts` turns raw bands into a `FeatureFrame` — this is where the adaptive
 floor/peak AGC lives, so everything downstream sees a signal already normalized to
