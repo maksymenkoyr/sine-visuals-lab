@@ -12,6 +12,9 @@ before adding a note here; this file doesn't restate them.
   auto-tune invariant that isn't owned by any single scene file.
 - [Tuning](tuning.md) — the live-tuning loop: param bus, mark, numeric probe,
   contact sheet, A/B.
+- [Business & legal](business.md) — the monetization model (AGPL code, paid
+  hosted service), why the CLA exists, the trademark position, and the
+  stage-2 checklist.
 - [Status](status.md) — what's in flight right now. The one note here that's
   expected to be rewritten wholesale each session.
 
