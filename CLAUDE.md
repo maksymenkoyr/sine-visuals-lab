@@ -61,6 +61,13 @@ gate the deploy that a push to `main` triggers — see
   *before* the hash — `src/app.ts` reads `location.search`, and a query placed
   after the hash silently lands on the gallery.
 
+## Git & PRs
+
+This repo has a fast-moving `main` and concurrent sessions. Always branch from
+freshly fetched `origin/main`, rebase (not merge) before opening a PR, and
+re-check for divergence right before pushing. Never rewrite shared history
+without explicit confirmation.
+
 ## Session close
 
 Run `/wrap` to regenerate `docs/status.md` and, if a tuning session happened,
