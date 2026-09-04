@@ -18,6 +18,8 @@ import { powderScene } from "./powder.ts";
 registerScene(chladniScene);
 registerScene(causticsScene);
 registerScene(meshGridScene);
+// First draft on purpose — the one currently being judged.
+registerScene(powderScene);
 registerScene(spectrumScene);
 registerScene(particlesScene);
 registerScene(tunnelScene);
@@ -26,7 +28,6 @@ registerScene(moireScene);
 registerScene(risoScene);
 registerScene(ferrofluidScene);
 registerScene(dancersScene);
-registerScene(powderScene);
 
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
  *  the featured scenes registered above it are deliberately absent. */
