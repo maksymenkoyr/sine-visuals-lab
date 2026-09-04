@@ -6,8 +6,9 @@ argument-hint: <sceneId> [bpm]
 Run the tuning loop from `docs/tuning.md` against scene `$1` (default bpm `$2`
 or 120 if not given). Read `docs/tuning.md` first if you haven't this session.
 
-1. Open `https://localhost:5173/#/v/$1?audio=synthetic&bpm=$2` (dev server must
-   already be running — `npm run dev`).
+1. Open `https://localhost:5173/?audio=synthetic&bpm=$2#/v/$1` (query before the
+   hash; dev server must already be running — `npm run dev`). Paste that direct
+   link to the user so they can watch the same scene.
 2. Edit `tuning/params.json` for the change under discussion; confirm it lands
    via the numeric probe (`tools/tune-probe.mjs` or `window.__viz.probe()`) —
    answer with numbers, not pixels, per `src/tuning/probe.ts`'s own principle.
