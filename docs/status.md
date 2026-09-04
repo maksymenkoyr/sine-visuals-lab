@@ -13,8 +13,12 @@ regenerate it at session close.
   under-reads on mirror lines). Registered in `DRAFT_SCENE_IDS`; its settings
   are in `tests/autoTune.test.ts`'s invariant set. Verified headlessly at
   high/low quality, on beats, on a real track via fake mic, with the
-  auto→manual probe sign-off and the gallery tile. **Not yet judged by the
-  user on real music.**
+  auto→manual probe sign-off and the gallery tile. User feedback round one:
+  beat snap read as a redraw → now a damped surge + swell envelope
+  (`advanceBeatSurge`). Same PR carries the **Beat grid** row (Rhythm card;
+  `src/audio/beatGrid.ts`, `src/render/gridPulse.ts`): per-scene Hits/1/8/1/4/
+  1/2/bar/2 bars, gridded off the phase-locked beat count, hits until the
+  tracker locks. Not sent to the TV (same gap as Smoothing).
 - **Three sibling draft scenes from the same reference-video workflow**, each
   on its own worktree branch with a draft PR: Plume (#75), Neon Fluid (#76),
   Powder (#77). None has had a user verdict on real music yet.
@@ -36,6 +40,8 @@ regenerate it at session close.
 - Which of the four reference-video draft scenes (Kaleidoscope, Plume, Neon
   Fluid, Powder) are worth graduating out of `DRAFT_SCENE_IDS`, and which get
   dropped? Each needs a look on real music first.
+- Beat grid: should its default move off Hits (to 1/4) once judged on real
+  music, and should the TV receive it (a new DeviceCommand field)?
 - Kaleidoscope: is a second symmetry lattice (hexagonal, six-fold cell) worth
   a setting, or is the square lattice the look? Its tint drift was halved
   after real music wandered it into purple/green — is the remaining drift
