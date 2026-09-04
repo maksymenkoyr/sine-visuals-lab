@@ -20,7 +20,7 @@ regenerate it at session close.
   real 140 BPM track. Registered as a draft. The user has seen clips; the
   journeys pass and the sunburst removal are not yet judged on the TV.
 - **A run of draft scene PRs** from the last two days, all waiting on review
-  and a real-music judgement: Kaleidoscope #79, Powder #77, Neon Fluid #76,
+  and a real-music judgement: Kaleidoscope #79, Powder #77 (now v2: velocity-state physics, plumes, bloom, club layer), Neon Fluid #76,
   Plume #75. Each has its own memory note and headless verification in its
   PR description.
 - **Auto: unstick tempoLock, rank dials** — draft PR #73
