@@ -12,7 +12,10 @@ regenerate it at session close.
   dot-lattice sheet with beat swells for loud ones, crossfaded by section
   intensity (`phaseMix`) or pinned with `MODES`. First `drawArraysInstanced`
   in the repo (instanced quads from an empty VAO); premultiplied "over"
-  blending for the flat merged blobs. Verified headlessly on synthetic audio
+  blending for the flat merged blobs. Second pass after the user re-watched
+  the reference: formations (`FORM`), bar-timed journeys between them
+  (`JOURNEYS`, run by `createChoreographer`), 4D turns of the sheet, tumble
+  and stretch poses, motion streaks. Verified headlessly on synthetic audio
   (high/low presets, gallery tile), the probe auto→manual sign-off, and one
   real 140 BPM track — where the section never dropped into the sunburst
   band, so Auto's crossfade itself is unwatched on real music. Registered as
