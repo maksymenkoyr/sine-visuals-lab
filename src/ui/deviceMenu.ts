@@ -127,9 +127,9 @@ import {
  * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
  * are its own, in bandFaders.ts). A focused
  * slider also takes Home/End to its min/max — the browser's own native
- * range-input behavior, left alone by onKeyDown below — plus z/x
- * (wireSliderQuickJump) to jump straight to the middle of the track or the
- * top, the one landing Home/End can't reach. Digit
+ * range-input behavior, left alone by onKeyDown below — plus z/x/c
+ * (wireSliderQuickJump) to jump straight to the middle of the track, the
+ * top, or wherever the pointer last hovered along it. Digit
  * keys 1-9 jump to a numbered block —
  * each card title and each scene group heading carries a .vc-block badge,
  * renumbered by renumberBlocks() whenever the block set can change (i.e. on
@@ -646,20 +646,53 @@ function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
   });
 }
 
-/** z centers a focused slider, x maxes it out — a fast way to land on either
- *  without dragging. No key for the low end: Home already jumps a native
- *  range input to its min for free (onKeyDown, below, doesn't intercept it),
- *  so the only capability worth adding is the one Home/End don't cover.
- *  Plain single keys, not a chord — z/x collide with nothing else live while
- *  a slider has focus (A/R/T/D, the panel's H/M/Tab/1-9, the arrows, and
- *  Home/End are all spoken for; z/x aren't). Sets .value then redispatches
- *  "input" rather than duplicating each slider's own commit logic, so this
- *  stays a one-line addition at every call site regardless of what that
- *  site's "input" listener does. */
-function wireSliderQuickJump(slider: HTMLInputElement): void {
+/** The pointer's fraction along `slider`'s track (0 at min, 1 at max,
+ *  clamped) — used by wireSliderQuickJump's c binding below. A keydown
+ *  carries no coordinates, so this reads lastHoverX/lastHoverY, the same
+ *  panel-wide last-real-cursor-position wireHoverFocus above maintains.
+ *  Undefined when the pointer hasn't entered the panel yet, or sits outside
+ *  `row` — the desync wireHoverFocus's own comment describes, where
+ *  scrolling carries a different row under a stationary cursor without
+ *  moving focus there; c should no-op then rather than edit a row the
+ *  pointer has left. Maps across the slider's full rect, not its thumb's
+ *  inset travel, matching both wireThumbMagnet's thumbX above and the
+ *  --vc-fill percentage (controlsTheme.ts) that paints the track — the
+ *  boundary the eye reads as "the value" sits at this position, and the
+ *  thumb itself is only 3px wide, so the half-thumb inset this skips is
+ *  sub-pixel. */
+function pointerFraction(row: HTMLElement, slider: HTMLInputElement): number | undefined {
+  if (lastHoverX < 0) return undefined;
+  const rowRect = row.getBoundingClientRect();
+  if (
+    lastHoverX < rowRect.left ||
+    lastHoverX > rowRect.right ||
+    lastHoverY < rowRect.top ||
+    lastHoverY > rowRect.bottom
+  ) {
+    return undefined;
+  }
+  const rect = slider.getBoundingClientRect();
+  if (rect.width <= 0) return undefined;
+  return Math.min(1, Math.max(0, (lastHoverX - rect.left) / rect.width));
+}
+
+/** z centers a focused slider, x maxes it out, c jumps it to wherever the
+ *  pointer last was along the track (pointerFraction above) — a fast way to
+ *  land on any value without dragging. No key for the low end: Home already
+ *  jumps a native range input to its min for free (onKeyDown, below, doesn't
+ *  intercept it), so the only capabilities worth adding are the ones
+ *  Home/End don't cover. Plain single keys, not a chord — z/x/c collide with
+ *  nothing else live while a slider has focus (A/R/T/D, the panel's
+ *  H/M/Tab/1-9, the arrows, and Home/End are all spoken for). c no-ops when
+ *  pointerFraction returns undefined, rather than falling back to some other
+ *  value — see its comment for why. Sets .value then redispatches "input"
+ *  rather than duplicating each slider's own commit logic, so this stays a
+ *  one-line addition at every call site regardless of what that site's
+ *  "input" listener does. */
+function wireSliderQuickJump(row: HTMLElement, slider: HTMLInputElement): void {
   slider.addEventListener("keydown", (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    const frac = { z: 0.5, x: 1 }[e.key];
+    const frac = e.key === "c" ? pointerFraction(row, slider) : { z: 0.5, x: 1 }[e.key];
     if (frac === undefined) return;
     e.preventDefault();
     const lo = Number(slider.min);
@@ -881,7 +914,7 @@ function createControlRow(spec: ControlRowSpec) {
   el.addEventListener("click", () => slider.focus());
   wireHoverFocus(el, slider);
   wireThumbMagnet(el, slider);
-  wireSliderQuickJump(slider);
+  wireSliderQuickJump(el, slider);
 
   // Log-mapped so the midpoint lands close to defaultValue instead of skewing
   // toward the wide "more reactive" end. With zeroAtMin, position 0 is carved
@@ -1528,7 +1561,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // reading the card's title steals focus onto the slider.
   wireHoverFocus(autoStrengthRow, autoStrengthSlider);
   wireThumbMagnet(autoCard.el, autoStrengthSlider);
-  wireSliderQuickJump(autoStrengthSlider);
+  wireSliderQuickJump(autoStrengthRow, autoStrengthSlider);
 
   function showAutoStrength(value: number): void {
     autoStrengthSlider.value = String(value);
