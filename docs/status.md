@@ -7,14 +7,20 @@ regenerate it at session close.
 ## In flight
 
 - **Powder scene** (this session) — branch `worktree-powder-scene`, draft
-  PR #77. A GPU powder cloud after the user's UE4 short: MRT RGBA8 ping-pong
-  sim, spring + curl turbulence with a lobe warp, coherent heat field for the
-  red, stateless cube bursts on big hits. Plan executed by an Opus subagent
-  in three passes (Sonnet was rate-limited); typecheck/tests green; verified
-  headless on synthetic audio, on the actual track through a fake mic, at
-  floor quality, in the gallery, and with the auto/manual probe sign-off.
-  Registered as a draft scene. Rough edges: first ~4 s after load, big-hit
-  refractory tuned on one 140 BPM track, cubes spray a ring not a plume.
+  PR #77, now at v2 after the user judged v1 as having "no physics". A GPU
+  powder cloud after the user's UE4 short: velocity-state sim on four RGBA8
+  MRT attachments (drag, curl force, directed burst plumes with vortex rings,
+  gravity + buoyancy, floor/wall collisions, re-emission, soft lumpy
+  confinement around wandering attractors), stateless cube bursts riding the
+  plume, per-scene half-res bloom, camera push/shake, bounded hue excursions,
+  treble sparkle. Executed by Opus subagents from
+  `~/.claude/plans/powder-v2-physics.md`; typecheck/tests green; verified
+  headless on the actual track through a fake mic, beat-synced, at floor
+  quality, in the gallery. Draft scene. Still short of the reference: folded
+  translucent membranes rather than matte powder, haze plumes rather than
+  tendrils, blurry floor tier. Found on the way: `anim.dropOnset` fires
+  dozens of times per drop on real music (guarded locally; upstream fix owed
+  in `sectionIntensity.ts`).
 - **Three scenes from the same reference landed in parallel today**: Plume
   (PR #75, `worktree-plume-scene`), Neon Fluid (PR #76, `worktree-neon-fluid`,
   a stable-fluids dye sim — a different look) and Powder (PR #77). Plume and
