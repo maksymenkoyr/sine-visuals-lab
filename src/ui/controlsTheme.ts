@@ -281,12 +281,16 @@ const stylesheet = `
   transition: max-height 0.18s ease, opacity 0.18s ease, margin-top 0.18s ease;
   font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.65);
 }
-.vc-row:hover .vc-hint, .vc-row:focus-within .vc-hint { max-height: 48px; opacity: 1; margin-top: 5px; }
+.vc-row:hover .vc-hint, .vc-row:focus-within .vc-hint { max-height: 120px; opacity: 1; margin-top: 5px; }
+/* The auto takeover line under a slider's description (deviceMenu.ts,
+ * AUTO_HOLDING_HINT) — a second line in the auto system's colour, shown only
+ * while auto holds the row, so the description above it stays readable. */
+.vc-hint-auto { color: ${withAlpha(AUTO_SKY, 0.85)}; }
 
 /* A row's "reacts to" strip (controlsKit.ts's createSignalStrip) — a sibling
  * of .vc-hint above, not nested inside it, so the two reveal independently:
- * while auto owns the row, deviceMenu.ts replaces the hint's text wholesale
- * (AUTO_HOLDING_HINT) but never touches this element, so the pills stay put.
+ * while auto owns the row, deviceMenu.ts adds its takeover line inside the
+ * hint (AUTO_HOLDING_HINT) but never touches this element, so the pills stay put.
  * Reveals on hover/focus like the hint, or pinned open by its own head chip
  * (.vc-reads-open, toggled on click) regardless of hover state. */
 .vc-reads {

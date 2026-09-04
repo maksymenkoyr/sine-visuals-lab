@@ -54,6 +54,12 @@ gate the deploy that a push to `main` triggers — see
   `THIRD-PARTY-NOTICES.md`.
 - Don't port third-party implementations into a scene — write it as independent
   work. (See the git history around "Rewrite Mesh Grid as independent work.")
+- When working on a visualization, start `npm run dev` and hand the user a
+  direct link to that scene — `https://localhost:<port>/#/v/<sceneId>` — not the
+  gallery root. The scene id is the `id` field on the `Scene` object in
+  `src/render/scenes/`. Any query (`?audio=synthetic&bpm=…`, `?quality=…`) goes
+  *before* the hash — `src/app.ts` reads `location.search`, and a query placed
+  after the hash silently lands on the gallery.
 
 ## Session close
 

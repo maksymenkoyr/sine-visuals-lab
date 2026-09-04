@@ -6,49 +6,52 @@ regenerate it at session close.
 
 ## In flight
 
-- **Powder scene** (this session) — branch `worktree-powder-scene`, draft
-  PR #77, now at v2 after the user judged v1 as having "no physics". A GPU
-  powder cloud after the user's UE4 short: velocity-state sim on four RGBA8
-  MRT attachments (drag, curl force, directed burst plumes with vortex rings,
-  gravity + buoyancy, floor/wall collisions, re-emission, soft lumpy
-  confinement around wandering attractors), stateless cube bursts riding the
-  plume, per-scene half-res bloom, camera push/shake, bounded hue excursions,
-  treble sparkle. Executed by Opus subagents from
-  `~/.claude/plans/powder-v2-physics.md`; typecheck/tests green; verified
-  headless on the actual track through a fake mic, beat-synced, at floor
-  quality, in the gallery. Draft scene. Still short of the reference: folded
-  translucent membranes rather than matte powder, haze plumes rather than
-  tendrils, blurry floor tier. Found on the way: `anim.dropOnset` fires
-  dozens of times per drop on real music (guarded locally; upstream fix owed
-  in `sectionIntensity.ts`).
-- **Three scenes from the same reference landed in parallel today**: Plume
-  (PR #75, `worktree-plume-scene`), Neon Fluid (PR #76, `worktree-neon-fluid`,
-  a stable-fluids dye sim — a different look) and Powder (PR #77). Plume and
-  Powder both chase the same video; nobody has compared them side by side.
-- **Other open drafts**: PR #74 (`worktree-docs-architecture`, diagrams-first
-  architecture doc), PR #73 (`worktree-auto-dial-ranking`, tempoLock unstick
-  + dial ranking). PR #72 (`docs-business`) and PR #70 (`wrap-status`) are
-  marked ready, not draft.
-- **Worktrees with no PR**: `agent-ae8a69d86e9c44e97`, `bake-defaults`,
-  `docs-index`, `setting-groups`, `tuning-spotlight` (all unlocked, idle);
-  `auto-hint-description` is locked but sits exactly at `main` — either a
-  session about to start or a stale lock.
-- `origin` carries several dozen `worktree-*` branches, most already merged
-  in spirit through other PRs; not pruned.
+- **Ambience scene** — `src/render/scenes/ambience.ts`, branch
+  `worktree-ambience-scene`, draft PR #80 (this session). A Windows Media
+  Player homage after a YouTube short: a dot lattice with beat swells that
+  opens as a dot unfolding into a sheet (`OPENING_LEGS`). The comet sunburst
+  of the first revision was dropped at the user's request. First `drawArraysInstanced`
+  in the repo (instanced quads from an empty VAO); premultiplied "over"
+  blending for the flat merged blobs. Second pass after the user re-watched
+  the reference: formations (`FORM`), bar-timed journeys between them
+  (`JOURNEYS`, run by `createChoreographer`), 4D turns of the sheet, tumble
+  and stretch poses, motion streaks. Verified headlessly on synthetic audio
+  (high/low presets, gallery tile), the probe auto→manual sign-off, and one
+  real 140 BPM track. Registered as a draft. The user has seen clips; the
+  journeys pass and the sunburst removal are not yet judged on the TV.
+- **A run of draft scene PRs** from the last two days, all waiting on review
+  and a real-music judgement: Kaleidoscope #79, Powder #77 (now v2: velocity-state physics, plumes, bloom, club layer), Neon Fluid #76,
+  Plume #75. Each has its own memory note and headless verification in its
+  PR description.
+- **Auto: unstick tempoLock, rank dials** — draft PR #73
+  (`worktree-auto-dial-ranking`).
+- **docs/architecture.md rebuild** — draft PR #74 (`worktree-docs-architecture`);
+  the older `worktree-docs-index` branch's premise is superseded by it and by
+  `docs/index.md` on `main`.
+- **Business/legal docs** — PR #72 (`docs-business`), ready for review;
+  PR #70 (`wrap-status`) is a stale status snapshot that this file replaces.
+- Idle worktrees with no PR: `worktree-agent-ae8a69d86e9c44e97` (always-on
+  dev controls), `worktree-auto-hint-description`, `worktree-setting-groups`
+  (its `SETTING_GROUPS` change is already on `main`), `worktree-tuning-spotlight`,
+  `dev-bake-defaults-into-source`. Check `git log main..` on each before
+  reviving; several look landed or superseded.
 
 ## Open questions
 
-- Plume (#75) vs Powder (#77): keep both as drafts, merge one, or fold the
-  stronger parts of each into one scene? Needs a real-music look at both.
-- Powder's cube bursts: is the "loud section + strong kick, ~every few
-  seconds" rule the right feel on slower or sparser music than the reference
-  track?
-- Is the locked `auto-hint-description` worktree in use, or a stale lock?
+- Ambience: the tesseract journey reads as a radial warp tunnel rather than
+  a recognisable lattice — keep it as one entry in `JOURNEYS`, or drop it?
+- Ambience: the reference's sheet is a spectrum-agnostic lattice; ours ties
+  disc size to each column's band (`breathe`). Keep, or make it pure motion?
+- Which of the five draft scenes graduate out of `DRAFT_SCENE_IDS`, and in
+  what order — they compete for the same gallery row.
+- Storm's local render-cap workaround (see its header) is redundant now that
+  `renderLatch.ts` is on `main`; simplify once nothing else is touching Storm.
 
 ## Next up
 
-- Judge PR #77 on real music in the app (mic), side by side with PR #75, then
-  decide the question above.
-- Merge or close the ready PRs #72 and #70.
-- Review drafts #73, #74, #76.
-- Prune the stale remote `worktree-*` branches and release idle worktrees.
+- Look at Ambience on the TV with real music; then review PR #80.
+- Review and land the draft scene PRs #75–#79 (or close the ones that don't
+  earn a slot), and PRs #72–#74.
+- Prune the old scratch branches listed in `git branch -r --no-merged main`
+  that are weeks behind; most read like earlier attempts at work that has
+  since landed.
