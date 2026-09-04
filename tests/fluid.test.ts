@@ -51,6 +51,7 @@ import {
   createFoldState,
   advanceFold,
   foldZoom,
+  foldMixEased,
   SHOCK_SLOTS,
   SHOCK_LIFE,
   createShockState,
@@ -542,9 +543,13 @@ describe("SETTINGS weight convention", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Symmetry / fold drift: the `symmetry` setting's Auto option (value 0)
-// drifts between FOLD_FAMILY's quadrant folds instead of holding one — see
-// fluid.ts's FoldState/createFoldState/advanceFold/foldZoom.
+// Symmetry / fold drift: the Symmetry group's `symmetry` setting's Auto
+// option (value 0) drifts between FOLD_FAMILY's quadrant folds instead of
+// holding one, warping the sample coordinate itself between them (see
+// foldMixEased) rather than crossfading two rendered images — see fluid.ts's
+// FoldState/createFoldState/advanceFold/foldZoom/foldMixEased. The group's
+// Spin/Zoom breathing/Auto drift settings gate advanceFold's rotation, zoom
+// amplitude, and hold-countdown rate respectively.
 // ---------------------------------------------------------------------------
 
 /** Deterministic stand-in for Math.random in fold-drift tests: cycles
@@ -588,13 +593,25 @@ describe("createFoldState", () => {
   });
 });
 
-describe("advanceFold", () => {
-  const inp = (overrides: Partial<{ energy: number; dropOnset: boolean; beatPulse: number }> = {}) => ({
+/** advanceFold's full input shape, with defaults chosen so the pre-existing
+ *  tests below see the same numeric behaviour they always have: spin/breathe
+ *  at 1 (full effect), drift at 0.5 (the value the task spec calls out as
+ *  matching the fold's drift rate before the Symmetry group's Auto drift
+ *  setting existed — see advanceFold's own doc comment in fluid.ts). */
+function foldInp(overrides: Partial<{ energy: number; dropOnset: boolean; beatPulse: number; spin: number; breathe: number; drift: number }> = {}) {
+  return {
     energy: 0,
     dropOnset: false,
     beatPulse: 0,
+    spin: 1,
+    breathe: 1,
+    drift: 0.5,
     ...overrides,
-  });
+  };
+}
+
+describe("advanceFold", () => {
+  const inp = foldInp;
 
   it("rises mix toward 1 within FOLD_FADE_SEC of a reconfigure", () => {
     const st = createFoldState(fixedRng(0.9));
@@ -619,9 +636,9 @@ describe("advanceFold", () => {
     expect(FOLD_FAMILY).toContain(st.modeB);
   });
 
-  it("never interrupts a crossfade already in flight, even on a dropOnset", () => {
+  it("never interrupts a warp already in flight, even on a dropOnset", () => {
     const st = createFoldState();
-    advanceFold(st, 0.016, inp({ dropOnset: true })); // starts a crossfade, mix -> 0
+    advanceFold(st, 0.016, inp({ dropOnset: true })); // starts a warp, mix -> 0
     const { modeA, modeB } = st;
     advanceFold(st, 0.01, inp({ dropOnset: true })); // still mid-fade
     expect(st.modeA).toBe(modeA);
@@ -645,7 +662,7 @@ describe("advanceFold", () => {
   it("keeps modeA and modeB in FOLD_FAMILY across many steps of mixed energy/beat/drop input", () => {
     const st = createFoldState();
     for (let i = 0; i < 2000; i++) {
-      advanceFold(st, 0.03, { energy: (i % 7) / 7, dropOnset: i % 53 === 0, beatPulse: (i % 11) / 11 });
+      advanceFold(st, 0.03, foldInp({ energy: (i % 7) / 7, dropOnset: i % 53 === 0, beatPulse: (i % 11) / 11 }));
       expect(FOLD_FAMILY).toContain(st.modeA);
       expect(FOLD_FAMILY).toContain(st.modeB);
     }
@@ -666,20 +683,96 @@ describe("advanceFold", () => {
     advanceFold(hi, 0.1, inp({ beatPulse: 1 }), fixedRng(0));
     expect(Math.abs(hi.rot)).toBeGreaterThan(Math.abs(lo.rot));
   });
+
+  it("spin 0 leaves rot unchanged (no rotation at all)", () => {
+    const st = createFoldState(fixedRng(0));
+    for (let i = 0; i < 50; i++) advanceFold(st, 0.1, inp({ spin: 0, energy: (i % 5) / 5, beatPulse: (i % 3) / 3 }));
+    expect(st.rot).toBe(0);
+  });
+
+  it("drift 0 never changes the fold, even past FOLD_HOLD_MAX and on a dropOnset", () => {
+    const st = createFoldState(fixedRng(0)); // holdLeft starts at FOLD_HOLD_MIN
+    const modeA = st.modeA;
+    const modeB = st.modeB;
+    let t = 0;
+    const dt = 0.05;
+    while (t < FOLD_HOLD_MAX + 1) {
+      advanceFold(st, dt, inp({ drift: 0, dropOnset: true }));
+      t += dt;
+    }
+    expect(st.modeA).toBe(modeA);
+    expect(st.modeB).toBe(modeB);
+    // mix still rises normally at drift 0 — only the reconfigure is gated.
+    expect(st.mix).toBe(1);
+  });
 });
 
 describe("foldZoom", () => {
-  it("is 1 at zoomPhase 0 (a fresh state)", () => {
-    expect(foldZoom(createFoldState())).toBeCloseTo(1, 6);
+  it("is 1 at zoomPhase 0 (a fresh state), regardless of breathe", () => {
+    expect(foldZoom(createFoldState(), 1)).toBeCloseTo(1, 6);
+    expect(foldZoom(createFoldState(), 0)).toBeCloseTo(1, 6);
   });
 
-  it("oscillates within [1 - FOLD_ZOOM_AMP, 1 + FOLD_ZOOM_AMP]", () => {
+  it("oscillates within [1 - FOLD_ZOOM_AMP, 1 + FOLD_ZOOM_AMP] at breathe 0.5 (matches the pre-setting amplitude)", () => {
     const st = createFoldState();
     for (let i = 0; i < 500; i++) {
-      advanceFold(st, 0.05, { energy: 0, dropOnset: false, beatPulse: 0 });
-      const z = foldZoom(st);
+      advanceFold(st, 0.05, foldInp({ breathe: 0.5 }));
+      const z = foldZoom(st, 0.5);
       expect(z).toBeGreaterThanOrEqual(1 - FOLD_ZOOM_AMP - 1e-9);
       expect(z).toBeLessThanOrEqual(1 + FOLD_ZOOM_AMP + 1e-9);
+    }
+  });
+
+  it("amplitude scales with breathe (breathe 1 swings twice as far as breathe 0.5)", () => {
+    const st = createFoldState();
+    st.zoomPhase = 0.25; // sin(0.25 * 2*pi) = 1, the oscillation's peak
+    const zHalf = foldZoom(st, 0.5) - 1;
+    const zFull = foldZoom(st, 1) - 1;
+    expect(zFull).toBeCloseTo(zHalf * 2, 6);
+  });
+});
+
+describe("foldMixEased", () => {
+  it("is 0 at 0, 1 at 1, and 0.5 at 0.5 (the smoothstep formula m*m*(3-2m))", () => {
+    expect(foldMixEased(0)).toBe(0);
+    expect(foldMixEased(1)).toBe(1);
+    expect(foldMixEased(0.5)).toBeCloseTo(0.5, 10);
+  });
+
+  it("is monotone non-decreasing over [0, 1]", () => {
+    let prev = -Infinity;
+    for (let m = 0; m <= 1; m += 0.01) {
+      const v = foldMixEased(m);
+      expect(v).toBeGreaterThanOrEqual(prev - 1e-9);
+      prev = v;
+    }
+  });
+});
+
+describe("Symmetry group settings", () => {
+  const symmetrySettings = SETTINGS.filter((s) => s.group === "Symmetry");
+  const SYMMETRY_KEYS = ["symmetry", "foldSpread", "foldSpin", "foldBreathe", "foldDrift"];
+
+  it("has exactly symmetry, foldSpread, foldSpin, foldBreathe, foldDrift", () => {
+    expect(symmetrySettings.map((s) => s.key).sort()).toEqual([...SYMMETRY_KEYS].sort());
+  });
+
+  it("symmetry itself carries no reads (moved to foldDrift)", () => {
+    const symmetry = SETTINGS.find((s) => s.key === "symmetry")!;
+    expect(symmetry.reads).toBeUndefined();
+  });
+
+  it("foldDrift reads anim.dropOnset", () => {
+    const foldDrift = SETTINGS.find((s) => s.key === "foldDrift")!;
+    expect(foldDrift.reads).toEqual(["anim.dropOnset"]);
+  });
+
+  it("foldSpread/foldSpin/foldBreathe/foldDrift are 0..1 ranged sliders with step 0.05", () => {
+    for (const key of ["foldSpread", "foldSpin", "foldBreathe", "foldDrift"]) {
+      const s = SETTINGS.find((x) => x.key === key)!;
+      expect(s.min, key).toBe(0);
+      expect(s.max, key).toBe(1);
+      expect(s.step, key).toBe(0.05);
     }
   });
 });

@@ -237,7 +237,7 @@ export const DYE_FADE_MIN = 0.05;
 export const DYE_FADE_MAX = 1.2;
 export const DYE_MAX = 4;
 export const CURL_EPS_BASE = 1.5;
-export const CURL_EPS_ENERGY = 1.5;
+export const CURL_EPS_ENERGY = 0.8;
 /** Integer texel offset the curl (CURL_BODY) and confinement-gradient
  *  (FORCE_BODY) stencils sample at — emitted into the GLSL as a const int so
  *  it can be swept (e.g. to reach past texel-scale noise onto larger

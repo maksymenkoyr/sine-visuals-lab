@@ -64,15 +64,24 @@ import {
 // of the edge line (`uBeatPulse`) and tints the screen-position colour ramp
 // by the live spectral centroid, on top of the manual hue shift. The
 // Swirl/Dye fade/Viscosity settings are themselves music-reactive via `auto`
-// weights, same as every other scene's SETTINGS. The `symmetry` setting's
-// Auto option (createFoldState/advanceFold below) drifts between the
-// FOLD_FAMILY quadrant folds instead of holding one — a random hold
-// shortened by loudness (and cut short by a drop) times a crossfade between
-// two folds, under a slow rotation and breathing zoom both nudged by energy
-// and the beat, Chladni-plate-inspired without literally computing an
-// eigenmode. Only the display program goes through uploadCommonUniforms —
-// the sim's own programs (fluidSim.ts) take a narrower, JS-computed set of
-// per-step uniforms that have nothing to do with a scene's settings.
+// weights, same as every other scene's SETTINGS. The Symmetry group's
+// `symmetry` setting's Auto option (createFoldState/advanceFold below)
+// drifts between the FOLD_FAMILY quadrant folds instead of holding one — a
+// random hold shortened by loudness and the group's Auto drift setting (and
+// cut short by a drop, when Auto drift is > 0) — under a slow rotation and
+// breathing zoom, each gated by the group's own Spin/Zoom breathing setting
+// and nudged by energy and the beat, Chladni-plate-inspired without
+// literally computing an eigenmode. The fold state keeps advancing even with
+// a manual fold pinned, so Spin/Zoom breathing still animate it; only the
+// drift-driven reconfigure is Auto-only. The two folds a drift is moving
+// between aren't crossfaded as two rendered images (a double exposure) —
+// simUv/foldMixEased warp the single sample COORDINATE from one fold to the
+// other, so the image reads as one continuous flow. Radial folds' own wedge
+// angle is remapped by the group's Wedge spread setting (see simUv's `k`)
+// rather than always squeezed to fill the sim's quarter-turn. Only the
+// display program goes through uploadCommonUniforms — the sim's own programs
+// (fluidSim.ts) take a narrower, JS-computed set of per-step uniforms that
+// have nothing to do with a scene's settings.
 //
 // dt: as chladni.ts, computed from frame.time deltas rather than
 // anim.dtSec — the anim clock advances every rAF tick while render() is
@@ -115,18 +124,18 @@ export const EMIT_SIGMA = 0.07;
 export const EMIT_RING = 0.25;
 export const EMIT_RING_SIGMA = 0.012;
 export const EMIT_FORCE_BASE = 15;
-export const EMIT_FORCE_ENERGY = 50;
-export const EMIT_KICK_LOW = 100;
-export const EMIT_KICK_BEAT = 50;
+export const EMIT_FORCE_ENERGY = 25;
+export const EMIT_KICK_LOW = 50;
+export const EMIT_KICK_BEAT = 25;
 export const EMIT_SWAY = 0.6;
 export const EMIT_SWAY_RATE = 0.35;
 /** Extra emitter force from a beat puff / a drop, gated by beatKick. */
-export const PUFF_FORCE = 350;
-export const DROP_FORCE = 600;
+export const PUFF_FORCE = 200;
+export const DROP_FORCE = 300;
 /** Continuous (always-on) and puff-driven dye injection at the emitter. */
 export const DYE_BASE_CONT = 0.05;
-export const DYE_ENERGY_CONT = 0.08;
-export const PUFF_DYE = 5;
+export const DYE_ENERGY_CONT = 0.04;
+export const PUFF_DYE = 4;
 
 /** Beat puff clock: fires an emitter/splat spike on a bass or broadband
  *  onset (or, once tempo-locked, on the beat-phase wrap), with a
@@ -142,6 +151,9 @@ export const PUFF_FALLBACK_RATE = 1.6;
  *  onset edge, or (once tempo-locked) the beat-phase wrap. A constant, not a
  *  setting — for sweeping from the screenshot script, not the device menu. */
 export const PUFF_TRIGGER: "onset" | "beatPhase" = "onset";
+/** Puffs closer together than this are dropped: on real music the onset
+ *  stream can fire several times a second, and every puff is a full ring. */
+export const PUFF_MIN_GAP = 0.25;
 
 export function puffEnv(ageSec: number): number {
   if (ageSec < 0) return 0;
@@ -161,7 +173,7 @@ export interface PuffState {
 }
 
 export function createPuffState(): PuffState {
-  return { age: 0, sinceOnset: 0, fallbackPhase: 0, lastBeatPhase: 0 };
+  return { age: PUFF_MIN_GAP, sinceOnset: 0, fallbackPhase: 0, lastBeatPhase: 0 };
 }
 
 /** Advances the puff clock in place by one frame and returns whether a puff
@@ -187,7 +199,7 @@ export function advancePuff(
   if (PUFF_TRIGGER === "beatPhase" && tempoLock > 0.5) {
     if (beatPhase < st.lastBeatPhase) firedNow = true;
   }
-  if (!firedNow && fired) firedNow = true;
+  if (!firedNow && fired && st.age >= PUFF_MIN_GAP) firedNow = true;
 
   if (firedNow) {
     st.age = 0;
@@ -219,15 +231,15 @@ export const SPLAT_FALLBACK_MIX = 0.35;
  *  flowPhase, its exponential decay shape, and per-slot force/dye/sigma. */
 export const SPLAT_RATE = 0.18;
 export const SPLAT_DECAY = 0.12;
-export const SPLAT_FORCE = 120;
+export const SPLAT_FORCE = 60;
 export const SPLAT_DYE = 0.4;
 export const SPLAT_SIGMA = 0.12;
 
 export const SIM_DT_MAX = 1 / 30;
 export const SIM_DT_DEFAULT = 1 / 60;
 /** warpedDt's clamp floor/gain — see its own comment below. */
-export const WARP_MIN = 0.7;
-export const WARP_GAIN = 0.25;
+export const WARP_MIN = 0.85;
+export const WARP_GAIN = 0.3;
 
 /** Tempo warp: scales the sim's own timestep by loudness and the `warp`
  *  setting, so louder passages visibly speed the whole flow up (clamped to
@@ -415,27 +427,35 @@ export function symmetryToMirror(k: number): MirrorMode | null {
  *  fluidSim.ts) and switching into one mid-flow would reset the fluid. */
 export const FOLD_FAMILY: readonly MirrorMode[] = [MIRROR_KALEIDO, MIRROR_RADIAL6, MIRROR_RADIAL8, MIRROR_RADIAL12];
 
-/** Fold-drift tuning: FOLD_FADE_SEC is the crossfade duration between two
- *  folds; FOLD_HOLD_MIN/MAX bound the random seconds a fold holds before the
- *  next drift (louder music shortens it — see advanceFold); FOLD_ROT_BASE/
- *  ENERGY set the slow rotation's rate at rest and its extra gain from
- *  energy (further nudged by the beat); FOLD_ZOOM_AMP/RATE set the size and
- *  speed of a slow breathing zoom (see foldZoom). */
+/** Fold-drift tuning: FOLD_FADE_SEC is the warp duration between two folds
+ *  (see foldMixEased — the display shader warps the sample coordinate itself
+ *  over this span, not a crossfade of two rendered images); FOLD_HOLD_MIN/MAX
+ *  bound the random seconds a fold holds before the next drift, scaled by the
+ *  Symmetry group's Auto drift setting (louder music also shortens it — see
+ *  advanceFold); FOLD_ROT_BASE/ENERGY set the slow rotation's rate at rest
+ *  (scaled by the Spin setting) and its extra gain from energy (further
+ *  nudged by the beat); FOLD_ZOOM_AMP/RATE set the size and speed of a slow
+ *  breathing zoom, its size also scaled by the Zoom breathing setting (see
+ *  foldZoom). */
 export const FOLD_FADE_SEC = 2.5;
 export const FOLD_HOLD_MIN = 10;
 export const FOLD_HOLD_MAX = 25;
-export const FOLD_ROT_BASE = 0.02;
-export const FOLD_ROT_ENERGY = 0.03;
+export const FOLD_ROT_BASE = 0.06;
+export const FOLD_ROT_ENERGY = 0.015;
 export const FOLD_ZOOM_AMP = 0.12;
 export const FOLD_ZOOM_RATE = 0.07;
 
-/** Auto symmetry's drift state: crossfades from modeA to modeB over
- *  FOLD_FADE_SEC seconds, picks the next modeB once the current hold expires
- *  (or a drop hits) and the crossfade has finished, and carries a slow
- *  rotation plus a breathing zoom applied to the fold's own coordinate (see
- *  simUv's uFoldRot/uFoldZoom use in the display shader) — a bit like a
- *  Chladni plate, random music energy reconfiguring the pattern, without
- *  literally computing a Chladni eigenmode. */
+/** Auto symmetry's drift state: warps from modeA to modeB over FOLD_FADE_SEC
+ *  seconds (see foldMixEased for the eased ramp uploaded as uFoldMix), picks
+ *  the next modeB once the current hold expires (or a drop hits, and only
+ *  when the Symmetry group's Auto drift setting is > 0) and the warp has
+ *  finished, and carries a slow rotation plus a breathing zoom applied to the
+ *  fold's own coordinate (see simUv's uFoldRot/uFoldZoom use in the display
+ *  shader) — a bit like a Chladni plate, random music energy reconfiguring
+ *  the pattern, without literally computing a Chladni eigenmode. The state
+ *  keeps advancing (rot/zoomPhase) even when a manual fold is pinned, so the
+ *  Spin/Zoom breathing settings still visibly turn and pulse a pinned
+ *  Kaleidoscope/Radial look — see render() below. */
 export interface FoldState {
   modeA: MirrorMode;
   modeB: MirrorMode;
@@ -458,21 +478,28 @@ export function createFoldState(rng: () => number = Math.random): FoldState {
   };
 }
 
-/** Advances `st` in place by one frame. `inp.energy` shortens the hold
- *  countdown and adds to the rotation rate; `inp.beatPulse` nudges the
- *  rotation further on a beat; `inp.dropOnset` forces an immediate
- *  reconfigure once the current crossfade has finished (never interrupts one
- *  already in flight, so a fold never visibly snaps mid-fade). */
+/** Advances `st` in place by one frame. `inp.spin` scales the rotation rate
+ *  (0 = no rotation); `inp.energy` shortens the hold countdown and adds to
+ *  the rotation rate; `inp.beatPulse` nudges the rotation further on a beat;
+ *  `inp.drift` scales how fast the hold countdown runs down (0 = the fold
+ *  never drifts on its own, 0.5 matches the rate before this setting
+ *  existed) and gates the drop-triggered reconfigure (a drop is ignored
+ *  entirely at drift 0); `inp.dropOnset` forces an immediate reconfigure once
+ *  the current warp has finished (never interrupts one already in flight, so
+ *  a fold never visibly snaps mid-warp). `inp.breathe` isn't read here — it
+ *  only feeds foldZoom, which the caller invokes separately once per frame
+ *  with the same settings bundle (see render() below) — it travels through
+ *  this type anyway so callers can pass one bundle to both. */
 export function advanceFold(
   st: FoldState,
   dtSec: number,
-  inp: { energy: number; dropOnset: boolean; beatPulse: number },
+  inp: { energy: number; dropOnset: boolean; beatPulse: number; spin: number; breathe: number; drift: number },
   rng: () => number = Math.random,
 ): void {
   st.mix = Math.min(1, st.mix + dtSec / FOLD_FADE_SEC);
-  st.holdLeft -= dtSec * (1 + 0.6 * inp.energy);
+  st.holdLeft -= dtSec * inp.drift * 2 * (1 + 0.3 * inp.energy);
 
-  if ((st.holdLeft <= 0 || inp.dropOnset) && st.mix >= 1) {
+  if ((st.holdLeft <= 0 || (inp.dropOnset && inp.drift > 0)) && st.mix >= 1) {
     st.modeA = st.modeB;
     let next = FOLD_FAMILY[Math.floor(rng() * FOLD_FAMILY.length)];
     for (let tries = 0; tries < 8 && next === st.modeA; tries++) {
@@ -484,14 +511,25 @@ export function advanceFold(
     st.holdLeft = FOLD_HOLD_MIN + rng() * (FOLD_HOLD_MAX - FOLD_HOLD_MIN);
   }
 
-  st.rot += dtSec * st.rotDir * (FOLD_ROT_BASE + FOLD_ROT_ENERGY * inp.energy) * (1 + 0.6 * inp.beatPulse);
+  st.rot += dtSec * st.rotDir * inp.spin * (FOLD_ROT_BASE + FOLD_ROT_ENERGY * inp.energy) * (1 + 0.3 * inp.beatPulse);
   st.zoomPhase += dtSec * FOLD_ZOOM_RATE;
 }
 
 /** Slow sinusoidal breathing zoom applied to Auto symmetry's fold coordinate
- *  — see simUv's uFoldZoom divide in the display shader. */
-export function foldZoom(st: FoldState): number {
-  return 1 + FOLD_ZOOM_AMP * Math.sin(st.zoomPhase * 6.28318);
+ *  — see simUv's uFoldZoom divide in the display shader. `breathe` is the
+ *  Zoom breathing setting (0..1); the *2 makes breathe 0.5 match the
+ *  amplitude this had before the setting existed. */
+export function foldZoom(st: FoldState, breathe: number): number {
+  return 1 + FOLD_ZOOM_AMP * breathe * 2 * Math.sin(st.zoomPhase * 6.28318);
+}
+
+/** Eases FoldState's linear-in-time `mix` (0..1) into a smoothstep ramp for
+ *  the display shader's uFoldMix — see main()'s one-flow coordinate warp
+ *  (`s = mix(sA, sB, uFoldMix)`). A linear mix warps at a constant rate that
+ *  visibly kinks at the start/end of the warp; smoothstep's ease-in/ease-out
+ *  reads as one continuous flow instead. */
+export function foldMixEased(m: number): number {
+  return m * m * (3 - 2 * m);
 }
 
 // ---------------------------------------------------------------------------
@@ -603,13 +641,54 @@ export const SETTINGS: SceneSetting[] = [
     key: "symmetry",
     label: "Symmetry",
     description: "Auto drifts between the folded looks with the music; the rest fix one fold",
-    group: "Look",
+    group: "Symmetry",
     min: 0,
     max: SYMMETRY_OPTIONS.length - 1,
     step: 1,
     default: 0,
     type: "enum",
     options: [...SYMMETRY_OPTIONS],
+  },
+  {
+    key: "foldSpread",
+    label: "Wedge spread",
+    description: "Radial folds: how much of the fluid each wedge squeezes in (0 = mirror a true slice)",
+    group: "Symmetry",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.25,
+  },
+  {
+    key: "foldSpin",
+    label: "Spin",
+    description: "Slow rotation of the fold, in every mode",
+    group: "Symmetry",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+    auto: { tempo: 0.2, loudness: 0.15 },
+  },
+  {
+    key: "foldBreathe",
+    label: "Zoom breathing",
+    description: "Slow in-and-out of the fold",
+    group: "Symmetry",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+  },
+  {
+    key: "foldDrift",
+    label: "Auto drift",
+    description: "How often Auto symmetry moves to its next fold (0 = never)",
+    group: "Symmetry",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
     reads: ["anim.dropOnset"],
   },
   {
@@ -947,18 +1026,26 @@ float hash21(vec2 p) {
 
 // Maps a screen uv to the sim uv it should sample, for fold mode \`m\`
 // (MirrorMode's index — see MIRROR_OPTIONS for the order; the caller passes
-// uFoldA/uFoldB, rounded, since Auto symmetry samples two folds and
-// crossfades — see main()). Off/Left-right/Top-bottom are plain axis folds
-// that ignore rot/zoom; Kaleidoscope and every Radial mode (m >= 3) first
-// rotate the centred, aspect-corrected screen coordinate by uFoldRot and
-// scale it by 1/uFoldZoom (Auto symmetry's slow turn-and-breathe drift —
-// see advanceFold/foldZoom in fluid.ts), then apply the same fold each
-// always did: Kaleidoscope's plain two-axis abs fold (un-corrected back to
-// uv space first, since that fold isn't aspect-aware), or a Radial mode's
-// fold into one of N wedges around the centre, reusing the Kaleidoscope
-// quadrant the sim already covers (see mirrorDomain in fluidSim.ts) — the
-// final mirror-wrap (s = 1.0 - abs(1.0 - s)) keeps points past the
-// quadrant's far corner continuous instead of seaming there.
+// uFoldA/uFoldB, rounded, since Auto symmetry warps continuously between two
+// folds — see main()). Off/Left-right/Top-bottom are plain axis folds that
+// ignore rot/zoom; Kaleidoscope and every Radial mode (m >= 3) first rotate
+// the centred, aspect-corrected screen coordinate by uFoldRot and scale it by
+// 1/uFoldZoom (the fold's slow turn-and-breathe drift — see advanceFold/
+// foldZoom in fluid.ts), then apply the fold itself: Kaleidoscope's plain
+// two-axis abs fold (un-corrected back to uv space first, since that fold
+// isn't aspect-aware), or a Radial mode's fold into one of N wedges around
+// the centre, reusing the Kaleidoscope quadrant the sim already covers (see
+// mirrorDomain in fluidSim.ts) — the final mirror-wrap
+// (s = 1.0 - abs(1.0 - s)) keeps points past the quadrant's far corner
+// continuous instead of seaming there.
+//
+// A Radial fold's wedge angle th runs [0, w/2] (w = 2*pi/N); uFoldSpread
+// (the "Wedge spread" setting) sets how much of that half-wedge's angle maps
+// onto the sim's own quarter-turn (th's own natural range is far narrower
+// than pi/2 for a high N, so mapping it 1:1 — spread 0 — shows a true,
+// unsqueezed slice of the fluid next to the jet axis at th' = pi/2, mirrored
+// out from there; spread 1 squeezes the whole half-wedge across the quarter
+// turn, same as the fold has always looked).
 vec2 simUv(vec2 uv, int m) {
   if (m == 0) return uv;
   if (m == 1) return vec2(abs(uv.x * 2.0 - 1.0), uv.y);
@@ -981,33 +1068,28 @@ vec2 simUv(vec2 uv, int m) {
   float w = 6.28318 / n;
   float th = mod(atan(p.y, p.x), w);
   if (th > 0.5 * w) th = w - th;
-  th *= (1.5707963 / (0.5 * w));
-  vec2 s = r * vec2(cos(th), sin(th)) / vec2(uDomainAspect, 1.0);
+  float k = mix(1.0, 1.5707963 / (0.5 * w), uFoldSpread);
+  float thp = 1.5707963 - th * k;
+  vec2 s = r * vec2(cos(thp), sin(thp)) / vec2(uDomainAspect, 1.0);
   s = abs(s);
   return 1.0 - abs(mod(s, 2.0) - 1.0);
 }
 
 void main() {
   vec2 uv = roomUv(vUv);
-  // Auto symmetry samples two folds (uFoldA/uFoldB) and crossfades by
-  // uFoldMix; a manual pick uploads A === B so the mix is a no-op. \`s\` is
-  // whichever fold is currently more visible, for anything below that only
-  // wants one sim-space coordinate (e.g. the velocity texture).
+  // One-flow transition: instead of sampling both folds and dissolving
+  // between the two images (a double-exposed crossfade — every filament
+  // visible twice, fading in and out of each other), the SAMPLE COORDINATE
+  // itself warps continuously from fold A to fold B. uFoldMix is the eased
+  // ramp (see foldMixEased in fluid.ts) uploaded by render(); a manual pick
+  // uploads A === B so the mix is a no-op either way.
   vec2 sA = simUv(uv, int(uFoldA + 0.5));
   vec2 sB = simUv(uv, int(uFoldB + 0.5));
-  vec2 s = uFoldMix < 0.5 ? sA : sB;
+  vec2 s = mix(sA, sB, uFoldMix);
 
-  vec2 dyeA = decodeDye(texture(uDye, sA));
-  vec2 dyeB = decodeDye(texture(uDye, sB));
-  vec2 dye = mix(dyeA, dyeB, uFoldMix);
-
-  float edgeA = mix(texture(uEdge, sA).r, textureLod(uEdge, sA, 1.0).r, uLineSoft);
-  float edgeB = mix(texture(uEdge, sB).r, textureLod(uEdge, sB, 1.0).r, uLineSoft);
-  float edge = mix(edgeA, edgeB, uFoldMix);
-
-  float glowA = 0.55 * textureLod(uEdge, sA, 2.0).r + 0.45 * textureLod(uEdge, sA, 3.5).r;
-  float glowB = 0.55 * textureLod(uEdge, sB, 2.0).r + 0.45 * textureLod(uEdge, sB, 3.5).r;
-  float glow = mix(glowA, glowB, uFoldMix);
+  vec2 dye = decodeDye(texture(uDye, s));
+  float edge = mix(texture(uEdge, s).r, textureLod(uEdge, s, 1.0).r, uLineSoft);
+  float glow = 0.55 * textureLod(uEdge, s, 2.0).r + 0.45 * textureLod(uEdge, s, 3.5).r;
 
   // Bright passages lean the ramp warm, dark ones cool, on top of the manual
   // hue shift.
@@ -1026,7 +1108,7 @@ void main() {
   // leans the line colour itself toward white so the spark tint below reads
   // hotter for the same beat, on top of the halo/screen lift near col below.
   float flash = uDropPulse * uDropFlash;
-  c = mix(c, vec3(1.0), 0.25 * flash);
+  c = mix(c, vec3(1.0), 0.12 * flash);
 
   // Treble drive: how hard hats/cymbals are hitting right now, feeding both
   // the plain line-gain boost (Glow) and the spark mask's threshold
@@ -1065,7 +1147,7 @@ void main() {
     // full-width block.
     float acrossF = fract(across / segW);
     float thin = smoothstep(0.0, soft, acrossF) * (1.0 - smoothstep(0.22, 0.22 + soft, acrossF));
-    float gate = step(1.0 - uSparkle * treble * 0.6, hash21(vec2(cell, seg) + 0.37));
+    float gate = step(1.0 - uSparkle * treble * 0.4, hash21(vec2(cell, seg) + 0.37));
     float dash = gate * thin * smoothstep(0.0, soft, f) * (1.0 - smoothstep(0.45, 0.45 + soft, f));
     float currentLo = mix(0.02, 1.0, uCurrentDensity);
     float currentHi = currentLo + 0.4;
@@ -1120,17 +1202,17 @@ void main() {
   // loudness trend (uSectionIntensity) climbs above its own midpoint,
   // clamped so a quiet trend can only dim the halo a little, never black it
   // out.
-  float buildMul = max(1.0 + uBuildGlow * 0.6 * (uSectionIntensity - 0.5), 0.2);
+  float buildMul = max(1.0 + uBuildGlow * 0.3 * (uSectionIntensity - 0.5), 0.2);
 
-  float lineGain = ${LINE_GAIN.toFixed(2)} * (1.0 + uBeatFlash * 0.7 * uBeatPulse) * (1.0 + 0.8 * shock);
-  vec3 col = BG + c * edge * lineGain * sparkle + c * glow * uEdgeGlow * ${GLOW_GAIN.toFixed(2)} * (1.0 + 1.0 * flash) * buildMul + c * dye.r * ${FILL_GAIN.toFixed(2)};
+  float lineGain = ${LINE_GAIN.toFixed(2)} * (1.0 + uBeatFlash * 0.35 * uBeatPulse) * (1.0 + 0.4 * shock);
+  vec3 col = BG + c * edge * lineGain * sparkle + c * glow * uEdgeGlow * ${GLOW_GAIN.toFixed(2)} * (1.0 + 0.5 * flash) * buildMul + c * dye.r * ${FILL_GAIN.toFixed(2)};
   // Sparks REPLACE rather than add, so a Negative/Complement tint reads as a
   // true contrast against the line rather than a wash on top of it.
   col = mix(col, mix(sparkCol, vec3(1.0), 0.15) * ${SPARK_GAIN.toFixed(2)}, spark);
   // The shockwave ring reads on the halo too, and the drop flash lifts the
   // whole screen a touch rather than only the line/halo terms above.
-  col += c * shock * 0.2;
-  col += vec3(0.025) * flash;
+  col += c * shock * 0.1;
+  col += vec3(0.012) * flash;
 
   // Purple emitter blob at the emitter's screen position — the identity of
   // the emitter, kept visible even in Off (where there's nothing to mirror
@@ -1212,9 +1294,22 @@ function createFluidScene(): Scene {
 
       const sym = Math.round(resolveSceneSetting(ID, settingFor("symmetry")));
       const manualMirror = symmetryToMirror(sym);
-      if (manualMirror === null) {
-        advanceFold(fold, dt, { energy: frame.energy, dropOnset: anim.dropOnset, beatPulse: anim.beatPulse });
-      }
+      const foldSpin = resolveSceneSetting(ID, settingFor("foldSpin"));
+      const foldBreathe = resolveSceneSetting(ID, settingFor("foldBreathe"));
+      const foldDrift = resolveSceneSetting(ID, settingFor("foldDrift"));
+      // The fold state always advances — even with a manual fold pinned — so
+      // Spin/Zoom breathing still turn and pulse a pinned Kaleidoscope/Radial
+      // look; only Auto drift itself (and the drop-triggered reconfigure it
+      // gates) is switched off outside Auto (drift: 0 below never advances
+      // holdLeft to zero — see advanceFold).
+      advanceFold(fold, dt, {
+        energy: frame.energy,
+        dropOnset: anim.dropOnset,
+        beatPulse: anim.beatPulse,
+        spin: foldSpin,
+        breathe: foldBreathe,
+        drift: manualMirror === null ? foldDrift : 0,
+      });
       // Auto symmetry always simulates the Kaleidoscope quadrant (fold.modeA/
       // modeB pick the *display's* fold — see uFoldA/uFoldB below); a manual
       // pick simulates that mode's own domain.
@@ -1234,7 +1329,9 @@ function createFluidScene(): Scene {
       // for a caller that wants it; this scene only needs the envelope it
       // leaves in puff.age (puffVal below), so the return value itself is
       // unused here.
-      advancePuff(puff, dt, anim.lowOnset || anim.onset, anim.beatPhase, anim.tempoLock, anim.flowPhase);
+      // Bass onsets only: the broadband onset stream fires on every hi-hat
+      // with real music and turned the plume into a strobe.
+      advancePuff(puff, dt, anim.lowOnset, anim.beatPhase, anim.tempoLock, anim.flowPhase);
       const puffVal = puffEnv(puff.age);
 
       emitterState(
@@ -1268,15 +1365,18 @@ function createFluidScene(): Scene {
       if (manualMirror === null) {
         displayProg.setF("uFoldA", fold.modeA);
         displayProg.setF("uFoldB", fold.modeB);
-        displayProg.setF("uFoldMix", fold.mix);
+        displayProg.setF("uFoldMix", foldMixEased(fold.mix));
         displayProg.setF("uFoldRot", fold.rot);
-        displayProg.setF("uFoldZoom", foldZoom(fold));
+        displayProg.setF("uFoldZoom", foldZoom(fold, foldBreathe));
       } else {
+        // A manual pick still carries the live rot/zoom from the
+        // ever-advancing fold state (Off/Left-right/Top-bottom's own simUv
+        // branches ignore both anyway).
         displayProg.setF("uFoldA", manualMirror);
         displayProg.setF("uFoldB", manualMirror);
         displayProg.setF("uFoldMix", 0);
-        displayProg.setF("uFoldRot", 0);
-        displayProg.setF("uFoldZoom", 1);
+        displayProg.setF("uFoldRot", fold.rot);
+        displayProg.setF("uFoldZoom", foldZoom(fold, foldBreathe));
       }
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sim.dyeTexture());
