@@ -1,12 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
-  createShove,
+  createBurstPool,
   createBigHitDetector,
   createChunkPool,
-  cloudRadius,
-  SHOVE_IMPULSE,
-  SHOVE_DECAY,
-  SHOVE_CAP,
+  createHueDrift,
+  calmTarget,
+  MAX_BURSTS,
+  BURST_LIFE_SEC,
+  BURST_DEAD_T0,
+  BURST_ORIGIN_RADIUS,
   MAX_CHUNK_BURSTS,
   CHUNKS_PER_BURST,
   CHUNK_LIFE_SEC,
@@ -14,54 +16,307 @@ import {
   BIG_HIT_REFRACTORY_SEC,
   BIG_HIT_PULSE_MIN,
   BIG_HIT_SECTION_MIN,
+  HUE_AMPL,
+  HUE_BAR_RADIANS,
+  HUE_DROP_EXCURSION,
+  HUE_RELAX_TAU,
+  MAX_ATTRACTORS,
+  ATTRACTOR_RADIUS,
+  ATTRACTOR_CENTRE_Y,
+  attractorPositions,
   sparseSizeScale,
   SPARSE_SIZE_SCALE_CAP,
   pointSizing,
-  CLOUD_RADIUS_MIN,
-  CLOUD_RADIUS_MAX,
 } from "../src/render/scenes/powder.ts";
 import type { GLProgram } from "../src/render/gl.ts";
 
-describe("shove envelope", () => {
-  it("starts at rest", () => {
-    expect(createShove().value).toBe(0);
+/** A GLProgram stub that only records the float-array uploads. */
+function fakeProgram(): { prog: GLProgram; uploads: Record<string, number[]> } {
+  const uploads: Record<string, number[]> = {};
+  const noop = () => {};
+  const record = (name: string, arr: Float32Array | number[]) => {
+    uploads[name] = Array.from(arr as ArrayLike<number>);
+  };
+  const prog = {
+    program: {} as WebGLProgram,
+    use: noop,
+    setF: noop,
+    setV2: noop,
+    setV4: noop,
+    setFv: record,
+    setV3v: record,
+    setV4v: noop,
+    dispose: noop,
+  } as unknown as GLProgram;
+  return { prog, uploads };
+}
+
+describe("burst pool", () => {
+  it("starts empty, with every slot uploading the dead sentinel", () => {
+    const pool = createBurstPool();
+    expect(pool.alive()).toBe(0);
+    const { prog, uploads } = fakeProgram();
+    pool.upload(prog);
+    expect(uploads.uBurstT0).toEqual(new Array(MAX_BURSTS).fill(BURST_DEAD_T0));
+    expect(uploads.uBurstOrigin).toHaveLength(MAX_BURSTS * 3);
+    expect(uploads.uBurstAxis).toHaveLength(MAX_BURSTS * 3);
+    expect(uploads.uBurstFresh.every((f) => f === 0)).toBe(true);
   });
 
-  it("rises on a trigger and decays monotonically toward zero afterwards", () => {
-    const shove = createShove();
-    shove.trigger(SHOVE_IMPULSE);
-    expect(shove.value).toBeCloseTo(SHOVE_IMPULSE, 10);
+  it("holds at most MAX_BURSTS live plumes, displacing the oldest", () => {
+    const pool = createBurstPool();
+    for (let i = 0; i < MAX_BURSTS * 3; i++) pool.trigger(i * 0.1, 1, i);
+    expect(pool.alive()).toBe(MAX_BURSTS);
+    const oldest = Math.min(...pool.bursts.map((b) => b.t0));
+    // Every surviving slot is one of the last MAX_BURSTS triggers.
+    expect(oldest).toBeGreaterThanOrEqual((MAX_BURSTS * 3 - MAX_BURSTS) * 0.1);
+  });
 
-    let prev = shove.value;
-    for (let i = 0; i < 120; i++) {
-      const v = shove.advance(1 / 60);
-      expect(v).toBeLessThan(prev);
-      prev = v;
+  it("expires a plume after BURST_LIFE_SEC and returns its slot to the sentinel", () => {
+    const pool = createBurstPool();
+    pool.trigger(10, 1, 3);
+    pool.tick(10 + BURST_LIFE_SEC * 0.99);
+    expect(pool.alive()).toBe(1);
+    pool.tick(10 + BURST_LIFE_SEC + 1e-3);
+    expect(pool.alive()).toBe(0);
+  });
+
+  it("reuses an expired slot rather than growing the pool", () => {
+    const pool = createBurstPool();
+    for (let i = 0; i < MAX_BURSTS; i++) pool.trigger(0, 1, i);
+    pool.tick(BURST_LIFE_SEC + 1);
+    pool.trigger(BURST_LIFE_SEC + 1, 1, 42);
+    expect(pool.alive()).toBe(1);
+    expect(pool.bursts).toHaveLength(MAX_BURSTS);
+  });
+
+  it("clears the fresh flag after exactly one upload", () => {
+    const pool = createBurstPool();
+    pool.trigger(1, 0.8, 5);
+    const first = fakeProgram();
+    pool.upload(first.prog);
+    expect(first.uploads.uBurstFresh.filter((f) => f === 1)).toHaveLength(1);
+    const second = fakeProgram();
+    pool.upload(second.prog);
+    expect(second.uploads.uBurstFresh.every((f) => f === 0)).toBe(true);
+    // The plume itself is still live — only the one-frame flag went.
+    expect(pool.alive()).toBe(1);
+  });
+
+  it("puts every origin inside BURST_ORIGIN_RADIUS of the middle", () => {
+    const pool = createBurstPool();
+    for (let i = 0; i < 200; i++) {
+      pool.trigger(i, 1, i * 7.13 + 0.5);
+      const b = pool.bursts.find((x) => x.t0 === i);
+      expect(b).toBeDefined();
+      const r = Math.hypot(b!.originX, b!.originY, b!.originZ);
+      expect(r).toBeLessThanOrEqual(BURST_ORIGIN_RADIUS + 1e-9);
     }
-    expect(prev).toBeLessThan(SHOVE_IMPULSE * 0.01);
-    expect(prev).toBeGreaterThan(0);
   });
 
-  it("decays at SHOVE_DECAY per second", () => {
-    const shove = createShove();
-    shove.trigger(1);
-    expect(shove.advance(1)).toBeCloseTo(Math.exp(-SHOVE_DECAY), 10);
+  it("gives every axis unit length and an upward lean", () => {
+    const pool = createBurstPool();
+    for (let i = 0; i < 200; i++) {
+      pool.trigger(i, 1, i * 3.77 + 1.1);
+      const b = pool.bursts.find((x) => x.t0 === i)!;
+      expect(Math.hypot(b.axisX, b.axisY, b.axisZ)).toBeCloseTo(1, 10);
+      expect(b.axisY).toBeGreaterThan(0);
+    }
   });
 
-  it("saturates at SHOVE_CAP no matter how many hits stack up", () => {
-    const shove = createShove();
-    for (let i = 0; i < 50; i++) shove.trigger(SHOVE_IMPULSE);
-    expect(shove.value).toBe(SHOVE_CAP);
+  it("mirrors the axis when flipped, so a drop throws two opposed plumes", () => {
+    const pool = createBurstPool();
+    pool.trigger(1, 1, 12.5);
+    const up = { ...pool.bursts.find((b) => b.t0 === 1)! };
+    pool.trigger(2, 1, 12.5, true);
+    const down = pool.bursts.find((b) => b.t0 === 2)!;
+    expect(down.axisX).toBeCloseTo(-up.axisX, 10);
+    expect(down.axisY).toBeCloseTo(-up.axisY, 10);
+    expect(down.axisZ).toBeCloseTo(-up.axisZ, 10);
+    // Same seed, so both come out of the same place.
+    expect(down.originX).toBeCloseTo(up.originX, 10);
+    expect(down.originY).toBeCloseTo(up.originY, 10);
+    expect(down.originZ).toBeCloseTo(up.originZ, 10);
   });
 
-  it("ignores a non-positive or non-finite impulse and a non-positive dt", () => {
-    const shove = createShove();
-    shove.trigger(-1);
-    shove.trigger(NaN);
-    expect(shove.value).toBe(0);
-    shove.trigger(1);
-    expect(shove.advance(-1)).toBe(1);
-    expect(shove.advance(NaN)).toBe(1);
+  it("clamps strength into [0,1] and survives a non-finite one", () => {
+    const pool = createBurstPool();
+    pool.trigger(1, 5, 2);
+    expect(pool.bursts.find((b) => b.t0 === 1)!.strength).toBe(1);
+    pool.trigger(2, -3, 2);
+    expect(pool.bursts.find((b) => b.t0 === 2)!.strength).toBe(0);
+    pool.trigger(3, NaN, 2);
+    expect(pool.bursts.find((b) => b.t0 === 3)!.strength).toBe(0);
+  });
+
+  it("uploads a live plume's own origin, axis, strength and t0", () => {
+    const pool = createBurstPool();
+    pool.trigger(4.5, 0.8, 12.25);
+    const { prog, uploads } = fakeProgram();
+    pool.upload(prog);
+    const slot = uploads.uBurstT0.indexOf(4.5);
+    expect(slot).toBeGreaterThanOrEqual(0);
+    expect(uploads.uBurstStrength[slot]).toBeCloseTo(0.8, 6);
+    const b = pool.bursts[slot];
+    expect(uploads.uBurstOrigin[slot * 3]).toBeCloseTo(b.originX, 6);
+    expect(uploads.uBurstAxis[slot * 3 + 1]).toBeCloseTo(b.axisY, 6);
+  });
+});
+
+describe("quiet-time gather signal", () => {
+  it("is full in silence and gone under a loud, bass-heavy section", () => {
+    expect(calmTarget(0, 0)).toBe(1);
+    expect(calmTarget(1, 0)).toBe(0);
+    expect(calmTarget(0, 1)).toBe(0);
+  });
+
+  it("falls as either the section or the bass rises", () => {
+    expect(calmTarget(0.5, 0)).toBeLessThan(calmTarget(0.2, 0));
+    expect(calmTarget(0, 0.4)).toBeLessThan(calmTarget(0, 0.1));
+  });
+
+  it("stays in [0,1] for out-of-range or non-finite inputs", () => {
+    for (const section of [-1, 0, 0.5, 1, 4, NaN]) {
+      for (const low of [-1, 0, 0.5, 1, 4, NaN]) {
+        const v = calmTarget(section, low);
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+});
+
+describe("hue drift", () => {
+  const dt = 1 / 60;
+  /** Walks `n` bar boundaries: barPhase has to fall by more than half a turn
+   *  for a wrap to count, so each bar is a 0.9 -> 0.05 pair. */
+  function bars(hue: ReturnType<typeof createHueDrift>, n: number, drift = 1) {
+    for (let i = 0; i < n; i++) {
+      hue.advance(dt, 0.9, false, drift);
+      hue.advance(dt, 0.05, false, drift);
+    }
+  }
+
+  it("starts at zero", () => {
+    expect(createHueDrift().value).toBe(0);
+  });
+
+  it("creeps the sine phase forward one fixed angle per bar wrap, and only then", () => {
+    const hue = createHueDrift();
+    hue.advance(dt, 0.4, false, 1);
+    hue.advance(dt, 0.9, false, 1);
+    expect(hue.phase).toBe(0);
+    hue.advance(dt, 0.05, false, 1); // wrapped
+    expect(hue.phase).toBeCloseTo(HUE_BAR_RADIANS, 12);
+  });
+
+  it("stays inside the amplitude, however long it runs", () => {
+    const hue = createHueDrift();
+    bars(hue, 4000);
+    for (let i = 0; i < 4000; i++) {
+      expect(Math.abs(hue.value)).toBeLessThanOrEqual(HUE_AMPL + 1e-12);
+    }
+  });
+
+  it("swings both ways rather than accumulating", () => {
+    const hue = createHueDrift();
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < 400; i++) {
+      bars(hue, 1);
+      min = Math.min(min, hue.value);
+      max = Math.max(max, hue.value);
+    }
+    expect(max).toBeGreaterThan(HUE_AMPL * 0.9);
+    expect(min).toBeLessThan(-HUE_AMPL * 0.9);
+  });
+
+  it("adds a one-off excursion on a drop and relaxes it away", () => {
+    const hue = createHueDrift();
+    hue.advance(dt, 0.5, true, 1);
+    expect(hue.excursion).toBeCloseTo(HUE_DROP_EXCURSION, 10);
+    expect(hue.value).toBeCloseTo(HUE_DROP_EXCURSION, 6);
+    for (let t = 0; t < HUE_RELAX_TAU * 6; t += dt) hue.advance(dt, 0.5, false, 1);
+    expect(hue.excursion).toBeLessThan(HUE_DROP_EXCURSION * 0.01);
+    expect(Math.abs(hue.value)).toBeLessThan(HUE_AMPL + 1e-12);
+  });
+
+  it("never lets repeated drops accumulate without bound", () => {
+    const hue = createHueDrift();
+    for (let i = 0; i < 400; i++) {
+      hue.advance(dt, 0.5, true, 1);
+      for (let t = 0; t < 2; t += dt) hue.advance(dt, 0.5, false, 1);
+    }
+    // The steady state of a step every 2 s relaxing with tau 6 s, not a walk.
+    expect(hue.excursion).toBeLessThan(HUE_DROP_EXCURSION * 5);
+  });
+
+  it("scales the whole shift with the Hue drift setting, and is exactly zero at 0", () => {
+    const full = createHueDrift();
+    const half = createHueDrift();
+    const off = createHueDrift();
+    for (const [hue, drift] of [
+      [full, 1],
+      [half, 0.5],
+      [off, 0],
+    ] as const) {
+      hue.advance(dt, 0.5, true, drift);
+      bars(hue, 3, drift);
+    }
+    expect(off.value).toBe(0);
+    expect(half.value).toBeCloseTo(full.value * 0.5, 10);
+  });
+
+  it("ignores a non-positive dt and a non-finite drift", () => {
+    const hue = createHueDrift();
+    hue.advance(dt, 0.5, true, 1);
+    const e = hue.excursion;
+    hue.advance(-1, 0.5, false, 1);
+    expect(hue.excursion).toBeCloseTo(e, 12);
+    hue.advance(NaN, 0.5, false, 1);
+    expect(hue.excursion).toBeCloseTo(e, 12);
+    hue.advance(dt, 0.5, false, NaN);
+    expect(hue.value).toBe(0);
+  });
+});
+
+describe("wandering attractors", () => {
+  it("keeps every attractor on its own orbit around the raised centre", () => {
+    const out = new Float32Array(MAX_ATTRACTORS * 3);
+    for (let t = 0; t < 400; t += 0.37) {
+      attractorPositions(t, out);
+      for (let i = 0; i < MAX_ATTRACTORS; i++) {
+        const x = out[i * 3];
+        const y = out[i * 3 + 1] - ATTRACTOR_CENTRE_Y;
+        const z = out[i * 3 + 2];
+        expect(Math.hypot(x, z)).toBeCloseTo(ATTRACTOR_RADIUS, 6);
+        expect(Math.abs(y)).toBeLessThanOrEqual(ATTRACTOR_RADIUS * 0.45 + 1e-12);
+      }
+    }
+  });
+
+  it("never collapses all three onto one point", () => {
+    const out = new Float32Array(MAX_ATTRACTORS * 3);
+    for (let t = 0; t < 400; t += 0.37) {
+      attractorPositions(t, out);
+      let closest = Infinity;
+      for (let i = 0; i < MAX_ATTRACTORS; i++) {
+        for (let j = i + 1; j < MAX_ATTRACTORS; j++) {
+          closest = Math.min(
+            closest,
+            Math.hypot(out[i * 3] - out[j * 3], out[i * 3 + 1] - out[j * 3 + 1], out[i * 3 + 2] - out[j * 3 + 2]),
+          );
+        }
+      }
+      expect(closest).toBeGreaterThan(0.01);
+    }
+  });
+
+  it("moves, and survives a non-finite clock", () => {
+    const a = attractorPositions(0, new Float32Array(MAX_ATTRACTORS * 3));
+    const b = attractorPositions(10, new Float32Array(MAX_ATTRACTORS * 3));
+    expect(Array.from(a)).not.toEqual(Array.from(b));
+    expect(Array.from(attractorPositions(NaN, new Float32Array(MAX_ATTRACTORS * 3))).every(Number.isFinite)).toBe(true);
   });
 });
 
@@ -201,27 +456,10 @@ describe("sparse-bed size scale", () => {
   });
 });
 
-/** A GLProgram stub that only records the float-array uploads. */
-function fakeProgram(): { prog: GLProgram; uploads: Record<string, number[]> } {
-  const uploads: Record<string, number[]> = {};
-  const noop = () => {};
-  const prog = {
-    program: {} as WebGLProgram,
-    use: noop,
-    setF: noop,
-    setV2: noop,
-    setV4: noop,
-    setFv: (name: string, arr: Float32Array | number[]) => {
-      uploads[name] = Array.from(arr as ArrayLike<number>);
-    },
-    setV3v: noop,
-    setV4v: noop,
-    dispose: noop,
-  } as unknown as GLProgram;
-  return { prog, uploads };
-}
-
 describe("chunk pool", () => {
+  const ORIGIN: [number, number, number] = [0.1, -0.05, 0.2];
+  const AXIS: [number, number, number] = [0, 1, 0];
+
   it("starts empty, with every slot uploading the dead sentinel", () => {
     const pool = createChunkPool();
     expect(pool.alive()).toBe(0);
@@ -230,18 +468,20 @@ describe("chunk pool", () => {
     expect(uploads.uChunkT0).toEqual(new Array(MAX_CHUNK_BURSTS).fill(CHUNK_DEAD_T0));
     expect(uploads.uChunkStrength).toHaveLength(MAX_CHUNK_BURSTS);
     expect(uploads.uChunkSeed).toHaveLength(MAX_CHUNK_BURSTS);
+    expect(uploads.uChunkOrigin).toHaveLength(MAX_CHUNK_BURSTS * 3);
+    expect(uploads.uChunkAxis).toHaveLength(MAX_CHUNK_BURSTS * 3);
   });
 
   it("holds at most MAX_CHUNK_BURSTS live bursts", () => {
     const pool = createChunkPool();
-    for (let i = 0; i < MAX_CHUNK_BURSTS * 3; i++) pool.trigger(i * 0.01, 1, i);
+    for (let i = 0; i < MAX_CHUNK_BURSTS * 3; i++) pool.trigger(i * 0.01, 1, i, ORIGIN, AXIS);
     expect(pool.alive()).toBe(MAX_CHUNK_BURSTS);
   });
 
   it("displaces the oldest burst once every slot is live", () => {
     const pool = createChunkPool();
-    for (let i = 0; i < MAX_CHUNK_BURSTS; i++) pool.trigger(i * 0.01, 1, i);
-    pool.trigger(1, 1, 99);
+    for (let i = 0; i < MAX_CHUNK_BURSTS; i++) pool.trigger(i * 0.01, 1, i, ORIGIN, AXIS);
+    pool.trigger(1, 1, 99, ORIGIN, AXIS);
     const seeds = pool.bursts.map((b) => b.seed);
     // The very first burst (seed 0, oldest t0) is the one that went.
     expect(seeds).toContain(99);
@@ -250,7 +490,7 @@ describe("chunk pool", () => {
 
   it("expires a burst after CHUNK_LIFE_SEC and returns its slot to the dead sentinel", () => {
     const pool = createChunkPool();
-    pool.trigger(10, 1, 7);
+    pool.trigger(10, 1, 7, ORIGIN, AXIS);
     pool.tick(10 + CHUNK_LIFE_SEC * 0.99);
     expect(pool.alive()).toBe(1);
     pool.tick(10 + CHUNK_LIFE_SEC + 1e-3);
@@ -261,35 +501,40 @@ describe("chunk pool", () => {
     expect(uploads.uChunkT0.every((t) => t === CHUNK_DEAD_T0)).toBe(true);
   });
 
-  it("uploads a live burst's own t0, strength and seed", () => {
+  it("uploads a live burst's own t0, strength, seed, origin and axis", () => {
     const pool = createChunkPool();
-    pool.trigger(4.5, 0.8, 12.25);
+    pool.trigger(4.5, 0.8, 12.25, ORIGIN, [0.6, 0.8, 0]);
     const { prog, uploads } = fakeProgram();
     pool.upload(prog);
     const slot = uploads.uChunkT0.indexOf(4.5);
     expect(slot).toBeGreaterThanOrEqual(0);
     expect(uploads.uChunkStrength[slot]).toBeCloseTo(0.8, 6);
     expect(uploads.uChunkSeed[slot]).toBeCloseTo(12.25, 6);
+    // Float32Array round trip, so compare componentwise rather than deeply.
+    for (let i = 0; i < 3; i++) {
+      expect(uploads.uChunkOrigin[slot * 3 + i]).toBeCloseTo(ORIGIN[i], 6);
+      expect(uploads.uChunkAxis[slot * 3 + i]).toBeCloseTo([0.6, 0.8, 0][i], 6);
+    }
   });
 
   it("reuses an expired slot rather than growing the pool", () => {
     const pool = createChunkPool();
-    for (let i = 0; i < MAX_CHUNK_BURSTS; i++) pool.trigger(0, 1, i);
+    for (let i = 0; i < MAX_CHUNK_BURSTS; i++) pool.trigger(0, 1, i, ORIGIN, AXIS);
     pool.tick(CHUNK_LIFE_SEC + 1);
-    pool.trigger(CHUNK_LIFE_SEC + 1, 1, 42);
+    pool.trigger(CHUNK_LIFE_SEC + 1, 1, 42, ORIGIN, AXIS);
     expect(pool.alive()).toBe(1);
     expect(pool.bursts).toHaveLength(MAX_CHUNK_BURSTS);
   });
 
   it("draws a whole number of full bursts", () => {
-    expect(MAX_CHUNK_BURSTS * CHUNKS_PER_BURST).toBe(MAX_CHUNK_BURSTS * CHUNKS_PER_BURST);
     expect(CHUNKS_PER_BURST).toBeGreaterThan(0);
+    expect(MAX_CHUNK_BURSTS * CHUNKS_PER_BURST).toBe(MAX_CHUNK_BURSTS * CHUNKS_PER_BURST);
   });
 });
 
 describe("point sizing across render scales", () => {
   // The Grain-size default: mix(GRAIN_PX_MIN, GRAIN_PX_MAX, 0.5).
-  const BASE = 3.25;
+  const BASE = 3.5;
 
   it("is a no-op at the reference resolution and grain count", () => {
     const s = pointSizing(BASE, 1, 1);
@@ -337,58 +582,5 @@ describe("point sizing across render scales", () => {
     const floor = pointSizing(BASE, 1, sparseSizeScale(4_000));
     expect(floor.sizePx).toBeGreaterThan(high.sizePx * 5);
     expect(floor.maxPx).toBeGreaterThan(high.maxPx);
-  });
-});
-
-describe("cloud radius", () => {
-  it("grows with Cloud size", () => {
-    let prev = -Infinity;
-    for (let size = 0; size <= 1.0001; size += 0.1) {
-      const r = cloudRadius(size, 0.6, 0.5, 0.2, 0, 0.6);
-      expect(r).toBeGreaterThan(prev);
-      prev = r;
-    }
-  });
-
-  it("grows with the section intensity while Loud swell is up", () => {
-    const quiet = cloudRadius(0.5, 1, 0.05, 0.2, 0, 0.6);
-    const loud = cloudRadius(0.5, 1, 0.95, 0.2, 0, 0.6);
-    expect(loud).toBeGreaterThan(quiet);
-  });
-
-  it("ignores the section intensity entirely at Loud swell 0", () => {
-    const quiet = cloudRadius(0.5, 0, 0.05, 0.2, 0, 0.6);
-    const loud = cloudRadius(0.5, 0, 0.95, 0.2, 0, 0.6);
-    expect(loud).toBeCloseTo(quiet, 10);
-  });
-
-  it("puffs out on a bass hit, and only while Bass kick is up", () => {
-    const rest = cloudRadius(0.5, 0.6, 0.5, 0.2, 0, 0.6);
-    const hit = cloudRadius(0.5, 0.6, 0.5, 0.2, 1, 0.6);
-    expect(hit).toBeGreaterThan(rest);
-    expect(cloudRadius(0.5, 0.6, 0.5, 0.2, 1, 0)).toBeCloseTo(rest, 10);
-  });
-
-  it("stays inside its bounds for every combination of extremes", () => {
-    for (const size of [0, 0.5, 1]) {
-      for (const breathe of [0, 1]) {
-        for (const section of [0, 1]) {
-          for (const low of [0, 1, 4]) {
-            for (const pulse of [0, 1]) {
-              for (const kick of [0, 1]) {
-                const r = cloudRadius(size, breathe, section, low, pulse, kick);
-                expect(r).toBeGreaterThanOrEqual(CLOUD_RADIUS_MIN);
-                expect(r).toBeLessThanOrEqual(CLOUD_RADIUS_MAX);
-              }
-            }
-          }
-        }
-      }
-    }
-  });
-
-  it("clamps out-of-range inputs instead of running away", () => {
-    expect(cloudRadius(5, 5, 5, 0, 0, 5)).toBeLessThanOrEqual(CLOUD_RADIUS_MAX);
-    expect(cloudRadius(-5, -5, -5, -5, -5, -5)).toBeGreaterThanOrEqual(CLOUD_RADIUS_MIN);
   });
 });
