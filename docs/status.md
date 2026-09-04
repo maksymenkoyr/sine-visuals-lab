@@ -6,52 +6,49 @@ regenerate it at session close.
 
 ## In flight
 
-- **Ambience scene** — `src/render/scenes/ambience.ts`, branch
-  `worktree-ambience-scene`, draft PR #80 (this session). A Windows Media
-  Player homage after a YouTube short: a dot lattice with beat swells that
-  opens as a dot unfolding into a sheet (`OPENING_LEGS`). The comet sunburst
-  of the first revision was dropped at the user's request. First `drawArraysInstanced`
-  in the repo (instanced quads from an empty VAO); premultiplied "over"
-  blending for the flat merged blobs. Second pass after the user re-watched
-  the reference: formations (`FORM`), bar-timed journeys between them
-  (`JOURNEYS`, run by `createChoreographer`), 4D turns of the sheet, tumble
-  and stretch poses, motion streaks. Verified headlessly on synthetic audio
-  (high/low presets, gallery tile), the probe auto→manual sign-off, and one
-  real 140 BPM track. Registered as a draft. The user has seen clips; the
-  journeys pass and the sunburst removal are not yet judged on the TV.
-- **A run of draft scene PRs** from the last two days, all waiting on review
-  and a real-music judgement: Kaleidoscope #79, Powder #77 (now v2: velocity-state physics, plumes, bloom, club layer), Neon Fluid #76,
-  Plume #75. Each has its own memory note and headless verification in its
-  PR description.
-- **Auto: unstick tempoLock, rank dials** — draft PR #73
+- **Kaleidoscope scene** — `src/render/scenes/kaleidoscope.ts`, branch
+  `worktree-kaleidoscope-scene`, draft PR #79 (this session). Mirror-tiled
+  contour-band mandalas after a YouTube short; even-fold symmetry keeps the
+  tiling seamless, the band footprint for ink/moiré is analytic (`fwidth`
+  under-reads on mirror lines). Registered in `DRAFT_SCENE_IDS`; its settings
+  are in `tests/autoTune.test.ts`'s invariant set. Verified headlessly at
+  high/low quality, on beats, on a real track via fake mic, with the
+  auto→manual probe sign-off and the gallery tile. **Not yet judged by the
+  user on real music.**
+- **Three sibling draft scenes from the same reference-video workflow**, each
+  on its own worktree branch with a draft PR: Plume (#75), Neon Fluid (#76),
+  Powder (#77). None has had a user verdict on real music yet.
+- **Auto: unstick tempoLock, rank dials against the session** — draft PR #73
   (`worktree-auto-dial-ranking`).
-- **docs/architecture.md rebuild** — draft PR #74 (`worktree-docs-architecture`);
-  the older `worktree-docs-index` branch's premise is superseded by it and by
-  `docs/index.md` on `main`.
-- **Business/legal docs** — PR #72 (`docs-business`), ready for review;
-  PR #70 (`wrap-status`) is a stale status snapshot that this file replaces.
+- **docs/architecture.md rebuilt diagrams-first** — draft PR #74
+  (`worktree-docs-architecture`).
+- **Business/legal docs** — PR #72 (`docs-business`), open, not draft.
+- **`wrap-status` PR #70** — an older status snapshot still open; this file
+  supersedes it, so close that PR rather than merging it.
 - Idle worktrees with no PR: `worktree-agent-ae8a69d86e9c44e97` (always-on
-  dev controls), `worktree-auto-hint-description`, `worktree-setting-groups`
-  (its `SETTING_GROUPS` change is already on `main`), `worktree-tuning-spotlight`,
-  `dev-bake-defaults-into-source`. Check `git log main..` on each before
-  reviving; several look landed or superseded.
+  dev controls), `worktree-auto-hint-description`, `bake-defaults`,
+  `worktree-docs-index`, `worktree-setting-groups`, `worktree-tuning-spotlight`
+  — several likely superseded by what has since landed on `main` (setting
+  groups, hint descriptions); diff before reviving.
 
 ## Open questions
 
-- Ambience: the tesseract journey reads as a radial warp tunnel rather than
-  a recognisable lattice — keep it as one entry in `JOURNEYS`, or drop it?
-- Ambience: the reference's sheet is a spectrum-agnostic lattice; ours ties
-  disc size to each column's band (`breathe`). Keep, or make it pure motion?
-- Which of the five draft scenes graduate out of `DRAFT_SCENE_IDS`, and in
-  what order — they compete for the same gallery row.
-- Storm's local render-cap workaround (see its header) is redundant now that
-  `renderLatch.ts` is on `main`; simplify once nothing else is touching Storm.
+- Which of the four reference-video draft scenes (Kaleidoscope, Plume, Neon
+  Fluid, Powder) are worth graduating out of `DRAFT_SCENE_IDS`, and which get
+  dropped? Each needs a look on real music first.
+- Kaleidoscope: is a second symmetry lattice (hexagonal, six-fold cell) worth
+  a setting, or is the square lattice the look? Its tint drift was halved
+  after real music wandered it into purple/green — is the remaining drift
+  still too much?
+- Storm's local render-cap workaround predates `renderLatch.ts` and is now
+  redundant in principle; simplify once nothing else is touching Storm.
+- The stale scratch branches on origin (`band-faders`, `lp-merge`,
+  `quality-preset-setting`, `worktree-band-tilt`, …): prune, or is anything
+  in them still wanted?
 
 ## Next up
 
-- Look at Ambience on the TV with real music; then review PR #80.
-- Review and land the draft scene PRs #75–#79 (or close the ones that don't
-  earn a slot), and PRs #72–#74.
-- Prune the old scratch branches listed in `git branch -r --no-merged main`
-  that are weeks behind; most read like earlier attempts at work that has
-  since landed.
+- Watch Kaleidoscope, Plume, Neon Fluid and Powder on real music; review and
+  land or drop their draft PRs.
+- Review draft PRs #73 and #74; merge or close PR #72; close PR #70.
+- Decide the fate of the idle worktrees listed above.
