@@ -9,35 +9,27 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, SAMPLE_BANDS_GLSL, settingUniformNa
 
 // Ambience: an homage to the visualizers that shipped with the old Windows
 // Media Player — one hot colour on a near-black ground, everything a soft,
-// flat-shaded glow, nothing lit, nothing textured. Two looks, crossfaded by
-// how loud the section is:
-//
-//  - The **sunburst**, for quiet sections: tapered comets pointing radially
-//    out of the frame's centre, round head on the centre side and a tail
-//    thinning to a point outward, drifting slowly outward. They arrive one
-//    at a time as the section builds; as it approaches the drop they
-//    contract into a single disc with thin wavy tendrils and shrink away.
-//  - The **lattice**, for loud sections: a regular grid of glowing discs
-//    that mostly lives as a sheet — rippling, bending, tumbling, stretched,
-//    seen in perspective from a camera that swoops between poses on bar
-//    boundaries — but that is really a set of dots free to take any
-//    *formation*: one dot, a line, the sheet, a tube, a cube, a tesseract.
-//    The reference builds its sheet exactly this way: the sunburst's last
-//    dot stretches into a line, the line sweeps round and extrudes the
-//    sheet, and at the end the sheet folds back down to a few dots. Every
-//    transition here is a leg on that dimensional ladder (see FORM and
-//    JOURNEYS), so the sheet always arrives from and leaves through a line
-//    or a dot, the way the video's does.
-//    A musical hit sends a swell running along one row or column, and the
-//    discs inside it balloon and merge into one fat blob.
+// flat-shaded glow, nothing lit, nothing textured. A regular lattice of
+// glowing discs that mostly lives as a sheet — rippling, bending, tumbling,
+// stretched, seen in perspective from a camera that swoops between poses on
+// bar boundaries — but that is really a set of dots free to take any
+// *formation*: one dot, a line, the sheet, a tube, a cube, a tesseract. The
+// reference builds its sheet exactly this way: a dot stretches into a line,
+// the line sweeps round and extrudes the sheet, and at the end the sheet
+// folds back down to a few dots. Every transition here is a leg on that
+// dimensional ladder (see FORM and JOURNEYS), so the sheet always arrives
+// from and leaves through a line or a dot, the way the video's does; the
+// scene opens on that unfold. A musical hit sends a swell running along one
+// row or column, and the discs inside it balloon and merge into one fat
+// blob.
 //
 // Design notes on how it's built:
 //
 //  - Nothing is a point sprite. The swells push a disc to several times the
 //    lattice spacing, past what gl.POINTS guarantees for a point size, so
-//    both the discs and the comets are **instanced quads** drawn from an
-//    empty VAO: the quad corner comes from gl_VertexID and the lattice cell
-//    (or comet slot) from gl_InstanceID, the same attribute-less trick
+//    the discs are **instanced quads** drawn from an empty VAO: the quad
+//    corner comes from gl_VertexID and the lattice cell from gl_InstanceID,
+//    the same attribute-less trick
 //    chladni.ts uses for its grains. No buffers exist at all.
 //  - Discs composite with **premultiplied "over"** blending, not additive.
 //    Two same-coloured discs drawn over each other are one flat shape, which
@@ -75,8 +67,8 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, SAMPLE_BANDS_GLSL, settingUniformNa
 //    on a bar boundary while the tempo is locked, on a timer otherwise, eased
 //    exponentially so every move is a sweep), the flips (a tumble target a
 //    half-turn away, so the sheet turns right over), and the journeys —
-//    sequences of formation legs timed in bars, started every few bars, on a
-//    section drop, and on the way into and out of the sunburst.
+//    sequences of formation legs timed in bars, started every few bars and
+//    on a section drop, and once at the start as the opening.
 //  - Swells are a small pool of travelling pulses (`createPulsePool`): each
 //    is one row or column, a head position in cells, and a strength; the
 //    vertex shader sums a Gaussian footprint per live pulse around the head.
@@ -94,29 +86,18 @@ import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, SAMPLE_BANDS_GLSL, settingUniformNa
 //    the default palette) with a hue-preserving chroma push and a touch of
 //    white, so another palette recolours the whole scene consistently; the
 //    ground is a dark indigo tinted a little by that same colour.
-//  - The comets are screen-space 2D, in a square space where the frame's
-//    height is 2 units and x is scaled by the room aspect so the burst stays
-//    circular. Each comet's angle, drift phase and proportions come from a
-//    hash of its slot, so a comet keeps its identity while it lives; the
-//    fragment shader draws a round-headed taper as a signed distance, with a
-//    wobble along the tail that ramps up as the burst contracts.
 //  - dt comes from anim.timeSec deltas (clamped) rather than anim.dtSec: the
 //    gallery's preview path hands render() an un-latched anim, and the delta
 //    form behaves in both hosts (same as storm.ts and meshGrid.ts).
 const ID = "ambience";
 
 export const MAX_PULSES = 8;
-export const MAX_COMETS = 32;
 /** Seconds after an accepted swell during which another hit is folded into it. */
 export const PULSE_REFRACTORY_SEC = 0.12;
 const PULSE_SPEED = 14; // cells per second at Swell speed 1
 /** Cells of run-in before the first cell and run-out after the last, so a
  *  swell fades in from off the sheet and out past its far edge. */
 export const PULSE_TAIL = 3;
-/** Half-width of the hysteresis band around Sunburst threshold. */
-export const SHEET_HYSTERESIS = 0.1;
-const SHEET_RISE_RATE = 2.5; // per second: the sheet arrives quickly at a drop
-const SHEET_FALL_RATE = 0.7; // per second: and dissolves slowly when the section quietens
 const FREE_RUN_SEC_SLOW = 8; // seconds per pose with no tempo lock, Camera drift 0
 const FREE_RUN_SEC_FAST = 2.5; // ...and at Camera drift 1
 const BARS_PER_POSE_SLOW = 4;
@@ -431,14 +412,10 @@ export const JOURNEYS: Readonly<Record<string, readonly Leg[]>> = {
   ],
 };
 
-/** The lattice's way in from the sunburst's last dot, and its way back out. */
-export const ENTER_LEGS: readonly Leg[] = [
+/** The opening: the lattice climbs from a single dot to the sheet. */
+export const OPENING_LEGS: readonly Leg[] = [
   { from: DOT, to: LINE, stagger: COLS, bars: 0.5 },
   { from: LINE, to: SHEET, stagger: ROWS, bars: 1 },
-];
-export const LEAVE_LEGS: readonly Leg[] = [
-  { from: SHEET, to: LINE, stagger: ROWS, bars: 1 },
-  { from: LINE, to: DOT, stagger: COLS, bars: 0.5 },
 ];
 
 export interface ChoreoOptions {
@@ -449,10 +426,6 @@ export interface ChoreoOptions {
 }
 
 export interface ChoreoEvents {
-  /** The lattice is appearing (crossfade rising from the sunburst). */
-  enter?: boolean;
-  /** The lattice is leaving (crossfade falling toward the sunburst). */
-  leave?: boolean;
   /** A section drop: start a journey now if nothing is running. */
   drop?: boolean;
 }
@@ -494,7 +467,6 @@ export function createChoreographer(rng: Rng = Math.random): Choreographer {
   let legIndex = 0;
   let legProgress = 0;
   let journeyName: string | null = null;
-  let leaving = false;
   let flipBase = [0, 0]; // xw, zw angles the current flip leg started from
   let spinBase = 0;
   let lastJourney = "";
@@ -556,7 +528,7 @@ export function createChoreographer(rng: Rng = Math.random): Choreographer {
 
   function start(name: string): boolean {
     const list = JOURNEYS[name];
-    if (!list || legs.length > 0 || leaving || formA !== SHEET) return false;
+    if (!list || legs.length > 0 || formA !== SHEET) return false;
     beginLegs(list, name);
     lastJourney = name;
     return true;
@@ -566,6 +538,9 @@ export function createChoreographer(rng: Rng = Math.random): Choreographer {
     const pool = names.filter((n) => n !== lastJourney);
     start(pool[Math.floor(rng() * pool.length) % pool.length]);
   }
+
+  // The scene opens on the ladder: a dot that unfolds into the sheet.
+  beginLegs(OPENING_LEGS, "opening");
 
   return {
     anim,
@@ -595,23 +570,15 @@ export function createChoreographer(rng: Rng = Math.random): Choreographer {
       barSec = Math.max(0.4, Math.min(6, barSec));
       lastBarPhase = barPhase;
 
-      if (events.enter) {
-        leaving = false;
-        beginLegs(ENTER_LEGS, "enter");
-      } else if (events.leave && !leaving) {
-        leaving = true;
-        beginLegs(LEAVE_LEGS, "leave");
-      }
-
       if (barBoundary) {
         bars++;
         barsSinceJourney++;
         // Locked: every few bars. Free-running: the timer already spans the
         // whole interval, so every tick.
         if (!locked || bars % barsPerPose(opts.drift) === 0) retarget(opts.range, opts.flip);
-        if (legs.length === 0 && !leaving && barsSinceJourney >= journeyBars(opts.transitions)) pickJourney();
+        if (legs.length === 0 && barsSinceJourney >= journeyBars(opts.transitions)) pickJourney();
       }
-      if (events.drop && legs.length === 0 && !leaving && rng() < 0.7) pickJourney();
+      if (events.drop && legs.length === 0 && rng() < 0.7) pickJourney();
 
       if (legs.length > 0) {
         const leg = legs[legIndex];
@@ -622,12 +589,7 @@ export function createChoreographer(rng: Rng = Math.random): Choreographer {
         if (leg.flip4 === "xw") anim[ANIM.ROT_XW] = flipBase[0] + Math.PI * e;
         if (leg.flip4 === "zw") anim[ANIM.ROT_ZW] = flipBase[1] + Math.PI * e;
         if (leg.spin) anim[ANIM.SPIN] = spinBase + 4 * Math.PI * e;
-        if (legProgress >= 1) {
-          finishLeg();
-          if (legs.length === 0 && leaving && formA === DOT) {
-            // Parked on the dot until the next enter.
-          }
-        }
+        if (legProgress >= 1) finishLeg();
       } else {
         anim[ANIM.PROGRESS] = 0;
       }
@@ -639,98 +601,11 @@ export function createChoreographer(rng: Rng = Math.random): Choreographer {
   };
 }
 
-/** The sunburst/sheet crossfade: 0 = all sunburst, 1 = all sheet. Section
- *  intensity above threshold + SHEET_HYSTERESIS picks the sheet, below
- *  threshold - SHEET_HYSTERESIS the sunburst, in between it holds whichever
- *  side it was on; the result slews rather than snaps (fast in, slow out). */
-export function phaseMix(prev: number, sectionIntensity: number, dt: number, threshold: number): number {
-  const p = Number.isFinite(prev) ? Math.max(0, Math.min(1, prev)) : 0;
-  if (!Number.isFinite(sectionIntensity) || !Number.isFinite(dt) || dt <= 0) return p;
-  let goal: number;
-  if (sectionIntensity > threshold + SHEET_HYSTERESIS) goal = 1;
-  else if (sectionIntensity < threshold - SHEET_HYSTERESIS) goal = 0;
-  else goal = p > 0.5 ? 1 : 0;
-  const rate = goal > p ? SHEET_RISE_RATE : SHEET_FALL_RATE;
-  return p + (goal - p) * (1 - Math.exp(-dt * rate));
-}
-
-/** How many comets are out (fractional: the last one is fading in) and how
- *  far the burst has contracted toward its final disc, from the section's
- *  progress toward the sheet threshold. */
-export function cometState(
-  cometCount: number,
-  energy: number,
-  sectionIntensity: number,
-  threshold: number,
-): { count: number; contract: number } {
-  const max = Math.max(1, Math.min(MAX_COMETS, cometCount));
-  const f = Math.max(0, Math.min(1, sectionIntensity / Math.max(threshold, 1e-3)));
-  const e = Math.max(0, Math.min(1, energy));
-  const fill = Math.max(0, Math.min(1, 0.12 + 0.88 * f * (0.75 + 0.25 * e)));
-  const count = Math.max(1, Math.min(max, max * fill));
-  const c = Math.max(0, Math.min(1, (f - 0.7) / 0.3));
-  return { count, contract: c * c * (3 - 2 * c) };
-}
-
-/** With Sunburst pinned, how far along its build the burst sits (0..1) for
- *  a live bass level and broadband energy — see render(). */
-export function sunburstProgress(low: number, energy: number): number {
-  const l = Number.isFinite(low) ? Math.max(0, Math.min(1, low)) : 0;
-  const e = Number.isFinite(energy) ? Math.max(0, Math.min(1, energy)) : 0;
-  const level = 0.5 * l + 0.5 * e;
-  const f = Math.max(0, Math.min(1, (level - 0.1) / 0.7));
-  return f * f * (3 - 2 * f);
-}
-
 // Every table below reproduces its plain `default` when all dials sit at
 // NEUTRAL (musicProfile.ts) — nothing is hand-biased. `pulse` is kept small:
 // it floors near 0.9 on any locked-tempo track (see the Focus snap comment in
 // caustics.ts), so a large pulse weight is a constant offset in disguise.
-export const MODES: readonly string[] = ["Auto", "Sheet", "Sunburst"];
-
 const SETTINGS: SceneSetting[] = [
-  {
-    key: "mode",
-    label: "Mode",
-    description: "Auto crossfades from the sunburst in quiet sections to the dot sheet in loud ones (see Sunburst threshold); Sheet and Sunburst pin one look",
-    group: "Form",
-    min: 0,
-    max: MODES.length - 1,
-    step: 1,
-    default: 0,
-    type: "enum",
-    options: MODES,
-  },
-  {
-    key: "sunburstThreshold",
-    label: "Sunburst threshold",
-    description: "In Auto mode, the section intensity the dot sheet takes over at; the sunburst contracts as the section approaches it",
-    group: "Form",
-    min: 0.2,
-    max: 0.9,
-    step: 0.05,
-    default: 0.5,
-  },
-  {
-    key: "cometCount",
-    label: "Comets",
-    description: "How many comets the sunburst grows to at the top of a quiet section's build",
-    group: "Form",
-    min: 1,
-    max: MAX_COMETS,
-    step: 1,
-    default: 20,
-  },
-  {
-    key: "cometLength",
-    label: "Comet length",
-    description: "Length of each comet's tail",
-    group: "Form",
-    min: 0.2,
-    max: 2,
-    step: 0.05,
-    default: 1,
-  },
   {
     key: "sheetDensity",
     label: "Sheet density",
@@ -987,11 +862,10 @@ uniform int uStagger;                // how the blend sweeps the lattice, see ST
 uniform float uAnim[${ANIM_N}];      // this frame's animation state, see ANIM
 uniform float uAnimPrev[${ANIM_N}];  // last frame's, for the motion streaks
 uniform vec4 uPulse[${MAX_PULSES}];  // live swells, see PulsePool.data
-uniform float uPhaseMix;             // 0 = sunburst, 1 = sheet
 uniform float uDtNorm;               // (1/60) / last frame's dt: streak length per 60 Hz frame
 out vec2 vQ;        // quad-local coordinate: y in [-1,1], x in +-(1 + vStretch)
 out float vStretch; // capsule half-length in units of the quad's half-height
-out float vFade;    // fog * row window * phase, applied to the whole premultiplied colour
+out float vFade;    // fog * row window, applied to the whole premultiplied colour
 out float vCore;    // radius of the disc's core as a fraction of the quad's half-height
 out float vAa;      // one pixel, in quad-local units
 out float vHot;     // swell amount, pushes the colour toward white
@@ -1195,7 +1069,7 @@ void main() {
   bool sheetOnly = uFormA == 2 && uFormB == 2;
   float win = (!sheetOnly || A[10] >= WINDOW_OPEN) ? 1.0 : smoothstep(A[10], A[10] - 0.3, abs(v - A[9]));
   float ahead = smoothstep(NEAR, NEAR + 2.0, pr.w);
-  vFade = fog * win * ahead * uPhaseMix;
+  vFade = fog * win * ahead;
   vHot = swell;
 
   if (vFade < 0.003) {
@@ -1254,104 +1128,9 @@ void main() {
 }
 `;
 
-const COMET_VERT = `#version 300 es
-precision highp float;
-${COMMON_UNIFORMS_GLSL}
-${settingsUniformsGlsl}
-${PALETTE_GLSL}
-${AMBIENCE_GLSL}
-uniform float uCometsOut;  // fractional: the last comet is fading in
-uniform float uContract;   // 0 = comets adrift, 1 = pulled into the final disc
-uniform float uPhaseMix;   // 0 = sunburst, 1 = sheet
-uniform float uCometSeed;
-out vec2 vLocal;    // x along the comet in width units (0 = head centre), y across
-out float vLen;     // tail length in width units
-out float vAlpha;
-out float vSeed;
-out float vWob;
-out float vAa;
-
-void main() {
-  vec2 corner = quadCorner(gl_VertexID);
-  int k = gl_InstanceID;
-  float seed = hash11(float(k) * 7.31 + uCometSeed);
-  float seed2 = hash11(float(k) * 3.77 + 11.0 + uCometSeed);
-  float appear = clamp(uCometsOut - float(k), 0.0, 1.0);
-  float ang = seed * 6.28318 + uTime * 0.05;
-  vec2 dir = vec2(cos(ang), sin(ang));
-  vec2 perp = vec2(-dir.y, dir.x);
-  // Drift outward and wrap, fading at both ends of the run; the contraction
-  // overrides the drift and gathers every head at the centre.
-  float trav = fract(seed2 + uTime * 0.03);
-  float env = smoothstep(0.0, 0.12, trav) * smoothstep(1.0, 0.8, trav);
-  float r = mix(0.12 + 0.62 * trav, 0.05 + 0.03 * seed2, uContract);
-  float len = uCometLength * 0.28 * mix(1.0, 0.7, uContract) * (0.8 + 0.4 * seed2);
-  float wid = 0.022 * mix(1.0, 1.5, uContract) * (0.8 + 0.4 * seed);
-  // The whole burst shrinks away as the sheet takes over.
-  float shrink = 1.0 - 0.85 * uPhaseMix;
-  r *= shrink;
-  len *= shrink;
-  wid *= shrink;
-  float s = corner.x * 0.5 + 0.5;
-  float along = mix(-1.6 * wid, len + 0.5 * wid, s);
-  float across = corner.y * wid * 2.2;
-  // Square space: the frame is 2 units tall, x scaled by the room aspect so
-  // the burst stays circular.
-  vec2 sq = dir * (r + along) + perp * across;
-  vec2 ndc = vec2(sq.x / roomAspect(), sq.y);
-  vec2 uv01 = (ndc * 0.5 + 0.5 - uViewport.xy) / uViewport.zw;
-  gl_Position = vec4(uv01 * 2.0 - 1.0, 0.0, 1.0);
-  vLocal = vec2(along / wid, across / wid);
-  vLen = len / wid;
-  vAlpha = appear * mix(env, 1.0, uContract) * (1.0 - uPhaseMix);
-  vSeed = seed;
-  vWob = uContract;
-  float vpH = max(uResolution.y * uViewport.w, 1.0);
-  vAa = 1.5 / max(wid * 0.5 * vpH, 1.0);
-}
-`;
-
-const COMET_FRAG = `#version 300 es
-precision highp float;
-in vec2 vLocal;
-in float vLen;
-in float vAlpha;
-in float vSeed;
-in float vWob;
-in float vAa;
-${COMMON_UNIFORMS_GLSL}
-${settingsUniformsGlsl}
-${PALETTE_GLSL}
-${AMBIENCE_GLSL}
-out vec4 outColor;
-
-void main() {
-  float x = vLocal.x;
-  float y = vLocal.y;
-  // A wobble along the tail: faint while adrift so the head flickers, a
-  // full wave once the burst has contracted into its tendrilled disc.
-  float wob = (0.1 + 0.4 * vWob) * sin(x * 0.9 + uTime * 5.0 + vSeed * 6.28318) * smoothstep(0.0, 2.0, x);
-  y -= wob;
-  float sx = clamp(x / max(vLen, 1e-3), 0.0, 1.0);
-  // 1 at the head, a point at the tail's tip; the tails thin to tendrils
-  // once the heads have gathered into the disc.
-  float rad = pow(1.0 - sx, 0.75) * mix(1.0, 0.35, vWob * smoothstep(0.0, 1.5, x));
-  float d = x < 0.0 ? length(vec2(x, y)) - 1.0 : abs(y) - rad;
-  if (x > vLen) d = 1.0;
-  float core = 1.0 - smoothstep(-vAa, vAa, d);
-  // The skirt must reach exactly zero at the quad's edges, or its floor
-  // shows as a faint box around every comet against the ground.
-  float box = smoothstep(2.2, 1.3, abs(vLocal.y)) * smoothstep(vLen + 0.5, vLen, x) * smoothstep(-1.6, -1.2, x);
-  float halo = uGlow * 0.3 * exp(-max(d, 0.0) * 1.8) * (1.0 - core) * box;
-  vec3 col = hotColor() * (0.9 + 0.25 * uEnergy);
-  outColor = vec4(col * (core + halo), core + 0.9 * halo) * vAlpha;
-}
-`;
-
 export const ambienceScene: Scene = (() => {
   let bgProg: GLProgram | null = null;
   let dotProg: GLProgram | null = null;
-  let cometProg: GLProgram | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;
   let emptyVao: WebGLVertexArrayObject | null = null;
   let formALoc: WebGLUniformLocation | null = null;
@@ -1362,9 +1141,6 @@ export const ambienceScene: Scene = (() => {
   let pool: PulsePool | null = null;
   let choreo: Choreographer | null = null;
   const animPrev = new Float32Array(ANIM_N);
-  let mix = 0;
-  let lastMix = 0;
-  let cometSeed = 0;
   let lastTime: number | null = null;
   let lastDt = 1 / 60;
   let dimsFor = -1;
@@ -1381,13 +1157,12 @@ export const ambienceScene: Scene = (() => {
       const { gl } = ctx;
       bgProg = createProgram(gl, BG_FRAG);
       dotProg = createProgram(gl, DOT_FRAG, DOT_VERT);
-      cometProg = createProgram(gl, COMET_FRAG, COMET_VERT);
       formALoc = gl.getUniformLocation(dotProg.program, "uFormA");
       formBLoc = gl.getUniformLocation(dotProg.program, "uFormB");
       staggerLoc = gl.getUniformLocation(dotProg.program, "uStagger");
       quadVao = createFullscreenQuad(gl);
-      // Both sprite passes have no vertex attributes at all — the quad corner
-      // comes from gl_VertexID and the cell from gl_InstanceID — so they draw
+      // The disc pass has no vertex attributes at all — the quad corner
+      // comes from gl_VertexID and the cell from gl_InstanceID — so it draws
       // from an empty VAO rather than the quad's (see file header).
       emptyVao = gl.createVertexArray();
       const dims = gridDimsForQuality(ctx.quality.detail);
@@ -1396,16 +1171,13 @@ export const ambienceScene: Scene = (() => {
       pool = createPulsePool();
       choreo = createChoreographer();
       animPrev.set(choreo.anim);
-      mix = 0;
-      lastMix = 0;
-      cometSeed = Math.random() * 100;
       lastTime = null;
       lastDt = 1 / 60;
       dimsFor = -1;
     },
 
     render(ctx, frame, viewport, palette, anim) {
-      if (!bgProg || !dotProg || !cometProg || !quadVao || !emptyVao || !pool || !choreo) return;
+      if (!bgProg || !dotProg || !quadVao || !emptyVao || !pool || !choreo) return;
       const { gl } = ctx;
 
       const dt = lastTime === null ? 1 / 60 : Math.max(0, Math.min(0.25, anim.timeSec - lastTime));
@@ -1415,17 +1187,6 @@ export const ambienceScene: Scene = (() => {
       // resolveSceneSetting (not getSceneSetting) for every read below —
       // reading the raw manual value would re-stomp an auto-tuned slider
       // back to manual every frame (see autoTune.ts).
-      const mode = resolveSceneSetting(ID, settingFor("mode"));
-      const threshold = resolveSceneSetting(ID, settingFor("sunburstThreshold"));
-      // A pinned mode still slews there, by feeding the crossfade an
-      // intensity that is unambiguously on that side.
-      const intensity = mode === 1 ? 2 : mode === 2 ? -1 : anim.sectionIntensity;
-      mix = phaseMix(mix, intensity, dt, threshold);
-      // The lattice enters from the sunburst's dot and leaves back into one.
-      const enter = lastMix < 0.02 && mix >= 0.02;
-      const leave = lastMix > 0.98 && mix <= 0.98 && intensity < threshold;
-      lastMix = mix;
-
       const density = resolveSceneSetting(ID, settingFor("sheetDensity"));
       const cols = Math.max(2, Math.round(baseCols * density));
       const rows = Math.max(2, Math.round(baseRows * density));
@@ -1435,13 +1196,11 @@ export const ambienceScene: Scene = (() => {
         dims4 = latticeDims(dimsFor, 4);
       }
 
-      // Swells only while the sheet is up; a section drop fires a burst.
-      if (mix > 0.05) {
-        if (anim.dropOnset) {
-          for (let n = 0; n < 3; n++) pool.trigger(1, cols, rows, true);
-        } else if (anim.lowOnset || anim.onset) {
-          pool.trigger(0.7 + 0.3 * anim.low, cols, rows);
-        }
+      // A hit fires a swell; a section drop fires a burst.
+      if (anim.dropOnset) {
+        for (let n = 0; n < 3; n++) pool.trigger(1, cols, rows, true);
+      } else if (anim.lowOnset || anim.onset) {
+        pool.trigger(0.7 + 0.3 * anim.low, cols, rows);
       }
       pool.tick(dt, resolveSceneSetting(ID, settingFor("swellSpeed")));
 
@@ -1457,12 +1216,11 @@ export const ambienceScene: Scene = (() => {
           flip: resolveSceneSetting(ID, settingFor("flip")),
           transitions: resolveSceneSetting(ID, settingFor("transitions")),
         },
-        { enter, leave, drop: anim.dropOnset },
+        { drop: anim.dropOnset },
       );
       // The ripple clock: the audio-warped flow phase at Wave speed. Kept in
       // the animation array so the streak sees last frame's phase too.
       choreo.anim[ANIM.FLOW] = anim.flowPhase * resolveSceneSetting(ID, settingFor("waveSpeed"));
-      if (enter) animPrev.set(choreo.anim); // no streak from wherever the lattice last parked
 
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
@@ -1474,44 +1232,19 @@ export const ambienceScene: Scene = (() => {
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.bindVertexArray(emptyVao);
-
-      if (mix > 0.005) {
-        dotProg.use();
-        uploadCommonUniforms(dotProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
-        dotProg.setV2("uGridDims", cols, rows);
-        dotProg.setV3v("uDims3", dims3);
-        dotProg.setV4("uDims4", dims4[0], dims4[1], dims4[2], dims4[3]);
-        gl.uniform1i(formALoc, choreo.formA());
-        gl.uniform1i(formBLoc, choreo.formB());
-        gl.uniform1i(staggerLoc, choreo.stagger());
-        dotProg.setFv("uAnim", choreo.anim);
-        dotProg.setFv("uAnimPrev", animPrev);
-        dotProg.setV4v("uPulse", pool.data);
-        dotProg.setF("uPhaseMix", mix);
-        dotProg.setF("uDtNorm", 1 / 60 / Math.max(lastDt, 1 / 240));
-        gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, cols * rows);
-      }
-
-      if (mix < 0.995) {
-        // In Auto the burst tracks the section's climb toward the drop. With
-        // Sunburst pinned there is no drop to climb to, so the live level
-        // stands in: the burst fills out on a loud passage and contracts
-        // on the loudest, then opens up again.
-        const progress = mode === 2 ? sunburstProgress(anim.low, frame.energy) * threshold : anim.sectionIntensity;
-        const { count, contract } = cometState(
-          resolveSceneSetting(ID, settingFor("cometCount")),
-          frame.energy,
-          progress,
-          threshold,
-        );
-        cometProg.use();
-        uploadCommonUniforms(cometProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
-        cometProg.setF("uCometsOut", count);
-        cometProg.setF("uContract", contract);
-        cometProg.setF("uPhaseMix", mix);
-        cometProg.setF("uCometSeed", cometSeed);
-        gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, Math.ceil(count));
-      }
+      dotProg.use();
+      uploadCommonUniforms(dotProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      dotProg.setV2("uGridDims", cols, rows);
+      dotProg.setV3v("uDims3", dims3);
+      dotProg.setV4("uDims4", dims4[0], dims4[1], dims4[2], dims4[3]);
+      gl.uniform1i(formALoc, choreo.formA());
+      gl.uniform1i(formBLoc, choreo.formB());
+      gl.uniform1i(staggerLoc, choreo.stagger());
+      dotProg.setFv("uAnim", choreo.anim);
+      dotProg.setFv("uAnimPrev", animPrev);
+      dotProg.setV4v("uPulse", pool.data);
+      dotProg.setF("uDtNorm", 1 / 60 / Math.max(lastDt, 1 / 240));
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, cols * rows);
 
       // The gallery renders every scene into one shared context each tick —
       // must not leak blend state or a bound VAO onto the next tile.
@@ -1524,12 +1257,10 @@ export const ambienceScene: Scene = (() => {
       const { gl } = ctx;
       bgProg?.dispose();
       dotProg?.dispose();
-      cometProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
       if (emptyVao) gl.deleteVertexArray(emptyVao);
       bgProg = null;
       dotProg = null;
-      cometProg = null;
       quadVao = null;
       emptyVao = null;
       formALoc = null;

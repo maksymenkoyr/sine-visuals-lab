@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  MAX_COMETS,
   MAX_PULSES,
   POSE_FLOATS,
   PULSE_REFRACTORY_SEC,
@@ -8,15 +7,12 @@ import {
   REST_POSE,
   ANIM,
   ANIM_N,
-  ENTER_LEGS,
   FORM,
   JOURNEYS,
-  LEAVE_LEGS,
+  OPENING_LEGS,
   STAGGER,
-  SHEET_HYSTERESIS,
   WINDOW_OPEN,
   barsPerPose,
-  cometState,
   createChoreographer,
   createPulsePool,
   createRng,
@@ -24,10 +20,8 @@ import {
   gridDimsForQuality,
   journeyBars,
   latticeDims,
-  phaseMix,
   poseToArray,
   randomPose,
-  sunburstProgress,
 } from "../src/render/scenes/ambience.ts";
 
 const DT = 1 / 60;
@@ -258,15 +252,11 @@ describe("ambience journeys", () => {
     }
   });
 
-  it("the way in climbs the ladder from the dot; the way out descends to it", () => {
-    expect(ENTER_LEGS[0].from).toBe(FORM.DOT);
-    expect(ENTER_LEGS[ENTER_LEGS.length - 1].to).toBe(FORM.SHEET);
-    expect(LEAVE_LEGS[0].from).toBe(FORM.SHEET);
-    expect(LEAVE_LEGS[LEAVE_LEGS.length - 1].to).toBe(FORM.DOT);
-    const climbs = (legs: readonly { from: number; to: number }[], up: boolean) =>
-      legs.every((l) => (up ? l.to > l.from : l.to < l.from));
-    expect(climbs(ENTER_LEGS, true)).toBe(true);
-    expect(climbs(LEAVE_LEGS, false)).toBe(true);
+  it("the opening climbs the ladder from the dot to the sheet", () => {
+    expect(OPENING_LEGS[0].from).toBe(FORM.DOT);
+    expect(OPENING_LEGS[OPENING_LEGS.length - 1].to).toBe(FORM.SHEET);
+    expect(OPENING_LEGS.every((l) => l.to > l.from)).toBe(true);
+    for (let i = 1; i < OPENING_LEGS.length; i++) expect(OPENING_LEGS[i].from).toBe(OPENING_LEGS[i - 1].to);
   });
 
   it("more Transitions means fewer bars between journeys", () => {
@@ -277,21 +267,25 @@ describe("ambience journeys", () => {
 
 describe("ambience choreographer", () => {
   const OPTS = { drift: 0.5, range: 1, flip: 0.6, transitions: 0 };
-  /** Runs `bars` locked bars through the choreographer, `perBar` ticks each. */
-  function runBars(c: ReturnType<typeof createChoreographer>, bars: number, opts = OPTS, perBar = 32) {
-    for (let b = 0; b < bars; b++) {
-      for (let k = 0; k < perBar; k++) c.advance(DT, k / perBar, 1, opts);
-    }
+  /** A fresh choreographer that has finished its opening and sits idle on the sheet. */
+  function settled(seed: number) {
+    const c = createChoreographer(createRng(seed));
+    let guard = 0;
+    while (c.journey() !== null && guard++ < 100_000) c.advance(DT, 0.5, 1, OPTS);
+    return c;
   }
 
-  it("opens on the rest pose, on the sheet, idle", () => {
+  it("opens on the rest pose as a dot unfolding into the sheet, then sits idle", () => {
     const c = createChoreographer(createRng(1));
     expect(Array.from(c.anim.subarray(0, POSE_FLOATS))).toEqual(Array.from(poseToArray(REST_POSE)));
     expect(c.anim.length).toBe(ANIM_N);
-    expect(c.formA()).toBe(FORM.SHEET);
-    expect(c.formB()).toBe(FORM.SHEET);
-    expect(c.journey()).toBeNull();
-    expect(c.anim[ANIM.PROGRESS]).toBe(0);
+    expect(c.formA()).toBe(FORM.DOT);
+    expect(c.journey()).toBe("opening");
+    const s = settled(1);
+    expect(s.formA()).toBe(FORM.SHEET);
+    expect(s.formB()).toBe(FORM.SHEET);
+    expect(s.journey()).toBeNull();
+    expect(s.anim[ANIM.PROGRESS]).toBe(0);
   });
 
   it("never retargets mid-bar while the tempo is locked", () => {
@@ -375,7 +369,7 @@ describe("ambience choreographer", () => {
   });
 
   it("runs a journey leg by leg, progress climbing 0..1 in each, and lands back on the sheet idle", () => {
-    const c = createChoreographer(createRng(6));
+    const c = settled(6);
     expect(c.start("unfold")).toBe(true);
     expect(c.journey()).toBe("unfold");
     expect(c.start("roll")).toBe(false); // one at a time
@@ -403,7 +397,7 @@ describe("ambience choreographer", () => {
   });
 
   it("a 4D turn leaves the sheet's plane angle exactly a half-turn on", () => {
-    const c = createChoreographer(createRng(7));
+    const c = settled(7);
     const before = c.anim[ANIM.ROT_XW];
     expect(c.start("turnX")).toBe(true);
     let peak = before;
@@ -418,7 +412,7 @@ describe("ambience choreographer", () => {
   });
 
   it("the tesseract dwell spins through whole turns, so the sheet returns unmirrored", () => {
-    const c = createChoreographer(createRng(8));
+    const c = settled(8);
     expect(c.start("tesseract")).toBe(true);
     let guard = 0;
     while (c.journey() !== null && guard++ < 200_000) c.advance(DT, 0.5, 1, OPTS);
@@ -428,7 +422,7 @@ describe("ambience choreographer", () => {
 
   it("starts journeys on its own every few bars, more often with Transitions up, never at 0", () => {
     const started = (transitions: number) => {
-      const c = createChoreographer(createRng(9));
+      const c = settled(9);
       let n = 0;
       let last: string | null = null;
       for (let b = 0; b < 40; b++) {
@@ -447,7 +441,7 @@ describe("ambience choreographer", () => {
   });
 
   it("a drop can start a journey; nothing can while one is running", () => {
-    const c = createChoreographer(createRng(10));
+    const c = settled(10);
     let fired = false;
     for (let n = 0; n < 20 && !fired; n++) {
       c.advance(DT, 0.5, 1, OPTS, { drop: true });
@@ -459,30 +453,6 @@ describe("ambience choreographer", () => {
     expect(c.journey()).toBe(running);
   });
 
-  it("enters from the dot up to the sheet, and leaves back down to the dot, whatever it was doing", () => {
-    const c = createChoreographer(createRng(11));
-    c.advance(DT, 0.5, 1, OPTS, { enter: true });
-    expect(c.formA()).toBe(FORM.DOT);
-    expect(c.journey()).toBe("enter");
-    let guard = 0;
-    while (c.journey() !== null && guard++ < 100_000) c.advance(DT, 0.5, 1, OPTS);
-    expect(c.formA()).toBe(FORM.SHEET);
-    // Leaving mid-journey overrides it.
-    expect(c.start("roll")).toBe(true);
-    c.advance(DT, 0.5, 1, OPTS, { leave: true });
-    expect(c.journey()).toBe("leave");
-    guard = 0;
-    while (c.journey() !== null && guard++ < 100_000) c.advance(DT, 0.5, 1, OPTS);
-    expect(c.formA()).toBe(FORM.DOT);
-    expect(c.formB()).toBe(FORM.DOT);
-    // Parked on the dot: no journey starts by itself until the next enter.
-    runBars(c, 30, { ...OPTS, transitions: 1 });
-    expect(c.formA()).toBe(FORM.DOT);
-    expect(c.journey()).toBeNull();
-    c.advance(DT, 0.5, 1, OPTS, { enter: true });
-    expect(c.journey()).toBe("enter");
-  });
-
   it("treats a non-finite or backwards dt as no time passing", () => {
     const c = createChoreographer(createRng(12));
     c.retarget(1, 0.6);
@@ -490,98 +460,5 @@ describe("ambience choreographer", () => {
     c.advance(Number.NaN, 0, 0, OPTS);
     c.advance(-1, 0, 0, OPTS);
     expect(Array.from(c.anim)).toEqual(before);
-  });
-});
-
-describe("ambience phase crossfade", () => {
-  const THR = 0.5;
-
-  it("heads for the sheet above the band and for the sunburst below it", () => {
-    let m = 0;
-    for (let k = 0; k < 600; k++) m = phaseMix(m, THR + SHEET_HYSTERESIS + 0.05, DT, THR);
-    expect(m).toBeGreaterThan(0.99);
-    for (let k = 0; k < 1200; k++) m = phaseMix(m, THR - SHEET_HYSTERESIS - 0.05, DT, THR);
-    expect(m).toBeLessThan(0.01);
-  });
-
-  it("holds its side inside the hysteresis band", () => {
-    let up = 1;
-    let down = 0;
-    for (let k = 0; k < 600; k++) {
-      up = phaseMix(up, THR, DT, THR);
-      down = phaseMix(down, THR, DT, THR);
-    }
-    expect(up).toBe(1);
-    expect(down).toBe(0);
-  });
-
-  it("slews rather than snaps, arriving faster than it leaves", () => {
-    const rise = phaseMix(0, 1, DT, THR);
-    expect(rise).toBeGreaterThan(0);
-    expect(rise).toBeLessThan(0.2);
-    const fall = 1 - phaseMix(1, 0, DT, THR);
-    expect(fall).toBeGreaterThan(0);
-    expect(fall).toBeLessThan(rise);
-  });
-
-  it("stays in [0,1] and finite whatever it is fed", () => {
-    for (const prev of [-1, 0, 0.5, 1, 2, Number.NaN]) {
-      for (const si of [-1, 0, 0.5, 1, 2, Number.NaN]) {
-        for (const dt of [0, DT, 0.25, -1, Number.NaN]) {
-          const m = phaseMix(prev, si, dt, THR);
-          expect(Number.isFinite(m)).toBe(true);
-          expect(m).toBeGreaterThanOrEqual(0);
-          expect(m).toBeLessThanOrEqual(1);
-        }
-      }
-    }
-  });
-});
-
-describe("ambience comet state", () => {
-  const THR = 0.5;
-
-  it("grows the burst with the section and never past the Comets setting", () => {
-    let prev = 0;
-    for (let si = 0; si <= THR; si += 0.02) {
-      const { count } = cometState(20, 0.5, si, THR);
-      expect(count).toBeGreaterThanOrEqual(1);
-      expect(count).toBeLessThanOrEqual(20);
-      expect(count).toBeGreaterThanOrEqual(prev);
-      prev = count;
-    }
-    expect(cometState(20, 1, THR, THR).count).toBeCloseTo(20, 6);
-    expect(cometState(1, 0, 0, THR).count).toBe(1);
-    expect(cometState(1000, 1, 1, THR).count).toBe(MAX_COMETS);
-  });
-
-  it("with Sunburst pinned, the live level walks the burst through its whole build", () => {
-    // Quiet: a handful of comets and no contraction. Loud: every comet out,
-    // contracted. And a burst driven this way must open up again when the
-    // level falls, which is the point of not reading the section here.
-    expect(sunburstProgress(0, 0)).toBe(0);
-    expect(sunburstProgress(1, 1)).toBe(1);
-    let prev = 0;
-    for (let l = 0; l <= 1; l += 0.05) {
-      const p = sunburstProgress(l, l);
-      expect(p).toBeGreaterThanOrEqual(prev);
-      expect(p).toBeLessThanOrEqual(1);
-      prev = p;
-    }
-    // A typical real-track reading sits mid-build, not pinned at either end.
-    const mid = sunburstProgress(0.55, 0.5);
-    expect(mid).toBeGreaterThan(0.2);
-    expect(mid).toBeLessThan(0.9);
-    expect(sunburstProgress(Number.NaN, 0.5)).toBeGreaterThanOrEqual(0);
-  });
-
-  it("only contracts in the last stretch before the threshold", () => {
-    expect(cometState(20, 0.5, 0, THR).contract).toBe(0);
-    expect(cometState(20, 0.5, THR * 0.6, THR).contract).toBe(0);
-    const mid = cometState(20, 0.5, THR * 0.85, THR).contract;
-    expect(mid).toBeGreaterThan(0);
-    expect(mid).toBeLessThan(1);
-    expect(cometState(20, 0.5, THR, THR).contract).toBe(1);
-    expect(cometState(20, 0.5, 5, THR).contract).toBe(1);
   });
 });
