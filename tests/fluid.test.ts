@@ -741,7 +741,7 @@ describe("Sparkle settings", () => {
     expect(s.auto).toBeUndefined();
     expect(s.min).toBe(0);
     expect(s.max).toBe(1);
-    expect(s.default).toBe(0.5);
+    expect(s.default).toBe(0.3);
   });
 });
 
