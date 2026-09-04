@@ -6,7 +6,7 @@ import { dancersScene } from "../src/render/scenes/dancers/index.ts";
 import { powderScene } from "../src/render/scenes/powder.ts";
 import { stormScene } from "../src/render/scenes/storm.ts";
 import { ambienceScene } from "../src/render/scenes/ambience.ts";
-import { kaleidoscopeScene } from "../src/render/scenes/kaleidoscope.ts";
+import { kaleidoscopeScene } from "../src/render/scenes/kaleido/index.ts";
 import { setSceneSetting, type SceneSetting } from "../src/render/sceneSettings.ts";
 import { setSensitivity, setExpansion, setSmoothing } from "../src/audio/sensitivity.ts";
 import { NEUTRAL, type DialValues } from "../src/render/musicProfile.ts";

@@ -19,6 +19,14 @@ regenerate it at session close.
   `src/audio/beatGrid.ts`, `src/render/gridPulse.ts`): per-scene Hits/1/8/1/4/
   1/2/bar/2 bars, gridded off the phase-locked beat count, hits until the
   tracker locks. Not sent to the TV (same gap as Smoothing).
+- **Kaleidoscope styles** — branch `worktree-kaleido-styles`, stacked on the
+  scene branch, its own draft PR. The scene is now the folder
+  `src/render/scenes/kaleido/` with a `style` enum: Mandala (richer: gaussian
+  rosette rings, corner motif, bar-breathe petal split, counter-rotating rings
+  behind an edge mask, twist), Portal, Prism and Burst, each after one of the
+  user's reference shorts (sheets in the session job dir). Every style
+  screenshot-checked at high/low quality and for tiling seams. The two
+  fractal-zoom references are a separate scene still to plan.
 - **Three sibling draft scenes from the same reference-video workflow**, each
   on its own worktree branch with a draft PR: Plume (#75), Neon Fluid (#76),
   Powder (#77). None has had a user verdict on real music yet.

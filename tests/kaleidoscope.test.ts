@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { advanceBeatSurge, createBeatSurgeState } from "../src/render/scenes/kaleidoscope.ts";
+import { advanceBeatSurge, createBeatSurgeState } from "../src/render/scenes/kaleido/index.ts";
 
 // The scene's beat response is a push, not a jump: this pins the two
 // properties the user-facing complaint was about — nothing moves in the
