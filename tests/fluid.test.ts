@@ -5,6 +5,8 @@ import {
   SIM_TIERS,
   WIDTH_QUANTUM,
   SPLAT_SLOTS,
+  viscosityPasses,
+  VISC_MAX_PASSES,
   type MirrorMode,
   type Splat,
 } from "../src/render/scenes/fluidSim.ts";
@@ -16,8 +18,20 @@ import {
   SPLAT_SIGMA,
   EMIT_SWAY,
   EMIT_SIGMA,
+  EMIT_RING,
+  EMIT_RING_SIGMA,
+  puffEnv,
+  createPuffState,
+  advancePuff,
+  warpedDt,
+  PUFF_FALLBACK_AFTER,
+  PUFF_FALLBACK_RATE,
+  SIM_DT_MAX,
+  SIM_DT_DEFAULT,
+  WARP_MIN,
   type EmitterInputs,
 } from "../src/render/scenes/fluid.ts";
+import type { SignalId } from "../src/render/signals.ts";
 
 describe("simResolutionFor", () => {
   it("is monotone non-decreasing in detail (higher detail never yields a smaller grid)", () => {
@@ -124,6 +138,36 @@ describe("sameSimSize", () => {
   });
 });
 
+describe("viscosityPasses", () => {
+  it("is {0, 0} at viscosity 0", () => {
+    const { full, frac } = viscosityPasses(0);
+    expect(full).toBe(0);
+    expect(frac).toBe(0);
+  });
+
+  it("is {VISC_MAX_PASSES, ~0} at viscosity 1", () => {
+    const { full, frac } = viscosityPasses(1);
+    expect(full).toBe(VISC_MAX_PASSES);
+    expect(frac).toBeCloseTo(0, 6);
+  });
+
+  it("splits a fractional pass count correctly (0.375 * VISC_MAX_PASSES = 1.5)", () => {
+    const { full, frac } = viscosityPasses(0.375);
+    expect(full).toBe(1);
+    expect(frac).toBeCloseTo(0.5, 6);
+  });
+
+  it("total pass-equivalent (full + frac) is monotone non-decreasing in viscosity", () => {
+    let prev = -Infinity;
+    for (let v = 0; v <= 1; v += 0.01) {
+      const { full, frac } = viscosityPasses(v);
+      const total = full + frac;
+      expect(total).toBeGreaterThanOrEqual(prev - 1e-9);
+      prev = total;
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // fluid.ts's own chunk: emitter/splat logic and the SETTINGS weight
 // convention. See fluid.ts's file header for what these functions model.
@@ -139,6 +183,13 @@ function baseInputs(overrides: Partial<EmitterInputs> = {}): EmitterInputs {
     beatKick: 0.5,
     dyeFlow: 0.5,
     mirror: 2,
+    // Puff clock inputs default to "no puff in flight" (a large puffAge so
+    // every secondary splat's puff-based envelope has decayed to ~0) so
+    // existing tests that don't care about the puff clock see the same
+    // baseline as before it existed.
+    puff: 0,
+    puffAge: 999,
+    dropPulse: 0,
     ...overrides,
   };
 }
@@ -230,11 +281,6 @@ describe("emitterState", () => {
     for (let i = 1; i < out.length; i++) expect(out[i].tag).toBe(0);
   });
 
-  it("still injects dye > 0 in silence (energy 0, pulses 0)", () => {
-    const out = emitterState(baseInputs({ energy: 0, lowPulse: 0, beatPulse: 0 }), freshSplats());
-    expect(out[0].dye).toBeGreaterThan(0);
-  });
-
   it("bounds the emitter's sway angle by EMIT_SWAY", () => {
     for (const flowPhase of [0, 1, 2, 5.5, 17.3]) {
       const out = emitterState(baseInputs({ flowPhase }), freshSplats());
@@ -245,10 +291,113 @@ describe("emitterState", () => {
     }
   });
 
-  it("keeps slot-0 sigma at EMIT_SIGMA and secondary slots at SPLAT_SIGMA", () => {
+  it("slot-0 sigma/ring follow EMIT_RING (a gaussian shell when > 0, a blob at EMIT_SIGMA otherwise); secondary slots stay plain blobs at SPLAT_SIGMA with ring 0", () => {
     const out = emitterState(baseInputs(), freshSplats());
-    expect(out[0].sigma).toBeCloseTo(EMIT_SIGMA, 6);
-    for (let i = 1; i < out.length; i++) expect(out[i].sigma).toBeCloseTo(SPLAT_SIGMA, 6);
+    if (EMIT_RING > 0) {
+      expect(out[0].ring).toBeCloseTo(EMIT_RING, 6);
+      expect(out[0].sigma).toBeCloseTo(EMIT_RING_SIGMA, 6);
+    } else {
+      expect(out[0].ring).toBe(0);
+      expect(out[0].sigma).toBeCloseTo(EMIT_SIGMA, 6);
+    }
+    for (let i = 1; i < out.length; i++) {
+      expect(out[i].sigma).toBeCloseTo(SPLAT_SIGMA, 6);
+      expect(out[i].ring).toBe(0);
+    }
+  });
+
+  it("slot-0 force magnitude and dye strictly increase with puff", () => {
+    const mag = (s: { fx: number; fy: number }) => Math.hypot(s.fx, s.fy);
+    const low = emitterState(baseInputs({ puff: 0 }), freshSplats())[0];
+    const high = emitterState(baseInputs({ puff: 1 }), freshSplats())[0];
+    expect(mag(high)).toBeGreaterThan(mag(low));
+    expect(high.dye).toBeGreaterThan(low.dye);
+  });
+
+  it("still injects dye > 0 in full silence (puff 0, energy 0, pulses 0)", () => {
+    const out = emitterState(baseInputs({ energy: 0, lowPulse: 0, beatPulse: 0, puff: 0, dropPulse: 0 }), freshSplats());
+    expect(out[0].dye).toBeGreaterThan(0);
+  });
+});
+
+describe("puffEnv", () => {
+  it("is 0 at age 0 (and for any negative age)", () => {
+    expect(puffEnv(0)).toBe(0);
+    expect(puffEnv(-0.1)).toBe(0);
+    expect(puffEnv(-5)).toBe(0);
+  });
+
+  it("peaks before 0.1s", () => {
+    let peakT = 0;
+    let peakV = -Infinity;
+    for (let t = 0; t <= 0.3; t += 0.001) {
+      const v = puffEnv(t);
+      if (v > peakV) {
+        peakV = v;
+        peakT = t;
+      }
+    }
+    expect(peakT).toBeLessThan(0.1);
+    expect(peakV).toBeGreaterThan(0);
+  });
+
+  it("decays to under 0.05 by 0.5s", () => {
+    expect(puffEnv(0.5)).toBeLessThan(0.05);
+  });
+
+  it("decays monotonically once past the peak", () => {
+    let prev = puffEnv(0.1);
+    for (let t = 0.15; t <= 2; t += 0.05) {
+      const v = puffEnv(t);
+      expect(v).toBeLessThanOrEqual(prev + 1e-9);
+      prev = v;
+    }
+  });
+});
+
+describe("advancePuff", () => {
+  it("fires and resets age to 0 when `fired` is true", () => {
+    const st = createPuffState();
+    st.age = 5;
+    const fired = advancePuff(st, 0.016, true, 0, 0, 0);
+    expect(fired).toBe(true);
+    expect(st.age).toBe(0);
+  });
+
+  it("does not fire twice in a row without a new onset", () => {
+    const st = createPuffState();
+    expect(advancePuff(st, 0.01, true, 0, 0, 0)).toBe(true);
+    // Immediately after: no new onset, and nowhere near the silence
+    // fallback's PUFF_FALLBACK_AFTER threshold yet.
+    expect(advancePuff(st, 0.01, false, 0, 0, 0.001)).toBe(false);
+  });
+
+  it("falls back to firing on its own within ~1/PUFF_FALLBACK_RATE s of silence once PUFF_FALLBACK_AFTER has elapsed", () => {
+    const st = createPuffState();
+    const dt = 0.01;
+    let t = 0;
+    let firedAt: number | null = null;
+    for (let i = 0; i < 1000 && firedAt === null; i++) {
+      t += dt;
+      // flowPhase advances at the same rate as wall time here, matching how
+      // flowClock behaves at rest (see flowClock.ts).
+      if (advancePuff(st, dt, false, 0, 0, t)) firedAt = t;
+    }
+    expect(firedAt).not.toBeNull();
+    expect(firedAt as number).toBeGreaterThanOrEqual(PUFF_FALLBACK_AFTER);
+    expect(firedAt as number).toBeLessThanOrEqual(PUFF_FALLBACK_AFTER + 1 / PUFF_FALLBACK_RATE + dt);
+  });
+});
+
+describe("warpedDt", () => {
+  it("at warp 0 and energy 0, scales dt by exactly WARP_MIN", () => {
+    const dt = SIM_DT_DEFAULT;
+    expect(warpedDt(dt, 0, 0)).toBeCloseTo(dt * WARP_MIN, 10);
+  });
+
+  it("clamps to SIM_DT_MAX for a large enough energy/warp", () => {
+    expect(warpedDt(SIM_DT_MAX, 1, 1)).toBe(SIM_DT_MAX);
+    expect(warpedDt(1, 1, 1)).toBe(SIM_DT_MAX);
   });
 });
 
@@ -276,5 +425,16 @@ describe("SETTINGS weight convention", () => {
     const mirror = SETTINGS.find((s) => s.key === "mirror")!;
     expect(mirror.type).toBe("enum");
     expect(mirror.options?.length).toBe(3);
+  });
+
+  it("every `reads` entry names a signal id that actually exists in signals.ts", () => {
+    const validIds: SignalId[] = ["feature.onset", "anim.lowOnset", "anim.dropOnset", "anim.centroid"];
+    for (const s of SETTINGS) {
+      if (!s.reads) continue;
+      for (const link of s.reads) {
+        const id = typeof link === "string" ? link : link.signal;
+        expect(validIds, `${s.key}.reads includes ${id}`).toContain(id);
+      }
+    }
   });
 });

@@ -6,42 +6,42 @@ regenerate it at session close.
 
 ## In flight
 
-- **Neon Fluid scene (this session)** — branch `worktree-neon-fluid`, draft
-  PR opened at session close. A stable-fluids dye sim rendered as neon
-  outlines, four-way mirrored, coloured by screen x, recreating a YouTube
-  short. Sim in `src/render/scenes/fluidSim.ts`, scene in
-  `src/render/scenes/fluid.ts`, registered as a draft scene. Typecheck and
-  the full suite green; headless-verified at every quality tier, all three
-  `mirror` modes, the gallery tile, the auto→manual probe sign-off, and the
-  byte-format fallback. Implementation was delegated to Sonnet subagents from
-  an approved plan; the look was tuned in-session from screenshots against
-  the reference thumbnails. Branched from `d7412c4`; `main` has since taken
-  Storm (#41) and the audio source picker (#71), so expect a trivial rebase
-  (touches only new files plus one-line registrations).
-- **Plume scene** — draft PR #75 (`worktree-plume-scene`, locked), a
-  parallel session today.
-- **Docs architecture rewrite** — draft PR #74 (`worktree-docs-architecture`).
-- **Auto dial ranking / tempoLock** — draft PR #73 (`worktree-auto-dial-ranking`, locked).
-- **Business & legal docs** — PR #72 (`docs-business`); **stage-1 wrap
-  status** — PR #70 (`wrap-status`). Both open, non-draft.
-- Worktrees with no PR: `powder-scene` (locked, still at `d7412c4` — a
-  session that hasn't committed yet), `bake-defaults`, `docs-index`,
-  `setting-groups`, `tuning-spotlight`, `agent-ae8a69d86e9c44e97`. The old
-  scratch branches listed in the previous snapshot are unchanged — diff
-  against `main` before reviving.
+- **Neon Fluid scene, v2 (this session)** — branch `worktree-neon-fluid`,
+  draft PR #76. After the user compared a frame against the reference short
+  ("sharper edges, more reactive to music"), the scene was reworked: the
+  dye grid doubled and advected with a two-pass clamped MacCormack step, an
+  explicit viscosity pass (new `viscosity` setting) replaced the old inline
+  smoothing, and emission moved from a continuous push into beat-timed
+  puffs (`puffEnv`/`advancePuff` in `src/render/scenes/fluid.ts`) — each
+  beat is one thin dye ring that stretches into a filament, so the striations
+  read the beat history. New `warp` setting speeds the sim with loudness;
+  the line brightens on beats and the hue ramp follows the spectral
+  centroid. Typecheck and the full suite green; headless-verified at every
+  quality tier, all three `mirror` modes, the gallery tile, a slow-tempo
+  fallback, and the byte-format fallback. Implementation delegated to two
+  Sonnet subagents from the approved plan; the look was then tuned from
+  screenshots in the main session (see the fluid lines at the end of
+  `tuning/VOCAB.md`). Still branched from `d7412c4`; `main` has since taken
+  Storm (#41) and the audio source picker (#71) — expect a trivial rebase.
+- **Powder scene** — PR #77; **Plume scene** — draft PR #75; **Docs
+  architecture rewrite** — draft PR #74; **Auto dial ranking / tempoLock** —
+  draft PR #73; **Business & legal docs** — PR #72; **stage-1 wrap status**
+  — PR #70.
 
 ## Open questions
 
-- Neon Fluid's `Off` and `Left-right` mirror modes work but read softer than
-  Kaleidoscope (bigger structures on screen, same physics). Give them their
-  own emitter/splat layout, or leave Kaleidoscope as the scene's identity?
-- Several of today's PRs (#70, #72, #74, this one) each rewrite
-  `docs/status.md`; whichever merges last wins. Fine for a snapshot, but
-  merge them in one sitting.
+- Neon Fluid's `Off` and `Left-right` mirror modes work but are busier than
+  Kaleidoscope (the same emitter unfolded over the whole screen). Give them
+  their own emitter placement, or accept Kaleidoscope as the identity?
+- The byte fallback renders but its 8-bit dye makes the thin rings jagged.
+  Acceptable for old TV runtimes, or worth a coarser ring there?
+- Several open PRs (#70, #72, #74, #76, #77) each rewrite `docs/status.md`;
+  whichever merges last wins. Merge them in one sitting.
 
 ## Next up
 
-- Review the Neon Fluid draft PR; then `/tune fluid` against real music —
-  the constants were tuned on `?audio=synthetic` only.
-- Rebase `worktree-neon-fluid` onto `main` once #41/#71 settle.
-- Review/merge PRs #70, #72, #73, #74, #75.
+- `/tune fluid` against real music — every v2 constant was tuned on
+  `?audio=synthetic` only; the beat puffs in particular need a real onset
+  stream.
+- Rebase `worktree-neon-fluid` onto `main`, mark PR #76 ready.
+- Review/merge PRs #70, #72, #73, #74, #75, #77.

@@ -2,7 +2,7 @@ import { createProgram, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 
 // A 2D incompressible fluid sim (velocity + dye advection), simulated over
 // one mirrored quadrant so the display can fold it into a four-way
-// kaleidoscope. This file owns only the GL machinery: allocation, the eight
+// kaleidoscope. This file owns only the GL machinery: allocation, the
 // shader passes, and the ghost-cell mirror seams. It knows nothing about
 // scenes, settings, or audio — src/render/scenes/fluid.ts is the layer that
 // turns music into Splat forces and renders the result; this module just
@@ -49,15 +49,23 @@ import { createProgram, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 // through the encode/decode pairs `simIoGlsl` emits: signed quantities
 // (velocity, pressure/curl/divergence) get a 0.5 bias so negative values
 // have somewhere to go, dye (always >= 0) doesn't. Every shader pass is
-// written once against `decodeX`/`encodeX` names, so the eight pass sources
-// are identical text in both formats — only the six codec functions differ.
+// written once against `decodeX`/`encodeX` names, so the pass sources
+// are identical text in both formats — only the codec functions simIoGlsl emits differ.
 //
 // Pass pipeline per step() (see the table in the design plan for the exact
-// per-pass math): advectVel -> curl -> force (vorticity confinement +
-// splats) -> divergence -> jacobi x N (pressure, warm-started — never
-// cleared except on resize) -> gradient (subtract grad(p)) -> advectDye ->
-// edge (Sobel of dye.r, then a mipmap chain the display pass samples at a
-// couple of LODs for the neon halo).
+// per-pass math): advectVel -> viscosity xN -> curl -> force (vorticity
+// confinement + splats) -> divergence -> jacobi x N (pressure, warm-started
+// — never cleared except on resize) -> gradient (subtract grad(p)) ->
+// advectDye (MacCormack) -> edge (Sobel of dye.r, then a mipmap chain the
+// display pass samples at a couple of LODs for the neon halo).
+//
+// Dye advection (ADVECT_DYE_BODY) runs a MacCormack step on top of the
+// semi-Lagrangian base: a predictor-corrector with a clamp to the local
+// min/max, so dye edges stay sharp instead of smearing every frame's
+// bilinear resample. It's written from the textbook description of the
+// scheme (Selle et al. 2008's BFECC/MacCormack idea), independently — same
+// "no ported code" rule as the rest of this file. `DYE_MACCORMACK = false`
+// restores the plain semi-Lagrangian step.
 
 export type SimFormat = "half" | "byte";
 /** Matches the Mirror enum setting's index: off | left-right | kaleidoscope. */
@@ -80,16 +88,17 @@ interface SimTier {
 
 /** Keyed on QualitySettings.detail, highest first. */
 export const SIM_TIERS: readonly SimTier[] = [
-  // The velocity grid is deliberately coarse at every tier: the bilinear
-  // semi-Lagrangian advection's numerical diffusion on a grid this size is
-  // what gives the flow its soft, rolling, viscous character (a finer grid
-  // stays razor-sharp and turbulent, and no per-frame smoothing can buy
-  // that much diffusion back). Tiers spend their budget on the dye grid
-  // (line quality) and pressure iterations (tighter vortices) instead.
-  { minDetail: 0.9, velRows: 128, dyeRows: 256, jacobi: 32 },
-  { minDetail: 0.65, velRows: 112, dyeRows: 224, jacobi: 24 },
-  { minDetail: 0.35, velRows: 96, dyeRows: 160, jacobi: 16 },
-  { minDetail: 0, velRows: 80, dyeRows: 128, jacobi: 10 },
+  // The velocity grid stays coarse at every tier and the dye grid runs near
+  // screen resolution — the split is no longer standing in for a physical
+  // property. Viscosity now lives in its own explicit pass (VISCOSITY_BODY,
+  // driven by the viscosity setting) rather than being *implied* by a coarse
+  // velocity grid's numerical diffusion, so the velocity grid can stay small
+  // (cheap, and still coherent once VISCOSITY_BODY blurs it) while the dye
+  // grid — which owns line sharpness — gets the resolution budget instead.
+  { minDetail: 0.9, velRows: 128, dyeRows: 512, jacobi: 32 },
+  { minDetail: 0.65, velRows: 112, dyeRows: 448, jacobi: 24 },
+  { minDetail: 0.35, velRows: 96, dyeRows: 320, jacobi: 16 },
+  { minDetail: 0, velRows: 80, dyeRows: 256, jacobi: 10 },
 ];
 
 /** Sim widths are quantised to a multiple of this so a 1px canvas resize
@@ -147,18 +156,34 @@ export function sameSimSize(a: SimSize, b: SimSize): boolean {
  *  rescaled by velH / FORCE_REF_ROWS so the look doesn't change with tier. */
 export const FORCE_REF_ROWS = 192;
 export const VEL_DAMP_PER_SEC = 0.15;
-/** Explicit smoothing blended into each advection step (a cheap viscosity /
- *  dye diffusion): the fraction of the 4-neighbour mean mixed in per frame.
- *  Fixed rather than resolution-scaled on purpose — SIM_TIERS keeps the
- *  velocity grid within a narrow range, and scaling by grid size made the
- *  unmirrored modes (twice the rows) blur out. */
-export const VEL_SMOOTH = 0.1;
-export const DYE_SMOOTH = 0.14;
+/** Viscosity (E2): VISCOSITY_BODY is a 5-tap blur run viscosityPasses(v).full
+ *  times at k = VISC_K, plus one more pass at k = VISC_K * frac when a
+ *  fractional pass remains, so the `viscosity` SimStepInputs setting is
+ *  continuous rather than snapping between integer pass counts (see
+ *  viscosityPasses and step()). This replaced the ad-hoc uSmooth blend that
+ *  used to live inside ADVECT_VEL_BODY. */
+export const VISC_MAX_PASSES = 4;
+export const VISC_K = 0.05;
+/** MacCormack dye advection (E1): see the file header and ADVECT_DYE_BODY.
+ *  false restores the original plain semi-Lagrangian dye step. */
+export const DYE_MACCORMACK = true;
+/** Fraction of the 4-neighbour mean blended into dye every advection step —
+ *  dye's own diffusion knob, independent of the velocity viscosity pass
+ *  above. Zero by default: MacCormack advection is sharp enough on its own;
+ *  the uniform (uSmooth — shared with VISCOSITY_BODY, which passes a
+ *  different value per pass) and this blend stay wired so it can be swept
+ *  back up if a look ever wants softer dye again. */
+export const DYE_SMOOTH = 0;
 export const DYE_FADE_MIN = 0.05;
 export const DYE_FADE_MAX = 1.2;
 export const DYE_MAX = 4;
-export const CURL_EPS_BASE = 3;
-export const CURL_EPS_ENERGY = 6;
+export const CURL_EPS_BASE = 1.5;
+export const CURL_EPS_ENERGY = 4;
+/** Integer texel offset the curl (CURL_BODY) and confinement-gradient
+ *  (FORCE_BODY) stencils sample at — emitted into the GLSL as a const int so
+ *  it can be swept (e.g. to reach past texel-scale noise onto larger
+ *  vortices) without editing shader text. */
+export const CURL_STENCIL = 1;
 /** The emitter tag (dye.g) fades this many times faster than density, so the
  *  purple only ever shows near the emitter and the plume beyond it takes the
  *  screen-position colour. */
@@ -191,6 +216,11 @@ export interface Splat {
   fy: number;
   dye: number;
   tag: number;
+  /** E3b ring injection: 0 = gaussian blob centred on the splat (as before);
+   *  > 0 = gaussian shell of this radius (sim uv), reusing `sigma` for the
+   *  shell's thickness — see splatDyeWeight in simPrefix. Rides in the spare
+   *  uSplatVel[i].w slot. */
+  ring: number;
 }
 
 export interface SimStepInputs {
@@ -201,6 +231,9 @@ export interface SimStepInputs {
   dissipation: number;
   /** Audio energy, 0..1 — adds to the vorticity-confinement strength. */
   energy: number;
+  /** Viscosity setting, 0..1 — scales how many VISCOSITY_BODY blur passes
+   *  run on velocity each step (see viscosityPasses). */
+  viscosity: number;
   /** Exactly SPLAT_SLOTS entries (see fluid.ts's emitterState). */
   splats: readonly Splat[];
 }
@@ -278,12 +311,23 @@ vec4 encodeDye(vec2 d) { return vec4(d, 0.0, 0.0); }
 const float BYTE_VEL_RANGE_C = ${BYTE_VEL_RANGE.toFixed(4)};
 const float BYTE_SCALAR_RANGE_C = ${BYTE_SCALAR_RANGE.toFixed(4)};
 const float BYTE_DYE_RANGE_C = ${BYTE_DYE_RANGE.toFixed(4)};
+// Per-texel, per-pass dither (uSeed changes every draw) on the emitter-tag
+// channel only, added before its 8-bit quantisation so rounding is
+// unbiased: a multiplicative fade that moves a value by less than half a
+// quantum would otherwise round straight back and never decay, and a
+// stalled tag paints the whole plume purple. Density is left undithered
+// on purpose — the Sobel edge pass turns one-step noise into speckle.
+uniform float uSeed;
+float byteDither() {
+  vec2 p = gl_FragCoord.xy + vec2(uSeed * 917.0, uSeed * 431.0);
+  return (fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+}
 vec2 decodeVel(vec4 t) { return (t.xy - 0.5) * BYTE_VEL_RANGE_C; }
 vec4 encodeVel(vec2 v) { return vec4(clamp(v / BYTE_VEL_RANGE_C, -0.5, 0.5) + 0.5, 0.0, 1.0); }
 float decodeScalar(vec4 t) { return (t.x - 0.5) * BYTE_SCALAR_RANGE_C; }
 vec4 encodeScalar(float s) { return vec4(clamp(s / BYTE_SCALAR_RANGE_C, -0.5, 0.5) + 0.5, 0.0, 0.0, 1.0); }
 vec2 decodeDye(vec4 t) { return t.xy * BYTE_DYE_RANGE_C; }
-vec4 encodeDye(vec2 d) { return vec4(clamp(d / BYTE_DYE_RANGE_C, 0.0, 1.0), 0.0, 1.0); }
+vec4 encodeDye(vec2 d) { return vec4(clamp(d / BYTE_DYE_RANGE_C, 0.0, 1.0) + vec2(0.0, byteDither()), 0.0, 1.0); }
 `;
 }
 
@@ -301,6 +345,7 @@ out vec4 outColor;
 
 uniform sampler2D uVel;
 uniform sampler2D uAux;
+uniform sampler2D uAux2;
 uniform vec2 uVelTexel;
 uniform vec2 uTexel;
 uniform float uSmooth;
@@ -317,6 +362,7 @@ const float VEL_DAMP_PER_SEC = ${VEL_DAMP_PER_SEC.toFixed(4)};
 const float DYE_MAX = ${DYE_MAX.toFixed(4)};
 const float CURL_EPS_BASE = ${CURL_EPS_BASE.toFixed(4)};
 const float CURL_EPS_ENERGY = ${CURL_EPS_ENERGY.toFixed(4)};
+const int CURL_STENCIL_C = ${CURL_STENCIL};
 const float EDGE_GAIN = ${EDGE_GAIN.toFixed(4)};
 const float TAG_FADE_MULT = ${TAG_FADE_MULT.toFixed(4)};
 const float EDGE_LO = ${EDGE_LO.toFixed(4)};
@@ -364,13 +410,15 @@ float scalarTexel(sampler2D tex, ivec2 t) {
   return decodeScalar(texelFetch(tex, t, 0));
 }
 
-vec2 dyeAt(vec2 uv) {
+vec2 dyeAtTex(sampler2D tex, vec2 uv) {
   if (uv.x < 0.0) uv.x = -uv.x;
   if (uv.y < 0.0) uv.y = -uv.y;
   if (uv.x > 1.0) uv.x = 2.0 - uv.x;
   if (uv.y > 1.0) uv.y = 2.0 - uv.y;
-  return decodeDye(texture(uAux, clamp(uv, 0.0, 1.0)));
+  return decodeDye(texture(tex, clamp(uv, 0.0, 1.0)));
 }
+
+vec2 dyeAt(vec2 uv) { return dyeAtTex(uAux, uv); }
 
 // Dye's red channel through a reflected texelFetch — used by the edge pass,
 // which needs dye's own codec (not scalarTexel's, which is calibrated for
@@ -380,6 +428,44 @@ float dyeRedTexel(ivec2 t) {
   t = reflectTexel(t, textureSize(uVel, 0), s);
   return decodeDye(texelFetch(uVel, t, 0)).x;
 }
+
+// Dye's full RG channels through a reflected texelFetch — used by
+// ADVECT_DYE_BODY's MacCormack clamp, which needs the source-grid texel
+// neighbourhood around a uv rather than dyeAt's bilinear sample. Reads uAux:
+// in the dye-advection pass dye is bound there (see step()'s advectDye
+// call), unlike dyeRedTexel above which is only used by the edge pass, where
+// dye is bound to uVel instead.
+vec2 dyeTexelRG(ivec2 t) {
+  vec2 s;
+  t = reflectTexel(t, textureSize(uAux, 0), s);
+  return decodeDye(texelFetch(uAux, t, 0));
+}
+
+// Splat weights. Dye (ADVECT_DYE_BODY) lands as a gaussian blob centred on
+// the splat when Splat.ring is 0, or as a gaussian shell of radius ring
+// (thickness sigma) when ring > 0 — each pulse is then a thin ring the flow
+// stretches into a filament instead of a blob (E3b). Force (FORCE_BODY) is
+// always a blob: a gaussian body-force impulse is what rolls up into one
+// clean vortex pair (the mushroom cap), whereas an annular push makes two
+// counter-rotating sheets that fight. When the dye is a ring the force blob
+// is sized to that ring (sigma = ring) so the cap and the filament match.
+// ring rides in uSplatVel[i].w (uSplatPos[i].w already carries tag).
+float splatDyeWeight(vec2 uv, int i) {
+  vec2 sp = uSplatPos[i].xy;
+  float sigma = uSplatPos[i].z;
+  float ring = uSplatVel[i].w;
+  vec2 d = (uv - sp) * vec2(uAspect, 1.0);
+  float delta = ring > 0.0 ? (length(d) - ring) : length(d);
+  return exp(-(delta * delta) / (2.0 * sigma * sigma));
+}
+
+float splatForceWeight(vec2 uv, int i) {
+  vec2 sp = uSplatPos[i].xy;
+  float ring = uSplatVel[i].w;
+  float sigma = ring > 0.0 ? ring : uSplatPos[i].z;
+  vec2 d = (uv - sp) * vec2(uAspect, 1.0);
+  return exp(-dot(d, d) / (2.0 * sigma * sigma));
+}
 `;
 }
 
@@ -387,11 +473,27 @@ const ADVECT_VEL_BODY = `
 void main() {
   vec2 uv = vUv;
   vec2 back = uv - velAt(uv) * uDt * uVelTexel;
-  vec2 v = velAt(back);
-  // Viscosity: blend toward the 4-neighbour mean at the source point.
-  vec2 avg = 0.25 * (velAt(back + vec2(uTexel.x, 0.0)) + velAt(back - vec2(uTexel.x, 0.0))
-                   + velAt(back + vec2(0.0, uTexel.y)) + velAt(back - vec2(0.0, uTexel.y)));
-  v = mix(v, avg, uSmooth) / (1.0 + VEL_DAMP_PER_SEC * uDt);
+  vec2 v = velAt(back) / (1.0 + VEL_DAMP_PER_SEC * uDt);
+  outColor = encodeVel(v);
+}
+`;
+
+// Viscosity (E2): a 5-tap blur toward the neighbour mean, ping-ponged
+// viscosityPasses(viscosity).full-or-so times after advectVel and before
+// curl — see step() and the VISC_MAX_PASSES/VISC_K constants above. Reuses
+// the ADVECT_VEL_BODY's old blend weight uSmooth as k, but as an explicit
+// pass instead of folded into advection, so "how viscous" is a pass count
+// rather than a fixed per-frame constant.
+const VISCOSITY_BODY = `
+void main() {
+  ivec2 texel = ivec2(gl_FragCoord.xy);
+  vec2 v = velTexel(texel);
+  vec2 vL = velTexel(texel + ivec2(-1, 0));
+  vec2 vR = velTexel(texel + ivec2( 1, 0));
+  vec2 vB = velTexel(texel + ivec2( 0,-1));
+  vec2 vT = velTexel(texel + ivec2( 0, 1));
+  float k = uSmooth;
+  v = (1.0 - 4.0 * k) * v + k * (vL + vR + vB + vT);
   outColor = encodeVel(v);
 }
 `;
@@ -399,10 +501,10 @@ void main() {
 const CURL_BODY = `
 void main() {
   ivec2 texel = ivec2(gl_FragCoord.xy);
-  vec2 vL = velTexel(texel + ivec2(-1, 0));
-  vec2 vR = velTexel(texel + ivec2( 1, 0));
-  vec2 vB = velTexel(texel + ivec2( 0,-1));
-  vec2 vT = velTexel(texel + ivec2( 0, 1));
+  vec2 vL = velTexel(texel + ivec2(-CURL_STENCIL_C, 0));
+  vec2 vR = velTexel(texel + ivec2( CURL_STENCIL_C, 0));
+  vec2 vB = velTexel(texel + ivec2( 0,-CURL_STENCIL_C));
+  vec2 vT = velTexel(texel + ivec2( 0, CURL_STENCIL_C));
   float c = 0.5 * ((vR.y - vL.y) - (vT.x - vB.x));
   outColor = encodeScalar(c);
 }
@@ -418,10 +520,10 @@ void main() {
   ivec2 texel = ivec2(gl_FragCoord.xy);
   vec2 v = decodeVel(texelFetch(uVel, texel, 0));
 
-  float cL = scalarTexel(uAux, texel + ivec2(-1, 0));
-  float cR = scalarTexel(uAux, texel + ivec2( 1, 0));
-  float cB = scalarTexel(uAux, texel + ivec2( 0,-1));
-  float cT = scalarTexel(uAux, texel + ivec2( 0, 1));
+  float cL = scalarTexel(uAux, texel + ivec2(-CURL_STENCIL_C, 0));
+  float cR = scalarTexel(uAux, texel + ivec2( CURL_STENCIL_C, 0));
+  float cB = scalarTexel(uAux, texel + ivec2( 0,-CURL_STENCIL_C));
+  float cT = scalarTexel(uAux, texel + ivec2( 0, CURL_STENCIL_C));
   float c  = decodeScalar(texelFetch(uAux, texel, 0));
 
   vec2 grad = 0.5 * vec2(abs(cR) - abs(cL), abs(cT) - abs(cB));
@@ -431,11 +533,7 @@ void main() {
 
   vec2 uv = vUv;
   for (int i = 0; i < ${SPLAT_SLOTS}; i++) {
-    vec2 sp = uSplatPos[i].xy;
-    float sigma = uSplatPos[i].z;
-    vec2 d = (uv - sp) * vec2(uAspect, 1.0);
-    float w = exp(-dot(d, d) / (2.0 * sigma * sigma));
-    force += uSplatVel[i].xy * w;
+    force += uSplatVel[i].xy * splatForceWeight(uv, i);
   }
 
   v += force * uForceScale * uDt;
@@ -485,24 +583,64 @@ void main() {
 }
 `;
 
+// MacCormack predictor: the plain semi-Lagrangian step, written to its own
+// target (dyeTemp) so the corrector below can re-sample the *interpolated*
+// intermediate — the interpolation error is the whole signal MacCormack
+// measures, so it can't be estimated from the source field alone.
+const ADVECT_DYE_PREDICT_BODY = `
+void main() {
+  vec2 uv = vUv;
+  vec2 back = uv - velAt(uv) * uDt * uVelTexel;
+  outColor = encodeDye(dyeAt(back));
+}
+`;
+
+// Dye step proper. uAux is the previous dye; with DYE_MACCORMACK, uAux2 is
+// the predictor's output and this pass is the corrector: trace the
+// intermediate forward, take half the round-trip discrepancy as the error
+// estimate, clamp to the source neighbourhood, then fade and inject.
 const ADVECT_DYE_BODY = `
 void main() {
   vec2 uv = vUv;
   vec2 back = uv - velAt(uv) * uDt * uVelTexel;
-  vec2 d = dyeAt(back);
-  // Dye diffusion: same 4-neighbour blend as the velocity's viscosity.
+${
+  DYE_MACCORMACK
+    ? `  // MacCormack (clamped predictor-corrector, Selle et al. 2008's
+  // BFECC/MacCormack idea — written from that textbook description,
+  // independently). dHat is the semi-Lagrangian result; advecting it
+  // forward again should land back on the source value, and half of what it
+  // misses by is a second-order estimate of the interpolation error.
+  vec2 dHat = dyeAtTex(uAux2, uv);
+  vec2 dRound = dyeAtTex(uAux2, uv + velAt(uv) * uDt * uVelTexel);
+  vec2 d = dHat + 0.5 * (dyeAt(uv) - dRound);
+
+  // Clamp to the source-grid 2x2 neighbourhood around \`back\` so the
+  // correction can't overshoot into new extrema (uncorrected MacCormack's
+  // usual failure mode: ringing at sharp edges).
+  vec2 auxSize = vec2(textureSize(uAux, 0));
+  vec2 p = back * auxSize - 0.5;
+  ivec2 i0 = ivec2(floor(p));
+  vec2 c00 = dyeTexelRG(i0);
+  vec2 c10 = dyeTexelRG(i0 + ivec2(1, 0));
+  vec2 c01 = dyeTexelRG(i0 + ivec2(0, 1));
+  vec2 c11 = dyeTexelRG(i0 + ivec2(1, 1));
+  vec2 lo = min(min(c00, c10), min(c01, c11));
+  vec2 hi = max(max(c00, c10), max(c01, c11));
+  d = clamp(d, lo, hi);
+`
+    : `  vec2 d = dyeAt(back);
+`
+}  // Dye diffusion: same 4-neighbour blend as the velocity's viscosity used
+  // to blend inline (E1: DYE_SMOOTH = 0 by default — MacCormack keeps dye
+  // sharp on its own; the blend stays wired so it can be swept back up).
   vec2 avg = 0.25 * (dyeAt(back + vec2(uTexel.x, 0.0)) + dyeAt(back - vec2(uTexel.x, 0.0))
                    + dyeAt(back + vec2(0.0, uTexel.y)) + dyeAt(back - vec2(0.0, uTexel.y)));
   d = mix(d, avg, uSmooth) / vec2(1.0 + uFade * uDt, 1.0 + uFade * TAG_FADE_MULT * uDt);
 
   vec2 inj = vec2(0.0);
   for (int i = 0; i < ${SPLAT_SLOTS}; i++) {
-    vec2 sp = uSplatPos[i].xy;
-    float sigma = uSplatPos[i].z;
     float tag = uSplatPos[i].w;
-    vec2 dd = (uv - sp) * vec2(uAspect, 1.0);
-    float w = exp(-dot(dd, dd) / (2.0 * sigma * sigma));
-    float rate = uSplatVel[i].z * w * uDt;
+    float rate = uSplatVel[i].z * splatDyeWeight(uv, i) * uDt;
     inj.x += rate;
     inj.y += rate * tag;
   }
@@ -614,6 +752,7 @@ interface PassProgram {
   prog: GLProgram;
   velLoc: WebGLUniformLocation | null;
   auxLoc: WebGLUniformLocation | null;
+  aux2Loc: WebGLUniformLocation | null;
 }
 
 function makePass(gl: WebGL2RenderingContext, format: SimFormat, body: string): PassProgram {
@@ -622,11 +761,24 @@ function makePass(gl: WebGL2RenderingContext, format: SimFormat, body: string): 
     prog,
     velLoc: gl.getUniformLocation(prog.program, "uVel"),
     auxLoc: gl.getUniformLocation(prog.program, "uAux"),
+    aux2Loc: gl.getUniformLocation(prog.program, "uAux2"),
   };
 }
 
 function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x));
+}
+
+/** Splits a 0..1 `viscosity` setting into a whole number of VISCOSITY_BODY
+ *  passes at full strength plus one fractional-strength pass, so step() can
+ *  ping-pong a continuous amount of blur rather than snapping between
+ *  integer pass counts. Pure and exported so it's unit-testable without a GL
+ *  context — see step()'s use of it. */
+export function viscosityPasses(viscosity: number): { full: number; frac: number } {
+  const passesF = clamp01(viscosity) * VISC_MAX_PASSES;
+  const full = Math.floor(passesF);
+  const frac = passesF - full;
+  return { full, frac };
 }
 
 export function createFluidSim(
@@ -637,11 +789,13 @@ export function createFluidSim(
 ): FluidSim {
   const passes = {
     advectVel: makePass(gl, format, ADVECT_VEL_BODY),
+    viscosity: makePass(gl, format, VISCOSITY_BODY),
     curl: makePass(gl, format, CURL_BODY),
     force: makePass(gl, format, FORCE_BODY),
     divergence: makePass(gl, format, DIVERGENCE_BODY),
     jacobi: makePass(gl, format, JACOBI_BODY),
     gradient: makePass(gl, format, GRADIENT_BODY),
+    advectDyePredict: makePass(gl, format, ADVECT_DYE_PREDICT_BODY),
     advectDye: makePass(gl, format, ADVECT_DYE_BODY),
     edge: makePass(gl, format, EDGE_BODY),
   };
@@ -652,6 +806,7 @@ export function createFluidSim(
   let curlTarget: SimTarget;
   let divTarget: SimTarget;
   let dye: [SimTarget, SimTarget];
+  let dyeTemp: SimTarget;
   let edgeTarget: SimTarget;
   let velRead = 0;
   let pRead = 0;
@@ -672,6 +827,7 @@ export function createFluidSim(
       createTarget(gl, s.dyeW, s.dyeH, "dye", format, "linear"),
       createTarget(gl, s.dyeW, s.dyeH, "dye", format, "linear"),
     ];
+    dyeTemp = createTarget(gl, s.dyeW, s.dyeH, "dye", format, "linear");
     edgeTarget = createTarget(gl, s.dyeW, s.dyeH, "edge", format, "mipmap");
     velRead = 0;
     pRead = 0;
@@ -684,6 +840,7 @@ export function createFluidSim(
     deleteTarget(gl, curlTarget);
     deleteTarget(gl, divTarget);
     for (const t of dye) deleteTarget(gl, t);
+    deleteTarget(gl, dyeTemp);
     deleteTarget(gl, edgeTarget);
   }
 
@@ -703,17 +860,23 @@ export function createFluidSim(
     fade: number,
     splats: readonly Splat[],
     smooth = 0,
+    aux2Tex: WebGLTexture | null = null,
   ): void {
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
     gl.viewport(0, 0, target.w, target.h);
     pp.prog.use();
     pp.prog.setF("uSmooth", smooth);
+    // Only the byte codec declares uSeed; a null location is a no-op in half mode.
+    pp.prog.setF("uSeed", Math.random());
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, velTex);
     gl.uniform1i(pp.velLoc, 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, auxTex);
     gl.uniform1i(pp.auxLoc, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, aux2Tex);
+    gl.uniform1i(pp.aux2Loc, 2);
 
     pp.prog.setF("uDt", dt);
     pp.prog.setV2("uVelTexel", velTexel[0], velTexel[1]);
@@ -727,9 +890,12 @@ export function createFluidSim(
       const sp = splats[i];
       if (sp) {
         pp.prog.setV4(`uSplatPos[${i}]`, sp.x, sp.y, sp.sigma, sp.tag);
-        pp.prog.setV4(`uSplatVel[${i}]`, sp.fx, sp.fy, sp.dye, 0);
+        // .w is E3b's ring radius (0 = plain gaussian blob) — see
+        // splatDyeWeight / splatForceWeight in simPrefix.
+        pp.prog.setV4(`uSplatVel[${i}]`, sp.fx, sp.fy, sp.dye, sp.ring);
       } else {
         pp.prog.setV4(`uSplatPos[${i}]`, 0, 0, 1, 0);
+        // A missing splat's ring stays 0 (last component) — plain blob.
         pp.prog.setV4(`uSplatVel[${i}]`, 0, 0, 0, 0);
       }
     }
@@ -743,16 +909,32 @@ export function createFluidSim(
     format,
 
     step(inputs: SimStepInputs): void {
-      const { dt, curl, dissipation, energy, splats } = inputs;
+      const { dt, curl, dissipation, energy, viscosity, splats } = inputs;
       const fade = DYE_FADE_MIN + (DYE_FADE_MAX - DYE_FADE_MIN) * clamp01(dissipation);
       const velTexel: readonly [number, number] = [1 / size.velW, 1 / size.velH];
       const aspect = size.velW / size.velH;
       const forceScale = size.velH / FORCE_REF_ROWS;
 
-      // 1. advect velocity.
+      // 1. advect velocity (plain semi-Lagrangian + damping — viscosity is
+      // its own pass now, see below).
       let vw = 1 - velRead;
-      drawPass(passes.advectVel, vel[vw], vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, splats, VEL_SMOOTH);
+      drawPass(passes.advectVel, vel[vw], vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, splats);
       velRead = vw;
+
+      // 1b. viscosity: viscosityPasses(viscosity).full 5-tap blur passes at
+      // VISC_K, plus one more at VISC_K * frac when a fractional pass
+      // remains, so the viscosity setting is continuous.
+      const { full: viscFull, frac: viscFrac } = viscosityPasses(viscosity);
+      for (let i = 0; i < viscFull; i++) {
+        vw = 1 - velRead;
+        drawPass(passes.viscosity, vel[vw], vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, splats, VISC_K);
+        velRead = vw;
+      }
+      if (viscFrac > 1e-3) {
+        vw = 1 - velRead;
+        drawPass(passes.viscosity, vel[vw], vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, splats, VISC_K * viscFrac);
+        velRead = vw;
+      }
 
       // 2. curl.
       drawPass(passes.curl, curlTarget, vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, splats);
@@ -780,7 +962,12 @@ export function createFluidSim(
 
       // 7. advect dye with the projected velocity.
       const dw = 1 - dyeRead;
-      drawPass(passes.advectDye, dye[dw], vel[velRead].tex, dye[dyeRead].tex, dt, velTexel, aspect, forceScale, curl, energy, fade, splats, DYE_SMOOTH);
+      // With DYE_MACCORMACK the predictor writes the plain semi-Lagrangian
+      // result to dyeTemp and the main pass corrects it (see the two bodies).
+      if (DYE_MACCORMACK) {
+        drawPass(passes.advectDyePredict, dyeTemp, vel[velRead].tex, dye[dyeRead].tex, dt, velTexel, aspect, forceScale, curl, energy, fade, splats);
+      }
+      drawPass(passes.advectDye, dye[dw], vel[velRead].tex, dye[dyeRead].tex, dt, velTexel, aspect, forceScale, curl, energy, fade, splats, DYE_SMOOTH, DYE_MACCORMACK ? dyeTemp.tex : null);
       dyeRead = dw;
 
       // 8. edge (Sobel of dye.r) + mipmap chain for the display pass's halo.
@@ -790,6 +977,8 @@ export function createFluidSim(
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE0);
@@ -813,11 +1002,13 @@ export function createFluidSim(
     dispose(): void {
       release();
       passes.advectVel.prog.dispose();
+      passes.viscosity.prog.dispose();
       passes.curl.prog.dispose();
       passes.force.prog.dispose();
       passes.divergence.prog.dispose();
       passes.jacobi.prog.dispose();
       passes.gradient.prog.dispose();
+      passes.advectDyePredict.prog.dispose();
       passes.advectDye.prog.dispose();
       passes.edge.prog.dispose();
     },
