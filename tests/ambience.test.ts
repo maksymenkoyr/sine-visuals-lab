@@ -6,15 +6,24 @@ import {
   PULSE_REFRACTORY_SEC,
   PULSE_TAIL,
   REST_POSE,
+  ANIM,
+  ANIM_N,
+  ENTER_LEGS,
+  FORM,
+  JOURNEYS,
+  LEAVE_LEGS,
+  STAGGER,
   SHEET_HYSTERESIS,
   WINDOW_OPEN,
   barsPerPose,
   cometState,
-  createPoseScheduler,
+  createChoreographer,
   createPulsePool,
   createRng,
   freeRunSec,
   gridDimsForQuality,
+  journeyBars,
+  latticeDims,
   phaseMix,
   poseToArray,
   randomPose,
@@ -206,82 +215,281 @@ describe("ambience poses", () => {
   });
 });
 
-describe("ambience pose scheduler", () => {
-  /** Runs `bars` bars of a locked tempo through the scheduler, `perBar`
-   *  ticks per bar, and returns how many times the target changed. */
-  function runBars(s: ReturnType<typeof createPoseScheduler>, bars: number, drift: number, perBar = 32): number {
-    let changes = 0;
-    let last = s.target();
-    for (let b = 0; b < bars; b++) {
-      for (let k = 0; k < perBar; k++) {
-        s.advance(DT, k / perBar, 1, drift, 1);
-        if (s.target() !== last) {
-          changes++;
-          last = s.target();
-        }
+describe("ambience lattice factoring", () => {
+  it("factors every quality grid exactly into three and four balanced sides", () => {
+    for (const q of [1.0, 0.7, 0.4, 0.25]) {
+      const { cols, rows } = gridDimsForQuality(q);
+      const n = cols * rows;
+      for (const k of [3, 4]) {
+        const d = latticeDims(n, k);
+        expect(d).toHaveLength(k);
+        expect(d.reduce((a, b) => a * b, 1)).toBe(n);
+        expect(Math.max(...d)).toBeLessThanOrEqual(3 * Math.min(...d));
+        for (let i = 1; i < d.length; i++) expect(d[i]).toBeGreaterThanOrEqual(d[i - 1]);
       }
     }
-    return changes;
+  });
+
+  it("still covers a count it cannot factor, never short", () => {
+    for (const n of [1, 2, 7, 97, 1009]) {
+      for (const k of [3, 4]) {
+        const d = latticeDims(n, k);
+        expect(d).toHaveLength(k);
+        expect(d.reduce((a, b) => a * b, 1)).toBeGreaterThanOrEqual(n);
+        expect(d.every((s) => Number.isInteger(s) && s >= 1)).toBe(true);
+      }
+    }
+  });
+});
+
+describe("ambience journeys", () => {
+  it("every journey starts and ends on the sheet and chains its legs", () => {
+    for (const [name, legs] of Object.entries(JOURNEYS)) {
+      expect(legs.length, name).toBeGreaterThan(0);
+      expect(legs[0].from).toBe(FORM.SHEET);
+      expect(legs[legs.length - 1].to).toBe(FORM.SHEET);
+      for (let i = 1; i < legs.length; i++) expect(legs[i].from, name).toBe(legs[i - 1].to);
+      for (const leg of legs) {
+        expect(leg.bars).toBeGreaterThan(0);
+        expect(Object.values(STAGGER)).toContain(leg.stagger);
+        expect(Object.values(FORM)).toContain(leg.from);
+        expect(Object.values(FORM)).toContain(leg.to);
+      }
+    }
+  });
+
+  it("the way in climbs the ladder from the dot; the way out descends to it", () => {
+    expect(ENTER_LEGS[0].from).toBe(FORM.DOT);
+    expect(ENTER_LEGS[ENTER_LEGS.length - 1].to).toBe(FORM.SHEET);
+    expect(LEAVE_LEGS[0].from).toBe(FORM.SHEET);
+    expect(LEAVE_LEGS[LEAVE_LEGS.length - 1].to).toBe(FORM.DOT);
+    const climbs = (legs: readonly { from: number; to: number }[], up: boolean) =>
+      legs.every((l) => (up ? l.to > l.from : l.to < l.from));
+    expect(climbs(ENTER_LEGS, true)).toBe(true);
+    expect(climbs(LEAVE_LEGS, false)).toBe(true);
+  });
+
+  it("more Transitions means fewer bars between journeys", () => {
+    expect(journeyBars(0)).toBeGreaterThan(journeyBars(1));
+    expect(journeyBars(1)).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("ambience choreographer", () => {
+  const OPTS = { drift: 0.5, range: 1, flip: 0.6, transitions: 0 };
+  /** Runs `bars` locked bars through the choreographer, `perBar` ticks each. */
+  function runBars(c: ReturnType<typeof createChoreographer>, bars: number, opts = OPTS, perBar = 32) {
+    for (let b = 0; b < bars; b++) {
+      for (let k = 0; k < perBar; k++) c.advance(DT, k / perBar, 1, opts);
+    }
   }
 
-  it("opens on the rest pose and never retargets mid-bar while the tempo is locked", () => {
-    const s = createPoseScheduler(createRng(1));
-    expect(Array.from(s.current)).toEqual(Array.from(poseToArray(REST_POSE)));
-    const t0 = s.target();
-    for (let k = 0; k < 100; k++) s.advance(DT, 0.1 + 0.008 * k, 1, 1, 1); // phase climbs, never wraps
-    expect(s.target()).toBe(t0);
+  it("opens on the rest pose, on the sheet, idle", () => {
+    const c = createChoreographer(createRng(1));
+    expect(Array.from(c.anim.subarray(0, POSE_FLOATS))).toEqual(Array.from(poseToArray(REST_POSE)));
+    expect(c.anim.length).toBe(ANIM_N);
+    expect(c.formA()).toBe(FORM.SHEET);
+    expect(c.formB()).toBe(FORM.SHEET);
+    expect(c.journey()).toBeNull();
+    expect(c.anim[ANIM.PROGRESS]).toBe(0);
+  });
+
+  it("never retargets mid-bar while the tempo is locked", () => {
+    const c = createChoreographer(createRng(1));
+    const t0 = c.target();
+    for (let k = 0; k < 100; k++) c.advance(DT, 0.1 + 0.008 * k, 1, OPTS); // phase climbs, never wraps
+    expect(c.target()).toBe(t0);
   });
 
   it("retargets on a bar boundary, every bar at full drift and less often at none", () => {
-    expect(runBars(createPoseScheduler(createRng(2)), 8, 1)).toBe(8 - 1); // the first wrap is bar 1
-    const slow = runBars(createPoseScheduler(createRng(2)), 8, 0);
-    expect(slow).toBeLessThan(7);
-    expect(slow).toBeGreaterThan(0);
+    const count = (drift: number) => {
+      const c = createChoreographer(createRng(2));
+      let changes = 0;
+      let last = c.target();
+      for (let b = 0; b < 8; b++) {
+        for (let k = 0; k < 32; k++) {
+          c.advance(DT, k / 32, 1, { ...OPTS, drift });
+          if (c.target() !== last) {
+            changes++;
+            last = c.target();
+          }
+        }
+      }
+      return changes;
+    };
+    expect(count(1)).toBe(8 - 1); // the first wrap is bar 1
+    expect(count(0)).toBeLessThan(7);
+    expect(count(0)).toBeGreaterThan(0);
   });
 
   it("free-runs on a timer when no tempo is locked", () => {
-    const s = createPoseScheduler(createRng(3));
-    const t0 = s.target();
+    const c = createChoreographer(createRng(3));
+    const t0 = c.target();
     const secs = freeRunSec(0.5);
     let elapsed = 0;
     while (elapsed < secs - 0.1) {
-      s.advance(DT, 0, 0, 0.5, 1);
+      c.advance(DT, 0, 0, OPTS);
       elapsed += DT;
     }
-    expect(s.target()).toBe(t0);
-    for (let k = 0; k < 20; k++) s.advance(DT, 0, 0, 0.5, 1);
-    expect(s.target()).not.toBe(t0);
+    expect(c.target()).toBe(t0);
+    for (let k = 0; k < 20; k++) c.advance(DT, 0, 0, OPTS);
+    expect(c.target()).not.toBe(t0);
   });
 
-  it("eases every field monotonically toward the target without overshoot", () => {
-    const s = createPoseScheduler(createRng(4));
-    s.retarget(1);
-    const target = poseToArray(s.target());
-    const start = Array.from(s.current);
-    let prev = Array.from(s.current);
+  it("eases every pose field monotonically toward the target without overshoot", () => {
+    const c = createChoreographer(createRng(4));
+    c.retarget(1, 0.6);
+    const target = poseToArray(c.target());
+    const start = Array.from(c.anim.subarray(0, POSE_FLOATS));
+    let prev = Array.from(start);
     for (let k = 0; k < 600; k++) {
-      s.advance(DT, 0.5, 1, 0.5, 1); // phase never wraps: the target stays put
+      c.advance(DT, 0.5, 1, OPTS); // phase never wraps: the target stays put
       for (let i = 0; i < POSE_FLOATS; i++) {
         const towards = Math.sign(target[i] - start[i]);
         if (towards === 0) {
-          expect(s.current[i]).toBe(start[i]);
+          expect(c.anim[i]).toBe(start[i]);
           continue;
         }
-        expect(Math.sign(s.current[i] - prev[i]) * towards).toBeGreaterThanOrEqual(0);
-        expect((target[i] - s.current[i]) * towards).toBeGreaterThanOrEqual(-1e-9);
+        expect(Math.sign(c.anim[i] - prev[i]) * towards).toBeGreaterThanOrEqual(0);
+        expect((target[i] - c.anim[i]) * towards).toBeGreaterThanOrEqual(-1e-9);
       }
-      prev = Array.from(s.current);
+      prev = Array.from(c.anim.subarray(0, POSE_FLOATS));
     }
-    for (let i = 0; i < POSE_FLOATS; i++) expect(s.current[i]).toBeCloseTo(target[i], 2);
+    for (let i = 0; i < POSE_FLOATS; i++) expect(c.anim[i]).toBeCloseTo(target[i], 2);
+  });
+
+  it("with Flip up, some poses are a half-turn away; with it off, none are", () => {
+    const turns = (flip: number) => {
+      const c = createChoreographer(createRng(5));
+      let flips = 0;
+      for (let n = 0; n < 200; n++) {
+        const before = c.target();
+        c.retarget(1, flip);
+        const t = c.target();
+        if (Math.abs(t.rx - before.rx) > 2 || Math.abs(t.rz - before.rz) > 2) flips++;
+      }
+      return flips;
+    };
+    expect(turns(1)).toBeGreaterThan(40);
+    expect(turns(0)).toBe(0);
+  });
+
+  it("runs a journey leg by leg, progress climbing 0..1 in each, and lands back on the sheet idle", () => {
+    const c = createChoreographer(createRng(6));
+    expect(c.start("unfold")).toBe(true);
+    expect(c.journey()).toBe("unfold");
+    expect(c.start("roll")).toBe(false); // one at a time
+    const seen: number[][] = [];
+    let lastProgress = -1;
+    let guard = 0;
+    while (c.journey() !== null && guard++ < 100_000) {
+      const pair = [c.formA(), c.formB()];
+      if (!seen.length || seen[seen.length - 1][0] !== pair[0] || seen[seen.length - 1][1] !== pair[1]) {
+        seen.push(pair);
+        lastProgress = -1;
+      }
+      c.advance(DT, 0.5, 1, OPTS);
+      expect(c.anim[ANIM.PROGRESS]).toBeGreaterThanOrEqual(0);
+      expect(c.anim[ANIM.PROGRESS]).toBeLessThanOrEqual(1);
+      if (c.journey() !== null && c.formA() === pair[0] && c.formB() === pair[1]) {
+        expect(c.anim[ANIM.PROGRESS]).toBeGreaterThanOrEqual(lastProgress);
+        lastProgress = c.anim[ANIM.PROGRESS];
+      }
+    }
+    expect(seen.map((p) => p.join(">"))).toEqual(JOURNEYS.unfold.map((l) => `${l.from}>${l.to}`));
+    expect(c.formA()).toBe(FORM.SHEET);
+    expect(c.formB()).toBe(FORM.SHEET);
+    expect(c.anim[ANIM.PROGRESS]).toBe(0);
+  });
+
+  it("a 4D turn leaves the sheet's plane angle exactly a half-turn on", () => {
+    const c = createChoreographer(createRng(7));
+    const before = c.anim[ANIM.ROT_XW];
+    expect(c.start("turnX")).toBe(true);
+    let peak = before;
+    let guard = 0;
+    while (c.journey() !== null && guard++ < 100_000) {
+      c.advance(DT, 0.5, 1, OPTS);
+      peak = Math.max(peak, c.anim[ANIM.ROT_XW]);
+    }
+    expect(c.anim[ANIM.ROT_XW]).toBeCloseTo(before + Math.PI, 5); // Float32 storage
+    expect(peak).toBeLessThanOrEqual(before + Math.PI + 1e-5);
+    expect(c.anim[ANIM.ROT_ZW]).toBe(0);
+  });
+
+  it("the tesseract dwell spins through whole turns, so the sheet returns unmirrored", () => {
+    const c = createChoreographer(createRng(8));
+    expect(c.start("tesseract")).toBe(true);
+    let guard = 0;
+    while (c.journey() !== null && guard++ < 200_000) c.advance(DT, 0.5, 1, OPTS);
+    expect(c.anim[ANIM.SPIN] / (2 * Math.PI)).toBeCloseTo(Math.round(c.anim[ANIM.SPIN] / (2 * Math.PI)), 5); // Float32 storage
+    expect(c.anim[ANIM.SPIN]).toBeGreaterThan(0);
+  });
+
+  it("starts journeys on its own every few bars, more often with Transitions up, never at 0", () => {
+    const started = (transitions: number) => {
+      const c = createChoreographer(createRng(9));
+      let n = 0;
+      let last: string | null = null;
+      for (let b = 0; b < 40; b++) {
+        for (let k = 0; k < 32; k++) {
+          c.advance(DT, k / 32, 1, { ...OPTS, transitions });
+          if (c.journey() !== last) {
+            if (c.journey() !== null) n++;
+            last = c.journey();
+          }
+        }
+      }
+      return n;
+    };
+    expect(started(1)).toBeGreaterThan(started(0.3));
+    expect(started(0.3)).toBeGreaterThan(0);
+  });
+
+  it("a drop can start a journey; nothing can while one is running", () => {
+    const c = createChoreographer(createRng(10));
+    let fired = false;
+    for (let n = 0; n < 20 && !fired; n++) {
+      c.advance(DT, 0.5, 1, OPTS, { drop: true });
+      fired = c.journey() !== null;
+    }
+    expect(fired).toBe(true);
+    const running = c.journey();
+    c.advance(DT, 0.5, 1, OPTS, { drop: true });
+    expect(c.journey()).toBe(running);
+  });
+
+  it("enters from the dot up to the sheet, and leaves back down to the dot, whatever it was doing", () => {
+    const c = createChoreographer(createRng(11));
+    c.advance(DT, 0.5, 1, OPTS, { enter: true });
+    expect(c.formA()).toBe(FORM.DOT);
+    expect(c.journey()).toBe("enter");
+    let guard = 0;
+    while (c.journey() !== null && guard++ < 100_000) c.advance(DT, 0.5, 1, OPTS);
+    expect(c.formA()).toBe(FORM.SHEET);
+    // Leaving mid-journey overrides it.
+    expect(c.start("roll")).toBe(true);
+    c.advance(DT, 0.5, 1, OPTS, { leave: true });
+    expect(c.journey()).toBe("leave");
+    guard = 0;
+    while (c.journey() !== null && guard++ < 100_000) c.advance(DT, 0.5, 1, OPTS);
+    expect(c.formA()).toBe(FORM.DOT);
+    expect(c.formB()).toBe(FORM.DOT);
+    // Parked on the dot: no journey starts by itself until the next enter.
+    runBars(c, 30, { ...OPTS, transitions: 1 });
+    expect(c.formA()).toBe(FORM.DOT);
+    expect(c.journey()).toBeNull();
+    c.advance(DT, 0.5, 1, OPTS, { enter: true });
+    expect(c.journey()).toBe("enter");
   });
 
   it("treats a non-finite or backwards dt as no time passing", () => {
-    const s = createPoseScheduler(createRng(5));
-    s.retarget(1);
-    const before = Array.from(s.current);
-    s.advance(Number.NaN, 0, 0, 1, 1);
-    s.advance(-1, 0, 0, 1, 1);
-    expect(Array.from(s.current)).toEqual(before);
+    const c = createChoreographer(createRng(12));
+    c.retarget(1, 0.6);
+    const before = Array.from(c.anim);
+    c.advance(Number.NaN, 0, 0, OPTS);
+    c.advance(-1, 0, 0, OPTS);
+    expect(Array.from(c.anim)).toEqual(before);
   });
 });
 
