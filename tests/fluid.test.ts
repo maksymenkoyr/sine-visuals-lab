@@ -41,6 +41,21 @@ import {
   SIM_DT_MAX,
   SIM_DT_DEFAULT,
   WARP_MIN,
+  SYMMETRY_OPTIONS,
+  symmetryToMirror,
+  FOLD_FAMILY,
+  FOLD_FADE_SEC,
+  FOLD_HOLD_MIN,
+  FOLD_HOLD_MAX,
+  FOLD_ZOOM_AMP,
+  createFoldState,
+  advanceFold,
+  foldZoom,
+  SHOCK_SLOTS,
+  SHOCK_LIFE,
+  createShockState,
+  triggerShock,
+  advanceShocks,
   type EmitterInputs,
 } from "../src/render/scenes/fluid.ts";
 import type { SignalId } from "../src/render/signals.ts";
@@ -506,12 +521,12 @@ describe("SETTINGS weight convention", () => {
     }
   });
 
-  it("mirror is an enum setting whose options and range match MIRROR_OPTIONS exactly", () => {
-    const mirror = SETTINGS.find((s) => s.key === "mirror")!;
-    expect(mirror.type).toBe("enum");
-    expect(mirror.options).toEqual(MIRROR_OPTIONS);
-    expect(mirror.min).toBe(0);
-    expect(mirror.max).toBe(MIRROR_OPTIONS.length - 1);
+  it("symmetry is an enum setting whose options and range match SYMMETRY_OPTIONS exactly", () => {
+    const symmetry = SETTINGS.find((s) => s.key === "symmetry")!;
+    expect(symmetry.type).toBe("enum");
+    expect(symmetry.options).toEqual(SYMMETRY_OPTIONS);
+    expect(symmetry.min).toBe(0);
+    expect(symmetry.max).toBe(SYMMETRY_OPTIONS.length - 1);
   });
 
   it("every `reads` entry names a signal id that actually exists in signals.ts", () => {
@@ -522,6 +537,149 @@ describe("SETTINGS weight convention", () => {
         const id = typeof link === "string" ? link : link.signal;
         expect(validIds, `${s.key}.reads includes ${id}`).toContain(id);
       }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Symmetry / fold drift: the `symmetry` setting's Auto option (value 0)
+// drifts between FOLD_FAMILY's quadrant folds instead of holding one — see
+// fluid.ts's FoldState/createFoldState/advanceFold/foldZoom.
+// ---------------------------------------------------------------------------
+
+/** Deterministic stand-in for Math.random in fold-drift tests: cycles
+ *  through the given values (repeating the last one) instead of drawing a
+ *  fresh real random number each call. */
+function fixedRng(...values: number[]): () => number {
+  let i = 0;
+  return () => values[Math.min(i++, values.length - 1)];
+}
+
+describe("SYMMETRY_OPTIONS / symmetryToMirror", () => {
+  it("is Auto plus every MIRROR_OPTIONS entry, index-shifted by one", () => {
+    expect(SYMMETRY_OPTIONS.length).toBe(MIRROR_OPTIONS.length + 1);
+    expect(SYMMETRY_OPTIONS[0]).toBe("Auto");
+    expect(SYMMETRY_OPTIONS.slice(1)).toEqual(MIRROR_OPTIONS);
+  });
+
+  it("maps 0 to null (Auto) and k > 0 to MirrorMode k - 1", () => {
+    expect(symmetryToMirror(0)).toBeNull();
+    for (let k = 1; k < SYMMETRY_OPTIONS.length; k++) {
+      expect(symmetryToMirror(k)).toBe(k - 1);
+    }
+  });
+});
+
+describe("createFoldState", () => {
+  it("starts settled on a FOLD_FAMILY member: modeA === modeB, mix 1, rot 0", () => {
+    const st = createFoldState();
+    expect(FOLD_FAMILY).toContain(st.modeA);
+    expect(st.modeA).toBe(st.modeB);
+    expect(st.mix).toBe(1);
+    expect(st.rot).toBe(0);
+  });
+
+  it("draws holdLeft from [FOLD_HOLD_MIN, FOLD_HOLD_MAX]", () => {
+    for (const rng of [fixedRng(0), fixedRng(0.999), fixedRng(0.5)]) {
+      const st = createFoldState(rng);
+      expect(st.holdLeft).toBeGreaterThanOrEqual(FOLD_HOLD_MIN);
+      expect(st.holdLeft).toBeLessThanOrEqual(FOLD_HOLD_MAX);
+    }
+  });
+});
+
+describe("advanceFold", () => {
+  const inp = (overrides: Partial<{ energy: number; dropOnset: boolean; beatPulse: number }> = {}) => ({
+    energy: 0,
+    dropOnset: false,
+    beatPulse: 0,
+    ...overrides,
+  });
+
+  it("rises mix toward 1 within FOLD_FADE_SEC of a reconfigure", () => {
+    const st = createFoldState(fixedRng(0.9));
+    advanceFold(st, 0, inp({ dropOnset: true }), fixedRng(0.9)); // force mix -> 0
+    expect(st.mix).toBe(0);
+    let t = 0;
+    const dt = 0.05;
+    while (t < FOLD_FADE_SEC) {
+      advanceFold(st, dt, inp(), fixedRng(0.9));
+      t += dt;
+    }
+    expect(st.mix).toBeCloseTo(1, 5);
+  });
+
+  it("a dropOnset at mix 1 changes modeB to a different FOLD_FAMILY member and resets mix to 0", () => {
+    const st = createFoldState();
+    const prevA = st.modeA;
+    advanceFold(st, 0.016, inp({ dropOnset: true }));
+    expect(st.mix).toBe(0);
+    expect(st.modeA).toBe(prevA);
+    expect(st.modeB).not.toBe(st.modeA);
+    expect(FOLD_FAMILY).toContain(st.modeB);
+  });
+
+  it("never interrupts a crossfade already in flight, even on a dropOnset", () => {
+    const st = createFoldState();
+    advanceFold(st, 0.016, inp({ dropOnset: true })); // starts a crossfade, mix -> 0
+    const { modeA, modeB } = st;
+    advanceFold(st, 0.01, inp({ dropOnset: true })); // still mid-fade
+    expect(st.modeA).toBe(modeA);
+    expect(st.modeB).toBe(modeB);
+  });
+
+  it("hold expiry (simulated FOLD_HOLD_MAX + 1s at energy 0) changes the fold once settled", () => {
+    const st = createFoldState(fixedRng(0)); // holdLeft starts at FOLD_HOLD_MIN
+    const startMode = st.modeB;
+    let t = 0;
+    const dt = 0.05;
+    let changed = false;
+    while (t < FOLD_HOLD_MAX + 1) {
+      advanceFold(st, dt, inp());
+      t += dt;
+      if (st.modeB !== startMode) changed = true;
+    }
+    expect(changed).toBe(true);
+  });
+
+  it("keeps modeA and modeB in FOLD_FAMILY across many steps of mixed energy/beat/drop input", () => {
+    const st = createFoldState();
+    for (let i = 0; i < 2000; i++) {
+      advanceFold(st, 0.03, { energy: (i % 7) / 7, dropOnset: i % 53 === 0, beatPulse: (i % 11) / 11 });
+      expect(FOLD_FAMILY).toContain(st.modeA);
+      expect(FOLD_FAMILY).toContain(st.modeB);
+    }
+  });
+
+  it("rot advances faster with more energy", () => {
+    const lo = createFoldState(fixedRng(0));
+    const hi = createFoldState(fixedRng(0));
+    advanceFold(lo, 0.1, inp({ energy: 0 }), fixedRng(0));
+    advanceFold(hi, 0.1, inp({ energy: 1 }), fixedRng(0));
+    expect(Math.abs(hi.rot)).toBeGreaterThan(Math.abs(lo.rot));
+  });
+
+  it("rot advances faster on a beat pulse", () => {
+    const lo = createFoldState(fixedRng(0));
+    const hi = createFoldState(fixedRng(0));
+    advanceFold(lo, 0.1, inp({ beatPulse: 0 }), fixedRng(0));
+    advanceFold(hi, 0.1, inp({ beatPulse: 1 }), fixedRng(0));
+    expect(Math.abs(hi.rot)).toBeGreaterThan(Math.abs(lo.rot));
+  });
+});
+
+describe("foldZoom", () => {
+  it("is 1 at zoomPhase 0 (a fresh state)", () => {
+    expect(foldZoom(createFoldState())).toBeCloseTo(1, 6);
+  });
+
+  it("oscillates within [1 - FOLD_ZOOM_AMP, 1 + FOLD_ZOOM_AMP]", () => {
+    const st = createFoldState();
+    for (let i = 0; i < 500; i++) {
+      advanceFold(st, 0.05, { energy: 0, dropOnset: false, beatPulse: 0 });
+      const z = foldZoom(st);
+      expect(z).toBeGreaterThanOrEqual(1 - FOLD_ZOOM_AMP - 1e-9);
+      expect(z).toBeLessThanOrEqual(1 + FOLD_ZOOM_AMP + 1e-9);
     }
   });
 });
@@ -555,7 +713,7 @@ describe("Sparkle settings", () => {
   it("sparkleStyle and sparkleTint expose the four options the display shader's int(u... + 0.5) branch expects", () => {
     const style = SETTINGS.find((s) => s.key === "sparkleStyle")!;
     const tint = SETTINGS.find((s) => s.key === "sparkleTint")!;
-    expect(style.options).toEqual(["Glow", "Electric", "Grain", "Electric + Glow"]);
+    expect(style.options).toEqual(["Glow", "Currents", "Grain", "Currents + Glow"]);
     expect(tint.options).toEqual(["Negative", "Complement", "White", "Palette"]);
   });
 
@@ -575,5 +733,143 @@ describe("Sparkle settings", () => {
   it("the sparkle master itself keeps its original auto weights, unchanged by the regroup", () => {
     const sparkle = SETTINGS.find((s) => s.key === "sparkle")!;
     expect(sparkle.auto).toEqual({ brightness: 0.35, attack: 0.15 });
+  });
+
+  it("currentDensity lives in Sparkle, manual (no auto)", () => {
+    const s = SETTINGS.find((x) => x.key === "currentDensity")!;
+    expect(s.group).toBe("Sparkle");
+    expect(s.auto).toBeUndefined();
+    expect(s.min).toBe(0);
+    expect(s.max).toBe(1);
+    expect(s.default).toBe(0.5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Look group's neon saturation / white-hot cores tone-map controls (see
+// fluid.ts's hue-preserving tone map in main()).
+// ---------------------------------------------------------------------------
+
+describe("Look group: neon / hotWhite", () => {
+  it("neon lives in Look, manual (no auto)", () => {
+    const s = SETTINGS.find((x) => x.key === "neon")!;
+    expect(s.group).toBe("Look");
+    expect(s.auto).toBeUndefined();
+    expect(s.default).toBe(0.5);
+  });
+
+  it("hotWhite lives in Look and opts into auto with the loudness/dynamics weights", () => {
+    const s = SETTINGS.find((x) => x.key === "hotWhite")!;
+    expect(s.group).toBe("Look");
+    expect(s.default).toBe(0.5);
+    expect(s.auto).toEqual({ loudness: 0.25, dynamics: 0.15 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Light group: music-reactive flashes layered on top of the line/halo (see
+// fluid.ts's dropFlash/shockwave/buildGlow/beatFlash in main()).
+// ---------------------------------------------------------------------------
+
+describe("Light group settings", () => {
+  const lightSettings = SETTINGS.filter((s) => s.group === "Light");
+  const LIGHT_KEYS = ["dropFlash", "shockwave", "buildGlow", "beatFlash"];
+
+  it("has exactly the dropFlash/shockwave/buildGlow/beatFlash settings", () => {
+    expect(lightSettings.map((s) => s.key).sort()).toEqual([...LIGHT_KEYS].sort());
+  });
+
+  it("every Light setting is 0..1 ranged and opts into auto with a valid weight convention", () => {
+    for (const s of lightSettings) {
+      expect(s.min, s.key).toBe(0);
+      expect(s.max, s.key).toBe(1);
+      expect(s.auto, s.key).toBeDefined();
+      let sum = 0;
+      for (const [dial, w] of Object.entries(s.auto!)) {
+        expect(Math.abs(w!), `${s.key}.auto.${dial}`).toBeGreaterThanOrEqual(0.15);
+        expect(Math.abs(w!), `${s.key}.auto.${dial}`).toBeLessThanOrEqual(0.5);
+        sum += Math.abs(w!);
+      }
+      expect(sum, `${s.key} sum of |auto weights|`).toBeLessThan(0.8);
+    }
+  });
+
+  it("dropFlash reads anim.dropOnset and shockwave reads anim.lowOnset + anim.dropOnset", () => {
+    const dropFlash = SETTINGS.find((s) => s.key === "dropFlash")!;
+    const shockwave = SETTINGS.find((s) => s.key === "shockwave")!;
+    expect(dropFlash.reads).toEqual(["anim.dropOnset"]);
+    expect(shockwave.reads).toEqual(["anim.lowOnset", "anim.dropOnset"]);
+  });
+
+  it("buildGlow and beatFlash carry no reads claim beyond their auto weights", () => {
+    const buildGlow = SETTINGS.find((s) => s.key === "buildGlow")!;
+    const beatFlash = SETTINGS.find((s) => s.key === "beatFlash")!;
+    expect(buildGlow.reads).toBeUndefined();
+    expect(beatFlash.reads).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shockwave pool (Light group's Bass shockwave) — see fluid.ts's
+// createShockState/triggerShock/advanceShocks, same ring-pool idiom as
+// caustics.ts's createRipplePool.
+// ---------------------------------------------------------------------------
+
+describe("Shockwave pool", () => {
+  it("createShockState returns SHOCK_SLOTS-length arrays with every slot inactive (amp 0)", () => {
+    const st = createShockState();
+    expect(st.age.length).toBe(SHOCK_SLOTS);
+    expect(st.amp.length).toBe(SHOCK_SLOTS);
+    for (let i = 0; i < SHOCK_SLOTS; i++) expect(st.amp[i]).toBe(0);
+  });
+
+  it("triggerShock fills the oldest slot: on a fresh state, sequential triggers fill slots 0..SHOCK_SLOTS-1 in order, then wrap back to slot 0", () => {
+    const st = createShockState();
+    for (let i = 0; i < SHOCK_SLOTS; i++) {
+      triggerShock(st, i + 1);
+      expect(st.age[i]).toBe(0);
+      expect(st.amp[i]).toBe(i + 1);
+    }
+    // Every slot now shares age 0 (a tie) — the oldest-slot search picks the
+    // lowest index on a tie, so a further trigger reuses slot 0.
+    triggerShock(st, 99);
+    expect(st.amp[0]).toBe(99);
+    expect(st.age[0]).toBe(0);
+  });
+
+  it("triggerShock never erases the youngest ring while an older one is available", () => {
+    const st = createShockState();
+    triggerShock(st, 1); // slot 0
+    advanceShocks(st, 0.1);
+    triggerShock(st, 2); // slot 1 (older than slot 0, which just aged 0.1s)
+    // Slot 0 (the most recent trigger) must survive the next trigger, which
+    // should land on one of the still-untouched (far older) slots instead.
+    expect(st.amp[0]).toBe(1);
+  });
+
+  it("advanceShocks ages every slot by dtSec", () => {
+    const st = createShockState();
+    triggerShock(st, 1);
+    advanceShocks(st, 0.25);
+    advanceShocks(st, 0.25);
+    expect(st.age[0]).toBeCloseTo(0.5, 6);
+  });
+
+  it("advanceShocks leaves amp untouched while age <= SHOCK_LIFE, and zeroes it once age exceeds SHOCK_LIFE", () => {
+    const st = createShockState();
+    triggerShock(st, 1.6);
+    advanceShocks(st, SHOCK_LIFE - 0.01);
+    // amp is a Float32Array — 1.6 isn't exactly representable, so compare
+    // with tolerance rather than Object.is equality.
+    expect(st.amp[0]).toBeCloseTo(1.6, 5);
+    advanceShocks(st, 0.02); // pushes age just past SHOCK_LIFE
+    expect(st.amp[0]).toBe(0);
+  });
+
+  it("never has more than SHOCK_SLOTS rings live at once (capacity-bound by construction)", () => {
+    const st = createShockState();
+    for (let i = 0; i < SHOCK_SLOTS * 3; i++) triggerShock(st, 1);
+    const live = st.amp.filter((a) => a > 0).length;
+    expect(live).toBeLessThanOrEqual(SHOCK_SLOTS);
   });
 });

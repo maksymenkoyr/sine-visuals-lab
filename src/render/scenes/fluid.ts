@@ -12,6 +12,8 @@ import {
   MIRROR_LR,
   MIRROR_OPTIONS,
   MIRROR_RADIAL6,
+  MIRROR_RADIAL8,
+  MIRROR_RADIAL12,
   MIRROR_TB,
   sameSimSize,
   simIoGlsl,
@@ -37,11 +39,15 @@ import {
 // that colours the sim by *screen* x (blue -> cyan -> yellow -> orange ->
 // red) with a purple emitter tag blended in and a Sobel-edge neon line with
 // a mip-sampled glow on top. The Sparkle settings group (sparkleStyle etc.,
-// display-shader-only — see the threads/vnoise/hash21 helpers above main())
-// layers thin drifting electric filaments or dense grain onto that line,
-// masked to where the line and its halo already are and composited by
-// replacing rather than adding, so a Negative or Complement spark colour
-// reads as true contrast against the line instead of a wash on top of it.
+// display-shader-only — see the hash21 helper above main()) layers a
+// Currents style (short dashes riding uVelSim's local flow direction,
+// gated to the densest/whitest dye by currentDensity) or dense Grain
+// speckle onto that line, masked to where the line and its halo already are
+// and composited by replacing rather than adding, so a Negative or
+// Complement spark colour reads as true contrast against the line instead
+// of a wash on top of it. A Light settings group (dropFlash/shockwave/
+// buildGlow/beatFlash) and the Look group's neon/hotWhite tone map layer
+// further music-reactive flashes and saturation on top of all of that.
 //
 // Audio wiring: most of the emitter's punch now comes from a **puff clock**
 // (createPuffState/advancePuff below) rather than a continuous push — it
@@ -58,10 +64,15 @@ import {
 // of the edge line (`uBeatPulse`) and tints the screen-position colour ramp
 // by the live spectral centroid, on top of the manual hue shift. The
 // Swirl/Dye fade/Viscosity settings are themselves music-reactive via `auto`
-// weights, same as every other scene's SETTINGS. Only the display program
-// goes through uploadCommonUniforms — the sim's own programs (fluidSim.ts)
-// take a narrower, JS-computed set of per-step uniforms that have nothing to
-// do with a scene's settings.
+// weights, same as every other scene's SETTINGS. The `symmetry` setting's
+// Auto option (createFoldState/advanceFold below) drifts between the
+// FOLD_FAMILY quadrant folds instead of holding one — a random hold
+// shortened by loudness (and cut short by a drop) times a crossfade between
+// two folds, under a slow rotation and breathing zoom both nudged by energy
+// and the beat, Chladni-plate-inspired without literally computing an
+// eigenmode. Only the display program goes through uploadCommonUniforms —
+// the sim's own programs (fluidSim.ts) take a narrower, JS-computed set of
+// per-step uniforms that have nothing to do with a scene's settings.
 //
 // dt: as chladni.ts, computed from frame.time deltas rather than
 // anim.dtSec — the anim clock advances every rAF tick while render() is
@@ -385,6 +396,105 @@ export function emitterState(inp: EmitterInputs, out: Splat[]): Splat[] {
 }
 
 // ---------------------------------------------------------------------------
+// Symmetry / fold drift
+// ---------------------------------------------------------------------------
+
+/** `symmetry` setting's options: "Auto" (fold drift, see FoldState below)
+ *  plus every manual fold name from MIRROR_OPTIONS, index-shifted by one —
+ *  see symmetryToMirror. */
+export const SYMMETRY_OPTIONS: readonly string[] = ["Auto", ...MIRROR_OPTIONS];
+
+/** Maps a `symmetry` setting value to the MirrorMode it pins, or null for
+ *  "Auto" (value 0, drifting — see FoldState/advanceFold). */
+export function symmetryToMirror(k: number): MirrorMode | null {
+  return k > 0 ? ((k - 1) as MirrorMode) : null;
+}
+
+/** Auto symmetry only ever drifts between the quadrant-domain folds — Off/
+ *  Left-right/Top-bottom simulate a different sim domain (mirrorDomain in
+ *  fluidSim.ts) and switching into one mid-flow would reset the fluid. */
+export const FOLD_FAMILY: readonly MirrorMode[] = [MIRROR_KALEIDO, MIRROR_RADIAL6, MIRROR_RADIAL8, MIRROR_RADIAL12];
+
+/** Fold-drift tuning: FOLD_FADE_SEC is the crossfade duration between two
+ *  folds; FOLD_HOLD_MIN/MAX bound the random seconds a fold holds before the
+ *  next drift (louder music shortens it — see advanceFold); FOLD_ROT_BASE/
+ *  ENERGY set the slow rotation's rate at rest and its extra gain from
+ *  energy (further nudged by the beat); FOLD_ZOOM_AMP/RATE set the size and
+ *  speed of a slow breathing zoom (see foldZoom). */
+export const FOLD_FADE_SEC = 2.5;
+export const FOLD_HOLD_MIN = 10;
+export const FOLD_HOLD_MAX = 25;
+export const FOLD_ROT_BASE = 0.02;
+export const FOLD_ROT_ENERGY = 0.12;
+export const FOLD_ZOOM_AMP = 0.12;
+export const FOLD_ZOOM_RATE = 0.07;
+
+/** Auto symmetry's drift state: crossfades from modeA to modeB over
+ *  FOLD_FADE_SEC seconds, picks the next modeB once the current hold expires
+ *  (or a drop hits) and the crossfade has finished, and carries a slow
+ *  rotation plus a breathing zoom applied to the fold's own coordinate (see
+ *  simUv's uFoldRot/uFoldZoom use in the display shader) — a bit like a
+ *  Chladni plate, random music energy reconfiguring the pattern, without
+ *  literally computing a Chladni eigenmode. */
+export interface FoldState {
+  modeA: MirrorMode;
+  modeB: MirrorMode;
+  mix: number;
+  rot: number;
+  rotDir: 1 | -1;
+  zoomPhase: number;
+  holdLeft: number;
+}
+
+export function createFoldState(rng: () => number = Math.random): FoldState {
+  return {
+    modeA: MIRROR_KALEIDO,
+    modeB: MIRROR_KALEIDO,
+    mix: 1,
+    rot: 0,
+    rotDir: rng() < 0.5 ? -1 : 1,
+    zoomPhase: 0,
+    holdLeft: FOLD_HOLD_MIN + rng() * (FOLD_HOLD_MAX - FOLD_HOLD_MIN),
+  };
+}
+
+/** Advances `st` in place by one frame. `inp.energy` shortens the hold
+ *  countdown and adds to the rotation rate; `inp.beatPulse` nudges the
+ *  rotation further on a beat; `inp.dropOnset` forces an immediate
+ *  reconfigure once the current crossfade has finished (never interrupts one
+ *  already in flight, so a fold never visibly snaps mid-fade). */
+export function advanceFold(
+  st: FoldState,
+  dtSec: number,
+  inp: { energy: number; dropOnset: boolean; beatPulse: number },
+  rng: () => number = Math.random,
+): void {
+  st.mix = Math.min(1, st.mix + dtSec / FOLD_FADE_SEC);
+  st.holdLeft -= dtSec * (1 + 1.5 * inp.energy);
+
+  if ((st.holdLeft <= 0 || inp.dropOnset) && st.mix >= 1) {
+    st.modeA = st.modeB;
+    let next = FOLD_FAMILY[Math.floor(rng() * FOLD_FAMILY.length)];
+    for (let tries = 0; tries < 8 && next === st.modeA; tries++) {
+      next = FOLD_FAMILY[Math.floor(rng() * FOLD_FAMILY.length)];
+    }
+    st.modeB = next;
+    st.mix = 0;
+    if (rng() < 0.5) st.rotDir = st.rotDir === 1 ? -1 : 1;
+    st.holdLeft = FOLD_HOLD_MIN + rng() * (FOLD_HOLD_MAX - FOLD_HOLD_MIN);
+  }
+
+  st.rot += dtSec * st.rotDir * (FOLD_ROT_BASE + FOLD_ROT_ENERGY * inp.energy) * (1 + 2 * inp.beatPulse);
+  st.zoomPhase += dtSec * FOLD_ZOOM_RATE;
+}
+
+/** Slow sinusoidal breathing zoom applied to Auto symmetry's fold coordinate
+ *  — see simUv's uFoldZoom divide in the display shader. */
+export function foldZoom(st: FoldState): number {
+  return 1 + FOLD_ZOOM_AMP * Math.sin(st.zoomPhase * 6.28318);
+}
+
+// ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 
@@ -490,17 +600,17 @@ export const SETTINGS: SceneSetting[] = [
     reads: ["anim.centroid"],
   },
   {
-    key: "mirror",
-    label: "Mirror",
-    description:
-      "Off: full domain. Left-right / Top-bottom: one seam. Kaleidoscope: both seams. Radial: the quadrant folded N ways around the centre",
+    key: "symmetry",
+    label: "Symmetry",
+    description: "Auto drifts between the folded looks with the music; the rest fix one fold",
     group: "Look",
     min: 0,
-    max: MIRROR_OPTIONS.length - 1,
+    max: SYMMETRY_OPTIONS.length - 1,
     step: 1,
-    default: MIRROR_KALEIDO,
+    default: 0,
     type: "enum",
-    options: [...MIRROR_OPTIONS],
+    options: [...SYMMETRY_OPTIONS],
+    reads: ["anim.dropOnset"],
   },
   {
     key: "lineSoft",
@@ -511,6 +621,73 @@ export const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.2,
+  },
+  {
+    key: "neon",
+    label: "Neon saturation",
+    description: "Pushes colour saturation for a punchier neon look",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+  },
+  {
+    key: "hotWhite",
+    label: "White-hot cores",
+    description: "How much the densest dye shifts toward white",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    auto: { loudness: 0.25, dynamics: 0.15 },
+  },
+  {
+    key: "dropFlash",
+    label: "Drop flash",
+    description: "Whole-screen brightness lift and line-to-white flash on a detected drop",
+    group: "Light",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    auto: { dynamics: 0.25, pulse: 0.15 },
+    reads: ["anim.dropOnset"],
+  },
+  {
+    key: "shockwave",
+    label: "Bass shockwave",
+    description: "A ring that expands from the emitter on a bass hit or drop",
+    group: "Light",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    auto: { attack: 0.3, pulse: 0.2 },
+    reads: ["anim.lowOnset", "anim.dropOnset"],
+  },
+  {
+    key: "buildGlow",
+    label: "Build-up glow",
+    description: "Extra halo brightness as a phrase builds toward its peak",
+    group: "Light",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.4,
+    auto: { dynamics: 0.2, loudness: 0.15 },
+  },
+  {
+    key: "beatFlash",
+    label: "Beat flash",
+    description: "Line-gain flash on every beat",
+    group: "Light",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.15,
+    auto: { pulse: 0.3, attack: 0.15 },
   },
   {
     key: "sparkle",
@@ -526,14 +703,14 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "sparkleStyle",
     label: "Style",
-    description: "Glow: brighter line only. Electric: thin filament sparks. Grain: dense speckle. Electric + Glow: both",
+    description: "Glow: brighter line only. Currents: electric dashes riding the flow through dense dye. Grain: dense speckle. Currents + Glow: both",
     group: "Sparkle",
     min: 0,
     max: 3,
     step: 1,
     default: 1,
     type: "enum",
-    options: ["Glow", "Electric", "Grain", "Electric + Glow"],
+    options: ["Glow", "Currents", "Grain", "Currents + Glow"],
   },
   {
     key: "sparkleTint",
@@ -597,6 +774,16 @@ export const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.2,
   },
+  {
+    key: "currentDensity",
+    label: "Current density",
+    description: "How dense the dye must be before the Currents style lights it up",
+    group: "Sparkle",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+  },
 ];
 
 function settingFor(key: string): SceneSetting {
@@ -608,14 +795,60 @@ function settingFor(key: string): SceneSetting {
 const SETTINGS_UNIFORMS_GLSL = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
 
 // ---------------------------------------------------------------------------
+// Shockwave pool (Light group's Bass shockwave) — a fixed-size ring pool
+// driven from render() below, same idiom as caustics.ts's ripple pool
+// (createRipplePool there): each slot ages independently and a trigger
+// always reuses the oldest slot, so a fast hit never erases the ring the
+// previous hit already sent out, only adds its own alongside it.
+// ---------------------------------------------------------------------------
+
+export const SHOCK_SLOTS = 4;
+/** Seconds after which a slot's amplitude is zeroed and it reads as free
+ *  again for triggerShock's oldest-slot search. */
+export const SHOCK_LIFE = 3;
+/** Ring expansion speed, screen heights per second — see the shockR/radius
+ *  math in the display shader's main(). */
+export const SHOCK_SPEED = 0.9;
+
+export interface ShockState {
+  age: Float32Array;
+  amp: Float32Array;
+}
+
+export function createShockState(): ShockState {
+  // age starts past SHOCK_LIFE (huge = never triggered, fully faded) so
+  // every slot reads as free; amp starts at Float32Array's own zero default.
+  return { age: new Float32Array(SHOCK_SLOTS).fill(1e6), amp: new Float32Array(SHOCK_SLOTS) };
+}
+
+/** Starts a fresh ring in whichever slot has aged the longest — never the
+ *  youngest, so a quick one-two hit doesn't erase the first ring before it's
+ *  had a chance to expand. */
+export function triggerShock(st: ShockState, amp: number): void {
+  let slot = 0;
+  for (let i = 1; i < SHOCK_SLOTS; i++) if (st.age[i] > st.age[slot]) slot = i;
+  st.age[slot] = 0;
+  st.amp[slot] = amp;
+}
+
+/** Ages every slot in place by dtSec, zeroing a slot's amplitude once it's
+ *  past SHOCK_LIFE so an old ring stops contributing instead of drifting on
+ *  forever at a vanishingly faint amplitude. */
+export function advanceShocks(st: ShockState, dtSec: number): void {
+  for (let i = 0; i < SHOCK_SLOTS; i++) {
+    st.age[i] += dtSec;
+    if (st.age[i] > SHOCK_LIFE) st.amp[i] = 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Display shader
 // ---------------------------------------------------------------------------
 
-const LINE_GAIN = 3.0;
-/** Extra brightening of the edge line on the beat, on top of LINE_GAIN — see
- *  uBeatPulse below. Halo (GLOW_GAIN) is left alone so the flash reads as
- *  the line snapping brighter, not a bloom. */
-const LINE_BEAT = 0.35;
+// Lowered from 3.0: the hue-preserving tone map below no longer clips a
+// bright line to white on its own, so a lower gain is needed to keep the
+// same on-screen brightness the old per-channel 1-exp(-x) map produced.
+const LINE_GAIN = 2.0;
 const GLOW_GAIN = 0.5;
 const FILL_GAIN = 0.05;
 const PALETTE_BLEND = 0.1;
@@ -634,7 +867,12 @@ const CENTROID_HUE = 0.08;
  *  line colour (see the `col = mix(col, sparkCol * SPARK_GAIN, spark)` line
  *  in main()) rather than adding onto it, so this alone sets how hot a spark
  *  reads against the rest of the line. */
-const SPARK_GAIN = 2.2;
+const SPARK_GAIN = 3.0;
+/** dye.r range the final tone map's white-hot core (uHotWhite) ramps over —
+ *  below HOT_LO a pixel is never pulled toward true white regardless of the
+ *  setting; at/above HOT_HI it's fully eligible. */
+const HOT_LO = 0.9;
+const HOT_HI = 2.2;
 
 function displayFragSrc(format: SimFormat): string {
   return `#version 300 es
@@ -650,6 +888,15 @@ uniform sampler2D uDye;
 uniform sampler2D uEdge;
 uniform float uDomainAspect;
 uniform vec2 uEmitScreen;
+uniform float uFoldA;
+uniform float uFoldB;
+uniform float uFoldMix;
+uniform float uFoldRot;
+uniform float uFoldZoom;
+uniform sampler2D uVelSim;
+uniform vec2 uSimTexels;
+uniform float uShockAge[${SHOCK_SLOTS}];
+uniform float uShockAmp[${SHOCK_SLOTS}];
 
 const vec3 BG = vec3(0.012, 0.012, 0.02);
 const vec3 NEON_BLUE = vec3(0.2, 0.4, 1.0);
@@ -688,52 +935,48 @@ vec3 hueRotate(vec3 col, float radians_) {
   return yiq2rgb * vec3(yiq.x, iq.x, iq.y);
 }
 
-// Sparkle group's noise stack — a plain hash -> bilinear value noise ->
-// ridged-and-drifting "threads" build, standard textbook shapes written
-// fresh here (not ported from any third-party source, per CLAUDE.md).
+// Sparkle group's hash: Grain's per-pixel speckle and Currents' per-dash
+// gate both key off this one hash — no value-noise/threads build needed now
+// that Currents rides the sim's own velocity field instead of a synthetic
+// drifting texture.
 float hash21(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
   p += dot(p, p + 45.32);
   return fract(p.x * p.y);
 }
 
-float vnoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  float a = hash21(i);
-  float b = hash21(i + vec2(1.0, 0.0));
-  float c = hash21(i + vec2(0.0, 1.0));
-  float d = hash21(i + vec2(1.0, 1.0));
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
-// Two octaves of value noise, ridged so each octave's mid-level contours
-// (not its peaks) come out as thin bright lines — the "electric filament"
-// look — then slowly advected so they crawl rather than sit still.
-float threads(vec2 p, float t) {
-  vec2 q = p + vec2(t * 0.7, -t * 0.5);
-  float n = 0.5 * vnoise(q) + 0.3 * vnoise(q * 2.13 + vec2(11.7, -5.2)) + 0.2 * vnoise(q * 4.7 + vec2(-3.1, 7.9));
-  float ridge = 1.0 - abs(2.0 * n - 1.0);
-  // Sharpen the ridge so the crest is a thin thread, not a broad band.
-  return ridge * ridge * ridge;
-}
-
-// Maps a screen uv to the sim uv it should sample, per Mirror mode (uMirror,
-// rounded — see MIRROR_OPTIONS for the index order). Off/Left-right/
-// Top-bottom/Kaleidoscope are plain axis folds; a Radial mode instead folds
-// the screen into one of N wedges around the centre and reuses the
-// Kaleidoscope quadrant the sim already covers (see mirrorDomain in
-// fluidSim.ts) — the final mirror-wrap (s = 1.0 - abs(1.0 - s)) keeps points
-// past the quadrant's far corner continuous instead of seaming there.
-vec2 simUv(vec2 uv) {
-  int m = int(uMirror + 0.5);
+// Maps a screen uv to the sim uv it should sample, for fold mode \`m\`
+// (MirrorMode's index — see MIRROR_OPTIONS for the order; the caller passes
+// uFoldA/uFoldB, rounded, since Auto symmetry samples two folds and
+// crossfades — see main()). Off/Left-right/Top-bottom are plain axis folds
+// that ignore rot/zoom; Kaleidoscope and every Radial mode (m >= 3) first
+// rotate the centred, aspect-corrected screen coordinate by uFoldRot and
+// scale it by 1/uFoldZoom (Auto symmetry's slow turn-and-breathe drift —
+// see advanceFold/foldZoom in fluid.ts), then apply the same fold each
+// always did: Kaleidoscope's plain two-axis abs fold (un-corrected back to
+// uv space first, since that fold isn't aspect-aware), or a Radial mode's
+// fold into one of N wedges around the centre, reusing the Kaleidoscope
+// quadrant the sim already covers (see mirrorDomain in fluidSim.ts) — the
+// final mirror-wrap (s = 1.0 - abs(1.0 - s)) keeps points past the
+// quadrant's far corner continuous instead of seaming there.
+vec2 simUv(vec2 uv, int m) {
   if (m == 0) return uv;
   if (m == 1) return vec2(abs(uv.x * 2.0 - 1.0), uv.y);
   if (m == 2) return vec2(uv.x, abs(uv.y * 2.0 - 1.0));
-  if (m == 3) return abs(uv * 2.0 - 1.0);
-  float n = m == 4 ? 6.0 : m == 5 ? 8.0 : 12.0;
+
   vec2 p = (uv * 2.0 - 1.0) * vec2(uDomainAspect, 1.0);
+  float rc = cos(uFoldRot);
+  float rs = sin(uFoldRot);
+  p = mat2(rc, rs, -rs, rc) * p / uFoldZoom;
+
+  // Rotation and zoom push screen corners past the quadrant; wrap them back
+  // by mirror repetition (period 2 in sim uv) rather than clamping, which
+  // would smear the domain's edge texels into broad bands of light.
+  if (m == 3) {
+    vec2 s3 = abs(p / vec2(uDomainAspect, 1.0));
+    return 1.0 - abs(mod(s3, 2.0) - 1.0);
+  }
+  float n = m == 4 ? 6.0 : m == 5 ? 8.0 : 12.0;
   float r = length(p);
   float w = 6.28318 / n;
   float th = mod(atan(p.y, p.x), w);
@@ -741,17 +984,30 @@ vec2 simUv(vec2 uv) {
   th *= (1.5707963 / (0.5 * w));
   vec2 s = r * vec2(cos(th), sin(th)) / vec2(uDomainAspect, 1.0);
   s = abs(s);
-  s = 1.0 - abs(1.0 - s);
-  return clamp(s, 0.0, 1.0);
+  return 1.0 - abs(mod(s, 2.0) - 1.0);
 }
 
 void main() {
   vec2 uv = roomUv(vUv);
-  vec2 s = simUv(uv);
+  // Auto symmetry samples two folds (uFoldA/uFoldB) and crossfades by
+  // uFoldMix; a manual pick uploads A === B so the mix is a no-op. \`s\` is
+  // whichever fold is currently more visible, for anything below that only
+  // wants one sim-space coordinate (e.g. the velocity texture).
+  vec2 sA = simUv(uv, int(uFoldA + 0.5));
+  vec2 sB = simUv(uv, int(uFoldB + 0.5));
+  vec2 s = uFoldMix < 0.5 ? sA : sB;
 
-  vec2 dye = decodeDye(texture(uDye, s));
-  float edge = mix(texture(uEdge, s).r, textureLod(uEdge, s, 1.0).r, uLineSoft);
-  float glow = 0.55 * textureLod(uEdge, s, 2.0).r + 0.45 * textureLod(uEdge, s, 3.5).r;
+  vec2 dyeA = decodeDye(texture(uDye, sA));
+  vec2 dyeB = decodeDye(texture(uDye, sB));
+  vec2 dye = mix(dyeA, dyeB, uFoldMix);
+
+  float edgeA = mix(texture(uEdge, sA).r, textureLod(uEdge, sA, 1.0).r, uLineSoft);
+  float edgeB = mix(texture(uEdge, sB).r, textureLod(uEdge, sB, 1.0).r, uLineSoft);
+  float edge = mix(edgeA, edgeB, uFoldMix);
+
+  float glowA = 0.55 * textureLod(uEdge, sA, 2.0).r + 0.45 * textureLod(uEdge, sA, 3.5).r;
+  float glowB = 0.55 * textureLod(uEdge, sB, 2.0).r + 0.45 * textureLod(uEdge, sB, 3.5).r;
+  float glow = mix(glowA, glowB, uFoldMix);
 
   // Bright passages lean the ramp warm, dark ones cool, on top of the manual
   // hue shift.
@@ -760,31 +1016,67 @@ void main() {
   c = mix(c, palette(0.2 + 0.6 * uv.x + hue, uPalA, uPalB, uPalC, uPalD), ${PALETTE_BLEND.toFixed(2)});
   c = mix(c, NEON_PURPLE, ${PURPLE_MIX.toFixed(2)} * clamp(dye.g / max(dye.r, ${PURPLE_FLOOR.toFixed(2)}), 0.0, 1.0));
 
+  // Neon saturation (Look group): pushes c away from grey before anything
+  // else tints or brightens it, so line/halo/sparks all read more vivid
+  // instead of washing toward white together.
+  vec3 grey = vec3(dot(c, vec3(0.333)));
+  c = max(mix(grey, c, 1.0 + uNeon), 0.0);
+
+  // Drop flash (Light group): a decaying flash on a detected section drop —
+  // leans the line colour itself toward white so the spark tint below reads
+  // hotter for the same beat, on top of the halo/screen lift near col below.
+  float flash = uDropPulse * uDropFlash;
+  c = mix(c, vec3(1.0), 0.5 * flash);
+
   // Treble drive: how hard hats/cymbals are hitting right now, feeding both
-  // the plain line-gain boost (Glow) and the spark mask's threshold (Electric
-  // / Grain).
+  // the plain line-gain boost (Glow) and the spark mask's threshold
+  // (Currents / Grain).
   float treble = clamp(0.35 + 0.9 * uHigh + 1.3 * uHighPulse, 0.0, 2.0);
   int sparkleStyleI = int(uSparkleStyle + 0.5);
 
   float sparkle = 1.0;
   float spark = 0.0;
-  // Threshold on the thread field: sparks are its crests only, so even at
-  // full treble the mask stays sparse; the sparkle amount and the treble
-  // drive lower it toward denser coverage.
   float cut = 1.0 - uSparkle * treble * 0.28;
   float soft = mix(0.02, 0.25, uSparkleSoft);
   if (sparkleStyleI == 0 || sparkleStyleI == 3) {
-    // Glow (and half of Electric + Glow): the old plain brightness boost.
+    // Glow (and half of Currents + Glow): the old plain brightness boost.
     sparkle = 1.0 + uSparkle * treble * 1.2;
   }
   if (sparkleStyleI == 1 || sparkleStyleI == 3) {
-    // Electric: thin ridged filaments drifting slowly across the line.
-    float freq = mix(10.0, 70.0, uSparkleSize);
-    float th = threads(vUv * freq * vec2(uResolution.x / uResolution.y, 1.0), uTime * mix(0.2, 3.0, uSparkleSpeed) + uFlowPhase * 0.3);
-    spark = smoothstep(cut - soft, cut + soft, th);
-    spark *= clamp(edge + uSparkleSpread * glow * 2.0, 0.0, 1.0);
+    // Currents: short bright dashes travelling along the local flow
+    // direction (uVelSim), gated to where the dye itself is densest
+    // (whitest) — an electric current picking out the fluid's own hottest
+    // channels rather than a synthetic filament texture drifting over it.
+    vec2 vs = decodeVel(texture(uVelSim, s));
+    float sp = length(vs);
+    vec2 t = vs / max(sp, 1e-3);
+    vec2 ps = s * uSimTexels;
+    float along = dot(ps, t);
+    float across = dot(ps, vec2(-t.y, t.x));
+    float period = mix(60.0, 14.0, uSparkleSize);
+    float ph = along / period - uTime * mix(0.6, 6.0, uSparkleSpeed);
+    float cell = floor(ph);
+    float f = fract(ph);
+    // Wobble so a current snakes rather than rules a straight line.
+    across += 3.0 * sin(along * 0.25 + uTime * 5.0);
+    float segW = period * 0.6;
+    float seg = floor(across / segW);
+    // Thin across the flow: each segment carries one narrow streak, not a
+    // full-width block.
+    float acrossF = fract(across / segW);
+    float thin = smoothstep(0.0, soft, acrossF) * (1.0 - smoothstep(0.22, 0.22 + soft, acrossF));
+    float gate = step(1.0 - uSparkle * treble * 1.0, hash21(vec2(cell, seg) + 0.37));
+    float dash = gate * thin * smoothstep(0.0, soft, f) * (1.0 - smoothstep(0.45, 0.45 + soft, f));
+    float currentLo = mix(0.02, 1.0, uCurrentDensity);
+    float currentHi = currentLo + 0.4;
+    // "Dense" means packed lines (the halo mip, high where many filaments
+    // crowd together — what reads as the whitest region) or dense dye itself.
+    float dense = smoothstep(currentLo, currentHi, max(dye.r, glow * 1.5));
+    // Inside a dense core the Sobel edge is zero (no gradient), so the mask
+    // must accept density itself there, not only the line's border.
+    spark = dash * dense * smoothstep(0.0, 3.0, sp) * clamp(max(edge, dense) + uSparkleSpread * glow * 2.0, 0.0, 1.0);
   } else if (sparkleStyleI == 2) {
-    // Grain: dense per-pixel speckle instead of filaments.
+    // Grain: dense per-pixel speckle instead of dashes.
     float g = hash21(floor(vUv * uResolution.xy / mix(4.0, 1.0, uSparkleSize)) + floor(uTime * mix(4.0, 30.0, uSparkleSpeed)));
     spark = smoothstep(cut - soft, cut + soft, g);
     spark *= clamp(edge + uSparkleSpread * glow * 2.0, 0.0, 1.0);
@@ -812,22 +1104,54 @@ void main() {
   }
   vec3 sparkCol = mix(c, tintCol, uSparkleNegative);
 
-  float lineGain = ${LINE_GAIN.toFixed(2)} * (1.0 + ${LINE_BEAT.toFixed(2)} * uBeatPulse);
-  vec3 col = BG + c * edge * lineGain * sparkle + c * glow * uEdgeGlow * ${GLOW_GAIN.toFixed(2)} + c * dye.r * ${FILL_GAIN.toFixed(2)};
+  // Bass shockwave (Light group): a ring pool expanding from the emitter —
+  // see triggerShock/advanceShocks in fluid.ts for how uShockAge/uShockAmp
+  // are filled each frame.
+  float shockR = length((uv - uEmitScreen) * vec2(uDomainAspect, 1.0));
+  float shock = 0.0;
+  for (int i = 0; i < ${SHOCK_SLOTS}; i++) {
+    float radius = uShockAge[i] * ${SHOCK_SPEED.toFixed(2)};
+    float w = 0.05 + 0.05 * uShockAge[i];
+    shock += uShockAmp[i] * exp(-pow((shockR - radius) / w, 2.0)) * exp(-uShockAge[i] * 1.2);
+  }
+  shock *= uShockwave;
+
+  // Build-up glow (Light group): extra halo brightness as a phrase's own
+  // loudness trend (uSectionIntensity) climbs above its own midpoint,
+  // clamped so a quiet trend can only dim the halo a little, never black it
+  // out.
+  float buildMul = max(1.0 + uBuildGlow * 1.2 * (uSectionIntensity - 0.5), 0.2);
+
+  float lineGain = ${LINE_GAIN.toFixed(2)} * (1.0 + uBeatFlash * 1.5 * uBeatPulse) * (1.0 + 2.0 * shock);
+  vec3 col = BG + c * edge * lineGain * sparkle + c * glow * uEdgeGlow * ${GLOW_GAIN.toFixed(2)} * (1.0 + 2.5 * flash) * buildMul + c * dye.r * ${FILL_GAIN.toFixed(2)};
   // Sparks REPLACE rather than add, so a Negative/Complement tint reads as a
   // true contrast against the line rather than a wash on top of it.
-  col = mix(col, sparkCol * ${SPARK_GAIN.toFixed(2)}, spark);
+  col = mix(col, mix(sparkCol, vec3(1.0), 0.15) * ${SPARK_GAIN.toFixed(2)}, spark);
+  // The shockwave ring reads on the halo too, and the drop flash lifts the
+  // whole screen a touch rather than only the line/halo terms above.
+  col += c * shock * 0.5;
+  col += vec3(0.06) * flash;
 
   // Purple emitter blob at the emitter's screen position — the identity of
   // the emitter, kept visible even in Off (where there's nothing to mirror
   // it from).
   // Top-bottom has two emitter copies (one per half); fold y so one blob
   // position covers both.
-  vec2 uvBlob = int(uMirror + 0.5) == 2 ? vec2(uv.x, 0.5 + abs(uv.y - 0.5)) : uv;
+  vec2 uvBlob = int(uFoldA + 0.5) == 2 ? vec2(uv.x, 0.5 + abs(uv.y - 0.5)) : uv;
   vec2 d = (uvBlob - uEmitScreen) * vec2(uDomainAspect, 1.0);
   col += NEON_PURPLE * exp(-dot(d, d) / (${EMIT_BLOB_RADIUS.toFixed(3)} * ${EMIT_BLOB_RADIUS.toFixed(3)})) * (${EMIT_BLOB_BASE.toFixed(2)} + ${EMIT_BLOB_PULSE.toFixed(2)} * uLowPulse);
 
-  outColor = vec4(1.0 - exp(-col), 1.0);
+  // Hue-preserving tone map (Look group): the old per-channel
+  // 1.0 - exp(-col) desaturates a bright pixel toward white on its own;
+  // mapping the scalar luminance's own compression back onto col keeps hue
+  // and saturation intact instead, and uHotWhite alone still controls how
+  // much the densest (white-hot) dye cores shift all the way to true white
+  // on top of that.
+  float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  vec3 mapped = col * ((1.0 - exp(-lum)) / max(lum, 1e-4));
+  float hot = smoothstep(${HOT_LO.toFixed(2)}, ${HOT_HI.toFixed(2)}, dye.r) * uHotWhite;
+  mapped = mix(mapped, vec3(1.0 - exp(-lum)), hot);
+  outColor = vec4(mapped, 1.0);
 }
 `;
 }
@@ -843,10 +1167,13 @@ function createFluidScene(): Scene {
   let format: SimFormat | null = null;
   let dyeLoc: WebGLUniformLocation | null = null;
   let edgeLoc: WebGLUniformLocation | null = null;
+  let velSimLoc: WebGLUniformLocation | null = null;
   let lastFrameTime: number | null = null;
   const bandsBuf = new Float32Array(NUM_BANDS);
   const splats: Splat[] = [];
   let puff = createPuffState();
+  let fold = createFoldState();
+  let shock = createShockState();
 
   return {
     id: ID,
@@ -860,12 +1187,18 @@ function createFluidScene(): Scene {
       displayProg = createProgram(gl, displayFragSrc(format));
       dyeLoc = gl.getUniformLocation(displayProg.program, "uDye");
       edgeLoc = gl.getUniformLocation(displayProg.program, "uEdge");
+      velSimLoc = gl.getUniformLocation(displayProg.program, "uVelSim");
 
-      const mirror = Math.round(SETTINGS.find((s) => s.key === "mirror")!.default) as MirrorMode;
+      // Default symmetry is Auto (value 0 -> symmetryToMirror null); Auto's
+      // sim domain is always MIRROR_KALEIDO (see FoldState/render below).
+      const symDefault = SETTINGS.find((s) => s.key === "symmetry")!.default;
+      const mirror = (symmetryToMirror(symDefault) ?? MIRROR_KALEIDO) as MirrorMode;
       const size = simResolutionFor(ctx.quality.detail, gl.drawingBufferWidth, gl.drawingBufferHeight, mirror);
       sim = createFluidSim(gl, quadVao, size, format);
       lastFrameTime = null;
       puff = createPuffState();
+      fold = createFoldState();
+      shock = createShockState();
     },
 
     render(ctx, frame, viewport, palette, anim) {
@@ -877,7 +1210,15 @@ function createFluidScene(): Scene {
         lastFrameTime === null ? SIM_DT_DEFAULT : Math.max(0, Math.min(SIM_DT_MAX, frame.time - lastFrameTime));
       lastFrameTime = frame.time;
 
-      const mirror = Math.round(resolveSceneSetting(ID, settingFor("mirror"))) as MirrorMode;
+      const sym = Math.round(resolveSceneSetting(ID, settingFor("symmetry")));
+      const manualMirror = symmetryToMirror(sym);
+      if (manualMirror === null) {
+        advanceFold(fold, dt, { energy: frame.energy, dropOnset: anim.dropOnset, beatPulse: anim.beatPulse });
+      }
+      // Auto symmetry always simulates the Kaleidoscope quadrant (fold.modeA/
+      // modeB pick the *display's* fold — see uFoldA/uFoldB below); a manual
+      // pick simulates that mode's own domain.
+      const mirror = manualMirror ?? MIRROR_KALEIDO;
       const curl = resolveSceneSetting(ID, settingFor("curl"));
       const viscosity = resolveSceneSetting(ID, settingFor("viscosity"));
       const dissipation = resolveSceneSetting(ID, settingFor("dissipation"));
@@ -924,16 +1265,46 @@ function createFluidScene(): Scene {
       displayProg.setF("uDomainAspect", gl.drawingBufferWidth / gl.drawingBufferHeight);
       const [emitScreenX, emitScreenY] = emitterScreenPosition(mirror);
       displayProg.setV2("uEmitScreen", emitScreenX, emitScreenY);
+      if (manualMirror === null) {
+        displayProg.setF("uFoldA", fold.modeA);
+        displayProg.setF("uFoldB", fold.modeB);
+        displayProg.setF("uFoldMix", fold.mix);
+        displayProg.setF("uFoldRot", fold.rot);
+        displayProg.setF("uFoldZoom", foldZoom(fold));
+      } else {
+        displayProg.setF("uFoldA", manualMirror);
+        displayProg.setF("uFoldB", manualMirror);
+        displayProg.setF("uFoldMix", 0);
+        displayProg.setF("uFoldRot", 0);
+        displayProg.setF("uFoldZoom", 1);
+      }
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sim.dyeTexture());
       gl.uniform1i(dyeLoc, 0);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, sim.edgeTexture());
       gl.uniform1i(edgeLoc, 1);
+
+      // Light group: Bass shockwave's ring pool (triggerShock/advanceShocks
+      // above) and the velocity field the Currents sparkle style samples —
+      // neither is a plain per-setting float, so both are uploaded here
+      // rather than through uploadCommonUniforms.
+      advanceShocks(shock, dt);
+      if (anim.dropOnset) triggerShock(shock, 1.6);
+      else if (anim.lowOnset) triggerShock(shock, 0.4 + 0.6 * anim.low);
+      displayProg.setFv("uShockAge", shock.age);
+      displayProg.setFv("uShockAmp", shock.amp);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, sim.velTexture());
+      gl.uniform1i(velSimLoc, 2);
+      displayProg.setV2("uSimTexels", sim.size.dyeW, sim.size.dyeH);
+
       drawFullscreenQuad(gl, quadVao);
 
       // The gallery renders every scene into one shared context each tick —
       // must not leak a bound texture unit onto the next tile.
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE0);
@@ -952,8 +1323,11 @@ function createFluidScene(): Scene {
       format = null;
       dyeLoc = null;
       edgeLoc = null;
+      velSimLoc = null;
       lastFrameTime = null;
       puff = createPuffState();
+      fold = createFoldState();
+      shock = createShockState();
     },
   };
 }

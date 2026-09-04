@@ -6,8 +6,11 @@ regenerate it at session close.
 
 ## In flight
 
-- **Neon Fluid scene, v3 (this session)** — branch `worktree-neon-fluid`,
-  draft PR #76. Same session, two more rounds after v2: `MIRROR_OPTIONS`
+- **Neon Fluid scene, v4 (this session)** — branch `worktree-neon-fluid`,
+  draft PR #76. v4: Mirror became `symmetry` with an Auto default that drifts
+  between the quadrant folds (`advanceFold`), the Currents sparkle rides the
+  sim velocity, a hue-preserving tone map with `neon`/`hotWhite`, and a Light
+  group (`dropFlash`, `shockwave`, `buildGlow`, `beatFlash`). v3: `MIRROR_OPTIONS`
   grew (Top-bottom = the reference geometry, Radial folds via `simUv`) and
   treble sparkle became its own settings group (Electric threads in a
   Negative tint). Before that, after the user compared a frame against the reference short
@@ -46,8 +49,9 @@ regenerate it at session close.
 
 ## Next up
 
-- `/tune fluid` against real music — every v2 constant was tuned on
-  `?audio=synthetic` only; the beat puffs in particular need a real onset
+- `/tune fluid` against real music — every constant was tuned on
+  `?audio=synthetic` only; the Currents gate needs real treble (synthetic has
+  almost none) and the Light group needs a real drop; the beat puffs need a real onset
   stream.
 - Rebase `worktree-neon-fluid` onto `main`, mark PR #76 ready.
 - Review/merge PRs #70, #72, #73, #74, #75, #77.

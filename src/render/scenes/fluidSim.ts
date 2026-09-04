@@ -302,6 +302,10 @@ export interface FluidSim {
   readonly format: SimFormat;
   step(inputs: SimStepInputs): void;
   dyeTexture(): WebGLTexture | null;
+  /** Current read velocity target's texture (vel-grid texels/second, decoded
+   *  via decodeVel) — for a display pass that wants the live flow direction
+   *  rather than just dye density (see fluid.ts's Currents sparkle style). */
+  velTexture(): WebGLTexture | null;
   edgeTexture(): WebGLTexture | null;
   resize(size: SimSize): void;
   dispose(): void;
@@ -1046,6 +1050,10 @@ export function createFluidSim(
 
     dyeTexture(): WebGLTexture | null {
       return dye[dyeRead].tex;
+    },
+
+    velTexture(): WebGLTexture | null {
+      return vel[velRead].tex;
     },
 
     edgeTexture(): WebGLTexture | null {
