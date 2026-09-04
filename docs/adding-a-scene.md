@@ -35,6 +35,11 @@
 Typecheck (`npm run typecheck`) catches a mismatched uniform name or a `Scene`
 missing a required method; nothing here needs a special build step.
 
+Once it renders, keep `npm run dev` running and give whoever is reviewing a
+direct link to the scene, `https://localhost:<port>/#/v/<sceneId>`, rather than
+the gallery root — the standing rule in `CLAUDE.md` spells out the URL form
+(query before the hash).
+
 ## The invariant you can't get from typecheck
 
 This is the one piece of scene-authoring knowledge that has no single owning

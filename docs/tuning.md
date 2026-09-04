@@ -20,9 +20,11 @@ sets always wins over a pin left over from an earlier by-hand session.
 Tune against synthetic audio so a result is comparable across sessions:
 
 ```
-https://localhost:5173/#/v/<sceneId>?audio=synthetic&bpm=<bpm>
+https://localhost:5173/?audio=synthetic&bpm=<bpm>#/v/<sceneId>
 ```
 
+The query sits *before* the hash — `src/app.ts` reads `location.search`, and
+`#/v/<sceneId>?audio=…` silently lands on the gallery instead.
 `src/audio/synthetic.ts` is the feed this drives. Real music is still the final
 check — synthetic audio is for comparing runs, not for judging how a scene feels.
 
