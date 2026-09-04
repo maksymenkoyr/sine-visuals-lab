@@ -58,25 +58,38 @@ const FLOW_BASS_GAIN = 1.2;
 /** Beat surge on the flow: a damped velocity impulse (caustics' lurch shape),
  *  not a phase jump — a jump moved every band a step in one frame, which read
  *  as the picture being redrawn rather than pushed. Total displacement per
- *  beat at Beat surge = 1 is SURGE_BANDS; SURGE_DECAY_PER_SEC sets how long
- *  the push lasts (tau ~180ms). The onset refractory is short enough that
- *  back-to-back fires could stack, so velocity is capped. */
+ *  beat at Beat surge = 1 is SURGE_BANDS regardless of softness; the Surge
+ *  ease slider sets how long the push lasts, from SURGE_TAU_SNAPPY to
+ *  SURGE_TAU_SOFT seconds, and the swell's attack and release stretch with
+ *  it (SWELL_*). The onset refractory is short enough that back-to-back
+ *  fires could stack, so velocity is capped at a fixed 1.5 fires' worth of
+ *  the snappiest impulse. */
 const SURGE_BANDS = 0.6;
-const SURGE_DECAY_PER_SEC = 5.5;
-const SURGE_IMPULSE = SURGE_BANDS * SURGE_DECAY_PER_SEC;
-const SURGE_VEL_CAP = SURGE_IMPULSE * 1.5;
+const SURGE_TAU_SNAPPY = 0.1;
+const SURGE_TAU_SOFT = 0.6;
+const SURGE_VEL_CAP = (SURGE_BANDS / SURGE_TAU_SNAPPY) * 1.5;
 /** Swell envelope: the difference of two exponentials, so it rises from 0
- *  over ~50ms and releases over ~300ms instead of stepping to 1 on the
- *  beat tick the way beatPulse does. Normalised to peak at 1. */
-const SWELL_ATTACK_PER_SEC = 22;
-const SWELL_RELEASE_PER_SEC = 3.5;
-const SWELL_PEAK = (() => {
-  const ka = SWELL_ATTACK_PER_SEC;
-  const kr = SWELL_RELEASE_PER_SEC;
-  const tPeak = Math.log(ka / kr) / (ka - kr);
-  return Math.exp(-kr * tPeak) - Math.exp(-ka * tPeak);
-})();
+ *  and releases instead of stepping to 1 on the beat tick the way beatPulse
+ *  does. Attack and release times at Surge ease 0 and 1; the envelope is
+ *  normalised to peak at 1 for any pair. */
+const SWELL_ATTACK_SNAPPY = 0.02;
+const SWELL_ATTACK_SOFT = 0.15;
+const SWELL_RELEASE_SNAPPY = 0.18;
+const SWELL_RELEASE_SOFT = 0.9;
 const SWELL_STACK_CAP = 1.5;
+
+/** The rates the surge runs at for a Surge ease value, and the swell peak
+ *  they produce — log-interpolated so the slider feels even across its range. */
+function surgeRates(ease: number) {
+  const e = Math.min(1, Math.max(0, ease));
+  const lerpLog = (a: number, b: number) => a * Math.pow(b / a, e);
+  const tau = lerpLog(SURGE_TAU_SNAPPY, SURGE_TAU_SOFT);
+  const ka = 1 / lerpLog(SWELL_ATTACK_SNAPPY, SWELL_ATTACK_SOFT);
+  const kr = 1 / lerpLog(SWELL_RELEASE_SNAPPY, SWELL_RELEASE_SOFT);
+  const tPeak = Math.log(ka / kr) / (ka - kr);
+  const peak = Math.exp(-kr * tPeak) - Math.exp(-ka * tPeak);
+  return { decay: 1 / tau, impulse: SURGE_BANDS / tau, ka, kr, peak };
+}
 
 export interface BeatSurgeState {
   /** Flow surge: velocity in bands/s and the displacement it has integrated. */
@@ -92,19 +105,21 @@ export function createBeatSurgeState(): BeatSurgeState {
 }
 
 /** Advances the surge and swell in place; `fired` is the render-latched beat
- *  edge, `amount` the Beat surge slider. Returns the swell envelope, 0..~1.
- *  Pure, exported for tests/kaleidoscope.test.ts. */
-export function advanceBeatSurge(st: BeatSurgeState, dtSec: number, fired: boolean, amount: number): number {
+ *  edge, `amount` the Beat surge slider, `ease` the Surge ease slider (0 =
+ *  snappy, 1 = soft). Returns the swell envelope, 0..~1. Pure, exported for
+ *  tests/kaleidoscope.test.ts. */
+export function advanceBeatSurge(st: BeatSurgeState, dtSec: number, fired: boolean, amount: number, ease = 0.5): number {
+  const k = surgeRates(ease);
   if (fired) {
-    st.vel = Math.min(st.vel + amount * SURGE_IMPULSE, SURGE_VEL_CAP);
+    st.vel = Math.min(st.vel + amount * k.impulse, SURGE_VEL_CAP);
     st.rel = Math.min(st.rel + amount, SWELL_STACK_CAP);
     st.att = Math.min(st.att + amount, SWELL_STACK_CAP);
   }
   st.phase += st.vel * dtSec;
-  st.vel *= Math.exp(-dtSec * SURGE_DECAY_PER_SEC);
-  st.rel *= Math.exp(-dtSec * SWELL_RELEASE_PER_SEC);
-  st.att *= Math.exp(-dtSec * SWELL_ATTACK_PER_SEC);
-  return Math.max(0, st.rel - st.att) / SWELL_PEAK;
+  st.vel *= Math.exp(-dtSec * k.decay);
+  st.rel *= Math.exp(-dtSec * k.kr);
+  st.att *= Math.exp(-dtSec * k.ka);
+  return Math.max(0, st.rel - st.att) / k.peak;
 }
 
 /** Morph accumulator: radians per second at Shape drift = 0 and 1, the extra
@@ -228,6 +243,18 @@ const SETTINGS: SceneSetting[] = [
     reads: ["feature.onset", "anim.dropOnset"] satisfies readonly SignalLink[],
   },
   {
+    key: "ease",
+    label: "Surge ease",
+    description: "How soft each beat's push and swell are — a quick snap at the low end, a long roll at the high end; the distance travelled per beat stays the same",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    // Soft swells suit soft music; sharp hits suit a snap.
+    auto: { attack: -0.3 },
+  },
+  {
     key: "spin",
     label: "Spin",
     description: "How fast alternate rings counter-rotate inside each cell; the mids speed it up",
@@ -336,7 +363,7 @@ export const kaleidoscopeScene = createFullscreenScene("kaleidoscope", "Kaleidos
       flowPos += anim.dtSec * flowRate;
       // anim.onset, not frame.onset: the render cap can skip the tick the
       // feature fired on (see AnimFrame's doc and renderLatch.ts).
-      const swell = advanceBeatSurge(surge, anim.dtSec, anim.onset, pulse);
+      const swell = advanceBeatSurge(surge, anim.dtSec, anim.onset, pulse, getSetting("ease"));
       const morphRate =
         (MORPH_RATE_MIN + (MORPH_RATE_MAX - MORPH_RATE_MIN) * getSetting("morph")) *
         (1.0 + MORPH_SECTION_GAIN * anim.sectionIntensity + MORPH_SWELL_GAIN * swell);
