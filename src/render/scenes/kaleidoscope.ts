@@ -78,18 +78,66 @@ const CYCLE_SPAN = -0.22;
 const CYCLE_BASE = 0.02;
 /** Radius over which the angular terms fade in from the centre. */
 const CORE_FADE = 0.16;
-/** Beat: how far the mandala swells (fraction of radius) and how many bands
- *  the contours snap by, at Beat snap = 1 on a fresh beat. */
-const BEAT_SWELL = 0.08;
-const BEAT_SNAP = 0.6;
-/** Flow accumulator: bands per second at Outward flow = 0 and 1, the extra
- *  factor a full bass level adds, and the jolt (in bands) a beat adds at
- *  Beat snap = 1. Scales the rate, never the accumulated phase — see
- *  flowClock.ts for why the other way teleports. */
+/** Beat: how far the mandala swells (fraction of radius) at Beat surge = 1,
+ *  on the swell envelope below. */
+const BEAT_SWELL = 0.07;
+/** Flow accumulator: bands per second at Outward flow = 0 and 1, and the
+ *  extra factor a full bass level adds. Scales the rate, never the
+ *  accumulated phase — see flowClock.ts for why the other way teleports. */
 const FLOW_RATE_MIN = 0.2;
 const FLOW_RATE_MAX = 3.0;
 const FLOW_BASS_GAIN = 1.2;
-const FLOW_BEAT_JOLT = 0.6;
+/** Beat surge on the flow: a damped velocity impulse (caustics' lurch shape),
+ *  not a phase jump — a jump moved every band a step in one frame, which read
+ *  as the picture being redrawn rather than pushed. Total displacement per
+ *  beat at Beat surge = 1 is SURGE_BANDS; SURGE_DECAY_PER_SEC sets how long
+ *  the push lasts (tau ~180ms). The onset refractory is short enough that
+ *  back-to-back fires could stack, so velocity is capped. */
+const SURGE_BANDS = 0.6;
+const SURGE_DECAY_PER_SEC = 5.5;
+const SURGE_IMPULSE = SURGE_BANDS * SURGE_DECAY_PER_SEC;
+const SURGE_VEL_CAP = SURGE_IMPULSE * 1.5;
+/** Swell envelope: the difference of two exponentials, so it rises from 0
+ *  over ~50ms and releases over ~300ms instead of stepping to 1 on the
+ *  beat tick the way beatPulse does. Normalised to peak at 1. */
+const SWELL_ATTACK_PER_SEC = 22;
+const SWELL_RELEASE_PER_SEC = 3.5;
+const SWELL_PEAK = (() => {
+  const ka = SWELL_ATTACK_PER_SEC;
+  const kr = SWELL_RELEASE_PER_SEC;
+  const tPeak = Math.log(ka / kr) / (ka - kr);
+  return Math.exp(-kr * tPeak) - Math.exp(-ka * tPeak);
+})();
+const SWELL_STACK_CAP = 1.5;
+
+export interface BeatSurgeState {
+  /** Flow surge: velocity in bands/s and the displacement it has integrated. */
+  vel: number;
+  phase: number;
+  /** Swell envelope's two exponentials (release minus attack). */
+  rel: number;
+  att: number;
+}
+
+export function createBeatSurgeState(): BeatSurgeState {
+  return { vel: 0, phase: 0, rel: 0, att: 0 };
+}
+
+/** Advances the surge and swell in place; `fired` is the render-latched beat
+ *  edge, `amount` the Beat surge slider. Returns the swell envelope, 0..~1.
+ *  Pure, exported for tests/kaleidoscope.test.ts. */
+export function advanceBeatSurge(st: BeatSurgeState, dtSec: number, fired: boolean, amount: number): number {
+  if (fired) {
+    st.vel = Math.min(st.vel + amount * SURGE_IMPULSE, SURGE_VEL_CAP);
+    st.rel = Math.min(st.rel + amount, SWELL_STACK_CAP);
+    st.att = Math.min(st.att + amount, SWELL_STACK_CAP);
+  }
+  st.phase += st.vel * dtSec;
+  st.vel *= Math.exp(-dtSec * SURGE_DECAY_PER_SEC);
+  st.rel *= Math.exp(-dtSec * SWELL_RELEASE_PER_SEC);
+  st.att *= Math.exp(-dtSec * SWELL_ATTACK_PER_SEC);
+  return Math.max(0, st.rel - st.att) / SWELL_PEAK;
+}
 /** Morph accumulator: radians per second at Shape drift = 0 and 1, and the
  *  extra factor a loud section adds. */
 const MORPH_RATE_MIN = 0.1;
@@ -180,8 +228,8 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "pulse",
-    label: "Beat snap",
-    description: "Each beat swells the mandala and jolts the bands outward a step; a section drop flips every ring between warm and cool",
+    label: "Beat surge",
+    description: "Each beat swells the mandala and pushes the bands outward; a section drop flips every ring between warm and cool",
     group: "Motion",
     min: 0,
     max: 1,
@@ -276,7 +324,7 @@ void main() {
   float cell = ${CELL_MID.toFixed(2)} * pow(${CELL_SPAN.toFixed(2)}, (uSpread - 0.5) * 2.0);
   vec2 c = mod(p + cell * 0.5, cell) - cell * 0.5;
 
-  float r = length(c) * (1.0 - ${BEAT_SWELL.toFixed(3)} * uPulse * uBeatPulse);
+  float r = length(c) * (1.0 - ${BEAT_SWELL.toFixed(3)} * uBeatSwell);
   float a = atan(c.y, c.x);
   float n = max(2.0, floor(uSymmetry * 0.5 + 0.5) * 2.0);
   float core = smoothstep(0.0, ${CORE_FADE.toFixed(3)}, r);
@@ -294,7 +342,6 @@ void main() {
   float dFdr = ${RING_RAMP.toFixed(2)};
   float dFda = 0.0;
   ${familyGlsl}
-  F += ${BEAT_SNAP.toFixed(2)} * uPulse * uBeatPulse;
 
   // Quantise F into flowing bands; colour each band from its place in a
   // warm/cool onion cycle.
@@ -333,12 +380,13 @@ void main() {
 
 export const kaleidoscopeScene = createFullscreenScene("kaleidoscope", "Kaleidoscope", FRAG, {
   settings: SETTINGS,
-  extraUniformDecls: `uniform float uFlowPos;\nuniform float uMorphPos;\nuniform float uPalShift;`,
+  extraUniformDecls: `uniform float uFlowPos;\nuniform float uMorphPos;\nuniform float uPalShift;\nuniform float uBeatSwell;`,
   extraUniforms: (() => {
     let flowPos = 0;
     let morphPos = 0;
     let palShift = 0;
     let prevDropOnset = false;
+    const surge = createBeatSurgeState();
     return (_frame, anim, getSetting) => {
       const flow = getSetting("flow");
       const pulse = getSetting("pulse");
@@ -346,7 +394,7 @@ export const kaleidoscopeScene = createFullscreenScene("kaleidoscope", "Kaleidos
       flowPos += anim.dtSec * flowRate;
       // anim.onset, not frame.onset: the render cap can skip the tick the
       // feature fired on (see AnimFrame's doc and renderLatch.ts).
-      if (anim.onset) flowPos += FLOW_BEAT_JOLT * pulse;
+      const swell = advanceBeatSurge(surge, anim.dtSec, anim.onset, pulse);
       const morphRate =
         (MORPH_RATE_MIN + (MORPH_RATE_MAX - MORPH_RATE_MIN) * getSetting("morph")) *
         (1.0 + MORPH_SECTION_GAIN * anim.sectionIntensity);
@@ -354,7 +402,7 @@ export const kaleidoscopeScene = createFullscreenScene("kaleidoscope", "Kaleidos
       const drop = anim.dropOnset && !prevDropOnset;
       prevDropOnset = anim.dropOnset;
       if (drop && pulse > 0) palShift += DROP_FLIP;
-      return { uFlowPos: flowPos, uMorphPos: morphPos, uPalShift: palShift };
+      return { uFlowPos: flowPos + surge.phase, uMorphPos: morphPos, uPalShift: palShift, uBeatSwell: swell };
     };
   })(),
 });
