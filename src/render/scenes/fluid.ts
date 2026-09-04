@@ -115,18 +115,18 @@ export const EMIT_SIGMA = 0.07;
 export const EMIT_RING = 0.25;
 export const EMIT_RING_SIGMA = 0.012;
 export const EMIT_FORCE_BASE = 15;
-export const EMIT_FORCE_ENERGY = 260;
-export const EMIT_KICK_LOW = 500;
-export const EMIT_KICK_BEAT = 250;
+export const EMIT_FORCE_ENERGY = 50;
+export const EMIT_KICK_LOW = 100;
+export const EMIT_KICK_BEAT = 50;
 export const EMIT_SWAY = 0.6;
 export const EMIT_SWAY_RATE = 0.35;
 /** Extra emitter force from a beat puff / a drop, gated by beatKick. */
-export const PUFF_FORCE = 700;
-export const DROP_FORCE = 1500;
+export const PUFF_FORCE = 350;
+export const DROP_FORCE = 600;
 /** Continuous (always-on) and puff-driven dye injection at the emitter. */
 export const DYE_BASE_CONT = 0.05;
-export const DYE_ENERGY_CONT = 0.3;
-export const PUFF_DYE = 8;
+export const DYE_ENERGY_CONT = 0.08;
+export const PUFF_DYE = 5;
 
 /** Beat puff clock: fires an emitter/splat spike on a bass or broadband
  *  onset (or, once tempo-locked, on the beat-phase wrap), with a
@@ -219,7 +219,7 @@ export const SPLAT_FALLBACK_MIX = 0.35;
  *  flowPhase, its exponential decay shape, and per-slot force/dye/sigma. */
 export const SPLAT_RATE = 0.18;
 export const SPLAT_DECAY = 0.12;
-export const SPLAT_FORCE = 260;
+export const SPLAT_FORCE = 120;
 export const SPLAT_DYE = 0.4;
 export const SPLAT_SIGMA = 0.12;
 
@@ -227,7 +227,7 @@ export const SIM_DT_MAX = 1 / 30;
 export const SIM_DT_DEFAULT = 1 / 60;
 /** warpedDt's clamp floor/gain — see its own comment below. */
 export const WARP_MIN = 0.7;
-export const WARP_GAIN = 0.9;
+export const WARP_GAIN = 0.25;
 
 /** Tempo warp: scales the sim's own timestep by loudness and the `warp`
  *  setting, so louder passages visibly speed the whole flow up (clamped to
@@ -425,7 +425,7 @@ export const FOLD_FADE_SEC = 2.5;
 export const FOLD_HOLD_MIN = 10;
 export const FOLD_HOLD_MAX = 25;
 export const FOLD_ROT_BASE = 0.02;
-export const FOLD_ROT_ENERGY = 0.12;
+export const FOLD_ROT_ENERGY = 0.03;
 export const FOLD_ZOOM_AMP = 0.12;
 export const FOLD_ZOOM_RATE = 0.07;
 
@@ -470,7 +470,7 @@ export function advanceFold(
   rng: () => number = Math.random,
 ): void {
   st.mix = Math.min(1, st.mix + dtSec / FOLD_FADE_SEC);
-  st.holdLeft -= dtSec * (1 + 1.5 * inp.energy);
+  st.holdLeft -= dtSec * (1 + 0.6 * inp.energy);
 
   if ((st.holdLeft <= 0 || inp.dropOnset) && st.mix >= 1) {
     st.modeA = st.modeB;
@@ -484,7 +484,7 @@ export function advanceFold(
     st.holdLeft = FOLD_HOLD_MIN + rng() * (FOLD_HOLD_MAX - FOLD_HOLD_MIN);
   }
 
-  st.rot += dtSec * st.rotDir * (FOLD_ROT_BASE + FOLD_ROT_ENERGY * inp.energy) * (1 + 2 * inp.beatPulse);
+  st.rot += dtSec * st.rotDir * (FOLD_ROT_BASE + FOLD_ROT_ENERGY * inp.energy) * (1 + 0.6 * inp.beatPulse);
   st.zoomPhase += dtSec * FOLD_ZOOM_RATE;
 }
 
@@ -1026,12 +1026,12 @@ void main() {
   // leans the line colour itself toward white so the spark tint below reads
   // hotter for the same beat, on top of the halo/screen lift near col below.
   float flash = uDropPulse * uDropFlash;
-  c = mix(c, vec3(1.0), 0.5 * flash);
+  c = mix(c, vec3(1.0), 0.25 * flash);
 
   // Treble drive: how hard hats/cymbals are hitting right now, feeding both
   // the plain line-gain boost (Glow) and the spark mask's threshold
   // (Currents / Grain).
-  float treble = clamp(0.35 + 0.9 * uHigh + 1.3 * uHighPulse, 0.0, 2.0);
+  float treble = clamp(0.2 + 0.5 * uHigh + 0.7 * uHighPulse, 0.0, 1.5);
   int sparkleStyleI = int(uSparkleStyle + 0.5);
 
   float sparkle = 1.0;
@@ -1065,7 +1065,7 @@ void main() {
     // full-width block.
     float acrossF = fract(across / segW);
     float thin = smoothstep(0.0, soft, acrossF) * (1.0 - smoothstep(0.22, 0.22 + soft, acrossF));
-    float gate = step(1.0 - uSparkle * treble * 1.0, hash21(vec2(cell, seg) + 0.37));
+    float gate = step(1.0 - uSparkle * treble * 0.6, hash21(vec2(cell, seg) + 0.37));
     float dash = gate * thin * smoothstep(0.0, soft, f) * (1.0 - smoothstep(0.45, 0.45 + soft, f));
     float currentLo = mix(0.02, 1.0, uCurrentDensity);
     float currentHi = currentLo + 0.4;
@@ -1120,17 +1120,17 @@ void main() {
   // loudness trend (uSectionIntensity) climbs above its own midpoint,
   // clamped so a quiet trend can only dim the halo a little, never black it
   // out.
-  float buildMul = max(1.0 + uBuildGlow * 1.2 * (uSectionIntensity - 0.5), 0.2);
+  float buildMul = max(1.0 + uBuildGlow * 0.6 * (uSectionIntensity - 0.5), 0.2);
 
-  float lineGain = ${LINE_GAIN.toFixed(2)} * (1.0 + uBeatFlash * 1.5 * uBeatPulse) * (1.0 + 2.0 * shock);
-  vec3 col = BG + c * edge * lineGain * sparkle + c * glow * uEdgeGlow * ${GLOW_GAIN.toFixed(2)} * (1.0 + 2.5 * flash) * buildMul + c * dye.r * ${FILL_GAIN.toFixed(2)};
+  float lineGain = ${LINE_GAIN.toFixed(2)} * (1.0 + uBeatFlash * 0.7 * uBeatPulse) * (1.0 + 0.8 * shock);
+  vec3 col = BG + c * edge * lineGain * sparkle + c * glow * uEdgeGlow * ${GLOW_GAIN.toFixed(2)} * (1.0 + 1.0 * flash) * buildMul + c * dye.r * ${FILL_GAIN.toFixed(2)};
   // Sparks REPLACE rather than add, so a Negative/Complement tint reads as a
   // true contrast against the line rather than a wash on top of it.
   col = mix(col, mix(sparkCol, vec3(1.0), 0.15) * ${SPARK_GAIN.toFixed(2)}, spark);
   // The shockwave ring reads on the halo too, and the drop flash lifts the
   // whole screen a touch rather than only the line/halo terms above.
-  col += c * shock * 0.5;
-  col += vec3(0.06) * flash;
+  col += c * shock * 0.2;
+  col += vec3(0.025) * flash;
 
   // Purple emitter blob at the emitter's screen position — the identity of
   // the emitter, kept visible even in Off (where there's nothing to mirror

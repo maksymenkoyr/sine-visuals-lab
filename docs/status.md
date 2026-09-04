@@ -49,7 +49,9 @@ regenerate it at session close.
 
 ## Next up
 
-- `/tune fluid` against real music — every constant was tuned on
+- `/tune fluid` against real music — the gains were cut to a fifth after the
+  user's first real-music run ("had to move all sliders to the bottom"), but
+  every constant was still tuned on
   `?audio=synthetic` only; the Currents gate needs real treble (synthetic has
   almost none) and the Light group needs a real drop; the beat puffs need a real onset
   stream.
