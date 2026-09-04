@@ -8,18 +8,17 @@ regenerate it at session close.
 
 - **Ambience scene** — `src/render/scenes/ambience.ts`, branch
   `worktree-ambience-scene`, draft PR #80 (this session). A Windows Media
-  Player homage after a YouTube short: a comet sunburst for quiet sections, a
-  dot-lattice sheet with beat swells for loud ones, crossfaded by section
-  intensity (`phaseMix`) or pinned with `MODES`. First `drawArraysInstanced`
+  Player homage after a YouTube short: a dot lattice with beat swells that
+  opens as a dot unfolding into a sheet (`OPENING_LEGS`). The comet sunburst
+  of the first revision was dropped at the user's request. First `drawArraysInstanced`
   in the repo (instanced quads from an empty VAO); premultiplied "over"
   blending for the flat merged blobs. Second pass after the user re-watched
   the reference: formations (`FORM`), bar-timed journeys between them
   (`JOURNEYS`, run by `createChoreographer`), 4D turns of the sheet, tumble
   and stretch poses, motion streaks. Verified headlessly on synthetic audio
   (high/low presets, gallery tile), the probe auto→manual sign-off, and one
-  real 140 BPM track — where the section never dropped into the sunburst
-  band, so Auto's crossfade itself is unwatched on real music. Registered as
-  a draft. **Not yet judged by eye by the user.**
+  real 140 BPM track. Registered as a draft. The user has seen clips; the
+  journeys pass and the sunburst removal are not yet judged on the TV.
 - **A run of draft scene PRs** from the last two days, all waiting on review
   and a real-music judgement: Kaleidoscope #79, Powder #77, Neon Fluid #76,
   Plume #75. Each has its own memory note and headless verification in its
@@ -39,10 +38,8 @@ regenerate it at session close.
 
 ## Open questions
 
-- Ambience: is `sunburstThreshold`'s default right for real music? On the one
-  test track `sectionIntensity` stayed above it throughout, so the sunburst
-  would only show on a quiet intro or breakdown. If the sheet should give way
-  more often, lower the default rather than biasing a weight table.
+- Ambience: the tesseract journey reads as a radial warp tunnel rather than
+  a recognisable lattice — keep it as one entry in `JOURNEYS`, or drop it?
 - Ambience: the reference's sheet is a spectrum-agnostic lattice; ours ties
   disc size to each column's band (`breathe`). Keep, or make it pure motion?
 - Which of the five draft scenes graduate out of `DRAFT_SCENE_IDS`, and in
