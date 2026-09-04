@@ -6,8 +6,11 @@ regenerate it at session close.
 
 ## In flight
 
-- **Neon Fluid scene, v2 (this session)** — branch `worktree-neon-fluid`,
-  draft PR #76. After the user compared a frame against the reference short
+- **Neon Fluid scene, v3 (this session)** — branch `worktree-neon-fluid`,
+  draft PR #76. Same session, two more rounds after v2: `MIRROR_OPTIONS`
+  grew (Top-bottom = the reference geometry, Radial folds via `simUv`) and
+  treble sparkle became its own settings group (Electric threads in a
+  Negative tint). Before that, after the user compared a frame against the reference short
   ("sharper edges, more reactive to music"), the scene was reworked: the
   dye grid doubled and advected with a two-pass clamped MacCormack step, an
   explicit viscosity pass (new `viscosity` setting) replaced the old inline
@@ -30,6 +33,9 @@ regenerate it at session close.
 
 ## Open questions
 
+- Neon Fluid's Top-bottom mode rolls into one big spiral at the emitter and leaves
+  the right of the screen empty even with `TB_PUSH_SCALE`; the reference fills
+  the width. Different emitter placement, or a sustained push there?
 - Neon Fluid's `Off` and `Left-right` mirror modes work but are busier than
   Kaleidoscope (the same emitter unfolded over the whole screen). Give them
   their own emitter placement, or accept Kaleidoscope as the identity?

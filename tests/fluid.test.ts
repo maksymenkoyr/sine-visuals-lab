@@ -7,12 +7,24 @@ import {
   SPLAT_SLOTS,
   viscosityPasses,
   VISC_MAX_PASSES,
+  MIRROR_OFF,
+  MIRROR_LR,
+  MIRROR_TB,
+  MIRROR_KALEIDO,
+  MIRROR_RADIAL6,
+  MIRROR_RADIAL8,
+  MIRROR_RADIAL12,
+  MIRROR_OPTIONS,
   type MirrorMode,
   type Splat,
 } from "../src/render/scenes/fluidSim.ts";
 import {
   splatEnvelope,
   emitterState,
+  emitterPosition,
+  emitterDirection,
+  emitterScreenPosition,
+  TB_EMIT_Y,
   SETTINGS,
   SPLAT_RATE,
   SPLAT_SIGMA,
@@ -33,10 +45,34 @@ import {
 } from "../src/render/scenes/fluid.ts";
 import type { SignalId } from "../src/render/signals.ts";
 
+/** Every mirror mode, in enum order — see MIRROR_OPTIONS. */
+const ALL_MIRROR_MODES: MirrorMode[] = [
+  MIRROR_OFF,
+  MIRROR_LR,
+  MIRROR_TB,
+  MIRROR_KALEIDO,
+  MIRROR_RADIAL6,
+  MIRROR_RADIAL8,
+  MIRROR_RADIAL12,
+];
+
+/** Slot 0 (the centre emitter)'s expected sim-space position per mirror
+ *  mode — shared between emitterState's own test and the direct
+ *  emitterPosition test below, since the two must agree. */
+const SLOT0_POSITION_CASES: Array<[MirrorMode, number[]]> = [
+  [MIRROR_OFF, [0.5, 0.5]],
+  [MIRROR_LR, [0, 0.5]],
+  [MIRROR_TB, [0, TB_EMIT_Y]],
+  [MIRROR_KALEIDO, [0, 0]],
+  [MIRROR_RADIAL6, [0, 0]],
+  [MIRROR_RADIAL8, [0, 0]],
+  [MIRROR_RADIAL12, [0, 0]],
+];
+
 describe("simResolutionFor", () => {
   it("is monotone non-decreasing in detail (higher detail never yields a smaller grid)", () => {
     const detailSteps = [0, 0.1, 0.2, 0.35, 0.4, 0.6, 0.65, 0.7, 0.85, 0.9, 0.95, 1];
-    for (const mirror of [0, 1, 2] as MirrorMode[]) {
+    for (const mirror of ALL_MIRROR_MODES) {
       let prev = simResolutionFor(detailSteps[0], 1920, 1080, mirror);
       for (let i = 1; i < detailSteps.length; i++) {
         const cur = simResolutionFor(detailSteps[i], 1920, 1080, mirror);
@@ -50,7 +86,7 @@ describe("simResolutionFor", () => {
 
   it("matches SIM_TIERS row counts exactly at each tier's own minDetail", () => {
     for (const tier of SIM_TIERS) {
-      const size = simResolutionFor(tier.minDetail, 1920, 1080, 2);
+      const size = simResolutionFor(tier.minDetail, 1920, 1080, MIRROR_KALEIDO);
       expect(size.velH).toBe(tier.velRows);
       expect(size.dyeH).toBe(tier.dyeRows);
       expect(size.jacobiIters).toBe(tier.jacobi);
@@ -67,7 +103,7 @@ describe("simResolutionFor", () => {
       [1, 1],
     ];
     for (const [bufW, bufH] of bufSizes) {
-      for (const mirror of [0, 1, 2] as MirrorMode[]) {
+      for (const mirror of ALL_MIRROR_MODES) {
         for (const detail of [0, 0.3, 0.5, 0.8, 1]) {
           const size = simResolutionFor(detail, bufW, bufH, mirror);
           expect(size.velW % WIDTH_QUANTUM).toBe(0);
@@ -82,8 +118,8 @@ describe("simResolutionFor", () => {
   it("keeps texel density per screen pixel constant across mirror modes: Off gets twice the quadrant's rows, and both share the full-screen aspect", () => {
     for (const [bufW, bufH] of [[1920, 1080], [1280, 720], [1000, 1000], [2560, 1080]] as Array<[number, number]>) {
       for (const detail of [0, 0.5, 1]) {
-        const off = simResolutionFor(detail, bufW, bufH, 0);
-        const kaleidoscope = simResolutionFor(detail, bufW, bufH, 2);
+        const off = simResolutionFor(detail, bufW, bufH, MIRROR_OFF);
+        const kaleidoscope = simResolutionFor(detail, bufW, bufH, MIRROR_KALEIDO);
         expect(off.velH).toBe(kaleidoscope.velH * 2);
         expect(off.dyeH).toBe(kaleidoscope.dyeH * 2);
         // Same aspect, twice the rows → about twice the width (quantised).
@@ -94,15 +130,35 @@ describe("simResolutionFor", () => {
   });
 
   it("left-right's half domain is roughly half of Off's width (aspect halved, quantised)", () => {
-    const off = simResolutionFor(1, 1920, 1080, 0);
-    const leftRight = simResolutionFor(1, 1920, 1080, 1);
+    const off = simResolutionFor(1, 1920, 1080, MIRROR_OFF);
+    const leftRight = simResolutionFor(1, 1920, 1080, MIRROR_LR);
     const ratio = leftRight.velW / off.velW;
     expect(ratio).toBeGreaterThan(0.4);
     expect(ratio).toBeLessThan(0.6);
   });
 
+  it("top-bottom simulates the same row count as one unfolded axis (velH === tier.velRows) and is about twice Kaleidoscope's width", () => {
+    for (const [bufW, bufH] of [[1920, 1080], [1280, 720], [1000, 1000]] as Array<[number, number]>) {
+      for (const detail of [0, 0.5, 1]) {
+        const tier = SIM_TIERS.find((t) => detail >= t.minDetail) ?? SIM_TIERS[SIM_TIERS.length - 1];
+        const tb = simResolutionFor(detail, bufW, bufH, MIRROR_TB);
+        expect(tb.velH).toBe(tier.velRows);
+        const kaleidoscope = simResolutionFor(detail, bufW, bufH, MIRROR_KALEIDO);
+        expect(tb.dyeW / kaleidoscope.dyeW).toBeGreaterThan(1.8);
+        expect(tb.dyeW / kaleidoscope.dyeW).toBeLessThan(2.2);
+      }
+    }
+  });
+
+  it("every Radial mode simulates the same grid size as Kaleidoscope (they share the quadrant)", () => {
+    const kaleidoscope = simResolutionFor(0.7, 1920, 1080, MIRROR_KALEIDO);
+    for (const mirror of [MIRROR_RADIAL6, MIRROR_RADIAL8, MIRROR_RADIAL12] as MirrorMode[]) {
+      expect(simResolutionFor(0.7, 1920, 1080, mirror)).toEqual(kaleidoscope);
+    }
+  });
+
   it("a 1px canvas resize doesn't change the sim size (quantisation absorbs it)", () => {
-    for (const mirror of [0, 1, 2] as MirrorMode[]) {
+    for (const mirror of ALL_MIRROR_MODES) {
       const a = simResolutionFor(1, 1920, 1080, mirror);
       const b = simResolutionFor(1, 1921, 1080, mirror);
       expect(sameSimSize(a, b)).toBe(true);
@@ -111,7 +167,7 @@ describe("simResolutionFor", () => {
 
   it("guards a degenerate zero (or negative) buffer height by treating aspect as 1, staying finite", () => {
     for (const bufH of [0, -1]) {
-      const size = simResolutionFor(0.5, 1920, bufH, 2);
+      const size = simResolutionFor(0.5, 1920, bufH, MIRROR_KALEIDO);
       expect(Number.isFinite(size.velW)).toBe(true);
       expect(Number.isFinite(size.dyeW)).toBe(true);
       expect(size.velW).toBeGreaterThanOrEqual(WIDTH_QUANTUM);
@@ -120,7 +176,7 @@ describe("simResolutionFor", () => {
   });
 
   it("also guards a non-finite buffer size", () => {
-    const size = simResolutionFor(0.5, NaN, 1080, 0);
+    const size = simResolutionFor(0.5, NaN, 1080, MIRROR_OFF);
     expect(Number.isFinite(size.velW)).toBe(true);
     expect(Number.isFinite(size.dyeW)).toBe(true);
   });
@@ -128,7 +184,7 @@ describe("simResolutionFor", () => {
 
 describe("sameSimSize", () => {
   it("is true for two identical sizes and false when any field differs", () => {
-    const base = simResolutionFor(0.8, 1920, 1080, 2);
+    const base = simResolutionFor(0.8, 1920, 1080, MIRROR_KALEIDO);
     expect(sameSimSize(base, { ...base })).toBe(true);
     expect(sameSimSize(base, { ...base, velW: base.velW + WIDTH_QUANTUM })).toBe(false);
     expect(sameSimSize(base, { ...base, velH: base.velH + 1 })).toBe(false);
@@ -182,7 +238,7 @@ function baseInputs(overrides: Partial<EmitterInputs> = {}): EmitterInputs {
     emitStrength: 0.5,
     beatKick: 0.5,
     dyeFlow: 0.5,
-    mirror: 2,
+    mirror: MIRROR_KALEIDO,
     // Puff clock inputs default to "no puff in flight" (a large puffAge so
     // every secondary splat's puff-based envelope has decayed to ~0) so
     // existing tests that don't care about the puff clock see the same
@@ -237,18 +293,14 @@ describe("emitterState", () => {
     expect(out.length).toBe(SPLAT_SLOTS);
   });
 
-  it.each([
-    [2 as MirrorMode, [0, 0]],
-    [1 as MirrorMode, [0, 0.5]],
-    [0 as MirrorMode, [0.5, 0.5]],
-  ])("slot-0 position for mirror mode %i is %o", (mirror, expected) => {
+  it.each(SLOT0_POSITION_CASES)("slot-0 position for mirror mode %i is %o", (mirror, expected) => {
     const out = emitterState(baseInputs({ mirror }), freshSplats());
     expect(out[0].x).toBeCloseTo(expected[0], 6);
     expect(out[0].y).toBeCloseTo(expected[1], 6);
   });
 
   it("keeps every slot position within [0,1]^2 in every mirror mode", () => {
-    for (const mirror of [0, 1, 2] as MirrorMode[]) {
+    for (const mirror of ALL_MIRROR_MODES) {
       for (const flowPhase of [0, 0.7, 3.14, 12.9]) {
         const out = emitterState(baseInputs({ mirror, flowPhase }), freshSplats());
         for (const s of out) {
@@ -317,6 +369,39 @@ describe("emitterState", () => {
   it("still injects dye > 0 in full silence (puff 0, energy 0, pulses 0)", () => {
     const out = emitterState(baseInputs({ energy: 0, lowPulse: 0, beatPulse: 0, puff: 0, dropPulse: 0 }), freshSplats());
     expect(out[0].dye).toBeGreaterThan(0);
+  });
+});
+
+describe("emitterPosition / emitterDirection / emitterScreenPosition", () => {
+  it.each(SLOT0_POSITION_CASES)("emitterPosition for mirror mode %i is %o (matches emitterState's slot 0)", (mirror, expected) => {
+    const [x, y] = emitterPosition(mirror);
+    expect(x).toBeCloseTo(expected[0], 6);
+    expect(y).toBeCloseTo(expected[1], 6);
+  });
+
+  it("emitterDirection is +x for Top-bottom (its seam is horizontal) and +y for every other mode (a vertical seam)", () => {
+    for (const mirror of ALL_MIRROR_MODES) {
+      const [dx, dy] = emitterDirection(mirror);
+      expect(Math.hypot(dx, dy)).toBeCloseTo(1, 6);
+      if (mirror === MIRROR_TB) {
+        expect(dx).toBeCloseTo(1, 6);
+        expect(dy).toBeCloseTo(0, 6);
+      } else {
+        expect(dx).toBeCloseTo(0, 6);
+        expect(dy).toBeCloseTo(1, 6);
+      }
+    }
+  });
+
+  it("emitterScreenPosition is the screen's left edge, TB_EMIT_Y off the seam, for Top-bottom, screen centre for every other mode", () => {
+    for (const mirror of ALL_MIRROR_MODES) {
+      const [x, y] = emitterScreenPosition(mirror);
+      if (mirror === MIRROR_TB) {
+        expect([x, y]).toEqual([0, 0.5 + TB_EMIT_Y * 0.5]);
+      } else {
+        expect([x, y]).toEqual([0.5, 0.5]);
+      }
+    }
   });
 });
 
@@ -421,10 +506,12 @@ describe("SETTINGS weight convention", () => {
     }
   });
 
-  it("mirror is an enum setting with three options", () => {
+  it("mirror is an enum setting whose options and range match MIRROR_OPTIONS exactly", () => {
     const mirror = SETTINGS.find((s) => s.key === "mirror")!;
     expect(mirror.type).toBe("enum");
-    expect(mirror.options?.length).toBe(3);
+    expect(mirror.options).toEqual(MIRROR_OPTIONS);
+    expect(mirror.min).toBe(0);
+    expect(mirror.max).toBe(MIRROR_OPTIONS.length - 1);
   });
 
   it("every `reads` entry names a signal id that actually exists in signals.ts", () => {
@@ -436,5 +523,57 @@ describe("SETTINGS weight convention", () => {
         expect(validIds, `${s.key}.reads includes ${id}`).toContain(id);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sparkle group: the treble-driven electric/grain spark controls added on
+// top of the plain glow boost (see fluid.ts's display-shader section).
+// ---------------------------------------------------------------------------
+
+describe("Sparkle settings", () => {
+  const sparkleSettings = SETTINGS.filter((s) => s.key.startsWith("sparkle"));
+
+  it("has at least the sparkle master plus its sub-params", () => {
+    expect(sparkleSettings.length).toBeGreaterThan(1);
+  });
+
+  it("every sparkle* setting lives in the Sparkle group", () => {
+    for (const s of sparkleSettings) expect(s.group, s.key).toBe("Sparkle");
+  });
+
+  it("enum sparkle settings have max === options.length - 1 and min 0 / step 1", () => {
+    for (const s of sparkleSettings) {
+      if (s.type !== "enum") continue;
+      expect(s.options, s.key).toBeDefined();
+      expect(s.max, s.key).toBe(s.options!.length - 1);
+      expect(s.min, s.key).toBe(0);
+      expect(s.step, s.key).toBe(1);
+    }
+  });
+
+  it("sparkleStyle and sparkleTint expose the four options the display shader's int(u... + 0.5) branch expects", () => {
+    const style = SETTINGS.find((s) => s.key === "sparkleStyle")!;
+    const tint = SETTINGS.find((s) => s.key === "sparkleTint")!;
+    expect(style.options).toEqual(["Glow", "Electric", "Grain", "Electric + Glow"]);
+    expect(tint.options).toEqual(["Negative", "Complement", "White", "Palette"]);
+  });
+
+  it("keeps the auto weight convention (|w| in [0.15, 0.5], sum under 0.8) for any sparkle* setting that opts into auto", () => {
+    for (const s of sparkleSettings) {
+      if (!s.auto) continue;
+      let sum = 0;
+      for (const [dial, w] of Object.entries(s.auto)) {
+        expect(Math.abs(w!), `${s.key}.auto.${dial}`).toBeGreaterThanOrEqual(0.15);
+        expect(Math.abs(w!), `${s.key}.auto.${dial}`).toBeLessThanOrEqual(0.5);
+        sum += Math.abs(w!);
+      }
+      expect(sum, `${s.key} sum of |auto weights|`).toBeLessThan(0.8);
+    }
+  });
+
+  it("the sparkle master itself keeps its original auto weights, unchanged by the regroup", () => {
+    const sparkle = SETTINGS.find((s) => s.key === "sparkle")!;
+    expect(sparkle.auto).toEqual({ brightness: 0.35, attack: 0.15 });
   });
 });

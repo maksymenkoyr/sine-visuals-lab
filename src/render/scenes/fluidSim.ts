@@ -26,12 +26,15 @@ import { createProgram, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 // lowest SIM_TIERS entry or the highest.
 //
 // Boundaries. Sim uv (0,0) is screen centre; the sim only ever simulates uv
-// in [0,1]^2 — one quadrant when the scene's mirror mode is Kaleidoscope, a
-// half when Left-right, the whole screen when Off (the mode only changes
-// the domain's aspect, via simResolutionFor, and where fluid.ts puts the
-// emitter). All four edges are free-slip walls handled by ghost cells: a
-// stencil read that would cross an edge reflects the texel/uv coordinate
-// back into range and negates the velocity component normal to that edge.
+// in [0,1]^2 — one quadrant when the scene's mirror mode is Kaleidoscope or
+// a Radial mode (Radial modes fold the screen into a wedge at display time
+// and reuse the same quadrant the sim already has), a half when Left-right
+// or Top-bottom (Top-bottom is a half of full width), the whole screen when
+// Off (the mode only changes the domain's aspect, via simResolutionFor, and
+// where fluid.ts puts the emitter). All four edges are free-slip walls
+// handled by ghost cells: a stencil read that would cross an edge reflects
+// the texel/uv coordinate back into range and negates the velocity
+// component normal to that edge.
 // At the mirror seams that is exactly what a mirror-symmetric flow looks
 // like from this side; at the outer screen edges it is a wall the plume
 // caps against and rolls off — the mushroom caps and side vortices of the
@@ -68,8 +71,58 @@ import { createProgram, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 // restores the plain semi-Lagrangian step.
 
 export type SimFormat = "half" | "byte";
-/** Matches the Mirror enum setting's index: off | left-right | kaleidoscope. */
-export type MirrorMode = 0 | 1 | 2;
+/** Matches the Mirror enum setting's index — see MIRROR_OPTIONS for the
+ *  ordered list of modes. */
+export type MirrorMode = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+// Left untyped (not `: MirrorMode`) on purpose: keeping each constant's
+// literal type lets the mirrorDomain switch below be checked exhaustively —
+// widening to MirrorMode would hide a missing case.
+export const MIRROR_OFF = 0;
+export const MIRROR_LR = 1;
+export const MIRROR_TB = 2;
+export const MIRROR_KALEIDO = 3;
+export const MIRROR_RADIAL6 = 4;
+export const MIRROR_RADIAL8 = 5;
+export const MIRROR_RADIAL12 = 6;
+
+/** Mirror enum setting's options, index-matched to MirrorMode — fluid.ts's
+ *  `mirror` SETTINGS entry uses this array directly so the device menu's
+ *  labels and the enum's range can't drift apart. */
+export const MIRROR_OPTIONS: readonly string[] = [
+  "Off",
+  "Left-right",
+  "Top-bottom",
+  "Kaleidoscope",
+  "Radial 6",
+  "Radial 8",
+  "Radial 12",
+];
+
+/** What a mirror mode folds: `foldX`/`foldY` say whether the sim only ever
+ *  covers half of that screen axis (the display pass mirrors the rest back
+ *  in), `radial` is the wedge count for a Radial mode (0 for every
+ *  non-radial mode). Radial modes fold both axes like Kaleidoscope — they
+ *  simulate the same quadrant and only differ in how the display pass folds
+ *  it (see simUv in fluid.ts). */
+export function mirrorDomain(m: MirrorMode): { foldX: boolean; foldY: boolean; radial: number } {
+  switch (m) {
+    case MIRROR_OFF:
+      return { foldX: false, foldY: false, radial: 0 };
+    case MIRROR_LR:
+      return { foldX: true, foldY: false, radial: 0 };
+    case MIRROR_TB:
+      return { foldX: false, foldY: true, radial: 0 };
+    case MIRROR_KALEIDO:
+      return { foldX: true, foldY: true, radial: 0 };
+    case MIRROR_RADIAL6:
+      return { foldX: true, foldY: true, radial: 6 };
+    case MIRROR_RADIAL8:
+      return { foldX: true, foldY: true, radial: 8 };
+    case MIRROR_RADIAL12:
+      return { foldX: true, foldY: true, radial: 12 };
+  }
+}
 
 export interface SimSize {
   velW: number;
@@ -107,14 +160,17 @@ export const WIDTH_QUANTUM = 8;
 
 /**
  * Picks a tier from `detail` and derives grid sizes from the drawing
- * buffer's aspect and `mirror`. A tier's row counts are specified for the
- * Kaleidoscope quadrant, i.e. per *half* screen height; the sim only ever
- * covers the domain that `mirror` leaves unmirrored, so Left-right (a half,
- * full height) and Off (the whole screen) get twice the rows to keep the
- * same texel density per screen pixel — otherwise those modes render soft
- * and blurry with the same grid stretched over more screen. Widths follow
- * from the domain's aspect: a quadrant has the full screen aspect (both axes
- * halved), a left-right half has half of it, the whole screen all of it.
+ * buffer's aspect and `mirror`, via mirrorDomain's foldX/foldY. A tier's row
+ * counts are specified for the Kaleidoscope quadrant, i.e. per *half* screen
+ * height; the sim only ever covers the domain that `mirror` leaves
+ * unfolded, so an axis that isn't folded doubles its rows to keep the same
+ * texel density per screen pixel — otherwise a mode that stretches the same
+ * grid over more screen renders soft and blurry. Widths follow from the
+ * domain's aspect the same way: a quadrant (both axes folded — Kaleidoscope
+ * and every Radial mode, which simulate the same quadrant, see mirrorDomain)
+ * has the full screen aspect, Left-right (x folded only) has half of it,
+ * Top-bottom (y folded only) has twice it, and Off (neither folded) has it
+ * as-is.
  */
 export function simResolutionFor(
   detail: number,
@@ -125,9 +181,12 @@ export function simResolutionFor(
   const tier = SIM_TIERS.find((t) => detail >= t.minDetail) ?? SIM_TIERS[SIM_TIERS.length - 1];
 
   const fullAspect = bufW > 0 && bufH > 0 && Number.isFinite(bufW) && Number.isFinite(bufH) ? bufW / bufH : 1;
-  let domainAspect = mirror === 1 ? fullAspect / 2 : fullAspect;
+  const { foldX, foldY } = mirrorDomain(mirror);
+  const widthScale = foldX ? 0.5 : 1;
+  const heightScale = foldY ? 0.5 : 1;
+  let domainAspect = (fullAspect * widthScale) / heightScale;
   if (!Number.isFinite(domainAspect) || domainAspect <= 0) domainAspect = 1;
-  const rowScale = mirror === 2 ? 1 : 2;
+  const rowScale = foldY ? 1 : 2;
 
   const quantize = (rows: number) => Math.max(WIDTH_QUANTUM, Math.ceil((Math.round(rows * domainAspect)) / WIDTH_QUANTUM) * WIDTH_QUANTUM);
   const velH = tier.velRows * rowScale;
