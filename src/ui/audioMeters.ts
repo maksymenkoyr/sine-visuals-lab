@@ -4,6 +4,7 @@ import type { FeatureFrame } from "../audio/types.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
+import { BEAT_GRIDS, BEAT_GRID_DEFAULT } from "../audio/beatGrid.ts";
 import {
   AUTO_SKY,
   FONT_MONO,
@@ -19,6 +20,7 @@ import {
   chipBtnStyle,
   createCard,
   createChipButton,
+  createPickerRow,
   createTraceLegend,
   digitsStyle,
   digitsTextStyle,
@@ -155,6 +157,11 @@ export interface AudioMeters {
 export interface AudioMetersDeps {
   /** The Loudness card's Reset chip: start the integrated reading over. */
   onLufsReset: () => void;
+  /** The Rhythm card's Beat grid row — the one control in the meters
+   *  panel, since its effect is what the Beat trace beneath it shows. The
+   *  stored index into BEAT_GRIDS for the current scene (src/audio/beatGrid.ts);
+   *  the row re-reads `get` on its text tick so a scene switch is picked up. */
+  beatGrid: { get: () => number; set: (value: number) => void };
 }
 
 const PEAK_FALL_PER_SEC = 1.2; // matches spectrumStrip.ts's peak-hold decay
@@ -933,6 +940,21 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   rhythmRow.style.cssText = rhythmRowStyle;
   rhythmRow.append(section.el, tempo.el);
   const hits = createHitsRow();
+  // Beat grid: which pulses every scene's beat reactions fire on. Lives
+  // here rather than in the Input card because its effect is visible in
+  // the Beat trace two rows down — red ticks either land where the
+  // detector fired or on the blue grid — and the tempo tile beside it is
+  // what a grid stop is waiting on (the row says so while it is).
+  const gridRow = createPickerRow({
+    label: "Beat grid",
+    accent: NEUTRAL_ACCENT,
+    options: BEAT_GRIDS.map((g) => g.label),
+    defaultValue: BEAT_GRID_DEFAULT,
+    description:
+      "Which pulses this scene's beat reactions fire on: every detected hit, or a steady grid from the tempo tracker — one pulse per eighth, beat, half bar, bar or two bars. A grid waits for a locked tempo and fires hits until then.",
+    get: () => deps.beatGrid.get(),
+    set: (value) => deps.beatGrid.set(value),
+  });
   // The onset detector's own input: how hard this frame's spectral flux
   // cleared its adaptive threshold (FeatureExtractor.fluxRatio). The tick
   // marks the firing line — right of it, the beat dot just flashed; left of
@@ -972,7 +994,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   beat.setReadout(String(HISTORY_SPAN_SEC));
   let prevBeatPhase: number | null = null;
   const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm" });
-  rhythmCard.body.append(rhythmRow, spacer(), hits.el, spacer(), beat.el, spacer(), onset.el);
+  rhythmCard.body.append(rhythmRow, spacer(), gridRow.el, spacer(), hits.el, spacer(), beat.el, spacer(), onset.el);
 
   // ---- Character ----
   const dialRows = MUSIC_DIALS.map((dial) => ({
@@ -1213,6 +1235,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         section.setValue(sectionVal, dtSec);
         if (anim?.dropOnset) section.flash(HOT_RED);
         if (text) {
+          gridRow.sync();
+          // A grid stop that hasn't got a tempo yet is firing hits — say so
+          // beside the choice rather than letting it look ignored.
+          const waiting = anim !== null && deps.beatGrid.get() !== BEAT_GRID_DEFAULT && !anim.onGrid;
+          gridRow.setStatus(waiting ? "no tempo lock · hits" : "");
           tempo.settle(frame?.bpm ?? 0, nowMs, raw || smoothingOff);
           section.setReadout(
             sectionVal === null ? "--" : pct(sectionVal),

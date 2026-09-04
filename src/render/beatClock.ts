@@ -30,6 +30,10 @@ export interface BeatClock {
   /** beatPhase over a BEATS_PER_BAR-beat bar, for effects that should read
    *  once every few beats rather than every single one. */
   readonly barPhase: number;
+  /** The same phase unwrapped: beats elapsed since the clock started, for
+   *  anything that needs to count beats rather than watch one wrap — the
+   *  beat grid (gridPulse.ts) reads this. Free-running like beatPhase. */
+  readonly beats: number;
   /** 0..1, ramps toward 1 while a tempo is held and toward 0 once bpm drops
    *  to 0 — lets tempo-driven effects fade in/out instead of popping. */
   readonly tempoLock: number;
@@ -46,6 +50,7 @@ export function createBeatClock(): BeatClock {
   const clock: BeatClock = {
     beatPhase: 0,
     barPhase: 0,
+    beats: 0,
     tempoLock: 0,
     advance(dtSec: number, bpm: number, beatFired: boolean): void {
       const target = Math.max(0, bpm);
@@ -67,6 +72,7 @@ export function createBeatClock(): BeatClock {
 
       (clock as { beatPhase: number }).beatPhase = wrap01(phase);
       (clock as { barPhase: number }).barPhase = wrap01(phase / BEATS_PER_BAR);
+      (clock as { beats: number }).beats = phase;
       (clock as { tempoLock: number }).tempoLock = tempoLock;
     },
   };

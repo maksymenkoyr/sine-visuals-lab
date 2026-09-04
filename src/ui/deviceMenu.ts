@@ -51,14 +51,19 @@ import {
   createAdvancedSection,
   createCard,
   createChipButton,
+  createPickerRow,
   createSignalStrip,
   createTraceLegend,
   digitsStyle,
   digitsTextStyle,
   groupHeading,
+  paletteChipLitStyle,
+  paletteChipStyle,
+  paletteListStyle,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
+  rowResetStyle,
   rowRightStyle,
   spacer,
   unitStyle,
@@ -212,6 +217,10 @@ export interface DeviceMenuDeps {
   /** The Loudness card's Reset chip — starts the integrated LUFS reading
    *  over (src/audio/lufsAnalyser.ts). */
   onLufsReset: () => void;
+  /** Per-scene Beat grid choice (src/audio/beatGrid.ts) for the Rhythm
+   *  card's row — see audioMeters.ts's AudioMetersDeps.beatGrid. */
+  getBeatGrid: (sceneId: string) => number;
+  onBeatGridChange: (sceneId: string, value: number) => void;
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   resolveSensitivityValue: (sceneId: string) => number;
@@ -331,10 +340,6 @@ const autoChipManualStyle = (accent: string) =>
 const offChipLitStyle = `${autoChipBaseStyle} background: rgba(255,255,255,0.82); border: 1px solid rgba(255,255,255,0.82); color: #070a09;`;
 const offChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
-const rowResetStyle = `
-  font: 400 11px/1 ${FONT_MONO}; color: rgba(255,255,255,0.45); background: none; border: none;
-  padding: 0; cursor: pointer; flex-shrink: 0;
-`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
 const AUTO_STRENGTH_HINT = "How hard auto pushes every A control";
 
@@ -365,14 +370,6 @@ const liveDotStyle = (on: boolean) =>
 const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.5);`;
 const hairlineStyle = `height: 1px; background: ${withAlpha(HAIRLINE, 0.45)}; margin: 8px 0 9px;`;
 
-// Palette chips.
-const paletteListStyle = `display: flex; flex-wrap: wrap; gap: 4px;`;
-const paletteChipStyle = `
-  font: 400 10.5px/1.2 ${FONT_MONO}; letter-spacing: 0.06em; color: rgba(255,255,255,0.7);
-  background: transparent; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px;
-  padding: 4px 8px; cursor: pointer;
-`;
-const paletteChipLitStyle = `${paletteChipStyle} color: #fff; background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.5);`;
 
 // Footer strip.
 const footerStyle = `
@@ -1196,113 +1193,6 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   return el;
 }
 
-interface PickerRowSpec {
-  label: string;
-  accent: string;
-  /** Names in value order — the stored value is the chosen index. */
-  options: readonly string[];
-  defaultValue: number;
-  description?: string;
-  get: () => number;
-  set: (value: number) => void;
-}
-
-/** An enum setting's row: same head as a toggle row, a strip of named chips
- *  (the palette picker's chips) where the slider would be. The strip is the
- *  one focusable control so it sits in the Tab ring like a slider; ←/→ (and
- *  the T hotkey) cycle the choice. Never auto-tunable, for the same reason
- *  a toggle isn't — see createToggleRow. */
-function createPickerRow(spec: PickerRowSpec): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "vc-row";
-
-  const head = document.createElement("div");
-  head.style.cssText = rowHeadStyle;
-  const label = document.createElement("div");
-  label.textContent = spec.label;
-  label.className = "vc-label";
-  label.style.cssText = rowLabelStyle;
-  const right = document.createElement("div");
-  right.style.cssText = rowRightStyle;
-  const readout = document.createElement("span");
-  readout.style.cssText = `${digitsTextStyle} color: #fff;`;
-  const resetBtn = document.createElement("button");
-  resetBtn.textContent = "↺";
-  resetBtn.title = `Reset ${spec.label} (R)`;
-  resetBtn.style.cssText = rowResetStyle;
-  right.append(readout, resetBtn);
-  head.append(label, right);
-
-  const strip = document.createElement("div");
-  strip.className = "vc-picker";
-  strip.tabIndex = 0;
-  strip.setAttribute("role", "radiogroup");
-  strip.setAttribute("aria-label", spec.label);
-  strip.style.cssText = paletteListStyle;
-  el.style.setProperty("--vc-accent", spec.accent);
-  wireHoverFocus(el, strip);
-  const chips = spec.options.map((name, i) => {
-    const btn = document.createElement("button");
-    btn.textContent = name;
-    btn.setAttribute("role", "radio");
-    btn.tabIndex = -1; // the strip is the ring's stop, not each chip
-    btn.addEventListener("click", () => {
-      apply(i);
-      spec.set(i);
-      strip.focus();
-    });
-    strip.appendChild(btn);
-    return btn;
-  });
-
-  const hint = document.createElement("div");
-  hint.className = "vc-hint";
-  hint.textContent = spec.description ?? "";
-  if (!spec.description) hint.style.display = "none";
-
-  el.append(head, strip, hint);
-
-  const clampIndex = (value: number): number =>
-    Math.min(spec.options.length - 1, Math.max(0, Math.round(value)));
-
-  let current = clampIndex(spec.get());
-  function apply(value: number): void {
-    current = clampIndex(value);
-    chips.forEach((chip, i) => {
-      chip.style.cssText = i === current ? paletteChipLitStyle : paletteChipStyle;
-      chip.setAttribute("aria-checked", String(i === current));
-    });
-    readout.textContent = spec.options[current];
-    resetBtn.style.visibility = current !== clampIndex(spec.defaultValue) ? "visible" : "hidden";
-  }
-  apply(current);
-
-  const cycle = (step: number): void => {
-    const next = (current + step + spec.options.length) % spec.options.length;
-    apply(next);
-    spec.set(next);
-  };
-  strip.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-      e.preventDefault();
-      cycle(1);
-    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-      e.preventDefault();
-      cycle(-1);
-    }
-  });
-  resetBtn.addEventListener("click", () => {
-    apply(spec.defaultValue);
-    spec.set(clampIndex(spec.defaultValue));
-  });
-
-  wireRowKeys(strip, {
-    reset: () => resetBtn.click(),
-    toggleOff: () => cycle(1),
-  });
-
-  return el;
-}
 
 function statusText(status: AudioStatus): string {
   switch (status.source) {
@@ -1359,7 +1249,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
   const spectrumStrip = bandFaders.strip;
   // The meters beneath the Bands card — see audioMeters.ts.
-  const audioMeters = createAudioMeters({ onLufsReset: deps.onLufsReset });
+  const audioMeters = createAudioMeters({
+    onLufsReset: deps.onLufsReset,
+    beatGrid: {
+      get: () => deps.getBeatGrid(deps.currentSceneId()),
+      set: (value) => deps.onBeatGridChange(deps.currentSceneId(), value),
+    },
+  });
 
   const spectrumCol = document.createElement("div");
   spectrumCol.className = "vc-spectrum-col";
@@ -1946,7 +1842,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           description: spec.description,
           get: () => deps.getSceneSettingValue(sceneId, spec),
           set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
-        }),
+          wire: (row, strip, a) => {
+            wireHoverFocus(row, strip);
+            wireRowKeys(strip, { reset: a.reset, toggleOff: () => a.cycle(1) });
+          },
+        }).el,
       );
       return;
     }
