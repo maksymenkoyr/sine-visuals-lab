@@ -329,8 +329,8 @@ export interface SignalStrip {
   chip: HTMLElement;
   /** The pill row — caller places it as a sibling of `.vc-hint`, not inside
    *  it, so the two reveal independently (see the .vc-reads rule,
-   *  controlsTheme.ts) and the pills survive the hint's own text being
-   *  replaced wholesale while auto owns the row. */
+   *  controlsTheme.ts) and the pills survive the hint growing its auto
+   *  takeover line while auto owns the row. */
   strip: HTMLElement;
   /** Per-pill live value in [0,1] and whether its link is currently active
    *  (SignalLink.activeWhen) — same order as the specs passed in. */
@@ -391,6 +391,152 @@ export function createSignalStrip(specs: SignalPillSpec[], accent: string): Sign
         pills[i].fill.style.width = `${Math.max(0, Math.min(1, s.value)) * 100}%`;
         pills[i].pill.style.opacity = s.active ? "1" : "0.4";
       }
+    },
+  };
+}
+
+// A row's ↺ reset glyph, shared by slider, toggle and picker rows.
+export const rowResetStyle = `
+  font: 400 11px/1 ${FONT_MONO}; color: rgba(255,255,255,0.45); background: none; border: none;
+  padding: 0; cursor: pointer; flex-shrink: 0;
+`;
+
+// Palette chips.
+export const paletteListStyle = `display: flex; flex-wrap: wrap; gap: 4px;`;
+export const paletteChipStyle = `
+  font: 400 10.5px/1.2 ${FONT_MONO}; letter-spacing: 0.06em; color: rgba(255,255,255,0.7);
+  background: transparent; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px;
+  padding: 4px 8px; cursor: pointer;
+`;
+export const paletteChipLitStyle = `${paletteChipStyle} color: #fff; background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.5);`;
+const pickerStatusStyle = `font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.06em; color: rgba(255,255,255,0.4); white-space: nowrap;`;
+
+export interface PickerRow {
+  el: HTMLElement;
+  /** Re-reads spec.get() — for a host whose value can change underneath
+   *  the row (a scene switch, for a per-scene store). */
+  sync: () => void;
+  /** The dim note beside the readout; empty string clears it. */
+  setStatus: (text: string) => void;
+}
+
+export interface PickerRowSpec {
+  label: string;
+  accent: string;
+  /** Names in value order — the stored value is the chosen index. */
+  options: readonly string[];
+  defaultValue: number;
+  description?: string;
+  get: () => number;
+  set: (value: number) => void;
+  /** Host hook for the strip's keyboard/hover wiring — the device menu
+   *  passes its wireHoverFocus + wireRowKeys (R resets, T cycles); the
+   *  meters panel, which has no hotkey layer, passes nothing. */
+  wire?: (row: HTMLElement, strip: HTMLElement, actions: { reset: () => void; cycle: (step: number) => void }) => void;
+}
+
+/** An enum setting's row: same head as a toggle row, a strip of named chips
+ *  (the palette picker's chips) where the slider would be. The strip is the
+ *  one focusable control so it sits in the Tab ring like a slider; ←/→ (and
+ *  the T hotkey) cycle the choice. Never auto-tunable, for the same reason
+ *  a toggle isn't — see createToggleRow. */
+export function createPickerRow(spec: PickerRowSpec): PickerRow {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = spec.label;
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  const right = document.createElement("div");
+  right.style.cssText = rowRightStyle;
+  const readout = document.createElement("span");
+  readout.style.cssText = `${digitsTextStyle} color: #fff;`;
+  // A dim note after the readout for state the host wants to show beside
+  // the choice (the Rhythm card's "waiting for tempo"); empty by default.
+  const status = document.createElement("span");
+  status.style.cssText = pickerStatusStyle;
+  const resetBtn = document.createElement("button");
+  resetBtn.textContent = "↺";
+  resetBtn.title = `Reset ${spec.label} (R)`;
+  resetBtn.style.cssText = rowResetStyle;
+  right.append(readout, status, resetBtn);
+  head.append(label, right);
+
+  const strip = document.createElement("div");
+  strip.className = "vc-picker";
+  strip.tabIndex = 0;
+  strip.setAttribute("role", "radiogroup");
+  strip.setAttribute("aria-label", spec.label);
+  strip.style.cssText = paletteListStyle;
+  el.style.setProperty("--vc-accent", spec.accent);
+  const chips = spec.options.map((name, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = name;
+    btn.setAttribute("role", "radio");
+    btn.tabIndex = -1; // the strip is the ring's stop, not each chip
+    btn.addEventListener("click", () => {
+      apply(i);
+      spec.set(i);
+      strip.focus();
+    });
+    strip.appendChild(btn);
+    return btn;
+  });
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  hint.textContent = spec.description ?? "";
+  if (!spec.description) hint.style.display = "none";
+
+  el.append(head, strip, hint);
+
+  const clampIndex = (value: number): number =>
+    Math.min(spec.options.length - 1, Math.max(0, Math.round(value)));
+
+  let current = clampIndex(spec.get());
+  function apply(value: number): void {
+    current = clampIndex(value);
+    chips.forEach((chip, i) => {
+      chip.style.cssText = i === current ? paletteChipLitStyle : paletteChipStyle;
+      chip.setAttribute("aria-checked", String(i === current));
+    });
+    readout.textContent = spec.options[current];
+    resetBtn.style.visibility = current !== clampIndex(spec.defaultValue) ? "visible" : "hidden";
+  }
+  apply(current);
+
+  const cycle = (step: number): void => {
+    const next = (current + step + spec.options.length) % spec.options.length;
+    apply(next);
+    spec.set(next);
+  };
+  strip.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      cycle(1);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      cycle(-1);
+    }
+  });
+  resetBtn.addEventListener("click", () => {
+    apply(spec.defaultValue);
+    spec.set(clampIndex(spec.defaultValue));
+  });
+
+  spec.wire?.(el, strip, { reset: () => resetBtn.click(), cycle });
+
+  return {
+    el,
+    sync: () => {
+      const next = clampIndex(spec.get());
+      if (next !== current) apply(next);
+    },
+    setStatus: (text) => {
+      if (status.textContent !== text) status.textContent = text;
     },
   };
 }

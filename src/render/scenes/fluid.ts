@@ -39,7 +39,7 @@ import { createFluidBolts, type FluidBolts } from "./fluidBolts.ts";
 // emitterState), the SETTINGS the device menu shows, and the display shader
 // that colours the sim by *screen* x (blue -> cyan -> yellow -> orange ->
 // red) with a purple emitter tag blended in and a Sobel-edge neon line with
-// a mip-sampled glow on top. The Sparkle settings group (sparkleStyle etc.,
+// a mip-sampled glow on top. The sparkle settings (sparkleStyle etc., the Look group's advanced run,
 // display-shader-only — see the hash21 helper above main()) layers a
 // Currents style (short dashes riding uVelSim's local flow direction,
 // gated to the densest/whitest dye by currentDensity) or dense Grain
@@ -51,7 +51,7 @@ import { createFluidBolts, type FluidBolts } from "./fluidBolts.ts";
 // threaded through the liquid in *screen* space (boltEndpoints, with the
 // fold's mirror copies from boltMirrors), composited additively and, through
 // a blurred mip of the same layer, lighting up the dye lines around them. A
-// Light settings group (dropFlash/shockwave/buildGlow/beatFlash/strobe) and
+// set of light settings (dropFlash/shockwave/buildGlow/beatFlash/strobe, the Post group) and
 // the Look group's neon/hotWhite tone map layer further music-reactive
 // flashes and saturation on top of all of that — strobe
 // (createStrobeState/triggerStrobe/advanceStrobe/strobeFrame below) is a
@@ -74,7 +74,7 @@ import { createFluidBolts, type FluidBolts } from "./fluidBolts.ts";
 // of the edge line (`uBeatPulse`) and tints the screen-position colour ramp
 // by the live spectral centroid, on top of the manual hue shift. The
 // Swirl/Dye fade/Viscosity settings are themselves music-reactive via `auto`
-// weights, same as every other scene's SETTINGS. The Symmetry group's
+// weights, same as every other scene's SETTINGS. The the Form group's
 // `symmetry` setting's Auto option (createFoldState/advanceFold below)
 // drifts between the FOLD_FAMILY quadrant folds instead of holding one — a
 // random hold shortened by loudness and the group's Auto drift setting (and
@@ -510,7 +510,7 @@ export const FOLD_FAMILY: readonly MirrorMode[] = [MIRROR_KALEIDO, MIRROR_RADIAL
  *  (see foldMixEased — the display shader warps the sample coordinate itself
  *  over this span, not a crossfade of two rendered images); FOLD_HOLD_MIN/MAX
  *  bound the random seconds a fold holds before the next drift, scaled by the
- *  Symmetry group's Auto drift setting (louder music also shortens it — see
+ *  the Form group's Auto drift setting (louder music also shortens it — see
  *  advanceFold); FOLD_ROT_BASE/ENERGY set the slow rotation's rate at rest
  *  (scaled by the Spin setting) and its extra gain from energy (further
  *  nudged by the beat); FOLD_ZOOM_AMP/RATE set the size and speed of a slow
@@ -527,7 +527,7 @@ export const FOLD_ZOOM_RATE = 0.07;
 /** Auto symmetry's drift state: warps from modeA to modeB over FOLD_FADE_SEC
  *  seconds (see foldMixEased for the eased ramp uploaded as uFoldMix), picks
  *  the next modeB once the current hold expires (or a drop hits, and only
- *  when the Symmetry group's Auto drift setting is > 0) and the warp has
+ *  when the the Form group's Auto drift setting is > 0) and the warp has
  *  finished, and carries a slow rotation plus a breathing zoom applied to the
  *  fold's own coordinate (see simUv's uFoldRot/uFoldZoom use in the display
  *  shader) — a bit like a Chladni plate, random music energy reconfiguring
@@ -624,10 +624,74 @@ export function foldMixEased(m: number): number {
 
 export const SETTINGS: SceneSetting[] = [
   {
+    key: "symmetry",
+    label: "Symmetry",
+    description: "Auto drifts between the folded looks with the music; the rest fix one fold",
+    group: "Form",
+    min: 0,
+    max: SYMMETRY_OPTIONS.length - 1,
+    step: 1,
+    default: 0,
+    type: "enum",
+    options: [...SYMMETRY_OPTIONS],
+  },
+  {
+    key: "foldCount",
+    label: "Mirror count",
+    description: "Wedges of a Radial fold — applies in Auto too",
+    group: "Form",
+    min: FOLD_WEDGES_MIN,
+    max: FOLD_WEDGES_MAX,
+    step: 1,
+    default: 6,
+  },
+  {
+    key: "foldSpread",
+    label: "Wedge spread",
+    description: "The Radial fold: how much of the fluid each wedge squeezes in (0 = mirror a true slice)",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.25,
+  },
+  {
+    key: "foldSpin",
+    label: "Spin",
+    description: "Slow rotation of the fold, in every mode",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+    auto: { tempo: 0.2, loudness: 0.15 },
+  },
+  {
+    key: "foldBreathe",
+    label: "Zoom breathing",
+    description: "Slow in-and-out of the fold",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+  },
+  {
+    key: "foldDrift",
+    label: "Auto drift",
+    description: "How often Auto symmetry moves to its next fold (0 = never)",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    reads: ["anim.dropOnset"],
+  },
+  {
     key: "emitStrength",
     label: "Emitter push",
     description: "Continuous push from the centre emitter (the beat puffs add to it)",
-    group: "Flow",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -638,7 +702,7 @@ export const SETTINGS: SceneSetting[] = [
     key: "beatKick",
     label: "Beat puffs",
     description: "Force and dye of the puff fired on each beat",
-    group: "Flow",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -650,7 +714,7 @@ export const SETTINGS: SceneSetting[] = [
     key: "curl",
     label: "Swirl",
     description: "Vorticity confinement — how curly the flow gets",
-    group: "Flow",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -661,7 +725,7 @@ export const SETTINGS: SceneSetting[] = [
     key: "viscosity",
     label: "Viscosity",
     description: "How syrupy the flow is — high values give big smooth rolls",
-    group: "Flow",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -672,7 +736,7 @@ export const SETTINGS: SceneSetting[] = [
     key: "dissipation",
     label: "Dye fade",
     description: "How quickly dye fades as it drifts",
-    group: "Flow",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -683,7 +747,7 @@ export const SETTINGS: SceneSetting[] = [
     key: "dyeFlow",
     label: "Dye flow",
     description: "How much dye the emitter and splats inject",
-    group: "Flow",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -694,7 +758,7 @@ export const SETTINGS: SceneSetting[] = [
     key: "warp",
     label: "Tempo warp",
     description: "How much loud passages speed the whole flow up",
-    group: "Flow",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -722,70 +786,6 @@ export const SETTINGS: SceneSetting[] = [
     step: 0.01,
     default: 0,
     reads: ["anim.centroid"],
-  },
-  {
-    key: "symmetry",
-    label: "Symmetry",
-    description: "Auto drifts between the folded looks with the music; the rest fix one fold",
-    group: "Symmetry",
-    min: 0,
-    max: SYMMETRY_OPTIONS.length - 1,
-    step: 1,
-    default: 0,
-    type: "enum",
-    options: [...SYMMETRY_OPTIONS],
-  },
-  {
-    key: "foldCount",
-    label: "Mirror count",
-    description: "Wedges of a Radial fold — applies in Auto too",
-    group: "Symmetry",
-    min: FOLD_WEDGES_MIN,
-    max: FOLD_WEDGES_MAX,
-    step: 1,
-    default: 6,
-  },
-  {
-    key: "foldSpread",
-    label: "Wedge spread",
-    description: "The Radial fold: how much of the fluid each wedge squeezes in (0 = mirror a true slice)",
-    group: "Symmetry",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.25,
-  },
-  {
-    key: "foldSpin",
-    label: "Spin",
-    description: "Slow rotation of the fold, in every mode",
-    group: "Symmetry",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.3,
-    auto: { tempo: 0.2, loudness: 0.15 },
-  },
-  {
-    key: "foldBreathe",
-    label: "Zoom breathing",
-    description: "Slow in-and-out of the fold",
-    group: "Symmetry",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.3,
-  },
-  {
-    key: "foldDrift",
-    label: "Auto drift",
-    description: "How often Auto symmetry moves to its next fold (0 = never)",
-    group: "Symmetry",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    reads: ["anim.dropOnset"],
   },
   {
     key: "lineSoft",
@@ -819,66 +819,10 @@ export const SETTINGS: SceneSetting[] = [
     auto: { loudness: 0.25, dynamics: 0.15 },
   },
   {
-    key: "dropFlash",
-    label: "Drop flash",
-    description: "Whole-screen brightness lift and line-to-white flash on a detected drop",
-    group: "Light",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    auto: { dynamics: 0.25, pulse: 0.15 },
-    reads: ["anim.dropOnset"],
-  },
-  {
-    key: "shockwave",
-    label: "Bass shockwave",
-    description: "A ring that expands from the emitter on a bass hit or drop",
-    group: "Light",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.5,
-    auto: { attack: 0.3, pulse: 0.2 },
-    reads: ["anim.lowOnset", "anim.dropOnset"],
-  },
-  {
-    key: "buildGlow",
-    label: "Build-up glow",
-    description: "Extra halo brightness as a phrase builds toward its peak",
-    group: "Light",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.4,
-    auto: { dynamics: 0.2, loudness: 0.15 },
-  },
-  {
-    key: "beatFlash",
-    label: "Beat flash",
-    description: "Line-gain flash on every beat",
-    group: "Light",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.15,
-    auto: { pulse: 0.3, attack: 0.15 },
-  },
-  {
-    key: "strobe",
-    label: "Strobe",
-    description: "Hard white / red / black frames cut in with each lightning strike (Lightning sparkle style only; photosensitivity: keep low on shared screens)",
-    group: "Light",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-  },
-  {
     key: "sparkle",
     label: "Treble sparkle",
     description: "How much treble fires the sparks",
-    group: "Sparkle",
+    group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
@@ -889,7 +833,7 @@ export const SETTINGS: SceneSetting[] = [
     key: "sparkleStyle",
     label: "Style",
     description: "Glow: brighter line only. Currents: electric dashes riding the flow through dense dye. Grain: dense speckle. Currents + Glow: both. Lightning: branched bolts fired on treble hits",
-    group: "Sparkle",
+    group: "Look",
     min: 0,
     max: 4,
     step: 1,
@@ -901,7 +845,8 @@ export const SETTINGS: SceneSetting[] = [
     key: "sparkleTint",
     label: "Spark colour",
     description: "Negative: inverse of the local line colour. Complement: opposite hue. White. Palette: cycles the scene palette",
-    group: "Sparkle",
+    group: "Look",
+    advanced: true,
     min: 0,
     max: 3,
     step: 1,
@@ -913,7 +858,8 @@ export const SETTINGS: SceneSetting[] = [
     key: "sparkleNegative",
     label: "Colour contrast",
     description: "0 = same colour as the line, 1 = fully the spark colour",
-    group: "Sparkle",
+    group: "Look",
+    advanced: true,
     min: 0,
     max: 1,
     step: 0.05,
@@ -923,7 +869,8 @@ export const SETTINGS: SceneSetting[] = [
     key: "sparkleSize",
     label: "Fineness",
     description: "Thinner, denser threads at high values",
-    group: "Sparkle",
+    group: "Look",
+    advanced: true,
     min: 0,
     max: 1,
     step: 0.05,
@@ -933,7 +880,8 @@ export const SETTINGS: SceneSetting[] = [
     key: "sparkleSoft",
     label: "Softness",
     description: "Edge softness of each spark",
-    group: "Sparkle",
+    group: "Look",
+    advanced: true,
     min: 0,
     max: 1,
     step: 0.05,
@@ -943,7 +891,8 @@ export const SETTINGS: SceneSetting[] = [
     key: "sparkleSpeed",
     label: "Flicker",
     description: "How fast the sparks shimmer and drift",
-    group: "Sparkle",
+    group: "Look",
+    advanced: true,
     min: 0,
     max: 1,
     step: 0.05,
@@ -953,7 +902,8 @@ export const SETTINGS: SceneSetting[] = [
     key: "sparkleSpread",
     label: "Spill",
     description: "How far sparks leave the line into the halo",
-    group: "Sparkle",
+    group: "Look",
+    advanced: true,
     min: 0,
     max: 1,
     step: 0.05,
@@ -963,11 +913,68 @@ export const SETTINGS: SceneSetting[] = [
     key: "currentDensity",
     label: "Current density",
     description: "How dense the dye must be before the Currents style lights it up",
-    group: "Sparkle",
+    group: "Look",
+    advanced: true,
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.3,
+  },
+  {
+    key: "dropFlash",
+    label: "Drop flash",
+    description: "Whole-screen brightness lift and line-to-white flash on a detected drop",
+    group: "Post",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    auto: { dynamics: 0.25, pulse: 0.15 },
+    reads: ["anim.dropOnset"],
+  },
+  {
+    key: "shockwave",
+    label: "Bass shockwave",
+    description: "A ring that expands from the emitter on a bass hit or drop",
+    group: "Post",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    auto: { attack: 0.3, pulse: 0.2 },
+    reads: ["anim.lowOnset", "anim.dropOnset"],
+  },
+  {
+    key: "buildGlow",
+    label: "Build-up glow",
+    description: "Extra halo brightness as a phrase builds toward its peak",
+    group: "Post",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.4,
+    auto: { dynamics: 0.2, loudness: 0.15 },
+  },
+  {
+    key: "beatFlash",
+    label: "Beat flash",
+    description: "Line-gain flash on every beat",
+    group: "Post",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.15,
+    auto: { pulse: 0.3, attack: 0.15 },
+  },
+  {
+    key: "strobe",
+    label: "Strobe",
+    description: "Hard white / red / black frames cut in with each lightning strike (Lightning sparkle style only; photosensitivity: keep low on shared screens)",
+    group: "Post",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
   },
 ];
 
@@ -980,7 +987,7 @@ function settingFor(key: string): SceneSetting {
 const SETTINGS_UNIFORMS_GLSL = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
 
 // ---------------------------------------------------------------------------
-// Shockwave pool (Light group's Bass shockwave) — a fixed-size ring pool
+// Shockwave pool (the Post group's Bass shockwave) — a fixed-size ring pool
 // driven from render() below, same idiom as caustics.ts's ripple pool
 // (createRipplePool there): each slot ages independently and a trigger
 // always reuses the oldest slot, so a fast hit never erases the ring the
@@ -1027,7 +1034,7 @@ export function advanceShocks(st: ShockState, dtSec: number): void {
 }
 
 // ---------------------------------------------------------------------------
-// Strobe (Light group's `strobe` setting) — a burst of hard-cut whole-screen
+// Strobe (the Post group's `strobe` setting) — a burst of hard-cut whole-screen
 // frames (white, red, black — STROBE_PATTERN) that rides each lightning
 // strike. Unlike the Shockwave pool above there's only ever one burst in
 // flight (a trigger inside the refractory is dropped), so this is one state,
@@ -1138,7 +1145,7 @@ const EMIT_BLOB_PULSE = 0.9;
 /** How far the live spectral centroid leans the hue ramp warm/cool on top of
  *  the manual hueShift setting — see uCentroid below. */
 const CENTROID_HUE = 0.08;
-/** Brightness ceiling for the Sparkle group's spark mask — sparks REPLACE the
+/** Brightness ceiling for the the Look group's sparkle spark mask — sparks REPLACE the
  *  line colour (see the `col = mix(col, sparkCol * SPARK_GAIN, spark)` line
  *  in main()) rather than adding onto it, so this alone sets how hot a spark
  *  reads against the rest of the line. Raised from 3.0 for a bigger, brighter
@@ -1238,7 +1245,7 @@ vec3 hueRotate(vec3 col, float radians_) {
   return yiq2rgb * vec3(yiq.x, iq.x, iq.y);
 }
 
-// Sparkle group's hash: Grain's per-pixel speckle and Currents' per-dash
+// the Look group's sparkle hash: Grain's per-pixel speckle and Currents' per-dash
 // gate both key off this one hash — no value-noise/threads build needed now
 // that Currents rides the sim's own velocity field instead of a synthetic
 // drifting texture.
@@ -1330,7 +1337,7 @@ void main() {
   vec3 grey = vec3(dot(c, vec3(0.333)));
   c = max(mix(grey, c, 1.0 + uNeon), 0.0);
 
-  // Drop flash (Light group): a decaying flash on a detected section drop —
+  // Drop flash (light settings (Post group)): a decaying flash on a detected section drop —
   // leans the line colour itself toward white so the spark tint below reads
   // hotter for the same beat, on top of the halo/screen lift near col below.
   float flash = uDropPulse * uDropFlash;
@@ -1414,7 +1421,7 @@ void main() {
   }
   vec3 sparkCol = mix(c, tintCol, uSparkleNegative);
 
-  // Bass shockwave (Light group): a ring pool expanding from the emitter —
+  // Bass shockwave (light settings (Post group)): a ring pool expanding from the emitter —
   // see triggerShock/advanceShocks in fluid.ts for how uShockAge/uShockAmp
   // are filled each frame.
   float shockR = length((uv - uEmitScreen) * vec2(uDomainAspect, 1.0));
@@ -1426,7 +1433,7 @@ void main() {
   }
   shock *= uShockwave;
 
-  // Build-up glow (Light group): extra halo brightness as a phrase's own
+  // Build-up glow (light settings (Post group)): extra halo brightness as a phrase's own
   // loudness trend (uSectionIntensity) climbs above its own midpoint,
   // clamped so a quiet trend can only dim the halo a little, never black it
   // out.
@@ -1482,7 +1489,7 @@ void main() {
   float hot = smoothstep(${HOT_LO.toFixed(2)}, ${HOT_HI.toFixed(2)}, dye.r) * uHotWhite;
   mapped = mix(mapped, vec3(1.0 - exp(-lum)), hot);
 
-  // Strobe (Light group): one hard-cut whole-screen frame — white, red or
+  // Strobe (light settings (Post group)): one hard-cut whole-screen frame — white, red or
   // black (STROBE_PATTERN in fluid.ts, stepped per render frame) — applied
   // AFTER the tone map so it always reads as a true flash regardless of
   // what's underneath. uStrobeMode is the frame's colour index, or negative
@@ -1720,7 +1727,7 @@ function createFluidScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, sim.edgeTexture());
       gl.uniform1i(edgeLoc, 1);
 
-      // Light group: Bass shockwave's ring pool (triggerShock/advanceShocks
+      // light settings (Post group): Bass shockwave's ring pool (triggerShock/advanceShocks
       // above) and the velocity field the Currents sparkle style samples —
       // neither is a plain per-setting float, so both are uploaded here
       // rather than through uploadCommonUniforms.
@@ -1730,7 +1737,7 @@ function createFluidScene(): Scene {
       displayProg.setFv("uShockAge", shock.age);
       displayProg.setFv("uShockAmp", shock.amp);
 
-      // Light group: Strobe — the hard-cut white/red/black frames that ride
+      // light settings (Post group): Strobe — the hard-cut white/red/black frames that ride
       // each lightning strike (triggered in the Lightning block above, so it
       // only exists in that sparkle style); see triggerStrobe/advanceStrobe/
       // strobeFrame. This frame's colour is read *before* the state advances

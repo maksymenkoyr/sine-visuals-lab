@@ -93,10 +93,24 @@ const BLENDS: readonly { name: string; mode: BlendMode }[] = [
 
 const SETTINGS: SceneSetting[] = [
   {
+    key: "style",
+    label: "Style",
+    description: "Which family of moves to dance, or a mix of everything.",
+    // Form, not Motion — picks a repertoire to dance from, the same kind of
+    // categorical choice as Skin below, not a movement in itself.
+    group: "Form",
+    type: "enum",
+    options: STYLES.map((s) => s.name),
+    min: 0,
+    max: STYLES.length - 1,
+    step: 1,
+    default: 0,
+  },
+  {
     key: "motion",
     label: "Move energy",
     description: "How much of each move comes through — all the way up is as it was captured.",
-    group: "Dance",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -107,7 +121,7 @@ const SETTINGS: SceneSetting[] = [
     key: "groove",
     label: "Groove",
     description: "How eagerly the dancer reaches for the big moves as a track builds.",
-    group: "Dance",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
@@ -115,22 +129,10 @@ const SETTINGS: SceneSetting[] = [
     auto: { pulse: 0.3, attack: 0.15 },
   },
   {
-    key: "style",
-    label: "Style",
-    description: "Which family of moves to dance, or a mix of everything.",
-    group: "Dance",
-    type: "enum",
-    options: STYLES.map((s) => s.name),
-    min: 0,
-    max: STYLES.length - 1,
-    step: 1,
-    default: 0,
-  },
-  {
     key: "blend",
     label: "Handover",
     description: "How one move hands over to the next: slide between them, or stop dead and settle into the new one.",
-    group: "Dance",
+    group: "Motion",
     type: "enum",
     options: BLENDS.map((b) => b.name),
     min: 0,
@@ -143,24 +145,13 @@ const SETTINGS: SceneSetting[] = [
     key: "jaw",
     label: "Jaw chatter",
     description: "How far bass hits open the jaw.",
-    group: "Dance",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.5,
     advanced: true,
     auto: { brightness: -0.25, attack: 0.2 },
-  },
-  {
-    key: "bob",
-    label: "Camera bob",
-    description: "How much the camera nudges in on each beat.",
-    group: "Camera",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.4,
-    auto: { attack: 0.3, pulse: 0.15, tempo: -0.2 },
   },
   {
     key: "skin",
@@ -179,6 +170,8 @@ const SETTINGS: SceneSetting[] = [
     label: "Renderer",
     description:
       "Raymarch is the full look; Capsules and Flat draw the same dance for a fraction of the cost. Below the Mid quality preset, Raymarch hands over to Capsules.",
+    // Look, not Post — it picks which draw path renders the figure, not a
+    // filter applied to an already-drawn image.
     group: "Look",
     type: "enum",
     options: RENDERERS,
@@ -209,6 +202,17 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { brightness: 0.3 },
+  },
+  {
+    key: "bob",
+    label: "Camera bob",
+    description: "How much the camera nudges in on each beat.",
+    group: "Camera",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.4,
+    auto: { attack: 0.3, pulse: 0.15, tempo: -0.2 },
   },
 ];
 

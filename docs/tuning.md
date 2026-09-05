@@ -20,9 +20,11 @@ sets always wins over a pin left over from an earlier by-hand session.
 Tune against synthetic audio so a result is comparable across sessions:
 
 ```
-https://localhost:5173/#/v/<sceneId>?audio=synthetic&bpm=<bpm>
+https://localhost:5173/?audio=synthetic&bpm=<bpm>#/v/<sceneId>
 ```
 
+The query sits *before* the hash — `src/app.ts` reads `location.search`, and
+`#/v/<sceneId>?audio=…` silently lands on the gallery instead.
 `src/audio/synthetic.ts` is the feed this drives. Real music is still the final
 check — synthetic audio is for comparing runs, not for judging how a scene feels.
 
@@ -80,6 +82,17 @@ every pin left over from an earlier by-hand panel session before that run pushes
 its own params. `bakeDefaults()` always dry-runs (mirrors Alt+D's first press,
 never writes) — a script that wants the actual write posts to `/__tuning/defaults`
 itself, the same endpoint the hotkey's second press calls.
+
+## Tuning against a reference video
+
+The loop above tunes against synthetic audio. When the target is a video
+someone handed over — "make it do what this does" — the sibling loop is
+`/ref` (`.claude/commands/ref.md`): `tools/ref-scan.py` measures what the
+reference does on its own beat grid and writes it up, `tools/ref-hear.mjs`
+records what our own analyser hears on the same audio so the write-up can say
+whether the runtime can see each trigger, and `tools/ref-shoot.mjs` replays
+that audio into our scene and shoots the same beats side by side. The tools'
+headers own the details; nothing here restates them.
 
 ## Recording what you learn
 

@@ -28,6 +28,7 @@ import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
+import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice } from "../audio/sourcePref.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -50,14 +51,19 @@ import {
   createAdvancedSection,
   createCard,
   createChipButton,
+  createPickerRow,
   createSignalStrip,
   createTraceLegend,
   digitsStyle,
   digitsTextStyle,
   groupHeading,
+  paletteChipLitStyle,
+  paletteChipStyle,
+  paletteListStyle,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
+  rowResetStyle,
   rowRightStyle,
   spacer,
   unitStyle,
@@ -109,7 +115,7 @@ import {
  * row, matching the identical hover/focus styling below, so pointing at a
  * row is enough; no click needed first. The hint under a row (a setting's
  * `description`) stays collapsed until hover/focus, and while auto holds the
- * row it reads as an invitation to take over instead. Each card's accent
+ * row a second line beneath it invites the user to take over. Each card's accent
  * names its system — the constants and their meanings live in
  * controlsTheme.ts.
  *
@@ -126,9 +132,9 @@ import {
  * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
  * are its own, in bandFaders.ts). A focused
  * slider also takes Home/End to its min/max — the browser's own native
- * range-input behavior, left alone by onKeyDown below — plus z/x
- * (wireSliderQuickJump) to jump straight to the middle of the track or the
- * top, the one landing Home/End can't reach. Digit
+ * range-input behavior, left alone by onKeyDown below — plus z/x/c
+ * (wireSliderQuickJump) to jump straight to the middle of the track, the
+ * top, or wherever the pointer last hovered along it. Digit
  * keys 1-9 jump to a numbered block —
  * each card title and each scene group heading carries a .vc-block badge,
  * renumbered by renumberBlocks() whenever the block set can change (i.e. on
@@ -147,7 +153,7 @@ export interface MenuItem {
   name: string;
 }
 
-export type AudioSource = "mic" | "remote" | "synthetic" | "none";
+export type AudioSource = "mic" | "display" | "remote" | "synthetic" | "none";
 export interface AudioStatus {
   source: AudioSource;
   /** The local AudioContext's rate, when there is one. */
@@ -162,6 +168,16 @@ export interface DeviceMenuDeps {
   onPickPalette: (id: string) => void;
   /** Shown in the Bands card's status line — where the bars are coming from. */
   getAudioStatus: () => AudioStatus;
+  /** This device's mic-vs-screen capture preference (src/audio/sourcePref.ts)
+   *  — drives the Input card's Source row. Null on a renderer or the
+   *  synthetic feed (no local capture to choose a source for), which is what
+   *  hides the row — the same null-hides-itself convention as the Loudness
+   *  card's `lufs` frame field. */
+  getAudioSourceChoice: () => AudioSourceChoice | null;
+  onAudioSourceChange: (choice: AudioSourceChoice) => void;
+  /** Whether this browser can offer the Screen option at all — see
+   *  sourcePref.ts's header for the exact browser/OS matrix. */
+  canCaptureDisplay: () => boolean;
   getSensitivity: (sceneId: string) => number;
   onSensitivityChange: (sceneId: string, value: number) => void;
   getExpansion: (sceneId: string) => number;
@@ -171,6 +187,9 @@ export interface DeviceMenuDeps {
   /** Empty for scenes with nothing to tune — the card hides itself. */
   getSceneSettings: (sceneId: string) => SceneSetting[];
   getSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
+  /** A setting's resting value under the scene's current variant (see
+   *  SceneSetting.variant) — what the row's reset arrow returns it to. */
+  getSceneSettingDefault: (sceneId: string, spec: SceneSetting) => number;
   onSceneSettingChange: (
     sceneId: string,
     spec: SceneSetting,
@@ -201,6 +220,10 @@ export interface DeviceMenuDeps {
   /** The Loudness card's Reset chip — starts the integrated LUFS reading
    *  over (src/audio/lufsAnalyser.ts). */
   onLufsReset: () => void;
+  /** Per-scene Beat grid choice (src/audio/beatGrid.ts) for the Rhythm
+   *  card's row — see audioMeters.ts's AudioMetersDeps.beatGrid. */
+  getBeatGrid: (sceneId: string) => number;
+  onBeatGridChange: (sceneId: string, value: number) => void;
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   resolveSensitivityValue: (sceneId: string) => number;
@@ -320,10 +343,6 @@ const autoChipManualStyle = (accent: string) =>
 const offChipLitStyle = `${autoChipBaseStyle} background: rgba(255,255,255,0.82); border: 1px solid rgba(255,255,255,0.82); color: #070a09;`;
 const offChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
-const rowResetStyle = `
-  font: 400 11px/1 ${FONT_MONO}; color: rgba(255,255,255,0.45); background: none; border: none;
-  padding: 0; cursor: pointer; flex-shrink: 0;
-`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
 const AUTO_STRENGTH_HINT = "How hard auto pushes every A control";
 
@@ -354,14 +373,6 @@ const liveDotStyle = (on: boolean) =>
 const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.5);`;
 const hairlineStyle = `height: 1px; background: ${withAlpha(HAIRLINE, 0.45)}; margin: 8px 0 9px;`;
 
-// Palette chips.
-const paletteListStyle = `display: flex; flex-wrap: wrap; gap: 4px;`;
-const paletteChipStyle = `
-  font: 400 10.5px/1.2 ${FONT_MONO}; letter-spacing: 0.06em; color: rgba(255,255,255,0.7);
-  background: transparent; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px;
-  padding: 4px 8px; cursor: pointer;
-`;
-const paletteChipLitStyle = `${paletteChipStyle} color: #fff; background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.5);`;
 
 // Footer strip.
 const footerStyle = `
@@ -635,20 +646,53 @@ function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
   });
 }
 
-/** z centers a focused slider, x maxes it out — a fast way to land on either
- *  without dragging. No key for the low end: Home already jumps a native
- *  range input to its min for free (onKeyDown, below, doesn't intercept it),
- *  so the only capability worth adding is the one Home/End don't cover.
- *  Plain single keys, not a chord — z/x collide with nothing else live while
- *  a slider has focus (A/R/T/D, the panel's H/M/Tab/1-9, the arrows, and
- *  Home/End are all spoken for; z/x aren't). Sets .value then redispatches
- *  "input" rather than duplicating each slider's own commit logic, so this
- *  stays a one-line addition at every call site regardless of what that
- *  site's "input" listener does. */
-function wireSliderQuickJump(slider: HTMLInputElement): void {
+/** The pointer's fraction along `slider`'s track (0 at min, 1 at max,
+ *  clamped) — used by wireSliderQuickJump's c binding below. A keydown
+ *  carries no coordinates, so this reads lastHoverX/lastHoverY, the same
+ *  panel-wide last-real-cursor-position wireHoverFocus above maintains.
+ *  Undefined when the pointer hasn't entered the panel yet, or sits outside
+ *  `row` — the desync wireHoverFocus's own comment describes, where
+ *  scrolling carries a different row under a stationary cursor without
+ *  moving focus there; c should no-op then rather than edit a row the
+ *  pointer has left. Maps across the slider's full rect, not its thumb's
+ *  inset travel, matching both wireThumbMagnet's thumbX above and the
+ *  --vc-fill percentage (controlsTheme.ts) that paints the track — the
+ *  boundary the eye reads as "the value" sits at this position, and the
+ *  thumb itself is only 3px wide, so the half-thumb inset this skips is
+ *  sub-pixel. */
+function pointerFraction(row: HTMLElement, slider: HTMLInputElement): number | undefined {
+  if (lastHoverX < 0) return undefined;
+  const rowRect = row.getBoundingClientRect();
+  if (
+    lastHoverX < rowRect.left ||
+    lastHoverX > rowRect.right ||
+    lastHoverY < rowRect.top ||
+    lastHoverY > rowRect.bottom
+  ) {
+    return undefined;
+  }
+  const rect = slider.getBoundingClientRect();
+  if (rect.width <= 0) return undefined;
+  return Math.min(1, Math.max(0, (lastHoverX - rect.left) / rect.width));
+}
+
+/** z centers a focused slider, x maxes it out, c jumps it to wherever the
+ *  pointer last was along the track (pointerFraction above) — a fast way to
+ *  land on any value without dragging. No key for the low end: Home already
+ *  jumps a native range input to its min for free (onKeyDown, below, doesn't
+ *  intercept it), so the only capabilities worth adding are the ones
+ *  Home/End don't cover. Plain single keys, not a chord — z/x/c collide with
+ *  nothing else live while a slider has focus (A/R/T/D, the panel's
+ *  H/M/Tab/1-9, the arrows, and Home/End are all spoken for). c no-ops when
+ *  pointerFraction returns undefined, rather than falling back to some other
+ *  value — see its comment for why. Sets .value then redispatches "input"
+ *  rather than duplicating each slider's own commit logic, so this stays a
+ *  one-line addition at every call site regardless of what that site's
+ *  "input" listener does. */
+function wireSliderQuickJump(row: HTMLElement, slider: HTMLInputElement): void {
   slider.addEventListener("keydown", (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    const frac = { z: 0.5, x: 1 }[e.key];
+    const frac = e.key === "c" ? pointerFraction(row, slider) : { z: 0.5, x: 1 }[e.key];
     if (frac === undefined) return;
     e.preventDefault();
     const lo = Number(slider.min);
@@ -852,15 +896,25 @@ function createControlRow(spec: ControlRowSpec) {
   }
   slider.step = discrete ? String(spec.step) : "any";
 
+  // Two lines: the setting's own description, always present when it has
+  // one, and beneath it the auto takeover note, shown only while auto holds
+  // the row — an addition, never a replacement, so the description stays
+  // readable whichever side owns the value.
   const hint = document.createElement("div");
   hint.className = "vc-hint";
+  const hintDesc = document.createElement("div");
+  hintDesc.textContent = spec.description ?? "";
+  const hintAuto = document.createElement("div");
+  hintAuto.className = "vc-hint-auto";
+  hintAuto.textContent = AUTO_HOLDING_HINT;
+  hint.append(hintDesc, hintAuto);
 
   el.append(head, slider, hint);
   if (signalIndicator) el.appendChild(signalIndicator.strip);
   el.addEventListener("click", () => slider.focus());
   wireHoverFocus(el, slider);
   wireThumbMagnet(el, slider);
-  wireSliderQuickJump(slider);
+  wireSliderQuickJump(el, slider);
 
   // Log-mapped so the midpoint lands close to defaultValue instead of skewing
   // toward the wide "more reactive" end. With zeroAtMin, position 0 is carved
@@ -900,9 +954,9 @@ function createControlRow(spec: ControlRowSpec) {
   }
 
   function setHint(auto: boolean): void {
-    const text = auto ? AUTO_HOLDING_HINT : spec.description ?? "";
-    hint.textContent = text;
-    hint.style.display = text ? "" : "none";
+    hintDesc.style.display = spec.description ? "" : "none";
+    hintAuto.style.display = auto ? "" : "none";
+    hint.style.display = spec.description || auto ? "" : "none";
   }
 
   function display(value: number, auto: boolean): void {
@@ -1142,118 +1196,13 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   return el;
 }
 
-interface PickerRowSpec {
-  label: string;
-  accent: string;
-  /** Names in value order — the stored value is the chosen index. */
-  options: readonly string[];
-  defaultValue: number;
-  description?: string;
-  get: () => number;
-  set: (value: number) => void;
-}
-
-/** An enum setting's row: same head as a toggle row, a strip of named chips
- *  (the palette picker's chips) where the slider would be. The strip is the
- *  one focusable control so it sits in the Tab ring like a slider; ←/→ (and
- *  the T hotkey) cycle the choice. Never auto-tunable, for the same reason
- *  a toggle isn't — see createToggleRow. */
-function createPickerRow(spec: PickerRowSpec): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "vc-row";
-
-  const head = document.createElement("div");
-  head.style.cssText = rowHeadStyle;
-  const label = document.createElement("div");
-  label.textContent = spec.label;
-  label.className = "vc-label";
-  label.style.cssText = rowLabelStyle;
-  const right = document.createElement("div");
-  right.style.cssText = rowRightStyle;
-  const readout = document.createElement("span");
-  readout.style.cssText = `${digitsTextStyle} color: #fff;`;
-  const resetBtn = document.createElement("button");
-  resetBtn.textContent = "↺";
-  resetBtn.title = `Reset ${spec.label} (R)`;
-  resetBtn.style.cssText = rowResetStyle;
-  right.append(readout, resetBtn);
-  head.append(label, right);
-
-  const strip = document.createElement("div");
-  strip.className = "vc-picker";
-  strip.tabIndex = 0;
-  strip.setAttribute("role", "radiogroup");
-  strip.setAttribute("aria-label", spec.label);
-  strip.style.cssText = paletteListStyle;
-  el.style.setProperty("--vc-accent", spec.accent);
-  wireHoverFocus(el, strip);
-  const chips = spec.options.map((name, i) => {
-    const btn = document.createElement("button");
-    btn.textContent = name;
-    btn.setAttribute("role", "radio");
-    btn.tabIndex = -1; // the strip is the ring's stop, not each chip
-    btn.addEventListener("click", () => {
-      apply(i);
-      spec.set(i);
-      strip.focus();
-    });
-    strip.appendChild(btn);
-    return btn;
-  });
-
-  const hint = document.createElement("div");
-  hint.className = "vc-hint";
-  hint.textContent = spec.description ?? "";
-  if (!spec.description) hint.style.display = "none";
-
-  el.append(head, strip, hint);
-
-  const clampIndex = (value: number): number =>
-    Math.min(spec.options.length - 1, Math.max(0, Math.round(value)));
-
-  let current = clampIndex(spec.get());
-  function apply(value: number): void {
-    current = clampIndex(value);
-    chips.forEach((chip, i) => {
-      chip.style.cssText = i === current ? paletteChipLitStyle : paletteChipStyle;
-      chip.setAttribute("aria-checked", String(i === current));
-    });
-    readout.textContent = spec.options[current];
-    resetBtn.style.visibility = current !== clampIndex(spec.defaultValue) ? "visible" : "hidden";
-  }
-  apply(current);
-
-  const cycle = (step: number): void => {
-    const next = (current + step + spec.options.length) % spec.options.length;
-    apply(next);
-    spec.set(next);
-  };
-  strip.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-      e.preventDefault();
-      cycle(1);
-    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-      e.preventDefault();
-      cycle(-1);
-    }
-  });
-  resetBtn.addEventListener("click", () => {
-    apply(spec.defaultValue);
-    spec.set(clampIndex(spec.defaultValue));
-  });
-
-  wireRowKeys(strip, {
-    reset: () => resetBtn.click(),
-    toggleOff: () => cycle(1),
-  });
-
-  return el;
-}
 
 function statusText(status: AudioStatus): string {
   switch (status.source) {
     case "mic":
       return status.sampleRate ? `Mic live · ${Math.round(status.sampleRate / 1000)}k` : "Mic live";
+    case "display":
+      return status.sampleRate ? `Screen live · ${Math.round(status.sampleRate / 1000)}k` : "Screen live";
     case "remote":
       return "Remote feed";
     case "synthetic":
@@ -1303,7 +1252,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
   const spectrumStrip = bandFaders.strip;
   // The meters beneath the Bands card — see audioMeters.ts.
-  const audioMeters = createAudioMeters({ onLufsReset: deps.onLufsReset });
+  const audioMeters = createAudioMeters({
+    onLufsReset: deps.onLufsReset,
+    beatGrid: {
+      get: () => deps.getBeatGrid(deps.currentSceneId()),
+      set: (value) => deps.onBeatGridChange(deps.currentSceneId(), value),
+    },
+  });
 
   const spectrumCol = document.createElement("div");
   spectrumCol.className = "vc-spectrum-col";
@@ -1505,7 +1460,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // reading the card's title steals focus onto the slider.
   wireHoverFocus(autoStrengthRow, autoStrengthSlider);
   wireThumbMagnet(autoCard.el, autoStrengthSlider);
-  wireSliderQuickJump(autoStrengthSlider);
+  wireSliderQuickJump(autoStrengthRow, autoStrengthSlider);
 
   function showAutoStrength(value: number): void {
     autoStrengthSlider.value = String(value);
@@ -1641,6 +1596,84 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     autoGainRow.sync(() => deps.getAutoGain());
   }
 
+  // Source: mic vs. captured screen/tab audio (src/audio/sourcePref.ts). Not
+  // gain-mapped like the rows below, so it's not built through
+  // createControlRow — a label plus a chip group where a slider would sit,
+  // same pattern as powerCard.ts's Energy-saving row (its chips are outside
+  // the Tab ring for the same reason: cycling through settings numbers, not
+  // switching device, is what Tab is for). Sits first in the card, above
+  // Auto-gain, since it decides what everything below is even listening to.
+  // Deliberately left out of this card's Reset chip below, same as
+  // Auto-gain — that chip resets per-scene taste, not a device-wide input
+  // choice — and out of inputRows, since it has no Auto behavior to wire
+  // through that array's shared call sites.
+  const sourceListStyle = `display: flex; gap: 4px; margin-top: 4px;`;
+  const sourceChipStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
+  const sourceChipLitStyle = `${chipBtnLitStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
+  // Always visible while Screen is the active source, not a .vc-hint: the hint
+  // only reveals on hover/focus, and on touch that means after the tap that
+  // already opened the picker — too late to be a guide. Same reasoning as
+  // createTraceLegend's always-on comment in controlsKit.ts.
+  const sourceGuideStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL}; color: rgba(255,255,255,0.55);`;
+  const SOURCE_OPTIONS: { choice: AudioSourceChoice; text: string; title: string }[] = [
+    { choice: "mic", text: "Mic", title: "The room's microphone" },
+    {
+      choice: "display",
+      text: "Screen",
+      title: "A shared screen or tab's audio — cleaner than the room mic",
+    },
+  ];
+  function createSourceRow() {
+    const el = document.createElement("div");
+    el.className = "vc-row";
+    el.style.setProperty("--vc-accent", INPUT_GREEN);
+
+    const head = document.createElement("div");
+    head.style.cssText = rowHeadStyle;
+    const label = document.createElement("div");
+    label.textContent = "Source";
+    label.className = "vc-label";
+    label.style.cssText = rowLabelStyle;
+    head.appendChild(label);
+
+    const list = document.createElement("div");
+    list.style.cssText = sourceListStyle;
+    const buttons = SOURCE_OPTIONS.map((opt) => {
+      const btn = document.createElement("button");
+      btn.textContent = opt.text;
+      btn.title = opt.title;
+      btn.style.cssText = sourceChipStyle;
+      btn.addEventListener("click", () => deps.onAudioSourceChange(opt.choice));
+      return { choice: opt.choice, btn };
+    });
+    list.append(...buttons.map((b) => b.btn));
+
+    const guide = document.createElement("div");
+    guide.style.cssText = sourceGuideStyle;
+    guide.textContent = DISPLAY_SHARE_GUIDE;
+
+    const hint = document.createElement("div");
+    hint.className = "vc-hint";
+
+    el.append(head, list, guide, hint);
+
+    return {
+      el,
+      refresh(): void {
+        const choice = deps.getAudioSourceChoice();
+        el.style.display = choice === null ? "none" : "";
+        const canDisplay = deps.canCaptureDisplay();
+        for (const { choice: c, btn } of buttons) {
+          btn.style.cssText = c === choice ? sourceChipLitStyle : sourceChipStyle;
+          btn.hidden = c === "display" && !canDisplay;
+        }
+        guide.style.display = choice === "display" ? "" : "none";
+        hint.textContent = SOURCE_OPTIONS.find((o) => o.choice === choice)?.title ?? "";
+      },
+    };
+  }
+  const sourceRow = createSourceRow();
+
   // Auto-gain: how much of the per-band adaptive normalization in features.ts
   // reaches the output. At the bottom (the default) the mic's real levels
   // show — bass louder than treble, like real music — which the adaptive
@@ -1696,6 +1729,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   markBlock(inputCard.title);
   inputCard.el.style.cssText += inputCardWashStyle;
   inputCard.body.append(
+    sourceRow.el,
+    spacer(),
     autoGainRow.el,
     spacer(),
     inputRows[0].row.el,
@@ -1816,11 +1851,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           label: spec.label,
           accent: SCENE_VIOLET,
           options: spec.options,
-          defaultValue: spec.default,
+          defaultValue: deps.getSceneSettingDefault(sceneId, spec),
           description: spec.description,
           get: () => deps.getSceneSettingValue(sceneId, spec),
-          set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
-        }),
+          set: (value) => {
+            deps.onSceneSettingChange(sceneId, spec, value);
+            // A variant switch swaps every other row's profile (values,
+            // defaults, auto state), so the card is rebuilt around it.
+            if (spec.variant) renderSceneSettings();
+          },
+          wire: (row, strip, a) => {
+            wireHoverFocus(row, strip);
+            wireRowKeys(strip, { reset: a.reset, toggleOff: () => a.cycle(1) });
+          },
+        }).el,
       );
       return;
     }
@@ -1829,7 +1873,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         createToggleRow({
           label: spec.label,
           accent: SCENE_VIOLET,
-          defaultValue: spec.default,
+          defaultValue: deps.getSceneSettingDefault(sceneId, spec),
           description: spec.description,
           get: () => deps.getSceneSettingValue(sceneId, spec),
           set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
@@ -1869,7 +1913,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       min: spec.min,
       max: spec.max,
       step: spec.step,
-      defaultValue: spec.default,
+      defaultValue: deps.getSceneSettingDefault(sceneId, spec),
       mapping: "linear",
       format: formatSetting,
       description: spec.description,
@@ -1950,8 +1994,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
 
     // The Scene card title is itself the block only when the active scene
-    // emits no group headings (e.g. Mesh Grid) — otherwise it and the first
-    // group heading would both resolve to the same first row.
+    // has settings but emits no group headings — otherwise it and the first
+    // group heading would both resolve to the same first row. Every scene
+    // with settings groups them today (tests/settingGroups.test.ts requires
+    // it — see SETTING_GROUPS in sceneSettings.ts), so this branch is dead
+    // until some future scene's settings all go ungrouped again.
     if (specs.length > 0 && !hasGroups) markBlock(sceneCard.title);
     else unmarkBlock(sceneCard.title);
     renumberBlocks();
@@ -2148,6 +2195,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function open() {
     refreshSpectrumHeader();
     renderPalettes();
+    sourceRow.refresh();
     syncInputRows();
     renderSceneSettings();
     refreshBandsSplit();
@@ -2253,6 +2301,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
       refreshSpectrumHeader();
       powerCard.refresh();
+      sourceRow.refresh();
       for (const { row } of inputRows) row.refreshAuto();
       autoGainRow.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();

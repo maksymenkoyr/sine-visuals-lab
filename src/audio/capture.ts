@@ -1,4 +1,5 @@
 import type { CaptureHandle, CaptureSourceKind } from "./types.ts";
+import { DISPLAY_SHARE_GUIDE } from "./sourcePref.ts";
 
 /**
  * Constraints tuned for music, not speech. All three MUST be false: browsers
@@ -47,6 +48,8 @@ export async function captureMic(deviceId?: string): Promise<CaptureHandle> {
  * Capture a shared tab/window/screen's audio (Chrome/Edge desktop). This is
  * the cleanest possible signal for a desktop host: no room noise, no mic
  * coloration, and no gesture-gated permission prompt beyond the picker.
+ * See sourcePref.ts's header for exactly which browser/OS combinations this
+ * actually yields audio on.
  */
 export async function captureDisplayAudio(): Promise<CaptureHandle> {
   const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -55,9 +58,7 @@ export async function captureDisplayAudio(): Promise<CaptureHandle> {
   });
   if (stream.getAudioTracks().length === 0) {
     for (const track of stream.getTracks()) track.stop();
-    throw new Error(
-      "No audio track in screen share. Re-share and enable 'Share audio'.",
-    );
+    throw new Error(`That share had no audio track. ${DISPLAY_SHARE_GUIDE}`);
   }
   // We only need the audio; drop the video track immediately.
   for (const track of stream.getVideoTracks()) track.stop();

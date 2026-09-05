@@ -11,6 +11,10 @@ import { meshGridScene } from "./meshGrid.ts";
 import { chladniScene } from "./chladni.ts";
 import { dancersScene } from "./dancers/index.ts";
 import { fluidScene } from "./fluid.ts";
+import { powderScene } from "./powder.ts";
+import { stormScene } from "./storm.ts";
+import { ambienceScene } from "./ambience.ts";
+import { kaleidoscopeScene } from "./kaleido/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
@@ -18,6 +22,8 @@ import { fluidScene } from "./fluid.ts";
 registerScene(chladniScene);
 registerScene(causticsScene);
 registerScene(meshGridScene);
+// First draft on purpose — the one currently being judged.
+registerScene(powderScene);
 registerScene(spectrumScene);
 registerScene(particlesScene);
 registerScene(tunnelScene);
@@ -27,6 +33,9 @@ registerScene(risoScene);
 registerScene(ferrofluidScene);
 registerScene(dancersScene);
 registerScene(fluidScene);
+registerScene(stormScene);
+registerScene(ambienceScene);
+registerScene(kaleidoscopeScene);
 
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
  *  the featured scenes registered above it are deliberately absent. */
@@ -40,6 +49,10 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "ferrofluid",
   "dancers",
   "fluid",
+  "powder",
+  "storm",
+  "ambience",
+  "kaleidoscope",
 ]);
 
 export {
@@ -55,4 +68,8 @@ export {
   chladniScene,
   dancersScene,
   fluidScene,
+  powderScene,
+  stormScene,
+  ambienceScene,
+  kaleidoscopeScene,
 };

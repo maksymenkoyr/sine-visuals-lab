@@ -570,7 +570,7 @@ describe("SETTINGS weight convention", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Symmetry / fold drift: the Symmetry group's `symmetry` setting's Auto
+// Symmetry / fold drift: the the Form group's `symmetry` setting's Auto
 // option (value 0) drifts between FOLD_FAMILY's quadrant folds instead of
 // holding one, warping the sample coordinate itself between them (see
 // foldMixEased) rather than crossfading two rendered images — see fluid.ts's
@@ -648,7 +648,7 @@ describe("createFoldState", () => {
 /** advanceFold's full input shape, with defaults chosen so the pre-existing
  *  tests below see the same numeric behaviour they always have: spin/breathe
  *  at 1 (full effect), drift at 0.5 (the value the task spec calls out as
- *  matching the fold's drift rate before the Symmetry group's Auto drift
+ *  matching the fold's drift rate before the the Form group's Auto drift
  *  setting existed — see advanceFold's own doc comment in fluid.ts). */
 function foldInp(overrides: Partial<{ energy: number; dropOnset: boolean; beatPulse: number; spin: number; breathe: number; drift: number }> = {}) {
   return {
@@ -819,8 +819,10 @@ describe("foldMixEased", () => {
   });
 });
 
-describe("Symmetry group settings", () => {
-  const symmetrySettings = SETTINGS.filter((s) => s.group === "Symmetry");
+describe("Form group: the symmetry settings", () => {
+  // The fold controls are the scene's whole Form group (SETTING_GROUPS
+  // vocabulary — see sceneSettings.ts).
+  const symmetrySettings = SETTINGS.filter((s) => s.group === "Form");
   const SYMMETRY_KEYS = ["symmetry", "foldCount", "foldSpread", "foldSpin", "foldBreathe", "foldDrift"];
 
   it("has exactly symmetry, foldCount, foldSpread, foldSpin, foldBreathe, foldDrift", () => {
@@ -860,7 +862,7 @@ describe("Symmetry group settings", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Sparkle group: the treble-driven electric/grain spark controls added on
+// sparkle settings (Look group): the treble-driven electric/grain spark controls added on
 // top of the plain glow boost (see fluid.ts's display-shader section).
 // ---------------------------------------------------------------------------
 
@@ -871,8 +873,22 @@ describe("Sparkle settings", () => {
     expect(sparkleSettings.length).toBeGreaterThan(1);
   });
 
-  it("every sparkle* setting lives in the Sparkle group", () => {
-    for (const s of sparkleSettings) expect(s.group, s.key).toBe("Sparkle");
+  it("every sparkle* setting lives in the Look group; the master and its style stay visible, the sub-controls are Look's advanced run", () => {
+    for (const s of sparkleSettings) {
+      expect(s.group, s.key).toBe("Look");
+      const visible = s.key === "sparkle" || s.key === "sparkleStyle";
+      expect(!!s.advanced, s.key).toBe(!visible);
+    }
+  });
+
+  it("the sparkle settings sit after Look's own controls, so the advanced run is one contiguous tail of the group", () => {
+    const look = SETTINGS.filter((s) => s.group === "Look");
+    const firstSparkle = look.findIndex((s) => s.key.startsWith("sparkle"));
+    expect(firstSparkle).toBeGreaterThan(0);
+    for (const s of look.slice(0, firstSparkle)) expect(s.advanced, s.key).toBeUndefined();
+    const firstAdvanced = look.findIndex((s) => s.advanced);
+    expect(firstAdvanced).toBeGreaterThan(firstSparkle);
+    for (const s of look.slice(firstAdvanced)) expect(s.advanced, s.key).toBe(true);
   });
 
   it("enum sparkle settings have max === options.length - 1 and min 0 / step 1", () => {
@@ -911,9 +927,10 @@ describe("Sparkle settings", () => {
     expect(sparkle.auto).toEqual({ brightness: 0.35, attack: 0.15 });
   });
 
-  it("currentDensity lives in Sparkle, manual (no auto)", () => {
+  it("currentDensity lives with the advanced sparkle controls in Look, manual (no auto)", () => {
     const s = SETTINGS.find((x) => x.key === "currentDensity")!;
-    expect(s.group).toBe("Sparkle");
+    expect(s.group).toBe("Look");
+    expect(s.advanced).toBe(true);
     expect(s.auto).toBeUndefined();
     expect(s.min).toBe(0);
     expect(s.max).toBe(1);
@@ -943,12 +960,13 @@ describe("Look group: neon / hotWhite", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Light group: music-reactive flashes layered on top of the line/halo (see
+// light settings (Post group): music-reactive flashes layered on top of the line/halo (see
 // fluid.ts's dropFlash/shockwave/buildGlow/beatFlash in main()).
 // ---------------------------------------------------------------------------
 
-describe("Light group settings", () => {
-  const lightSettings = SETTINGS.filter((s) => s.group === "Light");
+describe("Post group: the light settings", () => {
+  // The flashes are the scene's whole Post group (SETTING_GROUPS vocabulary).
+  const lightSettings = SETTINGS.filter((s) => s.group === "Post");
   const LIGHT_KEYS = ["dropFlash", "shockwave", "buildGlow", "beatFlash", "strobe"];
 
   it("has exactly the dropFlash/shockwave/buildGlow/beatFlash/strobe settings", () => {
@@ -997,7 +1015,7 @@ describe("Light group settings", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Shockwave pool (Light group's Bass shockwave) — see fluid.ts's
+// Shockwave pool (the Post group's Bass shockwave) — see fluid.ts's
 // createShockState/triggerShock/advanceShocks, same ring-pool idiom as
 // caustics.ts's createRipplePool.
 // ---------------------------------------------------------------------------
@@ -1062,7 +1080,7 @@ describe("Shockwave pool", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Strobe (Light group's `strobe` setting) — see fluid.ts's
+// Strobe (the Post group's `strobe` setting) — see fluid.ts's
 // createStrobeState/triggerStrobe/advanceStrobe/strobeFrame, and the display
 // shader's uStrobeMode/uStrobeAmp block applied after the tone map.
 // ---------------------------------------------------------------------------

@@ -28,6 +28,10 @@ export interface GalleryDeps {
    *  still fresh enough to unlock getUserMedia/AudioContext downstream. */
   onPick: (sceneId: string) => void;
   onDisabledPick: (sceneId: string, reason: string) => void;
+  /** Whether this device can offer the Screen source at all — see
+   *  src/audio/sourcePref.ts's displayCaptureSupported. Branches the
+   *  subtitle's copy so it never names an option a mobile visitor won't see. */
+  canCaptureDisplay: () => boolean;
 }
 
 export interface Gallery {
@@ -77,10 +81,13 @@ const badgeStyle = `
   border-radius: 999px; padding: 1px 7px; flex-shrink: 0;
 `;
 const reasonStyle = `font-size: 11px; opacity: 0.6; flex-shrink: 0;`;
+// Sized as a real button, not a caption: this is how the draft scenes are
+// reached at all, and it has to be findable on a TV or a phone at arm's length.
 const draftToggleStyle = `
-  display: block; margin: 20px auto 0; padding: 8px 14px;
-  background: none; border: none; color: #fff9; font: inherit; font-size: 13px;
-  cursor: pointer; border-radius: 999px;
+  display: block; margin: 28px auto 0; padding: 14px 28px;
+  background: #fff1; border: 1px solid #fff3; color: #fffd; font: inherit;
+  font-size: 17px; font-weight: 600; letter-spacing: 0.01em;
+  cursor: pointer; border-radius: 999px; min-height: 48px;
 `;
 
 const PREVIEW_W = 480;
@@ -138,7 +145,9 @@ export function createGallery(deps: GalleryDeps): Gallery {
   title.textContent = PRODUCT_NAME;
   title.style.cssText = titleStyle;
   const subtitle = document.createElement("div");
-  subtitle.textContent = "Pick a visual — tap to start with your mic.";
+  subtitle.textContent = deps.canCaptureDisplay()
+    ? "Pick a visual — tap to start on your mic, or share a tab for cleaner sound."
+    : "Pick a visual — tap to start with your mic.";
   subtitle.style.cssText = subtitleStyle;
   // The AGPL §13 network-source offer — see src/brand.ts.
   const sourceLink = document.createElement("a");

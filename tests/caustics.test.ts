@@ -379,8 +379,9 @@ describe("caustics kick jolt", () => {
   });
 });
 
-// The sparkle sub-params (see the Sparkle group in SETTINGS) replaced five
-// constants that used to be hardcoded directly on FRAG's sparkle line. This
+// The sparkle sub-params (see the sparkleBright..sparkleSustain entries in
+// SETTINGS) replaced five constants that used to be hardcoded directly on
+// FRAG's sparkle line. This
 // is what makes that change a visual no-op: every sub-param's own default
 // (0.5, or 0 for sustain) must map to the exact old constant it replaced, so
 // nothing changes on screen until someone actually drags a slider.

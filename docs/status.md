@@ -6,66 +6,63 @@ regenerate it at session close.
 
 ## In flight
 
-- **Neon Fluid scene, v7 (this session)** — branch `worktree-neon-fluid`,
-  draft PR #76. v7: the lightning moved from a sim-space layer (the fold chopped
-  every bolt into hairline slivers) to a screen-space layer in `fluidBolts.ts`:
-  bolts thread through the liquid at screen scale (`boltEndpoints`, fold copies
-  from `boltMirrors`), drawn anime-style (flat white core, saturated glow,
-  re-jagged while alive, cut off rather than faded) and lighting the dye under
-  them through a coarse mip of the layer; the `strobe` is now hard-cut per-frame
-  white/red/black frames (`STROBE_PATTERN`) riding each strike. v6: Lightning
-  sparkle style (Storm bolt generator lifted into `src/render/bolt.ts`; Storm
-  should import from `bolt.ts` when it lands), Mirror count authoritative in
-  Auto too. v5 (after two real-music rounds): gains cut to roughly a tenth
-  of v4, puffs on bass onsets only (`PUFF_MIN_GAP`), one-flow fold warps, a
-  Symmetry group (`foldCount` = live wedge-count slider, `foldSpread` unsqueezes the radial wedges, `foldSpin`,
-  `foldBreathe`, `foldDrift`). v4: Mirror became `symmetry` with an Auto default that drifts
-  between the quadrant folds (`advanceFold`), the Currents sparkle rides the
-  sim velocity, a hue-preserving tone map with `neon`/`hotWhite`, and a Light
-  group (`dropFlash`, `shockwave`, `buildGlow`, `beatFlash`). v3: `MIRROR_OPTIONS`
-  grew (Top-bottom = the reference geometry, Radial folds via `simUv`) and
-  treble sparkle became its own settings group (Electric threads in a
-  Negative tint). Before that, after the user compared a frame against the reference short
-  ("sharper edges, more reactive to music"), the scene was reworked: the
-  dye grid doubled and advected with a two-pass clamped MacCormack step, an
-  explicit viscosity pass (new `viscosity` setting) replaced the old inline
-  smoothing, and emission moved from a continuous push into beat-timed
-  puffs (`puffEnv`/`advancePuff` in `src/render/scenes/fluid.ts`) — each
-  beat is one thin dye ring that stretches into a filament, so the striations
-  read the beat history. New `warp` setting speeds the sim with loudness;
-  the line brightens on beats and the hue ramp follows the spectral
-  centroid. Typecheck and the full suite green; headless-verified at every
-  quality tier, all three `mirror` modes, the gallery tile, a slow-tempo
-  fallback, and the byte-format fallback. Implementation delegated to two
-  Sonnet subagents from the approved plan; the look was then tuned from
-  screenshots in the main session (see the fluid lines at the end of
-  `tuning/VOCAB.md`). Still branched from `d7412c4`; `main` has since taken
-  Storm (#41) and the audio source picker (#71) — expect a trivial rebase.
-- **Powder scene** — PR #77; **Plume scene** — draft PR #75; **Docs
-  architecture rewrite** — draft PR #74; **Auto dial ranking / tempoLock** —
-  draft PR #73; **Business & legal docs** — PR #72; **stage-1 wrap status**
-  — PR #70.
+- **Reference-video loop (`/ref`)** — draft PR #85, branch `worktree-ref-video`
+  (2026-09-05). `tools/ref-scan.py` turns a visualisation video into a bundle
+  whose `report.md` opens with Findings — sync rules the measurements support,
+  each with an "ours:" clause from what our own analyser heard on the same
+  audio (`tools/ref-hear.mjs`); one `keyframes.png`; the look as numbers.
+  `tools/ref-shoot.mjs` shoots our scene at the same beats beside the
+  reference. Verified on three clips; never yet used to build a scene — that
+  is the real test, and Kaleidoscope (now on `main`, `src/render/scenes/kaleido/`)
+  is the obvious first target. Design decisions are in the memory note
+  `reference-video-analysis`.
+- **Landed since the last snapshot:** Kaleidoscope scene #79 and its four
+  styles #83 (`style` is the first `variant` setting; Beat grid row in the
+  Rhythm card, `src/audio/beatGrid.ts` + `src/render/gridPulse.ts`), Powder
+  #77. Still in `DRAFT_SCENE_IDS` pending a real-music verdict.
+- **Draft scene PRs** waiting on review and a real-music judgement: Plume #75,
+  Neon Fluid #76 (v7, merged with `main` 2026-09-05: screen-space anime
+  lightning in `fluidBolts.ts` that lights the dye, hard-cut `STROBE_PATTERN`
+  frames; the Storm bolt generator lives in `src/render/bolt.ts` — Storm still
+  carries its own copy in `storm.ts`, dedupe after #76 lands).
+- **Auto: unstick tempoLock, rank dials** — draft PR #73.
+- **docs/architecture.md rebuild** — draft PR #74.
+- **CLAUDE.md Git & PRs section** — PR #84; **business/legal docs** — PR #72;
+  both ready for review. PR #70 is a stale status snapshot this file replaces —
+  close it.
+- Worktrees with no open PR (`git worktree list`): `agent-ae8a69d86e9c44e97`,
+  `audio-source-guide`, `bake-defaults`, `beat-rate-controls`, `docs-index`,
+  `setting-groups`, `tuning-spotlight`. Check `git log main..` on each before
+  reviving; several look landed or superseded.
 
 ## Open questions
 
-- Neon Fluid's Top-bottom mode rolls into one big spiral at the emitter and leaves
-  the right of the screen empty even with `TB_PUSH_SCALE`; the reference fills
-  the width. Different emitter placement, or a sustained push there?
-- Neon Fluid's `Off` and `Left-right` mirror modes work but are busier than
-  Kaleidoscope (the same emitter unfolded over the whole screen). Give them
-  their own emitter placement, or accept Kaleidoscope as the identity?
-- The byte fallback renders but its 8-bit dye makes the thin rings jagged.
-  Acceptable for old TV runtimes, or worth a coarser ring there?
-- Several open PRs (#70, #72, #74, #76, #77) each rewrite `docs/status.md`;
-  whichever merges last wins. Merge them in one sitting.
+- Ref loop: our tempo lock came out differently on two runs of the same clip
+  (162 steady vs a drop to 122 at a section boundary). Is `features.ts`'s comb
+  sensitive to start time / adaptive-gain state, and should `ref-hear` run
+  twice and report the spread?
+- Ref loop: our `section` signal (`sectionIntensity`) never rose at the
+  reference's section boundaries on the one clip with audio. Real gap in the
+  runtime, or a threshold mismatch in how the scan looks for a rise?
+- Ref loop: motion metrics run at `VIS_FPS`; above ~150 bpm a half-beat strobe
+  can't be told from a timer. Double the rate, or keep the stated resolution?
+- Beat grid: should its default move off Hits once judged on real music, and
+  should the TV receive it (a new DeviceCommand field)?
+- Kaleidoscope: should the dive target rotate between children (a spiral dive)
+  rather than always the top one? Do the rainbow texture styles
+  (`RAINBOW_ROOM_MIX`) read as ignoring the Palette card? Storm's Mode is the
+  obvious next `variant`.
+- Which draft scenes graduate out of `DRAFT_SCENE_IDS`, and in what order.
+- Storm's local render-cap workaround (see its header) is redundant now that
+  `renderLatch.ts` is on `main`; simplify once nothing else touches Storm.
+- Stale scratch branches on origin (`git branch -r --no-merged origin/main`):
+  prune, or is anything in them still wanted?
 
 ## Next up
 
-- `/tune fluid` against real music — the gains were cut to a fifth after the
-  user's first real-music run ("had to move all sliders to the bottom"), but
-  every constant was still tuned on
-  `?audio=synthetic` only; the Currents gate needs real treble (synthetic has
-  almost none) and the Light group needs a real drop; the beat puffs need a real onset
-  stream.
-- Rebase `worktree-neon-fluid` onto `main`, mark PR #76 ready.
-- Review/merge PRs #70, #72, #73, #74, #75, #77.
+- `/ref` on one of the Kaleidoscope reference shorts against the landed
+  `kaleidoscope` scene; see whether the findings change a tuning decision,
+  then review #85.
+- Watch Kaleidoscope, Powder, Plume and Neon Fluid on real music; land or drop
+  #75/#76 and decide on graduation.
+- Review #73, #74, #84, #72; close #70; decide the fate of the idle worktrees.

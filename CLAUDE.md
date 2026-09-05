@@ -54,6 +54,19 @@ gate the deploy that a push to `main` triggers — see
   `THIRD-PARTY-NOTICES.md`.
 - Don't port third-party implementations into a scene — write it as independent
   work. (See the git history around "Rewrite Mesh Grid as independent work.")
+- When working on a visualization, start `npm run dev` and hand the user a
+  direct link to that scene — `https://localhost:<port>/#/v/<sceneId>` — not the
+  gallery root. The scene id is the `id` field on the `Scene` object in
+  `src/render/scenes/`. Any query (`?audio=synthetic&bpm=…`, `?quality=…`) goes
+  *before* the hash — `src/app.ts` reads `location.search`, and a query placed
+  after the hash silently lands on the gallery.
+
+## Git & PRs
+
+This repo has a fast-moving `main` and concurrent sessions. Always branch from
+freshly fetched `origin/main`, rebase (not merge) before opening a PR, and
+re-check for divergence right before pushing. Never rewrite shared history
+without explicit confirmation.
 
 ## Session close
 

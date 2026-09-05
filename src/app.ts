@@ -5,7 +5,14 @@ import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformA
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
 import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
-import { NUM_BANDS, type CaptureHandle, type FeatureFrame } from "./audio/types.ts";
+import { NUM_BANDS, type CaptureHandle, type CaptureSourceKind, type FeatureFrame } from "./audio/types.ts";
+import {
+  getAudioSourceChoice as getStoredAudioSource,
+  setAudioSourceChoice,
+  displayCaptureSupported,
+  DISPLAY_SHARE_GUIDE,
+  type AudioSourceChoice,
+} from "./audio/sourcePref.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
 import {
   detectQuality,
@@ -30,9 +37,10 @@ import {
 } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
+import { getBeatGrid, setBeatGrid } from "./audio/beatGrid.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
+import { getSceneSetting, resetSceneSettings, setSceneSetting, settingDefault } from "./render/sceneSettings.ts";
 import {
   applyLook,
   captureLook,
@@ -90,7 +98,7 @@ import {
   type VisualSample,
 } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
-import { createDeviceMenu, type DeviceMenu } from "./ui/deviceMenu.ts";
+import { createDeviceMenu, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
 import { createControlPanel } from "./ui/controlPanel.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
@@ -106,7 +114,11 @@ const menuBtn = document.getElementById("menuBtn") as HTMLButtonElement;
 const panelBtn = document.getElementById("panelBtn") as HTMLButtonElement;
 const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
-const micPrompt = document.getElementById("micPrompt") as HTMLButtonElement;
+const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
+const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
+const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
+const audioPromptDisplayBtn = document.getElementById("audioPromptDisplayBtn") as HTMLButtonElement;
+const audioPromptGuide = document.getElementById("audioPromptGuide") as HTMLParagraphElement;
 
 const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
 /** No new frame in this long -> the host is gone even if our own socket to the relay is still open. */
@@ -132,11 +144,18 @@ let waveformAnalyser: WaveformAnalyser | null = null;
  *  (src/audio/lufsAnalyser.ts) — display-only and local, like the waveform
  *  analyser above. */
 let lufsAnalyser: LufsAnalyser | null = null;
-const extractor = new FeatureExtractor();
+/** Rebuilt (not just reset) on every swapAudioSource() — see that function's
+ *  comment for why a fresh extractor, not a reset(), is what a source swap
+ *  needs. */
+let extractor = new FeatureExtractor();
 /** Set on first mic/display-capture attempt; cached so re-entering a viz
- *  never re-prompts. Cleared back to null on failure so a retry is possible. */
+ *  never re-prompts. Cleared back to null on failure, or when the capture's
+ *  own track ends (onCaptureEnded), so a retry is possible. */
 let audioPromise: Promise<void> | null = null;
-let micDenied = false;
+let captureFailed = false;
+/** Guards against overlapping swapAudioSource() calls — e.g. a double-click
+ *  on the panel's Source chips while a share picker is already open. */
+let swapPromise: Promise<void> | null = null;
 /** `?audio=synthetic[&bpm=N]` — replaces the mic entirely with a
  *  deterministic feed (src/audio/synthetic.ts), so the same URL always
  *  produces the same frame at a given elapsed time. Set once in boot(); its
@@ -333,41 +352,195 @@ function fatalError(message: string): void {
   showHud(message, true);
 }
 
-async function chooseCapture(): Promise<CaptureHandle> {
+/** `?source=display` pins the initial offered/remembered choice the way
+ *  `?quality=` pins a preset — mainly for dev/tooling use without touching
+ *  localStorage. Otherwise defers to the persisted choice
+ *  (src/audio/sourcePref.ts), falling back to mic wherever display capture
+ *  isn't supported at all. Pinning "display" here does NOT by itself start a
+ *  capture — see autoStartSource() below for why. */
+function resolveInitialSource(): AudioSourceChoice {
   const params = new URLSearchParams(location.search);
-  if (params.get("source") === "display") return captureDisplayAudio();
-  return captureMic();
+  if (params.get("source") === "display" && displayCaptureSupported()) return "display";
+  const stored = getStoredAudioSource();
+  return stored === "display" && !displayCaptureSupported() ? "mic" : stored;
 }
 
-/** Idempotent and never torn down: capture/bandAnalyser are created once, on
- *  first viz entry, and kept alive across trips back to the gallery — that's
- *  what lets the room code and any TV pairing survive browsing the gallery. */
-function ensureAudio(): Promise<void> {
+/** The source an IMPLICIT start — one no tap asked for — is allowed to use.
+ *  getUserMedia and getDisplayMedia are not symmetric: getUserMedia has no
+ *  transient-activation requirement and its grant is remembered per origin,
+ *  so auto-starting the mic just re-uses consent already given. getDisplayMedia
+ *  is the opposite — it needs a live user gesture and reopens Chrome's share
+ *  picker on every single call, with nothing ever remembered. So a persisted
+ *  "display" pref is a statement of intent, not standing consent to pop that
+ *  picker: an implicit path starts nothing and lets updateMicPrompt() put the
+ *  start prompt up, whose Screen button reaches getDisplayMedia inside a real
+ *  tap. Same principle onCaptureEnded already states for its own refusal to
+ *  fall back to another source. */
+function autoStartSource(): AudioSourceChoice | null {
+  return resolveInitialSource() === "display" ? null : "mic";
+}
+
+function startCapture(choice: AudioSourceChoice): Promise<CaptureHandle> {
+  return choice === "display" ? captureDisplayAudio() : captureMic();
+}
+
+/** Maps a capture's kind to the panel's AudioSource vocabulary. "device" (a
+ *  specific input device, e.g. a loopback driver) has no capture.ts caller
+ *  yet and so no distinct AudioSource of its own — treat it as "mic" for
+ *  status purposes until it does. */
+function captureAudioSource(kind: CaptureSourceKind): AudioSource {
+  switch (kind) {
+    case "display":
+      return "display";
+    case "mic":
+    case "device":
+      return "mic";
+  }
+}
+
+/** Builds bandAnalyser/waveformAnalyser/lufsAnalyser off a freshly started
+ *  capture, and hangs a listener off its audio track so an externally-ended
+ *  share (Chrome's "Stop sharing" bar, a revoked mic permission) is noticed
+ *  instead of silently freezing the visuals at zero — see onCaptureEnded. */
+function attachCapture(handle: CaptureHandle): void {
+  capture = handle;
+  bandAnalyser = createBandAnalyser(handle.context, handle.sourceNode);
+  waveformAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode);
+  lufsAnalyser = createLufsAnalyser(handle.context, handle.sourceNode);
+  // stop() (used when swapAudioSource retires this handle) does not fire
+  // "ended" per spec — only an external stop does — so this listener and a
+  // deliberate swap never race each other.
+  const track = handle.stream.getAudioTracks()[0];
+  track?.addEventListener("ended", () => onCaptureEnded(handle), { once: true });
+}
+
+/** The live capture's track ended on its own — the user hit Chrome's "Stop
+ *  sharing" bar, or the OS revoked a mic permission mid-session. Tears down
+ *  and re-shows the start prompt rather than leaving the visuals frozen at
+ *  zero. Deliberately doesn't fall back to another source — that would fire
+ *  a permission prompt the user didn't ask for. */
+function onCaptureEnded(handle: CaptureHandle): void {
+  if (capture !== handle) return; // already superseded by a swap
+  handle.stop();
+  capture = null;
+  bandAnalyser = null;
+  waveformAnalyser = null;
+  lufsAnalyser = null;
+  audioPromise = null;
+  captureFailed = false;
+  updateMicPrompt();
+}
+
+/** Turns a capture failure into copy the user can act on. A mic denial keeps
+ *  today's wording — a tile tap does retry the mic; a cancelled share picker
+ *  points at the Screen button instead, since a tile tap no longer starts one
+ *  (both raise the same DOMException, hence branching on `choice` too);
+ *  anything else — e.g. captureDisplayAudio's own no-audio-track message —
+ *  surfaces verbatim with a neutral retry hint instead of being swallowed. */
+function captureErrorMessage(choice: AudioSourceChoice, err: unknown): string {
+  if (err instanceof DOMException && err.name === "NotAllowedError") {
+    return choice === "display"
+      ? "Screen share cancelled — tap Screen to try again."
+      : "Microphone permission denied — tap a tile to retry.";
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return `${message} — tap to try again.`;
+}
+
+/** Starts capture on first call — from `explicit` when a tap named a source
+ *  (the start prompt's buttons, the panel's Source chips), otherwise from
+ *  autoStartSource(), which refuses to open the display picker unbidden (see
+ *  its doc comment). While one is already running or has already succeeded,
+ *  later calls just return that same promise. Capture survives trips back to
+ *  the gallery — that's what lets the room code and any TV pairing keep
+ *  working while browsing — and is torn down only by an explicit
+ *  swapAudioSource() or the capture's own track ending (onCaptureEnded above). */
+function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
   if (syntheticFeed) return Promise.resolve();
   if (audioPromise) return audioPromise;
+  const choice = explicit ?? autoStartSource();
+  if (choice === null) {
+    updateMicPrompt(); // nothing started — the prompt is the way in
+    return Promise.resolve();
+  }
   const attempt = (async () => {
-    capture = await chooseCapture();
-    bandAnalyser = createBandAnalyser(capture.context, capture.sourceNode);
-    waveformAnalyser = createWaveformAnalyser(capture.context, capture.sourceNode);
-    lufsAnalyser = createLufsAnalyser(capture.context, capture.sourceNode);
-    micDenied = false;
+    attachCapture(await startCapture(choice));
+    captureFailed = false;
   })();
   audioPromise = attempt.catch((err) => {
     console.error(err);
-    micDenied = true;
+    captureFailed = true;
     audioPromise = null;
-    gallery?.setError("Microphone permission denied — tap a tile to retry.");
+    gallery?.setError(captureErrorMessage(choice, err));
   });
   audioPromise.then(updateMicPrompt);
   return audioPromise;
+}
+
+/** Hot-swaps the live capture to a different source — the panel's Source
+ *  row. Starts the new capture BEFORE touching the old one: if the user
+ *  cancels the share picker, this rejects, and the old capture must still be
+ *  the one running — starting-then-swapping guarantees that; tearing the old
+ *  one down first would not. The room connection is untouched either way:
+ *  hostConn is independent of capture, so a paired TV keeps rendering. */
+function swapAudioSource(next: AudioSourceChoice): Promise<void> {
+  if (!bandAnalyser || syntheticFeed || mode === "renderer") return Promise.resolve();
+  if (capture?.kind === next) return Promise.resolve();
+  if (swapPromise) return swapPromise;
+  const previous = capture;
+  const attempt = (async () => {
+    const handle = await startCapture(next);
+    previous?.stop();
+    attachCapture(handle);
+    // A fresh extractor, not a reset(): FeatureExtractor has none, and
+    // letting its adaptive AGC's envelope carry over would blow the visuals
+    // out for its ~1.25s re-adaptation window on the big level jump a
+    // mic-to-screen swap usually is (a room mic is far quieter than captured
+    // system audio).
+    extractor = new FeatureExtractor();
+    setAudioSourceChoice(next);
+    captureFailed = false;
+  })();
+  swapPromise = attempt
+    .catch((err) => {
+      console.error(err);
+      gallery?.setError(captureErrorMessage(next, err));
+    })
+    .finally(() => {
+      swapPromise = null;
+    });
+  return swapPromise;
+}
+
+/** Shows/hides the start prompt and — since display capture's availability
+ *  never changes mid-session — decides once whether it offers a Mic/Screen
+ *  choice or just Mic, matching the original single-button prompt exactly
+ *  where Screen isn't offered at all. Also fills in the share-audio guide
+ *  (DISPLAY_SHARE_GUIDE, src/audio/sourcePref.ts): its visibility is the same
+ *  static "is Screen offered" condition as the Screen button, so it belongs
+ *  here rather than in updateMicPrompt's per-change logic below. */
+function refreshAudioPromptButtons(): void {
+  const canDisplay = displayCaptureSupported();
+  audioPromptLabel.hidden = !canDisplay;
+  audioPromptDisplayBtn.hidden = !canDisplay;
+  audioPromptMicBtn.textContent = canDisplay ? "Mic" : "Tap to enable mic";
+  audioPromptGuide.textContent = DISPLAY_SHARE_GUIDE;
+  audioPromptGuide.hidden = !canDisplay;
 }
 
 function updateMicPrompt(): void {
   // Hidden while a fresh attempt is in flight (audioPromise set but not yet
   // settled) so we don't double-prompt; shown before any attempt or after
   // one has failed.
-  const needsMic = inViz && mode !== "renderer" && !syntheticFeed && !bandAnalyser && (micDenied || !audioPromise);
-  micPrompt.style.display = needsMic ? "block" : "none";
+  const needsAudio = inViz && mode !== "renderer" && !syntheticFeed && !bandAnalyser && (captureFailed || !audioPromise);
+  audioPrompt.style.display = needsAudio ? "flex" : "none";
+  // Which source is remembered can change mid-session (a Source-row swap
+  // persists a new pref), unlike display support above — hence here and not
+  // in refreshAudioPromptButtons. Emphasis only, never an auto-fire: see
+  // autoStartSource for why the picker still waits for a tap.
+  const remembered = resolveInitialSource();
+  audioPromptMicBtn.toggleAttribute("data-remembered", !audioPromptDisplayBtn.hidden && remembered === "mic");
+  audioPromptDisplayBtn.toggleAttribute("data-remembered", remembered === "display");
 }
 
 /** Renderer lost (or never reached) its room — fall back to this device's own mic, per the plan's Solo model. */
@@ -381,10 +554,10 @@ async function fallBackToSolo(reason: string): Promise<void> {
   panelBtn.style.display = "none"; // no room left to command
 
   try {
-    capture = await chooseCapture();
-    bandAnalyser = createBandAnalyser(capture.context, capture.sourceNode);
-    waveformAnalyser = createWaveformAnalyser(capture.context, capture.sourceNode);
-    lufsAnalyser = createLufsAnalyser(capture.context, capture.sourceNode);
+    // Gesture-less by construction (fires from a timer / a lost socket), so it
+    // can only start the source that needs no gesture — see autoStartSource.
+    // Matches this function's own "switching to solo mic" HUD line above.
+    attachCapture(await startCapture("mic"));
     mode = "solo";
     roomCodeEl.style.display = "none";
   } catch (err) {
@@ -414,9 +587,25 @@ function wireDeviceMenu(): void {
     // What the Bands card's status line reports as the audio source. A
     // renderer has no local analyser — its bands arrive over the room.
     getAudioStatus: () => ({
-      source: syntheticFeed ? "synthetic" : mode === "renderer" ? "remote" : bandAnalyser ? "mic" : "none",
+      source: syntheticFeed ? "synthetic" : mode === "renderer" ? "remote" : capture ? captureAudioSource(capture.kind) : "none",
       sampleRate: capture?.context.sampleRate ?? null,
     }),
+    // The Input card's Source row. Null (row hidden) on a renderer or the
+    // synthetic feed — see DeviceMenuDeps.getAudioSourceChoice's doc comment.
+    getAudioSourceChoice: () => (mode === "renderer" || syntheticFeed ? null : getStoredAudioSource()),
+    // No capture yet (e.g. the start prompt is up because autoStartSource()
+    // refused to auto-open a display picker) — the chip tap itself IS the
+    // explicit gesture, so start fresh rather than hot-swap: swapAudioSource
+    // deliberately bails with no live capture to swap out of. Stays
+    // synchronous up to ensureAudio so a display choice keeps the tap's
+    // transient activation.
+    onAudioSourceChange: (choice) => {
+      if (!bandAnalyser && mode !== "renderer" && !syntheticFeed) {
+        setAudioSourceChoice(choice);
+        void ensureAudio(choice);
+      } else void swapAudioSource(choice);
+    },
+    canCaptureDisplay: () => displayCaptureSupported(),
     onPickPalette: (id) => applyPalette(getPalette(id)),
     getSensitivity: (sceneId) => getSensitivity(sceneId),
     onSensitivityChange: (sceneId, value) => {
@@ -435,6 +624,7 @@ function wireDeviceMenu(): void {
     },
     getSceneSettings: (sceneId) => getScene(sceneId)?.settings ?? [],
     getSceneSettingValue: (sceneId, spec) => getSceneSetting(sceneId, spec),
+    getSceneSettingDefault: (sceneId, spec) => settingDefault(sceneId, spec),
     onSceneSettingChange: (sceneId, spec, value) => {
       setAutoEnabled(sceneId, spec.key, false);
       setSceneSetting(sceneId, spec, value);
@@ -462,6 +652,8 @@ function wireDeviceMenu(): void {
     onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
     onLufsReset: () => lufsAnalyser?.reset(),
+    getBeatGrid: (sceneId) => getBeatGrid(sceneId),
+    onBeatGridChange: (sceneId, value) => setBeatGrid(sceneId, value),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
     resolveExpansionValue: (sceneId) => resolveExpansion(sceneId),
@@ -605,7 +797,7 @@ function exitToGallery(): void {
   menuBtn.style.display = "none";
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
-  micPrompt.style.display = "none";
+  audioPrompt.style.display = "none";
   mainHost?.unmountAll();
   canvas.style.display = "none";
   immersive?.pause();
@@ -748,7 +940,9 @@ async function boot(): Promise<void> {
     }
   });
   backBtn.addEventListener("click", () => navigate({ kind: "gallery" }, "push"));
-  micPrompt.addEventListener("click", () => void ensureAudio());
+  refreshAudioPromptButtons(); // support never changes mid-session, so this runs once
+  audioPromptMicBtn.addEventListener("click", () => void ensureAudio("mic"));
+  audioPromptDisplayBtn.addEventListener("click", () => void ensureAudio("display"));
 
   if (bypassGallery) {
     void enterViz(scene);
@@ -771,6 +965,7 @@ async function boot(): Promise<void> {
         navigate({ kind: "viz", sceneId: id }, "push");
       },
       onDisabledPick: (id, reason) => showHud(`${id}: ${reason}`, true),
+      canCaptureDisplay: () => displayCaptureSupported(),
     });
 
     // A shared look link (?look=<code>#/v/<id>, see looksCard.ts's
@@ -983,7 +1178,7 @@ function loop(): void {
   // itself (beat/flow/band-pulse/section-intensity decay) still run on every
   // rAF tick regardless of the render-rate cap below — only the GPU draw is
   // rate-capped.
-  const anim = gained ? animClock.advance(dtSec, gained, smoothing) : null;
+  const anim = gained ? animClock.advance(dtSec, gained, smoothing, getBeatGrid(scene.id)) : null;
   if (anim) {
     lastAnim = anim;
     advanceAutoTune(dtSec, anim.profile);

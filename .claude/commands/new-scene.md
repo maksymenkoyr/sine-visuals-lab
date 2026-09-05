@@ -22,7 +22,10 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
    `caustics.ts`/`meshGrid.ts`).
 6. Run `npm run typecheck` — catches a mismatched uniform name or a missing
    `Scene` method.
-7. Run the tuning loop (`/tune $1`) at a couple of BPMs with `?audio=synthetic`
+7. Start `npm run dev` and give the user a direct link to the scene,
+   `https://localhost:<port>/#/v/$1` — not the gallery root (see the standing
+   rule in `CLAUDE.md` for the URL form).
+8. Run the tuning loop (`/tune $1`) at a couple of BPMs with `?audio=synthetic`
    and confirm the probe shows every setting's `mode` as `"auto"` until you
    touch it in the device menu, `"manual"` after.
 
