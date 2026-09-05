@@ -1,7 +1,7 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import type { SignalLink } from "../signals.ts";
-import { createBeatGateState, gatedOnset, gatedPulse, gridPhase } from "../beatGrid.ts";
+import { createBeatOverrideGate, gridPhase } from "../settingBeatRate.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
 // Domain-warped value noise, sharpened into thin ridges. Two renderer-side
@@ -65,16 +65,20 @@ import { createBeatGateState, gatedOnset, gatedPulse, gridPhase } from "../beatG
 // — a chorus or drop reads as a sustained, brighter, faster, more turbulent
 // surface, with a one-shot extra-strong ring at the exact moment intensity
 // spikes.
-// Tempo breathe, Beat ripple's beat-sourced ring, Beat surge, Beat churn,
-// Focus snap and Beat flash each carry a `rate` (see sceneSettings.ts and
-// beatGrid.ts) letting the user pick how many beats they cycle on instead of
-// always the one beat/one bar they read off today — Kick surge, Bass swell
-// and the rest stay off that list because they're driven by the bass band or
-// the section trend, not the tempo-locked beat clock a rate divides. Every
-// one of the six still reads its plain pre-rate source (anim.onset,
-// anim.beatPulse, or uBarPhase) bit for bit at its own default rate — see
-// each setting's `rate.rest` and extraUniforms below for where that identity
-// actually lives in code.
+// Beat ripple's beat-sourced ring, Beat surge, Beat churn, Focus snap and
+// Beat flash each carry a `rate: { kind: "override" }` (see
+// sceneSettings.ts and settingBeatRate.ts) letting the user pin that one
+// setting to a specific Beat grid stop regardless of what the scene-wide
+// Beat grid row (src/audio/beatGrid.ts, the Rhythm card) is set to. At rest
+// ("Scene") each still reads anim.onset/anim.beatPulse verbatim — already
+// shaped by the scene's own row, so nothing here duplicates that — and only
+// switches to its own gate once actually pinned elsewhere. Tempo breathe
+// carries `rate: { kind: "phase", rest: 4 }` instead: its bar-locked zoom
+// has no scene-wide control to defer to (the Beat grid only ever reshapes
+// onset/beatPulse, never barPhase), so it picks its own cycle length
+// directly. Kick surge, Bass swell and the rest stay off both lists because
+// they're driven by the bass band or the section trend, not the tempo-locked
+// beat clock either kind divides.
 // The master treble-sparkle knob. Defined outside SETTINGS so the sub-params
 // further down (density, brightness ceiling, grain, warp, spread, sustain —
 // all `advanced`, in the Look group) can name it directly as their `macro`
@@ -122,7 +126,7 @@ const SETTINGS: SceneSetting[] = [
     auto: { pulse: 0.3, tempo: -0.15 },
     // Already locked to the bar — rest is 4, not 1, so its rate chip strip
     // starts on "once a bar" instead of "every beat" like the others below.
-    rate: { rest: 4 },
+    rate: { kind: "phase", rest: 4 },
   },
   {
     key: "ripple",
@@ -147,7 +151,7 @@ const SETTINGS: SceneSetting[] = [
     ] satisfies readonly SignalLink[],
     // Only its beat-sourced ring (the feature.onset branch above) is
     // affected — a drop or bass hit still rings on every one, at any rate.
-    rate: { rest: 1 },
+    rate: { kind: "override" },
   },
   {
     key: "rippleSrc",
@@ -194,7 +198,7 @@ const SETTINGS: SceneSetting[] = [
     default: 0.3,
     // Beat-locked lurches only make sense with real beats to lurch on.
     auto: { pulse: 0.35, attack: 0.2 },
-    rate: { rest: 1 },
+    rate: { kind: "override" },
   },
   {
     key: "driftKick",
@@ -234,7 +238,7 @@ const SETTINGS: SceneSetting[] = [
     // both — but its own independent runtime magnitude and a distinct
     // visual channel; see uChurnDrive's comment in FRAG and extraUniforms.
     auto: { pulse: 0.3, attack: 0.2 },
-    rate: { rest: 1 },
+    rate: { kind: "override" },
   },
   {
     key: "bass",
@@ -304,7 +308,7 @@ const SETTINGS: SceneSetting[] = [
     // below), so the old worry about pinning the *floor* up doesn't apply
     // any more, but a saturated snap is just as flat a result.
     auto: { pulse: 0.2, attack: 0.15 },
-    rate: { rest: 1 },
+    rate: { kind: "override" },
   },
   {
     key: "flash",
@@ -317,7 +321,7 @@ const SETTINGS: SceneSetting[] = [
     default: 0.6,
     // Same reasoning as ripple, for brightness punch instead of ring shape.
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
-    rate: { rest: 1 },
+    rate: { kind: "override" },
   },
   {
     key: "centroidHue",
@@ -971,9 +975,9 @@ void main() {
   // Tempo-locked breathing: a slow zoom once per bar by default, off the
   // phase-locked beat clock (never restarts mid-beat) and faded by
   // tempoLock so it eases in/out with tempo detection instead of popping.
-  // uBreathePhase is beatGrid.ts's own generalized phase for this setting's
-  // chosen rate — equal to uBarPhase bit for bit at the default rate (4
-  // beats), the identity extraUniforms below leans on.
+  // uBreathePhase is settingBeatRate.ts's own generalized phase for this
+  // setting's chosen rate — equal to uBarPhase bit for bit at the default
+  // rate (4 beats), the identity extraUniforms below leans on.
   float breatheAmt = uBreathe * uTempoLock * 0.10 * cos(uBreathePhase * TWO_PI);
   p *= 1.0 + breatheAmt;
   // Loudness swell's aperture: a loud passage opens the pool wider, a quiet
@@ -1053,9 +1057,9 @@ void main() {
   float acc = 0.0;
   float amp = 1.0;
   // uFog sets the resting sharpness (sharpRest); uFocus is a pure multiplier
-  // on top of it, driven by uFocusPulse (uBeatPulse's own reading at Focus
-  // snap's default rate — see extraUniforms below), so uFocus=0 always
-  // holds sharp exactly at sharpRest (no snap, at any pulse) and sharpRest
+  // on top of it, driven by uFocusPulse (uBeatPulse verbatim unless Focus
+  // snap is pinned off "Scene" — see extraUniforms below), so uFocus=0
+  // always holds sharp exactly at sharpRest (no snap, at any pulse) and sharpRest
   // itself never moves with uFocus (see focusSharp's own doc comment above,
   // and this file's git history for the two different ways earlier versions
   // of this line each conflated the two: scaling floor and peak together, or
@@ -1264,17 +1268,17 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
     let kickJolt = 0;
     const ripples = createRipplePool();
     let prevDropOnset = false;
-    // One beatGrid.ts gate per rate-capable setting — see the file header's
-    // new paragraph and gatedOnset/gatedPulse's own doc comment for why each
-    // reads its pre-rate source bit for bit until the user actually moves it
-    // off its default rate.
-    const rippleGate = createBeatGateState();
-    const driftBeatGate = createBeatGateState();
-    const driftChurnGate = createBeatGateState();
-    const focusGate = createBeatGateState();
-    const flashGate = createBeatGateState();
+    // One settingBeatRate.ts override gate per override-capable setting —
+    // see the file header's new paragraph. Each reads anim.onset/beatPulse
+    // (already shaped by the scene's own Beat grid row) bit for bit while
+    // parked at "Scene", and only runs its own grid once pinned elsewhere.
+    const rippleGate = createBeatOverrideGate();
+    const driftBeatGate = createBeatOverrideGate();
+    const driftChurnGate = createBeatOverrideGate();
+    const focusGate = createBeatOverrideGate();
+    const flashGate = createBeatOverrideGate();
 
-    return (frame, anim, getSetting, getRate) => {
+    return (frame, anim, getSetting, getRate, getOverride) => {
       const driftKick = getSetting("driftKick");
       const driftLoud = getSetting("driftLoud");
       const loudSwell = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
@@ -1287,9 +1291,17 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
         dropReactivity: getSetting("dropReactivity"),
         sectionIntensity: anim.sectionIntensity,
       });
-      const driftBeatOnset = gatedOnset(driftBeatGate, anim.dtSec, anim.beats, getRate("driftBeat"), 1, anim.onset);
+      const gateInput = {
+        dtSec: anim.dtSec,
+        beats: anim.beats,
+        tempoLock: anim.tempoLock,
+        rawOnset: frame.onset,
+        sceneOnset: anim.onset,
+        scenePulse: anim.beatPulse,
+      };
+      const driftBeatOnset = driftBeatGate.advance({ ...gateInput, override: getOverride("driftBeat") }).onset;
       advanceLurch(lurch, anim.dtSec, driftBeatOnset, getSetting("driftBeat"));
-      const driftChurnOnset = gatedOnset(driftChurnGate, anim.dtSec, anim.beats, getRate("driftChurn"), 1, anim.onset);
+      const driftChurnOnset = driftChurnGate.advance({ ...gateInput, override: getOverride("driftChurn") }).onset;
       churnPulse *= Math.exp(-anim.dtSec * LURCH_DECAY_PER_SEC);
       if (driftChurnOnset) churnPulse = 1;
       const churnDrive = getSetting("driftChurn") * churnPulse;
@@ -1311,15 +1323,16 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
       // A bass onset always rings; a broadband beat rings too, but only
       // below RIPPLE_SRC_BEAT_THRESHOLD — see that constant's own comment,
       // and the "ripple"/"rippleSrc" SceneSettings' `reads` above. The beat
-      // branch goes through Beat ripple's own rate gate (rippleGate) rather
-      // than anim.onset directly once its rate leaves 1 — see gatedOnset.
-      // At rate 1 this is anim.onset, not frame.onset, same as before: see
-      // AnimFrame's own doc for why (a scene reading FeatureFrame.onset can
-      // miss the tick it fired on whenever the render cap skips it, exactly
-      // the bug renderLatch.ts's header describes).
+      // branch goes through Beat ripple's own override gate (rippleGate)
+      // rather than anim.onset directly once it's pinned off "Scene" — see
+      // createBeatOverrideGate. At "Scene" this is anim.onset, not
+      // frame.onset, same as before: see AnimFrame's own doc for why (a
+      // scene reading FeatureFrame.onset can miss the tick it fired on
+      // whenever the render cap skips it, exactly the bug renderLatch.ts's
+      // header describes).
       else if (
         anim.lowOnset ||
-        (gatedOnset(rippleGate, anim.dtSec, anim.beats, getRate("ripple"), 1, anim.onset) &&
+        (rippleGate.advance({ ...gateInput, override: getOverride("ripple") }).onset &&
           rippleSrc < RIPPLE_SRC_BEAT_THRESHOLD)
       )
         ripples.trigger(1);
@@ -1331,8 +1344,8 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
         uRippleRadius: ripples.radius,
         uRippleStrength: ripples.strength,
         uBreathePhase: gridPhase(anim.beats, getRate("breathe")),
-        uFocusPulse: gatedPulse(focusGate, anim.dtSec, anim.beats, getRate("focus"), 1, anim.beatPulse),
-        uFlashPulse: gatedPulse(flashGate, anim.dtSec, anim.beats, getRate("flash"), 1, anim.beatPulse),
+        uFocusPulse: focusGate.advance({ ...gateInput, override: getOverride("focus") }).pulse,
+        uFlashPulse: flashGate.advance({ ...gateInput, override: getOverride("flash") }).pulse,
       };
     };
   })(),

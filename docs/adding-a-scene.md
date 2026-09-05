@@ -1,5 +1,9 @@
 # Adding a scene
 
+If the scene is meant to look like a reference video, run `/ref` on it
+first (`docs/tuning.md`, "Tuning against a reference video") — a contact
+sheet shows the look, not the motion, and the motion is the sync.
+
 ## The mechanical path
 
 1. Implement `Scene` (`src/render/scene.ts`) — usually via `createFullscreenScene`
@@ -15,7 +19,12 @@
    on hover/focus; `group` is a closed vocabulary — see `SETTING_GROUPS`'s own
    doc comment in `sceneSettings.ts` for the rule that picks one);
    `type: "boolean"` renders a toggle instead, and `type: "enum"` with
-   `options` renders a strip of named chips whose index is the stored value. Mark a setting
+   `options` renders a strip of named chips whose index is the stored value.
+   If one enum decides what every other setting is even acting on (a style,
+   a mode), mark it `variant: true` — the rest of the settings then keep a
+   separate profile per option, with `variantDefaults` for a setting whose
+   resting value differs by option; `SceneSetting.variant`'s doc comment in
+   `sceneSettings.ts` owns the rules. Mark a setting
    `advanced: true` to tuck it behind a collapsed "show N more" disclosure within
    its group (`src/ui/controlsKit.ts`'s `createAdvancedSection`) — for a real,
    tunable constant that most people will only ever move as part of a `macro`

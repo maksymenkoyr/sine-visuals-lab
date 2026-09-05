@@ -34,10 +34,11 @@ setting → uniform wiring described in `docs/adding-a-scene.md`. `src/render/
 autoTune.ts` sits between a scene's declared `settings` and what actually reaches
 the shader, resolving each one against `src/render/musicProfile.ts`'s dials unless
 the user (or `src/tuning/overrides.ts` in dev) has pinned it manually. A
-setting that opts into `SceneSetting.rate` reacts on a chosen beat multiple or
-subdivision instead of always the one it was hardcoded to — `src/render/
-beatGrid.ts` is the seam between `beatClock.ts`'s free-running beat count and
-that per-setting choice.
+setting that opts into `SceneSetting.rate` reacts on its own chosen beat
+instead of always the one it was hardcoded to — `src/render/
+settingBeatRate.ts` layers that choice on top of the scene-wide Beat grid
+row (`src/audio/beatGrid.ts`, `src/render/gridPulse.ts`) that already shapes
+every scene's `anim.onset`/`beatPulse`.
 
 `src/router.ts` decides which scene mounts (`#/` → gallery, `#/v/<sceneId>` → one
 scene), read by `src/app.ts`, which is the phone/controller/gallery entry

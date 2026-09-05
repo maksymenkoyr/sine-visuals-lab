@@ -31,6 +31,17 @@
  * audio checkbox. That's a real gap but a small one: worth closing only if it
  * turns out to confuse people in practice.
  *
+ * Which share TYPE yields audio is a second, independent dimension, and it's
+ * the one people actually get wrong. In Chrome's picker a tab share offers
+ * "Also share tab audio", an entire-screen share offers "Also share system
+ * audio", and a window share offers neither — a window is silent no matter
+ * what. Leave the box unticked and getDisplayMedia hands back a video-only
+ * stream, which is exactly the case captureDisplayAudio() throws on.
+ * DISPLAY_SHARE_GUIDE below is the one-line user-facing form of this
+ * paragraph; the start prompt (src/app.ts), the Input card's Source row
+ * (src/ui/deviceMenu.ts) and that throw (src/audio/capture.ts) all render the
+ * same constant, so the wording can't drift apart across the three.
+ *
  * Same in-memory-cache-over-localStorage pattern as powerMode.ts: the cache is
  * the source of truth for get/set within a session, seeded once from
  * localStorage, so behavior stays correct even where localStorage is
@@ -80,3 +91,9 @@ export function setAudioSourceChoice(next: AudioSourceChoice): void {
 export function displayCaptureSupported(): boolean {
   return typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia;
 }
+
+/** The share-audio checkbox, in one line — see the share-TYPE paragraph in
+ *  this file's header. Worded to stand alone so every surface can render it
+ *  verbatim rather than paraphrasing it into three slightly different truths. */
+export const DISPLAY_SHARE_GUIDE =
+  'A screen share is silent unless you tick "Also share tab audio" (a tab) or "Also share system audio" (a whole screen) — a single window carries no audio.';

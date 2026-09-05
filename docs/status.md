@@ -6,52 +6,60 @@ regenerate it at session close.
 
 ## In flight
 
-- **Ambience scene** — `src/render/scenes/ambience.ts`, branch
-  `worktree-ambience-scene`, draft PR #80 (this session). A Windows Media
-  Player homage after a YouTube short: a dot lattice with beat swells that
-  opens as a dot unfolding into a sheet (`OPENING_LEGS`). The comet sunburst
-  of the first revision was dropped at the user's request. First `drawArraysInstanced`
-  in the repo (instanced quads from an empty VAO); premultiplied "over"
-  blending for the flat merged blobs. Second pass after the user re-watched
-  the reference: formations (`FORM`), bar-timed journeys between them
-  (`JOURNEYS`, run by `createChoreographer`), 4D turns of the sheet, tumble
-  and stretch poses, motion streaks. Verified headlessly on synthetic audio
-  (high/low presets, gallery tile), the probe auto→manual sign-off, and one
-  real 140 BPM track. Registered as a draft. The user has seen clips; the
-  journeys pass and the sunburst removal are not yet judged on the TV.
-- **A run of draft scene PRs** from the last two days, all waiting on review
-  and a real-music judgement: Kaleidoscope #79, Powder #77 (now v2: velocity-state physics, plumes, bloom, club layer), Neon Fluid #76,
-  Plume #75. Each has its own memory note and headless verification in its
-  PR description.
-- **Auto: unstick tempoLock, rank dials** — draft PR #73
-  (`worktree-auto-dial-ranking`).
-- **docs/architecture.md rebuild** — draft PR #74 (`worktree-docs-architecture`);
-  the older `worktree-docs-index` branch's premise is superseded by it and by
-  `docs/index.md` on `main`.
-- **Business/legal docs** — PR #72 (`docs-business`), ready for review;
-  PR #70 (`wrap-status`) is a stale status snapshot that this file replaces.
-- Idle worktrees with no PR: `worktree-agent-ae8a69d86e9c44e97` (always-on
-  dev controls), `worktree-auto-hint-description`, `worktree-setting-groups`
-  (its `SETTING_GROUPS` change is already on `main`), `worktree-tuning-spotlight`,
-  `dev-bake-defaults-into-source`. Check `git log main..` on each before
+- **Reference-video loop (`/ref`)** — draft PR #85, branch `worktree-ref-video`
+  (2026-09-05). `tools/ref-scan.py` turns a visualisation video into a bundle
+  whose `report.md` opens with Findings — sync rules the measurements support,
+  each with an "ours:" clause from what our own analyser heard on the same
+  audio (`tools/ref-hear.mjs`); one `keyframes.png`; the look as numbers.
+  `tools/ref-shoot.mjs` shoots our scene at the same beats beside the
+  reference. Verified on three clips; never yet used to build a scene — that
+  is the real test, and Kaleidoscope (now on `main`, `src/render/scenes/kaleido/`)
+  is the obvious first target. Design decisions are in the memory note
+  `reference-video-analysis`.
+- **Landed since the last snapshot:** Kaleidoscope scene #79 and its four
+  styles #83 (`style` is the first `variant` setting; Beat grid row in the
+  Rhythm card, `src/audio/beatGrid.ts` + `src/render/gridPulse.ts`), Powder
+  #77. Still in `DRAFT_SCENE_IDS` pending a real-music verdict.
+- **Draft scene PRs** waiting on review and a real-music judgement: Plume #75,
+  Neon Fluid #76.
+- **Auto: unstick tempoLock, rank dials** — draft PR #73.
+- **docs/architecture.md rebuild** — draft PR #74.
+- **CLAUDE.md Git & PRs section** — PR #84; **business/legal docs** — PR #72;
+  both ready for review. PR #70 is a stale status snapshot this file replaces —
+  close it.
+- Worktrees with no open PR (`git worktree list`): `agent-ae8a69d86e9c44e97`,
+  `audio-source-guide`, `bake-defaults`, `beat-rate-controls`, `docs-index`,
+  `setting-groups`, `tuning-spotlight`. Check `git log main..` on each before
   reviving; several look landed or superseded.
 
 ## Open questions
 
-- Ambience: the tesseract journey reads as a radial warp tunnel rather than
-  a recognisable lattice — keep it as one entry in `JOURNEYS`, or drop it?
-- Ambience: the reference's sheet is a spectrum-agnostic lattice; ours ties
-  disc size to each column's band (`breathe`). Keep, or make it pure motion?
-- Which of the five draft scenes graduate out of `DRAFT_SCENE_IDS`, and in
-  what order — they compete for the same gallery row.
+- Ref loop: our tempo lock came out differently on two runs of the same clip
+  (162 steady vs a drop to 122 at a section boundary). Is `features.ts`'s comb
+  sensitive to start time / adaptive-gain state, and should `ref-hear` run
+  twice and report the spread?
+- Ref loop: our `section` signal (`sectionIntensity`) never rose at the
+  reference's section boundaries on the one clip with audio. Real gap in the
+  runtime, or a threshold mismatch in how the scan looks for a rise?
+- Ref loop: motion metrics run at `VIS_FPS`; above ~150 bpm a half-beat strobe
+  can't be told from a timer. Double the rate, or keep the stated resolution?
+- Beat grid: should its default move off Hits once judged on real music, and
+  should the TV receive it (a new DeviceCommand field)?
+- Kaleidoscope: should the dive target rotate between children (a spiral dive)
+  rather than always the top one? Do the rainbow texture styles
+  (`RAINBOW_ROOM_MIX`) read as ignoring the Palette card? Storm's Mode is the
+  obvious next `variant`.
+- Which draft scenes graduate out of `DRAFT_SCENE_IDS`, and in what order.
 - Storm's local render-cap workaround (see its header) is redundant now that
-  `renderLatch.ts` is on `main`; simplify once nothing else is touching Storm.
+  `renderLatch.ts` is on `main`; simplify once nothing else touches Storm.
+- Stale scratch branches on origin (`git branch -r --no-merged origin/main`):
+  prune, or is anything in them still wanted?
 
 ## Next up
 
-- Look at Ambience on the TV with real music; then review PR #80.
-- Review and land the draft scene PRs #75–#79 (or close the ones that don't
-  earn a slot), and PRs #72–#74.
-- Prune the old scratch branches listed in `git branch -r --no-merged main`
-  that are weeks behind; most read like earlier attempts at work that has
-  since landed.
+- `/ref` on one of the Kaleidoscope reference shorts against the landed
+  `kaleidoscope` scene; see whether the findings change a tuning decision,
+  then review #85.
+- Watch Kaleidoscope, Powder, Plume and Neon Fluid on real music; land or drop
+  #75/#76 and decide on graduation.
+- Review #73, #74, #84, #72; close #70; decide the fate of the idle worktrees.

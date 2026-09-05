@@ -28,6 +28,10 @@ export interface GalleryDeps {
    *  still fresh enough to unlock getUserMedia/AudioContext downstream. */
   onPick: (sceneId: string) => void;
   onDisabledPick: (sceneId: string, reason: string) => void;
+  /** Whether this device can offer the Screen source at all — see
+   *  src/audio/sourcePref.ts's displayCaptureSupported. Branches the
+   *  subtitle's copy so it never names an option a mobile visitor won't see. */
+  canCaptureDisplay: () => boolean;
 }
 
 export interface Gallery {
@@ -141,7 +145,9 @@ export function createGallery(deps: GalleryDeps): Gallery {
   title.textContent = PRODUCT_NAME;
   title.style.cssText = titleStyle;
   const subtitle = document.createElement("div");
-  subtitle.textContent = "Pick a visual — tap to start with your mic.";
+  subtitle.textContent = deps.canCaptureDisplay()
+    ? "Pick a visual — tap to start on your mic, or share a tab for cleaner sound."
+    : "Pick a visual — tap to start with your mic.";
   subtitle.style.cssText = subtitleStyle;
   // The AGPL §13 network-source offer — see src/brand.ts.
   const sourceLink = document.createElement("a");
