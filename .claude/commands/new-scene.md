@@ -10,8 +10,9 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
    `src/render/scenes/` close in spirit before writing from scratch.
 2. Declare `settings: SceneSetting[]` — each key becomes a `uniform float
    u<Key>` and a device-menu control.
-3. Register it: add to `src/render/scenes/index.ts` (`registerScene(...)`) and
-   export it alongside its neighbours.
+3. Register it: add to `src/render/scenes/index.ts` (`registerScene(...)`) —
+   first among the drafts, per that file's header comment — and export it
+   alongside its neighbours.
 4. Set `minQuality` if the scene should degrade or disable below some hardware
    quality preset (`src/render/quality.ts`).
 5. **Check the invariant before calling it done** — see `docs/adding-a-scene.md`
@@ -22,9 +23,8 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
    `caustics.ts`/`meshGrid.ts`).
 6. Run `npm run typecheck` — catches a mismatched uniform name or a missing
    `Scene` method.
-7. Start `npm run dev` and give the user a direct link to the scene,
-   `https://localhost:<port>/#/v/$1` — not the gallery root (see the standing
-   rule in `CLAUDE.md` for the URL form).
+7. Start `npm run dev` and give the user the direct link it prints for `$1` —
+   not the gallery root (see the standing rule in `CLAUDE.md` for the URL form).
 8. Run the tuning loop (`/tune $1`) at a couple of BPMs with `?audio=synthetic`
    and confirm the probe shows every setting's `mode` as `"auto"` until you
    touch it in the device menu, `"manual"` after.

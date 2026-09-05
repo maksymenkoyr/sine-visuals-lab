@@ -30,7 +30,9 @@ sheet shows the look, not the motion, and the motion is the sync.
    tunable constant that most people will only ever move as part of a `macro`
    group, not something worth doubling the group's row count for everyone.
 3. Register the scene as a side effect in `src/render/scenes/index.ts`
-   (`registerScene(yourScene)`) and export it there like its neighbours.
+   (`registerScene(yourScene)`) and export it there like its neighbours. A new
+   scene goes *first* among the drafts — that file's header comment owns the
+   ordering rule and why.
 4. If it should degrade or disable below some hardware quality, set `minQuality`
    on the `Scene` object — see `src/render/quality.ts` for what each preset means.
 5. If the scene needs data it can't compute (the dancers' captured moves are
@@ -45,9 +47,10 @@ Typecheck (`npm run typecheck`) catches a mismatched uniform name or a `Scene`
 missing a required method; nothing here needs a special build step.
 
 Once it renders, keep `npm run dev` running and give whoever is reviewing a
-direct link to the scene, `https://localhost:<port>/#/v/<sceneId>`, rather than
-the gallery root — the standing rule in `CLAUDE.md` spells out the URL form
-(query before the hash).
+direct link to the scene rather than the gallery root — the dev server prints
+one per scene at startup, and a scene registered first among the drafts is the
+first draft link in that list. The standing rule in `CLAUDE.md` spells out the
+URL form (query before the hash).
 
 ## The invariant you can't get from typecheck
 

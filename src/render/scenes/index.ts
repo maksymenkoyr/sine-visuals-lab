@@ -17,12 +17,18 @@ import { kaleidoscopeScene } from "./kaleido/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
-// below) go first, drafts follow.
+// below) go first, drafts follow. Within each group the newest scene comes
+// first: a scene you just added goes at the top of the drafts, so it's the
+// first tile behind the gallery's draft toggle and the first link
+// vite-scene-links-plugin.ts prints when you start `npm run dev`.
 registerScene(chladniScene);
 registerScene(causticsScene);
-registerScene(meshGridScene);
-// First draft on purpose — the one currently being judged.
+registerScene(kaleidoscopeScene);
 registerScene(powderScene);
+registerScene(ambienceScene);
+registerScene(stormScene);
+registerScene(dancersScene);
+registerScene(meshGridScene);
 registerScene(spectrumScene);
 registerScene(particlesScene);
 registerScene(tunnelScene);
@@ -30,14 +36,11 @@ registerScene(cymaticsScene);
 registerScene(moireScene);
 registerScene(risoScene);
 registerScene(ferrofluidScene);
-registerScene(dancersScene);
-registerScene(stormScene);
-registerScene(ambienceScene);
-registerScene(kaleidoscopeScene);
 
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
  *  the featured scenes registered above it are deliberately absent. */
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
+  "mesh",
   "spectrum",
   "particles",
   "tunnel",
