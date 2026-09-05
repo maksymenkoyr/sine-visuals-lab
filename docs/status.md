@@ -19,6 +19,26 @@ regenerate it at session close.
   `src/audio/beatGrid.ts`, `src/render/gridPulse.ts`): per-scene Hits/1/8/1/4/
   1/2/bar/2 bars, gridded off the phase-locked beat count, hits until the
   tracker locks. Not sent to the TV (same gap as Smoothing).
+- **Kaleidoscope styles** — branch `worktree-kaleido-styles`, stacked on the
+  scene branch, draft PR #83. The scene is now the folder
+  `src/render/scenes/kaleido/` with a `style` enum: Mandala (richer: gaussian
+  rosette rings, corner motif, bar-breathe petal split, counter-rotating rings
+  behind an edge mask, twist), Portal, Prism and Burst, each after one of the
+  user's reference shorts. Round two after the user rejected the first three:
+  the reference videos were measured (frame registration against onsets —
+  every one zooms in continuously, brightness pops per beat, Prism kicks the
+  zoom on each beat, the Portal short is silent), and the styles rebuilt with
+  a Zoom slider that is a real camera dive. After two misreads ("zoom"
+  as in-cell motion, then as a growing lattice with windows) the user's
+  meaning turned out to be *recursive*: every mandala carries a ring of
+  child mandalas, each a whole copy, and the camera dives into the top
+  child until it is the parent (index.ts header — the similarity's fixed
+  point, the root frame). Tiling is now Nesting (child size); the lattice
+  and hexagonal variant are gone. What streams inside a mandala rides Flow. Style is
+  the scene's **variant**: `SceneSetting.variant` / `variantDefaults` in
+  `sceneSettings.ts` give every other setting a profile per option (values,
+  auto state, defaults); Looks carry the variant and apply it first. The two
+  fractal-zoom references are a separate scene still to plan.
 - **Three sibling draft scenes from the same reference-video workflow**, each
   on its own worktree branch with a draft PR: Plume (#75), Neon Fluid (#76),
   Powder (#77). None has had a user verdict on real music yet.
@@ -42,10 +62,10 @@ regenerate it at session close.
   dropped? Each needs a look on real music first.
 - Beat grid: should its default move off Hits (to 1/4) once judged on real
   music, and should the TV receive it (a new DeviceCommand field)?
-- Kaleidoscope: is a second symmetry lattice (hexagonal, six-fold cell) worth
-  a setting, or is the square lattice the look? Its tint drift was halved
-  after real music wandered it into purple/green — is the remaining drift
-  still too much?
+- Kaleidoscope: should the dive target rotate between children (a spiral
+  dive) rather than always the top one? The texture styles paint a full
+  rainbow tinted by the room palette (`RAINBOW_ROOM_MIX`) — does that read
+  as ignoring the Palette card? Storm's Mode is the obvious next `variant`.
 - Storm's local render-cap workaround predates `renderLatch.ts` and is now
   redundant in principle; simplify once nothing else is touching Storm.
 - The stale scratch branches on origin (`band-faders`, `lp-merge`,

@@ -1,5 +1,5 @@
 import type { SceneSetting } from "./sceneSettings.ts";
-import { getSceneSetting, setSceneSetting } from "./sceneSettings.ts";
+import { getSceneSetting, setSceneSetting, settingDefault, variantFirst } from "./sceneSettings.ts";
 import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
 
 /**
@@ -91,7 +91,10 @@ export function deleteLook(sceneId: string, name: string): void {
 export function captureLook(name: string, sceneId: string, specs: readonly SceneSetting[]): SceneLook {
   const manual: Record<string, number> = {};
   for (const spec of specs) {
-    if (!isAutoEnabled(sceneId, spec.key)) manual[spec.key] = getSceneSetting(sceneId, spec);
+    // The variant (SceneSetting.variant) is always carried, auto or not:
+    // every other key is stored per variant option, so a Look that left it
+    // out would apply its keys into whatever option the receiver was on.
+    if (spec.variant || !isAutoEnabled(sceneId, spec.key)) manual[spec.key] = getSceneSetting(sceneId, spec);
   }
   return { name, sceneId, manual };
 }
@@ -100,14 +103,18 @@ export function captureLook(name: string, sceneId: string, specs: readonly Scene
  *  every other key to auto at its default. See the module header for why
  *  this has to be authoritative rather than additive. */
 export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void {
-  for (const spec of specs) {
+  // The variant goes first (sceneSettings.ts's variantFirst): every other
+  // key is stored per variant option, so it has to be switched before they
+  // are written or the Look would land in the profile being left.
+  for (const spec of variantFirst(specs)) {
     const value = look.manual[spec.key];
     if (value !== undefined) {
       setAutoEnabled(look.sceneId, spec.key, false);
       setSceneSetting(look.sceneId, spec, value);
     } else {
-      setSceneSetting(look.sceneId, spec, spec.default);
-      seedAuto(look.sceneId, spec.key, spec.default);
+      const base = settingDefault(look.sceneId, spec);
+      setSceneSetting(look.sceneId, spec, base);
+      seedAuto(look.sceneId, spec.key, base);
       setAutoEnabled(look.sceneId, spec.key, true);
     }
   }

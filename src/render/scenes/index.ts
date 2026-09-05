@@ -13,7 +13,7 @@ import { dancersScene } from "./dancers/index.ts";
 import { powderScene } from "./powder.ts";
 import { stormScene } from "./storm.ts";
 import { ambienceScene } from "./ambience.ts";
-import { kaleidoscopeScene } from "./kaleidoscope.ts";
+import { kaleidoscopeScene } from "./kaleido/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,

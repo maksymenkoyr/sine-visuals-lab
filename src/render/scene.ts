@@ -1,7 +1,7 @@
 import type { FeatureFrame } from "../audio/types.ts";
 import type { QualitySettings } from "./quality.ts";
 import type { Palette } from "./palette.ts";
-import type { SceneSetting } from "./sceneSettings.ts";
+import { registerVariant, type SceneSetting } from "./sceneSettings.ts";
 import type { AnimFrame } from "./animClock.ts";
 
 /** A room-space rectangle this device is responsible for drawing. Full-frame is {x:0,y:0,w:1,h:1}. */
@@ -45,6 +45,7 @@ const registry = new Map<string, Scene>();
 
 export function registerScene(scene: Scene): void {
   registry.set(scene.id, scene);
+  registerVariant(scene.id, scene.settings);
 }
 
 export function getScene(id: string): Scene | undefined {
