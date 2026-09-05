@@ -31,8 +31,12 @@ export interface BeatClock {
    *  once every few beats rather than every single one. */
   readonly barPhase: number;
   /** The same phase unwrapped: beats elapsed since the clock started, for
-   *  anything that needs to count beats rather than watch one wrap — the
-   *  beat grid (gridPulse.ts) reads this. Free-running like beatPhase. */
+   *  anything that needs to count beats rather than watch one wrap. The
+   *  scene-wide beat grid (gridPulse.ts) reads this to pick its own grid
+   *  line; a setting overriding that grid for itself (beatGrid.ts) divides
+   *  by its own number instead. Free-running like beatPhase — only ever
+   *  advances forward, at whatever `bpm` this clock has been given, and
+   *  stalls, like everything else here, once bpm drops to 0. */
   readonly beats: number;
   /** 0..1, ramps toward 1 while a tempo is held and toward 0 once bpm drops
    *  to 0 — lets tempo-driven effects fade in/out instead of popping. */

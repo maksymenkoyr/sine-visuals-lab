@@ -3,7 +3,9 @@ import type { FeatureFrame } from "../audio/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "./gl.ts";
 import { PALETTE_GLSL } from "./palette.ts";
 import type { SceneSetting } from "./sceneSettings.ts";
+import { getSceneSettingBeatOverride, getSceneSettingRate } from "./sceneSettings.ts";
 import { resolveSceneSetting } from "./autoTune.ts";
+import type { BeatOverride, BeatRate } from "./settingBeatRate.ts";
 import type { Scene, SceneContext } from "./scene.ts";
 import type { AnimFrame } from "./animClock.ts";
 import {
@@ -46,6 +48,14 @@ export function createFullscreenScene(
       frame: FeatureFrame,
       anim: AnimFrame,
       getSetting: (key: string) => number,
+      /** `spec.rate.rest` for a `kind: "phase"` key, or 1 for a key with no
+       *  `rate` (or `kind: "override"` instead) — see sceneSettings.ts's
+       *  `SceneSetting.rate` and settingBeatRate.ts. Manual-only, unlike
+       *  getSetting: nothing here goes through autoTune.ts. */
+      getRate: (key: string) => BeatRate,
+      /** `null` ("Scene") for a `kind: "override"` key with no pin, or for
+       *  a key with no `rate` (or `kind: "phase"` instead). */
+      getOverride: (key: string) => BeatOverride,
     ) => Record<string, ExtraUniformValue>;
   } = {},
 ): Scene {
@@ -74,6 +84,14 @@ ${fragBody}
     const spec = settingsByKey.get(key);
     return spec ? resolveSceneSetting(id, spec) : 0;
   };
+  const getRate = (key: string): BeatRate => {
+    const spec = settingsByKey.get(key);
+    return spec?.rate?.kind === "phase" ? getSceneSettingRate(id, spec) : 1;
+  };
+  const getOverride = (key: string): BeatOverride => {
+    const spec = settingsByKey.get(key);
+    return spec?.rate?.kind === "override" ? getSceneSettingBeatOverride(id, spec) : null;
+  };
 
   return {
     id,
@@ -92,7 +110,7 @@ ${fragBody}
       prog.use();
       uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, id, settings, bandsBuf);
       if (opts.extraUniforms) {
-        const extras = opts.extraUniforms(frame, anim, getSetting);
+        const extras = opts.extraUniforms(frame, anim, getSetting, getRate, getOverride);
         for (const [name, value] of Object.entries(extras)) {
           if (value instanceof Float32Array) prog.setFv(name, value);
           else if (typeof value === "number") prog.setF(name, value);

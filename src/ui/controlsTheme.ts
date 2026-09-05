@@ -301,6 +301,17 @@ const stylesheet = `
   max-height: 60px; opacity: 1; margin-top: 6px;
 }
 
+/* A row's beat-rate chip strip (SceneSetting.rate, deviceMenu.ts's
+ * createControlRow) — a sibling of .vc-hint, same reveal-on-hover/focus as
+ * .vc-reads above, no pinned-open affordance (there's no head chip to pin
+ * it with — the strip is the whole control, so there's nothing to hide it
+ * behind once it's found). */
+.vc-rate {
+  max-height: 0; opacity: 0; overflow: hidden; margin-top: 0;
+  transition: max-height 0.18s ease, opacity 0.18s ease, margin-top 0.18s ease;
+}
+.vc-row:hover .vc-rate, .vc-row:focus-within .vc-rate { max-height: 60px; opacity: 1; margin-top: 6px; }
+
 /* The whole input is the touch target (taller than the 3px track it draws).
  * The accent comes from the enclosing .vc-row. */
 .vc-slider {

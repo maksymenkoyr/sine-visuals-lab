@@ -1,4 +1,5 @@
 import type { SignalLink } from "./signals.ts";
+import { isBeatOverride, isBeatRate, type BeatOverride, type BeatRate } from "./settingBeatRate.ts";
 
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
@@ -6,6 +7,14 @@ import type { SignalLink } from "./signals.ts";
  * in-memory cache seeded once from localStorage, so get/set stay correct
  * even where localStorage is unavailable (node test env, Safari private
  * mode) — only cross-reload persistence depends on it.
+ *
+ * A setting that opts into `rate` (see that field's own doc comment) gets a
+ * second, independent choice alongside its amount: which beat it reacts on.
+ * getSceneSettingRate/setSceneSettingRate (phase form) and
+ * getSceneSettingBeatOverride/setSceneSettingBeatOverride (override form)
+ * manage that choice in its own store, keyed the same variant-scoped way
+ * (settingScope below) as the amount store — see settingBeatRate.ts for
+ * what each form actually changes at render time.
  */
 
 /**
@@ -90,6 +99,21 @@ export interface SceneSetting {
    *  to catch. Omit for a setting that's pure geometry or colour, with
    *  nothing in the audio pipeline behind it. */
   reads?: readonly SignalLink[];
+  /** This setting reacts on a chosen beat instead of always on whatever it
+   *  rested on before this field existed — see settingBeatRate.ts for the
+   *  two shapes (`kind`) and the identity each rests on, and for why this
+   *  is manual-only (never next to `auto`): a chosen beat is a musical
+   *  intent, not a response to the track's character. Renders as a chip
+   *  strip under the row's hint.
+   *  - "override" pins this setting to one Beat grid stop regardless of the
+   *    scene's own row; it's this scene's own render code's job to actually
+   *    honor "null = read my pre-override source bit for bit".
+   *  - "phase" is for a continuous-position effect with no scene-wide
+   *    control to defer to; `rest` is the BeatRate that reproduces this
+   *    setting's pre-rate behavior bit for bit — 1 for a setting driven off
+   *    the bare beat, 4 for one already locked to the bar (BEATS_PER_BAR in
+   *    beatClock.ts). */
+  rate?: { kind: "override" } | { kind: "phase"; rest: BeatRate };
   /** This enum is the scene's *variant*: the one setting that decides what
    *  the rest of the settings are even acting on (Kaleidoscope's Style).
    *  Every other setting then keeps a separate stored value, auto/manual
@@ -208,12 +232,87 @@ export function setSceneSetting(sceneId: string, spec: SceneSetting, value: numb
   persist();
 }
 
+// A setting's chosen beat (either `rate` form) — see that field's own doc
+// comment above. Kept in its own store, the same cache-seeded-from-
+// localStorage shape as `cache` above, keyed the same variant-scoped way
+// (settingScope) rather than folded into `cache` itself: `cache`'s values
+// are always numbers in a spec's own [min,max], and a beat choice is
+// neither an amount nor, for an override at "Scene", even always present.
+const RATE_STORAGE_KEY = "vibe.sceneBeatRate";
+
+type RateStore = Record<string, Record<string, number>>;
+
+function loadInitialRates(): RateStore {
+  try {
+    const raw = localStorage.getItem(RATE_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const rateCache: RateStore = loadInitialRates();
+
+function persistRates(): void {
+  try {
+    localStorage.setItem(RATE_STORAGE_KEY, JSON.stringify(rateCache));
+  } catch {
+    // Not fatal — same as persist() above.
+  }
+}
+
+/** `spec.rate.rest` for a `kind: "phase"` setting with no stored choice yet,
+ *  or 1 for a setting with no `rate` at all, or one that's `kind:
+ *  "override"` instead — the same "absent means default" shape
+ *  `getSceneSetting` uses, so a scene added before this feature (or after,
+ *  but never touched) costs nothing extra to read. */
+export function getSceneSettingRate(sceneId: string, spec: SceneSetting): BeatRate {
+  if (!spec.rate || spec.rate.kind !== "phase") return 1;
+  const value = rateCache[settingScope(sceneId, spec.key)]?.[spec.key];
+  return typeof value === "number" && isBeatRate(value) ? value : spec.rate.rest;
+}
+
+export function setSceneSettingRate(sceneId: string, spec: SceneSetting, rate: BeatRate): void {
+  if (!spec.rate || spec.rate.kind !== "phase") return;
+  (rateCache[settingScope(sceneId, spec.key)] ??= {})[spec.key] = rate;
+  persistRates();
+}
+
+/** `null` ("Scene") for a `kind: "override"` setting with no stored pin
+ *  yet, or for a setting with no `rate` at all, or one that's `kind:
+ *  "phase"` instead. */
+export function getSceneSettingBeatOverride(sceneId: string, spec: SceneSetting): BeatOverride {
+  if (!spec.rate || spec.rate.kind !== "override") return null;
+  const value = rateCache[settingScope(sceneId, spec.key)]?.[spec.key];
+  return typeof value === "number" && isBeatOverride(value) ? value : null;
+}
+
+export function setSceneSettingBeatOverride(sceneId: string, spec: SceneSetting, override: BeatOverride): void {
+  if (!spec.rate || spec.rate.kind !== "override") return;
+  const scope = settingScope(sceneId, spec.key);
+  if (override === null) {
+    // "Scene" is the rest state — delete rather than store null, so reset
+    // and the Look share-code story stay "absent means default" uniformly.
+    delete rateCache[scope]?.[spec.key];
+  } else {
+    (rateCache[scope] ??= {})[spec.key] = override;
+  }
+  persistRates();
+}
+
 /** Every listed spec back to its default — within the current variant's
  *  profile, so resetting Prism leaves Mandala's tuning alone. The variant
  *  itself is reset too, first, so what follows lands in the default
- *  option's profile. */
+ *  option's profile. Each spec's own chosen beat (either `rate` form) goes
+ *  back to its rest state alongside its amount. */
 export function resetSceneSettings(sceneId: string, specs: SceneSetting[]): void {
-  for (const spec of variantFirst(specs)) setSceneSetting(sceneId, spec, settingDefault(sceneId, spec));
+  for (const spec of variantFirst(specs)) {
+    setSceneSetting(sceneId, spec, settingDefault(sceneId, spec));
+    if (spec.rate?.kind === "phase") setSceneSettingRate(sceneId, spec, spec.rate.rest);
+    else if (spec.rate?.kind === "override") setSceneSettingBeatOverride(sceneId, spec, null);
+  }
 }
 
 /** The specs with the scene's variant (if any) moved to the front: anything

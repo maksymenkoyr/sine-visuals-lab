@@ -14,6 +14,8 @@ import {
 } from "../audio/sensitivity.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import type { SceneLook } from "../render/sceneLooks.ts";
+import { BEAT_RATES, BEAT_RATE_LABELS, BEAT_RATE_TITLES, type BeatOverride, type BeatRate } from "../render/settingBeatRate.ts";
+import { BEAT_GRIDS } from "../audio/beatGrid.ts";
 import { createLooksCard } from "./looksCard.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { SIGNALS, type SignalSpec } from "../render/signals.ts";
@@ -196,6 +198,18 @@ export interface DeviceMenuDeps {
     value: number,
   ) => void;
   onSceneSettingsReset: (sceneId: string) => void;
+  /** SceneSetting.rate (sceneSettings.ts), `kind: "phase"` half — a
+   *  setting's own chosen cycle length, manual-only (no auto/resolve split:
+   *  see settingBeatRate.ts for why this never goes through autoTune.ts).
+   *  Called only for a spec with that `rate` kind. */
+  getSceneSettingRateValue: (sceneId: string, spec: SceneSetting) => BeatRate;
+  onSceneSettingRateChange: (sceneId: string, spec: SceneSetting, rate: BeatRate) => void;
+  /** SceneSetting.rate, `kind: "override"` half — a setting's pin onto one
+   *  Beat grid stop regardless of the scene's own row, or `null` for
+   *  "Scene" (the rest state). Called only for a spec with that `rate`
+   *  kind. */
+  getSceneSettingBeatOverrideValue: (sceneId: string, spec: SceneSetting) => BeatOverride;
+  onSceneSettingBeatOverrideChange: (sceneId: string, spec: SceneSetting, override: BeatOverride) => void;
   /** Named, shareable snapshots of the Scene card's own settings — see
    *  src/render/sceneLooks.ts. Rendered by the Looks card, next to Scene. */
   listLooks: (sceneId: string) => SceneLook[];
@@ -374,6 +388,22 @@ const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em;
 const hairlineStyle = `height: 1px; background: ${withAlpha(HAIRLINE, 0.45)}; margin: 8px 0 9px;`;
 
 
+// A setting row's beat-rate chip strip (SceneSetting.rate) — smaller than
+// the palette/picker chips above since there are always exactly
+// BEAT_RATES.length of them and the row already has a slider and hint
+// competing for width.
+const rateStripLabelStyle = `
+  font: 400 9.5px/1.4 ${FONT_MONO}; letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(255,255,255,0.4); margin-bottom: 3px;
+`;
+const rateChipStyle = `
+  font: 400 10px/1.2 ${FONT_MONO}; color: rgba(255,255,255,0.7);
+  background: transparent; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px;
+  padding: 3px 7px; cursor: pointer;
+`;
+const rateChipLitStyle = (accent: string) =>
+  `${rateChipStyle} color: #070a09; background: ${accent}; border-color: ${accent};`;
+
 // Footer strip.
 const footerStyle = `
   display: flex; align-items: center; justify-content: space-between; padding: 7px 12px;
@@ -531,6 +561,21 @@ interface ControlRowSpec {
    *  callbacks by appendSettingRow below — see ResolvedSignalRead. Omit for
    *  a setting with no `reads` entries. */
   reads?: readonly ResolvedSignalRead[];
+  /** SceneSetting.rate (sceneSettings.ts) — renders a chip strip under the
+   *  hint, same reveal-on-hover/focus as `reads`' strip. Omit for a setting
+   *  with no `rate`. Manual-only, unlike `auto`: there's no
+   *  `resolveLive`/`getManual` split here, just get/set. "phase" chips are
+   *  BEAT_RATES; "override" chips are "Scene" plus every BEAT_GRIDS stop. */
+  rate?:
+    | { kind: "phase"; get: () => BeatRate; set: (rate: BeatRate) => void; rest: BeatRate }
+    | { kind: "override"; get: () => BeatOverride; set: (override: BeatOverride) => void };
+}
+
+/** The rest value for either `rate` kind — a "phase" row's own `rest`, or
+ *  `null` ("Scene") for an "override" row, which has no `rest` field since
+ *  it's always the same value. */
+function restValueOf(rate: NonNullable<ControlRowSpec["rate"]>): number | null {
+  return rate.kind === "phase" ? rate.rest : null;
 }
 
 /** One SceneSetting.reads entry (sceneSettings.ts's SignalLink) resolved
@@ -909,7 +954,60 @@ function createControlRow(spec: ControlRowSpec) {
   hintAuto.textContent = AUTO_HOLDING_HINT;
   hint.append(hintDesc, hintAuto);
 
+  // A setting's chosen beat (SceneSetting.rate, sceneSettings.ts) — a chip
+  // strip under the hint, same reveal-on-hover/focus as the reads strip
+  // below (.vc-rate, controlsTheme.ts). Manual-only: no auto/pin interplay
+  // to mirror here, just a row of chips and a resting value. "phase" chips
+  // are BEAT_RATES; "override" chips are "Scene" (this setting's own rest —
+  // whatever the scene-wide Beat grid row resolves to) plus every BEAT_GRIDS
+  // stop, so a value of `null` needs its own place in the chip list rather
+  // than falling out of a plain BeatRate/BeatGridIndex union.
+  let applyRate: ((value: number | null) => void) | null = null;
+  let rateWrap: HTMLElement | null = null;
+  if (spec.rate) {
+    const rateSpec = spec.rate;
+    const chipDefs: { value: number | null; label: string; title: string }[] =
+      rateSpec.kind === "phase"
+        ? BEAT_RATES.map((r) => ({
+            value: r,
+            label: BEAT_RATE_LABELS[r],
+            title: `${BEAT_RATE_TITLES[r]}${r === rateSpec.rest ? " (default)" : ""}`,
+          }))
+        : [
+            { value: null, label: "Scene", title: "Whatever this scene's own Beat grid row is set to (default)" },
+            ...BEAT_GRIDS.map((g, i) => ({ value: i, label: g.label, title: g.label })),
+          ];
+    rateWrap = document.createElement("div");
+    rateWrap.className = "vc-rate";
+    const rateLabel = document.createElement("div");
+    rateLabel.textContent = rateSpec.kind === "phase" ? "Reacts every" : "Beat grid";
+    rateLabel.style.cssText = rateStripLabelStyle;
+    const rateChips = document.createElement("div");
+    rateChips.style.cssText = paletteListStyle;
+    const chips = chipDefs.map((def) => {
+      const btn = document.createElement("button");
+      btn.textContent = def.label;
+      btn.title = def.title;
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (rateSpec.kind === "phase") rateSpec.set(def.value as BeatRate);
+        else rateSpec.set(def.value as BeatOverride);
+        applyRate?.(def.value);
+      });
+      rateChips.appendChild(btn);
+      return btn;
+    });
+    applyRate = (current: number | null): void => {
+      chips.forEach((chip, i) => {
+        chip.style.cssText = chipDefs[i].value === current ? rateChipLitStyle(spec.accent) : rateChipStyle;
+      });
+    };
+    applyRate(rateSpec.get());
+    rateWrap.append(rateLabel, rateChips);
+  }
+
   el.append(head, slider, hint);
+  if (rateWrap) el.appendChild(rateWrap);
   if (signalIndicator) el.appendChild(signalIndicator.strip);
   el.addEventListener("click", () => slider.focus());
   wireHoverFocus(el, slider);
@@ -979,7 +1077,8 @@ function createControlRow(spec: ControlRowSpec) {
       }
       pinMark!.style.display = spec.pin.get() !== undefined ? "" : "none";
     }
-    resetBtn.style.visibility = Math.abs(value - spec.defaultValue) > 1e-6 ? "visible" : "hidden";
+    const rateChanged = spec.rate ? spec.rate.get() !== restValueOf(spec.rate) : false;
+    resetBtn.style.visibility = Math.abs(value - spec.defaultValue) > 1e-6 || rateChanged ? "visible" : "hidden";
     setHint(auto);
   }
 
@@ -1030,6 +1129,12 @@ function createControlRow(spec: ControlRowSpec) {
     clearOff();
     spec.pin?.clear();
     commit(spec.defaultValue);
+    if (spec.rate) {
+      const rest = restValueOf(spec.rate);
+      if (spec.rate.kind === "phase") spec.rate.set(rest as BeatRate);
+      else spec.rate.set(rest as BeatOverride);
+      applyRate?.(rest);
+    }
   });
   offChip.addEventListener("click", () => {
     // Any of the row's own controls taking over clears a pin the same way —
@@ -1930,6 +2035,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         : undefined,
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
       reads,
+      rate:
+        spec.rate?.kind === "phase"
+          ? {
+              kind: "phase",
+              get: () => deps.getSceneSettingRateValue(sceneId, spec),
+              set: (rate) => deps.onSceneSettingRateChange(sceneId, spec, rate),
+              rest: spec.rate.rest,
+            }
+          : spec.rate?.kind === "override"
+            ? {
+                kind: "override",
+                get: () => deps.getSceneSettingBeatOverrideValue(sceneId, spec),
+                set: (override) => deps.onSceneSettingBeatOverrideChange(sceneId, spec, override),
+              }
+            : undefined,
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));

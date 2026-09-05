@@ -38,6 +38,13 @@ export interface AnimFrame {
   beatPhase: number;
   barPhase: number;
   tempoLock: number;
+  /** beatClock's own free-running, never-reset beat count, unwrapped — see
+   *  beatClock.ts. The scene-wide beat grid (audio/beatGrid.ts, applied by
+   *  gridPulse.ts below) divides this by its own chosen note value; a
+   *  setting overriding that grid for itself (settingBeatRate.ts) divides
+   *  by its own instead. A scene wanting either should go through one of
+   *  those, not read this directly. */
+  beats: number;
   /** Whether this frame's beat edge came from the grid rather than the
    *  detector — false on Hits and while a grid stop is still waiting for
    *  the tracker to lock (gridPulse.ts). The Rhythm card reads this. */
@@ -129,6 +136,7 @@ export function createAnimClock(): AnimClock {
         beatPhase: beat.beatPhase,
         barPhase: beat.barPhase,
         tempoLock: beat.tempoLock,
+        beats: beat.beats,
         onGrid: grid.onGrid,
         low: bandEnergy.low,
         mid: bandEnergy.mid,

@@ -40,7 +40,16 @@ import { createRenderLatch } from "./render/renderLatch.ts";
 import { getBeatGrid, setBeatGrid } from "./audio/beatGrid.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { getSceneSetting, resetSceneSettings, setSceneSetting, settingDefault } from "./render/sceneSettings.ts";
+import {
+  getSceneSetting,
+  getSceneSettingBeatOverride,
+  getSceneSettingRate,
+  resetSceneSettings,
+  setSceneSetting,
+  setSceneSettingBeatOverride,
+  setSceneSettingRate,
+  settingDefault,
+} from "./render/sceneSettings.ts";
 import {
   applyLook,
   captureLook,
@@ -630,6 +639,11 @@ function wireDeviceMenu(): void {
       setSceneSetting(sceneId, spec, value);
     },
     onSceneSettingsReset: (sceneId) => resetSceneSettings(sceneId, getScene(sceneId)?.settings ?? []),
+    getSceneSettingRateValue: (sceneId, spec) => getSceneSettingRate(sceneId, spec),
+    onSceneSettingRateChange: (sceneId, spec, rate) => setSceneSettingRate(sceneId, spec, rate),
+    getSceneSettingBeatOverrideValue: (sceneId, spec) => getSceneSettingBeatOverride(sceneId, spec),
+    onSceneSettingBeatOverrideChange: (sceneId, spec, override) =>
+      setSceneSettingBeatOverride(sceneId, spec, override),
     listLooks,
     onSaveLook: (sceneId, name) => saveLook(captureLook(name, sceneId, getScene(sceneId)?.settings ?? [])),
     onApplyLook: (look) => {
