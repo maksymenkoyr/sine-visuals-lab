@@ -339,8 +339,7 @@ vec3 stylePortal(vec2 c, float cell, float r, float a, float n, float pxSize, fl
 
 // ---- Prism ----------------------------------------------------------------
 
-// A three-mirror kaleidoscope on a hexagonal lattice (index.ts folds this
-// style on hexCell): each rosette mirrors one wedge of a smoothly warped
+// A mirror kaleidoscope: each rosette mirrors one wedge of a smoothly warped
 // stripe field painted with a cyclic rainbow — stripes crossing the mirror
 // seams are what make the chevrons and diamonds — and the stripes are log
 // spirals, so a zoom is a plain shift of them and the picture dives
@@ -516,5 +515,3 @@ vec3 styleBurst(vec2 c, float cell, float r, float a, float n, float pxSize, flo
 `;
 
 export const STYLE_NAMES = ["Mandala", "Portal", "Prism", "Burst"] as const;
-/** Index of the style main() folds on the hexagonal lattice. */
-export const HEX_STYLE = 2;

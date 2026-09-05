@@ -1,8 +1,8 @@
 import { createFullscreenScene } from "../../fullscreenScene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import type { SignalLink } from "../../signals.ts";
-import { CELL_MID, KALEIDO_COMMON_GLSL } from "./glsl.ts";
-import { BURST_GLSL, HEX_STYLE, MANDALA_GLSL, PORTAL_GLSL, PRISM_GLSL, STYLE_NAMES } from "./styles.ts";
+import { KALEIDO_COMMON_GLSL } from "./glsl.ts";
+import { BURST_GLSL, MANDALA_GLSL, PORTAL_GLSL, PRISM_GLSL, STYLE_NAMES } from "./styles.ts";
 
 // A mirror-tiled lattice of mandalas in four styles (styles.ts): Mandala,
 // nested hard-edged contour bands after the "Kaleidoscope Visuals" short
@@ -13,31 +13,34 @@ import { BURST_GLSL, HEX_STYLE, MANDALA_GLSL, PORTAL_GLSL, PRISM_GLSL, STYLE_NAM
 // Lj4Ae4T3XP0. Style is the scene's variant (SceneSetting.variant): every
 // other setting keeps its own value per style.
 //
-// How every style is framed: the plane is folded into cells (square, p4m;
-// or for Prism a hexagonal lattice, p6m — HEX_STYLE), one mandala per cell,
-// each cell into uSymmetry mirrored wedges, and the style paints a function
-// of the radius and the folded angle. Mandala builds a scalar field F from a
-// concentric ramp plus ring families and quantises it into flowing bands;
-// the others sample noise in the folded wedge. The flow, morph, spin and
-// zoom are phase offsets accumulated JS-side like caustics' drift; the beat
-// is a damped surge (advanceBeatSurge below) that pushes Mandala's bands
-// and kicks the other styles' zoom, plus a swell envelope on the radius and
-// brightness.
+// How every style is framed: a mandala whose ring of petals is a ring of
+// smaller mandalas, each a whole copy of it, children all the way down.
+// main() finds, per pixel, the deepest mandala the pixel belongs to (a
+// descent through the nearest child at each level, CHILD_RING and the
+// child scale from Nesting) and hands that mandala's local coordinates —
+// radius and the uSymmetry-fold mirrored angle, a cell of CELL_LOCAL so
+// the disc is radius 1 — to the style, which paints one mandala's body.
+// Mandala builds a scalar field F from a concentric ramp plus ring families
+// and quantises it into flowing bands; the others sample noise in the
+// folded wedge. Every style draws in cell-relative units (Mandala rescales
+// r to CELL_MID; the others already work in r/cell).
 //
-// The infinite zoom is a lattice zoom, main(): the cell size grows
-// continuously — exactly what dragging Tiling does — from the Tiling size
-// up to the size whose core covers the screen, and every mandala's core is
-// a window onto the same lattice one level smaller (CORE_FRAC), so when a
-// mandala has swallowed the screen the picture is already the next level's
-// lattice at the Tiling size and the cycle restarts without a cut. A
-// level's cores only open once its cell has grown past the Tiling size, so
-// the newest level is never showing anything the level it replaces wasn't.
-// Every style therefore draws itself in cell-relative units (Mandala
-// rescales r to CELL_MID; the others already work in r/cell), which is
-// what makes a bigger cell a bigger mandala rather than a wider view. What
-// moves *inside* a cell — bands, rings, stripes, shards streaming out — is
-// the flow (uFlowPos), never the zoom, so the camera and the material
-// don't double up.
+// The infinite zoom is a dive into one child: the camera transform T_t
+// (main()) is the continuous power of the similarity that maps the parent
+// onto its top child — the fixed point of that similarity stays put on
+// screen while the parent slides off and the child grows into its place —
+// and because a child *is* the parent, the picture at the end of a cycle
+// is the picture at its start one level deeper, and uZoomPos just keeps
+// counting. The parent's own parent is drawn too (the root frame, one
+// child transform up), so what surrounds the child at the end of a cycle
+// is what surrounds the parent at the start.
+//
+// The flow, morph, spin and zoom are phase offsets accumulated JS-side
+// like caustics' drift; the beat is a damped surge (advanceBeatSurge
+// below) that pushes the material — Mandala's bands, the other styles'
+// rings, stripes and shards, all of which ride uFlowPos, never the zoom,
+// so the camera and the material don't double up — plus a swell envelope
+// on the radius and brightness.
 //
 // What the reference videos actually do with the music, measured (frame
 // log-polar registration against librosa onsets, 15 fps): every one zooms
@@ -48,19 +51,12 @@ import { BURST_GLSL, HEX_STYLE, MANDALA_GLSL, PORTAL_GLSL, PRISM_GLSL, STYLE_NAM
 // beatLift; the beat surge pushes the flow (the material, not the camera),
 // which reads as the kick without the lattice lurching.
 //
-// Why uSymmetry only takes even values, and why nothing may rotate near a
-// cell edge: the picture depends on r and the mirror-folded angle only, so
-// it's invariant under angle -> -angle and angle -> angle + 2pi/N. A
-// neighbouring cell is the mirror image across the shared edge, which maps
-// angle -> pi - angle; that's a symmetry iff pi is a multiple of 2pi/N, i.e.
-// iff N is even. With N even the tiling is seamless for free. On the
-// hexagonal lattice the neighbours sit at multiples of 60 degrees, so the
-// edge reflections are the mirror lines at 30, 90 and 150 degrees, and the
-// fold needs a multiple of six — main() snaps it. A rotation offset breaks
-// all this (fold(pi - a + rot) != fold(a + rot) unless 2rot is a multiple of
-// the sector), so every per-ring rotation is masked to zero before r
-// reaches cell/2 — inside the inscribed circle nothing touches an edge. A
-// twist shears along the *folded* angle, which is mirror-safe.
+// uSymmetry takes even values so a mandala mirrors across its own axes
+// (petal centre lines and seams both land on mirror lines); the fold's
+// history as a seamless-tiling rule is in git. Rotations are still masked
+// to zero toward the disc edge (EDGE_MASK_INNER in styles.ts) so a mandala
+// meets its parent's body with a steady rim, and a twist shears along the
+// *folded* angle.
 //
 // Mandala's band footprint (for ink antialiasing and the moiré fade) comes
 // from analytic dF/dr and dF/dangle carried alongside F, not from fwidth:
@@ -71,19 +67,26 @@ import { BURST_GLSL, HEX_STYLE, MANDALA_GLSL, PORTAL_GLSL, PRISM_GLSL, STYLE_NAM
 
 /** Viewport-height span of the centred coordinate system. */
 const ZOOM = 2.3;
-/** Ratio of cell size per unit of the Tiling slider, around CELL_MID. */
-const CELL_SPAN = 2.8;
-/** The lattice zoom: every mandala's core, this fraction of its cell in
- *  radius, is a window onto the lattice one level smaller. The cycle's
- *  largest cell is the one whose core covers the screen's half-diagonal,
- *  so the level above is invisible at the moment the cycle wraps. Levels
- *  drawn per pixel (the visible one plus what shows through its cores),
- *  the softness of a core's edge and the ink ring on it (fractions of the
- *  cell), and the palette step between nested levels. */
-const CORE_FRAC = 0.2;
-const ZOOM_LEVELS = 3;
-const CORE_SOFT = 0.006;
-const RING_W = 0.008;
+/** The cell a style is handed: the mandala's disc is radius 1 in its local
+ *  frame, so the cell (whose half is the disc) is 2. */
+const CELL_LOCAL = 2.0;
+/** The recursion: children sit on a ring at this radius of the parent's
+ *  disc; how many there are, from Symmetry (CHILDREN_MIN..CHILDREN_MAX);
+ *  and the child scale, a fraction of the largest that keeps neighbours
+ *  apart, from Nesting (CHILD_FILL_MIN..CHILD_FILL_MAX). Descent stops
+ *  after CHILD_DEPTH levels or once a mandala is under CHILD_MIN_PX pixels
+ *  across — its body is painted as if it had no children. Rim: the ink line
+ *  a parent draws around each child, in the parent's units, and the palette
+ *  step between nested levels (keyed on the absolute level, so a mandala
+ *  keeps its hue as it grows into its parent's place). */
+const CHILD_RING = 0.62;
+const CHILDREN_MIN = 6;
+const CHILDREN_MAX = 12;
+const CHILD_FILL_MIN = 0.45;
+const CHILD_FILL_MAX = 0.95;
+const CHILD_DEPTH = 7;
+const CHILD_MIN_PX = 6.0;
+const CHILD_RIM = 0.012;
 const LEVEL_HUE = 0.07;
 /** Where a warm cycle starts in the palette — a touch above 0 so Neon's
  *  first band is a deep red rather than a pink. */
@@ -189,7 +192,7 @@ const SETTINGS: SceneSetting[] = [
     key: "style",
     label: "Style",
     description:
-      "Mandala: nested contour bands. Portal: a disc of petalled rings pouring out of the centre. Prism: a hexagonal mirror kaleidoscope of a rainbow texture. Burst: crystal shards rushing out of a dark star. Every other setting remembers its own value per style",
+      "Mandala: nested contour bands. Portal: a disc of petalled rings pouring out of the centre. Prism: a mirror kaleidoscope of a rainbow texture. Burst: crystal shards rushing out of a dark star. Every other setting remembers its own value per style",
     group: "Form",
     type: "enum",
     options: STYLE_NAMES,
@@ -202,7 +205,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "symmetry",
     label: "Symmetry",
-    description: "How many mirrored wedges each mandala folds into — even counts only, so the tiles meet without a seam; Prism's hexagonal lattice rounds it to a multiple of six",
+    description: "How many mirrored wedges each mandala folds into, and with it how many child mandalas sit on its ring",
     group: "Form",
     min: 6,
     max: 32,
@@ -214,14 +217,13 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "spread",
-    label: "Tiling",
-    description: "How large each mandala's cell is — small tiles many across the screen, large is a single mandala filling it; with Zoom on, the size each dive starts from",
+    label: "Nesting",
+    description: "How big the child mandalas on each ring are — small beads at the low end, nearly touching at the high end; each is a whole copy of its parent, and the dive goes into one of them",
     group: "Form",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.5,
-    variantDefaults: { Portal: 0.85, Prism: 0.85, Burst: 0.85 },
   },
   {
     key: "rings",
@@ -283,7 +285,7 @@ const SETTINGS: SceneSetting[] = [
     key: "zoom",
     label: "Zoom",
     description:
-      "How fast the camera dives in — the tiles grow as if Tiling were being dragged up, and every mandala's centre opens onto the next lattice down, forever; Tiling is where each dive starts",
+      "How fast the camera dives into the top child mandala — it grows into its parent's place, its own children grow into its rings, and so on forever",
     group: "Motion",
     min: 0,
     max: 1,
@@ -382,10 +384,6 @@ ${PORTAL_GLSL}
 ${PRISM_GLSL}
 ${BURST_GLSL}
 
-vec2 cellCoords(vec2 p, float cell, bool hex) {
-  return hex ? hexCell(p, cell) : mod(p + cell * 0.5, cell) - cell * 0.5;
-}
-
 vec3 styleAt(int style, vec2 c, float cell, float n, float pxSize, float tBase) {
   float r = length(c) * (1.0 - ${BEAT_SWELL.toFixed(3)} * uBeatSwell);
   float a = atan(c.y, c.x);
@@ -395,58 +393,77 @@ vec3 styleAt(int style, vec2 c, float cell, float n, float pxSize, float tBase) 
   return styleMandala(c, cell, r, a, n, pxSize, tBase);
 }
 
+vec2 rot2(vec2 v, float t) {
+  float cs = cos(t);
+  float sn = sin(t);
+  return vec2(cs * v.x - sn * v.y, sn * v.x + cs * v.y);
+}
+
 void main() {
   vec2 uv = roomUv(vUv);
   vec2 aspectFix = vec2(uResolution.x / uResolution.y, 1.0);
-  vec2 p = (uv - 0.5) * aspectFix * ${ZOOM.toFixed(2)};
-  // Pixel size in p units — p is linear in vUv, so fwidth on it is exact
-  // and seam-free.
-  float pxSize = max(fwidth(p.x), fwidth(p.y));
+  vec2 q = (uv - 0.5) * aspectFix * ${ZOOM.toFixed(2)};
+  // Pixel size in screen units — q is linear in vUv, so fwidth on it is
+  // exact.
+  float pxScreen = max(fwidth(q.x), fwidth(q.y));
   float tBase0 = ${CYCLE_BASE.toFixed(2)} + uPalShift + (uCentroid - 0.5) * uTint * 0.25;
   int style = int(uStyle + 0.5);
-  bool hex = style == ${HEX_STYLE};
   float n = max(2.0, floor(uSymmetry * 0.5 + 0.5) * 2.0);
-  if (hex) n = max(6.0, floor(n / 6.0 + 0.5) * 6.0);
 
-  // The lattice zoom (header): the cell grows from the Tiling size to the
-  // size whose core swallows the whole screen, then the cycle restarts one
-  // level down — invisibly, because every mandala's core is a window onto
-  // the lattice a level smaller, and a level's cores only open once its
-  // cell has grown past the Tiling size.
-  float cMin = ${CELL_MID.toFixed(2)} * pow(${CELL_SPAN.toFixed(2)}, (uSpread - 0.5) * 2.0);
-  float halfDiag = 0.5 * ${ZOOM.toFixed(2)} * length(aspectFix);
-  float cMax = max(halfDiag / ${CORE_FRAC.toFixed(3)}, cMin * 2.0);
-  float cycle = log2(cMax / cMin);
-  float K = cMax / cMin;
+  // The recursion's shape (header): M children on a ring, the top one the
+  // dive target, each child's frame turned to point outward.
+  float m = clamp(floor(n * 0.5 + 0.5), ${CHILDREN_MIN.toFixed(1)}, ${CHILDREN_MAX.toFixed(1)});
+  float sector = TWO_PI / m;
+  float sMax = ${CHILD_RING.toFixed(3)} * sin(sector * 0.5);
+  float s = sMax * mix(${CHILD_FILL_MIN.toFixed(2)}, ${CHILD_FILL_MAX.toFixed(2)}, uSpread);
+  vec2 cTop = vec2(0.0, ${CHILD_RING.toFixed(3)});
+
+  // The camera: t in [0,1) through the cycle, the similarity parent -> top
+  // child raised to the power t, about its fixed point f. At t = 1 the
+  // screen frame is the child's frame exactly, which is the start of the
+  // next cycle one level down.
+  float cycle = log2(1.0 / s);
   float turns = floor(uZoomPos / cycle);
-  float C = cMin * exp2(uZoomPos - turns * cycle);
+  float t = (uZoomPos - turns * cycle) / cycle;
+  vec2 f = cTop / (1.0 - s);
+  float st = pow(s, t);
+  vec2 pWorld = f + st * (q - f);
+  // The root frame is the parent's parent: the parent is the root's top
+  // child, so what surrounds the parent is drawn too.
+  vec2 pp = cTop + s * pWorld;
+  float px = pxScreen * st * s;
+  float depth = -1.0;
 
-  vec3 col = vec3(0.0);
-  float carry = 1.0;
-  float ring = 0.0;
-  for (int k = 0; k < ${ZOOM_LEVELS}; k++) {
-    float cellK = C / pow(K, float(k));
-    vec2 c = cellCoords(p, cellK, hex);
-    float r = length(c);
-    float open = smoothstep(cMin / K, cMin, cellK);
-    float core = ${CORE_FRAC.toFixed(3)} * cellK * open;
-    float soft = ${CORE_SOFT.toFixed(3)} * cellK + pxSize;
-    float m = open > 0.0 ? smoothstep(core - soft, core + soft, r) : 1.0;
-    float w = carry * m;
-    if (w > 0.002) {
-      // Each level a step along the palette, keyed on the absolute level so
-      // a level keeps its hue as it grows into the next slot.
-      float tBase = tBase0 + (turns + float(k)) * ${LEVEL_HUE.toFixed(3)};
-      col += w * styleAt(style, c, cellK, n, pxSize, tBase);
-    }
-    if (open > 0.0) {
-      float rw = ${RING_W.toFixed(3)} * cellK + pxSize;
-      ring += carry * (1.0 - smoothstep(rw - pxSize, rw + pxSize, abs(r - core))) * open;
-    }
-    carry *= 1.0 - m;
-    if (carry < 0.002) break;
+  // Descend: at each level, is the point inside the nearest child's disc?
+  // Then the point belongs to that child (or something deeper).
+  float rimD = 1e9;
+  for (int d = 0; d < ${CHILD_DEPTH}; d++) {
+    rimD = 1e9;
+    float r = length(pp);
+    if (r > 1.0) break;
+    float ang = atan(pp.y, pp.x) - PI * 0.5;
+    float k = floor(ang / sector + 0.5);
+    float thk = PI * 0.5 + k * sector;
+    vec2 ck = ${CHILD_RING.toFixed(3)} * vec2(cos(thk), sin(thk));
+    vec2 dlt = pp - ck;
+    float dist = length(dlt);
+    if (dist > s) { rimD = dist - s; break; }
+    if (px / s > 1.0 / ${CHILD_MIN_PX.toFixed(1)}) break;
+    pp = rot2(dlt, -k * sector) / s;
+    px /= s;
+    depth += 1.0;
   }
-  col = mix(col, INK, min(1.0, ring) * min(1.0, uInk * 1.2));
+
+  // Paint this mandala's body in its own frame.
+  vec2 c = pp * ${(CELL_LOCAL * 0.5).toFixed(1)};
+  float tBase = tBase0 + (turns + depth) * ${LEVEL_HUE.toFixed(3)};
+  vec3 col = styleAt(style, c, ${CELL_LOCAL.toFixed(1)}, n, px * ${(CELL_LOCAL * 0.5).toFixed(1)}, tBase);
+  // The parent's ink rim around each child, and each mandala's own rim at
+  // its disc edge — what makes a child read as set into its parent.
+  float rimW = ${CHILD_RIM.toFixed(3)};
+  float rimOut = 1.0 - smoothstep(rimW - px, rimW + px, rimD);
+  float rimIn = 1.0 - smoothstep(rimW - px, rimW + px, abs(length(pp) - 1.0));
+  col = mix(col, INK, max(rimOut, rimIn) * min(1.0, uInk * 1.2));
   outColor = vec4(col, 1.0);
 }
 `;
