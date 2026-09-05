@@ -13,7 +13,8 @@
 // scene — so the default is the cheapest one to render. Fields recorded per
 // sample, straight from ProbeSnapshot (src/tuning/probe.ts): t (bundle
 // seconds), onset (beat.fired), bpm, phase (beatPhase), low/mid/high/energy,
-// section (sectionIntensity), drop (dropPulse), centroid. probe() reads the
+// section (sectionIntensity), drop (dropPulse), centroid, onGrid (the Beat
+// grid row's own hit flag, src/render/gridPulse.ts). probe() reads the
 // last frame's objects and doesn't consume anything, so sampling at rAF
 // rate sees every onset the renderer saw — but not more often than the
 // render loop runs, which is why a 60 fps sample can still miss an onset
@@ -59,6 +60,7 @@ const samples = await page.evaluate(
             +t.toFixed(4), p.beat.fired ? 1 : 0, +p.beat.bpm.toFixed(2), +p.beat.phase.toFixed(3),
             +p.bands.low.toFixed(3), +p.bands.mid.toFixed(3), +p.bands.high.toFixed(3), +p.bands.energy.toFixed(3),
             +p.section.toFixed(3), +p.drop.toFixed(3), +p.centroid.toFixed(3),
+            p.beat.onGrid ? 1 : 0,
           ]);
         }
         if (t * 1000 < durMs) requestAnimationFrame(tick);
@@ -76,7 +78,7 @@ writeFileSync(
   join(bundle, "hears.json"),
   JSON.stringify({
     bundle: basename(bundle), scene, port: +port,
-    columns: ["t", "onset", "bpm", "phase", "low", "mid", "high", "energy", "section", "drop", "centroid"],
+    columns: ["t", "onset", "bpm", "phase", "low", "mid", "high", "energy", "section", "drop", "centroid", "onGrid"],
     samples,
   }),
 );
