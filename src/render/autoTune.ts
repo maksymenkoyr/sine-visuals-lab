@@ -1,5 +1,5 @@
 import type { SceneSetting } from "./sceneSettings.ts";
-import { getSceneSetting } from "./sceneSettings.ts";
+import { getSceneSetting, setVariantResolver, settingDefault, settingScope } from "./sceneSettings.ts";
 import {
   EXPANSION_DEFAULT,
   EXPANSION_MAX,
@@ -211,17 +211,20 @@ function persistStrength(): void {
   }
 }
 
-/** True unless this exact (scene, key) pair was explicitly set to manual. */
+/** True unless this exact (scene, key) pair was explicitly set to manual.
+ *  Keyed by sceneSettings.ts's settingScope, so a scene with a variant keeps
+ *  one auto/manual state per variant option, like its values. */
 export function isAutoEnabled(sceneId: string, key: string): boolean {
-  return exceptions[sceneId]?.[key] !== false;
+  return exceptions[settingScope(sceneId, key)]?.[key] !== false;
 }
 
 export function setAutoEnabled(sceneId: string, key: string, on: boolean): void {
+  const scope = settingScope(sceneId, key);
   if (on) {
-    delete exceptions[sceneId]?.[key];
-    if (exceptions[sceneId] && Object.keys(exceptions[sceneId]).length === 0) delete exceptions[sceneId];
+    delete exceptions[scope]?.[key];
+    if (exceptions[scope] && Object.keys(exceptions[scope]).length === 0) delete exceptions[scope];
   } else {
-    (exceptions[sceneId] ??= {})[key] = false;
+    (exceptions[scope] ??= {})[key] = false;
   }
   persistExceptions();
 }
@@ -249,27 +252,29 @@ export function setAutoStrength(value: number): void {
   persistStrength();
 }
 
-function clampToSpec(spec: SceneSetting, value: number): number {
-  if (!Number.isFinite(value)) return spec.default;
+function clampToSpec(spec: SceneSetting, value: number, base = spec.default): number {
+  if (!Number.isFinite(value)) return base;
   return Math.min(spec.max, Math.max(spec.min, value));
 }
 
 /**
  * Pure resolution formula: how far this setting should sit from its default
  * given the current music profile. At every dial = 0.5 (NEUTRAL) the sum is
- * exactly 0, so this returns spec.default bit-for-bit — the property that
- * makes auto safe to ship on by default for an already-tuned scene.
+ * exactly 0, so this returns the default bit-for-bit — the property that
+ * makes auto safe to ship on by default for an already-tuned scene. `base`
+ * is that default: spec.default unless the scene's variant says otherwise
+ * (sceneSettings.ts's settingDefault), which resolve() passes in.
  */
-export function computeAutoTarget(spec: SceneSetting, profile: DialValues, autoStrength: number): number {
-  if (!spec.auto) return spec.default;
+export function computeAutoTarget(spec: SceneSetting, profile: DialValues, autoStrength: number, base = spec.default): number {
+  if (!spec.auto) return base;
   let deviation = 0;
   for (const dial of MUSIC_DIALS) {
     const w = spec.auto[dial];
     if (w === undefined) continue;
     deviation += w * (shapeExpansion(profile[dial], DIAL_EXPAND) - 0.5);
   }
-  const raw = spec.default + autoStrength * deviation * (spec.max - spec.min);
-  return clampToSpec(spec, raw);
+  const raw = base + autoStrength * deviation * (spec.max - spec.min);
+  return clampToSpec(spec, raw, base);
 }
 
 /**
@@ -279,12 +284,17 @@ export function computeAutoTarget(spec: SceneSetting, profile: DialValues, autoS
  * bit-for-bit — same identity-at-rest property, same reason it's safe to
  * ship auto-following by default.
  */
-export function computeMacroTarget(spec: SceneSetting, driverValue: number): number {
+export function computeMacroTarget(
+  spec: SceneSetting,
+  driverValue: number,
+  base = spec.default,
+  driverBase = spec.macro?.driver.default ?? 0,
+): number {
   const m = spec.macro;
-  if (!m) return spec.default;
-  const deviation = m.weight * (driverValue - m.driver.default);
-  const raw = spec.default + deviation * (spec.max - spec.min);
-  return clampToSpec(spec, raw);
+  if (!m) return base;
+  const deviation = m.weight * (driverValue - driverBase);
+  const raw = base + deviation * (spec.max - spec.min);
+  return clampToSpec(spec, raw, base);
 }
 
 // Glides the resolved value toward its target over a few seconds so a
@@ -297,7 +307,7 @@ let latestProfile: DialValues = { ...NEUTRAL };
 const slewed = new Map<string, number>();
 
 function slewKey(sceneId: string, key: string): string {
-  return `${sceneId}/${key}`;
+  return `${settingScope(sceneId, key)}/${key}`;
 }
 
 /** Advances the shared music profile snapshot every scene's resolve() reads
@@ -333,8 +343,13 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
   // usual), not the music profile directly. Drivers don't carry a `macro` of
   // their own, so this recurses exactly one level deep.
   const target = spec.auto
-    ? computeAutoTarget(spec, latestProfile, strength)
-    : computeMacroTarget(spec, resolveSceneSetting(sceneId, spec.macro!.driver));
+    ? computeAutoTarget(spec, latestProfile, strength, settingDefault(sceneId, spec))
+    : computeMacroTarget(
+        spec,
+        resolveSceneSetting(sceneId, spec.macro!.driver),
+        settingDefault(sceneId, spec),
+        settingDefault(sceneId, spec.macro!.driver),
+      );
   const key = slewKey(sceneId, spec.key);
   const current = slewed.get(key);
   // First time this param is seen, snap to target rather than gliding from
@@ -350,6 +365,11 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
 export function resolveSceneSetting(sceneId: string, spec: SceneSetting): number {
   return resolve(sceneId, spec, getSceneSetting(sceneId, spec));
 }
+
+// A scene's variant (SceneSetting.variant) is read through this resolver
+// too, so a dev override on it selects the matching profile — see
+// sceneSettings.ts's setVariantResolver.
+setVariantResolver(resolveSceneSetting);
 
 /** Same idea for the Sensitivity/Expansion/Smoothing pseudo-params, which
  *  live in their own store (audio/sensitivity.ts) rather than

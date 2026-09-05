@@ -6,6 +6,8 @@ import { createSectionIntensity, type SectionIntensity } from "./sectionIntensit
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
 import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroid.ts";
 import { SMOOTHING_DEFAULT, smoothingRateScale } from "../audio/sensitivity.ts";
+import { BEAT_GRID_DEFAULT, beatGridBeats } from "../audio/beatGrid.ts";
+import { createGridPulse, type GridPulse } from "./gridPulse.ts";
 
 // Bundles every per-frame renderer-side clock a scene might want, so
 // Scene.render() takes one object instead of an ever-growing positional
@@ -17,9 +19,12 @@ export interface AnimFrame {
   timeSec: number;
   /** Monotonic, audio-warped clock — see flowClock.ts. */
   flowPhase: number;
-  /** Decaying [0,1] flash that jumps to 1 on each beat. */
+  /** Decaying [0,1] flash that jumps to 1 on each beat — the same beat as
+   *  `onset` below, so it follows the beat grid too. */
   beatPulse: number;
-  /** One-shot broadband onset edge, mirroring FeatureFrame.onset — true only
+  /** One-shot broadband beat edge — FeatureFrame.onset on the Hits grid, or
+   *  a tick of beatClock.ts's phase-locked grid at the chosen note value
+   *  (src/audio/beatGrid.ts, derived by gridPulse.ts) — true only
    *  on the tick it fired. JS-side only, same family as lowOnset/midOnset/
    *  highOnset/dropOnset below: a scene wanting a discrete trigger (not
    *  beatPulse's continuous decay) reads this instead of FeatureFrame.onset
@@ -33,6 +38,10 @@ export interface AnimFrame {
   beatPhase: number;
   barPhase: number;
   tempoLock: number;
+  /** Whether this frame's beat edge came from the grid rather than the
+   *  detector — false on Hits and while a grid stop is still waiting for
+   *  the tracker to lock (gridPulse.ts). The Rhythm card reads this. */
+  onGrid: boolean;
   /** Slewed low/mid/high band levels and their onset pulses — see bandEnergy.ts. */
   low: number;
   mid: number;
@@ -78,8 +87,9 @@ export interface AnimClock {
    *  musicProfile's eases alike, so `smoothing` at the Smoothing row's Off
    *  stop (0 -> Infinity) makes sectionIntensity/profile land exactly on the
    *  `raw` counterparts already exposed below — see the meters panel's RAW
-   *  chip (src/ui/audioMeters.ts). */
-  advance(dtSec: number, frame: FeatureFrame, smoothing?: number): AnimFrame;
+   *  chip (src/ui/audioMeters.ts). `beatGrid` is the Beat grid row's stored
+   *  index (src/audio/beatGrid.ts); the default is Hits, today's behaviour. */
+  advance(dtSec: number, frame: FeatureFrame, smoothing?: number, beatGrid?: number): AnimFrame;
 }
 
 const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts broadband beatPulse decay
@@ -91,10 +101,11 @@ export function createAnimClock(): AnimClock {
   const section: SectionIntensity = createSectionIntensity();
   const profile: MusicProfile = createMusicProfile();
   const centroid: SpectralCentroid = createSpectralCentroid();
+  const grid: GridPulse = createGridPulse();
   let beatPulse = 0;
 
   return {
-    advance(dtSec: number, frame: FeatureFrame, smoothing = SMOOTHING_DEFAULT): AnimFrame {
+    advance(dtSec: number, frame: FeatureFrame, smoothing = SMOOTHING_DEFAULT, beatGrid = BEAT_GRID_DEFAULT): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
       const flowPhase = flow.advance(dtSec, frame.energy);
       beat.advance(dtSec, frame.bpm, frame.onset);
@@ -103,18 +114,22 @@ export function createAnimClock(): AnimClock {
       profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
       centroid.advance(dtSec, frame.bands, rateScale);
 
+      // The beat clock itself always tracks the raw detector (above) — the
+      // grid is a view over it, not a feedback into it.
+      const onset = grid.advance(beat.beats, beat.tempoLock, beatGridBeats(beatGrid), frame.onset);
       beatPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
-      if (frame.onset) beatPulse = 1;
+      if (onset) beatPulse = 1;
 
       return {
         dtSec,
         timeSec: frame.time,
         flowPhase,
         beatPulse,
-        onset: frame.onset,
+        onset,
         beatPhase: beat.beatPhase,
         barPhase: beat.barPhase,
         tempoLock: beat.tempoLock,
+        onGrid: grid.onGrid,
         low: bandEnergy.low,
         mid: bandEnergy.mid,
         high: bandEnergy.high,
