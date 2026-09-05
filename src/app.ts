@@ -36,6 +36,7 @@ import {
 } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
+import { getBeatGrid, setBeatGrid } from "./audio/beatGrid.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
@@ -597,6 +598,8 @@ function wireDeviceMenu(): void {
     onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
     onLufsReset: () => lufsAnalyser?.reset(),
+    getBeatGrid: (sceneId) => getBeatGrid(sceneId),
+    onBeatGridChange: (sceneId, value) => setBeatGrid(sceneId, value),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
     resolveExpansionValue: (sceneId) => resolveExpansion(sceneId),
@@ -1120,7 +1123,7 @@ function loop(): void {
   // itself (beat/flow/band-pulse/section-intensity decay) still run on every
   // rAF tick regardless of the render-rate cap below — only the GPU draw is
   // rate-capped.
-  const anim = gained ? animClock.advance(dtSec, gained, smoothing) : null;
+  const anim = gained ? animClock.advance(dtSec, gained, smoothing, getBeatGrid(scene.id)) : null;
   if (anim) {
     lastAnim = anim;
     advanceAutoTune(dtSec, anim.profile);
