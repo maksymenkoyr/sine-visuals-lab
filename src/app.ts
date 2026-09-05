@@ -38,7 +38,13 @@ import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
+import {
+  getSceneSetting,
+  getSceneSettingRate,
+  resetSceneSettings,
+  setSceneSetting,
+  setSceneSettingRate,
+} from "./render/sceneSettings.ts";
 import {
   applyLook,
   captureLook,
@@ -575,6 +581,8 @@ function wireDeviceMenu(): void {
       setSceneSetting(sceneId, spec, value);
     },
     onSceneSettingsReset: (sceneId) => resetSceneSettings(sceneId, getScene(sceneId)?.settings ?? []),
+    getSceneSettingRateValue: (sceneId, spec) => getSceneSettingRate(sceneId, spec),
+    onSceneSettingRateChange: (sceneId, spec, rate) => setSceneSettingRate(sceneId, spec, rate),
     listLooks,
     onSaveLook: (sceneId, name) => saveLook(captureLook(name, sceneId, getScene(sceneId)?.settings ?? [])),
     onApplyLook: (look) => {

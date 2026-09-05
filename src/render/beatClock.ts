@@ -24,6 +24,12 @@ function wrap01(x: number): number {
 }
 
 export interface BeatClock {
+  /** Free-running, never-reset position in beats — the same accumulator
+   *  beatPhase/barPhase wrap, exposed unwrapped so something wanting a rate
+   *  other than 1 or BEATS_PER_BAR (see beatGrid.ts) can divide by its own
+   *  number. Only ever advances forward, at whatever `bpm` this clock has
+   *  been given — stalls, like everything else here, once bpm drops to 0. */
+  readonly beats: number;
   /** Continuous [0,1) position within the current beat. Free-running —
    *  never resets, only ever nudged toward a detected onset. */
   readonly beatPhase: number;
@@ -44,6 +50,7 @@ export function createBeatClock(): BeatClock {
   let tempoLock = 0;
 
   const clock: BeatClock = {
+    beats: 0,
     beatPhase: 0,
     barPhase: 0,
     tempoLock: 0,
@@ -65,6 +72,7 @@ export function createBeatClock(): BeatClock {
       const lockTarget = bpm > 0 ? 1 : 0;
       tempoLock += (lockTarget - tempoLock) * Math.min(1, lockRate * dtSec);
 
+      (clock as { beats: number }).beats = phase;
       (clock as { beatPhase: number }).beatPhase = wrap01(phase);
       (clock as { barPhase: number }).barPhase = wrap01(phase / BEATS_PER_BAR);
       (clock as { tempoLock: number }).tempoLock = tempoLock;

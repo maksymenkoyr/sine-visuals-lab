@@ -1,4 +1,5 @@
 import type { SignalLink } from "./signals.ts";
+import { isBeatRate, type BeatRate } from "./beatGrid.ts";
 
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
@@ -6,6 +7,13 @@ import type { SignalLink } from "./signals.ts";
  * in-memory cache seeded once from localStorage, so get/set stay correct
  * even where localStorage is unavailable (node test env, Safari private
  * mode) — only cross-reload persistence depends on it.
+ *
+ * A setting that opts into `rate` (see that field's own doc comment) gets a
+ * second, independent choice alongside its amount: which beat multiple or
+ * subdivision it reacts on. getSceneSettingRate/setSceneSettingRate/
+ * resetSceneSettings manage that choice in its own store, the same
+ * cache-seeded-from-localStorage shape as the amount store above — see
+ * beatGrid.ts for what a chosen rate actually changes at render time.
  */
 
 /**
@@ -90,6 +98,20 @@ export interface SceneSetting {
    *  to catch. Omit for a setting that's pure geometry or colour, with
    *  nothing in the audio pipeline behind it. */
   reads?: readonly SignalLink[];
+  /** This setting reacts on a chosen multiple/subdivision of the beat
+   *  instead of always on whatever it rested on before this field existed —
+   *  see beatGrid.ts for the grid math and the identity the whole feature
+   *  rests on. `rest` is the BeatRate that reproduces this setting's plain
+   *  behavior bit for bit — 1 for a setting driven straight off the beat
+   *  (most of them), 4 for one already locked to the bar (BEATS_PER_BAR in
+   *  beatClock.ts) — and it's this scene's own job to actually honor that
+   *  identity in its render code; this field only records which value means
+   *  "don't touch the grid." Manual-only, deliberately not next to `auto`:
+   *  the chosen rate is a musical intent, not a response to the track's
+   *  character, so autoTune.ts never resolves it and a scene never needs a
+   *  live-resolved reading the way `resolveSceneSetting` gives it for the
+   *  amount. Renders as a chip strip under the row's hint. */
+  rate?: { rest: BeatRate };
 }
 
 const STORAGE_KEY = "vibe.sceneSettings";
@@ -134,6 +156,54 @@ export function setSceneSetting(sceneId: string, spec: SceneSetting, value: numb
   persist();
 }
 
+// A setting's chosen beat rate — see the `rate` field's own doc comment
+// above. Kept in its own store, the same cache-seeded-from-localStorage
+// shape as `cache` above, rather than folded into it: `cache`'s values are
+// always numbers in a spec's own [min,max], and a rate is neither.
+const RATE_STORAGE_KEY = "vibe.sceneBeatRate";
+
+type RateStore = Record<string, Record<string, BeatRate>>;
+
+function loadInitialRates(): RateStore {
+  try {
+    const raw = localStorage.getItem(RATE_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const rateCache: RateStore = loadInitialRates();
+
+function persistRates(): void {
+  try {
+    localStorage.setItem(RATE_STORAGE_KEY, JSON.stringify(rateCache));
+  } catch {
+    // Not fatal — same as persist() above.
+  }
+}
+
+/** `spec.rate.rest` for a setting with no `rate` field at all, or no stored
+ *  choice yet — the same "absent means default" shape `getSceneSetting`
+ *  uses, so a scene added before this feature (or after, but never touched)
+ *  costs nothing extra to read. */
+export function getSceneSettingRate(sceneId: string, spec: SceneSetting): BeatRate {
+  if (!spec.rate) return 1;
+  const value = rateCache[sceneId]?.[spec.key];
+  return typeof value === "number" && isBeatRate(value) ? value : spec.rate.rest;
+}
+
+export function setSceneSettingRate(sceneId: string, spec: SceneSetting, rate: BeatRate): void {
+  if (!spec.rate) return;
+  (rateCache[sceneId] ??= {})[spec.key] = rate;
+  persistRates();
+}
+
 export function resetSceneSettings(sceneId: string, specs: SceneSetting[]): void {
-  for (const spec of specs) setSceneSetting(sceneId, spec, spec.default);
+  for (const spec of specs) {
+    setSceneSetting(sceneId, spec, spec.default);
+    if (spec.rate) setSceneSettingRate(sceneId, spec, spec.rate.rest);
+  }
 }

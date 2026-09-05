@@ -1,13 +1,24 @@
 import { describe, it, expect } from "vitest";
 import {
   getSceneSetting,
+  getSceneSettingRate,
   setSceneSetting,
+  setSceneSettingRate,
   resetSceneSettings,
   type SceneSetting,
 } from "../src/render/sceneSettings.ts";
+import type { BeatRate } from "../src/render/beatGrid.ts";
 
 const FOCUS: SceneSetting = { key: "focus", label: "Focus", min: 0, max: 1, step: 0.05, default: 0.7 };
-const BREATHE: SceneSetting = { key: "breathe", label: "Breathe", min: 0, max: 1, step: 0.05, default: 0.35 };
+const BREATHE: SceneSetting = {
+  key: "breathe",
+  label: "Breathe",
+  min: 0,
+  max: 1,
+  step: 0.05,
+  default: 0.35,
+  rate: { rest: 4 },
+};
 
 describe("scene settings persistence", () => {
   // vitest runs under environment: "node" (vitest.config.ts), so there is no
@@ -47,12 +58,14 @@ describe("scene settings persistence", () => {
     expect(getSceneSetting("scene-c2", FOCUS)).toBeCloseTo(0.8);
   });
 
-  it("resetSceneSettings restores every listed spec to its default", () => {
+  it("resetSceneSettings restores every listed spec to its default, and its rate to rest", () => {
     setSceneSetting("scene-d", FOCUS, 0.9);
     setSceneSetting("scene-d", BREATHE, 0.1);
+    setSceneSettingRate("scene-d", BREATHE, 8);
     resetSceneSettings("scene-d", [FOCUS, BREATHE]);
     expect(getSceneSetting("scene-d", FOCUS)).toBe(FOCUS.default);
     expect(getSceneSetting("scene-d", BREATHE)).toBe(BREATHE.default);
+    expect(getSceneSettingRate("scene-d", BREATHE)).toBe(BREATHE.rate!.rest);
   });
 
   it("rounds an enum setting to a whole option index and clamps it to the options", () => {
@@ -67,5 +80,33 @@ describe("scene settings persistence", () => {
     expect(getSceneSetting("enum-test", SKIN)).toBe(SKIN.max);
     setSceneSetting("enum-test", SKIN, -3);
     expect(getSceneSetting("enum-test", SKIN)).toBe(SKIN.min);
+  });
+});
+
+describe("scene setting beat rate", () => {
+  it("returns 1 for a setting with no `rate` field at all", () => {
+    expect(getSceneSettingRate("rate-test-1", FOCUS)).toBe(1);
+  });
+
+  it("returns the spec's rest rate for a rate-capable setting never set", () => {
+    expect(getSceneSettingRate("rate-test-2", BREATHE)).toBe(4);
+  });
+
+  it("round-trips a chosen rate", () => {
+    setSceneSettingRate("rate-test-3", BREATHE, 2);
+    expect(getSceneSettingRate("rate-test-3", BREATHE)).toBe(2);
+  });
+
+  it("falls back to rest for a stored value that isn't a valid BeatRate", () => {
+    // Simulates a corrupted/stale localStorage entry (e.g. from a future
+    // BEAT_RATES this build doesn't know) rather than trusting it verbatim.
+    setSceneSettingRate("rate-test-4", BREATHE, 3 as unknown as BeatRate);
+    expect(getSceneSettingRate("rate-test-4", BREATHE)).toBe(BREATHE.rate!.rest);
+  });
+
+  it("is a no-op on a setting with no `rate` field", () => {
+    setSceneSetting("rate-test-5", FOCUS, 0.3);
+    setSceneSettingRate("rate-test-5", FOCUS, 2 as unknown as BeatRate);
+    expect(getSceneSettingRate("rate-test-5", FOCUS)).toBe(1);
   });
 });

@@ -33,6 +33,11 @@ export interface AnimFrame {
   beatPhase: number;
   barPhase: number;
   tempoLock: number;
+  /** beatClock's own free-running, never-reset beat count, unwrapped — see
+   *  beatClock.ts and beatGrid.ts, which divides this by a setting's own
+   *  chosen rate. A scene wanting a specific rate should go through
+   *  beatGrid.ts rather than reading this directly. */
+  beats: number;
   /** Slewed low/mid/high band levels and their onset pulses — see bandEnergy.ts. */
   low: number;
   mid: number;
@@ -115,6 +120,7 @@ export function createAnimClock(): AnimClock {
         beatPhase: beat.beatPhase,
         barPhase: beat.barPhase,
         tempoLock: beat.tempoLock,
+        beats: beat.beats,
         low: bandEnergy.low,
         mid: bandEnergy.mid,
         high: bandEnergy.high,

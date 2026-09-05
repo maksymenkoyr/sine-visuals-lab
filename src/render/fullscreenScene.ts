@@ -3,7 +3,9 @@ import type { FeatureFrame } from "../audio/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "./gl.ts";
 import { PALETTE_GLSL } from "./palette.ts";
 import type { SceneSetting } from "./sceneSettings.ts";
+import { getSceneSettingRate } from "./sceneSettings.ts";
 import { resolveSceneSetting } from "./autoTune.ts";
+import type { BeatRate } from "./beatGrid.ts";
 import type { Scene, SceneContext } from "./scene.ts";
 import type { AnimFrame } from "./animClock.ts";
 import {
@@ -46,6 +48,11 @@ export function createFullscreenScene(
       frame: FeatureFrame,
       anim: AnimFrame,
       getSetting: (key: string) => number,
+      /** `spec.rate.rest` for a key with no `rate` (or none declared at
+       *  all) — see sceneSettings.ts's `SceneSetting.rate` and beatGrid.ts.
+       *  Manual-only, unlike getSetting: nothing here goes through
+       *  autoTune.ts. */
+      getRate: (key: string) => BeatRate,
     ) => Record<string, ExtraUniformValue>;
   } = {},
 ): Scene {
@@ -74,6 +81,10 @@ ${fragBody}
     const spec = settingsByKey.get(key);
     return spec ? resolveSceneSetting(id, spec) : 0;
   };
+  const getRate = (key: string): BeatRate => {
+    const spec = settingsByKey.get(key);
+    return spec?.rate ? getSceneSettingRate(id, spec) : 1;
+  };
 
   return {
     id,
@@ -92,7 +103,7 @@ ${fragBody}
       prog.use();
       uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, id, settings, bandsBuf);
       if (opts.extraUniforms) {
-        const extras = opts.extraUniforms(frame, anim, getSetting);
+        const extras = opts.extraUniforms(frame, anim, getSetting, getRate);
         for (const [name, value] of Object.entries(extras)) {
           if (value instanceof Float32Array) prog.setFv(name, value);
           else if (typeof value === "number") prog.setF(name, value);

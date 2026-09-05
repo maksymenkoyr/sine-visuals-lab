@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
-import { getSceneSetting, setSceneSetting } from "../src/render/sceneSettings.ts";
+import { getSceneSetting, getSceneSettingRate, setSceneSetting, setSceneSettingRate } from "../src/render/sceneSettings.ts";
 import { isAutoEnabled, setAutoEnabled } from "../src/render/autoTune.ts";
 import {
   applyLook,
@@ -18,19 +18,52 @@ import {
 // that; only cross-reload persistence depends on it.
 
 const FOCUS: SceneSetting = { key: "focus", label: "Focus", min: 0, max: 1, step: 0.01, default: 0.5 };
-const BREATHE: SceneSetting = { key: "breathe", label: "Breathe", min: 0, max: 1, step: 0.01, default: 0.3 };
+const BREATHE: SceneSetting = {
+  key: "breathe",
+  label: "Breathe",
+  min: 0,
+  max: 1,
+  step: 0.01,
+  default: 0.3,
+  rate: { rest: 4 },
+};
 const SPECS = [FOCUS, BREATHE];
 
 describe("encodeLook / decodeLook", () => {
   it("round-trips a look, including a non-ASCII name", () => {
-    const look: SceneLook = { name: "Café Drift ✨", sceneId: "mesh", manual: { focus: 0.72, breathe: 0.1 } };
+    const look: SceneLook = {
+      name: "Café Drift ✨",
+      sceneId: "mesh",
+      manual: { focus: 0.72, breathe: 0.1 },
+      rates: {},
+    };
     const decoded = decodeLook(encodeLook(look));
     expect(decoded).toEqual(look);
   });
 
   it("round-trips an empty manual set", () => {
-    const look: SceneLook = { name: "Bare", sceneId: "mesh", manual: {} };
+    const look: SceneLook = { name: "Bare", sceneId: "mesh", manual: {}, rates: {} };
     expect(decodeLook(encodeLook(look))).toEqual(look);
+  });
+
+  it("round-trips a non-default beat rate", () => {
+    const look: SceneLook = { name: "Slow", sceneId: "caustics", manual: {}, rates: { breathe: 8 } };
+    expect(decodeLook(encodeLook(look))).toEqual(look);
+  });
+
+  it("decodes a v1 code with no `d` key at all as every rate at rest", () => {
+    // A link handed out before beatGrid.ts existed — no `d` field, not even
+    // an empty one. Must still decode, with `rates` coming back {}.
+    const preRateCode = btoa(JSON.stringify({ v: 1, n: "Old link", s: "caustics", m: { focus: 0.6 } }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    expect(decodeLook(preRateCode)).toEqual({
+      name: "Old link",
+      sceneId: "caustics",
+      manual: { focus: 0.6 },
+      rates: {},
+    });
   });
 
   it("returns null for garbage input", () => {
@@ -53,6 +86,14 @@ describe("encodeLook / decodeLook", () => {
       .replace(/=+$/, "");
     expect(decodeLook(badCode)).toBeNull();
   });
+
+  it("returns null when a rate isn't one of BEAT_RATES", () => {
+    const badCode = btoa(JSON.stringify({ v: 1, n: "x", s: "mesh", m: {}, d: { breathe: 3 } }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    expect(decodeLook(badCode)).toBeNull();
+  });
 });
 
 describe("captureLook", () => {
@@ -63,6 +104,20 @@ describe("captureLook", () => {
     // breathe stays auto (isAutoEnabled defaults true for a key never set manual).
     const look = captureLook("Test", sceneId, SPECS);
     expect(look.manual).toEqual({ focus: 0.8 });
+  });
+
+  it("records only a rate-capable setting's non-default rate", () => {
+    const sceneId = "look-capture-2";
+    setSceneSettingRate(sceneId, BREATHE, 8); // BREATHE rests at 4
+    const look = captureLook("Test", sceneId, SPECS);
+    expect(look.rates).toEqual({ breathe: 8 });
+  });
+
+  it("omits a rate-capable setting left at its own rest rate", () => {
+    const sceneId = "look-capture-3";
+    setSceneSettingRate(sceneId, BREATHE, BREATHE.rate!.rest);
+    const look = captureLook("Test", sceneId, SPECS);
+    expect(look.rates).toEqual({});
   });
 });
 
@@ -75,20 +130,35 @@ describe("applyLook", () => {
     setAutoEnabled(sceneId, BREATHE.key, false);
     setSceneSetting(sceneId, BREATHE, 0.9);
 
-    applyLook({ name: "L", sceneId, manual: { focus: 0.2 } }, SPECS);
+    applyLook({ name: "L", sceneId, manual: { focus: 0.2 }, rates: {} }, SPECS);
 
     expect(isAutoEnabled(sceneId, FOCUS.key)).toBe(false);
     expect(getSceneSetting(sceneId, FOCUS)).toBeCloseTo(0.2);
     expect(isAutoEnabled(sceneId, BREATHE.key)).toBe(true);
     expect(getSceneSetting(sceneId, BREATHE)).toBeCloseTo(BREATHE.default);
   });
+
+  it("sets a listed rate and returns an unlisted rate-capable setting to rest", () => {
+    const sceneId = "look-apply-2";
+    setSceneSettingRate(sceneId, BREATHE, 2);
+
+    applyLook({ name: "L", sceneId, manual: {}, rates: {} }, SPECS);
+
+    expect(getSceneSettingRate(sceneId, BREATHE)).toBe(BREATHE.rate!.rest);
+  });
+
+  it("applies a listed non-default rate", () => {
+    const sceneId = "look-apply-3";
+    applyLook({ name: "L", sceneId, manual: {}, rates: { breathe: 8 } }, SPECS);
+    expect(getSceneSettingRate(sceneId, BREATHE)).toBe(8);
+  });
 });
 
 describe("saveLook / listLooks / deleteLook", () => {
   it("saving an existing name replaces rather than duplicates", () => {
     const sceneId = "look-store-1";
-    saveLook({ name: "A", sceneId, manual: { focus: 0.1 } });
-    saveLook({ name: "A", sceneId, manual: { focus: 0.9 } });
+    saveLook({ name: "A", sceneId, manual: { focus: 0.1 }, rates: {} });
+    saveLook({ name: "A", sceneId, manual: { focus: 0.9 }, rates: {} });
     const looks = listLooks(sceneId);
     expect(looks).toHaveLength(1);
     expect(looks[0].manual.focus).toBe(0.9);
@@ -97,9 +167,9 @@ describe("saveLook / listLooks / deleteLook", () => {
   it("deletes by name without touching other looks or scenes", () => {
     const sceneId = "look-store-2";
     const otherScene = "look-store-2-other";
-    saveLook({ name: "A", sceneId, manual: {} });
-    saveLook({ name: "B", sceneId, manual: {} });
-    saveLook({ name: "A", sceneId: otherScene, manual: {} });
+    saveLook({ name: "A", sceneId, manual: {}, rates: {} });
+    saveLook({ name: "B", sceneId, manual: {}, rates: {} });
+    saveLook({ name: "A", sceneId: otherScene, manual: {}, rates: {} });
 
     deleteLook(sceneId, "A");
 
