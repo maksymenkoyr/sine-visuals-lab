@@ -28,8 +28,10 @@ regenerate it at session close.
   the reference videos were measured (frame registration against onsets —
   every one zooms in continuously, brightness pops per beat, Prism kicks the
   zoom on each beat, the Portal short is silent), and the styles rebuilt with
-  a Zoom slider and an infinite zoom in whatever coordinates make it exact
-  per style (styles.ts header). Prism folds on a hexagonal lattice. Style is
+  a Zoom slider that is a real camera dive: the lattice grows as if Tiling
+  were dragged and every mandala's core is a window onto the next lattice
+  down (index.ts header, CORE_FRAC), so it never cuts; what streams inside a
+  cell rides Flow. Prism folds on a hexagonal lattice. Style is
   the scene's **variant**: `SceneSetting.variant` / `variantDefaults` in
   `sceneSettings.ts` give every other setting a profile per option (values,
   auto state, defaults); Looks carry the variant and apply it first. The two
