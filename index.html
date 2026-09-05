@@ -106,7 +106,8 @@
       }
       /* Tap-to-start-audio prompt. One or two buttons live inside — mic-only
        * where display capture isn't offered, or a Mic/Screen choice where it
-       * is (see app.ts's refreshAudioPromptButtons). */
+       * is (see app.ts's refreshAudioPromptButtons). Column layout so
+       * #audioPromptGuide can sit under the button row. */
       #audioPrompt {
         position: fixed;
         left: 50%;
@@ -114,10 +115,16 @@
         transform: translateX(-50%);
         z-index: 6;
         display: none;
+        flex-direction: column;
         align-items: center;
         gap: 8px;
         font: 600 13px/1.4 system-ui, sans-serif;
         color: #fff;
+      }
+      #audioPromptRow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
       #audioPrompt button {
         font: inherit;
@@ -127,6 +134,22 @@
         background: #000c;
         color: inherit;
         cursor: pointer;
+      }
+      /* The remembered source (src/audio/sourcePref.ts) — a brighter border,
+       * the same "lit chip" idiom the controls panel uses. Emphasis only;
+       * app.ts never fires a capture off this alone — see autoStartSource. */
+      #audioPrompt button[data-remembered] {
+        border-color: #fff;
+        box-shadow: 0 0 12px #fff4;
+      }
+      /* Filled from DISPLAY_SHARE_GUIDE (src/audio/sourcePref.ts), which owns
+       * this copy; shown only where the Screen button is offered. */
+      #audioPromptGuide {
+        margin: 0;
+        max-width: min(420px, 88vw);
+        text-align: center;
+        font: 400 12px/1.45 system-ui, sans-serif;
+        color: #fff9;
       }
     </style>
   </head>
@@ -139,9 +162,12 @@
     <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false">&#9974;</button>
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)">&#9881;</button>
     <div id="audioPrompt">
-      <span id="audioPromptLabel" hidden>Tap to start audio</span>
-      <button id="audioPromptMicBtn">Tap to enable mic</button>
-      <button id="audioPromptDisplayBtn" hidden>Screen</button>
+      <div id="audioPromptRow">
+        <span id="audioPromptLabel" hidden>Tap to start audio</span>
+        <button id="audioPromptMicBtn">Tap to enable mic</button>
+        <button id="audioPromptDisplayBtn" hidden>Screen</button>
+      </div>
+      <p id="audioPromptGuide" hidden></p>
     </div>
     <script type="module" src="/src/app.ts"></script>
   </body>
