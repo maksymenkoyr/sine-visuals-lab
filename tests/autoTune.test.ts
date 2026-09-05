@@ -3,6 +3,7 @@ import { causticsScene } from "../src/render/scenes/caustics.ts";
 import { meshGridScene } from "../src/render/scenes/meshGrid.ts";
 import { chladniScene } from "../src/render/scenes/chladni.ts";
 import { dancersScene } from "../src/render/scenes/dancers/index.ts";
+import { fluidScene } from "../src/render/scenes/fluid.ts";
 import { powderScene } from "../src/render/scenes/powder.ts";
 import { stormScene } from "../src/render/scenes/storm.ts";
 import { ambienceScene } from "../src/render/scenes/ambience.ts";
@@ -37,6 +38,7 @@ const ALL_SETTINGS: SceneSetting[] = [
   ...(meshGridScene.settings ?? []),
   ...(chladniScene.settings ?? []),
   ...(dancersScene.settings ?? []),
+  ...(fluidScene.settings ?? []),
   ...(powderScene.settings ?? []),
   ...(stormScene.settings ?? []),
   ...(ambienceScene.settings ?? []),

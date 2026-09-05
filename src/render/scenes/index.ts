@@ -10,6 +10,7 @@ import { ferrofluidScene } from "./ferrofluid.ts";
 import { meshGridScene } from "./meshGrid.ts";
 import { chladniScene } from "./chladni.ts";
 import { dancersScene } from "./dancers/index.ts";
+import { fluidScene } from "./fluid.ts";
 import { powderScene } from "./powder.ts";
 import { stormScene } from "./storm.ts";
 import { ambienceScene } from "./ambience.ts";
@@ -31,6 +32,7 @@ registerScene(moireScene);
 registerScene(risoScene);
 registerScene(ferrofluidScene);
 registerScene(dancersScene);
+registerScene(fluidScene);
 registerScene(stormScene);
 registerScene(ambienceScene);
 registerScene(kaleidoscopeScene);
@@ -46,6 +48,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "riso",
   "ferrofluid",
   "dancers",
+  "fluid",
   "powder",
   "storm",
   "ambience",
@@ -64,6 +67,7 @@ export {
   meshGridScene,
   chladniScene,
   dancersScene,
+  fluidScene,
   powderScene,
   stormScene,
   ambienceScene,

@@ -21,7 +21,10 @@ regenerate it at session close.
   Rhythm card, `src/audio/beatGrid.ts` + `src/render/gridPulse.ts`), Powder
   #77. Still in `DRAFT_SCENE_IDS` pending a real-music verdict.
 - **Draft scene PRs** waiting on review and a real-music judgement: Plume #75,
-  Neon Fluid #76.
+  Neon Fluid #76 (v7, merged with `main` 2026-09-05: screen-space anime
+  lightning in `fluidBolts.ts` that lights the dye, hard-cut `STROBE_PATTERN`
+  frames; the Storm bolt generator lives in `src/render/bolt.ts` — Storm still
+  carries its own copy in `storm.ts`, dedupe after #76 lands).
 - **Auto: unstick tempoLock, rank dials** — draft PR #73.
 - **docs/architecture.md rebuild** — draft PR #74.
 - **CLAUDE.md Git & PRs section** — PR #84; **business/legal docs** — PR #72;
