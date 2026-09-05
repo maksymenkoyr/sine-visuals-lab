@@ -39,7 +39,7 @@ import { createRenderLatch } from "./render/renderLatch.ts";
 import { getBeatGrid, setBeatGrid } from "./audio/beatGrid.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { getSceneSetting, resetSceneSettings, setSceneSetting } from "./render/sceneSettings.ts";
+import { getSceneSetting, resetSceneSettings, setSceneSetting, settingDefault } from "./render/sceneSettings.ts";
 import {
   applyLook,
   captureLook,
@@ -571,6 +571,7 @@ function wireDeviceMenu(): void {
     },
     getSceneSettings: (sceneId) => getScene(sceneId)?.settings ?? [],
     getSceneSettingValue: (sceneId, spec) => getSceneSetting(sceneId, spec),
+    getSceneSettingDefault: (sceneId, spec) => settingDefault(sceneId, spec),
     onSceneSettingChange: (sceneId, spec, value) => {
       setAutoEnabled(sceneId, spec.key, false);
       setSceneSetting(sceneId, spec, value);

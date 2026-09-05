@@ -187,6 +187,9 @@ export interface DeviceMenuDeps {
   /** Empty for scenes with nothing to tune — the card hides itself. */
   getSceneSettings: (sceneId: string) => SceneSetting[];
   getSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
+  /** A setting's resting value under the scene's current variant (see
+   *  SceneSetting.variant) — what the row's reset arrow returns it to. */
+  getSceneSettingDefault: (sceneId: string, spec: SceneSetting) => number;
   onSceneSettingChange: (
     sceneId: string,
     spec: SceneSetting,
@@ -1838,10 +1841,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           label: spec.label,
           accent: SCENE_VIOLET,
           options: spec.options,
-          defaultValue: spec.default,
+          defaultValue: deps.getSceneSettingDefault(sceneId, spec),
           description: spec.description,
           get: () => deps.getSceneSettingValue(sceneId, spec),
-          set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
+          set: (value) => {
+            deps.onSceneSettingChange(sceneId, spec, value);
+            // A variant switch swaps every other row's profile (values,
+            // defaults, auto state), so the card is rebuilt around it.
+            if (spec.variant) renderSceneSettings();
+          },
           wire: (row, strip, a) => {
             wireHoverFocus(row, strip);
             wireRowKeys(strip, { reset: a.reset, toggleOff: () => a.cycle(1) });
@@ -1855,7 +1863,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         createToggleRow({
           label: spec.label,
           accent: SCENE_VIOLET,
-          defaultValue: spec.default,
+          defaultValue: deps.getSceneSettingDefault(sceneId, spec),
           description: spec.description,
           get: () => deps.getSceneSettingValue(sceneId, spec),
           set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
@@ -1895,7 +1903,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       min: spec.min,
       max: spec.max,
       step: spec.step,
-      defaultValue: spec.default,
+      defaultValue: deps.getSceneSettingDefault(sceneId, spec),
       mapping: "linear",
       format: formatSetting,
       description: spec.description,
