@@ -23,6 +23,11 @@ import type { AnimFrame } from "./animClock.ts";
 // until someone consumes it" shape, here local to one device's render loop
 // instead of a network room's playout clock.
 //
+// AnimFrame.boundary.provisional/confirmed (songBoundary.ts) are the same
+// family of one-shot edge and go through this latch too, nested inside the
+// boundary object rather than flat like the others — see consume() below for
+// how a nested edge gets merged back in.
+//
 // chladni.ts and meshGrid.ts already sidestep the dtSec half of this by
 // deriving their own dt from frame.time deltas instead of anim.dtSec — see
 // chladni.ts's file header. They predate this latch and don't need it, but
@@ -46,6 +51,8 @@ export function createRenderLatch(): RenderLatch {
   let pendingMidOnset = false;
   let pendingHighOnset = false;
   let pendingDropOnset = false;
+  let pendingBoundaryProvisional = false;
+  let pendingBoundaryConfirmed = false;
   let lastConsumeMs: number | null = null;
 
   return {
@@ -55,6 +62,8 @@ export function createRenderLatch(): RenderLatch {
       pendingMidOnset ||= anim.midOnset;
       pendingHighOnset ||= anim.highOnset;
       pendingDropOnset ||= anim.dropOnset;
+      pendingBoundaryProvisional ||= anim.boundary.provisional;
+      pendingBoundaryConfirmed ||= anim.boundary.confirmed;
     },
 
     consume(anim: AnimFrame, nowMs: number): AnimFrame {
@@ -71,6 +80,11 @@ export function createRenderLatch(): RenderLatch {
         midOnset: pendingMidOnset,
         highOnset: pendingHighOnset,
         dropOnset: pendingDropOnset,
+        boundary: {
+          ...anim.boundary,
+          provisional: pendingBoundaryProvisional,
+          confirmed: pendingBoundaryConfirmed,
+        },
       };
 
       pendingOnset = false;
@@ -78,6 +92,8 @@ export function createRenderLatch(): RenderLatch {
       pendingMidOnset = false;
       pendingHighOnset = false;
       pendingDropOnset = false;
+      pendingBoundaryProvisional = false;
+      pendingBoundaryConfirmed = false;
 
       return merged;
     },

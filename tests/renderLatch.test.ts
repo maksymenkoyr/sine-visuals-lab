@@ -31,6 +31,20 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     centroidRaw: 0,
     profile: { pulse: 0, tempo: 0, brightness: 0, density: 0, dynamics: 0, attack: 0, loudness: 0 },
     raw: { sectionIntensity: 0, profile: { pulse: 0, tempo: 0, brightness: 0, density: 0, dynamics: 0, attack: 0, loudness: 0 } },
+    boundary: {
+      quietDepth: 0,
+      quietHoldSec: 0,
+      gapConfidence: 0,
+      novelty: 0,
+      centroidStep: 0,
+      tempoLockDrop: 0,
+      tempoShift: 0,
+      rangeStale: 0,
+      confidence: 0,
+      provisional: false,
+      confirmed: false,
+      sinceBoundarySec: Number.POSITIVE_INFINITY,
+    },
     ...overrides,
   };
 }
@@ -80,6 +94,22 @@ describe("createRenderLatch", () => {
     // 24ms - 8ms = 16ms of wall time actually elapsed across the two ticks
     // since the last render, not one tick's 8ms.
     expect(second.dtSec).toBeCloseTo(0.016, 6);
+  });
+
+  it("boundary's nested provisional/confirmed edges survive skipped ticks the same as the flat ones", () => {
+    const latch = createRenderLatch();
+    latch.accumulate(frame({ boundary: { ...frame().boundary, provisional: true } })); // never rendered
+    latch.accumulate(frame({ boundary: { ...frame().boundary, confirmed: true } })); // never rendered
+    const rendered = latch.consume(frame(), 20); // this one finally does
+    expect(rendered.boundary.provisional).toBe(true);
+    expect(rendered.boundary.confirmed).toBe(true);
+  });
+
+  it("boundary's continuous fields pass through the latest tick's value, not OR'd like its edges", () => {
+    const latch = createRenderLatch();
+    latch.accumulate(frame({ boundary: { ...frame().boundary, confidence: 0.4 } }));
+    const rendered = latch.consume(frame({ boundary: { ...frame().boundary, confidence: 0.9 } }), 10);
+    expect(rendered.boundary.confidence).toBe(0.9);
   });
 
   it("continuous fields (pulses, profile) pass through the latest tick's value unmodified", () => {
