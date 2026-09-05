@@ -24,6 +24,7 @@ import { inkScene } from "./ink.ts";
 import { crystalScene } from "./crystal/index.ts";
 import { fluidScene } from "./fluid.ts";
 import { silkScene } from "./silk/index.ts";
+import { gatesScene } from "./gates/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
@@ -38,6 +39,7 @@ registerScene(physarumScene);
 registerScene(chladniScene);
 registerScene(causticsScene);
 registerScene(fluidScene);
+registerScene(gatesScene);
 registerScene(tesseraScene);
 registerScene(moireScene);
 registerScene(petriScene);
@@ -62,6 +64,7 @@ registerScene(ferrofluidScene);
  *  the featured scenes registered above it are deliberately absent. */
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "silk",
+  "gates",
   "tessera",
   "ink",
   "mesh",
@@ -110,4 +113,5 @@ export {
   inkScene,
   crystalScene,
   fluidScene,
+  gatesScene,
 };
