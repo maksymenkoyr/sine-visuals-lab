@@ -28,10 +28,13 @@ regenerate it at session close.
   the reference videos were measured (frame registration against onsets —
   every one zooms in continuously, brightness pops per beat, Prism kicks the
   zoom on each beat, the Portal short is silent), and the styles rebuilt with
-  a Zoom slider that is a real camera dive: the lattice grows as if Tiling
-  were dragged and every mandala's core is a window onto the next lattice
-  down (index.ts header, CORE_FRAC), so it never cuts; what streams inside a
-  cell rides Flow. Prism folds on a hexagonal lattice. Style is
+  a Zoom slider that is a real camera dive. After two misreads ("zoom"
+  as in-cell motion, then as a growing lattice with windows) the user's
+  meaning turned out to be *recursive*: every mandala carries a ring of
+  child mandalas, each a whole copy, and the camera dives into the top
+  child until it is the parent (index.ts header — the similarity's fixed
+  point, the root frame). Tiling is now Nesting (child size); the lattice
+  and hexagonal variant are gone. What streams inside a mandala rides Flow. Style is
   the scene's **variant**: `SceneSetting.variant` / `variantDefaults` in
   `sceneSettings.ts` give every other setting a profile per option (values,
   auto state, defaults); Looks carry the variant and apply it first. The two
@@ -59,10 +62,10 @@ regenerate it at session close.
   dropped? Each needs a look on real music first.
 - Beat grid: should its default move off Hits (to 1/4) once judged on real
   music, and should the TV receive it (a new DeviceCommand field)?
-- Kaleidoscope: the hexagonal lattice is Prism-only today — worth a Form
-  setting for the other styles? The texture styles paint a full rainbow
-  tinted by the room palette (`RAINBOW_ROOM_MIX`) — does that read as
-  ignoring the Palette card? Storm's Mode is the obvious next `variant`.
+- Kaleidoscope: should the dive target rotate between children (a spiral
+  dive) rather than always the top one? The texture styles paint a full
+  rainbow tinted by the room palette (`RAINBOW_ROOM_MIX`) — does that read
+  as ignoring the Palette card? Storm's Mode is the obvious next `variant`.
 - Storm's local render-cap workaround predates `renderLatch.ts` and is now
   redundant in principle; simplify once nothing else is touching Storm.
 - The stale scratch branches on origin (`band-faders`, `lp-merge`,
