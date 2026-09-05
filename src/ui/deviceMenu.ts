@@ -28,7 +28,7 @@ import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
-import type { AudioSourceChoice } from "../audio/sourcePref.ts";
+import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice } from "../audio/sourcePref.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -1711,6 +1711,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const sourceListStyle = `display: flex; gap: 4px; margin-top: 4px;`;
   const sourceChipStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
   const sourceChipLitStyle = `${chipBtnLitStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
+  // Always visible while Screen is the active source, not a .vc-hint: the hint
+  // only reveals on hover/focus, and on touch that means after the tap that
+  // already opened the picker — too late to be a guide. Same reasoning as
+  // createTraceLegend's always-on comment in controlsKit.ts.
+  const sourceGuideStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL}; color: rgba(255,255,255,0.55);`;
   const SOURCE_OPTIONS: { choice: AudioSourceChoice; text: string; title: string }[] = [
     { choice: "mic", text: "Mic", title: "The room's microphone" },
     {
@@ -1744,10 +1749,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
     list.append(...buttons.map((b) => b.btn));
 
+    const guide = document.createElement("div");
+    guide.style.cssText = sourceGuideStyle;
+    guide.textContent = DISPLAY_SHARE_GUIDE;
+
     const hint = document.createElement("div");
     hint.className = "vc-hint";
 
-    el.append(head, list, hint);
+    el.append(head, list, guide, hint);
 
     return {
       el,
@@ -1759,6 +1768,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           btn.style.cssText = c === choice ? sourceChipLitStyle : sourceChipStyle;
           btn.hidden = c === "display" && !canDisplay;
         }
+        guide.style.display = choice === "display" ? "" : "none";
         hint.textContent = SOURCE_OPTIONS.find((o) => o.choice === choice)?.title ?? "";
       },
     };

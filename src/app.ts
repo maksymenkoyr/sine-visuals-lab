@@ -10,6 +10,7 @@ import {
   getAudioSourceChoice as getStoredAudioSource,
   setAudioSourceChoice,
   displayCaptureSupported,
+  DISPLAY_SHARE_GUIDE,
   type AudioSourceChoice,
 } from "./audio/sourcePref.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
@@ -116,6 +117,7 @@ const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
 const audioPromptDisplayBtn = document.getElementById("audioPromptDisplayBtn") as HTMLButtonElement;
+const audioPromptGuide = document.getElementById("audioPromptGuide") as HTMLParagraphElement;
 
 const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
 /** No new frame in this long -> the host is gone even if our own socket to the relay is still open. */
@@ -349,15 +351,32 @@ function fatalError(message: string): void {
   showHud(message, true);
 }
 
-/** `?source=display` pins the initial capture the way `?quality=` pins a
- *  preset — mainly for dev/tooling use without touching localStorage.
- *  Otherwise defers to the persisted choice (src/audio/sourcePref.ts),
- *  falling back to mic wherever display capture isn't supported at all. */
+/** `?source=display` pins the initial offered/remembered choice the way
+ *  `?quality=` pins a preset — mainly for dev/tooling use without touching
+ *  localStorage. Otherwise defers to the persisted choice
+ *  (src/audio/sourcePref.ts), falling back to mic wherever display capture
+ *  isn't supported at all. Pinning "display" here does NOT by itself start a
+ *  capture — see autoStartSource() below for why. */
 function resolveInitialSource(): AudioSourceChoice {
   const params = new URLSearchParams(location.search);
   if (params.get("source") === "display" && displayCaptureSupported()) return "display";
   const stored = getStoredAudioSource();
   return stored === "display" && !displayCaptureSupported() ? "mic" : stored;
+}
+
+/** The source an IMPLICIT start — one no tap asked for — is allowed to use.
+ *  getUserMedia and getDisplayMedia are not symmetric: getUserMedia has no
+ *  transient-activation requirement and its grant is remembered per origin,
+ *  so auto-starting the mic just re-uses consent already given. getDisplayMedia
+ *  is the opposite — it needs a live user gesture and reopens Chrome's share
+ *  picker on every single call, with nothing ever remembered. So a persisted
+ *  "display" pref is a statement of intent, not standing consent to pop that
+ *  picker: an implicit path starts nothing and lets updateMicPrompt() put the
+ *  start prompt up, whose Screen button reaches getDisplayMedia inside a real
+ *  tap. Same principle onCaptureEnded already states for its own refusal to
+ *  fall back to another source. */
+function autoStartSource(): AudioSourceChoice | null {
+  return resolveInitialSource() === "display" ? null : "mic";
 }
 
 function startCapture(choice: AudioSourceChoice): Promise<CaptureHandle> {
@@ -412,29 +431,37 @@ function onCaptureEnded(handle: CaptureHandle): void {
 }
 
 /** Turns a capture failure into copy the user can act on. A mic denial keeps
- *  today's wording; a cancelled share picker gets its own (both raise the
- *  same DOMException, hence branching on `choice` too); anything else — e.g.
- *  captureDisplayAudio's own "No audio track in screen share…" — surfaces
- *  verbatim instead of being swallowed. */
+ *  today's wording — a tile tap does retry the mic; a cancelled share picker
+ *  points at the Screen button instead, since a tile tap no longer starts one
+ *  (both raise the same DOMException, hence branching on `choice` too);
+ *  anything else — e.g. captureDisplayAudio's own no-audio-track message —
+ *  surfaces verbatim with a neutral retry hint instead of being swallowed. */
 function captureErrorMessage(choice: AudioSourceChoice, err: unknown): string {
   if (err instanceof DOMException && err.name === "NotAllowedError") {
     return choice === "display"
-      ? "Screen share cancelled — tap a tile to retry."
+      ? "Screen share cancelled — tap Screen to try again."
       : "Microphone permission denied — tap a tile to retry.";
   }
   const message = err instanceof Error ? err.message : String(err);
-  return `${message} — tap a tile to retry.`;
+  return `${message} — tap to try again.`;
 }
 
-/** Starts capture from `choice` (default: resolveInitialSource()) on first
- *  call; while one is already running or has already succeeded, later calls
- *  just return that same promise. Capture survives trips back to the
- *  gallery — that's what lets the room code and any TV pairing keep working
- *  while browsing — and is torn down only by an explicit swapAudioSource()
- *  or the capture's own track ending (onCaptureEnded above). */
-function ensureAudio(choice: AudioSourceChoice = resolveInitialSource()): Promise<void> {
+/** Starts capture on first call — from `explicit` when a tap named a source
+ *  (the start prompt's buttons, the panel's Source chips), otherwise from
+ *  autoStartSource(), which refuses to open the display picker unbidden (see
+ *  its doc comment). While one is already running or has already succeeded,
+ *  later calls just return that same promise. Capture survives trips back to
+ *  the gallery — that's what lets the room code and any TV pairing keep
+ *  working while browsing — and is torn down only by an explicit
+ *  swapAudioSource() or the capture's own track ending (onCaptureEnded above). */
+function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
   if (syntheticFeed) return Promise.resolve();
   if (audioPromise) return audioPromise;
+  const choice = explicit ?? autoStartSource();
+  if (choice === null) {
+    updateMicPrompt(); // nothing started — the prompt is the way in
+    return Promise.resolve();
+  }
   const attempt = (async () => {
     attachCapture(await startCapture(choice));
     captureFailed = false;
@@ -487,12 +514,17 @@ function swapAudioSource(next: AudioSourceChoice): Promise<void> {
 /** Shows/hides the start prompt and — since display capture's availability
  *  never changes mid-session — decides once whether it offers a Mic/Screen
  *  choice or just Mic, matching the original single-button prompt exactly
- *  where Screen isn't offered at all. */
+ *  where Screen isn't offered at all. Also fills in the share-audio guide
+ *  (DISPLAY_SHARE_GUIDE, src/audio/sourcePref.ts): its visibility is the same
+ *  static "is Screen offered" condition as the Screen button, so it belongs
+ *  here rather than in updateMicPrompt's per-change logic below. */
 function refreshAudioPromptButtons(): void {
   const canDisplay = displayCaptureSupported();
   audioPromptLabel.hidden = !canDisplay;
   audioPromptDisplayBtn.hidden = !canDisplay;
   audioPromptMicBtn.textContent = canDisplay ? "Mic" : "Tap to enable mic";
+  audioPromptGuide.textContent = DISPLAY_SHARE_GUIDE;
+  audioPromptGuide.hidden = !canDisplay;
 }
 
 function updateMicPrompt(): void {
@@ -501,6 +533,13 @@ function updateMicPrompt(): void {
   // one has failed.
   const needsAudio = inViz && mode !== "renderer" && !syntheticFeed && !bandAnalyser && (captureFailed || !audioPromise);
   audioPrompt.style.display = needsAudio ? "flex" : "none";
+  // Which source is remembered can change mid-session (a Source-row swap
+  // persists a new pref), unlike display support above — hence here and not
+  // in refreshAudioPromptButtons. Emphasis only, never an auto-fire: see
+  // autoStartSource for why the picker still waits for a tap.
+  const remembered = resolveInitialSource();
+  audioPromptMicBtn.toggleAttribute("data-remembered", !audioPromptDisplayBtn.hidden && remembered === "mic");
+  audioPromptDisplayBtn.toggleAttribute("data-remembered", remembered === "display");
 }
 
 /** Renderer lost (or never reached) its room — fall back to this device's own mic, per the plan's Solo model. */
@@ -514,7 +553,10 @@ async function fallBackToSolo(reason: string): Promise<void> {
   panelBtn.style.display = "none"; // no room left to command
 
   try {
-    attachCapture(await startCapture(resolveInitialSource()));
+    // Gesture-less by construction (fires from a timer / a lost socket), so it
+    // can only start the source that needs no gesture — see autoStartSource.
+    // Matches this function's own "switching to solo mic" HUD line above.
+    attachCapture(await startCapture("mic"));
     mode = "solo";
     roomCodeEl.style.display = "none";
   } catch (err) {
@@ -550,7 +592,18 @@ function wireDeviceMenu(): void {
     // The Input card's Source row. Null (row hidden) on a renderer or the
     // synthetic feed — see DeviceMenuDeps.getAudioSourceChoice's doc comment.
     getAudioSourceChoice: () => (mode === "renderer" || syntheticFeed ? null : getStoredAudioSource()),
-    onAudioSourceChange: (choice) => void swapAudioSource(choice),
+    // No capture yet (e.g. the start prompt is up because autoStartSource()
+    // refused to auto-open a display picker) — the chip tap itself IS the
+    // explicit gesture, so start fresh rather than hot-swap: swapAudioSource
+    // deliberately bails with no live capture to swap out of. Stays
+    // synchronous up to ensureAudio so a display choice keeps the tap's
+    // transient activation.
+    onAudioSourceChange: (choice) => {
+      if (!bandAnalyser && mode !== "renderer" && !syntheticFeed) {
+        setAudioSourceChoice(choice);
+        void ensureAudio(choice);
+      } else void swapAudioSource(choice);
+    },
     canCaptureDisplay: () => displayCaptureSupported(),
     onPickPalette: (id) => applyPalette(getPalette(id)),
     getSensitivity: (sceneId) => getSensitivity(sceneId),
@@ -908,6 +961,7 @@ async function boot(): Promise<void> {
         navigate({ kind: "viz", sceneId: id }, "push");
       },
       onDisabledPick: (id, reason) => showHud(`${id}: ${reason}`, true),
+      canCaptureDisplay: () => displayCaptureSupported(),
     });
 
     // A shared look link (?look=<code>#/v/<id>, see looksCard.ts's
