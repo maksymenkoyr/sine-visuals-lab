@@ -8,12 +8,12 @@ import { NUM_BANDS } from "../../audio/types.ts";
 import {
   createFluidSim,
   detectSimFormat,
+  FOLD_WEDGES_MAX,
+  FOLD_WEDGES_MIN,
   MIRROR_KALEIDO,
   MIRROR_LR,
   MIRROR_OPTIONS,
-  MIRROR_RADIAL6,
-  MIRROR_RADIAL8,
-  MIRROR_RADIAL12,
+  MIRROR_RADIAL,
   MIRROR_TB,
   sameSimSize,
   simIoGlsl,
@@ -76,10 +76,12 @@ import {
 // drift-driven reconfigure is Auto-only. The two folds a drift is moving
 // between aren't crossfaded as two rendered images (a double exposure) —
 // simUv/foldMixEased warp the single sample COORDINATE from one fold to the
-// other, so the image reads as one continuous flow. Radial folds' own wedge
-// angle is remapped by the group's Wedge spread setting (see simUv's `k`)
-// rather than always squeezed to fill the sim's quarter-turn. Only the
-// display program goes through uploadCommonUniforms — the sim's own programs
+// other, so the image reads as one continuous flow. The Radial fold's own
+// wedge angle is remapped by the group's Wedge spread setting (see simUv's
+// `k`) rather than always squeezed to fill the sim's quarter-turn; its wedge
+// count is the group's own Mirror count setting (`foldCount`) when pinned,
+// or Auto's own drift over FOLD_WEDGE_CHOICES (see advanceFold) when not.
+// Only the display program goes through uploadCommonUniforms — the sim's own programs
 // (fluidSim.ts) take a narrower, JS-computed set of per-step uniforms that
 // have nothing to do with a scene's settings.
 //
@@ -263,7 +265,7 @@ const SPLAT_POINTS: readonly [number, number][] = [
 /** Maps a quadrant-space splat point into the domain actually simulated at
  *  `mirror` — Off simulates the full [-1,1]-ish square (here [0,1] centred
  *  at 0.5), Left-right only folds x, Top-bottom only folds y, Kaleidoscope
- *  and every Radial mode (which reuse the Kaleidoscope quadrant — see
+ *  and MIRROR_RADIAL (which reuses the Kaleidoscope quadrant — see
  *  mirrorDomain) fold both. The quadrant point already lives in [0,1]^2 with
  *  (0,0) at the shared seam corner, so: Kaleidoscope/Radial keep it as-is;
  *  Left-right also keeps x (still folded) and maps y from [0,1] (half
@@ -274,7 +276,7 @@ const SPLAT_POINTS: readonly [number, number][] = [
  *  simResolutionFor's Top-bottom aspect) and x is folded (still [0,1]); Off
  *  unfolds both axes around the centre. */
 function remapSplatPoint(x: number, y: number, mirror: MirrorMode): [number, number] {
-  if (mirror === MIRROR_KALEIDO || mirror >= MIRROR_RADIAL6) return [x, y];
+  if (mirror === MIRROR_KALEIDO || mirror === MIRROR_RADIAL) return [x, y];
   if (mirror === MIRROR_TB) return [y * 0.6, x];
   if (mirror === MIRROR_LR) return [x, 0.5 + (y - 0.5) * 0.5];
   return [0.5 + (x - 0.5) * 0.5, 0.5 + (y - 0.5) * 0.5];
@@ -286,7 +288,7 @@ function remapSplatPoint(x: number, y: number, mirror: MirrorMode): [number, num
  *  edge at mid-height (the left wall on the seam), matching the reference
  *  video's emitter; every other mode keeps it on the vertical seam. */
 export function emitterPosition(mirror: MirrorMode): [number, number] {
-  if (mirror === MIRROR_KALEIDO || mirror >= MIRROR_RADIAL6) return [0, 0];
+  if (mirror === MIRROR_KALEIDO || mirror === MIRROR_RADIAL) return [0, 0];
   if (mirror === MIRROR_TB) return [0, TB_EMIT_Y];
   if (mirror === MIRROR_LR) return [0, 0.5];
   return [0.5, 0.5];
@@ -363,9 +365,9 @@ export function emitterState(inp: EmitterInputs, out: Splat[]): Splat[] {
   // Sizes are specified in quadrant space; the unfolded modes' domains span
   // twice the screen per uv, so halve them there to keep the same on-screen
   // emitter (remapSplatPoint does the same to the splat points). Kaleidoscope
-  // and every Radial mode already simulate the quadrant (both axes folded),
-  // so they keep the size as-is.
-  const sizeScale = inp.mirror === MIRROR_KALEIDO || inp.mirror >= MIRROR_RADIAL6 ? 1 : 0.5;
+  // and MIRROR_RADIAL already simulate the quadrant (both axes folded), so
+  // they keep the size as-is.
+  const sizeScale = inp.mirror === MIRROR_KALEIDO || inp.mirror === MIRROR_RADIAL ? 1 : 0.5;
   if (EMIT_RING > 0) {
     slot0.ring = EMIT_RING * sizeScale;
     slot0.sigma = EMIT_RING_SIGMA * sizeScale;
@@ -425,7 +427,13 @@ export function symmetryToMirror(k: number): MirrorMode | null {
 /** Auto symmetry only ever drifts between the quadrant-domain folds — Off/
  *  Left-right/Top-bottom simulate a different sim domain (mirrorDomain in
  *  fluidSim.ts) and switching into one mid-flow would reset the fluid. */
-export const FOLD_FAMILY: readonly MirrorMode[] = [MIRROR_KALEIDO, MIRROR_RADIAL6, MIRROR_RADIAL8, MIRROR_RADIAL12];
+export const FOLD_FAMILY: readonly MirrorMode[] = [MIRROR_KALEIDO, MIRROR_RADIAL];
+
+/** Wedge counts Auto symmetry draws from when advanceFold's drift lands on
+ *  MIRROR_RADIAL (a pinned Radial's own wedge count instead comes straight
+ *  from the foldCount setting — see render() below). Every entry sits within
+ *  [FOLD_WEDGES_MIN, FOLD_WEDGES_MAX]. */
+export const FOLD_WEDGE_CHOICES: readonly number[] = [3, 4, 5, 6, 8, 10, 12];
 
 /** Fold-drift tuning: FOLD_FADE_SEC is the warp duration between two folds
  *  (see foldMixEased — the display shader warps the sample coordinate itself
@@ -459,6 +467,12 @@ export const FOLD_ZOOM_RATE = 0.07;
 export interface FoldState {
   modeA: MirrorMode;
   modeB: MirrorMode;
+  /** Radial wedge count riding along with modeA/modeB — meaningless (but
+   *  still carried forward) while that side's mode isn't MIRROR_RADIAL. See
+   *  FOLD_WEDGE_CHOICES for what advanceFold draws it from. Always an
+   *  integer within [FOLD_WEDGES_MIN, FOLD_WEDGES_MAX]. */
+  wedgesA: number;
+  wedgesB: number;
   mix: number;
   rot: number;
   rotDir: 1 | -1;
@@ -470,6 +484,8 @@ export function createFoldState(rng: () => number = Math.random): FoldState {
   return {
     modeA: MIRROR_KALEIDO,
     modeB: MIRROR_KALEIDO,
+    wedgesA: 6,
+    wedgesB: 6,
     mix: 1,
     rot: 0,
     rotDir: rng() < 0.5 ? -1 : 1,
@@ -486,7 +502,11 @@ export function createFoldState(rng: () => number = Math.random): FoldState {
  *  existed) and gates the drop-triggered reconfigure (a drop is ignored
  *  entirely at drift 0); `inp.dropOnset` forces an immediate reconfigure once
  *  the current warp has finished (never interrupts one already in flight, so
- *  a fold never visibly snaps mid-warp). `inp.breathe` isn't read here — it
+ *  a fold never visibly snaps mid-warp). A reconfigure picks the next mode
+ *  from FOLD_FAMILY and, when that lands on MIRROR_RADIAL, an independent
+ *  wedge count from FOLD_WEDGE_CHOICES — so Auto can repeat Radial with a
+ *  different wedge count, but the resulting (mode, wedges) pair is never
+ *  identical to the one just settled on. `inp.breathe` isn't read here — it
  *  only feeds foldZoom, which the caller invokes separately once per frame
  *  with the same settings bundle (see render() below) — it travels through
  *  this type anyway so callers can pass one bundle to both. */
@@ -501,11 +521,18 @@ export function advanceFold(
 
   if ((st.holdLeft <= 0 || (inp.dropOnset && inp.drift > 0)) && st.mix >= 1) {
     st.modeA = st.modeB;
-    let next = FOLD_FAMILY[Math.floor(rng() * FOLD_FAMILY.length)];
-    for (let tries = 0; tries < 8 && next === st.modeA; tries++) {
-      next = FOLD_FAMILY[Math.floor(rng() * FOLD_FAMILY.length)];
+    st.wedgesA = st.wedgesB;
+    const pickNext = (): [MirrorMode, number] => {
+      const mode = FOLD_FAMILY[Math.floor(rng() * FOLD_FAMILY.length)];
+      const wedges = mode === MIRROR_RADIAL ? FOLD_WEDGE_CHOICES[Math.floor(rng() * FOLD_WEDGE_CHOICES.length)] : st.wedgesA;
+      return [mode, wedges];
+    };
+    let [nextMode, nextWedges] = pickNext();
+    for (let tries = 0; tries < 8 && nextMode === st.modeA && nextWedges === st.wedgesA; tries++) {
+      [nextMode, nextWedges] = pickNext();
     }
-    st.modeB = next;
+    st.modeB = nextMode;
+    st.wedgesB = nextWedges;
     st.mix = 0;
     if (rng() < 0.5) st.rotDir = st.rotDir === 1 ? -1 : 1;
     st.holdLeft = FOLD_HOLD_MIN + rng() * (FOLD_HOLD_MAX - FOLD_HOLD_MIN);
@@ -650,9 +677,19 @@ export const SETTINGS: SceneSetting[] = [
     options: [...SYMMETRY_OPTIONS],
   },
   {
+    key: "foldCount",
+    label: "Mirror count",
+    description: "How many mirrored wedges a Radial fold has (Auto drifts this on its own)",
+    group: "Symmetry",
+    min: FOLD_WEDGES_MIN,
+    max: FOLD_WEDGES_MAX,
+    step: 1,
+    default: 6,
+  },
+  {
     key: "foldSpread",
     label: "Wedge spread",
-    description: "Radial folds: how much of the fluid each wedge squeezes in (0 = mirror a true slice)",
+    description: "The Radial fold: how much of the fluid each wedge squeezes in (0 = mirror a true slice)",
     group: "Symmetry",
     min: 0,
     max: 1,
@@ -972,6 +1009,8 @@ uniform float uFoldB;
 uniform float uFoldMix;
 uniform float uFoldRot;
 uniform float uFoldZoom;
+uniform float uFoldWedgesA;
+uniform float uFoldWedgesB;
 uniform sampler2D uVelSim;
 uniform vec2 uSimTexels;
 uniform float uShockAge[${SHOCK_SLOTS}];
@@ -1027,26 +1066,28 @@ float hash21(vec2 p) {
 // Maps a screen uv to the sim uv it should sample, for fold mode \`m\`
 // (MirrorMode's index — see MIRROR_OPTIONS for the order; the caller passes
 // uFoldA/uFoldB, rounded, since Auto symmetry warps continuously between two
-// folds — see main()). Off/Left-right/Top-bottom are plain axis folds that
-// ignore rot/zoom; Kaleidoscope and every Radial mode (m >= 3) first rotate
-// the centred, aspect-corrected screen coordinate by uFoldRot and scale it by
-// 1/uFoldZoom (the fold's slow turn-and-breathe drift — see advanceFold/
-// foldZoom in fluid.ts), then apply the fold itself: Kaleidoscope's plain
-// two-axis abs fold (un-corrected back to uv space first, since that fold
-// isn't aspect-aware), or a Radial mode's fold into one of N wedges around
-// the centre, reusing the Kaleidoscope quadrant the sim already covers (see
+// folds — see main()) with that fold's own wedge count \`wedges\` (only
+// meaningful when m is MIRROR_RADIAL's index — see uFoldWedgesA/B below).
+// Off/Left-right/Top-bottom are plain axis folds that ignore rot/zoom;
+// Kaleidoscope and MIRROR_RADIAL (m >= 3) first rotate the centred,
+// aspect-corrected screen coordinate by uFoldRot and scale it by 1/uFoldZoom
+// (the fold's slow turn-and-breathe drift — see advanceFold/foldZoom in
+// fluid.ts), then apply the fold itself: Kaleidoscope's plain two-axis abs
+// fold (un-corrected back to uv space first, since that fold isn't
+// aspect-aware), or the Radial fold into one of \`wedges\` wedges around the
+// centre, reusing the Kaleidoscope quadrant the sim already covers (see
 // mirrorDomain in fluidSim.ts) — the final mirror-wrap
 // (s = 1.0 - abs(1.0 - s)) keeps points past the quadrant's far corner
 // continuous instead of seaming there.
 //
-// A Radial fold's wedge angle th runs [0, w/2] (w = 2*pi/N); uFoldSpread
-// (the "Wedge spread" setting) sets how much of that half-wedge's angle maps
-// onto the sim's own quarter-turn (th's own natural range is far narrower
-// than pi/2 for a high N, so mapping it 1:1 — spread 0 — shows a true,
-// unsqueezed slice of the fluid next to the jet axis at th' = pi/2, mirrored
-// out from there; spread 1 squeezes the whole half-wedge across the quarter
-// turn, same as the fold has always looked).
-vec2 simUv(vec2 uv, int m) {
+// The Radial fold's wedge angle th runs [0, w/2] (w = 2*pi/n, n = wedges);
+// uFoldSpread (the "Wedge spread" setting) sets how much of that half-wedge's
+// angle maps onto the sim's own quarter-turn (th's own natural range is far
+// narrower than pi/2 for a high wedge count, so mapping it 1:1 — spread 0 —
+// shows a true, unsqueezed slice of the fluid next to the jet axis at
+// th' = pi/2, mirrored out from there; spread 1 squeezes the whole
+// half-wedge across the quarter turn, same as the fold has always looked).
+vec2 simUv(vec2 uv, int m, float wedges) {
   if (m == 0) return uv;
   if (m == 1) return vec2(abs(uv.x * 2.0 - 1.0), uv.y);
   if (m == 2) return vec2(uv.x, abs(uv.y * 2.0 - 1.0));
@@ -1063,7 +1104,7 @@ vec2 simUv(vec2 uv, int m) {
     vec2 s3 = abs(p / vec2(uDomainAspect, 1.0));
     return 1.0 - abs(mod(s3, 2.0) - 1.0);
   }
-  float n = m == 4 ? 6.0 : m == 5 ? 8.0 : 12.0;
+  float n = max(2.0, wedges);
   float r = length(p);
   float w = 6.28318 / n;
   float th = mod(atan(p.y, p.x), w);
@@ -1083,8 +1124,8 @@ void main() {
   // itself warps continuously from fold A to fold B. uFoldMix is the eased
   // ramp (see foldMixEased in fluid.ts) uploaded by render(); a manual pick
   // uploads A === B so the mix is a no-op either way.
-  vec2 sA = simUv(uv, int(uFoldA + 0.5));
-  vec2 sB = simUv(uv, int(uFoldB + 0.5));
+  vec2 sA = simUv(uv, int(uFoldA + 0.5), uFoldWedgesA);
+  vec2 sB = simUv(uv, int(uFoldB + 0.5), uFoldWedgesB);
   vec2 s = mix(sA, sB, uFoldMix);
 
   vec2 dye = decodeDye(texture(uDye, s));
@@ -1297,6 +1338,7 @@ function createFluidScene(): Scene {
       const foldSpin = resolveSceneSetting(ID, settingFor("foldSpin"));
       const foldBreathe = resolveSceneSetting(ID, settingFor("foldBreathe"));
       const foldDrift = resolveSceneSetting(ID, settingFor("foldDrift"));
+      const foldCount = resolveSceneSetting(ID, settingFor("foldCount"));
       // The fold state always advances — even with a manual fold pinned — so
       // Spin/Zoom breathing still turn and pulse a pinned Kaleidoscope/Radial
       // look; only Auto drift itself (and the drop-triggered reconfigure it
@@ -1368,15 +1410,23 @@ function createFluidScene(): Scene {
         displayProg.setF("uFoldMix", foldMixEased(fold.mix));
         displayProg.setF("uFoldRot", fold.rot);
         displayProg.setF("uFoldZoom", foldZoom(fold, foldBreathe));
+        displayProg.setF("uFoldWedgesA", fold.wedgesA);
+        displayProg.setF("uFoldWedgesB", fold.wedgesB);
       } else {
         // A manual pick still carries the live rot/zoom from the
         // ever-advancing fold state (Off/Left-right/Top-bottom's own simUv
-        // branches ignore both anyway).
+        // branches ignore both anyway). The Mirror count slider drives A/B
+        // directly (even outside Radial, where simUv never reads them) so a
+        // pinned Radial's wedge count follows the slider live — no sim reset
+        // needed, since every pinned mode's domain is unaffected by it.
         displayProg.setF("uFoldA", manualMirror);
         displayProg.setF("uFoldB", manualMirror);
         displayProg.setF("uFoldMix", 0);
         displayProg.setF("uFoldRot", fold.rot);
         displayProg.setF("uFoldZoom", foldZoom(fold, foldBreathe));
+        const wedges = Math.round(foldCount);
+        displayProg.setF("uFoldWedgesA", wedges);
+        displayProg.setF("uFoldWedgesB", wedges);
       }
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sim.dyeTexture());

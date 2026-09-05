@@ -7,14 +7,15 @@ import {
   SPLAT_SLOTS,
   viscosityPasses,
   VISC_MAX_PASSES,
+  mirrorDomain,
   MIRROR_OFF,
   MIRROR_LR,
   MIRROR_TB,
   MIRROR_KALEIDO,
-  MIRROR_RADIAL6,
-  MIRROR_RADIAL8,
-  MIRROR_RADIAL12,
+  MIRROR_RADIAL,
   MIRROR_OPTIONS,
+  FOLD_WEDGES_MIN,
+  FOLD_WEDGES_MAX,
   type MirrorMode,
   type Splat,
 } from "../src/render/scenes/fluidSim.ts";
@@ -44,6 +45,7 @@ import {
   SYMMETRY_OPTIONS,
   symmetryToMirror,
   FOLD_FAMILY,
+  FOLD_WEDGE_CHOICES,
   FOLD_FADE_SEC,
   FOLD_HOLD_MIN,
   FOLD_HOLD_MAX,
@@ -67,9 +69,7 @@ const ALL_MIRROR_MODES: MirrorMode[] = [
   MIRROR_LR,
   MIRROR_TB,
   MIRROR_KALEIDO,
-  MIRROR_RADIAL6,
-  MIRROR_RADIAL8,
-  MIRROR_RADIAL12,
+  MIRROR_RADIAL,
 ];
 
 /** Slot 0 (the centre emitter)'s expected sim-space position per mirror
@@ -80,9 +80,7 @@ const SLOT0_POSITION_CASES: Array<[MirrorMode, number[]]> = [
   [MIRROR_LR, [0, 0.5]],
   [MIRROR_TB, [0, TB_EMIT_Y]],
   [MIRROR_KALEIDO, [0, 0]],
-  [MIRROR_RADIAL6, [0, 0]],
-  [MIRROR_RADIAL8, [0, 0]],
-  [MIRROR_RADIAL12, [0, 0]],
+  [MIRROR_RADIAL, [0, 0]],
 ];
 
 describe("simResolutionFor", () => {
@@ -166,11 +164,9 @@ describe("simResolutionFor", () => {
     }
   });
 
-  it("every Radial mode simulates the same grid size as Kaleidoscope (they share the quadrant)", () => {
+  it("MIRROR_RADIAL simulates the same grid size as Kaleidoscope (they share the quadrant)", () => {
     const kaleidoscope = simResolutionFor(0.7, 1920, 1080, MIRROR_KALEIDO);
-    for (const mirror of [MIRROR_RADIAL6, MIRROR_RADIAL8, MIRROR_RADIAL12] as MirrorMode[]) {
-      expect(simResolutionFor(0.7, 1920, 1080, mirror)).toEqual(kaleidoscope);
-    }
+    expect(simResolutionFor(0.7, 1920, 1080, MIRROR_RADIAL)).toEqual(kaleidoscope);
   });
 
   it("a 1px canvas resize doesn't change the sim size (quantisation absorbs it)", () => {
@@ -207,6 +203,22 @@ describe("sameSimSize", () => {
     expect(sameSimSize(base, { ...base, dyeW: base.dyeW + WIDTH_QUANTUM })).toBe(false);
     expect(sameSimSize(base, { ...base, dyeH: base.dyeH + 1 })).toBe(false);
     expect(sameSimSize(base, { ...base, jacobiIters: base.jacobiIters + 1 })).toBe(false);
+  });
+});
+
+describe("mirrorDomain", () => {
+  it("radial is true only for MIRROR_RADIAL", () => {
+    for (const mirror of ALL_MIRROR_MODES) {
+      expect(mirrorDomain(mirror).radial).toBe(mirror === MIRROR_RADIAL);
+    }
+  });
+
+  it("folds both axes for Kaleidoscope and MIRROR_RADIAL, one axis for Left-right/Top-bottom, neither for Off", () => {
+    expect(mirrorDomain(MIRROR_OFF)).toEqual({ foldX: false, foldY: false, radial: false });
+    expect(mirrorDomain(MIRROR_LR)).toEqual({ foldX: true, foldY: false, radial: false });
+    expect(mirrorDomain(MIRROR_TB)).toEqual({ foldX: false, foldY: true, radial: false });
+    expect(mirrorDomain(MIRROR_KALEIDO)).toEqual({ foldX: true, foldY: true, radial: false });
+    expect(mirrorDomain(MIRROR_RADIAL)).toEqual({ foldX: true, foldY: true, radial: true });
   });
 });
 
@@ -560,6 +572,20 @@ function fixedRng(...values: number[]): () => number {
   return () => values[Math.min(i++, values.length - 1)];
 }
 
+/** Small deterministic PRNG (mulberry32) for tests that need many distinct
+ *  pseudo-random draws (fixedRng's fixed cycle isn't varied enough to drive
+ *  advanceFold through hundreds of distinct reconfigures) while staying
+ *  reproducible. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 describe("SYMMETRY_OPTIONS / symmetryToMirror", () => {
   it("is Auto plus every MIRROR_OPTIONS entry, index-shifted by one", () => {
     expect(SYMMETRY_OPTIONS.length).toBe(MIRROR_OPTIONS.length + 1);
@@ -575,6 +601,17 @@ describe("SYMMETRY_OPTIONS / symmetryToMirror", () => {
   });
 });
 
+describe("FOLD_WEDGE_CHOICES", () => {
+  it("is all integers within [FOLD_WEDGES_MIN, FOLD_WEDGES_MAX]", () => {
+    expect(FOLD_WEDGE_CHOICES.length).toBeGreaterThan(0);
+    for (const n of FOLD_WEDGE_CHOICES) {
+      expect(Number.isInteger(n)).toBe(true);
+      expect(n).toBeGreaterThanOrEqual(FOLD_WEDGES_MIN);
+      expect(n).toBeLessThanOrEqual(FOLD_WEDGES_MAX);
+    }
+  });
+});
+
 describe("createFoldState", () => {
   it("starts settled on a FOLD_FAMILY member: modeA === modeB, mix 1, rot 0", () => {
     const st = createFoldState();
@@ -582,6 +619,13 @@ describe("createFoldState", () => {
     expect(st.modeA).toBe(st.modeB);
     expect(st.mix).toBe(1);
     expect(st.rot).toBe(0);
+  });
+
+  it("starts on Kaleidoscope with wedgesA === wedgesB === 6", () => {
+    const st = createFoldState();
+    expect(st.modeA).toBe(MIRROR_KALEIDO);
+    expect(st.wedgesA).toBe(6);
+    expect(st.wedgesB).toBe(6);
   });
 
   it("draws holdLeft from [FOLD_HOLD_MIN, FOLD_HOLD_MAX]", () => {
@@ -668,6 +712,26 @@ describe("advanceFold", () => {
     }
   });
 
+  it("never produces an identical (mode, wedges) pair twice in a row across many reconfigures", () => {
+    const rng = mulberry32(12345);
+    const st = createFoldState(rng);
+    let reconfigures = 0;
+    for (let i = 0; i < 4000; i++) {
+      const before: [MirrorMode, number] = [st.modeB, st.wedgesB];
+      // dropOnset + drift 1 every frame reconfigures the instant each warp
+      // settles (st.mix reaches 1), driving many transitions quickly.
+      advanceFold(st, 0.05, { energy: rng(), dropOnset: true, beatPulse: 0, spin: 0, breathe: 0, drift: 1 }, rng);
+      if (st.mix === 0) {
+        reconfigures++;
+        expect([st.modeB, st.wedgesB]).not.toEqual(before);
+        expect(Number.isInteger(st.wedgesB)).toBe(true);
+        expect(st.wedgesB).toBeGreaterThanOrEqual(FOLD_WEDGES_MIN);
+        expect(st.wedgesB).toBeLessThanOrEqual(FOLD_WEDGES_MAX);
+      }
+    }
+    expect(reconfigures).toBeGreaterThan(20);
+  });
+
   it("rot advances faster with more energy", () => {
     const lo = createFoldState(fixedRng(0));
     const hi = createFoldState(fixedRng(0));
@@ -751,9 +815,9 @@ describe("foldMixEased", () => {
 
 describe("Symmetry group settings", () => {
   const symmetrySettings = SETTINGS.filter((s) => s.group === "Symmetry");
-  const SYMMETRY_KEYS = ["symmetry", "foldSpread", "foldSpin", "foldBreathe", "foldDrift"];
+  const SYMMETRY_KEYS = ["symmetry", "foldCount", "foldSpread", "foldSpin", "foldBreathe", "foldDrift"];
 
-  it("has exactly symmetry, foldSpread, foldSpin, foldBreathe, foldDrift", () => {
+  it("has exactly symmetry, foldCount, foldSpread, foldSpin, foldBreathe, foldDrift", () => {
     expect(symmetrySettings.map((s) => s.key).sort()).toEqual([...SYMMETRY_KEYS].sort());
   });
 
@@ -765,6 +829,18 @@ describe("Symmetry group settings", () => {
   it("foldDrift reads anim.dropOnset", () => {
     const foldDrift = SETTINGS.find((s) => s.key === "foldDrift")!;
     expect(foldDrift.reads).toEqual(["anim.dropOnset"]);
+  });
+
+  it("foldCount is a manual (no auto) slider spanning [FOLD_WEDGES_MIN, FOLD_WEDGES_MAX], step 1, default 6, placed right after symmetry", () => {
+    const s = SETTINGS.find((x) => x.key === "foldCount")!;
+    expect(s.min).toBe(FOLD_WEDGES_MIN);
+    expect(s.max).toBe(FOLD_WEDGES_MAX);
+    expect(s.step).toBe(1);
+    expect(s.default).toBe(6);
+    expect(s.auto).toBeUndefined();
+    const symmetryIdx = SETTINGS.findIndex((x) => x.key === "symmetry");
+    const foldCountIdx = SETTINGS.findIndex((x) => x.key === "foldCount");
+    expect(foldCountIdx).toBe(symmetryIdx + 1);
   });
 
   it("foldSpread/foldSpin/foldBreathe/foldDrift are 0..1 ranged sliders with step 0.05", () => {

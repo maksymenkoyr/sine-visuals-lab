@@ -9,7 +9,7 @@ regenerate it at session close.
 - **Neon Fluid scene, v5 (this session)** — branch `worktree-neon-fluid`,
   draft PR #76. v5 (after two real-music rounds): gains cut to roughly a tenth
   of v4, puffs on bass onsets only (`PUFF_MIN_GAP`), one-flow fold warps, a
-  Symmetry group (`foldSpread` unsqueezes the radial wedges, `foldSpin`,
+  Symmetry group (`foldCount` = live wedge-count slider, `foldSpread` unsqueezes the radial wedges, `foldSpin`,
   `foldBreathe`, `foldDrift`). v4: Mirror became `symmetry` with an Auto default that drifts
   between the quadrant folds (`advanceFold`), the Currents sparkle rides the
   sim velocity, a hue-preserving tone map with `neon`/`hotWhite`, and a Light

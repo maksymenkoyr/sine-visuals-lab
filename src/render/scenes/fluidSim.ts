@@ -27,11 +27,13 @@ import { createProgram, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 //
 // Boundaries. Sim uv (0,0) is screen centre; the sim only ever simulates uv
 // in [0,1]^2 — one quadrant when the scene's mirror mode is Kaleidoscope or
-// a Radial mode (Radial modes fold the screen into a wedge at display time
-// and reuse the same quadrant the sim already has), a half when Left-right
-// or Top-bottom (Top-bottom is a half of full width), the whole screen when
-// Off (the mode only changes the domain's aspect, via simResolutionFor, and
-// where fluid.ts puts the emitter). All four edges are free-slip walls
+// MIRROR_RADIAL (the Radial mode folds the screen into wedges at display
+// time — its wedge count is a display-only parameter, see FOLD_WEDGES_MIN/
+// MAX below and fluid.ts's foldCount setting — and reuses the same quadrant
+// the sim already has), a half when Left-right or Top-bottom (Top-bottom is
+// a half of full width), the whole screen when Off (the mode only changes
+// the domain's aspect, via simResolutionFor, and where fluid.ts puts the
+// emitter). All four edges are free-slip walls
 // handled by ghost cells: a stencil read that would cross an edge reflects
 // the texel/uv coordinate back into range and negates the velocity
 // component normal to that edge.
@@ -73,7 +75,7 @@ import { createProgram, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 export type SimFormat = "half" | "byte";
 /** Matches the Mirror enum setting's index — see MIRROR_OPTIONS for the
  *  ordered list of modes. */
-export type MirrorMode = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+export type MirrorMode = 0 | 1 | 2 | 3 | 4;
 
 // Left untyped (not `: MirrorMode`) on purpose: keeping each constant's
 // literal type lets the mirrorDomain switch below be checked exhaustively —
@@ -82,9 +84,7 @@ export const MIRROR_OFF = 0;
 export const MIRROR_LR = 1;
 export const MIRROR_TB = 2;
 export const MIRROR_KALEIDO = 3;
-export const MIRROR_RADIAL6 = 4;
-export const MIRROR_RADIAL8 = 5;
-export const MIRROR_RADIAL12 = 6;
+export const MIRROR_RADIAL = 4;
 
 /** Mirror enum setting's options, index-matched to MirrorMode — fluid.ts's
  *  `mirror` SETTINGS entry uses this array directly so the device menu's
@@ -94,33 +94,34 @@ export const MIRROR_OPTIONS: readonly string[] = [
   "Left-right",
   "Top-bottom",
   "Kaleidoscope",
-  "Radial 6",
-  "Radial 8",
-  "Radial 12",
+  "Radial",
 ];
+
+/** How many mirrored wedges a Radial fold can have — a display-time
+ *  parameter (fluid.ts's `foldCount` setting, or Auto's own drift over
+ *  FOLD_WEDGE_CHOICES), not part of the sim domain, so it plays no role in
+ *  mirrorDomain below. */
+export const FOLD_WEDGES_MIN = 2;
+export const FOLD_WEDGES_MAX = 16;
 
 /** What a mirror mode folds: `foldX`/`foldY` say whether the sim only ever
  *  covers half of that screen axis (the display pass mirrors the rest back
- *  in), `radial` is the wedge count for a Radial mode (0 for every
- *  non-radial mode). Radial modes fold both axes like Kaleidoscope — they
- *  simulate the same quadrant and only differ in how the display pass folds
- *  it (see simUv in fluid.ts). */
-export function mirrorDomain(m: MirrorMode): { foldX: boolean; foldY: boolean; radial: number } {
+ *  in), `radial` is true only for MIRROR_RADIAL. MIRROR_RADIAL folds both
+ *  axes like Kaleidoscope — it simulates the same quadrant and only differs
+ *  in how the display pass folds it (see simUv in fluid.ts); its wedge count
+ *  lives outside this domain description (see FOLD_WEDGES_MIN/MAX above). */
+export function mirrorDomain(m: MirrorMode): { foldX: boolean; foldY: boolean; radial: boolean } {
   switch (m) {
     case MIRROR_OFF:
-      return { foldX: false, foldY: false, radial: 0 };
+      return { foldX: false, foldY: false, radial: false };
     case MIRROR_LR:
-      return { foldX: true, foldY: false, radial: 0 };
+      return { foldX: true, foldY: false, radial: false };
     case MIRROR_TB:
-      return { foldX: false, foldY: true, radial: 0 };
+      return { foldX: false, foldY: true, radial: false };
     case MIRROR_KALEIDO:
-      return { foldX: true, foldY: true, radial: 0 };
-    case MIRROR_RADIAL6:
-      return { foldX: true, foldY: true, radial: 6 };
-    case MIRROR_RADIAL8:
-      return { foldX: true, foldY: true, radial: 8 };
-    case MIRROR_RADIAL12:
-      return { foldX: true, foldY: true, radial: 12 };
+      return { foldX: true, foldY: true, radial: false };
+    case MIRROR_RADIAL:
+      return { foldX: true, foldY: true, radial: true };
   }
 }
 
@@ -167,7 +168,7 @@ export const WIDTH_QUANTUM = 8;
  * texel density per screen pixel — otherwise a mode that stretches the same
  * grid over more screen renders soft and blurry. Widths follow from the
  * domain's aspect the same way: a quadrant (both axes folded — Kaleidoscope
- * and every Radial mode, which simulate the same quadrant, see mirrorDomain)
+ * and MIRROR_RADIAL, which simulate the same quadrant, see mirrorDomain)
  * has the full screen aspect, Left-right (x folded only) has half of it,
  * Top-bottom (y folded only) has twice it, and Off (neither folded) has it
  * as-is.
