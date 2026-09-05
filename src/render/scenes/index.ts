@@ -14,6 +14,7 @@ import { powderScene } from "./powder.ts";
 import { stormScene } from "./storm.ts";
 import { ambienceScene } from "./ambience.ts";
 import { kaleidoscopeScene } from "./kaleido/index.ts";
+import { gatesScene } from "./gates/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
@@ -34,6 +35,7 @@ registerScene(dancersScene);
 registerScene(stormScene);
 registerScene(ambienceScene);
 registerScene(kaleidoscopeScene);
+registerScene(gatesScene);
 
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
  *  the featured scenes registered above it are deliberately absent. */
@@ -50,6 +52,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "storm",
   "ambience",
   "kaleidoscope",
+  "gates",
 ]);
 
 export {
@@ -68,4 +71,5 @@ export {
   stormScene,
   ambienceScene,
   kaleidoscopeScene,
+  gatesScene,
 };
