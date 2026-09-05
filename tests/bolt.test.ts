@@ -9,7 +9,14 @@ import {
   jagPolyline,
   strikeEnvelope,
 } from "../src/render/bolt.ts";
-import { BOLT_REFRACTORY, MAX_BOLTS, createBoltPool } from "../src/render/scenes/fluidBolts.ts";
+import {
+  BOLT_BOIL_MIN,
+  BOLT_BOIL_SEC,
+  BOLT_CUTOFF,
+  BOLT_REFRACTORY,
+  MAX_BOLTS,
+  createBoltPool,
+} from "../src/render/scenes/fluidBolts.ts";
 
 describe("bolt strike envelope", () => {
   it("is exactly 1 at the instant of the strike", () => {
@@ -237,17 +244,28 @@ describe("createBoltPool", () => {
     expect(reclaimed).not.toBe(newestSlot);
   });
 
-  it("tick decays a fired slot's strength monotonically", () => {
+  it("tick decays a fired slot's strength monotonically, then cuts it to exactly 0 under BOLT_CUTOFF and keeps it there", () => {
     const pool = createBoltPool(createRng(5));
     expect(pool.strike(0.1, 0.1, 0.9, 0.9, 1)).toBe(true);
     const slot = Array.from(pool.strengths).findIndex((s) => s > 0);
     expect(pool.strengths[slot]).toBeCloseTo(1, 5);
     let prev = pool.strengths[slot];
-    for (let i = 0; i < 20; i++) {
+    let cut = false;
+    for (let i = 0; i < 40; i++) {
       pool.tick(0.02, 0.4, 0);
-      expect(pool.strengths[slot]).toBeLessThan(prev);
-      prev = pool.strengths[slot];
+      const s = pool.strengths[slot];
+      if (cut) {
+        expect(s).toBe(0);
+      } else if (s === 0) {
+        expect(prev).toBeLessThan(BOLT_CUTOFF * 1.5); // the cut happens near the threshold, not from full brightness
+        cut = true;
+      } else {
+        expect(s).toBeLessThan(prev);
+        expect(s).toBeGreaterThanOrEqual(BOLT_CUTOFF);
+      }
+      prev = s;
     }
+    expect(cut).toBe(true);
   });
 
   it("an untriggered pool contributes nothing", () => {
@@ -256,16 +274,58 @@ describe("createBoltPool", () => {
     expect(Array.from(pool.strengths).every((s) => s === 0)).toBe(true);
   });
 
-  it("clamps strike endpoints into [0,1]^2 before building the tree", () => {
+  it("keeps strike endpoints exactly as given, even outside the screen (a bolt may enter from off-frame)", () => {
     const pool = createBoltPool(createRng(7));
     expect(pool.strike(-0.5, 1.5, 2, -3, 1)).toBe(true);
     const slot = Array.from(pool.strengths).findIndex((s) => s > 0);
     const stride = BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS;
     const o = slot * stride;
     const bOff = o + BOLT_SEGMENTS * 2 * BOLT_VERT_FLOATS;
-    expect(pool.paths[o]).toBeCloseTo(0, 5); // ax: -0.5 -> 0
-    expect(pool.paths[o + 1]).toBeCloseTo(1, 5); // ay: 1.5 -> 1
-    expect(pool.paths[bOff]).toBeCloseTo(1, 5); // bx: 2 -> 1
-    expect(pool.paths[bOff + 1]).toBeCloseTo(0, 5); // by: -3 -> 0
+    expect(pool.paths[o]).toBeCloseTo(-0.5, 5);
+    expect(pool.paths[o + 1]).toBeCloseTo(1.5, 5);
+    expect(pool.paths[bOff]).toBeCloseTo(2, 5);
+    expect(pool.paths[bOff + 1]).toBeCloseTo(-3, 5);
+    expect(Array.from(pool.ends.subarray(slot * 4, slot * 4 + 4))).toEqual([-0.5, 1.5, 2, -3]);
+  });
+
+  describe("boil", () => {
+    const stride = BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS;
+    const pathOf = (pool: ReturnType<typeof createBoltPool>, slot: number) =>
+      Array.from(pool.paths.subarray(slot * stride, (slot + 1) * stride));
+
+    it("re-jags a live bolt once BOLT_BOIL_SEC has passed, marking it dirty and keeping its endpoints", () => {
+      const pool = createBoltPool(createRng(8));
+      pool.strike(0.2, -0.2, 0.9, 1.3, 1);
+      const slot = Array.from(pool.strengths).findIndex((s) => s > 0);
+      pool.dirty[slot] = 0; // pretend the strike's tree was uploaded
+      const before = pathOf(pool, slot);
+      pool.tick(BOLT_BOIL_SEC * 0.5, 1, 0);
+      expect(pool.dirty[slot]).toBe(0);
+      expect(pathOf(pool, slot)).toEqual(before);
+      pool.tick(BOLT_BOIL_SEC * 0.6, 1, 0);
+      expect(pool.dirty[slot]).toBe(1);
+      const after = pathOf(pool, slot);
+      expect(after).not.toEqual(before);
+      // Same endpoints: the main channel still starts on a and ends on b.
+      const bOff = BOLT_SEGMENTS * 2 * BOLT_VERT_FLOATS;
+      expect(after[0]).toBeCloseTo(0.2, 5);
+      expect(after[1]).toBeCloseTo(-0.2, 5);
+      expect(after[bOff]).toBeCloseTo(0.9, 5);
+      expect(after[bOff + 1]).toBeCloseTo(1.3, 5);
+    });
+
+    it("leaves a bolt alone once it has faded below BOLT_BOIL_MIN", () => {
+      const pool = createBoltPool(createRng(9));
+      pool.strike(0.2, 0.2, 0.9, 0.9, 1);
+      const slot = Array.from(pool.strengths).findIndex((s) => s > 0);
+      // Short afterglow: well faded after half a second.
+      pool.tick(0.5, 0, 0);
+      expect(pool.strengths[slot]).toBeLessThan(BOLT_BOIL_MIN);
+      pool.dirty[slot] = 0;
+      const before = pathOf(pool, slot);
+      for (let i = 0; i < 10; i++) pool.tick(BOLT_BOIL_SEC, 0, 0);
+      expect(pool.dirty[slot]).toBe(0);
+      expect(pathOf(pool, slot)).toEqual(before);
+    });
   });
 });

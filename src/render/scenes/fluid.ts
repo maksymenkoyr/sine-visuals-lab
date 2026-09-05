@@ -46,17 +46,18 @@ import { createFluidBolts, type FluidBolts } from "./fluidBolts.ts";
 // speckle onto that line, masked to where the line and its halo already are
 // and composited by replacing rather than adding, so a Negative or
 // Complement spark colour reads as true contrast against the line instead
-// of a wash on top of it. sparkleStyle's default "Lightning" option reads
-// like plain Glow in this file (no mask, see the sparkleStyleI branch below)
-// — the actual bolt layer is a separate additive composite the scene wires
-// in once it lands (see the plan's bolt.ts/fluidBolts.ts). A Light settings
-// group (dropFlash/shockwave/
-// buildGlow/beatFlash/strobe) and the Look group's neon/hotWhite tone map
-// layer further music-reactive flashes and saturation on top of all of
-// that — strobe (createStrobeState/triggerStrobe/advanceStrobe/strobePhase
-// below) is a single-shot white/red/black flash fired on a treble onset or a
-// drop, applied to the display shader's already-tone-mapped colour last of
-// all, unlike the others.
+// of a wash on top of it. sparkleStyle's default "Lightning" option keeps
+// the plain Glow boost here and adds the bolt layer (fluidBolts.ts): bolts
+// threaded through the liquid in *screen* space (boltEndpoints, with the
+// fold's mirror copies from boltMirrors), composited additively and, through
+// a blurred mip of the same layer, lighting up the dye lines around them. A
+// Light settings group (dropFlash/shockwave/buildGlow/beatFlash/strobe) and
+// the Look group's neon/hotWhite tone map layer further music-reactive
+// flashes and saturation on top of all of that — strobe
+// (createStrobeState/triggerStrobe/advanceStrobe/strobeFrame below) is a
+// burst of hard-cut white/red/black frames (STROBE_PATTERN) that rides each
+// lightning strike, applied to the display shader's already-tone-mapped
+// colour last of all, unlike the others.
 //
 // Audio wiring: most of the emitter's punch now comes from a **puff clock**
 // (createPuffState/advancePuff below) rather than a continuous push — it
@@ -327,23 +328,69 @@ export function emitterDirection(mirror: MirrorMode): [number, number] {
   return mirror === MIRROR_TB ? [1, 0] : [0, 1];
 }
 
-/** Lightning endpoints in sim uv for one strike: the root sits on the jet
- *  column (the densest, whitest dye — along emitterDirection from the
- *  emitter, a little off the seam), the tip a random direction `len` away.
- *  Both clamped to the domain; the display's fold mirrors the bolt like
- *  everything else in sim space. */
-export function boltEndpoints(rng: () => number, mirror: MirrorMode, len: number): [number, number, number, number] {
-  const [ex, ey] = emitterPosition(mirror);
-  const [dx, dy] = emitterDirection(mirror);
-  const along = 0.1 + 0.8 * rng();
-  const off = 0.02 + 0.08 * rng();
-  const ax = ex + dx * along - dy * off;
-  const ay = ey + dy * along + dx * off;
-  const ang = rng() * Math.PI * 2;
-  const bx = ax + Math.cos(ang) * len;
-  const by = ay + Math.sin(ang) * len;
-  const c = (v: number) => Math.min(1, Math.max(0, v));
-  return [c(ax), c(ay), c(bx), c(by)];
+/** How far off the emitter's screen position (as a fraction of the screen
+ *  height, and of the width along x) the point a bolt is threaded through
+ *  may land — wide enough to reach the plume's arms, not so wide that a bolt
+ *  misses the liquid altogether. */
+export const BOLT_THROUGH_SPREAD = 0.3;
+/** Half-range, in radians, of a bolt's swing off the vertical: bolts come
+ *  down through the screen rather than lying across it — the hand-drawn
+ *  read — but never all at the same angle. */
+export const BOLT_ANGLE_SWING = 0.7;
+/** The bolt layer is drawn at this fraction of the display's size: a ribbon
+ *  a dozen texels wide there is a bold stroke on screen, and the layer's
+ *  fill and mip rebuild stay cheap. */
+export const BOLT_LAYER_SCALE = 0.5;
+
+/** Lightning endpoints for one strike, in the bolt layer's screen-aspect
+ *  space (x in [0, aspect], y in [0, 1] — see fluidBolts.ts's header). The
+ *  bolt is a near-vertical line of length `len` (in screen heights) threaded
+ *  through a point near the emitter's screen position — i.e. through the
+ *  liquid — and deliberately *not* clamped to the screen, so a long bolt
+ *  enters from outside the frame. `aspect` = display width / height. */
+export function boltEndpoints(
+  rng: () => number,
+  mirror: MirrorMode,
+  aspect: number,
+  len: number,
+): [number, number, number, number] {
+  const [ex, ey] = emitterScreenPosition(mirror);
+  const px = ex * aspect + (rng() * 2 - 1) * BOLT_THROUGH_SPREAD * aspect;
+  const py = ey + (rng() * 2 - 1) * BOLT_THROUGH_SPREAD;
+  const ang = (rng() < 0.5 ? 1 : -1) * (Math.PI / 2) + (rng() * 2 - 1) * BOLT_ANGLE_SWING;
+  const dx = Math.cos(ang);
+  const dy = Math.sin(ang);
+  // Where along its own length the bolt crosses the through-point: never at
+  // an end, so both halves of it pass through the liquid.
+  const u = 0.3 + 0.4 * rng();
+  return [px - dx * len * u, py - dy * len * u, px + dx * len * (1 - u), py + dy * len * (1 - u)];
+}
+
+/** The bolt layer's size in texels for a display of w x h pixels: a fixed
+ *  fraction of the display (BOLT_LAYER_SCALE), never below one texel. */
+export function boltLayerSize(w: number, h: number): [number, number] {
+  return [Math.max(1, Math.ceil(w * BOLT_LAYER_SCALE)), Math.max(1, Math.ceil(h * BOLT_LAYER_SCALE))];
+}
+
+/** The copies of one bolt the display's fold *would* have made if the bolt
+ *  layer were still in sim space: Left-right mirrors x about the screen's
+ *  middle, Top-bottom mirrors y, Kaleidoscope both; Off and Radial keep the
+ *  single bolt (a Radial fold's wedges are too many to mirror a screen-wide
+ *  bolt into, and one bolt across a kaleidoscope reads best anyway). The
+ *  first entry is always the original. */
+export function boltMirrors(
+  mirror: MirrorMode,
+  aspect: number,
+  ends: readonly [number, number, number, number],
+): [number, number, number, number][] {
+  const [ax, ay, bx, by] = ends;
+  const flipX: [number, number, number, number] = [aspect - ax, ay, aspect - bx, by];
+  const flipY: [number, number, number, number] = [ax, 1 - ay, bx, 1 - by];
+  const flipXY: [number, number, number, number] = [aspect - ax, 1 - ay, aspect - bx, 1 - by];
+  if (mirror === MIRROR_LR) return [[ax, ay, bx, by], flipX];
+  if (mirror === MIRROR_TB) return [[ax, ay, bx, by], flipY];
+  if (mirror === MIRROR_KALEIDO) return [[ax, ay, bx, by], flipX, flipY, flipXY];
+  return [[ax, ay, bx, by]];
 }
 
 /** Screen uv (not sim uv — see emitterPosition for that) the emitter blob is
@@ -820,12 +867,12 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "strobe",
     label: "Strobe",
-    description: "White → red → black flash with each lightning strike (Lightning sparkle style only; photosensitivity: keep low on shared screens)",
+    description: "Hard white / red / black frames cut in with each lightning strike (Lightning sparkle style only; photosensitivity: keep low on shared screens)",
     group: "Light",
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.35,
+    default: 0.6,
   },
   {
     key: "sparkle",
@@ -980,56 +1027,93 @@ export function advanceShocks(st: ShockState, dtSec: number): void {
 }
 
 // ---------------------------------------------------------------------------
-// Strobe (Light group's `strobe` setting) — a single-shot white -> red ->
-// black flash fired on a treble onset or a drop, unlike the Shockwave pool
-// above there's only ever one flash in flight (a new trigger simply replaces
-// whatever's fading), so this is one state, not an array of slots. Driven
-// from render() below and applied last, after the display shader's tone map
-// — see the uStrobeT/uStrobeAmp block near the end of main().
+// Strobe (Light group's `strobe` setting) — a burst of hard-cut whole-screen
+// frames (white, red, black — STROBE_PATTERN) that rides each lightning
+// strike. Unlike the Shockwave pool above there's only ever one burst in
+// flight (a trigger inside the refractory is dropped), so this is one state,
+// not an array of slots. Driven from render() below and applied last, after
+// the display shader's tone map — see the uStrobeMode/uStrobeAmp block near
+// the end of main().
+//
+// The pattern is stepped per *render frame*, not per second: the user asked
+// for frames — a flash that is white on most of them and cuts to red or black
+// for single frames in between — and a time-based ramp smooths exactly that
+// away. STROBE_MAX_SEC caps the burst so a slow machine can't hold a red or
+// black frame on screen for long.
 // ---------------------------------------------------------------------------
 
-/** Seconds the white -> red -> black flash takes to fully decay — see
- *  strobePhase and the shader's sWhite/sRed/sBlack weights, which carve this
- *  span into three overlapping phases. */
-export const STROBE_DUR = 0.2;
+/** Frame colours: STROBE_WHITE/STROBE_RED/STROBE_BLACK index the display
+ *  shader's branches; STROBE_IDLE means no burst is showing. */
+export const STROBE_IDLE = -1;
+export const STROBE_WHITE = 0;
+export const STROBE_RED = 1;
+export const STROBE_BLACK = 2;
+/** One frame colour per render frame after a trigger, mostly white with a
+ *  red and a black frame cut in twice each — the "epilepsy" read the user
+ *  asked for. Starts white so the strike itself is the first thing seen. */
+export const STROBE_PATTERN: readonly number[] = [
+  STROBE_WHITE,
+  STROBE_WHITE,
+  STROBE_BLACK,
+  STROBE_WHITE,
+  STROBE_RED,
+  STROBE_WHITE,
+  STROBE_WHITE,
+  STROBE_RED,
+  STROBE_WHITE,
+  STROBE_BLACK,
+];
+/** Seconds after which a burst goes idle even if the pattern hasn't been
+ *  stepped through yet (a low frame rate). */
+export const STROBE_MAX_SEC = 0.35;
 /** Minimum seconds between two triggers — a hit inside this refractory
- *  window is dropped rather than restarting the flash early, so a burst of
- *  treble onsets reads as one clean flash, not a strobing flicker. */
-export const STROBE_MIN_GAP = 0.12;
+ *  window is dropped rather than restarting the burst early, so a burst of
+ *  treble onsets reads as one pattern, not an ever-restarting white frame.
+ *  Longer than the pattern takes at a common display rate, so two bursts
+ *  never overlap. */
+export const STROBE_MIN_GAP = 0.2;
 
 export interface StrobeState {
-  /** Seconds since the last trigger — see strobePhase. */
+  /** Seconds since the last trigger. */
   age: number;
+  /** Render frames since the last trigger — indexes STROBE_PATTERN. */
+  frame: number;
   /** The triggering hit's amplitude (0..1), scaled by the `strobe` setting
    *  before upload — see uStrobeAmp in render(). */
   amp: number;
 }
 
 export function createStrobeState(): StrobeState {
-  // age starts well past STROBE_DUR so a fresh scene never flashes on frame 1.
-  return { age: 10, amp: 0 };
+  // age/frame start well past the pattern so a fresh scene never flashes on
+  // frame 1.
+  return { age: 10, frame: STROBE_PATTERN.length, amp: 0 };
 }
 
-/** Fires a fresh flash at the given amplitude, unless the refractory window
+/** Fires a fresh burst at the given amplitude, unless the refractory window
  *  (STROBE_MIN_GAP since the last trigger) hasn't elapsed yet, in which case
  *  this is a no-op. Returns whether it fired. */
 export function triggerStrobe(st: StrobeState, amp: number): boolean {
   if (st.age < STROBE_MIN_GAP) return false;
   st.age = 0;
+  st.frame = 0;
   st.amp = amp;
   return true;
 }
 
-/** Ages `st` in place by dtSec. */
+/** Advances `st` by one render frame of dtSec seconds. Call once per
+ *  rendered frame *after* reading strobeFrame for that frame, so the trigger
+ *  frame itself shows the pattern's first entry. */
 export function advanceStrobe(st: StrobeState, dtSec: number): void {
   st.age += dtSec;
+  st.frame += 1;
 }
 
-/** [0,1] progress through the flash's STROBE_DUR-second life: 0 the instant
- *  it fires, 1 once it's fully decayed (and clamped there, so an idle strobe
- *  reads as a steady 1 rather than growing without bound). */
-export function strobePhase(st: StrobeState): number {
-  return Math.min(1, Math.max(0, st.age / STROBE_DUR));
+/** The colour this render frame shows: a STROBE_PATTERN entry while the
+ *  burst is live, STROBE_IDLE once the pattern has been stepped through or
+ *  STROBE_MAX_SEC has passed, whichever comes first. */
+export function strobeFrame(st: StrobeState): number {
+  if (st.age >= STROBE_MAX_SEC || st.frame >= STROBE_PATTERN.length) return STROBE_IDLE;
+  return STROBE_PATTERN[st.frame];
 }
 
 // ---------------------------------------------------------------------------
@@ -1061,15 +1145,27 @@ const CENTROID_HUE = 0.08;
  *  Currents style. */
 const SPARK_GAIN = 5.0;
 /** Lightning style: gains on the bolt layer's core (white) and glow (spark
- *  tint) channels, its afterglow (strikeEnvelope's slow-decay share), and
- *  the ribbon half-width range in layer texels across sparkleSize. */
+ *  tint) channels, its afterglow (strikeEnvelope's slow-decay share), the
+ *  ribbon half-width range in layer texels across sparkleSize, and the bolt
+ *  length range in screen heights across sparkleSize (past 1 the bolt runs
+ *  off the screen at both ends — see boltEndpoints). */
 const BOLT_CORE_GAIN = 6.0;
 const BOLT_GLOW_GAIN = 3.0;
-const BOLT_AFTERGLOW = 0.6;
-const BOLT_WIDTH_MIN = 4.0;
-const BOLT_WIDTH_MAX = 14.0;
-const BOLT_LEN_MIN = 0.25;
-const BOLT_LEN_MAX = 0.6;
+const BOLT_AFTERGLOW = 0.35;
+const BOLT_WIDTH_MIN = 5.0;
+const BOLT_WIDTH_MAX = 12.0;
+const BOLT_LEN_MIN = 0.9;
+const BOLT_LEN_MAX = 1.7;
+/** The light a bolt throws on the liquid around it: the bolt layer's glow
+ *  channel read at this mip level (a wide blur of the layer, in powers of two
+ *  of its texels) and scaled by this gain, multiplying the line and halo
+ *  brightness under it — see boltLight in the display shader. */
+const BOLT_LIGHT_LOD = 5.0;
+const BOLT_LIGHT_GAIN = 4.0;
+/** Amplitude and bolt count a section drop fires with — the lightning the
+ *  strobe rides on a drop, on top of the treble-onset strikes. */
+const BOLT_DROP_AMP = 1.4;
+const BOLT_DROP_COUNT = 2;
 /** dye.r range the final tone map's white-hot core (uHotWhite) ramps over —
  *  below HOT_LO a pixel is never pulled toward true white regardless of the
  *  setting; at/above HOT_HI it's fully eligible. */
@@ -1091,7 +1187,7 @@ uniform sampler2D uEdge;
 uniform float uDomainAspect;
 uniform vec2 uEmitScreen;
 uniform sampler2D uBolts;
-uniform float uStrobeT;
+uniform float uStrobeMode;
 uniform float uStrobeAmp;
 uniform float uFoldA;
 uniform float uFoldB;
@@ -1336,18 +1432,31 @@ void main() {
   // out.
   float buildMul = max(1.0 + uBuildGlow * 0.3 * (uSectionIntensity - 0.5), 0.2);
 
-  float lineGain = ${LINE_GAIN.toFixed(2)} * (1.0 + uBeatFlash * 0.35 * uBeatPulse) * (1.0 + 0.4 * shock);
-  vec3 col = BG + c * edge * lineGain * sparkle + c * glow * uEdgeGlow * ${GLOW_GAIN.toFixed(2)} * (1.0 + 0.5 * flash) * buildMul + c * dye.r * ${FILL_GAIN.toFixed(2)};
+  // Lightning: the bolt layer (fluidBolts.ts) lives in screen space, so it's
+  // sampled at the raw screen uv, not through the fold (the scene fires the
+  // fold's mirror copies itself — see boltMirrors). Read before the line is
+  // composed because a bolt also *lights* the liquid: a wide blur of its
+  // glow (a coarse mip of the layer) multiplies the line and halo brightness
+  // under it, so the dye around a strike flares in its own neon colour.
+  vec2 bolt = vec2(0.0);
+  float boltLight = 0.0;
+  // The glow stays saturated (the core is white already) so a bolt reads as
+  // neon, not a grey smear.
+  vec3 boltCol = mix(sparkCol, vec3(1.0), 0.15);
+  if (sparkleStyleI == 4) {
+    bolt = texture(uBolts, vUv).rg;
+    boltLight = textureLod(uBolts, vUv, ${BOLT_LIGHT_LOD.toFixed(1)}).g * ${BOLT_LIGHT_GAIN.toFixed(2)};
+  }
+
+  float lineGain = ${LINE_GAIN.toFixed(2)} * (1.0 + uBeatFlash * 0.35 * uBeatPulse) * (1.0 + 0.4 * shock) * (1.0 + boltLight);
+  vec3 col = BG + c * edge * lineGain * sparkle + c * glow * uEdgeGlow * ${GLOW_GAIN.toFixed(2)} * (1.0 + 0.5 * flash) * buildMul * (1.0 + boltLight) + c * dye.r * ${FILL_GAIN.toFixed(2)};
   // Sparks REPLACE rather than add, so a Negative/Complement tint reads as a
   // true contrast against the line rather than a wash on top of it.
   col = mix(col, mix(sparkCol, vec3(1.0), 0.5) * ${SPARK_GAIN.toFixed(2)}, spark);
-  // Lightning: the bolt layer (fluidBolts.ts) sampled through the same fold
-  // as the dye, so every fold mirrors the bolts; white core plus the spark
-  // tint as glow, added on top.
-  if (sparkleStyleI == 4) {
-    vec2 bolt = texture(uBolts, s).rg;
-    col += vec3(1.0) * bolt.r * ${BOLT_CORE_GAIN.toFixed(2)} + mix(sparkCol, vec3(1.0), 0.4) * bolt.g * ${BOLT_GLOW_GAIN.toFixed(2)};
-  }
+  // The bolt itself on top: a white core plus the spark tint as glow, and a
+  // faint haze of the light where there is no line to catch it.
+  col += boltCol * boltLight * 0.12;
+  col += vec3(1.0) * bolt.r * ${BOLT_CORE_GAIN.toFixed(2)} + boltCol * bolt.g * ${BOLT_GLOW_GAIN.toFixed(2)};
   // The shockwave ring reads on the halo too, and the drop flash lifts the
   // whole screen a touch rather than only the line/halo terms above.
   col += c * shock * 0.1;
@@ -1373,19 +1482,23 @@ void main() {
   float hot = smoothstep(${HOT_LO.toFixed(2)}, ${HOT_HI.toFixed(2)}, dye.r) * uHotWhite;
   mapped = mix(mapped, vec3(1.0 - exp(-lum)), hot);
 
-  // Strobe (Light group): a whole-screen white -> red -> black flash on a
-  // treble hit or a drop, applied AFTER the tone map so it always reads as a
-  // true flash regardless of what's underneath — see
-  // triggerStrobe/advanceStrobe/strobePhase in fluid.ts for how uStrobeT/
-  // uStrobeAmp are filled each frame. At uStrobeT >= 1.0 (idle) every weight
-  // below is 0, so an idle strobe costs nothing visible.
-  float st = uStrobeT; float sa = uStrobeAmp;
-  float sWhite = 1.0 - smoothstep(0.05, 0.45, st);
-  float sRed = smoothstep(0.2, 0.4, st) * (1.0 - smoothstep(0.55, 0.7, st));
-  float sBlack = smoothstep(0.6, 0.75, st) * (1.0 - smoothstep(0.9, 1.0, st));
-  mapped = mix(mapped, vec3(1.0), sWhite * sa);
-  mapped = mix(mapped, vec3(1.0, 0.04, 0.03) * max(lum, 0.6), sRed * sa);
-  mapped *= 1.0 - 0.85 * sBlack * sa;
+  // Strobe (Light group): one hard-cut whole-screen frame — white, red or
+  // black (STROBE_PATTERN in fluid.ts, stepped per render frame) — applied
+  // AFTER the tone map so it always reads as a true flash regardless of
+  // what's underneath. uStrobeMode is the frame's colour index, or negative
+  // when idle (see strobeFrame), so an idle strobe costs nothing visible.
+  if (uStrobeMode > -0.5) {
+    float sa = uStrobeAmp;
+    if (uStrobeMode < 0.5) {
+      mapped = mix(mapped, vec3(1.0), sa);
+    } else if (uStrobeMode < 1.5) {
+      // Red keeps the liquid's own shape (lum) so the frame reads as the
+      // scene turning red, not a red card over it.
+      mapped = mix(mapped, vec3(1.0, 0.03, 0.02) * max(lum * 1.5, 0.7), sa);
+    } else {
+      mapped *= 1.0 - 0.9 * sa;
+    }
+  }
 
   outColor = vec4(mapped, 1.0);
 }
@@ -1434,7 +1547,8 @@ function createFluidScene(): Scene {
       const mirror = (symmetryToMirror(symDefault) ?? MIRROR_KALEIDO) as MirrorMode;
       const size = simResolutionFor(ctx.quality.detail, gl.drawingBufferWidth, gl.drawingBufferHeight, mirror);
       sim = createFluidSim(gl, quadVao, size, format);
-      bolts = createFluidBolts(gl, size.dyeW, size.dyeH, format);
+      const [boltW, boltH] = boltLayerSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
+      bolts = createFluidBolts(gl, boltW, boltH, format);
       boltsLoc = gl.getUniformLocation(displayProg.program, "uBolts");
       lastFrameTime = null;
       puff = createPuffState();
@@ -1484,9 +1598,12 @@ function createFluidScene(): Scene {
       const warp = resolveSceneSetting(ID, settingFor("warp"));
 
       const want = simResolutionFor(ctx.quality.detail, gl.drawingBufferWidth, gl.drawingBufferHeight, mirror);
-      if (!sameSimSize(want, sim.size)) {
-        sim.resize(want);
-        bolts?.resize(want.dyeW, want.dyeH);
+      if (!sameSimSize(want, sim.size)) sim.resize(want);
+      // The bolt layer follows the *display*, not the sim (see fluidBolts.ts's
+      // header); resize is a no-op when the size hasn't changed.
+      if (bolts) {
+        const [boltW, boltH] = boltLayerSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
+        bolts.resize(boltW, boltH);
       }
 
       // advancePuff's boolean return is the discrete "fired this frame" edge
@@ -1521,30 +1638,50 @@ function createFluidScene(): Scene {
       const dtSim = warpedDt(dt, frame.energy, warp);
       sim.step({ dt: dtSim, curl, dissipation, viscosity, energy: frame.energy, splats });
 
-      // Lightning (Sparkle style 4): strikes on a strong treble onset, rooted
-      // on the jet column (boltEndpoints), drawn into the bolt layer before
-      // the display pass samples it. The extra strikes a high Sparkle
-      // setting adds skip the refractory so they land on the same hit.
+      // Lightning (Sparkle style 4): strikes on a strong treble onset or a
+      // drop, threaded through the liquid in screen space (boltEndpoints)
+      // with the copies the current fold calls for (boltMirrors), drawn into
+      // the bolt layer before the display pass samples it. Every strike after
+      // the first on a hit skips the refractory so they all land together.
       if (bolts) {
         const sparkle = resolveSceneSetting(ID, settingFor("sparkle"));
         const sparkleSize = resolveSceneSetting(ID, settingFor("sparkleSize"));
         const sparkleSpeed = resolveSceneSetting(ID, settingFor("sparkleSpeed"));
         const lightning = Math.round(resolveSceneSetting(ID, settingFor("sparkleStyle"))) === 4;
-        if (lightning && anim.highOnset && anim.highPulse > 0.35) {
-          const count = 1 + Math.round(Math.max(0, sparkle - 0.5) * 4);
+        const aspect = gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight);
+        // The display's fold is what decides which mirror copies a bolt needs
+        // — in Auto that's the drifting fold state's current mode, not the
+        // sim domain `mirror`.
+        const shownMirror = (manualMirror ?? fold.modeA) as MirrorMode;
+        let count = 0;
+        let amp = 0;
+        let strobeAmp = 0;
+        if (lightning && anim.dropOnset) {
+          count = BOLT_DROP_COUNT;
+          amp = BOLT_DROP_AMP;
+          strobeAmp = 1;
+        } else if (lightning && anim.highOnset && anim.highPulse > 0.35) {
+          // One bolt per hit at the default Sparkle, a second one at the top
+          // of the range — each is multiplied by the fold's copies, and a
+          // screen of a dozen bolts stops reading as a strike.
+          count = 1 + Math.round(Math.max(0, sparkle - 0.5) * 2);
+          amp = (0.6 + 0.6 * anim.highPulse) * (0.5 + sparkle);
+          strobeAmp = 0.5 + 0.5 * anim.highPulse;
+        }
+        if (count > 0) {
           const len = BOLT_LEN_MIN + (BOLT_LEN_MAX - BOLT_LEN_MIN) * sparkleSize;
-          const amp = (0.6 + 0.6 * anim.highPulse) * (0.5 + sparkle);
           let struck = false;
           for (let i = 0; i < count; i++) {
-            const [ax, ay, bx, by] = boltEndpoints(Math.random, mirror, len);
-            if (bolts.strike(ax, ay, bx, by, amp, i > 0)) struck = true;
+            const copies = boltMirrors(shownMirror, aspect, boltEndpoints(Math.random, mirror, aspect, len));
+            for (const [ax, ay, bx, by] of copies) {
+              if (bolts.strike(ax, ay, bx, by, amp, struck)) struck = true;
+            }
           }
           // The strobe belongs to the lightning: it fires only with a bolt.
-          if (struck) triggerStrobe(strobe, 0.5 + 0.5 * anim.highPulse);
+          if (struck) triggerStrobe(strobe, strobeAmp);
         }
-        advanceStrobe(strobe, dt);
         bolts.tick(dt, BOLT_AFTERGLOW, sparkleSpeed);
-        bolts.draw(BOLT_WIDTH_MIN + (BOLT_WIDTH_MAX - BOLT_WIDTH_MIN) * sparkleSize);
+        bolts.draw(BOLT_WIDTH_MIN + (BOLT_WIDTH_MAX - BOLT_WIDTH_MIN) * sparkleSize, aspect);
       }
 
       displayProg.use();
@@ -1593,15 +1730,18 @@ function createFluidScene(): Scene {
       displayProg.setFv("uShockAge", shock.age);
       displayProg.setFv("uShockAmp", shock.amp);
 
-      // Light group: Strobe — a single white/red/black flash that rides each
-      // lightning strike (triggered in the Lightning block above, so it only
-      // exists in that sparkle style); see triggerStrobe/advanceStrobe/
-      // strobePhase. uStrobeAmp folds the `strobe` setting itself into the
-      // strike's own amplitude, so a low Strobe setting keeps the effect dim
-      // without touching STROBE_DUR.
+      // Light group: Strobe — the hard-cut white/red/black frames that ride
+      // each lightning strike (triggered in the Lightning block above, so it
+      // only exists in that sparkle style); see triggerStrobe/advanceStrobe/
+      // strobeFrame. This frame's colour is read *before* the state advances
+      // so the trigger frame shows the pattern's first entry. uStrobeAmp
+      // folds the `strobe` setting itself into the strike's own amplitude, so
+      // a low Strobe setting keeps the frames translucent rather than
+      // shortening the burst.
       const strobeSetting = resolveSceneSetting(ID, settingFor("strobe"));
-      displayProg.setF("uStrobeT", strobePhase(strobe));
+      displayProg.setF("uStrobeMode", strobeFrame(strobe));
       displayProg.setF("uStrobeAmp", strobe.amp * strobeSetting);
+      advanceStrobe(strobe, dt);
 
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, sim.velTexture());

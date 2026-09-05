@@ -58,12 +58,22 @@ import {
   createShockState,
   triggerShock,
   advanceShocks,
-  STROBE_DUR,
   STROBE_MIN_GAP,
+  STROBE_MAX_SEC,
+  STROBE_PATTERN,
+  STROBE_IDLE,
+  STROBE_WHITE,
+  STROBE_RED,
+  STROBE_BLACK,
   createStrobeState,
   triggerStrobe,
   advanceStrobe,
-  strobePhase,
+  strobeFrame,
+  BOLT_THROUGH_SPREAD,
+  BOLT_LAYER_SCALE,
+  boltEndpoints,
+  boltMirrors,
+  boltLayerSize,
   type EmitterInputs,
 } from "../src/render/scenes/fluid.ts";
 import type { SignalId } from "../src/render/signals.ts";
@@ -978,11 +988,11 @@ describe("Light group settings", () => {
     expect(beatFlash.reads).toBeUndefined();
   });
 
-  it("strobe is manual (no auto), claims no signal of its own (it rides the lightning strikes), and defaults to 0.35", () => {
+  it("strobe is manual (no auto), claims no signal of its own (it rides the lightning strikes), and defaults to 0.6", () => {
     const strobe = SETTINGS.find((s) => s.key === "strobe")!;
     expect(strobe.auto).toBeUndefined();
     expect(strobe.reads).toBeUndefined();
-    expect(strobe.default).toBe(0.35);
+    expect(strobe.default).toBe(0.6);
   });
 });
 
@@ -1053,21 +1063,23 @@ describe("Shockwave pool", () => {
 
 // ---------------------------------------------------------------------------
 // Strobe (Light group's `strobe` setting) — see fluid.ts's
-// createStrobeState/triggerStrobe/advanceStrobe/strobePhase, and the display
-// shader's uStrobeT/uStrobeAmp block applied after the tone map.
+// createStrobeState/triggerStrobe/advanceStrobe/strobeFrame, and the display
+// shader's uStrobeMode/uStrobeAmp block applied after the tone map.
 // ---------------------------------------------------------------------------
 
 describe("Strobe", () => {
-  it("createStrobeState starts inactive (age past STROBE_DUR, amp 0)", () => {
+  it("createStrobeState starts idle (no frame showing, amp 0)", () => {
     const st = createStrobeState();
-    expect(st.age).toBeGreaterThan(STROBE_DUR);
+    expect(strobeFrame(st)).toBe(STROBE_IDLE);
+    expect(st.age).toBeGreaterThanOrEqual(STROBE_MAX_SEC);
     expect(st.amp).toBe(0);
   });
 
-  it("triggerStrobe fires and resets age to 0 when clear of the refractory window", () => {
+  it("triggerStrobe fires and resets age and frame to 0 when clear of the refractory window", () => {
     const st = createStrobeState();
     expect(triggerStrobe(st, 0.8)).toBe(true);
     expect(st.age).toBe(0);
+    expect(st.frame).toBe(0);
     expect(st.amp).toBe(0.8);
   });
 
@@ -1090,27 +1102,148 @@ describe("Strobe", () => {
     expect(st.amp).toBe(1.0);
   });
 
-  it("strobePhase is 0 the instant a flash fires and 1 once STROBE_DUR has elapsed (clamped, never overshooting)", () => {
-    const st = createStrobeState();
-    triggerStrobe(st, 1.0);
-    expect(strobePhase(st)).toBe(0);
-    advanceStrobe(st, STROBE_DUR);
-    expect(strobePhase(st)).toBe(1);
-    advanceStrobe(st, 10);
-    expect(strobePhase(st)).toBe(1);
+  it("STROBE_PATTERN opens on a white frame and is mostly white, with red and black cut in equally (about 60/20/20)", () => {
+    expect(STROBE_PATTERN[0]).toBe(STROBE_WHITE);
+    const count = (c: number) => STROBE_PATTERN.filter((f) => f === c).length;
+    const n = STROBE_PATTERN.length;
+    expect(count(STROBE_WHITE) + count(STROBE_RED) + count(STROBE_BLACK)).toBe(n);
+    expect(count(STROBE_WHITE) / n).toBeCloseTo(0.6, 1);
+    expect(count(STROBE_RED) / n).toBeCloseTo(0.2, 1);
+    expect(count(STROBE_BLACK) / n).toBeCloseTo(0.2, 1);
+    // No two red or black frames back to back: each cut is a single frame.
+    for (let i = 1; i < n; i++) {
+      if (STROBE_PATTERN[i] !== STROBE_WHITE) expect(STROBE_PATTERN[i - 1]).toBe(STROBE_WHITE);
+    }
   });
 
-  it("strobePhase rises monotonically between a fire and STROBE_DUR", () => {
+  it("strobeFrame steps through STROBE_PATTERN one entry per render frame, then goes idle", () => {
     const st = createStrobeState();
     triggerStrobe(st, 1.0);
-    let prev = -Infinity;
-    const step = STROBE_DUR / 20;
-    for (let i = 0; i < 20; i++) {
-      advanceStrobe(st, step);
-      const phase = strobePhase(st);
-      expect(phase).toBeGreaterThanOrEqual(prev);
-      prev = phase;
+    const seen: number[] = [];
+    for (let i = 0; i < STROBE_PATTERN.length; i++) {
+      seen.push(strobeFrame(st));
+      advanceStrobe(st, 1 / 60);
     }
-    expect(prev).toBeCloseTo(1, 6);
+    expect(seen).toEqual([...STROBE_PATTERN]);
+    expect(strobeFrame(st)).toBe(STROBE_IDLE);
+    advanceStrobe(st, 10);
+    expect(strobeFrame(st)).toBe(STROBE_IDLE);
+  });
+
+  it("strobeFrame goes idle once STROBE_MAX_SEC has passed even if the pattern is not finished (a slow frame rate)", () => {
+    const st = createStrobeState();
+    triggerStrobe(st, 1.0);
+    expect(strobeFrame(st)).toBe(STROBE_WHITE);
+    advanceStrobe(st, STROBE_MAX_SEC);
+    expect(st.frame).toBeLessThan(STROBE_PATTERN.length);
+    expect(strobeFrame(st)).toBe(STROBE_IDLE);
+  });
+
+  it("STROBE_MIN_GAP outlasts the whole pattern at a common display rate, so two bursts never overlap", () => {
+    expect(STROBE_MIN_GAP).toBeGreaterThanOrEqual(STROBE_PATTERN.length / 60);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lightning placement — see fluid.ts's boltEndpoints/boltMirrors/
+// boltLayerSize; the bolt layer itself is fluidBolts.ts (tests/bolt.test.ts).
+// ---------------------------------------------------------------------------
+
+describe("boltEndpoints", () => {
+  const aspect = 16 / 9;
+  const rng = (seed: number) => {
+    let s = seed;
+    return () => {
+      s = (s * 1664525 + 1013904223) % 4294967296;
+      return s / 4294967296;
+    };
+  };
+
+  it("spans exactly the requested length, in screen heights", () => {
+    for (const mirror of ALL_MIRROR_MODES) {
+      for (let k = 0; k < 20; k++) {
+        const len = 0.9 + k * 0.04;
+        const [ax, ay, bx, by] = boltEndpoints(rng(k + 1), mirror, aspect, len);
+        expect(Math.hypot(bx - ax, by - ay)).toBeCloseTo(len, 6);
+      }
+    }
+  });
+
+  it("threads through a point within BOLT_THROUGH_SPREAD of the emitter's screen position (scaled by aspect along x)", () => {
+    for (const mirror of ALL_MIRROR_MODES) {
+      const [ex, ey] = emitterScreenPosition(mirror);
+      for (let k = 0; k < 40; k++) {
+        const [ax, ay, bx, by] = boltEndpoints(rng(100 + k), mirror, aspect, 1.2);
+        // Closest point on the segment to the emitter must be within the spread.
+        const dx = bx - ax;
+        const dy = by - ay;
+        const t = Math.max(0, Math.min(1, ((ex * aspect - ax) * dx + (ey - ay) * dy) / (dx * dx + dy * dy)));
+        const cx = ax + dx * t;
+        const cy = ay + dy * t;
+        expect(Math.abs(cx - ex * aspect)).toBeLessThanOrEqual(BOLT_THROUGH_SPREAD * aspect + 1e-6);
+        expect(Math.abs(cy - ey)).toBeLessThanOrEqual(BOLT_THROUGH_SPREAD + 1e-6);
+      }
+    }
+  });
+
+  it("is mostly vertical: the bolt's vertical extent beats its horizontal extent", () => {
+    for (let k = 0; k < 40; k++) {
+      const [ax, ay, bx, by] = boltEndpoints(rng(200 + k), MIRROR_KALEIDO, aspect, 1);
+      expect(Math.abs(by - ay)).toBeGreaterThan(Math.abs(bx - ax));
+    }
+  });
+
+  it("does not clamp to the screen: a long bolt runs off both ends", () => {
+    let overshoot = 0;
+    for (let k = 0; k < 40; k++) {
+      const [, ay, , by] = boltEndpoints(rng(300 + k), MIRROR_KALEIDO, aspect, 1.7);
+      if (Math.min(ay, by) < 0 && Math.max(ay, by) > 1) overshoot++;
+    }
+    expect(overshoot).toBeGreaterThan(20);
+  });
+});
+
+describe("boltMirrors", () => {
+  const aspect = 2;
+  const ends: [number, number, number, number] = [0.3, -0.1, 0.5, 1.2];
+  const expectEnds = (actual: readonly number[], wanted: readonly number[]) => {
+    expect(actual).toHaveLength(4);
+    for (let i = 0; i < 4; i++) expect(actual[i]).toBeCloseTo(wanted[i], 9);
+  };
+
+  it("keeps the original bolt first in every mode", () => {
+    for (const mirror of ALL_MIRROR_MODES) expect(boltMirrors(mirror, aspect, ends)[0]).toEqual(ends);
+  });
+
+  it("Off and Radial keep a single bolt", () => {
+    expect(boltMirrors(MIRROR_OFF, aspect, ends)).toHaveLength(1);
+    expect(boltMirrors(MIRROR_RADIAL, aspect, ends)).toHaveLength(1);
+  });
+
+  it("Left-right adds the x mirror about the screen's middle (aspect / 2)", () => {
+    const copies = boltMirrors(MIRROR_LR, aspect, ends);
+    expect(copies).toHaveLength(2);
+    expectEnds(copies[1], [aspect - 0.3, -0.1, aspect - 0.5, 1.2]);
+  });
+
+  it("Top-bottom adds the y mirror about mid-height", () => {
+    const copies = boltMirrors(MIRROR_TB, aspect, ends);
+    expect(copies).toHaveLength(2);
+    expectEnds(copies[1], [0.3, 1.1, 0.5, -0.2]);
+  });
+
+  it("Kaleidoscope adds all three mirrors, all distinct", () => {
+    const copies = boltMirrors(MIRROR_KALEIDO, aspect, ends);
+    expect(copies).toHaveLength(4);
+    expect(new Set(copies.map((c) => c.join(","))).size).toBe(4);
+    expectEnds(copies[3], [aspect - 0.3, 1.1, aspect - 0.5, -0.2]);
+  });
+});
+
+describe("boltLayerSize", () => {
+  it("is BOLT_LAYER_SCALE of the display, rounded up, never below one texel", () => {
+    expect(boltLayerSize(1280, 720)).toEqual([Math.ceil(1280 * BOLT_LAYER_SCALE), Math.ceil(720 * BOLT_LAYER_SCALE)]);
+    expect(boltLayerSize(0, 0)).toEqual([1, 1]);
+    expect(boltLayerSize(1, 1)).toEqual([1, 1]);
   });
 });

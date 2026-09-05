@@ -1,46 +1,69 @@
 /**
  * The Fluid scene's lightning: a strike pool of jagged bolt trees (the shape
  * and timing math is `../bolt.ts`, lifted from Storm) drawn into their own
- * additive layer in sim-uv space, so the dye's fold/mirror transform (which
- * samples the display in the same `s` it samples the dye) mirrors the bolts
- * along with everything else.
+ * additive layer in **screen space** — not the sim's folded uv. An earlier
+ * version drew them in sim uv and let the display's fold mirror them, but a
+ * Radial/Kaleidoscope fold chops one wedge's bolt into tiny mirrored
+ * hairlines; a bolt has to cross the whole screen through the liquid to read
+ * as lightning, so the scene now fires the mirror copies itself (see
+ * boltMirrors in fluid.ts) and the display samples this layer at plain vUv.
  *
  * Two halves, the same split as fluidSim.ts's pure/GL divide:
  *  - `createBoltPool` is the JS-only strike pool — slots' age/amplitude/seed/
- *    strength and each slot's drawn path, a refractory window, oldest-slot
- *    reuse — so `tests/bolt.test.ts` can exercise it without a GL context.
- *  - `createFluidBolts` wraps a pool with the GL side: one small render
- *    target (`.r` = core, `.g` = glow — the same profile as Storm's
- *    BOLT_FRAG), a program that expands the ribbon in layer-texel space
- *    instead of screen space, and the vertex buffer/VAO that pool.paths
- *    uploads into.
+ *    strength, each slot's endpoints and drawn path, a refractory window,
+ *    oldest-slot reuse, and the "boil" (a live bolt is re-jagged every
+ *    BOLT_BOIL_SEC so it writhes the way hand-drawn lightning does) — so
+ *    `tests/bolt.test.ts` can exercise it without a GL context.
+ *  - `createFluidBolts` wraps a pool with the GL side: one render target at a
+ *    fraction of the display's size (`.r` = core, `.g` = glow), a program
+ *    that expands the ribbon in layer-texel space, and the vertex buffer/VAO
+ *    that pool.paths uploads into. The target carries mipmaps (rebuilt after
+ *    every draw) so the display can read a heavily blurred copy of the layer
+ *    as the light a bolt throws onto the dye around it.
  *
- * The layer is identity-projected (`pos.xy` is already sim uv in [0,1]), so
- * there is no camera to route the tangent through the way Storm's BOLT_VERT
- * does — the tangent's xy is scaled by the layer's own texel size instead of
- * a projected screen direction, which is what turns a unit tangent into a
- * texel-space normal to offset the ribbon along.
+ * Coordinates: bolt geometry lives in *screen-aspect space* — x in
+ * [0, aspect], y in [0, 1], aspect = display width / height — so
+ * jagPolyline's kinks are isotropic on screen instead of being stretched
+ * along x on a wide display. The vertex shader divides by `uSpace` =
+ * (aspect, 1) to land in the layer's uv. Endpoints are deliberately *not*
+ * clamped to the screen: a bolt whose ends overshoot the edges reads as
+ * entering from outside the frame, which is the point.
  */
 import { BOLT_RIBBON_VERTS, BOLT_VERT_FLOATS, buildBoltTree, strikeEnvelope } from "../bolt.ts";
 import { createProgram } from "../gl.ts";
 import type { SimFormat } from "./fluidSim.ts";
 
-/** Bolt slots the layer can hold in flight at once. */
-export const MAX_BOLTS = 6;
+/** Bolt slots the layer can hold in flight at once — enough for a multi-bolt
+ *  treble hit times the four copies a Kaleidoscope fold asks for (see
+ *  boltMirrors in fluid.ts). */
+export const MAX_BOLTS = 12;
 /** Shortest gap between strikes before a second one is dropped, unless
  *  `force` overrides it — the same idea as Storm's STRIKE_REFRACTORY_SEC,
  *  folding a beat and an onset that land on adjacent frames into one bolt. */
 export const BOLT_REFRACTORY = 0.06;
-
-function clamp01(x: number): number {
-  return Math.max(0, Math.min(1, x));
-}
+/** Seconds between re-jags of a live bolt's tree (the boil). Around two to
+ *  three display frames: fast enough to writhe, slow enough that each shape
+ *  is actually seen. */
+export const BOLT_BOIL_SEC = 0.045;
+/** Strength below which a fading bolt stops boiling — a dim afterglow that
+ *  keeps changing shape reads as noise, not lightning. */
+export const BOLT_BOIL_MIN = 0.15;
+/** Strength below which a bolt is switched off outright instead of fading
+ *  further: the exponential tail of strikeEnvelope would otherwise linger as
+ *  a grey ghost of the bolt for a long beat after the strike, and a drawn
+ *  bolt is either on the page or gone. */
+export const BOLT_CUTOFF = 0.12;
+/** Narrowest a ribbon half-width is allowed to be, in layer texels, wherever
+ *  the width is non-zero — below about a texel and a half the hard-edged core
+ *  aliases into a dotted line. Exactly-zero widths (the taper tips that let
+ *  one strip run through the whole tree) stay zero. */
+export const BOLT_MIN_HALF_PX = 1.5;
 
 /** The JS-only strike pool: endpoints, amplitude, age and each slot's drawn
  *  bolt tree, kept in flat arrays shaped for a GL upload but usable (and
  *  tested) with no GL at all. Mirrors Storm's createStrikePool, minus the
  *  lobe placement (the Fluid scene's callers pick endpoints themselves) and
- *  in 2D: every endpoint is a sim-uv coordinate, clamped into [0,1]^2. */
+ *  in 2D screen-aspect space (see the file header). */
 export interface BoltPool {
   /** Seconds since each slot last fired; large means "long faded". */
   readonly ages: Float32Array;
@@ -50,17 +73,23 @@ export interface BoltPool {
   readonly amps: Float32Array;
   /** Per-slot seed strikeEnvelope's return strokes are placed with. */
   readonly seeds: Float32Array;
+  /** Each slot's endpoints, ax ay bx by, kept so the boil can rebuild the
+   *  tree between the same two points. */
+  readonly ends: Float32Array;
   /** Every slot's drawn bolt tree, back to back: slot i owns the
    *  BOLT_RIBBON_VERTS ribbon vertices (BOLT_VERT_FLOATS floats each)
    *  starting at i * BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS. */
   readonly paths: Float32Array;
   /** 1 where a slot's path has changed since it was last uploaded to GL. */
   readonly dirty: Uint8Array;
-  /** Fires a bolt from (ax,ay) to (bx,by) (sim uv, clamped to [0,1]^2) in
-   *  whichever slot has been fading the longest. Returns false (and does
+  /** Fires a bolt from (ax,ay) to (bx,by) (screen-aspect space, unclamped)
+   *  in whichever slot has been fading the longest. Returns false (and does
    *  nothing) inside the refractory window unless `force`. */
   strike(ax: number, ay: number, bx: number, by: number, amp: number, force?: boolean): boolean;
-  /** Ages every slot and recomputes its strength from strikeEnvelope. */
+  /** Ages every slot, recomputes its strength from strikeEnvelope (0 once
+   *  that falls under BOLT_CUTOFF), and re-jags (boils) every slot still
+   *  brighter than BOLT_BOIL_MIN once BOLT_BOIL_SEC has passed since its
+   *  last shape. */
   tick(dtSec: number, afterglow: number, flicker: number): void;
 }
 
@@ -72,15 +101,26 @@ export function createBoltPool(rng: () => number = Math.random): BoltPool {
   const amp = new Float32Array(MAX_BOLTS); // 0 = inactive
   const seed = new Float32Array(MAX_BOLTS);
   const strength = new Float32Array(MAX_BOLTS);
+  const ends = new Float32Array(MAX_BOLTS * 4);
+  const sinceBoil = new Float32Array(MAX_BOLTS);
   const paths = new Float32Array(MAX_BOLTS * BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS);
   const dirty = new Uint8Array(MAX_BOLTS);
   let sinceLast = 1e6;
+
+  const rebuild = (slot: number): void => {
+    const a: [number, number, number] = [ends[slot * 4], ends[slot * 4 + 1], 0];
+    const b: [number, number, number] = [ends[slot * 4 + 2], ends[slot * 4 + 3], 0];
+    buildBoltTree(rng, a, b, paths, slot * BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS);
+    dirty[slot] = 1;
+    sinceBoil[slot] = 0;
+  };
 
   return {
     ages: age,
     strengths: strength,
     amps: amp,
     seeds: seed,
+    ends,
     paths,
     dirty,
     strike(ax: number, ay: number, bx: number, by: number, amp0: number, force = false): boolean {
@@ -91,10 +131,11 @@ export function createBoltPool(rng: () => number = Math.random): BoltPool {
       age[slot] = 0;
       amp[slot] = amp0;
       seed[slot] = rng() * 1000;
-      const a: [number, number, number] = [clamp01(ax), clamp01(ay), 0];
-      const b: [number, number, number] = [clamp01(bx), clamp01(by), 0];
-      buildBoltTree(rng, a, b, paths, slot * BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS);
-      dirty[slot] = 1;
+      ends[slot * 4] = ax;
+      ends[slot * 4 + 1] = ay;
+      ends[slot * 4 + 2] = bx;
+      ends[slot * 4 + 3] = by;
+      rebuild(slot);
       strength[slot] = amp0;
       return true;
     },
@@ -102,7 +143,11 @@ export function createBoltPool(rng: () => number = Math.random): BoltPool {
       sinceLast += dtSec;
       for (let i = 0; i < MAX_BOLTS; i++) {
         age[i] += dtSec;
-        strength[i] = amp[i] > 0 ? amp[i] * strikeEnvelope(age[i], seed[i], afterglow, flicker) : 0;
+        const s = amp[i] > 0 ? amp[i] * strikeEnvelope(age[i], seed[i], afterglow, flicker) : 0;
+        strength[i] = s < BOLT_CUTOFF ? 0 : s;
+        if (strength[i] <= BOLT_BOIL_MIN) continue;
+        sinceBoil[i] += dtSec;
+        if (sinceBoil[i] >= BOLT_BOIL_SEC) rebuild(i);
       }
     },
   };
@@ -111,16 +156,21 @@ export function createBoltPool(rng: () => number = Math.random): BoltPool {
 /** GL-facing bolt layer: a pool plus the render target and program it draws
  *  into. See the file header for the shape of the layer's texture. */
 export interface FluidBolts {
-  /** Fire a bolt from a to b (sim uv, [0,1]^2), amplitude ~0.5..1.5. Returns
-   *  false if refractory blocked it (force skips the refractory). */
+  /** Fire a bolt from a to b (screen-aspect space), amplitude ~0.5..1.5.
+   *  Returns false if refractory blocked it (force skips the refractory). */
   strike(ax: number, ay: number, bx: number, by: number, amp: number, force?: boolean): boolean;
   /** Age every bolt; strength = amp * strikeEnvelope(age, seed, afterglow, flicker). */
   tick(dtSec: number, afterglow: number, flicker: number): void;
-  /** Clear the layer and draw every live bolt into it additively. Leaves FBO
-   *  null, viewport restored, BLEND disabled, ARRAY_BUFFER/VAO unbound.
-   *  `widthPx` = ribbon half-width scale in layer texels. */
-  draw(widthPx: number): void;
+  /** Clear the layer, draw every live bolt into it additively and rebuild its
+   *  mipmaps. Leaves FBO null, viewport restored, BLEND disabled,
+   *  ARRAY_BUFFER/VAO/TEXTURE_2D unbound on the active unit. `widthPx` =
+   *  ribbon half-width scale in layer texels; `aspect` = the screen-aspect
+   *  space's width (display width / height) the geometry was built in. */
+  draw(widthPx: number, aspect: number): void;
   texture(): WebGLTexture | null;
+  /** The layer's current size in texels — what the scene compares against
+   *  the display size to decide when to resize. */
+  size(): { w: number; h: number };
   resize(w: number, h: number): void;
   dispose(): void;
   /** Pure-testable pool state (ages/strengths) for tests. */
@@ -139,7 +189,10 @@ interface BoltTarget {
  *  is running in half-float mode, RGBA8 otherwise — the same format/filter
  *  choice fluidSim.ts's own createTarget makes for its float-format targets,
  *  reimplemented locally since that helper isn't exported. Byte mode clamps
- *  to [0,1] on write, which is exactly the range core/glow live in. */
+ *  to [0,1] on write, which is exactly the range core/glow live in. The
+ *  mipmapped MIN_FILTER is what lets the display's textureLod read the
+ *  blurred layer as light thrown on the dye (16F formats are filterable in
+ *  WebGL2 core, so no extra extension is needed for it). */
 function createBoltTarget(gl: WebGL2RenderingContext, w: number, h: number, format: SimFormat): BoltTarget {
   const isHalf = format === "half";
   const tex = gl.createTexture();
@@ -149,10 +202,13 @@ function createBoltTarget(gl: WebGL2RenderingContext, w: number, h: number, form
   const glFormat = isHalf ? gl.RG : gl.RGBA;
   const type = isHalf ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
   gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, glFormat, type, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  // A complete mip chain from the start, so the first display frame's
+  // textureLod reads zeros rather than an incomplete texture.
+  gl.generateMipmap(gl.TEXTURE_2D);
 
   const fbo = gl.createFramebuffer();
   if (!fbo) {
@@ -182,11 +238,13 @@ function deleteBoltTarget(gl: WebGL2RenderingContext, t: BoltTarget): void {
 // per vertex.
 const BOLT_VERT = `#version 300 es
 precision highp float;
-layout(location = 0) in vec3 aPos;   // sim-uv xy (z unused, always 0)
+layout(location = 0) in vec3 aPos;   // screen-aspect space xy (z unused, always 0)
 layout(location = 1) in vec3 aTan;   // unit tangent of the path at this vertex
 layout(location = 2) in vec2 aShape; // x: signed half-width, y: fork level
 uniform vec2 uLayerSize;  // the bolt layer's own size, in texels
+uniform vec2 uSpace;      // (aspect, 1): the screen-aspect space's extent
 uniform float uWidthPx;   // ribbon half-width scale, in layer texels
+uniform float uMinHalfPx; // floor on a non-zero half-width (BOLT_MIN_HALF_PX)
 uniform float uStrength;  // this slot's strikeEnvelope value
 out float vSide;
 out float vStrength;
@@ -194,29 +252,33 @@ out float vStrength;
 // Branches read thinner than the channel they left, the same idea as
 // Storm's BOLT_VERT (there it also rides a user-facing "Bolt" setting;
 // here the base is fixed since this layer has no such slider).
-#define BOLT_BRANCH_BASE 0.35
+#define BOLT_BRANCH_BASE 0.45
 
 void main() {
   vec2 px = uLayerSize;
-  // The tangent is already in the layer's own identity-projected space, so
-  // its screen (texel) direction is just itself scaled by the texel size —
-  // no second projected point needed the way Storm derives one through a
+  vec2 uv = aPos.xy / uSpace;
+  // The tangent is in the same space as the position, so its texel-space
+  // direction is itself mapped into uv and scaled by the texel size — no
+  // second projected point needed the way Storm derives one through a
   // camera.
-  vec2 tanPx = aTan.xy * px;
+  vec2 tanPx = (aTan.xy / uSpace) * px;
   vec2 nrm = dot(tanPx, tanPx) > 1e-12 ? normalize(vec2(-tanPx.y, tanPx.x)) : vec2(1.0, 0.0);
   float fork = pow(max(BOLT_BRANCH_BASE, 1e-4), aShape.y);
   float halfPx = abs(aShape.x) * fork * uWidthPx;
+  // Thin branches would alias into dots; widen them to a drawable minimum
+  // but leave the zero-width taper tips (the strip's invisible joins) alone.
+  if (aShape.x != 0.0) halfPx = max(halfPx, uMinHalfPx);
   vSide = sign(aShape.x);
   vStrength = uStrength;
-  gl_Position = vec4((aPos.xy + nrm * sign(aShape.x) * halfPx / px) * 2.0 - 1.0, 0.0, 1.0);
+  gl_Position = vec4((uv + nrm * sign(aShape.x) * halfPx / px) * 2.0 - 1.0, 0.0, 1.0);
 }
 `;
 
-// Storm's BOLT_FRAG profile: a white-hot core with a soft additive shoulder,
-// both falling to nothing at the ribbon's edge (all the antialiasing a strip
-// a few texels wide needs). `.r` carries the core, `.g` the glow, so the
-// display pass in fluid.ts can tint the glow (the Sparkle colour) separately
-// from the always-white core.
+// The ribbon's cross-section: a flat, hard-edged white band (the anime read —
+// a bolt is a bold stroke, not a soft streak) over a wide additive shoulder
+// that falls to nothing at the ribbon's edge. `.r` carries the core, `.g`
+// the glow, so the display pass in fluid.ts can tint the glow (the Sparkle
+// colour) separately from the always-white core.
 const BOLT_FRAG = `#version 300 es
 precision highp float;
 in float vSide;
@@ -226,7 +288,7 @@ out vec4 outColor;
 void main() {
   float e = clamp(1.0 - abs(vSide), 0.0, 1.0);
   float glow = e * e;
-  float core = pow(e, 8.0);
+  float core = smoothstep(0.5, 0.65, e);
   outColor = vec4(core, glow, 0.0, 1.0) * vStrength;
 }
 `;
@@ -276,7 +338,7 @@ export function createFluidBolts(
     strengths: pool.strengths,
     strike: (ax, ay, bx, by, amp, force = false) => pool.strike(ax, ay, bx, by, amp, force),
     tick: (dtSec, afterglow, flicker) => pool.tick(dtSec, afterglow, flicker),
-    draw(widthPx: number): void {
+    draw(widthPx: number, aspect: number): void {
       gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
       gl.viewport(0, 0, target.w, target.h);
       gl.clearColor(0, 0, 0, 0);
@@ -284,7 +346,7 @@ export function createFluidBolts(
 
       gl.bindVertexArray(vao);
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-      // Only a slot that fired since the last draw re-uploads its tree.
+      // Only a slot whose tree changed (a strike or a boil) re-uploads.
       for (let i = 0; i < MAX_BOLTS; i++) {
         if (!pool.dirty[i]) continue;
         gl.bufferSubData(gl.ARRAY_BUFFER, i * boltFloats * 4, pool.paths.subarray(i * boltFloats, (i + 1) * boltFloats));
@@ -293,11 +355,13 @@ export function createFluidBolts(
 
       prog.use();
       prog.setV2("uLayerSize", target.w, target.h);
+      prog.setV2("uSpace", aspect, 1);
       prog.setF("uWidthPx", widthPx);
+      prog.setF("uMinHalfPx", BOLT_MIN_HALF_PX);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE);
       for (let i = 0; i < MAX_BOLTS; i++) {
-        if (pool.strengths[i] <= 0.001) continue;
+        if (pool.strengths[i] <= 0) continue;
         prog.setF("uStrength", pool.strengths[i]);
         gl.drawArrays(gl.TRIANGLE_STRIP, i * BOLT_RIBBON_VERTS, BOLT_RIBBON_VERTS);
       }
@@ -306,8 +370,14 @@ export function createFluidBolts(
       gl.bindVertexArray(null);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+
+      // The blurred copies the display reads as bolt light.
+      gl.bindTexture(gl.TEXTURE_2D, target.tex);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.bindTexture(gl.TEXTURE_2D, null);
     },
     texture: () => target.tex,
+    size: () => ({ w: target.w, h: target.h }),
     resize(nw: number, nh: number): void {
       if (nw === target.w && nh === target.h) return;
       deleteBoltTarget(gl, target);
