@@ -30,10 +30,10 @@
 // --from skips beats before that many seconds: the analyser's adaptive
 // floor/peak and the beat clock need a moment to settle, and the first
 // second of a shot has nothing to compare anyway.
-import { chromium } from "playwright";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { launchWithMic, openScene, waitUntil } from "./ref-browser.mjs";
 
 const args = process.argv.slice(2);
 const bundleDir = args.find((a) => !a.startsWith("--"));
@@ -75,58 +75,29 @@ if (!targets.length) {
 }
 console.log(`${basename(bundle)} → ${scene}: ${targets.length} beats × ${offsets.length} offsets, tempo ${meta.tempo.toFixed(1)}`);
 
-const browser = await chromium.launch({
-  channel: "chromium",
-  args: [
-    "--use-fake-device-for-media-stream",
-    "--use-fake-ui-for-media-stream",
-    `--use-file-for-fake-audio-capture=${wav}%noloop`,
-    "--autoplay-policy=no-user-gesture-required",
-    "--enable-gpu", "--use-angle=metal", "--enable-gpu-rasterization", "--ignore-gpu-blocklist",
-  ],
-});
-const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 960, height: 540 }, permissions: ["microphone"] });
-await ctx.addInitScript(() => {
-  const md = navigator.mediaDevices;
-  const orig = md.getUserMedia.bind(md);
-  md.getUserMedia = async (c) => {
-    const s = await orig(c);
-    if (c && c.audio && !window.__micT0) window.__micT0 = performance.now();
-    return s;
-  };
-});
-const page = await ctx.newPage();
-page.on("pageerror", (e) => console.log("PAGEERROR", e.message.slice(0, 500)));
-page.on("console", (m) => {
-  if (m.type() === "error" && !/8787|ERR_CONNECTION_REFUSED|403/.test(m.text())) console.log("CONSOLE", m.text().slice(0, 300));
-});
-await page.goto(`https://localhost:${port}/?quality=${quality}#/v/${scene}`, { waitUntil: "load" });
-await page.waitForTimeout(800);
-await page.mouse.click(480, 270); // the gesture that starts the mic
-await page.waitForFunction(() => window.__micT0 > 0, null, { timeout: 8000 });
-const hash = await page.evaluate(() => location.hash);
-if (!hash.includes(scene)) console.log(`WARNING: page is at ${hash}, not the requested scene`);
-// Only the canvas from here on — the HUD and buttons would sit on every frame.
-await page.addStyleTag({ content: "body > :not(canvas) { visibility: hidden !important; }" });
+const { browser, ctx } = await launchWithMic(wav);
+const page = await openScene(ctx, { port, scene, quality });
 if (settings) await page.evaluate((s) => window.__viz?.setParams({ autoPin: true, settings: JSON.parse(s) }), settings);
 else await page.evaluate(() => window.__viz?.setParams({ autoPin: false, settings: {} }));
+
+// What ours heard, if ref-hear.mjs has run: a slice around each shot goes
+// under the compare row's label.
+const hearsPath = join(bundle, "hears.json");
+const hears = existsSync(hearsPath) ? JSON.parse(readFileSync(hearsPath, "utf8")) : null;
+const heardAt = (t) => {
+  if (!hears) return null;
+  const col = (n) => hears.columns.indexOf(n);
+  const win = hears.samples.filter((s) => Math.abs(s[col("t")] - t) <= 0.08);
+  if (!win.length) return null;
+  const mid = win[Math.floor(win.length / 2)];
+  return { onset: win.some((s) => s[col("onset")]), bpm: mid[col("bpm")], energy: mid[col("energy")], section: mid[col("section")] };
+};
 
 const shots = [];
 for (const b of targets) {
   for (const off of offsets) {
     const targetMs = (b.t + off / 1000) * 1000;
-    const waited = await page.evaluate(
-      ({ targetMs, leadMs }) =>
-        new Promise((r) => {
-          const tick = () => {
-            const now = performance.now() - window.__micT0;
-            if (now >= targetMs - leadMs) r(now);
-            else requestAnimationFrame(tick);
-          };
-          tick();
-        }),
-      { targetMs, leadMs },
-    );
+    const waited = await waitUntil(page, targetMs, leadMs);
     const name = `b${String(b.i).padStart(3, "0")}_r${String(b.rank).padStart(2, "0")}_${off >= 0 ? "+" : "-"}${String(Math.abs(off)).padStart(3, "0")}.png`;
     await page.screenshot({ path: join(outDir, name) });
     const after = await page.evaluate(() => {
@@ -135,7 +106,7 @@ for (const b of targets) {
       return { now: performance.now() - window.__micT0, bpm: p?.beat?.bpm ?? null, phase: p?.beat?.phase ?? null, energy: p?.bands?.energy ?? null, scene: p?.scene ?? null };
     });
     const lag = Math.round((waited + after.now) / 2 - targetMs);
-    shots.push({ beat: b.i, rank: b.rank, t: b.t, offsetMs: off, file: name, lagMs: lag, probe: { bpm: after.bpm, phase: after.phase, energy: after.energy, scene: after.scene } });
+    shots.push({ beat: b.i, rank: b.rank, t: b.t, offsetMs: off, file: name, lagMs: lag, probe: { bpm: after.bpm, phase: after.phase, energy: after.energy, scene: after.scene }, heard: heardAt(b.t) });
     if (waited > targetMs + 50) console.log(`  late: beat #${b.i} ${off >= 0 ? "+" : ""}${off} ms reached ${Math.round(waited - targetMs)} ms after target`);
   }
   console.log(`beat #${b.i} r${b.rank} t=${b.t.toFixed(2)}s shot (probe bpm ${shots.at(-1).probe.bpm ?? "?"})`);
@@ -151,8 +122,10 @@ const rows = targets.map((b) => {
     const s = shots.find((x) => x.beat === b.i && x.offsetMs === o);
     return s ? cell(pathToFileURL(join(outDir, s.file)).href) : "";
   }).join("");
+  const heard = shots.find((x) => x.beat === b.i)?.heard;
+  const heardLine = heard ? `<br><span style="color:#8fd">ours: onset ${heard.onset ? "yes" : "no"} bpm ${Math.round(heard.bpm)}</span>` : "";
   return `<div style="display:flex;align-items:flex-start;margin-bottom:4px">
-    <div style="width:130px;flex:none;font:12px/1.4 monospace;color:#ddd;padding:4px">#${b.i} r${b.rank}<br>t ${b.t.toFixed(2)}s<br>onset ${b.onsetZ >= 0 ? "+" : ""}${b.onsetZ}<br>low ${b.lowZ >= 0 ? "+" : ""}${b.lowZ}${b.section ? "<br>SECTION" : ""}</div>
+    <div style="width:130px;flex:none;font:12px/1.4 monospace;color:#ddd;padding:4px">#${b.i} r${b.rank}<br>t ${b.t.toFixed(2)}s<br>onset ${b.onsetZ >= 0 ? "+" : ""}${b.onsetZ}<br>low ${b.lowZ >= 0 ? "+" : ""}${b.lowZ}${b.section ? "<br>SECTION" : ""}${heardLine}</div>
     <div style="flex:none">${ref}</div><div style="width:12px;flex:none"></div><div style="flex:none">${ours}</div></div>`;
 });
 const html = `<!doctype html><meta charset="utf-8"><body style="margin:0;background:#121216;padding:6px">

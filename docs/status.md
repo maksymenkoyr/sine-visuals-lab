@@ -6,17 +6,20 @@ regenerate it at session close.
 
 ## In flight
 
-- **Reference-video loop** — `tools/ref-scan.py`, `tools/ref-shoot.mjs`,
-  `.claude/commands/ref.md`, branch `worktree-ref-video` (this session, draft
-  PR). Scan a reference video into a beat-ranked bundle (frames grabbed on
-  the 1st/2nd/4th/8th/16th beats at before/on/after offsets, per-rank sheets,
-  a timeline, and a report that annotates every visual transition with the
-  audio at that moment); then replay the bundle's audio into one of our
-  scenes as a fake mic and shoot the same beats side by side. Verified on the
-  Kaleidoscope reference short (161 bpm) against `tunnel`: shots land within
-  ±20 ms, and the probe's bpm per shot exposed our beat clock halving to 122
-  at the reference's section boundary. Not yet used to build a scene — that's
-  the real test.
+- **Reference-video loop** — `tools/ref-scan.py`, `tools/ref-hear.mjs`,
+  `tools/ref-shoot.mjs` (+ shared `tools/ref-browser.mjs`),
+  `.claude/commands/ref.md`, branch `worktree-ref-video`, draft PR #85 (this
+  session, two passes). Scan a reference video into a bundle whose
+  `report.md` opens with auto-derived Findings (reaction per beat rank, which
+  band each visual metric follows and how late, strobes vs timers, regime
+  changes at section boundaries, onset-locked attack/decay, beat-phase
+  profile, continuous zoom/rotation), each with an "ours:" clause from what
+  our own analyser heard on the same audio (`ref-hear` → probe stream);
+  one `keyframes.png` chosen by regime/transition/phrase start; the look as
+  numbers (palette, mirror/rotational symmetry, motion). Verified on three
+  clips (a 161 bpm kaleidoscope short, a silent kaleidoscope, a silent copy);
+  `--report-only` rebuilds without decoding. Not yet used to build a scene —
+  that's the real test.
 - **Kaleidoscope** — draft PR #79 (scene) and stacked draft PR #83 (four
   styles built from measured references + infinite zoom). The first thing to
   point `/ref` at: the styles were tuned from the scratch script this branch
