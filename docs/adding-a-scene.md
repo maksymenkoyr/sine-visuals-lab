@@ -1,5 +1,9 @@
 # Adding a scene
 
+If the scene is meant to look like a reference video, run `/ref` on it
+first (`docs/tuning.md`, "Tuning against a reference video") — a contact
+sheet shows the look, not the motion, and the motion is the sync.
+
 ## The mechanical path
 
 1. Implement `Scene` (`src/render/scene.ts`) — usually via `createFullscreenScene`

@@ -83,6 +83,15 @@ its own params. `bakeDefaults()` always dry-runs (mirrors Alt+D's first press,
 never writes) — a script that wants the actual write posts to `/__tuning/defaults`
 itself, the same endpoint the hotkey's second press calls.
 
+## Tuning against a reference video
+
+The loop above tunes against synthetic audio. When the target is a video
+someone handed over — "make it do what this does" — the sibling loop is
+`/ref` (`.claude/commands/ref.md`): `tools/ref-scan.py` measures what the
+reference does on its own beat grid and writes it up, `tools/ref-shoot.mjs`
+replays the reference's audio into our scene and shoots the same beats side
+by side. Both tools' headers own the details; nothing here restates them.
+
 ## Recording what you learn
 
 Whenever a session resolves a natural-language phrase ("brighter", "less
