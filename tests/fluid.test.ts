@@ -45,7 +45,6 @@ import {
   SYMMETRY_OPTIONS,
   symmetryToMirror,
   FOLD_FAMILY,
-  FOLD_WEDGE_CHOICES,
   FOLD_FADE_SEC,
   FOLD_HOLD_MIN,
   FOLD_HOLD_MAX,
@@ -59,6 +58,12 @@ import {
   createShockState,
   triggerShock,
   advanceShocks,
+  STROBE_DUR,
+  STROBE_MIN_GAP,
+  createStrobeState,
+  triggerStrobe,
+  advanceStrobe,
+  strobePhase,
   type EmitterInputs,
 } from "../src/render/scenes/fluid.ts";
 import type { SignalId } from "../src/render/signals.ts";
@@ -601,17 +606,6 @@ describe("SYMMETRY_OPTIONS / symmetryToMirror", () => {
   });
 });
 
-describe("FOLD_WEDGE_CHOICES", () => {
-  it("is all integers within [FOLD_WEDGES_MIN, FOLD_WEDGES_MAX]", () => {
-    expect(FOLD_WEDGE_CHOICES.length).toBeGreaterThan(0);
-    for (const n of FOLD_WEDGE_CHOICES) {
-      expect(Number.isInteger(n)).toBe(true);
-      expect(n).toBeGreaterThanOrEqual(FOLD_WEDGES_MIN);
-      expect(n).toBeLessThanOrEqual(FOLD_WEDGES_MAX);
-    }
-  });
-});
-
 describe("createFoldState", () => {
   it("starts settled on a FOLD_FAMILY member: modeA === modeB, mix 1, rot 0", () => {
     const st = createFoldState();
@@ -621,11 +615,15 @@ describe("createFoldState", () => {
     expect(st.rot).toBe(0);
   });
 
-  it("starts on Kaleidoscope with wedgesA === wedgesB === 6", () => {
+  it("starts on Kaleidoscope", () => {
     const st = createFoldState();
     expect(st.modeA).toBe(MIRROR_KALEIDO);
-    expect(st.wedgesA).toBe(6);
-    expect(st.wedgesB).toBe(6);
+  });
+
+  it("carries no wedge count of its own — Mirror count is authoritative everywhere (render() alone owns uFoldWedgesA/B)", () => {
+    const st = createFoldState();
+    expect(st).not.toHaveProperty("wedgesA");
+    expect(st).not.toHaveProperty("wedgesB");
   });
 
   it("draws holdLeft from [FOLD_HOLD_MIN, FOLD_HOLD_MAX]", () => {
@@ -712,21 +710,19 @@ describe("advanceFold", () => {
     }
   });
 
-  it("never produces an identical (mode, wedges) pair twice in a row across many reconfigures", () => {
+  it("alternates between the two FOLD_FAMILY modes on every reconfigure (never repeats the mode just settled on)", () => {
     const rng = mulberry32(12345);
     const st = createFoldState(rng);
     let reconfigures = 0;
     for (let i = 0; i < 4000; i++) {
-      const before: [MirrorMode, number] = [st.modeB, st.wedgesB];
+      const before = st.modeB;
       // dropOnset + drift 1 every frame reconfigures the instant each warp
       // settles (st.mix reaches 1), driving many transitions quickly.
       advanceFold(st, 0.05, { energy: rng(), dropOnset: true, beatPulse: 0, spin: 0, breathe: 0, drift: 1 }, rng);
       if (st.mix === 0) {
         reconfigures++;
-        expect([st.modeB, st.wedgesB]).not.toEqual(before);
-        expect(Number.isInteger(st.wedgesB)).toBe(true);
-        expect(st.wedgesB).toBeGreaterThanOrEqual(FOLD_WEDGES_MIN);
-        expect(st.wedgesB).toBeLessThanOrEqual(FOLD_WEDGES_MAX);
+        expect(st.modeB).not.toBe(before);
+        expect(FOLD_FAMILY).toContain(st.modeB);
       }
     }
     expect(reconfigures).toBeGreaterThan(20);
@@ -879,10 +875,11 @@ describe("Sparkle settings", () => {
     }
   });
 
-  it("sparkleStyle and sparkleTint expose the four options the display shader's int(u... + 0.5) branch expects", () => {
+  it("sparkleStyle exposes its five style options (Lightning included, and the default) and sparkleTint its four tint options, both matching the display shader's int(u... + 0.5) branches", () => {
     const style = SETTINGS.find((s) => s.key === "sparkleStyle")!;
     const tint = SETTINGS.find((s) => s.key === "sparkleTint")!;
-    expect(style.options).toEqual(["Glow", "Currents", "Grain", "Currents + Glow"]);
+    expect(style.options).toEqual(["Glow", "Currents", "Grain", "Currents + Glow", "Lightning"]);
+    expect(style.default).toBe(4);
     expect(tint.options).toEqual(["Negative", "Complement", "White", "Palette"]);
   });
 
@@ -942,16 +939,20 @@ describe("Look group: neon / hotWhite", () => {
 
 describe("Light group settings", () => {
   const lightSettings = SETTINGS.filter((s) => s.group === "Light");
-  const LIGHT_KEYS = ["dropFlash", "shockwave", "buildGlow", "beatFlash"];
+  const LIGHT_KEYS = ["dropFlash", "shockwave", "buildGlow", "beatFlash", "strobe"];
 
-  it("has exactly the dropFlash/shockwave/buildGlow/beatFlash settings", () => {
+  it("has exactly the dropFlash/shockwave/buildGlow/beatFlash/strobe settings", () => {
     expect(lightSettings.map((s) => s.key).sort()).toEqual([...LIGHT_KEYS].sort());
   });
 
-  it("every Light setting is 0..1 ranged and opts into auto with a valid weight convention", () => {
+  it("every Light setting is 0..1 ranged; every one except strobe opts into auto with a valid weight convention (strobe is manual — see its own describe block)", () => {
     for (const s of lightSettings) {
       expect(s.min, s.key).toBe(0);
       expect(s.max, s.key).toBe(1);
+      if (s.key === "strobe") {
+        expect(s.auto, s.key).toBeUndefined();
+        continue;
+      }
       expect(s.auto, s.key).toBeDefined();
       let sum = 0;
       for (const [dial, w] of Object.entries(s.auto!)) {
@@ -975,6 +976,13 @@ describe("Light group settings", () => {
     const beatFlash = SETTINGS.find((s) => s.key === "beatFlash")!;
     expect(buildGlow.reads).toBeUndefined();
     expect(beatFlash.reads).toBeUndefined();
+  });
+
+  it("strobe is manual (no auto), reads anim.dropOnset, and defaults to 0.35", () => {
+    const strobe = SETTINGS.find((s) => s.key === "strobe")!;
+    expect(strobe.auto).toBeUndefined();
+    expect(strobe.reads).toEqual(["anim.dropOnset"]);
+    expect(strobe.default).toBe(0.35);
   });
 });
 
@@ -1040,5 +1048,69 @@ describe("Shockwave pool", () => {
     for (let i = 0; i < SHOCK_SLOTS * 3; i++) triggerShock(st, 1);
     const live = st.amp.filter((a) => a > 0).length;
     expect(live).toBeLessThanOrEqual(SHOCK_SLOTS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Strobe (Light group's `strobe` setting) — see fluid.ts's
+// createStrobeState/triggerStrobe/advanceStrobe/strobePhase, and the display
+// shader's uStrobeT/uStrobeAmp block applied after the tone map.
+// ---------------------------------------------------------------------------
+
+describe("Strobe", () => {
+  it("createStrobeState starts inactive (age past STROBE_DUR, amp 0)", () => {
+    const st = createStrobeState();
+    expect(st.age).toBeGreaterThan(STROBE_DUR);
+    expect(st.amp).toBe(0);
+  });
+
+  it("triggerStrobe fires and resets age to 0 when clear of the refractory window", () => {
+    const st = createStrobeState();
+    expect(triggerStrobe(st, 0.8)).toBe(true);
+    expect(st.age).toBe(0);
+    expect(st.amp).toBe(0.8);
+  });
+
+  it("triggerStrobe respects the refractory window: a retrigger inside STROBE_MIN_GAP is dropped, and the state is left untouched", () => {
+    const st = createStrobeState();
+    triggerStrobe(st, 0.5);
+    advanceStrobe(st, STROBE_MIN_GAP - 0.01);
+    expect(triggerStrobe(st, 1.0)).toBe(false);
+    // Neither age nor amp moved — the dropped trigger is a true no-op.
+    expect(st.age).toBeCloseTo(STROBE_MIN_GAP - 0.01, 6);
+    expect(st.amp).toBe(0.5);
+  });
+
+  it("triggerStrobe fires again once STROBE_MIN_GAP has elapsed", () => {
+    const st = createStrobeState();
+    triggerStrobe(st, 0.5);
+    advanceStrobe(st, STROBE_MIN_GAP);
+    expect(triggerStrobe(st, 1.0)).toBe(true);
+    expect(st.age).toBe(0);
+    expect(st.amp).toBe(1.0);
+  });
+
+  it("strobePhase is 0 the instant a flash fires and 1 once STROBE_DUR has elapsed (clamped, never overshooting)", () => {
+    const st = createStrobeState();
+    triggerStrobe(st, 1.0);
+    expect(strobePhase(st)).toBe(0);
+    advanceStrobe(st, STROBE_DUR);
+    expect(strobePhase(st)).toBe(1);
+    advanceStrobe(st, 10);
+    expect(strobePhase(st)).toBe(1);
+  });
+
+  it("strobePhase rises monotonically between a fire and STROBE_DUR", () => {
+    const st = createStrobeState();
+    triggerStrobe(st, 1.0);
+    let prev = -Infinity;
+    const step = STROBE_DUR / 20;
+    for (let i = 0; i < 20; i++) {
+      advanceStrobe(st, step);
+      const phase = strobePhase(st);
+      expect(phase).toBeGreaterThanOrEqual(prev);
+      prev = phase;
+    }
+    expect(prev).toBeCloseTo(1, 6);
   });
 });

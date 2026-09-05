@@ -98,8 +98,8 @@ export const MIRROR_OPTIONS: readonly string[] = [
 ];
 
 /** How many mirrored wedges a Radial fold can have — a display-time
- *  parameter (fluid.ts's `foldCount` setting, or Auto's own drift over
- *  FOLD_WEDGE_CHOICES), not part of the sim domain, so it plays no role in
+ *  parameter (fluid.ts's `foldCount` setting, authoritative in every mode
+ *  including Auto), not part of the sim domain, so it plays no role in
  *  mirrorDomain below. */
 export const FOLD_WEDGES_MIN = 2;
 export const FOLD_WEDGES_MAX = 16;

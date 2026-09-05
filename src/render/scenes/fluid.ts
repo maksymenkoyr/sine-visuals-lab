@@ -24,6 +24,7 @@ import {
   type SimFormat,
   type Splat,
 } from "./fluidSim.ts";
+import { createFluidBolts, type FluidBolts } from "./fluidBolts.ts";
 
 // Neon Fluid: a 2D incompressible dye sim (Stam 1999 stable-fluids scheme;
 // vorticity confinement per Fedkiw et al. — textbook GPU Gems ch.38 math,
@@ -45,9 +46,17 @@ import {
 // speckle onto that line, masked to where the line and its halo already are
 // and composited by replacing rather than adding, so a Negative or
 // Complement spark colour reads as true contrast against the line instead
-// of a wash on top of it. A Light settings group (dropFlash/shockwave/
-// buildGlow/beatFlash) and the Look group's neon/hotWhite tone map layer
-// further music-reactive flashes and saturation on top of all of that.
+// of a wash on top of it. sparkleStyle's default "Lightning" option reads
+// like plain Glow in this file (no mask, see the sparkleStyleI branch below)
+// — the actual bolt layer is a separate additive composite the scene wires
+// in once it lands (see the plan's bolt.ts/fluidBolts.ts). A Light settings
+// group (dropFlash/shockwave/
+// buildGlow/beatFlash/strobe) and the Look group's neon/hotWhite tone map
+// layer further music-reactive flashes and saturation on top of all of
+// that — strobe (createStrobeState/triggerStrobe/advanceStrobe/strobePhase
+// below) is a single-shot white/red/black flash fired on a treble onset or a
+// drop, applied to the display shader's already-tone-mapped colour last of
+// all, unlike the others.
 //
 // Audio wiring: most of the emitter's punch now comes from a **puff clock**
 // (createPuffState/advancePuff below) rather than a continuous push — it
@@ -79,8 +88,10 @@ import {
 // other, so the image reads as one continuous flow. The Radial fold's own
 // wedge angle is remapped by the group's Wedge spread setting (see simUv's
 // `k`) rather than always squeezed to fill the sim's quarter-turn; its wedge
-// count is the group's own Mirror count setting (`foldCount`) when pinned,
-// or Auto's own drift over FOLD_WEDGE_CHOICES (see advanceFold) when not.
+// count is always the group's own Mirror count setting (`foldCount`), Auto
+// included — render() uploads round(foldCount) as both uFoldWedgesA and
+// uFoldWedgesB regardless of mode, so Auto's drift (advanceFold) only ever
+// picks which FOLD_FAMILY mode is showing, never a wedge count of its own.
 // Only the display program goes through uploadCommonUniforms — the sim's own programs
 // (fluidSim.ts) take a narrower, JS-computed set of per-step uniforms that
 // have nothing to do with a scene's settings.
@@ -316,6 +327,25 @@ export function emitterDirection(mirror: MirrorMode): [number, number] {
   return mirror === MIRROR_TB ? [1, 0] : [0, 1];
 }
 
+/** Lightning endpoints in sim uv for one strike: the root sits on the jet
+ *  column (the densest, whitest dye — along emitterDirection from the
+ *  emitter, a little off the seam), the tip a random direction `len` away.
+ *  Both clamped to the domain; the display's fold mirrors the bolt like
+ *  everything else in sim space. */
+export function boltEndpoints(rng: () => number, mirror: MirrorMode, len: number): [number, number, number, number] {
+  const [ex, ey] = emitterPosition(mirror);
+  const [dx, dy] = emitterDirection(mirror);
+  const along = 0.1 + 0.8 * rng();
+  const off = 0.02 + 0.08 * rng();
+  const ax = ex + dx * along - dy * off;
+  const ay = ey + dy * along + dx * off;
+  const ang = rng() * Math.PI * 2;
+  const bx = ax + Math.cos(ang) * len;
+  const by = ay + Math.sin(ang) * len;
+  const c = (v: number) => Math.min(1, Math.max(0, v));
+  return [c(ax), c(ay), c(bx), c(by)];
+}
+
 /** Screen uv (not sim uv — see emitterPosition for that) the emitter blob is
  *  drawn at in the display shader's uEmitScreen: Top-bottom's emitter sits
  *  on the screen's left edge at mid-height (see emitterPosition), every
@@ -429,12 +459,6 @@ export function symmetryToMirror(k: number): MirrorMode | null {
  *  fluidSim.ts) and switching into one mid-flow would reset the fluid. */
 export const FOLD_FAMILY: readonly MirrorMode[] = [MIRROR_KALEIDO, MIRROR_RADIAL];
 
-/** Wedge counts Auto symmetry draws from when advanceFold's drift lands on
- *  MIRROR_RADIAL (a pinned Radial's own wedge count instead comes straight
- *  from the foldCount setting — see render() below). Every entry sits within
- *  [FOLD_WEDGES_MIN, FOLD_WEDGES_MAX]. */
-export const FOLD_WEDGE_CHOICES: readonly number[] = [3, 4, 5, 6, 8, 10, 12];
-
 /** Fold-drift tuning: FOLD_FADE_SEC is the warp duration between two folds
  *  (see foldMixEased — the display shader warps the sample coordinate itself
  *  over this span, not a crossfade of two rendered images); FOLD_HOLD_MIN/MAX
@@ -463,16 +487,13 @@ export const FOLD_ZOOM_RATE = 0.07;
  *  the pattern, without literally computing a Chladni eigenmode. The state
  *  keeps advancing (rot/zoomPhase) even when a manual fold is pinned, so the
  *  Spin/Zoom breathing settings still visibly turn and pulse a pinned
- *  Kaleidoscope/Radial look — see render() below. */
+ *  Kaleidoscope/Radial look — see render() below. The wedge count is NOT
+ *  part of this state — it's always the group's own Mirror count setting
+ *  (`foldCount`), Auto included, so it lives only in render()'s
+ *  uFoldWedgesA/B upload, never here. */
 export interface FoldState {
   modeA: MirrorMode;
   modeB: MirrorMode;
-  /** Radial wedge count riding along with modeA/modeB — meaningless (but
-   *  still carried forward) while that side's mode isn't MIRROR_RADIAL. See
-   *  FOLD_WEDGE_CHOICES for what advanceFold draws it from. Always an
-   *  integer within [FOLD_WEDGES_MIN, FOLD_WEDGES_MAX]. */
-  wedgesA: number;
-  wedgesB: number;
   mix: number;
   rot: number;
   rotDir: 1 | -1;
@@ -484,8 +505,6 @@ export function createFoldState(rng: () => number = Math.random): FoldState {
   return {
     modeA: MIRROR_KALEIDO,
     modeB: MIRROR_KALEIDO,
-    wedgesA: 6,
-    wedgesB: 6,
     mix: 1,
     rot: 0,
     rotDir: rng() < 0.5 ? -1 : 1,
@@ -503,13 +522,12 @@ export function createFoldState(rng: () => number = Math.random): FoldState {
  *  entirely at drift 0); `inp.dropOnset` forces an immediate reconfigure once
  *  the current warp has finished (never interrupts one already in flight, so
  *  a fold never visibly snaps mid-warp). A reconfigure picks the next mode
- *  from FOLD_FAMILY and, when that lands on MIRROR_RADIAL, an independent
- *  wedge count from FOLD_WEDGE_CHOICES — so Auto can repeat Radial with a
- *  different wedge count, but the resulting (mode, wedges) pair is never
- *  identical to the one just settled on. `inp.breathe` isn't read here — it
- *  only feeds foldZoom, which the caller invokes separately once per frame
- *  with the same settings bundle (see render() below) — it travels through
- *  this type anyway so callers can pass one bundle to both. */
+ *  from FOLD_FAMILY, always a different member from the one just settled on
+ *  (FOLD_FAMILY has exactly two members today, so this alternates between
+ *  them). `inp.breathe` isn't read here — it only feeds foldZoom, which the
+ *  caller invokes separately once per frame with the same settings bundle
+ *  (see render() below) — it travels through this type anyway so callers can
+ *  pass one bundle to both. */
 export function advanceFold(
   st: FoldState,
   dtSec: number,
@@ -521,18 +539,12 @@ export function advanceFold(
 
   if ((st.holdLeft <= 0 || (inp.dropOnset && inp.drift > 0)) && st.mix >= 1) {
     st.modeA = st.modeB;
-    st.wedgesA = st.wedgesB;
-    const pickNext = (): [MirrorMode, number] => {
-      const mode = FOLD_FAMILY[Math.floor(rng() * FOLD_FAMILY.length)];
-      const wedges = mode === MIRROR_RADIAL ? FOLD_WEDGE_CHOICES[Math.floor(rng() * FOLD_WEDGE_CHOICES.length)] : st.wedgesA;
-      return [mode, wedges];
-    };
-    let [nextMode, nextWedges] = pickNext();
-    for (let tries = 0; tries < 8 && nextMode === st.modeA && nextWedges === st.wedgesA; tries++) {
-      [nextMode, nextWedges] = pickNext();
+    const pickNext = (): MirrorMode => FOLD_FAMILY[Math.floor(rng() * FOLD_FAMILY.length)];
+    let nextMode = pickNext();
+    for (let tries = 0; tries < 8 && nextMode === st.modeA; tries++) {
+      nextMode = pickNext();
     }
     st.modeB = nextMode;
-    st.wedgesB = nextWedges;
     st.mix = 0;
     if (rng() < 0.5) st.rotDir = st.rotDir === 1 ? -1 : 1;
     st.holdLeft = FOLD_HOLD_MIN + rng() * (FOLD_HOLD_MAX - FOLD_HOLD_MIN);
@@ -679,7 +691,7 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "foldCount",
     label: "Mirror count",
-    description: "How many mirrored wedges a Radial fold has (Auto drifts this on its own)",
+    description: "Wedges of a Radial fold — applies in Auto too",
     group: "Symmetry",
     min: FOLD_WEDGES_MIN,
     max: FOLD_WEDGES_MAX,
@@ -806,6 +818,17 @@ export const SETTINGS: SceneSetting[] = [
     auto: { pulse: 0.3, attack: 0.15 },
   },
   {
+    key: "strobe",
+    label: "Strobe",
+    description: "White → red → black flash on treble hits and drops (photosensitivity: keep low on shared screens)",
+    group: "Light",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.35,
+    reads: ["anim.dropOnset"],
+  },
+  {
     key: "sparkle",
     label: "Treble sparkle",
     description: "How much treble fires the sparks",
@@ -819,14 +842,14 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "sparkleStyle",
     label: "Style",
-    description: "Glow: brighter line only. Currents: electric dashes riding the flow through dense dye. Grain: dense speckle. Currents + Glow: both",
+    description: "Glow: brighter line only. Currents: electric dashes riding the flow through dense dye. Grain: dense speckle. Currents + Glow: both. Lightning: branched bolts fired on treble hits",
     group: "Sparkle",
     min: 0,
-    max: 3,
+    max: 4,
     step: 1,
-    default: 1,
+    default: 4,
     type: "enum",
-    options: ["Glow", "Currents", "Grain", "Currents + Glow"],
+    options: ["Glow", "Currents", "Grain", "Currents + Glow", "Lightning"],
   },
   {
     key: "sparkleTint",
@@ -958,6 +981,59 @@ export function advanceShocks(st: ShockState, dtSec: number): void {
 }
 
 // ---------------------------------------------------------------------------
+// Strobe (Light group's `strobe` setting) — a single-shot white -> red ->
+// black flash fired on a treble onset or a drop, unlike the Shockwave pool
+// above there's only ever one flash in flight (a new trigger simply replaces
+// whatever's fading), so this is one state, not an array of slots. Driven
+// from render() below and applied last, after the display shader's tone map
+// — see the uStrobeT/uStrobeAmp block near the end of main().
+// ---------------------------------------------------------------------------
+
+/** Seconds the white -> red -> black flash takes to fully decay — see
+ *  strobePhase and the shader's sWhite/sRed/sBlack weights, which carve this
+ *  span into three overlapping phases. */
+export const STROBE_DUR = 0.2;
+/** Minimum seconds between two triggers — a hit inside this refractory
+ *  window is dropped rather than restarting the flash early, so a burst of
+ *  treble onsets reads as one clean flash, not a strobing flicker. */
+export const STROBE_MIN_GAP = 0.12;
+
+export interface StrobeState {
+  /** Seconds since the last trigger — see strobePhase. */
+  age: number;
+  /** The triggering hit's amplitude (0..1), scaled by the `strobe` setting
+   *  before upload — see uStrobeAmp in render(). */
+  amp: number;
+}
+
+export function createStrobeState(): StrobeState {
+  // age starts well past STROBE_DUR so a fresh scene never flashes on frame 1.
+  return { age: 10, amp: 0 };
+}
+
+/** Fires a fresh flash at the given amplitude, unless the refractory window
+ *  (STROBE_MIN_GAP since the last trigger) hasn't elapsed yet, in which case
+ *  this is a no-op. Returns whether it fired. */
+export function triggerStrobe(st: StrobeState, amp: number): boolean {
+  if (st.age < STROBE_MIN_GAP) return false;
+  st.age = 0;
+  st.amp = amp;
+  return true;
+}
+
+/** Ages `st` in place by dtSec. */
+export function advanceStrobe(st: StrobeState, dtSec: number): void {
+  st.age += dtSec;
+}
+
+/** [0,1] progress through the flash's STROBE_DUR-second life: 0 the instant
+ *  it fires, 1 once it's fully decayed (and clamped there, so an idle strobe
+ *  reads as a steady 1 rather than growing without bound). */
+export function strobePhase(st: StrobeState): number {
+  return Math.min(1, Math.max(0, st.age / STROBE_DUR));
+}
+
+// ---------------------------------------------------------------------------
 // Display shader
 // ---------------------------------------------------------------------------
 
@@ -982,8 +1058,19 @@ const CENTROID_HUE = 0.08;
 /** Brightness ceiling for the Sparkle group's spark mask — sparks REPLACE the
  *  line colour (see the `col = mix(col, sparkCol * SPARK_GAIN, spark)` line
  *  in main()) rather than adding onto it, so this alone sets how hot a spark
- *  reads against the rest of the line. */
-const SPARK_GAIN = 3.0;
+ *  reads against the rest of the line. Raised from 3.0 for a bigger, brighter
+ *  Currents style. */
+const SPARK_GAIN = 5.0;
+/** Lightning style: gains on the bolt layer's core (white) and glow (spark
+ *  tint) channels, its afterglow (strikeEnvelope's slow-decay share), and
+ *  the ribbon half-width range in layer texels across sparkleSize. */
+const BOLT_CORE_GAIN = 6.0;
+const BOLT_GLOW_GAIN = 3.0;
+const BOLT_AFTERGLOW = 0.6;
+const BOLT_WIDTH_MIN = 4.0;
+const BOLT_WIDTH_MAX = 14.0;
+const BOLT_LEN_MIN = 0.25;
+const BOLT_LEN_MAX = 0.6;
 /** dye.r range the final tone map's white-hot core (uHotWhite) ramps over —
  *  below HOT_LO a pixel is never pulled toward true white regardless of the
  *  setting; at/above HOT_HI it's fully eligible. */
@@ -1004,6 +1091,9 @@ uniform sampler2D uDye;
 uniform sampler2D uEdge;
 uniform float uDomainAspect;
 uniform vec2 uEmitScreen;
+uniform sampler2D uBolts;
+uniform float uStrobeT;
+uniform float uStrobeAmp;
 uniform float uFoldA;
 uniform float uFoldB;
 uniform float uFoldMix;
@@ -1161,8 +1251,10 @@ void main() {
   float spark = 0.0;
   float cut = 1.0 - uSparkle * treble * 0.28;
   float soft = mix(0.02, 0.25, uSparkleSoft);
-  if (sparkleStyleI == 0 || sparkleStyleI == 3) {
-    // Glow (and half of Currents + Glow): the old plain brightness boost.
+  if (sparkleStyleI == 0 || sparkleStyleI == 3 || sparkleStyleI == 4) {
+    // Glow (half of Currents + Glow, and Lightning — the bolt layer is a
+    // separate additive composite, so Lightning still gets the plain
+    // brightness boost here and no mask below, same as Glow).
     sparkle = 1.0 + uSparkle * treble * 1.2;
   }
   if (sparkleStyleI == 1 || sparkleStyleI == 3) {
@@ -1176,7 +1268,7 @@ void main() {
     vec2 ps = s * uSimTexels;
     float along = dot(ps, t);
     float across = dot(ps, vec2(-t.y, t.x));
-    float period = mix(60.0, 14.0, uSparkleSize);
+    float period = mix(90.0, 24.0, uSparkleSize);
     float ph = along / period - uTime * mix(0.6, 6.0, uSparkleSpeed);
     float cell = floor(ph);
     float f = fract(ph);
@@ -1187,9 +1279,9 @@ void main() {
     // Thin across the flow: each segment carries one narrow streak, not a
     // full-width block.
     float acrossF = fract(across / segW);
-    float thin = smoothstep(0.0, soft, acrossF) * (1.0 - smoothstep(0.22, 0.22 + soft, acrossF));
-    float gate = step(1.0 - uSparkle * treble * 0.4, hash21(vec2(cell, seg) + 0.37));
-    float dash = gate * thin * smoothstep(0.0, soft, f) * (1.0 - smoothstep(0.45, 0.45 + soft, f));
+    float thin = smoothstep(0.0, soft, acrossF) * (1.0 - smoothstep(0.4, 0.4 + soft, acrossF));
+    float gate = step(1.0 - uSparkle * treble * 0.7, hash21(vec2(cell, seg) + 0.37));
+    float dash = gate * thin * smoothstep(0.0, soft, f) * (1.0 - smoothstep(0.6, 0.6 + soft, f));
     float currentLo = mix(0.02, 1.0, uCurrentDensity);
     float currentHi = currentLo + 0.4;
     // "Dense" means packed lines (the halo mip, high where many filaments
@@ -1249,7 +1341,14 @@ void main() {
   vec3 col = BG + c * edge * lineGain * sparkle + c * glow * uEdgeGlow * ${GLOW_GAIN.toFixed(2)} * (1.0 + 0.5 * flash) * buildMul + c * dye.r * ${FILL_GAIN.toFixed(2)};
   // Sparks REPLACE rather than add, so a Negative/Complement tint reads as a
   // true contrast against the line rather than a wash on top of it.
-  col = mix(col, mix(sparkCol, vec3(1.0), 0.15) * ${SPARK_GAIN.toFixed(2)}, spark);
+  col = mix(col, mix(sparkCol, vec3(1.0), 0.5) * ${SPARK_GAIN.toFixed(2)}, spark);
+  // Lightning: the bolt layer (fluidBolts.ts) sampled through the same fold
+  // as the dye, so every fold mirrors the bolts; white core plus the spark
+  // tint as glow, added on top.
+  if (sparkleStyleI == 4) {
+    vec2 bolt = texture(uBolts, s).rg;
+    col += vec3(1.0) * bolt.r * ${BOLT_CORE_GAIN.toFixed(2)} + mix(sparkCol, vec3(1.0), 0.4) * bolt.g * ${BOLT_GLOW_GAIN.toFixed(2)};
+  }
   // The shockwave ring reads on the halo too, and the drop flash lifts the
   // whole screen a touch rather than only the line/halo terms above.
   col += c * shock * 0.1;
@@ -1274,6 +1373,21 @@ void main() {
   vec3 mapped = col * ((1.0 - exp(-lum)) / max(lum, 1e-4));
   float hot = smoothstep(${HOT_LO.toFixed(2)}, ${HOT_HI.toFixed(2)}, dye.r) * uHotWhite;
   mapped = mix(mapped, vec3(1.0 - exp(-lum)), hot);
+
+  // Strobe (Light group): a whole-screen white -> red -> black flash on a
+  // treble hit or a drop, applied AFTER the tone map so it always reads as a
+  // true flash regardless of what's underneath — see
+  // triggerStrobe/advanceStrobe/strobePhase in fluid.ts for how uStrobeT/
+  // uStrobeAmp are filled each frame. At uStrobeT >= 1.0 (idle) every weight
+  // below is 0, so an idle strobe costs nothing visible.
+  float st = uStrobeT; float sa = uStrobeAmp;
+  float sWhite = 1.0 - smoothstep(0.05, 0.45, st);
+  float sRed = smoothstep(0.2, 0.4, st) * (1.0 - smoothstep(0.55, 0.7, st));
+  float sBlack = smoothstep(0.6, 0.75, st) * (1.0 - smoothstep(0.9, 1.0, st));
+  mapped = mix(mapped, vec3(1.0), sWhite * sa);
+  mapped = mix(mapped, vec3(1.0, 0.04, 0.03) * max(lum, 0.6), sRed * sa);
+  mapped *= 1.0 - 0.85 * sBlack * sa;
+
   outColor = vec4(mapped, 1.0);
 }
 `;
@@ -1297,6 +1411,9 @@ function createFluidScene(): Scene {
   let puff = createPuffState();
   let fold = createFoldState();
   let shock = createShockState();
+  let bolts: FluidBolts | null = null;
+  let boltsLoc: WebGLUniformLocation | null = null;
+  let strobe = createStrobeState();
 
   return {
     id: ID,
@@ -1318,10 +1435,13 @@ function createFluidScene(): Scene {
       const mirror = (symmetryToMirror(symDefault) ?? MIRROR_KALEIDO) as MirrorMode;
       const size = simResolutionFor(ctx.quality.detail, gl.drawingBufferWidth, gl.drawingBufferHeight, mirror);
       sim = createFluidSim(gl, quadVao, size, format);
+      bolts = createFluidBolts(gl, size.dyeW, size.dyeH, format);
+      boltsLoc = gl.getUniformLocation(displayProg.program, "uBolts");
       lastFrameTime = null;
       puff = createPuffState();
       fold = createFoldState();
       shock = createShockState();
+      strobe = createStrobeState();
     },
 
     render(ctx, frame, viewport, palette, anim) {
@@ -1365,7 +1485,10 @@ function createFluidScene(): Scene {
       const warp = resolveSceneSetting(ID, settingFor("warp"));
 
       const want = simResolutionFor(ctx.quality.detail, gl.drawingBufferWidth, gl.drawingBufferHeight, mirror);
-      if (!sameSimSize(want, sim.size)) sim.resize(want);
+      if (!sameSimSize(want, sim.size)) {
+        sim.resize(want);
+        bolts?.resize(want.dyeW, want.dyeH);
+      }
 
       // advancePuff's boolean return is the discrete "fired this frame" edge
       // for a caller that wants it; this scene only needs the envelope it
@@ -1399,6 +1522,28 @@ function createFluidScene(): Scene {
       const dtSim = warpedDt(dt, frame.energy, warp);
       sim.step({ dt: dtSim, curl, dissipation, viscosity, energy: frame.energy, splats });
 
+      // Lightning (Sparkle style 4): strikes on a strong treble onset, rooted
+      // on the jet column (boltEndpoints), drawn into the bolt layer before
+      // the display pass samples it. The extra strikes a high Sparkle
+      // setting adds skip the refractory so they land on the same hit.
+      if (bolts) {
+        const sparkle = resolveSceneSetting(ID, settingFor("sparkle"));
+        const sparkleSize = resolveSceneSetting(ID, settingFor("sparkleSize"));
+        const sparkleSpeed = resolveSceneSetting(ID, settingFor("sparkleSpeed"));
+        const lightning = Math.round(resolveSceneSetting(ID, settingFor("sparkleStyle"))) === 4;
+        if (lightning && anim.highOnset && anim.highPulse > 0.35) {
+          const count = 1 + Math.round(Math.max(0, sparkle - 0.5) * 4);
+          const len = BOLT_LEN_MIN + (BOLT_LEN_MAX - BOLT_LEN_MIN) * sparkleSize;
+          const amp = (0.6 + 0.6 * anim.highPulse) * (0.5 + sparkle);
+          for (let i = 0; i < count; i++) {
+            const [ax, ay, bx, by] = boltEndpoints(Math.random, mirror, len);
+            bolts.strike(ax, ay, bx, by, amp, i > 0);
+          }
+        }
+        bolts.tick(dt, BOLT_AFTERGLOW, sparkleSpeed);
+        bolts.draw(BOLT_WIDTH_MIN + (BOLT_WIDTH_MAX - BOLT_WIDTH_MIN) * sparkleSize);
+      }
+
       displayProg.use();
       uploadCommonUniforms(displayProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
       displayProg.setF("uDomainAspect", gl.drawingBufferWidth / gl.drawingBufferHeight);
@@ -1410,24 +1555,24 @@ function createFluidScene(): Scene {
         displayProg.setF("uFoldMix", foldMixEased(fold.mix));
         displayProg.setF("uFoldRot", fold.rot);
         displayProg.setF("uFoldZoom", foldZoom(fold, foldBreathe));
-        displayProg.setF("uFoldWedgesA", fold.wedgesA);
-        displayProg.setF("uFoldWedgesB", fold.wedgesB);
       } else {
         // A manual pick still carries the live rot/zoom from the
         // ever-advancing fold state (Off/Left-right/Top-bottom's own simUv
-        // branches ignore both anyway). The Mirror count slider drives A/B
-        // directly (even outside Radial, where simUv never reads them) so a
-        // pinned Radial's wedge count follows the slider live — no sim reset
-        // needed, since every pinned mode's domain is unaffected by it.
+        // branches ignore both anyway).
         displayProg.setF("uFoldA", manualMirror);
         displayProg.setF("uFoldB", manualMirror);
         displayProg.setF("uFoldMix", 0);
         displayProg.setF("uFoldRot", fold.rot);
         displayProg.setF("uFoldZoom", foldZoom(fold, foldBreathe));
-        const wedges = Math.round(foldCount);
-        displayProg.setF("uFoldWedgesA", wedges);
-        displayProg.setF("uFoldWedgesB", wedges);
       }
+      // Mirror count is authoritative everywhere — Auto and pinned alike —
+      // so the Radial fold's wedge count always comes straight from the
+      // foldCount setting, never from the fold-drift state (see FoldState's
+      // header comment for why that state carries no wedge count of its
+      // own).
+      const wedges = Math.round(foldCount);
+      displayProg.setF("uFoldWedgesA", wedges);
+      displayProg.setF("uFoldWedgesB", wedges);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sim.dyeTexture());
       gl.uniform1i(dyeLoc, 0);
@@ -1444,15 +1589,34 @@ function createFluidScene(): Scene {
       else if (anim.lowOnset) triggerShock(shock, 0.4 + 0.6 * anim.low);
       displayProg.setFv("uShockAge", shock.age);
       displayProg.setFv("uShockAmp", shock.amp);
+
+      // Light group: Strobe — a single white/red/black flash fired on a
+      // treble onset (gated to a strong-enough pulse so ordinary hi-hats
+      // don't flash) or, more strongly, a drop; see triggerStrobe/
+      // advanceStrobe/strobePhase above. uStrobeAmp folds the `strobe`
+      // setting itself into the triggering hit's own amplitude, so a low
+      // Strobe setting keeps the effect dim without touching STROBE_DUR.
+      advanceStrobe(strobe, dt);
+      if (anim.dropOnset) triggerStrobe(strobe, 1.0);
+      else if (anim.highOnset && anim.highPulse > 0.35) triggerStrobe(strobe, 0.5 + 0.5 * anim.highPulse);
+      const strobeSetting = resolveSceneSetting(ID, settingFor("strobe"));
+      displayProg.setF("uStrobeT", strobePhase(strobe));
+      displayProg.setF("uStrobeAmp", strobe.amp * strobeSetting);
+
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, sim.velTexture());
       gl.uniform1i(velSimLoc, 2);
       displayProg.setV2("uSimTexels", sim.size.dyeW, sim.size.dyeH);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, bolts ? bolts.texture() : null);
+      gl.uniform1i(boltsLoc, 3);
 
       drawFullscreenQuad(gl, quadVao);
 
       // The gallery renders every scene into one shared context each tick —
       // must not leak a bound texture unit onto the next tile.
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE1);
@@ -1467,6 +1631,9 @@ function createFluidScene(): Scene {
       displayProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
       sim?.dispose();
+      bolts?.dispose();
+      bolts = null;
+      boltsLoc = null;
       displayProg = null;
       quadVao = null;
       sim = null;
@@ -1478,6 +1645,7 @@ function createFluidScene(): Scene {
       puff = createPuffState();
       fold = createFoldState();
       shock = createShockState();
+      strobe = createStrobeState();
     },
   };
 }

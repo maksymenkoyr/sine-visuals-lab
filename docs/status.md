@@ -6,8 +6,11 @@ regenerate it at session close.
 
 ## In flight
 
-- **Neon Fluid scene, v5 (this session)** — branch `worktree-neon-fluid`,
-  draft PR #76. v5 (after two real-music rounds): gains cut to roughly a tenth
+- **Neon Fluid scene, v6 (this session)** — branch `worktree-neon-fluid`,
+  draft PR #76. v6: Lightning sparkle style (Storm bolt generator lifted into
+  `src/render/bolt.ts` + a sim-space bolt layer in `fluidBolts.ts`; Storm should
+  import from `bolt.ts` when it lands), a Light-group `strobe` (white, red,
+  black), Mirror count authoritative in Auto too. v5 (after two real-music rounds): gains cut to roughly a tenth
   of v4, puffs on bass onsets only (`PUFF_MIN_GAP`), one-flow fold warps, a
   Symmetry group (`foldCount` = live wedge-count slider, `foldSpread` unsqueezes the radial wedges, `foldSpin`,
   `foldBreathe`, `foldDrift`). v4: Mirror became `symmetry` with an Auto default that drifts
