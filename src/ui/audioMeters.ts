@@ -78,6 +78,14 @@ import {
  *    wire frame, so a mic-less renderer has nothing to show here and the
  *    card hides itself. (No stereo width/balance: a phone or laptop mic is
  *    mono, so they'd read "mono" nearly always.)
+ *  - Track (last): every cue song-boundary detection can pull out of a
+ *    FeatureFrame (src/render/songBoundary.ts) — monitor only, nothing reads
+ *    any of this yet. Confidence's trace runs over a much longer span than
+ *    every other trace in this file (a boundary's shape plays out over a
+ *    phrase or more), with its Provisional/Confirmed edges plotted alongside
+ *    it so a fire reads against the evidence that produced it; the rows
+ *    beneath are that evidence's individual pieces. No RAW counterpart for
+ *    any of it — see that file's header for why.
  *
  * Fills move every frame; readout text at ~10Hz (the same reasoning as
  * deviceMenu.ts's AUTO_UI_REFRESH_MS — text writes cost layout, and eyes
@@ -296,6 +304,21 @@ const BEAT_TRACE_HEIGHT_CSS_PX = 28;
 // (red) and "predicted" (blue) never read as the same line.
 const BEAT_GRID_COLOR = AUTO_SKY;
 
+// The Track card: song-boundary instrumentation (src/render/songBoundary.ts).
+// A song boundary's shape — a novelty climb, a gap, a tempo re-lock — plays
+// out over a phrase or more, not the few seconds HISTORY_SPAN_SEC is tuned
+// for, so the Confidence trace gets its own, much longer span rather than
+// sharing createTraceStrip's default.
+const BOUNDARY_TRACE_SPAN_SEC = 60;
+const BOUNDARY_TRACE_HEIGHT_CSS_PX = 40;
+// Provisional reuses the Beat trace's "algorithm's tentative read" blue;
+// Confirmed reuses HOT_RED directly — the same "something real just
+// happened" tint as a section drop and a clipping waveform.
+const BOUNDARY_PROVISIONAL_COLOR = AUTO_SKY;
+// Purely a visual scale for the Since boundary bar (sinceBoundarySec has no
+// natural ceiling) — the readout beside it always shows the honest number.
+const SINCE_BOUNDARY_REF_SEC = 120;
+
 interface TraceStripSeries {
   color: string;
   width: number;
@@ -314,8 +337,10 @@ interface TraceStripSeries {
  *  bound stretch with no reading at all — which traceHistory's caller
  *  (below) reads as "lift the pen" rather than a reading of zero, the same
  *  gap HISTORY_FIXED_COLOR relies on for a source with no fixed-mapping
- *  reading this tick. */
-function createTraceStrip(series: TraceStripSeries[], heightPx: number) {
+ *  reading this tick. `spanSec` defaults to HISTORY_SPAN_SEC (every existing
+ *  caller); the Track card's Confidence trace overrides it with a much
+ *  longer span — see BOUNDARY_TRACE_SPAN_SEC. */
+function createTraceStrip(series: TraceStripSeries[], heightPx: number, spanSec = HISTORY_SPAN_SEC) {
   const canvas = document.createElement("canvas");
   canvas.style.cssText = `display: block; width: 100%; height: ${heightPx}px; margin-top: 4px;`;
   const ctx = canvas.getContext("2d")!;
@@ -345,7 +370,7 @@ function createTraceStrip(series: TraceStripSeries[], heightPx: number) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     bufs = series.map(() => new Float32Array(w).fill(Number.NaN));
     head = 0;
-    columnMs = (HISTORY_SPAN_SEC * 1000) / w;
+    columnMs = (spanSec * 1000) / w;
     return true;
   }
 
@@ -1031,6 +1056,109 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   characterCard.body.appendChild(spacer());
   characterCard.body.appendChild(centroidRow.el);
 
+  // ---- Track ----
+  // Song-boundary instrumentation (src/render/songBoundary.ts) — monitor
+  // only, nothing reacts to any of this yet. Confidence is the fused belief,
+  // plotted over BOUNDARY_TRACE_SPAN_SEC alongside its two edges:
+  // Provisional fires fast and loose, Confirmed only once the new spectrum
+  // has actually stuck. The rows beneath are the individual pieces of
+  // evidence Confidence is built from, so a fire (or a near-miss) can be
+  // read back to whichever cue actually drove it. No RAW counterpart for
+  // any of these — see songBoundary.ts's file header on why rateScale
+  // doesn't reach this module at all.
+  const confidenceRow = createMeterRow({
+    label: "Confidence",
+    accent: NEUTRAL_ACCENT,
+    unit: "%",
+    // No ticks: el.children[1] (the meter/track they'd render into) is
+    // replaced by the trace canvas below, same as History/Beat/Centroid.
+    description:
+      "Blended belief that a song just changed — gap, spectral novelty, tempo, and range evidence combined. Provisional (blue) fires fast and loose; Confirmed (red) waits a few seconds to see whether the new sound actually stuck. Nothing reacts to this yet.",
+  });
+  const confidenceTrace = createTraceStrip(
+    [
+      { color: NEUTRAL_ACCENT, width: 1.5 },
+      { color: BOUNDARY_PROVISIONAL_COLOR, width: 1.5 },
+      { color: HOT_RED, width: 1.5 },
+    ],
+    BOUNDARY_TRACE_HEIGHT_CSS_PX,
+    BOUNDARY_TRACE_SPAN_SEC,
+  );
+  confidenceRow.el.children[1].replaceWith(confidenceTrace.canvas);
+  confidenceRow.setReadout(String(BOUNDARY_TRACE_SPAN_SEC));
+  const confidenceLegend = createTraceLegend([
+    { color: NEUTRAL_ACCENT, label: "Confidence" },
+    { color: BOUNDARY_PROVISIONAL_COLOR, label: "Provisional" },
+    { color: HOT_RED, label: "Confirmed" },
+  ]);
+  confidenceTrace.canvas.after(confidenceLegend.el);
+  const gapRow = createMeterRow({
+    label: "Gap",
+    accent: NEUTRAL_ACCENT,
+    unit: "%",
+    description:
+      "How long and how far Level (not Energy — this survives auto-gain) has dropped below the track's own established loudness. Near-certain evidence for a real gap between tracks; an ordinary musical rest is usually too short to fill the bar.",
+  });
+  const noveltyRow = createMeterRow({
+    label: "Novelty",
+    accent: NEUTRAL_ACCENT,
+    unit: "%",
+    description:
+      "How different the last couple of seconds sound from this track's own recent spectral shape. Frozen during a gap (see Gap above) so a quiet breakdown returning to the same material doesn't read as new.",
+  });
+  const centroidStepRow = createMeterRow({
+    label: "Centroid step",
+    accent: NEUTRAL_ACCENT,
+    unit: "%",
+    description:
+      "Frame-to-frame jump in the live spectral centroid (Character card). Overlaps with Novelty above — kept as its own reading to see whether it's pulling its weight.",
+  });
+  const tempoDropRow = createMeterRow({
+    label: "Tempo drop",
+    accent: NEUTRAL_ACCENT,
+    unit: "%",
+    description:
+      "How far the beat tracker's lock (Rhythm card) has fallen from its own recent peak — a dropout, most often a gap with no beat to hold onto.",
+  });
+  const tempoShiftRow = createMeterRow({
+    label: "Tempo shift",
+    accent: NEUTRAL_ACCENT,
+    unit: "%",
+    description:
+      "When the tracker re-locks after a drop, how far the new tempo sits from the one it held before. A genuine tempo change is strong evidence; re-locking to the same tempo is weak — that's what a breakdown looks like.",
+  });
+  const rangeStaleRow = createMeterRow({
+    label: "Range stale",
+    accent: NEUTRAL_ACCENT,
+    unit: "%",
+    description:
+      "How long Section's own dynamic range (Rhythm card) has sat pinned at an extreme — a sign its floor/ceiling belongs to different music than what's playing now, which is the actual cost of not knowing a track changed.",
+  });
+  const sinceRow = createMeterRow({
+    label: "Since boundary",
+    accent: NEUTRAL_ACCENT,
+    unit: "s",
+    description: "Time since the last Confirmed edge above.",
+  });
+  const trackCard = createCard({ title: "Track", accent: NEUTRAL_ACCENT, foldId: "track" });
+  trackCard.body.append(
+    confidenceRow.el,
+    spacer(),
+    gapRow.el,
+    spacer(),
+    noveltyRow.el,
+    spacer(),
+    centroidStepRow.el,
+    spacer(),
+    tempoDropRow.el,
+    spacer(),
+    tempoShiftRow.el,
+    spacer(),
+    rangeStaleRow.el,
+    spacer(),
+    sinceRow.el,
+  );
+
   // ---- Scope ----
   const waveform = createMeterRow({
     label: "Waveform",
@@ -1049,7 +1177,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
 
   // The scope leads: it's the one live picture of the sound itself, and the
   // first thing to check when the visuals seem off.
-  root.append(metersHeader, scopeCard.el, signalCard.el, lufsCard.el, rhythmCard.el, characterCard.el);
+  root.append(metersHeader, scopeCard.el, signalCard.el, lufsCard.el, rhythmCard.el, characterCard.el, trackCard.el);
 
   // Ring buffer of columns, one pixel each — oldest at `head`, newest just
   // before it — plus the column currently being accumulated.
@@ -1303,6 +1431,53 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       } else {
         // Folded: don't accumulate a column while hidden, same as History.
         centroidTrace.resetColumn();
+      }
+
+      // ---- Track ----
+      if (!trackCard.fold?.isFolded()) {
+        const boundary = anim?.boundary ?? null;
+        confidenceRow.setValue(boundary ? boundary.confidence : null, dtSec);
+        if (boundary?.confirmed) confidenceRow.flash(HOT_RED);
+        else if (boundary?.provisional) confidenceRow.flash(BOUNDARY_PROVISIONAL_COLOR);
+        confidenceTrace.push(
+          boundary
+            ? [boundary.confidence, boundary.provisional ? boundary.confidence : 0, boundary.confirmed ? 1 : 0]
+            : [null, null, null],
+          nowMs,
+        );
+        confidenceTrace.draw();
+
+        gapRow.setValue(boundary ? boundary.gapConfidence : null, dtSec);
+        noveltyRow.setValue(boundary ? boundary.novelty : null, dtSec);
+        centroidStepRow.setValue(boundary ? boundary.centroidStep : null, dtSec);
+        tempoDropRow.setValue(boundary ? boundary.tempoLockDrop : null, dtSec);
+        tempoShiftRow.setValue(boundary ? boundary.tempoShift : null, dtSec);
+        rangeStaleRow.setValue(boundary ? boundary.rangeStale : null, dtSec);
+        // Infinity (never confirmed yet) reads as an empty bar, same as every
+        // other row's "nothing to show" — not a full one, which would visually
+        // read backwards as "a long time" rather than "N/A".
+        const since = boundary?.sinceBoundarySec ?? null;
+        sinceRow.setValue(
+          since !== null && Number.isFinite(since) ? clamp(since / SINCE_BOUNDARY_REF_SEC, 0, 1) : null,
+          dtSec,
+        );
+
+        if (text) {
+          confidenceRow.setReadout(boundary ? pct(boundary.confidence) : "--", boundary ? {} : IDLE);
+          gapRow.setReadout(boundary ? pct(boundary.gapConfidence) : "--", boundary ? {} : IDLE);
+          noveltyRow.setReadout(boundary ? pct(boundary.novelty) : "--", boundary ? {} : IDLE);
+          centroidStepRow.setReadout(boundary ? pct(boundary.centroidStep) : "--", boundary ? {} : IDLE);
+          tempoDropRow.setReadout(boundary ? pct(boundary.tempoLockDrop) : "--", boundary ? {} : IDLE);
+          tempoShiftRow.setReadout(boundary ? pct(boundary.tempoShift) : "--", boundary ? {} : IDLE);
+          rangeStaleRow.setReadout(boundary ? pct(boundary.rangeStale) : "--", boundary ? {} : IDLE);
+          sinceRow.setReadout(
+            since !== null && Number.isFinite(since) ? since.toFixed(0) : "--",
+            since !== null && Number.isFinite(since) ? {} : IDLE,
+          );
+        }
+      } else {
+        // Folded: don't accumulate a column while hidden, same as History.
+        confidenceTrace.resetColumn();
       }
 
       // ---- Loudness ----

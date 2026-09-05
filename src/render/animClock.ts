@@ -5,6 +5,7 @@ import { createBandEnergy, type BandEnergy } from "./bandEnergy.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
 import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroid.ts";
+import { createSongBoundary, type SongBoundary, type SongBoundarySnapshot } from "./songBoundary.ts";
 import { SMOOTHING_DEFAULT, smoothingRateScale } from "../audio/sensitivity.ts";
 import { BEAT_GRID_DEFAULT, beatGridBeats } from "../audio/beatGrid.ts";
 import { createGridPulse, type GridPulse } from "./gridPulse.ts";
@@ -76,6 +77,11 @@ export interface AnimFrame {
   /** The unsmoothed, absolute counterpart to centroid — see
    *  spectralCentroid.ts. */
   centroidRaw: number;
+  /** Every cue toward "did the track just change" — monitor-only today, see
+   *  songBoundary.ts. Nothing reacts to this yet; it feeds the meters
+   *  panel's Track card (src/ui/audioMeters.ts) so the cues can be watched
+   *  against real transitions before anything is built on top of them. */
+  boundary: SongBoundarySnapshot;
 }
 
 export interface AnimClock {
@@ -101,6 +107,7 @@ export function createAnimClock(): AnimClock {
   const section: SectionIntensity = createSectionIntensity();
   const profile: MusicProfile = createMusicProfile();
   const centroid: SpectralCentroid = createSpectralCentroid();
+  const boundary: SongBoundary = createSongBoundary();
   const grid: GridPulse = createGridPulse();
   let beatPulse = 0;
 
@@ -113,6 +120,11 @@ export function createAnimClock(): AnimClock {
       section.advance(dtSec, frame.energy, rateScale);
       profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
       centroid.advance(dtSec, frame.bands, rateScale);
+      boundary.advance(dtSec, frame, {
+        tempoLock: beat.tempoLock,
+        rawIntensity: section.rawIntensity,
+        centroidRaw: centroid.raw,
+      });
 
       // The beat clock itself always tracks the raw detector (above) — the
       // grid is a view over it, not a feedback into it.
@@ -157,6 +169,20 @@ export function createAnimClock(): AnimClock {
         },
         centroid: centroid.centroid,
         centroidRaw: centroid.raw,
+        boundary: {
+          quietDepth: boundary.quietDepth,
+          quietHoldSec: boundary.quietHoldSec,
+          gapConfidence: boundary.gapConfidence,
+          novelty: boundary.novelty,
+          centroidStep: boundary.centroidStep,
+          tempoLockDrop: boundary.tempoLockDrop,
+          tempoShift: boundary.tempoShift,
+          rangeStale: boundary.rangeStale,
+          confidence: boundary.confidence,
+          provisional: boundary.provisional,
+          confirmed: boundary.confirmed,
+          sinceBoundarySec: boundary.sinceBoundarySec,
+        },
       };
     },
   };
