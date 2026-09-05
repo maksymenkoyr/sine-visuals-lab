@@ -978,10 +978,10 @@ describe("Light group settings", () => {
     expect(beatFlash.reads).toBeUndefined();
   });
 
-  it("strobe is manual (no auto), reads anim.dropOnset, and defaults to 0.35", () => {
+  it("strobe is manual (no auto), claims no signal of its own (it rides the lightning strikes), and defaults to 0.35", () => {
     const strobe = SETTINGS.find((s) => s.key === "strobe")!;
     expect(strobe.auto).toBeUndefined();
-    expect(strobe.reads).toEqual(["anim.dropOnset"]);
+    expect(strobe.reads).toBeUndefined();
     expect(strobe.default).toBe(0.35);
   });
 });

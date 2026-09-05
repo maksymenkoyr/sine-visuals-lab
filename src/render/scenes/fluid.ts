@@ -820,13 +820,12 @@ export const SETTINGS: SceneSetting[] = [
   {
     key: "strobe",
     label: "Strobe",
-    description: "White → red → black flash on treble hits and drops (photosensitivity: keep low on shared screens)",
+    description: "White → red → black flash with each lightning strike (Lightning sparkle style only; photosensitivity: keep low on shared screens)",
     group: "Light",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.35,
-    reads: ["anim.dropOnset"],
   },
   {
     key: "sparkle",
@@ -1535,11 +1534,15 @@ function createFluidScene(): Scene {
           const count = 1 + Math.round(Math.max(0, sparkle - 0.5) * 4);
           const len = BOLT_LEN_MIN + (BOLT_LEN_MAX - BOLT_LEN_MIN) * sparkleSize;
           const amp = (0.6 + 0.6 * anim.highPulse) * (0.5 + sparkle);
+          let struck = false;
           for (let i = 0; i < count; i++) {
             const [ax, ay, bx, by] = boltEndpoints(Math.random, mirror, len);
-            bolts.strike(ax, ay, bx, by, amp, i > 0);
+            if (bolts.strike(ax, ay, bx, by, amp, i > 0)) struck = true;
           }
+          // The strobe belongs to the lightning: it fires only with a bolt.
+          if (struck) triggerStrobe(strobe, 0.5 + 0.5 * anim.highPulse);
         }
+        advanceStrobe(strobe, dt);
         bolts.tick(dt, BOLT_AFTERGLOW, sparkleSpeed);
         bolts.draw(BOLT_WIDTH_MIN + (BOLT_WIDTH_MAX - BOLT_WIDTH_MIN) * sparkleSize);
       }
@@ -1590,15 +1593,12 @@ function createFluidScene(): Scene {
       displayProg.setFv("uShockAge", shock.age);
       displayProg.setFv("uShockAmp", shock.amp);
 
-      // Light group: Strobe — a single white/red/black flash fired on a
-      // treble onset (gated to a strong-enough pulse so ordinary hi-hats
-      // don't flash) or, more strongly, a drop; see triggerStrobe/
-      // advanceStrobe/strobePhase above. uStrobeAmp folds the `strobe`
-      // setting itself into the triggering hit's own amplitude, so a low
-      // Strobe setting keeps the effect dim without touching STROBE_DUR.
-      advanceStrobe(strobe, dt);
-      if (anim.dropOnset) triggerStrobe(strobe, 1.0);
-      else if (anim.highOnset && anim.highPulse > 0.35) triggerStrobe(strobe, 0.5 + 0.5 * anim.highPulse);
+      // Light group: Strobe — a single white/red/black flash that rides each
+      // lightning strike (triggered in the Lightning block above, so it only
+      // exists in that sparkle style); see triggerStrobe/advanceStrobe/
+      // strobePhase. uStrobeAmp folds the `strobe` setting itself into the
+      // strike's own amplitude, so a low Strobe setting keeps the effect dim
+      // without touching STROBE_DUR.
       const strobeSetting = resolveSceneSetting(ID, settingFor("strobe"));
       displayProg.setF("uStrobeT", strobePhase(strobe));
       displayProg.setF("uStrobeAmp", strobe.amp * strobeSetting);
