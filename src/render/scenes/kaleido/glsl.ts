@@ -8,6 +8,11 @@
  *  than the reference's ink). */
 export const INK_DARK = "vec3(0.05, 0.04, 0.11)";
 
+/** Cell size at Tiling = 0.5, the size every style's constants are tuned
+ *  for (index.ts's lattice zoom hands each style a cell of any size). Lives
+ *  here rather than index.ts so styles.ts can import it without a cycle. */
+export const CELL_MID = 1.8;
+
 /** Octaves in the scale-cycling noise (zfbm below) at full detail; one
  *  fewer on a low tier. */
 export const ZOOM_OCTAVES = 5;

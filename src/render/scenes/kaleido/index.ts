@@ -1,7 +1,7 @@
 import { createFullscreenScene } from "../../fullscreenScene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import type { SignalLink } from "../../signals.ts";
-import { KALEIDO_COMMON_GLSL } from "./glsl.ts";
+import { CELL_MID, KALEIDO_COMMON_GLSL } from "./glsl.ts";
 import { BURST_GLSL, HEX_STYLE, MANDALA_GLSL, PORTAL_GLSL, PRISM_GLSL, STYLE_NAMES } from "./styles.ts";
 
 // A mirror-tiled lattice of mandalas in four styles (styles.ts): Mandala,
@@ -24,15 +24,29 @@ import { BURST_GLSL, HEX_STYLE, MANDALA_GLSL, PORTAL_GLSL, PRISM_GLSL, STYLE_NAM
 // and kicks the other styles' zoom, plus a swell envelope on the radius and
 // brightness.
 //
+// The infinite zoom is a lattice zoom, main(): the cell size grows
+// continuously — exactly what dragging Tiling does — from the Tiling size
+// up to the size whose core covers the screen, and every mandala's core is
+// a window onto the same lattice one level smaller (CORE_FRAC), so when a
+// mandala has swallowed the screen the picture is already the next level's
+// lattice at the Tiling size and the cycle restarts without a cut. A
+// level's cores only open once its cell has grown past the Tiling size, so
+// the newest level is never showing anything the level it replaces wasn't.
+// Every style therefore draws itself in cell-relative units (Mandala
+// rescales r to CELL_MID; the others already work in r/cell), which is
+// what makes a bigger cell a bigger mandala rather than a wider view. What
+// moves *inside* a cell — bands, rings, stripes, shards streaming out — is
+// the flow (uFlowPos), never the zoom, so the camera and the material
+// don't double up.
+//
 // What the reference videos actually do with the music, measured (frame
 // log-polar registration against librosa onsets, 15 fps): every one zooms
 // in continuously — the Prism short at about half a log unit per second,
 // Burst at a seventh of that — with a zoom kick on every beat in Prism, and
 // brightness that tracks the loudness and pops per beat in all of them
-// (the Portal short is silent). Hence the Zoom slider, the surge routed
-// into the zoom, and glsl.ts's beatLift. The infinite zoom itself is
-// styles.ts's business: each style dives in whatever coordinates make the
-// dive exact for it.
+// (the Portal short is silent). Hence the Zoom slider and glsl.ts's
+// beatLift; the beat surge pushes the flow (the material, not the camera),
+// which reads as the kick without the lattice lurching.
 //
 // Why uSymmetry only takes even values, and why nothing may rotate near a
 // cell edge: the picture depends on r and the mirror-folded angle only, so
@@ -57,9 +71,20 @@ import { BURST_GLSL, HEX_STYLE, MANDALA_GLSL, PORTAL_GLSL, PRISM_GLSL, STYLE_NAM
 
 /** Viewport-height span of the centred coordinate system. */
 const ZOOM = 2.3;
-/** Cell size at Tiling = 0.5, and the per-slider-unit ratio around it. */
-const CELL_MID = 1.8;
+/** Ratio of cell size per unit of the Tiling slider, around CELL_MID. */
 const CELL_SPAN = 2.8;
+/** The lattice zoom: every mandala's core, this fraction of its cell in
+ *  radius, is a window onto the lattice one level smaller. The cycle's
+ *  largest cell is the one whose core covers the screen's half-diagonal,
+ *  so the level above is invisible at the moment the cycle wraps. Levels
+ *  drawn per pixel (the visible one plus what shows through its cores),
+ *  the softness of a core's edge and the ink ring on it (fractions of the
+ *  cell), and the palette step between nested levels. */
+const CORE_FRAC = 0.2;
+const ZOOM_LEVELS = 3;
+const CORE_SOFT = 0.006;
+const RING_W = 0.008;
+const LEVEL_HUE = 0.07;
 /** Where a warm cycle starts in the palette — a touch above 0 so Neon's
  *  first band is a deep red rather than a pink. */
 const CYCLE_BASE = 0.02;
@@ -190,7 +215,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "spread",
     label: "Tiling",
-    description: "How large each mandala's cell is — small tiles many across the screen, large is a single mandala filling it",
+    description: "How large each mandala's cell is — small tiles many across the screen, large is a single mandala filling it; with Zoom on, the size each dive starts from",
     group: "Form",
     min: 0,
     max: 1,
@@ -246,7 +271,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "flow",
     label: "Flow",
-    description: "How fast Mandala's bands and Portal's ground stream outward; bass pushes them faster",
+    description: "How fast the bands, rings, stripes or shards stream out of every centre; bass pushes them faster",
     group: "Motion",
     min: 0,
     max: 1,
@@ -258,7 +283,7 @@ const SETTINGS: SceneSetting[] = [
     key: "zoom",
     label: "Zoom",
     description:
-      "How hard the picture dives into itself, forever — Portal, Prism and Burst zoom in at this rate; in Mandala the bands stream faster the further out they are, new ones born at the centre",
+      "How fast the camera dives in — the tiles grow as if Tiling were being dragged up, and every mandala's centre opens onto the next lattice down, forever; Tiling is where each dive starts",
     group: "Motion",
     min: 0,
     max: 1,
@@ -357,36 +382,71 @@ ${PORTAL_GLSL}
 ${PRISM_GLSL}
 ${BURST_GLSL}
 
+vec2 cellCoords(vec2 p, float cell, bool hex) {
+  return hex ? hexCell(p, cell) : mod(p + cell * 0.5, cell) - cell * 0.5;
+}
+
+vec3 styleAt(int style, vec2 c, float cell, float n, float pxSize, float tBase) {
+  float r = length(c) * (1.0 - ${BEAT_SWELL.toFixed(3)} * uBeatSwell);
+  float a = atan(c.y, c.x);
+  if (style == 1) return stylePortal(c, cell, r, a, n, pxSize, tBase);
+  if (style == 2) return stylePrism(c, cell, r, a, n, pxSize, tBase);
+  if (style == 3) return styleBurst(c, cell, r, a, n, pxSize, tBase);
+  return styleMandala(c, cell, r, a, n, pxSize, tBase);
+}
+
 void main() {
   vec2 uv = roomUv(vUv);
   vec2 aspectFix = vec2(uResolution.x / uResolution.y, 1.0);
   vec2 p = (uv - 0.5) * aspectFix * ${ZOOM.toFixed(2)};
-
-  // Coordinates relative to the nearest mandala centre: square cells, or
-  // the hexagonal lattice for the style that wants it (header).
-  float cell = ${CELL_MID.toFixed(2)} * pow(${CELL_SPAN.toFixed(2)}, (uSpread - 0.5) * 2.0);
-  int style = int(uStyle + 0.5);
-  float n = max(2.0, floor(uSymmetry * 0.5 + 0.5) * 2.0);
-  vec2 c;
-  if (style == ${HEX_STYLE}) {
-    c = hexCell(p, cell);
-    n = max(6.0, floor(n / 6.0 + 0.5) * 6.0);
-  } else {
-    c = mod(p + cell * 0.5, cell) - cell * 0.5;
-  }
-
-  float r = length(c) * (1.0 - ${BEAT_SWELL.toFixed(3)} * uBeatSwell);
-  float a = atan(c.y, c.x);
   // Pixel size in p units — p is linear in vUv, so fwidth on it is exact
   // and seam-free.
   float pxSize = max(fwidth(p.x), fwidth(p.y));
   float tBase0 = ${CYCLE_BASE.toFixed(2)} + uPalShift + (uCentroid - 0.5) * uTint * 0.25;
+  int style = int(uStyle + 0.5);
+  bool hex = style == ${HEX_STYLE};
+  float n = max(2.0, floor(uSymmetry * 0.5 + 0.5) * 2.0);
+  if (hex) n = max(6.0, floor(n / 6.0 + 0.5) * 6.0);
 
-  vec3 col;
-  if (style == 1) col = stylePortal(c, cell, r, a, n, pxSize, tBase0);
-  else if (style == 2) col = stylePrism(c, cell, r, a, n, pxSize, tBase0);
-  else if (style == 3) col = styleBurst(c, cell, r, a, n, pxSize, tBase0);
-  else col = styleMandala(c, cell, r, a, n, pxSize, tBase0);
+  // The lattice zoom (header): the cell grows from the Tiling size to the
+  // size whose core swallows the whole screen, then the cycle restarts one
+  // level down — invisibly, because every mandala's core is a window onto
+  // the lattice a level smaller, and a level's cores only open once its
+  // cell has grown past the Tiling size.
+  float cMin = ${CELL_MID.toFixed(2)} * pow(${CELL_SPAN.toFixed(2)}, (uSpread - 0.5) * 2.0);
+  float halfDiag = 0.5 * ${ZOOM.toFixed(2)} * length(aspectFix);
+  float cMax = max(halfDiag / ${CORE_FRAC.toFixed(3)}, cMin * 2.0);
+  float cycle = log2(cMax / cMin);
+  float K = cMax / cMin;
+  float turns = floor(uZoomPos / cycle);
+  float C = cMin * exp2(uZoomPos - turns * cycle);
+
+  vec3 col = vec3(0.0);
+  float carry = 1.0;
+  float ring = 0.0;
+  for (int k = 0; k < ${ZOOM_LEVELS}; k++) {
+    float cellK = C / pow(K, float(k));
+    vec2 c = cellCoords(p, cellK, hex);
+    float r = length(c);
+    float open = smoothstep(cMin / K, cMin, cellK);
+    float core = ${CORE_FRAC.toFixed(3)} * cellK * open;
+    float soft = ${CORE_SOFT.toFixed(3)} * cellK + pxSize;
+    float m = open > 0.0 ? smoothstep(core - soft, core + soft, r) : 1.0;
+    float w = carry * m;
+    if (w > 0.002) {
+      // Each level a step along the palette, keyed on the absolute level so
+      // a level keeps its hue as it grows into the next slot.
+      float tBase = tBase0 + (turns + float(k)) * ${LEVEL_HUE.toFixed(3)};
+      col += w * styleAt(style, c, cellK, n, pxSize, tBase);
+    }
+    if (open > 0.0) {
+      float rw = ${RING_W.toFixed(3)} * cellK + pxSize;
+      ring += carry * (1.0 - smoothstep(rw - pxSize, rw + pxSize, abs(r - core))) * open;
+    }
+    carry *= 1.0 - m;
+    if (carry < 0.002) break;
+  }
+  col = mix(col, INK, min(1.0, ring) * min(1.0, uInk * 1.2));
   outColor = vec4(col, 1.0);
 }
 `;

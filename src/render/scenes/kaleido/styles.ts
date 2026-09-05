@@ -7,24 +7,28 @@
 // rule they must all respect is in index.ts's header: depend only on r and
 // a *folded* angle, and mask any rotation to zero before r reaches cell/2.
 //
-// How each style dives (the infinite zoom, index.ts header): Mandala's
-// concentric ramp goes logarithmic with the Zoom slider so its bands stream
-// out exponentially, new ones born at the centre; Portal's annuli are log-
-// spaced and drift outward with uZoomPos; Prism samples its texture through
-// zfbm, which cycles octaves as uZoomPos grows; Burst lives in log-polar
-// coordinates, where a zoom is a plain shift.
+// The camera zoom is index.ts's lattice zoom; what each style does inside
+// its cell is the *flow* (uFlowPos): Mandala's bands stream out along a
+// part-logarithmic ramp, Portal's log-spaced annuli drift outward, Prism's
+// log-spiral stripes slide out and its noise warp cycles octaves (zfbm),
+// Burst's log-polar shards rush out. All are exact in their own coordinates
+// so the flow never runs out or repeats; the beat surge (uSurgePos) rides
+// the same phase.
 
 import { RAINBOW_BLUE } from "./glsl.ts";
+import { CELL_MID } from "./glsl.ts";
 
 /** Rotation is full inside this fraction of the cell and masks to zero at
  *  the edge (0.5), so no rotated ring ever meets a cell mirror (index.ts
  *  header) and the shear of the fade band lands between rings, not on the
  *  big outer ones. */
 const EDGE_MASK_INNER = 0.3;
-/** Octaves of zoom one unit of the beat surge's displacement adds, in the
- *  texture styles (Mandala pushes its bands instead). */
+/** Flow phase per unit uFlowPos in the texture styles (in the octave-like
+ *  units each style's z is in), and the octaves one unit of the beat
+ *  surge's displacement adds (Mandala pushes its bands instead). */
+const TEXTURE_FLOW = 0.3;
 export const SURGE_ZOOM = 0.25;
-/** Bar breathe in the texture styles: octaves the zoom rocks by, once per
+/** Bar breathe in the texture styles: octaves the flow rocks by, once per
  *  bar while the tempo is locked. */
 const BREATHE_OCTAVES = 0.12;
 
@@ -58,13 +62,14 @@ const FAMILIES_LOW_DETAIL = 3;
 
 /** F units per unit radius — the base concentric ramp at Zoom = 0. */
 const RING_RAMP = 3.0;
-/** The ramp at Zoom = 1: F units per unit of log radius, and the radius
- *  the two ramps agree at. Bands then sit at r = r1 * exp(F / LOG_RAMP):
- *  exponentially spaced, so the outward flow is a zoom — every band moves
- *  at a speed proportional to its radius and new ones are born at the
- *  centre forever. */
+/** A logarithmic ramp blended into the linear one by LOG_MIX: F units per
+ *  unit of log radius, and the radius the two ramps agree at. Bands on it
+ *  sit at r = r1 * exp(F / LOG_RAMP), exponentially spaced, so the outward
+ *  flow reads as a dive — bands speed up with radius and new ones are born
+ *  at the centre forever. */
 const LOG_RAMP = 1.6;
 const LOG_R1 = 0.5;
+const LOG_MIX = 0.35;
 /** Bands per F unit at Ring density = 0.5, and the octave span of that slider. */
 const BANDS_MID = 6.0;
 const BANDS_SPAN_OCTAVES = 2.0;
@@ -125,6 +130,14 @@ const familyGlsl = FAMILIES.map((f, j) => {
 
 export const MANDALA_GLSL = `
 vec3 styleMandala(vec2 c, float cell, float r, float a, float n, float pxSize, float tBase0) {
+  // Cell-relative units: the field below is tuned for a cell of CELL_MID,
+  // and a bigger cell must be a bigger mandala, not a wider view of it
+  // (the lattice zoom, index.ts header).
+  float su = ${CELL_MID.toFixed(2)} / cell;
+  c *= su;
+  r *= su;
+  pxSize *= su;
+  cell = ${CELL_MID.toFixed(2)};
   float core = smoothstep(0.0, ${CORE_FADE.toFixed(3)}, r);
   float core2 = smoothstep(0.0, ${(CORE_FADE * 2.5).toFixed(3)}, r);
   // Outer rings settle toward plain circles so the corner motif below owns
@@ -141,15 +154,15 @@ vec3 styleMandala(vec2 c, float cell, float r, float a, float n, float pxSize, f
   float split = uBreathe * uTempoLock * (0.5 - 0.5 * cos(TWO_PI * uBarPhase));
   int fam = uDetail < 0.5 ? ${FAMILIES_LOW_DETAIL} : ${FAMILY_COUNT};
 
-  // The concentric ramp: linear at Zoom 0, logarithmic at Zoom 1 (the
-  // bands then stream outward as a zoom — see LOG_RAMP).
+  // The concentric ramp: part linear, part logarithmic (LOG_RAMP), so the
+  // flow streams the bands out as a dive.
   float rz = max(r, 0.01);
-  float F = mix(r * ${RING_RAMP.toFixed(2)}, ${LOG_RAMP.toFixed(2)} * log(rz / ${LOG_R1.toFixed(2)}) + ${(RING_RAMP * LOG_R1).toFixed(2)}, uZoom);
+  float F = mix(r * ${RING_RAMP.toFixed(2)}, ${LOG_RAMP.toFixed(2)} * log(rz / ${LOG_R1.toFixed(2)}) + ${(RING_RAMP * LOG_R1).toFixed(2)}, ${LOG_MIX.toFixed(2)});
   // dF/dr and dF/dangle, accumulated analytically alongside F: the band
   // footprint below needs |grad F|, and screen-space derivatives can't give
   // it — across a mirror line the neighbouring pixel is the mirror image,
   // so fwidth reads ~0 there and dotted every fold.
-  float dFdr = mix(${RING_RAMP.toFixed(2)}, ${LOG_RAMP.toFixed(2)} / rz, uZoom);
+  float dFdr = mix(${RING_RAMP.toFixed(2)}, ${LOG_RAMP.toFixed(2)} / rz, ${LOG_MIX.toFixed(2)});
   float dFda = 0.0;
   ${familyGlsl}
 
@@ -214,8 +227,8 @@ vec3 styleMandala(vec2 c, float cell, float r, float a, float n, float pxSize, f
 
 // One mandala per cell, filling it: a disc of discrete annuli, each ring a
 // row of big ornate petals — pointed lobes with nested contours inside — in
-// its own hue, some rings a lace of beads instead, drifting outward as the
-// zoom dives (new rings born at the centre), with the corners outside the
+// its own hue, some rings a lace of beads instead, drifting outward with
+// the flow (new rings born at the centre), with the corners outside the
 // disc given to a rosette in the complementary hue — after CPu8pZPClww,
 // whose disc stacks navy leaves, scalloped orange petals and zigzag lace on
 // an orange ground.
@@ -241,10 +254,10 @@ export const PORTAL_GLSL = `
 vec3 stylePortal(vec2 c, float cell, float r, float a, float n, float pxSize, float tBase0) {
   float R = cell * ${PORTAL_DISC.toFixed(3)};
   float density = ${PORTAL_RINGS_MID.toFixed(2)} * pow(2.0, (uRings - 0.5) * 1.5);
-  float z = uZoomPos + uSurgePos * ${SURGE_ZOOM.toFixed(2)}
+  float z = uFlowPos * ${TEXTURE_FLOW.toFixed(2)} + uSurgePos * ${SURGE_ZOOM.toFixed(2)}
     + uBreathe * uTempoLock * ${BREATHE_OCTAVES.toFixed(2)} * (0.5 - 0.5 * cos(TWO_PI * uBarPhase));
   // Ring index grows outward; a ring's index is fixed to its material, so
-  // the whole stack drifts outward as z grows. The widths wander so the
+  // the whole stack drifts outward as the flow phase z grows. The widths wander so the
   // stack isn't a uniform ladder.
   float rl0 = log(max(r, 1e-4) / R) * density + z;
   float rl = rl0 + ${PORTAL_WIDTH_WANDER.toFixed(2)} * sin(rl0 * 1.3 + 1.0);
@@ -371,12 +384,12 @@ vec3 stylePrism(vec2 c, float cell, float r, float a, float n, float pxSize, flo
   float rot = ${PRISM_SPIN.toFixed(2)} * uSpin * uSpinPos * edgeMask;
   float sgn;
   float af = foldAngle(a + rot, n, sgn);
-  float z = uZoomPos + uSurgePos * ${SURGE_ZOOM.toFixed(2)}
+  float z = uFlowPos * ${TEXTURE_FLOW.toFixed(2)} + uSurgePos * ${SURGE_ZOOM.toFixed(2)}
     + uBreathe * uTempoLock * ${BREATHE_OCTAVES.toFixed(2)} * (0.5 - 0.5 * cos(TWO_PI * uBarPhase));
   float lr = log(max(r, 1e-4) / cell);
   // The wedge as a plane patch for the warp noise (zooms about the centre).
   float ang = af * sector * 0.5;
-  vec2 w = exp(lr) * vec2(cos(ang), sin(ang)) * ${PRISM_SCALE.toFixed(2)} * cell;
+  vec2 w = exp(lr) * vec2(cos(ang), sin(ang)) * ${PRISM_SCALE.toFixed(2)} * ${CELL_MID.toFixed(2)};
   float warp = zfbm(w, z * 1.4427 + uMorphPos * 0.3, false) - 0.5;
   float warp2 = zfbm(w * 1.7 + vec2(23.0, 9.0), z * 1.4427 + uMorphPos * 0.2, false) - 0.5;
   // Log-spiral stripes: a line in (log r, angle) is scale-free, so the
@@ -462,7 +475,7 @@ vec3 styleBurst(vec2 c, float cell, float r, float a, float n, float pxSize, flo
   float rot = ${BURST_SPIN.toFixed(2)} * uSpin * uSpinPos * edgeMask;
   float sgn;
   float af = foldAngle(a + rot, n, sgn);
-  float z = uZoomPos + uSurgePos * ${SURGE_ZOOM.toFixed(2)}
+  float z = uFlowPos * ${TEXTURE_FLOW.toFixed(2)} + uSurgePos * ${SURGE_ZOOM.toFixed(2)}
     + uBreathe * uTempoLock * ${BREATHE_OCTAVES.toFixed(2)} * (0.5 - 0.5 * cos(TWO_PI * uBarPhase));
   float lr = log(max(r, 1e-4) / cell);
   // Log-polar shard field: u along the radius (shifted by the zoom), v
