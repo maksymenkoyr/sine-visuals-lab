@@ -20,6 +20,6 @@
     "composite": true,
     "tsBuildInfoFile": "./tsconfig.tsbuildinfo"
   },
-  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "vite-tuning-plugin.ts", "sceneDefaultsPatch.ts"],
+  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "vite-tuning-plugin.ts", "vite-scene-links-plugin.ts", "sceneDefaultsPatch.ts"],
   "exclude": ["server"]
 }
