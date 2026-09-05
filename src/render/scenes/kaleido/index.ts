@@ -2,34 +2,51 @@ import { createFullscreenScene } from "../../fullscreenScene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import type { SignalLink } from "../../signals.ts";
 import { KALEIDO_COMMON_GLSL } from "./glsl.ts";
-import { BURST_GLSL, MANDALA_GLSL, PORTAL_GLSL, PRISM_GLSL, STYLE_NAMES } from "./styles.ts";
+import { BURST_GLSL, HEX_STYLE, MANDALA_GLSL, PORTAL_GLSL, PRISM_GLSL, STYLE_NAMES } from "./styles.ts";
 
 // A mirror-tiled lattice of mandalas in four styles (styles.ts): Mandala,
 // nested hard-edged contour bands after the "Kaleidoscope Visuals" short
-// IHRMKsTh0Sk; Portal, discrete textured annuli that counter-rotate and
-// drift inward, after CPu8pZPClww; Prism, a mirror kaleidoscope of a warped
-// posterised noise texture, after XDNSvjOIxQA; Burst, radial shards rushing
-// out from a dark star core, after Lj4Ae4T3XP0.
+// IHRMKsTh0Sk; Portal, a disc of densely petalled annuli drifting out of
+// the centre, after CPu8pZPClww; Prism, a three-mirror kaleidoscope of a
+// warped, hard-posterised rainbow texture, after XDNSvjOIxQA; Burst, a
+// rosette of crystal shards rushing out of a dark jagged star, after
+// Lj4Ae4T3XP0. Style is the scene's variant (SceneSetting.variant): every
+// other setting keeps its own value per style.
 //
-// How every style is framed: the plane is folded into square cells (p4m
-// symmetry, one mandala per cell), each cell into uSymmetry mirrored
-// wedges, and the style paints a function of the radius and the folded
-// angle. Mandala builds a scalar field F from a concentric ramp plus ring
-// families and quantises it into flowing bands; the others sample noise in
-// the folded wedge. The flow, morph and spin are phase offsets accumulated
-// JS-side like caustics' drift; the beat is a damped surge on the flow plus
-// a swell envelope on the radius (advanceBeatSurge below).
+// How every style is framed: the plane is folded into cells (square, p4m;
+// or for Prism a hexagonal lattice, p6m — HEX_STYLE), one mandala per cell,
+// each cell into uSymmetry mirrored wedges, and the style paints a function
+// of the radius and the folded angle. Mandala builds a scalar field F from a
+// concentric ramp plus ring families and quantises it into flowing bands;
+// the others sample noise in the folded wedge. The flow, morph, spin and
+// zoom are phase offsets accumulated JS-side like caustics' drift; the beat
+// is a damped surge (advanceBeatSurge below) that pushes Mandala's bands
+// and kicks the other styles' zoom, plus a swell envelope on the radius and
+// brightness.
+//
+// What the reference videos actually do with the music, measured (frame
+// log-polar registration against librosa onsets, 15 fps): every one zooms
+// in continuously — the Prism short at about half a log unit per second,
+// Burst at a seventh of that — with a zoom kick on every beat in Prism, and
+// brightness that tracks the loudness and pops per beat in all of them
+// (the Portal short is silent). Hence the Zoom slider, the surge routed
+// into the zoom, and glsl.ts's beatLift. The infinite zoom itself is
+// styles.ts's business: each style dives in whatever coordinates make the
+// dive exact for it.
 //
 // Why uSymmetry only takes even values, and why nothing may rotate near a
 // cell edge: the picture depends on r and the mirror-folded angle only, so
 // it's invariant under angle -> -angle and angle -> angle + 2pi/N. A
 // neighbouring cell is the mirror image across the shared edge, which maps
 // angle -> pi - angle; that's a symmetry iff pi is a multiple of 2pi/N, i.e.
-// iff N is even. With N even the tiling is seamless for free. A rotation
-// offset breaks that (fold(pi - a + rot) != fold(a + rot) unless 2rot is a
-// multiple of the sector), so every per-ring rotation is masked to zero
-// before r reaches cell/2 — inside the inscribed circle nothing touches an
-// edge. A twist shears along the *folded* angle, which is mirror-safe.
+// iff N is even. With N even the tiling is seamless for free. On the
+// hexagonal lattice the neighbours sit at multiples of 60 degrees, so the
+// edge reflections are the mirror lines at 30, 90 and 150 degrees, and the
+// fold needs a multiple of six — main() snaps it. A rotation offset breaks
+// all this (fold(pi - a + rot) != fold(a + rot) unless 2rot is a multiple of
+// the sector), so every per-ring rotation is masked to zero before r
+// reaches cell/2 — inside the inscribed circle nothing touches an edge. A
+// twist shears along the *folded* angle, which is mirror-safe.
 //
 // Mandala's band footprint (for ink antialiasing and the moiré fade) comes
 // from analytic dF/dr and dF/dangle carried alongside F, not from fwidth:
@@ -137,13 +154,17 @@ const SPIN_MID_GAIN = 0.5;
 /** Palette offset a section drop adds — half a palette, so warm rings turn
  *  cool and vice versa. Accumulates: each drop flips again. */
 const DROP_FLIP = 0.5;
+/** Zoom accumulator: octaves per second at Zoom = 1 (the Prism reference
+ *  dives at about 0.7), and the extra factor a loud section adds. */
+const ZOOM_RATE_MAX = 1.2;
+const ZOOM_SECTION_GAIN = 0.4;
 
 const SETTINGS: SceneSetting[] = [
   {
     key: "style",
     label: "Style",
     description:
-      "Mandala: nested contour bands. Portal: textured rings that counter-rotate and drift inward. Prism: a mirror kaleidoscope of a warped rainbow texture (try Symmetry 6). Burst: radial shards rushing out of a dark star (try 8)",
+      "Mandala: nested contour bands. Portal: a disc of petalled rings pouring out of the centre. Prism: a hexagonal mirror kaleidoscope of a rainbow texture. Burst: crystal shards rushing out of a dark star. Every other setting remembers its own value per style",
     group: "Form",
     type: "enum",
     options: STYLE_NAMES,
@@ -151,16 +172,18 @@ const SETTINGS: SceneSetting[] = [
     max: STYLE_NAMES.length - 1,
     step: 1,
     default: 0,
+    variant: true,
   },
   {
     key: "symmetry",
     label: "Symmetry",
-    description: "How many mirrored wedges each mandala folds into — even counts only, so the tiles meet without a seam",
+    description: "How many mirrored wedges each mandala folds into — even counts only, so the tiles meet without a seam; Prism's hexagonal lattice rounds it to a multiple of six",
     group: "Form",
     min: 6,
     max: 32,
     step: 2,
     default: 20,
+    variantDefaults: { Portal: 16, Prism: 6, Burst: 8 },
     // Framing geometry the user picks to taste, same reasoning as caustics'
     // Caustic density — not something the music profile should redecide.
   },
@@ -173,6 +196,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
+    variantDefaults: { Portal: 0.85, Prism: 0.85, Burst: 0.85 },
   },
   {
     key: "rings",
@@ -222,7 +246,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "flow",
     label: "Flow",
-    description: "How fast the bands stream from each centre — outward for most styles, inward for Portal; bass pushes them faster",
+    description: "How fast Mandala's bands and Portal's ground stream outward; bass pushes them faster",
     group: "Motion",
     min: 0,
     max: 1,
@@ -231,9 +255,22 @@ const SETTINGS: SceneSetting[] = [
     auto: { tempo: 0.3, loudness: 0.2 },
   },
   {
+    key: "zoom",
+    label: "Zoom",
+    description:
+      "How hard the picture dives into itself, forever — Portal, Prism and Burst zoom in at this rate; in Mandala the bands stream faster the further out they are, new ones born at the centre",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.25,
+    variantDefaults: { Portal: 0.25, Prism: 0.6, Burst: 0.4 },
+    auto: { tempo: 0.2, loudness: 0.15 },
+  },
+  {
     key: "pulse",
     label: "Beat surge",
-    description: "Each beat swells the mandala and pushes the bands along; a section drop flips every ring between warm and cool",
+    description: "Each beat swells the mandala, pushes the bands along or kicks the zoom, and lifts the brightness; a section drop flips every ring between warm and cool",
     group: "Motion",
     min: 0,
     max: 1,
@@ -268,7 +305,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "breathe",
     label: "Bar breathe",
-    description: "Once per bar, while the tempo is locked, every petal splits in two and rejoins",
+    description: "Once per bar, while the tempo is locked, Mandala's petals split in two and rejoin and the other styles' zoom rocks forward and back",
     group: "Motion",
     min: 0,
     max: 1,
@@ -279,7 +316,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "twist",
     label: "Twist",
-    description: "Shears the bands across each wedge into chevrons that spiral as they flow",
+    description: "Shears the bands or texture across each wedge into chevrons and spirals",
     group: "Motion",
     min: 0,
     max: 1,
@@ -296,6 +333,7 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.6,
+    variantDefaults: { Prism: 0.15, Burst: 0.3 },
     auto: { brightness: -0.2 },
   },
   {
@@ -324,19 +362,26 @@ void main() {
   vec2 aspectFix = vec2(uResolution.x / uResolution.y, 1.0);
   vec2 p = (uv - 0.5) * aspectFix * ${ZOOM.toFixed(2)};
 
-  // Square cells, coordinates relative to the nearest mandala centre.
+  // Coordinates relative to the nearest mandala centre: square cells, or
+  // the hexagonal lattice for the style that wants it (header).
   float cell = ${CELL_MID.toFixed(2)} * pow(${CELL_SPAN.toFixed(2)}, (uSpread - 0.5) * 2.0);
-  vec2 c = mod(p + cell * 0.5, cell) - cell * 0.5;
+  int style = int(uStyle + 0.5);
+  float n = max(2.0, floor(uSymmetry * 0.5 + 0.5) * 2.0);
+  vec2 c;
+  if (style == ${HEX_STYLE}) {
+    c = hexCell(p, cell);
+    n = max(6.0, floor(n / 6.0 + 0.5) * 6.0);
+  } else {
+    c = mod(p + cell * 0.5, cell) - cell * 0.5;
+  }
 
   float r = length(c) * (1.0 - ${BEAT_SWELL.toFixed(3)} * uBeatSwell);
   float a = atan(c.y, c.x);
-  float n = max(2.0, floor(uSymmetry * 0.5 + 0.5) * 2.0);
   // Pixel size in p units — p is linear in vUv, so fwidth on it is exact
   // and seam-free.
   float pxSize = max(fwidth(p.x), fwidth(p.y));
   float tBase0 = ${CYCLE_BASE.toFixed(2)} + uPalShift + (uCentroid - 0.5) * uTint * 0.25;
 
-  int style = int(uStyle + 0.5);
   vec3 col;
   if (style == 1) col = stylePortal(c, cell, r, a, n, pxSize, tBase0);
   else if (style == 2) col = stylePrism(c, cell, r, a, n, pxSize, tBase0);
@@ -348,11 +393,12 @@ void main() {
 
 export const kaleidoscopeScene = createFullscreenScene("kaleidoscope", "Kaleidoscope", FRAG, {
   settings: SETTINGS,
-  extraUniformDecls: `uniform float uFlowPos;\nuniform float uMorphPos;\nuniform float uSpinPos;\nuniform float uPalShift;\nuniform float uBeatSwell;`,
+  extraUniformDecls: `uniform float uFlowPos;\nuniform float uMorphPos;\nuniform float uSpinPos;\nuniform float uZoomPos;\nuniform float uSurgePos;\nuniform float uPalShift;\nuniform float uBeatSwell;`,
   extraUniforms: (() => {
     let flowPos = 0;
     let morphPos = 0;
     let spinPos = 0;
+    let zoomPos = 0;
     let palShift = 0;
     let prevDropOnset = false;
     const surge = createBeatSurgeState();
@@ -370,13 +416,17 @@ export const kaleidoscopeScene = createFullscreenScene("kaleidoscope", "Kaleidos
       morphPos += anim.dtSec * morphRate;
       const spinRate = (SPIN_RATE_MIN + (SPIN_RATE_MAX - SPIN_RATE_MIN) * getSetting("spin")) * (1.0 + SPIN_MID_GAIN * anim.mid);
       spinPos += anim.dtSec * spinRate;
+      const zoomRate = ZOOM_RATE_MAX * getSetting("zoom") * (1.0 + ZOOM_SECTION_GAIN * anim.sectionIntensity);
+      zoomPos += anim.dtSec * zoomRate;
       const drop = anim.dropOnset && !prevDropOnset;
       prevDropOnset = anim.dropOnset;
       if (drop && pulse > 0) palShift += DROP_FLIP;
       return {
-        uFlowPos: flowPos + surge.phase,
+        uFlowPos: flowPos,
         uMorphPos: morphPos,
         uSpinPos: spinPos,
+        uZoomPos: zoomPos,
+        uSurgePos: surge.phase,
         uPalShift: palShift,
         uBeatSwell: swell,
       };
