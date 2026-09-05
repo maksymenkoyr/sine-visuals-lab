@@ -6,60 +6,55 @@ regenerate it at session close.
 
 ## In flight
 
-- **Reference-video loop (`/ref`)** — draft PR #85, branch `worktree-ref-video`
-  (2026-09-05). `tools/ref-scan.py` turns a visualisation video into a bundle
-  whose `report.md` opens with Findings — sync rules the measurements support,
-  each with an "ours:" clause from what our own analyser heard on the same
-  audio (`tools/ref-hear.mjs`); one `keyframes.png`; the look as numbers.
-  `tools/ref-shoot.mjs` shoots our scene at the same beats beside the
-  reference. Verified on three clips; never yet used to build a scene — that
-  is the real test, and Kaleidoscope (now on `main`, `src/render/scenes/kaleido/`)
-  is the obvious first target. Design decisions are in the memory note
-  `reference-video-analysis`.
-- **Landed since the last snapshot:** Kaleidoscope scene #79 and its four
-  styles #83 (`style` is the first `variant` setting; Beat grid row in the
-  Rhythm card, `src/audio/beatGrid.ts` + `src/render/gridPulse.ts`), Powder
-  #77. Still in `DRAFT_SCENE_IDS` pending a real-music verdict.
-- **Draft scene PRs** waiting on review and a real-music judgement: Plume #75,
-  Neon Fluid #76.
+- **Neon Gates scene (`gates`)** — branch `worktree-neon-gates`, draft PR
+  opened 2026-09-05. The first scene built through the `/ref` loop
+  (`src/render/scenes/gates/`, header owns the design). The reference
+  (`4PsXO3JsQdg`) turned out to be *silent by design* and a few-second VJ
+  loop repeated for hours, so the scan gave the look and the cut cadence and
+  no sync; the cuts are ours — bar wraps, a blackout-then-cut on phrase bars
+  and drops, a free-run timer with no tempo lock (`advanceGates`, tested in
+  `tests/gates.test.ts`). Tuned three rounds from `ref-shoot` side-by-sides;
+  judged only on `?audio=synthetic` so far. In `DRAFT_SCENE_IDS`.
+- **Landed since the last snapshot:** the `/ref` loop #85 (its bundle for this
+  scene is `tools/.cache/refs/neon-groove/`), CLAUDE.md Git & PRs #84, the
+  audio-source guide #87.
+- **Draft scene PR** waiting on a real-music judgement: Neon Fluid #76.
 - **Auto: unstick tempoLock, rank dials** — draft PR #73.
+- **Beat-rate controls** (a setting picks which beat it reacts on) — draft #88.
 - **docs/architecture.md rebuild** — draft PR #74.
-- **CLAUDE.md Git & PRs section** — PR #84; **business/legal docs** — PR #72;
-  both ready for review. PR #70 is a stale status snapshot this file replaces —
-  close it.
+- **Dev server scene links** #89 and **business/legal docs** #72 — ready for
+  review. PR #70 is a stale status snapshot this file replaces — close it.
 - Worktrees with no open PR (`git worktree list`): `agent-ae8a69d86e9c44e97`,
-  `audio-source-guide`, `bake-defaults`, `beat-rate-controls`, `docs-index`,
-  `setting-groups`, `tuning-spotlight`. Check `git log main..` on each before
-  reviving; several look landed or superseded.
+  `bake-defaults`, `claude-md-git-workflow` (landed as #84), `docs-index`,
+  `setting-groups`, `tuning-spotlight`. Check `git log origin/main..` on each
+  before reviving; several look landed or superseded.
 
 ## Open questions
 
-- Ref loop: our tempo lock came out differently on two runs of the same clip
-  (162 steady vs a drop to 122 at a section boundary). Is `features.ts`'s comb
-  sensitive to start time / adaptive-gain state, and should `ref-hear` run
-  twice and report the spread?
-- Ref loop: our `section` signal (`sectionIntensity`) never rose at the
-  reference's section boundaries on the one clip with audio. Real gap in the
-  runtime, or a threshold mismatch in how the scan looks for a rise?
-- Ref loop: motion metrics run at `VIS_FPS`; above ~150 bpm a half-beat strobe
-  can't be told from a timer. Double the rate, or keep the stated resolution?
-- Beat grid: should its default move off Hits once judged on real music, and
-  should the TV receive it (a new DeviceCommand field)?
-- Kaleidoscope: should the dive target rotate between children (a spiral dive)
-  rather than always the top one? Do the rainbow texture styles
-  (`RAINBOW_ROOM_MIX`) read as ignoring the Palette card? Storm's Mode is the
-  obvious next `variant`.
+- Neon Gates: the reference's gates are 3D objects with foreshortening and a
+  much finer centre cluster; ours are flat billboards. Worth a real depth
+  model, or is the fold-plus-slots picture enough for a draft that graduates?
+- Neon Gates: blackouts land on every `BARS_PER_PHRASE`th bar counted from
+  scene start — there is no downbeat/phrase in the runtime. Should
+  `beatClock.ts` expose a bar count or a phrase estimate for every scene?
+- Ref loop: silent references are a category, not an accident (two of four
+  clips so far, same channel). Should `ref-scan.py` say "silent by design" up
+  front from the description, and skip the hear/shoot audio clauses?
+- Ref loop: our tempo lock came out differently on two runs of the same clip;
+  should `ref-hear` run twice and report the spread? And `sectionIntensity`
+  never rose at the one audible clip's section boundaries — runtime gap or
+  scan threshold?
+- Kaleidoscope: spiral dive between children? Do the rainbow texture styles
+  read as ignoring the Palette card? Storm's Mode is the obvious next `variant`.
 - Which draft scenes graduate out of `DRAFT_SCENE_IDS`, and in what order.
-- Storm's local render-cap workaround (see its header) is redundant now that
-  `renderLatch.ts` is on `main`; simplify once nothing else touches Storm.
-- Stale scratch branches on origin (`git branch -r --no-merged origin/main`):
-  prune, or is anything in them still wanted?
+- Storm's local render-cap workaround is redundant now that `renderLatch.ts`
+  is on `main`; simplify once nothing else touches Storm.
 
 ## Next up
 
-- `/ref` on one of the Kaleidoscope reference shorts against the landed
-  `kaleidoscope` scene; see whether the findings change a tuning decision,
-  then review #85.
-- Watch Kaleidoscope, Powder, Plume and Neon Fluid on real music; land or drop
-  #75/#76 and decide on graduation.
-- Review #73, #74, #84, #72; close #70; decide the fate of the idle worktrees.
+- Watch Neon Gates on real music (the `--use-file-for-fake-audio-capture`
+  recipe in the `headless-app-driving` memory); tune the cut cadence and the
+  onset flash against a track, then decide on the 3D question above.
+- Review #89, #72; close #70; land or drop #76; decide the idle worktrees.
+- `/ref` on a reference *with* audio for the next scene, so the hear/shoot
+  clauses finally get exercised end to end.
