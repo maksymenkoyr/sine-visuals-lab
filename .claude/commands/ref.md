@@ -22,8 +22,16 @@ opened only when the report points at it.
    clauses — whether our analyser fires an onset where the reference reacts,
    what tempo it held, whether its section signal moves where the reference's
    sections are. Skip only if the bundle reports no usable audio.
-3. **Read `report.md`**, Findings first. Then `keyframes.png` (the look,
-   before/after of each transition, phrase starts), then `timeline.png`.
+3. **Read `report.md`**, Findings first, then "Picture, measured" — per
+   visual regime, what is drawn as numbers: objects by shape class, size vs
+   distance from centre, rings and axis placement, stroke and glow in px,
+   hues, ground, flow direction and spin, streak (`tools/reflook.py`'s
+   header says what each line is for). Then `look.png` to check those
+   numbers against the full-resolution frame and the detection overlay,
+   `keyframes.png` (the look across the clip, before/after of each
+   transition, phrase starts), then `timeline.png`. Never design geometry
+   from the thumbnails: the picture section and `look.png` are what the
+   scene's shapes, sizes, stroke and motion come from.
    A STROBE finding states its flash spacing in beats *and* the measurement
    resolution — don't claim tighter. If the phase margin is low, find a
    phrase start by eye on the rank-4 sheet and re-run with `--phase N`.

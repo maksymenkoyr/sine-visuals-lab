@@ -11,3 +11,4 @@ docs/.obsidian/
 .claude/RESUME.md
 .claude/worktrees/
 tools/.cache/
+__pycache__/

@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["numpy>=1.26", "scipy>=1.11", "librosa>=0.10", "pillow>=10.1", "soundfile>=0.12"]
+# dependencies = ["numpy>=1.26", "scipy>=1.11", "librosa>=0.10", "pillow>=10.1", "soundfile>=0.12", "opencv-python-headless>=4.9"]
 # ///
 """
 ref-scan: turn a reference video into a beat-indexed *bundle* so a scene can
@@ -17,10 +17,19 @@ Read in this order — the first three are meant to be enough:
 
     report.md      Findings first: every sync rule the measurements support,
                    one line each, with what *our* analyser hears at the same
-                   moments when `--hear` was given. Then the look as numbers
-                   (palette, symmetry, motion), the per-rank table, the
-                   correlations that matter, the transitions with the audio
-                   at that moment, and a hint per image on when to open it.
+                   moments when `--hear` was given. Then "Picture, measured":
+                   per visual regime, what is drawn — lit objects by shape
+                   class, size vs distance from centre (the perspective law),
+                   ring radii and axis placement, stroke and glow in pixels,
+                   hues, ground, optical flow and streak (tools/reflook.py
+                   owns these and says what each is for). Then the look as
+                   statistics (palette, symmetry, motion), the per-rank table,
+                   the correlations that matter, the transitions with the
+                   audio at that moment, and a hint per image on when to open it.
+    look.png       per regime: the full-resolution frame, a ×3 centre crop,
+                   and the detection overlay — open to check that the
+                   "Picture, measured" numbers describe what you see.
+    look.json      every detected object behind those numbers.
     keyframes.png  one sheet, a handful of tiles the scan chose: a
                    representative frame per visual regime, before/after of
                    each transition, phrase starts — labelled with why.
@@ -93,6 +102,8 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage, signal
 from scipy.cluster.vq import kmeans2
+
+from reflook import measure_look, picture_lines  # sibling module, tools/ is on sys.path when run as a script
 
 HERE = Path(__file__).resolve().parent
 CACHE = HERE / ".cache" / "refs"
@@ -769,29 +780,41 @@ def grab_frames(frames: np.ndarray, beats: list[dict], offsets: list[int], min_r
             b["frames"][str(off)] = f"frames/{name}"
 
 
-def choose_keyframes(frames: np.ndarray, v: dict, beats: list[dict], trans: list[dict], dur: float, bundle: Path) -> list[dict]:
-    """The few frames worth a look: one per visual regime (clusters of
-    colour histogram + brightness/saturation/activity), the before/after of
-    each transition, and phrase starts not already covered. Saved as
-    frames/key_<n>.jpg; the order is the priority order."""
-    from PIL import Image
-
+def find_regimes(v: dict, dur: float) -> list[dict]:
+    """Visual regimes: clusters of colour histogram + brightness/saturation/
+    activity over the clip, each with its most central frame as the
+    representative. Shared by the key-frame sheet and the picture
+    measurement (reflook.py), so both talk about the same regimes."""
     n = v["n"]
     feat = np.hstack([v["hists"] * 4, zscore(v["bright"])[:, None] * 0.5, zscore(v["sat"])[:, None] * 0.5, zscore(v["act"])[:, None] * 0.5])
     k = int(np.clip(round(dur / 6), 2, 5))
     cent, lab = kmeans2(feat, k, minit="++", seed=0)
+    out = []
+    for c in range(k):
+        members = np.where(lab == c)[0]
+        if len(members) == 0:
+            continue
+        rep = int(members[np.argmin(np.linalg.norm(feat[members] - cent[c], axis=1))])
+        out.append({"t": rep / VIS_FPS, "share": len(members) / n, "frame": rep})
+    out.sort(key=lambda r: -r["share"])
+    return out
+
+
+def choose_keyframes(frames: np.ndarray, v: dict, beats: list[dict], trans: list[dict], regimes: list[dict], bundle: Path) -> list[dict]:
+    """The few frames worth a look: one per visual regime (find_regimes), the
+    before/after of each transition, and phrase starts not already covered.
+    Saved as frames/key_<n>.jpg; the order is the priority order."""
+    from PIL import Image
+
+    n = v["n"]
     # Budget: every regime (they are the look), then the strongest few
     # transitions as before/after pairs (a pair is one tile of information
     # split in two — never de-duplicate one half against the other), then
     # phrase starts to fill up. Regimes are never de-duplicated either: two
     # regimes can sit a frame apart inside a strobe (flash vs gap).
     picks = []
-    for c in range(k):
-        members = np.where(lab == c)[0]
-        if len(members) == 0:
-            continue
-        rep = int(members[np.argmin(np.linalg.norm(feat[members] - cent[c], axis=1))])
-        picks.append({"t": rep / VIS_FPS, "why": f"regime {len(picks) + 1}: {100 * len(members) / n:.0f}% of the clip", "prio": 0, "pair": None})
+    for i, rg in enumerate(regimes, start=1):
+        picks.append({"t": rg["t"], "why": f"regime {i}: {100 * rg['share']:.0f}% of the clip", "prio": 0, "pair": None})
     pairs_budget = max(2, (KEY_TILES_MAX - len(picks)) // 2 - 1)
     for pi, tr in enumerate(sorted(trans, key=lambda t: -t["novelty"])[:pairs_budget]):
         f = tr["frame"]
@@ -1159,7 +1182,13 @@ def write_report(bundle: Path, D: dict, v: dict, aud: dict, hs: dict | None, she
         L.append(f"- {f}")
     L.append("")
 
-    L.append("## Look, in numbers\n")
+    if D.get("picture"):
+        L.append("## Picture, measured\n")
+        L.append("What is drawn, per visual regime, from one full-resolution frame each (tools/reflook.py's header says what each "
+                 "line is for). r = distance from the frame centre in half-heights. Check against `look.png` before trusting a count.\n")
+        L.extend(picture_lines(D["picture"]))
+
+    L.append("## Look, as statistics\n")
     pal = " ".join(f"`{c['hex']}`×{c['share']:.2f}" for c in look["palette"])
     L.append(f"- palette (share of pixels): {pal}")
     s = look["symmetry"]
@@ -1229,6 +1258,8 @@ def write_report(bundle: Path, D: dict, v: dict, aud: dict, hs: dict | None, she
 
     L.append("## Files\n")
     L.append(f"- `keyframes.png` — {len(D['keyframes'])} tiles: regimes, transition before/after, phrase starts. Open this first.")
+    if D.get("picture"):
+        L.append("- `look.png` — per regime: full-res frame | ×3 centre crop | detections. Open when a Picture line looks wrong; `look.json` has every object.")
     L.append("- `timeline.png` — open when a finding names a time and you want to see the neighbours.")
     top = max(rt, key=lambda r: rt[r]["act"]) if rt else None
     for s in sheets:
@@ -1303,15 +1334,22 @@ def main() -> None:
     ap.add_argument("--max-rows", type=int, default=20, help="rows per sheet image before splitting")
     ap.add_argument("--hear", help="hears.json from tools/ref-hear.mjs, to add the ours: clauses")
     ap.add_argument("--report-only", action="store_true", help="rebuild report/timeline/keyframes from an existing bundle")
+    ap.add_argument("--look-only", action="store_true", help="re-measure the picture (reflook.py) on an existing bundle's regimes, then rebuild the report")
     args = ap.parse_args()
 
-    if args.report_only:
+    if args.report_only or args.look_only:
         p = Path(args.video)
         bundle = p.resolve() if p.exists() and p.is_dir() else CACHE / (args.name or p.stem)
         if not (bundle / "audio.json").exists():
             sys.exit(f"ref-scan: no bundle at {bundle}")
         D = json.loads((bundle / "audio.json").read_text())
         v, aud = load_series(bundle)
+        if args.look_only:
+            src = Path(D["source"])
+            info = probe(src)
+            regs = D.get("picture", {}).get("regimes", [])
+            log(f"measuring the picture in {len(regs)} regimes…")
+            D["picture"] = measure_look(src, D["start"], regs, info["width"], info["height"], bundle)
         H = load_hears(Path(args.hear)) if args.hear else (load_hears(bundle / "hears.json") if (bundle / "hears.json").exists() else None)
         render_outputs(bundle, D, v, aud, H)
         log(f"rebuilt {bundle / 'report.md'}" + (" with ours: clauses" if H else ""))
@@ -1407,8 +1445,11 @@ def main() -> None:
 
     grab_frames(frames, beats, offsets, args.min_rank, bundle / "frames")
     sheets = write_sheets(beats, offsets, bundle, args.max_rows)
-    keyframes = choose_keyframes(frames, v, beats, trans, dur, bundle)
+    vis_regimes = find_regimes(v, dur)
+    keyframes = choose_keyframes(frames, v, beats, trans, vis_regimes, bundle)
     write_series(bundle, v, aud, beats)
+    log(f"measuring the picture in {len(vis_regimes)} regimes…")
+    picture = measure_look(src, args.start, vis_regimes, info["width"], info["height"], bundle)
 
     D = {
         "name": name, "source": str(src), "start": args.start, "dur": float(dur), "nframes": int(len(frames)),
@@ -1422,7 +1463,7 @@ def main() -> None:
         "beats": beats, "transitions": trans, "regimeChanges": regimes,
         "onsetEnvelope": onset_envelope(v, a["onsets_t"], zaud["onset_env"]) if a else {},
         "beatPhase": beat_phase_profile(v, beat_t, period) if a else {},
-        "look": v["look"], "keyframes": keyframes, "sheets": sheets,
+        "look": v["look"], "picture": picture, "keyframes": keyframes, "sheets": sheets,
     }
     H = None
     hear_path = Path(args.hear) if args.hear else bundle / "hears.json"
