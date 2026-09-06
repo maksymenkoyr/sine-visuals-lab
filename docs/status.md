@@ -6,60 +6,54 @@ regenerate it at session close.
 
 ## In flight
 
-- **Reference-video loop (`/ref`)** — draft PR #85, branch `worktree-ref-video`
-  (2026-09-05). `tools/ref-scan.py` turns a visualisation video into a bundle
-  whose `report.md` opens with Findings — sync rules the measurements support,
-  each with an "ours:" clause from what our own analyser heard on the same
-  audio (`tools/ref-hear.mjs`); one `keyframes.png`; the look as numbers.
-  `tools/ref-shoot.mjs` shoots our scene at the same beats beside the
-  reference. Verified on three clips; never yet used to build a scene — that
-  is the real test, and Kaleidoscope (now on `main`, `src/render/scenes/kaleido/`)
-  is the obvious first target. Design decisions are in the memory note
-  `reference-video-analysis`.
-- **Landed since the last snapshot:** Kaleidoscope scene #79 and its four
-  styles #83 (`style` is the first `variant` setting; Beat grid row in the
-  Rhythm card, `src/audio/beatGrid.ts` + `src/render/gridPulse.ts`), Powder
-  #77. Still in `DRAFT_SCENE_IDS` pending a real-music verdict.
-- **Draft scene PRs** waiting on review and a real-music judgement: Plume #75,
-  Neon Fluid #76.
-- **Auto: unstick tempoLock, rank dials** — draft PR #73.
-- **docs/architecture.md rebuild** — draft PR #74.
-- **CLAUDE.md Git & PRs section** — PR #84; **business/legal docs** — PR #72;
-  both ready for review. PR #70 is a stale status snapshot this file replaces —
-  close it.
+- **Neon Gates rebuilt as real 3D** — draft PR #90, branch `worktree-neon-gates`,
+  `src/render/scenes/gates/` (2026-09-06). The first `/ref`-built scene, redone
+  from the measured picture after the thumbnail-designed draft was rejected:
+  instanced 3D wireframes drawn as one primitive (a tube segment swept through
+  the shutter, `glsl.ts`), looks as measured data (`layout.ts`'s `LOOKS`), a
+  per-scene bloom chain, the tested cut scheduler kept with spin fixed to the
+  measured rate and direction per look. Our screenshots measured with the
+  reference's own detector land inside its ranges for stroke, luminance, hues
+  and fold. Judged on `?audio=synthetic` only; no real-music run yet.
+- **Ref loop measures the picture** — PR #92, branch `worktree-ref-look`.
+  `tools/reflook.py` beside `tools/ref-scan.py`: objects by shape class, size vs
+  distance from centre, rings and fold, stroke and glow in pixels, hue clusters,
+  flow and spin from object tracking; "Picture, measured" in `report.md`,
+  `look.png`, `look.json`. This is what made the Gates rebuild possible.
+- **Landed since the last snapshot:** the `/ref` loop #85, dev-server scene
+  links #89, CLAUDE.md Git & PRs #84, share-audio guidance #87.
+- **Other draft PRs** waiting on review or a real-music judgement:
+  Song-boundary instrumentation #93, gallery preview scheduling #91, beat-rate
+  controls #88, Neon Fluid #76, auto dial ranking #73, architecture rebuild #74.
+  Business/legal docs #72 is ready for review. PR #70 is a stale status
+  snapshot this file replaces — close it.
 - Worktrees with no open PR (`git worktree list`): `agent-ae8a69d86e9c44e97`,
-  `audio-source-guide`, `bake-defaults`, `beat-rate-controls`, `docs-index`,
-  `setting-groups`, `tuning-spotlight`. Check `git log main..` on each before
-  reviving; several look landed or superseded.
+  `bake-defaults`, `claude-md-git-workflow`, `dev-scene-links`, `docs-index`,
+  `setting-groups`, `tuning-spotlight`. Several are landed; prune before reviving.
 
 ## Open questions
 
-- Ref loop: our tempo lock came out differently on two runs of the same clip
-  (162 steady vs a drop to 122 at a section boundary). Is `features.ts`'s comb
-  sensitive to start time / adaptive-gain state, and should `ref-hear` run
-  twice and report the spread?
-- Ref loop: our `section` signal (`sectionIntensity`) never rose at the
-  reference's section boundaries on the one clip with audio. Real gap in the
-  runtime, or a threshold mismatch in how the scan looks for a rise?
-- Ref loop: motion metrics run at `VIS_FPS`; above ~150 bpm a half-beat strobe
-  can't be told from a timer. Double the rate, or keep the stated resolution?
-- Beat grid: should its default move off Hits once judged on real music, and
-  should the TV receive it (a new DeviceCommand field)?
-- Kaleidoscope: should the dive target rotate between children (a spiral dive)
-  rather than always the top one? Do the rainbow texture styles
-  (`RAINBOW_ROOM_MIX`) read as ignoring the Palette card? Storm's Mode is the
-  obvious next `variant`.
+- Neon Gates: the reference has far more small fragments per frame and a much
+  wider bloom on its gold and beams regimes than ours reaches with two blur
+  levels. Add a third level, or accept the look as is for a draft?
+- Neon Gates: the gate pass is the repo's first geometry pass with adaptive
+  per-pixel sampling (sweep taps capped by `uDetail`). Fine on a desktop GPU;
+  untested on a TV.
+- Ref loop: `reflook.py`'s detector is tuned on neon outlines on black; it
+  needs a clip with bright fills or a textured ground before it is trusted
+  generally. Merging PR #92 before #90 keeps the measurement reproducible.
+- Ref loop on silent references: the cut cadence is ours alone. Is that worth
+  building at all, or should `/ref` refuse a silent clip?
+- There is no bar or phrase counter in `AnimFrame`; every scene that wants one
+  wraps `anim.barPhase` itself (Gates, Ambience, Powder). Promote it?
 - Which draft scenes graduate out of `DRAFT_SCENE_IDS`, and in what order.
-- Storm's local render-cap workaround (see its header) is redundant now that
-  `renderLatch.ts` is on `main`; simplify once nothing else touches Storm.
-- Stale scratch branches on origin (`git branch -r --no-merged origin/main`):
-  prune, or is anything in them still wanted?
 
 ## Next up
 
-- `/ref` on one of the Kaleidoscope reference shorts against the landed
-  `kaleidoscope` scene; see whether the findings change a tuning decision,
-  then review #85.
-- Watch Kaleidoscope, Powder, Plume and Neon Fluid on real music; land or drop
-  #75/#76 and decide on graduation.
-- Review #73, #74, #84, #72; close #70; decide the fate of the idle worktrees.
+- Watch Neon Gates on real music (the fake-audio-capture recipe in the
+  `headless-app-driving` memory); tune the cut cadence and the onset flash
+  against a track, then review #90 and #92.
+- Run `/ref` on a clip with audio and a non-neon look to test the picture
+  measurement outside the case it was built on.
+- Watch the other draft scenes on real music; review #93, #91, #88, #73, #74,
+  #72; close #70; prune the idle worktrees.

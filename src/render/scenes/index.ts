@@ -14,6 +14,7 @@ import { powderScene } from "./powder.ts";
 import { stormScene } from "./storm.ts";
 import { ambienceScene } from "./ambience.ts";
 import { kaleidoscopeScene } from "./kaleido/index.ts";
+import { gatesScene } from "./gates/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
@@ -23,6 +24,7 @@ import { kaleidoscopeScene } from "./kaleido/index.ts";
 // vite-scene-links-plugin.ts prints when you start `npm run dev`.
 registerScene(chladniScene);
 registerScene(causticsScene);
+registerScene(gatesScene);
 registerScene(kaleidoscopeScene);
 registerScene(powderScene);
 registerScene(ambienceScene);
@@ -53,6 +55,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "storm",
   "ambience",
   "kaleidoscope",
+  "gates",
 ]);
 
 export {
@@ -71,4 +74,5 @@ export {
   stormScene,
   ambienceScene,
   kaleidoscopeScene,
+  gatesScene,
 };
