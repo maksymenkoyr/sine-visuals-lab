@@ -6,10 +6,23 @@ import {
   FREE_BAR_SEC,
   gatesScene,
   LOOK_COUNT,
+  SPIN_RAD_MAX,
   type GateAnim,
   type GateOpts,
   type GateState,
 } from "../src/render/scenes/gates/index.ts";
+import {
+  buildLook,
+  LOOKS,
+  MAX_OBJ,
+  objectCountFor,
+  RADIUS_MAX,
+  RADIUS_MIN,
+  SEG_MAX,
+  segmentOf,
+  SHAPE,
+  TUNNEL_LEN,
+} from "../src/render/scenes/gates/layout.ts";
 import { computeAutoTarget } from "../src/render/autoTune.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 
@@ -158,25 +171,27 @@ describe("advanceGates", () => {
     expect(st.flash).toBeLessThan(0.05);
   });
 
-  it("a cut flips the spin direction while travel and spin stay continuous", () => {
+  it("spin never reverses across cuts; travel follows each look's direction, continuously", () => {
     const st = createGateState();
     const rng = lcg(13);
     let prevTravel = st.travel;
     let prevSpin = st.spinPos;
-    let flips = 0;
-    let dir = st.spinDir;
-    for (let bar = 0; bar < 8; bar++) {
+    const dirs = new Set<number>();
+    for (let bar = 0; bar < 12; bar++) {
       for (let k = 1; k <= STEPS; k++) {
         advanceGates(st, anim({ barPhase: k === STEPS ? 0 : k / STEPS }), OPTS, rng);
-        expect(st.travel).toBeGreaterThan(prevTravel);
-        expect(Math.abs(st.spinPos - prevSpin)).toBeLessThan(1.4 * DT + 1e-9);
-        if (st.spinDir !== dir) flips++;
-        dir = st.spinDir;
+        expect(st.spinPos).toBeGreaterThan(prevSpin);
+        expect(st.spinPos - prevSpin).toBeCloseTo(SPIN_RAD_MAX * OPTS.spin * DT, 9);
+        expect(st.dir).toBe(LOOKS[st.look].dir);
+        expect(Math.sign(st.travel - prevTravel)).toBe(st.dir);
+        expect(Math.abs(st.travel - prevTravel)).toBeLessThan(0.2);
+        dirs.add(st.dir);
         prevTravel = st.travel;
         prevSpin = st.spinPos;
       }
     }
-    expect(flips).toBeGreaterThan(0);
+    // Both directions are visited over the looks.
+    expect(dirs.size).toBe(2);
 
     const slow = createGateState();
     const fast = createGateState();
@@ -186,8 +201,17 @@ describe("advanceGates", () => {
       advanceGates(fast, anim(), { ...OPTS, speed: 1 }, lcg(1));
       advanceGates(bassy, anim({ low: 1 }), { ...OPTS, speed: 0 }, lcg(1));
     }
-    expect(fast.travel).toBeGreaterThan(slow.travel);
-    expect(bassy.travel).toBeGreaterThan(slow.travel);
+    expect(Math.abs(fast.travel)).toBeGreaterThan(Math.abs(slow.travel));
+    expect(Math.abs(bassy.travel)).toBeGreaterThan(Math.abs(slow.travel));
+  });
+
+  it("the default Spin turns the tunnel at the reference's measured rate", () => {
+    // The reference spins +35 to +36 degrees per second counter-clockwise
+    // in every regime (tools/.cache/refs/neon-groove/report.md).
+    const spinSetting = gatesScene.settings!.find((s) => s.key === "spin")!;
+    const degPerSec = (SPIN_RAD_MAX * spinSetting.default * 180) / Math.PI;
+    expect(degPerSec).toBeGreaterThan(33);
+    expect(degPerSec).toBeLessThan(39);
   });
 
   it("treats a non-finite or backwards dt as no time passing", () => {
@@ -207,5 +231,100 @@ describe("gates settings", () => {
     for (const s of gatesScene.settings ?? []) {
       if (s.auto) expect(computeAutoTarget(s, NEUTRAL, 1)).toBe(s.default);
     }
+  });
+});
+
+describe("gates layout", () => {
+  it("counts scale with density and detail and stay within the uniform arrays", () => {
+    for (let look = 0; look < LOOKS.length; look++) {
+      const lo = objectCountFor(look, 0, 0.25);
+      const mid = objectCountFor(look, 0.5, 1);
+      const hi = objectCountFor(look, 1, 1);
+      expect(lo).toBeGreaterThanOrEqual(4);
+      expect(lo).toBeLessThan(mid);
+      expect(mid).toBeLessThanOrEqual(hi);
+      expect(hi).toBeLessThanOrEqual(MAX_OBJ);
+      expect(mid).toBe(Math.min(MAX_OBJ, LOOKS[look].objects));
+    }
+  });
+
+  it("places every object in the tunnel's radius band and length, on the first quadrant", () => {
+    for (let look = 0; look < LOOKS.length; look++) {
+      const L = buildLook(look, 3, MAX_OBJ);
+      expect(L.count).toBe(MAX_OBJ);
+      for (let i = 0; i < L.count; i++) {
+        const x = L.objA[i * 4];
+        const y = L.objA[i * 4 + 1];
+        const r = Math.hypot(x, y);
+        expect(x).toBeGreaterThanOrEqual(0);
+        expect(y).toBeGreaterThanOrEqual(0);
+        expect(r).toBeGreaterThanOrEqual(RADIUS_MIN - 1e-9);
+        expect(r).toBeLessThanOrEqual(RADIUS_MAX + 1e-9);
+        expect(L.objA[i * 4 + 2]).toBeGreaterThanOrEqual(0);
+        expect(L.objA[i * 4 + 2]).toBeLessThan(TUNNEL_LEN);
+        const shape = L.objA[i * 4 + 3] % 4;
+        const key = Math.floor(L.objA[i * 4 + 3] / 4);
+        expect([0, 1, 2, 3]).toContain(shape);
+        expect([0, 1, 2]).toContain(key);
+        expect(L.objB[i * 4 + 2]).toBeGreaterThan(0);
+        expect(L.objB[i * 4 + 3]).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("puts the look's share of objects exactly on an axis", () => {
+    for (let look = 0; look < LOOKS.length; look++) {
+      let onAxis = 0;
+      let total = 0;
+      for (let seed = 0; seed < 40; seed++) {
+        const L = buildLook(look, seed, MAX_OBJ);
+        for (let i = 0; i < L.count; i++) {
+          total++;
+          if (L.objA[i * 4] === 0 || L.objA[i * 4 + 1] === 0) onAxis++;
+        }
+      }
+      expect(Math.abs(onAxis / total - LOOKS[look].onAxis)).toBeLessThan(0.05);
+    }
+  });
+
+  it("same seed, same layout; a new seed moves things", () => {
+    const a = buildLook(2, 5, 20);
+    const b = buildLook(2, 5, 20);
+    const c = buildLook(2, 6, 20);
+    expect(Array.from(a.objA)).toEqual(Array.from(b.objA));
+    expect(Array.from(a.objA)).not.toEqual(Array.from(c.objA));
+  });
+
+  it("Shape mix leans the shapes: 0 gives no rods or panels, 1 gives no prisms or frames", () => {
+    for (let look = 0; look < LOOKS.length; look++) {
+      const rings = buildLook(look, 1, MAX_OBJ, 0);
+      const bars = buildLook(look, 1, MAX_OBJ, 1);
+      for (let i = 0; i < MAX_OBJ; i++) {
+        expect(rings.objA[i * 4 + 3] % 4).toBeLessThan(2);
+        expect(bars.objA[i * 4 + 3] % 4).toBeGreaterThanOrEqual(2);
+      }
+    }
+  });
+
+  it("a hex prism has 18 distinct edges, a frame 12, a rod 1, every slot within SEG_MAX", () => {
+    const edges = (shape: 0 | 1 | 2 | 3) => {
+      const seen = new Set<string>();
+      let n = 0;
+      for (let i = 0; i < SEG_MAX; i++) {
+        const s = segmentOf(shape, i, 0.5, 0.8, 0.6);
+        if (!s) continue;
+        n++;
+        const key = [s[0], s[1]].map((p) => p.map((v) => v.toFixed(6)).join(",")).sort().join("|");
+        expect(seen.has(key)).toBe(false);
+        seen.add(key);
+        expect(Math.hypot(s[0][0] - s[1][0], s[0][1] - s[1][1], s[0][2] - s[1][2])).toBeGreaterThan(0.1);
+      }
+      return n;
+    };
+    expect(edges(SHAPE.PRISM)).toBe(18);
+    expect(edges(SHAPE.FRAME)).toBe(12);
+    expect(edges(SHAPE.ROD)).toBe(1);
+    expect(edges(SHAPE.PANEL)).toBe(1);
+    expect(segmentOf(SHAPE.PRISM, SEG_MAX, 1, 1, 1)).toBeNull();
   });
 });
