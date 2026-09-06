@@ -6,60 +6,58 @@ regenerate it at session close.
 
 ## In flight
 
-- **Reference-video loop (`/ref`)** — draft PR #85, branch `worktree-ref-video`
-  (2026-09-05). `tools/ref-scan.py` turns a visualisation video into a bundle
-  whose `report.md` opens with Findings — sync rules the measurements support,
-  each with an "ours:" clause from what our own analyser heard on the same
-  audio (`tools/ref-hear.mjs`); one `keyframes.png`; the look as numbers.
-  `tools/ref-shoot.mjs` shoots our scene at the same beats beside the
-  reference. Verified on three clips; never yet used to build a scene — that
-  is the real test, and Kaleidoscope (now on `main`, `src/render/scenes/kaleido/`)
-  is the obvious first target. Design decisions are in the memory note
-  `reference-video-analysis`.
-- **Landed since the last snapshot:** Kaleidoscope scene #79 and its four
-  styles #83 (`style` is the first `variant` setting; Beat grid row in the
-  Rhythm card, `src/audio/beatGrid.ts` + `src/render/gridPulse.ts`), Powder
-  #77. Still in `DRAFT_SCENE_IDS` pending a real-music verdict.
-- **Draft scene PRs** waiting on review and a real-music judgement: Plume #75,
-  Neon Fluid #76.
-- **Auto: unstick tempoLock, rank dials** — draft PR #73.
-- **docs/architecture.md rebuild** — draft PR #74.
-- **CLAUDE.md Git & PRs section** — PR #84; **business/legal docs** — PR #72;
-  both ready for review. PR #70 is a stale status snapshot this file replaces —
-  close it.
+- **Ref loop measures the picture** — PR #92, branch `worktree-ref-look`
+  (2026-09-06). `tools/reflook.py` sits beside `tools/ref-scan.py` and measures
+  each visual regime's frames as structure: lit objects by shape class, size vs
+  distance from centre, depth rings and fold, stroke and glow in pixels, hue
+  clusters, and flow from object tracking (direction, radial-speed law, spin).
+  Output is the "Picture, measured" section of `report.md`, `look.png` and
+  `look.json`; `--look-only` re-measures a bundle. Built after the user rejected
+  the first `/ref`-built scene: "you need to be extracting more visual
+  information in the first place" (memory note `ref-visual-measurement-depth`).
+- **Neon Gates** — draft PR #90, branch `worktree-neon-gates`,
+  `src/render/scenes/gates/`. First scene built through `/ref`, from a silent
+  VJ loop (`tools/.cache/refs/neon-groove/`). Its cut scheduler
+  (`advanceGates`) is tested and sound, but the picture was designed from
+  thumbnails and the new measurement contradicts it: the reference spins about
+  three times faster, flies backward in most regimes, and its hexagons are 3D
+  prisms with depth, not flat rings. Needs a rebuild from the measured numbers,
+  not tuning; the user has not yet chosen between real 3D geometry and
+  correcting the existing fold-and-slots shader.
+- **Landed since the last snapshot:** the `/ref` loop itself #85, dev-server
+  scene links #89, CLAUDE.md Git & PRs #84, share-audio guidance #87.
+- **Other draft PRs** waiting on review or a real-music judgement:
+  Song-boundary instrumentation #93, gallery preview scheduling #91, beat-rate
+  controls #88, Neon Fluid #76, auto dial ranking #73, architecture rebuild #74.
+  Business/legal docs #72 is ready for review. PR #70 is a stale status
+  snapshot this file replaces — close it.
 - Worktrees with no open PR (`git worktree list`): `agent-ae8a69d86e9c44e97`,
-  `audio-source-guide`, `bake-defaults`, `beat-rate-controls`, `docs-index`,
-  `setting-groups`, `tuning-spotlight`. Check `git log main..` on each before
-  reviving; several look landed or superseded.
+  `bake-defaults`, `claude-md-git-workflow`, `dev-scene-links`, `docs-index`,
+  `setting-groups`, `tuning-spotlight`. Several are landed; prune before reviving.
 
 ## Open questions
 
-- Ref loop: our tempo lock came out differently on two runs of the same clip
-  (162 steady vs a drop to 122 at a section boundary). Is `features.ts`'s comb
-  sensitive to start time / adaptive-gain state, and should `ref-hear` run
-  twice and report the spread?
-- Ref loop: our `section` signal (`sectionIntensity`) never rose at the
-  reference's section boundaries on the one clip with audio. Real gap in the
-  runtime, or a threshold mismatch in how the scan looks for a rise?
-- Ref loop: motion metrics run at `VIS_FPS`; above ~150 bpm a half-beat strobe
-  can't be told from a timer. Double the rate, or keep the stated resolution?
-- Beat grid: should its default move off Hits once judged on real music, and
-  should the TV receive it (a new DeviceCommand field)?
-- Kaleidoscope: should the dive target rotate between children (a spiral dive)
-  rather than always the top one? Do the rainbow texture styles
-  (`RAINBOW_ROOM_MIX`) read as ignoring the Palette card? Storm's Mode is the
-  obvious next `variant`.
+- Neon Gates rebuild: instanced 3D wireframes with a perspective camera (a new
+  rendering model for the repo), or keep the SDF tunnel and fix spin, direction,
+  colour? The measurement favours 3D; the cost is a second scene architecture.
+- Ref loop: `reflook.py`'s object detector is tuned on one reference (neon
+  outlines on black). Bright fills, textured or non-black grounds will need the
+  mask thresholds revisited — check `look.png`'s overlay panel on any new clip.
+- Ref loop on silent references (both "4K Night Light" clips so far): the scan
+  reports silence and invents no sync, so the scene's sync rules are ours alone.
+  Is a cut cadence without audio worth building at all, or should `/ref`
+  refuse a silent clip?
+- There is no bar or phrase counter in `AnimFrame`; every scene that wants one
+  wraps `anim.barPhase` itself (Gates, Ambience, Powder). Promote it?
+- Ref loop: tempo lock differs between runs of the same clip, and our `section`
+  signal never rose at a reference's section boundaries — both still open.
 - Which draft scenes graduate out of `DRAFT_SCENE_IDS`, and in what order.
-- Storm's local render-cap workaround (see its header) is redundant now that
-  `renderLatch.ts` is on `main`; simplify once nothing else touches Storm.
-- Stale scratch branches on origin (`git branch -r --no-merged origin/main`):
-  prune, or is anything in them still wanted?
 
 ## Next up
 
-- `/ref` on one of the Kaleidoscope reference shorts against the landed
-  `kaleidoscope` scene; see whether the findings change a tuning decision,
-  then review #85.
-- Watch Kaleidoscope, Powder, Plume and Neon Fluid on real music; land or drop
-  #75/#76 and decide on graduation.
-- Review #73, #74, #84, #72; close #70; decide the fate of the idle worktrees.
+- Decide the Neon Gates rebuild route, then rebuild it from the "Picture,
+  measured" numbers and shoot it with `tools/ref-shoot.mjs` against the bundle.
+- Run `/ref` on a clip with audio and a non-neon look to see whether the picture
+  measurement holds up outside the case it was built on; then review #92.
+- Watch the draft scenes on real music; review #93, #91, #88, #73, #74, #72;
+  close #70; prune the idle worktrees.
