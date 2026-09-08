@@ -61,6 +61,8 @@ gate the deploy that a push to `main` triggers — see
   (`?audio=synthetic&bpm=…`, `?quality=…`) goes *before* the hash —
   `src/app.ts` reads `location.search`, and a query placed after the hash
   silently lands on the gallery.
+- Once a detailed plan exists, execute it with Sonnet whenever possible (an
+  agent with `model: "sonnet"`). Keep the stronger model for planning and review.
 
 ## Git & PRs
 
