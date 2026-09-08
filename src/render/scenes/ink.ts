@@ -68,8 +68,14 @@ export const PARAM = {
   colourPhaseY: VORTEX_COUNT * VORTEX_STRIDE + 8,
   coreScale: VORTEX_COUNT * VORTEX_STRIDE + 9,
   armScale: VORTEX_COUNT * VORTEX_STRIDE + 10,
+  /** 0 = the fine ruled regime, 1 = broad marbled ribbons; rolled around the `ribbon` setting. */
+  marble: VORTEX_COUNT * VORTEX_STRIDE + 11,
+  /** The large-scale warp that bends the whole cross into a curved X. */
+  warpAmpL: VORTEX_COUNT * VORTEX_STRIDE + 12,
+  warpFreqL: VORTEX_COUNT * VORTEX_STRIDE + 13,
+  sheenPhase: VORTEX_COUNT * VORTEX_STRIDE + 14,
 } as const;
-export const PARAM_COUNT = PARAM.armScale + 1;
+export const PARAM_COUNT = PARAM.sheenPhase + 1;
 
 /** Re-target cadence with no tempo lock — the reference's own transition spacing. */
 export const NODE_FALLBACK_SEC = 1.4;
@@ -90,7 +96,7 @@ function roll(rng: Rng, centre: number, range: number, morph: number): number {
  *  index slot % 4 in the shader (right, left, up, down), so every arm gets
  *  at least one spiral and the horizontal/vertical arms get two. The lift
  *  entries are left untouched — see rollLift. */
-export function rollParams(rng: Rng, morph: number, out: Float32Array): Float32Array {
+export function rollParams(rng: Rng, morph: number, out: Float32Array, ribbon = 0.6): Float32Array {
   const m = Math.max(0, Math.min(2, morph));
   for (let i = 0; i < VORTEX_COUNT; i++) {
     const o = i * VORTEX_STRIDE;
@@ -108,6 +114,10 @@ export function rollParams(rng: Rng, morph: number, out: Float32Array): Float32A
   out[PARAM.colourPhaseY] = rng() * Math.PI * 2;
   out[PARAM.coreScale] = roll(rng, 1, 0.15, m);
   out[PARAM.armScale] = roll(rng, 1, 0.2, m);
+  out[PARAM.marble] = Math.max(0, Math.min(1, roll(rng, ribbon, 0.3, m)));
+  out[PARAM.warpAmpL] = 0.18 + Math.abs(roll(rng, 0.11, 0.11, m));
+  out[PARAM.warpFreqL] = 1 + Math.abs(roll(rng, 0.6, 0.6, m));
+  out[PARAM.sheenPhase] = rng() * Math.PI * 2;
   return out;
 }
 
@@ -137,7 +147,7 @@ export interface ParamDrift {
    *  bar wrap (barPhase dropping back toward 0) and the ease follows
    *  barPhase itself; otherwise a NODE_FALLBACK_SEC timer stands in.
    *  `recolour` forces a lift re-roll on top of the phrase counter. */
-  advance(dtSec: number, barPhase: number, tempoLock: number, morph: number, recolour?: boolean): Float32Array;
+  advance(dtSec: number, barPhase: number, tempoLock: number, morph: number, recolour?: boolean, ribbon?: number): Float32Array;
   /** How many rolls have happened so far. */
   readonly nodes: number;
 }
@@ -156,11 +166,11 @@ export function createParamDrift(rng: Rng = Math.random): ParamDrift {
   let wasLocked = false;
   let nodes = 0;
 
-  const node = (morph: number, recolour: boolean): void => {
+  const node = (morph: number, recolour: boolean, ribbon: number): void => {
     // Start the next ease from where the picture actually is, not from
     // the roll it was heading for — a wrap that lands early never jumps.
     prev.set(cur);
-    rollParams(rng, morph, next);
+    rollParams(rng, morph, next, ribbon);
     nodes++;
     if (recolour || nodes % NODES_PER_PHRASE === 0) rollLift(rng, next);
     else next.set(prev.subarray(PARAM.lift, PARAM.lift + 3), PARAM.lift);
@@ -177,17 +187,17 @@ export function createParamDrift(rng: Rng = Math.random): ParamDrift {
     get nodes() {
       return nodes;
     },
-    advance(dtSec, barPhase, tempoLock, morph, recolour = false) {
+    advance(dtSec, barPhase, tempoLock, morph, recolour = false, ribbon = 0.6) {
       const locked = tempoLock > 0.5;
       if (locked) {
-        if (wasLocked && barPhase < lastBarPhase - 0.5) node(morph, recolour);
+        if (wasLocked && barPhase < lastBarPhase - 0.5) node(morph, recolour, ribbon);
         else if (recolour) recolourNow();
         t = barPhase;
       } else {
         t += dtSec / NODE_FALLBACK_SEC;
         if (t >= 1) {
           t -= 1;
-          node(morph, recolour);
+          node(morph, recolour, ribbon);
         } else if (recolour) recolourNow();
       }
       wasLocked = locked;
@@ -238,6 +248,17 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 1.0,
     auto: { dynamics: 0.2, brightness: 0.15 },
+  },
+  {
+    key: "ribbon",
+    label: "Ribbon",
+    description: "Fine ruled lines at the left, broad liquid marbled strokes at the right — each bar rolls around this.",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    auto: { loudness: 0.25, density: -0.15 },
   },
   {
     key: "lineDensity",
@@ -366,27 +387,42 @@ void main() {
   float ampB = uParams[${PARAM.warpAmpB}] * uSwirl;
   float freqB = uParams[${PARAM.warpFreqB}];
   q += ampB * vec2(sin(q.y * freqB * 1.3 - ph * 1.1 + 2.0), sin(q.x * freqB + ph * 0.9 + 4.0));
+  // The large, slow warp that bends the whole cross into the reference's
+  // curved marbled X (its arms are far from straight at the ribbon end).
+  float marble = uParams[${PARAM.marble}];
+  float ampL = uParams[${PARAM.warpAmpL}] * uSwirl * (0.35 + 0.65 * marble);
+  float freqL = uParams[${PARAM.warpFreqL}];
+  q += ampL * vec2(sin(q.y * freqL + ph * 0.25 + 3.0), sin(q.x * freqL * 0.85 - ph * 0.2 + 1.5));
+  q += 0.5 * ampL * vec2(sin(q.x * freqL * 2.1 - ph * 0.15 + 0.7), sin(q.y * freqL * 1.9 + ph * 0.3 + 2.4));
 
   float r = length(q);
   float dAxis = min(abs(q.x), abs(q.y));
   // Ink density: the measured cross. Solid where density >= 1.
-  float coreR = 0.28 * uParams[${PARAM.coreScale}] * (1.0 + 0.6 * uLow * uBassSwell);
-  float armW = 0.3 * uParams[${PARAM.armScale}] / max(uArms, 0.05);
+  float coreR = 0.28 * uParams[${PARAM.coreScale}] * (1.0 + 0.45 * marble) * (1.0 + 0.6 * uLow * uBassSwell);
+  float armW = 0.3 * uParams[${PARAM.armScale}] * (1.0 + 0.5 * marble) / max(uArms, 0.05);
   // Two falloffs: the core's, and a faint long tail so the arms still
   // reach the frame edges as hairlines the way the reference's do.
-  float reach = exp(-r / coreR) + 0.1 * exp(-r / 1.2);
-  float density = 2.8 * uInk * reach * exp(-(dAxis * dAxis) / (armW * armW));
+  float reach = exp(-r / coreR) + 0.04 * exp(-r / 1.2);
+  float density = 2.8 * uInk * (1.0 + 0.3 * marble) * reach * exp(-(dAxis * dAxis) / (armW * armW));
   // Strokes thicken and thin along their length the way the reference's
   // do (its lines break into dashes far out): a cheap two-sine grain.
-  density *= 0.78 + 0.22 * sin(q.x * 31.0 + 1.7 + ph * 0.2) * sin(q.y * 29.0 + 0.4 - ph * 0.15);
+  float grain = mix(0.22, 0.1, marble);
+  density *= (1.0 - grain) + grain * sin(q.x * 31.0 + 1.7 + ph * 0.2) * sin(q.y * 29.0 + 0.4 - ph * 0.15);
 
   // Contour function: spacing shrinks away from the axis (measured ~d^1.7),
   // a weak radial term closes the lines around the arm ends.
-  float lineScale = uLineDensity * mix(0.6, 1.0, uDetail);
+  // Ribbons are the same contours ruled three times coarser.
+  float lineScale = uLineDensity * mix(0.6, 1.0, uDetail) * mix(1.0, 0.42, marble);
   float phi = 420.0 * lineScale * (pow(dAxis + 1e-4, 1.5) + 0.12 * dAxis) + 8.0 * lineScale * r * r;
   phi += 0.9 * sin(q.x * 23.0 + ph * 0.3) * sin(q.y * 19.0 - ph * 0.2);
   float v = 0.5 + 0.5 * sin(phi);
   float fw = fwidth(phi);
+  // Marbling groups its strokes: a few ribbons, a white gap, a few more.
+  // A slow mask over the contour index does that at the ribbon end.
+  float bandMask = 0.5 + 0.5 * sin(phi / 5.5 + 0.8 * sin(q.y * 1.7 + ph * 0.1) + 1.3);
+  float banded = 0.25 + 0.95 * smoothstep(0.3, 0.75, bandMask);
+  // The solid core stays solid: the mask only thins ink that is lines.
+  density *= mix(1.0, mix(banded, 1.0, smoothstep(0.7, 1.3, density)), marble);
   // A period under a few pixels can't be drawn as lines — let it fade to
   // paper (the reference's arms thin out to nothing the same way), and so
   // does any line where the ink has all but run out (the reference has
@@ -397,7 +433,9 @@ void main() {
   // Per-channel duty: the shared density nudged by a smooth field times
   // each channel's lift, only where the density is near 1.
   float colourField = 0.5 + 0.5 * sin(q.x * 1.8 + uParams[${PARAM.colourPhaseX}]) * sin(q.y * 1.8 + uParams[${PARAM.colourPhaseY}]);
-  float splitGain = uColorSplit * colourField * clamp(density, 0.0, 1.0);
+  // At the ribbon end the tint runs along every stroke (the reference's
+  // all-blue passages), at the ruled end it stays near the core.
+  float splitGain = uColorSplit * colourField * mix(clamp(density, 0.0, 1.0), 0.12 + 0.88 * clamp(density, 0.0, 1.0), marble) * mix(1.0, 0.35, marble);
   vec3 lift = vec3(uParams[${PARAM.lift}], uParams[${PARAM.lift + 1}], uParams[${PARAM.lift + 2}]);
   vec3 duty = density * (1.0 - splitGain * lift);
   vec3 edge = 1.0 - duty;
@@ -405,9 +443,19 @@ void main() {
   // Solid ink never fades, however dense the ruling is.
   vec3 solid = smoothstep(vec3(1.0), vec3(1.3), duty);
   ink = max(ink * drawable, solid);
+  // The liquid look of the broad strokes: a white ridge down each ribbon's
+  // spine and grey toward its edges, and an oil-slick sheen where the
+  // core is solid in every channel.
+  float ridge = smoothstep(0.975, 0.995, v) * smoothstep(0.35, 0.7, density) * (1.0 - smoothstep(1.0, 1.3, density)) * marble;
+  ink = max(ink - ridge, 0.0);
+  float edgeGrey = 0.16 * marble * smoothstep(1.0, 0.55, v);
 
   vec3 paper = vec3(0.98) * uPaper;
-  vec3 col = paper * (1.0 - ink);
+  vec3 col = paper * (1.0 - ink) + edgeGrey * ink;
+  float allSolid = min(min(solid.r, solid.g), solid.b);
+  float sheen = 0.5 + 0.5 * sin(q.x * 3.1 + uParams[${PARAM.sheenPhase}]) * sin(q.y * 2.7 - uParams[${PARAM.sheenPhase}] * 0.7);
+  vec3 tint = clamp(0.5 + 0.5 * lift, 0.0, 1.0);
+  col += allSolid * tint * sheen * 0.22 * uColorSplit * (0.3 + 0.7 * marble);
   col = mix(col, vec3(1.0) - col, uNegative);
   outColor = vec4(col, 1.0);
 }
@@ -424,7 +472,7 @@ export const inkScene = createFullscreenScene("ink", "Ink Synth", FRAG, {
       stretchEnv = advanceStretch(stretchEnv, anim.dtSec, anim.onset);
       const drop = anim.dropOnset && !prevDropOnset;
       prevDropOnset = anim.dropOnset;
-      const params = drift.advance(anim.dtSec, anim.barPhase, anim.tempoLock, getSetting("morph"), drop);
+      const params = drift.advance(anim.dtSec, anim.barPhase, anim.tempoLock, getSetting("morph"), drop, getSetting("ribbon"));
       return { uParams: params, uStretchEnv: stretchEnv };
     };
   })(),
