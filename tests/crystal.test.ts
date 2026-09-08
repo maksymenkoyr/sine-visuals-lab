@@ -1,82 +1,69 @@
 import { describe, it, expect } from "vitest";
-import { FRAMINGS, advanceCrystal, createCrystalState, cutEveryBeats, layerEnvelope } from "../src/render/scenes/crystal.ts";
+import {
+  advanceCrystal,
+  createCrystalState,
+  layerEnvelope,
+  hash01,
+  ZOOM_MID,
+  ZOOM_AMP,
+  type CrystalInputs,
+  type CrystalOpts,
+} from "../src/render/scenes/crystal.ts";
 
 // The sequencer is the scene's whole sync story (see crystal.ts's header):
-// light layers strobe in, hold and release; cuts reframe on a beat count
-// and on drops with a black gap. These pin the envelope's order, that
-// flicker only removes frames from the ramp, and what fires what.
-describe("layerEnvelope", () => {
-  it("ramps to 1 by the end of the attack, holds, then releases", () => {
-    expect(layerEnvelope(0, 0.12, 0.5, 0.3, 0, 1)).toBe(0);
-    expect(layerEnvelope(0.12, 0.12, 0.5, 0.3, 0, 1)).toBe(1);
-    expect(layerEnvelope(0.4, 0.12, 0.5, 0.3, 0, 1)).toBe(1);
-    expect(layerEnvelope(0.12 + 0.5 + 1.2, 0.12, 0.5, 0.3, 0, 1)).toBeLessThan(0.05);
-  });
-
-  it("flicker only ever lowers the ramp, never touches the hold, and drops some frame", () => {
-    let dropped = false;
-    for (let t = 0; t < 0.8; t += 0.005) {
-      const smooth = layerEnvelope(t, 0.12, 0.4, 0.3, 0, 7);
-      const stutter = layerEnvelope(t, 0.12, 0.4, 0.3, 1, 7);
-      expect(stutter).toBeLessThanOrEqual(smooth + 1e-9);
-      if (t >= 0.12 && t <= 0.52) expect(stutter).toBe(1);
-      if (t < 0.11 && stutter < smooth * 0.5) dropped = true;
+// a wandering camera, a morph clock and light layers that fade up and
+// down — nothing discrete anywhere except the beat/bar/drop triggers of
+// those smooth envelopes. These tests pin the envelope's shape and, above
+// all, that nothing the driver outputs ever jumps like a cut.
+describe("hash01", () => {
+  it("is deterministic and stays in [0, 1)", () => {
+    for (let k = 0; k < 20; k++) {
+      const v = hash01(3, k);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(1);
+      expect(hash01(3, k)).toBe(v);
     }
-    expect(dropped).toBe(true);
-  });
-
-  it("is silent before it fires", () => {
-    expect(layerEnvelope(Infinity, 0.12, 0.5, 0.3, 0.5, 1)).toBe(0);
-    expect(layerEnvelope(-1, 0.12, 0.5, 0.3, 0.5, 1)).toBe(0);
   });
 });
 
-describe("cutEveryBeats", () => {
-  it("maps the Cuts slider to never / 4 / 2 / 1 beats", () => {
-    expect(cutEveryBeats(0)).toBe(0);
-    expect(cutEveryBeats(0.2)).toBe(4);
-    expect(cutEveryBeats(0.5)).toBe(2);
-    expect(cutEveryBeats(1)).toBe(1);
+describe("layerEnvelope", () => {
+  it("ramps to 1 by the end of the attack, holds, then releases", () => {
+    expect(layerEnvelope(0, 0.12, 0.5, 0.3)).toBe(0);
+    expect(layerEnvelope(0.12, 0.12, 0.5, 0.3)).toBe(1);
+    expect(layerEnvelope(0.4, 0.12, 0.5, 0.3)).toBe(1);
+    expect(layerEnvelope(0.12 + 0.5 + 1.2, 0.12, 0.5, 0.3)).toBeLessThan(0.05);
+  });
+
+  it("is silent before it fires", () => {
+    expect(layerEnvelope(Infinity, 0.12, 0.5, 0.3)).toBe(0);
+    expect(layerEnvelope(-1, 0.12, 0.5, 0.3)).toBe(0);
   });
 });
 
 describe("advanceCrystal", () => {
   const DT = 1 / 60;
-  const opts = { cuts: 0.5, pulse: 0.6, flareAmt: 1, hold: 0.4, flicker: 0, drift: 0.3 };
-  const quiet = { dtSec: DT, onset: false, dropOnset: false, barPhase: 0, tempoLock: 1, low: 0 };
+  const opts: CrystalOpts = { zoom: 0.4, pulse: 0.6, flareAmt: 1, hold: 0.35, drift: 0.3 };
+  const quiet: CrystalInputs = {
+    dtSec: DT,
+    onset: false,
+    dropOnset: false,
+    barPhase: 0,
+    tempoLock: 1,
+    low: 0,
+    sectionIntensity: 0,
+  };
 
-  it("cuts to a different framing every second beat with a black gap, and never on the off beat", () => {
+  it("a drop lights the fan, ramping from zero", () => {
     const st = createCrystalState();
-    const seen = new Set<number>();
-    for (let i = 0; i < 8; i++) {
-      const before = st.framing;
-      const outOdd = advanceCrystal(st, { ...quiet, onset: true }, opts);
-      expect(st.framing).toBe(before);
-      expect(outOdd.gap).toBe(0);
-      for (let k = 0; k < 20; k++) advanceCrystal(st, quiet, opts);
-      const outEven = advanceCrystal(st, { ...quiet, onset: true }, opts);
-      expect(st.framing).not.toBe(before);
-      expect(st.framing).toBeGreaterThanOrEqual(0);
-      expect(st.framing).toBeLessThan(FRAMINGS.length);
-      expect(outEven.gap).toBe(1);
-      seen.add(st.framing);
-      for (let k = 0; k < 20; k++) advanceCrystal(st, quiet, opts);
-      expect(advanceCrystal(st, quiet, opts).gap).toBe(0);
-    }
-    expect(seen.size).toBeGreaterThan(2);
-  });
-
-  it("Cuts = 0 never reframes on beats; a drop still cuts and lights the fan", () => {
-    const st = createCrystalState();
-    for (let i = 0; i < 12; i++) advanceCrystal(st, { ...quiet, onset: true }, { ...opts, cuts: 0 });
-    expect(st.framing).toBe(0);
-    const out = advanceCrystal(st, { ...quiet, dropOnset: true }, { ...opts, cuts: 0 });
-    expect(st.framing).not.toBe(0);
-    expect(out.gap).toBe(1);
+    const out = advanceCrystal(st, { ...quiet, dropOnset: true }, opts);
     expect(st.fan.age).toBe(0);
+    expect(out.fan).toBe(0);
+    let peak = 0;
+    for (let t = 0; t < 1; t += DT) peak = Math.max(peak, advanceCrystal(st, quiet, opts).fan);
+    expect(peak).toBeGreaterThan(0.95);
   });
 
-  it("strobes the blob ring on a bar wrap while locked, ramping from zero", () => {
+  it("lights the blob ring on a bar wrap while locked, ramping from zero", () => {
     const st = createCrystalState();
     advanceCrystal(st, { ...quiet, barPhase: 0.9 }, opts);
     const fire = advanceCrystal(st, { ...quiet, barPhase: 0.05 }, opts);
@@ -84,10 +71,10 @@ describe("advanceCrystal", () => {
     expect(fire.blobs).toBe(0);
     let peak = 0;
     for (let t = 0; t < 1; t += DT) peak = Math.max(peak, advanceCrystal(st, quiet, opts).blobs);
-    expect(peak).toBe(1);
+    expect(peak).toBeGreaterThan(0.95);
   });
 
-  it("does not strobe on a bar wrap without a lock, and Flare = 0 lights nothing", () => {
+  it("does not light the blob ring on an unlocked bar wrap, and Flare = 0 lights nothing", () => {
     const st = createCrystalState();
     advanceCrystal(st, { ...quiet, barPhase: 0.9, tempoLock: 0 }, opts);
     advanceCrystal(st, { ...quiet, barPhase: 0.05, tempoLock: 0 }, opts);
@@ -105,7 +92,7 @@ describe("advanceCrystal", () => {
     let onset = true;
     const dt = 1 / 120;
     for (let t = 0; t < 1; t += dt) {
-      env.push(advanceCrystal(st, { ...quiet, dtSec: dt, onset }, { ...opts, cuts: 0, pulse: 1 }).swell);
+      env.push(advanceCrystal(st, { ...quiet, dtSec: dt, onset }, { ...opts, pulse: 1 }).swell);
       onset = false;
     }
     expect(env[0]).toBeLessThan(0.5);
@@ -113,5 +100,92 @@ describe("advanceCrystal", () => {
     expect(peak).toBeGreaterThan(0.95);
     expect(peak).toBeLessThanOrEqual(1.0001);
     expect(env[env.length - 1]).toBeLessThan(0.05);
+  });
+
+  it("keeps the camera's zoom within its travel bounds", () => {
+    const st = createCrystalState();
+    for (let i = 0; i < 1200; i++) {
+      const onset = i % 23 === 0;
+      const out = advanceCrystal(st, { ...quiet, onset, sectionIntensity: 0.5 }, opts);
+      expect(out.logZoom).toBeGreaterThanOrEqual(ZOOM_MID - ZOOM_AMP - 1e-6);
+      expect(out.logZoom).toBeLessThanOrEqual(ZOOM_MID + ZOOM_AMP + 1e-6);
+    }
+  });
+
+  it("a beat's zoom surge lands the frame after it fires, never the tick it fires on", () => {
+    const stA = createCrystalState();
+    const stB = createCrystalState();
+    for (let i = 0; i < 10; i++) {
+      advanceCrystal(stA, quiet, opts);
+      advanceCrystal(stB, quiet, opts);
+    }
+    const outFireTick = advanceCrystal(stA, { ...quiet, onset: true }, opts);
+    const outQuietTick = advanceCrystal(stB, quiet, opts);
+    // Firing the onset must not change how far the camera travelled this
+    // frame — only the *next* frame's travel speeds up.
+    expect(outFireTick.logZoom).toBeCloseTo(outQuietTick.logZoom, 9);
+    expect(stA.zoomVel).toBeGreaterThan(0);
+    const deltaA = Math.abs(advanceCrystal(stA, quiet, opts).logZoom - outFireTick.logZoom);
+    const deltaB = Math.abs(advanceCrystal(stB, quiet, opts).logZoom - outQuietTick.logZoom);
+    expect(deltaA).toBeGreaterThan(deltaB);
+  });
+
+  it("mood alternates which look a beat favours: over 16 s, red and edges each peak near 1 at different times", () => {
+    const st = createCrystalState();
+    const dt = 1 / 60;
+    const lowHold: CrystalOpts = { ...opts, hold: 0.1 };
+    let redPeak = 0;
+    let redPeakT = -1;
+    let edgesPeak = 0;
+    let edgesPeakT = -1;
+    let nextOnsetT = 0;
+    for (let t = 0; t < 16; t += dt) {
+      const onset = t >= nextOnsetT;
+      if (onset) nextOnsetT += 2.0;
+      const out = advanceCrystal(st, { ...quiet, dtSec: dt, onset }, lowHold);
+      if (out.red > redPeak) {
+        redPeak = out.red;
+        redPeakT = t;
+      }
+      if (out.edges > edgesPeak) {
+        edgesPeak = out.edges;
+        edgesPeakT = t;
+      }
+    }
+    expect(redPeak).toBeGreaterThan(0.9);
+    expect(edgesPeak).toBeGreaterThan(0.9);
+    expect(Math.abs(redPeakT - edgesPeakT)).toBeGreaterThan(2);
+  });
+
+  it("stays continuous over 12 s: no output ever jumps like a cut, only smooth motion", () => {
+    const st = createCrystalState();
+    const dt = 1 / 60;
+    const totalFrames = Math.round(12 / dt);
+    const onsetEvery = Math.round(0.47 / dt);
+    let barPhase = 0;
+    let onsetCount = 0;
+    let prev = advanceCrystal(
+      st,
+      { dtSec: dt, onset: false, dropOnset: false, barPhase, tempoLock: 1, low: 0.2, sectionIntensity: 0.3 },
+      opts,
+    );
+    for (let i = 1; i < totalFrames; i++) {
+      const t = i * dt;
+      const onset = i % onsetEvery === 0;
+      if (onset) {
+        onsetCount++;
+        barPhase = onsetCount % 4 === 0 ? 0.02 : barPhase + 0.25;
+      }
+      const dropOnset = t >= 5 && t < 5 + dt * 3;
+      const out = advanceCrystal(st, { dtSec: dt, onset, dropOnset, barPhase, tempoLock: 1, low: 0.2, sectionIntensity: 0.3 }, opts);
+      expect(Math.abs(out.blobs - prev.blobs)).toBeLessThan(0.2);
+      expect(Math.abs(out.fan - prev.fan)).toBeLessThan(0.2);
+      expect(Math.abs(out.red - prev.red)).toBeLessThan(0.2);
+      expect(Math.abs(out.edges - prev.edges)).toBeLessThan(0.2);
+      expect(Math.abs(out.logZoom - prev.logZoom)).toBeLessThan(0.05);
+      expect(Math.abs(out.pan[0] - prev.pan[0])).toBeLessThan(0.02);
+      expect(Math.abs(out.pan[1] - prev.pan[1])).toBeLessThan(0.02);
+      prev = out;
+    }
   });
 });
