@@ -19,8 +19,9 @@ import { kaleidoscopeScene } from "./kaleido/index.ts";
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
 // below) go first, drafts follow. Within each group the newest scene comes
 // first: a scene you just added goes at the top of the drafts, so it's the
-// first tile behind the gallery's draft toggle and the first link
-// vite-scene-links-plugin.ts prints when you start `npm run dev`.
+// first tile behind the gallery's draft toggle. (Registering it here is also
+// what lets vite-scene-links-plugin.ts print its link when you start
+// `npm run dev` with its files changed.)
 registerScene(chladniScene);
 registerScene(causticsScene);
 registerScene(kaleidoscopeScene);
