@@ -96,7 +96,7 @@ function roll(rng: Rng, centre: number, range: number, morph: number): number {
  *  index slot % 4 in the shader (right, left, up, down), so every arm gets
  *  at least one spiral and the horizontal/vertical arms get two. The lift
  *  entries are left untouched — see rollLift. */
-export function rollParams(rng: Rng, morph: number, out: Float32Array, ribbon = 0.6): Float32Array {
+export function rollParams(rng: Rng, morph: number, out: Float32Array, ribbon = 0.7): Float32Array {
   const m = Math.max(0, Math.min(2, morph));
   for (let i = 0; i < VORTEX_COUNT; i++) {
     const o = i * VORTEX_STRIDE;
@@ -187,7 +187,7 @@ export function createParamDrift(rng: Rng = Math.random): ParamDrift {
     get nodes() {
       return nodes;
     },
-    advance(dtSec, barPhase, tempoLock, morph, recolour = false, ribbon = 0.6) {
+    advance(dtSec, barPhase, tempoLock, morph, recolour = false, ribbon = 0.7) {
       const locked = tempoLock > 0.5;
       if (locked) {
         if (wasLocked && barPhase < lastBarPhase - 0.5) node(morph, recolour, ribbon);
@@ -257,7 +257,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.6,
+    default: 0.7,
     auto: { loudness: 0.25, density: -0.15 },
   },
   {
@@ -359,6 +359,41 @@ mat2 rot2(float a) {
   return mat2(c, -s, s, c);
 }
 
+float hash21(vec2 p) {
+  p = fract(p * vec2(127.1, 311.7));
+  p += dot(p, p + 19.19);
+  return fract(p.x * p.y);
+}
+
+// Value noise with a smooth blend, and a four-octave fbm rotated between
+// octaves so its ridges don't line up with the axes.
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash21(i);
+  float b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0));
+  float d = hash21(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm(vec2 p) {
+  float v = 0.0;
+  float amp = 0.5;
+  mat2 m = mat2(0.8, 0.6, -0.6, 0.8);
+  for (int i = 0; i < 4; i++) {
+    v += amp * vnoise(p);
+    p = m * p * 2.05 + vec2(1.7, 9.2);
+    amp *= 0.5;
+  }
+  return v;
+}
+
+vec2 fbm2(vec2 p) {
+  return vec2(fbm(p), fbm(p + vec2(5.2, 1.3)));
+}
+
 void main() {
   vec2 uv = roomUv(vUv);
   float aspect = uResolution.x / uResolution.y;
@@ -367,8 +402,21 @@ void main() {
   vec2 p = (uv - 0.5) * vec2(aspect, 1.0) * 2.0;
   p.x /= 1.0 + uStretchEnv * uStretch;
 
+  float ph = uFlowPhase * uFlow;
+  float marble = uParams[${PARAM.marble}];
+
+  // The marbling: the field is read through two nested noise warps whose
+  // amplitude is comparable to the ribbons themselves — that is what turns
+  // parallel contours into liquid strokes that swell, thin and fold. The
+  // warp drifts on the flow clock so the picture never sits still.
+  float ampL = uParams[${PARAM.warpAmpL}] * uSwirl * (0.3 + 0.7 * marble);
+  float freqL = uParams[${PARAM.warpFreqL}];
+  vec2 w1 = fbm2(p * freqL + vec2(ph * 0.05, -ph * 0.04)) - 0.5;
+  vec2 q = p + 3.2 * ampL * w1;
+  vec2 w2 = fbm2(q * freqL * 1.8 + vec2(2.3, 7.1) + ph * 0.03) - 0.5;
+  q += 1.6 * ampL * (0.4 + 0.6 * marble) * w2;
+
   // Spirals: a swirl warp per vortex, each parked on one arm.
-  vec2 q = p;
   for (int i = 0; i < ${VORTEX_COUNT}; i++) {
     vec2 dir = ARMS[i - 4 * (i / 4)];
     vec2 perp = vec2(-dir.y, dir.x);
@@ -379,76 +427,76 @@ void main() {
     float g = exp(-dot(d, d) / (radius * radius));
     q = c + rot2(strength * g) * d;
   }
-  // Sliding waviness — the phase runs on the audio-warped flow clock.
-  float ph = uFlowPhase * uFlow * 1.5;
-  float ampA = uParams[${PARAM.warpAmpA}] * uSwirl;
+  // Fine waviness on the ruled end only.
+  float ampA = uParams[${PARAM.warpAmpA}] * uSwirl * (1.0 - 0.7 * marble);
   float freqA = uParams[${PARAM.warpFreqA}];
-  q += ampA * vec2(sin(q.y * freqA + ph), sin(q.x * freqA * 0.8 - ph * 0.7 + 1.0));
-  float ampB = uParams[${PARAM.warpAmpB}] * uSwirl;
-  float freqB = uParams[${PARAM.warpFreqB}];
-  q += ampB * vec2(sin(q.y * freqB * 1.3 - ph * 1.1 + 2.0), sin(q.x * freqB + ph * 0.9 + 4.0));
-  // The large, slow warp that bends the whole cross into the reference's
-  // curved marbled X (its arms are far from straight at the ribbon end).
-  float marble = uParams[${PARAM.marble}];
-  float ampL = uParams[${PARAM.warpAmpL}] * uSwirl * (0.35 + 0.65 * marble);
-  float freqL = uParams[${PARAM.warpFreqL}];
-  q += ampL * vec2(sin(q.y * freqL + ph * 0.25 + 3.0), sin(q.x * freqL * 0.85 - ph * 0.2 + 1.5));
-  q += 0.5 * ampL * vec2(sin(q.x * freqL * 2.1 - ph * 0.15 + 0.7), sin(q.y * freqL * 1.9 + ph * 0.3 + 2.4));
+  q += ampA * vec2(sin(q.y * freqA + ph * 1.5), sin(q.x * freqA * 0.8 - ph * 1.05 + 1.0));
 
   float r = length(q);
   float dAxis = min(abs(q.x), abs(q.y));
-  // Ink density: the measured cross. Solid where density >= 1.
+  // Ink density: the measured cross. Solid where density >= 1. Two
+  // falloffs: the core's, and a faint long tail so the arms still reach
+  // the frame edges as hairlines the way the reference's do.
   float coreR = 0.28 * uParams[${PARAM.coreScale}] * (1.0 + 0.45 * marble) * (1.0 + 0.6 * uLow * uBassSwell);
   float armW = 0.3 * uParams[${PARAM.armScale}] * (1.0 + 0.5 * marble) / max(uArms, 0.05);
-  // Two falloffs: the core's, and a faint long tail so the arms still
-  // reach the frame edges as hairlines the way the reference's do.
   float reach = exp(-r / coreR) + 0.04 * exp(-r / 1.2);
-  float density = 2.8 * uInk * (1.0 + 0.3 * marble) * reach * exp(-(dAxis * dAxis) / (armW * armW));
+  float density = 2.8 * uInk * (1.0 + 0.15 * marble) * reach * exp(-(dAxis * dAxis) / (armW * armW));
   // Strokes thicken and thin along their length the way the reference's
   // do (its lines break into dashes far out): a cheap two-sine grain.
-  float grain = mix(0.22, 0.1, marble);
+  float grain = mix(0.22, 0.08, marble);
   density *= (1.0 - grain) + grain * sin(q.x * 31.0 + 1.7 + ph * 0.2) * sin(q.y * 29.0 + 0.4 - ph * 0.15);
 
-  // Contour function: spacing shrinks away from the axis (measured ~d^1.7),
-  // a weak radial term closes the lines around the arm ends.
-  // Ribbons are the same contours ruled three times coarser.
-  float lineScale = uLineDensity * mix(0.6, 1.0, uDetail) * mix(1.0, 0.42, marble);
-  float phi = 420.0 * lineScale * (pow(dAxis + 1e-4, 1.5) + 0.12 * dAxis) + 8.0 * lineScale * r * r;
-  phi += 0.9 * sin(q.x * 23.0 + ph * 0.3) * sin(q.y * 19.0 - ph * 0.2);
-  float v = 0.5 + 0.5 * sin(phi);
+  // The stroke field. At the ruled end the contours follow the arms
+  // (spacing shrinking away from each axis, measured ~d^1.5); at the ribbon
+  // end an organic noise term of comparable gradient takes over, so strokes
+  // still run along the arms but swell, split and fold like marbling.
+  float lineScale = uLineDensity * mix(0.6, 1.0, uDetail);
+  float organic = fbm(q * 1.4 + vec2(3.1, 7.7) + ph * 0.02);
+  float axisTerm = pow(dAxis + 1e-4, 1.5) + 0.12 * dAxis;
+  float phi = lineScale * (mix(420.0, 85.0, marble) * axisTerm + mix(35.0, 58.0, marble) * organic + 8.0 * r * r);
   float fw = fwidth(phi);
   // Marbling groups its strokes: a few ribbons, a white gap, a few more.
-  // A slow mask over the contour index does that at the ribbon end.
+  // A slow mask over the contour index does that at the ribbon end; the
+  // solid core is kept out of it so it stays solid.
   float bandMask = 0.5 + 0.5 * sin(phi / 5.5 + 0.8 * sin(q.y * 1.7 + ph * 0.1) + 1.3);
-  float banded = 0.25 + 0.95 * smoothstep(0.3, 0.75, bandMask);
-  // The solid core stays solid: the mask only thins ink that is lines.
+  float banded = 0.04 + 1.1 * smoothstep(0.3, 0.75, bandMask);
   density *= mix(1.0, mix(banded, 1.0, smoothstep(0.7, 1.3, density)), marble);
+
+  // Per-channel contour phase: near the core the three channels read the
+  // field slightly apart (the reference's three functions disagreeing),
+  // which draws the thin red/green/blue fringes inside the dark core.
+  float coreMask = smoothstep(0.6, 1.1, density);
+  vec3 phic = vec3(phi) + uColorSplit * 0.8 * coreMask * vec3(-1.0, 0.0, 1.0);
+  vec3 v = 0.5 + 0.5 * sin(phic);
+  float v0 = 0.5 + 0.5 * sin(phi);
+
   // A period under a few pixels can't be drawn as lines — let it fade to
-  // paper (the reference's arms thin out to nothing the same way), and so
-  // does any line where the ink has all but run out (the reference has
-  // nothing past r≈1.2, no hairlines either).
+  // paper, and so does any line where the ink has all but run out (the
+  // reference has nothing past r≈1.2, no hairlines either).
   float drawable = (1.0 - smoothstep(1.6, 3.2, fw)) * smoothstep(0.04, 0.12, density);
-  float aa = fwidth(v) * 0.75 + 1e-3;
+  float aa = fwidth(v0) * 0.75 + 1e-3;
 
   // Per-channel duty: the shared density nudged by a smooth field times
-  // each channel's lift, only where the density is near 1.
+  // each channel's lift. At the ribbon end the tint runs along every stroke
+  // (the reference's all-blue passages), at the ruled end it stays near the
+  // core.
   float colourField = 0.5 + 0.5 * sin(q.x * 1.8 + uParams[${PARAM.colourPhaseX}]) * sin(q.y * 1.8 + uParams[${PARAM.colourPhaseY}]);
-  // At the ribbon end the tint runs along every stroke (the reference's
-  // all-blue passages), at the ruled end it stays near the core.
   float splitGain = uColorSplit * colourField * mix(clamp(density, 0.0, 1.0), 0.12 + 0.88 * clamp(density, 0.0, 1.0), marble) * mix(1.0, 0.35, marble);
   vec3 lift = vec3(uParams[${PARAM.lift}], uParams[${PARAM.lift + 1}], uParams[${PARAM.lift + 2}]);
   vec3 duty = density * (1.0 - splitGain * lift);
   vec3 edge = 1.0 - duty;
-  vec3 ink = smoothstep(edge - aa, edge + aa, vec3(v));
+  vec3 ink = smoothstep(edge - aa, edge + aa, v);
   // Solid ink never fades, however dense the ruling is.
   vec3 solid = smoothstep(vec3(1.0), vec3(1.3), duty);
   ink = max(ink * drawable, solid);
-  // The liquid look of the broad strokes: a white ridge down each ribbon's
-  // spine and grey toward its edges, and an oil-slick sheen where the
-  // core is solid in every channel.
-  float ridge = smoothstep(0.975, 0.995, v) * smoothstep(0.35, 0.7, density) * (1.0 - smoothstep(1.0, 1.3, density)) * marble;
+
+  // The liquid look of the broad strokes: grey toward each ribbon's edges,
+  // a white ridge down its spine, and an oil-slick sheen where the core is
+  // solid in every channel.
+  float inside = clamp((v0 - (1.0 - density)) / max(density, 1e-3), 0.0, 1.0);
+  float edgeGrey = 0.2 * marble * (1.0 - inside) * (1.0 - inside);
+  float ridge = smoothstep(0.975, 0.995, v0) * smoothstep(0.35, 0.7, density) * (1.0 - smoothstep(1.0, 1.3, density)) * marble;
   ink = max(ink - ridge, 0.0);
-  float edgeGrey = 0.16 * marble * smoothstep(1.0, 0.55, v);
 
   vec3 paper = vec3(0.98) * uPaper;
   vec3 col = paper * (1.0 - ink) + edgeGrey * ink;
