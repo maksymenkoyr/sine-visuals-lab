@@ -372,7 +372,10 @@ void main() {
   // Ink density: the measured cross. Solid where density >= 1.
   float coreR = 0.28 * uParams[${PARAM.coreScale}] * (1.0 + 0.6 * uLow * uBassSwell);
   float armW = 0.3 * uParams[${PARAM.armScale}] / max(uArms, 0.05);
-  float density = 2.8 * uInk * exp(-r / coreR) * exp(-(dAxis * dAxis) / (armW * armW));
+  // Two falloffs: the core's, and a faint long tail so the arms still
+  // reach the frame edges as hairlines the way the reference's do.
+  float reach = exp(-r / coreR) + 0.1 * exp(-r / 1.2);
+  float density = 2.8 * uInk * reach * exp(-(dAxis * dAxis) / (armW * armW));
   // Strokes thicken and thin along their length the way the reference's
   // do (its lines break into dashes far out): a cheap two-sine grain.
   density *= 0.78 + 0.22 * sin(q.x * 31.0 + 1.7 + ph * 0.2) * sin(q.y * 29.0 + 0.4 - ph * 0.15);
