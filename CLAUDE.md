@@ -79,12 +79,13 @@ after all three pass; include the screenshot paths in your summary.
 - Don't port third-party implementations into a scene — write it as independent
   work. (See the git history around "Rewrite Mesh Grid as independent work.")
 - When working on a visualization, start `npm run dev` and hand the user a
-  direct link to that scene — not the gallery root. The dev server prints one
-  link per scene at startup, in gallery order, so copy the line for yours
-  (`vite-scene-links-plugin.ts` owns that listing). Any query
-  (`?audio=synthetic&bpm=…`, `?quality=…`) goes *before* the hash —
-  `src/app.ts` reads `location.search`, and a query placed after the hash
-  silently lands on the gallery.
+  direct link to that scene — not the gallery root. The dev server prints the
+  link to the scene in flight at startup — the one whose files git says are
+  modified, untracked, or changed on this branch — so copy that line
+  (`vite-scene-links-plugin.ts` owns the detection and what counts as "in
+  flight"). Any query (`?audio=synthetic&bpm=…`, `?quality=…`) goes *before*
+  the hash — `src/app.ts` reads `location.search`, and a query placed after
+  the hash silently lands on the gallery.
 - Once a detailed plan exists, execute it with Sonnet whenever possible (an
   agent with `model: "sonnet"`). Keep the stronger model for planning and review.
 
