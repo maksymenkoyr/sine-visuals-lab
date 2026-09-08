@@ -7,6 +7,7 @@ import { powderScene } from "../src/render/scenes/powder.ts";
 import { stormScene } from "../src/render/scenes/storm.ts";
 import { ambienceScene } from "../src/render/scenes/ambience.ts";
 import { kaleidoscopeScene } from "../src/render/scenes/kaleido/index.ts";
+import { crystalScene } from "../src/render/scenes/crystal.ts";
 import { setSceneSetting, type SceneSetting } from "../src/render/sceneSettings.ts";
 import { setSensitivity, setExpansion, setSmoothing } from "../src/audio/sensitivity.ts";
 import { NEUTRAL, type DialValues } from "../src/render/musicProfile.ts";
@@ -41,6 +42,7 @@ const ALL_SETTINGS: SceneSetting[] = [
   ...(stormScene.settings ?? []),
   ...(ambienceScene.settings ?? []),
   ...(kaleidoscopeScene.settings ?? []),
+  ...(crystalScene.settings ?? []),
   getSensitivitySpec(),
   getExpansionSpec(),
   getSmoothingSpec(),
