@@ -8,13 +8,17 @@ one image per frame. ref-scan.py calls it once per bundle and writes
                      (x = time). Lanes: the centre row, a ring at r = 0.5
                      unrolled by angle, a spoke from the centre to the top
                      edge. Strobes, pulses, zoom and spin read as texture
-                     at frame resolution; a hard cut is a vertical seam.
+                     at frame resolution; a hard cut is a vertical seam,
+                     a fade a soft one.
     bursts/<t0>/     a "burst": one short window decoded at every source
                      frame (BURST_S at BURST_FPS, BURST_PIXELS per frame,
                      more than the scan's budget) around a moment the data
                      chose — a strobe, a transition, a phrase start.
-        timing.png   every frame of the window on one sheet, cuts marked:
-                     answers when / in what order / how many frames. The
+        timing.png   every frame of the window on one sheet, cuts marked
+                     (a run of change frames is a *cut* only when one
+                     frame carries CUT_SHARE of it, else a *fade* — the
+                     report counts both): answers when / in what order /
+                     how many frames. The
                      window is BURST_S long; MOTION_WIN frames each side of
                      the first cut feed the projections.
         detail.png   DETAIL_TILES frames of the same window, large: the
@@ -26,9 +30,10 @@ one image per frame. ref-scan.py calls it once per bundle and writes
                      the window's central event (grey = still, colour
                      fringes = motion, their side = direction).
     report.md        "## Bursts": one line per burst, numbers first —
-                     hard cuts at BURST_FPS, hold lengths, brightness
-                     range — so a burst is opened for a reason. And a
-                     CUTS finding from the whole decode.
+                     hard cuts at BURST_FPS, fades and their spans, hold
+                     lengths, brightness range — so a burst is opened for
+                     a reason. And a CUTS / NO HARD CUTS finding from the
+                     whole decode.
 
 Why bursts are placed by data, not by a fixed interval: the scan already
 knows where the picture changes (transitions, strobes) and where the music
@@ -75,7 +80,10 @@ SILENT_BURST_EVERY_S = 10.0  # cadence when there is no audio to place them by
 BURST_OVERLAP = 0.5  # windows overlapping by more than this share of BURST_S merge
 DETAIL_TILES = 16
 HIST_BINS = 4  # per RGB channel → 64 colour bins, as ref-scan.py's cut metric
-CUT_HIST = 0.2  # L1 histogram distance (0..2) from the previous frame that counts as a hard cut
+CUT_HIST = 0.2  # L1 histogram distance (0..2) from the previous frame that counts as a change frame
+CUT_SHARE = 0.6  # a run of change frames is a hard cut only when one frame carries this share of the run's change; otherwise it is a fade
+DARK_LUM = 0.08  # a cut whose brighter side stays under this mean luminance is a change in the dark: the eye never sees a seam
+CUT_PIX = 0.1  # mean |pixel change| (0..1) a cut frame must reach: the histogram distance exaggerates a dark-to-lit step, the first frame of a strobe ramp
 MOTION_WIN = 15  # frames each side of the event for the max / mean projections (1 s at 30 fps)
 TILE_PAD = 3
 LINE_H = 14  # label line height, px
@@ -108,8 +116,64 @@ def colour_change(frames: np.ndarray, step: int = 4) -> np.ndarray:
     return d
 
 
-def find_cuts(d: np.ndarray) -> list[int]:
-    return [int(i) for i in np.where(d[1:] >= CUT_HIST)[0] + 1]
+def pixel_change(frames: np.ndarray) -> np.ndarray:
+    """Mean absolute pixel change of each frame from the previous one (p[0] = 0), on a coarse grid."""
+    small = frames[:, ::8, ::8, :].astype(np.float32) / 255
+    p = np.zeros(len(frames))
+    if len(frames) > 1:
+        p[1:] = np.abs(np.diff(small, axis=0)).mean(axis=(1, 2, 3))
+    return p
+
+
+def find_events(d: np.ndarray, lum: np.ndarray | None = None, pix: np.ndarray | None = None) -> list[dict]:
+    """Runs of consecutive change frames (d >= CUT_HIST), each a cut or a fade.
+
+    A fast fade crosses the threshold on every frame it spans, so counting
+    frames counted a three-frame fade as three cuts (the VJ-loop misread of
+    2026-09-08: a source with no cut at all reported 24). A run is a hard cut
+    only when a single frame carries CUT_SHARE of its change; `at` is that
+    frame for a cut, the run's first frame for a fade; `span` is in frames.
+    With `lum` (mean luminance per frame) a cut whose brighter neighbour stays
+    under DARK_LUM is flagged `dark` instead: a VJ loop cuts in the black and
+    fades the next picture up, which reads as a morph, not a seam. With `pix`
+    (mean pixel change per frame) a cut frame must also move CUT_PIX of the
+    picture, or it is the first frame of a fade."""
+    hot = np.where(d >= CUT_HIST)[0]
+    hot = hot[hot > 0]
+    events = []
+    i = 0
+    while i < len(hot):
+        j = i
+        while j + 1 < len(hot) and hot[j + 1] - hot[j] <= 1:
+            j += 1
+        a, b = int(hot[i]), int(hot[j])
+        seg = d[a:b + 1]
+        share = float(seg.max() / (seg.sum() + 1e-9))
+        at = a + int(np.argmax(seg))
+        cut = b == a or share >= CUT_SHARE
+        if cut and pix is not None and float(pix[at]) < CUT_PIX:
+            cut = False
+        dark = bool(cut and lum is not None and float(lum[max(0, a - 2):b + 3].max()) < DARK_LUM)
+        events.append({"at": at if cut else a, "start": a, "span": b - a + 1, "share": round(share, 3),
+                       "cut": cut and not dark, "dark": dark})
+        i = j + 1
+    return events
+
+
+def find_cuts(d: np.ndarray, lum: np.ndarray | None = None, pix: np.ndarray | None = None) -> list[int]:
+    return [e["at"] for e in find_events(d, lum, pix) if e["cut"]]
+
+
+def fade_stats(d: np.ndarray, lum: np.ndarray | None = None, pix: np.ndarray | None = None) -> dict:
+    """Counts of the non-cut events: fades and their spans, changes in the dark."""
+    ev = find_events(d, lum, pix)
+    spans = [e["span"] for e in ev if not e["cut"] and not e["dark"]]
+    return {"fades": len(spans), "fadeMinFr": min(spans) if spans else None, "fadeMedFr": int(np.median(spans)) if spans else None,
+            "fadeMaxFr": max(spans) if spans else None, "darkChanges": sum(1 for e in ev if e["dark"])}
+
+
+def mean_lum(frames: np.ndarray) -> np.ndarray:
+    return luminance(frames[:, ::4, ::4]).mean(axis=(1, 2))
 
 
 def holds_ms(cuts: list[int], fps: float) -> list[int]:
@@ -119,11 +183,13 @@ def holds_ms(cuts: list[int], fps: float) -> list[int]:
 def cut_summary(frames: np.ndarray, fps: float) -> dict:
     """The CUTS finding for the whole decode: how many, the densest second, hold lengths."""
     d = colour_change(frames)
-    cuts = find_cuts(d)
+    lum = mean_lum(frames)
+    pix = pixel_change(frames)
+    cuts = find_cuts(d, lum, pix)
     per_sec = np.bincount([int(c / fps) for c in cuts], minlength=int(len(frames) / fps) + 1) if cuts else np.zeros(1, dtype=int)
     hold = holds_ms(cuts, fps)
     return {
-        "fps": fps, "n": len(cuts), "t": [round(c / fps, 3) for c in cuts],
+        "fps": fps, "n": len(cuts), "t": [round(c / fps, 3) for c in cuts], **fade_stats(d, lum, pix),
         "perSecMax": int(per_sec.max()), "perSecMaxT": float(int(np.argmax(per_sec))),
         "holdMinMs": min(hold) if hold else None, "holdMedMs": int(np.median(hold)) if hold else None, "holdMaxMs": max(hold) if hold else None,
     }
@@ -132,11 +198,25 @@ def cut_summary(frames: np.ndarray, fps: float) -> dict:
 def cut_line(c: dict | None, dur: float, vis_fps: float) -> str | None:
     if not c:
         return None
+    fades = fade_line(c)
     if c["n"] == 0:
-        return f"no hard cuts at {c['fps']:g} fps in {dur:.0f} s: every transition below is a fade or a motion"
+        return (f"NO HARD CUTS at {c['fps']:g} fps in {dur:.0f} s{fades}: every transition below is a fade or a motion"
+                " — build it with envelopes and travel, never a switch")
     hold = (f"holds between cuts {c['holdMinMs']}–{c['holdMaxMs']} ms (median {c['holdMedMs']})" if c["holdMedMs"] is not None else "one cut")
-    return (f"CUTS at {c['fps']:g} fps: {c['n']} hard cuts in {dur:.0f} s, densest second {c['perSecMax']} cuts at {c['perSecMaxT']:.0f}s; {hold}"
+    return (f"CUTS at {c['fps']:g} fps: {c['n']} hard cuts in {dur:.0f} s, densest second {c['perSecMax']} cuts at {c['perSecMaxT']:.0f}s; {hold}{fades}"
             f" — the transition list below is measured at {vis_fps:g} fps and merges anything closer than that; the bursts resolve them")
+
+
+def fade_line(c: dict) -> str:
+    """'; N fades over a–b frames (median m)' for a cut summary or a burst record, or ''."""
+    out = ""
+    ms = 1000 / c["fps"]
+    if c.get("fades"):
+        out += (f"; {c['fades']} fade{'s' if c['fades'] != 1 else ''} over {c['fadeMinFr']}–{c['fadeMaxFr']} frames "
+                f"({c['fadeMinFr'] * ms:.0f}–{c['fadeMaxFr'] * ms:.0f} ms, median {c['fadeMedFr']})")
+    if c.get("darkChanges"):
+        out += f"; {c['darkChanges']} change{'s' if c['darkChanges'] != 1 else ''} in the dark (under {DARK_LUM:g} luminance — a seam the eye never sees)"
+    return out
 
 
 # ---- placing bursts ------------------------------------------------------------------
@@ -191,13 +271,15 @@ def burst_size(width: int, height: int) -> tuple[int, int]:
 
 def measure_burst(frames: np.ndarray, fps: float) -> dict:
     d = colour_change(frames)
-    cuts = find_cuts(d)
-    lum = luminance(frames[:, ::4, ::4]).mean(axis=(1, 2))
+    lum = mean_lum(frames)
+    pix = pixel_change(frames)
+    cuts = find_cuts(d, lum, pix)
+    fs = fade_stats(d, lum, pix)
     hold = holds_ms(cuts, fps)
     span = float(lum.max() - lum.min()) if len(lum) else 0.0
-    kind = "cuts" if len(cuts) >= 2 else "cut" if cuts else "flash" if span >= 0.1 else "continuous"
+    kind = "cuts" if len(cuts) >= 2 else "cut" if cuts else "fades" if fs["fades"] or fs["darkChanges"] else "flash" if span >= 0.1 else "continuous"
     return {
-        "kind": kind, "cuts": cuts, "holdsMs": hold,
+        "kind": kind, "cuts": cuts, "holdsMs": hold, "fps": fps, **fs,
         "holdMinMs": min(hold) if hold else None, "holdMedMs": int(np.median(hold)) if hold else None, "holdMaxMs": max(hold) if hold else None,
         "brightMin": round(float(lum.min()), 3) if len(lum) else 0.0, "brightMax": round(float(lum.max()), 3) if len(lum) else 0.0,
         "changeMean": round(float(d[1:].mean()), 4) if len(d) > 1 else 0.0,
@@ -234,10 +316,12 @@ def burst_lines(bursts: list[dict]) -> list[str]:
             what = f"no hard cut; brightness {b['brightMin']:.2f}–{b['brightMax']:.2f}, colour change {b['changeMean']:.3f}/frame (cut ≥ {CUT_HIST:g})"
         elif b["kind"] == "flash":
             what = f"no hard cut but brightness swings {b['brightMin']:.2f}–{b['brightMax']:.2f}"
+        elif b["kind"] == "fades":
+            what = f"no hard cut{fade_line(b)}; brightness {b['brightMin']:.2f}–{b['brightMax']:.2f}"
         elif b["holdMedMs"] is None:
-            what = f"1 hard cut at {b['cutT'][0]:.2f}s; brightness {b['brightMin']:.2f}–{b['brightMax']:.2f}"
+            what = f"1 hard cut at {b['cutT'][0]:.2f}s{fade_line(b)}; brightness {b['brightMin']:.2f}–{b['brightMax']:.2f}"
         else:
-            what = (f"{len(b['cuts'])} hard cuts, holds {b['holdMinMs']}–{b['holdMaxMs']} ms (median {b['holdMedMs']}); "
+            what = (f"{len(b['cuts'])} hard cuts, holds {b['holdMinMs']}–{b['holdMaxMs']} ms (median {b['holdMedMs']}){fade_line(b)}; "
                     f"brightness {b['brightMin']:.2f}–{b['brightMax']:.2f}")
         L.append(f"- **{b['t0']:.2f}–{t1:.2f}s** — {b['why']} — {what} — `{b['files']['timing']}` (every frame), "
                  f"`{b['files']['detail']}` (large), `{b['files']['motion']}` (paths / skeleton / t±1 in RGB)")
