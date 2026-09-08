@@ -9,9 +9,12 @@ own the details; read the header of `tools/ref-scan.py` (bundle contents,
 beat *rank*, how "what ours hears" is joined) and `tools/ref-shoot.mjs` (how
 our side is aligned to the same t=0) once per session before the first run.
 
-The budget: one report, one key-frame sheet, one timeline should be enough
-to write the sync hypotheses. Everything else in the bundle is drill-down,
-opened only when the report points at it.
+The budget: one report, one slit-scan, one key-frame sheet, one timeline
+should be enough to write the sync hypotheses. Everything else in the
+bundle is drill-down, opened only when the report points at it — each image
+of a burst (`bursts/<t0>/`, one window at every source frame) costs about
+as much as the key-frame sheet, so open the burst a Findings or Bursts line
+names, not the set.
 
 1. **Scan.** `uv run tools/ref-scan.py $1 [--start S --dur D]` — a URL is
    fetched with audio; a file is used as is. Bundle lands under
@@ -26,15 +29,24 @@ opened only when the report points at it.
    visual regime, what is drawn as numbers: objects by shape class, size vs
    distance from centre, rings and axis placement, stroke and glow in px,
    hues, ground, flow direction and spin, streak (`tools/reflook.py`'s
-   header says what each line is for). Then `look.png` to check those
+   header says what each line is for), then "Bursts" — per full-frame-rate
+   window, how many hard cuts and how long each hold (`tools/refburst.py`).
+   Then `slitscan.png` (the whole clip at frame resolution on one time
+   axis: every cut, flash and pulse), `look.png` to check the picture
    numbers against the full-resolution frame and the detection overlay,
    `keyframes.png` (the look across the clip, before/after of each
    transition, phrase starts), then `timeline.png`. Never design geometry
    from the thumbnails: the picture section and `look.png` are what the
    scene's shapes, sizes, stroke and motion come from.
-   A STROBE finding states its flash spacing in beats *and* the measurement
-   resolution — don't claim tighter. If the phase margin is low, find a
-   phrase start by eye on the rank-4 sheet and re-run with `--phase N`.
+   A CUTS finding says how fast the picture really cuts; the transition
+   list is coarser than that. A STROBE finding states its flash spacing in
+   beats *and* the measurement resolution — don't claim tighter; the burst
+   at that strobe resolves it to a frame. Open a burst's images only where
+   a finding points. If a finding names a moment no burst covers,
+   `uv run tools/ref-scan.py <name> --burst T` adds one and re-renders the
+   report — after reading it, not instead. If the phase margin is low,
+   find a phrase start by eye on the rank-4 sheet and re-run with
+   `--phase N`.
 4. **Write the sync hypotheses down** in the reply before building — one
    line each, *"X happens on rank-N beats / on onsets / at section
    boundaries / continuously"*, each pointing at the finding that says so,

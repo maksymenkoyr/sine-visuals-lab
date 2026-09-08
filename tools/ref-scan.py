@@ -11,9 +11,10 @@ be adapted from it by measurement instead of by guessing from a contact sheet.
                              [--offsets -80,0,160] [--min-rank 1] [--phase N]
                              [--bpm HINT] [--max-rows 20] [--out DIR]
                              [--hear hears.json] [--report-only]
+                             [--bursts-max N] [--burst T[,DUR]]
 
 Output lands in tools/.cache/refs/<name>/ (gitignored via tools/.cache/).
-Read in this order — the first three are meant to be enough:
+Read in this order — the first four are meant to be enough:
 
     report.md      Findings first: every sync rule the measurements support,
                    one line each, with what *our* analyser hears at the same
@@ -22,10 +23,16 @@ Read in this order — the first three are meant to be enough:
                    class, size vs distance from centre (the perspective law),
                    ring radii and axis placement, stroke and glow in pixels,
                    hues, ground, optical flow and streak (tools/reflook.py
-                   owns these and says what each is for). Then the look as
-                   statistics (palette, symmetry, motion), the per-rank table,
-                   the correlations that matter, the transitions with the
-                   audio at that moment, and a hint per image on when to open it.
+                   owns these and says what each is for). Then "Bursts":
+                   per full-frame-rate window, hard cuts and hold lengths
+                   (tools/refburst.py). Then the look as statistics
+                   (palette, symmetry, motion), the per-rank table, the
+                   correlations that matter, the transitions with the audio
+                   at that moment, and a hint per image on when to open it.
+    slitscan.png   the whole clip at the decode rate in one image — fixed
+                   pixel lines from every frame stacked along x = time (see
+                   tools/refburst.py). Strobes, pulses, zoom, spin and every
+                   hard cut are visible at frame resolution; open it second.
     look.png       per regime: the full-resolution frame, a ×3 centre crop,
                    and the detection overlay — open to check that the
                    "Picture, measured" numbers describe what you see.
@@ -37,12 +44,20 @@ Read in this order — the first three are meant to be enough:
                    lines by rank and markers for transitions / regime
                    changes / section boundaries (and our onsets, with --hear).
 
+    bursts/<t0>/   one short window per data-chosen moment (strobe,
+                   transition, phrase start), decoded at every source frame:
+                   timing.png (every frame, cuts marked), detail.png (the
+                   frames that matter, large), motion.png (light paths,
+                   static skeleton, t±1 in RGB). Drill-down: open the one a
+                   Findings or Bursts line points at. `--burst T[,DUR]` adds
+                   one at a time no default burst covered.
     sheets/        rank<N>.png — every beat of rank >= N, one row per beat,
                    one column per offset. Drill-down only; the report says
                    which one is worth opening.
     frames/        the JPEGs behind the sheets and key frames.
     audio.json     everything numeric: beats with rank + audio + frame paths,
-                   transitions, regime changes, key frames, look descriptors.
+                   transitions, regime changes, key frames, look descriptors,
+                   bursts with their cuts.
     series.tsv     the per-frame numbers behind the timeline, 15 fps.
     audio.wav      the clip's audio, 48 kHz mono s16 — what tools/ref-hear.mjs
                    and tools/ref-shoot.mjs play into the app as the microphone.
@@ -104,6 +119,7 @@ from scipy import ndimage, signal
 from scipy.cluster.vq import kmeans2
 
 from reflook import measure_look, picture_lines  # sibling module, tools/ is on sys.path when run as a script
+from refburst import BURST_S, BURSTS_MAX, SHEET_BOX, SHEET_PIXELS, burst_lines, cut_line, cut_summary, make_burst, pack_grid, place_bursts, write_slitscan
 
 HERE = Path(__file__).resolve().parent
 CACHE = HERE / ".cache" / "refs"
@@ -850,37 +866,28 @@ def choose_keyframes(frames: np.ndarray, v: dict, beats: list[dict], trans: list
     return out
 
 
-def write_keyframes_sheet(keys: list[dict], bundle: Path, out: Path, cols: int = 4, tile_h: int = 200) -> None:
-    from PIL import Image, ImageDraw
+def write_keyframes_sheet(keys: list[dict], bundle: Path, out: Path, cols: int = 4) -> None:
+    """The key frames on one sheet packed to the reader's box (refburst.pack_grid)."""
+    from PIL import Image
 
     if not keys:
         return
     import textwrap
 
-    f = font(12)
-    with Image.open(bundle / keys[0]["file"]) as im:
-        th = min(tile_h, im.height)
-        tw = max(150, int(im.width * th / im.height))  # room for the label under a portrait tile
-    chars = max(12, tw // 7)
-    label_h = 14 * 3 + 6
-    rows = math.ceil(len(keys) / cols)
-    sheet = Image.new("RGB", (cols * (tw + 6) + 6, rows * (th + label_h + 6) + 6), (18, 18, 22))
-    d = ImageDraw.Draw(sheet)
-    for i, k in enumerate(keys):
-        x = 6 + (i % cols) * (tw + 6)
-        y = 6 + (i // cols) * (th + label_h + 6)
+    tiles, labels = [], []
+    for k in keys:
         with Image.open(bundle / k["file"]) as im:
-            iw = int(im.width * th / im.height)
-            sheet.paste(im.resize((iw, th), Image.BILINEAR), (x + (tw - iw) // 2, y))
-        d.text((x + 2, y + th + 2), f"{k['t']:.2f}s  beat #{k['beat']} r{k['rank']}", fill=(255, 255, 255), font=f)
-        for li, line in enumerate(textwrap.wrap(k["why"], chars)[:2]):
-            d.text((x + 2, y + th + 16 + li * 14), line, fill=(180, 200, 255), font=f)
-    sheet.save(out)
+            tiles.append(np.asarray(im.convert("RGB")))
+        why = textwrap.wrap(k["why"], 40)[:2]
+        labels.append([(f"{k['t']:.2f}s  beat #{k['beat']} r{k['rank']}", (255, 255, 255))] + [(line, (180, 200, 255)) for line in why])
+    pack_grid(tiles, labels, cols=cols).save(out)
 
 
-def write_sheets(beats: list[dict], offsets: list[int], bundle: Path, max_rows: int, thumb_h: int = 200) -> list[str]:
-    """One row per beat, one column per offset. Thumbs are capped by
-    height so a portrait short doesn't make a sheet thousands of px tall."""
+def write_sheets(beats: list[dict], offsets: list[int], bundle: Path, max_rows: int, thumb_h: int = 120) -> list[str]:
+    """One row per beat, one column per offset. Rows per sheet are whatever
+    fits the reader's box (SHEET_BOX / SHEET_PIXELS, see refburst.py) at
+    `thumb_h`, capped by `max_rows` — a taller sheet would only be scaled
+    down before it is read."""
     from PIL import Image, ImageDraw
 
     (bundle / "sheets").mkdir(exist_ok=True)
@@ -897,7 +904,10 @@ def write_sheets(beats: list[dict], offsets: list[int], bundle: Path, max_rows: 
         with Image.open(bundle / first) as im:
             th = min(thumb_h, im.height)
             thumb_w = int(im.width * th / im.height)
-        chunks = [rows[i : i + max_rows] for i in range(0, len(rows), max_rows)]
+        W = label_w + thumb_w * len(offsets)
+        fit = max(1, min((SHEET_BOX - 18) // th, int((SHEET_PIXELS / W - 18) // th)))
+        per_sheet = max(1, min(max_rows, fit))
+        chunks = [rows[i : i + per_sheet] for i in range(0, len(rows), per_sheet)]
         for ci, chunk in enumerate(chunks):
             W = label_w + thumb_w * len(offsets)
             H = th * len(chunk) + 18
@@ -931,8 +941,8 @@ def write_timeline(v: dict, aud: dict, beats: list[dict], trans: list[dict], reg
     from PIL import Image, ImageDraw
 
     n = v["n"]
-    px = 3
     left, lane_h, gap = 70, 44, 4
+    px = max(1, min(3, (SHEET_BOX - left - 10) // max(1, n)))  # px per frame: stay inside the reader's box (refburst.py)
     lanes = [
         ("onset", aud["onset_env"], (255, 170, 80)), ("low", aud["low"], (255, 120, 90)),
         ("mid", aud["mid"], (255, 200, 120)), ("high", aud["high"], (255, 235, 170)),
@@ -1071,7 +1081,10 @@ def findings(D: dict, v: dict, aud: dict, rt: dict, corr: list[dict], hs: dict |
         if not best:
             F.append(f"no visual metric tracks a band continuously (all |r| < {CORR_MIN}) — the sync, if any, is event-based")
 
-    # 3. Transitions: strobes and singles.
+    # 3. Transitions: hard cuts at the decode rate first, then strobes and singles.
+    cl = cut_line(D.get("cuts"), D["dur"], VIS_FPS)
+    if cl:
+        F.append(cl)
     strobes = [t for t in trans if t["kind"] == "strobe"]
     singles = [t for t in trans if t["kind"] == "single"]
     if strobes:
@@ -1188,6 +1201,13 @@ def write_report(bundle: Path, D: dict, v: dict, aud: dict, hs: dict | None, she
                  "line is for). r = distance from the frame centre in half-heights. Check against `look.png` before trusting a count.\n")
         L.extend(picture_lines(D["picture"]))
 
+    if D.get("bursts"):
+        L.append("## Bursts\n")
+        L.append(f"Windows decoded at every source frame ({D['bursts'][0]['fps']:g} fps, tools/refburst.py) where the data put them; "
+                 "a hard cut is stated to one frame. Open a burst's images only when a finding sends you there.\n")
+        L.extend(burst_lines(D["bursts"]))
+        L.append("")
+
     L.append("## Look, as statistics\n")
     pal = " ".join(f"`{c['hex']}`×{c['share']:.2f}" for c in look["palette"])
     L.append(f"- palette (share of pixels): {pal}")
@@ -1257,10 +1277,19 @@ def write_report(bundle: Path, D: dict, v: dict, aud: dict, hs: dict | None, she
         L.append("")
 
     L.append("## Files\n")
-    L.append(f"- `keyframes.png` — {len(D['keyframes'])} tiles: regimes, transition before/after, phrase starts. Open this first.")
+    if D.get("slitscan"):
+        ss = D["slitscan"]
+        L.append(f"- `slitscan.png` — the whole clip, {ss['colsPerSec']:g} columns per second: centre row / ring r=0.5 / spoke lanes, "
+                 "beat ticks by rank on top, red = transitions. Open this first after the report: every cut, flash and pulse is on it.")
+    L.append(f"- `keyframes.png` — {len(D['keyframes'])} tiles: regimes, transition before/after, phrase starts. The look; open it next.")
     if D.get("picture"):
         L.append("- `look.png` — per regime: full-res frame | ×3 centre crop | detections. Open when a Picture line looks wrong; `look.json` has every object.")
     L.append("- `timeline.png` — open when a finding names a time and you want to see the neighbours.")
+    for b in D.get("bursts") or []:
+        L.append(f"- `{b['files']['timing']}` … — burst {b['t0']:.2f}–{b['t0'] + b['dur']:.2f}s ({b['kind']}): {b['why'].split(';')[0]}. "
+                 "timing.png for when, detail.png for what, motion.png for which way.")
+    if D.get("bursts") is not None:
+        L.append(f"- a moment no burst covers: `ref-scan.py {D['name']} --burst T[,DUR]` decodes one more ({BURST_S:g} s at every frame) and re-renders this report.")
     top = max(rt, key=lambda r: rt[r]["act"]) if rt else None
     for s in sheets:
         hint = " ← the rank that reacts hardest" if top and s == f"sheets/rank{top}.png" else ""
@@ -1335,9 +1364,11 @@ def main() -> None:
     ap.add_argument("--hear", help="hears.json from tools/ref-hear.mjs, to add the ours: clauses")
     ap.add_argument("--report-only", action="store_true", help="rebuild report/timeline/keyframes from an existing bundle")
     ap.add_argument("--look-only", action="store_true", help="re-measure the picture (reflook.py) on an existing bundle's regimes, then rebuild the report")
+    ap.add_argument("--bursts-max", type=int, default=BURSTS_MAX, help="most bursts a scan places by itself (strobes, then transitions, then phrase starts)")
+    ap.add_argument("--burst", help="T[,DUR]: add one burst at clip second T to an existing bundle (default length %.0f s), then rebuild the report" % BURST_S)
     args = ap.parse_args()
 
-    if args.report_only or args.look_only:
+    if args.report_only or args.look_only or args.burst:
         p = Path(args.video)
         bundle = p.resolve() if p.exists() and p.is_dir() else CACHE / (args.name or p.stem)
         if not (bundle / "audio.json").exists():
@@ -1350,6 +1381,17 @@ def main() -> None:
             regs = D.get("picture", {}).get("regimes", [])
             log(f"measuring the picture in {len(regs)} regimes…")
             D["picture"] = measure_look(src, D["start"], regs, info["width"], info["height"], bundle)
+        if args.burst:
+            src = Path(D["source"])
+            info = probe(src)
+            bits = [float(x) for x in args.burst.split(",")]
+            t0 = round(float(np.clip(bits[0], 0.0, D["dur"])), 2)
+            spec = {"t0": t0, "dur": round(min(bits[1] if len(bits) > 1 else BURST_S, D["dur"] - t0), 2), "why": "requested", "prio": 3, "anchor": "requested"}
+            log(f"burst {spec['t0']:.2f}+{spec['dur']:.2f}s…")
+            rec = make_burst(src, D["start"], info["width"], info["height"], spec, bundle)
+            if rec is None:
+                sys.exit(f"ref-scan: nothing decoded at {t0}s")
+            D["bursts"] = sorted([b for b in D.get("bursts") or [] if b["t0"] != rec["t0"]] + [rec], key=lambda b: b["t0"])
         H = load_hears(Path(args.hear)) if args.hear else (load_hears(bundle / "hears.json") if (bundle / "hears.json").exists() else None)
         render_outputs(bundle, D, v, aud, H)
         log(f"rebuilt {bundle / 'report.md'}" + (" with ours: clauses" if H else ""))
@@ -1464,7 +1506,13 @@ def main() -> None:
         "onsetEnvelope": onset_envelope(v, a["onsets_t"], zaud["onset_env"]) if a else {},
         "beatPhase": beat_phase_profile(v, beat_t, period) if a else {},
         "look": v["look"], "picture": picture, "keyframes": keyframes, "sheets": sheets,
+        "cuts": cut_summary(frames, VID_FPS),
+        "slitscan": write_slitscan(frames, VID_FPS, beats, trans, a is not None, bundle / "slitscan.png"),
     }
+    del frames  # the bursts decode their own frames; free the clip first
+    specs = place_bursts(D, dur, args.bursts_max)
+    log(f"{len(specs)} bursts at " + ", ".join(f"{s['t0']:.1f}s ({s['anchor']})" for s in specs))
+    D["bursts"] = [b for b in (make_burst(src, args.start, info["width"], info["height"], s, bundle) for s in specs) if b]
     H = None
     hear_path = Path(args.hear) if args.hear else bundle / "hears.json"
     if hear_path.exists():
@@ -1472,7 +1520,7 @@ def main() -> None:
         log(f"joining what ours heard ({hear_path.name})")
     render_outputs(bundle, D, v, aud, H)
     log(f"wrote {bundle}")
-    log(f"  read report.md, then keyframes.png, then timeline.png")
+    log(f"  read report.md, then slitscan.png, keyframes.png, timeline.png; bursts/ where a finding points")
 
 
 if __name__ == "__main__":
