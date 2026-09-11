@@ -128,6 +128,7 @@ abstract class RoomConnectionBase {
   protected clock: ClockSync;
   protected buffer = new JitterBuffer();
   private delaySlew = new SlewLimiter(DELAY_SLEW_RATE);
+  private lastDelayMs = 0;
   private _connected = false;
   private lastFrameAt = 0;
   private roster: RosterEntry[] = [];
@@ -236,9 +237,20 @@ abstract class RoomConnectionBase {
     return RENDER_DELAY_MS;
   }
 
+  /** How far behind the room clock the last sample() actually rendered, in
+   *  ms — the slewed value, so it reads the drift toward a new target, not
+   *  the target itself. Diagnostic only (the Bands card's status line on a
+   *  host — src/ui/deviceMenu.ts's statusText): what this device's own
+   *  screen deliberately gives up for sync, as distinct from mic input
+   *  latency (src/audio/capture.ts's estimateInputLatencySec). */
+  get renderDelayMs(): number {
+    return this.lastDelayMs;
+  }
+
   /** The shared visual state every device — host or renderer — renders this instant. */
   sample(): VisualSample | null {
     const delayMs = this.delaySlew.next(this.targetDelayMs(), Date.now());
+    this.lastDelayMs = delayMs;
     const targetMs = this.clock.roomNow() - delayMs;
     const s = this.buffer.sampleAt(targetMs);
     if (!s) return null;
