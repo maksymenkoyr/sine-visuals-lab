@@ -6,60 +6,51 @@ regenerate it at session close.
 
 ## In flight
 
-- **Reference-video loop (`/ref`)** — draft PR #85, branch `worktree-ref-video`
-  (2026-09-05). `tools/ref-scan.py` turns a visualisation video into a bundle
-  whose `report.md` opens with Findings — sync rules the measurements support,
-  each with an "ours:" clause from what our own analyser heard on the same
-  audio (`tools/ref-hear.mjs`); one `keyframes.png`; the look as numbers.
-  `tools/ref-shoot.mjs` shoots our scene at the same beats beside the
-  reference. Verified on three clips; never yet used to build a scene — that
-  is the real test, and Kaleidoscope (now on `main`, `src/render/scenes/kaleido/`)
-  is the obvious first target. Design decisions are in the memory note
-  `reference-video-analysis`.
-- **Landed since the last snapshot:** Kaleidoscope scene #79 and its four
-  styles #83 (`style` is the first `variant` setting; Beat grid row in the
-  Rhythm card, `src/audio/beatGrid.ts` + `src/render/gridPulse.ts`), Powder
-  #77. Still in `DRAFT_SCENE_IDS` pending a real-music verdict.
-- **Draft scene PRs** waiting on review and a real-music judgement: Plume #75,
-  Neon Fluid #76.
-- **Auto: unstick tempoLock, rank dials** — draft PR #73.
-- **docs/architecture.md rebuild** — draft PR #74.
-- **CLAUDE.md Git & PRs section** — PR #84; **business/legal docs** — PR #72;
-  both ready for review. PR #70 is a stale status snapshot this file replaces —
-  close it.
+- **Slats scene** — draft PR #100, branch `worktree-slats` (2026-09-11), the
+  fifth scene built through the `/ref` loop (YouTube qtPi0JvmWbs at 0:15–0:20):
+  a monochrome wall of translucent slats, `src/render/scenes/slats/`. Syncs to
+  onsets and the high band; layout reshuffles gate on bar wraps only while the
+  tempo clock is locked. Look was matched by frame statistics against the
+  reference frame rather than by eye — the memory note `slats-scene` has the
+  method and the three brightness bugs it found. Not yet `/tune`d.
+- **Other `/ref`-built draft scenes** waiting on review and a real-music
+  judgement: Shards #97, Ink Synth #96, Crystal Wall #95, Neon Gates #90; older
+  draft scenes Neon Fluid #76 (Plume #75 is gone from the open list — check
+  whether it landed or was closed).
+- **Ref loop on `main`:** scan #85, picture measurement #92, bursts/slit-scan
+  #94 all landed. Every scene above came out of it.
+- **Infrastructure drafts:** beat-rate controls #88, gallery preview
+  scheduling #91, song-boundary instrumentation #93, auto dial ranking #73,
+  docs/architecture rebuild #74; dev-server single-scene link #98 and the
+  business/legal docs #72 are ready for review. PR #70 is a stale status
+  snapshot this file replaces — close it.
 - Worktrees with no open PR (`git worktree list`): `agent-ae8a69d86e9c44e97`,
-  `audio-source-guide`, `bake-defaults`, `beat-rate-controls`, `docs-index`,
-  `setting-groups`, `tuning-spotlight`. Check `git log main..` on each before
-  reviving; several look landed or superseded.
+  `bake-defaults`, `claude-md-git-workflow`, `dev-scene-links`, `docs-index`,
+  `ref-bursts`, `setting-groups`, `tessera`, `tuning-spotlight`. Check
+  `git log main..` on each before reviving; several look landed or superseded.
 
 ## Open questions
 
-- Ref loop: our tempo lock came out differently on two runs of the same clip
-  (162 steady vs a drop to 122 at a section boundary). Is `features.ts`'s comb
-  sensitive to start time / adaptive-gain state, and should `ref-hear` run
-  twice and report the spread?
-- Ref loop: our `section` signal (`sectionIntensity`) never rose at the
-  reference's section boundaries on the one clip with audio. Real gap in the
-  runtime, or a threshold mismatch in how the scan looks for a rise?
-- Ref loop: motion metrics run at `VIS_FPS`; above ~150 bpm a half-beat strobe
-  can't be told from a timer. Double the rate, or keep the stated resolution?
-- Beat grid: should its default move off Hits once judged on real music, and
-  should the TV receive it (a new DeviceCommand field)?
-- Kaleidoscope: should the dive target rotate between children (a spiral dive)
-  rather than always the top one? Do the rainbow texture styles
-  (`RAINBOW_ROOM_MIX`) read as ignoring the Palette card? Storm's Mode is the
-  obvious next `variant`.
+- Beat clock: `AnimFrame` carries no bar or phrase counter (`beatClock.ts`
+  keeps `beats` internal), so a scene cannot react to a phrase start even when
+  the reference does. Expose a counter, or a rank like the ref tools compute?
+- Tempo lock: on the Slats reference our clock sat well above the true tempo
+  for the whole clip (the same run-to-run instability noted on earlier refs).
+  Scenes are now written to avoid `beatPhase` for one-shots; is that the
+  permanent rule, or does the comb in `features.ts` get fixed?
+- `SignalId` has only a handful of registered signals, so a setting driven by
+  energy or the high band cannot show a chip. Add them, or keep chips for
+  one-shots only?
 - Which draft scenes graduate out of `DRAFT_SCENE_IDS`, and in what order.
-- Storm's local render-cap workaround (see its header) is redundant now that
-  `renderLatch.ts` is on `main`; simplify once nothing else touches Storm.
-- Stale scratch branches on origin (`git branch -r --no-merged origin/main`):
-  prune, or is anything in them still wanted?
+- `tools/ref-shoot.mjs` needs the bundle's absolute path from a worktree
+  (`tools/.cache` lives in the main checkout). Worth resolving against the
+  main checkout automatically?
 
 ## Next up
 
-- `/ref` on one of the Kaleidoscope reference shorts against the landed
-  `kaleidoscope` scene; see whether the findings change a tuning decision,
-  then review #85.
-- Watch Kaleidoscope, Powder, Plume and Neon Fluid on real music; land or drop
-  #75/#76 and decide on graduation.
-- Review #73, #74, #84, #72; close #70; decide the fate of the idle worktrees.
+- `/tune slats` at two BPMs; clean up slab tops (hairs still denser than the
+  reference), make the right-edge curl and vanishing point visible; then
+  review #100.
+- Watch the `/ref` scenes (#100, #97, #96, #95, #90) on real music; decide
+  which land and which graduate.
+- Review #98, #72; close #70; decide the fate of the idle worktrees.
