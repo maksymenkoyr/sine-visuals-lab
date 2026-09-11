@@ -15,6 +15,7 @@ import { physarumScene } from "./physarum.ts";
 import { stormScene } from "./storm.ts";
 import { ambienceScene } from "./ambience.ts";
 import { kaleidoscopeScene } from "./kaleido/index.ts";
+import { slatsScene } from "./slats/index.ts";
 import { shardsScene } from "./shards/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
@@ -26,6 +27,7 @@ import { shardsScene } from "./shards/index.ts";
 registerScene(physarumScene);
 registerScene(chladniScene);
 registerScene(causticsScene);
+registerScene(slatsScene);
 registerScene(shardsScene);
 registerScene(kaleidoscopeScene);
 registerScene(powderScene);
@@ -44,6 +46,7 @@ registerScene(ferrofluidScene);
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
  *  the featured scenes registered above it are deliberately absent. */
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
+  "slats",
   "mesh",
   "spectrum",
   "particles",
@@ -77,5 +80,6 @@ export {
   stormScene,
   ambienceScene,
   kaleidoscopeScene,
+  slatsScene,
   shardsScene,
 };
