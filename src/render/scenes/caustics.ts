@@ -64,6 +64,27 @@ import type { SignalLink } from "../signals.ts";
 // — a chorus or drop reads as a sustained, brighter, faster, more turbulent
 // surface, with a one-shot extra-strong ring at the exact moment intensity
 // spikes.
+//
+// Precision, or why nothing the shader hashes ever grows with session
+// length: the drift phase only ever accumulates (see driftPhase in
+// extraUniforms — never reset, so the field never jumps), and for a long
+// time it was uploaded raw and added to every noise coordinate in FRAG. A
+// value-noise hash built on fract() of a large product loses its low bits
+// as that offset climbs, and on mobile GPU compilers the shared corner
+// hash between two neighbouring cells stopped agreeing well before the
+// desktop degradation was visible — the pattern broke along cell
+// boundaries: straight screen-aligned seams for the first, unwarped
+// octave, curved ones for the warped octaves, and fwidth() in the ridge
+// anti-aliasing then lit each seam up as a dashed line. The fix is in two
+// halves that only work together: every offset FRAG adds to a noise
+// coordinate is reduced modulo NOISE_PERIOD on the JS side, in float64
+// (driftFlows below — one entry per distinct offset the shader used to
+// derive from the raw phase, since they carry different multipliers and can't
+// share one wrap), and hashCell in FRAG is an integer hash over the cell
+// lattice masked to that same period, so the field is exactly periodic and
+// a wrap is invisible by construction. The phase itself still never wraps;
+// only what reaches the GPU does. See NOISE_PERIOD's own comment for how
+// the period was sized.
 // The master treble-sparkle knob. Defined outside SETTINGS so the sub-params
 // further down (density, brightness ceiling, grain, warp, spread, sustain —
 // all `advanced`, in the Look group) can name it directly as their `macro`
@@ -634,13 +655,84 @@ const INJECTION_NEAR_R = 0.14; // droplet radius right at the nozzle, before ato
 const INJECTION_FAR_R = 0.05; // droplet radius once fully atomized
 const INJECTION_GAIN = 1.3; // brightness of the summed field relative to a glint's own peak
 
+// Period, in noise cells, of every hashed field in FRAG (see the file
+// header's precision paragraph). Must be a power of two — hashCell masks the
+// cell index with NOISE_PERIOD - 1. Sized so that (a) the largest value the
+// shader ever adds to a noise coordinate stays far below where fp32 loses
+// sub-pixel resolution, and (b) a repeat is out of reach: the coarsest
+// octave's cells are a good fraction of the screen tall, so the pattern
+// only recurs after the drift has carried it many screens past its start,
+// and the ridge octaves sample at different multiples of the same phase
+// (see driftFlows), so they don't even line up again together. The finest
+// consumer is the spray field: it lives at INJECTION_CELLS_PER_GRAIN cells
+// per glint-noise unit and so wraps at NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN
+// (INJECTION_MASK below), which is why that constant has to be a power-of-
+// two fraction and the period can't drop below its reciprocal.
+export const NOISE_PERIOD = 256;
+const NOISE_MASK = NOISE_PERIOD - 1;
+const INJECTION_MASK = NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN - 1;
+if (!Number.isInteger(Math.log2(NOISE_PERIOD)) || !Number.isInteger(Math.log2(INJECTION_MASK + 1))) {
+  throw new Error("caustics: NOISE_PERIOD and NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN must both be powers of two");
+}
+
+// The ridge loop's octave count, and the flow multipliers FRAG applies per
+// use of the drift phase — named here because driftFlows has to reproduce
+// exactly the offsets the shader adds, one wrapped entry each. FLOW_X/FLOW_Y
+// are the base flow direction (the x/y scale of the old
+// per-phase-unit flow the shader used to compute itself), and FLOW_OCTAVE_STEP the
+// per-octave speed-up on the ridge sample (the old `flow * (1.0 + fi * 0.2)`).
+// SPARKLE_FLOW is the glint field's own, faster scroll, shared with the
+// spray field laid out on top of it.
+const RIDGE_OCTAVES = 6;
+const FLOW_X = 0.15;
+const FLOW_Y = -0.09;
+const FLOW_OCTAVE_STEP = 0.2;
+const SPARKLE_FLOW = 2.0;
+// Layout of the uDriftFlow uniform array driftFlows fills: [x, y] pairs for
+// the forward warp sample and the backward one, then one pair per ridge
+// octave, then the scalar glint/spray scroll.
+const FLOW_FWD = 0;
+const FLOW_BACK = 2;
+const FLOW_RIDGE = 4;
+const FLOW_SPARKLE = FLOW_RIDGE + 2 * RIDGE_OCTAVES;
+const DRIFT_FLOW_LEN = FLOW_SPARKLE + 1;
+
+/** x reduced into [0, NOISE_PERIOD), in float64 — the JS side is the one
+ *  place the raw phase can be reduced without precision loss. */
+export function wrapFlow(x: number): number {
+  return x - Math.floor(x / NOISE_PERIOD) * NOISE_PERIOD;
+}
+
+/** Fills `out` with every drift offset FRAG adds to a noise coordinate, each
+ *  already wrapped by wrapFlow: the field is periodic in NOISE_PERIOD
+ *  (hashCell in FRAG), so each entry is equivalent to its unwrapped value
+ *  and the GPU never sees the raw, ever-growing phase. `densScale` is
+ *  causticDensityScale() of the live density setting — the same factor the
+ *  shader applies to q, folded in here so a finer/coarser pattern keeps the
+ *  same screen-space drift speed (see uCausticDensity's comment in FRAG). */
+export function driftFlows(phase: number, densScale: number, out = new Float32Array(DRIFT_FLOW_LEN)): Float32Array {
+  const fx = phase * FLOW_X * densScale;
+  const fy = phase * FLOW_Y * densScale;
+  out[FLOW_FWD] = wrapFlow(fx);
+  out[FLOW_FWD + 1] = wrapFlow(fy);
+  out[FLOW_BACK] = wrapFlow(-fx);
+  out[FLOW_BACK + 1] = wrapFlow(-fy);
+  for (let i = 0; i < RIDGE_OCTAVES; i++) {
+    const k = 1 + i * FLOW_OCTAVE_STEP;
+    out[FLOW_RIDGE + 2 * i] = wrapFlow(fx * k);
+    out[FLOW_RIDGE + 2 * i + 1] = wrapFlow(fy * k);
+  }
+  out[FLOW_SPARKLE] = wrapFlow(phase * SPARKLE_FLOW * densScale);
+  return out;
+}
+
 // Own accumulator for the domain-warp drift: never reset, only advanced, so
 // dragging the Drift slider mid-run changes the *rate* going forward and
 // never jumps the field (see the file header and flowClock.ts).
 //
 // DRIFT_BASE_RATE used to be 0.15 — chosen to "match the original fixed
-// speed" — but the shader's flow term (see FRAG below) already multiplies
-// uDriftPhase by 0.15. That halved the intended attenuation twice over, so
+// speed" — but the flow term (driftFlows above) already multiplies the
+// phase by FLOW_X. That halved the intended attenuation twice over, so
 // drift=1 (the old default) ran ~6.7x slower than the scene's original
 // wander and even the old max (2) was ~3.3x slower. 2.0 here is what
 // actually cancels out to flowClock.ts's own base rate of 1.0/sec at the
@@ -775,7 +867,7 @@ export function loudSwellDrive(driftLoud: number, loudSwell: number): number {
 // term is what actually produces the "pump", and is weighted toward the top
 // of the driftKick slider (driftKick^2 in advanceKickJolt below) so low
 // settings stay purely the existing smooth rate surge.
-// -> ~0.3 of a noise cell in flow's own units (flow = uDriftPhase * 0.15,
+// -> ~0.3 of a noise cell in flow's own units (flow = phase * FLOW_X,
 // noise sampled at q*1.7/q*2.3) — clearly visible, well short of a teleport.
 const KICK_JOLT_PHASE = 2.0;
 // One-pole slew rate toward the jolt's target (see advanceKickJolt). Fast
@@ -916,25 +1008,49 @@ export function createRipplePool() {
 }
 
 const FRAG = `
+// 32-bit ints for the integer hash below — the fragment stage's default int
+// precision is mediump, which may be 16 bits on mobile.
+precision highp int;
 #define TWO_PI 6.28318530718
 
-float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
+// Integer hash over a periodic cell lattice — see the file header's
+// precision paragraph. Every operation here is exact on every GPU: no
+// fract() of a large product, nothing that depends on how far the drift
+// has carried the field. cell is an integer-valued lattice coordinate, mask
+// is the lattice's period minus one (a power of two, so the bitwise AND is
+// the wrap; two's complement makes it wrap negatives too), and seed picks
+// an independent stream.
+uint uhash(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
 }
 
-vec2 hash22(vec2 p) {
-  return vec2(hash21(p), hash21(p + 17.13));
+uint cellBits(vec2 cell, int mask, uint seed) {
+  ivec2 c = ivec2(cell) & ivec2(mask);
+  return uhash(uint(c.x) ^ (uint(c.y) << 16u) ^ (seed * 0x9e3779b9u));
+}
+
+// 24 significant bits -> exactly representable, uniform in [0, 1).
+float hashCell(vec2 cell, int mask, uint seed) {
+  return float(cellBits(cell, mask, seed) >> 8u) * (1.0 / 16777216.0);
+}
+
+vec2 hash2Cell(vec2 cell, int mask, uint seed) {
+  uint h = cellBits(cell, mask, seed);
+  return vec2(float(h >> 8u), float(uhash(h) >> 8u)) * (1.0 / 16777216.0);
 }
 
 float noise(vec2 p) {
   vec2 i = floor(p);
   vec2 f = fract(p);
-  float a = hash21(i);
-  float b = hash21(i + vec2(1.0, 0.0));
-  float c = hash21(i + vec2(0.0, 1.0));
-  float d = hash21(i + vec2(1.0, 1.0));
+  float a = hashCell(i, ${NOISE_MASK}, 0u);
+  float b = hashCell(i + vec2(1.0, 0.0), ${NOISE_MASK}, 0u);
+  float c = hashCell(i + vec2(0.0, 1.0), ${NOISE_MASK}, 0u);
+  float d = hashCell(i + vec2(1.0, 1.0), ${NOISE_MASK}, 0u);
   vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
@@ -969,18 +1085,24 @@ void main() {
   p += dir0 * bassBulge * 0.22 * exp(-pLen0 * 0.8) * smoothstep(0.0, 0.4, pLen0);
 
   // uCausticDensity scales the noise field's own sampling frequency — more,
-  // finer filaments at higher values. Applied once, here, to the drift phase
-  // (flow); every later use of q inherits it because q is built by
-  // accumulating onto a scaled starting point (see q's definition below),
-  // not by re-scaling p at each octave separately. flow is scaled by the
-  // same factor so a finer/coarser pattern doesn't also drift visibly
-  // faster/slower on screen — screen-space drift speed is flowRate /
-  // (samplingFreq), and densScale cancels between the two.
+  // finer filaments at higher values. Applied once, here, to q's starting
+  // point; every later use of q inherits it because q is built by
+  // accumulating onto that scaled start (see q's definition below), not by
+  // re-scaling p at each octave separately. The drift offsets in uDriftFlow
+  // carry the same factor (driftFlows folds it in JS-side) so a finer/
+  // coarser pattern doesn't also drift visibly faster/slower on screen —
+  // screen-space drift speed is flowRate / (samplingFreq), and densScale
+  // cancels between the two.
   float densScale = pow(2.0, (uCausticDensity - 0.5) * ${DENSITY_SPAN_OCTAVES.toFixed(2)});
 
-  // This scene's own drift phase (uDriftPhase, uploaded by extraUniforms
-  // below) replaces the shared uFlowPhase so drift speed is dialable.
-  vec2 flow = vec2(uDriftPhase * 0.15, -uDriftPhase * 0.09) * densScale;
+  // This scene's own drift (uDriftFlow, uploaded by extraUniforms below)
+  // replaces the shared uFlowPhase so drift speed is dialable. It arrives
+  // as one already-wrapped offset per use (see driftFlows and the file
+  // header's precision paragraph) rather than as a raw phase to multiply
+  // here — the multiply is exactly what used to push the hash past fp32.
+  vec2 flowFwd = vec2(uDriftFlow[${FLOW_FWD}], uDriftFlow[${FLOW_FWD + 1}]);
+  vec2 flowBack = vec2(uDriftFlow[${FLOW_BACK}], uDriftFlow[${FLOW_BACK + 1}]);
+  vec2 sparkleFlow = vec2(uDriftFlow[${FLOW_SPARKLE}]);
 
   // Beat ripple pool: every ring in flight (MAX_RIPPLES slots, radius and
   // strength per slot from createRipplePool) is summed here, so a new beat
@@ -1066,15 +1188,16 @@ void main() {
   // independent of warpAmt; a maxed Beat churn against a maxed Focus snap is
   // the case to eyeball for it.
   float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7 + uChurnDrive * ${CHURN_GAIN.toFixed(2)});
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < ${RIDGE_OCTAVES}; i++) {
     if (i >= iterations) break;
-    float band = sampleBands(float(i) / 6.0);
+    float band = sampleBands(float(i) / ${RIDGE_OCTAVES}.0);
     float fi = float(i);
     q += vec2(
-      noise(q * 1.7 + flow + fi),
-      noise(q * 1.7 - flow + fi * 1.3)
+      noise(q * 1.7 + flowFwd + fi),
+      noise(q * 1.7 + flowBack + fi * 1.3)
     ) * warpAmt;
-    float v = noise(q * 2.3 + flow * (1.0 + fi * 0.2));
+    vec2 ridgeFlow = vec2(uDriftFlow[${FLOW_RIDGE} + 2 * i], uDriftFlow[${FLOW_RIDGE + 1} + 2 * i]);
+    float v = noise(q * 2.3 + ridgeFlow);
     float ridge = 1.0 - abs(v * 2.0 - 1.0);
     // Anti-alias the ridge against its own screen-space footprint. pow()
     // has no concept of pixel size, so whenever the true line width (which
@@ -1112,13 +1235,13 @@ void main() {
   vec2 sparkleQ = q;
   if (uSparkleWarp > 0.0) {
     vec2 sparkleWarpOffset = vec2(
-      noise(q * 0.8 + flow + 11.0),
-      noise(q * 0.8 - flow + 23.0)
+      noise(q * 0.8 + flowFwd + 11.0),
+      noise(q * 0.8 + flowBack + 23.0)
     ) - 0.5;
     sparkleQ += sparkleWarpOffset * uSparkleWarp * ${SPARKLE_WARP_GAIN.toFixed(2)};
   }
   float sparkleFreq = mix(${SPARKLE_GRAIN_FREQ_LO.toFixed(1)}, ${SPARKLE_GRAIN_FREQ_HI.toFixed(1)}, uSparkleGrain);
-  float sparkleNoise = noise(sparkleQ * sparkleFreq + vec2(uDriftPhase * 2.0) * densScale);
+  float sparkleNoise = noise(sparkleQ * sparkleFreq + sparkleFlow);
   float sparkleExp = mix(${SPARKLE_DENSITY_EXP_LO.toFixed(1)}, ${SPARKLE_DENSITY_EXP_HI.toFixed(1)}, uSparkleDensity);
   float sparkleGain = uSparkleBright * ${SPARKLE_BRIGHT_GAIN.toFixed(1)};
   acc += uSparkle * sparkleDrive * crestGate * pow(sparkleNoise, sparkleExp) * sparkleGain;
@@ -1126,7 +1249,7 @@ void main() {
   // Spray injection, added on top of the glints rather than in place of
   // them. The glint field is tiled into nozzle cells — in sparkleQ *
   // sparkleFreq, the exact coordinate the glints sample, drifting with the
-  // same uDriftPhase offset — and each cell holds one nozzle spraying
+  // same wrapped drift offset (sparkleFlow) — and each cell holds one nozzle spraying
   // INJECTION_DROPS droplets outward on hashed directions and phases, so
   // sprays appear everywhere glints can and never fire in lockstep. The
   // motion runs on uTime (its own continuous clock, not gated to
@@ -1147,13 +1270,15 @@ void main() {
   // rather than fading mist.
   float injectionField = 0.0;
   if (uInjection > 0.0) {
-    vec2 ip = (sparkleQ * sparkleFreq + vec2(uDriftPhase * 2.0) * densScale) * ${INJECTION_CELLS_PER_GRAIN.toFixed(2)};
+    vec2 ip = (sparkleQ * sparkleFreq + sparkleFlow) * ${INJECTION_CELLS_PER_GRAIN.toFixed(2)};
     for (int gx = -1; gx <= 1; gx++) {
       for (int gy = -1; gy <= 1; gy++) {
         vec2 cellId = floor(ip) + vec2(float(gx), float(gy));
-        vec2 nozzle = cellId + 0.5 + (hash22(cellId + 91.7) - 0.5) * ${INJECTION_NOZZLE_JITTER.toFixed(2)};
+        // Its own lattice period (INJECTION_MASK) — this field wraps at
+        // NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN cells, see NOISE_PERIOD's comment.
+        vec2 nozzle = cellId + 0.5 + (hash2Cell(cellId, ${INJECTION_MASK}, 1u) - 0.5) * ${INJECTION_NOZZLE_JITTER.toFixed(2)};
         for (int k = 0; k < ${INJECTION_DROPS}; k++) {
-          vec2 rnd = hash22(cellId * 3.1 + float(k) * 17.3 + 5.2);
+          vec2 rnd = hash2Cell(cellId, ${INJECTION_MASK}, 2u + uint(k));
           float cyclePos = fract(uTime * ${INJECTION_RATE.toFixed(2)} + rnd.x);
           float travel = uInjectionReverse > 0.5 ? 1.0 - cyclePos : cyclePos;
           float ang = rnd.y * TWO_PI;
@@ -1222,7 +1347,7 @@ void main() {
 
 export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG, {
   settings: SETTINGS,
-  extraUniformDecls: `uniform float uDriftPhase;\nuniform float uChurnDrive;\nuniform float uLoudSwell;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
+  extraUniformDecls: `uniform float uDriftFlow[${DRIFT_FLOW_LEN}];\nuniform float uChurnDrive;\nuniform float uLoudSwell;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
   extraUniforms: (() => {
     let driftPhase = 0;
     const lurch = createLurchState();
@@ -1239,6 +1364,7 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
     let kickJolt = 0;
     const ripples = createRipplePool();
     let prevDropOnset = false;
+    const flowBuf = new Float32Array(DRIFT_FLOW_LEN);
 
     return (frame, anim, getSetting) => {
       const driftKick = getSetting("driftKick");
@@ -1282,7 +1408,7 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
       else if (anim.lowOnset || (anim.onset && rippleSrc < RIPPLE_SRC_BEAT_THRESHOLD)) ripples.trigger(1);
 
       return {
-        uDriftPhase: driftPhase + lurch.phase + kickJolt,
+        uDriftFlow: driftFlows(driftPhase + lurch.phase + kickJolt, causticDensityScale(getSetting("causticDensity")), flowBuf),
         uChurnDrive: churnDrive,
         uLoudSwell: loudSwellDrive(driftLoud, loudSwell),
         uRippleRadius: ripples.radius,
