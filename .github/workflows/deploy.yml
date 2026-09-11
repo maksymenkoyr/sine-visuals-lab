@@ -1,24 +1,33 @@
-# Checks every pull request; builds and deploys the Worker on every push to main.
+# Checks every pull request; builds and deploys the Worker on every push to main;
+# deploys a throwaway preview Worker for every open pull request.
 #
 # The build step is not optional decoration: `wrangler deploy` uploads ./dist
 # (the [assets] block in wrangler.toml) but never builds it, and dist/ is
 # gitignored — so only a fresh build from the checked-out commit guarantees the
 # deployed assets match the source that shipped alongside them.
+#
+# PR previews: each pull request gets its own Worker, named after the PR number
+# and deployed through the `preview` environment in wrangler.toml (workers.dev
+# only, no custom domain, its own Room namespace). It is redeployed on every
+# push to the PR and deleted when the PR closes. The URL lands in a single
+# sticky comment on the PR — mic and phone/TV pairing both work there, since
+# workers.dev is HTTPS and the client talks to its own origin. Dev-only features
+# (tuning overrides, pins) are compiled out of a build, so a preview shows what
+# prod would, not what `npm run dev` shows.
+#
+# Previews only run for PRs from branches in this repo: a PR from a fork has no
+# access to the Cloudflare secrets, so its deploy step is skipped by the `if`.
 name: CI & Deploy
 
 on:
   push:
     branches: [main]
   pull_request:
+    # `closed` is only here for the preview teardown; `ship` skips it.
+    types: [opened, synchronize, reopened, closed]
 
 permissions:
   contents: read
-
-# Serialize deploys so two merges landing close together can't race each other
-# onto the Worker.
-concurrency:
-  group: deploy-main
-  cancel-in-progress: false
 
 env:
   # The tools/tune-*.mjs scripts are the only playwright consumers and they never
@@ -27,7 +36,18 @@ env:
 
 jobs:
   ship:
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # For the sticky preview-URL comment.
+      pull-requests: write
+    # Serialize prod deploys so two merges landing close together can't race
+    # each other onto the Worker; previews serialize per PR instead, so a burst
+    # of pushes settles on the last one without blocking other PRs.
+    concurrency:
+      group: ${{ github.event_name == 'pull_request' && format('preview-{0}', github.event.number) || 'deploy-main' }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -51,3 +71,68 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy PR preview
+        id: preview
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env preview --name audio-viz-room-pr-${{ github.event.number }}
+
+      - name: Post preview URL
+        if: steps.preview.outcome == 'success'
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.deployment-url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const marker = "<!-- pr-preview -->";
+            const url = (process.env.PREVIEW_URL || "").replace(/\/$/, "");
+            if (!url) {
+              core.warning("wrangler-action reported no deployment-url; skipping the preview comment");
+              return;
+            }
+            const body = [
+              marker,
+              `**Preview:** ${url}`,
+              "",
+              `Built from ${process.env.HEAD_SHA}. Redeployed on every push; deleted when this PR closes.`,
+              "",
+              "Open a scene directly with the same hash the dev server prints, e.g.",
+              `\`${url}/?audio=synthetic&bpm=120#/v/<scene-id>\` — the query goes before the \`#\`.`,
+              `The TV entry is at \`${url}/tv.html\`.`,
+            ].join("\n");
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+            const existing = comments.find((c) => c.body && c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+  # Tear the preview Worker down (and its Room namespace with it) once the PR
+  # is merged or closed. `--force` skips wrangler's interactive confirmation and
+  # the "other Workers depend on this" check, which can't apply to a Worker
+  # nothing else binds to. A preview that never deployed (fork PR, or the gates
+  # failed on every push) makes this a harmless "not found".
+  teardown-preview:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    concurrency:
+      group: preview-${{ github.event.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Delete PR preview
+        uses: cloudflare/wrangler-action@v3
+        continue-on-error: true
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: delete --env preview --name audio-viz-room-pr-${{ github.event.number }} --force
