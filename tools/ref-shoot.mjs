@@ -77,7 +77,9 @@ console.log(`${basename(bundle)} → ${scene}: ${targets.length} beats × ${offs
 
 const { browser, ctx } = await launchWithMic(wav);
 const page = await openScene(ctx, { port, scene, quality });
-if (settings) await page.evaluate((s) => window.__viz?.setParams({ autoPin: true, settings: JSON.parse(s) }), settings);
+// applyTuningParams (src/tuning/bus.ts) ignores `settings` unless the scene id
+// comes with them — without it --settings silently changed nothing.
+if (settings) await page.evaluate(({ s, scene }) => window.__viz?.setParams({ scene, autoPin: true, settings: JSON.parse(s) }), { s: settings, scene });
 else await page.evaluate(() => window.__viz?.setParams({ autoPin: false, settings: {} }));
 
 // What ours heard, if ref-hear.mjs has run: a slice around each shot goes
