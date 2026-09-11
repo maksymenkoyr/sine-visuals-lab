@@ -710,7 +710,7 @@ export function wrapFlow(x: number): number {
  *  causticDensityScale() of the live density setting — the same factor the
  *  shader applies to q, folded in here so a finer/coarser pattern keeps the
  *  same screen-space drift speed (see uCausticDensity's comment in FRAG). */
-export function driftFlows(phase: number, densScale: number, out = new Float32Array(DRIFT_FLOW_LEN)): Float32Array {
+export function driftFlows(phase: number, densScale: number, out: Float32Array = new Float32Array(DRIFT_FLOW_LEN)): Float32Array {
   const fx = phase * FLOW_X * densScale;
   const fy = phase * FLOW_Y * densScale;
   out[FLOW_FWD] = wrapFlow(fx);
