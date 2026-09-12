@@ -4,6 +4,7 @@ import { particlesScene } from "./particles.ts";
 import { tunnelScene } from "./tunnel.ts";
 import { cymaticsScene } from "./cymatics.ts";
 import { moireScene } from "./moire.ts";
+import { moire2Scene } from "./moire2.ts";
 import { causticsScene } from "./caustics.ts";
 import { risoScene } from "./riso.ts";
 import { ferrofluidScene } from "./ferrofluid.ts";
@@ -23,6 +24,7 @@ import { kaleidoscopeScene } from "./kaleido/index.ts";
 // vite-scene-links-plugin.ts prints when you start `npm run dev`.
 registerScene(chladniScene);
 registerScene(causticsScene);
+registerScene(moireScene);
 registerScene(kaleidoscopeScene);
 registerScene(powderScene);
 registerScene(ambienceScene);
@@ -33,7 +35,7 @@ registerScene(spectrumScene);
 registerScene(particlesScene);
 registerScene(tunnelScene);
 registerScene(cymaticsScene);
-registerScene(moireScene);
+registerScene(moire2Scene);
 registerScene(risoScene);
 registerScene(ferrofluidScene);
 
@@ -46,6 +48,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "tunnel",
   "cymatics",
   "moire",
+  "moire2",
   "riso",
   "ferrofluid",
   "dancers",
@@ -61,6 +64,7 @@ export {
   tunnelScene,
   cymaticsScene,
   moireScene,
+  moire2Scene,
   causticsScene,
   risoScene,
   ferrofluidScene,
