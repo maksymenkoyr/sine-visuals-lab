@@ -158,6 +158,14 @@ export interface AudioStatus {
   source: AudioSource;
   /** The local AudioContext's rate, when there is one. */
   sampleRate: number | null;
+  /** Browser-reported mic-to-analyser latency in ms (see
+   *  src/audio/capture.ts's estimateInputLatencySec); null when there is no
+   *  local capture or the browser reports nothing. */
+  inputLatencyMs: number | null;
+  /** How far behind its own capture this device deliberately renders for
+   *  room sync (src/net/room.ts's renderDelayMs); null when not in a room.
+   *  Shown only once it's non-zero — a host alone in its room targets 0. */
+  renderDelayMs: number | null;
 }
 
 export interface DeviceMenuDeps {
@@ -1197,12 +1205,27 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
 }
 
 
+/** The latency tail of the status line: what the browser says the mic path
+ *  costs, and what the room's sync delay adds on top, so a delay seen on
+ *  this screen can be attributed at a glance. Empty when nothing is known. */
+function latencyText(status: AudioStatus): string {
+  const parts: string[] = [];
+  if (status.inputLatencyMs !== null) parts.push(`${Math.round(status.inputLatencyMs)}ms in`);
+  if (status.renderDelayMs !== null && status.renderDelayMs >= 1) parts.push(`+${Math.round(status.renderDelayMs)}ms sync`);
+  return parts.length ? ` · ${parts.join(" ")}` : "";
+}
+
+function liveText(label: string, status: AudioStatus): string {
+  const rate = status.sampleRate ? ` · ${Math.round(status.sampleRate / 1000)}k` : "";
+  return `${label} live${rate}${latencyText(status)}`;
+}
+
 function statusText(status: AudioStatus): string {
   switch (status.source) {
     case "mic":
-      return status.sampleRate ? `Mic live · ${Math.round(status.sampleRate / 1000)}k` : "Mic live";
+      return liveText("Mic", status);
     case "display":
-      return status.sampleRate ? `Screen live · ${Math.round(status.sampleRate / 1000)}k` : "Screen live";
+      return liveText("Screen", status);
     case "remote":
       return "Remote feed";
     case "synthetic":

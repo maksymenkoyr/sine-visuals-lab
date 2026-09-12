@@ -1,5 +1,5 @@
 import { DRAFT_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
-import { captureMic, captureDisplayAudio } from "./audio/capture.ts";
+import { captureMic, captureDisplayAudio, estimateInputLatencySec } from "./audio/capture.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
@@ -586,10 +586,15 @@ function wireDeviceMenu(): void {
     currentPaletteId: () => palette.id,
     // What the Bands card's status line reports as the audio source. A
     // renderer has no local analyser — its bands arrive over the room.
-    getAudioStatus: () => ({
-      source: syntheticFeed ? "synthetic" : mode === "renderer" ? "remote" : capture ? captureAudioSource(capture.kind) : "none",
-      sampleRate: capture?.context.sampleRate ?? null,
-    }),
+    getAudioStatus: () => {
+      const inputLatencySec = capture ? estimateInputLatencySec(capture) : null;
+      return {
+        source: syntheticFeed ? "synthetic" : mode === "renderer" ? "remote" : capture ? captureAudioSource(capture.kind) : "none",
+        sampleRate: capture?.context.sampleRate ?? null,
+        inputLatencyMs: inputLatencySec === null ? null : inputLatencySec * 1000,
+        renderDelayMs: mode === "host" && hostConn ? hostConn.renderDelayMs : null,
+      };
+    },
     // The Input card's Source row. Null (row hidden) on a renderer or the
     // synthetic feed — see DeviceMenuDeps.getAudioSourceChoice's doc comment.
     getAudioSourceChoice: () => (mode === "renderer" || syntheticFeed ? null : getStoredAudioSource()),
