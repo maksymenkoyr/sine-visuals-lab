@@ -11,6 +11,7 @@ import { meshGridScene } from "./meshGrid.ts";
 import { chladniScene } from "./chladni.ts";
 import { dancersScene } from "./dancers/index.ts";
 import { powderScene } from "./powder.ts";
+import { physarumScene } from "./physarum.ts";
 import { stormScene } from "./storm.ts";
 import { ambienceScene } from "./ambience.ts";
 import { kaleidoscopeScene } from "./kaleido/index.ts";
@@ -24,6 +25,7 @@ import { shardsScene } from "./shards/index.ts";
 // vite-scene-links-plugin.ts prints when you start `npm run dev`.
 registerScene(chladniScene);
 registerScene(causticsScene);
+registerScene(physarumScene);
 registerScene(shardsScene);
 registerScene(kaleidoscopeScene);
 registerScene(powderScene);
@@ -42,6 +44,7 @@ registerScene(ferrofluidScene);
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
  *  the featured scenes registered above it are deliberately absent. */
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
+  "physarum",
   "mesh",
   "spectrum",
   "particles",
@@ -71,6 +74,7 @@ export {
   chladniScene,
   dancersScene,
   powderScene,
+  physarumScene,
   stormScene,
   ambienceScene,
   kaleidoscopeScene,
