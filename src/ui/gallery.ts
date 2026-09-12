@@ -1,11 +1,15 @@
 import type { Scene } from "../render/scene.ts";
-import type { QualitySettings } from "../render/quality.ts";
+import type { QualityPreset, QualitySettings } from "../render/quality.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import { createSyntheticFeed } from "../audio/synthetic.ts";
 import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRenderer.ts";
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
 import { PRODUCT_NAME, SOURCE_URL } from "../brand.ts";
+import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "../render/framePace.ts";
+import { getPowerMode } from "../render/powerMode.ts";
+import { selectDueTiles, type ScheduleCandidate } from "../render/previewSchedule.ts";
+import { createPreviewBudgetController, type PreviewBudgetController } from "../render/previewBudget.ts";
 
 export interface GallerySceneEntry {
   scene: Scene;
@@ -37,7 +41,10 @@ export interface GalleryDeps {
 export interface Gallery {
   show(): void;
   hide(): void;
-  /** Call every rAF tick while the gallery is showing; self-throttles to ~30fps. */
+  /** Call every rAF tick while the gallery is showing; self-throttles to the
+   *  device's own render-rate cap (framePace.ts), same policy as the
+   *  fullscreen viz, and further self-limits which tiles actually redraw —
+   *  see the priority-band comments above createGallery. */
   tick(nowMs: number): void;
   setError(msg: string | null): void;
   destroy(): void;
@@ -92,16 +99,47 @@ const draftToggleStyle = `
 
 const PREVIEW_W = 480;
 const PREVIEW_H = 270;
-const PREVIEW_FPS = 30;
-const FRAME_INTERVAL_MS = 1000 / PREVIEW_FPS;
 
 // A thumbnail doesn't need fullscreen-viz quality — same per-pixel raymarch
-// cost as the real thing otherwise, across every scene, every tick. And
-// tiles don't all need to redraw every tick either: round-robin a handful
-// per tick so each one lands around ~10fps, which reads as smooth motion at
-// thumbnail size while cutting preview GPU work roughly 3x.
+// cost as the real thing otherwise, across every scene, every tick.
 const PREVIEW_QUALITY_SCALE = 0.4;
-const PREVIEW_TILES_PER_TICK = 3;
+
+// Tiles don't all need to redraw at the same rate: rather than spreading one
+// shared frame rate thin across every visible tile (what used to happen —
+// see the round-robin this replaced), each tile gets its own target
+// interval by priority band, and previewSchedule.ts's overdue-first
+// selection spends the per-tick draw budget on whichever tiles actually hit
+// their target. A tile that's skipped costs nothing to leave alone — the
+// last blit it made stays on screen — so concentrating the budget on the
+// tile the user is actually looking at, at full rate, beats making every
+// visible tile equally choppy.
+//
+// Expressed as multiples of the base interval (itself the device's own
+// render-rate cap, see tickIntervalMs()) so they scale automatically with
+// Energy saving On and with a floor-preset device's slower cap, rather than
+// hardcoding separate fps numbers that could drift out of step with it.
+const NEAR_INTERVAL_MULT = 3;
+const FAR_INTERVAL_MULT = 10;
+
+// Eligibility cutoff (a tile below this intersection ratio is skipped
+// entirely, same threshold the old visible/not-visible flag used) and the
+// near/far split within what remains — "near" is substantially on screen,
+// "far" is a sliver scrolled into view but not what anyone's looking at.
+const MIN_VISIBLE_RATIO = 0.01;
+const NEAR_VISIBLE_RATIO = 0.6;
+
+// Per-tick draw-budget ceiling by detected device quality (quality.ts) —
+// the most tiles previewBudgetController is ever allowed to ask for, even
+// once its own EWMA says the device has room. floor/low keep roughly what
+// the old fixed round-robin constant gave every device; mid/high can afford
+// far more since a preview tile costs a small fraction of one fullscreen
+// viz frame at PREVIEW_QUALITY_SCALE.
+const BUDGET_CEILING_BY_PRESET: Record<QualityPreset, number> = {
+  high: 12,
+  mid: 6,
+  low: 3,
+  floor: 2,
+};
 
 /** Derives a permanently-reduced quality for gallery previews from the
  *  device's detected/chosen quality — a snapshot, not a live reference, so it
@@ -120,6 +158,37 @@ function reducedPreviewQuality(q: QualitySettings): QualitySettings {
   };
 }
 
+/** The gallery's base tick interval — same cap policy as the fullscreen viz
+ *  (see app.ts's renderIntervalMs, which this mirrors): a floor-preset
+ *  device gets RENDER_FPS_CAP_FLOOR, everyone else framePace.ts's normal
+ *  cap, and a deliberate Energy saving On always drops to the floor rate
+ *  regardless of preset. The gallery previously ignored power mode
+ *  entirely — this is what makes "On" actually reach preview tiles. */
+function tickIntervalMs(preset: QualityPreset): number {
+  return getPowerMode() === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(preset);
+}
+
+/** How often one tile wants to be redrawn, as a multiple of the shared base
+ *  interval — see the NEAR_INTERVAL_MULT/FAR_INTERVAL_MULT comment above.
+ *  Disabled tiles are pinned to the slow band regardless of hover/scroll:
+ *  they can't be picked, so there's nothing to lose by starving them for
+ *  budget the pickable tiles can use instead.
+ *
+ *  `noContention` is what keeps the common case — the default gallery's
+ *  handful of featured tiles, comfortably inside the budget — identical to
+ *  "draw everyone every tick": banding only exists to ration a budget that's
+ *  actually scarce, and with room to spare there's nothing to ration. Without
+ *  it, a 3-tile gallery with nothing hovered would throttle two of its three
+ *  tiles to the near/far rate for no reason — the exact regression this
+ *  guards against. */
+function targetIntervalMsFor(t: Tile, isFocused: boolean, baseIntervalMs: number, noContention: boolean): number {
+  if (!t.enabled) return baseIntervalMs * FAR_INTERVAL_MULT;
+  if (isFocused || noContention) return baseIntervalMs;
+  return t.visibleRatio >= NEAR_VISIBLE_RATIO
+    ? baseIntervalMs * NEAR_INTERVAL_MULT
+    : baseIntervalMs * FAR_INTERVAL_MULT;
+}
+
 interface Tile {
   scene: Scene;
   canvas: HTMLCanvasElement;
@@ -128,11 +197,22 @@ interface Tile {
   palette: Palette;
   anim: AnimClock;
   /** Wall-clock ms this tile last actually drew — distinct from the shared
-   *  tick cadence now that tiles round-robin, so each tile's anim clock
-   *  (pulse decay, flow phase, etc.) advances by its own true elapsed time,
-   *  not the global tick interval (which would under-decay/under-advance a
-   *  tile that's only drawn every few ticks). 0 = never drawn yet. */
+   *  tick cadence now that tiles draw at their own priority-band rate, so
+   *  each tile's anim clock (pulse decay, flow phase, etc.) advances by its
+   *  own true elapsed time, not the global tick interval (which would
+   *  under-decay/under-advance a tile drawn less often than every tick).
+   *  0 = never drawn yet. */
   lastDrawMs: number;
+  /** Whether this device's GPU quality preset can run the scene fullscreen —
+   *  mirrors GallerySceneEntry.enabled. A disabled tile always lands in the
+   *  slow "far" priority band regardless of hover/scroll position, freeing
+   *  budget for tiles the user can actually pick. */
+  enabled: boolean;
+  /** This tile's last IntersectionObserver ratio (0..1) — drives both the
+   *  eligibility cutoff and the near/far priority split. Draft tiles start
+   *  at 0 (built into a possibly still-collapsed section, before the
+   *  observer's first callback can fire); featured tiles start at 1. */
+  visibleRatio: number;
 }
 
 export function createGallery(deps: GalleryDeps): Gallery {
@@ -181,7 +261,22 @@ export function createGallery(deps: GalleryDeps): Gallery {
   let tiles: Tile[] = [];
   let lastDrawMs = 0;
   let visible = false;
-  let rrIndex = 0;
+  // The device preset last captured in show() — drives both the tick
+  // interval (tickIntervalMs()) and the budget controller's ceiling
+  // (BUDGET_CEILING_BY_PRESET). Not read from deps.quality() live inside
+  // tick(): reducedPreviewQuality() already treats the device quality as a
+  // one-time snapshot for the same reason (see its own comment), and a mid-
+  // session preset change would otherwise resize the tick cadence a running
+  // animation is being timed against.
+  let preset: QualityPreset = "mid";
+  // Rebuilt fresh each show() alongside everything else tiles-related — see
+  // the comment on `preset` above for why it isn't just read live.
+  let budgetController: PreviewBudgetController | null = null;
+  // The tile currently under the pointer, if any — see the delegated
+  // pointerover/pointerleave listeners below. Falls back to "nearest the
+  // viewport center" in tick() when null (e.g. on a touch device, or the
+  // pointer is elsewhere on the page).
+  let hoveredTile: Tile | null = null;
 
   // Draft-section state. Rebuilt (along with everything else) on every show(),
   // so these describe the *current* build cycle, not something persisted
@@ -191,15 +286,64 @@ export function createGallery(deps: GalleryDeps): Gallery {
   let draftsBuilt = false;
   let draftsExpanded = false;
 
+  // Reverse lookup from DOM element back to Tile, for the IntersectionObserver
+  // callback and the delegated pointer listeners below — avoids an O(tiles)
+  // Array.find on every callback/event. WeakMaps need no explicit teardown on
+  // rebuild: entries for discarded elements just become unreachable.
+  const tileByCanvas = new WeakMap<Element, Tile>();
+  const tileByButton = new WeakMap<Element, Tile>();
+
   const observer = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
-        const tile = tiles.find((t) => t.canvas === e.target);
-        if (tile) (tile.canvas.dataset.visible = e.isIntersecting ? "1" : "0");
+        const tile = tileByCanvas.get(e.target);
+        if (tile) tile.visibleRatio = e.intersectionRatio;
       }
     },
-    { threshold: 0.01 },
+    // A handful of steps, not just one crossing point: tick() needs a
+    // continuous-enough signal to tell "a sliver scrolled into view" (far
+    // band) from "substantially on screen" (near band), not just in/out.
+    { threshold: [0, MIN_VISIBLE_RATIO, 0.25, NEAR_VISIBLE_RATIO, 0.75, 1] },
   );
+
+  // Delegated rather than per-tile: one pair of listeners on the root covers
+  // every tile, present and future (drafts built lazily on expand included).
+  root.addEventListener("pointerover", (e) => {
+    const btn = (e.target as Element | null)?.closest("button") ?? null;
+    hoveredTile = btn ? (tileByButton.get(btn) ?? null) : null;
+  });
+  // pointerleave (not pointerout) doesn't bubble, so it only fires here when
+  // the pointer actually leaves the gallery's root — exactly the "moved
+  // somewhere pointerover can't tell us about" case pointerover's own
+  // bubbling already covers for every in-root move.
+  root.addEventListener("pointerleave", () => {
+    hoveredTile = null;
+  });
+
+  /** The one tile that gets drawn every tick regardless of the shared
+   *  budget — whichever the pointer is over, or, with no pointer involved
+   *  (touch, or the pointer is elsewhere on the page), whichever
+   *  eligible+enabled tile sits nearest the viewport's vertical center, on
+   *  the theory that's the one a phone user scrolling the gallery is most
+   *  likely looking at. Reads layout (getBoundingClientRect) only for the
+   *  already-small eligible set, and only once per tick. */
+  function pickFocusedTile(eligible: Tile[]): Tile | null {
+    if (hoveredTile !== null && eligible.includes(hoveredTile)) return hoveredTile;
+
+    const centerY = window.innerHeight / 2;
+    let best: Tile | null = null;
+    let bestDist = Infinity;
+    for (const t of eligible) {
+      if (!t.enabled) continue;
+      const rect = t.canvas.getBoundingClientRect();
+      const dist = Math.abs(rect.top + rect.height / 2 - centerY);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = t;
+      }
+    }
+    return best;
+  }
 
   function buildTile(entry: GallerySceneEntry, i: number, into: HTMLElement): void {
     const btn = document.createElement("button");
@@ -209,10 +353,6 @@ export function createGallery(deps: GalleryDeps): Gallery {
     canvas.width = PREVIEW_W;
     canvas.height = PREVIEW_H;
     canvas.style.cssText = canvasStyle;
-    // Draft tiles may be built into a still-collapsed (display: none) section —
-    // mark them not-visible up front so tick()'s round-robin never draws one
-    // in the brief window before the IntersectionObserver's first callback.
-    if (entry.draft) canvas.dataset.visible = "0";
 
     const caption = document.createElement("div");
     caption.style.cssText = captionStyle;
@@ -245,7 +385,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
     observer.observe(canvas);
     preview?.host.mount(entry.scene);
 
-    tiles.push({
+    const tile: Tile = {
       scene: entry.scene,
       canvas,
       sink: preview?.attach(canvas) ?? null,
@@ -253,7 +393,15 @@ export function createGallery(deps: GalleryDeps): Gallery {
       palette: PALETTES[i % PALETTES.length],
       anim: createAnimClock(),
       lastDrawMs: 0,
-    });
+      enabled: entry.enabled,
+      // Draft tiles may be built into a still-collapsed (display: none)
+      // section — start at 0 so tick() never draws one in the brief window
+      // before the IntersectionObserver's first callback can fire.
+      visibleRatio: entry.draft ? 0 : 1,
+    };
+    tiles.push(tile);
+    tileByCanvas.set(canvas, tile);
+    tileByButton.set(btn, tile);
   }
 
   function updateToggleLabel(): void {
@@ -287,6 +435,10 @@ export function createGallery(deps: GalleryDeps): Gallery {
     draftGrid.innerHTML = "";
     tiles = [];
     draftsBuilt = false;
+    // Avoid holding a reference to a Tile object this rebuild is about to
+    // discard — pickFocusedTile() would just filter it back out via its own
+    // eligible-tiles check, but there's no reason to carry it across.
+    hoveredTile = null;
 
     const entries = deps.scenes();
     preview?.setSize(PREVIEW_W, PREVIEW_H);
@@ -308,11 +460,20 @@ export function createGallery(deps: GalleryDeps): Gallery {
 
   return {
     show(): void {
+      preset = deps.quality().preset;
       preview ??= createPreviewRenderer(reducedPreviewQuality(deps.quality()));
       if (!preview) {
         errorBanner.textContent = "WebGL2 preview unavailable on this device.";
         errorBanner.style.display = "block";
       }
+      // Start at half the device's ceiling rather than the ceiling itself —
+      // an optimistic-but-not-maximal guess that a few ticks of
+      // recordTick() will correct in either direction (see
+      // STEP_DOWN_TICKS/STEP_UP_TICKS in previewBudget.ts), rather than
+      // risking a brief overload right as the gallery opens.
+      budgetController = createPreviewBudgetController(
+        Math.max(1, Math.round(BUDGET_CEILING_BY_PRESET[preset] / 2)),
+      );
       buildTiles();
       root.style.display = "block";
       visible = true;
@@ -331,35 +492,50 @@ export function createGallery(deps: GalleryDeps): Gallery {
     },
 
     tick(nowMs: number): void {
-      if (!visible || !preview) return;
+      if (!visible || !preview || !budgetController) return;
       if (document.visibilityState !== "visible") return;
-      if (nowMs - lastDrawMs < FRAME_INTERVAL_MS) return;
+      const intervalMs = tickIntervalMs(preset);
+      // shouldRenderFrame(), not a raw `<` comparison — see framePace.ts's
+      // header for why the naive comparison quantizes against vsync and
+      // silently loses a third of the intended rate.
+      if (!shouldRenderFrame(nowMs, lastDrawMs, intervalMs)) return;
       lastDrawMs = nowMs;
 
       const timeSec = nowMs / 1000;
       const live = deps.liveFrame();
 
-      // Round-robin a handful of tiles per tick rather than redrawing every
-      // visible one — see the PREVIEW_TILES_PER_TICK comment above. Degrades
-      // to "draw everything, every tick" automatically once eligible.length
-      // <= PREVIEW_TILES_PER_TICK (small galleries see no change).
-      const eligible = tiles.filter((t) => t.sink && t.canvas.dataset.visible !== "0");
-      const drawCount = Math.min(PREVIEW_TILES_PER_TICK, eligible.length);
+      const eligible = tiles.filter((t) => t.sink && t.visibleRatio > MIN_VISIBLE_RATIO);
+      if (eligible.length === 0) return;
 
-      for (let i = 0; i < drawCount; i++) {
-        const t = eligible[rrIndex % eligible.length];
-        rrIndex++;
+      const ceiling = Math.min(BUDGET_CEILING_BY_PRESET[preset], eligible.length);
+      const budget = budgetController.budgetFor(ceiling);
+      // The common case — a handful of featured tiles well inside the
+      // budget — skips banding (and the getBoundingClientRect reads in
+      // pickFocusedTile) entirely: see targetIntervalMsFor's comment.
+      const noContention = budget >= eligible.length;
+      const focused = noContention ? null : pickFocusedTile(eligible);
+      const candidates: ScheduleCandidate[] = eligible.map((t) => ({
+        lastDrawMs: t.lastDrawMs,
+        targetIntervalMs: targetIntervalMsFor(t, t === focused, intervalMs, noContention),
+      }));
+
+      const dueIndices = selectDueTiles(candidates, nowMs, budget);
+
+      const drawStartMs = performance.now();
+      for (const idx of dueIndices) {
+        const t = eligible[idx];
 
         // Each tile's own elapsed-time-since-last-draw, not the shared tick
-        // interval — a tile only drawn every few ticks still decays/advances
-        // by the real time that's passed, not just one tick's worth.
-        const tileDt = t.lastDrawMs === 0 ? FRAME_INTERVAL_MS / 1000 : (nowMs - t.lastDrawMs) / 1000;
+        // interval — a tile drawn less often than every tick still
+        // decays/advances its anim clock by the real time that's passed.
+        const tileDt = t.lastDrawMs === 0 ? intervalMs / 1000 : (nowMs - t.lastDrawMs) / 1000;
         t.lastDrawMs = nowMs;
 
         const frame = live ?? t.feed.frame(timeSec);
         const anim = t.anim.advance(tileDt, frame);
         preview.drawTo(t.sink!, t.scene, frame, t.palette, anim);
       }
+      budgetController.recordTick(performance.now() - drawStartMs, dueIndices.length);
     },
 
     setError(msg: string | null): void {
