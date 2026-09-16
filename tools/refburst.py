@@ -143,11 +143,16 @@ def cut_line(c: dict | None, dur: float, vis_fps: float) -> str | None:
 
 
 def place_bursts(D: dict, dur: float, max_bursts: int = BURSTS_MAX) -> list[dict]:
-    """[{t0, dur, why, prio, anchor}] — strobes, then transitions by novelty,
-    then phrase starts (or a fixed interval without audio); overlapping
-    windows merge into the higher-priority one; at most `max_bursts`."""
+    """[{t0, dur, why, prio, anchor}] — strobes, then the uploader's chapter
+    boundaries (the one change the author stated; ref-scan.py reads them),
+    then transitions by novelty, then phrase starts (or a fixed interval
+    without audio); overlapping windows merge into the higher-priority one;
+    at most `max_bursts`."""
     win = min(BURST_S, dur)
     cands = []
+    for c in D.get("chapters") or []:
+        cands.append({"t0": c["t"] - win / 2, "why": f"chapter «{c['title']}» starts at {c['t']:.2f}s (beat #{c['beat']})", "prio": 1,
+                      "anchor": "chapter", "score": 1e9})
     for tr in D["transitions"]:
         if tr["kind"] == "strobe":
             cands.append({"t0": tr["t"] - 0.25, "why": f"strobe {tr['t']:.2f}–{tr['tEnd']:.2f}s, flashes every {tr['spacingS']:.2f}s", "prio": 0,

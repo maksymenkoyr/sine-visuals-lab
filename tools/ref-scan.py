@@ -95,6 +95,18 @@ at run time: it scales frame 0 up by 5 %, measures the shift, and flips the
 sign so that positive `zoom` always means zooming *in*. Rotation is
 radians/s, positive = counter-clockwise on screen (image coordinates, y down).
 
+Chapters: a URL's yt-dlp info JSON is fetched with the video, and the
+uploader's chapters in it (the seek-bar ones, whether set by hand or
+parsed from description timestamps) become a third set of boundaries
+beside the audio sections and the picture's regime changes — the one set
+the author *stated*. The report header lists them all with video times
+(for choosing `--start` on a long set or a compilation), a Findings line
+says how many of the boundaries inside the clip the audio and the picture
+agree with, each gets a burst and a titled magenta line on the timeline,
+and the beat nearest each is flagged `chapter` in audio.json. Local files
+take `--chapters FILE` (an info JSON, or `[H:]MM:SS title` lines). No
+chapters is the common case and says nothing about the video.
+
 Silent videos (no audio stream, or all-zero RMS) still get frames and
 motion metrics on a uniform grid at `--bpm` (120 if not given), and the
 report says so — don't read sync into a grid that was invented.
@@ -109,6 +121,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import shutil
 import subprocess
 import sys
@@ -173,6 +186,7 @@ def resolve_source(video: str) -> Path:
         [
             "uvx", "yt-dlp", "-q", "--no-simulate", "--no-playlist",
             "-f", "bv*[height<=720]+ba/b", "--merge-output-format", "mp4",
+            "--write-info-json",  # <id>.info.json beside the video — the uploader's chapters live there
             "-o", str(DL_DIR / "%(id)s.%(ext)s"),
             "--print", "after_move:filepath", video,
         ],
@@ -181,6 +195,57 @@ def resolve_source(video: str) -> Path:
     if not out:
         sys.exit("ref-scan: yt-dlp printed no output path")
     return Path(out[-1])
+
+
+CHAPTER_LINE = re.compile(r"^\s*(?:(\d+):)?(\d{1,2}):(\d{2})\s*[-–—:.]?\s*(.*?)\s*$")
+CHAPTER_EDGE_S = 0.25  # a chapter this close to the clip's start or end is not a change inside it
+
+
+def load_chapters(src: Path, explicit: str | None) -> list[dict]:
+    """[{start, end, title}] in *video* seconds — the uploader's chapters (the
+    ones YouTube shows on the seek bar), from the yt-dlp info JSON beside the
+    video (resolve_source writes it; put one next to a local file by hand),
+    or from `--chapters FILE`: an info JSON, or a text file with one
+    `[H:]MM:SS title` line per chapter, as a description lists them. Empty
+    when there are none — most shorts and VJ loops have none, and that is
+    not an error, just nothing to say."""
+    path = Path(explicit).expanduser() if explicit else src.with_name(src.stem + ".info.json")
+    if not path.exists():
+        if explicit:
+            sys.exit(f"ref-scan: no such chapters file {path}")
+        return []
+    text = path.read_text()
+    chaps: list[dict] = []
+    if path.suffix == ".json":
+        for c in json.loads(text).get("chapters") or []:
+            chaps.append({"start": float(c["start_time"]), "end": float(c.get("end_time") or 0.0), "title": str(c.get("title") or "").strip()})
+    else:
+        for line in text.splitlines():
+            m = CHAPTER_LINE.match(line)
+            if m:
+                h, mnt, sec, title = m.groups()
+                chaps.append({"start": float((int(h or 0) * 60 + int(mnt)) * 60 + int(sec)), "end": 0.0, "title": title})
+        chaps.sort(key=lambda c: c["start"])
+        for c, nxt in zip(chaps, chaps[1:]):
+            c["end"] = nxt["start"]
+    return chaps
+
+
+def clip_chapters(chaps: list[dict], start: float, dur: float, beat_t: np.ndarray) -> list[dict]:
+    """The chapter *boundaries* inside the clip, in clip seconds with the
+    nearest beat. The chapter the clip starts in is where we are, not a
+    change, so a boundary at the clip's own start is left out."""
+    out = []
+    for c in chaps:
+        t = c["start"] - start
+        if CHAPTER_EDGE_S <= t < dur - CHAPTER_EDGE_S:
+            bi = int(np.argmin(np.abs(beat_t - t))) if len(beat_t) else 0
+            out.append({"t": round(float(t), 3), "beat": bi, "title": c["title"], "videoT": round(float(c["start"]), 1)})
+    return out
+
+
+def chapter_at(chaps: list[dict], video_t: float) -> dict | None:
+    return next((c for c in reversed(chaps) if c["start"] <= video_t), None)
 
 
 def probe(path: Path) -> dict:
@@ -749,13 +814,15 @@ def hear_summary(H: dict, D: dict) -> dict:
     for i in range(1, len(sec)):
         if sec[i] - sec[max(0, i - 60)] >= 0.4 and (not rises or H["t"][i] - rises[-1] > 1.0):
             rises.append(float(H["t"][i]))
-    sec_match = []
-    for s in D["sections"]:
-        if rises:
-            d = min(rises, key=lambda r: abs(r - s["t"])) - s["t"]
-            sec_match.append({"beat": s["beat"], "t": s["t"], "oursRiseDelta": round(d, 2) if abs(d) <= 2.0 else None})
-        else:
-            sec_match.append({"beat": s["beat"], "t": s["t"], "oursRiseDelta": None})
+    def match_rises(points: list[dict]) -> list[dict]:
+        out = []
+        for s in points:
+            d = (min(rises, key=lambda r: abs(r - s["t"])) - s["t"]) if rises else None
+            out.append({"beat": s["beat"], "t": s["t"], "oursRiseDelta": round(d, 2) if d is not None and abs(d) <= 2.0 else None})
+        return out
+
+    sec_match = match_rises(D["sections"])
+    chap_match = match_rises(D.get("chapters") or [])
     return {
         "scene": H["scene"], "samples": int(len(H["t"])), "onsets": int(len(ours)), "refOnsets": int(len(ref)),
         "onsetHitRate": round(hits / len(ref), 2) if len(ref) else None,
@@ -763,7 +830,7 @@ def hear_summary(H: dict, D: dict) -> dict:
         "onsetLagMs": int(np.median(lags) * 1000) if lags else None,
         "onsetLagSpreadMs": int(np.std(lags) * 1000) if lags else None,
         "bpmLock": lock, "bpmMedian": round(float(np.median(bpm[valid])), 1) if valid.any() else None,
-        "hitByRank": by_rank, "sections": sec_match,
+        "hitByRank": by_rank, "sections": sec_match, "chapters": chap_match,
     }
 
 
@@ -937,7 +1004,7 @@ def write_sheets(beats: list[dict], offsets: list[int], bundle: Path, max_rows: 
 
 
 def write_timeline(v: dict, aud: dict, beats: list[dict], trans: list[dict], regimes: list[dict], section_t: np.ndarray,
-                   H: dict | None, out: Path) -> None:
+                   chapters: list[dict], H: dict | None, out: Path) -> None:
     from PIL import Image, ImageDraw
 
     n = v["n"]
@@ -967,6 +1034,10 @@ def write_timeline(v: dict, aud: dict, beats: list[dict], trans: list[dict], reg
     for t in section_t:
         x = left + int(t * VIS_FPS * px)
         d.line([(x, 20), (x, H_ - 16)], fill=(120, 255, 160), width=2)
+    for c in chapters:  # the uploader's chapter boundaries: magenta, titled
+        x = left + int(c["t"] * VIS_FPS * px)
+        d.line([(x, 20), (x, H_ - 16)], fill=(255, 110, 255), width=2)
+        d.text((x + 3, 22), c["title"][:24], fill=(255, 110, 255), font=f)
     for li, (name, series, col) in enumerate(lanes):
         y0 = 26 + li * (lane_h + gap)
         d.text((4, y0 + lane_h // 2 - 7), name, fill=col, font=f)
@@ -1001,7 +1072,7 @@ def write_timeline(v: dict, aud: dict, beats: list[dict], trans: list[dict], reg
         x = left + int(s_ * VIS_FPS * px)
         d.text((x + 2, H_ - 14), f"{s_}s", fill=(120, 120, 130), font=f)
     d.text((left, 2), "red (top) = visual transition, bar = strobe stretch   orange (bottom) = regime change on a bar/phrase beat   "
-           "beat lines brighter = higher rank   green = audio section boundary   white ticks on 'ours energy' = our onsets",
+           "beat lines brighter = higher rank   green = audio section boundary   magenta = uploader chapter   white ticks on 'ours energy' = our onsets",
            fill=(160, 160, 170), font=f)
     im.save(out)
 
@@ -1124,6 +1195,29 @@ def findings(D: dict, v: dict, aud: dict, rt: dict, corr: list[dict], hs: dict |
             line += (f" — ours: `section` rises within {max(abs(s['oursRiseDelta']) for s in close):.1f} s at {len(close)}/{len(hs['sections'])} of them"
                      if close else " — ours: `section` shows no rise near any of them")
         F.append(line)
+
+    # 4b. The uploader's chapters → what the audio and the picture do there.
+    # A chapter boundary is the one change the author *stated*; whether the
+    # audio segmentation and the picture agree says which of them to trust
+    # when they disagree elsewhere.
+    chaps = D.get("chapters") or []
+    if chaps:
+        near = lambda pts, t, tol: any(abs(p["t"] - t) <= tol for p in pts)  # noqa: E731
+        sec_hit = sum(1 for c in chaps if near(D["sections"], c["t"], D["period"]))
+        reg_hit = sum(1 for c in chaps if near(regimes, c["t"], D["period"]))
+        tr_hit = sum(1 for c in chaps if near(trans, c["t"], D["period"] * 0.6))
+        n = len(chaps)
+        line = (f"{n} chapter boundar{'y' if n == 1 else 'ies'} inside the clip ({', '.join(f'«{c['title']}» {c['t']:.1f}s' for c in chaps)}): "
+                f"audio section within a beat at {sec_hit}/{n}, picture regime change at {reg_hit}/{n}, transition at {tr_hit}/{n}")
+        if hs:
+            close = [c for c in hs.get("chapters") or [] if c["oursRiseDelta"] is not None]
+            line += (f" — ours: `section` rises within {max(abs(c['oursRiseDelta']) for c in close):.1f} s at {len(close)}/{n} of them"
+                     if close else " — ours: `section` shows no rise near any of them")
+        F.append(line)
+    elif D.get("chaptersAll"):
+        nxt = next((c for c in D["chaptersAll"] if c["start"] >= D["start"] + D["dur"]), None)
+        F.append(f"the video has {len(D['chaptersAll'])} chapters but no boundary falls inside this clip"
+                 + (f" — the next is «{nxt['title']}» at {nxt['start']:.0f}s; `--start` there to catch a stated change" if nxt else ""))
     for rg in regimes:
         if "zoom" in rg["deltas"] and abs(rg["deltas"]["zoom"]) >= 1.2:
             F.append(f"zoom direction changes at beat #{rg['beat']} (r{rg['rank']}, {rg['t']:.1f}s, {rg['deltas']['zoom']:+.1f}σ)")
@@ -1186,6 +1280,13 @@ def write_report(bundle: Path, D: dict, v: dict, aud: dict, hs: dict | None, she
                 f"({'given' if D['phaseGiven'] else f'estimated, margin {D['phaseMargin']}σ'}); sections at beats "
                 f"{', '.join(str(s['beat']) for s in D['sections']) or '—'}."
                 if D["hasAudio"] else f"no usable audio ({D['audioNote']})."))
+    if D.get("chaptersAll"):
+        here = chapter_at(D["chaptersAll"], D["start"])
+        inside = D.get("chapters") or []
+        L.append(f"Uploader chapters: {len(D['chaptersAll'])} in the video"
+                 + (f"; the clip opens in «{here['title']}»" if here else "")
+                 + (" and crosses into " + ", ".join(f"«{c['title']}» at {c['t']:.1f}s (beat #{c['beat']})" for c in inside) if inside else "")
+                 + ". Full list: " + "; ".join(f"{c['start']:.0f}s «{c['title']}»" for c in D["chaptersAll"]) + ".")
     if hs:
         L.append(f"Ours heard through `{hs['scene']}`: {hs['samples']} probe samples, {hs['onsets']} onsets vs the reference's {hs['refOnsets']}.")
     L.append("")
@@ -1264,15 +1365,16 @@ def write_report(bundle: Path, D: dict, v: dict, aud: dict, hs: dict | None, she
             L.append(f"- beat #{rg['beat']} (r{rg['rank']}, {rg['t']:.2f}s): " + ", ".join(f"{k} {d:+.1f}σ" for k, d in rg["deltas"].items()))
         L.append("")
 
-    ev = [b for b in D["beats"] if b["rank"] >= 4 or b.get("section")]
+    ev = [b for b in D["beats"] if b["rank"] >= 4 or b.get("section") or b.get("chapter")]
     if ev and D["hasAudio"]:
         L.append("## Bar and phrase beats\n")
+        L.append("S = audio section boundary, C = the uploader's chapter boundary.\n")
         L.append("| beat | t | rank | onset z | low z | high z | act z | cut z |" + (" ours onset | ours bpm |" if hs else ""))
         L.append("|---|---|---|---|---|---|---|---|" + ("---|---|" if hs else ""))
         for b in ev:
             o = b.get("ours")
             ours = (f" {'yes' if o['onset'] else 'no'} | {o['bpm']:.0f} |" if o else " — | — |") if hs else ""
-            L.append(f"| #{b['i']}{' S' if b.get('section') else ''} | {b['t']:.2f} | {b['rank']} | {b['onsetZ']:+.1f} | {b['lowZ']:+.1f} | {b['highZ']:+.1f} | "
+            L.append(f"| #{b['i']}{' S' if b.get('section') else ''}{' C' if b.get('chapter') else ''} | {b['t']:.2f} | {b['rank']} | {b['onsetZ']:+.1f} | {b['lowZ']:+.1f} | {b['highZ']:+.1f} | "
                      f"{b['actZ']:+.1f} | {b['cutZ']:+.1f} |{ours}")
         L.append("")
 
@@ -1341,7 +1443,7 @@ def render_outputs(bundle: Path, D: dict, v: dict, aud: dict, H: dict | None) ->
     hs = attach_hears(D, H) if H else None
     section_t = np.array([s["t"] for s in D["sections"]])
     write_keyframes_sheet(D["keyframes"], bundle, bundle / "keyframes.png")
-    write_timeline(v, aud, D["beats"], D["transitions"], D["regimeChanges"], section_t, H, bundle / "timeline.png")
+    write_timeline(v, aud, D["beats"], D["transitions"], D["regimeChanges"], section_t, D.get("chapters") or [], H, bundle / "timeline.png")
     write_report(bundle, D, v, aud, hs, D["sheets"])
     (bundle / "audio.json").write_text(json.dumps(D, indent=1))
 
@@ -1360,6 +1462,8 @@ def main() -> None:
     ap.add_argument("--min-rank", type=int, default=1, help="only grab frames at beats of at least this rank")
     ap.add_argument("--phase", type=int, help="beat index of a phrase start, overriding the estimate")
     ap.add_argument("--bpm", type=float, help="tempo hint for the beat tracker (and the grid for silent video)")
+    ap.add_argument("--chapters", help="the uploader's chapters for a local file: a yt-dlp .info.json, or a text file of `[H:]MM:SS title` lines "
+                    "(a URL's chapters are fetched with the video; with --report-only this re-reads them into an existing bundle)")
     ap.add_argument("--max-rows", type=int, default=20, help="rows per sheet image before splitting")
     ap.add_argument("--hear", help="hears.json from tools/ref-hear.mjs, to add the ours: clauses")
     ap.add_argument("--report-only", action="store_true", help="rebuild report/timeline/keyframes from an existing bundle")
@@ -1375,6 +1479,11 @@ def main() -> None:
             sys.exit(f"ref-scan: no bundle at {bundle}")
         D = json.loads((bundle / "audio.json").read_text())
         v, aud = load_series(bundle)
+        if args.chapters or "chaptersAll" not in D:  # a bundle from before chapters were read, or a list given now
+            D["chaptersAll"] = load_chapters(Path(D["source"]), args.chapters)
+            D["chapters"] = clip_chapters(D["chaptersAll"], D["start"], D["dur"], np.array([b["t"] for b in D["beats"]]))
+            for b in D["beats"]:
+                b["chapter"] = any(c["beat"] == b["i"] for c in D["chapters"])
         if args.look_only:
             src = Path(D["source"])
             info = probe(src)
@@ -1461,6 +1570,12 @@ def main() -> None:
         z_ = np.zeros(v["n"])
         aud = {"onset_env": z_, "low": z_, "mid": z_, "high": z_, "rms": z_}
     section_t = np.array([beat_t[i] for i in section_beats]) if section_beats else np.array([])
+    chapters_all = load_chapters(src, args.chapters)
+    chapters = clip_chapters(chapters_all, args.start, dur, beat_t)
+    if chapters_all:
+        log(f"{len(chapters_all)} uploader chapters, {len(chapters)} boundaries inside the clip"
+            + (": " + ", ".join(f"«{c['title']}» {c['t']:.1f}s" for c in chapters) if chapters else ""))
+    chapter_beats = {c["beat"] for c in chapters}
 
     rank = [rank_of(i, phase) for i in range(nb)]
     zaud = {k: zscore(aud[k]) for k in aud}
@@ -1471,7 +1586,7 @@ def main() -> None:
         w_ = slice(max(0, f0 - 1), min(v["n"], f0 + 4))
         ok = w_.stop > w_.start
         beats.append({
-            "i": i, "t": round(float(t), 4), "rank": rank[i], "section": i in section_beats,
+            "i": i, "t": round(float(t), 4), "rank": rank[i], "section": i in section_beats, "chapter": i in chapter_beats,
             "onsetZ": round(float(zaud["onset_env"][w_].max()) if ok else 0.0, 2),
             "lowZ": round(float(zaud["low"][w_].mean()) if ok else 0.0, 2),
             "midZ": round(float(zaud["mid"][w_].mean()) if ok else 0.0, 2),
@@ -1502,6 +1617,7 @@ def main() -> None:
         "offsetsMs": offsets, "visFps": VIS_FPS, "zoomSign": v["sign"],
         "onsets": [round(float(t), 3) for t in (a["onsets_t"] if a else [])],
         "sections": [{"beat": i, "t": round(float(beat_t[i]), 3)} for i in section_beats],
+        "chaptersAll": chapters_all, "chapters": chapters,
         "beats": beats, "transitions": trans, "regimeChanges": regimes,
         "onsetEnvelope": onset_envelope(v, a["onsets_t"], zaud["onset_env"]) if a else {},
         "beatPhase": beat_phase_profile(v, beat_t, period) if a else {},
