@@ -11,6 +11,7 @@ import { meshGridScene } from "./meshGrid.ts";
 import { chladniScene } from "./chladni.ts";
 import { dancersScene } from "./dancers/index.ts";
 import { powderScene } from "./powder.ts";
+import { physarumScene } from "./physarum.ts";
 import { stormScene } from "./storm.ts";
 import { ambienceScene } from "./ambience.ts";
 import { kaleidoscopeScene } from "./kaleido/index.ts";
@@ -22,6 +23,7 @@ import { shardsScene } from "./shards/index.ts";
 // first: a scene you just added goes at the top of the drafts, so it's the
 // first tile behind the gallery's draft toggle and the first link
 // vite-scene-links-plugin.ts prints when you start `npm run dev`.
+registerScene(physarumScene);
 registerScene(chladniScene);
 registerScene(causticsScene);
 registerScene(shardsScene);
@@ -71,6 +73,7 @@ export {
   chladniScene,
   dancersScene,
   powderScene,
+  physarumScene,
   stormScene,
   ambienceScene,
   kaleidoscopeScene,
