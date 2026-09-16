@@ -81,12 +81,26 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --env preview --name audio-viz-room-pr-${{ github.event.number }}
 
+      # Shallow-fetches just the two endpoints of the PR's diff range so
+      # scene-deploy-links.mjs (next step) can `git diff` them — checkout's
+      # default fetch-depth leaves neither commit present locally for a
+      # pull_request event.
+      - name: Fetch PR diff range
+        if: steps.preview.outcome == 'success'
+        run: git fetch --no-tags --depth=1 origin ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
+
+      - name: Find touched scenes
+        id: scenes
+        if: steps.preview.outcome == 'success'
+        run: echo "json=$(node tools/scene-deploy-links.mjs ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" >> "$GITHUB_OUTPUT"
+
       - name: Post preview URL
         if: steps.preview.outcome == 'success'
         uses: actions/github-script@v7
         env:
           PREVIEW_URL: ${{ steps.preview.outputs.deployment-url }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TOUCHED_SCENES: ${{ steps.scenes.outputs.json }}
         with:
           script: |
             const marker = "<!-- pr-preview -->";
@@ -95,11 +109,24 @@ jobs:
               core.warning("wrangler-action reported no deployment-url; skipping the preview comment");
               return;
             }
+            let scenes = [];
+            try {
+              scenes = JSON.parse(process.env.TOUCHED_SCENES || "[]");
+            } catch (err) {
+              core.warning(`could not parse touched-scenes JSON: ${err}`);
+            }
             const body = [
               marker,
               `**Preview:** ${url}`,
               "",
               `Built from ${process.env.HEAD_SHA}. Redeployed on every push; deleted when this PR closes.`,
+              ...(scenes.length > 0
+                ? [
+                    "",
+                    scenes.length === 1 ? "**Your scene:**" : "**Your scenes:**",
+                    ...scenes.map((s) => `[${s.name}](${url}/#/v/${s.id})`),
+                  ]
+                : []),
               "",
               "Open a scene directly with the same hash the dev server prints, e.g.",
               `\`${url}/?audio=synthetic&bpm=120#/v/<scene-id>\` — the query goes before the \`#\`.`,
