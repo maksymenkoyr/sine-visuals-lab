@@ -24,10 +24,10 @@ import { shardsScene } from "./shards/index.ts";
 // first: a scene you just added goes at the top of the drafts, so it's the
 // first tile behind the gallery's draft toggle and the first link
 // vite-scene-links-plugin.ts prints when you start `npm run dev`.
+registerScene(slatsScene);
 registerScene(physarumScene);
 registerScene(chladniScene);
 registerScene(causticsScene);
-registerScene(slatsScene);
 registerScene(shardsScene);
 registerScene(kaleidoscopeScene);
 registerScene(powderScene);
@@ -46,7 +46,6 @@ registerScene(ferrofluidScene);
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
  *  the featured scenes registered above it are deliberately absent. */
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
-  "slats",
   "mesh",
   "spectrum",
   "particles",
