@@ -87,6 +87,7 @@ describe("override wins over resolve()", () => {
   it("auto pin bypasses computeAutoTarget entirely, returning the manual value even with no explicit override set", () => {
     const sceneId = "scene-ovres-3";
     setSceneSetting(sceneId, SPEC, 0.77);
+    setAutoEnabled(sceneId, SPEC.key, true); // exercise the auto path this test is about
     advanceAutoTune(1, { ...NEUTRAL, tempo: 1 }); // strong auto pull away from 0.77
     const unpinned = resolveSceneSetting(sceneId, SPEC);
     expect(unpinned).not.toBeCloseTo(0.77, 2); // sanity: auto really was pulling it away

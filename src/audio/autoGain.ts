@@ -25,11 +25,11 @@
  * those dials describe the music, not the room, and nothing there measures
  * "how much of the analyser's window is this input actually using" — which
  * is exactly what needs fixing here, and is already tracked unconditionally
- * (see bandSpanDb's own doc comment). Unlike autoTune.ts's exceptions store
- * (absent key == auto), auto here is opt-in and defaults off: this setting's
- * own default is AUTO_GAIN_MIN specifically to preserve real tilt, and
- * flipping every existing user to auto on upgrade would quietly override
- * that choice for them.
+ * (see bandSpanDb's own doc comment). Like autoTune.ts's own store, auto
+ * here is opt-in and defaults off: this setting's own default is
+ * AUTO_GAIN_MIN specifically to preserve real tilt, and flipping every
+ * existing user to auto on upgrade would quietly override that choice for
+ * them.
  */
 
 const STORAGE_KEY = "vibe.autoGain";

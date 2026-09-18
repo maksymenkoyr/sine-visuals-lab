@@ -269,7 +269,7 @@ export interface DeviceMenuDeps {
   /** The row's own "A" chip — auto-resolves the amount from the room's
    *  measured span rather than MUSIC_DIALS (see autoGain.ts's header for
    *  why). Independent of the master Auto button: that toggle is scoped to
-   *  isSceneAuto's per-scene exceptions, and this setting is device-global
+   *  isSceneAuto's per-scene auto-on store, and this setting is device-global
    *  like getAutoGain above. */
   isAutoGainAuto: () => boolean;
   onAutoGainAutoToggle: (on: boolean) => void;

@@ -151,7 +151,7 @@ export function currentVariant(sceneId: string): string | undefined {
 /** The storage id a (scene, setting) pair lives under: the scene id itself
  *  for a scene with no variant and for the variant setting itself, else the
  *  scene id qualified by the current variant option's name. Every per-
- *  setting store (this one, autoTune.ts's exceptions and slew) keys by this,
+ *  setting store (this one, autoTune.ts's auto-on store and slew) keys by this,
  *  which is what makes a variant's profile one thing rather than several. */
 export function settingScope(sceneId: string, key: string): string {
   const spec = variantSpecs.get(sceneId);

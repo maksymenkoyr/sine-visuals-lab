@@ -19,7 +19,7 @@ import "../src/render/scenes/index.ts";
 // A scene's variant (SceneSetting.variant) gives every other setting one
 // profile per option: its own stored value, auto/manual state and default.
 // These pin the contract every store shares — sceneSettings.ts's values,
-// autoTune.ts's exceptions, sceneLooks.ts's apply order — with a synthetic
+// autoTune.ts's auto-on store, sceneLooks.ts's apply order — with a synthetic
 // scene, then check the real scenes declare variants legally.
 
 const STYLE: SceneSetting = {
@@ -95,19 +95,23 @@ describe("variant profiles", () => {
 
   it("keeps auto/manual state per option", () => {
     const id = freshScene("auto");
-    setAutoEnabled(id, FLOW.key, false);
-    expect(isAutoEnabled(id, FLOW.key)).toBe(false);
-    setSceneSetting(id, STYLE, 2);
+    setAutoEnabled(id, FLOW.key, true);
     expect(isAutoEnabled(id, FLOW.key)).toBe(true);
-    setSceneSetting(id, STYLE, 0);
+    setSceneSetting(id, STYLE, 2);
+    // Gamma's profile has never had FLOW touched — manual by default.
     expect(isAutoEnabled(id, FLOW.key)).toBe(false);
+    setSceneSetting(id, STYLE, 0);
+    // Alpha's own auto choice survived the round trip through Gamma.
+    expect(isAutoEnabled(id, FLOW.key)).toBe(true);
   });
 
   it("applies a Look's variant before its other keys, so they land in that option's profile", () => {
     const id = freshScene("look");
     setSceneSetting(id, STYLE, 1);
     setSceneSetting(id, SYMMETRY, 14);
-    setAutoEnabled(id, SYMMETRY.key, false);
+    // FLOW stays auto so it's the one key captureLook leaves out below —
+    // SYMMETRY is explicit here only for clarity; it's already manual by default.
+    setAutoEnabled(id, FLOW.key, true);
     const look = captureLook("Beta fourteen", id, SPECS);
     expect(look.manual).toEqual({ style: 1, symmetry: 14 });
     resetSceneSettings(id, SPECS);
