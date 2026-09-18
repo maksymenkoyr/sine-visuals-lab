@@ -25,18 +25,26 @@ import { getPin } from "../tuning/pins.ts";
  * in MUSIC_DIALS this reads and the file header there for why "everything
  * neutral" must reproduce a setting's plain default.
  *
- * Auto state is stored as exceptions: vibe.sceneAuto only ever lists the
- * params a user has taken MANUAL control of. A key absent from the store —
- * including every key on a scene added after this feature shipped — is
- * auto by default. That's the whole mechanism behind "a new scene's
- * sliders are auto from the first run with no extra work."
+ * Auto is opt-in: vibe.sceneAuto only ever lists the params a user has
+ * explicitly switched TO auto (per-row chip or the scene's master Auto
+ * button). A key absent from the store — including every key on a scene
+ * added after this feature shipped, and every key on a fresh profile — is
+ * manual by default, resolving to its plain spec/variant default until
+ * someone opts it in.
+ *
+ * This flipped from an exceptions-store ("absent means auto") design; old
+ * persisted data only ever contains `false` values (the old "manual"
+ * marker), and those now simply read as absent-therefore-manual — the new
+ * default — so no migration was needed for the flip itself. loadAutoStore
+ * prunes any lingering non-`true` entries (and the empty scope objects they
+ * leave behind) on load so stale `false`s don't sit in storage forever.
  *
  * A SceneSetting's `macro` field is the same displacement shape as `auto`,
  * aimed at another setting instead of the music profile: computeMacroTarget
  * mirrors computeAutoTarget exactly, with the driver's live value standing
  * in for a dial reading, and the same "driver at its own default -> exactly
- * spec.default" identity at rest. It shares this module's exceptions store
- * and slew, so dragging a macro-driven setting "goes manual" the same way
+ * spec.default" identity at rest. It shares this module's auto-on store and
+ * slew, so dragging a macro-driven setting "goes manual" the same way
  * dragging an auto one does — see resolve() below.
  */
 
@@ -64,7 +72,7 @@ export type AutoWeights = Partial<Record<MusicDial, number>>;
 // invariant this whole module rests on regardless of the expansion factor.
 const DIAL_EXPAND = 2.5;
 
-const STORAGE_KEY_EXCEPTIONS = "vibe.sceneAuto";
+const STORAGE_KEY_AUTO_ON = "vibe.sceneAuto";
 const STORAGE_KEY_STRENGTH = "vibe.autoStrength";
 
 export const AUTO_STRENGTH_MIN = 0;
@@ -79,7 +87,7 @@ export const EXPANSION_AUTO_KEY = "@expansion";
 export const SMOOTHING_AUTO_KEY = "@smoothing";
 
 // The auto keys from this control's previous names — see the migration in
-// loadExceptions() below, and the parallel legacyKeys migration for the
+// loadAutoStore() below, and the parallel legacyKeys migration for the
 // manual-value store in audio/sensitivity.ts.
 const LEGACY_EXPANSION_AUTO_KEYS = ["@acceleration", "@contrast"] as const;
 
@@ -140,37 +148,61 @@ const SMOOTHING_SPEC: SceneSetting = {
   auto: { attack: -0.3, tempo: -0.15 },
 };
 
-type ExceptionStore = Record<string, Record<string, false>>;
+type AutoStore = Record<string, Record<string, true>>;
 
-// One-time rewrite of any LEGACY_EXPANSION_AUTO_KEYS auto-exception key to
-// EXPANSION_AUTO_KEY, in place, on whatever shape loadExceptions() handed
-// back. Skipping this would silently flip any scene where the control had
-// been set to manual under an old name back to auto after the rename — the
-// exception simply wouldn't be found under its new key. Returns whether
-// anything changed, so the caller can persist the rewritten shape
-// immediately rather than re-migrating (a no-op, but wasted work) on every
-// future load.
-function migrateLegacyExpansionKeys(store: ExceptionStore): boolean {
+// One-time rewrite of any LEGACY_EXPANSION_AUTO_KEYS auto-on key to
+// EXPANSION_AUTO_KEY, in place, on whatever shape loadAutoStore() handed
+// back. Skipping this would silently drop a scene's auto choice for the
+// control back to manual after the rename — the entry simply wouldn't be
+// found under its new key. Returns whether anything changed, so the caller
+// can persist the rewritten shape immediately rather than re-migrating (a
+// no-op, but wasted work) on every future load.
+function migrateLegacyExpansionKeys(store: AutoStore): boolean {
   let changed = false;
   for (const sceneId of Object.keys(store)) {
-    const sceneExceptions = store[sceneId];
+    const sceneEntry = store[sceneId];
     for (const legacyKey of LEGACY_EXPANSION_AUTO_KEYS) {
-      if (!(legacyKey in sceneExceptions)) continue;
-      if (!(EXPANSION_AUTO_KEY in sceneExceptions)) sceneExceptions[EXPANSION_AUTO_KEY] = sceneExceptions[legacyKey];
-      delete sceneExceptions[legacyKey];
+      if (!(legacyKey in sceneEntry)) continue;
+      if (!(EXPANSION_AUTO_KEY in sceneEntry)) sceneEntry[EXPANSION_AUTO_KEY] = sceneEntry[legacyKey];
+      delete sceneEntry[legacyKey];
       changed = true;
     }
   }
   return changed;
 }
 
-function loadExceptions(): ExceptionStore {
+// Drops any entry that isn't literally `true` (e.g. a `false` written by the
+// pre-flip "exceptions" scheme, back when absent meant auto) and any scope
+// object left empty by that — those now just mean "manual", the new default,
+// so keeping them around is dead weight, not state. Returns whether anything
+// changed, so the caller only re-persists when pruning actually did something.
+function pruneNonAutoEntries(store: AutoStore): boolean {
+  let changed = false;
+  for (const sceneId of Object.keys(store)) {
+    const sceneEntry = store[sceneId] as Record<string, unknown>;
+    for (const key of Object.keys(sceneEntry)) {
+      if (sceneEntry[key] !== true) {
+        delete sceneEntry[key];
+        changed = true;
+      }
+    }
+    if (Object.keys(sceneEntry).length === 0) {
+      delete store[sceneId];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function loadAutoStore(): AutoStore {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_EXCEPTIONS);
+    const raw = localStorage.getItem(STORAGE_KEY_AUTO_ON);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
-    if (migrateLegacyExpansionKeys(parsed)) localStorage.setItem(STORAGE_KEY_EXCEPTIONS, JSON.stringify(parsed));
+    const migrated = migrateLegacyExpansionKeys(parsed);
+    const pruned = pruneNonAutoEntries(parsed);
+    if (migrated || pruned) localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(parsed));
     return parsed;
   } catch {
     return {};
@@ -192,12 +224,12 @@ function clampStrength(value: number): number {
   return Math.min(AUTO_STRENGTH_MAX, Math.max(AUTO_STRENGTH_MIN, value));
 }
 
-const exceptions: ExceptionStore = loadExceptions();
+const autoOn: AutoStore = loadAutoStore();
 let strength = loadStrength();
 
-function persistExceptions(): void {
+function persistAutoStore(): void {
   try {
-    localStorage.setItem(STORAGE_KEY_EXCEPTIONS, JSON.stringify(exceptions));
+    localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(autoOn));
   } catch {
     // Not fatal — auto/manual choices just won't persist across reloads.
   }
@@ -207,26 +239,26 @@ function persistStrength(): void {
   try {
     localStorage.setItem(STORAGE_KEY_STRENGTH, String(strength));
   } catch {
-    // Not fatal — see persistExceptions.
+    // Not fatal — see persistAutoStore.
   }
 }
 
-/** True unless this exact (scene, key) pair was explicitly set to manual.
- *  Keyed by sceneSettings.ts's settingScope, so a scene with a variant keeps
- *  one auto/manual state per variant option, like its values. */
+/** True only if this exact (scene, key) pair was explicitly switched to
+ *  auto. Keyed by sceneSettings.ts's settingScope, so a scene with a variant
+ *  keeps one auto/manual state per variant option, like its values. */
 export function isAutoEnabled(sceneId: string, key: string): boolean {
-  return exceptions[settingScope(sceneId, key)]?.[key] !== false;
+  return autoOn[settingScope(sceneId, key)]?.[key] === true;
 }
 
 export function setAutoEnabled(sceneId: string, key: string, on: boolean): void {
   const scope = settingScope(sceneId, key);
   if (on) {
-    delete exceptions[scope]?.[key];
-    if (exceptions[scope] && Object.keys(exceptions[scope]).length === 0) delete exceptions[scope];
+    (autoOn[scope] ??= {})[key] = true;
   } else {
-    (exceptions[scope] ??= {})[key] = false;
+    delete autoOn[scope]?.[key];
+    if (autoOn[scope] && Object.keys(autoOn[scope]).length === 0) delete autoOn[scope];
   }
-  persistExceptions();
+  persistAutoStore();
 }
 
 /** Whether every auto-capable setting on this scene is currently auto —
@@ -261,8 +293,10 @@ function clampToSpec(spec: SceneSetting, value: number, base = spec.default): nu
  * Pure resolution formula: how far this setting should sit from its default
  * given the current music profile. At every dial = 0.5 (NEUTRAL) the sum is
  * exactly 0, so this returns the default bit-for-bit — the property that
- * makes auto safe to ship on by default for an already-tuned scene. `base`
- * is that default: spec.default unless the scene's variant says otherwise
+ * makes switching a setting to auto never jump (a quiet/neutral profile
+ * resolves to the same value the manual default already showed) instead of
+ * snapping somewhere else the instant the chip is flipped. `base` is that
+ * default: spec.default unless the scene's variant says otherwise
  * (sceneSettings.ts's settingDefault), which resolve() passes in.
  */
 export function computeAutoTarget(spec: SceneSetting, profile: DialValues, autoStrength: number, base = spec.default): number {
@@ -281,8 +315,8 @@ export function computeAutoTarget(spec: SceneSetting, profile: DialValues, autoS
  * Same shape as computeAutoTarget, but displaced by a driver setting's value
  * instead of the music profile. At driverValue === spec.macro.driver.default
  * the displacement term is exactly 0, so this returns spec.default
- * bit-for-bit — same identity-at-rest property, same reason it's safe to
- * ship auto-following by default.
+ * bit-for-bit — same identity-at-rest property, same reason switching this
+ * setting to auto (or its driver) never produces a visible jump.
  */
 export function computeMacroTarget(
   spec: SceneSetting,

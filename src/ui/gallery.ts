@@ -190,6 +190,12 @@ export function createGallery(deps: GalleryDeps): Gallery {
   let pendingDraftStartIndex = 0;
   let draftsBuilt = false;
   let draftsExpanded = false;
+  // Bumped by every buildTiles() so an in-flight progressive draft build
+  // (see expandDrafts) from a previous cycle notices and stops.
+  let draftBuildGen = 0;
+  /** How many draft tiles the in-flight build has mounted so far — drives the
+   *  toggle's loading label; -1 = no build in flight. */
+  let draftsBuiltCount = -1;
 
   const observer = new IntersectionObserver(
     (entries) => {
@@ -257,17 +263,53 @@ export function createGallery(deps: GalleryDeps): Gallery {
   }
 
   function updateToggleLabel(): void {
-    draftToggle.textContent = draftsExpanded ? "▾ Hide draft scenes" : `▸ Show ${pendingDrafts.length} draft scenes`;
+    const loading = draftsBuiltCount >= 0;
+    draftToggle.disabled = loading;
+    draftToggle.setAttribute("aria-busy", loading ? "true" : "false");
+    draftToggle.style.cursor = loading ? "progress" : "pointer";
+    draftToggle.style.opacity = loading ? "0.7" : "1";
+    draftToggle.textContent = loading
+      ? `Loading draft scenes… ${draftsBuiltCount} of ${pendingDrafts.length}`
+      : draftsExpanded
+        ? "▾ Hide draft scenes"
+        : `▸ Show ${pendingDrafts.length} draft scenes`;
+  }
+
+  // Draft tiles are built one per animation frame rather than all at once:
+  // each buildTile() compiles that scene's shaders synchronously, and doing
+  // every draft in one click handler froze the page — the button couldn't
+  // even repaint to say it was working. Spreading them out lets the toggle
+  // show its loading label first, then the grid fill in tile by tile while
+  // the page stays responsive. The extra leading frame is deliberate: rAF
+  // callbacks run *before* that frame's paint, so without it the first
+  // compile would still land ahead of the label's first repaint.
+  function buildDraftsProgressively(): void {
+    const gen = draftBuildGen;
+    draftsBuiltCount = 0;
+    updateToggleLabel();
+
+    const step = (): void => {
+      if (gen !== draftBuildGen) return; // a rebuild superseded this build
+      if (draftsBuiltCount >= pendingDrafts.length) {
+        draftsBuilt = true;
+        draftsBuiltCount = -1;
+        updateToggleLabel();
+        return;
+      }
+      const j = draftsBuiltCount;
+      buildTile(pendingDrafts[j], pendingDraftStartIndex + j, draftGrid);
+      draftsBuiltCount = j + 1;
+      updateToggleLabel();
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(step));
   }
 
   function expandDrafts(): void {
-    if (!draftsBuilt) {
-      pendingDrafts.forEach((entry, j) => buildTile(entry, pendingDraftStartIndex + j, draftGrid));
-      draftsBuilt = true;
-    }
     draftGrid.style.display = "grid";
     draftsExpanded = true;
-    updateToggleLabel();
+    if (!draftsBuilt && draftsBuiltCount < 0) buildDraftsProgressively();
+    else updateToggleLabel();
   }
 
   function collapseDrafts(): void {
@@ -277,6 +319,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
   }
 
   draftToggle.addEventListener("click", () => {
+    if (draftsBuiltCount >= 0) return; // still loading — the button is disabled, but belt and braces
     if (draftsExpanded) collapseDrafts();
     else expandDrafts();
   });
@@ -287,6 +330,8 @@ export function createGallery(deps: GalleryDeps): Gallery {
     draftGrid.innerHTML = "";
     tiles = [];
     draftsBuilt = false;
+    draftBuildGen++;
+    draftsBuiltCount = -1;
 
     const entries = deps.scenes();
     preview?.setSize(PREVIEW_W, PREVIEW_H);

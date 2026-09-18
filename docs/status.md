@@ -6,60 +6,50 @@ regenerate it at session close.
 
 ## In flight
 
-- **Reference-video loop (`/ref`)** — draft PR #85, branch `worktree-ref-video`
-  (2026-09-05). `tools/ref-scan.py` turns a visualisation video into a bundle
-  whose `report.md` opens with Findings — sync rules the measurements support,
-  each with an "ours:" clause from what our own analyser heard on the same
-  audio (`tools/ref-hear.mjs`); one `keyframes.png`; the look as numbers.
-  `tools/ref-shoot.mjs` shoots our scene at the same beats beside the
-  reference. Verified on three clips; never yet used to build a scene — that
-  is the real test, and Kaleidoscope (now on `main`, `src/render/scenes/kaleido/`)
-  is the obvious first target. Design decisions are in the memory note
-  `reference-video-analysis`.
-- **Landed since the last snapshot:** Kaleidoscope scene #79 and its four
-  styles #83 (`style` is the first `variant` setting; Beat grid row in the
-  Rhythm card, `src/audio/beatGrid.ts` + `src/render/gridPulse.ts`), Powder
-  #77. Still in `DRAFT_SCENE_IDS` pending a real-music verdict.
-- **Draft scene PRs** waiting on review and a real-music judgement: Plume #75,
-  Neon Fluid #76.
-- **Auto: unstick tempoLock, rank dials** — draft PR #73.
-- **docs/architecture.md rebuild** — draft PR #74.
-- **CLAUDE.md Git & PRs section** — PR #84; **business/legal docs** — PR #72;
-  both ready for review. PR #70 is a stale status snapshot this file replaces —
-  close it.
-- Worktrees with no open PR (`git worktree list`): `agent-ae8a69d86e9c44e97`,
-  `audio-source-guide`, `bake-defaults`, `beat-rate-controls`, `docs-index`,
-  `setting-groups`, `tuning-spotlight`. Check `git log main..` on each before
-  reviving; several look landed or superseded.
+- **Moiré rebuilt from a measured reference** — draft PR #104, branch
+  `worktree-moire-lines` (2026-09-12). `/ref` on thedotisblack's horizontal-
+  lines moiré (chapter Part 2): two same-period gratings, one displaced by
+  noise, field re-rolling every frame. The old three-grating draft lives on as
+  `moire2`. Nothing in the source is audio-driven, so every trigger is our
+  mapping (see the scene header). Needs a look on real music; the numbers
+  match the reference's bands, the taste call is open.
+- **Draft scene PRs from `/ref`** waiting on review and a real-music judgement:
+  Slats #100, Ink Synth #96, Crystal Wall #95, Neon Gates #90,
+  Neon Fluid #76. Tessera has a branch (`tessera-scene`) and no PR yet.
+- **Ref-loop tool fixes riding on scene PRs:** `ref-shoot --settings` was a
+  silent no-op without the scene id (fixed in #104); fade-vs-cut grouping (#95).
+- **Runtime:** Song-boundary instrumentation #93; beat-rate setting #88;
+  Auto tempoLock/dial ranking #73; mic
+  latency status line #103 (from the mobile session, not draft).
+- Landed on `main` since the last snapshot: Shards #105, the Caustics mobile
+  noise-hash bound #102, draft-tile loading progress #106.
+- **Dev/docs:** dev-server single scene link #98; gallery preview scheduling
+  #91; docs/architecture.md rebuild #74; business/legal docs #72. PR #70 is a
+  stale status snapshot — close it.
+- Worktrees with no open PR (`git worktree list`): `agent-…`, `bake-defaults`,
+  `claude-md-git-workflow`, `dev-scene-links`, `docs-index`, `ref-bursts`,
+  `setting-groups`, `tessera`, `tuning-spotlight`. Check `git log main..` on
+  each before reviving; several look landed or superseded.
 
 ## Open questions
 
-- Ref loop: our tempo lock came out differently on two runs of the same clip
-  (162 steady vs a drop to 122 at a section boundary). Is `features.ts`'s comb
-  sensitive to start time / adaptive-gain state, and should `ref-hear` run
-  twice and report the spread?
-- Ref loop: our `section` signal (`sectionIntensity`) never rose at the
-  reference's section boundaries on the one clip with audio. Real gap in the
-  runtime, or a threshold mismatch in how the scan looks for a rise?
-- Ref loop: motion metrics run at `VIS_FPS`; above ~150 bpm a half-beat strobe
-  can't be told from a timer. Double the rate, or keep the stated resolution?
-- Beat grid: should its default move off Hits once judged on real music, and
-  should the TV receive it (a new DeviceCommand field)?
-- Kaleidoscope: should the dive target rotate between children (a spiral dive)
-  rather than always the top one? Do the rainbow texture styles
-  (`RAINBOW_ROOM_MIX`) read as ignoring the Palette card? Storm's Mode is the
-  obvious next `variant`.
+- Ref loop: a re-rolling noise field (Moiré) reads as hundreds of "hard cuts"
+  to the histogram detector — should `refburst` report a per-frame
+  decorrelation figure alongside cuts, so a shimmer isn't mistaken for editing?
+- Ref loop: `reflook` finds nothing on light-ground references (Moiré, Ink
+  Synth both needed a hand scan-line script) — fold a light-ground path into
+  `tools/reflook.py`?
+- Runtime: our tempo locked at ×2 on an 86 bpm ambient track for the whole
+  clip, and `sectionIntensity` never rose at the reference's section
+  boundaries (third clip in a row) — `beatClock.ts` half-time preference, and a
+  real section-change signal, are now recurring to-dos.
 - Which draft scenes graduate out of `DRAFT_SCENE_IDS`, and in what order.
-- Storm's local render-cap workaround (see its header) is redundant now that
-  `renderLatch.ts` is on `main`; simplify once nothing else touches Storm.
 - Stale scratch branches on origin (`git branch -r --no-merged origin/main`):
   prune, or is anything in them still wanted?
 
 ## Next up
 
-- `/ref` on one of the Kaleidoscope reference shorts against the landed
-  `kaleidoscope` scene; see whether the findings change a tuning decision,
-  then review #85.
-- Watch Kaleidoscope, Powder, Plume and Neon Fluid on real music; land or drop
-  #75/#76 and decide on graduation.
-- Review #73, #74, #84, #72; close #70; decide the fate of the idle worktrees.
+- Watch Moiré (#104) on real music: does the 30 Hz shimmer read as intended
+  or as noise, and does the curtain ever lift? Then review and land or drop.
+- Review the queue of draft scene PRs; decide graduation.
+- Review #103 from the mobile session; close #70; prune idle worktrees.

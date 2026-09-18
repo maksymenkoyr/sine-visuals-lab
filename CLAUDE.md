@@ -5,6 +5,22 @@ Two entry points: `index.html` → `src/app.ts` (phone/controller + gallery) and
 `tv.html` → `src/tv.ts` (the paired display). See `README.md` for the pitch and
 `docs/index.md` for how the pieces fit together.
 
+## Git workflow
+
+### Before starting work
+
+Check whether the change already exists: run
+`git fetch && git log origin/main --oneline -20` and grep for the relevant
+symbol on `origin/main` before implementing a fix. Parallel sessions often land
+the same change.
+
+### Branching
+
+Never edit files while on `main`. Before any code change, create or switch to a
+git worktree branch (`git worktree add ../<repo>-<topic> -b <topic>`), do all
+work there, then open a PR. If you notice you've started editing on main, stop
+and move the work before continuing.
+
 ## Two rules for keeping this documentation honest
 
 **1. A doc only exists for knowledge with no single owning file.** If a fact has
@@ -36,6 +52,14 @@ a standing claim, so specifics there are expected to age out immediately.
 gate the deploy that a push to `main` triggers — see
 `.github/workflows/deploy.yml`.
 
+## Testing
+
+### Verification before claiming done
+
+For every visualization/UI change: run `npm run typecheck`, the full test suite,
+and capture headless Playwright before/after screenshots. Only report success
+after all three pass; include the screenshot paths in your summary.
+
 ## Read this before touching X
 
 | Touching... | Read first |
@@ -55,12 +79,34 @@ gate the deploy that a push to `main` triggers — see
 - Don't port third-party implementations into a scene — write it as independent
   work. (See the git history around "Rewrite Mesh Grid as independent work.")
 - When working on a visualization, start `npm run dev` and hand the user a
-  direct link to that scene — not the gallery root. The dev server prints one
-  link per scene at startup, in gallery order, so copy the line for yours
-  (`vite-scene-links-plugin.ts` owns that listing). Any query
-  (`?audio=synthetic&bpm=…`, `?quality=…`) goes *before* the hash —
-  `src/app.ts` reads `location.search`, and a query placed after the hash
-  silently lands on the gallery.
+  direct link to that scene — not the gallery root. The dev server prints the
+  link to the scene in flight at startup — the one whose files git says are
+  modified, untracked, or changed on this branch — so copy that line
+  (`vite-scene-links-plugin.ts` owns the detection and what counts as "in
+  flight"). Any query (`?audio=synthetic&bpm=…`, `?quality=…`) goes *before*
+  the hash — `src/app.ts` reads `location.search`, and a query placed after
+  the hash silently lands on the gallery.
+- Once a detailed plan exists, execute it with Sonnet whenever possible (an
+  agent with `model: "sonnet"`). Keep the stronger model for planning and review.
+
+## Communication style
+
+### Answering questions
+
+When I ask 'why', 'what does X mean', or 'explain X', answer in plain prose
+grounded in the actual code first. Do NOT produce plans, HTML artifacts, visual
+pages, or multi-step designs unless I explicitly ask for them. Name the concrete
+file/function and the one mechanism that causes the behaviour, then stop and
+wait.
+
+## Architecture conventions
+
+### Scope discipline
+
+When a requested effect overlaps an existing system (e.g. Sparkle, governor,
+brightness dial), integrate into that system rather than adding a standalone
+parallel effect. Ask one clarifying question if unsure which system owns the
+behaviour.
 
 ## Git & PRs
 

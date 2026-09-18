@@ -14,8 +14,12 @@ prompt and the Input card's Source row — and hands back a raw stream.
 (`src/audio/bandSplit.ts` / `bandScale.ts` decide the band edges). `src/audio/
 features.ts` turns raw bands into a `FeatureFrame` — this is where the adaptive
 floor/peak AGC lives, so everything downstream sees a signal already normalized to
-the room's own loudness. `src/audio/sensitivity.ts` applies the user's Sensitivity/
-Expansion/Smoothing controls on top of that.
+the room's own loudness. That same adaptive shape is why `src/audio/
+silenceGate.ts` exists: its two marks weight `features.ts`'s own broadband onset,
+and (via `src/render/animClock.ts`) `src/render/bandEnergy.ts`'s per-band onsets,
+against `FeatureFrame.level` — the one absolute-loudness reading in the pipeline —
+so a quiet room's own hiss can't fire on its own. `src/audio/sensitivity.ts`
+applies the user's Sensitivity/Expansion/Smoothing controls on top of that.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
@@ -48,7 +52,9 @@ mic, entirely separate from
 a viewer with no local mic doesn't get that card at all. Their Signal card's
 history trace likewise reads `FeatureExtractor.fixedEnergy`, a local
 diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
-`FeatureFrame` field. The Loudness card is the same kind of read: BS.1770 LUFS
+`FeatureFrame` field — the Gate card right after it reads that same
+extractor's `gateDimmer`/`suppressed` diagnostics the same way. The Loudness
+card is the same kind of read: BS.1770 LUFS
 from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
 this device's own capture, hidden on a mic-less renderer like the Scope.
 
@@ -83,13 +89,16 @@ app.ts` drives `AnimFrame` straight from its own local `FeatureFrame`s.
 
 `src/render/quality.ts` (`detectQuality`) picks a quality preset once at
 startup; `src/render/qualityPref.ts` lets the user override it from the Power
-card, defaulting to Auto (the detected preset); `src/render/governor.ts` (the
-quality governor) can step the effective preset down at runtime under
-sustained frame-time pressure, judged against the render-rate cap that `src/
-render/framePace.ts` owns — probing that a step down actually helped before
-trusting it, so a pace this page doesn't control (a browser energy-saver mode,
-an OS refresh-rate cap) can't be mistaken for GPU load. A scene's `minQuality`
-(on the `Scene` interface) opts it out of running below a given preset at all.
-`src/render/powerMode.ts` is the user-facing override — Energy saving's
-Auto/On/Off in the controls panel's Power card (`src/ui/powerCard.ts`) — that
-takes the governor out of the loop entirely rather than fighting it.
+card — `QUALITY_CHOICE_DEFAULT` in that file decides what a fresh device
+starts on, Auto being the choice that instead follows the detected preset;
+`src/render/governor.ts` (the quality governor) can step the effective preset
+down at runtime under sustained frame-time pressure, judged against the
+render-rate cap that `src/render/framePace.ts` owns — probing that a step
+down actually helped before trusting it, so a pace this page doesn't control
+(a browser energy-saver mode, an OS refresh-rate cap) can't be mistaken for
+GPU load. A scene's `minQuality` (on the `Scene` interface) opts it out of
+running below a given preset at all. `src/render/powerMode.ts` is the
+user-facing override — Energy saving's Auto/On/Off in the controls panel's
+Power card (`src/ui/powerCard.ts`) — that takes the governor out of the loop
+entirely rather than fighting it; `POWER_MODE_DEFAULT` in that file decides
+whether the governor is in the loop at all on a fresh device.

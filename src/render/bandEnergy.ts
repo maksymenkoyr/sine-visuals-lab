@@ -23,6 +23,16 @@ import { getBandSplit, bandSplitVersion } from "../audio/bandSplit.ts";
 // detector exactly when there's the most bass to catch. Rate-of-rise
 // doesn't have this problem: a sustained note has high level but ~zero
 // rise, so it can't mask the kicks on top of it.
+//
+// advance()'s optional `dimmer` is the same silence gate features.ts's own
+// broadband onset reads (src/audio/silenceGate.ts) — scoped per group here
+// rather than applied once for the whole spectrum, since a kick and a hat
+// are each free to fire on nothing but mic hiss even while the broadband
+// detector alone is gated. Same rule as there: it multiplies only the
+// firing comparison in advanceGroup below, never fluxBaseline (which keeps
+// adapting to the raw, ungated rise) or the refractory. Defaults to 1 so
+// every existing caller — including animClock.ts's own default when it has
+// no marks to pass — keeps today's ungated behavior.
 
 const LEVEL_SLEW_PER_SEC = 10; // smooths the continuous level so geometry-driving uniforms can't strobe
 
@@ -101,7 +111,14 @@ function makeGroupState(): GroupState {
   return { level: 0, prevRaw: null, fluxBaseline: 0, sinceOnsetSec: Infinity, pulse: 0, onset: false };
 }
 
-function advanceGroup(state: GroupState, spec: GroupSpec, dtSec: number, bands: Float32Array, rateScale: number): void {
+function advanceGroup(
+  state: GroupState,
+  spec: GroupSpec,
+  dtSec: number,
+  bands: Float32Array,
+  rateScale: number,
+  dimmer: number,
+): void {
   const raw = meanRange(bands, spec.lo, spec.hi);
   state.level += (raw - state.level) * Math.min(1, LEVEL_SLEW_PER_SEC * rateScale * dtSec);
 
@@ -126,7 +143,9 @@ function advanceGroup(state: GroupState, spec: GroupSpec, dtSec: number, bands: 
 
   state.sinceOnsetSec += dt;
   const threshold = state.fluxBaseline * spec.triggerMult + spec.triggerMargin;
-  state.onset = rise > threshold && state.sinceOnsetSec > spec.refractorySec;
+  // Only the comparison reads `dimmer` — threshold/fluxBaseline above stay on
+  // the raw rise, same reasoning as features.ts's own gated comparison.
+  state.onset = rise * dimmer > threshold && state.sinceOnsetSec > spec.refractorySec;
   if (state.onset) state.sinceOnsetSec = 0;
 
   state.pulse *= Math.exp(-dtSec * spec.pulseDecayRate * rateScale);
@@ -150,8 +169,13 @@ export interface BandEnergy {
    *  sensitivity.ts's smoothingRateScale. Stops there deliberately: it does
    *  not reach the flux baseline or refractory, which are measurement, not
    *  display smoothing (see advanceGroup). Defaults to 1 (today's behavior)
-   *  so existing callers don't need to change. */
-  advance(dtSec: number, bands: Float32Array, rateScale?: number): void;
+   *  so existing callers don't need to change. `dimmer` is the silence
+   *  gate's multiplier (src/audio/silenceGate.ts) on each group's own firing
+   *  comparison only — see the file header for why it's scoped per group
+   *  rather than applied once broadband. Defaults to 1 (no gating), same as
+   *  rateScale, so a caller with no marks (a preview/gallery/probe tile) is
+   *  unaffected. */
+  advance(dtSec: number, bands: Float32Array, rateScale?: number, dimmer?: number): void;
 }
 
 export function createBandEnergy(): BandEnergy {
@@ -175,16 +199,16 @@ export function createBandEnergy(): BandEnergy {
     lowOnset: false,
     midOnset: false,
     highOnset: false,
-    advance(dtSec: number, bands: Float32Array, rateScale = 1): void {
+    advance(dtSec: number, bands: Float32Array, rateScale = 1, dimmer = 1): void {
       const currentVersion = bandSplitVersion();
       if (currentVersion !== seenVersion) {
         specs = groupSpecsFromSplit();
         seenVersion = currentVersion;
       }
 
-      advanceGroup(low, specs.low, dtSec, bands, rateScale);
-      advanceGroup(mid, specs.mid, dtSec, bands, rateScale);
-      advanceGroup(high, specs.high, dtSec, bands, rateScale);
+      advanceGroup(low, specs.low, dtSec, bands, rateScale, dimmer);
+      advanceGroup(mid, specs.mid, dtSec, bands, rateScale, dimmer);
+      advanceGroup(high, specs.high, dtSec, bands, rateScale, dimmer);
 
       result.low = low.level;
       result.mid = mid.level;

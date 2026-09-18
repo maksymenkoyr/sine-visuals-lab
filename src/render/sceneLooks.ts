@@ -9,15 +9,17 @@ import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
  * Sensitivity/Expansion/Smoothing, band gains, auto-gain, quality, or power
  * mode either — those are device/room-specific and stay untouched by a Look.
  *
- * autoTune.ts stores auto state as exceptions: a setting absent from its
- * store is auto by default, and the renderer reads resolveSceneSetting (the
- * music-driven value), not the raw stored number. So a Look that carried
- * every slider's number, auto or not, would silently do nothing on any auto
- * key — the number would sit in sceneSettings.ts's store, shadowed by
- * whatever the music resolves to. A Look therefore stores exactly what
- * autoTune.ts's own store stores: the manual exceptions, nothing else. This
- * also keeps codes short, since auto-at-default is every setting's resting
- * state.
+ * autoTune.ts's own store lists only the settings a user has switched TO
+ * auto (opt-in, off by default), and the renderer reads resolveSceneSetting
+ * (the music-driven value when auto, the raw stored number otherwise), not
+ * the raw stored number directly. So a Look that carried every slider's
+ * number, auto or not, would silently do nothing on any auto key — the
+ * number would sit in sceneSettings.ts's store, shadowed by whatever the
+ * music resolves to. A Look therefore stores exactly the settings that
+ * aren't auto: the ones a plain apply wouldn't already reproduce. Since
+ * Auto is off by default, a captured Look will usually list most or all of
+ * a scene's non-variant settings in `manual` (longer codes than when Auto
+ * shipped on, same format).
  *
  * applyLook is authoritative, not additive: every spec in the scene is set,
  * not just the keys the Look lists. A key absent from the Look is put back
@@ -34,8 +36,10 @@ export interface SceneLook {
   name: string;
   sceneId: string;
   /** Settings pinned by hand, and the value each was pinned to. A key absent
-   *  here resolves from the music at its spec default — the same "absent
-   *  means auto" rule autoTune.ts's own exception store uses. */
+   *  here goes back to auto at its spec default when the Look is applied —
+   *  applyLook (below) is what actually enforces that, not an "absent means
+   *  auto" default in autoTune.ts's own store (that store now defaults every
+   *  key to manual; a Look's apply is what puts an omitted key into auto). */
   manual: Record<string, number>;
 }
 

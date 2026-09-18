@@ -7,6 +7,7 @@ import {
   createLoudSwellState,
   createLurchState,
   createRipplePool,
+  driftFlows,
   driftRatePerSec,
   focusSharp,
   fogFloorCut,
@@ -18,12 +19,14 @@ import {
   sparkleDensityExponent,
   sparkleGrainFreq,
   sparkleSpreadRange,
+  NOISE_PERIOD,
+  wrapFlow,
   type DriftInputs,
 } from "../src/render/scenes/caustics.ts";
 
 // Baseline: everything off except the Drift speed slider itself. Beat surge
 // is no longer part of DriftInputs — it's the separate advanceLurch impulse
-// tested below, added onto uDriftPhase rather than modulating this rate.
+// tested below, added onto the drift phase rather than modulating this rate.
 // loudSwell defaults to 0.5 (neutral) — advanceLoudSwell's "no information
 // yet" reading — so a bare `driftLoud` override doesn't silently mean
 // "maximally loud" the way `energy: 1` used to.
@@ -572,5 +575,63 @@ describe("caustics beat ripple pool", () => {
     const slot = argmax(pool.strength);
     expect(pool.strength[slot]).toBeCloseTo(1.8 * rippleEnvelope(0.2), 5);
     for (let i = 0; i < pool.strength.length; i++) if (i !== slot) expect(pool.strength[i]).toBe(0);
+  });
+});
+
+describe("driftFlows keeps every shader-side offset bounded (mobile precision seams)", () => {
+  // Regression guard for the tiled/dashed rendering on phones: the raw drift
+  // phase used to reach the shader and be multiplied into every noise
+  // coordinate, so the hash's inputs grew without bound. Now each offset is
+  // reduced into [0, NOISE_PERIOD) in float64 before upload, and the shader's
+  // integer hash is periodic in exactly that period, so the wrap is
+  // invisible and the GPU never sees a large float.
+  const HUGE_PHASE = 1e9; // hours at the drift-rate cap, and then some
+
+  it("stays in [0, NOISE_PERIOD) for every entry, at any phase", () => {
+    for (const phase of [0, 1, 123.456, -50, 1e4, HUGE_PHASE, -HUGE_PHASE]) {
+      for (const dens of [causticDensityScale(0), causticDensityScale(0.5), causticDensityScale(1)]) {
+        const flows = driftFlows(phase, dens);
+        expect(flows.length).toBeGreaterThan(0);
+        for (const v of flows) {
+          expect(v).toBeGreaterThanOrEqual(0);
+          expect(v).toBeLessThan(NOISE_PERIOD);
+        }
+      }
+    }
+  });
+
+  it("is congruent to the unwrapped offset — a wrap is a whole number of periods", () => {
+    // Forward warp x/y entries are phase * FLOW_X / FLOW_Y * densScale; check
+    // them against an independently computed modulo at a phase where fp32
+    // would have long since lost sub-cell resolution.
+    const flows = driftFlows(HUGE_PHASE, 1);
+    const fx = HUGE_PHASE * 0.15;
+    const fy = -HUGE_PHASE * 0.09;
+    const mod = (x: number) => ((x % NOISE_PERIOD) + NOISE_PERIOD) % NOISE_PERIOD;
+    expect(flows[0]).toBeCloseTo(mod(fx), 3);
+    expect(flows[1]).toBeCloseTo(mod(fy), 3);
+    // Backward warp is the negated flow, wrapped — never just -flow.
+    expect(flows[2]).toBeCloseTo(mod(-fx), 3);
+    expect(flows[3]).toBeCloseTo(mod(-fy), 3);
+  });
+
+  it("advances continuously across a wrap, so the field never jumps", () => {
+    // Step the phase by a small delta straddling a wrap boundary of the
+    // forward-x entry: the wrapped value must move by exactly delta * FLOW_X
+    // modulo the period, i.e. either +delta*0.15 or that minus the period.
+    const period = NOISE_PERIOD / 0.15; // phase units per wrap of flows[0]
+    const delta = 0.01;
+    const before = driftFlows(period * 3 - delta / 2, 1)[0];
+    const after = driftFlows(period * 3 + delta / 2, 1)[0];
+    const step = wrapFlow(after - before);
+    // Tolerance: the upload buffer is a Float32Array, so a value just under
+    // the period carries fp32 rounding — still orders of magnitude below a
+    // pixel's worth of noise coordinate, which is the whole point.
+    expect(step).toBeCloseTo(delta * 0.15, 4);
+  });
+
+  it("reuses the caller's buffer, so the per-frame upload allocates nothing", () => {
+    const buf = driftFlows(1, 1);
+    expect(driftFlows(2, 1, buf)).toBe(buf);
   });
 });

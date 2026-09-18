@@ -4,7 +4,7 @@ import { chipBtnStyle, createCard, createChipButton, spacer } from "./controlsKi
 
 /**
  * The Looks card — named, shareable snapshots of the Scene card's own
- * sliders (src/render/sceneLooks.ts owns the model: exceptions-only storage,
+ * sliders (src/render/sceneLooks.ts owns the model: non-auto-only storage,
  * authoritative apply, the share-code format). Mounted next to sceneCard in
  * deviceMenu.ts and hidden the same way when the active scene has no
  * settings to snapshot.

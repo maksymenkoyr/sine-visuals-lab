@@ -63,6 +63,12 @@ import {
   isAutoGainAuto,
   setAutoGainAuto,
 } from "./audio/autoGain.ts";
+import {
+  getSilenceGate,
+  setSilenceGateClosed,
+  setSilenceGateOpen,
+  type SilenceGateReading,
+} from "./audio/silenceGate.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
@@ -144,6 +150,13 @@ let waveformAnalyser: WaveformAnalyser | null = null;
  *  (src/audio/lufsAnalyser.ts) — display-only and local, like the waveform
  *  analyser above. */
 let lufsAnalyser: LufsAnalyser | null = null;
+/** DEV-only: a deep (32768-sample, ~682ms) sibling of waveformAnalyser, for
+ *  tools/audio-latency.mjs to locate a test click's exact arrival sample —
+ *  see that tool's header. waveformAnalyser's own 2048 samples (42.7ms at
+ *  48kHz) are too shallow: a click near the low end of the tool's expected
+ *  10-30ms result would already be uncomfortably close to scrolling out of
+ *  it. Never built outside import.meta.env.DEV — see attachCapture. */
+let measureAnalyser: WaveformAnalyser | null = null;
 /** Rebuilt (not just reset) on every swapAudioSource() — see that function's
  *  comment for why a fresh extractor, not a reset(), is what a source swap
  *  needs. */
@@ -208,6 +221,10 @@ let lastRawBands: Float32Array | null = null;
  *  solo/host-only availability as lastRawBands above, for the same reason
  *  (no local mic on a renderer device). Feeds the Scope card. */
 let lastMono: Float32Array | null = null;
+/** This tick's deep waveform samples, straight off measureAnalyser — DEV
+ *  only, see that variable's own comment. Same buffer identity every read;
+ *  a consumer across a page.evaluate boundary must copy before it returns. */
+let lastDeepMono: Float32Array | null = null;
 // FeatureExtractor.fixedEnergy from this device's own extractor — the Signal
 // card's history trace draws it as the "auto-gain fully off" reference. Null
 // wherever no local extractor ran this frame (renderer, synthetic feed).
@@ -216,6 +233,13 @@ let lastFixedEnergy: number | null = null;
 // card's Onset row. Same solo/host-only availability as lastFixedEnergy
 // above and for the same reason.
 let lastFluxRatio: number | null = null;
+// The silence gate's last reading off this device's own extractor — the
+// Gate card (audioMeters.ts). `fired` is the local extractor's own frame's
+// onset (not the jitter-buffered `lastVis`), so it and `suppressed` always
+// describe the same tick's decision — see the two currentVisual() branches
+// below where this is set. Same solo/host-only availability as lastFluxRatio
+// above and for the same reason.
+let lastGate: SilenceGateReading | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
  *  availability as lastMono, for the Loudness card. */
 let lastLufs: LufsReading | null = null;
@@ -407,6 +431,9 @@ function attachCapture(handle: CaptureHandle): void {
   bandAnalyser = createBandAnalyser(handle.context, handle.sourceNode);
   waveformAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode);
   lufsAnalyser = createLufsAnalyser(handle.context, handle.sourceNode);
+  // measureAnalyser's own header explains why this is DEV-only and deep
+  // (32768 samples) rather than reusing waveformAnalyser.
+  if (import.meta.env.DEV) measureAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode, 32768);
   // stop() (used when swapAudioSource retires this handle) does not fire
   // "ended" per spec — only an external stop does — so this listener and a
   // deliberate swap never race each other.
@@ -425,6 +452,7 @@ function onCaptureEnded(handle: CaptureHandle): void {
   capture = null;
   bandAnalyser = null;
   waveformAnalyser = null;
+  measureAnalyser = null;
   lufsAnalyser = null;
   audioPromise = null;
   captureFailed = false;
@@ -700,6 +728,9 @@ function wireDeviceMenu(): void {
     isAutoGainAuto: () => isAutoGainAuto(),
     onAutoGainAutoToggle: (on) => setAutoGainAuto(on),
     resolveAutoGain: () => resolveAutoGain(),
+    getSilenceGate: () => getSilenceGate(),
+    onSilenceGateClosedChange: (value) => setSilenceGateClosed(value),
+    onSilenceGateOpenChange: (value) => setSilenceGateOpen(value),
     getPowerMode: () => powerMode,
     onPowerModeChange: (mode) => {
       setPowerMode(mode);
@@ -1018,6 +1049,9 @@ async function boot(): Promise<void> {
         anim: lastAnim,
         renderScale: quality.renderScale,
         govLevel: governor?.level ?? 0,
+        deepMono: lastDeepMono,
+        sampleRate: capture?.context.sampleRate ?? null,
+        fluxRatio: lastFluxRatio,
       }),
     });
   }
@@ -1051,9 +1085,11 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     // signal — there's nothing for the scope to trace, so its card
     // correctly stays hidden here (see audioMeters.ts).
     lastMono = null;
+    lastDeepMono = null;
     lastLufs = null;
     lastFixedEnergy = null;
     lastFluxRatio = null;
+    lastGate = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
@@ -1061,19 +1097,27 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     if (!bandAnalyser || !capture) {
       lastRawBands = null;
       lastMono = null;
+      lastDeepMono = null;
       lastLufs = null;
       lastFixedEnergy = null;
       lastFluxRatio = null;
+      lastGate = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+    lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
+    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, getSilenceGate());
     lastFixedEnergy = extractor.fixedEnergy;
     lastFluxRatio = extractor.fluxRatio;
+    // `fired` is this local extractor's own frame's onset, not the
+    // jitter-buffered visual frame currentVisual() returns for host mode
+    // (sampleToVisual(hostConn.sample())) — so fired and suppressed always
+    // describe the same tick's decision.
+    lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
     // Feeds next tick's resolveAutoGain(), not this one's — see
     // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
     feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
@@ -1084,19 +1128,23 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     if (!bandAnalyser || !capture || !hostConn) {
       lastRawBands = null;
       lastMono = null;
+      lastDeepMono = null;
       lastLufs = null;
       lastFixedEnergy = null;
       lastFluxRatio = null;
+      lastGate = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+    lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
+    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, getSilenceGate());
     lastFixedEnergy = extractor.fixedEnergy;
     lastFluxRatio = extractor.fluxRatio;
+    lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
     // Feeds next tick's resolveAutoGain(), not this one's — see
     // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
     feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
@@ -1107,9 +1155,11 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   // renderer — no local mic, so no raw signal to show.
   lastRawBands = null;
   lastMono = null;
+  lastDeepMono = null;
   lastLufs = null;
   lastFixedEnergy = null;
   lastFluxRatio = null;
+  lastGate = null;
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
@@ -1178,7 +1228,7 @@ function loop(): void {
   // itself (beat/flow/band-pulse/section-intensity decay) still run on every
   // rAF tick regardless of the render-rate cap below — only the GPU draw is
   // rate-capped.
-  const anim = gained ? animClock.advance(dtSec, gained, smoothing, getBeatGrid(scene.id)) : null;
+  const anim = gained ? animClock.advance(dtSec, gained, smoothing, getBeatGrid(scene.id), getSilenceGate()) : null;
   if (anim) {
     lastAnim = anim;
     advanceAutoTune(dtSec, anim.profile);
@@ -1191,7 +1241,7 @@ function loop(): void {
   // can render its "waiting for audio" idle state instead of going dead.
   // `rateScale` lets the meters panel (audioMeters.ts) bypass its own BPM
   // settle and waveform peak-hold at Smoothing's Off stop, same as above.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastFluxRatio);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastFluxRatio, lastGate);
 
   if (!lastVis || !anim) return;
 

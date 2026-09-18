@@ -47,8 +47,8 @@ const ALL_SETTINGS: SceneSetting[] = [
 ];
 
 describe("computeAutoTarget", () => {
-  // The load-bearing property the whole "safe to ship on by default" claim
-  // rests on: at every dial neutral, auto must reproduce the plain default
+  // The load-bearing property that makes switching a setting to auto never
+  // jump: at every dial neutral, auto must reproduce the plain default
   // bit-for-bit, for every real setting this pass ships weights for (every
   // caustics and mesh grid setting, plus Sensitivity, Expansion, and
   // Smoothing — see ALL_SETTINGS above).
@@ -182,31 +182,33 @@ const SPEC: SceneSetting = {
 };
 
 describe("auto state and resolution", () => {
-  // Every test below uses its own sceneId — the exceptions map and slew
+  // Every test below uses its own sceneId — the auto-on map and slew
   // cache are both keyed by "sceneId/key", so distinct ids keep tests from
   // reading each other's leftover state (see tests/sceneSettings.test.ts).
 
-  it("is auto by default for a param never touched", () => {
-    expect(isAutoEnabled("scene-auto-1", "drift")).toBe(true);
+  it("is manual by default for a param never touched", () => {
+    expect(isAutoEnabled("scene-auto-1", "drift")).toBe(false);
   });
 
-  it("setAutoEnabled(false) makes resolveSceneSetting return the manual stored value", () => {
+  it("resolveSceneSetting returns the manual stored value for a param never switched to auto", () => {
     const sceneId = "scene-auto-2";
     setSceneSetting(sceneId, SPEC, 0.9);
-    setAutoEnabled(sceneId, SPEC.key, false);
     advanceAutoTune(1, { ...NEUTRAL, tempo: 1 }); // would push well past 0.9 if this were auto
     expect(resolveSceneSetting(sceneId, SPEC)).toBeCloseTo(0.9);
   });
 
-  it("setAutoEnabled(true) restores auto driving", () => {
+  it("setAutoEnabled(true) turns on auto driving, and setAutoEnabled(false) turns it back off", () => {
     const sceneId = "scene-auto-3";
-    setAutoEnabled(sceneId, SPEC.key, false);
+    expect(isAutoEnabled(sceneId, SPEC.key)).toBe(false);
     setAutoEnabled(sceneId, SPEC.key, true);
     expect(isAutoEnabled(sceneId, SPEC.key)).toBe(true);
+    setAutoEnabled(sceneId, SPEC.key, false);
+    expect(isAutoEnabled(sceneId, SPEC.key)).toBe(false);
   });
 
   it("a freshly-seen param resolves at its target immediately, with no glide-in", () => {
     const sceneId = "scene-auto-4";
+    setAutoEnabled(sceneId, SPEC.key, true);
     setAutoStrength(1);
     const highTempo: DialValues = { ...NEUTRAL, tempo: 1 };
     advanceAutoTune(1 / 60, highTempo);
@@ -216,6 +218,7 @@ describe("auto state and resolution", () => {
 
   it("converges toward a new target over repeated per-tick advance+resolve calls", () => {
     const sceneId = "scene-auto-5";
+    setAutoEnabled(sceneId, SPEC.key, true);
     setAutoStrength(1);
     advanceAutoTune(1 / 60, NEUTRAL);
     const atDefault = resolveSceneSetting(sceneId, SPEC);
@@ -237,9 +240,11 @@ describe("auto state and resolution", () => {
     expect(last).toBeCloseTo(target, 2);
   });
 
-  it("isSceneAuto is true only while every auto-capable setting passed to it is auto", () => {
+  it("isSceneAuto is false by default, and true only once every auto-capable setting passed to it is switched to auto", () => {
     const sceneId = "scene-auto-6";
     const specs = [SPEC, getSensitivitySpec(), getExpansionSpec(), getSmoothingSpec()];
+    expect(isSceneAuto(sceneId, specs)).toBe(false);
+    setSceneAuto(sceneId, specs, true);
     expect(isSceneAuto(sceneId, specs)).toBe(true);
     setAutoEnabled(sceneId, SPEC.key, false);
     expect(isSceneAuto(sceneId, specs)).toBe(false);
@@ -306,6 +311,12 @@ describe("auto state and resolution", () => {
     setSensitivity(sceneId, 2);
     setExpansion(sceneId, 2);
     setSmoothing(sceneId, 2);
+    // Switch all three to auto so the resolve() calls below actually take
+    // the auto path (the point of this test) instead of trivially reading
+    // the manual store back, which is now the default with nothing enabled.
+    setAutoEnabled(sceneId, SENSITIVITY_AUTO_KEY, true);
+    setAutoEnabled(sceneId, EXPANSION_AUTO_KEY, true);
+    setAutoEnabled(sceneId, SMOOTHING_AUTO_KEY, true);
     setAutoStrength(1);
     advanceAutoTune(1, { ...NEUTRAL, dynamics: 1, density: 0 });
     resolveSensitivity(sceneId);
@@ -324,11 +335,11 @@ describe("auto state and resolution", () => {
   });
 });
 
-describe("auto-exception migration from the legacy @contrast key", () => {
-  // vibe.sceneAuto's exceptions are loaded once at module load, same as the
-  // per-scene value stores in sensitivity.ts — see that file's migration
-  // test for why this needs vi.resetModules() plus a fresh dynamic import
-  // rather than the statically-imported module used everywhere else above.
+describe("auto-on store: legacy-key migration and false-entry pruning", () => {
+  // vibe.sceneAuto is loaded once at module load, same as the per-scene
+  // value stores in sensitivity.ts — see that file's migration test for why
+  // this needs vi.resetModules() plus a fresh dynamic import rather than the
+  // statically-imported module used everywhere else above.
   function makeFakeLocalStorage() {
     const store = new Map<string, string>();
     return {
@@ -346,32 +357,41 @@ describe("auto-exception migration from the legacy @contrast key", () => {
     vi.resetModules();
   });
 
-  it("rewrites a scene's '@contrast' manual exception to '@expansion' and persists the rewrite", async () => {
+  it("rewrites a scene's legacy '@contrast' key to '@expansion', then prunes the leftover false entries as manual", async () => {
     const fake = makeFakeLocalStorage();
+    // Pre-flip data: `false` was the old "manual" marker under the
+    // exceptions scheme. Both entries here used to mean "user pinned this
+    // to manual" — under the new opt-in scheme that's simply the default,
+    // so nothing needs to survive in storage for it.
     fake.setItem("vibe.sceneAuto", JSON.stringify({ "scene-a": { "@contrast": false, "@sensitivity": false } }));
     (globalThis as { localStorage?: unknown }).localStorage = fake;
 
     vi.resetModules();
     const fresh = await import("../src/render/autoTune.ts");
 
-    // The old key must not still count as manual (it would silently flip
-    // Expansion back to auto if left unmigrated), and the new key must.
-    expect(fresh.isAutoEnabled("scene-a", "@contrast")).toBe(true);
+    // The old key is migrated away regardless, so it never counts as
+    // anything under its own name any more.
+    expect(fresh.isAutoEnabled("scene-a", "@contrast")).toBe(false);
+    // The migrated '@expansion' entry was a legacy `false`, not `true` — it
+    // gets pruned on load, so it reads as manual, same as before the flip.
     expect(fresh.isAutoEnabled("scene-a", fresh.EXPANSION_AUTO_KEY)).toBe(false);
-    // Sensitivity's unrelated exception survives the rewrite untouched.
+    // Sensitivity's legacy `false` entry is pruned the same way.
     expect(fresh.isAutoEnabled("scene-a", fresh.SENSITIVITY_AUTO_KEY)).toBe(false);
 
+    // Nothing survives persistence: scene-a's entry is emptied by pruning
+    // and dropped entirely, not just its individual keys.
     const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto")!);
-    expect(persisted["scene-a"]).toEqual({ "@expansion": false, "@sensitivity": false });
+    expect(persisted).toEqual({});
   });
 
-  it("rewrites the intermediate '@acceleration' key too, and a scene already on '@expansion' keeps its own value", async () => {
+  it("rewrites the intermediate '@acceleration' key too, and a scene already on '@expansion' still prunes to manual", async () => {
     const fake = makeFakeLocalStorage();
     fake.setItem(
       "vibe.sceneAuto",
       JSON.stringify({
         "scene-a": { "@acceleration": false },
-        // Both present: the current key wins, the stale one is just dropped.
+        // Both present: the current key wins, the stale one is just dropped
+        // (before pruning removes the survivor too, since it's `false`).
         "scene-b": { "@expansion": false, "@contrast": false },
       }),
     );
@@ -380,12 +400,45 @@ describe("auto-exception migration from the legacy @contrast key", () => {
     vi.resetModules();
     const fresh = await import("../src/render/autoTune.ts");
 
-    expect(fresh.isAutoEnabled("scene-a", "@acceleration")).toBe(true);
+    expect(fresh.isAutoEnabled("scene-a", "@acceleration")).toBe(false);
     expect(fresh.isAutoEnabled("scene-a", fresh.EXPANSION_AUTO_KEY)).toBe(false);
     expect(fresh.isAutoEnabled("scene-b", fresh.EXPANSION_AUTO_KEY)).toBe(false);
 
     const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto")!);
-    expect(persisted).toEqual({ "scene-a": { "@expansion": false }, "scene-b": { "@expansion": false } });
+    expect(persisted).toEqual({});
+  });
+
+  it("a legacy all-false store loads as all-manual and is pruned to empty", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem(
+      "vibe.sceneAuto",
+      JSON.stringify({ "scene-a": { drift: false, focus: false }, "scene-b": { drift: false } }),
+    );
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+
+    vi.resetModules();
+    const fresh = await import("../src/render/autoTune.ts");
+
+    expect(fresh.isAutoEnabled("scene-a", "drift")).toBe(false);
+    expect(fresh.isAutoEnabled("scene-a", "focus")).toBe(false);
+    expect(fresh.isAutoEnabled("scene-b", "drift")).toBe(false);
+
+    const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto")!);
+    expect(persisted).toEqual({});
+  });
+
+  it("a persisted true entry survives a reload", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.sceneAuto", JSON.stringify({ "scene-a": { drift: true } }));
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+
+    vi.resetModules();
+    const fresh = await import("../src/render/autoTune.ts");
+
+    expect(fresh.isAutoEnabled("scene-a", "drift")).toBe(true);
+    // Nothing to prune here — the store on disk is untouched by the load.
+    const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto")!);
+    expect(persisted).toEqual({ "scene-a": { drift: true } });
   });
 });
 

@@ -17,8 +17,12 @@ as much as the key-frame sheet, so open the burst a Findings or Bursts line
 names, not the set.
 
 1. **Scan.** `uv run tools/ref-scan.py $1 [--start S --dur D]` — a URL is
-   fetched with audio; a file is used as is. Bundle lands under
-   `tools/.cache/refs/<name>/`. Say where it is.
+   fetched with audio and its uploader chapters; a file is used as is
+   (`--chapters FILE` hands it a chapter list). Bundle lands under
+   `tools/.cache/refs/<name>/`. Say where it is. If the report's header
+   lists chapters and the clip crosses none, the Findings line names the
+   next one — a compilation or a long set is measured per chapter, so
+   re-scan with `--start` at the chapter that shows the look you want.
 2. **Hear.** With `npm run dev` running on some port:
    `node tools/ref-hear.mjs tools/.cache/refs/<name> --port <port>`, then
    `uv run tools/ref-scan.py <name> --report-only`. This adds the "ours:"
@@ -51,6 +55,9 @@ names, not the set.
    line each, *"X happens on rank-N beats / on onsets / at section
    boundaries / continuously"*, each pointing at the finding that says so,
    and each with its "ours:" verdict: can the runtime see that trigger? A
+   chapter boundary is the author's own word for "this is a change": where
+   the audio sections and the picture regimes disagree, the set that lands
+   on the chapters is the one to believe. A
    trigger ours can't see (no section signal, tempo at ×½) is a to-do in
    `src/audio/` or `src/render/beatClock.ts`, not something to fake in the
    scene. A transition off the beat with no onset is a timer — say so.

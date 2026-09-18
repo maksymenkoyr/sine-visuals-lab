@@ -37,3 +37,27 @@ custom_domain = true
 [[routes]]
 pattern = "www.sinevisualslab.com"
 custom_domain = true
+
+# ---------------------------------------------------------------------------
+# Per-PR preview Workers — `wrangler deploy --env preview --name <pr-name>`,
+# run by .github/workflows/deploy.yml on every push to an open pull request and
+# torn down (`wrangler delete`) when the PR closes. Each one is a fully separate
+# Worker on the workers.dev subdomain, with its own Room namespace, so pairing
+# works inside a preview but never crosses into prod.
+#
+# Environments inherit `main`, `compatibility_date`, `workers_dev`, `[assets]`
+# and `[[migrations]]` from the top level, so the preview is built from exactly
+# the same dist/ and Room class as prod. Two things must be spelled out:
+#
+#  - `routes = []`: `routes` is inherited too, and deploying an environment that
+#    inherits a custom domain reassigns that domain away from the top-level
+#    Worker — a preview would take sinevisualslab.com off prod. Wrangler warns
+#    about exactly this at deploy time if the override is missing.
+#  - `durable_objects`: bindings are *not* inherited (per-environment resources
+#    are always explicit), so the ROOM binding is repeated here verbatim.
+[env.preview]
+routes = []
+
+[[env.preview.durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"

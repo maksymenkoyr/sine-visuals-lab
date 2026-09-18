@@ -20,7 +20,9 @@ npm run dev:worker    # Cloudflare Worker backend, for phone/TV room pairing
 
 `npm run build` produces a static bundle (`tsc -b && vite build`);
 `npm run deploy` builds and ships the Worker via Wrangler. Pushing to `main`
-does the same automatically — see [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+does the same automatically, and every open pull request gets its own
+throwaway preview Worker (URL posted as a comment on the PR) — see
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
 
 ## Architecture
 

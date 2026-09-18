@@ -26,7 +26,7 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
 7. Start `npm run dev` and give the user the direct link it prints for `$1` —
    not the gallery root (see the standing rule in `CLAUDE.md` for the URL form).
 8. Run the tuning loop (`/tune $1`) at a couple of BPMs with `?audio=synthetic`
-   and confirm the probe shows every setting's `mode` as `"auto"` until you
-   touch it in the device menu, `"manual"` after.
+   and confirm the probe shows every setting's `mode` as `"manual"` until you
+   switch it to auto in the device menu, `"auto"` after.
 
 Report which steps are done and flag anything skipped.

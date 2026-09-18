@@ -37,6 +37,24 @@ export interface TuningDeps {
   getInput: () => ProbeInput;
 }
 
+/** Cheap, side-effect-free onset readout for a headless driver polling every
+ *  rAF tick — see audioProbe's own comment on api below for why this is a
+ *  separate method from probe(). */
+export interface AudioProbeSnapshot {
+  onset: boolean;
+  time: number;
+  fluxRatio: number | null;
+}
+
+/** The deep time-domain buffer behind AudioProbeSnapshot, split into its own
+ *  call so the (relatively costly, 32768-element) copy across the
+ *  page.evaluate boundary only happens when a caller actually detected an
+ *  onset edge on this tick — see audioBuffer's own comment on api below. */
+export interface AudioBufferSnapshot {
+  mono: number[] | null;
+  sampleRate: number | null;
+}
+
 interface VizDebugApi {
   probe(): ProbeSnapshot;
   probeText(): string;
@@ -53,6 +71,19 @@ interface VizDebugApi {
    *  what Alt+D's first press does, exposed for a headless driver to check
    *  deterministically instead of scraping the notice panel. */
   bakeDefaults(): Promise<BakeResponse>;
+  /** For tools/audio-latency.mjs: this tick's raw FeatureFrame.onset/.time
+   *  and the extractor's fluxRatio, read directly off deps.getInput() rather
+   *  than through probe()/buildProbeSnapshot — that path resolves every
+   *  scene setting (resolveSceneSetting), which advances the auto-tune slew
+   *  map (autoTune.ts) as a side effect on every call. Polling that every
+   *  rAF tick would perturb the running scene; this doesn't. Also distinct
+   *  from probe().beat.fired, which is anim.onset (grid-filtered) rather
+   *  than this raw pre-grid flag. */
+  audioProbe(): AudioProbeSnapshot;
+  /** The deep waveform buffer behind the tick audioProbe() just reported —
+   *  call only on a detected onset edge, not every tick (see
+   *  AudioBufferSnapshot's own comment). */
+  audioBuffer(): AudioBufferSnapshot;
 }
 
 type CaptureMeta = ProbeSnapshot & { kind: "mark" | "clip" };
@@ -194,6 +225,14 @@ export function initTuning(deps: TuningDeps): void {
     setClipBuffer: (on) => (on ? startClipBuffer() : stopClipBuffer()),
     clearPins: () => clearAllPins(),
     bakeDefaults: dryRunBake,
+    audioProbe: () => {
+      const input = deps.getInput();
+      return { onset: input.vis?.onset ?? false, time: input.vis?.time ?? 0, fluxRatio: input.fluxRatio ?? null };
+    },
+    audioBuffer: () => {
+      const input = deps.getInput();
+      return { mono: input.deepMono ? Array.from(input.deepMono) : null, sampleRate: input.sampleRate ?? null };
+    },
   };
   (window as unknown as { __viz: VizDebugApi }).__viz = api;
 

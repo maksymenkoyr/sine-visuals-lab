@@ -11,6 +11,7 @@ import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts"
 import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
+import { getSilenceGate } from "./audio/silenceGate.ts";
 
 /** No new frame this long -> treat the room as if no host is present and go back to the join screen. */
 const STALE_TIMEOUT_MS = 3000;
@@ -151,8 +152,13 @@ async function main(): Promise<void> {
     };
 
     // Only the GPU draw is rate-capped — sampling and the anim clock's
-    // decay above stay on every rAF tick.
-    const anim = animClock.advance(dtSec, frame);
+    // decay above stay on every rAF tick. smoothing/beatGrid left at their
+    // defaults (the TV has no per-scene Smoothing/Beat grid controls of its
+    // own); `frame.onset` itself already arrived pre-gated from the phone
+    // (see silenceGate.ts's TV-limitation note), but bandEnergy's own
+    // low/mid/high detectors run locally here too, off this device's own
+    // stored marks — hence passing the gate through.
+    const anim = animClock.advance(dtSec, frame, undefined, undefined, getSilenceGate());
     advanceAutoTune(dtSec, anim.profile);
     renderLatch.accumulate(anim);
 
