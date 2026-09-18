@@ -19,6 +19,7 @@ import { kaleidoscopeScene } from "./kaleido/index.ts";
 import { slatsScene } from "./slats/index.ts";
 import { shardsScene } from "./shards/index.ts";
 import { petriScene } from "./petri.ts";
+import { inkScene } from "./ink.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
@@ -34,6 +35,7 @@ registerScene(causticsScene);
 registerScene(moireScene);
 registerScene(petriScene);
 registerScene(shardsScene);
+registerScene(inkScene);
 registerScene(kaleidoscopeScene);
 registerScene(powderScene);
 registerScene(ambienceScene);
@@ -51,6 +53,7 @@ registerScene(ferrofluidScene);
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
  *  the featured scenes registered above it are deliberately absent. */
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
+  "ink",
   "mesh",
   "spectrum",
   "particles",
@@ -90,4 +93,5 @@ export {
   slatsScene,
   shardsScene,
   petriScene,
+  inkScene,
 };
