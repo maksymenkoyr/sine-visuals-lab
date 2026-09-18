@@ -209,10 +209,15 @@ export interface TraceLegendSpec {
 
 /** Builds a legend from traceLegendStyle; entries stay in the order given.
  *  setEntryEnabled dims an entry (e.g. a reference line the source can't
- *  supply right now) without removing it, keyed so a per-frame call is free. */
+ *  supply right now) without removing it, keyed so a per-frame call is free.
+ *  setNote rewrites entry i's aside (e.g. a lane's live ratio and fire
+ *  count — audioMeters.ts's hit history) — the note element always exists
+ *  (empty/hidden without an initial `note`), so this works even for an
+ *  entry that started with none. Also keyed, so a per-frame call is free. */
 export function createTraceLegend(entries: TraceLegendSpec[]) {
   const el = document.createElement("div");
   el.style.cssText = traceLegendStyle;
+  const notes: HTMLElement[] = [];
   const rows = entries.map((spec) => {
     const row = document.createElement("div");
     row.style.cssText = traceLegendEntryStyle;
@@ -222,22 +227,29 @@ export function createTraceLegend(entries: TraceLegendSpec[]) {
     label.textContent = spec.label;
     label.style.cssText = traceLegendLabelStyle;
     row.append(swatch, label);
-    if (spec.note) {
-      const note = document.createElement("div");
-      note.textContent = spec.note;
-      note.style.cssText = traceLegendNoteStyle;
-      row.appendChild(note);
-    }
+    const note = document.createElement("div");
+    note.style.cssText = traceLegendNoteStyle;
+    note.textContent = spec.note ?? "";
+    if (!spec.note) note.style.display = "none";
+    row.appendChild(note);
+    notes.push(note);
     el.appendChild(row);
     return row;
   });
   const lastEnabled: boolean[] = entries.map(() => true);
+  const lastNote: string[] = entries.map((s) => s.note ?? "");
   return {
     el,
     setEntryEnabled(i: number, enabled: boolean): void {
       if (lastEnabled[i] === enabled) return;
       lastEnabled[i] = enabled;
       rows[i].style.opacity = enabled ? "1" : "0.35";
+    },
+    setNote(i: number, text: string): void {
+      if (lastNote[i] === text) return;
+      lastNote[i] = text;
+      notes[i].textContent = text;
+      notes[i].style.display = text ? "" : "none";
     },
   };
 }
@@ -433,6 +445,13 @@ export interface PickerRowSpec {
    *  passes its wireHoverFocus + wireRowKeys (R resets, T cycles); the
    *  meters panel, which has no hotkey layer, passes nothing. */
   wire?: (row: HTMLElement, strip: HTMLElement, actions: { reset: () => void; cycle: (step: number) => void }) => void;
+  /** The row's audio-driven links (createSignalStrip), built by the host
+   *  from the setting's `reads` — placed the same way a slider row places
+   *  its own: the chip leftmost in `right`, the pill strip as a sibling of
+   *  `.vc-hint`. The host keeps the reference and drives update() per
+   *  tick; this row only mounts it. A picker whose choice decides *which*
+   *  signal the scene listens to (shards' Cut on) is the motivating case. */
+  signals?: SignalStrip;
 }
 
 /** An enum setting's row: same head as a toggle row, a strip of named chips
@@ -462,6 +481,7 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   resetBtn.textContent = "↺";
   resetBtn.title = `Reset ${spec.label} (R)`;
   resetBtn.style.cssText = rowResetStyle;
+  if (spec.signals) right.appendChild(spec.signals.chip);
   right.append(readout, status, resetBtn);
   head.append(label, right);
 
@@ -492,6 +512,7 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   if (!spec.description) hint.style.display = "none";
 
   el.append(head, strip, hint);
+  if (spec.signals) el.appendChild(spec.signals.strip);
 
   const clampIndex = (value: number): number =>
     Math.min(spec.options.length - 1, Math.max(0, Math.round(value)));

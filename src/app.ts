@@ -69,6 +69,7 @@ import {
   setSilenceGateOpen,
   type SilenceGateReading,
 } from "./audio/silenceGate.ts";
+import type { OnsetDiag } from "./audio/onsetDiag.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
@@ -229,15 +230,23 @@ let lastDeepMono: Float32Array | null = null;
 // card's history trace draws it as the "auto-gain fully off" reference. Null
 // wherever no local extractor ran this frame (renderer, synthetic feed).
 let lastFixedEnergy: number | null = null;
-// FeatureExtractor.fluxRatio from this device's own extractor — the Rhythm
-// card's Onset row. Same solo/host-only availability as lastFixedEnergy
-// above and for the same reason.
+// FeatureExtractor.onsetDiag from this device's own extractor — the Rhythm
+// card's hits history. Same solo/host-only availability as lastFixedEnergy
+// above and for the same reason. Read synchronously the same tick it's set
+// (deviceMenu.update() below), before the next currentVisual() call mutates
+// the extractor's own diag object in place — see onsetDiag's own doc.
+let lastBeatDiag: OnsetDiag | null = null;
+// FeatureExtractor.fluxRatio from this device's own extractor — tuning/
+// debug.ts's getInput() (tools/audio-latency.mjs's click-track latency
+// measurement), a separate consumer from the Rhythm card's hits history
+// above. Same solo/host-only availability as lastFixedEnergy and for the
+// same reason.
 let lastFluxRatio: number | null = null;
 // The silence gate's last reading off this device's own extractor — the
 // Gate card (audioMeters.ts). `fired` is the local extractor's own frame's
 // onset (not the jitter-buffered `lastVis`), so it and `suppressed` always
 // describe the same tick's decision — see the two currentVisual() branches
-// below where this is set. Same solo/host-only availability as lastFluxRatio
+// below where this is set. Same solo/host-only availability as lastBeatDiag
 // above and for the same reason.
 let lastGate: SilenceGateReading | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
@@ -1088,6 +1097,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastDeepMono = null;
     lastLufs = null;
     lastFixedEnergy = null;
+    lastBeatDiag = null;
     lastFluxRatio = null;
     lastGate = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
@@ -1100,6 +1110,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastDeepMono = null;
       lastLufs = null;
       lastFixedEnergy = null;
+      lastBeatDiag = null;
       lastFluxRatio = null;
       lastGate = null;
       return null;
@@ -1112,6 +1123,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, getSilenceGate());
     lastFixedEnergy = extractor.fixedEnergy;
+    lastBeatDiag = extractor.onsetDiag;
     lastFluxRatio = extractor.fluxRatio;
     // `fired` is this local extractor's own frame's onset, not the
     // jitter-buffered visual frame currentVisual() returns for host mode
@@ -1131,6 +1143,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastDeepMono = null;
       lastLufs = null;
       lastFixedEnergy = null;
+      lastBeatDiag = null;
       lastFluxRatio = null;
       lastGate = null;
       return null;
@@ -1143,6 +1156,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, getSilenceGate());
     lastFixedEnergy = extractor.fixedEnergy;
+    lastBeatDiag = extractor.onsetDiag;
     lastFluxRatio = extractor.fluxRatio;
     lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
     // Feeds next tick's resolveAutoGain(), not this one's — see
@@ -1158,6 +1172,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   lastDeepMono = null;
   lastLufs = null;
   lastFixedEnergy = null;
+  lastBeatDiag = null;
   lastFluxRatio = null;
   lastGate = null;
   if (rendererConn) {
@@ -1241,7 +1256,7 @@ function loop(): void {
   // can render its "waiting for audio" idle state instead of going dead.
   // `rateScale` lets the meters panel (audioMeters.ts) bypass its own BPM
   // settle and waveform peak-hold at Smoothing's Off stop, same as above.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastFluxRatio, lastGate);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate);
 
   if (!lastVis || !anim) return;
 

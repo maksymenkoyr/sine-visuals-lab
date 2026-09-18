@@ -4,12 +4,16 @@
 // layout.ts's header lists what was measured and which rule each part of
 // this scene answers; glsl.ts owns the material.
 //
-// Sync: the cut rides anim.onset (the render-latched one-shot — never
-// frame.onset, see renderLatch.ts). The reference reacts on every beat with
-// no rank preference and our onset lands on 93 % of its beats, while our
-// tempo lock never held its 161 bpm — so nothing here reads the beat clock
-// unless the Cut mode is switched to Bars. Between cuts the plates extend
-// along their axes (faster on bass) and the camera rolls clockwise.
+// Sync: the cut rides a beatListener.ts listener (CUT_LISTENER, layout.ts)
+// fed the render-latched anim (never frame directly — see renderLatch.ts),
+// which owns the trigger + hold + refractory decision; layout.ts's
+// advanceShards only reacts to what it decided. Cut mode picks what the
+// listener listens to (cutSource) — the broadband beat by default, matching
+// the reference, which reacts on every beat with no rank preference; our
+// onset lands on 93% of its beats, while our tempo lock never held its
+// 161 bpm — hence Bars falling back to the raw beat without a lock (see
+// beatListener.ts's sourceEdge). Between cuts the plates extend along their
+// axes (faster on bass) and the camera rolls clockwise.
 //
 // Draw: the ground pass and the depth-tested instanced prisms go into a
 // full-res sharp target (with its own depth renderbuffer — an FBO has no
@@ -28,16 +32,19 @@ import {
 } from "../../sceneCommon.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import { NUM_BANDS } from "../../../audio/types.ts";
+import { createBeatListener, type BeatListener } from "../../beatListener.ts";
+import type { SignalLink } from "../../signals.ts";
 import {
+  CUT_LISTENER,
+  CUT_MODE,
   CUT_MODE_NAMES,
   MAX_SHARDS,
   PRISM_VERTS,
   advanceShards,
   cameraBasis,
   createShardState,
+  cutSource,
   packShards,
-  minHoldSec,
-  shouldCut,
   type AdvanceOptions,
   type ShardState,
 } from "./layout.ts";
@@ -83,7 +90,7 @@ const SETTINGS: SceneSetting[] = [
     key: "cutMode",
     label: "Cut on",
     description:
-      "What triggers a hard cut to a new arrangement. Every beat is what the reference does; Bass hits and Bars are for songs whose beat is too busy",
+      "What triggers a hard cut to a new arrangement. Every beat and Bars both listen to the broadband beat (Bars cuts once a bar instead of every beat, once the tempo is locked); Bass hits listens to the low band instead, for songs whose broadband beat is too busy",
     group: "Motion",
     type: "enum",
     options: CUT_MODE_NAMES,
@@ -91,7 +98,10 @@ const SETTINGS: SceneSetting[] = [
     max: CUT_MODE_NAMES.length - 1,
     step: 1,
     default: 0,
-    reads: ["feature.onset"],
+    reads: [
+      { signal: "feature.onset", activeWhen: (get) => get("cutMode") !== CUT_MODE.BASS },
+      { signal: "anim.lowOnset", activeWhen: (get) => get("cutMode") === CUT_MODE.BASS },
+    ] satisfies readonly SignalLink[],
   },
   {
     key: "extend",
@@ -220,7 +230,7 @@ export const shardsScene: Scene = (() => {
   let sharpH = 0;
   const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   let state: ShardState | null = null;
-  let prevBarPhase = 0;
+  let listener: BeatListener | null = null;
   const bandsBuf = new Float32Array(NUM_BANDS);
   const shardA = new Float32Array(MAX_SHARDS * 4);
   const shardB = new Float32Array(MAX_SHARDS * 4);
@@ -298,7 +308,7 @@ export const shardsScene: Scene = (() => {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  function options(detail: number, tempoLock: number, bpm: number): AdvanceOptions {
+  function options(detail: number): AdvanceOptions {
     return {
       density: resolveSceneSetting(ID, settingFor("density")),
       spread: resolveSceneSetting(ID, settingFor("spread")),
@@ -308,7 +318,6 @@ export const shardsScene: Scene = (() => {
       spin: resolveSceneSetting(ID, settingFor("spin")),
       dolly: resolveSceneSetting(ID, settingFor("dolly")),
       recolour: resolveSceneSetting(ID, settingFor("recolour")),
-      minHold: minHoldSec(tempoLock, bpm),
     };
   }
 
@@ -328,26 +337,20 @@ export const shardsScene: Scene = (() => {
       // gl_InstanceID — so the prisms draw from an empty VAO (ambience.ts).
       emptyVao = gl.createVertexArray();
       samplerLocs.clear();
-      state = createShardState(SEED, options(ctx.quality.detail, 0, 0));
-      prevBarPhase = 0;
+      state = createShardState(SEED, options(ctx.quality.detail));
+      listener = createBeatListener(CUT_LISTENER);
     },
 
     render(ctx, frame, viewport, palette, anim) {
-      if (!bgProg || !prismProg || !blurProg || !compositeProg || !quadVao || !emptyVao || !state) return;
+      if (!bgProg || !prismProg || !blurProg || !compositeProg || !quadVao || !emptyVao || !state || !listener) return;
       const { gl } = ctx;
 
       // resolveSceneSetting (not getSceneSetting) everywhere — a raw read
       // would re-stomp an auto-tuned slider to manual (autoTune.ts).
-      const opts = options(ctx.quality.detail, anim.tempoLock, frame.bpm);
-      const barWrapped = anim.barPhase < prevBarPhase - 0.5;
-      prevBarPhase = anim.barPhase;
-      const cut = shouldCut(Math.round(resolveSceneSetting(ID, settingFor("cutMode"))), {
-        onset: anim.onset,
-        lowOnset: anim.lowOnset,
-        barWrapped,
-        tempoLock: anim.tempoLock,
-      });
-      advanceShards(state, anim.dtSec, cut, anim.low, opts);
+      const opts = options(ctx.quality.detail);
+      const mode = Math.round(resolveSceneSetting(ID, settingFor("cutMode")));
+      const hit = listener.advance(anim, cutSource(mode));
+      advanceShards(state, anim.dtSec, hit, anim.low, opts);
 
       const distance = resolveSceneSetting(ID, settingFor("distance"));
       const cam = { ...state.camera, dist: state.camera.dist * distance };
@@ -448,6 +451,7 @@ export const shardsScene: Scene = (() => {
       quadVao = emptyVao = null;
       samplerLocs.clear();
       state = null;
+      listener = null;
     },
   };
 })();
