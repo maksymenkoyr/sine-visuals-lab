@@ -12,9 +12,9 @@ describe("power mode persistence", () => {
 
   // vitest runs under environment: "node" (vitest.config.ts), so there is no
   // localStorage global at all here — this also proves the module tolerates that.
-  it("defaults to auto", () => {
-    expect(POWER_MODE_DEFAULT).toBe("auto");
-    expect(getPowerMode()).toBe("auto");
+  it("defaults to off", () => {
+    expect(POWER_MODE_DEFAULT).toBe("off");
+    expect(getPowerMode()).toBe("off");
   });
 
   it("round-trips a set", () => {

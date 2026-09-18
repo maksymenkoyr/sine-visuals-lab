@@ -4,19 +4,21 @@
  * not per scene) — whether this device wants to trade picture quality for
  * battery describes the device, not one scene's look.
  *
- * - "auto" (default): the governor runs closed-loop, stepping quality down
- *   under sustained GPU load and back up once comfortable, with the
- *   authority probe (governor.ts) so a pace this page doesn't control (a
- *   browser energy-saver mode, an OS refresh-rate cap) can't be mistaken
- *   for overload.
+ * - "auto": the governor runs closed-loop, stepping quality down under
+ *   sustained GPU load and back up once comfortable, with the authority
+ *   probe (governor.ts) so a pace this page doesn't control (a browser
+ *   energy-saver mode, an OS refresh-rate cap) can't be mistaken for
+ *   overload. The choice for a device that wants that closed loop instead
+ *   of a flat pin.
  * - "on": a deliberate, user-forced saver — quality stays at the chosen
  *   preset's baseline (nothing is cut), but the render-rate cap drops to
  *   RENDER_FPS_CAP_FLOOR (see src/render/framePace.ts). Halving the render
  *   rate roughly halves GPU work without reintroducing the softness a
  *   resolution cut causes, at a comparable saving.
- * - "off": the governor never steps anything — quality is pinned to
- *   whatever the quality setting resolved to (src/render/qualityPref.ts),
- *   for a session where dropped frames are preferable to any quality loss.
+ * - "off" (default): the governor never steps anything — quality is pinned
+ *   to whatever the quality setting resolved to (src/render/qualityPref.ts).
+ *   Shipped as the default: dropped frames are preferable to any quality
+ *   loss for a look that's meant to be judged at full detail.
  *
  * Same in-memory-cache-over-localStorage pattern as autoGain.ts: the cache
  * is the source of truth for get/set within a session, seeded once from
@@ -27,7 +29,7 @@
 export type PowerMode = "auto" | "on" | "off";
 
 const STORAGE_KEY = "vibe.powerMode";
-export const POWER_MODE_DEFAULT: PowerMode = "auto";
+export const POWER_MODE_DEFAULT: PowerMode = "off";
 
 function isPowerMode(value: string): value is PowerMode {
   return value === "auto" || value === "on" || value === "off";
