@@ -56,11 +56,12 @@ describe("encodeLook / decodeLook", () => {
 });
 
 describe("captureLook", () => {
-  it("records only manual keys, skipping keys still on auto", () => {
+  it("records only manual keys, skipping keys switched to auto", () => {
     const sceneId = "look-capture-1";
-    setAutoEnabled(sceneId, FOCUS.key, false);
+    // focus is manual by default (never touched) — no call needed to make it so.
     setSceneSetting(sceneId, FOCUS, 0.8);
-    // breathe stays auto (isAutoEnabled defaults true for a key never set manual).
+    // breathe is explicitly switched to auto, so captureLook leaves it out.
+    setAutoEnabled(sceneId, BREATHE.key, true);
     const look = captureLook("Test", sceneId, SPECS);
     expect(look.manual).toEqual({ focus: 0.8 });
   });
