@@ -9,6 +9,11 @@
  * Display-only and local to this device: nothing here reaches
  * FeatureExtractor or the wire frame. The math over the samples lives in
  * waveform.ts, kept pure so it's testable without an AudioContext.
+ *
+ * `fftSize` is also reused DEV-only at 32768 (app.ts's measureAnalyser) as a
+ * deep ring buffer for tools/audio-latency.mjs — that caller needs 682ms of
+ * history to reliably still hold a just-arrived click, well past this
+ * module's own default 2048/42.7ms.
  */
 
 export interface WaveformAnalyser {

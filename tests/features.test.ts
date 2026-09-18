@@ -64,6 +64,31 @@ describe("FeatureExtractor", () => {
     expect(frame!.bpm).toBeLessThan(bpm + 5);
   });
 
+  it("fires the onset flag on the very same tick a broadband click appears, no attack delay", () => {
+    // Flux is computed from the pre-envelope normalized band value (see this
+    // file's own update(), and the module header's account of why) — onset
+    // detection is deliberately not gated behind ATTACK_PER_SEC's ~14ms rise
+    // time. tools/audio-latency.mjs measures the mic-to-onset delay this
+    // leaves (the analyser's own windowing plus render-tick quantization);
+    // if flux ever moved onto the smoothed `bands` envelope instead, that
+    // measurement would silently grow by another attack-time term, and this
+    // test would start failing a tick late.
+    const extractor = new FeatureExtractor();
+    const dt = 1 / 60;
+    let time = 0;
+
+    // Prime the adaptive floor/peak with a couple of quiet seconds first.
+    for (let i = 0; i < 120; i++) {
+      time += dt;
+      extractor.update(bandsFrame(QUIET_DB), time);
+    }
+
+    time += dt;
+    const frame = extractor.update(bandsFrame(LOUD_DB), time);
+
+    expect(frame.onset).toBe(true);
+  });
+
   it("still reads the click tempo when every click also fires a second onset from its tail", () => {
     // A metronome at 100bpm whose clicks each trigger the detector twice —
     // the attack, then the tail 140ms later (just past the refractory).

@@ -94,6 +94,9 @@ whether the runtime can see each trigger, and `tools/ref-shoot.mjs` replays
 that audio into our scene and shoots the same beats side by side. The tools'
 headers own the details; nothing here restates them.
 
+`tools/audio-latency.mjs` measures real mic-to-onset latency with a
+generated click track, for the same reason: its own header owns the method.
+
 ## Recording what you learn
 
 Whenever a session resolves a natural-language phrase ("brighter", "less

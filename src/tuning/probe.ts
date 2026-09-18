@@ -25,6 +25,21 @@ export interface ProbeInput {
    *  downgraded it" instead of guessing from pixels. */
   renderScale: number;
   govLevel: number;
+  /** DEV-measurement-only: this tick's deep (32768-sample) time-domain
+   *  buffer off app.ts's measureAnalyser, for tools/audio-latency.mjs to
+   *  locate a test click's exact arrival sample — see that tool's header.
+   *  Null outside DEV, or wherever no local capture is running (see
+   *  lastDeepMono's own comment in app.ts). Same buffer-identity-per-read
+   *  caveat as WaveformAnalyser.read() — a consumer across a page.evaluate
+   *  boundary must copy it before returning. */
+  deepMono: Float32Array | null;
+  /** The AudioContext sample rate backing deepMono, for converting a sample
+   *  index to milliseconds. Null wherever deepMono is. */
+  sampleRate: number | null;
+  /** FeatureExtractor.fluxRatio from this device's own extractor (see
+   *  app.ts's lastFluxRatio) — a diagnostic for confirming a detected onset
+   *  actually corresponds to the click rather than noise. */
+  fluxRatio: number | null;
 }
 
 export interface ProbeSettingValue {
