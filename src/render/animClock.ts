@@ -8,6 +8,7 @@ import { createSpectralCentroid, type SpectralCentroid } from "./spectralCentroi
 import { SMOOTHING_DEFAULT, smoothingRateScale } from "../audio/sensitivity.ts";
 import { BEAT_GRID_DEFAULT, beatGridBeats } from "../audio/beatGrid.ts";
 import { createGridPulse, type GridPulse } from "./gridPulse.ts";
+import { silenceGateDimmer, type SilenceGateMarks } from "../audio/silenceGate.ts";
 
 // Bundles every per-frame renderer-side clock a scene might want, so
 // Scene.render() takes one object instead of an ever-growing positional
@@ -88,8 +89,14 @@ export interface AnimClock {
    *  stop (0 -> Infinity) makes sectionIntensity/profile land exactly on the
    *  `raw` counterparts already exposed below — see the meters panel's RAW
    *  chip (src/ui/audioMeters.ts). `beatGrid` is the Beat grid row's stored
-   *  index (src/audio/beatGrid.ts); the default is Hits, today's behaviour. */
-  advance(dtSec: number, frame: FeatureFrame, smoothing?: number, beatGrid?: number): AnimFrame;
+   *  index (src/audio/beatGrid.ts); the default is Hits, today's behaviour.
+   *  `gate` (src/audio/silenceGate.ts), when given, is turned into this
+   *  tick's dimmer from `frame.level` right here and threaded into
+   *  bandEnergy's own advance() — animClock stays param-driven and never
+   *  reads the store itself, so only the real app.ts/tv.ts entry points pass
+   *  marks; omitted by every preview/gallery/probe caller, which is what
+   *  leaves those ungated. */
+  advance(dtSec: number, frame: FeatureFrame, smoothing?: number, beatGrid?: number, gate?: SilenceGateMarks): AnimFrame;
 }
 
 const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts broadband beatPulse decay
@@ -105,11 +112,18 @@ export function createAnimClock(): AnimClock {
   let beatPulse = 0;
 
   return {
-    advance(dtSec: number, frame: FeatureFrame, smoothing = SMOOTHING_DEFAULT, beatGrid = BEAT_GRID_DEFAULT): AnimFrame {
+    advance(
+      dtSec: number,
+      frame: FeatureFrame,
+      smoothing = SMOOTHING_DEFAULT,
+      beatGrid = BEAT_GRID_DEFAULT,
+      gate?: SilenceGateMarks,
+    ): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
+      const dimmer = gate ? silenceGateDimmer(frame.level, gate) : 1;
       const flowPhase = flow.advance(dtSec, frame.energy);
       beat.advance(dtSec, frame.bpm, frame.onset);
-      bandEnergy.advance(dtSec, frame.bands, rateScale);
+      bandEnergy.advance(dtSec, frame.bands, rateScale, dimmer);
       section.advance(dtSec, frame.energy, rateScale);
       profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
       centroid.advance(dtSec, frame.bands, rateScale);
