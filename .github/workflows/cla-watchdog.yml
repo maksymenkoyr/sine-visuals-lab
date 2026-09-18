@@ -1,0 +1,111 @@
+# Nudges cla-assistant.io when it forgets to report `license/cla` on a pull
+# request.
+#
+# `license/cla` is a required status on `main`, and nothing in this repo writes
+# it: it comes from the cla-assistant.io webhook on the repository. That service
+# acknowledges every `pull_request` delivery with a 200 and then does its work
+# in the background — and when that background work fails (it retries on a short
+# timer, then gives up and only logs), no status is ever written. GitHub waits
+# for a required status forever, so the PR sits at "Expected — waiting for
+# status to be reported" and cannot merge. It is a fault on their side, not a
+# misconfiguration here, and it hits a noticeable share of PRs.
+#
+# The fix is to give cla-assistant another event to react to. Its webhook
+# handler acts on the `opened`, `reopened` and `synchronize` actions only, so
+# this workflow closes and immediately reopens the PR. Doing that with the
+# workflow's own GITHUB_TOKEN is what makes it cheap: repository webhooks still
+# fire (cla-assistant sees `reopened`), but events caused by GITHUB_TOKEN never
+# trigger workflows, so deploy.yml neither tears the PR's preview down nor
+# re-runs `ship`. The only trace is a closed/reopened pair in the PR timeline.
+#
+# What it deliberately leaves alone: a PR whose `license/cla` status *exists*
+# in any state. "pending — not signed yet" is cla-assistant working as designed
+# (a contributor who has not signed, or a commit authored by an account missing
+# from the allowlist in the repo's cla-assistant.io settings); nudging cannot
+# fix that and would only make noise.
+#
+# To unstick one PR by hand without the timeline trace, replay the webhook
+# delivery GitHub recorded instead (repo Settings → Webhooks → Recent
+# deliveries → Redeliver, or POST …/hooks/<id>/deliveries/<id>/attempts).
+# Deliveries are only kept for a few days, and a replay can fail the same way
+# the original did — replay again.
+name: CLA watchdog
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cla-watchdog
+  cancel-in-progress: false
+
+jobs:
+  nudge:
+    runs-on: ubuntu-latest
+    permissions:
+      # Close/reopen, and the timeline read that counts earlier nudges.
+      pull-requests: write
+      # Read the combined status of each PR's head commit.
+      statuses: read
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const CONTEXT = "license/cla";
+            // cla-assistant's own retries finish well inside this; a PR younger
+            // than it may simply not have been answered yet. A nudge also bumps
+            // `updated_at`, so this doubles as the cooldown between nudges.
+            const SETTLE_MS = 10 * 60 * 1000;
+            // If cla-assistant is down outright, stop flapping the PR and say so.
+            const MAX_NUDGES_PER_DAY = 3;
+            const DAY_MS = 24 * 60 * 60 * 1000;
+
+            const { owner, repo } = context.repo;
+            const now = Date.now();
+            const pulls = await github.paginate(github.rest.pulls.list, { owner, repo, state: "open", per_page: 100 });
+
+            for (const pr of pulls) {
+              const tag = `#${pr.number}`;
+              if (now - Date.parse(pr.updated_at) < SETTLE_MS) {
+                core.info(`${tag}: touched recently, leaving it to settle`);
+                continue;
+              }
+              const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, {
+                owner, repo, ref: pr.head.sha, per_page: 100,
+              });
+              if (statuses.some((s) => s.context === CONTEXT)) continue;
+
+              const events = await github.paginate(github.rest.issues.listEvents, {
+                owner, repo, issue_number: pr.number, per_page: 100,
+              });
+              const nudges = events.filter(
+                (e) =>
+                  e.event === "reopened" &&
+                  e.actor && e.actor.login === "github-actions[bot]" &&
+                  now - Date.parse(e.created_at) < DAY_MS,
+              ).length;
+              if (nudges >= MAX_NUDGES_PER_DAY) {
+                core.warning(`${tag}: still no ${CONTEXT} status after ${nudges} nudges today — is cla-assistant.io down?`);
+                continue;
+              }
+
+              core.notice(`${tag}: no ${CONTEXT} status on ${pr.head.sha.slice(0, 7)}, closing and reopening`);
+              await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: "closed" });
+              // Never leave a PR closed: retry the reopen, and fail loudly if it
+              // still doesn't take.
+              let reopened = false;
+              for (let attempt = 0; attempt < 5 && !reopened; attempt++) {
+                try {
+                  await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: "open" });
+                  reopened = true;
+                } catch (err) {
+                  core.warning(`${tag}: reopen attempt failed: ${err.message}`);
+                  await new Promise((r) => setTimeout(r, 3000));
+                }
+              }
+              if (!reopened) core.setFailed(`${tag} was closed by this workflow and could not be reopened — reopen it by hand`);
+            }

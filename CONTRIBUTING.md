@@ -6,8 +6,9 @@ request, then the practical stuff.
 ## The license agreement (CLA)
 
 Every contribution requires agreeing to the Contributor License Agreement in
-[CLA.md](CLA.md) — once, on your first pull request, by posting the comment
-it describes.
+[CLA.md](CLA.md) — once, on your first pull request, by following the
+`license/cla` check's link and accepting it there. How that counts as your
+signature is spelled out at the end of CLA.md.
 
 Here's the honest framing of why: this project is licensed AGPL-3.0-or-later
 and will stay that way — the source stays free, forever, for everyone. The
