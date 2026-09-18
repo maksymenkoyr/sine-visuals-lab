@@ -63,6 +63,12 @@ import {
   isAutoGainAuto,
   setAutoGainAuto,
 } from "./audio/autoGain.ts";
+import {
+  getSilenceGate,
+  setSilenceGateClosed,
+  setSilenceGateOpen,
+  type SilenceGateReading,
+} from "./audio/silenceGate.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
@@ -216,6 +222,13 @@ let lastFixedEnergy: number | null = null;
 // card's Onset row. Same solo/host-only availability as lastFixedEnergy
 // above and for the same reason.
 let lastFluxRatio: number | null = null;
+// The silence gate's last reading off this device's own extractor — the
+// Gate card (audioMeters.ts). `fired` is the local extractor's own frame's
+// onset (not the jitter-buffered `lastVis`), so it and `suppressed` always
+// describe the same tick's decision — see the two currentVisual() branches
+// below where this is set. Same solo/host-only availability as lastFluxRatio
+// above and for the same reason.
+let lastGate: SilenceGateReading | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
  *  availability as lastMono, for the Loudness card. */
 let lastLufs: LufsReading | null = null;
@@ -700,6 +713,9 @@ function wireDeviceMenu(): void {
     isAutoGainAuto: () => isAutoGainAuto(),
     onAutoGainAutoToggle: (on) => setAutoGainAuto(on),
     resolveAutoGain: () => resolveAutoGain(),
+    getSilenceGate: () => getSilenceGate(),
+    onSilenceGateClosedChange: (value) => setSilenceGateClosed(value),
+    onSilenceGateOpenChange: (value) => setSilenceGateOpen(value),
     getPowerMode: () => powerMode,
     onPowerModeChange: (mode) => {
       setPowerMode(mode);
@@ -1054,6 +1070,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastLufs = null;
     lastFixedEnergy = null;
     lastFluxRatio = null;
+    lastGate = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
@@ -1064,6 +1081,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastLufs = null;
       lastFixedEnergy = null;
       lastFluxRatio = null;
+      lastGate = null;
       return null;
     }
     const now = capture.context.currentTime;
@@ -1071,9 +1089,14 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
+    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, getSilenceGate());
     lastFixedEnergy = extractor.fixedEnergy;
     lastFluxRatio = extractor.fluxRatio;
+    // `fired` is this local extractor's own frame's onset, not the
+    // jitter-buffered visual frame currentVisual() returns for host mode
+    // (sampleToVisual(hostConn.sample())) — so fired and suppressed always
+    // describe the same tick's decision.
+    lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
     // Feeds next tick's resolveAutoGain(), not this one's — see
     // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
     feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
@@ -1087,6 +1110,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastLufs = null;
       lastFixedEnergy = null;
       lastFluxRatio = null;
+      lastGate = null;
       return null;
     }
     const now = capture.context.currentTime;
@@ -1094,9 +1118,10 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale);
+    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, getSilenceGate());
     lastFixedEnergy = extractor.fixedEnergy;
     lastFluxRatio = extractor.fluxRatio;
+    lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
     // Feeds next tick's resolveAutoGain(), not this one's — see
     // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
     feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
@@ -1110,6 +1135,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   lastLufs = null;
   lastFixedEnergy = null;
   lastFluxRatio = null;
+  lastGate = null;
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
@@ -1178,7 +1204,7 @@ function loop(): void {
   // itself (beat/flow/band-pulse/section-intensity decay) still run on every
   // rAF tick regardless of the render-rate cap below — only the GPU draw is
   // rate-capped.
-  const anim = gained ? animClock.advance(dtSec, gained, smoothing, getBeatGrid(scene.id)) : null;
+  const anim = gained ? animClock.advance(dtSec, gained, smoothing, getBeatGrid(scene.id), getSilenceGate()) : null;
   if (anim) {
     lastAnim = anim;
     advanceAutoTune(dtSec, anim.profile);
@@ -1191,7 +1217,7 @@ function loop(): void {
   // can render its "waiting for audio" idle state instead of going dead.
   // `rateScale` lets the meters panel (audioMeters.ts) bypass its own BPM
   // settle and waveform peak-hold at Smoothing's Off stop, same as above.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastFluxRatio);
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastFluxRatio, lastGate);
 
   if (!lastVis || !anim) return;
 

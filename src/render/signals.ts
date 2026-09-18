@@ -34,8 +34,11 @@ import type { AnimFrame } from "./animClock.ts";
 
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
  *  Populated on demand: add an id here only once some SignalSpec below
- *  actually points at that card. */
-export type MeterCardId = "scope" | "signal" | "lufs" | "rhythm" | "character";
+ *  actually points at that card. "gate" (src/audio/silenceGate.ts) is the
+ *  one exception — audioMeters.ts's `cardElements` needs every MeterCardId
+ *  as a key regardless, so it's listed here even though no SignalSpec below
+ *  points at it yet. */
+export type MeterCardId = "scope" | "signal" | "gate" | "lufs" | "rhythm" | "character";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). */

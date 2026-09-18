@@ -1,5 +1,10 @@
 import { NUM_BANDS, type FeatureFrame } from "./types.ts";
 import { ANALYSER_MIN_DB, ANALYSER_MAX_DB } from "./analyser.ts";
+// Only the type plus the pure dimmer function — never the store's
+// get/set/reset — so this extractor stays store-free like the rest of it
+// (see the `autoGain`/`smoothingScale` params below, both plain numbers a
+// caller resolves from a store itself).
+import { silenceGateDimmer, type SilenceGateMarks } from "./silenceGate.ts";
 
 // Adaptive floor/ceiling per band: a leaky min/max that tracks the room's
 // own quiet and loud levels. This is what makes a muffled laptop mic and a
@@ -57,12 +62,14 @@ const ONSET_REFRACTORY_SEC = 0.1; // ~600 BPM ceiling, prevents double-triggers
 // that only fits the true gaps as its 2nd/3rd multiples (a sub-harmonic
 // grid, e.g. a click plus a loud echo a third of a beat later) must not
 // out-vote the tempo whose single beat is actually being hit.
-// Onsets are kept by age, not count: a mic's noise floor fires spurious
-// onsets between real hits (the adaptive window collapses in near-silence
-// and every wobble clears the threshold), and a fixed count of the most
-// recent onsets would then hold only a couple of real beats. Each onset
-// carries a weight — how far its flux cleared the threshold, capped — so
-// pairs of weak noise onsets barely vote against pairs of real hits.
+// Onsets are kept by age, not count: with no silence gate (or the gate off —
+// see src/audio/silenceGate.ts, which is what actually stops a mic's noise
+// floor from firing spurious onsets between real hits in a near-silent room)
+// the adaptive window can still collapse and every wobble clears the
+// threshold, and a fixed count of the most recent onsets would then hold
+// only a couple of real beats. Each onset still carries a weight — how far
+// its flux cleared the threshold, capped — so pairs of weak noise onsets
+// barely vote against pairs of real hits even then.
 const ONSET_WINDOW_SEC = 6;
 const MAX_ONSETS = 48; // hard cap for the O(n²) pair walk
 const ONSET_WEIGHT_CAP = 4;
@@ -148,6 +155,26 @@ export class FeatureExtractor {
     return this.lastFluxRatio;
   }
 
+  /** How much of this frame's flux the silence gate let through before the
+   *  firing comparison — see silenceGate.ts's silenceGateDimmer. 1 with no
+   *  `gate` argument (or whenever the gate is off), down toward 0 the
+   *  quieter the room reads. A local diagnostic like fluxRatio above, never
+   *  part of FeatureFrame — the Gate card's Dimmer row and History trace
+   *  (audioMeters.ts) are the one reader. */
+  get gateDimmer(): number {
+    return this.lastGateDimmer;
+  }
+
+  /** True on the tick a hit's flux cleared its threshold but the gate's
+   *  dimmer stopped `onset` from firing — see update()'s own comment on why
+   *  this needs a one-shot spacing separate from the refractory a suppressed
+   *  hit deliberately doesn't start. A local diagnostic like fluxRatio
+   *  above, never part of FeatureFrame — the Gate card's History trace
+   *  (audioMeters.ts) marks where a hit was stopped. */
+  get suppressed(): boolean {
+    return this.lastSuppressed;
+  }
+
   private fluxBaseline = 0;
   private lastTime: number | null = null;
   private lastDt = 1 / 60;
@@ -162,6 +189,12 @@ export class FeatureExtractor {
   // tuning session wants to see how hard a hit cleared the bar (or how
   // close it came) — the Rhythm card's Onset row in audioMeters.ts.
   private lastFluxRatio = 0;
+  private lastGateDimmer = 1;
+  private lastSuppressed = false;
+  // Separate from lastOnsetTime — a suppressed hit must never set that one
+  // (see update()) — so `suppressed` gets its own one-shot spacing instead
+  // of staying true for as long as flux keeps clearing the threshold.
+  private lastSuppressedTime = -Infinity;
 
   /** The AudioContext-clock delta update() computed last call — what
    *  app.ts should feed autoGain.ts's feedAutoGainMeasurement() as dtSec,
@@ -197,8 +230,14 @@ export class FeatureExtractor {
    *   baseline below stay at their own fixed rates regardless — they're
    *   measurement, not display smoothing, and the meters panel's RAW chip
    *   already shows their output untouched.
+   * @param gate Silence-gate marks (src/audio/silenceGate.ts) to weight the
+   *   broadband onset's firing comparison by this tick's `level` — see
+   *   silenceGateDimmer for exactly what it multiplies (only the comparison,
+   *   never the baseline/ratio/refractory) and why. `undefined` (every
+   *   existing call site and test that doesn't pass one) means no gating at
+   *   all, today's behavior.
    */
-  update(rawBandsDb: Float32Array, time: number, autoGain = 1, smoothingScale = 1): FeatureFrame {
+  update(rawBandsDb: Float32Array, time: number, autoGain = 1, smoothingScale = 1, gate?: SilenceGateMarks): FeatureFrame {
     const blend = clamp01(autoGain);
     const dt = this.lastTime === null ? 1 / 60 : Math.max(1e-4, time - this.lastTime);
     this.lastTime = time;
@@ -255,18 +294,48 @@ export class FeatureExtractor {
       this.prevNorm[b] = norm;
     }
 
+    // Averaged as power, then back to dB — not a mean of the dB values. Most
+    // of the 24 bands sit at the noise floor for any ordinary sound, and a
+    // mean of dB let those drag the result down to LEVEL_DB_FLOOR, so level
+    // read ~0 for everything short of a loud broadband roar. Power averaging
+    // lets the loud bands carry it, which is what loudness is. Computed here,
+    // ahead of the onset decision below, specifically so that decision can
+    // read this tick's own level rather than last tick's.
+    const meanRawDb = 10 * Math.log10(rawPowSum / NUM_BANDS);
+    const level = clamp01((meanRawDb - LEVEL_DB_FLOOR) / (LEVEL_DB_CEIL - LEVEL_DB_FLOOR));
+
     this.fluxBaseline += (flux - this.fluxBaseline) * Math.min(1, FLUX_ADAPTIVE_RATE * dt);
     const threshold = this.fluxBaseline * FLUX_THRESHOLD_MULT + FLUX_THRESHOLD_MARGIN;
     // Unconditional, not just on a fire — see fluxRatio's own doc. threshold
     // is always > 0 (FLUX_THRESHOLD_MARGIN keeps it off zero at a silent
     // baseline), so this never divides by zero.
     this.lastFluxRatio = flux / threshold;
+    // The gate only ever weights the comparison below — fluxBaseline just
+    // above and lastFluxRatio's score are both computed on raw, ungated flux,
+    // and stay that way (see silenceGate.ts's header for why gating the
+    // baseline too would defeat the gate entirely).
+    const dimmer = gate ? silenceGateDimmer(level, gate) : 1;
+    this.lastGateDimmer = dimmer;
     const canFire = time - this.lastOnsetTime > ONSET_REFRACTORY_SEC;
-    const onset = canFire && flux > threshold;
+    const wouldFire = canFire && flux > threshold;
+    const onset = wouldFire && flux * dimmer > threshold;
 
     if (onset) {
       this.lastOnsetTime = time;
       this.registerOnset(time, flux / threshold);
+    }
+
+    // A hit the gate stopped: wouldFire was true (flux alone cleared the
+    // threshold) but the dimmed comparison didn't. Since a suppressed hit
+    // deliberately doesn't touch lastOnsetTime/the refractory above, flux can
+    // stay over threshold for several frames in a row — this gets its own
+    // one-shot spacing (against whichever of lastOnsetTime/lastSuppressedTime
+    // is more recent) so the flag reads as one event per stopped hit rather
+    // than chattering true for as long as the room stays that loud.
+    this.lastSuppressed = false;
+    if (wouldFire && !onset && time - Math.max(this.lastOnsetTime, this.lastSuppressedTime) > ONSET_REFRACTORY_SEC) {
+      this.lastSuppressed = true;
+      this.lastSuppressedTime = time;
     }
 
     let energy = 0;
@@ -279,14 +348,6 @@ export class FeatureExtractor {
     this.lastFixedEnergy = clamp01(fixedEnergy / NUM_BANDS);
 
     const onsetPhase = this.bpm > 0 ? (((time - this.lastOnsetPhaseTime) / (60 / this.bpm)) % 1 + 1) % 1 : 0;
-
-    // Averaged as power, then back to dB — not a mean of the dB values. Most
-    // of the 24 bands sit at the noise floor for any ordinary sound, and a
-    // mean of dB let those drag the result down to LEVEL_DB_FLOOR, so level
-    // read ~0 for everything short of a loud broadband roar. Power averaging
-    // lets the loud bands carry it, which is what loudness is.
-    const meanRawDb = 10 * Math.log10(rawPowSum / NUM_BANDS);
-    const level = clamp01((meanRawDb - LEVEL_DB_FLOOR) / (LEVEL_DB_CEIL - LEVEL_DB_FLOOR));
 
     return { time, bands, energy, onset, bpm: this.bpm, onsetPhase, level };
   }

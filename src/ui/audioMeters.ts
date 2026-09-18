@@ -3,6 +3,7 @@ import type { MeterCardId, MeterRowId } from "../render/signals.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import type { LufsReading } from "../audio/lufs.ts";
+import type { SilenceGateMarks, SilenceGateReading } from "../audio/silenceGate.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
 import { BEAT_GRIDS, BEAT_GRID_DEFAULT } from "../audio/beatGrid.ts";
 import {
@@ -51,6 +52,14 @@ import {
  *    adding; sliding it down closes the gap. (No raw low/mid/high energy
  *    spectrum strip already shows that. Their post-bandEnergy pulses live
  *    in Rhythm's Hits row instead — see below.)
+ *  - Gate (right after Signal): the live view of the silence gate
+ *    (src/audio/silenceGate.ts) — Dimmer, how much of a hit's strength the
+ *    gate is currently letting through, and beneath it a History trace of
+ *    Level against the Input card's two marks (dashed guides), with ticks
+ *    for every beat that fired and every hit the gate stopped. Local-only
+ *    like fixedEnergy/fluxRatio above — a device with no FeatureExtractor of
+ *    its own (a renderer, the synthetic feed) has nothing to read here, so
+ *    Dimmer and the ticks go idle, same as the Rhythm card's Onset row.
  *  - Loudness: the broadcast measurement — BS.1770 / EBU R128 LUFS from
  *    lufsAnalyser.ts (math in lufs.ts). Momentary on the bar with the
  *    LUFS_TARGET_* marks, Short-term as the big number, Integrated beneath
@@ -135,7 +144,11 @@ export interface AudioMeters {
    *  file header). `fluxRatio` is FeatureExtractor.fluxRatio — how hard the
    *  broadband onset detector's flux cleared its adaptive threshold this
    *  frame (1 is a bare trigger, below 1 a near-miss) — null on the same
-   *  devices as `fixedEnergy` (the Onset row reads idle). */
+   *  devices as `fixedEnergy` (the Onset row reads idle). `gate` is this
+   *  device's own SilenceGateReading (src/audio/silenceGate.ts) — null on
+   *  the same devices as `fixedEnergy` (the Gate card's Dimmer row and
+   *  ticks read idle; its History trace still plots `frame.level` against
+   *  the two marks, since that part doesn't need a local extractor). */
   update(
     frame: FeatureFrame | null,
     anim: AnimFrame | null,
@@ -145,6 +158,7 @@ export interface AudioMeters {
     fixedEnergy: number | null,
     lufs: LufsReading | null,
     fluxRatio: number | null,
+    gate: SilenceGateReading | null,
   ): void;
   /** Unfolds `card` if needed (the same click-the-chevron move
    *  deviceMenu.ts's jumpToBlock makes for a folded settings card), scrolls
@@ -162,6 +176,11 @@ export interface AudioMetersDeps {
    *  stored index into BEAT_GRIDS for the current scene (src/audio/beatGrid.ts);
    *  the row re-reads `get` on its text tick so a scene switch is picked up. */
   beatGrid: { get: () => number; set: (value: number) => void };
+  /** The Gate card's History trace guides — the same two marks the Input
+   *  card's Silence below/Sound above rows edit (src/audio/silenceGate.ts).
+   *  Read fresh every draw() so dragging a mark in the Input card moves the
+   *  dashed lines live. */
+  getSilenceGate: () => SilenceGateMarks;
 }
 
 const PEAK_FALL_PER_SEC = 1.2; // matches spectrumStrip.ts's peak-hold decay
@@ -295,30 +314,72 @@ const BEAT_TRACE_HEIGHT_CSS_PX = 28;
 // the auto-gain/auto-tune system, distinct from BEAT_COLOR so "detected"
 // (red) and "predicted" (blue) never read as the same line.
 const BEAT_GRID_COLOR = AUTO_SKY;
+// The Gate card's History (src/audio/silenceGate.ts): more series, plus the
+// dashed SilenceGateMarks guide lines on top, read more crowded than
+// Signal's own History, so this trace gets a little more height.
+// GATE_DIMMER_COLOR reuses the same blue as the auto-gain/auto-tune system
+// (AUTO_SKY) at a dim alpha — the dimmer is a reference line like
+// HISTORY_FIXED_COLOR above, not a primary reading. GATE_GUIDE_COLOR ties
+// the dashed guide lines back to the Input card's own accent, since that's
+// the card that edits the marks they trace.
+const GATE_HISTORY_HEIGHT_CSS_PX = HISTORY_HEIGHT_CSS_PX + 16;
+const GATE_DIMMER_COLOR = withAlpha(AUTO_SKY, 0.7);
+const GATE_GUIDE_COLOR = withAlpha(INPUT_GREEN, 0.5);
+// The Gate History draws Level (and the two guide lines) on a zoomed scale,
+// not the full range Signal's History uses: the marks live near the bottom
+// of FeatureFrame.level's range by design (they separate silence from quiet
+// playback), so on the full scale both dashed lines and everything Level
+// does around them collapse into the strip's bottom few pixels — the one
+// region this card exists to show. The strip's top is this multiple of the
+// `open` mark instead, which pins that mark at mid-height wherever the
+// slider puts it; Level past the top clamps there, which reads correctly as
+// "well clear of the gate". GATE_LEVEL_TOP_MIN keeps the scale from
+// blowing up when the marks are dragged to the very bottom. Dimmer and the
+// Fired/Stopped ticks stay on their own full scale — they're already 0..1.
+// Dragging a mark rescales new columns only; the columns already drawn keep
+// the scale they were recorded at until they scroll off.
+const GATE_LEVEL_TOP_PER_OPEN = 2;
+const GATE_LEVEL_TOP_MIN = 0.1;
+
+function gateLevelTop(marks: SilenceGateMarks): number {
+  return Math.min(1, Math.max(GATE_LEVEL_TOP_MIN, marks.open * GATE_LEVEL_TOP_PER_OPEN));
+}
 
 interface TraceStripSeries {
   color: string;
   width: number;
 }
 
+interface TraceStripGuide {
+  /** 0..1 on the same y scale as the series. */
+  at: number;
+  color: string;
+}
+
 /** A rolling ring-buffer history trace, one column per CSS pixel over
- *  HISTORY_SPAN_SEC, one line per series — the Signal card's History (three
- *  series: level, energy, the fixed-mapping reference) and the Character
- *  card's Centroid trace (one series, no legend) both drive one of these.
- *  Each series' column is a max-hold of what push() saw since the column
- *  before last closed, so a transient survives however many frames the
- *  column spans; when push() closes several columns in one call (see
- *  COLUMN_CARRY_MS above) the sample that closed them is held across all
- *  but blank past the carry bound. A column stays NaN when nothing was ever
- *  sampled for it — a null reading this series had no value for, or a carry
- *  bound stretch with no reading at all — which traceHistory's caller
- *  (below) reads as "lift the pen" rather than a reading of zero, the same
- *  gap HISTORY_FIXED_COLOR relies on for a source with no fixed-mapping
- *  reading this tick. */
-function createTraceStrip(series: TraceStripSeries[], heightPx: number) {
+ *  HISTORY_SPAN_SEC, one line per series — the Signal card's History (level,
+ *  energy, the fixed-mapping reference), the Character card's Centroid trace
+ *  (a lone series, no legend) and the Gate card's History (its own series
+ *  plus `guides`) all drive one of these. Each series' column is
+ *  a max-hold of what push() saw since the column before last closed, so a
+ *  transient survives however many frames the column spans; when push()
+ *  closes several columns in one call (see COLUMN_CARRY_MS above) the sample
+ *  that closed them is held across all but blank past the carry bound. A
+ *  column stays NaN when nothing was ever sampled for it — a null reading
+ *  this series had no value for, or a carry bound stretch with no reading at
+ *  all — which traceHistory's caller (below) reads as "lift the pen" rather
+ *  than a reading of zero, the same gap HISTORY_FIXED_COLOR relies on for a
+ *  source with no fixed-mapping reading this tick.
+ *
+ *  `guides`, when given, replaces draw()'s own fixed mid-height line with
+ *  dashed horizontal lines at each entry's `at` (0..1, the same y scale the
+ *  series use) — the Gate History's two Input-card marks. Read fresh every
+ *  draw() call (not cached), since a mark can move while the card is open. */
+function createTraceStrip(series: TraceStripSeries[], heightPx: number, guides?: () => TraceStripGuide[]) {
   const canvas = document.createElement("canvas");
   canvas.style.cssText = `display: block; width: 100%; height: ${heightPx}px; margin-top: 4px;`;
   const ctx = canvas.getContext("2d")!;
+  const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (heightPx - 2);
 
   let bufs: Float32Array[] = series.map(() => new Float32Array(0));
   let head = 0;
@@ -359,8 +420,6 @@ function createTraceStrip(series: TraceStripSeries[], heightPx: number) {
    *  a gap rather than a line to zero. */
   function traceHistory(buf: Float32Array, live: number, color: string, width: number): void {
     const len = buf.length;
-    const h = heightPx;
-    const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (h - 2);
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
     ctx.beginPath();
@@ -410,13 +469,30 @@ function createTraceStrip(series: TraceStripSeries[], heightPx: number) {
     },
     /** Redraws every series in the order given to createTraceStrip — the
      *  last one lands on top, same as the Signal card putting Level over
-     *  Energy over the fixed-mapping reference. */
+     *  Energy over the fixed-mapping reference. With no `guides`, draws the
+     *  plain fixed mid-height line every trace has always had; with `guides`,
+     *  draws those instead (a mid-height line would read as an unlabeled
+     *  third mark on top of them). */
     draw(): void {
       const w = cssWidth;
       const h = heightPx;
       ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = "rgba(255,255,255,0.18)";
-      ctx.fillRect(0, Math.round(h / 2) - 0.5, w, 1);
+      if (guides) {
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        for (const g of guides()) {
+          const y = yOf(g.at);
+          ctx.strokeStyle = g.color;
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      } else {
+        ctx.fillStyle = "rgba(255,255,255,0.18)";
+        ctx.fillRect(0, Math.round(h / 2) - 0.5, w, 1);
+      }
       for (let i = 0; i < series.length; i++) {
         traceHistory(bufs[i], colVals[i], series[i].color, series[i].width);
       }
@@ -898,6 +974,59 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN, foldId: "signal" });
   signalCard.body.append(level.el, spacer(), energy.el, spacer(), history.el);
 
+  // ---- Gate ----
+  // The live version of the silence-gate timeline (src/audio/silenceGate.ts)
+  // — see this file's header for what the two rows show and why a mic-less
+  // device (renderer, synthetic feed) reads idle here the same way it does
+  // on the Rhythm card's Onset row.
+  const gateDimmer = createMeterRow({
+    label: "Dimmer",
+    accent: INPUT_GREEN,
+    unit: "%",
+    description:
+      "How much of a hit's strength is allowed to count right now. Full: beats are detected exactly as before. Empty: the room is silent and nothing can fire.",
+  });
+  const gateHistory = createMeterRow({
+    label: "History",
+    accent: INPUT_GREEN,
+    unit: "s",
+    description:
+      "Level against the two Input-card marks (dashed), zoomed in so the upper mark sits mid-height. Green ticks are beats that fired; red ticks are hits the gate stopped because the room was too quiet.",
+  });
+  // Paint order: the two tick series first, then Dimmer, then Level on top
+  // — the same "Level lands last" order Signal's own History uses. A tick
+  // runs the strip's full height on exactly the columns where Level and
+  // Dimmer move (a hit is what raises both), so ticks painted last would
+  // hide the two lines at the only moments they say anything.
+  const gateHistoryStrip = createTraceStrip(
+    [
+      { color: HOT_RED, width: 1.5 },
+      { color: INPUT_GREEN, width: 1.5 },
+      { color: GATE_DIMMER_COLOR, width: 1 },
+      { color: HISTORY_LEVEL_COLOR, width: 1 },
+    ],
+    GATE_HISTORY_HEIGHT_CSS_PX,
+    () => {
+      const marks = deps.getSilenceGate();
+      const top = gateLevelTop(marks);
+      return [
+        { at: marks.closed / top, color: GATE_GUIDE_COLOR },
+        { at: marks.open / top, color: GATE_GUIDE_COLOR },
+      ];
+    },
+  );
+  gateHistory.el.children[1].replaceWith(gateHistoryStrip.canvas);
+  gateHistory.setReadout(String(HISTORY_SPAN_SEC));
+  const gateLegend = createTraceLegend([
+    { color: HISTORY_LEVEL_COLOR, label: "Level" },
+    { color: GATE_DIMMER_COLOR, label: "Dimmer" },
+    { color: INPUT_GREEN, label: "Fired" },
+    { color: HOT_RED, label: "Stopped" },
+  ]);
+  gateHistoryStrip.canvas.after(gateLegend.el);
+  const gateCard = createCard({ title: "Gate", accent: INPUT_GREEN, foldId: "gate" });
+  gateCard.body.append(gateDimmer.el, spacer(), gateHistory.el);
+
   // ---- Loudness ----
   const lufsRow = createMeterRow({
     label: "Momentary",
@@ -1049,7 +1178,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
 
   // The scope leads: it's the one live picture of the sound itself, and the
   // first thing to check when the visuals seem off.
-  root.append(metersHeader, scopeCard.el, signalCard.el, lufsCard.el, rhythmCard.el, characterCard.el);
+  root.append(metersHeader, scopeCard.el, signalCard.el, gateCard.el, lufsCard.el, rhythmCard.el, characterCard.el);
 
   // Ring buffer of columns, one pixel each — oldest at `head`, newest just
   // before it — plus the column currently being accumulated.
@@ -1171,6 +1300,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const cardElements: Record<MeterCardId, HTMLElement> = {
     scope: scopeCard.el,
     signal: signalCard.el,
+    gate: gateCard.el,
     lufs: lufsCard.el,
     rhythm: rhythmCard.el,
     character: characterCard.el,
@@ -1184,7 +1314,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
 
   return {
     el: root,
-    update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, fluxRatio): void {
+    update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, fluxRatio, gate): void {
       const nowMs = performance.now();
       const dtSec =
         lastMs === null ? 1 / 60 : Math.max(1e-4, (nowMs - lastMs) / 1000);
@@ -1226,6 +1356,33 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       } else {
         // Folded: don't accumulate a column while hidden, same as the Scope.
         historyStrip.resetColumn();
+      }
+
+      // ---- Gate ----
+      // No RAW branch, same as the Rhythm card's Onset row just below: this
+      // is already an instant, local reading with no pre-smoothing
+      // counterpart threaded through AnimFrame to switch to.
+      if (!gateCard.fold?.isFolded()) {
+        gateDimmer.setValue(gate ? gate.dimmer : null, dtSec);
+        if (text) gateDimmer.setReadout(gate ? pct(gate.dimmer) : "--", gate ? {} : IDLE);
+        // Level plots off `frame` regardless of `gate` — it doesn't need a
+        // local extractor — while Dimmer/Stopped/Fired go null wherever
+        // `gate` itself does (see AudioMeters.update's own doc comment).
+        if (frame || gate) {
+          gateHistoryStrip.push(
+            [
+              gate ? (gate.suppressed ? 1 : 0) : null,
+              gate ? (gate.fired ? 1 : 0) : null,
+              gate ? gate.dimmer : null,
+              frame ? frame.level / gateLevelTop(deps.getSilenceGate()) : null,
+            ],
+            nowMs,
+          );
+          gateHistoryStrip.draw();
+        }
+      } else {
+        // Folded: don't accumulate a column while hidden, same as Signal's History.
+        gateHistoryStrip.resetColumn();
       }
 
       // ---- Rhythm ----

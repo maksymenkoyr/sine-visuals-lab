@@ -14,8 +14,12 @@ prompt and the Input card's Source row — and hands back a raw stream.
 (`src/audio/bandSplit.ts` / `bandScale.ts` decide the band edges). `src/audio/
 features.ts` turns raw bands into a `FeatureFrame` — this is where the adaptive
 floor/peak AGC lives, so everything downstream sees a signal already normalized to
-the room's own loudness. `src/audio/sensitivity.ts` applies the user's Sensitivity/
-Expansion/Smoothing controls on top of that.
+the room's own loudness. That same adaptive shape is why `src/audio/
+silenceGate.ts` exists: its two marks weight `features.ts`'s own broadband onset,
+and (via `src/render/animClock.ts`) `src/render/bandEnergy.ts`'s per-band onsets,
+against `FeatureFrame.level` — the one absolute-loudness reading in the pipeline —
+so a quiet room's own hiss can't fire on its own. `src/audio/sensitivity.ts`
+applies the user's Sensitivity/Expansion/Smoothing controls on top of that.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
@@ -48,7 +52,9 @@ mic, entirely separate from
 a viewer with no local mic doesn't get that card at all. Their Signal card's
 history trace likewise reads `FeatureExtractor.fixedEnergy`, a local
 diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
-`FeatureFrame` field. The Loudness card is the same kind of read: BS.1770 LUFS
+`FeatureFrame` field — the Gate card right after it reads that same
+extractor's `gateDimmer`/`suppressed` diagnostics the same way. The Loudness
+card is the same kind of read: BS.1770 LUFS
 from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
 this device's own capture, hidden on a mic-less renderer like the Scope.
 

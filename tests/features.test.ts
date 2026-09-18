@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { FeatureExtractor } from "../src/audio/features.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import { ANALYSER_MIN_DB, ANALYSER_MAX_DB } from "../src/audio/analyser.ts";
+import { SILENCE_GATE_CLOSED_DEFAULT, SILENCE_GATE_OPEN_DEFAULT, type SilenceGateMarks } from "../src/audio/silenceGate.ts";
 
 const QUIET_DB = -90;
 const LOUD_DB = -20;
@@ -489,5 +490,144 @@ describe("FeatureExtractor", () => {
       expect(frame!.onset).toBe(false);
       expect(Number.isFinite(extractor.fluxRatio)).toBe(true);
     });
+  });
+});
+
+// The silence gate (src/audio/silenceGate.ts) folded into update()'s onset
+// decision — see that file's header for the room-adaptive-floor-collapses-
+// onto-hiss problem this exists to fix. A small seeded LCG (same shape as
+// the "mic noise" test above) stands in for real mic hiss, since Math.random
+// isn't allowed in a deterministic test.
+describe("silence gate", () => {
+  const dt = 1 / 60;
+  const SILENCE_MARKS: SilenceGateMarks = { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT };
+
+  function makeRand(seed: number): () => number {
+    let s = seed;
+    return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  }
+
+  function jitteredBands(rand: () => number, baseDb: number, jitterDb: number, overrides: Record<number, number> = {}): Float32Array {
+    const bands = new Float32Array(NUM_BANDS);
+    for (let i = 0; i < NUM_BANDS; i++) bands[i] = baseDb + (rand() - 0.5) * 2 * jitterDb;
+    for (const [i, v] of Object.entries(overrides)) bands[Number(i)] = v;
+    return bands;
+  }
+
+  it("fires zero onsets through near-silent hiss with the gate on, and flags at least one suppressed hit", () => {
+    const extractor = new FeatureExtractor();
+    const rand = makeRand(1);
+    let time = 0;
+    // A few seconds of warm-up so the floor/peak/flux trackers settle before
+    // the assertion window starts.
+    for (let i = 0; i < 180; i++) {
+      time += dt;
+      extractor.update(jitteredBands(rand, -80, 3), time, 1, 1, SILENCE_MARKS);
+    }
+    let onsets = 0;
+    let sawSuppressed = false;
+    for (let i = 0; i < Math.round(20 / dt); i++) {
+      time += dt;
+      const frame = extractor.update(jitteredBands(rand, -80, 3), time, 1, 1, SILENCE_MARKS);
+      if (frame.onset) onsets++;
+      if (extractor.suppressed) sawSuppressed = true;
+    }
+    expect(onsets).toBe(0);
+    expect(sawSuppressed).toBe(true);
+  });
+
+  it("the identical hiss fires more than zero onsets with no gate argument — pins why the gate exists", () => {
+    const extractor = new FeatureExtractor();
+    const rand = makeRand(1); // same seed as the gated test above -> identical input
+    let time = 0;
+    for (let i = 0; i < 180; i++) {
+      time += dt;
+      extractor.update(jitteredBands(rand, -80, 3), time);
+    }
+    let onsets = 0;
+    for (let i = 0; i < Math.round(20 / dt); i++) {
+      time += dt;
+      const frame = extractor.update(jitteredBands(rand, -80, 3), time);
+      if (frame.onset) onsets++;
+    }
+    expect(onsets).toBeGreaterThan(0);
+  });
+
+  it("gives identical onset times for loud input, with and without the gate", () => {
+    // Loud enough that `level` clears SILENCE_GATE_OPEN_DEFAULT throughout,
+    // so the gate should have zero effect — the dimmer stays at 1 every tick.
+    const rand = makeRand(7);
+    const seconds = 15;
+    const n = Math.round(seconds / dt);
+    const periodFrames = Math.round(60 / 128 / dt); // roughly a beat at 128bpm
+    const frames: Float32Array[] = [];
+    for (let i = 0; i < n; i++) {
+      const hit = i % periodFrames < 2;
+      frames.push(jitteredBands(rand, -30, 3, hit ? { 0: -15, 1: -15, 2: -15, 3: -15 } : {}));
+    }
+
+    function run(gate?: SilenceGateMarks): number[] {
+      const extractor = new FeatureExtractor();
+      let time = 0;
+      const times: number[] = [];
+      for (const bands of frames) {
+        time += dt;
+        const frame = extractor.update(bands, time, 1, 1, gate);
+        if (frame.onset) times.push(frame.time);
+      }
+      return times;
+    }
+
+    const withGate = run(SILENCE_MARKS);
+    const withoutGate = run(undefined);
+    expect(withGate.length).toBeGreaterThan(0); // the scenario must actually produce onsets
+    expect(withGate).toEqual(withoutGate);
+  });
+
+  it("a loud clap in near-silence still fires with the gate on — level opens its own gate the same tick", () => {
+    const extractor = new FeatureExtractor();
+    const rand = makeRand(3);
+    let time = 0;
+    for (let i = 0; i < 300; i++) {
+      time += dt;
+      extractor.update(jitteredBands(rand, -80, 3), time, 1, 1, SILENCE_MARKS);
+    }
+
+    let fired = false;
+    const baseDb = -80;
+    const clapPeakDb = baseDb + 45;
+    for (let i = 0; i < 30; i++) {
+      time += dt;
+      const decay = Math.exp(-i / 4); // fast exponential decay back toward baseline
+      const db = baseDb + (clapPeakDb - baseDb) * decay;
+      const frame = extractor.update(jitteredBands(rand, db, 3), time, 1, 1, SILENCE_MARKS);
+      if (frame.onset) fired = true;
+    }
+    expect(fired).toBe(true);
+  });
+
+  it("fluxRatio is identical with and without the gate on the same input — the score is untouched", () => {
+    const rand = makeRand(11);
+    const seconds = 10;
+    const n = Math.round(seconds / dt);
+    const frames: Float32Array[] = [];
+    for (let i = 0; i < n; i++) {
+      const hit = i % 45 < 2;
+      frames.push(jitteredBands(rand, -30, 3, hit ? { 0: -15, 1: -15, 2: -15, 3: -15 } : {}));
+    }
+
+    function run(gate?: SilenceGateMarks): number[] {
+      const extractor = new FeatureExtractor();
+      let time = 0;
+      const ratios: number[] = [];
+      for (const bands of frames) {
+        time += dt;
+        extractor.update(bands, time, 1, 1, gate);
+        ratios.push(extractor.fluxRatio);
+      }
+      return ratios;
+    }
+
+    expect(run(SILENCE_MARKS)).toEqual(run(undefined));
   });
 });

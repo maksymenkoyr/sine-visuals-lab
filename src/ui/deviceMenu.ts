@@ -20,6 +20,14 @@ import { SIGNALS, type SignalSpec } from "../render/signals.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
+import {
+  SILENCE_GATE_CLOSED_DEFAULT,
+  SILENCE_GATE_MAX,
+  SILENCE_GATE_MIN,
+  SILENCE_GATE_OPEN_DEFAULT,
+  type SilenceGateMarks,
+  type SilenceGateReading,
+} from "../audio/silenceGate.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { createBandFaders } from "./bandFaders.ts";
@@ -266,6 +274,16 @@ export interface DeviceMenuDeps {
   isAutoGainAuto: () => boolean;
   onAutoGainAutoToggle: (on: boolean) => void;
   resolveAutoGain: () => number;
+  /** The two silence-gate marks (src/audio/silenceGate.ts) — the Input
+   *  card's Silence below/Sound above rows. Device-wide, like Auto-gain
+   *  above: how quiet this room/mic actually is describes the input, not one
+   *  scene's look. Setting one can push the other (the invariant `open >=
+   *  closed + SILENCE_GATE_MIN_WIDTH`), which is why both rows re-sync from
+   *  getSilenceGate() after either change rather than trusting the value the
+   *  row that fired onChange was itself showing. */
+  getSilenceGate: () => SilenceGateMarks;
+  onSilenceGateClosedChange: (value: number) => void;
+  onSilenceGateOpenChange: (value: number) => void;
   /** Energy saving mode (src/render/powerMode.ts) — the Power card's
    *  Auto/On/Off override for the quality governor. Device-wide, like
    *  Auto-gain above. */
@@ -304,7 +322,10 @@ export interface DeviceMenu {
    *  waveform peak-hold bypass at Smoothing's Off stop the same way the rest
    *  of the pipeline does; not re-resolved here, since resolveSmoothing()
    *  slews its auto value and this runs every rAF tick. `fluxRatio` is
-   *  FeatureExtractor.fluxRatio, null on the same paths as `fixedEnergy`. */
+   *  FeatureExtractor.fluxRatio, null on the same paths as `fixedEnergy`.
+   *  `gate` is this device's own SilenceGateReading (src/audio/silenceGate.ts)
+   *  — app.ts's `lastGate` — null on the same paths as `fixedEnergy`, for the
+   *  Gate card. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -316,6 +337,7 @@ export interface DeviceMenu {
     fixedEnergy: number | null,
     lufs: LufsReading | null,
     fluxRatio: number | null,
+    gate: SilenceGateReading | null,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
@@ -1258,6 +1280,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       get: () => deps.getBeatGrid(deps.currentSceneId()),
       set: (value) => deps.onBeatGridChange(deps.currentSceneId(), value),
     },
+    getSilenceGate: () => deps.getSilenceGate(),
   });
 
   const spectrumCol = document.createElement("div");
@@ -1591,9 +1614,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ];
   function syncInputRows(): void {
     for (const { row, getManual } of inputRows) row.sync(getManual);
-    // Auto-gain isn't in inputRows (see its own comment below on why it's
-    // built separately) but needs the same resync wherever this is called.
+    // Auto-gain and the Silence gate rows aren't in inputRows (see their own
+    // comments below on why they're built separately) but need the same
+    // resync wherever this is called.
     autoGainRow.sync(() => deps.getAutoGain());
+    syncSilenceGateRows();
   }
 
   // Source: mic vs. captured screen/tab audio (src/audio/sourcePref.ts). Not
@@ -1604,9 +1629,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // switching device, is what Tab is for). Sits first in the card, above
   // Auto-gain, since it decides what everything below is even listening to.
   // Deliberately left out of this card's Reset chip below, same as
-  // Auto-gain — that chip resets per-scene taste, not a device-wide input
-  // choice — and out of inputRows, since it has no Auto behavior to wire
-  // through that array's shared call sites.
+  // Auto-gain and the Silence gate rows further down — that chip resets
+  // per-scene taste, not a device-wide input choice — and out of inputRows,
+  // since it has no Auto behavior to wire through that array's shared call
+  // sites.
   const sourceListStyle = `display: flex; gap: 4px; margin-top: 4px;`;
   const sourceChipStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
   const sourceChipLitStyle = `${chipBtnLitStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
@@ -1714,6 +1740,55 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoGainRow.onChange((value) => deps.onAutoGainChange(value));
   autoGainRow.sync(() => deps.getAutoGain());
 
+  // Silence gate: two volume marks in FeatureFrame.level units (see
+  // src/audio/silenceGate.ts for the why — relative onset detection misfiring
+  // on mic hiss in a quiet room). No `auto` block, like Source above: a
+  // device-wide read of "how quiet is this room" has nothing for MUSIC_DIALS
+  // to resolve against, the same reason Auto-gain's own "A" chip leans on
+  // FeatureExtractor.bandSpanDb instead. `syncSilenceGateRows` re-reads both
+  // marks from the store after either row's own change, since moving one can
+  // push the other (silenceGate.ts's ordering invariant) — trusting just the
+  // row that fired onChange would leave the other stale.
+  const silenceClosedRow = createControlRow({
+    label: "Silence below",
+    accent: INPUT_GREEN,
+    min: SILENCE_GATE_MIN,
+    max: SILENCE_GATE_MAX,
+    defaultValue: SILENCE_GATE_CLOSED_DEFAULT,
+    mapping: "linear",
+    zeroAtMin: true,
+    unit: "%",
+    format: (value) => String(Math.round(value * 100)),
+    description:
+      "Quieter than this on the Signal card's Level, the room counts as silent and no beat can fire. All the way down turns the gate off.",
+  });
+  const silenceOpenRow = createControlRow({
+    label: "Sound above",
+    accent: INPUT_GREEN,
+    min: SILENCE_GATE_MIN,
+    max: SILENCE_GATE_MAX,
+    defaultValue: SILENCE_GATE_OPEN_DEFAULT,
+    mapping: "linear",
+    unit: "%",
+    format: (value) => String(Math.round(value * 100)),
+    description:
+      "Louder than this, beats are detected exactly as before. Between the two marks a hit has to stand out more the quieter the room is.",
+  });
+  function syncSilenceGateRows(): void {
+    const marks = deps.getSilenceGate();
+    silenceClosedRow.sync(() => marks.closed);
+    silenceOpenRow.sync(() => marks.open);
+  }
+  silenceClosedRow.onChange((value) => {
+    deps.onSilenceGateClosedChange(value);
+    syncSilenceGateRows();
+  });
+  silenceOpenRow.onChange((value) => {
+    deps.onSilenceGateOpenChange(value);
+    syncSilenceGateRows();
+  });
+  syncSilenceGateRows();
+
   const inputCard = createCard({
     title: "Input",
     accent: INPUT_GREEN,
@@ -1732,6 +1807,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     sourceRow.el,
     spacer(),
     autoGainRow.el,
+    spacer(),
+    silenceClosedRow.el,
+    spacer(),
+    silenceOpenRow.el,
     spacer(),
     inputRows[0].row.el,
     spacer(),
@@ -2243,11 +2322,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       fixedEnergy: number | null,
       lufs: LufsReading | null,
       fluxRatio: number | null,
+      gate: SilenceGateReading | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, fluxRatio);
+      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, fluxRatio, gate);
       // Unthrottled, same reasoning as audioMeters' own fills — see
       // createControlRow's updateSignalPills doc comment. A no-op per row
       // with no `reads`, so this costs nothing for the common case.

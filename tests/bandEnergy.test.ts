@@ -235,6 +235,43 @@ describe("band energy", () => {
     expect(Math.abs(at60 - at120)).toBeLessThanOrEqual(2);
   });
 
+  // The silence gate (src/audio/silenceGate.ts) folded into advance()'s own
+  // firing comparison — see bandEnergy.ts's file header for why it's scoped
+  // per group rather than once broadband.
+  it("an input that fires lowOnset with the default dimmer fires none with dimmer = 0", () => {
+    const seconds = 20;
+    const afterSec = 2.5;
+    const gated = createBandEnergy();
+    let onsetsAtZero = 0;
+    for (let i = 0; i < Math.round(seconds / DT); i++) {
+      const t = i * DT;
+      gated.advance(DT, kickOverBedBands(t), 1, 0);
+      if (gated.lowOnset && t > afterSec) onsetsAtZero++;
+    }
+    expect(onsetsAtZero).toBe(0);
+    // Sanity: the identical fixture does fire once the dimmer is back up —
+    // see "fires on nearly every kick..." above, which already covers this
+    // exact case at the default (omitted) dimmer.
+    expect(countLowOnsets(60, seconds, afterSec)).toBeGreaterThan(0);
+  });
+
+  it("dimmer = 1 gives the same onset ticks as omitting the arg", () => {
+    const seconds = 20;
+    const withDefault = createBandEnergy();
+    const withExplicitOne = createBandEnergy();
+    const defaultTicks: boolean[] = [];
+    const explicitTicks: boolean[] = [];
+    for (let i = 0; i < Math.round(seconds / DT); i++) {
+      const t = i * DT;
+      const bands = kickOverBedBands(t);
+      withDefault.advance(DT, bands);
+      withExplicitOne.advance(DT, bands, 1, 1);
+      defaultTicks.push(withDefault.lowOnset);
+      explicitTicks.push(withExplicitOne.lowOnset);
+    }
+    expect(explicitTicks).toEqual(defaultTicks);
+  });
+
   it("stays finite and keeps firing onsets with Smoothing at its Off stop (rateScale = Infinity)", () => {
     // The flux baseline and refractory must not be scaled by rateScale: at
     // the Smoothing row's Off stop rateScale is Infinity, and scaling the
