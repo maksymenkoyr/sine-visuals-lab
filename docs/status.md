@@ -6,44 +6,50 @@ regenerate it at session close.
 
 ## In flight
 
-- **Caustics on mobile: seams and dashed lines** — branch
-  `claude/mobile-caustics-rendering-7binpj` (2026-09-11), no PR yet. The
-  drift phase reached the shader raw and grew without bound, so the value-noise
-  hash lost precision: phones showed the pattern breaking along noise-cell
-  boundaries, with `fwidth` lighting the breaks up as dashes. Fixed in
-  `src/render/scenes/caustics.ts`: `driftFlows` wraps every offset modulo
-  `NOISE_PERIOD` in JS, and `hashCell` is an integer hash periodic in the same
-  period (see the file header's precision paragraph). Verified headless
-  (old vs new at a long-session phase) and by `tests/caustics.test.ts`; not yet
-  confirmed on the reporting phone.
-- **Scenes from `/ref`, all draft PRs:** Slats #100, Shards #97, Ink Synth
-  #96, Crystal Wall #95, Neon Gates #90, Neon Fluid #76. Each is waiting on a
-  real-music judgement before leaving `DRAFT_SCENE_IDS`.
-- **Ready for review:** gallery preview scheduling #91, dev-server scene link
-  #98, business/legal docs #72.
-- **Drafts on the runtime:** song-boundary instrumentation #93, beat-rate
-  setting controls #88, Auto tempoLock/dial ranking #73, docs/architecture
-  rebuild #74. PR #70 is a stale status snapshot this file replaces — close it.
-- Recently on `main`: per-PR preview Worker deploys (#101).
+- **Moiré rebuilt from a measured reference** — draft PR #104, branch
+  `worktree-moire-lines` (2026-09-12). `/ref` on thedotisblack's horizontal-
+  lines moiré (chapter Part 2): two same-period gratings, one displaced by
+  noise, field re-rolling every frame. The old three-grating draft lives on as
+  `moire2`. Nothing in the source is audio-driven, so every trigger is our
+  mapping (see the scene header). Needs a look on real music; the numbers
+  match the reference's bands, the taste call is open.
+- **Draft scene PRs from `/ref`** waiting on review and a real-music judgement:
+  Slats #100, Ink Synth #96, Crystal Wall #95, Neon Gates #90,
+  Neon Fluid #76. Tessera has a branch (`tessera-scene`) and no PR yet.
+- **Ref-loop tool fixes riding on scene PRs:** `ref-shoot --settings` was a
+  silent no-op without the scene id (fixed in #104); fade-vs-cut grouping (#95).
+- **Runtime:** Song-boundary instrumentation #93; beat-rate setting #88;
+  Auto tempoLock/dial ranking #73; mic
+  latency status line #103 (from the mobile session, not draft).
+- Landed on `main` since the last snapshot: Shards #105, the Caustics mobile
+  noise-hash bound #102, draft-tile loading progress #106.
+- **Dev/docs:** dev-server single scene link #98; gallery preview scheduling
+  #91; docs/architecture.md rebuild #74; business/legal docs #72. PR #70 is a
+  stale status snapshot — close it.
+- Worktrees with no open PR (`git worktree list`): `agent-…`, `bake-defaults`,
+  `claude-md-git-workflow`, `dev-scene-links`, `docs-index`, `ref-bursts`,
+  `setting-groups`, `tessera`, `tuning-spotlight`. Check `git log main..` on
+  each before reviving; several look landed or superseded.
 
 ## Open questions
 
-- Caustics: the other scenes that add an ever-growing phase to a hashed
-  coordinate (grep for `uFlowPhase` and per-scene accumulators under
-  `src/render/scenes/`) have the same exposure on long sessions. Audit them
-  with the same `driftFlows`/periodic-hash pattern, or leave until one shows?
-- Caustics: the phone reports came from a room host (`room:` in the HUD). Is
-  a host session simply longer-lived, or does the pairing path change anything
-  in how the scene is driven?
-- Which draft scenes graduate out of `DRAFT_SCENE_IDS`, and in what order —
-  six are now queued.
+- Ref loop: a re-rolling noise field (Moiré) reads as hundreds of "hard cuts"
+  to the histogram detector — should `refburst` report a per-frame
+  decorrelation figure alongside cuts, so a shimmer isn't mistaken for editing?
+- Ref loop: `reflook` finds nothing on light-ground references (Moiré, Ink
+  Synth both needed a hand scan-line script) — fold a light-ground path into
+  `tools/reflook.py`?
+- Runtime: our tempo locked at ×2 on an 86 bpm ambient track for the whole
+  clip, and `sectionIntensity` never rose at the reference's section
+  boundaries (third clip in a row) — `beatClock.ts` half-time preference, and a
+  real section-change signal, are now recurring to-dos.
+- Which draft scenes graduate out of `DRAFT_SCENE_IDS`, and in what order.
 - Stale scratch branches on origin (`git branch -r --no-merged origin/main`):
   prune, or is anything in them still wanted?
 
 ## Next up
 
-- Open the PR for the Caustics fix and have it checked on the reporting phone
-  after a long run; if it holds, sweep the other scenes for the same pattern.
-- Watch the six draft scenes on real music; land or drop, and decide
-  graduation order.
-- Review #91, #98, #72; close #70.
+- Watch Moiré (#104) on real music: does the 30 Hz shimmer read as intended
+  or as noise, and does the curtain ever lift? Then review and land or drop.
+- Review the queue of draft scene PRs; decide graduation.
+- Review #103 from the mobile session; close #70; prune idle worktrees.
