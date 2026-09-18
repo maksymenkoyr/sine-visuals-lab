@@ -35,6 +35,15 @@ import type { SceneSetting } from "../sceneSettings.ts";
 //    off the bottom of the frame, ground only, the way the reference's
 //    closing section does; going loud again or a drop pulls it back down
 //    faster than it rose (advanceCurtain). 0 disables it outright.
+//  - `stretch` and `wander` answer a follow-up ("ours looks a bit
+//    monotonous" — see hazy-discovering-plum.md's Round 2): a follow-up scan
+//    of the reference's middle found the dark clouds aren't isotropic blobs
+//    at all — they're elongated streaks whose long axis rotates through
+//    every direction over tens of seconds, with the lines themselves
+//    carrying a slight tilt. `stretch` is the ceiling on how elongated a
+//    streak can get; `wander` is how briskly the streak's stretch,
+//    orientation and tilt re-pick and ease toward a new target
+//    (advanceWander) — 0 freezes the field exactly where it sits.
 //
 // Shader-side: the grating is drawn in screen pixels off gl_FragCoord (the
 // riso.ts halftone-grid idiom) so the reference's fixed line spacing holds
@@ -54,11 +63,17 @@ import type { SceneSetting } from "../sceneSettings.ts";
 // `uDrift` (the raw Drift-speed slider, vs. the JS-accumulated uDriftPhase
 // it feeds), the raw slider value is only ever consumed on the JS side,
 // while the shader reads the already-processed signal under its own name
-// (uBlackoutPhase / uCurtainLevel) — see extraUniformDecls below.
+// (uBlackoutPhase / uCurtainLevel) — see extraUniformDecls below. `uStretch`
+// and `uWander` (the `stretch`/`wander` settings' own auto-declared
+// uniforms) are the same story: `stretch` is only ever read as
+// advanceWander's ceiling and `wander` only as its ease-rate scale, so the
+// shader instead reads the already-wandered values under their own names —
+// `uStretchNow`, `uAngle`, `uDetailMix`, `uTilt` — see extraUniformDecls below.
 
 // Noise / grating look -------------------------------------------------
 const WOBBLE = 0.15; // periods of small along-the-line undulation baked into phiA itself, independent of Warp depth's displacement
 const FRESH_MIX = 0.65; // how much of the field is the fast-reseeding component vs. the slow persistent one
+const STRETCH_ACROSS_SHARE = 0.75; // share (in log terms) of the wandered stretch that compresses the across-streak axis; the rest lengthens the along axis — see FRAG's domain comment
 const NOISE_BASE_FREQ = 0.55; // lattice cells per half-height at Cloud size 1 — measured so a cloud's half-correlation length lands in the reference's band
 const INK_A = 0.87; // the fixed grating's ink strength: its lines read near-black but not clipped, as the reference's do
 const INK_B = 0.75; // the displaced grating's — measured lighter: where it fills the fixed grating's gaps they go grey, not black, so a dark cloud bottoms out well above ink-on-ink
@@ -88,6 +103,25 @@ const CURTAIN_DOWN_PER_SEC = 0.15; // dropping back onto loud material snaps the
 const CURTAIN_QUIET_THRESHOLD_SCALE = 0.4; // curtain (0..1) scaled into a sectionIntensity threshold; 0 -> threshold 0 -> never quiet enough
 const CURTAIN_EDGE_GAIN = 1.05; // slight overshoot past 1 so a full reveal finishes covering the very top edge
 const CURTAIN_EDGE_WOBBLE = 0.03; // small fbm-driven waviness on the reveal edge, matching the reference's uneven boundary
+
+// Wander (uStretchNow/uAngle/uDetailMix/uTilt) — Round 2's fix for the field
+// reading as monotonous: exponential-approach targets for the noise domain's
+// anisotropy, orientation, fine detail and line tilt. Exported so
+// tests/moire.test.ts can bind to the exact bounds instead of guessing them
+// (CLAUDE.md's "name the symbol" rule) — the rest of this file's constants
+// stay unexported because their tests only assert relative behaviour.
+export const WANDER_TAU_SEC = 6; // exponential time constant at Wander=0.5 (its default) — a swing takes tens of seconds, matching the reference
+export const WANDER_BARS = 4; // bar wraps between re-picks while tempo-locked — a handful of bars lands near WANDER_FALLBACK_SEC's own cadence at a typical tempo
+export const WANDER_FALLBACK_SEC = 8; // seconds between re-picks while unlocked (no bar clock to count wraps on)
+const WANDER_LOCK_THRESHOLD = 0.5; // anim.tempoLock above this counts as "locked" for re-pick purposes — same cut as HueDrift's own bar-boundary reads
+export const ANGLE_STEP = (70 * Math.PI) / 180; // max radians the orientation target can step per re-pick — small enough to walk continuously through every direction, not jump to an unrelated one
+export const TILT_MAX_RAD = (1.5 * Math.PI) / 180; // +/- line tilt target, matching the reference's measured tilt
+export const DETAIL_MIN = 0.15; // low end of the fbm second-octave weight's wander range
+export const DETAIL_MAX = 0.5; // high end — the streaky regime carries more fine structure than round 1's fixed weight
+const DETAIL_REST = 0.3; // round 1's fixed second-octave weight — the resting value before the first wander re-pick, and FRAG's own comment on uDetailMix
+export const STRETCH_CENTROID_LOW = 0.75; // stretch target multiplier at centroid=0 (mix(0.75, 1.35, centroid))
+export const STRETCH_CENTROID_HIGH = 1.35; // ...and at centroid=1 — a brighter spectrum reads streakier
+const ANGLE_DROP_RATE_BOOST = 3; // extra multiple on the angle's ease rate at dropPulse=1 — a drop's turn should land within the hit, not tens of seconds later
 
 const SETTINGS: SceneSetting[] = [
   {
@@ -130,6 +164,18 @@ const SETTINGS: SceneSetting[] = [
     auto: { loudness: 0.3, dynamics: 0.2 },
   },
   {
+    key: "stretch",
+    label: "Streak",
+    description: "Ceiling on how far the wandering field can elongate into a streak",
+    group: "Form",
+    min: 1,
+    max: 4,
+    step: 0.1,
+    default: 3,
+    // A brighter, more treble-forward mix reads as more streaked.
+    auto: { brightness: 0.2 },
+  },
+  {
     key: "duty",
     label: "Ink width",
     description: "Fraction of each period drawn as ink",
@@ -163,6 +209,18 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.2,
     auto: { tempo: 0.2 },
+  },
+  {
+    key: "wander",
+    label: "Wander",
+    description: "How briskly the streak's stretch, orientation and tilt re-pick and ease to a new target — 0 freezes it",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    // A faster, more dynamic track re-picks and turns sooner.
+    auto: { tempo: 0.15, dynamics: 0.2 },
   },
   {
     key: "beatDip",
@@ -248,16 +306,36 @@ float vnoise(vec2 p) {
 // Two octaves only, the second held well down: the reference's clouds carry
 // one or two broad rings each, and every extra octave of detail in the
 // displacement adds a wrap — a third octave drew a thicket of thin contours.
+// The second octave's weight is uDetailMix (Round 2) rather than a fixed
+// constant, so the streaky regime the wander can reach carries more fine
+// structure without touching the first octave's own broad shape.
 float fbm(vec2 p) {
-  return 0.7 * vnoise(p) + 0.3 * vnoise(p * 2.03 + 7.7);
+  return (1.0 - uDetailMix) * vnoise(p) + uDetailMix * vnoise(p * 2.03 + 7.7);
+}
+
+// Plain 2D rotation, for turning the noise domain to uAngle before the
+// anisotropic scale below — not a noise function, so it doesn't fall under
+// this file's "no ported noise" rule.
+vec2 rotateDomain(vec2 v, float a) {
+  float c = cos(a);
+  float s = sin(a);
+  return vec2(c * v.x - s * v.y, s * v.x + c * v.y);
 }
 
 // A single grating's ink at phase phi: dark (1) for the first uDuty share of
 // each period, light (0) the rest, anti-aliased by the phase's own screen
-// derivative rather than a fixed pixel width.
+// derivative rather than a fixed pixel width. Both edges of the ink band are
+// softened, by measuring the periodic distance to the band's centre: a
+// one-sided smoothstep left the edge where fract() wraps as a hard step, and
+// any line that isn't exactly horizontal (the wobble, the tilt) then
+// stair-steps a pixel at a time — neighbouring lines step at the same x, and
+// the steps read as hard vertical seams down the whole frame.
 float grating(float phi) {
   float aa = max(fwidth(phi), 0.0008);
-  return 1.0 - smoothstep(uDuty - aa, uDuty + aa, fract(phi));
+  float halfInk = 0.5 * uDuty;
+  float d = abs(fract(phi) - halfInk);
+  d = min(d, 1.0 - d);
+  return 1.0 - smoothstep(halfInk - aa, halfInk + aa, d);
 }
 
 void main() {
@@ -270,12 +348,27 @@ void main() {
   float periodPx = uResolution.y / uLines;
 
   float wobble = ${WOBBLE.toFixed(3)} * fbm(vec2(p.x * 0.6, uSlowT * 0.3));
-  float phiA = gl_FragCoord.y / periodPx + wobble;
+  // Line tilt (Round 2): a small screen-space shear, in pixels, added before
+  // the period divide — independent of the wobble and the curtain edge.
+  float tiltPx = tan(uTilt) * (gl_FragCoord.x - 0.5 * uResolution.x);
+  float phiA = (gl_FragCoord.y + tiltPx) / periodPx + wobble;
 
   // The displaced grating: a slow persistent component (uSlowT) blended with
   // a fast-reseeding one (uSeed) — see advanceFlicker for how uSeed steps or
-  // glides.
-  vec2 q = p * uScale * ${NOISE_BASE_FREQ.toFixed(2)};
+  // glides. Round 2: both samples share one rotated, anisotropically scaled
+  // domain (rp) so a streak's shape and orientation stay coherent across the
+  // re-roll instead of shimmering independently. The elongation ratio is
+  // uStretchNow, but most of it is spent compressing the across-axis
+  // (STRETCH_ACROSS_SHARE of it, in log terms) rather than lengthening the
+  // along-axis: measured, the reference's streaky frames have about half the
+  // across period of its round clouds while the along length barely grows —
+  // many narrow streaks, not a few long ones.
+  vec2 rp = rotateDomain(p, uAngle);
+  vec2 aniso = vec2(
+    rp.x / pow(uStretchNow, ${(1 - STRETCH_ACROSS_SHARE).toFixed(2)}),
+    rp.y * pow(uStretchNow, ${STRETCH_ACROSS_SHARE.toFixed(2)})
+  );
+  vec2 q = aniso * uScale * ${NOISE_BASE_FREQ.toFixed(2)};
   float slow = fbm(q + vec2(0.0, uSlowT));
   float fresh = fbm(q * 1.3 + vec2(uSeed, -uSeed * 0.7));
   float n = mix(slow, fresh, ${FRESH_MIX.toFixed(2)});
@@ -423,15 +516,140 @@ export function advanceCurtain(
   return st.level;
 }
 
+function clamp01(x: number): number {
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
+/** The subset of AnimFrame advanceWander reads — named separately so tests
+ *  can build one without a whole animClock.ts fixture. */
+export interface WanderInputs {
+  barPhase: number;
+  tempoLock: number;
+  dropOnset: boolean;
+  dropPulse: number;
+  centroid: number;
+}
+
+export interface WanderOutput {
+  angle: number;
+  stretch: number;
+  detail: number;
+  tilt: number;
+}
+
+export interface WanderState extends WanderOutput {
+  angleTarget: number;
+  stretchTarget: number;
+  detailTarget: number;
+  tiltTarget: number;
+  prevBarPhase: number;
+  barsSincePick: number;
+  fallbackSec: number;
+  /** Captured at createWander() time — advanceWander only ever calls
+   *  `st.rng()`, never takes its own rng parameter, so the whole closure
+   *  stays deterministic once seeded. */
+  rng: () => number;
+}
+
+/**
+ * Starts fully at rest: isotropic (stretch 1, angle/tilt 0) and at
+ * DETAIL_REST — bit-identical to Round 1's fixed-weight fbm until the first
+ * re-pick fires (see advanceWander). `rng` defaults to Math.random and
+ * exists to be overridden by tests, same reason ambience.ts's pools take
+ * one.
+ */
+export function createWander(rng: () => number = Math.random): WanderState {
+  return {
+    angle: 0,
+    stretch: 1,
+    detail: DETAIL_REST,
+    tilt: 0,
+    angleTarget: 0,
+    stretchTarget: 1,
+    detailTarget: DETAIL_REST,
+    tiltTarget: 0,
+    prevBarPhase: 0,
+    barsSincePick: 0,
+    fallbackSec: 0,
+    rng,
+  };
+}
+
+/**
+ * Advances the wander clock and returns this frame's {angle, stretch,
+ * detail, tilt}, eased toward re-picked targets — the streaky-not-monotonous
+ * fix from hazy-discovering-plum.md's Round 2. Each value chases its own
+ * target by exponential approach at WANDER_TAU_SEC, scaled by `wander`
+ * (`getSetting("wander")`): 0 makes the ease rate exactly 0 (frozen, however
+ * often targets are re-picked underneath), its default 0.5 matches
+ * WANDER_TAU_SEC exactly, 1 is twice as fast. The angle eases faster still
+ * while `dropPulse` is high (ANGLE_DROP_RATE_BOOST), so a drop's turn lands
+ * with the hit instead of tens of seconds later.
+ *
+ * Targets are re-picked (using `st.rng`, never Math.random directly) on
+ * `dropOnset`; otherwise every WANDER_BARS bar wraps — `barPhase` dropping
+ * by more than half since last frame, `powder.ts`'s HueDrift idiom — while
+ * `tempoLock` is above WANDER_LOCK_THRESHOLD, or every WANDER_FALLBACK_SEC
+ * while it isn't. `stretchMax` (`getSetting("stretch")`) is the ceiling a
+ * freshly log-uniform-picked stretch target can reach before the
+ * centroid mix (STRETCH_CENTROID_LOW..HIGH) is applied and the result
+ * clamped to at least 1; the angle target instead walks from its own
+ * previous target by at most +/-ANGLE_STEP, so orientation drifts
+ * continuously through every direction rather than jumping to an unrelated
+ * one; detail and tilt targets are freshly uniform in their own ranges.
+ * Pure aside from `st`.
+ */
+export function advanceWander(st: WanderState, dtSec: number, inputs: WanderInputs, stretchMax: number, wander: number): WanderOutput {
+  const barWrapped = inputs.barPhase < st.prevBarPhase - 0.5;
+  st.prevBarPhase = inputs.barPhase;
+
+  let repick = inputs.dropOnset;
+  if (inputs.tempoLock > WANDER_LOCK_THRESHOLD) {
+    st.fallbackSec = 0;
+    if (barWrapped) st.barsSincePick += 1;
+    if (st.barsSincePick >= WANDER_BARS) repick = true;
+  } else {
+    st.barsSincePick = 0;
+    st.fallbackSec += dtSec;
+    if (st.fallbackSec >= WANDER_FALLBACK_SEC) repick = true;
+  }
+
+  if (repick) {
+    const ceiling = Math.max(1, stretchMax);
+    const logUniform = Math.exp(st.rng() * Math.log(ceiling)); // log-uniform in [1, ceiling]
+    const centroidMix = STRETCH_CENTROID_LOW + (STRETCH_CENTROID_HIGH - STRETCH_CENTROID_LOW) * clamp01(inputs.centroid);
+    st.stretchTarget = Math.max(1, logUniform * centroidMix);
+    st.angleTarget += (st.rng() * 2 - 1) * ANGLE_STEP;
+    st.detailTarget = DETAIL_MIN + st.rng() * (DETAIL_MAX - DETAIL_MIN);
+    st.tiltTarget = (st.rng() * 2 - 1) * TILT_MAX_RAD;
+    st.barsSincePick = 0;
+    st.fallbackSec = 0;
+  }
+
+  const rateScale = clamp01(wander) * 2; // 0.5 (default) -> 1x, 1 -> 2x, 0 -> exactly frozen below
+  const baseRate = rateScale / WANDER_TAU_SEC;
+  const angleRate = baseRate * (1 + clamp01(inputs.dropPulse) * ANGLE_DROP_RATE_BOOST);
+  const baseK = 1 - Math.exp(-dtSec * baseRate);
+  const angleK = 1 - Math.exp(-dtSec * angleRate);
+
+  st.angle += (st.angleTarget - st.angle) * angleK;
+  st.stretch += (st.stretchTarget - st.stretch) * baseK;
+  st.detail += (st.detailTarget - st.detail) * baseK;
+  st.tilt += (st.tiltTarget - st.tilt) * baseK;
+
+  return { angle: st.angle, stretch: st.stretch, detail: st.detail, tilt: st.tilt };
+}
+
 export const moireScene = createFullscreenScene("moire", "Moiré", FRAG, {
   settings: SETTINGS,
-  extraUniformDecls: `uniform float uSeed;\nuniform float uSlowT;\nuniform float uDepthEnv;\nuniform float uBlackoutPhase;\nuniform float uCurtainLevel;`,
+  extraUniformDecls: `uniform float uSeed;\nuniform float uSlowT;\nuniform float uDepthEnv;\nuniform float uBlackoutPhase;\nuniform float uCurtainLevel;\nuniform float uStretchNow;\nuniform float uAngle;\nuniform float uDetailMix;\nuniform float uTilt;`,
   extraUniforms: (() => {
     let elapsedSec = 0;
     let slowT = 0;
     const flicker = createFlickerState();
     const blackout = createBlackoutState();
     const curtain = createCurtainState();
+    const wander = createWander();
 
     return (frame, anim, getSetting) => {
       elapsedSec += anim.dtSec;
@@ -443,6 +661,19 @@ export const moireScene = createFullscreenScene("moire", "Moiré", FRAG, {
         introRamp(elapsedSec) * (ENERGY_DEPTH_FLOOR + (1 - ENERGY_DEPTH_FLOOR) * frame.energy) * (1 - getSetting("beatDip") * anim.beatPulse);
       const blackoutPhase = advanceBlackout(blackout, anim.dtSec, anim.dropOnset, anim.lowOnset, getSetting("blackout"));
       const curtainLevel = advanceCurtain(curtain, anim.dtSec, anim.sectionIntensity, getSetting("curtain"), anim.dropOnset);
+      const wanderOut = advanceWander(
+        wander,
+        anim.dtSec,
+        {
+          barPhase: anim.barPhase,
+          tempoLock: anim.tempoLock,
+          dropOnset: anim.dropOnset,
+          dropPulse: anim.dropPulse,
+          centroid: anim.centroid,
+        },
+        getSetting("stretch"),
+        getSetting("wander"),
+      );
 
       return {
         uSeed: seed,
@@ -450,6 +681,10 @@ export const moireScene = createFullscreenScene("moire", "Moiré", FRAG, {
         uDepthEnv: depthEnv,
         uBlackoutPhase: blackoutPhase,
         uCurtainLevel: curtainLevel,
+        uStretchNow: wanderOut.stretch,
+        uAngle: wanderOut.angle,
+        uDetailMix: wanderOut.detail,
+        uTilt: wanderOut.tilt,
       };
     };
   })(),

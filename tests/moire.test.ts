@@ -3,14 +3,53 @@ import {
   advanceBlackout,
   advanceCurtain,
   advanceFlicker,
+  advanceWander,
+  ANGLE_STEP,
   createBlackoutState,
   createCurtainState,
   createFlickerState,
+  createWander,
+  DETAIL_MAX,
+  DETAIL_MIN,
   introRamp,
   moireScene,
+  STRETCH_CENTROID_HIGH,
+  TILT_MAX_RAD,
+  WANDER_BARS,
+  WANDER_FALLBACK_SEC,
+  type WanderInputs,
 } from "../src/render/scenes/moire.ts";
 import { computeAutoTarget } from "../src/render/autoTune.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
+
+// mulberry32: a small deterministic PRNG so the wander tests are
+// reproducible for a given seed — same pattern as storm.ts/ambience.ts's own
+// local createRng, kept test-local since advanceWander only needs a plain
+// `() => number`.
+function createRng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// One simulated bar: progress partway through it, then wrap back near 0 —
+// powder.ts's HueDrift idiom (a bar boundary is a wrap in barPhase, not a
+// threshold crossing) — exactly one wrap per call.
+function simulateBar(
+  st: ReturnType<typeof createWander>,
+  dt: number,
+  stretchMax: number,
+  wander: number,
+  rest: Omit<WanderInputs, "barPhase">,
+): void {
+  advanceWander(st, dt, { ...rest, barPhase: 0.9 }, stretchMax, wander);
+  advanceWander(st, dt, { ...rest, barPhase: 0.1 }, stretchMax, wander);
+}
 
 describe("moire flicker (advanceFlicker)", () => {
   it("steps rate*T times over T seconds, within one step", () => {
@@ -176,6 +215,120 @@ describe("moire curtain (advanceCurtain)", () => {
     let level = 0;
     for (let i = 0; i < 60 * 60; i++) level = advanceCurtain(st, dt, QUIET_SECTION_INTENSITY, 0, false);
     expect(level).toBe(0);
+  });
+});
+
+describe("moire wander (createWander/advanceWander)", () => {
+  const REST: Omit<WanderInputs, "barPhase"> = { tempoLock: 1, dropOnset: false, dropPulse: 0, centroid: 0.5 };
+
+  it("keeps every value inside its designed range over a long, varied run", () => {
+    const stretchMax = 3;
+    const st = createWander(createRng(42));
+    const dt = 1 / 60;
+    for (let i = 0; i < 20000; i++) {
+      const barPhase = (i % 37) / 37; // wraps periodically
+      const tempoLock = i % 500 < 250 ? 1 : 0; // alternates locked/unlocked
+      const dropOnset = i % 613 === 0;
+      const dropPulse = dropOnset ? 1 : Math.max(0, 1 - (i % 613) / 40);
+      const centroid = 0.5 + 0.5 * Math.sin(i * 0.01);
+      const out = advanceWander(st, dt, { barPhase, tempoLock, dropOnset, dropPulse, centroid }, stretchMax, 0.5);
+      expect(out.stretch).toBeGreaterThanOrEqual(1);
+      expect(out.stretch).toBeLessThanOrEqual(stretchMax * STRETCH_CENTROID_HIGH + 1e-9);
+      expect(out.detail).toBeGreaterThanOrEqual(DETAIL_MIN - 1e-9);
+      expect(out.detail).toBeLessThanOrEqual(DETAIL_MAX + 1e-9);
+      expect(out.tilt).toBeGreaterThanOrEqual(-TILT_MAX_RAD - 1e-9);
+      expect(out.tilt).toBeLessThanOrEqual(TILT_MAX_RAD + 1e-9);
+      expect(Number.isFinite(out.angle)).toBe(true);
+    }
+  });
+
+  it("never re-picks the angle target by more than ANGLE_STEP", () => {
+    const st = createWander(createRng(9));
+    const dt = 1 / 60;
+    let prevTarget = st.angleTarget;
+    for (let i = 0; i < 5000; i++) {
+      const barPhase = (i % 37) / 37;
+      advanceWander(st, dt, { ...REST, barPhase, tempoLock: i % 400 < 200 ? 1 : 0, dropOnset: i % 900 === 0 }, 3, 0.5);
+      const delta = Math.abs(st.angleTarget - prevTarget);
+      if (delta > 1e-12) expect(delta).toBeLessThanOrEqual(ANGLE_STEP + 1e-9);
+      prevTarget = st.angleTarget;
+    }
+  });
+
+  it("eases toward the target rather than snapping to it — no per-frame jump as large as ANGLE_STEP", () => {
+    const st = createWander(createRng(13));
+    const dt = 1 / 60;
+    let prevAngle = st.angle;
+    for (let i = 0; i < 3000; i++) {
+      const barPhase = (i % 20) / 20;
+      const dropOnset = i % 300 === 0;
+      const out = advanceWander(st, dt, { ...REST, barPhase, dropOnset, dropPulse: dropOnset ? 1 : 0 }, 3, 1);
+      expect(Math.abs(out.angle - prevAngle)).toBeLessThan(ANGLE_STEP);
+      prevAngle = out.angle;
+    }
+  });
+
+  it("re-picks targets after WANDER_BARS bar wraps while tempo-locked, not before", () => {
+    const st = createWander(createRng(7));
+    const initial = { angle: st.angleTarget, stretch: st.stretchTarget, detail: st.detailTarget, tilt: st.tiltTarget };
+    const dt = 1 / 60;
+    for (let i = 0; i < WANDER_BARS - 1; i++) simulateBar(st, dt, 3, 0.5, REST);
+    const before = { angle: st.angleTarget, stretch: st.stretchTarget, detail: st.detailTarget, tilt: st.tiltTarget };
+    expect(before).toEqual(initial); // fewer than WANDER_BARS wraps: no re-pick yet
+
+    simulateBar(st, dt, 3, 0.5, REST); // the WANDER_BARS-th wrap crosses the threshold
+    const after = { angle: st.angleTarget, stretch: st.stretchTarget, detail: st.detailTarget, tilt: st.tiltTarget };
+    expect(after).not.toEqual(before);
+  });
+
+  it("re-picks targets every WANDER_FALLBACK_SEC while tempo is unlocked", () => {
+    const st = createWander(createRng(11));
+    const dt = 0.5;
+    const stepsBeforeThreshold = Math.floor(WANDER_FALLBACK_SEC / dt) - 1;
+    for (let i = 0; i < stepsBeforeThreshold; i++) {
+      advanceWander(st, dt, { ...REST, barPhase: 0, tempoLock: 0 }, 3, 0.5);
+    }
+    const before = { angle: st.angleTarget, stretch: st.stretchTarget, detail: st.detailTarget, tilt: st.tiltTarget };
+    expect(st.fallbackSec).toBeLessThan(WANDER_FALLBACK_SEC);
+
+    advanceWander(st, dt, { ...REST, barPhase: 0, tempoLock: 0 }, 3, 0.5);
+    const after = { angle: st.angleTarget, stretch: st.stretchTarget, detail: st.detailTarget, tilt: st.tiltTarget };
+    expect(after).not.toEqual(before);
+  });
+
+  it("re-picks immediately on dropOnset, regardless of the bar/fallback clocks", () => {
+    const st = createWander(createRng(3));
+    expect(st.stretchTarget).toBe(1);
+    advanceWander(st, 1 / 60, { ...REST, barPhase: 0, dropOnset: true, dropPulse: 1 }, 3, 0.5);
+    // centroidMix at centroid=0.5 is > 1, and the log-uniform draw is >= 1,
+    // so a genuine re-pick always pushes the stretch target strictly above 1.
+    expect(st.stretchTarget).toBeGreaterThan(1);
+  });
+
+  it("holds the returned values exactly frame to frame when wander=0, however often targets are re-picked underneath", () => {
+    const st = createWander(createRng(5));
+    const first = advanceWander(st, 1 / 60, { ...REST, barPhase: 0.9, dropPulse: 1 }, 3, 0);
+    for (let i = 0; i < 500; i++) {
+      const barPhase = i % 2 === 0 ? 0.1 : 0.9; // forces a wrap every other frame
+      const dropOnset = i % 37 === 0;
+      const out = advanceWander(st, 1 / 30, { ...REST, barPhase, dropOnset, dropPulse: 1, centroid: 0.9 }, 3, 0);
+      expect(out).toEqual(first);
+    }
+  });
+
+  it("is deterministic for a given rng, and differs for a different one", () => {
+    const run = (seed: number) => {
+      const st = createWander(createRng(seed));
+      let last;
+      for (let i = 0; i < 200; i++) {
+        const barPhase = (i % 10) / 10;
+        const dropOnset = i === 50;
+        last = advanceWander(st, 1 / 60, { ...REST, barPhase, tempoLock: 0.8, dropOnset, dropPulse: dropOnset ? 1 : 0 }, 3, 0.5);
+      }
+      return last;
+    };
+    expect(run(1)).toEqual(run(1));
+    expect(run(1)).not.toEqual(run(2));
   });
 });
 
