@@ -92,7 +92,7 @@ const modeChipStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top:
 const modeChipLitStyle = `${chipBtnLitStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
 
 const MODE_OPTIONS: { mode: PowerMode; text: string; title: string }[] = [
-  { mode: "auto", text: "Auto", title: "Let the quality governor decide — the recommended setting" },
+  { mode: "auto", text: "Auto", title: "Let the quality governor decide, stepping down under load and back up once comfortable" },
   { mode: "on", text: "On", title: "Force energy saving: half the frame rate, full resolution kept" },
   { mode: "off", text: "Off", title: "Never reduce quality or frame rate, no matter the load" },
 ];

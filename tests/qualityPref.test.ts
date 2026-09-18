@@ -12,9 +12,9 @@ describe("quality choice persistence", () => {
 
   // vitest runs under environment: "node" (vitest.config.ts), so there is no
   // localStorage global at all here — this also proves the module tolerates that.
-  it("defaults to auto", () => {
-    expect(QUALITY_CHOICE_DEFAULT).toBe("auto");
-    expect(getQualityChoice()).toBe("auto");
+  it("defaults to high", () => {
+    expect(QUALITY_CHOICE_DEFAULT).toBe("high");
+    expect(getQualityChoice()).toBe("high");
   });
 
   it("round-trips a set", () => {
