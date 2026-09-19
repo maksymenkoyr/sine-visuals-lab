@@ -1,5 +1,5 @@
 import { registerScene } from "../scene.ts";
-import { tesseraScene } from "./tessera.ts";
+import { tesseraScene } from "./tessera/index.ts";
 import { spectrumScene } from "./spectrum.ts";
 import { particlesScene } from "./particles.ts";
 import { tunnelScene } from "./tunnel.ts";
