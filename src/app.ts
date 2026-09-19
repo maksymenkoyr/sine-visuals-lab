@@ -992,11 +992,23 @@ async function boot(): Promise<void> {
       quality: () => quality,
       liveFrame: () => lastVis,
       onPick: (id) => {
-        void ensureAudio(); // fires inside the click, before any await, so the gesture survives
+        // Fires inside the click, before any await, so the gesture survives —
+        // which is also what lets a tile tap open the share picker directly
+        // when the masthead's sound-source picker says "Share a tab", instead
+        // of detouring through the start prompt the way an implicit start must
+        // (see autoStartSource).
+        void ensureAudio(resolveInitialSource());
         navigate({ kind: "viz", sceneId: id }, "push");
       },
       onDisabledPick: (id, reason) => showHud(`${id}: ${reason}`, true),
       canCaptureDisplay: () => displayCaptureSupported(),
+      // While a capture is live it is the truth; before that, the remembered pref.
+      sourceChoice: () => (bandAnalyser && capture ? (capture.kind === "display" ? "display" : "mic") : resolveInitialSource()),
+      onSourceChoice: (next) => {
+        if (bandAnalyser) return swapAudioSource(next); // persists the pref itself, once the swap lands
+        setAudioSourceChoice(next);
+        return Promise.resolve();
+      },
     });
 
     // A shared look link (?look=<code>#/v/<id>, see looksCard.ts's

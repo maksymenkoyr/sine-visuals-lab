@@ -6,6 +6,9 @@ import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRe
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
 import { PRODUCT_NAME, SOURCE_URL } from "../brand.ts";
+import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice } from "../audio/sourcePref.ts";
+import { createBrandMark, BRAND_RED } from "./brandMark.ts";
+import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
 
 export interface GallerySceneEntry {
   scene: Scene;
@@ -29,9 +32,17 @@ export interface GalleryDeps {
   onPick: (sceneId: string) => void;
   onDisabledPick: (sceneId: string, reason: string) => void;
   /** Whether this device can offer the Screen source at all — see
-   *  src/audio/sourcePref.ts's displayCaptureSupported. Branches the
-   *  subtitle's copy so it never names an option a mobile visitor won't see. */
+   *  src/audio/sourcePref.ts's displayCaptureSupported. Where it can't, the
+   *  masthead's sound-source picker shows the microphone alone and the
+   *  subtitle never names an option a mobile visitor won't see. */
   canCaptureDisplay: () => boolean;
+  /** The source a tile tap will start on — what the picker highlights. */
+  sourceChoice: () => AudioSourceChoice;
+  /** Fired inside the picker's click, so a live swap to screen capture still
+   *  has its user gesture. Resolves once the choice has settled (a cancelled
+   *  share picker leaves the old one in place); the picker then re-reads
+   *  sourceChoice() rather than trusting what was clicked. */
+  onSourceChoice: (next: AudioSourceChoice) => Promise<void>;
 }
 
 export interface Gallery {
@@ -43,52 +54,136 @@ export interface Gallery {
   destroy(): void;
 }
 
-const rootStyle = `
+const STYLE_ID = "gallery-styles";
+const GROUND = "#05070a";
+/** Below this the masthead stacks and the page gutters tighten. */
+const NARROW_BELOW_PX = 820;
+
+// The gallery design (option 1a of "Gallery & Scene", in the same Claude
+// Design project as the controls panel's "Viz Controls"): masthead with the
+// mark and the sound-source picker, a Released section of large
+// tiles, a Draft section of small ones behind a fold, and a one-line footer.
+// A stylesheet rather than inline cssText because nearly every rule here
+// needs :hover, :focus-visible or a media query. Accents and fonts come from
+// controlsTheme.ts so the gallery and the panel can't drift apart.
+const stylesheet = `
+.gal-root {
   position: fixed; inset: 0; z-index: 15; overflow-y: auto; display: none;
-  background: #000; color: #fff; font-family: system-ui, sans-serif;
-  padding: 28px 20px 40px;
+  background: ${GROUND}; color: #fff; font-family: ${FONT_LABEL};
+  padding: 44px 56px 48px; box-sizing: border-box;
+}
+.gal-page { max-width: 1328px; margin: 0 auto; display: flex; flex-direction: column; gap: 36px; }
+.gal-mono { font: 400 10.5px ${FONT_MONO}; text-transform: uppercase; }
+
+.gal-mast { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; }
+.gal-ident { display: flex; gap: 22px; align-items: center; min-width: 0; }
+.gal-title { font: 500 30px/1 ${FONT_LABEL}; letter-spacing: .01em; }
+.gal-sub { font: 400 14px/1.4 ${FONT_LABEL}; color: rgba(255,255,255,.62); margin-top: 6px; }
+.gal-source { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; flex: none; }
+.gal-source-label { letter-spacing: .14em; color: rgba(255,255,255,.5); }
+.gal-source-row { display: flex; gap: 4px; }
+.gal-src {
+  display: flex; align-items: center; gap: 9px; padding: 10px 14px; text-align: left;
+  border: 1px solid rgba(255,255,255,.16); border-radius: 3px; background: none;
+  color: #fff; font: inherit; cursor: pointer;
+}
+.gal-src:hover { border-color: rgba(255,255,255,.4); }
+.gal-src[aria-checked="true"] { border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; }
+.gal-src[data-solo] { cursor: default; }
+.gal-src-dot { width: 5px; height: 5px; border-radius: 50%; border: 1px solid rgba(255,255,255,.45); box-sizing: border-box; flex: none; }
+.gal-src[aria-checked="true"] .gal-src-dot { background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN}; }
+.gal-src-name { font: 400 13.5px ${FONT_LABEL}; }
+.gal-src-hint { font: 400 9.5px ${FONT_MONO}; letter-spacing: .1em; color: rgba(255,255,255,.55); margin-top: 2px; }
+
+.gal-error {
+  display: none; padding: 10px 14px; border-radius: 3px; font-size: 13px;
+  background: rgba(232,50,42,.14); border: 1px solid ${withAlpha(BRAND_RED, 0.6)};
+}
+
+.gal-section { display: flex; flex-direction: column; gap: 14px; }
+.gal-section-head { display: flex; align-items: center; gap: 14px; min-height: 26px; }
+.gal-section-name { letter-spacing: .16em; }
+.gal-rule { flex: 1; height: 1px; background: rgba(255,255,255,.1); }
+.gal-count { letter-spacing: .1em; color: rgba(255,255,255,.4); }
+.gal-fold {
+  display: flex; align-items: center; gap: 8px; letter-spacing: .1em;
+  color: rgba(255,255,255,.55); background: none; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.16); border-radius: 3px; padding: 6px 12px;
+}
+.gal-fold:hover:not(:disabled) { color: #fff; border-color: rgba(255,255,255,.4); }
+.gal-fold:disabled { cursor: progress; opacity: .7; }
+.gal-fold-arrow { font-size: 8px; }
+
+.gal-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.gal-grid-draft { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+
+.gal-tile {
+  display: block; width: 100%; padding: 0; text-align: left; font: inherit; color: #fff;
+  border: 1px solid rgba(255,255,255,.13); border-top-color: rgba(255,255,255,.22);
+  border-radius: 3px; background: rgba(255,255,255,.025); overflow: hidden; cursor: pointer;
+}
+.gal-tile:hover, .gal-tile:focus-visible { border-color: ${BRAND_RED}; outline: none; }
+.gal-tile[data-draft] { border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.02); }
+.gal-tile[data-draft]:hover, .gal-tile[data-draft]:focus-visible { border-color: ${withAlpha(SCENE_VIOLET, 0.7)}; }
+.gal-tile[data-disabled] { opacity: .45; }
+.gal-shot { position: relative; aspect-ratio: 16 / 9; background: ${GROUND}; }
+.gal-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.gal-shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(5,7,10,.7), transparent 40%); pointer-events: none; }
+.gal-over { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.gal-name-group { display: flex; align-items: baseline; gap: 12px; min-width: 0; flex-wrap: wrap; }
+.gal-name { font: 500 22px/1 ${FONT_LABEL}; }
+.gal-meta { letter-spacing: .12em; color: rgba(255,255,255,.7); }
+.gal-start {
+  font: 400 11px ${FONT_MONO}; letter-spacing: .14em; flex: none; white-space: nowrap;
+  color: ${INPUT_GREEN}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.6)};
+  border-radius: 3px; padding: 5px 10px; background: rgba(5,7,10,.5);
+}
+.gal-start[data-muted] { color: rgba(255,255,255,.7); border-color: rgba(255,255,255,.3); }
+.gal-cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; }
+.gal-cap-name { font: 400 15px ${FONT_LABEL}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.gal-tag {
+  font: 400 9.5px ${FONT_MONO}; letter-spacing: .12em; text-transform: uppercase; flex: none;
+  color: ${SCENE_VIOLET}; border: 1px solid ${withAlpha(SCENE_VIOLET, 0.5)}; border-radius: 3px; padding: 2px 6px;
+}
+
+.gal-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap;
+  padding-top: 16px; border-top: 1px solid rgba(255,255,255,.08); color: rgba(255,255,255,.4);
+}
+.gal-foot-left { letter-spacing: .14em; }
+.gal-foot-right { letter-spacing: .1em; display: flex; gap: 8px 20px; flex-wrap: wrap; }
+.gal-foot a { color: inherit; text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.25); }
+.gal-foot a:hover { color: #fff; }
+
+@media (max-width: ${NARROW_BELOW_PX}px) {
+  .gal-root { padding: 24px 16px 32px; }
+  .gal-page { gap: 28px; }
+  .gal-mast { flex-direction: column; gap: 20px; }
+  .gal-ident { gap: 16px; }
+  .gal-title { font-size: 24px; }
+  .gal-sub { font-size: 13px; }
+  .gal-source { align-items: flex-start; }
+  .gal-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .gal-name { font-size: 19px; }
+  /* A phone at arm's length: the fold is how the drafts are reached at all. */
+  .gal-fold { min-height: 40px; padding: 8px 14px; }
+}
 `;
-const headerStyle = `max-width: 1100px; margin: 0 auto 24px;`;
-const titleStyle = `font-size: 22px; font-weight: 700;`;
-const subtitleStyle = `font-size: 13px; opacity: 0.55; margin-top: 4px;`;
-const sourceLinkStyle = `font-size: 12px; opacity: 0.45; margin-top: 6px; display: inline-block; color: inherit;`;
-const errorStyle = `
-  max-width: 1100px; margin: 0 auto 16px; padding: 10px 14px; border-radius: 8px;
-  background: #4a1a1a; border: 1px solid #f66a; font-size: 13px; display: none;
-`;
-const gridStyle = `
-  display: grid; gap: 16px; max-width: 1100px; margin: 0 auto;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-`;
-const tileStyle = `
-  background: #111; border: 1px solid #fff2; border-radius: 16px; padding: 8px;
-  cursor: pointer; text-align: left; font: inherit; color: #fff;
-  display: block; width: 100%;
-`;
-const canvasStyle = `width: 100%; display: block; aspect-ratio: 16 / 9; border-radius: 12px; background: #000;`;
-const captionStyle = `display: flex; justify-content: space-between; align-items: baseline; padding: 10px 6px 4px;`;
-// The name sits alongside its (optional) draft badge in one flex group so the
-// badge stays right next to the name rather than being pushed to the tile's
-// far edge by captionStyle's space-between — `reason` still owns that edge.
-const nameGroupStyle = `display: flex; align-items: baseline; gap: 7px; min-width: 0;`;
-const nameStyle = `
-  font-size: 14px; font-weight: 600;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
-`;
-const badgeStyle = `
-  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
-  color: #fffa; background: #fff2; border: 1px solid #fff3;
-  border-radius: 999px; padding: 1px 7px; flex-shrink: 0;
-`;
-const reasonStyle = `font-size: 11px; opacity: 0.6; flex-shrink: 0;`;
-// Sized as a real button, not a caption: this is how the draft scenes are
-// reached at all, and it has to be findable on a TV or a phone at arm's length.
-const draftToggleStyle = `
-  display: block; margin: 28px auto 0; padding: 14px 28px;
-  background: #fff1; border: 1px solid #fff3; color: #fffd; font: inherit;
-  font-size: 17px; font-weight: 600; letter-spacing: 0.01em;
-  cursor: pointer; border-radius: 999px; min-height: 48px;
-`;
+
+function ensureGalleryStyles(): void {
+  if (document.getElementById(STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = stylesheet;
+  document.head.appendChild(style);
+}
+
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
 
 const PREVIEW_W = 480;
 const PREVIEW_H = 270;
@@ -136,45 +231,101 @@ interface Tile {
 }
 
 export function createGallery(deps: GalleryDeps): Gallery {
-  const root = document.createElement("div");
-  root.style.cssText = rootStyle;
+  ensureGalleryStyles();
+  const root = el("div", "gal-root");
+  const page = el("div", "gal-page");
 
-  const header = document.createElement("div");
-  header.style.cssText = headerStyle;
-  const title = document.createElement("div");
-  title.textContent = PRODUCT_NAME;
-  title.style.cssText = titleStyle;
-  const subtitle = document.createElement("div");
-  subtitle.textContent = deps.canCaptureDisplay()
-    ? "Pick a visual — tap to start on your mic, or share a tab for cleaner sound."
-    : "Pick a visual — tap to start with your mic.";
-  subtitle.style.cssText = subtitleStyle;
-  // The AGPL §13 network-source offer — see src/brand.ts.
-  const sourceLink = document.createElement("a");
-  sourceLink.textContent = "Source (AGPL-3.0)";
-  sourceLink.href = SOURCE_URL;
-  sourceLink.target = "_blank";
-  sourceLink.rel = "noopener";
-  sourceLink.style.cssText = sourceLinkStyle;
-  header.append(title, subtitle, sourceLink);
+  // Masthead: the mark lives here and nowhere else on the page.
+  const mast = el("div", "gal-mast");
+  const ident = el("div", "gal-ident");
+  const identText = el("div", "");
+  identText.append(
+    el("div", "gal-title", PRODUCT_NAME),
+    el(
+      "div",
+      "gal-sub",
+      deps.canCaptureDisplay()
+        ? "Audio-reactive visuals in the browser. Pick a scene, then choose where the sound comes from."
+        : "Audio-reactive visuals in the browser. Pick a scene to start on your mic.",
+    ),
+  );
+  ident.append(createBrandMark(72), identText);
 
-  const errorBanner = document.createElement("div");
-  errorBanner.style.cssText = errorStyle;
+  // Sound source: which capture a tile tap starts on. A radio pair where
+  // screen capture exists; the microphone alone, as a plain statement, where
+  // it doesn't.
+  const source = el("div", "gal-source");
+  const sourceRow = el("div", "gal-source-row");
+  sourceRow.setAttribute("role", "radiogroup");
+  sourceRow.setAttribute("aria-label", "Sound source");
+  const sourceButtons = new Map<AudioSourceChoice, HTMLButtonElement>();
+  const refreshSource = (): void => {
+    const current = deps.sourceChoice();
+    for (const [choice, btn] of sourceButtons) btn.setAttribute("aria-checked", String(choice === current));
+  };
+  const addSource = (choice: AudioSourceChoice, name: string, hint: string, title?: string): void => {
+    const btn = el("button", "gal-src");
+    btn.type = "button";
+    btn.setAttribute("role", "radio");
+    if (title) btn.title = title;
+    const text = el("div", "");
+    text.append(el("div", "gal-src-name", name), el("div", "gal-src-hint", hint));
+    btn.append(el("div", "gal-src-dot"), text);
+    if (deps.canCaptureDisplay()) {
+      btn.addEventListener("click", () => void deps.onSourceChoice(choice).then(refreshSource, refreshSource));
+    } else {
+      btn.dataset.solo = "";
+      btn.tabIndex = -1;
+    }
+    sourceButtons.set(choice, btn);
+    sourceRow.appendChild(btn);
+  };
+  addSource("mic", "Microphone", "DEFAULT · TAP A SCENE");
+  if (deps.canCaptureDisplay()) addSource("display", "Share a tab", "CLEANER SIGNAL", DISPLAY_SHARE_GUIDE);
+  source.append(el("div", "gal-mono gal-source-label", "Sound source"), sourceRow);
+  mast.append(ident, source);
 
-  const grid = document.createElement("div");
-  grid.style.cssText = gridStyle;
+  const errorBanner = el("div", "gal-error");
+  errorBanner.setAttribute("role", "alert");
+
+  const released = el("div", "gal-section");
+  const releasedHead = el("div", "gal-section-head");
+  const releasedName = el("div", "gal-mono gal-section-name", "Released");
+  releasedName.style.color = BANDS_AMBER;
+  const releasedCount = el("div", "gal-mono gal-count");
+  releasedHead.append(releasedName, el("div", "gal-rule"), releasedCount);
+  const grid = el("div", "gal-grid");
+  released.append(releasedHead, grid);
 
   // Collapsed by default — see expandDrafts/collapseDrafts below. Built lazily
   // so a first-time visitor never pays for compiling the draft shaders.
-  const draftToggle = document.createElement("button");
-  draftToggle.style.cssText = draftToggleStyle;
-  draftToggle.style.display = "none";
-
-  const draftGrid = document.createElement("div");
-  draftGrid.style.cssText = gridStyle;
+  const draftSection = el("div", "gal-section");
+  const draftHead = el("div", "gal-section-head");
+  const draftName = el("div", "gal-mono gal-section-name", "Draft");
+  draftName.style.color = SCENE_VIOLET;
+  const draftToggle = el("button", "gal-mono gal-fold");
+  draftToggle.type = "button";
+  const draftArrow = el("span", "gal-fold-arrow");
+  const draftLabel = el("span", "");
+  draftToggle.append(draftArrow, draftLabel);
+  draftHead.append(draftName, el("div", "gal-rule"), draftToggle);
+  const draftGrid = el("div", "gal-grid-draft");
   draftGrid.style.display = "none";
+  draftSection.append(draftHead, draftGrid);
 
-  root.append(header, errorBanner, grid, draftToggle, draftGrid);
+  // The Source link is the AGPL §13 network-source offer (see src/brand.ts),
+  // and PRIVACY.md points readers at it — it has to stay on this page.
+  const foot = el("div", "gal-mono gal-foot");
+  const footRight = el("div", "gal-foot-right");
+  const sourceLink = el("a", "", "Source · AGPL-3.0");
+  sourceLink.href = SOURCE_URL;
+  sourceLink.target = "_blank";
+  sourceLink.rel = "noopener";
+  footRight.append(el("span", "", "Chrome · Safari · Firefox"), sourceLink);
+  foot.append(el("div", "gal-foot-left", "Runs locally · Audio never leaves this device"), footRight);
+
+  page.append(mast, errorBanner, released, draftSection, foot);
+  root.appendChild(page);
   document.body.appendChild(root);
 
   let preview: PreviewRenderer | null = null;
@@ -208,41 +359,45 @@ export function createGallery(deps: GalleryDeps): Gallery {
   );
 
   function buildTile(entry: GallerySceneEntry, i: number, into: HTMLElement): void {
-    const btn = document.createElement("button");
-    btn.style.cssText = tileStyle + (entry.enabled ? "" : "opacity: 0.45;");
+    const btn = el("button", "gal-tile");
+    btn.type = "button";
+    if (entry.draft) btn.dataset.draft = "";
+    if (!entry.enabled) btn.dataset.disabled = "";
 
-    const canvas = document.createElement("canvas");
+    const shot = el("div", "gal-shot");
+    const canvas = el("canvas", "gal-canvas");
     canvas.width = PREVIEW_W;
     canvas.height = PREVIEW_H;
-    canvas.style.cssText = canvasStyle;
     // Draft tiles may be built into a still-collapsed (display: none) section —
     // mark them not-visible up front so tick()'s round-robin never draws one
     // in the brief window before the IntersectionObserver's first callback.
     if (entry.draft) canvas.dataset.visible = "0";
+    shot.appendChild(canvas);
 
-    const caption = document.createElement("div");
-    caption.style.cssText = captionStyle;
-    const nameGroup = document.createElement("div");
-    nameGroup.style.cssText = nameGroupStyle;
-    const name = document.createElement("span");
-    name.textContent = entry.scene.name;
-    name.style.cssText = nameStyle;
-    nameGroup.appendChild(name);
+    const reason = entry.enabled ? null : (entry.reason ?? "Unavailable");
     if (entry.draft) {
-      const badge = document.createElement("span");
-      badge.textContent = "DRAFT";
-      badge.style.cssText = badgeStyle;
-      nameGroup.appendChild(badge);
-    }
-    caption.appendChild(nameGroup);
-    if (!entry.enabled && entry.reason) {
-      const reason = document.createElement("span");
-      reason.textContent = entry.reason;
-      reason.style.cssText = reasonStyle;
-      caption.appendChild(reason);
+      // Small tile: the picture, then a caption bar with the name and a tag
+      // (the reason it can't run here takes the tag's place when it can't).
+      const cap = el("div", "gal-cap");
+      cap.append(el("div", "gal-cap-name", entry.scene.name), el("div", "gal-tag", reason ?? "Draft"));
+      btn.append(shot, cap);
+    } else {
+      // Large tile: name, a one-line spec and the call to action sit over the
+      // picture's darkened foot.
+      const controls = entry.scene.settings?.length ?? 0;
+      const nameGroup = el("div", "gal-name-group");
+      nameGroup.append(
+        el("div", "gal-name", entry.scene.name),
+        el("div", "gal-mono gal-meta", controls > 0 ? `WebGL · ${controls} controls` : "WebGL"),
+      );
+      const start = el("div", "gal-start", reason ?? "START ›");
+      if (reason) start.dataset.muted = "";
+      const over = el("div", "gal-over");
+      over.append(nameGroup, start);
+      shot.append(el("div", "gal-shade"), over);
+      btn.appendChild(shot);
     }
 
-    btn.append(canvas, caption);
     btn.addEventListener("click", () => {
       if (entry.enabled) deps.onPick(entry.scene.id);
       else deps.onDisabledPick(entry.scene.id, entry.reason ?? "unavailable");
@@ -264,15 +419,14 @@ export function createGallery(deps: GalleryDeps): Gallery {
 
   function updateToggleLabel(): void {
     const loading = draftsBuiltCount >= 0;
+    const n = pendingDrafts.length;
     draftToggle.disabled = loading;
     draftToggle.setAttribute("aria-busy", loading ? "true" : "false");
-    draftToggle.style.cursor = loading ? "progress" : "pointer";
-    draftToggle.style.opacity = loading ? "0.7" : "1";
-    draftToggle.textContent = loading
-      ? `Loading draft scenes… ${draftsBuiltCount} of ${pendingDrafts.length}`
-      : draftsExpanded
-        ? "▾ Hide draft scenes"
-        : `▸ Show ${pendingDrafts.length} draft scenes`;
+    draftToggle.setAttribute("aria-expanded", String(draftsExpanded));
+    draftArrow.textContent = draftsExpanded ? "▼" : "▶";
+    draftLabel.textContent = loading
+      ? `Loading drafts ${draftsBuiltCount} / ${n}`
+      : `${draftsExpanded ? "Hide" : "Show"} ${n} ${n === 1 ? "draft" : "drafts"}`;
   }
 
   // Draft tiles are built one per animation frame rather than all at once:
@@ -342,7 +496,10 @@ export function createGallery(deps: GalleryDeps): Gallery {
 
     featured.forEach((entry, i) => buildTile(entry, i, grid));
 
-    draftToggle.style.display = pendingDrafts.length > 0 ? "block" : "none";
+    releasedCount.textContent = `${featured.length} ${featured.length === 1 ? "scene" : "scenes"}`;
+    released.style.display = featured.length > 0 ? "" : "none";
+    draftSection.style.display = pendingDrafts.length > 0 ? "" : "none";
+    refreshSource();
     updateToggleLabel();
 
     // Re-expand across a rebuild (e.g. returning from a viz) so browsing the
