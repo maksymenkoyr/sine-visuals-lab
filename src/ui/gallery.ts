@@ -142,11 +142,9 @@ const stylesheet = `
 }
 
 .gal-foot {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap;
+  display: flex; justify-content: flex-end; letter-spacing: .1em;
   padding-top: 16px; border-top: 1px solid rgba(255,255,255,.08); color: rgba(255,255,255,.4);
 }
-.gal-foot-left { letter-spacing: .14em; }
-.gal-foot-right { letter-spacing: .1em; display: flex; gap: 8px 20px; flex-wrap: wrap; }
 .gal-foot a { color: inherit; text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.25); }
 .gal-foot a:hover { color: #fff; }
 
@@ -299,13 +297,11 @@ export function createGallery(deps: GalleryDeps): Gallery {
   // The Source link is the AGPL §13 network-source offer (see src/brand.ts),
   // and PRIVACY.md points readers at it — it has to stay on this page.
   const foot = el("div", "gal-mono gal-foot");
-  const footRight = el("div", "gal-foot-right");
   const sourceLink = el("a", "", "Source · AGPL-3.0");
   sourceLink.href = SOURCE_URL;
   sourceLink.target = "_blank";
   sourceLink.rel = "noopener";
-  footRight.append(el("span", "", "Chrome · Safari · Firefox"), sourceLink);
-  foot.append(el("div", "gal-foot-left", "Runs locally · Audio never leaves this device"), footRight);
+  foot.appendChild(sourceLink);
 
   page.append(mast, errorBanner, released, draftSection, foot);
   root.appendChild(page);
