@@ -1,11 +1,11 @@
 /**
  * The product's public identity — the single home for the name and the
  * source-repository URL. Everything user-facing that states either one
- * (gallery header, TV corner link, HTML <title>s) must trace back here.
+ * (gallery masthead and footer, TV corner link, HTML <title>s) must trace back here.
  *
  * SOURCE_URL is not cosmetic: AGPL-3.0 §13 requires every page served to
  * network users to prominently offer the Corresponding Source. The gallery
- * header (src/ui/gallery.ts) and the TV entry (src/tv.ts) each render a link
+ * footer (src/ui/gallery.ts) and the TV entry (src/tv.ts) each render a link
  * to this URL to satisfy that. If the repository moves, update it here and
  * both surfaces follow.
  *

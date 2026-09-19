@@ -132,6 +132,7 @@ const menuBtn = document.getElementById("menuBtn") as HTMLButtonElement;
 const panelBtn = document.getElementById("panelBtn") as HTMLButtonElement;
 const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
+const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
@@ -481,7 +482,8 @@ function onCaptureEnded(handle: CaptureHandle): void {
 
 /** Turns a capture failure into copy the user can act on. A mic denial keeps
  *  today's wording — a tile tap does retry the mic; a cancelled share picker
- *  points at the Screen button instead, since a tile tap no longer starts one
+ *  points at the Screen button instead, since by then the viz is up and the
+ *  start prompt's Screen button is the nearest retry
  *  (both raise the same DOMException, hence branching on `choice` too);
  *  anything else — e.g. captureDisplayAudio's own no-audio-track message —
  *  surfaces verbatim with a neutral retry hint instead of being swallowed. */
@@ -540,6 +542,7 @@ function swapAudioSource(next: AudioSourceChoice): Promise<void> {
     const handle = await startCapture(next);
     previous?.stop();
     attachCapture(handle);
+    updateStopBtn(); // its label names the source
     // A fresh extractor, not a reset(): FeatureExtractor has none, and
     // letting its adaptive AGC's envelope carry over would blow the visuals
     // out for its ~1.25s re-adaptation window on the big level jump a
@@ -576,7 +579,18 @@ function refreshAudioPromptButtons(): void {
   audioPromptGuide.hidden = !canDisplay;
 }
 
+/** The scene's stop button exists only while there is something to stop: a
+ *  live capture of this device's own, inside a viz. Called from
+ *  updateMicPrompt, which already runs on every transition that matters here
+ *  (capture attached, ended, failed; viz entered). */
+function updateStopBtn(): void {
+  stopBtn.style.display = inViz && capture && bandAnalyser ? "block" : "none";
+  // Names the thing it stops, so the label is never a guess.
+  stopBtn.textContent = capture?.kind === "display" ? "STOP SHARE" : "STOP MIC";
+}
+
 function updateMicPrompt(): void {
+  updateStopBtn();
   // Hidden while a fresh attempt is in flight (audioPromise set but not yet
   // settled) so we don't double-prompt; shown before any attempt or after
   // one has failed.
@@ -885,6 +899,7 @@ function exitToGallery(): void {
   menuBtn.style.display = "none";
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
+  stopBtn.style.display = "none";
   audioPrompt.style.display = "none";
   mainHost?.unmountAll();
   canvas.style.display = "none";
@@ -1028,6 +1043,13 @@ async function boot(): Promise<void> {
     }
   });
   backBtn.addEventListener("click", () => navigate({ kind: "gallery" }, "push"));
+  // Stop is the deliberate form of what onCaptureEnded handles when the
+  // browser ends a capture on its own: release the mic/share, and put the
+  // start prompt back so listening resumes only on a tap. The room
+  // connection is untouched, same as there.
+  stopBtn.addEventListener("click", () => {
+    if (capture) onCaptureEnded(capture);
+  });
   refreshAudioPromptButtons(); // support never changes mid-session, so this runs once
   audioPromptMicBtn.addEventListener("click", () => void ensureAudio("mic"));
   audioPromptDisplayBtn.addEventListener("click", () => void ensureAudio("display"));
@@ -1049,11 +1071,23 @@ async function boot(): Promise<void> {
       quality: () => quality,
       liveFrame: () => lastVis,
       onPick: (id) => {
-        void ensureAudio(); // fires inside the click, before any await, so the gesture survives
+        // Fires inside the click, before any await, so the gesture survives —
+        // which is also what lets a tile tap open the share picker directly
+        // when the masthead's sound-source picker says "Share a tab", instead
+        // of detouring through the start prompt the way an implicit start must
+        // (see autoStartSource).
+        void ensureAudio(resolveInitialSource());
         navigate({ kind: "viz", sceneId: id }, "push");
       },
       onDisabledPick: (id, reason) => showHud(`${id}: ${reason}`, true),
       canCaptureDisplay: () => displayCaptureSupported(),
+      // While a capture is live it is the truth; before that, the remembered pref.
+      sourceChoice: () => (bandAnalyser && capture ? (capture.kind === "display" ? "display" : "mic") : resolveInitialSource()),
+      onSourceChoice: (next) => {
+        if (bandAnalyser) return swapAudioSource(next); // persists the pref itself, once the swap lands
+        setAudioSourceChoice(next);
+        return Promise.resolve();
+      },
     });
 
     // A shared look link (?look=<code>#/v/<id>, see looksCard.ts's

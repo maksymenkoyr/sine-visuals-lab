@@ -20,6 +20,12 @@ This project bundles the following third-party packages and data into its client
 - License: SIL Open Font License, Version 1.1 (text below)
 - Source: packaged by Fontsource, https://github.com/fontsource/fontsource
 
+## Shippori Mincho B1 (via `@fontsource/shippori-mincho-b1`)
+
+- Copyright 2021 The Shippori Mincho Project Authors (https://github.com/fontdasu/ShipporiMincho)
+- License: SIL Open Font License, Version 1.1 (text below)
+- Source: https://github.com/fontdasu/ShipporiMincho — packaged by Fontsource, https://github.com/fontsource/fontsource
+
 ## DSEG7-Classic (via `dseg`)
 
 - Copyright (c) 2017, keshikan (http://www.keshikan.net), with Reserved Font Name "DSEG"
