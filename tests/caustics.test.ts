@@ -19,10 +19,9 @@ import {
   sparkleDensityExponent,
   sparkleGrainFreq,
   sparkleSpreadRange,
-  NOISE_PERIOD,
-  wrapFlow,
   type DriftInputs,
 } from "../src/render/scenes/caustics.ts";
+import { NOISE_PERIOD, wrapFlow } from "../src/render/noiseHash.ts";
 
 // Baseline: everything off except the Drift speed slider itself. Beat surge
 // is no longer part of DriftInputs — it's the separate advanceLurch impulse

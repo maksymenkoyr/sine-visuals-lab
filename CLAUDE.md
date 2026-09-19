@@ -70,6 +70,7 @@ after all three pass; include the screenshot paths in your summary.
 | The settings/uniform system itself | `src/render/sceneSettings.ts` header |
 | The saved-look share-code format | `src/render/sceneLooks.ts` header — links in the wild outlive the schema |
 | The build target (`es2017`) | `vite.config.ts`, the comment at the `target:` line |
+| A scene that hashes a noise lattice, or adds a growing phase to a noise coordinate | `src/render/noiseHash.ts` header — the mobile seams fix, and the two halves every scene must take together |
 
 ## Standing rules not worth their own doc
 
