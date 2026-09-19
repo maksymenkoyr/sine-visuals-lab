@@ -104,19 +104,25 @@
       #sceneNav .iconBtn:hover {
         border-color: rgba(255, 255, 255, 0.4);
       }
-      #backBtn {
+      /* Every button in this row says what it does in words — a bare square
+       * or grid glyph read as nothing in particular. */
+      #sceneNav .iconBtn {
         width: auto;
         padding: 0 12px 0 10px;
         font-size: 11px;
         letter-spacing: 0.14em;
         color: rgba(255, 255, 255, 0.8);
+        white-space: nowrap;
       }
       #stopBtn::before {
         content: "";
-        display: block;
-        width: 10px;
-        height: 10px;
-        margin: auto;
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        margin-right: 8px;
+        vertical-align: middle;
+        position: relative;
+        top: -1px;
         border-radius: 1px;
         background: rgba(255, 255, 255, 0.8);
       }
@@ -191,8 +197,8 @@
     <div id="roomCode"></div>
     <div id="sceneNav">
       <button id="backBtn" class="iconBtn" aria-label="Back to gallery">&#8249; GALLERY</button>
-      <button id="stopBtn" class="iconBtn" aria-label="Stop listening" title="Stop listening"></button>
-      <button id="panelBtn" class="iconBtn" aria-label="Room panel">&#9638;</button>
+      <button id="stopBtn" class="iconBtn" title="Stop listening and release the audio source">STOP MIC</button>
+      <button id="panelBtn" class="iconBtn" title="Screens paired to this room">&#9638; ROOM</button>
     </div>
     <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false">&#9974;</button>
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)">&#9881;</button>

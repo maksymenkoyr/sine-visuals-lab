@@ -522,6 +522,7 @@ function swapAudioSource(next: AudioSourceChoice): Promise<void> {
     const handle = await startCapture(next);
     previous?.stop();
     attachCapture(handle);
+    updateStopBtn(); // its label names the source
     // A fresh extractor, not a reset(): FeatureExtractor has none, and
     // letting its adaptive AGC's envelope carry over would blow the visuals
     // out for its ~1.25s re-adaptation window on the big level jump a
@@ -564,6 +565,8 @@ function refreshAudioPromptButtons(): void {
  *  (capture attached, ended, failed; viz entered). */
 function updateStopBtn(): void {
   stopBtn.style.display = inViz && capture && bandAnalyser ? "block" : "none";
+  // Names the thing it stops, so the label is never a guess.
+  stopBtn.textContent = capture?.kind === "display" ? "STOP SHARE" : "STOP MIC";
 }
 
 function updateMicPrompt(): void {
