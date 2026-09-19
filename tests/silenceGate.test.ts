@@ -5,6 +5,11 @@ import {
   setSilenceGateOpen,
   resetSilenceGate,
   silenceGateDimmer,
+  isSilenceGateAuto,
+  setSilenceGateAuto,
+  resolveSilenceGate,
+  feedSilenceGateMeasurement,
+  silenceGateMarksForFloor,
   SILENCE_GATE_MIN,
   SILENCE_GATE_MAX,
   SILENCE_GATE_MIN_WIDTH,
@@ -157,5 +162,175 @@ describe("silenceGateDimmer", () => {
       const frame = feed.frame(t);
       expect(silenceGateDimmer(frame.level, defaults)).toBe(1);
     }
+  });
+});
+
+// silenceGateMarksForFloor is the pure mapping the room-floor tracker leans
+// on — a higher floor should never ask for a lower `closed` than a quieter
+// one, and the gap between the two marks should track the shipped manual
+// defaults' own gap regardless of where `closed` lands.
+describe("silenceGateMarksForFloor", () => {
+  it("keeps the same gap width as the shipped manual defaults, away from either clamp", () => {
+    const gap = SILENCE_GATE_OPEN_DEFAULT - SILENCE_GATE_CLOSED_DEFAULT;
+    for (const floor of [0.02, 0.1, 0.2]) {
+      const marks = silenceGateMarksForFloor(floor);
+      expect(marks.open - marks.closed).toBeCloseTo(gap);
+    }
+  });
+
+  it("never returns closed at SILENCE_GATE_MIN even for a very low or negative floor", () => {
+    for (const floor of [0, -1, -100]) {
+      const marks = silenceGateMarksForFloor(floor);
+      expect(marks.closed).toBeGreaterThan(SILENCE_GATE_MIN);
+    }
+  });
+
+  it("never returns closed anywhere near SILENCE_GATE_MAX even for a very high floor", () => {
+    const marks = silenceGateMarksForFloor(100);
+    expect(marks.closed).toBeLessThan(SILENCE_GATE_MAX);
+    expect(marks.open).toBeLessThanOrEqual(SILENCE_GATE_MAX);
+  });
+
+  it("is monotonically non-decreasing as the floor rises", () => {
+    let prevClosed = -Infinity;
+    for (let floor = -0.1; floor <= 1; floor += 0.05) {
+      const marks = silenceGateMarksForFloor(floor);
+      expect(marks.closed).toBeGreaterThanOrEqual(prevClosed - 1e-9);
+      prevClosed = marks.closed;
+    }
+  });
+
+  it("falls back sanely on a non-finite floor", () => {
+    const marks = silenceGateMarksForFloor(Number.NaN);
+    expect(Number.isFinite(marks.closed)).toBe(true);
+    expect(Number.isFinite(marks.open)).toBe(true);
+  });
+});
+
+describe("silence gate auto mode", () => {
+  // Auto must be off before resetting the manual marks, or setSilenceGateAuto
+  // wouldn't be the thing seeding the tracker off a known baseline — same
+  // ordering autoGain.test.ts uses for its own auto-mode reset.
+  beforeEach(() => {
+    setSilenceGateAuto(false);
+    resetSilenceGate();
+  });
+
+  it("defaults off, and resolveSilenceGate falls back to the manual marks while off", () => {
+    expect(isSilenceGateAuto()).toBe(false);
+    setSilenceGateClosed(0.02);
+    setSilenceGateOpen(0.3);
+    expect(resolveSilenceGate()).toEqual(getSilenceGate());
+  });
+
+  it("is a no-op to feed measurements while off — resolveSilenceGate stays on the manual marks", () => {
+    setSilenceGateClosed(0.02);
+    setSilenceGateOpen(0.3);
+    feedSilenceGateMeasurement(0, 5);
+    expect(resolveSilenceGate()).toEqual(getSilenceGate());
+  });
+
+  it("toggling on seeds from the current manual marks — no jump on the chip click", () => {
+    // silenceGateMarksForFloor always reconstructs `open` as `closed` plus
+    // the *default* gap (see its own doc comment) rather than whatever gap
+    // the manual marks happened to have, so this uses a manual pair that
+    // already sits at the default gap width — the case where seeding really
+    // must reproduce both marks exactly, not just `closed`.
+    const gap = SILENCE_GATE_OPEN_DEFAULT - SILENCE_GATE_CLOSED_DEFAULT;
+    setSilenceGateClosed(0.08);
+    setSilenceGateOpen(0.08 + gap);
+    setSilenceGateAuto(true);
+    const resolved = resolveSilenceGate();
+    expect(resolved.closed).toBeCloseTo(0.08);
+    expect(resolved.open).toBeCloseTo(0.08 + gap);
+  });
+
+  it("round-trips the flag", () => {
+    setSilenceGateAuto(true);
+    expect(isSilenceGateAuto()).toBe(true);
+    setSilenceGateAuto(false);
+    expect(isSilenceGateAuto()).toBe(false);
+  });
+
+  it("a steady low level pulls the marks to settle just above it", () => {
+    setSilenceGateAuto(true);
+    const quietLevel = 0.01; // below SILENCE_GATE_CLOSED_DEFAULT's own seed
+    for (let i = 0; i < 60; i++) feedSilenceGateMeasurement(quietLevel, 1);
+    const resolved = resolveSilenceGate();
+    // "Just above" — closer to the room's own quiet level than to the
+    // shipped default gap between the two marks, without pinning the exact
+    // margin (an unmeasured placeholder — see this module's header).
+    const gap = SILENCE_GATE_OPEN_DEFAULT - SILENCE_GATE_CLOSED_DEFAULT;
+    expect(resolved.closed).toBeGreaterThan(quietLevel);
+    expect(resolved.closed).toBeLessThan(quietLevel + gap);
+  });
+
+  it("a fluctuating, music-like level never lets the floor rise", () => {
+    setSilenceGateAuto(true);
+    const before = resolveSilenceGate();
+    // Both levels sit above the seeded floor, so this only exercises the
+    // steadiness gate, not the fast-drop path — a wide, constantly-moving
+    // window should never read as "the room went quiet."
+    for (let i = 0; i < 400; i++) feedSilenceGateMeasurement(i % 2 === 0 ? 0.4 : 0.15, 1 / 20);
+    const after = resolveSilenceGate();
+    expect(after.closed).toBeCloseTo(before.closed);
+  });
+
+  it("a level dropping below the floor pulls the marks down faster than an equally-distant rise", () => {
+    // Mid-range starting point, away from either auto clamp in both
+    // directions, so neither leg below saturates SILENCE_GATE_AUTO_CLOSED_
+    // FLOOR/CEIL and confounds the comparison.
+    setSilenceGateClosed(0.15);
+    setSilenceGateAuto(true); // seeds the floor from that manual value
+    const before = resolveSilenceGate();
+    feedSilenceGateMeasurement(before.closed - 0.1, 0.1);
+    const afterDrop = resolveSilenceGate().closed;
+
+    // Fresh seed + fresh envelope for a clean second comparison — a
+    // first-ever reading needs only one sample (both envelope bounds start
+    // unset), so this isolates the rate difference from any envelope
+    // warm-up effect the first leg left behind.
+    setSilenceGateAuto(false);
+    setSilenceGateClosed(0.15);
+    setSilenceGateAuto(true);
+    const beforeRise = resolveSilenceGate();
+    feedSilenceGateMeasurement(beforeRise.closed + 0.1, 0.1);
+    const afterRise = resolveSilenceGate().closed;
+
+    const dropDelta = before.closed - afterDrop;
+    const riseDelta = afterRise - beforeRise.closed;
+    expect(dropDelta).toBeGreaterThan(0);
+    expect(riseDelta).toBeGreaterThan(0);
+    expect(dropDelta).toBeGreaterThan(riseDelta * 3);
+  });
+
+  it("auto closed never reaches SILENCE_GATE_MIN, even after a very long silence", () => {
+    setSilenceGateAuto(true);
+    for (let i = 0; i < 200; i++) feedSilenceGateMeasurement(0, 5);
+    expect(resolveSilenceGate().closed).toBeGreaterThan(SILENCE_GATE_MIN);
+  });
+
+  it("auto closed never approaches SILENCE_GATE_MAX, even after a very long, loud drone", () => {
+    setSilenceGateAuto(true);
+    for (let i = 0; i < 200; i++) feedSilenceGateMeasurement(SILENCE_GATE_MAX, 5);
+    expect(resolveSilenceGate().closed).toBeLessThan(SILENCE_GATE_MAX);
+  });
+
+  it("keeps the open >= closed + SILENCE_GATE_MIN_WIDTH invariant across a run with varied levels", () => {
+    setSilenceGateAuto(true);
+    const levels = [0.5, 0.02, 0.4, 0.01, 0.6, 0, 0.3];
+    for (let i = 0; i < 200; i++) feedSilenceGateMeasurement(levels[i % levels.length], 1 / 30);
+    const resolved = resolveSilenceGate();
+    expect(resolved.open - resolved.closed).toBeGreaterThanOrEqual(SILENCE_GATE_MIN_WIDTH - 1e-9);
+  });
+
+  it("ignores a non-finite level or dt outright, holding the last estimate", () => {
+    setSilenceGateAuto(true);
+    feedSilenceGateMeasurement(0.02, 1); // establish a real reading first
+    const before = resolveSilenceGate();
+    feedSilenceGateMeasurement(Number.NaN, 1);
+    feedSilenceGateMeasurement(0.02, Number.NaN);
+    feedSilenceGateMeasurement(Number.POSITIVE_INFINITY, 1);
+    expect(resolveSilenceGate()).toEqual(before);
   });
 });

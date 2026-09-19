@@ -18,8 +18,12 @@ the room's own loudness. That same adaptive shape is why `src/audio/
 silenceGate.ts` exists: its two marks weight `features.ts`'s own broadband onset,
 and (via `src/render/animClock.ts`) `src/render/bandEnergy.ts`'s per-band onsets,
 against `FeatureFrame.level` — the one absolute-loudness reading in the pipeline —
-so a quiet room's own hiss can't fire on its own. `src/audio/sensitivity.ts`
-applies the user's Sensitivity/Expansion/Smoothing controls on top of that.
+so a quiet room's own hiss can't fire on its own. Both marks can also be handed
+to an opt-in auto mode that tracks the room's own quiet level instead of a
+manual drag, fed each tick by `feedSilenceGateMeasurement` — mirroring
+`src/audio/autoGain.ts`'s own auto flag rather than resolving through
+`musicProfile.ts`'s dials. `src/audio/sensitivity.ts` applies the user's
+Sensitivity/Expansion/Smoothing controls on top of that.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
