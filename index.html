@@ -57,15 +57,15 @@
        * keyed off aria-pressed). */
       .iconBtn {
         position: fixed;
-        width: 32px;
-        height: 32px;
+        width: 36px;
+        height: 36px;
         border-radius: 999px;
         background: rgba(8, 11, 10, 0.3);
         -webkit-backdrop-filter: blur(18px) saturate(0.6) brightness(0.5);
         backdrop-filter: blur(18px) saturate(0.6) brightness(0.5);
         color: rgba(255, 255, 255, 0.72);
         border: 1px solid rgba(255, 255, 255, 0.16);
-        font: 400 13px/30px "Share Tech Mono", ui-monospace, monospace;
+        font: 400 13px/34px "Share Tech Mono", ui-monospace, monospace;
         text-align: center;
         z-index: 5;
         cursor: pointer;
@@ -79,16 +79,48 @@
       }
       #fsBtn {
         bottom: 16px;
-        right: 58px;
+        right: 58px; /* one button and a 6px gap in from #menuBtn */
       }
-      #backBtn {
+      /* Top-left of a scene: a plain "back to gallery" chip and a stop — no
+       * branding, the visual stays the hero. The room panel's button, shown
+       * only while a room exists, rides along at the end. Squared, unlike the round
+       * buttons, and laid out by this flex row rather than fixed offsets
+       * because the chip's width is its label's. */
+      #sceneNav {
+        position: fixed;
         top: 16px;
         left: 16px;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        gap: 4px;
       }
-      #panelBtn {
-        top: 16px;
-        left: 58px;
+      #sceneNav .iconBtn {
+        position: static;
+        border-radius: 3px;
+        -webkit-backdrop-filter: blur(18px) saturate(0.6) brightness(0.5) contrast(1.08);
+        backdrop-filter: blur(18px) saturate(0.6) brightness(0.5) contrast(1.08);
       }
+      #sceneNav .iconBtn:hover {
+        border-color: rgba(255, 255, 255, 0.4);
+      }
+      #backBtn {
+        width: auto;
+        padding: 0 12px 0 10px;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        color: rgba(255, 255, 255, 0.8);
+      }
+      #stopBtn::before {
+        content: "";
+        display: block;
+        width: 10px;
+        height: 10px;
+        margin: auto;
+        border-radius: 1px;
+        background: rgba(255, 255, 255, 0.8);
+      }
+
       /* "Immersed" fullscreen: after a few seconds idle the chrome fades and
        *  the cursor hides; any pointer/key activity brings it back (see
        *  src/ui/fullscreen.ts). The HUD isn't included — it already fades
@@ -157,8 +189,11 @@
     <canvas id="gl"></canvas>
     <div id="hud"></div>
     <div id="roomCode"></div>
-    <button id="panelBtn" class="iconBtn" aria-label="Room panel">&#9638;</button>
-    <button id="backBtn" class="iconBtn" aria-label="Back to gallery">&#8249;</button>
+    <div id="sceneNav">
+      <button id="backBtn" class="iconBtn" aria-label="Back to gallery">&#8249; GALLERY</button>
+      <button id="stopBtn" class="iconBtn" aria-label="Stop listening" title="Stop listening"></button>
+      <button id="panelBtn" class="iconBtn" aria-label="Room panel">&#9638;</button>
+    </div>
     <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false">&#9974;</button>
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)">&#9881;</button>
     <div id="audioPrompt">

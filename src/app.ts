@@ -120,6 +120,7 @@ const menuBtn = document.getElementById("menuBtn") as HTMLButtonElement;
 const panelBtn = document.getElementById("panelBtn") as HTMLButtonElement;
 const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
+const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
@@ -461,7 +462,8 @@ function onCaptureEnded(handle: CaptureHandle): void {
 
 /** Turns a capture failure into copy the user can act on. A mic denial keeps
  *  today's wording — a tile tap does retry the mic; a cancelled share picker
- *  points at the Screen button instead, since a tile tap no longer starts one
+ *  points at the Screen button instead, since by then the viz is up and the
+ *  start prompt's Screen button is the nearest retry
  *  (both raise the same DOMException, hence branching on `choice` too);
  *  anything else — e.g. captureDisplayAudio's own no-audio-track message —
  *  surfaces verbatim with a neutral retry hint instead of being swallowed. */
@@ -556,7 +558,16 @@ function refreshAudioPromptButtons(): void {
   audioPromptGuide.hidden = !canDisplay;
 }
 
+/** The scene's stop button exists only while there is something to stop: a
+ *  live capture of this device's own, inside a viz. Called from
+ *  updateMicPrompt, which already runs on every transition that matters here
+ *  (capture attached, ended, failed; viz entered). */
+function updateStopBtn(): void {
+  stopBtn.style.display = inViz && capture && bandAnalyser ? "block" : "none";
+}
+
 function updateMicPrompt(): void {
+  updateStopBtn();
   // Hidden while a fresh attempt is in flight (audioPromise set but not yet
   // settled) so we don't double-prompt; shown before any attempt or after
   // one has failed.
@@ -828,6 +839,7 @@ function exitToGallery(): void {
   menuBtn.style.display = "none";
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
+  stopBtn.style.display = "none";
   audioPrompt.style.display = "none";
   mainHost?.unmountAll();
   canvas.style.display = "none";
@@ -971,6 +983,13 @@ async function boot(): Promise<void> {
     }
   });
   backBtn.addEventListener("click", () => navigate({ kind: "gallery" }, "push"));
+  // Stop is the deliberate form of what onCaptureEnded handles when the
+  // browser ends a capture on its own: release the mic/share, and put the
+  // start prompt back so listening resumes only on a tap. The room
+  // connection is untouched, same as there.
+  stopBtn.addEventListener("click", () => {
+    if (capture) onCaptureEnded(capture);
+  });
   refreshAudioPromptButtons(); // support never changes mid-session, so this runs once
   audioPromptMicBtn.addEventListener("click", () => void ensureAudio("mic"));
   audioPromptDisplayBtn.addEventListener("click", () => void ensureAudio("display"));

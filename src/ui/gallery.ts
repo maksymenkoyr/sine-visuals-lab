@@ -5,7 +5,7 @@ import { createSyntheticFeed } from "../audio/synthetic.ts";
 import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRenderer.ts";
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
-import { PRODUCT_NAME, SOURCE_URL } from "../brand.ts";
+import { SOURCE_URL } from "../brand.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
@@ -33,8 +33,8 @@ export interface GalleryDeps {
   onDisabledPick: (sceneId: string, reason: string) => void;
   /** Whether this device can offer the Screen source at all — see
    *  src/audio/sourcePref.ts's displayCaptureSupported. Where it can't, the
-   *  masthead's sound-source picker shows the microphone alone and the
-   *  subtitle never names an option a mobile visitor won't see. */
+   *  masthead's sound-source picker shows the microphone alone, so it
+   *  never names an option a mobile visitor won't see. */
   canCaptureDisplay: () => boolean;
   /** The source a tile tap will start on — what the picker highlights. */
   sourceChoice: () => AudioSourceChoice;
@@ -70,16 +70,13 @@ const stylesheet = `
 .gal-root {
   position: fixed; inset: 0; z-index: 15; overflow-y: auto; display: none;
   background: ${GROUND}; color: #fff; font-family: ${FONT_LABEL};
-  padding: 44px 56px 48px; box-sizing: border-box;
+  padding: 32px 56px 40px; box-sizing: border-box;
 }
-.gal-page { max-width: 1328px; margin: 0 auto; display: flex; flex-direction: column; gap: 36px; }
+.gal-page { max-width: 1328px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
 .gal-mono { font: 400 10.5px ${FONT_MONO}; text-transform: uppercase; }
 
-.gal-mast { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; }
-.gal-ident { display: flex; gap: 22px; align-items: center; min-width: 0; }
-.gal-title { font: 500 30px/1 ${FONT_LABEL}; letter-spacing: .01em; }
-.gal-sub { font: 400 14px/1.4 ${FONT_LABEL}; color: rgba(255,255,255,.62); margin-top: 6px; }
-.gal-source { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; flex: none; }
+.gal-mast { display: flex; align-items: center; justify-content: space-between; gap: 16px 32px; flex-wrap: wrap; }
+.gal-source { display: flex; align-items: center; gap: 14px; }
 .gal-source-label { letter-spacing: .14em; color: rgba(255,255,255,.5); }
 .gal-source-row { display: flex; gap: 4px; }
 .gal-src {
@@ -130,9 +127,7 @@ const stylesheet = `
 .gal-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .gal-shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(5,7,10,.7), transparent 40%); pointer-events: none; }
 .gal-over { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
-.gal-name-group { display: flex; align-items: baseline; gap: 12px; min-width: 0; flex-wrap: wrap; }
-.gal-name { font: 500 22px/1 ${FONT_LABEL}; }
-.gal-meta { letter-spacing: .12em; color: rgba(255,255,255,.7); }
+.gal-name { font: 500 22px/1 ${FONT_LABEL}; min-width: 0; }
 .gal-start {
   font: 400 11px ${FONT_MONO}; letter-spacing: .14em; flex: none; white-space: nowrap;
   color: ${INPUT_GREEN}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.6)};
@@ -157,12 +152,12 @@ const stylesheet = `
 
 @media (max-width: ${NARROW_BELOW_PX}px) {
   .gal-root { padding: 24px 16px 32px; }
-  .gal-page { gap: 28px; }
-  .gal-mast { flex-direction: column; gap: 20px; }
-  .gal-ident { gap: 16px; }
-  .gal-title { font-size: 24px; }
-  .gal-sub { font-size: 13px; }
-  .gal-source { align-items: flex-start; }
+  .gal-page { gap: 24px; }
+  /* No room for the label beside the mark and both options on a phone. */
+  .gal-source-label { display: none; }
+  .gal-mast { gap: 12px; }
+  .gal-src { padding: 9px 8px; gap: 6px; }
+  .gal-src-hint { letter-spacing: .06em; }
   .gal-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .gal-name { font-size: 19px; }
   /* A phone at arm's length: the fold is how the drafts are reached at all. */
@@ -235,21 +230,9 @@ export function createGallery(deps: GalleryDeps): Gallery {
   const root = el("div", "gal-root");
   const page = el("div", "gal-page");
 
-  // Masthead: the mark lives here and nowhere else on the page.
+  // Masthead: the mark alone carries the name — no title, no blurb — and it
+  // lives here and nowhere else on the page.
   const mast = el("div", "gal-mast");
-  const ident = el("div", "gal-ident");
-  const identText = el("div", "");
-  identText.append(
-    el("div", "gal-title", PRODUCT_NAME),
-    el(
-      "div",
-      "gal-sub",
-      deps.canCaptureDisplay()
-        ? "Audio-reactive visuals in the browser. Pick a scene, then choose where the sound comes from."
-        : "Audio-reactive visuals in the browser. Pick a scene to start on your mic.",
-    ),
-  );
-  ident.append(createBrandMark(72), identText);
 
   // Sound source: which capture a tile tap starts on. A radio pair where
   // screen capture exists; the microphone alone, as a plain statement, where
@@ -283,7 +266,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
   addSource("mic", "Microphone", "DEFAULT · TAP A SCENE");
   if (deps.canCaptureDisplay()) addSource("display", "Share a tab", "CLEANER SIGNAL", DISPLAY_SHARE_GUIDE);
   source.append(el("div", "gal-mono gal-source-label", "Sound source"), sourceRow);
-  mast.append(ident, source);
+  mast.append(createBrandMark(56), source);
 
   const errorBanner = el("div", "gal-error");
   errorBanner.setAttribute("role", "alert");
@@ -382,18 +365,12 @@ export function createGallery(deps: GalleryDeps): Gallery {
       cap.append(el("div", "gal-cap-name", entry.scene.name), el("div", "gal-tag", reason ?? "Draft"));
       btn.append(shot, cap);
     } else {
-      // Large tile: name, a one-line spec and the call to action sit over the
-      // picture's darkened foot.
-      const controls = entry.scene.settings?.length ?? 0;
-      const nameGroup = el("div", "gal-name-group");
-      nameGroup.append(
-        el("div", "gal-name", entry.scene.name),
-        el("div", "gal-mono gal-meta", controls > 0 ? `WebGL · ${controls} controls` : "WebGL"),
-      );
+      // Large tile: the name and the call to action sit over the picture's
+      // darkened foot.
       const start = el("div", "gal-start", reason ?? "START ›");
       if (reason) start.dataset.muted = "";
       const over = el("div", "gal-over");
-      over.append(nameGroup, start);
+      over.append(el("div", "gal-name", entry.scene.name), start);
       shot.append(el("div", "gal-shade"), over);
       btn.appendChild(shot);
     }
