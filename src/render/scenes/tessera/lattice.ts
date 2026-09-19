@@ -48,11 +48,6 @@ export const BALL_RADIUS = 1.0;
  *  only a sliver of margin to the new, closer far camera, so the shell's own
  *  screen size ballooned past the ball's instead of sitting behind it). */
 export const SHELL_RADIUS = 1.5;
-/** A wall's own thickness (its end-cap-strip's radial extent), as a
- *  fraction of the tube's *smaller* cross-section dimension -- a visibly fat
- *  frame, so "looking down a tube" reads as a bright rectangle around a dark
- *  hole even before any lighting is applied. */
-export const WALL_THICK_FRACTION = 0.2;
 /** How much of a wall's own length, from the open end inward, is pulled
  *  toward near-white. */
 export const END_RIM_FRACTION = 0.06;
@@ -63,11 +58,18 @@ export const INTERIOR_SHADE = 0.1;
 /** Flat shade for a long wall's OUTER face (the facing test says the camera
  *  sits on the wall's own outward-normal side). The reference's faces are
  *  flat luminous colour on their lit side (frames/look_1.jpg,
- *  bursts/022.83); the two azimuth-facing walls (0/1) read brightest, the
- *  two meridian-facing walls (2/3) a touch dimmer, for a little of the
- *  reference's own per-face variation. */
+ *  bursts/022.83). Round 5: both wall types now read at the same full
+ *  shade -- the round-3 azimuth/meridian split (1.0 vs 0.8, "for a little of
+ *  the reference's own per-face variation") is no longer worth the cost: the
+ *  azimuth-facing walls (0/1) turn out to carry almost none of the mid/far
+ *  view's own screen coverage on their own (their own across-extent,
+ *  e2-based, foreshortens toward the view axis near the camera's own
+ *  horizon -- see CAM_FAR's comment), so nearly everything the mid/far view
+ *  actually shows is a meridian wall (2/3); dimming those on top of that
+ *  scarcity was crushing those views far more than any azimuth/meridian
+ *  variation was worth. */
 export const WALL_SHADE_AZIMUTH = 1.0;
-export const WALL_SHADE_MERIDIAN = 0.8;
+export const WALL_SHADE_MERIDIAN = 1.0;
 
 /** The fixed white pole box: half-width/depth and length, half-heights --
  *  small and solid, sized against the round-2 near camera (see CAM_NEAR's
@@ -175,13 +177,13 @@ export function instanceRingSlot(instanceId: number, layout: LatticeLayout): { r
 }
 
 /** How far a ring's own per-ring twist (see sectorArg) advances for one unit
- *  of theta -- picked so that at the Pitch setting's own default (0.085 rad)
- *  the twist between neighbouring rings (theta step ~= pitch) comes out to
- *  about `swirl` turns-of-argument per ring, the same size step the old
- *  discrete `swirl * ringIndex` formula gave (round 1). Away from the
- *  default Pitch the per-ring step scales with the actual ring density
- *  instead, which just makes a denser lattice swirl a little tighter --
- *  never discontinuous, since theta itself is continuous. */
+ *  of theta -- picked so that at roughly the Pitch setting's own scale the
+ *  twist between neighbouring rings (theta step ~= pitch) comes out to about
+ *  `swirl` turns-of-argument per ring, the same size step the old discrete
+ *  `swirl * ringIndex` formula gave (round 1). Away from that scale the
+ *  per-ring step scales with the actual ring density instead, which just
+ *  makes a denser lattice swirl a little tighter -- never discontinuous,
+ *  since theta itself is continuous. */
 export const SWIRL_SCALE = 11.76;
 
 /** The shared angular argument behind both the length lobe and the hue
@@ -193,14 +195,38 @@ export function sectorArg(phi: number, theta: number, fold: number, swirl: numbe
   return fold * phi + swirl * theta * SWIRL_SCALE;
 }
 
-/** Lobe gain for a box's length -- the scalloped petals, roughly 0..1 with
- *  a -0.1 undershoot at the trough -- length clamps at a small floor
- *  downstream, so the brief negative dip just reads as the shortest boxes
- *  in a petal's dark gap, not a visible defect. Symmetric under
- *  phi -> phi+pi whenever fold is even (cos(A + fold*pi) === cos(A)), which
- *  is what gives the measured 2-fold rotational symmetry "for free". */
+/** Round 5's "petal shells" fix: at LOBE_SHARPNESS = 1 (no sharpening) the
+ *  lobe is a plain 0..1 cosine, which reads as a soft, shallow undulation --
+ *  the reference's own dome (bursts/003.03, bursts/011.02) is 8 clearly
+ *  DISTINCT scalloped shells even in silence, so the lobe needs a real dark
+ *  gap between petals and a crisp tip, not just a gentle wave. Exponentiating
+ *  a 0..1 value pulls the mid-range down toward the trough while leaving the
+ *  peak (1) and trough (0) fixed, narrowing each petal's own bright tip
+ *  without touching its bounds -- see lobeValue. */
+export const LOBE_SHARPNESS = 1.5;
+/** Round 5: the length lobe used to be pure audio gain (silent = flat
+ *  sphere, no petals at all) -- the reference's own scalloped shells are
+ *  visible with NO onset flash (the plan's own "no beat-rank preference"
+ *  finding), so the petal shape has to live in the REST length too. A box's
+ *  length blends between this floor (a petal's own dark-gap length, as a
+ *  fraction of lenBase) and lenBase itself by lobe01 -- see boxVert/index.ts
+ *  header's length formula -- so the dome is visibly 8 shells even at
+ *  lenAudio=0 or dead silence. */
+export const LOBE_REST_MIN = 0.35;
+
+/** Lobe gain for a box's length -- the scalloped petals, sharpened to 0..1
+ *  (LOBE_SHARPNESS) so the tips are distinct and the troughs bottom out at
+ *  exactly 0, never negative (round 5: the old 0.5+0.6*cos undershoot below
+ *  0 was clamped away downstream anyway, so a clean 0..1 range is simpler to
+ *  reason about now that this same value also blends the REST length, not
+ *  only the audio gain -- see LOBE_REST_MIN). Symmetric under phi -> phi+pi
+ *  whenever fold is even (cos(A + fold*pi) === cos(A)), which is what gives
+ *  the measured 2-fold rotational symmetry "for free" -- pow() preserves
+ *  that symmetry since it's monotonic on the non-negative range cos() is
+ *  clamped to first. */
 export function lobeValue(phi: number, theta: number, fold: number, swirl: number, lobePhase = 0): number {
-  return 0.5 + 0.6 * Math.cos(sectorArg(phi, theta, fold, swirl) + lobePhase);
+  const raw = 0.5 + 0.5 * Math.cos(sectorArg(phi, theta, fold, swirl) + lobePhase);
+  return Math.pow(Math.max(0, raw), LOBE_SHARPNESS);
 }
 
 /** Which of the two complementary hue stops (0 or 0.5) a box's sector gets --

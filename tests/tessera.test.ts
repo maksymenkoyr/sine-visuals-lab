@@ -155,17 +155,28 @@ describe("tessera lobe/hue: symmetry under phi -> phi+pi (fold even)", () => {
     expect(anyDiffers).toBe(true);
   });
 
-  it("lobeValue stays within its 0.5 +/- 0.6 cosine bounds", () => {
+  it("lobeValue (round 5: sharpened 0..1, LOBE_SHARPNESS) never leaves [0,1]", () => {
     for (let i = 0; i < 200; i++) {
       const v = lobeValue(Math.random() * 10 - 5, Math.random() * 2, 8, Math.random() * 2 - 1);
-      expect(v).toBeGreaterThanOrEqual(0.5 - 0.6 - 1e-9);
-      expect(v).toBeLessThanOrEqual(0.5 + 0.6 + 1e-9);
+      expect(v).toBeGreaterThanOrEqual(-1e-9);
+      expect(v).toBeLessThanOrEqual(1 + 1e-9);
     }
   });
 
-  it("lobeValue peaks near 1.1 and troughs near -0.1 (amplitude 0.6 around a 0.5 mean)", () => {
-    expect(lobeValue(0, 0, 8, 0)).toBeCloseTo(1.1, 10);
-    expect(lobeValue(Math.PI / 8, 0, 8, 0)).toBeCloseTo(-0.1, 10);
+  it("lobeValue peaks at exactly 1 and troughs at exactly 0 (a clean 0..1 range, unlike round 2's -0.1..1.1 undershoot)", () => {
+    expect(lobeValue(0, 0, 8, 0)).toBeCloseTo(1, 10);
+    expect(lobeValue(Math.PI / 8, 0, 8, 0)).toBeCloseTo(0, 10);
+  });
+
+  it("sharpening (LOBE_SHARPNESS > 1) pulls mid-range values down, narrowing the petal tip", () => {
+    // A plain (unsharpened) 0..1 cosine would give exactly 0.5 at the
+    // quarter points (cos = 0); the sharpened version must read lower there,
+    // since x^1.5 < x for every x in (0,1) -- this is the whole point of
+    // round 5's fix (distinct petal tips, not a shallow wave).
+    const quarterPoint = Math.PI / 16; // A = fold*phi = 8 * pi/16 = pi/2 -> cos(A) = 0
+    const v = lobeValue(quarterPoint, 0, 8, 0);
+    expect(v).toBeLessThan(0.5);
+    expect(v).toBeGreaterThan(0);
   });
 
   it("sectorHue is also symmetric under phi -> phi+pi for an even fold (each petal is one hue)", () => {

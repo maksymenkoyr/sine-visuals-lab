@@ -37,6 +37,8 @@ import {
   BOX_VERTS,
   END_RIM_FRACTION,
   INTERIOR_SHADE,
+  LOBE_REST_MIN,
+  LOBE_SHARPNESS,
   MAX_RINGS,
   POLE_HALF,
   POLE_LEN,
@@ -45,7 +47,6 @@ import {
   SWIRL_SCALE,
   WALL_SHADE_AZIMUTH,
   WALL_SHADE_MERIDIAN,
-  WALL_THICK_FRACTION,
 } from "./lattice.ts";
 import { PALETTE_GLSL } from "../../palette.ts";
 import { NUM_BANDS } from "../../../audio/types.ts";
@@ -75,7 +76,7 @@ export const RIM_MIX = 0.22;
  *  under 60fps) land in different buckets, which is the whole point of the
  *  motion-check screenshot (fringes at box ends only). */
 export const JITTER_RATE_HZ = 40.0;
-export const BLOOM_THRESHOLD = 0.55;
+export const BLOOM_THRESHOLD = 0.45;
 export const BLUR_STRIDE_X = 2.0;
 export const BLUR_STRIDE_Y = 1.0;
 
@@ -100,7 +101,6 @@ const LATTICE_CONST_GLSL = `
 #define PI 3.14159265359
 #define BALL_RADIUS ${BALL_RADIUS.toFixed(3)}
 #define SHELL_RADIUS ${SHELL_RADIUS.toFixed(3)}
-#define WALL_THICK_FRACTION ${WALL_THICK_FRACTION.toFixed(3)}
 #define END_RIM_FRACTION ${END_RIM_FRACTION.toFixed(3)}
 #define INTERIOR_SHADE ${INTERIOR_SHADE.toFixed(3)}
 #define WALL_SHADE_AZIMUTH ${WALL_SHADE_AZIMUTH.toFixed(3)}
@@ -111,6 +111,8 @@ const LATTICE_CONST_GLSL = `
 #define JITTER_RATE ${JITTER_RATE_HZ.toFixed(1)}
 #define MAX_RINGS ${MAX_RINGS}
 #define SWIRL_SCALE ${SWIRL_SCALE.toFixed(2)}
+#define LOBE_REST_MIN ${LOBE_REST_MIN.toFixed(3)}
+#define LOBE_SHARPNESS ${LOBE_SHARPNESS.toFixed(2)}
 `;
 
 /** The dim background: sparse hash dots and four faint axis rays, held in
@@ -276,10 +278,18 @@ void main() {
     // lattice.ts's SWIRL_SCALE comment for why this constant, not swirl
     // alone, keeps the same per-ring twist size at the default Pitch).
     float A = uFold * phi + uSwirl * theta * SWIRL_SCALE;
-    float lobe = 0.5 + 0.6 * cos(A);
+    // Round 5's "petal shells" fix (lattice.ts's lobeValue/LOBE_REST_MIN
+    // header): lobe01 is a clean 0..1 cosine, sharpened by LOBE_SHARPNESS so
+    // each petal has a distinct tip and a real dark gap, not a shallow wave.
+    // It drives BOTH the resting length (blended between LOBE_REST_MIN and
+    // 1 of lenBase, so the dome is visibly 8 scalloped shells even in
+    // silence) and the audio gain on top -- the reference shows no onset
+    // flash, so the shape can't live only in the audio term.
+    float lobeRaw = 0.5 + 0.5 * cos(A);
+    float lobe01 = pow(max(lobeRaw, 0.0), LOBE_SHARPNESS);
     float jseed = floor(uTime * JITTER_RATE);
     float jit = hashLattice(float(ring), float(slot), jseed) - 0.5;
-    float len = uLenBase + uLenAudio * band * lobe + jit * uJitter;
+    float len = uLenBase * (LOBE_REST_MIN + (1.0 - LOBE_REST_MIN) * lobe01) + uLenAudio * band * lobe01 + jit * uJitter;
 
     float slotWidthAng = 2.0 * PI / float(slotCount);
     float m = mod(phi, PI * 0.5);
@@ -301,14 +311,15 @@ void main() {
   float dirSign = isShell ? -1.0 : 1.0;
   vec3 base = N * baseR;
   // A wall's own thickness (its end-cap-strip's radial reach), sized off the
-  // tube's *smaller* cross-section dimension -- fat enough (20%) that
-  // looking down a tube shows a bright rectangular frame, not a hairline,
-  // around its dark hole. The pole box is the one exception: its own
-  // end-cap-strips reach all the way to the centre (wallThick = offsetHalf),
-  // so its four quadrants tile into one solid white cap instead of leaving
-  // the same open bore a ring box's tiny scale would otherwise turn into a
-  // stray dark fleck.
-  float wallThick = isPole ? offsetHalf : WALL_THICK_FRACTION * (2.0 * min(halfWidthAz, halfDepthMer));
+  // tube's *smaller* cross-section dimension by the Wall setting -- round 5:
+  // raised well past a hairline so the mouth reads as the reference's own
+  // narrow dark SLIT down the middle of a bright bar, not a wide dark hole
+  // in a thin frame. The pole box is the one exception: its own end-cap-
+  // strips reach all the way to the centre (wallThick = offsetHalf), so its
+  // four quadrants tile into one solid white cap instead of leaving the same
+  // open bore a ring box's tiny scale would otherwise turn into a stray dark
+  // fleck.
+  float wallThick = isPole ? offsetHalf : uWall * (2.0 * min(halfWidthAz, halfDepthMer));
 
   vec3 world;
   if (isEndCap) {
