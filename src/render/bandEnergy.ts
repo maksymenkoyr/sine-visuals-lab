@@ -1,5 +1,6 @@
 import { NUM_BANDS } from "../audio/types.ts";
 import { getBandSplit, bandSplitVersion } from "../audio/bandSplit.ts";
+import type { OnsetDiag } from "../audio/onsetDiag.ts";
 
 // Splits the 24 log-spaced bands into low/mid/high groups and derives, per
 // group: a slewed continuous level (safe to drive geometry with — it can't
@@ -70,7 +71,10 @@ interface GroupSpec {
 //   because a kick physically cannot repeat as fast as a hat. Low's matches
 //   features.ts's broadband ONSET_REFRACTORY_SEC; the others scale down
 //   with how fast that group's transients can legitimately repeat.
-const GROUP_TUNING: Record<"low" | "mid" | "high", Omit<GroupSpec, "lo" | "hi">> = {
+// Exported so the meters panel's hit-history hint (audioMeters.ts's
+// hitsRuleHint) can spell out the exact per-group rule from these numbers
+// instead of a hand-typed copy that can drift from them.
+export const GROUP_TUNING: Record<"low" | "mid" | "high", Omit<GroupSpec, "lo" | "hi">> = {
   low: { fluxAdaptRate: 3, pulseDecayRate: 3.5, triggerMult: 1.6, triggerMargin: 1.5, refractorySec: 0.1 },
   mid: { fluxAdaptRate: 4, pulseDecayRate: 6, triggerMult: 1.6, triggerMargin: 1.5, refractorySec: 0.07 },
   high: { fluxAdaptRate: 6, pulseDecayRate: 10, triggerMult: 1.8, triggerMargin: 1.2, refractorySec: 0.05 },
@@ -105,10 +109,22 @@ interface GroupState {
   sinceOnsetSec: number;
   pulse: number;
   onset: boolean;
+  /** This group's onset diagnostic — see onsetDiag.ts's OnsetDiag. Mutated
+   *  in place every advance() (see BandEnergy's own lowDiag/midDiag/
+   *  highDiag doc), never replaced. */
+  diag: OnsetDiag;
 }
 
 function makeGroupState(): GroupState {
-  return { level: 0, prevRaw: null, fluxBaseline: 0, sinceOnsetSec: Infinity, pulse: 0, onset: false };
+  return {
+    level: 0,
+    prevRaw: null,
+    fluxBaseline: 0,
+    sinceOnsetSec: Infinity,
+    pulse: 0,
+    onset: false,
+    diag: { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity },
+  };
 }
 
 function advanceGroup(
@@ -145,7 +161,14 @@ function advanceGroup(
   const threshold = state.fluxBaseline * spec.triggerMult + spec.triggerMargin;
   // Only the comparison reads `dimmer` — threshold/fluxBaseline above stay on
   // the raw rise, same reasoning as features.ts's own gated comparison.
-  state.onset = rise * dimmer > threshold && state.sinceOnsetSec > spec.refractorySec;
+  const cleared = rise > threshold;
+  const passes = rise * dimmer > threshold;
+  const canFire = state.sinceOnsetSec > spec.refractorySec;
+  state.onset = passes && canFire;
+  state.diag.ratio = rise / threshold;
+  state.diag.gated = cleared && !passes;
+  state.diag.blocked = passes && !canFire;
+  state.diag.sinceOnsetSec = state.sinceOnsetSec;
   if (state.onset) state.sinceOnsetSec = 0;
 
   state.pulse *= Math.exp(-dtSec * spec.pulseDecayRate * rateScale);
@@ -161,10 +184,18 @@ export interface BandEnergy {
   highPulse: number;
   /** One-shot edges (like FeatureFrame.onset, but per group) — true only on
    *  the exact tick that group's rate-of-rise cleared its adaptive flux
-   *  threshold with that group's refractory elapsed. */
+   *  threshold with that group's refractory elapsed and the silence gate
+   *  (below) didn't stop it. */
   lowOnset: boolean;
   midOnset: boolean;
   highOnset: boolean;
+  /** Per-group onset diagnostics — see onsetDiag.ts's OnsetDiag. Aliases of
+   *  the mutated GroupState.diag objects above, so reading these costs
+   *  nothing extra and never allocates per frame; read them before the next
+   *  advance() call. */
+  lowDiag: OnsetDiag;
+  midDiag: OnsetDiag;
+  highDiag: OnsetDiag;
   /** rateScale multiplies the level slew and pulse decay rates — see
    *  sensitivity.ts's smoothingRateScale. Stops there deliberately: it does
    *  not reach the flux baseline or refractory, which are measurement, not
@@ -199,6 +230,9 @@ export function createBandEnergy(): BandEnergy {
     lowOnset: false,
     midOnset: false,
     highOnset: false,
+    lowDiag: low.diag,
+    midDiag: mid.diag,
+    highDiag: high.diag,
     advance(dtSec: number, bands: Float32Array, rateScale = 1, dimmer = 1): void {
       const currentVersion = bandSplitVersion();
       if (currentVersion !== seenVersion) {

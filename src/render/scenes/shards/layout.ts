@@ -9,13 +9,17 @@
 // — big panels, long thin blades, small fragments — hard-cutting to a new
 // arrangement on every beat with no rank preference, and between cuts
 // extending outward along their own axes while the camera rolls slowly
-// clockwise. The clip has no timer cuts; FREE_RUN_SEC only keeps dead air
-// from freezing the picture.
+// clockwise. The clip has no timer cuts, and neither does this scene: there
+// is no cut without a trigger, so silence freezes the picture (index.ts's
+// CUT_LISTENER, driven by beatListener.ts, has no free-run option by
+// design — see that file's own header).
 //
 // One primitive draws everything: a triangular prism — a triangle in the
 // (axis, across) plane, extruded ±thickness/2 along its normal. PRISM_VERTS
 // vertices per instance, derived from gl_VertexID in glsl.ts with the same
 // arithmetic as faceOf()/cornerOf() below, so a test can pin it.
+
+import type { BeatListenerSpec, BeatSource, ListenResult } from "../../beatListener.ts";
 
 export interface Rng {
   (): number;
@@ -338,41 +342,37 @@ export function pickCut(rng: Rng, recolour: number): CutKind {
 export const CUT_MODE_NAMES = ["Every beat", "Bass hits", "Bars"] as const;
 export const CUT_MODE = { BEAT: 0, BASS: 1, BARS: 2 } as const;
 
-/** Whether this frame's audio asks for a cut under the given Cut mode. The
- *  reference cuts on every onset (mode 0); the other two exist for songs
- *  where our broadband onset is too busy. */
-export function shouldCut(
-  mode: number,
-  a: { onset: boolean; lowOnset: boolean; barWrapped: boolean; tempoLock: number },
-): boolean {
-  if (mode === CUT_MODE.BASS) return a.lowOnset;
-  if (mode === CUT_MODE.BARS) return a.tempoLock > 0.5 ? a.barWrapped : a.onset;
-  return a.onset;
-}
-
 /** Two cuts inside this window are one cut: the reference's only
  *  consecutive-frame "cut" was a recolour ramp, not two arrangements. */
 export const CUT_REFRACTORY_SEC = 0.1;
-/** The minimum hold between arrangements, from the tempo when one is held.
- *  The reference cuts at beat rate while the track (and our detector) has
- *  about twice as many onsets — hi-hats between the beats — so a raw onset
- *  inside most of a beat is the same beat. Without a lock, a fixed hold
- *  that still lets a 160 bpm track through at every beat. */
-export function minHoldSec(tempoLock: number, bpm: number): number {
-  if (tempoLock >= 0.35 && bpm > 0) return 0.7 * (60 / bpm);
-  return 0.25;
+
+/** index.ts's beatListener.ts spec: cuts on the broadband beat edge, with
+ *  the reference's own cadence as the hold — see the pre-listener
+ *  minHoldSec this reproduces (beatListener.ts's resolveHold doc). The
+ *  reference cuts at beat rate while the track (and our detector) has about
+ *  twice as many onsets — hi-hats between the beats — so a raw onset inside
+ *  most of a beat is the same beat; without a tempo lock, a fixed quarter
+ *  second still lets a 160 bpm track's beat through every time. */
+export const CUT_LISTENER: BeatListenerSpec = {
+  source: "beat",
+  refractorySec: CUT_REFRACTORY_SEC,
+  hold: { beats: 0.7, fallbackSec: 0.25, lockMin: 0.35 },
+};
+
+/** What the Cut mode setting listens to — "Every beat"/"Bars" both start
+ *  from the broadband beat (bar falls back to it without a tempo lock — see
+ *  beatListener.ts's sourceEdge); "Bass hits" listens to the low band
+ *  instead, for a track whose broadband onset is too busy. */
+export function cutSource(mode: number): BeatSource {
+  if (mode === CUT_MODE.BASS) return "bass";
+  if (mode === CUT_MODE.BARS) return "bar";
+  return "beat";
 }
-/** No onset for this long → cut anyway, so silence still moves. */
-export const FREE_RUN_SEC = 2.0;
 
 export interface ShardState {
   rng: Rng;
   shards: Shard[];
   camera: Camera;
-  /** Seconds since the last cut of any kind. */
-  holdT: number;
-  /** Seconds since the last cluster/camera cut. */
-  sinceArrange: number;
   /** Cuts applied so far, by kind — for tests and the probe. */
   cuts: [number, number, number];
   /** The options the current cluster was built with; a change rebuilds. */
@@ -388,8 +388,6 @@ export interface AdvanceOptions extends ClusterOptions {
   dolly: number;
   /** Recolour share multiplier. */
   recolour: number;
-  /** Minimum seconds between arrangements — see minHoldSec(). */
-  minHold: number;
 }
 
 export function createShardState(seed: number, opts: ClusterOptions): ShardState {
@@ -398,8 +396,6 @@ export function createShardState(seed: number, opts: ClusterOptions): ShardState
     rng,
     shards: [],
     camera: randomCamera(rng),
-    holdT: 0,
-    sinceArrange: CUT_REFRACTORY_SEC,
     cuts: [0, 0, 0],
     builtWith: null,
   };
@@ -501,12 +497,10 @@ function applyCut(state: ShardState, kind: CutKind, opts: AdvanceOptions): void 
   if (kind === CUT.CLUSTER) {
     state.camera = randomCamera(state.rng);
     rebuild(state, opts);
-    state.sinceArrange = 0;
   } else if (kind === CUT.CAMERA) {
     state.camera = randomCamera(state.rng);
     for (const s of state.shards) s.grow = 0;
     settle(state);
-    state.sinceArrange = 0;
   } else {
     // Recolour the biggest one to three shards, never to the same colour.
     const n = 1 + Math.floor(state.rng() * 3);
@@ -518,22 +512,29 @@ function applyCut(state: ShardState, kind: CutKind, opts: AdvanceOptions): void 
       s.colour = pickWeighted(state.rng, w);
     }
   }
-  state.holdT = 0;
   state.cuts[kind]++;
 }
 
-/** One frame. `cut` is this frame's trigger (see shouldCut); `low` the slewed
- *  low band 0..1. Returns the cut applied, or null. */
+/** One frame. `hit` is this frame's beatListener.ts reading (index.ts's
+ *  CUT_LISTENER, already resolved against hold/refractory) — no cut without
+ *  a trigger, so silence freezes the picture (see the file header). `fired`
+ *  is a fresh arrangement: rolls a cut kind and applies it outright.
+ *  `reason === "held" | "refractory"` is a trigger landing on the same
+ *  beat/onset a previous one already spent — today's exact two-roll
+ *  recolour odds, carried over unchanged from the pre-listener version: the
+ *  first roll still applies immediately if it happens to land on a
+ *  recolour on its own; only an arranging first roll (cluster/camera) is
+ *  gated behind a second roll that must also land on a recolour, or nothing
+ *  cuts at all. Nothing else cuts. `low` the slewed low band 0..1. Returns
+ *  the cut applied, or null. */
 export function advanceShards(
   state: ShardState,
   dt: number,
-  cut: boolean,
+  hit: Pick<ListenResult, "fired" | "reason">,
   low: number,
   opts: AdvanceOptions,
 ): CutKind | null {
   dt = Math.max(0, Math.min(0.25, dt));
-  state.holdT += dt;
-  state.sinceArrange += dt;
   let applied: CutKind | null = null;
 
   if (state.builtWith && formDrift(state.builtWith, opts) > FORM_REBUILD_STEP) {
@@ -541,18 +542,19 @@ export function advanceShards(
     rebuild(state, opts);
   }
 
-  if (cut || state.holdT >= FREE_RUN_SEC) {
-    let kind: CutKind = cut ? pickCut(state.rng, opts.recolour) : CUT.CLUSTER;
-    const arranging = kind !== CUT.RECOLOUR;
-    const hold = Math.max(CUT_REFRACTORY_SEC, opts.minHold);
-    if (arranging && state.sinceArrange < hold) {
-      kind = CUT.RECOLOUR;
-      // Inside the refractory a second beat is the same beat: only a
-      // recolour may still land, and only if the rng picked one.
-      if (cut && pickCut(state.rng, opts.recolour) !== CUT.RECOLOUR) return null;
-    }
+  if (hit.fired) {
+    const kind = pickCut(state.rng, opts.recolour);
     applyCut(state, kind, opts);
     applied = kind;
+  } else if (hit.reason === "held" || hit.reason === "refractory") {
+    const kind = pickCut(state.rng, opts.recolour);
+    if (kind === CUT.RECOLOUR) {
+      applyCut(state, kind, opts);
+      applied = kind;
+    } else if (pickCut(state.rng, opts.recolour) === CUT.RECOLOUR) {
+      applyCut(state, CUT.RECOLOUR, opts);
+      applied = CUT.RECOLOUR;
+    }
   }
 
   // Between cuts: shards extend along their axis, faster on bass; the

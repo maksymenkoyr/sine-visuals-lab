@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { listScenes } from "../src/render/scene.ts";
+import { SOURCE_SIGNAL } from "../src/render/beatListener.ts";
+import { CUT_MODE } from "../src/render/scenes/shards/layout.ts";
 // Side-effect import: registers every scene (src/render/scenes/index.ts's
 // own header comment) so listScenes() below sees the full set, not just
 // whichever scene another test file happened to import first.
@@ -71,5 +73,30 @@ describe("signals registry", () => {
 
     expect(idsOf(ripple).sort()).toEqual(["anim.dropOnset", "anim.lowOnset", "feature.onset"].sort());
     expect(idsOf(rippleSrc).sort()).toEqual(["anim.lowOnset", "feature.onset"].sort());
+  });
+
+  it("shards' Cut on reads both broadband and bass signals, with complementary activeWhen", () => {
+    const scenes = listScenes();
+    const shards = scenes.find((s) => s.id === "shards")!;
+    const cutMode = shards.settings!.find((s) => s.key === "cutMode")!;
+    const links = cutMode.reads ?? [];
+    expect(links.length).toBe(2);
+
+    const idsOf = links.map((l) => (typeof l === "string" ? l : l.signal));
+    expect(idsOf.sort()).toEqual(["anim.lowOnset", "feature.onset"].sort());
+
+    // Bass hits (CUT_MODE.BASS) switches which signal is "active"; the two
+    // links must disagree at every mode, not just report both as live.
+    for (const mode of [CUT_MODE.BEAT, CUT_MODE.BASS, CUT_MODE.BARS]) {
+      const get = (key: string) => (key === "cutMode" ? mode : 0);
+      const active = links.map((l) => (typeof l === "string" ? true : l.activeWhen(get)));
+      expect(active.filter(Boolean).length).toBe(1);
+    }
+  });
+
+  it("every beatListener.ts SOURCE_SIGNAL entry resolves in SIGNALS", () => {
+    for (const id of Object.values(SOURCE_SIGNAL)) {
+      expect(SIGNALS[id!]).toBeDefined();
+    }
   });
 });

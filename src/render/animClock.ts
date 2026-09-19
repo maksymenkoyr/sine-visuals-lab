@@ -1,4 +1,5 @@
 import type { FeatureFrame } from "../audio/types.ts";
+import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import { createFlowClock, type FlowClock } from "./flowClock.ts";
 import { createBeatClock, type BeatClock } from "./beatClock.ts";
 import { createBandEnergy, type BandEnergy } from "./bandEnergy.ts";
@@ -77,6 +78,30 @@ export interface AnimFrame {
   /** The unsmoothed, absolute counterpart to centroid — see
    *  spectralCentroid.ts. */
   centroidRaw: number;
+  /** FeatureFrame.bpm passed through unchanged — beatListener.ts's
+   *  resolveHold reads this (alongside tempoLock) to size a hold in beats
+   *  rather than a fixed duration. */
+  bpm: number;
+  /** This tick's silence-gate dimmer (src/audio/silenceGate.ts) — the same
+   *  value bandEnergy.advance() was called with above, computed once here
+   *  from `gate`/`frame.level` (see advance()'s own doc). 1 with no gate or
+   *  a fully open room, down toward 0 the quieter the room reads. The
+   *  Rhythm card's hits history reads this to shade the ground (alpha
+   *  proportional to `1 - gateDimmer`, so a half-open gate reads lighter
+   *  than a shut one); a BeatListener's "bass"/"mid"/"high" sources are
+   *  gated by construction (lowOnset/midOnset/highOnset are already false
+   *  while this sits near 0). */
+  gateDimmer: number;
+  /** Per-group onset diagnostics (bandEnergy.ts's lowDiag/midDiag/highDiag)
+   *  — JS-only like `raw`, per-tick readings, NOT edges: unlike
+   *  lowOnset/midOnset/highOnset above, these are not folded into
+   *  renderLatch.ts's one-shot latch, so a scene must not read them as
+   *  triggers — only the meters panel's hit history does, on its own
+   *  every-rAF-tick update ahead of the render cap. A fresh snapshot each
+   *  frame (unlike bandEnergy's own lowDiag/midDiag/highDiag, which alias
+   *  their mutated source) so a caller holding an old AnimFrame never sees
+   *  a later tick's numbers under it. */
+  hits: { low: OnsetDiag; mid: OnsetDiag; high: OnsetDiag };
 }
 
 export interface AnimClock {
@@ -171,6 +196,13 @@ export function createAnimClock(): AnimClock {
         },
         centroid: centroid.centroid,
         centroidRaw: centroid.raw,
+        bpm: frame.bpm,
+        gateDimmer: dimmer,
+        hits: {
+          low: { ...bandEnergy.lowDiag },
+          mid: { ...bandEnergy.midDiag },
+          high: { ...bandEnergy.highDiag },
+        },
       };
     },
   };

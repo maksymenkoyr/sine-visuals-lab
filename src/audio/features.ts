@@ -5,6 +5,9 @@ import { ANALYSER_MIN_DB, ANALYSER_MAX_DB } from "./analyser.ts";
 // (see the `autoGain`/`smoothingScale` params below, both plain numbers a
 // caller resolves from a store itself).
 import { silenceGateDimmer, type SilenceGateMarks } from "./silenceGate.ts";
+// Only the shared diagnostic shape — this extractor owns computing its own
+// OnsetDiag, not any gate logic (that's silenceGate.ts's job now).
+import type { OnsetDiag } from "./onsetDiag.ts";
 
 // Adaptive floor/ceiling per band: a leaky min/max that tracks the room's
 // own quiet and loud levels. This is what makes a muffled laptop mic and a
@@ -47,9 +50,12 @@ const RELEASE_PER_SEC = 6;
 // 0.05 at 60fps versus expBlend's 0.0488 — it never saturates at any
 // realistic frame rate, so there's no frame-rate bug here to fix.
 const FLUX_ADAPTIVE_RATE = 3; // how fast the local flux baseline adapts
-const FLUX_THRESHOLD_MULT = 1.6;
-const FLUX_THRESHOLD_MARGIN = 0.03;
-const ONSET_REFRACTORY_SEC = 0.1; // ~600 BPM ceiling, prevents double-triggers
+// Exported so the meters panel's hit-history hint (audioMeters.ts's
+// hitsRuleHint) can spell out the exact rule from these numbers instead of
+// a hand-typed copy that can drift from them.
+export const FLUX_THRESHOLD_MULT = 1.6;
+export const FLUX_THRESHOLD_MARGIN = 0.03;
+export const ONSET_REFRACTORY_SEC = 0.1; // ~600 BPM ceiling, prevents double-triggers
 
 // BPM estimation — a comb over the gaps between every pair of recent onsets
 // (see registerOnset). Candidate periods step through the tempo window;
@@ -155,6 +161,16 @@ export class FeatureExtractor {
     return this.lastFluxRatio;
   }
 
+  /** This frame's full onset diagnostic — see onsetDiag.ts's OnsetDiag.
+   *  Mutated in place every update() (like bandEnergy.ts's own group
+   *  diags), so this is an alias, not a snapshot: read it before the next
+   *  update() call. A local diagnostic like fixedEnergy/bandSpanDb above,
+   *  never part of FeatureFrame — the Rhythm card's hits history in
+   *  audioMeters.ts is the one consumer. */
+  get onsetDiag(): Readonly<OnsetDiag> {
+    return this.diag;
+  }
+
   /** How much of this frame's flux the silence gate let through before the
    *  firing comparison — see silenceGate.ts's silenceGateDimmer. 1 with no
    *  `gate` argument (or whenever the gate is off), down toward 0 the
@@ -187,7 +203,7 @@ export class FeatureExtractor {
   // local diagnostic like fixedEnergy/bandSpanDb above, never part of
   // FeatureFrame: the onset flag it explains is a boolean by design, but a
   // tuning session wants to see how hard a hit cleared the bar (or how
-  // close it came) — the Rhythm card's Onset row in audioMeters.ts.
+  // close it came) — the Rhythm card's hits history in audioMeters.ts.
   private lastFluxRatio = 0;
   private lastGateDimmer = 1;
   private lastSuppressed = false;
@@ -195,6 +211,11 @@ export class FeatureExtractor {
   // (see update()) — so `suppressed` gets its own one-shot spacing instead
   // of staying true for as long as flux keeps clearing the threshold.
   private lastSuppressedTime = -Infinity;
+  // The rest of the onset diagnostic beyond fluxRatio/gateDimmer/suppressed
+  // above — see onsetDiag's own doc. Mutated in place every update(), not
+  // replaced (like bandEnergy.ts's own group diags) — no per-frame
+  // allocation.
+  private diag: OnsetDiag = { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity };
 
   /** The AudioContext-clock delta update() computed last call — what
    *  app.ts should feed autoGain.ts's feedAutoGainMeasurement() as dtSec,
@@ -310,16 +331,27 @@ export class FeatureExtractor {
     // is always > 0 (FLUX_THRESHOLD_MARGIN keeps it off zero at a silent
     // baseline), so this never divides by zero.
     this.lastFluxRatio = flux / threshold;
+    this.diag.ratio = this.lastFluxRatio;
     // The gate only ever weights the comparison below — fluxBaseline just
     // above and lastFluxRatio's score are both computed on raw, ungated flux,
     // and stay that way (see silenceGate.ts's header for why gating the
     // baseline too would defeat the gate entirely).
     const dimmer = gate ? silenceGateDimmer(level, gate) : 1;
     this.lastGateDimmer = dimmer;
-    const canFire = time - this.lastOnsetTime > ONSET_REFRACTORY_SEC;
+    const sinceOnsetSec = time - this.lastOnsetTime;
+    const canFire = sinceOnsetSec > ONSET_REFRACTORY_SEC;
     const wouldFire = canFire && flux > threshold;
-    const onset = wouldFire && flux * dimmer > threshold;
+    // Cleared even after the dimmer — used for the real firing decision
+    // below and, unconditionally, for onsetDiag.blocked (see its own doc):
+    // a hit that cleared the gated comparison but still landed inside the
+    // refractory reads as "blocked" rather than a plain miss.
+    const dimmedClears = flux * dimmer > threshold;
+    const onset = wouldFire && dimmedClears;
+    this.diag.blocked = dimmedClears && !canFire;
+    this.diag.sinceOnsetSec = sinceOnsetSec;
 
+    // A hit the silence gate or the refractory stopped doesn't reach
+    // registerOnset either — it doesn't get to vote on the tempo.
     if (onset) {
       this.lastOnsetTime = time;
       this.registerOnset(time, flux / threshold);
@@ -337,6 +369,7 @@ export class FeatureExtractor {
       this.lastSuppressed = true;
       this.lastSuppressedTime = time;
     }
+    this.diag.gated = this.lastSuppressed;
 
     let energy = 0;
     let fixedEnergy = 0;

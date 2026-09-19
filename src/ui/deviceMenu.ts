@@ -28,6 +28,7 @@ import {
   type SilenceGateMarks,
   type SilenceGateReading,
 } from "../audio/silenceGate.ts";
+import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { createBandFaders } from "./bandFaders.ts";
@@ -321,8 +322,8 @@ export interface DeviceMenu {
    *  Smoothing value — forwarded to the meters so their own BPM settle and
    *  waveform peak-hold bypass at Smoothing's Off stop the same way the rest
    *  of the pipeline does; not re-resolved here, since resolveSmoothing()
-   *  slews its auto value and this runs every rAF tick. `fluxRatio` is
-   *  FeatureExtractor.fluxRatio, null on the same paths as `fixedEnergy`.
+   *  slews its auto value and this runs every rAF tick. `beatDiag` is
+   *  FeatureExtractor.onsetDiag, null on the same paths as `fixedEnergy`.
    *  `gate` is this device's own SilenceGateReading (src/audio/silenceGate.ts)
    *  — app.ts's `lastGate` — null on the same paths as `fixedEnergy`, for the
    *  Gate card. */
@@ -336,7 +337,7 @@ export interface DeviceMenu {
     rateScale: number,
     fixedEnergy: number | null,
     lufs: LufsReading | null,
-    fluxRatio: number | null,
+    beatDiag: OnsetDiag | null,
     gate: SilenceGateReading | null,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
@@ -1833,7 +1834,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   sceneCard.el.style.display = "none";
   const sceneRows = document.createElement("div");
   sceneCard.body.appendChild(sceneRows);
-  let sceneRowHandles: ReturnType<typeof createControlRow>[] = [];
+  // What the per-tick loop and the auto refresh need from a scene row — a
+  // slider row (createControlRow) satisfies it as is; an enum picker with
+  // `reads` supplies its own pair (see appendSettingRow).
+  interface SceneRowHandle {
+    updateSignalPills(frame: FeatureFrame | null, anim: AnimFrame | null): void;
+    refreshAuto(): void;
+  }
+  let sceneRowHandles: SceneRowHandle[] = [];
 
   // Looks: named snapshots of the Scene card's own settings above — see
   // src/render/sceneLooks.ts. Hidden the same way sceneCard is when the
@@ -1924,43 +1932,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // (spec.reads below) — every other branch here only ever touches `spec`
   // itself.
   function appendSettingRow(container: HTMLElement, sceneId: string, spec: SceneSetting, specs: SceneSetting[]): void {
-    if (spec.type === "enum" && spec.options) {
-      container.appendChild(
-        createPickerRow({
-          label: spec.label,
-          accent: SCENE_VIOLET,
-          options: spec.options,
-          defaultValue: deps.getSceneSettingDefault(sceneId, spec),
-          description: spec.description,
-          get: () => deps.getSceneSettingValue(sceneId, spec),
-          set: (value) => {
-            deps.onSceneSettingChange(sceneId, spec, value);
-            // A variant switch swaps every other row's profile (values,
-            // defaults, auto state), so the card is rebuilt around it.
-            if (spec.variant) renderSceneSettings();
-          },
-          wire: (row, strip, a) => {
-            wireHoverFocus(row, strip);
-            wireRowKeys(strip, { reset: a.reset, toggleOff: () => a.cycle(1) });
-          },
-        }).el,
-      );
-      return;
-    }
-    if (spec.type === "boolean") {
-      container.appendChild(
-        createToggleRow({
-          label: spec.label,
-          accent: SCENE_VIOLET,
-          defaultValue: deps.getSceneSettingDefault(sceneId, spec),
-          description: spec.description,
-          get: () => deps.getSceneSettingValue(sceneId, spec),
-          set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
-        }),
-      );
-      return;
-    }
-
     // A sibling setting's live (auto-aware) value, by key — what a
     // SignalLink.activeWhen predicate reads (see signals.ts's SignalLink doc
     // comment). Falls back to 0 for an unknown key rather than throwing: a
@@ -1985,6 +1956,69 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           : undefined,
       };
     });
+
+    if (spec.type === "enum" && spec.options) {
+      // An enum's `reads` get the same chip + pill strip a slider row builds
+      // for itself inside createControlRow — here the host builds it, since
+      // the picker only mounts it (PickerRowSpec.signals). The pills are
+      // how a picker that chooses *what the scene listens to* (shards' Cut
+      // on: Beat vs Bass hit, via complementary activeWhen predicates)
+      // shows which trigger the current choice actually rides.
+      const signals = reads?.length
+        ? createSignalStrip(
+            reads.map((r) => ({ label: r.signal.label, description: r.signal.description, onReveal: r.onReveal })),
+            SCENE_VIOLET,
+          )
+        : undefined;
+      const picker = createPickerRow({
+        label: spec.label,
+        accent: SCENE_VIOLET,
+        options: spec.options,
+        defaultValue: deps.getSceneSettingDefault(sceneId, spec),
+        description: spec.description,
+        get: () => deps.getSceneSettingValue(sceneId, spec),
+        set: (value) => {
+          deps.onSceneSettingChange(sceneId, spec, value);
+          // A variant switch swaps every other row's profile (values,
+          // defaults, auto state), so the card is rebuilt around it.
+          if (spec.variant) renderSceneSettings();
+        },
+        wire: (row, strip, a) => {
+          wireHoverFocus(row, strip);
+          wireRowKeys(strip, { reset: a.reset, toggleOff: () => a.cycle(1) });
+        },
+        signals,
+      });
+      container.appendChild(picker.el);
+      if (signals && reads) {
+        sceneRowHandles.push({
+          // Same shape as createControlRow's own updateSignalPills.
+          updateSignalPills: (frame, anim) =>
+            signals.update(
+              reads.map((r) => ({
+                value: frame && anim ? r.signal.read(frame, anim) : 0,
+                active: r.active(),
+              })),
+            ),
+          refreshAuto: () => {},
+        });
+        wireBandHighlight(picker.el, reads);
+      }
+      return;
+    }
+    if (spec.type === "boolean") {
+      container.appendChild(
+        createToggleRow({
+          label: spec.label,
+          accent: SCENE_VIOLET,
+          defaultValue: deps.getSceneSettingDefault(sceneId, spec),
+          description: spec.description,
+          get: () => deps.getSceneSettingValue(sceneId, spec),
+          set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
+        }),
+      );
+      return;
+    }
 
     const row = createControlRow({
       label: spec.label,
@@ -2321,13 +2355,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       rateScale: number,
       fixedEnergy: number | null,
       lufs: LufsReading | null,
-      fluxRatio: number | null,
+      beatDiag: OnsetDiag | null,
       gate: SilenceGateReading | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, fluxRatio, gate);
+      audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate);
       // Unthrottled, same reasoning as audioMeters' own fills — see
       // createControlRow's updateSignalPills doc comment. A no-op per row
       // with no `reads`, so this costs nothing for the common case.

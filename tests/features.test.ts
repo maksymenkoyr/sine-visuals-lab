@@ -516,6 +516,49 @@ describe("FeatureExtractor", () => {
       expect(Number.isFinite(extractor.fluxRatio)).toBe(true);
     });
   });
+
+  describe("onsetDiag", () => {
+    it("blocked is true on a rise the refractory suppresses", () => {
+      // Well inside ONSET_REFRACTORY_SEC (0.1s): every rising edge clears
+      // the threshold, but only the first of each nearby pair fires — same
+      // shape as bandEnergy.test.ts's own refractory/blocked test.
+      const periodSec = 0.03;
+      const extractor = new FeatureExtractor();
+      const dt = 1 / 60;
+      let time = 0;
+      let sawBlocked = false;
+      for (let i = 0; i < Math.round(2 / dt); i++) {
+        time += dt;
+        const high = (time % periodSec) < periodSec / 2;
+        const frame = extractor.update(bandsFrame(QUIET_DB, high ? { 0: LOUD_DB, 12: LOUD_DB } : {}), time);
+        if (time > 0.5 && !frame.onset && extractor.onsetDiag.blocked) sawBlocked = true;
+      }
+      expect(sawBlocked).toBe(true);
+    });
+
+    it("gated is true for a hit whose level sits below the closed mark", () => {
+      // A relative jump large enough to clear the flux threshold against
+      // the adaptive per-band tracker, but small in absolute terms — both
+      // ends sit well under LEVEL_DB_FLOOR, so FeatureFrame.level (and the
+      // gate's `closed` mark it's compared against) never leaves
+      // near-zero. Passed explicitly via `gate` — with no marks argument
+      // update() never gates anything (see its own doc).
+      const extractor = new FeatureExtractor();
+      const dt = 1 / 60;
+      let time = 0;
+      const veryQuietDb = -95;
+      const marks: SilenceGateMarks = { closed: 0.2, open: 0.5 };
+      for (let i = 0; i < 120; i++) {
+        time += dt;
+        extractor.update(bandsFrame(veryQuietDb), time, 1, 1, marks);
+      }
+      time += dt;
+      const frame = extractor.update(bandsFrame(veryQuietDb, { 0: -80, 12: -80 }), time, 1, 1, marks);
+      expect(frame.level).toBeLessThan(marks.closed);
+      expect(frame.onset).toBe(false);
+      expect(extractor.onsetDiag.gated).toBe(true);
+    });
+  });
 });
 
 // The silence gate (src/audio/silenceGate.ts) folded into update()'s onset

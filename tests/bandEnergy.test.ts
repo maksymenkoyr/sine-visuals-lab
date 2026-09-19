@@ -272,6 +272,49 @@ describe("band energy", () => {
     expect(explicitTicks).toEqual(defaultTicks);
   });
 
+  it("lowDiag.ratio is >= 1 on the firing tick", () => {
+    const energy = createBandEnergy();
+    const quiet = bandsWith([]);
+    for (let i = 0; i < 60; i++) energy.advance(DT, quiet);
+    energy.advance(DT, bandsWith([0, 1, 2, 3]));
+    expect(energy.lowOnset).toBe(true);
+    expect(energy.lowDiag.ratio).toBeGreaterThanOrEqual(1);
+  });
+
+  it("lowDiag.blocked is true on a rise the refractory suppressed", () => {
+    // Well inside the low group's 0.1s refractory — every rising edge
+    // clears the threshold, but only some are far enough apart to fire.
+    const periodSec = 0.03;
+    const energy = createBandEnergy();
+    let sawBlocked = false;
+    const seconds = 2;
+    for (let i = 0; i < Math.round(seconds / DT); i++) {
+      const t = i * DT;
+      const high = (t % periodSec) < periodSec / 2;
+      energy.advance(DT, bandsWith([0, 1, 2, 3], high ? 0.9 : 0.02));
+      if (t > 0.5 && !energy.lowOnset && energy.lowDiag.blocked) sawBlocked = true;
+    }
+    expect(sawBlocked).toBe(true);
+  });
+
+  it("dimmer = 0 fires no lowOnset and marks lowDiag.gated; dimmer = 1 fires normally", () => {
+    // Same shape as the two 20-second dimmer tests above, but on the
+    // simpler bandsWith fixture so the diagnostic fields are easy to
+    // assert on a single tick.
+    const gated = createBandEnergy();
+    const open = createBandEnergy();
+    const quiet = bandsWith([]);
+    for (let i = 0; i < 60; i++) {
+      gated.advance(DT, quiet, 1, 0);
+      open.advance(DT, quiet, 1, 1);
+    }
+    gated.advance(DT, bandsWith([0, 1, 2, 3]), 1, 0);
+    open.advance(DT, bandsWith([0, 1, 2, 3]), 1, 1);
+    expect(gated.lowOnset).toBe(false);
+    expect(gated.lowDiag.gated).toBe(true);
+    expect(open.lowOnset).toBe(true);
+  });
+
   it("stays finite and keeps firing onsets with Smoothing at its Off stop (rateScale = Infinity)", () => {
     // The flux baseline and refractory must not be scaled by rateScale: at
     // the Smoothing row's Off stop rateScale is Infinity, and scaling the
