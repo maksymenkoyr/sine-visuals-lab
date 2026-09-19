@@ -65,6 +65,27 @@
  * don't. So a phone's Silence gate setting doesn't gate what a paired TV's
  * own bandEnergy onsets treat as silence; only the TV's own copy of this
  * setting does that.
+ *
+ * Auto mode: an opt-in room-floor tracker (feedSilenceGateMeasurement,
+ * gated by STORAGE_KEY_AUTO) that can drive both marks instead of a manual
+ * drag. It resolves against its own room-floor estimate rather than
+ * autoTune.ts's MUSIC_DIALS, for the same reason autoGain.ts's own auto
+ * amount does: no dial there describes how quiet this room's silence
+ * actually reads, only what the music is doing once it's already playing.
+ * Its rule in plain words is "the room is quiet when the volume holds
+ * still" — hiss is steady, music is not — so it watches FeatureFrame.level
+ * for a stretch that barely moves and treats that as a genuine floor
+ * reading, easing `closed` to sit just above it, rather than trying to tell
+ * silence from music by loudness alone. Off by default, like autoGain.ts's
+ * own auto flag: this whole feature exists because one specific room read
+ * Level as nearly zero, and defaulting every device into an unproven
+ * room-floor guess on upgrade would be a worse trade for a room that never
+ * needed a gate at all. Only src/app.ts's own extractor loop ever calls
+ * feedSilenceGateMeasurement — a paired TV (which, per the limitation
+ * above, keeps its own entirely local copy of this module) and the
+ * synthetic feed never do, so on either path the auto marks simply hold
+ * wherever setSilenceGateAuto(true) last seeded them, same as if a manual
+ * drag had left them there.
  */
 
 const STORAGE_KEY_CLOSED = "vibe.silenceGateClosed";
@@ -174,6 +195,192 @@ export function resetSilenceGate(): void {
   closedCache = SILENCE_GATE_CLOSED_DEFAULT;
   openCache = SILENCE_GATE_OPEN_DEFAULT;
   persist();
+}
+
+// ---- Auto mode -------------------------------------------------------
+// See this file's header for the why. Same opt-in/seed-on-enable/no-op-
+// while-off shape as autoGain.ts's own auto mode, just with two derived
+// marks instead of one amount.
+
+const STORAGE_KEY_AUTO = "vibe.silenceGateAuto";
+
+function loadInitialAuto(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEY_AUTO) === "1";
+  } catch {
+    return false;
+  }
+}
+
+let autoOn = loadInitialAuto();
+
+function persistAuto(): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_AUTO, autoOn ? "1" : "0");
+  } catch {
+    // Not fatal — the setting just won't persist across reloads.
+  }
+}
+
+export function isSilenceGateAuto(): boolean {
+  return autoOn;
+}
+
+// Placeholders, not measured against a real mic in a real room — same
+// caveat as SILENCE_GATE_CLOSED_DEFAULT/OPEN_DEFAULT above.
+//
+// SILENCE_GATE_AUTO_MARGIN is how far above the tracked floor `closed`
+// sits once the room settles: wide enough that the floor estimate's own
+// residual wobble can't cross it back open, narrow enough that a room that
+// has genuinely gone quiet gates promptly rather than after a long fade.
+// SILENCE_GATE_AUTO_CLOSED_FLOOR keeps auto `closed` off SILENCE_GATE_MIN
+// itself, which silenceGateDimmer reads as "gate off" — auto should always
+// be gating *something*, never silently disabling itself just because the
+// room read as dead silent for a moment. SILENCE_GATE_AUTO_CLOSED_CEIL is
+// the mirror case: it keeps a sustained drone (a fan, an AC hum, mains
+// hum) from ever pushing auto `closed` high enough to gate real music
+// out — well under SILENCE_GATE_MAX, the ceiling only a deliberate manual
+// drag can still reach.
+const SILENCE_GATE_AUTO_MARGIN = 0.02;
+const SILENCE_GATE_AUTO_CLOSED_FLOOR = 0.01;
+const SILENCE_GATE_AUTO_CLOSED_CEIL = 0.3;
+
+// How long a "has the room held still" window looks back, and how tightly
+// level has to hold inside it to count as steady. Implemented below as a
+// leaky min/max envelope rather than a literal ring buffer of samples: a
+// new extreme snaps the envelope open immediately (so one loud transient
+// is never mistaken for the room's floor), and otherwise it relaxes back
+// toward the current level with this window as its time constant — which
+// "forgets" an old extreme once it's genuinely that far in the past,
+// without ever storing a sample to compute a real sliding window from.
+const SILENCE_GATE_AUTO_WINDOW_SEC = 2;
+const SILENCE_GATE_AUTO_STEADY_SPAN = 0.02;
+const ENVELOPE_DECAY_RATE = 1 / SILENCE_GATE_AUTO_WINDOW_SEC;
+
+// Time constants for easing the floor estimate toward a steady window's
+// mean (slow — seconds-scale, like autoGain.ts's own EASE_RATE) versus
+// following a level that's dropped below the current estimate (fast — the
+// room just proved it can be quieter, so there's no reason to keep gating
+// on a stale high estimate for another several seconds).
+const FLOOR_RISE_RATE = 0.1;
+const FLOOR_DROP_RATE = 1;
+
+/** Pure — this tracker's current floor estimate to the two gate marks that
+ *  follow from it. Exported for tests, like autoGain.ts's autoGainForSpan;
+ *  feedSilenceGateMeasurement is the only real caller. Keeps the same gap
+ *  width the shipped manual defaults use (SILENCE_GATE_OPEN_DEFAULT -
+ *  SILENCE_GATE_CLOSED_DEFAULT) rather than inventing a second one, so
+ *  switching Silence gate to auto changes where the two marks sit, not how
+ *  wide the smoothstep between them is. */
+export function silenceGateMarksForFloor(floor: number): SilenceGateMarks {
+  const safeFloor = Number.isFinite(floor) ? floor : SILENCE_GATE_CLOSED_DEFAULT;
+  const closed = Math.min(
+    SILENCE_GATE_AUTO_CLOSED_CEIL,
+    Math.max(SILENCE_GATE_AUTO_CLOSED_FLOOR, safeFloor + SILENCE_GATE_AUTO_MARGIN),
+  );
+  const open = Math.min(SILENCE_GATE_MAX, closed + (SILENCE_GATE_OPEN_DEFAULT - SILENCE_GATE_CLOSED_DEFAULT));
+  return { closed, open };
+}
+
+// The tracker's own state — never persisted, since (like autoGain.ts's
+// `eased`) it's re-derived from the room fresh every session. `floor` is
+// the tracker's current guess at the room's quiet level; envelopeMin/Max
+// are the leaky min/max envelope feedSilenceGateMeasurement reads "is the
+// room holding still" from (see the constants above).
+let floor = SILENCE_GATE_CLOSED_DEFAULT - SILENCE_GATE_AUTO_MARGIN;
+let envelopeMin = Infinity;
+let envelopeMax = -Infinity;
+
+export function setSilenceGateAuto(on: boolean): void {
+  if (on === autoOn) return;
+  autoOn = on;
+  if (on) {
+    // Seed from the manual marks so the rows don't jump on the chip click —
+    // same reasoning as autoGain.ts's setAutoGainAuto. Backed out through
+    // silenceGateMarksForFloor's own margin (rather than caching `closed`
+    // directly) so the very next feedSilenceGateMeasurement() call eases
+    // forward from a floor estimate consistent with what that function
+    // would already show, not a `closed` value the formula could never
+    // itself have produced. The envelope resets too, so a stale window from
+    // a much earlier auto session (or one left mid-track) can't bias the
+    // very first "is the room steady" read after re-enabling.
+    floor = closedCache - SILENCE_GATE_AUTO_MARGIN;
+    envelopeMin = Infinity;
+    envelopeMax = -Infinity;
+    autoSnapshot = null;
+  }
+  persistAuto();
+}
+
+// Rebuilt only when the auto marks have moved by more than this — same
+// reasoning as the manual snapshot above (persist() being the one place
+// every setter ends): resolveSilenceGate() runs every tick while the floor
+// eases continuously, so a fresh object on every call would be steady-state
+// garbage for no reason.
+const AUTO_SNAPSHOT_EPS = 1e-4;
+let autoSnapshot: SilenceGateMarks | null = null;
+
+/** The value app.ts's extractor/animClock should actually use this tick:
+ *  the room-floor tracker's marks while auto is on, getSilenceGate()
+ *  otherwise. */
+export function resolveSilenceGate(): SilenceGateMarks {
+  if (!autoOn) return getSilenceGate();
+  const marks = silenceGateMarksForFloor(floor);
+  if (
+    autoSnapshot === null ||
+    Math.abs(marks.closed - autoSnapshot.closed) > AUTO_SNAPSHOT_EPS ||
+    Math.abs(marks.open - autoSnapshot.open) > AUTO_SNAPSHOT_EPS
+  ) {
+    autoSnapshot = Object.freeze(marks);
+  }
+  return autoSnapshot;
+}
+
+/**
+ * The room-floor tracker. Eases `floor` — this module's best guess at how
+ * quiet this room's silence actually reads on FeatureFrame.level — toward
+ * whatever the mic has settled on lately, so resolveSilenceGate() can place
+ * `closed` just above it without anyone ever dragging a slider. In plain
+ * words: **the room is quiet when the volume holds still.** Hiss is steady;
+ * music is not — so a stretch where `level` barely moves is treated as a
+ * genuine floor reading, and a stretch that's bouncing around (a beat, a
+ * phrase, anything actually playing) is left alone.
+ *
+ * Call once per tick (app.ts, right after FeatureExtractor.update(), next
+ * to feedAutoGainMeasurement) with this tick's FeatureFrame.level and the
+ * AudioContext-clock delta since the last call — see
+ * feedAutoGainMeasurement's own doc comment for why that's the right clock.
+ * A no-op while auto is off, so the tracker doesn't drift out from under a
+ * manual value it isn't driving — and since only app.ts's own extractor
+ * loop ever calls this (see this file's header), a paired TV or the
+ * synthetic feed never advances it at all, holding whatever marks
+ * setSilenceGateAuto(true) last seeded.
+ *
+ * Non-finite input (no mic yet, a NaN dt) is ignored outright rather than
+ * folded in as a bad sample — the tracker just holds its last estimate,
+ * the same fail-open instinct as silenceGateDimmer's own non-finite check.
+ */
+export function feedSilenceGateMeasurement(level: number, dtSec: number): void {
+  if (!autoOn) return;
+  if (!Number.isFinite(level) || !Number.isFinite(dtSec)) return;
+  const dt = Math.max(0, dtSec);
+  const decay = 1 - Math.exp(-ENVELOPE_DECAY_RATE * dt);
+
+  // Leaky min/max envelope standing in for a real sliding window — see the
+  // constants above.
+  envelopeMax = level > envelopeMax ? level : envelopeMax + (level - envelopeMax) * decay;
+  envelopeMin = level < envelopeMin ? level : envelopeMin + (level - envelopeMin) * decay;
+
+  if (level < floor) {
+    // The room just proved it can be quieter than the current estimate —
+    // follow it down fast rather than waiting out the slow steadiness ease
+    // below, so one misjudged-high floor doesn't keep gating real quiet
+    // passages for the rest of the session.
+    floor += (level - floor) * (1 - Math.exp(-FLOOR_DROP_RATE * dt));
+  } else if (envelopeMax - envelopeMin < SILENCE_GATE_AUTO_STEADY_SPAN) {
+    const candidate = (envelopeMax + envelopeMin) / 2;
+    floor += (candidate - floor) * (1 - Math.exp(-FLOOR_RISE_RATE * dt));
+  }
 }
 
 function clamp01(x: number): number {

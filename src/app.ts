@@ -40,7 +40,13 @@ import { createRenderLatch } from "./render/renderLatch.ts";
 import { getBeatGrid, setBeatGrid } from "./audio/beatGrid.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { getSceneSetting, resetSceneSettings, setSceneSetting, settingDefault } from "./render/sceneSettings.ts";
+import {
+  getSceneSetting,
+  resetSceneSettings,
+  setSceneSetting,
+  settingDefault,
+  type SceneSetting,
+} from "./render/sceneSettings.ts";
 import {
   applyLook,
   captureLook,
@@ -67,8 +73,13 @@ import {
   getSilenceGate,
   setSilenceGateClosed,
   setSilenceGateOpen,
+  resolveSilenceGate,
+  feedSilenceGateMeasurement,
+  isSilenceGateAuto,
+  setSilenceGateAuto,
   type SilenceGateReading,
 } from "./audio/silenceGate.ts";
+import { isMicAuto, setMicAuto } from "./audio/micAuto.ts";
 import type { OnsetDiag } from "./audio/onsetDiag.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
@@ -615,6 +626,43 @@ function menuItems(items: { id: string; name: string }[]) {
   return items.map((i) => ({ id: i.id, name: i.name }));
 }
 
+// A named top-level function (rather than inline in the DeviceMenuDeps
+// object literal below) so micAuto.ts's setMicAuto can reuse this exact
+// seed-then-flip path for the Sensitivity/Expansion/Smoothing pseudo-params
+// instead of re-deriving it — see micAutoMembers below and micAuto.ts's
+// header for why that reuse matters.
+function onSettingAutoToggle(sceneId: string, spec: SceneSetting, on: boolean): void {
+  if (on) {
+    // Pseudo-params (Sensitivity/Expansion/Smoothing) live in their own
+    // store rather than sceneSettings.ts — this map picks the right
+    // manual-value getter by key, falling back to a real scene setting.
+    const pseudoGetters: Record<string, (sceneId: string) => number> = {
+      [getSensitivitySpec().key]: getSensitivity,
+      [getExpansionSpec().key]: getExpansion,
+      [getSmoothingSpec().key]: getSmoothing,
+    };
+    const current = (pseudoGetters[spec.key] ?? ((id: string) => getSceneSetting(id, spec)))(sceneId);
+    seedAuto(sceneId, spec.key, current);
+  }
+  setAutoEnabled(sceneId, spec.key, on);
+}
+
+// The whole-mic membership itself lives in micAuto.ts (see its header) —
+// this is only the wiring from that module's injected getters/setters to
+// this app's own store functions, reused by both DeviceMenuDeps.isMicAuto
+// and .onMicAutoToggle below.
+const micAutoMembers = {
+  isAutoGainAuto,
+  setAutoGainAuto,
+  isSilenceGateAuto,
+  setSilenceGateAuto,
+  getSensitivitySpec,
+  getExpansionSpec,
+  getSmoothingSpec,
+  isSettingAutoEnabled: isAutoEnabled,
+  onSettingAutoToggle,
+};
+
 function wireDeviceMenu(): void {
   deviceMenu = createDeviceMenu({
     getPalettes: () => menuItems(PALETTES),
@@ -699,21 +747,7 @@ function wireDeviceMenu(): void {
     getExpansionSpec: () => getExpansionSpec(),
     getSmoothingSpec: () => getSmoothingSpec(),
     isSettingAutoEnabled: (sceneId, key) => isAutoEnabled(sceneId, key),
-    onSettingAutoToggle: (sceneId, spec, on) => {
-      if (on) {
-        // Pseudo-params (Sensitivity/Expansion/Smoothing) live in their
-        // own store rather than sceneSettings.ts — this map picks the right
-        // manual-value getter by key, falling back to a real scene setting.
-        const pseudoGetters: Record<string, (sceneId: string) => number> = {
-          [getSensitivitySpec().key]: getSensitivity,
-          [getExpansionSpec().key]: getExpansion,
-          [getSmoothingSpec().key]: getSmoothing,
-        };
-        const current = (pseudoGetters[spec.key] ?? ((id: string) => getSceneSetting(id, spec)))(sceneId);
-        seedAuto(sceneId, spec.key, current);
-      }
-      setAutoEnabled(sceneId, spec.key, on);
-    },
+    onSettingAutoToggle,
     isSceneAuto: (sceneId) =>
       isSceneAuto(sceneId, [
         ...(getScene(sceneId)?.settings ?? []),
@@ -738,8 +772,22 @@ function wireDeviceMenu(): void {
     onAutoGainAutoToggle: (on) => setAutoGainAuto(on),
     resolveAutoGain: () => resolveAutoGain(),
     getSilenceGate: () => getSilenceGate(),
-    onSilenceGateClosedChange: (value) => setSilenceGateClosed(value),
-    onSilenceGateOpenChange: (value) => setSilenceGateOpen(value),
+    // A drag hands the gate back to manual first, same as onAutoGainChange
+    // above — otherwise resolveSilenceGate() would keep serving the auto
+    // marks and the drag would do nothing.
+    onSilenceGateClosedChange: (value) => {
+      setSilenceGateAuto(false);
+      setSilenceGateClosed(value);
+    },
+    onSilenceGateOpenChange: (value) => {
+      setSilenceGateAuto(false);
+      setSilenceGateOpen(value);
+    },
+    isSilenceGateAuto: () => isSilenceGateAuto(),
+    onSilenceGateAutoToggle: (on) => setSilenceGateAuto(on),
+    resolveSilenceGate: () => resolveSilenceGate(),
+    isMicAuto: (sceneId) => isMicAuto(sceneId, micAutoMembers),
+    onMicAutoToggle: (sceneId, on) => setMicAuto(sceneId, on, micAutoMembers),
     getPowerMode: () => powerMode,
     onPowerModeChange: (mode) => {
       setPowerMode(mode);
@@ -1121,7 +1169,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, getSilenceGate());
+    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
     lastFixedEnergy = extractor.fixedEnergy;
     lastBeatDiag = extractor.onsetDiag;
     lastFluxRatio = extractor.fluxRatio;
@@ -1133,6 +1181,9 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     // Feeds next tick's resolveAutoGain(), not this one's — see
     // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
     feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
+    // Same one-tick lag, same reason — see feedSilenceGateMeasurement's own
+    // doc comment.
+    feedSilenceGateMeasurement(f.level, extractor.dtSec);
     return f;
   }
 
@@ -1154,7 +1205,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, getSilenceGate());
+    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
     lastFixedEnergy = extractor.fixedEnergy;
     lastBeatDiag = extractor.onsetDiag;
     lastFluxRatio = extractor.fluxRatio;
@@ -1162,6 +1213,9 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     // Feeds next tick's resolveAutoGain(), not this one's — see
     // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
     feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
+    // Same one-tick lag, same reason — see feedSilenceGateMeasurement's own
+    // doc comment.
+    feedSilenceGateMeasurement(f.level, extractor.dtSec);
     hostConn.sendFrame(f);
     return sampleToVisual(hostConn.sample());
   }
@@ -1243,7 +1297,7 @@ function loop(): void {
   // itself (beat/flow/band-pulse/section-intensity decay) still run on every
   // rAF tick regardless of the render-rate cap below — only the GPU draw is
   // rate-capped.
-  const anim = gained ? animClock.advance(dtSec, gained, smoothing, getBeatGrid(scene.id), getSilenceGate()) : null;
+  const anim = gained ? animClock.advance(dtSec, gained, smoothing, getBeatGrid(scene.id), resolveSilenceGate()) : null;
   if (anim) {
     lastAnim = anim;
     advanceAutoTune(dtSec, anim.profile);
