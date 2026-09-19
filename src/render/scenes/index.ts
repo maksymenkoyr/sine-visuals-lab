@@ -20,7 +20,7 @@ import { slatsScene } from "./slats/index.ts";
 import { shardsScene } from "./shards/index.ts";
 import { petriScene } from "./petri.ts";
 import { inkScene } from "./ink.ts";
-import { crystalScene } from "./crystal.ts";
+import { crystalScene } from "./crystal/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,

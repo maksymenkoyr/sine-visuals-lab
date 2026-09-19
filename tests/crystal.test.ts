@@ -8,7 +8,7 @@ import {
   ZOOM_AMP,
   type CrystalInputs,
   type CrystalOpts,
-} from "../src/render/scenes/crystal.ts";
+} from "../src/render/scenes/crystal/index.ts";
 
 // The sequencer is the scene's whole sync story (see crystal.ts's header):
 // a wandering camera, a morph clock and light layers that fade up and
@@ -42,7 +42,7 @@ describe("layerEnvelope", () => {
 
 describe("advanceCrystal", () => {
   const DT = 1 / 60;
-  const opts: CrystalOpts = { zoom: 0.4, pulse: 0.6, flareAmt: 1, hold: 0.35, drift: 0.3 };
+  const opts: CrystalOpts = { zoom: 0.4, pulse: 0.6, flareAmt: 1, hold: 0.35, speed: 0.3 };
   const quiet: CrystalInputs = {
     dtSec: DT,
     onset: false,
@@ -185,7 +185,32 @@ describe("advanceCrystal", () => {
       expect(Math.abs(out.logZoom - prev.logZoom)).toBeLessThan(0.05);
       expect(Math.abs(out.pan[0] - prev.pan[0])).toBeLessThan(0.02);
       expect(Math.abs(out.pan[1] - prev.pan[1])).toBeLessThan(0.02);
+      expect(out.travel - prev.travel).toBeGreaterThanOrEqual(0);
+      expect(out.travel - prev.travel).toBeLessThan(0.1);
+      expect(out.roll - prev.roll).toBeGreaterThanOrEqual(0);
+      expect(out.roll - prev.roll).toBeLessThan(0.1);
       prev = out;
     }
+  });
+
+  it("travel and roll advance monotonically and continuously — v4's raymarched camera", () => {
+    const st = createCrystalState();
+    let prev = advanceCrystal(st, quiet, opts);
+    let sawOnset = false;
+    for (let i = 1; i < 600; i++) {
+      const onset = i % 23 === 0;
+      if (onset) sawOnset = true;
+      const out = advanceCrystal(st, { ...quiet, onset, low: 0.3 }, opts);
+      // Never reversed, and never a jump — a beat only ever speeds up where
+      // the camera was already headed (shares the zoom surge's velocity).
+      expect(out.travel).toBeGreaterThanOrEqual(prev.travel);
+      expect(out.travel - prev.travel).toBeLessThan(0.1);
+      expect(out.roll).toBeGreaterThanOrEqual(prev.roll);
+      expect(out.roll - prev.roll).toBeLessThan(0.1);
+      prev = out;
+    }
+    expect(sawOnset).toBe(true);
+    expect(prev.travel).toBeGreaterThan(0);
+    expect(prev.roll).toBeGreaterThan(0);
   });
 });
