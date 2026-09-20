@@ -127,15 +127,14 @@ const stylesheet = `
 .gal-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .gal-shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(5,7,10,.7), transparent 40%); pointer-events: none; }
 .gal-over { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
-.gal-name { font: 500 22px/1 ${FONT_LABEL}; min-width: 0; }
-.gal-start {
+.gal-name { font: 500 17px/1 ${FONT_LABEL}; min-width: 0; }
+.gal-reason {
   font: 400 11px ${FONT_MONO}; letter-spacing: .14em; flex: none; white-space: nowrap;
-  color: ${INPUT_GREEN}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.6)};
+  color: rgba(255,255,255,.7); border: 1px solid rgba(255,255,255,.3);
   border-radius: 3px; padding: 5px 10px; background: rgba(5,7,10,.5);
 }
-.gal-start[data-muted] { color: rgba(255,255,255,.7); border-color: rgba(255,255,255,.3); }
 .gal-cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; }
-.gal-cap-name { font: 400 15px ${FONT_LABEL}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.gal-cap-name { font: 400 13px ${FONT_LABEL}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .gal-tag {
   font: 400 9.5px ${FONT_MONO}; letter-spacing: .12em; text-transform: uppercase; flex: none;
   color: ${SCENE_VIOLET}; border: 1px solid ${withAlpha(SCENE_VIOLET, 0.5)}; border-radius: 3px; padding: 2px 6px;
@@ -157,7 +156,7 @@ const stylesheet = `
   .gal-src { padding: 9px 8px; gap: 6px; }
   .gal-src-hint { letter-spacing: .06em; }
   .gal-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .gal-name { font-size: 19px; }
+  .gal-name { font-size: 15px; }
   /* A phone at arm's length: the fold is how the drafts are reached at all. */
   .gal-fold { min-height: 40px; padding: 8px 14px; }
 }
@@ -361,12 +360,12 @@ export function createGallery(deps: GalleryDeps): Gallery {
       cap.append(el("div", "gal-cap-name", entry.scene.name), el("div", "gal-tag", reason ?? "Draft"));
       btn.append(shot, cap);
     } else {
-      // Large tile: the name and the call to action sit over the picture's
-      // darkened foot.
-      const start = el("div", "gal-start", reason ?? "START ›");
-      if (reason) start.dataset.muted = "";
+      // Large tile: the name sits over the picture's darkened foot, joined by
+      // the reason when the scene can't run here. The whole tile is the call
+      // to action, so a runnable one carries no button of its own.
       const over = el("div", "gal-over");
-      over.append(el("div", "gal-name", entry.scene.name), start);
+      over.append(el("div", "gal-name", entry.scene.name));
+      if (reason) over.append(el("div", "gal-reason", reason));
       shot.append(el("div", "gal-shade"), over);
       btn.appendChild(shot);
     }
