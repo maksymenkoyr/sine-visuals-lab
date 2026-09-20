@@ -38,8 +38,9 @@ export interface GalleryDeps {
   canCaptureDisplay: () => boolean;
   /** The source a tile tap will start on — what the picker highlights. */
   sourceChoice: () => AudioSourceChoice;
-  /** Fired inside the picker's click, so a live swap to screen capture still
-   *  has its user gesture. Resolves once the choice has settled (a cancelled
+  /** Fired inside the picker's click, so starting — or live-swapping to —
+   *  screen capture still has its user gesture: a click here starts listening
+   *  at once, it doesn't wait for a tile. Resolves once the choice has settled (a cancelled
    *  share picker leaves the old one in place); the picker then re-reads
    *  sourceChoice() rather than trusting what was clicked. */
   onSourceChoice: (next: AudioSourceChoice) => Promise<void>;
