@@ -28,6 +28,7 @@ import {
   type SilenceGateMarks,
   type SilenceGateReading,
 } from "../audio/silenceGate.ts";
+import type { HitShape } from "../audio/hitStrength.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
@@ -110,9 +111,10 @@ import {
  * which goes through DeviceMenuDeps, this doesn't, since nothing outside
  * src/ui/ ever needs to know which card is folded.
  *
- * Row grammar (createControlRow; the meters follow it too, with a meter in
- * the slider's place — the shared pieces live in controlsKit.ts): label ·
- * seven-segment readout + unit ·
+ * Row grammar (createControlRow, exported for audioMeters.ts's Hit strength
+ * card to reuse directly rather than duplicate; most meter rows instead
+ * follow the same grammar with a meter in the slider's place — the shared
+ * pieces live in controlsKit.ts): label · seven-segment readout + unit ·
  * "A" chip · "T" chip · ↺. The A chip *is* the auto indicator — filled when
  * auto owns the value, outlined when the user has taken the row manual,
  * absent when the setting has no auto weights (see autoTune.ts). The T chip
@@ -297,6 +299,13 @@ export interface DeviceMenuDeps {
   isSilenceGateAuto: () => boolean;
   onSilenceGateAutoToggle: (on: boolean) => void;
   resolveSilenceGate: () => SilenceGateMarks;
+  /** The Hit strength card's four sliders (src/audio/hitStrength.ts) — see
+   *  audioMeters.ts's AudioMetersDeps.hitShape. Global per device, like
+   *  getSilenceGate above, not per scene: how a hit's stand-out and
+   *  loudness should blend into its pulse height is a taste about
+   *  detection itself, not one scene's look. */
+  getHitShape: () => HitShape;
+  setHitShape: (partial: Partial<HitShape>) => void;
   /** Whether every member of "the whole mic" is on auto for this scene —
    *  drives the Input card's own Auto button. See src/audio/micAuto.ts's
    *  header for exactly what that membership is and how it overlaps
@@ -542,7 +551,12 @@ function unmarkBlock(heading: HTMLElement): void {
   heading.querySelector(".vc-block-n")?.remove();
 }
 
-interface ControlRowSpec {
+// Exported so audioMeters.ts's Hit strength card (src/audio/hitStrength.ts)
+// can reuse this same slider row instead of duplicating it — the meters
+// panel already builds one control this way (the Rhythm card's Beat grid
+// row is a picker, not a slider; see createControlRow's own doc comment for
+// the row grammar this shares).
+export interface ControlRowSpec {
   label: string;
   accent: string;
   min: number;
@@ -771,7 +785,7 @@ function wireSliderQuickJump(row: HTMLElement, slider: HTMLInputElement): void {
 /** One slider row in the panel's grammar — label, readout, chip, ↺, slider,
  *  hint. Gain rows (log-mapped) and scene setting rows (linear) are the same
  *  shape, so the construction and pos<->value mapping live here once. */
-function createControlRow(spec: ControlRowSpec) {
+export function createControlRow(spec: ControlRowSpec) {
   const el = document.createElement("div");
   el.className = "vc-row";
   el.style.cursor = "pointer";
@@ -1327,6 +1341,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       set: (value) => deps.onBeatGridChange(deps.currentSceneId(), value),
     },
     getSilenceGate: () => deps.getSilenceGate(),
+    hitShape: {
+      get: () => deps.getHitShape(),
+      set: (partial) => deps.setHitShape(partial),
+    },
   });
 
   const spectrumCol = document.createElement("div");

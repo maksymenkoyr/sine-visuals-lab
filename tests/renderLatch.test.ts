@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import { createRenderLatch } from "../src/render/renderLatch.ts";
 import type { AnimFrame } from "../src/render/animClock.ts";
 import type { OnsetDiag } from "../src/audio/onsetDiag.ts";
+import type { HitParts } from "../src/audio/hitStrength.ts";
 
 const NULL_DIAG: OnsetDiag = { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity };
+const NULL_HIT: HitParts = { standout: 0, loudness: 0, strength: 0 };
 
 // Minimal AnimFrame factory — only dtSec and the one-shot edges vary per
 // test; every other field is a fixed, valid placeholder.
@@ -35,6 +37,7 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     bpm: 0,
     gateDimmer: 1,
     hits: { low: NULL_DIAG, mid: NULL_DIAG, high: NULL_DIAG },
+    hitStrength: { beat: NULL_HIT, low: NULL_HIT, mid: NULL_HIT, high: NULL_HIT },
     profile: { pulse: 0, tempo: 0, brightness: 0, density: 0, dynamics: 0, attack: 0, loudness: 0 },
     raw: { sectionIntensity: 0, profile: { pulse: 0, tempo: 0, brightness: 0, density: 0, dynamics: 0, attack: 0, loudness: 0 } },
     ...overrides,

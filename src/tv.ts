@@ -12,6 +12,7 @@ import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
+import { getHitShape } from "./audio/hitStrength.ts";
 
 /** No new frame this long -> treat the room as if no host is present and go back to the join screen. */
 const STALE_TIMEOUT_MS = 3000;
@@ -157,8 +158,12 @@ async function main(): Promise<void> {
     // own); `frame.onset` itself already arrived pre-gated from the phone
     // (see silenceGate.ts's TV-limitation note), but bandEnergy's own
     // low/mid/high detectors run locally here too, off this device's own
-    // stored marks — hence passing the gate through.
-    const anim = animClock.advance(dtSec, frame, undefined, undefined, getSilenceGate());
+    // stored marks — hence passing the gate through. Same TV limitation for
+    // `hit` (src/audio/hitStrength.ts's own header): no `beatRatio` — a
+    // paired TV never runs a local broadband FeatureExtractor of its own —
+    // so a graded broadband beatPulse falls back to the loudest of this
+    // device's own band ratios, same as any device with no local extractor.
+    const anim = animClock.advance(dtSec, frame, undefined, undefined, getSilenceGate(), { shape: getHitShape() });
     advanceAutoTune(dtSec, anim.profile);
     renderLatch.accumulate(anim);
 

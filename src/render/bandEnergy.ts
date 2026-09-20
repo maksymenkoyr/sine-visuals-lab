@@ -1,6 +1,7 @@
 import { NUM_BANDS } from "../audio/types.ts";
 import { getBandSplit, bandSplitVersion } from "../audio/bandSplit.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
+import { hitStrength, type HitShape, type HitParts } from "../audio/hitStrength.ts";
 
 // Splits the 24 log-spaced bands into low/mid/high groups and derives, per
 // group: a slewed continuous level (safe to drive geometry with — it can't
@@ -8,6 +9,21 @@ import type { OnsetDiag } from "../audio/onsetDiag.ts";
 // beatPulse/onset shape already used for the whole spectrum in app.ts, just
 // scoped to a frequency range) so a kick and a hat can drive visibly
 // different things instead of both hiding inside one broadband uEnergy.
+//
+// A group's pulse *height* is graded by src/audio/hitStrength.ts when a
+// `shape` is given to advance() below: on the tick a group's onset fires,
+// hitStrength() blends how far this hit's flux ratio cleared its trigger
+// (stand-out) against how loud the group's own band mean actually is this
+// frame (loudness — a fixed-window dB reading with auto-gain off, the
+// default; see src/audio/bandGains.ts's header) into a 0..1 strength, and
+// `state.pulse` takes the larger of its own decaying tail and that strength
+// rather than snapping to it outright, so a weak hit landing on a strong
+// one's decay can't cut the pulse down. Omit `shape` (every existing caller)
+// and a group's pulse still snaps to a flat 1 on its onset, exactly as
+// before hitStrength.ts existed. The one-shot edges below (lowOnset etc.)
+// are untouched either way — only pulse *height* is graded, so a scene that
+// cuts on the boolean still fires on every hit regardless of how tall its
+// pulse would have read.
 //
 // The low/mid boundary and mid/high boundary are user-tunable (config panel
 // Bands box, src/audio/bandSplit.ts) rather than hardcoded, so "how low does
@@ -113,6 +129,11 @@ interface GroupState {
    *  in place every advance() (see BandEnergy's own lowDiag/midDiag/
    *  highDiag doc), never replaced. */
   diag: OnsetDiag;
+  /** This group's last graded hit — see onsetDiag.ts-style: mutated in
+   *  place on every onset (see BandEnergy's own lowHit/midHit/highHit doc),
+   *  holding the previous hit's numbers between onsets rather than
+   *  resetting. Only written when advance() is given a `shape`. */
+  hit: HitParts;
 }
 
 function makeGroupState(): GroupState {
@@ -124,6 +145,7 @@ function makeGroupState(): GroupState {
     pulse: 0,
     onset: false,
     diag: { ratio: 0, gated: false, blocked: false, sinceOnsetSec: Infinity },
+    hit: { standout: 0, loudness: 0, strength: 0 },
   };
 }
 
@@ -134,6 +156,7 @@ function advanceGroup(
   bands: Float32Array,
   rateScale: number,
   dimmer: number,
+  shape: HitShape | undefined,
 ): void {
   const raw = meanRange(bands, spec.lo, spec.hi);
   state.level += (raw - state.level) * Math.min(1, LEVEL_SLEW_PER_SEC * rateScale * dtSec);
@@ -172,7 +195,14 @@ function advanceGroup(
   if (state.onset) state.sinceOnsetSec = 0;
 
   state.pulse *= Math.exp(-dtSec * spec.pulseDecayRate * rateScale);
-  if (state.onset) state.pulse = 1;
+  if (state.onset) {
+    if (shape) {
+      const hit = hitStrength(state.diag.ratio, raw, shape, state.hit);
+      state.pulse = Math.max(state.pulse, hit.strength);
+    } else {
+      state.pulse = 1;
+    }
+  }
 }
 
 export interface BandEnergy {
@@ -196,6 +226,14 @@ export interface BandEnergy {
   lowDiag: OnsetDiag;
   midDiag: OnsetDiag;
   highDiag: OnsetDiag;
+  /** Per-group graded hit — see hitStrength.ts's HitParts and this file's
+   *  header. Aliases of the mutated GroupState.hit objects above, same
+   *  reasoning as lowDiag/midDiag/highDiag: free to read, holds the last
+   *  onset's numbers until the next one (never written at all while
+   *  advance() is called with no `shape`). */
+  lowHit: HitParts;
+  midHit: HitParts;
+  highHit: HitParts;
   /** rateScale multiplies the level slew and pulse decay rates — see
    *  sensitivity.ts's smoothingRateScale. Stops there deliberately: it does
    *  not reach the flux baseline or refractory, which are measurement, not
@@ -205,8 +243,12 @@ export interface BandEnergy {
    *  comparison only — see the file header for why it's scoped per group
    *  rather than applied once broadband. Defaults to 1 (no gating), same as
    *  rateScale, so a caller with no marks (a preview/gallery/probe tile) is
-   *  unaffected. */
-  advance(dtSec: number, bands: Float32Array, rateScale?: number, dimmer?: number): void;
+   *  unaffected. `shape` (src/audio/hitStrength.ts) grades each group's own
+   *  pulse height on its onset — omitted (every existing caller) keeps a
+   *  group's pulse snapping to a flat 1, exactly as before that module
+   *  existed; only src/render/animClock.ts's own `hit` param ever supplies
+   *  one, threaded down from src/app.ts/src/tv.ts. */
+  advance(dtSec: number, bands: Float32Array, rateScale?: number, dimmer?: number, shape?: HitShape): void;
 }
 
 export function createBandEnergy(): BandEnergy {
@@ -233,16 +275,19 @@ export function createBandEnergy(): BandEnergy {
     lowDiag: low.diag,
     midDiag: mid.diag,
     highDiag: high.diag,
-    advance(dtSec: number, bands: Float32Array, rateScale = 1, dimmer = 1): void {
+    lowHit: low.hit,
+    midHit: mid.hit,
+    highHit: high.hit,
+    advance(dtSec: number, bands: Float32Array, rateScale = 1, dimmer = 1, shape?: HitShape): void {
       const currentVersion = bandSplitVersion();
       if (currentVersion !== seenVersion) {
         specs = groupSpecsFromSplit();
         seenVersion = currentVersion;
       }
 
-      advanceGroup(low, specs.low, dtSec, bands, rateScale, dimmer);
-      advanceGroup(mid, specs.mid, dtSec, bands, rateScale, dimmer);
-      advanceGroup(high, specs.high, dtSec, bands, rateScale, dimmer);
+      advanceGroup(low, specs.low, dtSec, bands, rateScale, dimmer, shape);
+      advanceGroup(mid, specs.mid, dtSec, bands, rateScale, dimmer, shape);
+      advanceGroup(high, specs.high, dtSec, bands, rateScale, dimmer, shape);
 
       result.low = low.level;
       result.mid = mid.level;
