@@ -78,7 +78,10 @@ import {
  *    against its firing threshold plus a tick for every fired/gated/blocked
  *    reading (onsetDiag.ts's OnsetVerdict) — a history, not just an instant
  *    reading, so a tuning session can see *why* a hit did or didn't count,
- *    ground-shaded by how closed the silence gate was at the time.
+ *    ground-shaded by how closed the silence gate was at the time. Last,
+ *    an Onset row: the Beat lane's same ratio as a full-width live bar
+ *    with the firing line marked — the lane is the history, the bar is the
+ *    reading you can see from across the room.
  *  - Character: one row per entry in MUSIC_DIALS (never a hardcoded list),
  *    each marking NEUTRAL with a tick — what autoTune.ts resolves every "A"
  *    chip against, otherwise invisible. Copy comes from DIAL_LABELS. Plus
@@ -191,11 +194,11 @@ export interface AudioMetersDeps {
 
 const PEAK_FALL_PER_SEC = 1.2; // matches spectrumStrip.ts's peak-hold decay
 const TEXT_REFRESH_MS = 100;
-// Scale for a hit-history lane's ratio trace (OnsetDiag.ratio), in units of
-// the ratio itself (1 = the firing line). An ordinary hit clears 1 by some
-// margin but rarely reaches this — picked so a lane has headroom rather
-// than pinning at full height on every beat. Was the old Onset row's own
-// ONSET_METER_MAX; folded into createHitsHistory below.
+// Track width for the Onset row and scale for a hit-history lane's ratio
+// trace (both OnsetDiag.ratio), in units of the ratio itself (1 = the
+// firing line). An ordinary hit clears 1 by some margin but rarely reaches
+// this — picked so the bar and the lanes have headroom rather than pinning
+// at full on every beat.
 const ONSET_METER_MAX = 2.5;
 /** Readings that feed no single system — same neutral as the Palette card. */
 const NEUTRAL_ACCENT = "rgba(255,255,255,0.7)";
@@ -827,11 +830,11 @@ function createTempoBlock(accent: string) {
 
 // Rhythm's hit history: four lanes, one canvas, one column per CSS pixel
 // over HISTORY_SPAN_SEC (createColumnRing above) — Beat (the broadband
-// onset), Low/Mid/High (bandEnergy.ts's per-group onsets). Replaces both the
-// old Hits row (four instantaneous pulse bars, no history) and the Onset
-// row (the broadband ratio alone, ONSET_METER_MAX folded in below): the
-// point of a history is seeing *why* something did or didn't count, which
-// four bars that reset every frame never could.
+// onset), Low/Mid/High (bandEnergy.ts's per-group onsets). Replaces the old
+// Hits row (four instantaneous pulse bars, no history): the point of a
+// history is seeing *why* something did or didn't count, which four bars
+// that reset every frame never could. The Onset row under it shows the
+// Beat lane's ratio live, at a size a thin lane can't.
 const HITS_LANE_HEIGHT_PX = 16;
 const HITS_LANE_COUNT = 4; // Beat, Low, Mid, High
 const HITS_HEIGHT_PX = HITS_LANE_HEIGHT_PX * HITS_LANE_COUNT;
@@ -1312,8 +1315,20 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   beat.el.children[1].replaceWith(beatTrace.canvas);
   beat.setReadout(String(HISTORY_SPAN_SEC));
   let prevBeatPhase: number | null = null;
+  // The onset detector's own input: how hard this frame's spectral flux
+  // cleared its adaptive threshold (OnsetDiag.ratio — the same number the
+  // hits history's Beat lane traces). The tick is the firing line; short
+  // of it, a near-miss. Track runs to ONSET_METER_MAX so an ordinary hit
+  // doesn't pin the bar.
+  const onset = createMeterRow({
+    label: "Onset",
+    accent: NEUTRAL_ACCENT,
+    ticks: [{ at: 1 / ONSET_METER_MAX, label: "fires" }],
+    description:
+      "How hard the broadband onset detector's flux cleared its threshold this frame — past the mark is a beat, short of it a near-miss.",
+  });
   const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm" });
-  rhythmCard.body.append(rhythmRow, spacer(), gridRow.el, spacer(), hitsHistory.el, spacer(), beat.el);
+  rhythmCard.body.append(rhythmRow, spacer(), gridRow.el, spacer(), hitsHistory.el, spacer(), beat.el, spacer(), onset.el);
 
   // ---- Character ----
   const dialRows = MUSIC_DIALS.map((dial) => ({
@@ -1610,6 +1625,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         // mic-less renderer or the synthetic feed) — see AudioMeters.update's
         // own doc.
         hitsHistory.update(frame, anim, beatDiag, nowMs, text);
+        onset.setValue(beatDiag ? beatDiag.ratio / ONSET_METER_MAX : null, dtSec);
+        if (frame?.onset) onset.flash();
+        if (text) {
+          onset.setReadout(beatDiag ? beatDiag.ratio.toFixed(2) : "--", beatDiag ? {} : IDLE);
+        }
       } else {
         // Folded: don't accumulate a column while hidden, same as History
         // and Centroid — and forget the last phase so unfolding mid-track
