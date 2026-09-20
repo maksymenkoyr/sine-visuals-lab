@@ -21,6 +21,7 @@ import { shardsScene } from "./shards/index.ts";
 import { petriScene } from "./petri.ts";
 import { inkScene } from "./ink.ts";
 import { crystalScene } from "./crystal/index.ts";
+import { pourScene } from "./pour.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
@@ -33,6 +34,7 @@ registerScene(slatsScene);
 registerScene(physarumScene);
 registerScene(chladniScene);
 registerScene(causticsScene);
+registerScene(pourScene);
 registerScene(moireScene);
 registerScene(petriScene);
 registerScene(shardsScene);
@@ -73,6 +75,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "shards",
   "petri",
   "crystal",
+  "pour",
 ]);
 
 export {
@@ -98,4 +101,5 @@ export {
   petriScene,
   inkScene,
   crystalScene,
+  pourScene,
 };
