@@ -321,6 +321,24 @@ const SETTINGS: SceneSetting[] = [
     // Same reasoning as ripple, for brightness punch instead of ring shape.
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
   },
+  // What Beat flash follows. At 0 it's the beat pulse — a punch when a hit
+  // *starts*, gone again while a loud sound merely holds (flux sees no rise
+  // in a sustained wall of noise, so it fires once at the front edge). At 1
+  // it's uEnergy, the plain average of every band: the flash stays up for
+  // as long as the music is loud, hit or no hit. An experiment in driving a
+  // beat reaction from level rather than rate-of-rise — no auto weights, so
+  // it sits at its default until touched, and 0 leaves the flash term
+  // exactly what it was.
+  {
+    key: "flashLevel",
+    label: "Flash from level",
+    description: "What Beat flash follows — hits only at the bottom, the overall loudness of every band at the top, so a long loud stretch stays lit instead of flashing once",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+  },
   {
     key: "centroidHue",
     label: "Spectral hue",
@@ -1258,7 +1276,7 @@ void main() {
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
 
-  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * uBeatPulse * 1.5 + ring * 0.8
+  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * mix(uBeatPulse, uEnergy, uFlashLevel) * 1.5 + ring * 0.8
        + dropDrive * 0.5 + dropFlash * 1.2;
   // Dark-water floor: uFog=0 clips almost exactly today's old fixed cut
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips
