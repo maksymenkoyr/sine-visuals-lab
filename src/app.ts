@@ -1085,8 +1085,14 @@ async function boot(): Promise<void> {
       sourceChoice: () => (bandAnalyser && capture ? (capture.kind === "display" ? "display" : "mic") : resolveInitialSource()),
       onSourceChoice: (next) => {
         if (bandAnalyser) return swapAudioSource(next); // persists the pref itself, once the swap lands
+        // Nothing live yet: remember the choice AND start it, inside this same
+        // click — a picker that only stored a pref read as buttons that do
+        // nothing. The click is a real gesture, so "display" may open the
+        // share picker here just as a tile tap may (see onPick above); the
+        // pref is kept even if that picker is cancelled, as a statement of
+        // intent for the next tile tap (see autoStartSource).
         setAudioSourceChoice(next);
-        return Promise.resolve();
+        return ensureAudio(next);
       },
     });
 
