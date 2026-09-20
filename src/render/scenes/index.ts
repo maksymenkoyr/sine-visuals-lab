@@ -1,4 +1,5 @@
 import { registerScene } from "../scene.ts";
+import { tesseraScene } from "./tessera/index.ts";
 import { spectrumScene } from "./spectrum.ts";
 import { particlesScene } from "./particles.ts";
 import { tunnelScene } from "./tunnel.ts";
@@ -35,6 +36,7 @@ registerScene(physarumScene);
 registerScene(chladniScene);
 registerScene(causticsScene);
 registerScene(pourScene);
+registerScene(tesseraScene);
 registerScene(moireScene);
 registerScene(petriScene);
 registerScene(shardsScene);
@@ -57,6 +59,7 @@ registerScene(ferrofluidScene);
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
  *  the featured scenes registered above it are deliberately absent. */
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
+  "tessera",
   "ink",
   "mesh",
   "spectrum",
@@ -79,6 +82,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
 ]);
 
 export {
+  tesseraScene,
   spectrumScene,
   particlesScene,
   tunnelScene,
