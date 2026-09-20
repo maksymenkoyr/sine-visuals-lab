@@ -170,7 +170,22 @@ const stylesheet = `
 .vc-cols-wrap.vc-cols-folded > .vc-cols-toggle { display: flex; }
 .vc-cols-toggle:hover, .vc-cols-toggle:focus-visible { color: #fff; }
 @media (max-width: ${STACK_BELOW_PX}px) {
-  .vc-root { flex-direction: column; width: min(320px, 88vw); overflow-y: auto; }
+  /* pointer-events: auto here undoes the base rule's none. Stacked, every
+   * child is width: 100%, so the root's box has no gap beside a short child
+   * for a click to fall through — and the root is now the element that
+   * scrolls. iOS WebKit won't touch-scroll a scroller whose own box has
+   * pointer-events: none, even when the finger lands on an auto child, so
+   * leaving the base rule in place made the whole panel unscrollable on
+   * iPhone. 100dvh follows Safari's collapsing toolbar (a plain 100vh is
+   * the taller, toolbar-hidden height, so the panel's tail — and the end of
+   * its scroll range — hid under the toolbar); browsers without dvh keep
+   * the vh line. */
+  .vc-root {
+    flex-direction: column; width: min(320px, 88vw); overflow-y: auto;
+    pointer-events: auto;
+    max-height: calc(100vh - 74px);
+    max-height: calc(100dvh - 74px);
+  }
   .vc-root > *, .vc-spectrum-col > * { flex-shrink: 0; }
   /* Dissolve the spectrum column so its card and the meters become root
    * items in their own right: spectrum, then the controls, then the meters
