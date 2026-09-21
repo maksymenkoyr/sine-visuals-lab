@@ -1,6 +1,7 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import type { SignalLink } from "../signals.ts";
+import { NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../noiseHash.ts";
 
 /**
  * Ink Synth — black ink on white paper, drawn as thousands of fine contour
@@ -48,8 +49,24 @@ import type { SignalLink } from "../signals.ts";
  *   disagree where density is near 1, so colour stays a small share of
  *   the picture (the reference: under 2 % of pixels, all primaries).
  *
- * The pure pieces (rollParams, blendParams, createParamDrift, advanceStretch)
- * are exported for tests/ink.test.ts.
+ * Precision, or why the flow phase never reaches the shader raw: the
+ * marbling warps and the organic stroke term are value noise, and the flow
+ * phase (uFlowPhase × `flow`, ever-growing) used to be added to their
+ * coordinates in the shader, so the noise hash's input climbed with session
+ * length. On mobile GPUs that broke the field along noise-cell boundaries
+ * into straight and slanted seams — the octave rotation in fbm sets the
+ * slants — with the contour lines shifted on either side, exactly the
+ * failure noiseHash.ts's header describes for Caustics. So fbm hashes the
+ * integer cell lattice (NOISE_HASH_GLSL, periodic in NOISE_PERIOD cells)
+ * and reads its flow offset per octave from uNoiseFlow, which noiseFlows
+ * fills on the JS side: each call site's offset carried through the same
+ * octave transform the shader applies to p, then wrapped into the lattice
+ * period in float64. The sine terms that also ride the phase read it from
+ * uSinPhase instead, each already reduced modulo one turn (sinPhases), so
+ * no sin() ever sees a large argument either.
+ *
+ * The pure pieces (rollParams, blendParams, createParamDrift, advanceStretch,
+ * noiseFlows, sinPhases) are exported for tests/ink.test.ts.
  */
 
 export const VORTEX_COUNT = 8;
@@ -83,6 +100,78 @@ export const NODE_FALLBACK_SEC = 1.4;
 export const NODES_PER_PHRASE = 4;
 /** The stretch smear relaxes to ~5 % in half a second. */
 export const STRETCH_DECAY_PER_SEC = 6;
+
+/** FRAG's fbm: octave count, the per-octave scale-up and the rotation
+ *  between octaves (cos/sin of the octave matrix's angle) — named here
+ *  because noiseFlows has to carry each flow offset through the very same
+ *  transform the shader applies to p (see the file header's precision
+ *  paragraph). */
+export const FBM_OCTAVES = 4;
+export const FBM_LACUNARITY = 2.05;
+export const FBM_ROT_COS = 0.8;
+export const FBM_ROT_SIN = 0.6;
+
+/** Per fbm call site in FRAG, the x/y rate at which its noise coordinate
+ *  drifts per unit of flow phase — the large marbling warp, the nested warp
+ *  on top of it, and the organic stroke term, in the order the shader names
+ *  them (NOISE_FLOW_WARP_L, NOISE_FLOW_WARP_N, NOISE_FLOW_ORGANIC). */
+export const NOISE_FLOW_RATES: ReadonlyArray<readonly [number, number]> = [
+  [0.05, -0.04],
+  [0.03, 0.03],
+  [0.02, 0.02],
+];
+const NOISE_FLOW_WARP_L = 0;
+const NOISE_FLOW_WARP_N = 1;
+const NOISE_FLOW_ORGANIC = 2;
+/** uNoiseFlow layout: per call site, per octave, an [x, y] pair. */
+export const NOISE_FLOW_LEN = NOISE_FLOW_RATES.length * FBM_OCTAVES * 2;
+
+/** Fills `out` with the flow offset every fbm octave in FRAG adds to its
+ *  noise coordinate, each already wrapped into the lattice period. The
+ *  shader used to add `ph * rate` to p once, before the octave loop, so
+ *  octave k saw that offset rotated and scaled k times over; the same
+ *  transform is applied here, in float64, and only then wrapped — in that
+ *  octave's own lattice frame, where the wrap is a whole number of periods
+ *  and therefore invisible. `ph` is the raw flow phase times the `flow`
+ *  setting. */
+export function noiseFlows(ph: number, out: Float32Array = new Float32Array(NOISE_FLOW_LEN)): Float32Array {
+  for (let site = 0; site < NOISE_FLOW_RATES.length; site++) {
+    let ox = ph * NOISE_FLOW_RATES[site][0];
+    let oy = ph * NOISE_FLOW_RATES[site][1];
+    for (let k = 0; k < FBM_OCTAVES; k++) {
+      const o = (site * FBM_OCTAVES + k) * 2;
+      out[o] = wrapFlow(ox);
+      out[o + 1] = wrapFlow(oy);
+      const nx = FBM_ROT_COS * ox - FBM_ROT_SIN * oy;
+      const ny = FBM_ROT_SIN * ox + FBM_ROT_COS * oy;
+      ox = nx * FBM_LACUNARITY;
+      oy = ny * FBM_LACUNARITY;
+    }
+  }
+  return out;
+}
+
+/** The rate (sign included) at which each sine term in FRAG advances with
+ *  the flow phase, in the order uSinPhase is read: the fine wave along y,
+ *  the fine wave along x, the stroke grain along x, the grain along y, and
+ *  the marbling band mask. */
+export const SIN_FLOW_RATES: readonly number[] = [1.5, -1.05, 0.2, -0.15, 0.1];
+const TWO_PI = Math.PI * 2;
+
+/** x reduced into [0, 2π), in float64; a value that would round up to a
+ *  full turn in the fp32 upload is returned as 0 (the same angle). */
+export function wrapAngle(x: number): number {
+  const w = x - Math.floor(x / TWO_PI) * TWO_PI;
+  return Math.fround(w) >= TWO_PI ? 0 : w;
+}
+
+/** Fills `out` with each sine term's phase, reduced modulo one turn so the
+ *  shader's sin() never sees a large argument (mobile sin() range reduction
+ *  is coarse). Congruent to `ph * rate`, so the picture is unchanged. */
+export function sinPhases(ph: number, out: Float32Array = new Float32Array(SIN_FLOW_RATES.length)): Float32Array {
+  for (let i = 0; i < SIN_FLOW_RATES.length; i++) out[i] = wrapAngle(ph * SIN_FLOW_RATES[i]);
+  return out;
+}
 
 type Rng = () => number;
 
@@ -359,39 +448,41 @@ mat2 rot2(float a) {
   return mat2(c, -s, s, c);
 }
 
-float hash21(vec2 p) {
-  p = fract(p * vec2(127.1, 311.7));
-  p += dot(p, p + 19.19);
-  return fract(p.x * p.y);
-}
+// The integer lattice hash (hashCell) — see the file header's precision
+// paragraph and noiseHash.ts.
+${NOISE_HASH_GLSL}
 
-// Value noise with a smooth blend, and a four-octave fbm rotated between
-// octaves so its ridges don't line up with the axes.
+// Value noise with a smooth blend over the periodic lattice, and an fbm
+// rotated between octaves so its ridges don't line up with the axes.
 float vnoise(vec2 p) {
   vec2 i = floor(p);
   vec2 f = fract(p);
   vec2 u = f * f * (3.0 - 2.0 * f);
-  float a = hash21(i);
-  float b = hash21(i + vec2(1.0, 0.0));
-  float c = hash21(i + vec2(0.0, 1.0));
-  float d = hash21(i + vec2(1.0, 1.0));
+  float a = hashCell(i, ${NOISE_MASK}, 0u);
+  float b = hashCell(i + vec2(1.0, 0.0), ${NOISE_MASK}, 0u);
+  float c = hashCell(i + vec2(0.0, 1.0), ${NOISE_MASK}, 0u);
+  float d = hashCell(i + vec2(1.0, 1.0), ${NOISE_MASK}, 0u);
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-float fbm(vec2 p) {
+// site picks this call's block of per-octave flow offsets in uNoiseFlow
+// (noiseFlows on the JS side); the offset is added per octave, after the
+// octave transform, because that is the frame it was wrapped in.
+float fbm(vec2 p, int site) {
   float v = 0.0;
   float amp = 0.5;
-  mat2 m = mat2(0.8, 0.6, -0.6, 0.8);
-  for (int i = 0; i < 4; i++) {
-    v += amp * vnoise(p);
-    p = m * p * 2.05 + vec2(1.7, 9.2);
+  mat2 m = mat2(${FBM_ROT_COS.toFixed(3)}, ${FBM_ROT_SIN.toFixed(3)}, -${FBM_ROT_SIN.toFixed(3)}, ${FBM_ROT_COS.toFixed(3)});
+  for (int i = 0; i < ${FBM_OCTAVES}; i++) {
+    int o = (site * ${FBM_OCTAVES} + i) * 2;
+    v += amp * vnoise(p + vec2(uNoiseFlow[o], uNoiseFlow[o + 1]));
+    p = m * p * ${FBM_LACUNARITY.toFixed(3)} + vec2(1.7, 9.2);
     amp *= 0.5;
   }
   return v;
 }
 
-vec2 fbm2(vec2 p) {
-  return vec2(fbm(p), fbm(p + vec2(5.2, 1.3)));
+vec2 fbm2(vec2 p, int site) {
+  return vec2(fbm(p, site), fbm(p + vec2(5.2, 1.3), site));
 }
 
 void main() {
@@ -402,18 +493,18 @@ void main() {
   vec2 p = (uv - 0.5) * vec2(aspect, 1.0) * 2.0;
   p.x /= 1.0 + uStretchEnv * uStretch;
 
-  float ph = uFlowPhase * uFlow;
   float marble = uParams[${PARAM.marble}];
 
   // The marbling: the field is read through two nested noise warps whose
   // amplitude is comparable to the ribbons themselves — that is what turns
   // parallel contours into liquid strokes that swell, thin and fold. The
-  // warp drifts on the flow clock so the picture never sits still.
+  // warp drifts on the flow clock (uNoiseFlow, per octave — see the file
+  // header's precision paragraph) so the picture never sits still.
   float ampL = uParams[${PARAM.warpAmpL}] * uSwirl * (0.3 + 0.7 * marble);
   float freqL = uParams[${PARAM.warpFreqL}];
-  vec2 w1 = fbm2(p * freqL + vec2(ph * 0.05, -ph * 0.04)) - 0.5;
+  vec2 w1 = fbm2(p * freqL, ${NOISE_FLOW_WARP_L}) - 0.5;
   vec2 q = p + 3.2 * ampL * w1;
-  vec2 w2 = fbm2(q * freqL * 1.8 + vec2(2.3, 7.1) + ph * 0.03) - 0.5;
+  vec2 w2 = fbm2(q * freqL * 1.8 + vec2(2.3, 7.1), ${NOISE_FLOW_WARP_N}) - 0.5;
   q += 1.6 * ampL * (0.4 + 0.6 * marble) * w2;
 
   // Spirals: a swirl warp per vortex, each parked on one arm.
@@ -430,7 +521,7 @@ void main() {
   // Fine waviness on the ruled end only.
   float ampA = uParams[${PARAM.warpAmpA}] * uSwirl * (1.0 - 0.7 * marble);
   float freqA = uParams[${PARAM.warpFreqA}];
-  q += ampA * vec2(sin(q.y * freqA + ph * 1.5), sin(q.x * freqA * 0.8 - ph * 1.05 + 1.0));
+  q += ampA * vec2(sin(q.y * freqA + uSinPhase[0]), sin(q.x * freqA * 0.8 + uSinPhase[1] + 1.0));
 
   float r = length(q);
   float dAxis = min(abs(q.x), abs(q.y));
@@ -444,21 +535,21 @@ void main() {
   // Strokes thicken and thin along their length the way the reference's
   // do (its lines break into dashes far out): a cheap two-sine grain.
   float grain = mix(0.22, 0.08, marble);
-  density *= (1.0 - grain) + grain * sin(q.x * 31.0 + 1.7 + ph * 0.2) * sin(q.y * 29.0 + 0.4 - ph * 0.15);
+  density *= (1.0 - grain) + grain * sin(q.x * 31.0 + 1.7 + uSinPhase[2]) * sin(q.y * 29.0 + 0.4 + uSinPhase[3]);
 
   // The stroke field. At the ruled end the contours follow the arms
   // (spacing shrinking away from each axis, measured ~d^1.5); at the ribbon
   // end an organic noise term of comparable gradient takes over, so strokes
   // still run along the arms but swell, split and fold like marbling.
   float lineScale = uLineDensity * mix(0.6, 1.0, uDetail);
-  float organic = fbm(q * 1.4 + vec2(3.1, 7.7) + ph * 0.02);
+  float organic = fbm(q * 1.4 + vec2(3.1, 7.7), ${NOISE_FLOW_ORGANIC});
   float axisTerm = pow(dAxis + 1e-4, 1.5) + 0.12 * dAxis;
   float phi = lineScale * (mix(420.0, 85.0, marble) * axisTerm + mix(35.0, 58.0, marble) * organic + 8.0 * r * r);
   float fw = fwidth(phi);
   // Marbling groups its strokes: a few ribbons, a white gap, a few more.
   // A slow mask over the contour index does that at the ribbon end; the
   // solid core is kept out of it so it stays solid.
-  float bandMask = 0.5 + 0.5 * sin(phi / 5.5 + 0.8 * sin(q.y * 1.7 + ph * 0.1) + 1.3);
+  float bandMask = 0.5 + 0.5 * sin(phi / 5.5 + 0.8 * sin(q.y * 1.7 + uSinPhase[4]) + 1.3);
   float banded = 0.04 + 1.1 * smoothstep(0.3, 0.75, bandMask);
   density *= mix(1.0, mix(banded, 1.0, smoothstep(0.7, 1.3, density)), marble);
 
@@ -511,17 +602,22 @@ void main() {
 
 export const inkScene = createFullscreenScene("ink", "Ink Synth", FRAG, {
   settings: SETTINGS,
-  extraUniformDecls: `uniform float uParams[${PARAM_COUNT}];\nuniform float uStretchEnv;`,
+  extraUniformDecls: `uniform float uParams[${PARAM_COUNT}];\nuniform float uStretchEnv;\nuniform float uNoiseFlow[${NOISE_FLOW_LEN}];\nuniform float uSinPhase[${SIN_FLOW_RATES.length}];`,
   extraUniforms: (() => {
     const drift = createParamDrift();
+    const flowBuf = new Float32Array(NOISE_FLOW_LEN);
+    const sinBuf = new Float32Array(SIN_FLOW_RATES.length);
     let stretchEnv = 0;
     let prevDropOnset = false;
     return (_frame, anim, getSetting) => {
+      // The flow phase, at the Flow setting's rate — reduced here, in
+      // float64, before anything reaches the shader (file header).
+      const ph = anim.flowPhase * getSetting("flow");
       stretchEnv = advanceStretch(stretchEnv, anim.dtSec, anim.onset);
       const drop = anim.dropOnset && !prevDropOnset;
       prevDropOnset = anim.dropOnset;
       const params = drift.advance(anim.dtSec, anim.barPhase, anim.tempoLock, getSetting("morph"), drop, getSetting("ribbon"));
-      return { uParams: params, uStretchEnv: stretchEnv };
+      return { uParams: params, uStretchEnv: stretchEnv, uNoiseFlow: noiseFlows(ph, flowBuf), uSinPhase: sinPhases(ph, sinBuf) };
     };
   })(),
 });

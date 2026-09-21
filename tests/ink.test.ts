@@ -3,15 +3,25 @@ import {
   advanceStretch,
   blendParams,
   createParamDrift,
+  FBM_LACUNARITY,
+  FBM_OCTAVES,
+  FBM_ROT_COS,
+  FBM_ROT_SIN,
   NODE_FALLBACK_SEC,
   NODES_PER_PHRASE,
+  NOISE_FLOW_LEN,
+  NOISE_FLOW_RATES,
+  noiseFlows,
   PARAM,
   PARAM_COUNT,
   rollLift,
   rollParams,
+  SIN_FLOW_RATES,
+  sinPhases,
   STRETCH_DECAY_PER_SEC,
   VORTEX_COUNT,
 } from "../src/render/scenes/ink.ts";
+import { NOISE_PERIOD, wrapFlow } from "../src/render/noiseHash.ts";
 
 /** Deterministic LCG so a roll is reproducible across runs. */
 function seeded(seed: number): () => number {
@@ -153,5 +163,91 @@ describe("ink stretch envelope", () => {
     for (let i = 0; i < 60; i++) env = advanceStretch(env, 1 / 60, false);
     expect(env).toBeLessThan(0.05);
     expect(Math.exp(-STRETCH_DECAY_PER_SEC)).toBeLessThan(0.05);
+  });
+});
+
+describe("noiseFlows keeps every shader-side offset bounded (mobile precision seams)", () => {
+  // Regression guard for the tiled rendering on phones: the raw flow phase
+  // used to reach the shader and be added to every fbm coordinate, so the
+  // noise hash's inputs grew without bound and the field broke along
+  // cell boundaries on mobile GPU compilers. Now each octave's offset is
+  // reduced into [0, NOISE_PERIOD) in float64 before upload, and the
+  // shader's integer hash is periodic in exactly that period.
+  const HUGE_PHASE = 1e9;
+
+  it("stays in [0, NOISE_PERIOD) for every entry, at any phase", () => {
+    for (const ph of [0, 1, 123.456, -50, 1e4, HUGE_PHASE, -HUGE_PHASE]) {
+      const flows = noiseFlows(ph);
+      expect(flows.length).toBe(NOISE_FLOW_LEN);
+      for (const v of flows) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThan(NOISE_PERIOD);
+      }
+    }
+  });
+
+  it("is congruent to the unwrapped offset, carried through the octave transform", () => {
+    // Octave 0 of each call site is ph * rate; octave 1 is that offset
+    // rotated by the fbm matrix and scaled by the lacunarity — the same
+    // transform the shader applies to p between octaves. Check both against
+    // an independent modulo at a phase where fp32 would have long since
+    // lost sub-cell resolution.
+    // Distance on the period's circle, so an offset sitting right on a wrap
+    // (0 vs a hair under the period) still counts as equal.
+    const circDist = (a: number, b: number) => {
+      const d = wrapFlow(a - b);
+      return Math.min(d, NOISE_PERIOD - d);
+    };
+    const ph = HUGE_PHASE + 0.123;
+    const flows = noiseFlows(ph);
+    NOISE_FLOW_RATES.forEach(([rx, ry], site) => {
+      const ox = ph * rx;
+      const oy = ph * ry;
+      const base = site * FBM_OCTAVES * 2;
+      expect(circDist(flows[base], ox)).toBeLessThan(1e-2);
+      expect(circDist(flows[base + 1], oy)).toBeLessThan(1e-2);
+      const ox1 = (FBM_ROT_COS * ox - FBM_ROT_SIN * oy) * FBM_LACUNARITY;
+      const oy1 = (FBM_ROT_SIN * ox + FBM_ROT_COS * oy) * FBM_LACUNARITY;
+      expect(circDist(flows[base + 2], ox1)).toBeLessThan(1e-2);
+      expect(circDist(flows[base + 3], oy1)).toBeLessThan(1e-2);
+    });
+  });
+
+  it("advances continuously across a wrap, so the field never jumps", () => {
+    // Step the phase by a small delta straddling a wrap of the first call
+    // site's octave-0 x entry: the wrapped value must move by exactly
+    // delta * rate modulo the period.
+    const rate = NOISE_FLOW_RATES[0][0];
+    const period = NOISE_PERIOD / rate;
+    const delta = 0.01;
+    const before = noiseFlows(period * 3 - delta / 2)[0];
+    const after = noiseFlows(period * 3 + delta / 2)[0];
+    expect(wrapFlow(after - before)).toBeCloseTo(delta * rate, 4);
+  });
+
+  it("reuses the caller's buffer, so the per-frame upload allocates nothing", () => {
+    const buf = noiseFlows(1);
+    expect(noiseFlows(2, buf)).toBe(buf);
+  });
+});
+
+describe("sinPhases keeps every sine argument within one turn", () => {
+  it("stays in [0, 2π) and is congruent to ph * rate", () => {
+    const TWO_PI = Math.PI * 2;
+    for (const ph of [0, 1, -7.5, 1e4, 1e9]) {
+      const phases = sinPhases(ph);
+      expect(phases.length).toBe(SIN_FLOW_RATES.length);
+      SIN_FLOW_RATES.forEach((rate, i) => {
+        expect(phases[i]).toBeGreaterThanOrEqual(0);
+        expect(phases[i]).toBeLessThan(TWO_PI);
+        // sin of the wrapped and unwrapped arguments agree (float64 side).
+        expect(Math.sin(phases[i])).toBeCloseTo(Math.sin(ph * rate), 4);
+      });
+    }
+  });
+
+  it("reuses the caller's buffer", () => {
+    const buf = sinPhases(1);
+    expect(sinPhases(2, buf)).toBe(buf);
   });
 });

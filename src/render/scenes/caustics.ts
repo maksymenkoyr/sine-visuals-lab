@@ -1,6 +1,7 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import type { SignalLink } from "../signals.ts";
+import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHash.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
 // Domain-warped value noise, sharpened into thin ridges. Two renderer-side
@@ -83,8 +84,9 @@ import type { SignalLink } from "../signals.ts";
 // share one wrap), and hashCell in FRAG is an integer hash over the cell
 // lattice masked to that same period, so the field is exactly periodic and
 // a wrap is invisible by construction. The phase itself still never wraps;
-// only what reaches the GPU does. See NOISE_PERIOD's own comment for how
-// the period was sized.
+// only what reaches the GPU does. The hash, the period and wrapFlow now live
+// in noiseHash.ts (its header is the standing explanation) so other drifting
+// scenes share them.
 // The master treble-sparkle knob. Defined outside SETTINGS so the sub-params
 // further down (density, brightness ceiling, grain, warp, spread, sustain —
 // all `advanced`, in the Look group) can name it directly as their `macro`
@@ -655,24 +657,16 @@ const INJECTION_NEAR_R = 0.14; // droplet radius right at the nozzle, before ato
 const INJECTION_FAR_R = 0.05; // droplet radius once fully atomized
 const INJECTION_GAIN = 1.3; // brightness of the summed field relative to a glint's own peak
 
-// Period, in noise cells, of every hashed field in FRAG (see the file
-// header's precision paragraph). Must be a power of two — hashCell masks the
-// cell index with NOISE_PERIOD - 1. Sized so that (a) the largest value the
-// shader ever adds to a noise coordinate stays far below where fp32 loses
-// sub-pixel resolution, and (b) a repeat is out of reach: the coarsest
-// octave's cells are a good fraction of the screen tall, so the pattern
-// only recurs after the drift has carried it many screens past its start,
-// and the ridge octaves sample at different multiples of the same phase
-// (see driftFlows), so they don't even line up again together. The finest
-// consumer is the spray field: it lives at INJECTION_CELLS_PER_GRAIN cells
-// per glint-noise unit and so wraps at NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN
+// Every hashed field in FRAG is periodic in NOISE_PERIOD cells (the shared
+// lattice hash in noiseHash.ts — see the file header's precision paragraph
+// and that file's for how the period was sized). The finest consumer is the
+// spray field: it lives at INJECTION_CELLS_PER_GRAIN cells per glint-noise
+// unit and so wraps at NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN
 // (INJECTION_MASK below), which is why that constant has to be a power-of-
 // two fraction and the period can't drop below its reciprocal.
-export const NOISE_PERIOD = 256;
-const NOISE_MASK = NOISE_PERIOD - 1;
 const INJECTION_MASK = NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN - 1;
-if (!Number.isInteger(Math.log2(NOISE_PERIOD)) || !Number.isInteger(Math.log2(INJECTION_MASK + 1))) {
-  throw new Error("caustics: NOISE_PERIOD and NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN must both be powers of two");
+if (!Number.isInteger(Math.log2(INJECTION_MASK + 1))) {
+  throw new Error("caustics: NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN must be a power of two");
 }
 
 // The ridge loop's octave count, and the flow multipliers FRAG applies per
@@ -696,12 +690,6 @@ const FLOW_BACK = 2;
 const FLOW_RIDGE = 4;
 const FLOW_SPARKLE = FLOW_RIDGE + 2 * RIDGE_OCTAVES;
 const DRIFT_FLOW_LEN = FLOW_SPARKLE + 1;
-
-/** x reduced into [0, NOISE_PERIOD), in float64 — the JS side is the one
- *  place the raw phase can be reduced without precision loss. */
-export function wrapFlow(x: number): number {
-  return x - Math.floor(x / NOISE_PERIOD) * NOISE_PERIOD;
-}
 
 /** Fills `out` with every drift offset FRAG adds to a noise coordinate, each
  *  already wrapped by wrapFlow: the field is periodic in NOISE_PERIOD
@@ -1008,41 +996,11 @@ export function createRipplePool() {
 }
 
 const FRAG = `
-// 32-bit ints for the integer hash below — the fragment stage's default int
-// precision is mediump, which may be 16 bits on mobile.
-precision highp int;
+// The integer lattice hash (hashCell / hash2Cell) — see the file header's
+// precision paragraph and noiseHash.ts for why nothing here uses fract() of
+// a large product.
+${NOISE_HASH_GLSL}
 #define TWO_PI 6.28318530718
-
-// Integer hash over a periodic cell lattice — see the file header's
-// precision paragraph. Every operation here is exact on every GPU: no
-// fract() of a large product, nothing that depends on how far the drift
-// has carried the field. cell is an integer-valued lattice coordinate, mask
-// is the lattice's period minus one (a power of two, so the bitwise AND is
-// the wrap; two's complement makes it wrap negatives too), and seed picks
-// an independent stream.
-uint uhash(uint x) {
-  x ^= x >> 16u;
-  x *= 0x7feb352du;
-  x ^= x >> 15u;
-  x *= 0x846ca68bu;
-  x ^= x >> 16u;
-  return x;
-}
-
-uint cellBits(vec2 cell, int mask, uint seed) {
-  ivec2 c = ivec2(cell) & ivec2(mask);
-  return uhash(uint(c.x) ^ (uint(c.y) << 16u) ^ (seed * 0x9e3779b9u));
-}
-
-// 24 significant bits -> exactly representable, uniform in [0, 1).
-float hashCell(vec2 cell, int mask, uint seed) {
-  return float(cellBits(cell, mask, seed) >> 8u) * (1.0 / 16777216.0);
-}
-
-vec2 hash2Cell(vec2 cell, int mask, uint seed) {
-  uint h = cellBits(cell, mask, seed);
-  return vec2(float(h >> 8u), float(uhash(h) >> 8u)) * (1.0 / 16777216.0);
-}
 
 float noise(vec2 p) {
   vec2 i = floor(p);
@@ -1275,7 +1233,7 @@ void main() {
       for (int gy = -1; gy <= 1; gy++) {
         vec2 cellId = floor(ip) + vec2(float(gx), float(gy));
         // Its own lattice period (INJECTION_MASK) — this field wraps at
-        // NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN cells, see NOISE_PERIOD's comment.
+        // NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN cells, see INJECTION_MASK's comment.
         vec2 nozzle = cellId + 0.5 + (hash2Cell(cellId, ${INJECTION_MASK}, 1u) - 0.5) * ${INJECTION_NOZZLE_JITTER.toFixed(2)};
         for (int k = 0; k < ${INJECTION_DROPS}; k++) {
           vec2 rnd = hash2Cell(cellId, ${INJECTION_MASK}, 2u + uint(k));
