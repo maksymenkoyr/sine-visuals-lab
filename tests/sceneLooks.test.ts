@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { getSceneSetting, setSceneSetting } from "../src/render/sceneSettings.ts";
 import { isAutoEnabled, setAutoEnabled } from "../src/render/autoTune.ts";
+import { getDriveChoice, setDriveChoice } from "../src/render/driveStore.ts";
 import {
   applyLook,
   captureLook,
@@ -19,7 +20,17 @@ import {
 
 const FOCUS: SceneSetting = { key: "focus", label: "Focus", min: 0, max: 1, step: 0.01, default: 0.5 };
 const BREATHE: SceneSetting = { key: "breathe", label: "Breathe", min: 0, max: 1, step: 0.01, default: 0.3 };
+const FLASH: SceneSetting = {
+  key: "flash",
+  label: "Flash",
+  min: 0,
+  max: 1,
+  step: 0.05,
+  default: 0.6,
+  drive: { default: "feature.onset" },
+};
 const SPECS = [FOCUS, BREATHE];
+const SPECS_WITH_DRIVE = [FOCUS, BREATHE, FLASH];
 
 describe("encodeLook / decodeLook", () => {
   it("round-trips a look, including a non-ASCII name", () => {
@@ -53,6 +64,32 @@ describe("encodeLook / decodeLook", () => {
       .replace(/=+$/, "");
     expect(decodeLook(badCode)).toBeNull();
   });
+
+  // `d` (SceneSetting.drive choices) is optional and additive — v stays 1.
+  it("round-trips a look with drive choices (`d`)", () => {
+    const look: SceneLook = {
+      name: "Driven",
+      sceneId: "caustics",
+      manual: { focus: 0.4 },
+      drives: { flash: "anim.lowOnset", ripple: { source: "beat", grid: 3 } },
+    };
+    expect(decodeLook(encodeLook(look))).toEqual(look);
+  });
+
+  it("an old look with no `d` at all still round-trips (the field is simply absent, not empty)", () => {
+    const look: SceneLook = { name: "Old", sceneId: "mesh", manual: { focus: 0.3 } };
+    const code = encodeLook(look);
+    expect(JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/"))).d).toBeUndefined();
+    expect(decodeLook(code)).toEqual(look);
+  });
+
+  it("returns null for a garbage drive choice inside `d`", () => {
+    const badCode = btoa(JSON.stringify({ v: 1, n: "x", s: "mesh", m: {}, d: { flash: { source: "not-real" } } }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    expect(decodeLook(badCode)).toBeNull();
+  });
 });
 
 describe("captureLook", () => {
@@ -64,6 +101,16 @@ describe("captureLook", () => {
     setAutoEnabled(sceneId, BREATHE.key, true);
     const look = captureLook("Test", sceneId, SPECS);
     expect(look.manual).toEqual({ focus: 0.8 });
+  });
+
+  it("captures a drive setting's choice only when it isn't already the default", () => {
+    const sceneId = "look-capture-2";
+    const look = captureLook("Test", sceneId, SPECS_WITH_DRIVE);
+    expect(look.drives).toBeUndefined(); // flash is still at its default (feature.onset)
+
+    setDriveChoice(sceneId, FLASH, "anim.lowOnset");
+    const look2 = captureLook("Test", sceneId, SPECS_WITH_DRIVE);
+    expect(look2.drives).toEqual({ flash: "anim.lowOnset" });
   });
 });
 
@@ -82,6 +129,17 @@ describe("applyLook", () => {
     expect(getSceneSetting(sceneId, FOCUS)).toBeCloseTo(0.2);
     expect(isAutoEnabled(sceneId, BREATHE.key)).toBe(true);
     expect(getSceneSetting(sceneId, BREATHE)).toBeCloseTo(BREATHE.default);
+  });
+
+  it("sets a listed drive choice and resets an unlisted one back to its default", () => {
+    const sceneId = "look-apply-2";
+    setDriveChoice(sceneId, FLASH, "anim.highOnset");
+
+    applyLook({ name: "L", sceneId, manual: {}, drives: { flash: "anim.lowOnset" } }, SPECS_WITH_DRIVE);
+    expect(getDriveChoice(sceneId, FLASH)).toBe("anim.lowOnset");
+
+    applyLook({ name: "L2", sceneId, manual: {} }, SPECS_WITH_DRIVE);
+    expect(getDriveChoice(sceneId, FLASH)).toBe("feature.onset");
   });
 });
 
