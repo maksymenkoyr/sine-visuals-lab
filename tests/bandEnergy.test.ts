@@ -136,6 +136,23 @@ describe("band energy", () => {
     expect(slow.low).toBeCloseTo(fast.low, 2);
   });
 
+  it("level rises faster than it falls — a sound starting should read sooner than one trailing off", () => {
+    const bass = bandsWith([0, 1, 2, 3]);
+    const silence = bandsWith([]);
+
+    const energy = createBandEnergy();
+    for (let i = 0; i < 60; i++) energy.advance(DT, silence);
+    // Same number of ticks either direction: the rise should have covered
+    // more of its own distance to target than the fall has, since a rising
+    // level uses the faster of the two rates (see LEVEL_ATTACK_PER_SEC's
+    // own doc for why — a swell reading late is the thing this fixes).
+    for (let i = 0; i < 10; i++) energy.advance(DT, bass);
+    const risenFraction = energy.low; // target is ~1 for an all-in-range bass signal
+    for (let i = 0; i < 10; i++) energy.advance(DT, silence);
+    const fallenFraction = risenFraction - energy.low; // how much of the rise was undone
+    expect(fallenFraction).toBeLessThan(risenFraction);
+  });
+
   it("raising the Kick top crossover moves previously-mid bands into low", () => {
     // Bands 6-9 sit in the default mid range [6,16) — confirm that baseline first.
     const midBands = [6, 7, 8, 9];

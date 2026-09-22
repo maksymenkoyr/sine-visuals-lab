@@ -51,7 +51,15 @@ import { hitStrength, type HitShape, type HitParts } from "../audio/hitStrength.
 // every existing caller — including animClock.ts's own default when it has
 // no marks to pass — keeps today's ungated behavior.
 
-const LEVEL_SLEW_PER_SEC = 10; // smooths the continuous level so geometry-driving uniforms can't strobe
+// Split attack/release, same shape as features.ts's own ATTACK_PER_SEC/
+// RELEASE_PER_SEC on bands[] — a single symmetric rate here (the old
+// LEVEL_SLEW_PER_SEC = 10) measured out to a ~270ms/~400ms 95%/99% rise
+// time on a hard step, which read as a visible build-up before a swell/
+// churn/Sparkle-sustain term reached its full response. Release keeps that
+// same rate (a fall still eases out smoothly, no strobing on the way down —
+// the thing LEVEL_SLEW_PER_SEC existed to prevent); only the rise is faster.
+const LEVEL_ATTACK_PER_SEC = 24; // ~125ms/~190ms 95%/99% rise on a hard step
+const LEVEL_RELEASE_PER_SEC = 10; // unchanged from the old single rate
 
 // A zero or non-finite dtSec (a stalled clock, a test) would otherwise turn
 // a real rise into an infinite rate (division below) or, at the Smoothing
@@ -159,7 +167,8 @@ function advanceGroup(
   shape: HitShape | undefined,
 ): void {
   const raw = meanRange(bands, spec.lo, spec.hi);
-  state.level += (raw - state.level) * Math.min(1, LEVEL_SLEW_PER_SEC * rateScale * dtSec);
+  const levelRate = raw > state.level ? LEVEL_ATTACK_PER_SEC : LEVEL_RELEASE_PER_SEC;
+  state.level += (raw - state.level) * Math.min(1, levelRate * rateScale * dtSec);
 
   // Rate of rise, in band-mean per second — normalized by dt (not a raw
   // per-frame delta) so the trigger reads the same at 60Hz and 120Hz. A
