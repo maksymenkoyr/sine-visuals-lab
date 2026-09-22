@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   getAudioSourceChoice,
   setAudioSourceChoice,
+  hasStoredAudioSource,
+  resolveSourceState,
   displayCaptureSupported,
   AUDIO_SOURCE_DEFAULT,
 } from "../src/audio/sourcePref.ts";
@@ -46,7 +48,7 @@ describe("audio source persistence with a stubbed localStorage", () => {
     vi.unstubAllGlobals();
   });
 
-  it("rejects a garbage stored value and falls back to the default", async () => {
+  it("rejects a garbage stored value and falls back to the default, unchosen", async () => {
     // loadInitial() only runs once, at module init — so to exercise its
     // guard (isAudioSourceChoice) against a corrupted value, the module must
     // be re-imported fresh with the bad value already in place.
@@ -54,11 +56,61 @@ describe("audio source persistence with a stubbed localStorage", () => {
     vi.resetModules();
     const fresh = await import("../src/audio/sourcePref.ts");
     expect(fresh.getAudioSourceChoice()).toBe("mic");
+    // A garbage value must NOT read as a real pick — that's exactly what
+    // hasStoredAudioSource() exists to distinguish from AUDIO_SOURCE_DEFAULT.
+    expect(fresh.hasStoredAudioSource()).toBe(false);
   });
 
-  it("persists a set through localStorage.setItem", () => {
+  it("persists a set through localStorage.setItem, and hasStoredAudioSource() agrees", () => {
     setAudioSourceChoice("display");
     expect(store.get("vibe.audioSource")).toBe("display");
+    expect(hasStoredAudioSource()).toBe(true);
+  });
+
+  it("hasStoredAudioSource() flips true on a set, even if the write itself fails", async () => {
+    // persist() swallows errors (see its own comment) — chosen must still
+    // flip, or a browser that can't persist would look permanently unpicked.
+    // A fresh module import (like the garbage-value test above) so this
+    // starts from a genuine "nothing chosen yet" instead of riding whatever
+    // an earlier test in this file already set on the shared module cache.
+    const boom: Pick<Storage, "getItem" | "setItem"> = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("quota exceeded");
+      },
+    };
+    vi.stubGlobal("localStorage", boom);
+    vi.resetModules();
+    const fresh = await import("../src/audio/sourcePref.ts");
+    expect(fresh.hasStoredAudioSource()).toBe(false);
+    fresh.setAudioSourceChoice("display");
+    expect(fresh.hasStoredAudioSource()).toBe(true);
+  });
+});
+
+describe("resolveSourceState", () => {
+  it("is idle when nothing is live and nothing was ever chosen", () => {
+    expect(resolveSourceState({ liveChoice: null, preferredChoice: "mic", preferenceChosen: false })).toEqual({
+      choice: "mic",
+      live: false,
+      chosen: false,
+    });
+  });
+
+  it("is ready when a preference was chosen but nothing is live", () => {
+    expect(resolveSourceState({ liveChoice: null, preferredChoice: "display", preferenceChosen: true })).toEqual({
+      choice: "display",
+      live: false,
+      chosen: true,
+    });
+  });
+
+  it("live overrides a mismatched stored preference", () => {
+    // Exactly the swapAudioSource ordering gap: a capture already running as
+    // "display" while the persisted pref still says "mic" (attach happens
+    // before persist) must report the LIVE kind, never the stale pref.
+    const state = resolveSourceState({ liveChoice: "display", preferredChoice: "mic", preferenceChosen: false });
+    expect(state).toEqual({ choice: "display", live: true, chosen: true });
   });
 });
 

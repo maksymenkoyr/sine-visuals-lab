@@ -46,6 +46,16 @@
  * the source of truth for get/set within a session, seeded once from
  * localStorage, so behavior stays correct even where localStorage is
  * unavailable (node test env, Safari private mode).
+ *
+ * getAudioSourceChoice() alone can't tell a real choice from AUDIO_SOURCE_DEFAULT
+ * standing in for one nobody made — which is exactly what let both the gallery
+ * masthead and the Input card's Source row paint the microphone as "active" on
+ * a first visit, before any getUserMedia call had ever run. hasStoredAudioSource()
+ * and resolveSourceState() below are the fix: a caller (src/app.ts) that also
+ * knows about live capture state combines them with that into one SourceState,
+ * fed to both pickers, so "listening now" (live), "picked, not listening yet"
+ * (ready) and "nobody's picked anything" (idle) can never say different things
+ * on the two surfaces.
  */
 
 export type AudioSourceChoice = "mic" | "display";
@@ -57,10 +67,22 @@ function isAudioSourceChoice(value: string): value is AudioSourceChoice {
   return value === "mic" || value === "display";
 }
 
+// Whether a *real* choice was ever made — set() or a valid stored value — as
+// opposed to `cache` merely holding AUDIO_SOURCE_DEFAULT because nothing was
+// ever chosen. Deliberately not re-derived from a fresh localStorage read:
+// persist() below swallows write failures (Safari private mode, the node test
+// env), so a browser that can't persist would otherwise report "not chosen"
+// forever even right after an explicit setAudioSourceChoice() call.
+let chosen = false;
+
 function loadInitial(): AudioSourceChoice {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw !== null && isAudioSourceChoice(raw) ? raw : AUDIO_SOURCE_DEFAULT;
+    if (raw !== null && isAudioSourceChoice(raw)) {
+      chosen = true;
+      return raw;
+    }
+    return AUDIO_SOURCE_DEFAULT;
   } catch {
     return AUDIO_SOURCE_DEFAULT;
   }
@@ -82,7 +104,47 @@ export function getAudioSourceChoice(): AudioSourceChoice {
 
 export function setAudioSourceChoice(next: AudioSourceChoice): void {
   cache = next;
+  chosen = true;
   persist();
+}
+
+/** True once a real choice exists — set() was called, or a valid value was
+ *  found in localStorage at load — as opposed to getAudioSourceChoice() just
+ *  returning AUDIO_SOURCE_DEFAULT because nothing was ever chosen. A garbage
+ *  stored value does NOT count (loadInitial falls back to the default without
+ *  setting this). See this file's header for why the picker UIs need it. */
+export function hasStoredAudioSource(): boolean {
+  return chosen;
+}
+
+/** One resolved source state, computed from a source's liveness (a real
+ *  capture running right now) and whether it was ever explicitly picked. Both
+ *  pickers (the gallery masthead, the Input card's Source row) render off
+ *  this instead of AudioSourceChoice alone, so neither can claim "active"
+ *  before anything actually is. */
+export interface SourceState {
+  choice: AudioSourceChoice;
+  /** A capture of `choice` is actually running right now. */
+  live: boolean;
+  /** `choice` reflects a real pick (live, url-pinned, or persisted) rather
+   *  than just AUDIO_SOURCE_DEFAULT standing in for no pick at all. */
+  chosen: boolean;
+}
+
+/** Pure so it's node-testable without a DOM: the caller (src/app.ts) does the
+ *  impure parts — reading the live capture globals, localStorage via
+ *  hasStoredAudioSource(), and the `?source=` URL pin — and hands the results
+ *  in. `liveChoice` wins outright: a capture actually running makes both
+ *  `live` and `chosen` true regardless of what's stored, which matters right
+ *  after a source swap where the persisted pref hasn't caught up yet (see
+ *  swapAudioSource's ordering in src/app.ts). */
+export function resolveSourceState(input: {
+  liveChoice: AudioSourceChoice | null;
+  preferredChoice: AudioSourceChoice;
+  preferenceChosen: boolean;
+}): SourceState {
+  if (input.liveChoice !== null) return { choice: input.liveChoice, live: true, chosen: true };
+  return { choice: input.preferredChoice, live: false, chosen: input.preferenceChosen };
 }
 
 /** Whether this browser exposes getDisplayMedia at all. Doesn't (can't)

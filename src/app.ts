@@ -9,9 +9,12 @@ import { NUM_BANDS, type CaptureHandle, type CaptureSourceKind, type FeatureFram
 import {
   getAudioSourceChoice as getStoredAudioSource,
   setAudioSourceChoice,
+  hasStoredAudioSource,
+  resolveSourceState,
   displayCaptureSupported,
   DISPLAY_SHARE_GUIDE,
   type AudioSourceChoice,
+  type SourceState,
 } from "./audio/sourcePref.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
 import {
@@ -397,6 +400,15 @@ function fatalError(message: string): void {
   showHud(message, true);
 }
 
+/** `?source=display`, only where display capture is actually supported — same
+ *  guard resolveInitialSource applies to a stored "display" pref, so the two
+ *  can't disagree about what counts as a real pin. Never stripped from the
+ *  URL (unlike `?look=`), so it stays authoritative for the whole session. */
+function urlPinnedSource(): AudioSourceChoice | null {
+  const params = new URLSearchParams(location.search);
+  return params.get("source") === "display" && displayCaptureSupported() ? "display" : null;
+}
+
 /** `?source=display` pins the initial offered/remembered choice the way
  *  `?quality=` pins a preset — mainly for dev/tooling use without touching
  *  localStorage. Otherwise defers to the persisted choice
@@ -404,10 +416,28 @@ function fatalError(message: string): void {
  *  isn't supported at all. Pinning "display" here does NOT by itself start a
  *  capture — see autoStartSource() below for why. */
 function resolveInitialSource(): AudioSourceChoice {
-  const params = new URLSearchParams(location.search);
-  if (params.get("source") === "display" && displayCaptureSupported()) return "display";
+  const pinned = urlPinnedSource();
+  if (pinned) return pinned;
   const stored = getStoredAudioSource();
   return stored === "display" && !displayCaptureSupported() ? "mic" : stored;
+}
+
+/** The one truth both source pickers (the gallery masthead, the Input card's
+ *  Source row) render — see SourceState's doc comment in sourcePref.ts for
+ *  what "live" vs "chosen" mean and why collapsing them into one
+ *  AudioSourceChoice was the bug. A capture actually running wins outright
+ *  (derived from `capture.kind`, never the stored pref — swapAudioSource
+ *  attaches the new capture before persisting it, so reading the pref here
+ *  would flash the old choice for one tick); otherwise it's the remembered/
+ *  pinned preference, marked `chosen` only if one was ever really made. */
+function currentSourceState(): SourceState {
+  const liveChoice: AudioSourceChoice | null =
+    bandAnalyser && capture ? (capture.kind === "display" ? "display" : "mic") : null;
+  return resolveSourceState({
+    liveChoice,
+    preferredChoice: resolveInitialSource(),
+    preferenceChosen: urlPinnedSource() !== null || hasStoredAudioSource(),
+  });
 }
 
 /** The source an IMPLICIT start — one no tap asked for — is allowed to use.
@@ -460,6 +490,12 @@ function attachCapture(handle: CaptureHandle): void {
   // deliberate swap never race each other.
   const track = handle.stream.getAudioTracks()[0];
   track?.addEventListener("ended", () => onCaptureEnded(handle), { once: true });
+  // The one place every attach path (ensureAudio, swapAudioSource,
+  // fallBackToSolo) funnels through, so it's also the one place that needs to
+  // repaint the source pickers and the stop button — see updateMicPrompt and
+  // gallery.syncSource's own doc comments for what each covers.
+  updateMicPrompt();
+  gallery?.syncSource();
 }
 
 /** The live capture's track ended on its own — the user hit Chrome's "Stop
@@ -478,6 +514,7 @@ function onCaptureEnded(handle: CaptureHandle): void {
   audioPromise = null;
   captureFailed = false;
   updateMicPrompt();
+  gallery?.syncSource();
 }
 
 /** Turns a capture failure into copy the user can act on. A mic denial keeps
@@ -541,8 +578,7 @@ function swapAudioSource(next: AudioSourceChoice): Promise<void> {
   const attempt = (async () => {
     const handle = await startCapture(next);
     previous?.stop();
-    attachCapture(handle);
-    updateStopBtn(); // its label names the source
+    attachCapture(handle); // also repaints the stop button, so its label names the new source
     // A fresh extractor, not a reset(): FeatureExtractor has none, and
     // letting its adaptive AGC's envelope carry over would blow the visuals
     // out for its ~1.25s re-adaptation window on the big level jump a
@@ -690,8 +726,8 @@ function wireDeviceMenu(): void {
       sampleRate: capture?.context.sampleRate ?? null,
     }),
     // The Input card's Source row. Null (row hidden) on a renderer or the
-    // synthetic feed — see DeviceMenuDeps.getAudioSourceChoice's doc comment.
-    getAudioSourceChoice: () => (mode === "renderer" || syntheticFeed ? null : getStoredAudioSource()),
+    // synthetic feed — see DeviceMenuDeps.getSourceState's doc comment.
+    getSourceState: () => (mode === "renderer" || syntheticFeed ? null : currentSourceState()),
     // No capture yet (e.g. the start prompt is up because autoStartSource()
     // refused to auto-open a display picker) — the chip tap itself IS the
     // explicit gesture, so start fresh rather than hot-swap: swapAudioSource
@@ -1081,8 +1117,7 @@ async function boot(): Promise<void> {
       },
       onDisabledPick: (id, reason) => showHud(`${id}: ${reason}`, true),
       canCaptureDisplay: () => displayCaptureSupported(),
-      // While a capture is live it is the truth; before that, the remembered pref.
-      sourceChoice: () => (bandAnalyser && capture ? (capture.kind === "display" ? "display" : "mic") : resolveInitialSource()),
+      sourceState: () => currentSourceState(),
       onSourceChoice: (next) => {
         if (bandAnalyser) return swapAudioSource(next); // persists the pref itself, once the swap lands
         // Nothing live yet: remember the choice AND start it, inside this same

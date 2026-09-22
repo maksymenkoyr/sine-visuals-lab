@@ -6,7 +6,7 @@ import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRe
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
 import { SOURCE_URL } from "../brand.ts";
-import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice } from "../audio/sourcePref.ts";
+import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
 import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "../render/framePace.ts";
@@ -40,13 +40,14 @@ export interface GalleryDeps {
    *  masthead's sound-source picker shows the microphone alone, so it
    *  never names an option a mobile visitor won't see. */
   canCaptureDisplay: () => boolean;
-  /** The source a tile tap will start on — what the picker highlights. */
-  sourceChoice: () => AudioSourceChoice;
+  /** The source a tile tap will start on, and whether it's live yet — what
+   *  the picker paints. See SourceState's doc comment in sourcePref.ts. */
+  sourceState: () => SourceState;
   /** Fired inside the picker's click, so starting — or live-swapping to —
    *  screen capture still has its user gesture: a click here starts listening
    *  at once, it doesn't wait for a tile. Resolves once the choice has settled (a cancelled
    *  share picker leaves the old one in place); the picker then re-reads
-   *  sourceChoice() rather than trusting what was clicked. */
+   *  sourceState() rather than trusting what was clicked. */
   onSourceChoice: (next: AudioSourceChoice) => Promise<void>;
 }
 
@@ -58,6 +59,13 @@ export interface Gallery {
    *  fullscreen viz, and further self-limits which tiles actually redraw —
    *  see the priority-band comments above createGallery. */
   tick(nowMs: number): void;
+  /** Repaints the sound-source picker off a fresh sourceState() — called
+   *  whenever liveness changes elsewhere (src/app.ts's attachCapture,
+   *  onCaptureEnded) while the gallery may already be showing, e.g. a capture
+   *  survives a trip back to the gallery and the user hits Chrome's "Stop
+   *  sharing" bar while browsing. A no-op while hidden; show() repaints on
+   *  its own via buildTiles(). */
+  syncSource(): void;
   setError(msg: string | null): void;
   destroy(): void;
 }
@@ -84,19 +92,31 @@ const stylesheet = `
 .gal-mono { font: 400 10.5px ${FONT_MONO}; text-transform: uppercase; }
 
 .gal-mast { display: flex; align-items: center; justify-content: space-between; gap: 16px 32px; flex-wrap: wrap; }
-.gal-source { display: flex; align-items: center; gap: 14px; }
+.gal-source { display: flex; flex-direction: column; gap: 5px; }
+.gal-source-top { display: flex; align-items: center; gap: 14px; }
 .gal-source-label { letter-spacing: .14em; color: rgba(255,255,255,.5); }
 .gal-source-row { display: flex; gap: 4px; }
+/* Shown only while nothing is picked yet — see refreshSource's data-state
+ * ("idle") in createGallery. Empty text node otherwise, so it never reserves
+ * layout height it isn't using. */
+.gal-source-cta { letter-spacing: .1em; color: rgba(255,255,255,.4); }
 .gal-src {
   display: flex; align-items: center; gap: 9px; padding: 10px 14px; text-align: left;
   border: 1px solid rgba(255,255,255,.16); border-radius: 3px; background: none;
   color: #fff; font: inherit; cursor: pointer;
 }
 .gal-src:hover { border-color: rgba(255,255,255,.4); }
-.gal-src[aria-checked="true"] { border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; }
+/* Paint keys off data-state, not aria-checked — aria-checked stays purely
+ * semantic (radio state for assistive tech). Both "ready" and "live" share
+ * [aria-checked] and [role=radio] specificity, so keying paint off the
+ * wrong attribute here previously let a merely-remembered choice (never
+ * actually listening yet) paint the same green as a live one. */
+.gal-src[data-state="ready"] { border-color: rgba(255,255,255,.4); }
+.gal-src[data-state="live"] { border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; }
 .gal-src[data-solo] { cursor: default; }
 .gal-src-dot { width: 5px; height: 5px; border-radius: 50%; border: 1px solid rgba(255,255,255,.45); box-sizing: border-box; flex: none; }
-.gal-src[aria-checked="true"] .gal-src-dot { background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN}; }
+.gal-src[data-state="ready"] .gal-src-dot { border-color: rgba(255,255,255,.8); }
+.gal-src[data-state="live"] .gal-src-dot { background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN}; }
 .gal-src-name { font: 400 13.5px ${FONT_LABEL}; }
 .gal-src-hint { font: 400 9.5px ${FONT_MONO}; letter-spacing: .1em; color: rgba(255,255,255,.55); margin-top: 2px; }
 
@@ -163,6 +183,7 @@ const stylesheet = `
   .gal-mast { gap: 12px; }
   .gal-src { padding: 9px 8px; gap: 6px; }
   .gal-src-hint { letter-spacing: .06em; }
+  .gal-source-cta { letter-spacing: .06em; }
   .gal-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .gal-name { font-size: 15px; }
   /* A phone at arm's length: the fold is how the drafts are reached at all. */
@@ -313,37 +334,65 @@ export function createGallery(deps: GalleryDeps): Gallery {
   const mast = el("div", "gal-mast");
 
   // Sound source: which capture a tile tap starts on. A radio pair where
-  // screen capture exists; the microphone alone, as a plain statement, where
-  // it doesn't.
+  // screen capture exists; the microphone alone, as a plain statement (no
+  // radio semantics, no CTA — there's nothing to choose between), where it
+  // doesn't. canChoose is read once: display capture's availability never
+  // changes mid-session (same assumption refreshAudioPromptButtons in
+  // app.ts makes for the start prompt).
+  const canChoose = deps.canCaptureDisplay();
   const source = el("div", "gal-source");
+  const sourceTop = el("div", "gal-source-top");
   const sourceRow = el("div", "gal-source-row");
-  sourceRow.setAttribute("role", "radiogroup");
-  sourceRow.setAttribute("aria-label", "Sound source");
-  const sourceButtons = new Map<AudioSourceChoice, HTMLButtonElement>();
+  if (canChoose) {
+    sourceRow.setAttribute("role", "radiogroup");
+    sourceRow.setAttribute("aria-label", "Sound source");
+  }
+  const LIVE_LABEL = "LISTENING";
+  const READY_LABEL = "TAP TO START";
+  const sourceButtons = new Map<AudioSourceChoice, { btn: HTMLButtonElement; hintEl: HTMLElement; descriptor: string }>();
+  const cta = canChoose ? el("div", "gal-mono gal-source-cta", "PICK A SOURCE — OR TAP A SCENE TO USE THE MIC") : null;
   const refreshSource = (): void => {
-    const current = deps.sourceChoice();
-    for (const [choice, btn] of sourceButtons) btn.setAttribute("aria-checked", String(choice === current));
+    const state = deps.sourceState();
+    for (const [choice, entry] of sourceButtons) {
+      const isCurrent = choice === state.choice;
+      // Solo has no "ready" — nothing is being picked over anything else,
+      // so the only meaningful distinction left is live vs. not.
+      const uiState: "live" | "ready" | "idle" = !isCurrent
+        ? "idle"
+        : state.live
+          ? "live"
+          : canChoose && state.chosen
+            ? "ready"
+            : "idle";
+      entry.btn.dataset.state = uiState;
+      if (canChoose) entry.btn.setAttribute("aria-checked", String(uiState !== "idle"));
+      entry.hintEl.textContent = uiState === "live" ? LIVE_LABEL : uiState === "ready" ? READY_LABEL : entry.descriptor;
+    }
+    if (cta) cta.style.display = state.chosen ? "none" : "block";
   };
-  const addSource = (choice: AudioSourceChoice, name: string, hint: string, title?: string): void => {
+  const addSource = (choice: AudioSourceChoice, name: string, descriptor: string, title?: string): void => {
     const btn = el("button", "gal-src");
     btn.type = "button";
-    btn.setAttribute("role", "radio");
     if (title) btn.title = title;
+    const hintEl = el("div", "gal-src-hint", descriptor);
     const text = el("div", "");
-    text.append(el("div", "gal-src-name", name), el("div", "gal-src-hint", hint));
+    text.append(el("div", "gal-src-name", name), hintEl);
     btn.append(el("div", "gal-src-dot"), text);
-    if (deps.canCaptureDisplay()) {
+    if (canChoose) {
+      btn.setAttribute("role", "radio");
       btn.addEventListener("click", () => void deps.onSourceChoice(choice).then(refreshSource, refreshSource));
     } else {
       btn.dataset.solo = "";
       btn.tabIndex = -1;
     }
-    sourceButtons.set(choice, btn);
+    sourceButtons.set(choice, { btn, hintEl, descriptor });
     sourceRow.appendChild(btn);
   };
-  addSource("mic", "Microphone", "DEFAULT · TAP A SCENE");
-  if (deps.canCaptureDisplay()) addSource("display", "Share a tab", "CLEANER SIGNAL", DISPLAY_SHARE_GUIDE);
-  source.append(el("div", "gal-mono gal-source-label", "Sound source"), sourceRow);
+  addSource("mic", "Microphone", "ROOM AUDIO");
+  if (canChoose) addSource("display", "Share a tab", "CLEANER SIGNAL", DISPLAY_SHARE_GUIDE);
+  sourceTop.append(el("div", "gal-mono gal-source-label", "Sound source"), sourceRow);
+  source.appendChild(sourceTop);
+  if (cta) source.appendChild(cta);
   mast.append(createBrandMark(56), source);
 
   const errorBanner = el("div", "gal-error");
@@ -667,6 +716,10 @@ export function createGallery(deps: GalleryDeps): Gallery {
       // shader recompiled the next time the gallery is shown.
       visible = false;
       root.style.display = "none";
+    },
+
+    syncSource(): void {
+      if (visible) refreshSource();
     },
 
     tick(nowMs: number): void {

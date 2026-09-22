@@ -37,7 +37,7 @@ import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
-import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice } from "../audio/sourcePref.ts";
+import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -179,12 +179,13 @@ export interface DeviceMenuDeps {
   onPickPalette: (id: string) => void;
   /** Shown in the Bands card's status line — where the bars are coming from. */
   getAudioStatus: () => AudioStatus;
-  /** This device's mic-vs-screen capture preference (src/audio/sourcePref.ts)
-   *  — drives the Input card's Source row. Null on a renderer or the
-   *  synthetic feed (no local capture to choose a source for), which is what
-   *  hides the row — the same null-hides-itself convention as the Loudness
-   *  card's `lufs` frame field. */
-  getAudioSourceChoice: () => AudioSourceChoice | null;
+  /** This device's mic-vs-screen capture state (src/audio/sourcePref.ts's
+   *  SourceState) — drives the Input card's Source row, including whether
+   *  the lit chip means "listening now" or just "picked, not started yet".
+   *  Null on a renderer or the synthetic feed (no local capture to choose a
+   *  source for), which is what hides the row — the same null-hides-itself
+   *  convention as the Loudness card's `lufs` frame field. */
+  getSourceState: () => SourceState | null;
   onAudioSourceChange: (choice: AudioSourceChoice) => void;
   /** Whether this browser can offer the Screen option at all — see
    *  sourcePref.ts's header for the exact browser/OS matrix. */
@@ -1687,11 +1688,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const sourceListStyle = `display: flex; gap: 4px; margin-top: 4px;`;
   const sourceChipStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
   const sourceChipLitStyle = `${chipBtnLitStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
+  // Between sourceChipStyle and sourceChipLitStyle: picked but not listening
+  // yet (SourceState.chosen without .live) — see the Source row's refresh()
+  // below for why that's no longer painted the same as live.
+  const sourceChipReadyStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px; border-color: rgba(255,255,255,0.4); color: rgba(255,255,255,0.85);`;
   // Always visible while Screen is the active source, not a .vc-hint: the hint
   // only reveals on hover/focus, and on touch that means after the tap that
   // already opened the picker — too late to be a guide. Same reasoning as
   // createTraceLegend's always-on comment in controlsKit.ts.
   const sourceGuideStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL}; color: rgba(255,255,255,0.55);`;
+  // Same always-on reasoning as sourceGuideStyle just above — the status line
+  // built from this state (refresh() below) is the row's answer to "which
+  // one is picked and is it actually listening", so it can't be hover-gated
+  // either. Per-option description now lives only in the chip's title
+  // tooltip (SOURCE_OPTIONS.title) rather than duplicated here.
+  const sourceStatusStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL}; color: rgba(255,255,255,0.5);`;
   const SOURCE_OPTIONS: { choice: AudioSourceChoice; text: string; title: string }[] = [
     { choice: "mic", text: "Mic", title: "The room's microphone" },
     {
@@ -1729,23 +1740,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     guide.style.cssText = sourceGuideStyle;
     guide.textContent = DISPLAY_SHARE_GUIDE;
 
-    const hint = document.createElement("div");
-    hint.className = "vc-hint";
+    const status = document.createElement("div");
+    status.style.cssText = sourceStatusStyle;
 
-    el.append(head, list, guide, hint);
+    el.append(head, list, guide, status);
 
     return {
       el,
       refresh(): void {
-        const choice = deps.getAudioSourceChoice();
-        el.style.display = choice === null ? "none" : "";
+        const state = deps.getSourceState();
+        el.style.display = state === null ? "none" : "";
+        if (state === null) return;
         const canDisplay = deps.canCaptureDisplay();
         for (const { choice: c, btn } of buttons) {
-          btn.style.cssText = c === choice ? sourceChipLitStyle : sourceChipStyle;
+          btn.style.cssText =
+            c !== state.choice ? sourceChipStyle : state.live ? sourceChipLitStyle : state.chosen ? sourceChipReadyStyle : sourceChipStyle;
           btn.hidden = c === "display" && !canDisplay;
         }
-        guide.style.display = choice === "display" ? "" : "none";
-        hint.textContent = SOURCE_OPTIONS.find((o) => o.choice === choice)?.title ?? "";
+        guide.style.display = state.choice === "display" ? "" : "none";
+        const name = SOURCE_OPTIONS.find((o) => o.choice === state.choice)?.text ?? "";
+        status.textContent = !state.chosen ? "Pick a source above" : state.live ? `${name} — listening` : `${name} — tap to start`;
       },
     };
   }
