@@ -92,20 +92,35 @@ const stylesheet = `
 .gal-mono { font: 400 10.5px ${FONT_MONO}; text-transform: uppercase; }
 
 .gal-mast { display: flex; align-items: center; justify-content: space-between; gap: 16px 32px; flex-wrap: wrap; }
-.gal-source { display: flex; flex-direction: column; gap: 5px; }
+/* flex: 1 1 auto (basis = max-content), not a bare "flex: 1" (basis 0%) —
+ * the latter collapses to min-content and wraps "Share a tab"/"CLEANER
+ * SIGNAL" onto several lines before it ever grows. This wraps at exactly the
+ * point the unsized block would, then fills the gap .gal-mast's
+ * space-between otherwise leaves dead. max-width caps how wide the buttons
+ * get on a wide desktop — .gal-page's own 1328px cap already bounds the mast. */
+.gal-source { display: flex; flex-direction: column; gap: 5px; flex: 1 1 auto; max-width: 680px; }
 .gal-source-top { display: flex; align-items: center; gap: 14px; }
 .gal-source-label { letter-spacing: .14em; color: rgba(255,255,255,.5); }
-.gal-source-row { display: flex; gap: 4px; }
-/* Shown only while nothing is picked yet — see refreshSource's data-state
- * ("idle") in createGallery. Empty text node otherwise, so it never reserves
- * layout height it isn't using. */
-.gal-source-cta { letter-spacing: .1em; color: rgba(255,255,255,.4); }
-.gal-src {
-  display: flex; align-items: center; gap: 9px; padding: 10px 14px; text-align: left;
-  border: 1px solid rgba(255,255,255,.16); border-radius: 3px; background: none;
-  color: #fff; font: inherit; cursor: pointer;
+.gal-source-row { display: flex; gap: 8px; flex: 1; }
+/* Always laid out (a reserved line, never display:none) so toggling it never
+ * changes .gal-source's height — .gal-mast uses align-items:center, so a
+ * height change here would re-center the mark and nudge the tiles below on
+ * every state change. Faded by refreshSource() via the data-visible flip
+ * below; aria-hidden (also set there) keeps it out of the AT tree while
+ * invisible, since opacity alone doesn't. */
+.gal-source-cta {
+  letter-spacing: .1em; color: rgba(255,255,255,.4);
+  opacity: 0; transform: translateY(-4px); transition: opacity .22s ease, transform .22s ease;
 }
-.gal-src:hover { border-color: rgba(255,255,255,.4); }
+.gal-source-cta[data-visible] { opacity: 1; transform: translateY(0); }
+.gal-src {
+  display: flex; align-items: center; gap: 12px; padding: 16px 20px; text-align: left;
+  border: 1px solid rgba(255,255,255,.16); border-radius: 3px; background: none;
+  color: #fff; font: inherit; cursor: pointer; position: relative; flex: 1 1 0; min-width: 0;
+  transition: border-color .2s ease, background .2s ease, transform .12s ease;
+}
+.gal-src:hover { border-color: rgba(255,255,255,.4); background: rgba(255,255,255,.04); }
+.gal-src:active { transform: scale(0.98); }
 /* Paint keys off data-state, not aria-checked — aria-checked stays purely
  * semantic (radio state for assistive tech). Both "ready" and "live" share
  * [aria-checked] and [role=radio] specificity, so keying paint off the
@@ -114,11 +129,43 @@ const stylesheet = `
 .gal-src[data-state="ready"] { border-color: rgba(255,255,255,.4); }
 .gal-src[data-state="live"] { border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; }
 .gal-src[data-solo] { cursor: default; }
-.gal-src-dot { width: 5px; height: 5px; border-radius: 50%; border: 1px solid rgba(255,255,255,.45); box-sizing: border-box; flex: none; }
+/* The live ring lives on ::after rather than the button's own box-shadow so
+ * its continuous pulse (below) animates opacity/transform only — those
+ * promote to a compositor layer, so the loop costs nothing on the main
+ * thread the preview tiles' own rAF draws are competing for. Animating
+ * box-shadow directly would repaint the button every frame instead. */
+.gal-src[data-state="live"]::after {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit;
+  box-shadow: 0 0 0 1px ${withAlpha(INPUT_GREEN, 0.5)}; pointer-events: none;
+}
+.gal-src-dot {
+  width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(255,255,255,.45);
+  box-sizing: border-box; flex: none; transition: background-color .2s ease, border-color .2s ease;
+}
 .gal-src[data-state="ready"] .gal-src-dot { border-color: rgba(255,255,255,.8); }
 .gal-src[data-state="live"] .gal-src-dot { background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN}; }
-.gal-src-name { font: 400 13.5px ${FONT_LABEL}; }
-.gal-src-hint { font: 400 9.5px ${FONT_MONO}; letter-spacing: .1em; color: rgba(255,255,255,.55); margin-top: 2px; }
+/* Both bound to the [data-state="live"] attribute selector rather than
+ * toggled by JS: refreshSource() rewrites dataset.state on every relevant
+ * capture transition, including with the SAME value, but a same-value
+ * attribute write doesn't change the computed animation-name so it can't
+ * restart either animation — the only thing that does is hide()/show()'s
+ * display:none<->block cycle (display:none cancels every running animation
+ * in the subtree; showing it again restarts whichever animation-names still
+ * apply). Net effect: the pulse/pop replay once each time the gallery is
+ * reopened while still live — kept deliberately, as a small "still
+ * listening" reaffirmation, rather than adding class-toggle/reflow/
+ * animationend bookkeeping to suppress it. Pop is on the dot only, never the
+ * full-width button: .gal-root's overflow-y:auto makes overflow-x compute to
+ * auto too, so a wide element scaling near the mobile edge could flash a
+ * scrollbar — a small dot scaling to 1.25x can't. */
+@media (prefers-reduced-motion: no-preference) {
+  .gal-src[data-state="live"]::after { animation: gal-src-pulse 2.4s ease-in-out infinite; }
+  .gal-src[data-state="live"] .gal-src-dot { animation: gal-src-pop .32s ease; }
+  @keyframes gal-src-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; transform: scale(1.06); } }
+  @keyframes gal-src-pop { 0% { transform: scale(.5); opacity: 0; } 60% { transform: scale(1.25); opacity: 1; } 100% { transform: scale(1); } }
+}
+.gal-src-name { font: 400 16px ${FONT_LABEL}; white-space: nowrap; }
+.gal-src-hint { font: 400 9.5px ${FONT_MONO}; letter-spacing: .1em; color: rgba(255,255,255,.55); margin-top: 2px; white-space: nowrap; }
 
 .gal-error {
   display: none; padding: 10px 14px; border-radius: 3px; font-size: 13px;
@@ -182,6 +229,8 @@ const stylesheet = `
   .gal-source-label { display: none; }
   .gal-mast { gap: 12px; }
   .gal-src { padding: 9px 8px; gap: 6px; }
+  .gal-src-name { font-size: 14px; }
+  .gal-src-dot { width: 6px; height: 6px; }
   .gal-src-hint { letter-spacing: .06em; }
   .gal-source-cta { letter-spacing: .06em; }
   .gal-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
@@ -368,7 +417,12 @@ export function createGallery(deps: GalleryDeps): Gallery {
       if (canChoose) entry.btn.setAttribute("aria-checked", String(uiState !== "idle"));
       entry.hintEl.textContent = uiState === "live" ? LIVE_LABEL : uiState === "ready" ? READY_LABEL : entry.descriptor;
     }
-    if (cta) cta.style.display = state.chosen ? "none" : "block";
+    if (cta) {
+      // Always laid out — see .gal-source-cta's own comment for why this is
+      // an opacity/transform fade (data-visible) rather than a display swap.
+      cta.toggleAttribute("data-visible", !state.chosen);
+      cta.setAttribute("aria-hidden", String(state.chosen));
+    }
   };
   const addSource = (choice: AudioSourceChoice, name: string, descriptor: string, title?: string): void => {
     const btn = el("button", "gal-src");
