@@ -18,7 +18,10 @@ what goes in it and what never does.
    for free (`COMMON_UNIFORMS_GLSL`, `roomUv()`, `palette()`, band sampling).
 2. Each entry in `settings: SceneSetting[]` (spec'd in `sceneSettings.ts`) becomes
    a `uniform float u<Key>` in your shader, plus a slider/checkbox in the device
-   menu. `min`/`max`/`step`/`default` are the slider; `label`/`description`/`group`
+   menu. A setting that is an amount of reaction to the music also declares a
+   `drive` and reads its signal through the generated `<key>Drive(…)` helper
+   (or `drives.value`/`drives.fired` in JS), so the user can choose what it
+   reacts to — `src/render/drives.ts`'s header is the full story. `min`/`max`/`step`/`default` are the slider; `label`/`description`/`group`
    are what the user sees (`description` is the hint that unfolds under the row
    on hover/focus; `group` is a closed vocabulary — see `SETTING_GROUPS`'s own
    doc comment in `sceneSettings.ts` for the rule that picks one);

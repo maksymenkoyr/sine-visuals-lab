@@ -9,7 +9,12 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
    (`src/render/fullscreenScene.ts`). Look at an existing scene in
    `src/render/scenes/` close in spirit before writing from scratch.
 2. Declare `settings: SceneSetting[]` — each key becomes a `uniform float
-   u<Key>` and a device-menu control.
+   u<Key>` and a device-menu control. Every setting that is an *amount of
+   reaction to the music* gets a `drive` (see `src/render/drives.ts`'s
+   header): read it through the generated `<key>Drive(signal)` in GLSL or
+   `drives.value`/`drives.fired` in JS, never the signal directly, so the
+   user can pick what it reacts to. Default it to the one signal it reads,
+   or `"scene"` with a `sceneLabel` when it mixes several.
 3. Register it: add to `src/render/scenes/index.ts` (`registerScene(...)`) —
    first among the drafts, per that file's header comment — and export it
    alongside its neighbours.

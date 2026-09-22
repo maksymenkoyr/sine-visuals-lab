@@ -101,8 +101,9 @@ import { getDriveChoice, getDriveLine, getDriveLineStrength } from "./driveStore
  * lookup — one scalar can't replace *which band is where on screen*);
  * bar-wrap choreography and flowPhase rates (timelines, not amounts — a
  * future "Beat · 1 bar" source on one of these is plausible, just not this
- * system); scenes with no settings at all. See the plan this file was built
- * from (docs/status.md at the time) for the full inventory.
+ * system); scenes with no settings at all. A setting in one of these
+ * buckets simply declares no `drive` — the scene keeps reading its signal
+ * directly, exactly as before this file existed.
  */
 
 export type DriveChoice =

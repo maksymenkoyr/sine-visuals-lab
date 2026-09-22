@@ -68,6 +68,7 @@ after all three pass; include the screenshot paths in your summary.
 | The wire format between phone and TV | `src/net/protocol.ts` header — includes the legacy-decode sunset condition |
 | Why a setting resolves the way it does under Auto | `src/render/autoTune.ts` and `src/render/musicProfile.ts` headers |
 | The settings/uniform system itself | `src/render/sceneSettings.ts` header |
+| Making a setting audio-reactive (what it reacts to: a hit, a grid tick, a level, a drawn frequency line) | `src/render/drives.ts` header — a scene reads `<key>Drive(…)`, never a signal directly |
 | The saved-look share-code format | `src/render/sceneLooks.ts` header — links in the wild outlive the schema |
 | The build target (`es2017`) | `vite.config.ts`, the comment at the `target:` line |
 | A scene that hashes a noise lattice, or adds a growing phase to a noise coordinate | `src/render/noiseHash.ts` header — the mobile seams fix, and the two halves every scene must take together |
