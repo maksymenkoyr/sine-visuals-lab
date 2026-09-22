@@ -1153,6 +1153,7 @@ function createHitCurve() {
     return true;
   }
 
+  let lastKey = "";
   const xOf = (ratio: number, w: number) => ((ratio - 1) / (ONSET_METER_MAX - 1)) * (w - 1);
   const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (HIT_CURVE_HEIGHT_CSS_PX - 2);
 
@@ -1163,7 +1164,14 @@ function createHitCurve() {
      *  it (the Beat lane on synthetic/renderer — see createHitsHistory's
      *  own doc comment for the same gap). */
     draw(knee: number, laneRatios: readonly (number | null)[]): void {
+      // The curve only changes when Knee or a lane's last hit does — and
+      // both are rare next to the tick rate — so a repeat call is a no-op
+      // rather than a clear+stroke+rect read every frame. The width check
+      // stays first so a panel resize still repaints.
       if (!ensureSize()) return;
+      const key = `${cssWidth}|${knee}|${laneRatios.join(",")}`;
+      if (key === lastKey) return;
+      lastKey = key;
       const w = cssWidth;
       const h = HIT_CURVE_HEIGHT_CSS_PX;
       ctx.clearRect(0, 0, w, h);

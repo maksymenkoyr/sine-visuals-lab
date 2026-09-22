@@ -55,7 +55,7 @@ export interface BandLineEditor {
   /** Called every tick: this scene's live drive/excess (0/null before audio
    *  or with `line` omitted from animClock.advance) — feeds the Drive meter
    *  and the overlay's amber fill. */
-  update(lineDrive: number, excess: ArrayLike<number> | null): void;
+  update(lineDrive: number, excess: ArrayLike<number> | null, nowMs: number): void;
 }
 
 export interface BandLineEditorOpts {
@@ -77,13 +77,20 @@ const LINE_WIDTH_PX = 2;
 const formatStrength = (v: number) => v.toFixed(1);
 
 const meterTrackStyle = `position: relative; width: 100%; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.18); margin-top: 8px;`;
-const meterFillStyle = `position: absolute; top: 0; left: 0; height: 100%; width: 0%; border-radius: 2px; background-color: ${BANDS_AMBER};`;
+// The fill moves by transform, not width: a width write dirties layout, and
+// the overlay's own rect read straight after would then force the whole
+// panel to lay out again every tick (measured at ~2x the frame time with the
+// Line and Hit strength cards both open). A transform is compositor-only.
+const meterFillStyle = `position: absolute; top: 0; left: 0; height: 100%; width: 100%; border-radius: 2px; background-color: ${BANDS_AMBER}; transform-origin: left; transform: scaleX(0);`;
+// The % digits are a DOM text write, so they refresh on their own slow tick
+// (same rate as audioMeters.ts's TEXT_REFRESH_MS) rather than every frame.
+const DRIVE_TEXT_REFRESH_MS = 100;
 
 /** The Drive meter: the simplest possible bar — a label, a % readout, a
  *  track+fill — no peak-hold cap and no ticks (see audioMeters.ts's own
  *  createMeterRow for the fuller version this deliberately doesn't reuse;
  *  it isn't exported, and this card doesn't need what the extra weight buys). */
-function createDriveMeterRow(): { el: HTMLElement; setValue(v: number): void } {
+function createDriveMeterRow(): { el: HTMLElement; setValue(v: number, nowMs: number): void } {
   const el = document.createElement("div");
   el.className = "vc-row";
   el.tabIndex = 0;
@@ -121,14 +128,21 @@ function createDriveMeterRow(): { el: HTMLElement; setValue(v: number): void } {
   el.append(head, track, hint);
 
   let lastPct = -1;
+  let lastTextPct = -1;
+  let lastTextMs = 0;
   return {
     el,
-    setValue(v: number): void {
+    setValue(v: number, nowMs: number): void {
       const pct = Math.round(clamp01(v) * 100);
-      if (pct === lastPct) return;
-      lastPct = pct;
-      fill.style.width = `${pct}%`;
-      digits.textContent = String(pct);
+      if (pct !== lastPct) {
+        lastPct = pct;
+        fill.style.transform = `scaleX(${pct / 100})`;
+      }
+      if (pct !== lastTextPct && nowMs - lastTextMs >= DRIVE_TEXT_REFRESH_MS) {
+        lastTextPct = pct;
+        lastTextMs = nowMs;
+        digits.textContent = String(pct);
+      }
     },
   };
 }
@@ -316,10 +330,12 @@ export function createBandLineEditor(opts: BandLineEditorOpts): BandLineEditor {
     setStrength(value: number): void {
       strengthRow.setValue(value);
     },
-    update(lineDrive: number, nextExcess: ArrayLike<number> | null): void {
+    update(lineDrive: number, nextExcess: ArrayLike<number> | null, nowMs: number): void {
       excess = nextExcess;
-      driveRow.setValue(lineDrive);
+      // Read (redraw's rect check) before write (the Drive row), so the read
+      // never lands on a layout this tick's own write just dirtied.
       redraw();
+      driveRow.setValue(lineDrive, nowMs);
     },
   };
 }

@@ -2665,10 +2665,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // bandLineEditor.ts's header — and its overlay/Drive meter read this
       // same tick's AnimFrame, unthrottled like the strip above (a beat
       // driving the line should feel as live as the meters it's shaping).
-      lineEditor.strip.update(rawBands, processedBands);
-      lineEditor.update(anim?.lineDrive ?? 0, anim?.lineExcess ?? null);
-
+      // Skipped entirely while the card is folded — a second full strip
+      // draw plus the overlay is real per-frame work, and a folded card has
+      // nothing to show it on (the meters' own cards skip the same way).
       const nowMs = performance.now();
+      if (!lineCard.fold?.isFolded()) {
+        lineEditor.strip.update(rawBands, processedBands);
+        lineEditor.update(anim?.lineDrive ?? 0, anim?.lineExcess ?? null, nowMs);
+      }
+
       if (nowMs - lastAutoRefreshMs < AUTO_UI_REFRESH_MS) return;
       lastAutoRefreshMs = nowMs;
 
