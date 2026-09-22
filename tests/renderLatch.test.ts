@@ -38,6 +38,8 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     gateDimmer: 1,
     hits: { low: NULL_DIAG, mid: NULL_DIAG, high: NULL_DIAG },
     hitStrength: { beat: NULL_HIT, low: NULL_HIT, mid: NULL_HIT, high: NULL_HIT },
+    lineDrive: 0,
+    lineExcess: null,
     profile: { pulse: 0, tempo: 0, brightness: 0, density: 0, dynamics: 0, attack: 0, loudness: 0 },
     raw: { sectionIntensity: 0, profile: { pulse: 0, tempo: 0, brightness: 0, density: 0, dynamics: 0, attack: 0, loudness: 0 } },
     ...overrides,

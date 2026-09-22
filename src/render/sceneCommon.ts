@@ -26,6 +26,7 @@ uniform float uHigh;
 uniform float uLowPulse;  // decaying per-group onset pulse, same shape as uBeatPulse
 uniform float uMidPulse;
 uniform float uHighPulse;
+uniform float uLineDrive; // sensitivity-line drive — see bandLine.ts; 0 with no line drawn or drawn flat
 uniform float uSectionIntensity; // phrase-level loudness trend — see sectionIntensity.ts
 uniform float uDropPulse;        // decaying flash on a detected section change/drop
 uniform float uCentroid; // range-adapted spectral centroid — see spectralCentroid.ts; 0.5 is this track's own recent middle
@@ -93,6 +94,7 @@ export function uploadCommonUniforms(
   prog.setF("uLowPulse", anim.lowPulse);
   prog.setF("uMidPulse", anim.midPulse);
   prog.setF("uHighPulse", anim.highPulse);
+  prog.setF("uLineDrive", anim.lineDrive);
   prog.setF("uSectionIntensity", anim.sectionIntensity);
   prog.setF("uDropPulse", anim.dropPulse);
   prog.setF("uCentroid", anim.centroid);

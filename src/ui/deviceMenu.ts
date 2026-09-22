@@ -32,7 +32,9 @@ import type { HitShape } from "../audio/hitStrength.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
+import { LINE_STRENGTH_DEFAULT } from "../audio/bandLine.ts";
 import { createBandFaders } from "./bandFaders.ts";
+import { createBandLineEditor } from "./bandLineEditor.ts";
 import { createAudioMeters } from "./audioMeters.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
@@ -84,11 +86,13 @@ import {
  *
  * Two glass columns anchored top-right over the live scene: the Bands card
  * (scene name, audio source, and the live bars with the band faders drawn
- * over them — see src/ui/bandFaders.ts) beside the controls column, whose
- * cards run Auto strength (with the Auto master block welded to it) → Input
- * (its own header carries a second Auto button, next to Reset — see
+ * over them — see src/ui/bandFaders.ts), then the Line card (a second strip
+ * you draw a sensitivity threshold onto — src/ui/bandLineEditor.ts, backed
+ * by src/audio/bandLine.ts), beside the controls column, whose cards run
+ * Auto strength (with the Auto master block welded to it) → Input (its own
+ * header carries a second Auto button, next to Reset — see
  * src/audio/micAuto.ts for how it differs from the master block) → Scene →
- * Palette → a footer strip. Under the Bands card, the read-only
+ * Palette → a footer strip. Under the Bands and Line cards, the read-only
  * meters (audioMeters.ts) scroll in their own strip. Below the breakpoint
  * in controlsTheme.ts everything stacks into one scrolling column with the
  * meters last, so the knobs stay in reach. It's corner-docked, not a modal:
@@ -233,6 +237,15 @@ export interface DeviceMenuDeps {
   getBandGain: (sceneId: string, fader: number) => number;
   onBandGainChange: (sceneId: string, fader: number, value: number) => void;
   onBandGainsReset: (sceneId: string) => void;
+  /** The Line card's drawn sensitivity line and its Strength dial, per scene
+   *  — see src/audio/bandLine.ts. Named to match that module's own exports
+   *  1:1 rather than the onXChange/onXReset convention above, since the Line
+   *  card (src/ui/bandLineEditor.ts) calls straight through them. */
+  getBandLine: (sceneId: string) => Float32Array;
+  setBandLineBand: (sceneId: string, band: number, height: number) => void;
+  resetBandLine: (sceneId: string) => void;
+  getBandLineStrength: (sceneId: string) => number;
+  setBandLineStrength: (sceneId: string, value: number) => void;
   /** The Loudness card's Reset chip — starts the integrated LUFS reading
    *  over (src/audio/lufsAnalyser.ts). */
   onLufsReset: () => void;
@@ -1435,7 +1448,45 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
 
   bandsCard.body.append(spectrumHeader, hairline, fadersRow);
-  spectrumCol.append(bandsCard.el, audioMeters.el);
+
+  // ---- Line card: a drawable per-band sensitivity threshold ----
+  // src/audio/bandLine.ts's own header has the formula the overlay's fills
+  // are showing (FeatureFrame.energy is the special case of a flat-0 line).
+  // First consumer: Caustics' "Sparkle from line" setting; the drive itself
+  // (uLineDrive, sceneCommon.ts) is global, so any scene can read it next.
+  const lineEditor = createBandLineEditor({
+    onLineChange: (band, height) => deps.setBandLineBand(deps.currentSceneId(), band, height),
+    onStrengthChange: (value) => deps.setBandLineStrength(deps.currentSceneId(), value),
+  });
+  const lineResetChip = createChipButton("Reset", "Clear the drawn line and reset Strength", () => {
+    const sceneId = deps.currentSceneId();
+    deps.resetBandLine(sceneId);
+    deps.setBandLineStrength(sceneId, LINE_STRENGTH_DEFAULT);
+    refreshBandLine();
+  });
+  const lineCard = createCard({
+    title: "Line",
+    accent: BANDS_AMBER,
+    right: lineResetChip,
+    foldId: "line",
+  });
+  markBlock(lineCard.title);
+
+  // The strip+overlay sits in a .vc-row, same reasoning as fadersRow above,
+  // so its hint wakes on hover/focus-within like a slider row's does — pure
+  // CSS (.vc-row:hover), no JS wiring needed since the overlay isn't a
+  // focusable control (see bandLineEditor.ts's header for why it's pointer-only).
+  const lineStripRow = document.createElement("div");
+  lineStripRow.className = "vc-row";
+  lineStripRow.style.setProperty("--vc-accent", BANDS_AMBER);
+  const lineHint = document.createElement("div");
+  lineHint.className = "vc-hint";
+  lineHint.textContent =
+    "Draw a line over the bars. Effects that follow the line (Caustics: Sparkle from line) react to how far the spectrum rises above it — a band at the top is ignored.";
+  lineStripRow.append(lineEditor.el, lineHint);
+  lineCard.body.append(lineStripRow, lineEditor.strengthRow, lineEditor.driveRow);
+
+  spectrumCol.append(bandsCard.el, lineCard.el, audioMeters.el);
 
   // Power travels with this column for the purposes of the all-folded
   // triangle collapse below: they're wrapped together so the CSS
@@ -1499,13 +1550,25 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     bandFaders.clearOff();
   }
 
+  // Same call sites as refreshBandFaders above: open() and this card's own
+  // Reset chip.
+  function refreshBandLine(): void {
+    const sceneId = deps.currentSceneId();
+    lineEditor.setLine(deps.getBandLine(sceneId));
+    lineEditor.setStrength(deps.getBandLineStrength(sceneId));
+  }
+
   // The split is fixed (it only tints the bars by pulse group), so the strip
   // needs it set up once — the Hz edges do still depend on the analyser's
   // real sample rate, though, which isn't known until mic access is granted,
-  // so this is re-run on every open(). The edges also label the faders.
+  // so this is re-run on every open(). The edges also label the faders. The
+  // Line card's own strip is fed the exact same edges/split, same reasoning
+  // as it showing the same processed bars (bandLineEditor.ts's header).
   function refreshBandsSplit(): void {
     bandFaders.setEdgesHz(deps.getBandEdgesHz());
     spectrumStrip.setSplit(deps.getBandSplit());
+    lineEditor.setEdgesHz(deps.getBandEdgesHz());
+    lineEditor.setSplit(deps.getBandSplit());
   }
 
   // ---- controls column ----
@@ -2502,6 +2565,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     renderSceneSettings();
     refreshBandsSplit();
     refreshBandFaders();
+    refreshBandLine();
     refreshAutoStrengthDisplay();
     root.classList.add("vc-open");
     deps.toggleButton.setAttribute("aria-pressed", "true");
@@ -2597,6 +2661,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       spectrumStrip.setPinned(pinned);
       const processedBands = frame ? applySensitivity(frame, sensitivity, expansion).bands : null;
       spectrumStrip.update(rawBands, processedBands);
+      // The Line card's own strip shows the same processed feed — see
+      // bandLineEditor.ts's header — and its overlay/Drive meter read this
+      // same tick's AnimFrame, unthrottled like the strip above (a beat
+      // driving the line should feel as live as the meters it's shaping).
+      lineEditor.strip.update(rawBands, processedBands);
+      lineEditor.update(anim?.lineDrive ?? 0, anim?.lineExcess ?? null);
 
       const nowMs = performance.now();
       if (nowMs - lastAutoRefreshMs < AUTO_UI_REFRESH_MS) return;

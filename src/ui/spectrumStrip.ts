@@ -18,7 +18,10 @@ import { AUTO_SKY, BANDS_AMBER, FADER_OFF, FONT_MONO, STRIP_HIGH, STRIP_LOW, STR
  * Drawing only — the faders' pointer/keyboard handling and readouts live in
  * src/ui/bandFaders.ts, which owns this canvas and tells it what to draw
  * via setFaders/setFocused. This split keeps the canvas free of DOM
- * concerns and the interaction free of pixel math.
+ * concerns and the interaction free of pixel math. A second consumer with no
+ * faders of its own (src/ui/bandLineEditor.ts's Line card strip) calls
+ * setShowFaders(false) so this instance draws bars/axis/centroid only, with
+ * its own overlay canvas taking the rail's place.
  *
  * Feeds, all copied into this component's own buffers on arrival (callers
  * reuse scratch arrays across frames):
@@ -61,6 +64,16 @@ export interface SpectrumStrip {
    *  processed feed the visuals actually see. */
   setShowRaw(on: boolean): void;
   showRaw(): boolean;
+  /** Whether the fader rail/knobs draw at all — true (default, today's
+   *  behavior) for the Bands card's own strip; the Line card's strip
+   *  (bandLineEditor.ts) turns this off, since it has no faders of its own
+   *  and its overlay draws a different rail (the sensitivity line) in the
+   *  same space a fader's knob would otherwise sit. Does not affect
+   *  setFaders/setFocused — a caller that never calls those already gets
+   *  the same visual effect as this being false, since the default gains
+   *  (all 1×) draw every knob dead-center, but a Line-card-style consumer
+   *  shouldn't have to reason about that default to know knobs won't show. */
+  setShowFaders(on: boolean): void;
   /** The fader bank's current gains — drives the knobs and which bars get a
    *  ghost. Copied. */
   setFaders(gains: ArrayLike<number>): void;
@@ -122,6 +135,7 @@ export function createSpectrumStrip(): SpectrumStrip {
   let split: BandSplit = { lowMid: 6, midHigh: 16 };
   let lastDrawMs: number | null = null;
   let showRaw = false;
+  let showFaders = true;
 
   // Every feed is copied into these on arrival — never aliased to a caller's
   // array — since app.ts/deviceMenu.ts reuse scratch buffers across frames
@@ -346,7 +360,7 @@ export function createSpectrumStrip(): SpectrumStrip {
 
     drawBars(width, plotHeight, dtSec);
     drawAxis(width, plotHeight);
-    drawFaders(width, plotHeight);
+    if (showFaders) drawFaders(width, plotHeight);
     drawCentroidMarker(width, plotHeight);
   }
 
@@ -368,6 +382,10 @@ export function createSpectrumStrip(): SpectrumStrip {
       requestRedraw();
     },
     showRaw: () => showRaw,
+    setShowFaders(on: boolean): void {
+      showFaders = on;
+      requestRedraw();
+    },
     setFaders(next: ArrayLike<number>): void {
       for (let i = 0; i < BAND_FADER_COUNT; i++) gains[i] = next[i];
       faderWeights(gains, weights);

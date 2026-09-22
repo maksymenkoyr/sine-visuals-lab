@@ -1,4 +1,4 @@
-import type { FeatureFrame } from "../audio/types.ts";
+import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import { createFlowClock, type FlowClock } from "./flowClock.ts";
 import { createBeatClock, type BeatClock } from "./beatClock.ts";
@@ -11,6 +11,7 @@ import { BEAT_GRID_DEFAULT, beatGridBeats } from "../audio/beatGrid.ts";
 import { createGridPulse, type GridPulse } from "./gridPulse.ts";
 import { silenceGateDimmer, type SilenceGateMarks } from "../audio/silenceGate.ts";
 import { hitStrength, type HitShape, type HitParts } from "../audio/hitStrength.ts";
+import { bandLineDrive, type BandLineDrive } from "../audio/bandLine.ts";
 
 // Bundles every per-frame renderer-side clock a scene might want, so
 // Scene.render() takes one object instead of an ever-growing positional
@@ -110,6 +111,16 @@ export interface AnimFrame {
    *  the meters panel's Hit strength card (audioMeters.ts) wants to watch
    *  without an old AnimFrame changing under it later. */
   hitStrength: { beat: HitParts; low: HitParts; mid: HitParts; high: HitParts };
+  /** This tick's sensitivity-line drive (src/audio/bandLine.ts) — 0 when
+   *  `line` below is omitted. `frame.bands` here is already post-band-gains
+   *  (app.ts applies bandGains.ts before calling advance()), so the line
+   *  reads the same shaped spectrum the Bands card's faders left behind. */
+  lineDrive: number;
+  /** Per-band excess behind lineDrive above — null when `line` is omitted.
+   *  Copied, same reason `hits` copies bandEnergy's diags: the overlay
+   *  (src/ui/bandLineEditor.ts) reads this straight off the AnimFrame, and an
+   *  old frame must not change under it on a later tick. */
+  lineExcess: Float32Array | null;
 }
 
 export interface AnimClock {
@@ -136,7 +147,13 @@ export interface AnimClock {
    *  for *this* tick (features.ts's FeatureExtractor.fluxRatio, kept outside
    *  this module since animClock never reads a FeatureExtractor directly) —
    *  omitted or null (a device with no local extractor), the broadband grade
-   *  falls back to the loudest of this same tick's three band ratios. */
+   *  falls back to the loudest of this same tick's three band ratios. `line`
+   *  (src/audio/bandLine.ts), same rule again: when given, `heights`/
+   *  `strength` feed bandLineDrive() against this tick's (already
+   *  post-band-gains) `frame.bands`, producing `lineDrive`/`lineExcess`
+   *  above; omitted, `lineDrive` is 0 and `lineExcess` is null, so a scene
+   *  reading `uLineDrive` (sceneCommon.ts) sees nothing from every preview/
+   *  gallery/probe caller that doesn't pass one. */
   advance(
     dtSec: number,
     frame: FeatureFrame,
@@ -144,6 +161,7 @@ export interface AnimClock {
     beatGrid?: number,
     gate?: SilenceGateMarks,
     hit?: { shape: HitShape; beatRatio?: number | null },
+    line?: { heights: ArrayLike<number>; strength: number },
   ): AnimFrame;
 }
 
@@ -163,6 +181,12 @@ export function createAnimClock(): AnimClock {
   // GroupState.hit: holds the previous hit's numbers between onsets rather
   // than resetting, and is only ever written while `hit` is given.
   const beatHit: HitParts = { standout: 0, loudness: 0, strength: 0 };
+  // Per-instance scratch for bandLineDrive() below — bandLine.ts's own
+  // default scratch is module-shared, which would let two AnimClock
+  // instances (app.ts and tv.ts each own one; tests make many) clobber each
+  // other's excess array. lineExcess on the returned AnimFrame is still a
+  // fresh copy of this every tick (see that field's own doc comment).
+  const lineDriveScratch: BandLineDrive = { drive: 0, excess: new Float32Array(NUM_BANDS) };
 
   return {
     advance(
@@ -172,6 +196,7 @@ export function createAnimClock(): AnimClock {
       beatGrid = BEAT_GRID_DEFAULT,
       gate?: SilenceGateMarks,
       hit?: { shape: HitShape; beatRatio?: number | null },
+      line?: { heights: ArrayLike<number>; strength: number },
     ): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
       const dimmer = gate ? silenceGateDimmer(frame.level, gate) : 1;
@@ -202,6 +227,10 @@ export function createAnimClock(): AnimClock {
           beatPulse = 1;
         }
       }
+
+      // frame.bands here is already post-band-gains — see this field's own
+      // doc comment on AnimFrame.lineDrive.
+      const lineResult = line ? bandLineDrive(frame.bands, line.heights, line.strength, lineDriveScratch) : null;
 
       return {
         dtSec,
@@ -253,6 +282,8 @@ export function createAnimClock(): AnimClock {
           mid: { ...bandEnergy.midHit },
           high: { ...bandEnergy.highHit },
         },
+        lineDrive: lineResult ? lineResult.drive : 0,
+        lineExcess: lineResult ? Float32Array.from(lineResult.excess) : null,
       };
     },
   };

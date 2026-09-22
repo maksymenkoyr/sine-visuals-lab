@@ -86,4 +86,28 @@ describe("createAnimClock", () => {
     expect(anim.hitStrength.low.strength).toBeGreaterThan(0);
     expect(anim.hitStrength.low.strength).toBeLessThanOrEqual(1);
   });
+
+  // The sensitivity line (src/audio/bandLine.ts), threaded through
+  // advance()'s optional `line` — see animClock's own doc comment for why an
+  // omitted `line` must reproduce a driveless frame exactly.
+  it("omitted `line` -> lineDrive is 0 and lineExcess is null", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    const anim = clock.advance(DT, frame({ bands }));
+    expect(anim.lineDrive).toBe(0);
+    expect(anim.lineExcess).toBeNull();
+  });
+
+  it("a flat-0 line at strength 1 makes lineDrive equal frame.energy", () => {
+    const clock = createAnimClock();
+    const bands = Float32Array.from({ length: NUM_BANDS }, (_, i) => (i % 7) / 10);
+    const energy = Array.from(bands).reduce((a, b) => a + b, 0) / NUM_BANDS;
+    const line = new Float32Array(NUM_BANDS).fill(0);
+    const anim = clock.advance(DT, frame({ bands, energy }), undefined, undefined, undefined, undefined, {
+      heights: line,
+      strength: 1,
+    });
+    expect(anim.lineDrive).toBeCloseTo(energy, 5);
+    expect(anim.lineExcess).not.toBeNull();
+  });
 });

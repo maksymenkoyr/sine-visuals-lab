@@ -88,12 +88,12 @@ import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHas
 // in noiseHash.ts (its header is the standing explanation) so other drifting
 // scenes share them.
 // The master treble-sparkle knob. Defined outside SETTINGS so the sub-params
-// further down (density, brightness ceiling, grain, warp, spread, sustain —
-// all `advanced`, in the Look group) can name it directly as their `macro`
-// driver: a spec reference costs nothing extra to resolve and can't drift out
-// of sync with a key string. See their own leading comment further down for
-// what each sub-param actually does; this one just carries the auto weights
-// and stays the everyday slider.
+// further down (density, brightness ceiling, grain, warp, spread, sustain,
+// line source — all `advanced`, in the Look group) can name it directly as
+// their `macro` driver: a spec reference costs nothing extra to resolve and
+// can't drift out of sync with a key string. See their own leading comment
+// further down for what each sub-param actually does; this one just carries
+// the auto weights and stays the everyday slider.
 const SPARKLE: SceneSetting = {
   key: "sparkle",
   label: "Treble sparkle",
@@ -436,6 +436,27 @@ const SETTINGS: SceneSetting[] = [
     default: 0, // -> today's behavior: glints only follow the onset pulse
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.3 },
+  },
+  // The sensitivity line (src/audio/bandLine.ts, drawn on the Line card) as
+  // an alternate sparkle source: at 0 the glints still follow the treble hit
+  // detector exactly as before (see sparkleDrive in FRAG below); dialed up,
+  // they blend toward uLineDrive, so a line drawn to exclude the low/mid
+  // bands makes the glints track only the treble energy the user drew above
+  // it, and a strength pushed past 1 (the Line card's own Strength row) can
+  // light them at the faintest rise. Off the master: a source choice, not an
+  // intensity one, same convention as sparkleGrain above.
+  {
+    key: "sparkleLine",
+    label: "Sparkle from line",
+    description:
+      "How much the glints follow the sensitivity line drawn on the Line card instead of the treble hit detector — at full they light exactly as far as the spectrum rises above your line",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+    advanced: true,
+    macro: { driver: SPARKLE, weight: 0 },
   },
   // Spray injection rides on the glints rather than replacing them: every
   // cell of the glint field is its own tiny nozzle, so sprays appear in as
@@ -1191,19 +1212,23 @@ void main() {
 
   // Treble sparkle: fine glints gated to where the pattern is already bright
   // (ridge crests), driven by a high-band onset pulse — or, once
-  // uSparkleSustain is dialed up, kept alive through a sustained wash too.
-  // uSparkleBright/Density/Grain/Spread/Sustain used to be fixed constants
-  // here (1.5, 8.0, 38.0, smoothstep(0.15, 0.6, ...), pulse-only); each
-  // defaults to reproduce its old constant exactly (see the sparkleBright..
-  // sparkleSustain entries in SETTINGS above) and is a macro of uSparkle, so
-  // the master knob still moves all of them together.
+  // uSparkleSustain is dialed up, kept alive through a sustained wash too —
+  // or, once uSparkleLine is dialed up, by uLineDrive instead: the
+  // sensitivity line drawn on the Line card (src/audio/bandLine.ts) in place
+  // of the treble hit detector entirely. uSparkleBright/Density/Grain/
+  // Spread/Sustain used to be fixed constants here (1.5, 8.0, 38.0,
+  // smoothstep(0.15, 0.6, ...), pulse-only); each defaults to reproduce its
+  // old constant exactly (see the sparkleBright..sparkleSustain entries in
+  // SETTINGS above) and is a macro of uSparkle, so the master knob still
+  // moves all of them together.
   float sparkleLo = mix(${SPARKLE_SPREAD_LO_AT_0.toFixed(2)}, ${SPARKLE_SPREAD_LO_AT_1.toFixed(2)}, uSparkleSpread);
   float sparkleHi = mix(${SPARKLE_SPREAD_HI_AT_0.toFixed(2)}, ${SPARKLE_SPREAD_HI_AT_1.toFixed(2)}, uSparkleSpread);
   float crestGate = smoothstep(sparkleLo, sparkleHi, acc);
   // uHigh is the slewed continuous high-band level (vs. uHighPulse's
   // decaying onset spike) — max() rather than a blend so sustain=0 leaves
-  // the pulse-only drive bit-for-bit untouched.
-  float sparkleDrive = max(uHighPulse, uSparkleSustain * uHigh);
+  // the pulse-only drive bit-for-bit untouched. uSparkleLine at 0 leaves this
+  // whole mix() bit-for-bit what it was too.
+  float sparkleDrive = mix(max(uHighPulse, uSparkleSustain * uHigh), uLineDrive, uSparkleLine);
   // uSparkleWarp bends the coordinate glints are sampled at with its own
   // small warp pass — independent of the ridge loop's warpAmt above, so
   // dragging it changes only the glints' own curvature, never the ridges'.
