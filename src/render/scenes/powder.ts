@@ -3,7 +3,8 @@ import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
-import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
+import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
+import { PASSTHROUGH_DRIVES } from "../drives.ts";
 import { NUM_BANDS } from "../../audio/types.ts";
 import { grainTextureSide, REFERENCE_GRAINS } from "./chladni.ts";
 import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
@@ -769,6 +770,10 @@ const SETTINGS: SceneSetting[] = [
     default: 0.6,
     // Quiet-verse / loud-chorus tracks are the ones worth breathing on.
     auto: { dynamics: 0.35 },
+    // Scales this scene's own quiet-time `calm` signal (render()) — a slow
+    // slewed composite of section intensity and bass level, not a catalogue
+    // signal — so the default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: this scene's own quiet-time calm signal" },
   },
   {
     key: "turbulence",
@@ -781,6 +786,8 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     // Busy, fast mixes churn more.
     auto: { density: 0.25, tempo: 0.2 },
+    // uEnergy directly (turbAmp, the wind-force term) — a plain All level default.
+    drive: { default: "anim.energy" },
   },
   {
     key: "swirl",
@@ -805,6 +812,11 @@ const SETTINGS: SceneSetting[] = [
     default: 0.6,
     // Dark, bass-heavy mixes carry more kick presence to throw on.
     auto: { attack: 0.3, brightness: -0.2 },
+    // Gates the ordinary plume (render()) and scales the point-size grow
+    // term (POINT_VERT) — both anim.lowPulse/lowOnset directly, a plain
+    // Bass hit default. A drop's own opposed-pair plume is unconditional,
+    // independent of this choice, the same as caustics' drop ring.
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "chunks",
@@ -817,6 +829,10 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     // Cubes read best on punchy, dynamic music.
     auto: { attack: 0.25, dynamics: 0.2 },
+    // Gated and scaled by this scene's own hit-strength detector (bigHit,
+    // render()) — a bespoke composite of level, pulse, section intensity
+    // and both rise flags — so the default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: this scene's own hit-strength detector" },
   },
   {
     key: "heat",
@@ -873,6 +889,10 @@ const SETTINGS: SceneSetting[] = [
     default: 0.45,
     // Bright, snappy material is what has hats worth twinkling on.
     auto: { brightness: 0.4, attack: 0.15 },
+    // Two signals across two layers (a treble hit, or the sustained treble
+    // level too), not one — same reasoning as caustics' Treble sparkle —
+    // so the default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: treble level + hits" },
   },
   {
     key: "hueDrift",
@@ -908,6 +928,9 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     // Move the camera on music that has hits and a tempo to move to.
     auto: { pulse: 0.25, tempo: 0.15 },
+    // Two different signals at two different sites — the push-in reads a
+    // bass hit, the drop shake reads the drop pulse — so the default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: bass hit (push-in) and drop (shake)" },
   },
   {
     key: "flash",
@@ -921,6 +944,10 @@ const SETTINGS: SceneSetting[] = [
     // Same reasoning as chladni's and caustics' flash: punches read on
     // punchy, uncluttered material.
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
+    // Every site mixes a different weighted blend of bass hit/beat hit/
+    // drop (or, at two sites, just one of them alone) — no single catalogue
+    // pick reproduces all five, so the default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: bass, beat and drop hits, weighted per site" },
   },
   {
     key: "bloom",
@@ -943,6 +970,7 @@ function settingFor(key: string): SceneSetting {
 }
 
 const SETTINGS_UNIFORMS_GLSL = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+const DRIVE_UNIFORMS_GLSL = DRIVE_GLSL(SETTINGS);
 
 // Shared by the sim, room, powder and chunk programs so the packing, the
 // noise and the camera can't drift apart between them.
@@ -1105,6 +1133,7 @@ layout(location = 2) out vec4 outVelXY;
 layout(location = 3) out vec4 outVelZW;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uPosXY;
 uniform sampler2D uPosZW;
 uniform sampler2D uVelXY;
@@ -1200,8 +1229,8 @@ void main() {
   // step through BURST_ACCEL would overshoot.
   int steps = uSimDt > 0.025 ? 2 : 1;
   float dt = uSimDt / float(steps);
-  float turbAmp = uTurbulence * (0.85 + 2.6 * uEnergy);
-  float gather = GATHER * uCalm * mix(0.35, 1.6, uBreathe);
+  float turbAmp = uTurbulence * (0.85 + 2.6 * turbulenceDrive(uEnergy));
+  float gather = GATHER * breatheDrive(uCalm) * mix(0.35, 1.6, uBreathe);
   // The audio-warped drift is a straight translation in y; the uTime term
   // circles instead, because a second translation would advect the whole
   // field off in one direction over a long track rather than evolving it.
@@ -1323,6 +1352,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
 ${POWDER_GLSL}
@@ -1364,9 +1394,9 @@ void main() {
   vec3 toEdge = min(hit - ROOM_MIN, ROOM_MAX - hit) + face * 1e3;
   float edge = min(min(toEdge.x, toEdge.y), toEdge.z);
   float rim = 1.0 - smoothstep(0.0, 0.08, edge);
-  col += vec3(0.030, 0.038, 0.055) * rim * (1.0 + uFlash * (2.0 * uLowPulse + 4.0 * uDropPulse));
+  col += vec3(0.030, 0.038, 0.055) * rim * (1.0 + uFlash * flashDrive(2.0 * uLowPulse + 4.0 * uDropPulse));
   // The floor picks up the same punch, so a kick lights the room's ground.
-  col += vec3(0.020, 0.026, 0.045) * onFloor * uFlash * (1.2 * uLowPulse + 3.0 * uDropPulse);
+  col += vec3(0.020, 0.026, 0.045) * onFloor * uFlash * flashDrive(1.2 * uLowPulse + 3.0 * uDropPulse);
 
   // Distance fog toward black, and a vignette on the shared room canvas
   // (not on vUv, so a Panorama slice doesn't get its own dark corners).
@@ -1376,7 +1406,7 @@ void main() {
 
   col = max(col, vec3(0.0));
   col *= 0.15 + uRoom;
-  col *= 1.0 + uFlash * (0.35 * uBeatPulse + 2.5 * uDropPulse);
+  col *= 1.0 + uFlash * flashDrive(0.35 * uBeatPulse + 2.5 * uDropPulse);
   outColor = vec4(col, 1.0);
 }
 `;
@@ -1385,6 +1415,7 @@ const POINT_VERT = `#version 300 es
 precision highp float;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uPosXY;
 uniform sampler2D uPosZW;
 uniform sampler2D uVelZW;
@@ -1434,7 +1465,7 @@ void main() {
   // Size comes from JS (see pointSizing) so the brightness correction that
   // pairs with it can be computed from the same numbers; the kick swells it
   // for one decay so the punch reads from the back of the room.
-  float grow = (1.0 + 0.25 * uLowPulse * uKick) * mix(1.0, 1.2, vFloor);
+  float grow = (1.0 + 0.25 * kickDrive(uLowPulse) * uKick) * mix(1.0, 1.2, vFloor);
   gl_PointSize = clamp(uGrainPx * grow * SIZE_DEPTH_REF / max(v.z, 0.5), 1.0, uMaxPointPx * 2.0);
 }
 `;
@@ -1449,6 +1480,7 @@ in float vFloor;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform float uGrainGain;
 uniform float uHueShift;
 uniform float uDim;
@@ -1482,14 +1514,14 @@ void main() {
   // so a red plume reads as hot rather than as a hole in the cloud.
   float jitter = 0.85 + 0.3 * vSeed;
   float bright = uGrainGain * (0.35 + 0.9 * uGlow) * jitter * vDepthFade
-               * (1.0 + 0.5 * hotness) * (1.0 + uFlash * uBeatPulse * 0.6)
+               * (1.0 + 0.5 * hotness) * (1.0 + uFlash * flashDrive(uBeatPulse) * 0.6)
                * mix(1.0, 0.06, vFloor) * uDim;
   vec3 rgb = col * (bright * soft);
 
   // One grain in twelve twinkles white on the hats, its own spin phase
   // deciding where in the flash it currently is.
   float pick = step(0.9167, vSeed);
-  float twinkle = pick * uSparkle * (0.5 * uHigh + 1.5 * uHighPulse)
+  float twinkle = pick * uSparkle * sparkleDrive(0.5 * uHigh + 1.5 * uHighPulse)
                 * (0.5 + 0.5 * sin(vPhase * 6.2831853));
   rgb += vec3(1.0, 0.97, 0.92) * (twinkle * soft * uGrainGain * 3.5 * vDepthFade * uDim);
 
@@ -1501,6 +1533,7 @@ const CHUNK_VERT = `#version 300 es
 precision highp float;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform float uChunkT0[${MAX_CHUNK_BURSTS}];
 uniform float uChunkStrength[${MAX_CHUNK_BURSTS}];
 uniform float uChunkSeed[${MAX_CHUNK_BURSTS}];
@@ -1572,6 +1605,7 @@ in float vFade;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform float uHueShift;
 uniform float uDim;
 ${PALETTE_GLSL}
@@ -1616,6 +1650,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uGlowTex;
 uniform sampler2D uBlurTex;
 uniform float uDim;
@@ -1635,7 +1670,7 @@ void main() {
   // The halo carries the glow, and the drop's flash rides on the halo and the
   // room only. Applied to the sharp layer as well it just blows the core into
   // a white hole for half a second.
-  col += blurC * (uBloom * ${BLOOM_WEIGHT.toFixed(3)} * uDim * (1.0 + 2.5 * uDropPulse * uFlash));
+  col += blurC * (uBloom * ${BLOOM_WEIGHT.toFixed(3)} * uDim * (1.0 + 2.5 * flashDrive(uDropPulse) * uFlash));
   // One last shoulder on the sum. The knee above stops the powder alone from
   // clipping, but the halo lands on top of it, and an exponential shoulder
   // only reaches white asymptotically — so the densest fold reads as bright
@@ -1896,7 +1931,7 @@ function createPowderScene(): Scene {
       hue = createHueDrift();
     },
 
-    render(ctx, frame, viewport, palette, anim) {
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!simProg || !roomProg || !pointProg || !chunkProg || !blurProg || !compositeProg) return;
       if (!quadVao || !pointVao) return;
       if (!bigHit || !bursts || !chunks || !hue) return;
@@ -1953,15 +1988,16 @@ function createPowderScene(): Scene {
         bursts.trigger(anim.timeSec, s, seed);
         bursts.trigger(anim.timeSec, s, seed, true);
         shakeLeft = SHAKE_SEC;
-      } else if (lowRose && kickS >= 0.05) {
+      } else if (drives.fired("kick", lowRose) && kickS >= 0.05) {
         bursts.trigger(anim.timeSec, kickS * (0.5 + 0.7 * anim.lowPulse), Math.random() * 100);
       }
 
       // The detector's baseline is stepped every frame regardless, so turning
       // the cubes back on doesn't fire a stale burst from a cold baseline.
       const hitStrength = bigHit.advance(dt, anim.low, anim.lowPulse, anim.sectionIntensity, lowRose, dropRose);
+      const chunkStrength = drives.value("chunks", hitStrength);
       chunks.tick(anim.timeSec);
-      if (chunksS >= 0.05 && hitStrength > 0) {
+      if (chunksS >= 0.05 && chunkStrength > 0) {
         // Whichever plume fired most recently is the one the cubes belong to.
         let newest = bursts.bursts[0];
         for (const b of bursts.bursts) if (b.t0 > newest.t0) newest = b;
@@ -1971,18 +2007,20 @@ function createPowderScene(): Scene {
         chunkAxis[0] = newest.axisX;
         chunkAxis[1] = newest.axisY;
         chunkAxis[2] = newest.axisZ;
-        chunks.trigger(anim.timeSec, hitStrength * (0.5 + chunksS), Math.random() * 100, chunkOrigin, chunkAxis);
+        chunks.trigger(anim.timeSec, chunkStrength * (0.5 + chunksS), Math.random() * 100, chunkOrigin, chunkAxis);
       }
 
       yaw = (yaw + (0.03 + 0.25 * cameraS) * dt) % (Math.PI * 2);
 
-      // Camera: pushes in on the kick, shakes for SHAKE_SEC after a drop.
-      const push = 1 - 0.06 * anim.lowPulse * cameraS;
+      // Camera: pushes in on the kick, shakes for SHAKE_SEC after a drop —
+      // two different signals at two different sites, see the "camera"
+      // setting's own comment.
+      const push = 1 - 0.06 * drives.value("camera", anim.lowPulse) * cameraS;
       eyeBuf[0] = 0;
       eyeBuf[1] = EYE_Y * push;
       eyeBuf[2] = EYE_Z * push;
       if (shakeLeft > 0) {
-        const amp = SHAKE_AMP * cameraS * anim.dropPulse * (shakeLeft / SHAKE_SEC);
+        const amp = SHAKE_AMP * cameraS * drives.value("camera", anim.dropPulse) * (shakeLeft / SHAKE_SEC);
         eyeBuf[0] += (Math.random() * 2 - 1) * amp;
         eyeBuf[1] += (Math.random() * 2 - 1) * amp;
         eyeBuf[2] += (Math.random() * 2 - 1) * amp * 0.5;
@@ -1990,7 +2028,7 @@ function createPowderScene(): Scene {
       }
 
       const common = (prog: GLProgram): void => {
-        uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+        uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
         prog.setF("uYaw", yaw);
         prog.setV3v("uEye", eyeBuf);
       };
@@ -2095,7 +2133,7 @@ function createPowderScene(): Scene {
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE);
       compositeProg.use();
-      uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       compositeProg.setF("uDim", dim);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, glowTex);
