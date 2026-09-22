@@ -335,16 +335,29 @@ function catalogueOptions(kind: "edge" | "level"): DriveOption[] {
     .map((s) => ({ label: s.label, choice: s.id }));
 }
 
-export function driveOptions(): DriveOption[] {
+/** driveOptions(), grouped for the panel's inline picker (deviceMenu.ts) —
+ *  each group gets its own small heading there. Same five groups, same
+ *  order and contents as driveOptions()'s own flat list — see that
+ *  function's doc comment for where each one comes from. */
+export interface DriveOptionGroup {
+  label: string;
+  options: DriveOption[];
+}
+
+export function driveOptionGroups(): DriveOptionGroup[] {
   const grid: DriveOption[] = [];
   for (let i = 1; i < BEAT_GRIDS.length; i++) grid.push({ label: beatGridLabel(i), choice: { source: "beat", grid: i } });
   return [
-    ...catalogueOptions("edge"),
-    ...grid,
-    ...catalogueOptions("level"),
-    { label: "Freq", choice: { source: "line" } },
-    { label: "Scene", choice: "scene" },
+    { label: "Hits", options: catalogueOptions("edge") },
+    { label: "Grid", options: grid },
+    { label: "Levels", options: catalogueOptions("level") },
+    { label: "Frequencies", options: [{ label: "Freq", choice: { source: "line" } }] },
+    { label: "Scene", options: [{ label: "Scene", choice: "scene" }] },
   ];
+}
+
+export function driveOptions(): DriveOption[] {
+  return driveOptionGroups().flatMap((g) => g.options);
 }
 
 /** Structural equality for two DriveChoice values — plain values compare by
