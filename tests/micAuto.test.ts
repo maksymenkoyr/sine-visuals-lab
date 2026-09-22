@@ -49,6 +49,16 @@ describe("isMicAuto / setMicAuto", () => {
     expect(isMicAuto(sceneId, members)).toBe(false);
   });
 
+  it("is true on a genuinely untouched scene — every member defaults to auto (the point of this whole change)", () => {
+    // AutoGain/the gate are device-wide, so restore their own real default
+    // here rather than trusting this describe block's beforeEach reset,
+    // which forces them off to isolate the other tests above.
+    setAutoGainAuto(true);
+    setSilenceGateAuto(true);
+    const freshScene = "mic-auto-fresh-scene";
+    expect(isMicAuto(freshScene, members)).toBe(true);
+  });
+
   it("is true only once every member is switched to auto, one at a time", () => {
     setAutoGainAuto(true);
     expect(isMicAuto(sceneId, members)).toBe(false);
@@ -79,6 +89,12 @@ describe("isMicAuto / setMicAuto", () => {
     setAutoEnabled(sceneId, getSensitivitySpec().key, true);
     setAutoEnabled(sceneId, getExpansionSpec().key, true);
     setAutoEnabled(sceneId, getSmoothingSpec().key, true);
+    // The pseudo-params default to auto for a scene that's never been
+    // touched at all (autoTune.ts's DEFAULT_AUTO_KEYS), so an untouched
+    // "some-other-scene" would read as mic-auto regardless of scoping —
+    // an explicit manual choice on one of its own rows is what actually
+    // proves sceneId's auto choices above didn't leak into it.
+    setAutoEnabled("some-other-scene", getSensitivitySpec().key, false);
     expect(isMicAuto(sceneId, members)).toBe(true);
     expect(isMicAuto("some-other-scene", members)).toBe(false);
   });
