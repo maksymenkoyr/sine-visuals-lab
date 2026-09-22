@@ -3,9 +3,10 @@ import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram
 import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import type { Scene, SceneContext } from "../scene.ts";
-import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
+import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { grainTextureSide } from "./chladni.ts";
 import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
+import { PASSTHROUGH_DRIVES } from "../drives.ts";
 
 // Physarum: an agent-based slime-mould transport network. Each agent senses
 // a chemical trail a short distance ahead — dead ahead and to each side —
@@ -415,8 +416,9 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    reads: ["feature.onset"],
     auto: { pulse: 0.25, attack: 0.2 },
+    // uBeatPulse directly (SIM_FRAG's surge term) — a plain Beat default.
+    drive: { default: "feature.onset" },
   },
   {
     key: "seed",
@@ -427,8 +429,12 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.3,
-    reads: ["feature.onset"],
     auto: { attack: 0.25, dynamics: 0.15 },
+    // The trigger is this scene's own beatSeeder (a *rise* in the decaying
+    // beat pulse, onset folded in as a bonus, its own refractory — see the
+    // file header and createBeatSeeder), not a plain onset edge, so the
+    // default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: a rise in the beat pulse (bonus on a raw onset)" },
   },
   {
     key: "reach",
@@ -439,8 +445,11 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    reads: ["anim.lowOnset"],
     auto: { density: 0.2 },
+    // Three signals across three channels (each group pulls toward its own
+    // uLow/uMid/uHigh), plus a bass-hit boost on the low group alone — see
+    // the DIFFUSE_FRAG loop — so the default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: each band's own level (bass boosted on a hit)" },
   },
   // --- Look ---
   {
@@ -485,13 +494,15 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.3,
-    reads: ["feature.onset"],
     // Same convention powder.ts and chladni.ts share for this control.
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
+    // uBeatPulse directly (COMPOSITE_FRAG) — a plain Beat default.
+    drive: { default: "feature.onset" },
   },
 ];
 
 const SETTINGS_UNIFORMS_GLSL = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+const DRIVE_UNIFORMS_GLSL = DRIVE_GLSL(SETTINGS);
 
 // Shared by every pass so the packing, the hashes, the species split and the
 // room mapping can't drift apart between them.
@@ -558,6 +569,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uTrailIn;
 uniform float uTrailSide;
 uniform float uDiffuseDt;
@@ -605,10 +617,10 @@ void main() {
     vec2 d = fract(fuv - uAttractorPos[i] + 0.5) - 0.5;
     float g = exp(-dot(d, d) / (2.0 * ATTRACTOR_SIGMA * ATTRACTOR_SIGMA));
     float level = i == 0 ? uLow : (i == 1 ? uMid : uHigh);
-    // Band pull's "reads" claims the low attractor pulses on a bass hit —
-    // this is what makes that literally true.
+    // Band pull's Scene default pulses the low attractor harder on a bass
+    // hit — this is what makes that literally true.
     float lowBoost = i == 0 ? (1.0 + LOW_PULSE_BOOST * uLowPulse) : 1.0;
-    trail[i] += level * uReach * lowBoost * g * uDiffuseDt;
+    trail[i] += reachDrive(level * lowBoost) * uReach * g * uDiffuseDt;
   }
 
   // Dither the write by up to half a quantisation step. One frame of decay
@@ -630,6 +642,7 @@ layout(location = 0) out vec4 outPos;
 layout(location = 1) out vec4 outDir;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uAgentPos;
 uniform sampler2D uAgentDir;
 uniform sampler2D uTrail;
@@ -700,7 +713,7 @@ void main() {
 
   float speedBase = mix(SPEED_MIN, SPEED_MAX, uSpeed) * scaleFactor
                    * (JITTER_SPEED_MIN + JITTER_SPEED_SPAN * jitter);
-  float surge = 1.0 + uBeatSurge * uBeatPulse * SURGE_GAIN;
+  float surge = 1.0 + uBeatSurge * beatSurgeDrive(uBeatPulse) * SURGE_GAIN;
   float speed = speedBase * surge;
   pos = fract(pos + vec2(cos(heading), sin(heading)) * speed * uSimDt);
 
@@ -726,6 +739,7 @@ const DEPOSIT_VERT = `#version 300 es
 precision highp float;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uAgentPos;
 uniform sampler2D uAgentDir;
 uniform float uAgentSide;
@@ -763,6 +777,7 @@ in vec3 vDepositColor;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 
 void main() {
   outColor = vec4(vDepositColor, 1.0);
@@ -775,6 +790,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uTrail;
 uniform float uTrailTexel;
 ${PALETTE_GLSL}
@@ -832,7 +848,7 @@ void main() {
   col *= mix(1.0, shade, uRelief);
 
   col *= GLOW_BASE + GLOW_SPAN * uGlow;
-  col *= 1.0 + uFlash * uBeatPulse * FLASH_GAIN;
+  col *= 1.0 + uFlash * flashDrive(uBeatPulse) * FLASH_GAIN;
 
   // Per-channel roll-off so a saturated overlap goes white rather than
   // shifting hue (powder.ts's Reinhard note).
@@ -886,6 +902,12 @@ function createPhysarumScene(): Scene {
   let trailSideCur = 0;
   let lastFrameTime: number | null = null;
   let beatSeeder: BeatSeeder | null = null;
+  // How many times a reseed has actually fired — kept separate from
+  // beatSeeder.epoch (its own beat-rise bookkeeping) so which slice of
+  // agents gets picked (uSeedEpoch, SIM_FRAG) rotates on the "seed"
+  // setting's own drive choice rather than always on beatSeeder's internal
+  // schedule — see that setting's own comment in SETTINGS.
+  let seedEpoch = 0;
   const bandsBuf = new Float32Array(NUM_BANDS);
   const attractorBuf = new Float32Array(GROUP_COUNT * 2);
 
@@ -1005,9 +1027,10 @@ function createPhysarumScene(): Scene {
       agentRead = 0;
       lastFrameTime = null;
       beatSeeder = createBeatSeeder();
+      seedEpoch = 0;
     },
 
-    render(ctx, frame, viewport, palette, anim) {
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!diffuseProg || !simProg || !depositProg || !compositeProg) return;
       if (!quadVao || !depositVao || !beatSeeder) return;
       const { gl } = ctx;
@@ -1018,7 +1041,15 @@ function createPhysarumScene(): Scene {
       const dt = lastFrameTime === null ? 1 / 60 : Math.max(0, Math.min(0.05, frame.time - lastFrameTime));
       lastFrameTime = frame.time;
 
-      const seedFresh = beatSeeder.advance(dt, anim.beatPulse, anim.onset);
+      // beatSeeder.advance() is this setting's Scene default (see its own
+      // comment in SETTINGS) — always called so its internal refractory
+      // clock keeps running regardless of the setting's actual drive
+      // choice. drives.fired() is what actually gates the reseed below;
+      // seedEpoch (not beatSeeder.epoch) is what rotates which slice of
+      // agents it picks, so a non-default choice still varies the slice
+      // across repeated fires.
+      const seedFresh = drives.fired("seed", beatSeeder.advance(dt, anim.beatPulse, anim.onset));
+      if (seedFresh) seedEpoch++;
       attractorPositions(anim.timeSec, attractorBuf);
 
       gl.disable(gl.BLEND);
@@ -1028,7 +1059,7 @@ function createPhysarumScene(): Scene {
       gl.bindFramebuffer(gl.FRAMEBUFFER, trailFbo[trailWrite]);
       gl.viewport(0, 0, trailSideCur, trailSideCur);
       diffuseProg.use();
-      uploadCommonUniforms(diffuseProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(diffuseProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       diffuseProg.setF("uTrailSide", trailSideCur);
       diffuseProg.setF("uDiffuseDt", dt);
       diffuseProg.setF("uNoiseSeed", Math.random() * 100);
@@ -1046,9 +1077,9 @@ function createPhysarumScene(): Scene {
       gl.bindFramebuffer(gl.FRAMEBUFFER, agentFbo[agentWrite]);
       gl.viewport(0, 0, agentSide, agentSide);
       simProg.use();
-      uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       simProg.setF("uSimDt", dt);
-      simProg.setF("uSeedEpoch", beatSeeder.epoch);
+      simProg.setF("uSeedEpoch", seedEpoch);
       simProg.setF("uSeedFresh", seedFresh ? 1 : 0);
       simProg.setF("uNoiseSeed", Math.random() * 100);
       gl.activeTexture(gl.TEXTURE0);
@@ -1071,7 +1102,7 @@ function createPhysarumScene(): Scene {
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE);
       depositProg.use();
-      uploadCommonUniforms(depositProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(depositProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       depositProg.setF("uAgentSide", agentSide);
       depositProg.setF("uDepositDt", dt);
       gl.activeTexture(gl.TEXTURE0);
@@ -1090,7 +1121,7 @@ function createPhysarumScene(): Scene {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
       compositeProg.use();
-      uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       compositeProg.setF("uTrailTexel", 1 / trailSideCur);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
@@ -1136,6 +1167,7 @@ function createPhysarumScene(): Scene {
       depositVao = null;
       lastFrameTime = null;
       beatSeeder = null;
+      seedEpoch = 0;
       trailSideCur = 0;
     },
   };
