@@ -1,5 +1,4 @@
 import { NUM_BANDS } from "./types.ts";
-import { createPerSceneSetting } from "./sensitivity.ts";
 
 /**
  * The sensitivity line: a drawn shape over the band ladder — one height per
@@ -9,7 +8,7 @@ import { createPerSceneSetting } from "./sensitivity.ts";
  * to the very top (1) has no headroom and is excluded entirely — however
  * loud it gets, it can never drive anything. A band drawn to the bottom (0)
  * is fully in: its whole reading counts. The default is the top for every
- * band — a scene that's never been drawn on listens to nothing, and the
+ * band — a setting that's never been drawn on listens to nothing, and the
  * user draws the line *down* onto the range they want, so an undrawn band
  * can neither dilute the drive nor sneak signal into it (the first draft
  * defaulted to the bottom and both happened at once).
@@ -27,22 +26,16 @@ import { createPerSceneSetting } from "./sensitivity.ts";
  * `strength` scales the whole ratio and can push it all the way to the 1
  * ceiling — the "include maximum" half of the overall-strength slider.
  *
- * Storage is per-scene, same cache-over-localStorage pattern as
- * bandGains.ts/silenceGate.ts: the cache is the source of truth for get/set
- * within a session, seeded once from localStorage, so behavior stays
- * correct even where localStorage is unavailable (node test env, Safari
- * private mode). The line itself lives under one key ("vibe.bandLine",
- * `{ [sceneId]: number[] }`, sanitized on load — a missing/wrong-length/
- * non-numeric entry falls back to the default flat-0 line rather than
- * partially trusting it); the overall-strength dial is a plain
- * createPerSceneSetting float, the same shape sensitivity.ts's own rows use.
- *
- * UI is src/ui/bandLineEditor.ts, drawn over a second spectrum strip inside
- * deviceMenu.ts's Line card. Reaches the render path via
- * src/render/animClock.ts's `line` param (AnimFrame.lineDrive/lineExcess)
- * and, from there, the global `uLineDrive` uniform in sceneCommon.ts — see
- * that file's header for how a scene opts in. First consumer: Caustics'
- * `sparkleLine` setting.
+ * This module holds only the pure drive math now — sanitizeLine (below) and
+ * the shared height/strength constants. The line is a drive source
+ * (`{ source: "line" }`, one of `SceneSetting.drive`'s choices — see
+ * src/render/drives.ts), so its storage lives in src/render/driveStore.ts,
+ * keyed per *setting* (not per scene: two drive settings on the same scene
+ * each draw their own line), and its peak-hold release lives in drives.ts
+ * next to the engine that advances it every tick. UI is
+ * src/ui/bandLineEditor.ts, drawn over the Bands card's own spectrum strip
+ * (put into line mode for whichever setting is being drawn) rather than a
+ * second strip of its own.
  */
 
 export const LINE_STRENGTH_MIN = 0.25;
@@ -95,14 +88,16 @@ export function bandLineDrive(
   return out;
 }
 
-// ---- Store: the drawn line, per scene ------------------------------------
-
-const STORAGE_KEY_LINE = "vibe.bandLine";
-
 /** Where an undrawn band sits: the top, excluded — see the file header. */
 export const LINE_HEIGHT_DEFAULT = 1;
 
-function sanitizeLine(raw: unknown): Float32Array | null {
+/** `raw` sanitized into a fresh NUM_BANDS-length line, or null if it isn't
+ *  even the right shape (wrong length, not an array at all) — a
+ *  missing/wrong-length entry falls back to the caller's own default
+ *  (driveStore.ts's stored-line load) rather than partially trusting it.
+ *  A present-but-non-numeric entry sanitizes in place to LINE_HEIGHT_DEFAULT
+ *  per band instead of failing the whole line. */
+export function sanitizeLine(raw: unknown): Float32Array | null {
   if (!Array.isArray(raw) || raw.length !== NUM_BANDS) return null;
   const out = new Float32Array(NUM_BANDS);
   for (let b = 0; b < NUM_BANDS; b++) {
@@ -112,94 +107,7 @@ function sanitizeLine(raw: unknown): Float32Array | null {
   return out;
 }
 
-// In-memory cache is the source of truth for get/set within a session,
-// seeded once from localStorage below — same reasoning as
-// sensitivity.ts's createPerSceneSetting. Holds already-sanitized arrays
-// (not raw JSON) so getBandLine never has to re-parse or re-clamp on the
-// hot per-frame path.
-const lineCache = new Map<string, Float32Array>();
-
-function loadLineCache(): void {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_LINE);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return;
-    for (const sceneId of Object.keys(parsed)) {
-      const sanitized = sanitizeLine(parsed[sceneId]);
-      if (sanitized) lineCache.set(sceneId, sanitized);
-    }
-  } catch {
-    // Not fatal — every scene just starts at the default flat-0 line.
-  }
-}
-loadLineCache();
-
-function persistLine(): void {
-  try {
-    const obj: Record<string, number[]> = {};
-    for (const [sceneId, heights] of lineCache) obj[sceneId] = Array.from(heights);
-    localStorage.setItem(STORAGE_KEY_LINE, JSON.stringify(obj));
-  } catch {
-    // Not fatal — the line just won't persist across reloads.
-  }
-}
-
-const scratchLine = new Float32Array(NUM_BANDS);
-
-/** This scene's drawn line, written into `out` (default: a shared scratch —
- *  copy if you need to hold onto it). A scene that's never been drawn on,
- *  or whose stored entry didn't sanitize (see sanitizeLine), reads as flat 0. */
-export function getBandLine(sceneId: string, out: Float32Array = scratchLine): Float32Array {
-  const stored = lineCache.get(sceneId);
-  if (stored) out.set(stored);
-  else out.fill(LINE_HEIGHT_DEFAULT);
-  return out;
-}
-
-export function setBandLineBand(sceneId: string, band: number, height: number): void {
-  if (!Number.isInteger(band) || band < 0 || band >= NUM_BANDS) return;
-  let heights = lineCache.get(sceneId);
-  if (!heights) {
-    heights = new Float32Array(NUM_BANDS).fill(LINE_HEIGHT_DEFAULT);
-    lineCache.set(sceneId, heights);
-  }
-  heights[band] = Number.isFinite(height) ? clamp01(height) : LINE_HEIGHT_DEFAULT;
-  persistLine();
-}
-
-export function setBandLine(sceneId: string, heights: ArrayLike<number>): void {
-  const next = new Float32Array(NUM_BANDS);
-  for (let b = 0; b < NUM_BANDS; b++) {
-    const v = heights[b];
-    next[b] = Number.isFinite(v) ? clamp01(v) : LINE_HEIGHT_DEFAULT;
-  }
-  lineCache.set(sceneId, next);
-  persistLine();
-}
-
-/** Back to the undrawn default — the Line card's Reset chip (alongside
- *  resetBandLineStrength below). */
-export function resetBandLine(sceneId: string): void {
-  lineCache.delete(sceneId);
-  persistLine();
-}
-
 export function isDefaultLine(line: ArrayLike<number>): boolean {
   for (let b = 0; b < NUM_BANDS; b++) if (line[b] !== LINE_HEIGHT_DEFAULT) return false;
   return true;
-}
-
-// ---- Store: overall strength, per scene -----------------------------------
-
-const lineStrengthStore = createPerSceneSetting(
-  "vibe.bandLineStrength",
-  LINE_STRENGTH_MIN,
-  LINE_STRENGTH_MAX,
-  LINE_STRENGTH_DEFAULT,
-);
-export const getBandLineStrength = lineStrengthStore.get;
-export const setBandLineStrength = lineStrengthStore.set;
-export function resetBandLineStrength(sceneId: string): void {
-  lineStrengthStore.set(sceneId, LINE_STRENGTH_DEFAULT);
 }
