@@ -152,6 +152,9 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     advanced: true,
     auto: { brightness: -0.25, attack: 0.2 },
+    // clocks.lowPulse directly (choreo.ts's mulBoneEuler jaw term) — a
+    // plain Bass hit default.
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "skin",
@@ -213,6 +216,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.4,
     auto: { attack: 0.3, pulse: 0.15, tempo: -0.2 },
+    // Two different signals at two different sites — dolly/tilt read the
+    // beat, roll reads the bass — so the default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: beat (dolly/tilt) and bass hit (roll)" },
   },
 ];
 
@@ -381,7 +387,7 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
     const bars = createBarCounter();
     const clipPose = createPose();
 
-    return (frame, anim, getSetting) => {
+    return (frame, anim, getSetting, drives) => {
       clocks.beatPhase = anim.beatPhase;
       clocks.barPhase = anim.barPhase;
       clocks.tempoLock = anim.tempoLock;
@@ -399,6 +405,9 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
         bob: getSetting("bob"),
         groove: getSetting("groove"),
         jaw: getSetting("jaw"),
+        jawDrive: drives.value("jaw", anim.lowPulse),
+        bobBeatDrive: drives.value("bob", anim.beatPulse),
+        bobLowDrive: drives.value("bob", anim.lowPulse),
         family: STYLES[Math.round(getSetting("style"))]?.family ?? null,
         blend: BLENDS[Math.round(getSetting("blend"))]?.mode ?? "crossfade",
       });

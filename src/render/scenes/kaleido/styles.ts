@@ -119,7 +119,7 @@ const familyGlsl = FAMILIES.map((f, j) => {
       ${env}
       float amp = ${f.amp.toFixed(3)}
         * (0.5 + 0.5 * mix(1.0, sampleBands(x), uSpectrum))
-        * (1.0 + uBass * uLow * ${f.bassGain.toFixed(2)})
+        * (1.0 + uBass * bassDrive(uLow) * ${f.bassGain.toFixed(2)})
         * outer
         * ${f.mult === 2 ? "core2" : "core"};
       F += amp * env * shape;
@@ -283,7 +283,7 @@ vec3 stylePortal(vec2 c, float cell, float r, float a, float n, float pxSize, fl
   // window along the ring, sharpened toward a point by the bass. Lace rings
   // use a squat, rounder lobe: a row of beads.
   float m = mix(0.55 + 0.4 * sin(uMorphPos * 0.4 + k * 1.3), 0.1, lace);
-  float sharp = 1.6 + 1.5 * uBass * uLow;
+  float sharp = 1.6 + 1.5 * uBass * bassDrive(uLow);
   float win = 1.0 - pow(abs(fr * 2.0 - 1.0), sharp);
   float lobe = petal(af, m) * mix(win, win * win, lace);
   float wl = fwidth(lobe) + 1e-4;
@@ -394,7 +394,7 @@ vec3 stylePrism(vec2 c, float cell, float r, float a, float n, float pxSize, flo
   // Log-spiral stripes: a line in (log r, angle) is scale-free, so the
   // zoom slides them outward without end. Ring density sets how many.
   float dens = pow(2.0, (uRings - 0.5) * ${PRISM_DENSITY_OCTAVES.toFixed(2)});
-  float bassK = 1.0 + 0.6 * uBass * uLow;
+  float bassK = 1.0 + 0.6 * uBass * bassDrive(uLow);
   float coreFade = smoothstep(0.0, ${PRISM_CORE_FADE.toFixed(2)} * cell, r);
   float field = (lr - z * 0.6931) * ${PRISM_STRIPE_R.toFixed(2)} * dens
     + af * ${PRISM_STRIPE_A.toFixed(2)} * dens * (1.0 + uTwist * ${PRISM_TWIST.toFixed(2)}) * coreFade
@@ -501,7 +501,7 @@ vec3 styleBurst(vec2 c, float cell, float r, float a, float n, float pxSize, flo
   float spike = pow(1.0 - af, 2.0);
   float jag = ${BURST_JAG.toFixed(2)} * (vnoise(vec2(af * 6.0, uMorphPos * 0.2 + 3.0)) - 0.5);
   float coreR = ${BURST_CORE.toFixed(3)} * cell * (1.0 + ${BURST_STAR.toFixed(2)} * spike + jag)
-    * (1.0 + 0.4 * uBass * uLow + 0.35 * uBeatSwell * uPulse);
+    * (1.0 + 0.4 * uBass * bassDrive(uLow) + 0.35 * uBeatSwell * uPulse);
   float coreEdge = fwidth(r) * 1.5;
   float outside = smoothstep(coreR - coreEdge, coreR + coreEdge, r);
   // Bright halo just outside the core, the shards' light source.

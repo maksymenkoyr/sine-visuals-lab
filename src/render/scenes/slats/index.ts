@@ -73,6 +73,7 @@ import { NUM_BANDS } from "../../../audio/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
 import type { Scene, SceneContext } from "../../scene.ts";
 import { uploadCommonUniforms } from "../../sceneCommon.ts";
+import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 import { SETTINGS, SLAT_VERT, SLAT_FRAG, BLUR_FRAG, COMPOSITE_FRAG, BLUR_STRIDE } from "./glsl.ts";
@@ -324,7 +325,7 @@ export const slatsScene: Scene = (() => {
       onsetEnv.value = 0;
     },
 
-    render(ctx, frame, viewport, palette, anim) {
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!slatProg || !blurProg || !compositeProg || !slatVao || !quadVao || !bufA || !bufB) return;
       const { gl } = ctx;
 
@@ -334,7 +335,7 @@ export const slatsScene: Scene = (() => {
       const dt = lastTime === null ? 1 / 60 : Math.max(0, Math.min(0.25, anim.timeSec - lastTime));
       lastTime = anim.timeSec;
 
-      advanceOnsetEnvelope(onsetEnv, dt, anim.onset);
+      advanceOnsetEnvelope(onsetEnv, dt, drives.fired("pulse", anim.onset));
 
       const morphSeconds = resolveSceneSetting(ID, settingFor("morph"));
       const reshuffleProb = resolveSceneSetting(ID, settingFor("reshuffle"));
@@ -357,7 +358,7 @@ export const slatsScene: Scene = (() => {
 
       const drawSlats = (prog: GLProgram) => {
         prog.use();
-        uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+        uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
         prog.setF("uMorphMix", morphMix);
         prog.setF("uOnsetEnv", onsetEnv.value);
         gl.bindVertexArray(slatVao);
@@ -396,7 +397,7 @@ export const slatsScene: Scene = (() => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
         compositeProg.use();
-        uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+        uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, fullTex);
         gl.activeTexture(gl.TEXTURE1);

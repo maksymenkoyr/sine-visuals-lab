@@ -1,7 +1,6 @@
-import { settingUniformName, COMMON_UNIFORMS_GLSL } from "../../sceneCommon.ts";
+import { settingUniformName, COMMON_UNIFORMS_GLSL, DRIVE_GLSL } from "../../sceneCommon.ts";
 import { PALETTE_GLSL } from "../../palette.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
-import type { SignalLink } from "../../signals.ts";
 
 /**
  * Slats' settings table and shader sources. See index.ts's header for the
@@ -33,6 +32,8 @@ export const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.8,
     auto: { loudness: 0.3, dynamics: 0.2 },
+    // uEnergy directly (heightScale, SLAT_VERT) — a plain All level default.
+    drive: { default: "anim.energy" },
   },
   {
     key: "slabWidth",
@@ -77,7 +78,9 @@ export const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.35,
     auto: { pulse: 0.4, attack: 0.2 },
-    reads: ["feature.onset"] satisfies readonly SignalLink[],
+    // anim.onset directly (advanceOnsetEnvelope's trigger, index.ts) — a
+    // plain Beat default.
+    drive: { default: "feature.onset" },
   },
   {
     key: "flutter",
@@ -124,7 +127,8 @@ export const SETTINGS: SceneSetting[] = [
     default: 0.15,
     advanced: true,
     auto: { pulse: 0.2 },
-    reads: ["anim.lowOnset"] satisfies readonly SignalLink[],
+    // uLowPulse directly (SLAT_FRAG's alpha dip) — a plain Bass hit default.
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "opacity",
@@ -203,6 +207,7 @@ export const SETTINGS: SceneSetting[] = [
 ];
 
 export const settingsUniformsGlsl = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+export const driveUniformsGlsl = DRIVE_GLSL(SETTINGS);
 
 // Camera/geometry constants. See index.ts's header for the reasoning behind
 // a near-flat size law (a large BASE_DEPTH relative to LAYER_GAP/CURVE_DEPTH)
@@ -276,6 +281,7 @@ layout(location = 2) in vec4 aSlatB0;
 layout(location = 3) in vec4 aSlatB1;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 uniform float uMorphMix; // A->B crossfade progress, eased — see file header for why not uMorph
 uniform float uOnsetEnv; // layout.ts's OnsetEnvelope, fast-decay beat kick
 out float vAlpha;
@@ -314,7 +320,7 @@ void main() {
   float flutterN = valueNoise1(flutterPhase) * 2.0 - 1.0;
   float centreN = valueNoise1(flutterPhase * 0.63 + 31.7) * 2.0 - 1.0;
 
-  float heightScale = uSlabHeight * (HEIGHT_SCALE_ENERGY_BASE + HEIGHT_SCALE_ENERGY_GAIN * uEnergy)
+  float heightScale = uSlabHeight * (HEIGHT_SCALE_ENERGY_BASE + HEIGHT_SCALE_ENERGY_GAIN * slabHeightDrive(uEnergy))
     * (1.0 + uPulse * uOnsetEnv);
   float hairN = valueNoise1(flutterPhase * 1.7 + 77.3);
   float hair = hairExtra * uHair * (1.0 - uFlutter * HAIR_FLUTTER_GAIN * hairN);
@@ -358,6 +364,7 @@ precision highp float;
 in float vAlpha;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${PALETTE_GLSL}
 uniform float uOnsetEnv;
 out vec4 outColor;
@@ -370,7 +377,7 @@ void main() {
   vec3 tinted = mix(vec3(1.0), palette(TINT_PALETTE_T, uPalA, uPalB, uPalC, uPalD), uTint);
   float a = vAlpha * (uOpacity / OPACITY_DEFAULT);
   a *= 1.0 + ONSET_ALPHA_PUNCH * uOnsetEnv;
-  a *= 1.0 - uKickDip * uLowPulse;
+  a *= 1.0 - uKickDip * kickDipDrive(uLowPulse);
   a = clamp(a, 0.0, 1.0);
   outColor = vec4(tinted * a, a);
 }
@@ -406,6 +413,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 uniform sampler2D uSharpTex;
 uniform sampler2D uBlurTex;
 

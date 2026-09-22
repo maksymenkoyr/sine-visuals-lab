@@ -4,6 +4,7 @@ import type { SceneSetting } from "../../sceneSettings.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import type { Scene, SceneContext } from "../../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, SAMPLE_BANDS_GLSL, settingUniformName, uploadCommonUniforms } from "../../sceneCommon.ts";
+import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { NUM_BANDS } from "../../../audio/types.ts";
 import { MARCH_FRAG_BODY, BLUR_FRAG, COMPOSITE_BODY } from "./glsl.ts";
 import { advanceCrystal, createCrystalState, type CrystalState } from "./driver.ts";
@@ -129,7 +130,10 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { pulse: 0.3, attack: 0.2 },
-    reads: ["feature.onset"],
+    // anim.onset directly (advanceCrystal's zoomVel/swell impulses) — a
+    // plain Beat default. beatCount and the light layers still run off the
+    // raw onset regardless of this choice — see CrystalInputs.pulseOnset.
+    drive: { default: "feature.onset" },
   },
   {
     key: "flare",
@@ -375,7 +379,7 @@ function createCrystalSceneImpl(): Scene {
       dbH = 0;
     },
 
-    render(ctx, frame, viewport, palette, anim) {
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!marchProg || !blurProg || !compositeProg || !quadVao || !state) return;
       const { gl } = ctx;
       ensureTargets(gl);
@@ -392,6 +396,7 @@ function createCrystalSceneImpl(): Scene {
           tempoLock: anim.tempoLock,
           low: anim.low,
           sectionIntensity: anim.sectionIntensity,
+          pulseOnset: drives.fired("pulse", anim.onset),
         },
         {
           zoom: resolveSceneSetting(ID, settingFor("zoom")),
@@ -415,7 +420,7 @@ function createCrystalSceneImpl(): Scene {
       gl.bindFramebuffer(gl.FRAMEBUFFER, sharpFbo);
       gl.viewport(0, 0, sharpW, sharpH);
       marchProg.use();
-      uploadCommonUniforms(marchProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(marchProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       marchProg.setF("uLogZoom", out.logZoom);
       marchProg.setF("uPanX", out.pan[0]);
       marchProg.setF("uPanY", out.pan[1]);
@@ -467,7 +472,7 @@ function createCrystalSceneImpl(): Scene {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
       compositeProg.use();
-      uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       // Under the ice light the picture defocuses: the sharp layer gives way
       // to the blurred ones (the reference's bright look has no hard line).
       const soft = useBloom ? Math.min(1, Math.max(0, out.blobs)) : 0;
