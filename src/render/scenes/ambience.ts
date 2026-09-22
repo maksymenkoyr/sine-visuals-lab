@@ -2,10 +2,10 @@ import { NUM_BANDS } from "../../audio/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
-import type { SignalLink } from "../signals.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
-import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, SAMPLE_BANDS_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
+import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, SAMPLE_BANDS_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
+import { PASSTHROUGH_DRIVES } from "../drives.ts";
 
 // Ambience: an homage to the visualizers that shipped with the old Windows
 // Media Player — one hot colour on a near-black ground, everything a soft,
@@ -628,6 +628,10 @@ const SETTINGS: SceneSetting[] = [
     default: 1,
     // Dynamic material rolls harder; bright mixes stay a little calmer.
     auto: { dynamics: 0.3, brightness: -0.15 },
+    // Two signals across two ripple terms (bass, mid), plus a non-audio
+    // noise roll — no single catalogue pick reproduces the mix, so the
+    // default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: bass + mid ripple terms" },
   },
   {
     key: "waveSpeed",
@@ -663,7 +667,10 @@ const SETTINGS: SceneSetting[] = [
     default: 1,
     // Punchy, transient-heavy material gets bigger blobs.
     auto: { attack: 0.3, pulse: 0.2 },
-    reads: ["anim.lowOnset", "feature.onset", "anim.dropOnset"] satisfies readonly SignalLink[],
+    // Spawns a swell on a bass hit OR a beat hit, unconditionally (render())
+    // — no single catalogue source covers that union, so the default is
+    // Scene. A drop's own burst is unconditional, independent of this choice.
+    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit" },
   },
   {
     key: "swellSpeed",
@@ -773,6 +780,7 @@ function settingFor(key: string): SceneSetting {
 }
 
 const settingsUniformsGlsl = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+const driveUniformsGlsl = DRIVE_GLSL(SETTINGS);
 
 // Shared by every program: the room aspect, the hot colour and a small
 // hash/value-noise family of this scene's own. Requires COMMON_UNIFORMS_GLSL
@@ -832,6 +840,7 @@ precision highp float;
 in vec2 vUv;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
 ${AMBIENCE_GLSL}
@@ -850,6 +859,7 @@ const DOT_VERT = `#version 300 es
 precision highp float;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${PALETTE_GLSL}
 ${SAMPLE_BANDS_GLSL}
 ${AMBIENCE_GLSL}
@@ -891,7 +901,7 @@ vec3 lookTarget() { return vec3(A[4], 0.0, A[5]); }
 // roll, and the pose's curvature (bowl / ridge / saddle).
 float sheetHeight(float u, float v) {
   float t = A[${ANIM.FLOW}];
-  float h = uWaveHeight * S * 0.16 * (
+  float h = uWaveHeight * S * 0.16 * waveHeightDrive(
       (0.4 + 0.9 * uLow) * sin(u * 2.4 + t * 1.3)
     + (0.3 + 0.7 * uMid) * sin(v * 3.1 - t * 1.1 + u * 0.7) * 0.8
     + 1.2 * (vnoise(vec2(u * 1.3 + t * 0.15, v * 1.3 - t * 0.11)) - 0.5));
@@ -1106,6 +1116,7 @@ in float vAa;
 in float vHot;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${PALETTE_GLSL}
 ${AMBIENCE_GLSL}
 out vec4 outColor;
@@ -1176,7 +1187,7 @@ export const ambienceScene: Scene = (() => {
       dimsFor = -1;
     },
 
-    render(ctx, frame, viewport, palette, anim) {
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!bgProg || !dotProg || !quadVao || !emptyVao || !pool || !choreo) return;
       const { gl } = ctx;
 
@@ -1199,7 +1210,7 @@ export const ambienceScene: Scene = (() => {
       // A hit fires a swell; a section drop fires a burst.
       if (anim.dropOnset) {
         for (let n = 0; n < 3; n++) pool.trigger(1, cols, rows, true);
-      } else if (anim.lowOnset || anim.onset) {
+      } else if (drives.fired("swell", anim.lowOnset || anim.onset)) {
         pool.trigger(0.7 + 0.3 * anim.low, cols, rows);
       }
       pool.tick(dt, resolveSceneSetting(ID, settingFor("swellSpeed")));
@@ -1225,7 +1236,7 @@ export const ambienceScene: Scene = (() => {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
       bgProg.use();
-      uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       drawFullscreenQuad(gl, quadVao);
 
       // Premultiplied "over": opaque cores union, skirts add (see file header).
@@ -1233,7 +1244,7 @@ export const ambienceScene: Scene = (() => {
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.bindVertexArray(emptyVao);
       dotProg.use();
-      uploadCommonUniforms(dotProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(dotProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       dotProg.setV2("uGridDims", cols, rows);
       dotProg.setV3v("uDims3", dims3);
       dotProg.setV4("uDims4", dims4[0], dims4[1], dims4[2], dims4[3]);
