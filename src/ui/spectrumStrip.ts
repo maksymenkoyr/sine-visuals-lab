@@ -18,10 +18,13 @@ import { AUTO_SKY, BANDS_AMBER, FADER_OFF, FONT_MONO, STRIP_HIGH, STRIP_LOW, STR
  * Drawing only — the faders' pointer/keyboard handling and readouts live in
  * src/ui/bandFaders.ts, which owns this canvas and tells it what to draw
  * via setFaders/setFocused. This split keeps the canvas free of DOM
- * concerns and the interaction free of pixel math. A second consumer with no
- * faders of its own (src/ui/bandLineEditor.ts's Line card strip) calls
- * setShowFaders(false) so this instance draws bars/axis/centroid only, with
- * its own overlay canvas taking the rail's place.
+ * concerns and the interaction free of pixel math. There's only ever one
+ * instance of this strip mounted (the Bands card's own, inside
+ * bandFaders.el) — a drive setting parked on Frequencies
+ * (src/render/drives.ts) puts *that same* strip into line-drawing mode via
+ * setShowFaders(false), with src/ui/bandLineEditor.ts's overlay canvas
+ * appended on top of it taking the rail's place, rather than mounting a
+ * second strip of its own.
  *
  * Feeds, all copied into this component's own buffers on arrival (callers
  * reuse scratch arrays across frames):
@@ -65,14 +68,14 @@ export interface SpectrumStrip {
   setShowRaw(on: boolean): void;
   showRaw(): boolean;
   /** Whether the fader rail/knobs draw at all — true (default, today's
-   *  behavior) for the Bands card's own strip; the Line card's strip
-   *  (bandLineEditor.ts) turns this off, since it has no faders of its own
-   *  and its overlay draws a different rail (the sensitivity line) in the
-   *  same space a fader's knob would otherwise sit. Does not affect
-   *  setFaders/setFocused — a caller that never calls those already gets
-   *  the same visual effect as this being false, since the default gains
-   *  (all 1×) draw every knob dead-center, but a Line-card-style consumer
-   *  shouldn't have to reason about that default to know knobs won't show. */
+   *  behavior) normally; deviceMenu.ts turns this off while a drive setting
+   *  is parked on Frequencies, since bandLineEditor.ts's overlay draws a
+   *  different rail (the sensitivity line) in the same space a fader's knob
+   *  would otherwise sit. Does not affect setFaders/setFocused — a caller
+   *  that never calls those already gets the same visual effect as this
+   *  being false, since the default gains (all 1×) draw every knob
+   *  dead-center, but line-drawing mode shouldn't have to reason about that
+   *  default to know knobs won't show. */
   setShowFaders(on: boolean): void;
   /** The fader bank's current gains — drives the knobs and which bars get a
    *  ghost. Copied. */

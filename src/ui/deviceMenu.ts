@@ -33,6 +33,7 @@ import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { LINE_STRENGTH_DEFAULT } from "../audio/bandLine.ts";
+import { driveOptions, sameDriveChoice, type DriveChoice, type SceneDrives } from "../render/drives.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
 import { createAudioMeters } from "./audioMeters.ts";
@@ -86,15 +87,18 @@ import {
  *
  * Two glass columns anchored top-right over the live scene: the Bands card
  * (scene name, audio source, and the live bars with the band faders drawn
- * over them — see src/ui/bandFaders.ts), then the Line card (a second strip
- * you draw a sensitivity threshold onto — src/ui/bandLineEditor.ts, backed
- * by src/audio/bandLine.ts), beside the controls column, whose cards run
- * Auto strength (with the Auto master block welded to it) → Input (its own
- * header carries a second Auto button, next to Reset — see
+ * over them — see src/ui/bandFaders.ts) beside the controls column, whose
+ * cards run Auto strength (with the Auto master block welded to it) → Input
+ * (its own header carries a second Auto button, next to Reset — see
  * src/audio/micAuto.ts for how it differs from the master block) → Scene →
- * Palette → a footer strip. Under the Bands and Line cards, the read-only
- * meters (audioMeters.ts) scroll in their own strip. Below the breakpoint
- * in controlsTheme.ts everything stacks into one scrolling column with the
+ * Palette → a footer strip. A drive setting's source picker (a row under its
+ * own slider, appendDriveRow — see src/render/drives.ts) can put the Bands
+ * card's strip into line-drawing mode for that setting instead of faders —
+ * src/ui/bandLineEditor.ts's overlay, backed by src/audio/bandLine.ts —
+ * with a "Drawing: <label>" header and Done chip taking the strip's normal
+ * status line's place. Under the Bands card, the read-only meters
+ * (audioMeters.ts) scroll in their own strip. Below the breakpoint in
+ * controlsTheme.ts everything stacks into one scrolling column with the
  * meters last, so the knobs stay in reach. It's corner-docked, not a modal:
  * the whole point is to watch the scene react while you tune it, so it
  * also stays open across palette taps.
@@ -237,22 +241,23 @@ export interface DeviceMenuDeps {
   getBandGain: (sceneId: string, fader: number) => number;
   onBandGainChange: (sceneId: string, fader: number, value: number) => void;
   onBandGainsReset: (sceneId: string) => void;
-  /** The Line card's drawn sensitivity line and its Strength dial, per scene
-   *  — see src/audio/bandLine.ts. Named to match that module's own exports
-   *  1:1 rather than the onXChange/onXReset convention above, since the Line
-   *  card (src/ui/bandLineEditor.ts) calls straight through them. */
-  getBandLine: (sceneId: string) => Float32Array;
-  setBandLineBand: (sceneId: string, band: number, height: number) => void;
-  resetBandLine: (sceneId: string) => void;
-  getBandLineStrength: (sceneId: string) => number;
-  setBandLineStrength: (sceneId: string, value: number) => void;
+  /** A drive setting's source choice, and — while it's parked on
+   *  Frequencies — the drawn line and Strength dial behind it (see
+   *  src/render/drives.ts and src/render/driveStore.ts). Named to match
+   *  driveStore.ts's own exports 1:1, keyed per (scene, setting) rather
+   *  than per scene: two drive settings on the same scene each draw their
+   *  own line. */
+  getDriveChoice: (sceneId: string, spec: SceneSetting) => DriveChoice;
+  onDriveChoiceChange: (sceneId: string, spec: SceneSetting, choice: DriveChoice) => void;
+  getDriveLine: (sceneId: string, spec: SceneSetting) => Float32Array;
+  setDriveLineBand: (sceneId: string, spec: SceneSetting, band: number, height: number) => void;
+  setDriveLine: (sceneId: string, spec: SceneSetting, heights: ArrayLike<number>) => void;
+  resetDriveLine: (sceneId: string, spec: SceneSetting) => void;
+  getDriveLineStrength: (sceneId: string, spec: SceneSetting) => number;
+  setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
   /** The Loudness card's Reset chip — starts the integrated LUFS reading
    *  over (src/audio/lufsAnalyser.ts). */
   onLufsReset: () => void;
-  /** Per-scene Beat grid choice (src/audio/beatGrid.ts) for the Rhythm
-   *  card's row — see audioMeters.ts's AudioMetersDeps.beatGrid. */
-  getBeatGrid: (sceneId: string) => number;
-  onBeatGridChange: (sceneId: string, value: number) => void;
   /** Auto-resolved live value for a row currently on auto — see autoTune.ts. */
   resolveSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   resolveSensitivityValue: (sceneId: string) => number;
@@ -366,7 +371,13 @@ export interface DeviceMenu {
    *  FeatureExtractor.onsetDiag, null on the same paths as `fixedEnergy`.
    *  `gate` is this device's own SilenceGateReading (src/audio/silenceGate.ts)
    *  — app.ts's `lastGate` — null on the same paths as `fixedEnergy`, for the
-   *  Gate card. */
+   *  Gate card. `drives` is this tick's SceneDrives (src/render/drives.ts),
+   *  off the same *un-latched* AnimFrame as `anim` — null on the same paths.
+   *  A drive row's live pill reads its uniformPair() (the same number a
+   *  scene's u<Key>Drive uniform gets), and the Frequencies overlay reads
+   *  its excess(); neither ever calls fired(), so polling it here every
+   *  tick can't steal a grid setting's pending edge out from under the
+   *  scene that's about to render it. */
   update(
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
@@ -379,6 +390,7 @@ export interface DeviceMenu {
     lufs: LufsReading | null,
     beatDiag: OnsetDiag | null,
     gate: SilenceGateReading | null,
+    drives: SceneDrives | null,
   ): void;
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
@@ -1349,10 +1361,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // The meters beneath the Bands card — see audioMeters.ts.
   const audioMeters = createAudioMeters({
     onLufsReset: deps.onLufsReset,
-    beatGrid: {
-      get: () => deps.getBeatGrid(deps.currentSceneId()),
-      set: (value) => deps.onBeatGridChange(deps.currentSceneId(), value),
-    },
     getSilenceGate: () => deps.getSilenceGate(),
     hitShape: {
       get: () => deps.getHitShape(),
@@ -1449,44 +1457,78 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   bandsCard.body.append(spectrumHeader, hairline, fadersRow);
 
-  // ---- Line card: a drawable per-band sensitivity threshold ----
-  // src/audio/bandLine.ts's own header has the formula the overlay's fills
-  // are showing (FeatureFrame.energy is the special case of a flat-0 line).
-  // First consumer: Caustics' "Sparkle from line" setting; the drive itself
-  // (uLineDrive, sceneCommon.ts) is global, so any scene can read it next.
+  // ---- Frequencies: a drive setting's own drawn line, on this same strip ----
+  // No second strip (see bandLineEditor.ts's header) — picking Frequencies
+  // on a drive row's source picker (appendDriveRow, below) puts the Bands
+  // card's one strip into line-drawing mode for that setting instead:
+  // faders hidden (spectrumStrip.setShowFaders), this overlay on top of the
+  // same strip, a header naming which setting is being drawn with a Done
+  // chip back out, and that setting's own Strength row. src/audio/bandLine.ts's
+  // header has the formula the overlay's fills are showing.
+  let lineMode: { sceneId: string; spec: SceneSetting } | null = null;
   const lineEditor = createBandLineEditor({
-    onLineChange: (band, height) => deps.setBandLineBand(deps.currentSceneId(), band, height),
-    onStrengthChange: (value) => deps.setBandLineStrength(deps.currentSceneId(), value),
+    onLineChange: (band, height) => {
+      if (lineMode) deps.setDriveLineBand(lineMode.sceneId, lineMode.spec, band, height);
+    },
+    onStrengthChange: (value) => {
+      if (lineMode) deps.setDriveLineStrength(lineMode.sceneId, lineMode.spec, value);
+    },
   });
-  const lineResetChip = createChipButton("Reset", "Clear the drawn line and reset Strength", () => {
-    const sceneId = deps.currentSceneId();
-    deps.resetBandLine(sceneId);
-    deps.setBandLineStrength(sceneId, LINE_STRENGTH_DEFAULT);
-    refreshBandLine();
-  });
-  const lineCard = createCard({
-    title: "Line",
-    accent: BANDS_AMBER,
-    right: lineResetChip,
-    foldId: "line",
-  });
-  markBlock(lineCard.title);
+  lineEditor.el.style.display = "none";
+  // Appended after the fader hit divs already in bandFaders.el, so it sits
+  // on top of them in DOM/paint order and captures every pointer event over
+  // the strip while visible — no separate suppression of the faders'
+  // pointer handlers needed, only spectrumStrip.setShowFaders for the drawn
+  // markers themselves.
+  bandFaders.el.appendChild(lineEditor.el);
 
-  // The strip+overlay sits in a .vc-row, same reasoning as fadersRow above,
-  // so its hint wakes on hover/focus-within like a slider row's does — pure
-  // CSS (.vc-row:hover), no JS wiring needed since the overlay isn't a
-  // focusable control (see bandLineEditor.ts's header for why it's pointer-only).
-  const lineStripRow = document.createElement("div");
-  lineStripRow.className = "vc-row";
-  lineStripRow.style.setProperty("--vc-accent", BANDS_AMBER);
-  const lineHint = document.createElement("div");
-  lineHint.className = "vc-hint";
-  lineHint.textContent =
-    "Draw the line down onto the bars you want to listen to — everything starts ignored at the top. Keep it just above where those bars rest, so only the hits poke over it: effects that follow the line (Caustics: Sparkle from line) react to how far the spectrum rises above it, and a Drive that sits near full means the line is too low.";
-  lineStripRow.append(lineEditor.el, lineHint);
-  lineCard.body.append(lineStripRow, lineEditor.strengthRow, lineEditor.driveRow);
+  const lineModeLabel = document.createElement("div");
+  lineModeLabel.className = "vc-label";
+  lineModeLabel.style.cssText = rowLabelStyle;
+  const lineModeDoneChip = createChipButton("Done", "Stop drawing — back to the band faders", () => exitLineMode());
+  const lineModeResetChip = createChipButton("Reset", "Clear the drawn line and reset Strength", () => {
+    if (!lineMode) return;
+    deps.resetDriveLine(lineMode.sceneId, lineMode.spec);
+    deps.setDriveLineStrength(lineMode.sceneId, lineMode.spec, LINE_STRENGTH_DEFAULT);
+    lineEditor.setLine(deps.getDriveLine(lineMode.sceneId, lineMode.spec));
+    lineEditor.setStrength(deps.getDriveLineStrength(lineMode.sceneId, lineMode.spec));
+  });
+  const lineModeHeadRight = document.createElement("div");
+  lineModeHeadRight.style.cssText = rowRightStyle;
+  lineModeHeadRight.append(lineModeResetChip, lineModeDoneChip);
+  const lineModeHead = document.createElement("div");
+  lineModeHead.style.cssText = rowHeadStyle;
+  lineModeHead.append(lineModeLabel, lineModeHeadRight);
+  const lineModeRow = document.createElement("div");
+  lineModeRow.className = "vc-row";
+  lineModeRow.style.setProperty("--vc-accent", BANDS_AMBER);
+  lineModeRow.style.display = "none";
+  lineModeRow.appendChild(lineModeHead);
 
-  spectrumCol.append(bandsCard.el, lineCard.el, audioMeters.el);
+  function enterLineMode(sceneId: string, spec: SceneSetting): void {
+    lineMode = { sceneId, spec };
+    spectrumStrip.setShowFaders(false);
+    lineEditor.el.style.display = "";
+    lineModeRow.style.display = "";
+    lineEditor.strengthRow.style.display = "";
+    lineModeLabel.textContent = `Drawing: ${spec.label}`;
+    lineEditor.setLine(deps.getDriveLine(sceneId, spec));
+    lineEditor.setStrength(deps.getDriveLineStrength(sceneId, spec));
+  }
+
+  function exitLineMode(): void {
+    if (!lineMode) return;
+    lineMode = null;
+    spectrumStrip.setShowFaders(true);
+    lineEditor.el.style.display = "none";
+    lineModeRow.style.display = "none";
+    lineEditor.strengthRow.style.display = "none";
+  }
+
+  lineEditor.strengthRow.style.display = "none";
+  bandsCard.body.append(lineModeRow, lineEditor.strengthRow);
+
+  spectrumCol.append(bandsCard.el, audioMeters.el);
 
   // Power travels with this column for the purposes of the all-folded
   // triangle collapse below: they're wrapped together so the CSS
@@ -1550,25 +1592,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     bandFaders.clearOff();
   }
 
-  // Same call sites as refreshBandFaders above: open() and this card's own
-  // Reset chip.
+  // Re-syncs whichever setting's line is currently being drawn, if any — the
+  // panel's own open() call site (refreshBandLine no longer has a Line card
+  // Reset chip of its own to also run from; enterLineMode() already seeds
+  // the editor fresh whenever a setting is picked).
   function refreshBandLine(): void {
-    const sceneId = deps.currentSceneId();
-    lineEditor.setLine(deps.getBandLine(sceneId));
-    lineEditor.setStrength(deps.getBandLineStrength(sceneId));
+    if (!lineMode) return;
+    lineEditor.setLine(deps.getDriveLine(lineMode.sceneId, lineMode.spec));
+    lineEditor.setStrength(deps.getDriveLineStrength(lineMode.sceneId, lineMode.spec));
   }
 
   // The split is fixed (it only tints the bars by pulse group), so the strip
   // needs it set up once — the Hz edges do still depend on the analyser's
   // real sample rate, though, which isn't known until mic access is granted,
   // so this is re-run on every open(). The edges also label the faders. The
-  // Line card's own strip is fed the exact same edges/split, same reasoning
-  // as it showing the same processed bars (bandLineEditor.ts's header).
+  // Frequencies overlay draws on top of this same strip, so it needs neither.
   function refreshBandsSplit(): void {
     bandFaders.setEdgesHz(deps.getBandEdgesHz());
     spectrumStrip.setSplit(deps.getBandSplit());
-    lineEditor.setEdgesHz(deps.getBandEdgesHz());
-    lineEditor.setSplit(deps.getBandSplit());
   }
 
   // ---- controls column ----
@@ -2063,6 +2104,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAuto(): void;
   }
   let sceneRowHandles: SceneRowHandle[] = [];
+  // A drive setting's source-picker row (appendDriveRow, below) — refreshed
+  // on the same slow tick as sceneRowHandles' own refreshAuto(), since a
+  // Look apply or an external choice change (not this row's own chip click)
+  // needs picking up too.
+  interface DriveRowHandle {
+    refresh(drives: SceneDrives | null): void;
+  }
+  let driveRowHandles: DriveRowHandle[] = [];
 
   // Looks: named snapshots of the Scene card's own settings above — see
   // src/render/sceneLooks.ts. Hidden the same way sceneCard is when the
@@ -2099,11 +2148,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
 
-  // "all"/"low" (SignalSpec.bandRange, signals.ts) resolved against the
-  // *live* split rather than a fixed index range, since bandSplit.ts's
-  // crossover is user-configurable.
-  function resolveBandRange(kind: "all" | "low", split: BandSplit): { lo: number; hi: number } {
-    return kind === "low" ? { lo: 0, hi: split.lowMid } : { lo: 0, hi: NUM_BANDS };
+  // "all"/"low"/"mid"/"high" (SignalSpec.bandRange, signals.ts) resolved
+  // against the *live* split rather than a fixed index range, since
+  // bandSplit.ts's crossover is user-configurable.
+  function resolveBandRange(kind: "all" | "low" | "mid" | "high", split: BandSplit): { lo: number; hi: number } {
+    switch (kind) {
+      case "low":
+        return { lo: 0, hi: split.lowMid };
+      case "mid":
+        return { lo: split.lowMid, hi: split.midHigh };
+      case "high":
+        return { lo: split.midHigh, hi: NUM_BANDS };
+      case "all":
+        return { lo: 0, hi: NUM_BANDS };
+    }
   }
 
   // Lights the bands a signal-linked row actually listens to on the
@@ -2143,6 +2201,61 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     el.addEventListener("input", show); // dragging can switch which read is active
     el.addEventListener("pointerleave", hide);
     el.addEventListener("focusout", hide);
+  }
+
+  // The one flattened options list every drive row's picker offers — see
+  // drives.ts's driveOptions() header for the grouping (Hits, Grid, Levels,
+  // Frequencies, Scene) and why it's built from the same catalogue rather
+  // than hand-duplicated here.
+  const DRIVE_OPTIONS = driveOptions();
+  const DRIVE_OPTION_LABELS = DRIVE_OPTIONS.map((o) => o.label);
+
+  function driveOptionIndex(choice: DriveChoice): number {
+    const i = DRIVE_OPTIONS.findIndex((o) => sameDriveChoice(o.choice, choice));
+    return i < 0 ? DRIVE_OPTIONS.length - 1 : i; // falls back to Scene (the last option) rather than throwing on a foreign stored value
+  }
+
+  // A drive setting's source picker — appended right after its own slider
+  // row (appendSettingRow below). One flat chip strip (createPickerRow,
+  // reused rather than a from-scratch popover) rather than a collapsed
+  // chip-that-opens-a-menu: simpler, and the strip already wraps onto
+  // several lines at this many options (controlsKit.ts's paletteListStyle).
+  // Picking Frequencies puts the Bands card's own strip into line-drawing
+  // mode for this setting (enterLineMode); picking anything else while this
+  // setting is the one currently being drawn leaves that mode.
+  function appendDriveRow(container: HTMLElement, sceneId: string, spec: SceneSetting): void {
+    const drive = spec.drive!;
+    const defaultIndex = driveOptionIndex(drive.default);
+    const picker = createPickerRow({
+      label: `${spec.label} source`,
+      accent: SCENE_VIOLET,
+      options: DRIVE_OPTION_LABELS,
+      defaultValue: defaultIndex,
+      description: drive.sceneLabel ? `Scene: ${drive.sceneLabel.replace(/^Scene:\s*/, "")}` : undefined,
+      get: () => driveOptionIndex(deps.getDriveChoice(sceneId, spec)),
+      set: (index) => {
+        const choice = DRIVE_OPTIONS[index]?.choice ?? "scene";
+        deps.onDriveChoiceChange(sceneId, spec, choice);
+        if (typeof choice === "object" && choice.source === "line") enterLineMode(sceneId, spec);
+        else if (lineMode && lineMode.sceneId === sceneId && lineMode.spec.key === spec.key) exitLineMode();
+      },
+      wire: (row, strip, a) => {
+        wireHoverFocus(row, strip);
+        wireRowKeys(strip, { reset: a.reset, toggleOff: () => a.cycle(1) });
+      },
+    });
+    container.appendChild(picker.el);
+    driveRowHandles.push({
+      refresh: (drives) => {
+        picker.sync();
+        if (!drives) {
+          picker.setStatus("");
+          return;
+        }
+        const pair = drives.uniformPair(spec.key);
+        picker.setStatus(pair.custom > 0 ? `${Math.round(pair.drive * 100)}%` : "");
+      },
+    });
   }
 
   // Builds one setting's row (enum picker, boolean toggle or slider) into `container` —
@@ -2270,6 +2383,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     container.appendChild(row.el);
     sceneRowHandles.push(row);
     wireBandHighlight(row.el, reads);
+    if (spec.drive) appendDriveRow(container, sceneId, spec);
   }
 
   function renderSceneSettings(): void {
@@ -2277,6 +2391,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const specs = deps.getSceneSettings(sceneId);
     sceneRows.innerHTML = "";
     sceneRowHandles = [];
+    driveRowHandles = [];
     sceneCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.refresh();
@@ -2558,6 +2673,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   function open() {
+    // The panel may have been closed on a different scene since lineMode was
+    // last checked — update()'s own tick-by-tick check (see its top) never
+    // ran while closed.
+    if (lineMode && lineMode.sceneId !== deps.currentSceneId()) exitLineMode();
     refreshSpectrumHeader();
     renderPalettes();
     sourceRow.refresh();
@@ -2610,10 +2729,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       lufs: LufsReading | null,
       beatDiag: OnsetDiag | null,
       gate: SilenceGateReading | null,
+      drives: SceneDrives | null,
     ) {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
+      // A scene switch (or a renderer with nothing playing) leaves lineMode
+      // pointing at a setting that no longer belongs to the active scene —
+      // checked here rather than at every scene-change call site, since this
+      // runs every tick regardless of how the switch happened (gallery pick,
+      // Look apply, a paired device's own command).
+      if (lineMode && lineMode.sceneId !== deps.currentSceneId()) exitLineMode();
       audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate);
       // Unthrottled, same reasoning as audioMeters' own fills — see
       // createControlRow's updateSignalPills doc comment. A no-op per row
@@ -2661,17 +2787,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       spectrumStrip.setPinned(pinned);
       const processedBands = frame ? applySensitivity(frame, sensitivity, expansion).bands : null;
       spectrumStrip.update(rawBands, processedBands);
-      // The Line card's own strip shows the same processed feed — see
-      // bandLineEditor.ts's header — and its overlay/Drive meter read this
-      // same tick's AnimFrame, unthrottled like the strip above (a beat
+      // The Frequencies overlay draws on this same strip's own canvas (no
+      // second one — see bandLineEditor.ts's header) and reads this same
+      // tick's live excess, unthrottled like the strip above (a beat
       // driving the line should feel as live as the meters it's shaping).
-      // Skipped entirely while the card is folded — a second full strip
-      // draw plus the overlay is real per-frame work, and a folded card has
-      // nothing to show it on (the meters' own cards skip the same way).
+      // Skipped entirely while lineMode is unset or the Bands card is
+      // folded — a folded card has nothing to show it on (the meters' own
+      // cards skip the same way).
       const nowMs = performance.now();
-      if (!lineCard.fold?.isFolded()) {
-        lineEditor.strip.update(rawBands, processedBands);
-        lineEditor.update(anim?.lineDrive ?? 0, anim?.lineExcess ?? null, nowMs);
+      if (lineMode && !bandsCard.fold?.isFolded()) {
+        lineEditor.update(drives?.excess(lineMode.spec.key) ?? null);
       }
 
       if (nowMs - lastAutoRefreshMs < AUTO_UI_REFRESH_MS) return;
@@ -2688,6 +2813,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       silenceClosedRow.refreshAuto();
       silenceOpenRow.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
+      // A drive row's chip strip and live pill — picked up here rather than
+      // every tick, same reasoning as every other refreshAuto() above.
+      for (const row of driveRowHandles) row.refresh(drives);
     },
   };
 }

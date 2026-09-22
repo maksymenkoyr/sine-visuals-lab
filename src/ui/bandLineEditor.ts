@@ -1,8 +1,6 @@
 import { NUM_BANDS } from "../audio/types.ts";
-import type { BandSplit } from "../audio/bandSplit.ts";
-import { createSpectrumStrip, STRIP_PLOT_HEIGHT_PX, type SpectrumStrip } from "./spectrumStrip.ts";
+import { STRIP_PLOT_HEIGHT_PX } from "./spectrumStrip.ts";
 import { BANDS_AMBER, withAlpha } from "./controlsTheme.ts";
-import { digitsStyle, readoutStyle, rowHeadStyle, rowLabelStyle, rowRightStyle, unitStyle } from "./controlsKit.ts";
 import { LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, LINE_HEIGHT_DEFAULT } from "../audio/bandLine.ts";
 // Circular with deviceMenu.ts (it imports createBandLineEditor below) — same
 // established pattern as audioMeters.ts importing createControlRow from
@@ -11,16 +9,17 @@ import { LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, LINE_HEIGH
 import { createControlRow } from "./deviceMenu.ts";
 
 /**
- * The Line card's interactive piece: a second spectrum strip (the same
- * processed feed the Bands card shows, so the user draws over live bars —
- * src/ui/bandFaders.ts is the model this follows) with a transparent overlay
- * <canvas> drawn on top, plus the Strength row and Drive meter beneath it.
- * The overlay paints the sensitivity line itself (src/audio/bandLine.ts):
- * a stepped polyline at each band's `1 - line[b]` height, a faint fill below
- * it down to the bottom ("ignored"), and — fed live every tick via update()
- * — a translucent amber fill above it wherever the current bars clear it
- * (AnimFrame.lineExcess), so the user sees exactly what's driving the Drive
- * meter and any scene reading uLineDrive.
+ * A drive setting's Frequencies overlay: a transparent <canvas>, sized to
+ * match the Bands card's own spectrum strip (src/ui/spectrumStrip.ts) and
+ * meant to be positioned directly on top of it (the caller — deviceMenu.ts —
+ * owns that strip and swaps its faders for this overlay while a setting is
+ * parked on Frequencies; there is no second strip here any more, unlike this
+ * file's first version). The overlay paints the sensitivity line itself
+ * (src/audio/bandLine.ts): a stepped polyline at each band's `1 - line[b]`
+ * height, a faint fill below it down to the bottom ("ignored"), and — fed
+ * live every tick via update() — a translucent amber fill above it wherever
+ * the current bars clear it (a drive engine's excess(), src/render/drives.ts),
+ * so the user sees exactly what's driving that setting's u<Key>Drive.
  *
  * Pointer-only, not wired into the panel's keyboard/Tab-ring layer the way
  * bandFaders.ts's faders are (each their own role="slider" hit area) — this
@@ -30,32 +29,27 @@ import { createControlRow } from "./deviceMenu.ts";
  * sits in the Tab ring / gets A-less R/T for free.
  *
  * Values come in through setLine/setStrength (the panel pushes the current
- * scene's store on open() and after a card Reset, the same call sites as
- * bandFaders.setGains) and go out through onLineChange/onStrengthChange —
- * this component holds a copy but is not the source of truth, matching the
- * rest of the panel.
+ * setting's store on entering Frequencies and after its own Reset, the same
+ * call sites as bandFaders.setGains) and go out through
+ * onLineChange/onStrengthChange — this component holds a copy but is not
+ * the source of truth, matching the rest of the panel.
  */
 
 export interface BandLineEditor {
-  /** The strip + overlay only — same scope as bandFaders.ts's own `el`. The
-   *  caller wraps this in its own `.vc-row` alongside the card's hint text,
-   *  mirroring the Bands card's fadersRow. */
-  el: HTMLElement;
-  strip: SpectrumStrip;
-  /** The Strength row and Drive meter row — already their own `.vc-row`s,
-   *  appended as direct siblings in the card body rather than nested inside
-   *  `el`'s row. */
+  /** The overlay canvas alone — the caller positions it absolutely over the
+   *  Bands card's own strip (which must already be `position: relative`;
+   *  bandFaders.ts's own wrapper already is). */
+  el: HTMLCanvasElement;
+  /** The Strength row — its own `.vc-row`, appended as a sibling in the
+   *  Bands card body while a setting is parked on Frequencies. */
   strengthRow: HTMLElement;
-  driveRow: HTMLElement;
-  setEdgesHz(edges: Float32Array): void;
-  setSplit(split: BandSplit): void;
-  /** Pushes a scene's stored line into the overlay. */
+  /** Pushes a setting's stored line into the overlay. */
   setLine(heights: ArrayLike<number>): void;
   setStrength(value: number): void;
-  /** Called every tick: this scene's live drive/excess (0/null before audio
-   *  or with `line` omitted from animClock.advance) — feeds the Drive meter
-   *  and the overlay's amber fill. */
-  update(lineDrive: number, excess: ArrayLike<number> | null, nowMs: number): void;
+  /** Called every tick while a setting is on Frequencies: that setting's
+   *  live excess (src/render/drives.ts's SceneDrives.excess()), null before
+   *  audio is up — feeds the overlay's amber fill. */
+  update(excess: ArrayLike<number> | null): void;
 }
 
 export interface BandLineEditorOpts {
@@ -67,7 +61,6 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
-const wrapperStyle = `position: relative;`;
 const overlayStyle = `position: absolute; top: 0; left: 0; width: 100%; height: ${STRIP_PLOT_HEIGHT_PX}px; touch-action: none; cursor: crosshair;`;
 
 const IGNORED_FILL = "rgba(255,255,255,0.06)";
@@ -76,92 +69,10 @@ const LINE_WIDTH_PX = 2;
 
 const formatStrength = (v: number) => v.toFixed(1);
 
-const meterTrackStyle = `position: relative; width: 100%; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.18); margin-top: 8px;`;
-// The fill moves by transform, not width: a width write dirties layout, and
-// the overlay's own rect read straight after would then force the whole
-// panel to lay out again every tick (measured at ~2x the frame time with the
-// Line and Hit strength cards both open). A transform is compositor-only.
-const meterFillStyle = `position: absolute; top: 0; left: 0; height: 100%; width: 100%; border-radius: 2px; background-color: ${BANDS_AMBER}; transform-origin: left; transform: scaleX(0);`;
-// The % digits are a DOM text write, so they refresh on their own slow tick
-// (same rate as audioMeters.ts's TEXT_REFRESH_MS) rather than every frame.
-const DRIVE_TEXT_REFRESH_MS = 100;
-
-/** The Drive meter: the simplest possible bar — a label, a % readout, a
- *  track+fill — no peak-hold cap and no ticks (see audioMeters.ts's own
- *  createMeterRow for the fuller version this deliberately doesn't reuse;
- *  it isn't exported, and this card doesn't need what the extra weight buys). */
-function createDriveMeterRow(): { el: HTMLElement; setValue(v: number, nowMs: number): void } {
-  const el = document.createElement("div");
-  el.className = "vc-row";
-  el.tabIndex = 0;
-  el.style.setProperty("--vc-accent", BANDS_AMBER);
-
-  const head = document.createElement("div");
-  head.style.cssText = rowHeadStyle;
-  const label = document.createElement("div");
-  label.textContent = "Drive";
-  label.className = "vc-label";
-  label.style.cssText = rowLabelStyle;
-  const right = document.createElement("div");
-  right.style.cssText = rowRightStyle;
-  const readout = document.createElement("div");
-  readout.style.cssText = readoutStyle;
-  const digits = document.createElement("span");
-  digits.style.cssText = digitsStyle;
-  const unit = document.createElement("span");
-  unit.style.cssText = unitStyle;
-  unit.textContent = "%";
-  readout.append(digits, unit);
-  right.appendChild(readout);
-  head.append(label, right);
-
-  const track = document.createElement("div");
-  track.style.cssText = meterTrackStyle;
-  const fill = document.createElement("div");
-  fill.style.cssText = meterFillStyle;
-  track.appendChild(fill);
-
-  const hint = document.createElement("div");
-  hint.className = "vc-hint";
-  hint.textContent = "How hard the spectrum above the line is driving right now — what Strength scales.";
-
-  el.append(head, track, hint);
-
-  let lastPct = -1;
-  let lastTextPct = -1;
-  let lastTextMs = 0;
-  return {
-    el,
-    setValue(v: number, nowMs: number): void {
-      const pct = Math.round(clamp01(v) * 100);
-      if (pct !== lastPct) {
-        lastPct = pct;
-        fill.style.transform = `scaleX(${pct / 100})`;
-      }
-      if (pct !== lastTextPct && nowMs - lastTextMs >= DRIVE_TEXT_REFRESH_MS) {
-        lastTextPct = pct;
-        lastTextMs = nowMs;
-        digits.textContent = String(pct);
-      }
-    },
-  };
-}
-
 export function createBandLineEditor(opts: BandLineEditorOpts): BandLineEditor {
-  const strip = createSpectrumStrip();
-  // No fader bank of its own — see spectrumStrip.ts's own header for why
-  // this can't just be "never call setFaders" (the default gains still draw
-  // every knob dead-center).
-  strip.setShowFaders(false);
-
-  const el = document.createElement("div");
-  el.style.cssText = wrapperStyle;
-
   const overlay = document.createElement("canvas");
   overlay.style.cssText = overlayStyle;
   const ctx = overlay.getContext("2d")!;
-
-  el.append(strip.el, overlay);
 
   // This component's own copy — pushed in via setLine, painted locally on
   // pointer input and reported out through onLineChange; not the source of
@@ -310,19 +221,9 @@ export function createBandLineEditor(opts: BandLineEditorOpts): BandLineEditor {
   });
   strengthRow.onChange((value) => opts.onStrengthChange(value));
 
-  const driveRow = createDriveMeterRow();
-
   return {
-    el,
-    strip,
+    el: overlay,
     strengthRow: strengthRow.el,
-    driveRow: driveRow.el,
-    setEdgesHz(edges: Float32Array): void {
-      strip.setEdgesHz(edges);
-    },
-    setSplit(split: BandSplit): void {
-      strip.setSplit(split);
-    },
     setLine(heights: ArrayLike<number>): void {
       for (let b = 0; b < NUM_BANDS; b++) line[b] = heights[b];
       redraw();
@@ -330,12 +231,9 @@ export function createBandLineEditor(opts: BandLineEditorOpts): BandLineEditor {
     setStrength(value: number): void {
       strengthRow.setValue(value);
     },
-    update(lineDrive: number, nextExcess: ArrayLike<number> | null, nowMs: number): void {
+    update(nextExcess: ArrayLike<number> | null): void {
       excess = nextExcess;
-      // Read (redraw's rect check) before write (the Drive row), so the read
-      // never lands on a layout this tick's own write just dirtied.
       redraw();
-      driveRow.setValue(lineDrive, nowMs);
     },
   };
 }

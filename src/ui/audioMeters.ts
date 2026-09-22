@@ -5,7 +5,6 @@ import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { SILENCE_GATE_MIN, type SilenceGateMarks, type SilenceGateReading } from "../audio/silenceGate.ts";
 import { DIAL_LABELS, MUSIC_DIALS, NEUTRAL } from "../render/musicProfile.ts";
-import { BEAT_GRIDS, BEAT_GRID_DEFAULT } from "../audio/beatGrid.ts";
 import { verdictOf, type OnsetDiag, type OnsetVerdict } from "../audio/onsetDiag.ts";
 import { FLUX_THRESHOLD_MARGIN, FLUX_THRESHOLD_MULT, ONSET_REFRACTORY_SEC } from "../audio/features.ts";
 import { GROUP_TUNING } from "../render/bandEnergy.ts";
@@ -41,7 +40,6 @@ import {
   chipBtnStyle,
   createCard,
   createChipButton,
-  createPickerRow,
   createTraceLegend,
   digitsStyle,
   digitsTextStyle,
@@ -212,14 +210,6 @@ export interface AudioMeters {
 export interface AudioMetersDeps {
   /** The Loudness card's Reset chip: start the integrated reading over. */
   onLufsReset: () => void;
-  /** The Rhythm card's Beat grid row and the Hit strength card's four
-   *  sliders (below) are the only controls that live in the meters panel
-   *  rather than the Input card — each one's effect is exactly what a trace
-   *  right beneath it shows, so splitting the knob from its own picture
-   *  would put the two a card apart. The stored index into BEAT_GRIDS for
-   *  the current scene (src/audio/beatGrid.ts); the row re-reads `get` on
-   *  its text tick so a scene switch is picked up. */
-  beatGrid: { get: () => number; set: (value: number) => void };
   /** The Gate card's History trace guides and the Rhythm card's hits
    *  history hint (hitsRuleHint) — the same two marks the Input card's
    *  Silence below/Sound above rows edit (src/audio/silenceGate.ts). Read
@@ -1523,21 +1513,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   rhythmRow.style.cssText = rhythmRowStyle;
   rhythmRow.append(section.el, tempo.el);
   const hitsHistory = createHitsHistory(deps.getSilenceGate);
-  // Beat grid: which pulses every scene's beat reactions fire on. Lives
-  // here rather than in the Input card because its effect is visible in
-  // the Beat trace two rows down — red ticks either land where the
-  // detector fired or on the blue grid — and the tempo tile beside it is
-  // what a grid stop is waiting on (the row says so while it is).
-  const gridRow = createPickerRow({
-    label: "Beat grid",
-    accent: NEUTRAL_ACCENT,
-    options: BEAT_GRIDS.map((g) => g.label),
-    defaultValue: BEAT_GRID_DEFAULT,
-    description:
-      "Which pulses this scene's beat reactions fire on: every detected hit, or a steady grid from the tempo tracker — one pulse per eighth, beat, half bar, bar or two bars. A grid waits for a locked tempo and fires hits until then.",
-    get: () => deps.beatGrid.get(),
-    set: (value) => deps.beatGrid.set(value),
-  });
   // Beats as actually detected (anim.beatPulse, red — same as the hit
   // history's Beat lane and the tempo dot) against the phase-locked grid
   // beatClock predicts (a spike at each anim.beatPhase wrap, blue, height
@@ -1577,11 +1552,10 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       "How hard the broadband onset detector's flux cleared its threshold this frame — past the mark is a beat, short of it a near-miss.",
   });
   const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm" });
-  rhythmCard.body.append(rhythmRow, spacer(), gridRow.el, spacer(), hitsHistory.el, spacer(), beat.el, spacer(), onset.el);
+  rhythmCard.body.append(rhythmRow, spacer(), hitsHistory.el, spacer(), beat.el, spacer(), onset.el);
 
   // ---- Hit strength ----
-  // Controls and monitors together, right after Rhythm — same reasoning as
-  // that card's own Beat grid row (AudioMetersDeps.beatGrid's doc comment):
+  // Controls and monitors together, right after Rhythm — same reasoning:
   // each slider's effect is exactly what the Curve/Strength traces beneath
   // it show. See src/audio/hitStrength.ts for the formula these four shape.
   const hitAmountRow = createControlRow({
@@ -1963,11 +1937,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         section.setValue(sectionVal, dtSec);
         if (anim?.dropOnset) section.flash(HOT_RED);
         if (text) {
-          gridRow.sync();
-          // A grid stop that hasn't got a tempo yet is firing hits — say so
-          // beside the choice rather than letting it look ignored.
-          const waiting = anim !== null && deps.beatGrid.get() !== BEAT_GRID_DEFAULT && !anim.onGrid;
-          gridRow.setStatus(waiting ? "no tempo lock · hits" : "");
           tempo.settle(frame?.bpm ?? 0, nowMs, raw || smoothingOff);
           section.setReadout(
             sectionVal === null ? "--" : pct(sectionVal),
