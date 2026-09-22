@@ -1,6 +1,5 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
-import type { SignalLink } from "../signals.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHash.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
@@ -88,12 +87,12 @@ import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHas
 // in noiseHash.ts (its header is the standing explanation) so other drifting
 // scenes share them.
 // The master treble-sparkle knob. Defined outside SETTINGS so the sub-params
-// further down (density, brightness ceiling, grain, warp, spread, sustain,
-// line source — all `advanced`, in the Look group) can name it directly as
-// their `macro` driver: a spec reference costs nothing extra to resolve and
-// can't drift out of sync with a key string. See their own leading comment
-// further down for what each sub-param actually does; this one just carries
-// the auto weights and stays the everyday slider.
+// further down (density, brightness ceiling, grain, warp, spread, sustain —
+// all `advanced`, in the Look group) can name it directly as their `macro`
+// driver: a spec reference costs nothing extra to resolve and can't drift
+// out of sync with a key string. See their own leading comment further down
+// for what each sub-param actually does; this one just carries the auto
+// weights and stays the everyday slider.
 const SPARKLE: SceneSetting = {
   key: "sparkle",
   label: "Treble sparkle",
@@ -105,6 +104,13 @@ const SPARKLE: SceneSetting = {
   default: 0.4,
   // Directly the hats/cymbals dial.
   auto: { brightness: 0.45, attack: 0.15 },
+  // Two signals across two layers (a treble hit, or — with Sparkle sustain
+  // dialed up — the sustained treble level too), not one, so the default
+  // is Scene — see sparkleGlintDrive in FRAG. Used to have its own
+  // continuous "Sparkle from line" dial blending toward the sensitivity
+  // line; that's now Frequencies, a discrete alternative source on this
+  // same picker.
+  drive: { default: "scene", sceneLabel: "Scene: treble hits + sustain wash" },
 };
 
 const SETTINGS: SceneSetting[] = [
@@ -144,34 +150,13 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     // Rings read best against punchy, uncluttered material.
     auto: { attack: 0.35, pulse: 0.25, density: -0.2 },
-    // Three signals across two layers, not one — see the trigger logic
-    // itself, below. A bass onset always fires a ring; a broadband beat only
-    // fires one alongside it while Ripple source sits under its own
-    // threshold — RIPPLE_SRC_BEAT_THRESHOLD below is the single source of
-    // truth both this predicate and the trigger logic read.
-    reads: [
-      "anim.dropOnset",
-      "anim.lowOnset",
-      { signal: "feature.onset", activeWhen: (get) => get("rippleSrc") < RIPPLE_SRC_BEAT_THRESHOLD },
-    ] satisfies readonly SignalLink[],
-  },
-  {
-    key: "rippleSrc",
-    label: "Ripple source",
-    description: "Bass hits always ring out. Below 0.5, ordinary beats ring out too; at 0.5 and above, only bass hits do.",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.3,
-    // On a busy mix, restrict rings to bass hits so they don't machine-gun.
-    auto: { density: 0.3 },
-    // The two signals this switches between — dragging the slider across
-    // RIPPLE_SRC_BEAT_THRESHOLD is what the Beat pill dimming makes visible.
-    reads: [
-      "anim.lowOnset",
-      { signal: "feature.onset", activeWhen: (get) => get("rippleSrc") < RIPPLE_SRC_BEAT_THRESHOLD },
-    ] satisfies readonly SignalLink[],
+    // A bass onset OR a broadband beat, unconditionally — no single
+    // catalogue source reproduces that union, so the default is Scene (see
+    // the trigger logic itself, below, and drives.ts's header for why a
+    // Scene default is still bit-identical to today). A drop still rings
+    // its own stronger ring in place of the ordinary one on that tick,
+    // independent of this choice — see the trigger logic.
+    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit" },
   },
   {
     key: "drift",
@@ -200,6 +185,8 @@ const SETTINGS: SceneSetting[] = [
     default: 0.3,
     // Beat-locked lurches only make sense with real beats to lurch on.
     auto: { pulse: 0.35, attack: 0.2 },
+    // The lurch fires on anim.onset today — a plain Beat default.
+    drive: { default: "feature.onset" },
   },
   {
     key: "driftKick",
@@ -212,6 +199,9 @@ const SETTINGS: SceneSetting[] = [
     default: 0.45, // -> weighted toward the jolt (see advanceKickJolt's driftKick^2), so a lower default would ship with the jolt this setting exists for effectively invisible
     // Dark/bass-heavy mixes carry more kick presence to pump on.
     auto: { brightness: -0.3, attack: 0.2 },
+    // The jolt is driven continuously by anim.lowPulse today — a plain Bass
+    // hit default (drives.ts's decaying-envelope reading of it, same field).
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "driftLoud",
@@ -225,6 +215,11 @@ const SETTINGS: SceneSetting[] = [
     // Swells with volume read best on tracks with real quiet->loud range;
     // an already-dense mix doesn't need more.
     auto: { dynamics: 0.3, density: -0.15 },
+    // Driven by this scene's own calibrated loudSwell (advanceLoudSwell,
+    // below) — a bespoke per-scene calibration of FeatureFrame.level, not a
+    // catalogue signal (see that function's own comment for why it isn't
+    // just frame.energy/anim.sectionIntensity), so the default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: this track's own calibrated loudness swing" },
   },
   {
     key: "driftChurn",
@@ -239,6 +234,9 @@ const SETTINGS: SceneSetting[] = [
     // both — but its own independent runtime magnitude and a distinct
     // visual channel; see uChurnDrive's comment in FRAG and extraUniforms.
     auto: { pulse: 0.3, attack: 0.2 },
+    // Same trigger as Beat surge — anim.onset — but its own independent
+    // envelope (churnPulse, below).
+    drive: { default: "feature.onset" },
   },
   {
     key: "bass",
@@ -251,6 +249,8 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     // A dark mix wants the low-end swell emphasized; a bright one doesn't need it.
     auto: { brightness: -0.4 },
+    // uLowPulse directly — a plain Bass hit default.
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "turbulence",
@@ -263,6 +263,8 @@ const SETTINGS: SceneSetting[] = [
     default: 0.35,
     // Busy mids churn the filaments; a bright mix reads as more mid-heavy too.
     auto: { density: 0.35, brightness: 0.1 },
+    // uMid directly (the slewed level, not a hit pulse) — a plain Mid level default.
+    drive: { default: "anim.mid" },
   },
   {
     key: "dropReactivity",
@@ -308,11 +310,13 @@ const SETTINGS: SceneSetting[] = [
     // below), so the old worry about pinning the *floor* up doesn't apply
     // any more, but a saturated snap is just as flat a result.
     auto: { pulse: 0.2, attack: 0.15 },
+    // uBeatPulse directly — a plain Beat default.
+    drive: { default: "feature.onset" },
   },
   {
     key: "flash",
     label: "Beat flash",
-    description: "Overall brightness punch on each beat",
+    description: "Overall brightness punch on each beat — pick All level instead of Beat for a long loud stretch to stay lit rather than flashing once",
     group: "Look",
     min: 0,
     max: 1,
@@ -320,24 +324,11 @@ const SETTINGS: SceneSetting[] = [
     default: 0.6,
     // Same reasoning as ripple, for brightness punch instead of ring shape.
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
-  },
-  // What Beat flash follows. At 0 it's the beat pulse — a punch when a hit
-  // *starts*, gone again while a loud sound merely holds (flux sees no rise
-  // in a sustained wall of noise, so it fires once at the front edge). At 1
-  // it's uEnergy, the plain average of every band: the flash stays up for
-  // as long as the music is loud, hit or no hit. An experiment in driving a
-  // beat reaction from level rather than rate-of-rise — no auto weights, so
-  // it sits at its default until touched, and 0 leaves the flash term
-  // exactly what it was.
-  {
-    key: "flashLevel",
-    label: "Flash from level",
-    description: "What Beat flash follows — hits only at the bottom, the overall loudness of every band at the top, so a long loud stretch stays lit instead of flashing once",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0,
+    // uBeatPulse directly — a plain Beat default. Used to be a continuous
+    // blend toward uEnergy via a separate "Flash from level" dial; that's
+    // now a discrete alternative source (All level) on this same picker
+    // instead of a second setting.
+    drive: { default: "feature.onset" },
   },
   {
     key: "centroidHue",
@@ -353,26 +344,6 @@ const SETTINGS: SceneSetting[] = [
     reads: ["anim.centroid"],
   },
   SPARKLE,
-  // The sensitivity line (src/audio/bandLine.ts, drawn on the Line card) as
-  // an alternate sparkle source: at 0 the glints still follow the treble hit
-  // detector exactly as before (see sparkleDrive in FRAG below); dialed up,
-  // they blend toward uLineDrive, so a line drawn to exclude the low/mid
-  // bands makes the glints track only the treble energy the user drew above
-  // it, and a strength pushed past 1 (the Line card's own Strength row) can
-  // light them at the faintest rise. Off the master: a source choice, not an
-  // intensity one, same convention as sparkleGrain above.
-  {
-    key: "sparkleLine",
-    label: "Sparkle from line",
-    description:
-      "How much the glints follow the sensitivity line drawn on the Line card instead of the treble hit detector — at full they light exactly as far as the spectrum rises above your line",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0,
-    macro: { driver: SPARKLE, weight: 0 },
-  },
   // The constants that used to be hardcoded on the sparkle line in FRAG —
   // how bright, how many, how fine, how far the glints spread, and whether
   // they persist through a sustained wash instead of only flashing on a hit.
@@ -477,6 +448,12 @@ const SETTINGS: SceneSetting[] = [
     // Same reasoning as sparkleGrain: a shape/taste choice, not an
     // intensity one, so the master knob leaves it alone.
     macro: { driver: SPARKLE, weight: 0 },
+    // No extra gating of its own today — droplets already ride Sparkle's
+    // own hits+line composite (the shared crest gate and treble drive every
+    // glint uses), so the identity scene default is a bare 1.0, not a
+    // second signal. Offered anyway so a non-default pick (e.g. Bass hit)
+    // can give the spray its own trigger independent of the glints it rides.
+    drive: { default: "scene", sceneLabel: "Scene: unfiltered (rides Sparkle's own gating)" },
   },
   {
     key: "injectionReverse",
@@ -499,10 +476,6 @@ const SETTINGS: SceneSetting[] = [
 // erase a ring that was still a third as bright as when it started, which
 // read as the whole pattern being redrawn on that beat.
 const MAX_RIPPLES = 8;
-// Below this, a broadband beat rings out alongside a bass onset; at or above
-// it, only a bass onset does — see the trigger logic below and the "ripple"
-// SceneSetting's `reads`, which points its Beat pill at this same constant.
-const RIPPLE_SRC_BEAT_THRESHOLD = 0.5;
 const RIPPLE_SPEED = 1.1; // units/sec a ring expands at
 const RIPPLE_WIDTH = 4.0; // gaussian tightness of a ring's height profile — lower = wider ring
 const RIPPLE_DECAY_PER_SEC = 0.45; // lower = the ring lives longer and travels farther
@@ -1074,7 +1047,7 @@ void main() {
   // is a one-shot ring rather than a standing bulge.
   float pLen0 = length(p);
   vec2 dir0 = pLen0 > 1e-4 ? p / pLen0 : vec2(1.0, 0.0);
-  float bassBulge = uBass * uLowPulse;
+  float bassBulge = uBass * bassDrive(uLowPulse);
   // Faded to zero at the origin: dir0 flips sign across the center, so a
   // displacement that's still nonzero there tears the field at a single
   // point — every filament near the middle gets dragged into a pinch.
@@ -1154,7 +1127,7 @@ void main() {
   // this line each conflated the two: scaling floor and peak together, or
   // pinning the peak identical at every focus setting).
   float sharpRest = mix(${FOG_SHARP_CRISP.toFixed(1)}, ${FOG_SHARP_HAZY.toFixed(1)}, uFog);
-  float sharp = min(sharpRest * (1.0 + uFocus * uBeatPulse * ${FOCUS_SNAP_RATIO.toFixed(2)}), ${FOCUS_SHARP_MAX}.0)
+  float sharp = min(sharpRest * (1.0 + uFocus * focusDrive(uBeatPulse) * ${FOCUS_SNAP_RATIO.toFixed(2)}), ${FOCUS_SHARP_MAX}.0)
     * (1.0 - bassBulge * 0.25);
   float ridgeGain = sqrt(sharp / 4.0); // a thinner ridge is proportionally brightened, so Focus snaps intensity too, not just width
   // Warp compresses screen space into q-space, and near its own fold points
@@ -1183,7 +1156,7 @@ void main() {
   // being coupled. aaSharp below still bounds the pixel-ladder artifact
   // independent of warpAmt; a maxed Beat churn against a maxed Focus snap is
   // the case to eyeball for it.
-  float warpAmt = 0.45 * (1.0 + uTurbulence * uMid * 1.2 + dropDrive * 0.7 + uChurnDrive * ${CHURN_GAIN.toFixed(2)});
+  float warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2 + dropDrive * 0.7 + uChurnDrive * ${CHURN_GAIN.toFixed(2)});
   for (int i = 0; i < ${RIDGE_OCTAVES}; i++) {
     if (i >= iterations) break;
     float band = sampleBands(float(i) / ${RIDGE_OCTAVES}.0);
@@ -1211,23 +1184,25 @@ void main() {
 
   // Treble sparkle: fine glints gated to where the pattern is already bright
   // (ridge crests), driven by a high-band onset pulse — or, once
-  // uSparkleSustain is dialed up, kept alive through a sustained wash too —
-  // or, once uSparkleLine is dialed up, by uLineDrive instead: the
-  // sensitivity line drawn on the Line card (src/audio/bandLine.ts) in place
-  // of the treble hit detector entirely. uSparkleBright/Density/Grain/
-  // Spread/Sustain used to be fixed constants here (1.5, 8.0, 38.0,
-  // smoothstep(0.15, 0.6, ...), pulse-only); each defaults to reproduce its
-  // old constant exactly (see the sparkleBright..sparkleSustain entries in
-  // SETTINGS above) and is a macro of uSparkle, so the master knob still
-  // moves all of them together.
+  // uSparkleSustain is dialed up, kept alive through a sustained wash too.
+  // uSparkleBright/Density/Grain/Spread/Sustain used to be fixed constants
+  // here (1.5, 8.0, 38.0, smoothstep(0.15, 0.6, ...), pulse-only); each
+  // defaults to reproduce its old constant exactly (see the
+  // sparkleBright..sparkleSustain entries in SETTINGS above) and is a macro
+  // of uSparkle, so the master knob still moves all of them together.
+  // Picking a source other than Sparkle's own Scene default (sparkleDrive()
+  // below, generated by DRIVE_GLSL from the "sparkle" setting's own drive —
+  // sceneCommon.ts) replaces this whole composite, including Frequencies:
+  // the sensitivity line drawn for this setting in place of the treble hit
+  // detector entirely (used to be a continuous "Sparkle from line" dial
+  // blending toward it; now a discrete alternative pick).
   float sparkleLo = mix(${SPARKLE_SPREAD_LO_AT_0.toFixed(2)}, ${SPARKLE_SPREAD_LO_AT_1.toFixed(2)}, uSparkleSpread);
   float sparkleHi = mix(${SPARKLE_SPREAD_HI_AT_0.toFixed(2)}, ${SPARKLE_SPREAD_HI_AT_1.toFixed(2)}, uSparkleSpread);
   float crestGate = smoothstep(sparkleLo, sparkleHi, acc);
   // uHigh is the slewed continuous high-band level (vs. uHighPulse's
   // decaying onset spike) — max() rather than a blend so sustain=0 leaves
-  // the pulse-only drive bit-for-bit untouched. uSparkleLine at 0 leaves this
-  // whole mix() bit-for-bit what it was too.
-  float sparkleDrive = mix(max(uHighPulse, uSparkleSustain * uHigh), uLineDrive, uSparkleLine);
+  // the pulse-only drive bit-for-bit untouched.
+  float sparkleGlintDrive = sparkleDrive(max(uHighPulse, uSparkleSustain * uHigh));
   // uSparkleWarp bends the coordinate glints are sampled at with its own
   // small warp pass — independent of the ridge loop's warpAmt above, so
   // dragging it changes only the glints' own curvature, never the ridges'.
@@ -1244,7 +1219,7 @@ void main() {
   float sparkleNoise = noise(sparkleQ * sparkleFreq + sparkleFlow);
   float sparkleExp = mix(${SPARKLE_DENSITY_EXP_LO.toFixed(1)}, ${SPARKLE_DENSITY_EXP_HI.toFixed(1)}, uSparkleDensity);
   float sparkleGain = uSparkleBright * ${SPARKLE_BRIGHT_GAIN.toFixed(1)};
-  acc += uSparkle * sparkleDrive * crestGate * pow(sparkleNoise, sparkleExp) * sparkleGain;
+  acc += uSparkle * sparkleGlintDrive * crestGate * pow(sparkleNoise, sparkleExp) * sparkleGain;
 
   // Spray injection, added on top of the glints rather than in place of
   // them. The glint field is tiled into nozzle cells — in sparkleQ *
@@ -1254,9 +1229,13 @@ void main() {
   // sprays appear everywhere glints can and never fire in lockstep. The
   // motion runs on uTime (its own continuous clock, not gated to
   // anim.onset), but the brightness is gated exactly like a glint —
-  // uSparkle * sparkleDrive * crestGate * sparkleGain — so spray shows up
-  // where and when the hats sparkle, and adds nothing until uInjection is
-  // raised. Droplet radius shrinks with actual distance from its nozzle
+  // uSparkle * sparkleGlintDrive * crestGate * sparkleGain — so spray shows
+  // up where and when the hats sparkle, and adds nothing until uInjection is
+  // raised. injectionDrive() (generated by DRIVE_GLSL from the "injection"
+  // setting's own drive) is a second, independent gate on top of that —
+  // 1.0 at its Scene default (see that setting's own comment in SETTINGS),
+  // so it adds nothing extra until a non-default source is picked. Droplet
+  // radius shrinks with actual distance from its nozzle
   // (INJECTION_REACH), not with time, so it reads as a stream atomizing
   // into mist regardless of travel direction; the ease-out on dist makes
   // droplets leave fast and slow as they atomize (and, reversed, gather
@@ -1295,12 +1274,12 @@ void main() {
       }
     }
   }
-  acc += uSparkle * sparkleDrive * crestGate * sparkleGain * uInjection * injectionField * ${INJECTION_GAIN.toFixed(2)};
+  acc += uSparkle * sparkleGlintDrive * crestGate * sparkleGain * uInjection * injectionDrive(1.0) * injectionField * ${INJECTION_GAIN.toFixed(2)};
 
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
 
-  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * mix(uBeatPulse, uEnergy, uFlashLevel) * 1.5 + ring * 0.8
+  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * flashDrive(uBeatPulse) * 1.5 + ring * 0.8
        + dropDrive * 0.5 + dropFlash * 1.2;
   // Dark-water floor: uFog=0 clips almost exactly today's old fixed cut
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips
@@ -1366,46 +1345,55 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
     let prevDropOnset = false;
     const flowBuf = new Float32Array(DRIFT_FLOW_LEN);
 
-    return (frame, anim, getSetting) => {
+    return (frame, anim, getSetting, drives) => {
       const driftKick = getSetting("driftKick");
       const driftLoud = getSetting("driftLoud");
-      const loudSwell = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
+      // Kept up to date every tick regardless of driftLoud's own drive
+      // choice — see the "driftLoud" SceneSetting's own comment — and
+      // drives.value()'s sceneDefault, so at that setting's Scene default
+      // (today's behavior) loudSwell is exactly this calibrated reading.
+      const loudSwellCalibrated = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
+      const loudSwell = drives.value("driftLoud", loudSwellCalibrated);
       driftPhase += anim.dtSec * driftRatePerSec({
         drift: getSetting("drift"),
         driftKick,
         driftLoud,
-        lowPulse: anim.lowPulse,
+        // Bass hit's own decaying envelope at driftKick's Beat-hit default —
+        // see the "driftKick" SceneSetting's own comment.
+        lowPulse: drives.value("driftKick", anim.lowPulse),
         loudSwell,
         dropReactivity: getSetting("dropReactivity"),
         sectionIntensity: anim.sectionIntensity,
       });
-      advanceLurch(lurch, anim.dtSec, anim.onset, getSetting("driftBeat"));
+      advanceLurch(lurch, anim.dtSec, drives.fired("driftBeat", anim.onset), getSetting("driftBeat"));
       churnPulse *= Math.exp(-anim.dtSec * LURCH_DECAY_PER_SEC);
-      if (anim.onset) churnPulse = 1;
+      if (drives.fired("driftChurn", anim.onset)) churnPulse = 1;
       const churnDrive = getSetting("driftChurn") * churnPulse;
       // Not gated behind Drift speed the way the rate term above is — a
       // kick strike should still land even with drift=0 (see the file
-      // header's driftKick comment).
-      kickJolt = advanceKickJolt(kickJolt, driftKick, anim.lowPulse, anim.dtSec);
+      // header's driftKick comment). Same drives.value() reading as the
+      // rate term above, not a second independent read.
+      kickJolt = advanceKickJolt(kickJolt, driftKick, drives.value("driftKick", anim.lowPulse), anim.dtSec);
 
       ripples.tick(anim.dtSec);
-      const rippleSrc = getSetting("rippleSrc");
       // A drop is rarer and bigger than an ordinary beat — one stronger ring
       // in place of (not on top of) the beat that usually lands on the same
-      // tick. Edge-triggered locally since anim.dropOnset is already a
-      // one-shot pulse, but the guard keeps this robust if that ever
-      // changes.
+      // tick, independent of the "ripple" setting's own drive choice.
+      // Edge-triggered locally since anim.dropOnset is already a one-shot
+      // pulse, but the guard keeps this robust if that ever changes.
       const drop = anim.dropOnset && !prevDropOnset;
       prevDropOnset = anim.dropOnset;
       if (drop) ripples.trigger(RIPPLE_DROP_AMP);
-      // A bass onset always rings; a broadband beat rings too, but only
-      // below RIPPLE_SRC_BEAT_THRESHOLD — see that constant's own comment,
-      // and the "ripple"/"rippleSrc" SceneSettings' `reads` above. Reads
-      // anim.onset, not frame.onset directly — see AnimFrame's own doc: a
-      // scene reading FeatureFrame.onset can miss the tick it fired on
-      // whenever the render cap skips it, which is exactly the bug this
-      // scene used to have (renderLatch.ts's header has the story).
-      else if (anim.lowOnset || (anim.onset && rippleSrc < RIPPLE_SRC_BEAT_THRESHOLD)) ripples.trigger(1);
+      // At the "ripple" setting's Scene default this reproduces today's
+      // exact trigger (a bass hit OR a broadband beat, unconditionally —
+      // see that setting's own comment); a non-default pick fires on
+      // whatever single catalogue/grid/line source the picker chose
+      // instead. Reads anim.onset, not frame.onset directly — see
+      // AnimFrame's own doc: a scene reading FeatureFrame.onset can miss
+      // the tick it fired on whenever the render cap skips it, which is
+      // exactly the bug this scene used to have (renderLatch.ts's header
+      // has the story).
+      else if (drives.fired("ripple", anim.lowOnset || anim.onset)) ripples.trigger(1);
 
       return {
         uDriftFlow: driftFlows(driftPhase + lurch.phase + kickJolt, causticDensityScale(getSetting("causticDensity")), flowBuf),
