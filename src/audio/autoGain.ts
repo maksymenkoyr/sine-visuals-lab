@@ -25,11 +25,14 @@
  * those dials describe the music, not the room, and nothing there measures
  * "how much of the analyser's window is this input actually using" — which
  * is exactly what needs fixing here, and is already tracked unconditionally
- * (see bandSpanDb's own doc comment). Like autoTune.ts's own store, auto
- * here is opt-in and defaults off: this setting's own default is
- * AUTO_GAIN_MIN specifically to preserve real tilt, and flipping every
- * existing user to auto on upgrade would quietly override that choice for
- * them.
+ * (see bandSpanDb's own doc comment). Auto here defaults ON — unlike this
+ * setting's own manual default, AUTO_GAIN_MIN, chosen specifically to
+ * preserve real tilt: the room-span reading is exactly what makes different
+ * mics/rooms converge toward the same look, which is the point of the whole
+ * feature, so a fresh profile should get it without a click. An explicit
+ * off is what gets stored (loadInitialAuto below); the manual amount is
+ * still there underneath, cached and ready, for anyone who switches the row
+ * back off.
  */
 
 const STORAGE_KEY = "vibe.autoGain";
@@ -55,9 +58,11 @@ function loadInitial(): number {
 
 function loadInitialAuto(): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY_AUTO) === "1";
+    // Missing key means ON (see this file's header) — only a stored "0"
+    // (persistAuto's explicit off) turns it off.
+    return localStorage.getItem(STORAGE_KEY_AUTO) !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 

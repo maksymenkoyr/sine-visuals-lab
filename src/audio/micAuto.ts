@@ -18,7 +18,10 @@ import type { SceneSetting } from "../render/sceneSettings.ts";
  * a feature, not a bug: they answer two different questions ("is this
  * scene's own look on auto" vs. "is the whole input on auto"), and
  * deviceMenu.ts refreshes each one whenever the other's toggle could have
- * moved it.
+ * moved it. Every member defaults ON (each one's own module owns that
+ * default — src/audio/autoGain.ts, src/audio/silenceGate.ts, autoTune.ts's
+ * DEFAULT_AUTO_KEYS), so on a fresh profile the Input card's Auto button
+ * itself starts lit.
  *
  * Pure and DOM-free, like autoTune.ts's own isSceneAuto/setSceneAuto: every
  * member is an injected getter/setter (MicAutoMembers) rather than an

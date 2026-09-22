@@ -74,14 +74,18 @@ when the driver sits at *its* default — see `computeMacroTarget` in
 sub-param out of the master entirely (see `sparkleGrain`) rather than forcing
 every knob under a group to move together.
 
-**Auto is opt-in, off by default — nothing to do on your part.**
-`vibe.sceneAuto` (the auto-on store `autoTune.ts` reads) only ever lists
-settings a user has explicitly switched TO auto, via the row's own chip or the
-scene's master Auto button. A key that's never been touched — including every
-key on a scene you just added — resolves to its plain `default` (or
-`variantDefaults` entry) until someone opts it in. You don't need to seed
-anything for this to work; just don't add code that writes to that store
-unprompted.
+**A scene's own settings are manual by default — nothing to do on your part.**
+`vibe.sceneAuto` (the auto-on store `autoTune.ts` reads) lists deviations from
+each key's own default, not simply "the settings on auto." For a scene's own
+settings, the default is manual, so a key that's never been touched —
+including every key on a scene you just added — resolves to its plain
+`default` (or `variantDefaults` entry) until someone explicitly switches it to
+auto, via the row's own chip or the scene's master Auto button. You don't need
+to seed anything for this to work; just don't add code that writes to that
+store unprompted. (The one exception is the Input card's own Sensitivity/
+Expansion/Smoothing pseudo-params — `autoTune.ts`'s `DEFAULT_AUTO_KEYS` — which
+default to auto instead; that's the Input card's Auto button's territory, not
+a scene's own settings, so it doesn't affect what you write.)
 
 **Weight-authoring convention:** `autoTune.ts`'s own header comment states the
 recommended magnitude range for `|weight|` per dial and its per-setting sum —

@@ -66,26 +66,27 @@
  * own bandEnergy onsets treat as silence; only the TV's own copy of this
  * setting does that.
  *
- * Auto mode: an opt-in room-floor tracker (feedSilenceGateMeasurement,
- * gated by STORAGE_KEY_AUTO) that can drive both marks instead of a manual
- * drag. It resolves against its own room-floor estimate rather than
- * autoTune.ts's MUSIC_DIALS, for the same reason autoGain.ts's own auto
- * amount does: no dial there describes how quiet this room's silence
- * actually reads, only what the music is doing once it's already playing.
- * Its rule in plain words is "the room is quiet when the volume holds
- * still" — hiss is steady, music is not — so it watches FeatureFrame.level
- * for a stretch that barely moves and treats that as a genuine floor
- * reading, easing `closed` to sit just above it, rather than trying to tell
- * silence from music by loudness alone. Off by default, like autoGain.ts's
- * own auto flag: this whole feature exists because one specific room read
- * Level as nearly zero, and defaulting every device into an unproven
- * room-floor guess on upgrade would be a worse trade for a room that never
- * needed a gate at all. Only src/app.ts's own extractor loop ever calls
- * feedSilenceGateMeasurement — a paired TV (which, per the limitation
- * above, keeps its own entirely local copy of this module) and the
- * synthetic feed never do, so on either path the auto marks simply hold
- * wherever setSilenceGateAuto(true) last seeded them, same as if a manual
- * drag had left them there.
+ * Auto mode: a room-floor tracker (feedSilenceGateMeasurement, gated by
+ * STORAGE_KEY_AUTO) that can drive both marks instead of a manual drag. It
+ * resolves against its own room-floor estimate rather than autoTune.ts's
+ * MUSIC_DIALS, for the same reason autoGain.ts's own auto amount does: no
+ * dial there describes how quiet this room's silence actually reads, only
+ * what the music is doing once it's already playing. Its rule in plain
+ * words is "the room is quiet when the volume holds still" — hiss is
+ * steady, music is not — so it watches FeatureFrame.level for a stretch
+ * that barely moves and treats that as a genuine floor reading, easing
+ * `closed` to sit just above it, rather than trying to tell silence from
+ * music by loudness alone. On by default, like autoGain.ts's own auto flag
+ * (loadInitialAuto below) — an explicit off is what gets stored: the
+ * tracker only ever eases the marks toward this room's own measured quiet,
+ * seeded from whatever the manual marks already were (see `floor`'s own
+ * init below), so a fresh profile starts from the shipped marks and only
+ * moves once this room has actually been heard holding still. Only src/app.ts's own extractor loop
+ * ever calls feedSilenceGateMeasurement — a paired TV (which, per the
+ * limitation above, keeps its own entirely local copy of this module) and
+ * the synthetic feed never do, so on either path the auto marks simply hold
+ * at the seed (= the manual marks), same as if a manual drag had left them
+ * there — this is what keeps every headless screenshot undimmed by default.
  */
 
 const STORAGE_KEY_CLOSED = "vibe.silenceGateClosed";
@@ -198,17 +199,19 @@ export function resetSilenceGate(): void {
 }
 
 // ---- Auto mode -------------------------------------------------------
-// See this file's header for the why. Same opt-in/seed-on-enable/no-op-
-// while-off shape as autoGain.ts's own auto mode, just with two derived
-// marks instead of one amount.
+// See this file's header for the why. Same on-by-default/seed-on-enable/
+// no-op-while-off shape as autoGain.ts's own auto mode, just with two
+// derived marks instead of one amount.
 
 const STORAGE_KEY_AUTO = "vibe.silenceGateAuto";
 
 function loadInitialAuto(): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY_AUTO) === "1";
+    // Missing key means ON (see this file's header) — only a stored "0"
+    // (persistAuto's explicit off) turns it off.
+    return localStorage.getItem(STORAGE_KEY_AUTO) !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -284,10 +287,14 @@ export function silenceGateMarksForFloor(floor: number): SilenceGateMarks {
 
 // The tracker's own state — never persisted, since (like autoGain.ts's
 // `eased`) it's re-derived from the room fresh every session. `floor` is
-// the tracker's current guess at the room's quiet level; envelopeMin/Max
+// the tracker's current guess at the room's quiet level, seeded from
+// closedCache (the stored manual closed mark, or its default) backed out
+// through SILENCE_GATE_AUTO_MARGIN — same reasoning as setSilenceGateAuto's
+// own on-enable seed below, needed here too now that auto can be on from
+// module load without setSilenceGateAuto(true) ever running. envelopeMin/Max
 // are the leaky min/max envelope feedSilenceGateMeasurement reads "is the
 // room holding still" from (see the constants above).
-let floor = SILENCE_GATE_CLOSED_DEFAULT - SILENCE_GATE_AUTO_MARGIN;
+let floor = closedCache - SILENCE_GATE_AUTO_MARGIN;
 let envelopeMin = Infinity;
 let envelopeMax = -Infinity;
 

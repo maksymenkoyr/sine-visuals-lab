@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   getSilenceGate,
   setSilenceGateClosed,
@@ -216,7 +216,7 @@ describe("silence gate auto mode", () => {
     resetSilenceGate();
   });
 
-  it("defaults off, and resolveSilenceGate falls back to the manual marks while off", () => {
+  it("resolveSilenceGate falls back to the manual marks while off", () => {
     expect(isSilenceGateAuto()).toBe(false);
     setSilenceGateClosed(0.02);
     setSilenceGateOpen(0.3);
@@ -332,5 +332,74 @@ describe("silence gate auto mode", () => {
     feedSilenceGateMeasurement(0.02, Number.NaN);
     feedSilenceGateMeasurement(Number.POSITIVE_INFINITY, 1);
     expect(resolveSilenceGate()).toEqual(before);
+  });
+});
+
+// Module-load default: a fresh profile (no stored "vibe.silenceGateAuto" key
+// at all) must come up with auto ON, and — since setSilenceGateAuto(true)
+// never runs on that path — the tracker's `floor` must still seed from
+// whatever manual `closed` mark was stored, not the hardcoded shipped
+// default. This needs its own fake localStorage plus vi.resetModules() and a
+// fresh dynamic import, same pattern tests/autoTune.test.ts uses for its own
+// load-time store tests.
+describe("silence gate auto mode: default on module load", () => {
+  function makeFakeLocalStorage() {
+    const store = new Map<string, string>();
+    return {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+      raw: store,
+    };
+  }
+
+  const originalLocalStorage = (globalThis as { localStorage?: unknown }).localStorage;
+
+  afterEach(() => {
+    (globalThis as { localStorage?: unknown }).localStorage = originalLocalStorage;
+    vi.resetModules();
+  });
+
+  it("a missing key loads as auto on", async () => {
+    const fake = makeFakeLocalStorage();
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+    vi.resetModules();
+    const fresh = await import("../src/audio/silenceGate.ts");
+    expect(fresh.isSilenceGateAuto()).toBe(true);
+  });
+
+  it("a stored \"0\" loads as auto off", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.silenceGateAuto", "0");
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+    vi.resetModules();
+    const fresh = await import("../src/audio/silenceGate.ts");
+    expect(fresh.isSilenceGateAuto()).toBe(false);
+  });
+
+  it("a stored \"1\" loads as auto on", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.silenceGateAuto", "1");
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+    vi.resetModules();
+    const fresh = await import("../src/audio/silenceGate.ts");
+    expect(fresh.isSilenceGateAuto()).toBe(true);
+  });
+
+  it("with a stored manual closed mark and no auto key, resolveSilenceGate right after load honors it as the seed", async () => {
+    const fake = makeFakeLocalStorage();
+    const storedClosed = 0.12;
+    fake.setItem("vibe.silenceGateClosed", String(storedClosed));
+    fake.setItem("vibe.silenceGateOpen", String(storedClosed + 0.1));
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+    vi.resetModules();
+    const fresh = await import("../src/audio/silenceGate.ts");
+
+    expect(fresh.isSilenceGateAuto()).toBe(true); // no auto key stored -> on by default
+    const resolved = fresh.resolveSilenceGate();
+    // The tracker hasn't been fed a single measurement yet, so its `floor`
+    // is still exactly its seed — silenceGateMarksForFloor's own closed for
+    // that seed must equal the stored manual closed mark.
+    expect(resolved.closed).toBeCloseTo(storedClosed);
   });
 });

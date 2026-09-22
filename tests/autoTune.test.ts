@@ -192,6 +192,21 @@ describe("auto state and resolution", () => {
     expect(isAutoEnabled("scene-auto-1", "drift")).toBe(false);
   });
 
+  it("a fresh scene reports the Sensitivity/Expansion/Smoothing pseudo-keys auto and a real scene key manual, both by default", () => {
+    const sceneId = "scene-auto-fresh-defaults";
+    expect(isAutoEnabled(sceneId, SENSITIVITY_AUTO_KEY)).toBe(true);
+    expect(isAutoEnabled(sceneId, EXPANSION_AUTO_KEY)).toBe(true);
+    expect(isAutoEnabled(sceneId, SMOOTHING_AUTO_KEY)).toBe(true);
+    expect(isAutoEnabled(sceneId, SPEC.key)).toBe(false);
+  });
+
+  it("a real scene setting still needs an explicit true to read as auto, unlike the pseudo-keys", () => {
+    const sceneId = "scene-auto-real-key-needs-true";
+    expect(isAutoEnabled(sceneId, SPEC.key)).toBe(false);
+    setAutoEnabled(sceneId, SPEC.key, true);
+    expect(isAutoEnabled(sceneId, SPEC.key)).toBe(true);
+  });
+
   it("resolveSceneSetting returns the manual stored value for a param never switched to auto", () => {
     const sceneId = "scene-auto-2";
     setSceneSetting(sceneId, SPEC, 0.9);
@@ -313,9 +328,10 @@ describe("auto state and resolution", () => {
     setSensitivity(sceneId, 2);
     setExpansion(sceneId, 2);
     setSmoothing(sceneId, 2);
-    // Switch all three to auto so the resolve() calls below actually take
-    // the auto path (the point of this test) instead of trivially reading
-    // the manual store back, which is now the default with nothing enabled.
+    // Switch all three to auto (redundant with their own default, but
+    // explicit here since the point of this test is exercising the auto
+    // path) so the resolve() calls below actually take it, rather than
+    // trivially reading the manual store back.
     setAutoEnabled(sceneId, SENSITIVITY_AUTO_KEY, true);
     setAutoEnabled(sceneId, EXPANSION_AUTO_KEY, true);
     setAutoEnabled(sceneId, SMOOTHING_AUTO_KEY, true);
@@ -359,12 +375,13 @@ describe("auto-on store: legacy-key migration and false-entry pruning", () => {
     vi.resetModules();
   });
 
-  it("rewrites a scene's legacy '@contrast' key to '@expansion', then prunes the leftover false entries as manual", async () => {
+  it("rewrites a scene's legacy '@contrast' key to '@expansion', keeping the leftover false entries as manual (pseudo-keys default to auto)", async () => {
     const fake = makeFakeLocalStorage();
     // Pre-flip data: `false` was the old "manual" marker under the
     // exceptions scheme. Both entries here used to mean "user pinned this
-    // to manual" — under the new opt-in scheme that's simply the default,
-    // so nothing needs to survive in storage for it.
+    // to manual" — under the current default-auto rule for these two
+    // pseudo-keys specifically, `false` is still exactly that deviation
+    // marker, so it survives pruning rather than getting dropped.
     fake.setItem("vibe.sceneAuto", JSON.stringify({ "scene-a": { "@contrast": false, "@sensitivity": false } }));
     (globalThis as { localStorage?: unknown }).localStorage = fake;
 
@@ -374,26 +391,27 @@ describe("auto-on store: legacy-key migration and false-entry pruning", () => {
     // The old key is migrated away regardless, so it never counts as
     // anything under its own name any more.
     expect(fresh.isAutoEnabled("scene-a", "@contrast")).toBe(false);
-    // The migrated '@expansion' entry was a legacy `false`, not `true` — it
-    // gets pruned on load, so it reads as manual, same as before the flip.
+    // The migrated '@expansion' entry was a legacy `false` — EXPANSION_AUTO_KEY
+    // is one of DEFAULT_AUTO_KEYS, so `false` there means manual and is kept.
     expect(fresh.isAutoEnabled("scene-a", fresh.EXPANSION_AUTO_KEY)).toBe(false);
-    // Sensitivity's legacy `false` entry is pruned the same way.
+    // Sensitivity's legacy `false` entry reads as manual the same way.
     expect(fresh.isAutoEnabled("scene-a", fresh.SENSITIVITY_AUTO_KEY)).toBe(false);
 
-    // Nothing survives persistence: scene-a's entry is emptied by pruning
-    // and dropped entirely, not just its individual keys.
+    // The migration still rewrites the key name, but pruning leaves both
+    // `false` deviations in place — they're not stale, they're the manual
+    // choice for two default-auto keys.
     const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto")!);
-    expect(persisted).toEqual({});
+    expect(persisted).toEqual({ "scene-a": { "@sensitivity": false, "@expansion": false } });
   });
 
-  it("rewrites the intermediate '@acceleration' key too, and a scene already on '@expansion' still prunes to manual", async () => {
+  it("rewrites the intermediate '@acceleration' key too, and a scene already on '@expansion' still reads as manual", async () => {
     const fake = makeFakeLocalStorage();
     fake.setItem(
       "vibe.sceneAuto",
       JSON.stringify({
         "scene-a": { "@acceleration": false },
         // Both present: the current key wins, the stale one is just dropped
-        // (before pruning removes the survivor too, since it's `false`).
+        // ('@expansion's own `false` survives pruning — see the test above).
         "scene-b": { "@expansion": false, "@contrast": false },
       }),
     );
@@ -407,7 +425,7 @@ describe("auto-on store: legacy-key migration and false-entry pruning", () => {
     expect(fresh.isAutoEnabled("scene-b", fresh.EXPANSION_AUTO_KEY)).toBe(false);
 
     const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto")!);
-    expect(persisted).toEqual({});
+    expect(persisted).toEqual({ "scene-a": { "@expansion": false }, "scene-b": { "@expansion": false } });
   });
 
   it("a legacy all-false store loads as all-manual and is pruned to empty", async () => {
@@ -441,6 +459,50 @@ describe("auto-on store: legacy-key migration and false-entry pruning", () => {
     // Nothing to prune here — the store on disk is untouched by the load.
     const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto")!);
     expect(persisted).toEqual({ "scene-a": { drift: true } });
+  });
+
+  it("an explicit manual choice on a default-auto pseudo-key survives a reload", async () => {
+    const fake = makeFakeLocalStorage();
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+
+    vi.resetModules();
+    const first = await import("../src/render/autoTune.ts");
+    first.setAutoEnabled("scene-persist", first.SENSITIVITY_AUTO_KEY, false);
+
+    vi.resetModules();
+    const second = await import("../src/render/autoTune.ts");
+    expect(second.isAutoEnabled("scene-persist", second.SENSITIVITY_AUTO_KEY)).toBe(false);
+    const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto")!);
+    expect(persisted).toEqual({ "scene-persist": { "@sensitivity": false } });
+  });
+
+  it("switching a pseudo-key back to auto (its own default) leaves no entry in storage — the store holds deviations only", async () => {
+    const fake = makeFakeLocalStorage();
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+
+    vi.resetModules();
+    const fresh = await import("../src/render/autoTune.ts");
+    fresh.setAutoEnabled("scene-deviation-only", fresh.SENSITIVITY_AUTO_KEY, false); // deviate to manual
+    fresh.setAutoEnabled("scene-deviation-only", fresh.SENSITIVITY_AUTO_KEY, true); // back to its own default (auto)
+
+    expect(fresh.isAutoEnabled("scene-deviation-only", fresh.SENSITIVITY_AUTO_KEY)).toBe(true);
+    const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto") ?? "{}");
+    expect(persisted).toEqual({});
+  });
+
+  it("pruning on load drops a stored true on a pseudo-key (restates its own default) but keeps a stored false on it (means manual)", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.sceneAuto", JSON.stringify({ "scene-x": { "@sensitivity": true, "@expansion": false } }));
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+
+    vi.resetModules();
+    const fresh = await import("../src/render/autoTune.ts");
+
+    expect(fresh.isAutoEnabled("scene-x", fresh.SENSITIVITY_AUTO_KEY)).toBe(true); // default, whether or not pruned
+    expect(fresh.isAutoEnabled("scene-x", fresh.EXPANSION_AUTO_KEY)).toBe(false); // explicit manual survives
+
+    const persisted = JSON.parse(fake.raw.get("vibe.sceneAuto")!);
+    expect(persisted).toEqual({ "scene-x": { "@expansion": false } });
   });
 });
 

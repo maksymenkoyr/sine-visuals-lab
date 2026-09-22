@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   getAutoGain,
   setAutoGain,
@@ -81,7 +81,7 @@ describe("auto-gain auto mode", () => {
     setAutoGain(AUTO_GAIN_DEFAULT);
   });
 
-  it("defaults off, and resolves to the manual value while off", () => {
+  it("resolves to the manual value while off", () => {
     expect(isAutoGainAuto()).toBe(false);
     setAutoGain(0.4);
     expect(resolveAutoGain()).toBe(0.4);
@@ -122,5 +122,56 @@ describe("auto-gain auto mode", () => {
     setAutoGainAuto(true);
     feedAutoGainMeasurement(0, 120);
     expect(resolveAutoGain()).toBeCloseTo(AUTO_GAIN_MAX, 3);
+  });
+});
+
+// Module-load default: a fresh profile (no stored "vibe.autoGainAuto" key at
+// all) must come up with auto ON. This needs its own fake localStorage plus
+// vi.resetModules() and a fresh dynamic import — the module-level `autoOn`
+// cache above is seeded once, at first import, from whatever localStorage
+// looked like at that moment, same pattern tests/autoTune.test.ts uses for
+// its own load-time store tests.
+describe("auto-gain auto mode: default on module load", () => {
+  function makeFakeLocalStorage() {
+    const store = new Map<string, string>();
+    return {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+      raw: store,
+    };
+  }
+
+  const originalLocalStorage = (globalThis as { localStorage?: unknown }).localStorage;
+
+  afterEach(() => {
+    (globalThis as { localStorage?: unknown }).localStorage = originalLocalStorage;
+    vi.resetModules();
+  });
+
+  it("a missing key loads as auto on", async () => {
+    const fake = makeFakeLocalStorage();
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+    vi.resetModules();
+    const fresh = await import("../src/audio/autoGain.ts");
+    expect(fresh.isAutoGainAuto()).toBe(true);
+  });
+
+  it("a stored \"0\" loads as auto off", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.autoGainAuto", "0");
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+    vi.resetModules();
+    const fresh = await import("../src/audio/autoGain.ts");
+    expect(fresh.isAutoGainAuto()).toBe(false);
+  });
+
+  it("a stored \"1\" loads as auto on", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.autoGainAuto", "1");
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+    vi.resetModules();
+    const fresh = await import("../src/audio/autoGain.ts");
+    expect(fresh.isAutoGainAuto()).toBe(true);
   });
 });

@@ -25,19 +25,29 @@ import { getPin } from "../tuning/pins.ts";
  * in MUSIC_DIALS this reads and the file header there for why "everything
  * neutral" must reproduce a setting's plain default.
  *
- * Auto is opt-in: vibe.sceneAuto only ever lists the params a user has
- * explicitly switched TO auto (per-row chip or the scene's master Auto
- * button). A key absent from the store — including every key on a scene
- * added after this feature shipped, and every key on a fresh profile — is
- * manual by default, resolving to its plain spec/variant default until
- * someone opts it in.
+ * vibe.sceneAuto lists deviations from each key's own default, not simply
+ * "the params currently on auto." A scene's own settings (caustics' focus,
+ * mesh grid's density, …) default to manual, same as always. The Input
+ * card's Sensitivity/Expansion/Smoothing pseudo-params (DEFAULT_AUTO_KEYS
+ * below — see src/audio/micAuto.ts for why those three specifically) default
+ * to auto instead. A key absent from the store — including every key on a
+ * scene added after this feature shipped, and every key on a fresh profile —
+ * resolves to whichever of those two defaults its own key has, until someone
+ * explicitly switches it the other way (per-row chip, the scene's master
+ * Auto button, or the Input card's own Auto button — src/audio/micAuto.ts).
  *
- * This flipped from an exceptions-store ("absent means auto") design; old
- * persisted data only ever contains `false` values (the old "manual"
- * marker), and those now simply read as absent-therefore-manual — the new
- * default — so no migration was needed for the flip itself. loadAutoStore
- * prunes any lingering non-`true` entries (and the empty scope objects they
- * leave behind) on load so stale `false`s don't sit in storage forever.
+ * This module flipped once already, from an exceptions-store ("absent means
+ * auto") design to "absent means manual"; old persisted data only ever
+ * contained `false` values (the old "manual" marker), and those simply read
+ * as absent-therefore-manual under that rule, so no migration was needed for
+ * that flip. The mic-pseudo-params flip (this file's second one — absent now
+ * means auto for exactly DEFAULT_AUTO_KEYS) reuses that same old `false`
+ * marker for its new purpose: a `false` already stored against one of those
+ * three keys meant "manual" before, and it still does now, so it's kept
+ * as-is rather than migrated. loadAutoStore's pruneDefaultEntries drops any
+ * entry that merely restates its own key's default (and the empty scope
+ * objects that leaves behind) on load, so a stale entry doesn't sit in
+ * storage forever.
  *
  * A SceneSetting's `macro` field is the same displacement shape as `auto`,
  * aimed at another setting instead of the music profile: computeMacroTarget
@@ -85,6 +95,12 @@ export const AUTO_STRENGTH_DEFAULT = 1;
 export const SENSITIVITY_AUTO_KEY = "@sensitivity";
 export const EXPANSION_AUTO_KEY = "@expansion";
 export const SMOOTHING_AUTO_KEY = "@smoothing";
+
+// The Input card's "whole mic" pseudo-params (see src/audio/micAuto.ts) —
+// auto by default. Every real SceneSetting key stays manual by default; see
+// isAutoEnabled/setAutoEnabled below for how the store encodes that
+// per-key-different default as deviations only.
+const DEFAULT_AUTO_KEYS: ReadonlySet<string> = new Set([SENSITIVITY_AUTO_KEY, EXPANSION_AUTO_KEY, SMOOTHING_AUTO_KEY]);
 
 // The auto keys from this control's previous names — see the migration in
 // loadAutoStore() below, and the parallel legacyKeys migration for the
@@ -148,7 +164,7 @@ const SMOOTHING_SPEC: SceneSetting = {
   auto: { attack: -0.3, tempo: -0.15 },
 };
 
-type AutoStore = Record<string, Record<string, true>>;
+type AutoStore = Record<string, Record<string, boolean>>;
 
 // One-time rewrite of any LEGACY_EXPANSION_AUTO_KEYS auto-on key to
 // EXPANSION_AUTO_KEY, in place, on whatever shape loadAutoStore() handed
@@ -171,17 +187,26 @@ function migrateLegacyExpansionKeys(store: AutoStore): boolean {
   return changed;
 }
 
-// Drops any entry that isn't literally `true` (e.g. a `false` written by the
-// pre-flip "exceptions" scheme, back when absent meant auto) and any scope
-// object left empty by that — those now just mean "manual", the new default,
-// so keeping them around is dead weight, not state. Returns whether anything
-// changed, so the caller only re-persists when pruning actually did something.
-function pruneNonAutoEntries(store: AutoStore): boolean {
+// Drops any entry that just restates its own key's default (and any scope
+// object left empty by that) — deviations only, per this module's header.
+// For a key in DEFAULT_AUTO_KEYS (default auto) the deviation marker is
+// `false`, so anything else stored against it — a `true`, or any other
+// stray value — restates the default and gets dropped. For every other key
+// (default manual) the deviation marker is `true`, so anything else —
+// including a `false` written by the pre-flip "exceptions" scheme, back
+// when absent meant auto — restates the default and gets dropped. A
+// lingering `false` on one of DEFAULT_AUTO_KEYS from that same old scheme is
+// the one case NOT dropped: it meant "manual" under the old scheme too, and
+// it still does under the new one, so it's kept as-is rather than migrated.
+// Returns whether anything changed, so the caller only re-persists when
+// pruning actually did something.
+function pruneDefaultEntries(store: AutoStore): boolean {
   let changed = false;
   for (const sceneId of Object.keys(store)) {
-    const sceneEntry = store[sceneId] as Record<string, unknown>;
+    const sceneEntry = store[sceneId];
     for (const key of Object.keys(sceneEntry)) {
-      if (sceneEntry[key] !== true) {
+      const restatesDefault = DEFAULT_AUTO_KEYS.has(key) ? sceneEntry[key] !== false : sceneEntry[key] !== true;
+      if (restatesDefault) {
         delete sceneEntry[key];
         changed = true;
       }
@@ -201,7 +226,7 @@ function loadAutoStore(): AutoStore {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
     const migrated = migrateLegacyExpansionKeys(parsed);
-    const pruned = pruneNonAutoEntries(parsed);
+    const pruned = pruneDefaultEntries(parsed);
     if (migrated || pruned) localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(parsed));
     return parsed;
   } catch {
@@ -243,17 +268,27 @@ function persistStrength(): void {
   }
 }
 
-/** True only if this exact (scene, key) pair was explicitly switched to
- *  auto. Keyed by sceneSettings.ts's settingScope, so a scene with a variant
- *  keeps one auto/manual state per variant option, like its values. */
+/** Whether this exact (scene, key) pair currently resolves to auto — either
+ *  because it was explicitly switched to auto, or because nothing's been
+ *  stored for it and its key defaults to auto (DEFAULT_AUTO_KEYS above).
+ *  Keyed by sceneSettings.ts's settingScope, so a scene with a variant keeps
+ *  one auto/manual state per variant option, like its values. */
 export function isAutoEnabled(sceneId: string, key: string): boolean {
-  return autoOn[settingScope(sceneId, key)]?.[key] === true;
+  const stored = autoOn[settingScope(sceneId, key)]?.[key];
+  if (stored === undefined) return DEFAULT_AUTO_KEYS.has(key);
+  return stored === true;
 }
 
 export function setAutoEnabled(sceneId: string, key: string, on: boolean): void {
   const scope = settingScope(sceneId, key);
-  if (on) {
-    (autoOn[scope] ??= {})[key] = true;
+  // The store holds only deviations from each key's own default (see this
+  // module's header): a DEFAULT_AUTO_KEYS key's default is auto, so writing
+  // `on` (true) is a no-op deviation-wise and just clears any stored
+  // manual override, while `off` (false) is the deviation and gets written.
+  // Every other key's default is manual, so it's the mirror image.
+  const deviatesFromDefault = DEFAULT_AUTO_KEYS.has(key) ? !on : on;
+  if (deviatesFromDefault) {
+    (autoOn[scope] ??= {})[key] = on;
   } else {
     delete autoOn[scope]?.[key];
     if (autoOn[scope] && Object.keys(autoOn[scope]).length === 0) delete autoOn[scope];
