@@ -3,6 +3,7 @@ import type { QualitySettings } from "./quality.ts";
 import type { Palette } from "./palette.ts";
 import { registerVariant, type SceneSetting } from "./sceneSettings.ts";
 import type { AnimFrame } from "./animClock.ts";
+import type { SceneDrives } from "./drives.ts";
 
 /** A room-space rectangle this device is responsible for drawing. Full-frame is {x:0,y:0,w:1,h:1}. */
 export interface Viewport {
@@ -37,6 +38,12 @@ export interface Scene {
      *  animClock.ts for what composes it and why each piece is derived
      *  rather than read straight off FeatureFrame. */
     anim: AnimFrame,
+    /** Resolved SceneSetting.drive values for this render — see
+     *  src/render/drives.ts. Optional and defaults to a Scene-only
+     *  passthrough (drives.ts's PASSTHROUGH_DRIVES) for every caller not
+     *  wired to a real DriveEngine (gallery previews, tests, probes), which
+     *  renders exactly as if this scene had no drive settings at all. */
+    drives?: SceneDrives,
   ): void;
   dispose(ctx: SceneContext): void;
 }

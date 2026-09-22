@@ -6,8 +6,10 @@ import type { SceneSetting } from "./sceneSettings.ts";
 import { resolveSceneSetting } from "./autoTune.ts";
 import type { Scene, SceneContext } from "./scene.ts";
 import type { AnimFrame } from "./animClock.ts";
+import { PASSTHROUGH_DRIVES, type SceneDrives } from "./drives.ts";
 import {
   COMMON_UNIFORMS_GLSL,
+  DRIVE_GLSL,
   ROOM_UV_GLSL,
   SAMPLE_BANDS_GLSL,
   settingUniformName,
@@ -46,6 +48,13 @@ export function createFullscreenScene(
       frame: FeatureFrame,
       anim: AnimFrame,
       getSetting: (key: string) => number,
+      /** See Scene.render()'s own `drives` param (scene.ts) — a JS trigger
+       *  reads `drives.fired("ripple", anim.lowOnset)`; a continuous JS
+       *  coupling reads `drives.value("driftKick", anim.lowPulse)`. Always
+       *  present here (defaults to PASSTHROUGH_DRIVES when the scene itself
+       *  wasn't given one), so an extraUniforms closure never has to guard
+       *  against it being undefined. */
+      drives: SceneDrives,
     ) => Record<string, ExtraUniformValue>;
   } = {},
 ): Scene {
@@ -56,6 +65,7 @@ export function createFullscreenScene(
   const settingsByKey = new Map(settings.map((s) => [s.key, s]));
 
   const settingsUniformsGlsl = settings.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+  const driveUniformsGlsl = DRIVE_GLSL(settings);
 
   const fragSrc = `#version 300 es
 precision highp float;
@@ -63,6 +73,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${opts.extraUniformDecls ?? ""}
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
@@ -86,13 +97,13 @@ ${fragBody}
       vao = createFullscreenQuad(ctx.gl);
     },
 
-    render(ctx, frame, viewport, palette, anim) {
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!prog || !vao) return;
       const { gl } = ctx;
       prog.use();
-      uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, id, settings, bandsBuf);
+      uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, id, settings, bandsBuf, drives);
       if (opts.extraUniforms) {
-        const extras = opts.extraUniforms(frame, anim, getSetting);
+        const extras = opts.extraUniforms(frame, anim, getSetting, drives);
         for (const [name, value] of Object.entries(extras)) {
           if (value instanceof Float32Array) prog.setFv(name, value);
           else if (typeof value === "number") prog.setF(name, value);
