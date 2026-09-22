@@ -111,10 +111,16 @@ export interface AnimFrame {
    *  the meters panel's Hit strength card (audioMeters.ts) wants to watch
    *  without an old AnimFrame changing under it later. */
   hitStrength: { beat: HitParts; low: HitParts; mid: HitParts; high: HitParts };
-  /** This tick's sensitivity-line drive (src/audio/bandLine.ts) — 0 when
-   *  `line` below is omitted. `frame.bands` here is already post-band-gains
-   *  (app.ts applies bandGains.ts before calling advance()), so the line
-   *  reads the same shaped spectrum the Bands card's faders left behind. */
+  /** The sensitivity-line drive (src/audio/bandLine.ts), peak-held: it
+   *  jumps to this tick's raw drive whenever that is higher and otherwise
+   *  decays at LINE_DRIVE_RELEASE_PER_SEC, the same shape as beatPulse. A
+   *  line drawn just above where a band rests is cleared for a frame or two
+   *  per hit, which a shader can't show on its own — the release turns that
+   *  poke into a visible flash while a sustained rise still reads as a
+   *  level. 0 when `line` below is omitted. `frame.bands` here is already
+   *  post-band-gains (app.ts applies bandGains.ts before calling advance()),
+   *  so the line reads the same shaped spectrum the Bands card's faders left
+   *  behind. */
   lineDrive: number;
   /** Per-band excess behind lineDrive above — null when `line` is omitted.
    *  Copied, same reason `hits` copies bandEnergy's diags: the overlay
@@ -166,6 +172,7 @@ export interface AnimClock {
 }
 
 const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts broadband beatPulse decay
+const LINE_DRIVE_RELEASE_PER_SEC = 6; // lineDrive's peak-hold release — see AnimFrame.lineDrive
 
 export function createAnimClock(): AnimClock {
   const flow: FlowClock = createFlowClock();
@@ -176,6 +183,7 @@ export function createAnimClock(): AnimClock {
   const centroid: SpectralCentroid = createSpectralCentroid();
   const grid: GridPulse = createGridPulse();
   let beatPulse = 0;
+  let lineDrive = 0;
   // The broadband detector's own last graded hit — mutated in place by
   // hitStrength() below, same reasoning as bandEnergy.ts's own per-group
   // GroupState.hit: holds the previous hit's numbers between onsets rather
@@ -231,6 +239,9 @@ export function createAnimClock(): AnimClock {
       // frame.bands here is already post-band-gains — see this field's own
       // doc comment on AnimFrame.lineDrive.
       const lineResult = line ? bandLineDrive(frame.bands, line.heights, line.strength, lineDriveScratch) : null;
+      lineDrive *= Math.exp(-dtSec * LINE_DRIVE_RELEASE_PER_SEC * rateScale);
+      if (lineResult && lineResult.drive > lineDrive) lineDrive = lineResult.drive;
+      if (!lineResult) lineDrive = 0;
 
       return {
         dtSec,
@@ -282,7 +293,7 @@ export function createAnimClock(): AnimClock {
           mid: { ...bandEnergy.midHit },
           high: { ...bandEnergy.highHit },
         },
-        lineDrive: lineResult ? lineResult.drive : 0,
+        lineDrive,
         lineExcess: lineResult ? Float32Array.from(lineResult.excess) : null,
       };
     },

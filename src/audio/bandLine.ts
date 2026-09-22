@@ -7,8 +7,12 @@ import { createPerSceneSetting } from "./sensitivity.ts";
  * shape I drew is the spectrum". A band's *headroom* is `1 - line[b]`: how
  * much room is left above the line for signal to stand out in. A band drawn
  * to the very top (1) has no headroom and is excluded entirely — however
- * loud it gets, it can never drive anything. A band left at the bottom (0)
- * is fully in: its whole reading counts.
+ * loud it gets, it can never drive anything. A band drawn to the bottom (0)
+ * is fully in: its whole reading counts. The default is the top for every
+ * band — a scene that's never been drawn on listens to nothing, and the
+ * user draws the line *down* onto the range they want, so an undrawn band
+ * can neither dilute the drive nor sneak signal into it (the first draft
+ * defaulted to the bottom and both happened at once).
  *
  * bandLineDrive() reduces the whole line to one number per frame: the
  * fraction of the line's total headroom the signal currently fills.
@@ -16,7 +20,7 @@ import { createPerSceneSetting } from "./sensitivity.ts";
  *   excess_b = max(0, bands[b] - line[b])
  *   drive    = clamp01( strength * Σ excess_b / Σ (1 - line[b]) )   (0 if Σ headroom is 0)
  *
- * With the line flat at 0 and strength 1 this is exactly
+ * With the line drawn flat to the bottom and strength 1 this is exactly
  * FeatureFrame.energy (the mean of every band) — the line generalises
  * energy into "energy above a shape you drew". Near the line, a band
  * contributes almost nothing; far above it, the same band dominates.
@@ -95,12 +99,15 @@ export function bandLineDrive(
 
 const STORAGE_KEY_LINE = "vibe.bandLine";
 
+/** Where an undrawn band sits: the top, excluded — see the file header. */
+export const LINE_HEIGHT_DEFAULT = 1;
+
 function sanitizeLine(raw: unknown): Float32Array | null {
   if (!Array.isArray(raw) || raw.length !== NUM_BANDS) return null;
   const out = new Float32Array(NUM_BANDS);
   for (let b = 0; b < NUM_BANDS; b++) {
     const v = raw[b];
-    out[b] = typeof v === "number" && Number.isFinite(v) ? clamp01(v) : 0;
+    out[b] = typeof v === "number" && Number.isFinite(v) ? clamp01(v) : LINE_HEIGHT_DEFAULT;
   }
   return out;
 }
@@ -138,9 +145,6 @@ function persistLine(): void {
   }
 }
 
-// Default view for a scene that's never been drawn on: flat 0, all bands
-// fully in — see this file's header for what that means for the drive
-// formula (identical to FeatureFrame.energy at strength 1).
 const scratchLine = new Float32Array(NUM_BANDS);
 
 /** This scene's drawn line, written into `out` (default: a shared scratch —
@@ -149,7 +153,7 @@ const scratchLine = new Float32Array(NUM_BANDS);
 export function getBandLine(sceneId: string, out: Float32Array = scratchLine): Float32Array {
   const stored = lineCache.get(sceneId);
   if (stored) out.set(stored);
-  else out.fill(0);
+  else out.fill(LINE_HEIGHT_DEFAULT);
   return out;
 }
 
@@ -157,10 +161,10 @@ export function setBandLineBand(sceneId: string, band: number, height: number): 
   if (!Number.isInteger(band) || band < 0 || band >= NUM_BANDS) return;
   let heights = lineCache.get(sceneId);
   if (!heights) {
-    heights = new Float32Array(NUM_BANDS);
+    heights = new Float32Array(NUM_BANDS).fill(LINE_HEIGHT_DEFAULT);
     lineCache.set(sceneId, heights);
   }
-  heights[band] = Number.isFinite(height) ? clamp01(height) : 0;
+  heights[band] = Number.isFinite(height) ? clamp01(height) : LINE_HEIGHT_DEFAULT;
   persistLine();
 }
 
@@ -168,13 +172,13 @@ export function setBandLine(sceneId: string, heights: ArrayLike<number>): void {
   const next = new Float32Array(NUM_BANDS);
   for (let b = 0; b < NUM_BANDS; b++) {
     const v = heights[b];
-    next[b] = Number.isFinite(v) ? clamp01(v) : 0;
+    next[b] = Number.isFinite(v) ? clamp01(v) : LINE_HEIGHT_DEFAULT;
   }
   lineCache.set(sceneId, next);
   persistLine();
 }
 
-/** Back to flat 0 — the Line card's Reset chip (alongside
+/** Back to the undrawn default — the Line card's Reset chip (alongside
  *  resetBandLineStrength below). */
 export function resetBandLine(sceneId: string): void {
   lineCache.delete(sceneId);
@@ -182,7 +186,7 @@ export function resetBandLine(sceneId: string): void {
 }
 
 export function isDefaultLine(line: ArrayLike<number>): boolean {
-  for (let b = 0; b < NUM_BANDS; b++) if (line[b] !== 0) return false;
+  for (let b = 0; b < NUM_BANDS; b++) if (line[b] !== LINE_HEIGHT_DEFAULT) return false;
   return true;
 }
 

@@ -3,7 +3,7 @@ import type { BandSplit } from "../audio/bandSplit.ts";
 import { createSpectrumStrip, STRIP_PLOT_HEIGHT_PX, type SpectrumStrip } from "./spectrumStrip.ts";
 import { BANDS_AMBER, withAlpha } from "./controlsTheme.ts";
 import { digitsStyle, readoutStyle, rowHeadStyle, rowLabelStyle, rowRightStyle, unitStyle } from "./controlsKit.ts";
-import { LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN } from "../audio/bandLine.ts";
+import { LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, LINE_HEIGHT_DEFAULT } from "../audio/bandLine.ts";
 // Circular with deviceMenu.ts (it imports createBandLineEditor below) — same
 // established pattern as audioMeters.ts importing createControlRow from
 // there; safe because neither side calls the other at module-eval time,
@@ -274,11 +274,11 @@ export function createBandLineEditor(opts: BandLineEditorOpts): BandLineEditor {
   overlay.addEventListener("pointerup", endDrag);
   overlay.addEventListener("pointercancel", endDrag);
 
-  // Small nicety: reset one band to 0 (fully in — see this file's header)
-  // without hunting for the exact bottom of its column.
+  // Small nicety: put one band back to ignored (the top, LINE_HEIGHT_DEFAULT)
+  // without hunting for the exact top of its column.
   overlay.addEventListener("dblclick", (e) => {
     const { band } = bandAndHeightFromEvent(e);
-    commitBand(band, 0);
+    commitBand(band, LINE_HEIGHT_DEFAULT);
     redraw();
   });
 

@@ -98,7 +98,7 @@ describe("createAnimClock", () => {
     expect(anim.lineExcess).toBeNull();
   });
 
-  it("a flat-0 line at strength 1 makes lineDrive equal frame.energy", () => {
+  it("a line drawn flat to the bottom at strength 1 makes lineDrive equal frame.energy", () => {
     const clock = createAnimClock();
     const bands = Float32Array.from({ length: NUM_BANDS }, (_, i) => (i % 7) / 10);
     const energy = Array.from(bands).reduce((a, b) => a + b, 0) / NUM_BANDS;
@@ -109,5 +109,18 @@ describe("createAnimClock", () => {
     });
     expect(anim.lineDrive).toBeCloseTo(energy, 5);
     expect(anim.lineExcess).not.toBeNull();
+  });
+
+  it("lineDrive holds its peak and releases instead of dropping with the raw drive", () => {
+    const clock = createAnimClock();
+    const line = new Float32Array(NUM_BANDS).fill(0);
+    const loud = new Float32Array(NUM_BANDS).fill(0.8);
+    const quiet = new Float32Array(NUM_BANDS).fill(0);
+    const opts = { heights: line, strength: 1 };
+    const peak = clock.advance(DT, frame({ bands: loud }), undefined, undefined, undefined, undefined, opts).lineDrive;
+    const after = clock.advance(DT, frame({ bands: quiet }), undefined, undefined, undefined, undefined, opts).lineDrive;
+    expect(peak).toBeCloseTo(0.8, 5);
+    expect(after).toBeGreaterThan(0);
+    expect(after).toBeLessThan(peak);
   });
 });

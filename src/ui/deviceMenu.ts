@@ -1482,7 +1482,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const lineHint = document.createElement("div");
   lineHint.className = "vc-hint";
   lineHint.textContent =
-    "Draw a line over the bars. Effects that follow the line (Caustics: Sparkle from line) react to how far the spectrum rises above it — a band at the top is ignored.";
+    "Draw the line down onto the bars you want to listen to — everything starts ignored at the top. Keep it just above where those bars rest, so only the hits poke over it: effects that follow the line (Caustics: Sparkle from line) react to how far the spectrum rises above it, and a Drive that sits near full means the line is too low.";
   lineStripRow.append(lineEditor.el, lineHint);
   lineCard.body.append(lineStripRow, lineEditor.strengthRow, lineEditor.driveRow);
 

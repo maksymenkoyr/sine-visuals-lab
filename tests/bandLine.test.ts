@@ -11,8 +11,7 @@ import {
   resetBandLineStrength,
   setBandLine,
   setBandLineBand,
-  setBandLineStrength,
-} from "../src/audio/bandLine.ts";
+  setBandLineStrength, LINE_HEIGHT_DEFAULT } from "../src/audio/bandLine.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 
 function flatLine(v: number): Float32Array {
@@ -74,8 +73,9 @@ describe("bandLineDrive", () => {
 });
 
 describe("isDefaultLine", () => {
-  it("is true only for a flat-0 line", () => {
-    expect(isDefaultLine(flatLine(0))).toBe(true);
+  it("is true only for the undrawn line (every band at the top)", () => {
+    expect(isDefaultLine(flatLine(LINE_HEIGHT_DEFAULT))).toBe(true);
+    expect(isDefaultLine(flatLine(0))).toBe(false);
     const line = flatLine(0);
     line[10] = 0.01;
     expect(isDefaultLine(line)).toBe(false);
@@ -85,9 +85,9 @@ describe("isDefaultLine", () => {
 describe("band line store", () => {
   // vitest runs under environment: "node" (vitest.config.ts), so there is no
   // localStorage global at all here — this also proves the module tolerates that.
-  it("a scene that's never been drawn on reads as flat 0", () => {
+  it("a scene that's never been drawn on reads as flat LINE_HEIGHT_DEFAULT (the top: ignored)", () => {
     const line = getBandLine("nonexistent-scene");
-    for (let b = 0; b < NUM_BANDS; b++) expect(line[b]).toBe(0);
+    for (let b = 0; b < NUM_BANDS; b++) expect(line[b]).toBe(LINE_HEIGHT_DEFAULT);
     expect(isDefaultLine(line)).toBe(true);
   });
 
@@ -118,7 +118,7 @@ describe("band line store", () => {
     for (let b = 2; b < NUM_BANDS; b++) expect(line[b]).toBeCloseTo(heights[b] as number);
   });
 
-  it("resetBandLine returns a scene to the default flat-0 line", () => {
+  it("resetBandLine returns a scene to the undrawn default", () => {
     setBandLineBand("scene-reset", 4, 0.8);
     resetBandLine("scene-reset");
     expect(isDefaultLine(getBandLine("scene-reset"))).toBe(true);

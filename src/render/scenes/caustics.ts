@@ -353,6 +353,26 @@ const SETTINGS: SceneSetting[] = [
     reads: ["anim.centroid"],
   },
   SPARKLE,
+  // The sensitivity line (src/audio/bandLine.ts, drawn on the Line card) as
+  // an alternate sparkle source: at 0 the glints still follow the treble hit
+  // detector exactly as before (see sparkleDrive in FRAG below); dialed up,
+  // they blend toward uLineDrive, so a line drawn to exclude the low/mid
+  // bands makes the glints track only the treble energy the user drew above
+  // it, and a strength pushed past 1 (the Line card's own Strength row) can
+  // light them at the faintest rise. Off the master: a source choice, not an
+  // intensity one, same convention as sparkleGrain above.
+  {
+    key: "sparkleLine",
+    label: "Sparkle from line",
+    description:
+      "How much the glints follow the sensitivity line drawn on the Line card instead of the treble hit detector — at full they light exactly as far as the spectrum rises above your line",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+    macro: { driver: SPARKLE, weight: 0 },
+  },
   // The constants that used to be hardcoded on the sparkle line in FRAG —
   // how bright, how many, how fine, how far the glints spread, and whether
   // they persist through a sustained wash instead of only flashing on a hit.
@@ -436,27 +456,6 @@ const SETTINGS: SceneSetting[] = [
     default: 0, // -> today's behavior: glints only follow the onset pulse
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.3 },
-  },
-  // The sensitivity line (src/audio/bandLine.ts, drawn on the Line card) as
-  // an alternate sparkle source: at 0 the glints still follow the treble hit
-  // detector exactly as before (see sparkleDrive in FRAG below); dialed up,
-  // they blend toward uLineDrive, so a line drawn to exclude the low/mid
-  // bands makes the glints track only the treble energy the user drew above
-  // it, and a strength pushed past 1 (the Line card's own Strength row) can
-  // light them at the faintest rise. Off the master: a source choice, not an
-  // intensity one, same convention as sparkleGrain above.
-  {
-    key: "sparkleLine",
-    label: "Sparkle from line",
-    description:
-      "How much the glints follow the sensitivity line drawn on the Line card instead of the treble hit detector — at full they light exactly as far as the spectrum rises above your line",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0,
-    advanced: true,
-    macro: { driver: SPARKLE, weight: 0 },
   },
   // Spray injection rides on the glints rather than replacing them: every
   // cell of the glint field is its own tiny nozzle, so sprays appear in as
