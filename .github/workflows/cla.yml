@@ -1,0 +1,95 @@
+# The Contributor License Agreement check — the `license/cla` check that
+# main's branch protection requires, run in this repo's own Actions.
+#
+# Why it lives here: it replaced the cla-assistant.io webhook, which answered
+# every delivery and then, on a share of pull requests, never reported a
+# status at all — and GitHub waits forever for a required status, so those PRs
+# silently could not merge. A failure here is an ordinary red job: readable,
+# and re-runnable. The job's `name` must stay `license/cla`: branch protection
+# matches the required check by that name.
+#
+# How signing works: on a PR with an unsigned author, the job fails and posts a
+# comment asking them to post the signing sentence (`custom-pr-sign-comment`
+# below). The action accepts the comment only if it equals that sentence
+# exactly, apart from case and surrounding whitespace — so it must stay
+# identical to the sentence in CLA.md's "How to agree" section; change both
+# together. Posting it records the signature and re-runs the PR's check.
+# Anyone can comment `recheck` to run the check again, which is also how to
+# check a PR opened before this workflow existed.
+#
+# Where signatures live: `signatures/cla.json` on `main` of the private repo
+# maksymenkoyr/sine-visuals-lab-cla — one entry per signer, one commit per
+# signature, so its history is the timestamped record. The action reads and
+# writes it with the CLA_SIGNATURES_TOKEN secret: a fine-grained personal
+# access token limited to that one repo, Contents read and write. When the
+# token expires, this job fails on every PR with an error about the personal
+# access token or retrieving repository contents: create a new token and
+# replace the secret; no signatures are lost. That repo's `main` must stay
+# unprotected, and the file must exist — the action fails, rather than
+# creating it, when it's missing.
+#
+# The allowlist never has to sign: the maintainer (the CLA's grantee);
+# `claude`, the account GitHub maps commits by Claude Code cloud sessions to
+# (authored as noreply@anthropic.com — the maintainer's own work); and bots.
+# A plain name matches exactly; a pattern with `*` is an unanchored regex.
+# A commit authored with an email linked to no GitHub account can't sign and
+# will hold the check red — its author has to fix the commit's email.
+#
+# Security: pull_request_target runs this file as it is on main, with the
+# secret, even for PRs from forks. That's safe only because nothing here
+# checks out or runs the PR's code — the action reads commit metadata and
+# comments through the API. Keep it that way.
+#
+# The action (contributor-assistant/github-action, "CLA Assistant Lite") is
+# archived upstream, so it's pinned to its v2.6.1 commit and can't change
+# underneath this file. It runs on node20: when GitHub retires that runtime,
+# move to a maintained fork or re-pin.
+name: CLA
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cla-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  cla:
+    name: license/cla
+    # A comment only matters on a pull request, and only when it's `recheck`
+    # or looks like the signing sentence — the action itself checks the
+    # sentence exactly.
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request &&
+        (github.event.comment.body == 'recheck' ||
+          contains(github.event.comment.body, 'hereby agree to its terms')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Re-run the PR's failed check once its author has signed.
+      actions: write
+      # The sign-here and all-signed comments.
+      pull-requests: write
+    steps:
+      - uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.CLA_SIGNATURES_TOKEN }}
+        with:
+          path-to-document: https://github.com/maksymenkoyr/sine-visuals-lab/blob/main/CLA.md
+          custom-pr-sign-comment: I have read the CLA at CLA.md and I hereby agree to its terms for all my past and future contributions to this project.
+          remote-organization-name: maksymenkoyr
+          remote-repository-name: sine-visuals-lab-cla
+          branch: main
+          path-to-signatures: signatures/cla.json
+          allowlist: maksymenkoyr,claude,*[bot]
+          # Nothing triggers on `closed` anyway; stated so merged PRs are
+          # never locked if someone adds it.
+          lock-pullrequest-aftermerge: false
