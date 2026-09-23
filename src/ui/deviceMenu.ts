@@ -516,7 +516,7 @@ const driveLayerStyle = `grid-area: 1 / 1; min-width: 0;`;
 // alongside the readouts, not tucked under a control someone has to find).
 const eqHintStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.5); margin-top: 6px;`;
 const FADER_HINT_TEXT =
-  "Middle is 1× — drag up to boost a band, down to cut it, all the way down to switch it off · hover a reactive setting to choose what it reacts to";
+  "Drag a knob up to boost a band, down to cut it. Hover a reactive setting to pick what it reacts to.";
 // Shown only as the Draw chip's tooltip (drives.ts's DriveModeOption for
 // {source:"line"}) — the Setting layer's own three rows (mode, range,
 // Draw's Strength) have no room left for a fourth line of prose.
@@ -1681,6 +1681,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  differs per setting (a Scene mix row, the default-only extras), so
    *  there was little to share across selections anyway. Pointer-only, not
    *  part of the Tab ring — see drivePickerWrapStyle's own comment. */
+  // The default option's marker: a small amber dot after the label, not a
+  // text bullet — at chip size a "•" glyph reads as trailing punctuation.
+  function setDriveChipLabel(btn: HTMLButtonElement, label: string, isDefault: boolean): void {
+    btn.textContent = label;
+    if (!isDefault) return;
+    const dot = document.createElement("span");
+    dot.style.cssText = `display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: ${BANDS_AMBER}; margin-left: 6px; vertical-align: middle;`;
+    btn.appendChild(dot);
+    btn.title = "This setting's default";
+  }
+
   function renderDrivePicker(host: HTMLElement, sceneId: string, spec: SceneSetting): void {
     const current = deps.getDriveChoice(sceneId, spec);
     const rows = driveModes(spec);
@@ -1698,7 +1709,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // Scene mix only ever appears as this setting's own default (see
       // driveModes()'s doc comment) — its dot marks the whole tab, since it
       // has no row-2 chip of its own to carry it instead.
-      btn.textContent = row.mode === "scene" ? `${row.label} •` : row.label;
+      setDriveChipLabel(btn, row.label, row.mode === "scene");
       btn.style.cssText = row.mode === activeMode ? paletteChipLitStyle : paletteChipStyle;
       btn.addEventListener("click", () => {
         if (row.mode === activeMode) return;
@@ -1727,7 +1738,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           btn.title = LINE_HINT_TEXT;
           if (isCurrent) drawIsCurrent = true;
         }
-        btn.textContent = opt.isDefault ? `${opt.label} •` : opt.label;
+        setDriveChipLabel(btn, opt.label, !!opt.isDefault);
         btn.style.cssText = isCurrent ? paletteChipLitStyle : paletteChipStyle;
         btn.addEventListener("click", () => {
           if (isCurrent) return;
