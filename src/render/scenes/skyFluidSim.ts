@@ -261,8 +261,10 @@ export const BYTE_SCALAR_RANGE = 50;
 export const BYTE_DYE_RANGE = 4;
 
 /** Slot 0 is always the centre emitter; slots 1..SPLAT_SLOTS-1 are the
- *  periodic accent splats. */
-export const SPLAT_SLOTS = 4;
+ *  periodic accent splats. Raised from the Neon Fluid original's 4: Sky
+ *  scatters one small cloud source per slot across the frame (sky.ts's
+ *  DRIFTER_SEEDS), and every slot past this count is silently dropped. */
+export const SPLAT_SLOTS = 12;
 
 /** A single force/dye injection point, in sim uv with force in
  *  texels/s^2 at FORCE_REF_ROWS rows. `tag` marks the emitter (1) vs a

@@ -4,6 +4,7 @@ import {
   waveFallbackIntervalSec,
   advanceBrushPhase,
   driftCenter,
+  drifterPuff,
   createWavePool,
   MAX_WAVE_BURSTS,
   WAVE_LIFE_SEC,
@@ -109,16 +110,24 @@ describe("advanceBrushPhase", () => {
 });
 
 describe("driftCenter", () => {
-  it("stays within the documented bounds ([0.20, 0.80] x [0.28, 0.72]) for any seed/time", () => {
-    for (const seed of [0, 1.7, 5.3, 12, -3]) {
+  it("stays within the documented bounds ([0.04, 0.96] x [0.06, 0.94]) for any seed/time", () => {
+    for (const seed of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1.7, 12, -3]) {
       for (let t = 0; t < 200; t += 3.3) {
         const [x, y] = driftCenter(seed, t);
-        expect(x).toBeGreaterThanOrEqual(0.2);
-        expect(x).toBeLessThanOrEqual(0.8);
-        expect(y).toBeGreaterThanOrEqual(0.28);
-        expect(y).toBeLessThanOrEqual(0.72);
+        expect(x).toBeGreaterThanOrEqual(0.04);
+        expect(x).toBeLessThanOrEqual(0.96);
+        expect(y).toBeGreaterThanOrEqual(0.06);
+        expect(y).toBeLessThanOrEqual(0.94);
       }
     }
+  });
+
+  it("spreads consecutive integer seeds over the frame, not clumped at the centre", () => {
+    const pts = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((s) => driftCenter(s, 0));
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(0.6);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(0.55);
   });
 
   it("is deterministic for the same (seed, t) and moves as t advances", () => {
@@ -139,6 +148,23 @@ describe("driftCenter", () => {
     const [x, y] = driftCenter(NaN, NaN);
     expect(Number.isFinite(x)).toBe(true);
     expect(Number.isFinite(y)).toBe(true);
+  });
+});
+
+describe("drifterPuff", () => {
+  it("stays in [0, 1], goes fully off and fully on over a cycle, and survives NaN", () => {
+    let lo = 1;
+    let hi = 0;
+    for (let t = 0; t < 60; t += 0.25) {
+      const v = drifterPuff(3, t);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+      lo = Math.min(lo, v);
+      hi = Math.max(hi, v);
+    }
+    expect(lo).toBe(0);
+    expect(hi).toBe(1);
+    expect(Number.isFinite(drifterPuff(NaN, NaN))).toBe(true);
   });
 });
 

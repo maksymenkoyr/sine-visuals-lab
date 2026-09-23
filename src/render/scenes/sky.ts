@@ -134,17 +134,21 @@ export const MAX_WAVE_BURSTS = 3; // concurrent floater waves — mirrors powder
 // coverage with a near-white core, not the soft low-alpha wash the first
 // pass produced). ---
 const SIM_VISCOSITY = 0.3;
-const DYE_DISSIPATION = 0.22;
+const DYE_DISSIPATION = 0.34; // high enough that old puffs thin out instead of piling into one mass
 const SIM_DT_MAX = 1 / 30; // clamps a slow-frame dt so the sim never destabilises
 
-// --- Ambient cloud drift (not audio-reactive — see file header). A third
-// seed (was two) so the cover reads as a few distinct masses rather than
-// one blob orbiting the centre. ---
-const DRIFTER_SEEDS: readonly number[] = [1.7, 5.3, 9.1];
+// --- Ambient cloud drift (not audio-reactive — see file header). Many small
+// sources, each wandering around its own home spot spread across the whole
+// frame (driftCenter) and puffing on and off (drifterPuff), so the cover
+// reads as separate airy puffs scattered over the sky. Three big sources
+// orbiting the centre, fed continuously, merged into one central blob. ---
+const DRIFTER_SEEDS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const DRIFT_TANGENT_EPS = 0.08; // finite-difference step used only to find the drift's own heading
-const DRIFTER_SIGMA = 0.16; // splat radius, sim uv
-const DRIFTER_FORCE = 5; // texels/s^2 at FORCE_REF_ROWS — see skyFluidSim.ts's header
-const DRIFTER_DYE_RATE = 0.85; // density/s at the splat centre, before Cloud cover scales it
+const DRIFTER_SIGMA_MIN = 0.045; // splat radius range, sim uv — varied per seed so puffs aren't all one size
+const DRIFTER_SIGMA_MAX = 0.085;
+const DRIFTER_FORCE = 10; // texels/s^2 at FORCE_REF_ROWS — see skyFluidSim.ts's header; strong enough that the flow shears puffs into drifting shapes rather than leaving round balls where they were laid
+const DRIFTER_DYE_RATE = 1.05; // density/s at the splat centre while puffing, before Cloud cover scales it
+const DRIFTER_PUFF_RATE = 0.45; // rad/s of each source's on/off cycle (~14s per puff) — a long "on" phase grows one puff into a big blob
 
 // --- Floater waves. ---
 export const WAVE_LIFE_SEC = 3.5;
@@ -191,21 +195,37 @@ export function advanceBrushPhase(prev: number, dtSec: number): number {
   return from + dt * BRUSH_TURNS_PER_SEC * Math.PI * 2;
 }
 
-/** The ambient drift's own slow meander, in sim uv space: a Lissajous-ish
- *  wander from two low, seed-offset frequencies, pure and deterministic so
- *  it's testable without a GL context. render() also samples this at
+/** The ambient drift's own slow meander, in sim uv space: each seed owns a
+ *  home spot (golden-ratio / sqrt(2) low-discrepancy sequences, so
+ *  consecutive integer seeds land evenly spread over the whole frame rather
+ *  than clumped) and wanders a small
+ *  Lissajous-ish loop around it. Pure and deterministic so it's testable
+ *  without a GL context. render() also samples this at
  *  `tSec + DRIFT_TANGENT_EPS` to get a finite-difference heading for the
- *  splat's push direction. Kept well clear of the domain's own edges
- *  (never past [0.20, 0.80] x [0.28, 0.72]) so the ambient splat itself is
- *  never what makes a free-slip wall visible. */
+ *  splat's push direction. Stays within [0.04, 0.96] x [0.06, 0.94] — near
+ *  enough to the edges that the sides of the frame get cloud too. */
 export function driftCenter(seed: number, tSec: number): [number, number] {
   const s = Number.isFinite(seed) ? seed : 0;
   const t = Number.isFinite(tSec) ? tSec : 0;
+  const fract = (v: number) => v - Math.floor(v);
+  const hx = 0.1 + 0.8 * fract(0.1 + s * 0.6180339887);
+  const hy = 0.12 + 0.76 * fract(0.35 + s * 0.4142135624);
   const a1 = 0.05 + (Math.abs(s * 0.017) % 0.02);
   const a2 = 0.07 + (Math.abs(s * 0.013) % 0.02);
-  const x = 0.5 + 0.3 * Math.sin(t * a1 + s * 2.1) * Math.cos(t * a2 * 0.6 + s);
-  const y = 0.5 + 0.22 * Math.cos(t * a2 + s * 1.3);
+  const x = hx + 0.06 * Math.sin(t * a1 + s * 2.1) * Math.cos(t * a2 * 0.6 + s);
+  const y = hy + 0.06 * Math.cos(t * a2 + s * 1.3);
   return [x, y];
+}
+
+/** 0..1 dye gate for one source at time t: each seed breathes on and off on
+ *  its own phase, so a source lays down separate puffs that drift apart
+ *  instead of one continuous stream. */
+export function drifterPuff(seed: number, tSec: number): number {
+  const s = Number.isFinite(seed) ? seed : 0;
+  const t = Number.isFinite(tSec) ? tSec : 0;
+  const w = 0.5 + 0.5 * Math.sin(t * DRIFTER_PUFF_RATE * (0.8 + 0.07 * s) + s * 3.7);
+  const e = clamp01((w - 0.35) / 0.4);
+  return e * e * (3 - 2 * e);
 }
 
 /** One live floater wave: when it started, how hard (0..1, from
@@ -427,8 +447,10 @@ const float WAVE_LIFE_SEC_C = ${WAVE_LIFE_SEC.toFixed(3)};
 const float WAVE_FADE_IN = ${WAVE_FADE_IN_SEC.toFixed(3)};
 const float WAVE_FADE_OUT = ${WAVE_FADE_OUT_SEC.toFixed(3)};
 
-const float CLOUD_LOW = 0.22; // bumped density below this reads as clear sky
-const float CLOUD_HIGH = 0.38; // bumped density above this reads as a solid, opaque cloud body
+const float CLOUD_LOW = 0.16; // bumped density below this reads as clear sky
+const float CLOUD_HIGH = 0.55; // bumped density above this reads as a solid, opaque cloud body — a wide band, so edges fade through semi-transparent wisps (airy) rather than a hard cut-out
+const float CLOUD_WISP_SCALE = 2.9; // second, finer bump octave, relative to CLOUD_BUMP_SCALE — frays the edges into wisps
+const float CLOUD_WISP_AMOUNT = 0.35;
 const float CLOUD_BUMP_SCALE = 11.0; // fbm frequency, room-uv units — the cauliflower texture
 const float CLOUD_BUMP_MORPH = 0.05; // fbm domain drift per second — churn beyond plain advection
 const float CLOUD_BUMP_AMOUNT = 0.65; // how hard the bump noise erodes/thickens the edge
@@ -689,7 +711,8 @@ void main() {
   // this reaches far enough across the body to shade actual folds.
   float density = max(decodeDye(texture(uDye, uv)).x, 0.0);
   float bump = fbm2(uv * CLOUD_BUMP_SCALE + vec2(uTime * CLOUD_BUMP_MORPH, uTime * CLOUD_BUMP_MORPH * 0.6));
-  float bumped = density * mix(1.0 - CLOUD_BUMP_AMOUNT, 1.0 + CLOUD_BUMP_AMOUNT, bump);
+  float wisp = fbm2(uv * CLOUD_BUMP_SCALE * CLOUD_WISP_SCALE - vec2(uTime * CLOUD_BUMP_MORPH * 1.7, 0.0));
+  float bumped = density * mix(1.0 - CLOUD_BUMP_AMOUNT, 1.0 + CLOUD_BUMP_AMOUNT, bump) * mix(1.0 - CLOUD_WISP_AMOUNT, 1.0 + CLOUD_WISP_AMOUNT, wisp);
   float cloudAlpha = smoothstep(CLOUD_LOW, CLOUD_HIGH, bumped);
   float sunNear = max(decodeDye(texture(uDye, uv + CLOUD_LIGHT_DIR * CLOUD_SHADOW_TAP1)).x, 0.0);
   float sunFar = max(decodeDye(texture(uDye, uv + CLOUD_LIGHT_DIR * CLOUD_SHADOW_TAP2)).x, 0.0);
@@ -699,6 +722,10 @@ void main() {
   // rather than the first pass's guessed, noticeably darker shadow tone.
   vec3 cloudShadow = vec3(0.6, 0.59, 0.67);
   vec3 cloudLit = vec3(1.0, 0.99, 0.96);
+  // Thin, barely-there cloud is sunlit through, never shadowed — without
+  // this, half-faded puffs blend a shadow tone into the sky and read as
+  // grey smudges instead of airy haze.
+  shadow = mix(1.0, shadow, smoothstep(0.0, 0.8, cloudAlpha));
   vec3 cloudColor = mix(cloudShadow, cloudLit, shadow) * (0.85 + 0.3 * uCloudBrightness);
   color = mix(color, cloudColor, cloudAlpha);
 
@@ -759,10 +786,10 @@ function createSkyScene(): Scene {
   let dyeLoc: WebGLUniformLocation | null = null;
   let wavePool: WavePool | null = null;
   const bandsBuf = new Float32Array(NUM_BANDS);
-  const drifterSplats: Splat[] = DRIFTER_SEEDS.map(() => ({
+  const drifterSplats: Splat[] = DRIFTER_SEEDS.map((seed) => ({
     x: 0.5,
     y: 0.5,
-    sigma: DRIFTER_SIGMA,
+    sigma: DRIFTER_SIGMA_MIN + (DRIFTER_SIGMA_MAX - DRIFTER_SIGMA_MIN) * ((seed * 0.618034) % 1),
     fx: 0,
     fy: 0,
     dye: 0,
@@ -841,7 +868,7 @@ function createSkyScene(): Scene {
         s.y = y0;
         s.fx = (dx / len) * DRIFTER_FORCE * (0.5 + flowSpeedAmount);
         s.fy = (dy / len) * DRIFTER_FORCE * (0.5 + flowSpeedAmount);
-        s.dye = DRIFTER_DYE_RATE * (0.25 + 0.75 * cloudCoverAmount);
+        s.dye = DRIFTER_DYE_RATE * drifterPuff(seed, ambientT) * (0.25 + 0.75 * cloudCoverAmount);
       }
 
       const simDt = Math.min(SIM_DT_MAX, dt * (0.5 + 1.5 * flowSpeedAmount));
