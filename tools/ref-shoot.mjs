@@ -6,7 +6,12 @@
 //
 //   node tools/ref-shoot.mjs tools/.cache/refs/<name> --scene <sceneId> [--port 5173]
 //        [--quality high] [--settings '{"key":v}'] [--min-rank 4] [--max-beats 12]
-//        [--from 1.5] [--lead 40] [--out DIR]
+//        [--from 1.5] [--lead 40] [--out DIR] [--size WxH]
+//
+// --size (default 960x540, matching ref-browser.mjs's own default): the
+// viewport/screenshot size. A portrait reference (a short) is better
+// compared at something like 540x960 than squashed into our landscape
+// default — pass the reference's own aspect so the framing lines up.
 //
 // How the two sides line up: Chromium's --use-file-for-fake-audio-capture
 // plays the wav as the microphone from the moment the capture starts, so
@@ -57,6 +62,18 @@ const minRank = +opt("--min-rank", "4");
 const maxBeats = +opt("--max-beats", "12");
 const fromSec = +opt("--from", "1.5");
 const leadMs = +opt("--lead", "40");
+const sizeArg = opt("--size", null);
+let shotWidth = 960;
+let shotHeight = 540;
+if (sizeArg) {
+  const m = /^(\d+)x(\d+)$/.exec(sizeArg);
+  if (!m) {
+    console.error(`ref-shoot: --size must be WxH (e.g. 540x960), got "${sizeArg}"`);
+    process.exit(2);
+  }
+  shotWidth = +m[1];
+  shotHeight = +m[2];
+}
 const bundle = resolve(bundleDir);
 const outDir = resolve(opt("--out", join(bundle, `ours-${scene}`)));
 mkdirSync(outDir, { recursive: true });
@@ -75,7 +92,7 @@ if (!targets.length) {
 }
 console.log(`${basename(bundle)} → ${scene}: ${targets.length} beats × ${offsets.length} offsets, tempo ${meta.tempo.toFixed(1)}`);
 
-const { browser, ctx } = await launchWithMic(wav);
+const { browser, ctx } = await launchWithMic(wav, { width: shotWidth, height: shotHeight });
 const page = await openScene(ctx, { port, scene, quality });
 // applyTuningParams (src/tuning/bus.ts) ignores `settings` unless the scene id
 // comes with them — without it --settings silently changed nothing.
