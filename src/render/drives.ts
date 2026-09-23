@@ -4,7 +4,7 @@ import type { SceneSetting } from "./sceneSettings.ts";
 import { settingScope } from "./sceneSettings.ts";
 import { SIGNALS, type SignalId } from "./signals.ts";
 import { createGridPulse, type GridPulse } from "./gridPulse.ts";
-import { BEAT_GRIDS, beatGridBeats, beatGridLabel, type BeatGridIndex } from "../audio/beatGrid.ts";
+import { BEAT_GRIDS, beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { getDriveChoice, getDriveLine, getDriveLineStrength } from "./driveStore.ts";
 
@@ -307,66 +307,185 @@ export function createDriveEngine(): DriveEngine {
   };
 }
 
-// ---- The panel's source picker -------------------------------------------
-
-/** One row of the source picker (deviceMenu.ts) — a chip's label plus the
- *  DriveChoice it sets. Grouped Hits / Grid / Levels / Frequencies / Scene,
- *  in that order, built from this same catalogue rather than a
- *  hand-maintained parallel list (see this file's header): Hits and Levels
- *  are simply every SIGNALS entry of that `kind`, in catalogue order,
- *  excluding centroid/section from Hits (they're `kind: "level"` already)
- *  and Drop from nowhere (it's `kind: "edge"`, so it lands in Hits). Grid
- *  skips BEAT_GRIDS' own "Hits" entry (index 0) — that's just the plain
- *  Beat catalogue choice already in the Hits group under a different name.
- *  The trailing Scene option is offered on every row, not only where a
- *  setting's own `drive.default` happens to be `"scene"` — the generated
- *  GLSL/JS passthrough exists for every drive setting (see this file's
- *  header) — with its chip always reading plain "Scene"; a setting's own
- *  `drive.sceneLabel`, when it has one, is the picker row's describing text
- *  instead (deviceMenu.ts), not per-chip, since a chip has no room for a
- *  sentence. */
-export interface DriveOption {
-  label: string;
-  choice: DriveChoice;
-}
-
-function catalogueOptions(kind: "edge" | "level"): DriveOption[] {
-  return Object.values(SIGNALS)
-    .filter((s) => s.kind === kind)
-    .map((s) => ({ label: s.label, choice: s.id }));
-}
-
-/** driveOptions(), grouped for the panel's inline picker (deviceMenu.ts) —
- *  each group gets its own small heading there. Same five groups, same
- *  order and contents as driveOptions()'s own flat list — see that
- *  function's doc comment for where each one comes from. */
-export interface DriveOptionGroup {
-  label: string;
-  options: DriveOption[];
-}
-
-export function driveOptionGroups(): DriveOptionGroup[] {
-  const grid: DriveOption[] = [];
-  for (let i = 1; i < BEAT_GRIDS.length; i++) grid.push({ label: beatGridLabel(i), choice: { source: "beat", grid: i } });
-  return [
-    { label: "Hits", options: catalogueOptions("edge") },
-    { label: "Grid", options: grid },
-    { label: "Levels", options: catalogueOptions("level") },
-    { label: "Frequencies", options: [{ label: "Freq", choice: { source: "line" } }] },
-    { label: "Scene", options: [{ label: "Scene", choice: "scene" }] },
-  ];
-}
-
-export function driveOptions(): DriveOption[] {
-  return driveOptionGroups().flatMap((g) => g.options);
-}
-
 /** Structural equality for two DriveChoice values — plain values compare by
  *  `===`, the two object shapes compare by their one field. Used to find a
- *  stored choice's index among driveOptions() (deviceMenu.ts's picker). */
+ *  stored choice's current position in driveModes() below, and by
+ *  sceneLooks.ts to tell a setting's stored choice apart from its default. */
 export function sameDriveChoice(a: DriveChoice, b: DriveChoice): boolean {
   if (a === b) return true;
   if (typeof a !== "object" || typeof b !== "object") return false;
   if (a.source !== b.source) return false;
   return a.source === "beat" && b.source === "beat" ? a.grid === b.grid : true;
+}
+
+// ---- The panel's source picker -------------------------------------------
+//
+// Two questions, not one catalogue dump (see this section's own header
+// note below driveModes()'s doc comment for the full rationale): *when*
+// does a setting react (row 1 — driveModes()'s own DriveModeRow.mode), and
+// *to which frequencies* (row 2 — DriveModeRow.options). modeOf() is the
+// inverse: given any stored DriveChoice, which row 1 mode it belongs to,
+// plus a DriveRange bucket used only to carry a choice's frequency range
+// across a row-1 switch (deviceMenu.ts) — Hits·Bass to Loudness·Bass, say.
+
+/** Row 1 of the panel's picker (deviceMenu.ts): *when* a setting reacts.
+ *  "scene" is offered only for a setting whose own `drive.default` is
+ *  `"scene"` — see driveModes()'s own doc comment. */
+export type DriveMode = "hits" | "loudness" | "beatGrid" | "scene";
+
+/** A DriveChoice's frequency-range bucket, for "switching row 1 keeps the
+ *  range" (deviceMenu.ts): "bass"/"mid"/"treble" carry across Hits and
+ *  Loudness directly (Hits·Bass -> Loudness·Bass); "broadband" is Any/All,
+ *  the shared "no particular band" bucket both rows offer; "other" is
+ *  everything with no natural range at all (Drop, the default-only
+ *  Brightness/Song extras, Draw, every Beat-grid stop, and Scene) — landing
+ *  on a target row's own "broadband" option is `modeOf`'s answer for those,
+ *  same as the plan's "Drop/Brightness/Song/Draw map to All/Any" rule. */
+export type DriveRange = "broadband" | "bass" | "mid" | "treble" | "other";
+
+const MODE_LABEL: Record<DriveMode, string> = {
+  hits: "Hits",
+  loudness: "Loudness",
+  beatGrid: "Beat grid",
+  scene: "Scene mix",
+};
+
+interface CatalogueRowOption {
+  choice: SignalId;
+  range: DriveRange;
+  label: string;
+}
+
+// Row 2 under Hits — deliberately its own small vocabulary ("Any", not
+// SIGNALS["feature.onset"].label's "Beat"; "Bass"/"Mid"/"Treble", not "Bass
+// hit") rather than reusing signals.ts's own labels: those are written for
+// the meters and a setting's `reads` pill, where the signal's *identity*
+// needs spelling out ("Bass hit" beside a "Bass level" meter row); here row
+// 1 already says "Hits", so row 2 only needs to say which band.
+const HITS_OPTIONS: CatalogueRowOption[] = [
+  { choice: "feature.onset", range: "broadband", label: "Any" },
+  { choice: "anim.lowOnset", range: "bass", label: "Bass" },
+  { choice: "anim.midOnset", range: "mid", label: "Mid" },
+  { choice: "anim.highOnset", range: "treble", label: "Treble" },
+  { choice: "anim.dropOnset", range: "other", label: "Drop" },
+];
+
+// Row 2 under Loudness. "✎ Draw" ({source:"line"}) and the two default-only
+// extras (Brightness/Song, appended by driveModes() below, only for the one
+// setting whose own default is that id) aren't SignalId catalogue entries,
+// so they're added on top of this list rather than living in it.
+const LOUDNESS_OPTIONS: CatalogueRowOption[] = [
+  { choice: "anim.energy", range: "broadband", label: "All" },
+  { choice: "anim.low", range: "bass", label: "Bass" },
+  { choice: "anim.mid", range: "mid", label: "Mid" },
+  { choice: "anim.high", range: "treble", label: "Treble" },
+];
+
+const DRAW_LABEL = "✎ Draw";
+const DRAW_CHOICE: DriveChoice = { source: "line" };
+
+// Row 2 under Beat grid — plain-language note-value names distinct from
+// beatGrid.ts's own DAW-quantise-menu labels ("1/8", "1 bar", …), which the
+// picker's earlier revision showed verbatim and the user called cryptic.
+// Index 0 ("Hits") is never offered here — it's the plain Beat catalogue
+// choice already in the Hits row, under a different name.
+const BEAT_GRID_ROW_LABEL: Record<number, string> = {
+  1: "½ beat",
+  2: "Beat",
+  3: "2 beats",
+  4: "Bar",
+  5: "2 bars",
+};
+
+/** Which row-1 mode a stored DriveChoice belongs to, plus its DriveRange —
+ *  the inverse of driveModes() below, and the one place that mapping is
+ *  written down, so the two can't drift. Exhaustive over every SignalId
+ *  (tests/drives.test.ts's round-trip check): the four Hits ids and the
+ *  broadband/bass/mid/treble four of Loudness resolve by table lookup; a
+ *  grid or line choice resolves by shape; anim.centroid/anim.sectionIntensity
+ *  — the two default-only extras, never in either table since they only
+ *  ever appear on the one setting they default for — fall to the same
+ *  Loudness/"other" answer driveModes() itself gives them. */
+export function modeOf(choice: DriveChoice): { mode: DriveMode; range: DriveRange } {
+  if (choice === "scene") return { mode: "scene", range: "other" };
+  if (typeof choice === "object") {
+    return choice.source === "beat" ? { mode: "beatGrid", range: "other" } : { mode: "loudness", range: "other" };
+  }
+  const hit = HITS_OPTIONS.find((o) => o.choice === choice);
+  if (hit) return { mode: "hits", range: hit.range };
+  const level = LOUDNESS_OPTIONS.find((o) => o.choice === choice);
+  if (level) return { mode: "loudness", range: level.range };
+  return { mode: "loudness", range: "other" }; // anim.centroid / anim.sectionIntensity
+}
+
+/** One row-2 chip: its label, the DriveChoice it sets, and whether it's
+ *  this setting's own `drive.default` — driveModes() below marks exactly
+ *  one option (or, for a Scene-default setting, the "Scene mix" row itself)
+ *  this way per setting, so the panel can dot it and skip a separate reset
+ *  (deviceMenu.ts). */
+export interface DriveModeOption {
+  label: string;
+  choice: DriveChoice;
+  isDefault: boolean;
+}
+
+/** One row-1 mode plus its row-2 chips. `options` is empty for `"scene"` —
+ *  its row 2 is one line of text (this setting's own `drive.sceneLabel` +
+ *  "— the scene's own mix", deviceMenu.ts), not a chip strip, since a
+ *  composite has nothing to pick from. */
+export interface DriveModeRow {
+  mode: DriveMode;
+  label: string;
+  options: DriveModeOption[];
+}
+
+/** The panel's whole picker for one drive setting (deviceMenu.ts): always
+ *  Hits, Loudness and Beat grid, in that order, plus a trailing Scene mix
+ *  row *only* when `setting.drive.default` is `"scene"` — every other
+ *  setting's Scene passthrough exists at the engine level (drives.ts's own
+ *  header) but has no picker row, since there's nothing to say about it
+ *  beyond "back to how it was" and every other row already offers that via
+ *  its own dot. That dot — DriveModeOption.isDefault / the presence of the
+ *  Scene mix row itself — is the only "reset": returning to a setting's own
+ *  default is one tap on whichever chip already shows it, not a separate
+ *  control (see the plan's Revision 3 section for why a Reset chip was cut).
+ *
+ *  This replaces `driveOptionGroups()`'s flat five-group catalogue dump
+ *  (Hits/Grid/Levels/Frequencies/Scene, printed straight from SIGNALS) with
+ *  a picker shaped around the two questions a user actually asks — *when*
+ *  (row 1) and *which frequencies* (row 2) — per the user's own "super
+ *  crappy… not thought through" verdict on that flat version. Grouping
+ *  lives here, not deviceMenu.ts, so it's unit-testable
+ *  (tests/drives.test.ts) independent of the DOM it's rendered into. */
+export function driveModes(setting: SceneSetting): DriveModeRow[] {
+  const def = setting.drive?.default;
+  const isDefault = (choice: DriveChoice): boolean => def !== undefined && sameDriveChoice(choice, def);
+
+  const hits: DriveModeRow = {
+    mode: "hits",
+    label: MODE_LABEL.hits,
+    options: HITS_OPTIONS.map((o) => ({ label: o.label, choice: o.choice, isDefault: isDefault(o.choice) })),
+  };
+
+  const loudnessOptions: DriveModeOption[] = LOUDNESS_OPTIONS.map((o) => ({
+    label: o.label,
+    choice: o.choice,
+    isDefault: isDefault(o.choice),
+  }));
+  loudnessOptions.push({ label: DRAW_LABEL, choice: DRAW_CHOICE, isDefault: isDefault(DRAW_CHOICE) });
+  // Default-only extras — see this function's own header paragraph above.
+  if (def === "anim.centroid") loudnessOptions.push({ label: "Brightness", choice: "anim.centroid", isDefault: true });
+  if (def === "anim.sectionIntensity") loudnessOptions.push({ label: "Song", choice: "anim.sectionIntensity", isDefault: true });
+  const loudness: DriveModeRow = { mode: "loudness", label: MODE_LABEL.loudness, options: loudnessOptions };
+
+  const gridOptions: DriveModeOption[] = [];
+  for (let i = 1; i < BEAT_GRIDS.length; i++) {
+    const choice: DriveChoice = { source: "beat", grid: i };
+    gridOptions.push({ label: BEAT_GRID_ROW_LABEL[i], choice, isDefault: isDefault(choice) });
+  }
+  const beatGrid: DriveModeRow = { mode: "beatGrid", label: MODE_LABEL.beatGrid, options: gridOptions };
+
+  const rows: DriveModeRow[] = [hits, loudness, beatGrid];
+  if (def === "scene") rows.push({ mode: "scene", label: MODE_LABEL.scene, options: [] });
+  return rows;
 }

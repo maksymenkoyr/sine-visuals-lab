@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createDriveEngine, PASSTHROUGH_DRIVES, driveOptions, sameDriveChoice, type DriveChoice } from "../src/render/drives.ts";
+import { createDriveEngine, PASSTHROUGH_DRIVES, driveModes, modeOf, sameDriveChoice, type DriveChoice } from "../src/render/drives.ts";
 import { createAnimClock } from "../src/render/animClock.ts";
 import { setDriveLine, setDriveLineStrength } from "../src/render/driveStore.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
@@ -201,19 +201,83 @@ describe("drives: line choice", () => {
   });
 });
 
-describe("drives: driveOptions() / sameDriveChoice()", () => {
-  it("Scene is always the last option, and every option round-trips through sameDriveChoice", () => {
-    const options = driveOptions();
-    expect(options.length).toBeGreaterThan(10);
-    expect(options[options.length - 1].choice).toBe("scene");
-    for (const opt of options) expect(sameDriveChoice(opt.choice, opt.choice)).toBe(true);
-  });
-
+describe("drives: sameDriveChoice()", () => {
   it("sameDriveChoice distinguishes grid indices and is false across different shapes", () => {
     expect(sameDriveChoice({ source: "beat", grid: 2 }, { source: "beat", grid: 3 })).toBe(false);
     expect(sameDriveChoice({ source: "beat", grid: 2 }, { source: "beat", grid: 2 })).toBe(true);
     expect(sameDriveChoice({ source: "line" }, "scene")).toBe(false);
     expect(sameDriveChoice("anim.mid", "anim.mid")).toBe(true);
+  });
+});
+
+describe("drives: driveModes() / modeOf() — the panel's two-row picker", () => {
+  it("every registered scene's drive setting has its default reachable in driveModes(setting)", () => {
+    let checked = 0;
+    for (const scene of listScenes()) {
+      for (const spec of scene.settings ?? []) {
+        if (!spec.drive) continue;
+        checked++;
+        const rows = driveModes(spec);
+        const def = spec.drive.default;
+        if (def === "scene") {
+          expect(rows.some((r) => r.mode === "scene"), `${scene.id}'s "${spec.key}" is Scene-default but driveModes() has no Scene mix row`).toBe(true);
+        } else {
+          const found = rows.some((r) => r.options.some((o) => o.isDefault && sameDriveChoice(o.choice, def)));
+          expect(found, `${scene.id}'s "${spec.key}"'s default (${JSON.stringify(def)}) isn't reachable in its own driveModes()`).toBe(true);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("every option every driveModes() row offers round-trips through modeOf() to that same row's mode", () => {
+    // A setting whose own default is Scene, and touches both default-only
+    // extras, so every row (including Scene mix and the two extras) is
+    // actually present to check.
+    const centroidSetting = settingWithDrive("centroidSetting", "anim.centroid");
+    const sectionSetting = settingWithDrive("sectionSetting", "anim.sectionIntensity");
+    const sceneSetting = settingWithDrive("sceneSetting", "scene", "Scene: a mix of things");
+    for (const setting of [centroidSetting, sectionSetting, sceneSetting]) {
+      for (const row of driveModes(setting)) {
+        for (const opt of row.options) {
+          expect(modeOf(opt.choice).mode, `${row.mode}'s "${opt.label}" chip resolves to a different mode via modeOf()`).toBe(row.mode);
+        }
+      }
+    }
+  });
+
+  it("Scene mix is offered only for a setting whose own default is Scene", () => {
+    const nonScene = settingWithDrive("nonScene", "anim.lowOnset");
+    expect(driveModes(nonScene).some((r) => r.mode === "scene")).toBe(false);
+    const scene = settingWithDrive("scene", "scene", "Scene: a mix of things");
+    expect(driveModes(scene).some((r) => r.mode === "scene")).toBe(true);
+  });
+
+  it("the default-only Brightness/Song extras appear in the Loudness row only for the one setting they default for", () => {
+    const centroidSetting = settingWithDrive("centroidSetting", "anim.centroid");
+    const loudnessOptions = driveModes(centroidSetting).find((r) => r.mode === "loudness")!.options;
+    const brightness = loudnessOptions.find((o) => o.label === "Brightness");
+    expect(brightness).toBeTruthy();
+    expect(brightness!.isDefault).toBe(true);
+    expect(brightness!.choice).toBe("anim.centroid");
+
+    const otherSetting = settingWithDrive("otherSetting", "anim.mid");
+    expect(driveModes(otherSetting).find((r) => r.mode === "loudness")!.options.some((o) => o.label === "Brightness")).toBe(false);
+    expect(driveModes(otherSetting).find((r) => r.mode === "loudness")!.options.some((o) => o.label === "Song")).toBe(false);
+  });
+
+  it("exactly one option is marked isDefault, matching the setting's own drive.default, for a plain catalogue/grid/line default", () => {
+    const settings: SceneSetting[] = [
+      settingWithDrive("a", "feature.onset"),
+      settingWithDrive("b", "anim.high"),
+      settingWithDrive("c", { source: "beat", grid: 3 }),
+      settingWithDrive("d", { source: "line" }),
+    ];
+    for (const setting of settings) {
+      const flagged = driveModes(setting).flatMap((r) => r.options.filter((o) => o.isDefault));
+      expect(flagged.length).toBe(1);
+      expect(sameDriveChoice(flagged[0].choice, setting.drive!.default)).toBe(true);
+    }
   });
 });
 

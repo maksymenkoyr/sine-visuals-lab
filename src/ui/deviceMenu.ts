@@ -33,7 +33,7 @@ import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { LINE_STRENGTH_DEFAULT } from "../audio/bandLine.ts";
-import { driveOptionGroups, sameDriveChoice, type DriveChoice, type SceneDrives } from "../render/drives.ts";
+import { driveModes, modeOf, sameDriveChoice, type DriveChoice, type DriveMode, type SceneDrives } from "../render/drives.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
 import { createAudioMeters } from "./audioMeters.ts";
@@ -95,24 +95,33 @@ import {
  * src/render/drives.ts) has no UI of its own on its row — focus decides
  * selection instead (a row's own `focusin`, wired in appendSettingRow;
  * wireHoverFocus above turns real pointer movement over a row into that
- * same focus, so hover and Tab both select). The Bands card carries one
- * fixed drive section, right below the spectrum, that shows whichever
- * setting is currently focused: its name, its grouped source picker
- * (Hits/Grid/Levels/Frequencies/Scene), and, only while its choice is
- * Frequencies, the line Strength row. Nothing selected shows a hint in the
- * same reserved space instead — the section's height never changes with
- * the selection, because in the stacked layout the Bands card sits above
- * the Scene card and a resize would push the very rows the cursor is
- * sweeping over, oscillating focus between them. Focus leaving a row for
- * anywhere else in the Bands card (the strip, the line overlay, this
- * section's own picker, Strength) — or for the meters, another card, or
- * the page — leaves the selection alone, so drawing a line means moving
- * off the row and onto the strip without losing it (selectDrive's own doc
- * comment has the exact contract). Picking Frequencies there puts the Bands
- * card's own strip into line-drawing mode for that setting instead of
- * faders — src/ui/bandLineEditor.ts's overlay, backed by
- * src/audio/bandLine.ts. Under the Bands card, the read-only meters
- * (audioMeters.ts) scroll in their own strip. Below the breakpoint in
+ * same focus, so hover and Tab both select — pointer focus waits out a
+ * short dwell first, see wireHoverFocus's own comment, so sweeping the
+ * cursor across several rows on the way to the spectrum doesn't select any
+ * of them). The Bands card's header (spectrumHeader) doubles as a tab bar:
+ * nothing selected shows a plain "<Scene> · Equaliser" label; a selection
+ * shows two tabs, "Equaliser | <Setting>", the setting's tab active by
+ * default (refreshSpectrumTabs) — clicking Equaliser shows the strip's
+ * knobs and readouts without dropping the selection, so the other tab goes
+ * straight back. Under the strip sits one CSS grid swap zone (driveZone):
+ * an Equaliser layer (the gain/Hz readouts + the fader hint) and a Setting
+ * layer (the two-row source picker — driveModes()/modeOf(), drives.ts —
+ * plus, only on Draw, the line's Strength dial and Clear line) share the
+ * same grid cell and are toggled by visibility, so the cell's height is
+ * always the taller of the two and nothing jumps in the stacked layout when
+ * the selection changes (refreshDriveZone/renderDrivePicker). The strip
+ * itself shows the answer to "what does this listen to": a Hits/Loudness
+ * choice with a band tints that range (spectrumStrip.setHighlight, the same
+ * resolveBandRange a non-drive row's hover already used); Draw swaps the
+ * knobs for the drawn line (src/ui/bandLineEditor.ts's overlay, backed by
+ * src/audio/bandLine.ts); Beat grid and an unresolved Scene mix show no
+ * tint. Focus leaving a row for anywhere else in the Bands card (the strip,
+ * the line overlay, the swap zone's own picker) — or for the meters,
+ * another card, or the page — leaves the selection alone, so drawing a line
+ * means moving off the row and onto the strip without losing it
+ * (selectDrive's own doc comment has the exact contract). Under the Bands
+ * card, the read-only meters (audioMeters.ts) scroll in their own strip.
+ * Below the breakpoint in
  * controlsTheme.ts everything stacks into one scrolling column with the
  * meters last, so the knobs stay in reach. It's corner-docked, not a modal:
  * the whole point is to watch the scene react while you tune it, so it
@@ -480,27 +489,49 @@ const liveDotStyle = (on: boolean) =>
 const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.5);`;
 const hairlineStyle = `height: 1px; background: ${withAlpha(HAIRLINE, 0.45)}; margin: 8px 0 9px;`;
 
-// The Bands card's drive section (selectDrive/refreshDriveSection) — a
-// small heading per group of chips within it (Hits/Grid/Levels/
-// Frequencies/Scene).
-const drivePickerGroupLabelStyle = `
-  font: 400 8.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase;
-  color: rgba(255,255,255,0.4); margin: 7px 0 4px;
+// The Bands card's header tabs (spectrumHeader/refreshSpectrumTabs): a
+// plain label while nothing is selected, "Equaliser | <Setting>" once a
+// drive setting is — see spectrumTitlePlain/spectrumTabs below.
+const tabBtnBaseStyle = `
+  font: 500 12px/1.2 ${FONT_MONO}; letter-spacing: 0.14em; text-transform: uppercase;
+  background: none; border: none; padding: 0; cursor: pointer; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 `;
-// The section's own empty-state line ("Focus a setting to choose…") —
-// deliberately not .vc-hint: that class only reveals on hover/focus, and
-// this is the section's entire content while nothing is selected, so it
-// has to be visible on its own. Same typography as .vc-hint's own rule
-// (controlsTheme.ts) minus the hover-gating.
-const driveSectionEmptyHintStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.5);`;
+const tabBtnActiveStyle = `${tabBtnBaseStyle} color: rgba(255,255,255,0.92);`;
+const tabBtnInactiveStyle = `${tabBtnBaseStyle} color: rgba(255,255,255,0.4);`;
+const tabSepStyle = `font: 400 11px/1 ${FONT_MONO}; color: rgba(255,255,255,0.25); flex-shrink: 0;`;
 
-// The Bands card's one hint line reads one of these two, swapped by
-// refreshDriveSection below — dragging a fader and drawing a line are
-// mutually exclusive on this strip, so the hint should only ever describe
-// whichever one is actually live.
-const FADER_HINT_TEXT = "Middle is 1× — drag up to boost a band, down to cut it, all the way down to switch it off";
+// The swap zone under the strip (driveZone/refreshDriveZone): one CSS grid
+// cell, the Equaliser layer and the Setting layer both pinned to it via
+// grid-area, toggled by visibility rather than display. An auto grid track
+// sizes to the tallest item placed in it regardless of that item's own
+// visibility, so the cell is always as tall as the taller layer — no
+// magic reserved number, and nothing jumps when the selection changes.
+const driveZoneStyle = `display: grid;`;
+const driveLayerStyle = `grid-area: 1 / 1; min-width: 0;`;
+
+// The Equaliser layer's hint — plain text, not .vc-hint: that class waits
+// for hover/focus on an enclosing .vc-row, and this line has no row of its
+// own to wait on (it's the swap zone's resting content, always on screen
+// alongside the readouts, not tucked under a control someone has to find).
+const eqHintStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.5); margin-top: 6px;`;
+const FADER_HINT_TEXT =
+  "Middle is 1× — drag up to boost a band, down to cut it, all the way down to switch it off · hover a reactive setting to choose what it reacts to";
+// Shown only as the Draw chip's tooltip (drives.ts's DriveModeOption for
+// {source:"line"}) — the Setting layer's own three rows (mode, range,
+// Draw's Strength) have no room left for a fourth line of prose.
 const LINE_HINT_TEXT =
   "Draw the line down onto the bars this setting listens to — keep it just above where they rest so only the hits poke over it. A band left at the top is ignored.";
+
+// The Setting layer's two chip rows — reusing controlsKit.ts's enum-picker
+// look (paletteChipStyle/paletteChipLitStyle) so the picker reads as native
+// to the panel, not a bespoke widget. Pointer-only, not part of the Tab
+// ring — same call bandLineEditor.ts's own drawing overlay already made
+// (see its header): this is still closer to a fast-moving experiment than
+// a control bank, so a second keyboard grammar isn't worth it yet.
+const drivePickerWrapStyle = `display: flex; flex-direction: column; gap: 6px; margin-top: 2px;`;
+const sceneMixLineStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.65);`;
+const drawRowStyle = `display: flex; align-items: flex-start; gap: 10px;`;
 
 
 // Footer strip.
@@ -768,6 +799,21 @@ function wireThumbMagnet(row: HTMLElement, slider: HTMLInputElement): void {
 let lastHoverX = -1;
 let lastHoverY = -1;
 
+// True only for the duration of a wireHoverFocus-triggered control.focus()
+// call below — appendSettingRow's onRowFocusIn reads this (synchronously,
+// from inside the focusin its own control.focus() call below dispatches) to
+// tell a real pointer-originated focus apart from a keyboard/click one, so
+// only the former waits out HOVER_SELECT_DELAY_MS before selecting. One
+// shared flag rather than per-row state, same reasoning as lastHoverX/Y
+// above — there's exactly one device menu instance.
+let pointerFocusOriginated = false;
+
+// How long a pointer-originated row focus waits before it actually selects
+// (appendSettingRow's onRowFocusIn) — long enough that a fast diagonal
+// sweep toward the spectrum strip never lands, short enough that resting
+// the pointer on a row still feels immediate.
+const HOVER_SELECT_DELAY_MS = 150;
+
 /** Focuses `control` on real pointer movement over `row` — a hover row reads
  *  as focused already (controlsTheme.ts styles :hover and :focus-within
  *  identically), so this makes the keyboard agree without a click first.
@@ -784,7 +830,9 @@ function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
     lastHoverX = e.clientX;
     lastHoverY = e.clientY;
     if (document.activeElement === control || isTypingTarget(document.activeElement)) return;
+    pointerFocusOriginated = true;
     control.focus({ preventScroll: true });
+    pointerFocusOriginated = false;
   });
 }
 
@@ -1440,11 +1488,27 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   bandsCard.el.classList.add("vc-spectrum-card");
   markBlock(bandsCard.title);
 
-  // Status line: which scene, whether audio is flowing, and from where.
+  // Status line, doubling as a tab bar once a drive setting is selected —
+  // see refreshSpectrumTabs below and this card's own doc-comment paragraph.
   const spectrumHeader = document.createElement("div");
   spectrumHeader.style.cssText = spectrumHeaderStyle;
+  const spectrumTitlePlain = document.createElement("span");
+  spectrumTitlePlain.style.cssText = spectrumTitleStyle;
+  const eqTabBtn = document.createElement("button");
+  eqTabBtn.type = "button";
+  eqTabBtn.textContent = "Equaliser";
+  const tabSep = document.createElement("span");
+  tabSep.textContent = "|";
+  tabSep.style.cssText = tabSepStyle;
+  const settingTabBtn = document.createElement("button");
+  settingTabBtn.type = "button";
+  const spectrumTabs = document.createElement("div");
+  spectrumTabs.style.cssText = `display: flex; align-items: center; gap: 6px; min-width: 0;`;
+  spectrumTabs.append(eqTabBtn, tabSep, settingTabBtn);
+  spectrumTabs.style.display = "none";
   const spectrumTitle = document.createElement("div");
-  spectrumTitle.style.cssText = spectrumTitleStyle;
+  spectrumTitle.style.cssText = `display: flex; min-width: 0; flex: 1; overflow: hidden;`;
+  spectrumTitle.append(spectrumTitlePlain, spectrumTabs);
   const spectrumStatus = document.createElement("div");
   spectrumStatus.style.cssText = spectrumStatusStyle;
   const liveDot = document.createElement("div");
@@ -1457,27 +1521,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const hairline = document.createElement("div");
   hairline.style.cssText = hairlineStyle;
 
-  // The fader bank sits in a .vc-row so it wakes (glow, hint) on hover and
-  // on focus-within exactly like a slider row.
+  // The fader bank sits in a .vc-row so it wakes (glow) on hover and
+  // on focus-within exactly like a slider row. The gain/Hz readouts and the
+  // fader hint used to live here too; they're now in the Equaliser layer of
+  // driveZone below (bandFaders.readouts, fadersHint) so the swap zone can
+  // account for their height — see this card's own doc-comment paragraph.
   const fadersRow = document.createElement("div");
   fadersRow.className = "vc-row";
   fadersRow.style.setProperty("--vc-accent", BANDS_AMBER);
-  // Always-on, unlike fadersHint below: explains the sky-blue marker
-  // spectrumStrip.ts's drawCentroidMarker draws over the bars (same
-  // AUTO_SKY constant, so the swatch can't drift from the line). A sibling
-  // of .vc-hint, not nested in it, so it doesn't inherit the hover-reveal —
-  // see the createSignalStrip .vc-reads reasoning above for why that split
-  // matters. Not the same reading as the Character card's Centroid row:
-  // that one is range-adapted against the track's own recent swing and has
-  // no position on this strip's band-index axis, so the note doesn't claim
-  // the two match.
+  // Always-on: explains the sky-blue marker spectrumStrip.ts's
+  // drawCentroidMarker draws over the bars (same AUTO_SKY constant, so the
+  // swatch can't drift from the line). Not the same reading as the
+  // Character card's Centroid row: that one is range-adapted against the
+  // track's own recent swing and has no position on this strip's
+  // band-index axis, so the note doesn't claim the two match.
   const spectrumLegend = createTraceLegend([
     { color: AUTO_SKY, label: "Brightness", note: "where the spectrum's energy balances" },
   ]);
-  const fadersHint = document.createElement("div");
-  fadersHint.className = "vc-hint";
-  fadersHint.textContent = FADER_HINT_TEXT;
-  fadersRow.append(bandFaders.el, spectrumLegend.el, fadersHint);
+  fadersRow.append(bandFaders.el, spectrumLegend.el);
   // R/T on a focused fader, through the same wiring as every row; no A —
   // the faders have no auto weights.
   bandFaders.faders.forEach((el, i) => {
@@ -1485,47 +1546,62 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       reset: () => bandFaders.reset(i),
       toggleOff: () => bandFaders.toggleOff(i),
     });
-    // Scoped to the hit div itself, not fadersRow: fadersRow also contains the
-    // spectrum plot and the gain/Hz readouts, which aren't any one band's
-    // control, so hovering the row as a whole would resolve to an arbitrary
-    // fader. Each hit div already covers exactly its own band's hit region
+    // Scoped to the hit div itself, not fadersRow: fadersRow also contains
+    // the whole spectrum plot, which isn't any one band's control, so
+    // hovering the row as a whole would resolve to an arbitrary fader. Each
+    // hit div already covers exactly its own band's hit region
     // (bandFaders.ts's `left`/`width`), so it's its own correct hover scope.
     wireHoverFocus(el, el);
   });
 
-  bandsCard.body.append(spectrumHeader, hairline, fadersRow);
+  // Always-visible equaliser hint — plain text now, not hover-gated (see
+  // eqHintStyle's own comment for why).
+  const fadersHint = document.createElement("div");
+  fadersHint.style.cssText = eqHintStyle;
+  fadersHint.textContent = FADER_HINT_TEXT;
 
-  // ---- Drive section: ONE fixed place, below the spectrum, for whichever ----
-  // ---- drive setting is currently focused ------------------------------------
-  // No chip on the row any more — the panel already turns real pointer
-  // movement over a row into keyboard focus (wireHoverFocus above; :hover
-  // and :focus-within are styled identically in controlsTheme.ts), so
-  // that's what selection rides now: a scene-setting row's own `focusin`
-  // (wired in appendSettingRow) selects it if it's a drive setting, clears
-  // otherwise. This section, always in the same spot under the Bands card's
-  // strip, shows the selected setting's name, its grouped source picker
-  // (Hits/Grid/Levels/Frequencies/Scene — driveOptionGroups()), and — only
-  // while its choice is Frequencies — the line Strength row. Nothing
-  // selected shows a hint in the picker's own reserved space instead (see
-  // driveSectionBody/driveSectionEmptyHint below — the section's height
-  // must never change with the selection: in the stacked layout the Bands
-  // card sits above the Scene card, and a section that grew/shrank would
-  // push the very rows the cursor is sweeping over, flipping focus between
-  // them). selectDrive()/refreshDriveSection() is the one place that
-  // decides what the section and the strip below it show.
-  const DRIVE_OPTION_GROUPS = driveOptionGroups();
+  const eqLayer = document.createElement("div");
+  eqLayer.style.cssText = driveLayerStyle;
+  eqLayer.append(bandFaders.readouts, fadersHint);
+
+  // Rebuilt from scratch on every selection/choice change by
+  // renderDrivePicker() below — see driveZoneStyle's own comment for why
+  // this and eqLayer can coexist, one hidden, without a height jump.
+  const settingLayer = document.createElement("div");
+  settingLayer.style.cssText = driveLayerStyle;
+
+  const driveZone = document.createElement("div");
+  driveZone.style.cssText = driveZoneStyle;
+  driveZone.append(eqLayer, settingLayer);
+
+  bandsCard.body.append(spectrumHeader, hairline, fadersRow, driveZone);
+
+  // ---- Drive selection: the swap zone above shows whichever setting is ----
+  // ---- currently focused, and its two-row picker (drives.ts's ---------------
+  // ---- driveModes()/modeOf()) ------------------------------------------------
+  // A drive setting has no UI of its own on its row — the panel already
+  // turns real pointer movement over a row into keyboard focus
+  // (wireHoverFocus above, after a short dwell — see appendSettingRow's
+  // onRowFocusIn), so that's what selection rides: a scene-setting row's own
+  // `focusin` selects it if it's a drive setting, clears otherwise.
 
   // The strip's own line-drawing mode: set only while `selected` exists and
-  // its current choice is Frequencies — see refreshDriveSection(), the one
-  // place that derives this from `selected` and writes it. Kept as its own
-  // variable (rather than computed inline everywhere) because the per-frame
-  // overlay update in DeviceMenu.update() below needs to know which
-  // setting's excess() to read without re-deriving it every tick.
+  // its current choice is Draw — see refreshDriveZone(), the one place that
+  // derives this from `selected` and writes it. Kept as its own variable
+  // (rather than computed inline everywhere) because the per-frame overlay
+  // update in DeviceMenu.update() below needs to know which setting's
+  // excess() to read without re-deriving it every tick.
   let lineMode: { sceneId: string; spec: SceneSetting } | null = null;
   // The one drive setting the panel is currently showing a picker for. See
-  // selectDrive's own doc comment for exactly what sets and clears it now
-  // that it follows focus rather than a click.
+  // selectDrive's own doc comment for exactly what sets and clears it.
   let selected: { sceneId: string; spec: SceneSetting } | null = null;
+  // Which of the header's two tabs the swap zone currently shows while
+  // `selected` is set — irrelevant (and never read) while it isn't. A new
+  // selection always opens on "setting" (selectDrive below); only the
+  // Equaliser tab's own click moves it to "equaliser", and only until the
+  // next selection change.
+  let driveTab: "equaliser" | "setting" = "setting";
+
   const lineEditor = createBandLineEditor({
     onLineChange: (band, height) => {
       if (lineMode) deps.setDriveLineBand(lineMode.sceneId, lineMode.spec, band, height);
@@ -1542,129 +1618,226 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // markers themselves.
   bandFaders.el.appendChild(lineEditor.el);
 
-  const driveSectionTitle = document.createElement("div");
-  driveSectionTitle.className = "vc-label";
-  driveSectionTitle.style.cssText = rowLabelStyle;
-  const driveSectionClearChip = createChipButton("Equaliser", "Deselect — back to the plain band faders", () => selectDrive(null));
-  // Only shown while the selected setting is actually on Frequencies — a
-  // reset for a non-drawn line would have nothing to do.
-  const driveSectionResetChip = createChipButton("Reset", "Clear the drawn line and reset Strength", () => {
+  // Draw's inline reset — see the Setting layer's own drawRowStyle grouping
+  // (renderDrivePicker below), placed beside lineEditor.strengthRow rather
+  // than baked into it, since createControlRow has no extra-button slot and
+  // this is the only row that needs one.
+  const clearLineChip = createChipButton("Clear line", "Clear the drawn line and reset Strength", () => {
     if (!selected) return;
     deps.resetDriveLine(selected.sceneId, selected.spec);
     deps.setDriveLineStrength(selected.sceneId, selected.spec, LINE_STRENGTH_DEFAULT);
     lineEditor.setLine(deps.getDriveLine(selected.sceneId, selected.spec));
     lineEditor.setStrength(deps.getDriveLineStrength(selected.sceneId, selected.spec));
   });
-  const driveSectionHeadRight = document.createElement("div");
-  driveSectionHeadRight.style.cssText = rowRightStyle;
-  driveSectionHeadRight.append(driveSectionResetChip, driveSectionClearChip);
-  const driveSectionHead = document.createElement("div");
-  driveSectionHead.style.cssText = rowHeadStyle;
-  driveSectionHead.append(driveSectionTitle, driveSectionHeadRight);
-  // Always present (never display:none) — its height is the same one line
-  // whether the title is a setting's name or blank, so showing/hiding it
-  // can't be what causes the jump requirement 4 above is about; only the
-  // picker body below needs the reserved-height treatment.
 
-  // Built exactly once — every chip's click handler reads `selected` fresh
-  // rather than closing over one setting, so changing the selection is a
-  // handful of style/text writes (refreshDriveSection), never a rebuild.
-  // This is also what gives the section its fixed height: the same DOM
-  // exists whether or not anything is selected.
-  const driveSectionBody = document.createElement("div");
-  const driveChips: { btn: HTMLButtonElement; choice: DriveChoice }[] = [];
-  let driveSceneChipBtn: HTMLButtonElement | null = null;
-  for (const group of DRIVE_OPTION_GROUPS) {
-    const heading = document.createElement("div");
-    heading.textContent = group.label;
-    heading.style.cssText = drivePickerGroupLabelStyle;
-    const chipRow = document.createElement("div");
-    chipRow.style.cssText = paletteListStyle;
-    for (const opt of group.options) {
+  eqTabBtn.addEventListener("click", () => {
+    if (!selected) return;
+    driveTab = "equaliser";
+    refreshDriveZone();
+  });
+  settingTabBtn.addEventListener("click", () => {
+    if (!selected) return;
+    driveTab = "setting";
+    refreshDriveZone();
+  });
+
+  function refreshSpectrumTabs(): void {
+    const showTabs = !!selected;
+    spectrumTitlePlain.style.display = showTabs ? "none" : "";
+    spectrumTabs.style.display = showTabs ? "flex" : "none";
+    if (!showTabs) return;
+    settingTabBtn.textContent = selected!.spec.label;
+    eqTabBtn.style.cssText = driveTab === "equaliser" ? tabBtnActiveStyle : tabBtnInactiveStyle;
+    settingTabBtn.style.cssText = driveTab === "setting" ? tabBtnActiveStyle : tabBtnInactiveStyle;
+  }
+
+  // "Switching row 1 keeps the range" (the plan's Revision 3 section): the
+  // DriveChoice a setting lands on when its row-1 mode changes, derived
+  // from the range of the choice it's leaving rather than jumping to this
+  // setting's own drive.default — Hits·Bass to Loudness gives
+  // Loudness·Bass, not back to whatever this setting defaults to. Beat grid
+  // always starts at Beat (grid index 2, drives.ts's own "Beat" row-2
+  // label) regardless of the range being left, since a grid tick has no
+  // frequency range to preserve; Scene mix has only the one choice.
+  function nextChoiceForMode(mode: DriveMode, current: DriveChoice, spec: SceneSetting): DriveChoice {
+    if (mode === "scene") return "scene";
+    if (mode === "beatGrid") return { source: "beat", grid: 2 };
+    const targetRow = driveModes(spec).find((r) => r.mode === mode)!;
+    const { range } = modeOf(current);
+    const bucket = range === "bass" || range === "mid" || range === "treble" ? range : "broadband";
+    const match =
+      targetRow.options.find((o) => modeOf(o.choice).range === bucket) ??
+      targetRow.options.find((o) => modeOf(o.choice).range === "broadband");
+    return (match ?? targetRow.options[0]).choice;
+  }
+
+  /** Rebuilds the Setting layer's picker from scratch for whichever setting
+   *  is selected — row 1 (driveModes(spec)'s modes, a segmented control),
+   *  row 2 (the active mode's own options), and, only on Draw, the line's
+   *  Strength dial + Clear line. Called from refreshDriveZone() on every
+   *  selection or choice change, never per tick (see this file's own perf
+   *  note), so a full rebuild here is simpler than patching a shared DOM
+   *  tree the way the old flat catalogue picker did — driveModes(spec)
+   *  differs per setting (a Scene mix row, the default-only extras), so
+   *  there was little to share across selections anyway. Pointer-only, not
+   *  part of the Tab ring — see drivePickerWrapStyle's own comment. */
+  function renderDrivePicker(host: HTMLElement, sceneId: string, spec: SceneSetting): void {
+    const current = deps.getDriveChoice(sceneId, spec);
+    const rows = driveModes(spec);
+    const activeMode = modeOf(current).mode;
+    const activeRow = rows.find((r) => r.mode === activeMode) ?? rows[0];
+
+    const wrap = document.createElement("div");
+    wrap.style.cssText = drivePickerWrapStyle;
+
+    const row1 = document.createElement("div");
+    row1.style.cssText = paletteListStyle;
+    for (const row of rows) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.textContent = opt.label;
-      btn.style.cssText = chipBtnStyle;
-      if (opt.choice === "scene") driveSceneChipBtn = btn;
+      // Scene mix only ever appears as this setting's own default (see
+      // driveModes()'s doc comment) — its dot marks the whole tab, since it
+      // has no row-2 chip of its own to carry it instead.
+      btn.textContent = row.mode === "scene" ? `${row.label} •` : row.label;
+      btn.style.cssText = row.mode === activeMode ? paletteChipLitStyle : paletteChipStyle;
       btn.addEventListener("click", () => {
-        if (!selected) return;
-        deps.onDriveChoiceChange(selected.sceneId, selected.spec, opt.choice);
-        refreshDriveSection();
+        if (row.mode === activeMode) return;
+        deps.onDriveChoiceChange(sceneId, spec, nextChoiceForMode(row.mode, current, spec));
+        refreshDriveZone();
       });
-      driveChips.push({ btn, choice: opt.choice });
-      chipRow.appendChild(btn);
+      row1.appendChild(btn);
     }
-    driveSectionBody.append(heading, chipRow);
-  }
+    wrap.appendChild(row1);
 
-  // Sits over driveSectionBody, in the same reserved space, shown only
-  // while nothing is selected — see driveSectionBodyWrap below.
-  const driveSectionEmptyHint = document.createElement("div");
-  driveSectionEmptyHint.style.cssText = `${driveSectionEmptyHintStyle} position: absolute; inset: 0; display: flex; align-items: center;`;
-  driveSectionEmptyHint.textContent = "Focus a setting to choose what it reacts to.";
+    if (activeRow.mode === "scene") {
+      const line = document.createElement("div");
+      line.style.cssText = sceneMixLineStyle;
+      line.textContent = `${spec.drive!.sceneLabel} — the scene's own mix`;
+      wrap.appendChild(line);
+    } else {
+      const row2 = document.createElement("div");
+      row2.style.cssText = paletteListStyle;
+      let drawIsCurrent = false;
+      for (const opt of activeRow.options) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        const isCurrent = sameDriveChoice(opt.choice, current);
+        const isLine = typeof opt.choice === "object" && opt.choice.source === "line";
+        if (isLine) {
+          btn.title = LINE_HINT_TEXT;
+          if (isCurrent) drawIsCurrent = true;
+        }
+        btn.textContent = opt.isDefault ? `${opt.label} •` : opt.label;
+        btn.style.cssText = isCurrent ? paletteChipLitStyle : paletteChipStyle;
+        btn.addEventListener("click", () => {
+          if (isCurrent) return;
+          deps.onDriveChoiceChange(sceneId, spec, opt.choice);
+          refreshDriveZone();
+        });
+        row2.appendChild(btn);
+      }
+      wrap.appendChild(row2);
 
-  // position:relative so the empty-state hint can sit exactly over the
-  // (reserved-height, `visibility: hidden` when empty) picker rather than
-  // the section collapsing around it.
-  const driveSectionBodyWrap = document.createElement("div");
-  driveSectionBodyWrap.style.cssText = `position: relative;`;
-  driveSectionBodyWrap.append(driveSectionBody, driveSectionEmptyHint);
-
-  const driveSection = document.createElement("div");
-  driveSection.className = "vc-row";
-  driveSection.style.setProperty("--vc-accent", BANDS_AMBER);
-  driveSection.append(driveSectionHead, driveSectionBodyWrap);
-
-  function refreshPickerHighlight(): void {
-    if (!selected) return;
-    const current = deps.getDriveChoice(selected.sceneId, selected.spec);
-    for (const { btn, choice } of driveChips) btn.style.cssText = sameDriveChoice(choice, current) ? chipBtnLitStyle : chipBtnStyle;
-  }
-
-  // Re-derives everything the section and the strip below it show from
-  // `selected` alone — called after any click that could have changed the
-  // selected setting's own choice, from selectDrive() below whenever the
-  // selection itself actually changes, and once from renderSceneSettings()'s
-  // own tail (a Look apply, undo, or scene switch can move the choice —
-  // or the selection itself — without a focusin here).
-  function refreshDriveSection(): void {
-    driveSectionTitle.textContent = selected?.spec.label ?? "";
-    // visibility, not display — the whole point is that the picker's box
-    // keeps occupying the same space, hint or no hint (requirement 4).
-    driveSectionBody.style.visibility = selected ? "visible" : "hidden";
-    driveSectionEmptyHint.style.visibility = selected ? "hidden" : "visible";
-    // Scene is the one option with a sentence to say about it — a tooltip
-    // rather than a permanent line, so every other chip stays one row tall.
-    // Updated here rather than baked into the (now shared, built-once)
-    // button, since which sentence applies depends on which setting is
-    // currently selected.
-    const sceneLabel = selected?.spec.drive?.sceneLabel;
-    if (driveSceneChipBtn) {
-      if (sceneLabel) driveSceneChipBtn.title = sceneLabel;
-      else driveSceneChipBtn.removeAttribute("title");
+      if (drawIsCurrent) {
+        lineEditor.setLine(deps.getDriveLine(sceneId, spec));
+        lineEditor.setStrength(deps.getDriveLineStrength(sceneId, spec));
+        lineEditor.strengthRow.style.flex = "1";
+        const drawRow = document.createElement("div");
+        drawRow.style.cssText = drawRowStyle;
+        drawRow.append(lineEditor.strengthRow, clearLineChip);
+        wrap.appendChild(drawRow);
+      }
     }
 
-    const choice = selected ? deps.getDriveChoice(selected.sceneId, selected.spec) : null;
-    const isFreq = choice !== null && typeof choice === "object" && choice.source === "line";
-    driveSectionResetChip.style.display = isFreq ? "" : "none";
+    host.appendChild(wrap);
+  }
 
-    if (isFreq && selected) {
+  // "all"/"low"/"mid"/"high" (SignalSpec.bandRange, signals.ts) resolved
+  // against the *live* split rather than a fixed index range — see
+  // resolveBandRange below, defined once and shared by both this and
+  // wireBandHighlight's own hover tint for a non-drive row.
+  function highlightForSelection(): { lo: number; hi: number } | null {
+    if (!selected) return null;
+    const choice = deps.getDriveChoice(selected.sceneId, selected.spec);
+    const { mode } = modeOf(choice);
+    if (mode === "hits" || mode === "loudness") {
+      if (typeof choice === "object") return null; // Draw — the line replaces the knobs, no tint under it
+      if (choice === "scene") return null; // unreachable (modeOf never pairs "scene" with hits/loudness) — narrows for SIGNALS below
+      const range = SIGNALS[choice].bandRange;
+      return range ? resolveBandRange(range, deps.getBandSplit()) : null;
+    }
+    if (mode === "scene") {
+      // A Scene-default setting has no static `reads` today (see
+      // signals.ts's own header) — this is here for the setting that
+      // eventually does, per the plan's Revision 3 section, rather than a
+      // claim any currently-registered scene relies on.
+      const reads = selected.spec.reads;
+      if (!reads?.length) return null;
+      let lo = NUM_BANDS;
+      let hi = 0;
+      let any = false;
+      for (const link of reads) {
+        const id = typeof link === "string" ? link : link.signal;
+        const range = SIGNALS[id].bandRange;
+        if (!range) continue;
+        const r = resolveBandRange(range, deps.getBandSplit());
+        lo = Math.min(lo, r.lo);
+        hi = Math.max(hi, r.hi);
+        any = true;
+      }
+      return any ? { lo, hi } : null;
+    }
+    return null; // beatGrid — a grid tick has no frequency range
+  }
+
+  // `null` while the Equaliser tab is showing (even with a setting still
+  // selected) — its whole point is the plain band gains, with no tint and
+  // no picker (this card's own doc-comment paragraph).
+  function applyTint(showSetting: boolean): void {
+    spectrumStrip.setHighlight(showSetting ? highlightForSelection() : null);
+    spectrumStrip.redraw();
+  }
+
+  // Re-derives everything the header tabs, the strip and the swap zone show
+  // from `selected`/`driveTab` alone — called after any click that could
+  // have changed the selected setting's own choice or which tab is showing,
+  // from selectDrive() below whenever the selection itself actually
+  // changes, and once from renderSceneSettings()'s own tail (a Look apply,
+  // undo, or scene switch can move the choice — or the selection itself —
+  // without a focusin here).
+  function refreshDriveZone(): void {
+    refreshSpectrumTabs();
+
+    // Nothing selected, or the Equaliser tab showing over a real selection,
+    // both mean the strip shows the plain equaliser — no tint, no line, no
+    // picker (this card's own doc-comment paragraph: the Equaliser tab is
+    // knobs and readouts regardless of what the selected setting is on).
+    const showSetting = !!selected && driveTab === "setting";
+    const choice = showSetting ? deps.getDriveChoice(selected!.sceneId, selected!.spec) : null;
+    const isDraw = choice !== null && typeof choice === "object" && choice.source === "line";
+    if (isDraw && selected) {
       lineMode = { sceneId: selected.sceneId, spec: selected.spec };
       spectrumStrip.setShowFaders(false);
       lineEditor.el.style.display = "";
-      lineEditor.strengthRow.style.display = "";
       lineEditor.setLine(deps.getDriveLine(selected.sceneId, selected.spec));
       lineEditor.setStrength(deps.getDriveLineStrength(selected.sceneId, selected.spec));
-      fadersHint.textContent = LINE_HINT_TEXT;
     } else if (lineMode) {
       lineMode = null;
       spectrumStrip.setShowFaders(true);
       lineEditor.el.style.display = "none";
-      lineEditor.strengthRow.style.display = "none";
-      fadersHint.textContent = FADER_HINT_TEXT;
     }
+    applyTint(showSetting);
 
-    refreshPickerHighlight();
+    // The picker still gets (re)built from `selected` regardless of which
+    // tab is showing — the swap zone needs the Setting layer's real content
+    // for its own height even while the Equaliser layer is the visible one
+    // (see driveZoneStyle's own comment), and it must already be current
+    // for when the setting tab is clicked back to.
+    settingLayer.innerHTML = "";
+    if (selected) renderDrivePicker(settingLayer, selected.sceneId, selected.spec);
+
+    eqLayer.style.visibility = showSetting ? "hidden" : "visible";
+    settingLayer.style.visibility = showSetting ? "visible" : "hidden";
   }
 
   function sameSelection(a: { sceneId: string; spec: SceneSetting } | null, b: typeof a): boolean {
@@ -1672,34 +1845,47 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return !!a && !!b && a.sceneId === b.sceneId && a.spec.key === b.spec.key;
   }
 
-  /** The only place `selected` is written. Called from a scene-setting row's
-   *  own `focusin` (appendSettingRow — a drive setting selects itself, any
-   *  other setting clears), the section's own Equaliser chip, Escape
-   *  (onKeyDown), and the scene-mismatch checks in renderSceneSettings()/
-   *  update(). Deliberately *not* called when focus leaves a row for
-   *  anywhere else (the Bands card's own strip/overlay/section/Strength,
-   *  the meters, another card, the page): each row's `focusin` listener
-   *  only ever fires for focus entering *that* row, so moving the mouse off
-   *  a selected setting and onto the spectrum to draw its line — or onto
-   *  this very section's own picker chips — never touches `selected` at
-   *  all, let alone clears it. No-ops when `sel` already matches the
-   *  current selection: `focusin` re-fires for every focus change *within*
-   *  one row (the slider, its A/T/reset chips — see wireHoverFocus), not
-   *  just a row-to-row change, so without this guard sweeping the mouse or
-   *  tabbing across one row's own controls would redo this work on every
-   *  one of them. */
-  function selectDrive(sel: { sceneId: string; spec: SceneSetting } | null): void {
-    if (sameSelection(selected, sel)) return;
-    selected = sel;
-    refreshDriveSection();
+  // A hover-scheduled selection change not yet committed — see
+  // wireHoverFocus's own pointerFocusOriginated flag and appendSettingRow's
+  // onRowFocusIn below for the dwell this exists to implement (only a
+  // pointer-originated focus waits; keyboard/click focus calls selectDrive
+  // directly). One shared timer, not per-row, since only one such change
+  // can ever be in flight — a new one always supersedes whatever's pending.
+  let pendingSelectTimer: ReturnType<typeof setTimeout> | null = null;
+  function cancelPendingSelect(): void {
+    if (pendingSelectTimer !== null) {
+      clearTimeout(pendingSelectTimer);
+      pendingSelectTimer = null;
+    }
   }
 
-  // A sibling of driveSection, not nested in it — both are their own
-  // `.vc-row`, and CSS/query selectors throughout this file assume rows
-  // don't nest.
-  lineEditor.strengthRow.style.display = "none";
-  bandsCard.body.append(driveSection, lineEditor.strengthRow);
-  refreshDriveSection(); // seeds driveSectionBody's visibility/hint at rest
+  /** The only place `selected` is written. Called (after cancelPendingSelect,
+   *  always its first line) from a scene-setting row's own `focusin`
+   *  (appendSettingRow, immediately for keyboard/click focus, after a dwell
+   *  for pointer focus), Escape (onKeyDown), and the scene-mismatch check in
+   *  update() — see renderSceneSettings()'s own tail for the scene-switch
+   *  case, which writes `selected` directly instead, since a scene switch
+   *  also needs the row set rebuilt regardless of whether the selection
+   *  itself changes. Deliberately *not* called when focus leaves a row for
+   *  anywhere else (the Bands card's own strip/overlay/picker, the meters,
+   *  another card, the page): each row's `focusin`/`focusout` pair only
+   *  ever touches its own pending timer (appendSettingRow), so moving the
+   *  mouse off a selected setting and onto the spectrum to draw its line
+   *  never touches `selected` at all, let alone clears it. No-ops when
+   *  `sel` already matches the current selection: `focusin` re-fires for
+   *  every focus change *within* one row (the slider, its A/T/reset
+   *  chips), not just a row-to-row change, so without this guard sweeping
+   *  the mouse or tabbing across one row's own controls would redo this
+   *  work on every one of them. */
+  function selectDrive(sel: { sceneId: string; spec: SceneSetting } | null): void {
+    cancelPendingSelect();
+    if (sameSelection(selected, sel)) return;
+    selected = sel;
+    if (sel) driveTab = "setting"; // a new selection always opens on its own picker
+    refreshDriveZone();
+  }
+
+  refreshDriveZone(); // seeds the header/zone/tint at rest
 
   spectrumCol.append(bandsCard.el, audioMeters.el);
 
@@ -1747,7 +1933,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   let lastStatusText = "";
   function refreshSpectrumHeader(): void {
-    spectrumTitle.textContent = deps.currentSceneName();
+    spectrumTitlePlain.textContent = `${deps.currentSceneName()} · Equaliser`;
     const status = deps.getAudioStatus();
     const text = statusText(status);
     if (text !== lastStatusText) {
@@ -2324,10 +2510,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // spectrum strip while the row is being touched — hover, keyboard focus,
   // or a drag — and clears back to the normal view on release. A no-op for
   // a row with no `reads`, or whose reads are all band-agnostic (drop
-  // detection: section loudness, not a frequency read). Recomputed on
-  // every `input` (not just on entry) since dragging Ripple source across
-  // its own threshold changes which signal is actually active mid-drag —
-  // see RIPPLE_SRC_BEAT_THRESHOLD's own comment in caustics.ts.
+  // detection: section loudness, not a frequency read) — which in practice
+  // makes this a non-drive-row-only affordance, since a drive setting
+  // declares no static `reads` at all (signals.ts's own header): its tint
+  // instead comes from the *selection* (highlightForSelection/applyTint
+  // above), which owns the strip's highlight for as long as that setting
+  // stays selected, not just while the row itself is being touched.
+  // Recomputed on every `input` (not just on entry) since dragging Ripple
+  // source across its own threshold changes which signal is actually active
+  // mid-drag — see RIPPLE_SRC_BEAT_THRESHOLD's own comment in caustics.ts.
   function wireBandHighlight(el: HTMLElement, reads: ResolvedSignalRead[] | undefined): void {
     const withRange = reads?.filter((r) => r.signal.bandRange !== undefined);
     if (!withRange?.length) return;
@@ -2393,12 +2584,44 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       };
     });
 
-    // The selection signal now (Revision 2 — see selectDrive's own doc
-    // comment for the full contract) — every scene-setting row gets this,
-    // regardless of type, so focusing a non-drive row (an enum picker, a
-    // toggle) correctly clears a previous selection too, not just sliders.
+    // The selection signal (see selectDrive's own doc comment for the full
+    // contract) — every scene-setting row gets this, regardless of type, so
+    // focusing a non-drive row (an enum picker, a toggle) correctly clears a
+    // previous selection too, not just sliders. Pointer-originated focus
+    // (wireHoverFocus's pointerFocusOriginated flag) waits out
+    // HOVER_SELECT_DELAY_MS before actually selecting, canceled by
+    // whichever comes first: a newer focusin (any row, cancelPendingSelect
+    // at the top of both this and selectDrive) or this row losing focus
+    // before the timer fires (onRowFocusOut below) — together these are
+    // what let a fast sweep across several rows toward the spectrum strip
+    // leave the starting selection alone. Keyboard/click focus (not
+    // pointer-originated) selects immediately.
     function onRowFocusIn(): void {
-      selectDrive(spec.drive ? { sceneId, spec } : null);
+      cancelPendingSelect();
+      const next = spec.drive ? { sceneId, spec } : null;
+      if (pointerFocusOriginated) {
+        pendingSelectTimer = setTimeout(() => {
+          pendingSelectTimer = null;
+          selectDrive(next);
+        }, HOVER_SELECT_DELAY_MS);
+      } else {
+        selectDrive(next);
+      }
+    }
+
+    /** Cancels this row's own still-pending hover selection if focus leaves
+     *  it for somewhere that never calls onRowFocusIn at all (the spectrum
+     *  strip, the meters, another card) before the dwell fires — a newer
+     *  row's own focusin already cancels via onRowFocusIn's own call, but
+     *  that only fires for focus landing on *another row*, not for focus
+     *  leaving the ring of rows entirely. `el` is the whole row (slider,
+     *  A/T/reset chips and all), so a focus change *within* it (e.g. Tab to
+     *  its own reset chip) isn't a leave. */
+    function wireSelectionFocus(el: HTMLElement): void {
+      el.addEventListener("focusin", onRowFocusIn);
+      el.addEventListener("focusout", (e) => {
+        if (!el.contains(e.relatedTarget as Node | null)) cancelPendingSelect();
+      });
     }
 
     if (spec.type === "enum" && spec.options) {
@@ -2433,7 +2656,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         },
         signals,
       });
-      picker.el.addEventListener("focusin", onRowFocusIn);
+      wireSelectionFocus(picker.el);
       container.appendChild(picker.el);
       if (signals && reads) {
         sceneRowHandles.push({
@@ -2460,7 +2683,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         get: () => deps.getSceneSettingValue(sceneId, spec),
         set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
       });
-      toggleEl.addEventListener("focusin", onRowFocusIn);
+      wireSelectionFocus(toggleEl);
       container.appendChild(toggleEl);
       return;
     }
@@ -2491,7 +2714,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));
-    row.el.addEventListener("focusin", onRowFocusIn);
+    wireSelectionFocus(row.el);
     container.appendChild(row.el);
     sceneRowHandles.push(row);
     wireBandHighlight(row.el, reads);
@@ -2569,13 +2792,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     else unmarkBlock(sceneCard.title);
     renumberBlocks();
 
-    // A scene switch invalidates a selection from the scene being left;
-    // anything else (Look apply/undo, variant switch, a card Reset, every
-    // open()) just needs the section/strip and every row's chip rebuilt for
-    // whatever `selected` still is — selectDrive() does both in one call,
-    // whether or not it actually changes.
+    // A scene switch invalidates a selection from the scene being left, so
+    // it's cleared directly (not through selectDrive — its sameSelection
+    // no-op would otherwise skip refreshDriveZone() below on exactly the
+    // one tick that needs it). Every other caller of this function (a Look
+    // apply/undo, variant switch, a card Reset, every open()) just needs the
+    // zone/strip and every picker chip rebuilt for whatever `selected`
+    // still is, which the unconditional refreshDriveZone() call covers too.
     if (selected && selected.sceneId !== sceneId) selected = null;
-    selectDrive(selected);
+    cancelPendingSelect();
+    refreshDriveZone();
   }
 
   // Palette: the only picker left in the panel.
@@ -2728,9 +2954,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // card rebuilt by renderSceneSettings can never leave it stale. Filtered
   // to controls with a layout box: a folded card's body is display:none, and
   // a control inside it would otherwise sit in the ring and fail to focus.
+  // Also filtered on computed visibility: driveZone's swap zone (this card's
+  // own assembly comment) keeps its hidden layer's real content mounted for
+  // sizing, so e.g. lineEditor.strengthRow's `.vc-slider` still has a
+  // non-empty getClientRects() while the Equaliser tab is showing instead —
+  // visibility inherits down from settingLayer, so checking the control's
+  // own computed style catches it without walking ancestors by hand.
   function ringElements(): HTMLElement[] {
     return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker, .vc-fader")].filter(
-      (el) => el.getClientRects().length > 0,
+      (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden",
     );
   }
 
@@ -2937,11 +3169,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       silenceClosedRow.refreshAuto();
       silenceOpenRow.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
-      // The selected setting's picker highlight — picked up here rather than
+      // The selected setting's picker/tint — picked up here rather than
       // every tick, same reasoning as every other refreshAuto() above (an
       // external change, e.g. a paired device's own command, could move the
       // selected setting's choice without a focusin here).
-      if (selected) refreshPickerHighlight();
+      if (selected) refreshDriveZone();
     },
   };
 }
