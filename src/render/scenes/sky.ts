@@ -161,8 +161,8 @@ const DRIFTER_PUFF_RATE = 0.45; // rad/s of each source's on/off cycle (~14s per
 // --- Floater waves. ---
 export const WAVE_LIFE_SEC = 16; // long enough for a swarm to visibly drift across part of the sky
 export const WAVE_DEAD_T0 = -1e9;
-const WAVE_FADE_IN_SEC = 2.5;
-const WAVE_FADE_OUT_SEC = 3.5;
+const WAVE_FADE_IN_SEC = 1.2; // one floater's own fade-in, from its staggered birth (see the swarm loop in the shader)
+const WAVE_FADE_OUT_SEC = 1.8; // one floater's own fade-out, ending at its staggered death
 const SPONTANEOUS_WAVE_STRENGTH = 0.5;
 const WAVE_FALLBACK_MIN_SEC = 8; // shortest spontaneous-wave gap, at Wave frequency = 1
 const WAVE_FALLBACK_MAX_SEC = 26; // longest gap, at Wave frequency = 0 — the sky is sometimes empty of floaters between waves
@@ -535,7 +535,11 @@ const float SWARM_LOBE_R = 0.085;
 const float SWARM_STRETCH = 1.45;
 const vec2 SWARM_WIND = vec2(0.018, 0.003);
 const float SWARM_CHURN = 0.014;
-const float SWARM_BOUND = 0.34; // conservative swarm radius for the per-wave early-out: spread + lobe + churn + half a strand + fringe, stretched
+const float SWARM_BOUND = 0.34; // conservative swarm radius for the per-wave early-out: spread + lobe + churn + half a strand + fringe, stretched (at full grow)
+const float SWARM_GROW_FROM = 0.7; // layout scale at birth, easing out to 1.0 by the end of the wave — the swarm spreads as it drifts
+const float SWARM_STAGGER = 0.4; // fraction of the wave's life over which floaters trickle in (and, mirrored, trickle out)
+const float SWARM_HEADING_VAR = 0.9; // radians of per-swarm heading spread around the wind direction
+const float FLOATER_HEADING_JITTER = 0.16; // radians of per-floater spread around its swarm's heading — small, so the strands read as aligned
 // floaterPath's heading theta(t) = theta0 + B1*sin(2*pi*f1*t+p1) +
 // B2*sin(2*pi*f2*t+p2): a dominant gentle bend (B1/f1) plus a much smaller,
 // faster wobble (B2/f2), all hashed once per seed. Because heading is
@@ -545,8 +549,8 @@ const float SWARM_BOUND = 0.34; // conservative swarm radius for the per-wave ea
 // side-by-side against the reference showed v2/v3's per-point-independent
 // kinks read as an angular zigzag, not the reference's smooth curve; this
 // can't produce a corner at all.
-const float FLOATER_B1_MIN = 0.6; // dominant bend swing, radians (random sign per seed)
-const float FLOATER_B1_MAX = 1.3;
+const float FLOATER_B1_MIN = 0.3; // dominant bend swing, radians (random sign per seed) — gentle, so a swarm's strands read as parallel
+const float FLOATER_B1_MAX = 0.6;
 const float FLOATER_F1_MIN = 0.5; // dominant bend's cycles over the strand
 const float FLOATER_F1_MAX = 1.0;
 const float FLOATER_B2_MIN = 0.1; // secondary wobble, radians — kept subtle; texture, not a second kink
@@ -671,8 +675,11 @@ float floaterLen(float seed) {
 // t — see the FLOATER_B1_MIN..FLOATER_F2_MAX comment above for why. 'pts' is
 // then re-centred on its own average so the strand's MIDDLE sits at the
 // local origin: floaterShape adds basePos (its slot in the swarm) straight
-// onto these points, so basePos is the strand's centre, not its head.
-void floaterPath(float seed, out vec2 pts[FLOATER_SEGMENTS]) {
+// onto these points, so basePos is the strand's centre, not its head. The
+// whole strand is then rotated so its chord (head to tail) points along
+// 'heading' — its swarm's shared direction — which is what lines a swarm's
+// strands up in parallel however each one curls along the way.
+void floaterPath(float seed, float heading, out vec2 pts[FLOATER_SEGMENTS]) {
   float len = floaterLen(seed);
   float thetaSign = hash21(vec2(seed, 26.0)) < 0.5 ? -1.0 : 1.0;
   float b1 = thetaSign * mix(FLOATER_B1_MIN, FLOATER_B1_MAX, hash21(vec2(seed, 21.0)));
@@ -681,7 +688,7 @@ void floaterPath(float seed, out vec2 pts[FLOATER_SEGMENTS]) {
   float b2 = mix(FLOATER_B2_MIN, FLOATER_B2_MAX, hash21(vec2(seed, 28.0)));
   float f2 = mix(FLOATER_F2_MIN, FLOATER_F2_MAX, hash21(vec2(seed, 23.0)));
   float p2 = hash21(vec2(seed, 24.0)) * 6.28318;
-  float theta0 = hash21(vec2(seed, 8.0)) * 6.28318;
+  float theta0 = 0.0;
   float stepLen = len / float(FLOATER_SEGMENTS - 1);
   pts[0] = vec2(0.0);
   for (int i = 1; i < FLOATER_SEGMENTS; i++) {
@@ -694,7 +701,10 @@ void floaterPath(float seed, out vec2 pts[FLOATER_SEGMENTS]) {
   vec2 sum = vec2(0.0);
   for (int i = 0; i < FLOATER_SEGMENTS; i++) sum += pts[i];
   vec2 mid = sum / float(FLOATER_SEGMENTS);
-  for (int i = 0; i < FLOATER_SEGMENTS; i++) pts[i] -= mid;
+  vec2 chord = pts[FLOATER_SEGMENTS - 1] - pts[0];
+  float turn = heading - atan(chord.y, chord.x);
+  mat2 rot = mat2(cos(turn), sin(turn), -sin(turn), cos(turn));
+  for (int i = 0; i < FLOATER_SEGMENTS; i++) pts[i] = rot * (pts[i] - mid);
 }
 
 // One floater's signed relative-luminance delta at p: a hollow refractive
@@ -709,7 +719,7 @@ void floaterPath(float seed, out vec2 pts[FLOATER_SEGMENTS]) {
 // centres its points on it) skips the FLOATER_SEGMENTS-point path build and
 // distance loop for fragments nowhere near this floater — see the file
 // header's per-slot budget.
-float floaterShape(vec2 p, float seed, vec2 basePos) {
+float floaterShape(vec2 p, float seed, vec2 basePos, float heading) {
   if (hash21(vec2(seed, 13.0)) < FLOATER_DOT_CHANCE) {
     float dotR = mix(FLOATER_DOT_R_MIN, FLOATER_DOT_R_MAX, hash21(vec2(seed, 15.0)));
     float s = length(p - basePos) - dotR;
@@ -719,7 +729,7 @@ float floaterShape(vec2 p, float seed, vec2 basePos) {
   float len = floaterLen(seed);
   if (length(p - basePos) > len * 0.5 + FLOATER_R + FLOATER_FRINGE_W * 2.0) return 0.0;
   vec2 pts[FLOATER_SEGMENTS];
-  floaterPath(seed, pts);
+  floaterPath(seed, heading, pts);
   vec2 pLocal = p - basePos;
   float dMin = 1.0e6;
   for (int i = 1; i < FLOATER_SEGMENTS; i++) {
@@ -817,19 +827,31 @@ void main() {
     if (length(p - swarmC) > SWARM_BOUND) continue;
     float swell = mix(1.0 - clamp(uWaveStrength, 0.0, 1.0), 1.0, clamp(uBurstAmp[b], 0.0, 1.0));
     int subActive = int(float(perBurstCap) * clamp(uFloaterDensity * 1.4, 0.15, 1.0) * mix(0.35, 1.0, swell) + 0.5);
-    float envelope = smoothstep(0.0, WAVE_FADE_IN, age) * (1.0 - smoothstep(WAVE_LIFE_SEC_C - WAVE_FADE_OUT, WAVE_LIFE_SEC_C, age));
+    // The swarm condenses and disperses like a cloud: it spreads a little as
+    // it ages, and each floater has its own staggered birth (early in the
+    // wave) and death (late in it), so the group forms floater by floater
+    // and thins out the same way rather than fading as one block.
+    float grow = mix(SWARM_GROW_FROM, 1.0, age / WAVE_LIFE_SEC_C);
+    // One shared heading per swarm (roughly along the wind, hashed per wave),
+    // so its strands lie in parallel — see floaterPath.
+    float swarmHeading = atan(SWARM_WIND.y, SWARM_WIND.x) + (hash21(vec2(uBurstSeed[b], 41.0)) - 0.5) * SWARM_HEADING_VAR;
     for (int j = 0; j < FLOATER_PER_BURST_MAX; j++) {
       if (j >= subActive) break;
       float seed = uBurstSeed[b] * 31.7 + float(j) * 9.3 + 5.0;
-      vec2 fc = swarmC + floaterOffset(seed, uBurstSeed[b], uTime);
-      float d = floaterShape(p, seed, fc);
+      float born = hash21(vec2(seed, 42.0)) * WAVE_LIFE_SEC_C * SWARM_STAGGER;
+      float dies = WAVE_LIFE_SEC_C * (1.0 - hash21(vec2(seed, 43.0)) * SWARM_STAGGER);
+      float life = smoothstep(born, born + WAVE_FADE_IN, age) * (1.0 - smoothstep(dies - WAVE_FADE_OUT, dies, age));
+      if (life <= 0.0) continue;
+      vec2 fc = swarmC + floaterOffset(seed, uBurstSeed[b], uTime) * grow;
+      float heading = swarmHeading + (hash21(vec2(seed, 44.0)) - 0.5) * FLOATER_HEADING_JITTER;
+      float d = floaterShape(p, seed, fc, heading);
       if (d == 0.0) continue;
       // Keep off the clouds: this floater's own centre, looked up in the same
       // field the cloud pass thresholds, with a margin below CLOUD_LOW so it
       // fades before a cloud's visible edge reaches it.
       vec2 fcUv = roomUv(fc / vec2(devAspect, 1.0) + 0.5);
       float clear = 1.0 - smoothstep(CLOUD_LOW * 0.3, CLOUD_LOW * 0.85, cloudBumpedAt(fcUv));
-      floatDelta += d * envelope * clear;
+      floatDelta += d * life * clear;
     }
   }
   floatDelta = clamp(floatDelta, -0.2, 0.2) * (1.0 - cloudAlpha);
