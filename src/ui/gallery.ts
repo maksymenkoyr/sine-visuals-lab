@@ -41,10 +41,9 @@ export interface GalleryDeps {
    *  never names an option a mobile visitor won't see. */
   canCaptureDisplay: () => boolean;
   /** The source a tile tap will start on, and whether it's live yet — what
-   *  the picker paints, including state.micReady (see its doc comment in
-   *  sourcePref.ts), which lets the Mic option read "ready" even while a
-   *  different source is the resolved choice. Same signal drives the Input
-   *  card's Source row (src/ui/deviceMenu.ts's createSourceRow). */
+   *  the picker paints. Only `live` is ever painted as a highlight (see
+   *  SourceState's doc comment in sourcePref.ts). Same signal drives the
+   *  Input card's Source row (src/ui/deviceMenu.ts's createSourceRow). */
   sourceState: () => SourceState;
   /** Fired inside the picker's click, so starting — or live-swapping to —
    *  screen capture still has its user gesture: a click here starts listening
@@ -132,15 +131,11 @@ const stylesheet = `
 }
 .gal-src:hover { border-color: rgba(255,255,255,.4); }
 /* Paint keys off data-state, not aria-checked — aria-checked stays purely
- * semantic (radio state for assistive tech). Both "ready" and "live" share
- * [aria-checked] and [role=radio] specificity, so keying paint off the
- * wrong attribute here previously let a merely-remembered choice (never
- * actually listening yet) paint the same green as a live one. */
-.gal-src[data-state="ready"] { border-color: rgba(255,255,255,.4); }
+ * semantic (radio state for assistive tech). Live is the only state this
+ * paints; anything else (idle) is the button's own plain default look. */
 .gal-src[data-state="live"] { border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; }
 .gal-src[data-solo] { cursor: default; }
 .gal-src-dot { width: 5px; height: 5px; border-radius: 50%; border: 1px solid rgba(255,255,255,.45); box-sizing: border-box; flex: none; }
-.gal-src[data-state="ready"] .gal-src-dot { border-color: rgba(255,255,255,.8); }
 .gal-src[data-state="live"] .gal-src-dot { background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN}; }
 .gal-src-name { font: 400 13.5px ${FONT_LABEL}; }
 .gal-src-hint { font: 400 9.5px ${FONT_MONO}; letter-spacing: .1em; color: rgba(255,255,255,.55); margin-top: 2px; }
@@ -382,7 +377,6 @@ export function createGallery(deps: GalleryDeps): Gallery {
     sourceRow.setAttribute("aria-label", "Sound source");
   }
   const LIVE_LABEL = "LISTENING";
-  const READY_LABEL = "TAP TO START";
   const sourceButtons = new Map<AudioSourceChoice, { btn: HTMLButtonElement; hintEl: HTMLElement; descriptor: string }>();
   // Only where there's an actual choice to nudge toward — the solo path (no
   // display capture) has nothing to pick between, so it keeps just the plain
@@ -397,40 +391,22 @@ export function createGallery(deps: GalleryDeps): Gallery {
   const refreshSource = (): void => {
     const state = deps.sourceState();
     for (const [choice, entry] of sourceButtons) {
-      const isCurrent = choice === state.choice;
-      // Mic can read "ready" on its own merits (state.micReady — see its doc
-      // comment in sourcePref.ts) even while a *different* source is the
-      // resolved choice: a granted mic permission is real regardless of
-      // which source happens to be preferred right now, which used to go
-      // completely unshown whenever "display" was the stored pick. That
-      // branch also reaches the solo (no-display-capture) path — canChoose
-      // is false there, but state.micReady isn't gated on it, so a solo mic
-      // whose permission is already granted now reads "ready" too, instead
-      // of a flat idle until it's actually live. Display has no independent
-      // readiness signal at all (getDisplayMedia always prompts fresh), so
-      // it's still only ever "ready" as the resolved, chosen choice — see
-      // the Input card's Source row in deviceMenu.ts for the matching
-      // comment, and why its own fallback branch is deliberately not gated
-      // on canDisplay the way this one's is gated on canChoose.
-      const uiState: "live" | "ready" | "idle" =
-        isCurrent && state.live
-          ? "live"
-          : choice === "mic" && state.micReady
-            ? "ready"
-            : isCurrent && canChoose && state.chosen
-              ? "ready"
-              : "idle";
+      // Live is the only state a button ever paints — a stored preference or
+      // a granted mic permission never highlights a button on its own, since
+      // a user reads any highlight as "this is running" (see SourceState's
+      // doc comment in sourcePref.ts).
+      const uiState: "live" | "idle" = choice === state.choice && state.live ? "live" : "idle";
       entry.btn.dataset.state = uiState;
-      if (canChoose) entry.btn.setAttribute("aria-checked", String(uiState !== "idle"));
-      entry.hintEl.textContent = uiState === "live" ? LIVE_LABEL : uiState === "ready" ? READY_LABEL : entry.descriptor;
+      if (canChoose) entry.btn.setAttribute("aria-checked", String(uiState === "live"));
+      entry.hintEl.textContent = uiState === "live" ? LIVE_LABEL : entry.descriptor;
     }
     if (sourceHint) {
       // Both children live in .gal-source-slot's one grid cell — see that
       // rule's own comment for why this toggle can't shift .gal-src's fixed
       // position.
-      sourceSlot.toggleAttribute("data-prompting", !state.chosen);
-      sourceHint.setAttribute("aria-hidden", String(state.chosen));
-      sourceLabel.setAttribute("aria-hidden", String(!state.chosen));
+      sourceSlot.toggleAttribute("data-prompting", !state.live);
+      sourceHint.setAttribute("aria-hidden", String(state.live));
+      sourceLabel.setAttribute("aria-hidden", String(!state.live));
     }
   };
   const addSource = (choice: AudioSourceChoice, name: string, descriptor: string, title?: string): void => {

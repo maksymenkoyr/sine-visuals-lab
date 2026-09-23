@@ -12,11 +12,9 @@ import {
   hasStoredAudioSource,
   resolveSourceState,
   displayCaptureSupported,
-  watchMicPermission,
   DISPLAY_SHARE_GUIDE,
   type AudioSourceChoice,
   type SourceState,
-  type MicPermission,
 } from "./audio/sourcePref.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
 import {
@@ -185,12 +183,6 @@ let extractor = new FeatureExtractor();
  *  own track ends (onCaptureEnded), so a retry is possible. */
 let audioPromise: Promise<void> | null = null;
 let captureFailed = false;
-/** The browser's live microphone permission state — see MicPermission's own
- *  doc comment in sourcePref.ts. Seeded/kept current by boot()'s
- *  watchMicPermission() call; resolveSourceState() (via currentSourceState()
- *  below) uses it, not localStorage alone, to decide whether the mic reads
- *  as "chosen". */
-let micPermission: MicPermission = "unknown";
 /** Guards against overlapping swapAudioSource() calls — e.g. a double-click
  *  on the panel's Source chips while a share picker is already open. */
 let swapPromise: Promise<void> | null = null;
@@ -433,30 +425,24 @@ function resolveInitialSource(): AudioSourceChoice {
 
 /** Whether a real audio-source choice has ever been made on this device — a
  *  URL pin for this load, or a persisted pick from a previous one. The one
- *  owner of that check: currentSourceState() and autoStartSource() below,
- *  and the gallery's onPick, all need the same answer to "has this app ever
- *  been told anything", and used to each spell it out inline. */
+ *  owner of that check: autoStartSource() below and the gallery's onPick both
+ *  need the same answer to "has this app ever been told anything", and used
+ *  to each spell it out inline. */
 function sourceEverChosen(): boolean {
   return urlPinnedSource() !== null || hasStoredAudioSource();
 }
 
-/** The one truth both source pickers (the gallery masthead, the Input card's
- *  Source row) render — see SourceState's doc comment in sourcePref.ts for
- *  what "live" vs "chosen" mean and why collapsing them into one
- *  AudioSourceChoice was the bug. A capture actually running wins outright
- *  (derived from `capture.kind`, never the stored pref — swapAudioSource
- *  attaches the new capture before persisting it, so reading the pref here
- *  would flash the old choice for one tick); otherwise it's the remembered/
- *  pinned preference, marked `chosen` only if one was ever really made. */
+/** The one truth every source picker (the gallery masthead, the Input card's
+ *  Source row) renders — see SourceState's doc comment in sourcePref.ts for
+ *  why a picker only ever highlights `live`, never a stored preference. A
+ *  capture actually running wins outright (derived from `capture.kind`, never
+ *  the stored pref — swapAudioSource attaches the new capture before
+ *  persisting it, so reading the pref here would flash the old choice for one
+ *  tick); otherwise it's just the remembered/pinned preference, not live. */
 function currentSourceState(): SourceState {
   const liveChoice: AudioSourceChoice | null =
     bandAnalyser && capture ? (capture.kind === "display" ? "display" : "mic") : null;
-  return resolveSourceState({
-    liveChoice,
-    preferredChoice: resolveInitialSource(),
-    preferenceChosen: sourceEverChosen(),
-    micPermission,
-  });
+  return resolveSourceState({ liveChoice, preferredChoice: resolveInitialSource() });
 }
 
 /** The source an IMPLICIT start — one no tap asked for — is allowed to use.
@@ -662,25 +648,9 @@ function updateMicPrompt(): void {
   // one has failed.
   const needsAudio = inViz && mode !== "renderer" && !syntheticFeed && !bandAnalyser && (captureFailed || !audioPromise);
   audioPrompt.style.display = needsAudio ? "flex" : "none";
-  // Which source is remembered can change mid-session (a Source-row swap
-  // persists a new pref), unlike display support above — hence here and not
-  // in refreshAudioPromptButtons. Emphasis only, never an auto-fire: see
-  // autoStartSource for why the picker still waits for a tap.
-  //
-  // currentSourceState(), not resolveInitialSource() alone — the same
-  // "default stands in for a real pick" bug the gallery masthead and the
-  // Input card's Source row had before their own fixes: resolveInitialSource()
-  // returns AUDIO_SOURCE_DEFAULT even when nothing was ever chosen, which
-  // used to paint Mic as remembered on a cold first visit. state.micReady
-  // additionally lets Mic light up on its own merits (a granted permission)
-  // even while Screen is the resolved choice — see SourceState.micReady's
-  // own doc comment in sourcePref.ts.
-  const state = currentSourceState();
-  audioPromptMicBtn.toggleAttribute(
-    "data-remembered",
-    !audioPromptDisplayBtn.hidden && ((state.choice === "mic" && state.chosen) || state.micReady),
-  );
-  audioPromptDisplayBtn.toggleAttribute("data-remembered", state.choice === "display" && state.chosen);
+  // Nothing is ever live while this prompt is showing (needsAudio above
+  // requires !bandAnalyser), so neither button gets emphasis here — both are
+  // a plain, equal choice.
 }
 
 /** Renderer lost (or never reached) its room — fall back to this device's own mic, per the plan's Solo model. */
@@ -1004,16 +974,6 @@ function applyRoute(route: Route): void {
 }
 
 async function boot(): Promise<void> {
-  // Kicked off first so it resolves in parallel with the detectQuality()
-  // await below — the first paint is correct with no flicker. Awaited just
-  // before createGallery() constructs the picker; the change listener keeps
-  // repainting live afterward (e.g. a grant from the browser's own prompt,
-  // or a permission reset while the page stays open) via gallery.syncSource().
-  const micPermissionReady = watchMicPermission((p) => {
-    micPermission = p;
-    gallery?.syncSource();
-  });
-
   if (!document.createElement("canvas").getContext) {
     fatalError("Canvas unsupported");
     return;
@@ -1145,7 +1105,6 @@ async function boot(): Promise<void> {
   if (bypassGallery) {
     void enterViz(scene);
   } else {
-    micPermission = await micPermissionReady;
     gallery = createGallery({
       scenes: () =>
         listScenes().map((s) => {

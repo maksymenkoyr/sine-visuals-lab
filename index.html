@@ -188,11 +188,10 @@
         border-color: rgba(255, 255, 255, 0.4);
       }
       /* Same status-dot idiom as .gal-src-dot (src/ui/gallery.ts) and the
-       * Input card's Source row (src/ui/deviceMenu.ts) — a plain border by
-       * default, brighter under [data-remembered]. No live/green state here:
-       * this overlay only ever shows before anything is listening, so idle
-       * vs. remembered is the whole vocabulary — unlike the other two
-       * pickers, which also need to paint "listening now". */
+       * Input card's Source row (src/ui/deviceMenu.ts) — a plain border, no
+       * other state: this overlay only ever shows before anything is
+       * listening (updateMicPrompt in app.ts hides it the moment a capture
+       * attaches), so idle is the only state either button is ever in. */
       .apDot {
         width: 6px;
         height: 6px;
@@ -200,16 +199,6 @@
         border: 1px solid rgba(255, 255, 255, 0.45);
         box-sizing: border-box;
         flex: none;
-      }
-      /* The remembered source (src/audio/sourcePref.ts) — a brighter border
-       * on the button and its dot, the same "lit chip" idiom the controls
-       * panel uses. Emphasis only; app.ts never fires a capture off this
-       * alone — see autoStartSource. */
-      #audioPrompt button[data-remembered] {
-        border-color: rgba(255, 255, 255, 0.8);
-      }
-      #audioPrompt button[data-remembered] .apDot {
-        border-color: rgba(255, 255, 255, 0.9);
       }
       /* Filled from DISPLAY_SHARE_GUIDE (src/audio/sourcePref.ts), which owns
        * this copy; shown only where the Screen button is offered. */

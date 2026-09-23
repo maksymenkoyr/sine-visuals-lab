@@ -180,14 +180,13 @@ export interface DeviceMenuDeps {
   /** Shown in the Bands card's status line — where the bars are coming from. */
   getAudioStatus: () => AudioStatus;
   /** This device's mic-vs-screen capture state (src/audio/sourcePref.ts's
-   *  SourceState) — drives the Input card's Source row, including whether
-   *  the lit chip means "listening now" or just "picked, not started yet",
-   *  and state.micReady, which lets the Mic chip read "ready" even while a
-   *  different source is the resolved choice. Same signal drives the gallery
-   *  masthead's picker (src/ui/gallery.ts's refreshSource). Null on a
-   *  renderer or the synthetic feed (no local capture to choose a
-   *  source for), which is what hides the row — the same null-hides-itself
-   *  convention as the Loudness card's `lufs` frame field. */
+   *  SourceState) — drives the Input card's Source row, including whether the
+   *  lit chip means "listening now" (the only thing it ever highlights — see
+   *  SourceState's doc comment). Same signal drives the gallery masthead's
+   *  picker (src/ui/gallery.ts's refreshSource). Null on a renderer or the
+   *  synthetic feed (no local capture to choose a source for), which is what
+   *  hides the row — the same null-hides-itself convention as the Loudness
+   *  card's `lufs` frame field. */
   getSourceState: () => SourceState | null;
   onAudioSourceChange: (choice: AudioSourceChoice) => void;
   /** Whether this browser can offer the Screen option at all — see
@@ -1696,15 +1695,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // both surfaces rather than the generic white "lit" chip look every other
   // enum picker in this panel uses.
   const sourceChipLiveStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px; border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; color: #fff;`;
-  // Between sourceChipStyle and sourceChipLiveStyle: picked but not listening
-  // yet (SourceState.chosen without .live) — see the Source row's refresh()
-  // below for why that's no longer painted the same as live.
-  const sourceChipReadyStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px; border-color: rgba(255,255,255,0.4); color: rgba(255,255,255,0.85);`;
   // The chip's status dot — same status-light idiom as the gallery's
   // .gal-src-dot, one small element whose border/fill swaps with the same
-  // three states as the chip itself (idle/ready/live) in refresh() below.
+  // two states as the chip itself (idle/live) in refresh() below.
   const sourceDotStyle = `display: inline-block; width: 6px; height: 6px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.45); box-sizing: border-box; margin-right: 6px; vertical-align: middle;`;
-  const sourceDotReadyStyle = `${sourceDotStyle} border-color: rgba(255,255,255,0.85);`;
   const sourceDotLiveStyle = `${sourceDotStyle} background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN};`;
   // Always visible while Screen is the active source, not a .vc-hint: the hint
   // only reveals on hover/focus, and on touch that means after the tap that
@@ -1774,40 +1768,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         if (state === null) return;
         const canDisplay = deps.canCaptureDisplay();
         for (const { choice: c, btn, dot } of buttons) {
-          const isCurrent = c === state.choice;
-          // Mic can read "ready" on its own merits (state.micReady — see its
-          // doc comment in sourcePref.ts) even while a *different* source is
-          // the resolved choice: a granted mic permission is real regardless
-          // of which source happens to be preferred right now, which used to
-          // go completely unshown whenever "display" was the stored pick.
-          // Display keeps its existing behavior — only ready when it's the
-          // resolved, chosen choice — since there's no independent "display
-          // permission" signal to check. No canDisplay gate on that fallback
-          // (unlike the gallery masthead's refreshSource, which deliberately
-          // suppresses "ready" in its solo/no-display-capture path): this row
-          // never had that gate before micReady existed, and adding one now
-          // would regress a solo browser with no usable Permissions API
-          // (Safari/iOS is exactly that combination) that had already
-          // explicitly picked mic — state.chosen still means something there
-          // even though state.micReady can't.
-          const uiState: "live" | "ready" | "idle" =
-            isCurrent && state.live
-              ? "live"
-              : c === "mic" && state.micReady
-                ? "ready"
-                : isCurrent && state.chosen
-                  ? "ready"
-                  : "idle";
-          btn.style.cssText = uiState === "live" ? sourceChipLiveStyle : uiState === "ready" ? sourceChipReadyStyle : sourceChipStyle;
-          dot.style.cssText = uiState === "live" ? sourceDotLiveStyle : uiState === "ready" ? sourceDotReadyStyle : sourceDotStyle;
+          // Live is the only state a chip ever paints — a stored preference
+          // or a granted mic permission never highlights a chip on its own
+          // (see SourceState's doc comment in sourcePref.ts).
+          const isLive = c === state.choice && state.live;
+          btn.style.cssText = isLive ? sourceChipLiveStyle : sourceChipStyle;
+          dot.style.cssText = isLive ? sourceDotLiveStyle : sourceDotStyle;
           btn.hidden = c === "display" && !canDisplay;
         }
         guide.style.display = state.choice === "display" ? "" : "none";
         // See .vc-src-status[data-prompting] (controlsTheme.ts) for the
-        // shimmer this drives while nothing's chosen yet.
-        status.toggleAttribute("data-prompting", !state.chosen);
+        // shimmer this drives while nothing's live yet.
+        status.toggleAttribute("data-prompting", !state.live);
         const name = SOURCE_OPTIONS.find((o) => o.choice === state.choice)?.text ?? "";
-        status.textContent = !state.chosen ? "Pick a source above" : state.live ? `${name} — listening` : `${name} — tap to start`;
+        status.textContent = state.live ? `${name} — listening` : "Pick a source above";
       },
     };
   }
