@@ -423,6 +423,23 @@ const float CLOUD_HIGH = 0.38; // bumped density above this reads as a solid, op
 const float CLOUD_BUMP_SCALE = 11.0; // fbm frequency, room-uv units — the cauliflower texture
 const float CLOUD_BUMP_MORPH = 0.05; // fbm domain drift per second — churn beyond plain advection
 const float CLOUD_BUMP_AMOUNT = 0.65; // how hard the bump noise erodes/thickens the edge
+// A fixed 2D "sun" direction and two shadow taps along it — storm.ts's Gas
+// mode's own two-tap technique (SUN_DIR + densityCheap/shape at 0.18/0.5,
+// exp(-1.9*s1-1.15*s2), mixed as a colour ramp not a brightness scalar),
+// ported from its 3D raymarch to a plain 2D density lookup. A single
+// adjacent-texel check (the first pass's own shadeAmt) only ever sees
+// edges; a wide cloud's flat interior has no local gradient at that scale,
+// which is why v1 read as one flat tone instead of a folded mass.
+const vec2 CLOUD_LIGHT_DIR = vec2(0.53, 0.848);
+const float CLOUD_SHADOW_TAP1 = 0.045;
+const float CLOUD_SHADOW_TAP2 = 0.095;
+// Calibrated against this scene's own measured density range (median ~0.8,
+// p90 ~1.65 inside the cloud silhouette — much higher than storm.ts's own
+// 3D density scale, which is why its 1.9/1.15 weights collapsed shadow to
+// ~0 almost everywhere here on the first try, read directly off a debug
+// render rather than re-guessed blind).
+const float CLOUD_SHADOW_K1 = 0.85;
+const float CLOUD_SHADOW_K2 = 0.52;
 const float BRUSH_R_CORE = 0.03;
 const float BRUSH_R_IN = 0.22;
 const float BRUSH_R_OUT = 0.34;
@@ -433,14 +450,18 @@ const float FLOATER_DRIFT_R = 0.05;
 const float FLOATER_JUMP_MIN = 2.0;
 const float FLOATER_JUMP_MAX = 5.0;
 const float FLOATER_JUMP_EASE = 0.35;
-const float FLOATER_LEN = 0.05; // body length, screen p-units
+const float FLOATER_LEN = 0.085; // body length, screen p-units — measured bigger against a real reference than v1's guess
 const float FLOATER_CURL = 0.6; // sideways kink per segment, relative to FLOATER_LEN
-const float FLOATER_HEAD_R = 0.0065;
-const float FLOATER_TAIL_R = 0.0018;
-const float FLOATER_GLOW_R = 0.02;
-const vec3 FLOATER_TINT = vec3(0.88, 0.94, 1.0);
-const float FLOATER_CORE_ALPHA = 0.5;
-const float FLOATER_GLOW_ALPHA = 0.4;
+const float FLOATER_HEAD_R = 0.010;
+const float FLOATER_TAIL_R = 0.003;
+const float FLOATER_GLOW_R = 0.014; // tighter than v1 — the reference reads crisp, not a diffuse blur
+const float FLOATER_RING_CHANCE = 0.32; // fraction of floaters that render as a ring instead of a squiggle
+const float FLOATER_RING_MIN = 0.012;
+const float FLOATER_RING_MAX = 0.028;
+const float FLOATER_RING_WIDTH = 0.0035;
+const vec3 FLOATER_TINT = vec3(0.9, 0.95, 1.0);
+const float FLOATER_CORE_ALPHA = 0.75;
+const float FLOATER_GLOW_ALPHA = 0.28;
 
 // This scene's own small hash/noise family — independently written (the
 // same fract/dot idiom every other scene's hash21 uses, CLAUDE.md's
@@ -513,11 +534,21 @@ vec2 floaterPoint(float seed, int i) {
 
 // Distance from p to one floater's curved body (a short polyline through
 // FLOATER_SEGMENTS hashed points) plus a soft glow — core is the
-// slightly-brighter thread tapering head-to-tail, glow is the wide soft
-// halo around it, matching a real floater's low-contrast translucency
-// rather than a solid dot.
+// slightly-brighter thread tapering head-to-tail, glow is the tight halo
+// around it. A measured real reference showed two floater families side by
+// side, elongated squiggles AND round rings/bubbles (aspect ratios ~1.6-1.9
+// vs ~1.0) — FLOATER_RING_CHANCE of seeds render as a ring instead, sharing
+// the same core/glow treatment so both read as the same kind of translucent
+// vitreous strand.
 void floaterShape(vec2 p, float seed, float t, out float core, out float glow) {
   vec2 basePos = floaterPos(seed, t);
+  if (hash21(vec2(seed, 13.0)) < FLOATER_RING_CHANCE) {
+    float ringR = mix(FLOATER_RING_MIN, FLOATER_RING_MAX, hash21(vec2(seed, 15.0)));
+    float d = abs(length(p - basePos) - ringR);
+    core = smoothstep(FLOATER_RING_WIDTH, FLOATER_RING_WIDTH * 0.25, d);
+    glow = exp(-(d * d) / (FLOATER_GLOW_R * FLOATER_GLOW_R));
+    return;
+  }
   float rotAngle = hash21(vec2(seed, 8.0)) * 6.28318;
   float cr = cos(rotAngle);
   float sr = sin(rotAngle);
@@ -551,11 +582,14 @@ void main() {
   vec2 p = (vUv - 0.5) * vec2(devAspect, 1.0);
 
   // 1. Sky: a vertical gradient, Sky tint walking it from cool blue toward
-  // a warm dusk.
-  vec3 zenithCool = vec3(0.09, 0.22, 0.50);
-  vec3 zenithWarm = vec3(0.28, 0.18, 0.27);
-  vec3 horizonCool = vec3(0.55, 0.68, 0.86);
-  vec3 horizonWarm = vec3(0.76, 0.55, 0.47);
+  // a warm dusk. Lightened and desaturated against a measured real-sky
+  // photo whose open-sky patch came out a very pale, low-saturation blue
+  // (hue~179/255, sat~14/255) — the first pass's zenith was a fairly deep,
+  // saturated navy, nothing like that hazy, high-key look.
+  vec3 zenithCool = vec3(0.42, 0.56, 0.74);
+  vec3 zenithWarm = vec3(0.55, 0.42, 0.48);
+  vec3 horizonCool = vec3(0.74, 0.82, 0.92);
+  vec3 horizonWarm = vec3(0.88, 0.74, 0.64);
   vec3 zenith = mix(zenithCool, zenithWarm, uSkyTint);
   vec3 horizon = mix(horizonCool, horizonWarm, uSkyTint);
   vec3 color = mix(horizon, zenith, smoothstep(-0.1, 0.9, uv.y));
@@ -563,32 +597,34 @@ void main() {
   // 2. Cloud cover: the sim's own dye density thresholded (CLOUD_LOW/HIGH)
   // rather than blended with a plain extinction curve — a gain/gamma remap
   // on a smooth density field stays smooth no matter how it's curved, so it
-  // never grows a real edge; only an actual threshold does. Measured against
-  // a real open-sky still, whose
-  // cloud body swings from near-black-sky to near-white-core, nothing like
-  // the first pass's low-contrast blend. A slowly time-drifting fbm
-  // (CLOUD_BUMP_*) eats into the density's own edge for the cauliflower
-  // bump texture and keeps the shape visibly morphing beyond plain
-  // advection, the same "erode a silhouette with noise" idea as Storm's Gas
-  // mode (storm.ts), independently written per the file header. Shading
-  // stays the cheap directional tap from the first pass (lit tops, shadowed
-  // undersides) — still a thin slab, not a raymarch.
-  vec2 dyeTexel = 1.0 / vec2(textureSize(uDye, 0));
+  // never grows a real edge; only an actual threshold does. A slowly
+  // time-drifting fbm (CLOUD_BUMP_*) eats into the density's own edge for
+  // the cauliflower bump texture and keeps the shape visibly morphing
+  // beyond plain advection, the same "erode a silhouette with noise" idea
+  // as Storm's Gas mode (storm.ts), independently written per the file
+  // header.
+  //
+  // Shading is Storm's own two-tap sun-shadow technique (CLOUD_LIGHT_DIR/
+  // CLOUD_SHADOW_TAP1-2/CLOUD_SHADOW_K1-2 above), ported from its 3D
+  // raymarch to a plain 2D density lookup: sample density toward a fixed
+  // light direction at two distances, run it through Beer's law, and use
+  // the result to pick a point on a colour ramp (mix), not as a brightness
+  // multiplier. The first pass's shading only compared immediate neighbour
+  // texels, which sees an edge but nothing in a wide cloud's flat interior —
+  // this reaches far enough across the body to shade actual folds.
   float density = max(decodeDye(texture(uDye, uv)).x, 0.0);
-  float densityUp = max(decodeDye(texture(uDye, uv + vec2(0.0, dyeTexel.y))).x, 0.0);
-  float densityDown = max(decodeDye(texture(uDye, uv - vec2(0.0, dyeTexel.y))).x, 0.0);
-  // A signed shadow OFFSET, not a 0..1 replacement for brightness — the flat
-  // interior of a wide cloud has almost no local density gradient, so using
-  // the gradient as the cloud's whole brightness (the first pass's own lit
-  // variable) left the entire body a flat mid-grey instead of a lit,
-  // near-white mass with only its underside reading darker.
-  float shadeAmt = clamp((densityUp - densityDown) * 1.6, 0.0, 0.7);
   float bump = fbm2(uv * CLOUD_BUMP_SCALE + vec2(uTime * CLOUD_BUMP_MORPH, uTime * CLOUD_BUMP_MORPH * 0.6));
   float bumped = density * mix(1.0 - CLOUD_BUMP_AMOUNT, 1.0 + CLOUD_BUMP_AMOUNT, bump);
   float cloudAlpha = smoothstep(CLOUD_LOW, CLOUD_HIGH, bumped);
-  vec3 cloudShadow = vec3(0.42, 0.47, 0.56);
-  vec3 cloudLit = vec3(0.99, 0.98, 1.0);
-  vec3 cloudColor = mix(cloudLit, cloudShadow, shadeAmt) * (0.75 + 0.4 * uCloudBrightness);
+  float sunNear = max(decodeDye(texture(uDye, uv + CLOUD_LIGHT_DIR * CLOUD_SHADOW_TAP1)).x, 0.0);
+  float sunFar = max(decodeDye(texture(uDye, uv + CLOUD_LIGHT_DIR * CLOUD_SHADOW_TAP2)).x, 0.0);
+  float shadow = exp(-CLOUD_SHADOW_K1 * sunNear - CLOUD_SHADOW_K2 * sunFar);
+  // Pale cool lavender-grey to warm white — measured off a real hazy-cumulus
+  // photo (shadow-fold RGB≈(156,151,172)/255, highlight RGB≈(255,255,254)/255)
+  // rather than the first pass's guessed, noticeably darker shadow tone.
+  vec3 cloudShadow = vec3(0.6, 0.59, 0.67);
+  vec3 cloudLit = vec3(1.0, 0.99, 0.96);
+  vec3 cloudColor = mix(cloudShadow, cloudLit, shadow) * (0.85 + 0.3 * uCloudBrightness);
   color = mix(color, cloudColor, cloudAlpha);
 
   // 3. Haidinger's brush: a faint bowtie centred on the fixation point,
