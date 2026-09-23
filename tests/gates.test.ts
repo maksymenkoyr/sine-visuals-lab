@@ -127,19 +127,6 @@ describe("advanceGates", () => {
     expect(st.bars).toBeGreaterThanOrEqual(BARS_PER_PHRASE);
   });
 
-  it("flash jumps on an onset and decays to nothing within a second", () => {
-    const st = createGateState();
-    advanceGates(st, anim({ onset: true }), OPTS, lcg(1));
-    expect(st.flash).toBeGreaterThan(0.9);
-    let prev = st.flash;
-    for (let k = 0; k < 60; k++) {
-      advanceGates(st, anim({ barPhase: 0.5 * (k / 60) }), OPTS, lcg(1));
-      expect(st.flash).toBeLessThan(prev);
-      prev = st.flash;
-    }
-    expect(st.flash).toBeLessThan(0.05);
-  });
-
   it("spin never reverses across morphs; travel changes smoothly and settles to each look's direction", () => {
     const st = createGateState();
     const rng = lcg(13);
@@ -205,7 +192,6 @@ describe("advanceGates", () => {
     advanceGates(st, anim({ dtSec: Number.NaN, barPhase: 0.1, tempoLock: 0 }), OPTS, lcg(1));
     advanceGates(st, anim({ dtSec: -1, barPhase: 0.2, tempoLock: 0 }), OPTS, lcg(1));
     expect(st.travel).toBe(before.travel);
-    expect(st.flash).toBe(before.flash);
     expect(st.bars).toBe(before.bars);
   });
 

@@ -65,9 +65,9 @@ import {
 // own the geometry side of that); colours, ground and glow blend
 // continuously with it (morphEase(st.morph), an eased 0..1). A Density/
 // Shape mix/quality change while holding also morphs in place (st.rebuild)
-// rather than snapping. The fly speed rides the low band and an onset
-// flashes the nearest gates. Rates scale, positions accumulate (travel,
-// spin) — the flowClock lesson.
+// rather than snapping. The fly speed rides the low band and Beat flash
+// punches the nearest gates on the shared beat pulse. Rates scale, positions
+// accumulate (travel, spin) — the flowClock lesson.
 //
 // Rendering: the gates draw additively into a full-resolution RGBA8 target
 // (no float targets — chladni.ts's TV constraint), two blur levels at a
@@ -102,10 +102,6 @@ const FLY_BASS_GAIN = 0.8;
 /** Spin in radians per second at Spin = 1 — the default Spin lands on the
  *  reference's measured rate. Counter-clockwise on screen, never reversed. */
 export const SPIN_RAD_MAX = 1.8;
-/** Onset flash: the jump per onset, its cap, and its decay per second. */
-const FLASH_HIT = 1.0;
-const FLASH_CAP = 1.5;
-const FLASH_DECAY = 5.0;
 /** Shutter length in seconds at Streaks = 1: how far a gate smears. */
 const SHUTTER_MAX = 0.09;
 /** Mirror copies per Symmetry option (the enum index picks one). */
@@ -134,7 +130,6 @@ export interface GateState {
    *  the object count while holding); consumed here, the next time a morph
    *  can start. */
   rebuild: boolean;
-  flash: number;
   /** Accumulated travel in world units (signed by velocity), and spin in
    *  radians. */
   travel: number;
@@ -157,7 +152,6 @@ export function createGateState(): GateState {
     morph: 1,
     morphs: 0,
     rebuild: false,
-    flash: 0,
     travel: 0,
     spinPos: 0,
     flyVel: 0,
@@ -248,9 +242,6 @@ export function advanceGates(st: GateState, anim: GateAnim, opts: GateOpts, rng:
   // Only once nothing else has claimed this frame's morph slot (begin() is
   // still a no-op above whenever one did).
   if (st.rebuild) begin();
-
-  if (anim.onset) st.flash = Math.min(FLASH_CAP, st.flash + FLASH_HIT);
-  st.flash *= Math.exp(-dt * FLASH_DECAY);
 
   const e = morphEase(st.morph);
   const vel = (look: number): number =>
@@ -345,14 +336,38 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "glow",
     label: "Glow",
-    description: "How bright the neon burns and how far its bloom spreads; a beat flashes the nearest gates",
+    description: "How bright the neon burns and how far its bloom spreads",
     group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.5,
     auto: { brightness: 0.2, loudness: 0.2 },
+  },
+  {
+    key: "beatFlash",
+    label: "Beat flash",
+    description: "Brightness punch on the nearest gates and the ground on each beat",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.4,
+    // Same weights as caustics'/chladni's/powder's own Beat flash.
+    auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
     reads: ["feature.onset"] satisfies readonly SignalLink[],
+  },
+  {
+    key: "buildGlow",
+    label: "Build-up glow",
+    description: "Extra bloom as a phrase builds toward its peak, on top of Glow's steady level",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.4,
+    // fluid.ts's own buildGlow weights.
+    auto: { dynamics: 0.2, loudness: 0.15 },
   },
 ];
 
@@ -600,7 +615,6 @@ export const gatesScene: Scene = (() => {
       gateProg.setV3v("uColFrom", [...lookFrom.primary, ...lookFrom.secondary, ...lookFrom.accent]);
       gateProg.setV3v("uColTo", [...lookTo.primary, ...lookTo.secondary, ...lookTo.accent]);
       gateProg.setF("uMorph", e);
-      gateProg.setF("uFlash", st.flash);
       gateProg.setF("uCoreGain", 0.55 + 0.8 * glow);
       gl.bindVertexArray(emptyVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n * copies * SEG_MAX);
@@ -642,7 +656,6 @@ export const gatesScene: Scene = (() => {
       compProg.setF("uGlowBGain", passes >= 2 ? glowB * glowScale : 0);
       compProg.setV3v("uGround", ground);
       compProg.setF("uVignette", vignette);
-      compProg.setF("uFlash", st.flash);
       drawFullscreenQuad(gl, quadVao);
 
       // 4. The gallery renders every scene into one shared context each tick

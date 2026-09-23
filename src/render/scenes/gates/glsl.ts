@@ -60,7 +60,10 @@ const SWEEP_TAPS = 40;
 const TAIL_DIM = 0.35;
 /** How much the core pushes toward white. */
 const WHITE_CORE = 0.2;
-/** Onset flash: extra gain on the nearest gates. */
+/** Beat flash: extra gain on the nearest gates, scaled by the Beat flash
+ *  setting (uBeatFlash) against the shared beat pulse (uBeatPulse) — the
+ *  same shared pattern every other scene's own Beat flash setting reads,
+ *  replacing what used to be a hand-rolled per-scene onset accumulator. */
 const FLASH_GAIN = 1.6;
 /** Blur stride in texels of the level being blurred. */
 export const BLUR_STRIDE = 2.4;
@@ -117,7 +120,6 @@ uniform float uSpinDelta;
 uniform vec3 uColFrom[3];
 uniform vec3 uColTo[3];
 uniform float uMorph;
-uniform float uFlash;
 uniform float uCoreGain;
 
 flat out vec4 vSegNow;
@@ -295,7 +297,7 @@ void main() {
   float g = gain
     * exp(-HAZE * zMid)
     * smoothstep(NEAR, NEAR_FADE_Z, zMid)
-    * (1.0 + FLASH_GAIN * uFlash * exp(-0.6 * zMid))
+    * (1.0 + FLASH_GAIN * uBeatFlash * uBeatPulse * exp(-0.6 * zMid))
     * uCoreGain;
   vColor = col * g;
 }
@@ -376,15 +378,15 @@ uniform vec3 uGround;
 uniform float uVignette;
 uniform float uGlowAGain;
 uniform float uGlowBGain;
-uniform float uFlash;
 
 void main() {
   vec2 ruv = roomUv(vUv);
   vec2 q = (ruv - 0.5) * vec2(roomAspect(), 1.0) * 2.0;
   float r = length(q);
-  vec3 ground = uGround * mix(1.0, uVignette, smoothstep(0.2, 1.3, r)) * (1.0 + 0.5 * uFlash);
+  vec3 ground = uGround * mix(1.0, uVignette, smoothstep(0.2, 1.3, r)) * (1.0 + 0.5 * uBeatFlash * uBeatPulse);
   vec3 sharpC = texture(uSharpTex, vUv).rgb;
-  vec3 glow = texture(uGlowATex, vUv).rgb * uGlowAGain + texture(uGlowBTex, vUv).rgb * uGlowBGain;
+  float buildMul = max(1.0 + uBuildGlow * 0.3 * (uSectionIntensity - 0.5), 0.2);
+  vec3 glow = (texture(uGlowATex, vUv).rgb * uGlowAGain + texture(uGlowBTex, vUv).rgb * uGlowBGain) * buildMul;
   // Per-channel Reinhard: an overdriven core keeps its hue on the way to
   // white instead of clipping one channel first (powder.ts's lesson).
   vec3 col = ground + sharpC + glow;
