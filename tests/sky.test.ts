@@ -5,6 +5,7 @@ import {
   advanceBrushPhase,
   driftCenter,
   drifterPuff,
+  pickSwarmCenter,
   createWavePool,
   MAX_WAVE_BURSTS,
   WAVE_LIFE_SEC,
@@ -168,6 +169,38 @@ describe("drifterPuff", () => {
   });
 });
 
+describe("pickSwarmCenter", () => {
+  it("stays within its spawn bounds and is deterministic per seed", () => {
+    for (let seed = 0; seed < 20; seed++) {
+      const [x, y] = pickSwarmCenter(seed, [[0.5, 0.5]]);
+      expect(x).toBeGreaterThanOrEqual(0.15);
+      expect(x).toBeLessThanOrEqual(0.85);
+      expect(y).toBeGreaterThanOrEqual(0.2);
+      expect(y).toBeLessThanOrEqual(0.8);
+      expect(pickSwarmCenter(seed, [[0.5, 0.5]])).toEqual([x, y]);
+    }
+  });
+
+  it("keeps clear of the obstacles — clouds all on the left put the swarm on the right", () => {
+    const leftClouds: [number, number][] = [
+      [0.1, 0.2],
+      [0.2, 0.5],
+      [0.15, 0.8],
+      [0.35, 0.35],
+      [0.3, 0.65],
+    ];
+    for (let seed = 0; seed < 10; seed++) {
+      expect(pickSwarmCenter(seed, leftClouds)[0]).toBeGreaterThan(0.5);
+    }
+  });
+
+  it("survives no obstacles and a non-finite seed", () => {
+    const [x, y] = pickSwarmCenter(NaN, []);
+    expect(Number.isFinite(x)).toBe(true);
+    expect(Number.isFinite(y)).toBe(true);
+  });
+});
+
 describe("wave pool", () => {
   it("starts empty, with every slot uploading the dead sentinel", () => {
     const pool = createWavePool();
@@ -216,6 +249,20 @@ describe("wave pool", () => {
     expect(slot).toBeGreaterThanOrEqual(0);
     expect(uploads.uBurstAmp[slot]).toBeCloseTo(0.8, 6);
     expect(uploads.uBurstSeed[slot]).toBeCloseTo(12.25, 6);
+  });
+
+  it("uploads a live wave's spawn position, defaulting to the screen centre", () => {
+    const pool = createWavePool();
+    pool.trigger(1, 1, 3, 0.2, 0.7);
+    pool.trigger(2, 1, 4);
+    const { prog, uploads } = fakeProgram();
+    pool.upload(prog);
+    const a = uploads.uBurstT0.indexOf(1);
+    const b = uploads.uBurstT0.indexOf(2);
+    expect(uploads.uBurstX[a]).toBeCloseTo(0.2, 6);
+    expect(uploads.uBurstY[a]).toBeCloseTo(0.7, 6);
+    expect(uploads.uBurstX[b]).toBe(0.5);
+    expect(uploads.uBurstY[b]).toBe(0.5);
   });
 
   it("clamps an out-of-range strength to [0, 1]", () => {

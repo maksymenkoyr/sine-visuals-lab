@@ -77,26 +77,35 @@ import {
 // of seeds) reads the identical profile around a filled disk instead of a
 // tube — a measured real floater dot turned out to have the same rim/fringe
 // shape, just circular. The shape itself is fixed per seed (no time
-// dependency in floaterShape), only its anchor position drifts (floaterPos);
-// both the ambient baseline and the wave bursts below draw from the same
-// floaterShape/floaterPos pair, evaluated per-fragment as pure functions of
-// (uTime, seed) — no vertex buffers, no per-floater JS state, in the spirit
-// of the plan's "a handful of trig/hash per slot" budget. A bounding-circle
-// early-out in floaterShape skips the per-segment distance loop for
-// fragments nowhere near a given floater. Loop bounds (FLOATER_AMBIENT_MAX /
-// FLOATER_PER_BURST_MAX below) are sized for the highest quality tier and
-// compiled once; how many of those slots are actually drawn is gated at
-// runtime by uDetail (quality.ts's 0..1 density proxy, already uploaded)
-// combined with the relevant setting, so a lower tier or TV hardware gets an
-// explicit, bounded ceiling without a second shader variant.
+// dependency in floaterShape).
+//
+// Floaters only exist inside waves — there is no always-on baseline — and
+// they don't move like real floaters (no saccade jumps). Each wave is a
+// *swarm*: many tiny floaters laid out in a few hashed clumps (floaterOffset),
+// drifting together on a slow wind and gently churning in place, so the whole
+// wave reads as a small cloud made of floaters. Swarms keep off the real
+// clouds twice over: render() spawns each one at the clearest of a handful of
+// candidate spots (pickSwarmCenter, scored against the cloud drifters'
+// current centres), and in the shader any floater whose own centre sits over
+// cloud (cloudBumpedAt, the exact field the cloud pass thresholds) fades
+// out, with a per-pixel cloudAlpha backstop. Everything is evaluated
+// per-fragment as pure functions of (uTime, burst) — no vertex buffers, no
+// per-floater JS state. A swarm-level bounding circle skips whole waves for
+// fragments nowhere near them, and floaterShape's own bounding circle skips
+// the per-segment distance loop for fragments nowhere near a given floater.
+// The loop bound (FLOATER_PER_BURST_MAX below) is sized for the highest
+// quality tier and compiled once; how many of those slots are actually drawn
+// is gated at runtime by uDetail (quality.ts's 0..1 density proxy) combined
+// with the Floaters setting, so a lower tier gets an explicit, bounded
+// ceiling without a second shader variant.
 //
 // Floater waves reuse powder.ts's stateless chunk-pool idiom
-// (createWavePool below): a small JS pool of (t0, strength, seed) slots,
-// uploaded as flat uniform arrays (uBurstT0/uBurstAmp/uBurstSeed — named
-// distinctly from the "Wave strength" *setting*'s own auto-generated
-// uWaveStrength uniform, the collision ambience.ts's header flags), each
-// slot's whole floater burst evaluated analytically from its age in the
-// shader. A burst fires on anim.dropOnset (graded locally from
+// (createWavePool below): a small JS pool of (t0, strength, seed, x, y)
+// slots, uploaded as flat uniform arrays (uBurstT0/uBurstAmp/uBurstSeed/
+// uBurstX/uBurstY — named distinctly from the "Wave strength" *setting*'s
+// own auto-generated uWaveStrength uniform, the collision ambience.ts's
+// header flags), each slot's whole swarm evaluated analytically from its age
+// in the shader. A burst fires on anim.dropOnset (graded locally from
 // anim.dropPulse/anim.sectionIntensity — the same local-grading spirit as
 // powder.ts's createBigHitDetector, without needing that detector's own
 // baseline/refractory logic, since dropOnset already comes pre-debounced
@@ -122,8 +131,7 @@ const ID = "sky";
 
 // --- Quality-scaled illusion budgets (compile-time loop bounds in the
 // display shader) — see the file header on how uDetail gates actual use. ---
-const FLOATER_AMBIENT_MAX = 10; // lowered from v3's 18 — strands are now 3-4x longer (FLOATER_LEN_MIN/MAX below), so the same count reads as a crowded frame
-const FLOATER_PER_BURST_MAX = 10;
+const FLOATER_PER_BURST_MAX = 32; // floaters in one wave's swarm at the top tier
 export const MAX_WAVE_BURSTS = 3; // concurrent floater waves — mirrors powder.ts's MAX_BURSTS
 
 // --- Fluid sim tuning. Fixed rather than exposed as settings — the plan's
@@ -151,13 +159,14 @@ const DRIFTER_DYE_RATE = 1.05; // density/s at the splat centre while puffing, b
 const DRIFTER_PUFF_RATE = 0.45; // rad/s of each source's on/off cycle (~14s per puff) — a long "on" phase grows one puff into a big blob
 
 // --- Floater waves. ---
-export const WAVE_LIFE_SEC = 3.5;
+export const WAVE_LIFE_SEC = 16; // long enough for a swarm to visibly drift across part of the sky
 export const WAVE_DEAD_T0 = -1e9;
-const WAVE_FADE_IN_SEC = 0.5;
-const WAVE_FADE_OUT_SEC = 1.2;
+const WAVE_FADE_IN_SEC = 2.5;
+const WAVE_FADE_OUT_SEC = 3.5;
 const SPONTANEOUS_WAVE_STRENGTH = 0.5;
-const WAVE_FALLBACK_MIN_SEC = 6; // shortest spontaneous-wave gap, at Wave frequency = 1
-const WAVE_FALLBACK_MAX_SEC = 22; // longest gap, at Wave frequency = 0
+const WAVE_FALLBACK_MIN_SEC = 8; // shortest spontaneous-wave gap, at Wave frequency = 1
+const WAVE_FALLBACK_MAX_SEC = 26; // longest gap, at Wave frequency = 0 — the sky is sometimes empty of floaters between waves
+const SWARM_CANDIDATES = 12; // spawn spots pickSwarmCenter scores against the cloud drifters
 
 // --- Haidinger's brush. ---
 const BRUSH_TURNS_PER_SEC = 0.045; // one full turn every ~22s
@@ -228,24 +237,51 @@ export function drifterPuff(seed: number, tSec: number): number {
   return e * e * (3 - 2 * e);
 }
 
+/** Where a new floater swarm spawns, in screen uv: the clearest of
+ *  SWARM_CANDIDATES hashed spots, i.e. the one farthest from every obstacle
+ *  (the cloud drifters' current centres — clouds form around them). Pure
+ *  and deterministic per seed, so it's testable without a GL context. The
+ *  shader's per-floater cloud fade covers whatever this heuristic misses. */
+export function pickSwarmCenter(seed: number, obstacles: readonly (readonly [number, number])[]): [number, number] {
+  const s = Number.isFinite(seed) ? seed : 0;
+  const fract = (v: number) => v - Math.floor(v);
+  let best: [number, number] = [0.5, 0.5];
+  let bestScore = -Infinity;
+  for (let i = 0; i < SWARM_CANDIDATES; i++) {
+    const x = 0.15 + 0.7 * fract(Math.sin(s * 12.9898 + i * 78.233) * 43758.5453);
+    const y = 0.2 + 0.6 * fract(Math.sin(s * 39.3468 + i * 11.135) * 24634.6345);
+    let score = Infinity;
+    for (const [ox, oy] of obstacles) score = Math.min(score, Math.hypot(x - ox, y - oy));
+    if (score > bestScore) {
+      bestScore = score;
+      best = [x, y];
+    }
+  }
+  return best;
+}
+
 /** One live floater wave: when it started, how hard (0..1, from
- *  waveStrengthFromDrop or the spontaneous trigger) and the seed its
- *  floaters' positions hash from. Same stateless-pool idiom as powder.ts's
+ *  waveStrengthFromDrop or the spontaneous trigger), the seed its swarm's
+ *  layout hashes from, and where it spawned (screen uv, from
+ *  pickSwarmCenter). Same stateless-pool idiom as powder.ts's
  *  createChunkPool — see this file's header. */
 export interface WaveBurst {
   t0: number;
   strength: number;
   seed: number;
+  x: number;
+  y: number;
 }
 
 export interface WavePool {
-  /** Starts a wave, reusing a dead slot or displacing the oldest live one. */
-  trigger(nowSec: number, strength: number, seed: number): void;
+  /** Starts a wave at screen uv (x, y), reusing a dead slot or displacing
+   *  the oldest live one. */
+  trigger(nowSec: number, strength: number, seed: number, x?: number, y?: number): void;
   /** Retires every wave older than WAVE_LIFE_SEC. */
   tick(nowSec: number): void;
   /** How many waves are currently live. */
   alive(): number;
-  /** Uploads the pool as uBurstT0/uBurstAmp/uBurstSeed. */
+  /** Uploads the pool as uBurstT0/uBurstAmp/uBurstSeed/uBurstX/uBurstY. */
   upload(prog: GLProgram): void;
   /** The raw slots, for tests. */
   readonly bursts: readonly WaveBurst[];
@@ -253,14 +289,16 @@ export interface WavePool {
 
 export function createWavePool(): WavePool {
   const bursts: WaveBurst[] = [];
-  for (let i = 0; i < MAX_WAVE_BURSTS; i++) bursts.push({ t0: WAVE_DEAD_T0, strength: 0, seed: 0 });
+  for (let i = 0; i < MAX_WAVE_BURSTS; i++) bursts.push({ t0: WAVE_DEAD_T0, strength: 0, seed: 0, x: 0.5, y: 0.5 });
   const t0Buf = new Float32Array(MAX_WAVE_BURSTS);
   const ampBuf = new Float32Array(MAX_WAVE_BURSTS);
   const seedBuf = new Float32Array(MAX_WAVE_BURSTS);
+  const xBuf = new Float32Array(MAX_WAVE_BURSTS);
+  const yBuf = new Float32Array(MAX_WAVE_BURSTS);
 
   return {
     bursts,
-    trigger(nowSec, strength, seed): void {
+    trigger(nowSec, strength, seed, x = 0.5, y = 0.5): void {
       let slot = 0;
       let oldest = Infinity;
       for (let i = 0; i < bursts.length; i++) {
@@ -278,6 +316,8 @@ export function createWavePool(): WavePool {
       b.t0 = Number.isFinite(nowSec) ? nowSec : 0;
       b.strength = clamp01(Number.isFinite(strength) ? strength : 0);
       b.seed = seed;
+      b.x = Number.isFinite(x) ? x : 0.5;
+      b.y = Number.isFinite(y) ? y : 0.5;
     },
     tick(nowSec): void {
       for (const b of bursts) {
@@ -298,10 +338,14 @@ export function createWavePool(): WavePool {
         t0Buf[i] = b.t0;
         ampBuf[i] = b.strength;
         seedBuf[i] = b.seed;
+        xBuf[i] = b.x;
+        yBuf[i] = b.y;
       }
       prog.setFv("uBurstT0", t0Buf);
       prog.setFv("uBurstAmp", ampBuf);
       prog.setFv("uBurstSeed", seedBuf);
+      prog.setFv("uBurstX", xBuf);
+      prog.setFv("uBurstY", yBuf);
     },
   };
 }
@@ -349,7 +393,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "floaterDensity",
     label: "Floaters",
-    description: "How many floaters drift in the visual field at rest, before a wave adds more",
+    description: "How many floaters make up each wave's swarm — a sparse drift at the low end, a thick cloud of them at the high end",
     group: "Motion",
     min: 0,
     max: 1,
@@ -360,7 +404,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "waveStrength",
     label: "Wave strength",
-    description: "How many extra floaters a wave brings in on top of the resting count",
+    description: "How much a hard section drop swells its wave's swarm compared with a quiet spontaneous wave",
     group: "Motion",
     min: 0,
     max: 1,
@@ -439,8 +483,9 @@ uniform float uBrushPhase;
 uniform float uBurstT0[${MAX_WAVE_BURSTS}];
 uniform float uBurstAmp[${MAX_WAVE_BURSTS}];
 uniform float uBurstSeed[${MAX_WAVE_BURSTS}];
+uniform float uBurstX[${MAX_WAVE_BURSTS}];
+uniform float uBurstY[${MAX_WAVE_BURSTS}];
 
-const int FLOATER_AMBIENT_MAX = ${FLOATER_AMBIENT_MAX};
 const int FLOATER_PER_BURST_MAX = ${FLOATER_PER_BURST_MAX};
 const int MAX_WAVE_BURSTS_C = ${MAX_WAVE_BURSTS};
 const float WAVE_LIFE_SEC_C = ${WAVE_LIFE_SEC.toFixed(3)};
@@ -475,14 +520,22 @@ const float BRUSH_R_CORE = 0.03;
 const float BRUSH_R_IN = 0.22;
 const float BRUSH_R_OUT = 0.34;
 const float BRUSH_BASE = 0.4;
-const int FLOATER_SEGMENTS = 14; // path points per floater's curved body (head at index 0) — see floaterPath; raised from v3's 9 for a smoother heading-integrated curve
-const float FLOATER_SPAN = 1.3;
-const float FLOATER_DRIFT_R = 0.05;
-const float FLOATER_JUMP_MIN = 2.0;
-const float FLOATER_JUMP_MAX = 5.0;
-const float FLOATER_JUMP_EASE = 0.35;
-const float FLOATER_LEN_MIN = 0.08; // strand arc length, screen p-units, hashed per seed — every size below is the reference-matched proportions scaled ~0.45x (the user wanted them much smaller than the reference crop), so rim/fringe/length keep their measured ratios
-const float FLOATER_LEN_MAX = 0.145;
+const int FLOATER_SEGMENTS = 10; // path points per floater's curved body (head at index 0) — see floaterPath; plenty for a strand this short
+const float FLOATER_LEN_MIN = 0.042; // strand arc length, screen p-units, hashed per seed — every size below is the reference-matched proportions scaled down (the user wanted them far smaller than the reference crop), so rim/fringe/length keep roughly their measured ratios
+const float FLOATER_LEN_MAX = 0.075;
+// A wave's swarm (see the file header): SWARM_LOBES clumps hashed per wave
+// within SWARM_SPREAD of the swarm centre, each floater scattered within
+// SWARM_LOBE_R of its clump, the whole layout stretched SWARM_STRETCH wide
+// like a cumulus. It drifts on SWARM_WIND (p-units/s, scaled by Flow speed)
+// and each floater churns SWARM_CHURN around its slot so the swarm slowly
+// morphs instead of sliding as a rigid stamp.
+const float SWARM_LOBES = 3.0;
+const vec2 SWARM_SPREAD = vec2(0.13, 0.06);
+const float SWARM_LOBE_R = 0.085;
+const float SWARM_STRETCH = 1.45;
+const vec2 SWARM_WIND = vec2(0.018, 0.003);
+const float SWARM_CHURN = 0.014;
+const float SWARM_BOUND = 0.34; // conservative swarm radius for the per-wave early-out: spread + lobe + churn + half a strand + fringe, stretched
 // floaterPath's heading theta(t) = theta0 + B1*sin(2*pi*f1*t+p1) +
 // B2*sin(2*pi*f2*t+p2): a dominant gentle bend (B1/f1) plus a much smaller,
 // faster wobble (B2/f2), all hashed once per seed. Because heading is
@@ -505,15 +558,15 @@ const float FLOATER_F2_MAX = 5.0;
 // dark fringe just outside the edge, a brighter rim just inside it, and a
 // barely-lifted see-through interior, everything within about +-10% of the
 // background — never a solid painted line.
-const float FLOATER_R = 0.005; // squiggle tube half-width, screen p-units
-const float FLOATER_RIM_W = 0.0023; // bright-rim band width, just inside the edge
-const float FLOATER_FRINGE_W = 0.0036; // dark-fringe band width, just outside the edge
+const float FLOATER_R = 0.0028; // squiggle tube half-width, screen p-units
+const float FLOATER_RIM_W = 0.0014; // bright-rim band width, just inside the edge
+const float FLOATER_FRINGE_W = 0.0022; // dark-fringe band width, just outside the edge
 const float FLOATER_INTERIOR = 0.02; // relative lum delta well inside the edge
 const float FLOATER_RIM = 0.07; // relative lum delta at the rim's peak
 const float FLOATER_FRINGE = 0.10; // relative lum delta (negative) at the fringe's peak
 const float FLOATER_DOT_CHANCE = 0.4; // fraction of floaters that render as a filled disk instead of a squiggle (was FLOATER_RING_CHANCE — a measured dot turned out to be a filled disk, not an annulus, under the same rim/fringe profile)
-const float FLOATER_DOT_R_MIN = 0.007; // dot radius, screen p-units
-const float FLOATER_DOT_R_MAX = 0.012;
+const float FLOATER_DOT_R_MIN = 0.004; // dot radius, screen p-units
+const float FLOATER_DOT_R_MAX = 0.0068;
 const vec3 FLOATER_COOL_TINT = vec3(0.94, 0.99, 1.06); // faint cool bias applied only to the rim's brightening (see main()) — a hint of refraction's blue-white; the fringe's darkening stays neutral
 
 // This scene's own small hash/noise family — independently written (the
@@ -555,22 +608,31 @@ float fbm2(vec2 p) {
   return sum;
 }
 
-// Smooth drift around a slowly re-anchored point — the saccade-lag jitter
-// the floater illusions want: a new anchor every FLOATER_JUMP_MIN..MAX
-// seconds (per-seed), eased in over FLOATER_JUMP_EASE rather than
-// teleporting, with a small continuous wander on top. Shared by the ambient
-// baseline and the wave bursts below — they differ only in which seeds and
-// which age-gated envelope call it.
-vec2 floaterPos(float seed, float t) {
-  float jumpPeriod = FLOATER_JUMP_MIN + hash21(vec2(seed, 2.7)) * (FLOATER_JUMP_MAX - FLOATER_JUMP_MIN);
-  float k = floor(t / jumpPeriod);
-  float localT = t - k * jumpPeriod;
-  vec2 anchor = (hash22(vec2(seed * 3.1 + 1.0, k)) - 0.5) * FLOATER_SPAN;
-  vec2 prevAnchor = (hash22(vec2(seed * 3.1 + 1.0, k - 1.0)) - 0.5) * FLOATER_SPAN;
-  float ease = smoothstep(0.0, FLOATER_JUMP_EASE, localT);
-  vec2 base = mix(prevAnchor, anchor, ease);
-  vec2 drift = vec2(sin(localT * 0.7 + seed), cos(localT * 0.55 + seed * 1.6)) * FLOATER_DRIFT_R;
-  return base + drift;
+// The cloud pass's own pre-threshold field at a room uv: dye density eroded
+// by the two bump octaves. Shared by the cloud pass and the floaters' "keep
+// off the clouds" fade, so both agree exactly on where cloud is.
+float cloudBumpedAt(vec2 uv) {
+  float density = max(decodeDye(texture(uDye, uv)).x, 0.0);
+  float bump = fbm2(uv * CLOUD_BUMP_SCALE + vec2(uTime * CLOUD_BUMP_MORPH, uTime * CLOUD_BUMP_MORPH * 0.6));
+  float wisp = fbm2(uv * CLOUD_BUMP_SCALE * CLOUD_WISP_SCALE - vec2(uTime * CLOUD_BUMP_MORPH * 1.7, 0.0));
+  return density * mix(1.0 - CLOUD_BUMP_AMOUNT, 1.0 + CLOUD_BUMP_AMOUNT, bump) * mix(1.0 - CLOUD_WISP_AMOUNT, 1.0 + CLOUD_WISP_AMOUNT, wisp);
+}
+
+// One floater's offset from its swarm's centre (screen p-units): picks one
+// of the wave's SWARM_LOBES clumps (hashed from waveSeed), scatters within
+// it (sqrt for an even area fill, a squared falloff biasing toward the
+// clump core so edges thin out like a cloud's), stretches wide, then churns
+// slowly around that slot. No saccade jumps — the swarm moves as one body.
+vec2 floaterOffset(float seed, float waveSeed, float t) {
+  float lobe = floor(hash21(vec2(seed, 31.0)) * SWARM_LOBES);
+  vec2 lobeC = (hash22(vec2(waveSeed * 5.3 + lobe, 17.0)) - 0.5) * 2.0 * SWARM_SPREAD;
+  float u = hash21(vec2(seed, 32.0));
+  float r = SWARM_LOBE_R * sqrt(u) * mix(0.55, 1.0, u);
+  float a = hash21(vec2(seed, 33.0)) * 6.28318;
+  vec2 o = lobeC + r * vec2(cos(a), sin(a));
+  o.x *= SWARM_STRETCH;
+  o += SWARM_CHURN * vec2(sin(t * 0.21 + seed * 1.3), cos(t * 0.17 + seed * 2.1));
+  return o;
 }
 
 // Signed relative-luminance delta for a point at true signed distance s from
@@ -608,8 +670,8 @@ float floaterLen(float seed) {
 // rather than offsetting each point sideways by an independent function of
 // t — see the FLOATER_B1_MIN..FLOATER_F2_MAX comment above for why. 'pts' is
 // then re-centred on its own average so the strand's MIDDLE sits at the
-// local origin: floaterShape adds basePos (floaterPos's anchor) straight
-// onto these points, so the anchor drifts the strand's centre, not its head.
+// local origin: floaterShape adds basePos (its slot in the swarm) straight
+// onto these points, so basePos is the strand's centre, not its head.
 void floaterPath(float seed, out vec2 pts[FLOATER_SEGMENTS]) {
   float len = floaterLen(seed);
   float thetaSign = hash21(vec2(seed, 26.0)) < 0.5 ? -1.0 : 1.0;
@@ -647,8 +709,7 @@ void floaterPath(float seed, out vec2 pts[FLOATER_SEGMENTS]) {
 // centres its points on it) skips the FLOATER_SEGMENTS-point path build and
 // distance loop for fragments nowhere near this floater — see the file
 // header's per-slot budget.
-float floaterShape(vec2 p, float seed, float t) {
-  vec2 basePos = floaterPos(seed, t);
+float floaterShape(vec2 p, float seed, vec2 basePos) {
   if (hash21(vec2(seed, 13.0)) < FLOATER_DOT_CHANCE) {
     float dotR = mix(FLOATER_DOT_R_MIN, FLOATER_DOT_R_MAX, hash21(vec2(seed, 15.0)));
     float s = length(p - basePos) - dotR;
@@ -709,10 +770,7 @@ void main() {
   // multiplier. The first pass's shading only compared immediate neighbour
   // texels, which sees an edge but nothing in a wide cloud's flat interior —
   // this reaches far enough across the body to shade actual folds.
-  float density = max(decodeDye(texture(uDye, uv)).x, 0.0);
-  float bump = fbm2(uv * CLOUD_BUMP_SCALE + vec2(uTime * CLOUD_BUMP_MORPH, uTime * CLOUD_BUMP_MORPH * 0.6));
-  float wisp = fbm2(uv * CLOUD_BUMP_SCALE * CLOUD_WISP_SCALE - vec2(uTime * CLOUD_BUMP_MORPH * 1.7, 0.0));
-  float bumped = density * mix(1.0 - CLOUD_BUMP_AMOUNT, 1.0 + CLOUD_BUMP_AMOUNT, bump) * mix(1.0 - CLOUD_WISP_AMOUNT, 1.0 + CLOUD_WISP_AMOUNT, wisp);
+  float bumped = cloudBumpedAt(uv);
   float cloudAlpha = smoothstep(CLOUD_LOW, CLOUD_HIGH, bumped);
   float sunNear = max(decodeDye(texture(uDye, uv + CLOUD_LIGHT_DIR * CLOUD_SHADOW_TAP1)).x, 0.0);
   float sunFar = max(decodeDye(texture(uDye, uv + CLOUD_LIGHT_DIR * CLOUD_SHADOW_TAP2)).x, 0.0);
@@ -740,37 +798,41 @@ void main() {
   float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * (1.0 - 0.4 * uEnergy), 0.0, 1.0);
   color = mix(color, color * brushTint, brushAmt);
 
-  // 4. Floaters: an always-on ambient baseline plus wave bursts on top (see
-  // createWavePool in sky.ts), both drawn from floaterShape as one signed
-  // relative-luminance delta per slot (dark fringe negative, bright rim
-  // positive, interior a small positive lift — see floaterProfile), the
-  // bursts additionally gated by their own age envelope. Every slot's delta
-  // sums into floatDelta, clamped, then applied as a multiplicative
-  // modulation of whatever's already in 'color' rather than mixed toward a
-  // fixed tint or added as glow, so a floater reads as a refraction of the
-  // sky/cloud behind it and never becomes the brightest thing in frame.
-  int ambientCap = int(clamp(mix(3.0, float(FLOATER_AMBIENT_MAX), uDetail), 1.0, float(FLOATER_AMBIENT_MAX)) + 0.5);
-  float ambientGate = clamp(uFloaterDensity * (0.7 + 0.3 * uSectionIntensity), 0.0, 1.0);
-  int ambientActive = int(float(ambientCap) * ambientGate + 0.5);
+  // 4. Floaters: wave swarms only (see the file header and createWavePool),
+  // each floater drawn from floaterShape as one signed relative-luminance
+  // delta (dark fringe negative, bright rim positive, interior a small
+  // positive lift — see floaterProfile), gated by its wave's age envelope and
+  // faded out wherever its own centre sits over cloud. Every delta sums into
+  // floatDelta, clamped, then applied as a multiplicative modulation of
+  // whatever's already in 'color' rather than mixed toward a fixed tint or
+  // added as glow, so a floater reads as a refraction of the sky behind it
+  // and never becomes the brightest thing in frame.
+  int perBurstCap = int(clamp(mix(8.0, float(FLOATER_PER_BURST_MAX), uDetail), 1.0, float(FLOATER_PER_BURST_MAX)) + 0.5);
+  vec2 wind = SWARM_WIND * (0.5 + uFlowSpeed);
   float floatDelta = 0.0;
-  for (int i = 0; i < FLOATER_AMBIENT_MAX; i++) {
-    if (i >= ambientActive) break;
-    float seed = float(i) * 7.9 + 1.0;
-    floatDelta += floaterShape(p, seed, uTime);
-  }
-  int perBurstCap = int(clamp(mix(2.0, float(FLOATER_PER_BURST_MAX), uDetail), 1.0, float(FLOATER_PER_BURST_MAX)) + 0.5);
   for (int b = 0; b < MAX_WAVE_BURSTS_C; b++) {
     float age = uTime - uBurstT0[b];
     if (age < 0.0 || age > WAVE_LIFE_SEC_C) continue;
-    int subActive = int(float(perBurstCap) * clamp(uBurstAmp[b], 0.0, 1.0) * clamp(uWaveStrength, 0.0, 1.0) + 0.5);
+    vec2 swarmC = (vec2(uBurstX[b], uBurstY[b]) - 0.5) * vec2(devAspect, 1.0) + wind * age;
+    if (length(p - swarmC) > SWARM_BOUND) continue;
+    float swell = mix(1.0 - clamp(uWaveStrength, 0.0, 1.0), 1.0, clamp(uBurstAmp[b], 0.0, 1.0));
+    int subActive = int(float(perBurstCap) * clamp(uFloaterDensity * 1.4, 0.15, 1.0) * mix(0.35, 1.0, swell) + 0.5);
     float envelope = smoothstep(0.0, WAVE_FADE_IN, age) * (1.0 - smoothstep(WAVE_LIFE_SEC_C - WAVE_FADE_OUT, WAVE_LIFE_SEC_C, age));
     for (int j = 0; j < FLOATER_PER_BURST_MAX; j++) {
       if (j >= subActive) break;
       float seed = uBurstSeed[b] * 31.7 + float(j) * 9.3 + 5.0;
-      floatDelta += floaterShape(p, seed, uTime) * envelope;
+      vec2 fc = swarmC + floaterOffset(seed, uBurstSeed[b], uTime);
+      float d = floaterShape(p, seed, fc);
+      if (d == 0.0) continue;
+      // Keep off the clouds: this floater's own centre, looked up in the same
+      // field the cloud pass thresholds, with a margin below CLOUD_LOW so it
+      // fades before a cloud's visible edge reaches it.
+      vec2 fcUv = roomUv(fc / vec2(devAspect, 1.0) + 0.5);
+      float clear = 1.0 - smoothstep(CLOUD_LOW * 0.3, CLOUD_LOW * 0.85, cloudBumpedAt(fcUv));
+      floatDelta += d * envelope * clear;
     }
   }
-  floatDelta = clamp(floatDelta, -0.2, 0.2);
+  floatDelta = clamp(floatDelta, -0.2, 0.2) * (1.0 - cloudAlpha);
   float floatPos = max(floatDelta, 0.0);
   color *= 1.0 + min(floatDelta, 0.0) + floatPos * FLOATER_COOL_TINT;
 
@@ -796,10 +858,15 @@ function createSkyScene(): Scene {
     tag: 0,
     ring: 0,
   }));
+  // The same drifters' current centres, reused as pickSwarmCenter's obstacles.
+  const drifterCentres: [number, number][] = DRIFTER_SEEDS.map(() => [0.5, 0.5]);
 
   let ambientT = 0;
   let brushPhase = 0;
-  let timeSinceWave = WAVE_FALLBACK_MAX_SEC * 10; // clear of the fallback on the very first frame
+  // anim.timeSec of the last wave, on the same clock the shader ages waves
+  // by — not an accumulated dt, which is capped per frame and so runs slow
+  // at a low frame rate. null fires the first wave on the first frame.
+  let lastWaveSec: number | null = null;
   let waveSeedCounter = 0;
   let lastFrameTime: number | null = null;
 
@@ -825,7 +892,7 @@ function createSkyScene(): Scene {
 
       ambientT = 0;
       brushPhase = 0;
-      timeSinceWave = WAVE_FALLBACK_MAX_SEC * 10;
+      lastWaveSec = null;
       waveSeedCounter = 0;
       lastFrameTime = null;
     },
@@ -869,6 +936,8 @@ function createSkyScene(): Scene {
         s.fx = (dx / len) * DRIFTER_FORCE * (0.5 + flowSpeedAmount);
         s.fy = (dy / len) * DRIFTER_FORCE * (0.5 + flowSpeedAmount);
         s.dye = DRIFTER_DYE_RATE * drifterPuff(seed, ambientT) * (0.25 + 0.75 * cloudCoverAmount);
+        drifterCentres[i][0] = x0;
+        drifterCentres[i][1] = y0;
       }
 
       const simDt = Math.min(SIM_DT_MAX, dt * (0.5 + 1.5 * flowSpeedAmount));
@@ -885,13 +954,19 @@ function createSkyScene(): Scene {
       // fires on its own between drops at a rate Wave frequency controls,
       // so floaters arrive in waves rather than only on a drop (see file
       // header).
-      timeSinceWave += dt;
-      if (anim.dropOnset) {
-        wavePool.trigger(anim.timeSec, waveStrengthFromDrop(anim.dropPulse, anim.sectionIntensity), waveSeedCounter++);
-        timeSinceWave = 0;
-      } else if (timeSinceWave > waveFallbackIntervalSec(waveFrequencyAmount)) {
-        wavePool.trigger(anim.timeSec, SPONTANEOUS_WAVE_STRENGTH, waveSeedCounter++);
-        timeSinceWave = 0;
+      // Each swarm spawns in the clearest open sky it can find, scored
+      // against the cloud drifters' current centres (pickSwarmCenter).
+      const dropWave = anim.dropOnset;
+      const dueWave =
+        lastWaveSec === null ||
+        anim.timeSec < lastWaveSec || // clock reset (scene re-entered)
+        anim.timeSec - lastWaveSec > waveFallbackIntervalSec(waveFrequencyAmount);
+      if (dropWave || dueWave) {
+        const strength = dropWave ? waveStrengthFromDrop(anim.dropPulse, anim.sectionIntensity) : SPONTANEOUS_WAVE_STRENGTH;
+        const seed = waveSeedCounter++;
+        const [cx, cy] = pickSwarmCenter(seed, drifterCentres);
+        wavePool.trigger(anim.timeSec, strength, seed, cx, cy);
+        lastWaveSec = anim.timeSec;
       }
       wavePool.tick(anim.timeSec);
 
