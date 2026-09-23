@@ -23,6 +23,7 @@ import { petriScene } from "./petri.ts";
 import { inkScene } from "./ink.ts";
 import { crystalScene } from "./crystal/index.ts";
 import { fluidScene } from "./fluid.ts";
+import { silkScene } from "./silk/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
 // insertion order) — the featured scenes (those absent from DRAFT_SCENE_IDS,
@@ -31,6 +32,7 @@ import { fluidScene } from "./fluid.ts";
 // first tile behind the gallery's draft toggle. (Registering it here is also
 // what lets vite-scene-links-plugin.ts print its link when you start
 // `npm run dev` with its files changed.)
+registerScene(silkScene);
 registerScene(slatsScene);
 registerScene(physarumScene);
 registerScene(chladniScene);
@@ -59,6 +61,7 @@ registerScene(ferrofluidScene);
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
  *  the featured scenes registered above it are deliberately absent. */
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
+  "silk",
   "tessera",
   "ink",
   "mesh",
@@ -82,6 +85,7 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
 ]);
 
 export {
+  silkScene,
   tesseraScene,
   spectrumScene,
   particlesScene,
