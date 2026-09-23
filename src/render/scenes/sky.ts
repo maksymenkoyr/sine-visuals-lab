@@ -16,13 +16,15 @@ import {
   type Splat,
 } from "./skyFluidSim.ts";
 
-// Sky: a real 2D fluid sim driving cloud cover, with three vision
-// illusions layered on top — blue field entoptic phenomenon, floaters (in
-// waves), and Haidinger's brush. Picked from the "Open Sky Illusions"
-// preview artifact as the first three of seven candidate illusions;
-// vection, Troxler fading, afterimage, the autokinetic effect and
-// pareidolia are deliberately NOT built here, not even as disabled
-// settings — a later pass's scope, not this one's.
+// Sky: a real 2D fluid sim driving cloud cover, with two vision illusions
+// layered on top — floaters (in waves) and Haidinger's brush. Picked from
+// the "Open Sky Illusions" preview artifact; the blue field entoptic
+// phenomenon was in the first pass but cut after a live look at real
+// screenshots (small darting dots read as noise rather than an atmospheric
+// illusion once the cloud itself was worth looking at). Vection, Troxler
+// fading, afterimage, the autokinetic effect and pareidolia are
+// deliberately NOT built here either, not even as disabled settings — a
+// later pass's scope, not this one's.
 //
 // The fluid sim (skyFluidSim.ts) is a verbatim copy of
 // origin/worktree-neon-fluid's fluidSim.ts, the stable-fluids solver that
@@ -32,11 +34,12 @@ import {
 // kaleido/glsl.ts already use for their own noise helpers. This scene runs
 // it in MIRROR_OFF mode only — full screen, no kaleidoscope fold — the one
 // path that needs no adaptation. Cloud drift is deliberately NOT
-// audio-reactive: two slow, gently meandering ambient splats (driftCenter,
-// a real-time clock, never warped by anim.flowPhase or frame.energy — the
-// sim step below always passes energy: 0) keep the sky moving on its own;
-// the three illusions are what carry the music connection, matching the
-// brief's own framing. Free-slip walls are kept as-is (no wrap boundary) —
+// audio-reactive: DRIFTER_SEEDS.length slow, gently meandering ambient
+// splats (driftCenter, a real-time clock, never warped by anim.flowPhase or
+// frame.energy — the sim step below always passes energy: 0) keep the sky
+// moving on its own; the two illusions are what carry the music connection,
+// matching the brief's own framing. Free-slip walls are kept as-is (no wrap
+// boundary) —
 // a possible follow-up, not a v1 blocker, since the drift is slow enough
 // that a wall never reads as one in a normal viewing session.
 //
@@ -45,29 +48,38 @@ import {
 // sim's dyeTexture() through skyFluidSim's own simIoGlsl(format) codec —
 // the same reason petri.ts hand-rolls its display pass. Compositing order,
 // sky gradient at the bottom, illusions on top:
-//   sky gradient -> cloud (extinction blend off dye density, plus a cheap
-//   lit-top/shadowed-bottom shade from the density gradient — a thin slab,
-//   not Storm's Gas-mode raymarch, which is private to storm.ts) ->
-//   Haidinger's brush (faint, blended into the sky+cloud) -> blue-field
-//   dots (drawn last, brightest) -> floaters (also last, translucent).
+//   sky gradient -> cloud (contrast-shaped extinction blend off dye
+//   density, cross-eroded by a self-written fbm bump for cauliflower
+//   texture and continuous morphing, plus a cheap lit-top/shadowed-bottom
+//   shade from the density gradient — a thin slab, not Storm's Gas-mode
+//   raymarch, which is private to storm.ts) -> Haidinger's brush (faint,
+//   blended into the sky+cloud) -> floaters (drawn last, on top of
+//   everything, since they're the viewer's own eye artifact).
 // The sky/cloud sample the shared room-space canvas (roomUv) since the
 // fluid is one world shared across a Panorama's devices, same as every
-// other world-simulating scene; the three illusions instead centre on
-// *this device's own* screen (vUv, not roomUv) — each is a viewer's own
-// eye artifact, not shared room content, so it has to track the screen the
+// other world-simulating scene; the two illusions instead centre on *this
+// device's own* screen (vUv, not roomUv) — each is a viewer's own eye
+// artifact, not shared room content, so it has to track the screen the
 // viewer is actually looking at rather than a hypothetical shared-canvas
 // centre that might sit off this device's own slice entirely.
 //
-// Blue-field dots and floaters are both small fixed-size loops in the
-// display shader, evaluated per-fragment as pure functions of (uTime,
-// seed) — no vertex buffers, no per-dot JS state, the "a handful of
-// sin/cos per slot" budget the plan calls for. Loop bounds (DOT_SLOTS_MAX /
-// FLOATER_AMBIENT_MAX / FLOATER_PER_BURST_MAX below) are sized for the
-// highest quality tier and compiled once; how many of those slots are
-// actually drawn is gated at runtime by uDetail (quality.ts's 0..1 density
-// proxy, already uploaded) combined with the relevant setting, so a lower
-// tier or TV hardware gets an explicit, bounded ceiling without a second
-// shader variant.
+// Floaters are drawn as an actual curved translucent stroke (floaterShape,
+// a short polyline SDF over FLOATER_SEGMENTS hashed control points, tapered
+// wide-to-narrow head-to-tail), not a single soft dot — the first pass's
+// dot-shaped floaters read as fuzzy blobs rather than the vitreous
+// squiggles a real floater looks like against open sky. The shape itself
+// is fixed per seed (no time dependency in floaterShape), only its anchor
+// position drifts (floaterPos); both the ambient baseline and the wave
+// bursts below draw from the same floaterShape/floaterPos pair, evaluated
+// per-fragment as pure functions of (uTime, seed) — no vertex buffers, no
+// per-floater JS state, in the spirit of the plan's "a handful of
+// trig/hash per slot" budget, now a handful of segment-distance checks per
+// slot instead. Loop bounds (FLOATER_AMBIENT_MAX / FLOATER_PER_BURST_MAX
+// below) are sized for the highest quality tier and compiled once; how many
+// of those slots are actually drawn is gated at runtime by uDetail
+// (quality.ts's 0..1 density proxy, already uploaded) combined with the
+// relevant setting, so a lower tier or TV hardware gets an explicit,
+// bounded ceiling without a second shader variant.
 //
 // Floater waves reuse powder.ts's stateless chunk-pool idiom
 // (createWavePool below): a small JS pool of (t0, strength, seed) slots,
@@ -101,24 +113,29 @@ const ID = "sky";
 
 // --- Quality-scaled illusion budgets (compile-time loop bounds in the
 // display shader) — see the file header on how uDetail gates actual use. ---
-const DOT_SLOTS_MAX = 16;
 const FLOATER_AMBIENT_MAX = 18;
 const FLOATER_PER_BURST_MAX = 10;
 export const MAX_WAVE_BURSTS = 3; // concurrent floater waves — mirrors powder.ts's MAX_BURSTS
 
 // --- Fluid sim tuning. Fixed rather than exposed as settings — the plan's
 // settings list is representative, not exhaustive, and these aren't part of
-// any of the three illusions. ---
+// either illusion. Dye rate raised and dissipation lowered from the first
+// pass, which built up too thin and too slowly to read as real cloud cover
+// against a real-sky reference (a still frame of open sky runs 40-50% cloud
+// coverage with a near-white core, not the soft low-alpha wash the first
+// pass produced). ---
 const SIM_VISCOSITY = 0.3;
-const DYE_DISSIPATION = 0.35;
+const DYE_DISSIPATION = 0.22;
 const SIM_DT_MAX = 1 / 30; // clamps a slow-frame dt so the sim never destabilises
 
-// --- Ambient cloud drift (not audio-reactive — see file header). ---
-const DRIFTER_SEEDS: readonly number[] = [1.7, 5.3];
+// --- Ambient cloud drift (not audio-reactive — see file header). A third
+// seed (was two) so the cover reads as a few distinct masses rather than
+// one blob orbiting the centre. ---
+const DRIFTER_SEEDS: readonly number[] = [1.7, 5.3, 9.1];
 const DRIFT_TANGENT_EPS = 0.08; // finite-difference step used only to find the drift's own heading
 const DRIFTER_SIGMA = 0.16; // splat radius, sim uv
 const DRIFTER_FORCE = 5; // texels/s^2 at FORCE_REF_ROWS — see skyFluidSim.ts's header
-const DRIFTER_DYE_RATE = 0.55; // density/s at the splat centre, before Cloud cover scales it
+const DRIFTER_DYE_RATE = 0.85; // density/s at the splat centre, before Cloud cover scales it
 
 // --- Floater waves. ---
 export const WAVE_LIFE_SEC = 3.5;
@@ -359,30 +376,6 @@ const SETTINGS: SceneSetting[] = [
     auto: { loudness: 0.2 },
   },
   {
-    key: "dotsDensity",
-    label: "Dot density",
-    description: "How many blue-field entoptic dots are darting at once",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.55,
-    auto: { pulse: 0.3 },
-    reads: ["feature.onset"],
-  },
-  {
-    key: "dotsBrightness",
-    label: "Dot brightness",
-    description: "How bright the darting dots read against the sky",
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    auto: { pulse: 0.2, brightness: 0.15 },
-    reads: ["feature.onset"],
-  },
-  {
     key: "brushOpacity",
     label: "Brush opacity",
     description: "Faintness of Haidinger's brush, the bowtie afterimage that turns slowly over the centre of view",
@@ -418,7 +411,6 @@ uniform float uBurstT0[${MAX_WAVE_BURSTS}];
 uniform float uBurstAmp[${MAX_WAVE_BURSTS}];
 uniform float uBurstSeed[${MAX_WAVE_BURSTS}];
 
-const int DOT_SLOTS_MAX = ${DOT_SLOTS_MAX};
 const int FLOATER_AMBIENT_MAX = ${FLOATER_AMBIENT_MAX};
 const int FLOATER_PER_BURST_MAX = ${FLOATER_PER_BURST_MAX};
 const int MAX_WAVE_BURSTS_C = ${MAX_WAVE_BURSTS};
@@ -426,25 +418,29 @@ const float WAVE_LIFE_SEC_C = ${WAVE_LIFE_SEC.toFixed(3)};
 const float WAVE_FADE_IN = ${WAVE_FADE_IN_SEC.toFixed(3)};
 const float WAVE_FADE_OUT = ${WAVE_FADE_OUT_SEC.toFixed(3)};
 
-const float CLOUD_THICKNESS = 1.1;
+const float CLOUD_LOW = 0.22; // bumped density below this reads as clear sky
+const float CLOUD_HIGH = 0.38; // bumped density above this reads as a solid, opaque cloud body
+const float CLOUD_BUMP_SCALE = 11.0; // fbm frequency, room-uv units — the cauliflower texture
+const float CLOUD_BUMP_MORPH = 0.05; // fbm domain drift per second — churn beyond plain advection
+const float CLOUD_BUMP_AMOUNT = 0.65; // how hard the bump noise erodes/thickens the edge
 const float BRUSH_R_CORE = 0.03;
 const float BRUSH_R_IN = 0.22;
 const float BRUSH_R_OUT = 0.34;
 const float BRUSH_BASE = 0.4;
-const float DOT_SPAN = 1.15;
-const float DOT_CURVE = 0.35;
-const float DOT_CYCLE_MIN = 0.6;
-const float DOT_CYCLE_MAX = 1.6;
-const float DOT_RADIUS = 0.007;
-const vec3 DOT_COLOR = vec3(0.86, 0.93, 1.0);
+const int FLOATER_SEGMENTS = 5; // control points per floater's curved body (head at index 0)
 const float FLOATER_SPAN = 1.3;
 const float FLOATER_DRIFT_R = 0.05;
 const float FLOATER_JUMP_MIN = 2.0;
 const float FLOATER_JUMP_MAX = 5.0;
 const float FLOATER_JUMP_EASE = 0.35;
-const float FLOATER_RADIUS = 0.011;
-const vec3 FLOATER_COLOR = vec3(0.72, 0.75, 0.7);
-const float FLOATER_ALPHA = 0.55;
+const float FLOATER_LEN = 0.05; // body length, screen p-units
+const float FLOATER_CURL = 0.6; // sideways kink per segment, relative to FLOATER_LEN
+const float FLOATER_HEAD_R = 0.0065;
+const float FLOATER_TAIL_R = 0.0018;
+const float FLOATER_GLOW_R = 0.02;
+const vec3 FLOATER_TINT = vec3(0.88, 0.94, 1.0);
+const float FLOATER_CORE_ALPHA = 0.5;
+const float FLOATER_GLOW_ALPHA = 0.4;
 
 // This scene's own small hash/noise family — independently written (the
 // same fract/dot idiom every other scene's hash21 uses, CLAUDE.md's
@@ -457,6 +453,32 @@ float hash21(vec2 p) {
 
 vec2 hash22(vec2 p) {
   return vec2(hash21(p), hash21(p + 19.19));
+}
+
+// Value-noise fbm for the cloud's bump texture only — this scene's own,
+// independently written (not shared with ink.ts/moire.ts/kaleido's own fbm
+// functions; see the file header on the per-scene-copy pattern this repo
+// already uses for noise).
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float a = hash21(i);
+  float b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0));
+  float d = hash21(i + vec2(1.0, 1.0));
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm2(vec2 p) {
+  float sum = 0.0;
+  float amp = 0.5;
+  for (int i = 0; i < 3; i++) {
+    sum += amp * vnoise(p);
+    p *= 2.02;
+    amp *= 0.5;
+  }
+  return sum;
 }
 
 // Smooth drift around a slowly re-anchored point — the saccade-lag jitter
@@ -477,9 +499,53 @@ vec2 floaterPos(float seed, float t) {
   return base + drift;
 }
 
+// One control point of a floater's own curved body, in the floater's local
+// frame (head at index 0, tail at FLOATER_SEGMENTS-1) — constant over time,
+// so the squiggle's shape never changes, only floaterPos's anchor drifts it
+// and floaterShape's own per-seed rotation orients it. Each segment kinks
+// sideways by a hashed amount that grows toward the tail, the same "chain
+// of little S-bends" a real vitreous strand traces rather than one smooth arc.
+vec2 floaterPoint(float seed, int i) {
+  float t = float(i) / float(FLOATER_SEGMENTS - 1);
+  float side = (hash21(vec2(seed * 5.3 + float(i) * 2.1, 9.0)) - 0.5) * 2.0 * FLOATER_CURL * FLOATER_LEN * t;
+  return vec2(t * FLOATER_LEN, side);
+}
+
+// Distance from p to one floater's curved body (a short polyline through
+// FLOATER_SEGMENTS hashed points) plus a soft glow — core is the
+// slightly-brighter thread tapering head-to-tail, glow is the wide soft
+// halo around it, matching a real floater's low-contrast translucency
+// rather than a solid dot.
+void floaterShape(vec2 p, float seed, float t, out float core, out float glow) {
+  vec2 basePos = floaterPos(seed, t);
+  float rotAngle = hash21(vec2(seed, 8.0)) * 6.28318;
+  float cr = cos(rotAngle);
+  float sr = sin(rotAngle);
+  vec2 pts[FLOATER_SEGMENTS];
+  for (int i = 0; i < FLOATER_SEGMENTS; i++) {
+    vec2 local = floaterPoint(seed, i);
+    pts[i] = vec2(local.x * cr - local.y * sr, local.x * sr + local.y * cr) + basePos;
+  }
+  float dMin = 1.0e6;
+  float tMin = 0.0;
+  for (int i = 1; i < FLOATER_SEGMENTS; i++) {
+    vec2 pa = p - pts[i - 1];
+    vec2 ba = pts[i] - pts[i - 1];
+    float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1.0e-6), 0.0, 1.0);
+    float d = length(pa - ba * h);
+    if (d < dMin) {
+      dMin = d;
+      tMin = (float(i - 1) + h) / float(FLOATER_SEGMENTS - 1);
+    }
+  }
+  float width = mix(FLOATER_HEAD_R, FLOATER_TAIL_R, tMin);
+  core = smoothstep(width, width * 0.25, dMin);
+  glow = exp(-(dMin * dMin) / (FLOATER_GLOW_R * FLOATER_GLOW_R));
+}
+
 void main() {
   vec2 uv = roomUv(vUv);
-  // The three illusions live in this device's own screen space, not the
+  // The two illusions live in this device's own screen space, not the
   // shared room canvas — see the file header on why.
   float devAspect = uResolution.x / max(uResolution.y, 1.0);
   vec2 p = (vUv - 0.5) * vec2(devAspect, 1.0);
@@ -494,23 +560,40 @@ void main() {
   vec3 horizon = mix(horizonCool, horizonWarm, uSkyTint);
   vec3 color = mix(horizon, zenith, smoothstep(-0.1, 0.9, uv.y));
 
-  // 2. Cloud cover: extinction blend off the sim's own dye density, plus a
-  // cheap directional shade from the density gradient (lit tops, shadowed
-  // undersides) — a thin slab, not a raymarch (see file header).
+  // 2. Cloud cover: the sim's own dye density thresholded (CLOUD_LOW/HIGH)
+  // rather than blended with a plain extinction curve — a gain/gamma remap
+  // on a smooth density field stays smooth no matter how it's curved, so it
+  // never grows a real edge; only an actual threshold does. Measured against
+  // a real open-sky still, whose
+  // cloud body swings from near-black-sky to near-white-core, nothing like
+  // the first pass's low-contrast blend. A slowly time-drifting fbm
+  // (CLOUD_BUMP_*) eats into the density's own edge for the cauliflower
+  // bump texture and keeps the shape visibly morphing beyond plain
+  // advection, the same "erode a silhouette with noise" idea as Storm's Gas
+  // mode (storm.ts), independently written per the file header. Shading
+  // stays the cheap directional tap from the first pass (lit tops, shadowed
+  // undersides) — still a thin slab, not a raymarch.
   vec2 dyeTexel = 1.0 / vec2(textureSize(uDye, 0));
   float density = max(decodeDye(texture(uDye, uv)).x, 0.0);
   float densityUp = max(decodeDye(texture(uDye, uv + vec2(0.0, dyeTexel.y))).x, 0.0);
   float densityDown = max(decodeDye(texture(uDye, uv - vec2(0.0, dyeTexel.y))).x, 0.0);
-  float lit = clamp(0.5 + (densityDown - densityUp) * 2.2, 0.15, 1.0);
-  float cloudAlpha = clamp(1.0 - exp(-density * CLOUD_THICKNESS), 0.0, 1.0);
+  // A signed shadow OFFSET, not a 0..1 replacement for brightness — the flat
+  // interior of a wide cloud has almost no local density gradient, so using
+  // the gradient as the cloud's whole brightness (the first pass's own lit
+  // variable) left the entire body a flat mid-grey instead of a lit,
+  // near-white mass with only its underside reading darker.
+  float shadeAmt = clamp((densityUp - densityDown) * 1.6, 0.0, 0.7);
+  float bump = fbm2(uv * CLOUD_BUMP_SCALE + vec2(uTime * CLOUD_BUMP_MORPH, uTime * CLOUD_BUMP_MORPH * 0.6));
+  float bumped = density * mix(1.0 - CLOUD_BUMP_AMOUNT, 1.0 + CLOUD_BUMP_AMOUNT, bump);
+  float cloudAlpha = smoothstep(CLOUD_LOW, CLOUD_HIGH, bumped);
   vec3 cloudShadow = vec3(0.42, 0.47, 0.56);
   vec3 cloudLit = vec3(0.99, 0.98, 1.0);
-  vec3 cloudColor = mix(cloudShadow, cloudLit, lit) * (0.55 + 0.65 * uCloudBrightness);
+  vec3 cloudColor = mix(cloudLit, cloudShadow, shadeAmt) * (0.75 + 0.4 * uCloudBrightness);
   color = mix(color, cloudColor, cloudAlpha);
 
   // 3. Haidinger's brush: a faint bowtie centred on the fixation point,
   // rotating on uBrushPhase — under/with the sky+cloud, per the file
-  // header's compositing order, so it never sits on top of the dots.
+  // header's compositing order, so it never sits on top of the floaters.
   float r = length(p);
   float ang = atan(p.y, p.x) - uBrushPhase;
   float lobe = cos(2.0 * ang);
@@ -519,48 +602,24 @@ void main() {
   float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * (1.0 - 0.4 * uEnergy), 0.0, 1.0);
   color = mix(color, color * brushTint, brushAmt);
 
-  // 4. Blue-field entoptic phenomenon: DOT_SLOTS_MAX analytic dart paths,
-  // each a pure function of (uTime, seed) — a quadratic bezier between two
-  // hashed waypoints, continuous and staggered with no JS-side state.
-  int dotCap = int(clamp(mix(3.0, float(DOT_SLOTS_MAX), uDetail), 1.0, float(DOT_SLOTS_MAX)) + 0.5);
-  int dotActive = int(float(dotCap) * clamp(uDotsDensity, 0.0, 1.0) + 0.5);
-  float dotAccum = 0.0;
-  for (int i = 0; i < DOT_SLOTS_MAX; i++) {
-    if (i >= dotActive) break;
-    float seed = float(i) * 11.7 + 3.1;
-    float cycleLen = DOT_CYCLE_MIN + hash21(vec2(seed, 4.0)) * (DOT_CYCLE_MAX - DOT_CYCLE_MIN);
-    float tCycle = uTime / cycleLen + seed * 0.53;
-    float k = floor(tCycle);
-    float localT = fract(tCycle);
-    vec2 a = (hash22(vec2(seed, k)) - 0.5) * DOT_SPAN;
-    vec2 b = (hash22(vec2(seed, k + 1.0)) - 0.5) * DOT_SPAN;
-    vec2 mid = (a + b) * 0.5;
-    vec2 dir = b - a;
-    vec2 perp = normalize(vec2(-dir.y, dir.x) + 1e-5);
-    float curveAmt = (hash21(vec2(seed, k + 0.5)) - 0.5) * DOT_CURVE;
-    vec2 ctrl = mid + perp * curveAmt;
-    vec2 pos = mix(mix(a, ctrl, localT), mix(ctrl, b, localT), localT);
-    float opacity = sin(3.14159265 * localT) * (0.55 + 0.45 * uBeatPulse);
-    float d = length(p - pos);
-    float core = smoothstep(DOT_RADIUS, DOT_RADIUS * 0.25, d);
-    dotAccum += core * max(opacity, 0.0);
-  }
-  float energyGate = smoothstep(0.0, 0.35, uEnergy);
-  color = mix(color, DOT_COLOR, clamp(dotAccum, 0.0, 1.0) * uDotsBrightness * energyGate);
-
-  // 5. Floaters: an always-on ambient baseline plus wave bursts on top
-  // (see createWavePool in sky.ts) — both drawn from floaterPos, the
-  // bursts additionally gated by their own age envelope.
+  // 4. Floaters: an always-on ambient baseline plus wave bursts on top
+  // (see createWavePool in sky.ts) — both drawn from floaterShape, the
+  // bursts additionally gated by their own age envelope. floatCore is the
+  // slightly-brighter thread, floatGlow the soft additive halo around it;
+  // composited separately below so the result reads as translucent rather
+  // than a flat painted colour.
   int ambientCap = int(clamp(mix(3.0, float(FLOATER_AMBIENT_MAX), uDetail), 1.0, float(FLOATER_AMBIENT_MAX)) + 0.5);
   float ambientGate = clamp(uFloaterDensity * (0.7 + 0.3 * uSectionIntensity), 0.0, 1.0);
   int ambientActive = int(float(ambientCap) * ambientGate + 0.5);
-  float floatAccum = 0.0;
+  float floatCore = 0.0;
+  float floatGlow = 0.0;
   for (int i = 0; i < FLOATER_AMBIENT_MAX; i++) {
     if (i >= ambientActive) break;
     float seed = float(i) * 7.9 + 1.0;
-    vec2 pos = floaterPos(seed, uTime);
-    float d = length(p - pos);
-    floatAccum += smoothstep(FLOATER_RADIUS, FLOATER_RADIUS * 0.2, d);
+    float core, glow;
+    floaterShape(p, seed, uTime, core, glow);
+    floatCore += core;
+    floatGlow += glow;
   }
   int perBurstCap = int(clamp(mix(2.0, float(FLOATER_PER_BURST_MAX), uDetail), 1.0, float(FLOATER_PER_BURST_MAX)) + 0.5);
   for (int b = 0; b < MAX_WAVE_BURSTS_C; b++) {
@@ -571,12 +630,14 @@ void main() {
     for (int j = 0; j < FLOATER_PER_BURST_MAX; j++) {
       if (j >= subActive) break;
       float seed = uBurstSeed[b] * 31.7 + float(j) * 9.3 + 5.0;
-      vec2 pos = floaterPos(seed, uTime);
-      float d = length(p - pos);
-      floatAccum += smoothstep(FLOATER_RADIUS, FLOATER_RADIUS * 0.2, d) * envelope;
+      float core, glow;
+      floaterShape(p, seed, uTime, core, glow);
+      floatCore += core * envelope;
+      floatGlow += glow * envelope;
     }
   }
-  color = mix(color, FLOATER_COLOR, clamp(floatAccum, 0.0, 1.0) * FLOATER_ALPHA);
+  color = mix(color, FLOATER_TINT, clamp(floatCore, 0.0, 1.0) * FLOATER_CORE_ALPHA);
+  color += FLOATER_TINT * clamp(floatGlow, 0.0, 1.0) * FLOATER_GLOW_ALPHA;
 
   outColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
