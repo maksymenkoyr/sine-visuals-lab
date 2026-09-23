@@ -112,9 +112,41 @@ export function setAudioSourceChoice(next: AudioSourceChoice): void {
  *  found in localStorage at load — as opposed to getAudioSourceChoice() just
  *  returning AUDIO_SOURCE_DEFAULT because nothing was ever chosen. A garbage
  *  stored value does NOT count (loadInitial falls back to the default without
- *  setting this). See this file's header for why the picker UIs need it. */
+ *  setting this). See this file's header for why the picker UIs need it. A
+ *  site-permission reset leaves this untouched — resetting permissions
+ *  doesn't clear localStorage — which is exactly why resolveSourceState()
+ *  below doesn't lean on this alone to call the microphone "chosen". */
 export function hasStoredAudioSource(): boolean {
   return chosen;
+}
+
+/** The live state of the browser's own microphone permission, as reported by
+ *  the Permissions API — "unknown" wherever that API is unavailable or
+ *  refuses to answer for "microphone" (see watchMicPermission below).
+ *  resolveSourceState() uses this, not hasStoredAudioSource() alone, to
+ *  decide whether the mic reads as "chosen": a permission reset leaves
+ *  localStorage intact, so a stored "mic" pick from before the reset would
+ *  otherwise keep painting the picker as ready with nothing actually
+ *  listening. */
+export type MicPermission = "granted" | "prompt" | "denied" | "unknown";
+
+/** Subscribes to the browser's microphone permission status and returns its
+ *  current state. `onChange` fires on every subsequent transition (e.g. a
+ *  grant from the browser's own permission prompt, or a reset performed
+ *  while the page is open) — see src/app.ts's boot() for how the resulting
+ *  repaint is wired to the pickers. Resolves "unknown" wherever
+ *  navigator.permissions is absent, or its query rejects (older Firefox
+ *  rejects the "microphone" PermissionName outright) — same
+ *  typeof-navigator guard style as displayCaptureSupported() below. */
+export async function watchMicPermission(onChange: (p: MicPermission) => void): Promise<MicPermission> {
+  if (typeof navigator === "undefined" || !navigator.permissions) return "unknown";
+  try {
+    const status = await navigator.permissions.query({ name: "microphone" as PermissionName });
+    status.addEventListener("change", () => onChange(status.state));
+    return status.state;
+  } catch {
+    return "unknown";
+  }
 }
 
 /** One resolved source state, computed from a source's liveness (a real
@@ -133,18 +165,31 @@ export interface SourceState {
 
 /** Pure so it's node-testable without a DOM: the caller (src/app.ts) does the
  *  impure parts — reading the live capture globals, localStorage via
- *  hasStoredAudioSource(), and the `?source=` URL pin — and hands the results
+ *  hasStoredAudioSource(), the browser's mic permission via
+ *  watchMicPermission(), and the `?source=` URL pin — and hands the results
  *  in. `liveChoice` wins outright: a capture actually running makes both
  *  `live` and `chosen` true regardless of what's stored, which matters right
  *  after a source swap where the persisted pref hasn't caught up yet (see
- *  swapAudioSource's ordering in src/app.ts). */
+ *  swapAudioSource's ordering in src/app.ts). Otherwise, for a preferred mic
+ *  the permission is the truth wherever the browser reports one — a
+ *  permission reset leaves localStorage intact (see hasStoredAudioSource's
+ *  own comment), so a stored pick only stands in for `chosen` where the
+ *  browser can't say (`"unknown"`). Display capture has no standing
+ *  permission — getDisplayMedia prompts on every call — so a preferred
+ *  display always falls back to the stored pick, which there is pure
+ *  intent. */
 export function resolveSourceState(input: {
   liveChoice: AudioSourceChoice | null;
   preferredChoice: AudioSourceChoice;
   preferenceChosen: boolean;
+  micPermission: MicPermission;
 }): SourceState {
   if (input.liveChoice !== null) return { choice: input.liveChoice, live: true, chosen: true };
-  return { choice: input.preferredChoice, live: false, chosen: input.preferenceChosen };
+  const chosen =
+    input.preferredChoice === "mic"
+      ? input.micPermission === "granted" || (input.micPermission === "unknown" && input.preferenceChosen)
+      : input.preferenceChosen;
+  return { choice: input.preferredChoice, live: false, chosen };
 }
 
 /** Whether this browser exposes getDisplayMedia at all. Doesn't (can't)

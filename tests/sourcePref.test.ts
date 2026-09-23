@@ -5,7 +5,9 @@ import {
   hasStoredAudioSource,
   resolveSourceState,
   displayCaptureSupported,
+  watchMicPermission,
   AUDIO_SOURCE_DEFAULT,
+  type MicPermission,
 } from "../src/audio/sourcePref.ts";
 
 // Like powerMode/autoGain/bandSplit, audio-source choice has no per-scene
@@ -90,7 +92,9 @@ describe("audio source persistence with a stubbed localStorage", () => {
 
 describe("resolveSourceState", () => {
   it("is idle when nothing is live and nothing was ever chosen", () => {
-    expect(resolveSourceState({ liveChoice: null, preferredChoice: "mic", preferenceChosen: false })).toEqual({
+    expect(
+      resolveSourceState({ liveChoice: null, preferredChoice: "mic", preferenceChosen: false, micPermission: "prompt" }),
+    ).toEqual({
       choice: "mic",
       live: false,
       chosen: false,
@@ -98,7 +102,14 @@ describe("resolveSourceState", () => {
   });
 
   it("is ready when a preference was chosen but nothing is live", () => {
-    expect(resolveSourceState({ liveChoice: null, preferredChoice: "display", preferenceChosen: true })).toEqual({
+    expect(
+      resolveSourceState({
+        liveChoice: null,
+        preferredChoice: "display",
+        preferenceChosen: true,
+        micPermission: "prompt",
+      }),
+    ).toEqual({
       choice: "display",
       live: false,
       chosen: true,
@@ -109,8 +120,119 @@ describe("resolveSourceState", () => {
     // Exactly the swapAudioSource ordering gap: a capture already running as
     // "display" while the persisted pref still says "mic" (attach happens
     // before persist) must report the LIVE kind, never the stale pref.
-    const state = resolveSourceState({ liveChoice: "display", preferredChoice: "mic", preferenceChosen: false });
+    const state = resolveSourceState({
+      liveChoice: "display",
+      preferredChoice: "mic",
+      preferenceChosen: false,
+      micPermission: "denied",
+    });
     expect(state).toEqual({ choice: "display", live: true, chosen: true });
+  });
+
+  it("mic with a stored pick but permission only at \"prompt\" is NOT chosen — the reset bug", () => {
+    // The exact regression this round fixes: a permission reset leaves
+    // localStorage's stored pick in place, but the mic isn't actually ready
+    // to listen until the browser says so.
+    const state = resolveSourceState({
+      liveChoice: null,
+      preferredChoice: "mic",
+      preferenceChosen: true,
+      micPermission: "prompt",
+    });
+    expect(state.chosen).toBe(false);
+  });
+
+  it("mic never stored but already granted IS chosen", () => {
+    const state = resolveSourceState({
+      liveChoice: null,
+      preferredChoice: "mic",
+      preferenceChosen: false,
+      micPermission: "granted",
+    });
+    expect(state.chosen).toBe(true);
+  });
+
+  it("mic denied is NOT chosen even with a stored pick", () => {
+    const state = resolveSourceState({
+      liveChoice: null,
+      preferredChoice: "mic",
+      preferenceChosen: true,
+      micPermission: "denied",
+    });
+    expect(state.chosen).toBe(false);
+  });
+
+  it("mic with an unknown permission (Permissions API unavailable) falls back to the stored pick", () => {
+    const state = resolveSourceState({
+      liveChoice: null,
+      preferredChoice: "mic",
+      preferenceChosen: true,
+      micPermission: "unknown",
+    });
+    expect(state.chosen).toBe(true);
+  });
+
+  it("display stays chosen off the stored pick even while permission (irrelevant to display) sits at prompt", () => {
+    // getDisplayMedia has no standing permission to consult — it prompts on
+    // every call — so the stored pick is the only signal for display.
+    const state = resolveSourceState({
+      liveChoice: null,
+      preferredChoice: "display",
+      preferenceChosen: true,
+      micPermission: "prompt",
+    });
+    expect(state.chosen).toBe(true);
+  });
+
+  it("live beats a merely-\"prompt\" permission", () => {
+    const state = resolveSourceState({
+      liveChoice: "mic",
+      preferredChoice: "mic",
+      preferenceChosen: false,
+      micPermission: "prompt",
+    });
+    expect(state).toEqual({ choice: "mic", live: true, chosen: true });
+  });
+});
+
+describe("watchMicPermission", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("is unknown when navigator is absent (this suite's default node env)", async () => {
+    expect(await watchMicPermission(() => {})).toBe("unknown");
+  });
+
+  it("is unknown when navigator.permissions.query rejects (e.g. older Firefox rejecting \"microphone\")", async () => {
+    vi.stubGlobal("navigator", {
+      permissions: { query: () => Promise.reject(new Error("not supported")) },
+    });
+    expect(await watchMicPermission(() => {})).toBe("unknown");
+  });
+
+  it("resolves the initial state and calls onChange on a dispatched change event", async () => {
+    // A real EventTarget, not a mock object, so the status's own
+    // addEventListener/dispatchEvent actually wire up under node — matching
+    // what a real PermissionStatus is.
+    class FakeStatus extends EventTarget {
+      state: MicPermission;
+      constructor(state: MicPermission) {
+        super();
+        this.state = state;
+      }
+    }
+    const status = new FakeStatus("prompt");
+    vi.stubGlobal("navigator", {
+      permissions: { query: () => Promise.resolve(status) },
+    });
+    const changes: MicPermission[] = [];
+    const initial = await watchMicPermission((p) => changes.push(p));
+    expect(initial).toBe("prompt");
+
+    status.state = "granted";
+    status.dispatchEvent(new Event("change"));
+    expect(changes).toEqual(["granted"]);
   });
 });
 

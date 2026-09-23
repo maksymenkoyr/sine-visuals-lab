@@ -92,35 +92,42 @@ const stylesheet = `
 .gal-mono { font: 400 10.5px ${FONT_MONO}; text-transform: uppercase; }
 
 .gal-mast { display: flex; align-items: center; justify-content: space-between; gap: 16px 32px; flex-wrap: wrap; }
-/* flex: 1 1 auto (basis = max-content), not a bare "flex: 1" (basis 0%) —
- * the latter collapses to min-content and wraps "Share a tab"/"CLEANER
- * SIGNAL" onto several lines before it ever grows. This wraps at exactly the
- * point the unsized block would, then fills the gap .gal-mast's
- * space-between otherwise leaves dead. max-width caps how wide the buttons
- * get on a wide desktop — .gal-page's own 1328px cap already bounds the mast. */
-.gal-source { display: flex; flex-direction: column; gap: 5px; flex: 1 1 auto; max-width: 680px; }
+.gal-source { display: flex; flex-direction: column; gap: 5px; }
 .gal-source-top { display: flex; align-items: center; gap: 14px; }
+/* .gal-source-label and .gal-source-hint share one grid cell (justify-items:
+ * end) instead of sitting side by side, so .gal-source-slot's width is fixed
+ * to whichever child is wider — almost always the hint — and toggling which
+ * one is visible via opacity never nudges .gal-src's fixed right edge
+ * (.gal-mast's own space-between). The shimmer gradient below lives on
+ * .gal-source-hint-text unconditionally, with only its animation keyed off
+ * [data-prompting]: a landing pick then fades the text out from wherever the
+ * sweep had already reached (the band scrolled off-screen reads as a flat
+ * dim colour) instead of jumping from a moving gradient to solid colour
+ * mid-fade. */
+.gal-source-slot { display: grid; justify-items: end; }
+.gal-source-slot > * { grid-area: 1 / 1; transition: opacity .22s ease; white-space: nowrap; }
 .gal-source-label { letter-spacing: .14em; color: rgba(255,255,255,.5); }
-.gal-source-row { display: flex; gap: 8px; flex: 1; }
-/* Always laid out (a reserved line, never display:none) so toggling it never
- * changes .gal-source's height — .gal-mast uses align-items:center, so a
- * height change here would re-center the mark and nudge the tiles below on
- * every state change. Faded by refreshSource() via the data-visible flip
- * below; aria-hidden (also set there) keeps it out of the AT tree while
- * invisible, since opacity alone doesn't. */
-.gal-source-cta {
-  letter-spacing: .1em; color: rgba(255,255,255,.4);
-  opacity: 0; transform: translateY(-4px); transition: opacity .22s ease, transform .22s ease;
+.gal-source-hint { letter-spacing: .14em; color: rgba(255,255,255,.55); opacity: 0; }
+.gal-source-slot[data-prompting] .gal-source-hint { opacity: 1; }
+.gal-source-slot[data-prompting] .gal-source-label { opacity: 0; }
+.gal-source-hint-arrow { display: inline-block; margin-left: .6em; }
+@media (prefers-reduced-motion: no-preference) {
+  .gal-source-hint-text {
+    background: linear-gradient(90deg, rgba(255,255,255,.45) 40%, #fff 50%, rgba(255,255,255,.45) 60%) 100% 0 / 250% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .gal-source-slot[data-prompting] .gal-source-hint-text { animation: gal-hint-shimmer 2.6s ease-in-out infinite; }
+  .gal-source-slot[data-prompting] .gal-source-hint-arrow { animation: gal-hint-nudge 1.3s ease-in-out infinite; }
+  @keyframes gal-hint-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+  @keyframes gal-hint-nudge { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(4px); } }
 }
-.gal-source-cta[data-visible] { opacity: 1; transform: translateY(0); }
+.gal-source-row { display: flex; gap: 4px; }
 .gal-src {
-  display: flex; align-items: center; gap: 12px; padding: 16px 20px; text-align: left;
+  display: flex; align-items: center; gap: 9px; padding: 10px 14px; text-align: left;
   border: 1px solid rgba(255,255,255,.16); border-radius: 3px; background: none;
-  color: #fff; font: inherit; cursor: pointer; position: relative; flex: 1 1 0; min-width: 0;
-  transition: border-color .2s ease, background .2s ease, transform .12s ease;
+  color: #fff; font: inherit; cursor: pointer;
 }
-.gal-src:hover { border-color: rgba(255,255,255,.4); background: rgba(255,255,255,.04); }
-.gal-src:active { transform: scale(0.98); }
+.gal-src:hover { border-color: rgba(255,255,255,.4); }
 /* Paint keys off data-state, not aria-checked — aria-checked stays purely
  * semantic (radio state for assistive tech). Both "ready" and "live" share
  * [aria-checked] and [role=radio] specificity, so keying paint off the
@@ -129,43 +136,11 @@ const stylesheet = `
 .gal-src[data-state="ready"] { border-color: rgba(255,255,255,.4); }
 .gal-src[data-state="live"] { border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; }
 .gal-src[data-solo] { cursor: default; }
-/* The live ring lives on ::after rather than the button's own box-shadow so
- * its continuous pulse (below) animates opacity/transform only — those
- * promote to a compositor layer, so the loop costs nothing on the main
- * thread the preview tiles' own rAF draws are competing for. Animating
- * box-shadow directly would repaint the button every frame instead. */
-.gal-src[data-state="live"]::after {
-  content: ""; position: absolute; inset: -1px; border-radius: inherit;
-  box-shadow: 0 0 0 1px ${withAlpha(INPUT_GREEN, 0.5)}; pointer-events: none;
-}
-.gal-src-dot {
-  width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(255,255,255,.45);
-  box-sizing: border-box; flex: none; transition: background-color .2s ease, border-color .2s ease;
-}
+.gal-src-dot { width: 5px; height: 5px; border-radius: 50%; border: 1px solid rgba(255,255,255,.45); box-sizing: border-box; flex: none; }
 .gal-src[data-state="ready"] .gal-src-dot { border-color: rgba(255,255,255,.8); }
 .gal-src[data-state="live"] .gal-src-dot { background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN}; }
-/* Both bound to the [data-state="live"] attribute selector rather than
- * toggled by JS: refreshSource() rewrites dataset.state on every relevant
- * capture transition, including with the SAME value, but a same-value
- * attribute write doesn't change the computed animation-name so it can't
- * restart either animation — the only thing that does is hide()/show()'s
- * display:none<->block cycle (display:none cancels every running animation
- * in the subtree; showing it again restarts whichever animation-names still
- * apply). Net effect: the pulse/pop replay once each time the gallery is
- * reopened while still live — kept deliberately, as a small "still
- * listening" reaffirmation, rather than adding class-toggle/reflow/
- * animationend bookkeeping to suppress it. Pop is on the dot only, never the
- * full-width button: .gal-root's overflow-y:auto makes overflow-x compute to
- * auto too, so a wide element scaling near the mobile edge could flash a
- * scrollbar — a small dot scaling to 1.25x can't. */
-@media (prefers-reduced-motion: no-preference) {
-  .gal-src[data-state="live"]::after { animation: gal-src-pulse 2.4s ease-in-out infinite; }
-  .gal-src[data-state="live"] .gal-src-dot { animation: gal-src-pop .32s ease; }
-  @keyframes gal-src-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; transform: scale(1.06); } }
-  @keyframes gal-src-pop { 0% { transform: scale(.5); opacity: 0; } 60% { transform: scale(1.25); opacity: 1; } 100% { transform: scale(1); } }
-}
-.gal-src-name { font: 400 16px ${FONT_LABEL}; white-space: nowrap; }
-.gal-src-hint { font: 400 9.5px ${FONT_MONO}; letter-spacing: .1em; color: rgba(255,255,255,.55); margin-top: 2px; white-space: nowrap; }
+.gal-src-name { font: 400 13.5px ${FONT_LABEL}; }
+.gal-src-hint { font: 400 9.5px ${FONT_MONO}; letter-spacing: .1em; color: rgba(255,255,255,.55); margin-top: 2px; }
 
 .gal-error {
   display: none; padding: 10px 14px; border-radius: 3px; font-size: 13px;
@@ -225,14 +200,19 @@ const stylesheet = `
 @media (max-width: ${NARROW_BELOW_PX}px) {
   .gal-root { padding: 24px 16px 32px; }
   .gal-page { gap: 24px; }
-  /* No room for the label beside the mark and both options on a phone. */
-  .gal-source-label { display: none; }
+  /* No room for the label beside the mark and both options on a phone — the
+   * hint takes its place on its own line above the buttons instead. */
+  .gal-source-top { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .gal-source-slot { justify-items: start; }
+  .gal-source-slot .gal-source-label { display: none; }
+  /* Otherwise the slot would still reserve its line (both children just
+   * fade to opacity 0) once a pick lands — hide it outright instead, at the
+   * cost of a one-line shift when that happens. */
+  .gal-source-slot:not([data-prompting]) { display: none; }
   .gal-mast { gap: 12px; }
   .gal-src { padding: 9px 8px; gap: 6px; }
-  .gal-src-name { font-size: 14px; }
-  .gal-src-dot { width: 6px; height: 6px; }
   .gal-src-hint { letter-spacing: .06em; }
-  .gal-source-cta { letter-spacing: .06em; }
+  .gal-source-hint { letter-spacing: .06em; }
   .gal-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .gal-name { font-size: 15px; }
   /* A phone at arm's length: the fold is how the drafts are reached at all. */
@@ -384,13 +364,15 @@ export function createGallery(deps: GalleryDeps): Gallery {
 
   // Sound source: which capture a tile tap starts on. A radio pair where
   // screen capture exists; the microphone alone, as a plain statement (no
-  // radio semantics, no CTA — there's nothing to choose between), where it
+  // radio semantics, no hint — there's nothing to choose between), where it
   // doesn't. canChoose is read once: display capture's availability never
   // changes mid-session (same assumption refreshAudioPromptButtons in
   // app.ts makes for the start prompt).
   const canChoose = deps.canCaptureDisplay();
   const source = el("div", "gal-source");
   const sourceTop = el("div", "gal-source-top");
+  const sourceSlot = el("div", "gal-source-slot");
+  const sourceLabel = el("div", "gal-mono gal-source-label", "Sound source");
   const sourceRow = el("div", "gal-source-row");
   if (canChoose) {
     sourceRow.setAttribute("role", "radiogroup");
@@ -399,7 +381,16 @@ export function createGallery(deps: GalleryDeps): Gallery {
   const LIVE_LABEL = "LISTENING";
   const READY_LABEL = "TAP TO START";
   const sourceButtons = new Map<AudioSourceChoice, { btn: HTMLButtonElement; hintEl: HTMLElement; descriptor: string }>();
-  const cta = canChoose ? el("div", "gal-mono gal-source-cta", "PICK A SOURCE — OR TAP A SCENE TO USE THE MIC") : null;
+  // Only where there's an actual choice to nudge toward — the solo path (no
+  // display capture) has nothing to pick between, so it keeps just the plain
+  // label, same as before this hint existed.
+  const sourceHint = canChoose ? el("div", "gal-mono gal-source-hint") : null;
+  if (sourceHint) {
+    sourceHint.append(
+      el("span", "gal-source-hint-text", "PICK A SOURCE TO START"),
+      el("span", "gal-source-hint-arrow", "›"),
+    );
+  }
   const refreshSource = (): void => {
     const state = deps.sourceState();
     for (const [choice, entry] of sourceButtons) {
@@ -417,11 +408,13 @@ export function createGallery(deps: GalleryDeps): Gallery {
       if (canChoose) entry.btn.setAttribute("aria-checked", String(uiState !== "idle"));
       entry.hintEl.textContent = uiState === "live" ? LIVE_LABEL : uiState === "ready" ? READY_LABEL : entry.descriptor;
     }
-    if (cta) {
-      // Always laid out — see .gal-source-cta's own comment for why this is
-      // an opacity/transform fade (data-visible) rather than a display swap.
-      cta.toggleAttribute("data-visible", !state.chosen);
-      cta.setAttribute("aria-hidden", String(state.chosen));
+    if (sourceHint) {
+      // Both children live in .gal-source-slot's one grid cell — see that
+      // rule's own comment for why this toggle can't shift .gal-src's fixed
+      // position.
+      sourceSlot.toggleAttribute("data-prompting", !state.chosen);
+      sourceHint.setAttribute("aria-hidden", String(state.chosen));
+      sourceLabel.setAttribute("aria-hidden", String(!state.chosen));
     }
   };
   const addSource = (choice: AudioSourceChoice, name: string, descriptor: string, title?: string): void => {
@@ -444,9 +437,10 @@ export function createGallery(deps: GalleryDeps): Gallery {
   };
   addSource("mic", "Microphone", "ROOM AUDIO");
   if (canChoose) addSource("display", "Share a tab", "CLEANER SIGNAL", DISPLAY_SHARE_GUIDE);
-  sourceTop.append(el("div", "gal-mono gal-source-label", "Sound source"), sourceRow);
+  sourceSlot.appendChild(sourceLabel);
+  if (sourceHint) sourceSlot.appendChild(sourceHint);
+  sourceTop.append(sourceSlot, sourceRow);
   source.appendChild(sourceTop);
-  if (cta) source.appendChild(cta);
   mast.append(createBrandMark(56), source);
 
   const errorBanner = el("div", "gal-error");

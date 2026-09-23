@@ -12,9 +12,11 @@ import {
   hasStoredAudioSource,
   resolveSourceState,
   displayCaptureSupported,
+  watchMicPermission,
   DISPLAY_SHARE_GUIDE,
   type AudioSourceChoice,
   type SourceState,
+  type MicPermission,
 } from "./audio/sourcePref.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
 import {
@@ -182,6 +184,12 @@ let extractor = new FeatureExtractor();
  *  own track ends (onCaptureEnded), so a retry is possible. */
 let audioPromise: Promise<void> | null = null;
 let captureFailed = false;
+/** The browser's live microphone permission state — see MicPermission's own
+ *  doc comment in sourcePref.ts. Seeded/kept current by boot()'s
+ *  watchMicPermission() call; resolveSourceState() (via currentSourceState()
+ *  below) uses it, not localStorage alone, to decide whether the mic reads
+ *  as "chosen". */
+let micPermission: MicPermission = "unknown";
 /** Guards against overlapping swapAudioSource() calls — e.g. a double-click
  *  on the panel's Source chips while a share picker is already open. */
 let swapPromise: Promise<void> | null = null;
@@ -437,6 +445,7 @@ function currentSourceState(): SourceState {
     liveChoice,
     preferredChoice: resolveInitialSource(),
     preferenceChosen: urlPinnedSource() !== null || hasStoredAudioSource(),
+    micPermission,
   });
 }
 
@@ -962,6 +971,16 @@ function applyRoute(route: Route): void {
 }
 
 async function boot(): Promise<void> {
+  // Kicked off first so it resolves in parallel with the detectQuality()
+  // await below — the first paint is correct with no flicker. Awaited just
+  // before createGallery() constructs the picker; the change listener keeps
+  // repainting live afterward (e.g. a grant from the browser's own prompt,
+  // or a permission reset while the page stays open) via gallery.syncSource().
+  const micPermissionReady = watchMicPermission((p) => {
+    micPermission = p;
+    gallery?.syncSource();
+  });
+
   if (!document.createElement("canvas").getContext) {
     fatalError("Canvas unsupported");
     return;
@@ -1093,6 +1112,7 @@ async function boot(): Promise<void> {
   if (bypassGallery) {
     void enterViz(scene);
   } else {
+    micPermission = await micPermissionReady;
     gallery = createGallery({
       scenes: () =>
         listScenes().map((s) => {
