@@ -1,26 +1,35 @@
 // Shaders for the Neon Gates scene. index.ts owns the design and the
-// reference it was measured from, layout.ts owns what is in the tunnel;
-// this file owns the picture. index.ts assembles each program from the
-// common uniform block, the setting uniforms and the sources here.
+// reference it was measured from, layout.ts owns what is in the tunnel and
+// how it morphs; this file owns the picture.
 //
 // The gate pass draws one primitive: a neon tube segment swept through the
 // shutter. Each instance is (object, mirror copy, segment): the vertex
-// shader looks the object up in the uObjA/uObjB arrays, takes the
-// segment's endpoints from the shape's index arithmetic (segmentOf, the
-// same table as layout.ts's), places it in the tunnel, mirrors it, spins
-// it, and projects it twice — where it is now and where it was a shutter
-// ago — then emits an oriented bounding quad around those four screen
-// points plus the stroke and the halo margin. The fragment shader samples
-// the tube along the sweep and averages an anti-aliased core and a short
-// halo, so the streaks the reference has are the motion of the 3D
-// geometry itself, not a smear pasted on afterwards. Everything is
+// shader looks the object up in the uObjA/uObjB/uObjC arrays, morphs that
+// segment's endpoints between the fromLook and toLook shapes (morphSegment,
+// mirroring layout.ts's TS version of the same name — same SEG_MAX=18
+// topology, same slot arithmetic, same lerp; the one difference is dims:
+// the shader gets a single already-blended (sx, sy, dz) from uObjB, not two
+// separate ones, since the uniform budget has no room for both — exact at
+// uMorph=0/1, a smooth approximation in between), places it in the tunnel,
+// mirrors it, spins it, and projects it twice — where it is now and where
+// it was a shutter ago — then emits an oriented bounding quad around those
+// four screen points plus the stroke and the halo margin. The fragment
+// shader samples the tube along the sweep and averages an anti-aliased core
+// and a short halo, so the streaks the reference has are the motion of the
+// 3D geometry itself, not a smear pasted on afterwards. Everything is
 // additive into an RGBA8 target; the blur chain and the composite in
 // index.ts turn that into the bloom and the tinted ground.
 //
-// Stroke is a tube radius in world units projected to pixels and floored
-// at CORE_MIN_PX, so it is thin at the vanishing point and thick at the
-// edge the way the reference's is. Past DOF_Z the halo widens with depth —
-// the cheap depth of field that turns far gates into soft blobs.
+// A mirror copy that would land exactly on an on-axis object is faded by a
+// continuous copyWeight (from uObjC's wx/wy, layout.ts's axis weights)
+// rather than discarded outright, so an object crossing a mirror axis
+// mid-morph fades its copy in/out instead of popping it.
+//
+// Stroke is a tube radius in world units (uObjA.w, blended per object)
+// projected to pixels and floored at CORE_MIN_PX, so it is thin at the
+// vanishing point and thick at the edge the way the reference's is. Past
+// DOF_Z the halo widens with depth — the cheap depth of field that turns far
+// gates into soft blobs.
 
 import { MAX_OBJ, SEG_MAX, TUNNEL_LEN } from "./layout.ts";
 
@@ -44,9 +53,9 @@ const HAZE = 0.28;
 /** A gate fades out over its last stretch before the camera instead of
  *  filling the frame. */
 const NEAR_FADE_Z = 1.1;
-/** Most samples along the shutter sweep (one per stroke width of sweep,
- *  so a long smear stays a smear and a short one costs little), and how
- *  dim the tail end is. */
+/** Most samples along the shutter sweep (one per stroke width of sweep, so
+ *  a long smear stays a smear and a short one costs little), and how dim
+ *  the tail end is. */
 const SWEEP_TAPS = 40;
 const TAIL_DIM = 0.35;
 /** How much the core pushes toward white. */
@@ -91,17 +100,23 @@ const float HAZE = ${f(HAZE)};
 const float NEAR_FADE_Z = ${f(NEAR_FADE_Z)};
 const float FLASH_GAIN = ${f(FLASH_GAIN)};
 
+// Per object: (x, y, z0, half-stroke) — see layout.ts's morphLayout header.
 uniform vec4 uObjA[${MAX_OBJ}];
+// Per object: (sx, sy, dz, presence * brightness jitter).
 uniform vec4 uObjB[${MAX_OBJ}];
+// Per object: (axis weight x, axis weight y, shapeFrom + 4*shapeTo, keyFrom + 4*keyTo).
+uniform vec4 uObjC[${MAX_OBJ}];
 uniform int uObjCount;
 uniform int uCopies;
 uniform float uTravel;
 uniform float uTravelDelta;
 uniform float uSpinPos;
 uniform float uSpinDelta;
-uniform vec3 uPrimary;
-uniform vec3 uSecondary;
-uniform vec3 uAccent;
+// Colour key 0/1/2 = primary/secondary/accent, for the look being left and
+// the look being entered; uMorph mixes between them.
+uniform vec3 uColFrom[3];
+uniform vec3 uColTo[3];
+uniform float uMorph;
 uniform float uFlash;
 uniform float uCoreGain;
 
@@ -111,51 +126,59 @@ flat out float vHalfPx;
 flat out float vHaloPx;
 flat out vec3 vColor;
 
-float hash11(float n) { return fract(sin(n * 127.1 + 311.7) * 43758.5453); }
-
-// Segment i of a shape in object space. Mirrored in layout.ts's segmentOf.
-void segmentOf(int shape, int i, vec3 dims, out vec3 a, out vec3 b, out bool used) {
-  float h = dims.z * 0.5;
-  used = true;
+// Ring vertex k (0..5) of a shape's cross-section at half-extents s.xy —
+// mirrors layout.ts's ringVertex exactly (see its header for the FRAME
+// slot-to-corner mapping).
+vec2 ringVertex(int shape, int k, vec2 s) {
   if (shape == 0) {
-    int k = i - (i / 6) * 6;
-    float a0 = PI * 0.5 + PI / 3.0 * float(k);
-    float a1 = a0 + PI / 3.0;
-    vec2 p0 = dims.x * vec2(cos(a0), sin(a0));
-    vec2 p1 = dims.x * vec2(cos(a1), sin(a1));
-    if (i < 6) { a = vec3(p0, -h); b = vec3(p1, -h); }
-    else if (i < 12) { a = vec3(p0, h); b = vec3(p1, h); }
-    else { a = vec3(p0, -h); b = vec3(p0, h); }
+    float a = PI * 0.5 + PI / 3.0 * float(k);
+    return s.x * vec2(cos(a), sin(a));
   } else if (shape == 1) {
-    if (i >= 12) { used = false; a = b = vec3(0.0); return; }
-    int k = i - (i / 4) * 4;
-    int k1 = k + 1 - ((k + 1) / 4) * 4;
-    vec2 c0 = vec2((k == 0 || k == 3) ? -dims.x : dims.x, k < 2 ? -dims.y : dims.y);
-    vec2 c1 = vec2((k1 == 0 || k1 == 3) ? -dims.x : dims.x, k1 < 2 ? -dims.y : dims.y);
-    if (i < 4) { a = vec3(c0, -h); b = vec3(c1, -h); }
-    else if (i < 8) { a = vec3(c0, h); b = vec3(c1, h); }
-    else { a = vec3(c0, -h); b = vec3(c0, h); }
-  } else {
-    if (i != 0) { used = false; a = b = vec3(0.0); return; }
-    a = vec3(0.0, 0.0, -h);
-    b = vec3(0.0, 0.0, h);
+    int corner = (k == 0 || k == 1) ? 0 : k == 2 ? 1 : (k == 3 || k == 4) ? 2 : 3;
+    float x = (corner == 0 || corner == 3) ? -s.x : s.x;
+    float y = corner < 2 ? -s.y : s.y;
+    return vec2(x, y);
   }
+  return vec2(0.0);
 }
 
-// Mirror copy c of a cross-section point: bit 0 flips x, bit 1 flips y,
-// bit 2 swaps the axes. Returns false for a copy that would land on top
-// of the object itself (an object on an axis mirrored across that axis).
-bool mirrorCopy(int c, inout vec2 p) {
-  if ((c & 4) != 0) p = p.yx;
-  if ((c & 1) != 0) {
-    if (p.x == 0.0) return false;
-    p.x = -p.x;
+// 1 for a real edge of shape at slot i (0..17), 0 for a degenerate dupe —
+// mirrors layout.ts's shapePresence exactly.
+float shapePresence(int shape, int i) {
+  if (shape == 0) return 1.0;
+  if (shape == 1) {
+    int k = i < 6 ? i : i < 12 ? i - 6 : i - 12;
+    if (i < 12) return (k == 0 || k == 3) ? 0.0 : 1.0;
+    return (k == 1 || k == 4) ? 0.0 : 1.0;
   }
-  if ((c & 2) != 0) {
-    if (p.y == 0.0) return false;
-    p.y = -p.y;
+  return i == 12 ? 1.0 : 0.0;
+}
+
+// Segment i, morphing shapeFrom's topology toward shapeTo's at progress e —
+// mirrors layout.ts's morphSegment, except dims is already the e-blended
+// (sx, sy, dz) rather than two separate from/to dims (see this file's
+// header for why that's still exact at e=0/1).
+void morphSegment(int shapeFrom, int shapeTo, int i, vec3 dims, float e, out vec3 a, out vec3 b, out float presence) {
+  float h = dims.z * 0.5;
+  presence = mix(shapePresence(shapeFrom, i), shapePresence(shapeTo, i), e);
+  if (i < 12) {
+    int k = i < 6 ? i : i - 6;
+    int k1 = k + 1 - ((k + 1) / 6) * 6;
+    vec2 pFrom = ringVertex(shapeFrom, k, dims.xy);
+    vec2 pFrom2 = ringVertex(shapeFrom, k1, dims.xy);
+    vec2 pTo = ringVertex(shapeTo, k, dims.xy);
+    vec2 pTo2 = ringVertex(shapeTo, k1, dims.xy);
+    float z = i < 6 ? -h : h;
+    a = vec3(mix(pFrom, pTo, e), z);
+    b = vec3(mix(pFrom2, pTo2, e), z);
+    return;
   }
-  return true;
+  int k = i - 12;
+  vec2 pFrom = ringVertex(shapeFrom, k, dims.xy);
+  vec2 pTo = ringVertex(shapeTo, k, dims.xy);
+  vec2 p = mix(pFrom, pTo, e);
+  a = vec3(p, -h);
+  b = vec3(p, h);
 }
 
 vec2 rot(vec2 p, float a) {
@@ -182,18 +205,38 @@ void main() {
 
   vec4 A = uObjA[obj];
   vec4 B = uObjB[obj];
-  int key = int(floor(A.w / 4.0 + 0.01));
-  int shape = int(A.w + 0.5) - 4 * key;
+  vec4 C = uObjC[obj];
+  int shapeCombo = int(C.z + 0.5);
+  int shapeFrom = shapeCombo - (shapeCombo / 4) * 4;
+  int shapeTo = shapeCombo / 4;
+  int keyCombo = int(C.w + 0.5);
+  int keyFrom = keyCombo - (keyCombo / 4) * 4;
+  int keyTo = keyCombo / 4;
+
   vec3 sa, sb;
-  bool used;
-  segmentOf(shape, seg, B.xyz, sa, sb, used);
+  float segPresenceNow;
+  morphSegment(shapeFrom, shapeTo, seg, B.xyz, uMorph, sa, sb, segPresenceNow);
 
   vec2 centre = A.xy;
-  bool drawn = used && obj < uObjCount && mirrorCopy(copy, centre);
+  bool swapped = (copy & 4) != 0;
+  if (swapped) centre = centre.yx;
+  // Mirror copy c of a cross-section point: bit 0 flips x, bit 1 flips y.
+  // copyWeight fades continuously toward 0 as the object approaches the
+  // axis that copy mirrors across (1 when off it) instead of a hard cut, so
+  // a transitioning object's mirror copy fades rather than pops; a fully
+  // on-axis holding object (weight exactly 0 or 1) behaves exactly as
+  // before.
+  vec2 axisW = swapped ? C.yx : C.xy;
+  float copyWeight = 1.0;
+  if ((copy & 1) != 0) { centre.x = -centre.x; copyWeight *= axisW.x; }
+  if ((copy & 2) != 0) { centre.y = -centre.y; copyWeight *= axisW.y; }
+
+  float gain = B.w * segPresenceNow * copyWeight;
+  bool drawn = obj < uObjCount && gain > 0.0005;
   if (!drawn) { gl_Position = vec4(2.0, 2.0, 0.0, 1.0); return; }
+
   // The copy mirrors the object's own frame as well as its place: a
   // mirrored hexagon is a hexagon, so only the sign pattern matters.
-  bool swapped = (copy & 4) != 0;
   vec2 fa = swapped ? sa.yx : sa.xy;
   vec2 fb = swapped ? sb.yx : sb.xy;
   if ((copy & 1) != 0) { fa.x = -fa.x; fb.x = -fb.x; }
@@ -219,7 +262,7 @@ void main() {
   // Stroke: the tube radius seen at the segment's mean depth.
   float zMid = 0.5 * (nowA.z + nowB.z);
   float pxScale = vpPx.y / 720.0;
-  float halfPx = clamp(B.w * FOCAL_Y * vpPx.y * 0.5 / zMid, CORE_MIN_PX * pxScale, CORE_MAX_PX * pxScale);
+  float halfPx = clamp(A.w * FOCAL_Y * vpPx.y * 0.5 / zMid, CORE_MIN_PX * pxScale, CORE_MAX_PX * pxScale);
   float haloPx = (HALO_PX + DOF_GAIN * max(0.0, zMid - DOF_Z)) * pxScale;
   float margin = halfPx + haloPx * 3.0 + 1.0;
 
@@ -246,13 +289,15 @@ void main() {
   vHalfPx = halfPx;
   vHaloPx = haloPx;
 
-  vec3 col = key == 2 ? uAccent : (key == 1 ? uSecondary : uPrimary);
-  float gain = (0.75 + 0.5 * hash11(float(obj) * 3.1 + 7.0))
+  vec3 colFrom = keyFrom == 2 ? uColFrom[2] : (keyFrom == 1 ? uColFrom[1] : uColFrom[0]);
+  vec3 colTo = keyTo == 2 ? uColTo[2] : (keyTo == 1 ? uColTo[1] : uColTo[0]);
+  vec3 col = mix(colFrom, colTo, uMorph);
+  float g = gain
     * exp(-HAZE * zMid)
     * smoothstep(NEAR, NEAR_FADE_Z, zMid)
     * (1.0 + FLASH_GAIN * uFlash * exp(-0.6 * zMid))
     * uCoreGain;
-  vColor = col * gain;
+  vColor = col * g;
 }
 `;
 
@@ -331,7 +376,6 @@ uniform vec3 uGround;
 uniform float uVignette;
 uniform float uGlowAGain;
 uniform float uGlowBGain;
-uniform float uBlackFrame;
 uniform float uFlash;
 
 void main() {
@@ -346,6 +390,6 @@ void main() {
   vec3 col = ground + sharpC + glow;
   col = col / (1.0 + col / TONE_KNEE);
   col = 1.0 - exp(-col * 1.5);
-  outColor = vec4(col * (1.0 - uBlackFrame), 1.0);
+  outColor = vec4(col, 1.0);
 }
 `;

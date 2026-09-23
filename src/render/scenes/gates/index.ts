@@ -13,7 +13,18 @@ import {
   uploadCommonUniforms,
 } from "../../sceneCommon.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
-import { buildLook, LOOKS, objectCountFor, SEG_MAX, type LookLayout } from "./layout.ts";
+import {
+  buildLook,
+  identityPairs,
+  LOOKS,
+  MAX_OBJ,
+  morphLayout,
+  objectCountFor,
+  pairLayouts,
+  SEG_MAX,
+  type LookLayout,
+  type MorphPairs,
+} from "./layout.ts";
 import {
   BLUR_FRAG,
   BLUR_STRIDE,
@@ -38,15 +49,25 @@ import {
 //
 // What the reference does with the music: nothing — it is silent by design
 // and a short loop repeated for hours, its hard cuts between looks landing
-// on a fixed timer with one blackout frame per loop. So the cuts here are
-// ours: on bar boundaries (a wrap of anim.barPhase, the ambience.ts
-// precedent) with the odds set by Cut rate, plus half-bar cuts once Cut
-// rate is high, never the same look twice in a row; a blackout frame then
-// a cut on every BARS_PER_PHRASE-th bar and on a drop (anim.dropOnset);
-// a free-running bar timer while there is no tempo lock, because barPhase
-// freezes without a tempo and a silent room would otherwise never cut.
-// The fly speed rides the low band and an onset flashes the nearest gates.
-// Rates scale, positions accumulate (travel, spin) — the flowClock lesson.
+// on a fixed timer with one blackout frame per loop. Ours departs from that
+// on purpose (at the user's request): a cut is jarring on a real music
+// track where the beat, not a fixed timer, should pick the moment, and a
+// black frame reads as a glitch rather than a transition. So instead, a bar
+// boundary (a wrap of anim.barPhase, the ambience.ts precedent, or a
+// free-running timer while there's no tempo lock — barPhase freezes without
+// one and a silent room would otherwise never advance) picks *when* to
+// start morphing into another look, with the odds set by Change rate, plus
+// always on every BARS_PER_PHRASE-th bar and on a drop (anim.dropOnset);
+// the morph itself always takes exactly one bar (MORPH_BARS, advanceGates)
+// and, once started, is uninterruptible — nothing can cut it short or start
+// another one until it settles. Every gate slides and reshapes into its
+// place in the next look (layout.ts's pairLayouts/morphLayout/morphSegment
+// own the geometry side of that); colours, ground and glow blend
+// continuously with it (morphEase(st.morph), an eased 0..1). A Density/
+// Shape mix/quality change while holding also morphs in place (st.rebuild)
+// rather than snapping. The fly speed rides the low band and an onset
+// flashes the nearest gates. Rates scale, positions accumulate (travel,
+// spin) — the flowClock lesson.
 //
 // Rendering: the gates draw additively into a full-resolution RGBA8 target
 // (no float targets — chladni.ts's TV constraint), two blur levels at a
@@ -56,19 +77,23 @@ import {
 // moves renderScale at runtime. Bloom levels follow quality.bloomPasses.
 //
 // The scheduler (advanceGates) is pure and exported for tests/gates.test.ts;
-// the scene keeps one instance in its closure.
+// the scene keeps one instance in its closure, alongside the two LookLayout
+// slots (fromLayout/toLayout) and the MorphPairs between them that the
+// render loop re-pairs whenever st.morphs changes.
 
 const ID = "gates";
 
-/** Looks the cut cycles through — the entries of LOOKS. */
+/** Looks the scheduler morphs between — the entries of LOOKS. */
 export const LOOK_COUNT = LOOKS.length;
-/** Every this-many bars: a blackout frame, then the cut. */
+/** Every this-many bars: a morph starts regardless of Change rate. */
 export const BARS_PER_PHRASE = 4;
 /** Bar length while there is no tempo lock (a 120 bpm bar). */
 export const FREE_BAR_SEC = 2.0;
-/** Half-bar cuts start once Cut rate passes this, scaled by the gain. */
-const HALF_BAR_CUT_FROM = 0.4;
-const HALF_BAR_CUT_GAIN = 1.5;
+/** How many bars a morph takes, start to settled. */
+export const MORPH_BARS = 1;
+/** Clamp on the bar-phase fraction advanced in one frame, so a tempo
+ *  re-lock or a phase jump can't skip a morph past done in a single frame. */
+const MAX_BAR_STEP = 0.25;
 /** Fly speed in world units per second at Speed 0 and 1, and the extra
  *  factor the low band adds. Each look scales it further (LOOKS[].speed). */
 const FLY_MIN = 0.6;
@@ -87,26 +112,36 @@ const SHUTTER_MAX = 0.09;
 const COPIES_BY_SYMMETRY = [2, 4, 8];
 
 export interface GateState {
-  /** Which look the tunnel is showing. */
+  /** Which look the tunnel is showing, or morphing into. */
   look: number;
-  /** Bumped on every cut; reseeds the look's layout. */
+  /** The look a running morph started from; equals `look` while holding
+   *  (morph === 1). */
+  fromLook: number;
+  /** Bumped whenever a new look is picked (not on a same-look rebuild);
+   *  reseeds the target layout's RNG stream. */
   cutSeed: number;
   /** Bar boundaries seen so far. */
   bars: number;
   lastBarPhase: number;
   /** Free-running bar clock while there is no tempo lock. */
   freeTimer: number;
-  /** This frame is black; the pending cut lands on the frame after it. */
-  blackFrame: 0 | 1;
-  pendingCut: boolean;
+  /** 0..1 progress of the morph from fromLook to look; 1 = holding/settled. */
+  morph: number;
+  /** Bumped every time a new morph begins (a look change or a rebuild) —
+   *  the render loop's cue to re-pair the two layouts. */
+  morphs: number;
+  /** Set by the scene to ask for a same-look morph (e.g. Density changed
+   *  the object count while holding); consumed here, the next time a morph
+   *  can start. */
+  rebuild: boolean;
   flash: number;
-  /** Fly direction of the current look: +1 toward the camera, -1 away. */
-  dir: 1 | -1;
-  /** Accumulated travel in world units (signed by dir), and spin in radians. */
+  /** Accumulated travel in world units (signed by velocity), and spin in
+   *  radians. */
   travel: number;
   spinPos: number;
-  /** Last frame's fly speed (world units/s, unsigned) and spin rate. */
-  flyRate: number;
+  /** Current fly velocity, world units/s, signed — blended across a morph
+   *  so a direction flip decelerates through zero instead of snapping. */
+  flyVel: number;
   spinRate: number;
   prevDrop: boolean;
 }
@@ -114,17 +149,18 @@ export interface GateState {
 export function createGateState(): GateState {
   return {
     look: 0,
+    fromLook: 0,
     cutSeed: 0,
     bars: 0,
     lastBarPhase: 0,
     freeTimer: 0,
-    blackFrame: 0,
-    pendingCut: false,
+    morph: 1,
+    morphs: 0,
+    rebuild: false,
     flash: 0,
-    dir: LOOKS[0].dir,
     travel: 0,
     spinPos: 0,
-    flyRate: FLY_MIN,
+    flyVel: 0,
     spinRate: 0,
     prevDrop: false,
   };
@@ -137,7 +173,6 @@ export interface GateOpts {
   speed: number;
   cutRate: number;
   spin: number;
-  blackouts: boolean;
 }
 
 /** A look other than `prev`, uniform over the rest. */
@@ -145,41 +180,31 @@ export function pickLook(prev: number, rng: () => number): number {
   return (prev + 1 + Math.floor(rng() * (LOOK_COUNT - 1))) % LOOK_COUNT;
 }
 
+/** Smoothstep: eases a morph's start and end instead of moving through the
+ *  whole bar at a constant rate. */
+export function morphEase(t: number): number {
+  const c = Math.min(1, Math.max(0, t));
+  return c * c * (3 - 2 * c);
+}
+
 /** Advances the scheduler by one rendered frame, in place. */
 export function advanceGates(st: GateState, anim: GateAnim, opts: GateOpts, rng: () => number = Math.random): void {
   const dt = Number.isFinite(anim.dtSec) ? Math.max(0, anim.dtSec) : 0;
 
-  const cut = () => {
-    st.look = pickLook(st.look, rng);
-    st.cutSeed += 1;
-    st.dir = LOOKS[st.look].dir;
-  };
-  const blackoutThenCut = () => {
-    if (opts.blackouts) {
-      st.blackFrame = 1;
-      st.pendingCut = true;
-    } else {
-      cut();
-    }
-  };
-
-  // Last frame was black: the cut it announced lands now.
-  if (st.blackFrame) {
-    st.blackFrame = 0;
-    if (st.pendingCut) {
-      cut();
-      st.pendingCut = false;
-    }
-  }
-
+  // Bar clock, and dBar: the fraction of a bar that elapsed this frame —
+  // clamped so a tempo re-lock or a phase jump can't skip a morph past done
+  // in one frame.
   let boundary = false;
-  let half = false;
+  let dBar: number;
   if (anim.tempoLock > 0.5) {
+    let step = anim.barPhase - st.lastBarPhase;
+    if (step < 0) step += 1; // wrapped past 1 back toward 0
+    dBar = Math.min(MAX_BAR_STEP, step);
     boundary = anim.barPhase < st.lastBarPhase - 0.5;
-    half = st.lastBarPhase < 0.5 && anim.barPhase >= 0.5;
     st.freeTimer = 0;
   } else {
     st.freeTimer += dt;
+    dBar = dt / FREE_BAR_SEC;
     if (st.freeTimer >= FREE_BAR_SEC) {
       boundary = true;
       st.freeTimer = 0;
@@ -187,24 +212,53 @@ export function advanceGates(st: GateState, anim: GateAnim, opts: GateOpts, rng:
   }
   st.lastBarPhase = anim.barPhase;
 
+  // Advance a running morph — this can settle it (morph hits 1) the same
+  // frame a trigger below asks to begin another. Once settled, fromLook
+  // tracks look again (the "equals look while holding" invariant) — it
+  // only diverges for the duration of a morph.
+  if (st.morph < 1) st.morph = Math.min(1, st.morph + dBar / MORPH_BARS);
+  if (st.morph >= 1) st.fromLook = st.look;
+
+  // Triggers. begin() is a no-op whenever a morph is still running (morph <
+  // 1) — this is the uninterruptibility: nothing here can cut a running
+  // morph short or start a second one on top of it. Called with no
+  // argument, it starts a same-look rebuild instead of picking a new look.
+  const begin = (nextLook?: number): void => {
+    if (st.morph < 1) return;
+    st.fromLook = st.look;
+    if (nextLook !== undefined) {
+      st.look = nextLook;
+      st.cutSeed += 1;
+    }
+    st.morph = 0;
+    st.morphs += 1;
+    st.rebuild = false;
+  };
+
   if (boundary) {
     st.bars += 1;
-    if (st.bars % BARS_PER_PHRASE === 0) blackoutThenCut();
-    else if (rng() < opts.cutRate) cut();
-  } else if (half && rng() < Math.max(0, opts.cutRate - HALF_BAR_CUT_FROM) * HALF_BAR_CUT_GAIN) {
-    cut();
+    if (st.bars % BARS_PER_PHRASE === 0) begin(pickLook(st.look, rng));
+    else if (rng() < opts.cutRate) begin(pickLook(st.look, rng));
   }
 
   const drop = anim.dropOnset && !st.prevDrop;
   st.prevDrop = anim.dropOnset;
-  if (drop) blackoutThenCut();
+  if (drop) begin(pickLook(st.look, rng));
+
+  // Only once nothing else has claimed this frame's morph slot (begin() is
+  // still a no-op above whenever one did).
+  if (st.rebuild) begin();
 
   if (anim.onset) st.flash = Math.min(FLASH_CAP, st.flash + FLASH_HIT);
   st.flash *= Math.exp(-dt * FLASH_DECAY);
 
-  st.flyRate = (FLY_MIN + (FLY_MAX - FLY_MIN) * opts.speed) * (1 + FLY_BASS_GAIN * anim.low) * LOOKS[st.look].speed;
+  const e = morphEase(st.morph);
+  const vel = (look: number): number =>
+    (FLY_MIN + (FLY_MAX - FLY_MIN) * opts.speed) * (1 + FLY_BASS_GAIN * anim.low) * LOOKS[look].speed * LOOKS[look].dir;
+  const velFrom = vel(st.fromLook);
+  st.flyVel = velFrom + (vel(st.look) - velFrom) * e;
   st.spinRate = SPIN_RAD_MAX * opts.spin;
-  st.travel += st.dir * st.flyRate * dt;
+  st.travel += st.flyVel * dt;
   st.spinPos += st.spinRate * dt;
 }
 
@@ -256,8 +310,8 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "cutRate",
-    label: "Cut rate",
-    description: "How often a bar boundary hard-cuts to another look; past the middle, half-bars can cut too. Every fourth bar and every drop cut regardless",
+    label: "Change rate",
+    description: "How likely each bar is to start morphing into another look; every fourth bar and every drop start one regardless, unless a morph is already running",
     group: "Motion",
     min: 0,
     max: 1,
@@ -299,18 +353,6 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     auto: { brightness: 0.2, loudness: 0.2 },
     reads: ["feature.onset"] satisfies readonly SignalLink[],
-  },
-  {
-    key: "blackouts",
-    label: "Blackouts",
-    description: "A single black frame before the cut on every fourth bar and on a drop, the way the reference loop drops out",
-    group: "Look",
-    type: "boolean",
-    min: 0,
-    max: 1,
-    step: 1,
-    default: 1,
-    reads: ["anim.dropOnset"] satisfies readonly SignalLink[],
   },
 ];
 
@@ -362,8 +404,21 @@ export const gatesScene: Scene = (() => {
   const levelH = [0, 0];
 
   const st = createGateState();
-  let layout: LookLayout | null = null;
-  let layoutKey = "";
+  // The look being left and the look being entered; morphLayout blends
+  // between them every frame. Re-paired only when st.morphs changes (a new
+  // morph began) — see render()'s pairing block.
+  let fromLayout: LookLayout | null = null;
+  let toLayout: LookLayout | null = null;
+  let pairs: MorphPairs | null = null;
+  /** The st.morphs value `pairs` was built for. */
+  let pairedMorphs = -1;
+  /** The count:shapeMix signature `toLayout` was built with, so a Density/
+   *  Shape mix/quality change while holding can ask for a rebuild instead
+   *  of silently going stale. */
+  let toLayoutKey = "";
+  const outA = new Float32Array(MAX_OBJ * 4);
+  const outB = new Float32Array(MAX_OBJ * 4);
+  const outC = new Float32Array(MAX_OBJ * 4);
   const bandsBuf = new Float32Array(NUM_BANDS);
 
   const get = (key: string): number => resolveSceneSetting(ID, SETTING_BY_KEY.get(key)!);
@@ -471,8 +526,12 @@ export const gatesScene: Scene = (() => {
       // empty VAO (ambience.ts's precedent).
       emptyVao = gl.createVertexArray();
       ensureTargets(gl);
-      layout = null;
-      layoutKey = "";
+      const initialCount = objectCountFor(st.look, 0.5, ctx.quality.detail);
+      toLayout = buildLook(st.look, st.cutSeed, initialCount, 0.5);
+      fromLayout = toLayout;
+      pairs = identityPairs(toLayout);
+      pairedMorphs = st.morphs;
+      toLayoutKey = `${initialCount}:0.50`;
     },
 
     render(ctx: SceneContext, frame: FeatureFrame, viewport: Viewport, palette: Palette, anim: AnimFrame) {
@@ -484,24 +543,40 @@ export const gatesScene: Scene = (() => {
       // the tick the feature fired on (renderLatch.ts).
       const speed = get("speed");
       const spin = get("spin");
-      advanceGates(st, anim, {
-        speed,
-        cutRate: get("cutRate"),
-        spin,
-        blackouts: get("blackouts") > 0.5,
-      });
-      const look = LOOKS[st.look];
+      advanceGates(st, anim, { speed, cutRate: get("cutRate"), spin });
+
       const density = get("density");
       const shapeMix = get("shapeMix");
       const count = objectCountFor(st.look, density, ctx.quality.detail);
-      const key = `${st.look}:${st.cutSeed}:${count}:${shapeMix.toFixed(2)}`;
-      if (!layout || key !== layoutKey) {
-        layout = buildLook(st.look, st.cutSeed, count, shapeMix);
-        layoutKey = key;
+      const wantKey = `${count}:${shapeMix.toFixed(2)}`;
+
+      if (st.morphs !== pairedMorphs) {
+        // A new morph just began: the just-finished target becomes the new
+        // source — morphs never overlap, so the current toLayout is always
+        // exactly what st.fromLook/its pre-increment cutSeed was built
+        // with. The `??` only guards a theoretical null right after init().
+        fromLayout = toLayout ?? buildLook(st.fromLook, Math.max(0, st.cutSeed - 1), count, shapeMix);
+        toLayout = buildLook(st.look, st.cutSeed, count, shapeMix);
+        toLayoutKey = wantKey;
+        pairs = pairLayouts(fromLayout, toLayout);
+        pairedMorphs = st.morphs;
+      } else if (st.morph >= 1 && wantKey !== toLayoutKey) {
+        // Holding, but Density/Shape mix/quality moved the object count or
+        // mix: ask the scheduler to morph in place next frame rather than
+        // rebuilding (and snapping) immediately.
+        st.rebuild = true;
       }
+      // Else: mid-morph and the key changed underneath it — let the running
+      // morph finish; if the mismatch persists once it settles, the branch
+      // above picks it up as a rebuild.
+
+      const n = morphLayout(fromLayout!, toLayout!, pairs!, morphEase(st.morph), outA, outB, outC);
       const copies = COPIES_BY_SYMMETRY[Math.max(0, Math.min(2, Math.round(get("symmetry"))))];
       const shutter = SHUTTER_MAX * get("streaks");
       const glow = get("glow");
+      const e = morphEase(st.morph);
+      const lookFrom = LOOKS[st.fromLook];
+      const lookTo = LOOKS[st.look];
 
       // 1. Gates, additive into the sharp target.
       gl.bindFramebuffer(gl.FRAMEBUFFER, sharpFbo);
@@ -513,21 +588,22 @@ export const gatesScene: Scene = (() => {
       gl.blendFunc(gl.ONE, gl.ONE);
       gateProg.use();
       uploadCommonUniforms(gateProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
-      gateProg.setV4v("uObjA", layout.objA);
-      gateProg.setV4v("uObjB", layout.objB);
-      gl.uniform1i(intLoc(gl, gateProg, "gate", "uObjCount"), layout.count);
+      gateProg.setV4v("uObjA", outA);
+      gateProg.setV4v("uObjB", outB);
+      gateProg.setV4v("uObjC", outC);
+      gl.uniform1i(intLoc(gl, gateProg, "gate", "uObjCount"), n);
       gl.uniform1i(intLoc(gl, gateProg, "gate", "uCopies"), copies);
       gateProg.setF("uTravel", st.travel);
-      gateProg.setF("uTravelDelta", st.dir * st.flyRate * shutter);
+      gateProg.setF("uTravelDelta", st.flyVel * shutter);
       gateProg.setF("uSpinPos", st.spinPos);
       gateProg.setF("uSpinDelta", st.spinRate * shutter);
-      gateProg.setV3v("uPrimary", [...look.primary]);
-      gateProg.setV3v("uSecondary", [...look.secondary]);
-      gateProg.setV3v("uAccent", [...look.accent]);
+      gateProg.setV3v("uColFrom", [...lookFrom.primary, ...lookFrom.secondary, ...lookFrom.accent]);
+      gateProg.setV3v("uColTo", [...lookTo.primary, ...lookTo.secondary, ...lookTo.accent]);
+      gateProg.setF("uMorph", e);
       gateProg.setF("uFlash", st.flash);
       gateProg.setF("uCoreGain", 0.55 + 0.8 * glow);
       gl.bindVertexArray(emptyVao);
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, layout.count * copies * SEG_MAX);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n * copies * SEG_MAX);
       gl.bindVertexArray(null);
       gl.disable(gl.BLEND);
 
@@ -556,11 +632,16 @@ export const gatesScene: Scene = (() => {
       gl.uniform1i(intLoc(gl, compProg, "comp", "uGlowATex"), 1);
       gl.uniform1i(intLoc(gl, compProg, "comp", "uGlowBTex"), 2);
       const glowScale = 0.8 + 1.4 * glow;
-      compProg.setF("uGlowAGain", passes >= 1 ? look.glowA * glowScale : 0);
-      compProg.setF("uGlowBGain", passes >= 2 ? look.glowB * glowScale : 0);
-      compProg.setV3v("uGround", [...look.ground]);
-      compProg.setF("uVignette", look.vignette);
-      compProg.setF("uBlackFrame", st.blackFrame);
+      const glowA = lookFrom.glowA + (lookTo.glowA - lookFrom.glowA) * e;
+      const glowB = lookFrom.glowB + (lookTo.glowB - lookFrom.glowB) * e;
+      const vignette = lookFrom.vignette + (lookTo.vignette - lookFrom.vignette) * e;
+      const ground: [number, number, number] = [0, 1, 2].map(
+        (i) => lookFrom.ground[i] + (lookTo.ground[i] - lookFrom.ground[i]) * e,
+      ) as [number, number, number];
+      compProg.setF("uGlowAGain", passes >= 1 ? glowA * glowScale : 0);
+      compProg.setF("uGlowBGain", passes >= 2 ? glowB * glowScale : 0);
+      compProg.setV3v("uGround", ground);
+      compProg.setF("uVignette", vignette);
       compProg.setF("uFlash", st.flash);
       drawFullscreenQuad(gl, quadVao);
 
@@ -587,8 +668,11 @@ export const gatesScene: Scene = (() => {
       quadVao = null;
       emptyVao = null;
       intLocs.clear();
-      layout = null;
-      layoutKey = "";
+      fromLayout = null;
+      toLayout = null;
+      pairs = null;
+      pairedMorphs = -1;
+      toLayoutKey = "";
     },
   };
 })();
