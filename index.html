@@ -169,8 +169,47 @@
       }
       #audioPromptRow {
         display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
         align-items: center;
         gap: 8px;
+      }
+      /* The same animated hint as the gallery masthead's .gal-source-hint
+       * (src/ui/gallery.ts) — mono caps, a shimmer sweeping toward the
+       * buttons and a nudging arrow — kept in sync by hand, like the rest of
+       * this block. No [data-prompting] toggle needed: the whole prompt only
+       * shows while nothing is listening. */
+      #audioPromptLabel {
+        margin-right: 10px;
+        font: 400 10.5px "Share Tech Mono", ui-monospace, monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        color: rgba(255, 255, 255, 0.55);
+      }
+      .apHintArrow {
+        display: inline-block;
+        margin-left: 0.6em;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .apHintText {
+          background: linear-gradient(90deg, rgba(255, 255, 255, 0.45) 40%, #fff 50%, rgba(255, 255, 255, 0.45) 60%) 100% 0 / 250% 100%;
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+          animation: ap-hint-shimmer 2.6s ease-in-out infinite;
+        }
+        .apHintArrow {
+          animation: ap-hint-nudge 1.3s ease-in-out infinite;
+        }
+        @keyframes ap-hint-shimmer {
+          from { background-position: 100% 0; }
+          to { background-position: 0 0; }
+        }
+        @keyframes ap-hint-nudge {
+          0%, 100% { transform: translateX(0); }
+          50% { transform: translateX(4px); }
+        }
       }
       #audioPrompt button {
         display: flex;
@@ -224,7 +263,7 @@
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)">&#9881;</button>
     <div id="audioPrompt">
       <div id="audioPromptRow">
-        <span id="audioPromptLabel" hidden>Tap to start audio</span>
+        <span id="audioPromptLabel" hidden><span class="apHintText">Pick a source to start</span><span class="apHintArrow">›</span></span>
         <button id="audioPromptMicBtn"><span class="apDot"></span><span id="audioPromptMicLabel">Tap to enable mic</span></button>
         <button id="audioPromptDisplayBtn" hidden><span class="apDot"></span><span>Screen</span></button>
       </div>
