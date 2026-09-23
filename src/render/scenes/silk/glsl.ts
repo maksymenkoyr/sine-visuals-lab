@@ -107,15 +107,23 @@ float presence(vec2 q) {
 }
 
 // Cyan-dominant ramp (measured: cyan 180° dominant, spring 150° secondary,
-// azure 210° a trace at the outer edge) — see index.ts's header for the
-// palette-share numbers this targets.
+// azure 210° a trace at the outer edge, rare amber accents) — see
+// index.ts's header for the palette-share numbers this targets. Some
+// regimes in the reference blend olive/gold with the cyan continuously
+// (compare.png rows at t=2.48-5.27s), not just as a bar-swell accent — the
+// warm mix below ties that to the regime's own hueBias (already travels
+// smoothly via driver.ts's regime interpolation) rather than gating it on
+// swell alone, which only lit it for an instant (Round 2 diagnosis).
 vec3 strandColor(int i, int n, float r) {
   vec3 cyan = vec3(0.255, 0.812, 0.741);
   vec3 spring = vec3(0.20, 0.83, 0.47);
   vec3 azure = vec3(0.25, 0.56, 0.88);
+  vec3 gold = vec3(0.78, 0.66, 0.32);
   float t = n > 1 ? float(i) / float(n - 1) : 0.0;
-  vec3 col = mix(cyan, spring, clamp(t * 0.7 + 0.35 * uHueBias, 0.0, 1.0));
+  vec3 col = mix(cyan, spring, clamp(t * 0.7, 0.0, 1.0));
   col = mix(col, azure, smoothstep(0.7, 1.0, r) * 0.5);
+  float warm = smoothstep(0.0, 0.7, uHueBias);
+  col = mix(col, gold, warm * 0.55);
   return col;
 }
 `;
@@ -162,6 +170,18 @@ vec3 fieldAndGrad(vec2 p, int k, float scaleK) {
   return vec3(f0, (fx - f0) / ${FIELD_EPS.toFixed(4)}, (fy - f0) / ${FIELD_EPS.toFixed(4)});
 }
 
+// Screen/lighten blend: stacks overlapping echoes into a denser, brighter
+// band instead of max's "keep only the brightest one", which erased the
+// reference's dense parallel-echo fringe (report.md: "feathers/combs where
+// these echoes fan") down to a single visible curve — see the Silk-scene
+// memory's Round 2 diagnosis. Each layer is clamped to [0,1] first so the
+// result stays in [0,1] too, still saturating gracefully rather than
+// flashing when echoes line up at a zoom-direction reversal — max's
+// original job, kept without its density-erasing side effect.
+vec3 screenBlend(vec3 base, vec3 add) {
+  return 1.0 - (1.0 - base) * (1.0 - clamp(add, 0.0, 1.0));
+}
+
 void main() {
   vec2 ruv = roomUv(vUv);
   vec2 aspect = vec2(uResolution.x / uResolution.y, 1.0);
@@ -199,9 +219,9 @@ void main() {
       // under it (the "amber accent wash" bug caught in the first
       // headless screenshots of this scene).
       vec3 amberTint = vec3(1.0, 0.55, 0.18) * clamp(uAccent, 0.0, 1.0) * uSwell * core;
-      echoCol = max(echoCol, (core + halo + fill) * col + amberTint);
+      echoCol = screenBlend(echoCol, (core + halo + fill) * col + amberTint);
     }
-    combined = max(combined, echoCol * decayK * pres);
+    combined = screenBlend(combined, echoCol * decayK * pres);
   }
 
   float mask = smoothstep(uHoleEff, uHoleEff + 0.08, r) * (1.0 - smoothstep(0.78, 0.95, r));
