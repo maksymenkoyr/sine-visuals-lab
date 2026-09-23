@@ -92,14 +92,23 @@ import {
  * (its own header carries a second Auto button, next to Reset — see
  * src/audio/micAuto.ts for how it differs from the master block) → Scene →
  * Palette → a footer strip. A drive setting (SceneSetting.drive — see
- * src/render/drives.ts) gets a compact source chip in its own row, next to
- * the A/T chips (createControlRow's driveChip); tapping it *selects* that
- * setting (selectDrive) rather than opening a picker under the row — the
- * Bands card carries one fixed drive section, right below the spectrum,
- * that shows whichever setting is selected: its name, its grouped source
- * picker (Hits/Grid/Levels/Frequencies/Scene), and, only while its choice is
- * Frequencies, the line Strength row. Nothing selected collapses the
- * section to a one-line hint. Picking Frequencies there puts the Bands
+ * src/render/drives.ts) has no UI of its own on its row — focus decides
+ * selection instead (a row's own `focusin`, wired in appendSettingRow;
+ * wireHoverFocus above turns real pointer movement over a row into that
+ * same focus, so hover and Tab both select). The Bands card carries one
+ * fixed drive section, right below the spectrum, that shows whichever
+ * setting is currently focused: its name, its grouped source picker
+ * (Hits/Grid/Levels/Frequencies/Scene), and, only while its choice is
+ * Frequencies, the line Strength row. Nothing selected shows a hint in the
+ * same reserved space instead — the section's height never changes with
+ * the selection, because in the stacked layout the Bands card sits above
+ * the Scene card and a resize would push the very rows the cursor is
+ * sweeping over, oscillating focus between them. Focus leaving a row for
+ * anywhere else in the Bands card (the strip, the line overlay, this
+ * section's own picker, Strength) — or for the meters, another card, or
+ * the page — leaves the selection alone, so drawing a line means moving
+ * off the row and onto the strip without losing it (selectDrive's own doc
+ * comment has the exact contract). Picking Frequencies there puts the Bands
  * card's own strip into line-drawing mode for that setting instead of
  * faders — src/ui/bandLineEditor.ts's overlay, backed by
  * src/audio/bandLine.ts. Under the Bands card, the read-only meters
@@ -478,7 +487,7 @@ const drivePickerGroupLabelStyle = `
   font: 400 8.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase;
   color: rgba(255,255,255,0.4); margin: 7px 0 4px;
 `;
-// The section's own empty-state line ("Tap a setting's source chip…") —
+// The section's own empty-state line ("Focus a setting to choose…") —
 // deliberately not .vc-hint: that class only reveals on hover/focus, and
 // this is the section's entire content while nothing is selected, so it
 // has to be visible on its own. Same typography as .vc-hint's own rule
@@ -664,19 +673,6 @@ export interface ControlRowSpec {
    *  callbacks by appendSettingRow below — see ResolvedSignalRead. Omit for
    *  a setting with no `reads` entries. */
   reads?: readonly ResolvedSignalRead[];
-  /** A drive setting's (SceneSetting.drive — src/render/drives.ts) compact
-   *  source chip: a small button in the row head, next to the A/T chips,
-   *  labelled with the current source plus its live % pill (both written by
-   *  the row's own setDriveChip() below — this component has no notion of
-   *  what a "source" is). Click, or Enter/Space since it's a plain button,
-   *  calls `select`; the caller (appendSettingRow) owns what "selected"
-   *  means — showing this setting's picker in the Bands card's one fixed
-   *  drive section — this component only reflects it back via
-   *  setDriveChip's own `selected` flag for the chip's lit/unlit style.
-   *  Omit for a non-drive row. */
-  driveChip?: {
-    select: () => void;
-  };
 }
 
 /** One SceneSetting.reads entry (sceneSettings.ts's SignalLink) resolved
@@ -999,22 +995,6 @@ export function createControlRow(spec: ControlRowSpec) {
   resetBtn.title = `Reset ${spec.label} (R)`;
   resetBtn.style.cssText = rowResetStyle;
 
-  // The compact source chip — see ControlRowSpec.driveChip's own doc
-  // comment. A plain button, so Enter/Space select it for free;
-  // stopPropagation so a click doesn't also trigger el's own
-  // click-to-focus-slider handler.
-  let driveChipBtn: HTMLButtonElement | null = null;
-  if (spec.driveChip) {
-    driveChipBtn = document.createElement("button");
-    driveChipBtn.type = "button";
-    driveChipBtn.style.cssText = chipBtnStyle;
-    driveChipBtn.title = `${spec.label}'s source — shown in the Bands card below`;
-    driveChipBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      spec.driveChip!.select();
-    });
-  }
-
   // src/render/signals.ts's link from this setting to the live values that
   // drive it — a small always-on chip in `right` (leftmost, read as a badge
   // on the row rather than another action) plus a hover-revealed pill strip
@@ -1034,7 +1014,6 @@ export function createControlRow(spec: ControlRowSpec) {
   if (signalIndicator) right.appendChild(signalIndicator.chip);
 
   right.appendChild(readout);
-  if (driveChipBtn) right.appendChild(driveChipBtn);
   right.append(chip, offChip, resetBtn);
   head.append(label, right);
 
@@ -1281,16 +1260,6 @@ export function createControlRow(spec: ControlRowSpec) {
         })),
       );
     },
-    /** Writes the drive chip's text and lit/unlit (selected) state — a no-op
-     *  without `driveChip`. Called immediately on selection changes and from
-     *  the panel's slow refresh tick otherwise (deviceMenu.ts's
-     *  driveRowHandles) — not every frame; see commit c992cbf for why a
-     *  per-tick text write here would matter. */
-    setDriveChip(text: string, selected: boolean): void {
-      if (!driveChipBtn) return;
-      driveChipBtn.textContent = text;
-      driveChipBtn.style.cssText = selected ? chipBtnLitStyle : chipBtnStyle;
-    },
   };
 }
 
@@ -1527,29 +1496,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   bandsCard.body.append(spectrumHeader, hairline, fadersRow);
 
   // ---- Drive section: ONE fixed place, below the spectrum, for whichever ----
-  // ---- drive setting is currently selected ----------------------------------
-  // Every drive setting's row keeps its own small source chip (next to A/T),
-  // but tapping it no longer opens a picker under that row — it *selects*
-  // the setting (selectDrive below), and this section, always in the same
-  // spot under the Bands card's strip, shows that one setting's name, its
-  // grouped source picker (Hits/Grid/Levels/Frequencies/Scene — the same
-  // driveOptionGroups() catalogue), and — only while its choice is
-  // Frequencies — the line Strength row. Nothing selected: the section
-  // collapses to a one-line hint. Selecting a different setting, deselecting
-  // (the "Equaliser" chip, Escape, or a scene switch), or picking a
-  // different source on the selected setting all funnel back through
-  // selectDrive()/refreshDriveSection() so there's one place that decides
-  // what the section and the strip below it currently show.
-  //
-  // The flattened DRIVE_OPTIONS list is only for turning a stored
-  // DriveChoice back into a label (a row's own chip text) — see
-  // drives.ts's driveOptionGroups() header for the grouping and why it's
-  // built from the same catalogue rather than hand-duplicated here.
+  // ---- drive setting is currently focused ------------------------------------
+  // No chip on the row any more — the panel already turns real pointer
+  // movement over a row into keyboard focus (wireHoverFocus above; :hover
+  // and :focus-within are styled identically in controlsTheme.ts), so
+  // that's what selection rides now: a scene-setting row's own `focusin`
+  // (wired in appendSettingRow) selects it if it's a drive setting, clears
+  // otherwise. This section, always in the same spot under the Bands card's
+  // strip, shows the selected setting's name, its grouped source picker
+  // (Hits/Grid/Levels/Frequencies/Scene — driveOptionGroups()), and — only
+  // while its choice is Frequencies — the line Strength row. Nothing
+  // selected shows a hint in the picker's own reserved space instead (see
+  // driveSectionBody/driveSectionEmptyHint below — the section's height
+  // must never change with the selection: in the stacked layout the Bands
+  // card sits above the Scene card, and a section that grew/shrank would
+  // push the very rows the cursor is sweeping over, flipping focus between
+  // them). selectDrive()/refreshDriveSection() is the one place that
+  // decides what the section and the strip below it show.
   const DRIVE_OPTION_GROUPS = driveOptionGroups();
-  const DRIVE_OPTIONS = DRIVE_OPTION_GROUPS.flatMap((g) => g.options);
-  function driveChoiceLabel(choice: DriveChoice): string {
-    return DRIVE_OPTIONS.find((o) => sameDriveChoice(o.choice, choice))?.label ?? "Scene";
-  }
 
   // The strip's own line-drawing mode: set only while `selected` exists and
   // its current choice is Frequencies — see refreshDriveSection(), the one
@@ -1558,9 +1522,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // overlay update in DeviceMenu.update() below needs to know which
   // setting's excess() to read without re-deriving it every tick.
   let lineMode: { sceneId: string; spec: SceneSetting } | null = null;
-  // The one drive setting the panel is currently showing a picker for — set
-  // only by a row's chip (selects), the section's own Equaliser chip, a
-  // scene switch, or Escape (never by hover — see selectDrive's own doc).
+  // The one drive setting the panel is currently showing a picker for. See
+  // selectDrive's own doc comment for exactly what sets and clears it now
+  // that it follows focus rather than a click.
   let selected: { sceneId: string; spec: SceneSetting } | null = null;
   const lineEditor = createBandLineEditor({
     onLineChange: (band, height) => {
@@ -1597,76 +1561,88 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const driveSectionHead = document.createElement("div");
   driveSectionHead.style.cssText = rowHeadStyle;
   driveSectionHead.append(driveSectionTitle, driveSectionHeadRight);
-  driveSectionHead.style.display = "none";
+  // Always present (never display:none) — its height is the same one line
+  // whether the title is a setting's name or blank, so showing/hiding it
+  // can't be what causes the jump requirement 4 above is about; only the
+  // picker body below needs the reserved-height treatment.
 
-  // Rebuilt fresh by selectDrive() every time the selected setting changes
-  // (a click event, not a per-frame cost) — its chips close over that one
-  // setting's own sceneId/spec, so there's nothing to keep in sync between
-  // selections, only to replace.
+  // Built exactly once — every chip's click handler reads `selected` fresh
+  // rather than closing over one setting, so changing the selection is a
+  // handful of style/text writes (refreshDriveSection), never a rebuild.
+  // This is also what gives the section its fixed height: the same DOM
+  // exists whether or not anything is selected.
   const driveSectionBody = document.createElement("div");
-  driveSectionBody.style.display = "none";
-  // Reassigned by selectDrive() to whatever buildDriveOptionChips() just
-  // built into driveSectionBody — keeps the currently-highlighted chip in
-  // sync on the panel's slow refresh tick without a full rebuild.
-  let refreshPickerHighlight: () => void = () => {};
+  const driveChips: { btn: HTMLButtonElement; choice: DriveChoice }[] = [];
+  let driveSceneChipBtn: HTMLButtonElement | null = null;
+  for (const group of DRIVE_OPTION_GROUPS) {
+    const heading = document.createElement("div");
+    heading.textContent = group.label;
+    heading.style.cssText = drivePickerGroupLabelStyle;
+    const chipRow = document.createElement("div");
+    chipRow.style.cssText = paletteListStyle;
+    for (const opt of group.options) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = opt.label;
+      btn.style.cssText = chipBtnStyle;
+      if (opt.choice === "scene") driveSceneChipBtn = btn;
+      btn.addEventListener("click", () => {
+        if (!selected) return;
+        deps.onDriveChoiceChange(selected.sceneId, selected.spec, opt.choice);
+        refreshDriveSection();
+      });
+      driveChips.push({ btn, choice: opt.choice });
+      chipRow.appendChild(btn);
+    }
+    driveSectionBody.append(heading, chipRow);
+  }
 
+  // Sits over driveSectionBody, in the same reserved space, shown only
+  // while nothing is selected — see driveSectionBodyWrap below.
   const driveSectionEmptyHint = document.createElement("div");
-  driveSectionEmptyHint.style.cssText = driveSectionEmptyHintStyle;
-  driveSectionEmptyHint.textContent = "Tap a setting's source chip to choose what it reacts to.";
+  driveSectionEmptyHint.style.cssText = `${driveSectionEmptyHintStyle} position: absolute; inset: 0; display: flex; align-items: center;`;
+  driveSectionEmptyHint.textContent = "Focus a setting to choose what it reacts to.";
+
+  // position:relative so the empty-state hint can sit exactly over the
+  // (reserved-height, `visibility: hidden` when empty) picker rather than
+  // the section collapsing around it.
+  const driveSectionBodyWrap = document.createElement("div");
+  driveSectionBodyWrap.style.cssText = `position: relative;`;
+  driveSectionBodyWrap.append(driveSectionBody, driveSectionEmptyHint);
 
   const driveSection = document.createElement("div");
   driveSection.className = "vc-row";
   driveSection.style.setProperty("--vc-accent", BANDS_AMBER);
-  driveSection.append(driveSectionEmptyHint, driveSectionHead, driveSectionBody);
+  driveSection.append(driveSectionHead, driveSectionBodyWrap);
 
-  // Builds one setting's grouped source chips into `container` — a pure DOM
-  // builder, no open/close state of its own (the section around it is
-  // always showing once something is selected). Returns a refreshHighlight
-  // callback so the caller can keep the lit chip in sync without rebuilding.
-  function buildDriveOptionChips(container: HTMLElement, sceneId: string, spec: SceneSetting): () => void {
-    const drive = spec.drive!;
-    const chips: { btn: HTMLButtonElement; choice: DriveChoice }[] = [];
-    for (const group of DRIVE_OPTION_GROUPS) {
-      const heading = document.createElement("div");
-      heading.textContent = group.label;
-      heading.style.cssText = drivePickerGroupLabelStyle;
-      const chipRow = document.createElement("div");
-      chipRow.style.cssText = paletteListStyle;
-      for (const opt of group.options) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.textContent = opt.label;
-        btn.style.cssText = chipBtnStyle;
-        // Scene is the one option with a sentence to say about it — a
-        // tooltip rather than a permanent line, so every other chip stays
-        // one row tall.
-        if (opt.choice === "scene" && drive.sceneLabel) btn.title = drive.sceneLabel;
-        btn.addEventListener("click", () => {
-          deps.onDriveChoiceChange(sceneId, spec, opt.choice);
-          refreshDriveSection();
-          refreshDriveRowChips();
-        });
-        chips.push({ btn, choice: opt.choice });
-        chipRow.appendChild(btn);
-      }
-      container.append(heading, chipRow);
-    }
-    return () => {
-      const current = deps.getDriveChoice(sceneId, spec);
-      for (const { btn, choice } of chips) btn.style.cssText = sameDriveChoice(choice, current) ? chipBtnLitStyle : chipBtnStyle;
-    };
+  function refreshPickerHighlight(): void {
+    if (!selected) return;
+    const current = deps.getDriveChoice(selected.sceneId, selected.spec);
+    for (const { btn, choice } of driveChips) btn.style.cssText = sameDriveChoice(choice, current) ? chipBtnLitStyle : chipBtnStyle;
   }
 
   // Re-derives everything the section and the strip below it show from
   // `selected` alone — called after any click that could have changed the
-  // selection or the selected setting's own choice, and once from
-  // renderSceneSettings()'s own tail (a Look apply, undo, or scene switch
-  // can move the choice, or the selection itself, without a click here).
+  // selected setting's own choice, from selectDrive() below whenever the
+  // selection itself actually changes, and once from renderSceneSettings()'s
+  // own tail (a Look apply, undo, or scene switch can move the choice —
+  // or the selection itself — without a focusin here).
   function refreshDriveSection(): void {
-    const hasSelection = selected !== null;
-    driveSectionEmptyHint.style.display = hasSelection ? "none" : "";
-    driveSectionHead.style.display = hasSelection ? "" : "none";
-    driveSectionBody.style.display = hasSelection ? "" : "none";
+    driveSectionTitle.textContent = selected?.spec.label ?? "";
+    // visibility, not display — the whole point is that the picker's box
+    // keeps occupying the same space, hint or no hint (requirement 4).
+    driveSectionBody.style.visibility = selected ? "visible" : "hidden";
+    driveSectionEmptyHint.style.visibility = selected ? "hidden" : "visible";
+    // Scene is the one option with a sentence to say about it — a tooltip
+    // rather than a permanent line, so every other chip stays one row tall.
+    // Updated here rather than baked into the (now shared, built-once)
+    // button, since which sentence applies depends on which setting is
+    // currently selected.
+    const sceneLabel = selected?.spec.drive?.sceneLabel;
+    if (driveSceneChipBtn) {
+      if (sceneLabel) driveSceneChipBtn.title = sceneLabel;
+      else driveSceneChipBtn.removeAttribute("title");
+    }
 
     const choice = selected ? deps.getDriveChoice(selected.sceneId, selected.spec) : null;
     const isFreq = choice !== null && typeof choice === "object" && choice.source === "line";
@@ -1691,22 +1667,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshPickerHighlight();
   }
 
-  /** The only place `selected` is written. Never called from hover — only a
-   *  row's chip (select), the section's own Equaliser chip, Escape
+  function sameSelection(a: { sceneId: string; spec: SceneSetting } | null, b: typeof a): boolean {
+    if (a === b) return true;
+    return !!a && !!b && a.sceneId === b.sceneId && a.spec.key === b.spec.key;
+  }
+
+  /** The only place `selected` is written. Called from a scene-setting row's
+   *  own `focusin` (appendSettingRow — a drive setting selects itself, any
+   *  other setting clears), the section's own Equaliser chip, Escape
    *  (onKeyDown), and the scene-mismatch checks in renderSceneSettings()/
-   *  update() call this, per the panel's "selected means tapped, not
-   *  hovered" contract. */
+   *  update(). Deliberately *not* called when focus leaves a row for
+   *  anywhere else (the Bands card's own strip/overlay/section/Strength,
+   *  the meters, another card, the page): each row's `focusin` listener
+   *  only ever fires for focus entering *that* row, so moving the mouse off
+   *  a selected setting and onto the spectrum to draw its line — or onto
+   *  this very section's own picker chips — never touches `selected` at
+   *  all, let alone clears it. No-ops when `sel` already matches the
+   *  current selection: `focusin` re-fires for every focus change *within*
+   *  one row (the slider, its A/T/reset chips — see wireHoverFocus), not
+   *  just a row-to-row change, so without this guard sweeping the mouse or
+   *  tabbing across one row's own controls would redo this work on every
+   *  one of them. */
   function selectDrive(sel: { sceneId: string; spec: SceneSetting } | null): void {
+    if (sameSelection(selected, sel)) return;
     selected = sel;
-    driveSectionBody.innerHTML = "";
-    if (sel) {
-      driveSectionTitle.textContent = sel.spec.label;
-      refreshPickerHighlight = buildDriveOptionChips(driveSectionBody, sel.sceneId, sel.spec);
-    } else {
-      refreshPickerHighlight = () => {};
-    }
     refreshDriveSection();
-    refreshDriveRowChips();
   }
 
   // A sibling of driveSection, not nested in it — both are their own
@@ -1714,6 +1699,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // don't nest.
   lineEditor.strengthRow.style.display = "none";
   bandsCard.body.append(driveSection, lineEditor.strengthRow);
+  refreshDriveSection(); // seeds driveSectionBody's visibility/hint at rest
 
   spectrumCol.append(bandsCard.el, audioMeters.el);
 
@@ -2282,22 +2268,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAuto(): void;
   }
   let sceneRowHandles: SceneRowHandle[] = [];
-  // A drive setting row's own chip (label/pill/selected-highlight) —
-  // refreshed on the same slow tick as sceneRowHandles' own refreshAuto(),
-  // since a Look apply, an external choice change, or a selection change
-  // elsewhere (not this row's own chip click) all need picking up too.
-  interface DriveRowHandle {
-    refresh(drives: SceneDrives | null): void;
-  }
-  let driveRowHandles: DriveRowHandle[] = [];
-  // This tick's SceneDrives, set at the top of DeviceMenu.update() below —
-  // kept around so selectDrive() (a click, not a tick) can refresh every
-  // row's chip immediately with real pill numbers instead of blanking them
-  // until the next slow tick.
-  let lastDrivesSnapshot: SceneDrives | null = null;
-  function refreshDriveRowChips(): void {
-    for (const row of driveRowHandles) row.refresh(lastDrivesSnapshot);
-  }
 
   // Looks: named snapshots of the Scene card's own settings above — see
   // src/render/sceneLooks.ts. Hidden the same way sceneCard is when the
@@ -2423,6 +2393,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       };
     });
 
+    // The selection signal now (Revision 2 — see selectDrive's own doc
+    // comment for the full contract) — every scene-setting row gets this,
+    // regardless of type, so focusing a non-drive row (an enum picker, a
+    // toggle) correctly clears a previous selection too, not just sliders.
+    function onRowFocusIn(): void {
+      selectDrive(spec.drive ? { sceneId, spec } : null);
+    }
+
     if (spec.type === "enum" && spec.options) {
       // An enum's `reads` get the same chip + pill strip a slider row builds
       // for itself inside createControlRow — here the host builds it, since
@@ -2455,6 +2433,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         },
         signals,
       });
+      picker.el.addEventListener("focusin", onRowFocusIn);
       container.appendChild(picker.el);
       if (signals && reads) {
         sceneRowHandles.push({
@@ -2473,16 +2452,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       return;
     }
     if (spec.type === "boolean") {
-      container.appendChild(
-        createToggleRow({
-          label: spec.label,
-          accent: SCENE_VIOLET,
-          defaultValue: deps.getSceneSettingDefault(sceneId, spec),
-          description: spec.description,
-          get: () => deps.getSceneSettingValue(sceneId, spec),
-          set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
-        }),
-      );
+      const toggleEl = createToggleRow({
+        label: spec.label,
+        accent: SCENE_VIOLET,
+        defaultValue: deps.getSceneSettingDefault(sceneId, spec),
+        description: spec.description,
+        get: () => deps.getSceneSettingValue(sceneId, spec),
+        set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
+      });
+      toggleEl.addEventListener("focusin", onRowFocusIn);
+      container.appendChild(toggleEl);
       return;
     }
 
@@ -2509,27 +2488,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         : undefined,
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
       reads,
-      // Selecting (not opening an inline picker any more — see the Bands
-      // card's drive section, built above) shows this setting's source
-      // picker in that one fixed place.
-      driveChip: spec.drive ? { select: () => selectDrive({ sceneId, spec }) } : undefined,
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));
+    row.el.addEventListener("focusin", onRowFocusIn);
     container.appendChild(row.el);
     sceneRowHandles.push(row);
     wireBandHighlight(row.el, reads);
-    if (spec.drive) {
-      driveRowHandles.push({
-        refresh: (drives) => {
-          const isSelected = !!selected && selected.sceneId === sceneId && selected.spec.key === spec.key;
-          const choice = deps.getDriveChoice(sceneId, spec);
-          const pair = drives?.uniformPair(spec.key);
-          const pill = pair && pair.custom > 0 ? ` ${Math.round(pair.drive * 100)}%` : "";
-          row.setDriveChip(`${driveChoiceLabel(choice)}${pill}`, isSelected);
-        },
-      });
-    }
   }
 
   function renderSceneSettings(): void {
@@ -2537,7 +2502,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const specs = deps.getSceneSettings(sceneId);
     sceneRows.innerHTML = "";
     sceneRowHandles = [];
-    driveRowHandles = [];
     sceneCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.refresh();
@@ -2892,7 +2856,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      lastDrivesSnapshot = drives;
       // A scene switch (or a renderer with nothing playing) leaves `selected`
       // pointing at a setting that no longer belongs to the active scene —
       // checked here rather than at every scene-change call site, since this
@@ -2974,12 +2937,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       silenceClosedRow.refreshAuto();
       silenceOpenRow.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
-      // Every drive row's own chip (label/pill/selected-highlight) — picked
-      // up here rather than every tick, same reasoning as every other
-      // refreshAuto() above. The section's own picker highlight rides along
-      // (an external change — a paired device's own command — could move
-      // the selected setting's choice without a click here).
-      refreshDriveRowChips();
+      // The selected setting's picker highlight — picked up here rather than
+      // every tick, same reasoning as every other refreshAuto() above (an
+      // external change, e.g. a paired device's own command, could move the
+      // selected setting's choice without a focusin here).
       if (selected) refreshPickerHighlight();
     },
   };
