@@ -88,7 +88,7 @@ const stylesheet = `
   background: ${GROUND}; color: #fff; font-family: ${FONT_LABEL};
   padding: 32px 56px 40px; box-sizing: border-box;
 }
-.gal-page { max-width: 1328px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+.gal-page { max-width: 1328px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 .gal-mono { font: 400 10.5px ${FONT_MONO}; text-transform: uppercase; }
 
 .gal-mast { display: flex; align-items: center; justify-content: space-between; gap: 16px 32px; flex-wrap: wrap; }
@@ -177,7 +177,7 @@ const stylesheet = `
 .gal-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .gal-shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(5,7,10,.7), transparent 40%); pointer-events: none; }
 .gal-over { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
-.gal-name { font: 500 17px/1 ${FONT_LABEL}; min-width: 0; }
+.gal-name { font: 400 14px/1 ${FONT_LABEL}; min-width: 0; }
 .gal-reason {
   font: 400 11px ${FONT_MONO}; letter-spacing: .14em; flex: none; white-space: nowrap;
   color: rgba(255,255,255,.7); border: 1px solid rgba(255,255,255,.3);
@@ -199,7 +199,7 @@ const stylesheet = `
 
 @media (max-width: ${NARROW_BELOW_PX}px) {
   .gal-root { padding: 24px 16px 32px; }
-  .gal-page { gap: 24px; }
+  .gal-page { gap: 16px; }
   /* No room for the label beside the mark and both options on a phone — the
    * hint takes its place on its own line above the buttons instead. */
   .gal-source-top { flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -214,7 +214,7 @@ const stylesheet = `
   .gal-src-hint { letter-spacing: .06em; }
   .gal-source-hint { letter-spacing: .06em; }
   .gal-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .gal-name { font-size: 15px; }
+  .gal-name { font-size: 13px; }
   /* A phone at arm's length: the fold is how the drafts are reached at all. */
   .gal-fold { min-height: 40px; padding: 8px 14px; }
 }
