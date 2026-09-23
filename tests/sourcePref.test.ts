@@ -98,6 +98,7 @@ describe("resolveSourceState", () => {
       choice: "mic",
       live: false,
       chosen: false,
+      micReady: false,
     });
   });
 
@@ -113,6 +114,7 @@ describe("resolveSourceState", () => {
       choice: "display",
       live: false,
       chosen: true,
+      micReady: false,
     });
   });
 
@@ -126,7 +128,7 @@ describe("resolveSourceState", () => {
       preferenceChosen: false,
       micPermission: "denied",
     });
-    expect(state).toEqual({ choice: "display", live: true, chosen: true });
+    expect(state).toEqual({ choice: "display", live: true, chosen: true, micReady: false });
   });
 
   it("mic with a stored pick but permission only at \"prompt\" is NOT chosen — the reset bug", () => {
@@ -191,7 +193,45 @@ describe("resolveSourceState", () => {
       preferenceChosen: false,
       micPermission: "prompt",
     });
-    expect(state).toEqual({ choice: "mic", live: true, chosen: true });
+    expect(state).toEqual({ choice: "mic", live: true, chosen: true, micReady: false });
+  });
+
+  describe("micReady", () => {
+    // The regression this field exists to fix: a granted mic permission is
+    // real and worth showing regardless of which source happens to be
+    // "preferred" right now — not just when mic is the resolved choice.
+    it("is true when the mic permission is granted, even while display is preferred", () => {
+      const state = resolveSourceState({
+        liveChoice: null,
+        preferredChoice: "display",
+        preferenceChosen: true,
+        micPermission: "granted",
+      });
+      expect(state.choice).toBe("display");
+      expect(state.micReady).toBe(true);
+    });
+
+    it("is false for denied, prompt, and unknown permission", () => {
+      for (const micPermission of ["denied", "prompt", "unknown"] as const) {
+        const state = resolveSourceState({
+          liveChoice: null,
+          preferredChoice: "mic",
+          preferenceChosen: true,
+          micPermission,
+        });
+        expect(state.micReady).toBe(false);
+      }
+    });
+
+    it("a live capture doesn't suppress it — granted permission still reads ready even while display is live", () => {
+      const state = resolveSourceState({
+        liveChoice: "display",
+        preferredChoice: "mic",
+        preferenceChosen: false,
+        micPermission: "granted",
+      });
+      expect(state).toEqual({ choice: "display", live: true, chosen: true, micReady: true });
+    });
   });
 });
 

@@ -181,8 +181,11 @@ export interface DeviceMenuDeps {
   getAudioStatus: () => AudioStatus;
   /** This device's mic-vs-screen capture state (src/audio/sourcePref.ts's
    *  SourceState) — drives the Input card's Source row, including whether
-   *  the lit chip means "listening now" or just "picked, not started yet".
-   *  Null on a renderer or the synthetic feed (no local capture to choose a
+   *  the lit chip means "listening now" or just "picked, not started yet",
+   *  and state.micReady, which lets the Mic chip read "ready" even while a
+   *  different source is the resolved choice. Same signal drives the gallery
+   *  masthead's picker (src/ui/gallery.ts's refreshSource). Null on a
+   *  renderer or the synthetic feed (no local capture to choose a
    *  source for), which is what hides the row — the same null-hides-itself
    *  convention as the Loudness card's `lufs` frame field. */
   getSourceState: () => SourceState | null;
@@ -1771,7 +1774,30 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         if (state === null) return;
         const canDisplay = deps.canCaptureDisplay();
         for (const { choice: c, btn, dot } of buttons) {
-          const uiState: "live" | "ready" | "idle" = c !== state.choice ? "idle" : state.live ? "live" : state.chosen ? "ready" : "idle";
+          const isCurrent = c === state.choice;
+          // Mic can read "ready" on its own merits (state.micReady — see its
+          // doc comment in sourcePref.ts) even while a *different* source is
+          // the resolved choice: a granted mic permission is real regardless
+          // of which source happens to be preferred right now, which used to
+          // go completely unshown whenever "display" was the stored pick.
+          // Display keeps its existing behavior — only ready when it's the
+          // resolved, chosen choice — since there's no independent "display
+          // permission" signal to check. No canDisplay gate on that fallback
+          // (unlike the gallery masthead's refreshSource, which deliberately
+          // suppresses "ready" in its solo/no-display-capture path): this row
+          // never had that gate before micReady existed, and adding one now
+          // would regress a solo browser with no usable Permissions API
+          // (Safari/iOS is exactly that combination) that had already
+          // explicitly picked mic — state.chosen still means something there
+          // even though state.micReady can't.
+          const uiState: "live" | "ready" | "idle" =
+            isCurrent && state.live
+              ? "live"
+              : c === "mic" && state.micReady
+                ? "ready"
+                : isCurrent && state.chosen
+                  ? "ready"
+                  : "idle";
           btn.style.cssText = uiState === "live" ? sourceChipLiveStyle : uiState === "ready" ? sourceChipReadyStyle : sourceChipStyle;
           dot.style.cssText = uiState === "live" ? sourceDotLiveStyle : uiState === "ready" ? sourceDotReadyStyle : sourceDotStyle;
           btn.hidden = c === "display" && !canDisplay;

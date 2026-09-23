@@ -56,6 +56,14 @@
  * fed to both pickers, so "listening now" (live), "picked, not listening yet"
  * (ready) and "nobody's picked anything" (idle) can never say different things
  * on the two surfaces.
+ *
+ * SourceState.micReady is a second, independent signal alongside `chosen`:
+ * `chosen` describes whether the globally resolved `choice` is real, but a
+ * granted mic permission is real regardless of which source happens to be
+ * preferred right now — a device whose stored pick is "display" still has a
+ * genuinely ready microphone underneath, and a picker needs to be able to say
+ * so. That's the gap that let a granted mic permission go completely unshown
+ * (no "chosen" paint, no hint) whenever "display" was the resolved choice.
  */
 
 export type AudioSourceChoice = "mic" | "display";
@@ -161,6 +169,14 @@ export interface SourceState {
   /** `choice` reflects a real pick (live, url-pinned, or persisted) rather
    *  than just AUDIO_SOURCE_DEFAULT standing in for no pick at all. */
   chosen: boolean;
+  /** The mic's own permission is granted — independent of whether `choice`
+   *  (the globally resolved, "preferred" source) happens to be mic right now.
+   *  What lets a picker answer "is Mic itself ready to go" without needing
+   *  Mic to be the resolved choice: a device whose stored preference is
+   *  "display" but whose mic permission is already granted from earlier use
+   *  should still show Mic as ready, not idle — the gap that previously let
+   *  a granted permission go unshown while "display" was the stored pick. */
+  micReady: boolean;
 }
 
 /** Pure so it's node-testable without a DOM: the caller (src/app.ts) does the
@@ -184,12 +200,13 @@ export function resolveSourceState(input: {
   preferenceChosen: boolean;
   micPermission: MicPermission;
 }): SourceState {
-  if (input.liveChoice !== null) return { choice: input.liveChoice, live: true, chosen: true };
+  const micReady = input.micPermission === "granted";
+  if (input.liveChoice !== null) return { choice: input.liveChoice, live: true, chosen: true, micReady };
   const chosen =
     input.preferredChoice === "mic"
       ? input.micPermission === "granted" || (input.micPermission === "unknown" && input.preferenceChosen)
       : input.preferenceChosen;
-  return { choice: input.preferredChoice, live: false, chosen };
+  return { choice: input.preferredChoice, live: false, chosen, micReady };
 }
 
 /** Whether this browser exposes getDisplayMedia at all. Doesn't (can't)

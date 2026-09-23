@@ -141,6 +141,7 @@ const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
+const audioPromptMicLabel = document.getElementById("audioPromptMicLabel") as HTMLSpanElement;
 const audioPromptDisplayBtn = document.getElementById("audioPromptDisplayBtn") as HTMLButtonElement;
 const audioPromptGuide = document.getElementById("audioPromptGuide") as HTMLParagraphElement;
 
@@ -430,6 +431,15 @@ function resolveInitialSource(): AudioSourceChoice {
   return stored === "display" && !displayCaptureSupported() ? "mic" : stored;
 }
 
+/** Whether a real audio-source choice has ever been made on this device — a
+ *  URL pin for this load, or a persisted pick from a previous one. The one
+ *  owner of that check: currentSourceState() and autoStartSource() below,
+ *  and the gallery's onPick, all need the same answer to "has this app ever
+ *  been told anything", and used to each spell it out inline. */
+function sourceEverChosen(): boolean {
+  return urlPinnedSource() !== null || hasStoredAudioSource();
+}
+
 /** The one truth both source pickers (the gallery masthead, the Input card's
  *  Source row) render — see SourceState's doc comment in sourcePref.ts for
  *  what "live" vs "chosen" mean and why collapsing them into one
@@ -444,7 +454,7 @@ function currentSourceState(): SourceState {
   return resolveSourceState({
     liveChoice,
     preferredChoice: resolveInitialSource(),
-    preferenceChosen: urlPinnedSource() !== null || hasStoredAudioSource(),
+    preferenceChosen: sourceEverChosen(),
     micPermission,
   });
 }
@@ -459,8 +469,17 @@ function currentSourceState(): SourceState {
  *  picker: an implicit path starts nothing and lets updateMicPrompt() put the
  *  start prompt up, whose Screen button reaches getDisplayMedia inside a real
  *  tap. Same principle onCaptureEnded already states for its own refusal to
- *  fall back to another source. */
+ *  fall back to another source.
+ *
+ *  Gated on sourceEverChosen(): the gesture-free mic path only ever applies
+ *  once a real choice exists — an in-app pick or a URL pin — never on a
+ *  browser that has literally never told this app anything, even if the
+ *  OS/browser already happens to have mic permission from elsewhere. Without
+ *  this, entering a scene from a cold link (enterViz's bare ensureAudio()
+ *  call) fired getUserMedia, and the browser's native permission prompt,
+ *  before the user had ever touched a source picker. */
 function autoStartSource(): AudioSourceChoice | null {
+  if (!sourceEverChosen()) return null;
   return resolveInitialSource() === "display" ? null : "mic";
 }
 
@@ -619,7 +638,9 @@ function refreshAudioPromptButtons(): void {
   const canDisplay = displayCaptureSupported();
   audioPromptLabel.hidden = !canDisplay;
   audioPromptDisplayBtn.hidden = !canDisplay;
-  audioPromptMicBtn.textContent = canDisplay ? "Mic" : "Tap to enable mic";
+  // Set on the label span, not the button itself — the button also holds
+  // .apDot, and overwriting textContent on the button would wipe it out.
+  audioPromptMicLabel.textContent = canDisplay ? "Mic" : "Tap to enable mic";
   audioPromptGuide.textContent = DISPLAY_SHARE_GUIDE;
   audioPromptGuide.hidden = !canDisplay;
 }
@@ -645,9 +666,21 @@ function updateMicPrompt(): void {
   // persists a new pref), unlike display support above — hence here and not
   // in refreshAudioPromptButtons. Emphasis only, never an auto-fire: see
   // autoStartSource for why the picker still waits for a tap.
-  const remembered = resolveInitialSource();
-  audioPromptMicBtn.toggleAttribute("data-remembered", !audioPromptDisplayBtn.hidden && remembered === "mic");
-  audioPromptDisplayBtn.toggleAttribute("data-remembered", remembered === "display");
+  //
+  // currentSourceState(), not resolveInitialSource() alone — the same
+  // "default stands in for a real pick" bug the gallery masthead and the
+  // Input card's Source row had before their own fixes: resolveInitialSource()
+  // returns AUDIO_SOURCE_DEFAULT even when nothing was ever chosen, which
+  // used to paint Mic as remembered on a cold first visit. state.micReady
+  // additionally lets Mic light up on its own merits (a granted permission)
+  // even while Screen is the resolved choice — see SourceState.micReady's
+  // own doc comment in sourcePref.ts.
+  const state = currentSourceState();
+  audioPromptMicBtn.toggleAttribute(
+    "data-remembered",
+    !audioPromptDisplayBtn.hidden && ((state.choice === "mic" && state.chosen) || state.micReady),
+  );
+  audioPromptDisplayBtn.toggleAttribute("data-remembered", state.choice === "display" && state.chosen);
 }
 
 /** Renderer lost (or never reached) its room — fall back to this device's own mic, per the plan's Solo model. */
@@ -1132,7 +1165,14 @@ async function boot(): Promise<void> {
         // when the masthead's sound-source picker says "Share a tab", instead
         // of detouring through the start prompt the way an implicit start must
         // (see autoStartSource).
-        void ensureAudio(resolveInitialSource());
+        //
+        // Only treat the tap itself as "start listening" once a source was
+        // really chosen — otherwise this would be the very first getUserMedia
+        // call this device ever sees from us, fired by a plain tile tap. A
+        // display pick still opens the share picker directly from this same
+        // gesture (see autoStartSource's own doc comment for why an implicit
+        // path can't do that on its own) — only the never-chosen case changes.
+        void ensureAudio(sourceEverChosen() ? resolveInitialSource() : undefined);
         navigate({ kind: "viz", sceneId: id }, "push");
       },
       onDisabledPick: (id, reason) => showHud(`${id}: ${reason}`, true),

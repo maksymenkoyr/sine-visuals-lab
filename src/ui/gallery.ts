@@ -41,7 +41,10 @@ export interface GalleryDeps {
    *  never names an option a mobile visitor won't see. */
   canCaptureDisplay: () => boolean;
   /** The source a tile tap will start on, and whether it's live yet — what
-   *  the picker paints. See SourceState's doc comment in sourcePref.ts. */
+   *  the picker paints, including state.micReady (see its doc comment in
+   *  sourcePref.ts), which lets the Mic option read "ready" even while a
+   *  different source is the resolved choice. Same signal drives the Input
+   *  card's Source row (src/ui/deviceMenu.ts's createSourceRow). */
   sourceState: () => SourceState;
   /** Fired inside the picker's click, so starting — or live-swapping to —
    *  screen capture still has its user gesture: a click here starts listening
@@ -395,15 +398,28 @@ export function createGallery(deps: GalleryDeps): Gallery {
     const state = deps.sourceState();
     for (const [choice, entry] of sourceButtons) {
       const isCurrent = choice === state.choice;
-      // Solo has no "ready" — nothing is being picked over anything else,
-      // so the only meaningful distinction left is live vs. not.
-      const uiState: "live" | "ready" | "idle" = !isCurrent
-        ? "idle"
-        : state.live
+      // Mic can read "ready" on its own merits (state.micReady — see its doc
+      // comment in sourcePref.ts) even while a *different* source is the
+      // resolved choice: a granted mic permission is real regardless of
+      // which source happens to be preferred right now, which used to go
+      // completely unshown whenever "display" was the stored pick. That
+      // branch also reaches the solo (no-display-capture) path — canChoose
+      // is false there, but state.micReady isn't gated on it, so a solo mic
+      // whose permission is already granted now reads "ready" too, instead
+      // of a flat idle until it's actually live. Display has no independent
+      // readiness signal at all (getDisplayMedia always prompts fresh), so
+      // it's still only ever "ready" as the resolved, chosen choice — see
+      // the Input card's Source row in deviceMenu.ts for the matching
+      // comment, and why its own fallback branch is deliberately not gated
+      // on canDisplay the way this one's is gated on canChoose.
+      const uiState: "live" | "ready" | "idle" =
+        isCurrent && state.live
           ? "live"
-          : canChoose && state.chosen
+          : choice === "mic" && state.micReady
             ? "ready"
-            : "idle";
+            : isCurrent && canChoose && state.chosen
+              ? "ready"
+              : "idle";
       entry.btn.dataset.state = uiState;
       if (canChoose) entry.btn.setAttribute("aria-checked", String(uiState !== "idle"));
       entry.hintEl.textContent = uiState === "live" ? LIVE_LABEL : uiState === "ready" ? READY_LABEL : entry.descriptor;
