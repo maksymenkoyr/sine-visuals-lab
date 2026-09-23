@@ -459,8 +459,8 @@ const float FLOATER_DRIFT_R = 0.05;
 const float FLOATER_JUMP_MIN = 2.0;
 const float FLOATER_JUMP_MAX = 5.0;
 const float FLOATER_JUMP_EASE = 0.35;
-const float FLOATER_LEN_MIN = 0.18; // strand arc length, screen p-units, hashed per seed — measured against the reference at ~0.25-0.35; v3's fixed 0.085 read 3-4x too short
-const float FLOATER_LEN_MAX = 0.32;
+const float FLOATER_LEN_MIN = 0.08; // strand arc length, screen p-units, hashed per seed — every size below is the reference-matched proportions scaled ~0.45x (the user wanted them much smaller than the reference crop), so rim/fringe/length keep their measured ratios
+const float FLOATER_LEN_MAX = 0.145;
 // floaterPath's heading theta(t) = theta0 + B1*sin(2*pi*f1*t+p1) +
 // B2*sin(2*pi*f2*t+p2): a dominant gentle bend (B1/f1) plus a much smaller,
 // faster wobble (B2/f2), all hashed once per seed. Because heading is
@@ -483,15 +483,15 @@ const float FLOATER_F2_MAX = 5.0;
 // dark fringe just outside the edge, a brighter rim just inside it, and a
 // barely-lifted see-through interior, everything within about +-10% of the
 // background — never a solid painted line.
-const float FLOATER_R = 0.011; // squiggle tube half-width, screen p-units — sized so rim-to-rim spacing matches the reference (~0.017 of screen height between the two bright rims)
-const float FLOATER_RIM_W = 0.005; // bright-rim band width, just inside the edge
-const float FLOATER_FRINGE_W = 0.008; // dark-fringe band width, just outside the edge
+const float FLOATER_R = 0.005; // squiggle tube half-width, screen p-units
+const float FLOATER_RIM_W = 0.0023; // bright-rim band width, just inside the edge
+const float FLOATER_FRINGE_W = 0.0036; // dark-fringe band width, just outside the edge
 const float FLOATER_INTERIOR = 0.02; // relative lum delta well inside the edge
 const float FLOATER_RIM = 0.07; // relative lum delta at the rim's peak
 const float FLOATER_FRINGE = 0.10; // relative lum delta (negative) at the fringe's peak
 const float FLOATER_DOT_CHANCE = 0.4; // fraction of floaters that render as a filled disk instead of a squiggle (was FLOATER_RING_CHANCE — a measured dot turned out to be a filled disk, not an annulus, under the same rim/fringe profile)
-const float FLOATER_DOT_R_MIN = 0.015; // dot radius, screen p-units — reference rim radius ~0.021
-const float FLOATER_DOT_R_MAX = 0.026;
+const float FLOATER_DOT_R_MIN = 0.007; // dot radius, screen p-units
+const float FLOATER_DOT_R_MAX = 0.012;
 const vec3 FLOATER_COOL_TINT = vec3(0.94, 0.99, 1.06); // faint cool bias applied only to the rim's brightening (see main()) — a hint of refraction's blue-white; the fringe's darkening stays neutral
 
 // This scene's own small hash/noise family — independently written (the
