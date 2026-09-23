@@ -3,15 +3,29 @@
 // pass list. Everything here is injected after COMMON_UNIFORMS_GLSL, this
 // scene's own setting uniforms, and the extra uniforms each pass declares
 // (index.ts's buildSharpFragSource / buildTailFragSource).
+import { PALETTE_GLSL } from "../../palette.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK } from "../../noiseHash.ts";
-import { ECHO_FLOW_STRIDE, ECHO_HZ, ECHO_MAX, FIELD_OCTAVES } from "./driver.ts";
+import { ECHO_FLOW_STRIDE, ECHO_HZ, ECHO_MAX, FIELD_OCTAVES, MAX_STRANDS } from "./driver.ts";
 
-if (FIELD_OCTAVES !== 2) {
-  // strandField below hand-unrolls exactly two octaves (a warp tap and a
-  // two-frequency read) — a different FIELD_OCTAVES would silently draw
+if (FIELD_OCTAVES !== 4) {
+  // strandField below hand-unrolls exactly four octaves (a warp tap and a
+  // three-frequency read) — a different FIELD_OCTAVES would silently draw
   // fewer/more offsets than the field actually reads.
-  throw new Error("silk/glsl.ts: strandField assumes FIELD_OCTAVES === 2");
+  throw new Error("silk/glsl.ts: strandField assumes FIELD_OCTAVES === 4");
 }
+
+/** Field-space spacing between one strand's fine trailing threads (Round 3)
+ *  — screen spacing is this divided by the local field gradient, so threads
+ *  fan out exactly where the reference's "feathers/combs" do (report.md).
+ *  Tuned so the spacing lands near the reference's measured ~0.017
+ *  half-heights (3px @ 360) at a typical gradient magnitude. */
+const THREAD_STEP = 0.022;
+/** Brightness falloff per thread step out from the main strand line. */
+const THREAD_FALLOFF = 0.8;
+/** Most threads ever drawn per strand — `threads` setting picks a fraction
+ *  of this, further capped so a full band never reaches the next strand
+ *  (see the sharp pass's nThreads clamp). */
+const MAX_THREADS = 10;
 
 /** Mirror-fold a point into one wedge of an n-fold rotation, angle only —
  *  radius is untouched, so a caller may scale the *result* per echo and
@@ -75,18 +89,73 @@ float vnoise(vec2 p, uint seed) {
 uniform float uEchoFlow[${ECHO_MAX * ECHO_FLOW_STRIDE}];
 
 // Echo k's field at q (already folded + scaled for that echo): a small
-// warp from the first flow offset, then two frequencies of value noise
-// from the second — cheap (four vnoise taps), organic enough for a silk
-// ribbon once seen through the strand level sets below.
+// warp from the first flow offset, then three frequencies of value noise,
+// each from its own flow offset (four vnoise-group taps total; Round 2's
+// two-octave version read the *shared* off1 scaled by 1.7 for its second
+// frequency rather than a real third octave — that scaling changed
+// discontinuously right when off1 itself wrapped 256→0 (noiseHash.ts),
+// a latent seam. Every octave now gets fillEchoFlows's own properly-wrapped
+// offset — see driver.ts's FIELD_OCTAVES doc.) The extra high frequency is
+// what turns Round 2's smooth blobby curves into the finer curls/loops the
+// reference shows.
 float strandField(vec2 q, int k) {
   int base = k * ${ECHO_FLOW_STRIDE};
   vec2 off0 = vec2(uEchoFlow[base], uEchoFlow[base + 1]);
   vec2 off1 = vec2(uEchoFlow[base + 2], uEchoFlow[base + 3]);
+  vec2 off2 = vec2(uEchoFlow[base + 4], uEchoFlow[base + 5]);
+  vec2 off3 = vec2(uEchoFlow[base + 6], uEchoFlow[base + 7]);
   vec2 w = vec2(vnoise(q * 0.7 + off0, 11u), vnoise(q * 0.7 + off0 + 5.2, 13u));
-  vec2 qw = q + (w - 0.5) * 0.9;
+  vec2 qw = q + (w - 0.5) * 1.15;
   float v0 = vnoise(qw * 1.6 + off1, 17u);
-  float v1 = vnoise(qw * 3.3 + off1 * 1.7, 19u);
-  return mix(v0, v1, 0.5);
+  float v1 = vnoise(qw * 3.3 + off2, 19u);
+  float v2 = vnoise(qw * 6.9 + off3, 23u);
+  return mix(mix(v0, v1, 0.5), v2, 0.28);
+}
+
+// A tiny per-index hash for shader-side per-strand picks (which strands
+// take the app palette — see uTint below) — same fract(sin(x)*C) shape as
+// driver.ts's hash01, just single-argument since it only ever hashes a
+// small integer loop index, not a (seed, k) pair.
+float stripHash(float i) {
+  return fract(sin(i * 12.9898) * 43758.5453);
+}
+
+// Cyclic 5-stop ramp through every measured hue (report.md: cyan 180°
+// dominant, spring 150° secondary, azure 210° a trace, gold/amber accents)
+// — built as a chain of smoothstep-gated mixes rather than a dynamic array
+// index, which some mobile GLSL ES 3.00 compilers handle poorly in a
+// fragment shader (see noiseHash.ts's header for this codebase's general
+// mobile-GPU caution). Each mix only does work inside its own unit
+// interval of t; outside it, its smoothstep is exactly 0 or 1, so the
+// chain reads as one continuous cyclic gradient.
+vec3 silkRamp(float t) {
+  vec3 cyan = vec3(0.255, 0.812, 0.741);
+  vec3 spring = vec3(0.20, 0.83, 0.47);
+  vec3 azure = vec3(0.25, 0.56, 0.88);
+  vec3 gold = vec3(0.78, 0.66, 0.32);
+  vec3 amber = vec3(1.0, 0.55, 0.18);
+  float tt = fract(t) * 5.0;
+  vec3 col = cyan;
+  col = mix(col, spring, smoothstep(0.0, 1.0, tt));
+  col = mix(col, azure, smoothstep(1.0, 2.0, tt));
+  col = mix(col, gold, smoothstep(2.0, 3.0, tt));
+  col = mix(col, amber, smoothstep(3.0, 4.0, tt));
+  col = mix(col, cyan, smoothstep(4.0, 5.0, tt));
+  return col;
+}
+
+${PALETTE_GLSL}
+
+// Picks a line's colour: normally a point on silkRamp, or — for the
+// uTint share of strands (stripHash(i) < uTint, a per-strand pick so
+// colours stay clean rather than mixing teal with rainbow into mud) — the
+// app's own palette (src/render/palette.ts, switched from the device
+// menu), so the user can push Silk past the reference's own measured hues
+// with a system already wired into every scene rather than a Silk-only
+// palette list (CLAUDE.md's "integrate with the existing system" rule —
+// see moire/petri/slats/kaleido's own tint settings).
+vec3 lineColor(float t, float tintPick) {
+  return mix(silkRamp(t), palette(t, uPalA, uPalB, uPalC, uPalD), tintPick);
 }
 
 // Presence: a soft brightness modulation across the field, not a hard
@@ -106,26 +175,6 @@ float presence(vec2 q) {
   return mix(PRESENCE_FLOOR, 1.0, smoothstep(lo, lo + 0.2, n));
 }
 
-// Cyan-dominant ramp (measured: cyan 180° dominant, spring 150° secondary,
-// azure 210° a trace at the outer edge, rare amber accents) — see
-// index.ts's header for the palette-share numbers this targets. Some
-// regimes in the reference blend olive/gold with the cyan continuously
-// (compare.png rows at t=2.48-5.27s), not just as a bar-swell accent — the
-// warm mix below ties that to the regime's own hueBias (already travels
-// smoothly via driver.ts's regime interpolation) rather than gating it on
-// swell alone, which only lit it for an instant (Round 2 diagnosis).
-vec3 strandColor(int i, int n, float r) {
-  vec3 cyan = vec3(0.255, 0.812, 0.741);
-  vec3 spring = vec3(0.20, 0.83, 0.47);
-  vec3 azure = vec3(0.25, 0.56, 0.88);
-  vec3 gold = vec3(0.78, 0.66, 0.32);
-  float t = n > 1 ? float(i) / float(n - 1) : 0.0;
-  vec3 col = mix(cyan, spring, clamp(t * 0.7, 0.0, 1.0));
-  col = mix(col, azure, smoothstep(0.7, 1.0, r) * 0.5);
-  float warm = smoothstep(0.0, 0.7, uHueBias);
-  col = mix(col, gold, warm * 0.55);
-  return col;
-}
 `;
 
 /** Forward-difference epsilon, room half-heights — small next to a
@@ -170,31 +219,50 @@ vec3 fieldAndGrad(vec2 p, int k, float scaleK) {
   return vec3(f0, (fx - f0) / ${FIELD_EPS.toFixed(4)}, (fy - f0) / ${FIELD_EPS.toFixed(4)});
 }
 
-// Screen/lighten blend: stacks overlapping echoes into a denser, brighter
-// band instead of max's "keep only the brightest one", which erased the
-// reference's dense parallel-echo fringe (report.md: "feathers/combs where
-// these echoes fan") down to a single visible curve — see the Silk-scene
-// memory's Round 2 diagnosis. Each layer is clamped to [0,1] first so the
-// result stays in [0,1] too, still saturating gracefully rather than
-// flashing when echoes line up at a zoom-direction reversal — max's
-// original job, kept without its density-erasing side effect.
-vec3 screenBlend(vec3 base, vec3 add) {
-  return 1.0 - (1.0 - base) * (1.0 - clamp(add, 0.0, 1.0));
+// Weighted accumulation: I (intensity) still screen-blends toward 1, so
+// echoes lining up at a zoom-direction reversal saturate gracefully rather
+// than flashing (max's original job) or blowing a channel out (Round 2's
+// per-channel screenBlend, which let R clip to 1 while G/B kept climbing
+// across stacked echoes and washed the picture to white-grey — the "why
+// ours looks grey" diagnosis this round). Hue is instead a running
+// weighted mean (C/W), which can never blow past any single layer's own
+// saturation no matter how many layers stack. See main()'s final mix for
+// the small white-hot lift applied only once, at the very end.
+void accumulate(inout float I, inout vec3 C, inout float W, float w, vec3 hue) {
+  float wc = clamp(w, 0.0, 1.0);
+  I = 1.0 - (1.0 - I) * (1.0 - wc);
+  C += hue * wc;
+  W += wc;
 }
 
 void main() {
   vec2 ruv = roomUv(vUv);
   vec2 aspect = vec2(uResolution.x / uResolution.y, 1.0);
   vec2 p = (ruv - 0.5) * aspect * 2.0; // half-heights: |p.y| == 1 at top/bottom
+  float px = 2.0 / uResolution.y; // one screen pixel, same half-height units as p
 
   float r = length(p);
-  vec2 pf0 = foldedPoint(p);
   vec2 presPf0 = presenceCoord(p);
   int nStrands = int(uStrands + 0.5);
   int kMax = int(uEchoCount + 0.5);
   float echoDecay = clamp(uEcho, 0.0, 0.995);
+  // Regime hueBias (-1..1) maps to a point on the cyclic ramp — each
+  // regime leans toward a different dominant hue instead of Round 2's
+  // fixed cyan-with-a-gold-mix (see silkRamp/lineColor above).
+  float hueBase = 0.5 + 0.5 * clamp(uHueBias, -1.0, 1.0);
+  float webRBreathed = uWebR + 0.06 * uWebBreath;
+  float holeMask = smoothstep(uHoleEff, uHoleEff + 0.08, r);
+  // The silk/thread annulus still closes off around r 0.78-0.95 (unchanged
+  // from Round 1/2); the web reaches further out to r 1.1-1.25 so it fills
+  // the corners the silk's own mask blacks out (report.md's separate,
+  // dimmer corner motifs) — see the header note on the web layer below.
+  float outerMaskSilk = 1.0 - smoothstep(0.78, 0.95, r);
+  float outerMaskWeb = 1.0 - smoothstep(1.1, 1.25, r);
 
-  vec3 combined = vec3(0.0);
+  float I = 0.0;
+  vec3 C = vec3(0.0);
+  float W = 0.0;
+
   for (int k = 0; k < ${ECHO_MAX}; k++) {
     if (k >= kMax) break;
     float scaleK = exp(-uZoomRate * float(k) / ${ECHO_HZ.toFixed(1)});
@@ -202,30 +270,96 @@ void main() {
     float gradMag = max(length(fg.yz), 1e-3);
     float decayK = pow(echoDecay, float(k));
     float pres = presence(presPf0 * scaleK * uFieldEff);
+    int echoBase = k * ${ECHO_FLOW_STRIDE};
+    vec2 echoOff0 = vec2(uEchoFlow[echoBase], uEchoFlow[echoBase + 1]);
 
-    vec3 echoCol = vec3(0.0);
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < ${MAX_STRANDS}; i++) {
       if (i >= nStrands) break;
       float ci = (float(i) + 1.0) / (float(nStrands) + 1.0) + 0.06 * uSwell;
       float d = abs(fg.x - ci) / gradMag;
       float core = exp(-pow(d / (0.0045 * max(uWidth, 0.05)), 2.0));
       float halo = exp(-d / 0.014) * 0.55;
       float side = ci - fg.x;
-      float fill = smoothstep(0.0, 0.1, side) * (1.0 - smoothstep(0.1, 0.22, side)) * 0.06 * uHaze;
-      vec3 col = strandColor(i, nStrands, r);
+
+      // Threads (Round 3): fine parallel lines trailing one side of the
+      // main strand, spaced THREAD_STEP apart in field space — screen
+      // spacing is that divided by the local gradient, so they fan out
+      // exactly where the field is shallow (the reference's
+      // "feathers/combs where echoes fan", report.md). Only the *nearest*
+      // thread index is ever tested per pixel (a periodic level-set family,
+      // same trick as the main strand's own single distance test), so this
+      // costs one more distance test, not a loop over threads.
+      float nThreadsCap = min(${MAX_THREADS.toFixed(1)}, floor(0.45 / ((float(nStrands) + 1.0) * ${THREAD_STEP.toFixed(4)})));
+      float nThreads = clamp(uThreads, 0.0, 1.0) * nThreadsCap;
+      float fillSpan = mix(0.22, ${MAX_THREADS.toFixed(1)} * ${THREAD_STEP.toFixed(4)}, clamp(uThreads, 0.0, 1.0));
+      float fill = smoothstep(0.0, 0.1, side) * (1.0 - smoothstep(fillSpan * 0.8, fillSpan, side)) * 0.10 * uHaze;
+
+      float tintPick = 1.0 - step(clamp(uTint, 0.0, 1.0), stripHash(float(i)));
+      float tBase = hueBase + uColors * (float(i) * 0.21 + float(k) * 0.015);
+      vec3 col = lineColor(tBase, tintPick);
       // Amber rides the swell but only where a line is actually lit
       // (weighted by core, not the whole annulus) — a flat wash over the
       // mask read as a spreading brown glow with no strand structure
       // under it (the "amber accent wash" bug caught in the first
-      // headless screenshots of this scene).
-      vec3 amberTint = vec3(1.0, 0.55, 0.18) * clamp(uAccent, 0.0, 1.0) * uSwell * core;
-      echoCol = screenBlend(echoCol, (core + halo + fill) * col + amberTint);
+      // headless screenshots of this scene). Blending the hue toward
+      // amber, rather than adding a separate term on top, keeps it inside
+      // the same weighted-hue accumulation as everything else.
+      col = mix(col, vec3(1.0, 0.55, 0.18), clamp(uAccent, 0.0, 1.0) * uSwell * core);
+
+      float wSilk = (core + halo + fill) * decayK * pres * holeMask * outerMaskSilk;
+      accumulate(I, C, W, wSilk, col);
+
+      float u = side / ${THREAD_STEP.toFixed(4)};
+      float j = floor(u + 0.5);
+      float dj = abs(u - j);
+      float screenSpacing = ${THREAD_STEP.toFixed(4)} / gradMag;
+      // Fades a thread band out once its screen spacing drops under ~2px,
+      // so a small gallery tile or a steep gradient never turns the fan
+      // into moiré instead of feathers.
+      float aa = smoothstep(1.5 * px, 3.0 * px, screenSpacing);
+      float gate = smoothstep(0.5, 1.0, j) * (1.0 - smoothstep(nThreads - 0.5, nThreads + 0.5, j));
+      float coreW = 0.0045 * max(uWidth, 0.05);
+      float thread = exp(-pow(dj * screenSpacing / (0.6 * coreW), 2.0)) * pow(${THREAD_FALLOFF.toFixed(2)}, j) * aa * gate;
+      if (thread > 0.0005) {
+        float tThread = tBase + j * 0.03 * uColors;
+        vec3 threadCol = lineColor(tThread, tintPick);
+        accumulate(I, C, W, thread * decayK * pres * holeMask * outerMaskSilk, threadCol);
+      }
     }
-    combined = screenBlend(combined, echoCol * decayK * pres);
+
+    // The faint geometric web (Round 3): one line (a mirrored chord, which
+    // reads as a star polygon) or circle (a mirrored arc, reading as a
+    // rosette) per echo, folded the same way as the silk but reaching past
+    // its annulus into the corners (report.md/compare.png: a thin
+    // diagonal lattice or a ring of arcs visible outside the flower
+    // proper, currently unmodelled). webShape/webR/webTilt travel
+    // with the regime (driver.ts); webBreath adds a small independent
+    // radius pulse. The wobble reuses echo k's own warp flow offset, so no
+    // new flow uniform is needed for it.
+    vec2 webP = foldedPoint(p) * scaleK * uFieldEff;
+    vec2 wobble = (vec2(vnoise(webP * 5.0 + echoOff0, 37u), vnoise(webP * 5.0 + echoOff0 + 3.1, 41u)) - 0.5) * 0.03;
+    vec2 webQ = webP + wobble;
+    float chordDist = abs(dot(webQ, vec2(cos(uWebTilt), sin(uWebTilt))) - webRBreathed);
+    float circleDist = abs(length(webQ - vec2(webRBreathed, 0.0)) - webRBreathed * 0.8);
+    float webDist = mix(chordDist, circleDist, clamp(uWebShape, 0.0, 1.0));
+    float webCore = exp(-pow(webDist / (0.5 * 0.0045 * max(uWidth, 0.05)), 2.0)) * decayK;
+    float webWeight = webCore * holeMask * outerMaskWeb * clamp(uWeb, 0.0, 1.0);
+    if (webWeight > 0.0005) {
+      // The ramp coordinate opposite the silk's own hueBase, so the web
+      // reads as gold under a cyan regime and vice versa — as in the
+      // reference at 4.39s/5.27s.
+      float tWeb = hueBase + 0.5 + float(k) * 0.02 * uColors;
+      vec3 webHue = silkRamp(tWeb);
+      accumulate(I, C, W, webWeight, webHue);
+    }
   }
 
-  float mask = smoothstep(uHoleEff, uHoleEff + 0.08, r) * (1.0 - smoothstep(0.78, 0.95, r));
-  combined *= mask;
+  vec3 hueAvg = C / max(W, 1e-4);
+  // A small white-hot lift only at the very brightest cores (I close to 1)
+  // — keeps the rest of the picture reading as coloured ribbons rather
+  // than washing toward white the way Round 2's unbounded per-channel
+  // screen blend did.
+  vec3 combined = mix(hueAvg * I, vec3(I), 0.2 * I * I * I);
 
   vec3 ground = vec3(0.0, 0.004, 0.008);
   vec3 outCol = max(combined, ground);
@@ -311,7 +445,13 @@ void main() {
  *  (uBrightS — no onset term: the reference's brightness never flashes on
  *  a beat). uGA/uGB are computed in index.ts like crystal's own composite,
  *  so a quality preset with no bloom passes can zero them outright rather
- *  than sampling glow targets this frame never rendered into. */
+ *  than sampling glow targets this frame never rendered into.
+ *  Round 2's `0.45 + ...` base stripped roughly half the sharp pass's own
+ *  chroma whenever the music wasn't loud, on top of the accumulation-side
+ *  grey-wash bug fixed in SHARP_BODY — raised to 0.8 so the now hue-correct
+ *  picture (report.md: measured saturation 0.71) isn't muted a second time
+ *  downstream; loudness still visibly pushes it further, just from a much
+ *  less washed-out floor. */
 export const COMPOSITE_BODY = `
 void main() {
   vec3 sharp = texture(uSharpTex, vUv).rgb;
@@ -320,7 +460,7 @@ void main() {
   vec3 col = sharp + glowA * uGA + glowB * uGB;
 
   float luma = dot(col, vec3(0.299, 0.587, 0.114));
-  float satAmt = clamp(0.45 + uSatReact * uLevelS, 0.0, 1.4);
+  float satAmt = clamp(0.8 + 0.45 * uSatReact * uLevelS, 0.0, 1.3);
   col = mix(vec3(luma), col, satAmt);
   col *= (0.7 + 0.3 * uBrightS) * uBrightness;
   outColor = vec4(clamp(col, 0.0, 1.0), 1.0);

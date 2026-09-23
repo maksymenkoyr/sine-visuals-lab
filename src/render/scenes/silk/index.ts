@@ -7,6 +7,15 @@ import { NUM_BANDS } from "../../../audio/types.ts";
 import { SHARP_BODY, TAIL_BODY, BLUR_FRAG, COMPOSITE_BODY } from "./glsl.ts";
 import { advanceSilk, createSilkState, fillEchoFlows, ECHO_FLOW_STRIDE, ECHO_MAX, type SilkState } from "./driver.ts";
 
+// Round 3 (user: "make it more complex, add some more colours") — see the
+// silk-scene memory's Round 3 section and glsl.ts's header comments for
+// what each addition is and why: fine trailing threads and a widened haze
+// fill (the reference's "feathers/combs where echoes fan"), a finer
+// strandField grown by another FIELD_OCTAVES tap, a faint geometric web
+// reaching past the silk's own annulus into the corners, and a cyclic
+// multi-hue ramp plus an optional per-strand app-palette tint, replacing
+// Round 2's single cyan-with-a-gold-mix colouring.
+
 // Silk: a mirror kaleidoscope of glowing silk/smoke ribbons, from the
 // measured short vKJu9mfeDS8 (tools/.cache/refs/vKJu9mfeDS8/report.md) — a
 // translucent D8 (D6 in some regimes) flower of teal filament ribbons on
@@ -73,9 +82,9 @@ const SETTINGS: SceneSetting[] = [
     description: "How many nested ribbon lines the field draws.",
     group: "Form",
     min: 1,
-    max: 5,
+    max: 8,
     step: 1,
-    default: 3,
+    default: 5,
   },
   {
     key: "density",
@@ -109,6 +118,26 @@ const SETTINGS: SceneSetting[] = [
     default: 0,
     type: "enum",
     options: ["Auto", "8", "6"],
+  },
+  {
+    key: "threads",
+    label: "Threads",
+    description: "Fine parallel lines trailing each ribbon — the reference's feather/comb fan. 0 = a bare outline.",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+  },
+  {
+    key: "web",
+    label: "Web",
+    description: "Brightness of the faint geometric star/rosette line under the silk, reaching past its own ring into the corners.",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
   },
   {
     key: "flow",
@@ -206,6 +235,26 @@ const SETTINGS: SceneSetting[] = [
     auto: { loudness: 0.2 },
   },
   {
+    key: "colors",
+    label: "Colours",
+    description: "How far strands, echoes and threads spread across the hue ramp instead of sharing one hue.",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+  },
+  {
+    key: "tint",
+    label: "App palette",
+    description: "Share of ribbons that take the app's own colour palette (device menu) instead of the measured reference hues.",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.35,
+  },
+  {
     key: "size",
     label: "Size",
     description: "Overall scale of the flower.",
@@ -258,6 +307,10 @@ const DRIVER_UNIFORM_DECLS = [
   "uniform float uFoldMix;",
   "uniform float uHueBias;",
   "uniform float uSwell;",
+  "uniform float uWebShape;",
+  "uniform float uWebR;",
+  "uniform float uWebTilt;",
+  "uniform float uWebBreath;",
 ].join("\n");
 
 function buildSharpFragSource(): string {
@@ -439,6 +492,10 @@ function createSilkSceneImpl(): Scene {
     prog.setF("uFoldMix", out.foldMix);
     prog.setF("uHueBias", out.hueBias);
     prog.setF("uSwell", out.swell);
+    prog.setF("uWebShape", out.webShape);
+    prog.setF("uWebR", out.webR);
+    prog.setF("uWebTilt", out.webTilt);
+    prog.setF("uWebBreath", out.webBreath);
   }
 
   return {

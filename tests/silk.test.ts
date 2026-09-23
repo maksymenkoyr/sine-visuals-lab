@@ -156,6 +156,22 @@ describe("advanceSilk", () => {
     }
   });
 
+  it("web fields (Round 3) stay within their regime-picked ranges", () => {
+    const st = createSilkState();
+    for (let i = 0; i < 1000; i++) {
+      const onset = i % 7 === 0;
+      const dropOnset = i % 240 === 0;
+      const out = advanceSilk(st, { ...quiet(1 / 60), onset, dropOnset, mid: 0.6, low: 0.5, level: 0.6 }, OPTS);
+      expect(out.webShape).toBeGreaterThanOrEqual(0);
+      expect(out.webShape).toBeLessThanOrEqual(1);
+      // pickRegime draws webR from [0.35, 0.85) then advanceSilk scales by
+      // opts.size (1 here) — a lerp of two in-range values stays in range,
+      // so this should never need the driver's wider [0.05, 1.3] safety clamp.
+      expect(out.webR).toBeGreaterThanOrEqual(0.35 * OPTS.size);
+      expect(out.webR).toBeLessThanOrEqual(0.85 * OPTS.size);
+    }
+  });
+
   it("does not change regime before MIN_BARS_BETWEEN, even on a drop", () => {
     const st = createSilkState();
     // Fire a bar (via the unlocked fallback: every UNLOCKED_BAR_BEATS-th
@@ -210,6 +226,18 @@ describe("advanceSilk", () => {
       const holeRange = 0.6 * 1.7; // opts.hole max * the widest holeMul span
       expect(Math.abs(out.hole - prev.hole)).toBeLessThanOrEqual(holeRange * maxSlope * bigDt * 6 + 1e-6);
       expect(Math.abs(out.foldMix - prev.foldMix)).toBeLessThanOrEqual(1 * maxSlope * bigDt * 6 + 1e-6);
+      // Round 3's web fields travel the same way (lerp/lerpAngle eased by
+      // the same smootherstep) — pin the same "no cut" bound on them.
+      const webRRange = 0.5 * OPTS.size; // pickRegime's [0.35, 0.85) span
+      expect(Math.abs(out.webR - prev.webR)).toBeLessThanOrEqual(webRRange * maxSlope * bigDt * 6 + 1e-6);
+      expect(Math.abs(out.webShape - prev.webShape)).toBeLessThanOrEqual(1 * maxSlope * bigDt * 6 + 1e-6);
+      // webTilt is an angle: a plain difference would falsely flag a "jump"
+      // right when it wraps through 0/2π during an otherwise-smooth travel
+      // (see driver.ts's lerpAngle), so this compares the shortest-way delta.
+      let tiltDelta = (out.webTilt - prev.webTilt) % (Math.PI * 2);
+      if (tiltDelta > Math.PI) tiltDelta -= Math.PI * 2;
+      else if (tiltDelta < -Math.PI) tiltDelta += Math.PI * 2;
+      expect(Math.abs(tiltDelta)).toBeLessThanOrEqual(Math.PI * maxSlope * bigDt * 6 + 1e-6);
       prev = out;
     }
   });

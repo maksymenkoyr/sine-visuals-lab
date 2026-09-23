@@ -45,9 +45,17 @@ import { wrapFlow } from "../../noiseHash.ts";
 export const ECHO_HZ = 30;
 /** Most echoes ever computed (quality-preset counts in index.ts are ≤ this). */
 export const ECHO_MAX = 8;
-/** Octaves in the strand field's domain warp (glsl.ts's warpedField) —
- *  small on purpose: K echoes each pay for this, so cost is K × OCTAVES. */
-export const FIELD_OCTAVES = 2;
+/** Octaves in the strand field's domain warp (glsl.ts's strandField) — one
+ *  wrapped flow offset per octave (warp, v0, v1, v2 — Round 3 added the
+ *  4th for finer curls; each octave gets its own properly-wrapped offset
+ *  rather than the earlier version's `off1 * 1.7` reuse, which changed
+ *  discontinuously right when off1 itself wrapped 256→0). K echoes each
+ *  pay for this, so cost is K × OCTAVES. */
+export const FIELD_OCTAVES = 4;
+/** Level-set lines the sharp pass ever draws — glsl.ts's strand loop bound,
+ *  interpolated in as a literal so it can't drift from the `strands`
+ *  setting's own max (index.ts). */
+export const MAX_STRANDS = 8;
 /** The field's single flow "site" (one field, not ink.ts's three) — same
  *  per-octave rotate+lacunarity transform as ink.ts's noiseFlows, just one
  *  rate pair instead of three. */
@@ -109,6 +117,18 @@ function smootherstep(t: number): number {
   const x = clamp(t, 0, 1);
   return x * x * x * (x * (x * 6 - 15) + 10);
 }
+/** Shortest-way angle interpolation — a plain `lerp` on `webTilt` would
+ *  occasionally spin the web's tilt almost a full turn in one
+ *  REGIME_TRAVEL_SEC when the hash picks values on opposite sides of the
+ *  0/2π seam, reading as a fast, out-of-place spin on an otherwise
+ *  travel-only scene. */
+function lerpAngle(a: number, b: number, t: number): number {
+  const twoPi = Math.PI * 2;
+  let diff = (b - a) % twoPi;
+  if (diff > Math.PI) diff -= twoPi;
+  else if (diff < -Math.PI) diff += twoPi;
+  return a + diff * t;
+}
 
 /** A tiny deterministic hash, seed × k -> [0, 1) — copied from
  *  crystal/driver.ts's own copy (scenes don't import each other). */
@@ -143,6 +163,16 @@ export interface RegimeTarget {
   fieldScaleMul: number;
   zoomDir: 1 | -1;
   hueBias: number;
+  /** 0 = a straight-chord star polygon, 1 = a circular-arc rosette — the
+   *  faint geometric web under the silk (Round 3). Blended like foldMix, so
+   *  it travels smoothly through an in-between shape mid-transition. */
+  webShape: number;
+  /** Web radius, in the same half-height units as `hole`, before the
+   *  per-frame breathing SilkOut.webBreath adds. */
+  webR: number;
+  /** Web rotation, radians — travelled with lerpAngle, not a plain lerp
+   *  (see that function's doc). */
+  webTilt: number;
 }
 
 function lerpRegime(a: RegimeTarget, b: RegimeTarget, t: number): RegimeTarget {
@@ -153,6 +183,9 @@ function lerpRegime(a: RegimeTarget, b: RegimeTarget, t: number): RegimeTarget {
     // The direction itself is never a fraction — see the interface doc.
     zoomDir: b.zoomDir,
     hueBias: lerp(a.hueBias, b.hueBias, t),
+    webShape: lerp(a.webShape, b.webShape, t),
+    webR: lerp(a.webR, b.webR, t),
+    webTilt: lerpAngle(a.webTilt, b.webTilt, t),
   };
 }
 
@@ -166,6 +199,9 @@ function pickRegime(idx: number, foldOpt: number): RegimeTarget {
   const h3 = hash01(idx, 3);
   const h4 = hash01(idx, 4);
   const h5 = hash01(idx, 5);
+  const h6 = hash01(idx, 6);
+  const h7 = hash01(idx, 7);
+  const h8 = hash01(idx, 8);
   const foldMix = foldOpt === 1 ? 0 : foldOpt === 2 ? 1 : h1 < 0.7 ? 0 : 1;
   const holeMul = 0.3 + h2 * 1.4;
   const fieldScaleMul = 0.8 + h3 * 0.6;
@@ -173,7 +209,10 @@ function pickRegime(idx: number, foldOpt: number): RegimeTarget {
   // negative, matching the reference's measured zoom mean of -0.12.
   const zoomDir: 1 | -1 = h4 < 0.6 ? -1 : 1;
   const hueBias = (h5 - 0.5) * 2;
-  return { foldMix, holeMul, fieldScaleMul, zoomDir, hueBias };
+  const webShape = h6 < 0.5 ? 0 : 1;
+  const webR = 0.35 + h7 * 0.5;
+  const webTilt = h8 * Math.PI * 2;
+  return { foldMix, holeMul, fieldScaleMul, zoomDir, hueBias, webShape, webR, webTilt };
 }
 
 export interface SilkState {
@@ -263,6 +302,16 @@ export interface SilkOut {
   fieldScale: number;
   foldMix: number;
   hueBias: number;
+  /** 0 = star-polygon web, 1 = arc rosette — travels like foldMix. */
+  webShape: number;
+  /** Web radius before breathing, half-height units, already ×opts.size. */
+  webR: number;
+  webTilt: number;
+  /** -1..1, a slow sinusoid of `morph` — the web's own subtle breathing,
+   *  applied shader-side as `uWebR + 0.06 * uWebBreath` (kept a separate
+   *  uniform, not baked into webR, so the shader's amplitude constant is
+   *  the one place that number lives). */
+  webBreath: number;
   swell: number;
   midS: number;
   levelS: number;
@@ -330,6 +379,9 @@ export function advanceSilk(st: SilkState, input: SilkInputs, opts: SilkOpts): S
   const fieldScaleMul = lerp(st.from.fieldScaleMul, st.to.fieldScaleMul, e);
   const foldMix = lerp(st.from.foldMix, st.to.foldMix, e);
   const hueBias = lerp(st.from.hueBias, st.to.hueBias, e);
+  const webShape = lerp(st.from.webShape, st.to.webShape, e);
+  const webR = lerp(st.from.webR, st.to.webR, e) * opts.size;
+  const webTilt = lerpAngle(st.from.webTilt, st.to.webTilt, e);
 
   const zoomDirBlend = lerp(st.from.zoomDir, st.to.zoomDir, e);
   const zoomTarget = zoomDirBlend * opts.zoom * (0.6 + 0.8 * st.midS);
@@ -343,6 +395,10 @@ export function advanceSilk(st: SilkState, input: SilkInputs, opts: SilkOpts): S
     fieldScale: Math.max(0.05, opts.size * fieldScaleMul),
     foldMix,
     hueBias,
+    webShape,
+    webR: clamp(webR, 0.05, 1.3),
+    webTilt,
+    webBreath: Math.sin(st.morph * 2.3),
     swell,
     midS: st.midS,
     levelS: st.levelS,
