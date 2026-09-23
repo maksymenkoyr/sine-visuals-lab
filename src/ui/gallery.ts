@@ -6,7 +6,7 @@ import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRe
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
 import { SOURCE_URL } from "../brand.ts";
-import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice } from "../audio/sourcePref.ts";
+import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
 import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "../render/framePace.ts";
@@ -40,13 +40,15 @@ export interface GalleryDeps {
    *  masthead's sound-source picker shows the microphone alone, so it
    *  never names an option a mobile visitor won't see. */
   canCaptureDisplay: () => boolean;
-  /** The source a tile tap will start on — what the picker highlights. */
-  sourceChoice: () => AudioSourceChoice;
+  /** Which source is live, if any — what the picker paints. Only `live` is ever painted as a highlight (see
+   *  SourceState's doc comment in sourcePref.ts). Same signal drives the
+   *  Input card's Source row (src/ui/deviceMenu.ts's createSourceRow). */
+  sourceState: () => SourceState;
   /** Fired inside the picker's click, so starting — or live-swapping to —
    *  screen capture still has its user gesture: a click here starts listening
    *  at once, it doesn't wait for a tile. Resolves once the choice has settled (a cancelled
    *  share picker leaves the old one in place); the picker then re-reads
-   *  sourceChoice() rather than trusting what was clicked. */
+   *  sourceState() rather than trusting what was clicked. */
   onSourceChoice: (next: AudioSourceChoice) => Promise<void>;
 }
 
@@ -58,6 +60,13 @@ export interface Gallery {
    *  fullscreen viz, and further self-limits which tiles actually redraw —
    *  see the priority-band comments above createGallery. */
   tick(nowMs: number): void;
+  /** Repaints the sound-source picker off a fresh sourceState() — called
+   *  whenever liveness changes elsewhere (src/app.ts's attachCapture,
+   *  onCaptureEnded) while the gallery may already be showing, e.g. a capture
+   *  survives a trip back to the gallery and the user hits Chrome's "Stop
+   *  sharing" bar while browsing. A no-op while hidden; show() repaints on
+   *  its own via buildTiles(). */
+  syncSource(): void;
   setError(msg: string | null): void;
   destroy(): void;
 }
@@ -80,12 +89,39 @@ const stylesheet = `
   background: ${GROUND}; color: #fff; font-family: ${FONT_LABEL};
   padding: 32px 56px 40px; box-sizing: border-box;
 }
-.gal-page { max-width: 1328px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+.gal-page { max-width: 1328px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 .gal-mono { font: 400 10.5px ${FONT_MONO}; text-transform: uppercase; }
 
 .gal-mast { display: flex; align-items: center; justify-content: space-between; gap: 16px 32px; flex-wrap: wrap; }
-.gal-source { display: flex; align-items: center; gap: 14px; }
+.gal-source { display: flex; flex-direction: column; gap: 5px; }
+.gal-source-top { display: flex; align-items: center; gap: 14px; }
+/* .gal-source-label and .gal-source-hint share one grid cell (justify-items:
+ * end) instead of sitting side by side, so .gal-source-slot's width is fixed
+ * to whichever child is wider — almost always the hint — and toggling which
+ * one is visible via opacity never nudges .gal-src's fixed right edge
+ * (.gal-mast's own space-between). The shimmer gradient below lives on
+ * .gal-source-hint-text unconditionally, with only its animation keyed off
+ * [data-prompting]: a landing pick then fades the text out from wherever the
+ * sweep had already reached (the band scrolled off-screen reads as a flat
+ * dim colour) instead of jumping from a moving gradient to solid colour
+ * mid-fade. */
+.gal-source-slot { display: grid; justify-items: end; }
+.gal-source-slot > * { grid-area: 1 / 1; transition: opacity .22s ease; white-space: nowrap; }
 .gal-source-label { letter-spacing: .14em; color: rgba(255,255,255,.5); }
+.gal-source-hint { letter-spacing: .14em; color: rgba(255,255,255,.55); opacity: 0; }
+.gal-source-slot[data-prompting] .gal-source-hint { opacity: 1; }
+.gal-source-slot[data-prompting] .gal-source-label { opacity: 0; }
+.gal-source-hint-arrow { display: inline-block; margin-left: .6em; }
+@media (prefers-reduced-motion: no-preference) {
+  .gal-source-hint-text {
+    background: linear-gradient(90deg, rgba(255,255,255,.45) 40%, #fff 50%, rgba(255,255,255,.45) 60%) 100% 0 / 250% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .gal-source-slot[data-prompting] .gal-source-hint-text { animation: gal-hint-shimmer 2.6s ease-in-out infinite; }
+  .gal-source-slot[data-prompting] .gal-source-hint-arrow { animation: gal-hint-nudge 1.3s ease-in-out infinite; }
+  @keyframes gal-hint-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+  @keyframes gal-hint-nudge { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(4px); } }
+}
 .gal-source-row { display: flex; gap: 4px; }
 .gal-src {
   display: flex; align-items: center; gap: 9px; padding: 10px 14px; text-align: left;
@@ -93,10 +129,13 @@ const stylesheet = `
   color: #fff; font: inherit; cursor: pointer;
 }
 .gal-src:hover { border-color: rgba(255,255,255,.4); }
-.gal-src[aria-checked="true"] { border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; }
+/* Paint keys off data-state, not aria-checked — aria-checked stays purely
+ * semantic (radio state for assistive tech). Live is the only state this
+ * paints; anything else (idle) is the button's own plain default look. */
+.gal-src[data-state="live"] { border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; }
 .gal-src[data-solo] { cursor: default; }
 .gal-src-dot { width: 5px; height: 5px; border-radius: 50%; border: 1px solid rgba(255,255,255,.45); box-sizing: border-box; flex: none; }
-.gal-src[aria-checked="true"] .gal-src-dot { background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN}; }
+.gal-src[data-state="live"] .gal-src-dot { background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN}; }
 .gal-src-name { font: 400 13.5px ${FONT_LABEL}; }
 .gal-src-hint { font: 400 9.5px ${FONT_MONO}; letter-spacing: .1em; color: rgba(255,255,255,.55); margin-top: 2px; }
 
@@ -135,7 +174,7 @@ const stylesheet = `
 .gal-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .gal-shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(5,7,10,.7), transparent 40%); pointer-events: none; }
 .gal-over { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
-.gal-name { font: 500 17px/1 ${FONT_LABEL}; min-width: 0; }
+.gal-name { font: 400 14px/1 ${FONT_LABEL}; min-width: 0; }
 .gal-reason {
   font: 400 11px ${FONT_MONO}; letter-spacing: .14em; flex: none; white-space: nowrap;
   color: rgba(255,255,255,.7); border: 1px solid rgba(255,255,255,.3);
@@ -157,14 +196,22 @@ const stylesheet = `
 
 @media (max-width: ${NARROW_BELOW_PX}px) {
   .gal-root { padding: 24px 16px 32px; }
-  .gal-page { gap: 24px; }
-  /* No room for the label beside the mark and both options on a phone. */
-  .gal-source-label { display: none; }
+  .gal-page { gap: 16px; }
+  /* No room for the label beside the mark and both options on a phone — the
+   * hint takes its place on its own line above the buttons instead. */
+  .gal-source-top { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .gal-source-slot { justify-items: start; }
+  .gal-source-slot .gal-source-label { display: none; }
+  /* Otherwise the slot would still reserve its line (both children just
+   * fade to opacity 0) once a pick lands — hide it outright instead, at the
+   * cost of a one-line shift when that happens. */
+  .gal-source-slot:not([data-prompting]) { display: none; }
   .gal-mast { gap: 12px; }
   .gal-src { padding: 9px 8px; gap: 6px; }
   .gal-src-hint { letter-spacing: .06em; }
+  .gal-source-hint { letter-spacing: .06em; }
   .gal-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .gal-name { font-size: 15px; }
+  .gal-name { font-size: 13px; }
   /* A phone at arm's length: the fold is how the drafts are reached at all. */
   .gal-fold { min-height: 40px; padding: 8px 14px; }
 }
@@ -312,38 +359,79 @@ export function createGallery(deps: GalleryDeps): Gallery {
   // lives here and nowhere else on the page.
   const mast = el("div", "gal-mast");
 
-  // Sound source: which capture a tile tap starts on. A radio pair where
-  // screen capture exists; the microphone alone, as a plain statement, where
-  // it doesn't.
+  // Sound source: which capture is listening, and the way to start one. A radio pair where
+  // screen capture exists; the microphone alone, as a plain statement (no
+  // radio semantics, no hint — there's nothing to choose between), where it
+  // doesn't. canChoose is read once: display capture's availability never
+  // changes mid-session (same assumption refreshAudioPromptButtons in
+  // app.ts makes for the start prompt).
+  const canChoose = deps.canCaptureDisplay();
   const source = el("div", "gal-source");
+  const sourceTop = el("div", "gal-source-top");
+  const sourceSlot = el("div", "gal-source-slot");
+  const sourceLabel = el("div", "gal-mono gal-source-label", "Sound source");
   const sourceRow = el("div", "gal-source-row");
-  sourceRow.setAttribute("role", "radiogroup");
-  sourceRow.setAttribute("aria-label", "Sound source");
-  const sourceButtons = new Map<AudioSourceChoice, HTMLButtonElement>();
+  if (canChoose) {
+    sourceRow.setAttribute("role", "radiogroup");
+    sourceRow.setAttribute("aria-label", "Sound source");
+  }
+  const LIVE_LABEL = "LISTENING";
+  const sourceButtons = new Map<AudioSourceChoice, { btn: HTMLButtonElement; hintEl: HTMLElement; descriptor: string }>();
+  // Only where there's an actual choice to nudge toward — the solo path (no
+  // display capture) has nothing to pick between, so it keeps just the plain
+  // label, same as before this hint existed.
+  const sourceHint = canChoose ? el("div", "gal-mono gal-source-hint") : null;
+  if (sourceHint) {
+    sourceHint.append(
+      el("span", "gal-source-hint-text", "PICK A SOURCE TO START"),
+      el("span", "gal-source-hint-arrow", "›"),
+    );
+  }
   const refreshSource = (): void => {
-    const current = deps.sourceChoice();
-    for (const [choice, btn] of sourceButtons) btn.setAttribute("aria-checked", String(choice === current));
+    const state = deps.sourceState();
+    for (const [choice, entry] of sourceButtons) {
+      // Live is the only state a button ever paints — a stored preference or
+      // a granted mic permission never highlights a button on its own, since
+      // a user reads any highlight as "this is running" (see SourceState's
+      // doc comment in sourcePref.ts).
+      const uiState: "live" | "idle" = choice === state.choice && state.live ? "live" : "idle";
+      entry.btn.dataset.state = uiState;
+      if (canChoose) entry.btn.setAttribute("aria-checked", String(uiState === "live"));
+      entry.hintEl.textContent = uiState === "live" ? LIVE_LABEL : entry.descriptor;
+    }
+    if (sourceHint) {
+      // Both children live in .gal-source-slot's one grid cell — see that
+      // rule's own comment for why this toggle can't shift .gal-src's fixed
+      // position.
+      sourceSlot.toggleAttribute("data-prompting", !state.live);
+      sourceHint.setAttribute("aria-hidden", String(state.live));
+      sourceLabel.setAttribute("aria-hidden", String(!state.live));
+    }
   };
-  const addSource = (choice: AudioSourceChoice, name: string, hint: string, title?: string): void => {
+  const addSource = (choice: AudioSourceChoice, name: string, descriptor: string, title?: string): void => {
     const btn = el("button", "gal-src");
     btn.type = "button";
-    btn.setAttribute("role", "radio");
     if (title) btn.title = title;
+    const hintEl = el("div", "gal-src-hint", descriptor);
     const text = el("div", "");
-    text.append(el("div", "gal-src-name", name), el("div", "gal-src-hint", hint));
+    text.append(el("div", "gal-src-name", name), hintEl);
     btn.append(el("div", "gal-src-dot"), text);
-    if (deps.canCaptureDisplay()) {
+    if (canChoose) {
+      btn.setAttribute("role", "radio");
       btn.addEventListener("click", () => void deps.onSourceChoice(choice).then(refreshSource, refreshSource));
     } else {
       btn.dataset.solo = "";
       btn.tabIndex = -1;
     }
-    sourceButtons.set(choice, btn);
+    sourceButtons.set(choice, { btn, hintEl, descriptor });
     sourceRow.appendChild(btn);
   };
-  addSource("mic", "Microphone", "DEFAULT · TAP A SCENE");
-  if (deps.canCaptureDisplay()) addSource("display", "Share a tab", "CLEANER SIGNAL", DISPLAY_SHARE_GUIDE);
-  source.append(el("div", "gal-mono gal-source-label", "Sound source"), sourceRow);
+  addSource("mic", "Microphone", "ROOM AUDIO");
+  if (canChoose) addSource("display", "Share a tab", "CLEANER SIGNAL", DISPLAY_SHARE_GUIDE);
+  sourceSlot.appendChild(sourceLabel);
+  if (sourceHint) sourceSlot.appendChild(sourceHint);
+  sourceTop.append(sourceSlot, sourceRow);
+  source.appendChild(sourceTop);
   mast.append(createBrandMark(56), source);
 
   const errorBanner = el("div", "gal-error");
@@ -667,6 +755,10 @@ export function createGallery(deps: GalleryDeps): Gallery {
       // shader recompiled the next time the gallery is shown.
       visible = false;
       root.style.display = "none";
+    },
+
+    syncSource(): void {
+      if (visible) refreshSource();
     },
 
     tick(nowMs: number): void {

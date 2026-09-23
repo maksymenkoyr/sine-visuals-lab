@@ -37,7 +37,7 @@ import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
-import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice } from "../audio/sourcePref.ts";
+import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -179,12 +179,15 @@ export interface DeviceMenuDeps {
   onPickPalette: (id: string) => void;
   /** Shown in the Bands card's status line — where the bars are coming from. */
   getAudioStatus: () => AudioStatus;
-  /** This device's mic-vs-screen capture preference (src/audio/sourcePref.ts)
-   *  — drives the Input card's Source row. Null on a renderer or the
+  /** This device's mic-vs-screen capture state (src/audio/sourcePref.ts's
+   *  SourceState) — drives the Input card's Source row, including whether the
+   *  lit chip means "listening now" (the only thing it ever highlights — see
+   *  SourceState's doc comment). Same signal drives the gallery masthead's
+   *  picker (src/ui/gallery.ts's refreshSource). Null on a renderer or the
    *  synthetic feed (no local capture to choose a source for), which is what
    *  hides the row — the same null-hides-itself convention as the Loudness
    *  card's `lufs` frame field. */
-  getAudioSourceChoice: () => AudioSourceChoice | null;
+  getSourceState: () => SourceState | null;
   onAudioSourceChange: (choice: AudioSourceChoice) => void;
   /** Whether this browser can offer the Screen option at all — see
    *  sourcePref.ts's header for the exact browser/OS matrix. */
@@ -1686,12 +1689,32 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // sites.
   const sourceListStyle = `display: flex; gap: 4px; margin-top: 4px;`;
   const sourceChipStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
-  const sourceChipLitStyle = `${chipBtnLitStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
+  // Live = green border + green tint, the same INPUT_GREEN language as the
+  // gallery masthead's .gal-src[data-state="live"] and this row's own accent
+  // (--vc-accent, set below) — echoing "listening now" in the same colour on
+  // both surfaces rather than the generic white "lit" chip look every other
+  // enum picker in this panel uses.
+  const sourceChipLiveStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px; border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; color: #fff;`;
+  // The chip's status dot — same status-light idiom as the gallery's
+  // .gal-src-dot, one small element whose border/fill swaps with the same
+  // two states as the chip itself (idle/live) in refresh() below.
+  const sourceDotStyle = `display: inline-block; width: 6px; height: 6px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.45); box-sizing: border-box; margin-right: 6px; vertical-align: middle;`;
+  const sourceDotLiveStyle = `${sourceDotStyle} background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN};`;
   // Always visible while Screen is the active source, not a .vc-hint: the hint
   // only reveals on hover/focus, and on touch that means after the tap that
   // already opened the picker — too late to be a guide. Same reasoning as
   // createTraceLegend's always-on comment in controlsKit.ts.
   const sourceGuideStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL}; color: rgba(255,255,255,0.55);`;
+  // Same always-on reasoning as sourceGuideStyle just above — the status line
+  // built from this state (refresh() below) is the row's answer to "which
+  // one is picked and is it actually listening", so it can't be hover-gated
+  // either. Per-option description now lives only in the chip's title
+  // tooltip (SOURCE_OPTIONS.title) rather than duplicated here. No inline
+  // color: the .vc-src-status class (controlsTheme.ts) owns it instead, so
+  // its [data-prompting] shimmer override — set in refresh() below — can
+  // actually win; an inline color here would beat any class rule regardless
+  // of specificity.
+  const sourceStatusStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL};`;
   const SOURCE_OPTIONS: { choice: AudioSourceChoice; text: string; title: string }[] = [
     { choice: "mic", text: "Mic", title: "The room's microphone" },
     {
@@ -1717,11 +1740,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     list.style.cssText = sourceListStyle;
     const buttons = SOURCE_OPTIONS.map((opt) => {
       const btn = document.createElement("button");
-      btn.textContent = opt.text;
       btn.title = opt.title;
       btn.style.cssText = sourceChipStyle;
+      const dot = document.createElement("span");
+      dot.style.cssText = sourceDotStyle;
+      btn.append(dot, document.createTextNode(opt.text));
       btn.addEventListener("click", () => deps.onAudioSourceChange(opt.choice));
-      return { choice: opt.choice, btn };
+      return { choice: opt.choice, btn, dot };
     });
     list.append(...buttons.map((b) => b.btn));
 
@@ -1729,23 +1754,34 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     guide.style.cssText = sourceGuideStyle;
     guide.textContent = DISPLAY_SHARE_GUIDE;
 
-    const hint = document.createElement("div");
-    hint.className = "vc-hint";
+    const status = document.createElement("div");
+    status.className = "vc-src-status";
+    status.style.cssText = sourceStatusStyle;
 
-    el.append(head, list, guide, hint);
+    el.append(head, list, guide, status);
 
     return {
       el,
       refresh(): void {
-        const choice = deps.getAudioSourceChoice();
-        el.style.display = choice === null ? "none" : "";
+        const state = deps.getSourceState();
+        el.style.display = state === null ? "none" : "";
+        if (state === null) return;
         const canDisplay = deps.canCaptureDisplay();
-        for (const { choice: c, btn } of buttons) {
-          btn.style.cssText = c === choice ? sourceChipLitStyle : sourceChipStyle;
+        for (const { choice: c, btn, dot } of buttons) {
+          // Live is the only state a chip ever paints — a stored preference
+          // or a granted mic permission never highlights a chip on its own
+          // (see SourceState's doc comment in sourcePref.ts).
+          const isLive = c === state.choice && state.live;
+          btn.style.cssText = isLive ? sourceChipLiveStyle : sourceChipStyle;
+          dot.style.cssText = isLive ? sourceDotLiveStyle : sourceDotStyle;
           btn.hidden = c === "display" && !canDisplay;
         }
-        guide.style.display = choice === "display" ? "" : "none";
-        hint.textContent = SOURCE_OPTIONS.find((o) => o.choice === choice)?.title ?? "";
+        guide.style.display = state.choice === "display" ? "" : "none";
+        // See .vc-src-status[data-prompting] (controlsTheme.ts) for the
+        // shimmer this drives while nothing's live yet.
+        status.toggleAttribute("data-prompting", !state.live);
+        const name = SOURCE_OPTIONS.find((o) => o.choice === state.choice)?.text ?? "";
+        status.textContent = state.live ? `${name} — listening` : "Pick a source above";
       },
     };
   }

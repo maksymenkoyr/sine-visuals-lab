@@ -46,6 +46,19 @@
  * the source of truth for get/set within a session, seeded once from
  * localStorage, so behavior stays correct even where localStorage is
  * unavailable (node test env, Safari private mode).
+ *
+ * Every picker (the gallery masthead, the Input card's Source row) paints only
+ * two states: live (a capture of that source is actually running) or not. A
+ * stored preference is never painted as a highlight — a user reads any
+ * highlight as "this is running". resolveSourceState() below is what lets a
+ * caller (src/app.ts) that also knows about live capture state hand every
+ * picker the same SourceState, so they can never say different things about
+ * what's actually listening.
+ *
+ * Nor does a stored preference start anything on its own: an implicit start
+ * (opening a scene, tapping a tile) only ever uses a source whose permission
+ * is still active, so no browser prompt can appear that the user didn't just
+ * ask for — see watchMicPermission below and src/app.ts's autoStartSource.
  */
 
 export type AudioSourceChoice = "mic" | "display";
@@ -60,7 +73,8 @@ function isAudioSourceChoice(value: string): value is AudioSourceChoice {
 function loadInitial(): AudioSourceChoice {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw !== null && isAudioSourceChoice(raw) ? raw : AUDIO_SOURCE_DEFAULT;
+    if (raw !== null && isAudioSourceChoice(raw)) return raw;
+    return AUDIO_SOURCE_DEFAULT;
   } catch {
     return AUDIO_SOURCE_DEFAULT;
   }
@@ -83,6 +97,54 @@ export function getAudioSourceChoice(): AudioSourceChoice {
 export function setAudioSourceChoice(next: AudioSourceChoice): void {
   cache = next;
   persist();
+}
+
+export type MicPermission = "granted" | "prompt" | "denied" | "unknown";
+
+/** Subscribes to the browser's microphone permission status and returns its
+ *  current state; `onChange` fires on every later transition (a grant from
+ *  the browser's own prompt, a reset while the page is open). This is the
+ *  "is the mic's permission still active" check an implicit start needs —
+ *  see src/app.ts's autoStartSource. Screen capture has no equivalent: its
+ *  permission is never remembered, getDisplayMedia prompts on every call.
+ *  Resolves "unknown" wherever navigator.permissions is absent or its query
+ *  rejects (Safari and older Firefox reject the "microphone" name) — same
+ *  typeof-navigator guard style as displayCaptureSupported() below. */
+export async function watchMicPermission(onChange: (p: MicPermission) => void): Promise<MicPermission> {
+  if (typeof navigator === "undefined" || !navigator.permissions) return "unknown";
+  try {
+    const status = await navigator.permissions.query({ name: "microphone" as PermissionName });
+    status.addEventListener("change", () => onChange(status.state));
+    return status.state;
+  } catch {
+    return "unknown";
+  }
+}
+
+/** One resolved source state. Every picker (the gallery masthead, the Input
+ *  card's Source row) renders off this instead of AudioSourceChoice alone, so
+ *  none of them can claim "listening" before a capture actually is. */
+export interface SourceState {
+  choice: AudioSourceChoice;
+  /** A capture of `choice` is actually running right now — the only thing any
+   *  picker highlights. See this file's header. */
+  live: boolean;
+}
+
+/** Pure so it's node-testable without a DOM: the caller (src/app.ts) does the
+ *  impure part — reading the live capture globals and handing in the
+ *  preferred choice (resolveInitialSource(), itself sourced from the
+ *  `?source=` URL pin or localStorage). `liveChoice` wins outright — a
+ *  capture actually running reports `live: true` regardless of what's
+ *  stored, which matters right after a source swap where the persisted pref
+ *  hasn't caught up yet (see swapAudioSource's ordering in src/app.ts).
+ *  Otherwise it's just the preferred choice, not live. */
+export function resolveSourceState(input: {
+  liveChoice: AudioSourceChoice | null;
+  preferredChoice: AudioSourceChoice;
+}): SourceState {
+  if (input.liveChoice !== null) return { choice: input.liveChoice, live: true };
+  return { choice: input.preferredChoice, live: false };
 }
 
 /** Whether this browser exposes getDisplayMedia at all. Doesn't (can't)

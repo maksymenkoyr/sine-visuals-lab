@@ -145,7 +145,15 @@
       /* Tap-to-start-audio prompt. One or two buttons live inside — mic-only
        * where display capture isn't offered, or a Mic/Screen choice where it
        * is (see app.ts's refreshAudioPromptButtons). Column layout so
-       * #audioPromptGuide can sit under the button row. */
+       * #audioPromptGuide can sit under the button row.
+       *
+       * Restyled to the same hairline/square-corner language as the gallery
+       * masthead's .gal-src and the panel's Source row (src/ui/gallery.ts,
+       * src/ui/deviceMenu.ts) — this is a third picker surface, and used to
+       * be the one nobody had touched: a plain pill with a white glow. This
+       * file is plain HTML, not a templated stylesheet, so these values
+       * (font, colors, radius) are kept in sync with src/ui/controlsTheme.ts
+       * by hand rather than importing it. */
       #audioPrompt {
         position: fixed;
         left: 50%;
@@ -156,29 +164,80 @@
         flex-direction: column;
         align-items: center;
         gap: 8px;
-        font: 600 13px/1.4 system-ui, sans-serif;
+        font: 400 13px/1.4 "Chakra Petch", system-ui, sans-serif;
         color: #fff;
       }
       #audioPromptRow {
         display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
         align-items: center;
         gap: 8px;
       }
+      /* The same animated hint as the gallery masthead's .gal-source-hint
+       * (src/ui/gallery.ts) — mono caps, a shimmer sweeping toward the
+       * buttons and a nudging arrow — kept in sync by hand, like the rest of
+       * this block. No [data-prompting] toggle needed: the whole prompt only
+       * shows while nothing is listening. */
+      #audioPromptLabel {
+        margin-right: 10px;
+        font: 400 10.5px "Share Tech Mono", ui-monospace, monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        color: rgba(255, 255, 255, 0.55);
+      }
+      .apHintArrow {
+        display: inline-block;
+        margin-left: 0.6em;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .apHintText {
+          background: linear-gradient(90deg, rgba(255, 255, 255, 0.45) 40%, #fff 50%, rgba(255, 255, 255, 0.45) 60%) 100% 0 / 250% 100%;
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+          animation: ap-hint-shimmer 2.6s ease-in-out infinite;
+        }
+        .apHintArrow {
+          animation: ap-hint-nudge 1.3s ease-in-out infinite;
+        }
+        @keyframes ap-hint-shimmer {
+          from { background-position: 100% 0; }
+          to { background-position: 0 0; }
+        }
+        @keyframes ap-hint-nudge {
+          0%, 100% { transform: translateX(0); }
+          50% { transform: translateX(4px); }
+        }
+      }
       #audioPrompt button {
+        display: flex;
+        align-items: center;
+        gap: 9px;
         font: inherit;
-        padding: 10px 18px;
-        border-radius: 999px;
-        border: 1px solid #fff5;
-        background: #000c;
+        padding: 10px 16px;
+        border-radius: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(0, 0, 0, 0.75);
         color: inherit;
         cursor: pointer;
       }
-      /* The remembered source (src/audio/sourcePref.ts) — a brighter border,
-       * the same "lit chip" idiom the controls panel uses. Emphasis only;
-       * app.ts never fires a capture off this alone — see autoStartSource. */
-      #audioPrompt button[data-remembered] {
-        border-color: #fff;
-        box-shadow: 0 0 12px #fff4;
+      #audioPrompt button:hover {
+        border-color: rgba(255, 255, 255, 0.4);
+      }
+      /* Same status-dot idiom as .gal-src-dot (src/ui/gallery.ts) and the
+       * Input card's Source row (src/ui/deviceMenu.ts) — a plain border, no
+       * other state: this overlay only ever shows before anything is
+       * listening (updateMicPrompt in app.ts hides it the moment a capture
+       * attaches), so idle is the only state either button is ever in. */
+      .apDot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 255, 255, 0.45);
+        box-sizing: border-box;
+        flex: none;
       }
       /* Filled from DISPLAY_SHARE_GUIDE (src/audio/sourcePref.ts), which owns
        * this copy; shown only where the Screen button is offered. */
@@ -204,9 +263,9 @@
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)">&#9881;</button>
     <div id="audioPrompt">
       <div id="audioPromptRow">
-        <span id="audioPromptLabel" hidden>Tap to start audio</span>
-        <button id="audioPromptMicBtn">Tap to enable mic</button>
-        <button id="audioPromptDisplayBtn" hidden>Screen</button>
+        <span id="audioPromptLabel" hidden><span class="apHintText">Pick a source to start</span><span class="apHintArrow">›</span></span>
+        <button id="audioPromptMicBtn"><span class="apDot"></span><span id="audioPromptMicLabel">Tap to enable mic</span></button>
+        <button id="audioPromptDisplayBtn" hidden><span class="apDot"></span><span>Screen</span></button>
       </div>
       <p id="audioPromptGuide" hidden></p>
     </div>

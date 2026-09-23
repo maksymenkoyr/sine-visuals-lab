@@ -2,8 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   getAudioSourceChoice,
   setAudioSourceChoice,
+  resolveSourceState,
   displayCaptureSupported,
+  watchMicPermission,
   AUDIO_SOURCE_DEFAULT,
+  type MicPermission,
 } from "../src/audio/sourcePref.ts";
 
 // Like powerMode/autoGain/bandSplit, audio-source choice has no per-scene
@@ -59,6 +62,81 @@ describe("audio source persistence with a stubbed localStorage", () => {
   it("persists a set through localStorage.setItem", () => {
     setAudioSourceChoice("display");
     expect(store.get("vibe.audioSource")).toBe("display");
+  });
+
+  it("keeps a set for the session even if the write itself fails", async () => {
+    const boom: Pick<Storage, "getItem" | "setItem"> = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("quota exceeded");
+      },
+    };
+    vi.stubGlobal("localStorage", boom);
+    vi.resetModules();
+    const fresh = await import("../src/audio/sourcePref.ts");
+    fresh.setAudioSourceChoice("display");
+    expect(fresh.getAudioSourceChoice()).toBe("display");
+  });
+});
+
+describe("resolveSourceState", () => {
+  it("is idle when nothing is live", () => {
+    expect(resolveSourceState({ liveChoice: null, preferredChoice: "mic" })).toEqual({
+      choice: "mic",
+      live: false,
+    });
+  });
+
+  it("reports the preferred choice, not live, when nothing is capturing", () => {
+    expect(resolveSourceState({ liveChoice: null, preferredChoice: "display" })).toEqual({
+      choice: "display",
+      live: false,
+    });
+  });
+
+  it("live wins over a mismatched stored preference", () => {
+    // Exactly the swapAudioSource ordering gap: a capture already running as
+    // "display" while the persisted pref still says "mic" (attach happens
+    // before persist) must report the LIVE kind, never the stale pref.
+    const state = resolveSourceState({ liveChoice: "display", preferredChoice: "mic" });
+    expect(state).toEqual({ choice: "display", live: true });
+  });
+});
+
+describe("watchMicPermission", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("is unknown when navigator is absent (this suite's default node env)", async () => {
+    expect(await watchMicPermission(() => {})).toBe("unknown");
+  });
+
+  it("is unknown when the query rejects (Safari, older Firefox)", async () => {
+    vi.stubGlobal("navigator", {
+      permissions: { query: () => Promise.reject(new Error("not supported")) },
+    });
+    expect(await watchMicPermission(() => {})).toBe("unknown");
+  });
+
+  it("resolves the initial state and reports later changes", async () => {
+    // A real EventTarget, so addEventListener/dispatchEvent actually wire up
+    // under node the way a real PermissionStatus does.
+    class FakeStatus extends EventTarget {
+      state: MicPermission;
+      constructor(state: MicPermission) {
+        super();
+        this.state = state;
+      }
+    }
+    const status = new FakeStatus("granted");
+    vi.stubGlobal("navigator", { permissions: { query: () => Promise.resolve(status) } });
+    const changes: MicPermission[] = [];
+    expect(await watchMicPermission((p) => changes.push(p))).toBe("granted");
+    // A permission reset while the page is open.
+    status.state = "prompt";
+    status.dispatchEvent(new Event("change"));
+    expect(changes).toEqual(["prompt"]);
   });
 });
 
