@@ -419,6 +419,30 @@ const stylesheet = `
 /* Chrome buttons (index.html) ring while their thing is active: the gear
  * while this panel is open, fullscreen while immersed. */
 .iconBtn[aria-pressed="true"] { border-color: rgba(255, 255, 255, 0.5); color: #fff; }
+
+/* The Source row's (deviceMenu.ts's createSourceRow) "nothing picked yet"
+ * status line — the panel's echo of the gallery masthead's animated hint
+ * (src/ui/gallery.ts's .gal-source-hint-text): a shimmer sweep instead of
+ * flat dim text, so a first-time visitor gets the same nudge in both places.
+ * Base colour lives here rather than in the row's own inline cssText so this
+ * rule can override it — an inline color would win over any class rule. Only
+ * the text shimmers, no arrow: these chips sit above the line, not beside
+ * it, so there's no single direction to point. */
+.vc-src-status { color: rgba(255, 255, 255, 0.5); }
+@media (prefers-reduced-motion: no-preference) {
+  .vc-src-status[data-prompting] {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.4) 40%, #fff 50%, rgba(255, 255, 255, 0.4) 60%) 100% 0 /
+      250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: vc-src-shimmer 2.6s ease-in-out infinite;
+  }
+  @keyframes vc-src-shimmer {
+    from { background-position: 100% 0; }
+    to { background-position: 0 0; }
+  }
+}
 `;
 
 /** Installs the panel's stylesheet once; safe to call from every creator. */

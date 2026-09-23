@@ -1687,11 +1687,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // sites.
   const sourceListStyle = `display: flex; gap: 4px; margin-top: 4px;`;
   const sourceChipStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
-  const sourceChipLitStyle = `${chipBtnLitStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
-  // Between sourceChipStyle and sourceChipLitStyle: picked but not listening
+  // Live = green border + green tint, the same INPUT_GREEN language as the
+  // gallery masthead's .gal-src[data-state="live"] and this row's own accent
+  // (--vc-accent, set below) — echoing "listening now" in the same colour on
+  // both surfaces rather than the generic white "lit" chip look every other
+  // enum picker in this panel uses.
+  const sourceChipLiveStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px; border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; color: #fff;`;
+  // Between sourceChipStyle and sourceChipLiveStyle: picked but not listening
   // yet (SourceState.chosen without .live) — see the Source row's refresh()
   // below for why that's no longer painted the same as live.
   const sourceChipReadyStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px; border-color: rgba(255,255,255,0.4); color: rgba(255,255,255,0.85);`;
+  // The chip's status dot — same status-light idiom as the gallery's
+  // .gal-src-dot, one small element whose border/fill swaps with the same
+  // three states as the chip itself (idle/ready/live) in refresh() below.
+  const sourceDotStyle = `display: inline-block; width: 6px; height: 6px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.45); box-sizing: border-box; margin-right: 6px; vertical-align: middle;`;
+  const sourceDotReadyStyle = `${sourceDotStyle} border-color: rgba(255,255,255,0.85);`;
+  const sourceDotLiveStyle = `${sourceDotStyle} background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN};`;
   // Always visible while Screen is the active source, not a .vc-hint: the hint
   // only reveals on hover/focus, and on touch that means after the tap that
   // already opened the picker — too late to be a guide. Same reasoning as
@@ -1701,8 +1712,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // built from this state (refresh() below) is the row's answer to "which
   // one is picked and is it actually listening", so it can't be hover-gated
   // either. Per-option description now lives only in the chip's title
-  // tooltip (SOURCE_OPTIONS.title) rather than duplicated here.
-  const sourceStatusStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL}; color: rgba(255,255,255,0.5);`;
+  // tooltip (SOURCE_OPTIONS.title) rather than duplicated here. No inline
+  // color: the .vc-src-status class (controlsTheme.ts) owns it instead, so
+  // its [data-prompting] shimmer override — set in refresh() below — can
+  // actually win; an inline color here would beat any class rule regardless
+  // of specificity.
+  const sourceStatusStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL};`;
   const SOURCE_OPTIONS: { choice: AudioSourceChoice; text: string; title: string }[] = [
     { choice: "mic", text: "Mic", title: "The room's microphone" },
     {
@@ -1728,11 +1743,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     list.style.cssText = sourceListStyle;
     const buttons = SOURCE_OPTIONS.map((opt) => {
       const btn = document.createElement("button");
-      btn.textContent = opt.text;
       btn.title = opt.title;
       btn.style.cssText = sourceChipStyle;
+      const dot = document.createElement("span");
+      dot.style.cssText = sourceDotStyle;
+      btn.append(dot, document.createTextNode(opt.text));
       btn.addEventListener("click", () => deps.onAudioSourceChange(opt.choice));
-      return { choice: opt.choice, btn };
+      return { choice: opt.choice, btn, dot };
     });
     list.append(...buttons.map((b) => b.btn));
 
@@ -1741,6 +1758,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     guide.textContent = DISPLAY_SHARE_GUIDE;
 
     const status = document.createElement("div");
+    status.className = "vc-src-status";
     status.style.cssText = sourceStatusStyle;
 
     el.append(head, list, guide, status);
@@ -1752,12 +1770,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         el.style.display = state === null ? "none" : "";
         if (state === null) return;
         const canDisplay = deps.canCaptureDisplay();
-        for (const { choice: c, btn } of buttons) {
-          btn.style.cssText =
-            c !== state.choice ? sourceChipStyle : state.live ? sourceChipLitStyle : state.chosen ? sourceChipReadyStyle : sourceChipStyle;
+        for (const { choice: c, btn, dot } of buttons) {
+          const uiState: "live" | "ready" | "idle" = c !== state.choice ? "idle" : state.live ? "live" : state.chosen ? "ready" : "idle";
+          btn.style.cssText = uiState === "live" ? sourceChipLiveStyle : uiState === "ready" ? sourceChipReadyStyle : sourceChipStyle;
+          dot.style.cssText = uiState === "live" ? sourceDotLiveStyle : uiState === "ready" ? sourceDotReadyStyle : sourceDotStyle;
           btn.hidden = c === "display" && !canDisplay;
         }
         guide.style.display = state.choice === "display" ? "" : "none";
+        // See .vc-src-status[data-prompting] (controlsTheme.ts) for the
+        // shimmer this drives while nothing's chosen yet.
+        status.toggleAttribute("data-prompting", !state.chosen);
         const name = SOURCE_OPTIONS.find((o) => o.choice === state.choice)?.text ?? "";
         status.textContent = !state.chosen ? "Pick a source above" : state.live ? `${name} — listening` : `${name} — tap to start`;
       },
