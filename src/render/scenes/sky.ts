@@ -444,24 +444,36 @@ const float BRUSH_R_CORE = 0.03;
 const float BRUSH_R_IN = 0.22;
 const float BRUSH_R_OUT = 0.34;
 const float BRUSH_BASE = 0.4;
-const int FLOATER_SEGMENTS = 5; // control points per floater's curved body (head at index 0)
+const int FLOATER_SEGMENTS = 9; // control points per floater's curved body (head at index 0) — raised from v2's 5 so the polyline traces a smooth curve rather than faceting it
 const float FLOATER_SPAN = 1.3;
 const float FLOATER_DRIFT_R = 0.05;
 const float FLOATER_JUMP_MIN = 2.0;
 const float FLOATER_JUMP_MAX = 5.0;
 const float FLOATER_JUMP_EASE = 0.35;
-const float FLOATER_LEN = 0.085; // body length, screen p-units — measured bigger against a real reference than v1's guess
-const float FLOATER_CURL = 0.6; // sideways kink per segment, relative to FLOATER_LEN
-const float FLOATER_HEAD_R = 0.010;
-const float FLOATER_TAIL_R = 0.003;
-const float FLOATER_GLOW_R = 0.014; // tighter than v1 — the reference reads crisp, not a diffuse blur
+const float FLOATER_LEN = 0.085; // body length, screen p-units
+// A real side-by-side against the reference (not just its aggregate stats)
+// showed v2's floaters were an angular zigzag, not a smooth curve — each
+// control point's kink was an independent hash, so consecutive segments had
+// no correlated heading. FLOATER_CURVE_* below drive one low-frequency bend
+// (the reference's single gentle hook) plus a much smaller secondary wave
+// for organic irregularity, as a continuous function of t — not another
+// source of sharp corners.
+const float FLOATER_CURVE_A1 = 0.85; // dominant bend amplitude, relative to FLOATER_LEN
+const float FLOATER_CURVE_A2 = 0.08; // secondary wobble amplitude, relative to FLOATER_LEN — kept subtle; too strong and it reads as a second kink instead of texture
+const float FLOATER_MID_R = 0.0085; // stroke width for most of the body — the reference is fairly uniform, not a strong taper
+const float FLOATER_TAIL_R = 0.0028; // width only at the very tail tip
+const float FLOATER_TAPER_START = 0.62; // width holds at FLOATER_MID_R until this far along, then narrows to FLOATER_TAIL_R
+const float FLOATER_GLOW_R = 0.014;
 const float FLOATER_RING_CHANCE = 0.32; // fraction of floaters that render as a ring instead of a squiggle
 const float FLOATER_RING_MIN = 0.012;
 const float FLOATER_RING_MAX = 0.028;
-const float FLOATER_RING_WIDTH = 0.0035;
-const vec3 FLOATER_TINT = vec3(0.9, 0.95, 1.0);
-const float FLOATER_CORE_ALPHA = 0.75;
-const float FLOATER_GLOW_ALPHA = 0.28;
+const float FLOATER_RING_WIDTH = 0.003;
+// Pale and close to the sky's own colour, not a bold graphic line — the
+// reference floaters are translucent enough that you have to look for them,
+// nothing like v2's near-white, high-alpha stroke.
+const vec3 FLOATER_TINT = vec3(0.86, 0.92, 0.98);
+const float FLOATER_CORE_ALPHA = 0.38;
+const float FLOATER_GLOW_ALPHA = 0.16;
 
 // This scene's own small hash/noise family — independently written (the
 // same fract/dot idiom every other scene's hash21 uses, CLAUDE.md's
@@ -523,23 +535,34 @@ vec2 floaterPos(float seed, float t) {
 // One control point of a floater's own curved body, in the floater's local
 // frame (head at index 0, tail at FLOATER_SEGMENTS-1) — constant over time,
 // so the squiggle's shape never changes, only floaterPos's anchor drifts it
-// and floaterShape's own per-seed rotation orients it. Each segment kinks
-// sideways by a hashed amount that grows toward the tail, the same "chain
-// of little S-bends" a real vitreous strand traces rather than one smooth arc.
+// and floaterShape's own per-seed rotation orients it. The sideways offset
+// is a continuous function of t (one dominant low-frequency bend plus a
+// small secondary wobble, amplitudes/frequencies/phases hashed once per
+// seed, not per point) so consecutive points' headings stay correlated —
+// a real curve, not the independent-per-point kinks that made v2 read as a
+// zigzag.
 vec2 floaterPoint(float seed, int i) {
   float t = float(i) / float(FLOATER_SEGMENTS - 1);
-  float side = (hash21(vec2(seed * 5.3 + float(i) * 2.1, 9.0)) - 0.5) * 2.0 * FLOATER_CURL * FLOATER_LEN * t;
+  float f1 = mix(1.0, 1.5, hash21(vec2(seed, 21.0)));
+  float p1 = hash21(vec2(seed, 22.0)) * 6.28318;
+  float f2 = mix(3.0, 4.0, hash21(vec2(seed, 23.0)));
+  float p2 = hash21(vec2(seed, 24.0)) * 6.28318;
+  float wave = FLOATER_CURVE_A1 * sin(t * 3.14159265 * f1 + p1) + FLOATER_CURVE_A2 * sin(t * 3.14159265 * f2 + p2);
+  float side = FLOATER_LEN * t * wave;
   return vec2(t * FLOATER_LEN, side);
 }
 
 // Distance from p to one floater's curved body (a short polyline through
-// FLOATER_SEGMENTS hashed points) plus a soft glow — core is the
-// slightly-brighter thread tapering head-to-tail, glow is the tight halo
-// around it. A measured real reference showed two floater families side by
-// side, elongated squiggles AND round rings/bubbles (aspect ratios ~1.6-1.9
-// vs ~1.0) — FLOATER_RING_CHANCE of seeds render as a ring instead, sharing
-// the same core/glow treatment so both read as the same kind of translucent
-// vitreous strand.
+// FLOATER_SEGMENTS points tracing floaterPoint's smooth curve) plus a soft
+// glow — core is the pale, translucent thread, glow the halo around it,
+// both far short of opaque. Width holds near FLOATER_MID_R for most of the
+// body and only narrows to FLOATER_TAIL_R in the last stretch
+// (FLOATER_TAPER_START to the tip) — the reference is fairly even along its
+// length, not a strong head-to-tail taper. A measured real reference showed
+// two floater families side by side, elongated squiggles AND round
+// rings/bubbles (aspect ratios ~1.6-1.9 vs ~1.0) — FLOATER_RING_CHANCE of
+// seeds render as a ring instead, sharing the same core/glow treatment so
+// both read as the same kind of translucent vitreous strand.
 void floaterShape(vec2 p, float seed, float t, out float core, out float glow) {
   vec2 basePos = floaterPos(seed, t);
   if (hash21(vec2(seed, 13.0)) < FLOATER_RING_CHANCE) {
@@ -569,7 +592,7 @@ void floaterShape(vec2 p, float seed, float t, out float core, out float glow) {
       tMin = (float(i - 1) + h) / float(FLOATER_SEGMENTS - 1);
     }
   }
-  float width = mix(FLOATER_HEAD_R, FLOATER_TAIL_R, tMin);
+  float width = mix(FLOATER_MID_R, FLOATER_TAIL_R, smoothstep(FLOATER_TAPER_START, 1.0, tMin));
   core = smoothstep(width, width * 0.25, dMin);
   glow = exp(-(dMin * dMin) / (FLOATER_GLOW_R * FLOATER_GLOW_R));
 }
