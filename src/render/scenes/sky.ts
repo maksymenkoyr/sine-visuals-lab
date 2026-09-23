@@ -63,23 +63,32 @@ import {
 // viewer is actually looking at rather than a hypothetical shared-canvas
 // centre that might sit off this device's own slice entirely.
 //
-// Floaters are drawn as an actual curved translucent stroke (floaterShape,
-// a short polyline SDF over FLOATER_SEGMENTS hashed control points, tapered
-// wide-to-narrow head-to-tail), not a single soft dot — the first pass's
-// dot-shaped floaters read as fuzzy blobs rather than the vitreous
-// squiggles a real floater looks like against open sky. The shape itself
-// is fixed per seed (no time dependency in floaterShape), only its anchor
-// position drifts (floaterPos); both the ambient baseline and the wave
-// bursts below draw from the same floaterShape/floaterPos pair, evaluated
-// per-fragment as pure functions of (uTime, seed) — no vertex buffers, no
-// per-floater JS state, in the spirit of the plan's "a handful of
-// trig/hash per slot" budget, now a handful of segment-distance checks per
-// slot instead. Loop bounds (FLOATER_AMBIENT_MAX / FLOATER_PER_BURST_MAX
-// below) are sized for the highest quality tier and compiled once; how many
-// of those slots are actually drawn is gated at runtime by uDetail
-// (quality.ts's 0..1 density proxy, already uploaded) combined with the
-// relevant setting, so a lower tier or TV hardware gets an explicit,
-// bounded ceiling without a second shader variant.
+// Floaters are drawn as hollow, near-transparent refractive tubes
+// (floaterShape), not a solid painted stroke or a soft glowing dot — a real
+// floater is a strand of vitreous gel refracting the sky behind it: a faint
+// bright rim on its edge, a thin dark fringe just outside that rim, and a
+// barely-lifted see-through interior (floaterProfile turns the signed
+// distance to the tube's own edge into that rim/fringe/interior brightness
+// delta). The path itself comes from floaterPath, which integrates a
+// heading forward at a fixed step rather than offsetting each point
+// sideways by an independent function of t, so the strand's arc length
+// always comes out exactly right and a sharp corner can't form — see
+// floaterPath's own comment. floaterShape's dot branch (FLOATER_DOT_CHANCE
+// of seeds) reads the identical profile around a filled disk instead of a
+// tube — a measured real floater dot turned out to have the same rim/fringe
+// shape, just circular. The shape itself is fixed per seed (no time
+// dependency in floaterShape), only its anchor position drifts (floaterPos);
+// both the ambient baseline and the wave bursts below draw from the same
+// floaterShape/floaterPos pair, evaluated per-fragment as pure functions of
+// (uTime, seed) — no vertex buffers, no per-floater JS state, in the spirit
+// of the plan's "a handful of trig/hash per slot" budget. A bounding-circle
+// early-out in floaterShape skips the per-segment distance loop for
+// fragments nowhere near a given floater. Loop bounds (FLOATER_AMBIENT_MAX /
+// FLOATER_PER_BURST_MAX below) are sized for the highest quality tier and
+// compiled once; how many of those slots are actually drawn is gated at
+// runtime by uDetail (quality.ts's 0..1 density proxy, already uploaded)
+// combined with the relevant setting, so a lower tier or TV hardware gets an
+// explicit, bounded ceiling without a second shader variant.
 //
 // Floater waves reuse powder.ts's stateless chunk-pool idiom
 // (createWavePool below): a small JS pool of (t0, strength, seed) slots,
@@ -113,7 +122,7 @@ const ID = "sky";
 
 // --- Quality-scaled illusion budgets (compile-time loop bounds in the
 // display shader) — see the file header on how uDetail gates actual use. ---
-const FLOATER_AMBIENT_MAX = 18;
+const FLOATER_AMBIENT_MAX = 10; // lowered from v3's 18 — strands are now 3-4x longer (FLOATER_LEN_MIN/MAX below), so the same count reads as a crowded frame
 const FLOATER_PER_BURST_MAX = 10;
 export const MAX_WAVE_BURSTS = 3; // concurrent floater waves — mirrors powder.ts's MAX_BURSTS
 
@@ -444,36 +453,46 @@ const float BRUSH_R_CORE = 0.03;
 const float BRUSH_R_IN = 0.22;
 const float BRUSH_R_OUT = 0.34;
 const float BRUSH_BASE = 0.4;
-const int FLOATER_SEGMENTS = 9; // control points per floater's curved body (head at index 0) — raised from v2's 5 so the polyline traces a smooth curve rather than faceting it
+const int FLOATER_SEGMENTS = 14; // path points per floater's curved body (head at index 0) — see floaterPath; raised from v3's 9 for a smoother heading-integrated curve
 const float FLOATER_SPAN = 1.3;
 const float FLOATER_DRIFT_R = 0.05;
 const float FLOATER_JUMP_MIN = 2.0;
 const float FLOATER_JUMP_MAX = 5.0;
 const float FLOATER_JUMP_EASE = 0.35;
-const float FLOATER_LEN = 0.085; // body length, screen p-units
-// A real side-by-side against the reference (not just its aggregate stats)
-// showed v2's floaters were an angular zigzag, not a smooth curve — each
-// control point's kink was an independent hash, so consecutive segments had
-// no correlated heading. FLOATER_CURVE_* below drive one low-frequency bend
-// (the reference's single gentle hook) plus a much smaller secondary wave
-// for organic irregularity, as a continuous function of t — not another
-// source of sharp corners.
-const float FLOATER_CURVE_A1 = 0.85; // dominant bend amplitude, relative to FLOATER_LEN
-const float FLOATER_CURVE_A2 = 0.08; // secondary wobble amplitude, relative to FLOATER_LEN — kept subtle; too strong and it reads as a second kink instead of texture
-const float FLOATER_MID_R = 0.0085; // stroke width for most of the body — the reference is fairly uniform, not a strong taper
-const float FLOATER_TAIL_R = 0.0028; // width only at the very tail tip
-const float FLOATER_TAPER_START = 0.62; // width holds at FLOATER_MID_R until this far along, then narrows to FLOATER_TAIL_R
-const float FLOATER_GLOW_R = 0.014;
-const float FLOATER_RING_CHANCE = 0.32; // fraction of floaters that render as a ring instead of a squiggle
-const float FLOATER_RING_MIN = 0.012;
-const float FLOATER_RING_MAX = 0.028;
-const float FLOATER_RING_WIDTH = 0.003;
-// Pale and close to the sky's own colour, not a bold graphic line — the
-// reference floaters are translucent enough that you have to look for them,
-// nothing like v2's near-white, high-alpha stroke.
-const vec3 FLOATER_TINT = vec3(0.86, 0.92, 0.98);
-const float FLOATER_CORE_ALPHA = 0.38;
-const float FLOATER_GLOW_ALPHA = 0.16;
+const float FLOATER_LEN_MIN = 0.18; // strand arc length, screen p-units, hashed per seed — measured against the reference at ~0.25-0.35; v3's fixed 0.085 read 3-4x too short
+const float FLOATER_LEN_MAX = 0.32;
+// floaterPath's heading theta(t) = theta0 + B1*sin(2*pi*f1*t+p1) +
+// B2*sin(2*pi*f2*t+p2): a dominant gentle bend (B1/f1) plus a much smaller,
+// faster wobble (B2/f2), all hashed once per seed. Because heading is
+// integrated forward rather than offsetting each point sideways by an
+// independent function of t, arc length always comes out to exactly the
+// strand's own FLOATER_LEN_* and the bend rate stays bounded — a real
+// side-by-side against the reference showed v2/v3's per-point-independent
+// kinks read as an angular zigzag, not the reference's smooth curve; this
+// can't produce a corner at all.
+const float FLOATER_B1_MIN = 0.6; // dominant bend swing, radians (random sign per seed)
+const float FLOATER_B1_MAX = 1.3;
+const float FLOATER_F1_MIN = 0.5; // dominant bend's cycles over the strand
+const float FLOATER_F1_MAX = 1.0;
+const float FLOATER_B2_MIN = 0.1; // secondary wobble, radians — kept subtle; texture, not a second kink
+const float FLOATER_B2_MAX = 0.2;
+const float FLOATER_F2_MIN = 3.0;
+const float FLOATER_F2_MAX = 5.0;
+// The refractive-tube profile (floaterProfile below), measured off a
+// brightness cross-section of the reference at sky luminance ~172: a thin
+// dark fringe just outside the edge, a brighter rim just inside it, and a
+// barely-lifted see-through interior, everything within about +-10% of the
+// background — never a solid painted line.
+const float FLOATER_R = 0.011; // squiggle tube half-width, screen p-units — sized so rim-to-rim spacing matches the reference (~0.017 of screen height between the two bright rims)
+const float FLOATER_RIM_W = 0.005; // bright-rim band width, just inside the edge
+const float FLOATER_FRINGE_W = 0.008; // dark-fringe band width, just outside the edge
+const float FLOATER_INTERIOR = 0.02; // relative lum delta well inside the edge
+const float FLOATER_RIM = 0.07; // relative lum delta at the rim's peak
+const float FLOATER_FRINGE = 0.10; // relative lum delta (negative) at the fringe's peak
+const float FLOATER_DOT_CHANCE = 0.4; // fraction of floaters that render as a filled disk instead of a squiggle (was FLOATER_RING_CHANCE — a measured dot turned out to be a filled disk, not an annulus, under the same rim/fringe profile)
+const float FLOATER_DOT_R_MIN = 0.015; // dot radius, screen p-units — reference rim radius ~0.021
+const float FLOATER_DOT_R_MAX = 0.026;
+const vec3 FLOATER_COOL_TINT = vec3(0.94, 0.99, 1.06); // faint cool bias applied only to the rim's brightening (see main()) — a hint of refraction's blue-white; the fringe's darkening stays neutral
 
 // This scene's own small hash/noise family — independently written (the
 // same fract/dot idiom every other scene's hash21 uses, CLAUDE.md's
@@ -532,69 +551,102 @@ vec2 floaterPos(float seed, float t) {
   return base + drift;
 }
 
-// One control point of a floater's own curved body, in the floater's local
-// frame (head at index 0, tail at FLOATER_SEGMENTS-1) — constant over time,
-// so the squiggle's shape never changes, only floaterPos's anchor drifts it
-// and floaterShape's own per-seed rotation orients it. The sideways offset
-// is a continuous function of t (one dominant low-frequency bend plus a
-// small secondary wobble, amplitudes/frequencies/phases hashed once per
-// seed, not per point) so consecutive points' headings stay correlated —
-// a real curve, not the independent-per-point kinks that made v2 read as a
-// zigzag.
-vec2 floaterPoint(float seed, int i) {
-  float t = float(i) / float(FLOATER_SEGMENTS - 1);
-  float f1 = mix(1.0, 1.5, hash21(vec2(seed, 21.0)));
-  float p1 = hash21(vec2(seed, 22.0)) * 6.28318;
-  float f2 = mix(3.0, 4.0, hash21(vec2(seed, 23.0)));
-  float p2 = hash21(vec2(seed, 24.0)) * 6.28318;
-  float wave = FLOATER_CURVE_A1 * sin(t * 3.14159265 * f1 + p1) + FLOATER_CURVE_A2 * sin(t * 3.14159265 * f2 + p2);
-  float side = FLOATER_LEN * t * wave;
-  return vec2(t * FLOATER_LEN, side);
+// Signed relative-luminance delta for a point at true signed distance s from
+// a floater's own edge (negative inside, screen p-units) — the
+// refractive-tube profile the constants above are measured against: a small
+// lift deep inside (FLOATER_INTERIOR), rising through a bright rim just
+// inside the edge (FLOATER_RIM, peaking at s = -FLOATER_RIM_W/2) into a dark
+// fringe just outside it (FLOATER_FRINGE, peaking at s = FLOATER_FRINGE_W/2),
+// fading smoothly to exactly 0 by s = FLOATER_FRINGE_W*2.0. Shared by
+// floaterShape's squiggle and dot branches — they differ only in how s is
+// computed. Built as a sum of two Gaussian-like bumps (rim, fringe) plus an
+// interior term that's flat for s well below -FLOATER_RIM_W and fades out
+// smoothly as s approaches the edge, not as separate hard-edged bands — the
+// reference itself is a little soft, not a vector outline.
+float floaterProfile(float s) {
+  float interior = FLOATER_INTERIOR * (1.0 - smoothstep(-FLOATER_RIM_W, 0.0, s));
+  float rimD = (s + FLOATER_RIM_W * 0.5) / (FLOATER_RIM_W * 0.5);
+  float rim = FLOATER_RIM * exp(-rimD * rimD);
+  float fringeD = (s - FLOATER_FRINGE_W * 0.5) / (FLOATER_FRINGE_W * 0.5);
+  float fringe = -FLOATER_FRINGE * exp(-fringeD * fringeD);
+  float cutoff = 1.0 - smoothstep(FLOATER_FRINGE_W, FLOATER_FRINGE_W * 2.0, s);
+  return (interior + rim + fringe) * cutoff;
 }
 
-// Distance from p to one floater's curved body (a short polyline through
-// FLOATER_SEGMENTS points tracing floaterPoint's smooth curve) plus a soft
-// glow — core is the pale, translucent thread, glow the halo around it,
-// both far short of opaque. Width holds near FLOATER_MID_R for most of the
-// body and only narrows to FLOATER_TAIL_R in the last stretch
-// (FLOATER_TAPER_START to the tip) — the reference is fairly even along its
-// length, not a strong head-to-tail taper. A measured real reference showed
-// two floater families side by side, elongated squiggles AND round
-// rings/bubbles (aspect ratios ~1.6-1.9 vs ~1.0) — FLOATER_RING_CHANCE of
-// seeds render as a ring instead, sharing the same core/glow treatment so
-// both read as the same kind of translucent vitreous strand.
-void floaterShape(vec2 p, float seed, float t, out float core, out float glow) {
-  vec2 basePos = floaterPos(seed, t);
-  if (hash21(vec2(seed, 13.0)) < FLOATER_RING_CHANCE) {
-    float ringR = mix(FLOATER_RING_MIN, FLOATER_RING_MAX, hash21(vec2(seed, 15.0)));
-    float d = abs(length(p - basePos) - ringR);
-    core = smoothstep(FLOATER_RING_WIDTH, FLOATER_RING_WIDTH * 0.25, d);
-    glow = exp(-(d * d) / (FLOATER_GLOW_R * FLOATER_GLOW_R));
-    return;
-  }
-  float rotAngle = hash21(vec2(seed, 8.0)) * 6.28318;
-  float cr = cos(rotAngle);
-  float sr = sin(rotAngle);
-  vec2 pts[FLOATER_SEGMENTS];
-  for (int i = 0; i < FLOATER_SEGMENTS; i++) {
-    vec2 local = floaterPoint(seed, i);
-    pts[i] = vec2(local.x * cr - local.y * sr, local.x * sr + local.y * cr) + basePos;
-  }
-  float dMin = 1.0e6;
-  float tMin = 0.0;
+// This floater's own strand length, hashed once per seed — split out from
+// floaterPath so floaterShape can bound-check a fragment against it before
+// paying for the FLOATER_SEGMENTS-point path build and distance loop (see
+// floaterShape's own comment).
+float floaterLen(float seed) {
+  return mix(FLOATER_LEN_MIN, FLOATER_LEN_MAX, hash21(vec2(seed, 25.0)));
+}
+
+// Builds this floater's whole curved path into 'pts' (head at index 0,
+// FLOATER_SEGMENTS points), by integrating a heading forward at a fixed step
+// rather than offsetting each point sideways by an independent function of
+// t — see the FLOATER_B1_MIN..FLOATER_F2_MAX comment above for why. 'pts' is
+// then re-centred on its own average so the strand's MIDDLE sits at the
+// local origin: floaterShape adds basePos (floaterPos's anchor) straight
+// onto these points, so the anchor drifts the strand's centre, not its head.
+void floaterPath(float seed, out vec2 pts[FLOATER_SEGMENTS]) {
+  float len = floaterLen(seed);
+  float thetaSign = hash21(vec2(seed, 26.0)) < 0.5 ? -1.0 : 1.0;
+  float b1 = thetaSign * mix(FLOATER_B1_MIN, FLOATER_B1_MAX, hash21(vec2(seed, 21.0)));
+  float f1 = mix(FLOATER_F1_MIN, FLOATER_F1_MAX, hash21(vec2(seed, 27.0)));
+  float p1 = hash21(vec2(seed, 22.0)) * 6.28318;
+  float b2 = mix(FLOATER_B2_MIN, FLOATER_B2_MAX, hash21(vec2(seed, 28.0)));
+  float f2 = mix(FLOATER_F2_MIN, FLOATER_F2_MAX, hash21(vec2(seed, 23.0)));
+  float p2 = hash21(vec2(seed, 24.0)) * 6.28318;
+  float theta0 = hash21(vec2(seed, 8.0)) * 6.28318;
+  float stepLen = len / float(FLOATER_SEGMENTS - 1);
+  pts[0] = vec2(0.0);
   for (int i = 1; i < FLOATER_SEGMENTS; i++) {
-    vec2 pa = p - pts[i - 1];
+    // Heading sampled at the segment's own midpoint t — a midpoint-rule
+    // integration of theta(t), not just its start or end.
+    float tMid = (float(i) - 0.5) / float(FLOATER_SEGMENTS - 1);
+    float theta = theta0 + b1 * sin(6.28318 * f1 * tMid + p1) + b2 * sin(6.28318 * f2 * tMid + p2);
+    pts[i] = pts[i - 1] + stepLen * vec2(cos(theta), sin(theta));
+  }
+  vec2 sum = vec2(0.0);
+  for (int i = 0; i < FLOATER_SEGMENTS; i++) sum += pts[i];
+  vec2 mid = sum / float(FLOATER_SEGMENTS);
+  for (int i = 0; i < FLOATER_SEGMENTS; i++) pts[i] -= mid;
+}
+
+// One floater's signed relative-luminance delta at p: a hollow refractive
+// tube along a curved path (floaterPath), or — FLOATER_DOT_CHANCE of seeds —
+// a filled disk, both read through floaterProfile off their own signed
+// distance to the edge (squiggle: distance to the path's capsule SDF, minus
+// FLOATER_R; dot: distance to basePos, minus its own hashed radius). A
+// measured real reference showed two floater families side by side,
+// elongated squiggles AND round dots (aspect ratios ~1.6-1.9 vs ~1.0), both
+// sharing the exact same rim/fringe brightness shape. A bounding-circle
+// early-out (basePos +/- half the strand's own length, since floaterPath
+// centres its points on it) skips the FLOATER_SEGMENTS-point path build and
+// distance loop for fragments nowhere near this floater — see the file
+// header's per-slot budget.
+float floaterShape(vec2 p, float seed, float t) {
+  vec2 basePos = floaterPos(seed, t);
+  if (hash21(vec2(seed, 13.0)) < FLOATER_DOT_CHANCE) {
+    float dotR = mix(FLOATER_DOT_R_MIN, FLOATER_DOT_R_MAX, hash21(vec2(seed, 15.0)));
+    float s = length(p - basePos) - dotR;
+    if (s > FLOATER_FRINGE_W * 2.0) return 0.0;
+    return floaterProfile(s);
+  }
+  float len = floaterLen(seed);
+  if (length(p - basePos) > len * 0.5 + FLOATER_R + FLOATER_FRINGE_W * 2.0) return 0.0;
+  vec2 pts[FLOATER_SEGMENTS];
+  floaterPath(seed, pts);
+  vec2 pLocal = p - basePos;
+  float dMin = 1.0e6;
+  for (int i = 1; i < FLOATER_SEGMENTS; i++) {
+    vec2 pa = pLocal - pts[i - 1];
     vec2 ba = pts[i] - pts[i - 1];
     float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1.0e-6), 0.0, 1.0);
     float d = length(pa - ba * h);
-    if (d < dMin) {
-      dMin = d;
-      tMin = (float(i - 1) + h) / float(FLOATER_SEGMENTS - 1);
-    }
+    dMin = min(dMin, d);
   }
-  float width = mix(FLOATER_MID_R, FLOATER_TAIL_R, smoothstep(FLOATER_TAPER_START, 1.0, tMin));
-  core = smoothstep(width, width * 0.25, dMin);
-  glow = exp(-(dMin * dMin) / (FLOATER_GLOW_R * FLOATER_GLOW_R));
+  return floaterProfile(dMin - FLOATER_R);
 }
 
 void main() {
@@ -661,24 +713,23 @@ void main() {
   float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * (1.0 - 0.4 * uEnergy), 0.0, 1.0);
   color = mix(color, color * brushTint, brushAmt);
 
-  // 4. Floaters: an always-on ambient baseline plus wave bursts on top
-  // (see createWavePool in sky.ts) — both drawn from floaterShape, the
-  // bursts additionally gated by their own age envelope. floatCore is the
-  // slightly-brighter thread, floatGlow the soft additive halo around it;
-  // composited separately below so the result reads as translucent rather
-  // than a flat painted colour.
+  // 4. Floaters: an always-on ambient baseline plus wave bursts on top (see
+  // createWavePool in sky.ts), both drawn from floaterShape as one signed
+  // relative-luminance delta per slot (dark fringe negative, bright rim
+  // positive, interior a small positive lift — see floaterProfile), the
+  // bursts additionally gated by their own age envelope. Every slot's delta
+  // sums into floatDelta, clamped, then applied as a multiplicative
+  // modulation of whatever's already in 'color' rather than mixed toward a
+  // fixed tint or added as glow, so a floater reads as a refraction of the
+  // sky/cloud behind it and never becomes the brightest thing in frame.
   int ambientCap = int(clamp(mix(3.0, float(FLOATER_AMBIENT_MAX), uDetail), 1.0, float(FLOATER_AMBIENT_MAX)) + 0.5);
   float ambientGate = clamp(uFloaterDensity * (0.7 + 0.3 * uSectionIntensity), 0.0, 1.0);
   int ambientActive = int(float(ambientCap) * ambientGate + 0.5);
-  float floatCore = 0.0;
-  float floatGlow = 0.0;
+  float floatDelta = 0.0;
   for (int i = 0; i < FLOATER_AMBIENT_MAX; i++) {
     if (i >= ambientActive) break;
     float seed = float(i) * 7.9 + 1.0;
-    float core, glow;
-    floaterShape(p, seed, uTime, core, glow);
-    floatCore += core;
-    floatGlow += glow;
+    floatDelta += floaterShape(p, seed, uTime);
   }
   int perBurstCap = int(clamp(mix(2.0, float(FLOATER_PER_BURST_MAX), uDetail), 1.0, float(FLOATER_PER_BURST_MAX)) + 0.5);
   for (int b = 0; b < MAX_WAVE_BURSTS_C; b++) {
@@ -689,14 +740,12 @@ void main() {
     for (int j = 0; j < FLOATER_PER_BURST_MAX; j++) {
       if (j >= subActive) break;
       float seed = uBurstSeed[b] * 31.7 + float(j) * 9.3 + 5.0;
-      float core, glow;
-      floaterShape(p, seed, uTime, core, glow);
-      floatCore += core * envelope;
-      floatGlow += glow * envelope;
+      floatDelta += floaterShape(p, seed, uTime) * envelope;
     }
   }
-  color = mix(color, FLOATER_TINT, clamp(floatCore, 0.0, 1.0) * FLOATER_CORE_ALPHA);
-  color += FLOATER_TINT * clamp(floatGlow, 0.0, 1.0) * FLOATER_GLOW_ALPHA;
+  floatDelta = clamp(floatDelta, -0.2, 0.2);
+  float floatPos = max(floatDelta, 0.0);
+  color *= 1.0 + min(floatDelta, 0.0) + floatPos * FLOATER_COOL_TINT;
 
   outColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
