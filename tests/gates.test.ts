@@ -7,12 +7,14 @@ import {
   gatesScene,
   LOOK_COUNT,
   morphEase,
+  pickArcColour,
   SPIN_RAD_MAX,
   type GateAnim,
   type GateOpts,
   type GateState,
 } from "../src/render/scenes/gates/index.ts";
 import {
+  arcPathStart,
   buildLook,
   identityPairs,
   LOOKS,
@@ -193,6 +195,34 @@ describe("advanceGates", () => {
     advanceGates(st, anim({ dtSec: -1, barPhase: 0.2, tempoLock: 0 }), OPTS, lcg(1));
     expect(st.travel).toBe(before.travel);
     expect(st.bars).toBe(before.bars);
+    // beatAge is guarded by the same dt as everything else here: neither a
+    // NaN nor a backwards dt should move it.
+    expect(st.beatAge).toBe(before.beatAge);
+  });
+
+  it("the lightning strike's clock: beatAge resets and beatCount bumps on every onset, beatAge grows by dt otherwise", () => {
+    const st = createGateState();
+    expect(st.beatAge).toBeGreaterThan(1); // nothing strikes before the first beat
+    expect(st.beatCount).toBe(0);
+
+    advanceGates(st, anim({ onset: true }), OPTS, lcg(1));
+    expect(st.beatAge).toBe(0);
+    expect(st.beatCount).toBe(1);
+
+    advanceGates(st, anim(), OPTS, lcg(1));
+    advanceGates(st, anim(), OPTS, lcg(1));
+    expect(st.beatAge).toBeCloseTo(2 * DT, 9);
+    expect(st.beatCount).toBe(1);
+
+    advanceGates(st, anim({ onset: true }), OPTS, lcg(1));
+    expect(st.beatAge).toBe(0);
+    expect(st.beatCount).toBe(2);
+
+    // A non-finite or backwards dt freezes beatAge, same as travel/bars.
+    advanceGates(st, anim({ dtSec: Number.NaN }), OPTS, lcg(1));
+    expect(st.beatAge).toBe(0);
+    advanceGates(st, anim({ dtSec: -1 }), OPTS, lcg(1));
+    expect(st.beatAge).toBe(0);
   });
 
   it("a morph lasts exactly one bar and lands on the boundary frame", () => {
@@ -366,6 +396,90 @@ describe("advanceGates", () => {
     }
     expect(fired).toBe(true);
     expect(st.rebuild).toBe(false);
+  });
+});
+
+// Mirrors index.ts's private ARC_COLOURS/hueDeg/hueDist exactly, so this
+// file can independently work out which entry pickArcColour *must* skip for
+// a given primary, rather than just re-deriving pickArcColour's own answer.
+const TEST_ARC_COLOURS: readonly (readonly [number, number, number])[] = [
+  [0.55, 0.15, 1.0],
+  [1.0, 0.05, 0.65],
+  [0.05, 0.95, 1.0],
+  [0.55, 1.0, 0.05],
+  [0.35, 0.8, 1.0],
+  [1.0, 0.65, 0.05],
+];
+function hueOf(rgb: readonly [number, number, number]): number {
+  const [r, g, b] = rgb;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d < 1e-9) return 0;
+  let h: number;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  h *= 60;
+  return h < 0 ? h + 360 : h;
+}
+function hueDist(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+describe("pickArcColour", () => {
+  it("is deterministic and never returns the colour nearest the look's primary, for every look", () => {
+    for (let look = 0; look < LOOKS.length; look++) {
+      const primary = LOOKS[look].primary;
+      const primaryHue = hueOf(primary);
+      let nearestHue = hueOf(TEST_ARC_COLOURS[0]);
+      let nearestDist = Infinity;
+      for (const c of TEST_ARC_COLOURS) {
+        const d = hueDist(hueOf(c), primaryHue);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearestHue = hueOf(c);
+        }
+      }
+      for (let beat = 0; beat < 12; beat++) {
+        const colour = pickArcColour(beat, primary);
+        // Deterministic: same beat, same look, same answer.
+        expect(pickArcColour(beat, primary)).toEqual(colour);
+        expect(hueDist(hueOf(colour), nearestHue)).toBeGreaterThan(1e-6);
+      }
+    }
+  });
+
+  it("changes between every pair of consecutive beats", () => {
+    for (let look = 0; look < LOOKS.length; look++) {
+      const primary = LOOKS[look].primary;
+      let prev = pickArcColour(0, primary);
+      for (let beat = 1; beat < 20; beat++) {
+        const colour = pickArcColour(beat, primary);
+        expect(colour).not.toEqual(prev);
+        prev = colour;
+      }
+    }
+  });
+});
+
+describe("arcPathStart", () => {
+  it("tiles each ring's edges over [0, 6) contiguously", () => {
+    for (let k = 0; k < 6; k++) {
+      expect(arcPathStart(k)).toBe(k); // ring 1
+      expect(arcPathStart(k + 6)).toBe(k); // ring 2, same start as ring 1
+    }
+  });
+
+  it("each pillar starts where the ring edge of the same corner starts", () => {
+    for (let k = 0; k < 6; k++) {
+      expect(arcPathStart(k + 12)).toBe(arcPathStart(k));
+    }
+  });
+
+  it("the rod/panel slot (12) starts at 0", () => {
+    expect(arcPathStart(12)).toBe(0);
   });
 });
 

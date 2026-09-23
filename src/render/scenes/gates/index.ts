@@ -24,6 +24,7 @@ import {
   SEG_MAX,
   type LookLayout,
   type MorphPairs,
+  type Rgb,
 } from "./layout.ts";
 import {
   BLUR_FRAG,
@@ -68,6 +69,18 @@ import {
 // rather than snapping. The fly speed rides the low band and Beat flash
 // punches the nearest gates on the shared beat pulse. Rates scale, positions
 // accumulate (travel, spin) — the flowClock lesson.
+//
+// Lightning (2026-09-23, at the user's request for something stronger than
+// Beat flash): on every anim.onset, advanceGates resets st.beatAge to 0 and
+// bumps st.beatCount — a beat clock the render loop reads to drive a strike
+// that runs *through* the gate lines, not just a brightness pulse on top of
+// them. pickArcColour turns beatCount into a colour from ARC_COLOURS, always
+// skipping the hue nearest the current look's own primary so the strike
+// reads as electricity, not as the neon's own glow. glsl.ts's shaders own
+// the actual picture: where the current is on each object's edges at any
+// instant (layout.ts's arcPathStart), the crackling zigzag around the true
+// line, and the trail it leaves that fades with both distance behind the
+// head and elapsed time since the beat.
 //
 // Rendering: the gates draw additively into a full-resolution RGBA8 target
 // (no float targets — chladni.ts's TV constraint), two blur levels at a
@@ -139,7 +152,17 @@ export interface GateState {
   flyVel: number;
   spinRate: number;
   prevDrop: boolean;
+  /** Seconds since the last anim.onset — the lightning strike's clock.
+   *  Starts large so nothing strikes before the first beat arrives. */
+  beatAge: number;
+  /** Bumped on every anim.onset; seeds each strike's zigzag (uArcSeed) and
+   *  steps pickArcColour to the next colour. */
+  beatCount: number;
 }
+
+/** beatAge starts well past ARC_DECAY's fade-out (glsl.ts) so a freshly
+ *  loaded scene shows no strike until the first real beat. */
+const BEAT_AGE_AT_LOAD = 10;
 
 export function createGateState(): GateState {
   return {
@@ -157,6 +180,8 @@ export function createGateState(): GateState {
     flyVel: 0,
     spinRate: 0,
     prevDrop: false,
+    beatAge: BEAT_AGE_AT_LOAD,
+    beatCount: 0,
   };
 }
 
@@ -174,6 +199,64 @@ export function pickLook(prev: number, rng: () => number): number {
   return (prev + 1 + Math.floor(rng() * (LOOK_COUNT - 1))) % LOOK_COUNT;
 }
 
+/** Vivid electric hues the lightning strike cycles through — deliberately
+ *  saturated and mostly cool/ultraviolet, since a look's own primary/
+ *  secondary/accent (layout.ts's LOOKS) tend toward warm neon; pickArcColour
+ *  additionally skips whichever of these sits closest to the current look's
+ *  primary, so the strike always reads as a colour apart from the gates. */
+const ARC_COLOURS: readonly Rgb[] = [
+  [0.55, 0.15, 1.0], // violet
+  [1.0, 0.05, 0.65], // hot magenta
+  [0.05, 0.95, 1.0], // cyan
+  [0.55, 1.0, 0.05], // lime
+  [0.35, 0.8, 1.0], // ice-blue
+  [1.0, 0.65, 0.05], // amber
+];
+
+/** Hue angle in degrees, 0..360 — the only thing pickArcColour compares
+ *  ARC_COLOURS against, so two colours of different brightness/saturation
+ *  but the same underlying hue still count as "the same" for contrast. */
+function hueDeg(rgb: Rgb): number {
+  const [r, g, b] = rgb;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d < 1e-9) return 0;
+  let h: number;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  h *= 60;
+  return h < 0 ? h + 360 : h;
+}
+
+/** Shortest distance between two hue angles, 0..180. */
+function hueDist(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+/** Deterministic per-beat colour for the lightning strike: steps through
+ *  ARC_COLOURS as beatCount advances, always skipping the entry whose hue is
+ *  closest to lookPrimary's — so the strike contrasts with the gates it runs
+ *  through — which also guarantees consecutive beats never repeat a colour
+ *  (stepping by 1 through any pool of 2+ entries always changes the index). */
+export function pickArcColour(beatCount: number, lookPrimary: Rgb): Rgb {
+  const primaryHue = hueDeg(lookPrimary);
+  let skip = 0;
+  let skipDist = Infinity;
+  for (let i = 0; i < ARC_COLOURS.length; i++) {
+    const d = hueDist(hueDeg(ARC_COLOURS[i]), primaryHue);
+    if (d < skipDist) {
+      skipDist = d;
+      skip = i;
+    }
+  }
+  const pool = ARC_COLOURS.filter((_, i) => i !== skip);
+  const idx = ((beatCount % pool.length) + pool.length) % pool.length;
+  return pool[idx];
+}
+
 /** Smoothstep: eases a morph's start and end instead of moving through the
  *  whole bar at a constant rate. */
 export function morphEase(t: number): number {
@@ -184,6 +267,17 @@ export function morphEase(t: number): number {
 /** Advances the scheduler by one rendered frame, in place. */
 export function advanceGates(st: GateState, anim: GateAnim, opts: GateOpts, rng: () => number = Math.random): void {
   const dt = Number.isFinite(anim.dtSec) ? Math.max(0, anim.dtSec) : 0;
+
+  // The lightning strike's clock: anim.onset is the render-latched beat edge
+  // (renderLatch.ts) — the same edge beatPulse follows and the silence gate
+  // already screens — so a strike starts exactly when the shared beat pulse
+  // does, with no separate onset accumulator of its own.
+  if (anim.onset) {
+    st.beatAge = 0;
+    st.beatCount += 1;
+  } else {
+    st.beatAge += dt;
+  }
 
   // Bar clock, and dBar: the fraction of a bar that elapsed this frame —
   // clamped so a tempo re-lock or a phase jump can't skip a morph past done
@@ -368,6 +462,19 @@ const SETTINGS: SceneSetting[] = [
     default: 0.4,
     // fluid.ts's own buildGlow weights.
     auto: { dynamics: 0.2, loudness: 0.15 },
+  },
+  {
+    key: "lightning",
+    label: "Lightning",
+    description: "On each beat a vivid current crackles through the gate lines, nearest gates first",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    // Same weights as Beat flash's own attack/pulse — both ride the beat.
+    auto: { attack: 0.3, pulse: 0.2 },
+    reads: ["feature.onset"] satisfies readonly SignalLink[],
   },
 ];
 
@@ -616,6 +723,18 @@ export const gatesScene: Scene = (() => {
       gateProg.setV3v("uColTo", [...lookTo.primary, ...lookTo.secondary, ...lookTo.accent]);
       gateProg.setF("uMorph", e);
       gateProg.setF("uCoreGain", 0.55 + 0.8 * glow);
+      // Lightning: uArcAge/uArcSeed are the beat clock advanceGates keeps
+      // (glsl.ts's GATE_VERT_BODY/GATE_FRAG_BODY headers own the picture);
+      // the colour blends the two looks' primaries by the same `e` the rest
+      // of the picture morphs by, so a strike mid-morph still contrasts with
+      // whatever's actually on screen.
+      const arcPrimary = [0, 1, 2].map(
+        (i) => lookFrom.primary[i] + (lookTo.primary[i] - lookFrom.primary[i]) * e,
+      ) as [number, number, number];
+      const arcColour = pickArcColour(st.beatCount, arcPrimary);
+      gateProg.setF("uArcAge", st.beatAge);
+      gateProg.setF("uArcSeed", st.beatCount);
+      gateProg.setV3v("uArcColor", [...arcColour]);
       gl.bindVertexArray(emptyVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n * copies * SEG_MAX);
       gl.bindVertexArray(null);

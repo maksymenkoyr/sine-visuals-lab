@@ -30,7 +30,27 @@
 // vanishing point and thick at the edge the way the reference's is. Past
 // DOF_Z the halo widens with depth — the cheap depth of field that turns far
 // gates into soft blobs.
+//
+// The lightning strike (index.ts's advanceGates/pickArcColour own its beat
+// clock and colour) is a second pass over the same geometry, folded into the
+// same draw call rather than a separate one: every instance still emits
+// exactly the bounding quad above, just a little larger while a strike is
+// live (see "while a strike is live" below), and the fragment shader adds
+// the current on top of the tube it already drew. Where the current is on
+// this instance's segment at this instant is arcPathStart(seg) (mirrored
+// from layout.ts's function of the same name) plus the fragment's own
+// position along the segment — a coordinate the *shape* doesn't need to
+// know, so the strike rides straight through a morph unaffected by what's
+// morphing into what. It starts at the gates nearest the camera and ripples
+// outward (the vertex shader's `delay`, from zMid) because a real spark
+// takes time to propagate and starting there reads as *arriving* rather than
+// simply appearing everywhere at once. It's evaluated once per fragment
+// against the *now* segment only (vSegNow), not swept across SWEEP_TAPS like
+// the tube's own motion blur — the strike is a flash of light along wires
+// that are already there, not something that itself needs to smear with
+// the camera's shutter.
 
+import { NOISE_HASH_GLSL, NOISE_MASK } from "../../noiseHash.ts";
 import { MAX_OBJ, SEG_MAX, TUNNEL_LEN } from "./layout.ts";
 
 /** Vertical focal length: the tunnel is seen through a wide lens. */
@@ -65,6 +85,53 @@ const WHITE_CORE = 0.2;
  *  same shared pattern every other scene's own Beat flash setting reads,
  *  replacing what used to be a hand-rolled per-scene onset accumulator. */
 const FLASH_GAIN = 1.6;
+
+// --- Lightning strike (index.ts's uLightning) -------------------------------
+/** Seconds of ripple delay per world-space z unit of depth, so the strike
+ *  reaches the far end of the tunnel well after the near gates light up. */
+const ARC_DEPTH_DELAY = 0.025;
+/** Max random per-object timing jitter added to the depth delay, seconds —
+ *  keeps gates at the same depth from striking in perfect lockstep. */
+const ARC_DEPTH_JITTER_SEC = 0.04;
+/** How fast the whole strike fades after the beat, per second — also what
+ *  ARC_LIVE_MIN below is measured against. */
+const ARC_DECAY = 6.0;
+/** Below this, uLightning * exp(-uArcAge * ARC_DECAY) counts as off: the
+ *  uniform-level branch (same value for every instance in the draw call)
+ *  that skips the quad's extra margin, so between beats — and at Lightning
+ *  0, where this is never exceeded — the vertex shader costs what it did
+ *  before the strike existed. */
+const ARC_LIVE_MIN = 0.02;
+/** Like HAZE, but tuned separately so the strike itself can be kept
+ *  concentrated near the camera independent of the neon's own falloff. */
+const HAZE_ARC = 0.32;
+/** How fast the current travels, in path-units per second — arcPathStart's
+ *  shared per-object path (layout.ts) is about 6 units around, so this is
+ *  roughly how many gate corners the current crosses each second. */
+const ARC_SPEED = 34.0;
+/** How fast the lit trail dims behind the current's head, per path-unit. */
+const ARC_TRAIL = 2.2;
+/** How tightly the current's own bright point glows around its
+ *  instantaneous position, per path-unit — higher is a sharper spark. */
+const ARC_HEAD_SHARP = 10.0;
+/** Pixel wavelength of the zigzag's crackle noise — smaller kinks tighter. */
+const ARC_WAVE_PX = 18.0;
+/** How far each zigzag strand strays from the true line, in pixels. */
+const ARC_AMP_PX = 5.0;
+/** Half-width of a zigzag strand's own bright core, in pixels — thinner
+ *  than the tube's CORE_MIN_PX so the crackle reads as a thread of light
+ *  laid over the tube, not a thickening of it. */
+const ARC_CORE_PX = 0.8;
+/** Half-width of a zigzag strand's halo, in pixels. */
+const ARC_HALO_PX = 4.0;
+/** Brightness of a zigzag strand's halo relative to its core. */
+const ARC_STRAND_HALO_GAIN = 0.5;
+/** How far the strike's core pushes toward white — stronger than the tube's
+ *  own WHITE_CORE, since lightning reads as white-hot, not tinted-hot. */
+const ARC_WHITE_CORE = 0.7;
+/** How often the crackle re-rolls to a new random shape, in Hz. */
+const ARC_FLICKER_HZ = 24.0;
+
 /** Blur stride in texels of the level being blurred. */
 export const BLUR_STRIDE = 2.4;
 /** Composite knee: per-channel Reinhard just above white. */
@@ -102,6 +169,15 @@ const float DOF_GAIN = ${f(DOF_GAIN)};
 const float HAZE = ${f(HAZE)};
 const float NEAR_FADE_Z = ${f(NEAR_FADE_Z)};
 const float FLASH_GAIN = ${f(FLASH_GAIN)};
+const float ARC_DEPTH_DELAY = ${f(ARC_DEPTH_DELAY)};
+const float ARC_DEPTH_JITTER_SEC = ${f(ARC_DEPTH_JITTER_SEC)};
+const float ARC_DECAY = ${f(ARC_DECAY)};
+const float ARC_LIVE_MIN = ${f(ARC_LIVE_MIN)};
+const float HAZE_ARC = ${f(HAZE_ARC)};
+const float ARC_AMP_PX = ${f(ARC_AMP_PX)};
+const float ARC_HALO_PX = ${f(ARC_HALO_PX)};
+
+${NOISE_HASH_GLSL}
 
 // Per object: (x, y, z0, half-stroke) — see layout.ts's morphLayout header.
 uniform vec4 uObjA[${MAX_OBJ}];
@@ -121,12 +197,30 @@ uniform vec3 uColFrom[3];
 uniform vec3 uColTo[3];
 uniform float uMorph;
 uniform float uCoreGain;
+// Lightning strike clock (index.ts's advanceGates): seconds since the last
+// beat, and a per-beat seed for the zigzag's noise and the per-object jitter
+// below. uLightning itself arrives via SETTINGS_UNIFORMS_GLSL.
+uniform float uArcAge;
+uniform float uArcSeed;
 
 flat out vec4 vSegNow;
 flat out vec4 vSegPrev;
 flat out float vHalfPx;
 flat out float vHaloPx;
 flat out vec3 vColor;
+// Lightning strike, evaluated in the fragment shader: (path start of this
+// segment's slot, this object's start delay in seconds, its strength — 0
+// when the strike isn't live, already folded with uLightning/HAZE_ARC/the
+// gain below so the fragment needs no setting uniform of its own — and this
+// object's index, for a per-object noise seed). See the file header.
+flat out vec4 vArc;
+
+// Where segment slot i (0..17) sits along the shared per-object arc path —
+// mirrors layout.ts's arcPathStart exactly (see its header).
+float arcPathStart(int i) {
+  int k = i - (i / 6) * 6;
+  return float(k);
+}
 
 // Ring vertex k (0..5) of a shape's cross-section at half-extents s.xy —
 // mirrors layout.ts's ringVertex exactly (see its header for the FRAME
@@ -268,6 +362,29 @@ void main() {
   float haloPx = (HALO_PX + DOF_GAIN * max(0.0, zMid - DOF_Z)) * pxScale;
   float margin = halfPx + haloPx * 3.0 + 1.0;
 
+  // Lightning strike: uLightning*exp(-uArcAge*ARC_DECAY) is the same value
+  // for every instance this draw call (both are true uniforms), so this
+  // branch is uniform-coherent — between beats, and always at Lightning 0,
+  // it's false for the whole draw call and the quad costs exactly what it
+  // did before the strike existed. While live, grow the margin so the
+  // zigzag's amplitude and halo (evaluated in the fragment shader) aren't
+  // clipped by the tube's own, smaller bounding quad.
+  float arcLive = uLightning * exp(-uArcAge * ARC_DECAY);
+  bool strikeLive = arcLive > ARC_LIVE_MIN;
+  if (strikeLive) margin += (ARC_AMP_PX + ARC_HALO_PX) * pxScale;
+
+  // This object's delay before the current reaches it (nearest gates first,
+  // rippling outward with depth) plus a small per-object jitter so gates at
+  // the same depth don't all strike in lockstep, and this segment's place
+  // on the shared arc path. strength folds in uLightning, the strike's own
+  // depth haze and this segment/copy's presence and copy weight (the same
+  // ones gain already carries) — zero whenever the strike isn't live, so
+  // the fragment shader needs no uLightning uniform of its own.
+  float jitterHash = hashCell(vec2(float(obj), 0.0), ${NOISE_MASK}, uint(uArcSeed));
+  float delay = zMid * ARC_DEPTH_DELAY + (jitterHash - 0.5) * 2.0 * ARC_DEPTH_JITTER_SEC;
+  float strength = strikeLive ? arcLive * exp(-HAZE_ARC * zMid) * gain : 0.0;
+  vArc = vec4(arcPathStart(seg), delay, strength, float(obj));
+
   // Oriented bounding quad around the four sweep points.
   vec2 run = pb - pa;
   vec2 sweep = qa - pa;
@@ -308,17 +425,56 @@ const int SWEEP_TAPS = ${SWEEP_TAPS};
 const float TAIL_DIM = ${f(TAIL_DIM)};
 const float HALO_GAIN = ${f(HALO_GAIN)};
 const float WHITE_CORE = ${f(WHITE_CORE)};
+const float ARC_SPEED = ${f(ARC_SPEED)};
+const float ARC_TRAIL = ${f(ARC_TRAIL)};
+const float ARC_HEAD_SHARP = ${f(ARC_HEAD_SHARP)};
+const float ARC_WAVE_PX = ${f(ARC_WAVE_PX)};
+const float ARC_AMP_PX = ${f(ARC_AMP_PX)};
+const float ARC_CORE_PX = ${f(ARC_CORE_PX)};
+const float ARC_HALO_PX = ${f(ARC_HALO_PX)};
+const float ARC_STRAND_HALO_GAIN = ${f(ARC_STRAND_HALO_GAIN)};
+const float ARC_WHITE_CORE = ${f(ARC_WHITE_CORE)};
+const float ARC_FLICKER_HZ = ${f(ARC_FLICKER_HZ)};
+
+${NOISE_HASH_GLSL}
 
 flat in vec4 vSegNow;
 flat in vec4 vSegPrev;
 flat in float vHalfPx;
 flat in float vHaloPx;
 flat in vec3 vColor;
+// (path start, start delay sec, strength — 0 when not live, else already
+// folded with uLightning/depth haze/presence/copy weight — object index).
+// See GATE_VERT_BODY, above, for how it's built.
+flat in vec4 vArc;
+// Lightning strike clock and colour — index.ts's advanceGates/pickArcColour.
+// uLightning itself never reaches this shader: vArc.z is already 0 whenever
+// the strike isn't live, so the branch below costs nothing between beats.
+uniform float uArcAge;
+uniform float uArcSeed;
+uniform vec3 uArcColor;
 
 float sdSegment(vec2 p, vec2 a, vec2 b) {
   vec2 pa = p - a, ba = b - a;
   float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
   return length(pa - ba * h);
+}
+
+// Two-octave value noise along a 1D coordinate, for the strike's crackle —
+// hashCell (noiseHash.ts) keeps it exact on every GPU, unlike the classic
+// fract(sin(...)) hash that degrades for a growing input (its header).
+float arcNoise1D(float x, uint seed) {
+  float i = floor(x);
+  float u = fract(x);
+  float sm = u * u * (3.0 - 2.0 * u);
+  float a = hashCell(vec2(i, 0.0), ${NOISE_MASK}, seed);
+  float b = hashCell(vec2(i + 1.0, 0.0), ${NOISE_MASK}, seed);
+  return mix(a, b, sm);
+}
+float arcFbm(float x, uint seed) {
+  float n = arcNoise1D(x, seed) * 0.6667;
+  n += arcNoise1D(x * 2.07, seed + 1u) * 0.3333;
+  return n;
 }
 
 void main() {
@@ -346,6 +502,55 @@ void main() {
   halo /= wsum;
   vec3 col = mix(vColor, vec3(max(max(vColor.r, vColor.g), vColor.b)), WHITE_CORE * core) * core
     + vColor * halo * HALO_GAIN;
+
+  // Lightning strike, evaluated once against the *now* segment only (see
+  // this file's header) — vArc.z is exactly 0 whenever the strike isn't
+  // live (including always, at Lightning 0), so this whole block is dead
+  // weight only while a beat's current is actually running.
+  if (vArc.z > 0.0005) {
+    float H = (uArcAge - vArc.y) * ARC_SPEED;
+    vec2 aSeg = vSegNow.xy;
+    vec2 baSeg = vSegNow.zw - aSeg;
+    float segLenPx = length(baSeg);
+    vec2 tangent = segLenPx > 1e-6 ? baSeg / segLenPx : vec2(1.0, 0.0);
+    vec2 normal = vec2(-tangent.y, tangent.x);
+    float hLocal = clamp(dot(p - aSeg, tangent) / max(segLenPx, 1e-6), 0.0, 1.0);
+    float pos = vArc.x + hLocal;
+    float perp = dot(p - aSeg, normal);
+
+    // Trail behind the current's head, plus a brighter point at the head
+    // itself — not gated by the step, so the head reads as a small glowing
+    // tip rather than a hard-edged front.
+    float trail = step(pos, H) * exp(-(H - pos) * ARC_TRAIL);
+    float head = exp(-abs(H - pos) * ARC_HEAD_SHARP);
+    float envelope = trail + head;
+
+    // A per-object, per-strand seed that re-rolls at ARC_FLICKER_HZ — the
+    // crackle. uArcSeed (the beat) mixes in so every beat's zigzag differs
+    // even for an object whose depth/jitter delay repeats.
+    uint flicker = uint(floor(uTime * ARC_FLICKER_HZ));
+    uint objSeed = uhash(uint(vArc.w) ^ (uint(uArcSeed) * 0x9e3779b9u) ^ (flicker * 0x85ebca6bu));
+    float coord = hLocal * segLenPx / ARC_WAVE_PX;
+
+    // Two independent zigzag strands around the true line — a forked look,
+    // brighter where they cross.
+    float strandCore = 0.0;
+    float strandHalo = 0.0;
+    for (int s = 0; s < 2; s++) {
+      uint strandSeed = s == 0 ? objSeed : uhash(objSeed ^ 0x27d4eb2fu);
+      float wave = (arcFbm(coord, strandSeed) - 0.5) * 2.0 * ARC_AMP_PX;
+      float dArc = abs(perp - wave);
+      strandCore += 1.0 - smoothstep(0.0, ARC_CORE_PX, dArc);
+      strandHalo += exp(-dArc / ARC_HALO_PX);
+    }
+    vec3 arcCoreCol = mix(uArcColor, vec3(1.0), ARC_WHITE_CORE);
+    vec3 arcGlow = (arcCoreCol * strandCore + uArcColor * strandHalo * ARC_STRAND_HALO_GAIN) * envelope
+      // The trail also relights the tube itself (core, already normalized
+      // above) in the strike's colour — the line it passed stays lit.
+      + uArcColor * envelope * core;
+    col += arcGlow * vArc.z;
+  }
+
   outColor = vec4(col, 1.0);
 }
 `;

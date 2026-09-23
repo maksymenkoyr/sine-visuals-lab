@@ -50,6 +50,13 @@
 //      glsl.ts ports this same topology into GLSL (see its header); the
 //      `segmentOf`/edge-count tests below are the spec both sides are
 //      pinned against.
+//
+// The lightning strike on each beat (index.ts's advanceGates/pickArcColour
+// own its clock and colour; glsl.ts's shaders own the picture) rides this
+// same shared topology: arcPathStart gives every one of the 18 slots a
+// position along one path through an object, independent of which shape is
+// currently showing there, so the current sweeps every object's edges the
+// same way regardless of what it's morphing between.
 
 /** Shape ids, as glsl.ts's morphSegment/segmentOf read them. */
 export const SHAPE = { PRISM: 0, FRAME: 1, ROD: 2, PANEL: 3 } as const;
@@ -476,6 +483,20 @@ export function morphSegment(
   const pTo = ringVertex(shapeTo, k, dimsTo.sx, dimsTo.sy);
   const [x, y] = lerp2(pFrom, pTo);
   return { a: [x, y, -h], b: [x, y, h], presence };
+}
+
+/** Where segment slot `i` (0..17, the shared topology above) sits along the
+ *  single path a lightning strike sweeps through one object: ring edge `k`
+ *  of *either* ring starts at `k` (so the current runs round both rings at
+ *  once), and pillar `k` also starts at `k` (so the current reaches the
+ *  pillar at a corner exactly when it reaches that corner's ring edges) — a
+ *  ring edge or pillar always spans exactly one path unit, [start, start+1).
+ *  A ROD/PANEL's one real segment is pillar 0 (slot 12), which this reduces
+ *  to path [0, 1), matching the header's claim for that case directly.
+ *  Mirrored in glsl.ts's arcPathStart next to ringVertex. */
+export function arcPathStart(slot: number): number {
+  const k = slot % 6;
+  return k < 0 ? k + 6 : k;
 }
 
 // ---------------------------------------------------------------------------
