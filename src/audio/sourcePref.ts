@@ -49,14 +49,16 @@
  *
  * Every picker (the gallery masthead, the Input card's Source row) paints only
  * two states: live (a capture of that source is actually running) or not. A
- * stored preference or a granted mic permission still decides what a tile tap
- * or an implicit start will use (resolveInitialSource(), sourceEverChosen()
- * below), but neither is ever painted as a highlight — a user reads any
- * highlight as "this is running", and both of those are true before anything
- * is. hasStoredAudioSource() and resolveSourceState() below are what let a
- * caller (src/app.ts) that also knows about live capture state combine the two
- * into one SourceState fed to every picker, so they can never say different
- * things about what's actually listening.
+ * stored preference is never painted as a highlight — a user reads any
+ * highlight as "this is running". resolveSourceState() below is what lets a
+ * caller (src/app.ts) that also knows about live capture state hand every
+ * picker the same SourceState, so they can never say different things about
+ * what's actually listening.
+ *
+ * Nor does a stored preference start anything on its own: an implicit start
+ * (opening a scene, tapping a tile) only ever uses a source whose permission
+ * is still active, so no browser prompt can appear that the user didn't just
+ * ask for — see watchMicPermission below and src/app.ts's autoStartSource.
  */
 
 export type AudioSourceChoice = "mic" | "display";
@@ -68,21 +70,10 @@ function isAudioSourceChoice(value: string): value is AudioSourceChoice {
   return value === "mic" || value === "display";
 }
 
-// Whether a *real* choice was ever made — set() or a valid stored value — as
-// opposed to `cache` merely holding AUDIO_SOURCE_DEFAULT because nothing was
-// ever chosen. Deliberately not re-derived from a fresh localStorage read:
-// persist() below swallows write failures (Safari private mode, the node test
-// env), so a browser that can't persist would otherwise report "not chosen"
-// forever even right after an explicit setAudioSourceChoice() call.
-let chosen = false;
-
 function loadInitial(): AudioSourceChoice {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw !== null && isAudioSourceChoice(raw)) {
-      chosen = true;
-      return raw;
-    }
+    if (raw !== null && isAudioSourceChoice(raw)) return raw;
     return AUDIO_SOURCE_DEFAULT;
   } catch {
     return AUDIO_SOURCE_DEFAULT;
@@ -105,19 +96,29 @@ export function getAudioSourceChoice(): AudioSourceChoice {
 
 export function setAudioSourceChoice(next: AudioSourceChoice): void {
   cache = next;
-  chosen = true;
   persist();
 }
 
-/** True once a real choice exists — set() was called, or a valid value was
- *  found in localStorage at load — as opposed to getAudioSourceChoice() just
- *  returning AUDIO_SOURCE_DEFAULT because nothing was ever chosen. A garbage
- *  stored value does NOT count (loadInitial falls back to the default without
- *  setting this). Not a picker-painting signal (see this file's header) —
- *  its one caller is src/app.ts's sourceEverChosen(), which gates whether an
- *  implicit (gesture-free) start is allowed to fire at all. */
-export function hasStoredAudioSource(): boolean {
-  return chosen;
+export type MicPermission = "granted" | "prompt" | "denied" | "unknown";
+
+/** Subscribes to the browser's microphone permission status and returns its
+ *  current state; `onChange` fires on every later transition (a grant from
+ *  the browser's own prompt, a reset while the page is open). This is the
+ *  "is the mic's permission still active" check an implicit start needs —
+ *  see src/app.ts's autoStartSource. Screen capture has no equivalent: its
+ *  permission is never remembered, getDisplayMedia prompts on every call.
+ *  Resolves "unknown" wherever navigator.permissions is absent or its query
+ *  rejects (Safari and older Firefox reject the "microphone" name) — same
+ *  typeof-navigator guard style as displayCaptureSupported() below. */
+export async function watchMicPermission(onChange: (p: MicPermission) => void): Promise<MicPermission> {
+  if (typeof navigator === "undefined" || !navigator.permissions) return "unknown";
+  try {
+    const status = await navigator.permissions.query({ name: "microphone" as PermissionName });
+    status.addEventListener("change", () => onChange(status.state));
+    return status.state;
+  } catch {
+    return "unknown";
+  }
 }
 
 /** One resolved source state. Every picker (the gallery masthead, the Input

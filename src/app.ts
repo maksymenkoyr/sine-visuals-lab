@@ -9,11 +9,12 @@ import { NUM_BANDS, type CaptureHandle, type CaptureSourceKind, type FeatureFram
 import {
   getAudioSourceChoice as getStoredAudioSource,
   setAudioSourceChoice,
-  hasStoredAudioSource,
   resolveSourceState,
   displayCaptureSupported,
+  watchMicPermission,
   DISPLAY_SHARE_GUIDE,
   type AudioSourceChoice,
+  type MicPermission,
   type SourceState,
 } from "./audio/sourcePref.ts";
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
@@ -183,6 +184,10 @@ let extractor = new FeatureExtractor();
  *  own track ends (onCaptureEnded), so a retry is possible. */
 let audioPromise: Promise<void> | null = null;
 let captureFailed = false;
+/** The browser's live mic permission, kept current by boot()'s
+ *  watchMicPermission() call — what autoStartSource() checks before any
+ *  implicit start. */
+let micPermission: MicPermission = "unknown";
 /** Guards against overlapping swapAudioSource() calls — e.g. a double-click
  *  on the panel's Source chips while a share picker is already open. */
 let swapPromise: Promise<void> | null = null;
@@ -423,15 +428,6 @@ function resolveInitialSource(): AudioSourceChoice {
   return stored === "display" && !displayCaptureSupported() ? "mic" : stored;
 }
 
-/** Whether a real audio-source choice has ever been made on this device — a
- *  URL pin for this load, or a persisted pick from a previous one. The one
- *  owner of that check: autoStartSource() below and the gallery's onPick both
- *  need the same answer to "has this app ever been told anything", and used
- *  to each spell it out inline. */
-function sourceEverChosen(): boolean {
-  return urlPinnedSource() !== null || hasStoredAudioSource();
-}
-
 /** The one truth every source picker (the gallery masthead, the Input card's
  *  Source row) renders — see SourceState's doc comment in sourcePref.ts for
  *  why a picker only ever highlights `live`, never a stored preference. A
@@ -445,28 +441,21 @@ function currentSourceState(): SourceState {
   return resolveSourceState({ liveChoice, preferredChoice: resolveInitialSource() });
 }
 
-/** The source an IMPLICIT start — one no tap asked for — is allowed to use.
- *  getUserMedia and getDisplayMedia are not symmetric: getUserMedia has no
- *  transient-activation requirement and its grant is remembered per origin,
- *  so auto-starting the mic just re-uses consent already given. getDisplayMedia
- *  is the opposite — it needs a live user gesture and reopens Chrome's share
- *  picker on every single call, with nothing ever remembered. So a persisted
- *  "display" pref is a statement of intent, not standing consent to pop that
- *  picker: an implicit path starts nothing and lets updateMicPrompt() put the
- *  start prompt up, whose Screen button reaches getDisplayMedia inside a real
- *  tap. Same principle onCaptureEnded already states for its own refusal to
- *  fall back to another source.
+/** The source an IMPLICIT start — opening a scene, tapping a tile, anything
+ *  no Mic/Screen tap asked for — is allowed to use: only one whose permission
+ *  is still active, so the start is silent and never pops a browser prompt
+ *  the user didn't just ask for. Otherwise nothing starts, and
+ *  updateMicPrompt() puts the start prompt up so the user picks first.
  *
- *  Gated on sourceEverChosen(): the gesture-free mic path only ever applies
- *  once a real choice exists — an in-app pick or a URL pin — never on a
- *  browser that has literally never told this app anything, even if the
- *  OS/browser already happens to have mic permission from elsewhere. Without
- *  this, entering a scene from a cold link (enterViz's bare ensureAudio()
- *  call) fired getUserMedia, and the browser's native permission prompt,
- *  before the user had ever touched a source picker. */
+ *  In practice that's the mic with its permission still granted — whatever
+ *  the stored preference says, since a remembered "display" pick can never
+ *  qualify: getDisplayMedia's permission is never remembered and it reopens
+ *  the share picker on every call. A reset or never-granted mic ("prompt"),
+ *  a denied one, or a browser that can't report it ("unknown", e.g. Safari)
+ *  all wait for a tap. Same principle onCaptureEnded states for its own
+ *  refusal to fall back to another source. */
 function autoStartSource(): AudioSourceChoice | null {
-  if (!sourceEverChosen()) return null;
-  return resolveInitialSource() === "display" ? null : "mic";
+  return micPermission === "granted" ? "mic" : null;
 }
 
 function startCapture(choice: AudioSourceChoice): Promise<CaptureHandle> {
@@ -531,10 +520,10 @@ function onCaptureEnded(handle: CaptureHandle): void {
   gallery?.syncSource();
 }
 
-/** Turns a capture failure into copy the user can act on. A mic denial keeps
- *  today's wording — a tile tap does retry the mic; a cancelled share picker
- *  points at the Screen button instead, since by then the viz is up and the
- *  start prompt's Screen button is the nearest retry
+/** Turns a capture failure into copy the user can act on. A mic denial points
+ *  at a Mic button (the gallery picker's or the start prompt's — a tile tap
+ *  won't retry it, see autoStartSource); a cancelled share picker points at
+ *  the Screen button the same way
  *  (both raise the same DOMException, hence branching on `choice` too);
  *  anything else — e.g. captureDisplayAudio's own no-audio-track message —
  *  surfaces verbatim with a neutral retry hint instead of being swallowed. */
@@ -542,7 +531,7 @@ function captureErrorMessage(choice: AudioSourceChoice, err: unknown): string {
   if (err instanceof DOMException && err.name === "NotAllowedError") {
     return choice === "display"
       ? "Screen share cancelled — tap Screen to try again."
-      : "Microphone permission denied — tap a tile to retry.";
+      : "Microphone permission denied — tap Mic to try again.";
   }
   const message = err instanceof Error ? err.message : String(err);
   return `${message} — tap to try again.`;
@@ -974,6 +963,13 @@ function applyRoute(route: Route): void {
 }
 
 async function boot(): Promise<void> {
+  // Started first so it resolves alongside detectQuality()'s await below;
+  // awaited before routing, since a deep-linked scene's enterViz() makes the
+  // first autoStartSource() call.
+  const micPermissionReady = watchMicPermission((p) => {
+    micPermission = p;
+  });
+
   if (!document.createElement("canvas").getContext) {
     fatalError("Canvas unsupported");
     return;
@@ -1102,6 +1098,7 @@ async function boot(): Promise<void> {
   audioPromptMicBtn.addEventListener("click", () => void ensureAudio("mic"));
   audioPromptDisplayBtn.addEventListener("click", () => void ensureAudio("display"));
 
+  micPermission = await micPermissionReady;
   if (bypassGallery) {
     void enterViz(scene);
   } else {
@@ -1119,19 +1116,11 @@ async function boot(): Promise<void> {
       quality: () => quality,
       liveFrame: () => lastVis,
       onPick: (id) => {
-        // Fires inside the click, before any await, so the gesture survives —
-        // which is also what lets a tile tap open the share picker directly
-        // when the masthead's sound-source picker says "Share a tab", instead
-        // of detouring through the start prompt the way an implicit start must
-        // (see autoStartSource).
-        //
-        // Only treat the tap itself as "start listening" once a source was
-        // really chosen — otherwise this would be the very first getUserMedia
-        // call this device ever sees from us, fired by a plain tile tap. A
-        // display pick still opens the share picker directly from this same
-        // gesture (see autoStartSource's own doc comment for why an implicit
-        // path can't do that on its own) — only the never-chosen case changes.
-        void ensureAudio(sourceEverChosen() ? resolveInitialSource() : undefined);
+        // A tile tap picks a scene, not a source — so it's an implicit start
+        // like any other: silent if the mic's permission is still active,
+        // otherwise nothing, and the scene's start prompt asks (see
+        // autoStartSource). Already-live capture just carries on.
+        void ensureAudio();
         navigate({ kind: "viz", sceneId: id }, "push");
       },
       onDisabledPick: (id, reason) => showHud(`${id}: ${reason}`, true),
@@ -1142,9 +1131,7 @@ async function boot(): Promise<void> {
         // Nothing live yet: remember the choice AND start it, inside this same
         // click — a picker that only stored a pref read as buttons that do
         // nothing. The click is a real gesture, so "display" may open the
-        // share picker here just as a tile tap may (see onPick above); the
-        // pref is kept even if that picker is cancelled, as a statement of
-        // intent for the next tile tap (see autoStartSource).
+        // share picker here.
         setAudioSourceChoice(next);
         return ensureAudio(next);
       },

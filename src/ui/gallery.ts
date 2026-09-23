@@ -40,8 +40,7 @@ export interface GalleryDeps {
    *  masthead's sound-source picker shows the microphone alone, so it
    *  never names an option a mobile visitor won't see. */
   canCaptureDisplay: () => boolean;
-  /** The source a tile tap will start on, and whether it's live yet — what
-   *  the picker paints. Only `live` is ever painted as a highlight (see
+  /** Which source is live, if any — what the picker paints. Only `live` is ever painted as a highlight (see
    *  SourceState's doc comment in sourcePref.ts). Same signal drives the
    *  Input card's Source row (src/ui/deviceMenu.ts's createSourceRow). */
   sourceState: () => SourceState;
@@ -360,7 +359,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
   // lives here and nowhere else on the page.
   const mast = el("div", "gal-mast");
 
-  // Sound source: which capture a tile tap starts on. A radio pair where
+  // Sound source: which capture is listening, and the way to start one. A radio pair where
   // screen capture exists; the microphone alone, as a plain statement (no
   // radio semantics, no hint — there's nothing to choose between), where it
   // doesn't. canChoose is read once: display capture's availability never
