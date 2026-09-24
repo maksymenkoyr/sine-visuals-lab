@@ -127,16 +127,19 @@ import {
 // accumulator like brushPhase, so moving Time of day never resets the
 // drift). The shader lights everything off the sun's elevation (sin of the
 // day angle): sky gradient, sun colour and cloud lit/shade tones all blend
-// between keys at night, blue hour, horizon glow, golden hour, early
-// evening and midday (DAY_KEY_E), mornings warmed toward peach where
-// evenings run pink. A soft sun halo tracks across the frame (rising left,
-// setting right), the horizon warms on the sun's side around sunrise and
-// sunset, the clouds' shadow taps point toward the sun by day and the moon
-// by night, stars come out past blue hour, Haidinger's brush fades with the
-// daylight it depends on, and floaters modulate a brightness floor at night
-// so they don't vanish into the dark. The default Time of day lands on the
-// early-evening key, which is exactly the fixed look the scene had before
-// the day cycle existed.
+// between keys at the horizon glow, golden hour, early evening and midday
+// (DAY_KEY_E), mornings warmed toward peach where evenings run pink. There
+// is deliberately no night sky (the user asked to skip it): elevation is
+// floored at the horizon-glow key (DAY_E_FLOOR), so between sunset and
+// sunrise the sky holds a soft twilight glow, and with Day drift on the
+// scene hurries through those hours (nightSpeedup) while the sun's halo
+// slips under the horizon from right to left. A soft sun halo tracks across
+// the frame (rising left, setting right), the horizon warms on the sun's
+// side around sunrise and sunset, the clouds' shadow taps point toward the
+// sun's side (swinging back through overhead while it's down), and
+// Haidinger's brush dims with the daylight it depends on. The default Time
+// of day lands on the early-evening key, which is exactly the fixed look the
+// scene had before the day cycle existed.
 //
 // Haidinger's brush rotates on brushPhase, a plain per-frame accumulator
 // (advanceBrushPhase) owned by this scene — never anim.barPhase, which
@@ -225,13 +228,29 @@ export function dayRatePerSec(drift: number): number {
   return 1 / (DAY_PERIOD_FAST_SEC * Math.pow(DAY_PERIOD_RANGE, 1 - d));
 }
 
+const NIGHT_SPEEDUP = 12; // how much faster the drift runs while the sun is well below the horizon
+
+/** How much faster than Day drift's own rate the sky moves at a day phase:
+ *  1 while the sun is up, easing up to NIGHT_SPEEDUP once it's below the
+ *  horizon. The scene has no night sky (the shader holds the sunset glow
+ *  while the sun is down), so with drift on it hurries through those hours
+ *  rather than sitting in one frozen twilight for half the cycle. Smooth,
+ *  so the sun's glow slipping under the horizon never visibly lurches. */
+export function nightSpeedup(dayPhase: number): number {
+  const e = sunElevation(dayPhase);
+  const k = clamp01((-0.02 - e) / 0.13); // 0 at the horizon glow key, 1 by e = -0.15
+  return 1 + (NIGHT_SPEEDUP - 1) * k * k * (3 - 2 * k);
+}
+
 /** The day cycle's own accumulator — how far the sky has drifted past Time
  *  of day, in days, wrapped to [0, 1). Owned by the scene like brushPhase,
- *  so Time of day can move under it without the drift resetting. */
-export function advanceDayOffset(prev: number, dtSec: number, drift: number): number {
+ *  so Time of day can move under it without the drift resetting. `dayPhase`
+ *  is the sky's current phase (Time of day plus this offset), so the drift
+ *  can hurry through the hours the sun is down (nightSpeedup). */
+export function advanceDayOffset(prev: number, dtSec: number, drift: number, dayPhase = 0.5): number {
   const from = Number.isFinite(prev) ? prev : 0;
   const dt = Number.isFinite(dtSec) ? Math.max(0, dtSec) : 0;
-  const next = from + dt * dayRatePerSec(drift);
+  const next = from + dt * dayRatePerSec(drift) * nightSpeedup(dayPhase);
   return next - Math.floor(next);
 }
 
@@ -547,7 +566,7 @@ const SETTINGS: SceneSetting[] = [
     key: "dayDrift",
     label: "Day drift",
     description:
-      "How fast the sky moves through its day — held still at 0, about half an hour per day just above it, a whole day every minute at 1",
+      "How fast the sky moves through its day — held still at 0, a slow daylight drift just above it, a quick one at 1. It hurries through the hours after sunset, since the scene has no night",
     group: "Motion",
     min: 0,
     max: 1,
@@ -559,7 +578,7 @@ const SETTINGS: SceneSetting[] = [
     key: "timeOfDay",
     label: "Time of day",
     description:
-      "Where in a 24-hour day the sky sits — 0 and 1 are midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset. With Day drift above zero the sky keeps moving on from here",
+      "Where in a 24-hour day the sky sits — 0.25 sunrise, 0.5 noon, 0.75 sunset; between sunset and sunrise it holds a soft twilight glow rather than going dark. With Day drift above zero the sky keeps moving on from here",
     group: "Look",
     min: 0,
     max: 1,
@@ -667,26 +686,25 @@ const vec3 SWEEP_TINT_C = vec3(0.82, 0.94, 1.00); // pale cyan, the midday horiz
 // The day cycle's light, keyed on sun elevation (sin of the day angle, -1 at
 // midnight to +1 at noon) rather than on clock time, so dawn and dusk share
 // one set of keys and only differ where main() warms mornings toward peach.
-// Keys, low to high: deep night, blue hour, the glow right at the horizon,
-// golden hour, early evening (the look this scene had before it had a day
-// cycle, which the default Time of day lands on) and midday. Each colour
-// blends between its two neighbouring keys (dayWeights).
-const float DAY_KEY_E[6] = float[6](-0.40, -0.14, -0.02, 0.08, 0.25, 0.65);
-const vec3 SKY_ZENITH[6] = vec3[6](
-  vec3(0.012, 0.018, 0.050), vec3(0.070, 0.080, 0.220), vec3(0.200, 0.200, 0.420),
-  vec3(0.300, 0.360, 0.600), vec3(0.370, 0.440, 0.650), vec3(0.260, 0.450, 0.780));
-const vec3 SKY_HORIZON[6] = vec3[6](
-  vec3(0.035, 0.045, 0.100), vec3(0.300, 0.240, 0.420), vec3(0.900, 0.500, 0.460),
-  vec3(0.950, 0.720, 0.580), vec3(0.710, 0.700, 0.840), vec3(0.700, 0.800, 0.930));
-const vec3 CLOUD_LIT_KEY[6] = vec3[6](
-  vec3(0.130, 0.150, 0.220), vec3(0.420, 0.360, 0.520), vec3(0.980, 0.620, 0.550),
-  vec3(1.000, 0.820, 0.660), vec3(0.980, 0.930, 0.950), vec3(1.000, 0.990, 0.970));
-const vec3 CLOUD_SHADE_KEY[6] = vec3[6](
-  vec3(0.050, 0.060, 0.110), vec3(0.160, 0.150, 0.280), vec3(0.360, 0.260, 0.400),
-  vec3(0.500, 0.420, 0.520), vec3(0.540, 0.500, 0.640), vec3(0.580, 0.620, 0.720));
-const vec3 SUN_KEY[6] = vec3[6](
-  vec3(0.0), vec3(0.550, 0.250, 0.350), vec3(1.000, 0.450, 0.250),
-  vec3(1.000, 0.700, 0.400), vec3(1.000, 0.880, 0.750), vec3(1.000, 0.970, 0.900));
+// Keys, low to high: the glow right at the horizon, golden hour, early
+// evening (the look this scene had before it had a day cycle, which the
+// default Time of day lands on) and midday. There is deliberately no night:
+// elevation is floored at the first key (DAY_E_FLOOR), so once the sun is
+// down the sky holds its sunset glow until sunrise, and with Day drift on the
+// scene hurries through those hours (nightSpeedup). Each colour blends
+// between its two neighbouring keys (dayWeights).
+const float DAY_KEY_E[4] = float[4](-0.02, 0.08, 0.25, 0.65);
+const float DAY_E_FLOOR = -0.02;
+const vec3 SKY_ZENITH[4] = vec3[4](
+  vec3(0.200, 0.200, 0.420), vec3(0.300, 0.360, 0.600), vec3(0.370, 0.440, 0.650), vec3(0.260, 0.450, 0.780));
+const vec3 SKY_HORIZON[4] = vec3[4](
+  vec3(0.900, 0.500, 0.460), vec3(0.950, 0.720, 0.580), vec3(0.710, 0.700, 0.840), vec3(0.700, 0.800, 0.930));
+const vec3 CLOUD_LIT_KEY[4] = vec3[4](
+  vec3(0.980, 0.620, 0.550), vec3(1.000, 0.820, 0.660), vec3(0.980, 0.930, 0.950), vec3(1.000, 0.990, 0.970));
+const vec3 CLOUD_SHADE_KEY[4] = vec3[4](
+  vec3(0.360, 0.260, 0.400), vec3(0.500, 0.420, 0.520), vec3(0.540, 0.500, 0.640), vec3(0.580, 0.620, 0.720));
+const vec3 SUN_KEY[4] = vec3[4](
+  vec3(1.000, 0.450, 0.250), vec3(1.000, 0.700, 0.400), vec3(1.000, 0.880, 0.750), vec3(1.000, 0.970, 0.900));
 const vec3 MORNING_WARMTH = vec3(1.04, 1.0, 0.86); // mornings lean peach/gold where evenings lean pink
 // The sun's place in the frame: it rises at the left, sets at the right, and
 // is near the top of the frame at noon, horizon at the bottom edge. Its glow
@@ -696,14 +714,6 @@ const float SUN_X_SPAN = 0.62; // fraction of the frame's width the sun's path s
 const float SUN_HALO = 0.30;
 const float SUN_CORE = 0.22;
 const float HORIZON_WARM = 0.35;
-// Night stars: one candidate per STAR_CELL (screen p-units), STAR_CHANCE of
-// them lit, most faint and a few bright, each twinkling on its own rate,
-// hidden behind cloud, faded in as the sky darkens past blue hour.
-const float STAR_CELL = 0.022;
-const float STAR_CHANCE = 0.2;
-// Floaters barely show against a night sky, since they only modulate what's
-// behind them; below this brightness they modulate this floor instead.
-const float FLOATER_NIGHT_FLOOR = 0.1;
 
 const float CLOUD_LOW = 0.16; // bumped density below this reads as clear sky
 const float CLOUD_HIGH = 0.55; // bumped density above this reads as a solid, opaque cloud body — a wide band, so edges fade through semi-transparent wisps (airy) rather than a hard cut-out
@@ -712,7 +722,7 @@ const float CLOUD_WISP_AMOUNT = 0.35;
 const float CLOUD_BUMP_SCALE = 11.0; // fbm frequency, room-uv units — the cauliflower texture
 const float CLOUD_BUMP_MORPH = 0.05; // fbm domain drift per second — churn beyond plain advection
 const float CLOUD_BUMP_AMOUNT = 0.65; // how hard the bump noise erodes/thickens the edge
-// Two shadow taps toward the light (the sun by day, the moon by night, from
+// Two shadow taps toward the light (the sun, from
 // whichever side of the frame it sits on; see main) — storm.ts's Gas
 // mode's own two-tap technique (SUN_DIR + densityCheap/shape at 0.18/0.5,
 // exp(-1.9*s1-1.15*s2), mixed as a colour ramp not a brightness scalar),
@@ -922,13 +932,13 @@ float floaterStrand(vec2 p, vec2 basePos, float seed, float heading, float len) 
   return dMin - max(FLOATER_R, FLOATER_MIN_PX / max(uResolution.y, 1.0));
 }
 
-// Blend weights for the six day keys at sun elevation e: only the two keys
+// Blend weights for the four day keys at sun elevation e: only the two keys
 // either side of e carry weight, eased between (smoothstep) so the sky never
 // shows a kink in its colour as it passes a key.
-void dayWeights(float e, out float w[6]) {
-  for (int i = 0; i < 6; i++) w[i] = 0.0;
-  float ec = clamp(e, DAY_KEY_E[0], DAY_KEY_E[5]);
-  for (int i = 0; i < 5; i++) {
+void dayWeights(float e, out float w[4]) {
+  for (int i = 0; i < 4; i++) w[i] = 0.0;
+  float ec = clamp(e, DAY_KEY_E[0], DAY_KEY_E[3]);
+  for (int i = 0; i < 3; i++) {
     if (ec <= DAY_KEY_E[i + 1]) {
       float f = smoothstep(DAY_KEY_E[i], DAY_KEY_E[i + 1], ec);
       w[i] = 1.0 - f;
@@ -936,28 +946,11 @@ void dayWeights(float e, out float w[6]) {
       return;
     }
   }
-  w[5] = 1.0;
+  w[3] = 1.0;
 }
 
-vec3 dayMix(float w[6], vec3 k[6]) {
-  return w[0] * k[0] + w[1] * k[1] + w[2] * k[2] + w[3] * k[3] + w[4] * k[4] + w[5] * k[5];
-}
-
-// Brightness of the night star field at p (screen p-units; px is one
-// screen pixel): at most one star per STAR_CELL, placed within its cell,
-// most faint and a few bright (magnitude cubed), each twinkling at its own
-// rate, drawn as a pixel-sized gaussian so it never aliases into a square.
-float starField(vec2 p, float px) {
-  vec2 g = p / STAR_CELL;
-  vec2 id = floor(g);
-  float h = hash21(id + 91.7);
-  if (h > STAR_CHANCE) return 0.0;
-  vec2 pos = 0.15 + 0.7 * hash22(id + 13.1);
-  float d = length((fract(g) - pos) * STAR_CELL);
-  float mag = pow(hash21(id + 5.3), 3.0);
-  float size = px * mix(0.7, 1.7, mag);
-  float twinkle = 0.72 + 0.28 * sin(uTime * mix(1.3, 4.1, hash21(id + 2.2)) + h * 40.0);
-  return exp(-d * d / (size * size)) * mix(0.28, 1.0, mag) * twinkle;
+vec3 dayMix(float w[4], vec3 k[4]) {
+  return w[0] * k[0] + w[1] * k[1] + w[2] * k[2] + w[3] * k[3];
 }
 
 // One wave's streak density at cell centre c (screen p-units), its slant in
@@ -1030,20 +1023,23 @@ void main() {
   // gradient between the keyed zenith and horizon colours for this sun
   // elevation, mornings warmed toward peach around the horizon glow, a
   // soft sun halo wherever the sun sits in the frame, horizon warmth pooled
-  // on the sun's side around sunrise and sunset, and stars once the sky
-  // darkens past blue hour. The early-evening key is the earlier fixed look,
+  // on the sun's side around sunrise and sunset; no night (see the DAY_KEY_E
+  // comment). The early-evening key is the earlier fixed look,
   // itself measured against a real hazy sky and then taken a step darker
   // with a faint pink-purple cast at the user's request.
   float px = 1.0 / max(uResolution.y, 1.0);
   float dayAngle = 6.28318 * (uDayPhase - 0.25);
   float sunE = sin(dayAngle);
-  float dw[6];
-  dayWeights(sunE, dw);
+  float lightE = max(sunE, DAY_E_FLOOR); // no night: the sky holds its sunset glow while the sun is down
+  float dw[4];
+  dayWeights(lightE, dw);
   vec3 zenith = dayMix(dw, SKY_ZENITH);
   vec3 horizon = dayMix(dw, SKY_HORIZON);
   vec3 sunCol = dayMix(dw, SUN_KEY);
-  float glowHour = 1.0 - smoothstep(0.05, 0.3, abs(sunE)); // 1 around sunrise/sunset, 0 by mid-morning
-  float morning = uDayPhase < 0.5 ? 1.0 : 0.0;
+  float glowHour = 1.0 - smoothstep(0.05, 0.3, abs(lightE)); // 1 around sunrise/sunset (and all through the skipped night), 0 by mid-morning
+  // 1 at sunrise, 0 at sunset, easing between through noon and midnight: a
+  // hard morning/evening switch would show, since the sky never goes dark.
+  float morning = 0.5 + 0.5 * cos(dayAngle);
   horizon = mix(horizon, horizon * MORNING_WARMTH, morning * glowHour);
   sunCol = mix(sunCol, sunCol * MORNING_WARMTH, morning * glowHour);
   vec3 color = mix(horizon, zenith, smoothstep(-0.1, 0.9, uv.y));
@@ -1057,8 +1053,6 @@ void main() {
   glow += sunCol * HORIZON_WARM * glowHour * onSunSide * lowInSky;
   color += glow;
 
-  float starAmt = 1.0 - smoothstep(-0.25, -0.06, sunE);
-  if (starAmt > 0.0) color += vec3(0.85, 0.9, 1.0) * starField(p, px) * starAmt;
 
   // 2. Cloud cover: the sim's own dye density thresholded (CLOUD_LOW/HIGH)
   // rather than blended with a plain extinction curve — a gain/gamma remap
@@ -1080,13 +1074,10 @@ void main() {
   // this reaches far enough across the body to shade actual folds.
   float bumped = cloudBumpedAt(uv);
   float cloudAlpha = smoothstep(CLOUD_LOW, CLOUD_HIGH, bumped);
-  // Light from the sun's side of the frame by day, the moon's (the opposite
-  // side) by night, always from somewhat above. The hand-over eases through
-  // light from straight above around sunrise and sunset rather than flipping
-  // sides in one frame, which would jump every cloud's shading with Day
-  // drift running.
-  float lightSide = smoothstep(-0.08, 0.08, sunE) * 2.0 - 1.0;
-  vec2 lightDir = normalize(vec2(-cos(dayAngle) * lightSide * 0.8, 0.85));
+  // Light from the sun's side of the frame, always from somewhat above; as
+  // the sun passes under the horizon between sunset and sunrise it swings
+  // back through overhead, so cloud shading never jumps.
+  vec2 lightDir = normalize(vec2(-cos(dayAngle) * 0.8, 0.85));
   float sunNear = max(decodeDye(texture(uDye, uv + lightDir * CLOUD_SHADOW_TAP1)).x, 0.0);
   float sunFar = max(decodeDye(texture(uDye, uv + lightDir * CLOUD_SHADOW_TAP2)).x, 0.0);
   float shadow = exp(-CLOUD_SHADOW_K1 * sunNear - CLOUD_SHADOW_K2 * sunFar);
@@ -1111,8 +1102,8 @@ void main() {
   float lobe = cos(2.0 * ang);
   float radial = smoothstep(0.0, BRUSH_R_CORE, r) * smoothstep(BRUSH_R_OUT, BRUSH_R_IN, r);
   vec3 brushTint = mix(vec3(0.82, 0.85, 1.05), vec3(1.05, 0.98, 0.82), lobe * 0.5 + 0.5);
-  // The brush is polarised skylight, so it fades out as the sky goes dark.
-  float daylight = smoothstep(-0.1, 0.25, sunE);
+  // The brush is polarised skylight, so it dims toward the low twilight glow.
+  float daylight = smoothstep(-0.1, 0.25, lightE);
   float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * (1.0 - 0.4 * uEnergy) * daylight, 0.0, 1.0);
   color = mix(color, color * brushTint, brushAmt);
 
@@ -1166,10 +1157,7 @@ void main() {
     }
     float vis = clear * (1.0 - cloudAlpha);
     float delta = clamp(floaterProfile(s) * uFloaterGain, -0.55, 0.55) * vis;
-    // Against a dark (night) sky, modulate a floor instead of the near-black
-    // behind, so floaters don't vanish once the sun is down.
-    vec3 base = max(color, vec3(FLOATER_NIGHT_FLOOR));
-    color += base * (min(delta, 0.0) + max(delta, 0.0) * FLOATER_COOL_TINT);
+    color *= 1.0 + min(delta, 0.0) + max(delta, 0.0) * FLOATER_COOL_TINT;
 
     // Beat light waves pass through the floaters only: each live wave is a
     // thin ring rippling out from near the centre of view (see the
@@ -1343,10 +1331,12 @@ function createSkyScene(): Scene {
       brushPhase = advanceBrushPhase(brushPhase, dt);
 
       // Day cycle: Time of day is where the sky starts, Day drift how fast it
-      // moves on from there (see file header).
-      dayOffset = advanceDayOffset(dayOffset, dt, resolveSceneSetting(ID, settingFor("dayDrift")));
-      const dayPhaseRaw = resolveSceneSetting(ID, settingFor("timeOfDay")) + dayOffset;
-      const dayPhase = dayPhaseRaw - Math.floor(dayPhaseRaw);
+      // moves on from there, hurrying through the hours the sun is down
+      // (see file header).
+      const timeOfDay = resolveSceneSetting(ID, settingFor("timeOfDay"));
+      const wrap = (v: number) => v - Math.floor(v);
+      dayOffset = advanceDayOffset(dayOffset, dt, resolveSceneSetting(ID, settingFor("dayDrift")), wrap(timeOfDay + dayOffset));
+      const dayPhase = wrap(timeOfDay + dayOffset);
 
       gl.disable(gl.BLEND);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);

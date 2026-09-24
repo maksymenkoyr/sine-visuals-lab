@@ -10,6 +10,7 @@ import {
   dayRatePerSec,
   advanceDayOffset,
   sunElevation,
+  nightSpeedup,
   advanceBrushPhase,
   driftCenter,
   drifterPuff,
@@ -126,6 +127,34 @@ describe("day cycle", () => {
   it("advanceDayOffset survives non-finite and negative inputs", () => {
     expect(Number.isFinite(advanceDayOffset(NaN, NaN, NaN))).toBe(true);
     expect(advanceDayOffset(0.5, -3, 1)).toBe(0.5);
+  });
+
+  it("nightSpeedup: normal pace while the sun is up, hurried once it's well below the horizon", () => {
+    expect(nightSpeedup(0.5)).toBe(1); // noon
+    expect(nightSpeedup(0.71)).toBe(1); // the default early evening
+    expect(nightSpeedup(0.75)).toBe(1); // sunset itself
+    expect(nightSpeedup(0)).toBeCloseTo(12, 6); // midnight
+    expect(nightSpeedup(0.765)).toBeGreaterThan(1); // just after sunset, mid-ramp
+    expect(nightSpeedup(0.765)).toBeLessThan(12);
+  });
+
+  it("a drifted day spends most of its time in daylight, skipping quickly through the night", () => {
+    let phase = 0.25; // start at sunrise
+    let offset = 0;
+    let daySec = 0;
+    let nightSec = 0;
+    const dt = 0.05;
+    // Walk one full cycle at Day drift = 1 (a one-minute day before the speedup).
+    while (offset < 0.999) {
+      const before = offset;
+      if (sunElevation(phase) >= 0) daySec += dt;
+      else nightSec += dt;
+      offset = advanceDayOffset(offset, dt, 1, phase);
+      if (offset < before) break; // wrapped
+      phase = (0.25 + offset) % 1;
+    }
+    expect(nightSec).toBeLessThan(daySec * 0.25);
+    expect(nightSec / (daySec + nightSec)).toBeLessThan(0.1);
   });
 
   it("sunElevation: sunrise and sunset on the horizon, noon highest, midnight lowest", () => {
