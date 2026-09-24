@@ -1816,7 +1816,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // changes, and once from renderSceneSettings()'s own tail (a Look apply,
   // undo, or scene switch can move the choice — or the selection itself —
   // without a focusin here).
-  function refreshDriveZone(): void {
+  //
+  // `onlyIfChanged` is for the panel's periodic refresh (DeviceMenu.update's
+  // refreshAuto pass): it skips everything unless the selection, tab or
+  // choice actually moved. Rebuilding the picker's buttons on that ~100ms
+  // cadence swaps the element under the pointer between mousedown and
+  // mouseup, and the browser then never fires `click` — every chip looked
+  // dead to a real mouse (a script's el.click() doesn't notice).
+  let lastZoneKey = "";
+  function refreshDriveZone(onlyIfChanged = false): void {
+    const zoneKey = selected
+      ? `${selected.sceneId}|${selected.spec.key}|${driveTab}|${JSON.stringify(deps.getDriveChoice(selected.sceneId, selected.spec))}`
+      : "";
+    if (onlyIfChanged && zoneKey === lastZoneKey) return;
+    lastZoneKey = zoneKey;
     refreshSpectrumTabs();
 
     // Nothing selected, or the Equaliser tab showing over a real selection,
@@ -3184,7 +3197,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // every tick, same reasoning as every other refreshAuto() above (an
       // external change, e.g. a paired device's own command, could move the
       // selected setting's choice without a focusin here).
-      if (selected) refreshDriveZone();
+      if (selected) refreshDriveZone(true);
     },
   };
 }
