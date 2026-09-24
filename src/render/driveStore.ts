@@ -47,11 +47,6 @@ import {
  * through `patch` only, so a choice-only entry never comes back once this
  * session has touched it.
  *
- * `getDriveChoice`/`setDriveChoice` further down are a compatibility shim
- * for src/ui/deviceMenu.ts's Revision-3 single-choice picker, which the
- * patch-bay plan's Phase 2 replaces with a real multi-source panel built on
- * `getDriveSetting`/`setDriveSetting` directly — see their own doc comments.
- *
  * Migration: a scene that had a non-Hits grid stored under beatGrid.ts's
  * retired per-scene store (LEGACY_BEAT_GRID_STORAGE_KEY, `vibe.beatGrid`)
  * converts once, lazily, the first time getDriveSetting() is asked about a
@@ -288,36 +283,12 @@ export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   persist();
 }
 
-// ---- getDriveChoice/setDriveChoice — Revision-3 picker shim ----------------
-//
-// src/ui/deviceMenu.ts's current source picker (driveModes()/modeOf(),
-// drives.ts) only ever shows and sets one source at a time. These two let it
-// keep compiling and working unchanged against the new patch-shaped store:
-// getDriveChoice reads the patch's first source (or "scene"); setDriveChoice
-// replaces the whole patch with the one-source, weight-1, Graded `add` patch
-// for that choice — exactly `driveSettingFromChoice`. Both are deleted along
-// with the picker in the patch-bay plan's Phase 2.
-
-export function getDriveChoice(sceneId: string, spec: SceneSetting): DriveChoice {
-  const setting = getDriveSetting(sceneId, spec);
-  if (setting === "scene") return "scene";
-  return setting.sources[0]?.choice ?? "scene";
-}
-
-export function setDriveChoice(sceneId: string, spec: SceneSetting, choice: DriveChoice): void {
-  setDriveSetting(sceneId, spec, driveSettingFromChoice(choice));
-}
-
-/** Alias — `resetDriveSetting` already resets the whole entry regardless of
- *  which shape (choice or patch) built it. */
-export const resetDriveChoice = resetDriveSetting;
-
-// ---- Patch-editing helpers (deviceMenu.ts, Phase 2) ------------------------
+// ---- Patch-editing helpers (deviceMenu.ts) ---------------------------------
 //
 // Store-level counterparts of drives.ts's own pure, same-named helpers:
 // read the current setting, run it through the pure function, persist. Kept
-// here (not exported from drives.ts under these names) so a Phase-2 caller
-// always reaches for the (sceneId, spec, …) form without having to
+// here (not exported from drives.ts under these names) so a caller always
+// reaches for the (sceneId, spec, …) form without having to
 // getDriveSetting()/setDriveSetting() around a pure call by hand.
 
 export function togglePatchSource(sceneId: string, spec: SceneSetting, choice: DriveSourceChoice): void {

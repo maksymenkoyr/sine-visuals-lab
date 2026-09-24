@@ -328,6 +328,17 @@ const stylesheet = `
 }
 .vc-slider:focus { outline: none; }
 .vc-row:hover .vc-slider, .vc-row:focus-within .vc-slider { transform: scale(1.015, 1.6); }
+/* A .vc-slider outside a .vc-row (the patch bay's own weight controls,
+ * deviceMenu.ts's buildWeightSlider) has no :focus-within ancestor to
+ * supply the scale/glow above, so give it a plain ring directly instead —
+ * keyboard focus stays visible wherever a .vc-slider lives. Harmless
+ * layered on top of a .vc-row slider's own effect too. */
+.vc-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px color-mix(in srgb, var(--vc-accent) 60%, transparent);
+}
+.vc-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px color-mix(in srgb, var(--vc-accent) 60%, transparent);
+}
 .vc-slider::-webkit-slider-runnable-track {
   height: 3px; border-radius: 2px;
   background: linear-gradient(var(--vc-accent), var(--vc-accent)) no-repeat 0 0 / var(--vc-fill) 100%, rgba(255, 255, 255, 0.18);
@@ -401,6 +412,21 @@ const stylesheet = `
 .vc-picker { outline: none; border-radius: 4px; margin-top: 6px; }
 .vc-picker:focus-visible {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--vc-accent) 70%, transparent);
+}
+
+/* The patch bay (deviceMenu.ts): a drive row's input port and the pinned
+ * row's own highlight. Colour/border/box-shadow are written per-row inline
+ * (drivePortStyle) since they depend on the setting's live sources; these
+ * cover only what inline cssText can't reach — the hover/focus states and
+ * the pinned row's resting ring (composited under .vc-row's own hover/
+ * focus-within glow, which wins when both are true, same cascade order as
+ * the rest of this file). */
+.vc-drive-port { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.vc-drive-port:hover { transform: scale(1.25); }
+.vc-drive-port:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.vc-row.vc-drive-pinned {
+  background-color: color-mix(in srgb, ${SCENE_VIOLET} 6%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, ${SCENE_VIOLET} 45%, transparent);
 }
 
 /* Dev-only typed-value field (deviceMenu.ts's pinOpenEdit), swapped in over a

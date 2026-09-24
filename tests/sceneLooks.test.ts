@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { getSceneSetting, setSceneSetting } from "../src/render/sceneSettings.ts";
 import { isAutoEnabled, setAutoEnabled } from "../src/render/autoTune.ts";
-import { getDriveChoice, setDriveChoice } from "../src/render/driveStore.ts";
+import { getDriveSetting, setDriveSetting } from "../src/render/driveStore.ts";
 import { driveSettingFromChoice, type DriveSetting } from "../src/render/drives.ts";
 import {
   applyLook,
@@ -151,7 +151,7 @@ describe("captureLook", () => {
     const look = captureLook("Test", sceneId, SPECS_WITH_DRIVE);
     expect(look.drives).toBeUndefined(); // flash is still at its default (feature.onset)
 
-    setDriveChoice(sceneId, FLASH, "anim.lowOnset");
+    setDriveSetting(sceneId, FLASH, driveSettingFromChoice("anim.lowOnset"));
     const look2 = captureLook("Test", sceneId, SPECS_WITH_DRIVE);
     expect(look2.drives).toEqual({ flash: driveSettingFromChoice("anim.lowOnset") });
   });
@@ -176,13 +176,13 @@ describe("applyLook", () => {
 
   it("sets a listed drive choice and resets an unlisted one back to its default", () => {
     const sceneId = "look-apply-2";
-    setDriveChoice(sceneId, FLASH, "anim.highOnset");
+    setDriveSetting(sceneId, FLASH, driveSettingFromChoice("anim.highOnset"));
 
     applyLook({ name: "L", sceneId, manual: {}, drives: { flash: driveSettingFromChoice("anim.lowOnset") } }, SPECS_WITH_DRIVE);
-    expect(getDriveChoice(sceneId, FLASH)).toBe("anim.lowOnset");
+    expect(getDriveSetting(sceneId, FLASH)).toEqual(driveSettingFromChoice("anim.lowOnset"));
 
     applyLook({ name: "L2", sceneId, manual: {} }, SPECS_WITH_DRIVE);
-    expect(getDriveChoice(sceneId, FLASH)).toBe("feature.onset");
+    expect(getDriveSetting(sceneId, FLASH)).toEqual(driveSettingFromChoice("feature.onset"));
   });
 });
 
