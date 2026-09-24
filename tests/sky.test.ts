@@ -5,6 +5,8 @@ import {
   waveStrengthFromTreble,
   sweepSlot,
   MAX_SWEEPS,
+  waveLifeSec,
+  floaterGain,
   dayRatePerSec,
   advanceDayOffset,
   sunElevation,
@@ -139,6 +141,57 @@ describe("day cycle", () => {
     const t = spec!.default;
     expect(t).toBeGreaterThan(0.5); // afternoon/evening, not morning
     expect(sunElevation(t)).toBeCloseTo(0.25, 1); // DAY_KEY_E's early-evening key
+  });
+});
+
+describe("floater sustain and visibility", () => {
+  it("waveLifeSec grows with Sustain from under a second to several seconds", () => {
+    let prev = waveLifeSec(0);
+    expect(prev).toBeLessThan(1);
+    for (let s = 0.1; s <= 1.0001; s += 0.1) {
+      const cur = waveLifeSec(s);
+      expect(cur).toBeGreaterThan(prev);
+      prev = cur;
+    }
+    expect(waveLifeSec(1)).toBeGreaterThan(5);
+  });
+
+  it("the default Sustain keeps waves close to the tuned couple of seconds", () => {
+    const spec = (skyScene.settings ?? []).find((s) => s.key === "floaterSustain");
+    expect(spec).toBeDefined();
+    const life = waveLifeSec(spec!.default);
+    expect(life).toBeGreaterThan(1.4);
+    expect(life).toBeLessThan(2.2);
+  });
+
+  it("floaterGain hides floaters at 0 and makes the default 20% stronger than the tuned contrast", () => {
+    expect(floaterGain(0)).toBe(0);
+    const spec = (skyScene.settings ?? []).find((s) => s.key === "floaterVisibility");
+    expect(spec).toBeDefined();
+    expect(floaterGain(spec!.default)).toBeCloseTo(1.2, 6);
+    expect(floaterGain(1)).toBeGreaterThan(floaterGain(spec!.default));
+  });
+
+  it("both clamp out-of-range and non-finite input", () => {
+    expect(waveLifeSec(-1)).toBe(waveLifeSec(0));
+    expect(waveLifeSec(9)).toBe(waveLifeSec(1));
+    expect(Number.isFinite(waveLifeSec(NaN))).toBe(true);
+    expect(floaterGain(9)).toBe(floaterGain(1));
+    expect(floaterGain(NaN)).toBe(0);
+  });
+
+  it("the wave pool retires each wave on its own life, and uploads it", () => {
+    const pool = createWavePool();
+    pool.trigger(0, 1, 1, 0.5, 0.5, 1);
+    pool.trigger(0, 1, 2, 0.5, 0.5, 5);
+    pool.tick(2);
+    expect(pool.alive()).toBe(1);
+    expect(pool.bursts.find((b) => b.t0 !== WAVE_DEAD_T0)?.seed).toBe(2);
+    const { prog, uploads } = fakeProgram();
+    pool.upload(prog);
+    expect(uploads.uBurstLife).toContain(5);
+    pool.tick(5.01);
+    expect(pool.alive()).toBe(0);
   });
 });
 

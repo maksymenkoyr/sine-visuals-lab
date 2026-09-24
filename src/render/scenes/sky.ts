@@ -111,10 +111,16 @@ import {
 // a bigger one on top.
 //
 // On each beat (a "beat" beatListener, one sweep per beat into a ring of
-// MAX_SWEEPS slots, sweepSlot) a wavy band of shifting rainbow light
-// crosses the frame, but it lights only the floaters' own tubes: the sky and
-// clouds around them never change, so the wave is only seen where it
-// passes through a streak.
+// MAX_SWEEPS slots, sweepSlot) a thin ring of pale light ripples quickly
+// out from near the centre of view (lightWaveAt), tinted only from the
+// sky's own lavender, rose and pale-cyan tones, and it lights only the
+// floaters' own tubes: the sky and clouds around them never change, so the
+// wave is only seen as a glint passing through a streak.
+//
+// Floater visibility (floaterGain) scales the tubes' contrast, and Floater
+// sustain (waveLifeSec) sets how long each wave stays; each wave keeps the
+// life it was given when it fired (uBurstLife), so moving the slider never
+// stretches or cuts short a streak already on screen.
 //
 // The sky runs on its own 24-hour clock. Time of day sets where it sits,
 // Day drift how fast it moves on from there (advanceDayOffset, a scene-owned
@@ -148,7 +154,7 @@ import {
 const ID = "sky";
 
 // --- Floater-wave budget (a compile-time loop bound in the display shader). ---
-export const MAX_WAVE_BURSTS = 6; // concurrent floater streaks — treble fires them often and each is short-lived, so several overlap
+export const MAX_WAVE_BURSTS = 8; // concurrent floater streaks — treble fires them often, and with a long Floater sustain several stay up at once
 
 // --- Fluid sim tuning. Fixed rather than exposed as settings — the plan's
 // settings list is representative, not exhaustive, and these aren't part of
@@ -177,7 +183,10 @@ const DRIFTER_PUFF_RATE = 0.45; // rad/s of each source's on/off cycle (~14s per
 // --- Floater waves (streaks of floaters on a grid — see the
 // file header). Short-lived and fired by treble, so they come and go
 // quickly. ---
-export const WAVE_LIFE_SEC = 1.8;
+export const WAVE_LIFE_SEC = 1.8; // a wave's life when none is given (createWavePool's trigger default)
+const WAVE_LIFE_MIN_SEC = 0.8; // life at Sustain = 0
+const WAVE_LIFE_MAX_SEC = 8; // life at Sustain = 1
+const FLOATER_GAIN_MAX = 2.4; // floater contrast gain at Visibility = 1 (so the 0.5 default is 1.2x the tuned contrast)
 export const WAVE_DEAD_T0 = -1e9;
 const WAVE_FADE_IN_SEC = 0.15; // the streak's density ramps up this fast — floaters pop in, fringe first
 const WAVE_FADE_OUT_SEC = 0.9; // and ramps back down over this long, so it dissolves ">" -> "_" -> gone
@@ -187,12 +196,13 @@ const WAVE_HOLD_FALLBACK_SEC_PER_BEAT = 0.45; // beatListener's no-tempo-lock fa
 const WAVE_REFRACTORY_SEC = 0.12; // hard floor between treble waves, whatever the hold
 const SWARM_CANDIDATES = 12; // spawn spots pickSwarmCenter scores against the cloud drifters
 
-// --- Beat light waves: a wavy band of shifting rainbow light sweeping
-// across the whole sky on each beat. A plain ring of slots — the oldest
-// is always the one overwritten, and the shader retires any sweep older
-// than SWEEP_SEC on its own, so nothing needs expiring here. ---
-export const MAX_SWEEPS = 3; // a sweep outlives a beat at most tempos, so a few overlap
-export const SWEEP_SEC = 1.3;
+// --- Beat light waves: a thin, pale ring of light rippling out from near
+// the centre of view on each beat, seen only where it passes through the
+// floaters. A plain ring of slots — the oldest is always the one
+// overwritten, and the shader retires any wave older than SWEEP_SEC on its
+// own, so nothing needs expiring here. ---
+export const MAX_SWEEPS = 3;
+export const SWEEP_SEC = 0.7; // quick: a ripple, not a slow wipe
 const SWEEP_HOLD: HoldBeats = { beats: 1, fallbackSec: 0.4 }; // at most one sweep per beat
 
 /** Which ring slot the next sweep goes in, given how many have fired so
@@ -259,6 +269,21 @@ export function waveStrengthFromDrop(dropPulse: number, sectionIntensity: number
 export function waveHoldBeats(frequency: number): number {
   const f = Number.isFinite(frequency) ? clamp01(frequency) : 0;
   return WAVE_HOLD_MAX_BEATS - (WAVE_HOLD_MAX_BEATS - WAVE_HOLD_MIN_BEATS) * f;
+}
+
+/** How long a floater wave stays, in seconds, at a Sustain setting: squared,
+ *  so the short end (where a quick flicker vs a brief hold matters most)
+ *  gets most of the slider. */
+export function waveLifeSec(sustain: number): number {
+  const s = Number.isFinite(sustain) ? clamp01(sustain) : 0;
+  return WAVE_LIFE_MIN_SEC + (WAVE_LIFE_MAX_SEC - WAVE_LIFE_MIN_SEC) * s * s;
+}
+
+/** Floater contrast gain at a Visibility setting — 0 hides them, the 0.5
+ *  default is 1.2x the tuned contrast, 1 is double that. */
+export function floaterGain(visibility: number): number {
+  const v = Number.isFinite(visibility) ? clamp01(visibility) : 0;
+  return FLOATER_GAIN_MAX * v;
 }
 
 /** How big a treble wave's streak is, from the high band's own pulse at the
@@ -335,27 +360,30 @@ export function pickSwarmCenter(seed: number, obstacles: readonly (readonly [num
 }
 
 /** One live floater wave: when it started, how hard (0..1, from
- *  waveStrengthFromDrop or the spontaneous trigger), the seed its swarm's
- *  layout hashes from, and where it spawned (screen uv, from
- *  pickSwarmCenter). Same stateless-pool idiom as powder.ts's
- *  createChunkPool — see this file's header. */
+ *  waveStrengthFromTreble or waveStrengthFromDrop), the seed its streak's
+ *  layout hashes from, where it spawned (screen uv, from pickSwarmCenter)
+ *  and how long it lives (from the Sustain setting at the moment it fired,
+ *  so moving the slider never stretches or cuts short a streak already on
+ *  screen). Same stateless-pool idiom as powder.ts's createChunkPool — see
+ *  this file's header. */
 export interface WaveBurst {
   t0: number;
   strength: number;
   seed: number;
   x: number;
   y: number;
+  life: number;
 }
 
 export interface WavePool {
-  /** Starts a wave at screen uv (x, y), reusing a dead slot or displacing
-   *  the oldest live one. */
-  trigger(nowSec: number, strength: number, seed: number, x?: number, y?: number): void;
-  /** Retires every wave older than WAVE_LIFE_SEC. */
+  /** Starts a wave at screen uv (x, y) living `life` seconds (default
+   *  WAVE_LIFE_SEC), reusing a dead slot or displacing the oldest live one. */
+  trigger(nowSec: number, strength: number, seed: number, x?: number, y?: number, life?: number): void;
+  /** Retires every wave older than its own life. */
   tick(nowSec: number): void;
   /** How many waves are currently live. */
   alive(): number;
-  /** Uploads the pool as uBurstT0/uBurstAmp/uBurstSeed/uBurstX/uBurstY. */
+  /** Uploads the pool as uBurstT0/uBurstAmp/uBurstSeed/uBurstX/uBurstY/uBurstLife. */
   upload(prog: GLProgram): void;
   /** The raw slots, for tests. */
   readonly bursts: readonly WaveBurst[];
@@ -363,16 +391,19 @@ export interface WavePool {
 
 export function createWavePool(): WavePool {
   const bursts: WaveBurst[] = [];
-  for (let i = 0; i < MAX_WAVE_BURSTS; i++) bursts.push({ t0: WAVE_DEAD_T0, strength: 0, seed: 0, x: 0.5, y: 0.5 });
+  for (let i = 0; i < MAX_WAVE_BURSTS; i++) {
+    bursts.push({ t0: WAVE_DEAD_T0, strength: 0, seed: 0, x: 0.5, y: 0.5, life: WAVE_LIFE_SEC });
+  }
   const t0Buf = new Float32Array(MAX_WAVE_BURSTS);
   const ampBuf = new Float32Array(MAX_WAVE_BURSTS);
   const seedBuf = new Float32Array(MAX_WAVE_BURSTS);
   const xBuf = new Float32Array(MAX_WAVE_BURSTS);
   const yBuf = new Float32Array(MAX_WAVE_BURSTS);
+  const lifeBuf = new Float32Array(MAX_WAVE_BURSTS);
 
   return {
     bursts,
-    trigger(nowSec, strength, seed, x = 0.5, y = 0.5): void {
+    trigger(nowSec, strength, seed, x = 0.5, y = 0.5, life = WAVE_LIFE_SEC): void {
       let slot = 0;
       let oldest = Infinity;
       for (let i = 0; i < bursts.length; i++) {
@@ -392,10 +423,11 @@ export function createWavePool(): WavePool {
       b.seed = seed;
       b.x = Number.isFinite(x) ? x : 0.5;
       b.y = Number.isFinite(y) ? y : 0.5;
+      b.life = Number.isFinite(life) && life > 0 ? life : WAVE_LIFE_SEC;
     },
     tick(nowSec): void {
       for (const b of bursts) {
-        if (b.t0 !== WAVE_DEAD_T0 && nowSec - b.t0 > WAVE_LIFE_SEC) {
+        if (b.t0 !== WAVE_DEAD_T0 && nowSec - b.t0 > b.life) {
           b.t0 = WAVE_DEAD_T0;
           b.strength = 0;
         }
@@ -414,12 +446,14 @@ export function createWavePool(): WavePool {
         seedBuf[i] = b.seed;
         xBuf[i] = b.x;
         yBuf[i] = b.y;
+        lifeBuf[i] = b.life;
       }
       prog.setFv("uBurstT0", t0Buf);
       prog.setFv("uBurstAmp", ampBuf);
       prog.setFv("uBurstSeed", seedBuf);
       prog.setFv("uBurstX", xBuf);
       prog.setFv("uBurstY", yBuf);
+      prog.setFv("uBurstLife", lifeBuf);
     },
   };
 }
@@ -500,6 +534,16 @@ const SETTINGS: SceneSetting[] = [
     reads: ["anim.dropOnset"],
   },
   {
+    key: "floaterSustain",
+    label: "Floater sustain",
+    description: "How long each wave of floaters stays before it dissolves — a quick flicker at the low end, several seconds of hanging in the sky at the high end",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.35,
+  },
+  {
     key: "dayDrift",
     label: "Day drift",
     description:
@@ -545,6 +589,16 @@ const SETTINGS: SceneSetting[] = [
     auto: { density: -0.2 },
   },
   {
+    key: "floaterVisibility",
+    label: "Floater visibility",
+    description: "How strongly the floaters stand out from the sky behind them — gone at 0, faint and glassy low, crisp and bold high",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+  },
+  {
     key: "lightWaves",
     label: "Light waves",
     description: "How brightly the floaters light up in shifting rainbow colours as a wave of light passes through them on each beat",
@@ -580,24 +634,35 @@ uniform float uBurstAmp[${MAX_WAVE_BURSTS}];
 uniform float uBurstSeed[${MAX_WAVE_BURSTS}];
 uniform float uBurstX[${MAX_WAVE_BURSTS}];
 uniform float uBurstY[${MAX_WAVE_BURSTS}];
+uniform float uBurstLife[${MAX_WAVE_BURSTS}]; // each wave's own life, from Floater sustain when it fired
 uniform float uSweepT0[${MAX_SWEEPS}];
 uniform float uSweepSeed[${MAX_SWEEPS}];
+uniform float uFloaterGain; // floaterGain(Floater visibility)
 uniform float uDayPhase; // 0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset (see advanceDayOffset)
 
 const int MAX_WAVE_BURSTS_C = ${MAX_WAVE_BURSTS};
-const float WAVE_LIFE_SEC_C = ${WAVE_LIFE_SEC.toFixed(3)};
 const float WAVE_FADE_IN = ${WAVE_FADE_IN_SEC.toFixed(3)};
 const float WAVE_FADE_OUT = ${WAVE_FADE_OUT_SEC.toFixed(3)};
 const int MAX_SWEEPS_C = ${MAX_SWEEPS};
 const float SWEEP_SEC_C = ${SWEEP_SEC.toFixed(3)};
-// A beat light wave's band (see the sweep loop in main): SWEEP_WIDTH wide in
-// screen p-units, its front rippled sideways by SWEEP_WOBBLE at
-// SWEEP_WOBBLE_FREQ so it reads as a wave rather than a straight wipe, and
-// screen-blended at up to SWEEP_ALPHA (times the Light waves setting).
-const float SWEEP_WIDTH = 0.12;
-const float SWEEP_WOBBLE = 0.05;
-const float SWEEP_WOBBLE_FREQ = 7.0;
-const float SWEEP_ALPHA = 0.9; // strong, since it only ever lights the floaters' own thin tubes
+// A beat light wave (see the wave loop in main): a ring expanding from
+// within SWEEP_ORIGIN_SPREAD of the centre of view, SWEEP_WIDTH thick in
+// screen p-units (a thin front with a short soft trail), its edge rippled
+// by SWEEP_WOBBLE in SWEEP_WOBBLE_LOBES lobes around the ring (a whole
+// number, so the ripple closes up with no seam), easing out as it spreads
+// like a ripple on water. Coloured only from pale tints already in the
+// sky's own palette (SWEEP_TINT_*), drifting between them around the ring
+// and across its width, and screen-blended at up to SWEEP_ALPHA (times the
+// Light waves setting): a soft glint in the floaters, not a rainbow.
+const float SWEEP_WIDTH = 0.045;
+const float SWEEP_WOBBLE = 0.02;
+const float SWEEP_WOBBLE_LOBES = 5.0;
+const float SWEEP_ORIGIN_SPREAD = 0.12;
+const float SWEEP_EASE = 1.8; // >1 eases the ring out: fast from the centre, slowing as it spreads
+const float SWEEP_ALPHA = 0.42;
+const vec3 SWEEP_TINT_A = vec3(0.84, 0.80, 1.00); // lavender, the early-evening zenith lifted
+const vec3 SWEEP_TINT_B = vec3(1.00, 0.86, 0.90); // rose, the sunset cloud tone lifted
+const vec3 SWEEP_TINT_C = vec3(0.82, 0.94, 1.00); // pale cyan, the midday horizon lifted
 
 // The day cycle's light, keyed on sun elevation (sin of the day angle, -1 at
 // midnight to +1 at noon) rather than on clock time, so dawn and dusk share
@@ -700,7 +765,7 @@ const float STREAK_SLANT_MIN = 0.12;
 const float STREAK_SLANT_MAX = 0.45; // radians up to the right; the reference rises ~20 degrees
 const float STREAK_RAG = 0.45;
 const float STREAK_HOT_CHANCE = 0.5; // fraction of streaks with a dot hotspot (one reference has one, the other none)
-const vec2 STREAK_DRIFT = vec2(0.09, 0.012); // p-units/s, scaled by Flow speed; quick, since a streak only lives WAVE_LIFE_SEC
+const vec2 STREAK_DRIFT = vec2(0.09, 0.012); // p-units/s, scaled by Flow speed; quick, since a streak only lives a couple of seconds by default (Floater sustain)
 const int FLOATER_SEGMENTS = 10; // path points per strand (head at index 0), see floaterPath
 const float BODY_LEN_MIN = 0.036 * FLOATER_SCALE; // body strand arc length, screen p-units, hashed per cell
 const float BODY_LEN_MAX = 0.048 * FLOATER_SCALE;
@@ -901,7 +966,7 @@ float starField(vec2 p, float px) {
 // fringe-first and dissolves cell by cell: each body strand gives way to a
 // fringe strand, then each fringe strand to empty sky, not the whole streak
 // fading at once.
-float streakDensity(vec2 c, vec2 centre, float seed, float amp, float age, out float slant, out float hot) {
+float streakDensity(vec2 c, vec2 centre, float seed, float amp, float age, float life, out float slant, out float hot) {
   float size = clamp(uFloaterDensity * 1.3, 0.1, 1.0) * mix(1.0 - clamp(uWaveStrength, 0.0, 1.0), 1.0, clamp(amp, 0.0, 1.0));
   vec2 L = mix(STREAK_L_MIN, STREAK_L_MAX, size);
   slant = mix(STREAK_SLANT_MIN, STREAK_SLANT_MAX, hash21(vec2(seed, 51.0)));
@@ -914,7 +979,8 @@ float streakDensity(vec2 c, vec2 centre, float seed, float amp, float age, out f
   float row = floor(c.y / FLOATER_CELL.y);
   float rag = (vnoise(vec2(row * 0.9 * FLOATER_SCALE + seed * 7.1, q.x / L.x * 2.2 + seed)) - 0.5) * STREAK_RAG;
   vec2 e = q / L;
-  float env = smoothstep(0.0, WAVE_FADE_IN, age) * (1.0 - smoothstep(WAVE_LIFE_SEC_C - WAVE_FADE_OUT, WAVE_LIFE_SEC_C, age));
+  float fadeOut = min(WAVE_FADE_OUT, life * 0.5); // a short-sustain wave still gets a clean pop in and out
+  float env = smoothstep(0.0, WAVE_FADE_IN, age) * (1.0 - smoothstep(life - fadeOut, life, age));
   hot = 0.0;
   if (hash21(vec2(seed, 52.0)) < STREAK_HOT_CHANCE) {
     vec2 hc = (hash22(vec2(seed, 53.0)) - 0.5) * vec2(0.9, 0.5) * L;
@@ -922,6 +988,35 @@ float streakDensity(vec2 c, vec2 centre, float seed, float amp, float age, out f
     hot = (1.0 - dot(he, he)) * env;
   }
   return 1.0 - dot(e, e) + rag - (1.0 - env) * 1.1;
+}
+
+// The beat light waves' glow at p (see the SWEEP_WIDTH comment): the sum of
+// every live wave's thin ring rippling out from near the centre of view,
+// each tinted from the sky's own pale palette. main() applies it only inside
+// the floaters' tubes.
+vec3 lightWaveAt(vec2 p, float devAspect) {
+  vec3 glow = vec3(0.0);
+  for (int i = 0; i < MAX_SWEEPS_C; i++) {
+    float age = uTime - uSweepT0[i];
+    if (age < 0.0 || age > SWEEP_SEC_C) continue;
+    float seed = uSweepSeed[i];
+    float t = age / SWEEP_SEC_C;
+    vec2 origin = (hash22(vec2(seed, 63.0)) - 0.5) * 2.0 * SWEEP_ORIGIN_SPREAD;
+    vec2 rel = p - origin;
+    float ang = atan(rel.y, rel.x);
+    // Far enough to clear the frame's farthest corner from any origin.
+    float reach = 0.5 * length(vec2(devAspect, 1.0)) + SWEEP_ORIGIN_SPREAD * 1.5 + SWEEP_WIDTH * 3.0;
+    float front = reach * (1.0 - pow(1.0 - t, SWEEP_EASE));
+    float radius = length(rel) + SWEEP_WOBBLE * sin(ang * SWEEP_WOBBLE_LOBES + seed * 6.0 + uTime * 1.7);
+    float x = (radius - front) / SWEEP_WIDTH;
+    // A crisp leading edge and a short soft trail inside the ring.
+    float band = x > 0.0 ? exp(-x * x * 3.0) : exp(-x * x * 0.6);
+    float drift = 0.5 + 0.5 * sin(ang * 2.0 + seed * 4.1);
+    vec3 tint = mix(mix(SWEEP_TINT_A, SWEEP_TINT_B, drift), SWEEP_TINT_C, 0.5 + 0.5 * cos(x * 1.3 + seed));
+    float fade = smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(0.6, 1.0, t));
+    glow += tint * band * fade;
+  }
+  return glow;
 }
 
 void main() {
@@ -1037,13 +1132,14 @@ void main() {
   float slant = 0.0;
   for (int b = 0; b < MAX_WAVE_BURSTS_C; b++) {
     float age = uTime - uBurstT0[b];
-    if (age < 0.0 || age > WAVE_LIFE_SEC_C) continue;
+    float life = uBurstLife[b];
+    if (age < 0.0 || age > life) continue;
     vec2 centre = (vec2(uBurstX[b], uBurstY[b]) - 0.5) * vec2(devAspect, 1.0) + wind * age;
     // Rag can push density past the ellipse by at most ~5%, never further.
     if (length(cellC - centre) > STREAK_L_MAX.x * 1.1) continue;
     float h;
     float sl;
-    float d = streakDensity(cellC, centre, uBurstSeed[b], uBurstAmp[b], age, sl, h);
+    float d = streakDensity(cellC, centre, uBurstSeed[b], uBurstAmp[b], age, life, sl, h);
     if (d > dens) {
       dens = d;
       hot = h;
@@ -1069,40 +1165,21 @@ void main() {
       s = floaterStrand(p, cellC + vec2(0.0, FRINGE_DROP), cellSeed, 0.0, len);
     }
     float vis = clear * (1.0 - cloudAlpha);
-    float delta = clamp(floaterProfile(s), -0.4, 0.4) * vis;
+    float delta = clamp(floaterProfile(s) * uFloaterGain, -0.55, 0.55) * vis;
     // Against a dark (night) sky, modulate a floor instead of the near-black
     // behind, so floaters don't vanish once the sun is down.
     vec3 base = max(color, vec3(FLOATER_NIGHT_FLOOR));
     color += base * (min(delta, 0.0) + max(delta, 0.0) * FLOATER_COOL_TINT);
 
-    // Beat light waves pass through the floaters only: each live sweep is a
-    // soft band travelling across the frame in its own hashed direction, its
-    // front rippling, its colour a rainbow shifting across the band and along
-    // it, and it lights just this floater's own tube (inside it and its rim),
-    // screen-blended so a floater flashes that colour as the band crosses it
-    // and the sky and clouds around it stay untouched.
+    // Beat light waves pass through the floaters only: each live wave is a
+    // thin ring rippling out from near the centre of view (see the
+    // SWEEP_WIDTH comment), and it lights just this floater's own tube
+    // (inside it and its rim), screen-blended so a floater glints a pale
+    // sky tint as the ring crosses it while the sky and clouds around it stay
+    // untouched.
     float tube = 1.0 - smoothstep(0.0, max(FLOATER_FRINGE_W, FLOATER_MIN_PX * px), s);
     if (tube > 0.0) {
-      vec3 sweepGlow = vec3(0.0);
-      for (int i = 0; i < MAX_SWEEPS_C; i++) {
-        float age = uTime - uSweepT0[i];
-        if (age < 0.0 || age > SWEEP_SEC_C) continue;
-        float seed = uSweepSeed[i];
-        float t = age / SWEEP_SEC_C;
-        float ang = mix(-0.7, 0.7, hash21(vec2(seed, 61.0))) + (hash21(vec2(seed, 62.0)) < 0.5 ? 0.0 : 3.14159265);
-        vec2 dir = vec2(cos(ang), sin(ang));
-        vec2 perp = vec2(-dir.y, dir.x);
-        float reach = 0.5 * (abs(dir.x) * devAspect + abs(dir.y)) + SWEEP_WIDTH * 2.0;
-        float front = mix(-reach, reach, t);
-        float across = dot(p, perp);
-        float along = dot(p, dir) + SWEEP_WOBBLE * sin(across * SWEEP_WOBBLE_FREQ + uTime * 2.3 + seed);
-        float x = (along - front) / SWEEP_WIDTH;
-        // A sharper leading edge and a longer glowing tail behind it.
-        float band = x > 0.0 ? exp(-x * x * 2.0) : exp(-x * x * 0.35);
-        vec3 hue = 0.5 + 0.5 * cos(6.28318 * (fract(seed * 0.37) + x * 0.22 + across * 0.8 + vec3(0.0, 0.33, 0.67)));
-        float fade = smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(0.75, 1.0, t));
-        sweepGlow += hue * band * fade;
-      }
+      vec3 sweepGlow = lightWaveAt(p, devAspect);
       vec3 lit = clamp(sweepGlow * SWEEP_ALPHA * uLightWaves * tube * vis, 0.0, 1.0);
       color = 1.0 - (1.0 - color) * (1.0 - lit);
     }
@@ -1249,6 +1326,7 @@ function createSkyScene(): Scene {
         sweepsFired++;
       }
       const treble = trebleListener.advance(anim);
+      const waveLife = waveLifeSec(resolveSceneSetting(ID, settingFor("floaterSustain")));
       const strengths: number[] = [];
       if (treble.fired) strengths.push(waveStrengthFromTreble(anim.highPulse));
       if (anim.dropOnset) strengths.push(waveStrengthFromDrop(anim.dropPulse, anim.sectionIntensity));
@@ -1257,7 +1335,7 @@ function createSkyScene(): Scene {
         for (const b of wavePool.bursts) if (b.t0 !== WAVE_DEAD_T0) obstacles.push([b.x, b.y]);
         const seed = waveSeedCounter++;
         const [cx, cy] = pickSwarmCenter(seed, obstacles);
-        wavePool.trigger(anim.timeSec, strength, seed, cx, cy);
+        wavePool.trigger(anim.timeSec, strength, seed, cx, cy, waveLife);
       }
 
       // Haidinger's brush — a continuously increasing accumulator, never
@@ -1276,6 +1354,7 @@ function createSkyScene(): Scene {
       uploadCommonUniforms(displayProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
       displayProg.setF("uBrushPhase", brushPhase);
       displayProg.setF("uDayPhase", dayPhase);
+      displayProg.setF("uFloaterGain", floaterGain(resolveSceneSetting(ID, settingFor("floaterVisibility"))));
       wavePool.upload(displayProg);
       displayProg.setFv("uSweepT0", sweepT0);
       displayProg.setFv("uSweepSeed", sweepSeed);
