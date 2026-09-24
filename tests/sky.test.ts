@@ -3,6 +3,8 @@ import {
   waveStrengthFromDrop,
   waveHoldBeats,
   waveStrengthFromTreble,
+  sweepSlot,
+  MAX_SWEEPS,
   advanceBrushPhase,
   driftCenter,
   drifterPuff,
@@ -84,6 +86,21 @@ describe("waveHoldBeats", () => {
     expect(waveHoldBeats(-5)).toBe(waveHoldBeats(0));
     expect(waveHoldBeats(5)).toBe(waveHoldBeats(1));
     expect(Number.isFinite(waveHoldBeats(NaN))).toBe(true);
+  });
+});
+
+describe("sweepSlot", () => {
+  it("cycles through every ring slot in order, so the oldest sweep is the one overwritten", () => {
+    const slots = Array.from({ length: MAX_SWEEPS * 2 }, (_, i) => sweepSlot(i));
+    for (let i = 0; i < slots.length; i++) expect(slots[i]).toBe(i % MAX_SWEEPS);
+  });
+
+  it("stays in range for negative, fractional and non-finite counts", () => {
+    for (const v of [-4, 2.7, NaN, Infinity]) {
+      const s = sweepSlot(v);
+      expect(s).toBeGreaterThanOrEqual(0);
+      expect(s).toBeLessThan(MAX_SWEEPS);
+    }
   });
 });
 

@@ -4,7 +4,7 @@ import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { NUM_BANDS } from "../../audio/types.ts";
-import { createBeatListener, type BeatListenerSpec } from "../beatListener.ts";
+import { createBeatListener, type BeatListenerSpec, type HoldBeats } from "../beatListener.ts";
 import {
   createFluidSim,
   detectSimFormat,
@@ -164,6 +164,21 @@ const WAVE_HOLD_MAX_BEATS = 2; // at Wave frequency = 0
 const WAVE_HOLD_FALLBACK_SEC_PER_BEAT = 0.45; // beatListener's no-tempo-lock fallback, per beat of hold
 const WAVE_REFRACTORY_SEC = 0.12; // hard floor between treble waves, whatever the hold
 const SWARM_CANDIDATES = 12; // spawn spots pickSwarmCenter scores against the cloud drifters
+
+// --- Beat light waves: a wavy band of shifting rainbow light sweeping
+// across the whole sky on each beat. A plain ring of slots — the oldest
+// is always the one overwritten, and the shader retires any sweep older
+// than SWEEP_SEC on its own, so nothing needs expiring here. ---
+export const MAX_SWEEPS = 3; // a sweep outlives a beat at most tempos, so a few overlap
+export const SWEEP_SEC = 1.3;
+const SWEEP_HOLD: HoldBeats = { beats: 1, fallbackSec: 0.4 }; // at most one sweep per beat
+
+/** Which ring slot the next sweep goes in, given how many have fired so
+ *  far — always the oldest one. */
+export function sweepSlot(fired: number): number {
+  const n = Number.isFinite(fired) ? Math.max(0, Math.floor(fired)) : 0;
+  return n % MAX_SWEEPS;
+}
 
 // --- Haidinger's brush. ---
 const BRUSH_TURNS_PER_SEC = 0.045; // one full turn every ~22s
@@ -466,6 +481,16 @@ const SETTINGS: SceneSetting[] = [
     default: 0.35,
     auto: { density: -0.2 },
   },
+  {
+    key: "lightWaves",
+    label: "Light waves",
+    description: "How bright the band of shifting rainbow light is that sweeps across the whole sky on each beat",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+  },
 ];
 
 function settingFor(key: string): SceneSetting {
@@ -492,11 +517,23 @@ uniform float uBurstAmp[${MAX_WAVE_BURSTS}];
 uniform float uBurstSeed[${MAX_WAVE_BURSTS}];
 uniform float uBurstX[${MAX_WAVE_BURSTS}];
 uniform float uBurstY[${MAX_WAVE_BURSTS}];
+uniform float uSweepT0[${MAX_SWEEPS}];
+uniform float uSweepSeed[${MAX_SWEEPS}];
 
 const int MAX_WAVE_BURSTS_C = ${MAX_WAVE_BURSTS};
 const float WAVE_LIFE_SEC_C = ${WAVE_LIFE_SEC.toFixed(3)};
 const float WAVE_FADE_IN = ${WAVE_FADE_IN_SEC.toFixed(3)};
 const float WAVE_FADE_OUT = ${WAVE_FADE_OUT_SEC.toFixed(3)};
+const int MAX_SWEEPS_C = ${MAX_SWEEPS};
+const float SWEEP_SEC_C = ${SWEEP_SEC.toFixed(3)};
+// A beat light wave's band (see the sweep loop in main): SWEEP_WIDTH wide in
+// screen p-units, its front rippled sideways by SWEEP_WOBBLE at
+// SWEEP_WOBBLE_FREQ so it reads as a wave rather than a straight wipe, and
+// screen-blended at up to SWEEP_ALPHA (times the Light waves setting).
+const float SWEEP_WIDTH = 0.12;
+const float SWEEP_WOBBLE = 0.05;
+const float SWEEP_WOBBLE_FREQ = 7.0;
+const float SWEEP_ALPHA = 0.38;
 
 const float CLOUD_LOW = 0.16; // bumped density below this reads as clear sky
 const float CLOUD_HIGH = 0.55; // bumped density above this reads as a solid, opaque cloud body — a wide band, so edges fade through semi-transparent wisps (airy) rather than a hard cut-out
@@ -588,8 +625,8 @@ const float FLOATER_R = 0.0028 * FLOATER_SCALE; // strand tube half-width, scree
 const float FLOATER_RIM_W = 0.0014 * FLOATER_SCALE; // bright-rim band width, just inside the edge
 const float FLOATER_FRINGE_W = 0.0022 * FLOATER_SCALE; // dark-fringe band width, just outside the edge
 const float FLOATER_INTERIOR = 0.02; // relative lum delta well inside the edge
-const float FLOATER_RIM = 0.07; // relative lum delta at the rim's peak
-const float FLOATER_FRINGE = 0.10; // relative lum delta (negative) at the fringe's peak
+const float FLOATER_RIM = 0.13; // relative lum delta at the rim peak — raised from the measured 0.07 for more contrast at the small size
+const float FLOATER_FRINGE = 0.18; // relative lum delta (negative) at the fringe peak — raised from the measured 0.10 likewise
 const float FLOATER_DOT_R_MIN = 0.005 * FLOATER_SCALE; // dot radius, screen p-units
 const float FLOATER_DOT_R_MAX = 0.0068 * FLOATER_SCALE;
 const vec3 FLOATER_COOL_TINT = vec3(0.94, 0.99, 1.06); // faint cool bias applied only to the rim's brightening (see main()); the fringe's darkening stays neutral
@@ -752,10 +789,12 @@ void main() {
   // a warm dusk. Lightened and desaturated against a measured real-sky
   // photo whose open-sky patch came out a very pale, low-saturation blue
   // (hue~179/255, sat~14/255) — the first pass's zenith was a fairly deep,
-  // saturated navy, nothing like that hazy, high-key look.
-  vec3 zenithCool = vec3(0.42, 0.56, 0.74);
+  // saturated navy, nothing like that hazy, high-key look. Then taken a step
+  // darker with a faint pink-purple cast at the user's request — the sky just
+  // as it starts to turn toward evening, not yet a sunset.
+  vec3 zenithCool = vec3(0.37, 0.44, 0.65);
   vec3 zenithWarm = vec3(0.55, 0.42, 0.48);
-  vec3 horizonCool = vec3(0.74, 0.82, 0.92);
+  vec3 horizonCool = vec3(0.71, 0.70, 0.84);
   vec3 horizonWarm = vec3(0.88, 0.74, 0.64);
   vec3 zenith = mix(zenithCool, zenithWarm, uSkyTint);
   vec3 horizon = mix(horizonCool, horizonWarm, uSkyTint);
@@ -787,8 +826,10 @@ void main() {
   // Pale cool lavender-grey to warm white — measured off a real hazy-cumulus
   // photo (shadow-fold RGB≈(156,151,172)/255, highlight RGB≈(255,255,254)/255)
   // rather than the first pass's guessed, noticeably darker shadow tone.
-  vec3 cloudShadow = vec3(0.6, 0.59, 0.67);
-  vec3 cloudLit = vec3(1.0, 0.99, 0.96);
+  // Both nudged toward the sky's pink-purple cast so clouds sit in the same
+  // light rather than reading as pasted-on white.
+  vec3 cloudShadow = vec3(0.54, 0.50, 0.64);
+  vec3 cloudLit = vec3(0.98, 0.93, 0.95);
   // Thin, barely-there cloud is sunlit through, never shadowed — without
   // this, half-faded puffs blend a shadow tone into the sky and read as
   // grey smudges instead of airy haze.
@@ -806,6 +847,33 @@ void main() {
   vec3 brushTint = mix(vec3(0.82, 0.85, 1.05), vec3(1.05, 0.98, 0.82), lobe * 0.5 + 0.5);
   float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * (1.0 - 0.4 * uEnergy), 0.0, 1.0);
   color = mix(color, color * brushTint, brushAmt);
+
+  // 3b. Beat light waves: each live sweep is a soft band travelling across
+  // the whole frame in its own hashed direction, its front rippling, its
+  // colour a rainbow that shifts across the band and along it — screen-
+  // blended over sky and cloud alike, and under the floaters, so they
+  // refract it like everything else behind them.
+  vec3 sweepGlow = vec3(0.0);
+  for (int i = 0; i < MAX_SWEEPS_C; i++) {
+    float age = uTime - uSweepT0[i];
+    if (age < 0.0 || age > SWEEP_SEC_C) continue;
+    float seed = uSweepSeed[i];
+    float t = age / SWEEP_SEC_C;
+    float ang = mix(-0.7, 0.7, hash21(vec2(seed, 61.0))) + (hash21(vec2(seed, 62.0)) < 0.5 ? 0.0 : 3.14159265);
+    vec2 dir = vec2(cos(ang), sin(ang));
+    vec2 perp = vec2(-dir.y, dir.x);
+    float reach = 0.5 * (abs(dir.x) * devAspect + abs(dir.y)) + SWEEP_WIDTH * 2.0;
+    float front = mix(-reach, reach, t);
+    float across = dot(p, perp);
+    float along = dot(p, dir) + SWEEP_WOBBLE * sin(across * SWEEP_WOBBLE_FREQ + uTime * 2.3 + seed);
+    float x = (along - front) / SWEEP_WIDTH;
+    // A sharper leading edge and a longer glowing tail behind it.
+    float band = x > 0.0 ? exp(-x * x * 2.0) : exp(-x * x * 0.35);
+    vec3 hue = 0.5 + 0.5 * cos(6.28318 * (fract(seed * 0.37) + x * 0.22 + across * 0.8 + vec3(0.0, 0.33, 0.67)));
+    float fade = smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(0.75, 1.0, t));
+    sweepGlow += hue * band * fade;
+  }
+  color = 1.0 - (1.0 - color) * (1.0 - clamp(sweepGlow * SWEEP_ALPHA * uLightWaves, 0.0, 1.0));
 
   // 4. Floater waves (see the file header): snap this pixel to its grid
   // cell, take the densest live streak at the cell's centre, and from that
@@ -854,7 +922,7 @@ void main() {
       float len = mix(FRINGE_LEN_MIN, FRINGE_LEN_MAX, hash21(vec2(cellSeed, 25.0)));
       delta = floaterStrand(p, cellC + vec2(0.0, FRINGE_DROP), cellSeed, 0.0, len);
     }
-    delta = clamp(delta, -0.2, 0.2) * clear * (1.0 - cloudAlpha);
+    delta = clamp(delta, -0.3, 0.3) * clear * (1.0 - cloudAlpha);
     color *= 1.0 + min(delta, 0.0) + max(delta, 0.0) * FLOATER_COOL_TINT;
   }
 
@@ -889,6 +957,11 @@ function createSkyScene(): Scene {
   // the Wave frequency setting (the listener reads spec.hold live).
   const trebleSpec: BeatListenerSpec = { source: "high", refractorySec: WAVE_REFRACTORY_SEC, hold: 0 };
   const trebleListener = createBeatListener(trebleSpec);
+  // Beat light waves: one sweep per beat into the oldest ring slot.
+  const beatListener = createBeatListener({ source: "beat", hold: SWEEP_HOLD });
+  const sweepT0 = new Float32Array(MAX_SWEEPS).fill(WAVE_DEAD_T0);
+  const sweepSeed = new Float32Array(MAX_SWEEPS);
+  let sweepsFired = 0;
   let waveSeedCounter = 0;
   let lastFrameTime: number | null = null;
 
@@ -915,6 +988,9 @@ function createSkyScene(): Scene {
       ambientT = 0;
       brushPhase = 0;
       trebleListener.reset();
+      beatListener.reset();
+      sweepT0.fill(WAVE_DEAD_T0);
+      sweepsFired = 0;
       waveSeedCounter = 0;
       lastFrameTime = null;
     },
@@ -982,6 +1058,12 @@ function createSkyScene(): Scene {
         beats: waveHoldBeats(waveFrequencyAmount),
         fallbackSec: waveHoldBeats(waveFrequencyAmount) * WAVE_HOLD_FALLBACK_SEC_PER_BEAT,
       };
+      if (beatListener.advance(anim).fired) {
+        const slot = sweepSlot(sweepsFired);
+        sweepT0[slot] = anim.timeSec;
+        sweepSeed[slot] = sweepsFired * 1.618 + 3.0;
+        sweepsFired++;
+      }
       const treble = trebleListener.advance(anim);
       const strengths: number[] = [];
       if (treble.fired) strengths.push(waveStrengthFromTreble(anim.highPulse));
@@ -1004,6 +1086,8 @@ function createSkyScene(): Scene {
       uploadCommonUniforms(displayProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
       displayProg.setF("uBrushPhase", brushPhase);
       wavePool.upload(displayProg);
+      displayProg.setFv("uSweepT0", sweepT0);
+      displayProg.setFv("uSweepSeed", sweepSeed);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sim.dyeTexture());
       gl.uniform1i(dyeLoc, 0);
