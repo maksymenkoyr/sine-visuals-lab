@@ -50,8 +50,9 @@ explained there.
 
 ## Privacy
 
-Microphone audio is processed entirely on your device and never transmitted —
-see [PRIVACY.md](PRIVACY.md) for the full statement.
+Audio — from the microphone or a shared tab — is processed entirely on your
+device and never transmitted; see [PRIVACY.md](PRIVACY.md) for the full
+statement, including what pairing sends and what the host sees.
 
 ## License
 

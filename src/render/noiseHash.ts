@@ -108,7 +108,7 @@ vec2 hash2Cell(vec2 cell, int mask, uint seed) {
  *  Per-component cost matters here more than for `cellBits` above: a scene
  *  calls this from inside an 8-corner trilinear lookup (vnoise's hash31) or
  *  a per-pixel sim step, so it runs several times per particle per frame —
- *  chladni.ts's own grain sim is where a first cut of this (a full lowbias32
+ *  powder.ts's particle sim is where a first cut of this (a full lowbias32
  *  pass *per component* before combining) was measured costing whole frames
  *  on a software-rasterised (SwiftShader) run. `fhBits` below spends only
  *  the first two of `fhMix`'s five steps decorrelating each component before

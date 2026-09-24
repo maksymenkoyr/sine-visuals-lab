@@ -45,7 +45,8 @@ id described above, which exists only so pairing can recognize your device
 again.
 
 Because this is open source (AGPL-3.0-or-later), every claim above is
-verifiable in the code this page ships from — see the Source link in the app.
+verifiable in the code this page ships from — see the Source link in the app —
+except what Cloudflare does as the host, which its own policy covers.
 
 Who runs this: Yaroslav Maksymenko. Questions or concerns — open an issue at
 https://github.com/maksymenkoyr/sine-visuals-lab/issues.
