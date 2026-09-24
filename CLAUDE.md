@@ -74,9 +74,11 @@ after all three pass; include the screenshot paths in your summary.
 
 ## Standing rules not worth their own doc
 
-- Licensed AGPL-3.0-or-later. New dependencies must be AGPL-compatible, and any
-  third-party code bundled into the client build gets an entry in
-  `THIRD-PARTY-NOTICES.md`.
+- Licensed AGPL-3.0-or-later. New dependencies must be permissively licensed
+  (MIT, BSD, Apache-2.0, ISC, OFL or similar) — never GPL, LGPL or AGPL, which
+  would bind the separately sold scenes combined with this code; the why is in
+  `CONTRIBUTING.md`. Any third-party code bundled into the client build gets an
+  entry in `THIRD-PARTY-NOTICES.md`.
 - Don't port third-party implementations into a scene — write it as independent
   work. (See the git history around "Rewrite Mesh Grid as independent work.")
 - When working on a visualization, start `npm run dev` and hand the user a

@@ -1,5 +1,7 @@
 # Sine Visuals Lab — Individual Contributor License Agreement
 
+Version 1.1, 24 September 2026.
+
 Thank you for your interest in contributing to Sine Visuals Lab (the
 "Project"), maintained by Yaroslav Maksymenko (together with his successors
 and assigns, the "Maintainer").
@@ -10,12 +12,13 @@ Foundation's Individual Contributor License Agreement. This is a legally
 binding document, so please read it carefully before agreeing to it. This
 Agreement covers your past, present, and future Contributions to the Project.
 
-**Why this exists:** the Project is and will remain available under the
-AGPL-3.0-or-later license. This Agreement additionally allows the Maintainer
-to offer the Project under other license terms — for example, commercial
-licenses or a paid hosted service — which is how development of the free
-version is funded. You keep the copyright to your work; you are granting the
-Maintainer a license to it, as set out below.
+**Why this exists:** the Project is licensed under AGPL-3.0-or-later, and
+every version released under that license stays available under it. This
+Agreement additionally allows the Maintainer to offer the Project under other
+terms — for example, commercial licenses, a paid hosted service, or products
+built on the Project that are not themselves under the AGPL — which is how
+development of the free version is funded. You keep the copyright to your
+work; you are granting a license to it, as set out below.
 
 ## 1. Definitions
 
@@ -38,28 +41,42 @@ Contribution."
 ## 2. Grant of Copyright License
 
 Subject to the terms and conditions of this Agreement, You hereby grant to
-the Maintainer a perpetual, worldwide, non-exclusive, no-charge,
-royalty-free, irrevocable copyright license to reproduce, prepare derivative
-works of, publicly display, publicly perform, sublicense, and distribute Your
-Contributions and such derivative works, under any license terms, including
-without limitation open-source and commercial license terms.
+the Maintainer and to recipients of software distributed by the Maintainer a
+perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+copyright license to reproduce, prepare derivative works of, publicly
+display, publicly perform, sublicense, and distribute Your Contributions and
+such derivative works, under any license terms, including without limitation
+open-source and commercial license terms.
 
 ## 3. Grant of Patent License
 
 Subject to the terms and conditions of this Agreement, You hereby grant to
-the Maintainer a perpetual, worldwide, non-exclusive, no-charge,
-royalty-free, irrevocable (except as stated in this section) patent license
-to make, have made, use, offer to sell, sell, import, and otherwise transfer
-Your Contributions, where such license applies only to those patent claims
+the Maintainer and to recipients of software distributed by the Maintainer a
+perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+(except as stated in this section) patent license to make, have made, use,
+offer to sell, sell, import, and otherwise transfer the Project and Your
+Contributions, where such license applies only to those patent claims
 licensable by You that are necessarily infringed by Your Contribution(s)
-alone or by combination of Your Contribution(s) with the Project. If any
-entity institutes patent litigation against You or any other entity alleging
-that Your Contribution, or the Project to which You have contributed,
-constitutes direct or contributory patent infringement, then any patent
-licenses granted to that entity under this Agreement for that Contribution or
-Project shall terminate as of the date such litigation is filed.
+alone or by combination of Your Contribution(s) with the Project. The
+Maintainer may sublicense the rights granted in this section to its
+licensees. If any entity institutes patent litigation against You or any
+other entity alleging that Your Contribution, or the Project to which You
+have contributed, constitutes direct or contributory patent infringement,
+then any patent licenses granted to that entity under this Agreement for that
+Contribution or Project shall terminate as of the date such litigation is
+filed.
 
-## 4. Your Representations
+## 4. Moral Rights
+
+To the extent permitted by applicable law, You waive, and agree not to
+assert against the Maintainer, its licensees, or recipients of software
+distributed by the Maintainer, any moral rights You have in Your
+Contributions, such as rights of attribution or integrity. Where such rights
+cannot be waived, You consent to Your Contributions being used, modified, and
+distributed in any form and without attribution. This does not affect the
+record of authorship that the Project's version history keeps.
+
+## 5. Your Representations
 
 You represent that:
 
@@ -80,7 +97,12 @@ license agreements) of which You are personally aware.
 license or other restriction of which You are personally aware and which is
 associated with any part of Your Contributions.
 
-## 5. No Obligation and No Warranty
+(d) If any part of a Contribution was produced with the help of an AI tool,
+You have reviewed it, You take the same responsibility for it as for work You
+wrote yourself, and to Your knowledge it does not reproduce third-party
+material that You are not entitled to submit under this Agreement.
+
+## 6. No Obligation and No Warranty
 
 You are not expected to provide support for Your Contributions, except to the
 extent You desire to provide support. Unless required by applicable law or
@@ -92,24 +114,40 @@ NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE.
 The Maintainer is under no obligation to accept, include, or retain any
 Contribution in the Project.
 
-## 6. Notification
+## 7. Notification
 
 You agree to notify the Maintainer of any facts or circumstances of which You
 become aware that would make the representations above inaccurate in any
 respect.
 
+## 8. Assignment
+
+The Maintainer may assign or transfer this Agreement, and the rights granted
+under it, in whole or in part, to any person or legal entity, including a
+company the Maintainer forms or controls. This Agreement binds and benefits
+the parties' successors and permitted assigns.
+
+## 9. General
+
+If any provision of this Agreement is held unenforceable, the rest of it
+remains in effect, and the unenforceable provision is to be read as closely
+to its original intent as the law allows. If You are contributing on behalf
+of a company or other legal entity, contact the Maintainer (open an issue on
+the Project's repository) before submitting, so that the right party signs.
+
 ## How to agree
 
-When you open your first pull request, the CLA Assistant check will prompt
-you to sign this Agreement. Accepting it there, from the GitHub account
-making the contribution, constitutes your electronic signature to this
-Agreement, recorded against that account.
+When you open your first pull request, the `license/cla` check will ask you
+to sign this Agreement. You agree by posting the following comment on your
+pull request, from the GitHub account making the contribution, exactly as
+written:
 
-If the automated check is unavailable, you can instead agree by posting the
-following comment on your pull request:
-
-> I have read the CLA at CLA.md and I hereby agree to its terms for all my
-> past and future contributions to this project.
+```
+I have read the CLA at CLA.md and I hereby agree to its terms for all my past and future contributions to this project.
+```
 
 That comment, together with your GitHub account identity and the pull request
-record, likewise constitutes your electronic signature to this Agreement.
+record, constitutes your electronic signature to this Agreement — the version
+of it in the Project's repository at the time you post the comment — recorded
+against that account. The check records your signature and passes once you
+have posted it; you only need to do this once.
