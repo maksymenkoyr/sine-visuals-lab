@@ -81,16 +81,32 @@ export function createJack(color: string, onClick: () => void, onHover: (on: boo
 }
 
 /** Toggles a meter row's (or a hit lane's shared row's) fed glow + "→
- *  <label>" chip — `fed`/`soft`/`color`/`label` are already resolved by the
- *  caller (deviceMenu.ts), this only writes the DOM. `soft` is a scene-mix
- *  row (drives.ts's sceneSources — display-only, no jack ever fills for
- *  it): a dimmer glow, same chip. Call only on a selection/patch change. */
-export function setRowFed(rowEl: HTMLElement, fed: boolean, soft: boolean, color: string, label: string): void {
-  rowEl.classList.toggle("vc-row-fed", fed && !soft);
-  rowEl.classList.toggle("vc-row-fed-soft", fed && soft);
-  if (fed) rowEl.style.setProperty("--vc-hl", color);
+ *  <label>" chip — `kind`/`color`/`label` are already resolved by the caller
+ *  (deviceMenu.ts's refreshBandsJacks, audioMeters.ts's refreshPatchView),
+ *  this only writes the DOM:
+ *   - "full": the row feeds the pinned setting and nothing else is being
+ *     previewed right now — the strong glow plus the chip.
+ *   - "soft": the row feeds the *previewed* setting (a hover/focus short of
+ *     a click), or is named in a `"scene"` setting's own display-only
+ *     `drive.sceneSources` — a dimmer glow, no chip. A preview always takes
+ *     this over a competing pinned feed on the same row (see the caller).
+ *   - "faint": the row feeds the pinned setting, but a *different* setting
+ *     is simultaneously being previewed elsewhere — a bare mark so the
+ *     pinned patch doesn't vanish from view while it's not what's shown.
+ *   - "none": dims under `.vc-patching` like any other unfed row.
+ *  Call only on a selection/patch change, never per frame. */
+export function setRowFed(
+  rowEl: HTMLElement,
+  kind: "full" | "soft" | "faint" | "none",
+  color: string,
+  label: string,
+): void {
+  rowEl.classList.toggle("vc-row-fed", kind === "full");
+  rowEl.classList.toggle("vc-row-fed-soft", kind === "soft");
+  rowEl.classList.toggle("vc-row-fed-faint", kind === "faint");
+  if (kind !== "none") rowEl.style.setProperty("--vc-hl", color);
   let chip = rowEl.querySelector<HTMLElement>(":scope > .vc-fed-chip");
-  if (fed) {
+  if (kind === "full") {
     if (!chip) {
       chip = document.createElement("span");
       chip.className = "vc-fed-chip";

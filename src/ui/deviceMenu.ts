@@ -62,7 +62,7 @@ import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
 import { createAudioMeters, createMeterRow } from "./audioMeters.ts";
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
-import { createCableLayer, type CableSourceSpec } from "./cableLayer.ts";
+import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
@@ -112,10 +112,13 @@ import {
 /**
  * The controller's controls panel — the "Viz Controls" design.
  *
- * Two glass columns anchored top-right over the live scene: the Bands card
- * (scene name, audio source, and the live bars with the band faders drawn
- * over them — see src/ui/bandFaders.ts) beside the controls column, whose
- * cards run Auto strength (with the Auto master block welded to it) → Input
+ * Glass columns over the live scene, docked to opposite screen edges in the
+ * wide layout (controlsTheme.ts) with the scene and the patch bay's own
+ * cables (src/ui/cableLayer.ts) showing through the open middle: the Bands
+ * card (scene name, audio source, and the live bars with the band faders
+ * drawn over them — see src/ui/bandFaders.ts) anchored top-left, and the
+ * controls column anchored top-right alongside Power, whose cards run Auto
+ * strength (with the Auto master block welded to it) → Input
  * (its own header carries a second Auto button, next to Reset — see
  * src/audio/micAuto.ts for how it differs from the master block) → Scene →
  * Palette → a footer strip. A drive setting (SceneSetting.drive — see
@@ -165,17 +168,36 @@ import {
  * already feeds (onJackHover, independent of the shown-setting highlight).
  * While a setting is shown, `refreshPatchHighlight` — called from every
  * place `pinned`/`preview`/a patch actually changes, never per frame —
- * dims the rest of the Bands+meters column (`.vc-patching`,
- * controlsTheme.ts), glows every feeding row/lane (jack.ts's setRowFed,
- * softer for a `"scene"` setting's own display-only `sceneSources`), and
- * dims the spectrum's own unheard bands (refreshSpectrumDriveHighlight).
- * The cables themselves (src/ui/cableLayer.ts) are one `<svg>` fixed over
- * the viewport, outside every card's own `overflow: hidden` — bezier paths
- * from each shown source's jack to the row's own port, geometry recomputed
- * only on that same short list of triggers (a selection/patch change,
- * scroll of either scrolling column, resize, a card fold, a Scene-card
- * rebuild — scheduleCableRecompute), with only `stroke-dashoffset` written
- * per tick (cableLayer.tick, flow speed off each source's own live value).
+ * dims the rest of the Bands+meters column (`.vc-patching`, controlsTheme.ts)
+ * and dims the spectrum's own unheard bands (refreshSpectrumDriveHighlight).
+ * A feeding row/lane's own glow (jack.ts's setRowFed) and the cables
+ * themselves now distinguish *pinned* from *previewed* rather than
+ * collapsing both into one "shown" look, since a click and a passing hover
+ * mean different things: pinned is the patch actually in effect, solid and
+ * glowing; a preview (hover, or keyboard focus, short of a click) is a
+ * quick look, thin and quiet, that never expands the row's own patch panel.
+ * `activePreview()` is `preview` only when it names a genuinely different
+ * setting than `pinned` — hovering the pinned row itself is a no-op here.
+ * refreshBandsJacks/audioMeters.ts's own refreshPatchView compute, per fed
+ * row/lane, which of the two (if both) applies: a preview always wins the
+ * glow (soft, no chip) over a competing pinned feed, which in turn either
+ * keeps its full glow+chip (nothing else previewed) or steps back to a
+ * bare "faint" mark (something else is). The cables themselves
+ * (src/ui/cableLayer.ts) are one `<svg>` fixed over the viewport, outside
+ * every card's own `overflow: hidden`, drawing two independent path
+ * groups — pinned (its usual glow/core/flow, dimmed once a preview is also
+ * live) and preview (a single thin dashed line, no glow, no flow
+ * animation) — from cableSpecsForShown/cableGroupFor below, each a bezier
+ * with a short straight stub at both the jack and the port (cableLayer.ts's
+ * own CABLE_STUB_PX) whose bend direction is derived from the two
+ * endpoints' actual resolved positions rather than assumed, so a cable
+ * still draws cleanly regardless of which side of its port a given jack's
+ * clamped/folded endpoint (endpointFor, cableLayer.ts) ends up landing on.
+ * Geometry is recomputed only on that same short list of triggers (a
+ * selection/patch change, scroll of either scrolling column, resize, a
+ * card fold, a Scene-card rebuild — scheduleCableRecompute), with only
+ * `stroke-dashoffset` written per tick, on the pinned group alone
+ * (cableLayer.tick, flow speed off each source's own live value).
  *
  * The Bands card is plain again: scene name, audio source, the live bars
  * with the band faders drawn over them (src/ui/bandFaders.ts) — always
@@ -580,17 +602,13 @@ const driveSummaryStyle = `
   font: 400 11px/1.35 ${FONT_MONO}; color: rgba(255,255,255,0.45); min-width: 0;
   overflow-wrap: break-word;
 `;
-// The input port: a 10 px ring at the row's own left edge — `.vc-row` is
-// already `position: relative`, so this needs no extra wrapper. `left` is
-// small and positive, not hanging past the row into the card's own
-// padding: `.vc-row`'s padding/negative-margin pair (controlsTheme.ts)
-// means a more negative offset here lands outside `.vc-card`'s own
-// `overflow: hidden` and gets clipped invisible. Colour is written per-row
-// by drivePortStyle() below.
-const drivePortBaseStyle = `
-  position: absolute; left: 1px; top: 15px; width: 10px; height: 10px; border-radius: 50%;
-  padding: 0; cursor: pointer; transition: box-shadow 0.15s ease;
-`;
+// The input port: a 10 px ring at the row's own left edge, facing the
+// meters column (which docks to the screen's own left edge — see
+// controlsTheme.ts's .vc-spectrum-col). Position/size/shape live in
+// controlsTheme.ts's own .vc-drive-port class rule, not here; drivePortStyle()
+// below only ever writes what actually depends on this row's own live
+// state — the setting's plugged sources' colours, and the pinned/preview
+// ring.
 
 const driveSparkWrapStyle = `margin-top: 4px; height: 20px;`;
 const driveSparkCanvasStyle = `display: block; width: 100%; height: 100%;`;
@@ -1231,10 +1249,10 @@ export function createControlRow(spec: ControlRowSpec) {
   if (spec.drivePanel) {
     const left = document.createElement("div");
     left.style.cssText = driveRowLeftStyle;
-    // Room for the port (drivePortBaseStyle), which sits just left of the
-    // label rather than hanging past the row (see that style's own
-    // comment) — a plain gap would leave the port floating over the text.
-    left.style.paddingLeft = "14px";
+    // Room for the port at this row's own left edge (controlsTheme.ts's
+    // .vc-drive-row-left/.vc-drive-port) — a plain gap would leave the
+    // port floating over the text.
+    left.classList.add("vc-drive-row-left");
     spec.drivePanel.summary.classList.add("vc-drive-summary");
     left.append(label, spec.drivePanel.summary);
     left.addEventListener("click", (e) => {
@@ -1649,8 +1667,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       usage: jackUsage,
       isShown: jackIsShown,
       isPinned: jackIsPinned,
+      isPreview: jackFeedsPreview,
+      previewIsActive: () => !!activePreview(),
       isSceneSource: jackIsSceneSource,
       shown: jackShownInfo,
+      pinnedLabel: () => pinned?.spec.label ?? null,
       describe: jackDescribe,
       onJackClick,
       onJackHover,
@@ -1953,10 +1974,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return names.join(setting.mix === "max" ? " or " : " + ");
   }
 
-  function drivePortStyle(setting: DriveSetting, lit: boolean): string {
-    const ringGlow = lit ? `, 0 0 0 2px ${withAlpha("#ffffff", 0.6)}` : "";
+  /** The setting's own first plugged source's colour, or SCENE_VIOLET for
+   *  a `"scene"` mix with nothing plugged in — shared by drivePortStyle's
+   *  own glow below and refreshMeta's --vc-pin-color (controlsTheme.ts's
+   *  .vc-drive-pinned/.vc-drive-preview), so a row's pinned/preview border
+   *  always matches what its own port is showing. */
+  function driveRowAccent(setting: DriveSetting): string {
+    if (setting === "scene" || !setting.sources.length) return SCENE_VIOLET;
+    return driveSourceColor(setting.sources[0]!.choice);
+  }
+
+  /** `state` is "none" while the row is neither pinned nor being previewed
+   *  (hover/focus short of a click): pinned gets a solid, glowing ring —
+   *  this *is* the shown patch right now; preview gets a bare outline, no
+   *  glow — a passing look, not a commitment (see this file's header doc
+   *  comment's row-grammar paragraph for why only a click expands the
+   *  patch panel). */
+  function drivePortStyle(setting: DriveSetting, state: "pinned" | "preview" | "none"): string {
+    const ring =
+      state === "pinned"
+        ? `, 0 0 0 2px ${withAlpha("#ffffff", 0.6)}`
+        : state === "preview"
+          ? `, 0 0 0 1.5px ${withAlpha("#ffffff", 0.5)}`
+          : "";
     if (setting === "scene") {
-      return `${drivePortBaseStyle} border: 1.5px dashed rgba(255,255,255,0.45); background: transparent; box-shadow: 0 0 0 2px rgba(8,11,10,0.75)${ringGlow};`;
+      return `border: 1.5px dashed rgba(255,255,255,0.45); background: transparent; box-shadow: 0 0 0 2px rgba(8,11,10,0.75)${ring};`;
     }
     const cols = setting.sources.map((s) => driveSourceColor(s.choice));
     const bg =
@@ -1964,7 +2006,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         ? (cols[0] ?? "rgba(255,255,255,0.3)")
         : `conic-gradient(${cols.map((c, i) => `${c} ${(i / cols.length) * 100}% ${((i + 1) / cols.length) * 100}%`).join(", ")})`;
     const glow = cols[0] ? withAlpha(cols[0], 0.55) : "transparent";
-    return `${drivePortBaseStyle} border: 1.5px solid rgba(8,11,10,0.75); background: ${bg}; box-shadow: 0 0 0 2px rgba(8,11,10,0.75), 0 0 6px ${glow}${ringGlow};`;
+    return `border: 1.5px solid rgba(8,11,10,0.75); background: ${bg}; box-shadow: 0 0 0 2px rgba(8,11,10,0.75), 0 0 6px ${glow}${ring};`;
   }
 
   // ---- Patch-panel sub-builders — each takes the (sceneId, spec) pair and
@@ -2403,14 +2445,29 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
     function refreshMeta(): void {
       const setting = deps.getDriveSetting(sceneId, spec);
-      const lit = isPinned() || samePair(preview, { sceneId, spec });
-      port.style.cssText = drivePortStyle(setting, lit);
+      const state: "pinned" | "preview" | "none" = isPinned()
+        ? "pinned"
+        : samePair(preview, { sceneId, spec })
+          ? "preview"
+          : "none";
+      port.style.cssText = drivePortStyle(setting, state);
       port.title = isPinned() ? `Unpin ${spec.label}'s patch` : `Pin ${spec.label}'s patch`;
       summary.textContent = driveSummaryText(spec, setting);
+      // --vc-pin-color: read by controlsTheme.ts's .vc-drive-pinned/
+      // .vc-drive-preview for this row's own border/tint — always kept
+      // current even at state "none" so it's already right the instant
+      // either class lands.
+      boundRowEl?.style.setProperty("--vc-pin-color", driveRowAccent(setting));
     }
 
+    /** Always resyncs .vc-drive-preview from the current global `preview`
+     *  first (so a stale preview class left over from a different row/
+     *  click gets cleared here too — see togglePin's own call), then only
+     *  bails out of a full refreshMeta() if this row is pinned, which
+     *  always wins visually over a preview elsewhere. */
     function refreshPreviewLit(): void {
-      if (isPinned()) return; // pinned always wins over a preview elsewhere
+      boundRowEl?.classList.toggle("vc-drive-preview", !isPinned() && samePair(preview, { sceneId, spec }));
+      if (isPinned()) return;
       refreshMeta();
     }
 
@@ -2560,6 +2617,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     activeOutputTick = null;
     if (!pinned) lastPinnedSetting = null;
     for (const h of driveRowHandles) h.refreshPin();
+    // preview just went to null above — resyncs every row's own
+    // .vc-drive-preview against that, since refreshPin() (above) never
+    // touches it and a row other than the one just clicked could otherwise
+    // be left showing a stale preview tint.
+    for (const h of driveRowHandles) h.refreshPreviewLit();
     refreshLineMode();
     refreshPatchHighlight();
   }
@@ -2593,6 +2655,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return preview ?? pinned;
   }
 
+  /** `preview`, but only when it's a genuinely *different* setting from
+   *  whatever's pinned — hovering the pinned row itself (or nothing) isn't
+   *  a competing preview to draw a second cable group for or fade the
+   *  pinned one over (see cableSpecsForShown/refreshBandsJacks below, and
+   *  cableLayer.ts's own two-group recompute). */
+  function activePreview(): { sceneId: string; spec: SceneSetting } | null {
+    return preview && !samePair(preview, pinned) ? preview : null;
+  }
+
   /** How many of the *active scene's* settings currently use `choice` —
    *  each jack's own usage dots, independent of selection. */
   function jackUsage(choice: DriveSourceChoice): number {
@@ -2617,6 +2688,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function jackIsPinned(choice: DriveSourceChoice): boolean {
     if (!pinned) return false;
     const setting = deps.getDriveSetting(pinned.sceneId, pinned.spec);
+    return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
+  }
+
+  /** `choice` is a source of the *active preview* specifically (see
+   *  activePreview() above) — a row/lane's soft glow, always taking
+   *  priority over a competing pinned feed on the same row. */
+  function jackFeedsPreview(choice: DriveSourceChoice): boolean {
+    const ap = activePreview();
+    if (!ap) return false;
+    const setting = deps.getDriveSetting(ap.sceneId, ap.spec);
     return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
   }
 
@@ -2686,9 +2767,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   /** The Bands card's own 4 jacks (mountBandsJack, above) — the same
    *  fill/pressed/uses/aria refresh audioMeters.ts's own refreshPatchView
    *  does for its jacks, plus the same row-level fed/dim (jack.ts's
-   *  setRowFed) for the 3 level rows and the faders row itself. */
+   *  setRowFed) for the 3 level rows and the faders row itself. Priority
+   *  for a shared row's own glow: the active preview always wins (soft, no
+   *  chip) over a competing pinned feed (full when uncontested, faint when
+   *  a different preview is live), which in turn wins over the softer
+   *  scene-mix fallback (jackIsSceneSource — a `"scene"` setting has no
+   *  patch sources of its own, so it can never win the pinned/preview
+   *  checks above; see jack.ts's setRowFed for what each kind draws). */
   function refreshBandsJacks(): void {
-    const info = jackShownInfo();
+    const ap = activePreview();
     const feedGroups = new Map<HTMLElement, DriveSourceChoice[]>();
     for (const { choice, jack, feedEl } of bandsJacks) {
       jack.setFilled(jackIsShown(choice));
@@ -2704,10 +2791,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       list.push(choice);
     }
     for (const [rowEl, choices] of feedGroups) {
-      const hard = choices.find((c) => jackIsShown(c));
-      const soft = hard ? undefined : choices.find((c) => jackIsSceneSource(c));
-      const lit = hard ?? soft;
-      setRowFed(rowEl, !!lit, !hard && !!soft, lit ? driveSourceColor(lit) : "", info?.label ?? "");
+      const previewHit = ap ? choices.find((c) => jackFeedsPreview(c)) : undefined;
+      const pinnedHit = pinned ? choices.find((c) => jackIsPinned(c)) : undefined;
+      const sceneSoftHit = previewHit || pinnedHit ? undefined : choices.find((c) => jackIsSceneSource(c));
+      if (previewHit) {
+        setRowFed(rowEl, "soft", driveSourceColor(previewHit), ap!.spec.label);
+      } else if (pinnedHit) {
+        setRowFed(rowEl, ap ? "faint" : "full", driveSourceColor(pinnedHit), pinned!.spec.label);
+      } else if (sceneSoftHit) {
+        setRowFed(rowEl, "soft", driveSourceColor(sceneSoftHit), jackShownInfo()?.label ?? "");
+      } else {
+        setRowFed(rowEl, "none", "", "");
+      }
     }
   }
 
@@ -2773,19 +2868,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let lastFrame: FeatureFrame | null = null;
   let lastAnim: AnimFrame | null = null;
 
-  function cableSpecsForShown(): { specs: CableSourceSpec[]; portEl: HTMLElement | null } {
-    const sel = shownSelection();
-    if (!sel) return { specs: [], portEl: null };
+  /** One cable group (src/ui/cableLayer.ts's CableGroupSpec) for whichever
+   *  (sceneId, spec) pair is passed — `pinned` or activePreview(), called
+   *  once each from cableSpecsForShown below. `isNew`/justAddedKey only
+   *  ever applies to the pinned group in practice (a patch can't be edited
+   *  without pinning it first — see onJackClick), but there's no reason to
+   *  special-case that away here. */
+  function cableGroupFor(sel: { sceneId: string; spec: SceneSetting } | null): CableGroupSpec {
+    if (!sel) return { sources: [], portEl: null };
     const handle = driveRowHandles.find((r) => r.sceneId === sel.sceneId && r.spec.key === sel.spec.key);
-    if (!handle) return { specs: [], portEl: null };
+    if (!handle) return { sources: [], portEl: null };
     const jackEls = combinedJackElements();
     const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
-    const specs: CableSourceSpec[] = [];
+    const sources: CableSourceSpec[] = [];
     if (setting === "scene") {
       for (const id of sel.spec.drive?.sceneSources ?? []) {
         const jackEl = jackEls.get(jackKey(id));
         if (!jackEl) continue;
-        specs.push({
+        sources.push({
           key: jackKey(id),
           color: driveSourceColor(id),
           soft: true,
@@ -2800,7 +2900,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         if (!jackEl) continue;
         const specKey = sel.spec.key;
         const idx = setting.sources.indexOf(src);
-        specs.push({
+        sources.push({
           key,
           color: driveSourceColor(src.choice),
           soft: false,
@@ -2810,8 +2910,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         });
       }
     }
+    return { sources, portEl: handle.portEl };
+  }
+
+  /** Both groups cableLayer.ts's own two-path-group recompute takes — see
+   *  its header and activePreview() above for why these are independent
+   *  rather than one "shown" selection. */
+  function cableSpecsForShown(): { pinned: CableGroupSpec; preview: CableGroupSpec } {
+    const pinnedGroup = cableGroupFor(pinned);
+    const previewGroup = cableGroupFor(activePreview());
     justAddedKey = null;
-    return { specs, portEl: handle.portEl };
+    return { pinned: pinnedGroup, preview: previewGroup };
   }
 
   let cableRecomputeQueued = false;
@@ -2821,8 +2930,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     requestAnimationFrame(() => {
       cableRecomputeQueued = false;
       if (!isOpen) return;
-      const { specs, portEl } = cableSpecsForShown();
-      cableLayer.recompute(specs, portEl);
+      const { pinned: pinnedGroup, preview: previewGroup } = cableSpecsForShown();
+      cableLayer.recompute(pinnedGroup, previewGroup);
     });
   }
   function refreshCableVisibility(): void {
