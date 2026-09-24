@@ -1,9 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { createDriveEngine, PASSTHROUGH_DRIVES, driveModes, modeOf, sameDriveChoice, type DriveChoice } from "../src/render/drives.ts";
-import { createAnimClock } from "../src/render/animClock.ts";
-import { setDriveLine, setDriveLineStrength } from "../src/render/driveStore.ts";
+import {
+  createDriveEngine,
+  normalizeDriveSetting,
+  PASSTHROUGH_DRIVES,
+  driveModes,
+  modeOf,
+  sameDriveChoice,
+  sameDriveSetting,
+  type DriveChoice,
+  type DrivePatch,
+} from "../src/render/drives.ts";
+import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
+import { setDriveLine, setDriveLineStrength, setDriveSetting } from "../src/render/driveStore.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
-import { SIGNALS } from "../src/render/signals.ts";
+import { SIGNALS, type SignalId } from "../src/render/signals.ts";
+import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { listScenes } from "../src/render/scene.ts";
@@ -30,6 +41,16 @@ function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
  *  about — the engine never reads min/max/default for a drive read. */
 function settingWithDrive(key: string, choice: DriveChoice, sceneLabel?: string): SceneSetting {
   return { key, label: key, min: 0, max: 1, step: 0.05, default: 0, drive: { default: choice, sceneLabel } };
+}
+
+/** A setting installed with a real multi-source patch, for the tests below
+ *  that exercise mix/weight/height rather than a single default choice.
+ *  `sceneId` is unique per test the same way the rest of this file keys
+ *  every scenario, so the store's own state can't bleed between tests. */
+function patchSetting(sceneId: string, key: string, patch: DrivePatch): SceneSetting {
+  const spec = settingWithDrive(key, "scene");
+  setDriveSetting(sceneId, spec, patch);
+  return spec;
 }
 
 describe("drives: catalogue identity", () => {
@@ -384,5 +405,379 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     const sceneDefaultNeither = neither.lowOnset || neither.onset;
     expect(sceneDefaultNeither).toBe(false);
     expect(engine.forScene("caustics", settings, neither).fired("ripple", sceneDefaultNeither)).toBe(false);
+  });
+});
+
+// ---- Phase 1 of the patch-bay plan: multi-source DrivePatch -------------
+
+describe("drives: patch normalization — weight clamp, dedupe, empty -> scene", () => {
+  it("clamps weight to 0..2", () => {
+    const patch: DrivePatch = {
+      mix: "add",
+      sources: [
+        { choice: "anim.low", weight: 5 },
+        { choice: "anim.mid", weight: -3 },
+      ],
+    };
+    const normalized = normalizeDriveSetting(patch);
+    if (normalized === "scene") throw new Error("unreachable — two sources, never collapses to scene");
+    expect(normalized.sources[0]!.weight).toBe(2);
+    expect(normalized.sources[1]!.weight).toBe(0);
+  });
+
+  it("drops a later source colliding with an earlier one's key, and a second line source", () => {
+    const patch: DrivePatch = {
+      mix: "add",
+      sources: [
+        { choice: "anim.low", weight: 1 },
+        { choice: "anim.low", weight: 2 }, // duplicate key — dropped
+        { choice: { source: "line" }, weight: 1 },
+        { choice: { source: "line" }, weight: 1 }, // second line — dropped
+      ],
+    };
+    const normalized = normalizeDriveSetting(patch);
+    if (normalized === "scene") throw new Error("unreachable");
+    expect(normalized.sources).toHaveLength(2);
+    expect(normalized.sources[0]).toEqual({ choice: "anim.low", weight: 1 });
+  });
+
+  it("an empty patch normalizes to scene", () => {
+    expect(normalizeDriveSetting({ mix: "add", sources: [] })).toBe("scene");
+  });
+
+  it("sameDriveSetting compares mix, source order, weight and height", () => {
+    const a: DrivePatch = { mix: "add", sources: [{ choice: "anim.low", weight: 1 }] };
+    const b: DrivePatch = { mix: "add", sources: [{ choice: "anim.low", weight: 1 }] };
+    const c: DrivePatch = { mix: "add", sources: [{ choice: "anim.low", weight: 1.1 }] };
+    expect(sameDriveSetting(a, b)).toBe(true);
+    expect(sameDriveSetting(a, c)).toBe(false);
+    expect(sameDriveSetting(a, "scene")).toBe(false);
+    expect(sameDriveSetting("scene", "scene")).toBe(true);
+  });
+});
+
+describe("drives: multi-source patch mixing (add/max/gate) and gain", () => {
+  it("add sums every source's own weight * value", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    const anim = clock.advance(DT, frame({ bands }));
+    const sceneId = "patch-add";
+    const spec = patchSetting(sceneId, "k", {
+      mix: "add",
+      sources: [
+        { choice: "anim.low", weight: 1.5 },
+        { choice: "anim.mid", weight: 0.5 },
+      ],
+    });
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame({ bands }), 0, anim, sceneId, [spec]);
+    const expected = 1.5 * anim.low + 0.5 * anim.mid;
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k")).toEqual({ drive: expected, custom: 1 });
+  });
+
+  it("max takes the single largest weighted source, not their sum", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    const anim = clock.advance(DT, frame({ bands }));
+    const sceneId = "patch-max";
+    const spec = patchSetting(sceneId, "k", {
+      mix: "max",
+      sources: [
+        { choice: "anim.low", weight: 2 },
+        { choice: "anim.mid", weight: 0.1 },
+      ],
+    });
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame({ bands }), 0, anim, sceneId, [spec]);
+    const expected = Math.max(2 * anim.low, 0.1 * anim.mid);
+    const drive = engine.forScene(sceneId, [spec], anim).uniformPair("k").drive;
+    expect(drive).toBe(expected);
+    expect(drive).toBeLessThan(2 * anim.low + 0.1 * anim.mid); // sanity: really not add
+  });
+
+  it("gate multiplies source 0 by a smoothstep of source 1; a third source is stored but ignored", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    const anim = clock.advance(DT, frame({ bands }));
+    const sceneId = "patch-gate";
+    const spec = patchSetting(sceneId, "k", {
+      mix: "gate",
+      sources: [
+        { choice: "anim.low", weight: 1 },
+        { choice: "anim.mid", weight: 1 },
+        { choice: "anim.high", weight: 1 }, // ignored — only sources 0 and 1 count
+      ],
+    });
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame({ bands }), 0, anim, sceneId, [spec]);
+    const t = Math.min(1, Math.max(0, (anim.mid - 0.35) / (0.55 - 0.35)));
+    const smooth = t * t * (3 - 2 * t);
+    const expected = anim.low * smooth;
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBeCloseTo(expected, 10);
+  });
+
+  it("gate with only one source treats the gate as always open (falls back to that source alone)", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.3);
+    const anim = clock.advance(DT, frame({ bands }));
+    const sceneId = "patch-gate-single";
+    const spec = patchSetting(sceneId, "k", { mix: "gate", sources: [{ choice: "anim.low", weight: 1.4 }] });
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame({ bands }), 0, anim, sceneId, [spec]);
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBeCloseTo(1.4 * anim.low, 10);
+  });
+
+  it("drive.gain scales the mix-combined result once, not each source", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    const anim = clock.advance(DT, frame({ bands }));
+    const sceneId = "patch-gain";
+    const spec: SceneSetting = { key: "k", label: "k", min: 0, max: 1, step: 0.05, default: 0, drive: { default: "scene", gain: 2 } };
+    setDriveSetting(sceneId, spec, {
+      mix: "add",
+      sources: [
+        { choice: "anim.low", weight: 1 },
+        { choice: "anim.mid", weight: 1 },
+      ],
+    });
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame({ bands }), 0, anim, sceneId, [spec]);
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBeCloseTo(2 * (anim.low + anim.mid), 10);
+  });
+});
+
+/** Two quiet ticks (to give bandEnergy's rate-of-rise trigger a real
+ *  `prevRaw` to compare against — see bandEnergy.ts's own `state.prevRaw ===
+ *  null` guard) then one loud tick, sharp enough to clear every group's *and*
+ *  the broadband detector's adaptive threshold. Shares one AnimClock/engine
+ *  across all three ticks (real per-tick state, not three independent
+ *  clocks) and returns the firing tick's AnimFrame. */
+function tickToOnset(
+  clock: ReturnType<typeof createAnimClock>,
+  engine: ReturnType<typeof createDriveEngine>,
+  sceneId: string,
+  specs: SceneSetting[],
+  spikeDriveEnergy = 0.9,
+) {
+  const quiet = new Float32Array(NUM_BANDS).fill(0.05);
+  const spike = new Float32Array(NUM_BANDS).fill(0.9);
+  let anim = clock.advance(DT, frame({ bands: quiet, onset: false }));
+  engine.accumulate(DT, frame({ bands: quiet }), 0.05, anim, sceneId, specs);
+  anim = clock.advance(DT, frame({ bands: quiet, onset: false }));
+  engine.accumulate(DT, frame({ bands: quiet }), 0.05, anim, sceneId, specs);
+  anim = clock.advance(DT, frame({ bands: spike, onset: true }));
+  engine.accumulate(DT, frame({ bands: spike }), spikeDriveEnergy, anim, sceneId, specs);
+  return anim;
+}
+
+describe("drives: hit heights (Fixed/Loud) on a patch source", () => {
+  it("Graded (the default) is untouched — exactly the catalogue's own pulse", () => {
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    const sceneId = "height-graded";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1 }] });
+    const anim = tickToOnset(clock, engine, sceneId, [spec]);
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(anim.lowPulse);
+  });
+
+  it("Fixed jumps to 1 on the source's own edge and decays at that source's own pulse-decay rate", () => {
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    const sceneId = "height-fixed";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1, height: "fixed" }] });
+    const anim = tickToOnset(clock, engine, sceneId, [spec]);
+    expect(anim.lowOnset).toBe(true); // sanity: the tick really fired
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(1);
+
+    // One further tick at the same (held) level: no new rise, so no new
+    // edge — heightEnv should just have decayed once, at bandEnergy's own
+    // low-group rate (GROUP_TUNING), the exact rate the Graded pulse it
+    // stands in for decays at.
+    const held = new Float32Array(NUM_BANDS).fill(0.9);
+    const anim2 = clock.advance(DT, frame({ bands: held, onset: false }));
+    engine.accumulate(DT, frame({ bands: held }), 0.9, anim2, sceneId, [spec]);
+    expect(anim2.lowOnset).toBe(false);
+    const after = engine.forScene(sceneId, [spec], anim2).uniformPair("k").drive;
+    expect(after).toBeCloseTo(Math.exp(-DT * GROUP_TUNING.low.pulseDecayRate), 6);
+  });
+
+  it("Loud jumps to the source's own band-group level on the edge — anim.low for Bass hit", () => {
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    const sceneId = "height-loud";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.lowOnset", weight: 1, height: "loud" }] });
+    const anim = tickToOnset(clock, engine, sceneId, [spec]);
+    expect(anim.lowOnset).toBe(true);
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(anim.low);
+  });
+
+  it("Loud on Any hit (broadband) uses driveEnergy, since it isn't band-specific", () => {
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    const sceneId = "height-loud-broadband";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "loud" }] });
+    const anim = tickToOnset(clock, engine, sceneId, [spec], 0.77);
+    expect(anim.onset).toBe(true);
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(0.77);
+  });
+
+  it("Fixed on Any hit decays at animClock's own BEAT_PULSE_DECAY_PER_SEC, the same rate its Graded pulse uses", () => {
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    const sceneId = "height-fixed-broadband";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "fixed" }] });
+    const anim = tickToOnset(clock, engine, sceneId, [spec]);
+    expect(anim.onset).toBe(true);
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(1);
+
+    const held = new Float32Array(NUM_BANDS).fill(0.9);
+    const anim2 = clock.advance(DT, frame({ bands: held, onset: false }));
+    engine.accumulate(DT, frame({ bands: held }), 0.9, anim2, sceneId, [spec]);
+    const after = engine.forScene(sceneId, [spec], anim2).uniformPair("k").drive;
+    expect(after).toBeCloseTo(Math.exp(-DT * BEAT_PULSE_DECAY_PER_SEC), 6);
+  });
+
+  it("a level-kind source (Bass level) ignores height entirely, even if one is stored", () => {
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    const sceneId = "height-ignored-level";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.low", weight: 1, height: "fixed" }] });
+    const anim = tickToOnset(clock, engine, sceneId, [spec]);
+    // Still reads the plain level, never a 1-then-decay envelope.
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBe(anim.low);
+  });
+
+  it("the drawn line ignores height entirely, even if one is stored", () => {
+    const sceneId = "height-ignored-line";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: { source: "line" }, weight: 1, height: "loud" }] });
+    setDriveLine(sceneId, spec, new Float32Array(NUM_BANDS).fill(0)); // flat-0: full headroom
+    setDriveLineStrength(sceneId, spec, 1);
+    const bands = Float32Array.from({ length: NUM_BANDS }, (_, i) => (i % 5) / 10);
+    const gained = frame({ bands });
+    const anim = createAnimClock().advance(DT, gained);
+    const engine = createDriveEngine();
+    engine.accumulate(DT, gained, 0, anim, sceneId, [spec]);
+    const expected = bandLineDrive(bands, new Float32Array(NUM_BANDS).fill(0), 1).drive;
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBeCloseTo(expected, 5);
+  });
+});
+
+describe("drives: fired() across multiple sources", () => {
+  it("add/max OR every source's own edge (catalogue sources)", () => {
+    const engine = createDriveEngine();
+    const sceneId = "fired-or-catalogue";
+    const spec = patchSetting(sceneId, "k", {
+      mix: "add",
+      sources: [
+        { choice: "anim.lowOnset", weight: 1 },
+        { choice: "anim.midOnset", weight: 1 },
+      ],
+    });
+    const base = createAnimClock().advance(DT, frame());
+    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: false, midOnset: false }).fired("k", false)).toBe(false);
+    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: true, midOnset: false }).fired("k", false)).toBe(true);
+    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: false, midOnset: true }).fired("k", false)).toBe(true);
+  });
+
+  it("gate: fires only when source 0's own edge coincides with the gate being open", () => {
+    const engine = createDriveEngine();
+    const sceneId = "fired-gate";
+    const spec = patchSetting(sceneId, "k", {
+      mix: "gate",
+      sources: [
+        { choice: "anim.lowOnset", weight: 1 },
+        { choice: "anim.mid", weight: 1 },
+      ],
+    });
+    const base = createAnimClock().advance(DT, frame());
+    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: true, mid: 0.9 }).fired("k", false)).toBe(true);
+    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: true, mid: 0.1 }).fired("k", false)).toBe(false);
+    expect(engine.forScene(sceneId, [spec], { ...base, lowOnset: false, mid: 0.9 }).fired("k", false)).toBe(false);
+  });
+});
+
+describe("drives: two settings sharing a grid choice keep independent latches", () => {
+  it("reading setting A's fired edge never consumes setting B's, on the same grid index", () => {
+    const engine = createDriveEngine();
+    const sceneId = "grid-share-scene";
+    const GRID_QUARTER = 2; // BEAT_GRIDS index for "1/4"
+    const specA = patchSetting(sceneId, "a", { mix: "add", sources: [{ choice: { source: "beat", grid: GRID_QUARTER }, weight: 1 }] });
+    const specB = patchSetting(sceneId, "b", { mix: "add", sources: [{ choice: { source: "beat", grid: GRID_QUARTER }, weight: 1 }] });
+
+    const tick = (beats: number) => {
+      const anim = { ...createAnimClock().advance(DT, frame()), beats, onset: false, tempoLock: 1 };
+      engine.accumulate(DT, frame(), 0, anim, sceneId, [specA, specB]);
+      return anim;
+    };
+
+    tick(0); // arms silently
+    const firedAnim = tick(1.5); // both cross the same boundary this tick
+
+    const drives = engine.forScene(sceneId, [specA, specB], firedAnim);
+    expect(drives.fired("a", false)).toBe(true);
+    // B's own edge must still be pending — reading A didn't steal it.
+    expect(drives.fired("b", false)).toBe(true);
+  });
+});
+
+describe("drives: sourceValues()/valueOf() — the panel's inspection API", () => {
+  it("sourceValues returns each source's own weight*value in patch order, un-gained", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.4);
+    const anim = clock.advance(DT, frame({ bands }));
+    const sceneId = "source-values-scene";
+    const spec = patchSetting(sceneId, "k", {
+      mix: "add",
+      sources: [
+        { choice: "anim.high", weight: 0.3 },
+        { choice: "anim.low", weight: 1.7 },
+      ],
+    });
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame({ bands }), 0, anim, sceneId, [spec]);
+    const values = engine.forScene(sceneId, [spec], anim).sourceValues("k");
+    expect(values).not.toBeNull();
+    expect(values![0]).toBeCloseTo(0.3 * anim.high, 6);
+    expect(values![1]).toBeCloseTo(1.7 * anim.low, 6);
+  });
+
+  it("sourceValues is null for a Scene setting", () => {
+    const engine = createDriveEngine();
+    const spec = settingWithDrive("k", "scene", "Scene: x");
+    const anim = createAnimClock().advance(DT, frame());
+    expect(engine.forScene("scene-sourcevalues", [spec], anim).sourceValues("k")).toBeNull();
+  });
+
+  it("valueOf matches uniformPair().drive, and is 0 for a Scene setting", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.4);
+    const anim = clock.advance(DT, frame({ bands }));
+    const sceneId = "valueof-scene";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.low", weight: 1 }] });
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame({ bands }), 0, anim, sceneId, [spec]);
+    const drives = engine.forScene(sceneId, [spec], anim);
+    expect(drives.valueOf("k")).toBe(drives.uniformPair("k").drive);
+
+    const sceneSpec = settingWithDrive("k2", "scene", "Scene: x");
+    expect(engine.forScene("valueof-scene-2", [sceneSpec], anim).valueOf("k2")).toBe(0);
+  });
+});
+
+describe("drives: sceneSources — display-only scene-mix metadata", () => {
+  it("every declared sceneSources entry is a real SignalId, only on a Scene-default setting", () => {
+    let checked = 0;
+    for (const scene of listScenes()) {
+      for (const spec of scene.settings ?? []) {
+        if (!spec.drive?.sceneSources) continue;
+        checked++;
+        expect(spec.drive.default, `${scene.id}'s "${spec.key}" has sceneSources but isn't Scene-default`).toBe("scene");
+        expect(spec.drive.sceneSources.length).toBeGreaterThan(0);
+        for (const id of spec.drive.sceneSources) {
+          expect(SIGNALS[id as SignalId], `${scene.id}'s "${spec.key}" sceneSources names unknown signal "${id}"`).toBeDefined();
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 });

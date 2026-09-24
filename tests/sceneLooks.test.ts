@@ -3,6 +3,7 @@ import type { SceneSetting } from "../src/render/sceneSettings.ts";
 import { getSceneSetting, setSceneSetting } from "../src/render/sceneSettings.ts";
 import { isAutoEnabled, setAutoEnabled } from "../src/render/autoTune.ts";
 import { getDriveChoice, setDriveChoice } from "../src/render/driveStore.ts";
+import { driveSettingFromChoice, type DriveSetting } from "../src/render/drives.ts";
 import {
   applyLook,
   captureLook,
@@ -65,15 +66,43 @@ describe("encodeLook / decodeLook", () => {
     expect(decodeLook(badCode)).toBeNull();
   });
 
-  // `d` (SceneSetting.drive choices) is optional and additive — v stays 1.
-  it("round-trips a look with drive choices (`d`)", () => {
+  // `d` (SceneSetting.drive settings) is optional and additive — v stays 1.
+  it("round-trips a look with drive settings (`d`), one-source patches included", () => {
     const look: SceneLook = {
       name: "Driven",
       sceneId: "caustics",
       manual: { focus: 0.4 },
-      drives: { flash: "anim.lowOnset", ripple: { source: "beat", grid: 3 } },
+      drives: { flash: driveSettingFromChoice("anim.lowOnset"), ripple: driveSettingFromChoice({ source: "beat", grid: 3 }) },
     };
     expect(decodeLook(encodeLook(look))).toEqual(look);
+  });
+
+  it("a one-source, weight-1, Graded patch encodes on the wire as the bare DriveChoice (old-app compatible)", () => {
+    const look: SceneLook = { name: "D", sceneId: "caustics", manual: {}, drives: { flash: driveSettingFromChoice("anim.lowOnset") } };
+    const code = encodeLook(look);
+    const wire = JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/")));
+    expect(wire.d).toEqual({ flash: "anim.lowOnset" });
+  });
+
+  it("a real multi-source patch round-trips as the compact {m,s} form", () => {
+    const patch: DriveSetting = {
+      mix: "gate",
+      sources: [
+        { choice: "anim.lowOnset", weight: 1.5, height: "fixed" },
+        { choice: "anim.mid", weight: 0.7 },
+      ],
+    };
+    const look: SceneLook = { name: "Gated", sceneId: "caustics", manual: {}, drives: { flash: patch } };
+    const code = encodeLook(look);
+    const wire = JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/")));
+    expect(wire.d.flash).toEqual({
+      m: "gate",
+      s: [
+        { c: "anim.lowOnset", w: 1.5, h: "fixed" },
+        { c: "anim.mid", w: 0.7 },
+      ],
+    });
+    expect(decodeLook(code)).toEqual(look);
   });
 
   it("an old look with no `d` at all still round-trips (the field is simply absent, not empty)", () => {
@@ -83,12 +112,26 @@ describe("encodeLook / decodeLook", () => {
     expect(decodeLook(code)).toEqual(look);
   });
 
-  it("returns null for a garbage drive choice inside `d`", () => {
+  it("returns null for a garbage drive setting inside `d`", () => {
     const badCode = btoa(JSON.stringify({ v: 1, n: "x", s: "mesh", m: {}, d: { flash: { source: "not-real" } } }))
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
       .replace(/=+$/, "");
     expect(decodeLook(badCode)).toBeNull();
+  });
+
+  it("returns null for a compact patch with a garbage mix or a malformed source", () => {
+    const badMix = btoa(JSON.stringify({ v: 1, n: "x", s: "mesh", m: {}, d: { flash: { m: "nonsense", s: [{ c: "anim.mid" }] } } }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    expect(decodeLook(badMix)).toBeNull();
+
+    const badSource = btoa(JSON.stringify({ v: 1, n: "x", s: "mesh", m: {}, d: { flash: { m: "add", s: [{ c: "anim.mid", h: "wrong" }] } } }))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    expect(decodeLook(badSource)).toBeNull();
   });
 });
 
@@ -110,7 +153,7 @@ describe("captureLook", () => {
 
     setDriveChoice(sceneId, FLASH, "anim.lowOnset");
     const look2 = captureLook("Test", sceneId, SPECS_WITH_DRIVE);
-    expect(look2.drives).toEqual({ flash: "anim.lowOnset" });
+    expect(look2.drives).toEqual({ flash: driveSettingFromChoice("anim.lowOnset") });
   });
 });
 
@@ -135,7 +178,7 @@ describe("applyLook", () => {
     const sceneId = "look-apply-2";
     setDriveChoice(sceneId, FLASH, "anim.highOnset");
 
-    applyLook({ name: "L", sceneId, manual: {}, drives: { flash: "anim.lowOnset" } }, SPECS_WITH_DRIVE);
+    applyLook({ name: "L", sceneId, manual: {}, drives: { flash: driveSettingFromChoice("anim.lowOnset") } }, SPECS_WITH_DRIVE);
     expect(getDriveChoice(sceneId, FLASH)).toBe("anim.lowOnset");
 
     applyLook({ name: "L2", sceneId, manual: {} }, SPECS_WITH_DRIVE);

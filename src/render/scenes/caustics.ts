@@ -110,7 +110,7 @@ const SPARKLE: SceneSetting = {
   // continuous "Sparkle from line" dial blending toward the sensitivity
   // line; that's now Frequencies, a discrete alternative source on this
   // same picker.
-  drive: { default: "scene", sceneLabel: "Scene: treble hits + sustain wash" },
+  drive: { default: "scene", sceneLabel: "Scene: treble hits + sustain wash", sceneSources: ["anim.highOnset", "anim.high"] },
 };
 
 const SETTINGS: SceneSetting[] = [
@@ -156,7 +156,7 @@ const SETTINGS: SceneSetting[] = [
     // Scene default is still bit-identical to today). A drop still rings
     // its own stronger ring in place of the ordinary one on that tick,
     // independent of this choice — see the trigger logic.
-    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit" },
+    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"] },
   },
   {
     key: "drift",

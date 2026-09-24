@@ -37,6 +37,16 @@ export interface AnimFrame {
    *  old single per-scene Beat grid row worked no longer exists as one
    *  switch — each drive setting picks its own grid now. */
   onset: boolean;
+  /** This tick's live broadband flux/threshold ratio — `hit.beatRatio` passed
+   *  straight through (0 when omitted: the TV, a renderer, or any caller with
+   *  no local FeatureExtractor — see advance()'s own doc). Unlike `onset`,
+   *  this never gates on refractory/threshold — it's the raw "how close is
+   *  the detector to firing right now" reading (features.ts's fluxRatio: 0 at
+   *  a silent baseline, 1 at a bare trigger, above 1 the harder a hit
+   *  cleared). src/render/drives.ts's `feature.flux` catalogue source
+   *  ("Onset surge") reads this so a scene can lean into a build-up before
+   *  the beat actually lands, not just react after. */
+  beatRatio: number;
   /** Phase-locked beat/bar clock — see beatClock.ts. Never restarts mid-beat
    *  the way FeatureFrame.onsetPhase can (that field has no reader today —
    *  this superseded it). */
@@ -154,7 +164,11 @@ export interface AnimClock {
   ): AnimFrame;
 }
 
-const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts broadband beatPulse decay
+// Exported so src/render/drives.ts's Fixed/Loud hit heights can decay a
+// broadband ("Beat") source at exactly this same rate rather than
+// hand-duplicating it (its own header explains why: "read it from
+// animClock/bandEnergy; don't invent one").
+export const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts broadband beatPulse decay
 
 export function createAnimClock(): AnimClock {
   const flow: FlowClock = createFlowClock();
@@ -206,6 +220,7 @@ export function createAnimClock(): AnimClock {
         flowPhase,
         beatPulse,
         onset,
+        beatRatio: hit?.beatRatio ?? 0,
         beatPhase: beat.beatPhase,
         barPhase: beat.barPhase,
         tempoLock: beat.tempoLock,

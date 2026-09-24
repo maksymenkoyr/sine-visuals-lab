@@ -1855,6 +1855,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["tempo", tempo.el],
     ["hits", hitsHistory.el],
     ["centroid", centroidRow.el],
+    ["onset", onset.el],
   ]);
 
   return {

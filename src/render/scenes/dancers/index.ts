@@ -218,7 +218,11 @@ const SETTINGS: SceneSetting[] = [
     auto: { attack: 0.3, pulse: 0.15, tempo: -0.2 },
     // Two different signals at two different sites — dolly/tilt read the
     // beat, roll reads the bass — so the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: beat (dolly/tilt) and bass hit (roll)" },
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: beat (dolly/tilt) and bass hit (roll)",
+      sceneSources: ["feature.onset", "anim.lowOnset"],
+    },
   },
 ];
 

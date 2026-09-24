@@ -74,10 +74,11 @@ export type MeterCardId = "scope" | "signal" | "gate" | "lufs" | "rhythm" | "cha
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid";
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset";
 
 export type SignalId =
   | "feature.onset"
+  | "feature.flux"
   | "anim.lowOnset"
   | "anim.midOnset"
   | "anim.highOnset"
@@ -128,6 +129,10 @@ function signal(spec: SignalSpec): SignalSpec {
   return spec;
 }
 
+function clamp01(x: number): number {
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
 /** One entry in `SceneSetting.reads` (sceneSettings.ts) — either just a
  *  signal id (this setting always responds to it), or a signal id plus
  *  `activeWhen`, for a setting that only responds while some other setting
@@ -160,6 +165,16 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     read: (_frame, anim) => anim.beatPulse,
     edge: (anim) => anim.onset,
     monitor: { card: "rhythm", row: "hits" },
+    bandRange: "all",
+  }),
+  "feature.flux": signal({
+    id: "feature.flux",
+    label: "Onset surge",
+    description:
+      "How close the broadband onset detector is to firing right now (AnimFrame.beatRatio, features.ts's own unclamped fluxRatio), rescaled so 0.6 (a clear near-miss) reads 0 and 2.0 reads 1 — the same flux 'Beat' fires on, read continuously instead of as a one-shot, so a scene can lean into an approaching hit rather than only ever react after it lands.",
+    kind: "level",
+    read: (_frame, anim) => clamp01((anim.beatRatio - 0.6) / 1.4),
+    monitor: { card: "rhythm", row: "onset" },
     bandRange: "all",
   }),
   "anim.lowOnset": signal({

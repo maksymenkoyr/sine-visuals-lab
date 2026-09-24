@@ -1,17 +1,32 @@
 import { NUM_BANDS } from "../audio/types.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, sanitizeLine } from "../audio/bandLine.ts";
-import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY } from "../audio/beatGrid.ts";
+import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { SIGNALS } from "./signals.ts";
 import { settingScope, type SceneSetting } from "./sceneSettings.ts";
-import type { DriveChoice } from "./drives.ts";
+import {
+  defaultDriveSetting,
+  driveSettingFromChoice,
+  normalizeDriveSetting,
+  setPatchMix as pureSetPatchMix,
+  setSourceGrid as pureSetSourceGrid,
+  setSourceHeight as pureSetSourceHeight,
+  setSourceWeight as pureSetSourceWeight,
+  togglePatchSource as pureTogglePatchSource,
+  type DriveChoice,
+  type DriveMix,
+  type DriveSetting,
+  type DriveSourceChoice,
+  type HitHeight,
+} from "./drives.ts";
 
 /**
- * Storage for `SceneSetting.drive` — the choice a drive setting is
- * currently on, plus (for a setting parked on Frequencies) the line it was
+ * Storage for `SceneSetting.drive` — the patch (src/render/drives.ts's
+ * `DriveSetting`: `"scene"` or a `DrivePatch`) a drive setting is currently
+ * on, plus (for a setting with a source on Frequencies) the line it was
  * drawn with and its overall strength. One entry per (scene, setting),
  * scoped through sceneSettings.ts's settingScope() exactly like the plain
  * value store, so a scene's variant (Kaleidoscope's Style, …) keeps its own
- * profile of drive choices too. Same cache-over-localStorage pattern as
+ * profile of drive settings too. Same cache-over-localStorage pattern as
  * every other store here: the in-memory cache is the source of truth for
  * get/set within a session, seeded once from localStorage, so behavior
  * stays correct even where localStorage is unavailable (node test env,
@@ -22,23 +37,43 @@ import type { DriveChoice } from "./drives.ts";
  * settings on the same scene each draw their own line (bandLine.ts's own
  * header covers why bandLineDrive() itself — the pure math — stayed put).
  *
+ * **Two storage shapes, one field each.** `DriveEntry.patch` is the current
+ * shape — whatever `getDriveSetting`/`setDriveSetting` round-trip, sanitized
+ * through `sanitizeDriveSetting` below on read so a stale/foreign value
+ * falls back rather than throwing. `DriveEntry.choice` is what every entry
+ * used to be before patches existed (a bare `DriveChoice`) — still read (and
+ * upgraded to a one-source patch via `driveSettingFromChoice`) for a browser
+ * that saved one before this file grew a `patch` field; every write goes
+ * through `patch` only, so a choice-only entry never comes back once this
+ * session has touched it.
+ *
+ * `getDriveChoice`/`setDriveChoice` further down are a compatibility shim
+ * for src/ui/deviceMenu.ts's Revision-3 single-choice picker, which the
+ * patch-bay plan's Phase 2 replaces with a real multi-source panel built on
+ * `getDriveSetting`/`setDriveSetting` directly — see their own doc comments.
+ *
  * Migration: a scene that had a non-Hits grid stored under beatGrid.ts's
  * retired per-scene store (LEGACY_BEAT_GRID_STORAGE_KEY, `vibe.beatGrid`)
- * converts once, lazily, the first time getDriveChoice() is asked about a
+ * converts once, lazily, the first time getDriveSetting() is asked about a
  * setting whose own `drive.default` is the plain "feature.onset" (Beat)
- * catalogue choice: it resolves to (and persists) `{source:"beat", grid}`
- * instead of the plain default, so a scene whose beat reactions used to run
- * on, say, "1 bar" doesn't suddenly snap back to raw Hits the moment this
- * system takes over gridding beat edges (see drives.ts's header for why
- * that's now a per-setting concern instead of animClock's own single
- * global grid). A setting whose default is anything other than plain Beat
- * never had a global grid apply to it in the first place, so it's left
- * alone. Read once at module load — the legacy store is retired, not kept
- * live alongside this one.
+ * catalogue choice: it resolves to (and persists) the one-source patch for
+ * `{source:"beat", grid}` instead of the plain default, so a scene whose
+ * beat reactions used to run on, say, "1 bar" doesn't suddenly snap back to
+ * raw Hits the moment this system took over gridding beat edges (see
+ * drives.ts's header for why that's now a per-setting concern instead of
+ * animClock's own single global grid). A setting whose default is anything
+ * other than plain Beat never had a global grid apply to it in the first
+ * place, so it's left alone. Read once at module load — the legacy store is
+ * retired, not kept live alongside this one.
  */
 
 interface DriveEntry {
+  /** Legacy — see this file's header. Never written by this module any
+   *  more; only read as a fallback when `patch` is absent. */
   choice?: DriveChoice;
+  /** `encodeDriveSetting`'s output — see that function's own doc for the
+   *  two shapes this field can hold. */
+  patch?: StoredDriveSetting;
   line?: number[];
   lineStrength?: number;
 }
@@ -64,7 +99,7 @@ function persist(): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
   } catch {
-    // Not fatal — drive choices/lines just won't persist across reloads.
+    // Not fatal — drive settings/lines just won't persist across reloads.
   }
 }
 
@@ -97,7 +132,7 @@ function migratedBeatGridChoice(sceneId: string, spec: SceneSetting): DriveChoic
   return { source: "beat", grid };
 }
 
-// ---- Choice -----------------------------------------------------------------
+// ---- Choice (single-source; legacy shape) -----------------------------------
 
 function isValidGridIndex(n: unknown): n is number {
   return typeof n === "number" && Number.isInteger(n) && n >= 0 && n < BEAT_GRIDS.length;
@@ -105,8 +140,11 @@ function isValidGridIndex(n: unknown): n is number {
 
 /** `raw` sanitized into a real DriveChoice, or null if it doesn't match any
  *  of the shapes a choice can take (a stale/foreign localStorage value, or —
- *  the other caller — an untrusted Look share code; sceneLooks.ts reuses
- *  this rather than re-validating the same shape a second way). */
+ *  another caller — a `DriveSource.choice` inside a patch, or an untrusted
+ *  Look share code; sanitizeDriveSetting/sceneLooks.ts reuse this rather
+ *  than re-validating the same shape a second way). Accepts `"scene"` for
+ *  the legacy top-level `choice` field/Look `d` entries; sanitizeSourceChoice
+ *  below is the same check with `"scene"` rejected, for a patch source. */
 export function sanitizeChoice(raw: unknown): DriveChoice | null {
   if (raw === "scene") return "scene";
   if (typeof raw === "string") return raw in SIGNALS ? (raw as DriveChoice) : null;
@@ -121,36 +159,188 @@ export function sanitizeChoice(raw: unknown): DriveChoice | null {
   return null;
 }
 
-/** This setting's stored source choice, or its `drive.default` — with the
+/** `sanitizeChoice`, with `"scene"` rejected — what one `DriveSource.choice`
+ *  inside a patch must sanitize to. */
+export function sanitizeSourceChoice(raw: unknown): DriveSourceChoice | null {
+  const choice = sanitizeChoice(raw);
+  return choice === null || choice === "scene" ? null : choice;
+}
+
+const HIT_HEIGHTS: readonly HitHeight[] = ["graded", "fixed", "loud"];
+const DRIVE_MIXES: readonly DriveMix[] = ["add", "max", "gate"];
+
+/** `raw` sanitized into a real DriveSetting, or null if it doesn't match
+ *  either shape a stored/shared entry can take: a plain `DriveChoice`
+ *  (`"scene"`, or what `sanitizeChoice` accepts — a setting whose patch has
+ *  never been edited past the identity one-source/weight-1/Graded shape
+ *  round-trips through this form, both in localStorage and in a Look's `d`
+ *  — see sceneLooks.ts's own header) or a compact patch
+ *  `{m: DriveMix, s: [{c: DriveChoice, w?: number, h?: HitHeight}, …]}`.
+ *  A source's `w`/`h`, if present, must already be a well-shaped value —
+ *  out-of-range weight is clamped (`normalizeDriveSetting`), but a wrong
+ *  *type* anywhere fails the whole entry rather than silently dropping one
+ *  source, so a garbage entry can't quietly resolve to a half-built patch. */
+export function sanitizeDriveSetting(raw: unknown): DriveSetting | null {
+  const asChoice = sanitizeChoice(raw);
+  if (asChoice !== null) return driveSettingFromChoice(asChoice);
+  if (!raw || typeof raw !== "object" || !("s" in raw)) return null;
+
+  const mix = (raw as { m?: unknown }).m;
+  if (typeof mix !== "string" || !(DRIVE_MIXES as readonly string[]).includes(mix)) return null;
+
+  const rawSources = (raw as { s?: unknown }).s;
+  if (!Array.isArray(rawSources)) return null;
+
+  const sources: { choice: DriveSourceChoice; weight: number; height?: HitHeight }[] = [];
+  for (const item of rawSources) {
+    if (!item || typeof item !== "object") return null;
+    const choice = sanitizeSourceChoice((item as { c?: unknown }).c);
+    if (choice === null) return null;
+
+    const rawWeight = (item as { w?: unknown }).w;
+    let weight = 1;
+    if (rawWeight !== undefined) {
+      if (typeof rawWeight !== "number" || !Number.isFinite(rawWeight)) return null;
+      weight = rawWeight;
+    }
+
+    const rawHeight = (item as { h?: unknown }).h;
+    let height: HitHeight | undefined;
+    if (rawHeight !== undefined) {
+      if (typeof rawHeight !== "string" || !(HIT_HEIGHTS as readonly string[]).includes(rawHeight)) return null;
+      height = rawHeight as HitHeight;
+    }
+
+    sources.push(height === undefined ? { choice, weight } : { choice, weight, height });
+  }
+
+  return normalizeDriveSetting({ mix: mix as DriveMix, sources });
+}
+
+/** The wire/storage shape `encodeDriveSetting` below produces and
+ *  `sanitizeDriveSetting` above accepts — either shape doc'd on that
+ *  function. Both `DriveEntry.patch` (localStorage) and a Look's `d` entry
+ *  (sceneLooks.ts) are one of these, never a bare `DriveSetting` — see this
+ *  file's header for why one canonical shape serves both boundaries. */
+export type StoredDriveSetting = DriveChoice | { m: DriveMix; s: { c: DriveChoice; w?: number; h?: HitHeight }[] };
+
+/** `setting` written the way `sanitizeDriveSetting` reads it back: a
+ *  one-source, weight-1, Graded `add` patch (and `"scene"`) as the bare
+ *  `DriveChoice` it's identical to — the same shape this store/a Look used
+ *  before patches existed, so an untouched setting keeps costing no more
+ *  than it always did and an old app can still make sense of it — anything
+ *  else as the compact `{m,s}` form. sceneLooks.ts reuses this directly
+ *  rather than re-deriving the same compaction. */
+export function encodeDriveSetting(setting: DriveSetting): StoredDriveSetting {
+  if (setting === "scene") return "scene";
+  if (setting.mix === "add" && setting.sources.length === 1) {
+    const only = setting.sources[0]!;
+    if (only.weight === 1 && (only.height === undefined || only.height === "graded")) return only.choice;
+  }
+  return {
+    m: setting.mix,
+    s: setting.sources.map((src) => {
+      const entry: { c: DriveChoice; w?: number; h?: HitHeight } = { c: src.choice };
+      if (src.weight !== 1) entry.w = src.weight;
+      if (src.height !== undefined && src.height !== "graded") entry.h = src.height;
+      return entry;
+    }),
+  };
+}
+
+/** This setting's stored DriveSetting, or its `drive.default` — with the
  *  one-time legacy beat-grid migration above folded in — for a setting
  *  that's never been touched. `spec.drive` must be set; callers only reach
  *  this for a setting the panel has already shown a source picker on. */
-export function getDriveChoice(sceneId: string, spec: SceneSetting): DriveChoice {
+export function getDriveSetting(sceneId: string, spec: SceneSetting): DriveSetting {
   const scope = settingScope(sceneId, spec.key);
-  const stored = cache[scope]?.[spec.key]?.choice;
-  const sanitized = stored === undefined ? undefined : sanitizeChoice(stored);
-  if (sanitized !== undefined && sanitized !== null) return sanitized;
+  const entry = cache[scope]?.[spec.key];
+
+  if (entry?.patch !== undefined) {
+    const sanitized = sanitizeDriveSetting(entry.patch);
+    if (sanitized !== null) return sanitized;
+  } else if (entry?.choice !== undefined) {
+    const sanitized = sanitizeChoice(entry.choice);
+    if (sanitized !== null) return driveSettingFromChoice(sanitized);
+  }
 
   const migrated = migratedBeatGridChoice(sceneId, spec);
   if (migrated) {
-    setDriveChoice(sceneId, spec, migrated);
-    return migrated;
+    const setting = driveSettingFromChoice(migrated);
+    setDriveSetting(sceneId, spec, setting);
+    return setting;
   }
-  return spec.drive?.default ?? "scene";
+  return defaultDriveSetting(spec);
 }
 
-export function setDriveChoice(sceneId: string, spec: SceneSetting, choice: DriveChoice): void {
-  entryFor(settingScope(sceneId, spec.key), spec.key).choice = choice;
+export function setDriveSetting(sceneId: string, spec: SceneSetting, setting: DriveSetting): void {
+  const entry = entryFor(settingScope(sceneId, spec.key), spec.key);
+  entry.patch = encodeDriveSetting(normalizeDriveSetting(setting));
+  delete entry.choice; // a fresh write always supersedes any legacy field
   persist();
 }
 
 /** Back to `spec.drive.default` — a row's reset affordance. */
-export function resetDriveChoice(sceneId: string, spec: SceneSetting): void {
-  delete entryFor(settingScope(sceneId, spec.key), spec.key).choice;
+export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
+  const entry = entryFor(settingScope(sceneId, spec.key), spec.key);
+  delete entry.patch;
+  delete entry.choice;
   persist();
 }
 
-// ---- Line (this setting parked on Frequencies) -----------------------------
+// ---- getDriveChoice/setDriveChoice — Revision-3 picker shim ----------------
+//
+// src/ui/deviceMenu.ts's current source picker (driveModes()/modeOf(),
+// drives.ts) only ever shows and sets one source at a time. These two let it
+// keep compiling and working unchanged against the new patch-shaped store:
+// getDriveChoice reads the patch's first source (or "scene"); setDriveChoice
+// replaces the whole patch with the one-source, weight-1, Graded `add` patch
+// for that choice — exactly `driveSettingFromChoice`. Both are deleted along
+// with the picker in the patch-bay plan's Phase 2.
+
+export function getDriveChoice(sceneId: string, spec: SceneSetting): DriveChoice {
+  const setting = getDriveSetting(sceneId, spec);
+  if (setting === "scene") return "scene";
+  return setting.sources[0]?.choice ?? "scene";
+}
+
+export function setDriveChoice(sceneId: string, spec: SceneSetting, choice: DriveChoice): void {
+  setDriveSetting(sceneId, spec, driveSettingFromChoice(choice));
+}
+
+/** Alias — `resetDriveSetting` already resets the whole entry regardless of
+ *  which shape (choice or patch) built it. */
+export const resetDriveChoice = resetDriveSetting;
+
+// ---- Patch-editing helpers (deviceMenu.ts, Phase 2) ------------------------
+//
+// Store-level counterparts of drives.ts's own pure, same-named helpers:
+// read the current setting, run it through the pure function, persist. Kept
+// here (not exported from drives.ts under these names) so a Phase-2 caller
+// always reaches for the (sceneId, spec, …) form without having to
+// getDriveSetting()/setDriveSetting() around a pure call by hand.
+
+export function togglePatchSource(sceneId: string, spec: SceneSetting, choice: DriveSourceChoice): void {
+  setDriveSetting(sceneId, spec, pureTogglePatchSource(getDriveSetting(sceneId, spec), choice));
+}
+
+export function setSourceWeight(sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, weight: number): void {
+  setDriveSetting(sceneId, spec, pureSetSourceWeight(getDriveSetting(sceneId, spec), choice, weight));
+}
+
+export function setSourceHeight(sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, height: HitHeight): void {
+  setDriveSetting(sceneId, spec, pureSetSourceHeight(getDriveSetting(sceneId, spec), choice, height));
+}
+
+export function setSourceGrid(sceneId: string, spec: SceneSetting, grid: BeatGridIndex): void {
+  setDriveSetting(sceneId, spec, pureSetSourceGrid(getDriveSetting(sceneId, spec), grid));
+}
+
+export function setPatchMix(sceneId: string, spec: SceneSetting, mix: DriveMix): void {
+  setDriveSetting(sceneId, spec, pureSetPatchMix(getDriveSetting(sceneId, spec), mix));
+}
+
+// ---- Line (a setting with a source on Frequencies) -------------------------
 
 const scratchLine = new Float32Array(NUM_BANDS);
 
