@@ -117,13 +117,14 @@ const ARC_HEAD_SHARP = 10.0;
 /** Pixel wavelength of the zigzag's crackle noise — smaller kinks tighter. */
 const ARC_WAVE_PX = 18.0;
 /** How far each zigzag strand strays from the true line, in pixels. */
-const ARC_AMP_PX = 5.0;
-/** Half-width of a zigzag strand's own bright core, in pixels — thinner
- *  than the tube's CORE_MIN_PX so the crackle reads as a thread of light
- *  laid over the tube, not a thickening of it. */
-const ARC_CORE_PX = 0.8;
+const ARC_AMP_PX = 10.0;
+/** Half-width of a zigzag strand's own bright core, in pixels — a bold
+ *  thread of light laid over the tube, wider than the tube's own floor. */
+const ARC_CORE_PX = 1.6;
 /** Half-width of a zigzag strand's halo, in pixels. */
-const ARC_HALO_PX = 4.0;
+const ARC_HALO_PX = 8.0;
+/** Overall brightness of the strike (strands, halo and the relit tube). */
+const ARC_GAIN = 3.0;
 /** Brightness of a zigzag strand's halo relative to its core. */
 const ARC_STRAND_HALO_GAIN = 0.5;
 /** How far the strike's core pushes toward white — stronger than the tube's
@@ -371,7 +372,7 @@ void main() {
   // clipped by the tube's own, smaller bounding quad.
   float arcLive = uLightning * exp(-uArcAge * ARC_DECAY);
   bool strikeLive = arcLive > ARC_LIVE_MIN;
-  if (strikeLive) margin += (ARC_AMP_PX + ARC_HALO_PX) * pxScale;
+  if (strikeLive) margin += (ARC_AMP_PX + ARC_HALO_PX * 3.0) * pxScale;
 
   // This object's delay before the current reaches it (nearest gates first,
   // rippling outward with depth) plus a small per-object jitter so gates at
@@ -435,6 +436,7 @@ const float ARC_HALO_PX = ${f(ARC_HALO_PX)};
 const float ARC_STRAND_HALO_GAIN = ${f(ARC_STRAND_HALO_GAIN)};
 const float ARC_WHITE_CORE = ${f(ARC_WHITE_CORE)};
 const float ARC_FLICKER_HZ = ${f(ARC_FLICKER_HZ)};
+const float ARC_GAIN = ${f(ARC_GAIN)};
 
 ${NOISE_HASH_GLSL}
 
@@ -548,7 +550,7 @@ void main() {
       // The trail also relights the tube itself (core, already normalized
       // above) in the strike's colour — the line it passed stays lit.
       + uArcColor * envelope * core;
-    col += arcGlow * vArc.z;
+    col += arcGlow * vArc.z * ARC_GAIN;
   }
 
   outColor = vec4(col, 1.0);
