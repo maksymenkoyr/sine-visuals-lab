@@ -1,0 +1,282 @@
+{
+ "scene": "crystal",
+ "bundle": "vjwall-1011",
+ "settings": null,
+ "offsets": [
+  -80,
+  0,
+  160
+ ],
+ "shots": [
+  {
+   "beat": 4,
+   "rank": 4,
+   "t": 2,
+   "offsetMs": -80,
+   "file": "b004_r04_-080.png",
+   "lagMs": 10,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 4,
+   "rank": 4,
+   "t": 2,
+   "offsetMs": 0,
+   "file": "b004_r04_+000.png",
+   "lagMs": 11,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 4,
+   "rank": 4,
+   "t": 2,
+   "offsetMs": 160,
+   "file": "b004_r04_+160.png",
+   "lagMs": 4,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 8,
+   "rank": 8,
+   "t": 4,
+   "offsetMs": -80,
+   "file": "b008_r08_-080.png",
+   "lagMs": 9,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 8,
+   "rank": 8,
+   "t": 4,
+   "offsetMs": 0,
+   "file": "b008_r08_+000.png",
+   "lagMs": 6,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 8,
+   "rank": 8,
+   "t": 4,
+   "offsetMs": 160,
+   "file": "b008_r08_+160.png",
+   "lagMs": 9,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 12,
+   "rank": 4,
+   "t": 6,
+   "offsetMs": -80,
+   "file": "b012_r04_-080.png",
+   "lagMs": 7,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 12,
+   "rank": 4,
+   "t": 6,
+   "offsetMs": 0,
+   "file": "b012_r04_+000.png",
+   "lagMs": 2,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 12,
+   "rank": 4,
+   "t": 6,
+   "offsetMs": 160,
+   "file": "b012_r04_+160.png",
+   "lagMs": 2,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": -80,
+   "file": "b016_r16_-080.png",
+   "lagMs": 11,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": 0,
+   "file": "b016_r16_+000.png",
+   "lagMs": 10,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": 160,
+   "file": "b016_r16_+160.png",
+   "lagMs": 4,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 20,
+   "rank": 4,
+   "t": 10,
+   "offsetMs": -80,
+   "file": "b020_r04_-080.png",
+   "lagMs": 10,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 20,
+   "rank": 4,
+   "t": 10,
+   "offsetMs": 0,
+   "file": "b020_r04_+000.png",
+   "lagMs": 11,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 20,
+   "rank": 4,
+   "t": 10,
+   "offsetMs": 160,
+   "file": "b020_r04_+160.png",
+   "lagMs": 5,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 24,
+   "rank": 8,
+   "t": 12,
+   "offsetMs": -80,
+   "file": "b024_r08_-080.png",
+   "lagMs": 4,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 24,
+   "rank": 8,
+   "t": 12,
+   "offsetMs": 0,
+   "file": "b024_r08_+000.png",
+   "lagMs": -5,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  },
+  {
+   "beat": 24,
+   "rank": 8,
+   "t": 12,
+   "offsetMs": 160,
+   "file": "b024_r08_+160.png",
+   "lagMs": 4,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "crystal"
+   },
+   "heard": null
+  }
+ ]
+}

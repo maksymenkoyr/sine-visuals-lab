@@ -1,0 +1,492 @@
+{
+ "scene": "moire",
+ "bundle": "moire-p2",
+ "settings": null,
+ "offsets": [
+  -80,
+  0,
+  160
+ ],
+ "shots": [
+  {
+   "beat": 7,
+   "rank": 8,
+   "t": 8.6378,
+   "offsetMs": -80,
+   "file": "b007_r08_-080.png",
+   "lagMs": 1,
+   "probe": {
+    "bpm": 171.96451139369668,
+    "phase": 0.28466286393719287,
+    "energy": 0.5104194426288208,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 161.16,
+    "energy": 0.564,
+    "section": 1
+   }
+  },
+  {
+   "beat": 7,
+   "rank": 8,
+   "t": 8.6378,
+   "offsetMs": 0,
+   "file": "b007_r08_+000.png",
+   "lagMs": -9,
+   "probe": {
+    "bpm": 172.1328495316839,
+    "phase": 0.4733336656581457,
+    "energy": 0.5832431763410568,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 161.16,
+    "energy": 0.564,
+    "section": 1
+   }
+  },
+  {
+   "beat": 7,
+   "rank": 8,
+   "t": 8.6378,
+   "offsetMs": 160,
+   "file": "b007_r08_+160.png",
+   "lagMs": -13,
+   "probe": {
+    "bpm": 172.1328495316839,
+    "phase": 0.9044289889117252,
+    "energy": 0.5146201327443123,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 161.16,
+    "energy": 0.564,
+    "section": 1
+   }
+  },
+  {
+   "beat": 11,
+   "rank": 4,
+   "t": 11.4242,
+   "offsetMs": -80,
+   "file": "b011_r04_-080.png",
+   "lagMs": 1,
+   "probe": {
+    "bpm": 172.35584290256935,
+    "phase": 0.3383196599835969,
+    "energy": 0.49363254484099645,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 162.45,
+    "energy": 0.546,
+    "section": 1
+   }
+  },
+  {
+   "beat": 11,
+   "rank": 4,
+   "t": 11.4242,
+   "offsetMs": 0,
+   "file": "b011_r04_+000.png",
+   "lagMs": -8,
+   "probe": {
+    "bpm": 172.35584290256935,
+    "phase": 0.5071709166922638,
+    "energy": 0.5676805240412554,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 162.45,
+    "energy": 0.546,
+    "section": 1
+   }
+  },
+  {
+   "beat": 11,
+   "rank": 4,
+   "t": 11.4242,
+   "offsetMs": 160,
+   "file": "b011_r04_+160.png",
+   "lagMs": -9,
+   "probe": {
+    "bpm": 172.303674415673,
+    "phase": 0.9807062415319443,
+    "energy": 0.5288060599317154,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 162.45,
+    "energy": 0.546,
+    "section": 1
+   }
+  },
+  {
+   "beat": 15,
+   "rank": 16,
+   "t": 14.2338,
+   "offsetMs": -80,
+   "file": "b015_r16_-080.png",
+   "lagMs": -9,
+   "probe": {
+    "bpm": 172.94942549349196,
+    "phase": 0.3652814223963503,
+    "energy": 0.43476816383190453,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 161.47,
+    "energy": 0.545,
+    "section": 0.987
+   }
+  },
+  {
+   "beat": 15,
+   "rank": 16,
+   "t": 14.2338,
+   "offsetMs": 0,
+   "file": "b015_r16_+000.png",
+   "lagMs": -10,
+   "probe": {
+    "bpm": 173.10783391421577,
+    "phase": 0.5841564134764141,
+    "energy": 0.5650146125505368,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 161.47,
+    "energy": 0.545,
+    "section": 0.987
+   }
+  },
+  {
+   "beat": 15,
+   "rank": 16,
+   "t": 14.2338,
+   "offsetMs": 160,
+   "file": "b015_r16_+160.png",
+   "lagMs": -12,
+   "probe": {
+    "bpm": 173.10783391421577,
+    "phase": 0.037623705168329025,
+    "energy": 0.5030654029299816,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 161.47,
+    "energy": 0.545,
+    "section": 0.987
+   }
+  },
+  {
+   "beat": 19,
+   "rank": 4,
+   "t": 16.997,
+   "offsetMs": -80,
+   "file": "b019_r04_-080.png",
+   "lagMs": -6,
+   "probe": {
+    "bpm": 171.65633897991378,
+    "phase": 0.2709132621460526,
+    "energy": 0.5087025687098503,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 162.5,
+    "energy": 0.509,
+    "section": 0.983
+   }
+  },
+  {
+   "beat": 19,
+   "rank": 4,
+   "t": 16.997,
+   "offsetMs": 0,
+   "file": "b019_r04_+000.png",
+   "lagMs": -13,
+   "probe": {
+    "bpm": 171.60408982488147,
+    "phase": 0.4620797684503728,
+    "energy": 0.5099307559430599,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 162.5,
+    "energy": 0.509,
+    "section": 0.983
+   }
+  },
+  {
+   "beat": 19,
+   "rank": 4,
+   "t": 16.997,
+   "offsetMs": 160,
+   "file": "b019_r04_+160.png",
+   "lagMs": -1,
+   "probe": {
+    "bpm": 171.4490885346377,
+    "phase": 0.986888964814149,
+    "energy": 0.5328656851003567,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 162.5,
+    "energy": 0.509,
+    "section": 0.983
+   }
+  },
+  {
+   "beat": 23,
+   "rank": 8,
+   "t": 19.8066,
+   "offsetMs": -80,
+   "file": "b023_r08_-080.png",
+   "lagMs": -11,
+   "probe": {
+    "bpm": 170.0405613747977,
+    "phase": 0.22651731838287503,
+    "energy": 0.5062395048638185,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 162.66,
+    "energy": 0.574,
+    "section": 0.999
+   }
+  },
+  {
+   "beat": 23,
+   "rank": 8,
+   "t": 19.8066,
+   "offsetMs": 0,
+   "file": "b023_r08_+000.png",
+   "lagMs": -16,
+   "probe": {
+    "bpm": 170.0405613747977,
+    "phase": 0.43913151751054613,
+    "energy": 0.5702346997956435,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 162.66,
+    "energy": 0.574,
+    "section": 0.999
+   }
+  },
+  {
+   "beat": 23,
+   "rank": 8,
+   "t": 19.8066,
+   "offsetMs": 160,
+   "file": "b023_r08_+160.png",
+   "lagMs": -7,
+   "probe": {
+    "bpm": 170.0405613747977,
+    "phase": 0.9326476944774527,
+    "energy": 0.5321368680646023,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 162.66,
+    "energy": 0.574,
+    "section": 0.999
+   }
+  },
+  {
+   "beat": 27,
+   "rank": 4,
+   "t": 22.593,
+   "offsetMs": -80,
+   "file": "b027_r04_-080.png",
+   "lagMs": -3,
+   "probe": {
+    "bpm": 155.76716282857308,
+    "phase": 0.2392346038253237,
+    "energy": 0.49456670818229514,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 150.94,
+    "energy": 0.552,
+    "section": 0.995
+   }
+  },
+  {
+   "beat": 27,
+   "rank": 4,
+   "t": 22.593,
+   "offsetMs": 0,
+   "file": "b027_r04_+000.png",
+   "lagMs": -15,
+   "probe": {
+    "bpm": 155.5557364412654,
+    "phase": 0.4017477227760011,
+    "energy": 0.5602415582786003,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 150.94,
+    "energy": 0.552,
+    "section": 0.995
+   }
+  },
+  {
+   "beat": 27,
+   "rank": 4,
+   "t": 22.593,
+   "offsetMs": 160,
+   "file": "b027_r04_+160.png",
+   "lagMs": -10,
+   "probe": {
+    "bpm": 155.34720071677685,
+    "phase": 0.8923159121772741,
+    "energy": 0.5417156741023064,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 150.94,
+    "energy": 0.552,
+    "section": 0.995
+   }
+  },
+  {
+   "beat": 31,
+   "rank": 16,
+   "t": 25.2169,
+   "offsetMs": -80,
+   "file": "b031_r16_-080.png",
+   "lagMs": -4,
+   "probe": {
+    "bpm": 154.19384260126023,
+    "phase": 0.10958639688234939,
+    "energy": 0.5255040364960829,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 150.32,
+    "energy": 0.549,
+    "section": 0.999
+   }
+  },
+  {
+   "beat": 31,
+   "rank": 16,
+   "t": 25.2169,
+   "offsetMs": 0,
+   "file": "b031_r16_+000.png",
+   "lagMs": -16,
+   "probe": {
+    "bpm": 154.1981051994026,
+    "phase": 0.24919997594473386,
+    "energy": 0.5589359949032465,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 150.32,
+    "energy": 0.549,
+    "section": 0.999
+   }
+  },
+  {
+   "beat": 31,
+   "rank": 16,
+   "t": 25.2169,
+   "offsetMs": 160,
+   "file": "b031_r16_+160.png",
+   "lagMs": -13,
+   "probe": {
+    "bpm": 154.1981051994026,
+    "phase": 0.6757599830787768,
+    "energy": 0.5618251437942187,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": false,
+    "bpm": 150.32,
+    "energy": 0.549,
+    "section": 0.999
+   }
+  },
+  {
+   "beat": 35,
+   "rank": 4,
+   "t": 28.0265,
+   "offsetMs": -80,
+   "file": "b035_r04_-080.png",
+   "lagMs": -5,
+   "probe": {
+    "bpm": 155.41593660734063,
+    "phase": 0.3554778325437553,
+    "energy": 0.5358092151582241,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 150.42,
+    "energy": 0.588,
+    "section": 1
+   }
+  },
+  {
+   "beat": 35,
+   "rank": 4,
+   "t": 28.0265,
+   "offsetMs": 0,
+   "file": "b035_r04_+000.png",
+   "lagMs": -15,
+   "probe": {
+    "bpm": 155.56729409134905,
+    "phase": 0.5279180744917795,
+    "energy": 0.5836246957381567,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 150.42,
+    "energy": 0.588,
+    "section": 1
+   }
+  },
+  {
+   "beat": 35,
+   "rank": 4,
+   "t": 28.0265,
+   "offsetMs": 160,
+   "file": "b035_r04_+160.png",
+   "lagMs": -14,
+   "probe": {
+    "bpm": 155.86535606769604,
+    "phase": 0.9911961536840721,
+    "energy": 0.5482383333146572,
+    "scene": "moire"
+   },
+   "heard": {
+    "onset": true,
+    "bpm": 150.42,
+    "energy": 0.588,
+    "section": 1
+   }
+  }
+ ]
+}

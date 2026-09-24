@@ -139,6 +139,11 @@ bloom itself is skipped entirely (no offscreen chain at all) once
   source per setting instead of the current fixed `reads` chips. Revisit
   once #127/#130 land.
 
+## Materials
+
+- `slats/qtPi0JvmWbs/` — measurements kept from the `/ref` bundle `qtPi0JvmWbs`: report, data, and our own shots.
+The reference media for these bundles (video, frames, audio, the images built from them) stays out of this repo: in the local `tools/.cache/refs/<bundle>/` cache and the private archive (`tools/ref-archive.py`).
+
 ## Resume here
 
 - `npm run dev`, then `/?audio=synthetic&bpm=120#/v/slats` (query before the

@@ -124,6 +124,12 @@ original work built around that data.
   idea, not agreed as committed work.
 - Still a draft scene (`DRAFT_SCENE_IDS`), not yet promoted to featured.
 
+## Materials
+
+- Artifact: [Dancing Figures Decision Guide](https://claude.ai/artifact/82iRWoHJybg3nfxMp8M7H8). Source saved as `dancers/artifacts/dancing-figures-decision-guide.html`.
+- Artifact: [Dancer Lab](https://claude.ai/artifact/BZwSRAM3ABZazqVQkXMYS3). Source saved as `dancers/artifacts/dancer-lab.html`.
+- The motion-capture clips are in the code itself (`clips.bin`), credited in `THIRD-PARTY-NOTICES.md`.
+
 ## Resume here
 
 - `npm run dev`, then open the Dancers scene directly, e.g.

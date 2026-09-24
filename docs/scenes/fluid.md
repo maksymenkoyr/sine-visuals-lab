@@ -149,6 +149,10 @@ mirror mode's plume rolls into one large spiral near the emitter rather than
 crossing the full screen width, even after the v3 push-scale tuning aimed at
 that geometry. A further real-music tuning pass is open.
 
+## Materials
+
+- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+
 ## Resume here
 
 `npm run dev`, then `/?audio=synthetic&bpm=120#/v/fluid`. When sweeping a

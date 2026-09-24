@@ -1,0 +1,232 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style></head><body>
+<title>Dancing Figures Decision Guide</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Manrope:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #f3efe6; --surface: #faf7f0; --surface-2: #ece6d8; --line: #d9d1c0;
+    --text: #1f1a2b; --muted: #6b6380; --accent: #c8206f; --accent-soft: #f6dbe8;
+    --cyan: #0b7fa3; --ok: #2f8f5b; --warn: #b8760f; --hot: #c9402f;
+    --display: "Syne", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+    --body: "Manrope", "Avenir Next", "Segoe UI", Arial, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #120f1a; --surface: #1d1829; --surface-2: #26203a; --line: #342c4b;
+      --text: #efe6d2; --muted: #9a91b0; --accent: #ff4fa3; --accent-soft: #35203a;
+      --cyan: #4fd9ff; --ok: #7fd6a4; --warn: #ffc46b; --hot: #ff7a6b;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #120f1a; --surface: #1d1829; --surface-2: #26203a; --line: #342c4b;
+    --text: #efe6d2; --muted: #9a91b0; --accent: #ff4fa3; --accent-soft: #35203a;
+    --cyan: #4fd9ff; --ok: #7fd6a4; --warn: #ffc46b; --hot: #ff7a6b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--body); font-size: 16px; line-height: 1.55; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 40px 22px 80px; }
+  h1 { font-family: var(--display); font-weight: 800; font-size: 38px; line-height: 1.1; letter-spacing: -0.015em; margin: 0 0 10px; text-wrap: balance; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { font-size: 18px; color: var(--muted); max-width: 62ch; margin: 0 0 36px; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 22px; margin: 48px 0 6px; letter-spacing: -0.01em; text-wrap: balance; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: .1em; text-transform: uppercase; margin: 0; }
+  p { max-width: 68ch; }
+  code { font-family: var(--mono); font-size: 13.5px; color: var(--cyan); background: var(--surface-2); padding: 1px 5px; border-radius: 3px; }
+  /* pipeline diagram */
+  .pipe { display: flex; align-items: stretch; gap: 0; margin: 20px 0 8px; overflow-x: auto; padding-bottom: 6px; }
+  .pipe .node { flex: 1 1 0; min-width: 150px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; position: relative; }
+  .pipe .node + .node { margin-left: 22px; }
+  .pipe .node + .node::before { content: "→"; position: absolute; left: -19px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 16px; }
+  .pipe .node h3 { font-family: var(--display); font-size: 14px; margin: 0 0 4px; }
+  .pipe .node .where { font-family: var(--mono); font-size: 11.5px; color: var(--accent); margin-bottom: 6px; }
+  .pipe .node p { font-size: 13.5px; color: var(--muted); margin: 0; }
+  .pipe .node.ts { border-top: 3px solid var(--cyan); }
+  .pipe .node.gl { border-top: 3px solid var(--accent); }
+  .legend { font-size: 13px; color: var(--muted); display: flex; gap: 18px; margin-bottom: 8px; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .legend .ts::before { background: var(--cyan); } .legend .gl::before { background: var(--accent); }
+  /* option cards */
+  .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 16px 0 10px; }
+  .opt { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 16px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .opt.rec { border-color: var(--accent); background: linear-gradient(var(--surface), var(--surface)) padding-box; box-shadow: inset 0 0 0 1px var(--accent); }
+  .opt h3 { font-family: var(--display); font-size: 16px; margin: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .opt .pill { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+  .opt p { font-size: 14px; margin: 0; color: var(--text); }
+  .opt ul { margin: 0; padding-left: 18px; font-size: 13.5px; color: var(--muted); }
+  .opt ul li { margin: 2px 0; }
+  .opt .cost { font-family: var(--mono); font-size: 12px; margin-top: auto; padding-top: 6px; border-top: 1px dashed var(--line); }
+  .cost.low { color: var(--ok); } .cost.med { color: var(--warn); } .cost.high { color: var(--hot); }
+  .verdict { background: var(--accent-soft); border-left: 3px solid var(--accent); padding: 10px 14px; border-radius: 4px; font-size: 15px; max-width: none; }
+  .verdict b { font-family: var(--display); }
+  /* settings table */
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 14px 0; }
+  .tbl { overflow-x: auto; }
+  th { text-align: left; font-family: var(--display); font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { font-family: var(--mono); font-size: 13px; color: var(--cyan); white-space: nowrap; }
+  .risk { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; font-size: 14.5px; margin: 14px 0; }
+  .risk dt { color: var(--hot); font-family: var(--display); font-size: 14px; }
+  .risk dd { margin: 0; max-width: 70ch; }
+  ol.path { padding-left: 22px; max-width: 70ch; }
+  ol.path li { margin: 8px 0; }
+  ol.path b { font-family: var(--display); font-weight: 700; }
+  .foot { margin-top: 40px; font-size: 13.5px; color: var(--muted); max-width: 70ch; }
+  @media (max-width: 640px) { .risk { grid-template-columns: 1fr; } }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">New scene · proposal</p>
+  <h1>Dancing figures with <em>swappable skins</em></h1>
+  <p class="lede">Three decisions shape the scene; everything else follows from them. Each section lays out the options, what they cost, and how they land in the existing scene infrastructure. Pair this with the Dancer Lab page to see the options move.</p>
+
+  <p class="eyebrow">The shape of the scene</p>
+  <h2>A rig in TypeScript, a skin in GLSL</h2>
+  <p>The "skeleton you can re-skin" idea maps onto a clean split. The <b>rig</b> is a joint hierarchy plus a choreography that turns the music clocks into joint positions — pure TypeScript, unit-testable like the geometry builders in <code>meshGrid.ts</code>. The <b>skin</b> is a GLSL function that draws a bone given its two endpoints. Skeleton, stick figure, neon, blob are all skins over the same rig; neither side knows about the other beyond the joint list.</p>
+  <div class="legend"><span class="ts">TypeScript, per frame</span><span class="gl">GLSL, per pixel</span></div>
+  <div class="pipe">
+    <div class="node ts"><h3>Music clocks</h3><div class="where">anim: AnimFrame</div><p><code>beatPhase</code>, <code>barPhase</code>, <code>tempoLock</code>, <code>lowPulse</code>, <code>sectionIntensity</code>, <code>dropPulse</code>, <code>profile</code> — all already computed by <code>animClock.ts</code>.</p></div>
+    <div class="node ts"><h3>Choreography</h3><div class="where">scenes/dancers/moves.ts</div><p>Picks and blends moves; each move is <code>(clocks) → Pose</code> (joint angles). Per-dancer phase offsets for a crowd.</p></div>
+    <div class="node ts"><h3>Rig solve</h3><div class="where">scenes/dancers/rig.ts</div><p>Forward kinematics: Pose → joint positions, packed into one <code>Float32Array</code> for all dancers.</p></div>
+    <div class="node gl"><h3>Upload</h3><div class="where">extraUniforms</div><p>The array goes up as <code>uniform vec2 uJoints[N]</code> via the <code>extraUniforms</code> hook — the same path <code>caustics.ts</code> uses for its ripple pool.</p></div>
+    <div class="node gl"><h3>Skin</h3><div class="where">fragment shader</div><p>Per pixel: distance to each bone capsule, then <code>skin(bone, d)</code> colours it. <code>uSkin</code> selects the skin function.</p></div>
+  </div>
+  <p>Nothing in this chain needs a new GL path, instancing, textures, or asset loading — none of which exist in the codebase today. It reuses <code>createFullscreenScene</code> end to end.</p>
+
+  <p class="eyebrow">Decision 1</p>
+  <h2>Look — how the dancers occupy the screen</h2>
+  <div class="opts">
+    <div class="opt rec">
+      <h3>Flat 2D cutouts <span class="pill">recommended start</span></h3>
+      <p>Screen-space capsule bones, no lighting. Reads as a cartoon / paper-cutout skeleton.</p>
+      <ul>
+        <li>Stylised look forgives procedural stiffness</li>
+        <li>Cheap enough for the gallery's always-on preview tiles at reduced <code>detail</code></li>
+        <li>Runs on every quality preset — no <code>minQuality</code></li>
+      </ul>
+      <div class="cost low">cost: one fullscreen pass, N×bones distance tests per pixel</div>
+    </div>
+    <div class="opt">
+      <h3>2.5D stage rows <span class="pill">cheap upgrade</span></h3>
+      <p>Same 2D bones plus a per-dancer depth: scale, dimming, draw order, a perspective floor and a spotlight.</p>
+      <ul>
+        <li>Turns a line of dancers into a stage — hero in front, crowd behind</li>
+        <li>Almost no extra cost over flat; can be a setting (<code>stageDepth</code>) rather than a fork</li>
+        <li>Depth cue makes the crowd read even when small</li>
+      </ul>
+      <div class="cost low">cost: flat + a few lines of shader</div>
+    </div>
+    <div class="opt">
+      <h3>3D shaded figures <span class="pill">later, if ever</span></h3>
+      <p>Raymarched 3D capsules with lighting and self-occlusion, like <code>ferrofluid.ts</code>'s sphere-trace loop.</p>
+      <ul>
+        <li>Real turns, foreshortening, ground shadows</li>
+        <li>Per-pixel cost scales with dancers × bones × march steps — realistically one or two figures</li>
+        <li>Would need <code>minQuality: "mid"</code> and heavy gating on <code>uMaxSteps</code></li>
+      </ul>
+      <div class="cost high">cost: ferrofluid-class raymarch per figure</div>
+    </div>
+  </div>
+  <p class="verdict"><b>Recommendation:</b> ship flat 2D with the depth cues from 2.5D behind a setting. The rig is identical in all three, so a 3D skin path could be added later without touching the choreography — but it is a separate project.</p>
+
+  <p class="eyebrow">Decision 2</p>
+  <h2>Cast — one dancer or a floor full</h2>
+  <div class="opts">
+    <div class="opt rec">
+      <h3>Hero + backing crowd <span class="pill">recommended</span></h3>
+      <p>One large lead dancer doing the featured moves; a row of smaller dancers doing simpler moves, phase-offset so they don't march in step.</p>
+      <ul>
+        <li>The hero carries the music-reaction; the crowd carries the energy</li>
+        <li>Crowd size follows <code>ctx.quality.detail</code> (the <code>gridSizeForQuality</code> pattern)</li>
+        <li>Natural home for a <code>crowd</code> setting with an <code>auto</code> weight on the <code>density</code> dial</li>
+      </ul>
+      <div class="cost low">cost: (1 + crowd) rigs, one shader pass</div>
+    </div>
+    <div class="opt">
+      <h3>Single dancer</h3>
+      <p>One centred figure; all detail budget goes to choreography and skin.</p>
+      <ul>
+        <li>Simplest first milestone — the hero of the option above is this</li>
+        <li>Can feel sparse on a TV at low intensity</li>
+      </ul>
+      <div class="cost low">cost: one rig</div>
+    </div>
+    <div class="opt">
+      <h3>Crowd only</h3>
+      <p>Many equal dancers; variety from offsets and per-dancer move choice.</p>
+      <ul>
+        <li>Great as a wall-of-motion at high intensity</li>
+        <li>No focal point for the beat — the eye doesn't know where to look</li>
+      </ul>
+      <div class="cost low">cost: N rigs</div>
+    </div>
+  </div>
+  <p class="verdict"><b>Recommendation:</b> build single-dancer first as the milestone, then add the crowd. Hero + crowd is the shipped default; "crowd size 0" gives single, "hero off" gives crowd-only, so all three are one scene.</p>
+
+  <p class="eyebrow">Decision 3</p>
+  <h2>Choreography — where the dancing comes from</h2>
+  <p>Both options are fully procedural. Baked animation clips (Mixamo-style) would need an asset pipeline that doesn't exist and sit badly with the "write it as independent work" rule, so they are off the table for now.</p>
+  <div class="opts">
+    <div class="opt rec">
+      <h3>Move library + picker <span class="pill">recommended</span></h3>
+      <p>A handful of hand-authored moves, each a pure function of the bar/beat clocks. A picker escalates through them on <code>sectionIntensity</code> and crossfades; <code>dropPulse</code> overrides with a hands-in-the-air pose; <code>tempoLock</code> falling out returns to a free sway.</p>
+      <ul>
+        <li>The dance changes over a track: build, drop, breakdown all look different</li>
+        <li>Moves are unit-testable (feet on the floor, no joint through the body)</li>
+        <li>Adding a move is adding a function — the natural growth path</li>
+      </ul>
+      <div class="cost med">effort: a few days of choreography tuning</div>
+    </div>
+    <div class="opt">
+      <h3>Single layered oscillator</h3>
+      <p>One pose built from stacked layers: bounce on <code>beatPulse</code>, sway on <code>barPhase</code>, arm height on intensity.</p>
+      <ul>
+        <li>Ships in an afternoon; every layer is a slider</li>
+        <li>Every track produces the same dance at a different amplitude — wears thin fast</li>
+        <li>Useful as the crowd's move set even under the library option</li>
+      </ul>
+      <div class="cost low">effort: hours</div>
+    </div>
+  </div>
+  <p class="verdict"><b>Recommendation:</b> library for the hero, oscillator-style simple moves for the crowd. The library's lowest rung <i>is</i> the oscillator, so this isn't really either/or.</p>
+
+  <p class="eyebrow">Skins</p>
+  <h2>What "skin" means, and the one UI gap</h2>
+  <p>A skin is a GLSL function over the rig. The first set is procedural and needs no assets: <b>skeleton</b> (ivory capsules, skull, ribs, pelvis), <b>stick figure</b> (the reference skin — if a move looks wrong here, blame the rig), <b>neon tube</b> (glow falloff in the palette's accent, the most at home next to the existing scenes), and <b>blob buddy</b> (fat capsules with smooth-min joints, eyes). "Other characters" later means either richer procedural skins or, if they need artwork, a texture-loading path — new infrastructure, kept as its own step.</p>
+  <p>The one thing the settings system can't express today is a picker: <code>SceneSetting.type</code> only knows <code>"boolean"</code>. Skin selection needs a small <code>type: "enum"</code> with an <code>options</code> list, touching <code>sceneSettings.ts</code>, <code>deviceMenu.ts</code>'s setting row, and the protocol's value clamp. It stays a float uniform underneath (<code>uSkin</code>), so nothing else changes. The interim is an integer slider, which works but reads as "Skin: 2".</p>
+
+  <p class="eyebrow">Proposed settings</p>
+  <h2>What would show up in the device menu</h2>
+  <div class="tbl"><table>
+    <tr><th>key</th><th>what it does</th><th>auto-tuned by</th></tr>
+    <tr><td>skin</td><td>Which skin draws the rig (enum)</td><td>never — manual only</td></tr>
+    <tr><td>energy</td><td>Amplitude of every move: bounce height, arm swing, step width</td><td><code>loudness</code>, <code>dynamics</code></td></tr>
+    <tr><td>groove</td><td>Bias in the move picker: how early it climbs to the big moves</td><td><code>pulse</code>, <code>attack</code></td></tr>
+    <tr><td>crowd</td><td>Number of backing dancers (0 = hero alone), capped by quality</td><td><code>density</code></td></tr>
+    <tr><td>stageDepth</td><td>How far back the crowd sits; 0 = flat line-up</td><td>—</td></tr>
+    <tr><td>glow</td><td>Light bloom around bones (skin-dependent)</td><td><code>brightness</code></td></tr>
+  </table></div>
+  <p>Every weighted setting must reproduce its plain default with all dials at neutral — the invariant from <code>docs/adding-a-scene.md</code>. The specific keys and weights above are a starting proposal, not a commitment.</p>
+
+  <p class="eyebrow">Risks</p>
+  <h2>What could make it look bad</h2>
+  <dl class="risk">
+    <dt>Stiffness</dt><dd>Procedural dance reads as robotic if poses are pure sines. Mitigations: ease curves per joint, a small per-dancer noise layer on top of the move, and the skeleton skin as the launch skin — jerky is on-brand there.</dd>
+    <dt>Beat loss</dt><dd>When <code>tempoLock</code> drops, a dancer stepping to a stale beat looks broken in a way a shader ripple doesn't. The picker must fade to a free sway driven by <code>flowPhase</code>, not freeze or keep stepping.</dd>
+    <dt>Preview tiles</dt><dd>The gallery renders every scene continuously at reduced detail. A crowd of 8 with 12 bones each is ~100 distance tests per pixel — fine on flat 2D, not on raymarched 3D. Crowd size must respond to <code>detail</code>.</dd>
+    <dt>Panorama</dt><dd>Multi-device Panorama slices the room; a dancer straddling a slice boundary must be positioned in room space via <code>roomUv()</code>, not per-device screen space, or the two halves won't line up.</dd>
+  </dl>
+
+  <p class="eyebrow">Suggested path</p>
+  <h2>Milestones</h2>
+  <ol class="path">
+    <li><b>Rig + stick skin, one dancer, oscillator move.</b> Proves the upload path and the FK. Registered as a draft scene.</li>
+    <li><b>Move library and picker.</b> Sway, step, bounce, hands-up, drop; tuned with <code>?audio=synthetic&amp;bpm=</code> at slow, house and fast tempos.</li>
+    <li><b>Skeleton skin + enum setting.</b> The skeleton is the launch look; the enum setting lands alongside it.</li>
+    <li><b>Crowd + stage depth.</b> Quality-scaled crowd, 2.5D cues, auto weights for the settings above.</li>
+    <li><b>More skins.</b> Neon, blob; then decide whether character artwork justifies an asset pipeline.</li>
+  </ol>
+
+  <p class="foot">Nothing has been built yet — this is the plan behind the Dancer Lab sketch. The lab's rig, move list and skins are the same ones proposed here, so what you see there is a faithful preview of what milestones 1–3 would produce.</p>
+</div>
+
+</body></html>

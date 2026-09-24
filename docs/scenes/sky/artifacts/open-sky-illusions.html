@@ -1,0 +1,596 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Open Sky Illusions</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:#0a0e14;
+    --surface:#121a24;
+    --surface-2:#0c131b;
+    --border:#22314a;
+    --border-soft:#1a2536;
+    --text:#e8edf5;
+    --text-dim:#8ea0b8;
+    --text-faint:#5c6f88;
+    --accent:#5ec8f2;
+    --accent-dim:#3f9bd4;
+    --accent-bg:rgba(94,200,242,0.12);
+    --warm:#ffcf9e;
+  }
+  *{box-sizing:border-box;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Sans', system-ui, sans-serif;
+    padding-inline: max(16px, calc((100% - 1040px)/2));
+    padding-block: 40px 64px;
+  }
+  h1,h2,h3{font-family:'Fraunces', 'IBM Plex Sans', serif; margin:0; text-wrap: balance;}
+  p{margin:0;}
+  a{color:var(--accent);}
+  .mono{font-family:'IBM Plex Mono', ui-monospace, monospace;}
+
+  .page-head{max-width:720px; margin-bottom:36px; display:flex; flex-direction:column; gap:10px;}
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:0.09em; text-transform:uppercase;
+    color:var(--accent-dim);
+  }
+  .page-head h1{font-size:clamp(28px, 4vw, 40px); font-weight:600; color:var(--text);}
+  .lede{color:var(--text-dim); font-size:15.5px; line-height:1.55; max-width:60ch;}
+
+  .grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap:18px;
+    margin-bottom:40px;
+  }
+  .card{
+    background:var(--surface);
+    border:1px solid var(--border-soft);
+    border-radius:12px;
+    overflow:hidden;
+    display:flex; flex-direction:column;
+  }
+  .card.excluded{border-style:dashed; border-color:var(--border); opacity:0.82;}
+  .card-canvas{position:relative; width:100%; aspect-ratio:4/3; background:var(--surface-2);}
+  .card-canvas canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
+  .card-body{padding:14px 16px 16px; display:flex; flex-direction:column; gap:8px;}
+  .card-top{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}
+  .card-top h3{font-size:16.5px; font-weight:600; line-height:1.25;}
+  .tag{
+    font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.03em;
+    color:var(--accent-dim); background:var(--accent-bg); border:1px solid rgba(94,200,242,0.25);
+    display:inline-block; padding:3px 8px; border-radius:999px; width:fit-content;
+  }
+  .excl-tag{
+    font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.03em;
+    color:var(--text-faint); border:1px solid var(--border); display:inline-block;
+    padding:3px 8px; border-radius:999px; width:fit-content;
+  }
+  .desc{color:var(--text-dim); font-size:13.5px; line-height:1.5;}
+  .note{color:var(--text-faint); font-size:12px; line-height:1.5; font-style:italic;}
+
+  .switch{position:relative; width:38px; height:22px; flex:none; margin-top:2px;}
+  .switch input{position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; z-index:1;}
+  .switch .track{
+    position:absolute; inset:0; background:var(--surface-2); border:1px solid var(--border);
+    border-radius:999px; transition:background .15s, border-color .15s;
+  }
+  .switch .thumb{
+    position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%;
+    background:var(--text-faint); transition:transform .15s, background .15s;
+  }
+  .switch input:checked + .track{background:var(--accent-bg); border-color:var(--accent-dim);}
+  .switch input:checked + .track .thumb{transform:translateX(16px); background:var(--accent);}
+  .switch input:focus-visible + .track{outline:2px solid var(--accent); outline-offset:2px;}
+
+  .combined{
+    background:var(--surface); border:1px solid var(--border-soft); border-radius:14px;
+    padding:20px; display:flex; flex-direction:column; gap:14px;
+  }
+  .combined-head{display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap;}
+  .combined-head h2{font-size:19px; font-weight:600;}
+  .combined-canvas-wrap{width:100%; aspect-ratio:16/7; border-radius:10px; overflow:hidden; background:var(--surface-2);}
+  .combined-canvas-wrap canvas{width:100%; height:100%; display:block;}
+  .copy-btn{
+    font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--text);
+    background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+    padding:8px 14px; cursor:pointer; transition:border-color .15s, color .15s;
+  }
+  .copy-btn:hover{border-color:var(--accent-dim); color:var(--accent);}
+  .copy-btn:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+  .picks-line{color:var(--text-dim); font-size:13.5px; line-height:1.5;}
+
+  .foot{margin-top:32px; font-size:13px;}
+  .foot a{color:var(--text-dim); text-decoration:underline; text-decoration-color:var(--border);}
+  .foot a:hover{color:var(--accent);}
+
+  @media (prefers-reduced-motion: reduce){
+    .switch *, .card, .copy-btn{transition:none !important;}
+  }
+</style>
+
+<header class="page-head">
+  <p class="eyebrow">Sky scene &middot; illusion picks</p>
+  <h1>Open Sky Illusions</h1>
+  <p class="lede">Seven candidate atmospheric illusions for the sky scene, each running live against the kind of sky it would sit in. Toggle the ones you want in the first cut, then check the combined preview at the bottom.</p>
+</header>
+
+<section class="grid" id="grid"></section>
+
+<article class="card excluded">
+  <div class="card-canvas"><canvas id="card-pareidolia" aria-label="Pareidolia preview"></canvas></div>
+  <div class="card-body">
+    <div class="card-top">
+      <h3>Pareidolia (faces in clouds)</h3>
+    </div>
+    <p class="excl-tag">not offered for v1</p>
+    <p class="desc">The obvious one people will ask for. Left out of the first cut: nudging the fluid toward a hidden silhouette is a separate project, and it rarely looks intentional rather than accidental.</p>
+  </div>
+</article>
+
+<section class="combined">
+  <div class="combined-head">
+    <h2>Combined preview</h2>
+    <button class="copy-btn" id="copyBtn" type="button">Copy picks</button>
+  </div>
+  <div class="combined-canvas-wrap"><canvas id="combinedCanvas" aria-label="Combined sky preview"></canvas></div>
+  <p class="picks-line" id="picksLine"></p>
+</section>
+
+<footer class="foot">
+  <a href="https://claude.ai/artifact/C84CxowAYRsqzzzQWbaQsA" target="_blank" rel="noopener">Full write-up: Sky Scene, Realistic Gas Cloud with Optical Illusions &rarr;</a>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  function rand(n){ const s = Math.sin(n*12.9898)*43758.5453; return s - Math.floor(s); }
+  function hashSeed(str){
+    let h = 0;
+    for(let i=0;i<str.length;i++){ h = (h*31 + str.charCodeAt(i)) | 0; }
+    return (Math.abs(h) % 1000) + 1;
+  }
+  function wrapX(x, w){ const m = w*0.35; return ((x + m) % (w + 2*m) + (w + 2*m)) % (w + 2*m) - m; }
+
+  function makeClouds(w, h, seed, count){
+    const arr = [];
+    for(let i=0;i<count;i++){
+      const s = seed + i*17;
+      arr.push({
+        x0: rand(s*1.7)*w,
+        y0: h*(0.12 + rand(s*2.3)*0.55),
+        r: h*(0.26 + rand(s*3.1)*0.34),
+        speedRel: 0.6 + rand(s*4.3)*0.9,
+        phase: rand(s*5.7)*Math.PI*2,
+        a: 0.5 + rand(s*6.1)*0.32
+      });
+    }
+    return arr;
+  }
+
+  function drawSky(ctx, w, h, t, wind){
+    const g = ctx.createLinearGradient(0,0,0,h);
+    g.addColorStop(0, '#175c93');
+    g.addColorStop(0.55, '#3d97cf');
+    g.addColorStop(1, '#a7d6ef');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,w,h);
+
+    const canvas = ctx.canvas;
+    if(!canvas._clouds || canvas._cloudW !== w || canvas._cloudH !== h){
+      canvas._clouds = makeClouds(w, h, hashSeed(canvas.id || 'sky'), 5);
+      canvas._cloudW = w; canvas._cloudH = h;
+    }
+    const clouds = canvas._clouds;
+
+    let driftBase;
+    if(wind && wind.reverseEvery){
+      const period = wind.reverseEvery*2;
+      const x = (t % period)/period;
+      const tri = x < 0.5 ? x*2 : 2 - x*2;
+      driftBase = tri * w * 1.3 * (wind.speedMul || 1);
+    } else {
+      driftBase = t * 9 * (wind && wind.speedMul ? wind.speedMul : 1);
+    }
+
+    ctx.globalCompositeOperation = 'lighter';
+    for(let i=0;i<clouds.length;i++){
+      const b = clouds[i];
+      const x = wrapX(b.x0 + driftBase*b.speedRel, w);
+      const y = b.y0 + Math.sin(t*0.18 + b.phase)*6;
+      const rg = ctx.createRadialGradient(x,y,0,x,y,b.r);
+      rg.addColorStop(0, 'rgba(255,255,255,'+(b.a*0.95)+')');
+      rg.addColorStop(0.55, 'rgba(255,255,255,'+(b.a*0.38)+')');
+      rg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath();
+      ctx.ellipse(x, y, b.r, b.r*0.5, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function drawFlatBlue(ctx, w, h){
+    const g = ctx.createRadialGradient(w*0.5, h*0.38, 0, w*0.5, h*0.38, Math.max(w,h)*0.8);
+    g.addColorStop(0, '#2f8fce');
+    g.addColorStop(1, '#133f66');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,w,h);
+  }
+
+  function drawBlack(ctx, w, h){
+    const g = ctx.createRadialGradient(w*0.5, h*0.5, 0, w*0.5, h*0.5, Math.max(w,h)*0.8);
+    g.addColorStop(0, '#0d1218');
+    g.addColorStop(1, '#020304');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,w,h);
+  }
+
+  function overlayBlueField(ctx, w, h, t){
+    const N = 11;
+    for(let i=0;i<N;i++){
+      const cyc = 1.5 + (i % 4)*0.35;
+      const off = i*0.71;
+      const raw = ((t + off) % cyc)/cyc;
+      const active = 0.82;
+      if(raw > active) continue;
+      const p = raw/active;
+      const seed = i*97.13;
+      const sx = w*(0.14 + 0.72*rand(seed));
+      const sy = h*(0.14 + 0.72*rand(seed+3));
+      const ang = rand(seed+5)*Math.PI*2;
+      const len = h*(0.16 + 0.14*rand(seed+7));
+      const curl = (rand(seed+9) - 0.5)*1.4;
+      const mx = sx + Math.cos(ang)*len*0.5 + Math.cos(ang+Math.PI/2)*len*curl*0.5;
+      const my = sy + Math.sin(ang)*len*0.5 + Math.sin(ang+Math.PI/2)*len*curl*0.5;
+      const ex = sx + Math.cos(ang)*len;
+      const ey = sy + Math.sin(ang)*len;
+      const bx = (1-p)*(1-p)*sx + 2*(1-p)*p*mx + p*p*ex;
+      const by = (1-p)*(1-p)*sy + 2*(1-p)*p*my + p*p*ey;
+      const op = Math.sin(Math.PI*p);
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(255,255,255,'+(0.92*op)+')';
+      ctx.shadowColor = 'rgba(225,248,255,0.9)';
+      ctx.shadowBlur = 6;
+      ctx.arc(bx, by, 1.7, 0, Math.PI*2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  function overlayTroxler(ctx, w, h, t){
+    const cyc = 5.2;
+    const phase = (t % cyc)/cyc;
+    const amt = phase*phase;
+    const cx = w/2, cy = h/2;
+    const rg = ctx.createRadialGradient(cx, cy, h*0.16, cx, cy, h*0.64);
+    rg.addColorStop(0, 'rgba(61,151,207,0)');
+    rg.addColorStop(1, 'rgba(61,151,207,'+(amt*0.88)+')');
+    ctx.fillStyle = rg;
+    ctx.fillRect(0,0,w,h);
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx-6, cy); ctx.lineTo(cx+6, cy);
+    ctx.moveTo(cx, cy-6); ctx.lineTo(cx, cy+6);
+    ctx.stroke();
+  }
+
+  function overlayAfterimage(ctx, w, h, t){
+    const cyc = 3.3;
+    const phase = (t % cyc)/cyc;
+    const fx = w*0.5, fy = h*0.36;
+    if(phase < 0.14){
+      const p = phase/0.14;
+      const op = 1-p;
+      const rg = ctx.createRadialGradient(fx, fy, 0, fx, fy, h*0.22);
+      rg.addColorStop(0, 'rgba(255,244,214,'+(0.95*op)+')');
+      rg.addColorStop(1, 'rgba(255,244,214,0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(fx, fy, h*0.22, 0, Math.PI*2); ctx.fill();
+    } else {
+      const p = (phase - 0.14)/0.86;
+      const dx = fx + p*w*0.22, dy = fy + p*h*0.2;
+      const op = (1-p)*0.6;
+      const rg = ctx.createRadialGradient(dx, dy, 0, dx, dy, h*0.2);
+      rg.addColorStop(0, 'rgba(126,94,255,'+op+')');
+      rg.addColorStop(1, 'rgba(126,94,255,0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(dx, dy, h*0.2, 0, Math.PI*2); ctx.fill();
+    }
+  }
+
+  function overlayVection(ctx, w, h, t){
+    const x = w*0.5, y = h*0.42;
+    ctx.fillStyle = 'rgba(15,22,30,0.88)';
+    ctx.beginPath();
+    ctx.moveTo(x-8, y);
+    ctx.lineTo(x, y-3.5);
+    ctx.lineTo(x+8, y);
+    ctx.lineTo(x, y+2);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function overlayFloaters(ctx, w, h, t){
+    const N = 6;
+    for(let i=0;i<N;i++){
+      const seed = i*53.7;
+      const jumpInt = 1.1 + 0.3*rand(seed+1);
+      const jumpPhase = Math.floor(t/jumpInt);
+      const jitterX = (rand(seed + jumpPhase*7.1) - 0.5)*10;
+      const jitterY = (rand(seed + jumpPhase*11.3) - 0.5)*10;
+      const baseX = wrapX(rand(seed)*w + t*(4 + rand(seed+2)*6) + jitterX, w);
+      const baseY = (rand(seed+4)*0.7 + 0.12)*h + Math.sin(t*0.3 + seed)*9 + jitterY;
+      ctx.save();
+      ctx.translate(baseX, baseY);
+      ctx.rotate(rand(seed+6)*Math.PI);
+      ctx.strokeStyle = 'rgba(255,255,255,'+(0.16 + 0.08*rand(seed+8))+')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-8, 0);
+      ctx.quadraticCurveTo(0, 6, 8, 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function overlayAutokinetic(ctx, w, h, t){
+    const x = w*0.52, y = h*0.46;
+    const tw = 0.72 + 0.28*Math.sin(t*1.7);
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255,244,224,'+(0.65 + 0.3*tw)+')';
+    ctx.shadowColor = 'rgba(255,244,224,0.9)';
+    ctx.shadowBlur = 8;
+    ctx.arc(x, y, 2.2, 0, Math.PI*2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function drawLobe(ctx, rx, ry, color, ang){
+    ctx.save();
+    ctx.rotate(ang);
+    const g = ctx.createRadialGradient(rx*0.4, 0, 0, rx*0.4, 0, rx*0.75);
+    g.addColorStop(0, color);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(rx*0.4, 0, rx*0.6, ry, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function overlayHaidinger(ctx, w, h, t){
+    const cx = w/2, cy = h/2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(t*0.12);
+    const rx = h*0.5, ry = h*0.14;
+    ctx.globalCompositeOperation = 'lighter';
+    drawLobe(ctx, rx, ry, 'rgba(255,241,168,0.16)', 0);
+    drawLobe(ctx, rx, ry, 'rgba(255,241,168,0.16)', Math.PI);
+    drawLobe(ctx, rx, ry, 'rgba(150,205,255,0.14)', Math.PI/2);
+    drawLobe(ctx, rx, ry, 'rgba(150,205,255,0.14)', -Math.PI/2);
+    ctx.restore();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function overlayPareidolia(ctx, w, h, t){
+    const cx = w*0.5, cy = h*0.48 + Math.sin(t*0.15)*2;
+    const r = h*0.32;
+    const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    rg.addColorStop(0, 'rgba(255,255,255,0.92)');
+    rg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = rg;
+    ctx.beginPath(); ctx.ellipse(cx, cy, r, r*0.72, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(63,90,120,0.45)';
+    ctx.beginPath(); ctx.ellipse(cx-r*0.32, cy-r*0.12, r*0.13, r*0.09, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx+r*0.32, cy-r*0.12, r*0.13, r*0.09, 0, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(63,90,120,0.4)';
+    ctx.lineWidth = r*0.07;
+    ctx.beginPath();
+    ctx.arc(cx, cy+r*0.15, r*0.26, 0.15*Math.PI, 0.85*Math.PI);
+    ctx.stroke();
+  }
+
+  const ILLUSIONS = [
+    {
+      key:'blueField', name:'Blue field entoptic phenomenon',
+      driver:'beat clock + hit strength', bg:'flat',
+      desc:'Tiny bright dots darting along short curved paths against a flat blue field — white blood cells moving through capillaries in front of the retina, in life pulsing with your heartbeat.',
+      note:'Shown here on flat blue for clarity; in the scene it sits over the normal cloudy sky.',
+      defaultOn:true
+    },
+    {
+      key:'troxler', name:'Troxler fading',
+      driver:'level (quiet passages)', bg:'sky',
+      desc:'Fixate the centre and the low-contrast periphery bleeds to flat sky blue, losing the cloud detail. An onset acts as a saccade that snaps it back into focus.',
+      defaultOn:true
+    },
+    {
+      key:'afterimage', name:'Afterimage',
+      driver:'bass hit', bg:'sky',
+      desc:'A bright flash — the sun catching your eye — leaves a drifting, fading blob in its complementary colour once the flash cuts.',
+      defaultOn:true
+    },
+    {
+      key:'vection', name:'Vection / induced motion',
+      driver:'bass-driven wind', bg:'sky', skyOpts:{reverseEvery:6, speedMul:1.7},
+      desc:'The clouds flow steadily; the small dark shape never moves at all. Against a moving surround, a genuinely static object reads as drifting the other way — the flow reverses on a drop.',
+      defaultOn:true
+    },
+    {
+      key:'floaters', name:'Floaters',
+      driver:'ambient, no strong tie', bg:'sky',
+      desc:'Fine translucent specks drift slowly with occasional small jumps — the lag of your own eye saccades catching up with debris in the vitreous.',
+      defaultOn:false
+    },
+    {
+      key:'autokinetic', name:'Autokinetic effect',
+      driver:'very quiet passages', bg:'black',
+      desc:'A single static point of light in the dark, with no other reference — this dot never moves. Any drift you perceive is your own eyes; that is the entire phenomenon.',
+      defaultOn:false
+    },
+    {
+      key:'haidinger', name:'Haidinger’s brush',
+      driver:'bar phase', bg:'sky',
+      desc:'A faint yellow-blue bowtie, visible against polarised light like open sky, rotating slowly with the bar.',
+      defaultOn:false
+    }
+  ];
+
+  const OVERLAYS = {
+    blueField: overlayBlueField,
+    troxler: overlayTroxler,
+    afterimage: overlayAfterimage,
+    vection: overlayVection,
+    floaters: overlayFloaters,
+    autokinetic: overlayAutokinetic,
+    haidinger: overlayHaidinger
+  };
+
+  const state = {};
+  const grid = document.getElementById('grid');
+
+  ILLUSIONS.forEach(function(ill){
+    state[ill.key] = ill.defaultOn;
+    const card = document.createElement('article');
+    card.className = 'card';
+    card.innerHTML =
+      '<div class="card-canvas"><canvas id="card-'+ill.key+'" aria-label="'+ill.name+' preview"></canvas></div>'+
+      '<div class="card-body">'+
+        '<div class="card-top">'+
+          '<h3>'+ill.name+'</h3>'+
+          '<label class="switch">'+
+            '<input type="checkbox" id="chk-'+ill.key+'"'+(ill.defaultOn ? ' checked' : '')+'>'+
+            '<span class="track"><span class="thumb"></span></span>'+
+          '</label>'+
+        '</div>'+
+        '<p class="tag mono">'+ill.driver+'</p>'+
+        '<p class="desc">'+ill.desc+'</p>'+
+        (ill.note ? '<p class="note">'+ill.note+'</p>' : '')+
+      '</div>';
+    grid.appendChild(card);
+  });
+
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+  function fitCanvas(canvas){
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.max(1, Math.round(rect.width));
+    const h = Math.max(1, Math.round(rect.height));
+    if(canvas._cw !== w || canvas._ch !== h){
+      canvas.width = w*DPR;
+      canvas.height = h*DPR;
+      canvas._cw = w; canvas._ch = h;
+    }
+    return {w: w, h: h};
+  }
+
+  const entries = [];
+
+  ILLUSIONS.forEach(function(ill){
+    const canvas = document.getElementById('card-'+ill.key);
+    const ctx = canvas.getContext('2d');
+    entries.push({
+      canvas: canvas, ctx: ctx, visible: true,
+      draw: function(ctx, w, h, t){
+        if(ill.bg === 'sky') drawSky(ctx, w, h, t, ill.skyOpts);
+        else if(ill.bg === 'flat') drawFlatBlue(ctx, w, h);
+        else drawBlack(ctx, w, h);
+        OVERLAYS[ill.key](ctx, w, h, t);
+      }
+    });
+  });
+
+  const pareidoliaCanvas = document.getElementById('card-pareidolia');
+  entries.push({
+    canvas: pareidoliaCanvas, ctx: pareidoliaCanvas.getContext('2d'), visible: true,
+    draw: function(ctx, w, h, t){ drawSky(ctx, w, h, t); overlayPareidolia(ctx, w, h, t); }
+  });
+
+  const combinedCanvas = document.getElementById('combinedCanvas');
+  entries.push({
+    canvas: combinedCanvas, ctx: combinedCanvas.getContext('2d'), visible: true,
+    draw: function(ctx, w, h, t){
+      const wind = state.vection ? {reverseEvery:6, speedMul:1.7} : undefined;
+      drawSky(ctx, w, h, t, wind);
+      ILLUSIONS.forEach(function(ill){ if(state[ill.key]) OVERLAYS[ill.key](ctx, w, h, t); });
+    }
+  });
+
+  try{
+    const io = new IntersectionObserver(function(list){
+      list.forEach(function(en){
+        const match = entries.find(function(e){ return e.canvas === en.target; });
+        if(match) match.visible = en.isIntersecting;
+      });
+    }, {rootMargin:'120px'});
+    entries.forEach(function(e){ io.observe(e.canvas); });
+  }catch(e){ /* IntersectionObserver unavailable: everything just renders */ }
+
+  function frame(now){
+    const t = now/1000;
+    for(let i=0;i<entries.length;i++){
+      const e = entries[i];
+      if(!e.visible) continue;
+      const size = fitCanvas(e.canvas);
+      const ctx = e.ctx;
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx.clearRect(0, 0, size.w, size.h);
+      e.draw(ctx, size.w, size.h, t);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  const picksLine = document.getElementById('picksLine');
+  function updatePicksLine(){
+    const chosen = ILLUSIONS.filter(function(i){ return state[i.key]; });
+    if(chosen.length === 0){
+      picksLine.textContent = 'No illusions selected yet — toggle the ones above you want in the first cut.';
+    } else {
+      picksLine.textContent = 'Selected for v1: ' + chosen.map(function(i){ return i.name; }).join(', ') + '.';
+    }
+  }
+  ILLUSIONS.forEach(function(ill){
+    document.getElementById('chk-'+ill.key).addEventListener('change', function(e){
+      state[ill.key] = e.target.checked;
+      updatePicksLine();
+    });
+  });
+  updatePicksLine();
+
+  const copyBtn = document.getElementById('copyBtn');
+  copyBtn.addEventListener('click', async function(){
+    const chosen = ILLUSIONS.filter(function(i){ return state[i.key]; });
+    const text = chosen.length
+      ? 'Sky scene illusions for v1: ' + chosen.map(function(i){ return i.name; }).join(', ') + '.'
+      : 'No sky scene illusions selected.';
+    try{
+      await navigator.clipboard.writeText(text);
+      copyBtn.textContent = 'Copied ✓';
+    }catch(err){
+      try{
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        copyBtn.textContent = 'Copied ✓';
+      }catch(err2){
+        copyBtn.textContent = 'Select text to copy';
+      }
+    }
+    setTimeout(function(){ copyBtn.textContent = 'Copy picks'; }, 1600);
+  });
+})();
+</script>
+
+</body></html>

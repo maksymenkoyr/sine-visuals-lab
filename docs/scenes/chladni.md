@@ -123,6 +123,10 @@ measured from a reference clip.
   had no changes since #69 (2026-09-03) besides the shared setting-group
   vocabulary pass.
 
+## Materials
+
+- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+
 ## Resume here
 
 - Dev link: `npm run dev`, then `/?audio=synthetic&bpm=120#/v/chladni`

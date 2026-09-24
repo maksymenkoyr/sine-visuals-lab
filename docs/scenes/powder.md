@@ -118,6 +118,10 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
   hit detector) is still owed.
 - Still a draft scene; not promoted to featured.
 
+## Materials
+
+- `powder/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
+
 ## Resume here
 
 - `npm run dev`, then open the scene directly:

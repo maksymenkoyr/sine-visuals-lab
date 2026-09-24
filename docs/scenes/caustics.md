@@ -148,6 +148,13 @@ reference-measurement workflow used by later scenes.
 - Only the synthetic audio feed has been used to check the sparkle/flash tuning
   above; there has been no measured real-music pass.
 
+## Materials
+
+- Artifact: [Caustics Patch Bay](https://claude.ai/artifact/5mPSRq9Btjf373FDtsQ8kt). Source saved as `caustics/artifacts/caustics-patch-bay.html`.
+- Artifact: [Caustics Signal Recipe](https://claude.ai/artifact/WDRpyQyRzbFAXS58YQaLZX). Source saved as `caustics/artifacts/caustics-signal-recipe.html`.
+- Both artifacts are clickable prototypes for choosing what each reactive setting listens to — the UI behind the drives work (PR #130).
+- `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
+
 ## Resume here
 
 - `npm run dev`, then open the scene directly:

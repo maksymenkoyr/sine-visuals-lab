@@ -1,0 +1,278 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style></head><body><p style="font:13px sans-serif;background:#fff3cd;color:#333;padding:8px 12px;margin:0">Reference image omitted: it shows the reference video's frames, which stay out of this public repo (see the scene's /ref bundle).</p>
+<title>Ink Synth Dossier</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #fafafa;
+    --paper-2: #f1f0ee;
+    --ink: #121213;
+    --ink-2: #3d3c3a;
+    --ink-3: #6f6d69;
+    --rule: #d9d6d1;
+    --accent: #2b36c4;
+    --accent-soft: #e6e8fa;
+    --red: #811616;
+    --display: "Archivo Narrow", "Arial Narrow", "Helvetica Neue", sans-serif;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #16171a; --paper-2: #1f2024; --ink: #ecebe7; --ink-2: #c9c7c1; --ink-3: #8f8d87;
+      --rule: #34363b; --accent: #8d95f0; --accent-soft: #23264a; --red: #e07a7a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #16171a; --paper-2: #1f2024; --ink: #ecebe7; --ink-2: #c9c7c1; --ink-3: #8f8d87;
+    --rule: #34363b; --accent: #8d95f0; --accent-soft: #23264a; --red: #e07a7a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--serif); font-size: 17px; line-height: 1.55; }
+  .page { max-width: 1080px; margin: 0 auto; padding: 48px 28px 96px; }
+  header.masthead { display: grid; grid-template-columns: 1fr; gap: 14px; padding-bottom: 28px; border-bottom: 2px solid var(--ink); margin-bottom: 40px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+  h1 { font-family: var(--display); font-weight: 700; font-size: clamp(40px, 6vw, 68px); line-height: 0.98; letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+  .lede { max-width: 66ch; font-size: 19px; color: var(--ink-2); margin: 0; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 28px; font-family: var(--mono); font-size: 13px; color: var(--ink-3); }
+  .meta b { color: var(--ink); font-weight: 500; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 6px 18px; font-family: var(--display); font-size: 17px; margin: -20px 0 40px; }
+  nav.toc a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; }
+  nav.toc a:hover, nav.toc a:focus-visible { border-bottom-color: var(--accent); outline: none; }
+  section.chapter { padding-top: 32px; margin-top: 40px; border-top: 1px solid var(--rule); }
+  .chapter-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-bottom: 22px; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 34px; line-height: 1.05; margin: 0; text-wrap: balance; }
+  h3 { font-family: var(--display); font-weight: 700; font-size: 21px; margin: 34px 0 10px; }
+  p { max-width: 66ch; margin: 0 0 14px; }
+  ul, ol { max-width: 70ch; padding-left: 22px; margin: 0 0 14px; }
+  li { margin: 4px 0; }
+  li::marker { color: var(--ink-3); font-family: var(--mono); font-size: 14px; }
+  code, .mono { font-family: var(--mono); font-size: 0.86em; }
+  code { background: var(--paper-2); padding: 1px 5px; border-radius: 3px; }
+  a { color: var(--accent); }
+  figure { margin: 22px 0 28px; }
+  figure img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); background: #000; }
+  figcaption { font-family: var(--mono); font-size: 12.5px; line-height: 1.5; color: var(--ink-3); margin-top: 8px; max-width: 90ch; }
+  figcaption b { color: var(--ink); font-weight: 500; }
+  .tablewrap { overflow-x: auto; margin: 14px 0 22px; }
+  table { border-collapse: collapse; font-family: var(--mono); font-size: 13.5px; font-variant-numeric: tabular-nums; min-width: 560px; }
+  th, td { text-align: left; padding: 7px 14px 7px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-weight: 500; color: var(--ink-3); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+  td.k { color: var(--ink-2); font-family: var(--serif); font-size: 15px; }
+  td .hit { color: var(--accent); font-weight: 500; }
+  td .miss { color: var(--red); font-weight: 500; }
+  .findings { list-style: none; padding: 0; max-width: none; display: grid; gap: 8px; }
+  .findings li { display: grid; grid-template-columns: 92px 1fr; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--rule); }
+  .findings .tag { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); padding-top: 4px; }
+  .findings .tag.warn { color: var(--red); }
+  details { margin: 14px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+  details + details { border-top: 0; }
+  summary { cursor: pointer; font-family: var(--display); font-size: 18px; padding: 12px 0; list-style: none; display: flex; gap: 12px; align-items: baseline; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "+"; font-family: var(--mono); color: var(--accent); width: 14px; }
+  details[open] summary::before { content: "−"; }
+  summary .when { font-family: var(--mono); font-size: 13px; color: var(--ink-3); }
+  summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+  .duo { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin: 20px 0 8px; }
+  .duo figure { margin: 0; }
+  .callout { background: var(--accent-soft); border-left: 3px solid var(--accent); padding: 14px 18px; margin: 20px 0; max-width: 72ch; }
+  .callout p { margin: 0; }
+  .paths { font-family: var(--mono); font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+  .paths b { color: var(--ink); font-weight: 500; }
+  @media (max-width: 640px) { .findings li { grid-template-columns: 1fr; gap: 2px; } body { font-size: 16px; } }
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <div class="eyebrow">Reference dossier · /ref loop · 2026-09-08</div>
+    <h1>Ink Synth Dossier</h1>
+    <p class="lede">Everything measured from the reference video before and while building the <b>Ink Synth</b> scene: two scans of the loop, the sheets the scanner drew, the numbers behind them, and ours held against the same frames.</p>
+    <div class="meta">
+      <span>video <b>youtu.be/-2j_U0pqovQ</b></span>
+      <span>channel <b>VideoSynthExperiment</b></span>
+      <span>length <b>200 s</b> · 30 fps · scanned at 1280×720</span>
+      <span>audio <b>silent</b> (Opus 3.6 kbps, −91 dB throughout)</span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <a href="#read">How to read a bundle</a>
+    <a href="#scan-a">Scan A · 0–30 s</a>
+    <a href="#scan-b">Scan B · 50–80 s</a>
+    <a href="#ours">Ours against the reference</a>
+    <a href="#files">Files on disk</a>
+  </nav>
+
+  <section id="read">
+    <h2>What the video is, and how to read a bundle</h2>
+    <p>The author's own description: <em>"a video synthesis program written in Swift and Metal. My program generates a random tree of functions from (x,y) to (r,g,b), and emits shader code for the GPU. Movement comes from interpolating between several vectors of parameters."</em> No fluid simulation, no audio. Every transition in it is a parameter vector passing through a node, and the picture sweeps between a fine ruled-line regime and a broad marbled-ribbon regime over the 200 s loop.</p>
+    <p>A bundle is one scanned window of the video, and its files are meant to be read in this order:</p>
+    <ol>
+      <li><b>report.md</b> — Findings first (every sync rule the numbers support), then "Picture, measured" per visual regime, then the bursts.</li>
+      <li><b>slitscan.png</b> — the whole window on one time axis, one column per source frame: every cut, flash and pulse at frame resolution.</li>
+      <li><b>look.png</b> — per regime: the full-resolution frame, a ×3 centre crop, and the detection overlay. Where the scene's shapes, sizes and stroke come from.</li>
+      <li><b>keyframes.png</b> — the look across the window: one tile per regime, before/after of each transition, phrase starts.</li>
+      <li><b>timeline.png</b> — audio lanes over visual lanes, beat lines by rank, markers for transitions and regime changes.</li>
+      <li><b>bursts/&lt;t&gt;/</b> — three-second windows at every source frame around each transition: <code>timing.png</code> (when), <code>detail.png</code> (what), <code>motion.png</code> (which way). Drill-down only.</li>
+    </ol>
+    <div class="callout"><p><b>Light-ground caveat.</b> The picture tool's object detector looks for lit shapes on black. On this dark-on-white video it found nothing in most regimes, so the shape numbers below come from a scan-line measurement of full-resolution frames instead: dark-pixel fraction per radius band, ink on the axes against the diagonals, dark-run lengths along rows, and HSV saturation. Radius <code>r</code> is in half-heights of the frame; <code>r = 1</code> is the top edge.</p></div>
+  </section>
+
+  <section class="chapter" id="scan-a">
+    <div class="chapter-head">
+      <div class="eyebrow">Scan A · bundle <code>tools/.cache/refs/-2j_U0pqovQ/</code></div>
+      <h2>0–30 s · the fine ruled-line regime</h2>
+    </div>
+    <p>The first scan, taken from the top of the video. This is the regime the scene was first built to, and it is the lighter, finer end of the loop.</p>
+
+    <h3>Findings</h3>
+    <ul class="findings">
+      <li><span class="tag warn">No audio</span><span>The audio is silent or has no beat: the beat grid is a uniform 120 bpm placeholder; only the visual findings mean anything.</span></li>
+      <li><span class="tag">Cuts</span><span>No hard cuts at 30 fps in 30 s. Every transition is a fade or a motion.</span></li>
+      <li><span class="tag">Transitions</span><span>Seven single transitions at 0.9, 2.1, 3.3, 14.1, 15.4, 16.9 and 17.5 s, all with no onset under them: parameter nodes on a timer, spaced roughly 1.2–1.5 s in the busy stretch.</span></li>
+      <li><span class="tag">Nodes</span><span>Zoom direction flips at 14.0 s and 16.0 s, the clearest sign of a parameter vector passing through a node.</span></li>
+      <li><span class="tag">Event</span><span>The one big moment: at 15.4 s the whole field smears horizontally for about half a second and relaxes, with saturation and activity peaking together.</span></li>
+    </ul>
+
+    <h3>Picture, measured</h3>
+    <div class="tablewrap">
+      <table>
+        <tr><th>What</th><th>Value</th><th>Read</th></tr>
+        <tr><td class="k">Ground</td><td><b>#fafafa</b>, 83 % of pixels; mean brightness 0.84; saturation 0.04</td><td class="k">flat white paper</td></tr>
+        <tr><td class="k">Dark fraction by radius band<br>&lt;0.15 · 0.15–0.3 · 0.3–0.6 · 0.6–1.0 · 1.0–1.4 · &gt;1.4</td><td><span class="hit">0.95 · 0.70 · 0.25 · 0.05 · 0.01 · 0.00</span></td><td class="k">a solid core to r≈0.2, ink falling off like 1/r², gone by r≈1.2</td></tr>
+        <tr><td class="k">On-axis vs diagonal (r 0.6–1.2)</td><td>0.03–0.14 vs 0.004–0.06</td><td class="k">2–15× denser on the axes: a cross, not a blob</td></tr>
+        <tr><td class="k">Line period / stroke, row at +0.1 hh</td><td>9–12 px / 4–6 px</td><td class="k">fine contour lines, coarser near the axis…</td></tr>
+        <tr><td class="k">…at +0.25 hh</td><td>6–8 px / 3–5 px</td><td class="k"></td></tr>
+        <tr><td class="k">…at +0.5 hh</td><td>4 px / 1–2 px</td><td class="k">…hairlines far out</td></tr>
+        <tr><td class="k">Saturated pixels</td><td>&lt; 1.5 %, hues at 80–140° (green), 200–260° (blue), 0–20° (red after ≈13 s)</td><td class="k">pure primaries, only near the core</td></tr>
+        <tr><td class="k">Motion (regimes 2–5)</td><td>radial speed 0.06–0.18 hh/s at r 0.5; rotation ≈ 0°/s; mixed directions</td><td class="k">lines slide along the arms, spirals turn locally</td></tr>
+        <tr><td class="k">Rank that reacts hardest</td><td>rank 16 (activity +0.76σ, |rot| +1.08σ) on a placeholder grid</td><td class="k">meaningless without audio, listed for completeness</td></tr>
+      </table>
+    </div>
+
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Key frames of the first 30 seconds: fifteen tiles, each a frame at a regime start, a transition, or a phrase start"><figcaption><b>keyframes.png</b> — one tile per regime, before/after of each transition, phrase starts. The green/blue core early, the red injection at 15.4 s, the settle into fine lines by 24 s.</figcaption></figure>
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Look sheet: five regimes, each as full frame, three-times centre crop, and detection overlay"><figcaption><b>look.png</b> — per regime: full frame | ×3 centre crop | detections. The centre crops are where the line spacing, stroke and colour placement were read.</figcaption></figure>
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Slit-scan of the first 30 seconds: centre row, ring and spoke lanes stacked along time"><figcaption><b>slitscan.png</b> — every frame as one column: the centre row, a ring at r = 0.5, and a spoke from the centre to the top edge. Red marks on top are transitions; the red band at 14–17 s is the injection.</figcaption></figure>
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Timeline of audio and visual lanes for the first 30 seconds"><figcaption><b>timeline.png</b> — audio lanes are flat (silent); the visual lanes show activity and saturation peaking at 15.4 s and the zoom sign flipping at 14 s and 16 s.</figcaption></figure>
+
+    <h3>Bursts the findings point at</h3>
+    <details open><summary>13.90–16.90 s <span class="when">transition at 15.40 s (novelty 10.4), the horizontal smear</span></summary>
+      <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Every-frame detail of 13.9 to 16.9 seconds showing the red core smearing horizontally then relaxing"><figcaption><b>bursts/013.90/detail.png</b> — frames 41–53 are the smear: the field stretches sideways over ~0.2 s and relaxes over ~0.3 s. This became the scene's onset stretch.</figcaption></figure>
+    </details>
+    <details><summary>15.97–18.97 s <span class="when">transition at 17.47 s (novelty 3.2)</span></summary>
+      <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Every-frame detail of 15.97 to 18.97 seconds"><figcaption><b>bursts/015.97/detail.png</b> — the red regime settling back toward fine lines.</figcaption></figure>
+    </details>
+  </section>
+
+  <section class="chapter" id="scan-b">
+    <div class="chapter-head">
+      <div class="eyebrow">Scan B · bundle <code>tools/.cache/refs/marble/</code></div>
+      <h2>50–80 s · the marbled-ribbon regime</h2>
+    </div>
+    <p>Scanned after your frame turned out to come from about 58 s, which the first scan never saw. The 50–70 s, 150–165 s and 190–200 s stretches of the loop carry roughly twice the ink of the opening (dark fraction 0.16–0.19 against 0.09), and this is where the broad, liquid strokes live.</p>
+
+    <h3>Findings</h3>
+    <ul class="findings">
+      <li><span class="tag warn">No audio</span><span>Same placeholder grid; only the visual findings mean anything.</span></li>
+      <li><span class="tag">Cuts</span><span>No hard cuts at 30 fps in 30 s.</span></li>
+      <li><span class="tag">Transitions</span><span>Seven transitions at 9.5, 10.3, 11.3, 13.3, 13.9, 14.9 and 17.1 s into the window (59.5–67.1 s absolute), spaced 0.5–2 s: the busiest stretch of the loop, morphing from broad ribbons into dense blue lines.</span></li>
+      <li><span class="tag">Regimes</span><span>Broad marbled X with blue iridescence around 60–62 s; dense fine lines tinted blue all over around 64–66 s; back to plain fine lines by 73 s.</span></li>
+      <li><span class="tag">Flow</span><span>Radial speed 0.04–0.08 hh/s at r 0.5, streak elongation 4–10× with 43–59 % of streaks radial: the ribbons are long and mostly run along the arms.</span></li>
+    </ul>
+
+    <h3>Picture, measured — the 58.5 s frame (your frame's regime)</h3>
+    <div class="tablewrap">
+      <table>
+        <tr><th>What</th><th>Value</th><th>Against scan A</th></tr>
+        <tr><td class="k">Dark fraction by radius band<br>&lt;0.15 · 0.15–0.3 · 0.3–0.6 · 0.6–1.0 · 1.0–1.4 · &gt;1.4</td><td><span class="hit">1.00 · 0.91 · 0.58 · 0.26 · 0.09 · 0.03</span></td><td class="k">about twice the ink in every band past the core</td></tr>
+        <tr><td class="k">On-axis vs diagonal (r 0.6–1.2)</td><td>0.23 vs 0.16</td><td class="k">diagonals nearly as inked: the cross is bent into a curved X</td></tr>
+        <tr><td class="k">Line period / stroke, rows at +0.1 / +0.25 / +0.5 hh</td><td>10 / 19 / 9 px  ·  5 / 9.5 / 4.5 px</td><td class="k">strokes 2–3× wider, fewer of them (15–19 per row, not 25–40)</td></tr>
+        <tr><td class="k">Saturated pixels</td><td>0.36 %, 200–260° (blue) dominant, some green and red</td><td class="k">less colour, and blue</td></tr>
+        <tr><td class="k">Mean brightness</td><td>0.79</td><td class="k">darker page</td></tr>
+        <tr><td class="k">Frame at 160 s, for contrast</td><td>1.00 · 0.90 · 0.39 · 0.10 · 0.01 · 0.01; strokes 2–9 px</td><td class="k">the loop comes back to fine lines</td></tr>
+      </table>
+    </div>
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="The reference at 58.5 seconds: broad black marbled ribbons bent into a curved X with a dark blue core"><figcaption><b>Reference at 58.5 s</b> — the frame closest to yours by thumbnail distance (0.23; the next candidates were at 19.5 s and 69.5 s at 0.33). Extracted at full resolution from the download.</figcaption></figure>
+
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Key frames of the 50 to 80 second window"><figcaption><b>keyframes.png</b> — the window sweeps from a light cross (50 s) through the broad marbled X (60–62 s) into dense blue lines (64–66 s) and back to fine black lines (73 s).</figcaption></figure>
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Look sheet for the 50 to 80 second window"><figcaption><b>look.png</b> — regime 3 (12.27 s into the window) is the marbled X; regime 5 (15.40 s) the blue lines. The detector fired here because the ribbons are wide enough to read as shapes.</figcaption></figure>
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Slit-scan of the 50 to 80 second window"><figcaption><b>slitscan.png</b> — the dark, busy band from 8 to 18 s is the marbled stretch; the blue wash at 14–17 s is the tinted-line regime.</figcaption></figure>
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Timeline for the 50 to 80 second window"><figcaption><b>timeline.png</b> — transitions cluster between 9.5 and 17 s; nothing in the audio lanes.</figcaption></figure>
+
+    <h3>Bursts the findings point at</h3>
+    <details open><summary>9.77–12.77 s <span class="when">transitions at 10.27 s and 11.27 s (novelty 3.1, 6.0), ribbons forming</span></summary>
+      <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Every-frame detail of the ribbons forming around 60 seconds"><figcaption><b>bursts/009.77/detail.png</b> — the broad strokes at every source frame: watch the arm on the left thicken and bend.</figcaption></figure>
+    </details>
+    <details><summary>11.83–14.83 s <span class="when">transition at 13.33 s (novelty 2.6)</span></summary>
+      <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Every-frame detail of 61.8 to 64.8 seconds"><figcaption><b>bursts/011.83/detail.png</b> — the marbled X at its heaviest, colour appearing inside the core.</figcaption></figure>
+    </details>
+    <details><summary>13.37–16.37 s <span class="when">transitions at 13.87 s and 14.87 s (novelty 4.3, 6.7), ribbons into blue lines</span></summary>
+      <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Every-frame detail of the ribbons dissolving into fine blue lines"><figcaption><b>bursts/013.37/detail.png</b> — the same field ruled finer and finer while the tint spreads along every line.</figcaption></figure>
+    </details>
+  </section>
+
+  <section class="chapter" id="ours">
+    <div class="chapter-head">
+      <div class="eyebrow">Scene <code>ink</code> · Ink Synth · draft PR #96</div>
+      <h2>Ours against the reference</h2>
+    </div>
+    <p>The scene is the same shape as the video's generator: one fragment shader and a parameter vector eased between random rolls. Since the reference has no audio, the mapping below is ours, chosen so silence reproduces the reference's resting look.</p>
+    <div class="tablewrap">
+      <table>
+        <tr><th>In the reference</th><th>Trigger</th><th>In ours</th></tr>
+        <tr><td class="k">parameter nodes every ≈1.4 s</td><td>timer</td><td class="k">a roll on every bar start while tempo-locked; a 1.4 s timer without a beat</td></tr>
+        <tr><td class="k">the horizontal smear at 15.4 s</td><td>timer</td><td class="k">fires on onsets, relaxes in half a second (<code>stretch</code>)</td></tr>
+        <tr><td class="k">green/blue → red colour drift</td><td>timer</td><td class="k">the lifted channel re-rolls every fourth roll and on a drop</td></tr>
+        <tr><td class="k">fine lines ↔ broad ribbons</td><td>slow drift</td><td class="k">a marble amount rolled around the <code>ribbon</code> setting each bar</td></tr>
+        <tr><td class="k">ink amount drifting</td><td>slow drift</td><td class="k">bass grows the core (<code>bassSwell</code>); the slow track dials move the rest</td></tr>
+      </table>
+    </div>
+
+    <h3>Fine regime, silent frame</h3>
+    <div class="tablewrap">
+      <table>
+        <tr><th>Band</th><th>Reference (scan A)</th><th>Ours</th></tr>
+        <tr><td class="k">dark fraction, six radius bands</td><td>0.95 · 0.70 · 0.25 · 0.05 · 0.01 · 0.00</td><td><span class="hit">0.96 · 0.69 · 0.23 · 0.03 · 0.00 · 0.00</span></td></tr>
+        <tr><td class="k">on-axis vs diagonal</td><td>2–15×</td><td><span class="hit">&gt;10×</span></td></tr>
+        <tr><td class="k">line period / stroke</td><td>4–12 px / 1–6 px</td><td><span class="hit">4–14 px / 2–7 px</span></td></tr>
+        <tr><td class="k">saturated pixels</td><td>&lt; 1.5 %</td><td><span class="hit">0.3–1.3 %, one primary</span></td></tr>
+      </table>
+    </div>
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Our scene in the fine regime: a black cross of fine contour lines with small spirals and a green accent at the core"><figcaption><b>Ours, ribbon 0</b> — the first build, measured to scan A.</figcaption></figure>
+
+    <h3>Ribbon regime, against your frame</h3>
+    <div class="tablewrap">
+      <table>
+        <tr><th>Band</th><th>Reference at 58.5 s</th><th>Ours, two rolls at ribbon 0.6</th></tr>
+        <tr><td class="k">dark fraction, six radius bands</td><td>1.00 · 0.91 · 0.58 · 0.26 · 0.09 · 0.03</td><td><span class="hit">0.95–0.99 · 0.78–0.85 · 0.47–0.61 · 0.17–0.32 · 0.05–0.15 · 0.02–0.09</span></td></tr>
+        <tr><td class="k">on-axis vs diagonal</td><td>0.23 vs 0.16</td><td>0.26–0.37 vs <span class="miss">0.04–0.20</span> (bends less, most rolls)</td></tr>
+        <tr><td class="k">strokes per row / stroke / period at +0.25 hh</td><td>15 / 9.5 px / 19 px</td><td><span class="hit">13–17 / 10–14 px / 20–28 px</span></td></tr>
+        <tr><td class="k">saturated pixels</td><td>0.36 %</td><td><span class="hit">0.2–0.8 %</span></td></tr>
+        <tr><td class="k">mean brightness</td><td>0.79</td><td><span class="hit">0.73–0.82</span></td></tr>
+      </table>
+    </div>
+    <div class="duo">
+      <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Reference at 58.5 seconds"><figcaption><b>Reference, 58.5 s</b></figcaption></figure>
+      <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Our scene at ribbon 0.6, a roll with a strongly bent cross"><figcaption><b>Ours</b>, a roll that bends hard</figcaption></figure>
+      <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Our scene at ribbon 0.6, a roll with grouped ribbons and spirals"><figcaption><b>Ours</b>, the next roll</figcaption></figure>
+    </div>
+    <div class="callout"><p><b>The open gap.</b> The numbers match, the look only partly does. The reference's ribbons are smooth liquid shapes with organic topology; ours are still families of parallel contour lines, because every stroke is a level set of one function. Closing that means a different stroke construction (thresholded multi-octave noise ribbons), a rebuild of the stroke layer rather than a tune.</p></div>
+
+    <h3>Beats and the same-beats compare</h3>
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Eight frames at 120 bpm synthetic audio, 260 ms apart"><figcaption><b>120 bpm, synthetic audio</b>, eight frames 260 ms apart: the picture re-targets on the bar, the horizontal stretch lands on hits (frames 2 and 5 are wider), the accent stays one primary.</figcaption></figure>
+    <figure><img src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22640%22%20height%3D%2290%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%232a2a2a%22%2F%3E%3Ctext%20x%3D%2216%22%20y%3D%2250%22%20fill%3D%22%23bbb%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3EReference%20image%20omitted%20%E2%80%94%20kept%20out%20of%20the%20public%20repo%3C%2Ftext%3E%3C%2Fsvg%3E" alt="Compare sheet: reference frames on the left, ours on the right, at the same twelve beats"><figcaption><b>ref-shoot compare</b> — the reference's silent audio played into our analyser (probe bpm 0, so the timer path), shot at the same twelve beats and offsets. Left the reference, right ours, before the ribbon work.</figcaption></figure>
+  </section>
+
+  <section class="chapter" id="files">
+    <div class="chapter-head"><h2>Files on disk</h2></div>
+    <p class="paths">
+      <b>Scan A</b> tools/.cache/refs/-2j_U0pqovQ/<br>
+      <b>Scan B</b> tools/.cache/refs/marble/<br>
+      <b>Download</b> tools/.cache/refs/_downloads/-2j_U0pqovQ.mp4 (the full 200 s)<br>
+      <b>Scene</b> src/render/scenes/ink.ts on branch worktree-ink-synth · tests/ink.test.ts<br>
+      <b>Open a bundle</b> <code>open tools/.cache/refs/-2j_U0pqovQ/</code> — the folder name starts with a dash, so always give the full path.<br>
+      <b>Scan another window</b> <code>uv run tools/ref-scan.py tools/.cache/refs/_downloads/-2j_U0pqovQ.mp4 --name &lt;name&gt; --start &lt;s&gt; --dur 30</code>
+    </p>
+  </section>
+</div>
+
+</body></html>

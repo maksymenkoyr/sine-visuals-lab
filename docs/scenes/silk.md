@@ -149,6 +149,11 @@ bpm, 59 beats, 3539 probe samples / 185 reference onsets):
   request; a follow-up `/tune` pass would want to check them against
   `tools/.cache/refs/vKJu9mfeDS8/report.md` again.
 
+## Materials
+
+- `silk/vKJu9mfeDS8/` — measurements kept from the `/ref` bundle `vKJu9mfeDS8`: report, data, and our own shots.
+The reference media for these bundles (video, frames, audio, the images built from them) stays out of this repo: in the local `tools/.cache/refs/<bundle>/` cache and the private archive (`tools/ref-archive.py`).
+
 ## Resume here
 
 - Dev link: `npm run dev`, then `/?audio=synthetic&bpm=123#/v/silk` (123

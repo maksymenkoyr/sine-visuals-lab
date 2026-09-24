@@ -146,6 +146,11 @@ bpm, 13 beats):
   worth checking whether it touches Shards' `auto` weights or `cutMode`
   wiring once it lands.
 
+## Materials
+
+- `shards/AcUcijyvpVc/` — measurements kept from the `/ref` bundle `AcUcijyvpVc`: report, data, and our own shots.
+The reference media for these bundles (video, frames, audio, the images built from them) stays out of this repo: in the local `tools/.cache/refs/<bundle>/` cache and the private archive (`tools/ref-archive.py`).
+
 ## Resume here
 
 - Dev link: `npm run dev`, then `/?audio=synthetic&bpm=120#/v/shards` (add

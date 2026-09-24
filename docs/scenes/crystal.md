@@ -219,6 +219,14 @@ are one measurement run each, not standing specs):
   lattice), so the mobile-seam concerns that header covers don't apply to
   this scene.
 
+## Materials
+
+- `crystal/vjwall-1011/` — measurements kept from the `/ref` bundle `vjwall-1011` (primary): report, data, and our own shots.
+- `crystal/vj-0810/` — measurements kept from the `/ref` bundle `vj-0810`: report, data, and our own shots.
+- `crystal/vj-1027/` — measurements kept from the `/ref` bundle `vj-1027` (also holds contact sheets of our earlier and v4 builds): report, data, and our own shots.
+- `crystal/vj-1472/` — measurements kept from the `/ref` bundle `vj-1472`: report, data, and our own shots.
+The reference media for these bundles (video, frames, audio, the images built from them) stays out of this repo: in the local `tools/.cache/refs/<bundle>/` cache and the private archive (`tools/ref-archive.py`).
+
 ## Resume here
 
 - Dev link: `npm run dev`, then

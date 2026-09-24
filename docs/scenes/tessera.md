@@ -62,7 +62,9 @@ clip.
 The persisted bundle report (`tools/.cache/refs/lZaThcqs-dk/report.md`)
 captures the *first* scan, made before this PR's temporal `/ref` tooling
 (slit-scan, full-rate bursts, motion tiles) existed; a rescan during the PR
-using those tools corrected its reading (see Decisions and pivots). The
+using those tools corrected its reading (see Decisions and pivots). That
+rescan survived in the scene's worktree cache and is now kept as
+`tessera/lZaThcqs-dk-rescan/`, beside the first scan (`tessera/lZaThcqs-dk/`). The
 first scan's per-frame picture composition still stands, only its motion
 interpretation was revised:
 
@@ -150,6 +152,13 @@ interpretation was revised:
 - The reference's boxes are smaller and more numerous up close, with longer
   trailing walls, than the current lattice produces.
 
+## Materials
+
+- `tessera/lZaThcqs-dk/` — measurements kept from the `/ref` bundle `lZaThcqs-dk` (first scan, 2026-09-06): report, data, and our own shots.
+- `tessera/lZaThcqs-dk-rescan/` — measurements kept from the `/ref` bundle `lZaThcqs-dk-rescan` (the rescan of 2026-09-18 that the shipped design was built from): report, data, and our own shots.
+- Artifact: [Tessera Rescan](https://claude.ai/artifact/YF1MFRg6Vyxyy4B8x1umBe). Source saved as `tessera/artifacts/tessera-rescan.html`, with its reference images replaced by a placeholder.
+The reference media for these bundles (video, frames, audio, the images built from them) stays out of this repo: in the local `tools/.cache/refs/<bundle>/` cache and the private archive (`tools/ref-archive.py`).
+
 ## Resume here
 
 - Dev link: `npm run dev`, then `/?audio=synthetic&bpm=118#/v/tessera` (118
@@ -164,8 +173,9 @@ interpretation was revised:
   (flat-pattern / streak readings that turned out to be perspective
   artifacts, not flow) — a rescan with slit-scan/burst/motion-tile analysis
   during the PR is what actually confirmed "lattice fixed, only box lengths
-  change"; don't re-derive conclusions from the persisted report's size-law
-  or flow lines without re-running the temporal tools.
+  change"; for motion, read the rescan's report
+  (`tessera/lZaThcqs-dk-rescan/report.md`), not the first scan's size-law or
+  flow lines.
 
 ## History
 

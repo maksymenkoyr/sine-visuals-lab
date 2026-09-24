@@ -47,6 +47,10 @@ None — original design.
   "simple launch scene" status, it has no `auto`-tuned settings to draw on
   and no measured reference to compare against.
 
+## Materials
+
+- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+
 ## Resume here
 
 - `npm run dev`, then `/?audio=synthetic&bpm=120#/v/spectrum`.

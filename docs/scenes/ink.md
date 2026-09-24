@@ -111,6 +111,13 @@ reaching a noise hash) is fixed here and in Caustics via the shared
 phase to a noise coordinate should take both halves of that fix — see
 `src/render/noiseHash.ts`'s header.
 
+## Materials
+
+- `ink/-2j_U0pqovQ/` — measurements kept from the `/ref` bundle `-2j_U0pqovQ` (the fine ruled-line window): report, data, and our own shots.
+- `ink/marble/` — measurements kept from the `/ref` bundle `marble` (the marbled-ribbon window): report, data, and our own shots.
+- Artifact: [Ink Synth Dossier](https://claude.ai/artifact/Vji9mqUL3qUpdzZfr7viBq). Source saved as `ink/artifacts/ink-synth-dossier.html`, with its reference images replaced by a placeholder.
+The reference media for these bundles (video, frames, audio, the images built from them) stays out of this repo: in the local `tools/.cache/refs/<bundle>/` cache and the private archive (`tools/ref-archive.py`).
+
 ## Resume here
 
 `npm run dev`, then `/?audio=synthetic&bpm=120#/v/ink`. The reference video

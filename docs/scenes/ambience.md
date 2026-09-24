@@ -100,6 +100,10 @@ still refers to "comet" even though the comet/sunburst path was removed in
 the third pass — leftover wording from before that removal, not a live
 feature.
 
+## Materials
+
+- Artifact: [Ambience Clip](https://claude.ai/artifact/YE9cjVLLo4A9PF1pFJ9XHq). Link only (not saved here).
+
 ## Resume here
 
 `npm run dev`, then `/?audio=synthetic&bpm=120#/v/ambience`. `__viz.setParams`

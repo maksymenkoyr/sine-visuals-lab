@@ -179,6 +179,10 @@ None — original design.
 - No open follow-ups are recorded against this scene beyond the settled
   state above; nothing in the log flags a currently-known visual defect.
 
+## Materials
+
+- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+
 ## Resume here
 
 - `npm run dev`, then open `/?audio=synthetic&bpm=120#/v/mesh` (any query

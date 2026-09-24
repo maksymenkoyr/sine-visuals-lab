@@ -1,0 +1,992 @@
+{
+ "name": "AcUcijyvpVc",
+ "source": "tools/.cache/refs/_downloads/AcUcijyvpVc.mp4",
+ "start": 0.0,
+ "dur": 4.474,
+ "nframes": 134,
+ "hasAudio": true,
+ "audioNote": "",
+ "tempo": 161.4990234375,
+ "period": 0.37151927437641724,
+ "phase": 0,
+ "phaseGiven": false,
+ "phaseMargin": 0.2,
+ "phaseNotes": [
+  "bar phase 0 (mod 4) by kick-weighted onset strength; margin 0.20\u03c3 over the runner-up",
+  "phase 0 (mod 8) by timbre novelty 3.30 vs 1.99",
+  "phase 0 (mod 16) by timbre novelty -1.00 vs -1.00"
+ ],
+ "offsetsMs": [
+  -80,
+  0,
+  160
+ ],
+ "visFps": 15,
+ "zoomSign": -1.0,
+ "onsets": [
+  0.07,
+  0.209,
+  0.395,
+  0.58,
+  0.766,
+  0.929,
+  1.138,
+  1.3,
+  1.347,
+  1.486,
+  1.649,
+  1.858,
+  2.043,
+  2.229,
+  2.368,
+  2.485,
+  2.577,
+  2.717,
+  2.81,
+  3.019,
+  3.088,
+  3.297,
+  3.483,
+  3.669,
+  3.808,
+  4.017,
+  4.203,
+  4.389
+ ],
+ "sections": [
+  {
+   "beat": 8,
+   "t": 2.926
+  }
+ ],
+ "beats": [
+  {
+   "i": 0,
+   "t": 0.0697,
+   "rank": 16,
+   "section": false,
+   "onsetZ": 3.92,
+   "lowZ": -0.57,
+   "midZ": -0.52,
+   "highZ": -0.96,
+   "rmsZ": -0.19,
+   "actZ": -1.0,
+   "cutZ": -0.81,
+   "frames": {
+    "-80": "frames/b000_r16_-080.jpg",
+    "0": "frames/b000_r16_+000.jpg",
+    "160": "frames/b000_r16_+160.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 0.0,
+    "energy": 0.313,
+    "section": 0.001
+   }
+  },
+  {
+   "i": 1,
+   "t": 0.418,
+   "rank": 1,
+   "section": false,
+   "onsetZ": 1.44,
+   "lowZ": 0.19,
+   "midZ": -0.03,
+   "highZ": 0.11,
+   "rmsZ": -0.12,
+   "actZ": 1.83,
+   "cutZ": 2.5,
+   "frames": {
+    "-80": "frames/b001_r01_-080.jpg",
+    "0": "frames/b001_r01_+000.jpg",
+    "160": "frames/b001_r01_+160.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 175.8,
+    "energy": 0.462,
+    "section": 0.061
+   }
+  },
+  {
+   "i": 2,
+   "t": 0.7663,
+   "rank": 2,
+   "section": false,
+   "onsetZ": 2.56,
+   "lowZ": 0.58,
+   "midZ": 0.68,
+   "highZ": 0.24,
+   "rmsZ": 0.76,
+   "actZ": 2.31,
+   "cutZ": 2.26,
+   "frames": {
+    "-80": "frames/b002_r02_-080.jpg",
+    "0": "frames/b002_r02_+000.jpg",
+    "160": "frames/b002_r02_+160.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 112.5,
+    "energy": 0.5,
+    "section": 0.209
+   }
+  },
+  {
+   "i": 3,
+   "t": 1.1378,
+   "rank": 1,
+   "section": false,
+   "onsetZ": 0.84,
+   "lowZ": 0.5,
+   "midZ": 0.29,
+   "highZ": 0.1,
+   "rmsZ": 0.33,
+   "actZ": 0.92,
+   "cutZ": 0.36,
+   "frames": {
+    "-80": "frames/b003_r01_-080.jpg",
+    "0": "frames/b003_r01_+000.jpg",
+    "160": "frames/b003_r01_+160.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 113.4,
+    "energy": 0.514,
+    "section": 0.413
+   }
+  },
+  {
+   "i": 4,
+   "t": 1.4861,
+   "rank": 4,
+   "section": false,
+   "onsetZ": 2.34,
+   "lowZ": 0.67,
+   "midZ": 0.03,
+   "highZ": -0.12,
+   "rmsZ": 0.78,
+   "actZ": 0.87,
+   "cutZ": 0.14,
+   "frames": {
+    "-80": "frames/b004_r04_-080.jpg",
+    "0": "frames/b004_r04_+000.jpg",
+    "160": "frames/b004_r04_+160.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 111.3,
+    "energy": 0.466,
+    "section": 0.609
+   }
+  },
+  {
+   "i": 5,
+   "t": 1.8576,
+   "rank": 1,
+   "section": false,
+   "onsetZ": 2.99,
+   "lowZ": 0.79,
+   "midZ": 0.31,
+   "highZ": 0.11,
+   "rmsZ": 1.07,
+   "actZ": 0.7,
+   "cutZ": 0.7,
+   "frames": {
+    "-80": "frames/b005_r01_-080.jpg",
+    "0": "frames/b005_r01_+000.jpg",
+    "160": "frames/b005_r01_+160.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 111.6,
+    "energy": 0.501,
+    "section": 0.75
+   }
+  },
+  {
+   "i": 6,
+   "t": 2.2291,
+   "rank": 2,
+   "section": false,
+   "onsetZ": -0.09,
+   "lowZ": 0.05,
+   "midZ": -0.15,
+   "highZ": -1.43,
+   "rmsZ": -0.58,
+   "actZ": 1.23,
+   "cutZ": 1.69,
+   "frames": {
+    "-80": "frames/b006_r02_-080.jpg",
+    "0": "frames/b006_r02_+000.jpg",
+    "160": "frames/b006_r02_+160.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 111.2,
+    "energy": 0.458,
+    "section": 0.841
+   }
+  },
+  {
+   "i": 7,
+   "t": 2.5774,
+   "rank": 1,
+   "section": false,
+   "onsetZ": 0.77,
+   "lowZ": -1.9,
+   "midZ": -1.26,
+   "highZ": 0.04,
+   "rmsZ": -1.47,
+   "actZ": 1.01,
+   "cutZ": 1.23,
+   "frames": {
+    "-80": "frames/b007_r01_-080.jpg",
+    "0": "frames/b007_r01_+000.jpg",
+    "160": "frames/b007_r01_+160.jpg"
+   },
+   "ours": {
+    "onset": false,
+    "bpm": 111.2,
+    "energy": 0.406,
+    "section": 0.895
+   }
+  },
+  {
+   "i": 8,
+   "t": 2.9257,
+   "rank": 8,
+   "section": true,
+   "onsetZ": 1.85,
+   "lowZ": -1.49,
+   "midZ": 0.21,
+   "highZ": 0.3,
+   "rmsZ": -1.12,
+   "actZ": -1.02,
+   "cutZ": -0.81,
+   "frames": {
+    "-80": "frames/b008_r08_-080.jpg",
+    "0": "frames/b008_r08_+000.jpg",
+    "160": "frames/b008_r08_+160.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 111.2,
+    "energy": 0.375,
+    "section": 0.931
+   }
+  },
+  {
+   "i": 9,
+   "t": 3.2972,
+   "rank": 1,
+   "section": false,
+   "onsetZ": -0.29,
+   "lowZ": 0.39,
+   "midZ": -0.06,
+   "highZ": 0.29,
+   "rmsZ": 0.19,
+   "actZ": 1.94,
+   "cutZ": 2.78,
+   "frames": {
+    "-80": "frames/b009_r01_-080.jpg",
+    "0": "frames/b009_r01_+000.jpg",
+    "160": "frames/b009_r01_+160.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 111.0,
+    "energy": 0.503,
+    "section": 0.956
+   }
+  },
+  {
+   "i": 10,
+   "t": 3.6688,
+   "rank": 2,
+   "section": false,
+   "onsetZ": 1.56,
+   "lowZ": -0.05,
+   "midZ": 0.5,
+   "highZ": 0.61,
+   "rmsZ": -0.34,
+   "actZ": 1.2,
+   "cutZ": 0.46,
+   "frames": {
+    "-80": "frames/b010_r02_-080.jpg",
+    "0": "frames/b010_r02_+000.jpg",
+    "160": "frames/b010_r02_+160.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 110.8,
+    "energy": 0.488,
+    "section": 0.972
+   }
+  },
+  {
+   "i": 11,
+   "t": 4.0403,
+   "rank": 1,
+   "section": false,
+   "onsetZ": 0.48,
+   "lowZ": 0.12,
+   "midZ": 0.23,
+   "highZ": 0.3,
+   "rmsZ": -0.06,
+   "actZ": 1.48,
+   "cutZ": 0.66,
+   "frames": {
+    "-80": "frames/b011_r01_-080.jpg",
+    "0": "frames/b011_r01_+000.jpg",
+    "160": "frames/b011_r01_+160.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 110.7,
+    "energy": 0.502,
+    "section": 0.982
+   }
+  },
+  {
+   "i": 12,
+   "t": 4.3886,
+   "rank": 4,
+   "section": false,
+   "onsetZ": 2.23,
+   "lowZ": 0.79,
+   "midZ": -0.65,
+   "highZ": -0.09,
+   "rmsZ": 1.0,
+   "actZ": 0.77,
+   "cutZ": 1.21,
+   "frames": {
+    "-80": "frames/b012_r04_-080.jpg",
+    "0": "frames/b012_r04_+000.jpg"
+   },
+   "ours": {
+    "onset": true,
+    "bpm": 110.7,
+    "energy": 0.475,
+    "section": 0.988
+   }
+  }
+ ],
+ "transitions": [
+  {
+   "t": 0.4,
+   "frame": 6,
+   "novelty": 2.96,
+   "beat": 1,
+   "rank": 1,
+   "offMs": -18,
+   "offBeats": -0.05,
+   "onBeat": true,
+   "onsetZ": 0.58,
+   "lowD": -1.13,
+   "midD": 0.44,
+   "highD": 1.26,
+   "rmsZ": 0.22,
+   "section": false,
+   "brightD": 2.14,
+   "cutZ": 0.57,
+   "kind": "single",
+   "ours": {
+    "onset": true,
+    "bpm": 175.8,
+    "energy": 0.456,
+    "section": 0.056
+   }
+  },
+  {
+   "t": 0.667,
+   "frame": 10,
+   "novelty": 1.75,
+   "beat": 2,
+   "rank": 2,
+   "offMs": -100,
+   "offBeats": -0.27,
+   "onBeat": true,
+   "onsetZ": 1.44,
+   "lowD": 0.94,
+   "midD": 1.58,
+   "highD": -0.03,
+   "rmsZ": -0.66,
+   "section": false,
+   "brightD": -0.51,
+   "cutZ": 2.26,
+   "kind": "single",
+   "ours": {
+    "onset": false,
+    "bpm": 112.5,
+    "energy": 0.506,
+    "section": 0.16
+   }
+  },
+  {
+   "t": 3.333,
+   "frame": 50,
+   "novelty": 3.48,
+   "beat": 9,
+   "rank": 1,
+   "offMs": 36,
+   "offBeats": 0.1,
+   "onBeat": true,
+   "onsetZ": -0.29,
+   "lowD": -0.73,
+   "midD": 0.43,
+   "highD": -0.0,
+   "rmsZ": -0.22,
+   "section": false,
+   "brightD": -2.31,
+   "cutZ": 2.78,
+   "kind": "single",
+   "ours": {
+    "onset": true,
+    "bpm": 111.0,
+    "energy": 0.504,
+    "section": 0.958
+   }
+  }
+ ],
+ "regimeChanges": [
+  {
+   "beat": 4,
+   "t": 1.486,
+   "rank": 4,
+   "deltas": {
+    "abszoom": -0.87,
+    "rot": 1.03
+   }
+  }
+ ],
+ "onsetEnvelope": {
+  "bright": null,
+  "act": null
+ },
+ "beatPhase": {
+  "act": {
+   "bins": [
+    0.73,
+    -0.56,
+    0.11,
+    0.19,
+    -0.17,
+    0.29,
+    -0.41,
+    -0.12
+   ],
+   "peakPhase": 0.0,
+   "contrast": 1.29
+  },
+  "bright": {
+   "bins": [
+    0.21,
+    -0.24,
+    0.07,
+    -0.02,
+    0.17,
+    0.03,
+    -0.08,
+    0.11
+   ],
+   "peakPhase": 0.0,
+   "contrast": 0.45
+  },
+  "abszoom": {
+   "bins": [
+    0.36,
+    -0.51,
+    -0.04,
+    0.08,
+    -0.24,
+    0.6,
+    -0.56,
+    0.21
+   ],
+   "peakPhase": 0.62,
+   "contrast": 1.16
+  }
+ },
+ "look": {
+  "palette": [
+   {
+    "hex": "#08080b",
+    "share": 0.72
+   },
+   {
+    "hex": "#904267",
+    "share": 0.12
+   },
+   {
+    "hex": "#edc13d",
+    "share": 0.07
+   },
+   {
+    "hex": "#d3c8b9",
+    "share": 0.06
+   },
+   {
+    "hex": "#5fc835",
+    "share": 0.04
+   }
+  ],
+  "symmetry": {
+   "fold": 1,
+   "foldR": 0.28,
+   "mirrorAxes": 1,
+   "mirrorR": 0.39
+  },
+  "centreBright": 0.467,
+  "edgeBright": 0.252,
+  "meanBright": 0.287,
+  "darkShare": 0.0,
+  "meanSat": 0.513,
+  "zoomMean": 0.0493,
+  "zoomAbs": 0.734,
+  "rotMean": -0.2304,
+  "rotAbs": 0.7384,
+  "actMean": 0.0874
+ },
+ "picture": {
+  "regimes": [
+   {
+    "size": [
+     360,
+     640
+    ],
+    "thr": 0.18,
+    "litShare": 0.1406,
+    "n": 22,
+    "classes": {
+     "panel": 6,
+     "bar": 9,
+     "blob": 7
+    },
+    "hollowShare": 0.0,
+    "nestedShare": 0.0,
+    "sizeFit": {
+     "b": -0.28,
+     "at03": 0.013,
+     "at09": 0.009,
+     "on": "gates",
+     "n": 6
+    },
+    "sizeEnvelope": {
+     "r0.1-0.3": 3.342,
+     "r0.3-0.6": 0.367,
+     "r0.6-1.0": 0.014,
+     "r>1": 0.009
+    },
+    "rings": [
+     {
+      "r": 0.27,
+      "n": 6
+     },
+     {
+      "r": 0.42,
+      "n": 5
+     },
+     {
+      "r": 0.6,
+      "n": 3
+     },
+     {
+      "r": 0.95,
+      "n": 5
+     }
+    ],
+    "fold": 1,
+    "foldScore": 0.0,
+    "onAxis": 0.0,
+    "onDiag": 0.0,
+    "stroke": {
+     "innerPx": null,
+     "outerPx": null
+    },
+    "streak": {
+     "innerElong": 3.04,
+     "outerElong": 1.66,
+     "radialShare": 0.53
+    },
+    "hues": [
+     {
+      "name": "yellow",
+      "deg": 60,
+      "share": 0.64
+     },
+     {
+      "name": "violet",
+      "deg": 270,
+      "share": 0.2
+     },
+     {
+      "name": "rose",
+      "deg": 330,
+      "share": 0.12
+     }
+    ],
+    "glow": {
+     "ground": 0.0061,
+     "core": 0.657,
+     "profile": [
+      0.3087,
+      0.2415,
+      0.1838,
+      0.1186,
+      0.0423,
+      0.0075
+     ],
+     "efoldPx": 7.3,
+     "haloRatio": 0.273
+    },
+    "ground": {
+     "hex": "#010103",
+     "vignette": 1.0
+    },
+    "regime": 1,
+    "t": 0.87,
+    "share": 0.69,
+    "flow": {
+     "matches": 454,
+     "outwardShare": 0.58,
+     "rBins": [
+      0.07,
+      0.21,
+      0.39,
+      0.61,
+      0.87,
+      1.22
+     ],
+     "radial": [
+      0.0,
+      0.0,
+      0.004,
+      0.008,
+      0.009,
+      0.0
+     ],
+     "rotDegS": [
+      -1.5,
+      -0.8,
+      -3.2,
+      -2.7,
+      -2.3,
+      -2.2
+     ],
+     "direction": "outward",
+     "p": 0.18,
+     "vAt05": 0.018,
+     "rotMeanDegS": -2.4
+    },
+    "frame": "frames/look_1.jpg",
+    "overlay": "frames/look_1_overlay.png"
+   },
+   {
+    "size": [
+     360,
+     640
+    ],
+    "thr": 0.18,
+    "litShare": 0.1324,
+    "n": 16,
+    "classes": {
+     "bar": 7,
+     "blob": 4,
+     "panel": 4,
+     "ring": 1
+    },
+    "hollowShare": 0.06,
+    "nestedShare": 1.0,
+    "sizeFit": {
+     "b": -0.18,
+     "at03": 0.424,
+     "at09": 0.348,
+     "on": "substantial objects",
+     "n": 8
+    },
+    "sizeEnvelope": {
+     "r0.1-0.3": 1.33,
+     "r0.3-0.6": 0.492,
+     "r0.6-1.0": 0.419,
+     "r>1": null
+    },
+    "rings": [
+     {
+      "r": 0.34,
+      "n": 4
+     },
+     {
+      "r": 0.67,
+      "n": 4
+     },
+     {
+      "r": 0.95,
+      "n": 5
+     }
+    ],
+    "fold": 1,
+    "foldScore": 0.0,
+    "onAxis": 0.0,
+    "onDiag": 0.0,
+    "stroke": {
+     "innerPx": 13.1,
+     "outerPx": null
+    },
+    "streak": {
+     "innerElong": 4.19,
+     "outerElong": 2.06,
+     "radialShare": 0.58
+    },
+    "hues": [
+     {
+      "name": "orange",
+      "deg": 30,
+      "share": 0.88
+     },
+     {
+      "name": "rose",
+      "deg": 330,
+      "share": 0.12
+     }
+    ],
+    "glow": {
+     "ground": 0.1158,
+     "core": 0.76,
+     "profile": [
+      0.3249,
+      0.2724,
+      0.2246,
+      0.1607,
+      0.1076,
+      0.1167
+     ],
+     "efoldPx": 4.6,
+     "haloRatio": 0.169
+    },
+    "ground": {
+     "hex": "#500d23",
+     "vignette": 68.62
+    },
+    "regime": 2,
+    "t": 2.33,
+    "share": 0.31,
+    "flow": {
+     "matches": 426,
+     "outwardShare": 0.6,
+     "rBins": [
+      0.07,
+      0.21,
+      0.39,
+      0.61,
+      0.87,
+      1.22
+     ],
+     "radial": [
+      0.0,
+      0.0,
+      0.001,
+      0.007,
+      0.007,
+      0.034
+     ],
+     "rotDegS": [
+      0.0,
+      -2.3,
+      -4.7,
+      -2.9,
+      -2.5,
+      -2.8
+     ],
+     "direction": "outward",
+     "p": 0.18,
+     "vAt05": 0.016,
+     "rotMeanDegS": -2.7
+    },
+    "frame": "frames/look_2.jpg",
+    "overlay": "frames/look_2_overlay.png"
+   }
+  ]
+ },
+ "keyframes": [
+  {
+   "t": 0.267,
+   "why": "before transition at 0.40s (beat #1 r1)",
+   "file": "frames/key_00.jpg",
+   "beat": 1,
+   "rank": 1
+  },
+  {
+   "t": 0.467,
+   "why": "after transition at 0.40s",
+   "file": "frames/key_01.jpg",
+   "beat": 1,
+   "rank": 1
+  },
+  {
+   "t": 0.867,
+   "why": "regime 1: 69% of the clip",
+   "file": "frames/key_02.jpg",
+   "beat": 2,
+   "rank": 2
+  },
+  {
+   "t": 2.333,
+   "why": "regime 2: 31% of the clip",
+   "file": "frames/key_03.jpg",
+   "beat": 6,
+   "rank": 2
+  },
+  {
+   "t": 3.2,
+   "why": "before transition at 3.33s (beat #9 r1)",
+   "file": "frames/key_04.jpg",
+   "beat": 9,
+   "rank": 1
+  },
+  {
+   "t": 3.4,
+   "why": "after transition at 3.33s",
+   "file": "frames/key_05.jpg",
+   "beat": 9,
+   "rank": 1
+  }
+ ],
+ "sheets": [
+  "sheets/rank16.png",
+  "sheets/rank8.png",
+  "sheets/rank4.png",
+  "sheets/rank2.png",
+  "sheets/rank1-1.png",
+  "sheets/rank1-2.png"
+ ],
+ "cuts": {
+  "fps": 30,
+  "n": 11,
+  "t": [
+   0.333,
+   0.5,
+   0.633,
+   0.8,
+   2.233,
+   2.567,
+   3.133,
+   3.267,
+   3.3,
+   3.433,
+   3.9
+  ],
+  "perSecMax": 5,
+  "perSecMaxT": 3.0,
+  "holdMinMs": 33,
+  "holdMedMs": 167,
+  "holdMaxMs": 1433
+ },
+ "slitscan": {
+  "step": 1,
+  "colsPerSec": 30.0,
+  "size": [
+   134,
+   605
+  ]
+ },
+ "bursts": [
+  {
+   "t0": 1.47,
+   "why": "transition at 3.33s (beat #9 r1, novelty 3.5); also transition at 0.40s (beat #1 r1, novelty 3.0); also transition at 0.67s (beat #2 r2, novelty 1.8); also phrase start, beat #0 (0.07s)",
+   "prio": 1,
+   "anchor": "transition",
+   "dur": 3.0,
+   "kind": "cuts",
+   "cuts": [
+    23,
+    33,
+    50,
+    54,
+    55,
+    59,
+    73
+   ],
+   "holdsMs": [
+    333,
+    567,
+    133,
+    33,
+    133,
+    467
+   ],
+   "holdMinMs": 33,
+   "holdMedMs": 233,
+   "holdMaxMs": 567,
+   "brightMin": 0.115,
+   "brightMax": 0.324,
+   "changeMean": 0.0683,
+   "frames": 90,
+   "fps": 30,
+   "size": [
+    360,
+    640
+   ],
+   "cutT": [
+    2.237,
+    2.57,
+    3.137,
+    3.27,
+    3.303,
+    3.437,
+    3.903
+   ],
+   "files": {
+    "timing": "bursts/001.47/timing.png",
+    "detail": "bursts/001.47/detail.png",
+    "motion": "bursts/001.47/motion.png"
+   }
+  }
+ ],
+ "hears": {
+  "scene": "spectrum",
+  "samples": 568,
+  "onsets": 26,
+  "refOnsets": 28,
+  "onsetHitRate": 0.93,
+  "onsetPrecision": 0.92,
+  "onsetLagMs": 1,
+  "onsetLagSpreadMs": 18,
+  "bpmLock": {
+   "x1": 0.0,
+   "half": 0.0,
+   "double": 0.0,
+   "other": 1.0
+  },
+  "bpmMedian": 111.0,
+  "hitByRank": {
+   "16": {
+    "n": 1,
+    "hit": 1
+   },
+   "8": {
+    "n": 1,
+    "hit": 1
+   },
+   "4": {
+    "n": 2,
+    "hit": 2
+   },
+   "2": {
+    "n": 3,
+    "hit": 3
+   },
+   "1": {
+    "n": 6,
+    "hit": 5
+   }
+  },
+  "sections": [
+   {
+    "beat": 8,
+    "t": 2.926,
+    "oursRiseDelta": null
+   }
+  ]
+ }
+}

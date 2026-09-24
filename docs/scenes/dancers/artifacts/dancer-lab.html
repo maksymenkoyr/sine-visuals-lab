@@ -1,0 +1,542 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style></head><body>
+<title>Dancer Lab</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Manrope:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #120f1a;
+    --surface: #1d1829;
+    --surface-2: #26203a;
+    --line: #342c4b;
+    --text: #efe6d2;
+    --muted: #8d84a3;
+    --accent: #ff4fa3;
+    --accent-dim: #8a2b5c;
+    --cyan: #4fd9ff;
+    --ok: #7fd6a4;
+    --warn: #ffc46b;
+    --hot: #ff7a6b;
+    --display: "Syne", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+    --body: "Manrope", "Avenir Next", "Segoe UI", Arial, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--body); font-size: 15px; line-height: 1.5;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-family: var(--display); font-weight: 800; font-size: 30px; letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); max-width: 62ch; margin: 4px 0 0; }
+  .readout { font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex; gap: 16px; align-items: center; font-variant-numeric: tabular-nums; }
+  .readout b { color: var(--text); font-weight: 500; }
+  .beat { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-dim); display: inline-block; transition: transform 60ms; }
+  .stage { position: relative; background: #0b0911; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: auto; }
+  .stage .move { position: absolute; left: 14px; top: 12px; font-family: var(--mono); font-size: 12px; color: var(--muted); background: rgba(18,15,26,.7); padding: 4px 8px; border-radius: 4px; }
+  .stage .move b { color: var(--accent); font-weight: 500; }
+  .stage .cost { position: absolute; right: 14px; top: 12px; font-family: var(--mono); font-size: 12px; padding: 4px 8px; border-radius: 4px; background: rgba(18,15,26,.7); }
+  .cost.low { color: var(--ok); } .cost.med { color: var(--warn); } .cost.high { color: var(--hot); }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 16px; }
+  .group { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; }
+  .group h2 { font-family: var(--display); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 0 0 10px; }
+  .seg { display: flex; flex-direction: column; gap: 6px; }
+  .seg button {
+    font: 500 14px var(--body); color: var(--text); background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 4px; padding: 7px 10px; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .seg button small { color: var(--muted); font-size: 12px; font-weight: 400; }
+  .seg button:hover { border-color: var(--muted); }
+  .seg button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+  .seg button[aria-pressed="true"] { border-color: var(--accent); background: #2f1c33; }
+  .seg button[aria-pressed="true"] small { color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin-top: 8px; font-size: 13px; }
+  .slider label { color: var(--muted); grid-column: 1 / -1; }
+  .slider input[type=range] { width: 100%; accent-color: var(--accent); }
+  .slider output { font-family: var(--mono); font-size: 12px; min-width: 5ch; text-align: right; font-variant-numeric: tabular-nums; }
+  .check { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .check input { accent-color: var(--accent); }
+  .play { margin-top: 10px; font: 600 13px var(--body); color: var(--bg); background: var(--text); border: 0; border-radius: 4px; padding: 7px 12px; cursor: pointer; }
+  .play:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .maps { margin-top: 18px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; padding: 14px 16px; }
+  .maps h2 { font-family: var(--display); font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 0 0 8px; }
+  .maps dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
+  .maps dt { color: var(--accent); font-family: var(--mono); font-size: 12px; padding-top: 2px; }
+  .maps dd { margin: 0; max-width: 78ch; }
+  .maps code { font-family: var(--mono); font-size: 12.5px; color: var(--cyan); }
+  .foot { color: var(--muted); font-size: 13px; margin-top: 18px; max-width: 70ch; }
+  @media (max-width: 640px) { .maps dl { grid-template-columns: 1fr; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Dancer <span>Lab</span></h1>
+      <p class="sub">A canvas sketch of the dancing-figures scene. Every toggle is one of the decisions on the table; the figures re-choreograph live against a synthetic beat.</p>
+    </div>
+    <div class="readout">
+      <span><span class="beat" id="beatDot"></span></span>
+      <span>bpm <b id="roBpm">124</b></span>
+      <span>bar <b id="roBar">0.00</b></span>
+      <span>intensity <b id="roInt">0.50</b></span>
+    </div>
+  </header>
+
+  <div class="stage">
+    <canvas id="c" width="1100" height="520" aria-label="Animated dancing figures"></canvas>
+    <div class="move">move <b id="roMove">sway</b></div>
+    <div class="cost low" id="roCost">GPU cost: low</div>
+  </div>
+
+  <div class="controls">
+    <div class="group">
+      <h2>Look</h2>
+      <div class="seg" data-key="look">
+        <button data-v="flat" aria-pressed="true">Flat 2D cutouts <small>cheap</small></button>
+        <button data-v="depth" aria-pressed="false">2.5D stage rows <small>cheap</small></button>
+        <button data-v="shaded" aria-pressed="false">3D shaded figures <small>heavy</small></button>
+      </div>
+    </div>
+    <div class="group">
+      <h2>Cast</h2>
+      <div class="seg" data-key="cast">
+        <button data-v="hero" aria-pressed="true">Hero + backing crowd</button>
+        <button data-v="single" aria-pressed="false">Single dancer</button>
+        <button data-v="crowd" aria-pressed="false">Crowd only</button>
+      </div>
+    </div>
+    <div class="group">
+      <h2>Choreography</h2>
+      <div class="seg" data-key="choreo">
+        <button data-v="library" aria-pressed="true">Move library + picker</button>
+        <button data-v="osc" aria-pressed="false">Single layered oscillator</button>
+      </div>
+      <div class="slider">
+        <label for="intensity">Section intensity (what the picker escalates on)</label>
+        <input id="intensity" type="range" min="0" max="1" step="0.01" value="0.5">
+        <output id="intOut">0.50</output>
+      </div>
+      <label class="check"><input type="checkbox" id="autoInt" checked> Auto: build → drop → breakdown over 16 bars</label>
+    </div>
+    <div class="group">
+      <h2>Skin</h2>
+      <div class="seg" data-key="skin">
+        <button data-v="skeleton" aria-pressed="true">Skeleton</button>
+        <button data-v="stick" aria-pressed="false">Stick figure</button>
+        <button data-v="neon" aria-pressed="false">Neon tube</button>
+        <button data-v="blob" aria-pressed="false">Blob buddy</button>
+      </div>
+      <div class="slider">
+        <label for="bpm">Tempo</label>
+        <input id="bpm" type="range" min="80" max="175" step="1" value="124">
+        <output id="bpmOut">124</output>
+      </div>
+      <button class="play" id="play">Pause</button>
+    </div>
+  </div>
+
+  <div class="maps">
+    <h2>What the current picks mean in the codebase</h2>
+    <dl>
+      <dt>look</dt><dd id="mLook"></dd>
+      <dt>cast</dt><dd id="mCast"></dd>
+      <dt>choreo</dt><dd id="mChoreo"></dd>
+      <dt>skin</dt><dd id="mSkin"></dd>
+    </dl>
+  </div>
+  <p class="foot">This is Canvas 2D, not the real WebGL2 path — it exists to compare how the options feel, not to measure them. The same rig (joint angles → forward kinematics) would live in TypeScript in the real scene and upload joint positions to the fragment shader each frame.</p>
+</div>
+
+<script>
+(() => {
+  // ---------- state ----------
+  const state = { look: "flat", cast: "hero", choreo: "library", skin: "skeleton", bpm: 124, intensity: 0.5, autoInt: true, playing: true };
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) state.playing = false;
+
+  const MAPS = {
+    look: {
+      flat: "Fullscreen fragment shader via <code>createFullscreenScene</code>. Bones are 2D capsule SDFs in screen space; joint positions arrive through <code>extraUniforms</code> (the ripple-pool pattern in <code>caustics.ts</code>). Cheap enough for the gallery's always-on preview tiles.",
+      depth: "Same 2D SDF path, plus a per-figure depth value: scale, dim, and draw order come from it, and a perspective floor is a few lines of shader. Still one fullscreen pass — the stage feel is almost free.",
+      shaded: "Raymarched 3D capsules with lighting, like <code>ferrofluid.ts</code>'s sphere-trace loop gated on <code>uMaxSteps</code>. Per-pixel cost grows with figure count × bones, so realistically one or two figures and probably <code>minQuality: \"mid\"</code>."
+    },
+    cast: {
+      hero: "One rig at full detail plus a crowd of the same rig at smaller scale. Crowd size scales off <code>ctx.quality.detail</code> the way <code>gridSizeForQuality</code> does in <code>meshGrid.ts</code>; crowd members get a per-dancer bar-phase offset so they don't move in lockstep.",
+      single: "One rig, all the budget on choreography and skin detail. Simplest uniform layout: one <code>vec2[]</code> of joints.",
+      crowd: "N copies of the rig, variety from phase offsets and per-dancer move choice. The joint array becomes N × joints; count follows the quality preset."
+    },
+    choreo: {
+      library: "A TypeScript move library — each move is a pure function <code>(barPhase, beatPhase, pulses) → Pose</code>, unit-testable in Vitest. A picker escalates sway → step → bounce → hands-up on <code>anim.sectionIntensity</code>, crossfades between moves, and <code>anim.dropPulse</code> overrides with a throw-your-hands pose. <code>anim.tempoLock</code> gates back to sway when the beat is lost.",
+      osc: "One pose built from stacked layers on the clocks: bounce on <code>beatPulse</code>, sway on <code>barPhase</code>, arm height on intensity. Faster to ship and easy to tune with sliders, but every track produces the same dance at a different amplitude."
+    },
+    skin: {
+      skeleton: "A skin is a GLSL draw function over the rig: this one renders each bone as an ivory capsule with a skull, ribs and pelvis. Rig and skin never know about each other beyond the joint list.",
+      stick: "Same rig, single-width round-capped capsules and a ring head. The reference skin — if a move looks wrong here, it's the rig, not the skin.",
+      neon: "Same rig, glow falloff around each capsule using the palette's accent — the skin most in keeping with the existing scenes.",
+      blob: "Same rig, fat capsules with smooth-min joints so limbs merge; eyes on the head. The first 'character'-flavoured skin, still fully procedural. Skins picked from a <code>type: \"enum\"</code> setting — a small addition to <code>sceneSettings.ts</code> and <code>deviceMenu.ts</code>."
+    }
+  };
+  const COST = { flat: ["low", "GPU cost: low"], depth: ["low", "GPU cost: low"], shaded: ["high", "GPU cost: high"] };
+
+  // ---------- rig ----------
+  const L = { torso: 0.32, neck: 0.05, head: 0.105, shoulder: 0.14, upper: 0.22, lower: 0.2, hipW: 0.075, thigh: 0.28, shin: 0.27 };
+  const dirUp = (t) => [Math.sin(t), Math.cos(t)];
+  const dirDown = (t) => [Math.sin(t), -Math.cos(t)];
+
+  function basePose() {
+    return { hipX: 0, hipY: 0, lean: 0, headTilt: 0, yaw: 0,
+      armR: { upper: 0.18, lower: 0.25 }, armL: { upper: 0.18, lower: 0.25 },
+      legR: { thigh: 0.12, shin: 0.05 }, legL: { thigh: 0.12, shin: 0.05 } };
+  }
+  function lerpPose(a, b, t) {
+    const o = basePose();
+    for (const k of ["hipX", "hipY", "lean", "headTilt", "yaw"]) o[k] = a[k] + (b[k] - a[k]) * t;
+    for (const k of ["armR", "armL"]) for (const j of ["upper", "lower"]) o[k][j] = a[k][j] + (b[k][j] - a[k][j]) * t;
+    for (const k of ["legR", "legL"]) for (const j of ["thigh", "shin"]) o[k][j] = a[k][j] + (b[k][j] - a[k][j]) * t;
+    return o;
+  }
+  const TAU = Math.PI * 2;
+  const relu = (x) => Math.max(0, x);
+
+  // Moves: (bar, beat, m) -> Pose ; m = { hit, drop, int }
+  const MOVES = {
+    sway(bar, beat, m) {
+      const p = basePose(); const s = Math.sin(TAU * bar);
+      p.hipX = 0.05 * s; p.lean = 0.09 * s; p.headTilt = -0.12 * s; p.hipY = -0.012 + 0.012 * Math.cos(TAU * 2 * bar);
+      p.armR.upper = 0.2 + 0.08 * s; p.armL.upper = 0.2 - 0.08 * s;
+      p.armR.lower = 0.3; p.armL.lower = 0.3; p.yaw = 0.25 * s;
+      return p;
+    },
+    step(bar, beat, m) {
+      const p = basePose(); const s2 = Math.sin(TAU * 2 * bar); // shifts every beat
+      p.hipX = 0.1 * s2; p.lean = 0.1 * s2; p.headTilt = -0.15 * s2;
+      p.hipY = -0.06 * (0.5 - 0.5 * Math.cos(TAU * beat));
+      p.armR.upper = 0.55 + 0.25 * s2; p.armL.upper = 0.55 - 0.25 * s2;
+      p.armR.lower = 1.7 - 0.3 * s2; p.armL.lower = 1.7 + 0.3 * s2;
+      p.legR.thigh = 0.15 + 0.3 * relu(s2); p.legL.thigh = 0.15 + 0.3 * relu(-s2);
+      p.legR.shin = 0.5 * relu(s2) + 0.05; p.legL.shin = 0.5 * relu(-s2) + 0.05;
+      p.yaw = 0.35 * s2;
+      return p;
+    },
+    bounce(bar, beat, m) {
+      const p = basePose(); const s = Math.sin(TAU * bar); const s2 = Math.sin(TAU * 2 * bar);
+      p.hipY = 0.1 * m.hit - 0.03; p.hipX = 0.04 * s2; p.lean = 0.05 * s; p.headTilt = 0.1 * m.hit;
+      p.legR.shin = 0.45 * (1 - m.hit) + 0.1; p.legL.shin = 0.45 * (1 - m.hit) + 0.1;
+      p.legR.thigh = 0.22; p.legL.thigh = 0.22;
+      p.armR.upper = 2.1 + 0.15 * m.hit; p.armL.upper = 2.1 + 0.15 * m.hit;
+      p.armR.lower = -0.7 + 0.5 * s2; p.armL.lower = -0.7 - 0.5 * s2;
+      p.yaw = 0.15 * s;
+      return p;
+    },
+    handsUp(bar, beat, m) {
+      const p = basePose(); const s = Math.sin(TAU * bar); const c = Math.cos(TAU * bar); const s2 = Math.sin(TAU * 2 * bar);
+      p.hipY = 0.13 * m.hit - 0.04; p.hipX = 0.12 * s2; p.lean = 0.14 * s2; p.headTilt = -0.25 - 0.1 * s2;
+      p.armR.upper = 2.55 + 0.35 * s; p.armL.upper = 2.55 - 0.35 * c;
+      p.armR.lower = 0.35 * s2; p.armL.lower = -0.35 * s2;
+      p.legR.thigh = 0.35 + 0.35 * relu(s2); p.legL.thigh = 0.35 + 0.35 * relu(-s2);
+      p.legR.shin = 0.35 * relu(s2) + 0.15 * (1 - m.hit); p.legL.shin = 0.35 * relu(-s2) + 0.15 * (1 - m.hit);
+      p.yaw = 0.5 * s;
+      return p;
+    },
+    drop(bar, beat, m) {
+      const p = basePose();
+      p.hipY = 0.16; p.headTilt = -0.4; p.lean = 0;
+      p.armR.upper = 2.9; p.armL.upper = 2.9; p.armR.lower = 0.15; p.armL.lower = -0.15;
+      p.legR.thigh = 0.3; p.legL.thigh = 0.3; p.legR.shin = 0.6; p.legL.shin = 0.6;
+      return p;
+    }
+  };
+  const LADDER = ["sway", "step", "bounce", "handsUp"]; // intensity thresholds below
+  const THRESH = [0.0, 0.3, 0.58, 0.82];
+
+  function pickLibrary(bar, beat, m) {
+    // pick the rung and crossfade into the next over a window
+    let i = 0; for (let k = 1; k < THRESH.length; k++) if (m.int >= THRESH[k]) i = k;
+    const a = MOVES[LADDER[i]](bar, beat, m);
+    let pose = a, name = LADDER[i];
+    if (i < LADDER.length - 1) {
+      const w = 0.1, next = THRESH[i + 1];
+      const t = Math.min(1, Math.max(0, (m.int - (next - w)) / w));
+      if (t > 0) { pose = lerpPose(a, MOVES[LADDER[i + 1]](bar, beat, m), t); if (t > 0.5) name = LADDER[i + 1]; }
+    }
+    if (m.drop > 0.02) { pose = lerpPose(pose, MOVES.drop(bar, beat, m), m.drop); if (m.drop > 0.5) name = "drop!"; }
+    return { pose, name };
+  }
+  function pickOsc(bar, beat, m) {
+    const p = basePose(); const s = Math.sin(TAU * bar); const s2 = Math.sin(TAU * 2 * bar); const k = m.int;
+    p.hipX = (0.04 + 0.08 * k) * s2; p.lean = (0.06 + 0.08 * k) * s2; p.headTilt = -0.15 * s2 - 0.2 * k;
+    p.hipY = 0.14 * k * m.hit - 0.02 - 0.05 * k * (0.5 - 0.5 * Math.cos(TAU * beat)) * (1 - k);
+    const arm = 0.2 + 2.5 * k;
+    p.armR.upper = arm + 0.3 * k * s; p.armL.upper = arm - 0.3 * k * s;
+    p.armR.lower = (1.4 - 1.2 * k) + 0.4 * s2; p.armL.lower = (1.4 - 1.2 * k) - 0.4 * s2;
+    p.legR.thigh = 0.12 + 0.3 * k * relu(s2); p.legL.thigh = 0.12 + 0.3 * k * relu(-s2);
+    p.legR.shin = 0.05 + 0.4 * k * (1 - m.hit); p.legL.shin = 0.05 + 0.4 * k * (1 - m.hit);
+    p.yaw = 0.4 * k * s;
+    let pose = p; if (m.drop > 0.02) pose = lerpPose(p, MOVES.drop(bar, beat, m), m.drop);
+    return { pose, name: "oscillator (" + k.toFixed(2) + ")" };
+  }
+
+  // Forward kinematics: pose -> joints in figure units (hip origin, y up)
+  function solve(p, yawOn) {
+    const J = {};
+    J.hip = [p.hipX, p.hipY];
+    const up = dirUp(p.lean);
+    J.chest = [J.hip[0] + up[0] * L.torso, J.hip[1] + up[1] * L.torso];
+    const nu = dirUp(p.lean + p.headTilt * 0.4);
+    J.neck = [J.chest[0] + nu[0] * L.neck, J.chest[1] + nu[1] * L.neck];
+    const hu = dirUp(p.lean + p.headTilt);
+    J.head = [J.neck[0] + hu[0] * (L.head + 0.02), J.neck[1] + hu[1] * (L.head + 0.02)];
+    const perp = [Math.cos(p.lean), -Math.sin(p.lean)];
+    for (const side of [1, -1]) {
+      const sfx = side > 0 ? "R" : "L"; const arm = p["arm" + sfx]; const leg = p["leg" + sfx];
+      const sh = [J.chest[0] + perp[0] * L.shoulder * side, J.chest[1] + perp[1] * L.shoulder * side];
+      const d1 = dirDown(arm.upper * side); const el = [sh[0] + d1[0] * L.upper, sh[1] + d1[1] * L.upper];
+      const d2 = dirDown((arm.upper + arm.lower) * side); const ha = [el[0] + d2[0] * L.lower, el[1] + d2[1] * L.lower];
+      const hp = [J.hip[0] + L.hipW * side, J.hip[1]];
+      const d3 = dirDown(leg.thigh * side); const kn = [hp[0] + d3[0] * L.thigh, hp[1] + d3[1] * L.thigh];
+      const d4 = dirDown((leg.thigh - leg.shin) * side); const ft = [kn[0] + d4[0] * L.shin, kn[1] + d4[1] * L.shin];
+      J["shoulder" + sfx] = sh; J["elbow" + sfx] = el; J["hand" + sfx] = ha; J["hipJ" + sfx] = hp; J["knee" + sfx] = kn; J["foot" + sfx] = ft;
+    }
+    // pseudo-yaw for the shaded look: rotate about the hip's x, keep z for sorting/thickness
+    const yaw = yawOn ? p.yaw : 0; const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    for (const k in J) { const x = J[k][0] - p.hipX; J[k] = [p.hipX + x * cy, J[k][1], x * sy]; }
+    return J;
+  }
+  const BONES = [
+    ["hipJL", "kneeL", "leg"], ["kneeL", "footL", "leg"], ["hipJR", "kneeR", "leg"], ["kneeR", "footR", "leg"],
+    ["hipJL", "hipJR", "pelvis"], ["hip", "chest", "spine"], ["chest", "neck", "neck"],
+    ["shoulderL", "shoulderR", "clav"],
+    ["shoulderL", "elbowL", "arm"], ["elbowL", "handL", "arm"], ["shoulderR", "elbowR", "arm"], ["elbowR", "handR", "arm"],
+  ];
+
+  // ---------- skins ----------
+  const BONE_W = { leg: 0.055, pelvis: 0.05, spine: 0.06, neck: 0.04, clav: 0.045, arm: 0.045 };
+  function capsule(ctx, a, b, w, style) {
+    ctx.lineCap = "round"; ctx.lineWidth = w; ctx.strokeStyle = style;
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+  }
+  function shade(ctx, a, b, w, base, hi, lo) {
+    // three-pass capsule: dark edge, base, highlight line — reads as a lit cylinder
+    capsule(ctx, a, b, w, lo);
+    capsule(ctx, a, b, w * 0.72, base);
+    const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1, nx = -dy / len * w * 0.15, ny = dx / len * w * 0.15;
+    capsule(ctx, [a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], w * 0.22, hi);
+  }
+  const SKINS = {
+    skeleton: {
+      bone(ctx, a, b, w, kind, sh) {
+        if (sh) shade(ctx, a, b, w * 1.1, "#e9dfc8", "#fff8e6", "#8a7f6b");
+        else { capsule(ctx, a, b, w * 1.15, "#6f6353"); capsule(ctx, a, b, w * 0.8, "#efe6d2"); }
+        // knobby ends
+        ctx.fillStyle = sh ? "#f4ecd8" : "#efe6d2";
+        for (const p of [a, b]) { ctx.beginPath(); ctx.arc(p[0], p[1], w * 0.62, 0, TAU); ctx.fill(); }
+      },
+      head(ctx, c, r, tilt, sh) {
+        ctx.save(); ctx.translate(c[0], c[1]); ctx.rotate(-tilt);
+        ctx.fillStyle = sh ? "#e9dfc8" : "#efe6d2"; ctx.strokeStyle = "#6f6353"; ctx.lineWidth = r * 0.12;
+        ctx.beginPath(); ctx.ellipse(0, -r * 0.05, r, r * 1.05, 0, 0, TAU); ctx.fill(); if (!sh) ctx.stroke();
+        ctx.beginPath(); ctx.roundRect(-r * 0.55, r * 0.55, r * 1.1, r * 0.5, r * 0.15); ctx.fill(); if (!sh) ctx.stroke();
+        ctx.fillStyle = "#1a1424";
+        ctx.beginPath(); ctx.ellipse(-r * 0.38, -r * 0.05, r * 0.26, r * 0.3, 0, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(r * 0.38, -r * 0.05, r * 0.26, r * 0.3, 0, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(0, r * 0.25); ctx.lineTo(-r * 0.1, r * 0.45); ctx.lineTo(r * 0.1, r * 0.45); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = "#1a1424"; ctx.lineWidth = r * 0.07;
+        for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(i * r * 0.22, r * 0.62); ctx.lineTo(i * r * 0.22, r * 0.95); ctx.stroke(); }
+        ctx.restore();
+      },
+      extras(ctx, J, s, sh) {
+        // ribs: curved lines across the spine
+        const c = J.chest, h = J.hip; ctx.strokeStyle = sh ? "#e2d7bf" : "#efe6d2"; ctx.lineWidth = s * 0.028; ctx.lineCap = "round";
+        for (let i = 0; i < 4; i++) {
+          const t = 0.2 + i * 0.2; const x = h[0] + (c[0] - h[0]) * t, y = h[1] + (c[1] - h[1]) * t; const rw = s * (0.16 - i * 0.02);
+          ctx.beginPath(); ctx.ellipse(x, y, rw, s * 0.03, 0, Math.PI * 0.05, Math.PI * 0.95); ctx.stroke();
+          ctx.beginPath(); ctx.ellipse(x, y, rw, s * 0.03, 0, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+        }
+      }
+    },
+    stick: {
+      bone(ctx, a, b, w, kind, sh) { capsule(ctx, a, b, w * 0.55, sh ? "#f4ecd8" : "#efe6d2"); },
+      head(ctx, c, r, tilt) { ctx.strokeStyle = "#efe6d2"; ctx.lineWidth = r * 0.28; ctx.beginPath(); ctx.arc(c[0], c[1], r * 0.92, 0, TAU); ctx.stroke(); },
+      extras() {}
+    },
+    neon: {
+      bone(ctx, a, b, w, kind) {
+        ctx.save(); ctx.shadowColor = kind === "arm" || kind === "clav" ? "#ff4fa3" : "#4fd9ff"; ctx.shadowBlur = w * 2.2;
+        capsule(ctx, a, b, w * 0.5, ctx.shadowColor); ctx.restore();
+        capsule(ctx, a, b, w * 0.22, "#ffffff");
+      },
+      head(ctx, c, r) {
+        ctx.save(); ctx.shadowColor = "#ff4fa3"; ctx.shadowBlur = r * 0.9; ctx.strokeStyle = "#ff4fa3"; ctx.lineWidth = r * 0.22;
+        ctx.beginPath(); ctx.arc(c[0], c[1], r * 0.9, 0, TAU); ctx.stroke(); ctx.restore();
+        ctx.strokeStyle = "#ffffff"; ctx.lineWidth = r * 0.08; ctx.beginPath(); ctx.arc(c[0], c[1], r * 0.9, 0, TAU); ctx.stroke();
+      },
+      extras() {}
+    },
+    blob: {
+      bone(ctx, a, b, w, kind, sh) {
+        if (sh) shade(ctx, a, b, w * 2.1, "#ff4fa3", "#ff9ccb", "#8a2b5c"); else capsule(ctx, a, b, w * 2.1, "#ff4fa3");
+        ctx.fillStyle = sh ? "#ff5fab" : "#ff4fa3";
+        for (const p of [a, b]) { ctx.beginPath(); ctx.arc(p[0], p[1], w * 1.05, 0, TAU); ctx.fill(); }
+      },
+      head(ctx, c, r, tilt, sh) {
+        ctx.save(); ctx.translate(c[0], c[1]); ctx.rotate(-tilt);
+        ctx.fillStyle = "#ff4fa3"; ctx.beginPath(); ctx.arc(0, 0, r * 1.25, 0, TAU); ctx.fill();
+        if (sh) { const g = ctx.createRadialGradient(-r * 0.4, -r * 0.5, r * 0.1, 0, 0, r * 1.3); g.addColorStop(0, "rgba(255,255,255,.35)"); g.addColorStop(1, "rgba(0,0,0,.25)"); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r * 1.25, 0, TAU); ctx.fill(); }
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(-r * 0.42, -r * 0.1, r * 0.34, 0, TAU); ctx.arc(r * 0.42, -r * 0.1, r * 0.34, 0, TAU); ctx.fill();
+        ctx.fillStyle = "#1a1424"; ctx.beginPath(); ctx.arc(-r * 0.36, -r * 0.08, r * 0.16, 0, TAU); ctx.arc(r * 0.48, -r * 0.08, r * 0.16, 0, TAU); ctx.fill();
+        ctx.restore();
+      },
+      extras(ctx, J, s, sh) {
+        const c = J.chest, h = J.hip; const mx = (c[0] + h[0]) / 2, my = (c[1] + h[1]) / 2;
+        ctx.fillStyle = "#ff4fa3"; ctx.beginPath(); ctx.ellipse(mx, my, s * 0.15, s * 0.2, 0, 0, TAU); ctx.fill();
+      }
+    }
+  };
+
+  // ---------- drawing a figure ----------
+  function drawFigure(ctx, J, s, floorY, cx, opts) {
+    // J in figure units (y up). map: X = cx + x*s ; Y = floorY - (0.55 + y)*s
+    const P = {}; for (const k in J) P[k] = [cx + J[k][0] * s, floorY - (0.55 + J[k][1]) * s, J[k][2]];
+    const skin = SKINS[opts.skin]; const sh = opts.look === "shaded";
+    ctx.save(); ctx.globalAlpha = opts.alpha;
+    if (sh) { // contact shadow
+      ctx.fillStyle = "rgba(0,0,0,.45)"; ctx.beginPath(); ctx.ellipse(cx + J.hip[0] * s, floorY + s * 0.01, s * 0.32, s * 0.05, 0, 0, TAU); ctx.fill();
+    }
+    let order = BONES.map((b, i) => ({ b, i, z: (P[b[0]][2] + P[b[1]][2]) / 2 }));
+    if (sh) order.sort((a, b) => a.z - b.z); // back to front
+    const headZ = P.head[2]; let headDrawn = false;
+    for (const { b, z } of order) {
+      if (sh && !headDrawn && z > headZ) { skin.head(ctx, P.head, L.head * s, opts.pose.lean + opts.pose.headTilt, sh); headDrawn = true; }
+      if (b[2] === "spine" && skin.extras) { skin.bone(ctx, P[b[0]], P[b[1]], BONE_W[b[2]] * s * (sh ? 1 + z * 0.4 : 1), b[2], sh); skin.extras(ctx, P, s, sh); continue; }
+      skin.bone(ctx, P[b[0]], P[b[1]], BONE_W[b[2]] * s * (sh ? 1 + z * 0.4 : 1), b[2], sh);
+    }
+    if (!headDrawn) skin.head(ctx, P.head, L.head * s, opts.pose.lean + opts.pose.headTilt, sh);
+    ctx.restore();
+  }
+
+  // ---------- scene layout ----------
+  function layout(W, H) {
+    const floor = H * 0.86;
+    const heroH = H * 0.66, crowdH = H * 0.5;
+    const hero = { cx: W / 2, floor, s: heroH / 1.2, alpha: 1, role: "hero", off: 0 };
+    const figs = [];
+    const { cast, look } = state;
+    if (cast === "single") { figs.push(hero); }
+    else if (cast === "hero") {
+      const n = 6; const offs = [0.25, 0.5, 0.75, 0.125, 0.625, 0.375];
+      for (let i = 0; i < n; i++) {
+        const u = (i + 0.5) / n; let cx, fl, sc, al;
+        if (look === "depth") { cx = W * 0.5 + (u - 0.5) * W * 0.78; fl = H * 0.7; sc = (H * 0.38) / 1.2; al = 0.55; }
+        else { const side = i < 3 ? -1 : 1; const k = i % 3; cx = W / 2 + side * (W * 0.2 + k * W * 0.135); fl = floor; sc = (crowdH * (0.85 - k * 0.06)) / 1.2; al = 0.85; }
+        figs.push({ cx, floor: fl, s: sc, alpha: al, role: "crowd", off: offs[i], lazy: 0.7 + 0.1 * (i % 3) });
+      }
+      figs.push(hero);
+    } else {
+      const n = 8; const offs = [0, 0.25, 0.5, 0.75, 0.125, 0.625, 0.375, 0.875];
+      for (let i = 0; i < n; i++) {
+        const u = (i + 0.5) / n; let cx, fl, sc, al;
+        if (look === "depth") { const back = i % 2 === 0; cx = W * 0.5 + (u - 0.5) * W * 0.9; fl = back ? H * 0.72 : floor; sc = (back ? H * 0.4 : H * 0.55) / 1.2; al = back ? 0.6 : 1; }
+        else { cx = W * 0.5 + (u - 0.5) * W * 0.92; fl = floor; sc = (H * 0.55) / 1.2; al = 1; }
+        figs.push({ cx, floor: fl, s: sc, alpha: al, role: "crowd", off: offs[i], lazy: 0.75 + 0.1 * (i % 3), z: fl });
+      }
+      figs.sort((a, b) => a.floor - b.floor);
+    }
+    return figs;
+  }
+
+  function drawStage(ctx, W, H, m) {
+    ctx.clearRect(0, 0, W, H);
+    // ground
+    ctx.fillStyle = "#0b0911"; ctx.fillRect(0, 0, W, H);
+    const floor = H * 0.86;
+    if (state.look === "depth" || state.look === "shaded") {
+      // spotlight
+      const g = ctx.createRadialGradient(W / 2, H * 0.45, 10, W / 2, H * 0.45, H * 0.8);
+      g.addColorStop(0, "rgba(255,79,163," + (0.10 + 0.12 * m.hit) + ")"); g.addColorStop(1, "rgba(255,79,163,0)");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    }
+    if (state.look === "depth") {
+      // perspective floor grid
+      ctx.strokeStyle = "rgba(141,132,163,.25)"; ctx.lineWidth = 1; const hz = H * 0.62;
+      for (let i = -8; i <= 8; i++) { ctx.beginPath(); ctx.moveTo(W / 2 + i * W * 0.05, hz); ctx.lineTo(W / 2 + i * W * 0.22, H); ctx.stroke(); }
+      for (let k = 0; k < 7; k++) { const t = Math.pow((k + 1) / 7, 1.8); const y = hz + (H - hz) * t; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+      ctx.fillStyle = "rgba(255,79,163," + (0.05 + 0.1 * m.hit) + ")"; ctx.fillRect(0, hz - 2, W, 3);
+    } else if (state.look === "shaded") {
+      const g = ctx.createLinearGradient(0, floor - H * 0.2, 0, H); g.addColorStop(0, "rgba(38,32,58,0)"); g.addColorStop(1, "rgba(38,32,58,.9)");
+      ctx.fillStyle = g; ctx.fillRect(0, floor - H * 0.2, W, H);
+    } else {
+      ctx.strokeStyle = "rgba(141,132,163,.35)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, floor + 1); ctx.lineTo(W, floor + 1); ctx.stroke();
+      // beat ticks
+      ctx.fillStyle = "rgba(255,79,163," + (0.25 + 0.6 * m.hit) + ")";
+      for (let i = 0; i < 4; i++) { ctx.globalAlpha = i === Math.floor(m.bar * 4) ? 1 : 0.35; ctx.fillRect(W / 2 - 40 + i * 22, H * 0.94, 14, 4); }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ---------- clock ----------
+  const cv = document.getElementById("c"); const ctx = cv.getContext("2d");
+  let t0 = performance.now(), tSec = 0, beatsAcc = 0, lastBpm = state.bpm, lastT = null, dropPulse = 0, intAuto = 0.5;
+  let lastMove = "";
+  function frame(now) {
+    const dt = Math.min(0.05, (now - (lastT ?? now)) / 1000); lastT = now;
+    if (state.playing) { tSec += dt; beatsAcc += dt * state.bpm / 60; dropPulse = Math.max(0, dropPulse - dt * 1.6); }
+    const beat = beatsAcc % 1, bar = (beatsAcc / 4) % 1, barIdx = Math.floor(beatsAcc / 4) % 16;
+    const hit = Math.exp(-6 * beat * 60 / state.bpm);
+    // auto intensity: 16-bar cycle
+    if (state.autoInt) {
+      const u = (beatsAcc / 4) % 16;
+      if (u < 8) intAuto = 0.15 + 0.7 * (u / 8);
+      else if (u < 14) intAuto = 0.92;
+      else intAuto = 0.3;
+      if (state.playing && u >= 8 && u < 8.03 && dropPulse < 0.5) dropPulse = 1;
+      state.intensity = intAuto; document.getElementById("intensity").value = intAuto.toFixed(2);
+      document.getElementById("intOut").value = intAuto.toFixed(2);
+    }
+    const m = { hit, drop: dropPulse, int: state.intensity, bar, beat };
+    const W = cv.width, H = cv.height;
+    drawStage(ctx, W, H, m);
+    const figs = layout(W, H);
+    let heroName = "";
+    for (const f of figs) {
+      const fb = (bar + f.off) % 1, fbeat = (beat + f.off * 4) % 1;
+      const fm = { ...m, bar: fb, beat: fbeat, hit: f.role === "hero" ? hit : Math.exp(-6 * fbeat * 60 / state.bpm), int: f.role === "hero" ? m.int : Math.min(0.8, m.int * (f.lazy || 1)) };
+      const r = state.choreo === "library" ? pickLibrary(fb, fbeat, fm) : pickOsc(fb, fbeat, fm);
+      if (f.role === "hero" || !heroName) heroName = r.name;
+      const J = solve(r.pose, state.look === "shaded");
+      drawFigure(ctx, J, f.s, f.floor, f.cx, { skin: state.skin, look: state.look, alpha: f.alpha, pose: r.pose });
+    }
+    // readouts
+    if (heroName !== lastMove) { document.getElementById("roMove").textContent = heroName; lastMove = heroName; }
+    document.getElementById("roBar").textContent = (barIdx + bar).toFixed(2);
+    document.getElementById("roInt").textContent = state.intensity.toFixed(2);
+    document.getElementById("beatDot").style.transform = "scale(" + (1 + hit * 1.4) + ")";
+    document.getElementById("beatDot").style.background = hit > 0.5 ? "#ff4fa3" : "#8a2b5c";
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- wiring ----------
+  function refreshMaps() {
+    for (const k of ["look", "cast", "choreo", "skin"]) document.getElementById("m" + k[0].toUpperCase() + k.slice(1)).innerHTML = MAPS[k][state[k]];
+    const c = COST[state.look]; const el = document.getElementById("roCost"); el.className = "cost " + c[0]; el.textContent = c[1];
+  }
+  for (const seg of document.querySelectorAll(".seg")) {
+    const key = seg.dataset.key;
+    seg.addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      state[key] = b.dataset.v;
+      for (const x of seg.querySelectorAll("button")) x.setAttribute("aria-pressed", x === b ? "true" : "false");
+      refreshMaps();
+    });
+  }
+  const bpm = document.getElementById("bpm"); bpm.addEventListener("input", () => { state.bpm = +bpm.value; document.getElementById("bpmOut").value = bpm.value; document.getElementById("roBpm").textContent = bpm.value; });
+  const inten = document.getElementById("intensity"); inten.addEventListener("input", () => { state.autoInt = false; document.getElementById("autoInt").checked = false; state.intensity = +inten.value; document.getElementById("intOut").value = (+inten.value).toFixed(2); });
+  document.getElementById("autoInt").addEventListener("change", (e) => { state.autoInt = e.target.checked; });
+  const play = document.getElementById("play"); play.textContent = state.playing ? "Pause" : "Play";
+  play.addEventListener("click", () => { state.playing = !state.playing; play.textContent = state.playing ? "Pause" : "Play"; });
+  refreshMaps();
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>
