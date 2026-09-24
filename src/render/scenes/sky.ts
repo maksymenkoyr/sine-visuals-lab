@@ -4,6 +4,7 @@ import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { NUM_BANDS } from "../../audio/types.ts";
+import { createBeatListener, type BeatListenerSpec } from "../beatListener.ts";
 import {
   createFluidSim,
   detectSimFormat,
@@ -63,56 +64,51 @@ import {
 // viewer is actually looking at rather than a hypothetical shared-canvas
 // centre that might sit off this device's own slice entirely.
 //
-// Floaters are drawn as hollow, near-transparent refractive tubes
-// (floaterShape), not a solid painted stroke or a soft glowing dot — a real
-// floater is a strand of vitreous gel refracting the sky behind it: a faint
-// bright rim on its edge, a thin dark fringe just outside that rim, and a
-// barely-lifted see-through interior (floaterProfile turns the signed
-// distance to the tube's own edge into that rim/fringe/interior brightness
-// delta). The path itself comes from floaterPath, which integrates a
-// heading forward at a fixed step rather than offsetting each point
-// sideways by an independent function of t, so the strand's arc length
-// always comes out exactly right and a sharp corner can't form — see
-// floaterPath's own comment. floaterShape's dot branch (FLOATER_DOT_CHANCE
-// of seeds) reads the identical profile around a filled disk instead of a
-// tube — a measured real floater dot turned out to have the same rim/fringe
-// shape, just circular. The shape itself is fixed per seed (no time
-// dependency in floaterShape).
+// Floaters are hollow, near-transparent refractive tubes: a real floater is
+// a strand of vitreous gel refracting the sky behind it, so floaterProfile
+// turns the signed distance to a floater's own edge into a faint bright rim,
+// a thin dark fringe just outside it and a barely-lifted see-through
+// interior, applied as a multiplicative modulation of whatever is behind.
+// Strand paths come from floaterPath, which integrates a heading forward at
+// a fixed step, so a strand's arc length always comes out exactly right and
+// a sharp corner can't form. Dots read the same profile around a disk.
 //
-// Floaters only exist inside waves — there is no always-on baseline — and
-// they don't move like real floaters (no saccade jumps). Each wave is a
-// *swarm*: many tiny floaters laid out in a few hashed clumps (floaterOffset),
-// drifting together on a slow wind and gently churning in place, so the whole
-// wave reads as a small cloud made of floaters. Swarms keep off the real
-// clouds twice over: render() spawns each one at the clearest of a handful of
-// candidate spots (pickSwarmCenter, scored against the cloud drifters'
-// current centres), and in the shader any floater whose own centre sits over
-// cloud (cloudBumpedAt, the exact field the cloud pass thresholds) fades
-// out, with a per-pixel cloudAlpha backstop. Everything is evaluated
-// per-fragment as pure functions of (uTime, burst) — no vertex buffers, no
-// per-floater JS state. A swarm-level bounding circle skips whole waves for
-// fragments nowhere near them, and floaterShape's own bounding circle skips
-// the per-segment distance loop for fragments nowhere near a given floater.
-// The loop bound (FLOATER_PER_BURST_MAX below) is sized for the highest
-// quality tier and compiled once; how many of those slots are actually drawn
-// is gated at runtime by uDetail (quality.ts's 0..1 density proxy) combined
-// with the Floaters setting, so a lower tier gets an explicit, bounded
-// ceiling without a second shader variant.
+// They arrive in short-lived waves, and each wave is laid out like the
+// user's two text-grid references: a streak of cells on a fixed grid
+// (FLOATER_CELL), where the reference's ">" body becomes aligned strands
+// (all following the streak's slant), its "_" fringe becomes short flat
+// strands low in the cell, and its "o" hotspot becomes dots. A streak is a
+// slanted ellipse of density (streakDensity), frayed row by row so each
+// row's run starts and ends at its own column, the references'
+// stair-stepped rows. Every pixel of a cell reads the density at the cell's
+// centre and the cell's own hash fixes its floater's shape, so a drifting
+// streak moves by floaters switching on and off across the grid. Its
+// envelope is subtracted from the density rather than multiplied in, so a
+// streak pops in fringe-first and dissolves cell by cell (body strand to
+// fringe strand to nothing). FLOATER_CELL is sized so a floater plus its
+// fringe fits in one cell, since a pixel only evaluates its own cell.
+//
+// Streaks keep off the real clouds twice over: render() spawns each one at
+// the clearest of a handful of candidate spots (pickSwarmCenter, scored
+// against the cloud drifters' current centres), and in the shader a cell
+// over cloud (cloudBumpedAt, the exact field the cloud pass thresholds)
+// draws nothing, with a per-pixel cloudAlpha backstop. Per pixel the cost is
+// one density evaluation per live wave (MAX_WAVE_BURSTS, each skipped
+// outright when the cell is out of its reach) plus one floater, so no
+// quality-tier gating is needed.
 //
 // Floater waves reuse powder.ts's stateless chunk-pool idiom
 // (createWavePool below): a small JS pool of (t0, strength, seed, x, y)
 // slots, uploaded as flat uniform arrays (uBurstT0/uBurstAmp/uBurstSeed/
 // uBurstX/uBurstY — named distinctly from the "Wave strength" *setting*'s
 // own auto-generated uWaveStrength uniform, the collision ambience.ts's
-// header flags), each slot's whole swarm evaluated analytically from its age
-// in the shader. A burst fires on anim.dropOnset (graded locally from
-// anim.dropPulse/anim.sectionIntensity — the same local-grading spirit as
-// powder.ts's createBigHitDetector, without needing that detector's own
-// baseline/refractory logic, since dropOnset already comes pre-debounced
-// out of sectionIntensity.ts). Because the brief wants floaters to arrive
-// "sometimes a lot at once, not just a constant light drift" rather than
-// only on a drop, a spontaneous wave also fires on its own between drops,
-// at a rate the Wave frequency setting controls (waveFallbackIntervalSec).
+// header flags), each slot's whole streak evaluated analytically from its
+// age in the shader. Waves come and go quickly on the treble: a
+// beatListener.ts listener on the "high" source fires one per treble hit,
+// held off by waveHoldBeats (tempo-aware, from the Wave frequency setting)
+// and sized by the high band's own pulse (waveStrengthFromTreble). A
+// section drop (anim.dropOnset, graded by waveStrengthFromDrop) always fires
+// a bigger one on top.
 //
 // Haidinger's brush rotates on brushPhase, a plain per-frame accumulator
 // (advanceBrushPhase) owned by this scene — never anim.barPhase, which
@@ -129,10 +125,8 @@ import {
 // against the tempo-locked alternative).
 const ID = "sky";
 
-// --- Quality-scaled illusion budgets (compile-time loop bounds in the
-// display shader) — see the file header on how uDetail gates actual use. ---
-const FLOATER_PER_BURST_MAX = 32; // floaters in one wave's swarm at the top tier
-export const MAX_WAVE_BURSTS = 3; // concurrent floater waves — mirrors powder.ts's MAX_BURSTS
+// --- Floater-wave budget (a compile-time loop bound in the display shader). ---
+export const MAX_WAVE_BURSTS = 6; // concurrent floater streaks — treble fires them often and each is short-lived, so several overlap
 
 // --- Fluid sim tuning. Fixed rather than exposed as settings — the plan's
 // settings list is representative, not exhaustive, and these aren't part of
@@ -158,14 +152,17 @@ const DRIFTER_FORCE = 10; // texels/s^2 at FORCE_REF_ROWS — see skyFluidSim.ts
 const DRIFTER_DYE_RATE = 1.05; // density/s at the splat centre while puffing, before Cloud cover scales it
 const DRIFTER_PUFF_RATE = 0.45; // rad/s of each source's on/off cycle (~14s per puff) — a long "on" phase grows one puff into a big blob
 
-// --- Floater waves. ---
-export const WAVE_LIFE_SEC = 16; // long enough for a swarm to visibly drift across part of the sky
+// --- Floater waves (streaks of floaters on a grid — see the
+// file header). Short-lived and fired by treble, so they come and go
+// quickly. ---
+export const WAVE_LIFE_SEC = 1.8;
 export const WAVE_DEAD_T0 = -1e9;
-const WAVE_FADE_IN_SEC = 1.2; // one floater's own fade-in, from its staggered birth (see the swarm loop in the shader)
-const WAVE_FADE_OUT_SEC = 1.8; // one floater's own fade-out, ending at its staggered death
-const SPONTANEOUS_WAVE_STRENGTH = 0.5;
-const WAVE_FALLBACK_MIN_SEC = 8; // shortest spontaneous-wave gap, at Wave frequency = 1
-const WAVE_FALLBACK_MAX_SEC = 26; // longest gap, at Wave frequency = 0 — the sky is sometimes empty of floaters between waves
+const WAVE_FADE_IN_SEC = 0.15; // the streak's density ramps up this fast — floaters pop in, fringe first
+const WAVE_FADE_OUT_SEC = 0.9; // and ramps back down over this long, so it dissolves ">" -> "_" -> gone
+const WAVE_HOLD_MIN_BEATS = 0.5; // gap between treble waves at Wave frequency = 1
+const WAVE_HOLD_MAX_BEATS = 2; // at Wave frequency = 0
+const WAVE_HOLD_FALLBACK_SEC_PER_BEAT = 0.45; // beatListener's no-tempo-lock fallback, per beat of hold
+const WAVE_REFRACTORY_SEC = 0.12; // hard floor between treble waves, whatever the hold
 const SWARM_CANDIDATES = 12; // spawn spots pickSwarmCenter scores against the cloud drifters
 
 // --- Haidinger's brush. ---
@@ -187,12 +184,22 @@ export function waveStrengthFromDrop(dropPulse: number, sectionIntensity: number
   return clamp01((0.5 + 0.5 * p) * (0.6 + 0.4 * s));
 }
 
-/** Seconds between spontaneous waves (no drop needed) at a given Wave
- *  frequency setting — 0 is the longest gap, 1 the shortest. A section drop
- *  always fires its own wave regardless of this timer (see render()). */
-export function waveFallbackIntervalSec(frequency: number): number {
+/** How many beats a treble wave holds off the next one, at a given Wave
+ *  frequency setting — 0 is the longest hold, 1 the shortest. Fed to the
+ *  treble beatListener as a HoldBeats spec, so it follows the live tempo once
+ *  the tracker locks. A section drop always fires its own wave regardless
+ *  (see render()). */
+export function waveHoldBeats(frequency: number): number {
   const f = Number.isFinite(frequency) ? clamp01(frequency) : 0;
-  return WAVE_FALLBACK_MAX_SEC - (WAVE_FALLBACK_MAX_SEC - WAVE_FALLBACK_MIN_SEC) * f;
+  return WAVE_HOLD_MAX_BEATS - (WAVE_HOLD_MAX_BEATS - WAVE_HOLD_MIN_BEATS) * f;
+}
+
+/** How big a treble wave's streak is, from the high band's own pulse at the
+ *  moment it fired: a light tick draws a small streak, a hard crash a big
+ *  one. Never zero, so every wave that fires is visible. */
+export function waveStrengthFromTreble(highPulse: number): number {
+  const p = Number.isFinite(highPulse) ? clamp01(highPulse) : 0;
+  return 0.3 + 0.55 * p;
 }
 
 /** Haidinger's brush's own accumulator: a plain, continuously increasing
@@ -393,7 +400,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "floaterDensity",
     label: "Floaters",
-    description: "How many floaters make up each wave's swarm — a sparse drift at the low end, a thick cloud of them at the high end",
+    description: "How big each wave's streak of floaters is — a few at the low end, a wide block of them at the high end",
     group: "Motion",
     min: 0,
     max: 1,
@@ -404,7 +411,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "waveStrength",
     label: "Wave strength",
-    description: "How much a hard section drop swells its wave's swarm compared with a quiet spontaneous wave",
+    description: "How much a hard treble hit or a section drop swells its streak compared with a light tick",
     group: "Motion",
     min: 0,
     max: 1,
@@ -416,7 +423,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "waveFrequency",
     label: "Wave frequency",
-    description: "How often floaters arrive in a wave — on every section drop regardless, and spontaneously in between at this rate",
+    description: "How closely treble waves may follow each other — one every couple of beats at the low end, every half beat at the high end; a section drop always fires one",
     group: "Motion",
     min: 0,
     max: 1,
@@ -486,7 +493,6 @@ uniform float uBurstSeed[${MAX_WAVE_BURSTS}];
 uniform float uBurstX[${MAX_WAVE_BURSTS}];
 uniform float uBurstY[${MAX_WAVE_BURSTS}];
 
-const int FLOATER_PER_BURST_MAX = ${FLOATER_PER_BURST_MAX};
 const int MAX_WAVE_BURSTS_C = ${MAX_WAVE_BURSTS};
 const float WAVE_LIFE_SEC_C = ${WAVE_LIFE_SEC.toFixed(3)};
 const float WAVE_FADE_IN = ${WAVE_FADE_IN_SEC.toFixed(3)};
@@ -520,58 +526,65 @@ const float BRUSH_R_CORE = 0.03;
 const float BRUSH_R_IN = 0.22;
 const float BRUSH_R_OUT = 0.34;
 const float BRUSH_BASE = 0.4;
-const int FLOATER_SEGMENTS = 10; // path points per floater's curved body (head at index 0) — see floaterPath; plenty for a strand this short
-const float FLOATER_LEN_MIN = 0.042; // strand arc length, screen p-units, hashed per seed — every size below is the reference-matched proportions scaled down (the user wanted them far smaller than the reference crop), so rim/fringe/length keep roughly their measured ratios
-const float FLOATER_LEN_MAX = 0.075;
-// A wave's swarm (see the file header): SWARM_LOBES clumps hashed per wave
-// within SWARM_SPREAD of the swarm centre, each floater scattered within
-// SWARM_LOBE_R of its clump, the whole layout stretched SWARM_STRETCH wide
-// like a cumulus. It drifts on SWARM_WIND (p-units/s, scaled by Flow speed)
-// and each floater churns SWARM_CHURN around its slot so the swarm slowly
-// morphs instead of sliding as a rigid stamp.
-const float SWARM_LOBES = 3.0;
-const vec2 SWARM_SPREAD = vec2(0.13, 0.06);
-const float SWARM_LOBE_R = 0.085;
-const float SWARM_STRETCH = 1.45;
-const vec2 SWARM_WIND = vec2(0.018, 0.003);
-const float SWARM_CHURN = 0.014;
-const float SWARM_BOUND = 0.34; // conservative swarm radius for the per-wave early-out: spread + lobe + churn + half a strand + fringe, stretched (at full grow)
-const float SWARM_GROW_FROM = 0.7; // layout scale at birth, easing out to 1.0 by the end of the wave — the swarm spreads as it drifts
-const float SWARM_STAGGER = 0.4; // fraction of the wave's life over which floaters trickle in (and, mirrored, trickle out)
-const float SWARM_HEADING_VAR = 0.9; // radians of per-swarm heading spread around the wind direction
-const float FLOATER_HEADING_JITTER = 0.16; // radians of per-floater spread around its swarm's heading — small, so the strands read as aligned
-// floaterPath's heading theta(t) = theta0 + B1*sin(2*pi*f1*t+p1) +
-// B2*sin(2*pi*f2*t+p2): a dominant gentle bend (B1/f1) plus a much smaller,
-// faster wobble (B2/f2), all hashed once per seed. Because heading is
-// integrated forward rather than offsetting each point sideways by an
-// independent function of t, arc length always comes out to exactly the
-// strand's own FLOATER_LEN_* and the bend rate stays bounded — a real
-// side-by-side against the reference showed v2/v3's per-point-independent
-// kinks read as an angular zigzag, not the reference's smooth curve; this
-// can't produce a corner at all.
-const float FLOATER_B1_MIN = 0.3; // dominant bend swing, radians (random sign per seed) — gentle, so a swarm's strands read as parallel
+// Floater waves (see the file header): each wave is a streak of the small
+// refractive-tube floaters laid out on a fixed grid, arranged like the
+// user's text-grid references, where ">" fills a streak's body, "_" runs
+// along its ragged fringe and an "o" sits inside some. Here a body cell
+// holds an aligned strand, a fringe cell a short flat strand low in the
+// cell, and a hotspot cell a round floater dot. FLOATER_CELL is sized so the
+// longest strand plus its fringe fits inside one cell, since a pixel only
+// ever evaluates the floater in its own cell.
+const vec2 FLOATER_CELL = vec2(0.06, 0.045);
+const float CELL_T_BODY = 0.42; // streak density above this puts an aligned strand in the cell (the reference's ">")
+const float CELL_T_FRINGE = 0.12; // between this and CELL_T_BODY, a short flat strand (the reference's "_"); below, nothing
+const float CELL_T_HOT = 0.25; // hotspot field above this, inside the body, puts a dot there instead (the reference's "o")
+const float FRINGE_DROP = -0.011; // the fringe strand sits this far below the cell centre, like "_" under ">"
+// Streak shape, screen p-units: an ellipse of half-extent between
+// STREAK_L_MIN and STREAK_L_MAX (by the wave's size), tilted up to the right
+// by a hashed slant, frayed row by row by STREAK_RAG noise so each row's run
+// starts and ends at its own column, the references' stair-stepped rows.
+const vec2 STREAK_L_MIN = vec2(0.14, 0.04);
+const vec2 STREAK_L_MAX = vec2(0.6, 0.13); // the long, thin reference streak runs ~1.0 x 0.2 of screen height
+const float STREAK_SLANT_MIN = 0.12;
+const float STREAK_SLANT_MAX = 0.45; // radians up to the right; the reference rises ~20 degrees
+const float STREAK_RAG = 0.45;
+const float STREAK_HOT_CHANCE = 0.5; // fraction of streaks with a dot hotspot (one reference has one, the other none)
+const vec2 STREAK_DRIFT = vec2(0.09, 0.012); // p-units/s, scaled by Flow speed; quick, since a streak only lives WAVE_LIFE_SEC
+const int FLOATER_SEGMENTS = 10; // path points per strand (head at index 0), see floaterPath
+const float BODY_LEN_MIN = 0.036; // body strand arc length, screen p-units, hashed per cell
+const float BODY_LEN_MAX = 0.048;
+const float FRINGE_LEN_MIN = 0.02; // fringe strands are short
+const float FRINGE_LEN_MAX = 0.03;
+const float BODY_HEADING_JITTER = 0.16; // radians around the streak's own slant, so body strands read as aligned
+// floaterPath's heading theta(t) = B1*sin(2*pi*f1*t+p1) + B2*sin(2*pi*f2*t+p2):
+// a dominant gentle bend (B1/f1) plus a much smaller, faster wobble (B2/f2),
+// all hashed once per seed. Because heading is integrated forward rather
+// than offsetting each point sideways by an independent function of t, arc
+// length always comes out exactly right and the bend rate stays bounded; a
+// real side-by-side against a floater reference showed per-point-independent
+// kinks read as an angular zigzag, not the reference's smooth curve.
+const float FLOATER_B1_MIN = 0.3; // dominant bend swing, radians (random sign per seed)
 const float FLOATER_B1_MAX = 0.6;
 const float FLOATER_F1_MIN = 0.5; // dominant bend's cycles over the strand
 const float FLOATER_F1_MAX = 1.0;
-const float FLOATER_B2_MIN = 0.1; // secondary wobble, radians — kept subtle; texture, not a second kink
+const float FLOATER_B2_MIN = 0.1; // secondary wobble, radians; texture, not a second kink
 const float FLOATER_B2_MAX = 0.2;
 const float FLOATER_F2_MIN = 3.0;
 const float FLOATER_F2_MAX = 5.0;
 // The refractive-tube profile (floaterProfile below), measured off a
-// brightness cross-section of the reference at sky luminance ~172: a thin
-// dark fringe just outside the edge, a brighter rim just inside it, and a
-// barely-lifted see-through interior, everything within about +-10% of the
-// background — never a solid painted line.
-const float FLOATER_R = 0.0028; // squiggle tube half-width, screen p-units
+// brightness cross-section of a floater reference at sky luminance ~172: a
+// thin dark fringe just outside the edge, a brighter rim just inside it, and
+// a barely-lifted see-through interior, everything within about +-10% of the
+// background, never a solid painted line.
+const float FLOATER_R = 0.0028; // strand tube half-width, screen p-units
 const float FLOATER_RIM_W = 0.0014; // bright-rim band width, just inside the edge
 const float FLOATER_FRINGE_W = 0.0022; // dark-fringe band width, just outside the edge
 const float FLOATER_INTERIOR = 0.02; // relative lum delta well inside the edge
 const float FLOATER_RIM = 0.07; // relative lum delta at the rim's peak
 const float FLOATER_FRINGE = 0.10; // relative lum delta (negative) at the fringe's peak
-const float FLOATER_DOT_CHANCE = 0.4; // fraction of floaters that render as a filled disk instead of a squiggle (was FLOATER_RING_CHANCE — a measured dot turned out to be a filled disk, not an annulus, under the same rim/fringe profile)
-const float FLOATER_DOT_R_MIN = 0.004; // dot radius, screen p-units
+const float FLOATER_DOT_R_MIN = 0.005; // dot radius, screen p-units
 const float FLOATER_DOT_R_MAX = 0.0068;
-const vec3 FLOATER_COOL_TINT = vec3(0.94, 0.99, 1.06); // faint cool bias applied only to the rim's brightening (see main()) — a hint of refraction's blue-white; the fringe's darkening stays neutral
+const vec3 FLOATER_COOL_TINT = vec3(0.94, 0.99, 1.06); // faint cool bias applied only to the rim's brightening (see main()); the fringe's darkening stays neutral
 
 // This scene's own small hash/noise family — independently written (the
 // same fract/dot idiom every other scene's hash21 uses, CLAUDE.md's
@@ -622,35 +635,14 @@ float cloudBumpedAt(vec2 uv) {
   return density * mix(1.0 - CLOUD_BUMP_AMOUNT, 1.0 + CLOUD_BUMP_AMOUNT, bump) * mix(1.0 - CLOUD_WISP_AMOUNT, 1.0 + CLOUD_WISP_AMOUNT, wisp);
 }
 
-// One floater's offset from its swarm's centre (screen p-units): picks one
-// of the wave's SWARM_LOBES clumps (hashed from waveSeed), scatters within
-// it (sqrt for an even area fill, a squared falloff biasing toward the
-// clump core so edges thin out like a cloud's), stretches wide, then churns
-// slowly around that slot. No saccade jumps — the swarm moves as one body.
-vec2 floaterOffset(float seed, float waveSeed, float t) {
-  float lobe = floor(hash21(vec2(seed, 31.0)) * SWARM_LOBES);
-  vec2 lobeC = (hash22(vec2(waveSeed * 5.3 + lobe, 17.0)) - 0.5) * 2.0 * SWARM_SPREAD;
-  float u = hash21(vec2(seed, 32.0));
-  float r = SWARM_LOBE_R * sqrt(u) * mix(0.55, 1.0, u);
-  float a = hash21(vec2(seed, 33.0)) * 6.28318;
-  vec2 o = lobeC + r * vec2(cos(a), sin(a));
-  o.x *= SWARM_STRETCH;
-  o += SWARM_CHURN * vec2(sin(t * 0.21 + seed * 1.3), cos(t * 0.17 + seed * 2.1));
-  return o;
-}
-
 // Signed relative-luminance delta for a point at true signed distance s from
-// a floater's own edge (negative inside, screen p-units) — the
-// refractive-tube profile the constants above are measured against: a small
-// lift deep inside (FLOATER_INTERIOR), rising through a bright rim just
-// inside the edge (FLOATER_RIM, peaking at s = -FLOATER_RIM_W/2) into a dark
-// fringe just outside it (FLOATER_FRINGE, peaking at s = FLOATER_FRINGE_W/2),
-// fading smoothly to exactly 0 by s = FLOATER_FRINGE_W*2.0. Shared by
-// floaterShape's squiggle and dot branches — they differ only in how s is
-// computed. Built as a sum of two Gaussian-like bumps (rim, fringe) plus an
-// interior term that's flat for s well below -FLOATER_RIM_W and fades out
-// smoothly as s approaches the edge, not as separate hard-edged bands — the
-// reference itself is a little soft, not a vector outline.
+// a floater's own edge (negative inside, screen p-units): a small lift deep
+// inside (FLOATER_INTERIOR), rising through a bright rim just inside the edge
+// (FLOATER_RIM, peaking at s = -FLOATER_RIM_W/2) into a dark fringe just
+// outside it (FLOATER_FRINGE, peaking at s = FLOATER_FRINGE_W/2), fading
+// smoothly to exactly 0 by s = FLOATER_FRINGE_W*2.0. Shared by strands and
+// dots; they differ only in how s is computed. Built from smooth bumps, not
+// hard-edged bands, since the reference itself is a little soft.
 float floaterProfile(float s) {
   float interior = FLOATER_INTERIOR * (1.0 - smoothstep(-FLOATER_RIM_W, 0.0, s));
   float rimD = (s + FLOATER_RIM_W * 0.5) / (FLOATER_RIM_W * 0.5);
@@ -661,26 +653,13 @@ float floaterProfile(float s) {
   return (interior + rim + fringe) * cutoff;
 }
 
-// This floater's own strand length, hashed once per seed — split out from
-// floaterPath so floaterShape can bound-check a fragment against it before
-// paying for the FLOATER_SEGMENTS-point path build and distance loop (see
-// floaterShape's own comment).
-float floaterLen(float seed) {
-  return mix(FLOATER_LEN_MIN, FLOATER_LEN_MAX, hash21(vec2(seed, 25.0)));
-}
-
-// Builds this floater's whole curved path into 'pts' (head at index 0,
-// FLOATER_SEGMENTS points), by integrating a heading forward at a fixed step
-// rather than offsetting each point sideways by an independent function of
-// t — see the FLOATER_B1_MIN..FLOATER_F2_MAX comment above for why. 'pts' is
-// then re-centred on its own average so the strand's MIDDLE sits at the
-// local origin: floaterShape adds basePos (its slot in the swarm) straight
-// onto these points, so basePos is the strand's centre, not its head. The
-// whole strand is then rotated so its chord (head to tail) points along
-// 'heading' — its swarm's shared direction — which is what lines a swarm's
-// strands up in parallel however each one curls along the way.
-void floaterPath(float seed, float heading, out vec2 pts[FLOATER_SEGMENTS]) {
-  float len = floaterLen(seed);
+// Builds a strand's curved path of arc length 'len' into 'pts' (head at
+// index 0, FLOATER_SEGMENTS points) by integrating a heading forward at a
+// fixed step (see the FLOATER_B1_MIN..FLOATER_F2_MAX comment above), then
+// re-centres it on its own average and rotates it so its chord (head to
+// tail) points along 'heading', which is what lines strands up in parallel
+// however each one curls along the way.
+void floaterPath(float seed, float heading, float len, out vec2 pts[FLOATER_SEGMENTS]) {
   float thetaSign = hash21(vec2(seed, 26.0)) < 0.5 ? -1.0 : 1.0;
   float b1 = thetaSign * mix(FLOATER_B1_MIN, FLOATER_B1_MAX, hash21(vec2(seed, 21.0)));
   float f1 = mix(FLOATER_F1_MIN, FLOATER_F1_MAX, hash21(vec2(seed, 27.0)));
@@ -688,14 +667,13 @@ void floaterPath(float seed, float heading, out vec2 pts[FLOATER_SEGMENTS]) {
   float b2 = mix(FLOATER_B2_MIN, FLOATER_B2_MAX, hash21(vec2(seed, 28.0)));
   float f2 = mix(FLOATER_F2_MIN, FLOATER_F2_MAX, hash21(vec2(seed, 23.0)));
   float p2 = hash21(vec2(seed, 24.0)) * 6.28318;
-  float theta0 = 0.0;
   float stepLen = len / float(FLOATER_SEGMENTS - 1);
   pts[0] = vec2(0.0);
   for (int i = 1; i < FLOATER_SEGMENTS; i++) {
-    // Heading sampled at the segment's own midpoint t — a midpoint-rule
-    // integration of theta(t), not just its start or end.
+    // Heading sampled at the segment's own midpoint t (midpoint-rule
+    // integration of theta(t)).
     float tMid = (float(i) - 0.5) / float(FLOATER_SEGMENTS - 1);
-    float theta = theta0 + b1 * sin(6.28318 * f1 * tMid + p1) + b2 * sin(6.28318 * f2 * tMid + p2);
+    float theta = b1 * sin(6.28318 * f1 * tMid + p1) + b2 * sin(6.28318 * f2 * tMid + p2);
     pts[i] = pts[i - 1] + stepLen * vec2(cos(theta), sin(theta));
   }
   vec2 sum = vec2(0.0);
@@ -707,39 +685,49 @@ void floaterPath(float seed, float heading, out vec2 pts[FLOATER_SEGMENTS]) {
   for (int i = 0; i < FLOATER_SEGMENTS; i++) pts[i] = rot * (pts[i] - mid);
 }
 
-// One floater's signed relative-luminance delta at p: a hollow refractive
-// tube along a curved path (floaterPath), or — FLOATER_DOT_CHANCE of seeds —
-// a filled disk, both read through floaterProfile off their own signed
-// distance to the edge (squiggle: distance to the path's capsule SDF, minus
-// FLOATER_R; dot: distance to basePos, minus its own hashed radius). A
-// measured real reference showed two floater families side by side,
-// elongated squiggles AND round dots (aspect ratios ~1.6-1.9 vs ~1.0), both
-// sharing the exact same rim/fringe brightness shape. A bounding-circle
-// early-out (basePos +/- half the strand's own length, since floaterPath
-// centres its points on it) skips the FLOATER_SEGMENTS-point path build and
-// distance loop for fragments nowhere near this floater — see the file
-// header's per-slot budget.
-float floaterShape(vec2 p, float seed, vec2 basePos, float heading) {
-  if (hash21(vec2(seed, 13.0)) < FLOATER_DOT_CHANCE) {
-    float dotR = mix(FLOATER_DOT_R_MIN, FLOATER_DOT_R_MAX, hash21(vec2(seed, 15.0)));
-    float s = length(p - basePos) - dotR;
-    if (s > FLOATER_FRINGE_W * 2.0) return 0.0;
-    return floaterProfile(s);
-  }
-  float len = floaterLen(seed);
-  if (length(p - basePos) > len * 0.5 + FLOATER_R + FLOATER_FRINGE_W * 2.0) return 0.0;
+// A strand floater's delta at p: a hollow refractive tube of half-width
+// FLOATER_R around the path floaterPath builds, centred on basePos.
+float floaterStrand(vec2 p, vec2 basePos, float seed, float heading, float len) {
   vec2 pts[FLOATER_SEGMENTS];
-  floaterPath(seed, heading, pts);
+  floaterPath(seed, heading, len, pts);
   vec2 pLocal = p - basePos;
   float dMin = 1.0e6;
   for (int i = 1; i < FLOATER_SEGMENTS; i++) {
     vec2 pa = pLocal - pts[i - 1];
     vec2 ba = pts[i] - pts[i - 1];
     float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1.0e-6), 0.0, 1.0);
-    float d = length(pa - ba * h);
-    dMin = min(dMin, d);
+    dMin = min(dMin, length(pa - ba * h));
   }
   return floaterProfile(dMin - FLOATER_R);
+}
+
+// One wave's streak density at cell centre c (screen p-units), its slant in
+// 'slant', and its dot hotspot field in 'hot'. The envelope is subtracted
+// from the density rather than multiplied into it, so a streak pops in
+// fringe-first and dissolves cell by cell: each body strand gives way to a
+// fringe strand, then each fringe strand to empty sky, not the whole streak
+// fading at once.
+float streakDensity(vec2 c, vec2 centre, float seed, float amp, float age, out float slant, out float hot) {
+  float size = clamp(uFloaterDensity * 1.3, 0.1, 1.0) * mix(1.0 - clamp(uWaveStrength, 0.0, 1.0), 1.0, clamp(amp, 0.0, 1.0));
+  vec2 L = mix(STREAK_L_MIN, STREAK_L_MAX, size);
+  slant = mix(STREAK_SLANT_MIN, STREAK_SLANT_MAX, hash21(vec2(seed, 51.0)));
+  vec2 d = c - centre;
+  float cs = cos(slant);
+  float sn = sin(slant);
+  vec2 q = vec2(cs * d.x + sn * d.y, -sn * d.x + cs * d.y);
+  // Row fray: noise keyed on the grid row (and only coarsely on position
+  // along the streak), so a whole row's run shifts together.
+  float row = floor(c.y / FLOATER_CELL.y);
+  float rag = (vnoise(vec2(row * 0.9 + seed * 7.1, q.x / L.x * 2.2 + seed)) - 0.5) * STREAK_RAG;
+  vec2 e = q / L;
+  float env = smoothstep(0.0, WAVE_FADE_IN, age) * (1.0 - smoothstep(WAVE_LIFE_SEC_C - WAVE_FADE_OUT, WAVE_LIFE_SEC_C, age));
+  hot = 0.0;
+  if (hash21(vec2(seed, 52.0)) < STREAK_HOT_CHANCE) {
+    vec2 hc = (hash22(vec2(seed, 53.0)) - 0.5) * vec2(0.9, 0.5) * L;
+    vec2 he = (q - hc) / (L * vec2(0.3, 0.45));
+    hot = (1.0 - dot(he, he)) * env;
+  }
+  return 1.0 - dot(e, e) + rag - (1.0 - env) * 1.1;
 }
 
 void main() {
@@ -808,55 +796,56 @@ void main() {
   float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * (1.0 - 0.4 * uEnergy), 0.0, 1.0);
   color = mix(color, color * brushTint, brushAmt);
 
-  // 4. Floaters: wave swarms only (see the file header and createWavePool),
-  // each floater drawn from floaterShape as one signed relative-luminance
-  // delta (dark fringe negative, bright rim positive, interior a small
-  // positive lift — see floaterProfile), gated by its wave's age envelope and
-  // faded out wherever its own centre sits over cloud. Every delta sums into
-  // floatDelta, clamped, then applied as a multiplicative modulation of
-  // whatever's already in 'color' rather than mixed toward a fixed tint or
-  // added as glow, so a floater reads as a refraction of the sky behind it
-  // and never becomes the brightest thing in frame.
-  int perBurstCap = int(clamp(mix(8.0, float(FLOATER_PER_BURST_MAX), uDetail), 1.0, float(FLOATER_PER_BURST_MAX)) + 0.5);
-  vec2 wind = SWARM_WIND * (0.5 + uFlowSpeed);
-  float floatDelta = 0.0;
+  // 4. Floater waves (see the file header): snap this pixel to its grid
+  // cell, take the densest live streak at the cell's centre, and from that
+  // density decide what floater (if any) the cell holds: an aligned strand
+  // in the body, a short flat strand on the fringe, a dot in a hotspot. Each
+  // floater is a refractive tube (floaterProfile), applied as a
+  // multiplicative modulation of what's behind it rather than a painted
+  // colour. The cell's own hash fixes its floater's shape, so a drifting
+  // streak moves by floaters switching on and off across a fixed grid.
+  vec2 cellId = floor(p / FLOATER_CELL);
+  vec2 cellC = (cellId + 0.5) * FLOATER_CELL;
+  vec2 wind = STREAK_DRIFT * (0.5 + uFlowSpeed);
+  float dens = -1.0;
+  float hot = 0.0;
+  float slant = 0.0;
   for (int b = 0; b < MAX_WAVE_BURSTS_C; b++) {
     float age = uTime - uBurstT0[b];
     if (age < 0.0 || age > WAVE_LIFE_SEC_C) continue;
-    vec2 swarmC = (vec2(uBurstX[b], uBurstY[b]) - 0.5) * vec2(devAspect, 1.0) + wind * age;
-    if (length(p - swarmC) > SWARM_BOUND) continue;
-    float swell = mix(1.0 - clamp(uWaveStrength, 0.0, 1.0), 1.0, clamp(uBurstAmp[b], 0.0, 1.0));
-    int subActive = int(float(perBurstCap) * clamp(uFloaterDensity * 1.4, 0.15, 1.0) * mix(0.35, 1.0, swell) + 0.5);
-    // The swarm condenses and disperses like a cloud: it spreads a little as
-    // it ages, and each floater has its own staggered birth (early in the
-    // wave) and death (late in it), so the group forms floater by floater
-    // and thins out the same way rather than fading as one block.
-    float grow = mix(SWARM_GROW_FROM, 1.0, age / WAVE_LIFE_SEC_C);
-    // One shared heading per swarm (roughly along the wind, hashed per wave),
-    // so its strands lie in parallel — see floaterPath.
-    float swarmHeading = atan(SWARM_WIND.y, SWARM_WIND.x) + (hash21(vec2(uBurstSeed[b], 41.0)) - 0.5) * SWARM_HEADING_VAR;
-    for (int j = 0; j < FLOATER_PER_BURST_MAX; j++) {
-      if (j >= subActive) break;
-      float seed = uBurstSeed[b] * 31.7 + float(j) * 9.3 + 5.0;
-      float born = hash21(vec2(seed, 42.0)) * WAVE_LIFE_SEC_C * SWARM_STAGGER;
-      float dies = WAVE_LIFE_SEC_C * (1.0 - hash21(vec2(seed, 43.0)) * SWARM_STAGGER);
-      float life = smoothstep(born, born + WAVE_FADE_IN, age) * (1.0 - smoothstep(dies - WAVE_FADE_OUT, dies, age));
-      if (life <= 0.0) continue;
-      vec2 fc = swarmC + floaterOffset(seed, uBurstSeed[b], uTime) * grow;
-      float heading = swarmHeading + (hash21(vec2(seed, 44.0)) - 0.5) * FLOATER_HEADING_JITTER;
-      float d = floaterShape(p, seed, fc, heading);
-      if (d == 0.0) continue;
-      // Keep off the clouds: this floater's own centre, looked up in the same
-      // field the cloud pass thresholds, with a margin below CLOUD_LOW so it
-      // fades before a cloud's visible edge reaches it.
-      vec2 fcUv = roomUv(fc / vec2(devAspect, 1.0) + 0.5);
-      float clear = 1.0 - smoothstep(CLOUD_LOW * 0.3, CLOUD_LOW * 0.85, cloudBumpedAt(fcUv));
-      floatDelta += d * life * clear;
+    vec2 centre = (vec2(uBurstX[b], uBurstY[b]) - 0.5) * vec2(devAspect, 1.0) + wind * age;
+    // Rag can push density past the ellipse by at most ~5%, never further.
+    if (length(cellC - centre) > STREAK_L_MAX.x * 1.1) continue;
+    float h;
+    float sl;
+    float d = streakDensity(cellC, centre, uBurstSeed[b], uBurstAmp[b], age, sl, h);
+    if (d > dens) {
+      dens = d;
+      hot = h;
+      slant = sl;
     }
   }
-  floatDelta = clamp(floatDelta, -0.2, 0.2) * (1.0 - cloudAlpha);
-  float floatPos = max(floatDelta, 0.0);
-  color *= 1.0 + min(floatDelta, 0.0) + floatPos * FLOATER_COOL_TINT;
+  if (dens > CELL_T_FRINGE) {
+    // Keep off the clouds: the cell's centre, looked up in the same field the
+    // cloud pass thresholds, with a margin below CLOUD_LOW so a streak gives
+    // way before a cloud's visible edge reaches it.
+    float clear = 1.0 - smoothstep(CLOUD_LOW * 0.3, CLOUD_LOW * 0.85, cloudBumpedAt(roomUv(cellC / vec2(devAspect, 1.0) + 0.5)));
+    float cellSeed = hash21(cellId * 0.731 + 17.3) * 97.0 + cellId.x * 0.013;
+    float delta;
+    if (dens > CELL_T_BODY && hot > CELL_T_HOT) {
+      float r = mix(FLOATER_DOT_R_MIN, FLOATER_DOT_R_MAX, hash21(vec2(cellSeed, 15.0)));
+      delta = floaterProfile(length(p - cellC) - r);
+    } else if (dens > CELL_T_BODY) {
+      float len = mix(BODY_LEN_MIN, BODY_LEN_MAX, hash21(vec2(cellSeed, 25.0)));
+      float heading = slant + (hash21(vec2(cellSeed, 44.0)) - 0.5) * BODY_HEADING_JITTER;
+      delta = floaterStrand(p, cellC, cellSeed, heading, len);
+    } else {
+      float len = mix(FRINGE_LEN_MIN, FRINGE_LEN_MAX, hash21(vec2(cellSeed, 25.0)));
+      delta = floaterStrand(p, cellC + vec2(0.0, FRINGE_DROP), cellSeed, 0.0, len);
+    }
+    delta = clamp(delta, -0.2, 0.2) * clear * (1.0 - cloudAlpha);
+    color *= 1.0 + min(delta, 0.0) + max(delta, 0.0) * FLOATER_COOL_TINT;
+  }
 
   outColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
@@ -885,10 +874,10 @@ function createSkyScene(): Scene {
 
   let ambientT = 0;
   let brushPhase = 0;
-  // anim.timeSec of the last wave, on the same clock the shader ages waves
-  // by — not an accumulated dt, which is capped per frame and so runs slow
-  // at a low frame rate. null fires the first wave on the first frame.
-  let lastWaveSec: number | null = null;
+  // The treble trigger for floater waves. Its hold is rewritten each tick from
+  // the Wave frequency setting (the listener reads spec.hold live).
+  const trebleSpec: BeatListenerSpec = { source: "high", refractorySec: WAVE_REFRACTORY_SEC, hold: 0 };
+  const trebleListener = createBeatListener(trebleSpec);
   let waveSeedCounter = 0;
   let lastFrameTime: number | null = null;
 
@@ -914,7 +903,7 @@ function createSkyScene(): Scene {
 
       ambientT = 0;
       brushPhase = 0;
-      lastWaveSec = null;
+      trebleListener.reset();
       waveSeedCounter = 0;
       lastFrameTime = null;
     },
@@ -972,25 +961,27 @@ function createSkyScene(): Scene {
         splats: drifterSplats,
       });
 
-      // Floater waves — a section drop always fires one; a spontaneous one
-      // fires on its own between drops at a rate Wave frequency controls,
-      // so floaters arrive in waves rather than only on a drop (see file
-      // header).
-      // Each swarm spawns in the clearest open sky it can find, scored
-      // against the cloud drifters' current centres (pickSwarmCenter).
-      const dropWave = anim.dropOnset;
-      const dueWave =
-        lastWaveSec === null ||
-        anim.timeSec < lastWaveSec || // clock reset (scene re-entered)
-        anim.timeSec - lastWaveSec > waveFallbackIntervalSec(waveFrequencyAmount);
-      if (dropWave || dueWave) {
-        const strength = dropWave ? waveStrengthFromDrop(anim.dropPulse, anim.sectionIntensity) : SPONTANEOUS_WAVE_STRENGTH;
-        const seed = waveSeedCounter++;
-        const [cx, cy] = pickSwarmCenter(seed, drifterCentres);
-        wavePool.trigger(anim.timeSec, strength, seed, cx, cy);
-        lastWaveSec = anim.timeSec;
-      }
+      // Floater waves come and go on the treble (see file header): the high
+      // band's listener fires one per hit, held off by Wave frequency; a
+      // section drop always fires a bigger one on top. Each spawns in the
+      // clearest open sky it can find, away from the cloud drifters and from
+      // streaks still on screen (pickSwarmCenter).
       wavePool.tick(anim.timeSec);
+      trebleSpec.hold = {
+        beats: waveHoldBeats(waveFrequencyAmount),
+        fallbackSec: waveHoldBeats(waveFrequencyAmount) * WAVE_HOLD_FALLBACK_SEC_PER_BEAT,
+      };
+      const treble = trebleListener.advance(anim);
+      const strengths: number[] = [];
+      if (treble.fired) strengths.push(waveStrengthFromTreble(anim.highPulse));
+      if (anim.dropOnset) strengths.push(waveStrengthFromDrop(anim.dropPulse, anim.sectionIntensity));
+      for (const strength of strengths) {
+        const obstacles: [number, number][] = [...drifterCentres];
+        for (const b of wavePool.bursts) if (b.t0 !== WAVE_DEAD_T0) obstacles.push([b.x, b.y]);
+        const seed = waveSeedCounter++;
+        const [cx, cy] = pickSwarmCenter(seed, obstacles);
+        wavePool.trigger(anim.timeSec, strength, seed, cx, cy);
+      }
 
       // Haidinger's brush — a continuously increasing accumulator, never
       // anim.barPhase (see file header).

@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   waveStrengthFromDrop,
-  waveFallbackIntervalSec,
+  waveHoldBeats,
+  waveStrengthFromTreble,
   advanceBrushPhase,
   driftCenter,
   drifterPuff,
@@ -65,24 +66,39 @@ describe("waveStrengthFromDrop", () => {
   });
 });
 
-describe("waveFallbackIntervalSec", () => {
-  it("is monotone non-increasing in frequency (higher frequency, shorter gap)", () => {
-    let prev = waveFallbackIntervalSec(0);
+describe("waveHoldBeats", () => {
+  it("is monotone non-increasing in frequency (higher frequency, shorter hold)", () => {
+    let prev = waveHoldBeats(0);
     for (let f = 0.1; f <= 1; f += 0.1) {
-      const cur = waveFallbackIntervalSec(f);
+      const cur = waveHoldBeats(f);
       expect(cur).toBeLessThanOrEqual(prev + 1e-9);
       prev = cur;
     }
   });
 
   it("stays positive across the whole range", () => {
-    for (let f = 0; f <= 1; f += 0.1) expect(waveFallbackIntervalSec(f)).toBeGreaterThan(0);
+    for (let f = 0; f <= 1; f += 0.1) expect(waveHoldBeats(f)).toBeGreaterThan(0);
   });
 
   it("clamps an out-of-range or non-finite frequency", () => {
-    expect(waveFallbackIntervalSec(-5)).toBe(waveFallbackIntervalSec(0));
-    expect(waveFallbackIntervalSec(5)).toBe(waveFallbackIntervalSec(1));
-    expect(Number.isFinite(waveFallbackIntervalSec(NaN))).toBe(true);
+    expect(waveHoldBeats(-5)).toBe(waveHoldBeats(0));
+    expect(waveHoldBeats(5)).toBe(waveHoldBeats(1));
+    expect(Number.isFinite(waveHoldBeats(NaN))).toBe(true);
+  });
+});
+
+describe("waveStrengthFromTreble", () => {
+  it("grows with the high band's pulse and is never zero", () => {
+    expect(waveStrengthFromTreble(1)).toBeGreaterThan(waveStrengthFromTreble(0));
+    expect(waveStrengthFromTreble(0)).toBeGreaterThan(0);
+  });
+
+  it("stays within [0, 1] for any input, including out-of-range and NaN", () => {
+    for (const v of [-3, 0, 0.5, 1, 7, NaN]) {
+      const s = waveStrengthFromTreble(v);
+      expect(s).toBeGreaterThanOrEqual(0);
+      expect(s).toBeLessThanOrEqual(1);
+    }
   });
 });
 
