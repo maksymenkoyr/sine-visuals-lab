@@ -57,10 +57,17 @@ export const FONT_LABEL = "'Chakra Petch', system-ui, sans-serif";
 export const FONT_MONO = "'Share Tech Mono', ui-monospace, monospace";
 export const FONT_DIGITS = `'DSEG7-Classic', ${FONT_MONO}`;
 
+/** The gutter between the meters column and the controls column in the
+ *  wide layout — the room the patch bay's cables (src/ui/cableLayer.ts)
+ *  swoop through from a meter's jack to a setting's port. Without it the
+ *  two columns abut and every cable is a short vertical run in a 4px gap. */
+export const CABLE_GUTTER_PX = 56;
+
 /** Below this viewport width the panel's columns stack into one. Sized for
- *  three columns (Power + Bands + controls, ~899px plus gaps) — see the
- *  stacked media query below for how Power folds into that single column. */
-export const STACK_BELOW_PX = 940;
+ *  three columns (Power + Bands + controls, ~899px plus gaps) plus
+ *  CABLE_GUTTER_PX — see the stacked media query below for how Power folds
+ *  into that single column. */
+export const STACK_BELOW_PX = 940 + CABLE_GUTTER_PX;
 
 /** `#rrggbb` + alpha in [0,1] -> `#rrggbbaa`. */
 export function withAlpha(hex: string, alpha: number): string {
@@ -139,6 +146,7 @@ const stylesheet = `
 .vc-controls-col {
   width: 314px; flex: none; display: flex; flex-direction: column; gap: 4px;
   max-height: calc(100vh - 74px); overflow-y: auto;
+  margin-left: ${CABLE_GUTTER_PX}px;
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
@@ -193,6 +201,8 @@ const stylesheet = `
    * reach a slider. */
   .vc-spectrum-col { display: contents; }
   .vc-power-col, .vc-spectrum-card, .vc-controls-col { width: 100%; max-height: none; overflow: visible; }
+  /* No cables in one column (cableLayer.ts hides them), so no gutter. */
+  .vc-controls-col { margin-left: 0; }
   .vc-spectrum-col > .vc-meters { width: 100%; order: 1; max-height: none; overflow: visible; }
   /* The horizontal triangle-collapse only makes sense beside other columns;
    * a single stacked mobile column has nothing to shrink next to, so
