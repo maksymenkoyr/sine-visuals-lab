@@ -175,6 +175,10 @@ Studied, not copied, across two look references:
   bloom locally with a tighter second in-scattered lobe and, in v5, briefly,
   a dimmed gas underlay since removed in v6).
 
+## Materials
+
+- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+
 ## Resume here
 
 - `npm run dev`, then open the scene directly:

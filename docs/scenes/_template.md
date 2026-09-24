@@ -42,6 +42,19 @@ real-music vs synthetic findings, quality-tier behaviour.>
 
 <What's still off, open follow-ups, ideas agreed but not done.>
 
+## Materials
+
+<Everything this scene was built with, and where each piece is kept:
+- measurements kept from each `/ref` bundle (report, data, our own shots):
+  `<id>/<bundle>/`, saved with `tools/ref-keep.py`;
+- working scripts: `<id>/scripts/` if scene-specific, `tools/` if general —
+  never only in a session's scratch folder;
+- artifacts: the title and link, with their source in `<id>/artifacts/`
+  (reference images replaced by a placeholder);
+- the reference media itself (videos, frames, audio, pasted stills): never in
+  this repo — the local `/ref` cache and the private archive
+  (`tools/ref-archive.py`).>
+
 ## Resume here
 
 <How to pick it back up fast:

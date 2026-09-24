@@ -49,6 +49,10 @@ beyond the coarser grid.
 None recorded — no open PR or issue references this scene
 beyond its creation.
 
+## Materials
+
+- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+
 ## Resume here
 
 - `npm run dev`, then `/?audio=synthetic&bpm=120#/v/particles` (query

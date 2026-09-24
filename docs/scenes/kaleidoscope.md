@@ -178,6 +178,10 @@ and had to be re-fetched).
   references; a rescan with the current `/ref` tooling (bundle + report.md)
   has not been done for this scene, unlike the later `/ref`-built scenes.
 
+## Materials
+
+- `kaleidoscope/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
+
 ## Resume here
 
 - Dev link: `npm run dev`, then `/?audio=synthetic&bpm=120#/v/kaleidoscope`.

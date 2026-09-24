@@ -1,0 +1,552 @@
+{
+ "scene": "gates",
+ "bundle": "neon-groove",
+ "settings": null,
+ "offsets": [
+  -80,
+  0,
+  160
+ ],
+ "shots": [
+  {
+   "beat": 4,
+   "rank": 4,
+   "t": 2,
+   "offsetMs": -80,
+   "file": "b004_r04_-080.png",
+   "lagMs": 18,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 4,
+   "rank": 4,
+   "t": 2,
+   "offsetMs": 0,
+   "file": "b004_r04_+000.png",
+   "lagMs": 35,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 4,
+   "rank": 4,
+   "t": 2,
+   "offsetMs": 160,
+   "file": "b004_r04_+160.png",
+   "lagMs": 12,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 8,
+   "rank": 8,
+   "t": 4,
+   "offsetMs": -80,
+   "file": "b008_r08_-080.png",
+   "lagMs": 3,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 8,
+   "rank": 8,
+   "t": 4,
+   "offsetMs": 0,
+   "file": "b008_r08_+000.png",
+   "lagMs": 0,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 8,
+   "rank": 8,
+   "t": 4,
+   "offsetMs": 160,
+   "file": "b008_r08_+160.png",
+   "lagMs": 5,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 12,
+   "rank": 4,
+   "t": 6,
+   "offsetMs": -80,
+   "file": "b012_r04_-080.png",
+   "lagMs": 27,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 12,
+   "rank": 4,
+   "t": 6,
+   "offsetMs": 0,
+   "file": "b012_r04_+000.png",
+   "lagMs": 59,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 12,
+   "rank": 4,
+   "t": 6,
+   "offsetMs": 160,
+   "file": "b012_r04_+160.png",
+   "lagMs": 14,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": -80,
+   "file": "b016_r16_-080.png",
+   "lagMs": 30,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": 0,
+   "file": "b016_r16_+000.png",
+   "lagMs": 70,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 16,
+   "rank": 16,
+   "t": 8,
+   "offsetMs": 160,
+   "file": "b016_r16_+160.png",
+   "lagMs": 15,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 20,
+   "rank": 4,
+   "t": 10,
+   "offsetMs": -80,
+   "file": "b020_r04_-080.png",
+   "lagMs": 12,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 20,
+   "rank": 4,
+   "t": 10,
+   "offsetMs": 0,
+   "file": "b020_r04_+000.png",
+   "lagMs": 20,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 20,
+   "rank": 4,
+   "t": 10,
+   "offsetMs": 160,
+   "file": "b020_r04_+160.png",
+   "lagMs": 4,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 24,
+   "rank": 8,
+   "t": 12,
+   "offsetMs": -80,
+   "file": "b024_r08_-080.png",
+   "lagMs": 9,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 24,
+   "rank": 8,
+   "t": 12,
+   "offsetMs": 0,
+   "file": "b024_r08_+000.png",
+   "lagMs": 20,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 24,
+   "rank": 8,
+   "t": 12,
+   "offsetMs": 160,
+   "file": "b024_r08_+160.png",
+   "lagMs": 11,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 28,
+   "rank": 4,
+   "t": 14,
+   "offsetMs": -80,
+   "file": "b028_r04_-080.png",
+   "lagMs": 29,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 28,
+   "rank": 4,
+   "t": 14,
+   "offsetMs": 0,
+   "file": "b028_r04_+000.png",
+   "lagMs": 66,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 28,
+   "rank": 4,
+   "t": 14,
+   "offsetMs": 160,
+   "file": "b028_r04_+160.png",
+   "lagMs": 17,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 32,
+   "rank": 16,
+   "t": 16,
+   "offsetMs": -80,
+   "file": "b032_r16_-080.png",
+   "lagMs": 19,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 32,
+   "rank": 16,
+   "t": 16,
+   "offsetMs": 0,
+   "file": "b032_r16_+000.png",
+   "lagMs": 49,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 32,
+   "rank": 16,
+   "t": 16,
+   "offsetMs": 160,
+   "file": "b032_r16_+160.png",
+   "lagMs": -2,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 36,
+   "rank": 4,
+   "t": 18,
+   "offsetMs": -80,
+   "file": "b036_r04_-080.png",
+   "lagMs": -2,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 36,
+   "rank": 4,
+   "t": 18,
+   "offsetMs": 0,
+   "file": "b036_r04_+000.png",
+   "lagMs": -11,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 36,
+   "rank": 4,
+   "t": 18,
+   "offsetMs": 160,
+   "file": "b036_r04_+160.png",
+   "lagMs": 9,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 40,
+   "rank": 8,
+   "t": 20,
+   "offsetMs": -80,
+   "file": "b040_r08_-080.png",
+   "lagMs": 4,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 40,
+   "rank": 8,
+   "t": 20,
+   "offsetMs": 0,
+   "file": "b040_r08_+000.png",
+   "lagMs": -1,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 40,
+   "rank": 8,
+   "t": 20,
+   "offsetMs": 160,
+   "file": "b040_r08_+160.png",
+   "lagMs": 20,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 44,
+   "rank": 4,
+   "t": 22,
+   "offsetMs": -80,
+   "file": "b044_r04_-080.png",
+   "lagMs": 22,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 44,
+   "rank": 4,
+   "t": 22,
+   "offsetMs": 0,
+   "file": "b044_r04_+000.png",
+   "lagMs": 60,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 44,
+   "rank": 4,
+   "t": 22,
+   "offsetMs": 160,
+   "file": "b044_r04_+160.png",
+   "lagMs": 24,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 48,
+   "rank": 16,
+   "t": 24,
+   "offsetMs": -80,
+   "file": "b048_r16_-080.png",
+   "lagMs": 23,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 48,
+   "rank": 16,
+   "t": 24,
+   "offsetMs": 0,
+   "file": "b048_r16_+000.png",
+   "lagMs": 63,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  },
+  {
+   "beat": 48,
+   "rank": 16,
+   "t": 24,
+   "offsetMs": 160,
+   "file": "b048_r16_+160.png",
+   "lagMs": 17,
+   "probe": {
+    "bpm": 0,
+    "phase": 0,
+    "energy": 0,
+    "scene": "gates"
+   },
+   "heard": null
+  }
+ ]
+}

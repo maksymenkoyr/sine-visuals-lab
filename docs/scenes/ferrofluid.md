@@ -60,6 +60,10 @@ None recorded — no open PR or issue references this scene
 beyond its creation. The quality gate is a known, deliberate constraint
 (see the header comment), not an open issue.
 
+## Materials
+
+- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+
 ## Resume here
 
 - `npm run dev`, then `/?audio=synthetic&bpm=120#/v/ferrofluid` (query

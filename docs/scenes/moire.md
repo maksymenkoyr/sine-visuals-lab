@@ -131,6 +131,12 @@ Tempo lock ran at 2x the reference on the measurement track, and
 are beat-clock/section limitations noted as runtime to-dos rather than
 worked around locally in this scene.
 
+## Materials
+
+- `moire/moire-p2/` — measurements kept from the `/ref` bundle `moire-p2` (the chapter the scene was built from): report, data, and our own shots.
+- `moire/oiIxQ_JxbZo/` — measurements kept from the `/ref` bundle `oiIxQ_JxbZo` (the first scan, of the wrong chapter): report, data, and our own shots.
+The reference media for these bundles (video, frames, audio, the images built from them) stays out of this repo: in the local `tools/.cache/refs/<bundle>/` cache and the private archive (`tools/ref-archive.py`).
+
 ## Resume here
 
 `npm run dev`, then `/?audio=synthetic&bpm=120#/v/moire`. `__viz.setParams`

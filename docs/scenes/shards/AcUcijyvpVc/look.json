@@ -1,0 +1,1098 @@
+[
+ {
+  "size": [
+   360,
+   640
+  ],
+  "thr": 0.18,
+  "litShare": 0.1406,
+  "n": 22,
+  "classes": {
+   "panel": 6,
+   "bar": 9,
+   "blob": 7
+  },
+  "hollowShare": 0.0,
+  "nestedShare": 0.0,
+  "sizeFit": {
+   "b": -0.28,
+   "at03": 0.013,
+   "at09": 0.009,
+   "on": "gates",
+   "n": 6
+  },
+  "sizeEnvelope": {
+   "r0.1-0.3": 3.342,
+   "r0.3-0.6": 0.367,
+   "r0.6-1.0": 0.014,
+   "r>1": 0.009
+  },
+  "rings": [
+   {
+    "r": 0.27,
+    "n": 6
+   },
+   {
+    "r": 0.42,
+    "n": 5
+   },
+   {
+    "r": 0.6,
+    "n": 3
+   },
+   {
+    "r": 0.95,
+    "n": 5
+   }
+  ],
+  "fold": 1,
+  "foldScore": 0.0,
+  "onAxis": 0.0,
+  "onDiag": 0.0,
+  "stroke": {
+   "innerPx": null,
+   "outerPx": null
+  },
+  "streak": {
+   "innerElong": 3.04,
+   "outerElong": 1.66,
+   "radialShare": 0.53
+  },
+  "hues": [
+   {
+    "name": "yellow",
+    "deg": 60,
+    "share": 0.64
+   },
+   {
+    "name": "violet",
+    "deg": 270,
+    "share": 0.2
+   },
+   {
+    "name": "rose",
+    "deg": 330,
+    "share": 0.12
+   }
+  ],
+  "glow": {
+   "ground": 0.0061,
+   "core": 0.657,
+   "profile": [
+    0.3087,
+    0.2415,
+    0.1838,
+    0.1186,
+    0.0423,
+    0.0075
+   ],
+   "efoldPx": 7.3,
+   "haloRatio": 0.273
+  },
+  "ground": {
+   "hex": "#010103",
+   "vignette": 1.0
+  },
+  "objects": [
+   {
+    "r": 0.832,
+    "theta": 87.3,
+    "size": 0.0094,
+    "elong": 1.5,
+    "radialAlign": 1.0,
+    "areaPx": 6,
+    "hollow": false,
+    "verts": 4,
+    "class": "panel",
+    "hue": 240.0,
+    "sat": 0.03,
+    "strokePx": 2.0,
+    "bbox": [
+     192,
+     53,
+     2,
+     3
+    ],
+    "cx": 192.5,
+    "cy": 54.0
+   },
+   {
+    "r": 0.989,
+    "theta": 124.1,
+    "size": 0.0094,
+    "elong": 1.5,
+    "radialAlign": 0.83,
+    "areaPx": 6,
+    "hollow": false,
+    "verts": 4,
+    "class": "panel",
+    "hue": 216.1,
+    "sat": 0.07,
+    "strokePx": 2.0,
+    "bbox": [
+     2,
+     57,
+     2,
+     3
+    ],
+    "cx": 2.5,
+    "cy": 58.0
+   },
+   {
+    "r": 0.873,
+    "theta": 123.1,
+    "size": 0.0094,
+    "elong": 1.5,
+    "radialAlign": 0.84,
+    "areaPx": 6,
+    "hollow": false,
+    "verts": 4,
+    "class": "panel",
+    "hue": 240.0,
+    "sat": 0.01,
+    "strokePx": 2.0,
+    "bbox": [
+     27,
+     85,
+     2,
+     3
+    ],
+    "cx": 27.5,
+    "cy": 86.0
+   },
+   {
+    "r": 0.579,
+    "theta": 67.9,
+    "size": 0.3896,
+    "elong": 4.56,
+    "radialAlign": 0.98,
+    "areaPx": 2244,
+    "hollow": false,
+    "verts": 3,
+    "class": "bar",
+    "hue": 338.1,
+    "sat": 0.62,
+    "strokePx": 27.4,
+    "bbox": [
+     229,
+     86,
+     41,
+     137
+    ],
+    "cx": 249.7,
+    "cy": 148.4
+   },
+   {
+    "r": 0.219,
+    "theta": 200.9,
+    "size": 2.8338,
+    "elong": 2.29,
+    "radialAlign": 0.36,
+    "areaPx": 20628,
+    "hollow": false,
+    "verts": 7,
+    "class": "blob",
+    "hue": 51.2,
+    "sat": 0.64,
+    "strokePx": 395.2,
+    "bbox": [
+     0,
+     114,
+     321,
+     409
+    ],
+    "cx": 114.4,
+    "cy": 345.1
+   },
+   {
+    "r": 0.192,
+    "theta": 72.4,
+    "size": 5.3749,
+    "elong": 5.11,
+    "radialAlign": 0.24,
+    "areaPx": 6522,
+    "hollow": false,
+    "verts": 4,
+    "class": "bar",
+    "hue": 259.6,
+    "sat": 0.47,
+    "strokePx": 336.7,
+    "bbox": [
+     76,
+     133,
+     251,
+     297
+    ],
+    "cx": 198.5,
+    "cy": 261.4
+   },
+   {
+    "r": 0.567,
+    "theta": 57.5,
+    "size": 0.0094,
+    "elong": 1.5,
+    "radialAlign": 0.84,
+    "areaPx": 6,
+    "hollow": false,
+    "verts": 4,
+    "class": "panel",
+    "hue": 220.0,
+    "sat": 0.05,
+    "strokePx": 2.0,
+    "bbox": [
+     277,
+     166,
+     2,
+     3
+    ],
+    "cx": 277.5,
+    "cy": 167.0
+   },
+   {
+    "r": 0.452,
+    "theta": 72.7,
+    "size": 0.0256,
+    "elong": 3.64,
+    "radialAlign": 0.99,
+    "areaPx": 19,
+    "hollow": false,
+    "verts": 7,
+    "class": "bar",
+    "hue": 341.8,
+    "sat": 0.78,
+    "strokePx": 2.3,
+    "bbox": [
+     221,
+     178,
+     5,
+     9
+    ],
+    "cx": 223.0,
+    "cy": 181.9
+   },
+   {
+    "r": 0.467,
+    "theta": 70.2,
+    "size": 0.0125,
+    "elong": 2.0,
+    "radialAlign": 0.94,
+    "areaPx": 8,
+    "hollow": false,
+    "verts": 4,
+    "class": "panel",
+    "hue": 338.0,
+    "sat": 0.8,
+    "strokePx": 2.0,
+    "bbox": [
+     230,
+     178,
+     2,
+     4
+    ],
+    "cx": 230.5,
+    "cy": 179.5
+   },
+   {
+    "r": 0.373,
+    "theta": 92.7,
+    "size": 0.1124,
+    "elong": 13.04,
+    "radialAlign": 0.19,
+    "areaPx": 94,
+    "hollow": false,
+    "verts": 2,
+    "class": "bar",
+    "hue": 222.0,
+    "sat": 0.56,
+    "strokePx": 2.8,
+    "bbox": [
+     157,
+     196,
+     35,
+     10
+    ],
+    "cx": 174.3,
+    "cy": 200.9
+   },
+   {
+    "r": 0.289,
+    "theta": 76.3,
+    "size": 0.185,
+    "elong": 1.55,
+    "radialAlign": 1.0,
+    "areaPx": 1348,
+    "hollow": false,
+    "verts": 7,
+    "class": "blob",
+    "hue": 330.7,
+    "sat": 0.49,
+    "strokePx": 38.2,
+    "bbox": [
+     180,
+     199,
+     44,
+     58
+    ],
+    "cx": 202.0,
+    "cy": 230.1
+   },
+   {
+    "r": 0.376,
+    "theta": 108.2,
+    "size": 0.0259,
+    "elong": 3.2,
+    "radialAlign": 0.82,
+    "areaPx": 16,
+    "hollow": false,
+    "verts": 6,
+    "class": "bar",
+    "hue": 337.2,
+    "sat": 0.62,
+    "strokePx": 2.6,
+    "bbox": [
+     139,
+     203,
+     7,
+     6
+    ],
+    "cx": 142.4,
+    "cy": 205.8
+   },
+   {
+    "r": 0.422,
+    "theta": 39.9,
+    "size": 0.3514,
+    "elong": 7.24,
+    "radialAlign": 0.99,
+    "areaPx": 968,
+    "hollow": false,
+    "verts": 4,
+    "class": "bar",
+    "hue": 211.4,
+    "sat": 0.39,
+    "strokePx": 15.5,
+    "bbox": [
+     251,
+     202,
+     75,
+     60
+    ],
+    "cx": 283.7,
+    "cy": 233.3
+   },
+   {
+    "r": 0.246,
+    "theta": 55.2,
+    "size": 0.0238,
+    "elong": 1.94,
+    "radialAlign": 0.1,
+    "areaPx": 24,
+    "hollow": false,
+    "verts": 7,
+    "class": "blob",
+    "hue": 336.3,
+    "sat": 0.72,
+    "strokePx": 3.9,
+    "bbox": [
+     222,
+     252,
+     7,
+     7
+    ],
+    "cx": 224.9,
+    "cy": 255.3
+   },
+   {
+    "r": 0.248,
+    "theta": 46.0,
+    "size": 0.0691,
+    "elong": 3.44,
+    "radialAlign": 0.99,
+    "areaPx": 109,
+    "hollow": false,
+    "verts": 6,
+    "class": "bar",
+    "hue": 338.5,
+    "sat": 0.77,
+    "strokePx": 6.4,
+    "bbox": [
+     228,
+     252,
+     16,
+     20
+    ],
+    "cx": 235.1,
+    "cy": 263.0
+   },
+   {
+    "r": 0.262,
+    "theta": 25.1,
+    "size": 0.0721,
+    "elong": 2.87,
+    "radialAlign": 0.13,
+    "areaPx": 105,
+    "hollow": false,
+    "verts": 6,
+    "class": "blob",
+    "hue": 218.5,
+    "sat": 0.51,
+    "strokePx": 8.0,
+    "bbox": [
+     249,
+     275,
+     16,
+     23
+    ],
+    "cx": 255.8,
+    "cy": 284.4
+   },
+   {
+    "r": 0.212,
+    "theta": 32.2,
+    "size": 0.0335,
+    "elong": 1.71,
+    "radialAlign": 1.0,
+    "areaPx": 37,
+    "hollow": false,
+    "verts": 5,
+    "class": "blob",
+    "hue": 336.5,
+    "sat": 0.56,
+    "strokePx": 6.3,
+    "bbox": [
+     232,
+     280,
+     10,
+     8
+    ],
+    "cx": 237.3,
+    "cy": 283.9
+   },
+   {
+    "r": 0.276,
+    "theta": 10.9,
+    "size": 0.0249,
+    "elong": 5.75,
+    "radialAlign": 0.25,
+    "areaPx": 11,
+    "hollow": false,
+    "verts": 6,
+    "class": "bar",
+    "hue": 230.0,
+    "sat": 0.67,
+    "strokePx": 1.4,
+    "bbox": [
+     265,
+     300,
+     5,
+     8
+    ],
+    "cx": 266.8,
+    "cy": 303.3
+   },
+   {
+    "r": 0.298,
+    "theta": 359.7,
+    "size": 0.0125,
+    "elong": 2.0,
+    "radialAlign": 0.01,
+    "areaPx": 6,
+    "hollow": false,
+    "verts": 4,
+    "class": "panel",
+    "hue": 231.0,
+    "sat": 0.66,
+    "strokePx": 2.0,
+    "bbox": [
+     275,
+     319,
+     2,
+     4
+    ],
+    "cx": 275.5,
+    "cy": 320.5
+   },
+   {
+    "r": 0.646,
+    "theta": 230.6,
+    "size": 0.0163,
+    "elong": 3.82,
+    "radialAlign": 0.88,
+    "areaPx": 8,
+    "hollow": false,
+    "verts": 7,
+    "class": "bar",
+    "hue": 215.7,
+    "sat": 0.55,
+    "strokePx": 1.4,
+    "bbox": [
+     46,
+     479,
+     6,
+     3
+    ],
+    "cx": 48.8,
+    "cy": 479.9
+   },
+   {
+    "r": 1.022,
+    "theta": 238.5,
+    "size": 0.0091,
+    "elong": 1.29,
+    "radialAlign": 0.23,
+    "areaPx": 8,
+    "hollow": false,
+    "verts": 5,
+    "class": "blob",
+    "hue": 240.0,
+    "sat": 0.02,
+    "strokePx": 2.3,
+    "bbox": [
+     8,
+     598,
+     3,
+     3
+    ],
+    "cx": 9.1,
+    "cy": 598.9
+   },
+   {
+    "r": 1.124,
+    "theta": 297.8,
+    "size": 0.0089,
+    "elong": 1.81,
+    "radialAlign": 0.35,
+    "areaPx": 6,
+    "hollow": false,
+    "verts": 6,
+    "class": "blob",
+    "hue": 65.2,
+    "sat": 0.11,
+    "strokePx": 1.6,
+    "bbox": [
+     347,
+     637,
+     3,
+     3
+    ],
+    "cx": 347.8,
+    "cy": 638.0
+   }
+  ],
+  "regime": 1,
+  "t": 0.87,
+  "share": 0.69,
+  "flow": {
+   "matches": 454,
+   "outwardShare": 0.58,
+   "rBins": [
+    0.07,
+    0.21,
+    0.39,
+    0.61,
+    0.87,
+    1.22
+   ],
+   "radial": [
+    0.0,
+    0.0,
+    0.004,
+    0.008,
+    0.009,
+    0.0
+   ],
+   "rotDegS": [
+    -1.5,
+    -0.8,
+    -3.2,
+    -2.7,
+    -2.3,
+    -2.2
+   ],
+   "direction": "outward",
+   "p": 0.18,
+   "vAt05": 0.018,
+   "rotMeanDegS": -2.4
+  },
+  "frame": "frames/look_1.jpg",
+  "overlay": "frames/look_1_overlay.png"
+ },
+ {
+  "size": [
+   360,
+   640
+  ],
+  "thr": 0.18,
+  "litShare": 0.1324,
+  "n": 16,
+  "classes": {
+   "bar": 7,
+   "blob": 4,
+   "panel": 4,
+   "ring": 1
+  },
+  "hollowShare": 0.06,
+  "nestedShare": 1.0,
+  "sizeFit": {
+   "b": -0.18,
+   "at03": 0.424,
+   "at09": 0.348,
+   "on": "substantial objects",
+   "n": 8
+  },
+  "sizeEnvelope": {
+   "r0.1-0.3": 1.33,
+   "r0.3-0.6": 0.492,
+   "r0.6-1.0": 0.419,
+   "r>1": null
+  },
+  "rings": [
+   {
+    "r": 0.34,
+    "n": 4
+   },
+   {
+    "r": 0.67,
+    "n": 4
+   },
+   {
+    "r": 0.95,
+    "n": 5
+   }
+  ],
+  "fold": 1,
+  "foldScore": 0.0,
+  "onAxis": 0.0,
+  "onDiag": 0.0,
+  "stroke": {
+   "innerPx": 13.1,
+   "outerPx": null
+  },
+  "streak": {
+   "innerElong": 4.19,
+   "outerElong": 2.06,
+   "radialShare": 0.58
+  },
+  "hues": [
+   {
+    "name": "orange",
+    "deg": 30,
+    "share": 0.88
+   },
+   {
+    "name": "rose",
+    "deg": 330,
+    "share": 0.12
+   }
+  ],
+  "glow": {
+   "ground": 0.1158,
+   "core": 0.76,
+   "profile": [
+    0.3249,
+    0.2724,
+    0.2246,
+    0.1607,
+    0.1076,
+    0.1167
+   ],
+   "efoldPx": 4.6,
+   "haloRatio": 0.169
+  },
+  "ground": {
+   "hex": "#500d23",
+   "vignette": 68.62
+  },
+  "objects": [
+   {
+    "r": 0.841,
+    "theta": 72.3,
+    "size": 0.6125,
+    "elong": 28.86,
+    "radialAlign": 1.0,
+    "areaPx": 920,
+    "hollow": false,
+    "verts": 2,
+    "class": "bar",
+    "hue": 310.2,
+    "sat": 0.07,
+    "strokePx": 6.8,
+    "bbox": [
+     240,
+     0,
+     46,
+     130
+    ],
+    "cx": 261.6,
+    "cy": 63.6
+   },
+   {
+    "r": 1.098,
+    "theta": 118.2,
+    "size": 0.012,
+    "elong": 2.39,
+    "radialAlign": 1.0,
+    "areaPx": 7,
+    "hollow": false,
+    "verts": 7,
+    "class": "blob",
+    "hue": 194.8,
+    "sat": 0.03,
+    "strokePx": 1.6,
+    "bbox": [
+     13,
+     9,
+     3,
+     4
+    ],
+    "cx": 13.9,
+    "cy": 10.4
+   },
+   {
+    "r": 0.904,
+    "theta": 91.8,
+    "size": 0.0088,
+    "elong": 1.73,
+    "radialAlign": 0.73,
+    "areaPx": 7,
+    "hollow": false,
+    "verts": 6,
+    "class": "blob",
+    "hue": 240.0,
+    "sat": 0.04,
+    "strokePx": 1.6,
+    "bbox": [
+     170,
+     30,
+     3,
+     3
+    ],
+    "cx": 171.0,
+    "cy": 31.0
+   },
+   {
+    "r": 0.925,
+    "theta": 119.0,
+    "size": 0.0094,
+    "elong": 1.5,
+    "radialAlign": 0.87,
+    "areaPx": 6,
+    "hollow": false,
+    "verts": 4,
+    "class": "panel",
+    "hue": 240.0,
+    "sat": 0.04,
+    "strokePx": 2.0,
+    "bbox": [
+     36,
+     60,
+     2,
+     3
+    ],
+    "cx": 36.5,
+    "cy": 61.0
+   },
+   {
+    "r": 0.589,
+    "theta": 65.5,
+    "size": 0.4338,
+    "elong": 7.38,
+    "radialAlign": 1.0,
+    "areaPx": 1482,
+    "hollow": false,
+    "verts": 4,
+    "class": "bar",
+    "hue": 335.3,
+    "sat": 0.46,
+    "strokePx": 18.8,
+    "bbox": [
+     230,
+     98,
+     62,
+     120
+    ],
+    "cx": 258.2,
+    "cy": 148.7
+   },
+   {
+    "r": 0.709,
+    "theta": 116.6,
+    "size": 0.0094,
+    "elong": 1.5,
+    "radialAlign": 0.89,
+    "areaPx": 6,
+    "hollow": false,
+    "verts": 4,
+    "class": "panel",
+    "hue": 240.0,
+    "sat": 0.05,
+    "strokePx": 2.0,
+    "bbox": [
+     78,
+     116,
+     2,
+     3
+    ],
+    "cx": 78.5,
+    "cy": 117.0
+   },
+   {
+    "r": 0.354,
+    "theta": 79.3,
+    "size": 0.5327,
+    "elong": 4.84,
+    "radialAlign": 0.96,
+    "areaPx": 4173,
+    "hollow": false,
+    "verts": 4,
+    "class": "bar",
+    "hue": 39.9,
+    "sat": 0.53,
+    "strokePx": 35.2,
+    "bbox": [
+     162,
+     123,
+     76,
+     158
+    ],
+    "cx": 201.0,
+    "cy": 208.8
+   },
+   {
+    "r": 0.209,
+    "theta": 229.7,
+    "size": 1.4447,
+    "elong": 2.87,
+    "radialAlign": 0.46,
+    "areaPx": 20888,
+    "hollow": true,
+    "verts": 8,
+    "class": "ring",
+    "hue": 44.8,
+    "sat": 0.69,
+    "strokePx": 13.1,
+    "bbox": [
+     30,
+     138,
+     255,
+     392
+    ],
+    "cx": 136.7,
+    "cy": 371.1
+   },
+   {
+    "r": 0.335,
+    "theta": 30.5,
+    "size": 0.4506,
+    "elong": 2.79,
+    "radialAlign": 0.84,
+    "areaPx": 913,
+    "hollow": false,
+    "verts": 6,
+    "class": "blob",
+    "hue": 323.9,
+    "sat": 0.46,
+    "strokePx": 51.8,
+    "bbox": [
+     227,
+     240,
+     133,
+     60
+    ],
+    "cx": 272.4,
+    "cy": 265.7
+   },
+   {
+    "r": 0.157,
+    "theta": 49.3,
+    "size": 0.2989,
+    "elong": 7.27,
+    "radialAlign": 0.97,
+    "areaPx": 657,
+    "hollow": false,
+    "verts": 4,
+    "class": "bar",
+    "hue": 23.8,
+    "sat": 0.61,
+    "strokePx": 13.2,
+    "bbox": [
+     196,
+     243,
+     31,
+     67
+    ],
+    "cx": 212.8,
+    "cy": 281.8
+   },
+   {
+    "r": 0.305,
+    "theta": 34.0,
+    "size": 0.0298,
+    "elong": 3.54,
+    "radialAlign": 0.66,
+    "areaPx": 14,
+    "hollow": false,
+    "verts": 6,
+    "class": "bar",
+    "hue": 338.1,
+    "sat": 0.74,
+    "strokePx": 2.7,
+    "bbox": [
+     257,
+     264,
+     10,
+     4
+    ],
+    "cx": 261.0,
+    "cy": 265.4
+   },
+   {
+    "r": 0.395,
+    "theta": 16.4,
+    "size": 0.0904,
+    "elong": 8.68,
+    "radialAlign": 0.74,
+    "areaPx": 63,
+    "hollow": false,
+    "verts": 2,
+    "class": "bar",
+    "hue": 339.5,
+    "sat": 0.82,
+    "strokePx": 3.3,
+    "bbox": [
+     289,
+     278,
+     29,
+     15
+    ],
+    "cx": 301.2,
+    "cy": 284.2
+   },
+   {
+    "r": 0.487,
+    "theta": 7.0,
+    "size": 0.0284,
+    "elong": 2.5,
+    "radialAlign": 0.92,
+    "areaPx": 30,
+    "hollow": false,
+    "verts": 6,
+    "class": "blob",
+    "hue": 338.2,
+    "sat": 0.82,
+    "strokePx": 3.6,
+    "bbox": [
+     331,
+     299,
+     9,
+     5
+    ],
+    "cx": 334.5,
+    "cy": 300.9
+   },
+   {
+    "r": 0.664,
+    "theta": 312.9,
+    "size": 0.2896,
+    "elong": 5.25,
+    "radialAlign": 0.52,
+    "areaPx": 1150,
+    "hollow": false,
+    "verts": 4,
+    "class": "bar",
+    "hue": 340.2,
+    "sat": 0.79,
+    "strokePx": 17.7,
+    "bbox": [
+     284,
+     463,
+     76,
+     28
+    ],
+    "cx": 324.7,
+    "cy": 475.8
+   },
+   {
+    "r": 0.666,
+    "theta": 239.7,
+    "size": 0.0094,
+    "elong": 1.5,
+    "radialAlign": 0.86,
+    "areaPx": 6,
+    "hollow": false,
+    "verts": 4,
+    "class": "panel",
+    "hue": 240.0,
+    "sat": 0.02,
+    "strokePx": 2.0,
+    "bbox": [
+     72,
+     503,
+     2,
+     3
+    ],
+    "cx": 72.5,
+    "cy": 504.0
+   },
+   {
+    "r": 0.964,
+    "theta": 294.8,
+    "size": 0.0094,
+    "elong": 1.5,
+    "radialAlign": 0.91,
+    "areaPx": 6,
+    "hollow": false,
+    "verts": 4,
+    "class": "panel",
+    "hue": 240.0,
+    "sat": 0.03,
+    "strokePx": 2.0,
+    "bbox": [
+     309,
+     599,
+     2,
+     3
+    ],
+    "cx": 309.5,
+    "cy": 600.0
+   }
+  ],
+  "regime": 2,
+  "t": 2.33,
+  "share": 0.31,
+  "flow": {
+   "matches": 426,
+   "outwardShare": 0.6,
+   "rBins": [
+    0.07,
+    0.21,
+    0.39,
+    0.61,
+    0.87,
+    1.22
+   ],
+   "radial": [
+    0.0,
+    0.0,
+    0.001,
+    0.007,
+    0.007,
+    0.034
+   ],
+   "rotDegS": [
+    0.0,
+    -2.3,
+    -4.7,
+    -2.9,
+    -2.5,
+    -2.8
+   ],
+   "direction": "outward",
+   "p": 0.18,
+   "vAt05": 0.016,
+   "rotMeanDegS": -2.7
+  },
+  "frame": "frames/look_2.jpg",
+  "overlay": "frames/look_2_overlay.png"
+ }
+]

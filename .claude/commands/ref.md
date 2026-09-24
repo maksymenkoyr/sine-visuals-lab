@@ -79,6 +79,10 @@ names, not the set.
      was built or tuned against, reference beside ours;
    - under "Decisions and pivots": the sync hypotheses and how they held up.
 
-   If the private archive is set up, `python3 tools/ref-archive.py <name>`
-   keeps the bundle; its header explains the setup and why the archive
-   stays private.
+   Then keep the materials:
+   - `uv run tools/ref-keep.py <name> $2` saves our half of the bundle
+     (report, data, our shots) into `docs/scenes/$2/<name>/`; list it under
+     the record's Materials;
+   - `python3 tools/ref-archive.py <name>` puts the whole bundle, the
+     reference media included, in the private archive. Its header explains
+     the setup, and why that archive stays private.

@@ -27,6 +27,19 @@ Close out this working session:
    session's memory notes are private to this machine; the record is what
    survives.
 
+   Then **save the materials** — anything this session used for a scene that
+   would otherwise be lost (the standing rule in `CLAUDE.md` says where each
+   kind goes):
+   - scripts written in the session's scratch folder that were used to
+     build, measure or screenshot the scene → `docs/scenes/<id>/scripts/`,
+     with absolute local paths made repo-relative;
+   - a `/ref` bundle not yet kept → `uv run tools/ref-keep.py <bundle> <id>`;
+   - an artifact made for the scene → its source in
+     `docs/scenes/<id>/artifacts/` (reference images replaced), and its link
+     under Materials;
+   - reference material used outside `/ref` (a pasted still, frames pulled
+     by hand) → under `tools/.cache/refs/<name>/`, named in the record.
+
 4. **Check for doc rot.** For any symbol, file, or param name this session
    renamed, removed, or changed the meaning of, grep `CLAUDE.md` and `docs/*.md`
    for the old name. Fix any reference you find — this is the enforcement
@@ -34,4 +47,5 @@ Close out this working session:
    countable"): a reference that names a real symbol will surface itself here
    the moment that symbol changes.
 
-Report what you changed in `docs/status.md` and whether any doc needed a fix.
+Report what you changed in `docs/status.md`, which scene records and
+materials you updated, and whether any doc needed a fix.

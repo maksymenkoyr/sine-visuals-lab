@@ -104,6 +104,28 @@ after all three pass; include the screenshot paths in your summary.
   reference media (frames, clips, audio, comparison sheets) never goes in
   this repo — a record names the `/ref` bundle instead
   (`tools/ref-archive.py` keeps bundles in a private archive).
+- Everything a scene was built with is kept, and its record's "Materials"
+  section says where. The split is by whose it is:
+  - **Ours goes in the repo, under `docs/scenes/<id>/`:**
+    - the measurements kept from each `/ref` bundle, via
+      `tools/ref-keep.py` (it knows which files are ours);
+    - working scripts, in `scripts/` — or `tools/` if general. A script
+      that only ever lived in a session's scratch folder is lost when that
+      folder is cleaned;
+    - the source of any artifact made for the scene, in `artifacts/`, with
+      reference images replaced by a placeholder.
+  - **The reference's own material** (videos, frames, audio, pasted stills,
+    images built from them) stays in the local `/ref` cache and the private
+    archive. Anything used outside `/ref` — a pasted still, frames pulled by
+    hand — still goes under `tools/.cache/refs/<name>/`, so it's kept with
+    the rest.
+
+  `/wrap` checks nothing the session used is left unsaved.
+
+  A scene that's sold separately (not under the AGPL) is the exception: its
+  code, record and materials all live in the private repo it ships from, and
+  nothing about it — record, measurements, screenshots, artifacts — goes in
+  this public repo.
 
 ## Communication style
 

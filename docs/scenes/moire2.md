@@ -38,6 +38,10 @@ Unchanged since the initial commit; no tuning session recorded against it.
 No open follow-ups recorded. It remains the cheapest of the Moiré-family
 scenes to draw and is kept mainly for comparison against the newer `moire`.
 
+## Materials
+
+- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+
 ## Resume here
 
 `npm run dev`, then `/?audio=synthetic&bpm=120#/v/moire2`.

@@ -1,0 +1,1623 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Caustics Patch Bay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=Share+Tech+Mono&display=swap">
+<style>
+:root {
+  color-scheme: dark;
+  --ground: #08070c;
+  --text: #f2eff8;
+  --dim: rgba(242, 239, 248, 0.62);
+  --faint: rgba(242, 239, 248, 0.36);
+  --glass: rgba(19, 16, 28, 0.76);
+  --glass-hi: rgba(33, 28, 48, 0.94);
+  --edge: rgba(255, 255, 255, 0.07);
+  --edge-hi: rgba(255, 255, 255, 0.16);
+  --amber: #f9b96c;
+  --violet: #c3a5f9;
+  --sky: #59bbfb;
+  --green: #8ce6a0;
+  --teal: #4dd4c0;
+  --red: #ef4444;
+  --yellow: #eab308;
+  --hair: #efb062;
+  --label: 'Chakra Petch', system-ui, sans-serif;
+  --mono: 'Share Tech Mono', ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  background:
+    radial-gradient(1100px 680px at 82% 8%, rgba(89, 187, 251, 0.10), transparent 62%),
+    radial-gradient(900px 620px at 6% 92%, rgba(195, 165, 249, 0.11), transparent 62%),
+    radial-gradient(720px 520px at 46% 48%, rgba(77, 212, 192, 0.05), transparent 60%),
+    var(--ground);
+  color: var(--text);
+  font: 400 13px/1.45 var(--label);
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 24px; padding-block: 22px 56px; }
+
+/* ---- header ---- */
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 24px; margin-bottom: 20px; }
+.brand h1 { margin: 0; font: 600 13px/1 var(--label); letter-spacing: 0.26em; text-transform: uppercase; }
+.brand h1 b { color: var(--violet); font-weight: 600; }
+.brand p { margin: 8px 0 0; color: var(--dim); font-size: 13.5px; transition: color 0.2s; }
+.brand p.flash { color: var(--amber); }
+.transport { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.phrase { display: flex; gap: 3px; }
+.phrase span {
+  font: 500 10px/1 var(--label); letter-spacing: 0.16em; text-transform: uppercase;
+  padding: 7px 9px; border-radius: 4px; color: var(--faint);
+  background: rgba(255, 255, 255, 0.03); border: 1px solid var(--edge);
+  transition: background 0.3s, color 0.3s;
+}
+.phrase span.on { color: var(--ground); background: var(--text); border-color: transparent; }
+.phrase span.on[data-p="drop"] { background: var(--yellow); }
+.bar-no { font: 13px var(--mono); color: var(--dim); min-width: 64px; font-variant-numeric: tabular-nums; }
+.btn {
+  font: 500 11px/1 var(--label); letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--text); background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--edge-hi); border-radius: 6px; padding: 8px 12px; cursor: pointer;
+}
+.btn:hover { background: rgba(255, 255, 255, 0.1); }
+.btn:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+
+/* ---- bay layout ---- */
+.bay {
+  position: relative; display: grid;
+  grid-template-columns: minmax(0, 440px) minmax(48px, 116px) minmax(0, 520px);
+  justify-content: center; align-items: start;
+}
+.col { display: flex; flex-direction: column; gap: 12px; position: relative; z-index: 1; min-width: 0; }
+.gutter { align-self: stretch; }
+svg.cables { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 3; }
+.cable-glow { fill: none; stroke-width: 7; opacity: 0.13; }
+.cable-core { fill: none; stroke-width: 1.6; opacity: 0.8; }
+.cable-flow { fill: none; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 0.1 11; opacity: 0.95; }
+.cable-core.new { stroke-dasharray: 100; stroke-dashoffset: 100; animation: draw 0.5s ease-out forwards; }
+.cable-glow.new, .cable-flow.new { opacity: 0; animation: fadein 0.35s 0.35s forwards; }
+.cable-glow.new { --o: 0.13; } .cable-flow.new { --o: 0.95; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes fadein { to { opacity: var(--o); } }
+
+/* ---- cards ---- */
+.card {
+  background: var(--glass); border: 1px solid var(--edge); border-radius: 10px;
+  padding: 12px 14px 10px; backdrop-filter: blur(18px) saturate(0.8); -webkit-backdrop-filter: blur(18px) saturate(0.8);
+}
+.card-title { display: flex; align-items: baseline; gap: 10px; padding-bottom: 9px; margin-bottom: 6px; position: relative; }
+.card-title::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
+  background: linear-gradient(90deg, var(--hair), rgba(239, 176, 98, 0) 85%); opacity: 0.5;
+}
+.card-title .n { font: 12px var(--mono); color: var(--faint); }
+.card-title h2 { margin: 0; font: 600 11.5px/1 var(--label); letter-spacing: 0.22em; text-transform: uppercase; color: var(--acc, var(--text)); }
+.card-title .aside { margin-left: auto; font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+
+/* ---- monitor lanes ---- */
+.lane {
+  display: grid; grid-template-columns: 88px minmax(0, 1fr) 24px; align-items: center; gap: 10px;
+  padding: 5px 6px; margin-inline: -6px; border-radius: 6px; position: relative;
+  transition: opacity 0.25s, background 0.25s;
+}
+.lane--wide { grid-template-columns: minmax(0, 1fr) 24px; align-items: start; }
+.lane--wide .jack { margin-top: 4px; }
+.lane-label { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lane-label span { font: 500 10.5px/1.2 var(--label); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); transition: color 0.25s; }
+.lane-label small { font: 10px/1.2 var(--mono); color: var(--faint); }
+.lane-viz { position: relative; min-width: 0; }
+.lane-viz canvas { display: block; width: 100%; }
+.bay.has-shown .lane[data-src]:not(.fed):not(.lane--keep) { opacity: 0.4; }
+.lane.fed { background: linear-gradient(90deg, transparent 25%, color-mix(in srgb, var(--c) 12%, transparent)); }
+.lane.fed .lane-label span { color: var(--c); }
+.fed-chip {
+  position: absolute; right: 2px; top: 1px; display: none;
+  font: 10px/1 var(--mono); color: var(--c); background: rgba(8, 7, 12, 0.86);
+  padding: 3px 6px; border-radius: 3px; pointer-events: none; white-space: nowrap;
+}
+.lane.fed .fed-chip { display: block; }
+
+.jack {
+  position: relative; width: 20px; height: 20px; border-radius: 50%; padding: 0;
+  border: 2px solid var(--c); background: radial-gradient(circle, #050408 0 34%, #1a1623 36%);
+  cursor: pointer; justify-self: center; transition: transform 0.15s, box-shadow 0.2s, background 0.2s;
+}
+.jack:hover { transform: scale(1.14); box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 20%, transparent); }
+.jack.patched { background: radial-gradient(circle, var(--c) 0 36%, color-mix(in srgb, var(--c) 28%, #111) 40%); box-shadow: 0 0 12px color-mix(in srgb, var(--c) 55%, transparent); }
+.jack:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.uses { position: absolute; left: 50%; top: calc(100% + 3px); transform: translateX(-50%); display: flex; gap: 2px; }
+.uses i { width: 3px; height: 3px; border-radius: 50%; background: var(--c); opacity: 0.6; }
+
+.axis { position: relative; height: 14px; margin-top: 5px; }
+.axis span { position: absolute; transform: translateX(-50%); font: 10px var(--mono); color: var(--faint); white-space: nowrap; }
+.spec-caption { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; min-height: 22px; font-size: 11.5px; color: var(--dim); }
+.spec-caption .key { width: 14px; height: 2px; background: var(--sky); border-radius: 2px; }
+.spec-caption b { font-weight: 500; color: var(--text); }
+.spec-caption .draw-key { width: 14px; height: 2px; background: var(--amber); border-radius: 2px; }
+canvas.spec.drawable { cursor: crosshair; touch-action: none; }
+.link { all: unset; cursor: pointer; color: var(--amber); text-decoration: underline; text-underline-offset: 3px; font-size: 11.5px; }
+.link:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; border-radius: 2px; }
+
+/* ---- scene rows ---- */
+.group-h { font: 500 10px/1 var(--label); letter-spacing: 0.22em; text-transform: uppercase; color: var(--faint); margin: 12px 0 4px 16px; }
+.group-h:first-child { margin-top: 6px; }
+.row {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px;
+  padding: 9px 12px 9px 18px; border-radius: 8px; transition: background 0.2s, box-shadow 0.2s;
+}
+.row:hover { background: rgba(255, 255, 255, 0.025); }
+.row.shown { background: var(--glass-hi); box-shadow: inset 0 0 0 1px rgba(195, 165, 249, 0.2), 0 10px 28px rgba(0, 0, 0, 0.35); }
+.row.pinned { background: var(--glass-hi); box-shadow: inset 0 0 0 1px rgba(195, 165, 249, 0.5), 0 12px 32px rgba(0, 0, 0, 0.45); }
+.row.hl { box-shadow: inset 0 0 0 1px var(--hl), 0 0 18px color-mix(in srgb, var(--hl) 22%, transparent); }
+.port {
+  position: absolute; left: -6px; top: 14px; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--pg, #2a2536); box-shadow: 0 0 0 2px #120f1a, 0 0 0 3px rgba(255, 255, 255, 0.14);
+}
+.row--static .port { display: none; }
+.row-select { all: unset; cursor: pointer; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.row-select:focus-visible { outline: 2px solid var(--violet); outline-offset: 4px; border-radius: 3px; }
+.row-label { font: 500 14px/1.25 var(--label); color: var(--text); white-space: nowrap; }
+.row-src { font: 11px/1.25 var(--mono); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.row.shown .row-src, .row.pinned .row-src { color: var(--dim); }
+.row--static .row-label { color: var(--dim); }
+.row-val { font: 12px var(--mono); color: var(--dim); align-self: center; font-variant-numeric: tabular-nums; }
+.amt { grid-column: 1 / -1; margin-top: 5px; }
+canvas.drive { grid-column: 1 / -1; display: block; width: 100%; height: 18px; margin-top: 3px; }
+.patch { grid-column: 1 / -1; }
+
+input[type="range"] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 16px; margin: 0;
+  background: transparent; cursor: pointer; --p: 50%; --acc: var(--violet);
+}
+input[type="range"]::-webkit-slider-runnable-track { height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--acc) var(--p), rgba(255, 255, 255, 0.14) var(--p)); }
+input[type="range"]::-moz-range-track { height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--acc) var(--p), rgba(255, 255, 255, 0.14) var(--p)); }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -5px; border-radius: 50%; background: #15121d; border: 2px solid var(--acc); }
+input[type="range"]::-moz-range-thumb { width: 9px; height: 9px; border-radius: 50%; background: #15121d; border: 2px solid var(--acc); }
+input[type="range"]:focus-visible { outline: none; }
+input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 45%, transparent); }
+input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 45%, transparent); }
+
+/* ---- patch panel ---- */
+.patch {
+  margin-top: 10px; padding: 10px 10px 9px; border-radius: 8px;
+  background: rgba(0, 0, 0, 0.26); border: 1px solid var(--edge);
+  display: flex; flex-direction: column; gap: 8px; cursor: default;
+}
+.patch[hidden], .reset[hidden] { display: none; }
+.patch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.eyebrow { font: 500 10px/1 var(--label); letter-spacing: 0.2em; text-transform: uppercase; color: var(--faint); }
+.seg { display: inline-flex; border: 1px solid var(--edge-hi); border-radius: 6px; overflow: hidden; }
+.seg button { all: unset; cursor: pointer; font: 500 10.5px/1 var(--label); letter-spacing: 0.1em; text-transform: uppercase; padding: 6px 9px; color: var(--dim); }
+.seg button + button { border-left: 1px solid var(--edge); }
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+.seg button:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; }
+.seg.mini button { padding: 5px 7px; font-size: 9.5px; }
+.src-list { display: flex; flex-direction: column; }
+.src-line { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 6px 10px; padding: 7px 0; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+.src-line:first-child { border-top: 0; }
+.src-line .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
+.src-name { font: 500 12.5px/1.2 var(--label); min-width: 0; }
+.src-role { font: 10px var(--mono); color: var(--faint); margin-left: 8px; text-transform: uppercase; letter-spacing: 0.08em; }
+.src-ctrls { grid-column: 2 / -1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.weight { display: flex; align-items: center; gap: 8px; flex: 1 1 130px; min-width: 120px; }
+.weight output { font: 11px var(--mono); color: var(--dim); min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+.x { all: unset; cursor: pointer; color: var(--faint); font: 15px/1 var(--mono); padding: 2px 5px; border-radius: 3px; }
+.x:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.x:focus-visible { outline: 2px solid var(--violet); }
+.empty { font-size: 12px; color: var(--dim); padding: 4px 0; }
+.add-hint { font-size: 12px; color: var(--dim); }
+.add-hint i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--faint); vertical-align: -1px; margin-inline: 2px; }
+.add { display: none; flex-direction: column; gap: 6px; }
+.add-group { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.add-group b { font: 500 9.5px/1 var(--label); letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); width: 54px; }
+.chip { all: unset; cursor: pointer; font: 500 11px/1 var(--label); padding: 6px 8px; border-radius: 5px; border: 1px solid var(--edge-hi); color: var(--dim); }
+.chip[aria-pressed="true"] { border-color: var(--c); color: var(--text); background: color-mix(in srgb, var(--c) 16%, transparent); }
+.chip:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+.out-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 2px; }
+.out-val { font: 12px var(--mono); color: var(--text); font-variant-numeric: tabular-nums; }
+canvas.out { display: block; width: 100%; height: 64px; border-radius: 5px; background: rgba(255, 255, 255, 0.02); }
+.reset { all: unset; cursor: pointer; align-self: flex-start; font: 500 11px var(--label); color: var(--violet); text-decoration: underline; text-underline-offset: 3px; }
+.reset:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+
+@media (max-width: 899px) {
+  .wrap { padding-inline: 16px; }
+  .bay { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .gutter, svg.cables { display: none; }
+  .add { display: flex; }
+  .add-hint { display: none; }
+  .lane:not(.lane--wide) { grid-template-columns: 80px minmax(0, 1fr) 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cable-core.new, .cable-glow.new, .cable-flow.new { animation: none; stroke-dashoffset: 0; opacity: var(--o, 0.8); }
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>Caustics <b>Patch Bay</b></h1>
+      <p id="legend">Pick a setting, then plug meters into it.</p>
+    </div>
+    <div class="transport">
+      <div class="phrase" id="phrase" aria-label="Where the fake track is">
+        <span data-p="intro">Intro</span><span data-p="build">Build</span><span data-p="drop">Drop</span><span data-p="break">Break</span>
+      </div>
+      <span class="bar-no" id="barNo">BAR 1</span>
+      <button class="btn" id="play" type="button" aria-pressed="true">Pause</button>
+    </div>
+  </header>
+
+  <main class="bay" id="bay">
+    <div class="col" id="monitors"></div>
+    <div class="gutter" aria-hidden="true"></div>
+    <div class="col" id="scene">
+      <section class="card" style="--acc: var(--violet)">
+        <div class="card-title"><span class="n">5</span><h2>Scene · Caustics</h2><span class="aside">124 BPM · example track</span></div>
+        <div id="sceneRows"></div>
+      </section>
+    </div>
+    <svg class="cables" id="cables" aria-hidden="true"></svg>
+  </main>
+</div>
+
+<script>
+// Shared fake-music engine for the drive prototypes. Inline this whole file
+// into each prototype page (artifacts can't load local scripts from disk).
+// It stands in for the real mic pipeline: a 124 BPM track with kick, bass,
+// snare, hats and a mid "growl" that only plays in the drop, arranged in
+// 8-bar phrases (intro → build → drop → break), folded into NUM_BANDS log
+// bands and run through the same kinds of detectors the app has (group
+// levels, spectral flux vs an adaptive threshold, graded hits, drop, section
+// intensity, centroid, beat grid). Numbers are shaped to look like the real
+// monitors, not to be acoustically exact.
+const Sim = (() => {
+  const NUM_BANDS = 24;
+  const BPM = 124;
+  const BEAT = 60 / BPM;
+  const LOW = [0, 6];   // band index ranges [lo, hi)
+  const MID = [6, 15];
+  const HIGH = [15, 24];
+  const HIST = 600;     // ~10 s at 60 fps
+
+  const PHRASES = ["intro", "build", "drop", "break"]; // 8 bars each
+  const bandHz = (i) => 40 * Math.pow(16000 / 40, (i + 0.5) / NUM_BANDS);
+
+  let t = 0;
+  const raw = new Float32Array(NUM_BANDS);
+  const bands = new Float32Array(NUM_BANDS);
+  const prev = new Float32Array(NUM_BANDS);
+  const group = { beat: mkDet(), low: mkDet(), mid: mkDet(), high: mkDet() };
+  let section = 0.3, loudSlow = 0.3, lastPhrase = "", dropPulse = 0, dropFired = false;
+  let lastBeatIdx = -1;
+  const lvl = { all: 0, low: 0, mid: 0, high: 0 };
+
+  function mkDet() {
+    return { base: 0.05, flux: 0, thr: 0.1, ratio: 0, fired: false, since: 9, pulse: 0, strength: 0 };
+  }
+  const hist = {
+    flux: new Float32Array(HIST), thr: new Float32Array(HIST),
+    all: new Float32Array(HIST), low: new Float32Array(HIST), mid: new Float32Array(HIST), high: new Float32Array(HIST),
+    hitBeat: new Float32Array(HIST), hitLow: new Float32Array(HIST), hitMid: new Float32Array(HIST), hitHigh: new Float32Array(HIST),
+    section: new Float32Array(HIST), centroid: new Float32Array(HIST), loud: new Float32Array(HIST),
+  };
+  let head = 0;
+
+  // Deterministic-ish noise so reloads look similar.
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+
+  const env = (x, decay) => (x < 0 ? 0 : Math.exp(-x / decay));
+  const bump = (i, centre, width) => Math.exp(-((i - centre) ** 2) / (2 * width * width));
+
+  function phraseAt(time) {
+    const bar = Math.floor(time / (BEAT * 4));
+    return { name: PHRASES[Math.floor(bar / 8) % 4], bar, barInPhrase: bar % 8 };
+  }
+
+  function synth(time) {
+    const beatPos = time / BEAT;
+    const inBeat = (beatPos % 1) * BEAT;         // seconds since the beat
+    const beatIdx = Math.floor(beatPos);
+    const ph = phraseAt(time);
+    const drop = ph.name === "drop", intro = ph.name === "intro", brk = ph.name === "break", build = ph.name === "build";
+    const kickOn = !intro && !(brk && ph.barInPhrase < 6);
+    const kick = kickOn ? env(inBeat, 0.11) : 0;
+    const snareOn = !intro && beatIdx % 2 === 1;
+    const rollDiv = build && ph.barInPhrase >= 6 ? 4 : 1;   // snare roll at the end of the build
+    const inRoll = ((beatPos * rollDiv) % 1) * (BEAT / rollDiv);
+    const snare = snareOn || (build && ph.barInPhrase >= 6) ? env(build && ph.barInPhrase >= 6 ? inRoll : inBeat, 0.13) * (build ? 0.6 + 0.05 * ph.barInPhrase : 1) : 0;
+    const hatDiv = drop ? 4 : 2;
+    const inHat = ((beatPos * hatDiv) % 1) * (BEAT / hatDiv);
+    const hat = env(inHat, 0.035) * (intro ? 0.55 : drop ? 1 : 0.8);
+    const bass = drop ? 0.75 : brk ? 0.2 : build ? 0.45 : 0.1;
+    const wob = drop ? 0.55 + 0.45 * Math.sin(beatPos * Math.PI * 2 * 2) : 0; // growl wobbles in 1/8 notes
+    const pad = brk || intro ? 0.35 : 0.15;
+    for (let i = 0; i < NUM_BANDS; i++) {
+      let v = 0.04 + 0.03 * rnd();
+      v += kick * 1.1 * bump(i, 1.5, 1.6);
+      v += bass * (0.55 + 0.1 * Math.sin(time * 3 + i)) * bump(i, 3.5, 1.8);
+      v += snare * 0.85 * bump(i, 11, 3.5);
+      v += hat * 0.8 * bump(i, 20.5, 2.4);
+      v += wob * 0.8 * bump(i, 10, 3);
+      v += pad * 0.5 * bump(i, 8, 5) * (0.8 + 0.2 * Math.sin(time * 0.7));
+      raw[i] = Math.min(1, v);
+    }
+    return ph;
+  }
+
+  function detect(det, fluxNow, dt, levelNow) {
+    det.flux = fluxNow;
+    det.base += (fluxNow - det.base) * Math.min(1, dt * 1.2);
+    det.thr = det.base * 1.6 + 0.03;
+    det.ratio = fluxNow / det.thr;
+    det.since += dt;
+    det.fired = false;
+    if (det.ratio > 1 && det.since > 0.1) {
+      det.fired = true;
+      det.since = 0;
+      const standout = 1 - Math.exp(-(det.ratio - 1) / 0.6);
+      det.strength = Math.max(0.15, 0.5 * standout + 0.5 * levelNow);
+      det.pulse = Math.max(det.pulse, det.strength);
+    }
+    det.pulse *= Math.exp(-dt * 7);
+  }
+
+  function step(dt) {
+    t += dt;
+    const ph = synth(t);
+    prev.set(bands);
+    for (let i = 0; i < NUM_BANDS; i++) {
+      const rate = raw[i] > bands[i] ? 70 : 6;
+      bands[i] += (raw[i] - bands[i]) * Math.min(1, rate * dt);
+    }
+    const mean = (r) => { let s = 0; for (let i = r[0]; i < r[1]; i++) s += bands[i]; return s / (r[1] - r[0]); };
+    const fluxOf = (r) => { let s = 0; for (let i = r[0]; i < r[1]; i++) s += Math.max(0, bands[i] - prev[i]); return s / (r[1] - r[0]) * 6; };
+    const lvRate = (now, was) => (now > was ? 24 : 10);
+    for (const [k, r] of [["low", LOW], ["mid", MID], ["high", HIGH], ["all", [0, NUM_BANDS]]]) {
+      const now = mean(r);
+      lvl[k] += (now - lvl[k]) * Math.min(1, lvRate(now, lvl[k]) * dt);
+    }
+    const fluxAll = fluxOf([0, NUM_BANDS]);
+    detect(group.beat, fluxAll, dt, lvl.all);
+    detect(group.low, fluxOf(LOW), dt, lvl.low);
+    detect(group.mid, fluxOf(MID), dt, lvl.mid);
+    detect(group.high, fluxOf(HIGH), dt, lvl.high);
+
+    loudSlow += (lvl.all - loudSlow) * Math.min(1, dt / 4);
+    section = Math.min(1, Math.max(0, (loudSlow - 0.12) / 0.3));
+    dropFired = ph.name === "drop" && lastPhrase !== "drop";
+    if (dropFired) dropPulse = 1;
+    dropPulse *= Math.exp(-dt * 1.2);
+    lastPhrase = ph.name;
+
+    let num = 0, den = 0;
+    for (let i = 0; i < NUM_BANDS; i++) { num += i * bands[i]; den += bands[i]; }
+    const centroid = den > 0 ? num / den / (NUM_BANDS - 1) : 0.5;
+
+    const beatPos = t / BEAT;
+    const beatIdx = Math.floor(beatPos);
+    const newBeat = beatIdx !== lastBeatIdx;
+    lastBeatIdx = beatIdx;
+
+    head = (head + 1) % HIST;
+    hist.flux[head] = fluxAll; hist.thr[head] = group.beat.thr;
+    hist.all[head] = lvl.all; hist.low[head] = lvl.low; hist.mid[head] = lvl.mid; hist.high[head] = lvl.high;
+    hist.hitBeat[head] = group.beat.fired ? group.beat.strength : 0;
+    hist.hitLow[head] = group.low.fired ? group.low.strength : 0;
+    hist.hitMid[head] = group.mid.fired ? group.mid.strength : 0;
+    hist.hitHigh[head] = group.high.fired ? group.high.strength : 0;
+    hist.section[head] = section; hist.centroid[head] = centroid; hist.loud[head] = lvl.all;
+
+    return {
+      t, phrase: ph.name, bar: ph.bar, beatPos, beatPhase: beatPos % 1, newBeat,
+      bands, level: { ...lvl },
+      flux: fluxAll, fluxThr: group.beat.thr, fluxRatio: group.beat.ratio,
+      hit: {
+        beat: group.beat.fired, low: group.low.fired, mid: group.mid.fired, high: group.high.fired, drop: dropFired,
+      },
+      strength: { beat: group.beat.strength, low: group.low.strength, mid: group.mid.strength, high: group.high.strength },
+      pulse: { beat: group.beat.pulse, low: group.low.pulse, mid: group.mid.pulse, high: group.high.pulse, drop: dropPulse },
+      section, centroid,
+    };
+  }
+
+  // Beat-grid tick: true on the frame a division boundary is crossed.
+  // div in beats: 0.5, 1, 2, 4, 8.
+  const gridLast = {};
+  function gridTick(div, beatPos) {
+    const idx = Math.floor(beatPos / div);
+    const fired = gridLast[div] !== undefined && idx !== gridLast[div];
+    gridLast[div] = idx;
+    return fired;
+  }
+
+  // Read the last n samples of a history series, oldest first.
+  function series(name, n = HIST) {
+    const src = hist[name], out = new Float32Array(n);
+    for (let k = 0; k < n; k++) out[k] = src[(head - n + 1 + k + HIST * 2) % HIST];
+    return out;
+  }
+
+  return { NUM_BANDS, BPM, BEAT, LOW, MID, HIGH, HIST, bandHz, step, gridTick, series };
+})();
+
+// The source catalogue the prototypes pick from. `read(f, s)` returns the
+// source's value this frame (0..1); `s` is per-source state for decaying
+// edges. Colours follow the real panel (STRIP_* for bands, HOT_RED for the
+// Rhythm card's Beat lane, AUTO_SKY for Brightness, INPUT_GREEN for level).
+const SOURCES = [
+  { id: "hit.beat", kind: "hit", label: "Any hit", short: "Hit", colour: "#ef4444", monitor: "rhythm.beat", range: [0, 24] },
+  { id: "hit.low", kind: "hit", label: "Bass hits", short: "Bass", colour: "#89e29d", monitor: "rhythm.low", range: [0, 6] },
+  { id: "hit.mid", kind: "hit", label: "Mid hits", short: "Mid", colour: "#c0a2f5", monitor: "rhythm.mid", range: [6, 15] },
+  { id: "hit.high", kind: "hit", label: "Treble hits", short: "Treble", colour: "#f6b15b", monitor: "rhythm.high", range: [15, 24] },
+  { id: "hit.drop", kind: "hit", label: "Drop", short: "Drop", colour: "#eab308", monitor: "loudness.section" },
+  { id: "flux", kind: "level", label: "Onset surge", short: "Surge", colour: "#f3f3f3", monitor: "rhythm.onset", range: [0, 24] },
+  { id: "level.all", kind: "level", label: "Loudness", short: "Loud", colour: "#8ce6a0", monitor: "signal.level", range: [0, 24] },
+  { id: "level.low", kind: "level", label: "Bass level", short: "Bass lvl", colour: "#89e29d", monitor: "bands.low", range: [0, 6] },
+  { id: "level.mid", kind: "level", label: "Mid level", short: "Mid lvl", colour: "#c0a2f5", monitor: "bands.mid", range: [6, 15] },
+  { id: "level.high", kind: "level", label: "Treble level", short: "Treble lvl", colour: "#f6b15b", monitor: "bands.high", range: [15, 24] },
+  { id: "section", kind: "level", label: "Song intensity", short: "Song", colour: "#4dd4c0", monitor: "loudness.section" },
+  { id: "centroid", kind: "level", label: "Brightness", short: "Bright", colour: "#59bbfb", monitor: "character.centroid" },
+  { id: "grid.1", kind: "tempo", label: "Every beat", short: "Beat", colour: "#ffffff", monitor: "rhythm.grid", div: 1 },
+  { id: "grid.4", kind: "tempo", label: "Every bar", short: "Bar", colour: "#ffffff", monitor: "rhythm.grid", div: 4 },
+  { id: "line", kind: "line", label: "Drawn line", short: "Line", colour: "#f9b96c", monitor: "bands.line", range: [0, 24] },
+];
+
+// Per-source readers. Hits and grid ticks become decaying pulses; `height`
+// chooses how tall a hit is: "fixed" (always 1), "standout" (how far it
+// cleared the threshold — the graded strength), or "loud" (the band's level
+// at that moment). Levels are continuous.
+function makeReader(src, opts = {}) {
+  let pulse = 0;
+  const height = opts.height ?? "standout";
+  const lineHeights = opts.line ?? null; // Float32Array(NUM_BANDS) of 0..1 thresholds
+  return function read(f, dt) {
+    pulse *= Math.exp(-dt * 7);
+    switch (src.id) {
+      case "hit.beat": case "hit.low": case "hit.mid": case "hit.high": {
+        const k = src.id.slice(4);
+        if (f.hit[k]) {
+          const lvKey = k === "beat" ? "all" : k;
+          const h = height === "fixed" ? 1 : height === "loud" ? Math.min(1, f.level[lvKey] * 1.8) : f.strength[k];
+          pulse = Math.max(pulse, h);
+        }
+        return pulse;
+      }
+      case "hit.drop": return f.pulse.drop;
+      case "flux": return Math.min(1, Math.max(0, (f.fluxRatio - 0.6) / 1.4));
+      case "level.all": return Math.min(1, f.level.all * 1.25);
+      case "level.low": return Math.min(1, f.level.low * 1.05);
+      case "level.mid": return Math.min(1, f.level.mid * 1.3);
+      case "level.high": return Math.min(1, f.level.high * 1.35);
+      case "section": return f.section;
+      case "centroid": return f.centroid;
+      case "grid.1": case "grid.4": {
+        if (Sim.gridTick(src.div, f.beatPos)) pulse = 1;
+        return pulse;
+      }
+      case "line": {
+        if (!lineHeights) return 0;
+        let ex = 0, room = 0;
+        for (let i = 0; i < Sim.NUM_BANDS; i++) {
+          if (lineHeights[i] >= 1) continue;
+          ex += Math.max(0, f.bands[i] - lineHeights[i]);
+          room += 1 - lineHeights[i];
+        }
+        return room > 0 ? Math.min(1, (ex / room) * 2.5) : 0;
+      }
+    }
+    return 0;
+  };
+}
+
+// How several sources become one drive. "add": weighted sum, clamped.
+// "max": the strongest weighted source wins. "gate": the first source,
+// passed only while the second is above half (e.g. hits, only when loud).
+function combine(mode, values, weights) {
+  if (!values.length) return 0;
+  if (mode === "max") return Math.min(1, Math.max(...values.map((v, i) => v * weights[i])));
+  if (mode === "gate") {
+    if (values.length < 2) return values[0] * weights[0];
+    const open = values[1] * weights[1] > 0.5 ? 1 : Math.max(0, values[1] * weights[1] * 2 - 0.5) ;
+    return Math.min(1, values[0] * weights[0] * open);
+  }
+  return Math.min(1, values.reduce((s, v, i) => s + v * weights[i], 0));
+}
+
+
+// ---------------------------------------------------------------------------
+// Patch bay (prototype A). Everything below is page code; the engine above is
+// shared with the other prototype and left untouched.
+// ---------------------------------------------------------------------------
+(() => {
+  "use strict";
+  const SRC = Object.fromEntries(SOURCES.map((s) => [s.id, s]));
+  const HIT_IDS = new Set(["hit.beat", "hit.low", "hit.mid", "hit.high"]);
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const narrowMQ = matchMedia("(max-width: 899px)");
+  const RING = 240;   // 4 s of per-row history at 60 fps
+  const SPARK = 180;  // the row sparkline shows the last 3 s
+  const LV = { all: 1.25, low: 1.05, mid: 1.3, high: 1.35 }; // same scaling the engine's level readers use
+  const GROUP_COL = (i) => (i < Sim.LOW[1] ? "#89e29d" : i < Sim.MID[1] ? "#c0a2f5" : "#f6b15b");
+  const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+  function hexA(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+  function h(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  // Canvases are sized only from ResizeObserver entries — never measured in
+  // the frame loop.
+  const ro = new ResizeObserver((entries) => {
+    const r = Math.min(2, window.devicePixelRatio || 1);
+    for (const e of entries) {
+      const rec = e.target._rec;
+      if (!rec) continue;
+      rec.w = e.contentRect.width;
+      rec.h = e.contentRect.height;
+      e.target.width = Math.max(1, Math.round(rec.w * r));
+      e.target.height = Math.max(1, Math.round(rec.h * r));
+      rec.ctx.setTransform(r, 0, 0, r, 0, 0);
+    }
+  });
+  function mkCanvas(cls, hpx) {
+    const c = h("canvas", cls);
+    c.style.height = hpx + "px";
+    const rec = { c, ctx: c.getContext("2d"), w: 0, h: 0 };
+    c._rec = rec;
+    ro.observe(c);
+    return rec;
+  }
+
+  // ---- settings (real Caustics rows; defaults mirror the real drives) ----
+  const one = (id, w = 1) => ({ id, w, height: "standout" });
+  const ROWS = [
+    { g: "Look", key: "sparkle", label: "Treble sparkle", amt: 0.55, def: { mode: "add", srcs: [one("hit.high"), one("level.high", 0.5)] } },
+    { g: "Look", key: "focus", label: "Focus snap", amt: 0.4, def: { mode: "add", srcs: [one("hit.beat")] } },
+    { g: "Look", key: "flash", label: "Beat flash", amt: 0.5, def: { mode: "add", srcs: [one("hit.beat")] } },
+    { g: "Look", key: "injection", label: "Spray injection", amt: 0.35, def: { mode: "add", srcs: [one("hit.high")] } },
+    { g: "Look", key: "fog", label: "Fog", amt: 0.3, def: null },
+    { g: "Motion", key: "ripple", label: "Beat ripple", amt: 0.6, def: { mode: "max", srcs: [one("hit.low"), one("hit.beat")] } },
+    { g: "Motion", key: "driftBeat", label: "Beat surge", amt: 0.4, def: { mode: "add", srcs: [one("hit.beat")] } },
+    { g: "Motion", key: "driftKick", label: "Kick surge", amt: 0.5, def: { mode: "add", srcs: [one("hit.low")] } },
+    { g: "Motion", key: "driftLoud", label: "Loudness surge", amt: 0.3, def: { mode: "add", srcs: [one("level.all")] } },
+    { g: "Motion", key: "driftChurn", label: "Beat churn", amt: 0.25, def: { mode: "add", srcs: [one("hit.beat")] } },
+    { g: "Motion", key: "bass", label: "Bass swell", amt: 0.7, def: { mode: "add", srcs: [one("hit.low")] } },
+    { g: "Motion", key: "turbulence", label: "Mid turbulence", amt: 0.45, def: { mode: "add", srcs: [one("level.mid")] } },
+    { g: "Form", key: "causticDensity", label: "Caustic density", amt: 0.5, def: null },
+  ];
+  const clonePatch = (p) => JSON.parse(JSON.stringify(p));
+  // A freshly plugged line starts as "only the top of the treble counts" so
+  // it visibly does something before anyone draws.
+  const seedLine = () => Float32Array.from({ length: Sim.NUM_BANDS }, (_, i) => (i >= 16 ? 0.5 : 1));
+  const rows = ROWS.map((spec) => ({
+    ...spec,
+    patch: spec.def ? clonePatch(spec.def) : null,
+    readers: new Map(),
+    srcHist: new Map(),
+    out: new Float32Array(RING),
+    dom: new Uint8Array(RING),
+    line: seedLine(),
+  }));
+  const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
+  let pinned = "sparkle";
+  let preview = null;
+  let head = 0;
+  let justAdded = null;
+  const shownRow = () => {
+    const r = byKey[preview ?? pinned];
+    return r && r.patch ? r : null;
+  };
+  const pinnedRow = () => {
+    const r = byKey[pinned];
+    return r && r.patch ? r : null;
+  };
+
+  // Beat-grid ticks are computed once per frame here: the engine's
+  // Sim.gridTick keeps one "last index" per division, so two settings both
+  // reading "Every beat" through it would steal each other's tick.
+  function readerFor(row, s) {
+    const src = SRC[s.id];
+    if (src.kind === "tempo") {
+      let p = 0;
+      return (f, dt) => {
+        p *= Math.exp(-dt * 7);
+        if (f.ticks[src.div]) p = 1;
+        return p;
+      };
+    }
+    if (s.id === "line") return makeReader(src, { line: row.line });
+    return makeReader(src, { height: s.height || "standout" });
+  }
+  function ensureReaders(row) {
+    if (!row.patch) return;
+    const keep = new Set();
+    for (const s of row.patch.srcs) {
+      keep.add(s.id);
+      const have = row.readers.get(s.id);
+      if (!have || have.height !== s.height) row.readers.set(s.id, { fn: readerFor(row, s), height: s.height });
+      if (!row.srcHist.has(s.id)) row.srcHist.set(s.id, new Float32Array(RING));
+    }
+    for (const id of [...row.readers.keys()]) if (!keep.has(id)) row.readers.delete(id);
+  }
+  rows.forEach(ensureReaders);
+
+  // ---------------------------------------------------------------------------
+  // Monitors column
+  // ---------------------------------------------------------------------------
+  const bay = document.getElementById("bay");
+  const monitorsEl = document.getElementById("monitors");
+  const draws = [];
+  const lanes = [];
+  const jacks = {};
+
+  function card(n, title, acc, aside) {
+    const c = h("section", "card");
+    c.style.setProperty("--acc", acc);
+    const t = h("div", "card-title");
+    t.append(h("span", "n", String(n)), h("h2", null, title));
+    if (aside) t.append(h("span", "aside", aside));
+    c.append(t);
+    monitorsEl.append(c);
+    return c;
+  }
+  function makeJack(id) {
+    const src = SRC[id];
+    const b = h("button", "jack");
+    b.type = "button";
+    b.dataset.jack = id;
+    b.style.setProperty("--c", src.colour);
+    b.title = src.label;
+    b.setAttribute("aria-label", `${src.label}: plug into or out of the selected setting`);
+    b.setAttribute("aria-pressed", "false");
+    const uses = h("span", "uses");
+    b.append(uses);
+    b._uses = uses;
+    b.addEventListener("click", () => onJack(id));
+    b.addEventListener("pointerenter", () => hoverJack(id, true));
+    b.addEventListener("pointerleave", () => hoverJack(id, false));
+    b.addEventListener("focus", () => hoverJack(id, true));
+    b.addEventListener("blur", () => hoverJack(id, false));
+    (jacks[id] ??= []).push(b);
+    return b;
+  }
+  function lane(parent, label, sub, srcId, vizNodes, opts = {}) {
+    const el = h("div", "lane" + (opts.wide ? " lane--wide" : "") + (opts.keep ? " lane--keep" : ""));
+    if (srcId) {
+      el.dataset.src = srcId;
+      el.style.setProperty("--c", SRC[srcId].colour);
+    }
+    if (!opts.wide) {
+      const lab = h("div", "lane-label");
+      lab.append(h("span", null, label));
+      if (sub) lab.append(h("small", null, sub));
+      el.append(lab);
+    }
+    const viz = h("div", "lane-viz");
+    viz.append(...vizNodes);
+    const chip = h("span", "fed-chip");
+    viz.append(chip);
+    el.append(viz);
+    el.append(srcId ? makeJack(srcId) : h("span"));
+    parent.append(el);
+    lanes.push({ el, src: srcId, chip });
+    return el;
+  }
+
+  // ---- 1 Bands ----
+  const bandsCard = card(1, "Bands", "var(--amber)", "24 bands");
+  const spec = mkCanvas("spec", 118);
+  const axis = h("div", "axis");
+  for (const [hz, txt] of [[100, "100 Hz"], [1000, "1 kHz"], [10000, "10 kHz"]]) {
+    const s = h("span", null, txt);
+    // Band centres are log-spaced over 40 Hz–16 kHz (Sim.bandHz); place each
+    // label where its frequency falls along that same scale.
+    s.style.left = (Math.log(hz / 40) / Math.log(16000 / 40)) * 100 + "%";
+    axis.append(s);
+  }
+  const caption = h("div", "spec-caption");
+  lane(bandsCard, "", "", "line", [spec.c, axis, caption], { wide: true, keep: true });
+  draws.push((f) => drawSpectrum(spec, f));
+  const lvPeak = { low: 0, mid: 0, high: 0 };
+  for (const [k, id, name] of [["low", "level.low", "Bass level"], ["mid", "level.mid", "Mid level"], ["high", "level.high", "Treble level"]]) {
+    const rec = mkCanvas("", 10);
+    lane(bandsCard, name, null, id, [rec.c]);
+    draws.push((f) => drawBar(rec, clamp01(f.level[k] * LV[k]), SRC[id].colour, lvPeak, k));
+  }
+
+  // ---- 2 Rhythm ----
+  const rhythmCard = card(2, "Rhythm", "var(--text)", "last 6 s");
+  for (const [id, name, series, sub] of [
+    ["hit.beat", "Any hit", "hitBeat", "whole spectrum"],
+    ["hit.low", "Bass hits", "hitLow", null],
+    ["hit.mid", "Mid hits", "hitMid", null],
+    ["hit.high", "Treble hits", "hitHigh", null],
+  ]) {
+    const rec = mkCanvas("", 22);
+    lane(rhythmCard, name, sub, id, [rec.c]);
+    draws.push(() => drawHits(rec, series, SRC[id].colour));
+  }
+  {
+    const rec = mkCanvas("", 40);
+    lane(rhythmCard, "Onset surge", "vs threshold", "flux", [rec.c]);
+    draws.push(() => drawOnset(rec));
+  }
+  {
+    const rec = mkCanvas("", 18);
+    lane(rhythmCard, "Every beat", null, "grid.1", [rec.c]);
+    draws.push((f) => drawBeats(rec, f));
+  }
+  {
+    const rec = mkCanvas("", 18);
+    lane(rhythmCard, "Every bar", null, "grid.4", [rec.c]);
+    draws.push((f) => drawBars(rec, f));
+  }
+
+  // ---- 3 Loudness ----
+  const loudCard = card(3, "Loudness", "var(--green)");
+  {
+    const rec = mkCanvas("", 34);
+    lane(loudCard, "Loudness", "whole mix", "level.all", [rec.c]);
+    draws.push(() => drawLevelHistory(rec));
+  }
+  {
+    const rec = mkCanvas("", 10);
+    const peaks = {};
+    lane(loudCard, "Song intensity", "last ~4 s", "section", [rec.c]);
+    draws.push((f) => drawBar(rec, f.section, SRC.section.colour, peaks, "s"));
+  }
+  {
+    const rec = mkCanvas("", 20);
+    lane(loudCard, "Drop", null, "hit.drop", [rec.c]);
+    draws.push((f) => drawDrop(rec, f));
+  }
+
+  // ---- 4 Character ----
+  const charCard = card(4, "Character", "var(--sky)");
+  {
+    const rec = mkCanvas("", 18);
+    lane(charCard, "Brightness", "where energy balances", "centroid", [rec.c]);
+    draws.push((f) => drawBrightness(rec, f));
+  }
+
+  // ---- monitor drawing ----
+  function shownRanges() {
+    const r = shownRow();
+    if (!r) return null;
+    const out = [];
+    for (const s of r.patch.srcs) {
+      const range = SRC[s.id].range;
+      if (!range) continue;
+      if (range[0] === 0 && range[1] === Sim.NUM_BANDS) return null; // whole spectrum: nothing to dim
+      out.push(range);
+    }
+    return out.length ? out : null;
+  }
+  const lineRow = () => {
+    const r = shownRow();
+    return r && r.patch.srcs.some((s) => s.id === "line") ? r : null;
+  };
+  const editableLineRow = () => {
+    const r = pinnedRow();
+    return r && r.patch.srcs.some((s) => s.id === "line") ? r : null;
+  };
+
+  function drawSpectrum(rec, f) {
+    const { ctx, w, h: hh } = rec;
+    if (!w) return;
+    ctx.clearRect(0, 0, w, hh);
+    const n = Sim.NUM_BANDS, gap = 2, bw = (w - gap * (n - 1)) / n;
+    ctx.fillStyle = "rgba(255,255,255,0.035)";
+    for (const q of [0.25, 0.5, 0.75]) ctx.fillRect(0, Math.round(hh * q), w, 1);
+    const ranges = shownRanges();
+    const lr = lineRow();
+    if (lr) {
+      ctx.fillStyle = "rgba(249,185,108,0.05)";
+      for (let i = 0; i < n; i++) {
+        const ly = (1 - lr.line[i]) * hh;
+        ctx.fillRect(i * (bw + gap), ly, bw + gap, hh - ly);
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      const x = i * (bw + gap);
+      const bh = Math.max(2, f.bands[i] * (hh - 2));
+      const inRange = !ranges || ranges.some(([a, b]) => i >= a && i < b);
+      const col = GROUP_COL(i);
+      ctx.fillStyle = hexA(col, lr ? 0.35 : inRange ? 0.9 : 0.18);
+      ctx.fillRect(x, hh - bh, bw, bh);
+      if (lr && lr.line[i] < 1) {
+        const ly = (1 - lr.line[i]) * hh;
+        const top = hh - bh;
+        if (top < ly) {
+          ctx.fillStyle = "rgba(249,185,108,0.9)";
+          ctx.fillRect(x, top, bw, ly - top);
+        }
+      }
+    }
+    if (lr) {
+      ctx.strokeStyle = "#f9b96c";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        const y = Math.max(1, (1 - lr.line[i]) * hh);
+        const x0 = i * (bw + gap), x1 = x0 + bw + (i < n - 1 ? gap : 0);
+        if (i === 0) ctx.moveTo(x0, y);
+        else ctx.lineTo(x0, y);
+        ctx.lineTo(x1, y);
+      }
+      ctx.stroke();
+    }
+    const cx = f.centroid * w;
+    ctx.fillStyle = "rgba(89,187,251,0.8)";
+    ctx.fillRect(cx - 0.75, 7, 1.5, hh - 7);
+    ctx.beginPath();
+    ctx.moveTo(cx - 4, 0);
+    ctx.lineTo(cx + 4, 0);
+    ctx.lineTo(cx, 6);
+    ctx.fill();
+  }
+  function drawBar(rec, v, col, peaks, key) {
+    const { ctx, w, h: hh } = rec;
+    if (!w) return;
+    ctx.clearRect(0, 0, w, hh);
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.fillRect(0, hh / 2 - 1, w, 2);
+    ctx.fillStyle = hexA(col, 0.85);
+    ctx.fillRect(0, hh / 2 - 2, v * w, 4);
+    peaks[key] = Math.max(v, (peaks[key] ?? 0) - 0.006);
+    ctx.fillStyle = col;
+    ctx.fillRect(Math.min(w - 2, peaks[key] * w), 0, 2, hh);
+  }
+  function drawHits(rec, series, col) {
+    const { ctx, w, h: hh } = rec;
+    if (!w) return;
+    ctx.clearRect(0, 0, w, hh);
+    const s = Sim.series(series, 360);
+    ctx.fillStyle = "rgba(255,255,255,0.07)";
+    ctx.fillRect(0, hh - 1, w, 1);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    for (let k = 0; k < 360; k++) {
+      const v = s[k];
+      if (v <= 0) continue;
+      const x = 2 + (k / 359) * (w - 4);
+      ctx.moveTo(x, hh - 1);
+      ctx.lineTo(x, hh - 1 - v * (hh - 4));
+    }
+    ctx.stroke();
+    let recent = 0;
+    for (let k = 340; k < 360; k++) recent = Math.max(recent, s[k]);
+    if (recent > 0) {
+      const g = ctx.createRadialGradient(w - 3, hh / 2, 0, w - 3, hh / 2, hh * 1.3);
+      g.addColorStop(0, hexA(col, 0.4 * recent));
+      g.addColorStop(1, hexA(col, 0));
+      ctx.fillStyle = g;
+      ctx.fillRect(w - hh * 1.4, 0, hh * 1.4, hh);
+    }
+  }
+  function drawOnset(rec) {
+    const { ctx, w, h: hh } = rec;
+    if (!w) return;
+    ctx.clearRect(0, 0, w, hh);
+    const fl = Sim.series("flux", 360), th = Sim.series("thr", 360);
+    let m = 0.05;
+    for (let k = 0; k < 360; k++) m = Math.max(m, th[k] * 2.2, fl[k] * 1.05);
+    const y = (v) => hh - 2 - (v / m) * (hh - 4);
+    const x = (k) => (k / 359) * w;
+    ctx.fillStyle = "rgba(239,68,68,0.22)";
+    for (let k = 0; k < 360; k++) if (fl[k] > th[k]) ctx.fillRect(x(k) - 0.5, y(fl[k]), 1.5, y(th[k]) - y(fl[k]));
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = "rgba(255,255,255,0.38)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let k = 0; k < 360; k++) (k ? ctx.lineTo : ctx.moveTo).call(ctx, x(k), y(th[k]));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = "rgba(243,243,243,0.9)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let k = 0; k < 360; k++) (k ? ctx.lineTo : ctx.moveTo).call(ctx, x(k), y(fl[k]));
+    ctx.stroke();
+  }
+  function drawBeats(rec, f) {
+    const { ctx, w, h: hh } = rec;
+    if (!w) return;
+    ctx.clearRect(0, 0, w, hh);
+    const bi = Math.floor(f.beatPos) % 4, fade = 1 - f.beatPhase;
+    const span = w - 44;
+    for (let i = 0; i < 4; i++) {
+      const cx = 6 + (i * (span - 12)) / 3;
+      const on = i === bi;
+      ctx.fillStyle = on ? `rgba(255,255,255,${0.45 + 0.55 * fade})` : "rgba(255,255,255,0.16)";
+      ctx.beginPath();
+      ctx.arc(cx, hh / 2, on ? 3.5 + 2.5 * fade : 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.font = "11px 'Share Tech Mono', monospace";
+    ctx.fillStyle = "rgba(242,239,248,0.5)";
+    ctx.textAlign = "right";
+    ctx.fillText(`${bi + 1}/4`, w, hh / 2 + 4);
+  }
+  function drawBars(rec, f) {
+    const { ctx, w, h: hh } = rec;
+    if (!w) return;
+    ctx.clearRect(0, 0, w, hh);
+    const bip = f.bar % 8, fade = 1 - ((f.beatPos / 4) % 1);
+    const span = w - 44, gap = 3, sw = (span - gap * 7) / 8;
+    for (let i = 0; i < 8; i++) {
+      const on = i === bip;
+      ctx.fillStyle = on ? `rgba(255,255,255,${0.45 + 0.55 * fade})` : i < bip ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.1)";
+      ctx.fillRect(i * (sw + gap), hh / 2 - 3, sw, 6);
+    }
+    ctx.font = "11px 'Share Tech Mono', monospace";
+    ctx.fillStyle = "rgba(242,239,248,0.5)";
+    ctx.textAlign = "right";
+    ctx.fillText(`${bip + 1}/8`, w, hh / 2 + 4);
+  }
+  function drawLevelHistory(rec) {
+    const { ctx, w, h: hh } = rec;
+    if (!w) return;
+    ctx.clearRect(0, 0, w, hh);
+    const s = Sim.series("all", 360);
+    const y = (v) => hh - 1 - clamp01(v * LV.all) * (hh - 3);
+    ctx.beginPath();
+    ctx.moveTo(0, hh);
+    for (let k = 0; k < 360; k++) ctx.lineTo((k / 359) * w, y(s[k]));
+    ctx.lineTo(w, hh);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(140,230,160,0.16)";
+    ctx.fill();
+    ctx.beginPath();
+    for (let k = 0; k < 360; k++) (k ? ctx.lineTo : ctx.moveTo).call(ctx, (k / 359) * w, y(s[k]));
+    ctx.strokeStyle = "rgba(140,230,160,0.9)";
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+  }
+  function drawDrop(rec, f) {
+    const { ctx, w, h: hh } = rec;
+    if (!w) return;
+    ctx.clearRect(0, 0, w, hh);
+    const p = f.pulse.drop;
+    ctx.font = "500 10px 'Chakra Petch', sans-serif";
+    ctx.textBaseline = "middle";
+    if (p > 0.04) {
+      ctx.fillStyle = `rgba(234,179,8,${0.2 + 0.7 * p})`;
+      ctx.fillRect(0, 2, Math.min(w, 70), hh - 4);
+      ctx.fillStyle = "#08070c";
+      ctx.fillText("DROP", 8, hh / 2 + 1);
+    } else {
+      ctx.strokeStyle = "rgba(255,255,255,0.14)";
+      ctx.strokeRect(0.5, 2.5, Math.min(w, 70) - 1, hh - 5);
+      ctx.fillStyle = "rgba(242,239,248,0.36)";
+      ctx.fillText("waiting", 8, hh / 2 + 1);
+    }
+  }
+  function drawBrightness(rec, f) {
+    const { ctx, w, h: hh } = rec;
+    if (!w) return;
+    ctx.clearRect(0, 0, w, hh);
+    const g = ctx.createLinearGradient(0, 0, w, 0);
+    g.addColorStop(0, "rgba(137,226,157,0.35)");
+    g.addColorStop(0.5, "rgba(192,162,245,0.35)");
+    g.addColorStop(1, "rgba(246,177,91,0.35)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, hh / 2 - 1.5, w, 3);
+    const x = f.centroid * w;
+    ctx.fillStyle = "rgba(89,187,251,0.25)";
+    ctx.beginPath();
+    ctx.arc(x, hh / 2, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#59bbfb";
+    ctx.fillRect(x - 1, 1, 2, hh - 2);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scene column
+  // ---------------------------------------------------------------------------
+  const sceneRowsEl = document.getElementById("sceneRows");
+  const outRec = mkCanvas("out", 64);
+  const outVal = h("span", "out-val", "0.00");
+  let lastGroup = null;
+  for (const r of rows) {
+    if (r.g !== lastGroup) {
+      sceneRowsEl.append(h("div", "group-h", r.g));
+      lastGroup = r.g;
+    }
+    const el = h("div", "row" + (r.patch ? "" : " row--static"));
+    el.dataset.key = r.key;
+    const port = h("span", "port");
+    const sel = h("button", "row-select");
+    sel.type = "button";
+    const src = h("span", "row-src");
+    sel.append(h("span", "row-label", r.label), src);
+    const val = h("span", "row-val", r.amt.toFixed(2));
+    const amt = h("input", "amt");
+    amt.type = "range";
+    amt.min = "0";
+    amt.max = "1";
+    amt.step = "0.01";
+    amt.value = String(r.amt);
+    amt.id = "amt-" + r.key;
+    amt.setAttribute("aria-label", r.label + " amount");
+    amt.style.setProperty("--p", r.amt * 100 + "%");
+    amt.addEventListener("input", () => {
+      r.amt = +amt.value;
+      amt.style.setProperty("--p", r.amt * 100 + "%");
+      val.textContent = r.amt.toFixed(2);
+    });
+    el.append(port, sel, val, amt);
+    if (r.patch) {
+      r.drive = mkCanvas("drive", 18);
+      el.append(r.drive.c);
+      const patch = h("div", "patch");
+      patch.hidden = true;
+      el.append(patch);
+      r.patchEl = patch;
+      sel.setAttribute("aria-expanded", "false");
+    } else {
+      src.textContent = "Doesn’t react to music";
+    }
+    sel.addEventListener("click", () => togglePin(r));
+    el.addEventListener("click", (e) => {
+      if (e.target.closest("input, button, .patch")) return;
+      togglePin(r);
+    });
+    // Hover previews a setting's cables after a short dwell, so sweeping
+    // across rows doesn't flicker them; only a click pins (and expands).
+    el.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "mouse" || !r.patch) return;
+      clearTimeout(r.hoverT);
+      r.hoverT = setTimeout(() => {
+        preview = r.key;
+        refreshShown();
+      }, 150);
+    });
+    el.addEventListener("pointerleave", () => {
+      clearTimeout(r.hoverT);
+      if (preview === r.key) {
+        preview = null;
+        refreshShown();
+      }
+    });
+    r.el = el;
+    r.port = port;
+    r.srcEl = src;
+    r.sel = sel;
+    sceneRowsEl.append(el);
+  }
+
+  function summary(row) {
+    const s = row.patch.srcs;
+    if (!s.length) return "Nothing plugged in";
+    const names = s.map((x) => SRC[x.id].label);
+    if (row.patch.mode === "gate" && s.length > 1) return `${names[0]} · only when ${names[1]}`;
+    return names.join(row.patch.mode === "max" ? " or " : " + ");
+  }
+  function updateRowMeta(row) {
+    if (!row.patch) return;
+    row.srcEl.textContent = summary(row);
+    const cols = row.patch.srcs.map((s) => SRC[s.id].colour);
+    let bg = "#2a2536";
+    if (cols.length === 1) bg = cols[0];
+    else if (cols.length > 1) bg = `conic-gradient(${cols.map((c, i) => `${c} ${(i / cols.length) * 100}% ${((i + 1) / cols.length) * 100}%`).join(", ")})`;
+    row.port.style.setProperty("--pg", bg);
+  }
+  function updateUses() {
+    for (const [id, list] of Object.entries(jacks)) {
+      const n = rows.filter((r) => r.patch && r.patch.srcs.some((s) => s.id === id)).length;
+      for (const j of list) {
+        j._uses.textContent = "";
+        for (let i = 0; i < Math.min(4, n); i++) j._uses.append(h("i"));
+        j.title = `${SRC[id].label} — used by ${n} setting${n === 1 ? "" : "s"}`;
+      }
+    }
+  }
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  function updateResetVis(row) {
+    if (row.resetEl) row.resetEl.hidden = same(row.patch, row.def);
+  }
+
+  function seg(options, value, onPick, title, mini) {
+    const s = h("div", "seg" + (mini ? " mini" : ""));
+    s.setAttribute("role", "group");
+    if (title) s.title = title;
+    for (const [v, label] of options) {
+      const b = h("button", null, label);
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(v === value));
+      b.addEventListener("click", () => {
+        if (v !== value) onPick(v);
+      });
+      s.append(b);
+    }
+    return s;
+  }
+
+  const ADD_GROUPS = [
+    ["Hits", ["hit.beat", "hit.low", "hit.mid", "hit.high", "hit.drop"]],
+    ["Levels", ["level.all", "level.low", "level.mid", "level.high", "flux", "section", "centroid"]],
+    ["Tempo", ["grid.1", "grid.4"]],
+    ["Line", ["line"]],
+  ];
+
+  // Rebuilt only when this row's patch changes or it gets pinned — never on
+  // a timer, so a button is never swapped out from under a pointer press.
+  function buildPatch(row) {
+    const p = row.patchEl;
+    p.textContent = "";
+    const headEl = h("div", "patch-head");
+    headEl.append(
+      h("span", "eyebrow", "Receives"),
+      seg(
+        [["add", "Add"], ["max", "Strongest"], ["gate", "Only when"]],
+        row.patch.mode,
+        (m) => {
+          row.patch.mode = m;
+          patchChanged(row);
+        },
+        "How the sources combine — Add: they sum. Strongest: whichever is highest right now. Only when: the first plays only while the second is high.",
+      ),
+    );
+    p.append(headEl);
+
+    const list = h("div", "src-list");
+    row.patch.srcs.forEach((s, i) => {
+      const src = SRC[s.id];
+      const line = h("div", "src-line");
+      line.style.setProperty("--c", src.colour);
+      const name = h("div", "src-name", src.label);
+      if (row.patch.mode === "gate" && row.patch.srcs.length > 1) {
+        name.append(h("span", "src-role", i === 0 ? "plays" : i === 1 ? "only when" : "not used"));
+      }
+      const x = h("button", "x", "×");
+      x.type = "button";
+      x.title = "Unplug " + src.label;
+      x.setAttribute("aria-label", "Unplug " + src.label);
+      x.addEventListener("click", () => {
+        row.patch.srcs.splice(i, 1);
+        patchChanged(row);
+      });
+      const ctrls = h("div", "src-ctrls");
+      if (HIT_IDS.has(s.id)) {
+        ctrls.append(
+          seg(
+            [["fixed", "Fixed"], ["standout", "Stand-out"], ["loud", "Loud"]],
+            s.height || "standout",
+            (v) => {
+              s.height = v;
+              patchChanged(row);
+            },
+            "How tall each hit is — Fixed: every hit full height. Stand-out: how far it cleared the hit threshold. Loud: how loud that band was at that moment.",
+            true,
+          ),
+        );
+      }
+      const wt = h("label", "weight");
+      const rng = h("input");
+      rng.type = "range";
+      rng.min = "0";
+      rng.max = "2";
+      rng.step = "0.05";
+      rng.value = String(s.w);
+      rng.id = `w-${row.key}-${s.id}`;
+      rng.setAttribute("aria-label", src.label + " weight");
+      rng.style.setProperty("--acc", src.colour);
+      rng.style.setProperty("--p", (s.w / 2) * 100 + "%");
+      const out = h("output", null, s.w.toFixed(2) + "×");
+      rng.addEventListener("input", () => {
+        s.w = +rng.value;
+        rng.style.setProperty("--p", (s.w / 2) * 100 + "%");
+        out.textContent = s.w.toFixed(2) + "×";
+        updateResetVis(row);
+      });
+      wt.append(rng, out);
+      ctrls.append(wt);
+      line.append(h("span", "dot"), name, x, ctrls);
+      list.append(line);
+    });
+    if (!row.patch.srcs.length) list.append(h("div", "empty", "Nothing plugged in — this setting holds still."));
+    p.append(list);
+
+    const hint = h("div", "add-hint");
+    hint.append("Click a meter’s jack ", h("i"), " on the left to plug it in or out.");
+    p.append(hint);
+
+    const add = h("div", "add");
+    for (const [g, ids] of ADD_GROUPS) {
+      const grp = h("div", "add-group");
+      grp.append(h("b", null, g));
+      for (const id of ids) {
+        const c = h("button", "chip", SRC[id].label);
+        c.type = "button";
+        c.style.setProperty("--c", SRC[id].colour);
+        c.setAttribute("aria-pressed", String(row.patch.srcs.some((s) => s.id === id)));
+        c.addEventListener("click", () => toggleSource(row, id));
+        grp.append(c);
+      }
+      add.append(grp);
+    }
+    p.append(add);
+
+    const oh = h("div", "out-head");
+    oh.append(h("span", "eyebrow", "What it receives · last 4 s"), outVal);
+    p.append(oh, outRec.c);
+
+    const rs = h("button", "reset", "Reset to scene default");
+    rs.type = "button";
+    rs.addEventListener("click", () => {
+      row.patch = clonePatch(row.def);
+      patchChanged(row);
+    });
+    p.append(rs);
+    row.resetEl = rs;
+    updateResetVis(row);
+  }
+
+  function renderPinned() {
+    for (const r of rows) {
+      const on = r.key === pinned && !!r.patch;
+      r.el.classList.toggle("pinned", on);
+      if (r.patchEl) {
+        r.patchEl.hidden = !on;
+        r.sel.setAttribute("aria-expanded", String(on));
+        if (on) buildPatch(r);
+      }
+    }
+  }
+  function togglePin(r) {
+    preview = null;
+    pinned = !r.patch ? null : pinned === r.key ? null : r.key;
+    renderPinned();
+    refreshShown();
+  }
+  function toggleSource(row, id) {
+    const i = row.patch.srcs.findIndex((s) => s.id === id);
+    if (i >= 0) row.patch.srcs.splice(i, 1);
+    else {
+      row.patch.srcs.push(one(id));
+      justAdded = id;
+    }
+    patchChanged(row);
+  }
+  function patchChanged(row) {
+    ensureReaders(row);
+    updateRowMeta(row);
+    updateUses();
+    if (row.key === pinned) buildPatch(row);
+    refreshShown();
+  }
+
+  const legend = document.getElementById("legend");
+  let legendT = 0;
+  function flashLegend(text) {
+    legend.textContent = text;
+    legend.classList.add("flash");
+    clearTimeout(legendT);
+    legendT = setTimeout(() => {
+      legend.textContent = "Pick a setting, then plug meters into it.";
+      legend.classList.remove("flash");
+    }, 2400);
+  }
+  function onJack(id) {
+    const r = pinnedRow();
+    if (!r) {
+      flashLegend("Pick a setting first — then click a jack to plug it in.");
+      hoverJack(id, true);
+      setTimeout(() => hoverJack(id, false), 900);
+      return;
+    }
+    toggleSource(r, id);
+    if (id === "line" && r.patch.srcs.some((s) => s.id === "line")) flashLegend(`Drag on the spectrum to draw ${r.label}’s line.`);
+  }
+  function hoverJack(id, on) {
+    for (const r of rows) {
+      if (!r.patch || !r.patch.srcs.some((s) => s.id === id)) continue;
+      r.el.classList.toggle("hl", on);
+      r.el.style.setProperty("--hl", SRC[id].colour);
+    }
+  }
+
+  function updateCaption() {
+    caption.textContent = "";
+    const lr = lineRow();
+    if (lr) {
+      caption.append(h("span", "draw-key"));
+      const t = h("span");
+      const editable = editableLineRow() === lr;
+      t.append(editable ? "Drag to draw " : "", h("b", null, lr.label + "’s line"), " — bars above it drive the setting");
+      caption.append(t);
+      if (editable) {
+        const clr = h("button", "link", "Clear line");
+        clr.type = "button";
+        clr.addEventListener("click", () => lr.line.fill(1));
+        caption.append(clr);
+      }
+    } else {
+      caption.append(h("span", "key"));
+      const t = h("span");
+      t.append(h("b", null, "Brightness"), " where the spectrum’s energy balances");
+      caption.append(t);
+    }
+    spec.c.classList.toggle("drawable", !!editableLineRow());
+  }
+
+  function refreshShown() {
+    const active = shownRow();
+    bay.classList.toggle("has-shown", !!active);
+    for (const r of rows) r.el.classList.toggle("shown", r === active && r.key !== pinned);
+    const fed = new Set(active ? active.patch.srcs.map((s) => s.id) : []);
+    for (const L of lanes) {
+      if (!L.src) continue;
+      const on = fed.has(L.src);
+      L.el.classList.toggle("fed", on);
+      L.chip.textContent = on ? "→ " + active.label : "";
+    }
+    const pr = pinnedRow();
+    for (const [id, list] of Object.entries(jacks)) {
+      for (const j of list) {
+        j.classList.toggle("patched", fed.has(id));
+        j.setAttribute("aria-pressed", String(!!(pr && pr.patch.srcs.some((s) => s.id === id))));
+      }
+    }
+    updateCaption();
+    scheduleCables();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cables — geometry is recomputed only on layout changes (resize, selection,
+  // patch edits, fonts), never per frame; per frame only the flow dashes move.
+  // ---------------------------------------------------------------------------
+  const svg = document.getElementById("cables");
+  const NS = "http://www.w3.org/2000/svg";
+  let flows = [];
+  let cablesQueued = false;
+  function scheduleCables() {
+    if (cablesQueued) return;
+    cablesQueued = true;
+    requestAnimationFrame(() => {
+      cablesQueued = false;
+      buildCables();
+    });
+  }
+  function pathEl(cls, d, col) {
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("class", cls);
+    p.setAttribute("d", d);
+    p.setAttribute("stroke", col);
+    return p;
+  }
+  function buildCables() {
+    svg.textContent = "";
+    flows = [];
+    const row = shownRow();
+    if (narrowMQ.matches || !row) {
+      justAdded = null;
+      return;
+    }
+    const b = bay.getBoundingClientRect();
+    const pr = row.port.getBoundingClientRect();
+    const x2 = pr.left + pr.width / 2 - b.left, y2 = pr.top + pr.height / 2 - b.top;
+    for (const s of row.patch.srcs) {
+      for (const j of jacks[s.id] || []) {
+        const r = j.getBoundingClientRect();
+        if (!r.width) continue;
+        const x1 = r.left + r.width / 2 - b.left, y1 = r.top + r.height / 2 - b.top;
+        const dx = Math.max(46, (x2 - x1) * 0.55);
+        const d = `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+        const col = SRC[s.id].colour;
+        const isNew = s.id === justAdded && !reduceMotion;
+        const glow = pathEl("cable-glow" + (isNew ? " new" : ""), d, col);
+        const core = pathEl("cable-core" + (isNew ? " new" : ""), d, col);
+        core.setAttribute("pathLength", "100");
+        const flow = pathEl("cable-flow" + (isNew ? " new" : ""), d, col);
+        svg.append(glow, core, flow);
+        flows.push({ el: flow, row, id: s.id, off: 0 });
+      }
+    }
+    justAdded = null;
+  }
+  const layoutRO = new ResizeObserver(scheduleCables);
+  layoutRO.observe(bay);
+  layoutRO.observe(monitorsEl);
+  layoutRO.observe(document.getElementById("scene"));
+  narrowMQ.addEventListener("change", scheduleCables);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleCables);
+
+  // ---- spectrum line drawing ----
+  let painting = false, lastBand = -1;
+  function paint(e) {
+    const r = editableLineRow();
+    if (!r) return;
+    const rect = spec.c.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width, y = (e.clientY - rect.top) / rect.height;
+    const b = Math.max(0, Math.min(Sim.NUM_BANDS - 1, Math.floor(x * Sim.NUM_BANDS)));
+    const v = y < 0.05 ? 1 : clamp01(1 - y); // the very top means "ignore this band"
+    if (lastBand >= 0 && lastBand !== b) {
+      const st = Math.sign(b - lastBand);
+      for (let i = lastBand + st; i !== b; i += st) r.line[i] = v;
+    }
+    r.line[b] = v;
+    lastBand = b;
+  }
+  spec.c.addEventListener("pointerdown", (e) => {
+    if (!editableLineRow()) return;
+    painting = true;
+    lastBand = -1;
+    spec.c.setPointerCapture(e.pointerId);
+    paint(e);
+  });
+  spec.c.addEventListener("pointermove", (e) => {
+    if (painting) paint(e);
+  });
+  const stopPaint = () => (painting = false);
+  spec.c.addEventListener("pointerup", stopPaint);
+  spec.c.addEventListener("pointercancel", stopPaint);
+
+  // ---- row sparklines + output ----
+  function drawDrive(row) {
+    const { ctx, w, h: hh } = row.drive;
+    if (!w) return;
+    ctx.clearRect(0, 0, w, hh);
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    ctx.fillRect(0, hh - 1, w, 1);
+    const srcs = row.patch.srcs;
+    if (!srcs.length) return;
+    ctx.globalAlpha = 0.3 + 0.7 * row.amt;
+    const y = (v) => hh - 1.5 - clamp01(v) * (hh - 3);
+    const xs = (k) => (k / (SPARK - 1)) * w;
+    // Faint area in the first source's colour, then the line itself coloured
+    // run by run by whichever source is carrying it at that moment.
+    ctx.beginPath();
+    ctx.moveTo(0, hh);
+    for (let k = 0; k < SPARK; k++) ctx.lineTo(xs(k), y(row.out[(head - SPARK + 1 + k + RING * 2) % RING]));
+    ctx.lineTo(w, hh);
+    ctx.closePath();
+    ctx.fillStyle = hexA(SRC[srcs[0].id].colour, 0.12);
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = "round";
+    let runCol = null;
+    for (let k = 0; k < SPARK; k++) {
+      const idx = (head - SPARK + 1 + k + RING * 2) % RING;
+      const col = SRC[(srcs[row.dom[idx]] || srcs[0]).id].colour;
+      const px = xs(k), py = y(row.out[idx]);
+      if (col !== runCol) {
+        if (runCol) {
+          ctx.lineTo(px, py);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        runCol = col;
+      } else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  function drawOut(row) {
+    const { ctx, w, h: hh } = outRec;
+    if (!w) return;
+    ctx.clearRect(0, 0, w, hh);
+    const y = (v) => hh - 4 - clamp01(v) * (hh - 10);
+    const xs = (k) => (k / (RING - 1)) * w;
+    const at = (k) => (head - RING + 1 + k + RING * 2) % RING;
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    ctx.fillRect(0, Math.round(y(0.5)), w, 1);
+    ctx.fillRect(0, Math.round(y(1)), w, 1);
+    const srcs = row.patch.srcs;
+    if (row.patch.mode === "gate" && srcs.length > 1) {
+      const gh = row.srcHist.get(srcs[1].id);
+      ctx.fillStyle = hexA(SRC[srcs[1].id].colour, 0.1);
+      for (let k = 0; k < RING; k++) if (gh[at(k)] * srcs[1].w > 0.5) ctx.fillRect(xs(k), 0, w / RING + 0.6, hh);
+    }
+    for (const s of srcs) {
+      const hs = row.srcHist.get(s.id);
+      if (!hs) continue;
+      ctx.strokeStyle = hexA(SRC[s.id].colour, 0.6);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let k = 0; k < RING; k++) (k ? ctx.lineTo : ctx.moveTo).call(ctx, xs(k), y(hs[at(k)] * s.w));
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.shadowColor = "rgba(255,255,255,0.55)";
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    for (let k = 0; k < RING; k++) (k ? ctx.lineTo : ctx.moveTo).call(ctx, xs(k), y(row.out[at(k)]));
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  // ---- transport ----
+  let playing = true;
+  const playBtn = document.getElementById("play");
+  playBtn.addEventListener("click", () => {
+    playing = !playing;
+    playBtn.textContent = playing ? "Pause" : "Play";
+    playBtn.setAttribute("aria-pressed", String(playing));
+  });
+  const phraseEls = [...document.querySelectorAll("#phrase span")];
+  const barNo = document.getElementById("barNo");
+  let lastPhrase = "", lastBar = -1, outT = 0;
+
+  // ---- frame loop ----
+  const tickLast = { 1: -1, 4: -1 };
+  let last = performance.now();
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const dt = Math.min(1 / 20, Math.max(0, (now - last) / 1000));
+    last = now;
+    if (!playing || dt === 0) return;
+    const f = Sim.step(dt);
+    f.ticks = {};
+    for (const d of [1, 4]) {
+      const idx = Math.floor(f.beatPos / d);
+      f.ticks[d] = tickLast[d] >= 0 && idx !== tickLast[d];
+      tickLast[d] = idx;
+    }
+    head = (head + 1) % RING;
+    for (const r of rows) {
+      if (!r.patch) continue;
+      const vals = [], wts = [];
+      let dom = 0, domV = -1;
+      r.patch.srcs.forEach((s, i) => {
+        const v = r.readers.get(s.id).fn(f, dt);
+        r.srcHist.get(s.id)[head] = v;
+        vals.push(v);
+        wts.push(s.w);
+        if (v * s.w > domV) {
+          domV = v * s.w;
+          dom = i;
+        }
+      });
+      r.out[head] = combine(r.patch.mode, vals, wts);
+      r.dom[head] = dom;
+    }
+    for (const d of draws) d(f);
+    for (const r of rows) if (r.patch) drawDrive(r);
+    const pr = pinnedRow();
+    if (pr) {
+      drawOut(pr);
+      outT += dt;
+      if (outT > 0.1) {
+        outT = 0;
+        outVal.textContent = pr.out[head].toFixed(2);
+      }
+    }
+    if (!reduceMotion) {
+      for (const fl of flows) {
+        const hs = fl.row.srcHist.get(fl.id);
+        const v = hs ? hs[head] : 0;
+        fl.off -= (6 + 70 * v) * dt;
+        fl.el.setAttribute("stroke-dashoffset", fl.off.toFixed(2));
+      }
+    }
+    if (f.phrase !== lastPhrase) {
+      lastPhrase = f.phrase;
+      for (const el of phraseEls) el.classList.toggle("on", el.dataset.p === f.phrase);
+    }
+    if (f.bar !== lastBar) {
+      lastBar = f.bar;
+      barNo.textContent = "BAR " + (f.bar + 1);
+    }
+  }
+
+  rows.forEach(updateRowMeta);
+  updateUses();
+  renderPinned();
+  refreshShown();
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>

@@ -1,0 +1,1498 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Caustics Signal Recipe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=Share+Tech+Mono&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --ground: #08070c;
+    --glass: rgba(19, 17, 27, 0.86);
+    --well: rgba(0, 0, 0, 0.28);
+    --line: rgba(255, 255, 255, 0.08);
+    --line-2: rgba(255, 255, 255, 0.15);
+    --ink: #f3f1f7;
+    --ink-2: rgba(243, 241, 247, 0.68);
+    --ink-3: rgba(243, 241, 247, 0.44);
+    --ink-4: rgba(243, 241, 247, 0.2);
+    --amber: #f9b96c;
+    --violet: #c3a5f9;
+    --sky: #59bbfb;
+    --green: #8ce6a0;
+    --hair: #efb062;
+    --focus: #59bbfb;
+    --f-label: 'Chakra Petch', 'Segoe UI', system-ui, sans-serif;
+    --f-mono: 'Share Tech Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --r: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background:
+      radial-gradient(1100px 560px at 12% -8%, rgba(77, 212, 192, 0.09), transparent 62%),
+      radial-gradient(900px 700px at 100% 28%, rgba(195, 165, 249, 0.07), transparent 60%),
+      radial-gradient(700px 500px at 40% 110%, rgba(249, 185, 108, 0.05), transparent 60%),
+      var(--ground);
+    background-attachment: fixed;
+    color: var(--ink);
+    font: 400 14px/1.45 var(--f-label);
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  canvas { display: block; width: 100%; }
+
+  .page { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 40px; }
+
+  /* ---- header / transport ---- */
+  .top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 28px; margin-bottom: 20px; }
+  .top h1 { margin: 0; font: 600 19px/1.1 var(--f-label); letter-spacing: 0.1em; text-transform: uppercase; text-wrap: balance; }
+  .top p { margin: 6px 0 0; color: var(--ink-2); font-size: 13.5px; }
+  .transport { display: flex; align-items: center; gap: 12px; padding: 6px 10px 6px 6px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, 0.025); }
+  .play { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 6px; background: rgba(255, 255, 255, 0.07); border: 1px solid var(--line-2); }
+  .play:hover { background: rgba(255, 255, 255, 0.12); }
+  .phrases { display: flex; gap: 3px; list-style: none; margin: 0; padding: 0; }
+  .phrases li { font: 400 11px/1 var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 7px; border-radius: 5px; color: var(--ink-3); transition: background 0.25s, color 0.25s; }
+  .phrases li.is-on { background: var(--ink); color: #0b0a10; }
+  .phrases li.is-on[data-p="drop"] { background: var(--amber); }
+  .barpos { font: 400 11px/1 var(--f-mono); color: var(--ink-2); letter-spacing: 0.06em; min-width: 76px; font-variant-numeric: tabular-nums; }
+
+  /* ---- stage ---- */
+  .stage { display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: 20px; align-items: start; }
+  .card { background: var(--glass); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px 16px; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); min-width: 0; }
+  .scene { position: sticky; top: 16px; }
+  .card-head { display: flex; align-items: center; gap: 10px; font: 500 12px/1 var(--f-label); letter-spacing: 0.2em; text-transform: uppercase; }
+  .idx { font-family: var(--f-mono); color: var(--ink-3); letter-spacing: 0; }
+  .bands .card-title { color: var(--amber); }
+  .scene .card-title { color: var(--violet); }
+  .card-head .meta { margin-left: auto; font: 400 11px/1 var(--f-mono); letter-spacing: 0.08em; color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+  .card-head .meta i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px rgba(140, 230, 160, 0.7); }
+  .hair { height: 1px; margin: 10px 0 12px; background: linear-gradient(90deg, var(--hair), rgba(239, 176, 98, 0) 85%); opacity: 0.55; }
+  .scene .hair { background: linear-gradient(90deg, var(--violet), rgba(195, 165, 249, 0) 85%); }
+
+  /* tabs */
+  .tabs { margin-top: 12px; display: flex; align-items: center; min-height: 32px; }
+  .plain { font: 500 12.5px/1 var(--f-label); letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-2); }
+  .seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, 0.035); max-width: 100%; }
+  .seg button { border: 0; background: none; color: var(--ink-2); font: 500 12px/1 var(--f-label); letter-spacing: 0.05em; padding: 7px 12px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .seg button:hover { color: var(--ink); background: rgba(255, 255, 255, 0.05); }
+  .seg button[aria-selected="true"], .seg button[aria-checked="true"] { background: rgba(255, 255, 255, 0.11); color: var(--ink); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
+  .seg button[aria-disabled="true"] { color: var(--ink-4); cursor: not-allowed; background: none; }
+  .tabs .seg button#tabSet[aria-selected="true"] { color: var(--amber); }
+
+  /* spectrum */
+  #spectrum { height: 168px; touch-action: none; }
+  #spectrum.paint { cursor: crosshair; }
+  #spectrum.knobs { cursor: ns-resize; }
+  .spec-hint { margin: 6px 0 0; font-size: 12px; color: var(--ink-3); min-height: 1.45em; }
+
+  /* equaliser view */
+  .readouts { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px 0; text-align: center; font: 400 11px/1.4 var(--f-mono); font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .readouts .g { color: var(--ink-2); }
+  .readouts .g.boost { color: var(--amber); }
+  .readouts .hz { color: var(--ink-3); font-size: 10.5px; }
+  .eq-hint { margin: 10px 0 0; font-size: 12.5px; color: var(--ink-3); }
+
+  /* recipe blocks */
+  .block { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .block-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .block h2 { margin: 0; font: 500 11px/1 var(--f-label); letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-2); }
+  .aside { font: 400 11px/1 var(--f-mono); color: var(--ink-3); letter-spacing: 0.02em; }
+
+  .tile-rows { display: grid; gap: 10px; }
+  .tile-row { display: grid; gap: 6px; }
+  .tile-group-head { font: 400 10px/1 var(--f-mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); padding-left: 2px; }
+  .tile { position: relative; display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 5px 6px 6px; text-align: left; border-radius: 8px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.025); color: var(--ink-2); transition: border-color 0.15s, background 0.15s, color 0.15s; }
+  .tile:hover { background: rgba(255, 255, 255, 0.055); border-color: var(--line-2); color: var(--ink); }
+  .tile canvas { height: 28px; border-radius: 4px; }
+  .tile .t-label { font: 500 11px/1.2 var(--f-label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile[aria-pressed="true"] { border-color: var(--c); background: color-mix(in srgb, var(--c) 12%, rgba(255, 255, 255, 0.02)); color: var(--ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 35%, transparent), 0 0 18px -6px var(--c); }
+  .tile .badge { position: absolute; top: 4px; right: 4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--c); color: #0b0a10; font: 400 10.5px/16px var(--f-mono); text-align: center; display: none; }
+  .tile[aria-pressed="true"] .badge { display: block; }
+
+  /* layers */
+  .layers { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .layer { position: relative; display: grid; gap: 8px; padding: 8px 10px 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, 0.03); transition: transform 0.16s ease, box-shadow 0.16s; }
+  .layer.dragging { transition: none; z-index: 2; background: rgba(38, 34, 52, 0.97); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55); }
+  .layer.empty { color: var(--ink-3); font-size: 13px; padding: 12px; text-align: center; border-style: dashed; }
+  .l-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .grip { width: 18px; height: 24px; flex: none; display: grid; place-items: center; border: 0; background: none; color: var(--ink-3); cursor: grab; touch-action: none; border-radius: 4px; }
+  .grip:hover { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
+  .grip:active { cursor: grabbing; }
+  .l-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px -1px var(--c); flex: none; }
+  .l-num { font: 400 11px/1 var(--f-mono); color: var(--ink-3); }
+  .l-name { font: 500 13.5px/1.2 var(--f-label); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .l-meter { width: 60px; height: 6px; margin-left: auto; flex: none; }
+  .l-remove { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--ink-3); }
+  .l-remove:hover { color: var(--ink); background: rgba(255, 255, 255, 0.07); }
+  .l-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding-left: 26px; }
+  .l-weight { display: flex; align-items: center; gap: 8px; flex: 1 1 170px; min-width: 0; }
+  .ctl-label { font: 400 10px/1 var(--f-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); flex: none; }
+  .l-weight output { font: 400 12px/1 var(--f-mono); color: var(--ink); min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+  .l-height { display: flex; align-items: center; gap: 8px; }
+  .seg.small button { padding: 5px 8px; font-size: 11px; }
+
+  input[type="range"] { -webkit-appearance: none; appearance: none; flex: 1; min-width: 60px; height: 18px; background: transparent; margin: 0; --c: var(--ink); }
+  input[type="range"]::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: linear-gradient(90deg, var(--c) var(--p, 50%), rgba(255, 255, 255, 0.14) var(--p, 50%)); }
+  input[type="range"]::-moz-range-track { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.14); }
+  input[type="range"]::-moz-range-progress { height: 3px; border-radius: 2px; background: var(--c); }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; margin-top: -5px; border-radius: 50%; background: #121019; border: 2px solid var(--c); }
+  input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: #121019; border: 2px solid var(--c); }
+
+  /* mix */
+  .seg.mix { display: flex; width: 100%; }
+  .seg.mix button { flex: 1; }
+  .sentence { margin: 10px 0 0; font: 400 14px/1.45 var(--f-label); color: var(--ink); text-wrap: pretty; }
+  .sentence b { font-weight: 600; color: var(--c); }
+  .sentence .muted { color: var(--ink-3); }
+
+  /* result */
+  .readout { font: 400 18px/1 var(--f-mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+  .result { display: flex; gap: 10px; align-items: stretch; }
+  #result { flex: 1; min-width: 0; height: 92px; border-radius: 6px; background: var(--well); }
+  .preview { position: relative; flex: none; width: 92px; height: 92px; margin: 0; border-radius: 6px; overflow: hidden; background: #051018; }
+  .preview canvas { width: 92px; height: 92px; }
+  .preview figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 6px 5px; font: 400 9.5px/1 var(--f-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); background: linear-gradient(transparent, rgba(0, 0, 0, 0.6)); }
+  .recipe-foot { margin-top: 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; font-size: 12.5px; color: var(--ink-3); }
+  .recipe-foot p { margin: 0; }
+  .ghost { border: 1px solid var(--line-2); background: rgba(255, 255, 255, 0.04); border-radius: 6px; padding: 6px 10px; font: 500 12px/1 var(--f-label); letter-spacing: 0.04em; color: var(--ink); }
+  .ghost:hover { background: rgba(255, 255, 255, 0.09); }
+
+  /* scene card */
+  .s-group h3 { margin: 16px 0 6px; padding-left: 10px; font: 400 10.5px/1 var(--f-mono); letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-3); }
+  .s-group:first-of-type h3 { margin-top: 4px; }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr) 64px minmax(96px, 150px); align-items: center; gap: 12px; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; transition: background 0.15s, border-color 0.15s; }
+  .row:hover { background: rgba(255, 255, 255, 0.035); }
+  .row.is-sel { background: rgba(249, 185, 108, 0.07); border-color: rgba(249, 185, 108, 0.32); }
+  .row-sel { display: grid; gap: 3px; min-width: 0; padding: 0; border: 0; background: none; text-align: left; border-radius: 4px; }
+  .r-label { display: flex; align-items: center; gap: 8px; font: 500 14px/1.2 var(--f-label); color: var(--ink); }
+  .r-tag { font: 400 9.5px/1 var(--f-mono); letter-spacing: 0.14em; color: var(--amber); text-transform: uppercase; display: none; }
+  .row.is-sel .r-tag { display: inline; }
+  .r-sum { display: flex; align-items: center; gap: 5px; min-width: 0; font: 400 11px/1.3 var(--f-mono); color: var(--ink-3); }
+  .r-sum .dots { display: inline-flex; gap: 3px; flex: none; }
+  .r-sum .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+  .r-sum .txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .row.inert .r-label { color: var(--ink-2); }
+  .r-meter { height: 6px; }
+  .r-amt { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .r-amt output { font: 400 12px/1 var(--f-mono); color: var(--ink-2); min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 880px) {
+    .stage { grid-template-columns: minmax(0, 1fr); }
+    .scene { position: static; }
+  }
+  @media (max-width: 480px) {
+    .card { padding: 12px 12px 14px; }
+    .row { grid-template-columns: minmax(0, 1fr) 44px 92px; gap: 8px; padding: 8px 6px; }
+    .l-controls { padding-left: 0; }
+    .transport { width: 100%; justify-content: space-between; }
+    .tile { padding: 5px 4px 6px; }
+    .tile .t-label { font-size: 10.5px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; }
+  }
+</style>
+
+<div class="page">
+  <header class="top">
+    <div>
+      <h1>Caustics Signal Recipe</h1>
+      <p>Choose a setting, then build what it listens to.</p>
+    </div>
+    <div class="transport" aria-label="Demo track">
+      <button class="play" id="play" type="button" aria-label="Pause the demo track">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="1.5" width="2.6" height="9" rx="0.6" fill="currentColor"/><rect x="7.4" y="1.5" width="2.6" height="9" rx="0.6" fill="currentColor"/></svg>
+      </button>
+      <ol class="phrases" id="phrases">
+        <li data-p="intro">intro</li><li data-p="build">build</li><li data-p="drop">drop</li><li data-p="break">break</li>
+      </ol>
+      <span class="barpos" id="barpos">BAR 01 · 1</span>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="card bands" id="bandsCard" aria-label="Bands">
+      <div class="card-head"><span class="idx">1</span><span class="card-title">Bands</span><span class="meta"><i></i>Demo track · 124 BPM</span></div>
+      <div class="tabs">
+        <span class="plain" id="plainLabel" hidden>Caustics · Equaliser</span>
+        <div class="seg" role="tablist" id="tabSeg" aria-label="What the spectrum shows">
+          <button type="button" role="tab" id="tabEq" aria-selected="false">Equaliser</button>
+          <button type="button" role="tab" id="tabSet" aria-selected="true">Treble sparkle</button>
+        </div>
+      </div>
+      <div class="hair"></div>
+      <canvas id="spectrum" aria-label="Live spectrum"></canvas>
+      <p class="spec-hint" id="specHint"></p>
+
+      <div id="eqView" hidden>
+        <div class="readouts" id="readouts"></div>
+        <p class="eq-hint">Drag a knob up to boost a band, down to cut it. Pick a reactive setting to choose what it listens to.</p>
+      </div>
+
+      <div id="recipe">
+        <section class="block" aria-labelledby="h-listen">
+          <div class="block-head"><h2 id="h-listen">Listens to</h2><span class="aside">Tap to add · tap again to remove</span></div>
+          <div class="tile-rows" id="tiles"></div>
+        </section>
+        <section class="block" aria-labelledby="h-layers">
+          <div class="block-head"><h2 id="h-layers">Layers</h2><span class="aside" id="layerCount"></span></div>
+          <ol class="layers" id="layers"></ol>
+        </section>
+        <section class="block" aria-labelledby="h-mix">
+          <div class="block-head"><h2 id="h-mix">Mix</h2></div>
+          <div class="seg mix" role="radiogroup" id="mix" aria-labelledby="h-mix">
+            <button type="button" role="radio" data-mode="add" aria-checked="true">Add</button>
+            <button type="button" role="radio" data-mode="max" aria-checked="false">Strongest</button>
+            <button type="button" role="radio" data-mode="gate" aria-checked="false">Only when</button>
+          </div>
+          <p class="sentence" id="sentence"></p>
+        </section>
+        <section class="block" aria-labelledby="resultTitle">
+          <div class="block-head"><h2 id="resultTitle">What it receives</h2><span class="readout" id="resultVal">0.00</span></div>
+          <div class="result">
+            <canvas id="result" aria-label="The combined signal over the last five seconds"></canvas>
+            <figure class="preview"><canvas id="preview" aria-hidden="true"></canvas><figcaption id="previewCap">Preview</figcaption></figure>
+          </div>
+        </section>
+        <footer class="recipe-foot">
+          <p id="defaultWords"></p>
+          <button type="button" class="ghost" id="reset" hidden>Reset to scene default</button>
+        </footer>
+      </div>
+    </section>
+
+    <section class="card scene" aria-label="Scene settings">
+      <div class="card-head"><span class="idx">2</span><span class="card-title">Scene</span><span class="meta">Caustics</span></div>
+      <div class="hair"></div>
+      <div id="sceneRows"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+// Shared fake-music engine for the drive prototypes. Inline this whole file
+// into each prototype page (artifacts can't load local scripts from disk).
+// It stands in for the real mic pipeline: a 124 BPM track with kick, bass,
+// snare, hats and a mid "growl" that only plays in the drop, arranged in
+// 8-bar phrases (intro → build → drop → break), folded into NUM_BANDS log
+// bands and run through the same kinds of detectors the app has (group
+// levels, spectral flux vs an adaptive threshold, graded hits, drop, section
+// intensity, centroid, beat grid). Numbers are shaped to look like the real
+// monitors, not to be acoustically exact.
+const Sim = (() => {
+  const NUM_BANDS = 24;
+  const BPM = 124;
+  const BEAT = 60 / BPM;
+  const LOW = [0, 6];   // band index ranges [lo, hi)
+  const MID = [6, 15];
+  const HIGH = [15, 24];
+  const HIST = 600;     // ~10 s at 60 fps
+
+  const PHRASES = ["intro", "build", "drop", "break"]; // 8 bars each
+  const bandHz = (i) => 40 * Math.pow(16000 / 40, (i + 0.5) / NUM_BANDS);
+
+  let t = 0;
+  const raw = new Float32Array(NUM_BANDS);
+  const bands = new Float32Array(NUM_BANDS);
+  const prev = new Float32Array(NUM_BANDS);
+  const group = { beat: mkDet(), low: mkDet(), mid: mkDet(), high: mkDet() };
+  let section = 0.3, loudSlow = 0.3, lastPhrase = "", dropPulse = 0, dropFired = false;
+  let lastBeatIdx = -1;
+  const lvl = { all: 0, low: 0, mid: 0, high: 0 };
+
+  function mkDet() {
+    return { base: 0.05, flux: 0, thr: 0.1, ratio: 0, fired: false, since: 9, pulse: 0, strength: 0 };
+  }
+  const hist = {
+    flux: new Float32Array(HIST), thr: new Float32Array(HIST),
+    all: new Float32Array(HIST), low: new Float32Array(HIST), mid: new Float32Array(HIST), high: new Float32Array(HIST),
+    hitBeat: new Float32Array(HIST), hitLow: new Float32Array(HIST), hitMid: new Float32Array(HIST), hitHigh: new Float32Array(HIST),
+    section: new Float32Array(HIST), centroid: new Float32Array(HIST), loud: new Float32Array(HIST),
+  };
+  let head = 0;
+
+  // Deterministic-ish noise so reloads look similar.
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+
+  const env = (x, decay) => (x < 0 ? 0 : Math.exp(-x / decay));
+  const bump = (i, centre, width) => Math.exp(-((i - centre) ** 2) / (2 * width * width));
+
+  function phraseAt(time) {
+    const bar = Math.floor(time / (BEAT * 4));
+    return { name: PHRASES[Math.floor(bar / 8) % 4], bar, barInPhrase: bar % 8 };
+  }
+
+  function synth(time) {
+    const beatPos = time / BEAT;
+    const inBeat = (beatPos % 1) * BEAT;         // seconds since the beat
+    const beatIdx = Math.floor(beatPos);
+    const ph = phraseAt(time);
+    const drop = ph.name === "drop", intro = ph.name === "intro", brk = ph.name === "break", build = ph.name === "build";
+    const kickOn = !intro && !(brk && ph.barInPhrase < 6);
+    const kick = kickOn ? env(inBeat, 0.11) : 0;
+    const snareOn = !intro && beatIdx % 2 === 1;
+    const rollDiv = build && ph.barInPhrase >= 6 ? 4 : 1;   // snare roll at the end of the build
+    const inRoll = ((beatPos * rollDiv) % 1) * (BEAT / rollDiv);
+    const snare = snareOn || (build && ph.barInPhrase >= 6) ? env(build && ph.barInPhrase >= 6 ? inRoll : inBeat, 0.13) * (build ? 0.6 + 0.05 * ph.barInPhrase : 1) : 0;
+    const hatDiv = drop ? 4 : 2;
+    const inHat = ((beatPos * hatDiv) % 1) * (BEAT / hatDiv);
+    const hat = env(inHat, 0.035) * (intro ? 0.55 : drop ? 1 : 0.8);
+    const bass = drop ? 0.75 : brk ? 0.2 : build ? 0.45 : 0.1;
+    const wob = drop ? 0.55 + 0.45 * Math.sin(beatPos * Math.PI * 2 * 2) : 0; // growl wobbles in 1/8 notes
+    const pad = brk || intro ? 0.35 : 0.15;
+    for (let i = 0; i < NUM_BANDS; i++) {
+      let v = 0.04 + 0.03 * rnd();
+      v += kick * 1.1 * bump(i, 1.5, 1.6);
+      v += bass * (0.55 + 0.1 * Math.sin(time * 3 + i)) * bump(i, 3.5, 1.8);
+      v += snare * 0.85 * bump(i, 11, 3.5);
+      v += hat * 0.8 * bump(i, 20.5, 2.4);
+      v += wob * 0.8 * bump(i, 10, 3);
+      v += pad * 0.5 * bump(i, 8, 5) * (0.8 + 0.2 * Math.sin(time * 0.7));
+      raw[i] = Math.min(1, v);
+    }
+    return ph;
+  }
+
+  function detect(det, fluxNow, dt, levelNow) {
+    det.flux = fluxNow;
+    det.base += (fluxNow - det.base) * Math.min(1, dt * 1.2);
+    det.thr = det.base * 1.6 + 0.03;
+    det.ratio = fluxNow / det.thr;
+    det.since += dt;
+    det.fired = false;
+    if (det.ratio > 1 && det.since > 0.1) {
+      det.fired = true;
+      det.since = 0;
+      const standout = 1 - Math.exp(-(det.ratio - 1) / 0.6);
+      det.strength = Math.max(0.15, 0.5 * standout + 0.5 * levelNow);
+      det.pulse = Math.max(det.pulse, det.strength);
+    }
+    det.pulse *= Math.exp(-dt * 7);
+  }
+
+  function step(dt) {
+    t += dt;
+    const ph = synth(t);
+    prev.set(bands);
+    for (let i = 0; i < NUM_BANDS; i++) {
+      const rate = raw[i] > bands[i] ? 70 : 6;
+      bands[i] += (raw[i] - bands[i]) * Math.min(1, rate * dt);
+    }
+    const mean = (r) => { let s = 0; for (let i = r[0]; i < r[1]; i++) s += bands[i]; return s / (r[1] - r[0]); };
+    const fluxOf = (r) => { let s = 0; for (let i = r[0]; i < r[1]; i++) s += Math.max(0, bands[i] - prev[i]); return s / (r[1] - r[0]) * 6; };
+    const lvRate = (now, was) => (now > was ? 24 : 10);
+    for (const [k, r] of [["low", LOW], ["mid", MID], ["high", HIGH], ["all", [0, NUM_BANDS]]]) {
+      const now = mean(r);
+      lvl[k] += (now - lvl[k]) * Math.min(1, lvRate(now, lvl[k]) * dt);
+    }
+    const fluxAll = fluxOf([0, NUM_BANDS]);
+    detect(group.beat, fluxAll, dt, lvl.all);
+    detect(group.low, fluxOf(LOW), dt, lvl.low);
+    detect(group.mid, fluxOf(MID), dt, lvl.mid);
+    detect(group.high, fluxOf(HIGH), dt, lvl.high);
+
+    loudSlow += (lvl.all - loudSlow) * Math.min(1, dt / 4);
+    section = Math.min(1, Math.max(0, (loudSlow - 0.12) / 0.3));
+    dropFired = ph.name === "drop" && lastPhrase !== "drop";
+    if (dropFired) dropPulse = 1;
+    dropPulse *= Math.exp(-dt * 1.2);
+    lastPhrase = ph.name;
+
+    let num = 0, den = 0;
+    for (let i = 0; i < NUM_BANDS; i++) { num += i * bands[i]; den += bands[i]; }
+    const centroid = den > 0 ? num / den / (NUM_BANDS - 1) : 0.5;
+
+    const beatPos = t / BEAT;
+    const beatIdx = Math.floor(beatPos);
+    const newBeat = beatIdx !== lastBeatIdx;
+    lastBeatIdx = beatIdx;
+
+    head = (head + 1) % HIST;
+    hist.flux[head] = fluxAll; hist.thr[head] = group.beat.thr;
+    hist.all[head] = lvl.all; hist.low[head] = lvl.low; hist.mid[head] = lvl.mid; hist.high[head] = lvl.high;
+    hist.hitBeat[head] = group.beat.fired ? group.beat.strength : 0;
+    hist.hitLow[head] = group.low.fired ? group.low.strength : 0;
+    hist.hitMid[head] = group.mid.fired ? group.mid.strength : 0;
+    hist.hitHigh[head] = group.high.fired ? group.high.strength : 0;
+    hist.section[head] = section; hist.centroid[head] = centroid; hist.loud[head] = lvl.all;
+
+    return {
+      t, phrase: ph.name, bar: ph.bar, beatPos, beatPhase: beatPos % 1, newBeat,
+      bands, level: { ...lvl },
+      flux: fluxAll, fluxThr: group.beat.thr, fluxRatio: group.beat.ratio,
+      hit: {
+        beat: group.beat.fired, low: group.low.fired, mid: group.mid.fired, high: group.high.fired, drop: dropFired,
+      },
+      strength: { beat: group.beat.strength, low: group.low.strength, mid: group.mid.strength, high: group.high.strength },
+      pulse: { beat: group.beat.pulse, low: group.low.pulse, mid: group.mid.pulse, high: group.high.pulse, drop: dropPulse },
+      section, centroid,
+    };
+  }
+
+  // Beat-grid tick: true on the frame a division boundary is crossed.
+  // div in beats: 0.5, 1, 2, 4, 8.
+  const gridLast = {};
+  function gridTick(div, beatPos) {
+    const idx = Math.floor(beatPos / div);
+    const fired = gridLast[div] !== undefined && idx !== gridLast[div];
+    gridLast[div] = idx;
+    return fired;
+  }
+
+  // Read the last n samples of a history series, oldest first.
+  function series(name, n = HIST) {
+    const src = hist[name], out = new Float32Array(n);
+    for (let k = 0; k < n; k++) out[k] = src[(head - n + 1 + k + HIST * 2) % HIST];
+    return out;
+  }
+
+  return { NUM_BANDS, BPM, BEAT, LOW, MID, HIGH, HIST, bandHz, step, gridTick, series };
+})();
+
+// The source catalogue the prototypes pick from. `read(f, s)` returns the
+// source's value this frame (0..1); `s` is per-source state for decaying
+// edges. Colours follow the real panel (STRIP_* for bands, HOT_RED for the
+// Rhythm card's Beat lane, AUTO_SKY for Brightness, INPUT_GREEN for level).
+const SOURCES = [
+  { id: "hit.beat", kind: "hit", label: "Any hit", short: "Hit", colour: "#ef4444", monitor: "rhythm.beat", range: [0, 24] },
+  { id: "hit.low", kind: "hit", label: "Bass hits", short: "Bass", colour: "#89e29d", monitor: "rhythm.low", range: [0, 6] },
+  { id: "hit.mid", kind: "hit", label: "Mid hits", short: "Mid", colour: "#c0a2f5", monitor: "rhythm.mid", range: [6, 15] },
+  { id: "hit.high", kind: "hit", label: "Treble hits", short: "Treble", colour: "#f6b15b", monitor: "rhythm.high", range: [15, 24] },
+  { id: "hit.drop", kind: "hit", label: "Drop", short: "Drop", colour: "#eab308", monitor: "loudness.section" },
+  { id: "flux", kind: "level", label: "Onset surge", short: "Surge", colour: "#f3f3f3", monitor: "rhythm.onset", range: [0, 24] },
+  { id: "level.all", kind: "level", label: "Loudness", short: "Loud", colour: "#8ce6a0", monitor: "signal.level", range: [0, 24] },
+  { id: "level.low", kind: "level", label: "Bass level", short: "Bass lvl", colour: "#89e29d", monitor: "bands.low", range: [0, 6] },
+  { id: "level.mid", kind: "level", label: "Mid level", short: "Mid lvl", colour: "#c0a2f5", monitor: "bands.mid", range: [6, 15] },
+  { id: "level.high", kind: "level", label: "Treble level", short: "Treble lvl", colour: "#f6b15b", monitor: "bands.high", range: [15, 24] },
+  { id: "section", kind: "level", label: "Song intensity", short: "Song", colour: "#4dd4c0", monitor: "loudness.section" },
+  { id: "centroid", kind: "level", label: "Brightness", short: "Bright", colour: "#59bbfb", monitor: "character.centroid" },
+  { id: "grid.1", kind: "tempo", label: "Every beat", short: "Beat", colour: "#ffffff", monitor: "rhythm.grid", div: 1 },
+  { id: "grid.4", kind: "tempo", label: "Every bar", short: "Bar", colour: "#ffffff", monitor: "rhythm.grid", div: 4 },
+  { id: "line", kind: "line", label: "Drawn line", short: "Line", colour: "#f9b96c", monitor: "bands.line", range: [0, 24] },
+];
+
+// Per-source readers. Hits and grid ticks become decaying pulses; `height`
+// chooses how tall a hit is: "fixed" (always 1), "standout" (how far it
+// cleared the threshold — the graded strength), or "loud" (the band's level
+// at that moment). Levels are continuous.
+function makeReader(src, opts = {}) {
+  let pulse = 0;
+  const height = opts.height ?? "standout";
+  const lineHeights = opts.line ?? null; // Float32Array(NUM_BANDS) of 0..1 thresholds
+  return function read(f, dt) {
+    pulse *= Math.exp(-dt * 7);
+    switch (src.id) {
+      case "hit.beat": case "hit.low": case "hit.mid": case "hit.high": {
+        const k = src.id.slice(4);
+        if (f.hit[k]) {
+          const lvKey = k === "beat" ? "all" : k;
+          const h = height === "fixed" ? 1 : height === "loud" ? Math.min(1, f.level[lvKey] * 1.8) : f.strength[k];
+          pulse = Math.max(pulse, h);
+        }
+        return pulse;
+      }
+      case "hit.drop": return f.pulse.drop;
+      case "flux": return Math.min(1, Math.max(0, (f.fluxRatio - 0.6) / 1.4));
+      case "level.all": return Math.min(1, f.level.all * 1.25);
+      case "level.low": return Math.min(1, f.level.low * 1.05);
+      case "level.mid": return Math.min(1, f.level.mid * 1.3);
+      case "level.high": return Math.min(1, f.level.high * 1.35);
+      case "section": return f.section;
+      case "centroid": return f.centroid;
+      case "grid.1": case "grid.4": {
+        if (Sim.gridTick(src.div, f.beatPos)) pulse = 1;
+        return pulse;
+      }
+      case "line": {
+        if (!lineHeights) return 0;
+        let ex = 0, room = 0;
+        for (let i = 0; i < Sim.NUM_BANDS; i++) {
+          if (lineHeights[i] >= 1) continue;
+          ex += Math.max(0, f.bands[i] - lineHeights[i]);
+          room += 1 - lineHeights[i];
+        }
+        return room > 0 ? Math.min(1, (ex / room) * 2.5) : 0;
+      }
+    }
+    return 0;
+  };
+}
+
+// How several sources become one drive. "add": weighted sum, clamped.
+// "max": the strongest weighted source wins. "gate": the first source,
+// passed only while the second is above half (e.g. hits, only when loud).
+function combine(mode, values, weights) {
+  if (!values.length) return 0;
+  if (mode === "max") return Math.min(1, Math.max(...values.map((v, i) => v * weights[i])));
+  if (mode === "gate") {
+    if (values.length < 2) return values[0] * weights[0];
+    const open = values[1] * weights[1] > 0.5 ? 1 : Math.max(0, values[1] * weights[1] * 2 - 0.5) ;
+    return Math.min(1, values[0] * weights[0] * open);
+  }
+  return Math.min(1, values.reduce((s, v, i) => s + v * weights[i], 0));
+}
+
+
+// ======================= Signal Recipe prototype =======================
+(() => {
+  const NB = Sim.NUM_BANDS;
+  const HN = 300;  // result history: 5 s at 60 fps
+  const TN = 96;   // tile history: ~1.6 s
+  const SRC = Object.fromEntries(SOURCES.map((s) => [s.id, s]));
+  const HEIGHT_IDS = new Set(["hit.beat", "hit.low", "hit.mid", "hit.high"]);
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const narrow = matchMedia("(max-width: 880px)");
+  const $ = (id) => document.getElementById(id);
+  const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+  const lc = (s) => s.charAt(0).toLowerCase() + s.slice(1);
+  const bandColour = (i) => (i < Sim.LOW[1] ? "#89e29d" : i < Sim.MID[1] ? "#c0a2f5" : "#f6b15b");
+  function rgba(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  // The engine's own gridTick keeps one "last index" per division, so only
+  // one caller per frame may ask. Ask once here, share the answer.
+  const gridFired = { 1: false, 4: false };
+  function mkRead(src, opts = {}) {
+    if (src.kind === "tempo") {
+      let p = 0;
+      return (f, dt) => { p *= Math.exp(-dt * 7); if (gridFired[src.div]) p = 1; return p; };
+    }
+    return makeReader(src, opts);
+  }
+
+  // ---------------------------------------------------------- settings
+  const L = (id, weight = 1, height = "standout") => ({ id, weight, height });
+  const SETTINGS = [
+    { key: "causticDensity", label: "Caustic density", group: "Form", amount: 0.5 },
+    { key: "ripple", label: "Beat ripple", group: "Motion", amount: 0.55, fx: "motion", def: { mode: "max", layers: [L("hit.low"), L("hit.beat")] } },
+    { key: "driftBeat", label: "Beat surge", group: "Motion", amount: 0.4, fx: "motion", def: { mode: "add", layers: [L("hit.beat")] } },
+    { key: "driftKick", label: "Kick surge", group: "Motion", amount: 0.45, fx: "motion", def: { mode: "add", layers: [L("hit.low")] } },
+    { key: "driftLoud", label: "Loudness surge", group: "Motion", amount: 0.35, fx: "motion", def: { mode: "add", layers: [L("level.all")] } },
+    { key: "bass", label: "Bass swell", group: "Motion", amount: 0.6, fx: "motion", def: { mode: "add", layers: [L("hit.low")] } },
+    { key: "turbulence", label: "Mid turbulence", group: "Motion", amount: 0.3, fx: "motion", def: { mode: "add", layers: [L("level.mid")] } },
+    { key: "fog", label: "Fog", group: "Look", amount: 0.3 },
+    { key: "sparkle", label: "Treble sparkle", group: "Look", amount: 0.7, fx: "glint", def: { mode: "add", layers: [L("hit.high", 1), L("level.high", 0.5)] } },
+    { key: "focus", label: "Focus snap", group: "Look", amount: 0.4, fx: "flash", def: { mode: "add", layers: [L("hit.beat")] } },
+    { key: "flash", label: "Beat flash", group: "Look", amount: 0.5, fx: "flash", def: { mode: "add", layers: [L("hit.beat")] } },
+    { key: "injection", label: "Spray injection", group: "Look", amount: 0.45, fx: "glint", def: { mode: "add", layers: [L("hit.high")] } },
+  ];
+  const REACTIVE = SETTINGS.filter((s) => s.def);
+
+  function demoLine() {
+    const a = new Float32Array(NB).fill(1);
+    for (let i = 15; i < NB; i++) a[i] = 0.5;
+    return a;
+  }
+  function instLayer(l, s) {
+    return { id: l.id, weight: l.weight, height: l.height, read: mkRead(SRC[l.id], { height: l.height, line: s.line }), hist: new Float32Array(HN), val: 0 };
+  }
+  for (const s of REACTIVE) {
+    s.line = demoLine();
+    s.mode = s.def.mode;
+    s.layers = s.def.layers.map((l) => instLayer(l, s));
+    s.hist = new Float32Array(HN);
+    s.value = 0;
+  }
+  const recipeKey = (mode, layers) => JSON.stringify([layers.length > 1 ? mode : "-", layers.map((l) => [l.id, +l.weight.toFixed(2), HEIGHT_IDS.has(l.id) ? l.height : "-"])]);
+  const isChanged = (s) => recipeKey(s.mode, s.layers) !== recipeKey(s.def.mode, s.def.layers);
+
+  // ---------------------------------------------------------- sentences
+  const COND = { hit: "just hit", level: "is high", tempo: "ticks", line: "crosses the line" };
+  function weighted(l, first) {
+    const src = SRC[l.id];
+    const name = first ? src.label : lc(src.label);
+    const w = l.weight;
+    let pre = "";
+    if (w < 0.01) pre = first ? "None of " : "none of ";
+    else if (Math.abs(w - 0.5) < 0.01) pre = first ? "Half of " : "half of ";
+    else if (Math.abs(w - 2) < 0.01) pre = first ? "Double " : "double ";
+    else if (Math.abs(w - 1) > 0.01) pre = `${w.toFixed(2).replace(/0$/, "")}× `;
+    if (pre && first) return [{ t: pre }, { t: lc(src.label), c: src.colour }];
+    return [{ t: pre }, { t: name, c: src.colour }];
+  }
+  function sentenceParts(mode, layers) {
+    if (!layers.length) return [{ t: "Nothing yet — this setting holds still.", m: true }];
+    if (layers.length === 1) return [...weighted(layers[0], true), { t: ".  Add another source to combine.", m: true }];
+    const P = [];
+    if (mode === "add") {
+      layers.forEach((l, i) => { if (i) P.push({ t: " + " }); P.push(...weighted(l, i === 0)); });
+    } else if (mode === "max") {
+      P.push({ t: "Whichever is stronger: " });
+      layers.forEach((l, i) => { if (i) P.push({ t: i === layers.length - 1 ? " or " : ", " }); P.push(...weighted(l, false)); });
+    } else {
+      P.push(...weighted(layers[0], true), { t: ", only when " }, { t: lc(SRC[layers[1].id].label), c: SRC[layers[1].id].colour }, { t: " " + COND[SRC[layers[1].id].kind] });
+      if (layers.length > 2) P.push({ t: "  (later layers wait their turn)", m: true });
+    }
+    return P;
+  }
+  const plainSentence = (mode, layers) => sentenceParts(mode, layers).filter((p) => !p.m).map((p) => p.t).join("").trim();
+
+  // ---------------------------------------------------------- canvases
+  const cvs = new Map();
+  const ro = new ResizeObserver((entries) => {
+    for (const e of entries) {
+      const o = cvs.get(e.target);
+      if (!o) continue;
+      const d = Math.min(2, window.devicePixelRatio || 1);
+      o.w = e.contentRect.width; o.h = e.contentRect.height; o.d = d;
+      e.target.width = Math.max(1, Math.round(o.w * d));
+      e.target.height = Math.max(1, Math.round(o.h * d));
+    }
+  });
+  function reg(c) { const o = { c, ctx: c.getContext("2d"), w: 0, h: 0, d: 1 }; cvs.set(c, o); ro.observe(c); return o; }
+  function unreg(c) { ro.unobserve(c); cvs.delete(c); }
+  function begin(o) { const x = o.ctx; x.setTransform(o.d, 0, 0, o.d, 0, 0); x.clearRect(0, 0, o.w, o.h); return x; }
+  function rr(x, X, Y, W, H, r) { x.beginPath(); if (x.roundRect) x.roundRect(X, Y, W, H, r); else x.rect(X, Y, W, H); }
+
+  // ---------------------------------------------------------- state
+  let f = Sim.step(1 / 60);
+  let playing = true;
+  let rh = 0, th = 0;
+  let selected = SETTINGS.find((s) => s.key === "sparkle");
+  let view = "setting"; // "setting" | "eq"
+  let hover = null, hoverT = 0;
+  const gains = [1, 1, 1, 1, 1, 1];
+  const KNOB_BAND = [1.5, 5.5, 9.5, 13.5, 17.5, 21.5];
+  const gainAt = (i) => gains[Math.min(5, Math.floor(i / 4))];
+
+  const tileRead = {}, tHist = {}, tMark = {};
+  for (const s of SOURCES) {
+    tileRead[s.id] = mkRead(s, { height: "standout", line: demoLine() });
+    tHist[s.id] = new Float32Array(TN);
+    tMark[s.id] = new Float32Array(TN);
+  }
+
+  function tick(dt) {
+    f = Sim.step(dt);
+    gridFired[1] = Sim.gridTick(1, f.beatPos);
+    gridFired[4] = Sim.gridTick(4, f.beatPos);
+    rh = (rh + 1) % HN;
+    th = (th + 1) % TN;
+    for (const s of REACTIVE) {
+      const vals = [], ws = [];
+      for (const l of s.layers) { l.val = l.read(f, dt); l.hist[rh] = l.val; vals.push(l.val); ws.push(l.weight); }
+      s.value = combine(s.mode, vals, ws);
+      s.hist[rh] = s.value;
+    }
+    for (const src of SOURCES) {
+      tHist[src.id][th] = tileRead[src.id](f, dt);
+      let m = 0;
+      if (src.kind === "hit") {
+        const k = src.id.slice(4);
+        if (k === "drop") { if (f.hit.drop) m = 1; }
+        else if (f.hit[k]) m = Math.max(0.25, f.strength[k]);
+      }
+      tMark[src.id][th] = m;
+    }
+  }
+  // Start near the end of the build so the drop lands a few seconds in.
+  for (let i = 0; i < 60 * 24; i++) tick(1 / 60);
+
+  // ---------------------------------------------------------- DOM refs
+  const spec = reg($("spectrum"));
+  const resultO = reg($("result"));
+  const previewO = reg($("preview"));
+  const tilesEl = $("tiles"), layersEl = $("layers"), mixEl = $("mix");
+  const tileEls = {};
+
+  // ---------------------------------------------------------- tiles (built once)
+  const TILE_ROWS = [
+    [{ h: "Hits", ids: ["hit.beat", "hit.low", "hit.mid", "hit.high", "hit.drop"] }],
+    [{ h: "Levels", ids: ["level.all", "level.low", "level.mid", "level.high"] }],
+    [{ h: "Feel", ids: ["flux", "section", "centroid"] }],
+    [{ h: "Tempo", ids: ["grid.1", "grid.4"] }, { h: "Draw", ids: ["line"] }],
+  ];
+  for (const row of TILE_ROWS) {
+    const n = row.reduce((a, g) => a + g.ids.length, 0);
+    const el = document.createElement("div");
+    el.className = "tile-row";
+    el.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+    for (const g of row) {
+      const h = document.createElement("div");
+      h.className = "tile-group-head";
+      h.style.gridColumn = `span ${g.ids.length}`;
+      h.textContent = g.h;
+      el.appendChild(h);
+    }
+    for (const g of row) for (const id of g.ids) {
+      const src = SRC[id];
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "tile";
+      b.style.setProperty("--c", src.colour);
+      b.setAttribute("aria-pressed", "false");
+      const c = document.createElement("canvas");
+      c.setAttribute("aria-hidden", "true");
+      const lab = document.createElement("span");
+      lab.className = "t-label";
+      lab.textContent = src.label;
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      b.append(c, lab, badge);
+      b.addEventListener("click", () => toggleSource(id));
+      b.addEventListener("pointerenter", () => setHover(src));
+      b.addEventListener("pointerleave", () => clearHover(src));
+      b.addEventListener("focus", () => setHover(src));
+      b.addEventListener("blur", () => clearHover(src));
+      tileEls[id] = { b, badge, o: reg(c), src };
+      el.appendChild(b);
+    }
+    tilesEl.appendChild(el);
+  }
+  function setHover(src) { hover = src; hoverT = performance.now(); }
+  function clearHover(src) { if (hover === src) hover = null; }
+
+  // ---------------------------------------------------------- scene rows (built once)
+  const rowEls = {};
+  {
+    const host = $("sceneRows");
+    for (const group of ["Form", "Motion", "Look"]) {
+      const g = document.createElement("div");
+      g.className = "s-group";
+      const h = document.createElement("h3");
+      h.textContent = group;
+      g.appendChild(h);
+      for (const s of SETTINGS.filter((x) => x.group === group)) {
+        const row = document.createElement("div");
+        row.className = "row" + (s.def ? "" : " inert");
+        const sel = document.createElement("button");
+        sel.type = "button";
+        sel.className = "row-sel";
+        const lab = document.createElement("span");
+        lab.className = "r-label";
+        lab.textContent = s.label;
+        const tag = document.createElement("span");
+        tag.className = "r-tag";
+        tag.textContent = "Editing";
+        lab.appendChild(tag);
+        const sum = document.createElement("span");
+        sum.className = "r-sum";
+        const dots = document.createElement("span");
+        dots.className = "dots";
+        const txt = document.createElement("span");
+        txt.className = "txt";
+        sum.append(dots, txt);
+        sel.append(lab, sum);
+        let meterO = null;
+        const meterSlot = document.createElement(s.def ? "canvas" : "span");
+        meterSlot.className = "r-meter";
+        if (s.def) meterO = reg(meterSlot);
+        const amt = document.createElement("div");
+        amt.className = "r-amt";
+        const rng = document.createElement("input");
+        rng.type = "range"; rng.min = "0"; rng.max = "1"; rng.step = "0.01"; rng.value = String(s.amount);
+        rng.id = `amt-${s.key}`;
+        rng.setAttribute("aria-label", `${s.label} amount`);
+        rng.style.setProperty("--c", "#c3a5f9");
+        rng.style.setProperty("--p", `${s.amount * 100}%`);
+        const out = document.createElement("output");
+        out.textContent = s.amount.toFixed(2);
+        rng.addEventListener("input", () => { s.amount = +rng.value; out.textContent = s.amount.toFixed(2); rng.style.setProperty("--p", `${s.amount * 100}%`); });
+        amt.append(rng, out);
+        row.append(sel, meterSlot, amt);
+        // Focus or a press anywhere on the row selects it — the real panel's rule.
+        row.addEventListener("focusin", () => select(s));
+        row.addEventListener("pointerdown", () => select(s));
+        rowEls[s.key] = { row, dots, txt, meterO };
+        g.appendChild(row);
+      }
+      host.appendChild(g);
+    }
+    for (const s of SETTINGS) renderRowSummary(s);
+  }
+  function renderRowSummary(s) {
+    const r = rowEls[s.key];
+    r.dots.textContent = "";
+    if (!s.def) { r.txt.textContent = "Not music-reactive"; return; }
+    for (const l of s.layers) { const i = document.createElement("i"); i.style.setProperty("--c", SRC[l.id].colour); r.dots.appendChild(i); }
+    r.txt.textContent = plainSentence(s.mode, s.layers) || "Holds still";
+  }
+
+  // ---------------------------------------------------------- selection / tabs
+  function select(s) {
+    const next = s.def ? s : null;
+    const nextView = next ? "setting" : "eq";
+    if (next === selected && nextView === view) return;
+    const was = selected;
+    selected = next;
+    view = nextView;
+    renderSelection();
+    if (next && next !== was && narrow.matches) $("bandsCard").scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+  }
+  $("tabEq").addEventListener("click", () => { if (view !== "eq") { view = "eq"; renderSelection(); } });
+  $("tabSet").addEventListener("click", () => { if (selected && view !== "setting") { view = "setting"; renderSelection(); } });
+
+  function renderSelection() {
+    for (const s of SETTINGS) rowEls[s.key].row.classList.toggle("is-sel", s === selected);
+    $("plainLabel").hidden = !!selected;
+    $("tabSeg").hidden = !selected;
+    if (selected) $("tabSet").textContent = selected.label;
+    $("tabEq").setAttribute("aria-selected", String(view === "eq"));
+    $("tabSet").setAttribute("aria-selected", String(view === "setting"));
+    $("eqView").hidden = view !== "eq";
+    $("recipe").hidden = view !== "setting";
+    if (selected) renderRecipe();
+    renderReadouts();
+    renderHint();
+  }
+
+  function hasLine() { return view === "setting" && selected && selected.layers.some((l) => l.id === "line"); }
+  function renderHint() {
+    const el = $("specHint");
+    spec.c.classList.toggle("paint", hasLine());
+    spec.c.classList.toggle("knobs", view === "eq");
+    if (view === "eq") el.textContent = "";
+    else if (hasLine()) el.textContent = "Drag across the bars to draw where it starts reacting.";
+    else el.textContent = "Coloured brackets under the bars show what this setting listens to.";
+  }
+
+  // ---------------------------------------------------------- recipe
+  function toggleSource(id) {
+    const s = selected;
+    if (!s) return;
+    const i = s.layers.findIndex((l) => l.id === id);
+    if (i >= 0) s.layers.splice(i, 1);
+    else s.layers.push(instLayer(L(id), s));
+    renderRecipe();
+    renderHint();
+  }
+
+  function renderRecipe() {
+    const s = selected;
+    // tiles
+    for (const id in tileEls) {
+      const t = tileEls[id];
+      const i = s.layers.findIndex((l) => l.id === id);
+      t.b.setAttribute("aria-pressed", String(i >= 0));
+      t.badge.textContent = i >= 0 ? String(i + 1) : "";
+      t.b.title = i >= 0 ? `Remove ${SRC[id].label} from ${s.label}` : `Add ${SRC[id].label} to ${s.label}`;
+    }
+    renderLayers();
+    renderMix();
+    $("resultTitle").textContent = `What ${lc(s.label)} receives`;
+    $("previewCap").textContent = s.fx === "glint" ? "Sparkle" : s.fx === "flash" ? "Flash" : "Motion";
+    $("defaultWords").textContent = `Scene default: ${plainSentence(s.def.mode, s.def.layers.map((l) => ({ ...l })))}`;
+    renderChanged();
+  }
+  function renderChanged() {
+    $("reset").hidden = !isChanged(selected);
+    renderRowSummary(selected);
+  }
+  $("reset").addEventListener("click", () => {
+    const s = selected;
+    s.mode = s.def.mode;
+    s.layers = s.def.layers.map((l) => instLayer(l, s));
+    renderRecipe();
+    renderHint();
+  });
+
+  function renderMix() {
+    const s = selected;
+    for (const b of mixEl.children) {
+      const m = b.dataset.mode;
+      b.setAttribute("aria-checked", String(m === s.mode));
+      const off = m === "gate" && s.layers.length < 2;
+      b.setAttribute("aria-disabled", String(off));
+      b.title = m === "add" ? "Sum every layer" : m === "max" ? "Only the strongest layer at each moment" : off ? "Needs two layers: the first plays, the second opens the gate" : "The first layer plays only while the second is high";
+    }
+    renderSentence();
+  }
+  mixEl.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b || !selected || b.getAttribute("aria-disabled") === "true") return;
+    selected.mode = b.dataset.mode;
+    renderMix();
+    renderChanged();
+  });
+  function renderSentence() {
+    const p = $("sentence");
+    p.textContent = "";
+    for (const part of sentenceParts(selected.mode, selected.layers)) {
+      if (part.c) { const b = document.createElement("b"); b.style.setProperty("--c", part.c); b.textContent = part.t; p.appendChild(b); }
+      else if (part.m) { const sp = document.createElement("span"); sp.className = "muted"; sp.textContent = part.t; p.appendChild(sp); }
+      else p.appendChild(document.createTextNode(part.t));
+    }
+  }
+
+  const GRIP_SVG = '<svg width="8" height="14" viewBox="0 0 8 14" aria-hidden="true"><g fill="currentColor"><circle cx="2" cy="2" r="1.2"/><circle cx="6" cy="2" r="1.2"/><circle cx="2" cy="7" r="1.2"/><circle cx="6" cy="7" r="1.2"/><circle cx="2" cy="12" r="1.2"/><circle cx="6" cy="12" r="1.2"/></g></svg>';
+  let layerMeters = [];
+  function renderLayers(focusIdx = -1) {
+    const s = selected;
+    for (const o of layerMeters) unreg(o.c);
+    layerMeters = [];
+    layersEl.textContent = "";
+    $("layerCount").textContent = s.layers.length === 1 ? "1 source" : `${s.layers.length} sources`;
+    if (!s.layers.length) {
+      const li = document.createElement("li");
+      li.className = "layer empty";
+      li.textContent = "Nothing yet — tap a source above to start.";
+      layersEl.appendChild(li);
+      return;
+    }
+    s.layers.forEach((l, idx) => {
+      const src = SRC[l.id];
+      const li = document.createElement("li");
+      li.className = "layer";
+      li.style.setProperty("--c", src.colour);
+      li.addEventListener("pointerenter", () => setHover(src));
+      li.addEventListener("pointerleave", () => clearHover(src));
+
+      const top = document.createElement("div");
+      top.className = "l-top";
+      const grip = document.createElement("button");
+      grip.type = "button";
+      grip.className = "grip";
+      grip.innerHTML = GRIP_SVG;
+      grip.setAttribute("aria-label", `Move ${src.label} — arrow keys, or drag`);
+      const dot = document.createElement("span"); dot.className = "l-dot";
+      const num = document.createElement("span"); num.className = "l-num"; num.textContent = String(idx + 1);
+      const name = document.createElement("span"); name.className = "l-name"; name.textContent = src.label;
+      const meter = document.createElement("canvas"); meter.className = "l-meter"; meter.setAttribute("aria-hidden", "true");
+      const rm = document.createElement("button");
+      rm.type = "button"; rm.className = "l-remove"; rm.setAttribute("aria-label", `Remove ${src.label}`);
+      rm.innerHTML = '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+      rm.addEventListener("click", () => { s.layers.splice(s.layers.indexOf(l), 1); renderRecipe(); renderHint(); });
+      top.append(grip, dot, num, name, meter, rm);
+
+      const ctl = document.createElement("div");
+      ctl.className = "l-controls";
+      const wl = document.createElement("label");
+      wl.className = "l-weight";
+      const wlab = document.createElement("span"); wlab.className = "ctl-label"; wlab.textContent = "Weight";
+      const rng = document.createElement("input");
+      rng.type = "range"; rng.min = "0"; rng.max = "2"; rng.step = "0.05"; rng.value = String(l.weight);
+      rng.id = `w-${s.key}-${l.id}`;
+      rng.style.setProperty("--c", src.colour);
+      rng.style.setProperty("--p", `${(l.weight / 2) * 100}%`);
+      const out = document.createElement("output"); out.textContent = `${l.weight.toFixed(2)}×`;
+      rng.addEventListener("input", () => {
+        l.weight = +rng.value;
+        out.textContent = `${l.weight.toFixed(2)}×`;
+        rng.style.setProperty("--p", `${(l.weight / 2) * 100}%`);
+        renderSentence();
+        renderChanged();
+      });
+      wl.append(wlab, rng, out);
+      ctl.appendChild(wl);
+
+      if (HEIGHT_IDS.has(l.id)) {
+        const hw = document.createElement("div");
+        hw.className = "l-height";
+        const hl = document.createElement("span"); hl.className = "ctl-label"; hl.textContent = "Height";
+        const seg = document.createElement("div");
+        seg.className = "seg small";
+        seg.setAttribute("role", "radiogroup");
+        seg.setAttribute("aria-label", `${src.label} hit height`);
+        const OPTS = [
+          ["fixed", "Fixed", "Every hit at full height"],
+          ["standout", "Stand-out", "Taller the further a hit beat the threshold"],
+          ["loud", "Loudness", "Taller the louder the band was at that moment"],
+        ];
+        const btns = OPTS.map(([v, t, tip]) => {
+          const b = document.createElement("button");
+          b.type = "button"; b.setAttribute("role", "radio"); b.textContent = t; b.title = tip;
+          b.setAttribute("aria-checked", String(l.height === v));
+          b.addEventListener("click", () => {
+            l.height = v;
+            l.read = mkRead(src, { height: v, line: s.line });
+            for (const [bb, vv] of btns) bb.setAttribute("aria-checked", String(vv === v));
+            renderChanged();
+          });
+          return [b, v];
+        });
+        seg.append(...btns.map(([b]) => b));
+        hw.append(hl, seg);
+        ctl.appendChild(hw);
+      }
+      li.append(top, ctl);
+      layersEl.appendChild(li);
+      layerMeters.push({ c: meter, o: reg(meter), l });
+
+      wireReorder(grip, li, idx);
+      if (idx === focusIdx) requestAnimationFrame(() => grip.focus());
+    });
+  }
+
+  function moveLayer(from, to) {
+    const s = selected;
+    if (to < 0 || to >= s.layers.length || to === from) return false;
+    const [m] = s.layers.splice(from, 1);
+    s.layers.splice(to, 0, m);
+    return true;
+  }
+  function wireReorder(grip, li, from) {
+    grip.addEventListener("keydown", (e) => {
+      const d = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      if (moveLayer(from, from + d)) { renderLayers(from + d); renderMix(); renderChanged(); }
+    });
+    grip.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      grip.setPointerCapture(e.pointerId);
+      const items = [...layersEl.children];
+      const rects = items.map((n) => n.getBoundingClientRect());
+      const step = rects[from].height + 6;
+      const startY = e.clientY;
+      let to = from;
+      li.classList.add("dragging");
+      const move = (ev) => {
+        const dy = ev.clientY - startY;
+        li.style.transform = `translateY(${dy}px)`;
+        const cy = rects[from].top + rects[from].height / 2 + dy;
+        to = rects.reduce((n, r, k) => (k !== from && r.top + r.height / 2 < cy ? n + 1 : n), 0);
+        items.forEach((n, k) => {
+          if (k === from) return;
+          let shift = 0;
+          if (from < to && k > from && k <= to) shift = -step;
+          if (from > to && k >= to && k < from) shift = step;
+          n.style.transform = shift ? `translateY(${shift}px)` : "";
+        });
+      };
+      const up = () => {
+        grip.removeEventListener("pointermove", move);
+        grip.removeEventListener("pointerup", up);
+        grip.removeEventListener("pointercancel", up);
+        items.forEach((n) => (n.style.transform = ""));
+        li.classList.remove("dragging");
+        if (moveLayer(from, to)) { renderLayers(); renderMix(); renderChanged(); }
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+      grip.addEventListener("pointercancel", up);
+    });
+  }
+
+  // ---------------------------------------------------------- equaliser readouts
+  const readoutsEl = $("readouts");
+  const gainEls = [];
+  for (let k = 0; k < 6; k++) {
+    const g = document.createElement("span"); g.className = "g";
+    gainEls.push(g);
+    readoutsEl.appendChild(g);
+  }
+  for (let k = 0; k < 6; k++) {
+    const hz = Sim.bandHz(KNOB_BAND[k]);
+    const h = document.createElement("span"); h.className = "hz";
+    h.textContent = hz >= 1000 ? `${(hz / 1000).toFixed(1)} kHz` : `${Math.round(hz)} Hz`;
+    readoutsEl.appendChild(h);
+  }
+  function renderReadouts() {
+    gains.forEach((g, k) => { gainEls[k].textContent = `${g.toFixed(2)}×`; gainEls[k].classList.toggle("boost", g > 1.001); });
+  }
+
+  // ---------------------------------------------------------- spectrum pointer: paint the line / drag knobs
+  const PH = 126; // plot height inside the spectrum canvas
+  let drag = null;
+  spec.c.addEventListener("pointerdown", (e) => {
+    const r = spec.c.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const bw = r.width / NB;
+    if (view === "eq") {
+      let best = -1, bd = 1e9;
+      KNOB_BAND.forEach((b, k) => { const d = Math.abs((b + 0.5) * bw - x); if (d < bd) { bd = d; best = k; } });
+      if (bd > bw * 2.2) return;
+      drag = { kind: "knob", k: best, r };
+    } else if (hasLine()) {
+      drag = { kind: "line", r, last: -1 };
+    } else return;
+    spec.c.setPointerCapture(e.pointerId);
+    applyDrag(x, y);
+  });
+  spec.c.addEventListener("pointermove", (e) => { if (drag) applyDrag(e.clientX - drag.r.left, e.clientY - drag.r.top); });
+  const endDrag = () => { drag = null; };
+  spec.c.addEventListener("pointerup", endDrag);
+  spec.c.addEventListener("pointercancel", endDrag);
+  function applyDrag(x, y) {
+    const bw = drag.r.width / NB;
+    if (drag.kind === "knob") {
+      gains[drag.k] = Math.round(Math.max(0, Math.min(2, 2 * (1 - y / PH))) * 20) / 20;
+      renderReadouts();
+      return;
+    }
+    const i = Math.max(0, Math.min(NB - 1, Math.floor(x / bw)));
+    const v = clamp01(1 - y / PH);
+    const line = selected.line;
+    if (drag.last >= 0 && drag.last !== i) {
+      const a = Math.min(drag.last, i), b = Math.max(drag.last, i);
+      for (let k = a; k <= b; k++) line[k] = v;
+    }
+    line[i] = v;
+    drag.last = i;
+  }
+
+  // ---------------------------------------------------------- drawing
+  function hzX(hz, W) { return ((Math.log(hz / 40) / Math.log(400)) * NB) / NB * W; }
+
+  function drawSpectrum(now) {
+    const o = spec;
+    if (!o.w) return;
+    const x = begin(o), W = o.w, bw = W / NB;
+    // grid
+    x.strokeStyle = "rgba(255,255,255,0.05)";
+    x.lineWidth = 1;
+    for (const g of [0.25, 0.5, 0.75]) { x.beginPath(); x.moveTo(0, Math.round(PH * g) + 0.5); x.lineTo(W, Math.round(PH * g) + 0.5); x.stroke(); }
+    // bars
+    const line = hasLine() ? selected.line : null;
+    for (let i = 0; i < NB; i++) {
+      const v = clamp01(f.bands[i] * gainAt(i) * 1.05);
+      const h = v * PH;
+      x.fillStyle = rgba(bandColour(i), 0.88);
+      x.fillRect(i * bw + 1, PH - h, bw - 2, h);
+      if (line && line[i] < 1) {
+        const ly = (1 - line[i]) * PH;
+        x.fillStyle = "rgba(255,255,255,0.045)";
+        x.fillRect(i * bw, ly, bw, PH - ly);
+        if (PH - h < ly) { x.fillStyle = "rgba(249,185,108,0.42)"; x.fillRect(i * bw + 1, PH - h, bw - 2, ly - (PH - h)); }
+      }
+    }
+    // hover tint + outline for the hovered source's bands
+    if (view === "setting" && hover && hover.range) {
+      const [a, b] = hover.range;
+      x.fillStyle = "rgba(8,7,12,0.66)";
+      x.fillRect(0, 0, a * bw, PH);
+      x.fillRect(b * bw, 0, W - b * bw, PH);
+      const k = reduced ? 1 : 0.4 + 0.6 * Math.exp(-(now - hoverT) / 450);
+      x.save();
+      x.strokeStyle = rgba(hover.colour, 0.9 * k + 0.1);
+      x.shadowColor = hover.colour;
+      x.shadowBlur = 14 * k;
+      x.lineWidth = 1.5;
+      rr(x, a * bw + 0.75, 0.75, (b - a) * bw - 1.5, PH - 1.5, 5);
+      x.stroke();
+      x.restore();
+    }
+    // centroid marker (Brightness)
+    const cx = (f.centroid * (NB - 1) + 0.5) * bw;
+    const bright = view === "setting" && ((hover && hover.id === "centroid") || (selected && selected.layers.some((l) => l.id === "centroid")));
+    x.save();
+    x.strokeStyle = "#59bbfb";
+    x.fillStyle = "#59bbfb";
+    x.lineWidth = bright ? 2.5 : 1.5;
+    if (bright) { x.shadowColor = "#59bbfb"; x.shadowBlur = 12; }
+    x.beginPath(); x.moveTo(cx, 7); x.lineTo(cx, PH); x.stroke();
+    x.beginPath(); x.moveTo(cx - 5, 0); x.lineTo(cx + 5, 0); x.lineTo(cx, 7); x.closePath(); x.fill();
+    x.restore();
+    // drawn line
+    if (line) {
+      x.save();
+      x.strokeStyle = "#f9b96c";
+      x.lineWidth = 2;
+      x.shadowColor = "rgba(249,185,108,0.6)";
+      x.shadowBlur = 6;
+      x.beginPath();
+      for (let i = 0; i < NB; i++) {
+        const ly = Math.max(1, (1 - line[i]) * PH);
+        if (i === 0) x.moveTo(0, ly); else x.lineTo(i * bw, ly);
+        x.lineTo((i + 1) * bw, ly);
+      }
+      x.stroke();
+      x.restore();
+    }
+    // listening brackets: one thin lane per layer that has a frequency range
+    if (view === "setting" && selected) {
+      let lane = 0;
+      for (const l of selected.layers) {
+        const src = SRC[l.id];
+        if (!src.range || lane > 2) continue;
+        const [a, b] = src.range;
+        const y = PH + 6 + lane * 5;
+        x.fillStyle = rgba(src.colour, 0.3 + 0.7 * clamp01(l.val));
+        rr(x, a * bw + 1, y, (b - a) * bw - 2, 3, 1.5);
+        x.fill();
+        lane++;
+      }
+    }
+    // equaliser knobs
+    if (view === "eq") {
+      x.setLineDash([3, 4]);
+      x.strokeStyle = "rgba(255,255,255,0.18)";
+      x.beginPath(); x.moveTo(0, PH / 2 + 0.5); x.lineTo(W, PH / 2 + 0.5); x.stroke();
+      x.setLineDash([]);
+      KNOB_BAND.forEach((b, k) => {
+        const kx = (b + 0.5) * bw, ky = PH * (1 - gains[k] / 2);
+        x.strokeStyle = "rgba(255,255,255,0.12)";
+        x.beginPath(); x.moveTo(kx + 0.5, 0); x.lineTo(kx + 0.5, PH); x.stroke();
+        x.fillStyle = "rgba(18,16,26,0.95)";
+        x.strokeStyle = "#f9b96c";
+        x.lineWidth = 1.5;
+        rr(x, kx - 12, ky - 7, 24, 14, 4); x.fill(); x.stroke();
+        x.fillStyle = "#f9b96c";
+        x.fillRect(kx - 4, ky - 0.75, 8, 1.5);
+        x.lineWidth = 1;
+      });
+    }
+    // axis
+    x.fillStyle = "rgba(243,241,247,0.44)";
+    x.font = "10.5px 'Share Tech Mono', ui-monospace, monospace";
+    x.textAlign = "center";
+    for (const [hz, t] of [[100, "100 Hz"], [1000, "1 kHz"], [10000, "10 kHz"]]) {
+      const hx = hzX(hz, W);
+      x.fillRect(hx, PH + 22, 1, 4);
+      x.fillText(t, hx, PH + 38);
+    }
+  }
+
+  function drawTile(t, now) {
+    const o = t.o;
+    if (!o.w) return;
+    const x = begin(o), W = o.w, H = o.h, src = t.src, c = src.colour, id = src.id;
+    x.fillStyle = "rgba(0,0,0,0.3)";
+    rr(x, 0, 0, W, H, 4); x.fill();
+    const hist = tHist[id];
+    const at = (k) => hist[(th + 1 + k) % TN];
+    const v = hist[th];
+    if (src.kind === "hit") {
+      x.fillStyle = "rgba(255,255,255,0.08)";
+      x.fillRect(3, H - 4, W - 6, 1);
+      if (id === "hit.drop") {
+        const sec = tHist["section"];
+        x.strokeStyle = "rgba(77,212,192,0.35)";
+        x.beginPath();
+        for (let k = 0; k < TN; k++) { const px = 3 + (k / (TN - 1)) * (W - 6), py = H - 5 - sec[(th + 1 + k) % TN] * (H - 10); k ? x.lineTo(px, py) : x.moveTo(px, py); }
+        x.stroke();
+      }
+      const marks = tMark[id];
+      x.lineWidth = 1.6;
+      for (let k = 0; k < TN; k++) {
+        const m = marks[(th + 1 + k) % TN];
+        if (m <= 0) continue;
+        const px = 3 + (k / (TN - 1)) * (W - 12);
+        x.strokeStyle = rgba(c, 0.35 + 0.65 * (k / TN));
+        x.beginPath(); x.moveTo(px, H - 4); x.lineTo(px, H - 4 - m * (H - 9)); x.stroke();
+      }
+      x.save();
+      x.fillStyle = c; x.shadowColor = c; x.shadowBlur = 10 * v;
+      x.beginPath(); x.arc(W - 5, H / 2, 1.6 + v * 2.6, 0, Math.PI * 2); x.fill();
+      x.restore();
+    } else if (id === "flux") {
+      const fl = Sim.series("flux", TN), tr = Sim.series("thr", TN);
+      let mx = 0.05;
+      for (let k = 0; k < TN; k++) mx = Math.max(mx, fl[k], tr[k]);
+      mx *= 1.1;
+      const py = (val) => H - 3 - (val / mx) * (H - 6);
+      x.setLineDash([2, 3]);
+      x.strokeStyle = "rgba(89,187,251,0.6)";
+      x.beginPath();
+      for (let k = 0; k < TN; k++) { const px = 3 + (k / (TN - 1)) * (W - 6); k ? x.lineTo(px, py(tr[k])) : x.moveTo(px, py(tr[k])); }
+      x.stroke();
+      x.setLineDash([]);
+      x.strokeStyle = "rgba(243,243,243,0.85)";
+      x.lineWidth = 1.2;
+      x.beginPath();
+      for (let k = 0; k < TN; k++) { const px = 3 + (k / (TN - 1)) * (W - 6); k ? x.lineTo(px, py(fl[k])) : x.moveTo(px, py(fl[k])); }
+      x.stroke();
+    } else if (id === "centroid") {
+      const g = x.createLinearGradient(4, 0, W - 4, 0);
+      g.addColorStop(0, "rgba(137,226,157,0.55)"); g.addColorStop(0.5, "rgba(192,162,245,0.55)"); g.addColorStop(1, "rgba(246,177,91,0.55)");
+      x.fillStyle = g;
+      rr(x, 4, H / 2 - 3, W - 8, 6, 3); x.fill();
+      for (let k = TN - 40; k < TN; k += 3) {
+        const a = (k - (TN - 40)) / 40;
+        x.fillStyle = `rgba(89,187,251,${0.08 + 0.3 * a})`;
+        x.fillRect(4 + at(k) * (W - 8) - 1, H / 2 - 7, 2, 14);
+      }
+      x.save();
+      x.fillStyle = "#59bbfb"; x.shadowColor = "#59bbfb"; x.shadowBlur = 8;
+      x.fillRect(4 + v * (W - 8) - 1.25, 3, 2.5, H - 6);
+      x.restore();
+    } else if (src.kind === "tempo") {
+      const idx = src.div === 1 ? Math.floor(f.beatPos) % 4 : Math.floor(f.beatPos / 4) % 4;
+      for (let k = 0; k < 4; k++) {
+        const px = W * (0.2 + k * 0.2), py = H / 2;
+        const on = k === idx;
+        x.save();
+        if (on) { x.fillStyle = "#fff"; x.shadowColor = "#fff"; x.shadowBlur = 4 + 10 * v; }
+        else x.fillStyle = "rgba(255,255,255,0.18)";
+        x.beginPath(); x.arc(px, py, on ? 2.8 + v * 2 : 2.4, 0, Math.PI * 2); x.fill();
+        x.restore();
+      }
+    } else if (id === "line") {
+      const line = selected ? selected.line : demoLine();
+      const bw = (W - 6) / NB;
+      for (let i = 0; i < NB; i++) {
+        const h = clamp01(f.bands[i]) * (H - 6);
+        x.fillStyle = rgba(bandColour(i), 0.55);
+        x.fillRect(3 + i * bw + 0.5, H - 3 - h, Math.max(1, bw - 1), h);
+      }
+      x.strokeStyle = "#f9b96c";
+      x.lineWidth = 1.4;
+      x.beginPath();
+      for (let i = 0; i < NB; i++) { const ly = 3 + (1 - line[i]) * (H - 6); i ? x.lineTo(3 + i * bw, ly) : x.moveTo(3, ly); x.lineTo(3 + (i + 1) * bw, ly); }
+      x.stroke();
+    } else {
+      // continuous levels + song intensity: history area and a live bar on the right
+      const Wd = W - 14;
+      x.beginPath();
+      x.moveTo(3, H - 3);
+      for (let k = 0; k < TN; k++) x.lineTo(3 + (k / (TN - 1)) * Wd, H - 3 - at(k) * (H - 6));
+      x.lineTo(3 + Wd, H - 3);
+      x.closePath();
+      x.fillStyle = rgba(c, 0.16);
+      x.fill();
+      x.strokeStyle = rgba(c, 0.55);
+      x.lineWidth = 1;
+      x.beginPath();
+      for (let k = 0; k < TN; k++) { const px = 3 + (k / (TN - 1)) * Wd, py = H - 3 - at(k) * (H - 6); k ? x.lineTo(px, py) : x.moveTo(px, py); }
+      x.stroke();
+      x.fillStyle = "rgba(255,255,255,0.08)";
+      x.fillRect(W - 8, 3, 5, H - 6);
+      x.fillStyle = c;
+      x.fillRect(W - 8, H - 3 - v * (H - 6), 5, v * (H - 6));
+    }
+  }
+
+  function drawBar(o, v, colour) {
+    if (!o.w) return;
+    const x = begin(o);
+    x.fillStyle = "rgba(255,255,255,0.08)";
+    rr(x, 0, 0, o.w, o.h, o.h / 2); x.fill();
+    const w = Math.max(0, Math.min(1, v)) * o.w;
+    if (w > 0.5) {
+      x.save();
+      x.fillStyle = colour;
+      if (v > 0.55) { x.shadowColor = colour; x.shadowBlur = 8; }
+      rr(x, 0, 0, w, o.h, o.h / 2); x.fill();
+      x.restore();
+    }
+  }
+
+  function drawResult() {
+    const o = resultO;
+    if (!o.w || !selected) return;
+    const x = begin(o), W = o.w, H = o.h, pad = 6;
+    const py = (v) => H - pad - clamp01(v) * (H - pad * 2);
+    x.strokeStyle = "rgba(255,255,255,0.06)";
+    x.beginPath(); x.moveTo(0, py(0.5) + 0.5); x.lineTo(W, py(0.5) + 0.5); x.stroke();
+    const px = (k) => (k / (HN - 1)) * W;
+    for (const l of selected.layers) {
+      x.strokeStyle = rgba(SRC[l.id].colour, 0.55);
+      x.lineWidth = 1.2;
+      x.beginPath();
+      for (let k = 0; k < HN; k++) { const v = l.hist[(rh + 1 + k) % HN] * l.weight; k ? x.lineTo(px(k), py(v)) : x.moveTo(px(k), py(v)); }
+      x.stroke();
+    }
+    const hs = selected.hist;
+    const g = x.createLinearGradient(0, pad, 0, H);
+    g.addColorStop(0, "rgba(255,255,255,0.28)"); g.addColorStop(1, "rgba(255,255,255,0.02)");
+    x.beginPath();
+    x.moveTo(0, H - pad);
+    for (let k = 0; k < HN; k++) x.lineTo(px(k), py(hs[(rh + 1 + k) % HN]));
+    x.lineTo(W, H - pad);
+    x.closePath();
+    x.fillStyle = g; x.fill();
+    x.strokeStyle = "#fff"; x.lineWidth = 2;
+    x.beginPath();
+    for (let k = 0; k < HN; k++) { const v = hs[(rh + 1 + k) % HN]; k ? x.lineTo(px(k), py(v)) : x.moveTo(px(k), py(v)); }
+    x.stroke();
+    x.fillStyle = "#fff";
+    x.beginPath(); x.arc(W - 3, py(hs[rh]), 3, 0, Math.PI * 2); x.fill();
+  }
+
+  // A tiny caustics stand-in: interfering ridges on water, lit by the drive.
+  const PN = 46;
+  const off = document.createElement("canvas");
+  off.width = PN; off.height = PN;
+  const offX = off.getContext("2d");
+  const img = offX.createImageData(PN, PN);
+  let pt = 0;
+  const glints = Array.from({ length: 22 }, () => ({ x: Math.random(), y: Math.random(), a: 0 }));
+  function drawPreview(dt) {
+    const o = previewO;
+    if (!o.w || !selected) return;
+    const v = clamp01(selected.value * (0.4 + selected.amount));
+    const fx = selected.fx;
+    if (!reduced && playing) pt += dt * (0.35 + (fx === "motion" ? v * 2.2 : 0.15));
+    const warp = 1 + (fx === "motion" ? v * 1.4 : 0.2);
+    const lift = fx === "flash" ? v * 0.55 : 0;
+    const gain = 0.35 + (fx === "glint" ? 0.35 : v * 1.25);
+    const d = img.data;
+    for (let j = 0; j < PN; j++) {
+      for (let i = 0; i < PN; i++) {
+        const u = (i / PN) * 5.2, w = (j / PN) * 5.2;
+        const a = Math.sin(u * 1.7 + pt * 1.1 + Math.sin(w * 1.3 - pt * 0.6) * warp);
+        const b = Math.sin(w * 1.9 - pt * 0.9 + Math.sin(u * 1.1 + pt * 0.5) * warp);
+        const ridge = Math.pow(1 - Math.abs(a + b) / 2, 7);
+        const I = Math.min(1.4, ridge * gain + lift);
+        const p = (j * PN + i) * 4;
+        d[p] = 6 + I * 150;
+        d[p + 1] = 26 + I * 205;
+        d[p + 2] = 40 + I * 215;
+        d[p + 3] = 255;
+      }
+    }
+    offX.putImageData(img, 0, 0);
+    const x = begin(o);
+    x.imageSmoothingEnabled = true;
+    x.drawImage(off, 0, 0, o.w, o.h);
+    if (fx === "glint") {
+      const n = Math.floor(v * glints.length);
+      for (let k = 0; k < glints.length; k++) {
+        const gp = glints[k];
+        if (k < n && Math.random() < 0.18) { gp.x = Math.random(); gp.y = Math.random(); gp.a = 1; }
+        gp.a *= Math.exp(-dt * 6);
+        if (gp.a < 0.03) continue;
+        x.save();
+        x.fillStyle = `rgba(255,236,200,${gp.a})`;
+        x.shadowColor = "#f9b96c"; x.shadowBlur = 8;
+        x.beginPath(); x.arc(gp.x * o.w, gp.y * o.h, 1 + gp.a * 1.6, 0, Math.PI * 2); x.fill();
+        x.restore();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------- transport
+  const phraseEls = [...$("phrases").children];
+  let lastPhrase = "", lastBeatShown = -1, lastVal = 0;
+  $("play").addEventListener("click", () => {
+    playing = !playing;
+    const b = $("play");
+    b.setAttribute("aria-label", playing ? "Pause the demo track" : "Play the demo track");
+    b.innerHTML = playing
+      ? '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="1.5" width="2.6" height="9" rx="0.6" fill="currentColor"/><rect x="7.4" y="1.5" width="2.6" height="9" rx="0.6" fill="currentColor"/></svg>'
+      : '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.5l7 4.5-7 4.5z" fill="currentColor"/></svg>';
+  });
+
+  // ---------------------------------------------------------- loop
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(1 / 20, Math.max(0, (now - last) / 1000));
+    last = now;
+    if (playing && dt > 0) tick(dt);
+
+    if (f.phrase !== lastPhrase) {
+      lastPhrase = f.phrase;
+      for (const li of phraseEls) li.classList.toggle("is-on", li.dataset.p === f.phrase);
+    }
+    const beatIdx = Math.floor(f.beatPos);
+    if (beatIdx !== lastBeatShown) {
+      lastBeatShown = beatIdx;
+      $("barpos").textContent = `BAR ${String(f.bar + 1).padStart(2, "0")} · ${(beatIdx % 4) + 1}`;
+    }
+
+    drawSpectrum(now);
+    if (view === "setting" && selected) {
+      for (const id in tileEls) drawTile(tileEls[id], now);
+      for (const m of layerMeters) drawBar(m.o, m.l.val * m.l.weight, SRC[m.l.id].colour);
+      drawResult();
+      drawPreview(dt);
+      if (now - lastVal > 90) { lastVal = now; $("resultVal").textContent = selected.value.toFixed(2); }
+    }
+    for (const s of REACTIVE) {
+      const r = rowEls[s.key];
+      if (r.meterO) drawBar(r.meterO, s.value, s.layers.length ? SRC[s.layers[0].id].colour : "#888");
+    }
+    requestAnimationFrame(frame);
+  }
+
+  renderSelection();
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>

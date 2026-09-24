@@ -104,6 +104,16 @@ Not yet tuned against real music. Beads' far rows show a little shimmer even
 with mipmapping enabled. The Beads-to-other-style camera artifact noted above
 is cosmetic and untriaged.
 
+## Materials
+
+- `petri/2s28LbNqmOM/` — measurements kept from the `/ref` bundle `2s28LbNqmOM`: report, data, and our own shots.
+- `petri/48H_Fre00AY/` — measurements kept from the `/ref` bundle `48H_Fre00AY`: report, data, and our own shots.
+- `petri/9pAkn0bsCLU/` — measurements kept from the `/ref` bundle `9pAkn0bsCLU`: report, data, and our own shots.
+- `petri/P-UTmeA4qeI/` — measurements kept from the `/ref` bundle `P-UTmeA4qeI`: report, data, and our own shots.
+- `petri/VTcH08UgcAE/` — measurements kept from the `/ref` bundle `VTcH08UgcAE`: report, data, and our own shots.
+- `petri/rBwFHMb8Lh0/` — measurements kept from the `/ref` bundle `rBwFHMb8Lh0`: report, data, and our own shots.
+The reference media for these bundles (video, frames, audio, the images built from them) stays out of this repo: in the local `tools/.cache/refs/<bundle>/` cache and the private archive (`tools/ref-archive.py`).
+
 ## Resume here
 
 `npm run dev`, then `/?audio=synthetic&bpm=120#/v/petri`. `window.__viz.setParams`

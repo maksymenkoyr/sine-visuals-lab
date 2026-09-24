@@ -64,6 +64,10 @@ Per the PR, the scene shipped featured on synthetic-feed tuning alone and
 had not yet been checked against real music from a mic; a real-music tuning
 pass may still be worth doing.
 
+## Materials
+
+- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+
 ## Resume here
 
 `npm run dev`, then `/?audio=synthetic&bpm=120#/v/physarum`. Pure logic

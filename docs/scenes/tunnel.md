@@ -55,6 +55,10 @@ beyond its creation. The `minQuality: "low"` gate is a known constraint,
 not a bug: see ferrofluid.ts's header comment, which points to tunnel.ts as
 the precedent for gating a raymarched scene out of floor-tier quality.
 
+## Materials
+
+- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+
 ## Resume here
 
 - `npm run dev`, then `/?audio=synthetic&bpm=120#/v/tunnel` (query before
