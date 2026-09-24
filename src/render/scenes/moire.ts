@@ -1,5 +1,6 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
+import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 
 // Rebuilt 2026-09-11 from thedotisblack's "Moiré Pattern Art | Horizontal
 // lines with noise" (Part 2, the video's second chapter) — a Processing
@@ -83,7 +84,6 @@ const AA_FADE_HIGH_PX = 3.0; // at/above this period the gratings render at full
 // Flicker (uSeed) --------------------------------------------------------
 const SEED_STEP = 43.27; // a jump large enough that consecutive fresh fields don't correlate; picked off any noise-lattice period
 const SEED_WRAP = 512; // uSeed is kept in [0, SEED_WRAP): a seed in the thousands leaves fract(p) in the shader with too few bits and the smooth blend steps — not a multiple of SEED_STEP, so the wrapped sequence doesn't repeat quickly
-const LATTICE_WRAP = 256; // the shader folds lattice corners into [0, LATTICE_WRAP) before hashing, for the same precision reason
 const SEED_SMOOTH_RATE = 0.15; // per second at Drift speed=1 — the flicker=0 fallback's continuous glide rate
 const SLOW_RATE = 0.12; // per second at Drift speed=1 — accumulation rate of the persistent (uSlowT) noise component
 
@@ -279,15 +279,15 @@ const SETTINGS: SceneSetting[] = [
 ];
 
 const FRAG = `
-// Lattice-corner hash. The corner is folded into a bounded range before any
-// large multiply: the fresh field's coordinates carry uSeed, and a fract() of
-// a coordinate in the thousands times a constant in the hundreds has no
-// mantissa left — that showed up as hard vertical seams along lattice edges.
+${FLOAT_HASH_GLSL}
+
+// Lattice-corner hash, kept under its old name for every call site below.
+// The bit-pattern hash above is exact at any magnitude, so this no longer
+// needs the fold-into-a-bounded-range step the old fract-multiply hash did
+// (see noiseHash.ts's header for the mobile-precision story that step was
+// working around).
 float hash12(vec2 i) {
-  vec2 p = mod(i, ${LATTICE_WRAP.toFixed(1)}) / ${LATTICE_WRAP.toFixed(1)};
-  p = fract(p * vec2(419.2, 371.9));
-  p += dot(p, p + 19.19);
-  return fract(p.x * p.y);
+  return hash21(i);
 }
 
 // Standard value noise: hash the lattice corners, smooth-blend between them.

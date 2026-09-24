@@ -93,3 +93,82 @@ vec2 hash2Cell(vec2 cell, int mask, uint seed) {
   return vec2(float(h >> 8u), float(uhash(h) >> 8u)) * (1.0 / 16777216.0);
 }
 `;
+
+/** GLSL for a one-shot float hash — paste at the top of a fragment body when
+ *  a scene needs `hash21`/`hash22`/`hash31`/`hash33` (a corner-of-a-lattice
+ *  hash, not a drifting one) rather than NOISE_HASH_GLSL's cell hash. Use
+ *  this one for an ordinary value-noise lattice with no accumulated phase in
+ *  its coordinate (no `uFlowPhase`-style drift); reach for NOISE_HASH_GLSL
+ *  and wrapFlow instead the moment a scene adds a growing phase to the noise
+ *  coordinate — see this file's header for why.
+ *
+ *  Where NOISE_HASH_GLSL hashes an already-integer cell index, this one
+ *  hashes the *bit pattern* of the float input directly (`floatBitsToUint`),
+ *  so it takes a plain lattice coordinate with no separate floor/mask step.
+ *  Per-component cost matters here more than for `cellBits` above: a scene
+ *  calls this from inside an 8-corner trilinear lookup (vnoise's hash31) or
+ *  a per-pixel sim step, so it runs several times per particle per frame —
+ *  chladni.ts's own grain sim is where a first cut of this (a full lowbias32
+ *  pass *per component* before combining) was measured costing whole frames
+ *  on a software-rasterised (SwiftShader) run. `fhBits` below spends only
+ *  the first two of `fhMix`'s five steps decorrelating each component before
+ *  they're combined, then the combined value gets the full five-step mix —
+ *  cheap per component, still collision-free across a swept-integer stress
+ *  test at negative and positive coordinates alike (see this file's test).
+ *  It mixes with the same lowbias32 constants as `uhash` above, but through
+ *  its own helper (`fhMix`, not `uhash`) so a scene that pastes both this
+ *  and NOISE_HASH_GLSL never gets a duplicate-symbol error. `floor()` can
+ *  produce -0.0, which hashes differently from +0.0 under `floatBitsToUint`
+ *  even though the two compare equal, so every input is canonicalised
+ *  (`fhZero`) first. */
+export const FLOAT_HASH_GLSL = `
+precision highp int;
+
+// lowbias32 (public domain / Unlicense) — same mix as NOISE_HASH_GLSL's
+// uhash, renamed so the two can coexist in one shader.
+uint fhMix(uint x) {
+  x ^= x >> 16u;
+  x *= 0x7feb352du;
+  x ^= x >> 15u;
+  x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  return x;
+}
+
+// -0.0 and +0.0 compare equal but hash differently through floatBitsToUint;
+// floor() can hand back -0.0, so every hash input is canonicalised here.
+float fhZero(float x) { return x == 0.0 ? 0.0 : x; }
+
+// Cheap per-component decorrelation (fhMix's first two steps only) before
+// combining — see the header on why a full mix per component isn't worth it.
+uint fhBits(float x) {
+  uint h = floatBitsToUint(fhZero(x));
+  h ^= h >> 16u;
+  h *= 0x7feb352du;
+  return h;
+}
+
+// 24 significant bits -> exactly representable, uniform in [0, 1).
+float fhUnit(uint h) { return float(h >> 8u) * (1.0 / 16777216.0); }
+
+float hash21(vec2 p) {
+  return fhUnit(fhMix(fhBits(p.x) ^ (fhBits(p.y) * 0x9e3779b9u)));
+}
+
+vec2 hash22(vec2 p) {
+  uint h = fhMix(fhBits(p.x) ^ (fhBits(p.y) * 0x9e3779b9u));
+  return vec2(fhUnit(h), fhUnit(fhMix(h)));
+}
+
+float hash31(vec3 p) {
+  uint h = fhBits(p.x) ^ (fhBits(p.y) * 0x9e3779b9u) ^ (fhBits(p.z) * 0x85ebca6bu);
+  return fhUnit(fhMix(h));
+}
+
+vec3 hash33(vec3 p) {
+  uint h0 = fhMix(fhBits(p.x) ^ (fhBits(p.y) * 0x9e3779b9u) ^ (fhBits(p.z) * 0x85ebca6bu));
+  uint h1 = fhMix(h0);
+  uint h2 = fhMix(h1);
+  return vec3(fhUnit(h0), fhUnit(h1), fhUnit(h2));
+}
+`;

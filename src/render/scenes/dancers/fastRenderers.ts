@@ -81,6 +81,7 @@ float raySphere(vec3 ro, vec3 rd, vec3 c, float r) {
 // Ray vs capsule (a, b, r): the infinite cylinder around the axis solved as
 // a quadratic in the axis frame, accepted only between the ends; otherwise
 // the sphere cap on the side the ray passes. Nearest positive t, or -1.
+// Inigo Quilez's capsule intersector (MIT) — see THIRD-PARTY-NOTICES.md
 float rayCapsule(vec3 ro, vec3 rd, vec3 a, vec3 b, float r) {
   vec3 ba = b - a;
   vec3 oa = ro - a;

@@ -251,6 +251,7 @@ vec3 shade(vec3 p, vec3 n, vec3 rd, vec3 rim, float ao) {
 }
 
 // Tetrahedral normal: four map() taps instead of six.
+// Inigo Quilez's tetrahedral-tap normal (MIT) — see THIRD-PARTY-NOTICES.md
 vec3 calcNormal(vec3 p, float eps) {
   const vec2 k = vec2(1.0, -1.0);
   return normalize(

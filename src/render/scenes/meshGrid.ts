@@ -5,6 +5,7 @@ import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
+import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 
 // A hidden-line terrain that is a live spectrogram waterfall: across the
 // grid (X) is frequency, mirrored so the bass sits as a ridge down the
@@ -837,11 +838,7 @@ uniform float uIsPointPass; // 1.0 only during the dots (gl.POINTS) draw
 #define NOISE_PERIOD ${NOISE_PERIOD.toFixed(1)}
 #define NOISE_Z_RATE ${NOISE_Z_RATE.toFixed(3)}
 
-float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
+${FLOAT_HASH_GLSL}
 
 // Value noise -- cheaper than a Perlin/gradient-noise permutation table
 // while keeping the same broad turbulent character. Periodic along y with

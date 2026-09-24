@@ -8,7 +8,9 @@
  * Every dimension is the design's value at its drawn size, scaled by the
  * requested size — so the proportions live in one place, here.
  *
- * The mark is a trademark, not covered by the AGPL — see src/brand.ts.
+ * This file's code is AGPL like the rest of the app; only the mark itself —
+ * the name and logo as a trademark — is reserved, which the AGPL's license
+ * grant doesn't touch — see src/brand.ts.
  */
 import "@fontsource/shippori-mincho-b1/latin-800.css";
 import { PRODUCT_NAME } from "../brand.ts";

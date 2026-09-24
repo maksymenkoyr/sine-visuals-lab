@@ -61,6 +61,7 @@ Licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-
 Third-party dependencies bundled into the client build are listed in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-The Sine Visuals Lab name and logo are trademarks of Yaroslav Maksymenko and
-are **not** covered by the AGPL license. Forks are welcome under the license,
-but must ship under their own name.
+The AGPL license grants no trademark rights (see AGPL-3.0 §7(e)): the Sine
+Visuals Lab name and logo are trademarks of Yaroslav Maksymenko, so modified
+versions and forks — welcome under the license — must ship under their own
+name.

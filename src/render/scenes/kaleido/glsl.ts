@@ -2,6 +2,7 @@
 // and styles.ts for what each style builds on top of this. Injected after
 // createFullscreenScene's common uniforms and palette(), so everything here
 // may call palette() and read the scene's setting uniforms.
+import { FLOAT_HASH_GLSL } from "../../noiseHash.ts";
 
 /** Ink colour for band lines, navy rings and the Burst core: a near-black
  *  navy, not a scaled palette colour (that gave dark-red/dark-green rather
@@ -31,11 +32,7 @@ export const KALEIDO_COMMON_GLSL = `
 
 const vec3 INK = ${INK_DARK};
 
-float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
+${FLOAT_HASH_GLSL}
 
 float vnoise(vec2 p) {
   vec2 i = floor(p);

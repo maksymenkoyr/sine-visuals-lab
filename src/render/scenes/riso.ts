@@ -1,4 +1,5 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
+import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 
 // A printed poster, not a demo: flat geometric forms sized by band groups,
 // rendered as two halftone ink screens over paper grain. uBeatPulse jolts
@@ -7,11 +8,7 @@ import { createFullscreenScene } from "../fullscreenScene.ts";
 // from screen pixels (not roomUv) so the ink stays physically fixed to the
 // display while the artwork itself spans the room.
 const FRAG = `
-float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
+${FLOAT_HASH_GLSL}
 
 float shapeField(vec2 p) {
   float v = 0.0;
