@@ -28,12 +28,23 @@
 # unprotected, and the file must exist — the action fails, rather than
 # creating it, when it's missing.
 #
-# The allowlist never has to sign: the maintainer (the CLA's grantee);
-# `claude`, the account GitHub maps commits by Claude Code cloud sessions to
-# (authored as noreply@anthropic.com — the maintainer's own work); and bots.
-# A plain name matches exactly; a pattern with `*` is an unanchored regex.
-# A commit authored with an email linked to no GitHub account can't sign and
-# will hold the check red — its author has to fix the commit's email.
+# Who never has to sign. A pull request opened by the maintainer (the CLA's
+# grantee) skips the job entirely, and a skipped job counts as passing for a
+# required check. That's what covers the maintainer's Claude Code cloud
+# sessions: their commits are authored as noreply@anthropic.com, which GitHub
+# maps to the account `claude`, but the pull request is opened under the
+# maintainer's account. `claude` must NOT go on the allowlist — a commit's
+# author is just the email written into it, so anyone could author commits
+# as noreply@anthropic.com and skip signing. On anyone else's pull request a
+# `claude`-authored commit therefore holds the check red (that account can't
+# sign); the contributor re-authors those commits under their own account.
+# The flip side: whatever lands through the maintainer's own pull requests is
+# the maintainer's responsibility — don't carry someone else's unsigned
+# commits in that way. The allowlist below covers the maintainer's own commits
+# inside other people's pull requests, and bots. A plain name matches
+# exactly; a pattern with `*` is an unanchored regex. A commit authored with
+# an email linked to no GitHub account can't sign either and holds the check
+# red until its author fixes the commit's email.
 #
 # Security: pull_request_target runs this file as it is on main, with the
 # secret, even for PRs from forks. That's safe only because nothing here
@@ -62,14 +73,16 @@ concurrency:
 jobs:
   cla:
     name: license/cla
-    # A comment only matters on a pull request, and only when it's `recheck`
-    # or looks like the signing sentence — the action itself checks the
-    # sentence exactly.
+    # Skipped for the maintainer's own pull requests (see the header). A
+    # comment only matters on a pull request, and only when it's `recheck` or
+    # looks like the signing sentence — the action itself checks the sentence
+    # exactly.
     if: >-
-      github.event_name == 'pull_request_target' ||
-      (github.event.issue.pull_request &&
-        (github.event.comment.body == 'recheck' ||
-          contains(github.event.comment.body, 'hereby agree to its terms')))
+      (github.event.pull_request.user.login || github.event.issue.user.login) != 'maksymenkoyr' &&
+      (github.event_name == 'pull_request_target' ||
+        (github.event.issue.pull_request &&
+          (github.event.comment.body == 'recheck' ||
+            contains(github.event.comment.body, 'hereby agree to its terms'))))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -89,7 +102,7 @@ jobs:
           remote-repository-name: sine-visuals-lab-cla
           branch: main
           path-to-signatures: signatures/cla.json
-          allowlist: maksymenkoyr,claude,*[bot]
+          allowlist: maksymenkoyr,*[bot]
           # Nothing triggers on `closed` anyway; stated so merged PRs are
           # never locked if someone adds it.
           lock-pullrequest-aftermerge: false

@@ -11,9 +11,8 @@ comment that the `license/cla` check asks for (it's also at the end of
 CLA.md).
 
 Here's the honest framing of why: the code in this repository is licensed
-AGPL-3.0-or-later and will stay that way — it stays open source for everyone,
-your contribution included, and a contribution made here is never taken out
-of this repository and sold as a closed, paid scene. What funds the work is
+AGPL-3.0-or-later, and whatever is released here stays available under that
+license for everyone — your contribution included. What funds the work is
 built around it: a paid tier on the hosted site, some scenes sold separately
 (made outside this repository and not under the AGPL), and commercial
 licenses for businesses that want the code without the AGPL's obligations.
@@ -21,6 +20,9 @@ The CLA is what makes those possible alongside your code — without it, code
 contributed under the AGPL alone would require anything built together with
 it to be released under the AGPL too. You keep the copyright to your code;
 the CLA grants the maintainer a license broad enough to make that model work.
+The maintainer's policy is that code contributed here isn't moved into the
+separately sold scenes; that's a statement of intent, and the CLA itself is
+the whole of the legal agreement.
 If that trade isn't one you
 want to make, that's a legitimate position — but then please open an issue
 describing your change instead of a pull request, so someone who has signed
