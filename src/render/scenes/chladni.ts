@@ -6,6 +6,7 @@ import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
+import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 
 // A Chladni plate, simulated rather than painted: a plate whose resonant
 // modes are each driven by the music's energy at that mode's own resonant
@@ -483,15 +484,7 @@ vec4 packPos(vec2 p) {
   return vec4(hi.x, lo.x, hi.y, lo.y) / 255.0;
 }
 
-float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
-
-vec2 hash22(vec2 p) {
-  return vec2(hash21(p), hash21(p + 17.13));
-}
+${FLOAT_HASH_GLSL}
 `;
 
 // Plate acceleration (amplitude x drive, g-ish units) at the knee between a

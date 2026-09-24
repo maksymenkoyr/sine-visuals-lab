@@ -188,7 +188,7 @@ const stylesheet = `
 }
 
 .gal-foot {
-  display: flex; justify-content: flex-end; letter-spacing: .1em;
+  display: flex; justify-content: flex-end; gap: 16px; letter-spacing: .1em;
   padding-top: 16px; border-top: 1px solid rgba(255,255,255,.08); color: rgba(255,255,255,.4);
 }
 .gal-foot a { color: inherit; text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.25); }
@@ -464,12 +464,23 @@ export function createGallery(deps: GalleryDeps): Gallery {
 
   // The Source link is the AGPL §13 network-source offer (see src/brand.ts),
   // and PRIVACY.md points readers at it — it has to stay on this page.
+  // Licenses/Privacy point at the plain-text copies vite-legal-notices-plugin.ts
+  // ships alongside the build (dist/*.txt), since MIT and the SIL Open Font
+  // License both require their notices to travel with copies of the site.
   const foot = el("div", "gal-mono gal-foot");
   const sourceLink = el("a", "", "Source · AGPL-3.0");
   sourceLink.href = SOURCE_URL;
   sourceLink.target = "_blank";
   sourceLink.rel = "noopener";
-  foot.appendChild(sourceLink);
+  const licensesLink = el("a", "", "Licenses");
+  licensesLink.href = "/THIRD-PARTY-NOTICES.txt";
+  licensesLink.target = "_blank";
+  licensesLink.rel = "noopener";
+  const privacyLink = el("a", "", "Privacy");
+  privacyLink.href = "/PRIVACY.txt";
+  privacyLink.target = "_blank";
+  privacyLink.rel = "noopener";
+  foot.append(sourceLink, licensesLink, privacyLink);
 
   page.append(mast, errorBanner, released, draftSection, foot);
   root.appendChild(page);

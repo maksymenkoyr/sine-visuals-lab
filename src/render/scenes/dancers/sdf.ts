@@ -7,6 +7,7 @@ export const SDF_GLSL = `
 float sdSphere(vec3 p, float r) { return length(p) - r; }
 
 // Bound-preserving ellipsoid approximation (exact on the axes).
+// Inigo Quilez's ellipsoid bound (MIT) — see THIRD-PARTY-NOTICES.md
 float sdEllipsoid(vec3 p, vec3 r) {
   float k0 = length(p / r);
   float k1 = max(length(p / (r * r)), 1e-6);
@@ -19,12 +20,14 @@ float sdRing(vec3 p, float R, float r) {
   return length(q) - r;
 }
 
+// Inigo Quilez's rounded-box distance (MIT) — see THIRD-PARTY-NOTICES.md
 float sdRoundBox(vec3 p, vec3 b, float r) {
   vec3 q = abs(p) - b;
   return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
 }
 
 // Capsule between two arbitrary points.
+// Inigo Quilez's capsule distance (MIT) — see THIRD-PARTY-NOTICES.md
 float sdSegment(vec3 p, vec3 a, vec3 b, float r) {
   vec3 pa = p - a, ba = b - a;
   float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
@@ -32,6 +35,7 @@ float sdSegment(vec3 p, vec3 a, vec3 b, float r) {
 }
 
 // Polynomial smooth union / intersection; k is the blend width.
+// Inigo Quilez's polynomial smooth min (MIT) — see THIRD-PARTY-NOTICES.md
 float smin(float a, float b, float k) {
   float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
   return mix(b, a, h) - k * h * (1.0 - h);

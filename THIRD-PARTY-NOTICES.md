@@ -34,7 +34,7 @@ This project bundles the following third-party packages and data into its client
 
 ### SIL Open Font License, Version 1.1
 
-The three fonts above are each licensed under this same text; each font's own
+The fonts above are each licensed under this same text; each font's own
 copyright statement and Reserved Font Name appear in its entry.
 
 ```
@@ -126,6 +126,39 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
 
+## Vite
+
+- Used: the `modulepreload` polyfill Vite's build injects into the client
+  bundle so browsers without native `modulepreload` support still preload a
+  page's module graph. Not a dependency we import — emitted automatically by
+  `vite build` (see the `target:` comment in vite.config.ts for why the
+  polyfill stays on rather than being disabled).
+- Source: https://github.com/vitejs/vite
+- License: MIT (text below)
+- Copyright © 2019-present, VoidZero Inc. and Vite contributors
+
+MIT License
+
+Copyright (c) 2019-present, VoidZero Inc. and Vite contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## qrcode-generator
 
 - Author: Kazuhiko Arase
@@ -135,6 +168,80 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 MIT License
 
 Copyright (c) Kazuhiko Arase
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+## Inigo Quilez's distance-field and shading snippets
+
+- Used: a handful of signed-distance-field primitives and small shading
+  helpers published on iquilezles.org — a capsule ray intersector, an
+  ellipsoid bound, a rounded box, a segment (capsule) distance, polynomial
+  smooth min/max, a hexagon distance field and its prism extrusion, a
+  tetrahedral-tap normal, and a branchless HSV-to-RGB conversion.
+- Files: `src/render/scenes/dancers/fastRenderers.ts` (the capsule ray
+  intersector), `src/render/scenes/dancers/sdf.ts` (the ellipsoid, rounded
+  box, segment, and smooth min/max), `src/render/scenes/dancers/rig.ts` (the
+  along-axis capsule distance), `src/render/scenes/dancers/index.ts` (the
+  tetrahedral normal), `src/render/scenes/crystal/glsl.ts` (the rounded box,
+  hexagon, hex-prism extrusion and capsule distance), `src/render/scenes/petri.ts`
+  (the HSV-to-RGB conversion). Each site carries its own credit comment.
+- Source: https://iquilezles.org/articles/ (distance functions, intersectors,
+  smooth minimum, and the normals/palette articles)
+- License: MIT (text below)
+- Copyright © Inigo Quilez
+
+MIT License
+
+Copyright © Inigo Quilez
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+## Dave Hoskins's "Hash without Sine"
+
+- Used: the float hashes `hash12` and `hash11` — a fract-of-a-large-product
+  hash that avoids the precision problems `sin()`-based hashes hit on some
+  GPU drivers.
+- Files: `src/render/scenes/storm.ts` (`hash12`), `src/render/scenes/slats/glsl.ts`
+  (`hash11`)
+- Source: https://www.shadertoy.com/view/4djSRW
+- License: MIT (text below)
+- Copyright © 2014 David Hoskins
+
+MIT License
+
+Copyright © 2014 David Hoskins
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

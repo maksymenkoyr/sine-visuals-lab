@@ -6,6 +6,7 @@ import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { NUM_BANDS } from "../../audio/types.ts";
 import { grainTextureSide, REFERENCE_GRAINS } from "./chladni.ts";
+import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 
 // Coloured powder thrown into a dark room: a GPU particle sim with real
 // momentum, lit like a club. Grains are *integrated*, not placed — every one
@@ -79,12 +80,12 @@ import { grainTextureSide, REFERENCE_GRAINS } from "./chladni.ts";
 // bonus rather than the sole source. Same reason dt comes from frame.time
 // deltas rather than anim.dtSec (chladni.ts's header covers that one).
 //
-// The noise is ours. hash31/hash33 are the 3D extension of chladni.ts's own
-// hash21/hash22 (the same fract/dot family, same constants); vnoise is a
-// plain trilinear value noise over eight hashed lattice corners; curl() is
-// the curl of a three-channel vector potential built from vnoise, by central
-// differences. Nothing here is ported from Ashima/Gustavson simplex or from
-// any Shadertoy curl-noise implementation — see CLAUDE.md's standing rule.
+// The noise is ours. hash31/hash33 come from the shared lattice-corner hash
+// (see noiseHash.ts); vnoise is a plain trilinear value noise over eight
+// hashed lattice corners; curl() is the curl of a three-channel vector
+// potential built from vnoise, by central differences. Nothing here is
+// ported from Ashima/Gustavson simplex or from any Shadertoy curl-noise
+// implementation — see CLAUDE.md's standing rule.
 const ID = "powder";
 
 /** Half-width of the packed world range: every position axis is 16-bit fixed
@@ -979,22 +980,8 @@ vec2 packAxisR(float p, float range) {
 float unpackAxis(vec2 c) { return unpackAxisR(c, POS_RANGE); }
 vec2 packAxis(float p) { return packAxisR(p, POS_RANGE); }
 
-// --- hashes: the 3D extension of chladni.ts's hash21/hash22 ---
-float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
-
-float hash31(vec3 p) {
-  p = fract(p * vec3(123.34, 456.21, 789.13));
-  p += dot(p, p.yzx + 45.32);
-  return fract((p.x + p.y) * p.z);
-}
-
-vec3 hash33(vec3 p) {
-  return vec3(hash31(p), hash31(p + 19.19), hash31(p + 37.71));
-}
+// --- hashes: the shared lattice-corner hash (see noiseHash.ts) ---
+${FLOAT_HASH_GLSL}
 
 // --- value noise: trilinear over 8 hashed lattice corners ---
 float vnoise(vec3 p) {

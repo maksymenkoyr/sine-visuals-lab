@@ -401,6 +401,7 @@ vec3 boneLocal(int i, vec3 p) {
 }
 float boneLen(int i) { return uBones[i * ${VEC4_PER_BONE}].w; }
 // Capsule from the bone's head along its local +Y to its tail.
+// Inigo Quilez's along-axis capsule distance (MIT) — see THIRD-PARTY-NOTICES.md
 float sdCapsuleY(vec3 q, float len, float r) {
   q.y -= clamp(q.y, 0.0, len);
   return length(q) - r;

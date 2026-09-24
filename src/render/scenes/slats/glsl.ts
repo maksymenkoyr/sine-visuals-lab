@@ -238,6 +238,7 @@ export const BLUR_STRIDE = 1.6;
 // viewport-slice mapping (ambience.ts's toDevice, same reasoning: the
 // gallery renders every scene into one shared canvas).
 const SLAT_HELPERS_GLSL = `
+// Dave Hoskins's "Hash without Sine" hash11 (MIT) — see THIRD-PARTY-NOTICES.md
 float hash11(float p) {
   p = fract(p * 0.1031);
   p *= p + 33.33;

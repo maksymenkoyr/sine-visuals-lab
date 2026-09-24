@@ -1,15 +1,8 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
+import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 
 const FRAG = `
-float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
-
-vec2 hash22(vec2 p) {
-  return vec2(hash21(p), hash21(p + 17.13));
-}
+${FLOAT_HASH_GLSL}
 
 vec2 flow(vec2 p, float t) {
   float n1 = sin(p.x * 2.3 + t) * cos(p.y * 2.3 - t * 0.7);

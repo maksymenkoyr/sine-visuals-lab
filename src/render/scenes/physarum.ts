@@ -5,6 +5,7 @@ import type { SceneSetting } from "../sceneSettings.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { grainTextureSide } from "./chladni.ts";
+import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 
 // Physarum: an agent-based slime-mould transport network. Each agent senses
 // a chemical trail a short distance ahead — dead ahead and to each side —
@@ -509,15 +510,8 @@ float unpackUnitR(vec2 c, float range) {
   return (b.x * 256.0 + b.y) / 65535.0 * range;
 }
 
-// --- hashes: chladni.ts's own family, same fract/dot shape and constants. ---
-float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
-vec2 hash22(vec2 p) {
-  return vec2(hash21(p), hash21(p + 17.13));
-}
+// --- hashes: the shared lattice-corner hash (see noiseHash.ts). ---
+${FLOAT_HASH_GLSL}
 
 // Which trail channel is this agent's own, as a one-hot mask; species is
 // 0.0/0.5/1.0 across the GROUP_COUNT groups.

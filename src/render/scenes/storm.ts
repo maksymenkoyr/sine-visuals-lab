@@ -2458,6 +2458,7 @@ float remap(float v, float lo, float hi, float nlo, float nhi) {
   return nlo + (v - lo) * (nhi - nlo) / max(hi - lo, 1e-5);
 }
 
+// Dave Hoskins's "Hash without Sine" hash12 (MIT) — see THIRD-PARTY-NOTICES.md
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);

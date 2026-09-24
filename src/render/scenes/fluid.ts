@@ -4,6 +4,7 @@ import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
+import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 import { NUM_BANDS } from "../../audio/types.ts";
 import {
   createFluidSim,
@@ -1249,11 +1250,7 @@ vec3 hueRotate(vec3 col, float radians_) {
 // gate both key off this one hash — no value-noise/threads build needed now
 // that Currents rides the sim's own velocity field instead of a synthetic
 // drifting texture.
-float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
+${FLOAT_HASH_GLSL}
 
 // Maps a screen uv to the sim uv it should sample, for fold mode \`m\`
 // (MirrorMode's index — see MIRROR_OPTIONS for the order; the caller passes

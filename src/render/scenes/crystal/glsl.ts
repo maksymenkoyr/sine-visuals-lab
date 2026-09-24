@@ -7,11 +7,14 @@
 
 /** Pass 1 body: folds the screen into one p6m wedge, turns the wedge point
  *  into a ray, and raymarches a hex-cored, panel-lined corridor along it.
- *  Everything above `main()` is this pass's own — the fold helpers
- *  (hexLocal/polar) are kept from v3, the SDF primitives are written out
- *  here the way dancers/sdf.ts writes its own (a box, a hex prism built by
- *  extruding a 2D hex distance field, a capsule), never ported from a
- *  reference shader. */
+ *  Everything above `main()` is this pass's own except the SDF helpers
+ *  themselves — the fold helpers (hexLocal/polar) are kept from v3; the box,
+ *  hexagon and hex-prism-extrusion and capsule distance functions are
+ *  Inigo Quilez's published distance functions (MIT, credited at each one
+ *  below and in THIRD-PARTY-NOTICES.md), written out here the way
+ *  dancers/sdf.ts writes its own copy, since this pass can't import GLSL
+ *  from another module. The corridor's *composition* — which primitives,
+ *  where, and how they're lit — is our own. */
 export const MARCH_FRAG_BODY = `
 const float PI = 3.14159265;
 const float TWO_PI = 6.2831853;
@@ -67,6 +70,7 @@ float redFlag(float h, float seed) {
 // A box with its corners rounded off by bevel — the textbook rounded-box
 // SDF (same formula as dancers/sdf.ts's sdRoundBox, written out again here
 // since this pass can't import GLSL from another module).
+// Inigo Quilez's rounded-box distance (MIT) — see THIRD-PARTY-NOTICES.md
 float sdBoxCh(vec3 p, vec3 b, float bevel) {
   vec3 q = abs(p) - b;
   return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - bevel;
@@ -74,6 +78,7 @@ float sdBoxCh(vec3 p, vec3 b, float bevel) {
 
 // 2D hexagon distance field (flat-topped, circumradius rr) — the same shape
 // v3's sdHexagon drew, extruded below into a prism.
+// Inigo Quilez's hexagon distance field (MIT) — see THIRD-PARTY-NOTICES.md
 float sdHexagon2(vec2 p, float rr) {
   const vec3 k = vec3(-0.8660254, 0.5, 0.5773503);
   p = abs(p);
@@ -82,15 +87,15 @@ float sdHexagon2(vec2 p, float rr) {
   return length(p) * sign(p.y);
 }
 
-// Extrude the 2D hexagon along z by half-depth hh — the generic
-// "extrude a 2D SDF" recipe every raymarched scene in this repo uses,
-// applied to our own 2D hexagon rather than anyone else's 3D formula.
+// Extrude the 2D hexagon along z by half-depth hh.
+// Inigo Quilez's hex-prism extrusion (MIT) — see THIRD-PARTY-NOTICES.md
 float sdHexPrism(vec3 p, float rr, float hh) {
   float d2 = sdHexagon2(p.xy, rr);
   float dz = abs(p.z) - hh;
   return min(max(d2, dz), 0.0) + length(max(vec2(d2, dz), 0.0));
 }
 
+// Inigo Quilez's capsule distance (MIT) — see THIRD-PARTY-NOTICES.md
 float sdCapsule(vec3 p, vec3 a, vec3 b, float rad) {
   vec3 pa = p - a, ba = b - a;
   float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);

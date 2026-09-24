@@ -491,6 +491,7 @@ vec3 hueRotate(vec3 c, float turns) {
 
 // Standard HSV->RGB (branchless). Neon's outline hue comes from here rather
 // than the jet LUT below, since it wants a full wheel, not a fixed ramp.
+// Inigo Quilez's branchless hsv2rgb (MIT) — see THIRD-PARTY-NOTICES.md
 vec3 hsv2rgb(vec3 hsv) {
   vec3 rgb = clamp(abs(mod(hsv.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
   return hsv.z * mix(vec3(1.0), rgb, hsv.y);
