@@ -14,6 +14,10 @@ before adding a note here; this file doesn't restate them.
   contact sheet, A/B.
 - [Status](status.md) — what's in flight right now. The one note here that's
   expected to be rewritten wholesale each session.
+- [Scene records](scenes/) — one note per scene, `scenes/<id>.md`: what it
+  is, what inspired it, what was measured, every decision and pivot, what's
+  still off, and how to pick it back up. New ones start from
+  [the template](scenes/_template.md).
 
 The session rituals that walk these notes live in `.claude/commands/` — run `/`
 in Claude Code to see them.

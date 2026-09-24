@@ -28,5 +28,10 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
 8. Run the tuning loop (`/tune $1`) at a couple of BPMs with `?audio=synthetic`
    and confirm the probe shows every setting's `mode` as `"manual"` until you
    switch it to auto in the device menu, `"auto"` after.
+9. Start the scene's record: copy `docs/scenes/_template.md` to
+   `docs/scenes/$1.md` and fill in what's known — references (if `/ref` was
+   run, its links, timestamps and bundle name), the first entries of
+   "Decisions and pivots", and "Resume here". It ships in the same PR as the
+   scene (standing rule in `CLAUDE.md`).
 
 Report which steps are done and flag anything skipped.

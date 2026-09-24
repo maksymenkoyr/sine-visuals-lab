@@ -20,3 +20,6 @@ or 120 if not given). Read `docs/tuning.md` first if you haven't this session.
 
 At the end, append any phrase → param mapping this session settled on to
 `tuning/VOCAB.md`, and note it in `docs/status.md` if the work is unfinished.
+Add what the session learned to `docs/scenes/$1.md`: values that looked right
+under "Tuning notes", and a dated line under "Decisions and pivots" for any
+change of direction.

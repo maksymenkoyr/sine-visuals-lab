@@ -16,7 +16,18 @@ Close out this working session:
    to `tuning/VOCAB.md` in its documented format:
    `"phrase" -> scene: setting/param, direction, ~magnitude`.
 
-3. **Check for doc rot.** For any symbol, file, or param name this session
+3. **Update the scene records.** For every scene this session touched, bring
+   `docs/scenes/<id>.md` up to date. Add:
+   - a dated line per decision or pivot, with the PR;
+   - new measurements or tuning findings;
+   - what's still off;
+   - anything that would save time next time under "Resume here".
+
+   A scene without a record gets one from `docs/scenes/_template.md`. The
+   session's memory notes are private to this machine; the record is what
+   survives.
+
+4. **Check for doc rot.** For any symbol, file, or param name this session
    renamed, removed, or changed the meaning of, grep `CLAUDE.md` and `docs/*.md`
    for the old name. Fix any reference you find — this is the enforcement
    mechanism behind rule 2 in `CLAUDE.md` ("never write down anything

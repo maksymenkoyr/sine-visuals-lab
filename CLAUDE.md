@@ -71,6 +71,7 @@ after all three pass; include the screenshot paths in your summary.
 | The saved-look share-code format | `src/render/sceneLooks.ts` header — links in the wild outlive the schema |
 | The build target (`es2017`) | `vite.config.ts`, the comment at the `target:` line |
 | A scene that hashes a noise lattice, or adds a growing phase to a noise coordinate | `src/render/noiseHash.ts` header — the mobile seams fix, and the two halves every scene must take together |
+| Any existing scene | `docs/scenes/<id>.md` — its record: references, measurements, every decision and pivot, what's still off, how to resume |
 
 ## Standing rules not worth their own doc
 
@@ -89,6 +90,18 @@ after all three pass; include the screenshot paths in your summary.
   the hash silently lands on the gallery.
 - Once a detailed plan exists, execute it with Sonnet whenever possible (an
   agent with `model: "sonnet"`). Keep the stronger model for planning and review.
+- Every scene has a record at `docs/scenes/<id>.md`, following
+  `docs/scenes/_template.md`: everything someone picking the scene back up
+  would need. Create it with the scene (`/new-scene`), and update it in the
+  same PR as any change to the scene; `/ref`, `/tune` and `/wrap` say what to
+  add. A record spans code, references and history, so it has no single
+  owning file (rule 1). Its "Measurements" and dated "Decisions and pivots"
+  entries are dated records, so specific numbers are fine there (rule 2's
+  corollary, like `docs/status.md`); elsewhere in it, name the symbol. It's
+  public: references are credited as inspiration or study, and downloaded
+  reference media (frames, clips, audio, comparison sheets) never goes in
+  this repo — a record names the `/ref` bundle instead
+  (`tools/ref-archive.py` keeps bundles in a private archive).
 
 ## Communication style
 

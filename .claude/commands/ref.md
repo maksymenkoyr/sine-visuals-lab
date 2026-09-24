@@ -72,3 +72,13 @@ names, not the set.
 7. When it's good, record it the way `save-good-visualizations-for-reuse`
    asks; either way, note what this reference syncs to (and doesn't) in the
    scene's memory, and any phrase → param mapping in `tuning/VOCAB.md`.
+8. **Write it into the scene's record**, `docs/scenes/$2.md`:
+   - under References: the link, timestamps, what was studied, and the
+     bundle name — never the media itself;
+   - under Measurements: the dated numbers from `report.md` that the scene
+     was built or tuned against, reference beside ours;
+   - under "Decisions and pivots": the sync hypotheses and how they held up.
+
+   If the private archive is set up, `python3 tools/ref-archive.py <name>`
+   keeps the bundle; its header explains the setup and why the archive
+   stays private.

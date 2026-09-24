@@ -4,6 +4,10 @@ If the scene is meant to look like a reference video, run `/ref` on it
 first (`docs/tuning.md`, "Tuning against a reference video") — a contact
 sheet shows the look, not the motion, and the motion is the sync.
 
+Every scene ships with its record, `docs/scenes/<id>.md`, started from
+[the template](scenes/_template.md) — the standing rule in `CLAUDE.md` says
+what goes in it and what never does.
+
 ## The mechanical path
 
 1. Implement `Scene` (`src/render/scene.ts`) — usually via `createFullscreenScene`
