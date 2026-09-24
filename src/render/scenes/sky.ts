@@ -534,11 +534,19 @@ const float BRUSH_BASE = 0.4;
 // cell, and a hotspot cell a round floater dot. FLOATER_CELL is sized so the
 // longest strand plus its fringe fits inside one cell, since a pixel only
 // ever evaluates the floater in its own cell.
-const vec2 FLOATER_CELL = vec2(0.06, 0.045);
+// Every floater size below (and the grid cell with them) is multiplied by
+// FLOATER_SCALE: the user asked for floaters 2.5x smaller than the
+// reference-matched sizes, with the grid shrinking alongside so a streak keeps
+// its extent and just holds more, finer floaters. At this scale the tube is
+// only a few pixels across, so floaterProfile floors its bands at
+// FLOATER_MIN_PX screen pixels rather than letting the rim alias away.
+const float FLOATER_SCALE = 0.4;
+const float FLOATER_MIN_PX = 0.8;
+const vec2 FLOATER_CELL = vec2(0.06, 0.045) * FLOATER_SCALE;
 const float CELL_T_BODY = 0.42; // streak density above this puts an aligned strand in the cell (the reference's ">")
 const float CELL_T_FRINGE = 0.12; // between this and CELL_T_BODY, a short flat strand (the reference's "_"); below, nothing
 const float CELL_T_HOT = 0.25; // hotspot field above this, inside the body, puts a dot there instead (the reference's "o")
-const float FRINGE_DROP = -0.011; // the fringe strand sits this far below the cell centre, like "_" under ">"
+const float FRINGE_DROP = -0.011 * FLOATER_SCALE; // the fringe strand sits this far below the cell centre, like "_" under ">"
 // Streak shape, screen p-units: an ellipse of half-extent between
 // STREAK_L_MIN and STREAK_L_MAX (by the wave's size), tilted up to the right
 // by a hashed slant, frayed row by row by STREAK_RAG noise so each row's run
@@ -551,10 +559,10 @@ const float STREAK_RAG = 0.45;
 const float STREAK_HOT_CHANCE = 0.5; // fraction of streaks with a dot hotspot (one reference has one, the other none)
 const vec2 STREAK_DRIFT = vec2(0.09, 0.012); // p-units/s, scaled by Flow speed; quick, since a streak only lives WAVE_LIFE_SEC
 const int FLOATER_SEGMENTS = 10; // path points per strand (head at index 0), see floaterPath
-const float BODY_LEN_MIN = 0.036; // body strand arc length, screen p-units, hashed per cell
-const float BODY_LEN_MAX = 0.048;
-const float FRINGE_LEN_MIN = 0.02; // fringe strands are short
-const float FRINGE_LEN_MAX = 0.03;
+const float BODY_LEN_MIN = 0.036 * FLOATER_SCALE; // body strand arc length, screen p-units, hashed per cell
+const float BODY_LEN_MAX = 0.048 * FLOATER_SCALE;
+const float FRINGE_LEN_MIN = 0.02 * FLOATER_SCALE; // fringe strands are short
+const float FRINGE_LEN_MAX = 0.03 * FLOATER_SCALE;
 const float BODY_HEADING_JITTER = 0.16; // radians around the streak's own slant, so body strands read as aligned
 // floaterPath's heading theta(t) = B1*sin(2*pi*f1*t+p1) + B2*sin(2*pi*f2*t+p2):
 // a dominant gentle bend (B1/f1) plus a much smaller, faster wobble (B2/f2),
@@ -576,14 +584,14 @@ const float FLOATER_F2_MAX = 5.0;
 // thin dark fringe just outside the edge, a brighter rim just inside it, and
 // a barely-lifted see-through interior, everything within about +-10% of the
 // background, never a solid painted line.
-const float FLOATER_R = 0.0028; // strand tube half-width, screen p-units
-const float FLOATER_RIM_W = 0.0014; // bright-rim band width, just inside the edge
-const float FLOATER_FRINGE_W = 0.0022; // dark-fringe band width, just outside the edge
+const float FLOATER_R = 0.0028 * FLOATER_SCALE; // strand tube half-width, screen p-units
+const float FLOATER_RIM_W = 0.0014 * FLOATER_SCALE; // bright-rim band width, just inside the edge
+const float FLOATER_FRINGE_W = 0.0022 * FLOATER_SCALE; // dark-fringe band width, just outside the edge
 const float FLOATER_INTERIOR = 0.02; // relative lum delta well inside the edge
 const float FLOATER_RIM = 0.07; // relative lum delta at the rim's peak
 const float FLOATER_FRINGE = 0.10; // relative lum delta (negative) at the fringe's peak
-const float FLOATER_DOT_R_MIN = 0.005; // dot radius, screen p-units
-const float FLOATER_DOT_R_MAX = 0.0068;
+const float FLOATER_DOT_R_MIN = 0.005 * FLOATER_SCALE; // dot radius, screen p-units
+const float FLOATER_DOT_R_MAX = 0.0068 * FLOATER_SCALE;
 const vec3 FLOATER_COOL_TINT = vec3(0.94, 0.99, 1.06); // faint cool bias applied only to the rim's brightening (see main()); the fringe's darkening stays neutral
 
 // This scene's own small hash/noise family — independently written (the
@@ -644,12 +652,15 @@ float cloudBumpedAt(vec2 uv) {
 // dots; they differ only in how s is computed. Built from smooth bumps, not
 // hard-edged bands, since the reference itself is a little soft.
 float floaterProfile(float s) {
-  float interior = FLOATER_INTERIOR * (1.0 - smoothstep(-FLOATER_RIM_W, 0.0, s));
-  float rimD = (s + FLOATER_RIM_W * 0.5) / (FLOATER_RIM_W * 0.5);
+  float px = FLOATER_MIN_PX / max(uResolution.y, 1.0);
+  float rimW = max(FLOATER_RIM_W, px);
+  float fringeW = max(FLOATER_FRINGE_W, px);
+  float interior = FLOATER_INTERIOR * (1.0 - smoothstep(-rimW, 0.0, s));
+  float rimD = (s + rimW * 0.5) / (rimW * 0.5);
   float rim = FLOATER_RIM * exp(-rimD * rimD);
-  float fringeD = (s - FLOATER_FRINGE_W * 0.5) / (FLOATER_FRINGE_W * 0.5);
+  float fringeD = (s - fringeW * 0.5) / (fringeW * 0.5);
   float fringe = -FLOATER_FRINGE * exp(-fringeD * fringeD);
-  float cutoff = 1.0 - smoothstep(FLOATER_FRINGE_W, FLOATER_FRINGE_W * 2.0, s);
+  float cutoff = 1.0 - smoothstep(fringeW, fringeW * 2.0, s);
   return (interior + rim + fringe) * cutoff;
 }
 
@@ -698,7 +709,7 @@ float floaterStrand(vec2 p, vec2 basePos, float seed, float heading, float len) 
     float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1.0e-6), 0.0, 1.0);
     dMin = min(dMin, length(pa - ba * h));
   }
-  return floaterProfile(dMin - FLOATER_R);
+  return floaterProfile(dMin - max(FLOATER_R, FLOATER_MIN_PX / max(uResolution.y, 1.0)));
 }
 
 // One wave's streak density at cell centre c (screen p-units), its slant in
@@ -718,7 +729,7 @@ float streakDensity(vec2 c, vec2 centre, float seed, float amp, float age, out f
   // Row fray: noise keyed on the grid row (and only coarsely on position
   // along the streak), so a whole row's run shifts together.
   float row = floor(c.y / FLOATER_CELL.y);
-  float rag = (vnoise(vec2(row * 0.9 + seed * 7.1, q.x / L.x * 2.2 + seed)) - 0.5) * STREAK_RAG;
+  float rag = (vnoise(vec2(row * 0.9 * FLOATER_SCALE + seed * 7.1, q.x / L.x * 2.2 + seed)) - 0.5) * STREAK_RAG;
   vec2 e = q / L;
   float env = smoothstep(0.0, WAVE_FADE_IN, age) * (1.0 - smoothstep(WAVE_LIFE_SEC_C - WAVE_FADE_OUT, WAVE_LIFE_SEC_C, age));
   hot = 0.0;
