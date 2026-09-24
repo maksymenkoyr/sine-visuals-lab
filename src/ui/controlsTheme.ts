@@ -442,6 +442,97 @@ const stylesheet = `
   background: color-mix(in srgb, var(--vc-accent) 12%, transparent);
 }
 
+/* Phase 2b's jacks (src/ui/jack.ts) — a small ring a meter row or hits lane
+ * mounts beside itself, coloured in its own source (driveSources.ts). Solid
+ * fill when it feeds the shown (preview ?? pinned) setting; the usage dots
+ * (.vc-jack-uses) count this scene's settings that use it, always on
+ * regardless of selection — see jack.ts's own header for the full split
+ * between this file's classes and deviceMenu.ts's own state. */
+.vc-jack {
+  position: relative; width: 13px; height: 13px; border-radius: 50%; padding: 0;
+  border: 1.5px solid var(--c); flex-shrink: 0; cursor: pointer;
+  background: radial-gradient(circle, rgba(5, 4, 8, 0.9) 0 34%, color-mix(in srgb, var(--c) 18%, transparent) 36%);
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+.vc-jack:hover { transform: scale(1.2); box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 22%, transparent); }
+.vc-jack-filled {
+  background: radial-gradient(circle, var(--c) 0 40%, color-mix(in srgb, var(--c) 30%, #111) 44%);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent);
+}
+.vc-jack:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.vc-jack-uses {
+  position: absolute; left: 50%; top: calc(100% + 2px); transform: translateX(-50%);
+  display: flex; gap: 2px; pointer-events: none;
+}
+.vc-jack-uses i { width: 2.5px; height: 2.5px; border-radius: 50%; background: var(--c); opacity: 0.65; }
+
+/* Highlighting while a setting is previewed/pinned (deviceMenu.ts's own
+ * refreshPatchHighlight): every meter row in the Bands+meters column dims,
+ * a feeding row glows in its source colour and grows a "→ <setting>" chip
+ * (jack.ts's setRowFed) — softer for a scene-mix row (drives.ts's
+ * sceneSources, never a togglable jack). A hit lane also gets its own thin
+ * glow bar (audioMeters.ts) rather than relying on the whole Hits row
+ * dimming, since HITS_LANES' own lanes can each feed a different setting. */
+/* .vc-row-keep (the Bands card's own faders row) opts out — it's the
+ * primary spectrum display, not a peripheral meter, and gets its own
+ * band-range dimming instead (spectrumStrip.ts's setHighlight, wired from
+ * refreshSpectrumDriveHighlight) rather than a flat opacity drop. */
+.vc-spectrum-col.vc-patching .vc-row:not(.vc-row-fed):not(.vc-row-fed-soft):not(.vc-row-keep) { opacity: 0.45; }
+.vc-row-fed, .vc-row-fed-soft {
+  box-shadow: inset 0 0 0 1px var(--vc-hl, transparent), 0 0 16px color-mix(in srgb, var(--vc-hl, transparent) 20%, transparent);
+}
+.vc-row-fed-soft { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-hl, transparent) 45%, transparent); }
+.vc-fed-chip {
+  position: absolute; right: 4px; top: 4px; z-index: 1;
+  font: 400 9.5px/1 ${FONT_MONO}; color: var(--vc-hl, #fff);
+  background: rgba(8, 7, 12, 0.86); padding: 2px 6px; border-radius: 3px;
+  pointer-events: none; white-space: nowrap;
+}
+.vc-lane-glow {
+  position: absolute; left: 0; right: 20px; pointer-events: none; border-radius: 2px;
+  background: color-mix(in srgb, var(--c) 22%, transparent); opacity: 0; transition: opacity 0.15s ease;
+}
+.vc-lane-glow.on { opacity: 1; }
+
+/* Hovering a jack (not a preview/pin) highlights every scene row it feeds —
+ * a lighter-weight, purely transient echo of .vc-row-fed above, keyed to
+ * the jack itself rather than the shown setting (deviceMenu.ts's
+ * onJackHover). */
+.vc-row.vc-drive-hl {
+  box-shadow: 0 0 0 1px var(--vc-hl2, transparent), 0 0 14px color-mix(in srgb, var(--vc-hl2, transparent) 22%, transparent);
+}
+
+/* The cable layer (src/ui/cableLayer.ts): one fixed SVG above .vc-root
+ * (z-index), covering the viewport so a cable can cross from a meter jack
+ * to a scene row's port without any card's own overflow:hidden clipping
+ * it. Each cable's own glow/core/flow path structure and the
+ * draw-on/fade-in for a freshly plugged source are ported from the
+ * prototype's own patch-bay.src.html almost verbatim. */
+.vc-cable-layer { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 31; overflow: visible; }
+.vc-cable-glow { fill: none; stroke-width: 6; opacity: 0.13; }
+.vc-cable-core { fill: none; stroke-width: 1.5; opacity: 0.8; }
+.vc-cable-core.vc-cable-soft { stroke-dasharray: 3 3; opacity: 0.4; }
+.vc-cable-flow { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 0.1 10; opacity: 0.9; }
+.vc-cable-flow.vc-cable-soft { opacity: 0.4; }
+.vc-cable-core.vc-cable-new { stroke-dasharray: 100; stroke-dashoffset: 100; animation: vc-cable-draw 0.25s ease-out forwards; }
+.vc-cable-glow.vc-cable-new, .vc-cable-flow.vc-cable-new { opacity: 0; animation: vc-cable-fadein 0.2s 0.2s forwards; }
+@keyframes vc-cable-draw { to { stroke-dashoffset: 0; } }
+@keyframes vc-cable-fadein { to { opacity: var(--o, 0.8); } }
+@media (prefers-reduced-motion: reduce) {
+  .vc-cable-core.vc-cable-new, .vc-cable-glow.vc-cable-new, .vc-cable-flow.vc-cable-new { animation: none; stroke-dashoffset: 0; opacity: var(--o, 0.8); }
+  .vc-cable-flow { stroke-dasharray: none; }
+}
+
+/* "Pick a setting first" — a jack clicked with nothing pinned and nothing
+ * ever previewed (deviceMenu.ts's showToast). */
+.vc-toast {
+  position: fixed; left: 50%; bottom: 84px; transform: translate(-50%, 6px);
+  background: rgba(8, 11, 10, 0.92); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px;
+  padding: 8px 14px; font: 400 12px/1.3 ${FONT_LABEL}; color: #fff; z-index: 32;
+  opacity: 0; pointer-events: none; transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.vc-toast-show { opacity: 1; transform: translate(-50%, 0); }
+
 /* Chrome buttons (index.html) ring while their thing is active: the gear
  * while this panel is open, fullscreen while immersed. */
 .iconBtn[aria-pressed="true"] { border-color: rgba(255, 255, 255, 0.5); color: #fff; }

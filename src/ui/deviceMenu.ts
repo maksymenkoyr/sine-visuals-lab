@@ -16,7 +16,7 @@ import type { SceneSetting } from "../render/sceneSettings.ts";
 import type { SceneLook } from "../render/sceneLooks.ts";
 import { createLooksCard } from "./looksCard.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
-import { SIGNALS, type SignalSpec } from "../render/signals.ts";
+import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
@@ -56,10 +56,13 @@ import {
   driveSourceLabel,
   isGridSourceChoice,
   isLineSourceChoice,
+  jackKey,
 } from "./driveSources.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
-import { createAudioMeters } from "./audioMeters.ts";
+import { createAudioMeters, createMeterRow } from "./audioMeters.ts";
+import { createJack, setRowFed, type JackHandle } from "./jack.ts";
+import { createCableLayer, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
@@ -147,6 +150,32 @@ import {
  * `sourceValues`/`valueOf`, and "+ Add by name" chip groups
  * (src/ui/driveSources.ts's DRIVE_ADD_GROUPS) — always open in the stacked
  * layout, since Phase 2b's jacks (the primary way in) are far away there.
+ *
+ * Jacks and cables (Phase 2b) are how a meter actually gets plugged in.
+ * Every reactive meter row/lane — audioMeters.ts's own (Rhythm/Signal/
+ * Character) plus this file's own Bands level rows (BAND_LEVEL_CHOICES) and
+ * its Frequencies corner (mountBandsJack) — grows a jack (src/ui/jack.ts): a
+ * ring in its source's colour, filled when it feeds the shown (preview ??
+ * pinned) setting, with tiny usage dots for how many of this scene's
+ * settings use it. Clicking one with a pinned setting toggles it into that
+ * patch (onJackClick); with nothing pinned, it pins whichever setting was
+ * last previewed (`lastPreview`, since `preview` itself goes back to null
+ * the moment the pointer leaves) and plugs in in the same click, or shows a
+ * toast if nothing ever was. Hovering a jack highlights every scene row it
+ * already feeds (onJackHover, independent of the shown-setting highlight).
+ * While a setting is shown, `refreshPatchHighlight` — called from every
+ * place `pinned`/`preview`/a patch actually changes, never per frame —
+ * dims the rest of the Bands+meters column (`.vc-patching`,
+ * controlsTheme.ts), glows every feeding row/lane (jack.ts's setRowFed,
+ * softer for a `"scene"` setting's own display-only `sceneSources`), and
+ * dims the spectrum's own unheard bands (refreshSpectrumDriveHighlight).
+ * The cables themselves (src/ui/cableLayer.ts) are one `<svg>` fixed over
+ * the viewport, outside every card's own `overflow: hidden` — bezier paths
+ * from each shown source's jack to the row's own port, geometry recomputed
+ * only on that same short list of triggers (a selection/patch change,
+ * scroll of either scrolling column, resize, a card fold, a Scene-card
+ * rebuild — scheduleCableRecompute), with only `stroke-dashoffset` written
+ * per tick (cableLayer.tick, flow speed off each source's own live value).
  *
  * The Bands card is plain again: scene name, audio source, the live bars
  * with the band faders drawn over them (src/ui/bandFaders.ts) — always
@@ -541,11 +570,15 @@ const FADER_HINT_TEXT =
 // colour/label comes from src/ui/driveSources.ts; this is only layout.
 
 // createControlRow's own drivePanel slot: the label + summary wrapper that
-// pins on click.
-const driveRowLeftStyle = `display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow: hidden; flex: 1; cursor: pointer;`;
+// pins on click. Stacked (label, then the summary on its own line) rather
+// than side by side — inline, the summary had nowhere left to grow in the
+// narrow controls column and ellipsized to unreadable ("Scene mix: bas…")
+// even at a middling width; a second line wraps instead, however long the
+// source list gets.
+const driveRowLeftStyle = `display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; cursor: pointer;`;
 const driveSummaryStyle = `
-  font: 400 11px/1.25 ${FONT_MONO}; color: rgba(255,255,255,0.45); min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 400 11px/1.35 ${FONT_MONO}; color: rgba(255,255,255,0.45); min-width: 0;
+  overflow-wrap: break-word;
 `;
 // The input port: a 10 px ring at the row's own left edge — `.vc-row` is
 // already `position: relative`, so this needs no extra wrapper. `left` is
@@ -1202,14 +1235,7 @@ export function createControlRow(spec: ControlRowSpec) {
     // label rather than hanging past the row (see that style's own
     // comment) — a plain gap would leave the port floating over the text.
     left.style.paddingLeft = "14px";
-    // The label never shrinks before the summary does — a row's own name
-    // is the primary thing to keep readable; the summary (already
-    // secondary, dimmer text) is what gives way first and ellipsizes.
-    label.style.flexShrink = "0";
-    label.style.maxWidth = "62%";
     spec.drivePanel.summary.classList.add("vc-drive-summary");
-    spec.drivePanel.summary.style.flex = "1 1 auto";
-    spec.drivePanel.summary.style.minWidth = "0";
     left.append(label, spec.drivePanel.summary);
     left.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1613,6 +1639,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       get: () => deps.getHitShape(),
       set: (partial) => deps.setHitShape(partial),
     },
+    // Every function referenced below is a plain (hoisted) function
+    // declaration further down this same closure, in the patch-bay
+    // section — see each one's own doc comment there. Referencing them
+    // here, ahead of their textual declaration, is safe: none of these are
+    // ever called until well after createDeviceMenu() has finished running
+    // and every one of them exists.
+    patch: {
+      usage: jackUsage,
+      isShown: jackIsShown,
+      isPinned: jackIsPinned,
+      isSceneSource: jackIsSceneSource,
+      shown: jackShownInfo,
+      describe: jackDescribe,
+      onJackClick,
+      onJackHover,
+    },
   });
 
   const spectrumCol = document.createElement("div");
@@ -1671,7 +1713,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // The fader bank sits in a .vc-row so it wakes (glow) on hover and on
   // focus-within exactly like a slider row.
   const fadersRow = document.createElement("div");
-  fadersRow.className = "vc-row";
+  // vc-row-keep: the primary spectrum display opts out of .vc-patching's
+  // flat dim (controlsTheme.ts) — it gets its own band-range dimming
+  // instead (refreshSpectrumDriveHighlight, below).
+  fadersRow.className = "vc-row vc-row-keep";
   fadersRow.style.setProperty("--vc-accent", BANDS_AMBER);
   // Always-on: explains the sky-blue marker spectrumStrip.ts's
   // drawCentroidMarker draws over the bars (same AUTO_SKY constant, so the
@@ -1715,6 +1760,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  below, Escape (onKeyDown), or a scene switch (renderSceneSettings's
    *  own tail). */
   let pinned: { sceneId: string; spec: SceneSetting } | null = null;
+  /** The last setting `previewDrive` was actually handed a non-null value
+   *  for — unlike `preview` itself, this never goes back to null when the
+   *  pointer leaves. It's what a jack click reaches for when nothing's
+   *  pinned (Phase 2b's own plan): "pin whatever I was just looking at,
+   *  then plug this in", rather than a bare toast every time. */
+  let lastPreview: { sceneId: string; spec: SceneSetting } | null = null;
   /** The Bands card's line-drawing mode — derived from `pinned`'s own patch
    *  by refreshLineMode() below, not from focus: only a pinned setting's
    *  panel can actually add/remove its line source. Kept as its own
@@ -1783,7 +1834,45 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  bandsCard.body.append(spectrumHeader, hairline, fadersRow, eqLayer);
+  // ---- The Bands card's own jacks: the spectrum's own Frequencies corner,
+  // plus BAND_LEVEL_CHOICES's own compact level rows under the strip. Built here (rather than
+  // through audioMeters.ts's mountJack) since the Bands card lives in this
+  // file; onJackClick/onJackHover/jackIsShown/etc. below are plain
+  // (hoisted) functions in this same closure, the same ones
+  // createAudioMeters's own `patch` deps call through, so every jack in the
+  // panel — meters or Bands — answers to identical logic. bandsJackEls is
+  // this card's own half of the cable layer's source-endpoint lookup (see
+  // combinedJackElements below).
+  const bandsJackEls = new Map<string, HTMLElement>();
+  function mountBandsJack(choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElement): JackHandle {
+    const jack = createJack(
+      driveSourceColor(choice),
+      () => onJackClick(choice),
+      (on) => onJackHover(choice, on),
+    );
+    host.appendChild(jack.el);
+    bandsJacks.push({ choice, jack, feedEl });
+    bandsJackEls.set(jackKey(choice), jack.el);
+    return jack;
+  }
+  const bandsJacks: { choice: DriveSourceChoice; jack: JackHandle; feedEl: HTMLElement }[] = [];
+
+  const lineJack = mountBandsJack({ source: "line" }, fadersRow, fadersRow);
+  lineJack.el.style.cssText += "position: absolute; top: 4px; right: 4px; z-index: 2;";
+
+  const BAND_LEVEL_CHOICES: readonly DriveSourceChoice[] = ["anim.low", "anim.mid", "anim.high"];
+  const levelRowsWrap = document.createElement("div");
+  levelRowsWrap.style.cssText = "display: flex; flex-direction: column; gap: 3px; margin-top: 6px;";
+  const bandLevelRows = BAND_LEVEL_CHOICES.map((choice) => {
+    const row = createMeterRow({ label: driveSourceLabel(choice), accent: driveSourceColor(choice) });
+    row.el.style.padding = "2px 8px";
+    row.el.style.margin = "-2px -8px";
+    mountBandsJack(choice, row.right, row.el);
+    levelRowsWrap.appendChild(row.el);
+    return { choice, row };
+  });
+
+  bandsCard.body.append(spectrumHeader, hairline, fadersRow, levelRowsWrap, eqLayer);
 
   // One at a time — set by buildPatchPanel() below whenever the pinned row
   // builds an output graph, cleared by togglePin()/patchChanged() when
@@ -1798,11 +1887,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   interface DriveRowHandle {
     sceneId: string;
     spec: SceneSetting;
+    /** The row's own input-port ring — a cable's target endpoint
+     *  (src/ui/cableLayer.ts). */
+    portEl: HTMLElement;
+    /** The whole row element — a jack-hover's own highlight target
+     *  (onJackHover below). */
+    rowEl: HTMLElement;
     refreshMeta(): void;
     refreshPin(): void;
     refreshPreviewLit(): void;
     rebuildIfPinned(): void;
-    tickSparkline(drives: SceneDrives): void;
+    tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void;
   }
   let driveRowHandles: DriveRowHandle[] = [];
   // Every row's sparkline canvas, so renderSceneSettings can unobserve them
@@ -2367,23 +2462,54 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (runColor) sparkCtx.stroke();
     }
 
-    function tickSparkline(drives: SceneDrives): void {
+    function tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void {
       const setting = deps.getDriveSetting(sceneId, spec);
-      const v = drives.valueOf(spec.key);
-      let col = SCENE_VIOLET;
-      if (setting !== "scene" && setting.sources.length) {
-        const vals = drives.sourceValues(spec.key);
-        let bi = 0;
-        if (vals && vals.length) {
-          let bv = -Infinity;
-          for (let i = 0; i < vals.length; i++) {
-            if (vals[i]! > bv) {
-              bv = vals[i]!;
-              bi = i;
+      let v: number;
+      let col: string;
+      if (setting === "scene") {
+        // drives.valueOf() is defined to return 0 for "scene" (there's no
+        // patch to sum) — without this branch every scene-mix row's own
+        // sparkline drew flat. Its composite isn't the engine's to read, so
+        // this approximates it from the loudest of the catalogue signals it
+        // honestly listens to (drive.sceneSources — display-only, see
+        // drives.ts's header), at a dimmed alpha that visibly marks it as
+        // an approximation rather than the setting's own real output.
+        const sources = spec.drive?.sceneSources;
+        if (sources?.length && frame && anim) {
+          let best = 0;
+          let bestId: SignalId = sources[0]!;
+          for (const id of sources) {
+            const rv = SIGNALS[id].read(frame, anim);
+            if (rv > best) {
+              best = rv;
+              bestId = id;
             }
           }
+          v = best;
+          col = withAlpha(driveSourceColor(bestId), 0.55);
+        } else {
+          // No sceneSources to approximate from — a faint flat baseline
+          // rather than a literal 0 (invisible at the track's very bottom).
+          v = 0.04;
+          col = withAlpha(SCENE_VIOLET, 0.35);
         }
-        col = driveSourceColor(setting.sources[bi]!.choice);
+      } else {
+        v = drives.valueOf(spec.key);
+        col = SCENE_VIOLET;
+        if (setting.sources.length) {
+          const vals = drives.sourceValues(spec.key);
+          let bi = 0;
+          if (vals && vals.length) {
+            let bv = -Infinity;
+            for (let i = 0; i < vals.length; i++) {
+              if (vals[i]! > bv) {
+                bv = vals[i]!;
+                bi = i;
+              }
+            }
+          }
+          col = driveSourceColor(setting.sources[bi]!.choice);
+        }
       }
       sparkHead = (sparkHead + 1) % SPARK_LEN;
       sparkVals[sparkHead] = v;
@@ -2399,7 +2525,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       bind(rowEl) {
         boundRowEl = rowEl;
         refreshMeta();
-        return { sceneId, spec, refreshMeta, refreshPin, refreshPreviewLit, rebuildIfPinned, tickSparkline };
+        return { sceneId, spec, portEl: port, rowEl, refreshMeta, refreshPin, refreshPreviewLit, rebuildIfPinned, tickSparkline };
       },
     };
   }
@@ -2414,6 +2540,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     h?.refreshMeta();
     h?.rebuildIfPinned();
     refreshLineMode();
+    refreshPatchHighlight();
   }
 
   /** Pins/unpins — the only place `pinned` is written (besides Escape in
@@ -2429,6 +2556,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (!pinned) lastPinnedSetting = null;
     for (const h of driveRowHandles) h.refreshPin();
     refreshLineMode();
+    refreshPatchHighlight();
   }
 
   /** The only place `preview` is written. See previewDrive's own callers
@@ -2438,7 +2566,308 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     cancelPendingPreview();
     if (samePair(preview, next)) return;
     preview = next;
+    if (next) lastPreview = next;
     for (const h of driveRowHandles) h.refreshPreviewLit();
+    refreshPatchHighlight();
+  }
+
+  // ---------------------------------------------------------------------
+  // Jacks (src/ui/jack.ts) and cables (src/ui/cableLayer.ts) — Phase 2b of
+  // this file's own plan. Every predicate below answers "does `choice` feed
+  // the shown (preview ?? pinned) setting" purely from `pinned`/`preview`
+  // and `deps.getDriveSetting`, so createAudioMeters's own jacks and this
+  // card's own (mountBandsJack, above) both call through the exact same
+  // logic — one contract, two mount points. driveSources.ts's jackKey is
+  // the identity every comparison below uses: it collapses every beat-grid
+  // division to one shared key, since a patch carries at most one and the
+  // Beat row's jack always means "whichever one's there", never a specific
+  // division.
+  // ---------------------------------------------------------------------
+
+  function shownSelection(): { sceneId: string; spec: SceneSetting } | null {
+    return preview ?? pinned;
+  }
+
+  /** How many of the *active scene's* settings currently use `choice` —
+   *  each jack's own usage dots, independent of selection. */
+  function jackUsage(choice: DriveSourceChoice): number {
+    const sceneId = deps.currentSceneId();
+    const key = jackKey(choice);
+    let n = 0;
+    for (const spec of deps.getSceneSettings(sceneId)) {
+      if (!spec.drive) continue;
+      const setting = deps.getDriveSetting(sceneId, spec);
+      if (setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === key)) n++;
+    }
+    return n;
+  }
+
+  function jackIsShown(choice: DriveSourceChoice): boolean {
+    const sel = shownSelection();
+    if (!sel) return false;
+    const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
+    return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
+  }
+
+  function jackIsPinned(choice: DriveSourceChoice): boolean {
+    if (!pinned) return false;
+    const setting = deps.getDriveSetting(pinned.sceneId, pinned.spec);
+    return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
+  }
+
+  /** `choice` is named in the shown setting's own display-only
+   *  `drive.sceneSources` (drives.ts's header) — never a real patch source,
+   *  so never a jack fill, only a row/lane's softer glow. */
+  function jackIsSceneSource(choice: DriveSourceChoice): boolean {
+    if (typeof choice !== "string") return false;
+    const sel = shownSelection();
+    if (!sel) return false;
+    const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
+    if (setting !== "scene") return false;
+    return (sel.spec.drive?.sceneSources ?? []).includes(choice);
+  }
+
+  function jackShownInfo(): { label: string; soft: boolean } | null {
+    const sel = shownSelection();
+    if (!sel) return null;
+    return { label: sel.spec.label, soft: deps.getDriveSetting(sel.sceneId, sel.spec) === "scene" };
+  }
+
+  function jackDescribe(choice: DriveSourceChoice): { aria: string; title: string } {
+    const name = driveSourceLabel(choice);
+    const target = pinned ?? lastPreview;
+    if (!target) return { aria: `${name} — pick a setting first`, title: name };
+    const already = jackIsPinned(choice);
+    const verb = already ? "Unplug" : "Plug";
+    const prep = already ? "from" : "into";
+    return { aria: `${verb} ${name} ${prep} ${target.spec.label}`, title: name };
+  }
+
+  // The most recent jack toggled ON, for one recompute — buildCables below
+  // consumes it to draw that one cable on rather than snapping in instantly
+  // (controlsTheme.ts's vc-cable-new rule), then clears it. Set right
+  // before the store write that adds it, since add-vs-remove has to be
+  // known ahead of the toggle.
+  let justAddedKey: string | null = null;
+
+  function onJackClick(choice: DriveSourceChoice): void {
+    const target = pinned ?? lastPreview;
+    if (!target) {
+      showToast("Pick a setting first");
+      return;
+    }
+    if (!pinned) togglePin(target.sceneId, target.spec);
+    const setting = deps.getDriveSetting(target.sceneId, target.spec);
+    const existed = setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
+    justAddedKey = existed ? null : jackKey(choice);
+    deps.onTogglePatchSource(target.sceneId, target.spec, choice);
+    patchChanged(target.sceneId, target.spec);
+  }
+
+  /** Hovering a jack highlights every scene row it feeds right now —
+   *  independent of the preview/pin highlight above (this fires for *any*
+   *  jack, fed or not, pinned setting or none). */
+  function onJackHover(choice: DriveSourceChoice, on: boolean): void {
+    const key = jackKey(choice);
+    const color = driveSourceColor(choice);
+    for (const h of driveRowHandles) {
+      const setting = deps.getDriveSetting(h.sceneId, h.spec);
+      if (setting === "scene" || !setting.sources.some((s) => jackKey(s.choice) === key)) continue;
+      h.rowEl.classList.toggle("vc-drive-hl", on);
+      if (on) h.rowEl.style.setProperty("--vc-hl2", color);
+    }
+  }
+
+  /** The Bands card's own 4 jacks (mountBandsJack, above) — the same
+   *  fill/pressed/uses/aria refresh audioMeters.ts's own refreshPatchView
+   *  does for its jacks, plus the same row-level fed/dim (jack.ts's
+   *  setRowFed) for the 3 level rows and the faders row itself. */
+  function refreshBandsJacks(): void {
+    const info = jackShownInfo();
+    const feedGroups = new Map<HTMLElement, DriveSourceChoice[]>();
+    for (const { choice, jack, feedEl } of bandsJacks) {
+      jack.setFilled(jackIsShown(choice));
+      jack.setPressed(jackIsPinned(choice));
+      jack.setUses(jackUsage(choice));
+      const { aria, title } = jackDescribe(choice);
+      jack.setLabel(aria, title);
+      let list = feedGroups.get(feedEl);
+      if (!list) {
+        list = [];
+        feedGroups.set(feedEl, list);
+      }
+      list.push(choice);
+    }
+    for (const [rowEl, choices] of feedGroups) {
+      const hard = choices.find((c) => jackIsShown(c));
+      const soft = hard ? undefined : choices.find((c) => jackIsSceneSource(c));
+      const lit = hard ?? soft;
+      setRowFed(rowEl, !!lit, !hard && !!soft, lit ? driveSourceColor(lit) : "", info?.label ?? "");
+    }
+  }
+
+  /** The spectrum strip's own dim-the-unheard-bands overlay for the shown
+   *  setting — real patch sources for an editable patch, `sceneSources` for
+   *  a `"scene"` one (both narrowed to a plain SignalId; a grid/line source
+   *  has no band range of its own). Recomputed alongside every other
+   *  selection-driven refresh here, never per frame or per hover — a drive
+   *  row has no `reads` of its own for wireBandHighlight to key off. */
+  function refreshSpectrumDriveHighlight(): void {
+    const sel = shownSelection();
+    if (!sel) {
+      spectrumStrip.setHighlight(null);
+      spectrumStrip.redraw();
+      return;
+    }
+    const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
+    const ids: SignalId[] =
+      setting === "scene"
+        ? [...(sel.spec.drive?.sceneSources ?? [])]
+        : setting.sources.map((s) => s.choice).filter((c): c is SignalId => typeof c === "string");
+    const split = deps.getBandSplit();
+    let lo = NUM_BANDS;
+    let hi = 0;
+    let any = false;
+    for (const id of ids) {
+      const range = SIGNALS[id].bandRange;
+      if (!range) continue;
+      if (range === "all") {
+        any = false;
+        break; // whole spectrum: nothing to dim, same convention as wireBandHighlight
+      }
+      const r = resolveBandRange(range, split);
+      lo = Math.min(lo, r.lo);
+      hi = Math.max(hi, r.hi);
+      any = true;
+    }
+    spectrumStrip.setHighlight(any ? { lo, hi } : null);
+    spectrumStrip.redraw();
+  }
+
+  // ---- Cables ----
+  const cableLayer = createCableLayer();
+  document.body.appendChild(cableLayer.el);
+  // Also drives the Bands card's own level rows, bandLevelRows (setValue's
+  // dtSec is only ever a peak-hold decay rate, so a rough per-tick delta is
+  // plenty).
+  let lastCableTickMs = performance.now();
+  const narrowMQ = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`);
+
+  function combinedJackElements(): ReadonlyMap<string, HTMLElement> {
+    const merged = new Map(audioMeters.jackElements());
+    for (const [k, v] of bandsJackEls) merged.set(k, v);
+    return merged;
+  }
+
+  // The latest tick's own SceneDrives/frame/anim — cableSpecsForShown's own
+  // per-source getValue() closures read these fresh every tick (via
+  // cableLayer.tick, never a snapshot), so a cable's flow speed always
+  // tracks the live signal even though geometry itself is rebuilt far less
+  // often. Written once per update() call below.
+  let lastDrives: SceneDrives | null = null;
+  let lastFrame: FeatureFrame | null = null;
+  let lastAnim: AnimFrame | null = null;
+
+  function cableSpecsForShown(): { specs: CableSourceSpec[]; portEl: HTMLElement | null } {
+    const sel = shownSelection();
+    if (!sel) return { specs: [], portEl: null };
+    const handle = driveRowHandles.find((r) => r.sceneId === sel.sceneId && r.spec.key === sel.spec.key);
+    if (!handle) return { specs: [], portEl: null };
+    const jackEls = combinedJackElements();
+    const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
+    const specs: CableSourceSpec[] = [];
+    if (setting === "scene") {
+      for (const id of sel.spec.drive?.sceneSources ?? []) {
+        const jackEl = jackEls.get(jackKey(id));
+        if (!jackEl) continue;
+        specs.push({
+          key: jackKey(id),
+          color: driveSourceColor(id),
+          soft: true,
+          jackEl,
+          getValue: () => (lastFrame && lastAnim ? SIGNALS[id].read(lastFrame, lastAnim) : 0),
+        });
+      }
+    } else {
+      for (const src of setting.sources) {
+        const key = jackKey(src.choice);
+        const jackEl = jackEls.get(key);
+        if (!jackEl) continue;
+        const specKey = sel.spec.key;
+        const idx = setting.sources.indexOf(src);
+        specs.push({
+          key,
+          color: driveSourceColor(src.choice),
+          soft: false,
+          jackEl,
+          getValue: () => lastDrives?.sourceValues(specKey)?.[idx] ?? 0,
+          isNew: key === justAddedKey,
+        });
+      }
+    }
+    justAddedKey = null;
+    return { specs, portEl: handle.portEl };
+  }
+
+  let cableRecomputeQueued = false;
+  function scheduleCableRecompute(): void {
+    if (cableRecomputeQueued) return;
+    cableRecomputeQueued = true;
+    requestAnimationFrame(() => {
+      cableRecomputeQueued = false;
+      if (!isOpen) return;
+      const { specs, portEl } = cableSpecsForShown();
+      cableLayer.recompute(specs, portEl);
+    });
+  }
+  function refreshCableVisibility(): void {
+    cableLayer.setVisible(isOpen && !narrowMQ.matches);
+  }
+  narrowMQ.addEventListener("change", () => {
+    refreshCableVisibility();
+    scheduleCableRecompute();
+  });
+  window.addEventListener("resize", scheduleCableRecompute);
+  // Geometry is recomputed on every layout trigger the plan names: scroll
+  // of the two scrolling columns and of the root itself (the stacked
+  // layout's own scroller — cables are hidden there, but a resize crossing
+  // the breakpoint mid-scroll should still land on fresh geometry), resize,
+  // and a ResizeObserver on both columns (spectrumCol here; controlsCol —
+  // declared further down — observes itself once it exists). Card
+  // fold/unfold piggybacks on the existing columnsWrap MutationObserver
+  // (refreshColumnsFold, below); renderSceneSettings schedules one from its
+  // own tail.
+  const cableColumnsRO = new ResizeObserver(scheduleCableRecompute);
+  cableColumnsRO.observe(spectrumCol);
+  audioMeters.el.addEventListener("scroll", scheduleCableRecompute, { passive: true });
+  root.addEventListener("scroll", scheduleCableRecompute, { passive: true });
+
+  // ---- "Pick a setting first" toast ----
+  const toastEl = document.createElement("div");
+  toastEl.className = "vc-toast";
+  toastEl.setAttribute("role", "status");
+  document.body.appendChild(toastEl);
+  let toastTimer: ReturnType<typeof setTimeout> | null = null;
+  function showToast(text: string): void {
+    toastEl.textContent = text;
+    toastEl.classList.add("vc-toast-show");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove("vc-toast-show"), 2200);
+  }
+
+  /** The one place every selection-driven visual gets recomputed together —
+   *  called on a pin, a preview change, and a patch edit (togglePin,
+   *  previewDrive, patchChanged above) and once more from
+   *  renderSceneSettings's own tail (a scene switch/Look apply rebuilds
+   *  every row, including the pinned one's). Content only — never a layout
+   *  read itself; scheduleCableRecompute() is what actually measures
+   *  anything, on its own rAF-batched schedule. */
+  function refreshPatchHighlight(): void {
+    audioMeters.refreshPatchView();
+    refreshBandsJacks();
+    refreshSpectrumDriveHighlight();
+    spectrumCol.classList.toggle("vc-patching", !!jackShownInfo());
+    scheduleCableRecompute();
   }
 
   // A hover-scheduled preview change not yet committed — see
@@ -2492,6 +2921,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       "vc-cols-folded",
       relevant.length > 0 && relevant.every((c) => c.classList.contains("vc-folded")),
     );
+    // This MutationObserver already fires for every fold/unfold in the
+    // Power+Bands+meters column (it observes columnsWrap's own subtree) —
+    // reused here as the cable layer's own fold trigger rather than a
+    // second observer over the same nodes.
+    scheduleCableRecompute();
   }
   new MutationObserver(refreshColumnsFold).observe(columnsWrap, {
     attributes: true,
@@ -2533,6 +2967,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // ---- controls column ----
   const controlsCol = document.createElement("div");
   controlsCol.className = "vc-controls-col vc-scroll";
+  cableColumnsRO.observe(controlsCol);
+  controlsCol.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
   // Auto strength: how far auto is allowed to push a setting from its default
   // (see autoTune.ts's computeAutoTarget). Global per device.
@@ -3393,7 +3829,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         lastPinnedSetting = null;
       }
     }
+    // A jack click with nothing pinned reaches for lastPreview — drop it on
+    // a genuine scene switch, same reasoning as the pinned check above,
+    // rather than let a jack click quietly pin a setting on the scene that
+    // was just left.
+    if (lastPreview && lastPreview.sceneId !== sceneId) lastPreview = null;
     refreshLineMode();
+    refreshPatchHighlight();
   }
 
   // Palette: the only picker left in the panel.
@@ -3634,6 +4076,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     isOpen = true;
     document.addEventListener("pointerdown", onDocPointerDown);
     document.addEventListener("keydown", onKeyDown);
+    refreshCableVisibility();
+    scheduleCableRecompute();
   }
 
   function close() {
@@ -3642,6 +4086,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     isOpen = false;
     document.removeEventListener("pointerdown", onDocPointerDown);
     document.removeEventListener("keydown", onKeyDown);
+    refreshCableVisibility();
+    toastEl.classList.remove("vc-toast-show");
   }
 
   // Cache of the last --wash value written, so update() (called every rAF
@@ -3692,6 +4138,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // rebuilds anything on the rare tick this fires.
       if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
       audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate);
+      // The cable layer's own per-tick flow (dashoffset only, no reads —
+      // see cableLayer.ts's header) and the Bands card's own level rows;
+      // both need a live dtSec and the freshest anim/drives this tick.
+      lastDrives = drives;
+      lastFrame = frame;
+      lastAnim = anim;
+      const cableNowMs = performance.now();
+      const cableDtSec = Math.min(1 / 15, Math.max(1e-4, (cableNowMs - lastCableTickMs) / 1000));
+      lastCableTickMs = cableNowMs;
+      if (!bandsCard.fold?.isFolded()) {
+        for (const r of bandLevelRows) {
+          const v = anim ? (r.choice === "anim.low" ? anim.low : r.choice === "anim.mid" ? anim.mid : anim.high) : null;
+          r.row.setValue(v, cableDtSec);
+        }
+      }
+      if (!narrowMQ.matches) cableLayer.tick(cableDtSec);
       // Unthrottled, same reasoning as audioMeters' own fills — see
       // createControlRow's updateSignalPills doc comment. A no-op per row
       // with no `reads`, so this costs nothing for the common case.
@@ -3755,7 +4217,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // yet — canvas draws only, never a DOM rebuild.
       if (drives && driveRowHandles.length && !sceneCard.fold?.isFolded() && nowMs - lastSparklineMs >= SPARKLINE_REFRESH_MS) {
         lastSparklineMs = nowMs;
-        for (const h of driveRowHandles) h.tickSparkline(drives);
+        for (const h of driveRowHandles) h.tickSparkline(drives, frame, anim);
         activeOutputTick?.(drives);
       }
 

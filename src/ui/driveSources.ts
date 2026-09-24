@@ -1,5 +1,5 @@
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
-import type { DriveSourceChoice } from "../render/drives.ts";
+import { sourceKey, type DriveSourceChoice } from "../render/drives.ts";
 import type { SignalId } from "../render/signals.ts";
 import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";
 
@@ -89,6 +89,18 @@ export function isGridSourceChoice(choice: DriveSourceChoice): boolean {
 
 export function isLineSourceChoice(choice: DriveSourceChoice): boolean {
   return typeof choice === "object" && choice.source === "line";
+}
+
+/** The identity a patch-bay jack (src/ui/jack.ts) keys itself by — every
+ *  grid division collapses to one shared key ("grid"), since a patch
+ *  carries at most one grid source regardless of division (drives.ts's own
+ *  header) and the Beat row's jack/the Tempo add-chip both mean "toggle
+ *  whichever one's already there", never one specific division (this is
+ *  the same collapse buildAddChips' own Tempo-chip click handler in
+ *  deviceMenu.ts applies by hand). Every other choice keys by its own
+ *  drives.ts sourceKey, unchanged. */
+export function jackKey(choice: DriveSourceChoice): string {
+  return isGridSourceChoice(choice) ? "grid" : sourceKey(choice);
 }
 
 /** The full display label — a row's source summary, a patch source line's

@@ -1,6 +1,9 @@
 import type { AnimFrame } from "../render/animClock.ts";
 import type { MeterCardId, MeterRowId } from "../render/signals.ts";
 import type { FeatureFrame } from "../audio/types.ts";
+import type { DriveSourceChoice } from "../render/drives.ts";
+import { driveSourceColor, jackKey } from "./driveSources.ts";
+import { createJack, setRowFed, type JackHandle } from "./jack.ts";
 import { downsampleForDisplay, isClipping, peak } from "../audio/waveform.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { SILENCE_GATE_MIN, type SilenceGateMarks, type SilenceGateReading } from "../audio/silenceGate.ts";
@@ -153,6 +156,20 @@ import { createControlRow } from "./deviceMenu.ts";
  * drawing choice (what range fills the card), not audio processing, so it
  * stays on in both modes.
  *
+ * The patch bay's jacks (src/ui/jack.ts) mount on every row above that a
+ * drive source can feed — Energy (Signal), Section's own Song+Drop pair,
+ * the Beat row's own beat-grid jack, Onset, Centroid (Character), and one
+ * per hits-history lane (createHitsHistory's own laneMounts) — plus the
+ * Bands card's own level rows (BAND_LEVEL_CHOICES, deviceMenu.ts) and its
+ * Frequencies corner, built directly
+ * in deviceMenu.ts. Every jack's click/hover/fill/usage state is
+ * `deps.patch` (AudioMetersDeps's own doc comment); this file only ever
+ * mounts them and, on refreshPatchView(), reads that state back into a
+ * jack's own visuals and its row/lane's fed glow (jack.ts's setRowFed) —
+ * never per frame, only on a selection or patch change. jackElements() is
+ * the cable layer's (src/ui/cableLayer.ts, owned by deviceMenu.ts) own
+ * source-endpoint lookup.
+ *
  * Every one of those "un-eased" values is what its smoothed sibling is
  * eternally chasing — none of it is a param a Reset chip can zero out.
  * `rateScale` (this file's update(), threaded from app.ts's
@@ -205,6 +222,17 @@ export interface AudioMeters {
    *  (src/ui/deviceMenu.ts). A no-op if `row` was never registered (a
    *  MeterRowId with no matching createMeterRow/welded-block call). */
   revealRow(card: MeterCardId, row: MeterRowId): void;
+  /** Refreshes every jack's fill/pressed/uses and each fed row/lane's
+   *  glow+chip, purely from `deps.patch` — called by deviceMenu.ts on a
+   *  selection or patch change (a pin, a preview, an add/remove), never per
+   *  frame (this file's own carried click-loss rule covers rebuilds, not
+   *  this — but the same reasoning applies: nothing here is worth doing at
+   *  frame rate). */
+  refreshPatchView(): void;
+  /** This card's own jacks, keyed by driveSources.ts's jackKey — the cable
+   *  layer's (src/ui/cableLayer.ts) source endpoints. Never mutated after
+   *  a jack is built. */
+  jackElements(): ReadonlyMap<string, HTMLElement>;
 }
 
 export interface AudioMetersDeps {
@@ -222,6 +250,44 @@ export interface AudioMetersDeps {
    *  its pulse height is a taste about detection itself, not one scene's
    *  look, so it carries across scene switches the same way. */
   hitShape: { get: () => HitShape; set: (partial: Partial<HitShape>) => void };
+  /** Every jack's behaviour and live state — see jack.ts's own header for
+   *  why this file never touches a DriveSetting directly. Every predicate
+   *  is keyed by the DriveSourceChoice a jack represents (driveSources.ts's
+   *  jackKey collapses every beat-grid division to one shared identity, so
+   *  a caller here never needs to know which one). deviceMenu.ts is the
+   *  only implementation — it closes over `pinned`/`preview` and every
+   *  scene setting's own patch. */
+  patch: {
+    /** How many of this scene's settings currently use `choice` — the
+     *  jack's usage dots (always on, independent of selection). */
+    usage(choice: DriveSourceChoice): number;
+    /** `choice` feeds the shown (preview ?? pinned) setting — jack fill and
+     *  a row/lane's hard glow. */
+    isShown(choice: DriveSourceChoice): boolean;
+    /** `choice` is a source of the *pinned* setting specifically — jack
+     *  aria-pressed, i.e. what a click on it would toggle off. */
+    isPinned(choice: DriveSourceChoice): boolean;
+    /** `choice` is named in the shown setting's own `drive.sceneSources`
+     *  (a `"scene"` setting has no patch to plug/unplug, so this never
+     *  drives a jack's own fill — only a row/lane's *soft* glow). */
+    isSceneSource(choice: DriveSourceChoice): boolean;
+    /** Non-null while a setting is shown — `label` is the fed chip's text,
+     *  `soft` marks a scene-mix selection (dims every glow a shade). */
+    shown(): { label: string; soft: boolean } | null;
+    /** aria-label / title text for `choice`'s jack right now — phrased
+     *  against whichever setting a click on it would actually reach
+     *  (pinned, else the last previewed setting, else neither). */
+    describe(choice: DriveSourceChoice): { aria: string; title: string };
+    /** A pinned setting: toggles `choice` in its patch. Nothing pinned but
+     *  something was previously previewed: pins that setting and toggles
+     *  `choice` into it in the same click. Neither: a "Pick a setting
+     *  first" toast, no change. */
+    onJackClick(choice: DriveSourceChoice): void;
+    /** Highlights every scene row `choice` currently feeds — independent
+     *  of the shown-setting highlight above, this is purely "what does
+     *  hovering *this* jack, right now, actually reach". */
+    onJackHover(choice: DriveSourceChoice, on: boolean): void;
+  };
 }
 
 const PEAK_FALL_PER_SEC = 1.2; // matches spectrumStrip.ts's peak-hold decay
@@ -622,7 +688,7 @@ function flashRow(el: HTMLElement): void {
   }, ROW_FLASH_MS);
 }
 
-interface MeterRowSpec {
+export interface MeterRowSpec {
   label: string;
   accent: string;
   /** Mono suffix after the digits ("%", "bpm"). */
@@ -644,7 +710,7 @@ interface ReadoutOpts {
   unit?: string;
 }
 
-function createMeterRow(spec: MeterRowSpec) {
+export function createMeterRow(spec: MeterRowSpec) {
   const el = document.createElement("div");
   el.className = "vc-row";
   if (spec.description) el.tabIndex = 0;
@@ -713,6 +779,10 @@ function createMeterRow(spec: MeterRowSpec) {
 
   return {
     el,
+    /** The head's right-hand slot (readout + whatever else) — a caller
+     *  mounts a jack (src/ui/jack.ts) beside the readout here rather than
+     *  this file forking a second row shape for a jack-bearing row. */
+    right,
     /** Fraction of the track (null empties it). `dtSec` drives the peak cap's fall. */
     setValue(value: number | null, dtSec: number): void {
       if (flashed) {
@@ -892,6 +962,8 @@ const HITS_LANES: readonly HitsLane[] = [
   { label: "Mid", color: STRIP_MID, ratioIdx: 4, codeIdx: 5 },
   { label: "High", color: STRIP_HIGH, ratioIdx: 6, codeIdx: 7 },
 ];
+// Same order as HITS_LANES — the drive source each lane's own jack plugs in.
+const HITS_LANE_CHOICES: readonly DriveSourceChoice[] = ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset"];
 const HITS_GROUND_IDX = 8;
 const HITS_SERIES_COUNT = 9;
 // Ground shading is a wash, not a primary reading — capped well under full
@@ -956,7 +1028,14 @@ function hitStrengthNote(parts: HitParts | null): string {
  *  remote — bandEnergy.ts runs everywhere); ground shading from
  *  `1 - anim.gateDimmer` — the same dimmer the Gate card's Dimmer row shows
  *  — so a half-open gate reads lighter than a shut one. */
-function createHitsHistory(getSilenceGate: () => SilenceGateMarks) {
+/** Mounts a jack for `choice` into `host` and registers it for the shared
+ *  row-level fed/dim treatment against `feedEl` (jack.ts's setRowFed) — see
+ *  createAudioMeters' own mountJack for what it actually does; threaded
+ *  down as a plain callback so createHitsHistory never needs to know
+ *  `deps.patch`'s own shape. */
+type MountJack = (choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElement) => JackHandle;
+
+function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: MountJack) {
   const row = createMeterRow({
     label: "Hits",
     accent: NEUTRAL_ACCENT,
@@ -965,11 +1044,39 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks) {
   });
   const ring = createColumnRing(HITS_SERIES_COUNT, HITS_HEIGHT_PX);
   const ctx = ring.ctx;
-  row.el.children[1].replaceWith(ring.canvas);
+  // HITS_LANES' own lane jacks mount absolutely inside this wrapper rather
+  // than the row itself (which is `position: relative` too, but its own top
+  // edge is above the head and shifts with font metrics) — the wrapper's
+  // own top edge is exactly the canvas's, so `i * HITS_LANE_HEIGHT_PX`
+  // lands each jack on its own lane without measuring anything.
+  const vizWrap = document.createElement("div");
+  vizWrap.style.cssText = "position: relative; margin-top: 4px;";
+  ring.canvas.style.marginTop = "0";
+  vizWrap.appendChild(ring.canvas);
+  row.el.children[1].replaceWith(vizWrap);
   row.setReadout(String(HISTORY_SPAN_SEC));
 
   const legend = createTraceLegend(HITS_LANES.map((l) => ({ color: l.color, label: l.label })));
-  ring.canvas.after(legend.el);
+  vizWrap.after(legend.el);
+
+  // One jack per lane, at that lane's own vertical centre on the right
+  // edge — feedEl is the shared row (every HITS_LANES entry lives on one
+  // canvas), so the row dims/glows as a whole; laneMounts below is what
+  // lets refreshPatchView pick out *which* lane to also glow.
+  const laneMounts = HITS_LANES.map((lane, i) => {
+    const choice = HITS_LANE_CHOICES[i]!;
+    const jack = mountJack(choice, vizWrap, row.el);
+    jack.el.style.position = "absolute";
+    jack.el.style.right = "2px";
+    jack.el.style.top = `${i * HITS_LANE_HEIGHT_PX + (HITS_LANE_HEIGHT_PX - 13) / 2}px`;
+    const glow = document.createElement("div");
+    glow.className = "vc-lane-glow";
+    glow.style.top = `${i * HITS_LANE_HEIGHT_PX}px`;
+    glow.style.height = `${HITS_LANE_HEIGHT_PX}px`;
+    glow.style.setProperty("--c", lane.color);
+    vizWrap.appendChild(glow);
+    return { choice, glowEl: glow };
+  });
 
   // Fire timestamps per lane, for the legend's "N fires in the last span"
   // note — pruned to HISTORY_SPAN_SEC on read, same window the trace shows.
@@ -1103,6 +1210,7 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks) {
     resetColumn(): void {
       ring.resetColumn();
     },
+    laneMounts,
   };
 }
 
@@ -1362,6 +1470,33 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const root = document.createElement("div");
   root.className = "vc-meters vc-scroll";
 
+  // Every jack this card mounts, plus which row/lane each one feeds when
+  // lit — see jack.ts's own header. `feedEl` groups jacks that share a row
+  // (the Section row's Song+Drop, every hits lane's shared Hits row) so
+  // refreshPatchView below only ever writes that row's fed state once.
+  const jackRegistry: { choice: DriveSourceChoice; jack: JackHandle; feedEl: HTMLElement }[] = [];
+  const jackElementsMap = new Map<string, HTMLElement>();
+
+  /** Builds one jack, wires it straight to `deps.patch`, and registers it
+   *  for refreshPatchView's own row-level glow/dim pass below. `host` is
+   *  where the jack's own element mounts (a row's `right` slot, or a
+   *  positioning wrapper for a hits lane); `feedEl` is the row/lane that
+   *  glows when this jack lights — usually the same element as `host`,
+   *  different only where the jack itself is absolutely positioned inside
+   *  a sub-wrapper (createHitsHistory's own vizWrap) but the glow/dim
+   *  belongs to the row as a whole. */
+  function mountJack(choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElement): JackHandle {
+    const jack = createJack(
+      driveSourceColor(choice),
+      () => deps.patch.onJackClick(choice),
+      (on) => deps.patch.onJackHover(choice, on),
+    );
+    host.appendChild(jack.el);
+    jackRegistry.push({ choice, jack, feedEl });
+    jackElementsMap.set(jackKey(choice), jack.el);
+    return jack;
+  }
+
   let showRaw = false;
   const metersHeader = document.createElement("div");
   metersHeader.style.cssText = metersHeaderStyle;
@@ -1389,6 +1524,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     description:
       "The same sound after auto-gain, which keeps it mid-range whether the room is quiet or loud. This is what the scene actually reacts to.",
   });
+  mountJack("anim.energy", energy.right, energy.el);
   const history = createMeterRow({
     label: "History",
     accent: INPUT_GREEN,
@@ -1508,11 +1644,13 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   section.el.style.flex = "1";
   section.el.style.minWidth = "0";
+  mountJack("anim.sectionIntensity", section.right, section.el);
+  mountJack("anim.dropOnset", section.right, section.el);
   const tempo = createTempoBlock(NEUTRAL_ACCENT);
   const rhythmRow = document.createElement("div");
   rhythmRow.style.cssText = rhythmRowStyle;
   rhythmRow.append(section.el, tempo.el);
-  const hitsHistory = createHitsHistory(deps.getSilenceGate);
+  const hitsHistory = createHitsHistory(deps.getSilenceGate, mountJack);
   // Beats as actually detected (anim.beatPulse, red — same as the hit
   // history's Beat lane and the tempo dot) against the phase-locked grid
   // beatClock predicts (a spike at each anim.beatPhase wrap, blue, height
@@ -1538,6 +1676,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   );
   beat.el.children[1].replaceWith(beatTrace.canvas);
   beat.setReadout(String(HISTORY_SPAN_SEC));
+  // The nominal division ("Beat") is only this jack's own identity for
+  // driveSourceColor/mounting — driveSources.ts's jackKey collapses every
+  // grid division to one shared key, so it lights/toggles for *any*
+  // division a patch happens to hold, matching the Tempo add-chip.
+  mountJack({ source: "beat", grid: 2 }, beat.right, beat.el);
   let prevBeatPhase: number | null = null;
   // The onset detector's own input: how hard this frame's spectral flux
   // cleared its adaptive threshold (OnsetDiag.ratio — the same number the
@@ -1551,6 +1694,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     description:
       "How hard the broadband onset detector's flux cleared its threshold this frame — past the mark is a beat, short of it a near-miss.",
   });
+  mountJack("feature.flux", onset.right, onset.el);
   const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm" });
   rhythmCard.body.append(rhythmRow, spacer(), hitsHistory.el, spacer(), beat.el, spacer(), onset.el);
 
@@ -1681,6 +1825,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     description: "Live spectral centroid, range-adapted to this track's own recent swing — 0.5 is its own recent middle, not an absolute mid-spectrum reading. The fast counterpart to Brightness above. Below the bar, the last few seconds of it — the shape brightness moves in, since an instant reading alone just jitters.",
     ticks: [{ at: 0.5 }],
   });
+  mountJack("anim.centroid", centroidRow.right, centroidRow.el);
   // Inserted before the hint (el's 3rd child), so it sits under the meter
   // like the Signal card's History — always visible, not hover-revealed.
   // One series, so no legend; RAW briefly mixes raw/processed samples in
@@ -2090,6 +2235,43 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       if (!rowEl) return;
       rowEl.scrollIntoView({ block: "nearest" });
       flashRow(rowEl);
+    },
+    refreshPatchView(): void {
+      const shownInfo = deps.patch.shown();
+      // Grouped by feedEl so a row/lane shared by several jacks (the
+      // Section row's Song+Drop, a hits lane's own shared Hits row) is
+      // only ever written to once.
+      const feedGroups = new Map<HTMLElement, DriveSourceChoice[]>();
+      for (const { choice, jack, feedEl } of jackRegistry) {
+        jack.setFilled(deps.patch.isShown(choice));
+        jack.setPressed(deps.patch.isPinned(choice));
+        jack.setUses(deps.patch.usage(choice));
+        const { aria, title } = deps.patch.describe(choice);
+        jack.setLabel(aria, title);
+        let list = feedGroups.get(feedEl);
+        if (!list) {
+          list = [];
+          feedGroups.set(feedEl, list);
+        }
+        list.push(choice);
+      }
+      for (const [rowEl, choices] of feedGroups) {
+        const hardChoice = choices.find((c) => deps.patch.isShown(c));
+        const softChoice = hardChoice ? undefined : choices.find((c) => deps.patch.isSceneSource(c));
+        const litChoice = hardChoice ?? softChoice;
+        setRowFed(rowEl, !!litChoice, !hardChoice && !!softChoice, litChoice ? driveSourceColor(litChoice) : "", shownInfo?.label ?? "");
+      }
+      // The hits lanes' own fine-grained glow, on top of the Hits row's
+      // shared fed/dim state above — a lane never gets the softer
+      // scene-mix treatment (a hit-onset entry in `sceneSources` is rare
+      // enough, and per-lane vs. per-row soft glow isn't worth a second
+      // code path here).
+      for (const { choice, glowEl } of hitsHistory.laneMounts) {
+        glowEl.classList.toggle("on", deps.patch.isShown(choice));
+      }
+    },
+    jackElements(): ReadonlyMap<string, HTMLElement> {
+      return jackElementsMap;
     },
   };
 }

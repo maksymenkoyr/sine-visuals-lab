@@ -75,7 +75,10 @@ import { getDriveLine, getDriveLineStrength, getDriveSetting } from "./driveStor
  * `valueOf(key)` returns the same reading `value()`/`uniformPair()` give a
  * scene (mix-combined, then × `gain`) — the row's own sparkline. Both are
  * pure reads of state `accumulate()` already advanced; neither consumes a
- * grid edge the way `fired()` does.
+ * grid edge the way `fired()` does. The panel's jacks and cables
+ * (src/ui/jack.ts, src/ui/cableLayer.ts, wired from src/ui/deviceMenu.ts)
+ * read only these two plus a patch's own `sources`/`mix` — nothing here
+ * exists for them alone.
  *
  * `"scene"` is still the one setting with no engine state at all: `.value()`
  * and `.fired()` simply return whatever the caller's own `sceneDefault`/
