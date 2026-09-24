@@ -2323,7 +2323,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (!patch.sources.length) {
       const empty = document.createElement("div");
       empty.style.cssText = driveEmptySrcStyle;
-      empty.textContent = "Nothing plugged in — this setting holds still.";
+      // An empty patch is always "scene" (normalizeDriveSetting), so the
+      // setting is playing its scene's own mix — not standing still.
+      const mix = spec.drive?.sceneLabel?.replace(/^Scene:\s*/, "");
+      empty.textContent = mix
+        ? `Playing the scene's own mix: ${mix}. Plug in a meter to replace it.`
+        : "Playing the scene's own mix. Plug in a meter to replace it.";
       list.appendChild(empty);
     }
     patch.sources.forEach((src, i) => {
