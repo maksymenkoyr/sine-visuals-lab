@@ -27,12 +27,12 @@ import {
 // deliberately NOT built here either, not even as disabled settings — a
 // later pass's scope, not this one's.
 //
-// The fluid sim (skyFluidSim.ts) is a verbatim copy of
-// origin/worktree-neon-fluid's fluidSim.ts, the stable-fluids solver that
-// branch built for Neon Fluid — copied rather than imported because that
-// branch isn't on main, and renamed (not "fluidSim.ts") so the two copies
-// are free to diverge, the same per-scene-copy pattern ink.ts/moire.ts/
-// kaleido/glsl.ts already use for their own noise helpers. This scene runs
+// The fluid sim (skyFluidSim.ts) is a copy of Neon Fluid's fluidSim.ts, the
+// stable-fluids solver — copied while that scene was still on an unmerged
+// branch, and still separate because Sky raises its SPLAT_SLOTS (Neon
+// Fluid's 4 → 12, one per cloud drifter). The two are otherwise identical;
+// folding them into one module with the slot count as a parameter is an
+// open follow-up. This scene runs
 // it in MIRROR_OFF mode only — full screen, no kaleidoscope fold — the one
 // path that needs no adaptation. Cloud drift is deliberately NOT
 // audio-reactive: DRIFTER_SEEDS.length slow, gently meandering ambient

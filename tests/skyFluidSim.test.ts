@@ -15,8 +15,8 @@ import {
   type MirrorMode,
 } from "../src/render/scenes/skyFluidSim.ts";
 
-// Ports the pure-function cases from origin/worktree-neon-fluid's
-// tests/fluid.test.ts that exercise skyFluidSim.ts's own exports (the sim
+// Ports the pure-function cases from Neon Fluid's tests/fluid.test.ts that
+// exercise skyFluidSim.ts's own exports (the sim
 // math, resolution/tier logic and mirror-domain description) — see
 // skyFluidSim.ts's own header for why this file is a copy of fluidSim.ts
 // rather than a shared module. The rest of that branch's test file covers
