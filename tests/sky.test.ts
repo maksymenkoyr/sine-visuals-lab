@@ -5,6 +5,9 @@ import {
   waveStrengthFromTreble,
   sweepSlot,
   MAX_SWEEPS,
+  dayRatePerSec,
+  advanceDayOffset,
+  sunElevation,
   advanceBrushPhase,
   driftCenter,
   drifterPuff,
@@ -86,6 +89,56 @@ describe("waveHoldBeats", () => {
     expect(waveHoldBeats(-5)).toBe(waveHoldBeats(0));
     expect(waveHoldBeats(5)).toBe(waveHoldBeats(1));
     expect(Number.isFinite(waveHoldBeats(NaN))).toBe(true);
+  });
+});
+
+describe("day cycle", () => {
+  it("holds still at Day drift 0 and speeds up monotonically above it", () => {
+    expect(dayRatePerSec(0)).toBe(0);
+    let prev = 0;
+    for (let d = 0.05; d <= 1.0001; d += 0.05) {
+      const r = dayRatePerSec(d);
+      expect(r).toBeGreaterThan(prev);
+      prev = r;
+    }
+  });
+
+  it("spans roughly a half-hour day at the slow end to a one-minute day at the fast end", () => {
+    expect(1 / dayRatePerSec(1)).toBeCloseTo(60, 6);
+    expect(1 / dayRatePerSec(0.001)).toBeGreaterThan(1700);
+    expect(1 / dayRatePerSec(0.001)).toBeLessThan(1810);
+  });
+
+  it("advanceDayOffset wraps into [0, 1) and never moves at drift 0", () => {
+    expect(advanceDayOffset(0.3, 10, 0)).toBe(0.3);
+    let off = 0;
+    for (let i = 0; i < 500; i++) {
+      off = advanceDayOffset(off, 1, 1);
+      expect(off).toBeGreaterThanOrEqual(0);
+      expect(off).toBeLessThan(1);
+    }
+    // A one-minute day: 60 seconds lands back where it started.
+    expect(advanceDayOffset(0.2, 60, 1)).toBeCloseTo(0.2, 6);
+  });
+
+  it("advanceDayOffset survives non-finite and negative inputs", () => {
+    expect(Number.isFinite(advanceDayOffset(NaN, NaN, NaN))).toBe(true);
+    expect(advanceDayOffset(0.5, -3, 1)).toBe(0.5);
+  });
+
+  it("sunElevation: sunrise and sunset on the horizon, noon highest, midnight lowest", () => {
+    expect(sunElevation(0.25)).toBeCloseTo(0, 6);
+    expect(sunElevation(0.75)).toBeCloseTo(0, 6);
+    expect(sunElevation(0.5)).toBeCloseTo(1, 6);
+    expect(sunElevation(0)).toBeCloseTo(-1, 6);
+  });
+
+  it("the default Time of day sits in early evening, on the key the scene's earlier fixed look became", () => {
+    const spec = (skyScene.settings ?? []).find((s) => s.key === "timeOfDay");
+    expect(spec).toBeDefined();
+    const t = spec!.default;
+    expect(t).toBeGreaterThan(0.5); // afternoon/evening, not morning
+    expect(sunElevation(t)).toBeCloseTo(0.25, 1); // DAY_KEY_E's early-evening key
   });
 });
 

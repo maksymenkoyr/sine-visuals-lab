@@ -110,6 +110,28 @@ import {
 // section drop (anim.dropOnset, graded by waveStrengthFromDrop) always fires
 // a bigger one on top.
 //
+// On each beat (a "beat" beatListener, one sweep per beat into a ring of
+// MAX_SWEEPS slots, sweepSlot) a wavy band of shifting rainbow light
+// crosses the frame, but it lights only the floaters' own tubes: the sky and
+// clouds around them never change, so the wave is only seen where it
+// passes through a streak.
+//
+// The sky runs on its own 24-hour clock. Time of day sets where it sits,
+// Day drift how fast it moves on from there (advanceDayOffset, a scene-owned
+// accumulator like brushPhase, so moving Time of day never resets the
+// drift). The shader lights everything off the sun's elevation (sin of the
+// day angle): sky gradient, sun colour and cloud lit/shade tones all blend
+// between keys at night, blue hour, horizon glow, golden hour, early
+// evening and midday (DAY_KEY_E), mornings warmed toward peach where
+// evenings run pink. A soft sun halo tracks across the frame (rising left,
+// setting right), the horizon warms on the sun's side around sunrise and
+// sunset, the clouds' shadow taps point toward the sun by day and the moon
+// by night, stars come out past blue hour, Haidinger's brush fades with the
+// daylight it depends on, and floaters modulate a brightness floor at night
+// so they don't vanish into the dark. The default Time of day lands on the
+// early-evening key, which is exactly the fixed look the scene had before
+// the day cycle existed.
+//
 // Haidinger's brush rotates on brushPhase, a plain per-frame accumulator
 // (advanceBrushPhase) owned by this scene — never anim.barPhase, which
 // wraps every bar and would make the brush visibly snap; storm.ts's own
@@ -178,6 +200,36 @@ const SWEEP_HOLD: HoldBeats = { beats: 1, fallbackSec: 0.4 }; // at most one swe
 export function sweepSlot(fired: number): number {
   const n = Number.isFinite(fired) ? Math.max(0, Math.floor(fired)) : 0;
   return n % MAX_SWEEPS;
+}
+
+// --- Day cycle: the sky's own 24-hour clock (see the file header). ---
+const DAY_PERIOD_FAST_SEC = 60; // one whole day per minute at Day drift = 1
+const DAY_PERIOD_RANGE = 30; // ...and 30x slower (half an hour per day) just above Day drift = 0
+
+/** Days per second at a Day drift setting: 0 holds the sky still at Time of
+ *  day; above that, exponential from a half-hour day up to a one-minute day,
+ *  so the low end of the slider still has fine control over slow drifts. */
+export function dayRatePerSec(drift: number): number {
+  const d = Number.isFinite(drift) ? clamp01(drift) : 0;
+  if (d <= 0) return 0;
+  return 1 / (DAY_PERIOD_FAST_SEC * Math.pow(DAY_PERIOD_RANGE, 1 - d));
+}
+
+/** The day cycle's own accumulator — how far the sky has drifted past Time
+ *  of day, in days, wrapped to [0, 1). Owned by the scene like brushPhase,
+ *  so Time of day can move under it without the drift resetting. */
+export function advanceDayOffset(prev: number, dtSec: number, drift: number): number {
+  const from = Number.isFinite(prev) ? prev : 0;
+  const dt = Number.isFinite(dtSec) ? Math.max(0, dtSec) : 0;
+  const next = from + dt * dayRatePerSec(drift);
+  return next - Math.floor(next);
+}
+
+/** Sun elevation, -1..1, at a day phase (0 midnight, 0.25 sunrise, 0.5
+ *  noon, 0.75 sunset) — the same curve the display shader lights the sky by. */
+export function sunElevation(dayPhase: number): number {
+  const t = Number.isFinite(dayPhase) ? dayPhase : 0;
+  return Math.sin(2 * Math.PI * (t - 0.25));
 }
 
 // --- Haidinger's brush. ---
@@ -447,17 +499,28 @@ const SETTINGS: SceneSetting[] = [
     auto: { dynamics: 0.2 },
     reads: ["anim.dropOnset"],
   },
-  // Look
   {
-    key: "skyTint",
-    label: "Sky tint",
-    description: "Walks the sky and cloud colour from a cool blue toward a warm dusk",
-    group: "Look",
+    key: "dayDrift",
+    label: "Day drift",
+    description:
+      "How fast the sky moves through its day — held still at 0, about half an hour per day just above it, a whole day every minute at 1",
+    group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.25,
-    auto: { brightness: 0.2 },
+    default: 0.3,
+  },
+  // Look
+  {
+    key: "timeOfDay",
+    label: "Time of day",
+    description:
+      "Where in a 24-hour day the sky sits — 0 and 1 are midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset. With Day drift above zero the sky keeps moving on from here",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    default: 0.71,
   },
   {
     key: "cloudBrightness",
@@ -484,7 +547,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "lightWaves",
     label: "Light waves",
-    description: "How bright the band of shifting rainbow light is that sweeps across the whole sky on each beat",
+    description: "How brightly the floaters light up in shifting rainbow colours as a wave of light passes through them on each beat",
     group: "Look",
     min: 0,
     max: 1,
@@ -519,6 +582,7 @@ uniform float uBurstX[${MAX_WAVE_BURSTS}];
 uniform float uBurstY[${MAX_WAVE_BURSTS}];
 uniform float uSweepT0[${MAX_SWEEPS}];
 uniform float uSweepSeed[${MAX_SWEEPS}];
+uniform float uDayPhase; // 0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset (see advanceDayOffset)
 
 const int MAX_WAVE_BURSTS_C = ${MAX_WAVE_BURSTS};
 const float WAVE_LIFE_SEC_C = ${WAVE_LIFE_SEC.toFixed(3)};
@@ -533,7 +597,48 @@ const float SWEEP_SEC_C = ${SWEEP_SEC.toFixed(3)};
 const float SWEEP_WIDTH = 0.12;
 const float SWEEP_WOBBLE = 0.05;
 const float SWEEP_WOBBLE_FREQ = 7.0;
-const float SWEEP_ALPHA = 0.38;
+const float SWEEP_ALPHA = 0.9; // strong, since it only ever lights the floaters' own thin tubes
+
+// The day cycle's light, keyed on sun elevation (sin of the day angle, -1 at
+// midnight to +1 at noon) rather than on clock time, so dawn and dusk share
+// one set of keys and only differ where main() warms mornings toward peach.
+// Keys, low to high: deep night, blue hour, the glow right at the horizon,
+// golden hour, early evening (the look this scene had before it had a day
+// cycle, which the default Time of day lands on) and midday. Each colour
+// blends between its two neighbouring keys (dayWeights).
+const float DAY_KEY_E[6] = float[6](-0.40, -0.14, -0.02, 0.08, 0.25, 0.65);
+const vec3 SKY_ZENITH[6] = vec3[6](
+  vec3(0.012, 0.018, 0.050), vec3(0.070, 0.080, 0.220), vec3(0.200, 0.200, 0.420),
+  vec3(0.300, 0.360, 0.600), vec3(0.370, 0.440, 0.650), vec3(0.260, 0.450, 0.780));
+const vec3 SKY_HORIZON[6] = vec3[6](
+  vec3(0.035, 0.045, 0.100), vec3(0.300, 0.240, 0.420), vec3(0.900, 0.500, 0.460),
+  vec3(0.950, 0.720, 0.580), vec3(0.710, 0.700, 0.840), vec3(0.700, 0.800, 0.930));
+const vec3 CLOUD_LIT_KEY[6] = vec3[6](
+  vec3(0.130, 0.150, 0.220), vec3(0.420, 0.360, 0.520), vec3(0.980, 0.620, 0.550),
+  vec3(1.000, 0.820, 0.660), vec3(0.980, 0.930, 0.950), vec3(1.000, 0.990, 0.970));
+const vec3 CLOUD_SHADE_KEY[6] = vec3[6](
+  vec3(0.050, 0.060, 0.110), vec3(0.160, 0.150, 0.280), vec3(0.360, 0.260, 0.400),
+  vec3(0.500, 0.420, 0.520), vec3(0.540, 0.500, 0.640), vec3(0.580, 0.620, 0.720));
+const vec3 SUN_KEY[6] = vec3[6](
+  vec3(0.0), vec3(0.550, 0.250, 0.350), vec3(1.000, 0.450, 0.250),
+  vec3(1.000, 0.700, 0.400), vec3(1.000, 0.880, 0.750), vec3(1.000, 0.970, 0.900));
+const vec3 MORNING_WARMTH = vec3(1.04, 1.0, 0.86); // mornings lean peach/gold where evenings lean pink
+// The sun's place in the frame: it rises at the left, sets at the right, and
+// is near the top of the frame at noon, horizon at the bottom edge. Its glow
+// is a wide soft halo plus a tighter core (no hard disc), and around sunrise
+// and sunset the horizon warms most on the sun's own side.
+const float SUN_X_SPAN = 0.62; // fraction of the frame's width the sun's path spans either side of centre
+const float SUN_HALO = 0.30;
+const float SUN_CORE = 0.22;
+const float HORIZON_WARM = 0.35;
+// Night stars: one candidate per STAR_CELL (screen p-units), STAR_CHANCE of
+// them lit, most faint and a few bright, each twinkling on its own rate,
+// hidden behind cloud, faded in as the sky darkens past blue hour.
+const float STAR_CELL = 0.022;
+const float STAR_CHANCE = 0.2;
+// Floaters barely show against a night sky, since they only modulate what's
+// behind them; below this brightness they modulate this floor instead.
+const float FLOATER_NIGHT_FLOOR = 0.1;
 
 const float CLOUD_LOW = 0.16; // bumped density below this reads as clear sky
 const float CLOUD_HIGH = 0.55; // bumped density above this reads as a solid, opaque cloud body — a wide band, so edges fade through semi-transparent wisps (airy) rather than a hard cut-out
@@ -542,14 +647,14 @@ const float CLOUD_WISP_AMOUNT = 0.35;
 const float CLOUD_BUMP_SCALE = 11.0; // fbm frequency, room-uv units — the cauliflower texture
 const float CLOUD_BUMP_MORPH = 0.05; // fbm domain drift per second — churn beyond plain advection
 const float CLOUD_BUMP_AMOUNT = 0.65; // how hard the bump noise erodes/thickens the edge
-// A fixed 2D "sun" direction and two shadow taps along it — storm.ts's Gas
+// Two shadow taps toward the light (the sun by day, the moon by night, from
+// whichever side of the frame it sits on; see main) — storm.ts's Gas
 // mode's own two-tap technique (SUN_DIR + densityCheap/shape at 0.18/0.5,
 // exp(-1.9*s1-1.15*s2), mixed as a colour ramp not a brightness scalar),
 // ported from its 3D raymarch to a plain 2D density lookup. A single
 // adjacent-texel check (the first pass's own shadeAmt) only ever sees
 // edges; a wide cloud's flat interior has no local gradient at that scale,
 // which is why v1 read as one flat tone instead of a folded mass.
-const vec2 CLOUD_LIGHT_DIR = vec2(0.53, 0.848);
 const float CLOUD_SHADOW_TAP1 = 0.045;
 const float CLOUD_SHADOW_TAP2 = 0.095;
 // Calibrated against this scene's own measured density range (median ~0.8,
@@ -573,11 +678,12 @@ const float BRUSH_BASE = 0.4;
 // ever evaluates the floater in its own cell.
 // Every floater size below (and the grid cell with them) is multiplied by
 // FLOATER_SCALE: the user asked for floaters 2.5x smaller than the
-// reference-matched sizes, with the grid shrinking alongside so a streak keeps
+// reference-matched sizes, then 20% bigger again, with the grid scaling
+// alongside so a streak keeps
 // its extent and just holds more, finer floaters. At this scale the tube is
 // only a few pixels across, so floaterProfile floors its bands at
 // FLOATER_MIN_PX screen pixels rather than letting the rim alias away.
-const float FLOATER_SCALE = 0.4;
+const float FLOATER_SCALE = 0.48;
 const float FLOATER_MIN_PX = 0.8;
 const vec2 FLOATER_CELL = vec2(0.06, 0.045) * FLOATER_SCALE;
 const float CELL_T_BODY = 0.42; // streak density above this puts an aligned strand in the cell (the reference's ">")
@@ -625,8 +731,8 @@ const float FLOATER_R = 0.0028 * FLOATER_SCALE; // strand tube half-width, scree
 const float FLOATER_RIM_W = 0.0014 * FLOATER_SCALE; // bright-rim band width, just inside the edge
 const float FLOATER_FRINGE_W = 0.0022 * FLOATER_SCALE; // dark-fringe band width, just outside the edge
 const float FLOATER_INTERIOR = 0.02; // relative lum delta well inside the edge
-const float FLOATER_RIM = 0.13; // relative lum delta at the rim peak — raised from the measured 0.07 for more contrast at the small size
-const float FLOATER_FRINGE = 0.18; // relative lum delta (negative) at the fringe peak — raised from the measured 0.10 likewise
+const float FLOATER_RIM = 0.17; // relative lum delta at the rim peak — raised well past the measured 0.07 for contrast at the small size
+const float FLOATER_FRINGE = 0.23; // relative lum delta (negative) at the fringe peak — raised from the measured 0.10 likewise
 const float FLOATER_DOT_R_MIN = 0.005 * FLOATER_SCALE; // dot radius, screen p-units
 const float FLOATER_DOT_R_MAX = 0.0068 * FLOATER_SCALE;
 const vec3 FLOATER_COOL_TINT = vec3(0.94, 0.99, 1.06); // faint cool bias applied only to the rim's brightening (see main()); the fringe's darkening stays neutral
@@ -733,8 +839,10 @@ void floaterPath(float seed, float heading, float len, out vec2 pts[FLOATER_SEGM
   for (int i = 0; i < FLOATER_SEGMENTS; i++) pts[i] = rot * (pts[i] - mid);
 }
 
-// A strand floater's delta at p: a hollow refractive tube of half-width
-// FLOATER_R around the path floaterPath builds, centred on basePos.
+// A strand floater's signed distance at p (negative inside the tube): a
+// hollow refractive tube of half-width FLOATER_R around the path
+// floaterPath builds, centred on basePos. main() turns it into the tube's
+// brightness (floaterProfile) and into where a light wave lights it.
 float floaterStrand(vec2 p, vec2 basePos, float seed, float heading, float len) {
   vec2 pts[FLOATER_SEGMENTS];
   floaterPath(seed, heading, len, pts);
@@ -746,7 +854,45 @@ float floaterStrand(vec2 p, vec2 basePos, float seed, float heading, float len) 
     float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1.0e-6), 0.0, 1.0);
     dMin = min(dMin, length(pa - ba * h));
   }
-  return floaterProfile(dMin - max(FLOATER_R, FLOATER_MIN_PX / max(uResolution.y, 1.0)));
+  return dMin - max(FLOATER_R, FLOATER_MIN_PX / max(uResolution.y, 1.0));
+}
+
+// Blend weights for the six day keys at sun elevation e: only the two keys
+// either side of e carry weight, eased between (smoothstep) so the sky never
+// shows a kink in its colour as it passes a key.
+void dayWeights(float e, out float w[6]) {
+  for (int i = 0; i < 6; i++) w[i] = 0.0;
+  float ec = clamp(e, DAY_KEY_E[0], DAY_KEY_E[5]);
+  for (int i = 0; i < 5; i++) {
+    if (ec <= DAY_KEY_E[i + 1]) {
+      float f = smoothstep(DAY_KEY_E[i], DAY_KEY_E[i + 1], ec);
+      w[i] = 1.0 - f;
+      w[i + 1] = f;
+      return;
+    }
+  }
+  w[5] = 1.0;
+}
+
+vec3 dayMix(float w[6], vec3 k[6]) {
+  return w[0] * k[0] + w[1] * k[1] + w[2] * k[2] + w[3] * k[3] + w[4] * k[4] + w[5] * k[5];
+}
+
+// Brightness of the night star field at p (screen p-units; px is one
+// screen pixel): at most one star per STAR_CELL, placed within its cell,
+// most faint and a few bright (magnitude cubed), each twinkling at its own
+// rate, drawn as a pixel-sized gaussian so it never aliases into a square.
+float starField(vec2 p, float px) {
+  vec2 g = p / STAR_CELL;
+  vec2 id = floor(g);
+  float h = hash21(id + 91.7);
+  if (h > STAR_CHANCE) return 0.0;
+  vec2 pos = 0.15 + 0.7 * hash22(id + 13.1);
+  float d = length((fract(g) - pos) * STAR_CELL);
+  float mag = pow(hash21(id + 5.3), 3.0);
+  float size = px * mix(0.7, 1.7, mag);
+  float twinkle = 0.72 + 0.28 * sin(uTime * mix(1.3, 4.1, hash21(id + 2.2)) + h * 40.0);
+  return exp(-d * d / (size * size)) * mix(0.28, 1.0, mag) * twinkle;
 }
 
 // One wave's streak density at cell centre c (screen p-units), its slant in
@@ -785,20 +931,39 @@ void main() {
   float devAspect = uResolution.x / max(uResolution.y, 1.0);
   vec2 p = (vUv - 0.5) * vec2(devAspect, 1.0);
 
-  // 1. Sky: a vertical gradient, Sky tint walking it from cool blue toward
-  // a warm dusk. Lightened and desaturated against a measured real-sky
-  // photo whose open-sky patch came out a very pale, low-saturation blue
-  // (hue~179/255, sat~14/255) — the first pass's zenith was a fairly deep,
-  // saturated navy, nothing like that hazy, high-key look. Then taken a step
-  // darker with a faint pink-purple cast at the user's request — the sky just
-  // as it starts to turn toward evening, not yet a sunset.
-  vec3 zenithCool = vec3(0.37, 0.44, 0.65);
-  vec3 zenithWarm = vec3(0.55, 0.42, 0.48);
-  vec3 horizonCool = vec3(0.71, 0.70, 0.84);
-  vec3 horizonWarm = vec3(0.88, 0.74, 0.64);
-  vec3 zenith = mix(zenithCool, zenithWarm, uSkyTint);
-  vec3 horizon = mix(horizonCool, horizonWarm, uSkyTint);
+  // 1. Sky, lit by the day cycle (see the DAY_KEY_E comment): a vertical
+  // gradient between the keyed zenith and horizon colours for this sun
+  // elevation, mornings warmed toward peach around the horizon glow, a
+  // soft sun halo wherever the sun sits in the frame, horizon warmth pooled
+  // on the sun's side around sunrise and sunset, and stars once the sky
+  // darkens past blue hour. The early-evening key is the earlier fixed look,
+  // itself measured against a real hazy sky and then taken a step darker
+  // with a faint pink-purple cast at the user's request.
+  float px = 1.0 / max(uResolution.y, 1.0);
+  float dayAngle = 6.28318 * (uDayPhase - 0.25);
+  float sunE = sin(dayAngle);
+  float dw[6];
+  dayWeights(sunE, dw);
+  vec3 zenith = dayMix(dw, SKY_ZENITH);
+  vec3 horizon = dayMix(dw, SKY_HORIZON);
+  vec3 sunCol = dayMix(dw, SUN_KEY);
+  float glowHour = 1.0 - smoothstep(0.05, 0.3, abs(sunE)); // 1 around sunrise/sunset, 0 by mid-morning
+  float morning = uDayPhase < 0.5 ? 1.0 : 0.0;
+  horizon = mix(horizon, horizon * MORNING_WARMTH, morning * glowHour);
+  sunCol = mix(sunCol, sunCol * MORNING_WARMTH, morning * glowHour);
   vec3 color = mix(horizon, zenith, smoothstep(-0.1, 0.9, uv.y));
+
+  vec2 sunP = vec2(-cos(dayAngle) * SUN_X_SPAN * devAspect, -0.55 + 1.05 * sunE);
+  float sunD = length(p - sunP);
+  float sunUp = smoothstep(-0.25, 0.02, sunE);
+  vec3 glow = sunCol * (SUN_HALO * exp(-sunD * 2.4) + SUN_CORE * exp(-sunD * 9.0)) * sunUp;
+  float onSunSide = exp(-abs(p.x - sunP.x) / (0.8 * devAspect));
+  float lowInSky = pow(1.0 - clamp(uv.y, 0.0, 1.0), 2.5);
+  glow += sunCol * HORIZON_WARM * glowHour * onSunSide * lowInSky;
+  color += glow;
+
+  float starAmt = 1.0 - smoothstep(-0.25, -0.06, sunE);
+  if (starAmt > 0.0) color += vec3(0.85, 0.9, 1.0) * starField(p, px) * starAmt;
 
   // 2. Cloud cover: the sim's own dye density thresholded (CLOUD_LOW/HIGH)
   // rather than blended with a plain extinction curve — a gain/gamma remap
@@ -810,7 +975,7 @@ void main() {
   // as Storm's Gas mode (storm.ts), independently written per the file
   // header.
   //
-  // Shading is Storm's own two-tap sun-shadow technique (CLOUD_LIGHT_DIR/
+  // Shading is Storm's own two-tap sun-shadow technique (lightDir below,
   // CLOUD_SHADOW_TAP1-2/CLOUD_SHADOW_K1-2 above), ported from its 3D
   // raymarch to a plain 2D density lookup: sample density toward a fixed
   // light direction at two distances, run it through Beer's law, and use
@@ -820,16 +985,22 @@ void main() {
   // this reaches far enough across the body to shade actual folds.
   float bumped = cloudBumpedAt(uv);
   float cloudAlpha = smoothstep(CLOUD_LOW, CLOUD_HIGH, bumped);
-  float sunNear = max(decodeDye(texture(uDye, uv + CLOUD_LIGHT_DIR * CLOUD_SHADOW_TAP1)).x, 0.0);
-  float sunFar = max(decodeDye(texture(uDye, uv + CLOUD_LIGHT_DIR * CLOUD_SHADOW_TAP2)).x, 0.0);
+  // Light from the sun's side of the frame by day, the moon's (the opposite
+  // side) by night, always from somewhat above. The hand-over eases through
+  // light from straight above around sunrise and sunset rather than flipping
+  // sides in one frame, which would jump every cloud's shading with Day
+  // drift running.
+  float lightSide = smoothstep(-0.08, 0.08, sunE) * 2.0 - 1.0;
+  vec2 lightDir = normalize(vec2(-cos(dayAngle) * lightSide * 0.8, 0.85));
+  float sunNear = max(decodeDye(texture(uDye, uv + lightDir * CLOUD_SHADOW_TAP1)).x, 0.0);
+  float sunFar = max(decodeDye(texture(uDye, uv + lightDir * CLOUD_SHADOW_TAP2)).x, 0.0);
   float shadow = exp(-CLOUD_SHADOW_K1 * sunNear - CLOUD_SHADOW_K2 * sunFar);
-  // Pale cool lavender-grey to warm white — measured off a real hazy-cumulus
-  // photo (shadow-fold RGB≈(156,151,172)/255, highlight RGB≈(255,255,254)/255)
-  // rather than the first pass's guessed, noticeably darker shadow tone.
-  // Both nudged toward the sky's pink-purple cast so clouds sit in the same
-  // light rather than reading as pasted-on white.
-  vec3 cloudShadow = vec3(0.54, 0.50, 0.64);
-  vec3 cloudLit = vec3(0.98, 0.93, 0.95);
+  // Keyed with the sky (CLOUD_LIT_KEY/CLOUD_SHADE_KEY), so clouds sit in the
+  // same light: white at midday, gold and pink toward sunset, dim moonlit
+  // grey at night. The midday pair was measured off a real hazy-cumulus
+  // photo (shadow-fold RGB≈(156,151,172)/255, highlight RGB≈(255,255,254)/255).
+  vec3 cloudShadow = dayMix(dw, CLOUD_SHADE_KEY);
+  vec3 cloudLit = mix(dayMix(dw, CLOUD_LIT_KEY), dayMix(dw, CLOUD_LIT_KEY) * MORNING_WARMTH, morning * glowHour);
   // Thin, barely-there cloud is sunlit through, never shadowed — without
   // this, half-faded puffs blend a shadow tone into the sky and read as
   // grey smudges instead of airy haze.
@@ -845,44 +1016,19 @@ void main() {
   float lobe = cos(2.0 * ang);
   float radial = smoothstep(0.0, BRUSH_R_CORE, r) * smoothstep(BRUSH_R_OUT, BRUSH_R_IN, r);
   vec3 brushTint = mix(vec3(0.82, 0.85, 1.05), vec3(1.05, 0.98, 0.82), lobe * 0.5 + 0.5);
-  float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * (1.0 - 0.4 * uEnergy), 0.0, 1.0);
+  // The brush is polarised skylight, so it fades out as the sky goes dark.
+  float daylight = smoothstep(-0.1, 0.25, sunE);
+  float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * (1.0 - 0.4 * uEnergy) * daylight, 0.0, 1.0);
   color = mix(color, color * brushTint, brushAmt);
-
-  // 3b. Beat light waves: each live sweep is a soft band travelling across
-  // the whole frame in its own hashed direction, its front rippling, its
-  // colour a rainbow that shifts across the band and along it — screen-
-  // blended over sky and cloud alike, and under the floaters, so they
-  // refract it like everything else behind them.
-  vec3 sweepGlow = vec3(0.0);
-  for (int i = 0; i < MAX_SWEEPS_C; i++) {
-    float age = uTime - uSweepT0[i];
-    if (age < 0.0 || age > SWEEP_SEC_C) continue;
-    float seed = uSweepSeed[i];
-    float t = age / SWEEP_SEC_C;
-    float ang = mix(-0.7, 0.7, hash21(vec2(seed, 61.0))) + (hash21(vec2(seed, 62.0)) < 0.5 ? 0.0 : 3.14159265);
-    vec2 dir = vec2(cos(ang), sin(ang));
-    vec2 perp = vec2(-dir.y, dir.x);
-    float reach = 0.5 * (abs(dir.x) * devAspect + abs(dir.y)) + SWEEP_WIDTH * 2.0;
-    float front = mix(-reach, reach, t);
-    float across = dot(p, perp);
-    float along = dot(p, dir) + SWEEP_WOBBLE * sin(across * SWEEP_WOBBLE_FREQ + uTime * 2.3 + seed);
-    float x = (along - front) / SWEEP_WIDTH;
-    // A sharper leading edge and a longer glowing tail behind it.
-    float band = x > 0.0 ? exp(-x * x * 2.0) : exp(-x * x * 0.35);
-    vec3 hue = 0.5 + 0.5 * cos(6.28318 * (fract(seed * 0.37) + x * 0.22 + across * 0.8 + vec3(0.0, 0.33, 0.67)));
-    float fade = smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(0.75, 1.0, t));
-    sweepGlow += hue * band * fade;
-  }
-  color = 1.0 - (1.0 - color) * (1.0 - clamp(sweepGlow * SWEEP_ALPHA * uLightWaves, 0.0, 1.0));
 
   // 4. Floater waves (see the file header): snap this pixel to its grid
   // cell, take the densest live streak at the cell's centre, and from that
   // density decide what floater (if any) the cell holds: an aligned strand
   // in the body, a short flat strand on the fringe, a dot in a hotspot. Each
-  // floater is a refractive tube (floaterProfile), applied as a
-  // multiplicative modulation of what's behind it rather than a painted
-  // colour. The cell's own hash fixes its floater's shape, so a drifting
-  // streak moves by floaters switching on and off across a fixed grid.
+  // floater is a refractive tube (floaterProfile), applied as a modulation of
+  // what's behind it rather than a painted colour. The cell's own hash fixes
+  // its floater's shape, so a drifting streak moves by floaters switching on
+  // and off across a fixed grid.
   vec2 cellId = floor(p / FLOATER_CELL);
   vec2 cellC = (cellId + 0.5) * FLOATER_CELL;
   vec2 wind = STREAK_DRIFT * (0.5 + uFlowSpeed);
@@ -910,20 +1056,56 @@ void main() {
     // way before a cloud's visible edge reaches it.
     float clear = 1.0 - smoothstep(CLOUD_LOW * 0.3, CLOUD_LOW * 0.85, cloudBumpedAt(roomUv(cellC / vec2(devAspect, 1.0) + 0.5)));
     float cellSeed = hash21(cellId * 0.731 + 17.3) * 97.0 + cellId.x * 0.013;
-    float delta;
+    float s;
     if (dens > CELL_T_BODY && hot > CELL_T_HOT) {
       float r = mix(FLOATER_DOT_R_MIN, FLOATER_DOT_R_MAX, hash21(vec2(cellSeed, 15.0)));
-      delta = floaterProfile(length(p - cellC) - r);
+      s = length(p - cellC) - max(r, FLOATER_MIN_PX * px);
     } else if (dens > CELL_T_BODY) {
       float len = mix(BODY_LEN_MIN, BODY_LEN_MAX, hash21(vec2(cellSeed, 25.0)));
       float heading = slant + (hash21(vec2(cellSeed, 44.0)) - 0.5) * BODY_HEADING_JITTER;
-      delta = floaterStrand(p, cellC, cellSeed, heading, len);
+      s = floaterStrand(p, cellC, cellSeed, heading, len);
     } else {
       float len = mix(FRINGE_LEN_MIN, FRINGE_LEN_MAX, hash21(vec2(cellSeed, 25.0)));
-      delta = floaterStrand(p, cellC + vec2(0.0, FRINGE_DROP), cellSeed, 0.0, len);
+      s = floaterStrand(p, cellC + vec2(0.0, FRINGE_DROP), cellSeed, 0.0, len);
     }
-    delta = clamp(delta, -0.3, 0.3) * clear * (1.0 - cloudAlpha);
-    color *= 1.0 + min(delta, 0.0) + max(delta, 0.0) * FLOATER_COOL_TINT;
+    float vis = clear * (1.0 - cloudAlpha);
+    float delta = clamp(floaterProfile(s), -0.4, 0.4) * vis;
+    // Against a dark (night) sky, modulate a floor instead of the near-black
+    // behind, so floaters don't vanish once the sun is down.
+    vec3 base = max(color, vec3(FLOATER_NIGHT_FLOOR));
+    color += base * (min(delta, 0.0) + max(delta, 0.0) * FLOATER_COOL_TINT);
+
+    // Beat light waves pass through the floaters only: each live sweep is a
+    // soft band travelling across the frame in its own hashed direction, its
+    // front rippling, its colour a rainbow shifting across the band and along
+    // it, and it lights just this floater's own tube (inside it and its rim),
+    // screen-blended so a floater flashes that colour as the band crosses it
+    // and the sky and clouds around it stay untouched.
+    float tube = 1.0 - smoothstep(0.0, max(FLOATER_FRINGE_W, FLOATER_MIN_PX * px), s);
+    if (tube > 0.0) {
+      vec3 sweepGlow = vec3(0.0);
+      for (int i = 0; i < MAX_SWEEPS_C; i++) {
+        float age = uTime - uSweepT0[i];
+        if (age < 0.0 || age > SWEEP_SEC_C) continue;
+        float seed = uSweepSeed[i];
+        float t = age / SWEEP_SEC_C;
+        float ang = mix(-0.7, 0.7, hash21(vec2(seed, 61.0))) + (hash21(vec2(seed, 62.0)) < 0.5 ? 0.0 : 3.14159265);
+        vec2 dir = vec2(cos(ang), sin(ang));
+        vec2 perp = vec2(-dir.y, dir.x);
+        float reach = 0.5 * (abs(dir.x) * devAspect + abs(dir.y)) + SWEEP_WIDTH * 2.0;
+        float front = mix(-reach, reach, t);
+        float across = dot(p, perp);
+        float along = dot(p, dir) + SWEEP_WOBBLE * sin(across * SWEEP_WOBBLE_FREQ + uTime * 2.3 + seed);
+        float x = (along - front) / SWEEP_WIDTH;
+        // A sharper leading edge and a longer glowing tail behind it.
+        float band = x > 0.0 ? exp(-x * x * 2.0) : exp(-x * x * 0.35);
+        vec3 hue = 0.5 + 0.5 * cos(6.28318 * (fract(seed * 0.37) + x * 0.22 + across * 0.8 + vec3(0.0, 0.33, 0.67)));
+        float fade = smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(0.75, 1.0, t));
+        sweepGlow += hue * band * fade;
+      }
+      vec3 lit = clamp(sweepGlow * SWEEP_ALPHA * uLightWaves * tube * vis, 0.0, 1.0);
+      color = 1.0 - (1.0 - color) * (1.0 - lit);
+    }
   }
 
   outColor = vec4(clamp(color, 0.0, 1.0), 1.0);
@@ -953,6 +1135,7 @@ function createSkyScene(): Scene {
 
   let ambientT = 0;
   let brushPhase = 0;
+  let dayOffset = 0;
   // The treble trigger for floater waves. Its hold is rewritten each tick from
   // the Wave frequency setting (the listener reads spec.hold live).
   const trebleSpec: BeatListenerSpec = { source: "high", refractorySec: WAVE_REFRACTORY_SEC, hold: 0 };
@@ -987,6 +1170,7 @@ function createSkyScene(): Scene {
 
       ambientT = 0;
       brushPhase = 0;
+      dayOffset = 0;
       trebleListener.reset();
       beatListener.reset();
       sweepT0.fill(WAVE_DEAD_T0);
@@ -1080,11 +1264,18 @@ function createSkyScene(): Scene {
       // anim.barPhase (see file header).
       brushPhase = advanceBrushPhase(brushPhase, dt);
 
+      // Day cycle: Time of day is where the sky starts, Day drift how fast it
+      // moves on from there (see file header).
+      dayOffset = advanceDayOffset(dayOffset, dt, resolveSceneSetting(ID, settingFor("dayDrift")));
+      const dayPhaseRaw = resolveSceneSetting(ID, settingFor("timeOfDay")) + dayOffset;
+      const dayPhase = dayPhaseRaw - Math.floor(dayPhaseRaw);
+
       gl.disable(gl.BLEND);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
       displayProg.use();
       uploadCommonUniforms(displayProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
       displayProg.setF("uBrushPhase", brushPhase);
+      displayProg.setF("uDayPhase", dayPhase);
       wavePool.upload(displayProg);
       displayProg.setFv("uSweepT0", sweepT0);
       displayProg.setFv("uSweepSeed", sweepSeed);
