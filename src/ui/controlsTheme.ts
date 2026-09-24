@@ -160,11 +160,13 @@ const stylesheet = `
  * (display: contents), which also neutralizes position: fixed here since
  * a display: contents element generates no box of its own to position. The
  * spectrum card stays put; the meters (src/ui/audioMeters.ts) scroll in
- * their own strip beneath it. */
+ * their own strip beneath it. Its top clears index.html's #sceneNav (the
+ * "‹ Gallery" chip row, 36px tall at top:16px, which shares this corner)
+ * by an 8px gap rather than covering it. */
 .vc-spectrum-col {
   width: 377px; flex: none; display: flex; flex-direction: column; gap: 4px;
-  max-height: calc(100vh - 74px);
-  position: fixed; top: 16px; left: 16px; z-index: 30;
+  max-height: calc(100vh - 76px);
+  position: fixed; top: 60px; left: 16px; z-index: 30;
 }
 .vc-spectrum-col > * { flex-shrink: 0; }
 .vc-spectrum-col > .vc-meters { flex-shrink: 1; min-height: 0; overflow-y: auto; }

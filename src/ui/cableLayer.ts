@@ -179,13 +179,13 @@ function cablePathD(
       `M${pt.x},${pt.y} H${jackStubX} ` +
       `C${jackStubX + dir * dx1},${pt.y} ${wpX - dir * dx1},${wpY} ${wpX},${wpY} ` +
       `C${wpX + dir * dx2},${wpY} ${portStubX - dir * dx2},${port.y} ${portStubX},${port.y} ` +
-      `H${port.x},${port.y}`
+      `H${port.x}`
     );
   }
   const dx = Math.max(40, Math.abs(portStubX - jackStubX) * 0.55);
   const cp1x = jackStubX + dir * dx;
   const cp2x = portStubX - dir * dx;
-  return `M${pt.x},${pt.y} H${jackStubX} C${cp1x},${pt.y} ${cp2x},${port.y} ${portStubX},${port.y} H${port.x},${port.y}`;
+  return `M${pt.x},${pt.y} H${jackStubX} C${cp1x},${pt.y} ${cp2x},${port.y} ${portStubX},${port.y} H${port.x}`;
 }
 
 function pathEl(cls: string, d: string, color: string): SVGPathElement {
