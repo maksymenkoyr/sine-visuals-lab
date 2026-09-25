@@ -101,7 +101,7 @@ const SPARKLE: SceneSetting = {
   min: 0,
   max: 1,
   step: 0.05,
-  default: 0.4,
+  default: 0.41,
   // Directly the hats/cymbals dial.
   auto: { brightness: 0.45, attack: 0.15 },
   // Two signals across two layers (a treble hit, or — with Sparkle sustain
@@ -122,7 +122,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.5, // -> the old fixed noise-sampling frequency, exactly
+    default: 0.35, // -> the old fixed noise-sampling frequency, exactly
     // Pure framing geometry the user tunes to taste, same reasoning as
     // sparkleGrain's weight: 0 — not something the music profile should
     // silently redecide underneath a chosen look.
@@ -135,7 +135,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.35,
+    default: 0.11,
     // Bar-locked zoom needs a steady tempo to lock to; slower music has more room for it.
     auto: { pulse: 0.3, tempo: -0.15 },
   },
@@ -147,7 +147,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.5,
+    default: 0.21,
     // Rings read best against punchy, uncluttered material.
     auto: { attack: 0.35, pulse: 0.25, density: -0.2 },
     // A bass onset OR a broadband beat, unconditionally — no single
@@ -166,7 +166,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.5,
+    default: 0.44,
     // Wander speed tracks the music's own tempo. Deliberately no `pulse`
     // weight: driftBeat already tracks punchiness (pulse: 0.35 below), and
     // weighting both the same way meant Auto walked them up together on the
@@ -182,7 +182,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.3,
+    default: 0.07,
     // Beat-locked lurches only make sense with real beats to lurch on.
     auto: { pulse: 0.35, attack: 0.2 },
     // The lurch fires on anim.onset today — a plain Beat default.
@@ -196,7 +196,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.45, // -> weighted toward the jolt (see advanceKickJolt's driftKick^2), so a lower default would ship with the jolt this setting exists for effectively invisible
+    default: 0.18, // -> weighted toward the jolt (see advanceKickJolt's driftKick^2), so a lower default would ship with the jolt this setting exists for effectively invisible
     // Dark/bass-heavy mixes carry more kick presence to pump on.
     auto: { brightness: -0.3, attack: 0.2 },
     // The jolt is driven continuously by anim.lowPulse today — a plain Bass
@@ -211,7 +211,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.4,
+    default: 0.74,
     // Swells with volume read best on tracks with real quiet->loud range;
     // an already-dense mix doesn't need more.
     auto: { dynamics: 0.3, density: -0.15 },
@@ -229,7 +229,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.3,
+    default: 0,
     // Same auto weights as Beat surge (pulse/attack) — punchy music wants
     // both — but its own independent runtime magnitude and a distinct
     // visual channel; see uChurnDrive's comment in FRAG and extraUniforms.
@@ -246,7 +246,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.5,
+    default: 1,
     // A dark mix wants the low-end swell emphasized; a bright one doesn't need it.
     auto: { brightness: -0.4 },
     // uLowPulse directly — a plain Bass hit default.
@@ -260,7 +260,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.35,
+    default: 0,
     // Busy mids churn the filaments; a bright mix reads as more mid-heavy too.
     auto: { density: 0.35, brightness: 0.1 },
     // uMid directly (the slewed level, not a hit pulse) — a plain Mid level default.
@@ -274,7 +274,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.6,
+    default: 0.76,
     // Only lean into drop behavior on a track that actually has real dynamic swings.
     auto: { dynamics: 0.45 },
   },
@@ -286,7 +286,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.4, // -> today's old fixed resting sharpness/floor-cut, closely
+    default: 0.57, // -> today's old fixed resting sharpness/floor-cut, closely
     // A busy mix wants the filaments legible (less fog); a dark mix reads as
     // moodier with more haze around them.
     auto: { density: -0.3, brightness: -0.2 },
@@ -299,7 +299,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.7,
+    default: 0.86,
     // Beat-snap only reads as a snap on music with actual beats to snap to.
     // Kept low (not the ~0.9 that `pulse` alone would floor near on almost
     // any locked-tempo track — 60% tempoLock saturates for basically all
@@ -321,7 +321,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.6,
+    default: 0.75,
     // Same reasoning as ripple, for brightness punch instead of ring shape.
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
     // uBeatPulse directly — a plain Beat default. Used to be a continuous
@@ -338,7 +338,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.3,
+    default: 0.68,
     // Already music-driven by construction (it reads the live centroid
     // directly, see FRAG's huePhase) — no auto table needed on top of that.
     reads: ["anim.centroid"],
@@ -360,7 +360,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.5, // -> the old fixed 1.5x gain (see the *3.0 in FRAG)
+    default: 1, // -> the old fixed 1.5x gain (see the *3.0 in FRAG)
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.5 },
   },
@@ -372,7 +372,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.5, // -> the old fixed pow() exponent of 8.0
+    default: 0.52, // -> the old fixed pow() exponent of 8.0
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.35 },
   },
@@ -384,7 +384,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.5, // -> the old fixed noise scale of 38.0
+    default: 0.11, // -> the old fixed noise scale of 38.0
     advanced: true,
     // Left off the master: glint size reads as a taste choice, not an
     // intensity one, and tying it to SPARKLE would make "stronger" also
@@ -412,7 +412,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.5, // -> the old fixed crest-gate smoothstep(0.15, 0.6, acc)
+    default: 0.73, // -> the old fixed crest-gate smoothstep(0.15, 0.6, acc)
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.2 },
   },
@@ -424,7 +424,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0, // -> today's behavior: glints only follow the onset pulse
+    default: 0.03, // -> today's behavior: glints only follow the onset pulse
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.3 },
   },
@@ -444,7 +444,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0, // off until touched — an added look, not something existing saved looks should suddenly grow
+    default: 0.67, // off until touched — an added look, not something existing saved looks should suddenly grow
     // Same reasoning as sparkleGrain: a shape/taste choice, not an
     // intensity one, so the master knob leaves it alone.
     macro: { driver: SPARKLE, weight: 0 },
