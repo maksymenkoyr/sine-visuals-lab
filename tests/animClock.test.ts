@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createAnimClock } from "../src/render/animClock.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 import type { SilenceGateMarks } from "../src/audio/silenceGate.ts";
+import type { HitShape } from "../src/audio/hitStrength.ts";
 
 const DT = 1 / 60;
 
@@ -57,5 +58,69 @@ describe("createAnimClock", () => {
     const loudBands = new Float32Array(NUM_BANDS).fill(0.9);
     clock.advance(DT, frame({ bands: loudBands, level: 1 }));
     expect(first.hits.low.ratio).toBe(firstRatio);
+  });
+
+  // Graded pulse height (src/audio/hitStrength.ts), threaded through
+  // advance()'s optional `hit` — see animClock's own doc comment for why an
+  // omitted `hit` must reproduce today's flat-1 beatPulse exactly.
+  it("omitted `hit` -> beatPulse snaps to exactly 1 on onset (today's behavior)", () => {
+    const clock = createAnimClock();
+    const anim = clock.advance(DT, frame({ onset: true }));
+    expect(anim.beatPulse).toBe(1);
+  });
+
+  it("with a shape at amount 1 and loudness 1, beatPulse on onset lands on frame.level", () => {
+    const clock = createAnimClock();
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0 };
+    const anim = clock.advance(DT, frame({ onset: true, level: 0.37 }), undefined, undefined, undefined, { shape });
+    expect(anim.beatPulse).toBeCloseTo(0.37, 5);
+  });
+
+  it("hitStrength.low mirrors bandEnergy's own graded hit when a shape is given", () => {
+    const clock = createAnimClock();
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0 };
+    const quietBands = new Float32Array(NUM_BANDS).fill(0.1);
+    for (let i = 0; i < 30; i++) clock.advance(DT, frame({ bands: quietBands, level: 1 }), undefined, undefined, undefined, { shape });
+    const loudBands = new Float32Array(NUM_BANDS).fill(0.6);
+    const anim = clock.advance(DT, frame({ bands: loudBands, level: 1 }), undefined, undefined, undefined, { shape });
+    expect(anim.hitStrength.low.strength).toBeGreaterThan(0);
+    expect(anim.hitStrength.low.strength).toBeLessThanOrEqual(1);
+  });
+
+  // The sensitivity line (src/audio/bandLine.ts), threaded through
+  // advance()'s optional `line` — see animClock's own doc comment for why an
+  // omitted `line` must reproduce a driveless frame exactly.
+  it("omitted `line` -> lineDrive is 0 and lineExcess is null", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    const anim = clock.advance(DT, frame({ bands }));
+    expect(anim.lineDrive).toBe(0);
+    expect(anim.lineExcess).toBeNull();
+  });
+
+  it("a line drawn flat to the bottom at strength 1 makes lineDrive equal frame.energy", () => {
+    const clock = createAnimClock();
+    const bands = Float32Array.from({ length: NUM_BANDS }, (_, i) => (i % 7) / 10);
+    const energy = Array.from(bands).reduce((a, b) => a + b, 0) / NUM_BANDS;
+    const line = new Float32Array(NUM_BANDS).fill(0);
+    const anim = clock.advance(DT, frame({ bands, energy }), undefined, undefined, undefined, undefined, {
+      heights: line,
+      strength: 1,
+    });
+    expect(anim.lineDrive).toBeCloseTo(energy, 5);
+    expect(anim.lineExcess).not.toBeNull();
+  });
+
+  it("lineDrive holds its peak and releases instead of dropping with the raw drive", () => {
+    const clock = createAnimClock();
+    const line = new Float32Array(NUM_BANDS).fill(0);
+    const loud = new Float32Array(NUM_BANDS).fill(0.8);
+    const quiet = new Float32Array(NUM_BANDS).fill(0);
+    const opts = { heights: line, strength: 1 };
+    const peak = clock.advance(DT, frame({ bands: loud }), undefined, undefined, undefined, undefined, opts).lineDrive;
+    const after = clock.advance(DT, frame({ bands: quiet }), undefined, undefined, undefined, undefined, opts).lineDrive;
+    expect(peak).toBeCloseTo(0.8, 5);
+    expect(after).toBeGreaterThan(0);
+    expect(after).toBeLessThan(peak);
   });
 });

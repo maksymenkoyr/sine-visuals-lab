@@ -10,6 +10,23 @@ import { verdictOf, type OnsetDiag, type OnsetVerdict } from "../audio/onsetDiag
 import { FLUX_THRESHOLD_MARGIN, FLUX_THRESHOLD_MULT, ONSET_REFRACTORY_SEC } from "../audio/features.ts";
 import { GROUP_TUNING } from "../render/bandEnergy.ts";
 import {
+  hitStandout,
+  HIT_AMOUNT_DEFAULT,
+  HIT_AMOUNT_MAX,
+  HIT_AMOUNT_MIN,
+  HIT_FLOOR_DEFAULT,
+  HIT_FLOOR_MAX,
+  HIT_FLOOR_MIN,
+  HIT_KNEE_DEFAULT,
+  HIT_KNEE_MAX,
+  HIT_KNEE_MIN,
+  HIT_LOUDNESS_DEFAULT,
+  HIT_LOUDNESS_MAX,
+  HIT_LOUDNESS_MIN,
+  type HitParts,
+  type HitShape,
+} from "../audio/hitStrength.ts";
+import {
   AUTO_SKY,
   FONT_MONO,
   HOT_RED,
@@ -36,6 +53,13 @@ import {
   spacer,
   unitStyle,
 } from "./controlsKit.ts";
+// The Hit strength card's four sliders reuse deviceMenu.ts's own slider row
+// builder rather than duplicate it — see that file's header comment on
+// createControlRow. deviceMenu.ts imports createAudioMeters from this file
+// in the other direction; that's fine (nothing but createDeviceMenu/
+// createAudioMeters actually call across the two at runtime, well after
+// both modules have finished loading).
+import { createControlRow } from "./deviceMenu.ts";
 
 /**
  * The meters under the spectrum card: everything the audio pipeline already
@@ -82,6 +106,15 @@ import {
  *    an Onset row: the Beat lane's same ratio as a full-width live bar
  *    with the firing line marked — the lane is the history, the bar is the
  *    reading you can see from across the room.
+ *  - Hit strength: the one card that's controls *and* monitors together —
+ *    src/audio/hitStrength.ts's Dimension/Knee/Loudness mix/Floor sliders,
+ *    then a Curve (hitStandout(ratio, knee) plotted live, a dot per
+ *    HITS_LANES lane at that lane's own last-hit ratio) and a Strength
+ *    history in the hits history's own four-lane layout — a bar per fired
+ *    hit up to its final strength, with its stand-out and loudness parts
+ *    as two small dots on the same column, and a dashed guide at Floor —
+ *    so dragging any of the four sliders shows exactly what it did to a
+ *    real hit rather than just a number.
  *  - Character: one row per entry in MUSIC_DIALS (never a hardcoded list),
  *    each marking NEUTRAL with a tick — what autoTune.ts resolves every "A"
  *    chip against, otherwise invisible. Copy comes from DIAL_LABELS. Plus
@@ -179,10 +212,13 @@ export interface AudioMeters {
 export interface AudioMetersDeps {
   /** The Loudness card's Reset chip: start the integrated reading over. */
   onLufsReset: () => void;
-  /** The Rhythm card's Beat grid row — the one control in the meters
-   *  panel, since its effect is what the Beat trace beneath it shows. The
-   *  stored index into BEAT_GRIDS for the current scene (src/audio/beatGrid.ts);
-   *  the row re-reads `get` on its text tick so a scene switch is picked up. */
+  /** The Rhythm card's Beat grid row and the Hit strength card's four
+   *  sliders (below) are the only controls that live in the meters panel
+   *  rather than the Input card — each one's effect is exactly what a trace
+   *  right beneath it shows, so splitting the knob from its own picture
+   *  would put the two a card apart. The stored index into BEAT_GRIDS for
+   *  the current scene (src/audio/beatGrid.ts); the row re-reads `get` on
+   *  its text tick so a scene switch is picked up. */
   beatGrid: { get: () => number; set: (value: number) => void };
   /** The Gate card's History trace guides and the Rhythm card's hits
    *  history hint (hitsRuleHint) — the same two marks the Input card's
@@ -190,6 +226,12 @@ export interface AudioMetersDeps {
    *  fresh every draw()/text tick so dragging a mark in the Input card
    *  moves the dashed lines and the hint's numbers live. */
   getSilenceGate: () => SilenceGateMarks;
+  /** The Hit strength card's four sliders — see src/audio/hitStrength.ts
+   *  for the formula they shape. Global per device, like getSilenceGate
+   *  above, not per scene: how a hit's stand-out and loudness blend into
+   *  its pulse height is a taste about detection itself, not one scene's
+   *  look, so it carries across scene switches the same way. */
+  hitShape: { get: () => HitShape; set: (partial: Partial<HitShape>) => void };
 }
 
 const PEAK_FALL_PER_SEC = 1.2; // matches spectrumStrip.ts's peak-hold decay
@@ -903,6 +945,17 @@ function laneNote(ratio: number | null, fires: number): string {
   return `${ratio === null ? "--" : ratio.toFixed(2)} · ${fires}/${HISTORY_SPAN_SEC}s`;
 }
 
+/** The Hit strength card's per-lane legend note — that lane's last fired
+ *  hit's three numbers. `anim.hitStrength.*` (see animClock.ts) always
+ *  holds a valid HitParts once `anim` exists (initial zeros before that
+ *  lane's very first hit, then the last one's numbers from then on), so
+ *  this only reads "--" while there's no anim at all — idle, same as every
+ *  other row's convention in this file. */
+function hitStrengthNote(parts: HitParts | null): string {
+  if (!parts) return "--";
+  return `${parts.standout.toFixed(2)} · ${parts.loudness.toFixed(2)} → ${parts.strength.toFixed(2)}`;
+}
+
 /** Rhythm's hit history. Feeds: Beat from `frame.onset` (the detector edge,
  *  pre-grid — the Beat trace row already shows it against the grid) and
  *  `beatDiag` (device-local only, see AudioMeters.update's own doc — a null
@@ -1060,6 +1113,202 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks) {
     resetColumn(): void {
       ring.resetColumn();
     },
+  };
+}
+
+// ---- Hit strength: the two monitors --------------------------------
+// (src/audio/hitStrength.ts) — the sliders themselves are plain
+// createControlRow instances built in createAudioMeters below, next to
+// these two.
+
+const HIT_CURVE_HEIGHT_CSS_PX = 56;
+
+/** The knee curve — hitStandout(ratio, knee) plotted for ratio in
+ *  1..ONSET_METER_MAX — plus a dot per HITS_LANES lane at that lane's own
+ *  last-hit ratio, so dragging Knee shows exactly what it does to a real
+ *  hit rather than just a number moving. A function plot, not a rolling
+ *  history: nothing to accumulate per frame, so draw() just takes this
+ *  tick's inputs and redraws from scratch (a canvas clear plus a few dozen
+ *  line segments is cheap — see file header's "fills move every frame"
+ *  rule). */
+function createHitCurve() {
+  const canvas = document.createElement("canvas");
+  canvas.style.cssText = `display: block; width: 100%; height: ${HIT_CURVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
+  const ctx = canvas.getContext("2d")!;
+  let cssWidth = 0;
+
+  /** Same "no layout yet" guard as every other canvas in this file
+   *  (createColumnRing's own ensureSize) — a folded/closed panel has a
+   *  zero-size rect. */
+  function ensureSize(): boolean {
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.round(rect.width);
+    if (w <= 0) return false;
+    if (w === cssWidth) return true;
+    cssWidth = w;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(HIT_CURVE_HEIGHT_CSS_PX * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return true;
+  }
+
+  let lastKey = "";
+  const xOf = (ratio: number, w: number) => ((ratio - 1) / (ONSET_METER_MAX - 1)) * (w - 1);
+  const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (HIT_CURVE_HEIGHT_CSS_PX - 2);
+
+  return {
+    canvas,
+    /** `laneRatios[i]` is HITS_LANES[i]'s own last-hit ratio — null before
+     *  that lane has ever fired, or on a device with no local reading for
+     *  it (the Beat lane on synthetic/renderer — see createHitsHistory's
+     *  own doc comment for the same gap). */
+    draw(knee: number, laneRatios: readonly (number | null)[]): void {
+      // The curve only changes when Knee or a lane's last hit does — and
+      // both are rare next to the tick rate — so a repeat call is a no-op
+      // rather than a clear+stroke+rect read every frame. The width check
+      // stays first so a panel resize still repaints.
+      if (!ensureSize()) return;
+      const key = `${cssWidth}|${knee}|${laneRatios.join(",")}`;
+      if (key === lastKey) return;
+      lastKey = key;
+      const w = cssWidth;
+      const h = HIT_CURVE_HEIGHT_CSS_PX;
+      ctx.clearRect(0, 0, w, h);
+
+      // The firing line itself, at ratio == 1 (the left edge) — same
+      // hairline-at-the-threshold convention as the hits history's own
+      // per-lane line at ratio == 1.
+      ctx.fillStyle = "rgba(255,255,255,0.18)";
+      ctx.fillRect(0, 0, 1, h);
+
+      ctx.strokeStyle = "rgba(255,255,255,0.7)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const STEPS = 48;
+      for (let i = 0; i <= STEPS; i++) {
+        const ratio = 1 + (i / STEPS) * (ONSET_METER_MAX - 1);
+        const x = xOf(ratio, w);
+        const y = yOf(hitStandout(ratio, knee));
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      for (let li = 0; li < HITS_LANES.length; li++) {
+        const ratio = laneRatios[li];
+        if (ratio === null || !Number.isFinite(ratio)) continue;
+        const clamped = clamp(ratio, 1, ONSET_METER_MAX);
+        const x = xOf(clamped, w);
+        const y = yOf(hitStandout(clamped, knee));
+        ctx.fillStyle = HITS_LANES[li].color;
+        ctx.beginPath();
+        ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    },
+  };
+}
+
+// Per-lane column layout for the strength history below: [strength,
+// standout, loudness] per HITS_LANES entry, in that lane order — reusing
+// HITS_LANES' colours/labels rather than a second copy of them.
+function hitStrengthLaneIdx(lane: number): { strength: number; standout: number; loudness: number } {
+  const base = lane * 3;
+  return { strength: base, standout: base + 1, loudness: base + 2 };
+}
+const HIT_STRENGTH_SERIES_COUNT = HITS_LANES.length * 3;
+
+/** The Strength history: same four-lane layout as the hits history above
+ *  (createHitsHistory) — Beat/Low/Mid/High, HITS_LANES' own colours and
+ *  HITS_LANE_HEIGHT_PX — but each column is a graded hit's three numbers
+ *  rather than a fixed-height event tick: a bar up to that hit's final
+ *  `strength`, with its `standout` and `loudness` parts as two small dots
+ *  on the same column so all three stay comparable at a glance. Only
+ *  written on the tick a lane actually fires (createColumnRing's own
+ *  NaN-lifts-the-pen convention leaves every other column blank) — a
+ *  continuous trace would just be a flat line holding the last hit's value,
+ *  which isn't what "the last hit's numbers" means here. */
+function createHitStrengthHistory() {
+  const ring = createColumnRing(HIT_STRENGTH_SERIES_COUNT, HITS_HEIGHT_PX);
+  const { canvas, ctx } = ring;
+
+  function laneY(laneIdx: number, v: number): number {
+    const top = laneIdx * HITS_LANE_HEIGHT_PX;
+    return top + 1 + (1 - clamp(v, 0, 1)) * (HITS_LANE_HEIGHT_PX - 2);
+  }
+
+  function draw(floor: number): void {
+    const w = ring.width;
+    const len = ring.length;
+    ctx.clearRect(0, 0, w, HITS_HEIGHT_PX);
+
+    // Divider between lanes, same as the hits history's own.
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.fillRect(0, HITS_LANE_HEIGHT_PX - 0.5, w, 1);
+
+    for (let li = 0; li < HITS_LANES.length; li++) {
+      const lane = HITS_LANES[li];
+      const idx = hitStrengthLaneIdx(li);
+
+      if (floor > 0) {
+        ctx.strokeStyle = withAlpha(lane.color, 0.4);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        const y = Math.round(laneY(li, floor)) - 0.5;
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      for (let x = 0; x <= len; x++) {
+        const strength = x === len ? ring.live(idx.strength) : ring.at(x, idx.strength);
+        if (Number.isNaN(strength)) continue;
+        const px = x === len ? w - 1 : x;
+        const top = li * HITS_LANE_HEIGHT_PX;
+        const yTop = laneY(li, strength);
+        ctx.fillStyle = withAlpha(lane.color, 0.85);
+        ctx.fillRect(px, yTop, 1, top + HITS_LANE_HEIGHT_PX - yTop);
+
+        const standout = x === len ? ring.live(idx.standout) : ring.at(x, idx.standout);
+        const loudness = x === len ? ring.live(idx.loudness) : ring.at(x, idx.loudness);
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.fillRect(px, Math.round(laneY(li, standout)) - 0.5, 1, 1);
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.fillRect(px, Math.round(laneY(li, loudness)) - 0.5, 1, 1);
+      }
+    }
+  }
+
+  return {
+    canvas,
+    /** Beat from `frame.onset` (the detector edge, pre-grid) and
+     *  `anim.hitStrength.beat`; Low/Mid/High from `anim.lowOnset`/
+     *  `midOnset`/`highOnset` and `anim.hitStrength.low/mid/high` — same
+     *  source split as createHitsHistory's own push(). */
+    push(frame: FeatureFrame | null, anim: AnimFrame | null, nowMs: number): void {
+      if (!anim) {
+        ring.push(new Array(HIT_STRENGTH_SERIES_COUNT).fill(null), nowMs);
+        return;
+      }
+      const vals: (number | null)[] = new Array(HIT_STRENGTH_SERIES_COUNT).fill(null);
+      const setLane = (li: number, fired: boolean, parts: HitParts): void => {
+        if (!fired) return;
+        const idx = hitStrengthLaneIdx(li);
+        vals[idx.strength] = parts.strength;
+        vals[idx.standout] = parts.standout;
+        vals[idx.loudness] = parts.loudness;
+      };
+      setLane(0, !!frame?.onset, anim.hitStrength.beat);
+      setLane(1, anim.lowOnset, anim.hitStrength.low);
+      setLane(2, anim.midOnset, anim.hitStrength.mid);
+      setLane(3, anim.highOnset, anim.hitStrength.high);
+      ring.push(vals, nowMs);
+    },
+    draw,
+    resetColumn: ring.resetColumn,
   };
 }
 
@@ -1330,6 +1579,114 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm" });
   rhythmCard.body.append(rhythmRow, spacer(), gridRow.el, spacer(), hitsHistory.el, spacer(), beat.el, spacer(), onset.el);
 
+  // ---- Hit strength ----
+  // Controls and monitors together, right after Rhythm — same reasoning as
+  // that card's own Beat grid row (AudioMetersDeps.beatGrid's doc comment):
+  // each slider's effect is exactly what the Curve/Strength traces beneath
+  // it show. See src/audio/hitStrength.ts for the formula these four shape.
+  const hitAmountRow = createControlRow({
+    label: "Dimension",
+    accent: NEUTRAL_ACCENT,
+    min: HIT_AMOUNT_MIN,
+    max: HIT_AMOUNT_MAX,
+    defaultValue: HIT_AMOUNT_DEFAULT,
+    mapping: "linear",
+    unit: "%",
+    format: (v) => String(Math.round(v * 100)),
+    description:
+      "How much a hit's size counts. Off: every hit lands at full strength, exactly as before. Full: a hit's pulse height is its graded strength, shown in Strength below.",
+  });
+  hitAmountRow.onChange((v) => deps.hitShape.set({ amount: v }));
+  hitAmountRow.sync(() => deps.hitShape.get().amount);
+
+  const hitKneeRow = createControlRow({
+    label: "Knee",
+    accent: NEUTRAL_ACCENT,
+    min: HIT_KNEE_MIN,
+    max: HIT_KNEE_MAX,
+    defaultValue: HIT_KNEE_DEFAULT,
+    mapping: "linear",
+    format: (v) => v.toFixed(2),
+    description:
+      "How sharply stand-out saturates above the firing line — the Curve below plots exactly this. Small: even a hit just over the line reads as nearly full strength. Large: a hit has to clear the line by a lot before it counts as strong.",
+  });
+  hitKneeRow.onChange((v) => deps.hitShape.set({ knee: v }));
+  hitKneeRow.sync(() => deps.hitShape.get().knee);
+
+  const hitLoudnessRow = createControlRow({
+    label: "Loudness mix",
+    accent: NEUTRAL_ACCENT,
+    min: HIT_LOUDNESS_MIN,
+    max: HIT_LOUDNESS_MAX,
+    defaultValue: HIT_LOUDNESS_DEFAULT,
+    mapping: "linear",
+    unit: "%",
+    format: (v) => String(Math.round(v * 100)),
+    description:
+      "How much of a hit's strength comes from how loud it actually was, rather than how far it stood out from the recent average. 0: stand-out only. 100: loudness only.",
+  });
+  hitLoudnessRow.onChange((v) => deps.hitShape.set({ loudness: v }));
+  hitLoudnessRow.sync(() => deps.hitShape.get().loudness);
+
+  const hitFloorRow = createControlRow({
+    label: "Floor",
+    accent: NEUTRAL_ACCENT,
+    min: HIT_FLOOR_MIN,
+    max: HIT_FLOOR_MAX,
+    defaultValue: HIT_FLOOR_DEFAULT,
+    mapping: "linear",
+    unit: "%",
+    format: (v) => String(Math.round(v * 100)),
+    description:
+      "Hits graded weaker than this count as nothing; the rest are rescaled to fill 0 to 100. 0: nothing is discarded — the dashed line in Strength below marks where it sits.",
+  });
+  hitFloorRow.onChange((v) => deps.hitShape.set({ floor: v }));
+  hitFloorRow.sync(() => deps.hitShape.get().floor);
+
+  const hitCurveRow = createMeterRow({
+    label: "Curve",
+    accent: NEUTRAL_ACCENT,
+    unit: "×",
+    description:
+      "Stand-out as a function of how far a hit's ratio cleared the firing line, at the current Knee. Dots mark each lane's most recent hit.",
+  });
+  const hitCurve = createHitCurve();
+  hitCurveRow.el.children[1].replaceWith(hitCurve.canvas);
+  hitCurveRow.setReadout(ONSET_METER_MAX.toFixed(1));
+
+  const hitStrengthRow = createMeterRow({
+    label: "Strength",
+    accent: NEUTRAL_ACCENT,
+    unit: "s",
+    description:
+      "Each fired hit's final strength (the tall bar), with its stand-out and loudness parts as two small dots on the same column, so the three stay comparable. Dashed line is Floor.",
+  });
+  const hitStrengthHistory = createHitStrengthHistory();
+  hitStrengthRow.el.children[1].replaceWith(hitStrengthHistory.canvas);
+  hitStrengthRow.setReadout(String(HISTORY_SPAN_SEC));
+  const hitStrengthLegend = createTraceLegend(HITS_LANES.map((l) => ({ color: l.color, label: l.label })));
+  hitStrengthHistory.canvas.after(hitStrengthLegend.el);
+
+  // Per-lane last-hit ratio, for the Curve's own dots — updated only on the
+  // tick each lane fires (see the update() block below), so a dot always
+  // marks a real hit rather than the ratio's live wander below the line.
+  const lastHitRatio: (number | null)[] = [null, null, null, null];
+
+  const hitStrengthCard = createCard({ title: "Hit strength", accent: NEUTRAL_ACCENT, foldId: "hitStrength" });
+  hitStrengthCard.body.append(
+    hitAmountRow.el,
+    spacer(),
+    hitKneeRow.el,
+    spacer(),
+    hitLoudnessRow.el,
+    spacer(),
+    hitFloorRow.el,
+    spacer(),
+    hitCurveRow.el,
+    spacer(),
+    hitStrengthRow.el,
+  );
+
   // ---- Character ----
   const dialRows = MUSIC_DIALS.map((dial) => ({
     dial,
@@ -1383,7 +1740,16 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
 
   // The scope leads: it's the one live picture of the sound itself, and the
   // first thing to check when the visuals seem off.
-  root.append(metersHeader, scopeCard.el, signalCard.el, gateCard.el, lufsCard.el, rhythmCard.el, characterCard.el);
+  root.append(
+    metersHeader,
+    scopeCard.el,
+    signalCard.el,
+    gateCard.el,
+    lufsCard.el,
+    rhythmCard.el,
+    hitStrengthCard.el,
+    characterCard.el,
+  );
 
   // Ring buffer of columns, one pixel each — oldest at `head`, newest just
   // before it — plus the column currently being accumulated.
@@ -1637,6 +2003,40 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         beatTrace.resetColumn();
         hitsHistory.resetColumn();
         prevBeatPhase = null;
+      }
+
+      // ---- Hit strength ----
+      if (!hitStrengthCard.fold?.isFolded()) {
+        if (anim) {
+          // Each lane's dot on the Curve tracks its own *last-hit* ratio,
+          // not this tick's live reading (which wanders below the firing
+          // line between hits and would put the dot somewhere a real hit
+          // never landed) — only overwritten on the exact tick that lane
+          // fires, same convention hitStrengthHistory's own push() below
+          // uses for its bars.
+          if (frame?.onset) lastHitRatio[0] = beatDiag ? beatDiag.ratio : null;
+          if (anim.lowOnset) lastHitRatio[1] = anim.hits.low.ratio;
+          if (anim.midOnset) lastHitRatio[2] = anim.hits.mid.ratio;
+          if (anim.highOnset) lastHitRatio[3] = anim.hits.high.ratio;
+        }
+        hitStrengthHistory.push(frame, anim, nowMs);
+        // Read fresh every draw(), like the Gate History's own marks — a
+        // slider drag should move the curve/guide immediately.
+        const shape = deps.hitShape.get();
+        hitCurve.draw(shape.knee, lastHitRatio);
+        hitStrengthHistory.draw(shape.floor);
+        if (text) {
+          const parts = anim
+            ? [anim.hitStrength.beat, anim.hitStrength.low, anim.hitStrength.mid, anim.hitStrength.high]
+            : null;
+          for (let li = 0; li < HITS_LANES.length; li++) {
+            hitStrengthLegend.setNote(li, hitStrengthNote(parts ? parts[li] : null));
+          }
+        }
+      } else {
+        // Folded: don't accumulate a column while hidden, same as the hits
+        // history above.
+        hitStrengthHistory.resetColumn();
       }
 
       // ---- Character ----

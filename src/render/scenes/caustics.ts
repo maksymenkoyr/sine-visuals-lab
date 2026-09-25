@@ -88,12 +88,12 @@ import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHas
 // in noiseHash.ts (its header is the standing explanation) so other drifting
 // scenes share them.
 // The master treble-sparkle knob. Defined outside SETTINGS so the sub-params
-// further down (density, brightness ceiling, grain, warp, spread, sustain —
-// all `advanced`, in the Look group) can name it directly as their `macro`
-// driver: a spec reference costs nothing extra to resolve and can't drift out
-// of sync with a key string. See their own leading comment further down for
-// what each sub-param actually does; this one just carries the auto weights
-// and stays the everyday slider.
+// further down (density, brightness ceiling, grain, warp, spread, sustain,
+// line source — all `advanced`, in the Look group) can name it directly as
+// their `macro` driver: a spec reference costs nothing extra to resolve and
+// can't drift out of sync with a key string. See their own leading comment
+// further down for what each sub-param actually does; this one just carries
+// the auto weights and stays the everyday slider.
 const SPARKLE: SceneSetting = {
   key: "sparkle",
   label: "Treble sparkle",
@@ -321,6 +321,24 @@ const SETTINGS: SceneSetting[] = [
     // Same reasoning as ripple, for brightness punch instead of ring shape.
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
   },
+  // What Beat flash follows. At 0 it's the beat pulse — a punch when a hit
+  // *starts*, gone again while a loud sound merely holds (flux sees no rise
+  // in a sustained wall of noise, so it fires once at the front edge). At 1
+  // it's uEnergy, the plain average of every band: the flash stays up for
+  // as long as the music is loud, hit or no hit. An experiment in driving a
+  // beat reaction from level rather than rate-of-rise — no auto weights, so
+  // it sits at its default until touched, and 0 leaves the flash term
+  // exactly what it was.
+  {
+    key: "flashLevel",
+    label: "Flash from level",
+    description: "What Beat flash follows — hits only at the bottom, the overall loudness of every band at the top, so a long loud stretch stays lit instead of flashing once",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+  },
   {
     key: "centroidHue",
     label: "Spectral hue",
@@ -335,6 +353,26 @@ const SETTINGS: SceneSetting[] = [
     reads: ["anim.centroid"],
   },
   SPARKLE,
+  // The sensitivity line (src/audio/bandLine.ts, drawn on the Line card) as
+  // an alternate sparkle source: at 0 the glints still follow the treble hit
+  // detector exactly as before (see sparkleDrive in FRAG below); dialed up,
+  // they blend toward uLineDrive, so a line drawn to exclude the low/mid
+  // bands makes the glints track only the treble energy the user drew above
+  // it, and a strength pushed past 1 (the Line card's own Strength row) can
+  // light them at the faintest rise. Off the master: a source choice, not an
+  // intensity one, same convention as sparkleGrain above.
+  {
+    key: "sparkleLine",
+    label: "Sparkle from line",
+    description:
+      "How much the glints follow the sensitivity line drawn on the Line card instead of the treble hit detector — at full they light exactly as far as the spectrum rises above your line",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+    macro: { driver: SPARKLE, weight: 0 },
+  },
   // The constants that used to be hardcoded on the sparkle line in FRAG —
   // how bright, how many, how fine, how far the glints spread, and whether
   // they persist through a sustained wash instead of only flashing on a hit.
@@ -1173,19 +1211,23 @@ void main() {
 
   // Treble sparkle: fine glints gated to where the pattern is already bright
   // (ridge crests), driven by a high-band onset pulse — or, once
-  // uSparkleSustain is dialed up, kept alive through a sustained wash too.
-  // uSparkleBright/Density/Grain/Spread/Sustain used to be fixed constants
-  // here (1.5, 8.0, 38.0, smoothstep(0.15, 0.6, ...), pulse-only); each
-  // defaults to reproduce its old constant exactly (see the sparkleBright..
-  // sparkleSustain entries in SETTINGS above) and is a macro of uSparkle, so
-  // the master knob still moves all of them together.
+  // uSparkleSustain is dialed up, kept alive through a sustained wash too —
+  // or, once uSparkleLine is dialed up, by uLineDrive instead: the
+  // sensitivity line drawn on the Line card (src/audio/bandLine.ts) in place
+  // of the treble hit detector entirely. uSparkleBright/Density/Grain/
+  // Spread/Sustain used to be fixed constants here (1.5, 8.0, 38.0,
+  // smoothstep(0.15, 0.6, ...), pulse-only); each defaults to reproduce its
+  // old constant exactly (see the sparkleBright..sparkleSustain entries in
+  // SETTINGS above) and is a macro of uSparkle, so the master knob still
+  // moves all of them together.
   float sparkleLo = mix(${SPARKLE_SPREAD_LO_AT_0.toFixed(2)}, ${SPARKLE_SPREAD_LO_AT_1.toFixed(2)}, uSparkleSpread);
   float sparkleHi = mix(${SPARKLE_SPREAD_HI_AT_0.toFixed(2)}, ${SPARKLE_SPREAD_HI_AT_1.toFixed(2)}, uSparkleSpread);
   float crestGate = smoothstep(sparkleLo, sparkleHi, acc);
   // uHigh is the slewed continuous high-band level (vs. uHighPulse's
   // decaying onset spike) — max() rather than a blend so sustain=0 leaves
-  // the pulse-only drive bit-for-bit untouched.
-  float sparkleDrive = max(uHighPulse, uSparkleSustain * uHigh);
+  // the pulse-only drive bit-for-bit untouched. uSparkleLine at 0 leaves this
+  // whole mix() bit-for-bit what it was too.
+  float sparkleDrive = mix(max(uHighPulse, uSparkleSustain * uHigh), uLineDrive, uSparkleLine);
   // uSparkleWarp bends the coordinate glints are sampled at with its own
   // small warp pass — independent of the ridge loop's warpAmt above, so
   // dragging it changes only the glints' own curvature, never the ridges'.
@@ -1258,7 +1300,7 @@ void main() {
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
 
-  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * uBeatPulse * 1.5 + ring * 0.8
+  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * mix(uBeatPulse, uEnergy, uFlashLevel) * 1.5 + ring * 0.8
        + dropDrive * 0.5 + dropFlash * 1.2;
   // Dark-water floor: uFog=0 clips almost exactly today's old fixed cut
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips

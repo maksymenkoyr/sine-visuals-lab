@@ -83,6 +83,7 @@ import {
   setSilenceGateAuto,
   type SilenceGateReading,
 } from "./audio/silenceGate.ts";
+import { getHitShape, setHitShape } from "./audio/hitStrength.ts";
 import { isMicAuto, setMicAuto } from "./audio/micAuto.ts";
 import type { OnsetDiag } from "./audio/onsetDiag.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
@@ -96,6 +97,13 @@ import {
   resetBandGains,
   setBandGain,
 } from "./audio/bandGains.ts";
+import {
+  getBandLine,
+  getBandLineStrength,
+  resetBandLine,
+  setBandLineBand,
+  setBandLineStrength,
+} from "./audio/bandLine.ts";
 import {
   advanceAutoTune,
   resolveSceneSetting,
@@ -787,6 +795,11 @@ function wireDeviceMenu(): void {
     getBandGain: (sceneId, fader) => getBandGain(sceneId, fader),
     onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
+    getBandLine: (sceneId) => getBandLine(sceneId),
+    setBandLineBand: (sceneId, band, height) => setBandLineBand(sceneId, band, height),
+    resetBandLine: (sceneId) => resetBandLine(sceneId),
+    getBandLineStrength: (sceneId) => getBandLineStrength(sceneId),
+    setBandLineStrength: (sceneId, value) => setBandLineStrength(sceneId, value),
     onLufsReset: () => lufsAnalyser?.reset(),
     getBeatGrid: (sceneId) => getBeatGrid(sceneId),
     onBeatGridChange: (sceneId, value) => setBeatGrid(sceneId, value),
@@ -837,6 +850,8 @@ function wireDeviceMenu(): void {
     isSilenceGateAuto: () => isSilenceGateAuto(),
     onSilenceGateAutoToggle: (on) => setSilenceGateAuto(on),
     resolveSilenceGate: () => resolveSilenceGate(),
+    getHitShape: () => getHitShape(),
+    setHitShape: (partial) => setHitShape(partial),
     isMicAuto: (sceneId) => isMicAuto(sceneId, micAutoMembers),
     onMicAutoToggle: (sceneId, on) => setMicAuto(sceneId, on, micAutoMembers),
     getPowerMode: () => powerMode,
@@ -1377,8 +1392,25 @@ function loop(): void {
   // animClock.advance in that case). Feature extraction and the anim clock
   // itself (beat/flow/band-pulse/section-intensity decay) still run on every
   // rAF tick regardless of the render-rate cap below — only the GPU draw is
-  // rate-capped.
-  const anim = gained ? animClock.advance(dtSec, gained, smoothing, getBeatGrid(scene.id), resolveSilenceGate()) : null;
+  // rate-capped. `lastFluxRatio` is this same tick's local extractor reading
+  // (null on host/renderer paths with no local extractor — see its own doc
+  // comment below) — passed as the graded broadband pulse's own ratio so it
+  // doesn't have to fall back to a band's own ratio on a device that has a
+  // real broadband reading to give it. The last object is the sensitivity
+  // line (src/audio/bandLine.ts) — this scene's own drawn line and Strength,
+  // off `gained`'s already-band-gained bands, same per-scene shape as
+  // getBandGains above.
+  const anim = gained
+    ? animClock.advance(
+        dtSec,
+        gained,
+        smoothing,
+        getBeatGrid(scene.id),
+        resolveSilenceGate(),
+        { shape: getHitShape(), beatRatio: lastFluxRatio },
+        { heights: getBandLine(scene.id), strength: getBandLineStrength(scene.id) },
+      )
+    : null;
   if (anim) {
     lastAnim = anim;
     advanceAutoTune(dtSec, anim.profile);

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createBandEnergy } from "../src/render/bandEnergy.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 import { setBandSplit, resetBandSplit } from "../src/audio/bandSplit.ts";
+import type { HitShape } from "../src/audio/hitStrength.ts";
 
 const DT = 1 / 60;
 
@@ -133,6 +134,23 @@ describe("band energy", () => {
       fast.advance(DT, bass, 1);
     }
     expect(slow.low).toBeCloseTo(fast.low, 2);
+  });
+
+  it("level rises faster than it falls — a sound starting should read sooner than one trailing off", () => {
+    const bass = bandsWith([0, 1, 2, 3]);
+    const silence = bandsWith([]);
+
+    const energy = createBandEnergy();
+    for (let i = 0; i < 60; i++) energy.advance(DT, silence);
+    // Same number of ticks either direction: the rise should have covered
+    // more of its own distance to target than the fall has, since a rising
+    // level uses the faster of the two rates (see LEVEL_ATTACK_PER_SEC's
+    // own doc for why — a swell reading late is the thing this fixes).
+    for (let i = 0; i < 10; i++) energy.advance(DT, bass);
+    const risenFraction = energy.low; // target is ~1 for an all-in-range bass signal
+    for (let i = 0; i < 10; i++) energy.advance(DT, silence);
+    const fallenFraction = risenFraction - energy.low; // how much of the rise was undone
+    expect(fallenFraction).toBeLessThan(risenFraction);
   });
 
   it("raising the Kick top crossover moves previously-mid bands into low", () => {
@@ -313,6 +331,53 @@ describe("band energy", () => {
     expect(gated.lowOnset).toBe(false);
     expect(gated.lowDiag.gated).toBe(true);
     expect(open.lowOnset).toBe(true);
+  });
+
+  // Graded pulse height (src/audio/hitStrength.ts), threaded through
+  // advance()'s optional `shape` — see this file's own header for why an
+  // omitted shape must reproduce today's flat-1 pulse exactly.
+  it("with no shape, an onset's pulse still snaps to exactly 1 (today's behavior)", () => {
+    const energy = createBandEnergy();
+    const quiet = bandsWith([]);
+    for (let i = 0; i < 60; i++) energy.advance(DT, quiet);
+    energy.advance(DT, bandsWith([0, 1, 2, 3]));
+    expect(energy.lowOnset).toBe(true);
+    expect(energy.lowPulse).toBe(1);
+  });
+
+  it("with a shape at amount 1, a bigger rise yields a bigger pulse", () => {
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0 };
+    const weak = createBandEnergy();
+    const strong = createBandEnergy();
+    const quiet = bandsWith([]);
+    for (let i = 0; i < 60; i++) {
+      weak.advance(DT, quiet, 1, 1, shape);
+      strong.advance(DT, quiet, 1, 1, shape);
+    }
+    // Same shape, two different rises above the same firing line — the
+    // bigger one should read a taller, but still <=1, pulse. (Only 4 of the
+    // low group's 6 default bands go hot — see bandsWith — so the group
+    // mean that actually drives the rise is diluted well below these
+    // values; both are picked with enough headroom to clear the firing
+    // line comfortably regardless.)
+    weak.advance(DT, bandsWith([0, 1, 2, 3], 0.08), 1, 1, shape);
+    strong.advance(DT, bandsWith([0, 1, 2, 3], 0.2), 1, 1, shape);
+    expect(weak.lowOnset).toBe(true);
+    expect(strong.lowOnset).toBe(true);
+    expect(strong.lowPulse).toBeGreaterThan(weak.lowPulse);
+    expect(strong.lowPulse).toBeLessThanOrEqual(1);
+  });
+
+  it("a floor above a hit's own stand-out yields pulse 0 while onset is still true", () => {
+    const shape: HitShape = { amount: 1, knee: 1, loudness: 0, floor: 0.9 };
+    const energy = createBandEnergy();
+    const quiet = bandsWith([]);
+    for (let i = 0; i < 60; i++) energy.advance(DT, quiet, 1, 1, shape);
+    // A small rise well clear of the firing line but nowhere near stand-out
+    // 0.9 — floor should zero the pulse without touching the onset edge.
+    energy.advance(DT, bandsWith([0, 1, 2, 3], 0.08), 1, 1, shape);
+    expect(energy.lowOnset).toBe(true);
+    expect(energy.lowPulse).toBe(0);
   });
 
   it("stays finite and keeps firing onsets with Smoothing at its Off stop (rateScale = Infinity)", () => {
