@@ -1,5 +1,18 @@
 // A phase-locked beat/bar clock — the tempo analog of flowClock.ts's phase
-// accumulator. The naive version of "where are we in the beat" is
+// accumulator. This clock has two feeds into its phase comb: the
+// render-tick path (features.ts's onsets, one per tick, back-dated by
+// HIT_LATENCY_FRAMES to correct for that path's own whole-frame flux
+// comparison lag — see that constant's doc) and, when app.ts's solo mode
+// has a live AudioWorklet tempo source (src/audio/tempoSource.ts), the
+// fixed-hop path's `tempoHits` — already-exact audio-clock onset times, so
+// no back-dating, and possibly several onsets in a single render tick
+// rather than at most one. advance()'s own doc says which parameter selects
+// which feed; only one is ever live for a given call. Host/renderer/TV
+// never get tempoHits — their AnimFrame comes off the jitter buffer's own
+// room-time clock (see app.ts's currentVisual), which the fixed-hop
+// tracker's local AudioContext times wouldn't line up with.
+//
+// The naive version of "where are we in the beat" is
 // FeatureFrame.onsetPhase, which the extractor (and jitterBuffer, for remote
 // frames) resets to exactly 0 on *every* detected onset. With only a 100ms
 // refractory window and no beat-grid quantization, a hi-hat, fill or false
@@ -133,6 +146,15 @@ interface Hit {
   w: number; // hitWeight passed to advance()
 }
 
+/** One fixed-hop onset, already an exact audio-clock time relative to "now"
+ *  — see advance()'s own doc for how this differs from the render-tick
+ *  path's single `beatFired`/`hitWeight` pair. */
+export interface TempoHit {
+  /** Seconds ago (from this tick's clockSec) the onset actually fired. */
+  agoSec: number;
+  weight: number;
+}
+
 export interface BeatClock {
   /** Continuous [0,1) position within the current beat. Free-running —
    *  never resets, only ever nudged toward a detected onset. */
@@ -160,8 +182,15 @@ export interface BeatClock {
    *  whether a beat fired this tick, and (if it did) how strongly —
    *  animClock.ts's own hitWeight, 1 by default so every other caller
    *  (tests, anything not passing one) keeps every fired beat's vote equal.
-   *  Call once per render tick. */
-  advance(dtSec: number, bpm: number, beatFired: boolean, hitWeight?: number): void;
+   *  Call once per render tick.
+   *
+   *  `tempoHits`, when given (even an empty array — its mere presence
+   *  selects this mode), switches the phase comb onto the fixed-hop feed
+   *  instead: `beatFired`/`hitWeight` are ignored entirely, and every entry
+   *  pushes its own hit at `clockSec - agoSec` with its own weight, no
+   *  HIT_LATENCY_FRAMES back-dating (these times are already exact) — see
+   *  the file header. */
+  advance(dtSec: number, bpm: number, beatFired: boolean, hitWeight?: number, tempoHits?: TempoHit[]): void;
 }
 
 export function createBeatClock(): BeatClock {
@@ -174,6 +203,30 @@ export function createBeatClock(): BeatClock {
   let confidence = 0;
   let hits: Hit[] = [];
 
+  // The phase-comb search itself — factored out since advance() now runs it
+  // from two different feeds (see the file header). Reads/writes the
+  // advance()-local closure state above (hits/phase/clockSec/smoothedBpm/
+  // pending/stability), same as when this was inline.
+  function runPhaseComb(): void {
+    if (hits.length < PHASE_MIN_HITS) return;
+    let bestOffset = 0;
+    let bestScore = -Infinity;
+    for (let o = -0.5; o < 0.5; o += PHASE_STEP) {
+      let score = 0;
+      for (const hit of hits) {
+        const predicted = phase - (clockSec - hit.t) * (smoothedBpm / 60);
+        const d = wrapHalf(predicted - o);
+        score += hit.w * Math.max(0, 1 - Math.abs(d) / PHASE_KERNEL);
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestOffset = o;
+      }
+    }
+    pending = bestOffset;
+    stability += (Math.abs(pending) - stability) * STABILITY_ALPHA;
+  }
+
   const clock: BeatClock = {
     beatPhase: 0,
     barPhase: 0,
@@ -181,7 +234,7 @@ export function createBeatClock(): BeatClock {
     bpm: 0,
     confidence: 0,
     tempoLock: 0,
-    advance(dtSec: number, bpm: number, beatFired: boolean, hitWeight = 1): void {
+    advance(dtSec: number, bpm: number, beatFired: boolean, hitWeight = 1, tempoHits?: TempoHit[]): void {
       clockSec += dtSec;
       const target = Math.max(0, bpm);
       smoothedBpm += (target - smoothedBpm) * Math.min(1, BPM_TRACK_RATE * dtSec);
@@ -193,27 +246,18 @@ export function createBeatClock(): BeatClock {
         stability = STABILITY_START;
       }
 
-      if (beatFired && smoothedBpm > 0) {
+      if (tempoHits !== undefined) {
+        // Fixed-hop feed — see the file header and advance()'s own doc.
+        // beatFired/hitWeight are ignored entirely in this mode.
+        if (tempoHits.length > 0 && smoothedBpm > 0) {
+          for (const h of tempoHits) hits.push({ t: clockSec - h.agoSec, w: h.weight });
+          hits = hits.filter((h) => clockSec - h.t <= PHASE_WINDOW_SEC);
+          runPhaseComb();
+        }
+      } else if (beatFired && smoothedBpm > 0) {
         hits.push({ t: clockSec - HIT_LATENCY_FRAMES * dtSec, w: hitWeight });
         hits = hits.filter((h) => clockSec - h.t <= PHASE_WINDOW_SEC);
-        if (hits.length >= PHASE_MIN_HITS) {
-          let bestOffset = 0;
-          let bestScore = -Infinity;
-          for (let o = -0.5; o < 0.5; o += PHASE_STEP) {
-            let score = 0;
-            for (const hit of hits) {
-              const predicted = phase - (clockSec - hit.t) * (smoothedBpm / 60);
-              const d = wrapHalf(predicted - o);
-              score += hit.w * Math.max(0, 1 - Math.abs(d) / PHASE_KERNEL);
-            }
-            if (score > bestScore) {
-              bestScore = score;
-              bestOffset = o;
-            }
-          }
-          pending = bestOffset;
-          stability += (Math.abs(pending) - stability) * STABILITY_ALPHA;
-        }
+        runPhaseComb();
       }
 
       // Apply the pending correction smoothly, every tick — see PHASE_RATE/
