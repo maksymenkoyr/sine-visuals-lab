@@ -6,7 +6,9 @@
   "author": "Yaroslav Maksymenko",
   "license": "AGPL-3.0-or-later",
   "scripts": {
+    "predev": "node tools/private-scenes.mjs",
     "dev": "vite",
+    "predev:host": "node tools/private-scenes.mjs",
     "dev:host": "vite --host",
     "dev:worker": "wrangler dev --port 8787 --local-protocol https",
     "build": "tsc -b && vite build",
