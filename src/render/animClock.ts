@@ -191,8 +191,10 @@ export const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts 
 // after the low-band detector's own, and either is real bass behind this
 // hit). A bass-heavy hit (a kick) is weighted PHASE_BASS times harder than a
 // bass-free one (a hat/clap on the same beat) — kicks are what people
-// actually tap along to. Tunable (only if the eval harness's targets need
-// it): PHASE_BASS and BASS_WEIGHT_FLOOR/BASS_WEIGHT_SPAN below.
+// actually tap along to. Tuned against tests/tempoEval.test.ts: PHASE_BASS
+// (beatClock.ts) went from an initial 2 to 4; BASS_WEIGHT_FLOOR/
+// BASS_WEIGHT_SPAN below were tried both looser and tighter and made every
+// track's own lockInTempo worse either way, so they stayed at these values.
 const HIT_WEIGHT_CAP = 4;
 const BASS_WEIGHT_FLOOR = 0.5;
 const BASS_WEIGHT_SPAN = 1.5;

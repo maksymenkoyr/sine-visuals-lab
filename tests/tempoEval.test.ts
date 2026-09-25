@@ -41,32 +41,47 @@ for (const [name, m] of Object.entries(metrics)) {
 console.table(table);
 
 describe("tempo eval scoreboard", () => {
-  it.skip("house: tracks tempo tightly, holds most beats within 30ms, and lets go cleanly after the track ends", () => {
+  it("house: tracks tempo tightly, holds most beats within 30ms, and lets go cleanly after the track ends", () => {
     expect(metrics.house!.tempoOk).toBeGreaterThanOrEqual(0.9);
     expect(metrics.house!.ticksOn30ms).toBeGreaterThanOrEqual(0.6);
     expect(metrics.house!.endBpm).toBe(0);
     expect(metrics.house!.endLock).toBeLessThan(0.1);
   });
 
-  it.skip("hiphop: tracks tempo through the swing pattern", () => {
+  it("hiphop: tracks tempo through the swing pattern", () => {
     expect(metrics.hiphop!.tempoOk).toBeGreaterThanOrEqual(0.88);
     expect(metrics.hiphop!.ticksOn30ms).toBeGreaterThanOrEqual(0.9);
   });
 
-  it.skip("dnb: tracks tempo at 174bpm", () => {
+  // Known gap, left failing rather than loosened (see the plan/PR this
+  // harness shipped with): tempoOk reads straight off FeatureExtractor.bpm,
+  // upstream of every parameter this PR was allowed to tune (all in
+  // beatClock.ts/animClock.ts). dnb's shortfall is almost entirely its own
+  // few-second warm-up before the comb first locks onto 174bpm — nothing
+  // downstream can move that.
+  it("dnb: tracks tempo at 174bpm", () => {
     expect(metrics.dnb!.tempoOk).toBeGreaterThanOrEqual(0.9);
     expect(metrics.dnb!.ticksOn30ms).toBeGreaterThanOrEqual(0.8);
   });
 
-  it.skip("ramp: follows a drifting tempo well enough to be usable", () => {
+  it("ramp: follows a drifting tempo well enough to be usable", () => {
     expect(metrics.ramp!.tempoOk).toBeGreaterThanOrEqual(0.4);
   });
 
-  it.skip("random: doesn't fake a lock on unstructured hits", () => {
+  it("random: doesn't fake a lock on unstructured hits", () => {
     expect(metrics.random!.lockNoTempo).toBeLessThanOrEqual(0.3);
   });
 
-  it.skip("every music track locks in confidently while a tempo is actually playing", () => {
+  // ramp's own lockInTempo is the other known gap: FeatureExtractor.bpm
+  // itself drifts onto a wrong (often 4:3-ish) candidate for long stretches
+  // during the ramp — tempoPrior (features.ts) softens this but doesn't
+  // eliminate it on a continuously-drifting tempo, and the comb naturally
+  // (and correctly) reads low confidence while it's combing at that wrong
+  // period. PHASE_BASS/STABILITY_ALPHA (both tuned up for this PR) improved
+  // it substantially (0.52 -> 0.58) but pushing either further starts
+  // breaking `random`'s own lockNoTempo target instead — see beatClock.ts's
+  // own STABILITY_ALPHA/PHASE_BASS comments for what was tried.
+  it("every music track locks in confidently while a tempo is actually playing", () => {
     for (const name of ["house", "hiphop", "dnb", "ramp"]) {
       expect(metrics[name]!.lockInTempo, name).toBeGreaterThanOrEqual(0.7);
     }

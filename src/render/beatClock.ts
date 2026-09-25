@@ -69,10 +69,16 @@ const PHASE_KERNEL = 0.06;
 const PHASE_RATE = 3;
 const PHASE_MAX_RATE = 0.35;
 // stability's own easing: how much a freshly-computed |pending| moves the
-// leaky average that becomes `confidence` below. Tunable (see the plan/PR
-// this shipped with) only if the eval harness's targets need it.
+// leaky average that becomes `confidence` below. Tuned against
+// tests/tempoEval.test.ts: STABILITY_ALPHA raised from an initial 0.2 to 0.4
+// (faster to both build and shed confidence — see PHASE_BASS's own doc
+// below for the other half of that same tuning pass); STABILITY_START
+// tried lower (0.1) with no measurable effect (it only matters for the
+// first comb run after a fresh bpm>0, not the sustained-but-wrong-tempo
+// stretches an eval track like `ramp` actually exercises) and was left at
+// its original value.
 const STABILITY_START = 0.2;
-const STABILITY_ALPHA = 0.2;
+const STABILITY_ALPHA = 0.4;
 // confidence = 1 at/under STABILITY_SURE, 0 at/over STABILITY_UNSURE,
 // smoothstepped between.
 const STABILITY_SURE = 0.05;
@@ -88,8 +94,13 @@ const LOCK_FALL_RATE = 3;
 // How much more a bass-weighted hit counts toward the phase comb's vote —
 // see src/render/animClock.ts's own hitWeight computation, which reads this.
 // Exported from here (not animClock.ts) since it's a property of what the
-// comb does with a hit's weight, not of how animClock derives one.
-export const PHASE_BASS = 2;
+// comb does with a hit's weight, not of how animClock derives one. Raised
+// from an initial 2 to 4 against tests/tempoEval.test.ts (a kick's own vote
+// needs to clearly outweigh a busy hat pattern's); animClock.ts's own
+// BASS_WEIGHT_FLOOR/BASS_WEIGHT_SPAN mapping was tried both looser and
+// tighter and made every track's own lockInTempo worse either way, so it
+// stayed at its original values.
+export const PHASE_BASS = 4;
 
 function wrap01(x: number): number {
   const w = x % 1;
