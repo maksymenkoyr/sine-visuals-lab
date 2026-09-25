@@ -151,35 +151,47 @@ describe("driveStore: sanitizeDriveSetting / encodeDriveSetting", () => {
     expect(encodeDriveSetting("scene")).toBe("scene");
   });
 
-  it("encodes a gate patch's when only when it isn't the default (1) — round-trips either way", () => {
-    const defaultWhen: DrivePatch = {
+  it("encodes each condition and muted source as its own g/o — several conditions round-trip", () => {
+    const patch: DrivePatch = {
       mix: "gate",
       sources: [
         { choice: "anim.low", weight: 1 },
-        { choice: "anim.mid", weight: 1 },
+        { choice: "anim.mid", weight: 1, when: true },
+        { choice: "anim.high", weight: 0.5, when: true, off: true },
       ],
     };
-    const encodedDefault = encodeDriveSetting(defaultWhen);
-    expect(encodedDefault).toEqual({ m: "gate", s: [{ c: "anim.low" }, { c: "anim.mid" }] }); // no `w` at the top level
-    expect(sanitizeDriveSetting(encodedDefault)).toEqual(defaultWhen);
+    const encoded = encodeDriveSetting(patch);
+    expect(encoded).toEqual({ m: "gate", s: [{ c: "anim.low" }, { c: "anim.mid", g: 1 }, { c: "anim.high", w: 0.5, g: 1, o: 1 }] });
+    expect(encoded).not.toHaveProperty("w"); // never a top-level `w` any more
+    expect(sanitizeDriveSetting(encoded)).toEqual(patch);
+  });
 
-    const explicitWhen: DrivePatch = {
+  it("reads the legacy top-level `w` as that source's condition role", () => {
+    expect(sanitizeDriveSetting({ m: "gate", s: [{ c: "anim.low" }, { c: "anim.mid" }, { c: "anim.high" }], w: 0 })).toEqual({
       mix: "gate",
-      when: 0,
       sources: [
-        { choice: "anim.low", weight: 1 },
+        { choice: "anim.low", weight: 1, when: true },
         { choice: "anim.mid", weight: 1 },
         { choice: "anim.high", weight: 1 },
       ],
-    };
-    const encodedExplicit = encodeDriveSetting(explicitWhen);
-    expect(encodedExplicit).toMatchObject({ w: 0 });
-    expect(sanitizeDriveSetting(encodedExplicit)).toEqual(explicitWhen);
+    });
   });
 
-  it("rejects a garbage top-level when", () => {
+  it("a gate patch with no condition stays without one — sanitize never invents a condition", () => {
+    expect(sanitizeDriveSetting({ m: "gate", s: [{ c: "anim.low" }, { c: "anim.mid" }] })).toEqual({
+      mix: "gate",
+      sources: [
+        { choice: "anim.low", weight: 1 },
+        { choice: "anim.mid", weight: 1 },
+      ],
+    });
+  });
+
+  it("rejects a garbage top-level when, g or o", () => {
     expect(sanitizeDriveSetting({ m: "gate", s: [{ c: "anim.low" }, { c: "anim.mid" }], w: "nonsense" })).toBeNull();
     expect(sanitizeDriveSetting({ m: "gate", s: [{ c: "anim.low" }, { c: "anim.mid" }], w: NaN })).toBeNull();
+    expect(sanitizeDriveSetting({ m: "gate", s: [{ c: "anim.low" }, { c: "anim.mid", g: true }] })).toBeNull();
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.low", o: "yes" }] })).toBeNull();
   });
 });
 

@@ -105,20 +105,20 @@ describe("encodeLook / decodeLook", () => {
     expect(decodeLook(code)).toEqual(look);
   });
 
-  it("a gate patch with a non-default condition (when) round-trips through a Look's own `d`", () => {
+  it("a gate patch with several conditions and a muted source round-trips through a Look's own `d`", () => {
     const patch: DriveSetting = {
       mix: "gate",
-      when: 0,
       sources: [
         { choice: "anim.lowOnset", weight: 1 },
-        { choice: "anim.mid", weight: 1 },
-        { choice: "anim.high", weight: 1 },
+        { choice: "anim.mid", weight: 1, when: true },
+        { choice: "anim.high", weight: 1, when: true, off: true },
       ],
     };
     const look: SceneLook = { name: "Gated when", sceneId: "caustics", manual: {}, drives: { flash: patch } };
     const code = encodeLook(look);
     const wire = JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/")));
-    expect(wire.d.flash.w).toBe(0);
+    expect(wire.d.flash.s[1].g).toBe(1);
+    expect(wire.d.flash.s[2]).toMatchObject({ g: 1, o: 1 });
     expect(decodeLook(code)).toEqual(look);
   });
 

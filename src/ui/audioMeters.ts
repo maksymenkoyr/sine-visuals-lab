@@ -273,6 +273,15 @@ export interface AudioMetersDeps {
      *  pinned row itself never counts. A row/lane's soft glow, always
      *  taking priority over a competing pinned feed on the same row. */
     isPreview(choice: DriveSourceChoice): boolean;
+    /** `isPinned`, but false when the matching source is muted (drives.ts's
+     *  `DriveSource.off`) — use this (not `isPinned`) for a row/lane's own
+     *  fed glow specifically: a muted source's jack still fills solid
+     *  (`isShown`/`isPinned` stay mute-agnostic, since it's still plugged
+     *  in — see deviceMenu.ts's own header), but its row stops glowing. */
+    isPinnedActive(choice: DriveSourceChoice): boolean;
+    /** `isPreview`, but false when the matching source is muted — see
+     *  isPinnedActive above. */
+    isPreviewActive(choice: DriveSourceChoice): boolean;
     /** True while isPreview(...) could return true for *something* — i.e.
      *  a different setting is being previewed than whatever's pinned right
      *  now. Drives whether a pinned feed on an uncontested row still gets
@@ -2271,8 +2280,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // own, so it never wins the preview/pinned checks above; see
       // jack.ts's setRowFed for what each kind actually draws).
       for (const [rowEl, choices] of feedGroups) {
-        const previewChoice = previewOn ? choices.find((c) => deps.patch.isPreview(c)) : undefined;
-        const pinnedChoice = choices.find((c) => deps.patch.isPinned(c));
+        // The mute-aware pair — a muted source keeps its jack filled above
+        // but stops lighting the row it feeds (see isPinnedActive's own
+        // doc on the AudioMetersDeps interface).
+        const previewChoice = previewOn ? choices.find((c) => deps.patch.isPreviewActive(c)) : undefined;
+        const pinnedChoice = choices.find((c) => deps.patch.isPinnedActive(c));
         const sceneSoftChoice =
           previewChoice || pinnedChoice ? undefined : choices.find((c) => deps.patch.isSceneSource(c));
         if (previewChoice) {
@@ -2292,9 +2304,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // code path here). Mirrors the same full/soft/faint priority as the
       // row-level pass above, just per lane instead of per row.
       for (const { choice, glowEl } of hitsHistory.laneMounts) {
-        const kind = deps.patch.isPreview(choice)
+        const kind = deps.patch.isPreviewActive(choice)
           ? "soft"
-          : deps.patch.isPinned(choice)
+          : deps.patch.isPinnedActive(choice)
             ? previewOn
               ? "faint"
               : "full"

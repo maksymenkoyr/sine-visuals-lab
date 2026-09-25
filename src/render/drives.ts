@@ -32,28 +32,50 @@ import { getDriveLine, getDriveLineStrength, getDriveSetting } from "./driveStor
  *   - **max** — the single largest weight·value. "Whichever is louder right
  *     now", for two sources that should never simply stack (Bass hit *or*
  *     Any hit, say, rather than a double-height pulse when both land).
- *   - **gate** — one source is the patch's own *condition*, named by
- *     `DrivePatch.when` (an index into `sources`; absent means index 1, so a
- *     patch built before `when` existed — always exactly two sources — keeps
- *     meaning unchanged: source 0 "plays", source 1 is "only when"). Every
- *     *other* source "plays": `plays = Σ over i ≠ when of weightᵢ·valueᵢ`,
- *     `condition = weight_when·value_when`, and the combined value is
- *     `plays · smoothstep(0.35, 0.55, condition)`. With exactly two sources
- *     and `when` at its default (1), this is `weight0·value0 ·
- *     smoothstep(0.35, 0.55, weight1·value1)` — today's gate, bit-for-bit
- *     (tests/drives.test.ts's own identity check). With one source, gate has
- *     no condition to read at all — `combine()` treats it as `add` (the
- *     panel disables Only when below two sources; a patch loaded with one
- *     anyway, e.g. from an old Look, still renders sensibly rather than
- *     going silent). `gateWhenIndex(patch)` below is the one place `when`'s
- *     effective (always-valid) index is resolved; `setGateCondition(setting,
- *     index)` is the pure edit a source line's own role toggle
- *     (deviceMenu.ts) calls through — driveStore.ts's same-named wrapper
- *     persists it. `normalizeDriveSetting` keeps `when` pointing at the same
- *     *source* across every structural edit (togglePatchSource adding or
- *     removing a source shifts/clamps it, or drops it back to the default
- *     if the condition source itself was removed) rather than a fixed index
- *     that could silently start naming a different source after a resize.
+ *   - **gate** — each source has a *role*, `DriveSource.when` (absent means
+ *     "plays"; `true` marks it a *condition*). `plays = Σ over non-condition,
+ *     non-muted sources of weightᵢ·valueᵢ`; `open = Π over condition,
+ *     non-muted sources of smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH,
+ *     weightⱼ·valueⱼ)` — every condition's own smoothstep multiplied
+ *     together, so *all* of them have to be reading high at once (an AND,
+ *     not an OR) for the product to stay near 1; the combined value is
+ *     `plays · open`. A muted source (`DriveSource.off`) never enters either
+ *     side, as if it weren't in the patch at all — see the header's own
+ *     Muting paragraph below. If no source is currently an *active*
+ *     condition — none is marked `when` at all, or every marked one is
+ *     muted — `open` is the empty product (1) and the gate simply reads as
+ *     `add` over whatever plays: this is the one, deliberate way to gate on
+ *     nothing (a user muting a patch's only condition to "listen past" it
+ *     for a moment) rather than a special case `combine()`/`fired()` have to
+ *     branch on. With exactly one source marked "plays" and one marked
+ *     `when` and neither muted, this is `weight0·value0 ·
+ *     smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, weight1·value1)` — today's
+ *     (single-condition) gate, bit-for-bit (tests/drives.test.ts's own
+ *     identity check).
+ *
+ *     **Invariant: at least one source plays.** A patch where every source
+ *     is marked `when` can never produce a value. `setSourceRole(setting,
+ *     index, "when")` — the pure edit a source line's own role toggle
+ *     (deviceMenu.ts) calls through, driveStore.ts's same-named wrapper
+ *     persisting it — refuses (returns `setting` unchanged) a request that
+ *     would leave zero "plays" sources; `normalizeDriveSetting` carries the
+ *     same check as a backstop for a patch built some other way (decoded
+ *     data, a structural edit that removes the last "plays" source), simply
+ *     clearing every `when` rather than guessing which one should stay a
+ *     condition. In every mix *other* than `gate`, a source's `when` flag is
+ *     kept (so switching the mix back to "Only when" restores exactly the
+ *     roles it had) but plays no part in `add`'s sum or `max`'s pick.
+ *
+ *     **Muting.** `DriveSource.off` turns a source off without unplugging
+ *     it: `combine()`/`fired()` treat it as absent (contributes nothing,
+ *     either as a "plays" term or a condition), but it keeps its own
+ *     position, weight, height and role, so switching it back on restores
+ *     exactly what it was doing. `sourceValues()` below reports a muted
+ *     source's own slot as 0 (still in patch order — the panel's per-source
+ *     trace just goes flat rather than disappearing and shifting every
+ *     later trace over). If *every* source in a patch is muted, the patch's
+ *     value is 0 regardless of mix — the setting simply holds its resting
+ *     look, same as a value of 0 always has.
  *
  *   The combined value is finally scaled by the setting's own `drive.gain`
  *   (unchanged from before patches existed — see the uniformPair doc below).
@@ -191,6 +213,19 @@ export interface DriveSource {
   choice: DriveSourceChoice;
   weight: number;
   height?: HitHeight;
+  /** This source's role in a `gate` mix: absent means "plays", `true` marks
+   *  it a condition — see this file's header's gate paragraph for how
+   *  several conditions combine (every one ANDed together) and the
+   *  at-least-one-plays invariant `setSourceRole`/`normalizeDriveSetting`
+   *  enforce. Kept (not stripped) in every other mix, so switching back to
+   *  `gate` restores exactly the roles a patch had before — just ignored by
+   *  `add`/`max`'s own combine. */
+  when?: true;
+  /** Muted: contributes nothing to `combine()`/`fired()` (as if this source
+   *  weren't in the patch at all) but keeps its own weight/height/role —
+   *  see this file's header's Muting paragraph. `sourceValues()` still
+   *  reports this slot, as 0. */
+  off?: true;
 }
 
 /** How a patch's sources combine into one number — see this file's header
@@ -200,18 +235,6 @@ export type DriveMix = "add" | "max" | "gate";
 export interface DrivePatch {
   mix: DriveMix;
   sources: DriveSource[];
-  /** Only meaningful for `mix === "gate"` (harmless, ignored, otherwise) —
-   *  which `sources` index is the condition; every other source "plays"
-   *  (this file's header's gate rule). Absent means index 1, so a patch
-   *  built before this field existed keeps its old two-source meaning
-   *  exactly. Always in range or absent, never a stale/out-of-bounds
-   *  index — `normalizeDriveSetting` is the one place that's enforced, and
-   *  it also drops the field back to absent whenever it would just resolve
-   *  to the default anyway (so an untouched two-source gate keeps encoding
-   *  as compactly as before `when` existed — see driveStore.ts's
-   *  encodeDriveSetting). Use `gateWhenIndex(patch)` to read it, never this
-   *  field directly, and `setGateCondition(setting, index)` to change it. */
-  when?: number;
 }
 
 /** What a `SceneSetting.drive` setting is currently on: the scene's own
@@ -228,16 +251,16 @@ export interface SceneDrives {
   value(key: string, sceneDefault: number): number;
   /** The resolved one-shot trigger for a JS-side spawn/impulse:
    *  `sceneDefaultFired` passed straight through for `"scene"`; for `add`/
-   *  `max`, the OR of every source's own edge (a grid source's pending tick,
-   *  cleared by this call; an edge-kind catalogue source's render-latched
-   *  boolean off `anim`; any other source falls back to `sceneDefaultFired`,
-   *  same as `"scene"` — see this file's header); for `gate` with two or
-   *  more sources, the OR of every *plays* source's own edge (every source
-   *  but `gateWhenIndex(patch)`) AND the gate being open (the condition
-   *  source's own weighted value past the same smoothstep midpoint
-   *  `value()`'s gate combine uses) — the condition source's own edge, if
-   *  it has one, is never consumed. A one-source gate falls through to the
-   *  add/max rule above (this file's header's gate paragraph). */
+   *  `max`, the OR of every non-muted source's own edge (a grid source's
+   *  pending tick, cleared by this call; an edge-kind catalogue source's
+   *  render-latched boolean off `anim`; any other source falls back to
+   *  `sceneDefaultFired`, same as `"scene"` — see this file's header); for
+   *  `gate`, the OR of every non-muted *plays* source's own edge AND `open`
+   *  (every non-muted condition's own weighted value past the same
+   *  smoothstep midpoint `value()`'s gate combine multiplies together) being
+   *  past 0.5 — a condition source's own edge, if it has one, is never
+   *  consumed. A gate with no active condition (this file's header) is
+   *  always open, so this reduces to the add/max OR-of-edges rule above. */
   fired(key: string, sceneDefaultFired: boolean): boolean;
   /** Per-band excess behind this setting's line source (bandLine.ts's
    *  BandLineDrive.excess), for the panel's overlay — null unless the
@@ -251,9 +274,11 @@ export interface SceneDrives {
    *  `custom` is 0 — unused by the shader's mix() either way). */
   uniformPair(key: string): { drive: number; custom: number };
   /** Each source's own `weight·value` this tick, in patch order, un-gained —
-   *  the panel's per-source trace and its ghost lines in the output graph.
-   *  Null for `"scene"` (nothing to enumerate) or an unknown key. Only reads
-   *  state accumulate() already computed — never consumes a grid edge. */
+   *  the panel's per-source trace and its ghost lines in the output graph. A
+   *  muted source's own slot reads 0 (still in patch order — this file's
+   *  header's Muting paragraph). Null for `"scene"` (nothing to enumerate)
+   *  or an unknown key. Only reads state accumulate() already computed —
+   *  never consumes a grid edge. */
   sourceValues(key: string): Float32Array | null;
   /** The same mix-combined, gained reading `value()`/`uniformPair().drive`
    *  give — for a row's own live sparkline, without a caller having to know
@@ -293,9 +318,14 @@ export const DRIVE_WEIGHT_MIN = 0;
 export const DRIVE_WEIGHT_MAX = 2;
 export const DRIVE_WEIGHT_DEFAULT = 1;
 
-/** `DrivePatch.when`'s meaning when absent — see that field's own doc. */
+/** The source index `setPatchMix`/the wire-format migration (driveStore.ts's
+ *  sanitizeDriveSetting) mark as the condition when converting a patch that
+ *  carries no per-source role information at all into one that does — the
+ *  same source the old, single-`DrivePatch.when` model defaulted to, so a
+ *  two-source patch that has never touched its roles keeps its old meaning
+ *  the moment it's asked to gate. */
 export const DRIVE_GATE_WHEN_DEFAULT = 1;
-/** The gate's own smoothstep window on the condition source's weighted
+/** The gate's own smoothstep window on a condition source's weighted
  *  value — this file's header's gate rule, and the one place these two
  *  numbers are written down (combine()/fired() below and the panel's own
  *  gate-open shading — deviceMenu.ts's buildOutputGraph — read them from
@@ -319,14 +349,18 @@ export function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** `patch.when`, resolved to an always-valid index: absent means
- *  `DRIVE_GATE_WHEN_DEFAULT`, clamped into `sources`' own bounds. Only
- *  meaningful with two or more sources (this file's header's gate
- *  paragraph) — callers with fewer should have already taken the
- *  single-source `add` fallback instead of asking. */
-export function gateWhenIndex(patch: DrivePatch): number {
-  const n = patch.sources.length;
-  return Math.min(Math.max(0, n - 1), Math.max(0, patch.when ?? DRIVE_GATE_WHEN_DEFAULT));
+/** Indices of `patch.sources` marked `when: true` — the patch's own gate
+ *  conditions, in patch order. Computed generically off the `when` flags
+ *  regardless of `mix` (a source's role survives a mix change — this file's
+ *  header), so a caller checks `mix === "gate"` itself before treating this
+ *  as meaningful. Includes a muted condition — `combine()`/`fired()` are
+ *  what skip those; the panel's own output graph (deviceMenu.ts's
+ *  buildOutputGraph) uses this same list to know which traces draw dashed,
+ *  separately deciding whether to draw a muted one at all. */
+export function gateConditionIndices(patch: DrivePatch): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < patch.sources.length; i++) if (patch.sources[i]!.when) out.push(i);
+  return out;
 }
 
 function isGridChoice(choice: DriveSourceChoice): choice is { source: "beat"; grid: BeatGridIndex } {
@@ -363,13 +397,14 @@ export function sameDriveChoice(a: DriveChoice, b: DriveChoice): boolean {
 export function sameDriveSetting(a: DriveSetting, b: DriveSetting): boolean {
   if (a === "scene" || b === "scene") return a === b;
   if (a.mix !== b.mix || a.sources.length !== b.sources.length) return false;
-  if ((a.when ?? DRIVE_GATE_WHEN_DEFAULT) !== (b.when ?? DRIVE_GATE_WHEN_DEFAULT)) return false;
   for (let i = 0; i < a.sources.length; i++) {
     const sa = a.sources[i]!;
     const sb = b.sources[i]!;
     if (!sameDriveChoice(sa.choice, sb.choice)) return false;
     if (sa.weight !== sb.weight) return false;
     if ((sa.height ?? "graded") !== (sb.height ?? "graded")) return false;
+    if (!!sa.when !== !!sb.when) return false;
+    if (!!sa.off !== !!sb.off) return false;
   }
   return true;
 }
@@ -395,20 +430,29 @@ export function defaultDriveSetting(spec: SceneSetting): DriveSetting {
 
 /** Clamps every source's weight, drops a source whose key collides with an
  *  earlier one in the same patch (first occurrence wins) or a second line
- *  source, collapses an empty result to `"scene"`, and clamps `when` into
- *  the surviving sources' own bounds — dropping it back to absent whenever
- *  it would resolve to `DRIVE_GATE_WHEN_DEFAULT` anyway (so an untouched
- *  two-source gate keeps its old compact shape) or there are fewer than two
- *  sources to gate between at all. This is the one place a patch's own
- *  invariants (this file's header: unique source keys, at most one line
- *  source, weight in 0..2, a valid-or-absent `when`) are enforced, so
- *  driveStore.ts's sanitizer and every patch-editing helper below can build
- *  through this rather than re-checking the rules themselves. Note this
- *  only *clamps* `when`'s index into range — it doesn't retarget it at the
- *  same source across a structural edit that actually shifts indices;
- *  `togglePatchSource` below does that itself before calling through here. */
+ *  source, and collapses an empty result to `"scene"`. Also carries the
+ *  legacy top-level `when: n` a patch built before per-source roles existed
+ *  can still show up with at runtime (driveStore.ts's sanitizeDriveSetting
+ *  does the same for the wire-format twin of this field, top-level `w`):
+ *  migrates to that surviving source's own `when: true`, but only when
+ *  nothing already carries a role (an already-migrated/edited patch keeps
+ *  whatever it has). Finally enforces this file's header's own invariant —
+ *  at least one source plays — as a backstop: a patch where literally every
+ *  source is marked `when` (a lone condition left after its plays sources
+ *  were unplugged, or decoded/hand-built data — `setSourceRole`'s own
+ *  refusal below already blocks it through the role toggle) has every
+ *  `when` cleared rather than guessing which one should stay a condition. This is the one place a patch's own invariants
+ *  (this file's header: unique source keys, at most one line source, weight
+ *  in 0..2, never every source a condition) are enforced, so driveStore.ts's
+ *  sanitizer and every patch-editing helper below can build through this
+ *  rather than re-checking the rules themselves. Deliberately does *not*
+ *  invent a condition for a `gate` patch that simply has none marked yet —
+ *  that's a real, reachable state (this file's header: "the gate simply
+ *  reads as add"), not something to fix up; `setPatchMix` below is the one
+ *  place a *fresh* switch into `gate` picks a default. */
 export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
   if (setting === "scene") return "scene";
+  const legacyWhen = typeof (setting as unknown as { when?: unknown }).when === "number" ? (setting as unknown as { when: number }).when : undefined;
   const seen = new Set<string>();
   const sources: DriveSource[] = [];
   for (const src of setting.sources) {
@@ -417,15 +461,24 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
     seen.add(key);
     const source: DriveSource = { choice: src.choice, weight: clampWeight(src.weight) };
     if (src.height !== undefined && src.height !== "graded") source.height = src.height;
+    if (src.when === true) source.when = true;
+    if (src.off === true) source.off = true;
     sources.push(source);
   }
   if (sources.length === 0) return "scene";
-  const result: DrivePatch = { mix: setting.mix, sources };
-  if (setting.when !== undefined && sources.length >= 2) {
-    const clamped = Math.min(sources.length - 1, Math.max(0, Math.round(setting.when)));
-    if (Number.isFinite(clamped) && clamped !== DRIVE_GATE_WHEN_DEFAULT) result.when = clamped;
+
+  if (legacyWhen !== undefined && !sources.some((s) => s.when)) {
+    const idx = Math.min(sources.length - 1, Math.max(0, Math.round(legacyWhen)));
+    if (Number.isFinite(idx)) sources[idx]!.when = true;
   }
-  return result;
+
+  // Including a lone source: a patch left with only a condition (every
+  // plays source unplugged) would gate nothing and read 0.
+  if (sources.every((s) => s.when)) {
+    for (const s of sources) delete s.when;
+  }
+
+  return { mix: setting.mix, sources };
 }
 
 // ---- Pure patch-editing helpers (deviceMenu.ts, Phase 2) -------------------
@@ -436,36 +489,22 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
 // testable without a localStorage stub and so the store stays the only
 // place that decides *when* to persist.
 
-/** The source key `gateWhenIndex(patch)` currently names, or undefined for
- *  a patch that can't gate at all (fewer than two sources) — the "same
- *  source" `togglePatchSource` below re-finds after an add/remove shifts
- *  every index that follows it. */
-function gateConditionKey(patch: DrivePatch): string | undefined {
-  if (patch.sources.length < 2) return undefined;
-  return sourceKey(patch.sources[gateWhenIndex(patch)]!.choice);
-}
-
 /** Adds `choice` to the patch (weight 1, Graded) if it isn't already a
  *  source, removes it if it is. `"scene"` becomes a fresh one-source `add`
- *  patch on the first add. An empty result normalizes to `"scene"`.
- *
- *  Keeps `when` pointing at the same *source* through the edit, not just
- *  the same index: an add/remove before the condition's own position shifts
- *  every following index, so this re-finds the condition source by key in
- *  the rebuilt list and carries its *new* index through — or, if the edit
- *  just removed the condition source itself, lets it fall back to
- *  `normalizeDriveSetting`'s own default (this file's header's "falls back
- *  to a sensible one"). */
+ *  patch on the first add. An empty result normalizes to `"scene"`. A
+ *  source's own role/mute travel with it automatically now — nothing to
+ *  re-find by key across the edit (drives.ts used to track a single
+ *  patch-level `when` index this way; a per-source flag needs no such
+ *  bookkeeping). Removing the last source not marked `when` falls under
+ *  `normalizeDriveSetting`'s own all-conditions backstop. */
 export function togglePatchSource(setting: DriveSetting, choice: DriveSourceChoice): DriveSetting {
   if (setting === "scene") return { mix: "add", sources: [{ choice, weight: DRIVE_WEIGHT_DEFAULT }] };
   const key = sourceKey(choice);
   const exists = setting.sources.some((s) => sourceKey(s.choice) === key);
-  const conditionKey = gateConditionKey(setting);
   const sources = exists
     ? setting.sources.filter((s) => sourceKey(s.choice) !== key)
     : [...setting.sources, { choice, weight: DRIVE_WEIGHT_DEFAULT }];
-  const when = conditionKey === undefined ? undefined : sources.findIndex((s) => sourceKey(s.choice) === conditionKey);
-  return normalizeDriveSetting(when !== undefined && when >= 0 ? { mix: setting.mix, sources, when } : { mix: setting.mix, sources });
+  return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
 /** No-op on `"scene"` or a patch with no source matching `choice`. */
@@ -473,7 +512,7 @@ export function setSourceWeight(setting: DriveSetting, choice: DriveSourceChoice
   if (setting === "scene") return setting;
   const key = sourceKey(choice);
   const sources = setting.sources.map((s) => (sourceKey(s.choice) === key ? { ...s, weight: clampWeight(weight) } : s));
-  return normalizeDriveSetting({ mix: setting.mix, sources, when: setting.when });
+  return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
 /** No-op on `"scene"` or a patch with no source matching `choice`. */
@@ -481,7 +520,7 @@ export function setSourceHeight(setting: DriveSetting, choice: DriveSourceChoice
   if (setting === "scene") return setting;
   const key = sourceKey(choice);
   const sources = setting.sources.map((s) => (sourceKey(s.choice) === key ? { ...s, height } : s));
-  return normalizeDriveSetting({ mix: setting.mix, sources, when: setting.when });
+  return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
 /** Re-grids the patch's own grid source (there's at most one — this file's
@@ -489,26 +528,67 @@ export function setSourceHeight(setting: DriveSetting, choice: DriveSourceChoice
 export function setSourceGrid(setting: DriveSetting, grid: BeatGridIndex): DriveSetting {
   if (setting === "scene") return setting;
   const sources = setting.sources.map((s) => (isGridChoice(s.choice) ? { ...s, choice: { source: "beat" as const, grid } } : s));
-  return normalizeDriveSetting({ mix: setting.mix, sources, when: setting.when });
+  return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
-/** No-op on `"scene"`. */
+/** No-op on `"scene"`. Switching *into* `gate` for the first time (nothing
+ *  in the patch has ever had a role assigned) marks `DRIVE_GATE_WHEN_DEFAULT`
+ *  the condition, so a fresh two-source patch gates exactly the way the old
+ *  single-`when` model always defaulted it to rather than landing on the
+ *  (equally valid, but surprising as a first click) "acts as add" state —
+ *  see this file's header. Switching mixes otherwise never touches a
+ *  source's own role. */
 export function setPatchMix(setting: DriveSetting, mix: DriveMix): DriveSetting {
   if (setting === "scene") return setting;
-  return normalizeDriveSetting({ mix, sources: setting.sources, when: setting.when });
+  let sources = setting.sources;
+  if (mix === "gate" && sources.length >= 2 && !sources.some((s) => s.when)) {
+    const idx = Math.min(DRIVE_GATE_WHEN_DEFAULT, sources.length - 1);
+    sources = sources.map((s, i) => (i === idx ? { ...s, when: true as const } : s));
+  }
+  return normalizeDriveSetting({ mix, sources });
 }
 
-/** The source line's own role toggle (deviceMenu.ts): makes `sources[index]`
- *  the patch's gate condition — every other source becomes (or stays)
- *  "plays". No-op on `"scene"` or a patch with fewer than two sources (gate
- *  has nothing to condition on — this file's header's gate paragraph);
- *  `index` is clamped into range by `normalizeDriveSetting`, so a stale
- *  index (a source removed between render and click) still lands somewhere
- *  valid rather than throwing. driveStore.ts's same-named wrapper persists
- *  the result. */
-export function setGateCondition(setting: DriveSetting, index: number): DriveSetting {
-  if (setting === "scene" || setting.sources.length < 2) return setting;
-  return normalizeDriveSetting({ mix: setting.mix, sources: setting.sources, when: index });
+/** The source line's own role toggle (deviceMenu.ts's buildRoleToggle):
+ *  marks `sources[index]` "plays" or "when" — several sources can be marked
+ *  `when` at once (this file's header's gate paragraph: every one of them
+ *  has to read high, ANDed together, for the gate to open). Refuses (returns
+ *  `setting` unchanged) a `"when"` request that would leave zero "plays"
+ *  sources among the *others* — the at-least-one-plays invariant, checked
+ *  here (not just in `normalizeDriveSetting`'s own backstop) so the panel
+ *  can tell a real edit from a no-op and disable the button instead of
+ *  letting a click visibly do nothing. Mute state (`off`) plays no part in
+ *  that check — a role is a role regardless of whether the source is
+ *  currently muted. No-op on `"scene"` or an out-of-range index.
+ *  driveStore.ts's same-named wrapper persists the result. */
+export function setSourceRole(setting: DriveSetting, index: number, role: "plays" | "when"): DriveSetting {
+  if (setting === "scene") return setting;
+  if (index < 0 || index >= setting.sources.length) return setting;
+  if (role === "when" && !setting.sources.some((s, i) => i !== index && !s.when)) return setting;
+  const sources = setting.sources.map((s, i) => {
+    if (i !== index) return s;
+    const next: DriveSource = { ...s };
+    if (role === "when") next.when = true;
+    else delete next.when;
+    return next;
+  });
+  return normalizeDriveSetting({ mix: setting.mix, sources });
+}
+
+/** The source line's own mute switch (deviceMenu.ts's buildMuteSwitch):
+ *  turns `sources[index]` off without unplugging it, or back on — see this
+ *  file's header's Muting paragraph. No-op on `"scene"` or an out-of-range
+ *  index. driveStore.ts's same-named wrapper persists the result. */
+export function setSourceMuted(setting: DriveSetting, index: number, muted: boolean): DriveSetting {
+  if (setting === "scene") return setting;
+  if (index < 0 || index >= setting.sources.length) return setting;
+  const sources = setting.sources.map((s, i) => {
+    if (i !== index) return s;
+    const next: DriveSource = { ...s };
+    if (muted) next.off = true;
+    else delete next.off;
+    return next;
+  });
+  return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
 // ---- Engine ------------------------------------------------------------
@@ -703,21 +783,39 @@ export function createDriveEngine(): DriveEngine {
         return patch.sources.map((src) => clampWeight(src.weight) * sourceRaw(key, src));
       }
 
+      // combine()'s gate branch (below) is the one place `off`/`when` are
+      // read directly rather than through a zeroed weighted value — see
+      // sourceValues() further down for why the *panel's* own read zeros a
+      // muted slot instead of skipping it structurally.
       function combine(patch: DrivePatch, weighted: number[]): number {
         if (patch.mix === "max") {
           let m = 0;
-          for (const v of weighted) if (v > m) m = v;
+          for (let i = 0; i < weighted.length; i++) {
+            if (patch.sources[i]!.off) continue;
+            if (weighted[i]! > m) m = weighted[i]!;
+          }
           return m;
         }
         if (patch.mix === "gate") {
-          if (weighted.length < 2) return weighted[0] ?? 0; // nothing to gate on — treat as add of the one term
-          const when = gateWhenIndex(patch);
           let plays = 0;
-          for (let i = 0; i < weighted.length; i++) if (i !== when) plays += weighted[i]!;
-          return plays * smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, weighted[when]!);
+          let open = 1;
+          let anyCondition = false;
+          for (let i = 0; i < patch.sources.length; i++) {
+            const src = patch.sources[i]!;
+            if (src.off) continue;
+            if (src.when) {
+              anyCondition = true;
+              open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, weighted[i]!);
+            } else {
+              plays += weighted[i]!;
+            }
+          }
+          // No active condition (none marked, or every marked one muted) —
+          // this file's header's own deliberate "acts as add" fallback.
+          return anyCondition ? plays * open : plays;
         }
         let sum = 0;
-        for (const v of weighted) sum += v;
+        for (let i = 0; i < weighted.length; i++) if (!patch.sources[i]!.off) sum += weighted[i]!;
         return sum;
       }
 
@@ -743,20 +841,30 @@ export function createDriveEngine(): DriveEngine {
         fired(key, sceneDefaultFired) {
           const { setting } = resolve(key);
           if (setting === "scene") return sceneDefaultFired;
-          if (setting.mix === "gate" && setting.sources.length >= 2) {
-            const when = gateWhenIndex(setting);
-            const whenSrc = setting.sources[when]!;
-            const conditionValue = clampWeight(whenSrc.weight) * sourceRaw(key, whenSrc);
-            const gateOpen = smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, conditionValue) > 0.5;
+          if (setting.mix === "gate") {
             let anyPlays = false;
+            let open = 1;
+            let anyCondition = false;
             for (let i = 0; i < setting.sources.length; i++) {
-              if (i === when) continue; // the condition's own edge, if it has one, is never consumed
-              if (sourceEdge(key, setting.sources[i]!.choice, sceneDefaultFired)) anyPlays = true;
+              const src = setting.sources[i]!;
+              if (src.off) continue;
+              if (src.when) {
+                anyCondition = true;
+                const conditionValue = clampWeight(src.weight) * sourceRaw(key, src);
+                open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, conditionValue);
+                // A condition's own edge, if it has one, is never consumed.
+              } else if (sourceEdge(key, src.choice, sceneDefaultFired)) {
+                anyPlays = true;
+              }
             }
+            const gateOpen = !anyCondition || open > 0.5;
             return anyPlays && gateOpen;
           }
           let any = false;
-          for (const src of setting.sources) if (sourceEdge(key, src.choice, sceneDefaultFired)) any = true;
+          for (const src of setting.sources) {
+            if (src.off) continue;
+            if (sourceEdge(key, src.choice, sceneDefaultFired)) any = true;
+          }
           return any;
         },
 
@@ -776,7 +884,15 @@ export function createDriveEngine(): DriveEngine {
 
         sourceValues(key) {
           const { setting } = resolve(key);
-          return setting === "scene" ? null : Float32Array.from(weightedValues(key, setting));
+          if (setting === "scene") return null;
+          const out = Float32Array.from(weightedValues(key, setting));
+          // A muted source's own slot reads 0 (this file's header's Muting
+          // paragraph) — combine()/fired() above check `.off` directly
+          // instead of relying on this zeroing (a muted *condition* still
+          // has to be told apart from one genuinely reading 0), but the
+          // panel's own per-source trace wants the flat-0 reading.
+          for (let i = 0; i < setting.sources.length; i++) if (setting.sources[i]!.off) out[i] = 0;
+          return out;
         },
 
         valueOf(key) {

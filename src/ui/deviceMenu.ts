@@ -37,7 +37,7 @@ import {
   defaultDriveSetting,
   DRIVE_WEIGHT_MAX,
   DRIVE_WEIGHT_MIN,
-  gateWhenIndex,
+  gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
   sameDriveSetting,
@@ -205,23 +205,40 @@ import {
  * `stroke-dashoffset` written per tick, on the pinned group alone
  * (cableLayer.tick, flow speed off each source's own live value).
  *
- * In Only when mode, which source is the *condition* (drives.ts's
- * `DrivePatch.when`, read through `gateWhenIndex`) is picked per source
- * line, not fixed at "source 1": buildRoleToggle puts a tiny Plays/Only
- * when segmented control on every line once the patch has two or more
- * sources and is gating, and clicking "Only when" on a line calls
- * `deps.onSetGateCondition` — drives.ts's own header explains why that
- * always resolves to a valid index, and how it keeps tracking the same
- * *source* (not just a position) through an add/remove. The condition line
- * gets a dashed left rule (`.vc-drive-src-condition`, controlsTheme.ts) so
- * it reads apart from a "plays" line at a glance; buildOutputGraph draws
- * that same source's trace dashed and shades the time its own smoothstep
- * was past 0.5 (the same test `fired()` gates on — drives.ts's
- * GATE_OPEN_LOW/HIGH); cableGroupFor marks its cable `cond`, which
- * cableLayer.ts/controlsTheme.ts draw with a longer dash than a scene-mix
- * cable's own `soft` one, so the condition reads in the cables too.
- * driveSummaryText's own gate branch names the plays sources then the
- * condition ("Treble hits + Bass hits, only when Song intensity is high").
+ * In Only when mode, a source's *role* (drives.ts's `DriveSource.when`) is
+ * its own, independent flag — several lines can be marked "Only when" at
+ * once, every one of them ANDed together (drives.ts's own header). Every
+ * line, once the patch has two or more sources and is gating, gets
+ * buildRoleToggle's Plays/Only when pair, both halves clickable
+ * (deps.onSetSourceRole) — "Only when" disables itself, with a hint, on the
+ * one line whose marking would leave zero "plays" sources among the rest
+ * (drives.ts's own setSourceRole refusal, mirrored here rather than letting
+ * a click visibly do nothing). Every source line shares one left gutter
+ * (driveSrcGutterStyle) so dots/names/controls line up regardless of role;
+ * a condition line's own dashed rule (`.vc-drive-gutter-cond`,
+ * controlsTheme.ts) lives *inside* that gutter, never shifting the row's own
+ * content the way a border+padding on the whole line would. buildOutputGraph
+ * draws every condition's trace dashed and darkens the time the gate was
+ * blocked (drives.ts's GATE_OPEN_LOW/HIGH) plus a lit-when-open strip along
+ * its own bottom edge; cableGroupFor marks each condition cable `cond`,
+ * which cableLayer.ts/controlsTheme.ts draw with a longer dash than a
+ * scene-mix cable's own `soft` one. driveSummaryText's own gate branch names
+ * the plays sources then every condition ("Treble hits + Bass hits, only
+ * when Song intensity and Loudness are high").
+ *
+ * A source line's own mute switch (buildMuteSwitch, `deps.onSetSourceMuted`)
+ * turns it off without unplugging it — drives.ts's `DriveSource.off`, its
+ * own header's Muting paragraph. A muted line dims (`.vc-drive-src-muted`)
+ * except the switch itself; its cable draws in cableLayer.ts's flat, dashed
+ * `.vc-cable-muted` style (no glow, no flow) rather than the pinned group's
+ * usual three-layer structure, and its meter jack still fills solid (it's
+ * still plugged in — jackIsShown/jackIsPinned don't look at mute at all) but
+ * no longer lights that row's own fed glow (jackIsPinnedActive/
+ * jackFeedsPreviewActive, the mute-aware pair refreshBandsJacks/
+ * audioMeters.ts's refreshPatchView use for row/lane glow specifically,
+ * leaving the plain isPinned/isPreview predicates — and so aria-pressed —
+ * mute-agnostic, since unplugging a muted source is still exactly what a
+ * click on its jack does).
  *
  * Every control in the patch panel explains itself two ways (setHint,
  * this file's own "cover everything with hints" pass): a `title` (the
@@ -405,9 +422,13 @@ export interface DeviceMenuDeps {
   onSetSourceHeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, height: HitHeight) => void;
   onSetSourceGrid: (sceneId: string, spec: SceneSetting, grid: BeatGridIndex) => void;
   onSetPatchMix: (sceneId: string, spec: SceneSetting, mix: DriveMix) => void;
-  /** The Only when role toggle (buildSourceLine) — makes `index` the
-   *  patch's own gate condition. See drives.ts's setGateCondition. */
-  onSetGateCondition: (sceneId: string, spec: SceneSetting, index: number) => void;
+  /** The Only when role toggle (buildRoleToggle) — marks `sources[index]`
+   *  "plays" or "when". See drives.ts's setSourceRole. */
+  onSetSourceRole: (sceneId: string, spec: SceneSetting, index: number, role: "plays" | "when") => void;
+  /** The source line's own mute switch (buildMuteSwitch) — turns
+   *  `sources[index]` off without unplugging it, or back on. See
+   *  drives.ts's setSourceMuted. */
+  onSetSourceMuted: (sceneId: string, spec: SceneSetting, index: number, muted: boolean) => void;
   getDriveLine: (sceneId: string, spec: SceneSetting) => Float32Array;
   setDriveLineBand: (sceneId: string, spec: SceneSetting, band: number, height: number) => void;
   setDriveLine: (sceneId: string, spec: SceneSetting, heights: ArrayLike<number>) => void;
@@ -677,23 +698,31 @@ const driveSegBtnStyle = `${driveSegBtnBase} color: rgba(255,255,255,0.6);`;
 const driveSegBtnLitStyle = `${driveSegBtnBase} color: #fff; background: rgba(255,255,255,0.12);`;
 const driveSegBtnDisabledStyle = `${driveSegBtnBase} color: rgba(255,255,255,0.22); cursor: not-allowed;`;
 
-// One source line.
+// One source line. Five fixed columns so every line — condition or plain,
+// muted or not — aligns identically (this file's own header): a left gutter
+// for the condition marker (driveSrcGutterStyle, never a border+padding on
+// the whole line — see controlsTheme.ts's .vc-drive-gutter-cond), the mute
+// switch, the colour dot, the name, then the unplug button; driveSrcCtrlsStyle
+// (row 2) spans from the name's own column so it indents under the name, not
+// under the gutter/switch/dot.
 const driveSrcListStyle = `display: flex; flex-direction: column;`;
 const driveSrcLineStyle = `
-  display: grid; grid-template-columns: 10px minmax(0,1fr) auto; align-items: center; gap: 6px 9px;
+  display: grid; grid-template-columns: 12px 20px 10px minmax(0,1fr) auto; align-items: center; gap: 6px 9px;
   padding: 6px 0; border-top: 1px solid rgba(255,255,255,0.05);
 `;
+const driveSrcGutterStyle = `grid-row: 1 / span 2; align-self: stretch; width: 100%;`;
 const driveSrcDotStyle = (color: string) => `width: 8px; height: 8px; border-radius: 50%; background: ${color}; box-shadow: 0 0 6px ${color};`;
 const driveSrcNameStyle = `font: 500 12px/1.2 ${FONT_LABEL}; color: #fff; min-width: 0;`;
 const driveSrcRemoveStyle = `
   background: none; border: none; color: rgba(255,255,255,0.4); font: 15px/1 ${FONT_MONO};
   padding: 2px 5px; border-radius: 3px; cursor: pointer;
 `;
-const driveSrcCtrlsStyle = `grid-column: 2 / -1; display: flex; align-items: center; gap: 9px; flex-wrap: wrap;`;
+const driveSrcCtrlsStyle = `grid-column: 4 / -1; display: flex; align-items: center; gap: 9px; flex-wrap: wrap;`;
 const driveEmptySrcStyle = `font: 400 12px/1.4 ${FONT_LABEL}; color: rgba(255,255,255,0.55); padding: 3px 0;`;
 
-// Height (mini) segmented control and the grid division chips — smaller
-// than the mix control, since a source line already carries a lot.
+// Height (mini) segmented control, the grid division chips, and the role
+// toggle — smaller than the mix control, since a source line already
+// carries a lot.
 const driveMiniSegStyle = `display: inline-flex; border: 1px solid rgba(255,255,255,0.16); border-radius: 5px; overflow: hidden;`;
 const driveMiniSegBtnBase = `
   font: 500 9px/1 ${FONT_LABEL}; letter-spacing: 0.05em; text-transform: uppercase;
@@ -701,6 +730,7 @@ const driveMiniSegBtnBase = `
 `;
 const driveMiniSegBtnStyle = `${driveMiniSegBtnBase} color: rgba(255,255,255,0.55);`;
 const driveMiniSegBtnLitStyle = `${driveMiniSegBtnBase} color: #fff; background: rgba(255,255,255,0.14);`;
+const driveMiniSegBtnDisabledStyle = `${driveMiniSegBtnBase} color: rgba(255,255,255,0.22); cursor: not-allowed;`;
 const driveGridChipsStyle = `display: flex; flex-wrap: wrap; gap: 4px;`;
 
 const driveWeightWrapStyle = `display: flex; align-items: center; gap: 7px; flex: 1 1 120px; min-width: 100px;`;
@@ -1711,6 +1741,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       isShown: jackIsShown,
       isPinned: jackIsPinned,
       isPreview: jackFeedsPreview,
+      isPinnedActive: jackIsPinnedActive,
+      isPreviewActive: jackFeedsPreviewActive,
       previewIsActive: () => !!activePreview(),
       isSceneSource: jackIsSceneSource,
       describe: jackDescribe,
@@ -2010,20 +2042,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     driveCanvasSizes.delete(canvas);
   }
 
+  /** A row's own one-line source summary — every muted source is left out
+   *  of the plain-language list (this file's header's Muting paragraph) and
+   *  folded into one short "· N off" suffix instead, so a summary never
+   *  grows a parenthetical per muted source. */
   function driveSummaryText(spec: SceneSetting, setting: DriveSetting): string {
     if (setting === "scene") {
       const label = spec.drive?.sceneLabel ?? "Scene mix";
       return label.replace(/^Scene:\s*/, "Scene mix: ");
     }
     if (!setting.sources.length) return "Nothing plugged in";
+    const mutedCount = setting.sources.filter((s) => s.off).length;
+    const suffix = mutedCount > 0 ? ` · ${mutedCount} off` : "";
+    const live = setting.sources.filter((s) => !s.off);
     if (setting.mix === "gate" && setting.sources.length > 1) {
-      const when = gateWhenIndex(setting);
-      const plays = setting.sources.filter((_, i) => i !== when).map((s) => driveSourceLabel(s.choice));
-      const condition = driveSourceLabel(setting.sources[when]!.choice);
-      return `${plays.join(" + ")}, only when ${condition} is high`;
+      const conditions = live.filter((s) => s.when);
+      const plays = live.filter((s) => !s.when);
+      const playsText = plays.length ? plays.map((s) => driveSourceLabel(s.choice)).join(" + ") : "Nothing";
+      if (!conditions.length) return `${playsText}${suffix}`;
+      const condText = conditions.map((s) => driveSourceLabel(s.choice)).join(" and ");
+      const verb = conditions.length > 1 ? "are" : "is";
+      return `${playsText}, only when ${condText} ${verb} high${suffix}`;
     }
-    const names = setting.sources.map((s) => driveSourceLabel(s.choice));
-    return names.join(setting.mix === "max" ? " or " : " + ");
+    const names = live.map((s) => driveSourceLabel(s.choice));
+    if (!names.length) return `Nothing playing${suffix}`;
+    return `${names.join(setting.mix === "max" ? " or " : " + ")}${suffix}`;
   }
 
   /** `Reset to scene default`'s own hint (buildPatchPanel) — the setting's
@@ -2102,14 +2145,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
   ];
 
-  const ROLE_OPTIONS: { role: "plays" | "condition"; label: string; hint: string }[] = [
+  const ROLE_OPTIONS: { role: "plays" | "when"; label: string; hint: string }[] = [
     { role: "plays", label: "Plays", hint: "This source makes the setting move." },
     {
-      role: "condition",
+      role: "when",
       label: "Only when",
-      hint: "The condition: the playing sources only get through while this one is high.",
+      hint: "A condition: the playing sources only get through while this one is high. Mark more than one and every condition has to be high at once.",
     },
   ];
+  const ROLE_REFUSE_HINT = "At least one source has to play.";
 
   const GRID_CHIP_HINT: Record<number, string> = {
     1: "A pulse every half beat.",
@@ -2170,34 +2214,38 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return seg;
   }
 
-  /** The Only when role toggle (drives.ts's setGateCondition) — shown on
-   *  every source line while the patch is gating, so any line can be
-   *  clicked into being the condition; the line that already is one shows
-   *  it pressed. `index` is this source's own current position in
-   *  `patch.sources` (buildSourceLine's own loop index), which is exactly
-   *  what setGateCondition wants. */
-  function buildRoleToggle(sceneId: string, spec: SceneSetting, index: number, isCondition: boolean): HTMLElement {
+  /** The Only when role toggle (drives.ts's setSourceRole) — shown on every
+   *  source line while the patch is gating. Both halves are independently
+   *  clickable now (this file's own header): marking this line "when" never
+   *  touches any other line's own role, so several can be conditions at
+   *  once. "Only when" disables itself — with `ROLE_REFUSE_HINT` — on the
+   *  one line whose marking would leave zero "plays" sources among the
+   *  rest, mirroring drives.ts's own refusal there rather than letting a
+   *  click visibly do nothing. `index` is this source's own current
+   *  position in `patch.sources` (buildSourceLine's own loop index), which
+   *  is exactly what setSourceRole wants. */
+  function buildRoleToggle(sceneId: string, spec: SceneSetting, patch: DrivePatch, index: number): HTMLElement {
     const seg = document.createElement("div");
     seg.style.cssText = driveMiniSegStyle;
     seg.setAttribute("role", "group");
     seg.setAttribute("aria-label", "Role");
+    const isCondition = !!patch.sources[index]!.when;
+    const wouldRefuse = !isCondition && !patch.sources.some((s, i) => i !== index && !s.when);
     for (const opt of ROLE_OPTIONS) {
-      const pressed = (opt.role === "condition") === isCondition;
+      const pressed = (opt.role === "when") === isCondition;
+      const disabled = opt.role === "when" && wouldRefuse && !pressed;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = opt.label;
-      setHint(btn, opt.hint);
-      btn.setAttribute("aria-description", opt.hint);
+      btn.disabled = disabled;
+      setHint(btn, disabled ? ROLE_REFUSE_HINT : opt.hint);
+      btn.setAttribute("aria-description", disabled ? ROLE_REFUSE_HINT : opt.hint);
       btn.setAttribute("aria-pressed", String(pressed));
-      btn.style.cssText = pressed ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
-      // Only "Only when" is ever actionable — clicking it makes *this* line
-      // the condition (retargeting `when` automatically demotes whichever
-      // line was the condition before, per drives.ts's setGateCondition).
-      // "Plays" is a plain read-out: a source is "Plays" simply by not
-      // being the condition, so there's nothing a click on it would do.
-      if (opt.role === "condition" && !pressed) {
+      btn.style.cssText = disabled ? driveMiniSegBtnDisabledStyle : pressed ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      if (!disabled) {
         btn.addEventListener("click", () => {
-          deps.onSetGateCondition(sceneId, spec, index);
+          if (pressed) return;
+          deps.onSetSourceRole(sceneId, spec, index, opt.role);
           patchChanged(sceneId, spec);
         });
       }
@@ -2273,6 +2321,34 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return wrap;
   }
 
+  const MUTE_HINT_ON = "Switch this source off without unplugging it — its settings are kept.";
+  const MUTE_HINT_OFF = "Switch this source back on.";
+
+  /** The source line's own on/off switch (drives.ts's setSourceMuted) —
+   *  lives in its own gutter column (driveSrcLineStyle) on every line, so
+   *  it never shifts alignment depending on whether a line happens to have
+   *  one. Styled like the panel's own boolean toggle (`.vc-toggle`,
+   *  controlsTheme.ts) at a compact size of its own (`.vc-mute-switch`)
+   *  rather than reusing that class outright — `.vc-toggle` is also this
+   *  file's own Tab-ring selector (ringElements()), and a mute switch inside
+   *  a pinned setting's own patch panel isn't meant to join that ring. */
+  function buildMuteSwitch(sceneId: string, spec: SceneSetting, index: number, src: DriveSource): HTMLElement {
+    const muted = !!src.off;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "vc-mute-switch";
+    btn.setAttribute("role", "switch");
+    btn.setAttribute("aria-checked", String(!muted));
+    btn.setAttribute("aria-label", `${driveSourceLabel(src.choice)} on/off`);
+    btn.style.setProperty("--c", driveSourceColor(src.choice));
+    setHint(btn, muted ? MUTE_HINT_OFF : MUTE_HINT_ON);
+    btn.addEventListener("click", () => {
+      deps.onSetSourceMuted(sceneId, spec, index, !muted);
+      patchChanged(sceneId, spec);
+    });
+    return btn;
+  }
+
   function buildSourceLine(
     sceneId: string,
     spec: SceneSetting,
@@ -2282,10 +2358,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onLiveEdit: () => void,
   ): HTMLElement {
     const isGate = patch.mix === "gate" && patch.sources.length > 1;
-    const isCondition = isGate && i === gateWhenIndex(patch);
+    const isCondition = isGate && !!src.when;
+    const muted = !!src.off;
     const line = document.createElement("div");
     line.style.cssText = driveSrcLineStyle;
-    line.classList.toggle("vc-drive-src-condition", isCondition);
+    line.classList.toggle("vc-drive-src-muted", muted);
+
+    // The condition marker lives in its own gutter column, not a
+    // border+padding on the whole line — every line's dots/names/controls
+    // align regardless of role (this file's own header).
+    const gutter = document.createElement("span");
+    gutter.style.cssText = driveSrcGutterStyle;
+    gutter.classList.toggle("vc-drive-gutter-cond", isCondition);
+
+    const muteBtn = buildMuteSwitch(sceneId, spec, i, src);
+
     const dot = document.createElement("span");
     dot.style.cssText = driveSrcDotStyle(driveSourceColor(src.choice));
     const name = document.createElement("div");
@@ -2304,7 +2391,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
     const ctrls = document.createElement("div");
     ctrls.style.cssText = driveSrcCtrlsStyle;
-    if (isGate) ctrls.appendChild(buildRoleToggle(sceneId, spec, i, isCondition));
+    if (isGate) ctrls.appendChild(buildRoleToggle(sceneId, spec, patch, i));
     // Fixed/Loud height only mean anything for a hit-kind source — an
     // edge-kind catalogue entry or a beat grid (drives.ts's own header).
     const isHitKind = isGridSourceChoice(src.choice) || (typeof src.choice === "string" && SIGNALS[src.choice].kind === "edge");
@@ -2321,7 +2408,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       ctrls.appendChild(buildWeightSlider(sceneId, spec, src, onLiveEdit));
     }
 
-    line.append(dot, name, removeBtn, ctrls);
+    line.append(gutter, muteBtn, dot, name, removeBtn, ctrls);
     return line;
   }
 
@@ -2402,7 +2489,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     patch: DrivePatch,
   ): { el: HTMLElement; canvas: HTMLCanvasElement; tick: (drives: SceneDrives) => void } {
     const wrap = document.createElement("div");
-    setHint(wrap, "What this setting receives over the last 4 seconds. Thin lines: each source after its weight. White: the result.");
+    setHint(
+      wrap,
+      "What this setting receives over the last 4 seconds. Thin lines: each source after its weight (dashed: a condition; a muted source draws no trace). Dark: the gate was blocked. Bottom strip: lit while open. White: the result.",
+    );
     const head = document.createElement("div");
     head.style.cssText = driveOutHeadStyle;
     const eyebrow = document.createElement("span");
@@ -2421,15 +2511,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const RING = 120; // 4 s at 30 Hz
     const combined = new Float32Array(RING);
     const perSource = patch.sources.map(() => new Float32Array(RING));
-    // The Only when patch's own condition — its trace draws dashed, and the
-    // time it held the gate open is shaded behind every trace, matching
-    // this file's own combine()/fired() gate test exactly (drives.ts's
-    // GATE_OPEN_LOW/HIGH, reused rather than re-typed).
-    const isGate = patch.mix === "gate" && patch.sources.length > 1;
-    const when = isGate ? gateWhenIndex(patch) : -1;
+    // Every marked condition (there can be more than one now — this file's
+    // own header) draws its trace dashed; `gateOpen` below tracks the same
+    // AND-of-smoothsteps combine()/fired() gate on (drives.ts's
+    // GATE_OPEN_LOW/HIGH, reused rather than re-typed), reduced to a bit per
+    // tick for the shading.
+    const isGate = patch.mix === "gate";
+    const conditionIdxs = isGate ? gateConditionIndices(patch) : [];
     const gateOpen = new Uint8Array(RING);
     let ringHead = 0;
     let filled = 0;
+
+    // The panel's own polish pass: darken the BLOCKED time clearly (not a
+    // faint wash over the open time — that read too subtly on the synthetic
+    // feed) plus a thin lit-when-open strip along the graph's own bottom
+    // edge, in a neutral white rather than picking one condition's colour
+    // when several are marked.
+    const BLOCKED_FILL = "rgba(0,0,0,0.4)";
+    const STRIP_OPEN = "rgba(255,255,255,0.9)";
+    const STRIP_BLOCKED = "rgba(255,255,255,0.16)";
+    const STRIP_H = 3;
 
     function draw(): void {
       const { w, h } = size;
@@ -2442,12 +2543,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const at = (k: number) => (ringHead - RING + k + 1 + RING * 2) % RING;
 
       if (isGate) {
-        ctx.fillStyle = "rgba(255,255,255,0.07)";
+        ctx.fillStyle = BLOCKED_FILL;
         let runStart = -1;
         for (let k = RING - n; k < RING; k++) {
-          const open = gateOpen[at(k)] === 1;
-          if (open && runStart < 0) runStart = k;
-          if (!open && runStart >= 0) {
+          const blocked = gateOpen[at(k)] === 0;
+          if (blocked && runStart < 0) runStart = k;
+          if (!blocked && runStart >= 0) {
             ctx.fillRect(xs(runStart), 0, xs(k) - xs(runStart), h);
             runStart = -1;
           }
@@ -2456,9 +2557,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
 
       for (let i = 0; i < patch.sources.length; i++) {
+        if (patch.sources[i]!.off) continue; // muted — no trace at all
         ctx.strokeStyle = withAlpha(driveSourceColor(patch.sources[i]!.choice), 0.65);
         ctx.lineWidth = 1;
-        ctx.setLineDash(i === when ? [3, 3] : []);
+        ctx.setLineDash(conditionIdxs.includes(i) ? [3, 3] : []);
         ctx.beginPath();
         for (let k = RING - n; k < RING; k++) {
           const idx = at(k);
@@ -2481,6 +2583,28 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
+
+      if (isGate) {
+        const colW = Math.max(1, w / (RING - 1));
+        let runStart = -1;
+        let runOpen = true;
+        for (let k = RING - n; k < RING; k++) {
+          const open = gateOpen[at(k)] === 1;
+          if (runStart < 0) {
+            runStart = k;
+            runOpen = open;
+          } else if (open !== runOpen) {
+            ctx.fillStyle = runOpen ? STRIP_OPEN : STRIP_BLOCKED;
+            ctx.fillRect(xs(runStart), h - STRIP_H, xs(k) - xs(runStart), STRIP_H);
+            runStart = k;
+            runOpen = open;
+          }
+        }
+        if (runStart >= 0) {
+          ctx.fillStyle = runOpen ? STRIP_OPEN : STRIP_BLOCKED;
+          ctx.fillRect(xs(runStart), h - STRIP_H, xs(RING - 1) - xs(runStart) + colW, STRIP_H);
+        }
+      }
     }
 
     function tick(drives: SceneDrives): void {
@@ -2489,7 +2613,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       for (let i = 0; i < perSource.length; i++) perSource[i]![ringHead] = src?.[i] ?? 0;
       const v = drives.valueOf(spec.key);
       combined[ringHead] = v;
-      if (isGate) gateOpen[ringHead] = smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, src?.[when] ?? 0) > 0.5 ? 1 : 0;
+      if (isGate) {
+        let open = 1;
+        let anyCondition = false;
+        for (const idx of conditionIdxs) {
+          if (patch.sources[idx]!.off) continue; // muted condition — excluded from the AND, same as the engine
+          anyCondition = true;
+          open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, src?.[idx] ?? 0);
+        }
+        gateOpen[ringHead] = !anyCondition || open > 0.5 ? 1 : 0;
+      }
       filled = Math.min(RING, filled + 1);
       val.textContent = v.toFixed(2);
       draw();
@@ -2923,6 +3056,36 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
   }
 
+  /** The matching `DriveSource` for `choice` in `setting`, or undefined —
+   *  jackIsPinnedActive/jackFeedsPreviewActive below share this rather than
+   *  each re-deriving "which source is this jack" a second way. */
+  function sourceForChoice(setting: DriveSetting, choice: DriveSourceChoice): DriveSource | undefined {
+    if (setting === "scene") return undefined;
+    const key = jackKey(choice);
+    return setting.sources.find((s) => jackKey(s.choice) === key);
+  }
+
+  /** `jackIsPinned`, but false for a *muted* source — the mute-aware pair
+   *  (with jackFeedsPreviewActive below) refreshBandsJacks/audioMeters.ts's
+   *  refreshPatchView use specifically for a row/lane's own fed glow, so a
+   *  muted source's jack still fills solid (jackIsPinned/jackIsShown stay
+   *  mute-agnostic — it's still plugged in) while its row stops lighting up
+   *  (this file's own header's Muting paragraph). */
+  function jackIsPinnedActive(choice: DriveSourceChoice): boolean {
+    if (!pinned) return false;
+    const src = sourceForChoice(deps.getDriveSetting(pinned.sceneId, pinned.spec), choice);
+    return !!src && !src.off;
+  }
+
+  /** `jackFeedsPreview`, but false for a *muted* source — see
+   *  jackIsPinnedActive above. */
+  function jackFeedsPreviewActive(choice: DriveSourceChoice): boolean {
+    const ap = activePreview();
+    if (!ap) return false;
+    const src = sourceForChoice(deps.getDriveSetting(ap.sceneId, ap.spec), choice);
+    return !!src && !src.off;
+  }
+
   /** `choice` is named in the shown setting's own display-only
    *  `drive.sceneSources` (drives.ts's header) — never a real patch source,
    *  so never a jack fill, only a row/lane's softer glow. */
@@ -3035,8 +3198,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       list.push(choice);
     }
     for (const [rowEl, choices] of feedGroups) {
-      const previewHit = ap ? choices.find((c) => jackFeedsPreview(c)) : undefined;
-      const pinnedHit = pinned ? choices.find((c) => jackIsPinned(c)) : undefined;
+      // The mute-aware pair — a muted source keeps its jack filled (above)
+      // but stops lighting the row it feeds (this file's own header).
+      const previewHit = ap ? choices.find((c) => jackFeedsPreviewActive(c)) : undefined;
+      const pinnedHit = pinned ? choices.find((c) => jackIsPinnedActive(c)) : undefined;
       const sceneSoftHit = previewHit || pinnedHit ? undefined : choices.find((c) => jackIsSceneSource(c));
       if (previewHit) {
         setRowFed(rowEl, "soft", driveSourceColor(previewHit));
@@ -3138,12 +3303,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         });
       }
     } else {
-      // Only meaningful for a gate patch with two or more sources — see
-      // drives.ts's gateWhenIndex — so the condition cable's own dashed-long
-      // style (controlsTheme.ts's .vc-cable-cond) reads consistently with
-      // the source line's own dashed marker and the output graph's dashed
-      // trace.
-      const when = setting.mix === "gate" && setting.sources.length > 1 ? gateWhenIndex(setting) : -1;
+      // Every marked condition (there can be more than one now — this
+      // file's own header) draws with the same dashed-long style
+      // (controlsTheme.ts's .vc-cable-cond), consistent with the source
+      // line's own dashed marker and the output graph's dashed trace. A
+      // muted source draws in the flat, dashed `.vc-cable-muted` style
+      // instead (no glow, no flow) regardless of role.
+      const conditionIdxs = setting.mix === "gate" ? gateConditionIndices(setting) : [];
       setting.sources.forEach((src, idx) => {
         const key = jackKey(src.choice);
         const jackEl = jackEls.get(key);
@@ -3153,7 +3319,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           key,
           color: driveSourceColor(src.choice),
           soft: false,
-          cond: idx === when,
+          cond: conditionIdxs.includes(idx),
+          muted: !!src.off,
           jackEl,
           getValue: () => lastDrives?.sourceValues(specKey)?.[idx] ?? 0,
           isNew: key === justAddedKey,

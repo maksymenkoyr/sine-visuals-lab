@@ -39,26 +39,24 @@ import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSe
  *
  * Each `d` entry is one setting's captured `DriveSetting` (drives.ts), wire-
  * encoded as whichever of two shapes is smaller: a one-source, weight-1,
- * Graded `add` patch — the identity shape a plain `DriveChoice` used to be,
- * before this store had patches — encodes as that bare `DriveChoice` (a
- * string id, or `{source:"beat"|"line", …}`), so a link built by an app from
- * before patches existed still decodes here, and a link built by this app
- * for a setting nobody has multi-sourced still decodes on that older app.
- * Anything else (more than one source, a non-`add` mix, a non-1 weight, or a
- * non-Graded height) encodes as the compact patch
- * `{m: DriveMix, s: [{c: DriveChoice, w?: number, h?: HitHeight}, …], w?:
- * number}` (the top-level `w`, present only for a `gate` Look whose
- * condition isn't the default source 1, is `DrivePatch.when` —
- * driveStore.ts's own header spells out why it shares a key with a source's
- * own weight) — an old app ignores a `d` entry it can't parse as a plain
- * choice the same way
- * it ignores `d` itself (ignore the unknown shape, fall back to the
- * setting's own default). This is the exact same `StoredDriveSetting` shape
- * `DriveEntry.patch` persists to localStorage as — one canonical wire shape
- * for a DriveSetting crossing either boundary, the same way a bare
- * `DriveChoice` already served both before patches existed — so
- * `encodeDriveSetting`/`sanitizeDriveSetting` (driveStore.ts) are reused
- * here rather than re-derived.
+ * Graded, unconditioned, unmuted `add` patch — the identity shape a plain
+ * `DriveChoice` used to be, before this store had patches — encodes as that
+ * bare `DriveChoice` (a string id, or `{source:"beat"|"line", …}`), so a
+ * link built by an app from before patches existed still decodes here, and a
+ * link built by this app for a setting nobody has multi-sourced still
+ * decodes on that older app. Anything else (more than one source, a non-
+ * `add` mix, a non-1 weight, a non-Graded height, a marked condition, or a
+ * muted source) encodes as the compact patch `{m: DriveMix, s: [{c:
+ * DriveChoice, w?: number, h?: HitHeight, g?: 1, o?: 1}, …]}` — a source's
+ * own `g`/`o` are `DriveSource.when`/`.off` (drives.ts's own header covers
+ * what each does) — an old app ignores a `d` entry it can't parse as a plain
+ * choice the same way it ignores `d` itself (ignore the unknown shape, fall
+ * back to the setting's own default). This is the exact same
+ * `StoredDriveSetting` shape `DriveEntry.patch` persists to localStorage as —
+ * one canonical wire shape for a DriveSetting crossing either boundary, the
+ * same way a bare `DriveChoice` already served both before patches
+ * existed — so `encodeDriveSetting`/`sanitizeDriveSetting` (driveStore.ts)
+ * are reused here rather than re-derived.
  */
 export interface SceneLook {
   name: string;

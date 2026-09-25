@@ -69,12 +69,21 @@ export interface CableSourceSpec {
    *  "just plugged" draw-on. Only meaningful on the pinned group; a preview
    *  cable is always drawn in its own flat style regardless. */
   soft: boolean;
-  /** This is an Only when patch's own gate condition (drives.ts's
-   *  gateWhenIndex) — a longer dash on the core than `soft`'s, so the gate
-   *  reads distinctly in the cables too (controlsTheme.ts's
-   *  .vc-cable-cond). Mutually exclusive with `soft` in practice (a scene
-   *  mix has no patch sources to gate — deviceMenu.ts's cableGroupFor). */
+  /** This is one of an Only when patch's own gate conditions (drives.ts's
+   *  gateConditionIndices — there can be more than one now) — a longer dash
+   *  on the core than `soft`'s, so the gate reads distinctly in the cables
+   *  too (controlsTheme.ts's .vc-cable-cond). Mutually exclusive with `soft`
+   *  in practice (a scene mix has no patch sources to gate —
+   *  deviceMenu.ts's cableGroupFor). */
   cond?: boolean;
+  /** This source is muted (drives.ts's `DriveSource.off`) — draws in the
+   *  flat, dashed `.vc-cable-muted` style instead of the usual glow/core/
+   *  flow structure (no glow, no flow animation), overriding `cond`/`soft`
+   *  outright: mute is the more specific fact about this cable right now.
+   *  Only ever true on the pinned group — deviceMenu.ts's cableGroupFor
+   *  only builds this from a real patch's own sources, never a preview's
+   *  flat style (which has no mute concept of its own). */
+  muted?: boolean;
   jackEl: HTMLElement;
   /** Read every tick — flow speed rides this source's own live value.
    *  Unused for a preview cable (it never animates). */
@@ -254,6 +263,13 @@ export function createCableLayer(): CableLayer {
         const key = `pinned:${src.key}`;
         liveKeys.add(key);
         const d = cablePathD(pt, portPt, avoidBand);
+        // A muted source draws once, flat — no glow/flow layer, no offset
+        // to carry — overriding cond/soft outright (this file's own
+        // CableSourceSpec.muted doc).
+        if (src.muted) {
+          svg.append(pathEl("vc-cable-muted", d, src.color));
+          continue;
+        }
         const soft = src.soft ? " vc-cable-soft" : "";
         const cond = src.cond ? " vc-cable-cond" : "";
         const dimCls = dimmed ? " vc-cable-dimmed" : "";

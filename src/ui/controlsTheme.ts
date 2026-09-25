@@ -609,12 +609,19 @@ const stylesheet = `
 /* The previewed setting's own cables — flat and quiet on purpose, so a
  * transient hover never reads as "committed" the way a pinned patch does. */
 .vc-cable-preview { fill: none; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
-/* The Only when patch's own condition source — a longer dash than
+/* Every one of an Only when patch's own condition sources (there can be more
+ * than one now — src/render/drives.ts's own header) — a longer dash than
  * .vc-cable-soft's fine 3/3 (a scene-mix cable) and than .vc-cable-preview's
  * own 3/3, so a gate's condition reads distinctly in the cables too
  * (src/ui/deviceMenu.ts's cableGroupFor). Core only — the flow layer keeps
  * its own short running dash regardless, and the glow layer stays solid. */
 .vc-cable-core.vc-cable-cond { stroke-dasharray: 9 6; }
+/* A muted source's own cable (src/render/drives.ts's DriveSource.off) — one
+ * flat path, no glow/flow layer at all (src/ui/cableLayer.ts's own recompute
+ * skips those for a muted source outright), a longer dash still than either
+ * .vc-cable-cond's 9/6 or .vc-cable-preview's 3/3 so it reads as its own,
+ * quieter thing rather than a variant of either. */
+.vc-cable-muted { fill: none; stroke-width: 1; stroke-dasharray: 14 8; opacity: 0.3; }
 
 /* "Pick a setting first" — a jack clicked with nothing pinned and nothing
  * ever previewed (deviceMenu.ts's showToast). */
@@ -652,14 +659,40 @@ const stylesheet = `
   padding-top: 2px; border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-/* The Only when patch's own condition source line (deviceMenu.ts's
- * buildSourceLine) — a dashed left rule so the condition reads distinctly
- * from a "plays" source at a glance, echoing the dashed condition trace in
- * the output graph and the dashed-long condition cable above. A small
- * rightward nudge of that one row (rather than reserving the gutter on
- * every row) — the row-list's own left edge sits flush against the panel's
- * padding, so there's no room for a rule outside it. */
-.vc-drive-src-condition { border-left: 2px dashed rgba(255, 255, 255, 0.45); padding-left: 6px; }
+/* The Only when patch's own condition marker (deviceMenu.ts's buildSourceLine)
+ * lives in every source line's own left gutter column (driveSrcGutterStyle) —
+ * a fixed-width span every line reserves whether or not it's a condition, so
+ * the dashed rule never shifts a line's dots/names/controls the way a
+ * border+padding on the whole line used to. Lit only on a condition line,
+ * echoing the dashed condition trace in the output graph and the
+ * dashed-long condition cable above. */
+.vc-drive-gutter-cond { border-right: 2px dashed rgba(255, 255, 255, 0.45); }
+
+/* The source line's own on/off switch (deviceMenu.ts's buildMuteSwitch) — a
+ * compact copy of .vc-toggle's own track/knob look, deliberately not that
+ * same class: .vc-toggle is this file's Tab-ring selector (deviceMenu.ts's
+ * ringElements()), and a mute switch inside the pinned patch panel isn't
+ * meant to join that ring. The --c custom property (the source's own
+ * colour, set by buildMuteSwitch) lights the track while the source is on;
+ * off falls back to a plain, unlit grey. */
+.vc-mute-switch {
+  position: relative; width: 18px; height: 10px; padding: 0; border: none; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.16); cursor: pointer; flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+.vc-mute-switch::after {
+  content: ""; position: absolute; top: 1.5px; left: 1.5px; width: 7px; height: 7px;
+  border-radius: 50%; background: #fff; transition: transform 0.15s ease;
+}
+.vc-mute-switch[aria-checked="true"] { background: color-mix(in srgb, var(--c, #fff) 55%, rgba(255, 255, 255, 0.16)); }
+.vc-mute-switch[aria-checked="true"]::after { transform: translateX(8px); }
+.vc-mute-switch:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* A muted source line (src/render/drives.ts's DriveSource.off) dims to read
+ * as "off" at a glance — except the switch itself, which stays legible so
+ * it's obvious what to click to bring the source back (deviceMenu.ts's own
+ * header's Muting paragraph). */
+.vc-drive-src-muted > *:not(.vc-mute-switch) { opacity: 0.45; }
 
 /* Chrome buttons (index.html) ring while their thing is active: the gear
  * while this panel is open, fullscreen while immersed. */
