@@ -1,5 +1,5 @@
 import type { AnimFrame } from "../render/animClock.ts";
-import type { MeterCardId, MeterRowId } from "../render/signals.ts";
+import { SIGNALS, type MeterCardId, type MeterRowId } from "../render/signals.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import type { DriveSourceChoice } from "../render/drives.ts";
 import { driveSourceColor, jackKey } from "./driveSources.ts";
@@ -1698,6 +1698,46 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // grid division to one shared key, so it lights/toggles for *any*
   // division a patch happens to hold, matching the Tempo add-chip.
   mountJack({ source: "beat", grid: 2 }, beat.right, beat.el);
+  // The two "shape of the beat" drives that read straight off the beat
+  // clock — a smooth swing rather than a hit — traced on one shared row
+  // the same way createHitsHistory's own lanes share the Hits row below.
+  const wave = createMeterRow({
+    label: "Wave",
+    accent: NEUTRAL_ACCENT,
+    unit: "s",
+    description:
+      "Beat wave (red) and bar wave (blue) — a smooth swing that peaks once a beat or once a bar and fades without a confident tempo, the same curves anim.beatWave/anim.barWave drive a setting with.",
+  });
+  const waveTrace = createTraceStrip(
+    [
+      { color: BEAT_COLOR, width: 1.5 },
+      { color: BEAT_GRID_COLOR, width: 1.5 },
+    ],
+    BEAT_TRACE_HEIGHT_CSS_PX,
+  );
+  wave.el.children[1].replaceWith(waveTrace.canvas);
+  wave.setReadout(String(HISTORY_SPAN_SEC));
+  mountJack("anim.beatWave", wave.right, wave.el);
+  mountJack("anim.barWave", wave.right, wave.el);
+
+  const tempoLevel = createMeterRow({
+    label: "Tempo",
+    accent: NEUTRAL_ACCENT,
+    unit: "bpm",
+    description:
+      "Where the tracked tempo sits, log-scaled across the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX) — the same reading anim.tempo drives a setting with.",
+  });
+  mountJack("anim.tempo", tempoLevel.right, tempoLevel.el);
+
+  const lock = createMeterRow({
+    label: "Lock",
+    accent: NEUTRAL_ACCENT,
+    unit: "%",
+    description:
+      "How confidently the beat clock has locked onto the tempo — the same reading the tempo dot's own brightness and anim.tempoLock both use.",
+  });
+  mountJack("anim.tempoLock", lock.right, lock.el);
+
   let prevBeatPhase: number | null = null;
   // The onset detector's own input: how hard this frame's spectral flux
   // cleared its adaptive threshold (OnsetDiag.ratio — the same number the
@@ -1713,7 +1753,21 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   mountJack("feature.flux", onset.right, onset.el);
   const rhythmCard = createCard({ title: "Rhythm", accent: NEUTRAL_ACCENT, foldId: "rhythm" });
-  rhythmCard.body.append(rhythmRow, spacer(), hitsHistory.el, spacer(), beat.el, spacer(), onset.el);
+  rhythmCard.body.append(
+    rhythmRow,
+    spacer(),
+    hitsHistory.el,
+    spacer(),
+    beat.el,
+    spacer(),
+    wave.el,
+    spacer(),
+    tempoLevel.el,
+    spacer(),
+    lock.el,
+    spacer(),
+    onset.el,
+  );
 
   // ---- Hit strength ----
   // Controls and monitors together, right after Rhythm — same reasoning:
@@ -2018,6 +2072,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["hits", hitsHistory.el],
     ["centroid", centroidRow.el],
     ["onset", onset.el],
+    ["wave", wave.el],
+    ["tempoLevel", tempoLevel.el],
+    ["lock", lock.el],
   ]);
 
   return {
@@ -2119,6 +2176,23 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           beatTrace.push([null, null], nowMs);
         }
         beatTrace.draw();
+        // Fed through SIGNALS[id].read() itself, not a hand-copied formula,
+        // so this row and a setting driven by the same signal always agree
+        // on the number (see this file's header and signals.ts's own).
+        if (frame && anim) {
+          waveTrace.push([SIGNALS["anim.beatWave"].read(frame, anim), SIGNALS["anim.barWave"].read(frame, anim)], nowMs);
+          tempoLevel.setValue(SIGNALS["anim.tempo"].read(frame, anim), dtSec);
+          lock.setValue(SIGNALS["anim.tempoLock"].read(frame, anim), dtSec);
+        } else {
+          waveTrace.push([null, null], nowMs);
+          tempoLevel.setValue(null, dtSec);
+          lock.setValue(null, dtSec);
+        }
+        waveTrace.draw();
+        if (text) {
+          tempoLevel.setReadout(anim && anim.tempoBpm > 0 ? String(Math.round(anim.tempoBpm)) : "--", anim && anim.tempoBpm > 0 ? {} : IDLE);
+          lock.setReadout(anim ? pct(anim.tempoLock) : "--", anim ? {} : IDLE);
+        }
         // Local diagnostic, same availability as fixedEnergy (null on a
         // mic-less renderer or the synthetic feed) — see AudioMeters.update's
         // own doc.
@@ -2133,6 +2207,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         // and Centroid — and forget the last phase so unfolding mid-track
         // doesn't read the jump across the fold as a wrap.
         beatTrace.resetColumn();
+        waveTrace.resetColumn();
         hitsHistory.resetColumn();
         prevBeatPhase = null;
       }
