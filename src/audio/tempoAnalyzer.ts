@@ -4,7 +4,7 @@ import { estimateTempo, TEMPO_DECAY_SEC, BPM_MIN, BPM_MAX } from "./tempoComb.ts
 
 /**
  * Fixed-hop tempo analysis over raw audio samples, independent of the
- * render loop — the thing PR 1's tracker (features.ts's FeatureExtractor,
+ * render loop — the thing the render-tick tracker (features.ts's FeatureExtractor,
  * fed one FFT frame per render tick) could never be: at 30fps a hit is only
  * evaluated twice as coarsely as at 60fps, and at 15fps the render tick is
  * long enough to miss or badly mistime a hit outright. Analysing samples at

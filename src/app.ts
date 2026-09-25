@@ -1389,7 +1389,10 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     // sampleToVisual(hostConn.sample()) returns below) is the jitter
     // buffer's room time, which this capture's local AudioContext onset
     // times wouldn't line up with — see beatClock.ts's file header.
-    if (tempoSource) f.bpm = tempoSource.bpm;
+    if (tempoSource) {
+      f.bpm = tempoSource.bpm;
+      tempoSource.drainOnsets(); // unused here (see above); drained so they don't queue
+    }
     lastFixedEnergy = extractor.fixedEnergy;
     lastBeatDiag = extractor.onsetDiag;
     lastFluxRatio = extractor.fluxRatio;

@@ -25,7 +25,7 @@ import type { TempoOnset } from "./tempoAnalyzer.ts";
  *
  * Any failure along the way (no `audioWorklet` on this AudioContext,
  * addModule() rejecting, AudioWorkletNode construction throwing) resolves
- * null rather than throwing — app.ts keeps PR 1's render-tick tracker
+ * null rather than throwing — app.ts keeps the render-tick tracker
  * (features.ts) in that case, so an older browser or a locked-down context
  * just doesn't get the fixed-hop path's better timing. Logged once in DEV,
  * never in production (no user-facing console noise for something the app
@@ -46,6 +46,8 @@ export interface TempoSource {
    *  wherever the capture it was built from gets torn down. */
   dispose(): void;
 }
+
+const MAX_PENDING_ONSETS = 64;
 
 export async function createTempoSource(context: AudioContext, sourceNode: AudioNode): Promise<TempoSource | null> {
   if (!context.audioWorklet) return null; // no AudioWorklet support at all
@@ -77,7 +79,14 @@ export async function createTempoSource(context: AudioContext, sourceNode: Audio
   let onsets: TempoOnset[] = [];
   node.port.onmessage = (event: MessageEvent<{ bpm: number; onsets: TempoOnset[] }>) => {
     bpm = event.data.bpm;
-    if (event.data.onsets.length > 0) onsets.push(...event.data.onsets);
+    if (event.data.onsets.length > 0) {
+      onsets.push(...event.data.onsets);
+      // Bounded whether or not anyone drains: a caller that only wants
+      // `bpm` (app.ts's host path) must not grow this for the life of the
+      // capture. MAX_PENDING_ONSETS is far more than a render tick ever
+      // gathers, so a caller that does drain every tick never loses one.
+      if (onsets.length > MAX_PENDING_ONSETS) onsets.splice(0, onsets.length - MAX_PENDING_ONSETS);
+    }
   };
 
   return {
