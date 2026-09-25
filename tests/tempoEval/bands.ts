@@ -13,10 +13,13 @@ import { MAX_HZ_CAP, bandEdgesHz } from "../../src/audio/bandScale.ts";
 const FFT_SIZE = 2048;
 const LOG2_FFT_SIZE = Math.log2(FFT_SIZE);
 
-// ---- Blackman window (a0=0.42, a1=0.5, a2=0.08), precomputed once. ----
+// ---- Blackman window (a0=0.42, a1=0.5, a2=0.08), precomputed once. The Web
+// Audio spec's own AnalyserNode blackman window divides by N itself (the
+// window length, FFT_SIZE here), not N-1 — this used to divide by FFT_SIZE-1,
+// which isn't what a live AnalyserNode actually computes; exact mirror now. ----
 const WINDOW = new Float32Array(FFT_SIZE);
 for (let i = 0; i < FFT_SIZE; i++) {
-  WINDOW[i] = 0.42 - 0.5 * Math.cos((2 * Math.PI * i) / (FFT_SIZE - 1)) + 0.08 * Math.cos((4 * Math.PI * i) / (FFT_SIZE - 1));
+  WINDOW[i] = 0.42 - 0.5 * Math.cos((2 * Math.PI * i) / FFT_SIZE) + 0.08 * Math.cos((4 * Math.PI * i) / FFT_SIZE);
 }
 
 // ---- Preallocated radix-2 iterative FFT (bit-reversal + twiddle tables built once). ----
