@@ -24,7 +24,14 @@ export interface FeatureFrame {
    *  this fires into as raw evidence. */
   onset: boolean;
   /** Estimated tempo in BPM — 0 until locked, and again once
-   *  features.ts's TEMPO_DECAY_SEC has passed with no onset registering. */
+   *  TEMPO_DECAY_SEC (tempoComb.ts) has passed with no onset registering.
+   *  Two possible sources, both on the same decay rule: features.ts's own
+   *  render-tick estimate (this frame's own value, unless overwritten), or
+   *  — app.ts's solo/host modes, whenever a fixed-hop AudioWorklet tempo
+   *  source (src/audio/tempoSource.ts) is live — that source's own bpm,
+   *  written in over features.ts's before this frame leaves currentVisual().
+   *  A renderer/TV frame (sampleToVisual) just carries whichever of the two
+   *  the sending device already picked, over the wire. */
   bpm: number;
   /** Phase since the last onset, [0,1) — resets on every onset, unlike
    *  AnimFrame.beatPhase, which never restarts mid-beat. No consumer reads
