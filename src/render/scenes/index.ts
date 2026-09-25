@@ -1,4 +1,5 @@
-import { registerScene } from "../scene.ts";
+import { listScenes, registerScene } from "../scene.ts";
+import { collectPrivateScenes } from "./privateScenes.ts";
 import { tesseraScene } from "./tessera/index.ts";
 import { spectrumScene } from "./spectrum.ts";
 import { particlesScene } from "./particles.ts";
@@ -61,8 +62,9 @@ registerScene(risoScene);
 registerScene(ferrofluidScene);
 
 /** Scenes still rough enough to sit behind the gallery's "draft" toggle —
- *  the featured scenes registered above it are deliberately absent. */
-export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
+ *  the featured scenes registered above it are deliberately absent. Paid
+ *  scenes checked out locally add themselves below (see privateScenes.ts). */
+const draftIds = new Set([
   "silk",
   "gates",
   "tessera",
@@ -86,6 +88,20 @@ export const DRAFT_SCENE_IDS: ReadonlySet<string> = new Set([
   "crystal",
   "fluid",
 ]);
+
+// Paid scenes: whatever is checked out under ./private/ (gitignored here —
+// see privateScenes.ts). Nothing matches in the public repo, its CI or the
+// deployed site, so they're only ever in a local build. Registered after the
+// built-ins, so each lands at the end of its gallery group.
+const privateScenes = collectPrivateScenes(
+  import.meta.glob("./private/*/index.ts", { eager: true }),
+  new Set(listScenes().map((s) => s.id)),
+);
+for (const scene of privateScenes.scenes) registerScene(scene);
+for (const id of privateScenes.draftIds) draftIds.add(id);
+for (const error of privateScenes.errors) console.warn(`[private scenes] ${error}`);
+
+export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
 
 export {
   silkScene,

@@ -8,7 +8,9 @@ import type { Plugin, ViteDevServer } from "vite";
  * you're working on — and nothing else. "Working on" means git says so: a
  * scene counts when a file that only it imports (under `src/render/scenes/`)
  * is modified or untracked in the working tree, or differs from the merge
- * base with `origin/main` (i.e. was touched by this branch). Usually that is
+ * base with `origin/main` (i.e. was touched by this branch) — for a paid scene
+ * checked out under `private/`, the same questions go to that checkout's own
+ * git (see src/render/scenes/privateScenes.ts). Usually that is
  * exactly one scene; if several qualify they all print, in gallery order; if
  * none do, nothing prints — the gallery is one click away and a full listing
  * is what this replaced.
@@ -169,6 +171,46 @@ async function changedSceneFiles(root: string): Promise<Set<string>> {
     }
     const diff = await git("diff", "--name-only", "-z", base, "HEAD");
     for (const rel of diff.split("\0")) if (rel) add(rel);
+    break;
+  }
+  // Paid scenes (src/render/scenes/privateScenes.ts) live in their own
+  // checkout under private/, which this repo's git ignores — ask that
+  // checkout's git too, and map its paths back under the scenes dir.
+  const privateRoot = path.join(root, PRIVATE_DIR);
+  try {
+    for (const rel of await changedFilesInRepo(privateRoot)) files.add(path.join(privateRoot, rel));
+  } catch {
+    // No private checkout (the usual case), or it isn't a git repo: nothing to add.
+  }
+  return files;
+}
+
+const PRIVATE_DIR = `${SCENES_DIR}/private`;
+
+/** Repo-relative paths a git checkout at `dir` has touched: working-tree
+ *  changes (untracked included) plus this branch's diff against its own
+ *  `origin/main` or `main`. Throws if `dir` isn't a git checkout. */
+async function changedFilesInRepo(dir: string): Promise<Set<string>> {
+  const git = async (...args: string[]) =>
+    (await exec("git", args, { cwd: dir, encoding: "utf8" })).stdout;
+  const top = (await git("rev-parse", "--show-toplevel")).trim();
+  if (path.resolve(top) !== path.resolve(dir)) throw new Error(`${dir} is not its own git checkout`);
+  const files = new Set<string>();
+  const entries = (await git("status", "--porcelain", "-z", "--untracked-files=all")).split("\0");
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (!e) continue;
+    files.add(e.slice(3));
+    if (e[0] === "R" || e[0] === "C") i++;
+  }
+  for (const ref of ["origin/main", "main"]) {
+    let base: string;
+    try {
+      base = (await git("merge-base", "HEAD", ref)).trim();
+    } catch {
+      continue;
+    }
+    for (const rel of (await git("diff", "--name-only", "-z", base, "HEAD")).split("\0")) if (rel) files.add(rel);
     break;
   }
   return files;
