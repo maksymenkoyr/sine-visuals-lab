@@ -72,6 +72,7 @@ after all three pass; include the screenshot paths in your summary.
 | The build target (`es2017`) | `vite.config.ts`, the comment at the `target:` line |
 | A scene that hashes a noise lattice, or adds a growing phase to a noise coordinate | `src/render/noiseHash.ts` header — the mobile seams fix, and the two halves every scene must take together |
 | Any existing scene | `docs/scenes/<id>.md` — its record: references, measurements, every decision and pivot, what's still off, how to resume |
+| A paid scene, or anything under `src/render/scenes/private/` | `src/render/scenes/privateScenes.ts` header — the contract, and why that folder never reaches this repo or the deployed site |
 
 ## Standing rules not worth their own doc
 
@@ -92,7 +93,13 @@ after all three pass; include the screenshot paths in your summary.
   the hash silently lands on the gallery.
 - Once a detailed plan exists, execute it with Sonnet whenever possible (an
   agent with `model: "sonnet"`). Keep the stronger model for planning and review.
-- Every scene has a record at `docs/scenes/<id>.md`, following
+- Paid scenes are closed. Their code lives in the private scenes repo,
+  checked out at the gitignored `src/render/scenes/private/`
+  (`privateScenes.ts` explains the hook). Never copy, commit or push a paid
+  scene's code, record or references into this public repo, a public
+  branch, or a public PR. Its record is `private/<id>/RECORD.md`, not
+  `docs/scenes/<id>.md`.
+- Every free scene has a record at `docs/scenes/<id>.md`, following
   `docs/scenes/_template.md`: everything someone picking the scene back up
   would need. Create it with the scene (`/new-scene`), and update it in the
   same PR as any change to the scene; `/ref`, `/tune` and `/wrap` say what to

@@ -8,6 +8,13 @@ Every scene ships with its record, `docs/scenes/<id>.md`, started from
 [the template](scenes/_template.md) — the standing rule in `CLAUDE.md` says
 what goes in it and what never does.
 
+A **paid** scene is built the same way but lives elsewhere: in its own folder
+of the private scenes repo, checked out at `src/render/scenes/private/<id>/`,
+with an `index.ts` exporting `scene` (and `draft = true` while it's rough),
+its tests next to it, and its record as `RECORD.md` there. It is never
+registered in `scenes/index.ts` by hand, and nothing about it goes in this
+repo. `src/render/scenes/privateScenes.ts` has the contract.
+
 ## The mechanical path
 
 1. Implement `Scene` (`src/render/scene.ts`) — usually via `createFullscreenScene`

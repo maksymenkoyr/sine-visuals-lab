@@ -12,3 +12,6 @@ docs/.obsidian/
 .claude/worktrees/
 tools/.cache/
 __pycache__/
+# Paid scenes: a local checkout of the private scenes repo, never committed
+# here (see src/render/scenes/privateScenes.ts).
+src/render/scenes/private/
