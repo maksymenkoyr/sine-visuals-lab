@@ -13,6 +13,7 @@ import {
   uploadCommonUniforms,
 } from "../../sceneCommon.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
+import { createBeatListener, type BeatListener, type BeatSource } from "../../beatListener.ts";
 import {
   buildLook,
   identityPairs,
@@ -71,16 +72,26 @@ import {
 // accumulate (travel, spin) — the flowClock lesson.
 //
 // Lightning (2026-09-23, at the user's request for something stronger than
-// Beat flash): on every anim.onset, advanceGates resets st.beatAge to 0 and
-// bumps st.beatCount — a beat clock the render loop reads to drive a strike
-// that runs *through* the gate lines, not just a brightness pulse on top of
-// them. pickArcColour turns beatCount into a colour from ARC_COLOURS, always
-// skipping the hue nearest the current look's own primary so the strike
-// reads as electricity, not as the neon's own glow. glsl.ts's shaders own
-// the actual picture: where the current is on each object's edges at any
-// instant (layout.ts's arcPathStart), the crackling zigzag around the true
-// line, and the trail it leaves that fades with both distance behind the
-// head and elapsed time since the beat.
+// Beat flash; five controls and a selectable source added 2026-09-25): each
+// render() tick, an arcListener (beatListener.ts, no hold or refractory —
+// just the trigger/source logic) advances against whichever BeatSource the
+// Lightning on setting (arcSource) picks — Beat/Bass/High/Bar, Shards'
+// cutMode pattern — and its `.fired` becomes advanceGates' `opts.strike`,
+// which resets st.beatAge to 0 and bumps st.beatCount exactly the way a raw
+// anim.onset used to. st.beatCount is a beat clock the render loop reads to
+// drive a strike that runs *through* the gate lines, not just a brightness
+// pulse on top of them. pickArcColour turns beatCount into a colour from
+// ARC_COLOURS, always skipping the hue nearest the current look's own
+// primary so the strike reads as electricity, not as the neon's own glow.
+// glsl.ts's shaders own the actual picture: where the current is on each
+// object's edges at any instant (layout.ts's arcPathStart), the crackling
+// zigzag around the true line, and the trail it leaves that fades with both
+// distance behind the head and elapsed time since the beat. arcSustain/
+// arcThickness/arcCrackle/arcSpeed resolve JS-side (the arc*For mapping
+// functions below) into the uArcShape/uArcLook uniforms glsl.ts's header
+// describes — each one's default reproduces the strike's pre-2026-09-25
+// constants exactly, so moving no slider changes nothing but the strength
+// (ARC_GAIN, glsl.ts, doubled the same day).
 //
 // Rendering: the gates draw additively into a full-resolution RGBA8 target
 // (no float targets — chladni.ts's TV constraint), two blur levels at a
@@ -185,18 +196,39 @@ export function createGateState(): GateState {
   };
 }
 
-/** The slice of AnimFrame the scheduler reads — tests build just this. */
-export type GateAnim = Pick<AnimFrame, "dtSec" | "barPhase" | "tempoLock" | "onset" | "dropOnset" | "low">;
+/** The slice of AnimFrame the scheduler reads — tests build just this.
+ *  Drops "onset": the lightning strike's clock reads opts.strike (an
+ *  arcListener's resolved edge) instead of the raw beat now — see the file
+ *  header. */
+export type GateAnim = Pick<AnimFrame, "dtSec" | "barPhase" | "tempoLock" | "dropOnset" | "low">;
 
 export interface GateOpts {
   speed: number;
   cutRate: number;
   spin: number;
+  /** This tick's resolved lightning trigger (an arcListener's `.fired` against
+   *  the Lightning on setting's chosen BeatSource) — replaces a direct
+   *  anim.onset read so the strike can listen to Bass/High/Bar too. */
+  strike: boolean;
 }
 
 /** A look other than `prev`, uniform over the rest. */
 export function pickLook(prev: number, rng: () => number): number {
   return (prev + 1 + Math.floor(rng() * (LOOK_COUNT - 1))) % LOOK_COUNT;
+}
+
+/** What the Lightning on setting listens to — Shards' cutMode/cutSource
+ *  pattern (src/render/scenes/shards/index.ts). "High"/"Bar" have no
+ *  registered SignalId (beatListener.ts's SOURCE_SIGNAL), so arcSource's own
+ *  `reads` below only covers Beat/Bass — no chip for the other two. */
+export const ARC_SOURCE_NAMES = ["Beat", "Bass", "High", "Bar"] as const;
+export const ARC_SOURCE = { BEAT: 0, BASS: 1, HIGH: 2, BAR: 3 } as const;
+
+const ARC_SOURCE_BY_INDEX: readonly BeatSource[] = ["beat", "bass", "high", "bar"];
+
+/** Resolves the Lightning on setting's index to a beatListener.ts source. */
+export function arcSource(mode: number): BeatSource {
+  return ARC_SOURCE_BY_INDEX[mode] ?? "beat";
 }
 
 /** Vivid electric hues the lightning strike cycles through — deliberately
@@ -268,11 +300,13 @@ export function morphEase(t: number): number {
 export function advanceGates(st: GateState, anim: GateAnim, opts: GateOpts, rng: () => number = Math.random): void {
   const dt = Number.isFinite(anim.dtSec) ? Math.max(0, anim.dtSec) : 0;
 
-  // The lightning strike's clock: anim.onset is the render-latched beat edge
-  // (renderLatch.ts) — the same edge beatPulse follows and the silence gate
-  // already screens — so a strike starts exactly when the shared beat pulse
-  // does, with no separate onset accumulator of its own.
-  if (anim.onset) {
+  // The lightning strike's clock: opts.strike is an arcListener's resolved
+  // edge against the Lightning on setting's chosen source (index.ts's
+  // render()) — beatListener.ts's sourceEdge already reads the render-latched
+  // AnimFrame (renderLatch.ts) and the silence gate, so a strike starts
+  // exactly when that source's own shared pulse does, with no separate onset
+  // accumulator of its own.
+  if (opts.strike) {
     st.beatAge = 0;
     st.beatCount += 1;
   } else {
@@ -345,6 +379,71 @@ export function advanceGates(st: GateState, anim: GateAnim, opts: GateOpts, rng:
   st.spinRate = SPIN_RAD_MAX * opts.spin;
   st.travel += st.flyVel * dt;
   st.spinPos += st.spinRate * dt;
+}
+
+/** Linear interpolation — the shared shape every arc*For mapping below uses. */
+function mix(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+// Lightning sustain/thickness/crackle/speed map a 0..1 slider onto the
+// strike's shape (glsl.ts's uArcShape/uArcLook — see that file's header).
+// Each default below was chosen so it reproduces the strike's own
+// pre-2026-09-25 constants exactly (6.0/s decay, 2.2/unit trail, 1.6/8 px
+// core/halo, 10 px/24 Hz crackle, 34 units/s speed) — moving no slider
+// changes nothing but ARC_GAIN's new strength. Where a single slider drives
+// two formulas at once (arcSustain), the two ranges below aren't literally
+// the plan's illustrative numbers at both ends — they were solved so one
+// shared default hits both targets exactly; see arcDecayFor/arcTrailFor.
+
+/** arcSustain -> the whole strike's brightness decay, per second (replaces
+ *  the old ARC_DECAY). Lower is slower — more sustain. */
+export function arcDecayFor(sustain: number): number {
+  return mix(14.0, 2 / 3, sustain);
+}
+/** arcSustain -> the lit trail's falloff behind the head, per path-unit
+ *  (replaces the old ARC_TRAIL) — the same slider as arcDecayFor, solved so
+ *  both hit their own target at the same default (0.6). Lower is a longer
+ *  visible trail. */
+export function arcTrailFor(sustain: number): number {
+  return mix(5.0, 1 / 3, sustain);
+}
+/** arcThickness -> a multiplier on both the zigzag strand's core and halo
+ *  half-width (replaces ARC_CORE_PX/ARC_HALO_PX) — a thin thread at 0, a
+ *  thick rope at 1; 1.0x (today's 1.6/8 px) sits at the default (0.3). */
+function arcThicknessMult(thickness: number): number {
+  return mix(0.4, 2.4, thickness);
+}
+export function arcCorePxFor(thickness: number): number {
+  return 1.6 * arcThicknessMult(thickness);
+}
+export function arcHaloPxFor(thickness: number): number {
+  return 8.0 * arcThicknessMult(thickness);
+}
+/** arcCrackle -> the zigzag's amplitude in px (replaces ARC_AMP_PX) — 0 is a
+ *  clean pulse straight along the line, 1 a wide crackle. */
+export function arcAmpPxFor(crackle: number): number {
+  return mix(0, 20, crackle);
+}
+/** arcCrackle -> how often the crackle re-rolls its shape, in Hz (replaces
+ *  ARC_FLICKER_HZ) — the same slider as arcAmpPxFor. */
+export function arcFlickerHzFor(crackle: number): number {
+  return mix(8, 40, crackle);
+}
+/** arcSpeed -> how fast the current runs, in path-units/s (replaces
+ *  ARC_SPEED) — a crawl at 0, a snap at 1. */
+export function arcSpeedFor(speed: number): number {
+  return mix(10, 90, speed);
+}
+/** arcSpeed -> the depth ripple delay, seconds per world-space z unit
+ *  (replaces the old fixed ARC_DEPTH_DELAY): scaled inversely to arcSpeedFor
+ *  so a faster current still ripples across roughly the same *spatial*
+ *  extent of the tunnel before the far end catches up, rather than a
+ *  shrinking or growing one. */
+export function arcDepthDelayFor(speed: number): number {
+  const ARC_DEPTH_DELAY_AT_DEFAULT = 0.025;
+  const ARC_SPEED_AT_DEFAULT = 34;
+  return ARC_DEPTH_DELAY_AT_DEFAULT * (ARC_SPEED_AT_DEFAULT / arcSpeedFor(speed));
 }
 
 const SETTINGS: SceneSetting[] = [
@@ -474,7 +573,72 @@ const SETTINGS: SceneSetting[] = [
     default: 0.6,
     // Same weights as Beat flash's own attack/pulse — both ride the beat.
     auto: { attack: 0.3, pulse: 0.2 },
-    reads: ["feature.onset"] satisfies readonly SignalLink[],
+    // What actually drives a strike is arcSource below (Shards' cutMode
+    // pattern) — the chip here follows that choice rather than always
+    // claiming the broadband beat.
+    reads: [
+      { signal: "feature.onset", activeWhen: (get) => get("arcSource") === ARC_SOURCE.BEAT },
+      { signal: "anim.lowOnset", activeWhen: (get) => get("arcSource") === ARC_SOURCE.BASS },
+    ] satisfies readonly SignalLink[],
+  },
+  {
+    key: "arcSustain",
+    label: "Lightning sustain",
+    description: "How long the strike's current keeps glowing — a quick snap at the low end, lines that linger at the high end",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    // Sparser music (lower dynamics) sustains the strike longer.
+    auto: { dynamics: -0.2 },
+  },
+  {
+    key: "arcThickness",
+    label: "Lightning thickness",
+    description: "How wide the strike's zigzag reads against the tube it runs through — a thin thread at the low end, a thick rope at the high end",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+  },
+  {
+    key: "arcCrackle",
+    label: "Lightning crackle",
+    description: "How wild the strike's zigzag is — a clean pulse straight along the line at the low end, a wide, fast-flickering crackle at the high end",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+  },
+  {
+    key: "arcSpeed",
+    label: "Lightning speed",
+    description: "How fast the current runs along the gate lines — a crawl at the low end, a snap at the high end",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+    auto: { tempo: 0.3 },
+  },
+  {
+    key: "arcSource",
+    label: "Lightning on",
+    description: "What triggers a strike: every beat, bass hits only, high-band hits only, or once a bar",
+    group: "Look",
+    type: "enum",
+    options: [...ARC_SOURCE_NAMES],
+    min: 0,
+    max: ARC_SOURCE_NAMES.length - 1,
+    step: 1,
+    default: ARC_SOURCE.BEAT,
+    reads: [
+      { signal: "feature.onset", activeWhen: (get) => get("arcSource") === ARC_SOURCE.BEAT },
+      { signal: "anim.lowOnset", activeWhen: (get) => get("arcSource") === ARC_SOURCE.BASS },
+    ] satisfies readonly SignalLink[],
   },
 ];
 
@@ -542,6 +706,11 @@ export const gatesScene: Scene = (() => {
   const outB = new Float32Array(MAX_OBJ * 4);
   const outC = new Float32Array(MAX_OBJ * 4);
   const bandsBuf = new Float32Array(NUM_BANDS);
+  // The lightning strike's trigger — no hold or refractory (the file
+  // header): its only job is resolving arcSource's chosen BeatSource into an
+  // edge, which advanceGates then owns the debouncing-free beatAge/beatCount
+  // clock for.
+  let arcListener: BeatListener | null = null;
 
   const get = (key: string): number => resolveSceneSetting(ID, SETTING_BY_KEY.get(key)!);
 
@@ -654,18 +823,22 @@ export const gatesScene: Scene = (() => {
       pairs = identityPairs(toLayout);
       pairedMorphs = st.morphs;
       toLayoutKey = `${initialCount}:0.50`;
+      arcListener = createBeatListener({ source: "beat" });
     },
 
     render(ctx: SceneContext, frame: FeatureFrame, viewport: Viewport, palette: Palette, anim: AnimFrame) {
       const { gl } = ctx;
-      if (!gateProg || !blurProg || !compProg || !quadVao || !emptyVao) return;
+      if (!gateProg || !blurProg || !compProg || !quadVao || !emptyVao || !arcListener) return;
       ensureTargets(gl);
 
-      // anim.onset / anim.dropOnset, not frame.onset: the render cap can skip
-      // the tick the feature fired on (renderLatch.ts).
+      // anim.dropOnset, not frame.dropOnset: the render cap can skip the tick
+      // the feature fired on (renderLatch.ts). The strike's own trigger comes
+      // from arcListener below instead of a raw anim.onset read, since
+      // Lightning on can point it at Bass/High/Bar too.
       const speed = get("speed");
       const spin = get("spin");
-      advanceGates(st, anim, { speed, cutRate: get("cutRate"), spin });
+      const strike = arcListener.advance(anim, arcSource(Math.round(get("arcSource")))).fired;
+      advanceGates(st, anim, { speed, cutRate: get("cutRate"), spin, strike });
 
       const density = get("density");
       const shapeMix = get("shapeMix");
@@ -735,6 +908,18 @@ export const gatesScene: Scene = (() => {
       gateProg.setF("uArcAge", st.beatAge);
       gateProg.setF("uArcSeed", st.beatCount);
       gateProg.setV3v("uArcColor", [...arcColour]);
+      // Lightning shape/look — five settings resolved into two vec4s
+      // (glsl.ts's header and this file's arc*For mapping functions).
+      const arcSustain = get("arcSustain");
+      const arcSpeedVal = arcSpeedFor(get("arcSpeed"));
+      gateProg.setV4("uArcShape", arcSpeedVal, arcTrailFor(arcSustain), arcDecayFor(arcSustain), arcAmpPxFor(get("arcCrackle")));
+      gateProg.setV4(
+        "uArcLook",
+        arcCorePxFor(get("arcThickness")),
+        arcHaloPxFor(get("arcThickness")),
+        arcFlickerHzFor(get("arcCrackle")),
+        arcDepthDelayFor(get("arcSpeed")),
+      );
       gl.bindVertexArray(emptyVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n * copies * SEG_MAX);
       gl.bindVertexArray(null);
@@ -805,6 +990,7 @@ export const gatesScene: Scene = (() => {
       pairs = null;
       pairedMorphs = -1;
       toLayoutKey = "";
+      arcListener = null;
     },
   };
 })();

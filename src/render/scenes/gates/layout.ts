@@ -499,6 +499,40 @@ export function arcPathStart(slot: number): number {
   return k < 0 ? k + 6 : k;
 }
 
+/** Below this, a strike's envelope (trail-behind-head plus the head's own
+ *  glow — glsl.ts's GATE_FRAG_BODY `trail + head`) counts as unlit: the
+ *  spatial (path-position) counterpart to glsl.ts's ARC_LIVE_MIN, which
+ *  gates the strike's *time* decay instead. Mirrored by hand into glsl.ts's
+ *  own ARC_ENV_MIN — no shared compile step between TS and GLSL (this
+ *  file's header). */
+export const ARC_ENV_MIN = 0.02;
+
+/** How tightly the current's head glows around its instantaneous position —
+ *  mirrors glsl.ts's own ARC_HEAD_SHARP by hand (same reasoning as
+ *  ARC_ENV_MIN above); not a user setting, so no uniform plumbing needed. */
+const ARC_HEAD_SHARP = 10.0;
+
+/** Whether a lightning strike's head at path position `H` (glsl.ts's vertex
+ *  and fragment shaders compute the same `H = (uArcAge - delay) * speed`)
+ *  puts segment `pathStart`'s span `[pathStart, pathStart+1)` within reach of
+ *  a non-negligible envelope: `trailReach` behind H (the sustain's trail
+ *  falloff, `trail` — a longer sustain widens this) or `headReach` either
+ *  side (the head's own sharper, fixed glow, which isn't gated by
+ *  direction — glsl.ts's `head` term is symmetric). Unlit before the head
+ *  arrives (beyond headReach ahead) and after the trail decays (beyond
+ *  trailReach behind).
+ *
+ *  This is the main fix for the strike's unmeasured, effectively-permanent
+ *  performance cost (glsl.ts's file header): glsl.ts's vertex shader only
+ *  grows an instance's bounding quad — and gives it a nonzero strength — when
+ *  this is true for that instance's segment, instead of every segment of
+ *  every visible object while the strike is merely live at all. */
+export function arcLitSpan(H: number, trail: number, pathStart: number): boolean {
+  const trailReach = Math.log(1 / ARC_ENV_MIN) / trail;
+  const headReach = Math.log(1 / ARC_ENV_MIN) / ARC_HEAD_SHARP;
+  return pathStart + 1 >= H - trailReach && pathStart <= H + headReach;
+}
+
 // ---------------------------------------------------------------------------
 // Pairing and per-frame morphing between two built layouts.
 

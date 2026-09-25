@@ -1,6 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
   advanceGates,
+  arcAmpPxFor,
+  arcCorePxFor,
+  arcDecayFor,
+  arcDepthDelayFor,
+  arcFlickerHzFor,
+  arcHaloPxFor,
+  arcSource,
+  arcSpeedFor,
+  arcTrailFor,
+  ARC_SOURCE,
   BARS_PER_PHRASE,
   createGateState,
   FREE_BAR_SEC,
@@ -14,6 +24,8 @@ import {
   type GateState,
 } from "../src/render/scenes/gates/index.ts";
 import {
+  arcLitSpan,
+  ARC_ENV_MIN,
   arcPathStart,
   buildLook,
   identityPairs,
@@ -33,6 +45,12 @@ import {
 import { computeAutoTarget } from "../src/render/autoTune.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 
+/** gatesScene.settings' own default for `key`, so a mapping test doesn't
+ *  hard-code a number the SETTINGS array already owns. */
+function settingDefault(key: string): number {
+  return gatesScene.settings!.find((s) => s.key === key)!.default;
+}
+
 // The scene's look changes are a scheduler, not a shader: this pins where a
 // morph may *begin* (a bar wrap, a phrase, a drop — never mid-bar at a low
 // Change rate), that once begun it always takes exactly one bar and nothing
@@ -46,12 +64,11 @@ describe("advanceGates", () => {
     dtSec: DT,
     barPhase: 0,
     tempoLock: 1,
-    onset: false,
     dropOnset: false,
     low: 0,
     ...over,
   });
-  const OPTS: GateOpts = { speed: 0.5, cutRate: 1, spin: 0.35 };
+  const OPTS: GateOpts = { speed: 0.5, cutRate: 1, spin: 0.35, strike: false };
 
   function lcg(seed: number): () => number {
     let s = seed >>> 0;
@@ -189,7 +206,7 @@ describe("advanceGates", () => {
 
   it("treats a non-finite or backwards dt as no time passing", () => {
     const st = createGateState();
-    advanceGates(st, anim({ onset: true }), OPTS, lcg(1));
+    advanceGates(st, anim(), { ...OPTS, strike: true }, lcg(1));
     const before = { ...st };
     advanceGates(st, anim({ dtSec: Number.NaN, barPhase: 0.1, tempoLock: 0 }), OPTS, lcg(1));
     advanceGates(st, anim({ dtSec: -1, barPhase: 0.2, tempoLock: 0 }), OPTS, lcg(1));
@@ -200,12 +217,12 @@ describe("advanceGates", () => {
     expect(st.beatAge).toBe(before.beatAge);
   });
 
-  it("the lightning strike's clock: beatAge resets and beatCount bumps on every onset, beatAge grows by dt otherwise", () => {
+  it("the lightning strike's clock: beatAge/beatCount follow opts.strike, beatAge grows by dt otherwise", () => {
     const st = createGateState();
     expect(st.beatAge).toBeGreaterThan(1); // nothing strikes before the first beat
     expect(st.beatCount).toBe(0);
 
-    advanceGates(st, anim({ onset: true }), OPTS, lcg(1));
+    advanceGates(st, anim(), { ...OPTS, strike: true }, lcg(1));
     expect(st.beatAge).toBe(0);
     expect(st.beatCount).toBe(1);
 
@@ -214,7 +231,7 @@ describe("advanceGates", () => {
     expect(st.beatAge).toBeCloseTo(2 * DT, 9);
     expect(st.beatCount).toBe(1);
 
-    advanceGates(st, anim({ onset: true }), OPTS, lcg(1));
+    advanceGates(st, anim(), { ...OPTS, strike: true }, lcg(1));
     expect(st.beatAge).toBe(0);
     expect(st.beatCount).toBe(2);
 
@@ -483,11 +500,79 @@ describe("arcPathStart", () => {
   });
 });
 
+// The per-segment liveness fix (glsl.ts's vertex shader mirrors this exactly
+// — see its header and this function's own doc comment).
+describe("arcLitSpan", () => {
+  const TRAIL = 2.2; // today's ARC_TRAIL — arbitrary but realistic for the reach numbers below
+  const trailReach = Math.log(1 / ARC_ENV_MIN) / TRAIL;
+
+  it("is lit when the head is on the segment", () => {
+    expect(arcLitSpan(5.5, TRAIL, 5)).toBe(true);
+  });
+
+  it("is lit just behind the head within trailReach, unlit further behind", () => {
+    expect(arcLitSpan(5, TRAIL, 5 - Math.floor(trailReach))).toBe(true);
+    expect(arcLitSpan(5, TRAIL, 5 - Math.ceil(trailReach) - 2)).toBe(false);
+  });
+
+  it("is unlit well before the head arrives", () => {
+    expect(arcLitSpan(0, TRAIL, 10)).toBe(false);
+  });
+
+  it("a longer sustain (smaller trail falloff) widens the lit window", () => {
+    const pathStart = 0;
+    const H = pathStart + 3; // the head has already moved well past this segment
+    expect(arcLitSpan(H, 5.0, pathStart)).toBe(false); // today's snap-quick low end: already decayed
+    expect(arcLitSpan(H, 0.5, pathStart)).toBe(true); // today's lingering high end: still glowing
+  });
+});
+
 describe("gates settings", () => {
   it("every setting with an auto table reproduces its default at NEUTRAL", () => {
     for (const s of gatesScene.settings ?? []) {
       if (s.auto) expect(computeAutoTarget(s, NEUTRAL, 1)).toBe(s.default);
     }
+  });
+});
+
+// Every new lightning control's default must reproduce the strike's own
+// pre-2026-09-25 constants exactly — moving no slider changes anything but
+// ARC_GAIN's new strength (glsl.ts).
+describe("lightning control mappings", () => {
+  it("arcSustain's default reproduces today's decay (6.0/s) and trail falloff (2.2/unit)", () => {
+    const sustain = settingDefault("arcSustain");
+    expect(arcDecayFor(sustain)).toBeCloseTo(6.0, 5);
+    expect(arcTrailFor(sustain)).toBeCloseTo(2.2, 5);
+  });
+
+  it("arcThickness's default reproduces today's core (1.6px) and halo (8px)", () => {
+    const thickness = settingDefault("arcThickness");
+    expect(arcCorePxFor(thickness)).toBeCloseTo(1.6, 5);
+    expect(arcHaloPxFor(thickness)).toBeCloseTo(8, 5);
+  });
+
+  it("arcCrackle's default reproduces today's amplitude (10px) and flicker (24Hz)", () => {
+    const crackle = settingDefault("arcCrackle");
+    expect(arcAmpPxFor(crackle)).toBeCloseTo(10, 5);
+    expect(arcFlickerHzFor(crackle)).toBeCloseTo(24, 5);
+  });
+
+  it("arcSpeed's default reproduces today's speed (34 units/s) and depth delay (0.025 s/z-unit)", () => {
+    const speed = settingDefault("arcSpeed");
+    expect(arcSpeedFor(speed)).toBeCloseTo(34, 5);
+    expect(arcDepthDelayFor(speed)).toBeCloseTo(0.025, 5);
+  });
+
+  it("arcSpeed's depth delay scales inversely with speed: doubling speed halves the delay", () => {
+    expect(arcDepthDelayFor(1)).toBeCloseTo(arcDepthDelayFor(0) / (arcSpeedFor(1) / arcSpeedFor(0)), 5);
+  });
+
+  it("arcSource's default is Beat, matching today's behaviour", () => {
+    expect(settingDefault("arcSource")).toBe(ARC_SOURCE.BEAT);
+    expect(arcSource(ARC_SOURCE.BEAT)).toBe("beat");
+    expect(arcSource(ARC_SOURCE.BASS)).toBe("bass");
+    expect(arcSource(ARC_SOURCE.HIGH)).toBe("high");
+    expect(arcSource(ARC_SOURCE.BAR)).toBe("bar");
   });
 });
 
