@@ -69,7 +69,7 @@ const PAIR_TOL_SEC = 0.03;
 const PAIR_REFINE_TOL_SEC = PAIR_TOL_SEC / 2;
 const RECENCY_SEC = 3;
 const ONSET_TIME_OFFSET_HOPS = 2.3;
-const TEMPO_SWITCH_MARGIN = 1.15;
+const TEMPO_SWITCH_MARGIN = 1.25; // matches the measured prototype's own hardcoded hysteresis margin
 const PERIOD_STEP_SEC = 0.0025;
 
 const BASS_WEIGHT = 2; // how much harder the low bands count toward flux/onset "bass", not the tempo vote
