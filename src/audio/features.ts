@@ -133,6 +133,18 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
+/**
+ * Runs once per render tick (app.ts's currentVisual()), on whatever bands
+ * the tick's own AnalyserNode read — so its `bpm`/onsets are timestamped to
+ * the frame, and degrade as the frame rate drops (see
+ * tests/tempoEval.test.ts's render-tick-vs-analyzer-path tables for exactly
+ * how much). src/audio/tempoAnalyzer.ts's fixed-hop AudioWorklet pipeline
+ * (src/audio/tempoSource.ts) doesn't have that problem — it never sees a
+ * frame at all — and app.ts's solo/host modes overwrite this extractor's
+ * own `bpm` with the tempo source's whenever one is live. This extractor's
+ * tempo estimate is the fallback: what a browser without AudioWorklet
+ * support, or a context addModule() rejects, is left running on.
+ */
 export class FeatureExtractor {
   private floor = new Float32Array(NUM_BANDS).fill(-100);
   private peak = new Float32Array(NUM_BANDS).fill(-40);
