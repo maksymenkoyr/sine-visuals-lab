@@ -16,7 +16,7 @@ import type { SceneSetting } from "../render/sceneSettings.ts";
 import type { SceneLook } from "../render/sceneLooks.ts";
 import { createLooksCard } from "./looksCard.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
-import { SIGNALS, type SignalSpec } from "../render/signals.ts";
+import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
@@ -33,10 +33,42 @@ import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import type { LufsReading } from "../audio/lufs.ts";
 import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { LINE_STRENGTH_DEFAULT } from "../audio/bandLine.ts";
-import { driveModes, modeOf, sameDriveChoice, type DriveChoice, type DriveMode, type SceneDrives } from "../render/drives.ts";
+import {
+  defaultDriveSetting,
+  DRIVE_WEIGHT_MAX,
+  DRIVE_WEIGHT_MIN,
+  gateConditionIndices,
+  GATE_OPEN_HIGH,
+  GATE_OPEN_LOW,
+  sameDriveSetting,
+  smoothstep,
+  sourceKey,
+  type DriveMix,
+  type DrivePatch,
+  type DriveSetting,
+  type DriveSource,
+  type DriveSourceChoice,
+  type HitHeight,
+  type SceneDrives,
+} from "../render/drives.ts";
+import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
+import {
+  DRIVE_ADD_GROUPS,
+  DRIVE_WHITE,
+  driveGridDivisionLabel,
+  driveSourceColor,
+  driveSourceDescription,
+  driveSourceLabel,
+  isGridSourceChoice,
+  isLineSourceChoice,
+  jackKey,
+} from "./driveSources.ts";
+import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
-import { createAudioMeters } from "./audioMeters.ts";
+import { createAudioMeters, createMeterRow } from "./audioMeters.ts";
+import { createJack, setRowFed, type JackHandle } from "./jack.ts";
+import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
@@ -55,6 +87,7 @@ import {
   INPUT_GREEN,
   LIVE_DOT,
   SCENE_VIOLET,
+  STACK_BELOW_PX,
   ensureControlsStyles,
   withAlpha,
 } from "./controlsTheme.ts";
@@ -85,47 +118,157 @@ import {
 /**
  * The controller's controls panel — the "Viz Controls" design.
  *
- * Two glass columns anchored top-right over the live scene: the Bands card
- * (scene name, audio source, and the live bars with the band faders drawn
- * over them — see src/ui/bandFaders.ts) beside the controls column, whose
- * cards run Auto strength (with the Auto master block welded to it) → Input
+ * Glass columns over the live scene, docked to opposite screen edges in the
+ * wide layout (controlsTheme.ts) with the scene and the patch bay's own
+ * cables (src/ui/cableLayer.ts) showing through the open middle: the Bands
+ * card (scene name, audio source, and the live bars with the band faders
+ * drawn over them — see src/ui/bandFaders.ts) anchored top-left, and the
+ * controls column anchored top-right alongside Power, whose cards run Auto
+ * strength (with the Auto master block welded to it) → Input
  * (its own header carries a second Auto button, next to Reset — see
  * src/audio/micAuto.ts for how it differs from the master block) → Scene →
  * Palette → a footer strip. A drive setting (SceneSetting.drive — see
- * src/render/drives.ts) has no UI of its own on its row — focus decides
- * selection instead (a row's own `focusin`, wired in appendSettingRow;
- * wireHoverFocus above turns real pointer movement over a row into that
- * same focus, so hover and Tab both select — pointer focus waits out a
- * short dwell first, see wireHoverFocus's own comment, so sweeping the
- * cursor across several rows on the way to the spectrum doesn't select any
- * of them). The Bands card's header (spectrumHeader) doubles as a tab bar:
- * nothing selected shows a plain "<Scene> · Equaliser" label; a selection
- * shows two tabs, "Equaliser | <Setting>", the setting's tab active by
- * default (refreshSpectrumTabs) — clicking Equaliser shows the strip's
- * knobs and readouts without dropping the selection, so the other tab goes
- * straight back. Under the strip sits one CSS grid swap zone (driveZone):
- * an Equaliser layer (the gain/Hz readouts + the fader hint) and a Setting
- * layer (the two-row source picker — driveModes()/modeOf(), drives.ts —
- * plus, only on Draw, the line's Strength dial and Clear line) share the
- * same grid cell and are toggled by visibility, so the cell's height is
- * always the taller of the two and nothing jumps in the stacked layout when
- * the selection changes (refreshDriveZone/renderDrivePicker). The strip
- * itself shows the answer to "what does this listen to": a Hits/Loudness
- * choice with a band tints that range (spectrumStrip.setHighlight, the same
- * resolveBandRange a non-drive row's hover already used); Draw swaps the
- * knobs for the drawn line (src/ui/bandLineEditor.ts's overlay, backed by
- * src/audio/bandLine.ts); Beat grid and an unresolved Scene mix show no
- * tint. Focus leaving a row for anywhere else in the Bands card (the strip,
- * the line overlay, the swap zone's own picker) — or for the meters,
- * another card, or the page — leaves the selection alone, so drawing a line
- * means moving off the row and onto the strip without losing it
- * (selectDrive's own doc comment has the exact contract). Under the Bands
- * card, the read-only meters (audioMeters.ts) scroll in their own strip.
- * Below the breakpoint in
- * controlsTheme.ts everything stacks into one scrolling column with the
- * meters last, so the knobs stay in reach. It's corner-docked, not a modal:
- * the whole point is to watch the scene react while you tune it, so it
- * also stays open across palette taps.
+ * src/render/drives.ts) is the patch bay: its row grows an input port (a
+ * small ring at the row's left edge, in its first source's colour —
+ * src/ui/driveSources.ts owns every source's colour and label), a source
+ * summary under the label ("Treble hits + Treble level"), and a live
+ * sparkline under the slider (drawn from `drives.valueOf(key)` at ~30 Hz in
+ * update(), skipped while the panel is closed). None of the three is a fork
+ * of createControlRow — they're its `port`/`summary`/`below` slots, filled
+ * in by appendSettingRow only for a setting with `spec.drive`.
+ *
+ * Two levels of attention, not one: hovering a row for
+ * HOVER_SELECT_DELAY_MS, or giving its slider keyboard focus, *previews* it
+ * (wireHoverFocus's existing dwell — see its own comment — now drives
+ * `preview` instead of a picker); there's no layout change, just the port
+ * lighting (cables and meter glow are Phase 2b). Clicking the row's label,
+ * summary or port instead *pins* it (togglePin) — one setting at a time —
+ * and expands its patch panel inline in the row, below the sparkline; the
+ * slider alone never pins, only previews, so dragging an amount can't
+ * accidentally swap which panel is open. Escape, clicking the pinned row's
+ * own label again, or switching scene unpins (onKeyDown, togglePin,
+ * renderSceneSettings's own tail). The patch panel (buildPatchPanel) is
+ * rebuilt only on a genuine patch edit — a mix/height/division button, an
+ * add/remove chip, Reset — never from a slider drag's own `input` event
+ * (that only writes the store and a readout) and never from the panel's
+ * periodic refresh, matching the click-loss lesson in this file's carried
+ * rules. It shows: a mix segmented control (Add/Strongest/Only when), one
+ * line per source (colour dot, name, weight 0–2×, a hit source's Height
+ * Graded/Fixed/Loud, a grid source's division chips, the line source's
+ * Strength + Clear reusing lineEditor.strengthRow), a 4 s output graph off
+ * `sourceValues`/`valueOf`, and "+ Add by name" chip groups
+ * (src/ui/driveSources.ts's DRIVE_ADD_GROUPS) — always open in the stacked
+ * layout, since Phase 2b's jacks (the primary way in) are far away there.
+ *
+ * Jacks and cables (Phase 2b) are how a meter actually gets plugged in.
+ * Every reactive meter row/lane — audioMeters.ts's own (Rhythm/Signal/
+ * Character) plus this file's own Bands level rows (BAND_LEVEL_CHOICES) and
+ * its Frequencies corner (mountBandsJack) — grows a jack (src/ui/jack.ts): a
+ * ring in its source's colour, filled when it feeds the shown (preview ??
+ * pinned) setting, with tiny usage dots for how many of this scene's
+ * settings use it. Clicking one with a pinned setting toggles it into that
+ * patch (onJackClick); with nothing pinned, it pins whichever setting was
+ * last previewed (`lastPreview`, since `preview` itself goes back to null
+ * the moment the pointer leaves) and plugs in in the same click, or shows a
+ * toast if nothing ever was. Hovering a jack highlights every scene row it
+ * already feeds (onJackHover, independent of the shown-setting highlight).
+ * While a setting is shown, `refreshPatchHighlight` — called from every
+ * place `pinned`/`preview`/a patch actually changes, never per frame —
+ * dims the rest of the Bands+meters column (`.vc-patching`, controlsTheme.ts)
+ * and dims the spectrum's own unheard bands (refreshSpectrumDriveHighlight).
+ * A feeding row/lane's own glow (jack.ts's setRowFed) and the cables
+ * themselves now distinguish *pinned* from *previewed* rather than
+ * collapsing both into one "shown" look, since a click and a passing hover
+ * mean different things: pinned is the patch actually in effect, solid and
+ * glowing; a preview (hover, or keyboard focus, short of a click) is a
+ * quick look, thin and quiet, that never expands the row's own patch panel.
+ * `activePreview()` is `preview` only when it names a genuinely different
+ * setting than `pinned` — hovering the pinned row itself is a no-op here.
+ * refreshBandsJacks/audioMeters.ts's own refreshPatchView compute, per fed
+ * row/lane, which of the two (if both) applies: a preview always wins the
+ * glow (soft) over a competing pinned feed, which in turn either keeps its
+ * full glow (nothing else previewed) or steps back to a bare "faint" mark
+ * (something else is). The cables themselves
+ * (src/ui/cableLayer.ts) are one `<svg>` fixed over the viewport, outside
+ * every card's own `overflow: hidden`, drawing two independent path
+ * groups — pinned (its usual glow/core/flow, dimmed once a preview is also
+ * live) and preview (a single thin dashed line, no glow, no flow
+ * animation) — from cableSpecsForShown/cableGroupFor below, each a bezier
+ * with a short straight stub at both the jack and the port (cableLayer.ts's
+ * own CABLE_STUB_PX) whose bend direction is derived from the two
+ * endpoints' actual resolved positions rather than assumed, so a cable
+ * still draws cleanly regardless of which side of its port a given jack's
+ * clamped/folded endpoint (endpointFor, cableLayer.ts) ends up landing on.
+ * Geometry is recomputed only on that same short list of triggers (a
+ * selection/patch change, scroll of either scrolling column, resize, a
+ * card fold, a Scene-card rebuild — scheduleCableRecompute), with only
+ * `stroke-dashoffset` written per tick, on the pinned group alone
+ * (cableLayer.tick, flow speed off each source's own live value).
+ *
+ * In Only when mode, a source's *role* (drives.ts's `DriveSource.when`) is
+ * its own, independent flag — several lines can be marked "Only when" at
+ * once, every one of them ANDed together (drives.ts's own header). Every
+ * line, once the patch has two or more sources and is gating, gets
+ * buildRoleToggle's Plays/Only when pair, both halves clickable
+ * (deps.onSetSourceRole) — "Only when" disables itself, with a hint, on the
+ * one line whose marking would leave zero "plays" sources among the rest
+ * (drives.ts's own setSourceRole refusal, mirrored here rather than letting
+ * a click visibly do nothing). Every source line shares one left gutter
+ * (driveSrcGutterStyle) so dots/names/controls line up regardless of role;
+ * a condition line's own dashed rule (`.vc-drive-gutter-cond`,
+ * controlsTheme.ts) lives *inside* that gutter, never shifting the row's own
+ * content the way a border+padding on the whole line would. buildOutputGraph
+ * draws every condition's trace dashed and darkens the time the gate was
+ * blocked (drives.ts's GATE_OPEN_LOW/HIGH) plus a lit-when-open strip along
+ * its own bottom edge; cableGroupFor marks each condition cable `cond`,
+ * which cableLayer.ts/controlsTheme.ts draw with a longer dash than a
+ * scene-mix cable's own `soft` one. driveSummaryText's own gate branch names
+ * the plays sources then every condition ("Treble hits + Bass hits, only
+ * when Song intensity and Loudness are high").
+ *
+ * A source line's own mute switch (buildMuteSwitch, `deps.onSetSourceMuted`)
+ * turns it off without unplugging it — drives.ts's `DriveSource.off`, its
+ * own header's Muting paragraph. A muted line dims (`.vc-drive-src-muted`)
+ * except the switch itself; its cable draws in cableLayer.ts's flat, dashed
+ * `.vc-cable-muted` style (no glow, no flow) rather than the pinned group's
+ * usual three-layer structure, and its meter jack still fills solid (it's
+ * still plugged in — jackIsShown/jackIsPinned don't look at mute at all) but
+ * no longer lights that row's own fed glow (jackIsPinnedActive/
+ * jackFeedsPreviewActive, the mute-aware pair refreshBandsJacks/
+ * audioMeters.ts's refreshPatchView use for row/lane glow specifically,
+ * leaving the plain isPinned/isPreview predicates — and so aria-pressed —
+ * mute-agnostic, since unplugging a muted source is still exactly what a
+ * click on its jack does).
+ *
+ * Every control in the patch panel explains itself two ways (setHint,
+ * this file's own "cover everything with hints" pass): a `title` (the
+ * browser's native delayed tooltip, and an `aria-description` alongside it
+ * for a screen reader) and a `data-hint` the panel's own bottom hint line
+ * (buildPatchPanel's `hintBar`) reads off whichever control is currently
+ * hovered or keyboard-focused, through one delegated pointerover/
+ * pointerout/focusin/focusout pair on the panel root — never a
+ * per-control listener, never rebuilt from refreshAuto/update(). The bar's
+ * own height is fixed (controlsTheme.ts's `.vc-drive-bottom-hint`) so
+ * nothing else in the panel grows or shrinks as the hint text changes. A
+ * jack, a row's own port, and a row's own sparkline live *outside* the
+ * panel, so they get src/ui/tooltip.ts's small floating tooltip instead,
+ * shown with no delay straight off the same pointerenter/focus events
+ * jack.ts's onHover already fires — onJackHover shows/hides it, its two
+ * lines built by jackTooltipLines from driveSources.ts's own
+ * `driveSourceDescription` map (the one place a source's plain-language
+ * description lives, next to its colour/label).
+ *
+ * The Bands card is plain again: scene name, audio source, the live bars
+ * with the band faders drawn over them (src/ui/bandFaders.ts) — always
+ * showing its knobs and readouts, *except* while the pinned setting's patch
+ * has a source on Frequencies, when the strip swaps to that line's drawing
+ * overlay (src/ui/bandLineEditor.ts, backed by src/audio/bandLine.ts;
+ * refreshLineMode derives this from the pinned patch, not from focus). Under
+ * the Bands card, the read-only meters (audioMeters.ts) scroll in their own
+ * strip. Below the breakpoint in controlsTheme.ts everything stacks into one
+ * scrolling column with the meters last, so the knobs stay in reach. It's
+ * corner-docked, not a modal: the whole point is to watch the scene react
+ * while you tune it, so it also stays open across palette taps.
  *
  * Every card in that left column — Power, Bands, and each meter card —
  * collapses to just its title bar (createCard's foldId, controlsKit.ts):
@@ -265,14 +408,27 @@ export interface DeviceMenuDeps {
   getBandGain: (sceneId: string, fader: number) => number;
   onBandGainChange: (sceneId: string, fader: number, value: number) => void;
   onBandGainsReset: (sceneId: string) => void;
-  /** A drive setting's source choice, and — while it's parked on
-   *  Frequencies — the drawn line and Strength dial behind it (see
-   *  src/render/drives.ts and src/render/driveStore.ts). Named to match
-   *  driveStore.ts's own exports 1:1, keyed per (scene, setting) rather
-   *  than per scene: two drive settings on the same scene each draw their
-   *  own line. */
-  getDriveChoice: (sceneId: string, spec: SceneSetting) => DriveChoice;
-  onDriveChoiceChange: (sceneId: string, spec: SceneSetting, choice: DriveChoice) => void;
+  /** A drive setting's whole patch (src/render/drives.ts's DriveSetting —
+   *  `"scene"` or a DrivePatch), and the store-level editing helpers the
+   *  patch panel's controls call through — named to match
+   *  driveStore.ts's own exports 1:1, keyed per (scene, setting) rather than
+   *  per scene: two drive settings on the same scene keep independent
+   *  patches (and, while a patch has a source on Frequencies, independent
+   *  drawn lines — see getDriveLine below). */
+  getDriveSetting: (sceneId: string, spec: SceneSetting) => DriveSetting;
+  onResetDriveSetting: (sceneId: string, spec: SceneSetting) => void;
+  onTogglePatchSource: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice) => void;
+  onSetSourceWeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, weight: number) => void;
+  onSetSourceHeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, height: HitHeight) => void;
+  onSetSourceGrid: (sceneId: string, spec: SceneSetting, grid: BeatGridIndex) => void;
+  onSetPatchMix: (sceneId: string, spec: SceneSetting, mix: DriveMix) => void;
+  /** The Only when role toggle (buildRoleToggle) — marks `sources[index]`
+   *  "plays" or "when". See drives.ts's setSourceRole. */
+  onSetSourceRole: (sceneId: string, spec: SceneSetting, index: number, role: "plays" | "when") => void;
+  /** The source line's own mute switch (buildMuteSwitch) — turns
+   *  `sources[index]` off without unplugging it, or back on. See
+   *  drives.ts's setSourceMuted. */
+  onSetSourceMuted: (sceneId: string, spec: SceneSetting, index: number, muted: boolean) => void;
   getDriveLine: (sceneId: string, spec: SceneSetting) => Float32Array;
   setDriveLineBand: (sceneId: string, spec: SceneSetting, band: number, height: number) => void;
   setDriveLine: (sceneId: string, spec: SceneSetting, heights: ArrayLike<number>) => void;
@@ -380,8 +536,8 @@ export interface DeviceMenu {
    *  before audio is up, rawBands/mono additionally on a mic-less renderer
    *  device) — drives the Input card's level wash, the spectrum strip's
    *  feeds, and the meters. `frame` has the band faders applied; `ungained`
-   *  is the same frame before them (the strip's ghost bars); `pinned` is
-   *  which bands the gain stage clamped (bandGains.ts's pinnedBands);
+   *  is the same frame before them (the strip's ghost bars); `pinnedBands`
+   *  is which bands the gain stage clamped (bandGains.ts's own pinnedBands);
    *  `anim`/`mono`/`fixedEnergy`/`lufs` feed the meters (audioMeters.ts) —
    *  `fixedEnergy` is FeatureExtractor.fixedEnergy, null wherever this
    *  device isn't running its own extractor (renderer, synthetic feed);
@@ -406,7 +562,7 @@ export interface DeviceMenu {
     frame: FeatureFrame | null,
     rawBands: Float32Array | null,
     ungained: FeatureFrame | null,
-    pinned: Uint8Array | null,
+    pinnedBands: Uint8Array | null,
     anim: AnimFrame | null,
     mono: Float32Array | null,
     rateScale: number,
@@ -489,49 +645,133 @@ const liveDotStyle = (on: boolean) =>
 const statusTextStyle = `font: 400 10.5px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.5);`;
 const hairlineStyle = `height: 1px; background: ${withAlpha(HAIRLINE, 0.45)}; margin: 8px 0 9px;`;
 
-// The Bands card's header tabs (spectrumHeader/refreshSpectrumTabs): a
-// plain label while nothing is selected, "Equaliser | <Setting>" once a
-// drive setting is — see spectrumTitlePlain/spectrumTabs below.
-const tabBtnBaseStyle = `
-  font: 500 12px/1.2 ${FONT_MONO}; letter-spacing: 0.14em; text-transform: uppercase;
-  background: none; border: none; padding: 0; cursor: pointer; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-`;
-const tabBtnActiveStyle = `${tabBtnBaseStyle} color: rgba(255,255,255,0.92);`;
-const tabBtnInactiveStyle = `${tabBtnBaseStyle} color: rgba(255,255,255,0.4);`;
-const tabSepStyle = `font: 400 11px/1 ${FONT_MONO}; color: rgba(255,255,255,0.25); flex-shrink: 0;`;
-
-// The swap zone under the strip (driveZone/refreshDriveZone): one CSS grid
-// cell, the Equaliser layer and the Setting layer both pinned to it via
-// grid-area, toggled by visibility rather than display. An auto grid track
-// sizes to the tallest item placed in it regardless of that item's own
-// visibility, so the cell is always as tall as the taller layer — no
-// magic reserved number, and nothing jumps when the selection changes.
-const driveZoneStyle = `display: grid;`;
-const driveLayerStyle = `grid-area: 1 / 1; min-width: 0;`;
-
-// The Equaliser layer's hint — plain text, not .vc-hint: that class waits
+// The Equaliser readouts' hint — plain text, not .vc-hint: that class waits
 // for hover/focus on an enclosing .vc-row, and this line has no row of its
-// own to wait on (it's the swap zone's resting content, always on screen
-// alongside the readouts, not tucked under a control someone has to find).
+// own to wait on (it's always on screen alongside the readouts, not tucked
+// under a control someone has to find).
 const eqHintStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.5); margin-top: 6px;`;
 const FADER_HINT_TEXT =
-  "Drag a knob up to boost a band, down to cut it. Hover a reactive setting to pick what it reacts to.";
-// Shown only as the Draw chip's tooltip (drives.ts's DriveModeOption for
-// {source:"line"}) — the Setting layer's own three rows (mode, range,
-// Draw's Strength) have no room left for a fourth line of prose.
+  "Drag a knob up to boost a band, down to cut it. Pin a reactive setting to plug meters into it.";
+
+// ---- The patch bay (a drive row's port/summary/sparkline, and its pinned
+// patch panel) — see this file's own header doc-comment paragraph. Every
+// colour/label comes from src/ui/driveSources.ts; this is only layout.
+
+// createControlRow's own drivePanel slot: the label + summary wrapper that
+// pins on click. Stacked (label, then the summary on its own line) rather
+// than side by side — inline, the summary had nowhere left to grow in the
+// narrow controls column and ellipsized to unreadable ("Scene mix: bas…")
+// even at a middling width; a second line wraps instead, however long the
+// source list gets.
+const driveRowLeftStyle = `display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; cursor: pointer;`;
+const driveSummaryStyle = `
+  font: 400 11px/1.35 ${FONT_MONO}; color: rgba(255,255,255,0.45); min-width: 0;
+  overflow-wrap: break-word;
+`;
+// The input port: a 10 px ring at the row's own left edge, facing the
+// meters column (which docks to the screen's own left edge — see
+// controlsTheme.ts's .vc-spectrum-col). Position/size/shape live in
+// controlsTheme.ts's own .vc-drive-port class rule, not here; drivePortStyle()
+// below only ever writes what actually depends on this row's own live
+// state — the setting's plugged sources' colours, and the pinned/preview
+// ring.
+
+const driveSparkWrapStyle = `margin-top: 4px; height: 20px;`;
+const driveSparkCanvasStyle = `display: block; width: 100%; height: 100%;`;
+
+// The pinned row's expanded panel.
+const drivePatchPanelStyle = `
+  margin-top: 8px; padding: 9px 9px 8px; border-radius: 7px;
+  background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.08);
+  display: flex; flex-direction: column; gap: 8px; cursor: default;
+`;
+const drivePatchHeadStyle = `display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;`;
+const driveEyebrowStyle = `font: 500 9.5px/1 ${FONT_LABEL}; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.4);`;
+
+// Mix segmented control (Add/Strongest/Only when).
+const driveSegStyle = `display: inline-flex; border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; overflow: hidden;`;
+const driveSegBtnBase = `
+  font: 500 10px/1 ${FONT_LABEL}; letter-spacing: 0.08em; text-transform: uppercase;
+  background: none; border: none; border-left: 1px solid rgba(255,255,255,0.1); padding: 6px 9px; cursor: pointer;
+`;
+const driveSegBtnStyle = `${driveSegBtnBase} color: rgba(255,255,255,0.6);`;
+const driveSegBtnLitStyle = `${driveSegBtnBase} color: #fff; background: rgba(255,255,255,0.12);`;
+const driveSegBtnDisabledStyle = `${driveSegBtnBase} color: rgba(255,255,255,0.22); cursor: not-allowed;`;
+
+// One source line. Five fixed columns so every line — condition or plain,
+// muted or not — aligns identically (this file's own header): a left gutter
+// for the condition marker (driveSrcGutterStyle, never a border+padding on
+// the whole line — see controlsTheme.ts's .vc-drive-gutter-cond), the mute
+// switch, the colour dot, the name, then the unplug button; driveSrcCtrlsStyle
+// (row 2) spans from the name's own column so it indents under the name, not
+// under the gutter/switch/dot.
+const driveSrcListStyle = `display: flex; flex-direction: column;`;
+const driveSrcLineStyle = `
+  display: grid; grid-template-columns: 12px 20px 10px minmax(0,1fr) auto; align-items: center; gap: 6px 9px;
+  padding: 6px 0; border-top: 1px solid rgba(255,255,255,0.05);
+`;
+const driveSrcGutterStyle = `grid-row: 1 / span 2; align-self: stretch; width: 100%;`;
+const driveSrcDotStyle = (color: string) => `width: 8px; height: 8px; border-radius: 50%; background: ${color}; box-shadow: 0 0 6px ${color};`;
+const driveSrcNameStyle = `font: 500 12px/1.2 ${FONT_LABEL}; color: #fff; min-width: 0;`;
+const driveSrcRemoveStyle = `
+  background: none; border: none; color: rgba(255,255,255,0.4); font: 15px/1 ${FONT_MONO};
+  padding: 2px 5px; border-radius: 3px; cursor: pointer;
+`;
+const driveSrcCtrlsStyle = `grid-column: 4 / -1; display: flex; align-items: center; gap: 9px; flex-wrap: wrap;`;
+const driveEmptySrcStyle = `font: 400 12px/1.4 ${FONT_LABEL}; color: rgba(255,255,255,0.55); padding: 3px 0;`;
+
+// Height (mini) segmented control, the grid division chips, and the role
+// toggle — smaller than the mix control, since a source line already
+// carries a lot.
+const driveMiniSegStyle = `display: inline-flex; border: 1px solid rgba(255,255,255,0.16); border-radius: 5px; overflow: hidden;`;
+const driveMiniSegBtnBase = `
+  font: 500 9px/1 ${FONT_LABEL}; letter-spacing: 0.05em; text-transform: uppercase;
+  background: none; border: none; border-left: 1px solid rgba(255,255,255,0.08); padding: 4px 6px; cursor: pointer;
+`;
+const driveMiniSegBtnStyle = `${driveMiniSegBtnBase} color: rgba(255,255,255,0.55);`;
+const driveMiniSegBtnLitStyle = `${driveMiniSegBtnBase} color: #fff; background: rgba(255,255,255,0.14);`;
+const driveMiniSegBtnDisabledStyle = `${driveMiniSegBtnBase} color: rgba(255,255,255,0.22); cursor: not-allowed;`;
+const driveGridChipsStyle = `display: flex; flex-wrap: wrap; gap: 4px;`;
+
+const driveWeightWrapStyle = `display: flex; align-items: center; gap: 7px; flex: 1 1 120px; min-width: 100px;`;
+const driveWeightRangeStyle = `flex: 1;`;
+const driveWeightOutStyle = `font: 400 10.5px/1 ${FONT_MONO}; color: rgba(255,255,255,0.6); min-width: 34px; text-align: right;`;
+const driveDrawHintStyle = `font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255,255,255,0.5);`;
+
+// The Line add-chip's own tooltip — a source line has no room for a fourth
+// line of prose once it's plugged in (buildSourceLine's own drawHint is the
+// short version shown there instead).
 const LINE_HINT_TEXT =
   "Draw the line down onto the bars this setting listens to — keep it just above where they rest so only the hits poke over it. A band left at the top is ignored.";
 
-// The Setting layer's two chip rows — reusing controlsKit.ts's enum-picker
-// look (paletteChipStyle/paletteChipLitStyle) so the picker reads as native
-// to the panel, not a bespoke widget. Pointer-only, not part of the Tab
-// ring — same call bandLineEditor.ts's own drawing overlay already made
-// (see its header): this is still closer to a fast-moving experiment than
-// a control bank, so a second keyboard grammar isn't worth it yet.
-const drivePickerWrapStyle = `display: flex; flex-direction: column; gap: 6px; margin-top: 2px;`;
-const sceneMixLineStyle = `font: 400 11px/1.5 ${FONT_LABEL}; color: rgba(255,255,255,0.65);`;
-const drawRowStyle = `display: flex; align-items: flex-start; gap: 10px;`;
+// "+ Add by name" chip groups — always open in the stacked layout (jacks
+// are far away there, this phase has none yet either); behind a small
+// disclosure in the wide layout.
+const driveAddDisclosureStyle = `
+  align-self: flex-start; background: none; border: none; padding: 0;
+  font: 400 11.5px/1.4 ${FONT_LABEL}; color: ${withAlpha(BANDS_AMBER, 0.85)}; text-decoration: underline;
+  text-underline-offset: 3px; cursor: pointer;
+`;
+const driveAddGroupsStyle = `display: flex; flex-direction: column; gap: 6px; margin-top: 2px;`;
+const driveAddGroupRowStyle = `display: flex; flex-wrap: wrap; gap: 5px; align-items: center;`;
+const driveAddGroupLabelStyle = `font: 500 9px/1 ${FONT_LABEL}; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.4); width: 46px; flex-shrink: 0;`;
+const driveChipStyle = `
+  font: 400 10.5px/1.2 ${FONT_LABEL}; color: rgba(255,255,255,0.7);
+  background: transparent; border: 1px solid rgba(255,255,255,0.18); border-radius: 5px;
+  padding: 4px 7px; cursor: pointer;
+`;
+const driveChipLitStyle = (color: string) =>
+  `${driveChipStyle} color: #fff; border-color: ${color}; background: ${withAlpha(color, 0.16)};`;
+
+// The output graph — 4 s of sourceValues()/valueOf().
+const driveOutHeadStyle = `display: flex; justify-content: space-between; align-items: baseline;`;
+const driveOutValStyle = `font: 400 12px/1 ${FONT_MONO}; color: #fff;`;
+const driveOutCanvasStyle = `display: block; width: 100%; height: 56px; border-radius: 5px; background: rgba(255,255,255,0.02);`;
+
+const driveResetLinkStyle = `
+  align-self: flex-start; background: none; border: none; padding: 0;
+  font: 500 11px/1 ${FONT_LABEL}; color: ${SCENE_VIOLET}; text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+`;
 
 
 // Footer strip.
@@ -704,6 +944,22 @@ export interface ControlRowSpec {
    *  callbacks by appendSettingRow below — see ResolvedSignalRead. Omit for
    *  a setting with no `reads` entries. */
   reads?: readonly ResolvedSignalRead[];
+  /** The one extension point a drive setting's row needs (this file's own
+   *  doc-comment paragraph) — built by appendSettingRow's buildDriveRow,
+   *  never forked out of this function: `port` mounts absolutely at the
+   *  row's left edge (`.vc-row` is already `position: relative`); `summary`
+   *  mounts inline right after the label, inside the same clickable wrapper;
+   *  `below` mounts as the row's last child (the sparkline, and — once
+   *  pinned — the patch panel); `onPin` fires on a click anywhere in the
+   *  label/summary wrapper or on `port` (stopPropagation'd so it never also
+   *  triggers this row's own click-to-focus-slider handler below). Omit for
+   *  a setting with no `drive`. */
+  drivePanel?: {
+    port: HTMLElement;
+    summary: HTMLElement;
+    below: HTMLElement;
+    onPin: () => void;
+  };
 }
 
 /** One SceneSetting.reads entry (sceneSettings.ts's SignalLink) resolved
@@ -1063,7 +1319,28 @@ export function createControlRow(spec: ControlRowSpec) {
 
   right.appendChild(readout);
   right.append(chip, offChip, resetBtn);
-  head.append(label, right);
+  if (spec.drivePanel) {
+    const left = document.createElement("div");
+    left.style.cssText = driveRowLeftStyle;
+    // Room for the port at this row's own left edge (controlsTheme.ts's
+    // .vc-drive-row-left/.vc-drive-port) — a plain gap would leave the
+    // port floating over the text.
+    left.classList.add("vc-drive-row-left");
+    spec.drivePanel.summary.classList.add("vc-drive-summary");
+    left.append(label, spec.drivePanel.summary);
+    left.addEventListener("click", (e) => {
+      e.stopPropagation();
+      spec.drivePanel!.onPin();
+    });
+    spec.drivePanel.port.addEventListener("click", (e) => {
+      e.stopPropagation();
+      spec.drivePanel!.onPin();
+    });
+    el.appendChild(spec.drivePanel.port);
+    head.append(left, right);
+  } else {
+    head.append(label, right);
+  }
 
   const slider = document.createElement("input");
   slider.type = "range";
@@ -1102,6 +1379,7 @@ export function createControlRow(spec: ControlRowSpec) {
 
   el.append(head, slider, hint);
   if (signalIndicator) el.appendChild(signalIndicator.strip);
+  if (spec.drivePanel) el.appendChild(spec.drivePanel.below);
   el.addEventListener("click", () => slider.focus());
   wireHoverFocus(el, slider);
   wireThumbMagnet(el, slider);
@@ -1452,6 +1730,25 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       get: () => deps.getHitShape(),
       set: (partial) => deps.setHitShape(partial),
     },
+    // Every function referenced below is a plain (hoisted) function
+    // declaration further down this same closure, in the patch-bay
+    // section — see each one's own doc comment there. Referencing them
+    // here, ahead of their textual declaration, is safe: none of these are
+    // ever called until well after createDeviceMenu() has finished running
+    // and every one of them exists.
+    patch: {
+      usage: jackUsage,
+      isShown: jackIsShown,
+      isPinned: jackIsPinned,
+      isPreview: jackFeedsPreview,
+      isPinnedActive: jackIsPinnedActive,
+      isPreviewActive: jackFeedsPreviewActive,
+      previewIsActive: () => !!activePreview(),
+      isSceneSource: jackIsSceneSource,
+      describe: jackDescribe,
+      onJackClick,
+      onJackHover,
+    },
   });
 
   const spectrumCol = document.createElement("div");
@@ -1488,27 +1785,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   bandsCard.el.classList.add("vc-spectrum-card");
   markBlock(bandsCard.title);
 
-  // Status line, doubling as a tab bar once a drive setting is selected —
-  // see refreshSpectrumTabs below and this card's own doc-comment paragraph.
+  // Status line — plain: the scene name and whether audio is live. No tabs;
+  // a drive setting's source picker now lives in its own row's pinned patch
+  // panel (this file's own doc-comment paragraph), not a swap zone here.
   const spectrumHeader = document.createElement("div");
   spectrumHeader.style.cssText = spectrumHeaderStyle;
   const spectrumTitlePlain = document.createElement("span");
   spectrumTitlePlain.style.cssText = spectrumTitleStyle;
-  const eqTabBtn = document.createElement("button");
-  eqTabBtn.type = "button";
-  eqTabBtn.textContent = "Equaliser";
-  const tabSep = document.createElement("span");
-  tabSep.textContent = "|";
-  tabSep.style.cssText = tabSepStyle;
-  const settingTabBtn = document.createElement("button");
-  settingTabBtn.type = "button";
-  const spectrumTabs = document.createElement("div");
-  spectrumTabs.style.cssText = `display: flex; align-items: center; gap: 6px; min-width: 0;`;
-  spectrumTabs.append(eqTabBtn, tabSep, settingTabBtn);
-  spectrumTabs.style.display = "none";
-  const spectrumTitle = document.createElement("div");
-  spectrumTitle.style.cssText = `display: flex; min-width: 0; flex: 1; overflow: hidden;`;
-  spectrumTitle.append(spectrumTitlePlain, spectrumTabs);
   const spectrumStatus = document.createElement("div");
   spectrumStatus.style.cssText = spectrumStatusStyle;
   const liveDot = document.createElement("div");
@@ -1516,25 +1799,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const statusLabel = document.createElement("div");
   statusLabel.style.cssText = statusTextStyle;
   spectrumStatus.append(liveDot, statusLabel);
-  spectrumHeader.append(spectrumTitle, spectrumStatus);
+  spectrumHeader.append(spectrumTitlePlain, spectrumStatus);
 
   const hairline = document.createElement("div");
   hairline.style.cssText = hairlineStyle;
 
-  // The fader bank sits in a .vc-row so it wakes (glow) on hover and
-  // on focus-within exactly like a slider row. The gain/Hz readouts and the
-  // fader hint used to live here too; they're now in the Equaliser layer of
-  // driveZone below (bandFaders.readouts, fadersHint) so the swap zone can
-  // account for their height — see this card's own doc-comment paragraph.
+  // The fader bank sits in a .vc-row so it wakes (glow) on hover and on
+  // focus-within exactly like a slider row.
   const fadersRow = document.createElement("div");
-  fadersRow.className = "vc-row";
+  // vc-row-keep: the primary spectrum display opts out of .vc-patching's
+  // flat dim (controlsTheme.ts) — it gets its own band-range dimming
+  // instead (refreshSpectrumDriveHighlight, below).
+  fadersRow.className = "vc-row vc-row-keep";
   fadersRow.style.setProperty("--vc-accent", BANDS_AMBER);
   // Always-on: explains the sky-blue marker spectrumStrip.ts's
   // drawCentroidMarker draws over the bars (same AUTO_SKY constant, so the
-  // swatch can't drift from the line). Not the same reading as the
-  // Character card's Centroid row: that one is range-adapted against the
-  // track's own recent swing and has no position on this strip's
-  // band-index axis, so the note doesn't claim the two match.
+  // swatch can't drift from the line).
   const spectrumLegend = createTraceLegend([
     { color: AUTO_SKY, label: "Brightness", note: "where the spectrum's energy balances" },
   ]);
@@ -1546,61 +1826,57 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       reset: () => bandFaders.reset(i),
       toggleOff: () => bandFaders.toggleOff(i),
     });
-    // Scoped to the hit div itself, not fadersRow: fadersRow also contains
-    // the whole spectrum plot, which isn't any one band's control, so
-    // hovering the row as a whole would resolve to an arbitrary fader. Each
-    // hit div already covers exactly its own band's hit region
-    // (bandFaders.ts's `left`/`width`), so it's its own correct hover scope.
     wireHoverFocus(el, el);
   });
 
-  // Always-visible equaliser hint — plain text now, not hover-gated (see
-  // eqHintStyle's own comment for why).
+  // Always-visible equaliser readouts + hint — hidden only while the pinned
+  // setting's patch has a source on Frequencies (refreshLineMode below).
   const fadersHint = document.createElement("div");
   fadersHint.style.cssText = eqHintStyle;
   fadersHint.textContent = FADER_HINT_TEXT;
-
   const eqLayer = document.createElement("div");
-  eqLayer.style.cssText = driveLayerStyle;
   eqLayer.append(bandFaders.readouts, fadersHint);
 
-  // Rebuilt from scratch on every selection/choice change by
-  // renderDrivePicker() below — see driveZoneStyle's own comment for why
-  // this and eqLayer can coexist, one hidden, without a height jump.
-  const settingLayer = document.createElement("div");
-  settingLayer.style.cssText = driveLayerStyle;
+  // ---------------------------------------------------------------------
+  // The patch bay: every drive-capable scene-setting row (appendSettingRow
+  // below) gets an input port, a source summary and a live sparkline
+  // (createControlRow's own `drivePanel` slot — see its doc comment).
+  // Clicking a row's label, summary or port pins it and expands its patch
+  // panel inline, below the sparkline. See this file's own header
+  // doc-comment paragraph for the full contract.
+  // ---------------------------------------------------------------------
 
-  const driveZone = document.createElement("div");
-  driveZone.style.cssText = driveZoneStyle;
-  driveZone.append(eqLayer, settingLayer);
-
-  bandsCard.body.append(spectrumHeader, hairline, fadersRow, driveZone);
-
-  // ---- Drive selection: the swap zone above shows whichever setting is ----
-  // ---- currently focused, and its two-row picker (drives.ts's ---------------
-  // ---- driveModes()/modeOf()) ------------------------------------------------
-  // A drive setting has no UI of its own on its row — the panel already
-  // turns real pointer movement over a row into keyboard focus
-  // (wireHoverFocus above, after a short dwell — see appendSettingRow's
-  // onRowFocusIn), so that's what selection rides: a scene-setting row's own
-  // `focusin` selects it if it's a drive setting, clears otherwise.
-
-  // The strip's own line-drawing mode: set only while `selected` exists and
-  // its current choice is Draw — see refreshDriveZone(), the one place that
-  // derives this from `selected` and writes it. Kept as its own variable
-  // (rather than computed inline everywhere) because the per-frame overlay
-  // update in DeviceMenu.update() below needs to know which setting's
-  // excess() to read without re-deriving it every tick.
+  /** Previewed on hover/keyboard-focus — port lit only, no layout change.
+   *  Written only by previewDrive() below. */
+  let preview: { sceneId: string; spec: SceneSetting } | null = null;
+  /** Pinned by an explicit click on a row's label/summary/port — expands
+   *  that row's patch panel. One at a time; written only by togglePin()
+   *  below, Escape (onKeyDown), or a scene switch (renderSceneSettings's
+   *  own tail). */
+  let pinned: { sceneId: string; spec: SceneSetting } | null = null;
+  /** The last setting `previewDrive` was actually handed a non-null value
+   *  for — unlike `preview` itself, this never goes back to null when the
+   *  pointer leaves. It's what a jack click reaches for when nothing's
+   *  pinned (Phase 2b's own plan): "pin whatever I was just looking at,
+   *  then plug this in", rather than a bare toast every time. */
+  let lastPreview: { sceneId: string; spec: SceneSetting } | null = null;
+  /** The Bands card's line-drawing mode — derived from `pinned`'s own patch
+   *  by refreshLineMode() below, not from focus: only a pinned setting's
+   *  panel can actually add/remove its line source. Kept as its own
+   *  variable (like the picker system it replaces) because
+   *  DeviceMenu.update()'s per-tick overlay refresh needs to know which
+   *  setting's excess() to read without re-deriving it every tick. */
   let lineMode: { sceneId: string; spec: SceneSetting } | null = null;
-  // The one drive setting the panel is currently showing a picker for. See
-  // selectDrive's own doc comment for exactly what sets and clears it.
-  let selected: { sceneId: string; spec: SceneSetting } | null = null;
-  // Which of the header's two tabs the swap zone currently shows while
-  // `selected` is set — irrelevant (and never read) while it isn't. A new
-  // selection always opens on "setting" (selectDrive below); only the
-  // Equaliser tab's own click moves it to "equaliser", and only until the
-  // next selection change.
-  let driveTab: "equaliser" | "setting" = "setting";
+  /** The pinned setting's own DriveSetting as of the last time its panel
+   *  was built — what DeviceMenu.update()'s ~10 Hz refresh compares against
+   *  to notice an external change (a paired device's own command) without
+   *  rebuilding the panel every tick regardless (this file's own carried
+   *  click-loss rule). `null` whenever nothing's pinned. */
+  let lastPinnedSetting: DriveSetting | null = null;
+
+  function samePair(a: { sceneId: string; spec: SceneSetting } | null, b: typeof a): boolean {
+    return !!a && !!b && a.sceneId === b.sceneId && a.spec.key === b.spec.key;
+  }
 
   const lineEditor = createBandLineEditor({
     onLineChange: (band, height) => {
@@ -1613,303 +1889,1531 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   lineEditor.el.style.display = "none";
   // Appended after the fader hit divs already in bandFaders.el, so it sits
   // on top of them in DOM/paint order and captures every pointer event over
-  // the strip while visible — no separate suppression of the faders'
+  // the strip while visible — no separate suppression of the faders' own
   // pointer handlers needed, only spectrumStrip.setShowFaders for the drawn
   // markers themselves.
   bandFaders.el.appendChild(lineEditor.el);
-
-  // Draw's inline reset — see the Setting layer's own drawRowStyle grouping
-  // (renderDrivePicker below), placed beside lineEditor.strengthRow rather
-  // than baked into it, since createControlRow has no extra-button slot and
-  // this is the only row that needs one.
-  const clearLineChip = createChipButton("Clear line", "Clear the drawn line and reset Strength", () => {
-    if (!selected) return;
-    deps.resetDriveLine(selected.sceneId, selected.spec);
-    deps.setDriveLineStrength(selected.sceneId, selected.spec, LINE_STRENGTH_DEFAULT);
-    lineEditor.setLine(deps.getDriveLine(selected.sceneId, selected.spec));
-    lineEditor.setStrength(deps.getDriveLineStrength(selected.sceneId, selected.spec));
+  // Reused inside the pinned row's own patch panel (buildSourceLine below)
+  // for its line source's controls — see this file's header doc comment.
+  const clearLineChip = createChipButton("Clear line", "Erase the drawn line — every band is ignored again.", () => {
+    if (!lineMode) return;
+    deps.resetDriveLine(lineMode.sceneId, lineMode.spec);
+    deps.setDriveLineStrength(lineMode.sceneId, lineMode.spec, LINE_STRENGTH_DEFAULT);
+    lineEditor.setLine(deps.getDriveLine(lineMode.sceneId, lineMode.spec));
+    lineEditor.setStrength(deps.getDriveLineStrength(lineMode.sceneId, lineMode.spec));
   });
+  clearLineChip.dataset.hint = clearLineChip.title;
+  // Static (this row's own text never changes), so set once here rather
+  // than every buildSourceLine() rebuild — the panel's bottom hint line
+  // reads it off this same element wherever it's currently appended.
+  lineEditor.strengthRow.title = "How hard the drawn line drives the setting when bars rise above it.";
+  lineEditor.strengthRow.dataset.hint = lineEditor.strengthRow.title;
 
-  eqTabBtn.addEventListener("click", () => {
-    if (!selected) return;
-    driveTab = "equaliser";
-    refreshDriveZone();
-  });
-  settingTabBtn.addEventListener("click", () => {
-    if (!selected) return;
-    driveTab = "setting";
-    refreshDriveZone();
-  });
-
-  function refreshSpectrumTabs(): void {
-    const showTabs = !!selected;
-    spectrumTitlePlain.style.display = showTabs ? "none" : "";
-    spectrumTabs.style.display = showTabs ? "flex" : "none";
-    if (!showTabs) return;
-    settingTabBtn.textContent = selected!.spec.label;
-    eqTabBtn.style.cssText = driveTab === "equaliser" ? tabBtnActiveStyle : tabBtnInactiveStyle;
-    settingTabBtn.style.cssText = driveTab === "setting" ? tabBtnActiveStyle : tabBtnInactiveStyle;
-  }
-
-  // "Switching row 1 keeps the range" (the plan's Revision 3 section): the
-  // DriveChoice a setting lands on when its row-1 mode changes, derived
-  // from the range of the choice it's leaving rather than jumping to this
-  // setting's own drive.default — Hits·Bass to Loudness gives
-  // Loudness·Bass, not back to whatever this setting defaults to. Beat grid
-  // always starts at Beat (grid index 2, drives.ts's own "Beat" row-2
-  // label) regardless of the range being left, since a grid tick has no
-  // frequency range to preserve; Scene mix has only the one choice.
-  function nextChoiceForMode(mode: DriveMode, current: DriveChoice, spec: SceneSetting): DriveChoice {
-    if (mode === "scene") return "scene";
-    if (mode === "beatGrid") return { source: "beat", grid: 2 };
-    const targetRow = driveModes(spec).find((r) => r.mode === mode)!;
-    const { range } = modeOf(current);
-    const bucket = range === "bass" || range === "mid" || range === "treble" ? range : "broadband";
-    const match =
-      targetRow.options.find((o) => modeOf(o.choice).range === bucket) ??
-      targetRow.options.find((o) => modeOf(o.choice).range === "broadband");
-    return (match ?? targetRow.options[0]).choice;
-  }
-
-  /** Rebuilds the Setting layer's picker from scratch for whichever setting
-   *  is selected — row 1 (driveModes(spec)'s modes, a segmented control),
-   *  row 2 (the active mode's own options), and, only on Draw, the line's
-   *  Strength dial + Clear line. Called from refreshDriveZone() on every
-   *  selection or choice change, never per tick (see this file's own perf
-   *  note), so a full rebuild here is simpler than patching a shared DOM
-   *  tree the way the old flat catalogue picker did — driveModes(spec)
-   *  differs per setting (a Scene mix row, the default-only extras), so
-   *  there was little to share across selections anyway. Pointer-only, not
-   *  part of the Tab ring — see drivePickerWrapStyle's own comment. */
-  // The default option's marker: a small amber dot after the label, not a
-  // text bullet — at chip size a "•" glyph reads as trailing punctuation.
-  function setDriveChipLabel(btn: HTMLButtonElement, label: string, isDefault: boolean): void {
-    btn.textContent = label;
-    if (!isDefault) return;
-    const dot = document.createElement("span");
-    dot.style.cssText = `display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: ${BANDS_AMBER}; margin-left: 6px; vertical-align: middle;`;
-    btn.appendChild(dot);
-    btn.title = "This setting's default";
-  }
-
-  function renderDrivePicker(host: HTMLElement, sceneId: string, spec: SceneSetting): void {
-    const current = deps.getDriveChoice(sceneId, spec);
-    const rows = driveModes(spec);
-    const activeMode = modeOf(current).mode;
-    const activeRow = rows.find((r) => r.mode === activeMode) ?? rows[0];
-
-    const wrap = document.createElement("div");
-    wrap.style.cssText = drivePickerWrapStyle;
-
-    const row1 = document.createElement("div");
-    row1.style.cssText = paletteListStyle;
-    for (const row of rows) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      // Scene mix only ever appears as this setting's own default (see
-      // driveModes()'s doc comment) — its dot marks the whole tab, since it
-      // has no row-2 chip of its own to carry it instead.
-      setDriveChipLabel(btn, row.label, row.mode === "scene");
-      btn.style.cssText = row.mode === activeMode ? paletteChipLitStyle : paletteChipStyle;
-      btn.addEventListener("click", () => {
-        if (row.mode === activeMode) return;
-        deps.onDriveChoiceChange(sceneId, spec, nextChoiceForMode(row.mode, current, spec));
-        refreshDriveZone();
-      });
-      row1.appendChild(btn);
-    }
-    wrap.appendChild(row1);
-
-    if (activeRow.mode === "scene") {
-      const line = document.createElement("div");
-      line.style.cssText = sceneMixLineStyle;
-      line.textContent = `${spec.drive!.sceneLabel} — the scene's own mix`;
-      wrap.appendChild(line);
-    } else {
-      const row2 = document.createElement("div");
-      row2.style.cssText = paletteListStyle;
-      let drawIsCurrent = false;
-      for (const opt of activeRow.options) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        const isCurrent = sameDriveChoice(opt.choice, current);
-        const isLine = typeof opt.choice === "object" && opt.choice.source === "line";
-        if (isLine) {
-          btn.title = LINE_HINT_TEXT;
-          if (isCurrent) drawIsCurrent = true;
-        }
-        setDriveChipLabel(btn, opt.label, !!opt.isDefault);
-        btn.style.cssText = isCurrent ? paletteChipLitStyle : paletteChipStyle;
-        btn.addEventListener("click", () => {
-          if (isCurrent) return;
-          deps.onDriveChoiceChange(sceneId, spec, opt.choice);
-          refreshDriveZone();
-        });
-        row2.appendChild(btn);
+  /** Derives lineMode from `pinned`'s own current patch — called after
+   *  every pin change and every patch edit (patchChanged below), never per
+   *  tick. Swaps the strip's fader markers for the line overlay the same
+   *  way the picker this replaces did. */
+  function refreshLineMode(): void {
+    const setting = pinned ? deps.getDriveSetting(pinned.sceneId, pinned.spec) : "scene";
+    const hasLine = !!pinned && setting !== "scene" && setting.sources.some((s) => isLineSourceChoice(s.choice));
+    if (hasLine && pinned) {
+      const isNew = !samePair(lineMode, pinned);
+      lineMode = { sceneId: pinned.sceneId, spec: pinned.spec };
+      if (isNew) {
+        spectrumStrip.setShowFaders(false);
+        lineEditor.el.style.display = "";
+        eqLayer.style.display = "none";
       }
-      wrap.appendChild(row2);
-
-      if (drawIsCurrent) {
-        lineEditor.setLine(deps.getDriveLine(sceneId, spec));
-        lineEditor.setStrength(deps.getDriveLineStrength(sceneId, spec));
-        lineEditor.strengthRow.style.flex = "1";
-        const drawRow = document.createElement("div");
-        drawRow.style.cssText = drawRowStyle;
-        drawRow.append(lineEditor.strengthRow, clearLineChip);
-        wrap.appendChild(drawRow);
-      }
-    }
-
-    host.appendChild(wrap);
-  }
-
-  // "all"/"low"/"mid"/"high" (SignalSpec.bandRange, signals.ts) resolved
-  // against the *live* split rather than a fixed index range — see
-  // resolveBandRange below, defined once and shared by both this and
-  // wireBandHighlight's own hover tint for a non-drive row.
-  function highlightForSelection(): { lo: number; hi: number } | null {
-    if (!selected) return null;
-    const choice = deps.getDriveChoice(selected.sceneId, selected.spec);
-    const { mode } = modeOf(choice);
-    if (mode === "hits" || mode === "loudness") {
-      if (typeof choice === "object") return null; // Draw — the line replaces the knobs, no tint under it
-      if (choice === "scene") return null; // unreachable (modeOf never pairs "scene" with hits/loudness) — narrows for SIGNALS below
-      const range = SIGNALS[choice].bandRange;
-      return range ? resolveBandRange(range, deps.getBandSplit()) : null;
-    }
-    if (mode === "scene") {
-      // A Scene-default setting has no static `reads` today (see
-      // signals.ts's own header) — this is here for the setting that
-      // eventually does, per the plan's Revision 3 section, rather than a
-      // claim any currently-registered scene relies on.
-      const reads = selected.spec.reads;
-      if (!reads?.length) return null;
-      let lo = NUM_BANDS;
-      let hi = 0;
-      let any = false;
-      for (const link of reads) {
-        const id = typeof link === "string" ? link : link.signal;
-        const range = SIGNALS[id].bandRange;
-        if (!range) continue;
-        const r = resolveBandRange(range, deps.getBandSplit());
-        lo = Math.min(lo, r.lo);
-        hi = Math.max(hi, r.hi);
-        any = true;
-      }
-      return any ? { lo, hi } : null;
-    }
-    return null; // beatGrid — a grid tick has no frequency range
-  }
-
-  // `null` while the Equaliser tab is showing (even with a setting still
-  // selected) — its whole point is the plain band gains, with no tint and
-  // no picker (this card's own doc-comment paragraph).
-  function applyTint(showSetting: boolean): void {
-    spectrumStrip.setHighlight(showSetting ? highlightForSelection() : null);
-    spectrumStrip.redraw();
-  }
-
-  // Re-derives everything the header tabs, the strip and the swap zone show
-  // from `selected`/`driveTab` alone — called after any click that could
-  // have changed the selected setting's own choice or which tab is showing,
-  // from selectDrive() below whenever the selection itself actually
-  // changes, and once from renderSceneSettings()'s own tail (a Look apply,
-  // undo, or scene switch can move the choice — or the selection itself —
-  // without a focusin here).
-  //
-  // `onlyIfChanged` is for the panel's periodic refresh (DeviceMenu.update's
-  // refreshAuto pass): it skips everything unless the selection, tab or
-  // choice actually moved. Rebuilding the picker's buttons on that ~100ms
-  // cadence swaps the element under the pointer between mousedown and
-  // mouseup, and the browser then never fires `click` — every chip looked
-  // dead to a real mouse (a script's el.click() doesn't notice).
-  let lastZoneKey = "";
-  function refreshDriveZone(onlyIfChanged = false): void {
-    const zoneKey = selected
-      ? `${selected.sceneId}|${selected.spec.key}|${driveTab}|${JSON.stringify(deps.getDriveChoice(selected.sceneId, selected.spec))}`
-      : "";
-    if (onlyIfChanged && zoneKey === lastZoneKey) return;
-    lastZoneKey = zoneKey;
-    refreshSpectrumTabs();
-
-    // Nothing selected, or the Equaliser tab showing over a real selection,
-    // both mean the strip shows the plain equaliser — no tint, no line, no
-    // picker (this card's own doc-comment paragraph: the Equaliser tab is
-    // knobs and readouts regardless of what the selected setting is on).
-    const showSetting = !!selected && driveTab === "setting";
-    const choice = showSetting ? deps.getDriveChoice(selected!.sceneId, selected!.spec) : null;
-    const isDraw = choice !== null && typeof choice === "object" && choice.source === "line";
-    if (isDraw && selected) {
-      lineMode = { sceneId: selected.sceneId, spec: selected.spec };
-      spectrumStrip.setShowFaders(false);
-      lineEditor.el.style.display = "";
-      lineEditor.setLine(deps.getDriveLine(selected.sceneId, selected.spec));
-      lineEditor.setStrength(deps.getDriveLineStrength(selected.sceneId, selected.spec));
+      lineEditor.setLine(deps.getDriveLine(lineMode.sceneId, lineMode.spec));
+      lineEditor.setStrength(deps.getDriveLineStrength(lineMode.sceneId, lineMode.spec));
     } else if (lineMode) {
       lineMode = null;
       spectrumStrip.setShowFaders(true);
       lineEditor.el.style.display = "none";
+      eqLayer.style.display = "";
     }
-    applyTint(showSetting);
-
-    // The picker still gets (re)built from `selected` regardless of which
-    // tab is showing — the swap zone needs the Setting layer's real content
-    // for its own height even while the Equaliser layer is the visible one
-    // (see driveZoneStyle's own comment), and it must already be current
-    // for when the setting tab is clicked back to.
-    settingLayer.innerHTML = "";
-    if (selected) renderDrivePicker(settingLayer, selected.sceneId, selected.spec);
-
-    eqLayer.style.visibility = showSetting ? "hidden" : "visible";
-    settingLayer.style.visibility = showSetting ? "visible" : "hidden";
   }
 
-  function sameSelection(a: { sceneId: string; spec: SceneSetting } | null, b: typeof a): boolean {
-    if (a === b) return true;
-    return !!a && !!b && a.sceneId === b.sceneId && a.spec.key === b.spec.key;
+  // ---- The Bands card's own jacks: the spectrum's own Frequencies corner,
+  // plus BAND_LEVEL_CHOICES's own compact level rows under the strip. Built here (rather than
+  // through audioMeters.ts's mountJack) since the Bands card lives in this
+  // file; onJackClick/onJackHover/jackIsShown/etc. below are plain
+  // (hoisted) functions in this same closure, the same ones
+  // createAudioMeters's own `patch` deps call through, so every jack in the
+  // panel — meters or Bands — answers to identical logic. bandsJackEls is
+  // this card's own half of the cable layer's source-endpoint lookup (see
+  // combinedJackElements below).
+  const bandsJackEls = new Map<string, HTMLElement>();
+  function mountBandsJack(choice: DriveSourceChoice, host: HTMLElement, feedEl: HTMLElement): JackHandle {
+    const jack = createJack(
+      driveSourceColor(choice),
+      () => onJackClick(choice),
+      (on) => onJackHover(choice, on),
+    );
+    host.appendChild(jack.el);
+    bandsJacks.push({ choice, jack, feedEl });
+    bandsJackEls.set(jackKey(choice), jack.el);
+    return jack;
+  }
+  const bandsJacks: { choice: DriveSourceChoice; jack: JackHandle; feedEl: HTMLElement }[] = [];
+
+  const lineJack = mountBandsJack({ source: "line" }, fadersRow, fadersRow);
+  lineJack.el.style.cssText += "position: absolute; top: 4px; right: 4px; z-index: 2;";
+
+  const BAND_LEVEL_CHOICES: readonly DriveSourceChoice[] = ["anim.low", "anim.mid", "anim.high"];
+  const levelRowsWrap = document.createElement("div");
+  levelRowsWrap.style.cssText = "display: flex; flex-direction: column; gap: 3px; margin-top: 6px;";
+  const bandLevelRows = BAND_LEVEL_CHOICES.map((choice) => {
+    const row = createMeterRow({ label: driveSourceLabel(choice), accent: driveSourceColor(choice) });
+    row.el.style.padding = "2px 8px";
+    row.el.style.margin = "-2px -8px";
+    mountBandsJack(choice, row.right, row.el);
+    levelRowsWrap.appendChild(row.el);
+    return { choice, row };
+  });
+
+  bandsCard.body.append(spectrumHeader, hairline, fadersRow, levelRowsWrap, eqLayer);
+
+  // One at a time — set by buildPatchPanel() below whenever the pinned row
+  // builds an output graph, cleared by togglePin()/patchChanged() when
+  // there's nothing (any more) to feed. DeviceMenu.update() calls through
+  // this rather than iterating every row, since only the pinned row ever
+  // has a graph.
+  let activeOutputTick: ((drives: SceneDrives) => void) | null = null;
+
+  // Every drive row appendSettingRow builds below, reset at the top of
+  // renderSceneSettings alongside sceneRowHandles — a scene switch/Look
+  // apply/undo/card Reset rebuilds the whole Scene card from scratch.
+  interface DriveRowHandle {
+    sceneId: string;
+    spec: SceneSetting;
+    /** The row's own input-port ring — a cable's target endpoint
+     *  (src/ui/cableLayer.ts). */
+    portEl: HTMLElement;
+    /** The whole row element — a jack-hover's own highlight target
+     *  (onJackHover below). */
+    rowEl: HTMLElement;
+    refreshMeta(): void;
+    refreshPin(): void;
+    refreshPreviewLit(): void;
+    rebuildIfPinned(): void;
+    tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void;
+  }
+  let driveRowHandles: DriveRowHandle[] = [];
+  // Every row's sparkline canvas, so renderSceneSettings can unobserve them
+  // (driveCanvasRO below) before discarding the old Scene card's rows —
+  // otherwise a scene switch would leave the observer holding a detached
+  // canvas per old row for the rest of the session.
+  let driveSparkCanvases: HTMLCanvasElement[] = [];
+
+  // Sparkline/output-graph canvases are sized only from ResizeObserver
+  // entries, never measured in a draw call (this file's own carried rule:
+  // no per-tick layout reads) — the Scene card's rows are built while the
+  // panel is still `display:none` (open() calls renderSceneSettings()
+  // before adding vc-open below), so a synchronous read at creation time
+  // would just read zero anyway.
+  interface CanvasSize {
+    w: number;
+    h: number;
+  }
+  const driveCanvasSizes = new WeakMap<HTMLCanvasElement, CanvasSize>();
+  const driveCanvasRO = new ResizeObserver((entries) => {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    for (const entry of entries) {
+      const canvas = entry.target as HTMLCanvasElement;
+      const size = driveCanvasSizes.get(canvas);
+      if (!size) continue;
+      size.w = entry.contentRect.width;
+      size.h = entry.contentRect.height;
+      canvas.width = Math.max(1, Math.round(size.w * dpr));
+      canvas.height = Math.max(1, Math.round(size.h * dpr));
+      canvas.getContext("2d")?.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+  });
+  function trackDriveCanvas(canvas: HTMLCanvasElement): CanvasSize {
+    const size: CanvasSize = { w: 0, h: 0 };
+    driveCanvasSizes.set(canvas, size);
+    driveCanvasRO.observe(canvas);
+    return size;
+  }
+  function untrackDriveCanvas(canvas: HTMLCanvasElement | null): void {
+    if (!canvas) return;
+    driveCanvasRO.unobserve(canvas);
+    driveCanvasSizes.delete(canvas);
   }
 
-  // A hover-scheduled selection change not yet committed — see
+  /** A row's own one-line source summary — every muted source is left out
+   *  of the plain-language list (this file's header's Muting paragraph) and
+   *  folded into one short "· N off" suffix instead, so a summary never
+   *  grows a parenthetical per muted source. */
+  function driveSummaryText(spec: SceneSetting, setting: DriveSetting): string {
+    if (setting === "scene") {
+      const label = spec.drive?.sceneLabel ?? "Scene mix";
+      return label.replace(/^Scene:\s*/, "Scene mix: ");
+    }
+    if (!setting.sources.length) return "Nothing plugged in";
+    const mutedCount = setting.sources.filter((s) => s.off).length;
+    const suffix = mutedCount > 0 ? ` · ${mutedCount} off` : "";
+    const live = setting.sources.filter((s) => !s.off);
+    if (setting.mix === "gate" && setting.sources.length > 1) {
+      const conditions = live.filter((s) => s.when);
+      const plays = live.filter((s) => !s.when);
+      const playsText = plays.length ? plays.map((s) => driveSourceLabel(s.choice)).join(" + ") : "Nothing";
+      if (!conditions.length) return `${playsText}${suffix}`;
+      const condText = conditions.map((s) => driveSourceLabel(s.choice)).join(" and ");
+      const verb = conditions.length > 1 ? "are" : "is";
+      return `${playsText}, only when ${condText} ${verb} high${suffix}`;
+    }
+    const names = live.map((s) => driveSourceLabel(s.choice));
+    if (!names.length) return `Nothing playing${suffix}`;
+    return `${names.join(setting.mix === "max" ? " or " : " + ")}${suffix}`;
+  }
+
+  /** `Reset to scene default`'s own hint (buildPatchPanel) — the setting's
+   *  own default patch, described in the same words a normal summary uses,
+   *  so the hint reads as "this is what you'd get" rather than jargon. */
+  function driveDefaultSummary(spec: SceneSetting): string {
+    return driveSummaryText(spec, defaultDriveSetting(spec));
+  }
+
+  /** The setting's own first plugged source's colour, or SCENE_VIOLET for
+   *  a `"scene"` mix with nothing plugged in — shared by drivePortStyle's
+   *  own glow below and refreshMeta's --vc-pin-color (controlsTheme.ts's
+   *  .vc-drive-pinned/.vc-drive-preview), so a row's pinned/preview border
+   *  always matches what its own port is showing. */
+  function driveRowAccent(setting: DriveSetting): string {
+    if (setting === "scene" || !setting.sources.length) return SCENE_VIOLET;
+    return driveSourceColor(setting.sources[0]!.choice);
+  }
+
+  /** `state` is "none" while the row is neither pinned nor being previewed
+   *  (hover/focus short of a click): pinned gets a solid, glowing ring —
+   *  this *is* the shown patch right now; preview gets a bare outline, no
+   *  glow — a passing look, not a commitment (see this file's header doc
+   *  comment's row-grammar paragraph for why only a click expands the
+   *  patch panel). */
+  function drivePortStyle(setting: DriveSetting, state: "pinned" | "preview" | "none"): string {
+    const ring =
+      state === "pinned"
+        ? `, 0 0 0 2px ${withAlpha("#ffffff", 0.6)}`
+        : state === "preview"
+          ? `, 0 0 0 1.5px ${withAlpha("#ffffff", 0.5)}`
+          : "";
+    if (setting === "scene") {
+      return `border: 1.5px dashed rgba(255,255,255,0.45); background: transparent; box-shadow: 0 0 0 2px rgba(8,11,10,0.75)${ring};`;
+    }
+    const cols = setting.sources.map((s) => driveSourceColor(s.choice));
+    const bg =
+      cols.length <= 1
+        ? (cols[0] ?? "rgba(255,255,255,0.3)")
+        : `conic-gradient(${cols.map((c, i) => `${c} ${(i / cols.length) * 100}% ${((i + 1) / cols.length) * 100}%`).join(", ")})`;
+    const glow = cols[0] ? withAlpha(cols[0], 0.55) : "transparent";
+    return `border: 1.5px solid rgba(8,11,10,0.75); background: ${bg}; box-shadow: 0 0 0 2px rgba(8,11,10,0.75), 0 0 6px ${glow}${ring};`;
+  }
+
+  // ---- Patch-panel sub-builders — each takes the (sceneId, spec) pair and
+  // whatever local data it needs, and wires its own controls straight to
+  // `deps`; patchChanged() below is the one place a mutation is followed by
+  // a rebuild. ----
+
+  /** Sets a control's plain-language hint two ways at once: `title` (the
+   *  browser's own delayed native tooltip, and a screen reader's
+   *  accessible description) and `data-hint` (buildPatchPanel's own bottom
+   *  hint line reads this off whichever control is hovered/focused right
+   *  now — the "cover everything with hints" pass's one delegated
+   *  mechanism, never a per-control listener). Every interactive element
+   *  inside the patch panel goes through this rather than setting `title`
+   *  by hand, so the two never drift apart. */
+  function setHint(el: HTMLElement, text: string): void {
+    el.title = text;
+    el.dataset.hint = text;
+  }
+
+  const MIX_OPTIONS: { mix: DriveMix; label: string; hint: string }[] = [
+    { mix: "add", label: "Add", hint: "Stack the sources: each adds its share, so together they push harder." },
+    { mix: "max", label: "Strongest", hint: "Only the strongest source at each moment counts — they don't stack." },
+    {
+      mix: "gate",
+      label: "Only when",
+      hint: "Some sources play, but only while the condition is high — e.g. treble hits, only when the song is intense.",
+    },
+  ];
+
+  const HEIGHT_OPTIONS: { h: HitHeight; label: string; hint: string }[] = [
+    { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by the Hit strength card." },
+    { h: "fixed", label: "Fixed", hint: "Every hit is a full-height pulse, however quiet." },
+    { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
+  ];
+
+  const ROLE_OPTIONS: { role: "plays" | "when"; label: string; hint: string }[] = [
+    { role: "plays", label: "Plays", hint: "This source makes the setting move." },
+    {
+      role: "when",
+      label: "Only when",
+      hint: "A condition: the playing sources only get through while this one is high. Mark more than one and every condition has to be high at once.",
+    },
+  ];
+  const ROLE_REFUSE_HINT = "At least one source has to play.";
+
+  const GRID_CHIP_HINT: Record<number, string> = {
+    1: "A pulse every half beat.",
+    2: "A pulse on every beat.",
+    3: "A pulse every other beat.",
+    4: "A pulse at the start of every bar (4 beats).",
+    5: "A pulse every two bars.",
+  };
+
+  function buildMixSeg(sceneId: string, spec: SceneSetting, patch: DrivePatch): HTMLElement {
+    const seg = document.createElement("div");
+    seg.style.cssText = driveSegStyle;
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Mix");
+    for (const opt of MIX_OPTIONS) {
+      const disabled = opt.mix === "gate" && patch.sources.length < 2;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = opt.label;
+      btn.disabled = disabled;
+      setHint(btn, disabled ? "Plug in a second source to gate one against the other." : opt.hint);
+      btn.setAttribute("aria-description", opt.hint);
+      btn.setAttribute("aria-pressed", String(patch.mix === opt.mix));
+      btn.style.cssText = disabled ? driveSegBtnDisabledStyle : patch.mix === opt.mix ? driveSegBtnLitStyle : driveSegBtnStyle;
+      if (!disabled) {
+        btn.addEventListener("click", () => {
+          if (patch.mix === opt.mix) return;
+          deps.onSetPatchMix(sceneId, spec, opt.mix);
+          patchChanged(sceneId, spec);
+        });
+      }
+      seg.appendChild(btn);
+    }
+    return seg;
+  }
+
+  function buildHeightSeg(sceneId: string, spec: SceneSetting, src: DriveSource): HTMLElement {
+    const seg = document.createElement("div");
+    seg.style.cssText = driveMiniSegStyle;
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Height");
+    const current = src.height ?? "graded";
+    for (const opt of HEIGHT_OPTIONS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = opt.label;
+      setHint(btn, opt.hint);
+      btn.setAttribute("aria-description", opt.hint);
+      btn.setAttribute("aria-pressed", String(current === opt.h));
+      btn.style.cssText = current === opt.h ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      btn.addEventListener("click", () => {
+        if (current === opt.h) return;
+        deps.onSetSourceHeight(sceneId, spec, src.choice, opt.h);
+        patchChanged(sceneId, spec);
+      });
+      seg.appendChild(btn);
+    }
+    return seg;
+  }
+
+  /** The Only when role toggle (drives.ts's setSourceRole) — shown on every
+   *  source line while the patch is gating. Both halves are independently
+   *  clickable now (this file's own header): marking this line "when" never
+   *  touches any other line's own role, so several can be conditions at
+   *  once. "Only when" disables itself — with `ROLE_REFUSE_HINT` — on the
+   *  one line whose marking would leave zero "plays" sources among the
+   *  rest, mirroring drives.ts's own refusal there rather than letting a
+   *  click visibly do nothing. `index` is this source's own current
+   *  position in `patch.sources` (buildSourceLine's own loop index), which
+   *  is exactly what setSourceRole wants. */
+  function buildRoleToggle(sceneId: string, spec: SceneSetting, patch: DrivePatch, index: number): HTMLElement {
+    const seg = document.createElement("div");
+    seg.style.cssText = driveMiniSegStyle;
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Role");
+    const isCondition = !!patch.sources[index]!.when;
+    const wouldRefuse = !isCondition && !patch.sources.some((s, i) => i !== index && !s.when);
+    for (const opt of ROLE_OPTIONS) {
+      const pressed = (opt.role === "when") === isCondition;
+      const disabled = opt.role === "when" && wouldRefuse && !pressed;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = opt.label;
+      btn.disabled = disabled;
+      setHint(btn, disabled ? ROLE_REFUSE_HINT : opt.hint);
+      btn.setAttribute("aria-description", disabled ? ROLE_REFUSE_HINT : opt.hint);
+      btn.setAttribute("aria-pressed", String(pressed));
+      btn.style.cssText = disabled ? driveMiniSegBtnDisabledStyle : pressed ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      if (!disabled) {
+        btn.addEventListener("click", () => {
+          if (pressed) return;
+          deps.onSetSourceRole(sceneId, spec, index, opt.role);
+          patchChanged(sceneId, spec);
+        });
+      }
+      seg.appendChild(btn);
+    }
+    return seg;
+  }
+
+  function buildGridChips(sceneId: string, spec: SceneSetting, src: DriveSource): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = driveGridChipsStyle;
+    wrap.setAttribute("role", "group");
+    wrap.setAttribute("aria-label", "Beat grid division");
+    const current = typeof src.choice === "object" && src.choice.source === "beat" ? src.choice.grid : 2;
+    for (let i = 1; i < BEAT_GRIDS.length; i++) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = driveGridDivisionLabel(i);
+      const hint = GRID_CHIP_HINT[i] ?? "";
+      setHint(btn, hint);
+      btn.setAttribute("aria-description", hint);
+      btn.setAttribute("aria-pressed", String(current === i));
+      btn.style.cssText = current === i ? driveChipLitStyle(DRIVE_WHITE) : driveChipStyle;
+      btn.addEventListener("click", () => {
+        if (current === i) return;
+        deps.onSetSourceGrid(sceneId, spec, i as BeatGridIndex);
+        patchChanged(sceneId, spec);
+      });
+      wrap.appendChild(btn);
+    }
+    return wrap;
+  }
+
+  const WEIGHT_HINT = "This source's share: 0 ignores it, 1× is normal, 2× doubles it.";
+
+  function buildWeightSlider(sceneId: string, spec: SceneSetting, src: DriveSource, onLiveEdit: () => void): HTMLElement {
+    const wrap = document.createElement("label");
+    wrap.style.cssText = driveWeightWrapStyle;
+    setHint(wrap, WEIGHT_HINT);
+    const rng = document.createElement("input");
+    rng.type = "range";
+    rng.setAttribute("aria-description", WEIGHT_HINT);
+    // The same track/thumb/fill CSS every other slider in the panel uses
+    // (controlsTheme.ts's .vc-slider rules, reading --vc-accent/--vc-fill)
+    // — without this class an <input type="range"> renders as the bare
+    // native control, and this one also joins the panel's own Tab ring
+    // (ringElements() below) for free, same as a setting row's own slider.
+    rng.className = "vc-slider";
+    rng.min = String(DRIVE_WEIGHT_MIN);
+    rng.max = String(DRIVE_WEIGHT_MAX);
+    rng.step = "0.05";
+    rng.value = String(src.weight);
+    rng.setAttribute("aria-label", `${driveSourceLabel(src.choice)} weight`);
+    rng.style.cssText = driveWeightRangeStyle;
+    rng.style.setProperty("--vc-accent", driveSourceColor(src.choice));
+    const out = document.createElement("output");
+    out.style.cssText = driveWeightOutStyle;
+    const setFill = (w: number) => rng.style.setProperty("--vc-fill", `${(w / DRIVE_WEIGHT_MAX) * 100}%`);
+    const setOut = (w: number) => (out.textContent = `${w.toFixed(2)}×`);
+    setFill(src.weight);
+    setOut(src.weight);
+    // Live store write + readout on every drag frame, no rebuild — a full
+    // buildPatchPanel() here would tear out the very slider being dragged
+    // (this file's own carried click-loss rule).
+    rng.addEventListener("input", () => {
+      const w = Number(rng.value);
+      setFill(w);
+      setOut(w);
+      deps.onSetSourceWeight(sceneId, spec, src.choice, w);
+      onLiveEdit();
+    });
+    wrap.append(rng, out);
+    return wrap;
+  }
+
+  const MUTE_HINT_ON = "Switch this source off without unplugging it — its settings are kept.";
+  const MUTE_HINT_OFF = "Switch this source back on.";
+
+  /** The source line's own on/off switch (drives.ts's setSourceMuted) —
+   *  lives in its own gutter column (driveSrcLineStyle) on every line, so
+   *  it never shifts alignment depending on whether a line happens to have
+   *  one. Styled like the panel's own boolean toggle (`.vc-toggle`,
+   *  controlsTheme.ts) at a compact size of its own (`.vc-mute-switch`)
+   *  rather than reusing that class outright — `.vc-toggle` is also this
+   *  file's own Tab-ring selector (ringElements()), and a mute switch inside
+   *  a pinned setting's own patch panel isn't meant to join that ring. */
+  function buildMuteSwitch(sceneId: string, spec: SceneSetting, index: number, src: DriveSource): HTMLElement {
+    const muted = !!src.off;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "vc-mute-switch";
+    btn.setAttribute("role", "switch");
+    btn.setAttribute("aria-checked", String(!muted));
+    btn.setAttribute("aria-label", `${driveSourceLabel(src.choice)} on/off`);
+    btn.style.setProperty("--c", driveSourceColor(src.choice));
+    setHint(btn, muted ? MUTE_HINT_OFF : MUTE_HINT_ON);
+    btn.addEventListener("click", () => {
+      deps.onSetSourceMuted(sceneId, spec, index, !muted);
+      patchChanged(sceneId, spec);
+    });
+    return btn;
+  }
+
+  function buildSourceLine(
+    sceneId: string,
+    spec: SceneSetting,
+    patch: DrivePatch,
+    src: DriveSource,
+    i: number,
+    onLiveEdit: () => void,
+  ): HTMLElement {
+    const isGate = patch.mix === "gate" && patch.sources.length > 1;
+    const isCondition = isGate && !!src.when;
+    const muted = !!src.off;
+    const line = document.createElement("div");
+    line.style.cssText = driveSrcLineStyle;
+    line.classList.toggle("vc-drive-src-muted", muted);
+
+    // The condition marker lives in its own gutter column, not a
+    // border+padding on the whole line — every line's dots/names/controls
+    // align regardless of role (this file's own header).
+    const gutter = document.createElement("span");
+    gutter.style.cssText = driveSrcGutterStyle;
+    gutter.classList.toggle("vc-drive-gutter-cond", isCondition);
+
+    const muteBtn = buildMuteSwitch(sceneId, spec, i, src);
+
+    const dot = document.createElement("span");
+    dot.style.cssText = driveSrcDotStyle(driveSourceColor(src.choice));
+    const name = document.createElement("div");
+    name.style.cssText = driveSrcNameStyle;
+    name.textContent = driveSourceLabel(src.choice);
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.style.cssText = driveSrcRemoveStyle;
+    removeBtn.textContent = "×";
+    removeBtn.setAttribute("aria-label", `Unplug ${driveSourceLabel(src.choice)}`);
+    setHint(removeBtn, "Unplug this source.");
+    removeBtn.addEventListener("click", () => {
+      deps.onTogglePatchSource(sceneId, spec, src.choice);
+      patchChanged(sceneId, spec);
+    });
+
+    const ctrls = document.createElement("div");
+    ctrls.style.cssText = driveSrcCtrlsStyle;
+    if (isGate) ctrls.appendChild(buildRoleToggle(sceneId, spec, patch, i));
+    // Fixed/Loud height only mean anything for a hit-kind source — an
+    // edge-kind catalogue entry or a beat grid (drives.ts's own header).
+    const isHitKind = isGridSourceChoice(src.choice) || (typeof src.choice === "string" && SIGNALS[src.choice].kind === "edge");
+    if (isHitKind) ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
+    if (isGridSourceChoice(src.choice)) ctrls.appendChild(buildGridChips(sceneId, spec, src));
+    if (isLineSourceChoice(src.choice)) {
+      lineEditor.strengthRow.style.flex = "1 1 160px";
+      ctrls.append(lineEditor.strengthRow, clearLineChip);
+      const drawHint = document.createElement("span");
+      drawHint.style.cssText = driveDrawHintStyle;
+      drawHint.textContent = "Draw on the spectrum.";
+      ctrls.appendChild(drawHint);
+    } else {
+      ctrls.appendChild(buildWeightSlider(sceneId, spec, src, onLiveEdit));
+    }
+
+    line.append(gutter, muteBtn, dot, name, removeBtn, ctrls);
+    return line;
+  }
+
+  function buildAddChips(sceneId: string, spec: SceneSetting, patch: DrivePatch): HTMLElement {
+    const wrap = document.createElement("div");
+    // Always open in the stacked layout (jacks — the primary way in once
+    // Phase 2b lands — are far away there); behind a small disclosure in
+    // the wide layout. A one-time check, not a resize listener: this panel
+    // is rebuilt on every patch edit anyway (this file's own carried rule
+    // against per-tick layout work), and a live breakpoint crossing
+    // mid-edit is a vanishingly rare case to chase.
+    const stacked = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`).matches;
+    let groupsHost = wrap;
+    if (!stacked) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.style.cssText = driveAddDisclosureStyle;
+      toggle.textContent = "+ Add by name";
+      toggle.setAttribute("aria-expanded", "false");
+      groupsHost = document.createElement("div");
+      groupsHost.style.cssText = `${driveAddGroupsStyle} display: none;`;
+      // A plain style toggle, not the `hidden` attribute: `driveAddGroupsStyle`
+      // already sets an inline `display`, which would otherwise outrank the
+      // UA stylesheet's `[hidden] { display: none }` rule and leave this
+      // visible regardless of the attribute.
+      let open = false;
+      toggle.addEventListener("click", () => {
+        open = !open;
+        groupsHost.style.display = open ? "flex" : "none";
+        toggle.setAttribute("aria-expanded", String(open));
+      });
+      wrap.append(toggle, groupsHost);
+    } else {
+      groupsHost.style.cssText = driveAddGroupsStyle;
+    }
+    for (const group of DRIVE_ADD_GROUPS) {
+      const row = document.createElement("div");
+      row.style.cssText = driveAddGroupRowStyle;
+      const label = document.createElement("b");
+      label.style.cssText = driveAddGroupLabelStyle;
+      label.textContent = group.label;
+      row.appendChild(label);
+      for (const choice of group.choices) {
+        const isTempo = isGridSourceChoice(choice);
+        const pressed = isTempo
+          ? patch.sources.some((s) => isGridSourceChoice(s.choice))
+          : patch.sources.some((s) => sourceKey(s.choice) === sourceKey(choice));
+        const btn = document.createElement("button");
+        btn.type = "button";
+        // The Tempo chip is generic ("Beat grid", not "Beat grid · Beat") —
+        // it adds a rhythmic pulse source; which division plays is the
+        // source line's own division chips (buildGridChips), not this one.
+        const chipLabel = isTempo ? "Beat grid" : driveSourceLabel(choice);
+        btn.textContent = chipLabel;
+        btn.setAttribute("aria-pressed", String(pressed));
+        btn.style.cssText = pressed ? driveChipLitStyle(driveSourceColor(choice)) : driveChipStyle;
+        // The line chip keeps its own longer draw-it-yourself instructions
+        // (LINE_HINT_TEXT) — every other chip gets "Plug <Source> in" plus
+        // driveSources.ts's own one-line description of what it is.
+        setHint(btn, isLineSourceChoice(choice) ? LINE_HINT_TEXT : `Plug ${chipLabel} in — ${driveSourceDescription(choice)}`);
+        btn.addEventListener("click", () => {
+          // The Tempo chip toggles whichever grid source is already
+          // present, not just this exact division — see driveSources.ts's
+          // own comment on DRIVE_ADD_GROUPS.
+          const target = isTempo ? (patch.sources.find((s) => isGridSourceChoice(s.choice))?.choice ?? choice) : choice;
+          deps.onTogglePatchSource(sceneId, spec, target);
+          patchChanged(sceneId, spec);
+        });
+        row.appendChild(btn);
+      }
+      groupsHost.appendChild(row);
+    }
+    return wrap;
+  }
+
+  function buildOutputGraph(
+    spec: SceneSetting,
+    patch: DrivePatch,
+  ): { el: HTMLElement; canvas: HTMLCanvasElement; tick: (drives: SceneDrives) => void } {
+    const wrap = document.createElement("div");
+    setHint(
+      wrap,
+      "What this setting receives over the last 4 seconds. Thin lines: each source after its weight (dashed: a condition; a muted source draws no trace). Dark: the gate was blocked. Bottom strip: lit while open. White: the result.",
+    );
+    const head = document.createElement("div");
+    head.style.cssText = driveOutHeadStyle;
+    const eyebrow = document.createElement("span");
+    eyebrow.style.cssText = driveEyebrowStyle;
+    eyebrow.textContent = "What it receives · last 4 s";
+    const val = document.createElement("span");
+    val.style.cssText = driveOutValStyle;
+    val.textContent = "0.00";
+    head.append(eyebrow, val);
+    const canvas = document.createElement("canvas");
+    canvas.style.cssText = driveOutCanvasStyle;
+    wrap.append(head, canvas);
+    const ctx = canvas.getContext("2d")!;
+    const size = trackDriveCanvas(canvas);
+
+    const RING = 120; // 4 s at 30 Hz
+    const combined = new Float32Array(RING);
+    const perSource = patch.sources.map(() => new Float32Array(RING));
+    // Every marked condition (there can be more than one now — this file's
+    // own header) draws its trace dashed; `gateOpen` below tracks the same
+    // AND-of-smoothsteps combine()/fired() gate on (drives.ts's
+    // GATE_OPEN_LOW/HIGH, reused rather than re-typed), reduced to a bit per
+    // tick for the shading.
+    const isGate = patch.mix === "gate";
+    const conditionIdxs = isGate ? gateConditionIndices(patch) : [];
+    const gateOpen = new Uint8Array(RING);
+    let ringHead = 0;
+    let filled = 0;
+
+    // The panel's own polish pass: darken the BLOCKED time clearly (not a
+    // faint wash over the open time — that read too subtly on the synthetic
+    // feed) plus a thin lit-when-open strip along the graph's own bottom
+    // edge, in a neutral white rather than picking one condition's colour
+    // when several are marked.
+    const BLOCKED_FILL = "rgba(0,0,0,0.4)";
+    const STRIP_OPEN = "rgba(255,255,255,0.9)";
+    const STRIP_BLOCKED = "rgba(255,255,255,0.16)";
+    const STRIP_H = 3;
+
+    function draw(): void {
+      const { w, h } = size;
+      if (w <= 1 || h <= 1) return;
+      ctx.clearRect(0, 0, w, h);
+      const n = Math.min(filled, RING);
+      if (n < 2) return;
+      const xs = (k: number) => (k / (RING - 1)) * w;
+      const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v)) * (h - 6);
+      const at = (k: number) => (ringHead - RING + k + 1 + RING * 2) % RING;
+
+      if (isGate) {
+        ctx.fillStyle = BLOCKED_FILL;
+        let runStart = -1;
+        for (let k = RING - n; k < RING; k++) {
+          const blocked = gateOpen[at(k)] === 0;
+          if (blocked && runStart < 0) runStart = k;
+          if (!blocked && runStart >= 0) {
+            ctx.fillRect(xs(runStart), 0, xs(k) - xs(runStart), h);
+            runStart = -1;
+          }
+        }
+        if (runStart >= 0) ctx.fillRect(xs(runStart), 0, xs(RING - 1) - xs(runStart), h);
+      }
+
+      for (let i = 0; i < patch.sources.length; i++) {
+        if (patch.sources[i]!.off) continue; // muted — no trace at all
+        ctx.strokeStyle = withAlpha(driveSourceColor(patch.sources[i]!.choice), 0.65);
+        ctx.lineWidth = 1;
+        ctx.setLineDash(conditionIdxs.includes(i) ? [3, 3] : []);
+        ctx.beginPath();
+        for (let k = RING - n; k < RING; k++) {
+          const idx = at(k);
+          const x = xs(k);
+          const y = ys(perSource[i]![idx]!);
+          if (k === RING - n) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      for (let k = RING - n; k < RING; k++) {
+        const idx = at(k);
+        const x = xs(k);
+        const y = ys(combined[idx]!);
+        if (k === RING - n) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      if (isGate) {
+        const colW = Math.max(1, w / (RING - 1));
+        let runStart = -1;
+        let runOpen = true;
+        for (let k = RING - n; k < RING; k++) {
+          const open = gateOpen[at(k)] === 1;
+          if (runStart < 0) {
+            runStart = k;
+            runOpen = open;
+          } else if (open !== runOpen) {
+            ctx.fillStyle = runOpen ? STRIP_OPEN : STRIP_BLOCKED;
+            ctx.fillRect(xs(runStart), h - STRIP_H, xs(k) - xs(runStart), STRIP_H);
+            runStart = k;
+            runOpen = open;
+          }
+        }
+        if (runStart >= 0) {
+          ctx.fillStyle = runOpen ? STRIP_OPEN : STRIP_BLOCKED;
+          ctx.fillRect(xs(runStart), h - STRIP_H, xs(RING - 1) - xs(runStart) + colW, STRIP_H);
+        }
+      }
+    }
+
+    function tick(drives: SceneDrives): void {
+      ringHead = (ringHead + 1) % RING;
+      const src = drives.sourceValues(spec.key);
+      for (let i = 0; i < perSource.length; i++) perSource[i]![ringHead] = src?.[i] ?? 0;
+      const v = drives.valueOf(spec.key);
+      combined[ringHead] = v;
+      if (isGate) {
+        let open = 1;
+        let anyCondition = false;
+        for (const idx of conditionIdxs) {
+          if (patch.sources[idx]!.off) continue; // muted condition — excluded from the AND, same as the engine
+          anyCondition = true;
+          open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, src?.[idx] ?? 0);
+        }
+        gateOpen[ringHead] = !anyCondition || open > 0.5 ? 1 : 0;
+      }
+      filled = Math.min(RING, filled + 1);
+      val.textContent = v.toFixed(2);
+      draw();
+    }
+
+    return { el: wrap, canvas, tick };
+  }
+
+  /** Rebuilds the pinned row's whole patch panel — called only on a genuine
+   *  patch edit (patchChanged) or a fresh pin (DriveRowHandle.refreshPin),
+   *  never from the panel's periodic refresh or a slider's own `input`
+   *  event (this file's own carried click-loss rule). */
+  function buildPatchPanel(
+    sceneId: string,
+    spec: SceneSetting,
+  ): { el: HTMLElement; outputCanvas: HTMLCanvasElement | null; tick: ((drives: SceneDrives) => void) | null } {
+    const setting = deps.getDriveSetting(sceneId, spec);
+    const patch: DrivePatch = setting === "scene" ? { mix: "add", sources: [] } : setting;
+
+    const panel = document.createElement("div");
+    panel.style.cssText = drivePatchPanelStyle;
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.style.cssText = driveResetLinkStyle;
+    resetBtn.textContent = "Reset to scene default";
+    setHint(resetBtn, `Back to what this scene does on its own: ${driveDefaultSummary(spec)}.`);
+    resetBtn.addEventListener("click", () => {
+      deps.onResetDriveSetting(sceneId, spec);
+      patchChanged(sceneId, spec);
+    });
+    function refreshResetVisibility(): void {
+      resetBtn.hidden = sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
+    }
+
+    const head = document.createElement("div");
+    head.style.cssText = drivePatchHeadStyle;
+    const eyebrow = document.createElement("span");
+    eyebrow.style.cssText = driveEyebrowStyle;
+    eyebrow.textContent = "Receives";
+    head.append(eyebrow, buildMixSeg(sceneId, spec, patch));
+    panel.appendChild(head);
+
+    const list = document.createElement("div");
+    list.style.cssText = driveSrcListStyle;
+    if (!patch.sources.length) {
+      const empty = document.createElement("div");
+      empty.style.cssText = driveEmptySrcStyle;
+      // An empty patch is always "scene" (normalizeDriveSetting), so the
+      // setting is playing its scene's own mix — not standing still.
+      const mix = spec.drive?.sceneLabel?.replace(/^Scene:\s*/, "");
+      empty.textContent = mix
+        ? `Playing the scene's own mix: ${mix}. Plug in a meter to replace it.`
+        : "Playing the scene's own mix. Plug in a meter to replace it.";
+      list.appendChild(empty);
+    }
+    patch.sources.forEach((src, i) => {
+      list.appendChild(buildSourceLine(sceneId, spec, patch, src, i, refreshResetVisibility));
+    });
+    panel.appendChild(list);
+    panel.appendChild(buildAddChips(sceneId, spec, patch));
+
+    let outputCanvas: HTMLCanvasElement | null = null;
+    let tick: ((drives: SceneDrives) => void) | null = null;
+    if (patch.sources.length) {
+      const graph = buildOutputGraph(spec, patch);
+      panel.appendChild(graph.el);
+      outputCanvas = graph.canvas;
+      tick = graph.tick;
+    }
+
+    panel.appendChild(resetBtn);
+    refreshResetVisibility();
+
+    // The panel's own bottom hint line (the "cover everything with hints"
+    // pass): a fixed-height readout of whichever control inside this panel
+    // is hovered or keyboard-focused right now, so nothing else in the
+    // panel has to grow/shrink to show its own description. One delegated
+    // pointerover/pointerout/focusin/focusout pair, reading each control's
+    // own `data-hint` (set by setHint above) — never a per-control
+    // listener, never touched by refreshAuto/update(). In the stacked
+    // layout jacks are far away, so the rest state points at the add-by-
+    // name chips instead of a meter's jack.
+    const stacked = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`).matches;
+    const restHint = stacked ? "Add a source by name below." : "Click a meter's jack to plug it in or out.";
+    const hintBar = document.createElement("div");
+    hintBar.className = "vc-drive-bottom-hint";
+    hintBar.textContent = restHint;
+    function hintedAncestor(target: EventTarget | null): HTMLElement | null {
+      return target instanceof HTMLElement ? target.closest<HTMLElement>("[data-hint]") : null;
+    }
+    function leftHintedAncestor(el: HTMLElement, related: EventTarget | null): boolean {
+      return !(related instanceof Node) || !el.contains(related);
+    }
+    panel.addEventListener("pointerover", (e) => {
+      const el = hintedAncestor(e.target);
+      if (el) hintBar.textContent = el.dataset.hint!;
+    });
+    panel.addEventListener("pointerout", (e) => {
+      const el = hintedAncestor(e.target);
+      if (el && leftHintedAncestor(el, e.relatedTarget)) hintBar.textContent = restHint;
+    });
+    panel.addEventListener("focusin", (e) => {
+      const el = hintedAncestor(e.target);
+      if (el) hintBar.textContent = el.dataset.hint!;
+    });
+    panel.addEventListener("focusout", (e) => {
+      const el = hintedAncestor(e.target);
+      if (el && leftHintedAncestor(el, e.relatedTarget)) hintBar.textContent = restHint;
+    });
+    panel.appendChild(hintBar);
+
+    return { el: panel, outputCanvas, tick };
+  }
+
+  /** Builds one drive-capable setting's port/summary/sparkline trio —
+   *  appendSettingRow passes `port`/`summary`/`below` into
+   *  createControlRow's own `drivePanel` slot, then calls `bind(row.el)`
+   *  once the row exists (this needs the finished element for the pinned
+   *  row's own highlight; the row needs `port`/`summary` before it exists —
+   *  see appendSettingRow below for the two-step order this implies). */
+  function buildDriveRow(
+    sceneId: string,
+    spec: SceneSetting,
+  ): { port: HTMLElement; summary: HTMLElement; below: HTMLElement; bind: (rowEl: HTMLElement) => DriveRowHandle } {
+    const port = document.createElement("button");
+    port.type = "button";
+    port.className = "vc-drive-port";
+    // The row port's own instant tooltip (outside the pinned panel, so it
+    // gets the floating tooltip rather than the panel's bottom hint line —
+    // this file's header's "cover everything with hints" pass). Reads
+    // port.title live at hover/focus time (refreshMeta below keeps it
+    // current), so this never needs its own state.
+    port.addEventListener("pointerenter", () => showTooltip(port, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [port.title]));
+    port.addEventListener("pointerleave", hideTooltip);
+    port.addEventListener("focus", () => showTooltip(port, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [port.title]));
+    port.addEventListener("blur", hideTooltip);
+    const summary = document.createElement("span");
+    summary.style.cssText = driveSummaryStyle;
+
+    const below = document.createElement("div");
+    const sparkWrap = document.createElement("div");
+    sparkWrap.style.cssText = driveSparkWrapStyle;
+    const sparkCanvas = document.createElement("canvas");
+    sparkCanvas.className = "vc-drive-spark";
+    sparkCanvas.style.cssText = driveSparkCanvasStyle;
+    const SPARK_TOOLTIP = "Live: what this setting is receiving (last 3 s). Colour shows which source is contributing most.";
+    sparkCanvas.title = SPARK_TOOLTIP;
+    sparkCanvas.addEventListener("pointerenter", () =>
+      showTooltip(sparkCanvas, driveRowAccent(deps.getDriveSetting(sceneId, spec)), [SPARK_TOOLTIP]),
+    );
+    sparkCanvas.addEventListener("pointerleave", hideTooltip);
+    sparkWrap.appendChild(sparkCanvas);
+    const sparkCtx = sparkCanvas.getContext("2d")!;
+    const sparkSize = trackDriveCanvas(sparkCanvas);
+    driveSparkCanvases.push(sparkCanvas);
+    const patchContainer = document.createElement("div");
+    patchContainer.className = "vc-drive-patch";
+    patchContainer.style.display = "none";
+    below.append(sparkWrap, patchContainer);
+
+    const SPARK_LEN = 90; // ~3 s at 30 Hz
+    const sparkVals = new Float32Array(SPARK_LEN);
+    const sparkCols: string[] = new Array(SPARK_LEN).fill(DRIVE_WHITE);
+    let sparkHead = 0;
+    let sparkFilled = 0;
+    let outputCanvas: HTMLCanvasElement | null = null;
+    let boundRowEl: HTMLElement | null = null;
+
+    function isPinned(): boolean {
+      return samePair(pinned, { sceneId, spec });
+    }
+
+    function refreshMeta(): void {
+      const setting = deps.getDriveSetting(sceneId, spec);
+      const state: "pinned" | "preview" | "none" = isPinned()
+        ? "pinned"
+        : samePair(preview, { sceneId, spec })
+          ? "preview"
+          : "none";
+      port.style.cssText = drivePortStyle(setting, state);
+      port.title = isPinned()
+        ? "Pinned — click again or press Esc to close."
+        : "Click to pin this setting and choose what it listens to.";
+      summary.textContent = driveSummaryText(spec, setting);
+      // --vc-pin-color: read by controlsTheme.ts's .vc-drive-pinned/
+      // .vc-drive-preview for this row's own border/tint — always kept
+      // current even at state "none" so it's already right the instant
+      // either class lands.
+      boundRowEl?.style.setProperty("--vc-pin-color", driveRowAccent(setting));
+    }
+
+    /** Always resyncs .vc-drive-preview from the current global `preview`
+     *  first (so a stale preview class left over from a different row/
+     *  click gets cleared here too — see togglePin's own call), then only
+     *  bails out of a full refreshMeta() if this row is pinned, which
+     *  always wins visually over a preview elsewhere. */
+    function refreshPreviewLit(): void {
+      boundRowEl?.classList.toggle("vc-drive-preview", !isPinned() && samePair(preview, { sceneId, spec }));
+      if (isPinned()) return;
+      refreshMeta();
+    }
+
+    function rebuildIfPinned(): void {
+      if (!isPinned()) return;
+      untrackDriveCanvas(outputCanvas);
+      const built = buildPatchPanel(sceneId, spec);
+      patchContainer.replaceChildren(built.el);
+      outputCanvas = built.outputCanvas;
+      activeOutputTick = built.tick;
+      lastPinnedSetting = deps.getDriveSetting(sceneId, spec);
+    }
+
+    function refreshPin(): void {
+      const on = isPinned();
+      boundRowEl?.classList.toggle("vc-drive-pinned", on);
+      patchContainer.style.display = on ? "" : "none";
+      if (on) {
+        rebuildIfPinned();
+      } else {
+        untrackDriveCanvas(outputCanvas);
+        outputCanvas = null;
+        patchContainer.replaceChildren();
+      }
+      refreshMeta();
+    }
+
+    function drawSparkline(): void {
+      const { w, h } = sparkSize;
+      if (w <= 1 || h <= 1) return;
+      sparkCtx.clearRect(0, 0, w, h);
+      const n = Math.min(sparkFilled, SPARK_LEN);
+      if (n < 2) return;
+      const xs = (k: number) => (k / (SPARK_LEN - 1)) * w;
+      const ys = (v: number) => h - 1 - Math.max(0, Math.min(1, v)) * (h - 2);
+      sparkCtx.lineWidth = 1.3;
+      sparkCtx.lineJoin = "round";
+      let runColor = "";
+      for (let k = SPARK_LEN - n; k < SPARK_LEN; k++) {
+        const idx = (sparkHead - SPARK_LEN + k + 1 + SPARK_LEN * 2) % SPARK_LEN;
+        const col = sparkCols[idx]!;
+        const px = xs(k);
+        const py = ys(sparkVals[idx]!);
+        if (col !== runColor) {
+          if (runColor) sparkCtx.stroke();
+          sparkCtx.strokeStyle = col;
+          sparkCtx.beginPath();
+          sparkCtx.moveTo(px, py);
+          runColor = col;
+        } else {
+          sparkCtx.lineTo(px, py);
+        }
+      }
+      if (runColor) sparkCtx.stroke();
+    }
+
+    function tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void {
+      const setting = deps.getDriveSetting(sceneId, spec);
+      let v: number;
+      let col: string;
+      if (setting === "scene") {
+        // drives.valueOf() is defined to return 0 for "scene" (there's no
+        // patch to sum) — without this branch every scene-mix row's own
+        // sparkline drew flat. Its composite isn't the engine's to read, so
+        // this approximates it from the loudest of the catalogue signals it
+        // honestly listens to (drive.sceneSources — display-only, see
+        // drives.ts's header), at a dimmed alpha that visibly marks it as
+        // an approximation rather than the setting's own real output.
+        const sources = spec.drive?.sceneSources;
+        if (sources?.length && frame && anim) {
+          let best = 0;
+          let bestId: SignalId = sources[0]!;
+          for (const id of sources) {
+            const rv = SIGNALS[id].read(frame, anim);
+            if (rv > best) {
+              best = rv;
+              bestId = id;
+            }
+          }
+          v = best;
+          col = withAlpha(driveSourceColor(bestId), 0.55);
+        } else {
+          // No sceneSources to approximate from — a faint flat baseline
+          // rather than a literal 0 (invisible at the track's very bottom).
+          v = 0.04;
+          col = withAlpha(SCENE_VIOLET, 0.35);
+        }
+      } else {
+        v = drives.valueOf(spec.key);
+        col = SCENE_VIOLET;
+        if (setting.sources.length) {
+          const vals = drives.sourceValues(spec.key);
+          let bi = 0;
+          if (vals && vals.length) {
+            let bv = -Infinity;
+            for (let i = 0; i < vals.length; i++) {
+              if (vals[i]! > bv) {
+                bv = vals[i]!;
+                bi = i;
+              }
+            }
+          }
+          col = driveSourceColor(setting.sources[bi]!.choice);
+        }
+      }
+      sparkHead = (sparkHead + 1) % SPARK_LEN;
+      sparkVals[sparkHead] = v;
+      sparkCols[sparkHead] = col;
+      sparkFilled = Math.min(SPARK_LEN, sparkFilled + 1);
+      drawSparkline();
+    }
+
+    return {
+      port,
+      summary,
+      below,
+      bind(rowEl) {
+        boundRowEl = rowEl;
+        refreshMeta();
+        return { sceneId, spec, portEl: port, rowEl, refreshMeta, refreshPin, refreshPreviewLit, rebuildIfPinned, tickSparkline };
+      },
+    };
+  }
+
+  /** The only place a patch mutation is followed by a rebuild — every
+   *  control inside buildPatchPanel() calls through here after writing to
+   *  `deps`, except a weight slider's own `input` (buildWeightSlider's
+   *  onLiveEdit only refreshes the reset link, never rebuilds — this file's
+   *  own carried click-loss rule). */
+  function patchChanged(sceneId: string, spec: SceneSetting): void {
+    const h = driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.key === spec.key);
+    h?.refreshMeta();
+    h?.rebuildIfPinned();
+    refreshLineMode();
+    refreshPatchHighlight();
+  }
+
+  /** Pins/unpins — the only place `pinned` is written (besides Escape in
+   *  onKeyDown and the scene-mismatch check in renderSceneSettings's own
+   *  tail). Clears any pending preview so a click doesn't leave a stale
+   *  dwell timer racing it. */
+  function togglePin(sceneId: string, spec: SceneSetting): void {
+    cancelPendingPreview();
+    const next = { sceneId, spec };
+    pinned = samePair(pinned, next) ? null : next;
+    preview = null;
+    activeOutputTick = null;
+    if (!pinned) lastPinnedSetting = null;
+    for (const h of driveRowHandles) h.refreshPin();
+    // preview just went to null above — resyncs every row's own
+    // .vc-drive-preview against that, since refreshPin() (above) never
+    // touches it and a row other than the one just clicked could otherwise
+    // be left showing a stale preview tint.
+    for (const h of driveRowHandles) h.refreshPreviewLit();
+    refreshLineMode();
+    refreshPatchHighlight();
+  }
+
+  /** The only place `preview` is written. See previewDrive's own callers
+   *  (appendSettingRow's onRowFocusIn) for the hover-dwell contract this
+   *  mirrors from the row-selection system it replaces. */
+  function previewDrive(next: { sceneId: string; spec: SceneSetting } | null): void {
+    cancelPendingPreview();
+    if (samePair(preview, next)) return;
+    preview = next;
+    if (next) lastPreview = next;
+    for (const h of driveRowHandles) h.refreshPreviewLit();
+    refreshPatchHighlight();
+  }
+
+  // ---------------------------------------------------------------------
+  // Jacks (src/ui/jack.ts) and cables (src/ui/cableLayer.ts) — Phase 2b of
+  // this file's own plan. Every predicate below answers "does `choice` feed
+  // the shown (preview ?? pinned) setting" purely from `pinned`/`preview`
+  // and `deps.getDriveSetting`, so createAudioMeters's own jacks and this
+  // card's own (mountBandsJack, above) both call through the exact same
+  // logic — one contract, two mount points. driveSources.ts's jackKey is
+  // the identity every comparison below uses: it collapses every beat-grid
+  // division to one shared key, since a patch carries at most one and the
+  // Beat row's jack always means "whichever one's there", never a specific
+  // division.
+  // ---------------------------------------------------------------------
+
+  function shownSelection(): { sceneId: string; spec: SceneSetting } | null {
+    return preview ?? pinned;
+  }
+
+  /** `preview`, but only when it's a genuinely *different* setting from
+   *  whatever's pinned — hovering the pinned row itself (or nothing) isn't
+   *  a competing preview to draw a second cable group for or fade the
+   *  pinned one over (see cableSpecsForShown/refreshBandsJacks below, and
+   *  cableLayer.ts's own two-group recompute). */
+  function activePreview(): { sceneId: string; spec: SceneSetting } | null {
+    return preview && !samePair(preview, pinned) ? preview : null;
+  }
+
+  /** How many of the *active scene's* settings currently use `choice` —
+   *  each jack's own usage dots, independent of selection. */
+  function jackUsage(choice: DriveSourceChoice): number {
+    const sceneId = deps.currentSceneId();
+    const key = jackKey(choice);
+    let n = 0;
+    for (const spec of deps.getSceneSettings(sceneId)) {
+      if (!spec.drive) continue;
+      const setting = deps.getDriveSetting(sceneId, spec);
+      if (setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === key)) n++;
+    }
+    return n;
+  }
+
+  function jackIsShown(choice: DriveSourceChoice): boolean {
+    const sel = shownSelection();
+    if (!sel) return false;
+    const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
+    return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
+  }
+
+  function jackIsPinned(choice: DriveSourceChoice): boolean {
+    if (!pinned) return false;
+    const setting = deps.getDriveSetting(pinned.sceneId, pinned.spec);
+    return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
+  }
+
+  /** `choice` is a source of the *active preview* specifically (see
+   *  activePreview() above) — a row/lane's soft glow, always taking
+   *  priority over a competing pinned feed on the same row. */
+  function jackFeedsPreview(choice: DriveSourceChoice): boolean {
+    const ap = activePreview();
+    if (!ap) return false;
+    const setting = deps.getDriveSetting(ap.sceneId, ap.spec);
+    return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
+  }
+
+  /** The matching `DriveSource` for `choice` in `setting`, or undefined —
+   *  jackIsPinnedActive/jackFeedsPreviewActive below share this rather than
+   *  each re-deriving "which source is this jack" a second way. */
+  function sourceForChoice(setting: DriveSetting, choice: DriveSourceChoice): DriveSource | undefined {
+    if (setting === "scene") return undefined;
+    const key = jackKey(choice);
+    return setting.sources.find((s) => jackKey(s.choice) === key);
+  }
+
+  /** `jackIsPinned`, but false for a *muted* source — the mute-aware pair
+   *  (with jackFeedsPreviewActive below) refreshBandsJacks/audioMeters.ts's
+   *  refreshPatchView use specifically for a row/lane's own fed glow, so a
+   *  muted source's jack still fills solid (jackIsPinned/jackIsShown stay
+   *  mute-agnostic — it's still plugged in) while its row stops lighting up
+   *  (this file's own header's Muting paragraph). */
+  function jackIsPinnedActive(choice: DriveSourceChoice): boolean {
+    if (!pinned) return false;
+    const src = sourceForChoice(deps.getDriveSetting(pinned.sceneId, pinned.spec), choice);
+    return !!src && !src.off;
+  }
+
+  /** `jackFeedsPreview`, but false for a *muted* source — see
+   *  jackIsPinnedActive above. */
+  function jackFeedsPreviewActive(choice: DriveSourceChoice): boolean {
+    const ap = activePreview();
+    if (!ap) return false;
+    const src = sourceForChoice(deps.getDriveSetting(ap.sceneId, ap.spec), choice);
+    return !!src && !src.off;
+  }
+
+  /** `choice` is named in the shown setting's own display-only
+   *  `drive.sceneSources` (drives.ts's header) — never a real patch source,
+   *  so never a jack fill, only a row/lane's softer glow. */
+  function jackIsSceneSource(choice: DriveSourceChoice): boolean {
+    if (typeof choice !== "string") return false;
+    const sel = shownSelection();
+    if (!sel) return false;
+    const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
+    if (setting !== "scene") return false;
+    return (sel.spec.drive?.sceneSources ?? []).includes(choice);
+  }
+
+  /** Something (preview ?? pinned) is currently shown at all — the Bands
+   *  card's own `.vc-patching` dim-everything-unfed switch. */
+  function isAnythingShown(): boolean {
+    return shownSelection() !== null;
+  }
+
+  function jackDescribe(choice: DriveSourceChoice): { aria: string; title: string } {
+    const name = driveSourceLabel(choice);
+    const target = pinned ?? lastPreview;
+    if (!target) return { aria: `${name} — pick a setting first`, title: name };
+    const already = jackIsPinned(choice);
+    const verb = already ? "Unplug" : "Plug";
+    const prep = already ? "from" : "into";
+    return { aria: `${verb} ${name} ${prep} ${target.spec.label}`, title: name };
+  }
+
+  /** The jack's own instant tooltip lines (onJackHover below) — line 1
+   *  names the source and what it is (driveSources.ts's own description),
+   *  line 2 says what a click on it would do right now: nothing pinned or
+   *  previewed yet, unplug what's already there, or plug in. */
+  function jackTooltipLines(choice: DriveSourceChoice): string[] {
+    const line1 = `${driveSourceLabel(choice)} — ${driveSourceDescription(choice)}`;
+    const target = pinned ?? lastPreview;
+    if (!target) return [line1, "Pin a setting first"];
+    const line2 = jackIsPinned(choice) ? `Click to unplug from ${target.spec.label}` : `Click to plug into ${target.spec.label}`;
+    return [line1, line2];
+  }
+
+  // The most recent jack toggled ON, for one recompute — buildCables below
+  // consumes it to draw that one cable on rather than snapping in instantly
+  // (controlsTheme.ts's vc-cable-new rule), then clears it. Set right
+  // before the store write that adds it, since add-vs-remove has to be
+  // known ahead of the toggle.
+  let justAddedKey: string | null = null;
+
+  function onJackClick(choice: DriveSourceChoice): void {
+    const target = pinned ?? lastPreview;
+    if (!target) {
+      showToast("Pick a setting first");
+      return;
+    }
+    if (!pinned) togglePin(target.sceneId, target.spec);
+    const setting = deps.getDriveSetting(target.sceneId, target.spec);
+    const existed = setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
+    justAddedKey = existed ? null : jackKey(choice);
+    deps.onTogglePatchSource(target.sceneId, target.spec, choice);
+    patchChanged(target.sceneId, target.spec);
+  }
+
+  /** Hovering a jack highlights every scene row it feeds right now —
+   *  independent of the preview/pin highlight above (this fires for *any*
+   *  jack, fed or not, pinned setting or none) — and shows/hides its own
+   *  instant tooltip (jackTooltipLines above), the jack half of the
+   *  "cover everything with hints" pass. Called from every jack's own
+   *  pointerenter/pointerleave/focus/blur (jack.ts's createJack), never a
+   *  timer. */
+  function onJackHover(choice: DriveSourceChoice, on: boolean): void {
+    const key = jackKey(choice);
+    const color = driveSourceColor(choice);
+    for (const h of driveRowHandles) {
+      const setting = deps.getDriveSetting(h.sceneId, h.spec);
+      if (setting === "scene" || !setting.sources.some((s) => jackKey(s.choice) === key)) continue;
+      h.rowEl.classList.toggle("vc-drive-hl", on);
+      if (on) h.rowEl.style.setProperty("--vc-hl2", color);
+    }
+    if (on) {
+      const jackEl = combinedJackElements().get(key);
+      if (jackEl) showTooltip(jackEl, color, jackTooltipLines(choice));
+    } else {
+      hideTooltip();
+    }
+  }
+
+  /** The Bands card's own 4 jacks (mountBandsJack, above) — the same
+   *  fill/pressed/uses/aria refresh audioMeters.ts's own refreshPatchView
+   *  does for its jacks, plus the same row-level fed/dim (jack.ts's
+   *  setRowFed) for the 3 level rows and the faders row itself. Priority
+   *  for a shared row's own glow: the active preview always wins (soft)
+   *  over a competing pinned feed (full when uncontested, faint when
+   *  a different preview is live), which in turn wins over the softer
+   *  scene-mix fallback (jackIsSceneSource — a `"scene"` setting has no
+   *  patch sources of its own, so it can never win the pinned/preview
+   *  checks above; see jack.ts's setRowFed for what each kind draws). */
+  function refreshBandsJacks(): void {
+    const ap = activePreview();
+    const feedGroups = new Map<HTMLElement, DriveSourceChoice[]>();
+    for (const { choice, jack, feedEl } of bandsJacks) {
+      jack.setFilled(jackIsShown(choice));
+      jack.setPressed(jackIsPinned(choice));
+      jack.setUses(jackUsage(choice));
+      const { aria, title } = jackDescribe(choice);
+      jack.setLabel(aria, title);
+      let list = feedGroups.get(feedEl);
+      if (!list) {
+        list = [];
+        feedGroups.set(feedEl, list);
+      }
+      list.push(choice);
+    }
+    for (const [rowEl, choices] of feedGroups) {
+      // The mute-aware pair — a muted source keeps its jack filled (above)
+      // but stops lighting the row it feeds (this file's own header).
+      const previewHit = ap ? choices.find((c) => jackFeedsPreviewActive(c)) : undefined;
+      const pinnedHit = pinned ? choices.find((c) => jackIsPinnedActive(c)) : undefined;
+      const sceneSoftHit = previewHit || pinnedHit ? undefined : choices.find((c) => jackIsSceneSource(c));
+      if (previewHit) {
+        setRowFed(rowEl, "soft", driveSourceColor(previewHit));
+      } else if (pinnedHit) {
+        setRowFed(rowEl, ap ? "faint" : "full", driveSourceColor(pinnedHit));
+      } else if (sceneSoftHit) {
+        setRowFed(rowEl, "soft", driveSourceColor(sceneSoftHit));
+      } else {
+        setRowFed(rowEl, "none", "");
+      }
+    }
+  }
+
+  /** The spectrum strip's own dim-the-unheard-bands overlay for the shown
+   *  setting — real patch sources for an editable patch, `sceneSources` for
+   *  a `"scene"` one (both narrowed to a plain SignalId; a grid/line source
+   *  has no band range of its own). Recomputed alongside every other
+   *  selection-driven refresh here, never per frame or per hover — a drive
+   *  row has no `reads` of its own for wireBandHighlight to key off. */
+  function refreshSpectrumDriveHighlight(): void {
+    const sel = shownSelection();
+    if (!sel) {
+      spectrumStrip.setHighlight(null);
+      spectrumStrip.redraw();
+      return;
+    }
+    const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
+    const ids: SignalId[] =
+      setting === "scene"
+        ? [...(sel.spec.drive?.sceneSources ?? [])]
+        : setting.sources.map((s) => s.choice).filter((c): c is SignalId => typeof c === "string");
+    const split = deps.getBandSplit();
+    let lo = NUM_BANDS;
+    let hi = 0;
+    let any = false;
+    for (const id of ids) {
+      const range = SIGNALS[id].bandRange;
+      if (!range) continue;
+      if (range === "all") {
+        any = false;
+        break; // whole spectrum: nothing to dim, same convention as wireBandHighlight
+      }
+      const r = resolveBandRange(range, split);
+      lo = Math.min(lo, r.lo);
+      hi = Math.max(hi, r.hi);
+      any = true;
+    }
+    spectrumStrip.setHighlight(any ? { lo, hi } : null);
+    spectrumStrip.redraw();
+  }
+
+  // ---- Cables ----
+  const cableLayer = createCableLayer();
+  document.body.appendChild(cableLayer.el);
+  // Also drives the Bands card's own level rows, bandLevelRows (setValue's
+  // dtSec is only ever a peak-hold decay rate, so a rough per-tick delta is
+  // plenty).
+  let lastCableTickMs = performance.now();
+  const narrowMQ = window.matchMedia(`(max-width: ${STACK_BELOW_PX}px)`);
+
+  function combinedJackElements(): ReadonlyMap<string, HTMLElement> {
+    const merged = new Map(audioMeters.jackElements());
+    for (const [k, v] of bandsJackEls) merged.set(k, v);
+    return merged;
+  }
+
+  // The latest tick's own SceneDrives/frame/anim — cableSpecsForShown's own
+  // per-source getValue() closures read these fresh every tick (via
+  // cableLayer.tick, never a snapshot), so a cable's flow speed always
+  // tracks the live signal even though geometry itself is rebuilt far less
+  // often. Written once per update() call below.
+  let lastDrives: SceneDrives | null = null;
+  let lastFrame: FeatureFrame | null = null;
+  let lastAnim: AnimFrame | null = null;
+
+  /** One cable group (src/ui/cableLayer.ts's CableGroupSpec) for whichever
+   *  (sceneId, spec) pair is passed — `pinned` or activePreview(), called
+   *  once each from cableSpecsForShown below. `isNew`/justAddedKey only
+   *  ever applies to the pinned group in practice (a patch can't be edited
+   *  without pinning it first — see onJackClick), but there's no reason to
+   *  special-case that away here. */
+  function cableGroupFor(sel: { sceneId: string; spec: SceneSetting } | null): CableGroupSpec {
+    if (!sel) return { sources: [], portEl: null };
+    const handle = driveRowHandles.find((r) => r.sceneId === sel.sceneId && r.spec.key === sel.spec.key);
+    if (!handle) return { sources: [], portEl: null };
+    const jackEls = combinedJackElements();
+    const setting = deps.getDriveSetting(sel.sceneId, sel.spec);
+    const sources: CableSourceSpec[] = [];
+    if (setting === "scene") {
+      for (const id of sel.spec.drive?.sceneSources ?? []) {
+        const jackEl = jackEls.get(jackKey(id));
+        if (!jackEl) continue;
+        sources.push({
+          key: jackKey(id),
+          color: driveSourceColor(id),
+          soft: true,
+          jackEl,
+          getValue: () => (lastFrame && lastAnim ? SIGNALS[id].read(lastFrame, lastAnim) : 0),
+        });
+      }
+    } else {
+      // Every marked condition (there can be more than one now — this
+      // file's own header) draws with the same dashed-long style
+      // (controlsTheme.ts's .vc-cable-cond), consistent with the source
+      // line's own dashed marker and the output graph's dashed trace. A
+      // muted source draws in the flat, dashed `.vc-cable-muted` style
+      // instead (no glow, no flow) regardless of role.
+      const conditionIdxs = setting.mix === "gate" ? gateConditionIndices(setting) : [];
+      setting.sources.forEach((src, idx) => {
+        const key = jackKey(src.choice);
+        const jackEl = jackEls.get(key);
+        if (!jackEl) return;
+        const specKey = sel.spec.key;
+        sources.push({
+          key,
+          color: driveSourceColor(src.choice),
+          soft: false,
+          cond: conditionIdxs.includes(idx),
+          muted: !!src.off,
+          jackEl,
+          getValue: () => lastDrives?.sourceValues(specKey)?.[idx] ?? 0,
+          isNew: key === justAddedKey,
+        });
+      });
+    }
+    return { sources, portEl: handle.portEl };
+  }
+
+  /** Both groups cableLayer.ts's own two-path-group recompute takes — see
+   *  its header and activePreview() above for why these are independent
+   *  rather than one "shown" selection. */
+  function cableSpecsForShown(): { pinned: CableGroupSpec; preview: CableGroupSpec } {
+    const pinnedGroup = cableGroupFor(pinned);
+    const previewGroup = cableGroupFor(activePreview());
+    justAddedKey = null;
+    return { pinned: pinnedGroup, preview: previewGroup };
+  }
+
+  let cableRecomputeQueued = false;
+  function scheduleCableRecompute(): void {
+    if (cableRecomputeQueued) return;
+    cableRecomputeQueued = true;
+    requestAnimationFrame(() => {
+      cableRecomputeQueued = false;
+      if (!isOpen) return;
+      const { pinned: pinnedGroup, preview: previewGroup } = cableSpecsForShown();
+      cableLayer.recompute(pinnedGroup, previewGroup);
+    });
+  }
+  function refreshCableVisibility(): void {
+    cableLayer.setVisible(isOpen && !narrowMQ.matches);
+  }
+  narrowMQ.addEventListener("change", () => {
+    refreshCableVisibility();
+    scheduleCableRecompute();
+  });
+  window.addEventListener("resize", scheduleCableRecompute);
+  // Geometry is recomputed on every layout trigger the plan names: scroll
+  // of the two scrolling columns and of the root itself (the stacked
+  // layout's own scroller — cables are hidden there, but a resize crossing
+  // the breakpoint mid-scroll should still land on fresh geometry), resize,
+  // and a ResizeObserver on both columns (spectrumCol here; controlsCol —
+  // declared further down — observes itself once it exists). Card
+  // fold/unfold piggybacks on the existing columnsWrap MutationObserver
+  // (refreshColumnsFold, below); renderSceneSettings schedules one from its
+  // own tail.
+  const cableColumnsRO = new ResizeObserver(scheduleCableRecompute);
+  cableColumnsRO.observe(spectrumCol);
+  audioMeters.el.addEventListener("scroll", scheduleCableRecompute, { passive: true });
+  root.addEventListener("scroll", scheduleCableRecompute, { passive: true });
+
+  // ---- "Pick a setting first" toast ----
+  const toastEl = document.createElement("div");
+  toastEl.className = "vc-toast";
+  toastEl.setAttribute("role", "status");
+  document.body.appendChild(toastEl);
+  let toastTimer: ReturnType<typeof setTimeout> | null = null;
+  function showToast(text: string): void {
+    toastEl.textContent = text;
+    toastEl.classList.add("vc-toast-show");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove("vc-toast-show"), 2200);
+  }
+
+  /** The one place every selection-driven visual gets recomputed together —
+   *  called on a pin, a preview change, and a patch edit (togglePin,
+   *  previewDrive, patchChanged above) and once more from
+   *  renderSceneSettings's own tail (a scene switch/Look apply rebuilds
+   *  every row, including the pinned one's). Content only — never a layout
+   *  read itself; scheduleCableRecompute() is what actually measures
+   *  anything, on its own rAF-batched schedule. */
+  function refreshPatchHighlight(): void {
+    audioMeters.refreshPatchView();
+    refreshBandsJacks();
+    refreshSpectrumDriveHighlight();
+    spectrumCol.classList.toggle("vc-patching", isAnythingShown());
+    scheduleCableRecompute();
+  }
+
+  // A hover-scheduled preview change not yet committed — see
   // wireHoverFocus's own pointerFocusOriginated flag and appendSettingRow's
   // onRowFocusIn below for the dwell this exists to implement (only a
-  // pointer-originated focus waits; keyboard/click focus calls selectDrive
-  // directly). One shared timer, not per-row, since only one such change
-  // can ever be in flight — a new one always supersedes whatever's pending.
-  let pendingSelectTimer: ReturnType<typeof setTimeout> | null = null;
-  function cancelPendingSelect(): void {
-    if (pendingSelectTimer !== null) {
-      clearTimeout(pendingSelectTimer);
-      pendingSelectTimer = null;
+  // pointer-originated focus waits; keyboard/click focus previews
+  // immediately). One shared timer, not per-row, since only one such change
+  // can ever be in flight.
+  let pendingPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+  function cancelPendingPreview(): void {
+    if (pendingPreviewTimer !== null) {
+      clearTimeout(pendingPreviewTimer);
+      pendingPreviewTimer = null;
     }
   }
-
-  /** The only place `selected` is written. Called (after cancelPendingSelect,
-   *  always its first line) from a scene-setting row's own `focusin`
-   *  (appendSettingRow, immediately for keyboard/click focus, after a dwell
-   *  for pointer focus), Escape (onKeyDown), and the scene-mismatch check in
-   *  update() — see renderSceneSettings()'s own tail for the scene-switch
-   *  case, which writes `selected` directly instead, since a scene switch
-   *  also needs the row set rebuilt regardless of whether the selection
-   *  itself changes. Deliberately *not* called when focus leaves a row for
-   *  anywhere else (the Bands card's own strip/overlay/picker, the meters,
-   *  another card, the page): each row's `focusin`/`focusout` pair only
-   *  ever touches its own pending timer (appendSettingRow), so moving the
-   *  mouse off a selected setting and onto the spectrum to draw its line
-   *  never touches `selected` at all, let alone clears it. No-ops when
-   *  `sel` already matches the current selection: `focusin` re-fires for
-   *  every focus change *within* one row (the slider, its A/T/reset
-   *  chips), not just a row-to-row change, so without this guard sweeping
-   *  the mouse or tabbing across one row's own controls would redo this
-   *  work on every one of them. */
-  function selectDrive(sel: { sceneId: string; spec: SceneSetting } | null): void {
-    cancelPendingSelect();
-    if (sameSelection(selected, sel)) return;
-    selected = sel;
-    if (sel) driveTab = "setting"; // a new selection always opens on its own picker
-    refreshDriveZone();
-  }
-
-  refreshDriveZone(); // seeds the header/zone/tint at rest
 
   spectrumCol.append(bandsCard.el, audioMeters.el);
 
@@ -1948,6 +3452,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       "vc-cols-folded",
       relevant.length > 0 && relevant.every((c) => c.classList.contains("vc-folded")),
     );
+    // This MutationObserver already fires for every fold/unfold in the
+    // Power+Bands+meters column (it observes columnsWrap's own subtree) —
+    // reused here as the cable layer's own fold trigger rather than a
+    // second observer over the same nodes.
+    scheduleCableRecompute();
   }
   new MutationObserver(refreshColumnsFold).observe(columnsWrap, {
     attributes: true,
@@ -1989,6 +3498,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // ---- controls column ----
   const controlsCol = document.createElement("div");
   controlsCol.className = "vc-controls-col vc-scroll";
+  cableColumnsRO.observe(controlsCol);
+  controlsCol.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
   // Auto strength: how far auto is allowed to push a setting from its default
   // (see autoTune.ts's computeAutoTarget). Global per device.
@@ -2536,10 +4047,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // a row with no `reads`, or whose reads are all band-agnostic (drop
   // detection: section loudness, not a frequency read) — which in practice
   // makes this a non-drive-row-only affordance, since a drive setting
-  // declares no static `reads` at all (signals.ts's own header): its tint
-  // instead comes from the *selection* (highlightForSelection/applyTint
-  // above), which owns the strip's highlight for as long as that setting
-  // stays selected, not just while the row itself is being touched.
+  // declares no static `reads` at all (signals.ts's own header). A drive
+  // row has no spectrum tint of its own in this phase — see this file's
+  // header doc comment; Phase 2b's jacks/cables own that instead.
   // Recomputed on every `input` (not just on entry) since dragging Ripple
   // source across its own threshold changes which signal is actually active
   // mid-drag — see RIPPLE_SRC_BEAT_THRESHOLD's own comment in caustics.ts.
@@ -2608,32 +4118,33 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       };
     });
 
-    // The selection signal (see selectDrive's own doc comment for the full
-    // contract) — every scene-setting row gets this, regardless of type, so
-    // focusing a non-drive row (an enum picker, a toggle) correctly clears a
-    // previous selection too, not just sliders. Pointer-originated focus
+    // The preview signal (see previewDrive's own doc comment) — every
+    // scene-setting row gets this, regardless of type, so focusing a
+    // non-drive row (an enum picker, a toggle) correctly clears a previous
+    // preview too, not just sliders. Pointer-originated focus
     // (wireHoverFocus's pointerFocusOriginated flag) waits out
-    // HOVER_SELECT_DELAY_MS before actually selecting, canceled by
-    // whichever comes first: a newer focusin (any row, cancelPendingSelect
-    // at the top of both this and selectDrive) or this row losing focus
+    // HOVER_SELECT_DELAY_MS before actually previewing, canceled by
+    // whichever comes first: a newer focusin (any row, cancelPendingPreview
+    // at the top of both this and previewDrive) or this row losing focus
     // before the timer fires (onRowFocusOut below) — together these are
     // what let a fast sweep across several rows toward the spectrum strip
-    // leave the starting selection alone. Keyboard/click focus (not
-    // pointer-originated) selects immediately.
+    // leave the starting preview alone. Keyboard/click focus (not
+    // pointer-originated) previews immediately. Never touches `pinned` —
+    // only an explicit click (togglePin) does that.
     function onRowFocusIn(): void {
-      cancelPendingSelect();
+      cancelPendingPreview();
       const next = spec.drive ? { sceneId, spec } : null;
       if (pointerFocusOriginated) {
-        pendingSelectTimer = setTimeout(() => {
-          pendingSelectTimer = null;
-          selectDrive(next);
+        pendingPreviewTimer = setTimeout(() => {
+          pendingPreviewTimer = null;
+          previewDrive(next);
         }, HOVER_SELECT_DELAY_MS);
       } else {
-        selectDrive(next);
+        previewDrive(next);
       }
     }
 
-    /** Cancels this row's own still-pending hover selection if focus leaves
+    /** Cancels this row's own still-pending hover preview if focus leaves
      *  it for somewhere that never calls onRowFocusIn at all (the spectrum
      *  strip, the meters, another card) before the dwell fires — a newer
      *  row's own focusin already cancels via onRowFocusIn's own call, but
@@ -2641,10 +4152,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
      *  leaving the ring of rows entirely. `el` is the whole row (slider,
      *  A/T/reset chips and all), so a focus change *within* it (e.g. Tab to
      *  its own reset chip) isn't a leave. */
-    function wireSelectionFocus(el: HTMLElement): void {
+    function wirePreviewFocus(el: HTMLElement): void {
       el.addEventListener("focusin", onRowFocusIn);
       el.addEventListener("focusout", (e) => {
-        if (!el.contains(e.relatedTarget as Node | null)) cancelPendingSelect();
+        if (!el.contains(e.relatedTarget as Node | null)) cancelPendingPreview();
       });
     }
 
@@ -2680,7 +4191,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         },
         signals,
       });
-      wireSelectionFocus(picker.el);
+      wirePreviewFocus(picker.el);
       container.appendChild(picker.el);
       if (signals && reads) {
         sceneRowHandles.push({
@@ -2707,10 +4218,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         get: () => deps.getSceneSettingValue(sceneId, spec),
         set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
       });
-      wireSelectionFocus(toggleEl);
+      wirePreviewFocus(toggleEl);
       container.appendChild(toggleEl);
       return;
     }
+
+    // A drive-capable setting (spec.drive) gets the patch bay's own port,
+    // summary and sparkline — built before the row itself (createControlRow
+    // needs them ready in its `drivePanel` slot) and bound after (bind()
+    // needs the finished row element for the pinned-row highlight) — see
+    // buildDriveRow's own doc comment.
+    const driveBuild = spec.drive ? buildDriveRow(sceneId, spec) : null;
 
     const row = createControlRow({
       label: spec.label,
@@ -2735,12 +4253,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         : undefined,
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
       reads,
+      drivePanel: driveBuild
+        ? { port: driveBuild.port, summary: driveBuild.summary, below: driveBuild.below, onPin: () => togglePin(sceneId, spec) }
+        : undefined,
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));
-    wireSelectionFocus(row.el);
+    wirePreviewFocus(row.el);
     container.appendChild(row.el);
     sceneRowHandles.push(row);
+    if (driveBuild) driveRowHandles.push(driveBuild.bind(row.el));
     wireBandHighlight(row.el, reads);
   }
 
@@ -2749,6 +4271,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const specs = deps.getSceneSettings(sceneId);
     sceneRows.innerHTML = "";
     sceneRowHandles = [];
+    for (const c of driveSparkCanvases) untrackDriveCanvas(c);
+    driveSparkCanvases = [];
+    driveRowHandles = [];
     sceneCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.refresh();
@@ -2816,16 +4341,32 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     else unmarkBlock(sceneCard.title);
     renumberBlocks();
 
-    // A scene switch invalidates a selection from the scene being left, so
-    // it's cleared directly (not through selectDrive — its sameSelection
-    // no-op would otherwise skip refreshDriveZone() below on exactly the
-    // one tick that needs it). Every other caller of this function (a Look
-    // apply/undo, variant switch, a card Reset, every open()) just needs the
-    // zone/strip and every picker chip rebuilt for whatever `selected`
-    // still is, which the unconditional refreshDriveZone() call covers too.
-    if (selected && selected.sceneId !== sceneId) selected = null;
-    cancelPendingSelect();
-    refreshDriveZone();
+    // A preview never survives a rebuild — it's transient by design, and
+    // the row it pointed at may not even exist any more (a variant switch
+    // changes which settings are on the card). A pin does survive, but its
+    // panel has to be rebuilt against the freshly-built row (every caller
+    // here — a scene switch, a Look apply/undo, a variant switch, a card
+    // Reset, every open() — replaces every row from scratch above): found
+    // by (sceneId, key) in the new driveRowHandles, or dropped if the pinned
+    // setting no longer exists on this scene (including a genuine scene
+    // switch, since every row just built carries the *new* sceneId).
+    preview = null;
+    cancelPendingPreview();
+    if (pinned) {
+      const stillHere = driveRowHandles.find((r) => r.sceneId === pinned!.sceneId && r.spec.key === pinned!.spec.key);
+      if (stillHere) stillHere.refreshPin();
+      else {
+        pinned = null;
+        lastPinnedSetting = null;
+      }
+    }
+    // A jack click with nothing pinned reaches for lastPreview — drop it on
+    // a genuine scene switch, same reasoning as the pinned check above,
+    // rather than let a jack click quietly pin a setting on the scene that
+    // was just left.
+    if (lastPreview && lastPreview.sceneId !== sceneId) lastPreview = null;
+    refreshLineMode();
+    refreshPatchHighlight();
   }
 
   // Palette: the only picker left in the panel.
@@ -2976,17 +4517,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // The Tab ring: every param control, in document order — see the header
   // comment. Derived from the DOM each call rather than cached, so a Scene
   // card rebuilt by renderSceneSettings can never leave it stale. Filtered
-  // to controls with a layout box: a folded card's body is display:none, and
-  // a control inside it would otherwise sit in the ring and fail to focus.
-  // Also filtered on computed visibility: driveZone's swap zone (this card's
-  // own assembly comment) keeps its hidden layer's real content mounted for
-  // sizing, so e.g. lineEditor.strengthRow's `.vc-slider` still has a
-  // non-empty getClientRects() while the Equaliser tab is showing instead —
-  // visibility inherits down from settingLayer, so checking the control's
-  // own computed style catches it without walking ancestors by hand.
+  // to controls with a layout box: a folded card's body is display:none, a
+  // pinned setting's patch panel is display:none while unpinned, and
+  // lineEditor.strengthRow sits detached entirely outside line mode (it's
+  // only ever appended into a source line, this card's own assembly
+  // section) — a control inside any of those would otherwise sit in the
+  // ring and fail to focus.
   function ringElements(): HTMLElement[] {
     return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker, .vc-fader")].filter(
-      (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden",
+      (el) => el.getClientRects().length > 0,
     );
   }
 
@@ -3028,8 +4567,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function onKeyDown(e: KeyboardEvent) {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     if (isTypingTarget(e.target)) return;
-    if (e.key === "Escape" && selected) {
-      selectDrive(null);
+    if (e.key === "Escape" && pinned) {
+      togglePin(pinned.sceneId, pinned.spec);
       e.preventDefault();
       return;
     }
@@ -3056,10 +4595,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     renderPalettes();
     sourceRow.refresh();
     syncInputRows();
-    // The panel may have been closed on a different scene since `selected`
-    // was last checked — renderSceneSettings()'s own tail deselects it if
-    // so, and rebuilds the drive section/strip for whatever's still
-    // selected either way.
+    // The panel may have been closed on a different scene since `pinned`
+    // was last checked — renderSceneSettings()'s own tail unpins it if so,
+    // and rebuilds its patch panel for whatever's still pinned either way.
     renderSceneSettings();
     refreshBandsSplit();
     refreshBandFaders();
@@ -3069,6 +4607,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     isOpen = true;
     document.addEventListener("pointerdown", onDocPointerDown);
     document.addEventListener("keydown", onKeyDown);
+    refreshCableVisibility();
+    scheduleCableRecompute();
   }
 
   function close() {
@@ -3077,6 +4617,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     isOpen = false;
     document.removeEventListener("pointerdown", onDocPointerDown);
     document.removeEventListener("keydown", onKeyDown);
+    refreshCableVisibility();
+    toastEl.classList.remove("vc-toast-show");
   }
 
   // Cache of the last --wash value written, so update() (called every rAF
@@ -3087,6 +4629,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // tick; its status changes even more rarely.
   const AUTO_UI_REFRESH_MS = 100;
   let lastAutoRefreshMs = 0;
+  // ~30 Hz — every drive row's own sparkline, plus the pinned row's output
+  // graph if it has one (this file's own carried rule: canvas draws, not
+  // DOM rebuilds, so this rides its own faster cadence rather than
+  // AUTO_UI_REFRESH_MS's 10 Hz).
+  const SPARKLINE_REFRESH_MS = 1000 / 30;
+  let lastSparklineMs = 0;
 
   return {
     toggle() {
@@ -3099,7 +4647,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       frame: FeatureFrame | null,
       rawBands: Float32Array | null,
       ungained: FeatureFrame | null,
-      pinned: Uint8Array | null,
+      pinnedBands: Uint8Array | null,
       anim: AnimFrame | null,
       mono: Float32Array | null,
       rateScale: number,
@@ -3112,15 +4660,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // Skip the DOM write while closed — the panel is re-opened via open()
       // anyway, and this runs every rAF tick while in a viz.
       if (!isOpen) return;
-      // A scene switch (or a renderer with nothing playing) leaves `selected`
+      // A scene switch (or a renderer with nothing playing) leaves `pinned`
       // pointing at a setting that no longer belongs to the active scene —
       // checked here rather than at every scene-change call site, since this
       // runs every tick regardless of how the switch happened (gallery pick,
       // Look apply, a paired device's own command). Cheap when nothing's
-      // selected or the scene hasn't changed — selectDrive() only actually
+      // pinned or the scene hasn't changed — togglePin() only actually
       // rebuilds anything on the rare tick this fires.
-      if (selected && selected.sceneId !== deps.currentSceneId()) selectDrive(null);
+      if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
       audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate);
+      // The cable layer's own per-tick flow (dashoffset only, no reads —
+      // see cableLayer.ts's header) and the Bands card's own level rows;
+      // both need a live dtSec and the freshest anim/drives this tick.
+      lastDrives = drives;
+      lastFrame = frame;
+      lastAnim = anim;
+      const cableNowMs = performance.now();
+      const cableDtSec = Math.min(1 / 15, Math.max(1e-4, (cableNowMs - lastCableTickMs) / 1000));
+      lastCableTickMs = cableNowMs;
+      if (!bandsCard.fold?.isFolded()) {
+        for (const r of bandLevelRows) {
+          const v = anim ? (r.choice === "anim.low" ? anim.low : r.choice === "anim.mid" ? anim.mid : anim.high) : null;
+          r.row.setValue(v, cableDtSec);
+        }
+      }
+      if (!narrowMQ.matches) cableLayer.tick(cableDtSec);
       // Unthrottled, same reasoning as audioMeters' own fills — see
       // createControlRow's updateSignalPills doc comment. A no-op per row
       // with no `reads`, so this costs nothing for the common case.
@@ -3164,7 +4728,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // fast path, so the ghost must be copied into the strip before the
       // second call overwrites it.
       spectrumStrip.setGhost(ungained ? applySensitivity(ungained, sensitivity, expansion).bands : null);
-      spectrumStrip.setPinned(pinned);
+      spectrumStrip.setPinned(pinnedBands);
       const processedBands = frame ? applySensitivity(frame, sensitivity, expansion).bands : null;
       spectrumStrip.update(rawBands, processedBands);
       // The Frequencies overlay draws on this same strip's own canvas (no
@@ -3177,6 +4741,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const nowMs = performance.now();
       if (lineMode && !bandsCard.fold?.isFolded()) {
         lineEditor.update(drives?.excess(lineMode.spec.key) ?? null);
+      }
+      // Sparklines: every drive row's own `valueOf()`, drawn at ~30 Hz — the
+      // pinned row's output graph (if it has one) rides the same tick.
+      // Skipped while the Scene card is folded or there's nothing to read
+      // yet — canvas draws only, never a DOM rebuild.
+      if (drives && driveRowHandles.length && !sceneCard.fold?.isFolded() && nowMs - lastSparklineMs >= SPARKLINE_REFRESH_MS) {
+        lastSparklineMs = nowMs;
+        for (const h of driveRowHandles) h.tickSparkline(drives, frame, anim);
+        activeOutputTick?.(drives);
       }
 
       if (nowMs - lastAutoRefreshMs < AUTO_UI_REFRESH_MS) return;
@@ -3193,11 +4766,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       silenceClosedRow.refreshAuto();
       silenceOpenRow.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
-      // The selected setting's picker/tint — picked up here rather than
-      // every tick, same reasoning as every other refreshAuto() above (an
+      // The pinned setting's patch panel — re-synced here rather than every
+      // tick, same reasoning as every other refreshAuto() above (an
       // external change, e.g. a paired device's own command, could move the
-      // selected setting's choice without a focusin here).
-      if (selected) refreshDriveZone(true);
+      // pinned setting's patch without a click here). Compared by value, not
+      // just presence, so an unrelated 100ms tick never rebuilds a panel the
+      // user might have a pointer down on (this file's own carried
+      // click-loss rule).
+      if (pinned) {
+        const current = deps.getDriveSetting(pinned.sceneId, pinned.spec);
+        if (!sameDriveSetting(current, lastPinnedSetting ?? "scene")) patchChanged(pinned.sceneId, pinned.spec);
+      }
     },
   };
 }

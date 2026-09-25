@@ -518,7 +518,11 @@ const SETTINGS: SceneSetting[] = [
     // The lurch's amplitude (beatAmp, render()) is graded across a union of
     // three signals — a drop takes priority, else a bass or beat rise — so
     // the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: drop, else bass or beat hit" },
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: drop, else bass or beat hit",
+      sceneSources: ["anim.dropOnset", "anim.lowOnset", "feature.onset"],
+    },
   },
   {
     key: "flow",
@@ -599,7 +603,7 @@ const SETTINGS: SceneSetting[] = [
     // single catalogue source covers that union, so the default is Scene.
     // uStrike's own GLSL sites are all plain gain curves on the setting's
     // own resolved value, no live signal, so nothing there needs wrapping.
-    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit" },
+    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"] },
   },
   {
     key: "reach",
@@ -691,7 +695,11 @@ const SETTINGS: SceneSetting[] = [
     // every geometry pass's shimmer reads uHighPulse (a hit) behind its own
     // stochastic gate — no single catalogue source covers both, so the
     // default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: treble level (march) or treble hits (lattice/points/strands)" },
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: treble level (march) or treble hits (lattice/points/strands)",
+      sceneSources: ["anim.high", "anim.highOnset"],
+    },
   },
   {
     key: "spectrumGlow",

@@ -773,7 +773,11 @@ const SETTINGS: SceneSetting[] = [
     // Scales this scene's own quiet-time `calm` signal (render()) — a slow
     // slewed composite of section intensity and bass level, not a catalogue
     // signal — so the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: this scene's own quiet-time calm signal" },
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: this scene's own quiet-time calm signal",
+      sceneSources: ["anim.sectionIntensity", "anim.low"],
+    },
   },
   {
     key: "turbulence",
@@ -832,7 +836,11 @@ const SETTINGS: SceneSetting[] = [
     // Gated and scaled by this scene's own hit-strength detector (bigHit,
     // render()) — a bespoke composite of level, pulse, section intensity
     // and both rise flags — so the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: this scene's own hit-strength detector" },
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: this scene's own hit-strength detector",
+      sceneSources: ["anim.low", "anim.lowOnset", "anim.sectionIntensity", "anim.dropOnset"],
+    },
   },
   {
     key: "heat",
@@ -892,7 +900,7 @@ const SETTINGS: SceneSetting[] = [
     // Two signals across two layers (a treble hit, or the sustained treble
     // level too), not one — same reasoning as caustics' Treble sparkle —
     // so the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: treble level + hits" },
+    drive: { default: "scene", sceneLabel: "Scene: treble level + hits", sceneSources: ["anim.high", "anim.highOnset"] },
   },
   {
     key: "hueDrift",
@@ -930,7 +938,11 @@ const SETTINGS: SceneSetting[] = [
     auto: { pulse: 0.25, tempo: 0.15 },
     // Two different signals at two different sites — the push-in reads a
     // bass hit, the drop shake reads the drop pulse — so the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: bass hit (push-in) and drop (shake)" },
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: bass hit (push-in) and drop (shake)",
+      sceneSources: ["anim.lowOnset", "anim.dropOnset"],
+    },
   },
   {
     key: "flash",
@@ -947,7 +959,11 @@ const SETTINGS: SceneSetting[] = [
     // Every site mixes a different weighted blend of bass hit/beat hit/
     // drop (or, at two sites, just one of them alone) — no single catalogue
     // pick reproduces all five, so the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: bass, beat and drop hits, weighted per site" },
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: bass, beat and drop hits, weighted per site",
+      sceneSources: ["anim.lowOnset", "feature.onset", "anim.dropOnset"],
+    },
   },
   {
     key: "bloom",

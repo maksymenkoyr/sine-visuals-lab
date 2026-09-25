@@ -434,7 +434,7 @@ const SETTINGS: SceneSetting[] = [
     // beat pulse, onset folded in as a bonus, its own refractory — see the
     // file header and createBeatSeeder), not a plain onset edge, so the
     // default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: a rise in the beat pulse (bonus on a raw onset)" },
+    drive: { default: "scene", sceneLabel: "Scene: a rise in the beat pulse (bonus on a raw onset)", sceneSources: ["feature.onset"] },
   },
   {
     key: "reach",
@@ -449,7 +449,11 @@ const SETTINGS: SceneSetting[] = [
     // Three signals across three channels (each group pulls toward its own
     // uLow/uMid/uHigh), plus a bass-hit boost on the low group alone — see
     // the DIFFUSE_FRAG loop — so the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: each band's own level (bass boosted on a hit)" },
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: each band's own level (bass boosted on a hit)",
+      sceneSources: ["anim.low", "anim.mid", "anim.high", "anim.lowOnset"],
+    },
   },
   // --- Look ---
   {

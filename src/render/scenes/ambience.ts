@@ -631,7 +631,7 @@ const SETTINGS: SceneSetting[] = [
     // Two signals across two ripple terms (bass, mid), plus a non-audio
     // noise roll — no single catalogue pick reproduces the mix, so the
     // default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: bass + mid ripple terms" },
+    drive: { default: "scene", sceneLabel: "Scene: bass + mid ripple terms", sceneSources: ["anim.low", "anim.mid"] },
   },
   {
     key: "waveSpeed",
@@ -670,7 +670,7 @@ const SETTINGS: SceneSetting[] = [
     // Spawns a swell on a bass hit OR a beat hit, unconditionally (render())
     // — no single catalogue source covers that union, so the default is
     // Scene. A drop's own burst is unconditional, independent of this choice.
-    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit" },
+    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"] },
   },
   {
     key: "swellSpeed",

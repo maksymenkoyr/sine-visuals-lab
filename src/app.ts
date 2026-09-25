@@ -43,14 +43,21 @@ import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
 import { createDriveEngine } from "./render/drives.ts";
 import {
-  getDriveChoice,
   getDriveLine,
   getDriveLineStrength,
+  getDriveSetting,
   resetDriveLine,
-  setDriveChoice,
+  resetDriveSetting,
   setDriveLine,
   setDriveLineBand,
   setDriveLineStrength,
+  setPatchMix,
+  setSourceGrid,
+  setSourceHeight,
+  setSourceMuted,
+  setSourceRole,
+  setSourceWeight,
+  togglePatchSource,
 } from "./render/driveStore.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
@@ -803,8 +810,15 @@ function wireDeviceMenu(): void {
     getBandGain: (sceneId, fader) => getBandGain(sceneId, fader),
     onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
-    getDriveChoice: (sceneId, spec) => getDriveChoice(sceneId, spec),
-    onDriveChoiceChange: (sceneId, spec, choice) => setDriveChoice(sceneId, spec, choice),
+    getDriveSetting: (sceneId, spec) => getDriveSetting(sceneId, spec),
+    onResetDriveSetting: (sceneId, spec) => resetDriveSetting(sceneId, spec),
+    onTogglePatchSource: (sceneId, spec, choice) => togglePatchSource(sceneId, spec, choice),
+    onSetSourceWeight: (sceneId, spec, choice, weight) => setSourceWeight(sceneId, spec, choice, weight),
+    onSetSourceHeight: (sceneId, spec, choice, height) => setSourceHeight(sceneId, spec, choice, height),
+    onSetSourceGrid: (sceneId, spec, grid) => setSourceGrid(sceneId, spec, grid),
+    onSetPatchMix: (sceneId, spec, mix) => setPatchMix(sceneId, spec, mix),
+    onSetSourceRole: (sceneId, spec, index, role) => setSourceRole(sceneId, spec, index, role),
+    onSetSourceMuted: (sceneId, spec, index, muted) => setSourceMuted(sceneId, spec, index, muted),
     getDriveLine: (sceneId, spec) => getDriveLine(sceneId, spec),
     setDriveLineBand: (sceneId, spec, band, height) => setDriveLineBand(sceneId, spec, band, height),
     setDriveLine: (sceneId, spec, heights) => setDriveLine(sceneId, spec, heights),

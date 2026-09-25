@@ -346,7 +346,7 @@ const SETTINGS: SceneSetting[] = [
     // attack, both shaped by Beat Smooth below — a response-shape param,
     // left alone) — not the catalogue's own beatPulse decay, so the default
     // is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: this scene's own two-stage beat swell" },
+    drive: { default: "scene", sceneLabel: "Scene: this scene's own two-stage beat swell", sceneSources: ["feature.onset"] },
   },
   {
     key: "beatSmooth",

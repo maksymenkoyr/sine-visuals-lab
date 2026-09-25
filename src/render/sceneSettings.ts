@@ -1,4 +1,4 @@
-import type { SignalLink } from "./signals.ts";
+import type { SignalId, SignalLink } from "./signals.ts";
 
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
@@ -116,6 +116,18 @@ export interface SceneSetting {
     default: import("./drives.ts").DriveChoice;
     sceneLabel?: string;
     gain?: number;
+    /** Display-only, for a `default: "scene"` setting: the meters its own
+     *  composite genuinely reads (its `sceneLabel` and code are the source of
+     *  truth — this just names the same things as SignalIds so the panel can
+     *  draw dimmed "scene mix" cables to them). Never read at render time —
+     *  changing this can't change what the scene draws, only what the panel
+     *  points at — and left out entirely where the composite doesn't read
+     *  anything in the src/render/signals.ts catalogue (a scene-local
+     *  detector like a bespoke calm/hit-strength signal, or a bare constant).
+     *  tests/drives.test.ts checks every entry against the catalogue, not
+     *  against the scene's own code, so a stale list is a wrong pill rather
+     *  than a broken build — keep it honest by hand. */
+    sceneSources?: readonly SignalId[];
   };
   /** This enum is the scene's *variant*: the one setting that decides what
    *  the rest of the settings are even acting on (Kaleidoscope's Style).

@@ -57,10 +57,25 @@ export const FONT_LABEL = "'Chakra Petch', system-ui, sans-serif";
 export const FONT_MONO = "'Share Tech Mono', ui-monospace, monospace";
 export const FONT_DIGITS = `'DSEG7-Classic', ${FONT_MONO}`;
 
+/** In the wide layout the meters column (`.vc-spectrum-col`) docks to the
+ *  screen's left edge; Power (`.vc-power-col`) sits immediately left of the
+ *  settings column (`.vc-controls-col`), both anchored to the right edge —
+ *  see `.vc-root`/`.vc-spectrum-col`/`.vc-controls-col` below. The visual
+ *  shows in the open middle, with the patch bay's cables
+ *  (src/ui/cableLayer.ts) sweeping left-to-right across it. No longer an
+ *  actual CSS margin (the meters side is independently positioned, not an
+ *  adjacent flex sibling of the settings side); this constant now only
+ *  sizes STACK_BELOW_PX below — the minimum gap the two docked sides must
+ *  keep between them before there's no room left for a cable to sweep
+ *  through and the panel falls back to one stacked column. */
+export const CABLE_GUTTER_PX = 56;
+
 /** Below this viewport width the panel's columns stack into one. Sized for
- *  three columns (Power + Bands + controls, ~899px plus gaps) — see the
+ *  Power + Bands + controls side by side (~899px plus gaps) plus
+ *  CABLE_GUTTER_PX as the minimum gap to preserve between the docked meters
+ *  column and the docked Power+settings side in the wide layout — see the
  *  stacked media query below for how Power folds into that single column. */
-export const STACK_BELOW_PX = 940;
+export const STACK_BELOW_PX = 940 + CABLE_GUTTER_PX;
 
 /** `#rrggbb` + alpha in [0,1] -> `#rrggbbaa`. */
 export function withAlpha(hex: string, alpha: number): string {
@@ -95,8 +110,14 @@ const stylesheet = `
   font-weight: 400; font-style: normal; font-display: swap;
 }
 
-/* Anchored top-right; the columns stop short of the bottom-right chrome
- * buttons (index.html) so the gear that closes the panel stays reachable.
+/* Anchored top-right — Power (.vc-power-col) then the settings column
+ * (.vc-controls-col), the same flex row as always. The meters side
+ * (.vc-spectrum-col) is a DOM child of .vc-cols-wrap below (so
+ * deviceMenu.ts's onDocPointerDown's root.contains(target) still sees it as
+ * "inside the panel") but docks itself independently to the opposite
+ * (top-left) corner of the screen in the wide layout — see .vc-spectrum-col
+ * below. Both sides stop short of the bottom-right chrome buttons
+ * (index.html) so the gear that closes the panel stays reachable.
  *
  * pointer-events: none plus "> *" restoring auto on direct children: a flex
  * row's own box is always as tall as its tallest child (align-items can't
@@ -108,7 +129,10 @@ const stylesheet = `
  * Disabling pointer events on the row itself and re-enabling them on its
  * children (their own boxes correctly hug their real content) lets a click
  * in the gap fall through to whatever's actually behind it. Same reasoning
- * applies to .vc-cols-wrap below. */
+ * applies to .vc-cols-wrap below. (.vc-spectrum-col, being independently
+ * position: fixed, contributes no box to .vc-cols-wrap's own sizing at all
+ * in the wide layout, so that row ends up hugging .vc-power-col alone —
+ * harmless, the mechanism still costs nothing to leave in place.) */
 .vc-root {
   position: fixed; top: 16px; right: 16px; z-index: 30;
   display: none; gap: 4px; align-items: flex-start;
@@ -119,18 +143,30 @@ const stylesheet = `
 .vc-root.vc-open { display: flex; }
 .vc-root > * { pointer-events: auto; }
 /* Power (src/ui/powerCard.ts): energy saving's Auto/On/Off override and its
- * status readouts. Leftmost — narrower than the other two columns since it
- * holds one compact card, not a scrolling stack. */
+ * status readouts — one compact card, not a scrolling stack, so this column
+ * is narrower than .vc-spectrum-col. Sits inside .vc-cols-wrap immediately
+ * left of the settings column (.vc-controls-col, below), on the screen's
+ * right edge. */
 .vc-power-col {
   width: 200px; flex: none; display: flex; flex-direction: column; gap: 4px;
   max-height: calc(100vh - 74px);
 }
 .vc-power-col > * { flex-shrink: 0; }
-/* The spectrum card stays put; the meters (src/ui/audioMeters.ts) scroll
- * in their own strip beneath it, the way the controls column scrolls. */
+/* The meters side. In the wide layout (the base rules here) it docks to the
+ * screen's own top-left corner, independently of .vc-root's top-right
+ * anchor — see .vc-root's own comment above for why that's safe for
+ * onDocPointerDown despite the two no longer being layout siblings. The
+ * stacked media query below dissolves it into root's own single column
+ * (display: contents), which also neutralizes position: fixed here since
+ * a display: contents element generates no box of its own to position. The
+ * spectrum card stays put; the meters (src/ui/audioMeters.ts) scroll in
+ * their own strip beneath it. Its top clears index.html's #sceneNav (the
+ * "‹ Gallery" chip row, 36px tall at top:16px, which shares this corner)
+ * by an 8px gap rather than covering it. */
 .vc-spectrum-col {
   width: 377px; flex: none; display: flex; flex-direction: column; gap: 4px;
-  max-height: calc(100vh - 74px);
+  max-height: calc(100vh - 76px);
+  position: fixed; top: 60px; left: 16px; z-index: 30;
 }
 .vc-spectrum-col > * { flex-shrink: 0; }
 .vc-spectrum-col > .vc-meters { flex-shrink: 1; min-height: 0; overflow-y: auto; }
@@ -142,12 +178,18 @@ const stylesheet = `
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
-/* Power + the spectrum column travel together (deviceMenu.ts's columnsWrap):
- * once every card in both is folded, there's nothing left to show but a
- * stack of title bars, so vc-cols-folded collapses the pair horizontally
- * too, down to one small triangle that reopens everything. Scoped to this
- * wrapper's direct children so a lone folded card (the common case) never
- * triggers it. */
+/* Power + the settings column travel together in .vc-root's own flex row;
+ * .vc-cols-wrap here is Power's own wrapper (the meters column left it for
+ * an independent dock above, leaving this holding just the fold toggle and
+ * Power) — kept as a wrapper rather than flattened away so the fold-all
+ * triangle below still has one place to hide/reveal both itself and Power
+ * as a unit. Once every card in Power AND the (now independently docked)
+ * meters column is folded, there's nothing left to show but a stack of
+ * title bars, so vc-cols-folded collapses this wrapper down to one small
+ * triangle that reopens everything — see refreshColumnsFold (deviceMenu.ts)
+ * for why the meters column being elsewhere on screen doesn't stop it
+ * counting toward that check. Scoped to this wrapper's direct children so a
+ * lone folded card (the common case) never triggers it. */
 /* align-items: flex-start keeps a folded (short) column from stretching to
  * match its taller neighbor; pointer-events here follows .vc-root's rule
  * above, for the same reason — this row's own box is still as tall as
@@ -328,6 +370,17 @@ const stylesheet = `
 }
 .vc-slider:focus { outline: none; }
 .vc-row:hover .vc-slider, .vc-row:focus-within .vc-slider { transform: scale(1.015, 1.6); }
+/* A .vc-slider outside a .vc-row (the patch bay's own weight controls,
+ * deviceMenu.ts's buildWeightSlider) has no :focus-within ancestor to
+ * supply the scale/glow above, so give it a plain ring directly instead —
+ * keyboard focus stays visible wherever a .vc-slider lives. Harmless
+ * layered on top of a .vc-row slider's own effect too. */
+.vc-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px color-mix(in srgb, var(--vc-accent) 60%, transparent);
+}
+.vc-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px color-mix(in srgb, var(--vc-accent) 60%, transparent);
+}
 .vc-slider::-webkit-slider-runnable-track {
   height: 3px; border-radius: 2px;
   background: linear-gradient(var(--vc-accent), var(--vc-accent)) no-repeat 0 0 / var(--vc-fill) 100%, rgba(255, 255, 255, 0.18);
@@ -403,6 +456,46 @@ const stylesheet = `
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--vc-accent) 70%, transparent);
 }
 
+/* The patch bay (deviceMenu.ts): a drive row's input port and the row's own
+ * pinned/preview highlight.
+ *
+ * The port's position (a 10px ring at the row's own left edge, facing the
+ * meters column which docks to the screen's own left edge — see
+ * .vc-spectrum-col above) is a plain class rule rather than deviceMenu.ts's
+ * own inline cssText, since drivePortStyle() (deviceMenu.ts) only ever
+ * writes colour/border/box-shadow inline — the setting's own plugged
+ * sources, and the ring that marks it pinned (solid, glowing) vs merely
+ * previewed (a bare outline) — never anything this rule already owns.
+ * left is small and positive, not hanging past the row into the card's
+ * own padding: .vc-row's padding/negative-margin pair (below) means a more
+ * negative offset here lands outside .vc-card's own overflow: hidden and
+ * gets clipped invisible.
+ *
+ * --vc-pin-color (set by deviceMenu.ts's refreshMeta, on the row) is the
+ * setting's own first plugged source's colour, or SCENE_VIOLET for a
+ * "scene" mix with nothing plugged in — the same colour drivePortStyle
+ * uses for the port's own glow, so a pinned/previewed row's border always
+ * matches what its port is showing. Pinned gets a solid border and stays
+ * visually "open"; previewed (hover/focus short of a click) gets only the
+ * background tint, no border — see the row grammar in this file's own
+ * header for why a click is what actually expands the patch panel. */
+.vc-drive-port {
+  position: absolute; left: 1px; top: 15px; width: 10px; height: 10px; border-radius: 50%;
+  padding: 0; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.vc-drive-port:hover { transform: scale(1.25); }
+.vc-drive-port:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* Room for the port at the row's own left edge, so its label/summary text
+ * doesn't sit underneath it (createControlRow's driveRowLeftStyle). */
+.vc-drive-row-left { padding-left: 14px; }
+.vc-row.vc-drive-pinned {
+  background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 8%, transparent);
+  box-shadow: 0 0 0 1.5px var(--vc-pin-color, ${SCENE_VIOLET});
+}
+.vc-row.vc-drive-preview {
+  background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 6%, transparent);
+}
+
 /* Dev-only typed-value field (deviceMenu.ts's pinOpenEdit), swapped in over a
  * row's digits on click. Inputs don't inherit color from an ancestor span the
  * way inline text does, so this needs its own color rather than relying on
@@ -415,6 +508,191 @@ const stylesheet = `
   outline: none; padding: 0 2px 1px; margin: 0 -2px;
   background: color-mix(in srgb, var(--vc-accent) 12%, transparent);
 }
+
+/* Phase 2b's jacks (src/ui/jack.ts) — a small ring a meter row or hits lane
+ * mounts beside itself, coloured in its own source (driveSources.ts). Solid
+ * fill when it feeds the shown (preview ?? pinned) setting; the usage dots
+ * (.vc-jack-uses) count this scene's settings that use it, always on
+ * regardless of selection — see jack.ts's own header for the full split
+ * between this file's classes and deviceMenu.ts's own state. */
+.vc-jack {
+  position: relative; width: 13px; height: 13px; border-radius: 50%; padding: 0;
+  border: 1.5px solid var(--c); flex-shrink: 0; cursor: pointer;
+  background: radial-gradient(circle, rgba(5, 4, 8, 0.9) 0 34%, color-mix(in srgb, var(--c) 18%, transparent) 36%);
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+.vc-jack:hover { transform: scale(1.2); box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 22%, transparent); }
+.vc-jack-filled {
+  background: radial-gradient(circle, var(--c) 0 40%, color-mix(in srgb, var(--c) 30%, #111) 44%);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent);
+}
+.vc-jack:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.vc-jack-uses {
+  position: absolute; left: 50%; top: calc(100% + 2px); transform: translateX(-50%);
+  display: flex; gap: 2px; pointer-events: none;
+}
+.vc-jack-uses i { width: 2.5px; height: 2.5px; border-radius: 50%; background: var(--c); opacity: 0.65; }
+
+/* Highlighting while a setting is previewed/pinned (deviceMenu.ts's own
+ * refreshPatchHighlight/refreshBandsJacks, audioMeters.ts's
+ * refreshPatchView): every meter row in the Bands+meters column dims,
+ * except a row jack.ts's setRowFed marks as feeding something —
+ *  - .vc-row-fed ("full"): feeds the pinned setting, and nothing else is
+ *    being previewed right now. The strong glow.
+ *  - .vc-row-fed-soft ("soft"): feeds the setting being previewed (a
+ *    hover/focus short of a click) — always wins this glow over a
+ *    competing pinned feed on the same row — or is named in a "scene"
+ *    setting's own display-only sceneSources (drives.ts), never a
+ *    togglable jack.
+ *  - .vc-row-fed-faint ("faint"): feeds the pinned setting, but a
+ *    *different* setting is being previewed elsewhere, so the pinned feed
+ *    steps back to a bare mark rather than competing with what's shown.
+ * A hit lane also gets its own thin glow bar (audioMeters.ts) rather than
+ * relying on the whole Hits row dimming, since HITS_LANES' own lanes can
+ * each feed a different setting. */
+/* .vc-row-keep (the Bands card's own faders row) opts out — it's the
+ * primary spectrum display, not a peripheral meter, and gets its own
+ * band-range dimming instead (spectrumStrip.ts's setHighlight, wired from
+ * refreshSpectrumDriveHighlight) rather than a flat opacity drop. */
+.vc-spectrum-col.vc-patching .vc-row:not(.vc-row-fed):not(.vc-row-fed-soft):not(.vc-row-fed-faint):not(.vc-row-keep) { opacity: 0.45; }
+.vc-row-fed, .vc-row-fed-soft, .vc-row-fed-faint {
+  box-shadow: inset 0 0 0 1px var(--vc-hl, transparent), 0 0 16px color-mix(in srgb, var(--vc-hl, transparent) 20%, transparent);
+}
+.vc-row-fed-soft { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-hl, transparent) 45%, transparent); }
+.vc-row-fed-faint { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-hl, transparent) 25%, transparent); }
+.vc-lane-glow {
+  position: absolute; left: 0; right: 20px; pointer-events: none; border-radius: 2px;
+  background: color-mix(in srgb, var(--c) 22%, transparent); opacity: 0; transition: opacity 0.15s ease;
+}
+.vc-lane-glow.on { opacity: 1; }
+
+/* Hovering a jack (not a preview/pin) highlights every scene row it feeds —
+ * a lighter-weight, purely transient echo of .vc-row-fed above, keyed to
+ * the jack itself rather than the shown setting (deviceMenu.ts's
+ * onJackHover). */
+.vc-row.vc-drive-hl {
+  box-shadow: 0 0 0 1px var(--vc-hl2, transparent), 0 0 14px color-mix(in srgb, var(--vc-hl2, transparent) 22%, transparent);
+}
+
+/* The cable layer (src/ui/cableLayer.ts): one fixed SVG above .vc-root
+ * (z-index), covering the viewport so a cable can cross from a meter jack
+ * to a scene row's port without any card's own overflow:hidden clipping
+ * it. Each cable's own glow/core/flow path structure and the
+ * draw-on/fade-in for a freshly plugged source are ported from the
+ * prototype's own patch-bay.src.html almost verbatim.
+ *
+ * cableLayer.ts draws two independent groups (see its own header): the
+ * pinned setting's cables, in the structure below, and the setting being
+ * previewed (hover/focus short of a click)'s cables, in the flatter
+ * .vc-cable-preview style further down — thin, dashed, no glow layer, no
+ * flow dash of its own, since a preview never animates. .vc-cable-dimmed
+ * pulls the pinned group back to a fixed opacity while a preview is also
+ * on screen, so the two never visually compete for attention. */
+.vc-cable-layer { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 31; overflow: visible; }
+.vc-cable-glow { fill: none; stroke-width: 6; opacity: 0.13; }
+.vc-cable-core { fill: none; stroke-width: 1.5; opacity: 0.8; }
+.vc-cable-core.vc-cable-soft { stroke-dasharray: 3 3; opacity: 0.4; }
+.vc-cable-flow { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 0.1 10; opacity: 0.9; }
+.vc-cable-flow.vc-cable-soft { opacity: 0.4; }
+.vc-cable-core.vc-cable-new { stroke-dasharray: 100; stroke-dashoffset: 100; animation: vc-cable-draw 0.25s ease-out forwards; }
+.vc-cable-glow.vc-cable-new, .vc-cable-flow.vc-cable-new { opacity: 0; animation: vc-cable-fadein 0.2s 0.2s forwards; }
+@keyframes vc-cable-draw { to { stroke-dashoffset: 0; } }
+@keyframes vc-cable-fadein { to { opacity: var(--o, 0.8); } }
+@media (prefers-reduced-motion: reduce) {
+  .vc-cable-core.vc-cable-new, .vc-cable-glow.vc-cable-new, .vc-cable-flow.vc-cable-new { animation: none; stroke-dashoffset: 0; opacity: var(--o, 0.8); }
+  .vc-cable-flow { stroke-dasharray: none; }
+}
+/* The whole pinned group (glow+core+flow) while a preview is also drawn —
+ * !important because it has to win regardless of which other cable classes
+ * (.vc-cable-soft, .vc-cable-new) happen to be combined on the same path. */
+.vc-cable-glow.vc-cable-dimmed, .vc-cable-core.vc-cable-dimmed, .vc-cable-flow.vc-cable-dimmed { opacity: 0.35 !important; }
+/* The previewed setting's own cables — flat and quiet on purpose, so a
+ * transient hover never reads as "committed" the way a pinned patch does. */
+.vc-cable-preview { fill: none; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
+/* Every one of an Only when patch's own condition sources (there can be more
+ * than one now — src/render/drives.ts's own header) — a longer dash than
+ * .vc-cable-soft's fine 3/3 (a scene-mix cable) and than .vc-cable-preview's
+ * own 3/3, so a gate's condition reads distinctly in the cables too
+ * (src/ui/deviceMenu.ts's cableGroupFor). Core only — the flow layer keeps
+ * its own short running dash regardless, and the glow layer stays solid. */
+.vc-cable-core.vc-cable-cond { stroke-dasharray: 9 6; }
+/* A muted source's own cable (src/render/drives.ts's DriveSource.off) — one
+ * flat path, no glow/flow layer at all (src/ui/cableLayer.ts's own recompute
+ * skips those for a muted source outright), a longer dash still than either
+ * .vc-cable-cond's 9/6 or .vc-cable-preview's 3/3 so it reads as its own,
+ * quieter thing rather than a variant of either. */
+.vc-cable-muted { fill: none; stroke-width: 1; stroke-dasharray: 14 8; opacity: 0.3; }
+
+/* "Pick a setting first" — a jack clicked with nothing pinned and nothing
+ * ever previewed (deviceMenu.ts's showToast). */
+.vc-toast {
+  position: fixed; left: 50%; bottom: 84px; transform: translate(-50%, 6px);
+  background: rgba(8, 11, 10, 0.92); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px;
+  padding: 8px 14px; font: 400 12px/1.3 ${FONT_LABEL}; color: #fff; z-index: 32;
+  opacity: 0; pointer-events: none; transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.vc-toast-show { opacity: 1; transform: translate(-50%, 0); }
+
+/* The instant tooltip (src/ui/tooltip.ts) for a jack, a row's own input
+ * port, or a row's own sparkline — everything *outside* the pinned patch
+ * panel (which gets .vc-drive-bottom-hint below instead). Styled like the
+ * panel itself: small mono type, dark glass, a left rule in the hovered
+ * thing's own source colour (--c, set by tooltip.ts). z-index above the
+ * cable layer (31) and the toast (32) — it has to read over both. */
+.vc-tooltip {
+  position: fixed; z-index: 40; pointer-events: none; max-width: 230px;
+  background: rgba(8, 11, 10, 0.94); border-left: 2px solid var(--c, #fff);
+  border-radius: 3px; padding: 5px 8px 6px;
+  font: 400 10.5px/1.4 ${FONT_MONO}; color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.vc-tooltip div + div { color: rgba(255, 255, 255, 0.55); margin-top: 2px; }
+
+/* The pinned patch panel's own bottom hint line (deviceMenu.ts's
+ * buildPatchPanel) — a fixed two-line-tall strip so the panel never
+ * reflows as the hint text changes length while hovering/tabbing between
+ * controls. Text is written by a single delegated pointerover/pointerout/
+ * focusin/focusout pair on the panel root, keyed off each control's own
+ * data-hint attribute — never per-tick, never rebuilt. */
+.vc-drive-bottom-hint {
+  min-height: 2.6em; font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.6);
+  padding-top: 2px; border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* The Only when patch's own condition marker (deviceMenu.ts's buildSourceLine)
+ * lives in every source line's own left gutter column (driveSrcGutterStyle) —
+ * a fixed-width span every line reserves whether or not it's a condition, so
+ * the dashed rule never shifts a line's dots/names/controls the way a
+ * border+padding on the whole line used to. Lit only on a condition line,
+ * echoing the dashed condition trace in the output graph and the
+ * dashed-long condition cable above. */
+.vc-drive-gutter-cond { border-right: 2px dashed rgba(255, 255, 255, 0.45); }
+
+/* The source line's own on/off switch (deviceMenu.ts's buildMuteSwitch) — a
+ * compact copy of .vc-toggle's own track/knob look, deliberately not that
+ * same class: .vc-toggle is this file's Tab-ring selector (deviceMenu.ts's
+ * ringElements()), and a mute switch inside the pinned patch panel isn't
+ * meant to join that ring. The --c custom property (the source's own
+ * colour, set by buildMuteSwitch) lights the track while the source is on;
+ * off falls back to a plain, unlit grey. */
+.vc-mute-switch {
+  position: relative; width: 18px; height: 10px; padding: 0; border: none; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.16); cursor: pointer; flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+.vc-mute-switch::after {
+  content: ""; position: absolute; top: 1.5px; left: 1.5px; width: 7px; height: 7px;
+  border-radius: 50%; background: #fff; transition: transform 0.15s ease;
+}
+.vc-mute-switch[aria-checked="true"] { background: color-mix(in srgb, var(--c, #fff) 55%, rgba(255, 255, 255, 0.16)); }
+.vc-mute-switch[aria-checked="true"]::after { transform: translateX(8px); }
+.vc-mute-switch:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* A muted source line (src/render/drives.ts's DriveSource.off) dims to read
+ * as "off" at a glance — except the switch itself, which stays legible so
+ * it's obvious what to click to bring the source back (deviceMenu.ts's own
+ * header's Muting paragraph). */
+.vc-drive-src-muted > *:not(.vc-mute-switch) { opacity: 0.45; }
 
 /* Chrome buttons (index.html) ring while their thing is active: the gear
  * while this panel is open, fullscreen while immersed. */

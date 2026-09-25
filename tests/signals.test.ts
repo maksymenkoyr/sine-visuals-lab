@@ -24,7 +24,7 @@ describe("signals registry", () => {
     // and fails loudly if they ever drift — the two are meant to change
     // together, rarely, both by hand.
     const knownCards = new Set(["scope", "signal", "lufs", "rhythm", "character"]);
-    const knownRows = new Set(["section", "tempo", "hits", "centroid"]);
+    const knownRows = new Set(["section", "tempo", "hits", "centroid", "onset"]);
     for (const spec of Object.values(SIGNALS)) {
       if (!spec.monitor) continue;
       expect(knownCards.has(spec.monitor.card)).toBe(true);

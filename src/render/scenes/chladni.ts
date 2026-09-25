@@ -409,7 +409,7 @@ const SETTINGS: SceneSetting[] = [
     auto: { brightness: 0.35, attack: 0.15 },
     // Two signals (the slewed high level and its onset pulse), not one —
     // see the vGlow formula in POINT_VERT — so the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: treble level + hits" },
+    drive: { default: "scene", sceneLabel: "Scene: treble level + hits", sceneSources: ["anim.high", "anim.highOnset"] },
   },
   {
     key: "beatFlash",

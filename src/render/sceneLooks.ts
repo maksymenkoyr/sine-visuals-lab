@@ -1,9 +1,8 @@
 import type { SceneSetting } from "./sceneSettings.ts";
 import { getSceneSetting, setSceneSetting, settingDefault, variantFirst } from "./sceneSettings.ts";
 import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
-import type { DriveChoice } from "./drives.ts";
-import { sameDriveChoice } from "./drives.ts";
-import { getDriveChoice, resetDriveChoice, sanitizeChoice, setDriveChoice } from "./driveStore.ts";
+import { defaultDriveSetting, sameDriveSetting, type DriveSetting } from "./drives.ts";
+import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSetting, setDriveSetting, type StoredDriveSetting } from "./driveStore.ts";
 
 /**
  * Named, shareable snapshots of one scene's own settings — the sliders in the
@@ -37,6 +36,27 @@ import { getDriveChoice, resetDriveChoice, sanitizeChoice, setDriveChoice } from
  * any other schema-outlives-the-link case this format tolerates. decodeLook
  * never throws — a malformed or future-versioned code (a link outlives this
  * schema) comes back null, and the caller decides what "didn't parse" means.
+ *
+ * Each `d` entry is one setting's captured `DriveSetting` (drives.ts), wire-
+ * encoded as whichever of two shapes is smaller: a one-source, weight-1,
+ * Graded, unconditioned, unmuted `add` patch — the identity shape a plain
+ * `DriveChoice` used to be, before this store had patches — encodes as that
+ * bare `DriveChoice` (a string id, or `{source:"beat"|"line", …}`), so a
+ * link built by an app from before patches existed still decodes here, and a
+ * link built by this app for a setting nobody has multi-sourced still
+ * decodes on that older app. Anything else (more than one source, a non-
+ * `add` mix, a non-1 weight, a non-Graded height, a marked condition, or a
+ * muted source) encodes as the compact patch `{m: DriveMix, s: [{c:
+ * DriveChoice, w?: number, h?: HitHeight, g?: 1, o?: 1}, …]}` — a source's
+ * own `g`/`o` are `DriveSource.when`/`.off` (drives.ts's own header covers
+ * what each does) — an old app ignores a `d` entry it can't parse as a plain
+ * choice the same way it ignores `d` itself (ignore the unknown shape, fall
+ * back to the setting's own default). This is the exact same
+ * `StoredDriveSetting` shape `DriveEntry.patch` persists to localStorage as —
+ * one canonical wire shape for a DriveSetting crossing either boundary, the
+ * same way a bare `DriveChoice` already served both before patches
+ * existed — so `encodeDriveSetting`/`sanitizeDriveSetting` (driveStore.ts)
+ * are reused here rather than re-derived.
  */
 export interface SceneLook {
   name: string;
@@ -47,14 +67,15 @@ export interface SceneLook {
    *  auto" default in autoTune.ts's own store (that store now defaults every
    *  key to manual; a Look's apply is what puts an omitted key into auto). */
   manual: Record<string, number>;
-  /** Each drive setting's captured source choice (src/render/drives.ts),
-   *  only for a setting whose choice isn't already its own `drive.default`
+  /** Each drive setting's captured `DriveSetting` (src/render/drives.ts),
+   *  only for a setting whose setting isn't already its own `drive.default`
    *  — same "only what a plain apply wouldn't already reproduce" rule as
-   *  `manual`. Omitted entirely when every drive setting was already at its
-   *  default, and always on a Look captured before this field existed;
-   *  applyLook treats a key absent here the same way it treats one absent
-   *  from `manual` — back to default, authoritative. */
-  drives?: Record<string, DriveChoice>;
+   *  `manual`, compared with `sameDriveSetting`. Omitted entirely when every
+   *  drive setting was already at its default, and always on a Look
+   *  captured before this field existed; applyLook treats a key absent here
+   *  the same way it treats one absent from `manual` — back to default,
+   *  authoritative. */
+  drives?: Record<string, DriveSetting>;
 }
 
 const STORAGE_KEY = "vibe.looks";
@@ -108,15 +129,15 @@ export function deleteLook(sceneId: string, name: string): void {
 
 export function captureLook(name: string, sceneId: string, specs: readonly SceneSetting[]): SceneLook {
   const manual: Record<string, number> = {};
-  let drives: Record<string, DriveChoice> | undefined;
+  let drives: Record<string, DriveSetting> | undefined;
   for (const spec of specs) {
     // The variant (SceneSetting.variant) is always carried, auto or not:
     // every other key is stored per variant option, so a Look that left it
     // out would apply its keys into whatever option the receiver was on.
     if (spec.variant || !isAutoEnabled(sceneId, spec.key)) manual[spec.key] = getSceneSetting(sceneId, spec);
     if (spec.drive) {
-      const choice = getDriveChoice(sceneId, spec);
-      if (!sameDriveChoice(choice, spec.drive.default)) (drives ??= {})[spec.key] = choice;
+      const setting = getDriveSetting(sceneId, spec);
+      if (!sameDriveSetting(setting, defaultDriveSetting(spec))) (drives ??= {})[spec.key] = setting;
     }
   }
   return { name, sceneId, manual, drives };
@@ -125,8 +146,8 @@ export function captureLook(name: string, sceneId: string, specs: readonly Scene
 /** Sets every spec in the scene — pins the keys the Look lists, and returns
  *  every other key to auto at its default. See the module header for why
  *  this has to be authoritative rather than additive. Same rule for a
- *  `SceneSetting.drive` spec's choice: listed in `look.drives` -> set to
- *  that choice, absent -> back to `spec.drive.default`. */
+ *  `SceneSetting.drive` spec's setting: listed in `look.drives` -> set to
+ *  that setting, absent -> back to `spec.drive.default`. */
 export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void {
   // The variant goes first (sceneSettings.ts's variantFirst): every other
   // key is stored per variant option, so it has to be switched before they
@@ -143,9 +164,9 @@ export function applyLook(look: SceneLook, specs: readonly SceneSetting[]): void
       setAutoEnabled(look.sceneId, spec.key, true);
     }
     if (spec.drive) {
-      const choice = look.drives?.[spec.key];
-      if (choice !== undefined) setDriveChoice(look.sceneId, spec, choice);
-      else resetDriveChoice(look.sceneId, spec);
+      const setting = look.drives?.[spec.key];
+      if (setting !== undefined) setDriveSetting(look.sceneId, spec, setting);
+      else resetDriveSetting(look.sceneId, spec);
     }
   }
 }
@@ -165,13 +186,16 @@ function fromBase64Url(code: string): string {
 }
 
 export function encodeLook(look: SceneLook): string {
-  const payload: { v: number; n: string; s: string; m: Record<string, number>; d?: Record<string, DriveChoice> } = {
+  const payload: { v: number; n: string; s: string; m: Record<string, number>; d?: Record<string, StoredDriveSetting> } = {
     v: CODE_VERSION,
     n: look.name,
     s: look.sceneId,
     m: look.manual,
   };
-  if (look.drives && Object.keys(look.drives).length > 0) payload.d = look.drives;
+  if (look.drives && Object.keys(look.drives).length > 0) {
+    payload.d = {};
+    for (const [key, setting] of Object.entries(look.drives)) payload.d[key] = encodeDriveSetting(setting);
+  }
   return toBase64Url(JSON.stringify(payload));
 }
 
@@ -186,14 +210,14 @@ export function decodeLook(code: string): SceneLook | null {
       if (typeof value !== "number" || !Number.isFinite(value)) return null;
       manual[key] = value;
     }
-    let drives: Record<string, DriveChoice> | undefined;
+    let drives: Record<string, DriveSetting> | undefined;
     if (parsed.d !== undefined) {
       if (!parsed.d || typeof parsed.d !== "object") return null;
       drives = {};
       for (const [key, value] of Object.entries(parsed.d)) {
-        const choice = sanitizeChoice(value);
-        if (choice === null) return null;
-        drives[key] = choice;
+        const setting = sanitizeDriveSetting(value);
+        if (setting === null) return null;
+        drives[key] = setting;
       }
     }
     return { name: parsed.n, sceneId: parsed.s, manual, drives };
