@@ -80,8 +80,11 @@ const ONSET_WINDOW_SEC = 6;
 const MAX_ONSETS = 48; // hard cap for the O(n²) pair walk
 const ONSET_WEIGHT_CAP = 4;
 const MAX_PAIR_GAP_SEC = 4;
-const BPM_MIN = 70;
-const BPM_MAX = 180;
+// Exported so src/render/signals.ts's "Tempo" drive source can map
+// tempoBpm into 0..1 against the same window this tracker actually
+// searches, rather than a second, hand-typed copy of these numbers.
+export const BPM_MIN = 70;
+export const BPM_MAX = 180;
 const PERIOD_STEP_SEC = 0.005;
 const COMB_TOL_SEC = 0.05; // ~one and a half frames at 30fps
 // Tighter for the final beat-length measurement than for picking the

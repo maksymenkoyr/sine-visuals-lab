@@ -1,7 +1,19 @@
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { sourceKey, type DriveSourceChoice } from "../render/drives.ts";
 import type { SignalId } from "../render/signals.ts";
-import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";
+import {
+  AUTO_SKY,
+  BANDS_AMBER,
+  HAIRLINE,
+  HOT_RED,
+  HOT_YELLOW,
+  INPUT_GREEN,
+  POWER_TEAL,
+  SCENE_VIOLET,
+  STRIP_HIGH,
+  STRIP_LOW,
+  STRIP_MID,
+} from "./controlsTheme.ts";
 
 /**
  * One place naming every drive source's colour and panel label (the patch
@@ -32,6 +44,10 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "anim.energy": "Loudness",
   "anim.sectionIntensity": "Song intensity",
   "anim.centroid": "Brightness",
+  "anim.beatWave": "Beat wave",
+  "anim.barWave": "Bar wave",
+  "anim.tempo": "Tempo",
+  "anim.tempoLock": "Tempo lock",
 };
 
 /** Plain-language descriptions for every source a jack can plug in — the
@@ -56,6 +72,10 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.energy": "overall loudness across every band.",
   "anim.sectionIntensity": "how intense this part of the song is, over the last few seconds.",
   "anim.centroid": "where the sound's energy sits, from dark and low to bright and high.",
+  "anim.beatWave": "a smooth swing that peaks once every beat, fading out without a confident tempo.",
+  "anim.barWave": "the same smooth swing as Beat wave, once every bar instead.",
+  "anim.tempo": "how fast the tracked tempo is, from slow to fast.",
+  "anim.tempoLock": "how confidently the tempo tracker has locked onto a beat.",
 };
 
 const GRID_SOURCE_DESCRIPTION = "a steady pulse locked to the tempo.";
@@ -78,6 +98,10 @@ const SIGNAL_SOURCE_COLOR: Record<SignalId, string> = {
   "anim.energy": INPUT_GREEN,
   "anim.sectionIntensity": POWER_TEAL,
   "anim.centroid": AUTO_SKY,
+  "anim.beatWave": DRIVE_WHITE,
+  "anim.barWave": DRIVE_WHITE,
+  "anim.tempo": SCENE_VIOLET,
+  "anim.tempoLock": HAIRLINE,
 };
 
 function isGridChoice(choice: DriveSourceChoice): choice is { source: "beat"; grid: number } {
@@ -169,6 +193,6 @@ export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
     label: "Levels",
     choices: ["anim.energy", "anim.low", "anim.mid", "anim.high", "feature.flux", "anim.sectionIntensity", "anim.centroid"],
   },
-  { label: "Tempo", choices: [{ source: "beat", grid: 2 }] },
+  { label: "Tempo", choices: [{ source: "beat", grid: 2 }, "anim.beatWave", "anim.barWave", "anim.tempo", "anim.tempoLock"] },
   { label: "Line", choices: [{ source: "line" }] },
 ];
