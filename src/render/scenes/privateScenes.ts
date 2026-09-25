@@ -7,7 +7,8 @@ import type { Scene } from "../scene.ts";
  * The contract: a paid scene is a folder `src/render/scenes/private/<id>/`
  * whose `index.ts` exports `scene` (a `Scene`) and, optionally, `draft: true`
  * to put it behind the gallery's draft toggle. `private/` is gitignored here;
- * on a developer's machine it is a checkout of the private scenes repo, so
+ * on a developer's machine it is a checkout of the private scenes repo (which
+ * `tools/private-scenes.mjs` clones before `npm run dev` when you have access), so
  * every paid scene registers alongside the free ones: gallery tile, `#/v/<id>`
  * link, settings panel, tuning tools, HMR, all unchanged. `scenes/index.ts`
  * finds those folders with Vite's `import.meta.glob`, which quietly matches
