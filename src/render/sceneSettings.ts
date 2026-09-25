@@ -88,8 +88,35 @@ export interface SceneSetting {
    *  happens in the scene's own JS/GLSL — so a stale entry is a wrong label
    *  rather than a broken scene, which is what tests/signals.test.ts exists
    *  to catch. Omit for a setting that's pure geometry or colour, with
-   *  nothing in the audio pipeline behind it. */
+   *  nothing in the audio pipeline behind it, or for a setting with `drive`
+   *  below — its row's live pill is derived from the drive choice itself,
+   *  so a hand-authored `reads` would just be a second, driftable claim
+   *  about the same thing. */
   reads?: readonly SignalLink[];
+  /** Declares this setting audio-reactive through the drive system
+   *  (src/render/drives.ts): the device menu grows a source picker on its
+   *  row, and the scene reads the resolved value through `<key>Drive()` in
+   *  GLSL or `drives.value()`/`drives.fired()` in JS instead of a coupling
+   *  fixed at build time. `default` is the source this setting reacts to
+   *  until someone changes it — a plain src/render/signals.ts SignalId
+   *  (reused as the drive catalogue, not a parallel enum — see that file's
+   *  header), `{ source: "beat", grid }` for a beat-grid tick
+   *  (src/audio/beatGrid.ts), `{ source: "line" }` for this setting's own
+   *  drawn frequency line (src/audio/bandLine.ts), or `"scene"` for a
+   *  coupling that mixes more than one signal and can't be reduced to a
+   *  single catalogue pick without changing the look — see drives.ts's
+   *  header for why `mix(sceneDefault, drive, 0)` makes that choice exactly
+   *  as bit-identical as any catalogue default. `sceneLabel` names the
+   *  Scene composite in the picker (e.g. "Scene: treble hits + line") —
+   *  required when `default` is `"scene"`, since there's no catalogue label
+   *  to fall back to. `gain` scales a catalogue source's [0,1] reading to
+   *  the shape this setting's own composite otherwise expects; omit for 1
+   *  (no scaling). */
+  drive?: {
+    default: import("./drives.ts").DriveChoice;
+    sceneLabel?: string;
+    gain?: number;
+  };
   /** This enum is the scene's *variant*: the one setting that decides what
    *  the rest of the settings are even acting on (Kaleidoscope's Style).
    *  Every other setting then keeps a separate stored value, auto/manual

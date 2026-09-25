@@ -4,8 +4,9 @@ import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
-import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
+import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
+import { PASSTHROUGH_DRIVES } from "../drives.ts";
 
 // A hidden-line terrain that is a live spectrogram waterfall: across the
 // grid (X) is frequency, mirrored so the bass sits as a ridge down the
@@ -341,6 +342,11 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.15,
+    // The scene's own two-stage envelope off anim.onset (release then
+    // attack, both shaped by Beat Smooth below — a response-shape param,
+    // left alone) — not the catalogue's own beatPulse decay, so the default
+    // is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: this scene's own two-stage beat swell" },
   },
   {
     key: "beatSmooth",
@@ -385,6 +391,11 @@ const SETTINGS: SceneSetting[] = [
     max: 3,
     step: 0.1,
     default: 1.0,
+    // Scales this scene's own spectral-flux envelope (fluxEnv, render()) at
+    // both sites it reaches (Flowing Noise's transient push and the peak
+    // glow's flare, MESH_FRAG) — flux isn't a catalogue signal, so the
+    // default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: this scene's own spectral-flux envelope" },
   },
   {
     key: "dampening",
@@ -447,6 +458,8 @@ const SETTINGS: SceneSetting[] = [
     max: 2,
     step: 0.05,
     default: 0.5,
+    // uEnergy directly (BG_FRAG's lattice term) — a plain All level default.
+    drive: { default: "anim.energy" },
   },
   {
     key: "wireframeOnly",
@@ -691,6 +704,7 @@ function dampen(prev: number, target: number, rate: number, dt: number): number 
 }
 
 const settingsUniformsGlsl = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+const driveUniformsGlsl = DRIVE_GLSL(SETTINGS);
 
 // Camera, projection and the horizon line, shared verbatim by MESH_VERT,
 // MESH_FRAG and BG_FRAG so the background's horizon glow lands exactly on
@@ -715,7 +729,7 @@ const CAMERA_GLSL = `
 // is the one multiplier every use of CIRCLE_RADIUS / SPHERE_RADIUS goes
 // through (layout, horizon, shapeCover) so the swell is consistent.
 uniform float uBeatEnv;
-float shapeScale() { return 1.0 + uBeatExpand * uBeatEnv; }
+float shapeScale() { return 1.0 + uBeatExpand * beatExpandDrive(uBeatEnv); }
 
 vec3 camPos() { return vec3(0.0, uCameraHeight, -uCameraDistance); }
 vec3 camForward() {
@@ -818,6 +832,7 @@ out float vHeight; // raw surface displacement, for the Contour Lines checkbox i
 out float vPole;   // 0 away from the disc center / globe poles, 1 at them, scaled by Center Spike -- the pole's glow in MESH_FRAG
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${CAMERA_GLSL}
 uniform sampler2D uHistory;
 uniform float uNewestRow;
@@ -1036,6 +1051,7 @@ uniform float uFluxEnv; // spectral-flux envelope from render(), brightens the p
 // same linked program and value.
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
 ${CAMERA_GLSL}
@@ -1049,7 +1065,7 @@ void main() {
   vec3 base = max(palette(0.05 + 0.4 * a + 0.12 * vZ, uPalA, uPalB, uPalC, uPalD), 0.0);
   // White-hot push at peaks: Color Intensity moves the threshold, the flux
   // envelope (transients) makes the glow flare.
-  float hot = smoothstep(0.55, 1.0, a * uColorIntensity) * (1.5 + 3.0 * uFluxEnv * uFluxReactivity);
+  float hot = smoothstep(0.55, 1.0, a * uColorIntensity) * (1.5 + 3.0 * fluxReactivityDrive(uFluxEnv) * uFluxReactivity);
 
   if (uIsPointPass > 0.5) {
     // Circular sprite with a soft antialiased rim (gl_PointCoord distance
@@ -1150,6 +1166,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
 ${CAMERA_GLSL}
@@ -1269,7 +1286,7 @@ void main() {
       mask = mix(below, 1.0, smoothstep(hv, hv + 0.1, rUv.y)) * (1.0 - 0.5 * smoothstep(hv + 0.3, 1.0, rUv.y));
     }
     vec3 latticeCol = max(palette(0.5, uPalA, uPalB, uPalC, uPalD), 0.0);
-    col += latticeCol * lattice * mask * uBgMeshIntensity * (0.3 + 0.5 * uEnergy);
+    col += latticeCol * lattice * mask * uBgMeshIntensity * (0.3 + 0.5 * bgMeshIntensityDrive(uEnergy));
   }
 
   // Matches MESH_FRAG's scanline effect so it reads as one continuous CRT
@@ -1388,7 +1405,7 @@ export const meshGridScene: Scene = (() => {
       lastFrameTime = null;
     },
 
-    render(ctx, frame, viewport, palette, anim) {
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!bgProg || !quadVao || !meshProg || !gridVao || !historyTex || !history || !smoothedBands || !prevRawBands) return;
       const { gl } = ctx;
 
@@ -1398,7 +1415,7 @@ export const meshGridScene: Scene = (() => {
       // BG_FRAG declares the full settingsUniformsGlsl block too (it uses a
       // few of them -- Background Mesh, Scanlines -- and the rest are simply
       // unset/no-op uniforms, same as meshProg's uNewestRow pattern).
-      uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       // Last frame's beat envelope (this frame's is computed below): the
       // background's shapeCover() silhouette lags the swell by one frame,
       // which is invisible.
@@ -1499,7 +1516,7 @@ export const meshGridScene: Scene = (() => {
       if (gridDensity !== builtDensity) buildGrid(ctx, gridDensity);
 
       meshProg.use();
-      uploadCommonUniforms(meshProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(meshProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, historyTex);
       gl.uniform1i(historyLoc, 0);
@@ -1513,7 +1530,9 @@ export const meshGridScene: Scene = (() => {
       // Reactivity (which also scales the peak glow's flux term in MESH_FRAG).
       const fluxReactivity = resolveSceneSetting(ID, settingFor("fluxReactivity"));
       const noiseBase = resolveSceneSetting(ID, settingFor("noise"));
-      const effectiveNoise = Math.max(0, Math.min(5, noiseBase + 2.8 * fluxReactivity * fluxEnv));
+      // Same drive reading MESH_FRAG's fluxReactivityDrive(uFluxEnv) resolves
+      // to this tick — see the "fluxReactivity" setting's own comment.
+      const effectiveNoise = Math.max(0, Math.min(5, noiseBase + 2.8 * fluxReactivity * drives.value("fluxReactivity", fluxEnv)));
       meshProg.setF("uNoise", effectiveNoise);
 
       // Nothing else in the gallery's shared context ever clears depth (see

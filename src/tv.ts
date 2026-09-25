@@ -13,7 +13,7 @@ import { createJoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
-import { getBandLine, getBandLineStrength } from "./audio/bandLine.ts";
+import { createDriveEngine } from "./render/drives.ts";
 
 /** No new frame this long -> treat the room as if no host is present and go back to the join screen. */
 const STALE_TIMEOUT_MS = 3000;
@@ -54,6 +54,11 @@ const animClock = createAnimClock();
 // time since the last *rendered* frame and keeps a one-shot edge alive
 // across ticks the render cap skips.
 const renderLatch = createRenderLatch();
+// See src/render/drives.ts's header. No panel on the TV to change a drive
+// choice, so every setting just reads its own `drive.default` from this
+// device's local store — the same TV limitation as the line/beatGrid notes
+// below, generalized: nothing ever writes a non-default choice here.
+const driveEngine = createDriveEngine();
 let lastRafMs = 0;
 
 // Render-rate cap and its jitter-tolerant gate live in framePace.ts (shared
@@ -154,32 +159,29 @@ async function main(): Promise<void> {
     };
 
     // Only the GPU draw is rate-capped — sampling and the anim clock's
-    // decay above stay on every rAF tick. smoothing/beatGrid left at their
-    // defaults (the TV has no per-scene Smoothing/Beat grid controls of its
-    // own); `frame.onset` itself already arrived pre-gated from the phone
-    // (see silenceGate.ts's TV-limitation note), but bandEnergy's own
-    // low/mid/high detectors run locally here too, off this device's own
-    // stored marks — hence passing the gate through. Same TV limitation for
-    // `hit` (src/audio/hitStrength.ts's own header): no `beatRatio` — a
-    // paired TV never runs a local broadband FeatureExtractor of its own —
-    // so a graded broadband beatPulse falls back to the loudest of this
-    // device's own band ratios, same as any device with no local extractor.
-    // Same TV limitation again for `line` (src/audio/bandLine.ts's own
-    // header): the phone's drawn line never travels over the wire — there's
-    // no bandLineEditor UI on the TV to draw one, so this always reads that
-    // module's own defaults (flat 0, Strength 1x) from this device's local
-    // store, same as getSilenceGate()/getHitShape() above.
-    const anim = animClock.advance(
-      dtSec,
-      frame,
-      undefined,
-      undefined,
-      getSilenceGate(),
-      { shape: getHitShape() },
-      { heights: getBandLine(scene.id), strength: getBandLineStrength(scene.id) },
-    );
+    // decay above stay on every rAF tick. smoothing left at its default (the
+    // TV has no per-scene Smoothing control of its own); `frame.onset`
+    // itself already arrived pre-gated from the phone (see silenceGate.ts's
+    // TV-limitation note), but bandEnergy's own low/mid/high detectors run
+    // locally here too, off this device's own stored marks — hence passing
+    // the gate through. Same TV limitation for `hit`
+    // (src/audio/hitStrength.ts's own header): no `beatRatio` — a paired TV
+    // never runs a local broadband FeatureExtractor of its own — so a
+    // graded broadband beatPulse falls back to the loudest of this device's
+    // own band ratios, same as any device with no local extractor. Beat
+    // grid and a setting's own drawn line are drive choices now
+    // (src/render/drives.ts) rather than animClock.advance() params — see
+    // driveEngine's own declaration above for the same TV limitation
+    // restated for those.
+    const anim = animClock.advance(dtSec, frame, undefined, getSilenceGate(), { shape: getHitShape() });
     advanceAutoTune(dtSec, anim.profile);
     renderLatch.accumulate(anim);
+    // No Sensitivity/Expansion on the TV — it renders the wire frame as-is
+    // (see the `frame` passed to scene.render() below), so `uEnergy` there
+    // is just frame.energy, unshaped; the drive engine's own energy source
+    // matches that directly, same reasoning as app.ts's driveEnergy but
+    // without a shaping step to redo.
+    driveEngine.accumulate(dtSec, frame, frame.energy, anim, scene.id, scene.settings ?? []);
 
     if (!shouldRenderFrame(nowRafMs, lastRenderMs, targetFrameIntervalMs(quality.preset))) return;
     lastRenderMs = nowRafMs;
@@ -187,7 +189,9 @@ async function main(): Promise<void> {
     const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);
 
-    scene.render(sceneCtx, frame, viewport, palette, renderLatch.consume(anim, nowRafMs));
+    const latchedAnim = renderLatch.consume(anim, nowRafMs);
+    const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
+    scene.render(sceneCtx, frame, viewport, palette, latchedAnim, drives);
     governor?.recordFrame(nowRafMs);
   }
 

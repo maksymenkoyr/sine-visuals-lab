@@ -6,11 +6,13 @@ import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import {
   COMMON_UNIFORMS_GLSL,
+  DRIVE_GLSL,
   ROOM_UV_GLSL,
   SAMPLE_BANDS_GLSL,
   settingUniformName,
   uploadCommonUniforms,
 } from "../sceneCommon.ts";
+import { PASSTHROUGH_DRIVES } from "../drives.ts";
 
 // A storm cloud lit from the inside by lightning on every beat — the intra-
 // cloud kind, with a hard attack, a couple of return-stroke flickers and an
@@ -449,6 +451,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { attack: 0.3 },
+    // uBeatPulse directly (the extra brightness term in BOLT_VERT's
+    // `bright`) — a plain Beat default.
+    drive: { default: "feature.onset" },
   },
   {
     key: "density",
@@ -510,6 +515,10 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.4,
     auto: { pulse: 0.2, attack: 0.2 },
+    // The lurch's amplitude (beatAmp, render()) is graded across a union of
+    // three signals — a drop takes priority, else a bass or beat rise — so
+    // the default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: drop, else bass or beat hit" },
   },
   {
     key: "flow",
@@ -543,6 +552,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { brightness: -0.35 },
+    // uLow directly (swellScale() in CAMERA_GLSL) — a plain Bass level default.
+    drive: { default: "anim.low" },
   },
   // "Look" leads so the picker sits at the top of the device menu: it decides
   // what the rest of the settings are even acting on.
@@ -583,6 +594,12 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.75,
     auto: { attack: 0.3, pulse: 0.15 },
+    // Gates the pool's ordinary strike (render()) — a bass hit OR a beat
+    // hit, unconditionally (a drop instead fires dropStorm's own burst): no
+    // single catalogue source covers that union, so the default is Scene.
+    // uStrike's own GLSL sites are all plain gain curves on the setting's
+    // own resolved value, no live signal, so nothing there needs wrapping.
+    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit" },
   },
   {
     key: "reach",
@@ -656,6 +673,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.25,
     auto: { loudness: 0.3, brightness: 0.2 },
+    // uEnergy directly, at every site (the march's ambient term and each
+    // geometry pass's own copy of it) — a plain All level default.
+    drive: { default: "anim.energy" },
   },
   {
     key: "spark",
@@ -667,6 +687,11 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.3,
     auto: { brightness: 0.35 },
+    // Mode-dependent: the march's own erosion term reads uHigh (a level),
+    // every geometry pass's shimmer reads uHighPulse (a hit) behind its own
+    // stochastic gate — no single catalogue source covers both, so the
+    // default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: treble level (march) or treble hits (lattice/points/strands)" },
   },
   {
     key: "spectrumGlow",
@@ -692,6 +717,10 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { dynamics: 0.45 },
+    // Gates both the burst of extra pool strikes (render()) and the
+    // whole-frame drop flash (uDropPulse, VOLUME_FRAG, 2 sites) — a single
+    // signal (Drop) at both, so the default is the catalogue source.
+    drive: { default: "anim.dropOnset" },
   },
 ];
 
@@ -2090,6 +2119,7 @@ export function createCellGlow(cells = MAX_CELLS, rng: () => number = Math.rando
 // Shaders
 
 const settingsUniformsGlsl = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+const driveUniformsGlsl = DRIVE_GLSL(SETTINGS);
 
 const STRIKE_UNIFORMS_GLSL = `
 uniform vec3 uStrikeA[${MAX_STRIKES}];
@@ -2322,7 +2352,7 @@ const CAMERA_GLSL = `
 #define TILT 0.22
 
 float swellScale() {
-  return 1.0 + 0.25 * uSwell * uLow;
+  return 1.0 + 0.25 * uSwell * swellDrive(uLow);
 }
 
 vec3 rotY(vec3 p, float ca, float sa) {
@@ -2390,6 +2420,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${STRIKE_UNIFORMS_GLSL}
 uniform highp sampler3D uNoise; // R: value fbm, G: inverted worley — tiled
 uniform highp sampler3D uShape; // the baked silhouettes, one per channel
@@ -2557,7 +2588,7 @@ float density(vec3 p, float sh, int octaves) {
 
   // Treble wisps: one high-frequency octave shaved off the rim, so hats and
   // cymbals fray the cloud's edge rather than lighting it.
-  float wisp = uSpark * uHigh;
+  float wisp = uSpark * sparkDrive(uHigh);
   if (wisp > 0.01) {
     float w = texture(uNoise, q * (BASE_FREQ * 8.0)).g;
     d = clamp(d - wisp * 0.4 * (1.0 - w) * (1.0 - sh), 0.0, 1.0);
@@ -2627,7 +2658,7 @@ void main() {
   // pixel is still written (nothing else in the shared gallery context clears
   // colour).
   if (!march) {
-    vec3 flat_ = bg + boltColor() * 0.1 * uDropPulse * uDropStorm;
+    vec3 flat_ = bg + boltColor() * 0.1 * uDropStorm * dropStormDrive(uDropPulse);
     outColor = vec4(tonemap(flat_), 1.0);
     return;
   }
@@ -2800,7 +2831,7 @@ void main() {
               * 0.9 * lift * mix(1.0, powder, 0.35 * uGasPowder);
           }
           float heightFrac = clamp((sp.y + BOUND.y) / (2.0 * BOUND.y), 0.0, 1.0);
-          vec3 ambient = skyTop * mix(0.35, 1.0, heightFrac) * uAmbient * (0.5 + uEnergy);
+          vec3 ambient = skyTop * mix(0.35, 1.0, heightFrac) * uAmbient * (0.5 + ambientDrive(uEnergy));
           // The band under this sample scales what the gas is lit by, not
           // what it absorbs, and never the lightning — so a loud band reads
           // as a brighter part of the same cloud.
@@ -2830,7 +2861,7 @@ void main() {
   }
 
   // Whole-frame flash on a drop, in front of the volume rather than behind it.
-  col += boltColor() * 0.1 * uDropPulse * uDropStorm;
+  col += boltColor() * 0.1 * uDropStorm * dropStormDrive(uDropPulse);
 
   outColor = vec4(tonemap(col), 1.0);
 }
@@ -2845,6 +2876,7 @@ layout(location = 0) in vec3 aPos;
 out vec3 vColor;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${STRIKE_UNIFORMS_GLSL}
 uniform float uIsNode; // 1.0 only during the nodes (gl.POINTS) draw
 ${AMBIENT_LIFT_GLSL}
@@ -2896,10 +2928,10 @@ void main() {
   // sectionGain is on this same resting term and nothing else — the flash
   // below reaches a dark section of the lattice whole.
   float lit = (0.18 * ambientFloor() * AMB_FLOOR_NORM
-      + 0.9 * uAmbient * (0.5 + uEnergy) * (0.45 + 0.55 * height))
+      + 0.9 * uAmbient * (0.5 + ambientDrive(uEnergy)) * (0.45 + 0.55 * height))
     * depthFade(view.z) * spectrumGain(p, viewToRoomNdc(view)) * sectionGain(p);
   // Treble shimmer: scattered nodes and wires glint on high-band hits.
-  float shimmer = uSpark * uHighPulse * step(0.93, hash11(seed * 7.1 + floor(uTime * 12.0)));
+  float shimmer = uSpark * sparkDrive(uHighPulse) * step(0.93, hash11(seed * 7.1 + floor(uTime * 12.0)));
 
   vColor = (wire * lit
     + flashTint(boltColor(), light) * light
@@ -2951,6 +2983,7 @@ out vec3 vCore;
 out float vSide;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 uniform float uBoltStrength; // this slot's strikeEnvelope value
 ${PALETTE_GLSL}
 ${CAMERA_GLSL}
@@ -2984,7 +3017,7 @@ void main() {
   // The same envelope that lights the gas, so the drawn bolt flashes and
   // flickers with the light it is supposed to be casting — and rides the beat
   // on top of that, which is the connection this mode exists to make.
-  float bright = uBoltStrength * uBolt * (1.0 + 0.25 * uBeatPulse);
+  float bright = uBoltStrength * uBolt * (1.0 + 0.25 * boltDrive(uBeatPulse));
   float branchAmt = smoothstep(BOLT_BRANCH_KNEE_LO, BOLT_BRANCH_KNEE_HI, uBolt);
   float fork = pow(max(branchAmt, 1e-4), aShape.y);
   bright *= mix(1.0, BOLT_BRANCH_DIM, min(aShape.y, 1.0));
@@ -3040,6 +3073,7 @@ layout(location = 1) in float aSeed;
 out vec3 vColor;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${STRIKE_UNIFORMS_GLSL}
 uniform float uCountBoost;
 // Included for the floor's knee alone: this pass's own resting light has
@@ -3085,10 +3119,10 @@ void main() {
   float heightShade = 0.55 + 0.45 * clamp((aPos.y + EXTENT_Y) / (2.0 * EXTENT_Y), 0.0, 1.0);
   // Same spectrum mapping the gas and the lattice get, on the same term, and
   // the same depthFade the lattice uses.
-  float ambient = uAmbient * (0.5 + uEnergy) * heightShade * depthFade(view.z) * (0.7 + 0.3 * hash11(seed * 3.7))
+  float ambient = uAmbient * (0.5 + ambientDrive(uEnergy)) * heightShade * depthFade(view.z) * (0.7 + 0.3 * hash11(seed * 3.7))
     * spectrumGain(p, viewToRoomNdc(view)) * sectionGain(p);
   // Treble sparks: a scattered few particles glint on high-band hits.
-  float spark = uSpark * uHighPulse * step(0.96, hash11(seed * 7.1 + floor(t * 10.0)));
+  float spark = uSpark * sparkDrive(uHighPulse) * step(0.96, hash11(seed * 7.1 + floor(t * 10.0)));
 
   vec3 base = mix(vec3(0.32, 0.34, 0.5), palette(0.6 + 0.1 * seed, uPalA, uPalB, uPalC, uPalD), 0.5) * 0.4;
   vColor = base * ambient + flashTint(boltColor(), light) * light + vec3(1.0) * spark;
@@ -3139,6 +3173,7 @@ layout(location = 2) in float aStep; // how far along the strand this vertex is
 out vec3 vColor;
 ${COMMON_UNIFORMS_GLSL}
 ${settingsUniformsGlsl}
+${driveUniformsGlsl}
 ${STRIKE_UNIFORMS_GLSL}
 uniform float uCountBoost;
 uniform highp sampler3D uFlowTex; // the curl field — buildFlowVolume
@@ -3230,9 +3265,9 @@ void main() {
   // brighter toward the top, aerial perspective with depth, the spectrum
   // mapping on the ambient side only, and treble sparks.
   float heightShade = 0.55 + 0.45 * clamp((aPos.y + EXTENT_Y) / (2.0 * EXTENT_Y), 0.0, 1.0);
-  float ambient = uAmbient * (0.5 + uEnergy) * heightShade * depthFade(view.z)
+  float ambient = uAmbient * (0.5 + ambientDrive(uEnergy)) * heightShade * depthFade(view.z)
     * (0.7 + 0.3 * hash11(aSeed * 3.7)) * spectrumGain(p, viewToRoomNdc(view)) * sectionGain(p);
-  float spark = uSpark * uHighPulse * step(0.96, hash11(aSeed * 7.1 + floor(uTime * 10.0)));
+  float spark = uSpark * sparkDrive(uHighPulse) * step(0.96, hash11(aSeed * 7.1 + floor(uTime * 10.0)));
 
   // A hair is faint on its own and the tangle is bright where it bunches, so
   // the gain stays low and the overlap does the work. Detail is what a 1px
@@ -3555,7 +3590,7 @@ export const stormScene: Scene = (() => {
       morphPhase = 0;
     },
 
-    render(ctx, frame, viewport, palette, anim) {
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!prog || !quadVao || !pool || !cells || !noiseTex || !shapeTex || !pointProg || !pointVao) return;
       if (!meshProg || !meshVao || !boltProg || !boltVao) return;
       if (!filProg || !filVao || !flowTex) return;
@@ -3606,7 +3641,7 @@ export const stormScene: Scene = (() => {
       // the frame a pulse rose, which is what makes the kick a step per beat
       // instead of a shove for as long as the pulse stays up.
       const beatAmp = dropRose ? 1 : lowRose || beatRose ? Math.min(1, 0.7 + 0.5 * (lowRose ? anim.lowPulse : 0)) : 0;
-      morphPhase = advanceMorphPhase(morphPhase, dt, morphSpeed, morphBeat, beatAmp);
+      morphPhase = advanceMorphPhase(morphPhase, dt, morphSpeed, morphBeat, drives.value("morphBeat", beatAmp));
 
       // Where the cloud sits between its silhouettes: the slider spans the
       // whole loop, and the morph accumulator carries it on from there.
@@ -3624,12 +3659,15 @@ export const stormScene: Scene = (() => {
       const lightStruck = (fired: boolean): void => {
         if (fired && cells && pool && pool.lastSlot >= 0) cells.lightSegment(pool.posA, pool.posB, pool.lastSlot);
       };
-      if (dropRose) {
+      // Single signal (Drop) — a catalogue default — vs. a union of bass and
+      // beat hits — a Scene default; see the "dropStorm"/"strike" settings'
+      // own comments.
+      if (drives.fired("dropStorm", dropRose)) {
         // A drop is a burst of ordinary-strength strikes in different lobes
         // (a cloud-wide flash), not one overdriven strike — three at full
         // amplitude already saturate most of the cloud.
         for (let i = 0; i < STRIKE_DROP_BURST; i++) lightStruck(pool.trigger(0.8 + 0.6 * dropStorm, true));
-      } else if (lowRose || beatRose) {
+      } else if (drives.fired("strike", lowRose || beatRose)) {
         lightStruck(pool.trigger(0.7 + 0.5 * (lowRose ? anim.lowPulse : 0), false));
       }
       // On top of whatever the strike lit: a beat picks its own sections, so
@@ -3641,7 +3679,7 @@ export const stormScene: Scene = (() => {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
       prog.use();
-      uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       prog.setV3v("uStrikeA", pool.posA);
       prog.setV3v("uStrikeB", pool.posB);
       prog.setFv("uStrikeStrength", pool.strength);
@@ -3718,7 +3756,7 @@ export const stormScene: Scene = (() => {
 
         if (meshVertCount > 0) {
           meshProg.use();
-          uploadCommonUniforms(meshProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+          uploadCommonUniforms(meshProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
           meshProg.setV3v("uStrikeA", pool.posA);
           meshProg.setV3v("uStrikeB", pool.posB);
           meshProg.setFv("uStrikeStrength", pool.strength);
@@ -3732,7 +3770,7 @@ export const stormScene: Scene = (() => {
         }
       } else if (mode === MODE_POINTS) {
         pointProg.use();
-        uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+        uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
         pointProg.setV3v("uStrikeA", pool.posA);
         pointProg.setV3v("uStrikeB", pool.posB);
         pointProg.setFv("uStrikeStrength", pool.strength);
@@ -3745,7 +3783,7 @@ export const stormScene: Scene = (() => {
         gl.bindVertexArray(null);
       } else if (mode === MODE_FILAMENTS) {
         filProg.use();
-        uploadCommonUniforms(filProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+        uploadCommonUniforms(filProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
         filProg.setV3v("uStrikeA", pool.posA);
         filProg.setV3v("uStrikeB", pool.posB);
         filProg.setFv("uStrikeStrength", pool.strength);
@@ -3782,7 +3820,7 @@ export const stormScene: Scene = (() => {
       }
       if (anyLive) {
         boltProg.use();
-        uploadCommonUniforms(boltProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+        uploadCommonUniforms(boltProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
         // One strip per live slot: the whole tree — channel, branches and the
         // unused branch slots — is one run of vertices whose joins have no
         // area (see buildBoltTree), so a bolt is one draw however it forked.

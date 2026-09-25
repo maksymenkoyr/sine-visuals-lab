@@ -41,7 +41,17 @@ import {
 } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
-import { getBeatGrid, setBeatGrid } from "./audio/beatGrid.ts";
+import { createDriveEngine } from "./render/drives.ts";
+import {
+  getDriveChoice,
+  getDriveLine,
+  getDriveLineStrength,
+  resetDriveLine,
+  setDriveChoice,
+  setDriveLine,
+  setDriveLineBand,
+  setDriveLineStrength,
+} from "./render/driveStore.ts";
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import {
@@ -97,13 +107,6 @@ import {
   resetBandGains,
   setBandGain,
 } from "./audio/bandGains.ts";
-import {
-  getBandLine,
-  getBandLineStrength,
-  resetBandLine,
-  setBandLineBand,
-  setBandLineStrength,
-} from "./audio/bandLine.ts";
 import {
   advanceAutoTune,
   resolveSceneSetting,
@@ -291,6 +294,11 @@ const animClock = createAnimClock();
 // un-latched `anim` (they run every tick); only what reaches scene.render()
 // goes through the latch.
 const renderLatch = createRenderLatch();
+// One drive engine for the whole app — its per-setting state is already
+// scoped by (scene, setting) internally (settingScope(), same as every
+// other store here), so it doesn't need recreating on a scene switch. See
+// src/render/drives.ts's header for accumulate() vs. forScene().
+const driveEngine = createDriveEngine();
 let lastRafMs = 0;
 let hudHideTimer: number | undefined;
 
@@ -795,14 +803,15 @@ function wireDeviceMenu(): void {
     getBandGain: (sceneId, fader) => getBandGain(sceneId, fader),
     onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
-    getBandLine: (sceneId) => getBandLine(sceneId),
-    setBandLineBand: (sceneId, band, height) => setBandLineBand(sceneId, band, height),
-    resetBandLine: (sceneId) => resetBandLine(sceneId),
-    getBandLineStrength: (sceneId) => getBandLineStrength(sceneId),
-    setBandLineStrength: (sceneId, value) => setBandLineStrength(sceneId, value),
+    getDriveChoice: (sceneId, spec) => getDriveChoice(sceneId, spec),
+    onDriveChoiceChange: (sceneId, spec, choice) => setDriveChoice(sceneId, spec, choice),
+    getDriveLine: (sceneId, spec) => getDriveLine(sceneId, spec),
+    setDriveLineBand: (sceneId, spec, band, height) => setDriveLineBand(sceneId, spec, band, height),
+    setDriveLine: (sceneId, spec, heights) => setDriveLine(sceneId, spec, heights),
+    resetDriveLine: (sceneId, spec) => resetDriveLine(sceneId, spec),
+    getDriveLineStrength: (sceneId, spec) => getDriveLineStrength(sceneId, spec),
+    setDriveLineStrength: (sceneId, spec, value) => setDriveLineStrength(sceneId, spec, value),
     onLufsReset: () => lufsAnalyser?.reset(),
-    getBeatGrid: (sceneId) => getBeatGrid(sceneId),
-    onBeatGridChange: (sceneId, value) => setBeatGrid(sceneId, value),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
     resolveSensitivityValue: (sceneId) => resolveSensitivity(sceneId),
     resolveExpansionValue: (sceneId) => resolveExpansion(sceneId),
@@ -1396,34 +1405,47 @@ function loop(): void {
   // (null on host/renderer paths with no local extractor — see its own doc
   // comment below) — passed as the graded broadband pulse's own ratio so it
   // doesn't have to fall back to a band's own ratio on a device that has a
-  // real broadband reading to give it. The last object is the sensitivity
-  // line (src/audio/bandLine.ts) — this scene's own drawn line and Strength,
-  // off `gained`'s already-band-gained bands, same per-scene shape as
-  // getBandGains above.
+  // real broadband reading to give it.
   const anim = gained
-    ? animClock.advance(
-        dtSec,
-        gained,
-        smoothing,
-        getBeatGrid(scene.id),
-        resolveSilenceGate(),
-        { shape: getHitShape(), beatRatio: lastFluxRatio },
-        { heights: getBandLine(scene.id), strength: getBandLineStrength(scene.id) },
-      )
+    ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: lastFluxRatio })
     : null;
+
+  // Reused for displayFrame at render time below instead of re-resolving —
+  // see the comment on `smoothing` above for why a second resolve*() call
+  // this tick would double-apply the auto slew.
+  let sensitivity = 1;
+  let expansion = 1;
+
   if (anim) {
     lastAnim = anim;
     advanceAutoTune(dtSec, anim.profile);
     // Every tick, whether or not it renders — see renderLatch.ts. A tick
     // that turns out not to render still needs its edges remembered.
     renderLatch.accumulate(anim);
+
+    sensitivity = resolveSensitivity(scene.id);
+    expansion = resolveExpansion(scene.id);
+    // The drive engine's own per-tick advance (src/render/drives.ts's
+    // header) — grid pulses and a setting's own drawn-line peak-hold need
+    // every rAF tick, not just a render tick, same reasoning as
+    // renderLatch.accumulate above. `driveEnergy` is the sensitivity-applied
+    // energy a scene's own uEnergy sees at render — computed here, every
+    // tick, so the "All level" catalogue source never lags a render by more
+    // than this same tick's own gap.
+    const driveEnergy = applySensitivity(gained!, sensitivity, expansion).energy;
+    driveEngine.accumulate(dtSec, gained!, driveEnergy, anim, scene.id, scene.settings ?? []);
   }
 
   // Fed even when null (mic permission still pending) so the spectrum strip
   // can render its "waiting for audio" idle state instead of going dead.
   // `rateScale` lets the meters panel (audioMeters.ts) bypass its own BPM
   // settle and waveform peak-hold at Smoothing's Off stop, same as above.
-  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate);
+  // `liveDrives`, off this tick's own (un-latched) AnimFrame, is purely for
+  // a drive row's live pill/overlay — it only ever reads uniformPair()/
+  // excess(), never fired(), so it can't steal a grid setting's pending edge
+  // out from under the scene that's about to render it (see drives.ts).
+  const liveDrives = anim ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
+  deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
 
   if (!lastVis || !anim) return;
 
@@ -1438,8 +1460,10 @@ function loop(): void {
   const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
-  const displayFrame = applySensitivity(gained!, resolveSensitivity(scene.id), resolveExpansion(scene.id));
-  scene.render(mainHost!.ctx, displayFrame, viewport, palette, renderLatch.consume(anim, nowRafMs));
+  const displayFrame = applySensitivity(gained!, sensitivity, expansion);
+  const latchedAnim = renderLatch.consume(anim, nowRafMs);
+  const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
+  scene.render(mainHost!.ctx, displayFrame, viewport, palette, latchedAnim, drives);
   governor?.recordFrame(nowRafMs);
 }
 

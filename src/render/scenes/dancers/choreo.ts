@@ -35,6 +35,18 @@ export interface ChoreoParams {
   groove: number;
   /** 0..1 how far bass hits open the jaw (the `jaw` setting). */
   jaw: number;
+  /** The "jaw" setting's own resolved drive (src/render/drives.ts) — what
+   *  the jaw actually opens against. Defaults to `clocks.lowPulse` when
+   *  omitted, its Bass hit default, so every existing caller (tests
+   *  included) keeps today's exact behavior; only index.ts's render()
+   *  passes a real drive-resolved value. */
+  jawDrive?: number;
+  /** The "bob" setting's own resolved drive, at each of its two distinct
+   *  sites below (dolly/tilt read the beat, roll reads the bass) — a Scene
+   *  default mixes both, so both fall back to their own `clocks.*` field
+   *  when omitted. See jawDrive's own comment. */
+  bobBeatDrive?: number;
+  bobLowDrive?: number;
   /** Clip family to dance, or null for the whole library (the `style` setting). */
   family: string | null;
   /** How one move hands over to the next (the `blend` setting) — see player.ts. */
@@ -123,7 +135,7 @@ export function createChoreographer(): Choreographer {
       dropBlend = slew(dropBlend, dropTarget, dropTarget > dropBlend ? DROP_ATTACK_RATE : DROP_RELEASE_RATE, dtSec);
       if (dropBlend > 1e-3) lerpPose(target, drop, dropBlend * (0.5 + 0.5 * params.energy), target);
 
-      mulBoneEuler(target, B.jaw, params.jaw * clocks.lowPulse * JAW_MAX, 0, 0);
+      mulBoneEuler(target, B.jaw, params.jaw * (params.jawDrive ?? clocks.lowPulse) * JAW_MAX, 0, 0);
 
       if (!primed) {
         pose.set(target);
@@ -134,9 +146,11 @@ export function createChoreographer(): Choreographer {
       }
 
       const bob = params.bob;
-      cam.camDolly = slew(cam.camDolly, bob * clocks.beatPulse * DOLLY_MAX, CAM_SLEW_RATE, dtSec);
-      cam.camTilt = slew(cam.camTilt, bob * clocks.beatPulse * TILT_MAX, CAM_SLEW_RATE, dtSec);
-      cam.camRoll = slew(cam.camRoll, bob * clocks.lowPulse * ROLL_MAX, CAM_SLEW_RATE, dtSec);
+      const bobBeat = params.bobBeatDrive ?? clocks.beatPulse;
+      const bobLow = params.bobLowDrive ?? clocks.lowPulse;
+      cam.camDolly = slew(cam.camDolly, bob * bobBeat * DOLLY_MAX, CAM_SLEW_RATE, dtSec);
+      cam.camTilt = slew(cam.camTilt, bob * bobBeat * TILT_MAX, CAM_SLEW_RATE, dtSec);
+      cam.camRoll = slew(cam.camRoll, bob * bobLow * ROLL_MAX, CAM_SLEW_RATE, dtSec);
 
       return { pose, clip: clip ? clip.name : null, ...cam };
     },

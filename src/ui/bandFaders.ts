@@ -27,6 +27,13 @@ import { BANDS_AMBER, FADER_OFF, FONT_MONO } from "./controlsTheme.ts";
  * Home and End are handled here since they're slider semantics rather than
  * panel hotkeys; the panel wires R/T through reset()/toggleOff().
  *
+ * The gain/Hz readouts grid is built here (it reads the same `gains`/
+ * `edgesHz` this component already owns) but returned separately as
+ * `readouts` rather than appended into `el` — deviceMenu.ts mounts it in
+ * the Bands card's own swap zone (its Equaliser layer, alongside the fader
+ * hint), not under the strip itself, so `el` is just the plot + fader hit
+ * areas + (deviceMenu.ts's own addition) the line-drawing overlay on top.
+ *
  * Travel is vertical: middle is 1× (see bandGains.ts's faderPosToGain for
  * the mapping and the centre detent), up boosts, down cuts, the bottom is
  * Off. T mutes a fader to Off and restores it on a second press; any other
@@ -40,6 +47,9 @@ import { BANDS_AMBER, FADER_OFF, FONT_MONO } from "./controlsTheme.ts";
 export interface BandFaders {
   el: HTMLElement;
   strip: SpectrumStrip;
+  /** The gain/Hz readouts grid — see this file's header for why it isn't
+   *  already a child of `el`. Mount it wherever the caller wants it shown. */
+  readouts: HTMLElement;
   /** The focusable hit areas, leftmost first — the panel wires keys on these. */
   faders: HTMLElement[];
   setGains(gains: ArrayLike<number>): void;
@@ -120,9 +130,9 @@ export function createBandFaders(opts: BandFadersOpts): BandFaders {
     gainSpans.push(gainSpan);
     hzSpans.push(hzSpan);
   }
-  // Two rows of the same grid: gains above, frequencies below.
+  // Two rows of the same grid: gains above, frequencies below. Not appended
+  // into `el` — see this file's header and the `readouts` field below.
   readouts.append(...gainSpans, ...hzSpans);
-  el.appendChild(readouts);
 
   function showFader(i: number): void {
     const g = gains[i];
@@ -229,6 +239,7 @@ export function createBandFaders(opts: BandFadersOpts): BandFaders {
   return {
     el,
     strip,
+    readouts,
     faders,
     setGains(next: ArrayLike<number>): void {
       for (let i = 0; i < BAND_FADER_COUNT; i++) gains[i] = next[i];

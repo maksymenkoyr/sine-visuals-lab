@@ -5,8 +5,9 @@ import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
-import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
+import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
+import { PASSTHROUGH_DRIVES } from "../drives.ts";
 
 // A Chladni plate, simulated rather than painted: a plate whose resonant
 // modes are each driven by the music's energy at that mode's own resonant
@@ -353,6 +354,8 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     // A loud, dynamic room drives the plate harder.
     auto: { loudness: 0.3, dynamics: 0.15 },
+    // uEnergy directly (inside the shake*(0.25+2.4*...) formula, SIM_FRAG) — a plain All level default.
+    drive: { default: "anim.energy" },
   },
   {
     key: "kick",
@@ -365,6 +368,8 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     // Dark, bass-heavy mixes carry more kick presence to throw on.
     auto: { brightness: -0.3, attack: 0.25 },
+    // uLowPulse directly — a plain Bass hit default.
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "fieldGlow",
@@ -377,6 +382,8 @@ const SETTINGS: SceneSetting[] = [
     default: 0.25,
     // A louder room lights the plate a little more.
     auto: { loudness: 0.2 },
+    // uEnergy directly (BG_FRAG) — a plain All level default.
+    drive: { default: "anim.energy" },
   },
   {
     key: "grainGlow",
@@ -400,6 +407,9 @@ const SETTINGS: SceneSetting[] = [
     default: 0.5,
     // Directly the hats/cymbals dial, as caustics' sparkle.
     auto: { brightness: 0.35, attack: 0.15 },
+    // Two signals (the slewed high level and its onset pulse), not one —
+    // see the vGlow formula in POINT_VERT — so the default is Scene.
+    drive: { default: "scene", sceneLabel: "Scene: treble level + hits" },
   },
   {
     key: "beatFlash",
@@ -412,6 +422,9 @@ const SETTINGS: SceneSetting[] = [
     default: 0.3,
     // Same reasoning as caustics' flash: punches read on punchy, uncluttered material.
     auto: { attack: 0.3, pulse: 0.2, density: -0.15 },
+    // uBeatPulse directly, at both sites it's used (BG_FRAG's plate flash
+    // and POINT_FRAG's grain brightness) — a plain Beat default.
+    drive: { default: "feature.onset" },
   },
 ];
 
@@ -422,6 +435,7 @@ function settingFor(key: string): SceneSetting {
 }
 
 const SETTINGS_UNIFORMS_GLSL = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+const DRIVE_UNIFORMS_GLSL = DRIVE_GLSL(SETTINGS);
 
 /** Fraction of the room's shorter axis the square plate's half-side spans. */
 const SQUARE_PLATE_HALF = 0.46;
@@ -518,6 +532,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uPosTex;
 uniform float uSimDt;
 uniform float uSeed;
@@ -534,7 +549,7 @@ void main() {
   // Vibration on a sub-linear curve so the low half of the slider is a usable
   // whisper while the top of the slider still throws sand hard.
   float shake = pow(uShake, 1.5) * 2.0;
-  float drive = shake * (0.25 + 2.4 * uEnergy) + uKick * uLowPulse * 1.5;
+  float drive = shake * (0.25 + 2.4 * shakeDrive(uEnergy)) + uKick * kickDrive(uLowPulse) * 1.5;
 
   float f = field(p);
   float a = abs(f) * 0.5;
@@ -576,6 +591,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
 ${CHLADNI_GLSL}
@@ -590,11 +606,11 @@ void main() {
 
   float a = amp(p);
   vec3 plate = vec3(0.030, 0.031, 0.036);
-  vec3 glow = palette(0.55 + 0.2 * a, uPalA, uPalB, uPalC, uPalD) * a * a * uFieldGlow * 0.75 * (0.3 + uEnergy);
+  vec3 glow = palette(0.55 + 0.2 * a, uPalA, uPalB, uPalC, uPalD) * a * a * uFieldGlow * 0.75 * (0.3 + fieldGlowDrive(uEnergy));
   // The rim only exists on the square plate; the full-frame plate has no edge to show.
   float rim = (1.0 - smoothstep(0.0, 0.012, 1.0 - border)) * uSquarePlate;
   vec3 col = (plate + glow + rim * 0.10) * inside;
-  col *= 1.0 + uBeatFlash * uBeatPulse * 0.3;
+  col *= 1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 0.3;
   outColor = vec4(col, 1.0);
 }
 `;
@@ -603,6 +619,7 @@ const POINT_VERT = `#version 300 es
 precision highp float;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uPosTex;
 uniform float uSide;
 ${CHLADNI_GLSL}
@@ -636,7 +653,7 @@ void main() {
   // a halo (see POINT_FRAG), mostly on the hat/cymbal onset pulse so it
   // flashes rather than fogs.
   float glint = step(1.0 - 1.0 / ${GLINT_ONE_IN.toFixed(1)}, hash21(vec2(texel) * 0.517 + 9.1));
-  vGlow = glint * clamp(uHighGlow * (0.8 * uHigh + 1.4 * uHighPulse), 0.0, 1.0);
+  vGlow = glint * clamp(uHighGlow * highGlowDrive(0.8 * uHigh + 1.4 * uHighPulse), 0.0, 1.0);
   float resScale = max(1.0, uResolution.y / 720.0);
   // A shard inscribed in the old disc covers less area than it (a triangle
   // 0.41x, a square 0.64x); grow the size by the matching factor so a faceted
@@ -661,6 +678,7 @@ in float vRot;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform float uGrainGain;
 ${PALETTE_GLSL}
 const float PI = 3.14159265;
@@ -704,7 +722,7 @@ void main() {
   float rim = smoothstep(0.5 - edge * 4.0, 0.5 - edge * 0.6, rn) * chunky;
   float chunkShade = mix(1.0, facetShade, chunky) * (1.0 - 0.35 * rim);
   vec3 grainCol = col * chunkShade;
-  float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * uBeatPulse * 0.8);
+  float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 0.8);
   // Treble glow: a soft halo across the enlarged sprite, tinted toward
   // white, falling to zero at the sprite edge. Normalised by sprite area
   // (in 720p pixels) so the bloom a line reaches depends on how many grains
@@ -803,7 +821,7 @@ function createChladniScene(): Scene {
       lastFrameTime = null;
     },
 
-    render(ctx, frame, viewport, palette, anim) {
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!simProg || !bgProg || !pointProg || !quadVao || !pointVao || !response) return;
       const { gl } = ctx;
 
@@ -826,7 +844,7 @@ function createChladniScene(): Scene {
       gl.bindFramebuffer(gl.FRAMEBUFFER, posFbo[write]);
       gl.viewport(0, 0, side, side);
       simProg.use();
-      uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       setModes(simProg, modes);
       simProg.setF("uMaxOrder", maxOrder);
       simProg.setF("uSimDt", dt);
@@ -844,7 +862,7 @@ function createChladniScene(): Scene {
 
       // Plate.
       bgProg.use();
-      uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       setModes(bgProg, modes);
       drawFullscreenQuad(gl, quadVao);
 
@@ -861,7 +879,7 @@ function createChladniScene(): Scene {
       const drawn = drawnGrainCount(grainCount, grainPx, platePx2);
 
       pointProg.use();
-      uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       setModes(pointProg, modes);
       pointProg.setF("uSide", side);
       pointProg.setF("uGrainGain", grainGain(grainCount));

@@ -1,6 +1,5 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
-import type { SignalLink } from "../signals.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, wrapFlow } from "../noiseHash.ts";
 
 /**
@@ -302,8 +301,6 @@ export function advanceStretch(env: number, dtSec: number, onset: boolean): numb
   return onset ? 1 : decayed;
 }
 
-const STRETCH_READS = ["feature.onset"] satisfies readonly SignalLink[];
-
 const SETTINGS: SceneSetting[] = [
   {
     key: "ink",
@@ -392,7 +389,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { attack: 0.3, pulse: 0.15 },
-    reads: STRETCH_READS,
+    // The trigger is anim.onset directly (advanceStretch's own decay
+    // math is unaffected by which edge resets it) — a plain Beat default.
+    drive: { default: "feature.onset" },
   },
   {
     key: "bassSwell",
@@ -404,6 +403,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.8,
     auto: { loudness: 0.2 },
+    // uLow directly (the core-radius term in FRAG) — a plain Bass level default.
+    drive: { default: "anim.low" },
   },
   {
     key: "colorSplit",
@@ -528,7 +529,7 @@ void main() {
   // Ink density: the measured cross. Solid where density >= 1. Two
   // falloffs: the core's, and a faint long tail so the arms still reach
   // the frame edges as hairlines the way the reference's do.
-  float coreR = 0.28 * uParams[${PARAM.coreScale}] * (1.0 + 0.45 * marble) * (1.0 + 0.6 * uLow * uBassSwell);
+  float coreR = 0.28 * uParams[${PARAM.coreScale}] * (1.0 + 0.45 * marble) * (1.0 + 0.6 * bassSwellDrive(uLow) * uBassSwell);
   float armW = 0.3 * uParams[${PARAM.armScale}] * (1.0 + 0.5 * marble) / max(uArms, 0.05);
   float reach = exp(-r / coreR) + 0.04 * exp(-r / 1.2);
   float density = 2.8 * uInk * (1.0 + 0.15 * marble) * reach * exp(-(dAxis * dAxis) / (armW * armW));
@@ -609,11 +610,11 @@ export const inkScene = createFullscreenScene("ink", "Ink Synth", FRAG, {
     const sinBuf = new Float32Array(SIN_FLOW_RATES.length);
     let stretchEnv = 0;
     let prevDropOnset = false;
-    return (_frame, anim, getSetting) => {
+    return (_frame, anim, getSetting, drives) => {
       // The flow phase, at the Flow setting's rate — reduced here, in
       // float64, before anything reaches the shader (file header).
       const ph = anim.flowPhase * getSetting("flow");
-      stretchEnv = advanceStretch(stretchEnv, anim.dtSec, anim.onset);
+      stretchEnv = advanceStretch(stretchEnv, anim.dtSec, drives.fired("stretch", anim.onset));
       const drop = anim.dropOnset && !prevDropOnset;
       prevDropOnset = anim.dropOnset;
       const params = drift.advance(anim.dtSec, anim.barPhase, anim.tempoLock, getSetting("morph"), drop, getSetting("ribbon"));

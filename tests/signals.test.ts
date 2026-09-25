@@ -55,25 +55,18 @@ describe("signals registry", () => {
     // "all"/"low" are the only two the caller (deviceMenu.ts) resolves
     // today — a typo'd third value would otherwise silently fall through
     // to "no highlight" instead of failing here.
-    const known = new Set(["all", "low"]);
+    const known = new Set(["all", "low", "mid", "high"]);
     for (const spec of Object.values(SIGNALS)) {
       if (spec.bandRange === undefined) continue;
       expect(known.has(spec.bandRange)).toBe(true);
     }
   });
 
-  it("caustics' Beat ripple and Ripple source both read the signals the trigger logic actually uses", () => {
-    const scenes = listScenes();
-    const caustics = scenes.find((s) => s.id === "caustics")!;
-    const ripple = caustics.settings!.find((s) => s.key === "ripple")!;
-    const rippleSrc = caustics.settings!.find((s) => s.key === "rippleSrc")!;
-
-    const idsOf = (spec: typeof ripple) =>
-      (spec.reads ?? []).map((l) => (typeof l === "string" ? l : l.signal));
-
-    expect(idsOf(ripple).sort()).toEqual(["anim.dropOnset", "anim.lowOnset", "feature.onset"].sort());
-    expect(idsOf(rippleSrc).sort()).toEqual(["anim.lowOnset", "feature.onset"].sort());
-  });
+  // Caustics' old "Ripple source" dial (a continuous blend between two
+  // trigger signals) is gone — its `reads` pair moved with it. Ripple's
+  // trigger is now a drive choice (SceneSetting.drive, tests/drives.test.ts
+  // covers the identity at its Scene default); this file only owns the
+  // catalogue itself, so there's nothing scene-specific left to check here.
 
   it("shards' Cut on reads both broadband and bass signals, with complementary activeWhen", () => {
     const scenes = listScenes();

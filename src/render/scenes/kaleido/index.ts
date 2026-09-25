@@ -1,6 +1,5 @@
 import { createFullscreenScene } from "../../fullscreenScene.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
-import type { SignalLink } from "../../signals.ts";
 import { KALEIDO_COMMON_GLSL } from "./glsl.ts";
 import { BURST_GLSL, MANDALA_GLSL, PORTAL_GLSL, PRISM_GLSL, STYLE_NAMES } from "./styles.ts";
 
@@ -258,6 +257,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { brightness: -0.2, loudness: 0.2 },
+    // uLow directly, at every style's own use of it — a plain Bass level default.
+    drive: { default: "anim.low" },
   },
   {
     key: "morph",
@@ -304,7 +305,11 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { pulse: 0.3, attack: 0.2 },
-    reads: ["feature.onset", "anim.dropOnset"] satisfies readonly SignalLink[],
+    // anim.onset directly (advanceBeatSurge's trigger) — a plain Beat
+    // default. The section-drop palette flip alongside it is unconditional
+    // — independent of this choice, gated only on this setting's own
+    // resolved value being nonzero, not on which signal fires it.
+    drive: { default: "feature.onset" },
   },
   {
     key: "ease",
@@ -373,7 +378,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.3,
     auto: { brightness: 0.2 },
-    reads: ["anim.centroid"] satisfies readonly SignalLink[],
+    // uCentroid directly (tBase0, main()) — a plain Centroid default.
+    drive: { default: "anim.centroid" },
   },
 ];
 
@@ -479,14 +485,14 @@ export const kaleidoscopeScene = createFullscreenScene("kaleidoscope", "Kaleidos
     let palShift = 0;
     let prevDropOnset = false;
     const surge = createBeatSurgeState();
-    return (_frame, anim, getSetting) => {
+    return (_frame, anim, getSetting, drives) => {
       const flow = getSetting("flow");
       const pulse = getSetting("pulse");
       const flowRate = (FLOW_RATE_MIN + (FLOW_RATE_MAX - FLOW_RATE_MIN) * flow) * (1.0 + FLOW_BASS_GAIN * anim.low);
       flowPos += anim.dtSec * flowRate;
       // anim.onset, not frame.onset: the render cap can skip the tick the
       // feature fired on (see AnimFrame's doc and renderLatch.ts).
-      const swell = advanceBeatSurge(surge, anim.dtSec, anim.onset, pulse, getSetting("ease"));
+      const swell = advanceBeatSurge(surge, anim.dtSec, drives.fired("pulse", anim.onset), pulse, getSetting("ease"));
       const morphRate =
         (MORPH_RATE_MIN + (MORPH_RATE_MAX - MORPH_RATE_MIN) * getSetting("morph")) *
         (1.0 + MORPH_SECTION_GAIN * anim.sectionIntensity + MORPH_SWELL_GAIN * swell);

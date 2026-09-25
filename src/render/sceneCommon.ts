@@ -5,6 +5,7 @@ import type { SceneSetting } from "./sceneSettings.ts";
 import { resolveSceneSetting } from "./autoTune.ts";
 import type { SceneContext, Viewport } from "./scene.ts";
 import type { AnimFrame } from "./animClock.ts";
+import { PASSTHROUGH_DRIVES, type SceneDrives } from "./drives.ts";
 
 /** GLSL uniform declarations every scene (fullscreen or geometry) can rely
  *  on — kept in one place so a new scene path doesn't have to restate them. */
@@ -26,7 +27,6 @@ uniform float uHigh;
 uniform float uLowPulse;  // decaying per-group onset pulse, same shape as uBeatPulse
 uniform float uMidPulse;
 uniform float uHighPulse;
-uniform float uLineDrive; // sensitivity-line drive — see bandLine.ts; 0 with no line drawn or drawn flat
 uniform float uSectionIntensity; // phrase-level loudness trend — see sectionIntensity.ts
 uniform float uDropPulse;        // decaying flash on a detected section change/drop
 uniform float uCentroid; // range-adapted spectral centroid — see spectralCentroid.ts; 0.5 is this track's own recent middle
@@ -40,6 +40,26 @@ uniform vec3 uPalD;
 
 export function settingUniformName(key: string): string {
   return `u${key[0].toUpperCase()}${key.slice(1)}`;
+}
+
+/** Per drive setting (SceneSetting.drive — see sceneSettings.ts and
+ *  drives.ts): `uniform float u<Key>Drive`, `uniform float u<Key>Custom`,
+ *  and the `<key>Drive(sceneDefault)` GLSL helper a scene's own FRAG calls
+ *  at the coupling's call site instead of the old fixed formula — see
+ *  drives.ts's header for why `mix(sceneDefault, u<Key>Drive, u<Key>Custom)`
+ *  is bit-for-bit identical to `sceneDefault` alone at Custom=0 (Scene) and
+ *  to the engine's own value at Custom=1 (every catalogue/grid/line
+ *  default). Settings with no `drive` contribute nothing — spliced into
+ *  fullscreenScene.ts's fragSrc next to settingsUniformsGlsl, and uploaded
+ *  in uploadCommonUniforms below alongside every other setting uniform. */
+export function DRIVE_GLSL(settings: readonly SceneSetting[]): string {
+  return settings
+    .filter((s) => s.drive)
+    .map((s) => {
+      const u = settingUniformName(s.key);
+      return `uniform float ${u}Drive;\nuniform float ${u}Custom;\nfloat ${s.key}Drive(float sceneDefault) { return mix(sceneDefault, ${u}Drive, ${u}Custom); }`;
+    })
+    .join("\n");
 }
 
 // Smoothly samples the (already normalized + enveloped) band array at a
@@ -62,8 +82,13 @@ vec2 roomUv(vec2 uv) {
 }`;
 
 /** Uploads every uniform COMMON_UNIFORMS_GLSL declares, plus this scene's
- *  own settings. Shared between createFullscreenScene and any geometry-based
- *  scene (see meshGrid.ts) so the two paths stay in lockstep. */
+ *  own settings and — for each setting with a `drive` — the pair DRIVE_GLSL
+ *  declared for it. Shared between createFullscreenScene and any
+ *  geometry-based scene (see meshGrid.ts) so the two paths stay in
+ *  lockstep. `drives` defaults to PASSTHROUGH_DRIVES (drives.ts) — every
+ *  caller not wired to a real DriveEngine (a gallery preview, a probe, a
+ *  test) then uploads {0,0} for every drive setting, which is exactly the
+ *  Scene/identity reading, so a scene renders the same as it always did. */
 export function uploadCommonUniforms(
   prog: GLProgram,
   ctx: SceneContext,
@@ -74,6 +99,7 @@ export function uploadCommonUniforms(
   sceneId: string,
   settings: SceneSetting[],
   bandsBuf: Float32Array,
+  drives: SceneDrives = PASSTHROUGH_DRIVES,
 ): void {
   const { gl } = ctx;
   prog.setV2("uResolution", gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -94,14 +120,19 @@ export function uploadCommonUniforms(
   prog.setF("uLowPulse", anim.lowPulse);
   prog.setF("uMidPulse", anim.midPulse);
   prog.setF("uHighPulse", anim.highPulse);
-  prog.setF("uLineDrive", anim.lineDrive);
   prog.setF("uSectionIntensity", anim.sectionIntensity);
   prog.setF("uDropPulse", anim.dropPulse);
   prog.setF("uCentroid", anim.centroid);
   prog.setF("uMaxSteps", ctx.quality.raymarchSteps);
   prog.setF("uDetail", ctx.quality.detail);
   for (const s of settings) {
-    prog.setF(settingUniformName(s.key), resolveSceneSetting(sceneId, s));
+    const u = settingUniformName(s.key);
+    prog.setF(u, resolveSceneSetting(sceneId, s));
+    if (s.drive) {
+      const pair = drives.uniformPair(s.key);
+      prog.setF(`${u}Drive`, pair.drive);
+      prog.setF(`${u}Custom`, pair.custom);
+    }
   }
   const pv = paletteVecs(palette);
   prog.setV3v("uPalA", pv.a);

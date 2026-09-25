@@ -5,11 +5,13 @@ import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
 import {
   COMMON_UNIFORMS_GLSL,
+  DRIVE_GLSL,
   ROOM_UV_GLSL,
   SAMPLE_BANDS_GLSL,
   settingUniformName,
   uploadCommonUniforms,
 } from "../sceneCommon.ts";
+import { PASSTHROUGH_DRIVES } from "../drives.ts";
 import type { QualityPreset } from "../quality.ts";
 import { NUM_BANDS } from "../../audio/types.ts";
 
@@ -233,7 +235,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { pulse: 0.2 },
-    reads: ["feature.onset"],
+    // anim.beatPulse directly (the extra-iterations term below) — a plain
+    // Beat default.
+    drive: { default: "feature.onset" },
   },
   {
     key: "reseed",
@@ -245,7 +249,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.35,
     auto: { pulse: 0.2 },
-    reads: ["feature.onset"],
+    // anim.onset gates the stamp below — a plain Beat default. The stamp's
+    // own strength still rides anim.beatPulse's graded hit shape, untouched.
+    drive: { default: "feature.onset" },
   },
   {
     key: "wipe",
@@ -257,7 +263,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.4,
     auto: { dynamics: 0.2 },
-    reads: ["anim.lowOnset"],
+    // anim.lowOnset gates the stamp below — a plain Bass hit default. The
+    // hole's own radius still rides anim.lowPulse's graded hit shape, untouched.
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "regime",
@@ -284,7 +292,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.4,
     auto: { brightness: 0.2 },
-    reads: ["feature.onset"],
+    // uBeatPulse directly (DISPLAY_FRAG's glowEff) — a plain Beat default.
+    drive: { default: "feature.onset" },
   },
   {
     key: "relief",
@@ -297,7 +306,8 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { dynamics: 0.2 },
-    reads: ["anim.lowOnset"],
+    // uLowPulse directly (DISPLAY_FRAG's reliefEff) — a plain Bass hit default.
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "shaping",
@@ -321,7 +331,8 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    reads: ["anim.centroid"],
+    // uCentroid directly (DISPLAY_FRAG's hueShift) — a plain Centroid default.
+    drive: { default: "anim.centroid" },
   },
   // Camera
   {
@@ -345,7 +356,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.4,
     auto: { pulse: 0.2 },
-    reads: ["feature.onset"],
+    // uBeatPulse directly (DISPLAY_FRAG's zoom) — a plain Beat default. The
+    // regime-cut kick (uCutKick) is a separate additive term, untouched.
+    drive: { default: "feature.onset" },
   },
   // Post
   {
@@ -367,6 +380,7 @@ function settingFor(key: string): SceneSetting {
 }
 
 const SETTINGS_UNIFORMS_GLSL = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+const DRIVE_UNIFORMS_GLSL = DRIVE_GLSL(SETTINGS);
 
 const SIM_FRAG = `#version 300 es
 precision highp float;
@@ -374,6 +388,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 ${SAMPLE_BANDS_GLSL}
 uniform sampler2D uPrev;
 uniform float uTexel;
@@ -431,6 +446,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uPrev;
 // xy = centre (uv), z = radius (uv), w = strength: w == 0 disables a slot,
 // w > 0 stamps a seed (nucleation site), w < 0 is a wipe (clears V, refills
@@ -461,6 +477,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
 ${ROOM_UV_GLSL}
 uniform sampler2D uPrev;
 uniform float uTexel;
@@ -548,10 +565,10 @@ void main() {
   float aspect = uResolution.x / max(uResolution.y, 1.0);
   uv.x *= aspect;
 
-  float glowEff = uGlow * (1.0 + 0.6 * uBeatPulse);
-  float reliefEff = uRelief * (1.0 + 0.8 * uLowPulse);
-  float hueShift = (uCentroid - 0.5) * uTint * 0.5;
-  float zoom = 1.0 + uPunch * 0.10 * uBeatPulse + 0.12 * uCutKick;
+  float glowEff = uGlow * (1.0 + 0.6 * glowDrive(uBeatPulse));
+  float reliefEff = uRelief * (1.0 + 0.8 * reliefDrive(uLowPulse));
+  float hueShift = (tintDrive(uCentroid) - 0.5) * uTint * 0.5;
+  float zoom = 1.0 + uPunch * 0.10 * punchDrive(uBeatPulse) + 0.12 * uCutKick;
 
   vec3 color = vec3(0.0);
 
@@ -780,7 +797,7 @@ function createPetriScene(): Scene {
       lastFrameTime = null;
     },
 
-    render(ctx, frame, viewport, palette, anim) {
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!simProg || !seedProg || !displayProg || !quadVao) return;
       const { gl } = ctx;
 
@@ -801,7 +818,7 @@ function createPetriScene(): Scene {
       const baseIterations = Math.max(1, Math.round(speedAmount));
       let iterations = Math.min(
         MAX_ITERATIONS,
-        baseIterations + Math.round(throbAmount * THROB_STEPS * anim.beatPulse),
+        baseIterations + Math.round(throbAmount * THROB_STEPS * drives.value("throb", anim.beatPulse)),
       );
       if (warmupLeft > 0) {
         const burst = Math.min(warmupLeft, WARMUP_STEPS_PER_FRAME);
@@ -860,7 +877,7 @@ function createPetriScene(): Scene {
         const cutSeedCount = MAX_SEEDS - 1;
         for (let i = 0; i < cutSeedCount; i++) stampSeed(1, seedRadius());
         anySeedThisFrame = true;
-      } else if (anim.onset && reseedAmount > 0.02 && seedCooldown <= 0) {
+      } else if (drives.fired("reseed", anim.onset) && reseedAmount > 0.02 && seedCooldown <= 0) {
         const stamps = 1 + Math.floor(reseedAmount * (MAX_SEEDS - 1));
         const strength = 0.5 + 0.5 * anim.beatPulse * reseedAmount;
         for (let i = 0; i < stamps; i++) stampSeed(strength, seedRadius());
@@ -873,7 +890,7 @@ function createPetriScene(): Scene {
         anySeedThisFrame = true;
       }
 
-      if (anim.lowOnset && wipeAmount > 0.02 && wipeCooldown <= 0 && slotsUsed < MAX_SEEDS) {
+      if (drives.fired("wipe", anim.lowOnset) && wipeAmount > 0.02 && wipeCooldown <= 0 && slotsUsed < MAX_SEEDS) {
         const radius = (0.015 + 0.05 * wipeAmount) * (0.6 + 0.4 * anim.lowPulse);
         stampSeed(-1, radius);
         wipeCooldown = WIPE_COOLDOWN_SEC;
@@ -902,7 +919,7 @@ function createPetriScene(): Scene {
         const write = 1 - read;
         gl.bindFramebuffer(gl.FRAMEBUFFER, stateFbo[write]);
         simProg.use();
-        uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+        uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
         simProg.setF("uTexel", texel);
         // Regime-effective values override the plain slider readings
         // uploadCommonUniforms just set — same uniform names (uFeed/uKill),
@@ -920,7 +937,7 @@ function createPetriScene(): Scene {
         const write = 1 - read;
         gl.bindFramebuffer(gl.FRAMEBUFFER, stateFbo[write]);
         seedProg.use();
-        uploadCommonUniforms(seedProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+        uploadCommonUniforms(seedProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
         seedProg.setV4v("uSeeds", seedsBuf);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, stateTex[read]);
@@ -936,7 +953,7 @@ function createPetriScene(): Scene {
       travel += dt * BEADS_TRAVEL_PER_SEC * driftAmount; // used only by Beads
 
       displayProg.use();
-      uploadCommonUniforms(displayProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(displayProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       displayProg.setF("uTexel", texel);
       displayProg.setF("uDriftAngle", driftAngle);
       displayProg.setF("uTravel", travel);

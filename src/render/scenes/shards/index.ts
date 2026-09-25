@@ -30,6 +30,7 @@ import {
   settingUniformName,
   uploadCommonUniforms,
 } from "../../sceneCommon.ts";
+import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import { resolveSceneSetting } from "../../autoTune.ts";
 import { NUM_BANDS } from "../../../audio/types.ts";
 import { createBeatListener, type BeatListener } from "../../beatListener.ts";
@@ -113,6 +114,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 1,
     auto: { pulse: 0.25, loudness: 0.2 },
+    // anim.low directly (advanceShards' growth rate, layout.ts) — a plain
+    // Bass level default.
+    drive: { default: "anim.low" },
   },
   {
     key: "spin",
@@ -341,7 +345,7 @@ export const shardsScene: Scene = (() => {
       listener = createBeatListener(CUT_LISTENER);
     },
 
-    render(ctx, frame, viewport, palette, anim) {
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!bgProg || !prismProg || !blurProg || !compositeProg || !quadVao || !emptyVao || !state || !listener) return;
       const { gl } = ctx;
 
@@ -350,7 +354,7 @@ export const shardsScene: Scene = (() => {
       const opts = options(ctx.quality.detail);
       const mode = Math.round(resolveSceneSetting(ID, settingFor("cutMode")));
       const hit = listener.advance(anim, cutSource(mode));
-      advanceShards(state, anim.dtSec, hit, anim.low, opts);
+      advanceShards(state, anim.dtSec, hit, drives.value("extend", anim.low), opts);
 
       const distance = resolveSceneSetting(ID, settingFor("distance"));
       const cam = { ...state.camera, dist: state.camera.dist * distance };
@@ -368,7 +372,7 @@ export const shardsScene: Scene = (() => {
       gl.disable(gl.BLEND);
       gl.disable(gl.DEPTH_TEST);
       bgProg.use();
-      uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(bgProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       bgProg.setF("uRollBg", state.camera.roll);
       bgProg.setF("uAspect", aspect);
       drawFullscreenQuad(gl, quadVao);
@@ -381,7 +385,7 @@ export const shardsScene: Scene = (() => {
       gl.enable(gl.DEPTH_TEST);
       gl.bindVertexArray(emptyVao);
       prismProg.use();
-      uploadCommonUniforms(prismProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+      uploadCommonUniforms(prismProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       prismProg.setV4v("uShardA", shardA);
       prismProg.setV4v("uShardB", shardB);
       prismProg.setV4v("uShardC", shardC);
@@ -418,7 +422,7 @@ export const shardsScene: Scene = (() => {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
         compositeProg.use();
-        uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
+        uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, sharpTex);
         gl.activeTexture(gl.TEXTURE1);

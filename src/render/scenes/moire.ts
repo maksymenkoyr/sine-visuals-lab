@@ -232,6 +232,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { pulse: 0.3 },
+    // anim.beatPulse directly (the depthEnv dip term, render()) — a plain
+    // Beat default.
+    drive: { default: "feature.onset" },
   },
   {
     key: "blackout",
@@ -243,6 +246,10 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { attack: 0.2 },
+    // Gates only the chance-rolled bass-hit flip (advanceBlackout) — a
+    // plain Bass hit default. The section-drop flip alongside it is
+    // unconditional, independent of this choice.
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "curtain",
@@ -254,6 +261,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { dynamics: 0.2 },
+    // anim.sectionIntensity directly (the quiet-threshold comparison,
+    // advanceCurtain) — a plain Section default.
+    drive: { default: "anim.sectionIntensity" },
   },
   {
     key: "tint",
@@ -651,16 +661,16 @@ export const moireScene = createFullscreenScene("moire", "Moiré", FRAG, {
     const curtain = createCurtainState();
     const wander = createWander();
 
-    return (frame, anim, getSetting) => {
+    return (frame, anim, getSetting, drives) => {
       elapsedSec += anim.dtSec;
       const drift = getSetting("drift");
       slowT += anim.dtSec * drift * SLOW_RATE;
 
       const seed = advanceFlicker(flicker, anim.dtSec, getSetting("flicker"), drift);
       const depthEnv =
-        introRamp(elapsedSec) * (ENERGY_DEPTH_FLOOR + (1 - ENERGY_DEPTH_FLOOR) * frame.energy) * (1 - getSetting("beatDip") * anim.beatPulse);
-      const blackoutPhase = advanceBlackout(blackout, anim.dtSec, anim.dropOnset, anim.lowOnset, getSetting("blackout"));
-      const curtainLevel = advanceCurtain(curtain, anim.dtSec, anim.sectionIntensity, getSetting("curtain"), anim.dropOnset);
+        introRamp(elapsedSec) * (ENERGY_DEPTH_FLOOR + (1 - ENERGY_DEPTH_FLOOR) * frame.energy) * (1 - getSetting("beatDip") * drives.value("beatDip", anim.beatPulse));
+      const blackoutPhase = advanceBlackout(blackout, anim.dtSec, anim.dropOnset, drives.fired("blackout", anim.lowOnset), getSetting("blackout"));
+      const curtainLevel = advanceCurtain(curtain, anim.dtSec, drives.value("curtain", anim.sectionIntensity), getSetting("curtain"), anim.dropOnset);
       const wanderOut = advanceWander(
         wander,
         anim.dtSec,
