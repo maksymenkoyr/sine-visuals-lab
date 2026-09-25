@@ -5,6 +5,7 @@ import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformA
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
 import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
+import { createTempoSource, type TempoSource } from "./audio/tempoSource.ts";
 import { NUM_BANDS, type CaptureHandle, type CaptureSourceKind, type FeatureFrame } from "./audio/types.ts";
 import {
   getAudioSourceChoice as getStoredAudioSource,
@@ -40,6 +41,7 @@ import {
   smoothingRateScale,
 } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
+import { PHASE_BASS, type TempoHit } from "./render/beatClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
 import { createDriveEngine } from "./render/drives.ts";
 import {
@@ -193,6 +195,13 @@ let lufsAnalyser: LufsAnalyser | null = null;
  *  10-30ms result would already be uncomfortably close to scrolling out of
  *  it. Never built outside import.meta.env.DEV — see attachCapture. */
 let measureAnalyser: WaveformAnalyser | null = null;
+/** The AudioWorklet-hosted fixed-hop tempo tracker (src/audio/tempoSource.ts)
+ *  for the live capture attached in attachCapture() — null until its async
+ *  createTempoSource() resolves, and permanently null (falling back to
+ *  extractor's own render-tick bpm below) on a browser/context that can't
+ *  support it. Disposed and cleared in onCaptureEnded/attachCapture's own
+ *  re-attach, same lifecycle as bandAnalyser above. */
+let tempoSource: TempoSource | null = null;
 /** Rebuilt (not just reset) on every swapAudioSource() — see that function's
  *  comment for why a fresh extractor, not a reset(), is what a source swap
  *  needs. */
@@ -281,6 +290,12 @@ let lastBeatDiag: OnsetDiag | null = null;
 // above. Same solo/host-only availability as lastFixedEnergy and for the
 // same reason.
 let lastFluxRatio: number | null = null;
+/** This tick's fixed-hop tempo onsets (src/audio/tempoSource.ts), solo mode
+ *  only — built in currentVisual() and read by loop() when it builds
+ *  animClock.advance()'s `hit` argument. undefined whenever no tempo
+ *  source is live on this tick (including every host/renderer/TV tick —
+ *  see beatClock.ts's own file header for why those never get this feed). */
+let lastTempoHits: TempoHit[] | undefined = undefined;
 // The silence gate's last reading off this device's own extractor — the
 // Gate card (audioMeters.ts). `fired` is the local extractor's own frame's
 // onset (not the jitter-buffered `lastVis`), so it and `suppressed` always
@@ -511,6 +526,26 @@ function attachCapture(handle: CaptureHandle): void {
   // measureAnalyser's own header explains why this is DEV-only and deep
   // (32768 samples) rather than reusing waveformAnalyser.
   if (import.meta.env.DEV) measureAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode, 32768);
+  // The previous capture's own tempoSource (if any) belonged to its own
+  // AudioContext — stop() (this function's caller, or onCaptureEnded/
+  // swapAudioSource's `previous?.stop()`) closes that context, which tears
+  // the old worklet node down on its own; clearing the reference here is
+  // enough, no explicit dispose() needed for it. createTempoSource() is
+  // async — until it resolves, and on a browser that can't support it
+  // (resolves null), currentVisual() below keeps reading `extractor`'s own
+  // render-tick bpm, exactly as before this existed.
+  tempoSource = null;
+  void createTempoSource(handle.context, handle.sourceNode).then((source) => {
+    // This capture may already have been superseded (a source swap, or the
+    // track ending) by the time the async load resolves — only adopt the
+    // result if `handle` is still the live capture, otherwise dispose the
+    // now-orphaned source instead of leaking its node/sink.
+    if (capture !== handle) {
+      source?.dispose();
+      return;
+    }
+    tempoSource = source;
+  });
   // stop() (used when swapAudioSource retires this handle) does not fire
   // "ended" per spec — only an external stop does — so this listener and a
   // deliberate swap never race each other.
@@ -537,6 +572,8 @@ function onCaptureEnded(handle: CaptureHandle): void {
   waveformAnalyser = null;
   measureAnalyser = null;
   lufsAnalyser = null;
+  tempoSource?.dispose();
+  tempoSource = null;
   audioPromise = null;
   captureFailed = false;
   updateMicPrompt();
@@ -1255,6 +1292,10 @@ function captureRawBands(dbBands: Float32Array, range: { min: number; max: numbe
  *  local capture's own envelope (features.ts) honors the same Smoothing
  *  the render path and the anim clock do, including its Off stop. */
 function currentVisual(rateScale: number): FeatureFrame | null {
+  // Reset every tick; only solo mode's own branch below (with a live
+  // tempoSource) sets this back — see its own doc comment on the module
+  // state above for why host/renderer/TV never do.
+  lastTempoHits = undefined;
   if (syntheticFeed) {
     lastRawBands = null;
     // Synthetic frames are generated directly, not sampled from a real
@@ -1289,6 +1330,22 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+    // The fixed-hop tempo source, when live, overrides the render-tick
+    // tracker's own bpm — see tempoAnalyzer.ts's header for why its numbers
+    // are better — and its drained onsets become this tick's tempoHits for
+    // animClock.advance() (loop() reads lastTempoHits when it builds that
+    // call's `hit` argument). `onset.time` is this same capture's own
+    // AudioContext clock (tempoSource.ts's own doc), so `now` (read above)
+    // converts it to agoSec directly. Weight mirrors animClock.ts's own
+    // hitWeight formula (strength graded by PHASE_BASS-weighted bass) so a
+    // kick counts for as much here as a render-tick hit would.
+    if (tempoSource) {
+      f.bpm = tempoSource.bpm;
+      lastTempoHits = tempoSource.drainOnsets().map((o) => ({
+        agoSec: now - o.time,
+        weight: o.strength * (1 + PHASE_BASS * o.bass),
+      }));
+    }
     lastFixedEnergy = extractor.fixedEnergy;
     lastBeatDiag = extractor.onsetDiag;
     lastFluxRatio = extractor.fluxRatio;
@@ -1325,6 +1382,14 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+    // Overwritten before hostConn.sendFrame() below, same as solo mode
+    // above, so the TV and any renderer get the fixed-hop tempo over the
+    // unchanged wire — see currentVisual()'s solo branch for the full
+    // comment. No tempoHits here: this device's own visual timeline (what
+    // sampleToVisual(hostConn.sample()) returns below) is the jitter
+    // buffer's room time, which this capture's local AudioContext onset
+    // times wouldn't line up with — see beatClock.ts's file header.
+    if (tempoSource) f.bpm = tempoSource.bpm;
     lastFixedEnergy = extractor.fixedEnergy;
     lastBeatDiag = extractor.onsetDiag;
     lastFluxRatio = extractor.fluxRatio;
@@ -1419,9 +1484,12 @@ function loop(): void {
   // (null on host/renderer paths with no local extractor — see its own doc
   // comment below) — passed as the graded broadband pulse's own ratio so it
   // doesn't have to fall back to a band's own ratio on a device that has a
-  // real broadband reading to give it.
+  // real broadband reading to give it. `lastTempoHits` is solo-mode-only
+  // (undefined every host/renderer/TV tick — see its own doc comment on the
+  // module state above) and switches beatClock.ts's phase comb onto the
+  // fixed-hop feed for this tick when a tempo source is live.
   const anim = gained
-    ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: lastFluxRatio })
+    ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: lastFluxRatio, tempoHits: lastTempoHits })
     : null;
 
   // Reused for displayFrame at render time below instead of re-resolving —
