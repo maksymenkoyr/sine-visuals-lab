@@ -150,6 +150,37 @@ describe("driveStore: sanitizeDriveSetting / encodeDriveSetting", () => {
     expect(encodeDriveSetting(driveSettingFromChoice("anim.lowOnset"))).toBe("anim.lowOnset");
     expect(encodeDriveSetting("scene")).toBe("scene");
   });
+
+  it("encodes a gate patch's when only when it isn't the default (1) — round-trips either way", () => {
+    const defaultWhen: DrivePatch = {
+      mix: "gate",
+      sources: [
+        { choice: "anim.low", weight: 1 },
+        { choice: "anim.mid", weight: 1 },
+      ],
+    };
+    const encodedDefault = encodeDriveSetting(defaultWhen);
+    expect(encodedDefault).toEqual({ m: "gate", s: [{ c: "anim.low" }, { c: "anim.mid" }] }); // no `w` at the top level
+    expect(sanitizeDriveSetting(encodedDefault)).toEqual(defaultWhen);
+
+    const explicitWhen: DrivePatch = {
+      mix: "gate",
+      when: 0,
+      sources: [
+        { choice: "anim.low", weight: 1 },
+        { choice: "anim.mid", weight: 1 },
+        { choice: "anim.high", weight: 1 },
+      ],
+    };
+    const encodedExplicit = encodeDriveSetting(explicitWhen);
+    expect(encodedExplicit).toMatchObject({ w: 0 });
+    expect(sanitizeDriveSetting(encodedExplicit)).toEqual(explicitWhen);
+  });
+
+  it("rejects a garbage top-level when", () => {
+    expect(sanitizeDriveSetting({ m: "gate", s: [{ c: "anim.low" }, { c: "anim.mid" }], w: "nonsense" })).toBeNull();
+    expect(sanitizeDriveSetting({ m: "gate", s: [{ c: "anim.low" }, { c: "anim.mid" }], w: NaN })).toBeNull();
+  });
 });
 
 describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight, setSourceHeight, setSourceGrid, setPatchMix)", () => {

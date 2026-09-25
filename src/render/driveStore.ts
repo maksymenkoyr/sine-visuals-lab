@@ -7,6 +7,7 @@ import {
   defaultDriveSetting,
   driveSettingFromChoice,
   normalizeDriveSetting,
+  setGateCondition as pureSetGateCondition,
   setPatchMix as pureSetPatchMix,
   setSourceGrid as pureSetSourceGrid,
   setSourceHeight as pureSetSourceHeight,
@@ -170,11 +171,16 @@ const DRIVE_MIXES: readonly DriveMix[] = ["add", "max", "gate"];
  *  never been edited past the identity one-source/weight-1/Graded shape
  *  round-trips through this form, both in localStorage and in a Look's `d`
  *  — see sceneLooks.ts's own header) or a compact patch
- *  `{m: DriveMix, s: [{c: DriveChoice, w?: number, h?: HitHeight}, …]}`.
- *  A source's `w`/`h`, if present, must already be a well-shaped value —
- *  out-of-range weight is clamped (`normalizeDriveSetting`), but a wrong
- *  *type* anywhere fails the whole entry rather than silently dropping one
- *  source, so a garbage entry can't quietly resolve to a half-built patch. */
+ *  `{m: DriveMix, s: [{c: DriveChoice, w?: number, h?: HitHeight}, …], w?:
+ *  number}`. The top-level `w` (present only for a `gate` patch whose
+ *  condition isn't the default index 1) is `DrivePatch.when` — a different
+ *  field than a source's own `w` (its weight) one level down, just the same
+ *  short key at the shape's own top level, mirroring drives.ts's naming.
+ *  A source's `w`/`h`, and the top-level `w`, if present, must already be a
+ *  well-shaped value — out-of-range weight/`when` is clamped
+ *  (`normalizeDriveSetting`), but a wrong *type* anywhere fails the whole
+ *  entry rather than silently dropping one source, so a garbage entry can't
+ *  quietly resolve to a half-built patch. */
 export function sanitizeDriveSetting(raw: unknown): DriveSetting | null {
   const asChoice = sanitizeChoice(raw);
   if (asChoice !== null) return driveSettingFromChoice(asChoice);
@@ -209,7 +215,14 @@ export function sanitizeDriveSetting(raw: unknown): DriveSetting | null {
     sources.push(height === undefined ? { choice, weight } : { choice, weight, height });
   }
 
-  return normalizeDriveSetting({ mix: mix as DriveMix, sources });
+  const rawWhen = (raw as { w?: unknown }).w;
+  let when: number | undefined;
+  if (rawWhen !== undefined) {
+    if (typeof rawWhen !== "number" || !Number.isFinite(rawWhen)) return null;
+    when = rawWhen;
+  }
+
+  return normalizeDriveSetting(when === undefined ? { mix: mix as DriveMix, sources } : { mix: mix as DriveMix, sources, when });
 }
 
 /** The wire/storage shape `encodeDriveSetting` below produces and
@@ -217,22 +230,25 @@ export function sanitizeDriveSetting(raw: unknown): DriveSetting | null {
  *  function. Both `DriveEntry.patch` (localStorage) and a Look's `d` entry
  *  (sceneLooks.ts) are one of these, never a bare `DriveSetting` — see this
  *  file's header for why one canonical shape serves both boundaries. */
-export type StoredDriveSetting = DriveChoice | { m: DriveMix; s: { c: DriveChoice; w?: number; h?: HitHeight }[] };
+export type StoredDriveSetting = DriveChoice | { m: DriveMix; s: { c: DriveChoice; w?: number; h?: HitHeight }[]; w?: number };
 
 /** `setting` written the way `sanitizeDriveSetting` reads it back: a
  *  one-source, weight-1, Graded `add` patch (and `"scene"`) as the bare
  *  `DriveChoice` it's identical to — the same shape this store/a Look used
  *  before patches existed, so an untouched setting keeps costing no more
  *  than it always did and an old app can still make sense of it — anything
- *  else as the compact `{m,s}` form. sceneLooks.ts reuses this directly
- *  rather than re-deriving the same compaction. */
+ *  else as the compact `{m,s}` form, plus a top-level `w` only when the
+ *  patch's own gate condition (`when`) isn't already absent (drives.ts's
+ *  `normalizeDriveSetting` only ever leaves it set when it differs from the
+ *  default index 1). sceneLooks.ts reuses this directly rather than
+ *  re-deriving the same compaction. */
 export function encodeDriveSetting(setting: DriveSetting): StoredDriveSetting {
   if (setting === "scene") return "scene";
-  if (setting.mix === "add" && setting.sources.length === 1) {
+  if (setting.mix === "add" && setting.sources.length === 1 && setting.when === undefined) {
     const only = setting.sources[0]!;
     if (only.weight === 1 && (only.height === undefined || only.height === "graded")) return only.choice;
   }
-  return {
+  const out: { m: DriveMix; s: { c: DriveChoice; w?: number; h?: HitHeight }[]; w?: number } = {
     m: setting.mix,
     s: setting.sources.map((src) => {
       const entry: { c: DriveChoice; w?: number; h?: HitHeight } = { c: src.choice };
@@ -241,6 +257,8 @@ export function encodeDriveSetting(setting: DriveSetting): StoredDriveSetting {
       return entry;
     }),
   };
+  if (setting.when !== undefined) out.w = setting.when;
+  return out;
 }
 
 /** This setting's stored DriveSetting, or its `drive.default` — with the
@@ -309,6 +327,12 @@ export function setSourceGrid(sceneId: string, spec: SceneSetting, grid: BeatGri
 
 export function setPatchMix(sceneId: string, spec: SceneSetting, mix: DriveMix): void {
   setDriveSetting(sceneId, spec, pureSetPatchMix(getDriveSetting(sceneId, spec), mix));
+}
+
+/** The Only when role toggle (deviceMenu.ts's source line): makes
+ *  `index` the patch's own gate condition. */
+export function setGateCondition(sceneId: string, spec: SceneSetting, index: number): void {
+  setDriveSetting(sceneId, spec, pureSetGateCondition(getDriveSetting(sceneId, spec), index));
 }
 
 // ---- Line (a setting with a source on Frequencies) -------------------------

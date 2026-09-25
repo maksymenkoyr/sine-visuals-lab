@@ -223,7 +223,7 @@ export interface AudioMeters {
    *  MeterRowId with no matching createMeterRow/welded-block call). */
   revealRow(card: MeterCardId, row: MeterRowId): void;
   /** Refreshes every jack's fill/pressed/uses and each fed row/lane's
-   *  glow+chip, purely from `deps.patch` — called by deviceMenu.ts on a
+   *  glow, purely from `deps.patch` — called by deviceMenu.ts on a
    *  selection or patch change (a pin, a preview, an add/remove), never per
    *  frame (this file's own carried click-loss rule covers rebuilds, not
    *  this — but the same reasoning applies: nothing here is worth doing at
@@ -276,20 +276,12 @@ export interface AudioMetersDeps {
     /** True while isPreview(...) could return true for *something* — i.e.
      *  a different setting is being previewed than whatever's pinned right
      *  now. Drives whether a pinned feed on an uncontested row still gets
-     *  its full glow+chip, or steps back to a bare "faint" mark instead. */
+     *  its full glow, or steps back to a bare "faint" mark instead. */
     previewIsActive(): boolean;
     /** `choice` is named in the shown setting's own `drive.sceneSources`
      *  (a `"scene"` setting has no patch to plug/unplug, so this never
      *  drives a jack's own fill — only a row/lane's *soft* glow). */
     isSceneSource(choice: DriveSourceChoice): boolean;
-    /** Non-null while a setting is shown — `label` is the scene-mix
-     *  fallback chip's text, `soft` marks a scene-mix selection (dims every
-     *  glow a shade). */
-    shown(): { label: string; soft: boolean } | null;
-    /** The pinned setting's own label, non-null only while something is
-     *  pinned — the fed chip's text for a row/lane fed by the pinned patch
-     *  itself (as opposed to the scene-mix fallback `shown()` labels). */
-    pinnedLabel(): string | null;
     /** aria-label / title text for `choice`'s jack right now — phrased
      *  against whichever setting a click on it would actually reach
      *  (pinned, else the last previewed setting, else neither). */
@@ -2254,7 +2246,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     },
     refreshPatchView(): void {
       const previewOn = deps.patch.previewIsActive();
-      const pinnedLabel = deps.patch.pinnedLabel();
       // Grouped by feedEl so a row/lane shared by several jacks (the
       // Section row's Song+Drop, a hits lane's own shared Hits row) is
       // only ever written to once.
@@ -2273,7 +2264,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         list.push(choice);
       }
       // Priority for a shared row/lane's own glow: the active preview
-      // always wins (soft, no chip) over a competing pinned feed (full when
+      // always wins (soft) over a competing pinned feed (full when
       // uncontested, faint when a different preview is live), which in
       // turn wins over the softer scene-mix fallback (deps.patch's
       // isSceneSource — a `"scene"` setting has no patch sources of its
@@ -2281,17 +2272,17 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // jack.ts's setRowFed for what each kind actually draws).
       for (const [rowEl, choices] of feedGroups) {
         const previewChoice = previewOn ? choices.find((c) => deps.patch.isPreview(c)) : undefined;
-        const pinnedChoice = pinnedLabel !== null ? choices.find((c) => deps.patch.isPinned(c)) : undefined;
+        const pinnedChoice = choices.find((c) => deps.patch.isPinned(c));
         const sceneSoftChoice =
           previewChoice || pinnedChoice ? undefined : choices.find((c) => deps.patch.isSceneSource(c));
         if (previewChoice) {
-          setRowFed(rowEl, "soft", driveSourceColor(previewChoice), deps.patch.shown()?.label ?? "");
+          setRowFed(rowEl, "soft", driveSourceColor(previewChoice));
         } else if (pinnedChoice) {
-          setRowFed(rowEl, previewOn ? "faint" : "full", driveSourceColor(pinnedChoice), pinnedLabel ?? "");
+          setRowFed(rowEl, previewOn ? "faint" : "full", driveSourceColor(pinnedChoice));
         } else if (sceneSoftChoice) {
-          setRowFed(rowEl, "soft", driveSourceColor(sceneSoftChoice), deps.patch.shown()?.label ?? "");
+          setRowFed(rowEl, "soft", driveSourceColor(sceneSoftChoice));
         } else {
-          setRowFed(rowEl, "none", "", "");
+          setRowFed(rowEl, "none", "");
         }
       }
       // The hits lanes' own fine-grained glow, on top of the Hits row's

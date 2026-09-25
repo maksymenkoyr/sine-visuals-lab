@@ -34,6 +34,33 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "anim.centroid": "Brightness",
 };
 
+/** Plain-language descriptions for every source a jack can plug in — the
+ *  "cover everything with hints" pass (CLAUDE.md's own doc-ownership rule:
+ *  this sits next to the colour/label map above rather than in a doc, since
+ *  a source's description has exactly this one home). Read by a jack's own
+ *  instant tooltip ("<Source> — <description>", deviceMenu.ts's
+ *  onJackHover) and by the patch panel's "+ Add by name" chips (both a
+ *  hover tooltip and, while it's inside the pinned panel, the panel's own
+ *  bottom hint line). Grid/line choices aren't `SignalId`s, so they get
+ *  their own two entries below rather than living in this record. */
+const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
+  "feature.onset": "any sudden jump across the whole spectrum.",
+  "feature.flux": "how sharply the sound is changing right now, compared with the hit threshold.",
+  "anim.lowOnset": "kicks and bass notes landing.",
+  "anim.midOnset": "snares, claps and vocal attacks.",
+  "anim.highOnset": "hi-hats, cymbals and sharp highs.",
+  "anim.dropOnset": "fires once when a drop lands.",
+  "anim.low": "how loud the bass is right now, moving smoothly.",
+  "anim.mid": "how loud the mids are right now, moving smoothly.",
+  "anim.high": "how loud the treble is right now, moving smoothly.",
+  "anim.energy": "overall loudness across every band.",
+  "anim.sectionIntensity": "how intense this part of the song is, over the last few seconds.",
+  "anim.centroid": "where the sound's energy sits, from dark and low to bright and high.",
+};
+
+const GRID_SOURCE_DESCRIPTION = "a steady pulse locked to the tempo.";
+const LINE_SOURCE_DESCRIPTION = "your own curve on the spectrum — bars that rise above it drive the setting.";
+
 /** "white" in the plan's own colour list — a near-white rather than pure
  *  #fff so it doesn't blow out against the panel's glass. */
 export const DRIVE_WHITE = "#f2f2f7";
@@ -115,6 +142,13 @@ export function driveSourceLabel(choice: DriveSourceChoice): string {
 export function driveSourceColor(choice: DriveSourceChoice): string {
   if (typeof choice === "object") return choice.source === "beat" ? DRIVE_WHITE : BANDS_AMBER;
   return SIGNAL_SOURCE_COLOR[choice];
+}
+
+/** The plain-language description below a source's own label — a jack's
+ *  instant tooltip's first line, and an add-by-name chip's hint. */
+export function driveSourceDescription(choice: DriveSourceChoice): string {
+  if (typeof choice === "object") return choice.source === "beat" ? GRID_SOURCE_DESCRIPTION : LINE_SOURCE_DESCRIPTION;
+  return SIGNAL_SOURCE_DESCRIPTION[choice];
 }
 
 /** One "+ Add by name" group (src/ui/deviceMenu.ts's patch panel). Tempo

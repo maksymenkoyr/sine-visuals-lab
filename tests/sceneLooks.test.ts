@@ -105,6 +105,23 @@ describe("encodeLook / decodeLook", () => {
     expect(decodeLook(code)).toEqual(look);
   });
 
+  it("a gate patch with a non-default condition (when) round-trips through a Look's own `d`", () => {
+    const patch: DriveSetting = {
+      mix: "gate",
+      when: 0,
+      sources: [
+        { choice: "anim.lowOnset", weight: 1 },
+        { choice: "anim.mid", weight: 1 },
+        { choice: "anim.high", weight: 1 },
+      ],
+    };
+    const look: SceneLook = { name: "Gated when", sceneId: "caustics", manual: {}, drives: { flash: patch } };
+    const code = encodeLook(look);
+    const wire = JSON.parse(atob(code.replace(/-/g, "+").replace(/_/g, "/")));
+    expect(wire.d.flash.w).toBe(0);
+    expect(decodeLook(code)).toEqual(look);
+  });
+
   it("an old look with no `d` at all still round-trips (the field is simply absent, not empty)", () => {
     const look: SceneLook = { name: "Old", sceneId: "mesh", manual: { focus: 0.3 } };
     const code = encodeLook(look);

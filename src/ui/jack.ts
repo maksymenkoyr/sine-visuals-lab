@@ -15,12 +15,12 @@
  * on a genuine selection or patch change, never per frame — the same
  * carried rule as the rest of the patch bay.
  *
- * setRowFed is the row-level half of the same contract: the glow + "→
- * <setting>" chip a fed meter row grows, and the dim every other row takes
- * on while `.vc-patching` is set on an ancestor (controlsTheme.ts's own
- * rules) — shared so deviceMenu.ts's own Bands-card jacks (built directly,
- * not through audioMeters.ts) and audioMeters.ts's own rows apply the exact
- * same class/chip logic rather than two hand-rolled copies drifting apart.
+ * setRowFed is the row-level half of the same contract: the glow a fed
+ * meter row grows, and the dim every other row takes on while
+ * `.vc-patching` is set on an ancestor (controlsTheme.ts's own rules) —
+ * shared so deviceMenu.ts's own Bands-card jacks (built directly, not
+ * through audioMeters.ts) and audioMeters.ts's own rows apply the exact
+ * same class logic rather than two hand-rolled copies drifting apart.
  */
 
 export interface JackHandle {
@@ -80,40 +80,24 @@ export function createJack(color: string, onClick: () => void, onHover: (on: boo
   };
 }
 
-/** Toggles a meter row's (or a hit lane's shared row's) fed glow + "→
- *  <label>" chip — `kind`/`color`/`label` are already resolved by the caller
- *  (deviceMenu.ts's refreshBandsJacks, audioMeters.ts's refreshPatchView),
- *  this only writes the DOM:
+/** Toggles a meter row's (or a hit lane's shared row's) fed glow — `kind`/
+ *  `color` are already resolved by the caller (deviceMenu.ts's
+ *  refreshBandsJacks, audioMeters.ts's refreshPatchView), this only writes
+ *  the DOM:
  *   - "full": the row feeds the pinned setting and nothing else is being
- *     previewed right now — the strong glow plus the chip.
+ *     previewed right now — the strong glow.
  *   - "soft": the row feeds the *previewed* setting (a hover/focus short of
  *     a click), or is named in a `"scene"` setting's own display-only
- *     `drive.sceneSources` — a dimmer glow, no chip. A preview always takes
- *     this over a competing pinned feed on the same row (see the caller).
+ *     `drive.sceneSources` — a dimmer glow. A preview always takes this
+ *     over a competing pinned feed on the same row (see the caller).
  *   - "faint": the row feeds the pinned setting, but a *different* setting
  *     is simultaneously being previewed elsewhere — a bare mark so the
  *     pinned patch doesn't vanish from view while it's not what's shown.
  *   - "none": dims under `.vc-patching` like any other unfed row.
  *  Call only on a selection/patch change, never per frame. */
-export function setRowFed(
-  rowEl: HTMLElement,
-  kind: "full" | "soft" | "faint" | "none",
-  color: string,
-  label: string,
-): void {
+export function setRowFed(rowEl: HTMLElement, kind: "full" | "soft" | "faint" | "none", color: string): void {
   rowEl.classList.toggle("vc-row-fed", kind === "full");
   rowEl.classList.toggle("vc-row-fed-soft", kind === "soft");
   rowEl.classList.toggle("vc-row-fed-faint", kind === "faint");
   if (kind !== "none") rowEl.style.setProperty("--vc-hl", color);
-  let chip = rowEl.querySelector<HTMLElement>(":scope > .vc-fed-chip");
-  if (kind === "full") {
-    if (!chip) {
-      chip = document.createElement("span");
-      chip.className = "vc-fed-chip";
-      rowEl.appendChild(chip);
-    }
-    chip.textContent = `→ ${label}`;
-  } else {
-    chip?.remove();
-  }
 }

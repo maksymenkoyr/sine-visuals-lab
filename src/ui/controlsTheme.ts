@@ -538,16 +538,15 @@ const stylesheet = `
  * refreshPatchView): every meter row in the Bands+meters column dims,
  * except a row jack.ts's setRowFed marks as feeding something —
  *  - .vc-row-fed ("full"): feeds the pinned setting, and nothing else is
- *    being previewed right now. Grows the "→ <setting>" chip.
+ *    being previewed right now. The strong glow.
  *  - .vc-row-fed-soft ("soft"): feeds the setting being previewed (a
  *    hover/focus short of a click) — always wins this glow over a
  *    competing pinned feed on the same row — or is named in a "scene"
  *    setting's own display-only sceneSources (drives.ts), never a
- *    togglable jack. No chip either way.
+ *    togglable jack.
  *  - .vc-row-fed-faint ("faint"): feeds the pinned setting, but a
  *    *different* setting is being previewed elsewhere, so the pinned feed
- *    steps back to a bare mark rather than competing with what's shown. No
- *    chip.
+ *    steps back to a bare mark rather than competing with what's shown.
  * A hit lane also gets its own thin glow bar (audioMeters.ts) rather than
  * relying on the whole Hits row dimming, since HITS_LANES' own lanes can
  * each feed a different setting. */
@@ -561,12 +560,6 @@ const stylesheet = `
 }
 .vc-row-fed-soft { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-hl, transparent) 45%, transparent); }
 .vc-row-fed-faint { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-hl, transparent) 25%, transparent); }
-.vc-fed-chip {
-  position: absolute; right: 4px; top: 4px; z-index: 1;
-  font: 400 9.5px/1 ${FONT_MONO}; color: var(--vc-hl, #fff);
-  background: rgba(8, 7, 12, 0.86); padding: 2px 6px; border-radius: 3px;
-  pointer-events: none; white-space: nowrap;
-}
 .vc-lane-glow {
   position: absolute; left: 0; right: 20px; pointer-events: none; border-radius: 2px;
   background: color-mix(in srgb, var(--c) 22%, transparent); opacity: 0; transition: opacity 0.15s ease;
@@ -616,6 +609,12 @@ const stylesheet = `
 /* The previewed setting's own cables — flat and quiet on purpose, so a
  * transient hover never reads as "committed" the way a pinned patch does. */
 .vc-cable-preview { fill: none; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
+/* The Only when patch's own condition source — a longer dash than
+ * .vc-cable-soft's fine 3/3 (a scene-mix cable) and than .vc-cable-preview's
+ * own 3/3, so a gate's condition reads distinctly in the cables too
+ * (src/ui/deviceMenu.ts's cableGroupFor). Core only — the flow layer keeps
+ * its own short running dash regardless, and the glow layer stays solid. */
+.vc-cable-core.vc-cable-cond { stroke-dasharray: 9 6; }
 
 /* "Pick a setting first" — a jack clicked with nothing pinned and nothing
  * ever previewed (deviceMenu.ts's showToast). */
@@ -626,6 +625,41 @@ const stylesheet = `
   opacity: 0; pointer-events: none; transition: opacity 0.18s ease, transform 0.18s ease;
 }
 .vc-toast-show { opacity: 1; transform: translate(-50%, 0); }
+
+/* The instant tooltip (src/ui/tooltip.ts) for a jack, a row's own input
+ * port, or a row's own sparkline — everything *outside* the pinned patch
+ * panel (which gets .vc-drive-bottom-hint below instead). Styled like the
+ * panel itself: small mono type, dark glass, a left rule in the hovered
+ * thing's own source colour (--c, set by tooltip.ts). z-index above the
+ * cable layer (31) and the toast (32) — it has to read over both. */
+.vc-tooltip {
+  position: fixed; z-index: 40; pointer-events: none; max-width: 230px;
+  background: rgba(8, 11, 10, 0.94); border-left: 2px solid var(--c, #fff);
+  border-radius: 3px; padding: 5px 8px 6px;
+  font: 400 10.5px/1.4 ${FONT_MONO}; color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.vc-tooltip div + div { color: rgba(255, 255, 255, 0.55); margin-top: 2px; }
+
+/* The pinned patch panel's own bottom hint line (deviceMenu.ts's
+ * buildPatchPanel) — a fixed two-line-tall strip so the panel never
+ * reflows as the hint text changes length while hovering/tabbing between
+ * controls. Text is written by a single delegated pointerover/pointerout/
+ * focusin/focusout pair on the panel root, keyed off each control's own
+ * data-hint attribute — never per-tick, never rebuilt. */
+.vc-drive-bottom-hint {
+  min-height: 2.6em; font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.6);
+  padding-top: 2px; border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* The Only when patch's own condition source line (deviceMenu.ts's
+ * buildSourceLine) — a dashed left rule so the condition reads distinctly
+ * from a "plays" source at a glance, echoing the dashed condition trace in
+ * the output graph and the dashed-long condition cable above. A small
+ * rightward nudge of that one row (rather than reserving the gutter on
+ * every row) — the row-list's own left edge sits flush against the panel's
+ * padding, so there's no room for a rule outside it. */
+.vc-drive-src-condition { border-left: 2px dashed rgba(255, 255, 255, 0.45); padding-left: 6px; }
 
 /* Chrome buttons (index.html) ring while their thing is active: the gear
  * while this panel is open, fullscreen while immersed. */

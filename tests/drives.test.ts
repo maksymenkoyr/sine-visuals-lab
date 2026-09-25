@@ -1,10 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
   createDriveEngine,
+  gateWhenIndex,
+  GATE_OPEN_HIGH,
+  GATE_OPEN_LOW,
   normalizeDriveSetting,
   PASSTHROUGH_DRIVES,
   sameDriveChoice,
   sameDriveSetting,
+  setGateCondition,
+  smoothstep,
+  togglePatchSource,
   type DriveChoice,
   type DrivePatch,
 } from "../src/render/drives.ts";
@@ -381,6 +387,94 @@ describe("drives: patch normalization — weight clamp, dedupe, empty -> scene",
     expect(sameDriveSetting(a, "scene")).toBe(false);
     expect(sameDriveSetting("scene", "scene")).toBe(true);
   });
+
+  it("normalizeDriveSetting clamps an out-of-range when, and drops it back to absent once it resolves to the default (1)", () => {
+    const patch: DrivePatch = {
+      mix: "gate",
+      when: 99,
+      sources: [
+        { choice: "anim.low", weight: 1 },
+        { choice: "anim.mid", weight: 1 },
+      ],
+    };
+    const normalized = normalizeDriveSetting(patch);
+    if (normalized === "scene") throw new Error("unreachable");
+    expect(gateWhenIndex(normalized)).toBe(1); // clamped into the 2-source range
+    expect(normalized.when).toBeUndefined(); // ...and that's the default, so dropped
+
+    const patchZero: DrivePatch = { ...patch, when: 0 };
+    const normalizedZero = normalizeDriveSetting(patchZero);
+    if (normalizedZero === "scene") throw new Error("unreachable");
+    expect(normalizedZero.when).toBe(0); // a genuinely non-default when survives
+  });
+});
+
+describe("drives: gate condition tracked by source, not index, through togglePatchSource", () => {
+  it("removing a source before the condition shifts when down so it still names the same source", () => {
+    // [A, B, C], condition = C (when 2). Removing A shifts C to index 1.
+    const patch: DrivePatch = {
+      mix: "gate",
+      when: 2,
+      sources: [
+        { choice: "anim.low", weight: 1 }, // A
+        { choice: "anim.mid", weight: 1 }, // B
+        { choice: "anim.high", weight: 1 }, // C — the condition
+      ],
+    };
+    const next = togglePatchSource(patch, "anim.low"); // remove A
+    if (next === "scene") throw new Error("unreachable");
+    expect(next.sources.map((s) => s.choice)).toEqual(["anim.mid", "anim.high"]);
+    expect(gateWhenIndex(next)).toBe(1); // still C, now at index 1
+  });
+
+  it("removing a source after the condition leaves when's own index untouched", () => {
+    // [A, B, C], condition = A (when 0). Removing C leaves A at index 0.
+    const patch: DrivePatch = {
+      mix: "gate",
+      when: 0,
+      sources: [
+        { choice: "anim.low", weight: 1 }, // A — the condition
+        { choice: "anim.mid", weight: 1 }, // B
+        { choice: "anim.high", weight: 1 }, // C
+      ],
+    };
+    const next = togglePatchSource(patch, "anim.high"); // remove C
+    if (next === "scene") throw new Error("unreachable");
+    expect(next.sources.map((s) => s.choice)).toEqual(["anim.low", "anim.mid"]);
+    expect(gateWhenIndex(next)).toBe(0); // still A, still index 0
+  });
+
+  it("removing the condition source itself falls back to the default index", () => {
+    // [A, B, C], condition = B (when 1). Removing B leaves nothing to track.
+    const patch: DrivePatch = {
+      mix: "gate",
+      when: 1,
+      sources: [
+        { choice: "anim.low", weight: 1 }, // A
+        { choice: "anim.mid", weight: 1 }, // B — the condition, about to be removed
+        { choice: "anim.high", weight: 1 }, // C
+      ],
+    };
+    const next = togglePatchSource(patch, "anim.mid"); // remove B, the condition itself
+    if (next === "scene") throw new Error("unreachable");
+    expect(next.sources.map((s) => s.choice)).toEqual(["anim.low", "anim.high"]);
+    expect(gateWhenIndex(next)).toBe(1); // falls back to the default (now C)
+  });
+
+  it("adding a source keeps the condition pointed at the same one", () => {
+    const patch: DrivePatch = {
+      mix: "gate",
+      when: 0, // A is the condition
+      sources: [
+        { choice: "anim.low", weight: 1 }, // A
+        { choice: "anim.mid", weight: 1 }, // B
+      ],
+    };
+    const next = togglePatchSource(patch, "anim.high"); // add C
+    if (next === "scene") throw new Error("unreachable");
+    expect(next.sources.map((s) => s.choice)).toEqual(["anim.low", "anim.mid", "anim.high"]);
+    expect(gateWhenIndex(next)).toBe(0); // still A
+  });
 });
 
 describe("drives: multi-source patch mixing (add/max/gate) and gain", () => {
@@ -422,7 +516,7 @@ describe("drives: multi-source patch mixing (add/max/gate) and gain", () => {
     expect(drive).toBeLessThan(2 * anim.low + 0.1 * anim.mid); // sanity: really not add
   });
 
-  it("gate multiplies source 0 by a smoothstep of source 1; a third source is stored but ignored", () => {
+  it("gate with exactly two sources and when at its default (1, absent) is identical to source0 * smoothstep(source1)", () => {
     const clock = createAnimClock();
     const bands = new Float32Array(NUM_BANDS).fill(0.5);
     const anim = clock.advance(DT, frame({ bands }));
@@ -432,14 +526,71 @@ describe("drives: multi-source patch mixing (add/max/gate) and gain", () => {
       sources: [
         { choice: "anim.low", weight: 1 },
         { choice: "anim.mid", weight: 1 },
-        { choice: "anim.high", weight: 1 }, // ignored — only sources 0 and 1 count
       ],
     });
     const engine = createDriveEngine();
     engine.accumulate(DT, frame({ bands }), 0, anim, sceneId, [spec]);
-    const t = Math.min(1, Math.max(0, (anim.mid - 0.35) / (0.55 - 0.35)));
-    const smooth = t * t * (3 - 2 * t);
+    const smooth = smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, anim.mid);
     const expected = anim.low * smooth;
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBeCloseTo(expected, 10);
+
+    // An explicit when:1 must read identically to when absent — the
+    // absent-means-1 default this file's header promises.
+    const specExplicit = patchSetting(sceneId, "k2", {
+      mix: "gate",
+      when: 1,
+      sources: [
+        { choice: "anim.low", weight: 1 },
+        { choice: "anim.mid", weight: 1 },
+      ],
+    });
+    engine.accumulate(DT, frame({ bands }), 0, anim, sceneId, [specExplicit]);
+    expect(engine.forScene(sceneId, [specExplicit], anim).uniformPair("k2").drive).toBeCloseTo(expected, 10);
+  });
+
+  it("gate with three sources sums the two 'plays' sources, gated by the condition (when defaults to index 1)", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    const anim = clock.advance(DT, frame({ bands }));
+    const sceneId = "patch-gate-3";
+    const spec = patchSetting(sceneId, "k", {
+      mix: "gate",
+      sources: [
+        { choice: "anim.low", weight: 1 }, // plays
+        { choice: "anim.mid", weight: 1 }, // condition (when defaults to 1)
+        { choice: "anim.high", weight: 1 }, // plays — no longer ignored
+      ],
+    });
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame({ bands }), 0, anim, sceneId, [spec]);
+    const smooth = smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, anim.mid);
+    const expected = (anim.low + anim.high) * smooth;
+    expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBeCloseTo(expected, 10);
+  });
+
+  it("setGateCondition(setting, 0) makes source 0 the condition — the other two sources sum as 'plays'", () => {
+    const clock = createAnimClock();
+    const bands = new Float32Array(NUM_BANDS).fill(0.5);
+    const anim = clock.advance(DT, frame({ bands }));
+    const sceneId = "patch-gate-condition-0";
+    const patch = setGateCondition(
+      {
+        mix: "gate",
+        sources: [
+          { choice: "anim.low", weight: 1 }, // condition, once retargeted
+          { choice: "anim.mid", weight: 1 }, // plays
+          { choice: "anim.high", weight: 1 }, // plays
+        ],
+      },
+      0,
+    );
+    if (patch === "scene") throw new Error("unreachable");
+    expect(gateWhenIndex(patch)).toBe(0);
+    const spec = patchSetting(sceneId, "k", patch);
+    const engine = createDriveEngine();
+    engine.accumulate(DT, frame({ bands }), 0, anim, sceneId, [spec]);
+    const smooth = smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, anim.low);
+    const expected = (anim.mid + anim.high) * smooth;
     expect(engine.forScene(sceneId, [spec], anim).uniformPair("k").drive).toBeCloseTo(expected, 10);
   });
 

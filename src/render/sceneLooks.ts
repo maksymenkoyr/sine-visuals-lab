@@ -46,8 +46,12 @@ import { encodeDriveSetting, getDriveSetting, resetDriveSetting, sanitizeDriveSe
  * for a setting nobody has multi-sourced still decodes on that older app.
  * Anything else (more than one source, a non-`add` mix, a non-1 weight, or a
  * non-Graded height) encodes as the compact patch
- * `{m: DriveMix, s: [{c: DriveChoice, w?: number, h?: HitHeight}, …]}` — an
- * old app ignores a `d` entry it can't parse as a plain choice the same way
+ * `{m: DriveMix, s: [{c: DriveChoice, w?: number, h?: HitHeight}, …], w?:
+ * number}` (the top-level `w`, present only for a `gate` Look whose
+ * condition isn't the default source 1, is `DrivePatch.when` —
+ * driveStore.ts's own header spells out why it shares a key with a source's
+ * own weight) — an old app ignores a `d` entry it can't parse as a plain
+ * choice the same way
  * it ignores `d` itself (ignore the unknown shape, fall back to the
  * setting's own default). This is the exact same `StoredDriveSetting` shape
  * `DriveEntry.patch` persists to localStorage as — one canonical wire shape

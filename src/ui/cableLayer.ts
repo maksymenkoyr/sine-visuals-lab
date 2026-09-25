@@ -69,6 +69,12 @@ export interface CableSourceSpec {
    *  "just plugged" draw-on. Only meaningful on the pinned group; a preview
    *  cable is always drawn in its own flat style regardless. */
   soft: boolean;
+  /** This is an Only when patch's own gate condition (drives.ts's
+   *  gateWhenIndex) — a longer dash on the core than `soft`'s, so the gate
+   *  reads distinctly in the cables too (controlsTheme.ts's
+   *  .vc-cable-cond). Mutually exclusive with `soft` in practice (a scene
+   *  mix has no patch sources to gate — deviceMenu.ts's cableGroupFor). */
+  cond?: boolean;
   jackEl: HTMLElement;
   /** Read every tick — flow speed rides this source's own live value.
    *  Unused for a preview cable (it never animates). */
@@ -249,11 +255,12 @@ export function createCableLayer(): CableLayer {
         liveKeys.add(key);
         const d = cablePathD(pt, portPt, avoidBand);
         const soft = src.soft ? " vc-cable-soft" : "";
+        const cond = src.cond ? " vc-cable-cond" : "";
         const dimCls = dimmed ? " vc-cable-dimmed" : "";
         const isNew = !!src.isNew && !reduceMotion();
         const newCls = isNew ? " vc-cable-new" : "";
         const glow = pathEl(`vc-cable-glow${soft}${dimCls}${newCls}`, d, src.color);
-        const core = pathEl(`vc-cable-core${soft}${dimCls}${newCls}`, d, src.color);
+        const core = pathEl(`vc-cable-core${soft}${cond}${dimCls}${newCls}`, d, src.color);
         core.setAttribute("pathLength", "100");
         const flow = pathEl(`vc-cable-flow${soft}${dimCls}${newCls}`, d, src.color);
         if (isNew) {
