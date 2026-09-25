@@ -1,7 +1,7 @@
 import { type FeatureFrame } from "../audio/types.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import { createFlowClock, type FlowClock } from "./flowClock.ts";
-import { createBeatClock, PHASE_BASS, type BeatClock } from "./beatClock.ts";
+import { createBeatClock, PHASE_BASS, type BeatClock, type TempoHit } from "./beatClock.ts";
 import { createBandEnergy, type BandEnergy } from "./bandEnergy.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
@@ -164,13 +164,18 @@ export interface AnimClock {
    *  line are both per-setting drive choices now (src/render/drives.ts),
    *  not something animClock does once for the whole scene; `onset`/
    *  `beatPulse` are the raw, ungridded hits and `beats` is the raw unwrapped
-   *  count a `{ source: "beat", grid }` drive grids on its own. */
+   *  count a `{ source: "beat", grid }` drive grids on its own. `hit.tempoHits`
+   *  (src/audio/tempoSource.ts's drained onsets, app.ts's solo mode only —
+   *  see beatClock.ts's own file header for why host/renderer/TV never pass
+   *  this) switches beatClock.ts's phase comb onto that fixed-hop feed for
+   *  this tick instead of the render-tick `frame.onset`/beatRatio pair;
+   *  omitted (every other caller), today's render-tick-only behavior. */
   advance(
     dtSec: number,
     frame: FeatureFrame,
     smoothing?: number,
     gate?: SilenceGateMarks,
-    hit?: { shape: HitShape; beatRatio?: number | null },
+    hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[] },
   ): AnimFrame;
 }
 
@@ -226,7 +231,7 @@ export function createAnimClock(): AnimClock {
       frame: FeatureFrame,
       smoothing = SMOOTHING_DEFAULT,
       gate?: SilenceGateMarks,
-      hit?: { shape: HitShape; beatRatio?: number | null },
+      hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[] },
     ): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
       const dimmer = gate ? silenceGateDimmer(frame.level, gate) : 1;
@@ -239,7 +244,15 @@ export function createAnimClock(): AnimClock {
       const strength = Math.min(HIT_WEIGHT_CAP, Math.max(1, hit?.beatRatio || 1));
       const bass = clamp01((Math.max(lowRatioNow, prevLowRatio) - BASS_WEIGHT_FLOOR) / BASS_WEIGHT_SPAN);
       const hitWeight = strength * (1 + PHASE_BASS * bass);
-      beat.advance(dtSec, frame.bpm, frame.onset, hitWeight);
+      // See beatClock.ts's own file header and its advance()'s doc: the
+      // fixed-hop feed (app.ts's solo mode, when a tempo source is live)
+      // replaces the render-tick beatFired/hitWeight pair entirely rather
+      // than combining with it.
+      if (hit?.tempoHits !== undefined) {
+        beat.advance(dtSec, frame.bpm, false, 1, hit.tempoHits);
+      } else {
+        beat.advance(dtSec, frame.bpm, frame.onset, hitWeight);
+      }
       prevLowRatio = lowRatioNow;
       section.advance(dtSec, frame.energy, rateScale);
       profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
