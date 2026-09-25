@@ -1,6 +1,8 @@
 import { FeatureExtractor } from "../../src/audio/features.ts";
 import { createAnimClock } from "../../src/render/animClock.ts";
 import { getHitShape } from "../../src/audio/hitStrength.ts";
+import { TempoAnalyzer } from "../../src/audio/tempoAnalyzer.ts";
+import { PHASE_BASS, type TempoHit } from "../../src/render/beatClock.ts";
 import { readBandsDb } from "./bands.ts";
 import { SR, type Track, type TempoSegment } from "./synth.ts";
 
@@ -13,6 +15,20 @@ import { SR, type Track, type TempoSegment } from "./synth.ts";
  * The permanent, dependency-free scoreboard tests/tempoEval.test.ts asserts
  * targets against (see that file, and the plan/PR that added this harness
  * for what each metric is meant to guard).
+ *
+ * `{ analyzer: true }` swaps the render-tick FeatureExtractor.bpm for the
+ * fixed-hop TempoAnalyzer's own — see tempoAnalyzer.ts's header for why its
+ * numbers are better. It's fed the track's samples in the same 128-sample
+ * blocks (with their own exact start times) app.ts's real AudioWorklet
+ * would, incrementally, up to each render tick's own `time` — never more,
+ * so a track's own future samples can't leak into an earlier tick's
+ * estimate the way it would if the whole buffer were pushed up front. Its
+ * drained onsets become that tick's animClock.advance() tempoHits, exactly
+ * the shape app.ts's currentVisual()/loop() build (agoSec against this same
+ * tick's `time`, weight graded by PHASE_BASS-weighted bass). Every other
+ * metric computed below is unchanged between the two modes — same
+ * FeatureExtractor, same AnimFrame, same ground truth comparison — so the
+ * two tables in tests/tempoEval.test.ts are directly comparable.
  */
 
 export interface EvalMetrics {
@@ -82,8 +98,19 @@ const LOCK_MIN_SEC = 6;
 const TICKS_TOLERANCE_SEC = 0.03;
 const WARMUP_SEC = 3;
 const LOCK_HOLD_SEC = 2;
+// Matches app.ts's tempoWorklet.ts real AudioWorklet render-quantum feed —
+// see tempoAnalyzer.ts's own hop derivation for why the exact block size
+// doesn't matter to its own hop timing (it's independent of the push()
+// chunking), only to how often this harness calls push().
+const ANALYZER_PUSH_BLOCK = 128;
 
-export function evaluate(track: Track, fps = 60): EvalMetrics {
+export interface EvalOptions {
+  /** Swap the render-tick FeatureExtractor.bpm for the fixed-hop
+   *  TempoAnalyzer's — see this file's own header. */
+  analyzer?: boolean;
+}
+
+export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMetrics {
   const dt = 1 / fps;
   const totalDurationSec = track.mono.length / SR;
   const nFrames = Math.floor(totalDurationSec * fps);
@@ -92,6 +119,8 @@ export function evaluate(track: Track, fps = 60): EvalMetrics {
   const extractor = new FeatureExtractor();
   const animClock = createAnimClock();
   const shape = getHitShape();
+  const analyzer = opts.analyzer ? new TempoAnalyzer(SR) : null;
+  let analyzerSamplesPushed = 0;
 
   const segPtr = { i: 0 };
   let framesInSeg = 0;
@@ -117,7 +146,20 @@ export function evaluate(track: Track, fps = 60): EvalMetrics {
     const time = i * dt;
     const bands = readBandsDb(track.mono, time, SR);
     const frame = extractor.update(bands, time);
-    const anim = animClock.advance(dt, frame, undefined, undefined, { shape, beatRatio: extractor.fluxRatio });
+
+    let tempoHits: TempoHit[] | undefined;
+    if (analyzer) {
+      const upToSample = Math.min(track.mono.length, Math.round(time * SR));
+      while (analyzerSamplesPushed < upToSample) {
+        const end = Math.min(upToSample, analyzerSamplesPushed + ANALYZER_PUSH_BLOCK);
+        analyzer.push(track.mono.subarray(analyzerSamplesPushed, end), analyzerSamplesPushed / SR);
+        analyzerSamplesPushed = end;
+      }
+      frame.bpm = analyzer.bpm;
+      tempoHits = analyzer.drainOnsets().map((o) => ({ agoSec: time - o.time, weight: o.strength * (1 + PHASE_BASS * o.bass) }));
+    }
+
+    const anim = animClock.advance(dt, frame, undefined, undefined, { shape, beatRatio: extractor.fluxRatio, tempoHits });
 
     const seg = currentSegment(track.tempo, segPtr, time);
     if (seg) {

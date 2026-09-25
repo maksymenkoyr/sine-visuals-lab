@@ -1,5 +1,11 @@
 import { NUM_BANDS, type FeatureFrame } from "./types.ts";
 import { ANALYSER_MIN_DB, ANALYSER_MAX_DB } from "./analyser.ts";
+// The pair-comb tempo estimate itself now lives in tempoComb.ts, shared with
+// src/audio/tempoAnalyzer.ts's fixed-hop pipeline — see that file's header
+// for what it does and why. BPM_MIN/BPM_MAX are re-exported below so
+// src/render/signals.ts's existing import keeps working unchanged.
+import { estimateTempo, BPM_MIN, BPM_MAX, TEMPO_DECAY_SEC } from "./tempoComb.ts";
+export { BPM_MIN, BPM_MAX, TEMPO_DECAY_SEC };
 // Only the type plus the pure dimmer function — never the store's
 // get/set/reset — so this extractor stays store-free like the rest of it
 // (see the `autoGain`/`smoothingScale` params below, both plain numbers a
@@ -79,12 +85,8 @@ export const ONSET_REFRACTORY_SEC = 0.1; // ~600 BPM ceiling, prevents double-tr
 const ONSET_WINDOW_SEC = 6;
 const MAX_ONSETS = 48; // hard cap for the O(n²) pair walk
 const ONSET_WEIGHT_CAP = 4;
-const MAX_PAIR_GAP_SEC = 4;
-// Exported so src/render/signals.ts's "Tempo" drive source can map
-// tempoBpm into 0..1 against the same window this tracker actually
-// searches, rather than a second, hand-typed copy of these numbers.
-export const BPM_MIN = 70;
-export const BPM_MAX = 180;
+// tempoComb.ts's own BPM_MIN/BPM_MAX are re-exported above (from this file's
+// import), so src/render/signals.ts's existing import site keeps working.
 const PERIOD_STEP_SEC = 0.005;
 const COMB_TOL_SEC = 0.05; // ~one and a half frames at 30fps
 // Tighter for the final beat-length measurement than for picking the
@@ -103,25 +105,10 @@ const TEMPO_SWITCH_MARGIN = 1.25;
 // TEMPO_DECAY_SEC of silence since the last real onset, update() below
 // clears both `bpm` and the onset history that would otherwise have kept
 // combScore remembering the old tempo the moment a new onset arrived.
-const TEMPO_DECAY_SEC = 3;
 
-// A bias toward tempos people actually tap along to, folded into
-// combScore's own score. Without it, a candidate exactly 3/4 or 4/3 of the
-// true tempo can out-score it outright: a busy 16th-note hat pattern makes
-// every third 16th (a 4:3 ratio of the beat) land on a whole number of
-// *its own* period just as exactly as the real beat does, and once that
-// candidate wins, TEMPO_SWITCH_MARGIN's hysteresis then keeps it for the
-// rest of the track. tempoPrior() is a log-normal bump centered on
-// TEMPO_PRIOR_BPM (TEMPO_PRIOR_OCTAVES wide) that favors the tempo octave
-// most music actually sits in, just enough to break that kind of tie
-// without overriding a real tempo confidently outside it.
-const TEMPO_PRIOR_BPM = 120;
-const TEMPO_PRIOR_OCTAVES = 1;
-
-function tempoPrior(bpm: number): number {
-  const octaves = Math.log2(bpm / TEMPO_PRIOR_BPM) / TEMPO_PRIOR_OCTAVES;
-  return Math.exp(-0.5 * octaves * octaves);
-}
+// The tempo-octave prior that breaks a busy subdivision's tie against the
+// real beat (e.g. a 4:3-ratio hi-hat pattern) now lives in tempoComb.ts's
+// own tempoPrior — see that file's header.
 
 // getFloatFrequencyData returns -Infinity for a bin with exactly zero
 // energy (true silence) — it is NOT clamped by the analyser's
@@ -146,6 +133,18 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
+/**
+ * Runs once per render tick (app.ts's currentVisual()), on whatever bands
+ * the tick's own AnalyserNode read — so its `bpm`/onsets are timestamped to
+ * the frame, and degrade as the frame rate drops (see
+ * tests/tempoEval.test.ts's render-tick-vs-analyzer-path tables for exactly
+ * how much). src/audio/tempoAnalyzer.ts's fixed-hop AudioWorklet pipeline
+ * (src/audio/tempoSource.ts) doesn't have that problem — it never sees a
+ * frame at all — and app.ts's solo/host modes overwrite this extractor's
+ * own `bpm` with the tempo source's whenever one is live. This extractor's
+ * tempo estimate is the fallback: what a browser without AudioWorklet
+ * support, or a context addModule() rejects, is left running on.
+ */
 export class FeatureExtractor {
   private floor = new Float32Array(NUM_BANDS).fill(-100);
   private peak = new Float32Array(NUM_BANDS).fill(-40);
@@ -429,82 +428,24 @@ export class FeatureExtractor {
     this.lastOnsetPhaseTime = time;
     this.onsets.push({ time, weight: Math.min(ONSET_WEIGHT_CAP, Math.max(1, strength)) });
     while (this.onsets.length > MAX_ONSETS || this.onsets[0].time < time - ONSET_WINDOW_SEC) this.onsets.shift();
-    if (this.onsets.length < 3) return;
 
-    // The gap between every pair of recent onsets, then a comb: each
-    // candidate period is scored by how many gaps land on a whole number of
-    // its beats. This is what survives a messy detector — extra onsets (a
-    // click's tail firing just past the refractory) and missed ones only
-    // add gaps that fit no candidate well, while the true spacing and all
-    // its multiples keep fitting the true period. Two earlier schemes
-    // failed on a plain 100bpm metronome: the mode of adjacent gaps (the
-    // tail made them alternate 0.14s/0.46s, and 0.46s is 130bpm), then the
-    // mode of all pair gaps folded into range by halving — folding is only
-    // right for power-of-two multiples, so three-beat gaps voted for 133
-    // and it read 115.
-    const onsets = this.onsets;
-    const n = onsets.length;
-    // A pair's vote is worth the weaker of its two onsets: a real hit
-    // paired with a noise blip is still a noise gap.
-    const gaps: number[] = [];
-    const weights: number[] = [];
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const gap = onsets[j].time - onsets[i].time;
-        if (gap > MAX_PAIR_GAP_SEC) break; // ascending, so later j are further still
-        gaps.push(gap);
-        weights.push(Math.min(onsets[i].weight, onsets[j].weight));
-      }
-    }
-
-    const combScore = (period: number): number => {
-      let score = 0;
-      for (let g = 0; g < gaps.length; g++) {
-        const k = Math.round(gaps[g] / period);
-        if (k < 1) continue;
-        const err = Math.abs(gaps[g] - k * period);
-        if (err >= COMB_TOL_SEC) continue;
-        score += ((1 - err / COMB_TOL_SEC) * weights[g]) / k;
-      }
-      // See tempoPrior's own doc above — hysteresis below calls this same
-      // function for the current tempo too, so the prior weights that
-      // comparison exactly the same way, on purpose.
-      return score * tempoPrior(60 / period);
-    };
-
-    const periodMin = 60 / BPM_MAX;
-    const periodMax = 60 / BPM_MIN;
-    let bestPeriod = 0;
-    let bestScore = 0;
-    for (let period = periodMin; period <= periodMax + 1e-9; period += PERIOD_STEP_SEC) {
-      const score = combScore(period);
-      if (score > bestScore) {
-        bestScore = score;
-        bestPeriod = period;
-      }
-    }
-    if (bestPeriod === 0) return;
-
-    // Hysteresis: stay on the current tempo unless the rival clearly wins.
-    // The refinement below still follows genuine drift, since it re-measures
-    // the beat length from whatever gaps fit.
-    if (this.bpm > 0) {
-      const current = 60 / this.bpm;
-      if (current >= periodMin && current <= periodMax && bestScore < combScore(current) * TEMPO_SWITCH_MARGIN) {
-        bestPeriod = current;
-      }
-    }
-
-    // Refine past the candidate grid: the mean beat length implied by every
-    // gap that fits the winner.
-    let sum = 0;
-    let total = 0;
-    for (let g = 0; g < gaps.length; g++) {
-      const k = Math.round(gaps[g] / bestPeriod);
-      if (k < 1 || Math.abs(gaps[g] - k * bestPeriod) >= REFINE_TOL_SEC) continue;
-      sum += (gaps[g] / k) * weights[g];
-      total += weights[g];
-    }
-    if (total > 0) this.bpm = 60 / (sum / total);
+    // The actual pair-comb tempo estimate lives in tempoComb.ts's
+    // estimateTempo, shared with tempoAnalyzer.ts's fixed-hop pipeline — see
+    // its header for what it does and why (two earlier, rejected schemes are
+    // there too: the mode of adjacent gaps, then the mode of pair gaps
+    // folded into range by halving). recencySec 0: every onset in the window
+    // votes equally regardless of age, today's render-tick behaviour. A null
+    // result (not enough onsets yet, or no candidate scored) leaves `bpm`
+    // exactly as it was, not reset to 0.
+    const result = estimateTempo(this.onsets, time, this.bpm, {
+      tolSec: COMB_TOL_SEC,
+      refineTolSec: REFINE_TOL_SEC,
+      recencySec: 0,
+      switchMargin: TEMPO_SWITCH_MARGIN,
+      periodStepSec: PERIOD_STEP_SEC,
+      bpmMin: BPM_MIN,
+      bpmMax: BPM_MAX,
+    });
+    if (result !== null) this.bpm = result;
   }
 }
