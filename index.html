@@ -4,10 +4,67 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#000000" />
-    <link
-      rel="icon"
-      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2245%22 fill=%22black%22/><circle cx=%2250%22 cy=%2250%22 r=%2225%22 fill=%22%2300ffcc%22/></svg>"
+    <!-- The snippet Google shows is this description — without it the crawler
+     * stitched one together from the button labels ("GALLERY STOP MIC …").
+     * Same string feeds og/twitter below and the JSON-LD graph. -->
+    <meta
+      name="description"
+      content="Real-time WebGL music visualizer in your browser: microphone or screen audio drives reactive visuals, and your phone pairs with a TV. Free, no install."
     />
+    <!-- Both sinevisualslab.com and www. serve this page (two custom_domain
+     * routes in wrangler.toml); www is the one Google indexes, so www is
+     * canonical and the one every absolute URL below and in sitemap.xml uses. -->
+    <link rel="canonical" href="https://www.sinevisualslab.com/" />
+    <!-- Real files under public/ — Google's favicon rules accept neither the
+     * data: URI this used to be nor SVG, only raster URLs (see tools/make-icons.mjs). -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Sine Visuals Lab" />
+    <meta property="og:title" content="Sine Visuals Lab" />
+    <meta
+      property="og:description"
+      content="Real-time WebGL music visualizer in your browser: microphone or screen audio drives reactive visuals, and your phone pairs with a TV. Free, no install."
+    />
+    <meta property="og:url" content="https://www.sinevisualslab.com/" />
+    <meta property="og:image" content="https://www.sinevisualslab.com/og.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="A caustics visual from Sine Visuals Lab: teal and violet ridges rippling over black." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Sine Visuals Lab" />
+    <meta
+      name="twitter:description"
+      content="Real-time WebGL music visualizer in your browser: microphone or screen audio drives reactive visuals, and your phone pairs with a TV. Free, no install."
+    />
+    <meta name="twitter:image" content="https://www.sinevisualslab.com/og.jpg" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "name": "Sine Visuals Lab",
+            "url": "https://www.sinevisualslab.com/",
+            "inLanguage": "en",
+            "description": "Real-time WebGL music visualizer in your browser: microphone or screen audio drives reactive visuals, and your phone pairs with a TV. Free, no install."
+          },
+          {
+            "@type": "WebApplication",
+            "name": "Sine Visuals Lab",
+            "url": "https://www.sinevisualslab.com/",
+            "applicationCategory": "MultimediaApplication",
+            "operatingSystem": "Any",
+            "browserRequirements": "Requires WebGL2",
+            "description": "Real-time WebGL music visualizer in your browser: microphone or screen audio drives reactive visuals, and your phone pairs with a TV. Free, no install.",
+            "image": "https://www.sinevisualslab.com/icon-512.png",
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+            "sameAs": ["https://github.com/maksymenkoyr/sine-visuals-lab"]
+          }
+        ]
+      }
+    </script>
     <title>Sine Visuals Lab</title>
     <style>
       html, body {
@@ -248,9 +305,30 @@
         font: 400 12px/1.45 system-ui, sans-serif;
         color: #fff9;
       }
+
+      /* The page's h1 and product blurb are for crawlers and screen readers
+       * only — the design rule for the gallery is that the mark alone carries
+       * the name, with no visible title or blurb (src/ui/gallery.ts). */
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+      }
     </style>
   </head>
   <body>
+    <h1 class="sr-only">Sine Visuals Lab</h1>
+    <p class="sr-only">
+      Pick a scene from the gallery and let your microphone or a shared screen drive it — every
+      setting can react to the music. Pair your phone with a TV and the visuals follow along on
+      the big screen. Runs entirely in the browser; nothing to install.
+    </p>
     <canvas id="gl"></canvas>
     <div id="hud"></div>
     <div id="roomCode"></div>
