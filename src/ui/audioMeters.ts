@@ -1706,7 +1706,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     accent: NEUTRAL_ACCENT,
     unit: "s",
     description:
-      "Beat wave (red) and bar wave (blue) — a smooth swing that peaks once a beat or once a bar and fades without a confident tempo, the same curves anim.beatWave/anim.barWave drive a setting with.",
+      "Beat wave (red) and bar wave (blue): a smooth swing that peaks on every beat, or once a bar. It fades out while the tempo isn't locked. Plug either into a setting to make it sway in time.",
   });
   const waveTrace = createTraceStrip(
     [
@@ -1725,7 +1725,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     accent: NEUTRAL_ACCENT,
     unit: "bpm",
     description:
-      "Where the tracked tempo sits, log-scaled across the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX) — the same reading anim.tempo drives a setting with.",
+      "How fast the tracked tempo is, from the slowest to the fastest the tracker listens for. Plug it into a setting to make fast songs move faster.",
   });
   mountJack("anim.tempo", tempoLevel.right, tempoLevel.el);
 
@@ -1734,7 +1734,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     accent: NEUTRAL_ACCENT,
     unit: "%",
     description:
-      "How confidently the beat clock has locked onto the tempo — the same reading the tempo dot's own brightness and anim.tempoLock both use.",
+      "How sure the tracker is about the beat: high while hits keep landing where it expects them, low on loose or beatless music. The tempo dot brightens with the same reading.",
   });
   mountJack("anim.tempoLock", lock.right, lock.el);
 

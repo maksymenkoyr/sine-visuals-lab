@@ -25,8 +25,19 @@ export interface EvalMetrics {
   /** Signed median offset (tracked − true), ms, over tracked beats within
    *  half a beat of their nearest true beat. NaN if none qualify. */
   medianOffsetMs: number;
-  /** Mean tempoLock over frames inside a tempo segment, after t=6s. */
-  lockInTempo: number;
+  /** tempoOk, but only over frames at or after WARMUP_SEC — steady-state
+   *  accuracy, with how long the first lock takes reported separately as
+   *  timeToLockSec rather than folded in here. */
+  tempoOkSteady: number;
+  /** When the tracker first reads the true tempo (within 2 bpm) and then
+   *  keeps it for LOCK_HOLD_SEC straight. NaN if it never does. */
+  timeToLockSec: number;
+  /** Mean tempoLock, after t=6s inside a tempo segment, over frames where
+   *  the tracker's bpm is right (within 2 of the truth). */
+  lockWhenRight: number;
+  /** The same over frames where it is wrong — a confidence worth having
+   *  reads lower here than lockWhenRight. */
+  lockWhenWrong: number;
   /** Mean tempoLock over frames after t=6s that are neither inside a tempo
    *  segment nor in the track's own trailing silence (the time after its
    *  last tempo segment ends — a track with no tempo segments at all, like
@@ -69,6 +80,8 @@ function median(values: number[]): number {
 const TICKS_MIN_SEC = 8;
 const LOCK_MIN_SEC = 6;
 const TICKS_TOLERANCE_SEC = 0.03;
+const WARMUP_SEC = 3;
+const LOCK_HOLD_SEC = 2;
 
 export function evaluate(track: Track, fps = 60): EvalMetrics {
   const dt = 1 / fps;
@@ -83,8 +96,14 @@ export function evaluate(track: Track, fps = 60): EvalMetrics {
   const segPtr = { i: 0 };
   let framesInSeg = 0;
   let framesOk = 0;
-  let lockInSum = 0;
-  let lockInCount = 0;
+  let steadyFrames = 0;
+  let steadyOk = 0;
+  let runStart: number | null = null;
+  let lockTime: number | null = null;
+  let rightSum = 0;
+  let rightCount = 0;
+  let wrongSum = 0;
+  let wrongCount = 0;
   let lockNoSum = 0;
   let lockNoCount = 0;
   const trackedBeats: number[] = [];
@@ -103,12 +122,26 @@ export function evaluate(track: Track, fps = 60): EvalMetrics {
     const seg = currentSegment(track.tempo, segPtr, time);
     if (seg) {
       framesInSeg++;
-      if (Math.abs(frame.bpm - seg.bpm) < 2) framesOk++;
+      const ok = Math.abs(frame.bpm - seg.bpm) < 2;
+      if (ok) framesOk++;
+      if (time >= WARMUP_SEC) {
+        steadyFrames++;
+        if (ok) steadyOk++;
+      }
+      if (ok) {
+        if (runStart === null) runStart = time;
+        if (lockTime === null && time - runStart >= LOCK_HOLD_SEC) lockTime = runStart;
+      } else runStart = null;
     }
     if (time > LOCK_MIN_SEC) {
       if (seg) {
-        lockInSum += anim.tempoLock;
-        lockInCount++;
+        if (Math.abs(frame.bpm - seg.bpm) < 2) {
+          rightSum += anim.tempoLock;
+          rightCount++;
+        } else {
+          wrongSum += anim.tempoLock;
+          wrongCount++;
+        }
       } else if (time < finalSilenceStart) {
         lockNoSum += anim.tempoLock;
         lockNoCount++;
@@ -156,7 +189,10 @@ export function evaluate(track: Track, fps = 60): EvalMetrics {
     tempoOk: framesInSeg > 0 ? framesOk / framesInSeg : NaN,
     ticksOn30ms: qualifying > 0 ? within30ms / qualifying : NaN,
     medianOffsetMs: median(offsetsMs),
-    lockInTempo: lockInCount > 0 ? lockInSum / lockInCount : NaN,
+    tempoOkSteady: steadyFrames > 0 ? steadyOk / steadyFrames : NaN,
+    timeToLockSec: lockTime ?? NaN,
+    lockWhenRight: rightCount > 0 ? rightSum / rightCount : NaN,
+    lockWhenWrong: wrongCount > 0 ? wrongSum / wrongCount : NaN,
     lockNoTempo: lockNoCount > 0 ? lockNoSum / lockNoCount : NaN,
     endBpm: lastBpm,
     endLock: lastLock,

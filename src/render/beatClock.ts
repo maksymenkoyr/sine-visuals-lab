@@ -101,6 +101,15 @@ const LOCK_FALL_RATE = 3;
 // tighter and made every track's own lockInTempo worse either way, so it
 // stayed at its original values.
 export const PHASE_BASS = 4;
+// A hit is only noticed on the first render tick after its sound starts
+// (features.ts's flux compares whole frames), so every fired beat is late by
+// part of a frame — a lag that grows as the frame rate drops, and that the
+// comb would otherwise faithfully lock the beat lines onto, landing the
+// metronome a little after the kick. Each hit is back-dated by this many of
+// its own tick's dtSec before it votes. Swept against tests/tempoEval.test.ts
+// at both 60 and 30 fps: this value landed tick offsets closest to zero at
+// both rates.
+const HIT_LATENCY_FRAMES = 0.75;
 
 function wrap01(x: number): number {
   const w = x % 1;
@@ -185,7 +194,7 @@ export function createBeatClock(): BeatClock {
       }
 
       if (beatFired && smoothedBpm > 0) {
-        hits.push({ t: clockSec, w: hitWeight });
+        hits.push({ t: clockSec - HIT_LATENCY_FRAMES * dtSec, w: hitWeight });
         hits = hits.filter((h) => clockSec - h.t <= PHASE_WINDOW_SEC);
         if (hits.length >= PHASE_MIN_HITS) {
           let bestOffset = 0;

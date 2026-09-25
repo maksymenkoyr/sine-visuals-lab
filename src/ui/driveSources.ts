@@ -1,19 +1,7 @@
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { sourceKey, type DriveSourceChoice } from "../render/drives.ts";
 import type { SignalId } from "../render/signals.ts";
-import {
-  AUTO_SKY,
-  BANDS_AMBER,
-  HAIRLINE,
-  HOT_RED,
-  HOT_YELLOW,
-  INPUT_GREEN,
-  POWER_TEAL,
-  SCENE_VIOLET,
-  STRIP_HIGH,
-  STRIP_LOW,
-  STRIP_MID,
-} from "./controlsTheme.ts";
+import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";
 
 /**
  * One place naming every drive source's colour and panel label (the patch
@@ -100,8 +88,8 @@ const SIGNAL_SOURCE_COLOR: Record<SignalId, string> = {
   "anim.centroid": AUTO_SKY,
   "anim.beatWave": DRIVE_WHITE,
   "anim.barWave": DRIVE_WHITE,
-  "anim.tempo": SCENE_VIOLET,
-  "anim.tempoLock": HAIRLINE,
+  "anim.tempo": DRIVE_WHITE,
+  "anim.tempoLock": DRIVE_WHITE,
 };
 
 function isGridChoice(choice: DriveSourceChoice): choice is { source: "beat"; grid: number } {
