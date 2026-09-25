@@ -40,6 +40,9 @@ class TempoWorkletProcessor extends AudioWorkletProcessor {
   private analyzer: TempoAnalyzer | null = null;
   private lastPostTime = -Infinity;
   private lastPostedBpm = 0;
+  // Reused downmix buffer — process() runs every render quantum on the audio
+  // thread, where a per-call allocation is garbage the GC has to chase.
+  private mono = new Float32Array(0);
 
   process(inputs: Float32Array[][]): boolean {
     const input = inputs[0];
@@ -51,7 +54,9 @@ class TempoWorkletProcessor extends AudioWorkletProcessor {
       if (input.length === 1) {
         mono = input[0];
       } else {
-        mono = new Float32Array(block);
+        if (this.mono.length !== block) this.mono = new Float32Array(block);
+        mono = this.mono;
+        mono.fill(0);
         for (const ch of input) {
           for (let i = 0; i < block; i++) mono[i] += ch[i]! / input.length;
         }
