@@ -1,4 +1,5 @@
 import { Room, type Env } from "./room.ts";
+import { isBotUserAgent, parseUsageEvent, usageDataPoint } from "./usage.ts";
 
 export { Room };
 
@@ -76,6 +77,18 @@ export default {
         });
       }
       return Response.json({ code: randomRoomCode() }, { headers: CORS_HEADERS });
+    }
+
+    // Fire-and-forget beacon from src/net/usage.ts; always 204 so a bad or
+    // unrecorded event is indistinguishable from a counted one to the client.
+    if (url.pathname === "/api/usage" && request.method === "POST") {
+      const ua = request.headers.get("User-Agent") ?? "";
+      const ev = parseUsageEvent(await request.json().catch(() => null));
+      if (ev && env.USAGE && !isBotUserAgent(ua)) {
+        const country = typeof request.cf?.country === "string" ? request.cf.country : "XX";
+        env.USAGE.writeDataPoint(usageDataPoint(ev, country, ua));
+      }
+      return new Response(null, { status: 204 });
     }
 
     const match = url.pathname.match(ROOM_PATH_RE);
