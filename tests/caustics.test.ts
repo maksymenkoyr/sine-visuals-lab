@@ -3,11 +3,11 @@ import {
   advanceKickJolt,
   advanceLoudSwell,
   advanceLurch,
+  advanceRippleHighpass,
   causticDensityScale,
   createLoudSwellState,
   createLurchState,
-  createRipplePool,
-  RIPPLE_EXIT_RADIUS,
+  createRippleHighpassState,
   driftFlows,
   driftRatePerSec,
   focusSharp,
@@ -15,7 +15,6 @@ import {
   fogRestingSharp,
   loudSpeedFactor,
   loudSwellDrive,
-  rippleEnvelope,
   sparkleBrightGain,
   sparkleDensityExponent,
   sparkleGrainFreq,
@@ -510,104 +509,40 @@ describe("caustics caustic density", () => {
   });
 });
 
-describe("caustics beat ripple pool", () => {
-  /** Index of the slot with the largest value in a pool array. */
-  const argmax = (a: Float32Array) => a.indexOf(Math.max(...a));
-
-  it("a ring starts from nothing (a strike, not a fully formed lobe) and is still clearly visible at the far corner of the frame", () => {
-    expect(rippleEnvelope(0)).toBe(0);
-    // Peak arrives quickly, then fades.
-    expect(rippleEnvelope(0.15)).toBeGreaterThan(0.8);
-    expect(rippleEnvelope(1)).toBeLessThan(rippleEnvelope(0.15));
-    // p-space radius ~3 is the far corner of a 16:9 frame at the scene's 3x
-    // zoom; at RIPPLE_SPEED a ring gets there around 2.8s. "Circles on water
-    // that go from the center to the end" means it must not have faded out
-    // before then.
-    expect(rippleEnvelope(2.8)).toBeGreaterThan(0.2);
+// Beat ripple's own high-pass (advanceRippleHighpass) is what makes the new
+// wave simulation (rippleTank.ts) carry a *change* in the driver rather than
+// its raw value — see that file's header for why a displacement source
+// wants a delta, not a level. These pin the property that actually matters:
+// a driver that never changes must never raise a wave.
+describe("caustics ripple high-pass (advanceRippleHighpass)", () => {
+  it("the first call seeds the average and reports no swing at all", () => {
+    const st = createRippleHighpassState();
+    expect(advanceRippleHighpass(st, 1 / 60, 0.7)).toBe(0);
   });
 
-  it("later beats never touch a ring already travelling — its radius keeps growing while it holds its slot", () => {
-    const pool = createRipplePool();
-    pool.trigger();
-    pool.tick(0.5);
-    const slot = argmax(pool.radius);
-    let prev = pool.radius[slot]!;
-    expect(prev).toBeGreaterThan(0);
-    // Fewer beats than there are slots, so this ring is never reclaimed.
-    for (let beat = 0; beat < pool.radius.length - 1; beat++) {
-      pool.trigger();
-      pool.tick(0.5);
-      expect(pool.radius[slot]).toBeGreaterThan(prev);
-      prev = pool.radius[slot]!;
+  it("a constant (DC) driver settles to reading zero — a steady signal raises no wave", () => {
+    const st = createRippleHighpassState();
+    let out = 1;
+    for (let i = 0; i < 600; i++) out = advanceRippleHighpass(st, 1 / 60, 0.6);
+    expect(out).toBeCloseTo(0, 6);
+  });
+
+  it("a sudden rise reads as a positive swing that decays back toward zero as the average catches up", () => {
+    const st = createRippleHighpassState();
+    for (let i = 0; i < 300; i++) advanceRippleHighpass(st, 1 / 60, 0.2); // settle at 0.2
+    const jump = advanceRippleHighpass(st, 1 / 60, 1.0);
+    expect(jump).toBeGreaterThan(0.5);
+    let out = jump;
+    for (let i = 0; i < 300; i++) out = advanceRippleHighpass(st, 1 / 60, 1.0);
+    expect(Math.abs(out)).toBeLessThan(Math.abs(jump));
+  });
+
+  it("never produces NaN across a broad random sweep, including dt=0", () => {
+    const st = createRippleHighpassState();
+    for (let i = 0; i < 500; i++) {
+      const out = advanceRippleHighpass(st, Math.random() < 0.05 ? 0 : Math.random() / 30, Math.random());
+      expect(Number.isFinite(out)).toBe(true);
     }
-  });
-
-  it("when every slot is taken, the most-faded ring is the one reused, never the youngest", () => {
-    const pool = createRipplePool();
-    for (let i = 0; i < pool.radius.length; i++) {
-      pool.trigger();
-      pool.tick(0.5);
-    }
-    const oldest = argmax(pool.radius);
-    const youngest = pool.radius.indexOf(Math.min(...pool.radius));
-    const youngestR = pool.radius[youngest]!;
-    pool.trigger();
-    expect(pool.radius[oldest]).toBe(0);
-    expect(pool.radius[youngest]).toBe(youngestR);
-  });
-
-  it("at a steady fast tempo, the ring a new beat reclaims has already left the frame and faded", () => {
-    const pool = createRipplePool();
-    const beatSec = 60 / 150; // 150 bpm, every beat rings
-    for (let i = 0; i < pool.radius.length; i++) {
-      pool.trigger();
-      pool.tick(beatSec);
-    }
-    const oldest = argmax(pool.radius);
-    expect(pool.radius[oldest]).toBeGreaterThan(3); // past the frame corner
-    expect(pool.strength[oldest]).toBeLessThan(0.25);
-  });
-
-  it("a driver that keeps hitting never pulls a ring back before it has crossed the frame", () => {
-    // The reported bug: at a fast hit rate the oldest slot was recycled while
-    // its ring was still mid-screen, so rings only reached the edge once the
-    // hits stopped. 10 hits/s for 10s is well past what the pool can seat.
-    const pool = createRipplePool();
-    const dt = 1 / 60;
-    for (let f = 0; f < 600; f++) {
-      const before = Float32Array.from(pool.radius);
-      if (f % 6 === 0) pool.trigger();
-      pool.tick(dt);
-      for (let i = 0; i < before.length; i++) {
-        // A slot's radius only ever drops when a fresh ring takes it.
-        if (pool.radius[i]! < before[i]!) expect(before[i]).toBeGreaterThanOrEqual(RIPPLE_EXIT_RADIUS);
-      }
-    }
-    // And the exit radius really is past the far corner (16:9, 3x zoom, top of Breathe).
-    expect(RIPPLE_EXIT_RADIUS).toBeGreaterThan(1.5 * Math.hypot(16 / 9, 1) * 1.1);
-  });
-
-  it("a drop while every ring is still on screen strengthens the youngest ring instead of restarting one", () => {
-    const pool = createRipplePool();
-    for (let i = 0; i < pool.radius.length; i++) {
-      pool.trigger();
-      pool.tick(0.1);
-    }
-    const radii = Float32Array.from(pool.radius);
-    const youngest = radii.indexOf(Math.min(...radii));
-    pool.trigger(1.8);
-    pool.tick(0.1);
-    for (let i = 0; i < radii.length; i++) expect(pool.radius[i]).toBeGreaterThan(radii[i]!);
-    expect(pool.strength[youngest]).toBeCloseTo(1.8 * rippleEnvelope(0.2), 5);
-  });
-
-  it("a drop's ring carries its amplitude; untriggered slots contribute nothing", () => {
-    const pool = createRipplePool();
-    pool.trigger(1.8);
-    pool.tick(0.2);
-    const slot = argmax(pool.strength);
-    expect(pool.strength[slot]).toBeCloseTo(1.8 * rippleEnvelope(0.2), 5);
-    for (let i = 0; i < pool.strength.length; i++) if (i !== slot) expect(pool.strength[i]).toBe(0);
   });
 });
 

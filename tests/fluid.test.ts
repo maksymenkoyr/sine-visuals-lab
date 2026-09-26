@@ -1016,8 +1016,9 @@ describe("Post group: the light settings", () => {
 
 // ---------------------------------------------------------------------------
 // Shockwave pool (Light group's Bass shockwave) — see fluid.ts's
-// createShockState/triggerShock/advanceShocks, same ring-pool idiom as
-// caustics.ts's createRipplePool.
+// createShockState/triggerShock/advanceShocks, the same ring-pool idiom
+// caustics.ts's old ripple pool used before that scene moved to a real wave
+// simulation (src/render/scenes/rippleTank.ts).
 // ---------------------------------------------------------------------------
 
 describe("Shockwave pool", () => {

@@ -27,8 +27,9 @@ blob scene with no connection to this sim):
   Decisions) with mirror copies fired explicitly via `boltMirrors`.
 - `src/render/scenes/fluid.ts` — the `Scene`: the emitter/splat schedule
   (`EmitterInputs`, `splatEnvelope`, `emitterState`), the beat puff clock
-  (`createPuffState`/`advancePuff`, envelope shaped like `caustics.ts`'s
-  `rippleEnvelope`), the fold-drift state for Auto symmetry
+  (`createPuffState`/`advancePuff`, envelope shaped like the old ring pool
+  `caustics.ts` used before it moved to a real wave simulation,
+  `src/render/scenes/rippleTank.ts`), the fold-drift state for Auto symmetry
   (`createFoldState`/`advanceFold`, drifting across `FOLD_FAMILY` quadrant
   folds), the strobe state machine (`createStrobeState`/`triggerStrobe`/
   `advanceStrobe`/`strobeFrame`, `STROBE_PATTERN`), all `SETTINGS`

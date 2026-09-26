@@ -1,8 +1,7 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHash.ts";
-import { resolveHold } from "../beatListener.ts";
-import { VALUE_TRIGGER_UPPER_DEFAULT } from "../valueTrigger.ts";
+import { createRippleTank, RIPPLE_TANK_SAMPLE_GLSL } from "./rippleTank.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
 // Domain-warped value noise, sharpened into thin ridges. Two renderer-side
@@ -26,15 +25,16 @@ import { VALUE_TRIGGER_UPPER_DEFAULT } from "../valueTrigger.ts";
 // uCausticDensity scales the noise field's spatial frequency (more/fewer,
 // finer/fatter filaments; 0.5 is exactly the old fixed frequency),
 // uBreathe locks a once-per-bar zoom to the beat
-// clock, uRipple sends a pool of overlapping drop-rings out from center so a
-// new beat never cuts a ring off before it has crossed the frame — Ripple
-// spacing (rippleSpacing) floors how often an ordinary ring may start, in
-// beats, for a busy mix that would otherwise stack rings densely, and Ripple
-// threshold (rippleThreshold) is the fire mark a level or drawn-line source
-// on the ripple drive rises past to drop one (a hit-kind source keeps its
-// own real edge and ignores it) — see the ripple trigger logic in
-// extraUniforms below, and valueTrigger.ts for the threshold's own
-// hysteresis. uFlash is a brightness punch,
+// clock, uRipple drives a real 2D wave simulation (rippleTank.ts) seated at
+// the center of the frame — a stepped height field that carries whatever
+// pushes it, rather than an earlier pool of analytic gaussian rings each
+// launched by a yes/no trigger (see this file's 2026-09-26 record entries):
+// that approach read fine for one clean beat but had no good answer for a
+// busy or continuous driver (a zigzag of hits, a level), where a simulated
+// surface just carries the signal the way a real ripple tank would. Wave
+// speed/Wave fade/Edge reflection/Drop size (waveSpeed/waveFade/waveEdges/
+// waveDrop) tune the tank itself; the scaling and drop-strike logic that
+// feeds it live in the `simulation` closure below. uFlash is a brightness punch,
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
 // driftRatePerSec below, not a shader uniform driving the rate directly —
 // with driftKick dialing in how much bass onsets pump that speed. driftBeat
@@ -151,50 +151,76 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "ripple",
     label: "Beat ripple",
-    description: "Each beat drops a ring that spreads from the center to the edge, like a drop on water; rings overlap instead of replacing each other",
+    description: "Raises a wave at the center that spreads outward and bends light like a ring on real water",
     group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.21,
-    // Rings read best against punchy, uncluttered material.
+    // Waves read best against punchy, uncluttered material.
     auto: { attack: 0.35, pulse: 0.25, density: -0.2 },
     // A bass onset OR a broadband beat, unconditionally — no single
     // catalogue source reproduces that union, so the default is Scene (see
-    // the trigger logic itself, below, and drives.ts's header for why a
-    // Scene default is still bit-identical to today). A drop still rings
-    // its own stronger ring in place of the ordinary one on that tick,
-    // independent of this choice — see the trigger logic.
+    // sceneDefaultSignal in the `simulation` closure below, and drives.ts's
+    // header for why a Scene default is still bit-identical to today). Fed
+    // into a real 2D wave simulation (rippleTank.ts) as a continuous
+    // envelope rather than a one-shot trigger — see that file's header for
+    // why: a trigger-launched ring can't represent a busy or continuous
+    // driver, but a simulated surface just carries whatever pushes it. This
+    // slider scales the *source* driving the tank (0 = flat water, done on
+    // the JS side in `simulation.step` below), not the display — see
+    // RIPPLE_REFRACT_K/RIPPLE_CREST_GAIN's own comment in FRAG for why the
+    // display side doesn't also multiply by it. A drop still gets its own
+    // stronger one-shot kick on top, independent of this choice.
     drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"] },
   },
   {
-    key: "rippleSpacing",
-    label: "Ripple spacing",
-    description: "Shortest gap between rings, in beats — raise it when a busy mix drops rings too often",
+    key: "waveSpeed",
+    label: "Wave speed",
+    description: "How fast a wave travels across the water",
     group: "Motion",
     min: 0,
-    max: 4,
+    max: 1,
     step: 0.05,
-    default: 0.7,
-    // A response-shape parameter (how often, not how much), same bucket as
-    // Beat listener's own hold/refractory — drives.ts's header lists this
-    // among what's deliberately not a drive. 0 = no minimum gap at all.
-    // Read only in extraUniforms below (resolveHold's own `beats`), never
-    // uploaded to FRAG.
+    default: 0.5,
+    // Response-shape, not an amount — same bucket as Wave fade/Edge
+    // reflection/Drop size below (drives.ts's header lists this kind of
+    // setting among what's deliberately not a drive). Read only in
+    // rippleTank.ts's stepsPerSecFor, never uploaded to FRAG.
   },
   {
-    key: "rippleThreshold",
-    label: "Ripple threshold",
-    description: "How high a level or drawn-line source must rise to drop a ring (hit sources ignore this)",
+    key: "waveFade",
+    label: "Wave fade",
+    description: "How fast a wave loses energy as it travels — low keeps it visible all the way to the far edge, high dies out quickly",
     group: "Motion",
-    min: 0.1,
-    max: 0.95,
+    min: 0,
+    max: 1,
     step: 0.05,
-    default: VALUE_TRIGGER_UPPER_DEFAULT,
-    // Same bucket as Ripple spacing above: this is the fire mark a level/
-    // line source's own Schmitt trigger uses (valueTrigger.ts), not an
-    // amount of anything — a hit-kind source has a real edge and ignores it
-    // entirely (drives.ts's fired()). Read only in extraUniforms below.
+    default: 0.3,
+    // Read only in rippleTank.ts's decayPerSecFor.
+  },
+  {
+    key: "waveEdges",
+    label: "Edge reflection",
+    description: "0 lets a wave run off the frame like open water; 1 turns the frame into a hard-walled tank where waves bounce back and interfere",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
+    // Read only in rippleTank.ts's spongeDampAt (and the sim shader's own
+    // uEdgeReflect) — see that file's header for the sponge/wall split.
+  },
+  {
+    key: "waveDrop",
+    label: "Drop size",
+    description: "How wide a splash each disturbance starts from",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+    // Read only in rippleTank.ts's sourceRadiusCellsFor.
   },
   {
     key: "drift",
@@ -508,38 +534,29 @@ const SETTINGS: SceneSetting[] = [
   },
 ];
 
-// Beat ripple pool. Every ring in flight is summed in the shader, so a new
-// beat only ever adds a ring — it never replaces one that is still on
-// screen. A fresh ring only takes a slot whose ring has already crossed
-// RIPPLE_EXIT_RADIUS (see createRipplePool); when every ring is still
-// crossing the frame, the hit is folded into the youngest one instead.
-// Recycling the oldest slot unconditionally was the bug: under a fast
-// driver (busy onsets, a 1/8 grid) each ring was yanked back to the center
-// after 8 hits, so no ring reached the edge until the hits stopped and the
-// last few were finally left alone to finish.
-const MAX_RIPPLES = 16;
-const RIPPLE_SPEED = 1.1; // units/sec a ring expands at
-// p-space radius past which a ring is off screen and its slot is free: the
-// far corner of a 16:9 frame at this scene's 3x zoom is ~3.06, ~3.4 at the
-// top of uBreathe's zoom, plus about one ring half-width so the crest's
-// tail has cleared the corner too.
-export const RIPPLE_EXIT_RADIUS = 4.0;
-const RIPPLE_WIDTH = 4.0; // gaussian tightness of a ring's height profile — lower = wider ring
-const RIPPLE_DECAY_PER_SEC = 0.45; // lower = the ring lives longer and travels farther
-// A drop starts as a dimple that grows into the ring rather than appearing
-// fully formed, so a beat reads as a strike on the water, not a cut.
-const RIPPLE_ATTACK_SEC = 0.06;
-// A drop moment gets one ring this much stronger than an ordinary beat.
-// Used to claim two coincident slots instead, which was the same picture
-// but burned a slot's worth of ring history for nothing.
-const RIPPLE_DROP_AMP = 1.8;
-// The refraction the shader applies is the *slope* of the ring's height
-// profile, not its height (see the ripple comment in FRAG). This scales the
-// gaussian derivative so its peak is exactly 1 per unit of ring strength;
-// RIPPLE_REFRACT below is then the peak displacement, in p-space units, of
-// a full-strength ring at uRipple = 1.
-const RIPPLE_SLOPE_NORM = Math.sqrt(2 * RIPPLE_WIDTH) * Math.exp(0.5);
-const RIPPLE_REFRACT = 0.3;
+// Beat ripple's display-side read of the wave sim (rippleTank.ts owns the
+// simulation itself; see that file's header). Both scales replace what
+// RIPPLE_SLOPE_NORM/RIPPLE_REFRACT and the old ring*0.8 crest term did for
+// the earlier analytic ring pool, and neither multiplies by uRipple again —
+// the strength slider already scales the *source* driving the tank on the
+// JS side (see the `simulation` closure below), so this is only ever a
+// display-side read of whatever height the tank already settled on.
+// Sized from the tank's own measured output (CPU twin, high grid, 120 bpm
+// beat pulse at the default Ripple strength — numbers in
+// docs/scenes/caustics.md): dh/duv runs ~29 at the 99th percentile and
+// ~150 right at the source, height ~0.4 and ~2. Each is a linear gain
+// feeding a tanh soft ceiling, so the typical wave refracts and lights about
+// as much as the old ring's peak did (0.3 p-space displacement, ~0.2 crest)
+// while the source's own far larger slope can't tear the pattern apart.
+const RIPPLE_REFRACT_K = 0.012; // p-space sampling displacement per unit of dh/duv, before the ceiling
+const RIPPLE_REFRACT_MAX = 0.4; // soft ceiling on that displacement, p-space units
+const RIPPLE_CREST_GAIN = 1.4; // crest brightening per unit of tank height, before the ceiling
+const RIPPLE_CREST_MAX = 0.35; // soft ceiling on crest brightening
+// A drop moment adds this much extra source delta on top of an ordinary
+// beat's own (see the `simulation` closure's `kick` below) — carried over
+// from the old ring pool's RIPPLE_DROP_AMP, same reasoning: a drop should
+// read as a bigger strike than a plain beat, not a replacement for one.
+const RIPPLE_DROP_KICK = 1.8;
 
 // Hard ceiling on sharp regardless of uFog/uFocus. Was 26 in a brief period
 // where every focus setting shared this same ceiling as its *peak* — lowered
@@ -919,8 +936,7 @@ const KICK_JOLT_PHASE = 2.0;
 // One-pole slew rate toward the jolt's target (see advanceKickJolt). Fast
 // enough to read as a strike; not instant, because lowPulse itself steps
 // 0->1 in a single tick (bandEnergy.ts) and stepping driftPhase that fast
-// would tear the field instead of reading as a strike — the same reasoning
-// RIPPLE_ATTACK_SEC applies to a fresh ring, below.
+// would tear the field instead of reading as a strike.
 const KICK_JOLT_SLEW_PER_SEC = 18;
 
 export interface DriftInputs {
@@ -986,8 +1002,7 @@ export function createLurchState(): LurchState {
 /** Advances a damped impulse in place: `fired` kicks the velocity up by
  *  `amount * LURCH_IMPULSE` (capped), then the phase integrates that
  *  velocity and the velocity decays exponentially — a fast, symmetric
- *  attack-and-coast, unlike rippleEnvelope's asymmetric ring shape. Pure and
- *  exported for tests/caustics.test.ts. */
+ *  attack-and-coast. Pure and exported for tests/caustics.test.ts. */
 export function advanceLurch(st: LurchState, dtSec: number, fired: boolean, amount: number): void {
   if (fired) st.vel = Math.min(st.vel + amount * LURCH_IMPULSE, LURCH_VEL_CAP);
   st.phase += st.vel * dtSec;
@@ -1006,63 +1021,40 @@ export function advanceKickJolt(prevJolt: number, driftKick: number, lowPulse: n
   return prevJolt + (target - prevJolt) * Math.min(1, KICK_JOLT_SLEW_PER_SEC * dtSec);
 }
 
-/** A ring's strength over its life: a short attack from 0 (the strike),
- *  then an exponential fade slow enough that a ring is still clearly
- *  visible by the time it reaches the far corner of a 16:9 frame (p-space
- *  radius ~3 at this scene's 3x zoom). Pure so tests/caustics.test.ts can
- *  pin that "rings reach the edge" property directly. */
-export function rippleEnvelope(ageSec: number): number {
-  if (ageSec <= 0) return 0;
-  return (1 - Math.exp(-ageSec / RIPPLE_ATTACK_SEC)) * Math.exp(-ageSec * RIPPLE_DECAY_PER_SEC);
+// Beat ripple's own high-pass on the driver signal (see the `simulation`
+// closure further down): a slow (~0.8s) average of the raw driver,
+// subtracted from it each frame before it reaches rippleTank.ts. A real
+// water surface only moves when something *changes* it — a synth pad held
+// at one steady loudness should raise no wave, only a swing away from
+// what's typical should. Frame-rate independent (exp(-dt/tau)), same idiom
+// as advanceLoudSwell's own calibration above, just on a much faster
+// timescale (a "typical level right now", not "this track's own observed
+// range").
+const RIPPLE_HIGHPASS_TAU_SEC = 0.8;
+
+export interface RippleHighpassState {
+  avg: number;
+  init: boolean;
 }
 
-/** Pool of rings in flight. Per-slot radius and strength are computed here
- *  each tick and uploaded as two uniform arrays, so the shader only does the
- *  spatial part. Exported for tests/caustics.test.ts. */
-export function createRipplePool() {
-  const age = new Float32Array(MAX_RIPPLES).fill(1e6); // huge = never triggered, fully faded
-  const amp = new Float32Array(MAX_RIPPLES); // 0 = inactive
-  const radius = new Float32Array(MAX_RIPPLES);
-  const strength = new Float32Array(MAX_RIPPLES);
-  return {
-    /** Current ring radius per slot, in p-space units. */
-    radius,
-    /** Current ring strength per slot: amplitude x rippleEnvelope(age). */
-    strength,
-    /** Starts a fresh ring in the longest-gone slot whose ring has already
-     *  left the frame. A ring still on screen is never restarted: if every
-     *  slot is still crossing, the hit lands on the youngest ring instead
-     *  (raising its amplitude to this hit's, if larger), which at that
-     *  rate is at most MAX_RIPPLES-th of a crossing old — so a drop still
-     *  gets its stronger ring and nothing jumps back to the center. */
-    trigger(amplitude = 1): void {
-      let slot = -1;
-      let youngest = 0;
-      for (let i = 0; i < MAX_RIPPLES; i++) {
-        if (age[i] < age[youngest]) youngest = i;
-        const gone = amp[i] === 0 || age[i] * RIPPLE_SPEED >= RIPPLE_EXIT_RADIUS;
-        if (gone && (slot < 0 || age[i] > age[slot])) slot = i;
-      }
-      if (slot < 0) {
-        amp[youngest] = Math.max(amp[youngest]!, amplitude);
-        return;
-      }
-      age[slot] = 0;
-      amp[slot] = amplitude;
-      radius[slot] = 0;
-      strength[slot] = 0;
-    },
-    tick(dtSec: number): void {
-      for (let i = 0; i < MAX_RIPPLES; i++) {
-        age[i] += dtSec;
-        // An inactive slot reports radius 0 (not a huge stale one) so the
-        // arrays stay readable in tests and probes; strength 0 already
-        // makes it contribute nothing.
-        radius[i] = amp[i] > 0 ? age[i] * RIPPLE_SPEED : 0;
-        strength[i] = amp[i] * rippleEnvelope(age[i]);
-      }
-    },
-  };
+export function createRippleHighpassState(): RippleHighpassState {
+  return { avg: 0, init: false };
+}
+
+/** Advances `st`'s slow average toward `signal` and returns `signal` minus
+ *  that average. The first call seeds the average from that sample (and
+ *  returns 0) rather than reporting a false swing away from a zeroed
+ *  average. Pure aside from `st`, and exported so tests/caustics.test.ts can
+ *  pin the "a steady driver raises no wave" property directly. */
+export function advanceRippleHighpass(st: RippleHighpassState, dtSec: number, signal: number): number {
+  if (!st.init) {
+    st.avg = signal;
+    st.init = true;
+    return 0;
+  }
+  const rate = 1 - Math.exp(-dtSec / RIPPLE_HIGHPASS_TAU_SEC);
+  st.avg += (signal - st.avg) * rate;
+  return signal - st.avg;
 }
 
 const FRAG = `
@@ -1132,48 +1124,43 @@ void main() {
   vec2 flowBack = vec2(uDriftFlow[${FLOW_BACK}], uDriftFlow[${FLOW_BACK + 1}]);
   vec2 sparkleFlow = vec2(uDriftFlow[${FLOW_SPARKLE}]);
 
-  // Beat ripple pool: every ring in flight (MAX_RIPPLES slots, radius and
-  // strength per slot from createRipplePool) is summed here, so a new beat
-  // adds a ring on top of the ones still travelling instead of replacing
-  // them. Each ring is modelled as a gaussian bump in the water's height at
-  // its current radius, and the pattern is refracted through it the way a
-  // real ripple bends the caustics beneath it: the sampling point shifts
-  // radially by the surface *slope* (the bump's derivative), not by its
-  // height. That matters for two reasons. The slope is an odd function
-  // around the crest — the pattern is pushed outward just inside the ring
-  // and drawn back just outside it — so a passing ring reads as a wave
-  // sweeping through the filaments, where the old height-based push shifted
-  // everything near the ring toward the center in one lump. And the slope
-  // of a bump sitting at radius 0 (a ring that just spawned) is zero at the
-  // origin and grows linearly away from it, so a fresh ring is a smooth
-  // dimple. The old lobe was at full height exactly at the origin, where
-  // radialDir flips sign — a tear that dragged every nearby filament into a
-  // single pinch point on each beat.
-  //
-  // The mirrored term (pLen + r) is what a radially symmetric wave actually
-  // looks like on the other side of the origin. It only matters while a
-  // ring is still small, and its job is to keep the total slope exactly
-  // zero at the origin for every radius, not just at spawn.
-  float pLen = length(p);
-  vec2 radialDir = pLen > 1e-4 ? p / pLen : vec2(1.0, 0.0);
-  float ringCrest = 0.0; // summed ring height here — lights the crest
-  float ringSlope = 0.0; // summed radial slope here — refracts the pattern
-  for (int i = 0; i < ${MAX_RIPPLES}; i++) {
-    float s = uRippleStrength[i];
-    float r = uRippleRadius[i];
-    float dOut = pLen - r;
-    float dIn = pLen + r;
-    float gOut = exp(-dOut * dOut * ${RIPPLE_WIDTH.toFixed(2)});
-    float gIn = exp(-dIn * dIn * ${RIPPLE_WIDTH.toFixed(2)});
-    ringCrest += s * (gOut + gIn);
-    ringSlope += s * (dOut * gOut + dIn * gIn);
-  }
-  float ring = uRipple * ringCrest;
+  // Beat ripple: a real 2D wave simulation (rippleTank.ts), stepped on the
+  // GPU and sampled here, in place of the old pool of analytic gaussian
+  // rings — see that file's header for why (a trigger-launched ring can't
+  // represent a busy or continuous driver; a simulated surface just carries
+  // whatever pushes it). tankHeight/RIPPLE_TANK_SAMPLE_GLSL decode the
+  // tank's own packed state with a manual bilinear (hardware filtering
+  // would blend the packed bytes, not the height they encode). The strength
+  // slider and the drop kick both already scaled the *source* driving the
+  // tank on the JS side (see the simulation closure below) — this is only
+  // ever a read of the surface, so nothing here multiplies by uRipple again.
+  // The pattern is refracted by the surface's *slope* (its gradient), not
+  // its height — the same reasoning the old ring pool used: a slope pushes
+  // the pattern outward on the rising side of a wave and draws it back on
+  // the falling side, reading as a wave sweeping through the filaments,
+  // where a height-based push would instead drag everything near a crest
+  // toward one lump.
+  vec2 tankUv = roomUv(vUv);
+  vec2 tankTexel = vec2(uRippleTexelX, uRippleTexelY);
+  float tankH = tankHeight(uRippleTank, tankUv);
+  float tankHL = tankHeight(uRippleTank, tankUv - vec2(tankTexel.x, 0.0));
+  float tankHR = tankHeight(uRippleTank, tankUv + vec2(tankTexel.x, 0.0));
+  float tankHD = tankHeight(uRippleTank, tankUv - vec2(0.0, tankTexel.y));
+  float tankHU = tankHeight(uRippleTank, tankUv + vec2(0.0, tankTexel.y));
+  // dh/duv (central differences, normalized by the texel spacing) rather
+  // than a raw finite difference, so a coarser quality preset's grid never
+  // reads as a weaker wave.
+  vec2 tankGrad = vec2(tankHR - tankHL, tankHU - tankHD) / (2.0 * tankTexel);
+  // Both terms go through a tanh soft ceiling — see RIPPLE_REFRACT_K's comment.
+  float ring = ${RIPPLE_CREST_MAX.toFixed(3)} * tanh(max(tankH, 0.0) * ${(RIPPLE_CREST_GAIN / RIPPLE_CREST_MAX).toFixed(3)});
+  vec2 rippleShift = tankGrad * ${RIPPLE_REFRACT_K.toFixed(4)};
+  float rippleShiftLen = length(rippleShift);
+  if (rippleShiftLen > 1e-5) rippleShift *= ${RIPPLE_REFRACT_MAX.toFixed(3)} * tanh(rippleShiftLen / ${RIPPLE_REFRACT_MAX.toFixed(3)}) / rippleShiftLen;
   // Scaled by densScale here, once — every later octave builds on q by
   // accumulating onto it (see the loop below), so the whole pattern inherits
   // the frequency change from this one multiply rather than re-scaling p at
   // each octave separately.
-  vec2 q = (p + radialDir * uRipple * ringSlope * ${(RIPPLE_SLOPE_NORM * RIPPLE_REFRACT).toFixed(4)}) * densScale;
+  vec2 q = (p + rippleShift) * densScale;
 
   int iterations = int(mix(3.0, 6.0, uDetail));
   float acc = 0.0;
@@ -1383,10 +1370,11 @@ void main() {
 }
 `;
 
-export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG, {
-  settings: SETTINGS,
-  extraUniformDecls: `uniform float uDriftFlow[${DRIFT_FLOW_LEN}];\nuniform float uChurnDrive;\nuniform float uLoudSwell;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
-  extraUniforms: (() => {
+export const causticsScene = createFullscreenScene(
+  "caustics",
+  "Caustics",
+  FRAG,
+  (() => {
     let driftPhase = 0;
     const lurch = createLurchState();
     const loudSwellState = createLoudSwellState();
@@ -1400,100 +1388,111 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
     // the point of a second, independent dial.
     let churnPulse = 0;
     let kickJolt = 0;
-    const ripples = createRipplePool();
-    let prevDropOnset = false;
-    // anim.timeSec of the last ring started (drop or ordinary) — what the
-    // Ripple spacing gap below measures from. -Infinity so the very first
-    // ring is never held back.
-    let lastRingSec = -Infinity;
     const flowBuf = new Float32Array(DRIFT_FLOW_LEN);
 
-    return (frame, anim, getSetting, drives) => {
-      const driftKick = getSetting("driftKick");
-      const driftLoud = getSetting("driftLoud");
-      // Kept up to date every tick regardless of driftLoud's own drive
-      // choice — see the "driftLoud" SceneSetting's own comment — and
-      // drives.value()'s sceneDefault, so at that setting's Scene default
-      // (today's behavior) loudSwell is exactly this calibrated reading.
-      const loudSwellCalibrated = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
-      const loudSwell = drives.value("driftLoud", loudSwellCalibrated);
-      driftPhase += anim.dtSec * driftRatePerSec({
-        drift: getSetting("drift"),
-        driftKick,
-        driftLoud,
-        // Bass hit's own decaying envelope at driftKick's Beat-hit default —
-        // see the "driftKick" SceneSetting's own comment.
-        lowPulse: drives.value("driftKick", anim.lowPulse),
-        loudSwell,
-        dropReactivity: getSetting("dropReactivity"),
-        sectionIntensity: anim.sectionIntensity,
-      });
-      advanceLurch(lurch, anim.dtSec, drives.fired("driftBeat", anim.onset), getSetting("driftBeat"));
-      churnPulse *= Math.exp(-anim.dtSec * LURCH_DECAY_PER_SEC);
-      if (drives.fired("driftChurn", anim.onset)) churnPulse = 1;
-      const churnDrive = getSetting("driftChurn") * churnPulse;
-      // Not gated behind Drift speed the way the rate term above is — a
-      // kick strike should still land even with drift=0 (see the file
-      // header's driftKick comment). Same drives.value() reading as the
-      // rate term above, not a second independent read.
-      kickJolt = advanceKickJolt(kickJolt, driftKick, drives.value("driftKick", anim.lowPulse), anim.dtSec);
+    // Beat ripple's own simulation state, shared between the `simulation`
+    // closure (which steps the tank) and `extraUniforms` (which uploads its
+    // texel size — see RIPPLE_TANK_SAMPLE_GLSL's own comment for why that's
+    // a plain uniform pair rather than something the sampler binding alone
+    // carries).
+    const tank = createRippleTank();
+    const highpass = createRippleHighpassState();
+    let prevDropOnset = false;
 
-      ripples.tick(anim.dtSec);
-      // A drop is rarer and bigger than an ordinary beat — one stronger ring
-      // in place of (not on top of) the beat that usually lands on the same
-      // tick, independent of the "ripple" setting's own drive choice.
-      // Edge-triggered locally since anim.dropOnset is already a one-shot
-      // pulse, but the guard keeps this robust if that ever changes.
-      const drop = anim.dropOnset && !prevDropOnset;
-      prevDropOnset = anim.dropOnset;
-      // Always read, drop or not, gap open or not: fired() is what consumes
-      // a grid source's pending edge and advances a level/line source's own
-      // Schmitt trigger (drives.ts's header) — short-circuiting this call on
-      // a gated tick would leave either stuck instead of moving with the
-      // music underneath the gap. At the "ripple" setting's Scene default
-      // this reads today's exact trigger (a bass hit OR a broadband beat,
-      // unconditionally — see that setting's own comment); a non-default
-      // pick fires on whatever single catalogue/grid/line source the picker
-      // chose instead — rippleThreshold is that source's own fire mark, read
-      // here regardless of which source is picked (a hit-kind source
-      // ignores it). Reads anim.onset, not frame.onset directly — see
-      // AnimFrame's own doc: a scene reading FeatureFrame.onset can miss the
-      // tick it fired on whenever the render cap skips it, which is exactly
-      // the bug this scene used to have (renderLatch.ts's header has the
-      // story).
-      const hit = drives.fired("ripple", anim.lowOnset || anim.onset, getSetting("rippleThreshold"));
-      if (drop) {
-        ripples.trigger(RIPPLE_DROP_AMP);
-        lastRingSec = anim.timeSec;
-      } else if (hit) {
-        // Ripple spacing: the shortest gap an ordinary ring may follow the
-        // last one by, in beats once the tempo tracker is confident, else a
-        // fixed fallback half that many seconds — resolveHold
-        // (beatListener.ts) is the same hold-sizing rule Beat listener uses
-        // elsewhere, reused rather than a bespoke formula. A drop's ring
-        // above is exempt from this gap (it always rings) but still moves
-        // lastRingSec, so an ordinary beat right after a drop respects the
-        // gap same as any other. Added because the pool fix alone (this
-        // file's 2026-09-26 record entry) still let a busy mix stack rings
-        // densely — spacing is the pacing fix on top of it.
-        const gap = resolveHold(
-          { beats: getSetting("rippleSpacing"), fallbackSec: 0.5 * getSetting("rippleSpacing") },
-          anim.tempoLock,
-          anim.bpm,
-        );
-        if (anim.timeSec - lastRingSec >= gap) {
-          ripples.trigger(1);
-          lastRingSec = anim.timeSec;
-        }
-      }
+    return {
+      settings: SETTINGS,
+      extraUniformDecls: `uniform float uDriftFlow[${DRIFT_FLOW_LEN}];\nuniform float uChurnDrive;\nuniform float uLoudSwell;\nuniform sampler2D uRippleTank;\n${RIPPLE_TANK_SAMPLE_GLSL}`,
 
-      return {
-        uDriftFlow: driftFlows(driftPhase + lurch.phase + kickJolt, causticDensityScale(getSetting("causticDensity")), flowBuf),
-        uChurnDrive: churnDrive,
-        uLoudSwell: loudSwellDrive(driftLoud, loudSwell),
-        uRippleRadius: ripples.radius,
-        uRippleStrength: ripples.strength,
-      };
+      simulation: {
+        init(gl, quality) {
+          tank.init(gl, quality);
+        },
+        step(gl, _frame, anim, getSetting, drives) {
+          // `_frame` unused here — the driver signal is entirely a function
+          // of `anim`'s pulses and the resolved `drives`/`getSetting`
+          // readings. The Scene default this setting's drive picker
+          // reproduces — "bass or beat hit" — read here as the two decaying
+          // pulses' max, a continuous envelope rather than a one-shot edge
+          // (see the "ripple" setting's own comment: rippleTank.ts's header
+          // explains why a real simulation wants a continuous signal, not
+          // a trigger).
+          const sceneDefaultSignal = Math.max(anim.lowPulse, anim.beatPulse);
+          const rawSignal = drives.value("ripple", sceneDefaultSignal);
+          const highpassed = advanceRippleHighpass(highpass, anim.dtSec, rawSignal);
+          const rippleAmt = getSetting("ripple");
+
+          // A drop is rarer and bigger than an ordinary beat — a strong
+          // one-shot kick added on top of whatever the continuous driver is
+          // already doing, independent of the "ripple" setting's own drive
+          // choice. Edge-triggered locally since anim.dropOnset is already
+          // a one-shot pulse, but the guard keeps this robust if that ever
+          // changes.
+          const drop = anim.dropOnset && !prevDropOnset;
+          prevDropOnset = anim.dropOnset;
+
+          // Scaled by the Ripple strength slider here, on the JS side, so a
+          // setting of 0 leaves the tank itself flat rather than merely
+          // hiding a wave the display side would otherwise still refract —
+          // see that setting's own comment and RIPPLE_REFRACT_K/
+          // RIPPLE_CREST_GAIN's comment in FRAG for why the display side
+          // doesn't also multiply by it.
+          const tex = tank.step(
+            gl,
+            {
+              drive: highpassed * rippleAmt,
+              kick: (drop ? RIPPLE_DROP_KICK : 0) * rippleAmt,
+              speed: getSetting("waveSpeed"),
+              fade: getSetting("waveFade"),
+              edgeReflect: getSetting("waveEdges"),
+              dropSize: getSetting("waveDrop"),
+            },
+            anim.dtSec,
+          );
+          return { uRippleTank: tex };
+        },
+        dispose(gl) {
+          tank.dispose(gl);
+        },
+      },
+
+      extraUniforms: (frame, anim, getSetting, drives) => {
+        const driftKick = getSetting("driftKick");
+        const driftLoud = getSetting("driftLoud");
+        // Kept up to date every tick regardless of driftLoud's own drive
+        // choice — see the "driftLoud" SceneSetting's own comment — and
+        // drives.value()'s sceneDefault, so at that setting's Scene default
+        // (today's behavior) loudSwell is exactly this calibrated reading.
+        const loudSwellCalibrated = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
+        const loudSwell = drives.value("driftLoud", loudSwellCalibrated);
+        driftPhase += anim.dtSec * driftRatePerSec({
+          drift: getSetting("drift"),
+          driftKick,
+          driftLoud,
+          // Bass hit's own decaying envelope at driftKick's Beat-hit default —
+          // see the "driftKick" SceneSetting's own comment.
+          lowPulse: drives.value("driftKick", anim.lowPulse),
+          loudSwell,
+          dropReactivity: getSetting("dropReactivity"),
+          sectionIntensity: anim.sectionIntensity,
+        });
+        advanceLurch(lurch, anim.dtSec, drives.fired("driftBeat", anim.onset), getSetting("driftBeat"));
+        churnPulse *= Math.exp(-anim.dtSec * LURCH_DECAY_PER_SEC);
+        if (drives.fired("driftChurn", anim.onset)) churnPulse = 1;
+        const churnDrive = getSetting("driftChurn") * churnPulse;
+        // Not gated behind Drift speed the way the rate term above is — a
+        // kick strike should still land even with drift=0 (see the file
+        // header's driftKick comment). Same drives.value() reading as the
+        // rate term above, not a second independent read.
+        kickJolt = advanceKickJolt(kickJolt, driftKick, drives.value("driftKick", anim.lowPulse), anim.dtSec);
+
+        return {
+          uDriftFlow: driftFlows(driftPhase + lurch.phase + kickJolt, causticDensityScale(getSetting("causticDensity")), flowBuf),
+          uChurnDrive: churnDrive,
+          uLoudSwell: loudSwellDrive(driftLoud, loudSwell),
+          uRippleTexelX: tank.texel[0],
+          uRippleTexelY: tank.texel[1],
+        };
+      },
     };
   })(),
-});
+);
