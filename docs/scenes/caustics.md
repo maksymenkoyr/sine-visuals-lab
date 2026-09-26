@@ -106,6 +106,17 @@ reference-measurement workflow used by later scenes.
   the weights are the invariant, defaults move with each bake — and the setting
   comments that still claimed their pre-bake values were reworded to describe
   the dial's mapping instead.
+- 2026-09-26 — Beat ripple under a driver that keeps hitting: reported as rings
+  that relaunch and never reach the edge of the screen until the signal drops,
+  then all "let go" at once. Cause: `createRipplePool` always recycled the
+  oldest of 8 slots, and a ring needs ~2.8s to cross to the far corner, so
+  anything past ~3 hits/s (busy onsets, a 1/8 grid source on the `ripple`
+  drive) pulled rings back to the centre mid-screen — at 5 hits/s no ring got
+  past radius ~1.8 of the ~3.06 corner. Now the pool has 16 slots and only
+  reuses a slot whose ring is past `RIPPLE_EXIT_RADIUS`; when every ring is
+  still crossing, a hit folds into the youngest ring (raising its amplitude,
+  so a drop still lands) instead of restarting one. Pinned by the "driver
+  that keeps hitting" test in `tests/caustics.test.ts`.
 
 ## Tuning notes
 

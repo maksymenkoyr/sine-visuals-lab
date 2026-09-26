@@ -25,7 +25,7 @@ import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHas
 // finer/fatter filaments; 0.5 is exactly the old fixed frequency),
 // uBreathe locks a once-per-bar zoom to the beat
 // clock, uRipple sends a pool of overlapping drop-rings out from center so a
-// new beat doesn't cut the last ring off, uFlash is a brightness punch,
+// new beat never cuts a ring off before it has crossed the frame, uFlash is a brightness punch,
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
 // driftRatePerSec below, not a shader uniform driving the rate directly —
 // with driftKick dialing in how much bass onsets pump that speed. driftBeat
@@ -471,14 +471,21 @@ const SETTINGS: SceneSetting[] = [
 ];
 
 // Beat ripple pool. Every ring in flight is summed in the shader, so a new
-// beat only ever adds a ring — it never replaces one. The pool is sized so
-// that the slot a fresh ring reclaims (always the most-faded one, see
-// createRipplePool) has long since left the screen at any musical tempo:
-// with fewer slots and round-robin reuse, the fifth beat of a bar used to
-// erase a ring that was still a third as bright as when it started, which
-// read as the whole pattern being redrawn on that beat.
-const MAX_RIPPLES = 8;
+// beat only ever adds a ring — it never replaces one that is still on
+// screen. A fresh ring only takes a slot whose ring has already crossed
+// RIPPLE_EXIT_RADIUS (see createRipplePool); when every ring is still
+// crossing the frame, the hit is folded into the youngest one instead.
+// Recycling the oldest slot unconditionally was the bug: under a fast
+// driver (busy onsets, a 1/8 grid) each ring was yanked back to the center
+// after 8 hits, so no ring reached the edge until the hits stopped and the
+// last few were finally left alone to finish.
+const MAX_RIPPLES = 16;
 const RIPPLE_SPEED = 1.1; // units/sec a ring expands at
+// p-space radius past which a ring is off screen and its slot is free: the
+// far corner of a 16:9 frame at this scene's 3x zoom is ~3.06, ~3.4 at the
+// top of uBreathe's zoom, plus about one ring half-width so the crest's
+// tail has cleared the corner too.
+export const RIPPLE_EXIT_RADIUS = 4.0;
 const RIPPLE_WIDTH = 4.0; // gaussian tightness of a ring's height profile — lower = wider ring
 const RIPPLE_DECAY_PER_SEC = 0.45; // lower = the ring lives longer and travels farther
 // A drop starts as a dimple that grows into the ring rather than appearing
@@ -984,12 +991,24 @@ export function createRipplePool() {
     radius,
     /** Current ring strength per slot: amplitude x rippleEnvelope(age). */
     strength,
-    /** Starts a fresh ring in whichever slot has been fading the longest.
-     *  Never the youngest — a beat must not erase the ring the last beat
-     *  sent out, only add its own. */
+    /** Starts a fresh ring in the longest-gone slot whose ring has already
+     *  left the frame. A ring still on screen is never restarted: if every
+     *  slot is still crossing, the hit lands on the youngest ring instead
+     *  (raising its amplitude to this hit's, if larger), which at that
+     *  rate is at most MAX_RIPPLES-th of a crossing old — so a drop still
+     *  gets its stronger ring and nothing jumps back to the center. */
     trigger(amplitude = 1): void {
-      let slot = 0;
-      for (let i = 1; i < MAX_RIPPLES; i++) if (age[i] > age[slot]) slot = i;
+      let slot = -1;
+      let youngest = 0;
+      for (let i = 0; i < MAX_RIPPLES; i++) {
+        if (age[i] < age[youngest]) youngest = i;
+        const gone = amp[i] === 0 || age[i] * RIPPLE_SPEED >= RIPPLE_EXIT_RADIUS;
+        if (gone && (slot < 0 || age[i] > age[slot])) slot = i;
+      }
+      if (slot < 0) {
+        amp[youngest] = Math.max(amp[youngest]!, amplitude);
+        return;
+      }
       age[slot] = 0;
       amp[slot] = amplitude;
       radius[slot] = 0;

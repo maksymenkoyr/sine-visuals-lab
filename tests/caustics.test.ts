@@ -7,6 +7,7 @@ import {
   createLoudSwellState,
   createLurchState,
   createRipplePool,
+  RIPPLE_EXIT_RADIUS,
   driftFlows,
   driftRatePerSec,
   focusSharp,
@@ -565,6 +566,39 @@ describe("caustics beat ripple pool", () => {
     const oldest = argmax(pool.radius);
     expect(pool.radius[oldest]).toBeGreaterThan(3); // past the frame corner
     expect(pool.strength[oldest]).toBeLessThan(0.25);
+  });
+
+  it("a driver that keeps hitting never pulls a ring back before it has crossed the frame", () => {
+    // The reported bug: at a fast hit rate the oldest slot was recycled while
+    // its ring was still mid-screen, so rings only reached the edge once the
+    // hits stopped. 10 hits/s for 10s is well past what the pool can seat.
+    const pool = createRipplePool();
+    const dt = 1 / 60;
+    for (let f = 0; f < 600; f++) {
+      const before = Float32Array.from(pool.radius);
+      if (f % 6 === 0) pool.trigger();
+      pool.tick(dt);
+      for (let i = 0; i < before.length; i++) {
+        // A slot's radius only ever drops when a fresh ring takes it.
+        if (pool.radius[i]! < before[i]!) expect(before[i]).toBeGreaterThanOrEqual(RIPPLE_EXIT_RADIUS);
+      }
+    }
+    // And the exit radius really is past the far corner (16:9, 3x zoom, top of Breathe).
+    expect(RIPPLE_EXIT_RADIUS).toBeGreaterThan(1.5 * Math.hypot(16 / 9, 1) * 1.1);
+  });
+
+  it("a drop while every ring is still on screen strengthens the youngest ring instead of restarting one", () => {
+    const pool = createRipplePool();
+    for (let i = 0; i < pool.radius.length; i++) {
+      pool.trigger();
+      pool.tick(0.1);
+    }
+    const radii = Float32Array.from(pool.radius);
+    const youngest = radii.indexOf(Math.min(...radii));
+    pool.trigger(1.8);
+    pool.tick(0.1);
+    for (let i = 0; i < radii.length; i++) expect(pool.radius[i]).toBeGreaterThan(radii[i]!);
+    expect(pool.strength[youngest]).toBeCloseTo(1.8 * rippleEnvelope(0.2), 5);
   });
 
   it("a drop's ring carries its amplitude; untriggered slots contribute nothing", () => {
