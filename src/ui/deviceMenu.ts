@@ -278,7 +278,7 @@ import {
  * The Bands+meters column can also go away at once — "Hide left" in the
  * footer strip, or M — which leaves Power and the controls where they are
  * rather than reflowing anything. Solo (O, the footer's "Solo", or the
- * Solo tab on a pinned setting's outline) goes further: only the
+ * Solo eye in a pinned setting's left gutter) goes further: only the
  * pinned setting stays — with the meters, whose jacks patch it — or, with
  * nothing pinned, only the Scene card, until O again (see applySolo);
  * jumping to a block outside what's soloed turns it off rather than
@@ -2838,16 +2838,23 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let sparkFilled = 0;
     let outputCanvas: HTMLCanvasElement | null = null;
     let boundRowEl: HTMLElement | null = null;
-    const soloTab = document.createElement("button");
-    soloTab.type = "button";
-    soloTab.className = "vc-solo-tab";
-    soloTab.dataset.key = "solo";
-    soloTab.dataset.keycap = "O";
-    soloTab.addEventListener("click", (e) => {
+    const soloEye = document.createElement("button");
+    soloEye.type = "button";
+    soloEye.className = "vc-solo-eye";
+    soloEye.dataset.key = "solo";
+    soloEye.dataset.keycap = "O";
+    // Lid + pupil (scaled open/shut by controlsTheme.ts's .vc-solo-eye
+    // rules) over a shut lid with lashes.
+    soloEye.innerHTML =
+      '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+      '<g class="vc-eye-lid"><path d="M2.5 12 Q12 3.5 21.5 12 Q12 20.5 2.5 12Z"/><circle cx="12" cy="12" r="3.3"/></g>' +
+      '<path class="vc-eye-shut" d="M3 11 Q12 18.5 21 11 M7 14.6 L5.8 17.4 M12 15.7 L12 18.8 M17 14.6 L18.2 17.4"/>' +
+      "</svg>";
+    soloEye.addEventListener("click", (e) => {
       e.stopPropagation(); // the row's own click would focus its slider
       setSolo(!soloOn);
     });
-    syncSoloTab(soloTab);
+    syncSoloEye(soloEye);
 
     function isPinned(): boolean {
       return samePair(pinned, { sceneId, spec });
@@ -2896,10 +2903,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     function refreshPin(): void {
       const on = isPinned();
       boundRowEl?.classList.toggle("vc-drive-pinned", on);
-      // The Solo tab rides the pinned outline's top edge (.vc-solo-tab,
-      // controlsTheme.ts) — on the pane it isolates, not somewhere else.
-      if (on && boundRowEl) boundRowEl.appendChild(soloTab);
-      else soloTab.remove();
+      // The Solo eye sits in the pinned row's left gutter, under its port
+      // (.vc-solo-eye, controlsTheme.ts) — on the pane it isolates.
+      if (on && boundRowEl) boundRowEl.appendChild(soloEye);
+      else soloEye.remove();
       patchContainer.style.display = on ? "" : "none";
       if (on) {
         rebuildIfPinned();
@@ -4613,16 +4620,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const moved = anchor.getBoundingClientRect().top - before;
     if (on) controlsCol.style.paddingTop = `${Math.max(0, -moved)}px`;
     else (narrowMQ.matches ? root : controlsCol).scrollTop += moved;
-    for (const tab of root.querySelectorAll<HTMLButtonElement>(".vc-solo-tab")) syncSoloTab(tab);
+    for (const eye of root.querySelectorAll<HTMLButtonElement>(".vc-solo-eye")) syncSoloEye(eye);
     soloBtn.textContent = on ? "All  O" : "Solo  O";
     soloBtn.title = on ? "Show everything again (O)" : "Show only the pinned setting — or the Scene card, when none is pinned (O)";
     soloBtn.style.color = on ? "#fff" : "inherit";
     scheduleCableRecompute();
   }
-  function syncSoloTab(tab: HTMLButtonElement): void {
-    tab.textContent = soloOn ? "◉ All  O" : "◎ Solo  O";
-    tab.title = soloOn ? "Show everything again (O)" : "Show only this setting (O)";
-    tab.classList.toggle("vc-solo-tab-on", soloOn);
+  function syncSoloEye(eye: HTMLButtonElement): void {
+    eye.setAttribute("aria-pressed", String(soloOn));
+    eye.setAttribute("aria-label", soloOn ? "Show everything again" : "Show only this setting");
+    eye.classList.toggle("vc-solo-eye-on", soloOn);
   }
   function applySolo(): void {
     for (const el of [...root.querySelectorAll(".vc-solo-hidden")]) el.classList.remove("vc-solo-hidden");

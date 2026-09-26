@@ -570,22 +570,35 @@ body.vc-keys-reveal [data-keycap]::after {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 8%, transparent);
   box-shadow: 0 0 0 1.5px var(--vc-pin-color, ${SCENE_VIOLET});
 }
-/* Solo's tab on the pinned outline (deviceMenu.ts's buildDriveRow): sits on
- * the outline's own top edge, in its colour, cutting the line like a label
- * on a patch-bay frame; filled while solo is on. The dark fill is what cuts
- * the line — the card's glass is too translucent to. */
-.vc-solo-tab {
-  position: absolute; top: -9px; right: 14px; z-index: 1;
-  font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; white-space: pre;
-  color: var(--vc-pin-color, ${SCENE_VIOLET}); background: #0b0e0d;
-  border: 1px solid var(--vc-pin-color, ${SCENE_VIOLET}); border-radius: 3px;
-  padding: 3px 6px; cursor: pointer;
+/* Solo's eye (deviceMenu.ts's buildDriveRow), in the pinned row's left
+ * gutter under its port, in the pin's colour: shut while everything shows,
+ * peeking half open on hover, wide open with a lit pupil while this setting
+ * is the only thing shown. The lid scales about the eye's own midline, so
+ * toggling reads as the eye opening and blinking shut. */
+.vc-solo-eye {
+  position: absolute; left: -1px; top: 32px; width: 14px; height: 14px; padding: 0;
+  background: none; border: none; cursor: pointer; color: var(--vc-pin-color, ${SCENE_VIOLET});
+  --open: 0;
 }
-.vc-solo-tab:hover, .vc-solo-tab:focus-visible { outline: none; box-shadow: 0 0 8px var(--vc-pin-color, ${SCENE_VIOLET}); }
-.vc-solo-tab.vc-solo-tab-on { background: var(--vc-pin-color, ${SCENE_VIOLET}); color: #0b0e0d; }
-/* Soloed, the pinned row is the first thing in its card — room above it so
- * the card's own overflow: hidden doesn't clip the tab. */
-.vc-root.vc-solo .vc-row.vc-drive-pinned { margin-top: 2px; }
+.vc-solo-eye svg { width: 14px; height: 14px; display: block; overflow: visible; }
+.vc-eye-lid {
+  fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round;
+  transform-origin: 12px 12px; transform: scaleY(var(--open));
+  transition: transform 0.24s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+.vc-eye-lid circle { fill: currentColor; stroke: none; opacity: 0.35; transition: opacity 0.2s ease; }
+.vc-eye-shut {
+  fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round;
+  opacity: calc(1 - var(--open)); transition: opacity 0.18s ease;
+}
+.vc-solo-eye:hover, .vc-solo-eye:focus-visible { --open: 0.5; outline: none; }
+.vc-solo-eye.vc-solo-eye-on { --open: 1; }
+.vc-solo-eye.vc-solo-eye-on:hover { --open: 0.8; }
+.vc-solo-eye.vc-solo-eye-on .vc-eye-lid circle { opacity: 1; }
+.vc-solo-eye.vc-solo-eye-on svg { filter: drop-shadow(0 0 3px var(--vc-pin-color, ${SCENE_VIOLET})); }
+@media (prefers-reduced-motion: reduce) {
+  .vc-eye-lid { transition: none; }
+}
 .vc-row.vc-drive-preview {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 6%, transparent);
 }
