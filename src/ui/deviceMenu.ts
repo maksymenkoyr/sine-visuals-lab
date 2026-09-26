@@ -273,9 +273,12 @@ import {
  * Every card in that left column — Power, Bands, and each meter card —
  * collapses to just its title bar (createCard's foldId, controlsKit.ts):
  * click the chevron or anywhere on the header outside a Reset-style chip.
- * The Bands+meters column can also go away at once — "Hide meters" in the
+ * The Bands+meters column can also go away at once — "Hide left" in the
  * footer strip, or M — which leaves Power and the controls where they are
- * rather than reflowing anything. Separately, once every card in Power and
+ * rather than reflowing anything. Solo (O, or the footer's Solo) goes
+ * further: every card but the one you're working in hides, until O again
+ * (see applySolo). The footer sits in a dock stuck to the bottom of the
+ * controls column, with a Keys list (?) of every shortcut above it. Separately, once every card in Power and
  * that column is folded, there's nothing left to show but a stack of title
  * bars, so the pair collapses horizontally too, down to one small triangle
  * (columnsWrap's vc-cols-folded below) that reopens everything — driven by
@@ -312,8 +315,12 @@ import {
  * deps.toggleButton (the gear); H, below, is the reverse direction, only
  * live once the panel is already open.
  *
+ * It's never closed by a tap outside it: that only lets go of focus (see
+ * onDocPointerDown), so you can work the scene with the panel still up.
+ *
  * Keyboard layer, live only while the panel is open (see onKeyDown): H
- * closes it, M hides/shows the meters column. Tab / Shift+Tab walk a ring over every
+ * closes it, M hides/shows the meters column, O solos a card, ? lists the
+ * keys. Tab / Shift+Tab walk a ring over every
  * .vc-slider/.vc-toggle/.vc-picker/.vc-fader in document order, wrapping at both ends
  * and skipping every chip and button — so Tab alone never leaves the panel
  * and never lands anywhere but a control. On whichever control has focus, A
@@ -524,8 +531,8 @@ export interface DeviceMenuDeps {
    *  governor actually decided this session, and why. Polled at the panel's
    *  existing ~10Hz auto-refresh tick, not per frame. */
   getPowerStatus: () => PowerStatus;
-  /** The button that opens this menu — excluded from the tap-outside-to-close
-   *  check, and ringed (aria-pressed) while the panel is open. */
+  /** The button that opens this menu — excluded from the tap-outside
+   *  focus reset, and ringed (aria-pressed) while the panel is open. */
   toggleButton: HTMLElement;
 }
 
@@ -782,7 +789,6 @@ const footerStyle = `
   border: 1px solid rgba(255,255,255,0.13); border-radius: 3px;
   font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.5);
 `;
-const footerBtnsStyle = `display: flex; gap: 16px;`;
 const footerBtnStyle = `
   font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit;
   background: none; border: none; padding: 0; cursor: pointer;
@@ -3439,7 +3445,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   // Recomputed off each card's own vc-folded class (via the observer below)
   // rather than a callback threaded through createCard/audioMeters.ts.
-  // When "Hide meters" is active, Bands and the meter cards are excluded
+  // When "Hide left" is active, Bands and the meter cards are excluded
   // from the check (isFolded(METERS_COLUMN), not an offsetParent probe —
   // that forces a synchronous layout on every class mutation in the
   // column, which stalled the panel once enough cards had folded), so
@@ -4392,33 +4398,76 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  // Footer strip: auto state at a glance, the meters column's on/off, and a
-  // way out. The column toggle lives here, in the column that never hides,
-  // rather than above Bands: a chip up there had to be its own row, which
-  // pushed the whole column down out of line with Power and Auto strength.
+  // Footer strip: the view toggles (keys, solo, the meters column) and a way
+  // out. It lives in the column that never hides, rather than above Bands: a
+  // chip up there had to be its own row, which pushed the whole column down
+  // out of line with Power and Auto strength. The dock that holds it is
+  // sticky to the bottom of that column (.vc-dock, controlsTheme.ts) — at
+  // the bottom of the scroll, the buttons were out of sight whenever the
+  // column overflowed, which it almost always does.
   const footer = document.createElement("div");
   footer.style.cssText = footerStyle;
-  const footerStatus = document.createElement("span");
-  const footerBtns = document.createElement("span");
-  footerBtns.style.cssText = footerBtnsStyle;
-  const metersBtn = document.createElement("button");
-  metersBtn.style.cssText = footerBtnStyle;
-  metersBtn.addEventListener("click", () => setMetersHidden(!isFolded(METERS_COLUMN)));
-  const hideBtn = document.createElement("button");
+  function makeFooterBtn(onClick: () => void): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.style.cssText = footerBtnStyle;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+  const keysBtn = makeFooterBtn(() => setKeysShown(!keysCard.classList.contains("vc-keys-show")));
+  keysBtn.textContent = "Keys  ?";
+  keysBtn.title = "Show the keyboard shortcuts (?)";
+  const soloBtn = makeFooterBtn(() => setSolo(soloUnit ? null : soloTarget(true)));
+  const metersBtn = makeFooterBtn(() => setMetersHidden(!isFolded(METERS_COLUMN)));
+  const hideBtn = makeFooterBtn(() => close());
   hideBtn.textContent = "Hide UI  H";
   hideBtn.title = "Close the panel (H)";
-  hideBtn.style.cssText = footerBtnStyle;
-  hideBtn.addEventListener("click", () => close());
-  footerBtns.append(metersBtn, hideBtn);
-  footer.append(footerStatus, footerBtns);
+  footer.append(keysBtn, soloBtn, metersBtn, hideBtn);
+
+  // The shortcut list behind "Keys". Written out rather than derived from
+  // onKeyDown, since half of these are handled elsewhere (app.ts's S/F, a
+  // row's own A/R/T, a slider's z/x/c) — keep it in step with those.
+  const keysCard = document.createElement("div");
+  keysCard.className = "vc-keys";
+  const KEYS: [string, string][] = [
+    ["S", "Open / close the panel"],
+    ["H", "Hide the interface"],
+    ["M", "Hide / show the left panel"],
+    ["O", "Solo: only the focused card"],
+    ["F", "Fullscreen"],
+    ["Tab", "Next control (⇧ previous)"],
+    ["1–9", "Jump to a numbered block"],
+    ["A R T", "Auto · reset · mute the row"],
+    ["Z X C", "Slider to middle · max · pointer"],
+    ["Esc", "Unpin a patched setting"],
+    ["?", "This list"],
+  ];
+  for (const [key, what] of KEYS) {
+    const k = document.createElement("span");
+    k.className = "vc-keys-key";
+    k.textContent = key;
+    const w = document.createElement("span");
+    w.textContent = what;
+    keysCard.append(k, w);
+  }
+  function setKeysShown(shown: boolean): void {
+    keysCard.classList.toggle("vc-keys-show", shown);
+    keysBtn.style.color = shown ? "#fff" : "inherit";
+  }
+
+  const dock = document.createElement("div");
+  dock.className = "vc-dock";
+  dock.append(keysCard, footer);
 
   function setMetersHidden(hidden: boolean): void {
     setFolded(METERS_COLUMN, hidden);
     root.classList.toggle("vc-meters-hidden", hidden);
-    metersBtn.textContent = hidden ? "Show meters  M" : "Hide meters  M";
+    metersBtn.textContent = hidden ? "Show left  M" : "Hide left  M";
     metersBtn.title = hidden
       ? "Bring back the Bands card and the meters (M)"
       : "Hide the Bands card and the meters, keep the controls (M)";
+    // A soloed card in that column would vanish with it, leaving nothing.
+    if (hidden && soloUnit && spectrumCol.contains(soloUnit)) setSolo(null);
     // Hiding/showing the column changes which cards have a layout box
     // without touching any card's own vc-folded class, so the observer
     // above never fires for it on its own — recompute here instead.
@@ -4426,13 +4475,74 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
   setMetersHidden(isFolded(METERS_COLUMN));
 
+  // ---- solo ----
+  // Every card but one hidden — the "unit" is a card, except that Auto
+  // strength travels with the master Auto button welded to it (autoRow).
+  // Hidden by walking up from the unit and the dock (which always stays) to
+  // the root, and marking every sibling off those paths .vc-solo-hidden —
+  // so no column, heading or neighbouring button needs its own rule, in
+  // either layout. View state for this session only, like the keys list.
+  let soloUnit: HTMLElement | null = null;
+  // The card last clicked into, tapped, or tabbed to — not merely hovered
+  // over: the pointer crosses other cards on its way to the Solo button,
+  // and wireHoverFocus focuses rows as it goes (pointerFocusOriginated).
+  let lastDeliberateUnit: HTMLElement | null = null;
+  function unitOf(node: Node | null): HTMLElement | null {
+    const el = node instanceof Element ? node : node?.parentElement ?? null;
+    const card = el?.closest<HTMLElement>(".vc-card") ?? null;
+    if (!card || !root.contains(card)) return null;
+    return card === autoCard.el ? autoRow : card;
+  }
+  root.addEventListener("focusin", (e) => {
+    if (pointerFocusOriginated) return;
+    lastDeliberateUnit = unitOf(e.target as Node) ?? lastDeliberateUnit;
+  });
+  root.addEventListener("pointerdown", (e) => {
+    lastDeliberateUnit = unitOf(e.target as Node) ?? lastDeliberateUnit;
+  });
+  /** Which card Solo shows: from the button, the card last clicked into
+   *  first (focus has just moved to the button itself); from O, whatever
+   *  has focus right now, hover included. The Scene card when nothing
+   *  qualifies — it's the one a solo is most often for. */
+  function soloTarget(fromButton: boolean): HTMLElement {
+    const active = unitOf(document.activeElement);
+    const deliberate = lastDeliberateUnit?.isConnected ? lastDeliberateUnit : null;
+    return (fromButton ? deliberate ?? active : active ?? deliberate) ?? sceneCard.el;
+  }
+  function setSolo(unit: HTMLElement | null): void {
+    soloUnit = unit;
+    applySolo();
+    soloBtn.textContent = unit ? "All  O" : "Solo  O";
+    soloBtn.title = unit ? "Show every card again (O)" : "Show only the card you're working in (O)";
+    soloBtn.style.color = unit ? "#fff" : "inherit";
+    scheduleCableRecompute();
+  }
+  function applySolo(): void {
+    for (const el of [...root.querySelectorAll(".vc-solo-hidden")]) el.classList.remove("vc-solo-hidden");
+    if (soloUnit && !soloUnit.isConnected) soloUnit = null;
+    root.classList.toggle("vc-solo", !!soloUnit);
+    if (!soloUnit) return;
+    const card = soloUnit === autoRow ? autoCard.el : soloUnit;
+    if (card.classList.contains("vc-folded")) card.querySelector<HTMLButtonElement>(".vc-fold")?.click();
+    const leaves = new Set<Element>([soloUnit, dock]);
+    const onPath = new Set<Element>();
+    for (const leaf of leaves) for (let n: Element | null = leaf; n && n !== root; n = n.parentElement) onPath.add(n);
+    const visit = (parent: Element): void => {
+      for (const child of parent.children) {
+        if (!onPath.has(child)) child.classList.add("vc-solo-hidden");
+        else if (!leaves.has(child)) visit(child);
+      }
+    };
+    visit(root);
+  }
+  setSolo(null);
+
   function refreshAutoMaster(): void {
     const lit = deps.isSceneAuto(deps.currentSceneId());
     autoMasterBtn.style.cssText = lit ? autoMasterLitStyle : autoMasterStyle;
     autoMasterLabel.style.cssText = autoMasterLabelStyle(lit);
     autoMasterSub.style.cssText = autoMasterSubStyle(lit);
     autoMasterSub.textContent = lit ? "ON" : "OFF";
-    footerStatus.textContent = lit ? "Auto on" : "Auto off";
   }
 
   // Shared by the master button's own click and the Auto strength row's A
@@ -4497,21 +4607,29 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     toggleOff: toggleAutoStrengthOff,
   });
 
-  controlsCol.append(autoRow, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, footer);
+  controlsCol.append(autoRow, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, dock);
   root.append(columnsWrap, controlsCol);
   document.body.appendChild(root);
 
   // ---- open / close ----
   let isOpen = false;
 
-  // With no full-screen backdrop to catch outside taps, listen on the document
-  // instead. The toggle button is excluded: pointerdown fires before click, so
-  // without this guard a gear tap would close the panel here and then the
-  // button's own click handler would immediately reopen it.
+  // A tap outside the panel leaves it open — it's corner-docked so you can
+  // work the scene beside it, and it closes only from the gear, Hide UI, S
+  // or H — but it does let go of whatever the panel was holding: keyboard
+  // focus (so A/R/T/z/x/c stop landing on the last row), the deliberate
+  // card Solo would pick, a pinned patch (as Escape does) and the keys
+  // list. A soloed card stays soloed. With no full-screen backdrop to catch
+  // outside taps, this listens on the document instead; the gear is
+  // excluded since it's the panel's own switch.
   function onDocPointerDown(e: PointerEvent) {
     const t = e.target as Node | null;
     if (t && (root.contains(t) || deps.toggleButton.contains(t))) return;
-    close();
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && root.contains(active)) active.blur();
+    lastDeliberateUnit = null;
+    if (pinned) togglePin(pinned.sceneId, pinned.spec);
+    setKeysShown(false);
   }
 
   // The Tab ring: every param control, in document order — see the header
@@ -4551,6 +4669,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function jumpToBlock(n: number): void {
     const heading = [...root.querySelectorAll<HTMLElement>(".vc-block")][n - 1];
     if (!heading) return;
+    // Soloed, a jump moves the solo to that block's card rather than into
+    // a card with no layout box.
+    const unit = unitOf(heading);
+    if (soloUnit && unit && unit !== soloUnit) setSolo(unit);
     // A folded card's controls have no layout box and are invisible to
     // ringElements() below — unfold first, or the jump would silently land
     // on the next block's control instead.
@@ -4580,6 +4702,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       setMetersHidden(!isFolded(METERS_COLUMN));
       return;
     }
+    if (e.key === "o" || e.key === "O") {
+      setSolo(soloUnit ? null : soloTarget(false));
+      return;
+    }
+    if (e.key === "?") {
+      setKeysShown(!keysCard.classList.contains("vc-keys-show"));
+      return;
+    }
     if (e.key === "Tab") {
       handleTab(e);
       return;
@@ -4602,6 +4732,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshBandsSplit();
     refreshBandFaders();
     refreshAutoStrengthDisplay();
+    // Whatever was rebuilt above comes in unmarked.
+    applySolo();
     root.classList.add("vc-open");
     deps.toggleButton.setAttribute("aria-pressed", "true");
     isOpen = true;
