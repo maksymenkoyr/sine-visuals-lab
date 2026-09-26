@@ -65,6 +65,7 @@ import {
 } from "./driveSources.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { setHintText } from "./hintSwatches.ts";
+import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
 import { createAudioMeters, createMeterRow } from "./audioMeters.ts";
@@ -276,10 +277,17 @@ import {
  * click the chevron or anywhere on the header outside a Reset-style chip.
  * The Bands+meters column can also go away at once — "Hide left" in the
  * footer strip, or M — which leaves Power and the controls where they are
- * rather than reflowing anything. Solo (O, or the footer's Solo) goes
- * further: every card but the one you're working in hides, until O again
- * (see applySolo). The footer sits in a dock stuck to the bottom of the
- * controls column, with a Keys list (?) of every shortcut above it. Separately, once every card in Power and
+ * rather than reflowing anything. Solo (O, or the footer's "Scene only")
+ * goes further: every card except Scene hides, until O again (see
+ * applySolo) — jumping to a block outside Scene while soloed turns it off
+ * rather than moving it (jumpToBlock). The footer sits in a dock stuck to
+ * the bottom of the controls column, with a Keys list (?) above it: one row
+ * per src/ui/keyHints.ts's SHORTCUTS entry, hovering or clicking a row
+ * flashing (or, for the handful with a single action — Panel/Hide UI/Hide
+ * left/Scene only/Fullscreen/Keys — performing) every control it names
+ * (wireKeysRow). That same module also owns the hover tooltip on any
+ * `data-key`-tagged control and the hold-Shift-to-reveal keycaps — see its
+ * own header. Separately, once every card in Power and
  * that column is folded, there's nothing left to show but a stack of title
  * bars, so the pair collapses horizontally too, down to one small triangle
  * (columnsWrap's vc-cols-folded below) that reopens everything — driven by
@@ -320,8 +328,8 @@ import {
  * onDocPointerDown), so you can work the scene with the panel still up.
  *
  * Keyboard layer, live only while the panel is open (see onKeyDown): H
- * closes it, M hides/shows the meters column, O solos a card, ? lists the
- * keys. Tab / Shift+Tab walk a ring over every
+ * closes it, M hides/shows the meters column, O solos the Scene card, ?
+ * lists the keys. Tab / Shift+Tab walk a ring over every
  * .vc-slider/.vc-toggle/.vc-picker/.vc-fader in document order, wrapping at both ends
  * and skipping every chip and button — so Tab alone never leaves the panel
  * and never lands anywhere but a control. On whichever control has focus, A
@@ -874,12 +882,16 @@ function washColor(level: number): string {
  *  rebuilt fresh each time, and a no-op on one that's already marked), so a
  *  static card title can be marked once at construction while a per-scene
  *  group heading gets marked on every renderSceneSettings without doubling
- *  up. The badge itself is filled in later by renumberBlocks. */
+ *  up. The badge itself is filled in later by renumberBlocks. `data-key`
+ *  (keyHints.ts) is the badge's own, not the heading's, since the badge is
+ *  what actually shows the digit the hover tooltip reads off — it carries
+ *  no `data-keycap`, on purpose: it already shows that digit as plain text. */
 function markBlock(heading: HTMLElement): void {
   if (heading.classList.contains("vc-block")) return;
   heading.classList.add("vc-block");
   const badge = document.createElement("span");
   badge.className = "vc-block-n";
+  badge.dataset.key = "block";
   heading.prepend(badge);
 }
 
@@ -998,7 +1010,11 @@ function isTypingTarget(t: EventTarget | null): boolean {
  *  act on whichever row the Tab ring last focused. Routes through the row's
  *  existing click handlers (`.click()`) rather than re-implementing them, so
  *  a hotkey and its chip can never drift apart. `auto` is omitted for rows
- *  with no auto weights (the A key then no-ops, matching the hidden chip). */
+ *  with no auto weights (the A key then no-ops, matching the hidden chip).
+ *  The single place all three keys report to keyHints.ts's noteKeyUse, so
+ *  every row (this file's own scene-setting rows, and the hand-rolled Auto
+ *  strength row that also calls this) shares one count per id rather than
+ *  each call site remembering to. */
 function wireRowKeys(
   control: HTMLElement,
   actions: { auto?: () => void; reset: () => void; toggleOff: () => void },
@@ -1009,14 +1025,17 @@ function wireRowKeys(
       case "a":
         if (!actions.auto) return;
         e.preventDefault();
+        noteKeyUse("auto");
         actions.auto();
         break;
       case "r":
         e.preventDefault();
+        noteKeyUse("reset");
         actions.reset();
         break;
       case "t":
         e.preventDefault();
+        noteKeyUse("mute");
         actions.toggleOff();
         break;
     }
@@ -1289,6 +1308,12 @@ export function createControlRow(spec: ControlRowSpec) {
   chip.textContent = "A";
   chip.title = `Auto-tune ${spec.label} (A)`;
   chip.style.cssText = autoChipManualStyle(spec.accent);
+  // data-key/data-keycap (keyHints.ts): every row's A chip shares the one
+  // "auto" id, so a keys-list hover/click (deviceMenu.ts's flashOn) and a
+  // held Shift's keycap reach all of them at once, not just this row's.
+  chip.classList.add("vc-keycap-anchor");
+  chip.dataset.key = "auto";
+  chip.dataset.keycap = "A";
   // A row with no auto weights has nothing for the chip to do — leave it out
   // rather than show a toggle that can't change anything.
   if (!spec.auto) chip.style.display = "none";
@@ -1299,12 +1324,19 @@ export function createControlRow(spec: ControlRowSpec) {
   offChip.textContent = "T";
   offChip.title = `Turn ${spec.label} off (T)`;
   offChip.style.cssText = offChipManualStyle(spec.accent);
+  offChip.classList.add("vc-keycap-anchor");
+  offChip.dataset.key = "mute";
+  offChip.dataset.keycap = "T";
 
   // visibility (not display) keeps the row from reflowing while dragging.
   const resetBtn = document.createElement("button");
   resetBtn.textContent = "↺";
   resetBtn.title = `Reset ${spec.label} (R)`;
   resetBtn.style.cssText = rowResetStyle;
+  // Keycap is the shortcut key (R), not the glyph this button shows.
+  resetBtn.classList.add("vc-keycap-anchor");
+  resetBtn.dataset.key = "reset";
+  resetBtn.dataset.keycap = "R";
 
   // src/render/signals.ts's link from this setting to the live values that
   // drive it — a small always-on chip in `right` (leftmost, read as a badge
@@ -1630,6 +1662,9 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   resetBtn.textContent = "↺";
   resetBtn.title = `Reset ${spec.label} (R)`;
   resetBtn.style.cssText = rowResetStyle;
+  resetBtn.classList.add("vc-keycap-anchor");
+  resetBtn.dataset.key = "reset";
+  resetBtn.dataset.keycap = "R";
   right.append(readout, resetBtn);
   head.append(label, right);
 
@@ -3387,17 +3422,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   audioMeters.el.addEventListener("scroll", scheduleCableRecompute, { passive: true });
   root.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
-  // ---- "Pick a setting first" toast ----
+  // ---- "Pick a setting first" toast (also keyHints.ts's tips/welcome,
+  // given a longer durationMs than a plain patch-bay toast needs) ----
   const toastEl = document.createElement("div");
   toastEl.className = "vc-toast";
   toastEl.setAttribute("role", "status");
   document.body.appendChild(toastEl);
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
-  function showToast(text: string): void {
+  function showToast(text: string, durationMs = 2200): void {
     toastEl.textContent = text;
     toastEl.classList.add("vc-toast-show");
     if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove("vc-toast-show"), 2200);
+    toastTimer = setTimeout(() => toastEl.classList.remove("vc-toast-show"), durationMs);
   }
 
   /** The one place every selection-driven visual gets recomputed together —
@@ -4415,49 +4451,100 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // column overflowed, which it almost always does.
   const footer = document.createElement("div");
   footer.style.cssText = footerStyle;
-  function makeFooterBtn(onClick: () => void): HTMLButtonElement {
+  // data-key/data-keycap (keyHints.ts): each footer button *is* the control
+  // its shortcut performs, so it's tagged at creation rather than looked
+  // up later — the hover tooltip, the held-Shift keycap, and the keys
+  // list's own hover/click flash (targetsFor below) all key off this.
+  function makeFooterBtn(id: string, keycap: string, onClick: () => void): HTMLButtonElement {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.style.cssText = footerBtnStyle;
+    btn.classList.add("vc-keycap-anchor");
+    btn.dataset.key = id;
+    btn.dataset.keycap = keycap;
     btn.addEventListener("click", onClick);
     return btn;
   }
-  const keysBtn = makeFooterBtn(() => setKeysShown(!keysCard.classList.contains("vc-keys-show")));
+  const keysBtn = makeFooterBtn("keys", "?", () => setKeysShown(!keysCard.classList.contains("vc-keys-show")));
   keysBtn.textContent = "Keys  ?";
   keysBtn.title = "Show the keyboard shortcuts (?)";
-  const soloBtn = makeFooterBtn(() => setSolo(soloUnit ? null : soloTarget(true)));
-  const metersBtn = makeFooterBtn(() => setMetersHidden(!isFolded(METERS_COLUMN)));
-  const hideBtn = makeFooterBtn(() => close());
+  const soloBtn = makeFooterBtn("solo", "O", () => setSolo(!soloOn));
+  const metersBtn = makeFooterBtn("left", "M", () => setMetersHidden(!isFolded(METERS_COLUMN)));
+  const hideBtn = makeFooterBtn("hide", "H", () => close());
   hideBtn.textContent = "Hide UI  H";
   hideBtn.title = "Close the panel (H)";
   footer.append(keysBtn, soloBtn, metersBtn, hideBtn);
 
-  // The shortcut list behind "Keys". Written out rather than derived from
-  // onKeyDown, since half of these are handled elsewhere (app.ts's S/F, a
-  // row's own A/R/T, a slider's z/x/c) — keep it in step with those.
+  // The keys list behind "Keys" — one row per src/ui/keyHints.ts's own
+  // SHORTCUTS entry, built here (not there) since a row is also this
+  // file's own click/hover target: hovering it flashes every visible
+  // `[data-key="<id>"]` control it names (targetsFor/flashOn — capped,
+  // since a busy scene can carry many rows' worth of A/R/T chips); clicking
+  // it performs the action for the handful of ids with exactly one
+  // (singleAction), or just re-flashes for the rest (1–9, A/R/T, Z X C,
+  // Esc — nothing single to do for those from a click).
   const keysCard = document.createElement("div");
   keysCard.className = "vc-keys";
-  const KEYS: [string, string][] = [
-    ["S", "Open / close the panel"],
-    ["H", "Hide the interface"],
-    ["M", "Hide / show the left panel"],
-    ["O", "Solo: only the focused card"],
-    ["F", "Fullscreen"],
-    ["Tab", "Next control (⇧ previous)"],
-    ["1–9", "Jump to a numbered block"],
-    ["A R T", "Auto · reset · mute the row"],
-    ["Z X C", "Slider to middle · max · pointer"],
-    ["Esc", "Unpin a patched setting"],
-    ["?", "This list"],
-  ];
-  for (const [key, what] of KEYS) {
+
+  function targetsFor(id: string): HTMLElement[] {
+    return [...document.querySelectorAll<HTMLElement>(`[data-key="${id}"]`)]
+      .filter((el) => el.getClientRects().length > 0)
+      .slice(0, 12);
+  }
+  function clearFlash(): void {
+    for (const el of [...document.querySelectorAll(".vc-key-flash")]) el.classList.remove("vc-key-flash");
+  }
+  function flashOn(id: string): void {
+    for (const el of targetsFor(id)) el.classList.add("vc-key-flash");
+  }
+  // Reuses each control's own click handler rather than re-implementing its
+  // effect, so the two can never drift apart — a side effect is that
+  // keyHints.ts's own delegated click listener then also credits that
+  // control with a genuine mouse use. "panel" has no button local to this
+  // file (the gear lives in app.ts) — deps.toggleButton is that same
+  // data-key="panel" control, so clicking it here still reaches it, and
+  // since the panel is open, still closes it (deviceMenu.toggle()).
+  const singleAction: Record<string, () => void> = {
+    panel: () => deps.toggleButton.click(),
+    hide: () => hideBtn.click(),
+    left: () => metersBtn.click(),
+    solo: () => soloBtn.click(),
+    fullscreen: () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "f" })),
+    keys: () => keysBtn.click(),
+  };
+  function wireKeysRow(row: HTMLButtonElement, id: string): void {
+    row.addEventListener("mouseenter", () => flashOn(id));
+    row.addEventListener("mouseleave", clearFlash);
+    row.addEventListener("click", () => (singleAction[id] ?? (() => flashOn(id)))());
+  }
+  for (const s of SHORTCUTS) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "vc-keys-row";
     const k = document.createElement("span");
     k.className = "vc-keys-key";
-    k.textContent = key;
+    k.textContent = s.key;
     const w = document.createElement("span");
-    w.textContent = what;
-    keysCard.append(k, w);
+    w.textContent = s.hint;
+    row.append(k, w);
+    wireKeysRow(row, s.id);
+    keysCard.appendChild(row);
   }
+  // Not a SHORTCUTS entry: it names no single control of its own (holding
+  // it reveals every tagged control's keycap at once), so it's neither a
+  // click action nor a flash target — disabled rather than wired.
+  const shiftRow = document.createElement("button");
+  shiftRow.type = "button";
+  shiftRow.className = "vc-keys-row";
+  shiftRow.disabled = true;
+  const shiftKey = document.createElement("span");
+  shiftKey.className = "vc-keys-key";
+  shiftKey.textContent = "Shift";
+  const shiftHint = document.createElement("span");
+  shiftHint.textContent = "Hold — show every shortcut";
+  shiftRow.append(shiftKey, shiftHint);
+  keysCard.appendChild(shiftRow);
+
   function setKeysShown(shown: boolean): void {
     keysCard.classList.toggle("vc-keys-show", shown);
     keysBtn.style.color = shown ? "#fff" : "inherit";
@@ -4474,8 +4561,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     metersBtn.title = hidden
       ? "Bring back the Bands card and the meters (M)"
       : "Hide the Bands card and the meters, keep the controls (M)";
-    // A soloed card in that column would vanish with it, leaving nothing.
-    if (hidden && soloUnit && spectrumCol.contains(soloUnit)) setSolo(null);
     // Hiding/showing the column changes which cards have a layout box
     // without touching any card's own vc-folded class, so the observer
     // above never fires for it on its own — recompute here instead.
@@ -4484,55 +4569,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   setMetersHidden(isFolded(METERS_COLUMN));
 
   // ---- solo ----
-  // Every card but one hidden — the "unit" is a card, except that Auto
-  // strength travels with the master Auto button welded to it (autoRow).
-  // Hidden by walking up from the unit and the dock (which always stays) to
-  // the root, and marking every sibling off those paths .vc-solo-hidden —
-  // so no column, heading or neighbouring button needs its own rule, in
-  // either layout. View state for this session only, like the keys list.
-  let soloUnit: HTMLElement | null = null;
-  // The card last clicked into, tapped, or tabbed to — not merely hovered
-  // over: the pointer crosses other cards on its way to the Solo button,
-  // and wireHoverFocus focuses rows as it goes (pointerFocusOriginated).
-  let lastDeliberateUnit: HTMLElement | null = null;
-  function unitOf(node: Node | null): HTMLElement | null {
-    const el = node instanceof Element ? node : node?.parentElement ?? null;
-    const card = el?.closest<HTMLElement>(".vc-card") ?? null;
-    if (!card || !root.contains(card)) return null;
-    return card === autoCard.el ? autoRow : card;
-  }
-  root.addEventListener("focusin", (e) => {
-    if (pointerFocusOriginated) return;
-    lastDeliberateUnit = unitOf(e.target as Node) ?? lastDeliberateUnit;
-  });
-  root.addEventListener("pointerdown", (e) => {
-    lastDeliberateUnit = unitOf(e.target as Node) ?? lastDeliberateUnit;
-  });
-  /** Which card Solo shows: from the button, the card last clicked into
-   *  first (focus has just moved to the button itself); from O, whatever
-   *  has focus right now, hover included. The Scene card when nothing
-   *  qualifies — it's the one a solo is most often for. */
-  function soloTarget(fromButton: boolean): HTMLElement {
-    const active = unitOf(document.activeElement);
-    const deliberate = lastDeliberateUnit?.isConnected ? lastDeliberateUnit : null;
-    return (fromButton ? deliberate ?? active : active ?? deliberate) ?? sceneCard.el;
-  }
-  function setSolo(unit: HTMLElement | null): void {
-    soloUnit = unit;
+  // Scene only: every other card hidden, until O again — hidden by walking
+  // up from the Scene card and the dock (which always stays) to the root,
+  // and marking every sibling off those two paths .vc-solo-hidden — so no
+  // column, heading or neighbouring button needs its own rule, in either
+  // layout. View state for this session only, like the keys list.
+  let soloOn = false;
+  function setSolo(on: boolean): void {
+    soloOn = on;
     applySolo();
-    soloBtn.textContent = unit ? "All  O" : "Solo  O";
-    soloBtn.title = unit ? "Show every card again (O)" : "Show only the card you're working in (O)";
-    soloBtn.style.color = unit ? "#fff" : "inherit";
+    soloBtn.textContent = on ? "All  O" : "Scene only  O";
+    soloBtn.title = on ? "Show every card again (O)" : "Show only the Scene card (O)";
+    soloBtn.style.color = on ? "#fff" : "inherit";
     scheduleCableRecompute();
   }
   function applySolo(): void {
     for (const el of [...root.querySelectorAll(".vc-solo-hidden")]) el.classList.remove("vc-solo-hidden");
-    if (soloUnit && !soloUnit.isConnected) soloUnit = null;
-    root.classList.toggle("vc-solo", !!soloUnit);
-    if (!soloUnit) return;
-    const card = soloUnit === autoRow ? autoCard.el : soloUnit;
-    if (card.classList.contains("vc-folded")) card.querySelector<HTMLButtonElement>(".vc-fold")?.click();
-    const leaves = new Set<Element>([soloUnit, dock]);
+    root.classList.toggle("vc-solo", soloOn);
+    if (!soloOn) return;
+    if (sceneCard.el.classList.contains("vc-folded")) sceneCard.el.querySelector<HTMLButtonElement>(".vc-fold")?.click();
+    const leaves = new Set<Element>([sceneCard.el, dock]);
     const onPath = new Set<Element>();
     for (const leaf of leaves) for (let n: Element | null = leaf; n && n !== root; n = n.parentElement) onPath.add(n);
     const visit = (parent: Element): void => {
@@ -4543,7 +4599,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     };
     visit(root);
   }
-  setSolo(null);
+  setSolo(false);
+
+  // keyHints.ts's hover badge, hold-to-reveal keycaps, and the mouse half
+  // of its light-suggestion tracking — one install for the panel's whole
+  // lifetime (there's exactly one device menu instance). A tip gets longer
+  // on screen than showToast's own default toast duration.
+  installKeyHints((text) => showToast(text, 4000));
 
   function refreshAutoMaster(): void {
     const lit = deps.isSceneAuto(deps.currentSceneId());
@@ -4628,17 +4690,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // A tap outside the panel leaves it open — it's corner-docked so you can
   // work the scene beside it, and it closes only from the gear, Hide UI, S
   // or H — but it does let go of whatever the panel was holding: keyboard
-  // focus (so A/R/T/z/x/c stop landing on the last row), the deliberate
-  // card Solo would pick, a pinned patch (as Escape does) and the keys
-  // list. A soloed card stays soloed. With no full-screen backdrop to catch
-  // outside taps, this listens on the document instead; the gear is
-  // excluded since it's the panel's own switch.
+  // focus (so A/R/T/z/x/c stop landing on the last row), a pinned patch (as
+  // Escape does) and the keys list. Solo (always the Scene card now) stays
+  // as it was. With no full-screen backdrop to catch outside taps, this
+  // listens on the document instead; the gear is excluded since it's the
+  // panel's own switch.
   function onDocPointerDown(e: PointerEvent) {
     const t = e.target as Node | null;
     if (t && (root.contains(t) || deps.toggleButton.contains(t))) return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && root.contains(active)) active.blur();
-    lastDeliberateUnit = null;
     if (pinned) togglePin(pinned.sceneId, pinned.spec);
     setKeysShown(false);
   }
@@ -4680,10 +4741,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function jumpToBlock(n: number): void {
     const heading = [...root.querySelectorAll<HTMLElement>(".vc-block")][n - 1];
     if (!heading) return;
-    // Soloed, a jump moves the solo to that block's card rather than into
-    // a card with no layout box.
-    const unit = unitOf(heading);
-    if (soloUnit && unit && unit !== soloUnit) setSolo(unit);
+    // Soloed, a jump outside the Scene card needs the rest of the panel
+    // back rather than trying to move the solo — Solo now always means
+    // the Scene card specifically, not whichever card was last worked in.
+    if (soloOn && !sceneCard.el.contains(heading)) setSolo(false);
     // A folded card's controls have no layout box and are invisible to
     // ringElements() below — unfold first, or the jump would silently land
     // on the next block's control instead.
@@ -4706,32 +4767,39 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       return;
     }
     if (e.key === "h" || e.key === "H") {
+      noteKeyUse("hide");
       close();
       return;
     }
     if (e.key === "m" || e.key === "M") {
+      noteKeyUse("left");
       setMetersHidden(!isFolded(METERS_COLUMN));
       return;
     }
     if (e.key === "o" || e.key === "O") {
-      setSolo(soloUnit ? null : soloTarget(false));
+      noteKeyUse("solo");
+      setSolo(!soloOn);
       return;
     }
     if (e.key === "?") {
+      noteKeyUse("keys");
       setKeysShown(!keysCard.classList.contains("vc-keys-show"));
       return;
     }
     if (e.key === "Tab") {
+      noteKeyUse("tab");
       handleTab(e);
       return;
     }
     if (e.key.length === 1 && e.key >= "1" && e.key <= "9") {
       e.preventDefault();
+      noteKeyUse("block");
       jumpToBlock(Number(e.key));
     }
   }
 
   function open() {
+    welcomeOnce();
     refreshSpectrumHeader();
     renderPalettes();
     sourceRow.refresh();

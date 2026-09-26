@@ -286,12 +286,10 @@ const stylesheet = `
 
 /* The whole meters column (Bands + the meters strip) hidden by the footer's
  * "Hide left" button / M (deviceMenu.ts). Outranks the stacked layout's
- * display: contents below on specificity, so it holds there too. Solo
- * overrides it: a digit jump can solo a card in that column, and Solo
- * already hides the column itself whenever the soloed card is elsewhere. */
-.vc-root.vc-meters-hidden:not(.vc-solo) .vc-spectrum-col { display: none; }
+ * display: contents below on specificity, so it holds there too. */
+.vc-root.vc-meters-hidden .vc-spectrum-col { display: none; }
 /* Solo (deviceMenu.ts's applySolo): everything off the paths from the
- * soloed card and the dock up to the root. !important to beat the inline
+ * Scene card and the dock up to the root. !important to beat the inline
  * and display: contents rules those elements carry in either layout. */
 .vc-solo-hidden { display: none !important; }
 
@@ -299,15 +297,61 @@ const stylesheet = `
  * controls column so its buttons never scroll out of sight — in the stacked
  * layout, to the bottom of the screen for as long as the controls last. */
 .vc-dock { position: sticky; bottom: 0; z-index: 2; display: flex; flex-direction: column; }
+
+/* keyHints.ts's hover badge, hold-to-reveal keycaps, and the interactive
+ * keys list below (deviceMenu.ts's keysCard, one row per keyHints.ts's
+ * SHORTCUTS entry).
+ *
+ * A keys-list row's hover/click echo on every live control it names
+ * (deviceMenu.ts's flashOn/clearFlash) — an outline plus one short pulse;
+ * no pointer-events rule needed since this only ever adds a class, never
+ * touches display or position. */
+.vc-key-flash { outline: 1px solid #fff; animation: vc-key-flash-pulse 0.5s ease-out; }
+@keyframes vc-key-flash-pulse {
+  from { box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.35); }
+  to { box-shadow: 0 0 0 5px rgba(255, 255, 255, 0); }
+}
+
+/* Holding Shift (keyHints.ts's hold-to-reveal) shows every tagged
+ * control's own keycap at once — content is the key itself (data-keycap),
+ * so nothing here needs to know what any of them say. .vc-keycap-anchor
+ * opts a normally-static control (a footer button, a row's A/T/↺ chip)
+ * into being its own keycap's positioning context; a control that's
+ * already positioned (index.html's #menuBtn/#fsBtn, both position: fixed)
+ * skips that class — adding position: relative there would fight the
+ * fixed rule via this rule's own higher specificity (two classes beat one),
+ * and fixed already anchors an ::after just fine on its own. The
+ * .vc-block digit badge (deviceMenu.ts's markBlock) carries data-key but
+ * never data-keycap — see keyHints.ts's header — so it never grows one. */
+.vc-keycap-anchor { position: relative; }
+body.vc-keys-reveal [data-keycap]::after {
+  content: attr(data-keycap); position: absolute; top: -7px; right: -7px;
+  min-width: 14px; height: 13px; padding: 0 2px; border-radius: 3px;
+  background: rgba(8, 11, 10, 0.94); border: 1px solid rgba(255, 255, 255, 0.75);
+  color: #fff; font: 600 8.5px/13px ${FONT_MONO}; text-align: center;
+  pointer-events: none; z-index: 41;
+}
+
+/* The keys list itself. Each keyHints.ts SHORTCUTS entry is a full-width
+ * row button (key cap + hint), not a plain two-column definition list, so
+ * it can double as deviceMenu.ts's own click/hover target — the row either
+ * performs its shortcut directly or just flashes every control it names,
+ * depending on whether that's a single action (wireKeysRow). */
 .vc-keys {
-  display: none; grid-template-columns: auto 1fr; gap: 5px 12px; align-items: baseline;
-  padding: 10px 12px;
+  display: none; flex-direction: column; gap: 1px; padding: 8px 6px;
   background: rgba(8, 11, 10, 0.72);
   -webkit-backdrop-filter: blur(20px) saturate(.6) brightness(.5); backdrop-filter: blur(20px) saturate(.6) brightness(.5);
   border: 1px solid rgba(255, 255, 255, 0.13); border-bottom: none; border-radius: 3px 3px 0 0;
   font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.75);
 }
-.vc-keys.vc-keys-show { display: grid; }
+.vc-keys.vc-keys-show { display: flex; }
+.vc-keys-row {
+  display: grid; grid-template-columns: 46px 1fr; gap: 4px 12px; align-items: baseline;
+  width: 100%; background: none; border: none; border-radius: 3px; padding: 4px 6px;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.vc-keys-row:hover, .vc-keys-row:focus-visible { background: rgba(255, 255, 255, 0.09); outline: none; }
+.vc-keys-row:disabled { cursor: default; opacity: 0.55; }
 .vc-keys-key {
   font: 400 9.5px/1.3 ${FONT_MONO}; letter-spacing: 0.08em; color: #fff; white-space: nowrap;
 }
