@@ -28,7 +28,7 @@ different mode takes over. Featured, on main.
   discs).
 - `tests/chladni.test.ts` covers the mode table ordering/symmetry, resonance
   mapping, ring timing, grain-texture sizing, `grainGain`, and
-  `drawnGrainCount`'s coverage cap.
+  `drawnGrainCount`'s coverage cap and Sand amount scaling.
 - Plugs into `autoTune.ts`/`sceneSettings.ts` the normal way (`resolveSceneSetting`,
   `auto` weights per setting); does not use the Drives system (PR #130) or
   `noiseHash.ts` — its own `hash21`/`hash22` in `CHLADNI_GLSL` are unrelated
@@ -84,6 +84,25 @@ measured from a reference clip.
 - 2026-09-03 (#69): setting `group` labels (Form / Motion / Look) joined
   the shared setting-group vocabulary introduced across all scenes; no
   Chladni-specific behaviour change.
+- 2026-09-26 (#148): added the Sand amount setting (`sandAmount`), a Form dial
+  after Grain size. It scales the drawn grain prefix inside
+  `drawnGrainCount`'s `amount` parameter rather than reallocating the grain
+  textures, so thinning is free and grains never pop in re-seeded; the
+  simulation still steps every grain (see the file header's fixed-budget
+  paragraph). Zero deliberately means a bare plate (drawn count zero, legal
+  for `gl.drawArrays`). `grainGain` stays keyed to the quality-tier count —
+  by decision less sand reads sparser at unchanged per-grain brightness
+  rather than being auto-compensated brighter, leaving Grain brightness as
+  the taste dial.
+- 2026-09-26 (#148, review): the first cut only thinned the drawn prefix of
+  the tier's pool and topped out at 1, where the coverage cap already
+  bound at default Grain size — so the dial read as cosmetic. Now the grain
+  pool is `SAND_AMOUNT_MAX` times the tier count, the sim is scissored to
+  the rows the drawn prefix occupies (real sand, and less sand is cheaper),
+  and the coverage cap scales with the amount above 1 so extra sand piles
+  onto the figure. Measured headless at 1280×720, synthetic 120 BPM: mean
+  luma 37 at 1, 102 at 5 right after raising (fresh sand scattered), and
+  after ~10 s at 5 the nodal lines are thick solid bands instead of dust.
 
 ## Tuning notes
 
@@ -109,6 +128,11 @@ measured from a reference clip.
 - Quality tiers change grain count (`ctx.quality.maxParticles`) only;
   `grainGain` compensates so sparser beds (`floor`/`low`) read about as
   bright as the `high` tier reference count (`REFERENCE_GRAINS`).
+- Sand amount (`sandAmount`) and Grain size both set the bed through
+  `drawnGrainCount` — amount scales the budget first, the coverage cap
+  (`MAX_BED_COVERAGE`, grown by the amount above 1) binds second — and neither touches `grainGain`, so
+  a reduced bed reads sparser at unchanged per-grain brightness; judge it
+  against Grain brightness, which is the dial that compensates by taste.
 - The auto→manual sign-off pattern used at ship time: drag one setting,
   confirm every weighted setting reads `auto` and the dragged one flips to
   `manual` — see PR #38's verification notes.
@@ -119,13 +143,19 @@ measured from a reference clip.
   fixed-sand-budget approach is a workaround for a fixed grain count
   painting over itself at large Grain size, not a physical fix — it's
   documented as the accepted trade-off in the file header, not an open bug.
-- No further follow-ups are recorded beyond the pivots above; the scene has
-  had no changes since #69 (2026-09-03) besides the shared setting-group
-  vocabulary pass.
+- The grain pool is allocated at `SAND_AMOUNT_MAX` times the tier count
+  whatever the setting (texture memory, not sim cost — the sim is scissored);
+  drawing the top of the range on the `high` tier is heavy on weak GPUs.
+- No further follow-ups are recorded beyond the pivots above.
 
 ## Materials
 
-- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+- No `/ref` bundle and no artifacts; the original design was built against
+  the plate physics rather than a reference clip.
+- Working scripts: `docs/scenes/chladni/scripts/` — `sand-amount-shot.mjs`
+  (headless before/after shots of the Sand amount setting via
+  `window.__viz.setParams`). Captured screenshots are session output, not
+  kept in the repo.
 
 ## Resume here
 
@@ -154,3 +184,5 @@ measured from a reference clip.
   of polygons.
 - `#69` / `88aab06` (2026-09-03) — setting groups join the shared
   cross-scene vocabulary.
+- `#148` / `4a2208f` (2026-09-26) — Sand amount setting: scales the drawn
+  grain bed; 0 leaves the plate bare.

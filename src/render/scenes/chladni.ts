@@ -71,6 +71,14 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 // bed as a fixed amount of sand instead — bigger grains, fewer of them drawn
 // — while the sim keeps stepping every grain regardless, so the drawn subset
 // is a stable prefix rather than a re-seeded bed each time the slider moves.
+// Sand amount is the user-facing half of that same budget, and it is real
+// sand, not just visibility: the grain pool is SAND_AMOUNT_MAX times the
+// quality tier's count, and the sim steps only the texture rows the drawn
+// prefix occupies. 0 leaves the plate bare; above 1 there is genuinely more
+// sand on the plate, and the coverage cap grows with the amount so the extra
+// sand piles onto the figure rather than being clipped back to the 1× bed.
+// Grains past the prefix sit where they were left, so raising the amount
+// scatters them back in as if poured on (no reallocation, no re-seed).
 //
 // dt for the sim comes from frame.time deltas, not anim.dtSec: the anim
 // clock advances every rAF tick while render() is frame-pace-capped, so
@@ -248,7 +256,12 @@ export function grainGain(count: number): number {
   return Math.max(0.5, Math.min(6, Math.sqrt(REFERENCE_GRAINS / Math.max(1, count))));
 }
 
-/** The bed may cover at most this fraction of the plate. Past it, every
+/** Top of the Sand amount slider: the grain pool is this many times the
+ *  quality tier's count, allocated once at init. */
+export const SAND_AMOUNT_MAX = 5;
+
+/** The bed may cover at most this fraction of the plate at Sand amount 1
+ *  (the cap scales with the amount above that). Past it, every
  *  pixel is the topmost grain and both the sand and the figure stop
  *  reading — see the file header. */
 export const MAX_BED_COVERAGE = 0.55;
@@ -263,11 +276,18 @@ const SIZE_JITTER_M2 = 1 + 0.5 ** 2 / 12;
  *  on-screen grain diameter (Grain size after the resolution scale
  *  POINT_VERT applies, before the shard-area and halo growth also applied
  *  there — both roughly wash out between the shard and the disc it
- *  replaced), `platePx2` the plate's area in pixels. */
-export function drawnGrainCount(count: number, grainPx: number, platePx2: number): number {
+ *  replaced), `platePx2` the plate's area in pixels. `count` is the
+ *  quality tier's grain count and `amount` (the Sand amount setting,
+ *  clamped to [0, SAND_AMOUNT_MAX]) scales it; the coverage cap then
+ *  applies, itself scaled by the amount above 1 so more sand really means a
+ *  denser bed. 0 draws nothing (a bare plate). */
+export function drawnGrainCount(count: number, grainPx: number, platePx2: number, amount = 1): number {
+  const a = Math.max(0, Math.min(SAND_AMOUNT_MAX, amount));
+  const desired = Math.round(count * a);
+  if (desired === 0) return 0;
   const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * SIZE_JITTER_M2;
-  const fits = Math.floor((MAX_BED_COVERAGE * platePx2) / Math.max(1e-6, areaPerGrain));
-  return Math.max(1, Math.min(count, fits));
+  const fits = Math.floor((MAX_BED_COVERAGE * Math.max(1, a) * platePx2) / Math.max(1e-6, areaPerGrain));
+  return Math.max(1, Math.min(desired, fits));
 }
 
 const SETTINGS: SceneSetting[] = [
@@ -342,6 +362,17 @@ const SETTINGS: SceneSetting[] = [
     max: 3,
     step: 0.1,
     default: 1.8,
+  },
+  {
+    key: "sandAmount",
+    label: "Sand amount",
+    description: "How much sand lies on the plate — 0 leaves it bare, 1 is the classic bed, more piles thicker lines; per-grain brightness is unchanged",
+    // Manual like Grain size — a taste dial, not something to retune per track.
+    group: "Form",
+    min: 0,
+    max: SAND_AMOUNT_MAX,
+    step: 0.05,
+    default: 1,
   },
   {
     key: "shake",
@@ -797,7 +828,7 @@ function createChladniScene(): Scene {
       pointVao = gl.createVertexArray();
 
       grainCount = Math.max(1, Math.floor(ctx.quality.maxParticles));
-      side = grainTextureSide(grainCount);
+      side = grainTextureSide(grainCount * SAND_AMOUNT_MAX);
       const seed = seedPositions(side);
       for (let i = 0; i < 2; i++) {
         const tex = gl.createTexture();
@@ -839,10 +870,25 @@ function createChladniScene(): Scene {
 
       gl.disable(gl.BLEND);
 
-      // Sim pass: step every grain from posTex[read] into posTex[write].
+      // How many grains lie on the plate — see drawnGrainCount.
+      const resScale = Math.max(1, gl.drawingBufferHeight / 720);
+      const grainPx = resolveSceneSetting(ID, settingFor("grainSize")) * resScale;
+      const squarePlate = resolveSceneSetting(ID, settingFor("squarePlate")) > 0.5;
+      const platePx2 = squarePlate
+        ? (2 * SQUARE_PLATE_HALF * Math.min(gl.drawingBufferWidth, gl.drawingBufferHeight)) ** 2
+        : gl.drawingBufferWidth * gl.drawingBufferHeight;
+      const sandAmount = resolveSceneSetting(ID, settingFor("sandAmount"));
+      const drawn = drawnGrainCount(grainCount, grainPx, platePx2, sandAmount);
+
+      // Sim pass: step the drawn prefix from posTex[read] into posTex[write].
+      // The scissor keeps it to the rows that prefix occupies (the sim
+      // indexes grains by gl_FragCoord), so the SAND_AMOUNT_MAX pool only
+      // costs what is actually on the plate.
       const write = 1 - read;
       gl.bindFramebuffer(gl.FRAMEBUFFER, posFbo[write]);
       gl.viewport(0, 0, side, side);
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(0, 0, side, Math.max(1, Math.ceil(drawn / side)));
       simProg.use();
       uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
       setModes(simProg, modes);
@@ -853,6 +899,7 @@ function createChladniScene(): Scene {
       gl.bindTexture(gl.TEXTURE_2D, posTex[read]);
       gl.uniform1i(simPosLoc, 0);
       drawFullscreenQuad(gl, quadVao);
+      gl.disable(gl.SCISSOR_TEST);
       // Both hosts (app.ts / tv.ts) size the viewport to the drawing buffer
       // and only re-set it on resize; the gallery preview sets it per frame.
       // Either way the drawing buffer is the right thing to restore to.
@@ -870,13 +917,6 @@ function createChladniScene(): Scene {
       // for why a fixed grain count can't just render bigger at Grain size.
       // Premultiplied blend — opaque grain cores occlude, halos add (see
       // POINT_FRAG).
-      const resScale = Math.max(1, gl.drawingBufferHeight / 720);
-      const grainPx = resolveSceneSetting(ID, settingFor("grainSize")) * resScale;
-      const squarePlate = resolveSceneSetting(ID, settingFor("squarePlate")) > 0.5;
-      const platePx2 = squarePlate
-        ? (2 * SQUARE_PLATE_HALF * Math.min(gl.drawingBufferWidth, gl.drawingBufferHeight)) ** 2
-        : gl.drawingBufferWidth * gl.drawingBufferHeight;
-      const drawn = drawnGrainCount(grainCount, grainPx, platePx2);
 
       pointProg.use();
       uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
