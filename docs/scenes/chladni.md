@@ -84,6 +84,16 @@ measured from a reference clip.
 - 2026-09-03 (#69): setting `group` labels (Form / Motion / Look) joined
   the shared setting-group vocabulary introduced across all scenes; no
   Chladni-specific behaviour change.
+- 2026-09-26: added the Sand amount setting (`sandAmount`), a Form dial
+  after Grain size. It scales the drawn grain prefix inside
+  `drawnGrainCount`'s `amount` parameter rather than reallocating the grain
+  textures, so thinning is free and grains never pop in re-seeded; the
+  simulation still steps every grain (see the file header's fixed-budget
+  paragraph). Zero deliberately means a bare plate (drawn count zero, legal
+  for `gl.drawArrays`). `grainGain` stays keyed to the quality-tier count —
+  by decision less sand reads sparser at unchanged per-grain brightness
+  rather than being auto-compensated brighter, leaving Grain brightness as
+  the taste dial.
 
 ## Tuning notes
 
@@ -109,6 +119,11 @@ measured from a reference clip.
 - Quality tiers change grain count (`ctx.quality.maxParticles`) only;
   `grainGain` compensates so sparser beds (`floor`/`low`) read about as
   bright as the `high` tier reference count (`REFERENCE_GRAINS`).
+- Sand amount (`sandAmount`) and Grain size both thin the bed through
+  `drawnGrainCount` — amount scales the budget first, the coverage cap
+  (`MAX_BED_COVERAGE`) binds second — and neither touches `grainGain`, so
+  a reduced bed reads sparser at unchanged per-grain brightness; judge it
+  against Grain brightness, which is the dial that compensates by taste.
 - The auto→manual sign-off pattern used at ship time: drag one setting,
   confirm every weighted setting reads `auto` and the dragged one flips to
   `manual` — see PR #38's verification notes.
@@ -119,9 +134,10 @@ measured from a reference clip.
   fixed-sand-budget approach is a workaround for a fixed grain count
   painting over itself at large Grain size, not a physical fix — it's
   documented as the accepted trade-off in the file header, not an open bug.
-- No further follow-ups are recorded beyond the pivots above; the scene has
-  had no changes since #69 (2026-09-03) besides the shared setting-group
-  vocabulary pass.
+- Sand amount only thins the drawn prefix; the sim pass still steps every
+  grain in the position texture, so the setting buys no performance headroom
+  (also noted in the file header).
+- No further follow-ups are recorded beyond the pivots above.
 
 ## Materials
 

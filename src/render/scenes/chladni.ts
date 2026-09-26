@@ -71,6 +71,10 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 // bed as a fixed amount of sand instead — bigger grains, fewer of them drawn
 // — while the sim keeps stepping every grain regardless, so the drawn subset
 // is a stable prefix rather than a re-seeded bed each time the slider moves.
+// Sand amount is the user-facing half of that same fixed budget: it scales
+// the drawn prefix, so 0 leaves the plate bare while the sim keeps every
+// grain's position ready to be drawn again (thinning costs no reallocation,
+// and a grain never pops in re-seeded).
 //
 // dt for the sim comes from frame.time deltas, not anim.dtSec: the anim
 // clock advances every rAF tick while render() is frame-pace-capped, so
@@ -263,11 +267,16 @@ const SIZE_JITTER_M2 = 1 + 0.5 ** 2 / 12;
  *  on-screen grain diameter (Grain size after the resolution scale
  *  POINT_VERT applies, before the shard-area and halo growth also applied
  *  there — both roughly wash out between the shard and the disc it
- *  replaced), `platePx2` the plate's area in pixels. */
-export function drawnGrainCount(count: number, grainPx: number, platePx2: number): number {
+ *  replaced), `platePx2` the plate's area in pixels. `amount` (the Sand
+ *  amount setting, clamped to [0,1]) scales the budget itself, then the
+ *  coverage cap applies: 0 draws nothing (a bare plate), and the cap still
+ *  binds whenever it is the tighter of the two. */
+export function drawnGrainCount(count: number, grainPx: number, platePx2: number, amount = 1): number {
+  const desired = Math.round(count * Math.max(0, Math.min(1, amount)));
+  if (desired === 0) return 0;
   const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * SIZE_JITTER_M2;
   const fits = Math.floor((MAX_BED_COVERAGE * platePx2) / Math.max(1e-6, areaPerGrain));
-  return Math.max(1, Math.min(count, fits));
+  return Math.max(1, Math.min(desired, fits));
 }
 
 const SETTINGS: SceneSetting[] = [
@@ -342,6 +351,17 @@ const SETTINGS: SceneSetting[] = [
     max: 3,
     step: 0.1,
     default: 1.8,
+  },
+  {
+    key: "sandAmount",
+    label: "Sand amount",
+    description: "How much sand lies on the plate — 0 leaves it bare; per-grain brightness is unchanged, so less sand reads sparser",
+    // Manual like Grain size — a taste dial, not something to retune per track.
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 1,
   },
   {
     key: "shake",
@@ -876,7 +896,8 @@ function createChladniScene(): Scene {
       const platePx2 = squarePlate
         ? (2 * SQUARE_PLATE_HALF * Math.min(gl.drawingBufferWidth, gl.drawingBufferHeight)) ** 2
         : gl.drawingBufferWidth * gl.drawingBufferHeight;
-      const drawn = drawnGrainCount(grainCount, grainPx, platePx2);
+      const sandAmount = resolveSceneSetting(ID, settingFor("sandAmount"));
+      const drawn = drawnGrainCount(grainCount, grainPx, platePx2, sandAmount);
 
       pointProg.use();
       uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);

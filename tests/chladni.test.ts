@@ -142,6 +142,54 @@ describe("bed coverage", () => {
   });
 });
 
+describe("sand amount", () => {
+  const count = qualitySettings("high").maxParticles;
+  const platePx2 = 1920 * 1080;
+
+  it("defaults to the full bed when the amount is omitted", () => {
+    expect(drawnGrainCount(count, 4, platePx2)).toBe(drawnGrainCount(count, 4, platePx2, 1));
+  });
+
+  it("scales the drawn count proportionally while the coverage cap is slack", () => {
+    // Tiny grains: the cap (fits) is far above `count`, so amount binds.
+    expect(drawnGrainCount(count, 1, platePx2, 1)).toBe(count);
+    expect(drawnGrainCount(count, 1, platePx2, 0.5)).toBe(count / 2);
+    expect(drawnGrainCount(count, 1, platePx2, 0.25)).toBe(count / 4);
+  });
+
+  it("draws nothing at amount 0 — a bare plate", () => {
+    expect(drawnGrainCount(count, 4, platePx2, 0)).toBe(0);
+  });
+
+  it("still never exceeds the coverage cap at any amount", () => {
+    for (const amount of [0.1, 0.5, 1]) {
+      for (const grainPx of [10, 40]) {
+        const drawn = drawnGrainCount(count, grainPx, platePx2, amount);
+        const full = drawnGrainCount(count, grainPx, platePx2, 1);
+        expect(drawn).toBeLessThanOrEqual(full);
+        const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * (1 + 0.5 ** 2 / 12);
+        if (drawn > 0) {
+          expect((drawn * areaPerGrain) / platePx2).toBeLessThanOrEqual(MAX_BED_COVERAGE + 1e-6);
+        }
+      }
+    }
+  });
+
+  it("is monotonically non-increasing in amount", () => {
+    let prev = drawnGrainCount(count, 4, platePx2, 1);
+    for (let amount = 0.95; amount >= 0; amount -= 0.05) {
+      const drawn = drawnGrainCount(count, 4, platePx2, amount);
+      expect(drawn).toBeLessThanOrEqual(prev);
+      prev = drawn;
+    }
+  });
+
+  it("clamps out-of-range amounts to [0,1]", () => {
+    expect(drawnGrainCount(count, 1, platePx2, 2)).toBe(count);
+    expect(drawnGrainCount(count, 1, platePx2, -1)).toBe(0);
+  });
+});
+
 function inputs(overrides: Partial<PlateResponseInputs> = {}): PlateResponseInputs {
   return { complexity: 1, resonance: 0.6, ring: 0.4, ...overrides };
 }
