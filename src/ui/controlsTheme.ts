@@ -125,7 +125,7 @@ const stylesheet = `
  * it), so when one side folds short next to a tall neighbor, the row's own
  * box still covers the gap beside the short side. Left catching clicks,
  * that gap would count as "inside" for deviceMenu.ts's onDocPointerDown
- * (root.contains(target)) and swallow a click meant to close the panel.
+ * (root.contains(target)) and swallow a click meant for the scene.
  * Disabling pointer events on the row itself and re-enabling them on its
  * children (their own boxes correctly hug their real content) lets a click
  * in the gap fall through to whatever's actually behind it. Same reasoning
@@ -285,9 +285,32 @@ const stylesheet = `
 .vc-fold:focus-visible { outline: none; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.7)); }
 
 /* The whole meters column (Bands + the meters strip) hidden by the footer's
- * "Hide meters" button / M (deviceMenu.ts). Outranks the stacked layout's
- * display: contents below on specificity, so it holds there too. */
-.vc-root.vc-meters-hidden .vc-spectrum-col { display: none; }
+ * "Hide left" button / M (deviceMenu.ts). Outranks the stacked layout's
+ * display: contents below on specificity, so it holds there too. Solo
+ * overrides it: a digit jump can solo a card in that column, and Solo
+ * already hides the column itself whenever the soloed card is elsewhere. */
+.vc-root.vc-meters-hidden:not(.vc-solo) .vc-spectrum-col { display: none; }
+/* Solo (deviceMenu.ts's applySolo): everything off the paths from the
+ * soloed card and the dock up to the root. !important to beat the inline
+ * and display: contents rules those elements carry in either layout. */
+.vc-solo-hidden { display: none !important; }
+
+/* The footer and the keys list above it, stuck to the bottom of the
+ * controls column so its buttons never scroll out of sight — in the stacked
+ * layout, to the bottom of the screen for as long as the controls last. */
+.vc-dock { position: sticky; bottom: 0; z-index: 2; display: flex; flex-direction: column; }
+.vc-keys {
+  display: none; grid-template-columns: auto 1fr; gap: 5px 12px; align-items: baseline;
+  padding: 10px 12px;
+  background: rgba(8, 11, 10, 0.72);
+  -webkit-backdrop-filter: blur(20px) saturate(.6) brightness(.5); backdrop-filter: blur(20px) saturate(.6) brightness(.5);
+  border: 1px solid rgba(255, 255, 255, 0.13); border-bottom: none; border-radius: 3px 3px 0 0;
+  font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.75);
+}
+.vc-keys.vc-keys-show { display: grid; }
+.vc-keys-key {
+  font: 400 9.5px/1.3 ${FONT_MONO}; letter-spacing: 0.08em; color: #fff; white-space: nowrap;
+}
 
 .vc-scroll { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
 .vc-scroll::-webkit-scrollbar { width: 4px; }
