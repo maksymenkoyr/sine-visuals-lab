@@ -80,8 +80,11 @@ const ONSET_WINDOW_SEC = 6;
 const MAX_ONSETS = 48; // hard cap for the O(n²) pair walk
 const ONSET_WEIGHT_CAP = 4;
 const MAX_PAIR_GAP_SEC = 4;
-const BPM_MIN = 70;
-const BPM_MAX = 180;
+// Exported so src/render/signals.ts's "Tempo" drive source can map
+// tempoBpm into 0..1 against the same window this tracker actually
+// searches, rather than a second, hand-typed copy of these numbers.
+export const BPM_MIN = 70;
+export const BPM_MAX = 180;
 const PERIOD_STEP_SEC = 0.005;
 const COMB_TOL_SEC = 0.05; // ~one and a half frames at 30fps
 // Tighter for the final beat-length measurement than for picking the
@@ -92,6 +95,33 @@ const REFINE_TOL_SEC = 0.025;
 // it — without it, two near-equal candidates (a tempo and something close
 // to a simple ratio of it) can trade places on every onset.
 const TEMPO_SWITCH_MARGIN = 1.25;
+
+// A confident tempo used to stick forever: `bpm` was only ever assigned
+// inside registerOnset, so once locked it never fell back to 0, however long
+// the onsets stopped coming — render/beatClock.ts's tempoLock (its own
+// confidence in this reading) had nothing to ease back down toward. Past
+// TEMPO_DECAY_SEC of silence since the last real onset, update() below
+// clears both `bpm` and the onset history that would otherwise have kept
+// combScore remembering the old tempo the moment a new onset arrived.
+const TEMPO_DECAY_SEC = 3;
+
+// A bias toward tempos people actually tap along to, folded into
+// combScore's own score. Without it, a candidate exactly 3/4 or 4/3 of the
+// true tempo can out-score it outright: a busy 16th-note hat pattern makes
+// every third 16th (a 4:3 ratio of the beat) land on a whole number of
+// *its own* period just as exactly as the real beat does, and once that
+// candidate wins, TEMPO_SWITCH_MARGIN's hysteresis then keeps it for the
+// rest of the track. tempoPrior() is a log-normal bump centered on
+// TEMPO_PRIOR_BPM (TEMPO_PRIOR_OCTAVES wide) that favors the tempo octave
+// most music actually sits in, just enough to break that kind of tie
+// without overriding a real tempo confidently outside it.
+const TEMPO_PRIOR_BPM = 120;
+const TEMPO_PRIOR_OCTAVES = 1;
+
+function tempoPrior(bpm: number): number {
+  const octaves = Math.log2(bpm / TEMPO_PRIOR_BPM) / TEMPO_PRIOR_OCTAVES;
+  return Math.exp(-0.5 * octaves * octaves);
+}
 
 // getFloatFrequencyData returns -Infinity for a bin with exactly zero
 // energy (true silence) — it is NOT clamped by the analyser's
@@ -371,6 +401,15 @@ export class FeatureExtractor {
     }
     this.diag.gated = this.lastSuppressed;
 
+    // Let a held tempo go once the onsets that were sustaining it actually
+    // stop — see TEMPO_DECAY_SEC's own doc above. Clearing `onsets` too
+    // means the next real onset starts a fresh comb rather than immediately
+    // re-finding the stale tempo off leftover history.
+    if (this.bpm > 0 && time - this.lastOnsetTime > TEMPO_DECAY_SEC) {
+      this.bpm = 0;
+      this.onsets = [];
+    }
+
     let energy = 0;
     let fixedEnergy = 0;
     for (let b = 0; b < NUM_BANDS; b++) {
@@ -427,7 +466,10 @@ export class FeatureExtractor {
         if (err >= COMB_TOL_SEC) continue;
         score += ((1 - err / COMB_TOL_SEC) * weights[g]) / k;
       }
-      return score;
+      // See tempoPrior's own doc above — hysteresis below calls this same
+      // function for the current tempo too, so the prior weights that
+      // comparison exactly the same way, on purpose.
+      return score * tempoPrior(60 / period);
     };
 
     const periodMin = 60 / BPM_MAX;

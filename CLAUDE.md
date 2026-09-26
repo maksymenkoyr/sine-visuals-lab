@@ -73,6 +73,7 @@ after all three pass; include the screenshot paths in your summary.
 | The build target (`es2017`) | `vite.config.ts`, the comment at the `target:` line |
 | A scene that hashes a noise lattice, or adds a growing phase to a noise coordinate | `src/render/noiseHash.ts` header — the mobile seams fix, and the two halves every scene must take together |
 | Any existing scene | `docs/scenes/<id>.md` — its record: references, measurements, every decision and pivot, what's still off, how to resume |
+| The tempo tracker (BPM in `src/audio/features.ts`, `src/render/beatClock.ts`) | `tests/tempoEval.test.ts` header — run `npm run eval:tempo` before and after; it scores the real tracker on synthesized tracks with known beats |
 | A paid scene, or anything under `src/render/scenes/private/` | `src/render/scenes/privateScenes.ts` header — the contract, and why that folder never reaches this repo or the deployed site |
 
 ## Standing rules not worth their own doc

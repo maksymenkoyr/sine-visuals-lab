@@ -1,5 +1,6 @@
 import type { FeatureFrame } from "../audio/types.ts";
 import type { AnimFrame } from "./animClock.ts";
+import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
 
 /**
  * The seam between the meters (src/ui/audioMeters.ts), scene settings
@@ -73,8 +74,12 @@ import type { AnimFrame } from "./animClock.ts";
 export type MeterCardId = "scope" | "signal" | "gate" | "lufs" | "rhythm" | "character";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
- *  currently points at need an id (see MeterCardId above). */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset";
+ *  currently points at need an id (see MeterCardId above). "tempo" is the
+ *  Rhythm card's existing BPM-digits/beat-dot block (audioMeters.ts's own
+ *  createTempoBlock, predating this catalogue); "wave"/"tempoLevel"/"lock"
+ *  are the newer plain meter rows the four `anim.beatWave`/`anim.barWave`/
+ *  `anim.tempo`/`anim.tempoLock` signals below point at instead. */
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset" | "wave" | "tempoLevel" | "lock";
 
 export type SignalId =
   | "feature.onset"
@@ -88,7 +93,11 @@ export type SignalId =
   | "anim.high"
   | "anim.energy"
   | "anim.sectionIntensity"
-  | "anim.centroid";
+  | "anim.centroid"
+  | "anim.beatWave"
+  | "anim.barWave"
+  | "anim.tempo"
+  | "anim.tempoLock";
 
 export interface SignalSpec {
   id: SignalId;
@@ -269,5 +278,41 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "level",
     read: (_frame, anim) => anim.centroid,
     monitor: { card: "character", row: "centroid" },
+  }),
+  "anim.beatWave": signal({
+    id: "anim.beatWave",
+    label: "Beat wave",
+    description:
+      "A smooth swing locked to the tempo, once per beat (AnimFrame.tempoLock times a cosine over AnimFrame.beatPhase) — 1 on every tracked beat, 0 halfway between, fading out on its own without a confident tempo rather than needing a separate gate.",
+    kind: "level",
+    read: (_frame, anim) => anim.tempoLock * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.beatPhase)),
+    monitor: { card: "rhythm", row: "wave" },
+  }),
+  "anim.barWave": signal({
+    id: "anim.barWave",
+    label: "Bar wave",
+    description: "The same swing as Beat wave, once per bar instead of once per beat (AnimFrame.barPhase).",
+    kind: "level",
+    read: (_frame, anim) => anim.tempoLock * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.barPhase)),
+    monitor: { card: "rhythm", row: "wave" },
+  }),
+  "anim.tempo": signal({
+    id: "anim.tempo",
+    label: "Tempo",
+    description:
+      "Where the tracked tempo (AnimFrame.tempoBpm) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 with no locked tempo.",
+    kind: "level",
+    read: (_frame, anim) =>
+      anim.tempoBpm > 0 ? clamp01(Math.log2(anim.tempoBpm / BPM_MIN) / Math.log2(BPM_MAX / BPM_MIN)) : 0,
+    monitor: { card: "rhythm", row: "tempoLevel" },
+  }),
+  "anim.tempoLock": signal({
+    id: "anim.tempoLock",
+    label: "Tempo lock",
+    description:
+      "How confidently the beat clock has locked onto the tempo (AnimFrame.tempoLock, beatClock.ts) — the same number the Rhythm card's tempo dot brightens with.",
+    kind: "level",
+    read: (_frame, anim) => anim.tempoLock,
+    monitor: { card: "rhythm", row: "lock" },
   }),
 };

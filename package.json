@@ -16,7 +16,8 @@
     "typecheck": "tsc -b && tsc -b server",
     "deploy": "npm run build && wrangler deploy",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval:tempo": "vitest run tests/tempoEval.test.ts"
   },
   "dependencies": {
     "@fontsource/chakra-petch": "^5.3.0",

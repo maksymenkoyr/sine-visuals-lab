@@ -1,7 +1,7 @@
 import { type FeatureFrame } from "../audio/types.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import { createFlowClock, type FlowClock } from "./flowClock.ts";
-import { createBeatClock, type BeatClock } from "./beatClock.ts";
+import { createBeatClock, PHASE_BASS, type BeatClock } from "./beatClock.ts";
 import { createBandEnergy, type BandEnergy } from "./bandEnergy.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
@@ -52,6 +52,11 @@ export interface AnimFrame {
    *  this superseded it). */
   beatPhase: number;
   barPhase: number;
+  /** How confidently the phase comb's own chosen correction has settled —
+   *  see beatClock.ts's header for what that means today (the *stability*
+   *  of the comb's picked offset, not merely "a bpm exists"). Scenes/UI
+   *  read this, not beatClock.ts's own `confidence` (the raw, un-eased
+   *  target this ramps toward). */
   tempoLock: number;
   /** beatClock.ts's own unwrapped beat count — free-running, never resets.
    *  JS-side only, like `raw`/`hits` below: src/render/drives.ts's
@@ -59,6 +64,11 @@ export interface AnimFrame {
    *  gridded pulse per setting (src/render/gridPulse.ts), off this same
    *  field. No scene reads it directly. */
   beats: number;
+  /** beatClock.ts's own smoothed tempo — the bpm its phase is actually
+   *  running at (BPM_TRACK_RATE-eased), as opposed to `bpm` below (the raw
+   *  FeatureFrame/wire passthrough). src/render/signals.ts's "Tempo" signal
+   *  reads this. */
+  tempoBpm: number;
   /** Slewed low/mid/high band levels and their onset pulses — see bandEnergy.ts. */
   low: number;
   mid: number;
@@ -170,6 +180,29 @@ export interface AnimClock {
 // animClock/bandEnergy; don't invent one").
 export const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts broadband beatPulse decay
 
+// The phase comb's own hit weight (beatClock.ts's advance()) — how much this
+// tick's beat vote counts, so a big, obvious hit corrects the clock harder
+// than a borderline one. Two ingredients: `strength`, this tick's own
+// broadband stand-out (hit.beatRatio, capped the same way
+// features.ts's registerOnset caps an onset's own weight — HIT_WEIGHT_CAP
+// mirrors its ONSET_WEIGHT_CAP), and `bass`, how much low end this tick or
+// the previous one carried (bandEnergy.lowDiag.ratio — checked over both
+// ticks since a kick's own broadband onset can register a tick before or
+// after the low-band detector's own, and either is real bass behind this
+// hit). A bass-heavy hit (a kick) is weighted PHASE_BASS times harder than a
+// bass-free one (a hat/clap on the same beat) — kicks are what people
+// actually tap along to. Tuned against tests/tempoEval.test.ts: PHASE_BASS
+// (beatClock.ts) went from an initial 2 to 4; BASS_WEIGHT_FLOOR/
+// BASS_WEIGHT_SPAN below were tried both looser and tighter and made every
+// track's own lockInTempo worse either way, so they stayed at these values.
+const HIT_WEIGHT_CAP = 4;
+const BASS_WEIGHT_FLOOR = 0.5;
+const BASS_WEIGHT_SPAN = 1.5;
+
+function clamp01(x: number): number {
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
 export function createAnimClock(): AnimClock {
   const flow: FlowClock = createFlowClock();
   const beat: BeatClock = createBeatClock();
@@ -178,6 +211,9 @@ export function createAnimClock(): AnimClock {
   const profile: MusicProfile = createMusicProfile();
   const centroid: SpectralCentroid = createSpectralCentroid();
   let beatPulse = 0;
+  // Last tick's own low-band onset ratio — see the hitWeight comment above
+  // for why this tick's bass weight checks both.
+  let prevLowRatio = 0;
   // The broadband detector's own last graded hit — mutated in place by
   // hitStrength() below, same reasoning as bandEnergy.ts's own per-group
   // GroupState.hit: holds the previous hit's numbers between onsets rather
@@ -195,8 +231,16 @@ export function createAnimClock(): AnimClock {
       const rateScale = smoothingRateScale(smoothing);
       const dimmer = gate ? silenceGateDimmer(frame.level, gate) : 1;
       const flowPhase = flow.advance(dtSec, frame.energy);
-      beat.advance(dtSec, frame.bpm, frame.onset);
+      // bandEnergy runs before beat, not after — see the hitWeight comment
+      // above: beat.advance() below needs *this* tick's lowDiag.ratio to
+      // weigh this tick's own beat vote.
       bandEnergy.advance(dtSec, frame.bands, rateScale, dimmer, hit?.shape);
+      const lowRatioNow = bandEnergy.lowDiag.ratio;
+      const strength = Math.min(HIT_WEIGHT_CAP, Math.max(1, hit?.beatRatio || 1));
+      const bass = clamp01((Math.max(lowRatioNow, prevLowRatio) - BASS_WEIGHT_FLOOR) / BASS_WEIGHT_SPAN);
+      const hitWeight = strength * (1 + PHASE_BASS * bass);
+      beat.advance(dtSec, frame.bpm, frame.onset, hitWeight);
+      prevLowRatio = lowRatioNow;
       section.advance(dtSec, frame.energy, rateScale);
       profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
       centroid.advance(dtSec, frame.bands, rateScale);
@@ -225,6 +269,7 @@ export function createAnimClock(): AnimClock {
         barPhase: beat.barPhase,
         tempoLock: beat.tempoLock,
         beats: beat.beats,
+        tempoBpm: beat.bpm,
         low: bandEnergy.low,
         mid: bandEnergy.mid,
         high: bandEnergy.high,

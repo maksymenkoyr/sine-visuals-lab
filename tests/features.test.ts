@@ -64,6 +64,95 @@ describe("FeatureExtractor", () => {
     expect(frame!.bpm).toBeLessThan(bpm + 5);
   });
 
+  it("bpm falls back to 0 a little after TEMPO_DECAY_SEC of silence following a click track", () => {
+    // Regression test for the bug TEMPO_DECAY_SEC fixes: bpm was only ever
+    // assigned inside registerOnset, so once locked it stuck forever,
+    // however long the onsets actually stopped — beatClock.ts's tempoLock
+    // had nothing to ease back down toward.
+    const extractor = new FeatureExtractor();
+    const bpm = 120;
+    const intervalSec = 60 / bpm;
+    const dt = 1 / 60;
+    let time = 0;
+    let frame;
+    let nextClickAt = intervalSec;
+
+    for (let i = 0; i < 120; i++) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time);
+    }
+    const clicksEndTime = time + 8; // ~16 clicks at 120bpm
+    while (time < clicksEndTime) {
+      time += dt;
+      const isClick = time >= nextClickAt;
+      if (isClick) nextClickAt += intervalSec;
+      frame = extractor.update(bandsFrame(QUIET_DB, isClick ? { 0: LOUD_DB, 12: LOUD_DB } : {}), time);
+    }
+    expect(frame!.bpm).toBeGreaterThan(0); // sanity: it actually locked first
+
+    // Silence for a bit less than TEMPO_DECAY_SEC — bpm should still hold.
+    const almostDecayed = time + 2.5;
+    while (time < almostDecayed) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time);
+    }
+    expect(frame!.bpm).toBeGreaterThan(0);
+
+    // Past TEMPO_DECAY_SEC since the last real onset — bpm should have let go.
+    const pastDecay = time + 1;
+    while (time < pastDecay) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time);
+    }
+    expect(frame!.bpm).toBe(0);
+  });
+
+  it("prefers the tempo people actually tap on a busy 16th-note pattern, not the 4:3 sub-candidate a plain comb would pick", () => {
+    // A 110bpm pattern with a hit on every 16th note, the on-beat hits
+    // (every 4th) louder than the rest — kick-weighted, like a real
+    // four-on-the-floor pattern with hats filling the gaps. Without
+    // tempoPrior, three consecutive 16ths (4:3 of the true beat) fit every
+    // gap just as exactly as the real beat does, and once that candidate
+    // wins, hysteresis (TEMPO_SWITCH_MARGIN) keeps it for the rest of the
+    // track — reading ~147bpm (110 * 4/3) instead of 110.
+    const extractor = new FeatureExtractor();
+    const bpm = 110;
+    const sixteenthSec = 60 / bpm / 4;
+    const dt = 1 / 60;
+    let time = 0;
+    let frame;
+    let nextHitAt = sixteenthSec;
+    let step = 1;
+    // Quiet enough that its onset weight (flux/threshold, capped at
+    // ONSET_WEIGHT_CAP) stays clearly below the loud on-beat hits' own —
+    // registerOnset's per-pair weight is min(both onsets' own weight), so
+    // this is what actually lets the on-beat pairs outvote the denser but
+    // uniformly-loud 3-sixteenths candidate.
+    const OFFBEAT_DB = -84;
+
+    for (let i = 0; i < 120; i++) {
+      time += dt;
+      frame = extractor.update(bandsFrame(QUIET_DB), time);
+    }
+
+    const endTime = time + 12;
+    while (time < endTime) {
+      time += dt;
+      const isHit = time >= nextHitAt;
+      if (isHit) {
+        nextHitAt += sixteenthSec;
+        const onBeat = step % 4 === 0;
+        frame = extractor.update(bandsFrame(QUIET_DB, onBeat ? { 0: LOUD_DB, 12: LOUD_DB } : { 0: OFFBEAT_DB, 12: OFFBEAT_DB }), time);
+        step++;
+      } else {
+        frame = extractor.update(bandsFrame(QUIET_DB), time);
+      }
+    }
+
+    expect(frame!.bpm).toBeGreaterThan(bpm - 3);
+    expect(frame!.bpm).toBeLessThan(bpm + 3);
+  });
+
   it("fires the onset flag on the very same tick a broadband click appears, no attack delay", () => {
     // Flux is computed from the pre-envelope normalized band value (see this
     // file's own update(), and the module header's account of why) — onset

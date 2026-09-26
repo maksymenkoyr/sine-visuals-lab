@@ -23,7 +23,8 @@ export interface FeatureFrame {
    *  beat: that's AnimFrame.beatPhase/tempoLock (render/beatClock.ts), which
    *  this fires into as raw evidence. */
   onset: boolean;
-  /** Estimated tempo in BPM (0 if not yet locked). */
+  /** Estimated tempo in BPM — 0 until locked, and again once
+   *  features.ts's TEMPO_DECAY_SEC has passed with no onset registering. */
   bpm: number;
   /** Phase since the last onset, [0,1) — resets on every onset, unlike
    *  AnimFrame.beatPhase, which never restarts mid-beat. No consumer reads
