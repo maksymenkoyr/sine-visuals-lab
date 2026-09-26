@@ -4,6 +4,9 @@ export interface Env {
   ROOM: DurableObjectNamespace;
   /** The built site (wrangler.toml [assets]); only `/` reaches the Worker first. */
   ASSETS: Fetcher;
+  /** Workers Analytics Engine dataset for usage counts (server/usage.ts).
+   *  Bound in prod only — absent in previews and `wrangler dev`. */
+  USAGE?: AnalyticsEngineDataset;
 }
 
 interface Viewport {

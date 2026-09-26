@@ -138,6 +138,7 @@ import {
   type VisualSample,
 } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
+import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
 import { createControlPanel } from "./ui/controlPanel.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
@@ -522,6 +523,17 @@ function attachCapture(handle: CaptureHandle): void {
   // gallery.syncSource's own doc comments for what each covers.
   updateMicPrompt();
   gallery?.syncSource();
+  reportUsage();
+}
+
+/** Counts a scene actually running on live audio (src/net/usage.ts) — called
+ *  from both ends because either can come last: entering a scene with audio
+ *  already live, or audio arriving for the scene already on screen. The
+ *  synthetic feed is automation, so it never counts. */
+function reportUsage(): void {
+  if (!inViz) return;
+  if (mode === "renderer") reportSceneRunning(scene.id, "remote");
+  else if (capture) reportSceneRunning(scene.id, captureAudioSource(capture.kind) === "display" ? "display" : "mic");
 }
 
 /** The live capture's track ended on its own — the user hit Chrome's "Stop
@@ -965,6 +977,7 @@ async function enterViz(next: Scene): Promise<void> {
 
   if (mode !== "renderer") void ensureAudio();
   updateMicPrompt();
+  reportUsage();
   void requestWakeLock();
   immersive?.resume();
 }
