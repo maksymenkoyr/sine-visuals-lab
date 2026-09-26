@@ -10,7 +10,7 @@
     "dev": "vite",
     "predev:host": "node tools/private-scenes.mjs",
     "dev:host": "vite --host",
-    "dev:worker": "wrangler dev --port 8787 --local-protocol https",
+    "dev:worker": "wrangler dev --port 8787 --local-protocol https --local-upstream localhost:8787",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b && tsc -b server",

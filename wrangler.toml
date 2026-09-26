@@ -22,6 +22,10 @@ new_sqlite_classes = ["Room"]
 # Paths that don't match a file in dist/ (i.e. /api/*) fall through to fetch().
 [assets]
 directory = "./dist"
+binding = "ASSETS"
+# Only the homepage runs the Worker first, so it can 301 the bare domain to
+# www (server/worker.ts); everything else is still served straight from dist/.
+run_worker_first = ["/"]
 
 # Custom Domains, not route patterns: this Worker serves the site as well as the
 # API, so every path on these hostnames must reach it. Cloudflare creates the
