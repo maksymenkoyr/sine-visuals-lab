@@ -17,6 +17,12 @@ Two entry points: `index.html` → `src/app.ts` (phone/controller + gallery) and
 `tv.html` → `src/tv.ts` (the paired display). See `README.md` for the pitch and
 `docs/index.md` for how the pieces fit together.
 
+## Sliders: right = more
+
+Moving any slider right makes more of what its label names. If a value
+works the other way, rename the label to what grows (e.g. "Speed", not
+"Period") or invert the mapping — never ship a slider that reads backwards.
+
 ## Git workflow
 
 ### Before starting work

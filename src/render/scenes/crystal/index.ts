@@ -79,7 +79,7 @@ const BLUR_STRIDE = 2.4;
 const SETTINGS: SceneSetting[] = [
   {
     key: "tiling",
-    label: "Tiling",
+    label: "Cell size",
     description: "Scale of the lattice: below 1 more, smaller cells; above 1 fewer, bigger.",
     group: "Form",
     min: 0.5,
@@ -183,7 +183,7 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "ground",
-    label: "Fog",
+    label: "View depth",
     description: "How far the corridor stays visible before fading to black.",
     group: "Look",
     min: 0,

@@ -129,6 +129,9 @@ Studied, not copied, across two look references:
   same fix.
 - 2026-09-03 (#69) — setting groups joined the shared cross-scene
   `SettingGroup` vocabulary; no behavior change.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Detail (`grain`) renamed Grain, and its description now leads with
+  coarseness: higher already meant bigger voxels and points. Label only.
 
 ## Tuning notes
 

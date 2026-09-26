@@ -90,6 +90,9 @@ primary at a time; ground `#fafafa` vs. `#fafafa`.
   and reading each fbm call site's flow offset from a JS-precomputed,
   already-wrapped `uNoiseFlow`/`uSinPhase` instead of letting the raw phase
   reach the shader.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Arms renamed Arm tightness: higher already meant a thinner cross. Label
+  only.
 
 ## Tuning notes
 

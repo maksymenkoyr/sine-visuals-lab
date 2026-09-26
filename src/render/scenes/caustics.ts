@@ -281,7 +281,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "fog",
     label: "Fog",
-    description: "How thin and bright the ridges sit at rest, between beats",
+    description: "How hazy and soft the ridges sit at rest, between beats",
     group: "Look",
     min: 0,
     max: 1,
@@ -381,7 +381,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "sparkleGrain",
     label: "Sparkle grain",
-    description: "How fine each glint is",
+    description: "How coarse each glint is",
     group: "Look",
     min: 0,
     max: 1,

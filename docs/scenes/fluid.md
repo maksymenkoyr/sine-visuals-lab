@@ -131,6 +131,9 @@ All rounds below landed in the single PR #76 (opened as a draft, merged
   flares in its own colour around a strike. Strobe was rebuilt as
   `STROBE_PATTERN` stepped per render frame (hard single-frame cuts, several
   white then red then black) rather than a smooth ramp.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Current density renamed Current threshold: higher lights fewer currents.
+  Label only.
 
 ## Tuning notes
 
