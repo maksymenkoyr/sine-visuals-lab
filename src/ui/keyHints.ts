@@ -102,6 +102,9 @@ function hintLine(el: HTMLElement): string | null {
     return digit ? `Jump to block · ${digit}` : null;
   }
   const s = shortcutFor(id);
+  // The gear turns into a close cross while the panel is open (index.html's
+  // #menuBtn rules) — the hint follows it.
+  if (s && id === "panel" && el.getAttribute("aria-pressed") === "true") return `Close controls · ${s.key}`;
   return s ? `${s.label} · ${s.key}` : null;
 }
 

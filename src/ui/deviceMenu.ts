@@ -4815,6 +4815,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     applySolo();
     root.classList.add("vc-open");
     deps.toggleButton.setAttribute("aria-pressed", "true");
+    deps.toggleButton.title = "Close controls (S)";
     isOpen = true;
     document.addEventListener("pointerdown", onDocPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -4825,6 +4826,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function close() {
     root.classList.remove("vc-open");
     deps.toggleButton.setAttribute("aria-pressed", "false");
+    deps.toggleButton.title = "Controls (S)";
     isOpen = false;
     document.removeEventListener("pointerdown", onDocPointerDown);
     document.removeEventListener("keydown", onKeyDown);
