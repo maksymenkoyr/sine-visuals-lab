@@ -6,7 +6,6 @@ import type { SceneSetting } from "./sceneSettings.ts";
 import { resolveSceneSetting } from "./autoTune.ts";
 import type { Scene, SceneContext } from "./scene.ts";
 import type { AnimFrame } from "./animClock.ts";
-import type { QualitySettings } from "./quality.ts";
 import { PASSTHROUGH_DRIVES, type SceneDrives } from "./drives.ts";
 import {
   COMMON_UNIFORMS_GLSL,
@@ -57,42 +56,11 @@ export function createFullscreenScene(
        *  against it being undefined. */
       drives: SceneDrives,
     ) => Record<string, ExtraUniformValue>;
-    /** An optional GPU simulation pass run once per render, before this
-     *  scene's own uniforms are uploaded — a ping-pong height field, a
-     *  sim-only program, its own FBOs — for a scene whose reactive layer
-     *  needs real per-cell state (a stepped wave equation, a reaction-
-     *  diffusion field) rather than something a shaped analytic formula in
-     *  `extraUniforms` can carry. See rippleTank.ts for the first user.
-     *  `init`/`dispose` run alongside this scene's own program/quad
-     *  lifecycle. `step` may freely bind its own framebuffers, viewport and
-     *  programs — it must not assume the display program or the default
-     *  framebuffer/canvas viewport are still current when it returns, since
-     *  the framework rebinds all three itself immediately afterwards, then
-     *  uploads the common/setting/extra uniforms, then binds each texture
-     *  `step` returned to its own consecutive texture unit with that
-     *  record's key set as the matching `sampler2D` uniform (name, and
-     *  therefore texture unit, are re-resolved by name every call, but the
-     *  underlying `WebGLUniformLocation` is cached the same way
-     *  `createProgram`'s own `loc()` caches one), unbinding them again after
-     *  the draw. A scene declaring no `simulation` behaves bit-identically
-     *  to one built before this option existed. */
-    simulation?: {
-      init(gl: WebGL2RenderingContext, quality: QualitySettings): void;
-      step(
-        gl: WebGL2RenderingContext,
-        frame: FeatureFrame,
-        anim: AnimFrame,
-        getSetting: (key: string) => number,
-        drives: SceneDrives,
-      ): Record<string, WebGLTexture>;
-      dispose(gl: WebGL2RenderingContext): void;
-    };
   } = {},
 ): Scene {
   let prog: GLProgram | null = null;
   let vao: WebGLVertexArrayObject | null = null;
   const bandsBuf = new Float32Array(NUM_BANDS);
-  const simSamplerLocs = new Map<string, WebGLUniformLocation | null>();
   const settings = opts.settings ?? [];
   const settingsByKey = new Map(settings.map((s) => [s.key, s]));
 
@@ -127,25 +95,11 @@ ${fragBody}
     init(ctx: SceneContext) {
       prog = createProgram(ctx.gl, fragSrc);
       vao = createFullscreenQuad(ctx.gl);
-      opts.simulation?.init(ctx.gl, ctx.quality);
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!prog || !vao) return;
       const { gl } = ctx;
-
-      // Run before any uniform upload — see the `simulation` option's own
-      // doc comment above for the exact contract. `step` may leave the GL
-      // state pointed at its own FBOs/program, so the display program and
-      // the real target are rebound right after it returns, before this
-      // scene's own uniforms (which assume `prog` is current) go up.
-      let simTextures: Record<string, WebGLTexture> | null = null;
-      if (opts.simulation) {
-        simTextures = opts.simulation.step(gl, frame, anim, getSetting, drives);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-      }
-
       prog.use();
       uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, id, settings, bandsBuf, drives);
       if (opts.extraUniforms) {
@@ -156,37 +110,10 @@ ${fragBody}
           else prog.setV4v(name, value.vec4);
         }
       }
-
-      if (simTextures) {
-        let unit = 0;
-        for (const [name, tex] of Object.entries(simTextures)) {
-          let loc = simSamplerLocs.get(name);
-          if (loc === undefined) {
-            loc = gl.getUniformLocation(prog.program, name);
-            simSamplerLocs.set(name, loc);
-          }
-          gl.activeTexture(gl.TEXTURE0 + unit);
-          gl.bindTexture(gl.TEXTURE_2D, tex);
-          gl.uniform1i(loc, unit);
-          unit++;
-        }
-      }
-
       drawFullscreenQuad(gl, vao);
-
-      if (simTextures) {
-        let unit = 0;
-        for (const _ in simTextures) {
-          gl.activeTexture(gl.TEXTURE0 + unit);
-          gl.bindTexture(gl.TEXTURE_2D, null);
-          unit++;
-        }
-        gl.activeTexture(gl.TEXTURE0);
-      }
     },
 
     dispose(ctx: SceneContext) {
-      opts.simulation?.dispose(ctx.gl);
       prog?.dispose();
       if (vao) ctx.gl.deleteVertexArray(vao);
       prog = null;

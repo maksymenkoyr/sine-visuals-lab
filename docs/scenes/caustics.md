@@ -9,19 +9,22 @@ spray-injection layer riding on top. Ships from the initial commit and is on mai
 
 - `src/render/scenes/caustics.ts` — the scene module (`createFullscreenScene`,
   `SETTINGS`, the `FRAG` template, an `extraUniforms` closure that advances the
-  drift phase, the beat lurch, beat churn, kick jolt and loudness-swell
-  calibration every frame, and a `simulation` closure — `fullscreenScene.ts`'s
-  optional GPU simulation-pass hook — that steps Beat ripple's wave tank).
+  drift phase, the beat lurch, beat churn, kick jolt, loudness-swell
+  calibration and Beat ripple's own emitter/profile every frame).
 - Its response math is factored into small pure functions exported specifically so
   `tests/caustics.test.ts` can pin them directly: `focusSharp`, `fogRestingSharp`,
   `fogFloorCut`, `causticDensityScale`, `driftRatePerSec`, `loudSpeedFactor`,
   `advanceLoudSwell`, `loudSwellDrive`, `advanceLurch`, `advanceKickJolt`,
-  `advanceRippleHighpass`, `driftFlows`, and the `sparkle*` helpers.
-- `src/render/scenes/rippleTank.ts` — Beat ripple's own real 2D wave simulation
-  (`createRippleTank`, `stepTankCPU`, `RIPPLE_TANK_SAMPLE_GLSL`); see its header
-  for the update rule, the RGBA8 16-bit packing and the sponge/wall edge model.
-  `tests/rippleTank.test.ts` pins the CPU reference's stability, wave speed,
-  edge absorption and periodic-driving behaviour directly.
+  `driftFlows`, and the `sparkle*` helpers.
+- `src/render/scenes/rippleEmitter.ts` — Beat ripple's own continuous ring
+  emitter: `advanceEmission` conditions the driver's own rise each frame into
+  a launched ring amount, `createRippleEmitter` keeps every ring in flight as
+  a plain `{ageSec, amp}` ring-buffer entry, and `buildProfile` sums them into
+  the 1D radial crest/slope profile `caustics.ts` uploads as `uRippleCrest`/
+  `uRippleSlope`; see its header for why (and for what it replaced: a fixed
+  trigger-launched ring pool, then briefly a real 2D wave simulation).
+  `tests/rippleEmitter.test.ts` pins the emission and profile behaviour
+  directly.
 - Imports `NOISE_HASH_GLSL`, `NOISE_MASK`, `NOISE_PERIOD`, `wrapFlow` from
   `src/render/noiseHash.ts` — the shared mobile-safe lattice hash (see Decisions
   below; this scene is the reason that module exists).
@@ -206,6 +209,49 @@ reference-measurement workflow used by later scenes.
   (p99 ≈ 0.28 displacement), crest `RIPPLE_CREST_GAIN` 1.4 under
   `RIPPLE_CREST_MAX` 0.35 (p99 ≈ 0.18). Headless default-settings frame:
   filaments intact, waves bending them as they pass.
+- 2026-09-27 — The wave tank tested against the user's own eye: "nah that's
+  not it" — running, it didn't look like the same thing the old rings did,
+  and they asked for something between the old pool and the tank rather than
+  either extreme. Landed on a continuous ring *emitter*
+  (`src/render/scenes/rippleEmitter.ts`) that keeps the old pool's exact ring
+  look — the same gaussian crest/slope profile, the mirrored term, the
+  short-attack/exponential-decay envelope (`rippleEnvelope` is back, doing
+  the same job it did before the tank existed) — but launches ring height in
+  proportion to how much the driver *rose* each frame (`advanceEmission`)
+  instead of on a yes/no trigger: a clean, isolated hit still reads as
+  exactly one full old-style ring, a busy driver naturally ducks itself (each
+  rise only launches a ring for however far the signal climbed since it last
+  fell back, so a fast run of hits reads as lighter, denser rings rather than
+  a machine-gun of full ones), and a slow swell or a held level emits nothing
+  at all — the tank's own "only a change should ring the water" property,
+  carried over without a separate slow-average high-pass: `advanceRippleHighpass`/
+  `RippleHighpassState` are gone, folded into `advanceEmission`'s own
+  deadbanded rise detector, tuned on a much shorter timescale (rejecting a
+  single tick's own jitter, not a whole section's worth of level). Every ring
+  in flight is still a `{ageSec, amp}` entry, but now in an actual ring
+  buffer (`createRippleEmitter`) rather than a fixed-size pool with
+  youngest-ring-eviction logic, and the per-pixel read is a 1D radial profile
+  built on the CPU each frame (`buildProfile`, sampled over
+  `PROFILE_MAX_RADIUS`) and uploaded as `uRippleCrest`/`uRippleSlope` float
+  arrays, rather than a per-slot uniform array `FRAG` loops over itself.
+  Removed entirely: the wave tank (`rippleTank.ts`, `tests/rippleTank.test.ts`),
+  `fullscreenScene.ts`'s general `simulation` GPU-pass hook (nothing else had
+  picked it up, so it reverted to its pre-tank shape), and the `waveEdges`/
+  `waveDrop` (Edge reflection/Drop size) settings — an emitted ring only ever
+  travels outward from the centre, so neither a wall to bounce off nor a
+  separate source radius applies any more. New: `ringWidth` (Ring width),
+  the one shape control a centre-seated emitter still needs, mapped to the
+  same gaussian tightness the old pool's fixed `RIPPLE_WIDTH` was.
+  `waveSpeed`/`waveFade` (Wave speed/Wave fade) carry over unchanged by name
+  and default but now map onto the emitted rings' own travel speed/decay
+  (`rippleSpeedFor`/`rippleDecayFor`) instead of the tank's steps/sec and
+  per-step damping. `uRipple` (the Beat ripple slider) scales the *display*
+  again — crest brightening and slope-based refraction in `FRAG` — not a
+  launched ring's own amplitude, the split the very first pool used, reversed
+  back from the tank's "scale the source" design. A soft knee (`RIPPLE_CEIL_KNEE`/
+  `RIPPLE_CEIL_MAX` in `caustics.ts`) bounds many overlapping rings' summed
+  crest/slope without touching a single ring's own peak, so one hit still
+  looks bit-for-bit like the old pool's.
 
 ## Tuning notes
 
@@ -223,12 +269,13 @@ reference-measurement workflow used by later scenes.
   calibration of `FeatureFrame.level`, not `frame.energy`, so it settles into the
   room or playback's own observed range instead of re-normalizing away the very
   quiet-vs-loud contrast it exists to show.
-- Beat ripple's drive picker still chooses what disturbs the tank (Scene default
+- Beat ripple's drive picker still chooses what feeds the emitter (Scene default
   is bass hits or any broadband beat, continuous; picking a single catalogue
   source instead reads that source's own level/pulse) — but there's no longer a
-  separate fire-mark threshold to tune, the way `rippleThreshold` used to be: a
-  real simulation just carries whatever the picked source's continuous reading
-  does, busy or not (see the 2026-09-27 Decisions entry).
+  separate fire-mark threshold to tune, the way `rippleThreshold` used to be:
+  `advanceEmission` reads whatever the picked source's continuous reading does
+  and launches a ring for its own rise, busy or not (see the 2026-09-27
+  Decisions entries).
 - Drift speed's default reproduces the scene's original wander speed exactly (see
   the `driftRatePerSec` regression test, which exists because an earlier version of
   this constant doubled up an attenuation already baked into the flow term and ran
@@ -236,27 +283,31 @@ reference-measurement workflow used by later scenes.
 - The silence gate's default marks (upstream, in `silenceGate.ts`) were tuned
   against the reported hiss case, not measured on a real mic — if Caustics still
   under- or over-reacts in a quiet room, that is the gate to retune, not this scene.
-- Beat ripple's wave tank (`rippleTank.ts`): `RIPPLE_REFRACT_K`/`RIPPLE_CREST_GAIN`
-  and their `_MAX` ceilings in `caustics.ts` set how visible a given tank height
-  reads on screen (sized from measured tank output — the 2026-09-27 entry), and
-  `SOURCE_GAIN`/`waveFade`'s default in `rippleTank.ts` set how strong a hit's
-  push is and how fast it fades. Judge them the way the old ring pool was judged
-  — a single beat should read as one clear expanding ring, not a flash — but
-  also check a *busy* driver (many onsets in a row, or a drawn line): the whole
-  point of the rewrite is that a busy driver should read as a busy, interfering
-  surface instead of stuttering or stacking. The headless recipe in Resume here
-  isolates the wave from every other reactive setting for exactly this judgment.
+- Beat ripple's emitter (`rippleEmitter.ts`): `RIPPLE_REFRACT`/`RIPPLE_CEIL_KNEE`/
+  `RIPPLE_CEIL_MAX` in `caustics.ts` set how visible the profile reads on
+  screen (a single full-strength ring is designed to peak at exactly the
+  ceiling's own knee, so it's unaffected by the ceiling at all), and
+  `advanceEmission`'s own `EMISSION_SMOOTH_TAU_SEC`/`RISE_DEADBAND_PER_SEC`
+  set how much of a real hit's height survives conditioning and how slow a
+  swell has to be before it's ignored entirely (see that function's own
+  comment — its constants are picked against `anim.beatPulse`'s actual decay
+  rate, `BEAT_PULSE_DECAY_PER_SEC` in `animClock.ts`, not a round number).
+  Judge a single beat the way the old pool was judged — one clear expanding
+  ring, not a flash — but also check a *busy* driver (many onsets in a row,
+  or a drawn line): it should read as lighter, denser rings that duck each
+  other, never a stutter or an unbroken stack of full-strength ones. The
+  headless recipe in Resume here isolates the ripple from every other
+  reactive setting for exactly this judgment.
 
 ## Known issues and next steps
 
 - Kick surge and Beat churn still hand-roll their own trigger/hold/decay logic in
   this file rather than using the shared beat-listener module that later scenes
   are meant to converge on; migrating them was flagged as a follow-up but is not
-  done. Beat ripple no longer belongs on this list — it moved off a trigger/hold/
-  decay pattern entirely, onto a continuous wave simulation (`rippleTank.ts`,
-  the 2026-09-27 Decisions entry), which is exactly the family of problem
-  trigger+hold+refractory (`beatListener.ts`'s own model) can't solve for a busy
-  or continuous driver.
+  done. Beat ripple no longer belongs on this list — it isn't a trigger/hold/
+  decay design at all (`rippleEmitter.ts`, the 2026-09-27 Decisions entries),
+  which is exactly the family of problem trigger+hold+refractory
+  (`beatListener.ts`'s own model) can't solve for a busy or continuous driver.
 - Two related pull requests were open and not yet merged as of this writing, and
   describe behavior not present in the current code on `main`:
   - A "Flash from level" crossfade (Beat flash driven by the continuous energy level
@@ -273,37 +324,31 @@ reference-measurement workflow used by later scenes.
   Check the state of any in-flight work touching this scene before assuming either
   is live.
 - Only the synthetic audio feed has been used to check the sparkle/flash tuning
-  above; there has been no measured real-music pass. The wave tank's own
+  above; there has been no measured real-music pass. The ring emitter's own
   constants (see Tuning notes) are likewise screenshot-tuned against synthetic
   audio only, not a measured real-music pass.
-- The wave tank's grid (`rippleTank.ts`'s `computeGridSize`) is sized off
-  `QualitySettings.preset` alone, like `petri.ts`'s own grid — never checked
-  against how it actually looks at every preset (`low`/`floor` in particular)
-  on a real device, only that it compiles and renders at the default preset a
-  dev machine picks.
 
 ## Materials
 
 - Artifact: [Caustics Patch Bay](https://claude.ai/artifact/5mPSRq9Btjf373FDtsQ8kt). Source saved as `caustics/artifacts/caustics-patch-bay.html`.
 - Artifact: [Caustics Signal Recipe](https://claude.ai/artifact/WDRpyQyRzbFAXS58YQaLZX). Source saved as `caustics/artifacts/caustics-signal-recipe.html`.
 - Both artifacts are clickable prototypes for choosing what each reactive setting listens to — the UI behind the drives work (PR #130).
-- Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider, why level/line sources used to silently ignore `fired()`, and a demo of the hysteresis signal→trigger converter shipped as `src/render/valueTrigger.ts` (this file's second 2026-09-26 entry above). Superseded as a picture of Beat ripple itself by the 2026-09-27 wave-simulation rewrite below (both "old" and "new" it compares are now history) — `valueTrigger.ts` is unaffected and still used elsewhere.
+- Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider, why level/line sources used to silently ignore `fired()`, and a demo of the hysteresis signal→trigger converter shipped as `src/render/valueTrigger.ts` (this file's second 2026-09-26 entry above). Superseded as a picture of Beat ripple itself by the wave-tank rewrite and then the continuous ring emitter (both 2026-09-27 Decisions entries; every version it compares is now history) — the current emitter (`rippleEmitter.ts`) restores most of what that artifact's "old" side showed, now launched continuously off the driver's own rise instead of a yes/no trigger. `valueTrigger.ts` is unaffected and still used elsewhere.
 - `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
 
 ## Resume here
 
 - `npm run dev`, then open the scene directly:
   `/?audio=synthetic&bpm=120#/v/caustics` (any query goes before the hash).
-- `tests/caustics.test.ts` pins the drift-rate, focus-snap, loudness-swell and
-  ripple-highpass invariants directly (the beat-ripple-pool describe block —
-  `rippleEnvelope`/`createRipplePool` — is gone; the wave tank's own physics
-  are `tests/rippleTank.test.ts`'s job now, against `stepTankCPU`) — run
-  against both before touching any of the exported pure functions rather than
-  eyeballing the shader.
-- A headless render check for the wave tank specifically: force `ripple:1` and
+- `tests/caustics.test.ts` pins the drift-rate, focus-snap and loudness-swell
+  invariants directly; Beat ripple's own emission and profile invariants
+  (`advanceEmission`, `rippleEnvelope`, `createRippleEmitter`, `buildProfile`)
+  are `tests/rippleEmitter.test.ts`'s job now — run both before touching any
+  of the exported pure functions rather than eyeballing the shader.
+- A headless render check for Beat ripple specifically: force `ripple:1` and
   zero every other Motion setting via `window.__viz.setParams` (a Playwright
-  script following this pattern is what this file's 2026-09-27 Decisions entry
-  was verified with) — a black frame means a shader compile error, printed at
+  script following this pattern is what this file's 2026-09-27 Decisions entries
+  were verified with) — a black frame means a shader compile error, printed at
   the top of the page's console/pageerror output.
 - Any new drift/flow offset added to a noise coordinate in `FRAG` must get a
   matching, wrapped entry in `driftFlows` on the JS side, or it reintroduces the

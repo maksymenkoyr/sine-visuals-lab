@@ -3,11 +3,9 @@ import {
   advanceKickJolt,
   advanceLoudSwell,
   advanceLurch,
-  advanceRippleHighpass,
   causticDensityScale,
   createLoudSwellState,
   createLurchState,
-  createRippleHighpassState,
   driftFlows,
   driftRatePerSec,
   focusSharp,
@@ -505,43 +503,6 @@ describe("caustics caustic density", () => {
       const s = causticDensityScale(d);
       expect(s).toBeGreaterThan(prev);
       prev = s;
-    }
-  });
-});
-
-// Beat ripple's own high-pass (advanceRippleHighpass) is what makes the new
-// wave simulation (rippleTank.ts) carry a *change* in the driver rather than
-// its raw value — see that file's header for why a displacement source
-// wants a delta, not a level. These pin the property that actually matters:
-// a driver that never changes must never raise a wave.
-describe("caustics ripple high-pass (advanceRippleHighpass)", () => {
-  it("the first call seeds the average and reports no swing at all", () => {
-    const st = createRippleHighpassState();
-    expect(advanceRippleHighpass(st, 1 / 60, 0.7)).toBe(0);
-  });
-
-  it("a constant (DC) driver settles to reading zero — a steady signal raises no wave", () => {
-    const st = createRippleHighpassState();
-    let out = 1;
-    for (let i = 0; i < 600; i++) out = advanceRippleHighpass(st, 1 / 60, 0.6);
-    expect(out).toBeCloseTo(0, 6);
-  });
-
-  it("a sudden rise reads as a positive swing that decays back toward zero as the average catches up", () => {
-    const st = createRippleHighpassState();
-    for (let i = 0; i < 300; i++) advanceRippleHighpass(st, 1 / 60, 0.2); // settle at 0.2
-    const jump = advanceRippleHighpass(st, 1 / 60, 1.0);
-    expect(jump).toBeGreaterThan(0.5);
-    let out = jump;
-    for (let i = 0; i < 300; i++) out = advanceRippleHighpass(st, 1 / 60, 1.0);
-    expect(Math.abs(out)).toBeLessThan(Math.abs(jump));
-  });
-
-  it("never produces NaN across a broad random sweep, including dt=0", () => {
-    const st = createRippleHighpassState();
-    for (let i = 0; i < 500; i++) {
-      const out = advanceRippleHighpass(st, Math.random() < 0.05 ? 0 : Math.random() / 30, Math.random());
-      expect(Number.isFinite(out)).toBe(true);
     }
   });
 });
