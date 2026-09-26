@@ -1,8 +1,9 @@
 # Sine Visuals Lab
 
-A browser-based, real-time audio visualizer rendered with WebGL2, with a
-phone-to-TV pairing mode: point a phone's microphone at a room, and drive a
-full-screen visualization on a paired TV over a low-latency WebSocket link.
+A browser-based, real-time audio visualizer rendered with WebGL2: point it at
+a microphone or a shared screen and a gallery of scenes follows the beat,
+tempo and tone of the music. (An experimental mode also pairs a phone with a
+second screen over a WebSocket link.)
 
 A gallery of audio-reactive scenes, each with per-scene sensitivity, contrast,
 and smoothing controls, plus an auto-tune engine that adapts those controls to
