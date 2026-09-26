@@ -12,7 +12,12 @@ import {
   shapeExpansion,
   shapeLevel,
 } from "../audio/sensitivity.ts";
-import type { SceneSetting } from "../render/sceneSettings.ts";
+import {
+  SCENE_MASTER_DEFAULT,
+  SCENE_MASTER_MAX,
+  SCENE_MASTER_MIN,
+  type SceneSetting,
+} from "../render/sceneSettings.ts";
 import type { SceneLook } from "../render/sceneLooks.ts";
 import { createLooksCard } from "./looksCard.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
@@ -457,6 +462,12 @@ export interface DeviceMenuDeps {
   onSceneAutoToggle: (sceneId: string, on: boolean) => void;
   getAutoStrength: () => number;
   onAutoStrengthChange: (value: number) => void;
+  /** The device-wide scene master (sceneSettings.ts's getSceneMaster) — one
+   *  dial over every numeric scene param, resolved in autoTune.ts's
+   *  resolveSceneSetting. Device-local like getAutoStrength above, so it is
+   *  neither captured in a Look nor sent to the TV. */
+  getSceneMaster: () => number;
+  onSceneMasterChange: (value: number) => void;
   /** Dev-only: read/write/clear an unclamped pin for a param row (see
    *  tuning/pins.ts) — its presence is what turns a row's readout into a
    *  typable field, and its absence in a production build is what hides
@@ -3577,6 +3588,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoRow.style.cssText = autoRowStyle;
   autoRow.append(autoCard.el, autoMasterBtn);
 
+  // Master: one device-wide dial over every numeric scene param, multiplied
+  // in at autoTune.ts's resolveSceneSetting (scaled once, never on drives,
+  // enums/booleans, or the Input card's gain stages — see that doc). Sits
+  // between Auto strength and Input as its own always-visible card: it is
+  // not part of the auto system, and unlike the Scene card below it must
+  // not disappear on a scene that declares no settings of its own — those
+  // scenes simply have nothing for it to move. The Scene card's violet,
+  // because what it scales is that card's contents.
+  const masterCard = createCard({ title: "Master", accent: SCENE_VIOLET });
+  markBlock(masterCard.title);
+  const masterRow = createControlRow({
+    label: "Scale",
+    accent: SCENE_VIOLET,
+    min: SCENE_MASTER_MIN,
+    max: SCENE_MASTER_MAX,
+    step: 0.05,
+    defaultValue: SCENE_MASTER_DEFAULT,
+    mapping: "linear",
+    unit: "×",
+    format: (value) => value.toFixed(2),
+    description: "Scales every scene param at once — 1 is as dialed",
+  });
+  masterRow.onChange((value) => deps.onSceneMasterChange(value));
+  masterCard.body.appendChild(masterRow.el);
+
   // Binds a row's typed-entry field to deps.devPin for one (scene, key) —
   // undefined (no typable readout) whenever devPin itself is, i.e. every
   // production build. `sceneId` is a getter rather than a plain string
@@ -4497,7 +4533,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     toggleOff: toggleAutoStrengthOff,
   });
 
-  controlsCol.append(autoRow, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, footer);
+  controlsCol.append(autoRow, masterCard.el, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, footer);
   root.append(columnsWrap, controlsCol);
   document.body.appendChild(root);
 
@@ -4602,6 +4638,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshBandsSplit();
     refreshBandFaders();
     refreshAutoStrengthDisplay();
+    masterRow.sync(() => deps.getSceneMaster());
     root.classList.add("vc-open");
     deps.toggleButton.setAttribute("aria-pressed", "true");
     isOpen = true;

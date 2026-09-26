@@ -62,8 +62,10 @@ import {
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import {
+  getSceneMaster,
   getSceneSetting,
   resetSceneSettings,
+  setSceneMaster,
   setSceneSetting,
   settingDefault,
   type SceneSetting,
@@ -850,6 +852,8 @@ function wireDeviceMenu(): void {
       ),
     getAutoStrength: () => getAutoStrength(),
     onAutoStrengthChange: (value) => setAutoStrength(value),
+    getSceneMaster: () => getSceneMaster(),
+    onSceneMasterChange: (value) => setSceneMaster(value),
     getAutoGain: () => getAutoGain(),
     onAutoGainChange: (value) => {
       setAutoGainAuto(false);
