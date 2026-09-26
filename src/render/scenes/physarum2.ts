@@ -187,7 +187,9 @@ const SCALE_MIN = 0.5;
 const SCALE_MAX = 1.8;
 
 // --- How much harder a beat lengthens each step — see Surge below. ---
-const SURGE_GAIN = 1.5;
+// Widened on request so the slider reaches much further (the scene record has
+// the history); Surge's default and auto weights are scaled to match.
+const SURGE_GAIN = 6.0;
 
 // --- Trail decay, per *step* (see the file header) — the Trail decay
 // setting's range, and the small per-step floor that keeps 8-bit evaporation
@@ -276,9 +278,9 @@ const SETTINGS: SceneSetting[] = [
     group: "Motion",
     min: 0,
     max: 1,
-    step: 0.05,
-    default: 0.4,
-    auto: { pulse: 0.25, attack: 0.2 },
+    step: 0.01,
+    default: 0.1,
+    auto: { pulse: 0.06, attack: 0.05 },
     // uBeatPulse directly (SIM_FRAG's surge term) — a plain Beat default.
     drive: { default: "feature.onset" },
   },

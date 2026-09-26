@@ -61,6 +61,11 @@ and `powder.ts`'s curl noise).
   Also compared Network scale 0.15 against the 0.5 default: finer scale
   breaks the short-sensor violet species into isolated dots, so the
   default stays.
+- 2026-09-26: "Beat surge" relabelled "Surge" (its drive can pick any
+  source). User asked for a 4x bigger Surge range: `SURGE_GAIN` 1.5 -> 6.0,
+  with the default 0.4 -> 0.1, step 0.05 -> 0.01 and auto weights quartered
+  (pulse 0.25 -> 0.06, attack 0.2 -> 0.05), so the default look is unchanged
+  and full slider is a 7x step on a hit instead of 2.5x.
 
 ## Tuning notes
 
