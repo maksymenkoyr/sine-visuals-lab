@@ -37,8 +37,9 @@
  * steps between the two ticks bracketing it. `lens` is the visual magnifier
  * this rides under (a flat core, a compressed ring, then the plain scale);
  * `dragStep` is the pointer-to-thumb relative-motion math in precision (the
- * thumb moves at a fraction of the pointer's own motion, leashed so a long
- * drag never lets the two drift apart by more than `LEASH_PX`).
+ * thumb moves at a fraction of the pointer's own motion; pull the pointer
+ * more than `LEASH_PX` away and precision lets go, so the thumb catches back
+ * up instead of trailing behind a pointer that's clearly going somewhere).
  */
 
 export type TickLevel = 0 | 1 | 2;
@@ -53,6 +54,9 @@ export interface Tick {
  *  only form magnetSlider.ts's own snapping/drawing ever touches. */
 export interface PlacedTick extends Tick {
   x: number;
+  /** The most `snap` may reach for this tick, in px — REACH_CAP of the gap to
+   *  its nearest kept neighbour of the same or higher rank (layoutTicks). */
+  reachCapPx?: number;
 }
 
 export interface SliderScale {
@@ -255,17 +259,32 @@ export const MIN_GAP_PX: readonly [number, number, number] = [2.16, 3.6, 5.4];
  *  if it would land within `MIN_GAP_PX[level]` of a tick already kept — a
  *  detent is never dropped. The result is sorted back into track order,
  *  which every consumer (snap's nearest-tick walk, precisionValue's bracket
- *  search) relies on. */
+ *  search) relies on. Each kept tick also gets its `reachCapPx`. */
 export function layoutTicks(scale: SliderScale, x0: number, x1: number): PlacedTick[] {
   const w = x1 - x0;
   const all: PlacedTick[] = scale.ticks.map((t) => ({ ...t, x: x0 + scale.toPos(t.v) * w }));
-  const order = all.slice().sort((a, b) => (b.detent ? 3 : b.level) - (a.detent ? 3 : a.level));
+  const rank = (t: PlacedTick): number => (t.detent ? 3 : t.level);
+  const order = all.slice().sort((a, b) => rank(b) - rank(a));
   const kept: PlacedTick[] = [];
   for (const t of order) {
     if (t.detent || kept.every((k) => Math.abs(k.x - t.x) >= MIN_GAP_PX[t.level])) kept.push(t);
   }
+  // A detent is capped against majors too — it rarely has another detent near
+  // enough to bound it.
+  const capRank = (t: PlacedTick): number => Math.min(rank(t), 2);
+  for (const t of kept) {
+    let gap = Infinity;
+    for (const k of kept) if (k !== t && capRank(k) >= capRank(t)) gap = Math.min(gap, Math.abs(k.x - t.x));
+    t.reachCapPx = gap * REACH_CAP;
+  }
   return kept.sort((a, b) => a.x - b.x);
 }
+
+// A tick may pull from at most this share of the gap to its nearest
+// neighbour of the same or higher rank — the pixel reaches below are sized
+// for a wide desktop track, and on a narrow one (the patch bay's weight
+// slider, a phone) they'd otherwise cover every step between two ticks.
+export const REACH_CAP = 0.35;
 
 // Feel constants — one place, so re-tuning the pull never means hunting
 // through magnetSlider.ts's drag math. MAGNETISM scales every reach in
@@ -301,8 +320,12 @@ export function nearestTick(x: number, ticks: readonly PlacedTick[]): PlacedTick
  *  the nearest tick, ignoring `bypass`: an integer count has no free
  *  position to bypass into. Otherwise `bypass` (Shift, on a continuous row)
  *  returns null — a free position, unsnapped. A tick the thumb is already
- *  `latched` to (mid/major/detent) holds on past its own reach, scaled by
- *  HOLD_ON, so passing exactly at the boundary doesn't chatter. Failing that,
+ *  `latched` to (major/detent only — a mid tick holding on as well swallowed
+ *  every fine step between two mids) holds on past its own reach, scaled by
+ *  HOLD_ON, so passing exactly at the boundary doesn't chatter. Every reach
+ *  is also capped by the tick's own `reachCapPx` (layoutTicks) so a pull
+ *  sized in pixels never covers the steps between ticks on a narrow track.
+ *  Failing that,
  *  the best-scoring tick within reach wins (a detent outranks any level,
  *  which outranks plain distance); failing *that*, the nearest tick — Step
  *  mode never leaves the thumb free. */
@@ -315,8 +338,9 @@ export function snap(
 ): PlacedTick | null {
   if (discrete) return nearestTick(x, ticks);
   if (bypass) return null;
-  const pull = (t: PlacedTick): number => MAGNETISM * (t.detent ? DETENT_PULL_PX : TICK_PULL_PX * LEVEL_PULL[t.level]);
-  if (latched && (latched.detent || latched.level > 0) && Math.abs(x - latched.x) <= pull(latched) * HOLD_ON) {
+  const pull = (t: PlacedTick): number =>
+    Math.min(MAGNETISM * (t.detent ? DETENT_PULL_PX : TICK_PULL_PX * LEVEL_PULL[t.level]), t.reachCapPx ?? Infinity);
+  if (latched && (latched.detent || latched.level === 2) && Math.abs(x - latched.x) <= pull(latched) * HOLD_ON) {
     return latched;
   }
   let best: PlacedTick | null = null;
@@ -338,8 +362,11 @@ export function snap(
 // lens magnifies by; HOLD_MS[level] is how long a slow/still pointer must
 // hold before reaching that level; SLOW_PX_S/FAST_PX_S bound "holding still"
 // and "moving fast enough to drop straight back to normal"; LEASH_PX is how
-// far a long precision drag lets the pointer wander from the thumb before
-// it's pulled along; CATCH_UP is how much of any leftover gap closes per
+// far the pointer may wander from the thumb in precision before precision
+// lets go (small wiggles near the thumb are fine-tuning, a longer pull means
+// "move it"); HOLD_STILL_PX_S is the stricter "still" a drag needs to
+// re-enter precision after that — without it a slow steady drag would open
+// precision, snap the leash, and reopen it over and over; CATCH_UP is how much of any leftover gap closes per
 // pixel of motion once back at normal speed; LENS_CORE_PX/LENS_EDGE_PX are
 // the magnifier's own flat core and the point it rejoins the plain scale.
 export const PRECISION_SUB: readonly [number, number, number] = [1, 5, 10];
@@ -347,7 +374,8 @@ export const SLOW_PX_S = 40;
 export const FAST_PX_S = 220;
 export const HOLD_MS: readonly [number, number, number] = [0, 308, 1210];
 export const SPEED_WINDOW_MS = 120;
-export const LEASH_PX = 45;
+export const LEASH_PX = 24;
+export const HOLD_STILL_PX_S = 8;
 export const CATCH_UP = 0.5;
 export const LENS_CORE_PX = 60;
 export const LENS_EDGE_PX = 96;
@@ -379,9 +407,10 @@ export function nextPrecisionLevel(
   speed: number,
   slowMs: number,
   dt: number,
+  slowPxS: number = SLOW_PX_S,
 ): { level: TickLevel; slowMs: number } {
   if (speed > FAST_PX_S) return { level: 0, slowMs: 0 };
-  const nextSlowMs = speed < SLOW_PX_S ? slowMs + dt : slowMs;
+  const nextSlowMs = speed < slowPxS ? slowMs + dt : slowMs;
   const achievable: TickLevel = nextSlowMs >= HOLD_MS[2] ? 2 : nextSlowMs >= HOLD_MS[1] ? 1 : 0;
   return { level: Math.max(level, achievable) as TickLevel, slowMs: nextSlowMs };
 }
@@ -423,6 +452,9 @@ export function lens(x: number, center: number, mag: number): { x: number; fade:
 export interface DragPos {
   u: number;
   grabOffset: number;
+  /** Set when this step pulled the pointer past LEASH_PX in precision — the
+   *  caller drops back to normal speed so the thumb catches up. */
+  released?: boolean;
 }
 
 /** One drag step's relative-motion math, shared by every precision level
@@ -431,9 +463,11 @@ export interface DragPos {
  *  `homeOffset` — 0 outside precision — so the thumb settles back under the
  *  pointer as it moves rather than staying offset from a precision drag that
  *  just ended). At `sub` > 1 the thumb moves at `1/sub` of the pointer's own
- *  motion (so a tick still passes every few pixels of a slow drag), leashed
- *  to LEASH_PX from the pointer's own position so a long precision drag
- *  can't let the two wander arbitrarily far apart. */
+ *  motion (so a tick still passes every few pixels of a slow drag); once the
+ *  pointer gets more than LEASH_PX from the thumb the step reports
+ *  `released` and puts the thumb straight back under the pointer (the caller
+ *  drops to normal speed). CATCH_UP only closes a gap left by leaving
+ *  precision with a fast move. */
 export function dragStep(
   pos: DragPos,
   fx: number,
@@ -447,7 +481,11 @@ export function dragStep(
   if (sub > 1) {
     let u = clamp(pos.u + dx / sub);
     const drift = u - fx - homeOffset;
-    if (Math.abs(drift) > LEASH_PX) u = clamp(fx + homeOffset + Math.sign(drift) * LEASH_PX);
+    if (Math.abs(drift) > LEASH_PX) {
+      // Let go: the thumb goes straight back under the pointer (the display
+      // eases it there) rather than creeping after it at catch-up speed.
+      return { u: clamp(fx + homeOffset), grabOffset: homeOffset, released: true };
+    }
     return { u, grabOffset: u - fx };
   }
   const gap = pos.grabOffset - homeOffset;

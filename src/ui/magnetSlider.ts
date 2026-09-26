@@ -10,9 +10,11 @@ import {
   pointerSpeed,
   precisionValue,
   snap,
+  HOLD_STILL_PX_S,
   LENS_CORE_PX,
   LENS_EDGE_PX,
   PRECISION_SUB,
+  SLOW_PX_S,
 } from "./sliderScale.ts";
 import { FONT_MONO } from "./controlsTheme.ts";
 
@@ -227,6 +229,9 @@ export function createMagnetSlider(opts: MagnetSliderOpts): MagnetSlider {
     lastClientX: 0,
     samples: [] as { t: number; x: number }[],
     slowMs: 0,
+    // After the leash lets go, precision only comes back on a real hold
+    // (HOLD_STILL_PX_S) — see sliderScale.ts's precision constants.
+    strictHold: false,
     level: 0 as TickLevel,
     mag: 1,
     shownSub: 1,
@@ -304,12 +309,13 @@ export function createMagnetSlider(opts: MagnetSliderOpts): MagnetSlider {
       return;
     }
     const speed = pointerSpeed(s.samples, now);
-    const result = nextPrecisionLevel(s.level, speed, s.slowMs, dt);
+    const result = nextPrecisionLevel(s.level, speed, s.slowMs, dt, s.strictHold ? HOLD_STILL_PX_S : SLOW_PX_S);
     s.slowMs = result.slowMs;
     if (result.level !== s.level) {
       const entering = result.level > s.level;
       s.level = result.level;
       if (entering) {
+        s.strictHold = false;
         s.shownSub = PRECISION_SUB[result.level];
         s.pulse = Math.max(s.pulse, 0.6);
         try {
@@ -333,6 +339,14 @@ export function createMagnetSlider(opts: MagnetSliderOpts): MagnetSlider {
     const pos = dragStep({ u: s.u, grabOffset: s.grabOffset }, fx, dx, sub, x0(), x1(), s.homeOffset);
     s.u = pos.u;
     s.grabOffset = pos.grabOffset;
+    if (pos.released) {
+      // Pulled past the leash: the pointer is going somewhere, so precision
+      // lets go and the thumb is already back under it (dragStep).
+      s.level = 0;
+      s.slowMs = 0;
+      s.strictHold = true;
+      setAria();
+    }
     s.lastClientX = clientX;
     const x = s.u;
     s.rawX = x;
@@ -361,8 +375,9 @@ export function createMagnetSlider(opts: MagnetSliderOpts): MagnetSlider {
     el.classList.add("vc-dragging");
     s.level = 0;
     s.slowMs = 0;
+    s.strictHold = false;
     s.lastClientX = e.clientX;
-    s.samples = [{ t: performance.now(), x: e.clientX }];
+    s.samples = [{ t: e.timeStamp, x: e.clientX }];
     el.setPointerCapture(e.pointerId);
     opts.onDragChange?.(true);
     fromPointer(e.clientX, e.shiftKey, true);
@@ -370,10 +385,13 @@ export function createMagnetSlider(opts: MagnetSliderOpts): MagnetSlider {
   });
   el.addEventListener("pointermove", (e) => {
     if (!s.dragging) return;
-    s.samples.push({ t: performance.now(), x: e.clientX });
+    // The event's own timeStamp, not the time it's handled — a busy main
+    // thread (the visualizer rendering) delivers moves in bursts, and
+    // handling-time gaps would read a steady slow drag as holding still.
+    s.samples.push({ t: e.timeStamp, x: e.clientX });
     // A fast move leaves precision on this event, not next frame (dt 0 —
     // see nextPrecisionLevel's own comment).
-    updatePrecision(performance.now(), 0);
+    updatePrecision(e.timeStamp, 0);
     fromPointer(e.clientX, e.shiftKey, false);
   });
   const endDrag = (e: PointerEvent): void => {

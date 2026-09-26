@@ -16,8 +16,11 @@ import {
   SLOW_PX_S,
   FAST_PX_S,
   LEASH_PX,
+  HOLD_STILL_PX_S,
   type PlacedTick,
 } from "../src/ui/sliderScale.ts";
+
+const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-9;
 
 // The old createControlRow formulas (deviceMenu.ts, before this file existed)
 // — logScale must reproduce these bit-for-bit on a 0..100 slider position.
@@ -203,6 +206,33 @@ describe("snap", () => {
     expect(held).toBe(major);
   });
 
+  it("a latched mid tick doesn't hold on — the fine steps past it stay reachable", () => {
+    const scale = linearScale({ min: 0, max: 1, fine: 0.01, mid: 0.05, major: 0.25 });
+    const ticks = layoutTicks(scale, 0, 360); // 3.6 px per fine step, as on a desktop row
+    const mid = ticks.find((t) => near(t.v, 0.35))!;
+    const next = ticks.find((t) => near(t.v, 0.37))!;
+    expect(snap(next.x, ticks, mid, false, false)).toBe(next);
+  });
+
+  it("caps reach on a narrow track so mid ticks don't swallow the fine steps between them", () => {
+    // the patch bay's weight slider: 0..2 with a 0.1 mid grid in ~300 px —
+    // uncapped, a mid's reach plus its hold-on covered the 15 px mid gap
+    const scale = linearScale({ min: 0, max: 2, fine: 0.02, mid: 0.1, major: 0.5, detents: [1] });
+    const ticks = layoutTicks(scale, 0, 300);
+    const bigger = ticks.filter((t) => t.level > 0 || t.detent);
+    // majors and marked values (1×) keep their strong pull on purpose — skip their reach
+    const nearDetent = (t: PlacedTick): boolean => ticks.some((d) => (d.detent || d.level === 2) && d !== t && Math.abs(d.x - t.x) < 16);
+    let checked = 0;
+    for (const t of ticks) {
+      if (t.level === 1 && !nearDetent(t)) expect(snap(t.x, ticks, null, false, false)).toBe(t);
+      if (t.level === 0 && !nearDetent(t) && Math.min(...bigger.map((b) => Math.abs(b.x - t.x))) > 5.5) {
+        expect(snap(t.x, ticks, null, false, false)).toBe(t);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(5);
+  });
+
   it("discrete ignores bypass and always returns the nearest tick", () => {
     const ticks = testTicks();
     const between = ticks[3].x + (ticks[4].x - ticks[3].x) / 2 + 1;
@@ -291,14 +321,26 @@ describe("lens", () => {
 });
 
 describe("dragStep", () => {
-  it("never leashes the thumb further than LEASH_PX from the pointer, in precision", () => {
-    let pos = { u: 0, grabOffset: 0 };
+  it("in precision, releases once the pointer is past LEASH_PX, never further", () => {
+    let pos: { u: number; grabOffset: number; released?: boolean } = { u: 0, grabOffset: 0 };
     let fx = 0;
-    for (let i = 0; i < 50; i++) {
+    let steps = 0;
+    while (!pos.released) {
       fx += 3; // the pointer keeps moving; the thumb only follows at 1/sub
       pos = dragStep(pos, fx, 3, 10, 0, 1000, 0);
       expect(Math.abs(pos.u - fx)).toBeLessThanOrEqual(LEASH_PX + 1e-6);
+      expect(++steps).toBeLessThan(50);
     }
+    // small wiggles near the thumb never release
+    const wiggle = dragStep({ u: 100, grabOffset: 0 }, 100 + LEASH_PX / 2, LEASH_PX / 2, 10, 0, 1000, 0);
+    expect(wiggle.released).toBeUndefined();
+  });
+
+  it("after a release, only a real hold (HOLD_STILL_PX_S) counts toward re-entering precision", () => {
+    const slowDrag = (HOLD_STILL_PX_S + SLOW_PX_S) / 2;
+    expect(nextPrecisionLevel(0, slowDrag, 0, HOLD_MS[1] + 1, HOLD_STILL_PX_S).level).toBe(0);
+    expect(nextPrecisionLevel(0, slowDrag, 0, HOLD_MS[1] + 1).level).toBe(1);
+    expect(nextPrecisionLevel(0, 0, 0, HOLD_MS[1] + 1, HOLD_STILL_PX_S).level).toBe(1);
   });
 
   it("at sub 1 (normal speed) the thumb tracks the pointer directly with no offset", () => {
