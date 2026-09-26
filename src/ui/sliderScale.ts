@@ -248,7 +248,7 @@ export function autoLinearScale(opts: { min: number; max: number; step?: number;
 // Minimum on-screen gap (px) a tick of each level needs from any tick
 // already kept — layoutTicks below thins the fine grid first on a narrow
 // track (a phone), so a marked value is never the one that gets crowded out.
-export const MIN_GAP_PX: readonly [number, number, number] = [2.4, 4, 6];
+export const MIN_GAP_PX: readonly [number, number, number] = [2.16, 3.6, 5.4];
 
 /** Places `scale.ticks` against real track pixels (`x0`..`x1`) and thins them
  *  to fit: kept in level order (majors and detents first), each dropped only
@@ -273,7 +273,7 @@ export function layoutTicks(scale: SliderScale, x0: number, x1: number): PlacedT
 // tick's own level (TICK_PULL_PX x LEVEL_PULL); HOLD_ON is how far past its
 // own reach a tick the thumb is already latched to keeps holding, so the
 // latch doesn't chatter right at the boundary.
-export const MAGNETISM = 1;
+export const MAGNETISM = 1.1;
 export const TICK_PULL_PX = 4;
 export const LEVEL_PULL: readonly [number, number, number] = [1, 1.5, 2.2];
 export const DETENT_PULL_PX = 14;
@@ -345,7 +345,7 @@ export function snap(
 export const PRECISION_SUB: readonly [number, number, number] = [1, 5, 10];
 export const SLOW_PX_S = 40;
 export const FAST_PX_S = 220;
-export const HOLD_MS: readonly [number, number, number] = [0, 280, 1100];
+export const HOLD_MS: readonly [number, number, number] = [0, 308, 1210];
 export const SPEED_WINDOW_MS = 120;
 export const LEASH_PX = 45;
 export const CATCH_UP = 0.5;

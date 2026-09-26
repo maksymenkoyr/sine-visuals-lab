@@ -194,9 +194,9 @@ describe("snap", () => {
     const major = ticks.find((t) => t.v === 5)!;
     expect(major.level).toBe(2);
     expect(major.detent).toBeUndefined();
-    // pull(major) = MAGNETISM * TICK_PULL_PX * LEVEL_PULL[2] = 1 * 4 * 2.2 = 8.8;
-    // HOLD_ON extends that to 13.2 px — land just inside that, past the plain
-    // 8.8 px reach a fresh (non-latched) snap at this same x would need.
+    // pull(major) = MAGNETISM * TICK_PULL_PX * LEVEL_PULL[2] = 1.1 * 4 * 2.2 = 9.68;
+    // HOLD_ON extends that to 14.52 px — land just inside that, past the plain
+    // 9.68 px reach a fresh (non-latched) snap at this same x would need.
     const nearBoundary = major.x + 12;
     expect(snap(nearBoundary, ticks, null, false, false)).not.toBe(major);
     const held = snap(nearBoundary, ticks, major, false, false);
