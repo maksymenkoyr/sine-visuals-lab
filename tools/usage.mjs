@@ -3,13 +3,15 @@
 // Analytics Engine: sessions (`start`) and scene views per day, per country
 // and per scene, with the owner's `?me=1` browsers left out.
 //
-//   node tools/usage.mjs            # last 30 days
-//   node tools/usage.mjs 7          # last 7 days
-//   node tools/usage.mjs 30 --me    # include the owner's own events
+//   npm run usage              # last 30 days
+//   npm run usage -- 7         # last 7 days
+//   npm run usage -- 30 --me   # include the owner's own events
 //
-// Auth: CLOUDFLARE_API_TOKEN, an API token with Account > Account Analytics >
-// Read (dash.cloudflare.com/profile/api-tokens). A `wrangler login` session
-// can't stand in: its OAuth scopes don't cover the Analytics Engine SQL API.
+// Auth: CLOUDFLARE_API_TOKEN, from the environment or from the gitignored
+// `.env` at the repo root (the main checkout's, so it works from any
+// worktree). It needs Account > Account Analytics > Read — create it once at
+// dash.cloudflare.com/profile/api-tokens. A `wrangler login` session can't
+// stand in: its OAuth scopes don't cover the Analytics Engine SQL API.
 // CLOUDFLARE_ACCOUNT_ID is optional; without it the token's first account
 // is used.
 //
@@ -19,15 +21,32 @@
 // Column names follow the blob order in usageDataPoint() — blob1 kind,
 // blob2 scene, blob3 source, blob4 me|visitor, blob5 country, blob6 device.
 
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
 const DATASET = "sinevisualslab_usage"; // wrangler.toml [[analytics_engine_datasets]]
 
 const args = process.argv.slice(2);
 const days = Number(args.find((a) => /^\d+$/.test(a)) ?? 30);
 const includeMe = args.includes("--me");
 
-const token = process.env.CLOUDFLARE_API_TOKEN;
+function tokenFromDotEnv() {
+  let root = ".";
+  try {
+    // --git-common-dir is the main checkout's .git, even from a worktree.
+    root = dirname(execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" }).trim());
+  } catch {}
+  try {
+    return readFileSync(join(root, ".env"), "utf8").match(/^CLOUDFLARE_API_TOKEN\s*=\s*"?([^"\s]+)"?/m)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const token = process.env.CLOUDFLARE_API_TOKEN ?? tokenFromDotEnv();
 if (!token) {
-  console.error("Set CLOUDFLARE_API_TOKEN (Account Analytics: Read) — see the header of this file.");
+  console.error("No CLOUDFLARE_API_TOKEN — add it to .env at the repo root (see the header of this file).");
   process.exit(1);
 }
 
