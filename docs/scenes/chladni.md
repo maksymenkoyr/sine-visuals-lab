@@ -94,6 +94,15 @@ measured from a reference clip.
   by decision less sand reads sparser at unchanged per-grain brightness
   rather than being auto-compensated brighter, leaving Grain brightness as
   the taste dial.
+- 2026-09-26 (#148, review): the first cut only thinned the drawn prefix of
+  the tier's pool and topped out at 1, where the coverage cap already
+  bound at default Grain size — so the dial read as cosmetic. Now the grain
+  pool is `SAND_AMOUNT_MAX` times the tier count, the sim is scissored to
+  the rows the drawn prefix occupies (real sand, and less sand is cheaper),
+  and the coverage cap scales with the amount above 1 so extra sand piles
+  onto the figure. Measured headless at 1280×720, synthetic 120 BPM: mean
+  luma 37 at 1, 102 at 5 right after raising (fresh sand scattered), and
+  after ~10 s at 5 the nodal lines are thick solid bands instead of dust.
 
 ## Tuning notes
 
@@ -119,9 +128,9 @@ measured from a reference clip.
 - Quality tiers change grain count (`ctx.quality.maxParticles`) only;
   `grainGain` compensates so sparser beds (`floor`/`low`) read about as
   bright as the `high` tier reference count (`REFERENCE_GRAINS`).
-- Sand amount (`sandAmount`) and Grain size both thin the bed through
+- Sand amount (`sandAmount`) and Grain size both set the bed through
   `drawnGrainCount` — amount scales the budget first, the coverage cap
-  (`MAX_BED_COVERAGE`) binds second — and neither touches `grainGain`, so
+  (`MAX_BED_COVERAGE`, grown by the amount above 1) binds second — and neither touches `grainGain`, so
   a reduced bed reads sparser at unchanged per-grain brightness; judge it
   against Grain brightness, which is the dial that compensates by taste.
 - The auto→manual sign-off pattern used at ship time: drag one setting,
@@ -134,9 +143,9 @@ measured from a reference clip.
   fixed-sand-budget approach is a workaround for a fixed grain count
   painting over itself at large Grain size, not a physical fix — it's
   documented as the accepted trade-off in the file header, not an open bug.
-- Sand amount only thins the drawn prefix; the sim pass still steps every
-  grain in the position texture, so the setting buys no performance headroom
-  (also noted in the file header).
+- The grain pool is allocated at `SAND_AMOUNT_MAX` times the tier count
+  whatever the setting (texture memory, not sim cost — the sim is scissored);
+  drawing the top of the range on the `high` tier is heavy on weak GPUs.
 - No further follow-ups are recorded beyond the pivots above.
 
 ## Materials
