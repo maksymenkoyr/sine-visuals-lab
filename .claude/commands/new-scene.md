@@ -29,7 +29,7 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
 6. Run `npm run typecheck` — catches a mismatched uniform name or a missing
    `Scene` method.
 7. Start `npm run dev` and give the user the direct link it prints for `$1` —
-   not the gallery root (see the standing rule in `CLAUDE.md` for the URL form).
+   not the gallery root (see the standing rule in `AGENTS.md` for the URL form).
 8. Run the tuning loop (`/tune $1`) at a couple of BPMs with `?audio=synthetic`
    and confirm the probe shows every setting's `mode` as `"manual"` until you
    switch it to auto in the device menu, `"auto"` after.
@@ -37,6 +37,6 @@ Walk `docs/adding-a-scene.md` end to end for a new scene `$1`:
    `docs/scenes/$1.md` and fill in what's known — references (if `/ref` was
    run, its links, timestamps and bundle name), the first entries of
    "Decisions and pivots", and "Resume here". It ships in the same PR as the
-   scene (standing rule in `CLAUDE.md`).
+    scene (standing rule in `AGENTS.md`).
 
 Report which steps are done and flag anything skipped.

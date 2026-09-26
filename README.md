@@ -39,7 +39,8 @@ Two entry points: `index.html` (the phone/controller view) and `tv.html`
 
 ## Documentation
 
-[`CLAUDE.md`](CLAUDE.md) carries the working rules; [`docs/index.md`](docs/index.md)
+[`AGENTS.md`](AGENTS.md) carries the working rules ([`CLAUDE.md`](CLAUDE.md)
+imports them for Claude Code); [`docs/index.md`](docs/index.md)
 is the documentation map.
 
 ## Contributing
