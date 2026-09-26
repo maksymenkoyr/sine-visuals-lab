@@ -537,14 +537,15 @@ body.vc-keys-reveal [data-keycap]::after {
 /* The patch bay (deviceMenu.ts): a drive row's input port and the row's own
  * pinned/preview highlight.
  *
- * The port's position (a 10px ring at the row's own left edge, facing the
- * meters column which docks to the screen's own left edge — see
+ * The port's position (a 10px ring centred on the row's top edge near its
+ * left corner — the pinned outline's top-left corner — on the side facing
+ * the meters column, which docks to the screen's own left edge — see
  * .vc-spectrum-col above) is a plain class rule rather than deviceMenu.ts's
  * own inline cssText, since drivePortStyle() (deviceMenu.ts) only ever
  * writes colour/border/box-shadow inline — the setting's own plugged
  * sources, and the ring that marks it pinned (solid, glowing) vs merely
  * previewed (a bare outline) — never anything this rule already owns.
- * left is small and positive, not hanging past the row into the card's
+ * left is positive, not hanging past the row into the card's
  * own padding: .vc-row's padding/negative-margin pair (below) means a more
  * negative offset here lands outside .vc-card's own overflow: hidden and
  * gets clipped invisible.
@@ -558,29 +559,29 @@ body.vc-keys-reveal [data-keycap]::after {
  * background tint, no border — see the row grammar in this file's own
  * header for why a click is what actually expands the patch panel. */
 .vc-drive-port {
-  position: absolute; left: 1px; top: 15px; width: 10px; height: 10px; border-radius: 50%;
+  position: absolute; left: 7px; top: -5px; width: 10px; height: 10px; border-radius: 50%;
   padding: 0; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 .vc-drive-port:hover { transform: scale(1.25); }
 .vc-drive-port:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-/* Room for the port at the row's own left edge, so its label/summary text
- * doesn't sit underneath it (createControlRow's driveRowLeftStyle). */
-.vc-drive-row-left { padding-left: 14px; }
+/* The port sits on the row's top edge (the pinned outline's top-left
+ * corner), above the label — the label needs no room cut out for it. */
+.vc-drive-row-left { padding-left: 0; }
 .vc-row.vc-drive-pinned {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 8%, transparent);
   box-shadow: 0 0 0 1.5px var(--vc-pin-color, ${SCENE_VIOLET});
 }
-/* Solo's eye (deviceMenu.ts's buildDriveRow), in the pinned row's left
- * gutter under its port, in the pin's colour: shut while everything shows,
+/* Solo's eye (deviceMenu.ts's positionSoloEye): fixed on <body> just
+ * outside the pinned row's left edge, under its port, in the pin's colour: shut while everything shows,
  * peeking half open on hover, wide open with a lit pupil while this setting
  * is the only thing shown. The lid scales about the eye's own midline, so
  * toggling reads as the eye opening and blinking shut. */
 .vc-solo-eye {
-  position: absolute; left: -1px; top: 32px; width: 14px; height: 14px; padding: 0;
+  position: fixed; z-index: 31; width: 16px; height: 16px; padding: 0;
   background: none; border: none; cursor: pointer; color: var(--vc-pin-color, ${SCENE_VIOLET});
   --open: 0;
 }
-.vc-solo-eye svg { width: 14px; height: 14px; display: block; overflow: visible; }
+.vc-solo-eye svg { width: 16px; height: 16px; display: block; overflow: visible; }
 .vc-eye-lid {
   fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round;
   transform-origin: 12px 12px; transform: scaleY(var(--open));
@@ -599,6 +600,9 @@ body.vc-keys-reveal [data-keycap]::after {
 @media (prefers-reduced-motion: reduce) {
   .vc-eye-lid { transition: none; }
 }
+/* Soloed, the pinned row is the first thing in its card — room above it so
+ * the card's own overflow: hidden doesn't clip the port on its top edge. */
+.vc-root.vc-solo .vc-row.vc-drive-pinned { margin-top: 2px; }
 .vc-row.vc-drive-preview {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 6%, transparent);
 }

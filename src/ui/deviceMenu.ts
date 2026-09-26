@@ -278,7 +278,7 @@ import {
  * The Bands+meters column can also go away at once — "Hide left" in the
  * footer strip, or M — which leaves Power and the controls where they are
  * rather than reflowing anything. Solo (O, the footer's "Solo", or the
- * Solo eye in a pinned setting's left gutter) goes further: only the
+ * Solo eye just outside a pinned setting's left edge) goes further: only the
  * pinned setting stays — with the meters, whose jacks patch it — or, with
  * nothing pinned, only the Scene card, until O again (see applySolo);
  * jumping to a block outside what's soloed turns it off rather than
@@ -791,6 +791,10 @@ const driveResetLinkStyle = `
   font: 500 11px/1 ${FONT_LABEL}; color: ${SCENE_VIOLET}; text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
 `;
 
+
+/** Solo's eye (positionSoloEye) — its box, which controlsTheme.ts's
+ *  .vc-solo-eye rule sizes to match. */
+const SOLO_EYE_PX = 16;
 
 // Footer strip.
 const footerStyle = `
@@ -2838,23 +2842,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let sparkFilled = 0;
     let outputCanvas: HTMLCanvasElement | null = null;
     let boundRowEl: HTMLElement | null = null;
-    const soloEye = document.createElement("button");
-    soloEye.type = "button";
-    soloEye.className = "vc-solo-eye";
-    soloEye.dataset.key = "solo";
-    soloEye.dataset.keycap = "O";
-    // Lid + pupil (scaled open/shut by controlsTheme.ts's .vc-solo-eye
-    // rules) over a shut lid with lashes.
-    soloEye.innerHTML =
-      '<svg viewBox="0 0 24 24" aria-hidden="true">' +
-      '<g class="vc-eye-lid"><path d="M2.5 12 Q12 3.5 21.5 12 Q12 20.5 2.5 12Z"/><circle cx="12" cy="12" r="3.3"/></g>' +
-      '<path class="vc-eye-shut" d="M3 11 Q12 18.5 21 11 M7 14.6 L5.8 17.4 M12 15.7 L12 18.8 M17 14.6 L18.2 17.4"/>' +
-      "</svg>";
-    soloEye.addEventListener("click", (e) => {
-      e.stopPropagation(); // the row's own click would focus its slider
-      setSolo(!soloOn);
-    });
-    syncSoloEye(soloEye);
 
     function isPinned(): boolean {
       return samePair(pinned, { sceneId, spec });
@@ -2903,10 +2890,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     function refreshPin(): void {
       const on = isPinned();
       boundRowEl?.classList.toggle("vc-drive-pinned", on);
-      // The Solo eye sits in the pinned row's left gutter, under its port
-      // (.vc-solo-eye, controlsTheme.ts) — on the pane it isolates.
-      if (on && boundRowEl) boundRowEl.appendChild(soloEye);
-      else soloEye.remove();
       patchContainer.style.display = on ? "" : "none";
       if (on) {
         rebuildIfPinned();
@@ -3048,8 +3031,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshLineMode();
     refreshPatchHighlight();
     // Solo follows the pin: onto the newly pinned row, or back to the
-    // Scene card once nothing is pinned.
+    // Scene card once nothing is pinned — and its eye follows the row.
     if (soloOn) applySolo();
+    scheduleCableRecompute();
   }
 
   /** The only place `preview` is written. See previewDrive's own callers
@@ -3417,6 +3401,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     cableRecomputeQueued = true;
     requestAnimationFrame(() => {
       cableRecomputeQueued = false;
+      positionSoloEye();
       if (!isOpen) return;
       const { pinned: pinnedGroup, preview: previewGroup } = cableSpecsForShown();
       cableLayer.recompute(pinnedGroup, previewGroup);
@@ -3453,6 +3438,40 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   // ---- "Pick a setting first" toast (also keyHints.ts's tips/welcome,
   // given a longer durationMs than a plain patch-bay toast needs) ----
+  // Solo's eye: one floating button just outside the pinned row's left
+  // edge, under its port (positionSoloEye) — on <body>, not in the row,
+  // since the Scene card's overflow: hidden clips anything hung past the
+  // row's own edge. Lid + pupil over a shut lid with lashes, scaled
+  // open/shut by controlsTheme.ts's .vc-solo-eye rules.
+  const soloEyeEl = document.createElement("button");
+  soloEyeEl.type = "button";
+  soloEyeEl.className = "vc-solo-eye";
+  soloEyeEl.dataset.key = "solo";
+  soloEyeEl.dataset.keycap = "O";
+  soloEyeEl.hidden = true;
+  soloEyeEl.innerHTML =
+    '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+    '<g class="vc-eye-lid"><path d="M2.5 12 Q12 3.5 21.5 12 Q12 20.5 2.5 12Z"/><circle cx="12" cy="12" r="3.3"/></g>' +
+    '<path class="vc-eye-shut" d="M3 11 Q12 18.5 21 11 M7 14.6 L5.8 17.4 M12 15.7 L12 18.8 M17 14.6 L18.2 17.4"/>' +
+    "</svg>";
+  soloEyeEl.addEventListener("click", () => setSolo(!soloOn));
+  document.body.appendChild(soloEyeEl);
+  /** Parks the eye beside the pinned row, in the row's own pin colour, or
+   *  hides it — closed panel, nothing pinned, or the row scrolled out of
+   *  its column. Rides every cable recompute (scroll, resize, pin, solo). */
+  function positionSoloEye(): void {
+    const row = isOpen ? sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned") : null;
+    const r = row?.getBoundingClientRect();
+    const col = (narrowMQ.matches ? root : controlsCol).getBoundingClientRect();
+    const top = r ? r.top + 9 : 0;
+    const visible = !!r && r.height > 0 && top >= col.top && top + SOLO_EYE_PX <= col.bottom;
+    soloEyeEl.hidden = !visible;
+    if (!visible || !row || !r) return;
+    soloEyeEl.style.left = `${r.left - SOLO_EYE_PX - 5}px`;
+    soloEyeEl.style.top = `${top}px`;
+    soloEyeEl.style.setProperty("--vc-pin-color", row.style.getPropertyValue("--vc-pin-color"));
+  }
+
   const toastEl = document.createElement("div");
   toastEl.className = "vc-toast";
   toastEl.setAttribute("role", "status");
@@ -4620,7 +4639,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const moved = anchor.getBoundingClientRect().top - before;
     if (on) controlsCol.style.paddingTop = `${Math.max(0, -moved)}px`;
     else (narrowMQ.matches ? root : controlsCol).scrollTop += moved;
-    for (const eye of root.querySelectorAll<HTMLButtonElement>(".vc-solo-eye")) syncSoloEye(eye);
+    syncSoloEye(soloEyeEl);
     soloBtn.textContent = on ? "All  O" : "Solo  O";
     soloBtn.title = on ? "Show everything again (O)" : "Show only the pinned setting — or the Scene card, when none is pinned (O)";
     soloBtn.style.color = on ? "#fff" : "inherit";
@@ -4752,7 +4771,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // panel's own switch.
   function onDocPointerDown(e: PointerEvent) {
     const t = e.target as Node | null;
-    if (t && (root.contains(t) || deps.toggleButton.contains(t))) return;
+    if (t && (root.contains(t) || deps.toggleButton.contains(t) || soloEyeEl.contains(t))) return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && root.contains(active)) active.blur();
     if (pinned) togglePin(pinned.sceneId, pinned.spec);
@@ -4886,6 +4905,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     document.removeEventListener("keydown", onKeyDown);
     refreshCableVisibility();
     toastEl.classList.remove("vc-toast-show");
+    positionSoloEye();
   }
 
   // Cache of the last --wash value written, so update() (called every rAF
