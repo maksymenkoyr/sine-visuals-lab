@@ -208,5 +208,5 @@ reference-measurement workflow used by later scenes.
 - #127 / `30e3240`, #130 / `4bc9175`, #136 / `eee37a8` (merged) — graded hit
   strength, the per-setting drive picker, and the multi-source patch bay —
   Caustics' reactive settings now pick their sources through the picker
-- 2026-09-26 — Tempo breathe → Breathe: a wirable, inert-until-patched zoom (see
-  Decisions)
+- #147 (2026-09-26) — Tempo breathe → Breathe: a wirable, inert-until-patched
+  zoom (see Decisions)
