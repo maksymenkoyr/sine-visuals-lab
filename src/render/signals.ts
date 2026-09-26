@@ -21,8 +21,14 @@ import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
  * straight off the render-latched AnimFrame it's handed (see renderLatch.ts
  * and drives.ts's own header), never through `read()` here, which always
  * returns the decaying envelope instead (see the next paragraph). `kind:
- * "level"` entries have no paired edge — `fired()` on one of these falls
- * back to whatever `sceneDefaultFired` the caller passed in, same as Scene.
+ * "level"` entries have no paired edge — a sustained reading has no rising
+ * instant to latch — so `fired()` on one of these instead runs the source's
+ * own weighted reading through a per-source Schmitt trigger
+ * (src/render/valueTrigger.ts) that turns "crossed a fire mark" into a
+ * one-shot the way a real edge would, rather than falling back to whatever
+ * `sceneDefaultFired` the caller passed in (the drawn line, `{ source:
+ * "line" }`, is the other DriveChoice with no edge and takes the same path —
+ * see drives.ts's own header).
  *
  * This is otherwise purely descriptive for the `reads` role: nothing reads
  * a `SceneSetting.reads` entry at render time — the actual driving happens
@@ -114,8 +120,8 @@ export interface SignalSpec {
    *  what drives.ts's fired() reads for a plain catalogue choice. Required
    *  for every `kind: "edge"` entry (tests/signals.test.ts checks this);
    *  absent for `kind: "level"` entries, which have no natural edge —
-   *  drives.ts's fired() falls back to the caller's own sceneDefaultFired
-   *  for those, same as "scene". */
+   *  drives.ts's fired() converts one of these through a Schmitt trigger
+   *  (valueTrigger.ts) instead, per this file's header. */
   edge?: (anim: AnimFrame) => boolean;
   /** The meter row that displays this, if any — see MeterCardId/MeterRowId's
    *  own doc comments above for why this is a small, hand-maintained set

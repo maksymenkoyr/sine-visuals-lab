@@ -95,14 +95,77 @@ describe("drives: catalogue identity", () => {
     expect(drives.fired("beatTrigger", false)).toBe(anim.onset);
   });
 
-  it("kind: level entries have no natural edge — fired() falls back to sceneDefaultFired", () => {
+});
+
+// kind: "level" entries (and the drawn line, which has no `kind` at all)
+// have no natural edge to read — fired() used to fall back to whatever
+// sceneDefaultFired the caller passed in for these, silently ignoring the
+// source the user actually picked. It now runs the source's own weighted
+// reading through a per-source Schmitt trigger instead (valueTrigger.ts).
+describe("drives: level/line sources fire through a Schmitt trigger (valueTrigger.ts), never sceneDefaultFired", () => {
+  it("a level source fires once above the mark, holds while still above it, and re-arms only below the lower mark", () => {
     const clock = createAnimClock();
-    const anim = clock.advance(DT, frame({ bands: new Float32Array(NUM_BANDS).fill(0.5) }));
+    const base = clock.advance(DT, frame());
     const engine = createDriveEngine();
+    const sceneId = "level-trigger-scene";
     const spec = settingWithDrive("levelTrigger", "anim.mid");
-    const drives = engine.forScene("identity-scene-3", [spec], anim);
-    expect(drives.fired("levelTrigger", true)).toBe(true);
-    expect(drives.fired("levelTrigger", false)).toBe(false);
+
+    const above = { ...base, mid: 0.9, timeSec: 0, beats: 0, tempoLock: 0 };
+    expect(engine.forScene(sceneId, [spec], above).fired("levelTrigger", false)).toBe(true);
+
+    // Still above the mark, a moment later, nowhere near a beat boundary or
+    // the fallback refire window — held, not a fresh fire.
+    const stillAbove = { ...base, mid: 0.9, timeSec: 0.05, beats: 0.01, tempoLock: 0 };
+    expect(engine.forScene(sceneId, [spec], stillAbove).fired("levelTrigger", true)).toBe(false);
+
+    // Between the marks — no fire, no re-arm.
+    const between = { ...base, mid: 0.5, timeSec: 0.1, beats: 0.02, tempoLock: 0 };
+    expect(engine.forScene(sceneId, [spec], between).fired("levelTrigger", true)).toBe(false);
+
+    // Below the lower mark — re-arms, but sceneDefaultFired never sneaks in.
+    const low = { ...base, mid: 0.1, timeSec: 0.15, beats: 0.03, tempoLock: 0 };
+    expect(engine.forScene(sceneId, [spec], low).fired("levelTrigger", true)).toBe(false);
+
+    // Rises again — fires, regardless of what sceneDefaultFired says.
+    const riseAgain = { ...base, mid: 0.9, timeSec: 0.2, beats: 0.04, tempoLock: 0 };
+    expect(engine.forScene(sceneId, [spec], riseAgain).fired("levelTrigger", false)).toBe(true);
+  });
+
+  it("a custom `upper` shifts the fire mark", () => {
+    const clock = createAnimClock();
+    const base = clock.advance(DT, frame());
+    const engine = createDriveEngine();
+    const sceneId = "level-trigger-threshold-scene";
+    const spec = settingWithDrive("levelTrigger", "anim.mid");
+    const anim = { ...base, mid: 0.5, timeSec: 0, beats: 0, tempoLock: 0 };
+    // Below the default mark (0.6) but above a lowered custom one.
+    expect(engine.forScene(sceneId, [spec], anim).fired("levelTrigger", false, 0.4)).toBe(true);
+  });
+
+  it("a line source is converted the same way, off its own bandLineDrive() reading", () => {
+    const sceneId = "line-trigger-scene";
+    const spec = settingWithDrive("lineTrigger", { source: "line" });
+    setDriveLine(sceneId, spec, new Float32Array(NUM_BANDS).fill(0)); // flat-0: full headroom everywhere
+    setDriveLineStrength(sceneId, spec, 1);
+    const engine = createDriveEngine();
+
+    const loud = frame({ bands: new Float32Array(NUM_BANDS).fill(0.9) });
+    const quiet = frame({ bands: new Float32Array(NUM_BANDS).fill(0.05) });
+    const anim = { ...createAnimClock().advance(DT, loud), timeSec: 0, beats: 0, tempoLock: 0 };
+
+    engine.accumulate(DT, loud, 0, anim, sceneId, [spec]);
+    expect(engine.forScene(sceneId, [spec], anim).fired("lineTrigger", false)).toBe(true);
+
+    // Still up (no fresh accumulate) — held, and sceneDefaultFired never matters.
+    expect(engine.forScene(sceneId, [spec], anim).fired("lineTrigger", true)).toBe(false);
+
+    // A long quiet stretch decays the line drive well past the lower mark.
+    engine.accumulate(5, quiet, 0, anim, sceneId, [spec]);
+    expect(engine.forScene(sceneId, [spec], anim).fired("lineTrigger", true)).toBe(false);
+
+    // Loud again — fires, regardless of sceneDefaultFired.
+    engine.accumulate(DT, loud, 0, anim, sceneId, [spec]);
+    expect(engine.forScene(sceneId, [spec], anim).fired("lineTrigger", false)).toBe(true);
   });
 });
 

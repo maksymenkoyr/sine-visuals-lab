@@ -117,6 +117,29 @@ reference-measurement workflow used by later scenes.
   still crossing, a hit folds into the youngest ring (raising its amplitude,
   so a drop still lands) instead of restarting one. Pinned by the "driver
   that keeps hitting" test in `tests/caustics.test.ts`.
+- 2026-09-26 — Two follow-ups from the same "driver that keeps hitting"
+  screenshot, once the pool fix above stopped losing rings but a busy mix
+  still stacked them densely enough to read as noise instead of individual
+  strikes: (1) `drives.fired()` (`src/render/drives.ts`) only understood
+  hit-kind sources — a level-kind catalogue source or Beat ripple's own
+  drawn line silently fell back to `sceneDefaultFired`, ignoring whatever the
+  user had actually picked. Fixed with `src/render/valueTrigger.ts`, a small
+  pure Schmitt-trigger module (`createValueTrigger`/`stepValueTrigger`):
+  hysteresis (two marks, not one) so a signal hovering at a fixed threshold
+  can't chatter, plus a held re-fire (once per beat when locked, else every
+  `HELD_REFIRE_FALLBACK_SEC`) so a sustained level source doesn't fire once
+  and go dark. `drives.ts`'s `SourceState` now keeps one `ValueTrigger` per
+  source, and `fired()` grew an optional `upper` param (the fire mark) that a
+  scene can pass through from its own setting. (2) Added `rippleSpacing`
+  (Motion group, default 0.7 beats, 0 = no limit) — a floor between ordinary
+  rings, sized via `resolveHold` (`beatListener.ts`) the same way Beat
+  listener sizes its own hold — and `rippleThreshold` (default
+  `VALUE_TRIGGER_UPPER_DEFAULT` = 0.6) — the fire mark a level/line source on
+  the ripple drive now reads through. A drop's ring stays exempt from the
+  spacing floor (it always rings) but still resets the spacing clock, so an
+  ordinary beat right after a drop respects the gap like any other; `fired()`
+  is still called every tick regardless of the gap, since it's what consumes
+  a grid source's pending edge or advances a level/line source's own trigger.
 
 ## Tuning notes
 
@@ -168,13 +191,21 @@ reference-measurement workflow used by later scenes.
   is live.
 - Only the synthetic audio feed has been used to check the sparkle/flash tuning
   above; there has been no measured real-music pass.
+- The device menu doesn't yet show a setting's own fire ticks on its
+  sparkline — `rippleThreshold`'s Schmitt-trigger fires (`valueTrigger.ts`)
+  are invisible in the panel today; you can only see their effect in the
+  rendered rings. Also undecided: whether `rippleThreshold` (and any future
+  setting built on the same converter) should auto-gain its fire mark to
+  each source's own observed range, the way Sensitivity/mic auto-gain do,
+  instead of one fixed 0..1 mark that reads differently against a quiet
+  source than a loud one.
 
 ## Materials
 
 - Artifact: [Caustics Patch Bay](https://claude.ai/artifact/5mPSRq9Btjf373FDtsQ8kt). Source saved as `caustics/artifacts/caustics-patch-bay.html`.
 - Artifact: [Caustics Signal Recipe](https://claude.ai/artifact/WDRpyQyRzbFAXS58YQaLZX). Source saved as `caustics/artifacts/caustics-signal-recipe.html`.
 - Both artifacts are clickable prototypes for choosing what each reactive setting listens to — the UI behind the drives work (PR #130).
-- Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider (the #154 fix), why level/line sources don't fire `fired()`, and a demo of the proposed hysteresis signal→trigger converter.
+- Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider (the #154 fix), why level/line sources used to silently ignore `fired()`, and a demo of the hysteresis signal→trigger converter now shipped as `src/render/valueTrigger.ts` (this file's second 2026-09-26 entry above).
 - `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
 
 ## Resume here

@@ -8,6 +8,7 @@ import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
 import { getDriveLine, getDriveLineStrength, getDriveSetting } from "./driveStore.ts";
+import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 
 /**
  * The drive engine: one place that turns a `SceneSetting.drive` setting into
@@ -171,8 +172,14 @@ import { getDriveLine, getDriveLineStrength, getDriveSetting } from "./driveStor
  * as a read-time side effect — so calling `.fired()` for a setting with a
  * grid source is what "consumes" that source's edge, exactly once per
  * actual render, without a separate consume() step every caller has to
- * remember to call. deviceMenu.ts builds its own `forScene()` off the tick's
- * raw (unlatched) AnimFrame purely to show a live reading beside a row — it
+ * remember to call. A level-kind catalogue source or the drawn line has no
+ * edge at all to latch or consume — `.fired()` instead runs that source's
+ * own weighted reading through a per-source Schmitt trigger (valueTrigger.ts)
+ * every time it's asked, and that trigger's own hysteresis state (armed,
+ * last beat, last fire time) simply persists across a render the scene
+ * skips, the same way the grid's pending flag survives one. deviceMenu.ts
+ * builds its own `forScene()` off the tick's raw (unlatched) AnimFrame
+ * purely to show a live reading beside a row — it
  * only ever reads `.uniformPair()`/`.excess()`/`.sourceValues()`/`.valueOf()`,
  * never `.fired()`, so it can't accidentally steal a grid edge a scene
  * hasn't rendered yet.
@@ -251,17 +258,24 @@ export interface SceneDrives {
   value(key: string, sceneDefault: number): number;
   /** The resolved one-shot trigger for a JS-side spawn/impulse:
    *  `sceneDefaultFired` passed straight through for `"scene"`; for `add`/
-   *  `max`, the OR of every non-muted source's own edge (a grid source's
-   *  pending tick, cleared by this call; an edge-kind catalogue source's
-   *  render-latched boolean off `anim`; any other source falls back to
-   *  `sceneDefaultFired`, same as `"scene"` — see this file's header); for
-   *  `gate`, the OR of every non-muted *plays* source's own edge AND `open`
-   *  (every non-muted condition's own weighted value past the same
-   *  smoothstep midpoint `value()`'s gate combine multiplies together) being
-   *  past 0.5 — a condition source's own edge, if it has one, is never
-   *  consumed. A gate with no active condition (this file's header) is
-   *  always open, so this reduces to the add/max OR-of-edges rule above. */
-  fired(key: string, sceneDefaultFired: boolean): boolean;
+   *  `max`, the OR of every non-muted source's own edge — a grid source's
+   *  pending tick (cleared by this call), an edge-kind catalogue source's
+   *  render-latched boolean off `anim`, or, for a level-kind catalogue
+   *  source or the drawn line (neither has a natural edge of its own —
+   *  signals.ts's header), that source's own weighted reading run through a
+   *  per-source Schmitt trigger (valueTrigger.ts) instead of falling back to
+   *  `sceneDefaultFired`; for `gate`, the OR of every non-muted *plays*
+   *  source's own edge (by that same rule) AND `open` (every non-muted
+   *  condition's own weighted value past the same smoothstep midpoint
+   *  `value()`'s gate combine multiplies together) being past 0.5 — a
+   *  condition source's own edge, if it has one, is never consumed. A gate
+   *  with no active condition (this file's header) is always open, so this
+   *  reduces to the add/max OR-of-edges rule above. `upper` is the
+   *  Schmitt trigger's own fire mark for a level/line source only (ignored
+   *  by a hit-kind source's real edge) — defaults to
+   *  `VALUE_TRIGGER_UPPER_DEFAULT` (valueTrigger.ts) when omitted, or a
+   *  scene can pass its own user-facing threshold setting through here. */
+  fired(key: string, sceneDefaultFired: boolean, upper?: number): boolean;
   /** Per-band excess behind this setting's line source (bandLine.ts's
    *  BandLineDrive.excess), for the panel's overlay — null unless the
    *  current patch has a source on Frequencies. */
@@ -603,6 +617,12 @@ interface SourceState {
    *  (stays 0) for a Graded source or a level-kind/line source, which never
    *  advance it. */
   heightEnv: number;
+  /** Schmitt-trigger state `sourceEdge` below advances for a level-kind
+   *  catalogue source or the drawn line, when `fired()` asks for this
+   *  source's own edge — see valueTrigger.ts's header. Unused (stays at its
+   *  just-created state) for a grid or edge-kind source, which have a real
+   *  edge of their own to read instead. */
+  valueTrigger: ValueTrigger;
 }
 
 function createSourceState(): SourceState {
@@ -613,6 +633,7 @@ function createSourceState(): SourceState {
     linePulse: 0,
     lineExcess: new Float32Array(NUM_BANDS),
     heightEnv: 0,
+    valueTrigger: createValueTrigger(),
   };
 }
 
@@ -819,16 +840,27 @@ export function createDriveEngine(): DriveEngine {
         return sum;
       }
 
-      function sourceEdge(key: string, choice: DriveSourceChoice, sceneDefaultFired: boolean): boolean {
+      // grid and edge-kind catalogue sources read a real one-shot edge, same
+      // as before. A level-kind catalogue source or the drawn line has no
+      // edge of its own (signals.ts's header) — its weighted reading is run
+      // through this source's own Schmitt trigger (valueTrigger.ts) instead
+      // of falling back to `sceneDefaultFired`. fired() runs once per scene
+      // render, not every rAF tick, which is exactly the rate hysteresis
+      // wants: a tick a scene never rendered never gets a vote on whether
+      // the trigger should have fired, and the trigger's own state
+      // (armed/lastBeat/lastFireSec) simply persists across a skipped tick.
+      function sourceEdge(key: string, src: DriveSource, upper: number): boolean {
+        const choice = src.choice;
         if (isGridChoice(choice)) {
           const st = stateFor(sceneId, key, sourceKey(choice));
           const fired = st.gridFiredPending;
           st.gridFiredPending = false;
           return fired;
         }
-        if (isLineChoice(choice)) return sceneDefaultFired;
-        const edge = SIGNALS[choice].edge;
-        return edge ? edge(anim) : sceneDefaultFired;
+        if (!isLineChoice(choice) && SIGNALS[choice].kind === "edge") return SIGNALS[choice].edge!(anim);
+        const st = stateFor(sceneId, key, sourceKey(choice));
+        const raw = clampWeight(src.weight) * sourceRaw(key, src);
+        return stepValueTrigger(st.valueTrigger, raw, upper, anim);
       }
 
       return {
@@ -838,7 +870,7 @@ export function createDriveEngine(): DriveEngine {
           return combine(setting, weightedValues(key, setting)) * gain;
         },
 
-        fired(key, sceneDefaultFired) {
+        fired(key, sceneDefaultFired, upper = VALUE_TRIGGER_UPPER_DEFAULT) {
           const { setting } = resolve(key);
           if (setting === "scene") return sceneDefaultFired;
           if (setting.mix === "gate") {
@@ -853,7 +885,7 @@ export function createDriveEngine(): DriveEngine {
                 const conditionValue = clampWeight(src.weight) * sourceRaw(key, src);
                 open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, conditionValue);
                 // A condition's own edge, if it has one, is never consumed.
-              } else if (sourceEdge(key, src.choice, sceneDefaultFired)) {
+              } else if (sourceEdge(key, src, upper)) {
                 anyPlays = true;
               }
             }
@@ -863,7 +895,7 @@ export function createDriveEngine(): DriveEngine {
           let any = false;
           for (const src of setting.sources) {
             if (src.off) continue;
-            if (sourceEdge(key, src.choice, sceneDefaultFired)) any = true;
+            if (sourceEdge(key, src, upper)) any = true;
           }
           return any;
         },

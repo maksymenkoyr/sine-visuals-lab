@@ -1,6 +1,8 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHash.ts";
+import { resolveHold } from "../beatListener.ts";
+import { VALUE_TRIGGER_UPPER_DEFAULT } from "../valueTrigger.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
 // Domain-warped value noise, sharpened into thin ridges. Two renderer-side
@@ -25,7 +27,14 @@ import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHas
 // finer/fatter filaments; 0.5 is exactly the old fixed frequency),
 // uBreathe locks a once-per-bar zoom to the beat
 // clock, uRipple sends a pool of overlapping drop-rings out from center so a
-// new beat never cuts a ring off before it has crossed the frame, uFlash is a brightness punch,
+// new beat never cuts a ring off before it has crossed the frame — Ripple
+// spacing (rippleSpacing) floors how often an ordinary ring may start, in
+// beats, for a busy mix that would otherwise stack rings densely, and Ripple
+// threshold (rippleThreshold) is the fire mark a level or drawn-line source
+// on the ripple drive rises past to drop one (a hit-kind source keeps its
+// own real edge and ignores it) — see the ripple trigger logic in
+// extraUniforms below, and valueTrigger.ts for the threshold's own
+// hysteresis. uFlash is a brightness punch,
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
 // driftRatePerSec below, not a shader uniform driving the rate directly —
 // with driftKick dialing in how much bass onsets pump that speed. driftBeat
@@ -157,6 +166,35 @@ const SETTINGS: SceneSetting[] = [
     // its own stronger ring in place of the ordinary one on that tick,
     // independent of this choice — see the trigger logic.
     drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"] },
+  },
+  {
+    key: "rippleSpacing",
+    label: "Ripple spacing",
+    description: "Shortest gap between rings, in beats — raise it when a busy mix drops rings too often",
+    group: "Motion",
+    min: 0,
+    max: 4,
+    step: 0.05,
+    default: 0.7,
+    // A response-shape parameter (how often, not how much), same bucket as
+    // Beat listener's own hold/refractory — drives.ts's header lists this
+    // among what's deliberately not a drive. 0 = no minimum gap at all.
+    // Read only in extraUniforms below (resolveHold's own `beats`), never
+    // uploaded to FRAG.
+  },
+  {
+    key: "rippleThreshold",
+    label: "Ripple threshold",
+    description: "How high a level or drawn-line source must rise to drop a ring (hit sources ignore this)",
+    group: "Motion",
+    min: 0.1,
+    max: 0.95,
+    step: 0.05,
+    default: VALUE_TRIGGER_UPPER_DEFAULT,
+    // Same bucket as Ripple spacing above: this is the fire mark a level/
+    // line source's own Schmitt trigger uses (valueTrigger.ts), not an
+    // amount of anything — a hit-kind source has a real edge and ignores it
+    // entirely (drives.ts's fired()). Read only in extraUniforms below.
   },
   {
     key: "drift",
@@ -1364,6 +1402,10 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
     let kickJolt = 0;
     const ripples = createRipplePool();
     let prevDropOnset = false;
+    // anim.timeSec of the last ring started (drop or ordinary) — what the
+    // Ripple spacing gap below measures from. -Infinity so the very first
+    // ring is never held back.
+    let lastRingSec = -Infinity;
     const flowBuf = new Float32Array(DRIFT_FLOW_LEN);
 
     return (frame, anim, getSetting, drives) => {
@@ -1404,17 +1446,46 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
       // pulse, but the guard keeps this robust if that ever changes.
       const drop = anim.dropOnset && !prevDropOnset;
       prevDropOnset = anim.dropOnset;
-      if (drop) ripples.trigger(RIPPLE_DROP_AMP);
-      // At the "ripple" setting's Scene default this reproduces today's
-      // exact trigger (a bass hit OR a broadband beat, unconditionally —
-      // see that setting's own comment); a non-default pick fires on
-      // whatever single catalogue/grid/line source the picker chose
-      // instead. Reads anim.onset, not frame.onset directly — see
-      // AnimFrame's own doc: a scene reading FeatureFrame.onset can miss
-      // the tick it fired on whenever the render cap skips it, which is
-      // exactly the bug this scene used to have (renderLatch.ts's header
-      // has the story).
-      else if (drives.fired("ripple", anim.lowOnset || anim.onset)) ripples.trigger(1);
+      // Always read, drop or not, gap open or not: fired() is what consumes
+      // a grid source's pending edge and advances a level/line source's own
+      // Schmitt trigger (drives.ts's header) — short-circuiting this call on
+      // a gated tick would leave either stuck instead of moving with the
+      // music underneath the gap. At the "ripple" setting's Scene default
+      // this reads today's exact trigger (a bass hit OR a broadband beat,
+      // unconditionally — see that setting's own comment); a non-default
+      // pick fires on whatever single catalogue/grid/line source the picker
+      // chose instead — rippleThreshold is that source's own fire mark, read
+      // here regardless of which source is picked (a hit-kind source
+      // ignores it). Reads anim.onset, not frame.onset directly — see
+      // AnimFrame's own doc: a scene reading FeatureFrame.onset can miss the
+      // tick it fired on whenever the render cap skips it, which is exactly
+      // the bug this scene used to have (renderLatch.ts's header has the
+      // story).
+      const hit = drives.fired("ripple", anim.lowOnset || anim.onset, getSetting("rippleThreshold"));
+      if (drop) {
+        ripples.trigger(RIPPLE_DROP_AMP);
+        lastRingSec = anim.timeSec;
+      } else if (hit) {
+        // Ripple spacing: the shortest gap an ordinary ring may follow the
+        // last one by, in beats once the tempo tracker is confident, else a
+        // fixed fallback half that many seconds — resolveHold
+        // (beatListener.ts) is the same hold-sizing rule Beat listener uses
+        // elsewhere, reused rather than a bespoke formula. A drop's ring
+        // above is exempt from this gap (it always rings) but still moves
+        // lastRingSec, so an ordinary beat right after a drop respects the
+        // gap same as any other. Added because the pool fix alone (this
+        // file's 2026-09-26 record entry) still let a busy mix stack rings
+        // densely — spacing is the pacing fix on top of it.
+        const gap = resolveHold(
+          { beats: getSetting("rippleSpacing"), fallbackSec: 0.5 * getSetting("rippleSpacing") },
+          anim.tempoLock,
+          anim.bpm,
+        );
+        if (anim.timeSec - lastRingSec >= gap) {
+          ripples.trigger(1);
+          lastRingSec = anim.timeSec;
+        }
+      }
 
       return {
         uDriftFlow: driftFlows(driftPhase + lurch.phase + kickJolt, causticDensityScale(getSetting("causticDensity")), flowBuf),
