@@ -3,15 +3,15 @@ import type { SceneSetting } from "../sceneSettings.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHash.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
-// Domain-warped value noise, sharpened into thin ridges. Two renderer-side
-// clocks feed it instead of raw audio: a phase-locked beat/bar clock
-// (beatClock.ts) that only ever nudges toward a detected beat rather than
-// resetting on every onset — the old FeatureFrame.onsetPhase restarted on
-// every hat/fill, which is what made Tempo breathe and Beat ripple stutter —
-// and this scene's own drift accumulator below, kept separate from the
-// shared uFlowPhase so its speed is user-dialable without reintroducing the
-// teleport bug flowClock.ts exists to prevent (scaling an *already
-// accumulated* phase is safe; scaling elapsed time by a live value is not).
+// Domain-warped value noise, sharpened into thin ridges. Motion comes from
+// renderer-side clocks instead of raw audio: the beat edges arrive as the
+// latched one-shots on AnimFrame (renderLatch.ts) — the old
+// FeatureFrame.onsetPhase restarted on every hat/fill, which is what made
+// the old bar-locked breathe and Beat ripple stutter — and this scene's own
+// drift accumulator below, kept separate from the shared uFlowPhase so its
+// speed is user-dialable without reintroducing the teleport bug
+// flowClock.ts exists to prevent (scaling an *already accumulated* phase is
+// safe; scaling elapsed time by a live value is not).
 // Settings map audio onto light and motion rather than position snapping:
 // uFog sets the resting look (how thin/bright the ridges sit between beats,
 // and how much of the dim wash the dark-water floor cut clips away), uFocus
@@ -23,8 +23,9 @@ import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHas
 // fog between beats" right at a time — see this file's git history),
 // uCausticDensity scales the noise field's spatial frequency (more/fewer,
 // finer/fatter filaments; 0.5 is exactly the old fixed frequency),
-// uBreathe locks a once-per-bar zoom to the beat
-// clock, uRipple sends a pool of overlapping drop-rings out from center so a
+// uBreathe is the depth of a zoom only a patched source can move
+// (breatheDrive in FRAG — inert at the Scene default), uRipple sends a pool
+// of overlapping drop-rings out from center so a
 // new beat doesn't cut the last ring off, uFlash is a brightness punch,
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
 // driftRatePerSec below, not a shader uniform driving the rate directly —
@@ -129,15 +130,18 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "breathe",
-    label: "Tempo breathe",
-    description: "Slow zoom locked to the beat, once per bar",
+    label: "Breathe",
+    description: "How far a source you patch in zooms the pool — it does nothing until one is wired to it",
     group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.11,
-    // Bar-locked zoom needs a steady tempo to lock to; slower music has more room for it.
-    auto: { pulse: 0.3, tempo: -0.15 },
+    // The depth a wired signal swings the zoom through, not a signal of its
+    // own — pure taste, so no auto table (same reasoning as causticDensity
+    // above): what it reacts to is the patch bay's choice, and at the Scene
+    // default it reacts to nothing at all (see breatheDrive(0.0) in FRAG).
+    drive: { default: "scene", sceneLabel: "Scene: inert until patched" },
   },
   {
     key: "ripple",
@@ -518,11 +522,18 @@ const FOG_SHARP_HAZY = 2.0;
 const FOG_FLOOR_CRISP = 0.13; // uFog = 0 -> today's old fixed dark-water cut (0.08) is inside this range
 const FOG_FLOOR_HAZY = 0.0;
 
+// uBreathe's zoom depth per full-strength cable — the same 0.10 swing the
+// old bar-locked cosine had at its peak (uBreathe 1, tempoLock 1). The
+// cable supplies the waveform, not this constant; see breatheDrive(0.0) in
+// FRAG for why the scene's own contribution is zero.
+const BREATHE_ZOOM = 0.10;
+
 // uLoudSwell's (loudSwellDrive above) two visual channels, both small at the
 // Loudness surge default (0.4) — see that constant's own comment — and both
 // on ground nothing else modulates at runtime: SWELL_ZOOM rides the same `p
-// *=` aperture line as uBreathe but is aperiodic and sustained rather than
-// bar-locked, and SWELL_FLOOR_LIFT rides the same dark-water floor cut uFog
+// *=` aperture line as BREATHE_ZOOM above, but the swell is the scene's own
+// aperiodic, sustained signal while uBreathe only moves when a cable
+// carries it, and SWELL_FLOOR_LIFT rides the same dark-water floor cut uFog
 // sets at rest, so a loud passage glows into that dim wash and a quiet one
 // deepens it, distinct from uFlash/uEnergy/dropDrive, which all brighten the
 // ridge *crests* instead.
@@ -1034,14 +1045,16 @@ void main() {
   float dropDrive = uDropReactivity * uSectionIntensity;
   float dropFlash = uDropReactivity * uDropPulse;
 
-  // Tempo-locked breathing: a slow zoom once per bar, off the phase-locked
-  // beat clock (never restarts mid-beat) and faded by tempoLock so it eases
-  // in/out with tempo detection instead of popping.
-  float breatheAmt = uBreathe * uTempoLock * 0.10 * cos(uBarPhase * TWO_PI);
-  p *= 1.0 + breatheAmt;
+  // Breathe: the pool zooms on whatever source is patched onto the breathe
+  // setting, at BREATHE_ZOOM depth scaled by uBreathe. The scene's own
+  // contribution is nothing — breatheDrive(0.0) is bit-for-bit no zoom until
+  // a cable carries a signal (the old bar-locked cosine this line replaced
+  // had the beat clock supply the waveform).
+  p *= 1.0 + ${BREATHE_ZOOM.toFixed(2)} * uBreathe * breatheDrive(0.0);
   // Loudness swell's aperture: a loud passage opens the pool wider, a quiet
-  // one tightens it — aperiodic and sustained, unlike uBreathe's bar-locked
-  // zoom above. See SWELL_ZOOM's own comment for why this line, not a new one.
+  // one tightens it — the scene's own sustained signal, where the breath
+  // above only moves when a cable carries it. See SWELL_ZOOM's own comment
+  // for why this line, not a new one.
   p *= 1.0 - ${SWELL_ZOOM.toFixed(2)} * uLoudSwell;
 
   // Bass swell: a sustained radial bulge near center, strongest right on a
