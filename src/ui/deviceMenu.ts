@@ -277,14 +277,16 @@ import {
  * click the chevron or anywhere on the header outside a Reset-style chip.
  * The Bands+meters column can also go away at once — "Hide left" in the
  * footer strip, or M — which leaves Power and the controls where they are
- * rather than reflowing anything. Solo (O, or the footer's "Scene only")
- * goes further: every card except Scene hides, until O again (see
- * applySolo) — jumping to a block outside Scene while soloed turns it off
- * rather than moving it (jumpToBlock). The footer sits in a dock stuck to
+ * rather than reflowing anything. Solo (O, the footer's "Solo", or the
+ * Solo chip on a pinned setting's patch pane) goes further: only the
+ * pinned setting stays — with the meters, whose jacks patch it — or, with
+ * nothing pinned, only the Scene card, until O again (see applySolo);
+ * jumping to a block outside what's soloed turns it off rather than
+ * moving it (jumpToBlock). The footer sits in a dock stuck to
  * the bottom of the controls column, with a Keys list (?) above it: one row
  * per src/ui/keyHints.ts's SHORTCUTS entry, hovering or clicking a row
  * flashing (or, for the handful with a single action — Panel/Hide UI/Hide
- * left/Scene only/Fullscreen/Keys — performing) every control it names
+ * left/Solo/Fullscreen/Keys — performing) every control it names
  * (wireKeysRow). That same module also owns the hover tooltip on any
  * `data-key`-tagged control and the hold-Shift-to-reveal keycaps — see its
  * own header. Separately, once every card in Power and
@@ -328,7 +330,7 @@ import {
  * onDocPointerDown), so you can work the scene with the panel still up.
  *
  * Keyboard layer, live only while the panel is open (see onKeyDown): H
- * closes it, M hides/shows the meters column, O solos the Scene card, ?
+ * closes it, M hides/shows the meters column, O solos the pinned setting (or the Scene card), ?
  * lists the keys. Tab / Shift+Tab walk a ring over every
  * .vc-slider/.vc-toggle/.vc-picker/.vc-fader in document order, wrapping at both ends
  * and skipping every chip and button — so Tab alone never leaves the panel
@@ -1896,6 +1898,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  below, Escape (onKeyDown), or a scene switch (renderSceneSettings's
    *  own tail). */
   let pinned: { sceneId: string; spec: SceneSetting } | null = null;
+  // Solo's on/off (setSolo/applySolo, by the footer) — declared up here
+  // because togglePin and every pinned patch panel's own Solo chip read it.
+  let soloOn = false;
   /** The last setting `previewDrive` was actually handed a non-null value
    *  for — unlike `preview` itself, this never goes back to null when the
    *  pointer leaves. It's what a jack click reaches for when nothing's
@@ -2705,7 +2710,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const eyebrow = document.createElement("span");
     eyebrow.style.cssText = driveEyebrowStyle;
     eyebrow.textContent = "Receives";
-    head.append(eyebrow, buildMixSeg(sceneId, spec, patch));
+    // Solo from right here, on the pane it isolates (see applySolo).
+    const soloChip = createChipButton(soloOn ? "◉ All" : "◎ Solo", soloOn ? "Show everything again (O)" : "Show only this setting (O)", () =>
+      setSolo(!soloOn),
+    );
+    soloChip.type = "button";
+    soloChip.dataset.key = "solo";
+    soloChip.dataset.keycap = "O";
+    if (soloOn) soloChip.style.cssText = chipBtnLitStyle;
+    const eyebrowRow = document.createElement("div");
+    eyebrowRow.style.cssText = "display: flex; align-items: center; justify-content: space-between; flex-basis: 100%;";
+    eyebrowRow.append(eyebrow, soloChip);
+    head.append(eyebrowRow, buildMixSeg(sceneId, spec, patch));
     panel.appendChild(head);
 
     const list = document.createElement("div");
@@ -3021,6 +3037,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (const h of driveRowHandles) h.refreshPreviewLit();
     refreshLineMode();
     refreshPatchHighlight();
+    // Solo follows the pin: onto the newly pinned row, or back to the
+    // Scene card once nothing is pinned.
+    if (soloOn) applySolo();
   }
 
   /** The only place `preview` is written. See previewDrive's own callers
@@ -4417,6 +4436,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (lastPreview && lastPreview.sceneId !== sceneId) lastPreview = null;
     refreshLineMode();
     refreshPatchHighlight();
+    // The rows were just rebuilt, unmarked — re-hide around whatever solo
+    // now isolates.
+    if (soloOn) applySolo();
   }
 
   // Palette: the only picker left in the panel.
@@ -4569,18 +4591,21 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   setMetersHidden(isFolded(METERS_COLUMN));
 
   // ---- solo ----
-  // Scene only: every other card hidden, until O again — hidden by walking
-  // up from the Scene card and the dock (which always stays) to the root,
-  // and marking every sibling off those two paths .vc-solo-hidden — so no
+  // Everything but the pinned setting (or, unpinned, the Scene card)
+  // hidden, until O again — hidden by walking up from it and the dock
+  // (which always stays) to the root, and marking every sibling off those
+  // paths .vc-solo-hidden — so no
   // column, heading or neighbouring button needs its own rule, in either
   // layout. View state for this session only, like the keys list.
-  let soloOn = false;
   function setSolo(on: boolean): void {
     soloOn = on;
     applySolo();
-    soloBtn.textContent = on ? "All  O" : "Scene only  O";
-    soloBtn.title = on ? "Show every card again (O)" : "Show only the Scene card (O)";
+    soloBtn.textContent = on ? "All  O" : "Solo  O";
+    soloBtn.title = on ? "Show everything again (O)" : "Show only the pinned setting — or the Scene card, when none is pinned (O)";
     soloBtn.style.color = on ? "#fff" : "inherit";
+    // The pinned pane's own chip mirrors this — rebuilt rather than
+    // restyled, the same way every other patch change reaches it.
+    if (pinned) patchChanged(pinned.sceneId, pinned.spec);
     scheduleCableRecompute();
   }
   function applySolo(): void {
@@ -4588,7 +4613,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     root.classList.toggle("vc-solo", soloOn);
     if (!soloOn) return;
     if (sceneCard.el.classList.contains("vc-folded")) sceneCard.el.querySelector<HTMLButtonElement>(".vc-fold")?.click();
-    const leaves = new Set<Element>([sceneCard.el, dock]);
+    // A pinned setting (its row plus its patch pane, the one outlined in
+    // its source colour) is the thing being worked on; the meters column
+    // stays with it, since its jacks are how that pane gets patched.
+    const pinnedRow = sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned");
+    const leaves = new Set<Element>(pinnedRow ? [pinnedRow, dock, spectrumCol] : [sceneCard.el, dock]);
     const onPath = new Set<Element>();
     for (const leaf of leaves) for (let n: Element | null = leaf; n && n !== root; n = n.parentElement) onPath.add(n);
     const visit = (parent: Element): void => {
@@ -4741,10 +4770,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function jumpToBlock(n: number): void {
     const heading = [...root.querySelectorAll<HTMLElement>(".vc-block")][n - 1];
     if (!heading) return;
-    // Soloed, a jump outside the Scene card needs the rest of the panel
-    // back rather than trying to move the solo — Solo now always means
-    // the Scene card specifically, not whichever card was last worked in.
-    if (soloOn && !sceneCard.el.contains(heading)) setSolo(false);
+    // Soloed, a jump outside what's soloed needs the rest of the panel
+    // back rather than trying to move the solo onto it.
+    if (soloOn && !(sceneCard.el.querySelector(".vc-drive-pinned") ?? sceneCard.el).contains(heading)) setSolo(false);
     // A folded card's controls have no layout box and are invisible to
     // ringElements() below — unfold first, or the jump would silently land
     // on the next block's control instead.

@@ -67,7 +67,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "S", id: "panel", label: "Panel", hint: "Open / close the panel" },
   { key: "H", id: "hide", label: "Hide UI", hint: "Hide the interface" },
   { key: "M", id: "left", label: "Hide left", hint: "Hide / show the left panel" },
-  { key: "O", id: "solo", label: "Scene only", hint: "Show only the Scene card" },
+  { key: "O", id: "solo", label: "Solo", hint: "Show only the pinned setting (or the Scene card)" },
   { key: "F", id: "fullscreen", label: "Fullscreen", hint: "Fullscreen" },
   { key: "Tab", id: "tab", label: "Next control", hint: "Next control (⇧ previous)" },
   { key: "1–9", id: "block", label: "Jump to block", hint: "Jump to a numbered block" },
