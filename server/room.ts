@@ -2,6 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 
 export interface Env {
   ROOM: DurableObjectNamespace;
+  /** The built site (wrangler.toml [assets]); only `/` reaches the Worker first. */
+  ASSETS: Fetcher;
 }
 
 interface Viewport {
