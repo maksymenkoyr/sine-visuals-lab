@@ -12,8 +12,8 @@
 // worktree). It needs Account > Account Analytics > Read — create it once at
 // dash.cloudflare.com/profile/api-tokens. A `wrangler login` session can't
 // stand in: its OAuth scopes don't cover the Analytics Engine SQL API.
-// CLOUDFLARE_ACCOUNT_ID is optional; without it the token's first account
-// is used.
+// CLOUDFLARE_ACCOUNT_ID comes from the same places and is required: a token
+// with only that one permission can't list accounts to find it.
 //
 // Counts are SUM(_sample_interval), not COUNT(): Analytics Engine may sample
 // under load, and the interval re-weights each surviving row.
@@ -31,20 +31,20 @@ const args = process.argv.slice(2);
 const days = Number(args.find((a) => /^\d+$/.test(a)) ?? 30);
 const includeMe = args.includes("--me");
 
-function tokenFromDotEnv() {
+function fromDotEnv(name) {
   let root = ".";
   try {
     // --git-common-dir is the main checkout's .git, even from a worktree.
     root = dirname(execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" }).trim());
   } catch {}
   try {
-    return readFileSync(join(root, ".env"), "utf8").match(/^CLOUDFLARE_API_TOKEN\s*=\s*"?([^"\s]+)"?/m)?.[1] ?? null;
+    return readFileSync(join(root, ".env"), "utf8").match(new RegExp(`^${name}\\s*=\\s*"?([^"\\s]+)"?`, "m"))?.[1] ?? null;
   } catch {
     return null;
   }
 }
 
-const token = process.env.CLOUDFLARE_API_TOKEN ?? tokenFromDotEnv();
+const token = process.env.CLOUDFLARE_API_TOKEN ?? fromDotEnv("CLOUDFLARE_API_TOKEN");
 if (!token) {
   console.error("No CLOUDFLARE_API_TOKEN — add it to .env at the repo root (see the header of this file).");
   process.exit(1);
@@ -60,8 +60,11 @@ async function api(path, init = {}) {
   return text;
 }
 
-let account = process.env.CLOUDFLARE_ACCOUNT_ID;
-if (!account) account = JSON.parse(await api("/accounts")).result[0]?.id;
+const account = process.env.CLOUDFLARE_ACCOUNT_ID ?? fromDotEnv("CLOUDFLARE_ACCOUNT_ID");
+if (!account) {
+  console.error("No CLOUDFLARE_ACCOUNT_ID — add it to .env next to the token (dashboard URL: dash.cloudflare.com/<account id>/…).");
+  process.exit(1);
+}
 
 async function sql(query) {
   const text = await api(`/accounts/${account}/analytics_engine/sql`, { method: "POST", body: query });
