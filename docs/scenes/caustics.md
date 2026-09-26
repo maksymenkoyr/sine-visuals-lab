@@ -106,6 +106,10 @@ reference-measurement workflow used by later scenes.
   the weights are the invariant, defaults move with each bake — and the setting
   comments that still claimed their pre-bake values were reworded to describe
   the dial's mapping instead.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Descriptions corrected: Fog is hazier/softer ridges as it rises, and
+  Sparkle grain is coarser glints as it rises. The old text said the
+  reverse.
 
 ## Tuning notes
 

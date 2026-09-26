@@ -110,6 +110,11 @@ worked around in this scene.
   edge, so any non-horizontal line (the wobble, later the tilt) stair-
   stepped in unison across the frame; both edges are now softened via
   distance-to-band-centre.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Cloud size renamed Cloud detail: `uScale` multiplies the noise frequency,
+  so higher already meant smaller clouds. Its `auto` density weight flipped
+  to positive, since the old negative sign gave dense music bigger clouds,
+  the opposite of the stated intent. Stored values and Looks are unchanged.
 
 ## Tuning notes
 

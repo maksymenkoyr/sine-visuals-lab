@@ -87,6 +87,9 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
   push/shake, and a bounded hue-drift model (`createHueDrift`,
   `HUE_DROP_EXCURSION`, `HUE_RELAX_TAU`) after unbounded cumulative hue
   drift wandered the palette off in well under a minute.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Loud swell (`breathe`) renamed Quiet gather: it scales how hard quiet
+  passages gather and dim the cloud. Label only.
 
 ## Tuning notes
 
