@@ -26,7 +26,7 @@ that file's behaviour is untouched. Exported pure helpers —
 `tests/physarum2.test.ts` without a GL context, along with structural checks
 on `SPECIES`/`ATTRACT_ROWS`/`PALETTE` and the NEUTRAL auto-tune invariant.
 `SETTINGS` carries the Form/Motion/Look/Post controls (Network scale, Trail
-decay, Rivalry, Crawl speed, Beat surge, Beat seeding, Band feed, Exposure,
+decay, Rivalry, Crawl speed, Surge, Beat seeding, Band feed, Exposure,
 Palette tint, Beat flash), each with its own `auto` weights.
 
 ## References

@@ -186,7 +186,7 @@ const SEED_CLUSTER_RADIUS = 0.12;
 const SCALE_MIN = 0.5;
 const SCALE_MAX = 1.8;
 
-// --- How much harder a beat lengthens each step — see Beat surge below. ---
+// --- How much harder a beat lengthens each step — see Surge below. ---
 const SURGE_GAIN = 1.5;
 
 // --- Trail decay, per *step* (see the file header) — the Trail decay
@@ -271,8 +271,8 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "beatSurge",
-    label: "Beat surge",
-    description: "How hard each beat lengthens every agent's step, throwing new branches",
+    label: "Surge",
+    description: "How hard a hit lengthens every agent's step, throwing new branches",
     group: "Motion",
     min: 0,
     max: 1,
