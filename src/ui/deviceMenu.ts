@@ -278,7 +278,7 @@ import {
  * The Bands+meters column can also go away at once — "Hide left" in the
  * footer strip, or M — which leaves Power and the controls where they are
  * rather than reflowing anything. Solo (O, the footer's "Solo", or the
- * Solo chip on a pinned setting's patch pane) goes further: only the
+ * Solo tab on a pinned setting's outline) goes further: only the
  * pinned setting stays — with the meters, whose jacks patch it — or, with
  * nothing pinned, only the Scene card, until O again (see applySolo);
  * jumping to a block outside what's soloed turns it off rather than
@@ -2710,18 +2710,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const eyebrow = document.createElement("span");
     eyebrow.style.cssText = driveEyebrowStyle;
     eyebrow.textContent = "Receives";
-    // Solo from right here, on the pane it isolates (see applySolo).
-    const soloChip = createChipButton(soloOn ? "◉ All" : "◎ Solo", soloOn ? "Show everything again (O)" : "Show only this setting (O)", () =>
-      setSolo(!soloOn),
-    );
-    soloChip.type = "button";
-    soloChip.dataset.key = "solo";
-    soloChip.dataset.keycap = "O";
-    if (soloOn) soloChip.style.cssText = chipBtnLitStyle;
-    const eyebrowRow = document.createElement("div");
-    eyebrowRow.style.cssText = "display: flex; align-items: center; justify-content: space-between; flex-basis: 100%;";
-    eyebrowRow.append(eyebrow, soloChip);
-    head.append(eyebrowRow, buildMixSeg(sceneId, spec, patch));
+    head.append(eyebrow, buildMixSeg(sceneId, spec, patch));
     panel.appendChild(head);
 
     const list = document.createElement("div");
@@ -2849,6 +2838,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let sparkFilled = 0;
     let outputCanvas: HTMLCanvasElement | null = null;
     let boundRowEl: HTMLElement | null = null;
+    const soloTab = document.createElement("button");
+    soloTab.type = "button";
+    soloTab.className = "vc-solo-tab";
+    soloTab.dataset.key = "solo";
+    soloTab.dataset.keycap = "O";
+    soloTab.addEventListener("click", (e) => {
+      e.stopPropagation(); // the row's own click would focus its slider
+      setSolo(!soloOn);
+    });
+    syncSoloTab(soloTab);
 
     function isPinned(): boolean {
       return samePair(pinned, { sceneId, spec });
@@ -2897,6 +2896,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     function refreshPin(): void {
       const on = isPinned();
       boundRowEl?.classList.toggle("vc-drive-pinned", on);
+      // The Solo tab rides the pinned outline's top edge (.vc-solo-tab,
+      // controlsTheme.ts) — on the pane it isolates, not somewhere else.
+      if (on && boundRowEl) boundRowEl.appendChild(soloTab);
+      else soloTab.remove();
       patchContainer.style.display = on ? "" : "none";
       if (on) {
         rebuildIfPinned();
@@ -4598,18 +4601,34 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // column, heading or neighbouring button needs its own rule, in either
   // layout. View state for this session only, like the keys list.
   function setSolo(on: boolean): void {
+    // Whatever solo isolates stays put on screen across the toggle: hiding
+    // (or bringing back) everything above it would otherwise jump it to the
+    // top of the column (or push it back down). On, padding makes up the
+    // space the hidden cards above it took; off, the column scrolls by
+    // however far it moved instead.
+    const anchor = sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned") ?? sceneCard.el;
+    const before = anchor.getBoundingClientRect().top;
     soloOn = on;
     applySolo();
+    const moved = anchor.getBoundingClientRect().top - before;
+    if (on) controlsCol.style.paddingTop = `${Math.max(0, -moved)}px`;
+    else (narrowMQ.matches ? root : controlsCol).scrollTop += moved;
+    for (const tab of root.querySelectorAll<HTMLButtonElement>(".vc-solo-tab")) syncSoloTab(tab);
     soloBtn.textContent = on ? "All  O" : "Solo  O";
     soloBtn.title = on ? "Show everything again (O)" : "Show only the pinned setting — or the Scene card, when none is pinned (O)";
     soloBtn.style.color = on ? "#fff" : "inherit";
-    // The pinned pane's own chip mirrors this — rebuilt rather than
-    // restyled, the same way every other patch change reaches it.
-    if (pinned) patchChanged(pinned.sceneId, pinned.spec);
     scheduleCableRecompute();
+  }
+  function syncSoloTab(tab: HTMLButtonElement): void {
+    tab.textContent = soloOn ? "◉ All  O" : "◎ Solo  O";
+    tab.title = soloOn ? "Show everything again (O)" : "Show only this setting (O)";
+    tab.classList.toggle("vc-solo-tab-on", soloOn);
   }
   function applySolo(): void {
     for (const el of [...root.querySelectorAll(".vc-solo-hidden")]) el.classList.remove("vc-solo-hidden");
+    // setSolo's keep-in-place padding belongs to the toggle that set it —
+    // any other re-apply (the pin moving, rows rebuilt) starts from none.
+    controlsCol.style.paddingTop = "";
     root.classList.toggle("vc-solo", soloOn);
     if (!soloOn) return;
     if (sceneCard.el.classList.contains("vc-folded")) sceneCard.el.querySelector<HTMLButtonElement>(".vc-fold")?.click();

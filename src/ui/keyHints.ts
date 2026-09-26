@@ -105,6 +105,7 @@ function hintLine(el: HTMLElement): string | null {
   // The gear turns into a close cross while the panel is open (index.html's
   // #menuBtn rules) — the hint follows it.
   if (s && id === "panel" && el.getAttribute("aria-pressed") === "true") return `Close controls · ${s.key}`;
+  if (s && id === "solo" && el.closest(".vc-solo")) return `Show all · ${s.key}`;
   return s ? `${s.label} · ${s.key}` : null;
 }
 

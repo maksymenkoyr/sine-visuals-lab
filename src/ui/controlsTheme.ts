@@ -570,6 +570,22 @@ body.vc-keys-reveal [data-keycap]::after {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 8%, transparent);
   box-shadow: 0 0 0 1.5px var(--vc-pin-color, ${SCENE_VIOLET});
 }
+/* Solo's tab on the pinned outline (deviceMenu.ts's buildDriveRow): sits on
+ * the outline's own top edge, in its colour, cutting the line like a label
+ * on a patch-bay frame; filled while solo is on. The dark fill is what cuts
+ * the line — the card's glass is too translucent to. */
+.vc-solo-tab {
+  position: absolute; top: -9px; right: 14px; z-index: 1;
+  font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; white-space: pre;
+  color: var(--vc-pin-color, ${SCENE_VIOLET}); background: #0b0e0d;
+  border: 1px solid var(--vc-pin-color, ${SCENE_VIOLET}); border-radius: 3px;
+  padding: 3px 6px; cursor: pointer;
+}
+.vc-solo-tab:hover, .vc-solo-tab:focus-visible { outline: none; box-shadow: 0 0 8px var(--vc-pin-color, ${SCENE_VIOLET}); }
+.vc-solo-tab.vc-solo-tab-on { background: var(--vc-pin-color, ${SCENE_VIOLET}); color: #0b0e0d; }
+/* Soloed, the pinned row is the first thing in its card — room above it so
+ * the card's own overflow: hidden doesn't clip the tab. */
+.vc-root.vc-solo .vc-row.vc-drive-pinned { margin-top: 2px; }
 .vc-row.vc-drive-preview {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 6%, transparent);
 }
