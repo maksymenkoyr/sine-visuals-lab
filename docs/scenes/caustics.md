@@ -96,6 +96,16 @@ reference-measurement workflow used by later scenes.
   so `anim.onset`/`anim.lowOnset`/`anim.dropOnset` — read here by Beat ripple, Beat
   surge, Beat churn and Kick surge — go quiet with the room instead of firing on
   hiss. No code in this file changed; the gate lives entirely upstream.
+- 2026-09-25 (`337ee13`) — Every `default:` in `SETTINGS` baked from the tuned
+  manual values via Option+D (`src/tuning/bakeDefaults.ts`), replacing the round
+  defaults that reproduced the constants they replaced exactly. The
+  `auto:`/`drive:`/`macro:` tables were untouched.
+- 2026-09-26 — Follow-up to the bake: the Focus snap regression guard in
+  `tests/autoTune.test.ts` asserted absolute bands that only held for the
+  pre-bake default, so it now bounds the *displacement* from `spec.default` —
+  the weights are the invariant, defaults move with each bake — and the setting
+  comments that still claimed their pre-bake values were reworded to describe
+  the dial's mapping instead.
 
 ## Tuning notes
 

@@ -122,7 +122,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.35, // -> the old fixed noise-sampling frequency, exactly
+    default: 0.35, // 0.5 on this dial was the scene's old fixed noise-sampling frequency
     // Pure framing geometry the user tunes to taste, same reasoning as
     // sparkleGrain's weight: 0 — not something the music profile should
     // silently redecide underneath a chosen look.
@@ -196,7 +196,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.18, // -> weighted toward the jolt (see advanceKickJolt's driftKick^2), so a lower default would ship with the jolt this setting exists for effectively invisible
+    default: 0.18, // advanceKickJolt weights this dial by driftKick^2, so the jolt's visible range lives in the upper part of it
     // Dark/bass-heavy mixes carry more kick presence to pump on.
     auto: { brightness: -0.3, attack: 0.2 },
     // The jolt is driven continuously by anim.lowPulse today — a plain Bass
@@ -286,7 +286,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.57, // -> today's old fixed resting sharpness/floor-cut, closely
+    default: 0.57, // sat near the old fixed resting sharpness/floor-cut this dial replaced
     // A busy mix wants the filaments legible (less fog); a dark mix reads as
     // moodier with more haze around them.
     auto: { density: -0.3, brightness: -0.2 },
@@ -301,14 +301,16 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.86,
     // Beat-snap only reads as a snap on music with actual beats to snap to.
-    // Kept low (not the ~0.9 that `pulse` alone would floor near on almost
-    // any locked-tempo track — 60% tempoLock saturates for basically all
-    // steady music) because sitting near 1 all track would have the beat
-    // snap saturate against FOCUS_SHARP_MAX on nearly every hit rather than
+    // The auto *weights* are kept low (not the ~0.9 that `pulse` alone would
+    // floor near on almost any locked-tempo track — 60% tempoLock saturates
+    // for basically all steady music) so Auto can't walk the resolved value
+    // the rest of the way to sitting near 1 all track, where the beat snap
+    // would saturate against FOCUS_SHARP_MAX on nearly every hit rather than
     // responding to a specific one — the resting look itself no longer
     // moves with this slider (see the Fog setting above and focusSharp
     // below), so the old worry about pinning the *floor* up doesn't apply
-    // any more, but a saturated snap is just as flat a result.
+    // any more, but a saturated snap is just as flat a result. The default
+    // itself is a baked look (Option+D), not a weight choice.
     auto: { pulse: 0.2, attack: 0.15 },
     // uBeatPulse directly — a plain Beat default.
     drive: { default: "feature.onset" },
@@ -360,7 +362,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 1, // -> the old fixed 1.5x gain (see the *3.0 in FRAG)
+    default: 1, // 0.5 on this dial was the old fixed 1.5x gain (see the *3.0 in FRAG)
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.5 },
   },
@@ -372,7 +374,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.52, // -> the old fixed pow() exponent of 8.0
+    default: 0.52, // 0.5 on this dial was the old fixed pow() exponent of 8.0
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.35 },
   },
@@ -384,7 +386,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.11, // -> the old fixed noise scale of 38.0
+    default: 0.11, // 0.5 on this dial was the old fixed noise scale of 38.0
     advanced: true,
     // Left off the master: glint size reads as a taste choice, not an
     // intensity one, and tying it to SPARKLE would make "stronger" also
@@ -412,7 +414,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.73, // -> the old fixed crest-gate smoothstep(0.15, 0.6, acc)
+    default: 0.73, // 0.4 on this dial was the old fixed crest-gate smoothstep(0.15, 0.6, acc)
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.2 },
   },
@@ -424,7 +426,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.03, // -> today's behavior: glints only follow the onset pulse
+    default: 0.03, // 0 on this dial is glints following only the onset pulse — the behavior before this dial existed
     advanced: true,
     macro: { driver: SPARKLE, weight: 0.3 },
   },
@@ -444,7 +446,7 @@ const SETTINGS: SceneSetting[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.67, // off until touched — an added look, not something existing saved looks should suddenly grow
+    default: 0.67,
     // Same reasoning as sparkleGrain: a shape/taste choice, not an
     // intensity one, so the master knob leaves it alone.
     macro: { driver: SPARKLE, weight: 0 },

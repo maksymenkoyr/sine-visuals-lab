@@ -510,23 +510,33 @@ describe("auto-on store: legacy-key migration and false-entry pruning", () => {
 
 describe("caustics Focus snap auto weights", () => {
   // Regression guard on the weight change in caustics.ts's `focus` spec.
-  // The old weights ({ pulse: 0.35, attack: 0.25 }) resolved focus to ~0.90
-  // on a steady percussive track and held it there for the whole track —
-  // `pulse` alone floors near 0.92 once tempo locks (it's 60% tempoLock,
-  // which saturates for almost any music with a steady beat), so this
-  // wasn't a rare edge case. The caustics shader's resting sharpness floor
-  // scales directly with uFocus (focusFloor = 0.35 * uFocus), so sitting
-  // that close to 1 kept the *resting* state elevated for the whole track,
-  // not just responding to individual beats. This asserts the new weights
-  // keep the resolved value meaningfully below that ceiling.
+  // The old weights ({ pulse: 0.35, attack: 0.25 }) displaced focus by
+  // ~0.20 from its default on a steady percussive track and held it there
+  // for the whole track — `pulse` alone floors near 0.92 once tempo locks
+  // (it's 60% tempoLock, which saturates for almost any music with a steady
+  // beat), so this wasn't a rare edge case. Focus sitting near 1 saturates
+  // the beat snap against FOCUS_SHARP_MAX on nearly every hit rather than
+  // responding to a specific one (the failure mode the setting's own
+  // comment in caustics.ts describes).
+  //
+  // The bounds are on the *displacement* from the default, not the absolute
+  // value: defaults get baked from dialled-in values by Option+D
+  // (src/tuning/bakeDefaults.ts), so any absolute ceiling here re-fails on
+  // the next bake of a legitimate default, while the weights — the thing
+  // that must not grow back — are what this block exists to pin. The
+  // current weights displace by ~0.116 at strength 1 and ~0.232 at
+  // strength 2; the thresholds leave headroom under those and still fail
+  // the old weights (~0.201 / ~0.402).
   const focusSpec = causticsScene.settings!.find((s) => s.key === "focus")!;
   const steadyPercussive: DialValues = { ...NEUTRAL, pulse: 0.92, attack: 0.6 };
 
-  it("stays inside the verified sharpness band on a steady percussive track", () => {
-    expect(computeAutoTarget(focusSpec, steadyPercussive, 1)).toBeLessThanOrEqual(0.85);
+  it("displaces the default by at most the verified band on a steady percussive track", () => {
+    const delta = computeAutoTarget(focusSpec, steadyPercussive, 1) - focusSpec.default;
+    expect(delta).toBeLessThanOrEqual(0.15);
   });
 
   it("stays bounded even at maximum Auto strength", () => {
-    expect(computeAutoTarget(focusSpec, steadyPercussive, 2)).toBeLessThanOrEqual(0.95);
+    const delta = computeAutoTarget(focusSpec, steadyPercussive, 2) - focusSpec.default;
+    expect(delta).toBeLessThanOrEqual(0.3);
   });
 });
