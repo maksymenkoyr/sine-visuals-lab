@@ -28,7 +28,7 @@ different mode takes over. Featured, on main.
   discs).
 - `tests/chladni.test.ts` covers the mode table ordering/symmetry, resonance
   mapping, ring timing, grain-texture sizing, `grainGain`, and
-  `drawnGrainCount`'s coverage cap.
+  `drawnGrainCount`'s coverage cap and Sand amount scaling.
 - Plugs into `autoTune.ts`/`sceneSettings.ts` the normal way (`resolveSceneSetting`,
   `auto` weights per setting); does not use the Drives system (PR #130) or
   `noiseHash.ts` — its own `hash21`/`hash22` in `CHLADNI_GLSL` are unrelated
@@ -84,7 +84,7 @@ measured from a reference clip.
 - 2026-09-03 (#69): setting `group` labels (Form / Motion / Look) joined
   the shared setting-group vocabulary introduced across all scenes; no
   Chladni-specific behaviour change.
-- 2026-09-26: added the Sand amount setting (`sandAmount`), a Form dial
+- 2026-09-26 (#148): added the Sand amount setting (`sandAmount`), a Form dial
   after Grain size. It scales the drawn grain prefix inside
   `drawnGrainCount`'s `amount` parameter rather than reallocating the grain
   textures, so thinning is free and grains never pop in re-seeded; the
@@ -141,7 +141,12 @@ measured from a reference clip.
 
 ## Materials
 
-- Nothing beyond the code: no `/ref` bundle, saved scripts or artifacts.
+- No `/ref` bundle and no artifacts; the original design was built against
+  the plate physics rather than a reference clip.
+- Working scripts: `docs/scenes/chladni/scripts/` — `sand-amount-shot.mjs`
+  (headless before/after shots of the Sand amount setting via
+  `window.__viz.setParams`). Captured screenshots are session output, not
+  kept in the repo.
 
 ## Resume here
 
@@ -170,3 +175,5 @@ measured from a reference clip.
   of polygons.
 - `#69` / `88aab06` (2026-09-03) — setting groups join the shared
   cross-scene vocabulary.
+- `#148` / `4a2208f` (2026-09-26) — Sand amount setting: scales the drawn
+  grain bed; 0 leaves the plate bare.
