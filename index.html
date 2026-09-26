@@ -44,8 +44,19 @@
         "@context": "https://schema.org",
         "@graph": [
           {
+            "@type": "Organization",
+            "@id": "https://www.sinevisualslab.com/#org",
+            "name": "Sine Visuals Lab",
+            "alternateName": "sinevisualslab",
+            "url": "https://www.sinevisualslab.com/",
+            "logo": "https://www.sinevisualslab.com/icon-512.png",
+            "sameAs": ["https://github.com/maksymenkoyr/sine-visuals-lab"]
+          },
+          {
             "@type": "WebSite",
             "name": "Sine Visuals Lab",
+            "alternateName": ["sinevisualslab", "Sine Visuals"],
+            "publisher": { "@id": "https://www.sinevisualslab.com/#org" },
             "url": "https://www.sinevisualslab.com/",
             "inLanguage": "en",
             "description": "Real-time WebGL music visualizer in your browser: microphone or screen audio drives reactive visuals, and your phone pairs with a TV. Free, no install."
@@ -65,7 +76,10 @@
         ]
       }
     </script>
-    <title>Sine Visuals Lab</title>
+    <!-- The blue link Google shows. Brand first (a brand search must match it),
+     * then the words people actually search — the bare name alone ranked for
+     * nothing but itself. -->
+    <title>Sine Visuals Lab — Free Online Music Visualizer for Mic &amp; TV</title>
     <style>
       html, body {
         margin: 0;
@@ -323,7 +337,7 @@
     </style>
   </head>
   <body>
-    <h1 class="sr-only">Sine Visuals Lab</h1>
+    <h1 class="sr-only">Sine Visuals Lab — a free online music visualizer</h1>
     <p class="sr-only">
       Pick a scene from the gallery and let your microphone or a shared screen drive it — every
       setting can react to the music. Pair your phone with a TV and the visuals follow along on
