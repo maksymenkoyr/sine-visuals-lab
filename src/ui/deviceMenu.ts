@@ -114,6 +114,8 @@ import {
   spacer,
   unitStyle,
 } from "./controlsKit.ts";
+import { createMagnetSlider, type MagnetSlider } from "./magnetSlider.ts";
+import { autoLinearScale, linearScale, logScale } from "./sliderScale.ts";
 
 /**
  * The controller's controls panel — the "Viz Controls" design.
@@ -141,13 +143,17 @@ import {
  * HOVER_SELECT_DELAY_MS, or giving its slider keyboard focus, *previews* it
  * (wireHoverFocus's existing dwell — see its own comment — now drives
  * `preview` instead of a picker); there's no layout change, just the port
- * lighting (cables and meter glow are Phase 2b). Clicking the row's label,
- * summary or port instead *pins* it (togglePin) — one setting at a time —
- * and expands its patch panel inline in the row, below the sparkline; the
- * slider alone never pins, only previews, so dragging an amount can't
- * accidentally swap which panel is open. Escape, clicking the pinned row's
- * own label again, or switching scene unpins (onKeyDown, togglePin,
- * renderSceneSettings's own tail). The patch panel (buildPatchPanel) is
+ * lighting (cables and meter glow are Phase 2b). Clicking the row anywhere
+ * — its label, summary, port, or just its hint text or blank space —
+ * instead *pins* it (togglePin) — one setting at a time — and expands its
+ * patch panel inline in the row, below the sparkline (createControlRow's
+ * own `drivePanel.pin`/`drivePanel.onPin` doc comment has the split: only a
+ * click on the label/summary/port can also *unpin* by clicking again;
+ * everywhere else on the row only ever pins). The slider alone never pins,
+ * only previews, so dragging an amount can't accidentally swap which panel
+ * is open. Escape, clicking the pinned row's own label/summary/port again,
+ * or switching scene unpins (onKeyDown, togglePin, renderSceneSettings's own
+ * tail). The patch panel (buildPatchPanel) is
  * rebuilt only on a genuine patch edit — a mix/height/division button, an
  * add/remove chip, Reset — never from a slider drag's own `input` event
  * (that only writes the store and a readout) and never from the panel's
@@ -318,9 +324,10 @@ import {
  * and skipping every chip and button — so Tab alone never leaves the panel
  * and never lands anywhere but a control. On whichever control has focus, A
  * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
- * are its own, in bandFaders.ts). A focused
- * slider also takes Home/End to its min/max — the browser's own native
- * range-input behavior, left alone by onKeyDown below — plus z/x/c
+ * are its own, in bandFaders.ts). A focused slider (src/ui/magnetSlider.ts)
+ * takes arrows one tick at a time, Shift+arrow/PageUp/PageDown to the next
+ * marked value or major tick, and Home/End to its own ends — its own
+ * keydown handler, left alone by onKeyDown below — plus z/x/c
  * (wireSliderQuickJump) to jump straight to the middle of the track, the
  * top, or wherever the pointer last hovered along it. Digit
  * keys 1-9 jump to a numbered block —
@@ -952,13 +959,19 @@ export interface ControlRowSpec {
    *  `below` mounts as the row's last child (the sparkline, and — once
    *  pinned — the patch panel); `onPin` fires on a click anywhere in the
    *  label/summary wrapper or on `port` (stopPropagation'd so it never also
-   *  triggers this row's own click-to-focus-slider handler below). Omit for
-   *  a setting with no `drive`. */
+   *  triggers this row's own click-to-focus-slider handler below), and
+   *  toggles — a second click there unpins. `pin` is that same row's
+   *  fallback for a click anywhere *else* on the row (its hint text
+   *  included — the click handler below is what actually calls it): unlike
+   *  `onPin` it only ever pins, never unpins, so it can't undo what a
+   *  genuine label/summary/port click just did. Omit both for a setting
+   *  with no `drive`. */
   drivePanel?: {
     port: HTMLElement;
     summary: HTMLElement;
     below: HTMLElement;
     onPin: () => void;
+    pin: () => void;
   };
 }
 
@@ -975,9 +988,14 @@ interface ResolvedSignalRead {
 }
 
 /** Shared by every document-level hotkey (H, Tab, the digits) and by
- *  wireHoverFocus below: ignored while typing somewhere (a range slider
- *  keeping focus after a drag is fine — that's still "in the panel", there's
- *  just nothing to type in the panel itself). */
+ *  wireHoverFocus below: ignored while typing somewhere. A slider
+ *  (magnetSlider.ts's own `<div class="vc-slider">`) never matches any
+ *  branch here at all — it isn't an INPUT — so keeping keyboard focus there
+ *  after a drag is already fine for free: that's still "in the panel",
+ *  there's just nothing to type in the panel itself. The `type !== "range"`
+ *  check below is what used to carve the slider out when it really was an
+ *  `<input type="range">`; nothing in src/ui/ still is, but it's harmless
+ *  left in place for any INPUT this panel adds later that isn't one either. */
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
   const tag = t.tagName;
@@ -1014,33 +1032,6 @@ function wireRowKeys(
         break;
     }
   });
-}
-
-// How far from the thumb (in px) the magnetic pull starts, and how much
-// extra scale it stacks on top of the row's existing 1.7x hover/focus boost
-// (controlsTheme.ts) at zero distance — see wireThumbMagnet below.
-const THUMB_MAGNET_RADIUS_PX = 48;
-const THUMB_MAGNET_MAX_BOOST = 1.3;
-
-/** Makes a slider's thumb grow further as the pointer nears it, on top of
- *  the row's existing hover/focus scale-up — a bigger target exactly where
- *  the pointer already is, rather than uniformly across the row. Written as
- *  a --vc-thumb-boost custom property that the thumb's transform multiplies
- *  in (controlsTheme.ts), so it composes with that existing rule instead of
- *  fighting it, and costs nothing when the pointer is elsewhere (falls back
- *  to 1). Purely a mouse nicety — keyboard/touch interaction never sets it. */
-function wireThumbMagnet(row: HTMLElement, slider: HTMLInputElement): void {
-  row.addEventListener("mousemove", (e) => {
-    const rect = slider.getBoundingClientRect();
-    const lo = Number(slider.min);
-    const hi = Number(slider.max);
-    const frac = hi > lo ? (Number(slider.value) - lo) / (hi - lo) : 0;
-    const thumbX = rect.left + frac * rect.width;
-    const t = Math.max(0, 1 - Math.abs(e.clientX - thumbX) / THUMB_MAGNET_RADIUS_PX);
-    const boost = 1 + (THUMB_MAGNET_MAX_BOOST - 1) * t * t;
-    row.style.setProperty("--vc-thumb-boost", boost.toFixed(3));
-  });
-  row.addEventListener("mouseleave", () => row.style.removeProperty("--vc-thumb-boost"));
 }
 
 // The last real mouse position seen anywhere in the panel — shared across
@@ -1092,21 +1083,19 @@ function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
   });
 }
 
-/** The pointer's fraction along `slider`'s track (0 at min, 1 at max,
- *  clamped) — used by wireSliderQuickJump's c binding below. A keydown
- *  carries no coordinates, so this reads lastHoverX/lastHoverY, the same
- *  panel-wide last-real-cursor-position wireHoverFocus above maintains.
- *  Undefined when the pointer hasn't entered the panel yet, or sits outside
- *  `row` — the desync wireHoverFocus's own comment describes, where
- *  scrolling carries a different row under a stationary cursor without
- *  moving focus there; c should no-op then rather than edit a row the
- *  pointer has left. Maps across the slider's full rect, not its thumb's
- *  inset travel, matching both wireThumbMagnet's thumbX above and the
- *  --vc-fill percentage (controlsTheme.ts) that paints the track — the
- *  boundary the eye reads as "the value" sits at this position, and the
- *  thumb itself is only 3px wide, so the half-thumb inset this skips is
- *  sub-pixel. */
-function pointerFraction(row: HTMLElement, slider: HTMLInputElement): number | undefined {
+/** The pointer's fraction along `slider`'s own full width (0 at its left
+ *  edge, 1 at its right, clamped) — used by wireSliderQuickJump's c binding
+ *  below, and matching the frame MagnetSlider.valueAtFraction (magnetSlider.ts)
+ *  itself expects, so the two stay consistent without either needing to know
+ *  the other's internals (valueAtFraction corrects for the track's own PAD
+ *  inset internally). A keydown carries no coordinates, so this reads
+ *  lastHoverX/lastHoverY, the same panel-wide last-real-cursor-position
+ *  wireHoverFocus above maintains. Undefined when the pointer hasn't entered
+ *  the panel yet, or sits outside `row` — the desync wireHoverFocus's own
+ *  comment describes, where scrolling carries a different row under a
+ *  stationary cursor without moving focus there; c should no-op then rather
+ *  than edit a row the pointer has left. */
+function pointerFraction(row: HTMLElement, slider: HTMLElement): number | undefined {
   if (lastHoverX < 0) return undefined;
   const rowRect = row.getBoundingClientRect();
   if (
@@ -1125,26 +1114,23 @@ function pointerFraction(row: HTMLElement, slider: HTMLInputElement): number | u
 /** z centers a focused slider, x maxes it out, c jumps it to wherever the
  *  pointer last was along the track (pointerFraction above) — a fast way to
  *  land on any value without dragging. No key for the low end: Home already
- *  jumps a native range input to its min for free (onKeyDown, below, doesn't
- *  intercept it), so the only capabilities worth adding are the ones
- *  Home/End don't cover. Plain single keys, not a chord — z/x/c collide with
- *  nothing else live while a slider has focus (A/R/T/D, the panel's
- *  H/M/Tab/1-9, the arrows, and Home/End are all spoken for). c no-ops when
- *  pointerFraction returns undefined, rather than falling back to some other
- *  value — see its comment for why. Sets .value then redispatches "input"
- *  rather than duplicating each slider's own commit logic, so this stays a
- *  one-line addition at every call site regardless of what that site's
- *  "input" listener does. */
-function wireSliderQuickJump(row: HTMLElement, slider: HTMLInputElement): void {
-  slider.addEventListener("keydown", (e) => {
+ *  takes a MagnetSlider to its own min for free (magnetSlider.ts's own
+ *  keydown handler, left alone by onKeyDown below), so the only capabilities
+ *  worth adding are the ones Home/End don't cover. Plain single keys, not a
+ *  chord — z/x/c collide with nothing else live while a slider has focus
+ *  (A/R/T/D, the panel's H/M/Tab/1-9, the arrows, and Home/End are all
+ *  spoken for). c no-ops when pointerFraction returns undefined, rather than
+ *  falling back to some other value — see its comment for why. Routes
+ *  through slider.setFromUser rather than duplicating each row's own commit
+ *  logic, so this stays a one-line addition regardless of what a given
+ *  row's own onInput does. */
+function wireSliderQuickJump(row: HTMLElement, slider: MagnetSlider): void {
+  slider.el.addEventListener("keydown", (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    const frac = e.key === "c" ? pointerFraction(row, slider) : { z: 0.5, x: 1 }[e.key];
+    const frac = e.key === "c" ? pointerFraction(row, slider.el) : { z: 0.5, x: 1 }[e.key];
     if (frac === undefined) return;
     e.preventDefault();
-    const lo = Number(slider.min);
-    const hi = Number(slider.max);
-    slider.value = String(lo + frac * (hi - lo));
-    slider.dispatchEvent(new Event("input", { bubbles: true }));
+    slider.setFromUser(slider.valueAtFraction(frac));
   });
 }
 
@@ -1342,27 +1328,21 @@ export function createControlRow(spec: ControlRowSpec) {
     head.append(label, right);
   }
 
-  const slider = document.createElement("input");
-  slider.type = "range";
-  slider.className = "vc-slider";
-  slider.setAttribute("aria-label", spec.label);
   // The accent rides the row (not just the slider) so the hover/focus
   // highlight on the title and track share it — see controlsTheme.ts.
   el.style.setProperty("--vc-accent", spec.accent);
   const isLog = spec.mapping === "log";
-  // Continuous, not stepped: a declared `step` is the uniform's meaningful
-  // resolution, not a detent, and snapping to it made a 0..1 row jump in
-  // twenty visible hops across the track. Only a step of 1 or more marks a
-  // genuinely discrete control (integer counts), which keeps its detents.
-  const discrete = !isLog && spec.step !== undefined && spec.step >= 1;
-  if (isLog) {
-    slider.min = "0";
-    slider.max = "100";
-  } else {
-    slider.min = String(spec.min);
-    slider.max = String(spec.max);
-  }
-  slider.step = discrete ? String(spec.step) : "any";
+  // The scale this row's magnet slider snaps to (src/ui/sliderScale.ts): a
+  // log row carries its own Off stop (zeroAtMin) and default as detents —
+  // this is where createControlRow's own posToValue/valueToPos formulas
+  // moved to (see logScale's own comment for why it must reproduce them
+  // exactly). Every other row picks its fine/mid/major spacing from nothing
+  // but min/max/step (autoLinearScale) rather than each caller hand-tuning
+  // three spacings — see its own comment for the discrete rule this carries
+  // over unchanged: only a step of 1 or more is a genuinely stepped control.
+  const scale = isLog
+    ? logScale({ min: spec.min, max: spec.max, zeroAtMin: spec.zeroAtMin, detents: [spec.defaultValue] })
+    : autoLinearScale({ min: spec.min, max: spec.max, step: spec.step, defaultValue: spec.defaultValue });
 
   // Two lines: the setting's own description, always present when it has
   // one, and beneath it the auto takeover note, shown only while auto holds
@@ -1377,39 +1357,6 @@ export function createControlRow(spec: ControlRowSpec) {
   hintAuto.textContent = AUTO_HOLDING_HINT;
   hint.append(hintDesc, hintAuto);
 
-  el.append(head, slider, hint);
-  if (signalIndicator) el.appendChild(signalIndicator.strip);
-  if (spec.drivePanel) el.appendChild(spec.drivePanel.below);
-  el.addEventListener("click", () => slider.focus());
-  wireHoverFocus(el, slider);
-  wireThumbMagnet(el, slider);
-  wireSliderQuickJump(el, slider);
-
-  // Log-mapped so the midpoint lands close to defaultValue instead of skewing
-  // toward the wide "more reactive" end. With zeroAtMin, position 0 is carved
-  // out as an explicit kill and the log curve covers 1..100 instead of 0..100
-  // — reserving a single position for it (vs. letting the curve asymptote
-  // toward 0) is what makes the kill a deliberate, findable stop rather than
-  // something you might land on by accident.
-  function posToValue(pos: number): number {
-    if (spec.zeroAtMin && pos <= 0) return 0;
-    const loPos = spec.zeroAtMin ? 1 : 0;
-    const t = (pos - loPos) / (100 - loPos);
-    return spec.min * Math.pow(spec.max / spec.min, t);
-  }
-  function valueToPos(value: number): number {
-    if (spec.zeroAtMin && value <= 0) return 0;
-    const loPos = spec.zeroAtMin ? 1 : 0;
-    const t = Math.log(value / spec.min) / Math.log(spec.max / spec.min);
-    return loPos + t * (100 - loPos);
-  }
-  function sliderToValue(): number {
-    return isLog ? posToValue(Number(slider.value)) : Number(slider.value);
-  }
-  function valueToSlider(value: number): number {
-    return isLog ? valueToPos(value) : value;
-  }
-
   function setReadout(value: number): void {
     if (spec.zeroAtMin && value <= 0) {
       digits.textContent = "Off";
@@ -1422,6 +1369,32 @@ export function createControlRow(spec: ControlRowSpec) {
     if (spec.unit) unit.style.display = "";
   }
 
+  // The slider's own aria-valuetext and ruler tick labels — the same
+  // Off/unit rules as setReadout above, folded into one string since a
+  // MagnetSlider wants a single piece of text rather than a digits+unit
+  // pair. Ignores `precision` (do not over-engineer per row: most of this
+  // panel's formatters have no natural extra decimal to reach for).
+  const formatSlider = (value: number): string => (spec.zeroAtMin && value <= 0 ? "Off" : spec.format(value) + (spec.unit ?? ""));
+
+  let dragging = false;
+  const slider = createMagnetSlider({
+    scale,
+    value: spec.defaultValue,
+    label: spec.label,
+    accent: spec.accent,
+    format: formatSlider,
+    defaultValue: spec.defaultValue,
+    hoverHost: el,
+    onInput: (value) => {
+      clearOff();
+      spec.pin?.clear();
+      commit(value);
+    },
+    onDragChange: (d) => {
+      dragging = d;
+    },
+  });
+
   function setHint(auto: boolean): void {
     hintDesc.style.display = spec.description ? "" : "none";
     hintAuto.style.display = auto ? "" : "none";
@@ -1430,12 +1403,7 @@ export function createControlRow(spec: ControlRowSpec) {
 
   function display(value: number, auto: boolean): void {
     lastValue = value;
-    const sliderValue = valueToSlider(value);
-    slider.value = String(sliderValue);
-    const lo = Number(slider.min);
-    const hi = Number(slider.max);
-    const pct = hi > lo ? ((sliderValue - lo) / (hi - lo)) * 100 : 0;
-    slider.style.setProperty("--vc-fill", `${Math.max(0, Math.min(100, pct))}%`);
+    slider.setValue(value);
     setReadout(value);
     // setReadout just overwrote digits.style.cssText wholesale, which would
     // silently pop the digits back over an open typed-entry field on every
@@ -1481,21 +1449,26 @@ export function createControlRow(spec: ControlRowSpec) {
     spec.onAutoToggled?.();
   }
 
-  let dragging = false;
-  slider.addEventListener("pointerdown", () => {
-    dragging = true;
+  el.append(head, slider.el, hint);
+  if (signalIndicator) el.appendChild(signalIndicator.strip);
+  if (spec.drivePanel) el.appendChild(spec.drivePanel.below);
+  el.addEventListener("click", (e) => {
+    slider.el.focus();
+    // The bug this fixes: a click on a drive row used to pin only from its
+    // label/summary/port (spec.drivePanel.onPin below, still the only way to
+    // *unpin*) — the hint text and every other blank part of the row did
+    // nothing. This is pin-only (see spec.drivePanel.pin's own doc comment),
+    // so it can never undo what a genuine label/summary/port click just did,
+    // and it backs off for a click on a button/input/the slider itself
+    // (already stopPropagation'd by their own handlers) or inside the
+    // expanded patch panel (.vc-drive-patch), which has its own controls.
+    if (spec.drivePanel && !(e.target as HTMLElement).closest("button, input, .vc-slider, .vc-drive-patch")) {
+      spec.drivePanel.pin();
+    }
   });
-  slider.addEventListener("pointerup", () => {
-    dragging = false;
-  });
-  slider.addEventListener("pointercancel", () => {
-    dragging = false;
-  });
-  slider.addEventListener("input", () => {
-    clearOff();
-    spec.pin?.clear();
-    commit(sliderToValue());
-  });
+  wireHoverFocus(el, slider.el);
+  wireSliderQuickJump(el, slider);
+
   resetBtn.addEventListener("click", () => {
     clearOff();
     spec.pin?.clear();
@@ -1511,7 +1484,7 @@ export function createControlRow(spec: ControlRowSpec) {
       commit(restore);
       refreshOffChip();
     } else {
-      offStoredValue = sliderToValue();
+      offStoredValue = lastValue;
       refreshOffChip();
       commit(spec.zeroAtMin ? 0 : spec.min);
     }
@@ -1535,7 +1508,7 @@ export function createControlRow(spec: ControlRowSpec) {
     });
   }
 
-  wireRowKeys(slider, {
+  wireRowKeys(slider.el, {
     auto: spec.auto ? () => chip.click() : undefined,
     reset: () => resetBtn.click(),
     toggleOff: () => offChip.click(),
@@ -2282,42 +2255,40 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const WEIGHT_HINT = "This source's share: 0 ignores it, 1× is normal, 2× doubles it.";
 
   function buildWeightSlider(sceneId: string, spec: SceneSetting, src: DriveSource, onLiveEdit: () => void): HTMLElement {
-    const wrap = document.createElement("label");
+    // A <div>, not a <label> — a label forwards a click straight to its one
+    // wrapped control, which was the actual cause of this slider being
+    // undraggable (a MagnetSlider's own pointerdown already stopPropagation's,
+    // so a <label>'s own synthetic re-click was fighting drag start).
+    const wrap = document.createElement("div");
     wrap.style.cssText = driveWeightWrapStyle;
     setHint(wrap, WEIGHT_HINT);
-    const rng = document.createElement("input");
-    rng.type = "range";
-    rng.setAttribute("aria-description", WEIGHT_HINT);
-    // The same track/thumb/fill CSS every other slider in the panel uses
-    // (controlsTheme.ts's .vc-slider rules, reading --vc-accent/--vc-fill)
-    // — without this class an <input type="range"> renders as the bare
-    // native control, and this one also joins the panel's own Tab ring
-    // (ringElements() below) for free, same as a setting row's own slider.
-    rng.className = "vc-slider";
-    rng.min = String(DRIVE_WEIGHT_MIN);
-    rng.max = String(DRIVE_WEIGHT_MAX);
-    rng.step = "0.05";
-    rng.value = String(src.weight);
-    rng.setAttribute("aria-label", `${driveSourceLabel(src.choice)} weight`);
-    rng.style.cssText = driveWeightRangeStyle;
-    rng.style.setProperty("--vc-accent", driveSourceColor(src.choice));
     const out = document.createElement("output");
     out.style.cssText = driveWeightOutStyle;
-    const setFill = (w: number) => rng.style.setProperty("--vc-fill", `${(w / DRIVE_WEIGHT_MAX) * 100}%`);
     const setOut = (w: number) => (out.textContent = `${w.toFixed(2)}×`);
-    setFill(src.weight);
-    setOut(src.weight);
-    // Live store write + readout on every drag frame, no rebuild — a full
-    // buildPatchPanel() here would tear out the very slider being dragged
-    // (this file's own carried click-loss rule).
-    rng.addEventListener("input", () => {
-      const w = Number(rng.value);
-      setFill(w);
-      setOut(w);
-      deps.onSetSourceWeight(sceneId, spec, src.choice, w);
-      onLiveEdit();
+    const slider = createMagnetSlider({
+      scale: linearScale({ min: DRIVE_WEIGHT_MIN, max: DRIVE_WEIGHT_MAX, fine: 0.02, mid: 0.1, major: 0.5, detents: [1] }),
+      value: src.weight,
+      label: `${driveSourceLabel(src.choice)} weight`,
+      accent: driveSourceColor(src.choice),
+      format: (w) => `${w.toFixed(2)}×`,
+      defaultValue: 1,
+      // Live store write + readout on every drag frame, no rebuild — a full
+      // buildPatchPanel() here would tear out the very slider being dragged
+      // (this file's own carried click-loss rule).
+      onInput: (w) => {
+        setOut(w);
+        deps.onSetSourceWeight(sceneId, spec, src.choice, w);
+        onLiveEdit();
+      },
     });
-    wrap.append(rng, out);
+    // Already a `.vc-slider` (createMagnetSlider's own class), which joins
+    // the panel's own Tab ring (ringElements() below) for free, same as a
+    // setting row's own slider — merged onto its own inline style (never
+    // replaced wholesale) so nothing the constructor set stays clobbered.
+    slider.el.style.cssText += driveWeightRangeStyle;
+    slider.el.setAttribute("aria-description", WEIGHT_HINT);
+    setOut(src.weight);
+    wrap.append(slider.el, out);
     return wrap;
   }
 
@@ -3521,47 +3492,49 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoCard.el.style.minWidth = "0";
   const autoStrengthRow = document.createElement("div");
   autoStrengthRow.className = "vc-row";
-  const autoStrengthSlider = document.createElement("input");
-  autoStrengthSlider.type = "range";
-  autoStrengthSlider.className = "vc-slider";
-  autoStrengthSlider.setAttribute("aria-label", "Auto strength");
-  autoStrengthSlider.min = String(AUTO_STRENGTH_MIN);
-  autoStrengthSlider.max = String(AUTO_STRENGTH_MAX);
-  autoStrengthSlider.step = "any";
   autoStrengthRow.style.setProperty("--vc-accent", AUTO_SKY);
-  autoStrengthSlider.style.marginTop = "0";
   const autoStrengthHint = document.createElement("div");
   autoStrengthHint.className = "vc-hint";
   autoStrengthHint.textContent = AUTO_STRENGTH_HINT;
-  autoStrengthRow.append(autoStrengthSlider, autoStrengthHint);
+
+  // Mirrors the last value shown — MagnetSlider has no getter of its own,
+  // and toggleAutoStrengthOff below (its R/T equivalent for this one-off
+  // row) needs to read "whatever's showing now" the same way a
+  // createControlRow row's own lastValue does.
+  let autoStrengthValue = AUTO_STRENGTH_DEFAULT;
+  function showAutoStrength(value: number): void {
+    autoStrengthValue = value;
+    autoStrengthSlider.setValue(value);
+    autoStrengthDigits.textContent = value.toFixed(2);
+  }
+  const autoStrengthSlider = createMagnetSlider({
+    scale: autoLinearScale({ min: AUTO_STRENGTH_MIN, max: AUTO_STRENGTH_MAX, defaultValue: AUTO_STRENGTH_DEFAULT }),
+    value: AUTO_STRENGTH_DEFAULT,
+    label: "Auto strength",
+    accent: AUTO_SKY,
+    format: (value) => value.toFixed(2),
+    defaultValue: AUTO_STRENGTH_DEFAULT,
+    hoverHost: autoStrengthRow,
+    onInput: (value) => {
+      autoStrengthOffStored = null;
+      showAutoStrength(value);
+      deps.onAutoStrengthChange(value);
+    },
+  });
+  autoStrengthRow.append(autoStrengthSlider.el, autoStrengthHint);
   autoCard.body.appendChild(autoStrengthRow);
   autoCard.el.style.cursor = "pointer";
-  autoCard.el.addEventListener("click", () => autoStrengthSlider.focus());
+  autoCard.el.addEventListener("click", () => autoStrengthSlider.el.focus());
   // Scoped to the row, not autoCard.el like the click handler above: click's
   // wider scope (hovering the card title still focuses the slider) is a
   // deliberate convenience, but hover-focus firing there too would mean just
   // reading the card's title steals focus onto the slider.
-  wireHoverFocus(autoStrengthRow, autoStrengthSlider);
-  wireThumbMagnet(autoCard.el, autoStrengthSlider);
+  wireHoverFocus(autoStrengthRow, autoStrengthSlider.el);
   wireSliderQuickJump(autoStrengthRow, autoStrengthSlider);
 
-  function showAutoStrength(value: number): void {
-    autoStrengthSlider.value = String(value);
-    autoStrengthSlider.style.setProperty(
-      "--vc-fill",
-      `${((value - AUTO_STRENGTH_MIN) / (AUTO_STRENGTH_MAX - AUTO_STRENGTH_MIN)) * 100}%`,
-    );
-    autoStrengthDigits.textContent = value.toFixed(2);
-  }
   function refreshAutoStrengthDisplay(): void {
     showAutoStrength(deps.getAutoStrength());
   }
-  autoStrengthSlider.addEventListener("input", () => {
-    autoStrengthOffStored = null;
-    const value = Number(autoStrengthSlider.value);
-    showAutoStrength(value);
-    deps.onAutoStrengthChange(value);
-  });
 
   // The global "Auto" master switch — toggles every auto-capable row, scene
   // settings plus Sensitivity/Expansion/Smoothing (see app.ts's
@@ -4261,7 +4234,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
       reads,
       drivePanel: driveBuild
-        ? { port: driveBuild.port, summary: driveBuild.summary, below: driveBuild.below, onPin: () => togglePin(sceneId, spec) }
+        ? {
+            port: driveBuild.port,
+            summary: driveBuild.summary,
+            below: driveBuild.below,
+            onPin: () => togglePin(sceneId, spec),
+            pin: () => {
+              if (!samePair(pinned, { sceneId, spec })) togglePin(sceneId, spec);
+            },
+          }
         : undefined,
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
@@ -4493,12 +4474,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       showAutoStrength(restore);
       deps.onAutoStrengthChange(restore);
     } else {
-      autoStrengthOffStored = Number(autoStrengthSlider.value);
+      autoStrengthOffStored = autoStrengthValue;
       showAutoStrength(AUTO_STRENGTH_MIN);
       deps.onAutoStrengthChange(AUTO_STRENGTH_MIN);
     }
   }
-  wireRowKeys(autoStrengthSlider, {
+  wireRowKeys(autoStrengthSlider.el, {
     auto: toggleAutoMaster,
     reset: resetAutoStrength,
     toggleOff: toggleAutoStrengthOff,
