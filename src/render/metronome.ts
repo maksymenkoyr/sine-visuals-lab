@@ -101,16 +101,19 @@ export const FOLLOW_LOCK = 0.75;
 export const PHASE_FOLLOW_RATE = 2;
 export const PHASE_FOLLOW_MAX_RATE = 0.25; // beats/s
 // A beat-line error bigger than this (in beats), the first time the clock is
-// confident after the metronome started or retuned, is snapped in one jump
+// confident after the metronome started or retuned, is corrected at once
 // instead of slewed; every later correction only slews, so a clock whose
-// phase jitters while confident can never make it jump repeatedly. The metronome now starts on the first
-// settled tempo, long before the clock is sure where the beat is, so its
-// starting phase is often far off; slewing half a beat at
-// PHASE_FOLLOW_MAX_RATE took seconds of visibly uneven ticks (measured on
-// the eval scoreboard's hiphop track). The jump is always forward — to the
-// next point on the clock's beat line — so `beats` stays monotonic, and it
-// arms tick detection silently like an adoption, so it never emits a tick
-// of its own: one longer interval, then evenly spaced again.
+// phase jitters while confident can never make it jump repeatedly. The
+// metronome starts on the first settled tempo, long before the clock is sure
+// where the beat is, so its starting phase is often far off; slewing half a
+// beat at PHASE_FOLLOW_MAX_RATE took seconds of visibly uneven ticks
+// (measured on the eval scoreboard's hiphop track). The correction takes the
+// short way round: behind the clock, `beats` jumps forward (a beat it jumps
+// past ticks right then, so the interval shortens but no tick is lost);
+// ahead of it, `beats` holds still for the difference (one longer interval)
+// rather than stepping back, so `beats` stays monotonic and no beat can tick
+// twice. An earlier version always jumped forward, which from "ahead" meant
+// most of a beat and drew a near-double tick in the panel's Metronome row.
 export const PHASE_SNAP_BEATS = 0.15;
 // Tempo follow while confident: only actually pulls `bpm` toward clock.bpm
 // while the two are already close (within RESYNC_RATIO) — see the next
@@ -159,10 +162,13 @@ export function createMetronome(): Metronome {
   // Whether this run has already had its one confident phase check (see
   // PHASE_SNAP_BEATS) — reset on every start and retune.
   let phaseChecked = false;
+  // Beats still to hold still for, from an "ahead" correction (see
+  // PHASE_SNAP_BEATS) — consumed from the normal advance before `beats` moves.
+  let pauseBeats = 0;
 
   // Arms tick detection against the *current* `beats` without emitting one —
-  // called on adoption and on a phase snap, both of which move `beats` and
-  // must never count that move itself as a tick.
+  // called on adoption, which moves `beats` fresh and must never count that
+  // move itself as a tick.
   function armTickDetection(): void {
     lastBeatFloor = Math.floor(beats);
     lastBarFloor = Math.floor(beats / METRONOME_BEATS_PER_BAR);
@@ -189,6 +195,7 @@ export function createMetronome(): Metronome {
           bpm = target;
           beats = clock.beats;
           phaseChecked = false;
+          pauseBeats = 0;
           armTickDetection();
         }
       } else if (target === 0) {
@@ -199,15 +206,21 @@ export function createMetronome(): Metronome {
           bpm = target;
           phaseChecked = false;
         }
-        beats += dtSec * (bpm / 60);
+        let step = dtSec * (bpm / 60);
+        if (pauseBeats > 0) {
+          const held = Math.min(pauseBeats, step);
+          pauseBeats -= held;
+          step -= held;
+        }
+        beats += step;
 
-        if (clock.tempoLock >= FOLLOW_LOCK && bpm > 0 && Math.abs(clock.bpm / bpm - 1) <= RESYNC_RATIO) {
+        if (pauseBeats === 0 && clock.tempoLock >= FOLLOW_LOCK && bpm > 0 && Math.abs(clock.bpm / bpm - 1) <= RESYNC_RATIO) {
           const err = wrapHalf(clock.beats - beats);
           const snap = !phaseChecked && Math.abs(err) > PHASE_SNAP_BEATS;
           phaseChecked = true;
           if (snap) {
-            beats += err > 0 ? err : err + 1;
-            armTickDetection();
+            if (err > 0) beats += err;
+            else pauseBeats = -err;
           } else {
             const rawStep = err * PHASE_FOLLOW_RATE * dtSec;
             const cap = PHASE_FOLLOW_MAX_RATE * dtSec;

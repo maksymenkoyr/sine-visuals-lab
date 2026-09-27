@@ -189,35 +189,53 @@ describe("metronome", () => {
     expect(wrapDist(clockBeats, m.beats)).toBeLessThan(0.02);
   });
 
-  it("snaps forward onto the clock's beat once, the first time the clock is sure, then only slews", () => {
-    const m = createMetronome();
-    // Starts while the clock is unsure, so it keeps its own (wrong) phase.
-    let clockBeats = 0.4;
-    let lastT = 0;
-    let lock = 0;
-    const clock = (t: number): MetronomeClockInput => {
-      clockBeats += ((t - lastT) * 120) / 60;
-      lastT = t;
-      return { bpm: 120, beats: clockBeats, tempoLock: lock };
-    };
-    run(m, TEMPO_SETTLE_SEC * 1.3, clock, () => 120);
-    expect(m.running).toBe(true);
-    const offBy = () => wrapDist(clockBeats, m.beats);
-    const before = m.beats;
-    lock = 1;
-    // Knock the clock off the metronome's line by more than the snap
-    // threshold, then let the clock turn sure.
-    clockBeats = m.beats + 0.45;
-    expect(offBy()).toBeGreaterThan(PHASE_SNAP_BEATS);
-    m.advance(DT, clock(lastT + DT), 120);
-    expect(offBy()).toBeLessThan(0.02);
-    expect(m.beats).toBeGreaterThan(before);
-    expect(m.beatTick).toBe(false);
-    // A second jump of the clock, while it stays sure, is slewed, not snapped.
-    clockBeats += 0.4;
-    m.advance(DT, clock(lastT + DT), 120);
-    expect(offBy()).toBeGreaterThan(0.3);
-  });
+  for (const offset of [0.4, -0.4]) {
+    it(`corrects a ${offset > 0 ? "behind" : "ahead"} phase once, the first time the clock is sure, with no double tick — then only slews`, () => {
+      const m = createMetronome();
+      // Starts while the clock is unsure, so it keeps its own phase.
+      let clockBeats = 0;
+      let lastT = 0;
+      let lock = 0;
+      let shift = 0;
+      const clock = (t: number): MetronomeClockInput => {
+        clockBeats += ((t - lastT) * 120) / 60 + shift;
+        shift = 0;
+        lastT = t;
+        return { bpm: 120, beats: clockBeats, tempoLock: lock };
+      };
+      run(m, TEMPO_SETTLE_SEC * 1.3, clock, () => 120);
+      expect(m.running).toBe(true);
+      const offBy = () => wrapDist(clockBeats, m.beats);
+      expect(offBy()).toBeLessThan(0.02);
+      // Knock the clock off the metronome's line by more than the snap
+      // threshold, and let it turn sure.
+      shift = offset;
+      lock = 1;
+      expect(Math.abs(offset)).toBeGreaterThan(PHASE_SNAP_BEATS);
+      const t0 = lastT + DT;
+      let prevBeats = m.beats;
+      const ticks: number[] = [];
+      for (let i = 0; i < 3 / DT; i++) {
+        const t = t0 + i * DT;
+        m.advance(DT, clock(t), 120);
+        expect(m.beats).toBeGreaterThanOrEqual(prevBeats);
+        prevBeats = m.beats;
+        if (m.beatTick) ticks.push(t);
+      }
+      expect(offBy()).toBeLessThan(0.02);
+      // One shorter or longer interval at most, never a near-double.
+      for (let k = 1; k < ticks.length; k++) {
+        const beatsApart = ((ticks[k]! - ticks[k - 1]!) * 120) / 60;
+        expect(beatsApart).toBeGreaterThan(0.5);
+        expect(beatsApart).toBeLessThan(1.5);
+      }
+      // A second jump of the clock, while it stays sure, is slewed, not
+      // corrected at once.
+      shift = 0.4;
+      m.advance(DT, clock(lastT + DT), 120);
+      expect(offBy()).toBeGreaterThan(0.3);
+    });
+  }
 
   it("ignores the clock's phase and tempo while confident but disagreeing on tempo", () => {
     const m = createMetronome();
