@@ -6,8 +6,9 @@ import {
   FOLLOW_LOCK,
   RESYNC_SEC,
   STOP_AFTER_SEC,
-  UNSURE_LOCK,
-  UNSURE_STOP_SEC,
+  START_HOLD_SEC,
+  LOST_HOLD_SEC,
+  LOCK_AVG_SEC,
   type Metronome,
   type MetronomeClockInput,
 } from "../src/render/metronome.ts";
@@ -129,7 +130,7 @@ describe("metronome", () => {
     let lastT = 0;
     const { beatTicks } = run(
       m,
-      RESYNC_SEC + 2,
+      RESYNC_SEC + 3,
       (t) => {
         sustainedBeats += ((t - lastT) * 140) / 60;
         lastT = t;
@@ -138,12 +139,11 @@ describe("metronome", () => {
       () => 140,
     );
     expect(m.bpm).toBeCloseTo(140, 1);
-    // Every gap after the resync has settled should be close to 60/140s;
-    // check the *last* few intervals (well after RESYNC_SEC has elapsed).
-    const tail = beatTicks.slice(-3);
-    for (let i = 1; i < tail.length; i++) {
-      expect(tail[i]! - tail[i - 1]!).toBeCloseTo(60 / 140, 2);
-    }
+    // After the resync has settled the ticks run at 60/140 s apart. Tick
+    // times are whole DT steps, so a single interval is off by up to a frame;
+    // the mean over the last few is what has to match.
+    const tail = beatTicks.slice(-4);
+    expect((tail[tail.length - 1]! - tail[0]!) / (tail.length - 1)).toBeCloseTo(60 / 140, 2);
     // No interval anywhere in the transition is a near-zero double-fire or
     // a near-double missing tick.
     for (let i = 1; i < beatTicks.length; i++) {
@@ -178,18 +178,41 @@ describe("metronome", () => {
     expect(m.bpm).toBe(0);
   });
 
-  it("stops after UNSURE_STOP_SEC of tempoLock below UNSURE_LOCK, even with rawBpm present", () => {
+  it("doesn't start on a confident spike shorter than START_HOLD_SEC", () => {
     const m = createMetronome();
-    run(m, 2, () => ({ bpm: 120, beats: 0, tempoLock: 1 }));
-    expect(m.running).toBe(true);
-
-    let beats = m.beats;
-    const steps = Math.round((UNSURE_STOP_SEC + 1) / DT);
-    for (let i = 0; i < steps; i++) {
-      beats += (DT * 120) / 60;
-      m.advance(DT, { bpm: 120, beats, tempoLock: UNSURE_LOCK / 2 }, 120);
-    }
+    // Confident for just under the hold, then not — repeatedly.
+    const period = START_HOLD_SEC * 2;
+    run(m, 20, (t) => ({ bpm: 120, beats: (t * 120) / 60, tempoLock: t % period < START_HOLD_SEC * 0.8 ? 1 : 0 }));
     expect(m.running).toBe(false);
+  });
+
+  it("keeps running through a long unsure stretch while the tracker still hears the same tempo", () => {
+    const m = createMetronome();
+    run(m, 3, () => ({ bpm: 120, beats: 0, tempoLock: 1 }));
+    expect(m.running).toBe(true);
+    let beats = m.beats;
+    for (let i = 0; i < Math.round(20 / DT); i++) {
+      beats += (DT * 120) / 60;
+      m.advance(DT, { bpm: 120, beats, tempoLock: 0.05 }, 121);
+    }
+    expect(m.running).toBe(true);
+  });
+
+  it("lets go once it is unsure and the tracker hears a different tempo, after LOST_HOLD_SEC", () => {
+    const m = createMetronome();
+    run(m, 3, () => ({ bpm: 120, beats: 0, tempoLock: 1 }));
+    expect(m.running).toBe(true);
+    let beats = m.beats;
+    let stoppedAt = -1;
+    const limit = LOCK_AVG_SEC * 3 + LOST_HOLD_SEC + 2;
+    for (let t = 0; t < limit; t += DT) {
+      beats += (DT * 150) / 60;
+      m.advance(DT, { bpm: 150, beats, tempoLock: 0.05 }, 150);
+      if (!m.running && stoppedAt < 0) stoppedAt = t;
+    }
+    // Never before the hold itself, and not held forever either.
+    expect(stoppedAt).toBeGreaterThanOrEqual(LOST_HOLD_SEC);
+    expect(stoppedAt).toBeGreaterThan(0);
   });
 
   it("beats are monotonic while running, under ordinary (non-resync) corrections", () => {
@@ -214,7 +237,7 @@ describe("metronome", () => {
   it("fires a bar tick exactly every METRONOME_BEATS_PER_BAR beat ticks", () => {
     // A fresh metronome, so adoption's own beat count starts from exactly 0.
     const m2 = createMetronome();
-    run(m2, 0.1, () => ({ bpm: 150, beats: 0, tempoLock: START_LOCK }));
+    run(m2, START_HOLD_SEC + 0.1, () => ({ bpm: 150, beats: 0, tempoLock: START_LOCK }));
     let beatCount = 0;
     let barCount = 0;
     let sawMismatch = false;

@@ -18,7 +18,7 @@
 // at whatever bpm it last held, rather than falling back to raw hits
 // (gridPulse.ts's behaviour) or drifting/stalling with the clock
 // (beatClock.ts's own beatPhase). It only ever stops on its own terms (see
-// STOP_AFTER_SEC/UNSURE_STOP_SEC below), never because a single beat went
+// STOP_AFTER_SEC/LOST_HOLD_SEC below), never because a single beat went
 // missing.
 //
 // This is deliberately a separate module from the Beat grid: gridPulse.ts's
@@ -39,8 +39,8 @@ export interface MetronomeClockInput {
 
 export interface Metronome {
   /** False until the metronome has adopted a tempo, and again once it lets
-   *  go (see STOP_AFTER_SEC/UNSURE_STOP_SEC) — never flips back on its own;
-   *  only a fresh adoption (START_LOCK) restarts it. */
+   *  go (see STOP_AFTER_SEC/LOST_HOLD_SEC) — never flips back on its own;
+   *  only a fresh adoption (START_LOCK held for START_HOLD_SEC) restarts it. */
   readonly running: boolean;
   /** The tempo it's actually ticking at — held steady between corrections,
    *  0 while idle. Not the same object as `clock.bpm`, which keeps moving
@@ -80,25 +80,20 @@ export interface Metronome {
 export const METRONOME_BEATS_PER_BAR = 4;
 
 // ---- Idle -> running -----------------------------------------------------
-// tempoLock the clock has to clear before the metronome trusts it enough to
-// adopt its tempo/beat line. Tunable 0.45-0.6: raising it makes a fresh lock
-// wait longer (fewer false starts on a noisy intro); lowering it starts
-// sooner but risks adopting a tempo the comb hasn't actually settled on yet.
-// Raised from an initial 0.5 to its own top of range against
-// tests/tempoEval.test.ts's random track: the render-tick tracker's own
-// tempoLock spikes as high as ~0.9 on unstructured hits for a few frames at
-// a time (see that file's own metronome tests for the measured numbers), so
-// even 0.6 doesn't stop every false start on that path — reported there
-// rather than pushed past its documented range.
+// tempoLock the clock has to hold — for START_HOLD_SEC straight, not just
+// touch — before the metronome adopts its tempo and beat line. The hold is
+// what keeps it from starting on unstructured hits: the tracker's tempoLock
+// can spike for a few frames there, and a spike is not a tempo.
 export const START_LOCK = 0.6;
+export const START_HOLD_SEC = 1.5;
 
 // ---- Corrections while running -------------------------------------------
 // tempoLock the clock has to hold for the metronome to accept *any*
-// correction at all — below this it free-runs untouched (the flywheel).
-// Deliberately the same value as START_LOCK today (one "is the clock worth
-// listening to" line), but a separate constant since nothing here requires
-// them to move together.
-export const FOLLOW_LOCK = 0.5;
+// correction — below it, it free-runs untouched (the flywheel). Set above
+// START_LOCK on purpose: as a clock loses the beat (a pads-only breakdown),
+// its confidence slides down while its phase is already drifting, and a
+// metronome still following it on the way down inherits that drift.
+export const FOLLOW_LOCK = 0.75;
 // Phase correction while confident: how fast the beat-line error (clock.beats
 // - beats, wrapped to the nearest whole beat) is folded in, and the hard cap
 // on how much that can move `beats` in one second — beats/s, so
@@ -125,24 +120,22 @@ export const RESYNC_RATIO = 0.06;
 export const RESYNC_SEC = 2;
 
 // ---- Running -> idle ------------------------------------------------------
-// Stops STOP_AFTER_SEC after the tracker's own *raw* bpm (not the clock's
-// smoothed one, which lags behind on its own decay) has read 0 — silence, or
-// a track that's ended. Also stops after tempoLock has sat below UNSURE_LOCK
-// for UNSURE_STOP_SEC straight — a tempo the tracker has been unsure about
-// for a long stretch (not just one bad bar) rather than briefly. Tunable
-// 8-16: raising UNSURE_STOP_SEC keeps the flywheel spinning longer through a
-// rough patch; lowering it lets go sooner once the tracker looks lost.
-// Lowered from an initial 12 to its own bottom of range against
-// tests/tempoEval.test.ts's random track, same tuning pass as START_LOCK
-// above: on the fixed-hop analyzer path this alone gets random's
-// metroRunShare under its target at every rate. On the render-tick path it
-// doesn't — that track's own longest continuous stretch below UNSURE_LOCK
-// only runs a few seconds, well short of even this floor, so no value in
-// range stops it once a false start has happened; see tempoEval.test.ts's
-// own comment on its render-tick metronome tests.
+// Stops STOP_AFTER_SEC after the tracker's own raw bpm (FeatureFrame.bpm —
+// the fixed-hop analyser's when one is live) has read 0: silence, or a track
+// that has ended.
 export const STOP_AFTER_SEC = 1.5;
-export const UNSURE_LOCK = 0.1;
-export const UNSURE_STOP_SEC = 8;
+// It also stops when the tracker has lost the beat for good: a running
+// average of tempoLock (time constant LOCK_AVG_SEC) below UNSURE_AVG_LOCK —
+// an average, because a lost tracker's lock is spiky rather than flat zero —
+// while the tracker's own tempo disagrees with the metronome's (outside
+// RESYNC_RATIO), for LOST_HOLD_SEC straight. Agreement on tempo keeps it
+// running however unsure the tracker is about *where* the beat is (that is
+// what the flywheel is for), and the hold rides out a breakdown that briefly
+// pulls the tracker onto a wrong tempo it drops as soon as the drums return —
+// stopping there would leave a hole while a restart waits out START_HOLD_SEC.
+export const LOST_HOLD_SEC = 4;
+export const LOCK_AVG_SEC = 4;
+export const UNSURE_AVG_LOCK = 0.3;
 
 // ---- Level ------------------------------------------------------------
 export const LEVEL_RISE_RATE = 2; // 1/s, while running
@@ -169,7 +162,9 @@ export function createMetronome(): Metronome {
   let lastBarFloor = 0;
   let resyncTimer = 0;
   let rawBpmZeroTimer = 0;
-  let unsureTimer = 0;
+  let startTimer = 0;
+  let lockAvg = 0;
+  let lostTimer = 0;
 
   // Arms tick detection against the *current* `beats` without emitting one —
   // called on adoption and on a re-sync jump, both of which move `beats`
@@ -193,14 +188,17 @@ export function createMetronome(): Metronome {
       let barTick = false;
 
       if (!running) {
-        if (clock.tempoLock >= START_LOCK && clock.bpm > 0) {
+        startTimer = clock.tempoLock >= START_LOCK && clock.bpm > 0 ? startTimer + dtSec : 0;
+        if (startTimer >= START_HOLD_SEC) {
           running = true;
+          startTimer = 0;
+          lockAvg = clock.tempoLock;
+          lostTimer = 0;
           bpm = clock.bpm;
           beats = clock.beats;
           armTickDetection();
           resyncTimer = 0;
           rawBpmZeroTimer = 0;
-          unsureTimer = 0;
         }
       } else {
         beats += dtSec * (bpm / 60);
@@ -229,9 +227,11 @@ export function createMetronome(): Metronome {
         }
 
         rawBpmZeroTimer = rawBpm > 0 ? 0 : rawBpmZeroTimer + dtSec;
-        unsureTimer = clock.tempoLock < UNSURE_LOCK ? unsureTimer + dtSec : 0;
+        lockAvg += (clock.tempoLock - lockAvg) * Math.min(1, dtSec / LOCK_AVG_SEC);
 
-        if (rawBpmZeroTimer >= STOP_AFTER_SEC || unsureTimer >= UNSURE_STOP_SEC) {
+        const tempoAgrees = rawBpm > 0 && bpm > 0 && Math.abs(rawBpm / bpm - 1) <= RESYNC_RATIO;
+        lostTimer = lockAvg < UNSURE_AVG_LOCK && !tempoAgrees ? lostTimer + dtSec : 0;
+        if (rawBpmZeroTimer >= STOP_AFTER_SEC || lostTimer >= LOST_HOLD_SEC) {
           running = false;
           bpm = 0;
         } else {
