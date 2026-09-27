@@ -4901,6 +4901,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         get: (spec) => deps.getSceneSettingValue(sceneId, spec),
         set: (spec, value) => deps.onSceneSettingChange(sceneId, spec, value),
         appendRow: (rowContainer, spec) => appendSettingRow(rowContainer, sceneId, spec, specs),
+        // The exact same live reading a row's own sparkline draws — see
+        // WidgetCtx.driveValue's own doc comment (registry.ts).
+        driveValue: (spec) => lastDrives?.valueOf(spec.key) ?? 0,
+        probe: () => deps.getScene(sceneId)?.probe?.() ?? null,
+        command: (name, args) => deps.getScene(sceneId)?.command?.(name, args),
         onTick: (fn) => tickFns.push(fn),
         onDispose: (fn) => widgetDisposers.push(fn),
         // A whole-card rebuild rather than patching this section's own DOM

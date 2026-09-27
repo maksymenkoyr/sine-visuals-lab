@@ -75,6 +75,10 @@ export function buildRelationRows(spec: RelationRowsSpec): HTMLElement {
     seg.setAttribute("role", "group");
     seg.setAttribute("aria-label", label.textContent);
     seg.style.cssText = paletteListStyle;
+    // One equal column per word so the scale never wraps onto a second line
+    // (it read as two separate controls at panel width).
+    seg.style.display = "grid";
+    seg.style.gridTemplateColumns = `repeat(${words.length}, minmax(0, 1fr))`;
 
     const value = get(selected, j);
     const activeIdx = nearestWordIndex(words, value);
@@ -85,6 +89,9 @@ export function buildRelationRows(spec: RelationRowsSpec): HTMLElement {
       btn.type = "button";
       btn.textContent = w.label;
       btn.style.cssText = i === activeIdx ? paletteChipLitStyle : paletteChipStyle;
+      btn.style.minWidth = "0";
+      btn.style.paddingInline = "2px";
+      btn.style.textAlign = "center";
       btn.setAttribute("aria-pressed", String(i === activeIdx));
       btn.addEventListener("click", () => set(selected, j, w.value));
       seg.appendChild(btn);

@@ -49,6 +49,24 @@ real caller — see those files' own headers for the item/panel framework
 itself (generic, reusable by any scene), and `tests/sceneItems.test.ts` /
 `tests/sceneKeys.test.ts` for its tests.
 
+**Phase 3 (2026-09-27):** live pure-culture previews inside each specimen
+box, POP/TERR/VIG readouts, a population bar, Rebalance and the pipette —
+`src/render/scenes/physarum2Preview.ts` (a pure, DOM-free port of the
+"Physarum Lab" prototype's `createStrainPreview`) driven by
+`src/ui/widgets/previews.ts` (a preview-source registry, id "physarum2")
+through `resolveStrainEffective` (physarum2.ts, exported — the one
+strain-motion mapping the GPU packing and every box's preview both call, so
+a box can't drift from what the strain actually does in the main dish).
+`scene.ts`'s new optional `Scene.probe()`/`Scene.command()` (phone-local,
+never reaching the TV) are how `src/ui/widgets/itemBoxes.ts` reads
+population/territory and sends `"inject"`/`"rebalance"` — see physarum2.ts's
+own file header for the territory GPU downsample/readback, the population
+bookkeeping, and the screen->field mapping the pipette uses. Two settings
+were added for it: `seedSpread` ("Spread", replacing the old fixed
+`SEED_CLUSTER_RADIUS`) and `seedFrom` ("Auto-inject from"); `seed` itself was
+relabelled "Dose". See `tests/physarum2Preview.test.ts` and the Phase 3
+additions to `tests/physarum2.test.ts`.
+
 ## References
 
 https://github.com/fogleman/physarum (MIT) — studied for the multi-species/
@@ -137,20 +155,73 @@ and `powder.ts`'s curl noise).
   `resolve.preserveSymlinks: true`. No scene record existed yet for this
   under `docs/scenes/physarum2/` beyond the prototype artifacts noted in
   Materials below; this session added no new `/ref` material.
+- 2026-09-27 (Phase 3): live specimen boxes, readouts, pipette, Rebalance.
+  Refactored the per-strain resolve step first — `resolveStrainEffective`
+  (physarum2.ts) is now the one function both `resolveStrains` (the GPU
+  packing) and every specimen box's preview call, folding Excitability's
+  surge multiplier straight into the packed step distance so `uStrainSurge`/
+  `strainSurgeFor` could come out of SIM_FRAG entirely (one fewer uniform,
+  one fewer place the two paths could drift apart). `physarum2Preview.ts`
+  ports the prototype's `createStrainPreview` faithfully (same
+  `RESPAWN_PER_STEP` comment, same 3x3-blur-times-0.9-decay kernel) but takes
+  `StrainPreviewMotion` as a plain argument instead of computing it itself,
+  so it stays pure/DOM-free and independently testable; `previews.ts`
+  (new registry) is what converts `resolveStrainEffective`'s reference-texel
+  output into the preview's own cell units, via one constant
+  (`REF_TEXELS_PER_PREVIEW_CELL = 4`, picked by eye against a headless
+  screenshot — a box's grain now visibly matches each STRAINS entry's own
+  one-line character comment: PP-A1 reads as flowing strands, PP-B2 as a
+  reticulated mesh, PP-C3 as coarse spots, PP-D4 as fine fuzz).
+  `itemBoxes.ts`'s preview canvas uses the exact two-canvas smoothing trick
+  the prototype's own `draw()` used (offscreen native-resolution
+  `putImageData`, then `drawImage` onto the visible, CSS-scaled canvas) and
+  steps (not draws) only every other device-menu tick — measured headless at
+  `?quality=low`, panel closed vs the Scene card open with all four
+  previews ticking: mean/median frame time were within noise of each other
+  (~8.3 ms both ways over 480 frames; p95 identical at ~9.2 ms), so no
+  further quality-tier scaling was needed.
+  Territory reads a 16x16 box-downsample of the trail (a small dedicated
+  `TERRITORY_FRAG` pass — no reliance on GPU mipmap LOD selection, which is
+  harder to reason about on a REPEAT-wrapped NPOT texture) through a
+  `PIXEL_PACK_BUFFER` + `fenceSync`, polled with a zero-timeout
+  `clientWaitSync` every render() so a readback never blocks the render
+  loop; a new one only kicks off at most every 500 ms and only while
+  `probe()` has actually been called in the last 2 s. Population is tracked
+  with no readback at all: `applyInjection`'s
+  `pop_k <- pop_k*(1-d) + (k==strain?d:0)` matches, in expectation, what the
+  GPU's uniform-random inject pass actually does. The pipette's tap-to-field
+  mapping (`screenToFieldUv`) is a pure JS twin of the composite shader's own
+  `roomAspect()`/`coverUv()`, plus `uncoverUv` as its exact algebraic
+  inverse — headless-verified end to end: arming the pipette, selecting
+  PP-C3 and 5 real taps at the same screen point moved its population from
+  25% to 29% (matching the "Dose" default of 0.01/tap by hand-calculation)
+  and left a visible teal colony at the tap point; Rebalance returned every
+  strain to exactly 25%. `seed` was relabelled "Dose" (it now also reads as
+  the pipette's own injected share, not just the beat's), and its old fixed
+  `SEED_CLUSTER_RADIUS` became the "Spread" setting (`seedSpread`) so the
+  pipette and the automatic beat reseed share one live control; a new
+  "Auto-inject from" enum (`seedFrom`) restricts which strain the *automatic*
+  trigger may move agents from (never converting species, unlike the
+  pipette — matching the prototype's own rule). The 3-line lab-log ticker
+  from the prototype was skipped (the brief allowed it: "skip if it
+  clutters") — the POP/TERR/VIG readouts plus the population bar already
+  cover what it would have narrated.
 
 ## Tuning notes
 
 Judge the look by whether black background still dominates and the four
 strains read as distinct, interlocking territories rather than one washed-out
-mass — `DEPOSIT`, `GLOW_MIN`/`GLOW_MAX` and the "seed" setting's default all
-trade off against this (see the file header's budget comments on each). The
-"seed" setting is unusually sensitive: because reseeded agents land in one
-small disc (`SEED_CLUSTER_RADIUS`) rather than scattering across the whole
-field the way `physarum.ts`'s own beat seeding does, a share that would look
-subtle field-wide saturates that disc solid white instead — this is why its
-`step` is finer (0.01) than every other setting here. Tuned so far only
-against the synthetic feed at `bpm=120`; not yet judged against real music
-through a mic.
+mass — `DEPOSIT`, `GLOW_MIN`/`GLOW_MAX` and "Dose"'s default all trade off
+against this (see the file header's budget comments on each). "Dose" (key
+`seed`) is unusually sensitive: because reseeded/injected agents land in one
+small disc ("Spread", `seedSpread` — replacing the old fixed
+`SEED_CLUSTER_RADIUS`) rather than scattering across the whole field the way
+`physarum.ts`'s own beat seeding does, a share that would look subtle
+field-wide saturates that disc solid white instead — this is why its `step`
+is finer (0.01) than every other setting here. The pipette (Phase 3) reads
+this exact same setting as its own injection share, so the same sensitivity
+applies there too. Tuned so far only against the synthetic feed at
+`bpm=120`; not yet judged against real music through a mic.
 
 ## Known issues and next steps
 
@@ -163,9 +234,6 @@ through a mic.
   plan's scope — a future session could explore alternate defaults (a
   `variant`-style setting, following Kaleidoscope's `Style` pattern) if more
   looks are wanted from this same mechanism.
-- Phase 3 (live per-strain previews inside each specimen box, territory/
-  population readouts, the manual pipette) is not built — the boxes only
-  show a code, colour and an empty placeholder swatch today.
 - The nutrient/excite/sensor/turn/stride/stain settings carry no `auto`
   table (unlike the global Form/Motion/Look/Post rows) — a scene-wide Auto
   toggle currently leaves every strain's own controls manual. Not asked for
@@ -174,6 +242,26 @@ through a mic.
   per-strain keys — Looks ignore unknown keys by design (a Look saved before
   this change simply won't touch any strain control), but no explicit test
   covers a Look captured *after* this change surviving a reload.
+- Vigour (VIG) comes from `probe()`'s `vig<k>`: the signal actually feeding
+  the strain's Nutrient in `resolveStrains`, scene default included. The
+  first Phase 3 build read `WidgetCtx.driveValue` instead, which is 0 until a
+  source is patched in, so VIG sat at 0.00 on defaults; fixed in review
+  (2026-09-27). The Nutrient row's own sparkline still follows the panel-wide
+  convention of showing only a patched source.
+- Territory's 16x16 downsample uses a real box filter (a small dedicated
+  `TERRITORY_FRAG` pass, not GPU-generated mipmaps) precisely to avoid
+  relying on LOD auto-selection on a REPEAT-wrapped NPOT texture — not
+  measured against an alternative approach, so if it ever shows up in a
+  profile, mipmaps are the next thing to try.
+- Pipette armed-state is a single in-memory map keyed by (scene, family) —
+  correct for Physarum 2 today, but a hypothetical second itemBoxes-based
+  scene would need its own distinct family name to avoid sharing the
+  "armed" bit (Physarum 2's own family is already "strain", so this is only
+  a risk for a future scene that reuses that exact name).
+- No 3-line lab-log ticker (leader-change-with-hysteresis, last
+  inject/rebalance events) — the plan allowed skipping it if it clutters;
+  the POP/TERR/VIG readouts and the population bar cover the same ground
+  without a fourth thing to read.
 
 ## Materials
 
@@ -187,25 +275,41 @@ through a mic.
   `docs/scenes/_shared/scripts/shot.mjs --scene physarum2 --bpm 120
   --settings '{…}'` (the session's scratch variant only differed in taking a
   list of capture times).
+- Phase 3's own headless checks (session scratch, not in this repo): a
+  panel-screenshot script (wide/phone, `#menuBtn` + scroll-to-Scene), a
+  pipette script (real press to select a strain and arm the pipette, real
+  taps on `#gl` at a known point, reads each box's own POP readout text
+  before/after), and a frame-time script (`requestAnimationFrame` deltas
+  in-page, panel closed vs the Scene card open) — the measurements these
+  produced are in the Decisions and pivots entry above.
 
 ## Resume here
 
 `npm run dev`, then `/?audio=synthetic&bpm=120#/v/physarum2`. Pure logic
-(`physarum2TrailSide`, `stepAccumulator`, `hueRotateRGB`, the sensor/turn/
-stride slider<->physical mappings) and the STRAINS/ATTRACT_ROWS shape are
-exercised by `tests/physarum2.test.ts`, including the NEUTRAL auto-tune
-invariant and the "defaults reproduce the old fixed motion" round trip;
+(`physarum2TrailSide`, `stepAccumulator`, `hueRotateRGB`,
+`resolveStrainEffective`, the sensor/turn/stride/seedSpread slider<->physical
+mappings, `equalPopulation`/`applyInjection`, `classifyTerritory`,
+`roomAspectJs`/`coverUvJs`/`uncoverUvJs`/`screenToFieldUv`) and the
+STRAINS/ATTRACT_ROWS shape are exercised by `tests/physarum2.test.ts`,
+including the NEUTRAL auto-tune invariant and the "defaults reproduce the old
+fixed motion" round trip; `physarum2Preview.ts`'s own sim (determinism, the
+respawn floor/ceiling claim) is `tests/physarum2Preview.test.ts`;
 `tests/sceneItems.test.ts`/`tests/sceneKeys.test.ts` cover the generic
-item/panel framework this scene is the first caller of. Next up here is
-Phase 3 (see Known issues): `src/render/scenes/physarum2Preview.ts` (a pure
-CPU sim reading the same mapping functions this file exports) feeding a live
-preview into each specimen box, plus the manual pipette — the plan at
-`~/.claude/plans/make-this-much-more-wondrous-pearl.md` (session-local, not
-in this repo) has the fuller sketch. A headless Playwright screenshot (see
+item/panel framework this scene is the first caller of. All three phases of
+the lab-controls plan are built now — what's left is Known issues above
+(mic-verified tuning, per-strain Auto, the skipped ticker) rather than a
+missing phase. A headless Playwright screenshot (see
 `docs/scenes/_shared/scripts/shot.mjs` for the pattern this followed) is the
 fastest way to judge a tuning change without a mic; for the panel itself,
 `#menuBtn` opens it and a real mouse down/wait/up (not a scripted `.click()`)
-is what actually exercises a box or Affinity-word press.
+is what actually exercises a box, Affinity word, Rebalance or Pipette press.
+The pipette's own canvas listener lives on `#gl` directly and outlives a
+panel close (only a Scene-card rebuild disposes it — `ctx.onDispose`), so a
+headless check can arm it, close the panel for an unobstructed tap, then
+reopen to read the readouts back. A `vite.shot.config.ts` wrapper
+(`server.fs.allow` for the main checkout, so `@fontsource` woff2s don't 403
+behind this worktree's symlinked `node_modules`) is the untracked fix for the
+panel rendering in system fonts headlessly — see headless-app-driving.md.
 
 ## History
 
@@ -215,3 +319,7 @@ is what actually exercises a box or Affinity-word press.
   above) — per-strain settings, the Strains/Affinity panel, and the generic
   `sceneItems.ts`/`src/ui/widgets/` framework it's built on. Still on
   `worktree-physarum2`, still not merged to main.
+- 2026-09-27: Phase 3 (see Decisions and pivots above) — live specimen-box
+  previews, POP/TERR/VIG readouts, the population bar, Rebalance and the
+  pipette, plus `seedSpread`/`seedFrom` and the "Dose" relabel. Still on
+  `worktree-physarum2`, still not merged to main (PR #153).

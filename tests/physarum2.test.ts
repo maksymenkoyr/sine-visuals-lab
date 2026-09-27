@@ -18,7 +18,22 @@ import {
   degToTurnSlider,
   strideSliderToDist,
   distToStrideSlider,
+  seedSpreadSliderToRadius,
+  radiusToSeedSpreadSlider,
+  resolveStrainEffective,
+  equalPopulation,
+  applyInjection,
+  classifyTerritory,
+  TERRITORY_THRESHOLD,
+  roomAspectJs,
+  roomUvJs,
+  coverUvJs,
+  uncoverUvJs,
+  screenToFieldUv,
+  type StrainRawValues,
+  type StrainDriveValues,
 } from "../src/render/scenes/physarum2.ts";
+import { FULL_VIEWPORT, type Viewport } from "../src/render/scene.ts";
 import { computeAutoTarget } from "../src/render/autoTune.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 import { qualitySettings } from "../src/render/quality.ts";
@@ -227,5 +242,222 @@ describe("physarum2's auto settings reproduce their default at NEUTRAL", () => {
     for (const spec of withAuto) {
       expect(computeAutoTarget(spec, NEUTRAL, 1)).toBe(spec.default);
     }
+  });
+});
+
+describe("Phase 3 settings: Dose (relabelled seed), Spread, Auto-inject from", () => {
+  const settings = physarum2Scene.settings ?? [];
+
+  it("relabels \"seed\" to \"Dose\" without changing its key, default or step", () => {
+    const spec = settings.find((s) => s.key === "seed")!;
+    expect(spec.label).toBe("Dose");
+    expect(spec.default).toBe(0.01);
+    expect(spec.step).toBe(0.01);
+  });
+
+  it("seedSpread's default reproduces the scene's old fixed reseed radius (0.12)", () => {
+    const spec = settings.find((s) => s.key === "seedSpread")!;
+    expect(spec.group).toBe("Motion");
+    expect(seedSpreadSliderToRadius(spec.default)).toBeCloseTo(0.12, 9);
+    // And the inverse direction agrees with the forward one.
+    expect(radiusToSeedSpreadSlider(0.12)).toBeCloseTo(spec.default, 9);
+  });
+
+  it("seedFrom is an enum of \"All strains\" plus every strain code, defaulting to \"All strains\"", () => {
+    const spec = settings.find((s) => s.key === "seedFrom")!;
+    expect(spec.group).toBe("Motion");
+    expect(spec.type).toBe("enum");
+    expect(spec.options).toEqual(["All strains", ...STRAINS.map((s) => s.code)]);
+    expect(spec.default).toBe(0);
+    expect(spec.max).toBe(SPECIES_COUNT);
+  });
+
+  it("Dose/Spread/Auto-inject from all sit in one contiguous Motion run with Crawl speed", () => {
+    const motionKeys = settings.filter((s) => s.group === "Motion").map((s) => s.key);
+    expect(motionKeys).toEqual(["speed", "seed", "seedSpread", "seedFrom"]);
+  });
+});
+
+describe("resolveStrainEffective — the one strain-motion mapping (shared by the GPU packing and the specimen-box previews)", () => {
+  const zeroRaw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
+  const zeroDrive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
+
+  it("at zero raw values and zero drive, reproduces the sliders' own MIN and the strain's unshifted colour", () => {
+    for (let k = 0; k < SPECIES_COUNT; k++) {
+      const eff = resolveStrainEffective(k, zeroRaw, zeroDrive);
+      expect(eff.sensorDist).toBeCloseTo(sensorSliderToDist(0), 9);
+      expect(eff.rotationRad).toBeCloseTo(turnSliderToDeg(0) * (Math.PI / 180), 9);
+      expect(eff.stepDist).toBeCloseTo(strideSliderToDist(0), 9); // surge = 1 at excite drive 0
+      expect(eff.feed).toBeCloseTo(1, 9); // lerp(1, X, 0) === 1 regardless of X
+      expect(eff.color).toEqual(STRAINS[k]!.color);
+    }
+  });
+
+  it("matches the plain slider->physical conversion at every strain's stored default, undriven — the same invariant the old inline resolveStrains code kept, now through the shared function", () => {
+    const settings = physarum2Scene.settings ?? [];
+    for (let k = 0; k < SPECIES_COUNT; k++) {
+      const raw: StrainRawValues = {
+        ...zeroRaw,
+        sensor: settings.find((s) => s.key === `sensor${k}`)!.default,
+        turn: settings.find((s) => s.key === `turn${k}`)!.default,
+        stride: settings.find((s) => s.key === `stride${k}`)!.default,
+      };
+      const eff = resolveStrainEffective(k, raw, zeroDrive);
+      expect(eff.sensorDist).toBeCloseTo(sensorSliderToDist(raw.sensor), 9);
+      expect(eff.rotationRad).toBeCloseTo(turnSliderToDeg(raw.turn) * (Math.PI / 180), 9);
+      expect(eff.stepDist).toBeCloseTo(strideSliderToDist(raw.stride), 9);
+    }
+  });
+
+  it("Excitability's drive multiplies stepDist by the surge formula (1 + excite*drive*6), independent of sensor/turn", () => {
+    const raw: StrainRawValues = { ...zeroRaw, excite: 0.5, stride: 0.5 };
+    const drive: StrainDriveValues = { ...zeroDrive, excite: 1 };
+    const eff = resolveStrainEffective(0, raw, drive);
+    const expectedSurge = 1 + 0.5 * 1 * 6.0; // physarum2.ts's own SURGE_GAIN
+    expect(eff.stepDist).toBeCloseTo(strideSliderToDist(0.5) * expectedSurge, 6);
+  });
+
+  it("a non-zero Stain value or drive actually shifts the colour away from STRAINS' own base", () => {
+    const raw: StrainRawValues = { ...zeroRaw, stain: 0.2 };
+    const eff = resolveStrainEffective(0, raw, zeroDrive);
+    expect(eff.color).not.toEqual(STRAINS[0]!.color);
+  });
+});
+
+describe("population bookkeeping (equalPopulation/applyInjection)", () => {
+  it("equalPopulation splits evenly and sums to 1", () => {
+    const pop = equalPopulation(4);
+    expect(pop).toEqual([0.25, 0.25, 0.25, 0.25]);
+    expect(pop.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 9);
+  });
+
+  it("applyInjection moves exactly `dose` share into `strain`, keeping the total at 1", () => {
+    const pop = equalPopulation(4);
+    const next = applyInjection(pop, 2, 0.4);
+    // Every strain (including 2) keeps (1-0.4) of its own share; strain 2
+    // alone also gains the 0.4 that left everyone.
+    expect(next[0]).toBeCloseTo(0.25 * 0.6, 9);
+    expect(next[1]).toBeCloseTo(0.25 * 0.6, 9);
+    expect(next[2]).toBeCloseTo(0.25 * 0.6 + 0.4, 9);
+    expect(next[3]).toBeCloseTo(0.25 * 0.6, 9);
+    expect(next.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 9);
+  });
+
+  it("dose 0 is a no-op; dose 1 collapses everything onto the injected strain", () => {
+    const pop = [0.5, 0.2, 0.2, 0.1];
+    expect(applyInjection(pop, 1, 0)).toEqual(pop);
+    expect(applyInjection(pop, 1, 1)).toEqual([0, 1, 0, 0]);
+  });
+
+  it("clamps a non-finite or out-of-range dose instead of producing NaN or a share outside [0,1]", () => {
+    for (const dose of [NaN, -1, 5, Infinity, -Infinity]) {
+      const next = applyInjection(equalPopulation(4), 0, dose);
+      for (const p of next) {
+        expect(Number.isFinite(p)).toBe(true);
+        expect(p).toBeGreaterThanOrEqual(0);
+        expect(p).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("repeated rebalance-then-inject round trips stay within [0,1] and sum to 1 over many draws", () => {
+    let pop = equalPopulation(4);
+    for (let i = 0; i < 50; i++) {
+      pop = applyInjection(pop, i % 4, 0.1 + 0.05 * (i % 3));
+      const sum = pop.reduce((a, b) => a + b, 0);
+      expect(sum).toBeCloseTo(1, 6);
+      for (const p of pop) {
+        expect(p).toBeGreaterThanOrEqual(-1e-9);
+        expect(p).toBeLessThanOrEqual(1 + 1e-9);
+      }
+    }
+  });
+});
+
+describe("classifyTerritory (Phase 3's territory readout)", () => {
+  const SIDE = 16;
+  const CELLS = SIDE * SIDE;
+
+  function makeBuffer(fill: (i: number) => [number, number, number, number]): Uint8Array {
+    const buf = new Uint8Array(CELLS * 4);
+    for (let i = 0; i < CELLS; i++) {
+      const [r, g, b, a] = fill(i);
+      buf[i * 4] = r;
+      buf[i * 4 + 1] = g;
+      buf[i * 4 + 2] = b;
+      buf[i * 4 + 3] = a;
+    }
+    return buf;
+  }
+
+  it("an all-zero buffer classifies nobody (every share 0)", () => {
+    const buf = makeBuffer(() => [0, 0, 0, 0]);
+    expect(classifyTerritory(buf, CELLS, 4)).toEqual([0, 0, 0, 0]);
+  });
+
+  it("a buffer split evenly by channel gives each strain exactly its own quarter", () => {
+    const buf = makeBuffer((i) => {
+      const k = i % 4;
+      const px: [number, number, number, number] = [0, 0, 0, 0];
+      px[k] = 200;
+      return px;
+    });
+    const shares = classifyTerritory(buf, CELLS, 4);
+    for (const s of shares) expect(s).toBeCloseTo(0.25, 9);
+    expect(shares.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 9);
+  });
+
+  it("a value at or below TERRITORY_THRESHOLD never counts toward anybody", () => {
+    const buf = makeBuffer(() => [TERRITORY_THRESHOLD, 0, 0, 0]);
+    expect(classifyTerritory(buf, CELLS, 4)).toEqual([0, 0, 0, 0]);
+    const bufJustAbove = makeBuffer(() => [TERRITORY_THRESHOLD + 1, 0, 0, 0]);
+    expect(classifyTerritory(bufJustAbove, CELLS, 4)[0]).toBeCloseTo(1, 9);
+  });
+
+  it("ties break toward the lowest index, and shares needn't sum to 1 when some cells are background", () => {
+    const buf = makeBuffer((i) => (i === 0 ? [100, 100, 0, 0] : [0, 0, 0, 0]));
+    const shares = classifyTerritory(buf, CELLS, 4);
+    expect(shares[0]).toBeCloseTo(1 / CELLS, 9);
+    expect(shares[1]).toBe(0);
+    expect(shares.reduce((a, b) => a + b, 0)).toBeCloseTo(1 / CELLS, 9);
+  });
+});
+
+describe("screen -> field mapping (roomAspectJs/coverUvJs/uncoverUvJs)", () => {
+  it("at the full viewport, roomAspect is just the device's own resolution aspect", () => {
+    expect(roomAspectJs(1920, 1080, FULL_VIEWPORT)).toBeCloseTo(1920 / 1080, 9);
+  });
+
+  it("roomUvJs is the identity at the full viewport", () => {
+    const uv = { x: 0.3, y: 0.7 };
+    expect(roomUvJs(uv, FULL_VIEWPORT)).toEqual(uv);
+  });
+
+  it("uncoverUvJs is coverUvJs's exact inverse, for any aspect and any point", () => {
+    const aspects = [0.2, 0.5, 1, 1.3333, 2, 3.5];
+    const points = [
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+      { x: 0.5, y: 0.5 },
+      { x: 0.1, y: 0.9 },
+      { x: -0.3, y: 1.6 }, // outside [0,1] is fine too — this is pure algebra
+    ];
+    for (const aspect of aspects) {
+      for (const p of points) {
+        const field = coverUvJs(p, aspect);
+        const back = uncoverUvJs(field, aspect);
+        expect(back.x).toBeCloseTo(p.x, 9);
+        expect(back.y).toBeCloseTo(p.y, 9);
+      }
+    }
+  });
+
+  it("screenToFieldUv chains roomUvJs then coverUvJs (a Panorama slice, not just the full viewport)", () => {
+    const viewport: Viewport = { x: 0.5, y: 0, w: 0.5, h: 1 };
+    const uv = { x: 0.2, y: 0.6 };
+    const expected = coverUvJs(roomUvJs(uv, viewport), roomAspectJs(800, 600, viewport));
+    const actual = screenToFieldUv(uv, viewport, 800, 600);
+    expect(actual.x).toBeCloseTo(expected.x, 9);
+    expect(actual.y).toBeCloseTo(expected.y, 9);
   });
 });

@@ -2,7 +2,8 @@ import { NUM_BANDS } from "../../audio/types.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
-import type { Scene, SceneContext, PanelSection } from "../scene.ts";
+import type { Scene, SceneContext, PanelSection, Viewport } from "../scene.ts";
+import { FULL_VIEWPORT } from "../scene.ts";
 import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../sceneCommon.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
 import { grainTextureSide } from "./chladni.ts";
@@ -59,11 +60,12 @@ import { packUnit, createBeatSeeder, type BeatSeeder } from "./physarum.ts";
 // else turns toward whichever side read stronger. Reseeding on a beat reuses
 // physarum.ts's own createBeatSeeder (the same rise-detector, the same
 // refractory) but doesn't scatter the chosen agents across the whole field
-// the way physarum.ts's reseed does: they drop into a small disc
-// (SEED_CLUSTER_RADIUS) around one hash-chosen point per epoch, so a beat
-// reads as a new colony visibly sprouting from a point rather than a
+// the way physarum.ts's reseed does: they drop into a small disc (the
+// "Spread" setting's radius) around one hash-chosen point per epoch, so a
+// beat reads as a new colony visibly sprouting from a point rather than a
 // field-wide reseed. A reseeded agent's strain never changes — only where
-// it is and which way it's facing resets.
+// it is and which way it's facing resets ("Auto-inject from" can still
+// restrict which strain gets picked in the first place).
 //
 // Per-strain settings and the Strains panel (2026-09-27): every strain got
 // its own Nutrient/Sensor range/Turn angle/Speed/Excitability/Stain controls
@@ -84,21 +86,23 @@ import { packUnit, createBeatSeeder, type BeatSeeder } from "./physarum.ts";
 // Uniform budget: a setting tagged `item` (sceneItems.ts) has no GLSL
 // uniform of its own — SETTINGS_UNIFORMS_GLSL/DRIVE_GLSL below are built
 // from NON_ITEM_SETTINGS only. Every per-strain effective value is instead
-// resolved in JS each frame render() — reading `resolveSceneSetting` for the
-// stored amount and `drives.value(key, sceneDefault)` for its own drive,
-// exactly the JS-side twin of the generated `<key>Drive(sceneDefault)` GLSL
-// helper (see drives.ts's header; this scene just calls the same engine
-// method directly instead of through a per-setting GLSL macro, since each
-// strain's own `sceneDefault` differs — a per-strain band for Nutrient, 0
-// ["inert until patched"] for Sensor range/Turn angle/Speed/Stain, matching
-// caustics.ts's own `breathe` pattern) — and packed into plain vec4/vec3
-// uniform arrays every program already declared: `uSpecies[4]` (sensor
-// angle, sensor distance, rotation, step — unchanged shape, now uploaded
-// every frame instead of once at init), `uAttractRow[4]` (still scaled by
-// Hostility inside SIM_FRAG), plus new `uStrainSurge` (a beat's step-length
-// multiplier per strain), `uStrainFeed` (deposit multiplier per strain) and
-// `uStrainColor[4]` (the composite's per-strain colour, after any Stain hue
-// shift).
+// resolved in JS each frame render() by `resolveStrainEffective` (below) —
+// the one function that turns a strain's stored setting values plus its live
+// drive readings into motion (sensor distance, turn angle, step length,
+// already surge-multiplied), a deposit multiplier and a stain-shifted colour,
+// all in the same reference-texel units SIM_FRAG works in. `resolveStrains`
+// calls it once per strain per frame for the GPU packing below; the specimen
+// boxes' live pure-culture previews (`physarum2Preview.ts`,
+// `src/ui/widgets/previews.ts`) call the exact same function from the device
+// menu's own live setting/drive reads, so a box can never show a strain
+// behaving differently than the strain actually does in the main dish. Packed
+// into plain vec4/vec3 uniform arrays every program already declared:
+// `uSpecies[4]` (sensor angle, sensor distance, rotation, step — the step
+// already includes Excitability's beat-surge multiplier, so SIM_FRAG never
+// needs a separate per-strain surge uniform), `uAttractRow[4]` (still scaled
+// by Hostility inside SIM_FRAG), `uStrainFeed` (deposit multiplier per
+// strain) and `uStrainColor[4]` (the composite's per-strain colour, after any
+// Stain hue shift).
 //
 // Render: black background; each channel's trail goes through a fixed
 // exposure and a 1/2.2 gamma before being weighted by its strain's own
@@ -107,6 +111,41 @@ import { packUnit, createBeatSeeder, type BeatSeeder } from "./physarum.ts";
 // than his. The final clamp is a hard min(), not physarum.ts's softer
 // Reinhard roll-off — that's what keeps the strains reading as discrete,
 // saturated territories instead of bleeding toward white where they overlap.
+//
+// Phase 3 (2026-09-27): probe()/command() (scene.ts) — phone-local, cheap,
+// never reaching the TV — give the device menu's Strains widget three more
+// things without a second settings system:
+//
+// - **Territory** per strain: SIM_FRAG's trail, box-downsampled by
+//   TERRITORY_FRAG into a 16x16 RGBA8 target, read back through a
+//   PIXEL_PACK_BUFFER + fenceSync (never a synchronous readPixels — see
+//   ensureTerritoryReadback) at most every TERRITORY_INTERVAL_MS, and only
+//   while probe() has actually been called within PROBE_IDLE_MS (a closed
+//   panel or the TV never triggers a single readback). `classifyTerritory`
+//   (pure, tested) turns the 256 texels into a share per strain — the cells
+//   where that strain's channel reads largest, above TERRITORY_THRESHOLD.
+// - **Population** per strain: tracked analytically in JS, no readback —
+//   `equalPopulation`/`applyInjection` (pure, tested) instead reproduce, in
+//   expectation, exactly what the GPU's uniform-random inject/rebalance
+//   passes do to the real per-agent species distribution.
+// - **command("inject", {x,y,strain})**: x,y are 0..1 in the *screen* space
+//   of this device's own viewport (the same space SIM_FRAG's fragment
+//   coordinates start from before roomUv/coverUv) — `screenToFieldUv` (a pure
+//   JS twin of PHYSARUM2_GLSL's roomAspect()/coverUv(), with `uncoverUv` as
+//   its exact inverse) maps that tap through the last viewport/resolution
+//   this scene actually rendered at into field space, queuing a one-shot the
+//   next render() applies on its first SIM step: agents chosen by the
+//   existing per-agent hash, with probability the "seed" (Dose) setting's
+//   *stored* amount (no drive — the drive only decides the automatic
+//   trigger, see GLOBAL_SETTINGS below), move into a disc of radius
+//   "seedSpread" around the point and are converted to `strain`. The
+//   automatic beat-triggered reseed shares the same disc-placement code but
+//   never converts species (`seedFrom` restricts which strain it may move
+//   agents *from*, matching the "Physarum Lab" prototype's own rule that
+//   auto-injection keeps strains).
+// - **command("rebalance")**: a one-shot SIM pass setting every agent's
+//   species back to its texel index mod SPECIES_COUNT — the exact
+//   distribution seedAgents() starts from.
 const ID = "physarum2";
 
 const TWO_PI = Math.PI * 2;
@@ -208,10 +247,23 @@ export function stepAccumulator(prevAcc: number, dt: number, stepRate: number): 
   return { steps, acc };
 }
 
-/** Radius (unit-square units) of the disc a beat's reseeded agents land in —
- *  see the file header for why this scene clusters a reseed instead of
- *  scattering it field-wide like physarum.ts's own beat seeding. */
-const SEED_CLUSTER_RADIUS = 0.12;
+// --- "Spread"'s linear map onto the reseed/inject disc's radius (unit-
+// square units) — see the file header for why this scene clusters a reseed
+// instead of scattering it field-wide like physarum.ts's own beat seeding.
+// Replaces the old fixed SEED_CLUSTER_RADIUS so the pipette (Phase 3) and
+// the automatic beat reseed can share one live control. ---
+const SEED_SPREAD_MIN = 0.02;
+const SEED_SPREAD_MAX = 0.3;
+/** The old fixed disc radius, before "seedSpread" existed — kept only to
+ *  derive that setting's default (radiusToSeedSpreadSlider), so the shipped
+ *  radius is unchanged. */
+const LEGACY_SEED_CLUSTER_RADIUS = 0.12;
+export function seedSpreadSliderToRadius(v: number): number {
+  return lerp(SEED_SPREAD_MIN, SEED_SPREAD_MAX, v);
+}
+export function radiusToSeedSpreadSlider(r: number): number {
+  return (r - SEED_SPREAD_MIN) / (SEED_SPREAD_MAX - SEED_SPREAD_MIN);
+}
 
 // --- Sensor/step geometry across the Network scale slider — multiplies
 // every strain's own live Sensor range/Speed (below), never its fixed
@@ -299,7 +351,10 @@ const EVAP_DITHER = 1.0;
 // setting scales it. Sized so a texel a trail keeps reinforcing settles well
 // below saturation before the exposure curve below, the same budget
 // reasoning as physarum.ts's DEPOSIT_FLOOR_RATE/DEPOSIT_GAIN_RATE. ---
-const DEPOSIT = 0.03;
+/** Exported for physarum2Preview.ts's callers: a preview computes its own
+ *  absolute per-step deposit as `DEPOSIT * StrainEffective.feed`, the same
+ *  product DEPOSIT_FRAG bakes in as a GLSL constant times `strainFeedFor(k)`. */
+export const DEPOSIT = 0.03;
 const FEED_BASE = 0.35;
 const FEED_GAIN = 1.65;
 
@@ -369,6 +424,169 @@ export function hueRotateRGB(rgb: readonly [number, number, number], shift: numb
 
 function cssColor([r, g, b]: readonly [number, number, number]): string {
   return `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
+}
+
+// ---------------------------------------------------------------------
+// The one strain-motion mapping — see the file header's "Uniform budget".
+// Called by resolveStrains (this file's GPU packing) and by the specimen
+// boxes' live pure-culture previews (src/ui/widgets/previews.ts), so a box
+// can never show a strain behaving differently than it does in the main
+// dish. Every distance here is in reference-texel units — the same
+// resolution-independent space SIM_FRAG's uSpecies/uStrainFeed already work
+// in (a caller converts to its own field's cell size with one documented
+// constant — physarum2Preview.ts's REF_TEXELS_PER_PREVIEW_CELL). Doesn't
+// touch the Network scale setting (a global multiplier only the GPU shader
+// applies) or the attraction table (a pure culture has no rival trail to
+// sense).
+// ---------------------------------------------------------------------
+
+/** A strain's stored setting amounts for one frame — resolveSceneSetting's
+ *  reading, before any drive is applied. */
+export interface StrainRawValues {
+  nutrient: number;
+  excite: number;
+  sensor: number;
+  turn: number;
+  stride: number;
+  stain: number;
+}
+
+/** A strain's live drive reading for each of the same six controls — the GPU
+ *  path reads `drives.value(key, sceneDefault)` (a per-strain band for
+ *  Nutrient, `anim.beatPulse` for Excitability, 0 elsewhere); the preview
+ *  reads `WidgetCtx.driveValue(spec)` (the same 0-for-"Scene" reading a
+ *  row's own sparkline shows) — see src/ui/widgets/registry.ts's header. */
+export interface StrainDriveValues {
+  nutrient: number;
+  excite: number;
+  sensor: number;
+  turn: number;
+  stride: number;
+  stain: number;
+}
+
+export interface StrainEffective {
+  /** Reference-texel units — SIM_FRAG's `cfg.y`. */
+  sensorDist: number;
+  rotationRad: number;
+  /** Reference-texel units per step, Excitability's surge multiplier already
+   *  applied — SIM_FRAG's `cfg.w`. */
+  stepDist: number;
+  /** Deposit multiplier — SIM_FRAG's `strainFeedFor(k)`; a caller multiplies
+   *  by DEPOSIT itself for an absolute per-step amount (the preview does; the
+   *  GPU deposit shader bakes DEPOSIT in as a GLSL constant instead). */
+  feed: number;
+  /** Stain-shifted colour over STRAINS[k]'s own base colour. */
+  color: readonly [number, number, number];
+}
+
+export function resolveStrainEffective(k: number, raw: StrainRawValues, drive: StrainDriveValues): StrainEffective {
+  const strain = STRAINS[k]!;
+  const feed = lerp(1, FEED_BASE + FEED_GAIN * drive.nutrient, raw.nutrient);
+  const surge = 1 + raw.excite * drive.excite * SURGE_GAIN;
+  const sensorEff = clamp01(pushToward1(raw.sensor, drive.sensor));
+  const sensorDist = sensorSliderToDist(sensorEff);
+  const turnEff = clamp01(pushToward1(raw.turn, drive.turn));
+  const rotationRad = turnSliderToDeg(turnEff) * DEG;
+  const strideEff = clamp01(pushToward1(raw.stride, drive.stride));
+  const stepDist = strideSliderToDist(strideEff) * surge;
+  const color = hueRotateRGB(strain.color, raw.stain + drive.stain * STAIN_DRIVE_GAIN);
+  return { sensorDist, rotationRad, stepDist, feed, color };
+}
+
+// ---------------------------------------------------------------------
+// Population bookkeeping (Phase 3): tracked analytically in JS, no GPU
+// readback — see the file header. Pure and tested (tests/physarum2.test.ts).
+// ---------------------------------------------------------------------
+
+export function equalPopulation(count: number): number[] {
+  return new Array(count).fill(1 / count);
+}
+
+/** `pop_k <- pop_k*(1-d) + (k===strain ? d : 0)` — matches, in expectation,
+ *  what SIM_FRAG's inject pass actually does: a uniform-random `d` share of
+ *  ALL agents (regardless of their current species) is moved into `strain`,
+ *  so every strain (including `strain` itself) keeps `(1-d)` of its own
+ *  share and `strain` alone gains the `d` that left everyone. `dose` is
+ *  clamped to [0,1] and treated as 0 if non-finite, so a stale/garbage
+ *  reading never pushes a population share out of [0,1]. */
+export function applyInjection(pop: readonly number[], strain: number, dose: number): number[] {
+  const d = Number.isFinite(dose) ? Math.max(0, Math.min(1, dose)) : 0;
+  return pop.map((p, k) => p * (1 - d) + (k === strain ? d : 0));
+}
+
+// ---------------------------------------------------------------------
+// Territory classification (Phase 3): pure over a downsampled RGBA8 buffer
+// — see the file header for the GPU-side downsample/readback this feeds.
+// ---------------------------------------------------------------------
+
+/** Below this (out of 255) a cell counts as background for every strain —
+ *  small enough that a lightly-used route still classifies, large enough to
+ *  exclude the evaporation dither floor's own noise (EVAP_DITHER/EVAP_FLOOR
+ *  above) once averaged over a downsample block. */
+export const TERRITORY_THRESHOLD = 6;
+
+/** `territory_k` = share of `buf`'s cells (RGBA8, `cellCount` texels, `count`
+ *  live channels) where channel k reads largest, strictly above
+ *  TERRITORY_THRESHOLD — cells with no channel above threshold count toward
+ *  nobody, so shares needn't sum to 1. Pure and tested on a synthetic buffer,
+ *  no GL context needed. */
+export function classifyTerritory(buf: ArrayLike<number>, cellCount: number, count: number): number[] {
+  const counts = new Array(count).fill(0);
+  for (let i = 0; i < cellCount; i++) {
+    let bestK = -1;
+    let bestV = TERRITORY_THRESHOLD;
+    for (let k = 0; k < count; k++) {
+      const v = buf[i * 4 + k] ?? 0;
+      if (v > bestV) {
+        bestV = v;
+        bestK = k;
+      }
+    }
+    if (bestK >= 0) counts[bestK]++;
+  }
+  return counts.map((c) => c / cellCount);
+}
+
+// ---------------------------------------------------------------------
+// Screen -> field mapping (Phase 3's pipette): a pure JS twin of
+// PHYSARUM2_GLSL's roomAspect()/coverUv() below, plus coverUv's exact
+// mathematical inverse (uncoverUv) — see the file header's command("inject")
+// paragraph. `viewport` matches Scene.render()'s own Viewport (scene.ts):
+// vec4(x,y,w,h) in the GLSL comes out the same order here.
+// ---------------------------------------------------------------------
+
+export function roomAspectJs(resW: number, resH: number, viewport: Viewport): number {
+  return (resW * viewport.h) / Math.max(resH * viewport.w, 1e-4);
+}
+
+export function roomUvJs(uv: { x: number; y: number }, viewport: Viewport): { x: number; y: number } {
+  return { x: viewport.x + uv.x * viewport.w, y: viewport.y + uv.y * viewport.h };
+}
+
+export function coverUvJs(ruv: { x: number; y: number }, aspect: number): { x: number; y: number } {
+  const s = Math.max(aspect, 1);
+  const rectW = aspect;
+  const rectH = 1;
+  return { x: (ruv.x * rectW + (s - rectW) * 0.5) / s, y: (ruv.y * rectH + (s - rectH) * 0.5) / s };
+}
+
+/** coverUvJs's exact inverse: field-space uv back to room-space uv. Only
+ *  used by tests/physarum2.test.ts's round-trip check — command("inject")
+ *  only ever needs the forward direction. */
+export function uncoverUvJs(fuv: { x: number; y: number }, aspect: number): { x: number; y: number } {
+  const s = Math.max(aspect, 1);
+  const rectW = aspect;
+  const rectH = 1;
+  return { x: (fuv.x * s - (s - rectW) * 0.5) / rectW, y: (fuv.y * s - (s - rectH) * 0.5) / rectH };
+}
+
+/** Screen-space uv (0..1 across this device's own viewport, matching
+ *  SIM_FRAG's vUv) all the way to field-space uv — roomUvJs then coverUvJs,
+ *  the exact chain the composite's own fragment shader runs to know which
+ *  field texel a screen pixel shows. */
+export function screenToFieldUv(uv: { x: number; y: number }, viewport: Viewport, resW: number, resH: number): { x: number; y: number } {
+  return coverUvJs(roomUvJs(uv, viewport), roomAspectJs(resW, resH, viewport));
 }
 
 // ---------------------------------------------------------------------
@@ -530,11 +748,11 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
   },
   {
     key: "seed",
-    label: "Beat seeding",
-    description: "Share of agents a beat relocates into a fresh cluster, sprouting a new colony",
+    label: "Dose",
+    description: "Share of agents relocated into a fresh cluster — by a beat, or by the pipette in the Strains panel above",
     group: "Motion",
     // A finer step than this scene's usual 0.05: the reseed disc's area is
-    // only a few percent of the trail map (SEED_CLUSTER_RADIUS), so this setting
+    // only a few percent of the trail map ("Spread", below), so this setting
     // is far more sensitive per unit than physarum.ts's own field-wide seed.
     step: 0.01,
     min: 0,
@@ -549,8 +767,35 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
     auto: { attack: 0.25, dynamics: 0.15 },
     // The trigger is this scene's own beatSeeder (a *rise* in the decaying
     // beat pulse, onset folded in as a bonus) — physarum.ts's own "seed"
-    // setting, same reasoning, same default.
+    // setting, same reasoning, same default. command("inject") (the pipette,
+    // Phase 3) reads this setting's plain stored amount too, with no drive
+    // involved — the drive only ever gates the *automatic* trigger, never the
+    // pipette's own one-shot command. See the file header.
     drive: { default: "scene", sceneLabel: "Scene: a rise in the beat pulse (bonus on a raw onset)", sceneSources: ["feature.onset"] },
+  },
+  {
+    key: "seedSpread",
+    label: "Spread",
+    description: "Radius of the disc a beat's reseed, or the pipette's injection, lands agents in",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.02,
+    // Reproduces the scene's old fixed disc radius (LEGACY_SEED_CLUSTER_RADIUS)
+    // so the shipped look is unchanged.
+    default: radiusToSeedSpreadSlider(LEGACY_SEED_CLUSTER_RADIUS),
+  },
+  {
+    key: "seedFrom",
+    label: "Auto-inject from",
+    description: "Which strains the automatic beat trigger may move agents from — it never converts species (only the pipette does)",
+    group: "Motion",
+    type: "enum",
+    options: ["All strains", ...STRAINS.map((s) => s.code)],
+    min: 0,
+    max: SPECIES_COUNT,
+    step: 1,
+    default: 0,
   },
   // --- Look ---
   {
@@ -676,6 +921,11 @@ const PANEL: readonly PanelSection[] = [
       labels: STRAINS.map((s) => s.code),
       colours: STRAINS.map((s) => cssColor(s.color)),
       rowOrder: ["nutrient", "sensor", "turn", "stride", "excite", "stain"],
+      // Phase 3's live pure-culture preview — src/ui/widgets/previews.ts's
+      // registry id. itemBoxes.ts falls back to the old empty placeholder
+      // swatch when a widget's options carry no preview id at all, so this
+      // doesn't disturb any other itemBoxes-based scene.
+      preview: "physarum2",
       relations: {
         prefix: "att",
         title: "Affinity",
@@ -813,14 +1063,25 @@ uniform sampler2D uTrail;
 uniform float uSeedEpoch;
 uniform float uSeedFresh;
 uniform float uNoiseSeed;
+uniform float uAgentSide;
 uniform vec4 uSpecies[${SPECIES_COUNT}];
 uniform vec4 uAttractRow[${SPECIES_COUNT}];
-uniform vec4 uStrainSurge;
+// Phase 3's pipette/Rebalance one-shots (scene.ts's command()) — see the file
+// header's command("inject")/command("rebalance") paragraphs. uInjectX/Y are
+// field-space uv, already mapped from the tap's screen coordinate on the CPU
+// side (screenToFieldUv) so this shader never needs room/viewport uniforms of
+// its own for it.
+uniform float uInjectFresh;
+uniform float uInjectX;
+uniform float uInjectY;
+uniform float uInjectStrain;
+uniform float uRebalanceFresh;
 ${PHYSARUM2_GLSL}
 
 const float SCALE_MIN = ${SCALE_MIN.toFixed(4)};
 const float SCALE_MAX = ${SCALE_MAX.toFixed(4)};
-const float SEED_CLUSTER_RADIUS = ${SEED_CLUSTER_RADIUS.toFixed(4)};
+const float SEED_SPREAD_MIN = ${SEED_SPREAD_MIN.toFixed(4)};
+const float SEED_SPREAD_MAX = ${SEED_SPREAD_MAX.toFixed(4)};
 
 vec4 speciesConfig(int k) {
   if (k == 0) return uSpecies[0];
@@ -836,17 +1097,6 @@ vec4 attractRowFor(int k) {
   return uAttractRow[3];
 }
 
-// A strain's own beat-driven step-length multiplier — computed in JS each
-// frame from its Excitability setting and drive (see the file header's
-// "Uniform budget"), packed into one vec4 the same way uSpecies/uAttractRow
-// already are.
-float strainSurgeFor(int k) {
-  if (k == 0) return uStrainSurge.x;
-  if (k == 1) return uStrainSurge.y;
-  if (k == 2) return uStrainSurge.z;
-  return uStrainSurge.w;
-}
-
 void main() {
   ivec2 texel = ivec2(gl_FragCoord.xy);
   vec4 cp = texelFetch(uAgentPos, texel, 0);
@@ -854,6 +1104,17 @@ void main() {
   vec2 pos = vec2(unpackUnitR(cp.rg, 1.0), unpackUnitR(cp.ba, 1.0));
   float heading = unpackUnitR(cd.rg, TWO_PI);
   int k = decodeSpecies(cd.b);
+
+  // Rebalance (Phase 3): a one-shot, full-field pass — every agent, not a
+  // hash-selected share — back to the same texel-index-mod-SPECIES_COUNT
+  // assignment seedAgents() starts from. Applied before this step's sensing
+  // so a rebalanced agent turns using ITS NEW strain's own motion this frame,
+  // same as physarum.ts's own convention for a strain that just changed.
+  if (uRebalanceFresh > 0.5) {
+    int side = int(uAgentSide);
+    int idx = texel.y * side + texel.x;
+    k = idx - (idx / SPECIES_COUNT) * SPECIES_COUNT;
+  }
 
   vec4 cfg = speciesConfig(k);
   float scale = mix(SCALE_MIN, SCALE_MAX, uScale);
@@ -892,29 +1153,56 @@ void main() {
   }
   heading = mod(mod(heading, TWO_PI) + TWO_PI, TWO_PI);
 
-  float moveStep = cfg.w / REF_FIELD * scale * strainSurgeFor(k);
+  // cfg.w already carries Excitability's beat-surge multiplier — see the
+  // file header's "Uniform budget" (resolveStrainEffective folds it in on
+  // the CPU side, so this shader needs no separate per-strain surge uniform).
+  float moveStep = cfg.w / REF_FIELD * scale;
   pos = fract(pos + vec2(cos(heading), sin(heading)) * moveStep);
+
+  float seedRadius = mix(SEED_SPREAD_MIN, SEED_SPREAD_MAX, uSeedSpread);
 
   // Seed on the beat: only on the exact tick uSeedFresh says the epoch
   // stepped (physarum.ts's file header covers why), and only for the
   // frame's first sim step — the caller only ever passes uSeedFresh=1 once
   // per firing. Reseeded agents cluster around one hash-chosen point per
   // epoch instead of scattering field-wide, so a beat reads as a colony
-  // sprouting from a point — see the file header. Strain is untouched.
+  // sprouting from a point — see the file header. Strain is untouched
+  // ("Auto-inject from" only restricts which strain may be picked, unlike
+  // the pipette's own inject block below, which always converts).
   if (uSeedFresh > 0.5) {
     float draw = hash21(seed + uSeedEpoch * 7.919 + 11.3);
-    if (draw < uSeed) {
+    bool fromOk = uSeedFrom < 0.5 || k == int(uSeedFrom + 0.5) - 1;
+    if (draw < uSeed && fromOk) {
       vec2 center = hash22(vec2(uSeedEpoch * 12.9898, uSeedEpoch * 78.233) + 17.0);
       vec2 seed2 = seed + uNoiseSeed * 3.13 + 91.7;
-      float r = SEED_CLUSTER_RADIUS * sqrt(hash21(seed2 + 3.7));
+      float r = seedRadius * sqrt(hash21(seed2 + 3.7));
       float theta = hash21(seed2 + 9.1) * TWO_PI;
       pos = fract(center + vec2(cos(theta), sin(theta)) * r);
       heading = hash21(seed2 + 4.71) * TWO_PI;
     }
   }
 
+  // Pipette inject (Phase 3, command("inject")): the same disc-placement
+  // math as the beat reseed above, centred on the tapped point instead of a
+  // beat-hash centre, and — unlike the beat reseed — it DOES convert the
+  // chosen agents' species to uInjectStrain. A distinct hash offset from the
+  // beat-reseed block above keeps the two draws independent so an inject
+  // landing on the same frame as a beat reseed doesn't correlate which
+  // agents each one picks.
+  if (uInjectFresh > 0.5) {
+    float draw = hash21(seed + 233.71);
+    if (draw < uSeed) {
+      vec2 seed2 = seed + uNoiseSeed * 4.13 + 151.3;
+      float r = seedRadius * sqrt(hash21(seed2 + 3.7));
+      float theta = hash21(seed2 + 9.1) * TWO_PI;
+      pos = fract(vec2(uInjectX, uInjectY) + vec2(cos(theta), sin(theta)) * r);
+      heading = hash21(seed2 + 4.71) * TWO_PI;
+      k = int(uInjectStrain + 0.5);
+    }
+  }
+
   outPos = vec4(packUnitR(pos.x, 1.0), packUnitR(pos.y, 1.0));
-  outDir = vec4(packUnitR(heading, TWO_PI), cd.b, cd.a);
+  outDir = vec4(packUnitR(heading, TWO_PI), float(k) / float(SPECIES_COUNT - 1), cd.a);
 }
 `;
 
@@ -1026,6 +1314,36 @@ void main() {
 }
 `;
 
+/** Territory (Phase 3): a plain box downsample of the live trail into a
+ *  TERRITORY_SIDE x TERRITORY_SIDE target, read back async (see the file
+ *  header's Territory paragraph and createPhysarum2Scene's pollTerritory).
+ *  No COMMON_UNIFORMS_GLSL/settings/drive splice — this pass is a standalone
+ *  utility over the trail texture, not part of the scene's own uniform
+ *  budget. A dynamic GLSL ES 3.00 loop is fine: at most 16x16 fragments, run
+ *  at most twice a second. */
+const TERRITORY_FRAG = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uTrail;
+uniform float uTrailSide;
+uniform float uBlock;
+
+void main() {
+  ivec2 outTexel = ivec2(gl_FragCoord.xy);
+  int block = int(uBlock + 0.5);
+  int side = int(uTrailSide);
+  vec4 sum = vec4(0.0);
+  for (int j = 0; j < block; j++) {
+    for (int i = 0; i < block; i++) {
+      ivec2 t = ivec2(outTexel.x * block + i, outTexel.y * block + j);
+      t = ivec2(mod(vec2(t), vec2(float(side))));
+      sum += texelFetch(uTrail, t, 0);
+    }
+  }
+  outColor = sum / float(block * block);
+}
+`;
+
 interface AgentSeed {
   pos: Uint8Array;
   dir: Uint8Array;
@@ -1090,10 +1408,36 @@ function createPhysarum2Scene(): Scene {
   const strainSensorDist = new Float32Array(SPECIES_COUNT);
   const strainRotationRad = new Float32Array(SPECIES_COUNT);
   const strainStepDist = new Float32Array(SPECIES_COUNT);
-  const strainSurge = new Float32Array(SPECIES_COUNT);
   const strainFeed = new Float32Array(SPECIES_COUNT);
   const strainColor = new Float32Array(SPECIES_COUNT * 3);
   const attRow = new Float32Array(SPECIES_COUNT * SPECIES_COUNT);
+
+  // Phase 3 scene-internal state — see the file header's own paragraph.
+  // `population` is the only one with visible bookkeeping (equalPopulation/
+  // applyInjection, pure and tested); the rest is GPU orchestration state
+  // that never leaves this closure.
+  let population: number[] = equalPopulation(SPECIES_COUNT);
+  const vigour = new Float32Array(SPECIES_COUNT);
+  let lastViewport: Viewport = FULL_VIEWPORT;
+  let lastResW = 1;
+  let lastResH = 1;
+  let pendingInject: { fieldX: number; fieldY: number; strain: number } | null = null;
+  let pendingRebalance = false;
+  // Territory: a 16x16 downsample of the trail, read back through a
+  // PIXEL_PACK_BUFFER + fenceSync so the GPU never stalls the CPU (the file
+  // header's own paragraph) — kicked off at most every TERRITORY_INTERVAL_MS,
+  // and only while probe() has been called within the last PROBE_IDLE_MS.
+  let territory: number[] = equalPopulation(SPECIES_COUNT);
+  let territoryProg: GLProgram | null = null;
+  let territoryTex: WebGLTexture | null = null;
+  let territoryFbo: WebGLFramebuffer | null = null;
+  let territoryPbo: WebGLBuffer | null = null;
+  let territorySync: WebGLSync | null = null;
+  let lastProbeMs = -Infinity;
+  let lastTerritoryKickMs = -Infinity;
+  const TERRITORY_SIDE = 16;
+  const TERRITORY_INTERVAL_MS = 500;
+  const PROBE_IDLE_MS = 2000;
 
   function samplerLoc(
     gl: WebGL2RenderingContext,
@@ -1167,6 +1511,82 @@ function createPhysarum2Scene(): Scene {
     trailReadIdx = 0;
   }
 
+  /** Lazily creates the 16x16 downsample target + its readback PBO — called
+   *  only the first time a territory readback actually kicks off, so a
+   *  session that never opens the panel (or opens it but never leaves it
+   *  idle long enough for probe() to matter) never allocates them. */
+  function ensureTerritoryTargets(gl: WebGL2RenderingContext): void {
+    if (territoryTex && territoryFbo && territoryPbo) return;
+    territoryTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, territoryTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, TERRITORY_SIDE, TERRITORY_SIDE, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    territoryFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, territoryFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, territoryTex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    territoryPbo = gl.createBuffer();
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, territoryPbo);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, TERRITORY_SIDE * TERRITORY_SIDE * 4, gl.STREAM_READ);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  }
+
+  /** Territory (Phase 3): polls any in-flight readback (never a blocking
+   *  wait — clientWaitSync with a 0 timeout just asks "is it done yet"), and
+   *  kicks off at most one more every TERRITORY_INTERVAL_MS, only while
+   *  probe() has actually been called within the last PROBE_IDLE_MS — see
+   *  the file header. Never calls gl.readPixels synchronously: the readback
+   *  always targets a bound PIXEL_PACK_BUFFER (returns immediately) and is
+   *  only ever drained through getBufferSubData once fenceSync says the GPU
+   *  is done, so this never stalls the render loop waiting on the GPU. */
+  function pollTerritory(gl: WebGL2RenderingContext, nowMs: number): void {
+    if (territorySync) {
+      const status = gl.clientWaitSync(territorySync, 0, 0);
+      if (status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED) {
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, territoryPbo);
+        const out = new Uint8Array(TERRITORY_SIDE * TERRITORY_SIDE * 4);
+        gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, out);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        gl.deleteSync(territorySync);
+        territorySync = null;
+        territory = classifyTerritory(out, TERRITORY_SIDE * TERRITORY_SIDE, SPECIES_COUNT);
+      } else if (status === gl.WAIT_FAILED) {
+        gl.deleteSync(territorySync);
+        territorySync = null;
+      }
+      return; // one readback in flight at a time
+    }
+    if (nowMs - lastProbeMs > PROBE_IDLE_MS) return;
+    if (nowMs - lastTerritoryKickMs < TERRITORY_INTERVAL_MS) return;
+    if (!territoryProg || !quadVao || trailSideCur === 0) return;
+    ensureTerritoryTargets(gl);
+    if (!territoryTex || !territoryFbo || !territoryPbo) return;
+    lastTerritoryKickMs = nowMs;
+
+    const block = Math.max(1, Math.floor(trailSideCur / TERRITORY_SIDE));
+    gl.bindFramebuffer(gl.FRAMEBUFFER, territoryFbo);
+    gl.viewport(0, 0, TERRITORY_SIDE, TERRITORY_SIDE);
+    territoryProg.use();
+    territoryProg.setF("uTrailSide", trailSideCur);
+    territoryProg.setF("uBlock", block);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
+    gl.uniform1i(samplerLoc(gl, territoryProg, "terr.uTrail", "uTrail"), 0);
+    drawFullscreenQuad(gl, quadVao);
+
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, territoryPbo);
+    gl.readPixels(0, 0, TERRITORY_SIDE, TERRITORY_SIDE, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    territorySync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+  }
+
   /** Resolves every per-strain setting for this frame into the scratch
    *  arrays above — see the file header's "Uniform budget". Pure JS: reads
    *  `resolveSceneSetting` (so a dev pin/override still applies even though
@@ -1176,35 +1596,35 @@ function createPhysarum2Scene(): Scene {
   function resolveStrains(frame: { energy: number }, anim: { low: number; mid: number; high: number; beatPulse: number }, drives: Parameters<Scene["render"]>[5]): void {
     const d = drives ?? PASSTHROUGH_DRIVES;
     for (let k = 0; k < SPECIES_COUNT; k++) {
-      const strain = STRAINS[k]!;
       const bandDefault = k === 0 ? anim.low : k === 1 ? anim.mid : k === 2 ? anim.high : frame.energy;
-
-      const nutrientValue = resolveSceneSetting(ID, nutrientSettings[k]!);
-      const nutrientDrive = d.value(nutrientSettings[k]!.key, bandDefault);
-      strainFeed[k] = lerp(1, FEED_BASE + FEED_GAIN * nutrientDrive, nutrientValue);
-
-      const exciteValue = resolveSceneSetting(ID, exciteSettings[k]!);
-      const exciteDrive = d.value(exciteSettings[k]!.key, anim.beatPulse);
-      strainSurge[k] = 1 + exciteValue * exciteDrive * SURGE_GAIN;
-
-      const sensorValue = resolveSceneSetting(ID, sensorSettings[k]!);
-      const sensorEff = clamp01(pushToward1(sensorValue, d.value(sensorSettings[k]!.key, 0)));
-      strainSensorDist[k] = sensorSliderToDist(sensorEff);
-
-      const turnValue = resolveSceneSetting(ID, turnSettings[k]!);
-      const turnEff = clamp01(pushToward1(turnValue, d.value(turnSettings[k]!.key, 0)));
-      strainRotationRad[k] = turnSliderToDeg(turnEff) * DEG;
-
-      const strideValue = resolveSceneSetting(ID, strideSettings[k]!);
-      const strideEff = clamp01(pushToward1(strideValue, d.value(strideSettings[k]!.key, 0)));
-      strainStepDist[k] = strideSliderToDist(strideEff);
-
-      const stainValue = resolveSceneSetting(ID, stainSettings[k]!);
-      const stainDrive = d.value(stainSettings[k]!.key, 0);
-      const [r, g, b] = hueRotateRGB(strain.color, stainValue + stainDrive * STAIN_DRIVE_GAIN);
-      strainColor[k * 3] = r;
-      strainColor[k * 3 + 1] = g;
-      strainColor[k * 3 + 2] = b;
+      const raw: StrainRawValues = {
+        nutrient: resolveSceneSetting(ID, nutrientSettings[k]!),
+        excite: resolveSceneSetting(ID, exciteSettings[k]!),
+        sensor: resolveSceneSetting(ID, sensorSettings[k]!),
+        turn: resolveSceneSetting(ID, turnSettings[k]!),
+        stride: resolveSceneSetting(ID, strideSettings[k]!),
+        stain: resolveSceneSetting(ID, stainSettings[k]!),
+      };
+      const drive: StrainDriveValues = {
+        nutrient: d.value(nutrientSettings[k]!.key, bandDefault),
+        excite: d.value(exciteSettings[k]!.key, anim.beatPulse),
+        sensor: d.value(sensorSettings[k]!.key, 0),
+        turn: d.value(turnSettings[k]!.key, 0),
+        stride: d.value(strideSettings[k]!.key, 0),
+        stain: d.value(stainSettings[k]!.key, 0),
+      };
+      // What probe() reports as the strain's vigour: the signal actually
+      // feeding its Nutrient this frame, scene default included (the
+      // widget's own drive reading is 0 until a source is patched in).
+      vigour[k] = drive.nutrient;
+      const eff = resolveStrainEffective(k, raw, drive);
+      strainSensorDist[k] = eff.sensorDist;
+      strainRotationRad[k] = eff.rotationRad;
+      strainStepDist[k] = eff.stepDist;
+      strainFeed[k] = eff.feed;
+      strainColor[k * 3] = eff.color[0];
+      strainColor[k * 3 + 1] = eff.color[1];
+      strainColor[k * 3 + 2] = eff.color[2];
 
       for (let j = 0; j < SPECIES_COUNT; j++) {
         attRow[k * SPECIES_COUNT + j] = resolveSceneSetting(ID, attSpecAt(k, j));
@@ -1224,6 +1644,7 @@ function createPhysarum2Scene(): Scene {
       simProg = createProgram(gl, SIM_FRAG);
       depositProg = createProgram(gl, DEPOSIT_FRAG, DEPOSIT_VERT);
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
+      territoryProg = createProgram(gl, TERRITORY_FRAG);
       samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
       // No vertex attributes at all — every agent is addressed by
@@ -1259,6 +1680,20 @@ function createPhysarum2Scene(): Scene {
       beatSeeder = createBeatSeeder();
       seedEpoch = 0;
       stepAcc = 0;
+
+      // Phase 3 state — see the file header. territoryTex/Fbo/Pbo are
+      // created lazily (ensureTerritoryTargets) the first time a readback is
+      // actually kicked off; dispose() frees them, so a fresh init() never
+      // needs to free a previous run's own.
+      population = equalPopulation(SPECIES_COUNT);
+      territory = new Array(SPECIES_COUNT).fill(0);
+      pendingInject = null;
+      pendingRebalance = false;
+      lastProbeMs = -Infinity;
+      lastTerritoryKickMs = -Infinity;
+      lastViewport = FULL_VIEWPORT;
+      lastResW = gl.drawingBufferWidth || 1;
+      lastResH = gl.drawingBufferHeight || 1;
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
@@ -1266,6 +1701,13 @@ function createPhysarum2Scene(): Scene {
       if (!quadVao || !depositVao || !beatSeeder) return;
       const { gl } = ctx;
       ensureTrailTargets(gl);
+
+      // Cached for command("inject") (screenToFieldUv), which can be called
+      // between render()s from a UI click, well outside this function's own
+      // scope — see the file header's command("inject") paragraph.
+      lastViewport = viewport;
+      lastResW = gl.drawingBufferWidth;
+      lastResH = gl.drawingBufferHeight;
 
       // See physarum.ts's file header for why frame.time and not anim.dtSec.
       const dt = lastFrameTime === null ? 1 / 60 : Math.max(0, Math.min(0.05, frame.time - lastFrameTime));
@@ -1314,7 +1756,13 @@ function createPhysarum2Scene(): Scene {
           attRow[k * SPECIES_COUNT + 3]!,
         );
       }
-      simProg.setV4("uStrainSurge", strainSurge[0]!, strainSurge[1]!, strainSurge[2]!, strainSurge[3]!);
+      simProg.setF("uAgentSide", agentSide);
+      // Phase 3's one-shots (constant across every step this frame runs;
+      // only uInjectFresh/uRebalanceFresh below vary, gated to the frame's
+      // first step) — see the file header's command() paragraphs.
+      simProg.setF("uInjectX", pendingInject ? pendingInject.fieldX : 0);
+      simProg.setF("uInjectY", pendingInject ? pendingInject.fieldY : 0);
+      simProg.setF("uInjectStrain", pendingInject ? pendingInject.strain : 0);
       gl.uniform1i(samplerLoc(gl, simProg, "sim.uAgentPos", "uAgentPos"), 0);
       gl.uniform1i(samplerLoc(gl, simProg, "sim.uAgentDir", "uAgentDir"), 1);
       gl.uniform1i(samplerLoc(gl, simProg, "sim.uTrail", "uTrail"), 2);
@@ -1345,6 +1793,8 @@ function createPhysarum2Scene(): Scene {
         gl.viewport(0, 0, agentSide, agentSide);
         simProg.use();
         simProg.setF("uSeedFresh", step === 0 && seedFresh ? 1 : 0);
+        simProg.setF("uInjectFresh", step === 0 && pendingInject ? 1 : 0);
+        simProg.setF("uRebalanceFresh", step === 0 && pendingRebalance ? 1 : 0);
         simProg.setF("uNoiseSeed", Math.random() * 100);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, agentPosTex[agentRead]);
@@ -1375,6 +1825,21 @@ function createPhysarum2Scene(): Scene {
         trailReadIdx = trailWrite;
       }
 
+      // A one-shot only actually reaches the GPU on the frame's first SIM
+      // step (above) — if this frame owed zero steps (sim paused, or Crawl
+      // speed very low), keep it pending rather than dropping it silently;
+      // it fires on the first frame that actually runs a step.
+      if (steps > 0) {
+        pendingInject = null;
+        pendingRebalance = false;
+      }
+
+      // Territory (Phase 3): poll any in-flight readback and maybe kick off
+      // another, using the freshest trail this frame produced — see the file
+      // header and pollTerritory's own doc comment. Never affects the
+      // uniforms/bindings the composite pass below sets up itself.
+      pollTerritory(gl, performance.now());
+
       // 4. Composite to the default framebuffer — always, even when this
       //    frame owed zero steps (the picture just doesn't advance).
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -1403,12 +1868,45 @@ function createPhysarum2Scene(): Scene {
       }
     },
 
+    // Phase 3 — phone-local only, never called for the TV (see scene.ts's
+    // own doc comment on probe/command). Both are cheap: probe() just reads
+    // already-resolved JS state, and command() only ever queues a flag for
+    // render()'s next call to pick up.
+    probe(): Record<string, number> | null {
+      lastProbeMs = performance.now();
+      const out: Record<string, number> = {};
+      for (let k = 0; k < SPECIES_COUNT; k++) {
+        out[`pop${k}`] = population[k]!;
+        out[`terr${k}`] = territory[k]!;
+        out[`vig${k}`] = vigour[k]!;
+      }
+      return out;
+    },
+
+    command(name: string, args: Record<string, number>): void {
+      if (name === "inject") {
+        const strain = Math.max(0, Math.min(SPECIES_COUNT - 1, Math.round(args.strain ?? 0)));
+        const x = clamp01(args.x ?? 0.5);
+        const y = clamp01(args.y ?? 0.5);
+        const field = screenToFieldUv({ x, y }, lastViewport, lastResW, lastResH);
+        pendingInject = { fieldX: field.x, fieldY: field.y, strain };
+        // The dose is this setting's plain stored amount — no drive; see the
+        // file header and the "seed" setting's own comment above.
+        const dose = resolveSceneSetting(ID, settingFor("seed"));
+        population = applyInjection(population, strain, dose);
+      } else if (name === "rebalance") {
+        pendingRebalance = true;
+        population = equalPopulation(SPECIES_COUNT);
+      }
+    },
+
     dispose(ctx: SceneContext) {
       const { gl } = ctx;
       diffuseProg?.dispose();
       simProg?.dispose();
       depositProg?.dispose();
       compositeProg?.dispose();
+      territoryProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
       if (depositVao) gl.deleteVertexArray(depositVao);
       for (let i = 0; i < 2; i++) {
@@ -1420,11 +1918,20 @@ function createPhysarum2Scene(): Scene {
         agentDirTex[i] = null;
       }
       freeTrailTargets(gl);
+      if (territorySync) gl.deleteSync(territorySync);
+      if (territoryFbo) gl.deleteFramebuffer(territoryFbo);
+      if (territoryTex) gl.deleteTexture(territoryTex);
+      if (territoryPbo) gl.deleteBuffer(territoryPbo);
+      territorySync = null;
+      territoryFbo = null;
+      territoryTex = null;
+      territoryPbo = null;
       samplerLocs.clear();
       diffuseProg = null;
       simProg = null;
       depositProg = null;
       compositeProg = null;
+      territoryProg = null;
       quadVao = null;
       depositVao = null;
       lastFrameTime = null;
@@ -1432,6 +1939,8 @@ function createPhysarum2Scene(): Scene {
       seedEpoch = 0;
       stepAcc = 0;
       trailSideCur = 0;
+      pendingInject = null;
+      pendingRebalance = false;
     },
   };
 }

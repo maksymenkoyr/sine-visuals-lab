@@ -57,6 +57,24 @@ export interface Scene {
    *  plain per-setting rows — see PanelSection above. Omit for a scene with
    *  nothing custom to show (every setting renders as an ordinary row). */
   panel?: readonly PanelSection[];
+  /** Optional read-only snapshot of live scene-internal state for the device
+   *  menu's own widgets (Physarum 2's specimen-box POP/TERR readouts —
+   *  src/ui/widgets/registry.ts's `WidgetCtx.probe`) — phone-local only, the
+   *  TV never calls this and neither does a Look/setting. Must be cheap:
+   *  a widget may call it every tick. A scene is free to return stale values
+   *  and throttle its own expensive work internally (see physarum2.ts's
+   *  territory readback) rather than doing it here. Omit for a scene with
+   *  nothing to report. */
+  probe?(): Record<string, number> | null;
+  /** Optional one-shot command from a widget (Physarum 2's pipette/
+   *  Rebalance buttons — `WidgetCtx.command`) — phone-local only; the TV
+   *  never calls this and it never becomes part of a setting or a Look.
+   *  `args` are always plain numbers, this scene's own settings convention —
+   *  a scene documents its own command names/args in its file header. Must
+   *  be cheap: queue the actual work for the next render() rather than doing
+   *  it here (see physarum2.ts's pendingInject/pendingRebalance). Omit for a
+   *  scene with no commands. */
+  command?(name: string, args: Record<string, number>): void;
   init(ctx: SceneContext): void;
   render(
     ctx: SceneContext,

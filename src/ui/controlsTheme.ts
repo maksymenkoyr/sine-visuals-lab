@@ -878,13 +878,41 @@ body.vc-keys-reveal [data-keycap]::after {
   font: 500 11.5px/1 ${FONT_MONO}; color: #fff; letter-spacing: 0.03em;
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* Sized placeholder for Phase 3's live per-item preview canvas. */
+/* A live preview (Phase 3) is a <canvas> in this same slot; an item family
+ * with no preview source keeps the plain sized placeholder <div> — either
+ * way the box's layout is untouched. */
 .vc-item-preview {
-  width: 100%; aspect-ratio: 2 / 1; border-radius: 4px;
+  display: block; width: 100%; aspect-ratio: 1; border-radius: 4px;
   background: color-mix(in srgb, var(--c, #fff) 10%, rgba(0, 0, 0, 0.35));
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 .vc-item-rows { display: grid; }
+
+/* Phase 3's per-box readouts (POP/TERR/VIG) and the population bar +
+ * Rebalance/Pipette row beneath the boxes — src/ui/widgets/itemBoxes.ts. */
+.vc-item-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-top: 4px; }
+.vc-item-stat { display: grid; justify-items: center; gap: 1px; font: 400 9px/1.1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.45); letter-spacing: 0.04em; }
+.vc-item-stat b { color: #fff; font-weight: 400; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+
+.vc-pop-wrap { display: grid; gap: 6px; justify-items: center; margin: 4px 0 10px; }
+.vc-popbar { display: flex; height: 10px; width: 100%; border-radius: 3px; overflow: hidden; background: rgba(255, 255, 255, 0.08); }
+.vc-popbar span { display: block; height: 100%; transition: width 0.2s ease; }
+.vc-poplabels { display: flex; flex-wrap: wrap; gap: 5px 12px; justify-content: center; font: 400 10px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.65); }
+.vc-poplabels i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 4px; box-shadow: 0 0 5px currentColor; }
+.vc-pop-actions { display: flex; gap: 8px; }
+
+/* The pipette's tap-point flash — position/left/top set inline per tap
+ * (document-body-absolute so it isn't clipped by the panel's own scroll
+ * container); everything else lives here so the keyframes can too. */
+.vc-pipette-ring {
+  position: fixed; width: 10px; height: 10px; margin: -5px 0 0 -5px;
+  border: 2px solid ${BANDS_AMBER}; border-radius: 50%; opacity: 0.95;
+  pointer-events: none; z-index: 9999; animation: vc-pipette-pulse 0.65s ease-out forwards;
+}
+@keyframes vc-pipette-pulse { to { width: 64px; height: 64px; margin: -32px 0 0 -32px; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .vc-pipette-ring { animation: none; opacity: 0; transition: opacity 0.5s ease-out; }
+}
 
 .vc-relweb-wrap { display: flex; justify-content: center; margin: 4px 0 10px; }
 .vc-relweb { width: 100%; max-width: 220px; }
