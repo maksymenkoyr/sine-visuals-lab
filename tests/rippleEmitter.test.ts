@@ -99,6 +99,78 @@ const TYPICAL_PARAMS: RippleProfileParams = {
   widthGaussianW: rippleWidthFor(0.5), // Ring width's own default
 };
 
+describe("advanceEmission salience — a ring is sized by how much a hit stands out", () => {
+  /** A beat-pulse-shaped driver from a list of hits ({t, h}): each hit
+   *  raises the pulse to max(current, h), then it decays like anim.beatPulse.
+   *  Returns the total emitted around each hit (from the hit's tick until the
+   *  next hit), in hit order. */
+  function emitPerHit(hits: { t: number; h: number }[], endSec: number, state = createRippleEmissionState()): number[] {
+    const out = hits.map(() => 0);
+    let pulse = 0;
+    let next = 0;
+    let current = -1;
+    advanceEmission(state, DT, 0);
+    for (let t = 0; t < endSec; t += DT) {
+      pulse *= Math.exp(-BEAT_PULSE_DECAY * DT);
+      while (next < hits.length && hits[next]!.t <= t) {
+        pulse = Math.max(pulse, hits[next]!.h);
+        current = next++;
+      }
+      const e = advanceEmission(state, DT, pulse);
+      if (current >= 0) out[current]! += e;
+    }
+    return out;
+  }
+
+  // Deterministic "noise": small hits between kicks, heights in 0.2..0.4.
+  const noisyKicks = (seconds: number) => {
+    const hits: { t: number; h: number; kick: boolean }[] = [];
+    let seed = 11;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let t = 0; t < seconds; t += 0.1) {
+      const kick = Math.abs((t / 0.5) - Math.round(t / 0.5)) < 1e-6;
+      hits.push({ t, h: kick ? 1 : 0.2 + 0.2 * rnd(), kick });
+    }
+    return hits;
+  };
+
+  it("background hits between kicks emit ~nothing once the floor has settled, kicks still emit full rings", () => {
+    const hits = noisyKicks(12);
+    const emitted = emitPerHit(hits, 12.5);
+    const settled = hits.map((hit, i) => ({ ...hit, e: emitted[i]! })).filter((h) => h.t > 4);
+    const noise = settled.filter((h) => !h.kick).map((h) => h.e);
+    const kicks = settled.filter((h) => h.kick).map((h) => h.e);
+    // Most background hits emit exactly nothing; the odd louder blip may make
+    // a faint ring, never anything near a kick's.
+    expect(noise.reduce((a, b) => a + b, 0) / noise.length).toBeLessThan(0.05);
+    expect(Math.max(...noise)).toBeLessThan(0.3);
+    expect(Math.min(...kicks)).toBeGreaterThan(0.7);
+  });
+
+  it("a steady run of equal kicks keeps emitting full rings — the peak is the kick itself", () => {
+    const hits = Array.from({ length: 60 }, (_, i) => ({ t: i * 0.5, h: 1 }));
+    const emitted = emitPerHit(hits, 30.5);
+    for (const e of emitted.slice(-10)) expect(e).toBeGreaterThan(0.85);
+  });
+
+  it("after a quiet spell a modest hit stands out again", () => {
+    const state = createRippleEmissionState();
+    // A busy passage of 0.3 hits pushes the floor up to ~0.3...
+    emitPerHit(Array.from({ length: 40 }, (_, i) => ({ t: i * 0.1, h: 0.3 })), 4, state);
+    // ...then 8s of silence, then one 0.3 hit.
+    const [afterQuiet] = emitPerHit([{ t: 8, h: 0.3 }], 8.5, state);
+    expect(afterQuiet).toBeGreaterThan(0.7);
+  });
+
+  it("a noise-only passage settles to ~nothing instead of ringing on every blip", () => {
+    const hits = noisyKicks(10).filter((h) => !h.kick);
+    const emitted = emitPerHit(hits, 10.5);
+    const late = emitted.filter((_, i) => hits[i]!.t > 5);
+    const mean = late.reduce((a, b) => a + b, 0) / late.length;
+    expect(mean).toBeLessThan(0.3);
+  });
+});
+
 describe("rippleEnvelope", () => {
   it("is 0 at or before age 0, and stays within [0, 1]", () => {
     expect(rippleEnvelope(0, 1)).toBe(0);

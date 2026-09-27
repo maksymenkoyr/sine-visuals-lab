@@ -252,6 +252,22 @@ reference-measurement workflow used by later scenes.
   `RIPPLE_CEIL_MAX` in `caustics.ts`) bounds many overlapping rings' summed
   crest/slope without touching a single ring's own peak, so one hit still
   looks bit-for-bit like the old pool's.
+- 2026-09-27 — The emitter still looked right only with a hit followed by
+  clean silence; with anything between hits "noise kind of resets it each
+  time". Cause, which every ripple design so far shared: the input is a hit
+  envelope (`max(anim.lowPulse, anim.beatPulse)` by default), and the hit
+  detectors fire on hats, ghost notes and small transients too, so each one
+  sent a fresh ring from the centre that buried the real hit's ring. Fix, in
+  `advanceEmission`: rings are sized by *salience* — how far a rise stands
+  above a floor (the running average of background rises, those below
+  `SALIENCE_BACKGROUND_FRACTION` of the peak) relative to a peak tracker (see
+  the `SALIENCE_*` constants' comment in `rippleEmitter.ts`). Measured on the
+  synthetic case in `tests/rippleEmitter.test.ts` (kicks of 1.0 every 0.5 s,
+  background hits 0.2–0.4 every 0.1 s, after 4 s): every kick emitted 1.00;
+  background hits emitted 0 in most cases, the loudest 0.22. Equal kicks with
+  nothing between stay at full rings indefinitely (a hit near the peak never
+  raises the floor), and after 8 s of quiet a 0.3 hit that was background
+  before rings > 0.7 again.
 
 ## Tuning notes
 

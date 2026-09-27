@@ -162,13 +162,48 @@ const EMISSION_SMOOTH_TAU_SEC = 0.005;
 // "single hit" test's ~10% tolerance).
 const RISE_DEADBAND_PER_SEC = 0.5;
 
+// Salience: a ring is sized by how much a rise stands out from the recent
+// rises, not by its absolute height. In real music the hit detectors behind
+// the driver fire on everything — hats, ghost notes, small transients — and
+// every one of them makes the driver jump; sized by absolute height, each
+// sent a fresh ring from the centre every fraction of a second, burying the
+// ring the real hit sent (it read as the ripple being reset by noise; only a
+// hit followed by clean silence looked right). Two trackers, updated on each
+// rise event (a frame's rise past SALIENCE_EVENT_MIN):
+//   - the peak follows the *big* rises: it jumps straight to a bigger one
+//     and eases down slowly toward a smaller one;
+//   - the floor is the running average of the *background* rises only —
+//     those below SALIENCE_BACKGROUND_FRACTION of the peak (or below the
+//     floor itself). A hit near the peak never raises the floor, so a steady
+//     four-on-the-floor of equal kicks keeps ringing at full strength however
+//     long it runs.
+// A rise emits (rise − SALIENCE_MARGIN·floor) / (peak − SALIENCE_MARGIN·floor),
+// clamped to 0..1: background hits sit near the floor and emit ~nothing, a
+// hit at the peak emits a full ring. SALIENCE_SPREAD_MIN keeps that ratio
+// from amplifying tiny differences when every recent rise is about the same
+// size (a noise-only passage). Both trackers relax over time
+// (SALIENCE_*_RELAX_SEC), so after a quiet spell even a modest hit stands out
+// again.
+const SALIENCE_EVENT_MIN = 0.05; // a rise smaller than this doesn't move the trackers (the smoothing's own one-frame tail, sub-noise jitter)
+const SALIENCE_BACKGROUND_FRACTION = 0.6; // a rise below this share of the peak counts as background
+const SALIENCE_FLOOR_RATE = 0.2; // per background event, toward that rise
+const SALIENCE_PEAK_DOWN = 0.05; // per event, toward a smaller rise
+const SALIENCE_MARGIN = 1.5; // a rise must clear this multiple of the floor to ring at all
+const SALIENCE_FLOOR_RELAX_SEC = 3; // floor decays toward 0 with this time constant
+const SALIENCE_PEAK_RELAX_SEC = 6; // peak decays toward the floor with this time constant
+const SALIENCE_SPREAD_MIN = 0.3;
+
 export interface RippleEmissionState {
   smoothed: number;
   init: boolean;
+  /** Salience floor — the size of the frequent, background rises. */
+  floor: number;
+  /** Salience peak — the size of the big rises. */
+  peak: number;
 }
 
 export function createRippleEmissionState(): RippleEmissionState {
-  return { smoothed: 0, init: false };
+  return { smoothed: 0, init: false, floor: 0, peak: 0 };
 }
 
 /** Conditions a raw driver reading into "how much ring height to launch this
@@ -183,7 +218,9 @@ export function createRippleEmissionState(): RippleEmissionState {
  *  Pure aside from `state`, and exported so tests/rippleEmitter.test.ts can
  *  pin the load-bearing property directly: a clean 0->1 jump followed by a
  *  decay emits a total close to 1 (one old-style full-strength ring), while
- *  a constant signal or a slow ramp emits close to 0. */
+ *  a constant signal or a slow ramp emits close to 0. The rise is then sized
+ *  by salience (see SALIENCE_EVENT_MIN's comment): background hits emit ~0,
+ *  standout hits a full ring. */
 export function advanceEmission(state: RippleEmissionState, dtSec: number, signal: number): number {
   if (!state.init) {
     state.smoothed = signal;
@@ -194,7 +231,23 @@ export function advanceEmission(state: RippleEmissionState, dtSec: number, signa
   const rate = 1 - Math.exp(-dtSec / EMISSION_SMOOTH_TAU_SEC);
   state.smoothed = prev + (signal - prev) * rate;
   const delta = state.smoothed - prev;
-  return Math.max(0, delta - RISE_DEADBAND_PER_SEC * dtSec);
+  const rise = Math.max(0, delta - RISE_DEADBAND_PER_SEC * dtSec);
+
+  state.floor *= Math.exp(-dtSec / SALIENCE_FLOOR_RELAX_SEC);
+  state.peak = state.floor + (state.peak - state.floor) * Math.exp(-dtSec / SALIENCE_PEAK_RELAX_SEC);
+  if (rise <= 0) return 0;
+  // Sized against the trackers as they stood *before* this rise, so a hit
+  // bigger than anything recent reads as a full ring rather than as merely
+  // equal to a peak it just raised.
+  const bar = SALIENCE_MARGIN * state.floor;
+  const emitted = clamp01((rise - bar) / Math.max(state.peak - bar, SALIENCE_SPREAD_MIN));
+  if (rise >= SALIENCE_EVENT_MIN) {
+    if (rise < SALIENCE_BACKGROUND_FRACTION * state.peak || rise < state.floor) {
+      state.floor += (rise - state.floor) * SALIENCE_FLOOR_RATE;
+    }
+    state.peak = rise > state.peak ? rise : state.peak + (rise - state.peak) * SALIENCE_PEAK_DOWN;
+  }
+  return emitted;
 }
 
 // ---- Ring buffer ----------------------------------------------------------
