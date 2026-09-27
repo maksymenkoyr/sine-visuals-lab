@@ -260,7 +260,7 @@ export function packSlats(slats: readonly PackedSlat[]): Float32Array {
 
 /** Time constant of the beat-triggered height/brightness kick (sync
  *  hypothesis 1) — short enough to read as a strike, the same family as
- *  caustics.ts's RIPPLE_ATTACK_SEC/CHURN_DECAY_PER_SEC. */
+ *  caustics.ts's RIPPLE_ATTACK_SEC. */
 export const ONSET_ENV_TAU_SEC = 0.12;
 
 export interface OnsetEnvelope {

@@ -312,11 +312,11 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     expect(drives.value("driftPump", -1)).toBe(anim.lowPulse);
   });
 
-  it("driftChurn defaults to Beat, matching anim.onset exactly for fired()", () => {
-    const anim = animWith({ onset: true });
+  it("driftPump defaults to Bass hit, matching anim.lowOnset exactly for fired()", () => {
+    const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.9), onset: false });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
-    expect(drives.fired("driftChurn", false)).toBe(anim.onset);
+    expect(drives.fired("driftPump", false)).toBe(anim.lowOnset);
   });
 
   it("sparkle, injection, ripple and driftLevel default to Scene", () => {

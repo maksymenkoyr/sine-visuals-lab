@@ -9,7 +9,7 @@ spray-injection layer riding on top. Ships from the initial commit and is on mai
 
 - `src/render/scenes/caustics.ts` — the scene module (`createFullscreenScene`,
   `SETTINGS`, the `FRAG` template, and an `extraUniforms` closure that advances the
-  drift phase, Speed pump's own accumulator, beat churn, loudness-swell calibration and
+  drift phase, Speed pump's own accumulator, loudness-swell calibration and
   the ripple pool every frame).
 - Its response math is factored into small pure functions exported specifically so
   `tests/caustics.test.ts` can pin them directly: `focusSharp`, `fogRestingSharp`,
@@ -148,6 +148,21 @@ reference-measurement workflow used by later scenes.
   Beat churn's own envelope decay constant was renamed from
   `LURCH_DECAY_PER_SEC` to `CHURN_DECAY_PER_SEC` (same value) now that it's
   no longer shared with a lurch; its behavior is unchanged.
+- 2026-09-27 — Beat churn removed: it spiked `warpAmt` (the domain warp) on
+  every onset with its own ~110ms decay, reshaping the whole field each beat —
+  "too chaotic" against the rest of Motion's beat-locked dials, and a
+  duplicate of `uTurbulence`'s existing warpAmt channel besides (Mid
+  turbulence already reshapes the filaments, and its drive picker already
+  lets it react to Any hit instead of only the mid band). Wire Turbulence to
+  a hit source for the same beat-locked reshaping in its place.
+  `CHURN_DECAY_PER_SEC`/`CHURN_GAIN`/`uChurnDrive`/`churnPulse` are gone with
+  it.
+- 2026-09-27 — Drift speed, Speed boost and Speed pump grouped into a shared
+  colour family (`SceneSetting.family`, a new generic device-menu mechanism —
+  see `sceneSettings.ts`, `controlsTheme.ts`'s `FAMILY_ACCENTS` and
+  `deviceMenu.ts`'s `renderSceneSettings`) so the three read visibly as one
+  thing — "all that is about drift speed" — in the panel instead of three
+  unrelated Motion rows.
 
 ## Tuning notes
 
@@ -159,8 +174,8 @@ reference-measurement workflow used by later scenes.
   specifically to keep the ridge's `pow()` short of a step function — past that
   point it "pixel-ladders" into a rainbow-fringed stair-step, worst exactly where
   the domain warp bunches several octaves' contours together and exactly on a beat
-  (when sharp jumps). A maxed Focus snap against a maxed Beat churn is the case to
-  eyeball for it.
+  (when sharp jumps). A maxed Focus snap against a maxed Mid turbulence is the case
+  to eyeball for it.
 - Speed boost reads `advanceLoudSwell`'s own slow-contracting (tens-of-seconds)
   calibration of `FeatureFrame.level`, not `frame.energy`, so it settles into the
   room or playback's own observed range instead of re-normalizing away the very
@@ -184,10 +199,10 @@ reference-measurement workflow used by later scenes.
 
 ## Known issues and next steps
 
-- Beat ripple and Beat churn still hand-roll their own trigger/hold/decay logic
-  in this file rather than using the shared beat-listener module that later
-  scenes are meant to converge on; migrating them was flagged as a follow-up
-  but is not done.
+- Beat ripple still hand-rolls its own trigger/hold/decay logic in this file
+  rather than using the shared beat-listener module that later scenes are
+  meant to converge on; migrating it was flagged as a follow-up but is not
+  done.
 - Two older pull-request prototypes this scene's audio coupling grew from — the
   "Flash from level" crossfade and the "Sparkle from line" drive — landed as
   discrete alternative sources on those rows' own pickers rather than as separate

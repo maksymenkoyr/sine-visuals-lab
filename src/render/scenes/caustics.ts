@@ -54,15 +54,12 @@ import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHas
 // top of the Drift-speed base rather than multipliers on it (see
 // driftRatePerSec below) — a multiplier on a base of zero can only ever stay
 // zero, so additive is what lets either one still move the pool with Drift
-// speed parked at 0. driftChurn reshapes the filaments themselves on each
-// beat (uChurnDrive in FRAG) instead of moving the phase at all — a separate
-// channel from the rate terms above, driven by its own decaying pulse rather
-// than either of them. driftLevel also drives uLoudSwell (loudSwellDrive
+// speed parked at 0. driftLevel also drives uLoudSwell (loudSwellDrive
 // below), an ungated visual swell — a loud passage widens the pool's
 // aperture and lifts the dark-water floor into a glow; a quiet one tightens
-// and deepens it. Like Beat churn's reshaping, this is a look rather than
-// motion along the phase, so — not gated behind Drift speed or Speed pump — it
-// must still land for anyone who wants a still, breathing pool. uBass/uTurbulence/
+// and deepens it. This is a look rather than motion along the phase, so —
+// not gated behind Drift speed or Speed pump — it must still land for anyone
+// who wants a still, breathing pool. uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
 // / crest glints), and uDropReactivity ties everything to
 // sectionIntensity.ts's slow-tracked "which part of the song is this" signal
@@ -171,6 +168,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Drift speed",
     description: "How fast the filaments wander, independent of the beat. 0.5 = the scene's original speed, 1 = double that.",
     group: "Motion",
+    family: "Drift speed",
     min: 0,
     max: 1,
     step: 0.05,
@@ -187,6 +185,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Speed boost",
     description: "Drift runs faster the louder the music is right now, and drops straight back to Drift speed when it quietens; the pool's aperture and floor glow swell with it too",
     group: "Motion",
+    family: "Drift speed",
     min: 0,
     max: 1,
     step: 0.05,
@@ -208,6 +207,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Speed pump",
     description: "Each push accelerates the drift like a gas pedal; the extra speed then coasts back down to Drift speed",
     group: "Motion",
+    family: "Drift speed",
     min: 0,
     max: 1,
     step: 0.05,
@@ -219,26 +219,6 @@ const SETTINGS: SceneSetting[] = [
     // the natural pedal to push against; rewire it to energy or anything
     // else in the picker.
     drive: { default: "anim.lowOnset" },
-  },
-  {
-    key: "driftChurn",
-    label: "Beat churn",
-    description: "Each beat reorganizes the filaments in place, instead of only pushing them along",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0,
-    // Punchy music wants a beat-locked reshape just as much as it wants
-    // beat-locked motion elsewhere in this group — same auto weights
-    // (pulse/attack) for that reason — but its own independent runtime
-    // magnitude and a distinct visual channel; see uChurnDrive's comment in
-    // FRAG and extraUniforms.
-    auto: { pulse: 0.3, attack: 0.2 },
-    // The same anim.onset edge Focus snap and Beat flash use as their own
-    // plain Beat default, but with its own independent envelope
-    // (churnPulse, below).
-    drive: { default: "feature.onset" },
   },
   {
     key: "bass",
@@ -913,17 +893,6 @@ export function driftRatePerSec(s: DriftInputs): number {
   return Math.min(base + level + s.pumpVel, DRIFT_RATE_MAX);
 }
 
-// Beat churn's own envelope decay (see extraUniforms' churnPulse below and
-// uChurnDrive's comment in FRAG) — this used to be shared with the drift
-// impulse this additive rate replaced, which is why churn always snapped in
-// step with that older design; kept at the same value now that it's
-// churn's own constant, since nothing about how fast a beat's reshaping
-// should decay changed with the drift-rate rework.
-const CHURN_DECAY_PER_SEC = 9; // tau ~110ms — controls snap
-// Beat churn's gain on warpAmt (FRAG) — see uChurnDrive's own comment there,
-// and extraUniforms' churnPulse, for its own independent decaying envelope.
-const CHURN_GAIN = 0.8;
-
 /** A ring's strength over its life: a short attack from 0 (the strike),
  *  then an exponential fade slow enough that a ring is still clearly
  *  visible by the time it reaches the far corner of a 16:9 frame (p-space
@@ -1110,21 +1079,15 @@ void main() {
   // — removed at the time (see this file's git history) because it moved
   // ridge *positions* on every beat as a side effect of an anti-aliasing fix
   // that didn't demonstrably work, i.e. unwanted motion for no proven
-  // benefit. uChurnDrive below reopens that same channel — warpAmt moving on
-  // the beat — but deliberately this time, as the entire point of the Beat
-  // churn setting, gated by its own slider rather than riding automatically
-  // on Focus snap. It's driven by its own decaying pulse (churnPulse in
-  // extraUniforms below), not Speed pump's own velocity: that vel is scaled by
-  // driftPump's amount and whatever source the "driftPump" picker is wired
-  // to, so deriving churn from it would tie Beat churn's strength to Speed pump
-  // and leave churn inert whenever driftPump was 0 or pointed away from a
-  // beat. churnPulse instead fires on the same anim.onset tick and shares
-  // its own CHURN_DECAY_PER_SEC decay, so the
-  // shove and the churn snap together in time without their magnitudes
-  // being coupled. aaSharp below still bounds the pixel-ladder artifact
-  // independent of warpAmt; a maxed Beat churn against a maxed Focus snap is
-  // the case to eyeball for it.
-  float warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2 + dropDrive * 0.7 + uChurnDrive * ${CHURN_GAIN.toFixed(2)});
+  // benefit. uTurbulence below already owns this same warpAmt channel and is
+  // drive-wirable (see the "turbulence" SceneSetting's own drive) — pick Any
+  // hit there instead of reaching for a second, dedicated beat-reshape
+  // control (a "Beat churn" setting used to duplicate exactly this channel
+  // with its own decaying pulse; removed for that reason — see this file's
+  // git history). aaSharp below still bounds the pixel-ladder artifact
+  // independent of warpAmt; a maxed Mid turbulence against a maxed Focus
+  // snap is the case to eyeball for it.
+  float warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2 + dropDrive * 0.7);
   for (int i = 0; i < ${RIDGE_OCTAVES}; i++) {
     if (i >= iterations) break;
     float band = sampleBands(float(i) / ${RIDGE_OCTAVES}.0);
@@ -1294,20 +1257,11 @@ void main() {
 
 export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG, {
   settings: SETTINGS,
-  extraUniformDecls: `uniform float uDriftFlow[${DRIFT_FLOW_LEN}];\nuniform float uChurnDrive;\nuniform float uLoudSwell;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
+  extraUniformDecls: `uniform float uDriftFlow[${DRIFT_FLOW_LEN}];\nuniform float uLoudSwell;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
   extraUniforms: (() => {
     let driftPhase = 0;
     const pump = createPumpState();
     const loudSwellState = createLoudSwellState();
-    // Beat churn's own envelope: a plain decaying pulse, jumping to 1 on
-    // anim.onset and decaying at its own CHURN_DECAY_PER_SEC — so a beat's
-    // reshape snaps with the same sharpness every time, gated only by
-    // driftChurn. Deliberately its own pulse rather than Speed pump's vel: that
-    // vel is scaled by driftPump's amount and whatever source the
-    // "driftPump" picker is wired to, so a churn derived from it would
-    // silently do nothing whenever driftPump was 0 or pointed away from a
-    // beat, defeating the point of a second, independent dial.
-    let churnPulse = 0;
     const ripples = createRipplePool();
     let prevDropOnset = false;
     const flowBuf = new Float32Array(DRIFT_FLOW_LEN);
@@ -1333,10 +1287,6 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
         dropReactivity: getSetting("dropReactivity"),
         sectionIntensity: anim.sectionIntensity,
       });
-      churnPulse *= Math.exp(-anim.dtSec * CHURN_DECAY_PER_SEC);
-      if (drives.fired("driftChurn", anim.onset)) churnPulse = 1;
-      const churnDrive = getSetting("driftChurn") * churnPulse;
-
       ripples.tick(anim.dtSec);
       // A drop is rarer and bigger than an ordinary beat — one stronger ring
       // in place of (not on top of) the beat that usually lands on the same
@@ -1359,7 +1309,6 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
 
       return {
         uDriftFlow: driftFlows(driftPhase, causticDensityScale(getSetting("causticDensity")), flowBuf),
-        uChurnDrive: churnDrive,
         uLoudSwell: loudSwellDrive(driftLevel, levelValue),
         uRippleRadius: ripples.radius,
         uRippleStrength: ripples.strength,

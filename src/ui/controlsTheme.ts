@@ -40,6 +40,15 @@ export const AUTO_SKY = "#59bbfb";
  *  readouts (src/ui/powerCard.ts). */
 export const POWER_TEAL = "#4dd4c0";
 
+/** Colours for a scene setting's `family` rail (sceneSettings.ts), handed out
+ *  in this order as each scene's families first appear (deviceMenu.ts's
+ *  renderSceneSettings), wrapping past the end for a scene with more
+ *  families than colours. Chosen to stay clear of the card accents above
+ *  (SCENE_VIOLET etc.) and of the drive-source colours (driveSources.ts) —
+ *  a family rail and a drive port/cable are two different things on the same
+ *  row and must never be mistaken for each other. */
+export const FAMILY_ACCENTS = ["#8ea2ff", "#f28bd0", "#c9e26b"] as const;
+
 /** Spectrum strip bar tints, one step darker than the card accents they echo. */
 export const STRIP_LOW = "#89e29d";
 export const STRIP_MID = "#c0a2f5";
@@ -301,6 +310,29 @@ const stylesheet = `
 .vc-block-n {
   display: inline-block; min-width: 1.1em; margin-right: 0.6em;
   color: rgba(255, 255, 255, 0.32); font-variant-numeric: tabular-nums;
+}
+
+/* A family rail (SceneSetting.family, sceneSettings.ts): a thin coloured
+ * spine tying a run of consecutive rows to one caption — Caustics' Drift
+ * speed/Speed boost/Speed pump, say. --vc-family is set per rail by
+ * deviceMenu.ts's renderSceneSettings, one of FAMILY_ACCENTS above in
+ * first-appearance order; every row inside gets that same colour as its own
+ * --vc-accent too (below), passed in as the row's own accent in place of
+ * the Scene card's usual SCENE_VIOLET (not a post-hoc override — the A/T
+ * chips are styled directly from that same accent, not from this CSS
+ * variable, so only passing it in up front keeps every part of the row in
+ * the same colour). padding-left is bigger than .vc-row's own 8px negative margin
+ * cancels out, so a row still sits visibly right of the spine instead of
+ * flush against it — narrow/phone widths (.vc-controls-col at 100%) have
+ * plenty of room left over either way. */
+.vc-family {
+  border-left: 2px solid var(--vc-family);
+  padding-left: 10px;
+  margin: 4px 0 4px 2px;
+}
+.vc-family-caption {
+  font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--vc-family); margin-bottom: 4px;
 }
 
 /* A row "wakes" when the pointer is anywhere over it (the row is a far

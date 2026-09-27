@@ -471,8 +471,8 @@ export function createBlackoutState(): BlackoutState {
  * small chance scaled by `blackout` (0 disables it outright, without ever
  * consulting `rng`) — see LOW_ONSET_BLACKOUT_CHANCE. `dropOnset`/`lowOnset`
  * are read as the already edge-latched booleans animClock.ts hands scenes,
- * the same contract caustics.ts's churnPulse uses for its own beat-triggered
- * envelope — no re-detection here. `rng` defaults to Math.random and exists
+ * the same contract caustics.ts's ripple pool uses for its own beat-triggered
+ * rings — no re-detection here. `rng` defaults to Math.random and exists
  * to be overridden by tests, the same reason ambience.ts's pools take one.
  * Pure aside from `st`.
  */

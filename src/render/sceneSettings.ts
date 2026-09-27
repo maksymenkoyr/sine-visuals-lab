@@ -47,6 +47,17 @@ export interface SceneSetting {
    *  group must keep each group's settings contiguous and in
    *  SETTING_GROUPS order (tests/settingGroups.test.ts enforces this). */
   group?: SettingGroup;
+  /** A sub-grouping *inside* a group — a run of *consecutive* settings that
+   *  together control one thing (e.g. Caustics' Drift speed/Speed boost/
+   *  Speed pump). Rendered as a shared colour rail in the device menu: the
+   *  name is shown once, as a small caption above the family's first row,
+   *  and every row inside takes the family's own accent in place of the
+   *  Scene card's usual violet (deviceMenu.ts's renderSceneSettings, colours
+   *  from controlsTheme.ts's FAMILY_ACCENTS). Must be a contiguous run and
+   *  must not span a group boundary (tests/settingGroups.test.ts enforces
+   *  both). Ignored on an `advanced` row — an advanced run already has its
+   *  own disclosure, and families don't need to nest inside that too. */
+  family?: string;
   min: number;
   max: number;
   step: number;
