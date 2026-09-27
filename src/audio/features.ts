@@ -224,6 +224,10 @@ export class FeatureExtractor {
   private lastTime: number | null = null;
   private lastDt = 1 / 60;
   private lastOnsetTime = -Infinity;
+  // pulseOnset's own refractory clock — see FeatureFrame.pulseOnset's doc
+  // for why it can't share lastOnsetTime: a hit the silence gate stops from
+  // firing `onset` must still be free to fire `pulseOnset` on schedule.
+  private lastPulseTime = -Infinity;
   private onsets: { time: number; weight: number }[] = [];
   private bpm = 0;
   private lastOnsetPhaseTime = 0;
@@ -280,12 +284,13 @@ export class FeatureExtractor {
    *   baseline below stay at their own fixed rates regardless — they're
    *   measurement, not display smoothing, and the meters panel's RAW chip
    *   already shows their output untouched.
-   * @param gate Silence-gate marks (src/audio/silenceGate.ts) to weight the
-   *   broadband onset's firing comparison by this tick's `level` — see
+   * @param gate Silence-gate marks (src/audio/silenceGate.ts) to weight
+   *   `onset`'s firing comparison by this tick's `level` — see
    *   silenceGateDimmer for exactly what it multiplies (only the comparison,
-   *   never the baseline/ratio/refractory) and why. `undefined` (every
-   *   existing call site and test that doesn't pass one) means no gating at
-   *   all, today's behavior.
+   *   never the baseline/ratio/refractory) and why. Never reaches
+   *   `pulseOnset` — see FeatureFrame.pulseOnset's own doc for why tempo
+   *   tracking must stay ungated. `undefined` (every existing call site and
+   *   test that doesn't pass one) means no gating at all, today's behavior.
    */
   update(rawBandsDb: Float32Array, time: number, autoGain = 1, smoothingScale = 1, gate?: SilenceGateMarks): FeatureFrame {
     const blend = clamp01(autoGain);
@@ -378,11 +383,26 @@ export class FeatureExtractor {
     const onset = wouldFire && dimmedClears;
     this.diag.blocked = dimmedClears && !canFire;
     this.diag.sinceOnsetSec = sinceOnsetSec;
+    if (onset) this.lastOnsetTime = time;
 
-    // A hit the silence gate or the refractory stopped doesn't reach
-    // registerOnset either — it doesn't get to vote on the tempo.
-    if (onset) {
-      this.lastOnsetTime = time;
+    // pulseOnset: the same flux/threshold comparison as `onset` above, but
+    // never dimmed by the silence gate — its own refractory (lastPulseTime),
+    // independent of onset's. registerOnset (the tempo vote) runs off this,
+    // not `onset`: a real beat in an otherwise-quiet room is still a beat
+    // the tempo tracker needs, and a noise hit here is aperiodic — the
+    // pair-comb/confidence machinery downstream already discounts it on its
+    // own merits, so gating the vote too would only cost tempo tracking
+    // exactly the hits the gate is supposed to leave alone. Measured effect
+    // of voting on the gated `onset` instead: host/TV and the render-tick
+    // fallback (this extractor's own tempo estimate, and the beat clock's
+    // phase comb it feeds — render/animClock.ts) ran the Metronome only
+    // ~21-26% of the time on real songs played through a simulated mic,
+    // against solo mode's ~94% (solo's beat clock is fed by the AudioWorklet
+    // analyser's own ungated onsets instead, never this extractor's).
+    const sincePulseSec = time - this.lastPulseTime;
+    const pulseOnset = sincePulseSec > ONSET_REFRACTORY_SEC && flux > threshold;
+    if (pulseOnset) {
+      this.lastPulseTime = time;
       this.registerOnset(time, flux / threshold);
     }
 
@@ -401,10 +421,15 @@ export class FeatureExtractor {
     this.diag.gated = this.lastSuppressed;
 
     // Let a held tempo go once the onsets that were sustaining it actually
-    // stop — see TEMPO_DECAY_SEC's own doc above. Clearing `onsets` too
-    // means the next real onset starts a fresh comb rather than immediately
-    // re-finding the stale tempo off leftover history.
-    if (this.bpm > 0 && time - this.lastOnsetTime > TEMPO_DECAY_SEC) {
+    // stop — see TEMPO_DECAY_SEC's own doc above. Against lastPulseTime, not
+    // lastOnsetTime: registerOnset (and so `bpm`/`onsets`) is driven by
+    // pulseOnset now, and decaying against the gated onset's own timer would
+    // wipe out a perfectly good tempo within TEMPO_DECAY_SEC of a quiet room
+    // simply because the gate stopped `onset` from firing — exactly the
+    // failure this field exists to avoid. Clearing `onsets` too means the
+    // next real onset starts a fresh comb rather than immediately re-finding
+    // the stale tempo off leftover history.
+    if (this.bpm > 0 && time - this.lastPulseTime > TEMPO_DECAY_SEC) {
       this.bpm = 0;
       this.onsets = [];
     }
@@ -420,7 +445,7 @@ export class FeatureExtractor {
 
     const onsetPhase = this.bpm > 0 ? (((time - this.lastOnsetPhaseTime) / (60 / this.bpm)) % 1 + 1) % 1 : 0;
 
-    return { time, bands, energy, onset, bpm: this.bpm, onsetPhase, level };
+    return { time, bands, energy, onset, pulseOnset, bpm: this.bpm, onsetPhase, level };
   }
 
   /** @param strength flux over the firing threshold — 1 is a bare trigger. */

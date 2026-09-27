@@ -1461,6 +1461,7 @@ function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
     bands: s.bands,
     energy: s.energy,
     onset: s.onsetFired,
+    pulseOnset: s.pulseFired,
     bpm: s.bpm,
     onsetPhase: s.beatPhase,
     level: s.level,

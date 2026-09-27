@@ -292,7 +292,14 @@ export function createAnimClock(): AnimClock {
       if (hit?.tempoHits !== undefined) {
         beat.advance(dtSec, frame.bpm, false, 1, hit.tempoHits);
       } else {
-        beat.advance(dtSec, frame.bpm, frame.onset, hitWeight);
+        // frame.pulseOnset, not frame.onset — the phase comb is tempo
+        // tracking, not a visual hit, and must not be starved by the
+        // silence gate (FeatureFrame.pulseOnset's own doc has the measured
+        // failure this replaces: host/TV and this render-tick fallback path
+        // ran the Metronome only ~21-26% of the time on real songs through
+        // a mic, against solo mode's ~94%, because their only feed here was
+        // the gated `onset`).
+        beat.advance(dtSec, frame.bpm, frame.pulseOnset, hitWeight);
       }
       metronome.advance(dtSec, { bpm: beat.bpm, beats: beat.beats, tempoLock: beat.tempoLock }, frame.bpm);
       prevLowRatio = lowRatioNow;

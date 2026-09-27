@@ -673,6 +673,7 @@ const driveFrameScratch: FeatureFrame = {
   bands: new Float32Array(NUM_BANDS),
   energy: 0,
   onset: false,
+  pulseOnset: false,
   bpm: 0,
   onsetPhase: 0,
   level: 0,

@@ -36,6 +36,12 @@ export interface VisualSample {
   beatPhase: number;
   /** One-shot: true only on the render tick where an onset first becomes due. */
   onsetFired: boolean;
+  /** Same one-shot shape as onsetFired, off the ungated pulse onset instead
+   *  — tempo tracking (the beat clock's phase comb, render/animClock.ts)
+   *  must read this, never onsetFired, so a host/renderer/TV's own
+   *  Metronome isn't starved by whatever silenced onsetFired for visuals.
+   *  See src/audio/types.ts's FeatureFrame.pulseOnset for the full story. */
+  pulseFired: boolean;
   /** Room-clock time, wrapped to stay small — safe to feed straight into a `uTime` uniform. */
   timeSec: number;
   /** Absolute input loudness [0,1] — see FeatureFrame.level. */
@@ -248,6 +254,7 @@ abstract class RoomConnectionBase {
       bpm: s.bpm,
       beatPhase: this.buffer.beatPhaseAt(targetMs),
       onsetFired: this.buffer.consumeOnsetIfDue(targetMs),
+      pulseFired: this.buffer.consumePulseIfDue(targetMs),
       timeSec: roomTimeToSeconds(targetMs),
       level: s.level,
     };

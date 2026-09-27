@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { JitterBuffer } from "../src/net/jitterBuffer.ts";
 import { NUM_BANDS } from "../src/audio/types.ts";
 
-function frame(roomTimeMs: number, energy: number, onset = false, bpm = 0, level = energy) {
-  return { bands: new Float32Array(NUM_BANDS).fill(energy), energy, onset, bpm, level, roomTimeMs };
+function frame(roomTimeMs: number, energy: number, onset = false, bpm = 0, level = energy, pulseOnset = onset) {
+  return { bands: new Float32Array(NUM_BANDS).fill(energy), energy, onset, pulseOnset, bpm, level, roomTimeMs };
 }
 
 describe("JitterBuffer", () => {
@@ -63,5 +63,21 @@ describe("JitterBuffer", () => {
     buf.push(frame(1500, 0.6, true, 120));
     expect(buf.consumeOnsetIfDue(1400)).toBe(false);
     expect(buf.consumeOnsetIfDue(1500)).toBe(true);
+  });
+
+  it("fires consumePulseIfDue independently of consumeOnsetIfDue — a gated onset still pulses", () => {
+    const buf = new JitterBuffer();
+    // onset false (the silence gate stopped it), pulseOnset true (tempo
+    // tracking must still see it) — see FeatureFrame.pulseOnset's own doc.
+    buf.push({ ...frame(1000, 0.5, false, 120), pulseOnset: true });
+
+    expect(buf.consumeOnsetIfDue(1000)).toBe(false); // onset never fires
+    expect(buf.consumePulseIfDue(999)).toBe(false); // not due yet
+    expect(buf.consumePulseIfDue(1000)).toBe(true); // due now
+    expect(buf.consumePulseIfDue(1001)).toBe(false); // already fired
+
+    buf.push({ ...frame(1500, 0.6, false, 120), pulseOnset: true });
+    expect(buf.consumePulseIfDue(1400)).toBe(false);
+    expect(buf.consumePulseIfDue(1500)).toBe(true);
   });
 });
