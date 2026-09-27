@@ -50,6 +50,13 @@ export function createJack(color: string, onClick: () => void, onHover: (on: boo
   const uses = document.createElement("span");
   uses.className = "vc-jack-uses";
   el.appendChild(uses);
+  // A mouse press must not move focus onto the jack. Focus opens its row's
+  // hint (controlsTheme.ts's `.vc-row:focus-within .vc-hint`) and closes the
+  // one it left, so pressing a jack below the last-focused row slid this
+  // jack up out from under the held button (the 0.18s hint collapse) — the
+  // release landed on the row, no click fired, and every other plug/unplug
+  // went dead. Tab still reaches the jack; only the mouse's focus is dropped.
+  el.addEventListener("mousedown", (e) => e.preventDefault());
   el.addEventListener("click", (e) => {
     e.stopPropagation();
     onClick();
