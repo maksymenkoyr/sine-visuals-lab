@@ -91,36 +91,12 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
 #layer-touch { --lc: var(--touch); }
 .layer[aria-checked="true"] { border-color: rgb(var(--lc)); box-shadow: inset 0 0 0 1px rgb(var(--lc)), 0 0 18px -8px rgb(var(--lc)); background: rgba(var(--lc), 0.06); }
 .layer[aria-checked="true"] b { color: rgb(var(--lc)); }
-.tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; }
-.tab {
-  border: 0; background: none; border-radius: 6px; padding: 7px 0; cursor: pointer;
-  font: 12px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2);
-}
-.tab[aria-selected="true"] { background: rgba(255, 255, 255, 0.08); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-hi); }
 .how { margin: 0; font-size: 12px; color: var(--ink-3); }
 .sec-label { font: 11px/1.2 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }
 .pane { display: grid; gap: 12px; }
 .status { min-height: 2.9em; margin: 0; font-size: 12.5px; color: var(--ink-2); }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .note-line { margin: 0; font-size: 12px; color: var(--ink-3); padding: 8px 10px; border: 1px dashed var(--line); border-radius: 6px; }
-
-.picker { display: flex; gap: 6px; flex-wrap: wrap; }
-.pick {
-  display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; cursor: pointer;
-  border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 255, 255, 0.02);
-  font: 12px var(--mono); color: var(--ink-2);
-}
-.pick i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
-.pick[aria-pressed="true"] { color: var(--ink); border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c), 0 0 14px -6px var(--c); }
-
-/* orbit */
-.orbit svg { width: 100%; height: auto; display: block; touch-action: none; user-select: none; -webkit-user-select: none; }
-.orbit .planet { cursor: grab; outline: none; }
-.orbit .planet:active { cursor: grabbing; }
-.orbit .planet:focus-visible .body { stroke: var(--violet); stroke-width: 2; }
-.ring-label { font: 8px var(--mono); letter-spacing: 0.1em; fill: rgba(255, 255, 255, 0.42); text-anchor: middle; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
-.planet-code { font: 9px var(--mono); text-anchor: middle; fill: #0b0f10; pointer-events: none; }
-.planet-val { font: 9px var(--mono); text-anchor: middle; fill: rgba(255, 255, 255, 0.7); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; pointer-events: none; }
 
 /* pads */
 .ownstrip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
@@ -162,14 +138,6 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
 .sl.v .marks span { top: auto; left: 20px; transform: translateY(50%); font-size: 0; }
 .sl.v .marks span::before { left: 0; top: 0; width: 4px; height: 1px; }
 
-.rows { display: grid; gap: 10px; }
-.rrow { display: grid; gap: 2px; }
-.rrow-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.rrow-head .t { font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
-.rrow-head .t i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.rrow-head .v { font: 12px var(--mono); color: var(--ink-2); }
-.rrow .back { font-size: 11.5px; color: var(--ink-3); margin-top: -4px; }
-
 /* mix */
 .mix { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 14px; }
 .btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -203,6 +171,29 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
 .mixthumb canvas { width: 76px; height: 43px; display: block; border-radius: 3px; background: #000; }
 .mixthumb.on { border-color: var(--violet); color: var(--ink); }
 
+/* touch mode + bite */
+.modes { display: grid; gap: 6px; }
+.seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; }
+.seg button {
+  border: 0; background: none; border-radius: 6px; padding: 7px 0; cursor: pointer;
+  font: 12px var(--mono); letter-spacing: 0.06em; color: var(--ink-2);
+}
+.seg button[aria-checked="true"] { background: rgba(var(--touch), 0.14); color: rgb(var(--touch)); box-shadow: inset 0 0 0 1px rgba(var(--touch), 0.6); }
+.bite { display: grid; gap: 4px; padding: 10px; border: 1px solid rgba(var(--touch), 0.45); border-radius: 8px; background: rgba(var(--touch), 0.05); }
+.bite-head { display: flex; justify-content: space-between; align-items: baseline; font-weight: 500; }
+.bite-head .num { color: rgb(var(--touch)); }
+.bite input { width: 100%; margin: 0; accent-color: rgb(var(--touch)); }
+
+/* explainer */
+.explain { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.explain figure { margin: 0; display: grid; gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #090d0e; }
+.explain svg { width: 100%; height: auto; display: block; }
+.explain figcaption { font-size: 12.5px; color: var(--ink-2); }
+.explain figcaption b { color: var(--ink); font-weight: 600; }
+.flow { display: grid; gap: 6px; font-size: 12.5px; padding-block: 6px; }
+.flow div { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.flow .op { border: 0; padding: 0 8px; color: rgb(var(--touch)); font-family: var(--mono); }
+
 /* notes */
 .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
 .note { border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 8px; align-content: start; background: #090d0e; }
@@ -218,8 +209,40 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
   <header>
     <div class="eyebrow">Physarum 2 · Affinity prototype</div>
     <h1>Affinity Studio</h1>
-    <p class="intro">Two tables now. Smell is what the scene has today: which trails each strain steers toward or away from. Touch is new: what a strain's steps do to another strain's trail, from eating it to feeding it. Flip the card between them, try the With touch presets, and play with the per-strain knobs under the culture.</p>
+    <p class="intro">Smell is what the scene has today: which trails each strain steers toward or away from. Touch is new: what a strain does to the trails it walks over. The chosen design: Pairs, with Touch as a full second table behind the Smell / Touch switch. The card's Touch setting still lets you compare Off (today's scene) and One knob.</p>
   </header>
+
+  <section class="explain" aria-label="Smell and Touch in pictures">
+    <figure>
+      <svg viewBox="0 0 200 120" role="img" aria-label="A red agent turns away from a yellow trail before touching it">
+        <path d="M8,92 C60,70 120,108 192,78" fill="none" stroke="#ffb81a" stroke-width="11" stroke-linecap="round" opacity="0.75"/>
+        <path d="M28,14 Q84,70 142,16" fill="none" stroke="#ff4d47" stroke-width="2" stroke-dasharray="4 4"/>
+        <path d="M142,16 l-10,1 l6,8 Z" fill="#ff4d47"/>
+        <circle cx="28" cy="14" r="5" fill="#ff4d47"/>
+        <text x="186" y="112" text-anchor="end" font-family="Share Tech Mono, monospace" font-size="9" fill="rgba(255,255,255,.55)">B2's trail</text>
+      </svg>
+      <figcaption><b>Smell</b> steers. PP-A1 avoids PP-B2's trail, so it turns away before it reaches it. The trail itself is untouched. This is all the scene does today.</figcaption>
+    </figure>
+    <figure>
+      <svg viewBox="0 0 200 120" role="img" aria-label="A red agent crosses a yellow trail and leaves a gap in it">
+        <path d="M8,92 C60,70 120,108 192,78" fill="none" stroke="#ffb81a" stroke-width="11" stroke-linecap="round" opacity="0.75"/>
+        <circle cx="100" cy="89" r="13" fill="#090d0e"/>
+        <path d="M100,10 L100,108" fill="none" stroke="#ff4d47" stroke-width="2" stroke-dasharray="4 4"/>
+        <path d="M100,114 l-5,-10 l10,0 Z" fill="#ff4d47"/>
+        <circle cx="100" cy="10" r="5" fill="#ff4d47"/>
+        <text x="118" y="62" font-family="Share Tech Mono, monospace" font-size="9" fill="rgb(89,187,251)">eaten</text>
+      </svg>
+      <figcaption><b>Touch</b> changes the trail. When PP-A1 crosses PP-B2's trail, it eats a piece of it (or, set the other way, adds to it). That hole changes where PP-B2 can go next.</figcaption>
+    </figure>
+    <figure>
+      <div class="flow">
+        <div>PP-A1 <b>avoids</b> PP-B2 <span class="num">−0.80</span></div>
+        <div class="op">× Bite 1.0</div>
+        <div>PP-A1 <b>eats</b> PP-B2's trail <span class="num">−0.80</span></div>
+      </div>
+      <figcaption><b>One knob</b>: you never edit Touch. Each strain eats the trails it avoids, more the more it avoids them. Bite sets how hard for everyone at once. The Affinity interface stays one table.</figcaption>
+    </figure>
+  </section>
 
   <div class="app">
     <div class="left">
@@ -248,35 +271,32 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
         <h2>Affinity</h2>
         <span class="eyebrow">Scene card</span>
       </div>
-      <div class="layers" role="radiogroup" aria-label="Table">
+      <div class="modes">
+        <div class="sec-label">Touch</div>
+        <div class="seg" role="radiogroup" aria-label="Touch">
+          <button type="button" role="radio" id="mode-none" aria-checked="false">Off</button>
+          <button type="button" role="radio" id="mode-knob" aria-checked="false">One knob</button>
+          <button type="button" role="radio" id="mode-table" aria-checked="true">Full table</button>
+        </div>
+      </div>
+      <div class="bite" id="biteBox">
+        <label class="bite-head" for="bite"><span>Bite</span><span class="num" id="biteVal"></span></label>
+        <input type="range" id="bite" min="0" max="1.5" step="0.05">
+        <p class="how">Strains eat the trails they avoid, more the more they avoid them. At 0 this is today's scene.</p>
+      </div>
+      <div class="layers" id="layers" role="radiogroup" aria-label="Table">
         <button class="layer" id="layer-smell" role="radio" aria-checked="true" type="button"><b>Smell</b><span>which trails it steers toward</span></button>
         <button class="layer" id="layer-touch" role="radio" aria-checked="false" type="button"><b>Touch</b><span>what its steps do to other trails</span></button>
       </div>
-      <div class="tabs" role="tablist" aria-label="Interface">
-        <button class="tab" role="tab" id="tab-pairs" aria-controls="pane-pairs" aria-selected="true" type="button">Pairs</button>
-        <button class="tab" role="tab" id="tab-orbit" aria-controls="pane-orbit" aria-selected="false" type="button">Orbit</button>
-        <button class="tab" role="tab" id="tab-rows" aria-controls="pane-rows" aria-selected="false" type="button">Rows</button>
-      </div>
       <p class="how" id="how"></p>
 
-      <div class="pane" id="pane-pairs" role="tabpanel" aria-labelledby="tab-pairs">
+      <div class="pane" id="pane-pairs">
         <div class="sec-label">Own trail</div>
         <div class="ownstrip" id="ownstrip"></div>
         <p class="note-line" id="ownNote" hidden>Each strain always lays its own trail. Touch is only about everyone else's.</p>
         <div class="sec-label">Pairs</div>
         <p class="status" id="pairStatus"></p>
         <div class="pads" id="pads"></div>
-      </div>
-
-      <div class="pane" id="pane-orbit" role="tabpanel" aria-labelledby="tab-orbit" hidden>
-        <div class="picker" id="orbitPicker"></div>
-        <div class="orbit"><svg id="orbit" viewBox="0 0 340 340" aria-label="Orbit"></svg></div>
-        <p class="status" id="orbitStatus"></p>
-      </div>
-
-      <div class="pane" id="pane-rows" role="tabpanel" aria-labelledby="tab-rows" hidden>
-        <div class="picker" id="rowsPicker"></div>
-        <div class="rows" id="rows"></div>
       </div>
 
       <div class="mix">
@@ -294,8 +314,8 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
           <div class="sec-label">Smell only</div>
           <div class="chips" id="presetsSmell"></div>
         </div>
-        <div class="preset-group">
-          <div class="sec-label">With touch</div>
+        <div class="preset-group" id="touchPresets">
+          <div class="sec-label">With touch (full table)</div>
           <div class="chips" id="presetsTouch"></div>
         </div>
         <div class="sec-label">Mixes · tap one to go back</div>
@@ -315,6 +335,15 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
       </dl>
     </article>
     <article class="note new">
+      <h3>Touch as one knob (Bite)</h3>
+      <dl>
+        <dt>What it does</dt><dd>Touch is copied from Smell instead of edited: each strain eats the trails it avoids, in proportion to how much it avoids them. Bite scales all of it.</dd>
+        <dt>Good</dt><dd>One slider instead of a second table, so the Affinity interface stays one table. Rivals with Bite gives the War look.</dd>
+        <dt>Can't do</dt><dd>Eat a trail it follows (Hunt) or feed a trail (Gardens). Those need the full table.</dd>
+        <dt>In the app</dt><dd>One global setting; the scene works out each pair's eating from <code>att</code> every frame. Same GPU work as the full table.</dd>
+      </dl>
+    </article>
+    <article class="note new">
       <h3>Per-strain knobs</h3>
       <dl>
         <dt>Sensor angle</dt><dd>Fixed per strain in the app's <code>STRAINS</code>. Together with Turn angle it decides the pattern a strain grows. Already sent to the shader, only not a setting.</dd>
@@ -329,22 +358,6 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
         <dt>You do</dt><dd>Drag one dot per pair. Across is what the first strain does about the second; up is the reverse.</dd>
         <dt>Good</dt><dd>Both directions in one drag, the pad names the result, and each pad is a live two-strain culture of just that pair. The Touch switch reuses the same pads.</dd>
         <dt>Costs</dt><dd>Tall on a phone. Own trails need their own strip.</dd>
-      </dl>
-    </article>
-    <article class="note">
-      <h3>Orbit</h3>
-      <dl>
-        <dt>You do</dt><dd>Pull a planet closer for more (follow, feed), push it out for less (flee, eat). Tap a planet to move it to the middle.</dd>
-        <dt>Good</dt><dd>One strain's whole attitude at a glance, and fun to throw around. The arrow shows what that strain does back.</dd>
-        <dt>Costs</dt><dd>One direction at a time. Exact values are harder to hit.</dd>
-      </dl>
-    </article>
-    <article class="note">
-      <h3>Rows</h3>
-      <dl>
-        <dt>You do</dt><dd>One continuous slider per trail, no snapping. The words under the track are landmarks only.</dd>
-        <dt>Good</dt><dd>Exact, predictable, works from the keyboard. Closest to what the panel already does.</dd>
-        <dt>Costs</dt><dd>Reads like a form, and Touch doubles the rows.</dd>
       </dl>
     </article>
     <article class="note">
@@ -455,7 +468,23 @@ const tables = {
   smell: { target: clone(RIVALS), live: clone(RIVALS) },
   touch: { target: clone(ZERO), live: clone(ZERO) },
 };
-const lv = (i, j, ly = layer) => tables[ly].live[i][j];
+// How Touch reaches the sim: "none" (today's scene), "knob" (copied from
+// Smell: each strain eats the trails it avoids, scaled by Bite) or "table"
+// (the full Touch table). `effT` is what actually runs.
+let touchMode = "table";
+let bite = 1.0;
+const effT = clone(ZERO);
+function computeEffTouch() {
+  const sm = tables.smell.live, tt = tables.touch.live;
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+    effT[i][j] = i === j ? 0
+      : touchMode === "table" ? tt[i][j]
+      : touchMode === "knob" ? clamp(-bite * Math.max(0, -sm[i][j]))
+      : 0;
+  }
+}
+const lv = (i, j, ly = layer) =>
+  ly === "touch" && touchMode !== "table" ? effT[i][j] : tables[ly].live[i][j];
 function setVal(i, j, v, ly = layer) {
   if (ly === "touch" && i === j) return;
   v = r2(clamp(v));
@@ -697,27 +726,8 @@ function describeEdge(i, j) {
   const s = lv(i, j, "smell"), t = lv(i, j, "touch");
   const smell = `${word(s, "smell")} ${who(j)} <span class="num">${fmt(s)}</span>`;
   const touch = `${word(t, "touch")} ${who(j)}'s trail <span class="num">${fmt(t)}</span>`;
+  if (touchMode === "none") return `${who(i)} ${smell}`;
   return layer === "touch" ? `${who(i)} ${touch} · ${smell}` : `${who(i)} ${smell} · ${touch}`;
-}
-
-// ---------- strain picker (Orbit and Rows) ----------
-let sel = 3;
-const pickers = [];
-function makePicker(host) {
-  STRAINS.forEach((s, k) => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "pick"; b.style.setProperty("--c", css(k));
-    b.innerHTML = `<i></i>${s.code}`;
-    b.addEventListener("click", () => selectStrain(k));
-    host.appendChild(b);
-  });
-  pickers.push(host);
-}
-function selectStrain(k) {
-  sel = k;
-  pickers.forEach((host) => [...host.children].forEach((b, i) => b.setAttribute("aria-pressed", String(i === sel))));
-  buildOrbit();
-  buildRows();
 }
 
 // ---------- A · Pairs ----------
@@ -853,7 +863,7 @@ function ensurePairCultures() {
   PAIRS.forEach(([a, b], idx) => {
     if (pairCultures[idx]) return;
     const c = makeCulture(72, 72, 1600, [a, b], 0.004);
-    for (let i = 0; i < 40; i++) c.step(tables.smell.live, tables.touch.live);
+    for (let i = 0; i < 40; i++) c.step(tables.smell.live, effT);
     pairCultures[idx] = c;
   });
 }
@@ -875,190 +885,11 @@ function updatePads() {
   }
 }
 
-// ---------- B · Orbit ----------
-const OC = 170, RN = 58, RF = 150, PR = 21;
-const rOf = (v) => RN + ((MAX - v) / (MAX - MIN)) * (RF - RN);
-const vOf = (r) => clamp(MAX - ((r - RN) / (RF - RN)) * (MAX - MIN));
-const DEFAULT_ANG = [50, 130, 210, 330].map((a) => a * DEG);
-const angles = {};
-const orbitSvg = $("orbit");
-const orbitStatus = $("orbitStatus");
-let planets = [];
-let orbitFocus = -1;
-const fullOrder = () => [sel, ...[0, 1, 2, 3].filter((j) => j !== sel)];
-const orbitOrder = () => (layer === "touch" ? fullOrder().slice(1) : fullOrder());
-function angleFor(j) {
-  const key = sel + "-" + j;
-  if (!(key in angles)) angles[key] = DEFAULT_ANG[fullOrder().indexOf(j)];
-  return angles[key];
-}
-function toSvg(e) {
-  const r = orbitSvg.getBoundingClientRect();
-  return { x: ((e.clientX - r.left) * 340) / r.width, y: ((e.clientY - r.top) * 340) / r.height };
-}
-function buildOrbit() {
-  const Ly = LAYERS[layer];
-  const P = Ly.pos.join(","), N = Ly.neg.join(",");
-  orbitSvg.textContent = "";
-  const defs = S("defs", {}, orbitSvg);
-  const grad = S("radialGradient", { id: "orbitGround", cx: OC, cy: OC, r: RF + 14, gradientUnits: "userSpaceOnUse" }, defs);
-  const z = (rOf(0) / (RF + 14)).toFixed(3);
-  [["0", `rgba(${P},.16)`], ["0.4", `rgba(${P},.06)`], [z, `rgba(${P},0)`], ["0.86", `rgba(${N},.06)`], ["1", `rgba(${N},.15)`]]
-    .forEach(([o, c]) => S("stop", { offset: o, "stop-color": c }, grad));
-  S("circle", { cx: OC, cy: OC, r: RF + 14, fill: "url(#orbitGround)" }, orbitSvg);
-  Ly.words.forEach(([, v]) => {
-    S("circle", { cx: OC, cy: OC, r: rOf(v), fill: "none", stroke: v === 0 ? "rgba(255,255,255,.16)" : "rgba(255,255,255,.08)", "stroke-dasharray": v === 0 ? "none" : "2 4" }, orbitSvg);
-  });
-  const links = S("g", {}, orbitSvg);
-  Ly.words.forEach(([w, v]) => { const t = S("text", { x: OC, y: OC - rOf(v) + 3, class: "ring-label" }, orbitSvg); t.textContent = w.toUpperCase(); });
-  const centre = S("g", {}, orbitSvg);
-  S("circle", { cx: OC, cy: OC, r: 28, fill: css(sel), style: `filter: drop-shadow(0 0 10px ${css(sel, 0.8)})` }, centre);
-  const ct = S("text", { x: OC, y: OC + 3.5, class: "planet-code", style: "font-size:10px" }, centre);
-  ct.textContent = STRAINS[sel].code;
-
-  planets = orbitOrder().map((j) => {
-    const own = j === sel;
-    const line = S("line", { x1: OC, y1: OC }, links);
-    const g = S("g", { class: "planet", tabindex: 0, role: "slider", "aria-label": own ? `${STRAINS[sel].code} own trail` : `${STRAINS[sel].code} toward ${STRAINS[j].code}` }, orbitSvg);
-    const arrow = S("path", {}, g);
-    if (own) {
-      S("circle", { r: PR, fill: css(sel, 0.18), stroke: css(sel), "stroke-width": 1.4, "stroke-dasharray": "3 3", class: "body" }, g);
-      const t1 = S("text", { y: -1, class: "planet-code", style: `fill:${css(sel)}` }, g); t1.textContent = "OWN";
-      const t2 = S("text", { y: 8, class: "planet-code", style: `fill:${css(sel)}` }, g); t2.textContent = "TRAIL";
-    } else if (layer === "touch") {
-      S("path", { d: `M0,${-PR - 3} L${PR + 3},0 L0,${PR + 3} L${-PR - 3},0 Z`, fill: css(j), class: "body" }, g);
-      const t = S("text", { y: 3.2, class: "planet-code" }, g); t.textContent = STRAINS[j].code;
-    } else {
-      S("circle", { r: PR, fill: css(j), class: "body" }, g);
-      const t = S("text", { y: 3.2, class: "planet-code" }, g); t.textContent = STRAINS[j].code;
-    }
-    const val = S("text", { y: PR + 12, class: "planet-val" }, g);
-
-    let drag = null;
-    g.addEventListener("pointerdown", (e) => { e.preventDefault(); g.focus(); g.setPointerCapture(e.pointerId); drag = { x0: e.clientX, y0: e.clientY, moved: false }; orbitFocus = j; });
-    g.addEventListener("pointermove", (e) => {
-      if (!drag) return;
-      if (!drag.moved && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 4) drag.moved = true;
-      if (!drag.moved) return;
-      const p = toSvg(e), dx = p.x - OC, dy = p.y - OC;
-      angles[sel + "-" + j] = Math.atan2(dy, dx);
-      setVal(sel, j, vOf(Math.hypot(dx, dy)));
-    });
-    g.addEventListener("pointerup", () => {
-      const tap = drag && !drag.moved;
-      drag = null;
-      if (tap && !own) selectStrain(j);
-    });
-    g.addEventListener("pointercancel", () => { drag = null; });
-    g.addEventListener("pointerenter", () => { orbitFocus = j; });
-    g.addEventListener("pointerleave", () => { if (!drag && orbitFocus === j) orbitFocus = -1; });
-    g.addEventListener("focus", () => { orbitFocus = j; });
-    g.addEventListener("keydown", (e) => {
-      const s = e.shiftKey ? 0.25 : 0.05;
-      const d = { ArrowRight: s, ArrowUp: s, ArrowLeft: -s, ArrowDown: -s }[e.key];
-      if (d !== undefined) { setVal(sel, j, lv(sel, j) + d); e.preventDefault(); }
-      else if (e.key === "Enter" && !own) { selectStrain(j); e.preventDefault(); }
-    });
-    return { j, own, g, line, arrow, val };
-  });
-}
-function updateOrbit() {
-  planets.forEach((p) => {
-    const v = lv(sel, p.j), a = angleFor(p.j), r = rOf(v);
-    const x = OC + Math.cos(a) * r, y = OC + Math.sin(a) * r;
-    p.g.setAttribute("transform", `translate(${x.toFixed(2)} ${y.toFixed(2)})`);
-    p.g.setAttribute("aria-valuenow", v.toFixed(2));
-    p.line.setAttribute("x2", x); p.line.setAttribute("y2", y);
-    p.line.setAttribute("stroke", valColour(v, 0.55));
-    p.line.setAttribute("stroke-width", (0.8 + Math.abs(v) * 1.6).toFixed(2));
-    p.val.textContent = fmt(v);
-    if (p.own) return;
-    // What this strain does back to the centre: an arrow toward the centre
-    // (follows / feeds back) or away from it (flees / eats back).
-    const back = lv(p.j, sel);
-    if (Math.abs(back) < 0.15) { p.arrow.setAttribute("d", ""); return; }
-    const ux = -Math.cos(a), uy = -Math.sin(a), side = back > 0 ? 1 : -1;
-    const b0 = PR + (layer === "touch" ? 5 : 2), len = 5 + Math.abs(back) * 8;
-    const bx = ux * b0 * side, by = uy * b0 * side, tx = ux * (b0 + len) * side, ty = uy * (b0 + len) * side;
-    const nx = -uy * 4.5, ny = ux * 4.5;
-    p.arrow.setAttribute("d", `M${(bx + nx).toFixed(2)},${(by + ny).toFixed(2)} L${tx.toFixed(2)},${ty.toFixed(2)} L${(bx - nx).toFixed(2)},${(by - ny).toFixed(2)} Z`);
-    p.arrow.setAttribute("fill", valColour(back));
-  });
-  if (orbitFocus >= 0 && orbitFocus !== sel) orbitStatus.innerHTML = `${describeEdge(sel, orbitFocus)}<br>Back: ${describeEdge(orbitFocus, sel)}`;
-  else if (orbitFocus === sel) orbitStatus.innerHTML = `${who(sel)} ${word(lv(sel, sel, "smell"), "smell")} its own trail <span class="num">${fmt(lv(sel, sel, "smell"))}</span>`;
-  else if (layer === "touch") { const t = touchSentence(sel); orbitStatus.innerHTML = t ? `${who(sel)} ${t}` : `${who(sel)} leaves every other trail alone.`; }
-  else orbitStatus.innerHTML = `${who(sel)} ${smellSentence(sel)}`;
-}
-
-// ---------- C · Rows ----------
-let rowHandles = [];
-function buildRows() {
-  const host = $("rows");
-  host.textContent = "";
-  if (layer === "touch") {
-    const n = document.createElement("p");
-    n.className = "note-line";
-    n.textContent = `${STRAINS[sel].code} always lays its own trail. These rows say what its steps do to the others' trails.`;
-    host.appendChild(n);
-  }
-  rowHandles = orbitOrder().map((j) => {
-    const own = j === sel;
-    const row = document.createElement("div");
-    row.className = "rrow";
-    const head = document.createElement("div");
-    head.className = "rrow-head";
-    const title = own ? "→ own trail" : layer === "touch" ? `→ ${STRAINS[j].code}'s trail` : `→ ${STRAINS[j].code}`;
-    head.innerHTML = `<span class="t"><i style="background:${css(j)}"></i>${title}</span><span class="v"></span>`;
-    const vEl = head.querySelector(".v");
-    const def = layer === "touch" ? 0 : RIVALS[sel][j];
-    const s = makeSlider({ get: () => lv(sel, j), set: (v) => setVal(sel, j, v), def, colour: css(sel), label: own ? `${STRAINS[sel].code} own trail` : `${STRAINS[sel].code} toward ${STRAINS[j].code}` });
-    row.appendChild(head); row.appendChild(s.el);
-    let back = null;
-    if (!own) { back = document.createElement("div"); back.className = "back"; row.appendChild(back); }
-    host.appendChild(row);
-    return {
-      update() {
-        s.update();
-        const v = lv(sel, j);
-        vEl.textContent = `${fmt(v)} ${word(v)}`;
-        if (back) back.innerHTML = `Back: ${describeEdge(j, sel)}`;
-      },
-    };
-  });
-}
-function updateRows() { rowHandles.forEach((h) => h.update()); }
-
-// ---------- layer + tabs ----------
+// ---------- layer ----------
 const HOW = {
-  smell: {
-    pairs: "Each pad is one pair. Drag the dot: across is how much the first strain follows the second's trail, up is the reverse. The corners name what the two do together, and the pad grows just those two strains.",
-    orbit: "Closer means a stronger pull. Drag a trail in to follow it, out to flee it. Tap a planet to put that strain in the middle. The small arrow shows how that strain feels back.",
-    rows: "One slider per trail, no snapping. The words under the track are landmarks. Double-click a slider to reset it.",
-  },
-  touch: {
-    pairs: "Same pads, second table. Across is what the first strain's steps do to the second's trail: right feeds it, left eats it. Up is the reverse.",
-    orbit: "Closer feeds that strain's trail, farther eats it. The arrow shows what that strain does back to the one in the middle.",
-    rows: "One slider per other trail: right feeds it, left eats it. Double-click a slider to set it back to Spares.",
-  },
+  smell: "Each pad is one pair. Drag the dot: across is how much the first strain follows the second's trail, up is the reverse. The corners name what the two do together, and the pad grows just those two strains.",
+  touch: "Same pads, second table. Across is what the first strain's steps do to the second's trail: right feeds it, left eats it. Up is the reverse.",
 };
-let tab = "pairs";
-const TABS = ["pairs", "orbit", "rows"];
-function showTab(t) {
-  tab = t;
-  TABS.forEach((x) => {
-    $("tab-" + x).setAttribute("aria-selected", String(x === t));
-    $("pane-" + x).hidden = x !== t;
-  });
-  $("how").textContent = HOW[layer][t];
-  if (t === "pairs") ensurePairCultures();
-}
-TABS.forEach((x) => $("tab-" + x).addEventListener("click", () => showTab(x)));
-document.querySelector(".tabs").addEventListener("keydown", (e) => {
-  const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-  if (!d) return;
-  const next = TABS[(TABS.indexOf(tab) + d + TABS.length) % TABS.length];
-  showTab(next); $("tab-" + next).focus(); e.preventDefault();
-});
 function setLayer(ly) {
   layer = ly;
   $("card").dataset.layer = ly;
@@ -1067,11 +898,26 @@ function setLayer(ly) {
   $("ownNote").hidden = ly === "smell";
   $("lockBtn").hidden = ly !== "smell";
   $("randomLabel").textContent = ly === "smell" ? "Random smell" : "Random touch";
-  pairFocus = -1; orbitFocus = -1;
-  buildPads(); buildOrbit(); buildRows();
-  $("how").textContent = HOW[ly][tab];
+  pairFocus = -1;
+  buildPads();
+  $("how").textContent = HOW[ly];
 }
 ["smell", "touch"].forEach((x) => $("layer-" + x).addEventListener("click", () => setLayer(x)));
+
+const biteInput = $("bite"), biteVal = $("biteVal");
+function syncBite() { biteInput.value = String(bite); biteVal.textContent = bite.toFixed(2); }
+biteInput.addEventListener("input", () => { bite = Number(biteInput.value); syncBite(); });
+function setMode(m) {
+  touchMode = m;
+  ["none", "knob", "table"].forEach((x) => $("mode-" + x).setAttribute("aria-checked", String(x === m)));
+  $("biteBox").hidden = m !== "knob";
+  $("layers").hidden = m !== "table";
+  $("touchPresets").hidden = m !== "table";
+  computeEffTouch();
+  if (m !== "table" && layer === "touch") setLayer("smell");
+  renderStory();
+}
+["none", "knob", "table"].forEach((x) => $("mode-" + x).addEventListener("click", () => setMode(x)));
 
 // ---------- mix: random, nudge, presets, history strip, auto ----------
 let lockOwn = false;
@@ -1079,7 +925,7 @@ const mixes = [];
 let curMix = -1;
 const SHOT_DELAY = 2.6, MAX_MIXES = 14;
 const nowS = () => performance.now() / 1000;
-const sameEntry = (e) => same(tables.smell.target, e.smell) && same(tables.touch.target, e.touch);
+const sameEntry = (e) => same(tables.smell.target, e.smell) && same(tables.touch.target, e.touch) && Math.abs(bite - e.bite) < 0.001;
 function shoot(e) {
   const c = e.canvas.getContext("2d");
   c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
@@ -1087,7 +933,7 @@ function shoot(e) {
   e.shot = true;
 }
 function newEntry(label, shotNow) {
-  const e = { smell: clone(tables.smell.target), touch: clone(tables.touch.target), label, canvas: document.createElement("canvas"), shot: false, at: nowS() + SHOT_DELAY };
+  const e = { smell: clone(tables.smell.target), touch: clone(tables.touch.target), bite, label, canvas: document.createElement("canvas"), shot: false, at: nowS() + SHOT_DELAY };
   e.canvas.width = 152; e.canvas.height = 86;
   if (shotNow) shoot(e);
   mixes.push(e);
@@ -1114,6 +960,8 @@ function goTo(e) {
   if (mixes.indexOf(e) < 0) { mixes.push(e); while (mixes.length > MAX_MIXES) mixes.shift(); }
   curMix = mixes.indexOf(e);
   setTargets(e.smell, e.touch);
+  bite = e.bite;
+  syncBite();
   if (!e.shot) e.at = nowS() + SHOT_DELAY;
   renderStrip();
 }
@@ -1184,39 +1032,35 @@ function mixTick(dt, moving) {
 // ---------- boot ----------
 buildKnobs();
 buildOwnStrip();
-makePicker($("orbitPicker"));
-makePicker($("rowsPicker"));
-sel = 3;
 setLayer("smell");
-selectStrain(sel);
-showTab("pairs");
-for (let i = 0; i < 90; i++) main.step(tables.smell.live, tables.touch.live);
+syncBite();
+setMode(touchMode);
+ensurePairCultures();
+for (let i = 0; i < 90; i++) main.step(tables.smell.live, effT);
 drawMain();
 curMix = mixes.indexOf(newEntry("Rivals", true));
 renderStrip();
 renderStory();
-updatePads(); updateOrbit(); updateRows();
+updatePads();
 
 let last = performance.now(), tick = 0;
 function frame(now) {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
   const moving = glide(dt);
-  const sm = tables.smell.live, tc = tables.touch.live;
+  computeEffTouch();
+  const sm = tables.smell.live, tc = effT;
   main.step(sm, tc);
   drawMain();
-  if (tab === "pairs") {
-    pairCultures.forEach((c) => c.step(sm, tc));
-    if (tick % 2 === 0) pads.forEach((p) => {
-      const c = pairCultures[p.idx];
-      if (!c) return;
-      c.render(0.85);
-      p.ctx.imageSmoothingEnabled = true;
-      p.ctx.drawImage(c.off, 0, 0, p.ctx.canvas.width, p.ctx.canvas.height);
-    });
-    updatePads();
-  } else if (tab === "orbit") updateOrbit();
-  else updateRows();
+  pairCultures.forEach((c) => c.step(sm, tc));
+  if (tick % 2 === 0) pads.forEach((p) => {
+    const c = pairCultures[p.idx];
+    if (!c) return;
+    c.render(0.85);
+    p.ctx.imageSmoothingEnabled = true;
+    p.ctx.drawImage(c.off, 0, 0, p.ctx.canvas.width, p.ctx.canvas.height);
+  });
+  updatePads();
   if (tick % 8 === 0) renderStory();
   mixTick(dt, moving);
   tick++;
