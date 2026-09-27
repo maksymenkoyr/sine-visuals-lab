@@ -1755,7 +1755,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     accent: NEUTRAL_ACCENT,
     unit: "bpm",
     description:
-      "How fast the tracked tempo is, from the slowest to the fastest the tracker listens for. Plug it into a setting to make fast songs move faster.",
+      "How fast the metronome is ticking, from the slowest to the fastest the tracker listens for. Plug it into a setting to make fast songs move faster.",
   });
   mountJack("anim.tempo", tempoLevel.right, tempoLevel.el);
 
@@ -2239,7 +2239,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         }
         waveTrace.draw();
         if (text) {
-          tempoLevel.setReadout(anim && anim.tempoBpm > 0 ? String(Math.round(anim.tempoBpm)) : "--", anim && anim.tempoBpm > 0 ? {} : IDLE);
+          tempoLevel.setReadout(anim && anim.metronomeBpm > 0 ? String(Math.round(anim.metronomeBpm)) : "--", anim && anim.metronomeBpm > 0 ? {} : IDLE);
           lock.setReadout(anim ? pct(anim.tempoLock) : "--", anim ? {} : IDLE);
         }
         // Local diagnostic, same availability as fixedEnergy (null on a
