@@ -11,8 +11,10 @@ import {
   rippleDecayFor,
   rippleSpeedFor,
   rippleWidthFor,
+  salienceMarks,
   type RippleProfileParams,
 } from "./rippleEmitter.ts";
+import { publishSettingMarks } from "../settingMarks.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
 // Domain-warped value noise, sharpened into thin ridges. Two renderer-side
@@ -1450,7 +1452,21 @@ float softCeil(float x, float knee, float ceil) {
         // itself instead of stacking full rings).
         const sceneDefaultSignal = Math.max(anim.lowPulse, anim.beatPulse);
         const rawSignal = drives.value("ripple", sceneDefaultSignal);
-        emitter.emit(advanceEmission(emission, anim.dtSec, rawSignal));
+        const emitted = advanceEmission(emission, anim.dtSec, rawSignal);
+        emitter.emit(emitted);
+        // The panel draws these on Beat ripple's own "What it receives"
+        // graph (settingMarks.ts): where the salience bar sits, and each
+        // ring actually sent.
+        const marks = salienceMarks(emission);
+        publishSettingMarks(
+          "caustics",
+          "ripple",
+          [
+            { value: marks.ringsAbove, label: "rings above" },
+            { value: marks.fullRing, label: "full ring" },
+          ],
+          emitted,
+        );
 
         // A drop is rarer and bigger than an ordinary beat — a stronger ring
         // emitted in addition to whatever the continuous driver above just

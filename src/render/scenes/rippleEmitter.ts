@@ -250,6 +250,17 @@ export function advanceEmission(state: RippleEmissionState, dtSec: number, signa
   return emitted;
 }
 
+/** Where advanceEmission's salience currently puts the line, as heights a
+ *  rise from rest would have to reach: `ringsAbove` is the bar a rise must
+ *  clear to emit anything, `fullRing` the rise that emits a full-strength
+ *  ring. For the panel's graph (settingMarks.ts) — a rise that starts from a
+ *  pulse still decaying from the last hit tops out higher on the graph than
+ *  the rise itself, so read these as "from rest". */
+export function salienceMarks(state: RippleEmissionState): { ringsAbove: number; fullRing: number } {
+  const bar = SALIENCE_MARGIN * state.floor;
+  return { ringsAbove: bar, fullRing: bar + Math.max(state.peak - bar, SALIENCE_SPREAD_MIN) };
+}
+
 // ---- Ring buffer ----------------------------------------------------------
 
 const DEFAULT_MAX_ENTRIES = 512;

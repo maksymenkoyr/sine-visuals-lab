@@ -268,6 +268,14 @@ reference-measurement workflow used by later scenes.
   nothing between stay at full rings indefinitely (a hit near the peak never
   raises the floor), and after 8 s of quiet a 0.3 hit that was background
   before rings > 0.7 again.
+- 2026-09-27 — The salience bar is now visible: Beat ripple's "What it
+  receives" graph in the panel (shown when a source is patched in) draws
+  dotted "rings above" / "full ring" lines (`salienceMarks`) and a cyan tick
+  under every ring actually sent, taller for a stronger ring. The scene
+  publishes them each frame through `src/render/settingMarks.ts`, a small
+  general channel any scene can use for its own settings' graphs; the lines
+  are heights for a rise from rest (a hit landing on a still-decaying pulse
+  tops out higher on the graph than its rise).
 
 ## Tuning notes
 

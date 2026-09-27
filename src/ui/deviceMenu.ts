@@ -17,6 +17,7 @@ import type { SceneLook } from "../render/sceneLooks.ts";
 import { createLooksCard } from "./looksCard.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
+import { takeSettingMarks, type SettingMarkLine } from "../render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
@@ -2485,13 +2486,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   function buildOutputGraph(
+    sceneId: string,
     spec: SceneSetting,
     patch: DrivePatch,
   ): { el: HTMLElement; canvas: HTMLCanvasElement; tick: (drives: SceneDrives) => void } {
     const wrap = document.createElement("div");
     setHint(
       wrap,
-      "What this setting receives over the last 4 seconds. Thin lines: each source after its weight (dashed: a condition; a muted source draws no trace). Dark: the gate was blocked. Bottom strip: lit while open. White: the result.",
+      "What this setting receives over the last 4 seconds. Thin lines: each source after its weight (dashed: a condition; a muted source draws no trace). Dark: the gate was blocked. Bottom strip: lit while open. White: the result. If the scene marks it: dotted lines are the scene's own thresholds, and cyan ticks along the bottom are each reaction it produced (taller = stronger).",
     );
     const head = document.createElement("div");
     head.style.cssText = driveOutHeadStyle;
@@ -2519,6 +2521,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const isGate = patch.mix === "gate";
     const conditionIdxs = isGate ? gateConditionIndices(patch) : [];
     const gateOpen = new Uint8Array(RING);
+    // A scene's own reference lines and reactions for this setting
+    // (settingMarks.ts) — e.g. Beat ripple's salience bar and each ring sent.
+    const reactions = new Float32Array(RING);
+    let markLines: SettingMarkLine[] = [];
     let ringHead = 0;
     let filled = 0;
 
@@ -2531,6 +2537,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const STRIP_OPEN = "rgba(255,255,255,0.9)";
     const STRIP_BLOCKED = "rgba(255,255,255,0.16)";
     const STRIP_H = 3;
+    const MARK_LINE = "rgba(255,255,255,0.55)";
+    const MARK_REACTION = "rgba(110,235,225,0.9)";
 
     function draw(): void {
       const { w, h } = size;
@@ -2571,7 +2579,29 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         }
         ctx.stroke();
       }
+      ctx.setLineDash([2, 3]);
+      ctx.lineWidth = 1;
+      ctx.font = "9px ui-monospace, monospace";
+      ctx.textAlign = "right";
+      for (const line of markLines) {
+        if (!(line.value > 0) || line.value > 1) continue;
+        const y = ys(line.value);
+        ctx.strokeStyle = MARK_LINE;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+        ctx.fillStyle = MARK_LINE;
+        ctx.fillText(line.label, w - 2, y - 2);
+      }
       ctx.setLineDash([]);
+      ctx.fillStyle = MARK_REACTION;
+      for (let k = RING - n; k < RING; k++) {
+        const r = reactions[at(k)]!;
+        if (r <= 0.01) continue;
+        const tall = 3 + Math.min(1, r) * (h * 0.3);
+        ctx.fillRect(xs(k) - 1, h - tall, 2, tall);
+      }
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.6;
       ctx.beginPath();
@@ -2613,6 +2643,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       for (let i = 0; i < perSource.length; i++) perSource[i]![ringHead] = src?.[i] ?? 0;
       const v = drives.valueOf(spec.key);
       combined[ringHead] = v;
+      const marks = takeSettingMarks(sceneId, spec.key);
+      markLines = marks?.lines ?? [];
+      reactions[ringHead] = marks?.reaction ?? 0;
       if (isGate) {
         let open = 1;
         let anyCondition = false;
@@ -2688,7 +2721,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let outputCanvas: HTMLCanvasElement | null = null;
     let tick: ((drives: SceneDrives) => void) | null = null;
     if (patch.sources.length) {
-      const graph = buildOutputGraph(spec, patch);
+      const graph = buildOutputGraph(sceneId, spec, patch);
       panel.appendChild(graph.el);
       outputCanvas = graph.canvas;
       tick = graph.tick;
