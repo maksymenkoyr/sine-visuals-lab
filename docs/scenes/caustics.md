@@ -322,6 +322,13 @@ reference-measurement workflow used by later scenes.
   patched in) raised the dotted line and removed every small ring, leaving
   the kicks — the big hits still ring at any setting, since they are the
   standouts it's measuring against.
+- 2026-09-27 — The row's own sparkline showed only the input (`valueOf`),
+  clipped at 1 and broken into gaps wherever the loudest source changed
+  colour, so it didn't reflect the filtering at all. Now, for a setting whose
+  scene reports reactions, it draws the input dimmed with a cyan dot per ring
+  sent; it autoscales and joins its colour segments. `settingMarks.ts`
+  reactions are now kept per reader ("graph", "row") so the two views don't
+  steal each other's rings.
 - 2026-09-26 — "Tempo breathe" becomes "Breathe": the once-per-bar, tempo-locked
   zoom — and this scene's last read of `beatClock.ts` — was removed, and the dial
   turned into a patch destination whose zoom follows whatever source is wired to

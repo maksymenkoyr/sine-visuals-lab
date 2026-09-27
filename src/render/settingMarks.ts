@@ -7,7 +7,9 @@
 //
 // A scene publishes from its own render callback; the panel reads at its own
 // refresh rate. Reactions accumulate (max) between reads so a reaction
-// between two panel reads isn't lost, and a read clears them. A scene
+// between two panel reads isn't lost, and a read clears them — per reader,
+// since more than one panel view reads the same setting (the pinned graph
+// and the row's own sparkline) and one must not steal the other's reactions. A scene
 // rendering on another device (the paired TV) never publishes here, so the
 // graph simply shows no marks there — nothing depends on them.
 
@@ -19,7 +21,8 @@ export interface SettingMarkLine {
 
 interface Entry {
   lines: SettingMarkLine[];
-  reaction: number;
+  /** Strongest reaction since each reader's last read, keyed by reader. */
+  reactions: Map<string, number>;
 }
 
 const entries = new Map<string, Entry>();
@@ -29,7 +32,7 @@ function entryFor(sceneId: string, key: string): Entry {
   const k = keyOf(sceneId, key);
   let e = entries.get(k);
   if (!e) {
-    e = { lines: [], reaction: 0 };
+    e = { lines: [], reactions: new Map() };
     entries.set(k, e);
   }
   return e;
@@ -40,15 +43,16 @@ function entryFor(sceneId: string, key: string): Entry {
 export function publishSettingMarks(sceneId: string, key: string, lines: SettingMarkLine[], reaction: number): void {
   const e = entryFor(sceneId, key);
   e.lines = lines;
-  if (reaction > e.reaction) e.reaction = reaction;
+  for (const [reader, r] of e.reactions) if (reaction > r) e.reactions.set(reader, reaction);
 }
 
-/** The panel's read: current lines and the strongest reaction since the last
- *  read (which this clears). Null if the scene never published for this key. */
-export function takeSettingMarks(sceneId: string, key: string): { lines: SettingMarkLine[]; reaction: number } | null {
+/** A panel view's read (`reader` names the view, e.g. "graph" or "row"):
+ *  current lines and the strongest reaction since that view's last read,
+ *  which this clears. Null if the scene never published for this key. */
+export function takeSettingMarks(sceneId: string, key: string, reader: string): { lines: SettingMarkLine[]; reaction: number } | null {
   const e = entries.get(keyOf(sceneId, key));
   if (!e) return null;
-  const out = { lines: e.lines, reaction: e.reaction };
-  e.reaction = 0;
-  return out;
+  const reaction = e.reactions.get(reader) ?? 0;
+  e.reactions.set(reader, 0);
+  return { lines: e.lines, reaction };
 }

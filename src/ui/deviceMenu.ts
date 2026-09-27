@@ -2723,7 +2723,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       for (let i = 0; i < perSource.length; i++) perSource[i]![ringHead] = src?.[i] ?? 0;
       const v = drives.valueOf(spec.key);
       combined[ringHead] = v;
-      const marks = takeSettingMarks(sceneId, spec.key);
+      const marks = takeSettingMarks(sceneId, spec.key, "graph");
       for (const trace of markTraces.values()) trace[ringHead] = NaN;
       for (const line of marks?.lines ?? []) {
         let trace = markTraces.get(line.label);
@@ -2931,6 +2931,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const SPARK_LEN = 90; // ~3 s at 30 Hz
     const sparkVals = new Float32Array(SPARK_LEN);
     const sparkCols: string[] = new Array(SPARK_LEN).fill(DRIVE_WHITE);
+    // The scene's own reactions for this setting (settingMarks.ts — Beat
+    // ripple's rings), read under this view's own "row" slot. While the
+    // scene reports any, the sparkline shows what the setting *did* (a dot
+    // per reaction) over a dimmed trace of what it received.
+    const sparkReact = new Float32Array(SPARK_LEN);
+    let sparkHasMarks = false;
     let sparkHead = 0;
     let sparkFilled = 0;
     let outputCanvas: HTMLCanvasElement | null = null;
@@ -3000,13 +3006,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       sparkCtx.clearRect(0, 0, w, h);
       const n = Math.min(sparkFilled, SPARK_LEN);
       if (n < 2) return;
+      const at = (k: number) => (sparkHead - SPARK_LEN + k + 1 + SPARK_LEN * 2) % SPARK_LEN;
       const xs = (k: number) => (k / (SPARK_LEN - 1)) * w;
-      const ys = (v: number) => h - 1 - Math.max(0, Math.min(1, v)) * (h - 2);
+      // Grows to fit (sources added together go past 1) rather than
+      // clipping, which drew a busy input as a flat line along the top.
+      let top = 1;
+      for (let k = SPARK_LEN - n; k < SPARK_LEN; k++) top = Math.max(top, sparkVals[at(k)]!);
+      const pad = sparkHasMarks ? 3 : 1;
+      const ys = (v: number) => h - pad - Math.max(0, Math.min(1, v / top)) * (h - 2 * pad);
       sparkCtx.lineWidth = 1.3;
       sparkCtx.lineJoin = "round";
+      sparkCtx.globalAlpha = sparkHasMarks ? 0.45 : 1;
       let runColor = "";
+      let prevX = 0;
+      let prevY = 0;
       for (let k = SPARK_LEN - n; k < SPARK_LEN; k++) {
-        const idx = (sparkHead - SPARK_LEN + k + 1 + SPARK_LEN * 2) % SPARK_LEN;
+        const idx = at(k);
         const col = sparkCols[idx]!;
         const px = xs(k);
         const py = ys(sparkVals[idx]!);
@@ -3014,13 +3029,36 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           if (runColor) sparkCtx.stroke();
           sparkCtx.strokeStyle = col;
           sparkCtx.beginPath();
-          sparkCtx.moveTo(px, py);
+          // Start the new colour from the previous point, so a change of
+          // loudest source doesn't leave a gap in the line.
+          if (runColor) {
+            sparkCtx.moveTo(prevX, prevY);
+            sparkCtx.lineTo(px, py);
+          } else {
+            sparkCtx.moveTo(px, py);
+          }
           runColor = col;
         } else {
           sparkCtx.lineTo(px, py);
         }
+        prevX = px;
+        prevY = py;
       }
       if (runColor) sparkCtx.stroke();
+      sparkCtx.globalAlpha = 1;
+      if (sparkHasMarks) {
+        sparkCtx.fillStyle = "rgba(110,235,225,0.95)";
+        for (let k = SPARK_LEN - n; k < SPARK_LEN; k++) {
+          if (sparkReact[at(k)]! <= 0.01) continue;
+          const start = k;
+          let total = 0;
+          while (k < SPARK_LEN && sparkReact[at(k)]! > 0.01) total += sparkReact[at(k++)]!;
+          k--;
+          sparkCtx.beginPath();
+          sparkCtx.arc(xs(start), ys(sparkVals[at(start)]!), 1.2 + 1.8 * Math.min(1, total), 0, Math.PI * 2);
+          sparkCtx.fill();
+        }
+      }
     }
 
     function tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void {
@@ -3075,6 +3113,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       sparkHead = (sparkHead + 1) % SPARK_LEN;
       sparkVals[sparkHead] = v;
       sparkCols[sparkHead] = col;
+      const marks = takeSettingMarks(sceneId, spec.key, "row");
+      if (marks) sparkHasMarks = true;
+      sparkReact[sparkHead] = marks?.reaction ?? 0;
       sparkFilled = Math.min(SPARK_LEN, sparkFilled + 1);
       drawSparkline();
     }
