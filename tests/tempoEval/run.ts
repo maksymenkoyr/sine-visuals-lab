@@ -79,6 +79,12 @@ export interface EvalMetrics {
    *  (ramp) or has none at all (random) — there's no single "even" interval
    *  to measure against. */
   metroIntervalCv: number;
+  /** Share of those same intervals within METRO_EVEN_TOL of their median —
+   *  the asserted evenness reading. Unlike the CV, one deliberate phase
+   *  correction (metronome.ts's PHASE_SNAP_BEATS: one longer interval, once
+   *  per start/retune) costs it one interval instead of failing the track,
+   *  while a metronome that keeps wobbling still scores low. Same NaN rule. */
+  metroEvenShare: number;
   /** house only (any track with a gap between two tempo segments, i.e. a
    *  breakdown with no drums under it): share of frames inside that gap
    *  where the metronome is running. NaN for a track with no such gap. */
@@ -136,6 +142,7 @@ function median(values: number[]): number {
 }
 
 const TICKS_MIN_SEC = 8;
+const METRO_EVEN_TOL = 0.03;
 const LOCK_MIN_SEC = 6;
 const TICKS_TOLERANCE_SEC = 0.03;
 const WARMUP_SEC = 3;
@@ -379,6 +386,7 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
   // (see EvalMetrics.metroIntervalCv's own doc).
   const sameBpmThroughout = track.tempo.length > 0 && track.tempo.every((s) => s.bpm === track.tempo[0]!.bpm);
   let metroIntervalCv = NaN;
+  let metroEvenShare = NaN;
   if (sameBpmThroughout) {
     const lateTicks = metroTicks.filter((t) => t > TICKS_MIN_SEC);
     const intervals: number[] = [];
@@ -387,6 +395,8 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
       const meanInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
       const variance = intervals.reduce((a, b) => a + (b - meanInterval) ** 2, 0) / intervals.length;
       metroIntervalCv = meanInterval > 0 ? Math.sqrt(variance) / meanInterval : NaN;
+      const median = [...intervals].sort((a, b) => a - b)[intervals.length >> 1]!;
+      metroEvenShare = intervals.filter((x) => Math.abs(x / median - 1) <= METRO_EVEN_TOL).length / intervals.length;
     }
   }
 
@@ -417,6 +427,7 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
     metroOn30ms: metroQualifying > 0 ? metroWithin / metroQualifying : NaN,
     metroCoverage: coverageQualifying > 0 ? coverageWithin / coverageQualifying : NaN,
     metroIntervalCv,
+    metroEvenShare,
     metroBreakdownRun: breakdownFrames > 0 ? breakdownRunning / breakdownFrames : NaN,
     metroBreakdownOn30ms,
     metroEndRunning: lastMetronomeOn,

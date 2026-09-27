@@ -3,6 +3,7 @@ import {
   createMetronome,
   METRONOME_BEATS_PER_BAR,
   FOLLOW_LOCK,
+  PHASE_SNAP_BEATS,
   type Metronome,
   type MetronomeClockInput,
 } from "../src/render/metronome.ts";
@@ -186,6 +187,36 @@ describe("metronome", () => {
       () => 120,
     );
     expect(wrapDist(clockBeats, m.beats)).toBeLessThan(0.02);
+  });
+
+  it("snaps forward onto the clock's beat once, the first time the clock is sure, then only slews", () => {
+    const m = createMetronome();
+    // Starts while the clock is unsure, so it keeps its own (wrong) phase.
+    let clockBeats = 0.4;
+    let lastT = 0;
+    let lock = 0;
+    const clock = (t: number): MetronomeClockInput => {
+      clockBeats += ((t - lastT) * 120) / 60;
+      lastT = t;
+      return { bpm: 120, beats: clockBeats, tempoLock: lock };
+    };
+    run(m, TEMPO_SETTLE_SEC * 1.3, clock, () => 120);
+    expect(m.running).toBe(true);
+    const offBy = () => wrapDist(clockBeats, m.beats);
+    const before = m.beats;
+    lock = 1;
+    // Knock the clock off the metronome's line by more than the snap
+    // threshold, then let the clock turn sure.
+    clockBeats = m.beats + 0.45;
+    expect(offBy()).toBeGreaterThan(PHASE_SNAP_BEATS);
+    m.advance(DT, clock(lastT + DT), 120);
+    expect(offBy()).toBeLessThan(0.02);
+    expect(m.beats).toBeGreaterThan(before);
+    expect(m.beatTick).toBe(false);
+    // A second jump of the clock, while it stays sure, is slewed, not snapped.
+    clockBeats += 0.4;
+    m.advance(DT, clock(lastT + DT), 120);
+    expect(offBy()).toBeGreaterThan(0.3);
   });
 
   it("ignores the clock's phase and tempo while confident but disagreeing on tempo", () => {

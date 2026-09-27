@@ -99,6 +99,7 @@ function printTable(label: string, rows: Record<string, EvalMetrics>): void {
       metroOn30ms: fmt(m.metroOn30ms),
       metroCoverage: fmt(m.metroCoverage),
       metroIntervalCv: fmt(m.metroIntervalCv),
+      metroEvenShare: fmt(m.metroEvenShare),
       metroBreakdownRun: fmt(m.metroBreakdownRun),
       metroBreakdownOn30ms: fmt(m.metroBreakdownOn30ms),
       metroEndRunning: String(m.metroEndRunning),
@@ -195,7 +196,7 @@ describe("tempo eval scoreboard", () => {
   it("metronome: evenly spaced, ticks through house's breakdown, lets go at the end", () => {
     for (const table of [metrics, metrics30]) {
       for (const name of ["house", "hiphop", "dnb"]) {
-        expect(table[name]!.metroIntervalCv, name).toBeLessThanOrEqual(0.02);
+        expect(table[name]!.metroEvenShare, name).toBeGreaterThanOrEqual(0.9);
       }
       expect(table.house!.metroBreakdownRun).toBeGreaterThanOrEqual(0.95);
       expect(table.house!.metroEndRunning).toBe(false);
@@ -280,7 +281,7 @@ describe("tempo eval scoreboard — fixed-hop analyzer path", () => {
         const tag = `${name} @ ${label}`;
         expect(table[name]!.metroOn30ms, tag).toBeGreaterThanOrEqual(0.85);
         expect(table[name]!.metroCoverage, tag).toBeGreaterThanOrEqual(0.9);
-        expect(table[name]!.metroIntervalCv, tag).toBeLessThanOrEqual(0.02);
+        expect(table[name]!.metroEvenShare, tag).toBeGreaterThanOrEqual(0.9);
       }
     }
   });
@@ -315,7 +316,7 @@ describe("tempo eval scoreboard — host/TV path", () => {
       for (const name of ["house", "hiphop", "dnb"]) {
         expect(table[name]!.metroOn30ms, name).toBeGreaterThanOrEqual(0.75);
         expect(table[name]!.metroCoverage, name).toBeGreaterThanOrEqual(0.9);
-        expect(table[name]!.metroIntervalCv, name).toBeLessThanOrEqual(0.02);
+        expect(table[name]!.metroEvenShare, name).toBeGreaterThanOrEqual(0.9);
       }
     }
   });

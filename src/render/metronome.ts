@@ -24,8 +24,8 @@ import { createTempoSettle } from "./tempoSettle.ts";
 // correction stops and this free-runs at its last bpm rather than drifting
 // or stalling with the clock (beatClock.ts's own beatPhase) or falling back
 // to raw hits (gridPulse.ts's behaviour below GRID_LOCK_ON). A tempo change
-// big enough to move tempoSettle's own held value still reaches this
-// module promptly (settle.push() every tick) and retunes it immediately —
+// big enough to move tempoSettle's own held value (once it has confirmed
+// it — see RETUNE_SURE_SEC there) retunes this the same tick —
 // phase stays continuous across that retune, only the beats/sec rate
 // changes.
 //
@@ -100,6 +100,18 @@ export const FOLLOW_LOCK = 0.75;
 // doc's monotonic note and tests/metronome.test.ts's own assertion.
 export const PHASE_FOLLOW_RATE = 2;
 export const PHASE_FOLLOW_MAX_RATE = 0.25; // beats/s
+// A beat-line error bigger than this (in beats), the first time the clock is
+// confident after the metronome started or retuned, is snapped in one jump
+// instead of slewed; every later correction only slews, so a clock whose
+// phase jitters while confident can never make it jump repeatedly. The metronome now starts on the first
+// settled tempo, long before the clock is sure where the beat is, so its
+// starting phase is often far off; slewing half a beat at
+// PHASE_FOLLOW_MAX_RATE took seconds of visibly uneven ticks (measured on
+// the eval scoreboard's hiphop track). The jump is always forward — to the
+// next point on the clock's beat line — so `beats` stays monotonic, and it
+// arms tick detection silently like an adoption, so it never emits a tick
+// of its own: one longer interval, then evenly spaced again.
+export const PHASE_SNAP_BEATS = 0.15;
 // Tempo follow while confident: only actually pulls `bpm` toward clock.bpm
 // while the two are already close (within RESYNC_RATIO) — see the next
 // constant's own doc for what happens when they're not.
@@ -144,9 +156,13 @@ export function createMetronome(): Metronome {
   // `bpm` a little further on its own.
   let lastTarget = 0;
 
+  // Whether this run has already had its one confident phase check (see
+  // PHASE_SNAP_BEATS) — reset on every start and retune.
+  let phaseChecked = false;
+
   // Arms tick detection against the *current* `beats` without emitting one —
-  // called on adoption, which moves `beats` fresh and must never count that
-  // move itself as a tick.
+  // called on adoption and on a phase snap, both of which move `beats` and
+  // must never count that move itself as a tick.
   function armTickDetection(): void {
     lastBeatFloor = Math.floor(beats);
     lastBarFloor = Math.floor(beats / METRONOME_BEATS_PER_BAR);
@@ -162,7 +178,7 @@ export function createMetronome(): Metronome {
     beatTick: false,
     barTick: false,
     advance(dtSec: number, clock: MetronomeClockInput, rawBpm: number): void {
-      settle.push(rawBpm, dtSec);
+      settle.push(rawBpm, dtSec, clock.tempoLock);
       const target = settle.bpm;
       let beatTick = false;
       let barTick = false;
@@ -172,20 +188,31 @@ export function createMetronome(): Metronome {
           running = true;
           bpm = target;
           beats = clock.beats;
+          phaseChecked = false;
           armTickDetection();
         }
       } else if (target === 0) {
         running = false;
         bpm = 0;
       } else {
-        if (target !== lastTarget) bpm = target;
+        if (target !== lastTarget) {
+          bpm = target;
+          phaseChecked = false;
+        }
         beats += dtSec * (bpm / 60);
 
         if (clock.tempoLock >= FOLLOW_LOCK && bpm > 0 && Math.abs(clock.bpm / bpm - 1) <= RESYNC_RATIO) {
           const err = wrapHalf(clock.beats - beats);
-          const rawStep = err * PHASE_FOLLOW_RATE * dtSec;
-          const cap = PHASE_FOLLOW_MAX_RATE * dtSec;
-          beats += Math.max(-cap, Math.min(cap, rawStep));
+          const snap = !phaseChecked && Math.abs(err) > PHASE_SNAP_BEATS;
+          phaseChecked = true;
+          if (snap) {
+            beats += err > 0 ? err : err + 1;
+            armTickDetection();
+          } else {
+            const rawStep = err * PHASE_FOLLOW_RATE * dtSec;
+            const cap = PHASE_FOLLOW_MAX_RATE * dtSec;
+            beats += Math.max(-cap, Math.min(cap, rawStep));
+          }
           bpm += (clock.bpm - bpm) * Math.min(1, TEMPO_FOLLOW_RATE * dtSec);
         }
 
