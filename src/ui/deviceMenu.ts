@@ -3486,7 +3486,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const row = isOpen ? sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned") : null;
     const r = row?.getBoundingClientRect();
     const col = (narrowMQ.matches ? root : controlsCol).getBoundingClientRect();
-    const top = r ? r.top + 9 : 0;
+    const top = r ? r.top + 20 : 0;
     const visible = !!r && r.height > 0 && top >= col.top && top + SOLO_EYE_PX <= col.bottom;
     soloEyeEl.hidden = !visible;
     if (!visible || !row || !r) return;

@@ -541,8 +541,8 @@ body.vc-keys-reveal [data-keycap]::after {
 /* The patch bay (deviceMenu.ts): a drive row's input port and the row's own
  * pinned/preview highlight.
  *
- * The port's position (a 10px ring centred on the row's top edge near its
- * left corner — the pinned outline's top-left corner — on the side facing
+ * The port's position (a 10px ring tucked into the row's top-left corner —
+ * the pinned outline's — inset evenly from both edges, on the side facing
  * the meters column, which docks to the screen's own left edge — see
  * .vc-spectrum-col above) is a plain class rule rather than deviceMenu.ts's
  * own inline cssText, since drivePortStyle() (deviceMenu.ts) only ever
@@ -563,14 +563,15 @@ body.vc-keys-reveal [data-keycap]::after {
  * background tint, no border — see the row grammar in this file's own
  * header for why a click is what actually expands the patch panel. */
 .vc-drive-port {
-  position: absolute; left: 7px; top: -5px; width: 10px; height: 10px; border-radius: 50%;
+  position: absolute; left: 6px; top: 6px; width: 10px; height: 10px; border-radius: 50%;
   padding: 0; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 .vc-drive-port:hover { transform: scale(1.25); }
 .vc-drive-port:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-/* The port sits on the row's top edge (the pinned outline's top-left
- * corner), above the label — the label needs no room cut out for it. */
-.vc-drive-row-left { padding-left: 0; }
+/* The port sits tucked into the row's top-left corner (the pinned
+ * outline's), inset evenly from both edges — the label and its summary
+ * start just clear of it. */
+.vc-drive-row-left { padding-left: 14px; }
 .vc-row.vc-drive-pinned {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 8%, transparent);
   box-shadow: 0 0 0 1.5px var(--vc-pin-color, ${SCENE_VIOLET});
@@ -604,9 +605,6 @@ body.vc-keys-reveal [data-keycap]::after {
 @media (prefers-reduced-motion: reduce) {
   .vc-eye-lid-top, .vc-eye-lid-bot { transition: none; }
 }
-/* Soloed, the pinned row is the first thing in its card — room above it so
- * the card's own overflow: hidden doesn't clip the port on its top edge. */
-.vc-root.vc-solo .vc-row.vc-drive-pinned { margin-top: 2px; }
 .vc-row.vc-drive-preview {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 6%, transparent);
 }
