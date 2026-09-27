@@ -86,6 +86,7 @@ after all three pass; include the screenshot paths in your summary.
 | The wire format between phone and TV | `src/net/protocol.ts` header — includes the legacy-decode sunset condition |
 | Why a setting resolves the way it does under Auto | `src/render/autoTune.ts` and `src/render/musicProfile.ts` headers |
 | The settings/uniform system itself | `src/render/sceneSettings.ts` header |
+| A scene's per-item settings (several strains/layers/objects with the same controls) or a custom widget in its Scene card | `src/render/sceneItems.ts` header, then `src/ui/widgets/registry.ts` header — items compile to plain keyed settings; widgets are data in `Scene.panel` |
 | Making a setting audio-reactive (what it reacts to: a hit, a grid tick, a level, a drawn frequency line) | `src/render/drives.ts` header — a scene reads `<key>Drive(…)`, never a signal directly |
 | Anything the site records about its visitors, or `PRIVACY.md` | `server/usage.ts` header — the one usage count, what it stores, and the `?me=1` owner flag |
 | The saved-look share-code format | `src/render/sceneLooks.ts` header — links in the wild outlive the schema |

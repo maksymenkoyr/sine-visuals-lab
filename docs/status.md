@@ -6,44 +6,38 @@ regenerate it at session close.
 
 ## In flight
 
-- **Ink Synth mobile seams fix** — branch `claude/mobile-rendering-cutoffs-z3a7l0`
-  (2026-09-19). The phone showed the picture cut into shifted polygons: the
-  same unbounded value-noise hash Caustics had (#102), now in Ink's marbling
-  warps. The integer lattice hash and `wrapFlow` moved out of `caustics.ts`
-  into `src/render/noiseHash.ts` so both scenes share them; Ink wraps its
-  flow offsets per fbm octave (`noiseFlows`) and its sine phases
-  (`sinPhases`) on the JS side. Verified with a headless harness rendering
-  the old and new shader at a huge flow phase (old collapses into
-  cell-aligned blocks, new does not) plus real-app phone-size captures on
-  `main` and the branch. Needs a look on the actual phone that showed it.
-- **Draft scene PRs from `/ref`** waiting on review and a real-music judgement:
-  Slats #100, Neon Gates #90, Neon Fluid #76, plus whatever the last snapshot
-  listed that hasn't landed since (Moiré #104, Ink #96 and Crystal #95 are on
-  `main` now).
-- **Runtime:** Song-boundary instrumentation #93; beat-rate setting #88;
-  Auto tempoLock/dial ranking #73; mic latency status line #103.
-- **Dev/docs:** gallery preview scheduling #91; docs/architecture.md rebuild
-  #74; business/legal docs #72. PR #70 is a stale status snapshot — close it.
+- **Physarum 2 is on `main`** (#153, merged 2026-09-27, still a draft scene).
+  It shipped with a reusable framework any scene can use: per-item settings
+  (`src/render/sceneItems.ts`) and custom Scene-card widgets declared in
+  `Scene.panel` (`src/ui/widgets/`). Physarum 2 uses it for its strain boxes
+  (live cultures, POP/TERR/VIG, Pipette, Rebalance), per-strain wirable rows,
+  solo/group strain editing and Affinity. Record: `docs/scenes/physarum2.md`.
+- **Wrap branch `wrap-physarum2`**: this snapshot, the Physarum 2 record's
+  Measurements and saved scripts, an `AGENTS.md` read-first row for the
+  widget framework, one `tuning/VOCAB.md` line. Needs a PR.
+- **Open PRs:** Magnet slider #160 (touches every panel slider — rebase over
+  the widget framework and check strain rows + linked ticks still work);
+  Sky back as a free scene #170; phone/tablet screen-capture fix #171;
+  Scene master #149; mic latency line #103; architecture doc #74; Auto dial
+  ranking #73. #70 is a stale status snapshot — close it.
 
 ## Open questions
 
-- Other scenes hash with `fract()` of a large product and also add `uTime` or
-  `uFlowPhase` to a noise coordinate (`grep -l "fract(" src/render/scenes`
-  crossed with `uFlowPhase|uTime` — Storm and Powder lead the list). None has
-  been reported broken on a phone yet; move each onto `noiseHash.ts` when it
-  is, or pre-emptively if a session has a phone to check on.
-- Ref loop: a re-rolling noise field (Moiré) reads as hundreds of "hard cuts"
-  to the histogram detector — should `refburst` report a per-frame
-  decorrelation figure alongside cuts?
-- Ref loop: `reflook` finds nothing on light-ground references — fold a
-  light-ground path into `tools/reflook.py`?
-- Runtime: `beatClock.ts` half-time preference on slow ambient tracks, and a
-  real section-change signal, are recurring to-dos.
-- Which draft scenes graduate out of `DRAFT_SCENE_IDS`, and in what order.
+- Affinity: the user found the relationship web "odd and not informative".
+  An orbit view (drag strains closer to follow, farther to avoid) plus a
+  live one-line summary is proposed — prototype first, or build?
+- Physarum 2 "Dose" is easy to misread; its label/description should say
+  "share of agents moved into a new colony per trigger (and per Pipette tap)".
+- Physarum steps can be ≈ 3.5× cheaper with a periodic spatial re-sort of
+  agent storage (measured, look unchanged, prototype in
+  `docs/scenes/physarum2/scripts/perf/`). Build it for `physarum2` and
+  `physarum`?
+- Neither Physarum scene has been judged on real music through a mic.
 
 ## Next up
 
-- Open the PR for the Ink seams branch; confirm on the reporting phone that
-  the cutoffs are gone, in Ink and still in Caustics.
-- Review the queue of draft scene PRs; decide graduation.
-- Close #70; prune idle worktrees and stale scratch branches on origin.
+- Open the PR for `wrap-physarum2`.
+- Affinity redesign (per the answer above).
+- Rebase #160 over the widget framework; close #70.
+- 26 worktrees exist and most belong to squash-merged PRs (`git branch
+  --merged` misses those): check each one's PR with `gh pr view` and prune.

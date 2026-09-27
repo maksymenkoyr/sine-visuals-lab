@@ -73,12 +73,40 @@ https://github.com/fogleman/physarum (MIT) — studied for the multi-species/
 attraction-table idea and the general shape of a per-step diffuse/decay +
 sense/turn/move + deposit loop; https://sagejenson.com/physarum — studied for
 the same algorithm description. Neither the species/attraction-table numbers
-in `SPECIES`/`ATTRACT_ROWS` nor the render palette are taken from Fogleman's
+in `STRAINS`/`ATTRACT_ROWS` nor the strain colours are taken from Fogleman's
 own published values — they're this scene's own hand-picked variant (CLAUDE.md:
 "just make one of the variants," not randomised). No `/ref` video bundle; no
 code was ported (CLAUDE.md's standing rule — written independently from the
 published description, the same spirit as `physarum.ts`'s own Jones citation
 and `powder.ts`'s curl noise).
+
+## Measurements
+
+- 2026-09-26, GPU cost per sim step, high quality (800k agents), 1920×1080,
+  M1 Pro via ANGLE/Metal, headless Chromium, 10 forced steps per frame with a
+  1-pixel readback to force GPU completion (`scripts/perf/tput.mjs`).
+  ANGLE's timer queries were unusable for per-pass numbers (a 5-tap
+  composite read 4.4 ms), so passes were measured by knocking each out:
+  - baseline ≈ 5.0 ms/step; deposit ≈ 3.5, sim ≈ 2.2, diffuse ≈ 0.2,
+    composite + overhead ≈ 0.24 per frame. At 75 steps/s ≈ a third of the
+    GPU.
+  - cause: agents are stored in random order, so neighbouring GPU threads
+    read and write far-apart trail texels. Static agents seeded in spatial
+    order cost 0.72 ms/step vs ≈ 2.75 in random order.
+  - prototype fix (periodic spatial re-sort: CPU counting sort by Morton
+    cell of a 128² grid, then a GPU gather pass permuting the agent
+    textures; `scripts/perf/`): 1.3–1.6 ms/step re-sorting every 75–300
+    steps, sort cost included; look unchanged. The synchronous prototype's
+    readback + sort took 6–11 ms of CPU per sort.
+  - no gain: an exact 9-tap bilinear form of the diffuse blur (bandwidth
+    bound, not fetch bound).
+- 2026-09-27, pure-culture preview collapse (`scripts/previewcheck.mjs`,
+  node): without respawn the widest-turning strain reached 76% of its trail
+  in the densest 2% of cells after 900 steps with surges; 0.3–1% respawn per
+  step held every strain at ≈ 40–60% visible cells and ≈ 12% densest-2%.
+- 2026-09-27, Phase 3 frame time at `?quality=low` with all four box
+  previews running: 8.35 ms/frame panel open vs 8.33 closed (no measurable
+  cost). Pipette: five taps at Dose 0.01 moved PP-C3 from 25% to 29%.
 
 ## Decisions and pivots
 
@@ -286,11 +314,18 @@ and `powder.ts`'s curl noise).
   same-selection slider drag doesn't remount the row it's on; and a cable
   wired from a jack onto a pinned row disappears cleanly (no crash, no stale
   path) once that row's strain is no longer primary and its DOM is disposed
-  — `pinned` itself isn't reset by a `mountRows` dispose (unlike a full
-  rebuild's own tail), so a jack can still show as "plugged in" by data
-  alone after its row is hidden this way; re-selecting the same strain later
-  remounts the row and the cable/patch-panel pick back up automatically
-  (`mountRows`'s own pinned-row check, keyed by `sceneId`+`spec.key`).
+  . Review fix the same day: the first build left `pinned` on the hidden
+  row; `mountRows`' dispose now unpins it and hands the pin to the same
+  control on the newly shown strain (`pinHandoff` in deviceMenu.ts), so the
+  patch bay follows "Nutrient" from PP-A1 to PP-B2.
+- **2026-09-27, rebase onto the panel pinning rework (#166, #168, #169,
+  #151).** `main` added `pinRowHandles` (every row registers, drive or
+  not), click-anywhere card pinning, Solo and `SceneSetting.family` accents
+  while this PR was open. Resolved in `deviceMenu.ts`: `appendSettingRow`
+  takes both new trailing parameters as `(…, accent, opts)`, and
+  `mountRows` also snapshots and disposes `pinRowHandles`, or a strain
+  switch would leave stale pin handles behind. The pin handoff uses
+  `main`'s pin-only `pinSetting`. Merged as #153 (squash 646b1ce).
 
 ## Tuning notes
 
@@ -311,6 +346,21 @@ applies there too. Tuned so far only against the synthetic feed at
 ## Known issues and next steps
 
 - Not yet checked against real music from a mic — synthetic-feed tuning only.
+- The user finds the Affinity relationship web "odd and not informative"
+  (2026-09-27). Proposed, not built, waiting on the user's go-ahead: an
+  orbit view (selected strain in the centre, the others at a distance set by
+  the affinity, drag them in to follow / out to avoid, rings for the five
+  words, own-trail as the centre's halo) plus a live one-line summary
+  ("PP-C3 chases PP-A1 and PP-B2, runs from PP-D4 …"); presets unchanged.
+  The user wanted a prototype-first round for panel UX before.
+- "Dose" confused the user: it is the share of all agents moved into one new
+  colony per trigger (default a beat-pulse rise), and the share each Pipette
+  tap converts. At 0.48 half the dish jumps every beat and the rest goes
+  dark. The label and description don't say that plainly yet.
+- Performance: the spatial re-sort in Measurements (≈ 3.5× cheaper steps,
+  look unchanged) is prototyped, not built. A real version needs an async
+  readback (PBO + fence) and the sort off the main thread; the same fix
+  likely applies to `physarum.ts`.
 - The reseed burst's brightness/size still trades off against `DEPOSIT` and
   `GLOW_MIN`/`GLOW_MAX`; a future pass might want its own exposure term
   instead of sharing the composite's global exposure, if a louder track needs
@@ -376,13 +426,23 @@ applies there too. Tuned so far only against the synthetic feed at
   `docs/scenes/_shared/scripts/shot.mjs --scene physarum2 --bpm 120
   --settings '{…}'` (the session's scratch variant only differed in taking a
   list of capture times).
-- Phase 3's own headless checks (session scratch, not in this repo): a
-  panel-screenshot script (wide/phone, `#menuBtn` + scroll-to-Scene), a
-  pipette script (real press to select a strain and arm the pipette, real
-  taps on `#gl` at a known point, reads each box's own POP readout text
-  before/after), and a frame-time script (`requestAnimationFrame` deltas
-  in-page, panel closed vs the Scene card open) — the measurements these
-  produced are in the Decisions and pivots entry above.
+- Scripts, in `physarum2/scripts/` (run from the repo root with a dev server
+  up; `--port` to match):
+  - `panelshot.mjs` — opens the panel (`#menuBtn`), scrolls to the Scene
+    card, screenshots at a given width.
+  - `solocheck.mjs` — the strain-selection check: solo / checkbox / Shift /
+    All, no-redraw (tagged DOM survives a click), no remount on a slider
+    drag, cable and pin handoff on a strain switch. Two of its checks are
+    stale: "cable-disappears" fails correctly now that the pin moves to the
+    new strain (the remaining cable is its scene-default source), and
+    "no-console-errors" trips on the worktree font 403s.
+  - `previewcheck.mjs` — node harness for the pure-culture collapse numbers
+    in Measurements.
+  - `perf/` — `tput.mjs` plus the spatial re-sort prototype
+    (`p2-prof-sort-prototype.diff`, `_p2sort.ts`, `_p2prof.ts`); see the
+    header of `tput.mjs` before using it.
+- Phase 3's pipette and frame-time checks were one-off session scripts and
+  weren't kept; their results are in Measurements.
 
 ## Resume here
 
@@ -410,23 +470,14 @@ headless check can arm it, close the panel for an unobstructed tap, then
 reopen to read the readouts back. A `vite.shot.config.ts` wrapper
 (`server.fs.allow` for the main checkout, so `@fontsource` woff2s don't 403
 behind this worktree's symlinked `node_modules`) is the untracked fix for the
-panel rendering in system fonts headlessly — see headless-app-driving.md.
+panel rendering in system fonts headlessly (not needed for the scripts to pass).
 
 ## History
 
-- Added on branch `worktree-physarum2` (2026-09-26): scene, tests, docs record,
-  registered as a draft. Not yet merged to main / opened as a PR.
-- 2026-09-27: Phases 1+2 of the lab-controls plan (see Decisions and pivots
-  above) — per-strain settings, the Strains/Affinity panel, and the generic
-  `sceneItems.ts`/`src/ui/widgets/` framework it's built on. Still on
-  `worktree-physarum2`, still not merged to main.
-- 2026-09-27: Phase 3 (see Decisions and pivots above) — live specimen-box
-  previews, POP/TERR/VIG readouts, the population bar, Rebalance and the
-  pipette, plus `seedSpread`/`seedFrom` and the "Dose" relabel. Still on
-  `worktree-physarum2`, still not merged to main (PR #153).
-- 2026-09-27: Multi-strain editing in the Strains widget (see Decisions and
-  pivots above) — toggle selection, "All", the generic `linked` bridge on
-  `WidgetCtx.appendRow`, divergent-value ticks, "Mixed — …" drive summaries,
-  Affinity's multi-target fan-out, and the preview-cache fix for cultures
-  restarting on every click. Still on `worktree-physarum2`, still not merged
-  to main.
+- #153 (squash 646b1ce, merged 2026-09-27): the scene (2026-09-26), then the
+  same PR grew the lab-controls prototype (`physarum2/artifacts/`), the
+  generic item/panel/widget framework (`src/render/sceneItems.ts`,
+  `src/ui/widgets/`), per-strain settings and Affinity, live specimen boxes
+  with readouts, Pipette and Rebalance, multi-strain editing, and solo/group
+  selection without a card rebuild — each step is a dated entry under
+  Decisions and pivots.
