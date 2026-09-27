@@ -98,16 +98,27 @@ registerPreviewSource("physarum2", {
       stride: specs.stride ? ctx.get(specs.stride) : 0,
       stain: specs.stain ? ctx.get(specs.stain) : 0,
     };
-    // ctx.driveValue reads the exact same thing each control's own
-    // sparkline shows — 0 while still on "Scene" (see WidgetCtx.driveValue's
-    // own doc comment), the real reading once patched.
+    // The drive readings the scene itself applied last frame (its probe()'s
+    // drive_<param><k>), Scene defaults included — a band on Nutrient, the
+    // beat pulse on Excitability — so a preview moves with the music the
+    // way the dish does. ctx.driveValue, the fallback when the scene isn't
+    // reporting, reads 0 while a control is still on "Scene" (see
+    // WidgetCtx.driveValue's own doc comment), which left every preview
+    // running without the music.
+    const live = ctx.probe();
+    const dv = (p: StrainParam): number => {
+      const v = live?.[`drive_${p}${k}`];
+      if (typeof v === "number") return v;
+      const spec = specs[p];
+      return spec ? ctx.driveValue(spec) : 0;
+    };
     const drive: StrainDriveValues = {
-      nutrient: specs.nutrient ? ctx.driveValue(specs.nutrient) : 0,
-      excite: specs.excite ? ctx.driveValue(specs.excite) : 0,
-      sensor: specs.sensor ? ctx.driveValue(specs.sensor) : 0,
-      turn: specs.turn ? ctx.driveValue(specs.turn) : 0,
-      stride: specs.stride ? ctx.driveValue(specs.stride) : 0,
-      stain: specs.stain ? ctx.driveValue(specs.stain) : 0,
+      nutrient: dv("nutrient"),
+      excite: dv("excite"),
+      sensor: dv("sensor"),
+      turn: dv("turn"),
+      stride: dv("stride"),
+      stain: dv("stain"),
     };
     const eff = resolveStrainEffective(k, raw, drive);
     const motion: StrainPreviewMotion = {

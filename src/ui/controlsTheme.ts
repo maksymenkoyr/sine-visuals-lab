@@ -1029,7 +1029,7 @@ body.vc-keys-reveal [data-keycap]::after {
   border: 1px solid rgba(255, 255, 255, 0.12); touch-action: none; cursor: crosshair;
 }
 .vc-pad-sq:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
-.vc-pad-canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.6; }
+.vc-pad-canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.85; }
 .vc-pad-sq svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .vc-pad-axis { stroke: rgba(255, 255, 255, 0.2); vector-effect: non-scaling-stroke; }
 .vc-pad-tick { stroke: rgba(255, 255, 255, 0.3); vector-effect: non-scaling-stroke; }

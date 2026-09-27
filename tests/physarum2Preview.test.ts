@@ -168,6 +168,37 @@ describe("physarum2Preview: createPairCulture", () => {
     for (let i = 3; i < buf.length; i += 4) expect(buf[i]).toBe(255);
   });
 
+  it("seedColony with share 0 changes nothing", () => {
+    const a = createPairCulture({ size: 24, agents: 300, seed: 9 });
+    const b = createPairCulture({ size: 24, agents: 300, seed: 9 });
+    runSteps(a, 20, inputs(0));
+    runSteps(b, 20, inputs(0));
+    a.seedColony(0, 0.1);
+    runSteps(a, 10, inputs(0));
+    runSteps(b, 10, inputs(0));
+    expect(a.totals()).toEqual(b.totals());
+  });
+
+  it("seedColony with share 1 gathers every agent into one small disc", () => {
+    const size = 32;
+    const lit = (c: ReturnType<typeof createPairCulture>): number => {
+      const buf = new Uint8ClampedArray(size * size * 4);
+      c.pixelsInto(buf, [
+        [1, 1, 1],
+        [1, 1, 1],
+      ]);
+      let n = 0;
+      for (let i = 0; i < buf.length; i += 4) if (buf[i]! > 0) n++;
+      return n;
+    };
+    const spread = createPairCulture({ size, agents: 800, seed: 13 });
+    runSteps(spread, 1, inputs(0));
+    const seeded = createPairCulture({ size, agents: 800, seed: 13 });
+    seeded.seedColony(1, 0.05);
+    runSteps(seeded, 1, inputs(0));
+    expect(lit(seeded)).toBeLessThan(lit(spread) * 0.3);
+  });
+
   it("eating (touch01 = -1.5) leaves strain 1's total well below the no-touch run", () => {
     const base = createPairCulture({ size: 32, agents: 800, seed: 11 });
     runSteps(base, 60, inputs(0));

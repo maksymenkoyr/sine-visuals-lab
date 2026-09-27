@@ -231,12 +231,19 @@ export interface PairCulture {
   step(inputs: PairCultureInputs): void;
   /** Renders both channels, additively combined and tinted by `colors`, into
    *  a caller-owned buffer (`out`, `size*size*4` bytes) — no per-frame
-   *  allocation, since a pad redraws every other tick (itemBoxes.ts's own
+   *  allocation, since a pad redraws whenever it steps (pairPads.ts's own
    *  stepping cadence). Alpha is always 255. */
   pixelsInto(out: Uint8ClampedArray, colors: readonly [RGB, RGB]): void;
   /** Each channel's raw trail sum — for tests only (a pixel-space assertion
    *  would have to redo the same gamma/exposure curve `pixelsInto` applies). */
   totals(): [number, number];
+  /** The scene's automatic beat reseed, at pad scale: each agent, with
+   *  probability `share`, jumps into one disc of `radius` (a fraction of the
+   *  dish's side, like the scene's field-unit Spread) at a random centre,
+   *  with a random heading and its strain unchanged. Without this a pad's
+   *  network settles into a fixed shape within seconds, while the scene's
+   *  own keeps being rebuilt on every beat. */
+  seedColony(share: number, radius: number): void;
 }
 
 export interface PairCultureOptions {
@@ -383,5 +390,20 @@ export function createPairCulture(opts: PairCultureOptions = {}): PairCulture {
     return [t0, t1];
   }
 
-  return { size, step, pixelsInto, totals };
+  function seedColony(share: number, radius: number): void {
+    if (!(share > 0)) return;
+    const cx = rnd() * size;
+    const cy = rnd() * size;
+    const r = Math.max(0, radius) * size;
+    for (let i = 0; i < agents; i++) {
+      if (rnd() >= share) continue;
+      const d = r * Math.sqrt(rnd());
+      const th = rnd() * TWO_PI;
+      ax[i] = (((cx + Math.cos(th) * d) % size) + size) % size;
+      ay[i] = (((cy + Math.sin(th) * d) % size) + size) % size;
+      ah[i] = rnd() * TWO_PI;
+    }
+  }
+
+  return { size, step, pixelsInto, totals, seedColony };
 }

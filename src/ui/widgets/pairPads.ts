@@ -152,6 +152,13 @@ const pairState = new Map<string, PairState>();
 const PAIR_CULTURE_CACHE_MAX = 24;
 const pairCultureCache = new Map<string, PairCulture>();
 
+/** How fast a pad's culture runs, in steps per second of wall time — near
+ *  the scene's own step rate, so a pad regrows after a beat reseed at the
+ *  pace the main dish does. PAD_MAX_STEPS_PER_TICK caps the catch-up after a
+ *  slow frame, so a stall never turns into a burst of CPU work. */
+const PAD_STEPS_PER_SEC = 60;
+const PAD_MAX_STEPS_PER_TICK = 4;
+
 function cachedCulture(key: string, size: number, agents: number, seed: number): PairCulture {
   let c = pairCultureCache.get(key);
   if (!c) {
@@ -878,14 +885,31 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     return effective ? effective(k).color : parseCssRgb(colours[k] ?? "rgb(255,255,255)");
   }
 
-  let tickCount = 0;
+  // The cultures step on a time budget (PAD_STEPS_PER_SEC, carried across
+  // ticks, capped per tick) rather than once every other panel tick: the
+  // panel ticks at the display's frame rate, so "every other tick" left a
+  // pad at a quarter of the scene's own pace on a 30 fps device and its
+  // network visibly frozen. They also mirror the scene's automatic beat
+  // reseed (probe()'s seedEpoch/seedDose/seedRadius) with seedColony, which
+  // is what keeps the scene's own networks being rebuilt.
+  let stepDebt = 0;
+  let lastTickMs = -1;
+  let lastSeedEpoch: number | undefined;
   function tick(): void {
-    tickCount++;
-    // Every other tick, same cadence as itemBoxes.ts's own specimen-box
-    // previews — see padcost.mjs's own measurement for why the real
-    // throttled-CPU cost here turned out to be the per-tick spec lookups
-    // (fixed by specGrid above), not this cadence.
-    const stepThisTick = tickCount % 2 === 0;
+    const nowMs = performance.now();
+    const dtSec = lastTickMs < 0 ? 0 : Math.min(0.1, (nowMs - lastTickMs) / 1000);
+    lastTickMs = nowMs;
+    stepDebt = Math.min(PAD_MAX_STEPS_PER_TICK, stepDebt + dtSec * PAD_STEPS_PER_SEC);
+    const steps = Math.floor(stepDebt);
+    stepDebt -= steps;
+    const probeData = ctx.probe();
+    const epoch = probeData?.seedEpoch;
+    let seedNow = false;
+    if (typeof epoch === "number") {
+      // A reset (the scene restarting its counter) just re-arms.
+      if (lastSeedEpoch !== undefined && epoch > lastSeedEpoch) seedNow = true;
+      lastSeedEpoch = epoch;
+    }
 
     for (const pad of pads) redrawPad(pad);
 
@@ -921,13 +945,16 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     if (pair && effective) {
       for (const pad of pads) {
         if (!pad.culture || !pad.offscreen || !pad.imgBuf || !pad.visible) continue;
-        if (stepThisTick) {
+        if (seedNow) pad.culture.seedColony(probeData?.seedDose ?? 0, probeData?.seedRadius ?? 0);
+        if (steps === 0 && !seedNow) continue;
+        if (steps > 0) {
           const w = pair.weights(ctx, pad.a, pad.b);
-          pad.culture.step({
-            motion: [effective(pad.a).motion, effective(pad.b).motion],
+          const inputs = {
+            motion: [effective(pad.a).motion, effective(pad.b).motion] as const,
             smell: w.smell,
             touch: w.touch,
-          });
+          };
+          for (let s = 0; s < steps; s++) pad.culture.step(inputs);
         }
         pad.culture.pixelsInto(pad.imgBuf, [colorFor(pad.a), colorFor(pad.b)]);
         const octx = pad.offscreen.getContext("2d");

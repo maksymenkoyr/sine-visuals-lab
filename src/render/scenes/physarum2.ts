@@ -1531,6 +1531,18 @@ function createPhysarum2Scene(): Scene {
   // that never leaves this closure.
   let population: number[] = equalPopulation(SPECIES_COUNT);
   const vigour = new Float32Array(SPECIES_COUNT);
+  // Every strain's drive readings as resolveStrains last applied them, Scene
+  // defaults included (a band on Nutrient, the beat pulse on Excitability),
+  // for probe() — so the panel's live previews move with the music the way
+  // the dish does, rather than reading 0 until a source is patched in.
+  const liveDrive: StrainDriveValues[] = Array.from({ length: SPECIES_COUNT }, () => ({
+    nutrient: 0,
+    excite: 0,
+    sensor: 0,
+    turn: 0,
+    stride: 0,
+    stain: 0,
+  }));
   let lastViewport: Viewport = FULL_VIEWPORT;
   let lastResW = 1;
   let lastResH = 1;
@@ -1777,6 +1789,7 @@ function createPhysarum2Scene(): Scene {
       // feeding its Nutrient this frame, scene default included (the
       // widget's own drive reading is 0 until a source is patched in).
       vigour[k] = drive.nutrient;
+      liveDrive[k] = drive;
       const eff = resolveStrainEffective(k, raw, drive);
       strainSensorDist[k] = eff.sensorDist;
       strainRotationRad[k] = eff.rotationRad;
@@ -2073,7 +2086,16 @@ function createPhysarum2Scene(): Scene {
         out[`pop${k}`] = population[k]!;
         out[`terr${k}`] = territory[k]!;
         out[`vig${k}`] = vigour[k]!;
+        const dr = liveDrive[k]!;
+        for (const p of Object.keys(dr) as (keyof StrainDriveValues)[]) out[`drive_${p}${k}`] = dr[p];
       }
+      // The automatic beat reseed, for the Affinity pads' own cultures to
+      // mirror (pairPads.ts): the counter steps once per reseed, with the
+      // share moved (Dose) and the disc radius (Spread, field-unit) that
+      // reseed used, both as resolved (Auto included), not as stored.
+      out.seedEpoch = seedEpoch;
+      out.seedDose = resolveSceneSetting(ID, settingFor("seed"));
+      out.seedRadius = seedSpreadSliderToRadius(resolveSceneSetting(ID, settingFor("seedSpread")));
       return out;
     },
 
