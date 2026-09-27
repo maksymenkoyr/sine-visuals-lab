@@ -4,6 +4,7 @@ import {
   gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
+  GENERIC_THRESHOLD_DEFAULT,
   normalizeDriveSetting,
   PASSTHROUGH_DRIVES,
   sameDriveChoice,
@@ -18,7 +19,7 @@ import {
   type DriveSetting,
 } from "../src/render/drives.ts";
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
-import { setDriveLine, setDriveLineStrength, setDriveSetting } from "../src/render/driveStore.ts";
+import { setDriveLine, setDriveLineStrength, setDriveSetting, setDriveThreshold, setDriveThresholdOn } from "../src/render/driveStore.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
@@ -96,14 +97,77 @@ describe("drives: catalogue identity", () => {
     expect(drives.fired("beatTrigger", false)).toBe(anim.onset);
   });
 
-  it("kind: level entries have no natural edge — fired() falls back to sceneDefaultFired", () => {
+});
+
+// kind: "level" entries (and the drawn line, which has no `kind` at all)
+// have no natural edge to read — fired() used to fall back to whatever
+// sceneDefaultFired the caller passed in for these, silently ignoring the
+// source the user actually picked. It now runs the source's own weighted
+// reading through a per-source Schmitt trigger instead (valueTrigger.ts).
+describe("drives: level/line sources fire through a Schmitt trigger (valueTrigger.ts), never sceneDefaultFired", () => {
+  it("a level source fires once above the mark, holds while still above it, and re-arms only below the lower mark", () => {
     const clock = createAnimClock();
-    const anim = clock.advance(DT, frame({ bands: new Float32Array(NUM_BANDS).fill(0.5) }));
+    const base = clock.advance(DT, frame());
     const engine = createDriveEngine();
+    const sceneId = "level-trigger-scene";
     const spec = settingWithDrive("levelTrigger", "anim.mid");
-    const drives = engine.forScene("identity-scene-3", [spec], anim);
-    expect(drives.fired("levelTrigger", true)).toBe(true);
-    expect(drives.fired("levelTrigger", false)).toBe(false);
+
+    const above = { ...base, mid: 0.9, timeSec: 0, beats: 0, tempoLock: 0 };
+    expect(engine.forScene(sceneId, [spec], above).fired("levelTrigger", false)).toBe(true);
+
+    // Still above the mark, a moment later, nowhere near a beat boundary or
+    // the fallback refire window — held, not a fresh fire.
+    const stillAbove = { ...base, mid: 0.9, timeSec: 0.05, beats: 0.01, tempoLock: 0 };
+    expect(engine.forScene(sceneId, [spec], stillAbove).fired("levelTrigger", true)).toBe(false);
+
+    // Between the marks — no fire, no re-arm.
+    const between = { ...base, mid: 0.5, timeSec: 0.1, beats: 0.02, tempoLock: 0 };
+    expect(engine.forScene(sceneId, [spec], between).fired("levelTrigger", true)).toBe(false);
+
+    // Below the lower mark — re-arms, but sceneDefaultFired never sneaks in.
+    const low = { ...base, mid: 0.1, timeSec: 0.15, beats: 0.03, tempoLock: 0 };
+    expect(engine.forScene(sceneId, [spec], low).fired("levelTrigger", true)).toBe(false);
+
+    // Rises again — fires, regardless of what sceneDefaultFired says.
+    const riseAgain = { ...base, mid: 0.9, timeSec: 0.2, beats: 0.04, tempoLock: 0 };
+    expect(engine.forScene(sceneId, [spec], riseAgain).fired("levelTrigger", false)).toBe(true);
+  });
+
+  it("a custom `upper` shifts the fire mark", () => {
+    const clock = createAnimClock();
+    const base = clock.advance(DT, frame());
+    const engine = createDriveEngine();
+    const sceneId = "level-trigger-threshold-scene";
+    const spec = settingWithDrive("levelTrigger", "anim.mid");
+    const anim = { ...base, mid: 0.5, timeSec: 0, beats: 0, tempoLock: 0 };
+    // Below the default mark (0.6) but above a lowered custom one.
+    expect(engine.forScene(sceneId, [spec], anim).fired("levelTrigger", false, 0.4)).toBe(true);
+  });
+
+  it("a line source is converted the same way, off its own bandLineDrive() reading", () => {
+    const sceneId = "line-trigger-scene";
+    const spec = settingWithDrive("lineTrigger", { source: "line" });
+    setDriveLine(sceneId, spec, new Float32Array(NUM_BANDS).fill(0)); // flat-0: full headroom everywhere
+    setDriveLineStrength(sceneId, spec, 1);
+    const engine = createDriveEngine();
+
+    const loud = frame({ bands: new Float32Array(NUM_BANDS).fill(0.9) });
+    const quiet = frame({ bands: new Float32Array(NUM_BANDS).fill(0.05) });
+    const anim = { ...createAnimClock().advance(DT, loud), timeSec: 0, beats: 0, tempoLock: 0 };
+
+    engine.accumulate(DT, loud, 0, anim, sceneId, [spec]);
+    expect(engine.forScene(sceneId, [spec], anim).fired("lineTrigger", false)).toBe(true);
+
+    // Still up (no fresh accumulate) — held, and sceneDefaultFired never matters.
+    expect(engine.forScene(sceneId, [spec], anim).fired("lineTrigger", true)).toBe(false);
+
+    // A long quiet stretch decays the line drive well past the lower mark.
+    engine.accumulate(5, quiet, 0, anim, sceneId, [spec]);
+    expect(engine.forScene(sceneId, [spec], anim).fired("lineTrigger", true)).toBe(false);
+
+    // Loud again — fires, regardless of sceneDefaultFired.
+    engine.accumulate(DT, loud, 0, anim, sceneId, [spec]);
+    expect(engine.forScene(sceneId, [spec], anim).fired("lineTrigger", false)).toBe(true);
   });
 });
 
@@ -377,8 +441,20 @@ describe("drives: patch normalization — weight clamp, dedupe, empty -> scene",
     expect(normalized.sources[0]).toEqual({ choice: "anim.low", weight: 1 });
   });
 
-  it("an empty patch normalizes to scene", () => {
-    expect(normalizeDriveSetting({ mix: "add", sources: [] })).toBe("scene");
+  it("an empty patch stays empty — nothing plugged in, not the scene's mix", () => {
+    expect(normalizeDriveSetting({ mix: "add", sources: [] })).toEqual({ mix: "add", sources: [] });
+  });
+
+  it("an empty patch listens to nothing: value 0, never fires, even when the scene's own trigger fires", () => {
+    const clock = createAnimClock();
+    const anim = clock.advance(DT, frame({ onset: true }));
+    const engine = createDriveEngine();
+    const spec = settingWithDrive("unplugged", "feature.onset");
+    setDriveSetting("empty-patch-scene", spec, { mix: "add", sources: [] });
+    const drives = engine.forScene("empty-patch-scene", [spec], anim);
+    expect(drives.value("unplugged", 0.8)).toBe(0);
+    expect(drives.fired("unplugged", true)).toBe(false);
+    expect(drives.uniformPair("unplugged")).toEqual({ drive: 0, custom: 1 });
   });
 
   it("sameDriveSetting compares mix, source order, weight and height", () => {
@@ -1053,5 +1129,188 @@ describe("drives: sceneSources — display-only scene-mix metadata", () => {
       }
     }
     expect(checked).toBeGreaterThan(0);
+  });
+});
+
+// ---- The generic engine gate (this file's header's "The threshold" paragraph) ----
+//
+// Every drive setting that doesn't declare its own SceneSetting.drive.
+// threshold gets this for free, off by default. "anim.energy" (a level-kind
+// catalogue entry driven directly by accumulate()'s own `driveEnergy`
+// argument) makes the tracker's own floor/peak fully controllable from a
+// test without needing a real onset; the fired()-blocked case below instead
+// uses an edge-kind source ("feature.onset") with height "loud", so a hit's
+// own combined value is controllable the same way while still going through
+// fired()'s real edge machinery.
+describe("drives: the generic engine gate — every drive setting without its own scene-handled threshold", () => {
+  function energySetting(key = "k"): SceneSetting {
+    return settingWithDrive(key, "anim.energy");
+  }
+
+  it("off (the default): bit-for-bit identical to no gate at all, however the signal moves — gateLine stays undefined", () => {
+    const sceneId = "gate-off-identity";
+    const spec = energySetting();
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    for (let i = 0; i < 200; i++) {
+      const e = i % 20 < 2 ? 1 : 0.05; // spiky — would train a floor/peak if the gate were mistakenly live
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      const drives = engine.forScene(sceneId, [spec], anim);
+      expect(drives.value("k", -1)).toBe(e);
+      expect(drives.uniformPair("k")).toEqual({ drive: e, custom: 1 });
+      expect(drives.gateLine("k")).toBeUndefined();
+      expect(drives.threshold("k")).toBe(null); // declares none of its own; the engine's own gate is off
+    }
+  });
+
+  it("on: a signal hovering below the line reads ~0 through value(), a bump above passes ≈ its own value", () => {
+    const sceneId = "gate-on-value";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    expect(tick(0.1).threshold("k")).toBe(GENERIC_THRESHOLD_DEFAULT); // switched on, value untouched
+    setDriveThreshold(sceneId, spec, 0.5);
+    for (let i = 0; i < 5; i++) tick(1); // a loud burst teaches the peak
+    let drives = new Array(180).fill(0).map(() => tick(0.1)).at(-1)!; // settles low, well under the line
+    expect(drives.value("k", -1)).toBe(0);
+    expect(drives.gateLine("k")).toBeGreaterThan(0.1);
+
+    drives = tick(1); // another burst — clearly above the line
+    expect(drives.value("k", -1)).toBeCloseTo(1, 5);
+  });
+
+  it("on: t=0 sits at the resting floor, t=1 at the recent peak — the slider moves the line", () => {
+    const sceneId = "gate-on-t";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.1); // floor settles low, peak stays well above it
+
+    setDriveThreshold(sceneId, spec, 0);
+    const lineAt0 = tick(0.1).gateLine("k")!;
+    setDriveThreshold(sceneId, spec, 1);
+    const lineAt1 = tick(0.1).gateLine("k")!;
+    expect(lineAt1).toBeGreaterThan(lineAt0 + 0.2);
+  });
+
+  it("on: fired() blocks an edge whose own combined value falls under the line", () => {
+    const sceneId = "gate-on-fired";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "loud" }] });
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveThreshold(sceneId, spec, 0.5);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+
+    function tick(onset: boolean, e: number) {
+      const anim = clock.advance(DT, frame({ onset }));
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    // Train the trackers with alternating loud (1.0) and quiet (0.1) hits —
+    // Loud height reads driveEnergy straight off the hit, so each hit's own
+    // combined value is exactly the energy it was given. Read fired()/value()
+    // the instant each hit lands: the SceneDrives view is live, not a
+    // snapshot, and a source's own heightEnv keeps decaying underneath it on
+    // every later tick, so a reading has to be taken there and then.
+    let lastLoudFired = false;
+    let lastLoudValue = 0;
+    for (let cycle = 0; cycle < 15; cycle++) {
+      let drives = tick(true, 1);
+      lastLoudFired = drives.fired("k", false);
+      lastLoudValue = drives.value("k", -1);
+      for (let i = 0; i < 10; i++) tick(false, 1);
+      drives = tick(true, 0.1);
+      const quietFired = drives.fired("k", false);
+      const quietValue = drives.value("k", -1);
+      for (let i = 0; i < 10; i++) tick(false, 0.1);
+      if (cycle > 10) {
+        expect(quietFired).toBe(false); // the edge is real, but too weak to pass
+        expect(quietValue).toBe(0);
+      }
+    }
+    expect(lastLoudFired).toBe(true); // the loud hit still fires
+    expect(lastLoudValue).toBe(1);
+  });
+});
+
+describe("drives: Beat wave's every-N-beats divider (DriveSource.every)", () => {
+  it("every=1, or absent, is identical to the plain catalogue read", () => {
+    const clock = createAnimClock();
+    const base = clock.advance(DT, frame());
+    const anim = { ...base, metronomeBeats: 5.25, metronomePhase: 0.25, metronomeLevel: 0.8 };
+    const engine = createDriveEngine();
+    const sceneId = "beatwave-every-identity";
+    const specDefault = settingWithDrive("k", "anim.beatWave");
+    const specExplicitOne = patchSetting(sceneId, "k2", { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, every: 1 }] });
+    const drives = engine.forScene(sceneId, [specDefault, specExplicitOne], anim);
+    const expected = SIGNALS["anim.beatWave"].read(frame(), anim);
+    expect(drives.value("k", -999)).toBe(expected);
+    expect(drives.value("k2", -999)).toBe(expected);
+  });
+
+  it("every=4 peaks once per 4 beats, not once per beat", () => {
+    const clock = createAnimClock();
+    const base = clock.advance(DT, frame());
+    const engine = createDriveEngine();
+    const sceneId = "beatwave-every-4";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, every: 4 }] });
+    // Beat wave follows the metronome (metronomeBeats/metronomePhase/
+    // metronomeLevel), so the test drives those, keeping phase = frac(beats).
+    const at = (beats: number) => ({ ...base, metronomeBeats: beats, metronomePhase: beats - Math.floor(beats), metronomeLevel: 1 });
+    const valueAt = (beats: number) => engine.forScene(sceneId, [spec], at(beats)).value("k", -999);
+
+    // Peaks at every multiple of 4 beats...
+    for (const b of [0, 4, 8, 12]) expect(valueAt(b)).toBeCloseTo(1, 6);
+    // ...and troughs exactly halfway through each 4-beat cycle.
+    for (const b of [2, 6, 10]) expect(valueAt(b)).toBeCloseTo(0, 6);
+    // At beat 1 (not a multiple of 4), every=4 reads far from the peak a
+    // plain (every=1) Beat wave would give at that same beat.
+    const plainAt1 = SIGNALS["anim.beatWave"].read(frame(), at(1));
+    expect(valueAt(1)).toBeLessThan(plainAt1 - 0.3);
+  });
+
+  it("normalizeDriveSetting drops `every` from a source on any choice but anim.beatWave", () => {
+    const withEvery = { mix: "add" as const, sources: [{ choice: "anim.mid" as const, weight: 1, every: 4 as const }] };
+    const normalized = normalizeDriveSetting(withEvery);
+    expect(normalized).not.toBe("scene");
+    if (normalized !== "scene") expect(normalized.sources[0]!.every).toBeUndefined();
+  });
+
+  it("normalizeDriveSetting drops an out-of-list every value even on anim.beatWave, and keeps a valid one", () => {
+    // `every: 3` isn't a value the DriveEvery type admits — this simulates
+    // foreign/decoded data reaching normalizeDriveSetting some other way
+    // than sanitizeDriveSetting's own (stricter, rejecting) parse.
+    const bad = { mix: "add" as const, sources: [{ choice: "anim.beatWave" as const, weight: 1, every: 3 as unknown as 4 }] };
+    const normBad = normalizeDriveSetting(bad);
+    if (normBad !== "scene") expect(normBad.sources[0]!.every).toBeUndefined();
+
+    const good = { mix: "add" as const, sources: [{ choice: "anim.beatWave" as const, weight: 1, every: 8 as const }] };
+    const normGood = normalizeDriveSetting(good);
+    if (normGood !== "scene") expect(normGood.sources[0]!.every).toBe(8);
+
+    // 1 is the identity default — normalizeDriveSetting keeps it out of the
+    // stored shape, same as it never stores a Graded height or a weight of 1.
+    const one = { mix: "add" as const, sources: [{ choice: "anim.beatWave" as const, weight: 1, every: 1 as const }] };
+    const normOne = normalizeDriveSetting(one);
+    if (normOne !== "scene") expect(normOne.sources[0]!.every).toBeUndefined();
   });
 });

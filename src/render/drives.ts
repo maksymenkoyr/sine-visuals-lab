@@ -7,7 +7,8 @@ import { createGridPulse, type GridPulse } from "./gridPulse.ts";
 import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
-import { getDriveLine, getDriveLineStrength, getDriveSetting } from "./driveStore.ts";
+import { getDriveLine, getDriveLineStrength, getDriveSetting, getDriveThresholdState } from "./driveStore.ts";
+import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 
 /**
  * The drive engine: one place that turns a `SceneSetting.drive` setting into
@@ -24,8 +25,9 @@ import { getDriveLine, getDriveLineStrength, getDriveSetting } from "./driveStor
  * **The patch model.** A setting not on `"scene"` is a `DrivePatch`: one or
  * more `DriveSource`s (each a plain `DriveChoice` — a src/render/signals.ts
  * `SignalId`, `{source:"beat", grid}`, or `{source:"line"}` — never
- * `"scene"`, plus a `weight` and, for a hit-kind source, a `height`)
- * combined by the patch's own `mix`:
+ * `"scene"`, plus a `weight`, for a hit-kind source a `height`, and for a
+ * plain `"anim.beatWave"` source an `every` — see DriveSource.every's own
+ * doc) combined by the patch's own `mix`:
  *
  *   - **add** — Σ weight·value. The everyday case: two hits reinforcing
  *     each other, or a hit layered under a sustained level.
@@ -69,8 +71,9 @@ import { getDriveLine, getDriveLineStrength, getDriveSetting } from "./driveStor
  *     **Muting.** `DriveSource.off` turns a source off without unplugging
  *     it: `combine()`/`fired()` treat it as absent (contributes nothing,
  *     either as a "plays" term or a condition), but it keeps its own
- *     position, weight, height and role, so switching it back on restores
- *     exactly what it was doing. `sourceValues()` below reports a muted
+ *     position, weight, height, role and (on a Beat wave source) its every-N-
+ *     beats divider, so switching it back on restores exactly what it was
+ *     doing. `sourceValues()` below reports a muted
  *     source's own slot as 0 (still in patch order — the panel's per-source
  *     trace just goes flat rather than disappearing and shifting every
  *     later trace over). If *every* source in a patch is muted, the patch's
@@ -140,6 +143,32 @@ import { getDriveLine, getDriveLineStrength, getDriveSetting } from "./driveStor
  * tests/drives.test.ts's identity check, which walks every registered
  * scene's drive settings and asserts exactly this.
  *
+ * **The threshold: scene-handled vs. engine-gated.** `SceneSetting.drive.
+ * threshold` marks a setting scene-handled: the scene owns the whole idea of
+ * "how far does this have to stand out before it counts" and reads the
+ * user's own slider back with `drives.threshold(key)`, applying whatever
+ * gate shape actually fits its signal — Beat ripple's salience floor/peak
+ * trackers (rippleEmitter.ts), not the generic one below. Declaring
+ * `drive.threshold` is what opts a setting *out* of the engine's own gate;
+ * every other patched setting (no `drive.threshold` on its spec) gets a
+ * generic version of the same idea for free, off by default so nothing
+ * changes until it's switched on. `accumulate()` tracks it per setting: a
+ * floor that follows the signal's resting level (down fast, up slowly — a
+ * brief loud passage shouldn't instantly convince it the room got louder)
+ * and a peak that jumps straight to a new high and eases back toward the
+ * floor, with the threshold slider (0..1) picking a line between the two —
+ * 0 at the floor (everything through), 1 at the peak (only the standouts).
+ * `value()`/`uniformPair()`/`valueOf()` fade a reading out smoothly below
+ * that line (a soft knee, not a hard cut, so a hit riding right on the edge
+ * doesn't flicker) and `fired()` blocks an edge whose own combined value
+ * falls under it, on top of whatever that mix already required. The panel's
+ * own graph draws the line with `SceneDrives.gateLine(key)` — `undefined`
+ * whenever there's nothing to draw: no `drive` at all, a scene-handled
+ * threshold (the scene draws its own line through settingMarks.ts instead),
+ * or the generic gate simply off. Because a scene-handled setting is
+ * skipped by the generic gate outright, and a generic setting has no scene
+ * of its own reading `drives.threshold`, a setting is never gated twice.
+ *
  * **Advancing.** Grid pulses, line peak-holds and Fixed/Loud height
  * envelopes are per-tick state that has to see every rAF tick, not just the
  * ticks that end up rendering — a fast grid stop (1/8 at a high tempo) can
@@ -171,8 +200,14 @@ import { getDriveLine, getDriveLineStrength, getDriveSetting } from "./driveStor
  * as a read-time side effect — so calling `.fired()` for a setting with a
  * grid source is what "consumes" that source's edge, exactly once per
  * actual render, without a separate consume() step every caller has to
- * remember to call. deviceMenu.ts builds its own `forScene()` off the tick's
- * raw (unlatched) AnimFrame purely to show a live reading beside a row — it
+ * remember to call. A level-kind catalogue source or the drawn line has no
+ * edge at all to latch or consume — `.fired()` instead runs that source's
+ * own weighted reading through a per-source Schmitt trigger (valueTrigger.ts)
+ * every time it's asked, and that trigger's own hysteresis state (armed,
+ * last beat, last fire time) simply persists across a render the scene
+ * skips, the same way the grid's pending flag survives one. deviceMenu.ts
+ * builds its own `forScene()` off the tick's raw (unlatched) AnimFrame
+ * purely to show a live reading beside a row — it
  * only ever reads `.uniformPair()`/`.excess()`/`.sourceValues()`/`.valueOf()`,
  * never `.fired()`, so it can't accidentally steal a grid edge a scene
  * hasn't rendered yet.
@@ -207,6 +242,15 @@ export type DriveChoice = DriveSourceChoice | "scene";
  *  (see this file's header). Absent on a `DriveSource` means Graded. */
 export type HitHeight = "graded" | "fixed" | "loud";
 
+/** Beat wave's own divider (DriveSource.every): how many beats one swing of
+ *  its cosine takes, instead of always one. 1 (or absent) is today's plain
+ *  reading — every value here is one this system already has a name for
+ *  (a beat grid division's own multiples), so a picker offering these five
+ *  reads as "the same kind of choice as a beat grid", not an arbitrary
+ *  slider. */
+export const DRIVE_EVERY_VALUES = [1, 2, 4, 8, 16] as const;
+export type DriveEvery = (typeof DRIVE_EVERY_VALUES)[number];
+
 /** One tap into a patch: `choice` never `"scene"`, `weight` clamped to
  *  0..2 (see `clampWeight` below) wherever a patch is normalized. */
 export interface DriveSource {
@@ -226,6 +270,14 @@ export interface DriveSource {
    *  see this file's header's Muting paragraph. `sourceValues()` still
    *  reports this slot, as 0. */
   off?: true;
+  /** Only meaningful on a plain `"anim.beatWave"` choice (see DRIVE_EVERY_VALUES'
+   *  own doc): swings once every this-many beats instead of once every beat.
+   *  `normalizeDriveSetting` strips this on any other choice, or an
+   *  out-of-list value, rather than carrying a number nothing will ever
+   *  read. Absent (or 1) is today's plain Beat wave reading, bit-identical —
+   *  `sourceRawImpl` (this file's engine) only takes the divider's own
+   *  branch once it's greater than 1. */
+  every?: DriveEvery;
 }
 
 /** How a patch's sources combine into one number — see this file's header
@@ -251,17 +303,24 @@ export interface SceneDrives {
   value(key: string, sceneDefault: number): number;
   /** The resolved one-shot trigger for a JS-side spawn/impulse:
    *  `sceneDefaultFired` passed straight through for `"scene"`; for `add`/
-   *  `max`, the OR of every non-muted source's own edge (a grid source's
-   *  pending tick, cleared by this call; an edge-kind catalogue source's
-   *  render-latched boolean off `anim`; any other source falls back to
-   *  `sceneDefaultFired`, same as `"scene"` — see this file's header); for
-   *  `gate`, the OR of every non-muted *plays* source's own edge AND `open`
-   *  (every non-muted condition's own weighted value past the same
-   *  smoothstep midpoint `value()`'s gate combine multiplies together) being
-   *  past 0.5 — a condition source's own edge, if it has one, is never
-   *  consumed. A gate with no active condition (this file's header) is
-   *  always open, so this reduces to the add/max OR-of-edges rule above. */
-  fired(key: string, sceneDefaultFired: boolean): boolean;
+   *  `max`, the OR of every non-muted source's own edge — a grid source's
+   *  pending tick (cleared by this call), an edge-kind catalogue source's
+   *  render-latched boolean off `anim`, or, for a level-kind catalogue
+   *  source or the drawn line (neither has a natural edge of its own —
+   *  signals.ts's header), that source's own weighted reading run through a
+   *  per-source Schmitt trigger (valueTrigger.ts) instead of falling back to
+   *  `sceneDefaultFired`; for `gate`, the OR of every non-muted *plays*
+   *  source's own edge (by that same rule) AND `open` (every non-muted
+   *  condition's own weighted value past the same smoothstep midpoint
+   *  `value()`'s gate combine multiplies together) being past 0.5 — a
+   *  condition source's own edge, if it has one, is never consumed. A gate
+   *  with no active condition (this file's header) is always open, so this
+   *  reduces to the add/max OR-of-edges rule above. `upper` is the
+   *  Schmitt trigger's own fire mark for a level/line source only (ignored
+   *  by a hit-kind source's real edge) — defaults to
+   *  `VALUE_TRIGGER_UPPER_DEFAULT` (valueTrigger.ts) when omitted, or a
+   *  scene can pass its own user-facing threshold setting through here. */
+  fired(key: string, sceneDefaultFired: boolean, upper?: number): boolean;
   /** Per-band excess behind this setting's line source (bandLine.ts's
    *  BandLineDrive.excess), for the panel's overlay — null unless the
    *  current patch has a source on Frequencies. */
@@ -286,6 +345,23 @@ export interface SceneDrives {
    *  here, since there is no patch to sum — the panel draws that setting's
    *  cables instead of a sparkline). */
   valueOf(key: string): number;
+  /** This setting's own threshold value when its threshold is on (whether
+   *  scene-handled — SceneSetting.drive.threshold, adjusted by the slider
+   *  under its graph — or the generic engine gate every other patched
+   *  setting gets, adjusted the same way), `null` while it's off, and
+   *  `undefined` only when there's no engine behind this at all
+   *  (PASSTHROUGH_DRIVES — the caller falls back to its own default). A
+   *  scene-handled setting reads this to apply its own gate shape (this
+   *  file's header's threshold paragraph); a generic setting doesn't need
+   *  to call this itself — the engine already applies its gate inside
+   *  value()/uniformPair()/valueOf()/fired(). */
+  threshold(key: string): number | null | undefined;
+  /** The generic engine gate's current line (this file's header's threshold
+   *  paragraph), for the panel's own graph to draw dotted — undefined
+   *  whenever there's nothing to draw: no `drive` on this setting, a
+   *  scene-handled threshold (the scene draws its own line instead), or the
+   *  generic gate simply off. */
+  gateLine(key: string): number | undefined;
 }
 
 /** Always "scene" — the identity fallback every caller not wired to a real
@@ -301,6 +377,8 @@ export const PASSTHROUGH_DRIVES: SceneDrives = {
   uniformPair: () => ({ drive: 0, custom: 0 }),
   sourceValues: () => null,
   valueOf: () => 0,
+  threshold: () => undefined,
+  gateLine: () => undefined,
 };
 
 // matches animClock.ts's own BEAT_PULSE_DECAY_PER_SEC exactly (imported, not
@@ -333,12 +411,49 @@ export const DRIVE_GATE_WHEN_DEFAULT = 1;
 export const GATE_OPEN_LOW = 0.35;
 export const GATE_OPEN_HIGH = 0.55;
 
+/** The generic engine gate's own threshold default (this file's header's
+ *  threshold paragraph) — the slider's resting position the one time it's
+ *  ever read before a user moves it. Unlike a scene-handled threshold
+ *  (SceneSetting.drive.threshold's own `default`), there's one value for
+ *  every generic setting, since none of them shaped this gate on purpose the
+ *  way Beat ripple shaped its own. */
+export const GENERIC_THRESHOLD_DEFAULT = 0.25;
+// The generic gate tracker's own time constants (accumulate() below) — a
+// floor that chases a *lower* resting level quickly (so a quiet moment reads
+// as quiet almost at once) but a *higher* one slowly (so one loud passage
+// doesn't instantly convince it the room got louder), and a peak that jumps
+// to a new high immediately but eases back down toward the floor at the same
+// slow rate. Picked to feel like a noise floor, not measured against any
+// reference — nothing here plays back a released ring the way
+// SALIENCE_*_RELAX_SEC (rippleEmitter.ts) does for Beat ripple's own,
+// unrelated trackers.
+const GATE_FLOOR_DOWN_TAU_SEC = 0.3;
+const GATE_FLOOR_UP_TAU_SEC = 4;
+const GATE_PEAK_DECAY_TAU_SEC = 4;
+// The soft knee around the gate's own line (value()/uniformPair()/valueOf()
+// below): a fraction of the tracker's own floor-to-peak spread, with a
+// minimum so a dead-flat signal (peak == floor) still has *some* knee rather
+// than a hard step.
+const GATE_KNEE_FRACTION = 0.04;
+const GATE_KNEE_SPREAD_MIN = 0.1;
+
 function clampWeight(w: number): number {
   return Number.isFinite(w) ? Math.min(DRIVE_WEIGHT_MAX, Math.max(DRIVE_WEIGHT_MIN, w)) : DRIVE_WEIGHT_DEFAULT;
 }
 
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
+/** Fractional part in [0, 1) — same convention as beatClock.ts's own
+ *  (unexported) wrap01, reproduced here rather than imported since it's a
+ *  one-line generic helper, not a beat-clock-specific one: `x % 1` alone
+ *  wraps negative inputs to (-1, 0], which every-N-beats' own division
+ *  (below) never actually hits (anim.beats only grows), but a copy that
+ *  doesn't quietly rely on that stays correct if it ever does. */
+function wrap01(x: number): number {
+  const w = x % 1;
+  return w < 0 ? w + 1 : w;
 }
 
 /** Exported for the panel's own gate-open shading (buildOutputGraph) — the
@@ -405,6 +520,7 @@ export function sameDriveSetting(a: DriveSetting, b: DriveSetting): boolean {
     if ((sa.height ?? "graded") !== (sb.height ?? "graded")) return false;
     if (!!sa.when !== !!sb.when) return false;
     if (!!sa.off !== !!sb.off) return false;
+    if ((sa.every ?? 1) !== (sb.every ?? 1)) return false;
   }
   return true;
 }
@@ -430,7 +546,12 @@ export function defaultDriveSetting(spec: SceneSetting): DriveSetting {
 
 /** Clamps every source's weight, drops a source whose key collides with an
  *  earlier one in the same patch (first occurrence wins) or a second line
- *  source, and collapses an empty result to `"scene"`. Also carries the
+ *  source, and keeps an empty result empty: a patch with nothing plugged in
+ *  listens to nothing (value 0, never fires). It used to collapse to
+ *  `"scene"`, which made unplugging the last source silently fall back to
+ *  the scene's own mix — Beat ripple's "bass or beat hit" could never be
+ *  disconnected. The panel's "Reset to scene default" is the one way back
+ *  to `"scene"`. Also carries the
  *  legacy top-level `when: n` a patch built before per-source roles existed
  *  can still show up with at runtime (driveStore.ts's sanitizeDriveSetting
  *  does the same for the wire-format twin of this field, top-level `w`):
@@ -463,9 +584,16 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
     if (src.height !== undefined && src.height !== "graded") source.height = src.height;
     if (src.when === true) source.when = true;
     if (src.off === true) source.off = true;
+    // Only ever meaningful on a plain Beat wave source, and only for a
+    // value the picker actually offers — anything else is dropped rather
+    // than carried as a number nothing will read (DriveSource.every's own
+    // doc, and this file's header on what a drive setting stores).
+    if (src.choice === "anim.beatWave" && src.every !== undefined && src.every !== 1 && (DRIVE_EVERY_VALUES as readonly number[]).includes(src.every)) {
+      source.every = src.every;
+    }
     sources.push(source);
   }
-  if (sources.length === 0) return "scene";
+  if (sources.length === 0) return { mix: setting.mix, sources: [] };
 
   if (legacyWhen !== undefined && !sources.some((s) => s.when)) {
     const idx = Math.min(sources.length - 1, Math.max(0, Math.round(legacyWhen)));
@@ -520,6 +648,18 @@ export function setSourceHeight(setting: DriveSetting, choice: DriveSourceChoice
   if (setting === "scene") return setting;
   const key = sourceKey(choice);
   const sources = setting.sources.map((s) => (sourceKey(s.choice) === key ? { ...s, height } : s));
+  return normalizeDriveSetting({ mix: setting.mix, sources });
+}
+
+/** Beat wave's own every-N-beats divider (DriveSource.every — see that
+ *  field's own doc). No-op on `"scene"` or a patch with no source matching
+ *  `choice`; `normalizeDriveSetting` is what actually enforces "only on
+ *  anim.beatWave, only a listed value", so a caller here (or a stray value)
+ *  can't leave a meaningless one behind. */
+export function setSourceEvery(setting: DriveSetting, choice: DriveSourceChoice, every: number): DriveSetting {
+  if (setting === "scene") return setting;
+  const key = sourceKey(choice);
+  const sources = setting.sources.map((s) => (sourceKey(s.choice) === key ? { ...s, every: every as DriveEvery } : s));
   return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
@@ -603,6 +743,12 @@ interface SourceState {
    *  (stays 0) for a Graded source or a level-kind/line source, which never
    *  advance it. */
   heightEnv: number;
+  /** Schmitt-trigger state `sourceEdge` below advances for a level-kind
+   *  catalogue source or the drawn line, when `fired()` asks for this
+   *  source's own edge — see valueTrigger.ts's header. Unused (stays at its
+   *  just-created state) for a grid or edge-kind source, which have a real
+   *  edge of their own to read instead. */
+  valueTrigger: ValueTrigger;
 }
 
 function createSourceState(): SourceState {
@@ -613,7 +759,47 @@ function createSourceState(): SourceState {
     linePulse: 0,
     lineExcess: new Float32Array(NUM_BANDS),
     heightEnv: 0,
+    valueTrigger: createValueTrigger(),
   };
+}
+
+/** One patched setting's own generic-gate tracker (this file's header's
+ *  threshold paragraph) — `accumulate()` advances it once per tick, from the
+ *  setting's own combined-and-gained value; `forScene()` only ever reads
+ *  `line`/`floor`/`peak` back, never advances them itself, same split as
+ *  `SourceState` above. Keyed per setting, not per source — there's one gate
+ *  on the setting's own output, not one per source feeding it. */
+interface GateTrackerState {
+  init: boolean;
+  floor: number;
+  peak: number;
+  /** floor + t·(peak−floor), t the setting's own threshold value — what the
+   *  panel's graph draws dotted (SceneDrives.gateLine) and what value()/
+   *  fired() gate against. Recomputed every advance, so it's always current
+   *  the instant floor/peak move even if the threshold slider itself didn't. */
+  line: number;
+}
+
+function createGateTracker(): GateTrackerState {
+  return { init: false, floor: 0, peak: 0, line: 0 };
+}
+
+/** Advances one setting's gate tracker by `dtSec`, given `v` (that setting's
+ *  own combined, gained reading this tick — the same number value() would
+ *  give with the gate itself switched off) and `t` (the threshold slider,
+ *  0..1). The first call seeds floor/peak from `v` rather than from 0, so
+ *  startup never reads as a signal that's fallen far below a floor of 0. */
+function advanceGateTracker(tr: GateTrackerState, dtSec: number, v: number, t: number): void {
+  if (!tr.init) {
+    tr.floor = v;
+    tr.peak = v;
+    tr.init = true;
+  } else {
+    const floorTau = v < tr.floor ? GATE_FLOOR_DOWN_TAU_SEC : GATE_FLOOR_UP_TAU_SEC;
+    tr.floor += (v - tr.floor) * (1 - Math.exp(-dtSec / floorTau));
+    tr.peak = v > tr.peak ? v : tr.floor + (tr.peak - tr.floor) * Math.exp(-dtSec / GATE_PEAK_DECAY_TAU_SEC);
+  }
+  tr.line = tr.floor + clamp01(t) * (tr.peak - tr.floor);
 }
 
 /** Fixed/Loud's own release rate for a hit-kind source — reused directly
@@ -667,6 +853,45 @@ function loudLevel(choice: DriveSourceChoice, anim: AnimFrame, driveEnergy: numb
   }
 }
 
+// combine()'s gate branch (below) is the one place `off`/`when` are read
+// directly rather than through a zeroed weighted value — see
+// SceneDrives.sourceValues's own doc for why the *panel's* own read zeros a
+// muted slot instead of skipping it structurally. Pure (patch + its own
+// already-weighted readings in), so both forScene() (a scene/panel's own
+// read) and accumulate() (the generic gate tracker's own input, this file's
+// header's threshold paragraph) share this one implementation.
+function combine(patch: DrivePatch, weighted: number[]): number {
+  if (patch.mix === "max") {
+    let m = 0;
+    for (let i = 0; i < weighted.length; i++) {
+      if (patch.sources[i]!.off) continue;
+      if (weighted[i]! > m) m = weighted[i]!;
+    }
+    return m;
+  }
+  if (patch.mix === "gate") {
+    let plays = 0;
+    let open = 1;
+    let anyCondition = false;
+    for (let i = 0; i < patch.sources.length; i++) {
+      const src = patch.sources[i]!;
+      if (src.off) continue;
+      if (src.when) {
+        anyCondition = true;
+        open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, weighted[i]!);
+      } else {
+        plays += weighted[i]!;
+      }
+    }
+    // No active condition (none marked, or every marked one muted) — this
+    // file's header's own deliberate "acts as add" fallback.
+    return anyCondition ? plays * open : plays;
+  }
+  let sum = 0;
+  for (let i = 0; i < weighted.length; i++) if (!patch.sources[i]!.off) sum += weighted[i]!;
+  return sum;
+}
+
 const lineDriveScratch = { drive: 0, excess: new Float32Array(NUM_BANDS) };
 const driveFrameScratch: FeatureFrame = {
   time: 0,
@@ -698,6 +923,8 @@ export interface DriveEngine {
 
 export function createDriveEngine(): DriveEngine {
   const states = new Map<string, SourceState>();
+  // One gate tracker per (scene, setting) — see GateTrackerState's own doc.
+  const gateTrackers = new Map<string, GateTrackerState>();
 
   function stateFor(sceneId: string, key: string, srcKey: string): SourceState {
     const k = `${settingScope(sceneId, key)}:${key}:${srcKey}`;
@@ -707,6 +934,68 @@ export function createDriveEngine(): DriveEngine {
       states.set(k, st);
     }
     return st;
+  }
+
+  function gateTrackerKey(sceneId: string, key: string): string {
+    return `${settingScope(sceneId, key)}:${key}`;
+  }
+
+  /** Creates the tracker on first touch — only ever called from
+   *  accumulate() below, for a setting accumulate() has already confirmed is
+   *  a real patch with the generic gate on. A read-only lookup (forScene()'s
+   *  own gateTrackerLine/applyGate/passesGate) uses the Map directly instead,
+   *  so merely *reading* a setting nobody has ever accumulated for (still on
+   *  "scene", or the gate is off) doesn't manufacture a fresh, meaningless
+   *  tracker. */
+  function gateTrackerFor(sceneId: string, key: string): GateTrackerState {
+    const k = gateTrackerKey(sceneId, key);
+    let tr = gateTrackers.get(k);
+    if (!tr) {
+      tr = createGateTracker();
+      gateTrackers.set(k, tr);
+    }
+    return tr;
+  }
+
+  // Raw (un-weighted, un-gained) reading for one source — needs `key` too
+  // (not just the choice) to look up this setting's own per-source state,
+  // and `anim` since accumulate() and forScene() each advance/read for their
+  // own AnimFrame (this file's header's Advancing/Reading paragraphs).
+  // Shared by both: forScene() below wraps this in a same-named, 2-arg local
+  // (closing over its own sceneId/anim) so the rest of that function's body
+  // reads exactly as it did before this was split out.
+  function sourceRawImpl(sceneId: string, key: string, src: DriveSource, anim: AnimFrame): number {
+    const choice = src.choice;
+    const wantsHeight = src.height === "fixed" || src.height === "loud";
+    if (isGridChoice(choice)) {
+      const st = stateFor(sceneId, key, sourceKey(choice));
+      return wantsHeight ? st.heightEnv : st.gridPulse;
+    }
+    if (isLineChoice(choice)) return stateFor(sceneId, key, sourceKey(choice)).linePulse;
+    // Beat wave's own every-N-beats divider (DriveSource.every): the plain
+    // catalogue read is exactly this formula at every=1 (it swings over the
+    // metronome's own phase, and metronomePhase is the fractional part of
+    // metronomeBeats — see AnimFrame's metronome fields in animClock.ts), so
+    // every>1 is the only case that needs its own read; every=1/absent
+    // falls through to the untouched catalogue.read() below, kept
+    // bit-identical on purpose rather than routed through this formula too.
+    if (choice === "anim.beatWave" && src.every !== undefined && src.every !== 1) {
+      return anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * wrap01(anim.metronomeBeats / src.every)));
+    }
+    const catalogue = SIGNALS[choice];
+    if (catalogue.kind === "edge" && wantsHeight) return stateFor(sceneId, key, sourceKey(choice)).heightEnv;
+    return catalogue.read(driveFrameScratch, anim);
+  }
+
+  // Plain float64 array, deliberately not a Float32Array — combine()'s
+  // sum/max has to match today's bit-for-bit reading exactly (this file's
+  // header's Identity paragraph), and rounding every weighted term through
+  // float32 on the way in would quietly break that at the last few bits.
+  // sourceValues() below, the panel's own inspection API, is the one place
+  // that precision loss is fine (and its own return type, Float32Array,
+  // says so).
+  function weightedValuesImpl(sceneId: string, key: string, patch: DrivePatch, anim: AnimFrame): number[] {
+    return patch.sources.map((src) => clampWeight(src.weight) * sourceRawImpl(sceneId, key, src, anim));
   }
 
   return {
@@ -751,6 +1040,19 @@ export function createDriveEngine(): DriveEngine {
           // state to advance — read straight off `anim`/driveFrameScratch at
           // forScene() time below.
         }
+
+        // The generic engine gate (this file's header's threshold
+        // paragraph): only for a setting that hasn't opted out by declaring
+        // its own scene-handled threshold, and only once it's actually
+        // switched on — an untouched setting costs nothing extra here.
+        if (spec.drive.threshold === undefined) {
+          const thresholdState = getDriveThresholdState(sceneId, spec);
+          if (thresholdState.on) {
+            const gain = spec.drive.gain ?? 1;
+            const v = combine(setting, weightedValuesImpl(sceneId, spec.key, setting, anim)) * gain;
+            advanceGateTracker(gateTrackerFor(sceneId, spec.key), dtSec, v, thresholdState.value);
+          }
+        }
       }
     },
 
@@ -764,91 +1066,85 @@ export function createDriveEngine(): DriveEngine {
         return { setting: getDriveSetting(sceneId, spec), gain: drive.gain ?? 1 };
       }
 
-      // Raw (un-weighted, un-gained) reading for one source — needs `key`
-      // too (not just the choice) to look up this setting's own per-source
-      // state.
+      // Thin, 2-arg wrappers around the shared impls above, closing over
+      // this call's own (sceneId, anim) — every call site below reads
+      // exactly as it did before sourceRaw/weightedValues moved out to be
+      // shared with accumulate()'s own generic-gate tracker.
       function sourceRaw(key: string, src: DriveSource): number {
-        const choice = src.choice;
-        const wantsHeight = src.height === "fixed" || src.height === "loud";
-        if (isGridChoice(choice)) {
-          const st = stateFor(sceneId, key, sourceKey(choice));
-          return wantsHeight ? st.heightEnv : st.gridPulse;
-        }
-        if (isLineChoice(choice)) return stateFor(sceneId, key, sourceKey(choice)).linePulse;
-        const catalogue = SIGNALS[choice];
-        if (catalogue.kind === "edge" && wantsHeight) return stateFor(sceneId, key, sourceKey(choice)).heightEnv;
-        return catalogue.read(driveFrameScratch, anim);
+        return sourceRawImpl(sceneId, key, src, anim);
       }
-
-      // Plain float64 array, deliberately not a Float32Array — combine()'s
-      // sum/max has to match today's bit-for-bit reading exactly (this
-      // file's header's Identity paragraph), and rounding every weighted
-      // term through float32 on the way in would quietly break that at the
-      // last few bits. sourceValues() below, the panel's own inspection
-      // API, is the one place that precision loss is fine (and its own
-      // return type, Float32Array, says so).
       function weightedValues(key: string, patch: DrivePatch): number[] {
-        return patch.sources.map((src) => clampWeight(src.weight) * sourceRaw(key, src));
+        return weightedValuesImpl(sceneId, key, patch, anim);
       }
 
-      // combine()'s gate branch (below) is the one place `off`/`when` are
-      // read directly rather than through a zeroed weighted value — see
-      // sourceValues() further down for why the *panel's* own read zeros a
-      // muted slot instead of skipping it structurally.
-      function combine(patch: DrivePatch, weighted: number[]): number {
-        if (patch.mix === "max") {
-          let m = 0;
-          for (let i = 0; i < weighted.length; i++) {
-            if (patch.sources[i]!.off) continue;
-            if (weighted[i]! > m) m = weighted[i]!;
-          }
-          return m;
-        }
-        if (patch.mix === "gate") {
-          let plays = 0;
-          let open = 1;
-          let anyCondition = false;
-          for (let i = 0; i < patch.sources.length; i++) {
-            const src = patch.sources[i]!;
-            if (src.off) continue;
-            if (src.when) {
-              anyCondition = true;
-              open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, weighted[i]!);
-            } else {
-              plays += weighted[i]!;
-            }
-          }
-          // No active condition (none marked, or every marked one muted) —
-          // this file's header's own deliberate "acts as add" fallback.
-          return anyCondition ? plays * open : plays;
-        }
-        let sum = 0;
-        for (let i = 0; i < weighted.length; i++) if (!patch.sources[i]!.off) sum += weighted[i]!;
-        return sum;
+      // Whether `key` is gated by the *generic* engine gate right now (a
+      // patch, its spec opted in by not declaring its own drive.threshold,
+      // and the threshold switched on) — undefined otherwise, in which case
+      // there's nothing here for a caller to apply. Reads the tracker
+      // read-only: a setting the generic gate has never had a reason to
+      // advance for (still "scene", or the gate is off) simply isn't gated,
+      // rather than manufacturing a fresh tracker just to answer this.
+      function genericGate(key: string): GateTrackerState | undefined {
+        const spec = specByKey.get(key);
+        if (!spec?.drive || spec.drive.threshold !== undefined) return undefined;
+        if (!getDriveThresholdState(sceneId, spec).on) return undefined;
+        return gateTrackers.get(gateTrackerKey(sceneId, key));
       }
 
-      function sourceEdge(key: string, choice: DriveSourceChoice, sceneDefaultFired: boolean): boolean {
+      // value()/uniformPair()/valueOf()'s own soft knee around the generic
+      // gate's line (this file's header's threshold paragraph) — a hard cut
+      // would make a hit riding right on the line flicker. No-op (returns
+      // `v` unchanged) whenever genericGate(key) has nothing to gate on.
+      function applyGenericGate(key: string, v: number): number {
+        const tr = genericGate(key);
+        if (!tr) return v;
+        const k = GATE_KNEE_FRACTION * Math.max(tr.peak - tr.floor, GATE_KNEE_SPREAD_MIN);
+        return v * smoothstep(tr.line - k, tr.line + k, v);
+      }
+
+      // fired()'s own hard cut: an edge whose combined value falls under the
+      // generic gate's line never counts, on top of whatever that setting's
+      // own mix already required. True (nothing blocked) whenever
+      // genericGate(key) has nothing to gate on.
+      function passesGenericGate(key: string, v: number): boolean {
+        const tr = genericGate(key);
+        return !tr || v >= tr.line;
+      }
+
+      // grid and edge-kind catalogue sources read a real one-shot edge, same
+      // as before. A level-kind catalogue source or the drawn line has no
+      // edge of its own (signals.ts's header) — its weighted reading is run
+      // through this source's own Schmitt trigger (valueTrigger.ts) instead
+      // of falling back to `sceneDefaultFired`. fired() runs once per scene
+      // render, not every rAF tick, which is exactly the rate hysteresis
+      // wants: a tick a scene never rendered never gets a vote on whether
+      // the trigger should have fired, and the trigger's own state
+      // (armed/lastBeat/lastFireSec) simply persists across a skipped tick.
+      function sourceEdge(key: string, src: DriveSource, upper: number): boolean {
+        const choice = src.choice;
         if (isGridChoice(choice)) {
           const st = stateFor(sceneId, key, sourceKey(choice));
           const fired = st.gridFiredPending;
           st.gridFiredPending = false;
           return fired;
         }
-        if (isLineChoice(choice)) return sceneDefaultFired;
-        const edge = SIGNALS[choice].edge;
-        return edge ? edge(anim) : sceneDefaultFired;
+        if (!isLineChoice(choice) && SIGNALS[choice].kind === "edge") return SIGNALS[choice].edge!(anim);
+        const st = stateFor(sceneId, key, sourceKey(choice));
+        const raw = clampWeight(src.weight) * sourceRaw(key, src);
+        return stepValueTrigger(st.valueTrigger, raw, upper, anim);
       }
 
       return {
         value(key, sceneDefault) {
           const { setting, gain } = resolve(key);
           if (setting === "scene") return sceneDefault;
-          return combine(setting, weightedValues(key, setting)) * gain;
+          return applyGenericGate(key, combine(setting, weightedValues(key, setting)) * gain);
         },
 
-        fired(key, sceneDefaultFired) {
-          const { setting } = resolve(key);
+        fired(key, sceneDefaultFired, upper = VALUE_TRIGGER_UPPER_DEFAULT) {
+          const { setting, gain } = resolve(key);
           if (setting === "scene") return sceneDefaultFired;
+          let ok: boolean;
           if (setting.mix === "gate") {
             let anyPlays = false;
             let open = 1;
@@ -861,19 +1157,23 @@ export function createDriveEngine(): DriveEngine {
                 const conditionValue = clampWeight(src.weight) * sourceRaw(key, src);
                 open *= smoothstep(GATE_OPEN_LOW, GATE_OPEN_HIGH, conditionValue);
                 // A condition's own edge, if it has one, is never consumed.
-              } else if (sourceEdge(key, src.choice, sceneDefaultFired)) {
+              } else if (sourceEdge(key, src, upper)) {
                 anyPlays = true;
               }
             }
             const gateOpen = !anyCondition || open > 0.5;
-            return anyPlays && gateOpen;
+            ok = anyPlays && gateOpen;
+          } else {
+            ok = false;
+            for (const src of setting.sources) {
+              if (src.off) continue;
+              if (sourceEdge(key, src, upper)) ok = true;
+            }
           }
-          let any = false;
-          for (const src of setting.sources) {
-            if (src.off) continue;
-            if (sourceEdge(key, src.choice, sceneDefaultFired)) any = true;
-          }
-          return any;
+          // The generic gate's own hard cut, on top of whatever the mix
+          // above already required (this file's header's threshold
+          // paragraph) — a weak hit's edge is blocked even though it fired.
+          return ok && passesGenericGate(key, combine(setting, weightedValues(key, setting)) * gain);
         },
 
         excess(key) {
@@ -887,7 +1187,7 @@ export function createDriveEngine(): DriveEngine {
         uniformPair(key) {
           const { setting, gain } = resolve(key);
           if (setting === "scene") return { drive: 0, custom: 0 };
-          return { drive: combine(setting, weightedValues(key, setting)) * gain, custom: 1 };
+          return { drive: applyGenericGate(key, combine(setting, weightedValues(key, setting)) * gain), custom: 1 };
         },
 
         sourceValues(key) {
@@ -898,14 +1198,27 @@ export function createDriveEngine(): DriveEngine {
           // paragraph) — combine()/fired() above check `.off` directly
           // instead of relying on this zeroing (a muted *condition* still
           // has to be told apart from one genuinely reading 0), but the
-          // panel's own per-source trace wants the flat-0 reading.
+          // panel's own per-source trace wants the flat-0 reading. Never
+          // gated — this file's header's threshold paragraph: the generic
+          // gate only ever touches the combined result.
           for (let i = 0; i < setting.sources.length; i++) if (setting.sources[i]!.off) out[i] = 0;
           return out;
         },
 
         valueOf(key) {
           const { setting, gain } = resolve(key);
-          return setting === "scene" ? 0 : combine(setting, weightedValues(key, setting)) * gain;
+          return setting === "scene" ? 0 : applyGenericGate(key, combine(setting, weightedValues(key, setting)) * gain);
+        },
+
+        threshold(key) {
+          const spec = specByKey.get(key);
+          if (!spec?.drive) return undefined;
+          const state = getDriveThresholdState(sceneId, spec);
+          return state.on ? state.value : null;
+        },
+
+        gateLine(key) {
+          return genericGate(key)?.line;
         },
       };
     },

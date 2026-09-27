@@ -1,0 +1,467 @@
+<title>How Beat Ripple Listens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Atkinson+Hyperlegible+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --ground: #f2f6f7;
+  --panel: #ffffff;
+  --ink: #13252b;
+  --muted: #45606a;
+  --line: #c6d6db;
+  --accent: #086d74;
+  --accent-ink: #ffffff;
+  --focus: #b3470c;
+  --screen: #071114;
+  --screen-line: #1f3339;
+  --sig: #ffffff;
+  --ring: #6eebe1;
+  --ignored: #9fb3b8;
+  --body: "Atkinson Hyperlegible", Verdana, "Segoe UI", system-ui, sans-serif;
+  --mono: "Atkinson Hyperlegible Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0d171a;
+    --panel: #132226;
+    --ink: #e3eef0;
+    --muted: #a3b9bf;
+    --line: #2a3f45;
+    --accent: #4fd1cb;
+    --accent-ink: #062024;
+    --focus: #ffb27a;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0d171a;
+  --panel: #132226;
+  --ink: #e3eef0;
+  --muted: #a3b9bf;
+  --line: #2a3f45;
+  --accent: #4fd1cb;
+  --accent-ink: #062024;
+  --focus: #ffb27a;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 18px;
+  line-height: 1.6;
+  padding-inline: 16px;
+  padding-block: 32px 72px;
+}
+main { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 48px; }
+h1 { font-size: clamp(32px, 6vw, 46px); line-height: 1.1; margin: 0; text-wrap: balance; }
+h2 { font-size: 26px; line-height: 1.2; margin: 0; text-wrap: balance; }
+h3 { font-size: 20px; margin: 0; }
+p { margin: 0; max-width: 64ch; }
+.lede { font-size: 21px; color: var(--muted); }
+section { display: flex; flex-direction: column; gap: 16px; }
+header { display: flex; flex-direction: column; gap: 14px; }
+
+/* Demo */
+.demo { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+.choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.demo button {
+  font: 700 17px var(--body);
+  color: var(--ink);
+  background: transparent;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  min-height: 48px;
+  cursor: pointer;
+}
+.demo button:hover { border-color: var(--accent); }
+.demo button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.views { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .views { grid-template-columns: 1fr; } }
+.view { display: flex; flex-direction: column; gap: 6px; }
+.view-label { font-size: 15px; color: var(--muted); }
+canvas { display: block; width: 100%; max-width: 100%; background: var(--screen); border-radius: 6px; }
+#graph { aspect-ratio: 2 / 1; }
+#water { aspect-ratio: 1 / 1; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.threshold { display: flex; flex-direction: column; gap: 6px; }
+.threshold label { font-weight: 700; display: flex; justify-content: space-between; max-width: 420px; }
+.thr-val { font-family: var(--mono); font-weight: 600; }
+.threshold input { width: 100%; max-width: 420px; height: 32px; accent-color: var(--accent); }
+.threshold input:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.status { font-size: 17px; }
+.status strong { font-family: var(--mono); font-weight: 600; }
+.what { color: var(--muted); font-size: 17px; }
+
+/* Key */
+.key { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.key li { display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: start; }
+.swatch { width: 44px; height: 28px; border-radius: 6px; background: var(--screen); display: grid; place-items: center; }
+.swatch svg { display: block; }
+
+/* Steps */
+.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; display: grid; gap: 20px; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 44px 1fr; gap: 14px; }
+.steps li::before {
+  content: counter(s);
+  width: 44px; height: 44px; border-radius: 50%;
+  display: grid; place-items: center;
+  font: 700 20px var(--mono);
+  border: 2px solid var(--accent); color: var(--accent);
+}
+.steps li div { display: flex; flex-direction: column; gap: 4px; }
+
+/* Questions */
+details { border-top: 1px solid var(--line); padding-block: 14px; }
+details:last-child { border-bottom: 1px solid var(--line); }
+summary { font-weight: 700; font-size: 19px; cursor: pointer; }
+summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+details p { margin-top: 10px; }
+
+.settings { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.settings li { display: grid; grid-template-columns: minmax(0, 9em) 1fr; gap: 14px; }
+@media (max-width: 480px) { .settings li { grid-template-columns: 1fr; gap: 2px; } }
+.settings b { font-weight: 700; }
+.fine { font-size: 16px; color: var(--muted); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+
+<main>
+  <header>
+    <h1>How Beat Ripple listens</h1>
+    <p class="lede">In the Caustics scene, a ring spreads across the water when the music does something that stands out. Small sounds that keep repeating don't make rings. This page shows how it decides.</p>
+  </header>
+
+  <section aria-labelledby="try">
+    <h2 id="try">Try it</h2>
+    <p>Pick a kind of music. The left picture is the same graph you see in Beat ripple's panel. The right picture is the water.</p>
+    <div class="demo">
+      <div class="choices" role="group" aria-label="Kind of music">
+        <button type="button" id="m-clean" data-m="clean" aria-pressed="false">Clean beat</button>
+        <button type="button" id="m-busy" data-m="busy" aria-pressed="true">Beat with busy hi-hats</button>
+        <button type="button" id="m-swell" data-m="swell" aria-pressed="false">Smooth swells</button>
+        <button type="button" id="m-noise" data-m="noise" aria-pressed="false">Only hi-hats</button>
+      </div>
+      <p class="what" id="what">A kick drum twice a second, with quieter hi-hats in between.</p>
+      <div class="views">
+        <div class="view">
+          <span class="view-label" id="graph-label">What the ripple hears, last 4 seconds</span>
+          <canvas id="graph" width="1040" height="520" role="img" aria-labelledby="graph-label" aria-describedby="status"></canvas>
+        </div>
+        <div class="view">
+          <span class="view-label" id="water-label">The water</span>
+          <canvas id="water" width="520" height="520" role="img" aria-labelledby="water-label" aria-describedby="status"></canvas>
+        </div>
+      </div>
+      <div class="threshold">
+        <label for="thr">Ring threshold <span class="thr-val" id="thr-val">0.25</span></label>
+        <input id="thr" type="range" min="0" max="1" step="0.05" value="0.25" aria-describedby="thr-help">
+        <p class="what" id="thr-help">The same slider as in the app. Move it right and the dotted line rises: fewer, clearer rings. Move it left: more rings, even from quiet sounds.</p>
+      </div>
+      <div class="row">
+        <p class="status" id="status" aria-live="polite">Starting…</p>
+        <button type="button" id="pause" aria-pressed="false">Pause</button>
+      </div>
+    </div>
+    <p class="fine">The demo uses made-up music and the same rules as the app.</p>
+  </section>
+
+  <section aria-labelledby="read">
+    <h2 id="read">How to read the graph</h2>
+    <ul class="key">
+      <li>
+        <span class="swatch" aria-hidden="true"><svg width="36" height="20" viewBox="0 0 36 20"><polyline points="2,17 10,17 12,3 16,9 22,13 34,16" fill="none" stroke="#ffffff" stroke-width="2.5"/></svg></span>
+        <p><b>White line:</b> what the ripple hears. Each sound makes it jump up, then it falls back down.</p>
+      </li>
+      <li>
+        <span class="swatch" aria-hidden="true"><svg width="36" height="20" viewBox="0 0 36 20"><line x1="2" y1="10" x2="34" y2="10" stroke="#ffffff" stroke-opacity="0.8" stroke-width="2" stroke-dasharray="2 4"/></svg></span>
+        <p><b>Dotted line:</b> how high the next jump has to reach to make a ring. It moves up when there are lots of small sounds, and down after a quiet part.</p>
+      </li>
+      <li>
+        <span class="swatch" aria-hidden="true"><svg width="36" height="20" viewBox="0 0 36 20"><circle cx="18" cy="10" r="7" fill="#6eebe1"/></svg></span>
+        <p><b>Filled dot:</b> a ring was sent. A bigger dot means a stronger ring.</p>
+      </li>
+      <li>
+        <span class="swatch" aria-hidden="true"><svg width="36" height="20" viewBox="0 0 36 20"><circle cx="18" cy="10" r="5" fill="none" stroke="#9fb3b8" stroke-width="2"/></svg></span>
+        <p><b>Empty circle:</b> a jump that didn't reach the dotted line, so no ring. (This one is only on this page. The app shows the filled dots.)</p>
+      </li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="how">
+    <h2 id="how">What happens, step by step</h2>
+    <ol class="steps">
+      <li><div><h3>Hear the sounds</h3><p>The app listens for sudden jumps in the music, like a kick drum or a hi-hat. Each one makes the white line jump.</p></div></li>
+      <li><div><h3>Learn what's normal</h3><p>It remembers how big the everyday jumps are, like a steady row of hi-hats. That memory sets the dotted line just above them.</p></div></li>
+      <li><div><h3>Ring for what stands out</h3><p>A jump that goes past the dotted line sends a ring across the water. The further past the line, the stronger the ring.</p></div></li>
+      <li><div><h3>Forget slowly</h3><p>After a few quiet seconds the memory fades and the dotted line comes down, so even a soft sound can make a ring again.</p></div></li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="faq">
+    <h2 id="faq">Questions</h2>
+    <div>
+      <details>
+        <summary>Why doesn't every sound make a ring?</summary>
+        <p>If every hi-hat sent a ring, new rings would start from the middle all the time and cover up the one from the kick drum. The water would look busy but you couldn't see the beat.</p>
+      </details>
+      <details>
+        <summary>Won't a steady kick drum stop counting as special?</summary>
+        <p>No. The dotted line only learns from the smaller jumps. A kick that's as big as the biggest recent jumps keeps making full rings, however long it plays. Try "Clean beat".</p>
+      </details>
+      <details>
+        <summary>What if I plug in something smooth, like loudness?</summary>
+        <p>It works the same way. It looks at each rise from the last low point up to the top. A big swell makes one ring, a small wobble makes none. Try "Smooth swells".</p>
+      </details>
+      <details>
+        <summary>When hits come very fast, why are the rings lighter?</summary>
+        <p>A hit that lands before the last one has faded can only rise a little way, so its ring is smaller. Fast parts look like quick, light ripples instead of a pile of full rings.</p>
+      </details>
+      <details>
+        <summary>Can I switch it off?</summary>
+        <p>Yes. Open Beat ripple in the panel and press Unplug. With nothing plugged in there are no rings. "Reset to scene default" brings it back to listening for bass and beat hits.</p>
+      </details>
+    </div>
+  </section>
+
+  <section aria-labelledby="set">
+    <h2 id="set">Settings that change the rings</h2>
+    <p>These four change how the rings look, not when they happen.</p>
+    <p><b>Ring threshold</b> is the one setting that changes <i>when</i> rings happen: it moves the dotted line. You'll find it as a slider right under Beat ripple's graph. Its technical name is an adaptive threshold. The app estimates the level of the everyday sounds (the noise floor), and the line sits a margin above it. It also has an Off switch, right beside the slider: with it off, every jump rings, sized by nothing but how far it climbed — no standing out from the everyday sounds required.</p>
+    <ul class="settings">
+      <li><b>Beat ripple</b><span>How strongly the rings bend the light. At 0 the water stays still.</span></li>
+      <li><b>Ring width</b><span>Thin, sharp rings or wide, soft ones.</span></li>
+      <li><b>Wave speed</b><span>How fast rings travel to the edge.</span></li>
+      <li><b>Wave fade</b><span>How quickly rings fade as they travel.</span></li>
+    </ul>
+  </section>
+</main>
+
+<script>
+(() => {
+  // ---- The app's rules (rippleEmitter.ts advanceEmission), same constants ----
+  const SMOOTH_TAU = 0.005, DEADBAND = 0.5;
+  const EVENT_MIN = 0.05, BACKGROUND_FRACTION = 0.6, FLOOR_RATE = 0.2, PEAK_DOWN = 0.05;
+  const FLOOR_RELAX = 3, PEAK_RELAX = 6, SPREAD_MIN = 0.3;
+  const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+  // Ring threshold, as ringThresholdBar in the app: margin 1x..3x the floor,
+  // plus a minimum that grows only above the default (0.25).
+  let threshold = 0.25;
+  function thresholdBar(floor) {
+    const t = clamp01(threshold);
+    return (1 + 2 * t) * floor + 0.25 * Math.max(0, (t - 0.25) / 0.75);
+  }
+
+  function newListener() {
+    return { smoothed: 0, init: false, floor: 0, peak: 0, climbing: false, base: 0, emitted: 0, bar: 0, spread: SPREAD_MIN };
+  }
+  // Returns { ring, ignoredClimb } for this step.
+  function listen(s, dt, signal) {
+    const out = { ring: 0, ignored: false };
+    if (!s.init) { s.smoothed = signal; s.init = true; return out; }
+    const prev = s.smoothed;
+    s.smoothed = prev + (signal - prev) * (1 - Math.exp(-dt / SMOOTH_TAU));
+    const rising = s.smoothed - prev > DEADBAND * dt;
+    s.floor *= Math.exp(-dt / FLOOR_RELAX);
+    s.peak = s.floor + (s.peak - s.floor) * Math.exp(-dt / PEAK_RELAX);
+    if (!rising) {
+      if (s.climbing) {
+        s.climbing = false;
+        const climb = prev - s.base;
+        if (climb >= EVENT_MIN) {
+          if (s.emitted < 0.02) out.ignored = true;
+          if (climb < BACKGROUND_FRACTION * s.peak || climb < s.floor) s.floor += (climb - s.floor) * FLOOR_RATE;
+          s.peak = climb > s.peak ? climb : s.peak + (climb - s.peak) * PEAK_DOWN;
+        }
+      }
+      return out;
+    }
+    if (!s.climbing) {
+      s.climbing = true;
+      s.base = prev;
+      s.emitted = 0;
+      s.bar = thresholdBar(s.floor);
+      s.spread = Math.max(s.peak - s.bar, SPREAD_MIN);
+    }
+    const target = clamp01((s.smoothed - s.base - s.bar) / s.spread);
+    out.ring = Math.max(0, target - s.emitted);
+    s.emitted = Math.max(s.emitted, target);
+    return out;
+  }
+  function reachLine(s) {
+    if (s.climbing) return s.base + s.bar;
+    return s.smoothed + thresholdBar(s.floor);
+  }
+
+  // ---- Made-up music ----
+  const MUSIC = {
+    clean: "A kick drum twice a second and nothing else.",
+    busy: "A kick drum twice a second, with quieter hi-hats in between.",
+    swell: "A smooth level, like loudness, with a big swell and a small wobble taking turns.",
+    noise: "Only quiet hi-hats, nothing that stands out.",
+  };
+  let rnd = 7;
+  const random = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;
+  function makeMusic(kind) {
+    let pulse = 0, nextKick = 0.2, nextHat = 0.2 + 0.125, t = 0, wobble = 0;
+    return (dt) => {
+      t += dt;
+      if (kind === "swell") {
+        wobble += (random() - 0.5) * 0.02 - wobble * dt * 6;
+        const k = Math.floor(t), ph = t - k, size = k % 2 === 0 ? 0.32 : 0.07;
+        const bump = ph < 0.5 ? size * 0.5 * (1 - Math.cos((ph / 0.5) * 2 * Math.PI)) : 0;
+        return 0.35 + bump + wobble;
+      }
+      pulse *= Math.exp(-6 * dt);
+      if ((kind === "clean" || kind === "busy") && t >= nextKick) { pulse = Math.max(pulse, 1); nextKick += 0.5; }
+      if ((kind === "busy" || kind === "noise") && t >= nextHat) {
+        pulse = Math.max(pulse, 0.22 + 0.18 * random());
+        nextHat += 0.125;
+        if (kind === "busy" && Math.abs(((nextHat - 0.2) % 0.5)) < 1e-6) nextHat += 0.125; // no hat on the kick
+      }
+      return pulse;
+    };
+  }
+
+  // ---- State ----
+  const STEP = 1 / 60, WINDOW = 240; // 4 s at 60 steps/s
+  let kind = "busy", music, listener, sig, line, ring, ignored, head, filled, rings, simTime;
+  function reset(k) {
+    kind = k;
+    music = makeMusic(k);
+    listener = newListener();
+    sig = new Float32Array(WINDOW); line = new Float32Array(WINDOW).fill(NaN);
+    ring = new Float32Array(WINDOW); ignored = new Uint8Array(WINDOW);
+    head = 0; filled = 0; rings = []; simTime = 0;
+    document.getElementById("what").textContent = MUSIC[k];
+    for (const b of document.querySelectorAll("[data-m]")) b.setAttribute("aria-pressed", String(b.dataset.m === k));
+  }
+  function step() {
+    const s = music(STEP);
+    const r = listen(listener, STEP, s);
+    head = (head + 1) % WINDOW;
+    sig[head] = s; line[head] = reachLine(listener); ring[head] = r.ring; ignored[head] = r.ignored ? 1 : 0;
+    filled = Math.min(WINDOW, filled + 1);
+    if (r.ring > 0) {
+      const last = rings[rings.length - 1];
+      if (last && last.age < 0.05) last.amp += r.ring; else rings.push({ age: 0, amp: r.ring });
+    }
+    for (const g of rings) g.age += STEP;
+    rings = rings.filter((g) => g.age < 6);
+    simTime += STEP;
+  }
+
+  // ---- Drawing ----
+  const graph = document.getElementById("graph"), gctx = graph.getContext("2d");
+  const water = document.getElementById("water"), wctx = water.getContext("2d");
+  const at = (k) => (head - WINDOW + 1 + k + WINDOW * 2) % WINDOW;
+  function drawGraph() {
+    const W = graph.width, H = graph.height, pad = 22;
+    gctx.fillStyle = "#071114"; gctx.fillRect(0, 0, W, H);
+    const n = filled;
+    let top = 1;
+    for (let k = WINDOW - n; k < WINDOW; k++) { top = Math.max(top, sig[at(k)]); if (line[at(k)] >= 0) top = Math.max(top, line[at(k)]); }
+    top *= 1.08;
+    const x = (k) => (k / (WINDOW - 1)) * W;
+    const y = (v) => H - pad - Math.max(0, Math.min(1, v / top)) * (H - 2 * pad);
+    // Dotted reach line
+    gctx.setLineDash([4, 8]); gctx.lineWidth = 3; gctx.strokeStyle = "rgba(255,255,255,0.75)";
+    gctx.beginPath(); let pen = false;
+    for (let k = WINDOW - n; k < WINDOW; k++) { const v = line[at(k)]; if (!(v >= 0)) { pen = false; continue; } pen ? gctx.lineTo(x(k), y(v)) : gctx.moveTo(x(k), y(v)); pen = true; }
+    gctx.stroke(); gctx.setLineDash([]);
+    // Signal
+    gctx.lineWidth = 4; gctx.strokeStyle = "#ffffff"; gctx.beginPath();
+    for (let k = WINDOW - n; k < WINDOW; k++) (k === WINDOW - n ? gctx.moveTo(x(k), y(sig[at(k)])) : gctx.lineTo(x(k), y(sig[at(k)])));
+    gctx.stroke();
+    // Rings (filled) and ignored jumps (empty)
+    for (let k = WINDOW - n; k < WINDOW; k++) {
+      if (ring[at(k)] > 0.01) {
+        const start = k; let total = 0;
+        while (k < WINDOW && ring[at(k)] > 0.01) total += ring[at(k++)];
+        gctx.fillStyle = "#6eebe1"; gctx.beginPath();
+        gctx.arc(x(start), y(sig[at(start)]), 6 + 12 * Math.min(1, total), 0, Math.PI * 2); gctx.fill();
+        k--;
+      } else if (ignored[at(k)]) {
+        gctx.strokeStyle = "#9fb3b8"; gctx.lineWidth = 3; gctx.beginPath();
+        gctx.arc(x(k), y(sig[at(k)]), 8, 0, Math.PI * 2); gctx.stroke();
+      }
+    }
+  }
+  function drawWater() {
+    const W = water.width, H = water.height, cx = W / 2, cy = H / 2;
+    const g = wctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.75);
+    g.addColorStop(0, "#0b2328"); g.addColorStop(1, "#050d10");
+    wctx.fillStyle = g; wctx.fillRect(0, 0, W, H);
+    const scale = (W * 0.72) / 3; // the frame corner sits at radius ~3, like the app
+    wctx.globalCompositeOperation = "lighter";
+    for (const r of rings) {
+      const env = (1 - Math.exp(-r.age / 0.06)) * Math.exp(-r.age * 0.45);
+      const a = Math.min(1, r.amp * env);
+      if (a < 0.02) continue;
+      const rad = r.age * 1.1 * scale;
+      wctx.lineWidth = 22; wctx.strokeStyle = `rgba(60,200,195,${0.16 * a})`;
+      wctx.beginPath(); wctx.arc(cx, cy, rad, 0, Math.PI * 2); wctx.stroke();
+      wctx.lineWidth = 4; wctx.strokeStyle = `rgba(190,250,245,${0.9 * a})`;
+      wctx.beginPath(); wctx.arc(cx, cy, rad, 0, Math.PI * 2); wctx.stroke();
+    }
+    wctx.globalCompositeOperation = "source-over";
+  }
+
+  // ---- Plain-words status for everyone, including screen readers ----
+  const status = document.getElementById("status");
+  function describe() {
+    let strong = 0, faint = 0, ignored4 = 0;
+    for (let k = WINDOW - filled; k < WINDOW; k++) {
+      if (ring[at(k)] > 0.01) {
+        let total = 0;
+        while (k < WINDOW && ring[at(k)] > 0.01) total += ring[at(k++)];
+        k--;
+        if (total >= 0.5) strong++; else faint++;
+      } else if (ignored[at(k)]) ignored4++;
+    }
+    const n = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+    status.innerHTML = `Last 4 seconds: <strong>${n(strong, "strong ring", "strong rings")}</strong>, <strong>${n(faint, "faint ring", "faint rings")}</strong>, <strong>${n(ignored4, "jump ignored", "jumps ignored")}</strong>.`;
+  }
+
+  // ---- Loop ----
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let paused = reduce, carry = 0, last = performance.now(), sinceDescribe = 0;
+  const pauseBtn = document.getElementById("pause");
+  function setPaused(p) {
+    paused = p;
+    pauseBtn.textContent = p ? "Play" : "Pause";
+    pauseBtn.setAttribute("aria-pressed", String(p));
+  }
+  function warm(seconds) { for (let i = 0; i < seconds / STEP; i++) step(); }
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    if (!paused) {
+      carry += dt;
+      while (carry >= STEP) { step(); carry -= STEP; }
+      drawGraph(); drawWater();
+      sinceDescribe += dt;
+      if (sinceDescribe > 4) { describe(); sinceDescribe = 0; }
+    }
+    requestAnimationFrame(frame);
+  }
+  function choose(k) {
+    reset(k);
+    warm(6); // start from a filled graph, not an empty one
+    drawGraph(); drawWater(); describe(); sinceDescribe = 0;
+  }
+  for (const b of document.querySelectorAll("[data-m]")) b.addEventListener("click", () => choose(b.dataset.m));
+  pauseBtn.addEventListener("click", () => setPaused(!paused));
+  const thr = document.getElementById("thr"), thrVal = document.getElementById("thr-val");
+  thr.addEventListener("input", () => {
+    threshold = Number(thr.value);
+    thrVal.textContent = threshold.toFixed(2);
+    if (paused) { drawGraph(); drawWater(); }
+  });
+  setPaused(paused);
+  choose("busy");
+  requestAnimationFrame(frame);
+})();
+</script>

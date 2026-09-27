@@ -1,0 +1,387 @@
+<title>Caustics Ripple Pool</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=Share+Tech+Mono&display=swap">
+<style>
+:root {
+  --ground: #edf2f1;
+  --panel: #f8fbfa;
+  --ink: #10292b;
+  --muted: #53706f;
+  --line: #c9d8d6;
+  --accent: #0b8683;
+  --bad: #c2410c;
+  --good: #0b8683;
+  --screen: #061112;
+  --screen-ink: #9fd6d2;
+  --display: "Chakra Petch", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --mono: "Share Tech Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0a1516;
+    --panel: #0f1e20;
+    --ink: #dbe9e7;
+    --muted: #8aa8a5;
+    --line: #22393b;
+    --accent: #3cc7c1;
+    --bad: #fb8a4c;
+    --good: #3cc7c1;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0a1516;
+  --panel: #0f1e20;
+  --ink: #dbe9e7;
+  --muted: #8aa8a5;
+  --line: #22393b;
+  --accent: #3cc7c1;
+  --bad: #fb8a4c;
+  --good: #3cc7c1;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.55;
+  padding-inline: 16px;
+  padding-block: 28px 64px;
+}
+.wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 44px; }
+header { display: flex; flex-direction: column; gap: 8px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--display); font-weight: 700; font-size: clamp(28px, 4.6vw, 44px); line-height: 1.05; margin: 0; text-wrap: balance; letter-spacing: .01em; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 22px; margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 68ch; }
+.lede { font-size: 17px; color: var(--muted); max-width: 64ch; }
+code, .mono { font-family: var(--mono); font-size: .95em; }
+section { display: flex; flex-direction: column; gap: 16px; }
+.sechead { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 18px; }
+.tag { display: inline-block; font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 3px; border: 1px solid currentColor; }
+.tag.shipped { color: var(--good); }
+.tag.proposal { color: var(--muted); }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; }
+.controls label { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.controls input[type=range] { width: 180px; accent-color: var(--accent); }
+.readout { font-family: var(--mono); min-width: 7ch; font-variant-numeric: tabular-nums; }
+button, .seg button {
+  font: 500 13px var(--body); color: var(--ink); background: transparent; border: 1px solid var(--line);
+  border-radius: 4px; padding: 6px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.on { background: var(--accent); border-color: var(--accent); color: var(--ground); }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .pair { grid-template-columns: 1fr; } }
+.pool { display: flex; flex-direction: column; gap: 8px; }
+.poolhead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.poolhead h3 { font-family: var(--display); font-weight: 600; font-size: 16px; margin: 0; }
+.poolhead .mono { font-size: 12px; color: var(--muted); }
+canvas { display: block; width: 100%; max-width: 100%; border-radius: 4px; }
+.screen { aspect-ratio: 16 / 9; background: var(--screen); }
+.lanes { background: var(--panel); border: 1px solid var(--line); }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat { display: flex; flex-direction: column; gap: 0; }
+.stat .n { font-family: var(--mono); font-size: 24px; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.stat .l { font-size: 12px; color: var(--muted); }
+.stat.bad .n { color: var(--bad); }
+.stat.good .n { color: var(--good); }
+.note { font-size: 13px; color: var(--muted); }
+.flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 760px) { .flow { grid-template-columns: 1fr; } }
+.box { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.box h4 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 15px; }
+.box p { font-size: 14px; }
+.box.warn { border-color: var(--bad); }
+.box.warn h4 { color: var(--bad); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+.graph { background: var(--panel); border: 1px solid var(--line); }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Caustics · Beat ripple · PR #154</div>
+    <h1>Why fast hits kept pulling the rings back</h1>
+    <p class="lede">Each hit starts a ring in a fixed pool. The old pool reused its oldest ring on every hit, even when that ring was still mid-screen. Push the hit rate up and watch the left side.</p>
+  </header>
+
+  <section>
+    <div class="sechead">
+      <span><span class="tag shipped">Shipped in #154</span></span>
+      <h2>1 · The ring pool, before and after</h2>
+      <p>Both sides get the same hits. A ring needs about 2.8 s to travel from the centre to the corner of a 16:9 frame (radius ≈ 3.06 at 1.1 units/s). The old pool had 8 rings, so above roughly 3 hits/s it recycled rings before they got there. Turn the driver off and the old side "lets go": the last rings are finally left alone and run out.</p>
+    </div>
+
+    <div class="controls">
+      <label for="rate">Hits per second <input id="rate" type="range" min="0.5" max="10" step="0.5" value="5"> <span class="readout" id="rateOut">5.0</span></label>
+      <button id="play" class="on" type="button">Driver playing</button>
+      <button id="drop" type="button">Send a drop</button>
+      <button id="reset" type="button">Reset counts</button>
+    </div>
+
+    <div class="pair">
+      <div class="pool">
+        <div class="poolhead"><h3>Before · main</h3><span class="mono">8 slots · always reuse the oldest</span></div>
+        <canvas class="screen" id="scrOld" width="960" height="540"></canvas>
+        <canvas class="lanes" id="lanesOld" width="960" height="150"></canvas>
+        <div class="stats">
+          <div class="stat good"><span class="n" id="reachOld">0</span><span class="l">rings that reached the corner</span></div>
+          <div class="stat bad"><span class="n" id="cutOld">0</span><span class="l">rings pulled back mid-screen</span></div>
+        </div>
+      </div>
+      <div class="pool">
+        <div class="poolhead"><h3>After · #154</h3><span class="mono">16 slots · reuse only rings past the exit line</span></div>
+        <canvas class="screen" id="scrNew" width="960" height="540"></canvas>
+        <canvas class="lanes" id="lanesNew" width="960" height="150"></canvas>
+        <div class="stats">
+          <div class="stat good"><span class="n" id="reachNew">0</span><span class="l">rings that reached the corner</span></div>
+          <div class="stat bad"><span class="n" id="cutNew">0</span><span class="l">rings pulled back mid-screen</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="note">Lanes: one bar per slot, length = that ring's radius. The dashed line is the frame corner, the solid line on the right is <code>RIPPLE_EXIT_RADIUS</code> = 4.0. A red flash means a ring was restarted before it reached the corner. When every ring on the new side is still crossing, a hit strengthens the youngest ring instead (shown as a brighter ring), so a drop still lands.</p>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span><span class="tag proposal">Found while fixing · not changed yet</span></span>
+      <h2>2 · Why some sources do nothing</h2>
+      <p>Beat ripple asks <code>drives.fired()</code> "did a hit happen this frame?". Only hit-type sources can answer that.</p>
+    </div>
+    <div class="flow">
+      <div class="box"><h4>Hit sources</h4><p>Beat, Bass hit, Mid hit, High hit, Drop, beat-grid stops. They have a one-shot edge (<code>kind: "edge"</code> in <code>signals.ts</code>), so each hit starts one ring.</p></div>
+      <div class="box warn"><h4>Level sources and drawn lines</h4><p>Loudness, band levels, a frequency line. They have no edge, so <code>sourceEdge()</code> silently returns the scene's own default trigger.</p></div>
+      <div class="box warn"><h4>What you see</h4><p>You patch a level into Beat ripple, the picker accepts it, and the rings still follow bass hits. Nothing tells you the choice was ignored.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sechead">
+      <span><span class="tag proposal">Proposal · not built</span></span>
+      <h2>3 · One converter for every kind of signal</h2>
+      <p>Fire from each source's 0–1 value instead of from a hard-coded edge. It fires when the value rises past the upper mark, and can't fire again until the value falls below the lower mark. There is a minimum gap between fires, and while a loud signal is held, it re-fires on the beat. Pick a signal and compare the three rows of fire ticks.</p>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Signal type">
+        <button type="button" data-sig="pulse" class="on">Clean hits</button>
+        <button type="button" data-sig="noisy">Noisy level</button>
+        <button type="button" data-sig="line">Drawn line swells</button>
+        <button type="button" data-sig="held">Held loud section</button>
+      </div>
+    </div>
+    <canvas class="graph" id="graph" width="1080" height="330"></canvas>
+    <div class="legend">
+      <span style="--c: var(--accent)">signal value</span>
+      <span style="--c: var(--muted)">upper / lower marks</span>
+      <span style="--c: #8a9a99">Today: default hits (your signal ignored unless it is a hit source)</span>
+      <span style="--c: var(--bad)">Plain threshold: chatters on noise</span>
+      <span style="--c: var(--good)">Proposed: hysteresis + gap + held re-fire</span>
+    </div>
+    <p class="note">The marks here are fixed at 0.6 / 0.4 for the demo. The open question is whether they should be draggable per setting, like the silence-gate marks, or adapt to each source's recent range the way auto-gain does.</p>
+  </section>
+</div>
+
+<script>
+(() => {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+  // ---- Ripple pool: ported from src/render/scenes/caustics.ts ----
+  const SPEED = 1.1, ATTACK = 0.06, DECAY = 0.45, EXIT = 4.0;
+  const HALF_W = 1.5 * 16 / 9, HALF_H = 1.5, CORNER = Math.hypot(HALF_W, HALF_H);
+  const env = (a) => a <= 0 ? 0 : (1 - Math.exp(-a / ATTACK)) * Math.exp(-a * DECAY);
+
+  function makePool(n, fixed) {
+    const age = new Float32Array(n).fill(1e6), amp = new Float32Array(n), counted = new Uint8Array(n), flash = new Float32Array(n);
+    const p = { n, age, amp, counted, flash, reach: 0, cut: 0 };
+    p.trigger = (a = 1) => {
+      let slot = -1;
+      if (!fixed) {
+        slot = 0;
+        for (let i = 1; i < n; i++) if (age[i] > age[slot]) slot = i;
+      } else {
+        let young = 0;
+        for (let i = 0; i < n; i++) {
+          if (age[i] < age[young]) young = i;
+          const gone = amp[i] === 0 || age[i] * SPEED >= EXIT;
+          if (gone && (slot < 0 || age[i] > age[slot])) slot = i;
+        }
+        if (slot < 0) { amp[young] = Math.max(amp[young], a); return; }
+      }
+      if (amp[slot] > 0 && age[slot] * SPEED < CORNER) { p.cut++; flash[slot] = 1; }
+      age[slot] = 0; amp[slot] = a; counted[slot] = 0;
+    };
+    p.tick = (dt) => {
+      for (let i = 0; i < n; i++) {
+        age[i] += dt;
+        flash[i] = Math.max(0, flash[i] - dt * 2.5);
+        if (amp[i] > 0 && !counted[i] && age[i] * SPEED >= CORNER) { counted[i] = 1; p.reach++; }
+      }
+    };
+    return p;
+  }
+
+  let oldP = makePool(8, false), newP = makePool(16, true);
+  let playing = true, rate = 5, sinceHit = 0;
+
+  const $ = (id) => document.getElementById(id);
+  $("rate").addEventListener("input", (e) => { rate = +e.target.value; $("rateOut").textContent = rate.toFixed(1); });
+  $("play").addEventListener("click", (e) => {
+    playing = !playing;
+    e.currentTarget.classList.toggle("on", playing);
+    e.currentTarget.textContent = playing ? "Driver playing" : "Driver stopped";
+  });
+  $("drop").addEventListener("click", () => { oldP.trigger(1.8); newP.trigger(1.8); });
+  $("reset").addEventListener("click", () => { for (const p of [oldP, newP]) { p.reach = 0; p.cut = 0; } });
+
+  function drawScreen(cv, p) {
+    const g = cv.getContext("2d"), W = cv.width, H = cv.height, s = W / (2 * HALF_W);
+    g.fillStyle = css("--screen"); g.fillRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2;
+    g.save();
+    g.globalCompositeOperation = "lighter";
+    for (let i = 0; i < p.n; i++) {
+      if (p.amp[i] <= 0) continue;
+      const st = p.amp[i] * env(p.age[i]);
+      if (st < 0.01) continue;
+      const r = p.age[i] * SPEED * s;
+      const a = Math.min(1, st);
+      g.lineWidth = 26; g.strokeStyle = `rgba(60,199,193,${0.10 * a})`;
+      g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
+      g.lineWidth = 3 + 3 * Math.min(1, st - 1 > 0 ? st - 1 : 0) * 2;
+      g.strokeStyle = `rgba(170,245,238,${0.85 * a})`;
+      g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
+    }
+    g.restore();
+    let fl = 0; for (let i = 0; i < p.n; i++) fl = Math.max(fl, p.flash[i]);
+    if (fl > 0) {
+      g.fillStyle = `rgba(251,138,76,${0.9 * fl})`;
+      g.beginPath(); g.arc(cx, cy, 10 + 18 * (1 - fl), 0, Math.PI * 2); g.fill();
+    }
+    g.setLineDash([6, 8]); g.lineWidth = 1.5; g.strokeStyle = "rgba(159,214,210,0.35)";
+    g.beginPath(); g.moveTo(cx, cy); g.lineTo(W, 0); g.stroke(); g.setLineDash([]);
+    g.font = "22px 'Share Tech Mono', monospace"; g.fillStyle = "rgba(159,214,210,0.7)";
+    g.fillText("corner r≈3.06", W - 190, 34);
+  }
+
+  function drawLanes(cv, p, showExit) {
+    const g = cv.getContext("2d"), W = cv.width, H = cv.height;
+    const pad = 12, maxR = 4.6, x = (r) => pad + (W - 2 * pad) * Math.min(r, maxR) / maxR;
+    g.clearRect(0, 0, W, H);
+    const lh = (H - 2 * pad) / p.n;
+    for (let i = 0; i < p.n; i++) {
+      const y = pad + i * lh;
+      g.fillStyle = css("--line"); g.fillRect(pad, y + lh * 0.2, W - 2 * pad, lh * 0.6);
+      if (p.amp[i] > 0) {
+        const r = p.age[i] * SPEED;
+        const st = p.amp[i] * env(p.age[i]);
+        g.globalAlpha = 0.35 + 0.65 * Math.min(1, st * 1.6);
+        g.fillStyle = css("--accent"); g.fillRect(pad, y + lh * 0.2, x(r) - pad, lh * 0.6);
+        g.globalAlpha = 1;
+      }
+      if (p.flash[i] > 0) {
+        g.fillStyle = css("--bad"); g.globalAlpha = p.flash[i];
+        g.fillRect(pad, y, W - 2 * pad, lh); g.globalAlpha = 1;
+      }
+    }
+    g.strokeStyle = css("--ink"); g.lineWidth = 2; g.setLineDash([6, 6]);
+    g.beginPath(); g.moveTo(x(CORNER), 4); g.lineTo(x(CORNER), H - 4); g.stroke(); g.setLineDash([]);
+    if (showExit) { g.beginPath(); g.moveTo(x(EXIT), 4); g.lineTo(x(EXIT), H - 4); g.stroke(); }
+  }
+
+  // ---- Converter demo (proposal) ----
+  const HI = 0.6, LO = 0.4, GAP = 0.18, BEAT = 0.5, WINDOW = 6;
+  let sig = "pulse", t = 0;
+  const hist = [], fires = { today: [], naive: [], prop: [] };
+  let armed = true, lastFire = -1e9, prevV = 0, lastDefault = 0, heldSince = -1;
+  const rnd = (() => { let s = 7; return () => (s = (s * 16807) % 2147483647) / 2147483647; })();
+  let noiseV = 0;
+  function signal(time, dt) {
+    noiseV += (rnd() - 0.5) * 0.9 * Math.sqrt(dt) * 3 - noiseV * dt * 8;
+    switch (sig) {
+      case "pulse": { const ph = time % BEAT; return Math.exp(-ph * 9) * 0.95; }
+      case "noisy": return Math.max(0, Math.min(1, 0.55 + 0.12 * Math.sin(time * 1.3) + 0.35 * noiseV));
+      case "line": { const b = Math.sin(time * 2.1) * 0.5 + Math.sin(time * 0.9 + 1) * 0.3; return Math.max(0, Math.min(1, 0.45 + 0.5 * b + 0.05 * noiseV)); }
+      case "held": { const c = time % 6; const base = c < 1.2 ? 0.15 : c < 4.4 ? 0.88 : 0.2; return Math.max(0, Math.min(1, base + 0.06 * noiseV)); }
+    }
+    return 0;
+  }
+  document.querySelectorAll("[data-sig]").forEach((b) => b.addEventListener("click", () => {
+    sig = b.dataset.sig;
+    document.querySelectorAll("[data-sig]").forEach((x) => x.classList.toggle("on", x === b));
+    hist.length = 0; fires.today.length = fires.naive.length = fires.prop.length = 0;
+    armed = true; lastFire = -1e9; heldSince = -1;
+  }));
+  function stepConverter(dt) {
+    t += dt;
+    const v = signal(t, dt);
+    hist.push([t, v]);
+    // Today: a hit source fires on its own edge; anything else falls back to the scene's default hits.
+    if (sig === "pulse") { if (v > 0.9 && prevV <= 0.9) fires.today.push(t); }
+    else if (t - lastDefault >= BEAT) { lastDefault = t; fires.today.push(t); }
+    // Plain threshold: every upward crossing fires.
+    if (v > HI && prevV <= HI) fires.naive.push(t);
+    // Proposed: hysteresis + minimum gap + beat re-fire while held.
+    if (!armed && v < LO) { armed = true; heldSince = -1; }
+    if (armed && v > HI && t - lastFire >= GAP) { fires.prop.push(t); lastFire = t; armed = false; heldSince = t; }
+    else if (!armed && v > HI && heldSince >= 0 && t - lastFire >= BEAT) { fires.prop.push(t); lastFire = t; }
+    prevV = v;
+    const cut = t - WINDOW;
+    while (hist.length && hist[0][0] < cut) hist.shift();
+    for (const k in fires) while (fires[k].length && fires[k][0] < cut) fires[k].shift();
+  }
+  function drawGraph() {
+    const cv = $("graph"), g = cv.getContext("2d"), W = cv.width, H = cv.height;
+    const L = 150, R = 14, top = 14, gh = 170;
+    const x = (tt) => L + (W - L - R) * (tt - (t - WINDOW)) / WINDOW, y = (v) => top + gh * (1 - v);
+    g.clearRect(0, 0, W, H);
+    g.font = "15px 'Share Tech Mono', monospace";
+    g.strokeStyle = css("--muted"); g.setLineDash([5, 6]); g.lineWidth = 1;
+    for (const [m, lab] of [[HI, "upper 0.6"], [LO, "lower 0.4"]]) {
+      g.beginPath(); g.moveTo(L, y(m)); g.lineTo(W - R, y(m)); g.stroke();
+      g.fillStyle = css("--muted"); g.fillText(lab, 12, y(m) + 5);
+    }
+    g.setLineDash([]);
+    g.fillStyle = css("--muted"); g.fillText("signal", 12, top + 14);
+    g.strokeStyle = css("--accent"); g.lineWidth = 2.5; g.beginPath();
+    hist.forEach(([tt, v], i) => (i ? g.lineTo(x(tt), y(v)) : g.moveTo(x(tt), y(v))));
+    g.stroke();
+    const rows = [["today", "Today", "#8a9a99"], ["naive", "Plain threshold", css("--bad")], ["prop", "Proposed", css("--good")]];
+    rows.forEach(([k, lab, col], i) => {
+      const ry = top + gh + 26 + i * 40;
+      g.fillStyle = css("--ink"); g.fillText(lab, 12, ry + 5);
+      g.strokeStyle = css("--line"); g.lineWidth = 1; g.beginPath(); g.moveTo(L, ry); g.lineTo(W - R, ry); g.stroke();
+      g.fillStyle = col;
+      for (const ft of fires[k]) g.fillRect(x(ft) - 2, ry - 12, 4, 24);
+    });
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (playing) {
+      sinceHit += dt;
+      if (sinceHit >= 1 / rate) { sinceHit = 0; oldP.trigger(1); newP.trigger(1); }
+    }
+    oldP.tick(dt); newP.tick(dt);
+    drawScreen($("scrOld"), oldP); drawScreen($("scrNew"), newP);
+    drawLanes($("lanesOld"), oldP, false); drawLanes($("lanesNew"), newP, true);
+    $("reachOld").textContent = oldP.reach; $("cutOld").textContent = oldP.cut;
+    $("reachNew").textContent = newP.reach; $("cutNew").textContent = newP.cut;
+    stepConverter(dt); drawGraph();
+    requestAnimationFrame(frame);
+  }
+  if (reduce) {
+    // Advance a few simulated seconds so the page still shows a representative state, then keep running slowly.
+    for (let i = 0; i < 360; i++) { const dt = 1 / 60; sinceHit += dt; if (sinceHit >= 1 / rate) { sinceHit = 0; oldP.trigger(); newP.trigger(); } oldP.tick(dt); newP.tick(dt); stepConverter(dt); }
+  }
+  requestAnimationFrame(frame);
+})();
+</script>

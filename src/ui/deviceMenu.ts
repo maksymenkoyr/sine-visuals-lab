@@ -17,6 +17,7 @@ import type { SceneLook } from "../render/sceneLooks.ts";
 import { createLooksCard } from "./looksCard.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
+import { takeSettingMarks } from "../render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
@@ -40,6 +41,7 @@ import {
   gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
+  GENERIC_THRESHOLD_DEFAULT,
   sameDriveSetting,
   smoothstep,
   sourceKey,
@@ -51,6 +53,7 @@ import {
   type HitHeight,
   type SceneDrives,
 } from "../render/drives.ts";
+import type { DriveThresholdState } from "../render/driveStore.ts";
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import {
   DRIVE_ADD_GROUPS,
@@ -248,9 +251,9 @@ import {
  * click on its jack does).
  *
  * Every control in the patch panel explains itself two ways (setHint,
- * this file's own "cover everything with hints" pass): a `title` (the
- * browser's native delayed tooltip, and an `aria-description` alongside it
- * for a screen reader) and a `data-hint` the panel's own bottom hint line
+ * this file's own "cover everything with hints" pass): an `aria-description`
+ * for a screen reader (no `title` — the native tooltip only repeated the
+ * bottom line) and a `data-hint` the panel's own bottom hint line
  * (buildPatchPanel's `hintBar`) reads off whichever control is currently
  * hovered or keyboard-focused, through one delegated pointerover/
  * pointerout/focusin/focusout pair on the panel root — never a
@@ -443,9 +446,17 @@ export interface DeviceMenuDeps {
    *  drawn lines — see getDriveLine below). */
   getDriveSetting: (sceneId: string, spec: SceneSetting) => DriveSetting;
   onResetDriveSetting: (sceneId: string, spec: SceneSetting) => void;
+  /** Leaves the setting with nothing plugged in — it stops reacting to the
+   *  music (drives.ts's normalizeDriveSetting keeps an empty patch empty).
+   *  The panel offers it while the setting plays its scene's own mix, which
+   *  otherwise has no source line of its own to unplug. */
+  onUnplugAll: (sceneId: string, spec: SceneSetting) => void;
   onTogglePatchSource: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice) => void;
   onSetSourceWeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, weight: number) => void;
   onSetSourceHeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, height: HitHeight) => void;
+  /** Beat wave's own every-N-beats divider (buildEverySeg) — only ever shown
+   *  on a plain Beat wave source line. See drives.ts's setSourceEvery. */
+  onSetSourceEvery: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, every: number) => void;
   onSetSourceGrid: (sceneId: string, spec: SceneSetting, grid: BeatGridIndex) => void;
   onSetPatchMix: (sceneId: string, spec: SceneSetting, mix: DriveMix) => void;
   /** The Only when role toggle (buildRoleToggle) — marks `sources[index]`
@@ -460,6 +471,15 @@ export interface DeviceMenuDeps {
   setDriveLine: (sceneId: string, spec: SceneSetting, heights: ArrayLike<number>) => void;
   resetDriveLine: (sceneId: string, spec: SceneSetting) => void;
   getDriveLineStrength: (sceneId: string, spec: SceneSetting) => number;
+  /** Every drive setting's own threshold row, under its graph: on/off +
+   *  value — driveStore.ts's getDriveThresholdState/setDriveThreshold/
+   *  setDriveThresholdOn. Scene-handled (SceneSetting.drive.threshold
+   *  declared) or the generic engine gate every other drive setting gets
+   *  (drives.ts's header's threshold paragraph) — the row looks the same
+   *  either way, just with a different label/hint. */
+  getDriveThresholdState: (sceneId: string, spec: SceneSetting) => DriveThresholdState;
+  onSetDriveThreshold: (sceneId: string, spec: SceneSetting, value: number) => void;
+  onSetDriveThresholdOn: (sceneId: string, spec: SceneSetting, on: boolean) => void;
   setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
   /** The Loudness card's Reset chip — starts the integrated LUFS reading
    *  over (src/audio/lufsAnalyser.ts). */
@@ -2214,16 +2234,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // `deps`; patchChanged() below is the one place a mutation is followed by
   // a rebuild. ----
 
-  /** Sets a control's plain-language hint two ways at once: `title` (the
-   *  browser's own delayed native tooltip, and a screen reader's
-   *  accessible description) and `data-hint` (buildPatchPanel's own bottom
-   *  hint line reads this off whichever control is hovered/focused right
-   *  now — the "cover everything with hints" pass's one delegated
-   *  mechanism, never a per-control listener). Every interactive element
-   *  inside the patch panel goes through this rather than setting `title`
-   *  by hand, so the two never drift apart. */
+  /** Sets a control's plain-language hint: `data-hint` (buildPatchPanel's
+   *  own bottom hint line reads this off whichever control is hovered/
+   *  focused right now — the "cover everything with hints" pass's one
+   *  delegated mechanism, never a per-control listener) and
+   *  `aria-description` for a screen reader. Deliberately no `title`: the
+   *  native tooltip repeated the bottom line's text a second time on top of
+   *  the panel. Every element inside the patch panel goes through this, so
+   *  the two never drift apart. */
   function setHint(el: HTMLElement, text: string): void {
-    el.title = text;
+    el.setAttribute("aria-description", text);
     el.dataset.hint = text;
   }
 
@@ -2242,6 +2262,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     { h: "fixed", label: "Fixed", hint: "Every hit is a full-height pulse, however quiet." },
     { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
   ];
+
+  // Beat wave's own every-N-beats divider (DriveSource.every) — only shown
+  // on a plain Beat wave source line (buildSourceLine below); every other
+  // source ignores it outright (drives.ts's own doc on that field).
+  const EVERY_OPTIONS: readonly number[] = [1, 2, 4, 8, 16];
+  const EVERY_HINT = "How many beats one swing takes: 1 = every beat, 4 = once a bar.";
 
   const ROLE_OPTIONS: { role: "plays" | "when"; label: string; hint: string }[] = [
     { role: "plays", label: "Plays", hint: "This source makes the setting move." },
@@ -2312,6 +2338,43 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return seg;
   }
 
+  /** Beat wave's own every-N-beats divider — a visible "Every" label (the
+   *  numbers alone don't say what they count, unlike Height's own
+   *  self-explanatory Graded/Fixed/Loud) plus a buildHeightSeg-styled row of
+   *  chips, one per EVERY_OPTIONS value. Live write + patchChanged, same as
+   *  buildHeightSeg. Only ever built for a plain Beat wave source line
+   *  (buildSourceLine below). */
+  function buildEverySeg(sceneId: string, spec: SceneSetting, src: DriveSource): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `display: flex; align-items: center; gap: 6px;`;
+    setHint(wrap, EVERY_HINT);
+    const label = document.createElement("span");
+    label.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
+    label.textContent = "Every";
+    const seg = document.createElement("div");
+    seg.style.cssText = driveMiniSegStyle;
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Every how many beats");
+    const current = src.every ?? 1;
+    for (const n of EVERY_OPTIONS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = String(n);
+      setHint(btn, EVERY_HINT);
+      btn.setAttribute("aria-description", EVERY_HINT);
+      btn.setAttribute("aria-pressed", String(current === n));
+      btn.style.cssText = current === n ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      btn.addEventListener("click", () => {
+        if (current === n) return;
+        deps.onSetSourceEvery(sceneId, spec, src.choice, n);
+        patchChanged(sceneId, spec);
+      });
+      seg.appendChild(btn);
+    }
+    wrap.append(label, seg);
+    return wrap;
+  }
+
   /** The Only when role toggle (drives.ts's setSourceRole) — shown on every
    *  source line while the patch is gating. Both halves are independently
    *  clickable now (this file's own header): marking this line "when" never
@@ -2378,6 +2441,96 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   const WEIGHT_HINT = "This source's share: 0 ignores it, 1× is normal, 2× doubles it.";
+
+  const GENERIC_THRESHOLD_HINT =
+    "An adaptive noise gate: the dotted line follows this setting's resting level, and anything under it counts as nothing. Right: only clear peaks get through. Off: everything gets through.";
+
+  /** Every drive setting's own threshold row — On/Off + a labelled 0..1
+   *  slider, right under its graph (or where the graph would be with
+   *  nothing plugged in yet). Scene-handled (SceneSetting.drive.threshold
+   *  declared — Beat ripple's "reach to ring" line) uses its own label/hint
+   *  and starts on; every other drive setting uses the generic label/hint
+   *  and starts off, gated by drives.ts's own engine (that file's header's
+   *  threshold paragraph) — driveStore.ts's getDriveThresholdState/
+   *  setDriveThreshold/setDriveThresholdOn either way. Same live-write,
+   *  no-rebuild rule as buildWeightSlider below; the On/Off buttons share
+   *  buildHeightSeg's own mini-segment styling. */
+  function buildThresholdRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
+    const declared = spec.drive?.threshold;
+    const label = declared?.label ?? "Threshold";
+    const hint = declared?.hint ?? GENERIC_THRESHOLD_HINT;
+
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap;`;
+    setHint(wrap, hint);
+
+    const seg = document.createElement("div");
+    seg.style.cssText = driveMiniSegStyle;
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", `${label} on/off`);
+    const onBtn = document.createElement("button");
+    onBtn.type = "button";
+    onBtn.textContent = "On";
+    const offBtn = document.createElement("button");
+    offBtn.type = "button";
+    offBtn.textContent = "Off";
+    seg.append(onBtn, offBtn);
+
+    const name = document.createElement("span");
+    name.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
+    name.textContent = label;
+    const rng = document.createElement("input");
+    rng.type = "range";
+    rng.className = "vc-slider";
+    rng.min = "0";
+    rng.max = "1";
+    rng.step = "0.05";
+    rng.setAttribute("aria-label", label);
+    rng.style.cssText = driveWeightRangeStyle;
+    const out = document.createElement("output");
+    out.style.cssText = driveWeightOutStyle;
+
+    const showValue = (v: number) => {
+      rng.value = String(v);
+      rng.style.setProperty("--vc-fill", `${v * 100}%`);
+      out.textContent = v.toFixed(2);
+    };
+    const showOnOff = (on: boolean) => {
+      onBtn.setAttribute("aria-pressed", String(on));
+      offBtn.setAttribute("aria-pressed", String(!on));
+      onBtn.style.cssText = on ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      offBtn.style.cssText = !on ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      rng.disabled = !on;
+      rng.style.opacity = on ? "1" : "0.4";
+      out.style.opacity = on ? "1" : "0.4";
+    };
+
+    const state = deps.getDriveThresholdState(sceneId, spec);
+    showValue(state.value);
+    showOnOff(state.on);
+
+    rng.addEventListener("input", () => {
+      const v = Number(rng.value);
+      showValue(v);
+      deps.onSetDriveThreshold(sceneId, spec, v);
+      onLiveEdit();
+    });
+    onBtn.addEventListener("click", () => {
+      if (onBtn.getAttribute("aria-pressed") === "true") return;
+      deps.onSetDriveThresholdOn(sceneId, spec, true);
+      showOnOff(true);
+      onLiveEdit();
+    });
+    offBtn.addEventListener("click", () => {
+      if (offBtn.getAttribute("aria-pressed") === "true") return;
+      deps.onSetDriveThresholdOn(sceneId, spec, false);
+      showOnOff(false);
+      onLiveEdit();
+    });
+
+    wrap.append(seg, name, rng, out);
+    return wrap;
+  }
 
   function buildWeightSlider(sceneId: string, spec: SceneSetting, src: DriveSource, onLiveEdit: () => void): HTMLElement {
     const wrap = document.createElement("label");
@@ -2494,6 +2647,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // edge-kind catalogue entry or a beat grid (drives.ts's own header).
     const isHitKind = isGridSourceChoice(src.choice) || (typeof src.choice === "string" && SIGNALS[src.choice].kind === "edge");
     if (isHitKind) ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
+    // Every-N-beats only ever means anything for a plain Beat wave source
+    // (DriveSource.every's own doc) — never a grid/line/hit-kind source, all
+    // handled by other branches here.
+    if (src.choice === "anim.beatWave") ctrls.appendChild(buildEverySeg(sceneId, spec, src));
     if (isGridSourceChoice(src.choice)) ctrls.appendChild(buildGridChips(sceneId, spec, src));
     if (isLineSourceChoice(src.choice)) {
       lineEditor.strengthRow.style.flex = "1 1 160px";
@@ -2583,13 +2740,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
 
   function buildOutputGraph(
+    sceneId: string,
     spec: SceneSetting,
     patch: DrivePatch,
   ): { el: HTMLElement; canvas: HTMLCanvasElement; tick: (drives: SceneDrives) => void } {
     const wrap = document.createElement("div");
     setHint(
       wrap,
-      "What this setting receives over the last 4 seconds. Thin lines: each source after its weight (dashed: a condition; a muted source draws no trace). Dark: the gate was blocked. Bottom strip: lit while open. White: the result.",
+      "The last 4 seconds. White: what this setting receives. Thin coloured lines: each source (dashed: a condition). Dark: the gate was closed. Dotted line and cyan dots, when shown: see the key under the graph.",
     );
     const head = document.createElement("div");
     head.style.cssText = driveOutHeadStyle;
@@ -2602,7 +2760,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     head.append(eyebrow, val);
     const canvas = document.createElement("canvas");
     canvas.style.cssText = driveOutCanvasStyle;
-    wrap.append(head, canvas);
+    // Key for a scene's own marks (settingMarks.ts), shown only once the
+    // scene has published some: the first line's label for the dotted trace,
+    // and the cyan dot for a reaction.
+    const key = document.createElement("div");
+    key.style.cssText = "display:none;gap:12px;margin-top:4px;font-size:11px;color:rgba(255,255,255,0.6);";
+    const keyReaction = document.createElement("span");
+    keyReaction.innerHTML = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:rgba(110,235,225,0.95);margin-right:5px;vertical-align:0"></span>ring sent';
+    const keyLine = document.createElement("span");
+    const keyLineSwatch = '<span style="display:inline-block;width:14px;border-top:1px dotted rgba(255,255,255,0.7);margin-right:5px;vertical-align:3px"></span>';
+    key.append(keyReaction, keyLine);
+    wrap.append(head, canvas, key);
     const ctx = canvas.getContext("2d")!;
     const size = trackDriveCanvas(canvas);
 
@@ -2617,6 +2785,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const isGate = patch.mix === "gate";
     const conditionIdxs = isGate ? gateConditionIndices(patch) : [];
     const gateOpen = new Uint8Array(RING);
+    // A scene's own reference lines and reactions for this setting
+    // (settingMarks.ts) — e.g. Beat ripple's salience bar and each ring sent.
+    // Lines are recorded per tick (a scene's line can move — Beat ripple's
+    // rides the signal) and drawn as traces, labelled at their latest point.
+    const reactions = new Float32Array(RING);
+    const markTraces = new Map<string, Float32Array>();
     let ringHead = 0;
     let filled = 0;
 
@@ -2629,6 +2803,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const STRIP_OPEN = "rgba(255,255,255,0.9)";
     const STRIP_BLOCKED = "rgba(255,255,255,0.16)";
     const STRIP_H = 3;
+    const MARK_LINE = "rgba(255,255,255,0.55)";
+    const MARK_REACTION = "rgba(110,235,225,0.9)";
+    // The generic engine gate's own line has no scene of its own to name it
+    // (unlike Beat ripple's "reach to ring") — one fixed label, used as both
+    // this trace's key in `markTraces` and the text the key row shows for it.
+    const GENERIC_GATE_LINE_LABEL = "below this counts as nothing";
 
     function draw(): void {
       const { w, h } = size;
@@ -2637,8 +2817,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const n = Math.min(filled, RING);
       if (n < 2) return;
       const xs = (k: number) => (k / (RING - 1)) * w;
-      const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v)) * (h - 6);
       const at = (k: number) => (ringHead - RING + k + 1 + RING * 2) % RING;
+      // The chart grows to fit: several sources added together can go past
+      // 1, and a scene's line rides above the signal — clipping both at 1
+      // flattened the result against the top and hid the line.
+      let top = 1;
+      for (let k = RING - n; k < RING; k++) {
+        const idx = at(k);
+        top = Math.max(top, combined[idx]!);
+        for (const trace of perSource) top = Math.max(top, trace[idx]!);
+        for (const trace of markTraces.values()) if (trace[idx]! >= 0) top = Math.max(top, trace[idx]!);
+      }
+      top *= 1.05;
+      const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v / top)) * (h - 6);
 
       if (isGate) {
         ctx.fillStyle = BLOCKED_FILL;
@@ -2669,6 +2860,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         }
         ctx.stroke();
       }
+      ctx.setLineDash([2, 3]);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = MARK_LINE;
+      for (const trace of markTraces.values()) {
+        ctx.beginPath();
+        let penDown = false;
+        for (let k = RING - n; k < RING; k++) {
+          const v = trace[at(k)]!;
+          if (!(v >= 0)) {
+            penDown = false; // NaN = no line that tick
+            continue;
+          }
+          if (penDown) ctx.lineTo(xs(k), ys(v));
+          else ctx.moveTo(xs(k), ys(v));
+          penDown = true;
+        }
+        ctx.stroke();
+      }
       ctx.setLineDash([]);
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.6;
@@ -2681,6 +2890,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
+
+      // A reaction that spans several ticks (a slow climb) is one dot, at the
+      // tick it started, sized by its total — drawn on the white line so it
+      // sits on the bump that caused it.
+      ctx.fillStyle = MARK_REACTION;
+      for (let k = RING - n; k < RING; k++) {
+        if (reactions[at(k)]! <= 0.01) continue;
+        const start = k;
+        let total = 0;
+        while (k < RING && reactions[at(k)]! > 0.01) total += reactions[at(k++)]!;
+        ctx.beginPath();
+        ctx.arc(xs(start), ys(combined[at(start)]!), 1.5 + 4.5 * Math.sqrt(Math.min(1, total)), 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       if (isGate) {
         const colW = Math.max(1, w / (RING - 1));
@@ -2711,6 +2934,37 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       for (let i = 0; i < perSource.length; i++) perSource[i]![ringHead] = src?.[i] ?? 0;
       const v = drives.valueOf(spec.key);
       combined[ringHead] = v;
+      const marks = takeSettingMarks(sceneId, spec.key, "graph");
+      for (const trace of markTraces.values()) trace[ringHead] = NaN;
+      for (const line of marks?.lines ?? []) {
+        let trace = markTraces.get(line.label);
+        if (!trace) {
+          trace = new Float32Array(RING).fill(NaN);
+          markTraces.set(line.label, trace);
+        }
+        trace[ringHead] = line.value;
+      }
+      // The generic engine gate's own line (drives.ts's header's threshold
+      // paragraph) — undefined for a scene-handled setting (it draws its own
+      // line above instead, through settingMarks.ts) or while the gate is
+      // off. Drawn the same dotted way as a scene's own mark lines, under
+      // one fixed label so it gets its own key entry.
+      const gateLine = drives.gateLine(spec.key);
+      if (gateLine !== undefined) {
+        let trace = markTraces.get(GENERIC_GATE_LINE_LABEL);
+        if (!trace) {
+          trace = new Float32Array(RING).fill(NaN);
+          markTraces.set(GENERIC_GATE_LINE_LABEL, trace);
+        }
+        trace[ringHead] = gateLine;
+      }
+      reactions[ringHead] = marks?.reaction ?? 0;
+      if (key.style.display === "none" && (marks || gateLine !== undefined)) {
+        key.style.display = "flex";
+        keyReaction.style.display = marks ? "" : "none"; // no reaction concept for the generic gate alone
+        const lineLabel = marks ? marks.lines[0]?.label : GENERIC_GATE_LINE_LABEL;
+        keyLine.innerHTML = lineLabel ? `${keyLineSwatch}${lineLabel}` : "";
+      }
       if (isGate) {
         let open = 1;
         let anyCondition = false;
@@ -2753,7 +3007,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       patchChanged(sceneId, spec);
     });
     function refreshResetVisibility(): void {
-      resetBtn.hidden = sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
+      // A moved threshold counts too — on/off or value, scene-handled or
+      // generic (this row's own default is "on" for the former, "off" for
+      // the latter, mirroring driveStore.ts's getDriveThresholdState).
+      const declared = spec.drive?.threshold;
+      const thresholdState = spec.drive ? deps.getDriveThresholdState(sceneId, spec) : undefined;
+      const thresholdMoved =
+        !!thresholdState &&
+        (thresholdState.on !== (declared !== undefined) || thresholdState.value !== (declared?.default ?? GENERIC_THRESHOLD_DEFAULT));
+      resetBtn.hidden = !thresholdMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
     }
 
     const head = document.createElement("div");
@@ -2766,15 +3028,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
     const list = document.createElement("div");
     list.style.cssText = driveSrcListStyle;
-    if (!patch.sources.length) {
+    if (setting === "scene") {
+      // The scene's own mix has no source line of its own, so it gets its
+      // own Unplug — without it the scene's mix could never be disconnected.
       const empty = document.createElement("div");
       empty.style.cssText = driveEmptySrcStyle;
-      // An empty patch is always "scene" (normalizeDriveSetting), so the
-      // setting is playing its scene's own mix — not standing still.
       const mix = spec.drive?.sceneLabel?.replace(/^Scene:\s*/, "");
       empty.textContent = mix
         ? `Playing the scene's own mix: ${mix}. Plug in a meter to replace it.`
         : "Playing the scene's own mix. Plug in a meter to replace it.";
+      const unplug = document.createElement("button");
+      unplug.type = "button";
+      unplug.style.cssText = driveResetLinkStyle;
+      unplug.textContent = "Unplug";
+      setHint(unplug, "Disconnect the scene's own mix, so this setting doesn't react to the music.");
+      unplug.addEventListener("click", () => {
+        deps.onUnplugAll(sceneId, spec);
+        patchChanged(sceneId, spec);
+      });
+      list.append(empty, unplug);
+    } else if (!patch.sources.length) {
+      // An empty patch stays empty (normalizeDriveSetting): nothing plugged
+      // in, so the setting holds still.
+      const empty = document.createElement("div");
+      empty.style.cssText = driveEmptySrcStyle;
+      empty.textContent = "Nothing plugged in, so this doesn't react to the music. Plug in a meter, or reset to the scene default.";
       list.appendChild(empty);
     }
     patch.sources.forEach((src, i) => {
@@ -2786,11 +3064,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let outputCanvas: HTMLCanvasElement | null = null;
     let tick: ((drives: SceneDrives) => void) | null = null;
     if (patch.sources.length) {
-      const graph = buildOutputGraph(spec, patch);
+      const graph = buildOutputGraph(sceneId, spec, patch);
       panel.appendChild(graph.el);
       outputCanvas = graph.canvas;
       tick = graph.tick;
     }
+    panel.appendChild(buildThresholdRow(sceneId, spec, refreshResetVisibility));
 
     panel.appendChild(resetBtn);
     refreshResetVisibility();
@@ -2885,6 +3164,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const SPARK_LEN = 90; // ~3 s at 30 Hz
     const sparkVals = new Float32Array(SPARK_LEN);
     const sparkCols: string[] = new Array(SPARK_LEN).fill(DRIVE_WHITE);
+    // The scene's own reactions for this setting (settingMarks.ts — Beat
+    // ripple's rings), read under this view's own "row" slot. While the
+    // scene reports any, the sparkline shows what the setting *did* (a dot
+    // per reaction) over a dimmed trace of what it received.
+    const sparkReact = new Float32Array(SPARK_LEN);
+    let sparkHasMarks = false;
     let sparkHead = 0;
     let sparkFilled = 0;
     let outputCanvas: HTMLCanvasElement | null = null;
@@ -2954,13 +3239,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       sparkCtx.clearRect(0, 0, w, h);
       const n = Math.min(sparkFilled, SPARK_LEN);
       if (n < 2) return;
+      const at = (k: number) => (sparkHead - SPARK_LEN + k + 1 + SPARK_LEN * 2) % SPARK_LEN;
       const xs = (k: number) => (k / (SPARK_LEN - 1)) * w;
-      const ys = (v: number) => h - 1 - Math.max(0, Math.min(1, v)) * (h - 2);
+      // Grows to fit (sources added together go past 1) rather than
+      // clipping, which drew a busy input as a flat line along the top.
+      let top = 1;
+      for (let k = SPARK_LEN - n; k < SPARK_LEN; k++) top = Math.max(top, sparkVals[at(k)]!);
+      const pad = sparkHasMarks ? 3 : 1;
+      const ys = (v: number) => h - pad - Math.max(0, Math.min(1, v / top)) * (h - 2 * pad);
       sparkCtx.lineWidth = 1.3;
       sparkCtx.lineJoin = "round";
+      sparkCtx.globalAlpha = sparkHasMarks ? 0.45 : 1;
       let runColor = "";
+      let prevX = 0;
+      let prevY = 0;
       for (let k = SPARK_LEN - n; k < SPARK_LEN; k++) {
-        const idx = (sparkHead - SPARK_LEN + k + 1 + SPARK_LEN * 2) % SPARK_LEN;
+        const idx = at(k);
         const col = sparkCols[idx]!;
         const px = xs(k);
         const py = ys(sparkVals[idx]!);
@@ -2968,13 +3262,36 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           if (runColor) sparkCtx.stroke();
           sparkCtx.strokeStyle = col;
           sparkCtx.beginPath();
-          sparkCtx.moveTo(px, py);
+          // Start the new colour from the previous point, so a change of
+          // loudest source doesn't leave a gap in the line.
+          if (runColor) {
+            sparkCtx.moveTo(prevX, prevY);
+            sparkCtx.lineTo(px, py);
+          } else {
+            sparkCtx.moveTo(px, py);
+          }
           runColor = col;
         } else {
           sparkCtx.lineTo(px, py);
         }
+        prevX = px;
+        prevY = py;
       }
       if (runColor) sparkCtx.stroke();
+      sparkCtx.globalAlpha = 1;
+      if (sparkHasMarks) {
+        sparkCtx.fillStyle = "rgba(110,235,225,0.95)";
+        for (let k = SPARK_LEN - n; k < SPARK_LEN; k++) {
+          if (sparkReact[at(k)]! <= 0.01) continue;
+          const start = k;
+          let total = 0;
+          while (k < SPARK_LEN && sparkReact[at(k)]! > 0.01) total += sparkReact[at(k++)]!;
+          k--;
+          sparkCtx.beginPath();
+          sparkCtx.arc(xs(start), ys(sparkVals[at(start)]!), 1 + 2.8 * Math.sqrt(Math.min(1, total)), 0, Math.PI * 2);
+          sparkCtx.fill();
+        }
+      }
     }
 
     function tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void {
@@ -3029,6 +3346,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       sparkHead = (sparkHead + 1) % SPARK_LEN;
       sparkVals[sparkHead] = v;
       sparkCols[sparkHead] = col;
+      const marks = takeSettingMarks(sceneId, spec.key, "row");
+      if (marks) sparkHasMarks = true;
+      sparkReact[sparkHead] = marks?.reaction ?? 0;
       sparkFilled = Math.min(SPARK_LEN, sparkFilled + 1);
       drawSparkline();
     }

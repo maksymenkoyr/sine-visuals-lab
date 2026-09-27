@@ -138,6 +138,19 @@ export interface SceneSetting {
      *  against the scene's own code, so a stale list is a wrong pill rather
      *  than a broken build — keep it honest by hand. */
     sceneSources?: readonly SignalId[];
+    /** Declares this setting scene-handled for its own threshold — a gate
+     *  the scene applies itself to whatever this setting receives, shaped
+     *  however its own signal needs (Beat ripple's adaptive "reach to ring"
+     *  line, rippleEmitter.ts, is the original of this). The panel shows the
+     *  On/Off toggle + slider right under this setting's graph
+     *  (deviceMenu.ts), starting on; it's saved with the rest of this
+     *  setting's patch (driveStore.ts's getDriveThresholdState), and the
+     *  scene reads it with drives.threshold(key). 0..1; `default` is what an
+     *  untouched setting uses. Leave this unset and the setting still gets a
+     *  threshold row, starting off — the engine applies a generic adaptive
+     *  gate instead (drives.ts's header's "The threshold" paragraph explains
+     *  why a setting is never gated both ways). */
+    threshold?: { default: number; label: string; hint: string };
   };
   /** This enum is the scene's *variant*: the one setting that decides what
    *  the rest of the settings are even acting on (Kaleidoscope's Style).
