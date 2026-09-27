@@ -250,6 +250,47 @@ and `powder.ts`'s curl noise).
   headless-verified by screenshotting one box's preview before/mid/after two
   extra rerender-triggering clicks: the trail pattern is visibly the same
   evolving shape throughout, not reset.
+- **2026-09-27, solo/group selection + no redraw on click.** Two changes to
+  the box-selection UX, requested together: (1) a tap on a box BODY (or a
+  relation-web node) now *solos* — the selection becomes exactly that one
+  strain, even if a group was active — instead of toggling; a small
+  checkbox in each box's header corner (`role="checkbox"`, >=24px touch
+  target) is now the deliberate way to build a group (ticking adds,
+  unticking removes, never empty), and a Shift/Cmd/Ctrl-modified tap on the
+  body does the same toggle for a mouse user. (2) A selection change no
+  longer calls `ctx.rerender()` at all — every box click used to rebuild the
+  whole Scene card, flashing every row and (before the preview-cache fix
+  above) every specimen box. `src/ui/widgets/registry.ts`'s `WidgetCtx` grew
+  `mountRows(container, rows)`, a scoped sibling of `appendRow`:
+  `deviceMenu.ts` snapshots `sceneRowHandles`/`driveRowHandles`/
+  `driveSparkCanvases` before and after building `rows`, so the returned
+  `dispose()` can unregister exactly what that call added (and its
+  `linkedByKey` entries) and pull its own DOM back out, then trigger the
+  existing cable recompute — mirroring the pinned-row reconciliation a full
+  `renderSceneSettings()` does, scoped to just the rows it built. `itemBoxes.ts`
+  now builds its boxes (and their live preview canvases/sims) exactly once
+  per widget mount; a selection change only (a) updates box classes/
+  checkboxes/the "Editing …" line in place, (b) disposes and re-mounts the
+  rows section through `mountRows`, and (c) clears and rebuilds the Affinity
+  web/rows/presets host in place (that block has no deviceMenu registrations
+  of its own, so a plain `replaceChildren()` rebuild already is the scoped
+  update — confirmed by reading `relationRows.ts`/`relationWeb.ts`). A
+  preset apply or an Affinity-row click also stopped calling
+  `ctx.rerender()`: they only ever touch `att<i><j>` settings, which the
+  rows section never shows, so refreshing just the Affinity host is enough.
+  `ctx.rerender()` is still what a Look apply or a card Reset use.
+  Headless-verified (real mouse down/wait/up throughout): the solo/toggle/
+  checkbox/Shift-click/All sequence from the brief; a tagged box element and
+  its preview canvas survive a *different* box's click (same DOM nodes, not
+  recreated) with before/after screenshots showing no blank/flash; a
+  same-selection slider drag doesn't remount the row it's on; and a cable
+  wired from a jack onto a pinned row disappears cleanly (no crash, no stale
+  path) once that row's strain is no longer primary and its DOM is disposed
+  — `pinned` itself isn't reset by a `mountRows` dispose (unlike a full
+  rebuild's own tail), so a jack can still show as "plugged in" by data
+  alone after its row is hidden this way; re-selecting the same strain later
+  remounts the row and the cable/patch-panel pick back up automatically
+  (`mountRows`'s own pinned-row check, keyed by `sceneId`+`spec.key`).
 
 ## Tuning notes
 
@@ -316,6 +357,12 @@ applies there too. Tuned so far only against the synthetic feed at
   index) regardless of how many are selected — it never had a selection of
   its own, and multi-select didn't add one; picking a specific strain to
   inject still means selecting it alone first.
+- Switching strains with a row pinned for patching: `mountRows`' dispose
+  (deviceMenu.ts) unpins the removed row and hands the pin to the same
+  control on the newly shown strain (pinned PP-A1 Nutrient → PP-B2 Nutrient),
+  so the patch bay never stays aimed at a hidden row. A hover preview on a
+  removed row is cleared the same way. (The first no-redraw build left the
+  pin on the hidden row; fixed in review, 2026-09-27.)
 
 ## Materials
 

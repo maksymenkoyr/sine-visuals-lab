@@ -2052,6 +2052,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Whether the panel is open (open/close, below) — declared up here since
   // setSolo's cable-visibility refresh runs during construction.
   let isOpen = false;
+  // Set by a mountRows dispose that removed the pinned row; consumed by the
+  // very next mountRows (see mountRows).
+  let pinHandoff: { family: string; param: string; other?: number } | null = null;
   /** The last setting `previewDrive` was actually handed a non-null value
    *  for — unlike `preview` itself, this never goes back to null when the
    *  pointer leaves. It's what a jack click reaches for when nothing's
@@ -4988,6 +4991,86 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     wireBandHighlight(row.el, reads);
   }
 
+  /** registry.ts's `WidgetCtx.mountRows` — a scoped sibling of
+   *  `appendSettingRow` above: builds `rows` into a single host div appended
+   *  to `container`, snapshotting `sceneRowHandles`/`driveRowHandles`/
+   *  `driveSparkCanvases` before and after so the returned `dispose()` can
+   *  unregister exactly what this call added (and `linkedByKey` entries by
+   *  the same rows' own keys) rather than the whole card's worth
+   *  `renderSceneSettings` resets. Mirrors that function's own pinned-row
+   *  reconciliation (its tail, below) for just the rows this call built: a
+   *  mount that happens to recreate the currently-pinned row picks the
+   *  patch panel back up instead of waiting for the next full rebuild. See
+   *  registry.ts's header for why a widget (itemBoxes.ts's selection
+   *  change) reaches for this instead of `ctx.rerender()`. */
+  function mountRows(
+    container: HTMLElement,
+    sceneId: string,
+    specs: SceneSetting[],
+    rows: readonly { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[] }[],
+  ): { dispose(): void } {
+    const host = document.createElement("div");
+    container.appendChild(host);
+
+    const sceneRowStart = sceneRowHandles.length;
+    const driveRowStart = driveRowHandles.length;
+    const sparkStart = driveSparkCanvases.length;
+    const pinRowStart = pinRowHandles.length;
+    for (const r of rows) appendSettingRow(host, sceneId, r.spec, specs, SCENE_VIOLET, { ownLabel: r.ownLabel, linked: r.linked });
+
+    const addedSceneRows = sceneRowHandles.slice(sceneRowStart);
+    const addedDriveRows = driveRowHandles.slice(driveRowStart);
+    const addedSparks = driveSparkCanvases.slice(sparkStart);
+    // Every row registers here too (registerPinRow), drive or not.
+    const addedPinRows = pinRowHandles.slice(pinRowStart);
+
+    if (pinned) {
+      const stillHere = addedPinRows.find((r) => r.sceneId === pinned!.sceneId && r.spec.key === pinned!.spec.key);
+      stillHere?.refreshPin();
+    }
+    // A pin handed off by the previous mount's dispose (below): re-pin the
+    // same per-item control on whichever item this mount shows, so switching
+    // strains keeps the patch bay aimed at "Nutrient", not at a hidden row.
+    const handoff = pinHandoff;
+    pinHandoff = null;
+    if (handoff && !pinned) {
+      const same = rows.find(
+        (r) =>
+          r.spec.item?.family === handoff.family &&
+          r.spec.item.param === handoff.param &&
+          r.spec.item.other === handoff.other,
+      );
+      if (same) pinSetting(sceneId, same.spec);
+    }
+
+    let disposed = false;
+    return {
+      dispose(): void {
+        if (disposed) return;
+        disposed = true;
+        sceneRowHandles = sceneRowHandles.filter((h) => !addedSceneRows.includes(h));
+        driveRowHandles = driveRowHandles.filter((h) => !addedDriveRows.includes(h));
+        pinRowHandles = pinRowHandles.filter((h) => !addedPinRows.includes(h));
+        for (const c of addedSparks) untrackDriveCanvas(c);
+        driveSparkCanvases = driveSparkCanvases.filter((c) => !addedSparks.includes(c));
+        for (const r of rows) linkedByKey.delete(r.spec.key);
+        host.remove();
+        const ownsKey = (p: { sceneId: string; spec: SceneSetting } | null): boolean =>
+          p !== null && p.sceneId === sceneId && rows.some((r) => r.spec.key === p.spec.key);
+        // Never leave the pin (or a hover preview) on a row that no longer
+        // exists: unpin, and remember which per-item control it was so the
+        // next mountRows can re-pin its counterpart (see above).
+        if (ownsKey(pinned)) {
+          const item = pinned!.spec.item;
+          togglePin(pinned!.sceneId, pinned!.spec);
+          pinHandoff = item ? { family: item.family, param: item.param, other: item.other } : null;
+        }
+        if (ownsKey(preview)) previewDrive(null);
+        refreshPatchHighlight();
+      },
+    };
+  }
+
   function renderSceneSettings(): void {
     const sceneId = deps.currentSceneId();
     const specs = deps.getSceneSettings(sceneId);
@@ -5066,6 +5149,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         get: (spec) => deps.getSceneSettingValue(sceneId, spec),
         set: (spec, value) => deps.onSceneSettingChange(sceneId, spec, value),
         appendRow: (rowContainer, spec, opts) => appendSettingRow(rowContainer, sceneId, spec, specs, SCENE_VIOLET, opts),
+        mountRows: (rowContainer, rows) => mountRows(rowContainer, sceneId, specs, rows),
         // The exact same live reading a row's own sparkline draws — see
         // WidgetCtx.driveValue's own doc comment (registry.ts).
         driveValue: (spec) => lastDrives?.valueOf(spec.key) ?? 0,

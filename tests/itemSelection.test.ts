@@ -6,9 +6,17 @@ import {
   formatMixedSummary,
   primarySelection,
   sameSelection,
+  soloSelection,
   toggleItemSelection,
   valuesDiffer,
 } from "../src/ui/widgets/itemSelection.ts";
+
+describe("soloSelection", () => {
+  it("replaces the whole selection with just the one index", () => {
+    expect(soloSelection(2)).toEqual([2]);
+    expect(soloSelection(0)).toEqual([0]);
+  });
+});
 
 describe("toggleItemSelection", () => {
   it("adds an unselected index, keeping the result ascending", () => {

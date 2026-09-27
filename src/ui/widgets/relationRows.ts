@@ -6,8 +6,12 @@ import { affinityRowTargets, primarySelection, valuesDiffer } from "./itemSelect
  * itemBoxes widget's `options.relations` (see itemBoxes.ts's header). Both
  * builders are pure DOM factories — no state kept here, no selection of
  * their own: "Affinity has no selector of its own; it follows the box
- * selection" (the approved v3 UX), so the caller (itemBoxes.ts) re-renders
- * this whole block through the same `ctx.rerender()` a box click uses.
+ * selection" (the approved v3 UX), so the caller (itemBoxes.ts) rebuilds
+ * this whole block in place — clearing and refilling its own host — every
+ * time the box selection changes or a row/preset click writes a new value
+ * (`refreshAffinity`, itemBoxes.ts's 2026-09-27b no-redraw-on-click change);
+ * this block has no deviceMenu registrations of its own to unregister, so
+ * that clear-and-refill already is the scoped update.
  *
  * **Multi-selection (2026-09-27).** `selected` is every currently-selected
  * item, not just one: the row set itself is still keyed off the PRIMARY

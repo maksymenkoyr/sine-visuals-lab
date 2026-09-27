@@ -5,11 +5,14 @@
  * avoids, width by |value|, dashed near zero), a small self-loop per item
  * for its own "diagonal" pair, and every selected item's own arrows/loop lit
  * while every other pair dims (a multi-selection, 2026-09-27, lights all of
- * them at once — not just the primary). Clicking a node toggles it in/out of
- * the selection, exactly like clicking its own specimen box (the caller
- * re-renders — see registry.ts's WidgetCtx.rerender). Rebuilt whole on every
- * call rather than patched in place — cheap at the row counts an item widget
- * has, and it keeps this module free of any retained state.
+ * them at once — not just the primary). Clicking (or Enter/Space-ing) a node
+ * calls `onSelect` exactly like clicking its own specimen box: a plain click
+ * solos, a Shift/Cmd/Ctrl-modified one toggles membership instead
+ * (itemBoxes.ts's own Solo paragraph, 2026-09-27b) — this module stays
+ * DOM-event-free itself, just forwarding which of the two the caller asked
+ * for as `{ toggle }`. Rebuilt whole on every call rather than patched in
+ * place — cheap at the row counts an item widget has, and it keeps this
+ * module free of any retained state.
  */
 
 const NS = "http://www.w3.org/2000/svg";
@@ -57,8 +60,11 @@ export interface RelationWebSpec {
   selected: readonly number[];
   /** Reads the stored `i -> j` value (the affinity/attraction setting). */
   get(i: number, j: number): number;
-  /** Toggles `i` in/out of the selection, like clicking its own box. */
-  onSelect(i: number): void;
+  /** Solos `i` (`toggle: false`) or toggles it in/out of the selection
+   *  (`toggle: true`, a Shift/Cmd/Ctrl-modified click or any keyboard
+   *  activation's own shiftKey) — like clicking its own box, see this
+   *  file's header. */
+  onSelect(i: number, mods: { toggle: boolean }): void;
 }
 
 export function buildRelationWeb(spec: RelationWebSpec): SVGSVGElement {
@@ -165,10 +171,10 @@ export function buildRelationWeb(spec: RelationWebSpec): SVGSVGElement {
     });
     c.style.filter = `drop-shadow(0 0 6px ${col})`;
     c.style.cursor = "pointer";
-    c.addEventListener("click", () => onSelect(i));
+    c.addEventListener("click", (e) => onSelect(i, { toggle: e.shiftKey || e.ctrlKey || e.metaKey }));
     c.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
-        onSelect(i);
+        onSelect(i, { toggle: e.shiftKey || e.ctrlKey || e.metaKey });
         e.preventDefault();
       }
     });

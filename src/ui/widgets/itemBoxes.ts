@@ -11,6 +11,7 @@ import {
   editingHeading,
   primarySelection,
   sameSelection,
+  soloSelection,
   toggleItemSelection,
 } from "./itemSelection.ts";
 
@@ -30,27 +31,48 @@ import {
  * web overview, and named presets — and an optional `preview` id (Phase 3).
  * Affinity has no selection of its own — it always follows the box selection
  * (the approved UX) — so a click on a box, a web node, or an experiment pill
- * all funnel through the same `ctx.rerender()` (see registry.ts's header for
- * why a whole-card rebuild is the right amount of work here rather than
- * patching this widget's own DOM). The current selection is the one piece of
- * state this widget keeps of its own, in localStorage keyed by (scene,
- * family) — a convenience only, wrapped in try/catch like every other
- * localStorage read/write in this codebase (sceneSettings.ts's own store is
- * the precedent).
+ * all funnel through `updateSelection` below (see the Solo paragraph
+ * further down for what that actually rebuilds). The current selection is
+ * the one piece of state this widget keeps of its own, in localStorage keyed
+ * by (scene, family) — a convenience only, wrapped in try/catch like every
+ * other localStorage read/write in this codebase (sceneSettings.ts's own
+ * store is the precedent).
  *
- * **Multi-selection (2026-09-27).** A box click TOGGLES that item in/out of
- * the selection (itemSelection.ts's `toggleItemSelection`) rather than
- * replacing it — several boxes stay lit at once, and the last remaining one
- * can't be tapped off. The "All" chip above the boxes selects every item at
- * once; the "Editing …" line under it names the current set
+ * **Multi-selection (2026-09-27).** The "All" chip above the boxes selects
+ * every item at once; the "Editing …" line under it names the current set
  * (`editingHeading`). The rows below the boxes are always the PRIMARY item's
  * own (`primarySelection` — the lowest selected index, "first in code
- * order"), but every edit made there is handed to `ctx.appendRow` as
- * `{ ownLabel, linked }` (registry.ts's own doc comment on that option) so
- * deviceMenu.ts fans the edit out to every other selected item's same
- * setting, draws a divergent-value tick per one that still disagrees, and
- * folds a disagreeing drive/patch into a "Mixed — …" summary. Affinity's own
- * per-row fan-out (`affinityRowTargets`) follows the same selection.
+ * order"), but every edit made there is handed to `ctx.appendRow`/
+ * `ctx.mountRows` as `{ ownLabel, linked }` (registry.ts's own doc comment on
+ * that option) so deviceMenu.ts fans the edit out to every other selected
+ * item's same setting, draws a divergent-value tick per one that still
+ * disagrees, and folds a disagreeing drive/patch into a "Mixed — …" summary.
+ * Affinity's own per-row fan-out (`affinityRowTargets`) follows the same
+ * selection.
+ *
+ * **Solo vs. group, and no redraw on click (2026-09-27b).** A tap on a box
+ * BODY (or a relation-web node) *solos* — the selection becomes exactly that
+ * one item, even when a group was active (itemSelection.ts's
+ * `soloSelection`) — since that's the common case and a still-lit group from
+ * three taps ago is more often a stale surprise than an intended one. A
+ * small checkbox in each box's header corner (real `<button role="checkbox"
+ * aria-checked>`, ticked = in the edit group) is the deliberate way to build
+ * a group: ticking adds, unticking removes (never empty —
+ * `toggleItemSelection`'s own invariant), and a Shift/Cmd/Ctrl-modified tap
+ * on the body does the same toggle for a desktop user who'd rather not
+ * aim for the checkbox. None of this calls `ctx.rerender()` any more: a
+ * selection change only (a) updates the box classes/checkboxes/"Editing"
+ * line in place (`refreshBoxSelection`), (b) disposes and re-mounts the rows
+ * section through `ctx.mountRows` (`mountRowsSection`), and (c) rebuilds the
+ * Affinity web/rows/presets in place (`refreshAffinity` — that block is
+ * plain widget-owned DOM with no deviceMenu registrations of its own, so a
+ * full clear-and-rebuild of just its own host is enough). The boxes
+ * themselves, their live preview canvases and sims, and the tick loop are
+ * built once per widget mount and never touched by a selection change — see
+ * registry.ts's header for why `ctx.mountRows` exists rather than reaching
+ * for `ctx.rerender()` here. `ctx.rerender()` is still right for a Look
+ * apply or a card Reset (deviceMenu.ts's own callers), since those actually
+ * change values this widget doesn't otherwise watch for.
  *
  * **Phase 3 (`options.preview`).** When set, `src/ui/widgets/previews.ts`'s
  * registry resolves it to a `PreviewSource` (size/agent count + an
@@ -119,9 +141,10 @@ function selectStoreKey(sceneId: string, family: string): string {
 
 // Whether the pipette is armed, per (scene, family) — in-memory only (never
 // localStorage: an armed pipette shouldn't survive a reload) but keyed the
-// same way the selection above is, so it survives a `ctx.rerender()` (a box
-// or Affinity-word click) instead of resetting the moment someone picks a
-// different strain to inject next — see this file's header.
+// same way the selection above is, so it survives a full widget rebuild (a
+// Look apply, a card Reset — the only things left that re-run this builder;
+// a selection change no longer does, see this file's header) instead of
+// resetting under one.
 const pipetteArmedByFamily = new Map<string, boolean>();
 
 function clamp01(v: number): number {
@@ -178,11 +201,12 @@ function findPairSpec(
   return specs.find((s) => s.item?.family === family && s.item.param === param && s.item.index === i && s.item.other === j);
 }
 
-/** Phase 3 preview sims persist across a widget rebuild (a box click, an
- *  Affinity edit — anything that calls `ctx.rerender()`) instead of
- *  restarting from noise every time: keyed by (scene, family, item index),
- *  looked up here and reattached to whatever new `<canvas>` this build made
- *  for it, rather than recreated with the rest of this function's own DOM.
+/** Phase 3 preview sims persist across a full widget rebuild (a Look apply,
+ *  a card Reset, reopening the panel — a selection change no longer rebuilds
+ *  the boxes at all, see this file's header) instead of restarting from
+ *  noise every time: keyed by (scene, family, item index), looked up here
+ *  and reattached to whatever new `<canvas>` this build made for it, rather
+ *  than recreated with the rest of this function's own DOM.
  *  `PREVIEW_CACHE_MAX` is a safety net, not a real limit — one item family's
  *  worth of entries never gets close to it; it only matters if a session
  *  somehow visits far more item-preview scenes than exist today, and even
@@ -207,28 +231,70 @@ function cachedPreview(sceneId: string, family: string, index: number, size: num
 }
 
 registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) => {
-  const family = section.items;
-  const opts = section.options as ItemBoxesOptions | undefined;
-  if (!family || !opts) return;
+  // Guarded, then re-declared with their definite (non-optional) type below
+  // rather than relying on control-flow narrowing of `section.items`/
+  // `section.options` themselves — a plain `function` declaration (several
+  // of this widget's own selection-update helpers are, since they need
+  // hoisting to call each other regardless of source order) doesn't retain
+  // an outer `if` guard's narrowing the way a same-scope statement does.
+  if (!section.items || !section.options) return;
+  const family: string = section.items;
+  const opts = section.options as ItemBoxesOptions;
   const labels = opts.labels;
   const count = labels.length;
   if (count === 0) return;
 
-  const selectedSet = readSelectedSet(ctx.sceneId, family, count);
-  const primary = primarySelection(selectedSet);
+  let selectedSet = readSelectedSet(ctx.sceneId, family, count);
+  let primary = primarySelection(selectedSet);
   const previewSource = opts.preview ? getPreviewSource(opts.preview) : undefined;
 
-  // Shared by the box click handler, the "All" chip and the web overview's
-  // own node click — see this file's header's Multi-selection paragraph.
-  // A `const` arrow, not a hoisted function declaration, so TypeScript keeps
-  // narrowing `family` (PanelSection.items, string | undefined) past the
-  // early-return guard above.
-  const toggleAndRerender = (i: number): void => {
-    const next = toggleItemSelection(selectedSet, i);
+  // Set once the rows section / Affinity block below actually mount — see
+  // `mountRowsSection` and the `if (rel)` block near the end of this builder.
+  // Predeclared here (rather than as `function` declarations nested inside
+  // an `if`, which module strict mode block-scopes) so `updateSelection`
+  // above can reach either regardless of source order.
+  let rowsHandle: { dispose(): void } | undefined;
+  let refreshAffinity: (() => void) | undefined;
+
+  // Every box's own element and checkbox, filled by the box-building loop
+  // below. `refreshBoxSelection` is the only thing that ever touches them
+  // again after that (this file's header's Solo paragraph): a selection
+  // change updates classes/aria state in place, it never rebuilds a box —
+  // that would recreate/restart its live preview canvas and sim.
+  const boxEls: HTMLElement[] = [];
+  const checkboxEls: HTMLButtonElement[] = [];
+
+  /** Applies `selectedSet` to every already-built box's own classes/aria
+   *  state and the "Editing …" line below the "All" chip — no DOM is
+   *  created or removed here (see this file's header's Solo paragraph). */
+  function refreshBoxSelection(): void {
+    for (let i = 0; i < count; i++) {
+      const isSel = selectedSet.includes(i);
+      boxEls[i]?.classList.toggle("vc-item-box-sel", isSel);
+      boxEls[i]?.setAttribute("aria-pressed", String(isSel));
+      checkboxEls[i]?.setAttribute("aria-checked", String(isSel));
+    }
+    editingEl.textContent = editingHeading(
+      selectedSet.map((i) => labels[i] ?? ""),
+      selectedSet.length === count,
+      opts.itemNoun ?? "items",
+    );
+  }
+
+  /** The one place `selectedSet`/`primary` change — every caller below
+   *  (a box body tap/keypress, its checkbox, the "All" chip, a relation-web
+   *  node) funnels through this instead of `ctx.rerender()`. See this
+   *  file's header's Solo paragraph for the scoped (a)/(b)/(c) update this
+   *  does in place. */
+  function updateSelection(next: number[]): void {
     if (sameSelection(next, selectedSet)) return;
+    selectedSet = next;
+    primary = primarySelection(selectedSet);
     writeSelectedSet(ctx.sceneId, family, next);
-    ctx.rerender();
-  };
+    refreshBoxSelection();
+    mountRowsSection();
+    refreshAffinity?.();
+  }
 
   // Phase 3 per-box state, filled in the loop below only when a preview
   // source is registered — see this file's header.
@@ -246,31 +312,34 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   const selBar = document.createElement("div");
   selBar.className = "vc-item-selbar";
   const allBtn = createChipButton("All", `Select every ${opts.itemNoun ?? "item"}`, () => {
-    const next = allItemsSelected(count);
-    if (sameSelection(next, selectedSet)) return;
-    writeSelectedSet(ctx.sceneId, family, next);
-    ctx.rerender();
+    updateSelection(allItemsSelected(count));
   });
   const editingEl = document.createElement("span");
   editingEl.className = "vc-item-editing";
-  editingEl.textContent = editingHeading(
-    selectedSet.map((i) => labels[i] ?? ""),
-    selectedSet.length === count,
-    opts.itemNoun ?? "items",
-  );
   selBar.append(allBtn, editingEl);
   container.appendChild(selBar);
+
+  // Whether `e` should TOGGLE membership rather than solo — a
+  // Shift/Cmd/Ctrl-modified tap on a box body or web node (this file's
+  // header's Solo paragraph); the checkbox always toggles regardless.
+  const isGroupModifier = (e: MouseEvent | KeyboardEvent): boolean => e.shiftKey || e.ctrlKey || e.metaKey;
 
   const boxesEl = document.createElement("div");
   boxesEl.className = "vc-item-boxes";
   for (let i = 0; i < count; i++) {
-    const isSel = selectedSet.includes(i);
-    const box = document.createElement("button");
-    box.type = "button";
-    box.className = "vc-item-box" + (isSel ? " vc-item-box-sel" : "");
+    // A `<div>`, not a `<button>`: the checkbox below is a real interactive
+    // `<button>` of its own, and nesting one inside a native button is
+    // invalid HTML (and would double-fire on a checkbox click). `role`/
+    // `tabIndex`/the keydown handler below restore native-button semantics.
+    const box = document.createElement("div");
+    box.className = "vc-item-box";
     box.style.setProperty("--c", opts.colours[i] ?? "#fff");
-    box.setAttribute("aria-pressed", String(isSel));
-    box.setAttribute("aria-label", `Toggle ${labels[i]}`);
+    box.setAttribute("role", "button");
+    box.tabIndex = 0;
+    box.setAttribute("aria-pressed", "false");
+    box.setAttribute("aria-label", labels[i] ?? "");
+    box.title = "Tap to edit only this — Shift/Cmd-tap or the checkbox to add to the group";
+    boxEls[i] = box;
 
     const head = document.createElement("div");
     head.className = "vc-item-box-head";
@@ -279,7 +348,22 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     const code = document.createElement("span");
     code.className = "vc-item-code";
     code.textContent = labels[i] ?? "";
-    head.append(led, code);
+    // The group checkbox (this file's header's Solo paragraph) — ticked
+    // means "in the edit group"; `stopPropagation` on its own click keeps
+    // the box body's own (solo) click handler below from also firing.
+    const checkbox = document.createElement("button");
+    checkbox.type = "button";
+    checkbox.className = "vc-item-check";
+    checkbox.setAttribute("role", "checkbox");
+    checkbox.setAttribute("aria-checked", "false");
+    checkbox.setAttribute("aria-label", labels[i] ?? "");
+    checkbox.title = "Include in the edit group";
+    checkboxEls[i] = checkbox;
+    checkbox.addEventListener("click", (e) => {
+      e.stopPropagation();
+      updateSelection(toggleItemSelection(selectedSet, i));
+    });
+    head.append(led, code, checkbox);
 
     let previewEl: HTMLElement;
     if (previewSource) {
@@ -327,10 +411,18 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
       readoutEls[i] = { pop: pop.val, terr: terr.val, vig: vig.val };
     }
 
-    box.addEventListener("click", () => toggleAndRerender(i));
+    box.addEventListener("click", (e) => {
+      updateSelection(isGroupModifier(e) ? toggleItemSelection(selectedSet, i) : soloSelection(i));
+    });
+    box.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      updateSelection(isGroupModifier(e) ? toggleItemSelection(selectedSet, i) : soloSelection(i));
+    });
     boxesEl.appendChild(box);
   }
   container.appendChild(boxesEl);
+  refreshBoxSelection();
 
   if (previewSource) {
     const io = new IntersectionObserver(
@@ -507,26 +599,51 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     });
   }
 
-  const rowsEl = document.createElement("div");
-  rowsEl.className = "vc-item-rows";
-  const primarySpecs = ctx.specsFor(family, primary);
-  const otherSelected = selectedSet.filter((i) => i !== primary);
-  for (const paramKey of opts.rowOrder) {
-    const spec = primarySpecs.find((s) => s.item?.param === paramKey);
-    if (!spec) continue;
-    const linked: LinkedSetting[] = [];
-    for (const i of otherSelected) {
-      const otherSpec = ctx.specsFor(family, i).find((s) => s.item?.param === paramKey);
-      if (otherSpec) linked.push({ spec: otherSpec, label: labels[i] ?? "", colour: opts.colours[i] });
+  // The rows section — always the PRIMARY item's own rowOrder settings, each
+  // fanned out to every OTHER selected item via `linked` (this file's
+  // header's Multi-selection paragraph). Mounted once here and re-mounted
+  // (dispose + mountRows) by `mountRowsSection` on every selection change —
+  // never `ctx.rerender()` (this file's header's Solo paragraph;
+  // registry.ts's header on why `ctx.mountRows` exists). `rowsSectionEl`
+  // itself is permanent — only its mounted contents get swapped.
+  const rowsSectionEl = document.createElement("div");
+  rowsSectionEl.className = "vc-item-rows";
+  container.appendChild(rowsSectionEl);
+
+  function buildRowSpecs(): { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[] }[] {
+    const primarySpecs = ctx.specsFor(family, primary);
+    const otherSelected = selectedSet.filter((i) => i !== primary);
+    const rows: { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[] }[] = [];
+    for (const paramKey of opts.rowOrder) {
+      const spec = primarySpecs.find((s) => s.item?.param === paramKey);
+      if (!spec) continue;
+      const linked: LinkedSetting[] = [];
+      for (const i of otherSelected) {
+        const otherSpec = ctx.specsFor(family, i).find((s) => s.item?.param === paramKey);
+        if (otherSpec) linked.push({ spec: otherSpec, label: labels[i] ?? "", colour: opts.colours[i] });
+      }
+      rows.push({ spec, ownLabel: linked.length ? labels[primary] ?? "" : undefined, linked: linked.length ? linked : undefined });
     }
-    ctx.appendRow(rowsEl, spec, linked.length ? { ownLabel: labels[primary] ?? "", linked } : undefined);
+    return rows;
   }
-  container.appendChild(rowsEl);
+
+  function mountRowsSection(): void {
+    rowsHandle?.dispose();
+    rowsHandle = ctx.mountRows(rowsSectionEl, buildRowSpecs());
+  }
+  mountRowsSection();
 
   const rel = opts.relations;
   if (!rel) return;
 
   container.appendChild(groupHeading(rel.title));
+  // Affinity's own permanent host — `refreshAffinity` clears and rebuilds
+  // its contents (the web + rows + presets below) on a selection change or
+  // any value it draws changing; it's plain widget-owned DOM with no
+  // deviceMenu registrations, so a full clear-and-rebuild of just this host
+  // is already the scoped update (this file's header's Solo paragraph).
+  const affinityHost = document.createElement("div");
+  container.appendChild(affinityHost);
 
   const getRel = (i: number, j: number): number => {
     const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
@@ -534,49 +651,55 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   };
   // Applies `value` to every pair a multi-selection's row `rowJ` affects
   // (itemSelection.ts's `affinityRowTargets`) — see relationRows.ts's own
-  // header for what row `rowJ` means.
+  // header for what row `rowJ` means. Refreshes Affinity in place rather
+  // than `ctx.rerender()`: it only ever changes `att<i><j>` settings, which
+  // the rows section above never shows.
   const applyAffinityRow = (rowJ: number, value: number): void => {
     for (const { i, j } of affinityRowTargets(selectedSet, primary, rowJ)) {
       const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
       if (spec) ctx.set(spec, value);
     }
-    ctx.rerender();
+    refreshAffinity?.();
   };
 
-  const webWrap = document.createElement("div");
-  webWrap.className = "vc-relweb-wrap";
-  webWrap.appendChild(
-    buildRelationWeb({
-      count,
-      colours: opts.colours,
-      labels,
-      selected: selectedSet,
-      get: getRel,
-      onSelect: toggleAndRerender,
-    }),
-  );
-  container.appendChild(webWrap);
-
-  container.appendChild(
-    buildRelationRows({ count, labels, selected: selectedSet, words: rel.words, get: getRel, applyRow: applyAffinityRow }),
-  );
-
-  if (rel.presets?.length) {
-    container.appendChild(
-      buildRelationPresets({
+  refreshAffinity = (): void => {
+    affinityHost.replaceChildren();
+    const webWrap = document.createElement("div");
+    webWrap.className = "vc-relweb-wrap";
+    webWrap.appendChild(
+      buildRelationWeb({
         count,
-        presets: rel.presets,
+        colours: opts.colours,
+        labels,
+        selected: selectedSet,
         get: getRel,
-        apply: (matrix) => {
-          for (let i = 0; i < count; i++) {
-            for (let j = 0; j < count; j++) {
-              const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
-              if (spec) ctx.set(spec, matrix[i]![j]!);
-            }
-          }
-          ctx.rerender();
-        },
+        onSelect: (i, mods) => updateSelection(mods.toggle ? toggleItemSelection(selectedSet, i) : soloSelection(i)),
       }),
     );
-  }
+    affinityHost.appendChild(webWrap);
+
+    affinityHost.appendChild(
+      buildRelationRows({ count, labels, selected: selectedSet, words: rel.words, get: getRel, applyRow: applyAffinityRow }),
+    );
+
+    if (rel.presets?.length) {
+      affinityHost.appendChild(
+        buildRelationPresets({
+          count,
+          presets: rel.presets,
+          get: getRel,
+          apply: (matrix) => {
+            for (let i = 0; i < count; i++) {
+              for (let j = 0; j < count; j++) {
+                const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
+                if (spec) ctx.set(spec, matrix[i]![j]!);
+              }
+            }
+            refreshAffinity?.();
+          },
+        }),
+      );
+    }
+  };
+  refreshAffinity();
 });

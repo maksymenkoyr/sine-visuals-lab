@@ -8,7 +8,22 @@
  * headless click. `itemBoxes.ts` is the only caller today; `relationRows.ts`
  * also reaches for `affinityRowTargets` since Affinity's own fan-out rule is
  * exactly this module's concern, not that file's.
+ *
+ * **Solo vs. group (2026-09-27b).** A plain tap on a box body (or a web
+ * node) no longer toggles membership — it *solos* (`soloSelection`),
+ * replacing the whole selection with just that one item, even when a group
+ * was active. Only a per-box checkbox (ticked = in the group) or a
+ * Shift/Cmd/Ctrl-modified tap still calls `toggleItemSelection` to build a
+ * multi-item group; `itemBoxes.ts` reads the modifier keys off the DOM event
+ * itself (this module stays DOM-free) and picks which of the two to call.
  */
+
+/** Replaces the whole selection with exactly `index` — a plain tap on a box
+ *  body or web node (see this file's header's Solo paragraph). Always
+ *  non-empty by construction, same invariant `toggleItemSelection` keeps. */
+export function soloSelection(index: number): number[] {
+  return [index];
+}
 
 /** Toggles `index` in/out of `selected`, always ascending and deduped, and
  *  always non-empty: toggling the last remaining member off is a no-op

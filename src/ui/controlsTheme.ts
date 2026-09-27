@@ -888,6 +888,7 @@ body.vc-keys-reveal [data-keycap]::after {
   display: grid; gap: 6px; padding: 8px; border-radius: 6px; text-align: left; min-width: 0;
   background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.13); cursor: pointer; font: inherit; color: inherit;
 }
+.vc-item-box:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
 .vc-item-box-sel {
   border-color: var(--c, ${SCENE_VIOLET});
   background: color-mix(in srgb, var(--c, ${SCENE_VIOLET}) 14%, transparent);
@@ -901,6 +902,29 @@ body.vc-keys-reveal [data-keycap]::after {
   font: 500 11.5px/1 ${FONT_MONO}; color: #fff; letter-spacing: 0.03em;
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* The per-box "in the edit group" checkbox (itemBoxes.ts's Solo paragraph,
+ * 2026-09-27b) — a real <button role="checkbox">, sized to a >=24px touch
+ * target even though its drawn glyph is much smaller, sitting in the box's
+ * own header row (its "corner") after the code label. --c is the box's own
+ * colour custom property, inherited straight from .vc-item-box since the
+ * checkbox is a DOM descendant of it. */
+.vc-item-check {
+  flex: none; width: 24px; height: 24px; padding: 0; margin: -3px -3px -3px 0;
+  border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.04);
+  cursor: pointer; display: grid; place-items: center; transition: background 0.12s ease, border-color 0.12s ease;
+}
+.vc-item-check::after {
+  content: ""; width: 8px; height: 8px; border-radius: 2px; background: transparent; transition: background 0.12s ease;
+}
+.vc-item-check[aria-checked="true"] {
+  border-color: var(--c, ${SCENE_VIOLET});
+  background: color-mix(in srgb, var(--c, ${SCENE_VIOLET}) 22%, transparent);
+}
+.vc-item-check[aria-checked="true"]::after {
+  background: var(--c, ${SCENE_VIOLET});
+  box-shadow: 0 0 5px var(--c, ${SCENE_VIOLET});
+}
+.vc-item-check:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 /* A live preview (Phase 3) is a <canvas> in this same slot; an item family
  * with no preview source keeps the plain sized placeholder <div> — either
  * way the box's layout is untouched. */

@@ -20,17 +20,33 @@ import type { SceneSetting } from "../../render/sceneSettings.ts";
  * controls (Physarum 2's Affinity segmented rows) read/write storage,
  * Looks and reset identically to a plain row, just with different UI.
  *
- * Widgets don't do their own fine-grained DOM patching on a selection
- * change: `ctx.rerender()` re-runs the *whole* Scene card
- * (deviceMenu.ts's `renderSceneSettings`) — the same rebuild a scene switch,
- * a Look apply or a card Reset already does. That reuses 100% of the
+ * `ctx.rerender()` re-runs the *whole* Scene card (deviceMenu.ts's
+ * `renderSceneSettings`) — the same rebuild a scene switch, a Look apply, a
+ * variant switch or a card Reset already does. It reuses 100% of the
  * existing jack/cable/pin teardown (driveRowHandles, sceneRowHandles, the
  * pinned-row reconciliation) for free instead of a second, easy-to-drift
- * bookkeeping path — the cost (rebuilding every row on a click, not just the
- * changed ones) is trivial for the small row counts a widget-backed scene
- * has today. A widget that needs its own state to survive a rebuild (which
- * item is selected, say) persists it itself (localStorage, try/catch — see
- * itemBoxes.ts) rather than relying on anything here to carry it across.
+ * bookkeeping path, but it's a sledgehammer: every row flashes, every
+ * preview canvas would restart (Phase 3's own `previewCache` is what stops
+ * that today), and any open patch panel/hover state resets. Right for
+ * something that actually changes every row's own profile (a Look apply, a
+ * variant switch), wrong for anything a widget expects to happen often and
+ * cheaply, like a selection change.
+ *
+ * For that, `ctx.mountRows(container, rows)` (2026-09-27b) mounts real
+ * device-menu rows the same way `appendRow` does, but scoped: it snapshots
+ * `sceneRowHandles`/`driveRowHandles`/`driveSparkCanvases`/`linkedByKey`
+ * before and after building `rows`, so the `{ dispose(): void }` it returns
+ * can unregister exactly what that call added — and nothing else already on
+ * the card — then remove that call's own DOM subtree and trigger the
+ * existing cable recompute (`refreshPatchHighlight`). A widget whose
+ * selection change only swaps out the *rows* below some unrelated,
+ * persistent DOM (the boxes and their live preview canvases, say — see
+ * itemBoxes.ts) calls `dispose()` on its previous mount and `mountRows()`
+ * again with the new set, instead of `ctx.rerender()`: the boxes, canvases
+ * and any per-tick state never move. A widget that needs its own state to
+ * survive either kind of rebuild (which item is selected, say) persists it
+ * itself (localStorage, try/catch — see itemBoxes.ts) rather than relying on
+ * anything here to carry it across.
  *
  * `onTick`/`onDispose` exist for the rarer widget that keeps its own
  * per-frame state or a resource outside the rebuilt DOM subtree (a
@@ -103,6 +119,23 @@ export interface WidgetCtx {
    *  primary/mixed-text rules a caller like itemBoxes.ts builds `opts`
    *  from. */
   appendRow(container: HTMLElement, spec: SceneSetting, opts?: { ownLabel?: string; linked?: readonly LinkedSetting[] }): void;
+  /** Mounts several rows (each the same shape `appendRow` takes — a spec
+   *  plus its own optional `ownLabel`/`linked`) into `container` as one
+   *  scoped unit: `dispose()` unregisters exactly what these rows
+   *  registered (drive row handles, spark canvases, jack/cable entries via
+   *  `linkedByKey`) and removes exactly their DOM, then triggers the
+   *  existing cable recompute — see this file's header for why a widget
+   *  reaches for this instead of `ctx.rerender()` on a selection change. A
+   *  mount that happens to recreate the row currently pinned open (by
+   *  `sceneId`+`spec.key`) picks its patch panel back up automatically,
+   *  mirroring what a full rebuild's own pinned-row reconciliation does.
+   *  Safe to call again with a fresh `rows` set after disposing the
+   *  previous call's handle — that's the whole update path (itemBoxes.ts's
+   *  selection change: dispose the old rows section, mount the new one). */
+  mountRows(
+    container: HTMLElement,
+    rows: readonly { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[] }[],
+  ): { dispose(): void };
   /** Registers `fn` to run on every device-menu tick (unthrottled) while
    *  this section is mounted — cleared automatically on the next rebuild. */
   onTick(fn: () => void): void;
