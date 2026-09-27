@@ -95,7 +95,13 @@ through a mic.
 
 ## Materials
 
-- No `/ref` bundle or artifacts. Headless shots for tuning:
+- Artifact "Physarum Lab" (controls prototype, private):
+  https://claude.ai/artifact/UhgRTMw36hB6mFBccP7ada — source in
+  `physarum2/artifacts/`: `lab.src.html`, `strainPreview.js` (the shared
+  strain-motion mapping and pure-culture preview), `engine.js` (fake-music
+  engine from the drives prototypes); `node build.mjs` writes the page,
+  `node look.mjs [--click]` screenshots it at wide and phone width.
+- No `/ref` bundle. Headless shots for tuning:
   `docs/scenes/_shared/scripts/shot.mjs --scene physarum2 --bpm 120
   --settings '{…}'` (the session's scratch variant only differed in taking a
   list of capture times).

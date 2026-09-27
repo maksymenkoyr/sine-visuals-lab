@@ -1,0 +1,3 @@
+# Build output and screenshots — regenerate with `node build.mjs` / `node look.mjs`.
+physarum2-controls.html
+look-*.png
