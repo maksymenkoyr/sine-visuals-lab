@@ -5,8 +5,10 @@ own motion profile and its own trail channel, sensing every strain's trail at
 once through a weighted sum (the `att<i><j>` settings, defaulting to
 ATTRACT_ROWS) — strongly its own, weakly or negatively everyone else's. That
 mutual avoidance is what separates the four networks into distinct,
-interlocking coloured territories rather than one shared mesh. Featured, on
-main (a draft until 2026-09-27).
+interlocking coloured territories rather than one shared mesh. A second pair
+table, Touch (`touch<i><j>`), lets a strain feed or eat another's trail
+directly, on top of what smell alone can do. Featured, on main (a draft until
+2026-09-27).
 
 ## Where the code is
 
@@ -32,17 +34,34 @@ on `STRAINS`/`ATTRACT_ROWS` and the NEUTRAL auto-tune invariant.
 
 `STRAINS` is the per-strain identity table (code, base colour, fixed sensor
 angle); `nutrient<k>`/`excite<k>`/`sensor<k>`/`turn<k>`/`stride<k>`/`stain<k>`
-(`src/render/sceneItems.ts`'s `defineItems`, family `"strain"`) and the full
-`att<i><j>` affinity matrix (`defineItemPairs`) replace the old shared "Band
-feed"/"Surge" pair and the fixed `SPECIES`/`PALETTE` constants — every strain
-now has its own controls and its own Receives patch. `scene.panel` (one
-`PanelSection` naming the `itemBoxes` widget — `src/ui/widgets/itemBoxes.ts`)
-renders them as specimen boxes + the selected strain's rows + an Affinity
-block (plain-word rows, a compact SVG web, named presets) inside the device
-menu's Scene card, ahead of the remaining flat rows (Network scale, Trail
-decay, Hostility [renamed from Rivalry, same key `rivalry`], Crawl speed,
-Beat seeding, Exposure, Palette tint, Beat flash), each of the latter still
-carrying its own `auto` weights as before.
+(`src/render/sceneItems.ts`'s `defineItems`, family `"strain"`) and the two
+pair tables, `att<i><j>` (Smell, `defineItemPairs`'s default `diagonal: true`
+— the own-trail weight is a real setting) and `touch<i><j>` (Touch,
+`diagonal: false` — Touch has no own-strain meaning at all), replace the old
+shared "Band feed"/"Surge" pair and the fixed `SPECIES`/`PALETTE` constants —
+every strain now has its own controls and its own Receives patch. Both pair
+tables also set `masterScale: false` (`sceneSettings.ts`'s own field,
+honoured by `autoTune.ts`'s `resolveSceneSetting`): a signed relation value's
+meaning is its exact position, so the device-wide Scene master must never
+scale it. `scene.panel` (one `PanelSection` naming the `itemBoxes` widget —
+`src/ui/widgets/itemBoxes.ts`) renders them as specimen boxes + the selected
+strain's rows + the Pairs block (`src/ui/widgets/pairPads.ts`'s
+`buildPairPads`: a Smell/Touch switch, an own-trail fader strip, one
+two-strain-culture pad per pair (`pairsOf`), a Random/Nudge/Keep own
+trails/Back mix row and
+named presets — replacing the old plain-word rows/SVG-web pair,
+`relationRows.ts`/`relationWeb.ts`, both deleted) inside the device menu's
+Scene card, ahead of the remaining flat rows (Network scale, Trail decay,
+Hostility [renamed from Rivalry, same key `rivalry`], Crawl speed, Beat
+seeding, Exposure, Palette tint, Beat flash), each of the latter still
+carrying its own `auto` weights as before. `src/render/scenes/
+physarum2Affinity.ts` is the DOM-free home for both tables' shared logic and
+words: `ATTRACT_ROWS`, `smellWeight` (Hostility folded into a raw Smell
+value, shared by the GPU packing and the pads), `packTouch` (Touch's GPU
+packing), `PAIR_WORDS` (every word the Pairs widget shows), `AFFINITY_PRESETS`
+and the pad/preset/mix-row pure helpers; `src/render/scenes/
+physarum2Preview.ts`'s `createPairCulture` is the CPU twin each pad's live
+preview steps.
 
 This is also `src/render/sceneItems.ts`/`src/ui/widgets/registry.ts`'s first
 real caller — see those files' own headers for the item/panel framework
@@ -107,6 +126,32 @@ and `powder.ts`'s curl noise).
 - 2026-09-27, Phase 3 frame time at `?quality=low` with all four box
   previews running: 8.35 ms/frame panel open vs 8.33 closed (no measurable
   cost). Pipette: five taps at Dose 0.01 moved PP-C3 from 25% to 29%.
+- 2026-09-27, Touch/Pairs GPU cost per sim step (`scripts/perf/tput.mjs`,
+  M1 Pro, headless Chromium ANGLE/Metal, 1920x1080, quality high, 10 forced
+  steps/frame, median ms/step; see that script's own header for the
+  documented temp hook this needs and never commits):
+  - Session 1 (before the deposit's MRT split): Phase 0 baseline 5.14
+    (5.11/5.22/5.14 across 3 runs); Phase 1 default 5.64 over 7 runs
+    (cluster 5.3-5.7, one 6.89 outlier); Gardens (feed only, MRT off) 5.55;
+    War (MRT on) 5.58; Hunt 5.57 — all within noise of the Phase 0/1
+    baseline, since none of these presets is far enough from the default
+    to show the eating path's own cost yet.
+  - Session 2 (after the deposit was split into a plain and an MRT program;
+    the machine was noisier this session, every figure roughly 25-30%
+    higher including an *unchanged* default, so only the *relative* numbers
+    below are informative): default 6.47 over 5 runs (6.16-6.61); an
+    interleaved A/B of 6+6 runs comparing the lazy split against always
+    running the MRT path gave split ~= 6.34 vs always-MRT ~= 6.44 (the split
+    is never slower, ~1.5% faster); War 6.76 (~= +4-5% over default, well
+    inside the plan's <= +25% acceptance bar for the eating path turned on).
+  - `padcost.mjs` (`?quality=low`, 480 rAF frames): the Pairs block open at
+    the pads vs the panel closed, unthrottled: mean delta 0.00 ms. Under a
+    4x CPU-throttle stand-in for a phone, opening the device menu AT ALL
+    (nothing Physarum2-specific on screen) already costs ~15 ms mean — a
+    pre-existing, scene-independent panel characteristic, not this widget's;
+    the pads' own marginal cost on top of that (open-at-the-pads vs
+    open-at-the-boxes, both throttled) came out negative and not
+    measurable: -0.81 ms mean / -2.80 ms p95.
 
 ## Decisions and pivots
 
@@ -361,6 +406,127 @@ and `powder.ts`'s curl noise).
   can't be a negative deposit into the RGBA8 trail; the likely route is a
   second deposit target counting each strain's steps, eroded in the diffuse
   pass. Waiting on the user's call.
+  (Correction, 2026-09-27: this entry's "a look Smell alone doesn't make"
+  claim for War overstated it — a fair side-by-side (fresh seed, 8 s each,
+  Rivals) showed Rivals *without* Touch also forms banded territories;
+  eating mainly sharpens and separates the bands that Smell alone already
+  draws. The GPU build below agrees: War reads crisper/thinner-lined than
+  the no-touch control, and Hunt becomes a thin interlocking filament web
+  rather than the flat fog this entry describes.)
+- **2026-09-27, Affinity Studio v3: Pairs plus the full Touch table
+  (prototype only).** Fills the gap the two entries above left open — the
+  prototype commits that recorded this pick ("Affinity Studio v3, Pairs only
+  with Touch as a full table" and the naming commits after it) changed only
+  `affinity-studio.html`, with no matching record entry. The user's calls,
+  in order:
+  continuous values with no snapping to the five word landmarks (the first
+  entry above); a Random button to re-mix a table; before building anything,
+  interface ideas — "Affinity Studio" (Materials) prototyped Pairs (one 2D
+  pad per pair, both directions in one drag, each pad a live two-strain
+  culture), Orbit (drag a trail closer to follow it) and Rows (plain
+  continuous sliders); the user picked **Pairs** ("it looks awesome"), and
+  Orbit and Rows were removed from the prototype. Touch itself (second entry
+  above) was prototyped both as a full n\*n table and as a one-knob "Bite"
+  variant (each strain eats the trails it avoids by smell, one shared knob);
+  the user chose the **full table** ("ok lets do fulltable pairs"). Then,
+  on the pads: each axis is simply that strain's value toward the other,
+  "−" to "+" (the verb captions were "weird words"); no corner labels ("what
+  merge in a context of smell even means"); and no band words anywhere
+  ("very confusing"). The prototype keeps its Off / One-knob Touch modes and
+  a naming-set switcher (None by default) for comparison only; nothing in
+  the shipped panel can switch to them.
+- **2026-09-27, Pairs + Touch built (Phases 0-3, this session, a
+  Sonnet-executed plan).** Touch reached the GPU and the panel in the order
+  above: pair tables and Hostility folding first, then Touch's own sim path,
+  then the Pairs pads' pure logic and DOM, then the pads' Random/Nudge/Keep
+  own trails/Back mix row on top. Design points, referenced by file:
+  - **Touch on the GPU: one extra render target, not a second deposit
+    draw.** Feeding a trail costs nothing extra — the deposit's own colour
+    becomes a *row* instead of a onehot (`touchFeedRowFor(k)` in
+    `physarum2.ts`'s `DEPOSIT_VERT`), so at Touch = 0 the result is
+    bit-identical to before. Eating needs to know how many of each strain
+    landed on a texel last step, which a second draw over all 800k agents
+    would double the deposit's own ~3.5 ms/step cost to get; instead the
+    same deposit draw writes a second RGBA8 attachment (the "footprint",
+    `ensureFootprintTargets`) counting landings per strain, and the next
+    step's `DIFFUSE_FRAG` turns that count into an exact per-channel decay
+    (`packTouch`'s `eatCols`, one `texelFetch` against the footprint). The
+    **lazy `eatOn` path**: the footprint texture, its framebuffers and the
+    diffuse's extra fetch only exist once `packTouch` finds any negative
+    (eating) Touch value that step — the default scene and any feed-only
+    table (Gardens) run exactly the passes they did before Touch existed.
+    Measured cost is in Measurements above: War (every pair eating) lands at
+    +4-5% over the default, inside the plan's <= +25% acceptance bar; the
+    split-vs-always-MRT A/B shows the laziness itself is never slower.
+  - **One shared formula for Hostility.** `smellWeight(att, i, j, rivalry)`
+    (`physarum2Affinity.ts`) replaced the inline `w = row * (own +
+    (1-own)*(uRivalry*2))` `SIM_FRAG` used to compute itself; `resolveStrains`
+    now packs `uAttractRow` already Hostility-scaled in JS, and the same
+    function is what a pad's own live culture calls, so neither path can
+    drift from the other the way two copies of that formula eventually
+    would.
+  - **The master exemption and `diagonal: false`.** Both pair tables set
+    `masterScale: false` (`sceneSettings.ts`'s new field, read by
+    `autoTune.ts`'s `resolveSceneSetting`) — the device-wide Scene master's
+    range is [0, 2], and ×0 or a clamped ×2 would change which relation a
+    signed value *is*, not just how strong it reads, while the panel kept
+    showing the unscaled stored number. Touch also sets `defineItemPairs`'s
+    new `diagonal: false`: Touch has no own-strain meaning at all, so the
+    four `touch<i><i>` keys that a plain pair table would otherwise emit
+    (dead weight in every Look and share code) never exist.
+  - **Naming kept as data, not deleted.** Every word the Pairs widget can
+    show lives in `PAIR_WORDS` (`physarum2Affinity.ts`), including the parts
+    this build turned off: `showRelations` is `false`, so a pad's header
+    shows its own two live signed values (each in its strain's colour)
+    instead of a relation name, and a pad draws no corner labels — both
+    because the user found them unreadable ("what does merge in a context of
+    smell even mean") once they read each axis as simply that strain's value
+    toward the other ("−" to "+", not a sentence). The band words
+    (Flees/.../Loves, Devours/.../Nurtures) are unused for the same reason
+    ("very confusing" — numbers only, everywhere a pad or the status line
+    reads a value) but stay in `PAIR_WORDS` as tested data, exactly like
+    `showRelations`, rather than being deleted — a later session can flip
+    either back on without re-deriving the words.
+  - **Selection as lit/dim pads.** A box click's existing selection channel
+    (`itemBoxes.ts`) now also reaches the Pairs block: `setSelection` toggles
+    `vc-pad-sel`/`vc-pad-dim` on whichever of the six pads touch a selected
+    strain, without rebuilding any DOM — the same "build once, update in
+    place" rule the whole widget follows so a pad's own live culture is
+    never restarted by a click.
+  - **Back is a stack in memory.** `pairPads.ts` keeps a small
+    `pairState.history` array per mount key, capped at `MIX_HISTORY_MAX`
+    (20, `physarum2Affinity.ts`'s `pushHistory`/`popHistory`) — every
+    Random, Nudge and preset push a `{smell, touch}` snapshot before writing,
+    and Back pops one off. It's module-level like the pad culture cache, so
+    it survives a Look apply or a card Reset (both rebuild this widget from
+    scratch), but a page reload starts it empty. Every write goes through
+    `writeTable`, which skips any cell already at the value being written —
+    Random/Nudge/Back/a preset would otherwise persist all 12-16 settings to
+    localStorage on every click (`sceneSettings.ts`'s own per-`ctx.set`
+    persist) regardless of how many cells actually moved. Fixed one latent
+    bug found while wiring this: `pairPads.ts`'s `tableOf("touch")` used to
+    read the Smell diagonal into Touch's diagonal slot (for `tablesMatch`'s
+    benefit), which meant a touchy preset's own pill could never read as
+    pressed since every preset's Touch diagonal is exactly 0; it now reads
+    0 there directly, matching every Touch table Touch ever actually has.
+  - **The final `TOUCH_*` gains.** `TOUCH_FEED_GAIN` moved from the
+    prototype's 1.0 to 0.15 by eye on the GPU: at 1.0, Gardens (every strain
+    feeding every other) roughly triples a channel's incoming deposit and
+    clips the whole picture to white; 0.15 keeps black dominant while
+    feeding still visibly brightens a fed trail (see Known issues below for
+    what's still left of Gardens' own brightness). `TOUCH_EAT_GAIN` (0.3) and
+    `TOUCH_MAX_BITE` (0.9) kept the prototype's own values — War and Hunt
+    both read clearly without needing a change, and eating after the blur
+    (see the plan's own Risks) is absorbed into this same gain rather than
+    given a separate correction term.
+  - **Two small script fixes, kept.** `shot.mjs --settings` used to be
+    silently ignored (`applyTuningParams` only reads `settings` when `scene`
+    is also set); it now passes both. `tput.mjs` gained a `--settings JSON`
+    flag and a documented temporary hook (its own header) for forcing a
+    fixed step count per frame — never committed to `physarum2.ts` itself.
+  - Tuned and screenshotted against synthetic audio only (`bpm=120`); not
+    yet checked against real music from a mic (same standing gap as every
+    other tuning note in this record).
 
 ## Tuning notes
 
@@ -381,15 +547,6 @@ applies there too. Tuned so far only against the synthetic feed at
 ## Known issues and next steps
 
 - Not yet checked against real music from a mic — synthetic-feed tuning only.
-- The user finds the Affinity relationship web "odd and not informative"
-  (2026-09-27). Proposed, not built, waiting on the user's go-ahead: an
-  orbit view (selected strain in the centre, the others at a distance set by
-  the affinity, drag them in to follow / out to avoid, rings for the five
-  words, own-trail as the centre's halo) plus a live one-line summary
-  ("PP-C3 chases PP-A1 and PP-B2, runs from PP-D4 …"); presets unchanged.
-  The user wanted a prototype-first round for panel UX before. Now
-  prototyped with two alternatives in "Affinity Studio" (Decisions,
-  2026-09-27 Affinity rethink); waiting on the user's pick.
 - "Dose" confused the user: it is the share of all agents moved into one new
   colony per trigger (default a beat-pulse rise), and the share each Pipette
   tap converts. At 0.48 half the dish jumps every beat and the rest goes
@@ -450,6 +607,42 @@ applies there too. Tuned so far only against the synthetic feed at
   so the patch bay never stays aimed at a hidden row. A hover preview on a
   removed row is cleared the same way. (The first no-redraw build left the
   pin on the hidden row; fixed in review, 2026-09-27.)
+- **Touch/Pairs (2026-09-27).** Tuned and screenshotted against synthetic
+  audio only, same as every other tuning claim above. The MRT cost in
+  Measurements is measured only on the M1 Pro's tile-based GPU via
+  ANGLE/Metal; an immediate-mode-renderer GPU (most desktop/laptop dGPUs)
+  pays for the second attachment differently and is unmeasured. The pair
+  cultures' own preview (`previews.ts`'s `pair.weights`) reads Hostility
+  through `WidgetCtx.get`, i.e. the *stored* `rivalry` value, not its
+  Auto-resolved one — the same gap `registry.ts`'s `get` doc already flagged
+  before Touch existed, now with one more reader. Touch carries no
+  `auto`/drive of its own, matching `att`. Symbiosis (Gardens' own smell
+  table) converges strains onto shared paths on its own, and Gardens' Touch
+  (every strain feeding every other) adds to that — even after lowering
+  `TOUCH_FEED_GAIN`, Gardens still reads as washed toward white rather than
+  the black-dominant look the Tuning notes above ask for (confirmed by a
+  headless screenshot 8 s after pressing the Gardens preset); a preset-level
+  Exposure override, or a lower Gardens-specific feed gain, are the two
+  obvious next things to try, not done here. A pad's own one-line `how` text
+  (`PAIR_WORDS`) is the only explanation of what a positive/negative number
+  means; the user found the numbers alone unclear and was offered a fixed
+  legend line ("+ steers toward that trail, − steers away" for Smell / "+
+  adds to that trail, − erases part of it" for Touch) — not yet decided, not
+  built. `touch-action: none` on all six pad squares (needed for a
+  pointer drag to control the pad instead of panning the page) was checked
+  only by screenshot at 390 px this session, not with an actual touch-pan
+  gesture past a pad; by the same reasoning as the plan's own Risks section,
+  a real phone may find scrolling past the Pairs block awkward unless the
+  drag starts on a long-press instead.
+- Not built (Touch/Pairs follow-ups): a glide/slew between two tables
+  instead of an instant jump (a preset, Random, Nudge and Back all write
+  every changed setting in one frame today); mix thumbnails on the mix row
+  or the presets so a past mix can be recognised before restoring it; an
+  Auto re-mix wired as a Receives patch on the Random button; per-strain
+  sensor angle / trail life / population share as their own rows (the
+  "is the parameter set complete?" entry's own per-strain gaps, still
+  equal-population and one shared `uDecay`); the one-knob "Bite" Touch
+  variant the prototype also built, kept for comparison only.
 
 ## Materials
 
@@ -463,11 +656,17 @@ applies there too. Tuned so far only against the synthetic feed at
   the per-strain knob bench, private):
   https://claude.ai/artifact/7Ja3hE75HJecRHF29bRHiY — self-contained source
   `physarum2/artifacts/affinity-studio.html` (publish it as is; its culture
-  is `lab.src.html`'s dish stepper generalised to any subset of strains).
+  is `lab.src.html`'s dish stepper generalised to any subset of strains). v3
+  (2026-09-27, the version actually built) is the same file cut down to
+  Pairs, with Touch as a full table, plain "−  A → B  +" axes and no corner
+  words; its Off / One-knob Touch modes and naming-set switcher remain for
+  comparison only (Decisions and pivots' "Affinity Studio v3" entry).
 - No `/ref` bundle. Headless shots for tuning:
   `docs/scenes/_shared/scripts/shot.mjs --scene physarum2 --bpm 120
   --settings '{…}'` (the session's scratch variant only differed in taking a
-  list of capture times).
+  list of capture times). `--settings` was a silent no-op before this session
+  (`applyTuningParams` only reads it once `scene` is also set, and the script
+  didn't pass `scene`); fixed as part of Phase 0 of the Pairs/Touch plan.
 - Scripts, in `physarum2/scripts/` (run from the repo root with a dev server
   up; `--port` to match):
   - `panelshot.mjs` — opens the panel (`#menuBtn`), scrolls to the Scene
@@ -482,7 +681,27 @@ applies there too. Tuned so far only against the synthetic feed at
     in Measurements.
   - `perf/` — `tput.mjs` plus the spatial re-sort prototype
     (`p2-prof-sort-prototype.diff`, `_p2sort.ts`, `_p2prof.ts`); see the
-    header of `tput.mjs` before using it.
+    header of `tput.mjs` before using it. `tput.mjs` also grew a `--settings
+    JSON` flag (applied after `goto`, `scene: "physarum2"`) and its header
+    now documents, rather than links to a stale diff for, the temporary
+    forced-step-count hook a Touch/War perf run needs in `physarum2.ts`'s
+    `render()` — copy it in by hand, measure, then `git diff` must show
+    physarum2.ts untouched again; never commit it.
+  - `padcheck.mjs` — the Pairs pads' own headless check: real mouse
+    down/wait/up drags on a pad and an own-trail fader, the Smell/Touch
+    switch, selection dim/highlight, a panel close/reopen (a culture must
+    not restart), and (Random/Nudge/Keep own trails/Back) a preset applying
+    exactly, Back restoring the pre-preset tables exactly, a Touch-layer
+    Random leaving Smell alone, and a Smell Nudge with Keep own trails
+    leaving every own-trail fader unchanged. Also takes the panel
+    screenshots (both layers, 1440/390) and, through the same real preset
+    pills, the main-scene screenshots 8 s after War/Hunt/Gardens.
+  - `padcost.mjs` — the pads' own frame-time budget: mean/median/p95 over
+    480 `requestAnimationFrame`s at `?quality=low`, the panel closed vs open
+    at the pads, plain and under a 4x CPU-throttle phone stand-in, with an
+    "open at the boxes, no pads visible" control so the pads' own marginal
+    cost isn't confounded with the pre-existing cost of opening the panel at
+    all under throttling (see that script's own header, and Measurements).
 - Phase 3's pipette and frame-time checks were one-off session scripts and
   weren't kept; their results are in Measurements.
 
@@ -496,16 +715,34 @@ mappings, `equalPopulation`/`applyInjection`, `classifyTerritory`,
 STRAINS/ATTRACT_ROWS shape are exercised by `tests/physarum2.test.ts`,
 including the NEUTRAL auto-tune invariant and the "defaults reproduce the old
 fixed motion" round trip; `physarum2Preview.ts`'s own sim (determinism, the
-respawn floor/ceiling claim) is `tests/physarum2Preview.test.ts`;
-`tests/sceneItems.test.ts`/`tests/sceneKeys.test.ts` cover the generic
-item/panel framework this scene is the first caller of. All three phases of
-the lab-controls plan are built now — what's left is Known issues above
-(mic-verified tuning, per-strain Auto, the skipped ticker) rather than a
-missing phase. A headless Playwright screenshot (see
+respawn floor/ceiling claim) is `tests/physarum2Preview.test.ts` — which also
+covers `createPairCulture`, the two-strain twin `pairPads.ts`'s live pads
+step (determinism, `pixelsInto`'s shape/alpha, that a negative Touch value
+actually lowers the fed-on strain's `totals()` and a positive one raises it,
+diagonal Touch a no-op); `tests/sceneItems.test.ts`/`tests/sceneKeys.test.ts`
+cover the generic item/panel framework this scene is the first caller of;
+`tests/sceneMaster.test.ts` covers `masterScale: false`'s exemption from the
+device-wide master. `tests/physarum2Affinity.test.ts` is
+`physarum2Affinity.ts`'s own suite — `packTouch`/`smellWeight`'s GPU-packing
+math, the vocabulary shape (`PAIR_WORDS`, `AFFINITY_PRESETS`), the pad/preset
+pure helpers (`wordBand`/`pairZone`/`pairRelation`/`fillTemplate`/
+`padPos`/`padValue`/`pairsOf`/`tablesMatch`), and the mix row's own pure
+logic (`randomSmell`/`randomTouch`/`nudgeTable`/`pushHistory`/`popHistory`,
+each exercised with a seeded `mulberry32`, never `Math.random`). Every word
+the Pairs widget shows lives in `PAIR_WORDS`
+(`src/render/scenes/physarum2Affinity.ts`) — re-word there, never in
+`pairPads.ts`. Both the original lab-controls plan (specimen boxes, Pipette,
+Rebalance, selection) and the later Pairs/Touch plan (this record's
+Decisions entries from "Affinity rethink" on) are fully built now — what's
+left is Known issues above (mic-verified tuning, per-strain Auto, the
+skipped ticker, Gardens' white wash, the pads' own legend line) rather than
+a missing phase. A headless Playwright screenshot (see
 `docs/scenes/_shared/scripts/shot.mjs` for the pattern this followed) is the
 fastest way to judge a tuning change without a mic; for the panel itself,
 `#menuBtn` opens it and a real mouse down/wait/up (not a scripted `.click()`)
-is what actually exercises a box, Affinity word, Rebalance or Pipette press.
+is what actually exercises a box, a Pairs pad drag, Rebalance or Pipette
+press; a plain `.click()` is fine for a button that isn't a drag (a preset
+pill, Random/Nudge/Keep own trails/Back, `padcheck.mjs`'s own convention).
 The pipette's own canvas listener lives on `#gl` directly and outlives a
 panel close (only a Scene-card rebuild disposes it — `ctx.onDispose`), so a
 headless check can arm it, close the panel for an unobstructed tap, then

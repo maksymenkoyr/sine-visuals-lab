@@ -5,7 +5,10 @@ import {
   TOUCH_EAT_GAIN,
   TOUCH_FEED_GAIN,
   TOUCH_MAX_BITE,
+  AFFINITY_MAX,
+  AFFINITY_MIN,
   AFFINITY_PRESETS,
+  AFFINITY_QUANTUM,
   PAIR_WORDS,
   ATTRACT_ROWS,
   wordBand,
@@ -17,8 +20,32 @@ import {
   padValue,
   pairsOf,
   tablesMatch,
+  quantize,
+  randomSmell,
+  randomTouch,
+  nudgeTable,
+  pushHistory,
+  popHistory,
+  OWN_TRAIL_RANDOM,
+  NUDGE_MAX,
+  MIX_HISTORY_MAX,
+  type AffinityTables,
   type PairLayer,
 } from "../src/render/scenes/physarum2Affinity.ts";
+
+// Deterministic seeded RNG for the Random/Nudge/History tests below — the
+// same mulberry32 shape physarum2Preview.ts (and several other scenes' own
+// tests) use, copied locally rather than exported, per this repo's own
+// convention (see e.g. tests/fluid.test.ts, tests/moire.test.ts).
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return function rnd(): number {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 // feedRows/eatCols are Float32Array (the GPU's own uniform-array precision),
 // so exact-decimal expectations use toBeCloseTo at a digit count float32
@@ -309,5 +336,210 @@ describe("AFFINITY_PRESETS", () => {
         expect(war.touch[i]![j]).toBe(-0.9);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------
+// Phase 3: Random / Nudge / Back's pure logic.
+// ---------------------------------------------------------------------
+
+const SAMPLE_TABLE = [
+  [1, -0.5, 0, 0.3],
+  [-0.5, 1, -0.5, 0],
+  [0, -0.5, 1, -0.5],
+  [0.3, 0, -0.5, 1],
+];
+
+function onQuantumGrid(v: number): boolean {
+  return Math.abs(v / AFFINITY_QUANTUM - Math.round(v / AFFINITY_QUANTUM)) < 1e-9;
+}
+
+describe("quantize", () => {
+  it("snaps to the nearest AFFINITY_QUANTUM", () => {
+    expect(quantize(0.074)).toBeCloseTo(0.05, 10);
+    expect(quantize(0.076)).toBeCloseTo(0.1, 10);
+    expect(quantize(-0.024)).toBeCloseTo(0, 10);
+  });
+});
+
+describe("randomSmell", () => {
+  it("every value lies in the AFFINITY range and on the 0.05 grid", () => {
+    const rnd = mulberry32(1);
+    const out = randomSmell(SAMPLE_TABLE, false, rnd);
+    for (const row of out) {
+      for (const v of row) {
+        expect(v).toBeGreaterThanOrEqual(AFFINITY_MIN);
+        expect(v).toBeLessThanOrEqual(AFFINITY_MAX);
+        expect(onQuantumGrid(v)).toBe(true);
+      }
+    }
+  });
+
+  it("the diagonal lies in OWN_TRAIL_RANDOM when not kept", () => {
+    const rnd = mulberry32(2);
+    const out = randomSmell(SAMPLE_TABLE, false, rnd);
+    for (let i = 0; i < 4; i++) {
+      expect(out[i]![i]).toBeGreaterThanOrEqual(OWN_TRAIL_RANDOM[0]);
+      expect(out[i]![i]).toBeLessThanOrEqual(OWN_TRAIL_RANDOM[1]);
+    }
+  });
+
+  it("keepOwn preserves the diagonal exactly", () => {
+    const rnd = mulberry32(3);
+    const out = randomSmell(SAMPLE_TABLE, true, rnd);
+    for (let i = 0; i < 4; i++) expect(out[i]![i]).toBe(SAMPLE_TABLE[i]![i]);
+  });
+
+  it("over 200 rolls, both signs appear off-diagonal", () => {
+    const rnd = mulberry32(4);
+    let sawPos = false;
+    let sawNeg = false;
+    for (let n = 0; n < 200; n++) {
+      const out = randomSmell(SAMPLE_TABLE, false, rnd);
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+          if (i === j) continue;
+          if (out[i]![j]! > 0) sawPos = true;
+          if (out[i]![j]! < 0) sawNeg = true;
+        }
+      }
+    }
+    expect(sawPos).toBe(true);
+    expect(sawNeg).toBe(true);
+  });
+});
+
+describe("randomTouch", () => {
+  it("the diagonal is always 0", () => {
+    const rnd = mulberry32(5);
+    for (let n = 0; n < 20; n++) {
+      const out = randomTouch(4, rnd);
+      for (let i = 0; i < 4; i++) expect(out[i]![i]).toBe(0);
+    }
+  });
+
+  it("every off-diagonal value lies in range and on the 0.05 grid", () => {
+    const rnd = mulberry32(7);
+    for (let n = 0; n < 20; n++) {
+      const out = randomTouch(4, rnd);
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+          if (i === j) continue;
+          expect(out[i]![j]!).toBeGreaterThanOrEqual(AFFINITY_MIN);
+          expect(out[i]![j]!).toBeLessThanOrEqual(AFFINITY_MAX);
+          expect(onQuantumGrid(out[i]![j]!)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("over 1000 rolls the off-diagonal zero share falls in [0.30, 0.42]", () => {
+    const rnd = mulberry32(6);
+    let zero = 0;
+    let total = 0;
+    for (let n = 0; n < 1000; n++) {
+      const out = randomTouch(4, rnd);
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+          if (i === j) continue;
+          total++;
+          if (out[i]![j] === 0) zero++;
+        }
+      }
+    }
+    const share = zero / total;
+    expect(share).toBeGreaterThanOrEqual(0.3);
+    expect(share).toBeLessThanOrEqual(0.42);
+  });
+});
+
+describe("nudgeTable", () => {
+  it("|delta| stays within NUDGE_MAX plus quantisation", () => {
+    const rnd = mulberry32(8);
+    for (let n = 0; n < 50; n++) {
+      const out = nudgeTable(SAMPLE_TABLE, "smell", false, rnd);
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+          expect(Math.abs(out[i]![j]! - SAMPLE_TABLE[i]![j]!)).toBeLessThanOrEqual(NUDGE_MAX + AFFINITY_QUANTUM / 2 + 1e-9);
+        }
+      }
+    }
+  });
+
+  it("results stay clamped to the AFFINITY range and on the 0.05 grid, even from the edge", () => {
+    const edge = [
+      [AFFINITY_MAX, AFFINITY_MIN, 0, 0],
+      [0, AFFINITY_MAX, 0, 0],
+      [0, 0, AFFINITY_MIN, 0],
+      [0, 0, 0, AFFINITY_MAX],
+    ];
+    const rnd = mulberry32(9);
+    for (let n = 0; n < 50; n++) {
+      const out = nudgeTable(edge, "smell", false, rnd);
+      for (const row of out) {
+        for (const v of row) {
+          expect(v).toBeGreaterThanOrEqual(AFFINITY_MIN);
+          expect(v).toBeLessThanOrEqual(AFFINITY_MAX);
+          expect(onQuantumGrid(v)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("the diagonal is untouched on Touch, and on Smell when keepOwn", () => {
+    const rnd = mulberry32(10);
+    const outTouch = nudgeTable(SAMPLE_TABLE, "touch", false, rnd);
+    for (let i = 0; i < 4; i++) expect(outTouch[i]![i]).toBe(SAMPLE_TABLE[i]![i]);
+    const outKeepOwn = nudgeTable(SAMPLE_TABLE, "smell", true, rnd);
+    for (let i = 0; i < 4; i++) expect(outKeepOwn[i]![i]).toBe(SAMPLE_TABLE[i]![i]);
+  });
+
+  it("the diagonal does still move on Smell when keepOwn is false", () => {
+    const rnd = mulberry32(11);
+    let moved = false;
+    for (let n = 0; n < 50 && !moved; n++) {
+      const out = nudgeTable(SAMPLE_TABLE, "smell", false, rnd);
+      for (let i = 0; i < 4; i++) if (out[i]![i] !== SAMPLE_TABLE[i]![i]) moved = true;
+    }
+    expect(moved).toBe(true);
+  });
+});
+
+describe("pushHistory / popHistory", () => {
+  const item = (n: number): AffinityTables => ({ smell: [[n]], touch: [[0]] });
+
+  it("push caps the stack at MIX_HISTORY_MAX, dropping the oldest first", () => {
+    let stack: AffinityTables[] = [];
+    for (let i = 0; i < MIX_HISTORY_MAX + 5; i++) stack = pushHistory(stack, item(i));
+    expect(stack.length).toBe(MIX_HISTORY_MAX);
+    expect(stack[0]).toEqual(item(5));
+    expect(stack[stack.length - 1]).toEqual(item(MIX_HISTORY_MAX + 4));
+  });
+
+  it("push never mutates its input array", () => {
+    const stack: AffinityTables[] = [item(1)];
+    const next = pushHistory(stack, item(2));
+    expect(stack.length).toBe(1);
+    expect(next.length).toBe(2);
+  });
+
+  it("a custom max caps push at that value", () => {
+    let stack: AffinityTables[] = [];
+    for (let i = 0; i < 5; i++) stack = pushHistory(stack, item(i), 3);
+    expect(stack).toEqual([item(2), item(3), item(4)]);
+  });
+
+  it("pop returns the last item and the rest as a new array, leaving the input untouched", () => {
+    const stack = [item(1), item(2), item(3)];
+    const [rest, popped] = popHistory(stack);
+    expect(popped).toEqual(item(3));
+    expect(rest).toEqual([item(1), item(2)]);
+    expect(stack.length).toBe(3);
+  });
+
+  it("pop on an empty stack returns undefined and an empty array", () => {
+    const [rest, popped] = popHistory([]);
+    expect(popped).toBeUndefined();
+    expect(rest).toEqual([]);
   });
 });

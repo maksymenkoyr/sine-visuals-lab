@@ -8,10 +8,10 @@
  *   as their default and tests import it from physarum2.ts.
  * - `smellWeight`, the one place Hostility (the `rivalry` setting) folds
  *   into a raw `att` value — shared between the GPU's per-step packing
- *   (physarum2.ts's `resolveStrains`) and, once the pair cultures land, the
- *   Affinity pads' own preview math, so both read the exact same formula
- *   `resolveStrainEffective` already keeps in one place for the other
- *   per-strain settings.
+ *   (physarum2.ts's `resolveStrains`) and the pair cultures' own preview
+ *   math (`previews.ts`'s `pair.weights`), so both read the exact same
+ *   formula `resolveStrainEffective` already keeps in one place for the
+ *   other per-strain settings.
  * - `packTouch`, which turns the raw `touch<i><j>` values into what the GPU
  *   actually consumes: a feed row added to the deposit colour, and an eat
  *   column consumed by the diffuse pass against last step's landing counts
@@ -40,8 +40,13 @@
  *   without `innerHTML` (`fillTemplate`), a value's pad-square position
  *   (`padPos`/`padValue`), the six pair index combinations (`pairsOf`), a
  *   signed number with a real minus sign (`fmtSigned`), and a same-table
- *   check for the (not yet built) preset/mix-history comparison
- *   (`tablesMatch`).
+ *   check for the preset/mix-history comparison (`tablesMatch`).
+ * - The mix row's own pure logic (`randomSmell`, `randomTouch`, `nudgeTable`,
+ *   `pushHistory`/`popHistory`) — every one takes an injected `rnd: () =>
+ *   number` so it's testable with a seeded generator; `pairPads.ts` is the
+ *   only caller that passes `Math.random`, and holds the actual history
+ *   stack (a module-level map, like its culture cache) since *when* to push
+ *   a snapshot is a widget concern, not this module's.
  */
 
 /** Range and step every Smell (`att<i><j>`) and Touch (`touch<i><j>`)
@@ -445,6 +450,131 @@ const CHASE_SMELL: readonly (readonly number[])[] = [
   [0, -1.2, 0.6, 1.2],
   [1.2, 0, -1.2, 0.6],
 ];
+
+// ---------------------------------------------------------------------
+// Random / Nudge / Back — the Pairs widget's mix row (pairPads.ts). Every
+// function here takes an injected `rnd: () => number` (uniform [0, 1)) so
+// tests can supply a seeded generator; the widget itself passes `Math.random`.
+// ---------------------------------------------------------------------
+
+/** The own-trail diagonal's own random range when Random rolls the Smell
+ *  layer — narrower than, and always positive unlike, a full off-diagonal
+ *  roll (`[AFFINITY_MIN, AFFINITY_MAX]`): every hand-picked default and
+ *  preset keeps a strain's own-trail weight positive (it follows its own
+ *  trail), so rolling it over the full signed range would routinely produce
+ *  a strain that avoids itself, reading as broken rather than as a variant
+ *  worth exploring. */
+export const OWN_TRAIL_RANDOM: readonly [number, number] = [0.2, 1.4];
+/** Random's own share of off-diagonal Touch cells left at exactly 0 — the
+ *  prototype's own value, so a rolled Touch table still reads mostly as a
+ *  Smell-only network with a few real bites/feeds rather than a wall of
+ *  noise where every strain touches every other. */
+export const TOUCH_ZERO_SHARE = 0.35;
+/** Nudge's per-cell jitter range, each direction — small next to
+ *  AFFINITY_MIN/MAX's own ±1.5 span, so repeated Nudges explore around the
+ *  table that's already there instead of replacing it (Random does that). */
+export const NUDGE_MAX = 0.35;
+/** How many mixes Back can undo — see pairPads.ts's module-level history
+ *  stack. In memory only: it survives the panel closing and reopening (the
+ *  stack lives beside `pairState`, keyed the same way), but not a reload. */
+export const MIX_HISTORY_MAX = 20;
+
+function uniform(min: number, max: number, rnd: () => number): number {
+  return min + rnd() * (max - min);
+}
+
+function clampAffinity(v: number): number {
+  return Math.max(AFFINITY_MIN, Math.min(AFFINITY_MAX, v));
+}
+
+/** Snaps a raw value to the settings' own step grid — every Random/Nudge
+ *  roll lands on the same 0.05 (`AFFINITY_QUANTUM`) grid a keyboard nudge
+ *  does, matching a preset's own hand-picked values closely enough for
+ *  `tablesMatch` after a round trip. */
+export function quantize(v: number): number {
+  return Math.round(v / AFFINITY_QUANTUM) * AFFINITY_QUANTUM;
+}
+
+/** A fresh Smell table the same size as `cur` (`cur.length` rows) — every
+ *  off-diagonal cell a quantised uniform roll over the full AFFINITY range;
+ *  the diagonal (own trail) is either kept exactly as `cur` has it
+ *  (`keepOwn`) or rolled over `OWN_TRAIL_RANDOM`, never the full range (see
+ *  that constant's own comment). Pure — the caller reads `cur` from the
+ *  live settings and writes the result back the same way. */
+export function randomSmell(cur: readonly (readonly number[])[], keepOwn: boolean, rnd: () => number): number[][] {
+  const n = cur.length;
+  const out: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const row: number[] = [];
+    for (let j = 0; j < n; j++) {
+      row.push(i === j ? (keepOwn ? cur[i]![j]! : quantize(uniform(...OWN_TRAIL_RANDOM, rnd))) : quantize(uniform(AFFINITY_MIN, AFFINITY_MAX, rnd)));
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/** A fresh Touch table, `n`×`n`, diagonal always 0 (Touch has no own-strain
+ *  meaning, `defineItemPairs`'s `diagonal: false`) — each off-diagonal cell
+ *  is 0 with probability `TOUCH_ZERO_SHARE`, otherwise a quantised uniform
+ *  roll over the full AFFINITY range. Has no `keepOwn`/`cur` parameter: the
+ *  diagonal is always exactly 0, never rolled or preserved. */
+export function randomTouch(n: number, rnd: () => number): number[][] {
+  const out: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const row: number[] = [];
+    for (let j = 0; j < n; j++) {
+      row.push(i === j ? 0 : rnd() < TOUCH_ZERO_SHARE ? 0 : quantize(uniform(AFFINITY_MIN, AFFINITY_MAX, rnd)));
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/** Jitters every cell of `cur` by up to ±`NUDGE_MAX`, clamped to the
+ *  AFFINITY range and quantised. The diagonal is left exactly as `cur` has
+ *  it — never nudged — on the Touch layer (no own-strain meaning) or on the
+ *  Smell layer while `keepOwn` is set; every other cell always moves (a
+ *  Nudge that sometimes rolls a 0 jitter would read as "did nothing"). */
+export function nudgeTable(cur: readonly (readonly number[])[], layer: PairLayer, keepOwn: boolean, rnd: () => number): number[][] {
+  const n = cur.length;
+  const skipDiagonal = layer === "touch" || keepOwn;
+  const out: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const row: number[] = [];
+    for (let j = 0; j < n; j++) {
+      const v = cur[i]![j]!;
+      row.push(i === j && skipDiagonal ? v : quantize(clampAffinity(v + uniform(-NUDGE_MAX, NUDGE_MAX, rnd))));
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/** One mix-row snapshot: both tables at once, so Back always restores Smell
+ *  and Touch together even though Random/Nudge only ever touch the layer on
+ *  screen — the shape `pairPads.ts`'s history stack holds. */
+export interface AffinityTables {
+  smell: readonly (readonly number[])[];
+  touch: readonly (readonly number[])[];
+}
+
+/** Pushes `item` onto `stack`, capped at `max` entries (the oldest dropped
+ *  first once full) — Back's own undo depth. Returns a new array; `stack`
+ *  itself is never mutated. */
+export function pushHistory(stack: readonly AffinityTables[], item: AffinityTables, max: number = MIX_HISTORY_MAX): AffinityTables[] {
+  const next = [...stack, item];
+  return next.length > max ? next.slice(next.length - max) : next;
+}
+
+/** Pops the most recent entry off `stack`, returning `[rest, item]` — `rest`
+ *  is a new array (never a mutation of `stack`), and `item` is `undefined`
+ *  (with `rest` empty) when `stack` was already empty, so Back's own click
+ *  handler can no-op on an empty stack without a separate length check. */
+export function popHistory(stack: readonly AffinityTables[]): [AffinityTables[], AffinityTables | undefined] {
+  if (stack.length === 0) return [[], undefined];
+  return [stack.slice(0, -1), stack[stack.length - 1]];
+}
 
 /** Copied from the approved "Physarum Lab" prototype
  *  (docs/scenes/physarum2/artifacts/lab.src.html's EXPERIMENTS) — matrices

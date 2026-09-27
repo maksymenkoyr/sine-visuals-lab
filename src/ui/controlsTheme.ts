@@ -1107,14 +1107,18 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-pad-sel { outline: 1px solid ${SCENE_VIOLET}; outline-offset: 2px; border-radius: 8px; }
 .vc-pad-dim { opacity: 0.45; }
 
-/* The mix row is laid out but not wired yet (pairPads.ts's own header) — its
- * buttons render disabled so the row's slot is settled without implying they
- * do anything today. */
+/* Random / Nudge / Keep own trails / Back (pairPads.ts's own header, "The mix
+ * row"). Back starts disabled (an empty history) via the plain disabled
+ * state; Keep own trails toggles via aria-pressed, styled the same violet
+ * as a pressed .vc-exp-pill below. */
 .vc-mix-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .vc-mix-row button {
-  font: 400 11px/1 ${FONT_MONO}; letter-spacing: 0.05em; text-transform: uppercase; color: rgba(255, 255, 255, 0.3);
-  background: transparent; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 6px 10px; cursor: not-allowed;
+  font: 400 11px/1 ${FONT_MONO}; letter-spacing: 0.05em; text-transform: uppercase; color: rgba(255, 255, 255, 0.7);
+  background: transparent; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px; padding: 6px 10px; cursor: pointer;
 }
+.vc-mix-row button:hover:not(:disabled) { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+.vc-mix-row button:disabled { color: rgba(255, 255, 255, 0.25); border-color: rgba(255, 255, 255, 0.1); cursor: not-allowed; }
+.vc-mix-row button[aria-pressed="true"] { color: ${SCENE_VIOLET}; border-color: ${SCENE_VIOLET}; }
 
 .vc-exp-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .vc-exp-pill {

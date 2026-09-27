@@ -4,13 +4,19 @@ import {
   AFFINITY_MIN,
   fillTemplate,
   fmtSigned,
+  nudgeTable,
   padPos,
   padValue,
   pairRelation,
   pairsOf,
+  popHistory,
+  pushHistory,
+  randomSmell,
+  randomTouch,
   tablesMatch,
   PAIR_LOOK,
   type AffinityPreset,
+  type AffinityTables,
   type PairLayer,
   type PairToken,
   type PairWords,
@@ -62,11 +68,20 @@ import type { PreviewEffective, PreviewSource } from "./previews.ts";
  * applies on both axes: right/up always reads more of whatever the axis
  * names, never less.
  *
- * **The mix row is laid out but not wired.** `Random`/`Nudge`/`Keep own
- * trails`/`Back` (Phase 3 of the plan this widget was built from) render as
- * real, disabled buttons so the row's slot exists and the layout is settled;
- * only the preset pills actually write values today (they apply directly,
- * with no undo stack — `Back` doesn't exist yet to need one).
+ * **The mix row (Phase 3).** Random/Nudge/Keep own trails/Back and every
+ * preset pill share one rule: **push before you write**. Each first snapshots
+ * both live tables (`snapshot()`) onto `PairState.history` (a module-level
+ * stack, same survives-a-rebuild convention as the culture cache below), then
+ * writes the new values through `writeTable`, which skips any cell whose
+ * stored value already matches — Random/Nudge/Back/a preset would otherwise
+ * persist all 12 (Touch) or 16 (Smell) settings to localStorage on every
+ * click regardless of how many cells actually moved (`sceneSettings.ts`'s own
+ * per-`ctx.set` persist). Random and Nudge only ever touch the layer on
+ * screen; a preset and Back write both tables. Keep own trails is a plain
+ * toggle (Smell only, hidden on Touch like the own-trail strip itself) with
+ * no history entry of its own — flipping it changes no value. None of this
+ * calls `ctx.rerender()`; `tick()` already reflects a `ctx.set` on the next
+ * frame the same way a slider drag does.
  */
 
 export interface PairPadsSpec {
@@ -124,6 +139,13 @@ export interface PairPadsHandle {
 
 interface PairState {
   layer: PairLayer;
+  /** Smell-only: Random/Nudge leave the own-trail diagonal untouched instead
+   *  of rolling/jittering it — see `randomSmell`/`nudgeTable`. */
+  keepOwn: boolean;
+  /** The mix-row undo stack — see this file's header. Module-level so it
+   *  survives a Look apply or a card Reset the same way `pairCultureCache`
+   *  does; in memory only (a reload starts empty). */
+  history: AffinityTables[];
 }
 const pairState = new Map<string, PairState>();
 
@@ -206,7 +228,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
   let state = pairState.get(stateKey);
   if (!state) {
-    state = { layer: "smell" };
+    state = { layer: "smell", keepOwn: false, history: [] };
     pairState.set(stateKey, state);
   }
   const hasTouch = !!tables.touch;
@@ -244,10 +266,34 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     const out: number[][] = [];
     for (let i = 0; i < count; i++) {
       const row: number[] = [];
-      for (let j = 0; j < count; j++) row.push(i === j ? getVal("smell", i, j) : getVal(layer, i, j));
+      for (let j = 0; j < count; j++) {
+        // Touch's diagonal has no setting at all (`diagonal: false`) and every
+        // preset/random/nudge table encodes it as exactly 0 — reading it back
+        // as 0 here (not Smell's own-trail value) is what lets `tablesMatch`
+        // against `AFFINITY_PRESETS`' touch tables (and a pushed snapshot's
+        // round trip through Back) actually agree on the diagonal.
+        row.push(i === j ? (layer === "smell" ? getVal("smell", i, j) : 0) : getVal(layer, i, j));
+      }
       out.push(row);
     }
     return out;
+  }
+  function snapshot(): AffinityTables {
+    return { smell: tableOf("smell"), touch: tableOf("touch") };
+  }
+  /** Writes `table` into `layer`'s settings, skipping any cell whose stored
+   *  value already matches within `round01`'s own resolution — see this
+   *  file's header, "The mix row". Touch's diagonal cells have no backing
+   *  setting; `setVal` already no-ops when `specFor` finds none, so no
+   *  special-case is needed here. */
+  function writeTable(layer: PairLayer, table: readonly (readonly number[])[]): void {
+    for (let i = 0; i < count; i++) {
+      for (let j = 0; j < count; j++) {
+        const v = round01(clampAff(table[i]![j]!));
+        if (Math.abs(getVal(layer, i, j) - v) < 0.005) continue;
+        setVal(layer, i, j, v);
+      }
+    }
   }
 
   const root = document.createElement("div");
@@ -656,20 +702,17 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     }
   }
 
-  // --- Mix row (Phase 3 slot — laid out, not wired; see this file's header) --
+  // --- Mix row (Phase 3: Random / Nudge / Keep own trails / Back) ---------
   const mixRow = document.createElement("div");
   mixRow.className = "vc-mix-row";
   const randomBtn = document.createElement("button");
   randomBtn.type = "button";
-  randomBtn.disabled = true;
   randomBtn.textContent = words.ui.random[state.layer];
   const nudgeBtn = document.createElement("button");
   nudgeBtn.type = "button";
-  nudgeBtn.disabled = true;
   nudgeBtn.textContent = words.ui.nudge;
   const keepOwnBtn = document.createElement("button");
   keepOwnBtn.type = "button";
-  keepOwnBtn.disabled = true;
   keepOwnBtn.setAttribute("aria-pressed", "false");
   keepOwnBtn.textContent = words.ui.keepOwn;
   const backBtn = document.createElement("button");
@@ -678,6 +721,45 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   backBtn.textContent = words.ui.back;
   mixRow.append(randomBtn, nudgeBtn, keepOwnBtn, backBtn);
   root.appendChild(mixRow);
+
+  /** Reflects `state.history`/`state.keepOwn` onto the mix row's own button
+   *  state — called after every action that can change either (push, pop,
+   *  the keepOwn toggle) and once at mount, since both survive a rebuild. */
+  function refreshMixRow(): void {
+    backBtn.disabled = state!.history.length === 0;
+    keepOwnBtn.setAttribute("aria-pressed", String(state!.keepOwn));
+  }
+
+  function pushSnapshot(): void {
+    state!.history = pushHistory(state!.history, snapshot());
+  }
+
+  randomBtn.addEventListener("click", () => {
+    pushSnapshot();
+    if (state!.layer === "smell") writeTable("smell", randomSmell(tableOf("smell"), state!.keepOwn, Math.random));
+    else writeTable("touch", randomTouch(count, Math.random));
+    refreshAll();
+    refreshMixRow();
+  });
+  nudgeBtn.addEventListener("click", () => {
+    pushSnapshot();
+    writeTable(state!.layer, nudgeTable(tableOf(state!.layer), state!.layer, state!.keepOwn, Math.random));
+    refreshAll();
+    refreshMixRow();
+  });
+  keepOwnBtn.addEventListener("click", () => {
+    state!.keepOwn = !state!.keepOwn;
+    refreshMixRow();
+  });
+  backBtn.addEventListener("click", () => {
+    const [rest, item] = popHistory(state!.history);
+    if (!item) return;
+    state!.history = rest;
+    writeTable("smell", item.smell);
+    if (hasTouch) writeTable("touch", item.touch);
+    refreshAll();
+    refreshMixRow();
+  });
 
   // --- Presets ------------------------------------------------------------
   const presetsEl = document.createElement("div");
@@ -698,13 +780,11 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   }
 
   function applyPreset(preset: AffinityPreset): void {
-    for (let i = 0; i < count; i++) {
-      for (let j = 0; j < count; j++) {
-        setVal("smell", i, j, preset.smell[i]![j]!);
-        if (hasTouch && i !== j) setVal("touch", i, j, preset.touch[i]![j]!);
-      }
-    }
+    pushSnapshot();
+    writeTable("smell", preset.smell);
+    if (hasTouch) writeTable("touch", preset.touch);
     refreshAll();
+    refreshMixRow();
   }
 
   function buildPresetGroup(host: HTMLElement, list: readonly AffinityPreset[]): Map<AffinityPreset, HTMLButtonElement> {
@@ -765,6 +845,9 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     // comment documents this same gotcha).
     ownStripEl.style.display = layer === "smell" ? "grid" : "none";
     ownNoteEl.style.display = layer === "smell" || !hasTouch ? "none" : "block";
+    // Keep own trails only means anything on Smell (Touch's diagonal has no
+    // setting to preserve at all) — same visibility rule as the strip itself.
+    keepOwnBtn.style.display = layer === "smell" ? "" : "none";
     howEl.textContent = words.layers[layer].how;
     randomBtn.textContent = words.ui.random[layer];
     focusIdx = -1;
@@ -894,6 +977,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     refreshPresetHighlight();
   }
   refreshAll();
+  refreshMixRow(); // reflect state.history/keepOwn, which can predate this mount
 
   function setSelection(sel: readonly number[]): void {
     const all = sel.length === count;
