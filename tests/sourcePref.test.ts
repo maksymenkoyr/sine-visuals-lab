@@ -158,4 +158,38 @@ describe("displayCaptureSupported", () => {
     vi.stubGlobal("navigator", { mediaDevices: { getDisplayMedia: () => Promise.resolve() } });
     expect(displayCaptureSupported()).toBe(true);
   });
+
+  const gdm = { getDisplayMedia: () => Promise.resolve() };
+
+  it("is false on Android Chrome even though getDisplayMedia is present", () => {
+    vi.stubGlobal("navigator", {
+      mediaDevices: gdm,
+      userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36",
+    });
+    expect(displayCaptureSupported()).toBe(false);
+  });
+
+  it("is false when Client Hints report a mobile device", () => {
+    vi.stubGlobal("navigator", { mediaDevices: gdm, userAgent: "", userAgentData: { mobile: true } });
+    expect(displayCaptureSupported()).toBe(false);
+  });
+
+  it("is false on iPadOS, which reports a desktop Mac user agent", () => {
+    vi.stubGlobal("navigator", {
+      mediaDevices: gdm,
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+      maxTouchPoints: 5,
+    });
+    expect(displayCaptureSupported()).toBe(false);
+  });
+
+  it("is true on desktop Chrome on a Mac", () => {
+    vi.stubGlobal("navigator", {
+      mediaDevices: gdm,
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36",
+      maxTouchPoints: 0,
+      userAgentData: { mobile: false },
+    });
+    expect(displayCaptureSupported()).toBe(true);
+  });
 });

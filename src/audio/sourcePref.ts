@@ -24,8 +24,11 @@
  * - Linux Chrome, Firefox and Safari on every platform, iOS, most Android: no
  *   usable audio from getDisplayMedia. Mic is the only route.
  *
- * displayCaptureSupported() only checks API presence (getDisplayMedia exists
- * on navigator.mediaDevices) — it can't detect the macOS-version/Chrome-
+ * displayCaptureSupported() checks API presence (getDisplayMedia exists on
+ * navigator.mediaDevices) and rules out phones and tablets outright: recent
+ * Android Chrome does expose getDisplayMedia, but it asks to record the whole
+ * screen and hands back no audio — a prompt with nothing to gain. It can't
+ * detect the macOS-version/Chrome-
  * version combination above, so an old-Chrome-on-old-macOS user will still
  * see the option and simply get tab-audio-only, or a picker with no system
  * audio checkbox. That's a real gap but a small one: worth closing only if it
@@ -147,11 +150,24 @@ export function resolveSourceState(input: {
   return { choice: input.preferredChoice, live: false };
 }
 
-/** Whether this browser exposes getDisplayMedia at all. Doesn't (can't)
- *  distinguish the macOS/Chrome-version combination that actually yields
- *  system audio from one that yields tab-audio-only — see the header above. */
+/** Whether to offer screen capture here: getDisplayMedia exists and this
+ *  isn't a phone or tablet. Doesn't (can't) distinguish the macOS/Chrome-
+ *  version combination that actually yields system audio from one that
+ *  yields tab-audio-only — see the header above. */
 export function displayCaptureSupported(): boolean {
-  return typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia;
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getDisplayMedia) return false;
+  return !isMobileDevice(navigator);
+}
+
+/** Phone or tablet: Client Hints' `mobile` where the browser reports it,
+ *  else the user agent — plus iPadOS, which reports a desktop Mac UA and
+ *  gives itself away only by having touch points. */
+function isMobileDevice(nav: Navigator): boolean {
+  const hints = (nav as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData;
+  if (hints?.mobile) return true;
+  const ua = nav.userAgent ?? "";
+  if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return true;
+  return /Macintosh/.test(ua) && (nav.maxTouchPoints ?? 0) > 1;
 }
 
 /** The share-audio checkbox, in one line — see the share-TYPE paragraph in
