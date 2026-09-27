@@ -11,6 +11,8 @@ import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 import { PASSTHROUGH_DRIVES } from "../drives.ts";
 import { composeSettings, defineItemPairs, defineItems } from "../sceneItems.ts";
 import { packUnit, createBeatSeeder, type BeatSeeder } from "./physarum.ts";
+import { ATTRACT_ROWS, packTouch, smellWeight } from "./physarum2Affinity.ts";
+export { ATTRACT_ROWS };
 
 // Physarum 2: a second slime-mould scene, after Michael Fogleman's
 // fogleman/physarum (Go, MIT — https://github.com/fogleman/physarum), studied
@@ -27,13 +29,18 @@ import { packUnit, createBeatSeeder, type BeatSeeder } from "./physarum.ts";
 // pulled away from every other strain's ink carves out its own territory
 // instead of merging into one shared network — that's the entire visual
 // difference from physarum.ts, and the one idea taken from Fogleman's model
-// rather than any of his code.
+// rather than any of his code. Strains can also change each other's trails
+// directly, independent of sensing: the `touch<i><j>` settings (2026-09-27,
+// "Touch" below) let a strain feed or eat another's ink as it steps.
 //
 // Packing follows physarum.ts's playbook — RGBA8 ping-pong, no
 // EXT_color_buffer_float dependency, gl_VertexID point deposits, a
 // REPEAT/LINEAR torus trail — see that file's header for the shared
 // reasoning (8-bit evaporation precision, frame.time vs anim.dtSec, why
-// LINEAR+REPEAT on the trail). Two things are genuinely different here:
+// LINEAR+REPEAT on the trail). While Touch is eating, a second RGBA8 render
+// target (the "footprint") counts each strain's landings per texel so next
+// step's diffuse can charge the right decay — see "Touch" below. Two things
+// are genuinely different here:
 //
 // - The trail is one RGBA8 texture with one live channel per strain, not
 //   physarum.ts's three band-group channels: a deposit's ONE,ONE blend adds
@@ -81,7 +88,13 @@ import { packUnit, createBeatSeeder, type BeatSeeder } from "./physarum.ts";
 // settings, resolved live in JS each frame (see "Uniform budget" below) —
 // LEGACY_MOTION exists only to derive the sensor/turn/stride sliders'
 // defaults so the shipped look is unchanged (tests/physarum2.test.ts checks
-// the round trip).
+// the round trip). Touch (`defineItemPairs`, `touch<i><j>`, `diagonal:
+// false` — a strain doesn't touch its own trail through this control,
+// unlike Affinity's diagonal "own trail" pair) sits alongside Affinity: both
+// are exempt from the device-wide scene master (`masterScale: false` — see
+// sceneSettings.ts/autoTune.ts) since a signed relation value's meaning is
+// its exact position. Touch has no panel UI of its own yet — see "Touch"
+// below for what it does on the GPU.
 //
 // Uniform budget: a setting tagged `item` (sceneItems.ts) has no GLSL
 // uniform of its own — SETTINGS_UNIFORMS_GLSL/DRIVE_GLSL below are built
@@ -99,10 +112,43 @@ import { packUnit, createBeatSeeder, type BeatSeeder } from "./physarum.ts";
 // into plain vec4/vec3 uniform arrays every program already declared:
 // `uSpecies[4]` (sensor angle, sensor distance, rotation, step — the step
 // already includes Excitability's beat-surge multiplier, so SIM_FRAG never
-// needs a separate per-strain surge uniform), `uAttractRow[4]` (still scaled
-// by Hostility inside SIM_FRAG), `uStrainFeed` (deposit multiplier per
-// strain) and `uStrainColor[4]` (the composite's per-strain colour, after any
-// Stain hue shift).
+// needs a separate per-strain surge uniform), `uAttractRow[4]` (arrives
+// already Hostility-scaled — `smellWeight` in physarum2Affinity.ts folds
+// Hostility in once per strain in `resolveStrains`, so SIM_FRAG just reads
+// the row straight; `uRivalry` itself stays declared, a plain non-item
+// setting still uploaded generically, but SIM_FRAG no longer reads it),
+// `uStrainFeed` (deposit multiplier per strain) and `uStrainColor[4]` (the
+// composite's per-strain colour, after any Stain hue shift). Touch adds two
+// more, both built by `packTouch` (physarum2Affinity.ts) from that frame's
+// `touch<i><j>` values: `uTouchFeedRow[4]` (DEPOSIT_VERT — what a strain's
+// own deposit adds to every strain's trail) and `uEatCol[4]` plus `uEatOn`
+// (DIFFUSE_FRAG — the diffuse's per-channel decay against last step's
+// footprint). Item settings still have no uniforms of their own.
+//
+// Touch (2026-09-27): `touch<i><j>` lets a strain feed or eat another
+// strain's trail as it steps, independent of Affinity's sensing. Feeding
+// needs no new pass: it's folded straight into the deposit's colour, as an
+// extra row (`uTouchFeedRow`) added to the plain onehot the deposit already
+// wrote — at touch = 0 the row IS onehot, so the deposit is bit-identical to
+// the no-Touch scene. Eating needs one more render target, the "footprint"
+// (a second RGBA8 attachment on the deposit draw, counting each strain's
+// landings per texel — see the file header above and the DIFFUSE_FRAG
+// eating block), consumed by the *next* step's diffuse pass. This (MRT on
+// the existing deposit draw) was chosen over a second, separate multiply
+// draw over the agents because the deposit's cost is almost entirely the
+// per-point vertex/raster work on hundreds of thousands of randomly ordered
+// agents (docs/scenes/physarum2.md, Measurements) — repeating that work for
+// a second draw would cost nearly as much as the whole deposit again, where
+// MRT shares it and only adds a second blended write per fragment. The
+// footprint texture and both `depositFbo`s are built lazily
+// (`ensureFootprintTargets`), only the first time `packTouch` reports
+// something actually eats (`eatOn`) — so the default scene, and any
+// feed-only table (a "Gardens"-style preset), never allocates the second
+// attachment or touches the extra code path at all. `TOUCH_FEED_GAIN`/
+// `TOUCH_EAT_GAIN`/`TOUCH_MAX_BITE` (physarum2Affinity.ts) are the only
+// tuning constants, shared with the Affinity pads' own CPU preview cultures
+// once those exist, so a pad's preview and the main dish read the same
+// gains.
 //
 // Render: black background; each channel's trail goes through a fixed
 // exposure and a 1/2.2 gamma before being weighted by its strain's own
@@ -179,20 +225,6 @@ export const STRAINS: readonly StrainConfig[] = [
  *  attraction table's shape) is keyed to this rather than a repeated
  *  literal. */
 export const SPECIES_COUNT = STRAINS.length;
-
-/** Row i is strain i's *default* sensing weights against every strain's
- *  trail (itself included) — the `att<i><j>` settings' own default, and the
- *  "Rivals" experiment preset (src/ui/widgets/itemBoxes.ts's panel below).
- *  Diagonal near +1 (follow own trail), off-diagonal negative (avoid
- *  everyone else's), scaled live by the Hostility setting (SIM_FRAG's `w`).
- *  Fixed, hand-picked — not derived from Fogleman's own published table,
- *  which uses different values. */
-export const ATTRACT_ROWS: readonly [number, number, number, number][] = [
-  [1.0, -0.85, -1.1, -0.7],
-  [-1.2, 1.1, -0.6, -0.95],
-  [-0.75, -1.05, 0.9, -1.25],
-  [-1.0, -0.65, -1.15, 1.05],
-];
 
 /** Cap on the square trail map's side, and the floor physarum2TrailSide
  *  clamps to for a degenerate agent count. */
@@ -682,10 +714,39 @@ const attSettings = defineItemPairs("strain", SPECIES_COUNT, {
   max: 1.5,
   step: 0.05,
   default: ATTRACT_ROWS,
+  masterScale: false,
 });
 
 function attSpecAt(i: number, j: number): SceneSetting {
   return attSettings[i * SPECIES_COUNT + j]!;
+}
+
+// Off-diagonal only (diagonal: false) — a strain doesn't feed or eat its own
+// trail through Touch, so `touchii` would otherwise sit as a permanently
+// dead key in Looks, resets and share codes. See physarum2Affinity.ts's
+// header and file header's "Touch" paragraph for what this feeds into.
+const touchSettings = defineItemPairs("strain", SPECIES_COUNT, {
+  key: "touch",
+  label: (i, j) => `${STRAINS[i]!.code} touch ${STRAINS[j]!.code}`,
+  description: "What this strain's steps do to that strain's trail — right feeds it, left eats it",
+  group: "Form",
+  min: -1.5,
+  max: 1.5,
+  step: 0.05,
+  default: 0,
+  diagonal: false,
+  masterScale: false,
+});
+
+// Unlike attSpecAt, this can't be a flat `i*n+j` index — defineItemPairs
+// skips the diagonal, so the list is 12 long, not 16, and the gaps aren't
+// evenly spaced. Built once from each spec's own item tag instead.
+const touchSpecGrid: (SceneSetting | undefined)[] = new Array(SPECIES_COUNT * SPECIES_COUNT).fill(undefined);
+for (const spec of touchSettings) {
+  touchSpecGrid[spec.item!.index * SPECIES_COUNT + spec.item!.other!] = spec;
+}
+function touchSpecAt(i: number, j: number): SceneSetting | undefined {
+  return touchSpecGrid[i * SPECIES_COUNT + j];
 }
 
 const STRAIN_ITEM_SETTINGS: readonly SceneSetting[] = [
@@ -696,6 +757,7 @@ const STRAIN_ITEM_SETTINGS: readonly SceneSetting[] = [
   ...strideSettings,
   ...stainSettings,
   ...attSettings,
+  ...touchSettings,
 ];
 
 const GLOBAL_SETTINGS: SceneSetting[] = [
@@ -1007,6 +1069,15 @@ ${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uTrailIn;
 uniform float uTrailSide;
 uniform float uNoiseSeed;
+// Touch's eating (file header, "Touch" paragraph) — uFootprint holds last
+// step's per-strain landing counts (exact integers, packed /255 into
+// RGBA8); uEatOn is 0 whenever nothing eats (packTouch's return), so the
+// footprint sampler is never even read on the scene's default table.
+// uEatCol[j] packs L_ij (physarum2Affinity.ts's packTouch) across i in its
+// four components, one array entry per *victim* channel j.
+uniform sampler2D uFootprint;
+uniform float uEatOn;
+uniform vec4 uEatCol[${SPECIES_COUNT}];
 ${PHYSARUM2_GLSL}
 
 const float DECAY_MIN = ${DECAY_MIN.toFixed(4)};
@@ -1041,6 +1112,14 @@ void main() {
   // covers why a bare multiply stalls in 8-bit.
   float decay = mix(DECAY_MIN, DECAY_MAX, uDecay);
   vec4 trail = max(vec4(0.0), sum * (1.0 - decay) - EVAP_FLOOR);
+
+  // Touch's eating — see the file header's Touch paragraph: n_i strain-i
+  // landings here last step (exact integers in RGBA8); channel j keeps
+  // exp(-Σ n_i·L_ij) = Π (1-bite_ij)^n_i.
+  if (uEatOn > 0.5) {
+    vec4 n = floor(texelFetch(uFootprint, texel, 0) * 255.0 + 0.5);
+    trail *= exp(-vec4(dot(n, uEatCol[0]), dot(n, uEatCol[1]), dot(n, uEatCol[2]), dot(n, uEatCol[3])));
+  }
 
   // Dither the write by up to half a quantisation step — same reasoning as
   // physarum.ts's own EVAP_DITHER.
@@ -1128,11 +1207,13 @@ void main() {
   vec2 dirR = vec2(cos(heading + sensorAngle), sin(heading + sensorAngle));
 
   // Own channel strongly, everyone else's weakly or negatively — Hostility
-  // scales only the off-diagonal, so the diagonal (follow-self) never
-  // weakens as strains are pushed further apart.
-  vec4 row = attractRowFor(k);
-  vec4 own = onehot4(k);
-  vec4 w = row * (own + (vec4(1.0) - own) * (uRivalry * 2.0));
+  // is already folded into uAttractRow on the CPU side (smellWeight, in
+  // physarum2Affinity.ts, applied once per strain in resolveStrains), so the
+  // diagonal (follow-self) never weakens as strains are pushed further
+  // apart. uRivalry itself stays declared (it's a plain non-item setting,
+  // still uploaded generically by uploadCommonUniforms) but is no longer
+  // read here.
+  vec4 w = attractRowFor(k);
 
   float sC = dot(texture(uTrail, fract(pos + dirC * sensorDist)), w);
   float sL = dot(texture(uTrail, fract(pos + dirL * sensorDist)), w);
@@ -1216,10 +1297,20 @@ uniform sampler2D uAgentPos;
 uniform sampler2D uAgentDir;
 uniform float uAgentSide;
 uniform vec4 uStrainFeed;
+// Touch's feeding (file header, "Touch" paragraph): row k = onehot(k) +
+// TOUCH_FEED_GAIN·max(0, touch[k][j]) for j≠k (physarum2Affinity.ts's
+// packTouch) — at touch = 0 this is exactly onehot, so the deposit is
+// bit-identical to the no-Touch scene.
+uniform vec4 uTouchFeedRow[${SPECIES_COUNT}];
 ${PHYSARUM2_GLSL}
 out vec4 vDepositColor;
+// The footprint — this landing's strain as a one-hot /255 unit — is only
+// ever consumed while eatOn is true (see render()'s MRT gating); flat means
+// no interpolation, matching the one-texel point this shader draws.
+flat out vec4 vFootprint;
 
 const float DEPOSIT = ${DEPOSIT.toFixed(4)};
+const float FOOT_UNIT = 1.0 / 255.0;
 
 // A strain's own deposit multiplier — computed in JS each frame from its
 // Nutrient setting and drive (see the file header's "Uniform budget").
@@ -1228,6 +1319,13 @@ float strainFeedFor(int k) {
   if (k == 1) return uStrainFeed.y;
   if (k == 2) return uStrainFeed.z;
   return uStrainFeed.w;
+}
+
+vec4 touchFeedRowFor(int k) {
+  if (k == 0) return uTouchFeedRow[0];
+  if (k == 1) return uTouchFeedRow[1];
+  if (k == 2) return uTouchFeedRow[2];
+  return uTouchFeedRow[3];
 }
 
 // No vertex attributes at all — every agent is addressed by gl_VertexID into
@@ -1240,7 +1338,8 @@ void main() {
   vec4 cd = texelFetch(uAgentDir, texel, 0);
   vec2 pos = vec2(unpackUnitR(cp.rg, 1.0), unpackUnitR(cp.ba, 1.0));
   int k = decodeSpecies(cd.b);
-  vDepositColor = onehot4(k) * DEPOSIT * strainFeedFor(k);
+  vDepositColor = touchFeedRowFor(k) * (DEPOSIT * strainFeedFor(k));
+  vFootprint = onehot4(k) * FOOT_UNIT;
   gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);
   // The only point size WebGL guarantees, and the mechanic itself: a
   // one-texel deposit.
@@ -1251,13 +1350,21 @@ void main() {
 const DEPOSIT_FRAG = `#version 300 es
 precision highp float;
 in vec4 vDepositColor;
-out vec4 outColor;
+flat in vec4 vFootprint;
+// Output 1 (the footprint) is only bound while eatOn's MRT framebuffer is
+// active (render()'s depositFbo); on the single-attachment trailFbo path
+// (draw buffer 1 is NONE) writing to it is discarded, which GLES3/WebGL2
+// allows. If a driver ever complains (GL_INVALID_OPERATION on this draw),
+// the fallback is a second single-output deposit program.
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outFootprint;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
 ${DRIVE_UNIFORMS_GLSL}
 
 void main() {
   outColor = vDepositColor;
+  outFootprint = vFootprint;
 }
 `;
 
@@ -1387,6 +1494,20 @@ function createPhysarum2Scene(): Scene {
   const agentFbo: (WebGLFramebuffer | null)[] = [null, null];
   const trailTex: (WebGLTexture | null)[] = [null, null];
   const trailFbo: (WebGLFramebuffer | null)[] = [null, null];
+  // Touch's eating footprint (file header, "Touch" paragraph) — built lazily,
+  // the first time packTouch's eatOn goes true, and freed whenever the trail
+  // targets are (they reference the same trailTex attachments). depositFbo[i]
+  // = trailTex[i] + footprintTex, a second framebuffer alongside trailFbo[i]
+  // rather than a third attachment on it, so the no-Touch deposit path never
+  // even binds an MRT framebuffer.
+  let footprintTex: WebGLTexture | null = null;
+  const depositFbo: (WebGLFramebuffer | null)[] = [null, null];
+  // Whether the footprint texture actually holds last step's landings —
+  // false right after ensureFootprintTargets first builds it (nothing has
+  // landed yet) and whenever a step ran on the plain (non-MRT) trailFbo
+  // path, so the diffuse pass's eat term never reads stale or garbage data.
+  let footprintFresh = false;
+  const FOOT_CLEAR = new Float32Array(4);
 
   const samplerLocs = new Map<string, WebGLUniformLocation | null>();
   let agentRead = 0;
@@ -1412,6 +1533,16 @@ function createPhysarum2Scene(): Scene {
   const strainFeed = new Float32Array(SPECIES_COUNT);
   const strainColor = new Float32Array(SPECIES_COUNT * 3);
   const attRow = new Float32Array(SPECIES_COUNT * SPECIES_COUNT);
+  // Touch scratch — see the file header's "Touch" paragraph and
+  // physarum2Affinity.ts's packTouch. touchVal is row-major, diagonal always
+  // 0 (Touch has no own-strain meaning); touchFeedRows/eatCols are the
+  // packed vec4-per-strain arrays the deposit/diffuse programs consume.
+  // eatOn gates the whole footprint/MRT path — false (the default scene,
+  // and any feed-only table) means it never runs.
+  const touchVal = new Float32Array(SPECIES_COUNT * SPECIES_COUNT);
+  const touchFeedRows = new Float32Array(16);
+  const eatCols = new Float32Array(16);
+  let eatOn = false;
 
   // Phase 3 scene-internal state — see the file header's own paragraph.
   // `population` is the only one with visible bookkeeping (equalPopulation/
@@ -1478,13 +1609,59 @@ function createPhysarum2Scene(): Scene {
     return tex;
   }
 
+  /** Frees the footprint texture and both depositFbo MRT framebuffers —
+   *  called whenever the trail textures they're attached to are about to be
+   *  freed/resized, and from dispose(). Safe to call when nothing was ever
+   *  built (every field is already null). */
+  function freeFootprintTargets(gl: WebGL2RenderingContext): void {
+    for (let i = 0; i < 2; i++) {
+      if (depositFbo[i]) gl.deleteFramebuffer(depositFbo[i]);
+      depositFbo[i] = null;
+    }
+    if (footprintTex) gl.deleteTexture(footprintTex);
+    footprintTex = null;
+    footprintFresh = false;
+  }
+
   function freeTrailTargets(gl: WebGL2RenderingContext): void {
+    freeFootprintTargets(gl); // depositFbo's attachments reference trailTex
     for (let i = 0; i < 2; i++) {
       if (trailFbo[i]) gl.deleteFramebuffer(trailFbo[i]);
       if (trailTex[i]) gl.deleteTexture(trailTex[i]);
       trailFbo[i] = null;
       trailTex[i] = null;
     }
+  }
+
+  /** Lazily builds the footprint texture and the two depositFbo MRT
+   *  framebuffers (trailTex[i] + footprintTex) the first time Touch's
+   *  eating actually needs them (render() calls this only while packTouch
+   *  said `eatOn`) — see the file header's "Touch" paragraph. A no-op once
+   *  built; freeFootprintTargets/freeTrailTargets are what force a rebuild
+   *  (a trail resize invalidates the attachment). */
+  function ensureFootprintTargets(gl: WebGL2RenderingContext): void {
+    if (footprintTex && depositFbo[0] && depositFbo[1]) return;
+    footprintTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, footprintTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, trailSideCur, trailSideCur, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    for (let i = 0; i < 2; i++) {
+      const f = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, trailTex[i], 0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, footprintTex, 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        throw new Error(`physarum2: deposit MRT framebuffer incomplete (0x${status.toString(16)})`);
+      }
+      depositFbo[i] = f;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
   /** Rebuilds the trail map, and reseeds it to zero, only when its size
@@ -1596,6 +1773,7 @@ function createPhysarum2Scene(): Scene {
    *  see drives.ts's header), one strain at a time. */
   function resolveStrains(frame: { energy: number }, anim: { low: number; mid: number; high: number; beatPulse: number }, drives: Parameters<Scene["render"]>[5]): void {
     const d = drives ?? PASSTHROUGH_DRIVES;
+    const rivalry = resolveSceneSetting(ID, settingFor("rivalry"));
     for (let k = 0; k < SPECIES_COUNT; k++) {
       const bandDefault = k === 0 ? anim.low : k === 1 ? anim.mid : k === 2 ? anim.high : frame.energy;
       const raw: StrainRawValues = {
@@ -1628,9 +1806,11 @@ function createPhysarum2Scene(): Scene {
       strainColor[k * 3 + 2] = eff.color[2];
 
       for (let j = 0; j < SPECIES_COUNT; j++) {
-        attRow[k * SPECIES_COUNT + j] = resolveSceneSetting(ID, attSpecAt(k, j));
+        attRow[k * SPECIES_COUNT + j] = smellWeight(resolveSceneSetting(ID, attSpecAt(k, j)), k, j, rivalry);
+        touchVal[k * SPECIES_COUNT + j] = k === j ? 0 : resolveSceneSetting(ID, touchSpecAt(k, j)!);
       }
     }
+    eatOn = packTouch(touchVal, SPECIES_COUNT, touchFeedRows, eatCols);
   }
 
   return {
@@ -1725,6 +1905,10 @@ function createPhysarum2Scene(): Scene {
       if (seedFresh) seedEpoch++;
 
       resolveStrains(frame, anim, drives);
+      // Lazily build the footprint/MRT targets the first time Touch's
+      // eating actually needs them — see the file header's "Touch"
+      // paragraph and ensureFootprintTargets's own doc comment.
+      if (eatOn) ensureFootprintTargets(gl);
 
       const speedSetting = resolveSceneSetting(ID, settingFor("speed"));
       const stepRate = STEP_RATE_MIN + (STEP_RATE_MAX - STEP_RATE_MIN) * speedSetting;
@@ -1741,7 +1925,9 @@ function createPhysarum2Scene(): Scene {
       diffuseProg.use();
       uploadCommonUniforms(diffuseProg, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
       diffuseProg.setF("uTrailSide", trailSideCur);
+      diffuseProg.setV4v("uEatCol", eatCols);
       gl.uniform1i(samplerLoc(gl, diffuseProg, "diff.uTrailIn", "uTrailIn"), 0);
+      gl.uniform1i(samplerLoc(gl, diffuseProg, "diff.uFootprint", "uFootprint"), 1);
 
       simProg.use();
       uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
@@ -1772,6 +1958,7 @@ function createPhysarum2Scene(): Scene {
       uploadCommonUniforms(depositProg, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
       depositProg.setF("uAgentSide", agentSide);
       depositProg.setV4("uStrainFeed", strainFeed[0]!, strainFeed[1]!, strainFeed[2]!, strainFeed[3]!);
+      depositProg.setV4v("uTouchFeedRow", touchFeedRows);
       gl.uniform1i(samplerLoc(gl, depositProg, "dep.uAgentPos", "uAgentPos"), 0);
       gl.uniform1i(samplerLoc(gl, depositProg, "dep.uAgentDir", "uAgentDir"), 1);
 
@@ -1784,8 +1971,17 @@ function createPhysarum2Scene(): Scene {
         gl.viewport(0, 0, trailSideCur, trailSideCur);
         diffuseProg.use();
         diffuseProg.setF("uNoiseSeed", Math.random() * 100);
+        diffuseProg.setF("uEatOn", footprintFresh ? 1 : 0);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
+        // Placeholder bind when there's nothing fresh to eat against — keeps
+        // a valid texture on the sampler (avoids a "no texture bound"
+        // warning) without ever reading stale data, since uEatOn gates the
+        // GLSL read. trailTex[read] is never the framebuffer this pass
+        // writes to. The sim pass right below rebinds unit 1 to agentDir, so
+        // the footprint is never left bound during the MRT deposit.
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, footprintFresh ? footprintTex : trailTex[trailReadIdx]);
         drawFullscreenQuad(gl, quadVao);
 
         // 2. Sim: agentRead -> agentWrite, sensing the trail diffuse just
@@ -1807,9 +2003,14 @@ function createPhysarum2Scene(): Scene {
 
         // 3. Deposit: additive points from the agent state sim just wrote,
         //    into the same trail write target diffuse just produced — never
-        //    blurred in the step it's laid (see the file header).
-        gl.bindFramebuffer(gl.FRAMEBUFFER, trailFbo[trailWrite]);
+        //    blurred in the step it's laid (see the file header). While
+        //    Touch is eating, this also writes the footprint MRT attachment
+        //    (depositFbo instead of trailFbo) so next step's diffuse can
+        //    read this step's landing counts.
+        const mrt = eatOn && footprintTex !== null;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, mrt ? depositFbo[trailWrite] : trailFbo[trailWrite]);
         gl.viewport(0, 0, trailSideCur, trailSideCur);
+        if (mrt) gl.clearBufferfv(gl.COLOR, 1, FOOT_CLEAR); // the footprint only; the trail (buffer 0) is untouched
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE);
         depositProg.use();
@@ -1821,6 +2022,7 @@ function createPhysarum2Scene(): Scene {
         gl.drawArrays(gl.POINTS, 0, agentCount);
         gl.bindVertexArray(null);
         gl.disable(gl.BLEND);
+        footprintFresh = mrt;
 
         agentRead = agentWrite;
         trailReadIdx = trailWrite;

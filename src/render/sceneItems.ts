@@ -35,7 +35,10 @@ import { SETTING_GROUPS, type SceneSetting, type SettingGroup } from "./sceneSet
  * item 2 of family strain" without parsing the key string back apart, and
  * what lets `src/tuning/bakeDefaults.ts` skip a generated setting — its
  * default lives in the scene's own item table above, not a literal
- * `default:` a bake could find and rewrite in source.
+ * `default:` a bake could find and rewrite in source. `defineItemPairs`'s
+ * `diagonal: false` skips `i === j` entirely, for a pair table that has no
+ * own-item meaning (Physarum 2's Touch: a strain doesn't feed/eat its own
+ * trail through this control).
  *
  * **The panel/widget split.** A scene declares *what* its items are
  * (`defineItems`/`defineItemPairs` here, plain data) and *how they're
@@ -148,19 +151,36 @@ export interface PairwiseParam {
   min: number;
   max: number;
   step: number;
-  /** `default[i][j]`, or a function — mirrors a plain matrix rather than
-   *  forcing a flat per-pair list. */
-  default: readonly (readonly number[])[] | ((i: number, j: number) => number);
+  /** `default[i][j]`, a function, or one plain number shared by every pair
+   *  (Physarum 2's Touch, which starts at rest for every strain) — mirrors a
+   *  plain matrix rather than forcing a flat per-pair list. */
+  default: readonly (readonly number[])[] | ((i: number, j: number) => number) | number;
+  /** False skips `i === j`, for a pair table that has no own-item meaning
+   *  (Physarum 2's Touch: a strain doesn't feed/eat its own trail through
+   *  this control) — the diagonal is simply never emitted, rather than
+   *  emitted and ignored, so it can't sit as a permanently dead key in
+   *  Looks, resets or share codes. Default true (the diagonal is emitted,
+   *  as before). */
+  diagonal?: boolean;
+  /** Copied onto every generated spec — see `SceneSetting.masterScale`. */
+  masterScale?: false;
 }
 
 /** One `SceneSetting` per `(i, j)` pair over `0..count-1` (`i === j`
- *  included), keyed `<param.key><i><j>` and tagged `item: { family, index:
- *  i, param: param.key, other: j }` — see this file's header. */
+ *  included unless `param.diagonal === false`), keyed `<param.key><i><j>`
+ *  and tagged `item: { family, index: i, param: param.key, other: j }` —
+ *  see this file's header. */
 export function defineItemPairs(family: string, count: number, param: PairwiseParam): SceneSetting[] {
   const out: SceneSetting[] = [];
   for (let i = 0; i < count; i++) {
     for (let j = 0; j < count; j++) {
-      const def = typeof param.default === "function" ? param.default(i, j) : param.default[i]![j]!;
+      if (param.diagonal === false && i === j) continue;
+      const def =
+        typeof param.default === "function"
+          ? param.default(i, j)
+          : typeof param.default === "number"
+            ? param.default
+            : param.default[i]![j]!;
       out.push({
         key: `${param.key}${i}${j}`,
         label: param.label ? param.label(i, j) : `${family} ${i}→${j}`,
@@ -170,6 +190,7 @@ export function defineItemPairs(family: string, count: number, param: PairwisePa
         max: param.max,
         step: param.step,
         default: def,
+        masterScale: param.masterScale,
         item: { family, index: i, param: param.key, other: j },
       });
     }
