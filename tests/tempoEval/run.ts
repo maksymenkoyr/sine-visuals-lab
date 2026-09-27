@@ -139,6 +139,12 @@ export interface EvalOptions {
   /** Swap the render-tick FeatureExtractor.bpm for the fixed-hop
    *  TempoAnalyzer's — see this file's own header. */
   analyzer?: boolean;
+  /** With `analyzer`: take only its bpm, and leave the beat clock on the
+   *  render-tick onset feed — what a paired host/TV actually runs (app.ts's
+   *  currentVisual(): the wire carries the fixed-hop bpm, but those devices'
+   *  own timeline is the jitter buffer's room time, so they never get the
+   *  exact onsets). */
+  hostFeed?: boolean;
 }
 
 export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMetrics {
@@ -209,7 +215,8 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
         analyzerSamplesPushed = end;
       }
       frame.bpm = analyzer.bpm;
-      tempoHits = analyzer.drainOnsets().map((o) => ({ agoSec: time - o.time, weight: o.strength * (1 + PHASE_BASS * o.bass) }));
+      const onsets = analyzer.drainOnsets();
+      if (!opts.hostFeed) tempoHits = onsets.map((o) => ({ agoSec: time - o.time, weight: o.strength * (1 + PHASE_BASS * o.bass) }));
     }
 
     const anim = animClock.advance(dt, frame, undefined, undefined, { shape, beatRatio: extractor.fluxRatio, tempoHits });
