@@ -4655,20 +4655,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // column, heading or neighbouring button needs its own rule, in either
   // layout. View state for this session only, like the keys list.
   function setSolo(on: boolean): void {
-    // Soloed, what's isolated settles at the bottom of the column, just
-    // above the footer (.vc-solo's rules in controlsTheme.ts); un-soloed,
-    // the column scrolls so it lands back where it was before the solo.
-    // Either way it slides there from where it just was (slideFrom) rather
-    // than jumping.
+    // Soloed, what's isolated slides down to the bottom of the column, just
+    // above the footer (.vc-solo's rules in controlsTheme.ts). Un-soloed it
+    // stays where it is — the column scrolls so the rest of the panel comes
+    // back around it; only when the column can't scroll that far (a pane
+    // near the top of the list) does it slide the rest of the way.
     const anchor = sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned") ?? sceneCard.el;
     const before = anchor.getBoundingClientRect().top;
     soloOn = on;
     applySolo();
-    if (on) soloReturnTop = before;
-    else if (soloReturnTop !== null) {
-      (narrowMQ.matches ? root : controlsCol).scrollTop += anchor.getBoundingClientRect().top - soloReturnTop;
-      soloReturnTop = null;
-    }
+    if (!on) (narrowMQ.matches ? root : controlsCol).scrollTop += anchor.getBoundingClientRect().top - before;
     slideFrom(sceneCard.el, before - anchor.getBoundingClientRect().top);
     syncSoloEye(soloEyeEl);
     refreshCableVisibility();
@@ -4677,8 +4673,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     soloBtn.style.color = on ? "#fff" : "inherit";
     scheduleCableRecompute();
   }
-  // Where the soloed pane sat before the solo — un-soloing puts it back.
-  let soloReturnTop: number | null = null;
   const reducedMotionMQ = window.matchMedia("(prefers-reduced-motion: reduce)");
   /** Plays `el` from `dy` px away back to where layout now puts it — a
    *  quick ease-out, skipped under reduced motion. Cables and the solo eye
