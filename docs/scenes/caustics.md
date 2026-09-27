@@ -162,7 +162,9 @@ reference-measurement workflow used by later scenes.
   see `sceneSettings.ts`, `controlsTheme.ts`'s `FAMILY_ACCENTS` and
   `deviceMenu.ts`'s `renderSceneSettings`) so the three read visibly as one
   thing — "all that is about drift speed" — in the panel instead of three
-  unrelated Motion rows.
+  unrelated Motion rows. A first cut added a left rail, an indent and a
+  caption; the user asked for just the colour ("colour is enough"), so the
+  rows sit flush and only their accent changes.
 
 ## Tuning notes
 

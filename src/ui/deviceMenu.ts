@@ -4102,7 +4102,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // (spec.reads below) — every other branch here only ever touches `spec`
   // itself. `accent` defaults to the Scene card's usual SCENE_VIOLET;
   // renderSceneSettings passes a family's own colour instead for a row
-  // inside a `.vc-family` rail (spec.family), so the A/T chips — styled
+  // in a family (spec.family), so the A/T chips — styled
   // directly from this parameter, not from the row's `--vc-accent` CSS
   // variable — tint correctly too.
   function appendSettingRow(
@@ -4312,17 +4312,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // spec.advanced entries is being appended into, or null between runs —
     // reset whenever a group heading appears so a run never spans a group.
     let advancedBody: HTMLElement | null = null;
-    // The currently-open family rail (SceneSetting.family) a run of
-    // consecutive same-family entries is being appended into, or null
-    // between runs — reset on a group change, an advanced run (families
-    // don't extend into one — see the spec.advanced branch below) or a
-    // family change, so a rail never spans any of those. familyAccents hands
-    // out FAMILY_ACCENTS in the order this scene's family names are first
-    // seen, wrapping past the end, and remembers the assignment for the
-    // rest of this render so every rail with the same name gets the same
-    // colour.
-    let familyBody: HTMLElement | null = null;
-    let lastFamily: string | undefined;
+    // familyAccents hands out FAMILY_ACCENTS (SceneSetting.family) in the
+    // order this scene's family names are first seen, wrapping past the
+    // end, and remembers the assignment for the rest of this render so
+    // every row of a family gets the same colour.
     const familyAccents = new Map<string, string>();
     const accentForFamily = (family: string): string => {
       let accent = familyAccents.get(family);
@@ -4338,8 +4331,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (groupChanged) {
         hasGroups = true;
         advancedBody = null;
-        familyBody = null;
-        lastFamily = undefined;
         const heading = groupHeading(spec.group!, lastGroup === undefined);
         markBlock(heading);
         sceneRows.appendChild(heading);
@@ -4349,8 +4340,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (spec.advanced) {
         // Families don't reach into an advanced run — see SceneSetting.family's
         // own doc comment (sceneSettings.ts).
-        familyBody = null;
-        lastFamily = undefined;
         if (!advancedBody) {
           if (!groupChanged && !first) sceneRows.appendChild(spacer());
           let count = 1;
@@ -4371,38 +4360,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
       advancedBody = null;
 
-      if (spec.family !== lastFamily) familyBody = null;
-      lastFamily = spec.family;
-
-      let target: HTMLElement = sceneRows;
-      let accent = SCENE_VIOLET;
-      if (spec.family !== undefined) {
-        accent = accentForFamily(spec.family);
-        if (!familyBody) {
-          if (!groupChanged && !first) sceneRows.appendChild(spacer());
-          const rail = document.createElement("div");
-          rail.className = "vc-family";
-          rail.style.setProperty("--vc-family", accent);
-          const caption = document.createElement("div");
-          caption.className = "vc-family-caption";
-          caption.textContent = spec.family;
-          rail.appendChild(caption);
-          sceneRows.appendChild(rail);
-          familyBody = rail;
-        } else {
-          familyBody.appendChild(spacer());
-        }
-        target = familyBody;
-      } else if (!groupChanged && !first) {
-        sceneRows.appendChild(spacer());
-      }
+      if (!groupChanged && !first) sceneRows.appendChild(spacer());
       first = false;
       // A family's own colour rides straight in as this row's `accent` (not
       // a post-hoc --vc-accent override) so the A/T chips — styled directly
       // from the accent passed to createControlRow/createPickerRow/
       // createToggleRow, not from that CSS variable — tint correctly too,
       // not just the slider fill and label.
-      appendSettingRow(target, sceneId, spec, specs, accent);
+      const accent = spec.family !== undefined ? accentForFamily(spec.family) : SCENE_VIOLET;
+      appendSettingRow(sceneRows, sceneId, spec, specs, accent);
     }
 
     // The Scene card title is itself the block only when the active scene
