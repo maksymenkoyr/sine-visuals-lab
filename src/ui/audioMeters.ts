@@ -1705,15 +1705,37 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // grid division to one shared key, so it lights/toggles for *any*
   // division a patch happens to hold, matching the Tempo add-chip.
   mountJack({ source: "beat", grid: 2 }, beat.right, beat.el);
-  // The two "shape of the beat" drives that read straight off the beat
-  // clock — a smooth swing rather than a hit — traced on one shared row
-  // the same way createHitsHistory's own lanes share the Hits row below.
+  // The metronome's own steady tick (metronome.ts, off beatClock's beat
+  // line once it's confident enough to adopt) against the same detected
+  // hits the Beat row above shows — same createTraceStrip machinery, so the
+  // two rows read as directly comparable: this one never wavers.
+  const metronomeRow = createMeterRow({
+    label: "Metronome",
+    accent: NEUTRAL_ACCENT,
+    unit: "bpm",
+    description:
+      "A steady tick locked to the song's tempo (blue), against the same detected hits as the Beat row above (red) — evenly spaced once it's adopted a tempo, and keeps ticking through breakdowns and unsure stretches rather than wavering with them.",
+    hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
+  });
+  const metronomeTrace = createTraceStrip(
+    [
+      { color: BEAT_GRID_COLOR, width: 1.5 },
+      { color: BEAT_COLOR, width: 1.5 },
+    ],
+    BEAT_TRACE_HEIGHT_CSS_PX,
+  );
+  metronomeRow.el.children[1].replaceWith(metronomeTrace.canvas);
+  mountJack("anim.metronome", metronomeRow.right, metronomeRow.el);
+  mountJack("anim.metronomeBar", metronomeRow.right, metronomeRow.el);
+  // The two "shape of the beat" drives that read straight off the metronome
+  // — a smooth swing rather than a hit — traced on one shared row the same
+  // way createHitsHistory's own lanes share the Hits row below.
   const wave = createMeterRow({
     label: "Wave",
     accent: NEUTRAL_ACCENT,
     unit: "s",
     description:
-      "Beat wave (red) and bar wave (blue): a smooth swing that peaks on every beat, or once a bar. It fades out while the tempo isn't locked. Plug either into a setting to make it sway in time.",
+      "Beat wave (red) and bar wave (blue): a smooth swing that peaks on every beat, or once a bar. It fades out with the metronome (above) rather than the live tempo lock. Plug either into a setting to make it sway in time.",
     hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
   });
   const waveTrace = createTraceStrip(
@@ -1767,6 +1789,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     hitsHistory.el,
     spacer(),
     beat.el,
+    spacer(),
+    metronomeRow.el,
     spacer(),
     wave.el,
     spacer(),
@@ -2080,6 +2104,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["hits", hitsHistory.el],
     ["centroid", centroidRow.el],
     ["onset", onset.el],
+    ["metronome", metronomeRow.el],
     ["wave", wave.el],
     ["tempoLevel", tempoLevel.el],
     ["lock", lock.el],
@@ -2184,6 +2209,22 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           beatTrace.push([null, null], nowMs);
         }
         beatTrace.draw();
+        // The metronome's own tick: a spike of height metronomeLevel exactly
+        // on metronomeBeat (a real one-shot edge now, unlike beatTrace's own
+        // phase-wrap inference above) against the same beatPulse reading as
+        // the Beat row, so the two traces are directly comparable.
+        if (anim) {
+          metronomeTrace.push([anim.metronomeBeat ? anim.metronomeLevel : 0, anim.beatPulse], nowMs);
+        } else {
+          metronomeTrace.push([null, null], nowMs);
+        }
+        metronomeTrace.draw();
+        if (text) {
+          metronomeRow.setReadout(
+            anim && anim.metronomeBpm > 0 ? String(Math.round(anim.metronomeBpm)) : "--",
+            anim && anim.metronomeBpm > 0 ? {} : IDLE,
+          );
+        }
         // Fed through SIGNALS[id].read() itself, not a hand-copied formula,
         // so this row and a setting driven by the same signal always agree
         // on the number (see this file's header and signals.ts's own).
@@ -2215,6 +2256,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         // and Centroid — and forget the last phase so unfolding mid-track
         // doesn't read the jump across the fold as a wrap.
         beatTrace.resetColumn();
+        metronomeTrace.resetColumn();
         waveTrace.resetColumn();
         hitsHistory.resetColumn();
         prevBeatPhase = null;
