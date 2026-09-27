@@ -11,6 +11,9 @@ import {
   precisionValue,
   lens,
   dragStep,
+  formatAtResolution,
+  formatKeepingPrecision,
+  stepAt,
   MIN_GAP_PX,
   HOLD_MS,
   SLOW_PX_S,
@@ -317,6 +320,34 @@ describe("lens", () => {
     const justOutside = lens(center + 96 + 0.001, center, mag);
     expect(justInside.x).toBeCloseTo(justOutside.x, 0);
     expect(justOutside.fade).toBe(1);
+  });
+});
+
+describe("formatAtResolution / stepAt", () => {
+  it("keeps the row's own format when it already shows a step", () => {
+    expect(formatAtResolution((v) => v.toFixed(2), 0.3, 0.01)).toBe("0.30");
+  });
+  it("adds just enough decimals for a finer precision step", () => {
+    expect(formatAtResolution((v) => v.toFixed(2), 0.304, 0.001)).toBe("0.304");
+    expect(formatAtResolution((v) => `${v.toFixed(2)}×`, 1.234, 0.002)).toBe("1.234×");
+  });
+  it("reads a percent formatter's own scale off format(1)", () => {
+    expect(formatAtResolution((v) => String(Math.round(v * 100)), 0.304, 0.002)).toBe("30.4");
+  });
+  it("formatKeepingPrecision keeps a precision-set digit after the drag, and nothing more", () => {
+    const f = (v: number): string => v.toFixed(2);
+    expect(formatKeepingPrecision(f, 0.3)).toBe("0.30");
+    expect(formatKeepingPrecision(f, 0.302)).toBe("0.302");
+    expect(formatKeepingPrecision(f, 0.55371)).toBe("0.554");
+    expect(formatKeepingPrecision((v) => String(Math.round(v * 100)), 0.304)).toBe("30.4");
+  });
+  it("leaves a non-numeric format alone", () => {
+    expect(formatAtResolution(() => "Off", 0, 0.001)).toBe("Off");
+  });
+  it("stepAt splits the bracketing visible ticks' gap by sub", () => {
+    const ticks = layoutTicks(linearScale({ min: 0, max: 1, fine: 0.01, mid: 0.05, major: 0.25 }), 0, 400);
+    expect(stepAt(ticks[30].x + 1, ticks, 10)).toBeCloseTo(0.001, 9);
+    expect(stepAt(ticks[30].x + 1, ticks, 1)).toBeCloseTo(0.01, 9);
   });
 });
 

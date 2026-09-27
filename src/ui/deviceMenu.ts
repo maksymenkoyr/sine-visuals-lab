@@ -115,7 +115,7 @@ import {
   unitStyle,
 } from "./controlsKit.ts";
 import { createMagnetSlider, type MagnetSlider } from "./magnetSlider.ts";
-import { autoLinearScale, linearScale, logScale } from "./sliderScale.ts";
+import { autoLinearScale, formatAtResolution, formatKeepingPrecision, linearScale, logScale } from "./sliderScale.ts";
 
 /**
  * The controller's controls panel — the "Viz Controls" design.
@@ -1165,6 +1165,7 @@ export function createControlRow(spec: ControlRowSpec) {
   // (with editingPin) whether display() needs to keep the field showing
   // instead of the digits it would otherwise reassert every refresh.
   let lastValue = spec.defaultValue;
+  let lastAuto = false;
   let editingPin = false;
 
   // Dev-only typed entry — see ControlRowSpec.pin. The digits span becomes
@@ -1357,14 +1358,24 @@ export function createControlRow(spec: ControlRowSpec) {
   hintAuto.textContent = AUTO_HOLDING_HINT;
   hint.append(hintDesc, hintAuto);
 
-  function setReadout(value: number): void {
+  function setReadout(value: number, auto: boolean): void {
     if (spec.zeroAtMin && value <= 0) {
       digits.textContent = "Off";
       digits.style.cssText = digitsTextStyle;
       unit.style.display = "none";
       return;
     }
-    digits.textContent = spec.format(value);
+    // While a drag has the precision lens open, the digits gain whatever
+    // decimals its finer step needs (formatAtResolution) — otherwise the
+    // scale visibly refines while the number sits still — and a value set
+    // that finely keeps its extra digit afterwards (formatKeepingPrecision).
+    // An auto-driven value is a continuous float, never "set finely", so it
+    // keeps the row's own format.
+    digits.textContent = sliderRef?.isDragging()
+      ? formatAtResolution(spec.format, value, sliderRef.resolution())
+      : auto
+        ? spec.format(value)
+        : formatKeepingPrecision(spec.format, value);
     digits.style.cssText = digitsStyle;
     if (spec.unit) unit.style.display = "";
   }
@@ -1372,11 +1383,19 @@ export function createControlRow(spec: ControlRowSpec) {
   // The slider's own aria-valuetext and ruler tick labels — the same
   // Off/unit rules as setReadout above, folded into one string since a
   // MagnetSlider wants a single piece of text rather than a digits+unit
-  // pair. Ignores `precision` (do not over-engineer per row: most of this
-  // panel's formatters have no natural extra decimal to reach for).
-  const formatSlider = (value: number): string => (spec.zeroAtMin && value <= 0 ? "Off" : spec.format(value) + (spec.unit ?? ""));
+  // pair. Tick labels always come through at precision 0; aria-valuetext
+  // gets the precision lens's finer digits the same way setReadout does.
+  const formatSlider = (value: number, precision: number): string => {
+    if (spec.zeroAtMin && value <= 0) return "Off";
+    const text = precision && sliderRef ? formatAtResolution(spec.format, value, sliderRef.resolution()) : spec.format(value);
+    return text + (spec.unit ?? "");
+  };
 
   let dragging = false;
+  // setReadout/formatSlider above read the slider through this (null until
+  // it exists) rather than the `slider` const below, which they'd otherwise
+  // reach before its declaration runs.
+  let sliderRef: MagnetSlider | null = null;
   const slider = createMagnetSlider({
     scale,
     value: spec.defaultValue,
@@ -1393,7 +1412,9 @@ export function createControlRow(spec: ControlRowSpec) {
     onDragChange: (d) => {
       dragging = d;
     },
+    onPrecisionChange: () => setReadout(lastValue, lastAuto),
   });
+  sliderRef = slider;
 
   function setHint(auto: boolean): void {
     hintDesc.style.display = spec.description ? "" : "none";
@@ -1403,8 +1424,9 @@ export function createControlRow(spec: ControlRowSpec) {
 
   function display(value: number, auto: boolean): void {
     lastValue = value;
+    lastAuto = auto;
     slider.setValue(value);
-    setReadout(value);
+    setReadout(value, auto);
     // setReadout just overwrote digits.style.cssText wholesale, which would
     // silently pop the digits back over an open typed-entry field on every
     // refresh (e.g. an auto row's ~100ms tick) — reassert the field's
@@ -2264,14 +2286,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     setHint(wrap, WEIGHT_HINT);
     const out = document.createElement("output");
     out.style.cssText = driveWeightOutStyle;
-    const setOut = (w: number) => (out.textContent = `${w.toFixed(2)}×`);
+    const formatWeight = (w: number): string => `${w.toFixed(2)}×`;
+    let current = src.weight;
+    // Finer digits while a drag has the precision lens open — see
+    // createControlRow's setReadout for why.
+    const setOut = (w: number): void => {
+      current = w;
+      out.textContent = slider.isDragging()
+        ? formatAtResolution(formatWeight, w, slider.resolution())
+        : formatKeepingPrecision(formatWeight, w);
+    };
     const slider = createMagnetSlider({
       scale: linearScale({ min: DRIVE_WEIGHT_MIN, max: DRIVE_WEIGHT_MAX, fine: 0.02, mid: 0.1, major: 0.5, detents: [1] }),
       value: src.weight,
       label: `${driveSourceLabel(src.choice)} weight`,
       accent: driveSourceColor(src.choice),
-      format: (w) => `${w.toFixed(2)}×`,
+      format: formatWeight,
       defaultValue: 1,
+      onPrecisionChange: () => setOut(current),
       // Live store write + readout on every drag frame, no rebuild — a full
       // buildPatchPanel() here would tear out the very slider being dragged
       // (this file's own carried click-loss rule).
@@ -3505,7 +3537,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function showAutoStrength(value: number): void {
     autoStrengthValue = value;
     autoStrengthSlider.setValue(value);
-    autoStrengthDigits.textContent = value.toFixed(2);
+    const format = (v: number): string => v.toFixed(2);
+    autoStrengthDigits.textContent = autoStrengthSlider.isDragging()
+      ? formatAtResolution(format, value, autoStrengthSlider.resolution())
+      : formatKeepingPrecision(format, value);
   }
   const autoStrengthSlider = createMagnetSlider({
     scale: autoLinearScale({ min: AUTO_STRENGTH_MIN, max: AUTO_STRENGTH_MAX, defaultValue: AUTO_STRENGTH_DEFAULT }),
@@ -3515,6 +3550,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     format: (value) => value.toFixed(2),
     defaultValue: AUTO_STRENGTH_DEFAULT,
     hoverHost: autoStrengthRow,
+    onPrecisionChange: () => showAutoStrength(autoStrengthValue),
     onInput: (value) => {
       autoStrengthOffStored = null;
       showAutoStrength(value);

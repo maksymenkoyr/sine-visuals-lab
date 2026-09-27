@@ -10,6 +10,7 @@ import {
   pointerSpeed,
   precisionValue,
   snap,
+  stepAt,
   HOLD_STILL_PX_S,
   LENS_CORE_PX,
   LENS_EDGE_PX,
@@ -111,6 +112,10 @@ export interface MagnetSliderOpts {
   onInput: (value: number) => void;
   /** Fires exactly at drag start/end. */
   onDragChange?: (dragging: boolean) => void;
+  /** Fires when the precision lens opens a level, lets go, or closes at drag
+   *  end — a readout re-renders then with `resolution()`'s finer step, so its
+   *  digits change the moment the scale does, not only on the next move. */
+  onPrecisionChange?: (level: TickLevel) => void;
 }
 
 export interface MagnetSlider {
@@ -128,6 +133,10 @@ export interface MagnetSlider {
    *  other's internals. Internally corrected for the track's own PAD inset. */
   valueAtFraction(f: number): number;
   isDragging(): boolean;
+  /** How far one step moves the value right now at the current value —
+   *  the visible scale's own step, split further while the precision lens is
+   *  open (sliderScale.ts's stepAt). Pair with formatAtResolution. */
+  resolution(): number;
 }
 
 // ---- the shared animation loop -------------------------------------------
@@ -325,6 +334,7 @@ export function createMagnetSlider(opts: MagnetSliderOpts): MagnetSlider {
         }
       }
       setAria();
+      opts.onPrecisionChange?.(s.level);
     }
   }
 
@@ -346,6 +356,7 @@ export function createMagnetSlider(opts: MagnetSliderOpts): MagnetSlider {
       s.slowMs = 0;
       s.strictHold = true;
       setAria();
+      opts.onPrecisionChange?.(0);
     }
     s.lastClientX = clientX;
     const x = s.u;
@@ -398,8 +409,10 @@ export function createMagnetSlider(opts: MagnetSliderOpts): MagnetSlider {
     if (!s.dragging) return;
     s.dragging = false;
     s.rawX = null;
+    const hadPrecision = s.level !== 0;
     s.level = 0;
     s.slowMs = 0;
+    if (hadPrecision) opts.onPrecisionChange?.(0);
     el.classList.remove("vc-dragging");
     try {
       el.releasePointerCapture(e.pointerId);
@@ -519,6 +532,12 @@ export function createMagnetSlider(opts: MagnetSliderOpts): MagnetSlider {
     ctx.fill();
   }
 
+  // A tick sitting in the precision lens's magnified core, once it's open
+  // enough to read (lensBackdrop sets lensAppear each frame, before this).
+  function inLensCore(k: { x: number }): boolean {
+    return s.lensAppear > 0.3 && Math.abs(k.x - s.dispX) <= LENS_CORE_PX - 2;
+  }
+
   function drawRulerScale(): void {
     const [ar, ag, ab] = s.acc;
     ctx.font = `9px ${FONT_MONO}`;
@@ -541,15 +560,25 @@ export function createMagnetSlider(opts: MagnetSliderOpts): MagnetSlider {
         ctx.shadowBlur = 0;
         ctx.fillRect(k.x - 0.5, CY + TRACK_GAP, 1, len);
       }
-      if (k.t.level === 2) labels.push(k);
+      if (k.t.level === 2 || inLensCore(k)) labels.push(k);
     }
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
 
-    // Labels by priority — the latched tick, marked values, the ends, then
-    // the rest — each skipped if it would touch one already placed.
+    // Labels by priority — the latched tick, every tick inside an open
+    // precision lens (so the magnified scale reads as numbers, not just
+    // finer lines), marked values, the ends, then the rest — each skipped if
+    // it would touch one already placed.
     const rank = (k: (typeof labels)[number]): number =>
-      k.latched ? 0 : k.t.detent ? 1 : k === labels[0] || k === labels[labels.length - 1] ? 2 : 3;
+      k.latched
+        ? 0
+        : inLensCore(k)
+          ? 1
+          : k.t.detent
+            ? 2
+            : k === labels[0] || k === labels[labels.length - 1]
+              ? 3
+              : 4;
     const placed: [number, number][] = [];
     for (const k of labels.slice().sort((x, y) => rank(x) - rank(y))) {
       const label = opts.format(k.t.v, 0).replace(/^0\./, ".");
@@ -695,6 +724,9 @@ export function createMagnetSlider(opts: MagnetSliderOpts): MagnetSlider {
     },
     isDragging(): boolean {
       return s.dragging;
+    },
+    resolution(): number {
+      return stepAt(xOf(s.value), s.ticks, PRECISION_SUB[s.level]);
     },
   };
 }

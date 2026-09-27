@@ -430,6 +430,54 @@ export function precisionValue(u: number, ticks: readonly PlacedTick[], sub: num
   return +(a.v + ((b.v - a.v) * k) / sub).toPrecision(10);
 }
 
+/** The value one step moves at track position `u` — the gap between the two
+ *  visible ticks bracketing it, split `sub` ways (precisionValue's own grid).
+ *  What a readout needs to know to show every step as a different number. */
+export function stepAt(u: number, ticks: readonly PlacedTick[], sub: number): number {
+  if (ticks.length < 2) return 0;
+  let i = 0;
+  while (i < ticks.length - 2 && ticks[i + 1].x < u) i++;
+  return Math.abs(ticks[i + 1].v - ticks[i].v) / sub;
+}
+
+/** `format(value)` when it already shows enough decimals for every `step`
+ *  to read as a different number; otherwise the same number with just
+ *  enough more decimals, keeping whatever unit text follows the digits ("×"). A row's own
+ *  formatter is opaque (two decimals, a 0..100 percent, a gain), so how it
+ *  scales a value is read off `format(1)` — "1.00" is 1, a percent's "100"
+ *  is 100. A formatter with no number in it (or no digits before the unit)
+ *  is returned untouched. This is how the precision lens's finer steps show
+ *  up in the digits instead of the readout sitting still while the value
+ *  moves underneath it. */
+export function formatAtResolution(format: (v: number) => string, value: number, step: number): string {
+  const base = format(value);
+  if (!(step > 0)) return base;
+  const parts = /^(-?\d+)(?:\.(\d+))?(.*)$/.exec(base);
+  const unitMatch = /-?\d+(?:\.\d+)?/.exec(format(1));
+  const unit = unitMatch ? Number(unitMatch[0]) : NaN;
+  if (!parts || !(unit > 0)) return base;
+  const decimals = Math.max(0, Math.ceil(-Math.log10(step * unit) - 1e-9));
+  if ((parts[2]?.length ?? 0) >= decimals) return base;
+  return (value * unit).toFixed(decimals) + parts[3];
+}
+
+/** `format(value)`, plus one more decimal when the value really carries one
+ *  that `format` would round away — a value set in the precision lens
+ *  (0.302) keeps reading 0.302 after the drag ends instead of snapping back
+ *  to 0.30, while a value on the format's own grid (0.30) reads as before.
+ *  Capped at one extra decimal (the precision lens's own finest step). */
+export function formatKeepingPrecision(format: (v: number) => string, value: number): string {
+  const base = format(value);
+  const parts = /^(-?\d+)(?:\.(\d+))?(.*)$/.exec(base);
+  const unitMatch = /-?\d+(?:\.\d+)?/.exec(format(1));
+  const unit = unitMatch ? Number(unitMatch[0]) : NaN;
+  if (!parts || !(unit > 0)) return base;
+  const shown = parts[2]?.length ?? 0;
+  const scaled = value * unit;
+  if (Math.abs(Number(scaled.toFixed(shown)) - scaled) < 1e-9) return base;
+  return formatAtResolution(format, value, Math.pow(10, -(shown + 1)) / unit);
+}
+
 /** The precision lens: a flat magnified core around `center` (radius
  *  LENS_CORE_PX/mag in real track pixels), a compressed ring out to
  *  LENS_EDGE_PX, then the plain scale (`fade` 1) beyond it. `fade` in the
