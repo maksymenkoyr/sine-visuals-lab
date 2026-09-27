@@ -175,6 +175,10 @@ const stylesheet = `
 .vc-controls-col {
   width: 314px; flex: none; display: flex; flex-direction: column; gap: 4px;
   max-height: calc(100vh - 74px); overflow-y: auto;
+  /* Solo's keep-in-place padding-top (deviceMenu.ts's setSolo) counts
+   * inside the max-height, not on top of it — else the column runs past
+   * the viewport and its sticky footer with it. */
+  box-sizing: border-box;
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
@@ -575,9 +579,10 @@ body.vc-keys-reveal [data-keycap]::after {
  * outside the pinned row's left edge, under its port, in the pin's colour —
  * a carved tile with an eye-shaped hole. Shut while everything shows (two
  * lids meet at a seam, shaded darker toward the hole's edge so together they
- * read as one rounded bump), peeking half open on hover, lids drawn back
- * (the pupil down in the dark, the tile glowing) while this setting is the
- * only thing shown. Each lid scales toward its own edge of the hole — the
+ * read as one rounded bump), lids drawn back (the pupil down in the dark,
+ * the tile glowing) while this setting is the only thing shown — opening
+ * and closing on click only. Very dim at rest so it doesn't compete with
+ * the row; full strength on hover. Each lid scales toward its own edge of the hole — the
  * upper up, the lower down — so toggling reads as an eye opening and
  * blinking shut. */
 .vc-solo-eye {
@@ -592,9 +597,9 @@ body.vc-keys-reveal [data-keycap]::after {
 }
 .vc-eye-lid-top { transform-origin: 12px 4.6px; }
 .vc-eye-lid-bot { transform-origin: 12px 19.4px; }
-.vc-solo-eye:hover, .vc-solo-eye:focus-visible { --open: 0.5; outline: none; }
+.vc-solo-eye { opacity: 0.28; transition: opacity 0.18s ease; }
+.vc-solo-eye:hover, .vc-solo-eye:focus-visible { opacity: 1; outline: none; }
 .vc-solo-eye.vc-solo-eye-on { --open: 1; }
-.vc-solo-eye.vc-solo-eye-on:hover { --open: 0.82; }
 .vc-solo-eye.vc-solo-eye-on svg { filter: drop-shadow(0 0 3px var(--vc-pin-color, ${SCENE_VIOLET})); }
 @media (prefers-reduced-motion: reduce) {
   .vc-eye-lid-top, .vc-eye-lid-bot { transition: none; }

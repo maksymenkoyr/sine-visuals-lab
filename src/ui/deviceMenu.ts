@@ -279,7 +279,7 @@ import {
  * footer strip, or M — which leaves Power and the controls where they are
  * rather than reflowing anything. Solo (O, the footer's "Solo", or the
  * Solo eye just outside a pinned setting's left edge) goes further: only the
- * pinned setting stays — with the meters, whose jacks patch it — or, with
+ * pinned setting stays — or, with
  * nothing pinned, only the Scene card, until O again (see applySolo);
  * jumping to a block outside what's soloed turns it off rather than
  * moving it (jumpToBlock). The footer sits in a dock stuck to
@@ -4682,10 +4682,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (!soloOn) return;
     if (sceneCard.el.classList.contains("vc-folded")) sceneCard.el.querySelector<HTMLButtonElement>(".vc-fold")?.click();
     // A pinned setting (its row plus its patch pane, the one outlined in
-    // its source colour) is the thing being worked on; the meters column
-    // stays with it, since its jacks are how that pane gets patched.
+    // its source colour) is the thing being worked on — it alone stays,
+    // the meters column included in what goes.
     const pinnedRow = sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned");
-    const leaves = new Set<Element>(pinnedRow ? [pinnedRow, dock, spectrumCol] : [sceneCard.el, dock]);
+    const leaves = new Set<Element>([pinnedRow ?? sceneCard.el, dock]);
     const onPath = new Set<Element>();
     for (const leaf of leaves) for (let n: Element | null = leaf; n && n !== root; n = n.parentElement) onPath.add(n);
     const visit = (parent: Element): void => {
