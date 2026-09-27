@@ -319,7 +319,10 @@ import {
  * closes it, M hides/shows the meters column. Tab / Shift+Tab walk a ring over every
  * .vc-slider/.vc-toggle/.vc-picker/.vc-fader in document order, wrapping at both ends
  * and skipping every chip and button — so Tab alone never leaves the panel
- * and never lands anywhere but a control. On whichever control has focus, A
+ * and never lands anywhere but a control. That's the soft (preview) walk;
+ * while a setting is pinned, Tab / Shift+Tab instead carry the pin itself
+ * to the next/previous drive row, wrapping (moveTabPin) — skipping the
+ * pinned row's own patch panel and every row that can't be pinned. On whichever control has focus, A
  * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
  * are its own, in bandFaders.ts). A focused
  * slider also takes Home/End to its min/max — the browser's own native
@@ -4562,7 +4565,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     );
   }
 
+  /** Tab while something is pinned: the pin moves to the next/previous
+   *  visible drive row (wrapping), and keyboard focus follows onto that
+   *  row's own control — focused first, pinned second, since togglePin
+   *  clears the preview that focus just set. */
+  function moveTabPin(e: KeyboardEvent, from: { sceneId: string; spec: SceneSetting }): void {
+    const rows = driveRowHandles.filter((h) => h.rowEl.getClientRects().length > 0);
+    if (rows.length === 0) return;
+    const idx = rows.findIndex((h) => samePair(from, h));
+    const next = rows[(idx + (e.shiftKey ? -1 : 1) + rows.length) % rows.length]!;
+    e.preventDefault();
+    next.rowEl.querySelector<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker")?.focus({ preventScroll: true });
+    pinDrive(next.sceneId, next.spec);
+    next.rowEl.scrollIntoView({ block: "nearest" });
+  }
+
   function handleTab(e: KeyboardEvent): void {
+    if (pinned) {
+      moveTabPin(e, pinned);
+      return;
+    }
     const elements = ringElements();
     if (elements.length === 0) return;
     const idx = document.activeElement instanceof HTMLElement ? elements.indexOf(document.activeElement) : -1;
