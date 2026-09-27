@@ -341,6 +341,26 @@ and `powder.ts`'s curl noise).
   trail closer to follow it) and Rows (the agreed sliders), plus Random,
   Nudge, Keep own trails, Auto and a strip of past mixes with snapshots.
   Waiting on the user's pick.
+- **2026-09-27, is the parameter set complete? (prototype only).** Before
+  going deeper into the interface the user asked whether the core sim is
+  missing a dimension. Compared with Fogleman's per-species config
+  (sensor angle, sensor distance, rotation, step, deposit, decay): the
+  sensor angle is fixed in `STRAINS.sensorAngleRad`, `DIFFUSE_FRAG` fades
+  all four channels with one `uDecay`, and the population split is always
+  equal. Those are per-strain rows. The one missing *pair* dimension:
+  strains interact only by smell (`att` weights the sensing; each agent
+  deposits only into its own channel, `onehot4(k)` in `DEPOSIT_VERT`), so a
+  strain can't eat or feed another's trail. Affinity Studio v2 adds that as
+  a second table, Touch (feed = add to that trail at the landing cell, eat =
+  keep only part of it), editable through the same views behind a
+  Smell / Touch switch, plus a per-strain sensor angle / trail life / share
+  bench. Headless look, about 7 s after each preset: War (everyone eats
+  everyone) formed clean banded territories with sharp fronts, a look Smell
+  alone doesn't make; Hunt (each strain chases and devours the next) stayed
+  fog, because a chaser erases the road it follows. In the app, eating
+  can't be a negative deposit into the RGBA8 trail; the likely route is a
+  second deposit target counting each strain's steps, eroded in the diffuse
+  pass. Waiting on the user's call.
 
 ## Tuning notes
 
@@ -439,7 +459,8 @@ applies there too. Tuned so far only against the synthetic feed at
   strain-motion mapping and pure-culture preview), `engine.js` (fake-music
   engine from the drives prototypes); `node build.mjs` writes the page,
   `node look.mjs [--click]` screenshots it at wide and phone width.
-- Artifact "Affinity Studio" (Affinity interface ideas, private):
+- Artifact "Affinity Studio" (Affinity interface ideas, the Touch table and
+  the per-strain knob bench, private):
   https://claude.ai/artifact/7Ja3hE75HJecRHF29bRHiY — self-contained source
   `physarum2/artifacts/affinity-studio.html` (publish it as is; its culture
   is `lab.src.html`'s dish stepper generalised to any subset of strains).
