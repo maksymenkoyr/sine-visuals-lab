@@ -9,7 +9,7 @@ spray-injection layer riding on top. Ships from the initial commit and is on mai
 
 - `src/render/scenes/caustics.ts` — the scene module (`createFullscreenScene`,
   `SETTINGS`, the `FRAG` template, and an `extraUniforms` closure that advances the
-  drift phase, Pump's own accumulator, beat churn, loudness-swell calibration and
+  drift phase, Speed pump's own accumulator, beat churn, loudness-swell calibration and
   the ripple pool every frame).
 - Its response math is factored into small pure functions exported specifically so
   `tests/caustics.test.ts` can pin them directly: `focusSharp`, `fogRestingSharp`,
@@ -120,7 +120,7 @@ reference-measurement workflow used by later scenes.
   Sparkle grain is coarser glints as it rises. The old text said the
   reverse.
 - 2026-09-27 — Beat surge, Kick surge and Loudness surge collapsed into two
-  dials: Speed boost and Pump. Beat surge and Kick surge were the same
+  dials: Speed boost and Speed pump. Beat surge and Kick surge were the same
   motion (a rate surge plus an additive phase impulse) on two different
   hit sources, and the per-setting drive picker already lets one dial
   choose which hit it reacts to — a second dial for "the other hit" no
@@ -137,7 +137,7 @@ reference-measurement workflow used by later scenes.
   straight onto the rate — `levelValue` is this scene's own calibrated
   loudness (`advanceLoudSwell`) by default, same reasoning as the old
   Loudness surge, just linear instead of a geometric swing about a neutral
-  pivot. Pump (`driftPump`) replaced `advanceLurch`/`advanceKickJolt` with a
+  pivot. Speed pump (`driftPump`) replaced `advanceLurch`/`advanceKickJolt` with a
   single accumulator (`advancePump`): a hit accelerates a velocity
   (`PUMP_ACCEL`) that decays exponentially (`PUMP_RELEASE_SEC`) and is
   capped (`PUMP_VEL_CAP`), added onto the rate the same additive way. Both
@@ -165,7 +165,7 @@ reference-measurement workflow used by later scenes.
   calibration of `FeatureFrame.level`, not `frame.energy`, so it settles into the
   room or playback's own observed range instead of re-normalizing away the very
   quiet-vs-loud contrast it exists to show.
-- Speed boost and Pump are both additive on top of the Drift-speed base
+- Speed boost and Speed pump are both additive on top of the Drift-speed base
   (`driftRatePerSec`), not multipliers on it, which is why either one still
   moves the pool with Drift speed itself parked at 0.
 - Ripple source switches Beat ripple between "bass hits only" and "bass hits plus

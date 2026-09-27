@@ -61,7 +61,7 @@ import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHas
 // below), an ungated visual swell — a loud passage widens the pool's
 // aperture and lifts the dark-water floor into a glow; a quiet one tightens
 // and deepens it. Like Beat churn's reshaping, this is a look rather than
-// motion along the phase, so — not gated behind Drift speed or Pump — it
+// motion along the phase, so — not gated behind Drift speed or Speed pump — it
 // must still land for anyone who wants a still, breathing pool. uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
 // / crest glints), and uDropReactivity ties everything to
@@ -205,14 +205,14 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "driftPump",
-    label: "Pump",
+    label: "Speed pump",
     description: "Each push accelerates the drift like a gas pedal; the extra speed then coasts back down to Drift speed",
     group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.35,
-    // Pump only reads as a pump on music with real hits to push against.
+    // Speed pump only reads as a pump on music with real hits to push against.
     auto: { pulse: 0.35, attack: 0.2 },
     // Driven continuously by anim.lowPulse today — a plain Bass hit default
     // (drives.ts's decaying-envelope reading of it, same field): a kick is
@@ -755,7 +755,7 @@ const DRIFT_BASE_RATE = 2.0;
 // move the pool with Drift speed parked at 0.
 const LEVEL_GAIN = 3.0;
 
-// Pump's own accumulator (advancePump, below). One hit's whole decaying
+// Speed pump's own accumulator (advancePump, below). One hit's whole decaying
 // pulse (drives.ts's continuous reading of a catalogue hit, which decays at
 // BEAT_PULSE_DECAY_PER_SEC, animClock.ts) has an area of about
 // 1/BEAT_PULSE_DECAY_PER_SEC seconds, so PUMP_ACCEL=6.0 is sized so one
@@ -861,7 +861,7 @@ export function createPumpState(): PumpState {
   return { vel: 0 };
 }
 
-/** Advances Pump's own accumulating velocity in place: `input` (0..1 —
+/** Advances Speed pump's own accumulating velocity in place: `input` (0..1 —
  *  whatever the "driftPump" drive picker is wired to, a hit's decaying
  *  envelope by default) accelerates `vel` by
  *  `PUMP_ACCEL * amount * input * dtSec`, then `vel` decays exponentially
@@ -889,7 +889,7 @@ export interface DriftInputs {
    *  wired to instead: drives.value("driftLevel", loudSwellCalibrated) in
    *  extraUniforms below. */
   levelValue: number;
-  /** Pump's own accumulating velocity (advancePump's `vel`), already scaled
+  /** Speed pump's own accumulating velocity (advancePump's `vel`), already scaled
    *  by the driftPump slider and its input, and added straight onto the
    *  rate — see PUMP_ACCEL/PUMP_RELEASE_SEC above. */
   pumpVel: number;
@@ -1114,9 +1114,9 @@ void main() {
   // the beat — but deliberately this time, as the entire point of the Beat
   // churn setting, gated by its own slider rather than riding automatically
   // on Focus snap. It's driven by its own decaying pulse (churnPulse in
-  // extraUniforms below), not Pump's own velocity: that vel is scaled by
+  // extraUniforms below), not Speed pump's own velocity: that vel is scaled by
   // driftPump's amount and whatever source the "driftPump" picker is wired
-  // to, so deriving churn from it would tie Beat churn's strength to Pump
+  // to, so deriving churn from it would tie Beat churn's strength to Speed pump
   // and leave churn inert whenever driftPump was 0 or pointed away from a
   // beat. churnPulse instead fires on the same anim.onset tick and shares
   // its own CHURN_DECAY_PER_SEC decay, so the
@@ -1302,7 +1302,7 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
     // Beat churn's own envelope: a plain decaying pulse, jumping to 1 on
     // anim.onset and decaying at its own CHURN_DECAY_PER_SEC — so a beat's
     // reshape snaps with the same sharpness every time, gated only by
-    // driftChurn. Deliberately its own pulse rather than Pump's vel: that
+    // driftChurn. Deliberately its own pulse rather than Speed pump's vel: that
     // vel is scaled by driftPump's amount and whatever source the
     // "driftPump" picker is wired to, so a churn derived from it would
     // silently do nothing whenever driftPump was 0 or pointed away from a
@@ -1320,7 +1320,7 @@ export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG,
       // (today's behavior) levelValue is exactly this calibrated reading.
       const loudSwellCalibrated = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
       const levelValue = drives.value("driftLevel", loudSwellCalibrated);
-      // Pump's own accelerate-then-release velocity, advanced before the
+      // Speed pump's own accelerate-then-release velocity, advanced before the
       // rate below reads pump.vel, so this tick's push already counts.
       // Bass hit's own decaying envelope at driftPump's Beat-hit default —
       // see the "driftPump" SceneSetting's own comment.

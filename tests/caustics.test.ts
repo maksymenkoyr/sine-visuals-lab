@@ -51,14 +51,14 @@ describe("caustics drift rate", () => {
   });
 
   it("drift=0 freezes the base wander term, regardless of drop reactivity", () => {
-    // Speed boost and Pump are additive terms, not multipliers on the base
+    // Speed boost and Speed pump are additive terms, not multipliers on the base
     // (see the two tests right below), so this only pins the *base* term's
     // own dependence on drift — with driftLevel/pumpVel left at 0 too, the
     // whole rate is 0.
     expect(driftRatePerSec(base({ drift: 0, dropReactivity: 1, sectionIntensity: 1 }))).toBe(0);
   });
 
-  it("Speed boost and Pump both still move the rate with Drift speed parked at 0 — the whole point of being additive rather than multiplicative", () => {
+  it("Speed boost and Speed pump both still move the rate with Drift speed parked at 0 — the whole point of being additive rather than multiplicative", () => {
     expect(driftRatePerSec(base({ drift: 0, driftLevel: 1, levelValue: 1, pumpVel: 2 }))).toBeCloseTo(3.0 + 2, 10);
   });
 
@@ -73,7 +73,7 @@ describe("caustics drift rate", () => {
     expect(driftRatePerSec(base({ drift: 0, driftLevel: 1, levelValue: 0 }))).toBe(0);
   });
 
-  it("Drop reactivity boosts drift with sectionIntensity even with Speed boost/Pump at 0", () => {
+  it("Drop reactivity boosts drift with sectionIntensity even with Speed boost/Speed pump at 0", () => {
     // base = DRIFT_BASE_RATE(2) * drift(0.5) * (1 + 1*1*0.8) = 1.8
     expect(driftRatePerSec(base({ drift: 0.5, dropReactivity: 1, sectionIntensity: 1 }))).toBeCloseTo(1.8, 10);
   });
