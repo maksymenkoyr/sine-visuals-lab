@@ -92,10 +92,19 @@ export interface EvalMetrics {
    *  should have let go by then on any track whose music actually ends. */
   metroEndRunning: boolean;
   /** Share of all frames after LOCK_MIN_SEC the metronome is running —
-   *  reported for every track, asserted only on `random` (it should almost
-   *  never convince itself unstructured hits are a tempo worth running a
-   *  metronome against). */
+   *  reported for every track. metronome.ts now runs exactly when
+   *  tempoSettle.ts's own settled bpm is non-zero (no confidence gate — see
+   *  that file's header), so on `random` this tracks bpmPresentShare below,
+   *  not "almost never": whether the tracker was ever fooled into a
+   *  *confident* lock on unstructured hits is lockNoTempo's job, not this
+   *  one's. */
   metroRunShare: number;
+  /** Share of all frames after LOCK_MIN_SEC where the tracker's own raw
+   *  bpm (FeatureFrame.bpm) is non-zero at all — metroRunShare's own
+   *  target now that starting/stopping is ungated on tempoLock; the two
+   *  should track each other closely (tempoSettle.ts's window is the only
+   *  thing between them). */
+  bpmPresentShare: number;
 }
 
 function currentSegment(segments: TempoSegment[], segPtr: { i: number }, t: number): TempoSegment | null {
@@ -207,6 +216,7 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
   let breakdownRunning = 0;
   let framesAfterLockMin = 0;
   let framesRunningAfterLockMin = 0;
+  let framesBpmPresentAfterLockMin = 0;
 
   let prevBeatsVal = 0;
   let prevMetroBeatsVal = 0;
@@ -272,6 +282,7 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
     if (time > LOCK_MIN_SEC) {
       framesAfterLockMin++;
       if (anim.metronomeOn) framesRunningAfterLockMin++;
+      if (frame.bpm > 0) framesBpmPresentAfterLockMin++;
     }
 
     if (i > 0) {
@@ -410,5 +421,6 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
     metroBreakdownOn30ms,
     metroEndRunning: lastMetronomeOn,
     metroRunShare: framesAfterLockMin > 0 ? framesRunningAfterLockMin / framesAfterLockMin : NaN,
+    bpmPresentShare: framesAfterLockMin > 0 ? framesBpmPresentAfterLockMin / framesAfterLockMin : NaN,
   };
 }

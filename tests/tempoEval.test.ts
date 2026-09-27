@@ -103,6 +103,7 @@ function printTable(label: string, rows: Record<string, EvalMetrics>): void {
       metroBreakdownOn30ms: fmt(m.metroBreakdownOn30ms),
       metroEndRunning: String(m.metroEndRunning),
       metroRunShare: fmt(m.metroRunShare),
+      bpmPresentShare: fmt(m.bpmPresentShare),
     };
   }
   // eslint-disable-next-line no-console
@@ -292,9 +293,16 @@ describe("tempo eval scoreboard — fixed-hop analyzer path", () => {
     }
   });
 
-  it("metronome: random doesn't convince it a tempo is worth running against", () => {
+  // metronome.ts now runs exactly when tempoSettle.ts's settled bpm is
+  // non-zero — no tempoLock gate (see that file's header) — so on `random`
+  // metroRunShare no longer stays low; it tracks bpmPresentShare (the share
+  // of time the tracker's own raw bpm is non-zero at all) instead. Whether
+  // the tracker was fooled into a *confident* lock on unstructured hits is
+  // "random: doesn't fake a lock on unstructured hits" above (lockNoTempo),
+  // unchanged by this file.
+  it("metronome: on random, run share tracks how often the tracker reports any tempo at all", () => {
     for (const [label, table] of Object.entries(analyzerTables)) {
-      expect(table.random!.metroRunShare, label).toBeLessThanOrEqual(0.3);
+      expect(table.random!.metroRunShare, label).toBeCloseTo(table.random!.bpmPresentShare, 1);
     }
   });
 });
@@ -320,9 +328,11 @@ describe("tempo eval scoreboard — host/TV path", () => {
     }
   });
 
-  it("metronome: random doesn't convince it a tempo is worth running against", () => {
-    expect(metricsH60.random!.metroRunShare).toBeLessThanOrEqual(0.3);
-    expect(metricsH30.random!.metroRunShare).toBeLessThanOrEqual(0.3);
+  // Same rewording as the analyzer path's own version of this test above —
+  // metroRunShare on `random` now tracks bpmPresentShare, not a low ceiling.
+  it("metronome: on random, run share tracks how often the tracker reports any tempo at all", () => {
+    expect(metricsH60.random!.metroRunShare).toBeCloseTo(metricsH60.random!.bpmPresentShare, 1);
+    expect(metricsH30.random!.metroRunShare).toBeCloseTo(metricsH30.random!.bpmPresentShare, 1);
   });
 });
 
@@ -349,9 +359,11 @@ describe("tempo eval scoreboard — through a mic, silence gate on", () => {
     }
   });
 
-  it("random still doesn't start it", () => {
+  // Same rewording as the other two "random" metronome tests above —
+  // metroRunShare tracks bpmPresentShare now, not a low ceiling.
+  it("random: run share still tracks how often the tracker reports any tempo at all", () => {
     for (const label of Object.keys(MIC_PATHS)) {
-      expect(micGateOn[label]!.random!.metroRunShare, label).toBeLessThanOrEqual(0.3);
+      expect(micGateOn[label]!.random!.metroRunShare, label).toBeCloseTo(micGateOn[label]!.random!.bpmPresentShare, 1);
     }
   });
 });
