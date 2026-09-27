@@ -1,5 +1,6 @@
 import { STRAINS, DEPOSIT, resolveStrainEffective, type StrainRawValues, type StrainDriveValues } from "../../render/scenes/physarum2.ts";
-import type { StrainPreviewMotion } from "../../render/scenes/physarum2Preview.ts";
+import type { StrainPreviewMotion, PairCultureInputs } from "../../render/scenes/physarum2Preview.ts";
+import { smellWeight } from "../../render/scenes/physarum2Affinity.ts";
 import type { SceneSetting } from "../../render/sceneSettings.ts";
 import type { WidgetCtx } from "./registry.ts";
 
@@ -12,6 +13,16 @@ import type { WidgetCtx } from "./registry.ts";
  * modules) even though it reads a concrete scene's exported pure helpers —
  * the constraint sceneItems.ts's header cares about is the other direction
  * (`src/render/` never importing `src/ui/`), which this doesn't cross.
+ *
+ * `PreviewSource.pair` (2026-09-27, the Pairs widget) is the two-strain
+ * twin: a Pairs pad's own live culture (`createPairCulture`,
+ * physarum2Preview.ts) needs `att`/`touch` read for one *pair* rather than
+ * `resolveStrainEffective`'s single-strain motion, so it's a separate,
+ * smaller reader instead of a second `effective()`-shaped function — it only
+ * ever supplies `smell`/`touch`, never motion/colour (pairPads.ts already
+ * has those from the same `effective()` this file's main registration
+ * builds). `ctx.get`, not an Auto-resolved read — see `WidgetCtx.get`'s own
+ * doc comment (registry.ts) — matches every other reader in this file.
  */
 
 export interface PreviewEffective {
@@ -25,6 +36,17 @@ export interface PreviewSource {
   /** `index` is the item's index within its family (itemBoxes.ts's own box
    *  order) — for physarum2 this is the strain index `k`. */
   effective(ctx: WidgetCtx, index: number): PreviewEffective;
+  /** A Pairs pad's own live two-strain culture, if this family has a pairwise
+   *  affinity table — see this file's header. Omitted (no registration) means
+   *  the Pairs widget draws its pads with no live culture behind them. */
+  pair?: {
+    size: number;
+    agents: number;
+    /** `a`/`b` are two item indices (not necessarily adjacent) — the pad's
+     *  own pair. Returns just enough for `PairCultureInputs`: local 2x2
+     *  `smell`/`touch`, indexed `[0][*]` = `a`, `[1][*]` = `b`. */
+    weights(ctx: WidgetCtx, a: number, b: number): Pick<PairCultureInputs, "smell" | "touch">;
+  };
 }
 
 const sources = new Map<string, PreviewSource>();
@@ -96,5 +118,38 @@ registerPreviewSource("physarum2", {
       deposit: DEPOSIT * eff.feed,
     };
     return { motion, color: eff.color };
+  },
+  pair: {
+    // The prototype's own pair-culture numbers (affinity-studio.html's
+    // `ensurePairCultures`) — six of these run at once, so smaller/fewer
+    // agents than the four specimen boxes' own 96/4500.
+    size: 72,
+    agents: 1600,
+    weights(ctx, a, b) {
+      const attSpec = (i: number, j: number): SceneSetting | undefined =>
+        ctx.specsFor("strain", i).find((s) => s.item?.param === "att" && s.item.other === j);
+      const touchSpec = (i: number, j: number): SceneSetting | undefined =>
+        ctx.specsFor("strain", i).find((s) => s.item?.param === "touch" && s.item.other === j);
+      const rivalrySpec = ctx.specs.find((s) => s.key === "rivalry");
+      const rivalry = rivalrySpec ? ctx.get(rivalrySpec) : 0.5;
+      const att = (i: number, j: number): number => {
+        const spec = attSpec(i, j);
+        return spec ? smellWeight(ctx.get(spec), i, j, rivalry) : 0;
+      };
+      const touch = (i: number, j: number): number => {
+        const spec = touchSpec(i, j);
+        return spec ? ctx.get(spec) : 0;
+      };
+      return {
+        smell: [
+          [att(a, a), att(a, b)],
+          [att(b, a), att(b, b)],
+        ],
+        touch: [
+          [0, touch(a, b)],
+          [touch(b, a), 0],
+        ],
+      };
+    },
   },
 });

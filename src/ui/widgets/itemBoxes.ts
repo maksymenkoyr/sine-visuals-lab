@@ -1,19 +1,11 @@
 import type { SceneSetting } from "../../render/sceneSettings.ts";
 import { createStrainPreview, type StrainPreview } from "../../render/scenes/physarum2Preview.ts";
+import type { AffinityPreset, PairWords } from "../../render/scenes/physarum2Affinity.ts";
 import { chipBtnLitStyle, chipBtnStyle, createChipButton, groupHeading } from "../controlsKit.ts";
 import { registerWidget, type LinkedSetting, type WidgetCtx } from "./registry.ts";
 import { getPreviewSource } from "./previews.ts";
-import { buildRelationPresets, buildRelationRows, type RelationPreset, type RelationWord } from "./relationRows.ts";
-import { buildRelationWeb } from "./relationWeb.ts";
-import {
-  affinityRowTargets,
-  allItemsSelected,
-  editingHeading,
-  primarySelection,
-  sameSelection,
-  soloSelection,
-  toggleItemSelection,
-} from "./itemSelection.ts";
+import { buildPairPads } from "./pairPads.ts";
+import { allItemsSelected, editingHeading, primarySelection, sameSelection, soloSelection, toggleItemSelection } from "./itemSelection.ts";
 
 /**
  * The generic "item boxes" widget: one specimen box per item of a
@@ -26,17 +18,18 @@ import {
  * `options` (see `ItemBoxesOptions` below): `labels`/`colours` per item,
  * `rowOrder` — the per-item param keys (`SceneSetting.item.param`) to show,
  * in order — an optional `relations` block for a *pairwise* family
- * (`att<i><j>`, via `sceneItems.ts`'s `defineItemPairs`): plain-word rows
- * from the selected item to every item (including itself), a compact SVG
- * web overview, and named presets — and an optional `preview` id (Phase 3).
- * Affinity has no selection of its own — it always follows the box selection
- * (the approved UX) — so a click on a box, a web node, or an experiment pill
- * all funnel through `updateSelection` below (see the Solo paragraph
- * further down for what that actually rebuilds). The current selection is
- * the one piece of state this widget keeps of its own, in localStorage keyed
- * by (scene, family) — a convenience only, wrapped in try/catch like every
- * other localStorage read/write in this codebase (sceneSettings.ts's own
- * store is the precedent).
+ * (`att<i><j>`/`touch<i><j>`, via `sceneItems.ts`'s `defineItemPairs`): the
+ * Pairs pads (`src/ui/widgets/pairPads.ts`'s `buildPairPads`, a live
+ * two-strain culture behind each pad, a Smell/Touch switch and named
+ * presets) — and an optional `preview` id (Phase 3). Affinity has no
+ * selection of its own — it always follows the box selection (the approved
+ * UX) — so a click on a box funnels through `updateSelection` below (see the
+ * Solo paragraph further down for what that actually rebuilds), and a
+ * selection change calls the pads' own `setPairsSelection` in turn. The
+ * current selection is the one piece of state this widget keeps of its own,
+ * in localStorage keyed by (scene, family) — a convenience only, wrapped in
+ * try/catch like every other localStorage read/write in this codebase
+ * (sceneSettings.ts's own store is the precedent).
  *
  * **Multi-selection (2026-09-27).** The "All" chip above the boxes selects
  * every item at once; the "Editing …" line under it names the current set
@@ -47,32 +40,31 @@ import {
  * that option) so deviceMenu.ts fans the edit out to every other selected
  * item's same setting, draws a divergent-value tick per one that still
  * disagrees, and folds a disagreeing drive/patch into a "Mixed — …" summary.
- * Affinity's own per-row fan-out (`affinityRowTargets`) follows the same
- * selection.
+ * The Pairs pads don't fan a drag out across a multi-selection the way a row
+ * does — a pad is already a specific pair, so a selection just dims the pads
+ * that don't touch it (`setPairsSelection`, below).
  *
  * **Solo vs. group, and no redraw on click (2026-09-27b).** A tap on a box
- * BODY (or a relation-web node) *solos* — the selection becomes exactly that
- * one item, even when a group was active (itemSelection.ts's
- * `soloSelection`) — since that's the common case and a still-lit group from
- * three taps ago is more often a stale surprise than an intended one. A
- * small checkbox in each box's header corner (real `<button role="checkbox"
- * aria-checked>`, ticked = in the edit group) is the deliberate way to build
- * a group: ticking adds, unticking removes (never empty —
- * `toggleItemSelection`'s own invariant), and a Shift/Cmd/Ctrl-modified tap
- * on the body does the same toggle for a desktop user who'd rather not
- * aim for the checkbox. None of this calls `ctx.rerender()` any more: a
- * selection change only (a) updates the box classes/checkboxes/"Editing"
- * line in place (`refreshBoxSelection`), (b) disposes and re-mounts the rows
- * section through `ctx.mountRows` (`mountRowsSection`), and (c) rebuilds the
- * Affinity web/rows/presets in place (`refreshAffinity` — that block is
- * plain widget-owned DOM with no deviceMenu registrations of its own, so a
- * full clear-and-rebuild of just its own host is enough). The boxes
- * themselves, their live preview canvases and sims, and the tick loop are
- * built once per widget mount and never touched by a selection change — see
- * registry.ts's header for why `ctx.mountRows` exists rather than reaching
- * for `ctx.rerender()` here. `ctx.rerender()` is still right for a Look
- * apply or a card Reset (deviceMenu.ts's own callers), since those actually
- * change values this widget doesn't otherwise watch for.
+ * BODY *solos* — the selection becomes exactly that one item, even when a
+ * group was active (itemSelection.ts's `soloSelection`) — since that's the
+ * common case and a still-lit group from three taps ago is more often a
+ * stale surprise than an intended one. A small checkbox in each box's header
+ * corner (real `<button role="checkbox" aria-checked>`, ticked = in the edit
+ * group) is the deliberate way to build a group: ticking adds, unticking
+ * removes (never empty — `toggleItemSelection`'s own invariant), and a
+ * Shift/Cmd/Ctrl-modified tap on the body does the same toggle for a desktop
+ * user who'd rather not aim for the checkbox. None of this calls
+ * `ctx.rerender()` any more: a selection change only (a) updates the box
+ * classes/checkboxes/"Editing" line in place (`refreshBoxSelection`),
+ * (b) disposes and re-mounts the rows section through `ctx.mountRows`
+ * (`mountRowsSection`), and (c) re-applies the pads' selection highlight
+ * (`pairPads.ts`'s `setSelection`). The boxes themselves, their live preview
+ * canvases and sims, the pads, and the tick loop are all built once per
+ * widget mount and never touched by a selection change — see registry.ts's
+ * header for why `ctx.mountRows` exists rather than reaching for
+ * `ctx.rerender()` here. `ctx.rerender()` is still right for a Look apply or
+ * a card Reset (deviceMenu.ts's own callers), since those actually change
+ * values this widget doesn't otherwise watch for.
  *
  * **Phase 3 (`options.preview`).** When set, `src/ui/widgets/previews.ts`'s
  * registry resolves it to a `PreviewSource` (size/agent count + an
@@ -126,12 +118,16 @@ export interface ItemBoxesOptions {
    *  population bar/pipette). */
   preview?: string;
   relations?: {
-    /** The pairwise family's key prefix (`defineItemPairs`'s own `key`,
-     *  e.g. "att") — `<prefix><i><j>` is looked up directly. */
-    prefix: string;
     title: string;
-    words: readonly RelationWord[];
-    presets?: readonly RelationPreset[];
+    /** `item.param` of each pair table the Pairs widget edits
+     *  (`defineItemPairs`'s own `key`, e.g. `{ smell: "att", touch:
+     *  "touch" }`) — `touch` omitted hides the Smell/Touch switch. */
+    tables: { smell: string; touch?: string };
+    /** Short codes (e.g. "A1") for axis captions and pad-header values —
+     *  same order as `labels`. */
+    shortLabels: readonly string[];
+    words: PairWords;
+    presets?: readonly AffinityPreset[];
   };
 }
 
@@ -191,16 +187,6 @@ function writeSelectedSet(sceneId: string, family: string, indices: readonly num
   }
 }
 
-function findPairSpec(
-  specs: readonly SceneSetting[],
-  family: string,
-  param: string,
-  i: number,
-  j: number,
-): SceneSetting | undefined {
-  return specs.find((s) => s.item?.family === family && s.item.param === param && s.item.index === i && s.item.other === j);
-}
-
 /** Phase 3 preview sims persist across a full widget rebuild (a Look apply,
  *  a card Reset, reopening the panel — a selection change no longer rebuilds
  *  the boxes at all, see this file's header) instead of restarting from
@@ -248,13 +234,13 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   let primary = primarySelection(selectedSet);
   const previewSource = opts.preview ? getPreviewSource(opts.preview) : undefined;
 
-  // Set once the rows section / Affinity block below actually mount — see
+  // Set once the rows section / Pairs pads below actually mount — see
   // `mountRowsSection` and the `if (rel)` block near the end of this builder.
   // Predeclared here (rather than as `function` declarations nested inside
   // an `if`, which module strict mode block-scopes) so `updateSelection`
   // above can reach either regardless of source order.
   let rowsHandle: { dispose(): void } | undefined;
-  let refreshAffinity: (() => void) | undefined;
+  let setPairsSelection: ((sel: readonly number[]) => void) | undefined;
 
   // Every box's own element and checkbox, filled by the box-building loop
   // below. `refreshBoxSelection` is the only thing that ever touches them
@@ -281,11 +267,10 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     );
   }
 
-  /** The one place `selectedSet`/`primary` change — every caller below
-   *  (a box body tap/keypress, its checkbox, the "All" chip, a relation-web
-   *  node) funnels through this instead of `ctx.rerender()`. See this
-   *  file's header's Solo paragraph for the scoped (a)/(b)/(c) update this
-   *  does in place. */
+  /** The one place `selectedSet`/`primary` change — every caller below (a box
+   *  body tap/keypress, its checkbox, the "All" chip) funnels through this
+   *  instead of `ctx.rerender()`. See this file's header's Solo paragraph for
+   *  the scoped (a)/(b)/(c) update this does in place. */
   function updateSelection(next: number[]): void {
     if (sameSelection(next, selectedSet)) return;
     selectedSet = next;
@@ -293,7 +278,7 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     writeSelectedSet(ctx.sceneId, family, next);
     refreshBoxSelection();
     mountRowsSection();
-    refreshAffinity?.();
+    setPairsSelection?.(selectedSet);
   }
 
   // Phase 3 per-box state, filled in the loop below only when a preview
@@ -637,69 +622,28 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   if (!rel) return;
 
   container.appendChild(groupHeading(rel.title));
-  // Affinity's own permanent host — `refreshAffinity` clears and rebuilds
-  // its contents (the web + rows + presets below) on a selection change or
-  // any value it draws changing; it's plain widget-owned DOM with no
-  // deviceMenu registrations, so a full clear-and-rebuild of just this host
-  // is already the scoped update (this file's header's Solo paragraph).
-  const affinityHost = document.createElement("div");
-  container.appendChild(affinityHost);
-
-  const getRel = (i: number, j: number): number => {
-    const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
-    return spec ? ctx.get(spec) : 0;
-  };
-  // Applies `value` to every pair a multi-selection's row `rowJ` affects
-  // (itemSelection.ts's `affinityRowTargets`) — see relationRows.ts's own
-  // header for what row `rowJ` means. Refreshes Affinity in place rather
-  // than `ctx.rerender()`: it only ever changes `att<i><j>` settings, which
-  // the rows section above never shows.
-  const applyAffinityRow = (rowJ: number, value: number): void => {
-    for (const { i, j } of affinityRowTargets(selectedSet, primary, rowJ)) {
-      const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
-      if (spec) ctx.set(spec, value);
-    }
-    refreshAffinity?.();
-  };
-
-  refreshAffinity = (): void => {
-    affinityHost.replaceChildren();
-    const webWrap = document.createElement("div");
-    webWrap.className = "vc-relweb-wrap";
-    webWrap.appendChild(
-      buildRelationWeb({
-        count,
-        colours: opts.colours,
-        labels,
-        selected: selectedSet,
-        get: getRel,
-        onSelect: (i, mods) => updateSelection(mods.toggle ? toggleItemSelection(selectedSet, i) : soloSelection(i)),
-      }),
-    );
-    affinityHost.appendChild(webWrap);
-
-    affinityHost.appendChild(
-      buildRelationRows({ count, labels, selected: selectedSet, words: rel.words, get: getRel, applyRow: applyAffinityRow }),
-    );
-
-    if (rel.presets?.length) {
-      affinityHost.appendChild(
-        buildRelationPresets({
-          count,
-          presets: rel.presets,
-          get: getRel,
-          apply: (matrix) => {
-            for (let i = 0; i < count; i++) {
-              for (let j = 0; j < count; j++) {
-                const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
-                if (spec) ctx.set(spec, matrix[i]![j]!);
-              }
-            }
-            refreshAffinity?.();
-          },
-        }),
-      );
-    }
-  };
-  refreshAffinity();
+  // buildPairPads is built once here, exactly like the boxes above — never
+  // rebuilt by a selection change (this file's header's Solo paragraph).
+  // `pair`/`effective` are the same previewSource this widget's own boxes
+  // already resolved above (`opts.preview`), so a pad's culture reads the
+  // identical live motion/colour a specimen box's own preview does.
+  const pads = buildPairPads({
+    ctx,
+    family,
+    count,
+    labels,
+    shortLabels: rel.shortLabels,
+    colours: opts.colours,
+    tables: rel.tables,
+    words: rel.words,
+    presets: rel.presets ?? [],
+    effective: previewSource ? (k) => previewSource.effective(ctx, k) : undefined,
+    pair: previewSource?.pair,
+    stateKey: `${ctx.sceneId}:${family}`,
+  });
+  container.appendChild(pads.el);
+  pads.setSelection(selectedSet);
+  setPairsSelection = (sel) => pads.setSelection(sel);
+  ctx.onTick(() => pads.tick());
+  ctx.onDispose(() => pads.dispose());
 });
