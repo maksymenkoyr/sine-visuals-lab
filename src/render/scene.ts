@@ -20,6 +20,32 @@ export interface SceneContext {
   quality: QualitySettings;
 }
 
+/** One custom group in the device menu's Scene card, rendered ahead of the
+ *  plain per-setting loop — see src/render/sceneItems.ts's header for the
+ *  item/panel split this exists for, and src/ui/widgets/registry.ts for how
+ *  `widget` is resolved to an actual builder. Plain data: nothing here
+ *  touches the DOM, so a scene stays importable under node (every test) and
+ *  ignorable by the TV/a paid private scene, which never open a device menu
+ *  at all. `items` names the `SceneSetting.item.family` this section claims
+ *  — every setting in the scene's own `settings` array carrying that family
+ *  is hidden from the flat loop and left to the widget instead. */
+export interface PanelSection {
+  /** A registered id in src/ui/widgets/registry.ts (e.g. "itemBoxes"). */
+  widget: string;
+  /** The group heading shown above this section, same voice as
+   *  SceneSetting.group ("Strains", "Affinity") — not restricted to
+   *  SETTING_GROUPS, since a panel section names the scene's own concept
+   *  rather than the closed Form/Motion/Look/Camera/Post vocabulary. */
+  title: string;
+  hint?: string;
+  /** The SceneSetting.item.family this section claims and renders. Omit
+   *  for a future widget with nothing item-shaped to claim. */
+  items?: string;
+  /** Widget-specific configuration — each widget's own module documents its
+   *  shape (e.g. itemBoxes.ts's ItemBoxesOptions). */
+  options?: unknown;
+}
+
 export interface Scene {
   id: string;
   name: string;
@@ -27,6 +53,10 @@ export interface Scene {
   minQuality?: "mid" | "low" | "floor";
   /** User-tunable parameters shown in the device menu, uploaded as uniform float u<Key>. */
   settings?: SceneSetting[];
+  /** Custom Scene-card groups this scene declares, rendered ahead of the
+   *  plain per-setting rows — see PanelSection above. Omit for a scene with
+   *  nothing custom to show (every setting renders as an ordinary row). */
+  panel?: readonly PanelSection[];
   init(ctx: SceneContext): void;
   render(
     ctx: SceneContext,

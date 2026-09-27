@@ -17,6 +17,13 @@
  *   are the same number, so the row's displayed value, its ↺ target, and the
  *   reset chip all already agree — clearing would only mean adding a delete
  *   path to sceneSettings.ts, a prod module, purely to serve a dev feature.
+ * - A setting tagged `item` (src/render/sceneItems.ts) is always skipped,
+ *   pin/override or not: its `default` was generated from the scene's own
+ *   item table (STRAINS, say), not typed as a literal `default:` this
+ *   file's server half could find and rewrite — there's nothing in source
+ *   to bake it into. `skippedGenerated` reports these separately from
+ *   `skipped` (pin/override) so Alt+D's "why didn't that bake" note can
+ *   name the real reason instead of a misleading "pinned/overridden".
  */
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import { getSceneSetting } from "../render/sceneSettings.ts";
@@ -45,6 +52,9 @@ export interface BakeResponse {
    *  — see the module header. Reported so a "why didn't that bake" is never
    *  silent. */
   skipped?: string[];
+  /** Keys skipped because they're `item`-tagged (generated) — see the
+   *  module header. */
+  skippedGenerated?: string[];
   /** The edit list this call built and sent (or would send, on a dry run) —
    *  carried back so a caller can render "key from→to" without recomputing
    *  it, and so the Alt+D confirm step can commit exactly what its preview
@@ -73,6 +83,9 @@ export function buildDefaultEdits(
 ): DefaultEdit[] {
   const edits: DefaultEdit[] = [];
   for (const spec of specs) {
+    // Generated — its default lives in the scene's own item table, not a
+    // literal `default:` in source (see the module header).
+    if (spec.item) continue;
     const raw = read(spec);
     if (!Number.isFinite(raw)) continue;
     const decimals = decimalsOf(spec.step);
@@ -108,14 +121,22 @@ export async function bakeDefaults(
   specs: readonly SceneSetting[],
   opts: BakeOptions = {},
 ): Promise<BakeResponse> {
-  const bakeable = specs.filter((spec) => getPin(sceneId, spec.key) === undefined && getOverride(sceneId, spec.key) === undefined);
-  const skippedKeys = specs.filter((s) => !bakeable.includes(s)).map((s) => s.key);
+  const skippedGeneratedKeys = specs.filter((s) => s.item).map((s) => s.key);
+  const nonGenerated = specs.filter((s) => !s.item);
+  const bakeable = nonGenerated.filter(
+    (spec) => getPin(sceneId, spec.key) === undefined && getOverride(sceneId, spec.key) === undefined,
+  );
+  const skippedKeys = nonGenerated.filter((s) => !bakeable.includes(s)).map((s) => s.key);
   const edits = buildDefaultEdits(bakeable, (spec) => getSceneSetting(sceneId, spec));
+  const skipFields = {
+    skipped: skippedKeys.length > 0 ? skippedKeys : undefined,
+    skippedGenerated: skippedGeneratedKeys.length > 0 ? skippedGeneratedKeys : undefined,
+  };
   if (edits.length === 0) {
-    return { ok: true, results: [], skipped: skippedKeys.length > 0 ? skippedKeys : undefined, edits };
+    return { ok: true, results: [], ...skipFields, edits };
   }
   const body = await post(sceneId, edits, opts.dryRun === true);
-  return { ...body, skipped: skippedKeys.length > 0 ? skippedKeys : undefined, edits };
+  return { ...body, ...skipFields, edits };
 }
 
 /**

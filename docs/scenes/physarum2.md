@@ -1,20 +1,23 @@
 # Physarum 2 (`physarum2`)
 
-A second slime-mould scene: SPECIES_COUNT independent species, each with its
-own motion profile and its own trail channel, sensing every species' trail at
-once through a fixed weighted sum (ATTRACT_ROWS) — strongly its own, weakly
-or negatively everyone else's. That mutual avoidance is what separates the
-four networks into distinct, interlocking coloured territories rather than
-one shared mesh. Draft, on this branch (not yet on main).
+A second slime-mould scene: SPECIES_COUNT independent strains, each with its
+own motion profile and its own trail channel, sensing every strain's trail at
+once through a weighted sum (the `att<i><j>` settings, defaulting to
+ATTRACT_ROWS) — strongly its own, weakly or negatively everyone else's. That
+mutual avoidance is what separates the four networks into distinct,
+interlocking coloured territories rather than one shared mesh. Draft, on this
+branch (not yet on main).
 
 ## Where the code is
 
 `src/render/scenes/physarum2.ts` — the header comment is the primary source
-for the whole simulation design (species/attraction-table packing, the
-per-step fixed-rate stepper, the RGBA=species trail, evaporation precision,
-the composite's exposure/gamma). Registered as `physarum2Scene` via
-`registerScene` in `src/render/scenes/index.ts` (first line of registration,
-newest-draft-first convention), and listed in that file's `draftIds`.
+for the whole simulation design (strain/attraction-table packing, the
+per-step fixed-rate stepper, the RGBA=strain trail, evaporation precision,
+the composite's exposure/gamma, and — since 2026-09-27 — the per-strain
+settings and the "Uniform budget" note on how they reach the shader without
+their own uniforms). Registered as `physarum2Scene` via `registerScene` in
+`src/render/scenes/index.ts` (first line of registration, newest-draft-first
+convention), and listed in that file's `draftIds`.
 
 Reuses `packUnit` and `createBeatSeeder` from `physarum.ts` (the same 16-bit
 packing round trip and the same beat-rise detector with its own refractory),
@@ -22,12 +25,29 @@ and `grainTextureSide` from `chladni.ts` for the agent-state texture sizing.
 The GLSL packing/hash/room-mapping helpers are copied into this file's own
 `PHYSARUM2_GLSL` shared block rather than exported from `physarum.ts`, so
 that file's behaviour is untouched. Exported pure helpers —
-`physarum2TrailSide`, `stepAccumulator` — are covered by
+`physarum2TrailSide`, `stepAccumulator`, `hueRotateRGB`, the
+sensor/turn/stride slider<->physical mapping pairs — are covered by
 `tests/physarum2.test.ts` without a GL context, along with structural checks
-on `SPECIES`/`ATTRACT_ROWS`/`PALETTE` and the NEUTRAL auto-tune invariant.
-`SETTINGS` carries the Form/Motion/Look/Post controls (Network scale, Trail
-decay, Rivalry, Crawl speed, Surge, Beat seeding, Band feed, Exposure,
-Palette tint, Beat flash), each with its own `auto` weights.
+on `STRAINS`/`ATTRACT_ROWS` and the NEUTRAL auto-tune invariant.
+
+`STRAINS` is the per-strain identity table (code, base colour, fixed sensor
+angle); `nutrient<k>`/`excite<k>`/`sensor<k>`/`turn<k>`/`stride<k>`/`stain<k>`
+(`src/render/sceneItems.ts`'s `defineItems`, family `"strain"`) and the full
+`att<i><j>` affinity matrix (`defineItemPairs`) replace the old shared "Band
+feed"/"Surge" pair and the fixed `SPECIES`/`PALETTE` constants — every strain
+now has its own controls and its own Receives patch. `scene.panel` (one
+`PanelSection` naming the `itemBoxes` widget — `src/ui/widgets/itemBoxes.ts`)
+renders them as specimen boxes + the selected strain's rows + an Affinity
+block (plain-word rows, a compact SVG web, named presets) inside the device
+menu's Scene card, ahead of the remaining flat rows (Network scale, Trail
+decay, Hostility [renamed from Rivalry, same key `rivalry`], Crawl speed,
+Beat seeding, Exposure, Palette tint, Beat flash), each of the latter still
+carrying its own `auto` weights as before.
+
+This is also `src/render/sceneItems.ts`/`src/ui/widgets/registry.ts`'s first
+real caller — see those files' own headers for the item/panel framework
+itself (generic, reusable by any scene), and `tests/sceneItems.test.ts` /
+`tests/sceneKeys.test.ts` for its tests.
 
 ## References
 
@@ -84,11 +104,44 @@ and `powder.ts`'s curl noise).
   node harness: densest 2% of cells fell from 76% to about 12% of the trail
   for the widest-turning strain). Implementation (declarative items +
   widget registry, then per-strain settings here) is planned but not built.
+- 2026-09-27: Phases 1+2 of the plan implemented — the approved v3 prototype
+  structure (Strains group: four specimen boxes with a placeholder preview
+  area, the selected strain's Nutrient/Sensor range/Turn angle/Speed/
+  Excitability/Stain as real device-menu rows, an Affinity block below with
+  Flees/Avoids/Ignores/Follows/Loves segmented rows, a compact SVG web and
+  the five named experiment presets copied from the prototype). Framework
+  landed as `src/render/sceneItems.ts` (`defineItems`/`defineItemPairs`/
+  `composeSettings`) and `src/ui/widgets/` (`registry.ts`'s `WidgetCtx`,
+  `itemBoxes.ts`, `relationRows.ts`, `relationWeb.ts`), wired into
+  `src/ui/deviceMenu.ts`'s `renderSceneSettings`. Removed the old shared
+  `feed`/`beatSurge` settings and the fixed `SPECIES`/`PALETTE` tables;
+  `STRAINS` plus the generated per-strain settings are now the source of
+  truth, resolved in JS each frame (drives.value/resolveSceneSetting) and
+  packed into `uSpecies`/`uAttractRow`/new `uStrainSurge`/`uStrainFeed`/
+  `uStrainColor` uniforms — see the file header's "Uniform budget". Sensor
+  range/Turn angle/Speed default to the *inverse* of the old fixed SPECIES
+  motion (round-trip asserted in tests), so the default look is unchanged;
+  confirmed by headless before/after screenshots at t=10s/20s (same
+  palette/density/character; the sim is stochastic so not pixel-identical).
+  Selecting another box or an Affinity word triggers a full Scene-card
+  rebuild (`WidgetCtx.rerender()`) rather than patching the widget's own
+  DOM — reuses deviceMenu's existing jack/cable/pin teardown for free
+  instead of a second bookkeeping path; cheap at this scene's row count.
+  Live per-strain previews, territory/population readouts and the manual
+  pipette are Phase 3, not built yet — the box's preview area is just a
+  sized, empty placeholder. Also fixed a latent `tests/sceneKeys.test.ts`
+  (new) blocker: importing anything that pulls in `controlsTheme.ts`'s
+  `?url` font import failed under Vitest in a git-worktree checkout (the
+  symlinked `node_modules` resolves outside the worktree root, and Vite
+  denies serving it) — `vitest.config.ts` now sets
+  `resolve.preserveSymlinks: true`. No scene record existed yet for this
+  under `docs/scenes/physarum2/` beyond the prototype artifacts noted in
+  Materials below; this session added no new `/ref` material.
 
 ## Tuning notes
 
 Judge the look by whether black background still dominates and the four
-species read as distinct, interlocking territories rather than one washed-out
+strains read as distinct, interlocking territories rather than one washed-out
 mass — `DEPOSIT`, `GLOW_MIN`/`GLOW_MAX` and the "seed" setting's default all
 trade off against this (see the file header's budget comments on each). The
 "seed" setting is unusually sensitive: because reseeded agents land in one
@@ -106,10 +159,21 @@ through a mic.
   `GLOW_MIN`/`GLOW_MAX`; a future pass might want its own exposure term
   instead of sharing the composite's global exposure, if a louder track needs
   a bigger burst than the ambient network can take without blowing out.
-- Fixed one variant only, per the plan's scope — a future session could
-  explore alternate `SPECIES`/`ATTRACT_ROWS` combinations (a `variant`-style
-  setting, following Kaleidoscope's `Style` pattern) if more looks are
-  wanted from this same mechanism.
+- Fixed one attraction-matrix variant as the default ("Rivals"), per the
+  plan's scope — a future session could explore alternate defaults (a
+  `variant`-style setting, following Kaleidoscope's `Style` pattern) if more
+  looks are wanted from this same mechanism.
+- Phase 3 (live per-strain previews inside each specimen box, territory/
+  population readouts, the manual pipette) is not built — the boxes only
+  show a code, colour and an empty placeholder swatch today.
+- The nutrient/excite/sensor/turn/stride/stain settings carry no `auto`
+  table (unlike the global Form/Motion/Look/Post rows) — a scene-wide Auto
+  toggle currently leaves every strain's own controls manual. Not asked for
+  in this round; worth a look if per-strain auto-tuning is wanted later.
+- Not checked against a scene-wide Look save/apply round trip with the new
+  per-strain keys — Looks ignore unknown keys by design (a Look saved before
+  this change simply won't touch any strain control), but no explicit test
+  covers a Look captured *after* this change surviving a reload.
 
 ## Materials
 
@@ -127,13 +191,27 @@ through a mic.
 ## Resume here
 
 `npm run dev`, then `/?audio=synthetic&bpm=120#/v/physarum2`. Pure logic
-(`physarum2TrailSide`, `stepAccumulator`) and the SPECIES/ATTRACT_ROWS/PALETTE
-shape are exercised by `tests/physarum2.test.ts`, including the NEUTRAL
-auto-tune invariant. A headless Playwright screenshot (see
+(`physarum2TrailSide`, `stepAccumulator`, `hueRotateRGB`, the sensor/turn/
+stride slider<->physical mappings) and the STRAINS/ATTRACT_ROWS shape are
+exercised by `tests/physarum2.test.ts`, including the NEUTRAL auto-tune
+invariant and the "defaults reproduce the old fixed motion" round trip;
+`tests/sceneItems.test.ts`/`tests/sceneKeys.test.ts` cover the generic
+item/panel framework this scene is the first caller of. Next up here is
+Phase 3 (see Known issues): `src/render/scenes/physarum2Preview.ts` (a pure
+CPU sim reading the same mapping functions this file exports) feeding a live
+preview into each specimen box, plus the manual pipette — the plan at
+`~/.claude/plans/make-this-much-more-wondrous-pearl.md` (session-local, not
+in this repo) has the fuller sketch. A headless Playwright screenshot (see
 `docs/scenes/_shared/scripts/shot.mjs` for the pattern this followed) is the
-fastest way to judge a tuning change without a mic.
+fastest way to judge a tuning change without a mic; for the panel itself,
+`#menuBtn` opens it and a real mouse down/wait/up (not a scripted `.click()`)
+is what actually exercises a box or Affinity-word press.
 
 ## History
 
 - Added on branch `worktree-physarum2` (2026-09-26): scene, tests, docs record,
   registered as a draft. Not yet merged to main / opened as a PR.
+- 2026-09-27: Phases 1+2 of the lab-controls plan (see Decisions and pivots
+  above) — per-strain settings, the Strains/Affinity panel, and the generic
+  `sceneItems.ts`/`src/ui/widgets/` framework it's built on. Still on
+  `worktree-physarum2`, still not merged to main.

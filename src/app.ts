@@ -851,6 +851,7 @@ function wireDeviceMenu(): void {
       setSmoothing(sceneId, value);
     },
     getSceneSettings: (sceneId) => getScene(sceneId)?.settings ?? [],
+    getScene: (sceneId) => getScene(sceneId),
     getSceneSettingValue: (sceneId, spec) => getSceneSetting(sceneId, spec),
     getSceneSettingDefault: (sceneId, spec) => settingDefault(sceneId, spec),
     onSceneSettingChange: (sceneId, spec, value) => {

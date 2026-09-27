@@ -43,6 +43,14 @@ repo. `src/render/scenes/privateScenes.ts` has the contract.
    its group (`src/ui/controlsKit.ts`'s `createAdvancedSection`) — for a real,
    tunable constant that most people will only ever move as part of a `macro`
    group, not something worth doubling the group's row count for everyone.
+   A scene with several identical, independently tunable instances of the
+   same thing (several populations, emitters, objects) doesn't hand-write
+   one `SceneSetting` per instance — see `src/render/sceneItems.ts`'s header
+   for `defineItems`/`defineItemPairs`/`composeSettings`, and declare a
+   `Scene.panel` entry (`scene.ts`) naming a widget from
+   `src/ui/widgets/registry.ts` to show the group as boxes/rows instead of
+   the plain per-setting loop (Physarum 2's Strains card is the worked
+   example).
 3. Register the scene as a side effect in `src/render/scenes/index.ts`
    (`registerScene(yourScene)`) and export it there like its neighbours. A new
    scene goes *first* among the drafts — that file's header comment owns the

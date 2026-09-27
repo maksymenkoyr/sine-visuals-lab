@@ -849,6 +849,70 @@ body.vc-keys-reveal [data-keycap]::after {
     to { background-position: 0 0; }
   }
 }
+
+/* ---- src/ui/widgets/itemBoxes.ts + relationWeb.ts/relationRows.ts ----
+ * A scene-declared item widget's own boxes, affinity rows and web — styled
+ * with this file's own tokens/fonts rather than a widget-local stylesheet,
+ * same convention as every other panel piece. Always a two-column grid,
+ * regardless of item count or panel width, so a box stays wide enough for
+ * its code + placeholder swatch even in the narrow (phone) stacked layout —
+ * see itemBoxes.ts's header on why Phase 3's live preview lands in
+ * .vc-item-preview without a layout change. */
+.vc-item-boxes {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px;
+}
+.vc-item-box {
+  display: grid; gap: 6px; padding: 8px; border-radius: 6px; text-align: left; min-width: 0;
+  background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.13); cursor: pointer; font: inherit; color: inherit;
+}
+.vc-item-box-sel {
+  border-color: var(--c, ${SCENE_VIOLET});
+  background: color-mix(in srgb, var(--c, ${SCENE_VIOLET}) 14%, transparent);
+}
+.vc-item-box-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.vc-item-led {
+  flex: none; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--c, #fff); box-shadow: 0 0 7px var(--c, #fff);
+}
+.vc-item-code {
+  font: 500 11.5px/1 ${FONT_MONO}; color: #fff; letter-spacing: 0.03em;
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Sized placeholder for Phase 3's live per-item preview canvas. */
+.vc-item-preview {
+  width: 100%; aspect-ratio: 2 / 1; border-radius: 4px;
+  background: color-mix(in srgb, var(--c, #fff) 10%, rgba(0, 0, 0, 0.35));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.vc-item-rows { display: grid; }
+
+.vc-relweb-wrap { display: flex; justify-content: center; margin: 4px 0 10px; }
+.vc-relweb { width: 100%; max-width: 220px; }
+.vc-relweb-label {
+  font: 500 10px/1 ${FONT_LABEL}; fill: #04050a; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.vc-relweb-node { cursor: pointer; }
+.vc-relweb-node:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 3px; }
+.vc-relweb-sel { opacity: 1; }
+.vc-relweb-dim { opacity: 0.3; }
+
+.vc-relrows { display: grid; gap: 2px; margin-bottom: 8px; }
+.vc-relrow { display: grid; gap: 7px; padding: 8px 2px; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.vc-relrow:first-child { border-top: 0; }
+.vc-relrow-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.vc-relrow-label { font: 500 12px/1.2 ${FONT_LABEL}; color: #fff; }
+.vc-relrow-value {
+  font: 400 12px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.6); font-variant-numeric: tabular-nums; flex: none;
+}
+
+.vc-exp-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.vc-exp-pill {
+  border: 1px solid rgba(255, 255, 255, 0.18); background: transparent; border-radius: 12px; padding: 4px 10px;
+  font: 500 11px/1 ${FONT_LABEL}; letter-spacing: 0.04em; color: rgba(255, 255, 255, 0.7); cursor: pointer;
+}
+.vc-exp-pill:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+.vc-exp-pill[aria-pressed="true"] { color: ${SCENE_VIOLET}; border-color: ${SCENE_VIOLET}; }
+.vc-exp-hyp { margin: 6px 0 0; width: 100%; color: rgba(255, 255, 255, 0.4); font-size: 11.5px; }
 `;
 
 /** Installs the panel's stylesheet once; safe to call from every creator. */

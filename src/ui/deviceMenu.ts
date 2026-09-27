@@ -14,7 +14,13 @@ import {
 } from "../audio/sensitivity.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import type { SceneLook } from "../render/sceneLooks.ts";
+import type { Scene } from "../render/scene.ts";
 import { createLooksCard } from "./looksCard.ts";
+// Side-effect import: registers every built-in widget (registerWidget) so a
+// scene's Scene.panel sections resolve — see widgets/registry.ts's header
+// for the panel/widget split this file is the one place that renders.
+import "./widgets/index.ts";
+import { getWidget, type WidgetCtx } from "./widgets/registry.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
 import { takeSettingMarks } from "../render/settingMarks.ts";
@@ -406,6 +412,10 @@ export interface DeviceMenuDeps {
   onSmoothingChange: (sceneId: string, value: number) => void;
   /** Empty for scenes with nothing to tune — the card hides itself. */
   getSceneSettings: (sceneId: string) => SceneSetting[];
+  /** The active scene object, for its optional `panel` (src/render/scene.ts)
+   *  — used only to render a scene-declared item widget ahead of the flat
+   *  settings loop; nothing else here reaches into a Scene directly. */
+  getScene: (sceneId: string) => Scene | undefined;
   getSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   /** A setting's resting value under the scene's current variant (see
    *  SceneSetting.variant) — what the row's reset arrow returns it to. */
@@ -4496,6 +4506,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAuto(): void;
   }
   let sceneRowHandles: SceneRowHandle[] = [];
+  // Cleanup callbacks a widget registered via WidgetCtx.onDispose
+  // (widgets/registry.ts) — run once, right before the next full rebuild.
+  let widgetDisposers: (() => void)[] = [];
 
   // Looks: named snapshots of the Scene card's own settings above — see
   // src/render/sceneLooks.ts. Hidden the same way sceneCard is when the
@@ -4820,6 +4833,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     driveSparkCanvases = [];
     driveRowHandles = [];
     pinRowHandles = [];
+    for (const dispose of widgetDisposers) dispose();
+    widgetDisposers = [];
     sceneCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.refresh();
@@ -4852,8 +4867,62 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
       return accent;
     };
+
+    // Scene-declared item widgets (src/render/sceneItems.ts, scene.ts's
+    // Scene.panel) render first, inside this same card — see
+    // src/ui/widgets/registry.ts's header. Every setting whose
+    // `item.family` a section claims is then skipped by the flat loop
+    // below, exactly as if it weren't in `specs` at all.
+    const scene = deps.getScene(sceneId);
+    const panelSections = scene?.panel ?? [];
+    const claimedFamilies = new Set(
+      panelSections.map((s) => s.items).filter((x): x is string => x !== undefined),
+    );
+    for (const section of panelSections) {
+      const build = getWidget(section.widget);
+      // tests/sceneKeys.test.ts checks every panel widget id is registered
+      // ahead of time — a missing one here just renders nothing rather than
+      // throwing in a live panel.
+      if (!build) continue;
+      hasGroups = true;
+      const heading = groupHeading(section.title, first);
+      markBlock(heading);
+      sceneRows.appendChild(heading);
+      first = false;
+      const host = document.createElement("div");
+      sceneRows.appendChild(host);
+
+      const tickFns: (() => void)[] = [];
+      const ctx: WidgetCtx = {
+        sceneId,
+        specs,
+        specsFor: (family, index) =>
+          specs.filter((s) => s.item?.family === family && (index === undefined || s.item.index === index)),
+        get: (spec) => deps.getSceneSettingValue(sceneId, spec),
+        set: (spec, value) => deps.onSceneSettingChange(sceneId, spec, value),
+        appendRow: (rowContainer, spec) => appendSettingRow(rowContainer, sceneId, spec, specs),
+        onTick: (fn) => tickFns.push(fn),
+        onDispose: (fn) => widgetDisposers.push(fn),
+        // A whole-card rebuild rather than patching this section's own DOM
+        // — see registry.ts's header for why that's the right amount of
+        // work here (it reuses every bit of jack/cable/pin teardown below
+        // for free).
+        rerender: () => renderSceneSettings(),
+      };
+      build(host, section, ctx);
+      if (tickFns.length > 0) {
+        sceneRowHandles.push({
+          updateSignalPills: () => {
+            for (const fn of tickFns) fn();
+          },
+          refreshAuto: () => {},
+        });
+      }
+    }
+
     for (let i = 0; i < specs.length; i++) {
       const spec = specs[i];
+      if (spec.item && claimedFamilies.has(spec.item.family)) continue;
       const groupChanged = spec.group !== undefined && spec.group !== lastGroup;
       if (groupChanged) {
         hasGroups = true;

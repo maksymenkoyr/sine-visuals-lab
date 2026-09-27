@@ -171,6 +171,24 @@ export interface SceneSetting {
    *  directly — at every place a default matters (reset, Looks, the auto
    *  identity at NEUTRAL, the panel's reset arrow). */
   variantDefaults?: Readonly<Record<string, number>>;
+  /** Tags this setting as one instance of a scene-declared item family
+   *  (src/render/sceneItems.ts's header owns the concept) rather than a
+   *  hand-written control: `family` names the item group (e.g. "strain"),
+   *  `index` is which item (0-based), `param` is which per-item control
+   *  this is (e.g. "nutrient"), and `other` is the paired item's index for
+   *  a pairwise family (defineItemPairs's `att<i><j>`, `other` = `j`).
+   *  scene.ts's `Scene.panel` claims every setting whose `item.family`
+   *  matches a section's own `items`, rendering it through a custom widget
+   *  (src/ui/widgets/registry.ts) instead of the device menu's flat
+   *  per-setting loop; src/tuning/bakeDefaults.ts also skips an
+   *  `item`-tagged setting, since its default lives in the scene's own item
+   *  table, not a literal `default:` in source a bake could rewrite. */
+  item?: {
+    family: string;
+    index: number;
+    param: string;
+    other?: number;
+  };
 }
 
 const STORAGE_KEY = "vibe.sceneSettings";

@@ -1,0 +1,88 @@
+import type { PanelSection } from "../../render/scene.ts";
+import type { SceneSetting } from "../../render/sceneSettings.ts";
+
+/**
+ * Where a scene's `Scene.panel` sections (src/render/scene.ts,
+ * src/render/sceneItems.ts) become real DOM. `src/ui/deviceMenu.ts` renders
+ * each section by looking up its `widget` id here and calling the
+ * registered builder with a `WidgetCtx` — a small capability object rather
+ * than deviceMenu's own internals, so a widget never imports deviceMenu.ts
+ * and stays testable/reusable on its own (a widget file only ever imports
+ * this module, src/render/*, and other src/ui/ helpers like
+ * controlsKit.ts/controlsTheme.ts).
+ *
+ * `appendRow` is the one bridge into deviceMenu's real row-building code
+ * (`appendSettingRow`): a widget that wants an ordinary slider/patch-bay row
+ * for one of its item settings gets the *actual* row — drive chip, Receives
+ * patch, jack, cables, pin — by calling this instead of building its own
+ * look-alike. `get`/`set` go through the exact same store path a slider
+ * drag uses (deviceMenu's `onSceneSettingChange`), so a widget's own custom
+ * controls (Physarum 2's Affinity segmented rows) read/write storage,
+ * Looks and reset identically to a plain row, just with different UI.
+ *
+ * Widgets don't do their own fine-grained DOM patching on a selection
+ * change: `ctx.rerender()` re-runs the *whole* Scene card
+ * (deviceMenu.ts's `renderSceneSettings`) — the same rebuild a scene switch,
+ * a Look apply or a card Reset already does. That reuses 100% of the
+ * existing jack/cable/pin teardown (driveRowHandles, sceneRowHandles, the
+ * pinned-row reconciliation) for free instead of a second, easy-to-drift
+ * bookkeeping path — the cost (rebuilding every row on a click, not just the
+ * changed ones) is trivial for the small row counts a widget-backed scene
+ * has today. A widget that needs its own state to survive a rebuild (which
+ * item is selected, say) persists it itself (localStorage, try/catch — see
+ * itemBoxes.ts) rather than relying on anything here to carry it across.
+ *
+ * `onTick`/`onDispose` exist for the rarer widget that keeps its own
+ * per-frame state or a resource outside the rebuilt DOM subtree (a
+ * ResizeObserver on `window`, say): `onTick` callbacks join the device
+ * menu's own unthrottled per-tick pass (deviceMenu.ts's `sceneRowHandles`
+ * loop), and every registered `onDispose` runs right before the next full
+ * Scene-card rebuild. Phase 1/2 widgets (itemBoxes) don't need either —
+ * their own rows already tick through the handles `appendRow` registers.
+ */
+
+export interface WidgetCtx {
+  sceneId: string;
+  /** The active scene's full, flat settings list (SceneSetting[]) — the
+   *  same array deviceMenu.ts's flat loop walks. */
+  specs: readonly SceneSetting[];
+  /** `specs` filtered to one item family, optionally narrowed to one
+   *  item's index — src/render/sceneItems.ts's `SceneSetting.item` tag. */
+  specsFor(family: string, index?: number): SceneSetting[];
+  /** The setting's current stored value — resolveSceneSettingValue's
+   *  auto-aware live reading, same as a row's own live readout. */
+  get(spec: SceneSetting): number;
+  /** Writes through the exact path a slider drag uses. */
+  set(spec: SceneSetting, value: number): void;
+  /** Mounts `spec` as a real device-menu row (drive chip, Receives patch,
+   *  jack, cables, A/T, reset — deviceMenu.ts's own `appendSettingRow`)
+   *  into `container`. */
+  appendRow(container: HTMLElement, spec: SceneSetting): void;
+  /** Registers `fn` to run on every device-menu tick (unthrottled) while
+   *  this section is mounted — cleared automatically on the next rebuild. */
+  onTick(fn: () => void): void;
+  /** Registers `fn` to run once, right before the next full Scene-card
+   *  rebuild (a selection change via `rerender()`, a scene switch, a Look
+   *  apply, a card Reset). */
+  onDispose(fn: () => void): void;
+  /** Re-runs the whole Scene card — see this file's header for why a widget
+   *  reaches for this instead of patching its own DOM on a selection
+   *  change. */
+  rerender(): void;
+}
+
+export type WidgetBuild = (container: HTMLElement, section: PanelSection, ctx: WidgetCtx) => void;
+
+const widgets = new Map<string, WidgetBuild>();
+
+export function registerWidget(id: string, build: WidgetBuild): void {
+  widgets.set(id, build);
+}
+
+export function getWidget(id: string): WidgetBuild | undefined {
+  return widgets.get(id);
+}
+
+export function listWidgetIds(): readonly string[] {
+  return [...widgets.keys()];
+}

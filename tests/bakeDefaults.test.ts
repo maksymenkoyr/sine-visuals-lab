@@ -43,4 +43,13 @@ describe("buildDefaultEdits", () => {
     const edits = buildDefaultEdits(specs, (s) => values[s.key]);
     expect(edits).toEqual([{ key: "b", from: 2, to: 5 }]);
   });
+
+  it("skips a setting tagged `item`, even if its stored value differs from default", () => {
+    // Generated (src/render/sceneItems.ts) — its default lives in the
+    // scene's own item table, not a literal `default:` a bake could find
+    // and rewrite in source.
+    const generated: SceneSetting = { ...spec("nutrient0", 0.6), item: { family: "strain", index: 0, param: "nutrient" } };
+    const edits = buildDefaultEdits([generated, spec("a", 1)], () => 9);
+    expect(edits).toEqual([{ key: "a", from: 1, to: 9 }]);
+  });
 });
