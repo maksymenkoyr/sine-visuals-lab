@@ -47,6 +47,11 @@ const ENUM_SPEC: SceneSetting = {
   options: ["A", "B", "C"],
 };
 const BOOL_SPEC: SceneSetting = { key: "glow", label: "Glow", min: 0, max: 1, step: 1, default: 1, type: "boolean" };
+// A signed relation value (Physarum 2's att/touch pair tables) whose meaning
+// is its exact position — masterScale: false exempts it from the master
+// entirely, unlike enum/boolean above (which the master also skips, but for
+// a different reason — see resolveSceneSetting's "Rules the master keeps").
+const UNSCALED_SPEC: SceneSetting = { key: "touch01", label: "Touch", min: -1.5, max: 1.5, step: 0.05, default: 0, masterScale: false };
 
 afterEach(() => {
   setSceneMaster(SCENE_MASTER_DEFAULT);
@@ -128,6 +133,16 @@ describe("resolveSceneSetting applies the master", () => {
     setSceneSetting(sceneId, BOOL_SPEC, 1);
     setSceneMaster(0);
     expect(resolveSceneSetting(sceneId, BOOL_SPEC)).toBe(1);
+  });
+
+  it("leaves a masterScale: false spec unscaled at master 2 and at master 0, including a negative value", () => {
+    const sceneId = "master-unscaled";
+    setAutoEnabled(sceneId, UNSCALED_SPEC.key, false);
+    setSceneSetting(sceneId, UNSCALED_SPEC, -0.9);
+    setSceneMaster(2);
+    expect(resolveSceneSetting(sceneId, UNSCALED_SPEC)).toBe(-0.9);
+    setSceneMaster(0);
+    expect(resolveSceneSetting(sceneId, UNSCALED_SPEC)).toBe(-0.9);
   });
 
   it("does not reach the Input card's Sensitivity/Expansion/Smoothing", () => {
