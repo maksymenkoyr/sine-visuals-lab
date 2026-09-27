@@ -110,9 +110,29 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
 .pad-head .pair i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 .pad-head .beh { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pad-body { display: grid; grid-template-columns: 13px minmax(0, 1fr); gap: 3px; }
-.ycap, .xcap { font: 9.5px var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; }
-.ycap { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; }
-.xcap { grid-column: 2; text-align: right; }
+.ycap, .xcap { display: flex; gap: 6px; font: 9.5px var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; }
+.ycap { writing-mode: vertical-rl; transform: rotate(180deg); justify-content: flex-start; }
+.xcap { grid-column: 2; justify-content: flex-end; }
+.pads[data-axes="ends"] .ycap, .pads[data-axes="ends"] .xcap { justify-content: space-between; }
+.pads[data-axes="ends"] .ycap span:nth-child(2), .pads[data-axes="ends"] .xcap span:nth-child(2) { color: var(--ink-2); }
+
+/* naming (prototype only) */
+.namebar { display: grid; gap: 6px; padding: 8px; border: 1px dashed var(--line-hi); border-radius: 8px; }
+.seg.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.seg.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.names { display: grid; gap: 12px; }
+.names-head p { margin: 4px 0 0; max-width: 70ch; color: var(--ink-2); font-size: 12.5px; }
+.names-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 12px; }
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: #090d0e; }
+table.nm { border-collapse: collapse; width: 100%; min-width: 540px; font-size: 12.5px; }
+.nm caption { text-align: left; padding: 10px 12px 6px; font: 11px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }
+.nm th, .nm td { padding: 7px 10px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+.nm thead th { padding: 4px 6px; }
+.nm thead button { border: 0; background: none; padding: 4px 6px; border-radius: 5px; cursor: pointer; font: 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
+.nm thead th.on button { color: var(--ink); background: rgba(255, 255, 255, 0.08); }
+.nm th[scope="row"] { color: var(--ink-3); font-weight: 400; font-size: 12px; width: 30%; }
+.nm td.on { background: rgba(255, 255, 255, 0.04); color: var(--ink); }
+.nm td small { display: block; margin-top: 2px; font: 10px var(--mono); letter-spacing: 0.08em; color: var(--ink-3); }
 .pad-sq { position: relative; aspect-ratio: 1; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #000; touch-action: none; cursor: crosshair; }
 .pad-sq canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.6; }
 .pad-sq svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -295,6 +315,14 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
         <div class="ownstrip" id="ownstrip"></div>
         <p class="note-line" id="ownNote" hidden>Each strain always lays its own trail. Touch is only about everyone else's.</p>
         <div class="sec-label">Pairs</div>
+        <div class="namebar" aria-label="Names, prototype only">
+          <div class="sec-label">Names · prototype only</div>
+          <div class="seg four" role="radiogroup" aria-label="Naming set" id="nameSeg"></div>
+          <div class="seg two" role="radiogroup" aria-label="Axis labels">
+            <button type="button" role="radio" id="axes-sentence" aria-checked="true">Axis: sentence</button>
+            <button type="button" role="radio" id="axes-ends" aria-checked="false">Axis: ends</button>
+          </div>
+        </div>
         <p class="status" id="pairStatus"></p>
         <div class="pads" id="pads"></div>
       </div>
@@ -323,6 +351,17 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
       </div>
     </section>
   </div>
+
+  <section class="names" aria-label="Names side by side">
+    <div class="names-head">
+      <div class="sec-label">Names side by side</div>
+      <p>Every relation a pad can name, in each naming set, with the corner label under it where the relation has a corner. Tap a set's name to put it on the pads.</p>
+    </div>
+    <div class="names-grid">
+      <div class="tbl-wrap"><table class="nm" id="nmSmell"></table></div>
+      <div class="tbl-wrap"><table class="nm" id="nmTouch"></table></div>
+    </div>
+  </section>
 
   <section class="notes" aria-label="What each idea costs">
     <article class="note new">
@@ -433,14 +472,10 @@ const LAYERS = {
   smell: {
     words: [["Flees", -1.2], ["Avoids", -0.6], ["Ignores", 0], ["Follows", 0.6], ["Loves", 1.1]],
     pos: [140, 230, 160], neg: [239, 106, 106], mixed: "249,185,108",
-    corners: { tr: "MERGE", bl: "WALL", tl: "CHASE", br: "CHASE" },
-    verb: "follows",
   },
   touch: {
     words: [["Devours", -1.2], ["Eats", -0.6], ["Spares", 0], ["Feeds", 0.6], ["Nurtures", 1.1]],
     pos: [89, 187, 251], neg: [255, 146, 72], mixed: "195,165,249",
-    corners: { tr: "SHARE", bl: "WAR", tl: "PREY", br: "PREY" },
-    verb: "feeds",
   },
 };
 let layer = "smell";
@@ -741,28 +776,67 @@ function S(tag, attrs, parent) {
   if (parent) parent.appendChild(e);
   return e;
 }
-function pairName(a, b, x, y) {
-  const P = 0.3, A = STRAINS[a].short, B = STRAINS[b].short;
-  if (layer === "touch") {
-    if (x > P && y > P) return "Share";
-    if (x < -P && y < -P) return "War";
-    if (x < -P && y > P) return `${A} preys on ${B}`;
-    if (x > P && y < -P) return `${B} preys on ${A}`;
-    if (x < -P) return `${A} eats ${B}`;
-    if (y < -P) return `${B} eats ${A}`;
-    if (x > P) return `${A} feeds ${B}`;
-    if (y > P) return `${B} feeds ${A}`;
-    return "Harmless";
-  }
-  if (x > P && y > P) return "Merge";
-  if (x < -P && y < -P) return "Wall";
-  if (x > P && y < -P) return `${A} chases ${B}`;
-  if (x < -P && y > P) return `${B} chases ${A}`;
-  if (x > P) return `${A} tails ${B}`;
-  if (y > P) return `${B} tails ${A}`;
-  if (x < -P) return `${A} shuns ${B}`;
-  if (y < -P) return `${B} shuns ${A}`;
-  return "Strangers";
+// Naming sets for the pads, per table. A pad's x is what A does about B,
+// y what B does about A. `plus(a, b)` / `minus(a, b)`: a's side is clearly
+// positive / negative and the other side is near zero. `mixed(w, l)`: Smell,
+// w is drawn to l while l is pushed off w; Touch, w harms l while l helps w.
+const NAMES = {
+  current: {
+    label: "Current",
+    smell: { verb: "follows", ends: ["flees", "follows"], corners: { both: "MERGE", against: "WALL", mix: "CHASE" },
+      both: "Merge", against: "Wall", neither: "Strangers",
+      mixed: (w, l) => `${w} chases ${l}`, plus: (a, b) => `${a} tails ${b}`, minus: (a, b) => `${a} shuns ${b}` },
+    touch: { verb: "feeds", ends: ["eats", "feeds"], corners: { both: "SHARE", against: "WAR", mix: "PREY" },
+      both: "Share", against: "War", neither: "Harmless",
+      mixed: (w, l) => `${w} preys on ${l}`, plus: (a, b) => `${a} feeds ${b}`, minus: (a, b) => `${a} eats ${b}` },
+  },
+  ecology: {
+    label: "Ecology",
+    smell: { verb: "is drawn to", ends: ["repelled", "drawn"], corners: { both: "FLOCK", against: "TERRITORY", mix: "PURSUIT" },
+      both: "Flocking", against: "Territories", neither: "Indifferent",
+      mixed: (w, l) => `${w} pursues ${l}`, plus: (a, b) => `${a} follows ${b}`, minus: (a, b) => `${a} avoids ${b}` },
+    touch: { verb: "helps", ends: ["harms", "helps"], corners: { both: "MUTUALISM", against: "COMPETITION", mix: "PREDATION" },
+      both: "Mutualism", against: "Competition", neither: "Neutralism",
+      mixed: (w, l) => `${w} preys on ${l}`, plus: (a, b) => `${b} lives off ${a}`, minus: (a, b) => `${a} harms ${b}` },
+  },
+  plain: {
+    label: "Plain",
+    smell: { verb: "goes to", ends: ["away", "toward"], corners: { both: "TOGETHER", against: "APART", mix: "CHASE" },
+      both: "Together", against: "Apart", neither: "Ignore each other",
+      mixed: (w, l) => `${w} chases ${l}`, plus: (a, b) => `${a} follows ${b}`, minus: (a, b) => `${a} avoids ${b}` },
+    touch: { verb: "helps", ends: ["harms", "helps"], corners: { both: "HELP", against: "HARM", mix: "USE" },
+      both: "Help each other", against: "Harm each other", neither: "No effect",
+      mixed: (w, l) => `${w} uses ${l}`, plus: (a, b) => `${a} helps ${b}`, minus: (a, b) => `${a} harms ${b}` },
+  },
+  playful: {
+    label: "Playful",
+    smell: { verb: "likes", ends: ["dodge", "like"], corners: { both: "DANCE", against: "STANDOFF", mix: "TAG" },
+      both: "Dance", against: "Standoff", neither: "Strangers",
+      mixed: (w, l) => `${w} tags ${l}`, plus: (a, b) => `${a} shadows ${b}`, minus: (a, b) => `${a} dodges ${b}` },
+    touch: { verb: "gifts", ends: ["bite", "gift"], corners: { both: "ALLIES", against: "WAR", mix: "VAMPIRE" },
+      both: "Allies", against: "War", neither: "Peace",
+      mixed: (w, l) => `${w} drains ${l}`, plus: (a, b) => `${a} gifts ${b}`, minus: (a, b) => `${a} bites ${b}` },
+  },
+};
+let nameSet = "current";
+let axisStyle = "sentence";
+function pairName(a, b, x, y, ly = layer, set = nameSet) {
+  const n = NAMES[set][ly], P = 0.3, A = STRAINS[a].short, B = STRAINS[b].short;
+  const touch = ly === "touch";
+  if (x > P && y > P) return n.both;
+  if (x < -P && y < -P) return n.against;
+  if (x > P && y < -P) return touch ? n.mixed(B, A) : n.mixed(A, B);
+  if (x < -P && y > P) return touch ? n.mixed(A, B) : n.mixed(B, A);
+  if (x > P) return n.plus(A, B);
+  if (y > P) return n.plus(B, A);
+  if (x < -P) return n.minus(A, B);
+  if (y < -P) return n.minus(B, A);
+  return n.neither;
+}
+function axisCaption(from, to, n) {
+  return axisStyle === "ends"
+    ? `<span>${n.ends[0]}</span><span>${from}→${to}</span><span>${n.ends[1]}</span>`
+    : `<span>${from} ${n.verb} ${to} →</span>`;
 }
 const pads = [];
 const pairCultures = [];
@@ -787,7 +861,9 @@ function buildPads() {
   const host = $("pads");
   host.textContent = "";
   pads.length = 0;
+  host.dataset.axes = axisStyle;
   const Ly = LAYERS[layer];
+  const nm = NAMES[nameSet][layer];
   const P = Ly.pos.join(","), N = Ly.neg.join(",");
   PAIRS.forEach(([a, b], idx) => {
     const A = STRAINS[a], B = STRAINS[b];
@@ -796,9 +872,9 @@ function buildPads() {
     el.innerHTML = `
       <div class="pad-head"><span class="pair"><i style="background:${css(a)}"></i>${A.short} ⇄ <i style="background:${css(b)}"></i>${B.short}</span><span class="beh"></span></div>
       <div class="pad-body">
-        <div class="ycap">${B.short} ${Ly.verb} ${A.short} →</div>
+        <div class="ycap">${axisCaption(B.short, A.short, nm)}</div>
         <div class="pad-sq" tabindex="0" role="group" aria-label="${A.code} and ${B.code}"><canvas width="144" height="144"></canvas></div>
-        <div class="xcap">${A.short} ${Ly.verb} ${B.short} →</div>
+        <div class="xcap">${axisCaption(A.short, B.short, nm)}</div>
       </div>`;
     const sq = el.querySelector(".pad-sq");
     const cv = sq.querySelector("canvas");
@@ -815,10 +891,10 @@ function buildPads() {
       S("line", { x1: 48.5, y1: 100 - pc(v), x2: 51.5, y2: 100 - pc(v), stroke: "rgba(255,255,255,.3)", "vector-effect": "non-scaling-stroke" }, svg);
     });
     const corner = (x, y, anchor, text) => { const t = S("text", { x, y, "text-anchor": anchor, class: "pad-corner" }, svg); t.textContent = text; };
-    corner(96, 9, "end", Ly.corners.tr);
-    corner(4, 96, "start", Ly.corners.bl);
-    corner(96, 96, "end", Ly.corners.br);
-    corner(4, 9, "start", Ly.corners.tl);
+    corner(96, 9, "end", nm.corners.both);
+    corner(4, 96, "start", nm.corners.against);
+    corner(96, 96, "end", nm.corners.mix);
+    corner(4, 9, "start", nm.corners.mix);
     const gx = S("line", { stroke: "rgba(255,255,255,.35)", "stroke-dasharray": "2 2", "vector-effect": "non-scaling-stroke" }, svg);
     const gy = S("line", { stroke: "rgba(255,255,255,.35)", "stroke-dasharray": "2 2", "vector-effect": "non-scaling-stroke" }, svg);
     const dot = S("g", {}, svg);
@@ -918,6 +994,58 @@ function setMode(m) {
   renderStory();
 }
 ["none", "knob", "table"].forEach((x) => $("mode-" + x).addEventListener("click", () => setMode(x)));
+
+// ---------- naming (prototype only) ----------
+// Each row is one relation a pad can name, as pad values for A1 (x) and B2 (y).
+const NAME_ROWS = {
+  smell: [
+    { desc: "Both drawn to each other's trail", x: 1, y: 1, corner: "both" },
+    { desc: "Both pushed off each other's trail", x: -1, y: -1, corner: "against" },
+    { desc: "A1 drawn to B2, B2 pushed off A1", x: 1, y: -1, corner: "mix" },
+    { desc: "A1 drawn to B2, B2 doesn't care", x: 1, y: 0 },
+    { desc: "A1 pushed off B2, B2 doesn't care", x: -1, y: 0 },
+    { desc: "Neither cares", x: 0, y: 0 },
+  ],
+  touch: [
+    { desc: "Both feed each other's trail", x: 1, y: 1, corner: "both" },
+    { desc: "Both eat each other's trail", x: -1, y: -1, corner: "against" },
+    { desc: "A1 eats B2's, B2 feeds A1's", x: -1, y: 1, corner: "mix" },
+    { desc: "A1 feeds B2's, B2 does nothing", x: 1, y: 0 },
+    { desc: "A1 eats B2's, B2 does nothing", x: -1, y: 0 },
+    { desc: "Neither touches the other's", x: 0, y: 0 },
+  ],
+};
+const SETS = Object.keys(NAMES);
+function renderNameTables() {
+  [["smell", "nmSmell", "Smell"], ["touch", "nmTouch", "Touch"]].forEach(([ly, id, title]) => {
+    const on = (s) => (s === nameSet ? "on" : "");
+    const head = `<caption>${title}</caption><thead><tr><th scope="col"></th>${SETS.map((s) => `<th scope="col" class="${on(s)}"><button type="button" data-set="${s}">${NAMES[s].label}</button></th>`).join("")}</tr></thead>`;
+    const axisRow = `<tr><th scope="row">Axis, A1 → B2</th>${SETS.map((s) => { const n = NAMES[s][ly]; return `<td class="${on(s)}">A1 ${n.verb} B2<small>${n.ends[0]} · ${n.ends[1]}</small></td>`; }).join("")}</tr>`;
+    const rows = NAME_ROWS[ly].map((r) => `<tr><th scope="row">${r.desc}</th>${SETS.map((s) => `<td class="${on(s)}">${pairName(0, 1, r.x, r.y, ly, s)}${r.corner ? `<small>${NAMES[s][ly].corners[r.corner]}</small>` : ""}</td>`).join("")}</tr>`).join("");
+    const t = $(id);
+    t.innerHTML = `${head}<tbody>${axisRow}${rows}</tbody>`;
+    t.querySelectorAll("button[data-set]").forEach((b) => b.addEventListener("click", () => setNames(b.dataset.set)));
+  });
+}
+SETS.forEach((s) => {
+  const b = document.createElement("button");
+  b.type = "button"; b.id = "names-" + s; b.textContent = NAMES[s].label;
+  b.setAttribute("role", "radio");
+  b.addEventListener("click", () => setNames(s));
+  $("nameSeg").appendChild(b);
+});
+function setNames(s) {
+  nameSet = s;
+  SETS.forEach((x) => $("names-" + x).setAttribute("aria-checked", String(x === s)));
+  buildPads();
+  renderNameTables();
+}
+function setAxes(a) {
+  axisStyle = a;
+  ["sentence", "ends"].forEach((x) => $("axes-" + x).setAttribute("aria-checked", String(x === a)));
+  buildPads();
+}
+["sentence", "ends"].forEach((x) => $("axes-" + x).addEventListener("click", () => setAxes(x)));
 
 // ---------- mix: random, nudge, presets, history strip, auto ----------
 let lockOwn = false;
@@ -1035,6 +1163,7 @@ buildOwnStrip();
 setLayer("smell");
 syncBite();
 setMode(touchMode);
+setNames(nameSet);
 ensurePairCultures();
 for (let i = 0; i < 90; i++) main.step(tables.smell.live, effT);
 drawMain();
