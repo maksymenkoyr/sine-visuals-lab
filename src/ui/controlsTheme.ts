@@ -175,10 +175,15 @@ const stylesheet = `
 .vc-controls-col {
   width: 314px; flex: none; display: flex; flex-direction: column; gap: 4px;
   max-height: calc(100vh - 74px); overflow-y: auto;
-  /* Solo's keep-in-place padding-top (deviceMenu.ts's setSolo) counts
-   * inside the max-height, not on top of it — else the column runs past
-   * the viewport and its sticky footer with it. */
-  box-sizing: border-box;
+}
+/* Solo (deviceMenu.ts's setSolo/applySolo): the column takes its full
+ * height and what's left in it sits at the bottom, just above the footer
+ * (wide layout only — stacked, the whole panel is one scroller) —
+ * an auto top margin rather than justify-content: flex-end, which would
+ * make an overflowing pane's top unreachable by scrolling. */
+@media (min-width: ${STACK_BELOW_PX + 1}px) {
+  .vc-root.vc-solo .vc-controls-col { height: calc(100vh - 74px); }
+  .vc-root.vc-solo .vc-controls-col > :not(.vc-solo-hidden):not(.vc-dock) { margin-top: auto; }
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }

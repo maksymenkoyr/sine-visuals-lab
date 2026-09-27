@@ -4655,24 +4655,49 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // column, heading or neighbouring button needs its own rule, in either
   // layout. View state for this session only, like the keys list.
   function setSolo(on: boolean): void {
-    // Whatever solo isolates stays put on screen across the toggle: hiding
-    // (or bringing back) everything above it would otherwise jump it to the
-    // top of the column (or push it back down). On, padding makes up the
-    // space the hidden cards above it took; off, the column scrolls by
-    // however far it moved instead.
+    // Soloed, what's isolated settles at the bottom of the column, just
+    // above the footer (.vc-solo's rules in controlsTheme.ts); un-soloed,
+    // the column scrolls so it lands back where it was before the solo.
+    // Either way it slides there from where it just was (slideFrom) rather
+    // than jumping.
     const anchor = sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned") ?? sceneCard.el;
     const before = anchor.getBoundingClientRect().top;
     soloOn = on;
     applySolo();
-    const moved = anchor.getBoundingClientRect().top - before;
-    if (on) controlsCol.style.paddingTop = `${Math.max(0, -moved)}px`;
-    else (narrowMQ.matches ? root : controlsCol).scrollTop += moved;
+    if (on) soloReturnTop = before;
+    else if (soloReturnTop !== null) {
+      (narrowMQ.matches ? root : controlsCol).scrollTop += anchor.getBoundingClientRect().top - soloReturnTop;
+      soloReturnTop = null;
+    }
+    slideFrom(sceneCard.el, before - anchor.getBoundingClientRect().top);
     syncSoloEye(soloEyeEl);
     refreshCableVisibility();
     soloBtn.textContent = on ? "All  O" : "Solo  O";
     soloBtn.title = on ? "Show everything again (O)" : "Show only the pinned setting — or the Scene card, when none is pinned (O)";
     soloBtn.style.color = on ? "#fff" : "inherit";
     scheduleCableRecompute();
+  }
+  // Where the soloed pane sat before the solo — un-soloing puts it back.
+  let soloReturnTop: number | null = null;
+  const reducedMotionMQ = window.matchMedia("(prefers-reduced-motion: reduce)");
+  /** Plays `el` from `dy` px away back to where layout now puts it — a
+   *  quick ease-out, skipped under reduced motion. Cables and the solo eye
+   *  are re-placed once it lands. */
+  function slideFrom(el: HTMLElement, dy: number): void {
+    if (Math.abs(dy) < 1 || reducedMotionMQ.matches) return;
+    el.style.transition = "none";
+    el.style.transform = `translateY(${dy}px)`;
+    el.getBoundingClientRect(); // commit the offset before animating it away
+    el.style.transition = "transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1)";
+    el.style.transform = "";
+    el.addEventListener(
+      "transitionend",
+      () => {
+        el.style.transition = "";
+        scheduleCableRecompute();
+      },
+      { once: true },
+    );
   }
   function syncSoloEye(eye: HTMLButtonElement): void {
     eye.setAttribute("aria-pressed", String(soloOn));
@@ -4681,9 +4706,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   }
   function applySolo(): void {
     for (const el of [...root.querySelectorAll(".vc-solo-hidden")]) el.classList.remove("vc-solo-hidden");
-    // setSolo's keep-in-place padding belongs to the toggle that set it —
-    // any other re-apply (the pin moving, rows rebuilt) starts from none.
-    controlsCol.style.paddingTop = "";
     root.classList.toggle("vc-solo", soloOn);
     if (!soloOn) return;
     if (sceneCard.el.classList.contains("vc-folded")) sceneCard.el.querySelector<HTMLButtonElement>(".vc-fold")?.click();
