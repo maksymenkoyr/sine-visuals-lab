@@ -573,27 +573,31 @@ body.vc-keys-reveal [data-keycap]::after {
 }
 /* Solo's eye (deviceMenu.ts's positionSoloEye): fixed on <body> just
  * outside the pinned row's left edge, under its port, in the pin's colour —
- * a carved tile with an eye-shaped hole. Shut while everything shows (a
- * rounded, sphere-shaded lid fills the hole), peeking half open on hover,
- * lid lifted away (the pupil down in the dark, the tile glowing) while this
- * setting is the only thing shown. The lid scales from the hole's top edge,
- * so toggling reads as an eyelid opening and blinking shut. */
+ * a carved tile with an eye-shaped hole. Shut while everything shows (two
+ * lids meet at a seam, shaded darker toward the hole's edge so together they
+ * read as one rounded bump), peeking half open on hover, lids drawn back
+ * (the pupil down in the dark, the tile glowing) while this setting is the
+ * only thing shown. Each lid scales toward its own edge of the hole — the
+ * upper up, the lower down — so toggling reads as an eye opening and
+ * blinking shut. */
 .vc-solo-eye {
   position: fixed; z-index: 31; width: 18px; height: 18px; padding: 0;
   background: none; border: none; cursor: pointer; color: var(--vc-pin-color, ${SCENE_VIOLET});
   --open: 0;
 }
 .vc-solo-eye svg { width: 18px; height: 18px; display: block; overflow: visible; }
-.vc-eye-lid {
-  transform-origin: 12px 4.4px; transform: scaleY(calc(1 - var(--open)));
+.vc-eye-lid-top, .vc-eye-lid-bot {
+  transform: scaleY(calc(1 - var(--open)));
   transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
+.vc-eye-lid-top { transform-origin: 12px 4.6px; }
+.vc-eye-lid-bot { transform-origin: 12px 19.4px; }
 .vc-solo-eye:hover, .vc-solo-eye:focus-visible { --open: 0.5; outline: none; }
 .vc-solo-eye.vc-solo-eye-on { --open: 1; }
 .vc-solo-eye.vc-solo-eye-on:hover { --open: 0.82; }
 .vc-solo-eye.vc-solo-eye-on svg { filter: drop-shadow(0 0 3px var(--vc-pin-color, ${SCENE_VIOLET})); }
 @media (prefers-reduced-motion: reduce) {
-  .vc-eye-lid { transition: none; }
+  .vc-eye-lid-top, .vc-eye-lid-bot { transition: none; }
 }
 /* Soloed, the pinned row is the first thing in its card — room above it so
  * the card's own overflow: hidden doesn't clip the port on its top edge. */
