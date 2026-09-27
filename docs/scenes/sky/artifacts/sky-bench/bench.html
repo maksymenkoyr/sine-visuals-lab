@@ -188,7 +188,7 @@ input[type=range].time::-moz-range-progress { background: transparent; }
 .sw .hex { font: 12px var(--mono); color: var(--muted); }
 
 /* Looks */
-.presets { display: flex; flex-wrap: wrap; gap: 6px; }
+#groups .group { background: var(--bg); }
 .preset { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 5px 11px; cursor: pointer; font-size: 13px; color: var(--text); }
 .preset:hover { border-color: var(--accent); }
 .preset small { color: var(--faint); margin-left: 4px; }
@@ -255,11 +255,8 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
           <span>Drag across the preview to move the divider.</span>
         </div>
         <div class="modeopts" id="optVariations" hidden>
-          <span class="ctlmini"><label for="varAmt">How different</label><input type="range" id="varAmt" min="0.1" max="1" step="0.05" value="0.5"></span>
-          <label><input type="checkbox" id="varSky" checked> Sky colours</label>
-          <label><input type="checkbox" id="varCloudCol" checked> Cloud colours</label>
-          <label><input type="checkbox" id="varShape" checked> Cloud shape</label>
           <button class="btn small" id="reroll" type="button">New variations</button>
+          <span>Click a tile to keep it.</span>
         </div>
       </div>
 
@@ -274,13 +271,10 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
     </section>
 
     <aside class="rail" id="rail" aria-label="Controls">
+      <div id="mainGroup"></div>
       <details class="group" open id="gLooks">
-        <summary>Looks <span class="aside" id="undoWrap"><button class="btn small" id="undo" type="button" disabled>Undo</button></span></summary>
+        <summary>Looks <span class="aside"><button class="btn small" id="resetAll" type="button">Reset to shipped</button> <button class="btn small" id="undo" type="button" disabled>Undo</button></span></summary>
         <div class="gbody">
-          <div>
-            <p class="gnote" style="margin-bottom:8px">Start from a preset. Colour presets keep your cloud shape, and shape presets keep your colours.</p>
-            <div class="presets" id="presets"></div>
-          </div>
           <form class="saveform" id="saveForm">
             <label for="lookName" class="gnote">Save this look for Claude</label>
             <input id="lookName" maxlength="60" placeholder="Name, e.g. Dusk with soft puffs" autocomplete="off">
@@ -293,7 +287,10 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
           </div>
         </div>
       </details>
-      <div id="groups" style="display:grid;gap:10px"></div>
+      <details class="group" id="gMore">
+        <summary>More controls <span class="aside">day colours, sun, shading, sim</span></summary>
+        <div class="gbody" id="groups"></div>
+      </details>
       <details class="group" id="gCode">
         <summary>Code for sky.ts <span class="aside" id="codeCount"></span></summary>
         <div class="gbody">
@@ -322,29 +319,21 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
   const $ = (id) => document.getElementById(id);
 
   // ---- The look: every constant sky.ts reads for the sky and clouds. ----
-  // SHIPPED mirrors sky.ts on this branch; BEFORE is the scene before the
-  // darker, narrower sky, the farther sun and the palette-matched darkest
-  // key (SKY_SPREAD, SKY_LEVEL and SUN_DISTANCE at 1, the old coral glow key).
+  // SHIPPED mirrors sky.ts on this branch.
   const SHIPPED = {
-    zenith: [[0.245, 0.328, 0.984], [0.3, 0.36, 0.6], [0.37, 0.44, 0.65], [0.26, 0.45, 0.78]],
-    horizon: [[1.0, 1.0, 0.95], [0.95, 0.72, 0.58], [0.71, 0.7, 0.84], [0.7, 0.8, 0.93]],
-    cloudLit: [[0.9, 0.9, 1.0], [1.0, 0.82, 0.66], [0.98, 0.93, 0.95], [1.0, 0.99, 0.97]],
-    cloudShade: [[0.4, 0.42, 0.72], [0.5, 0.42, 0.52], [0.54, 0.5, 0.64], [0.58, 0.62, 0.72]],
+    zenith: [[0.245, 0.328, 0.984], [0.3, 0.36, 0.6], [0.37, 0.44, 0.65], [0.167, 0.325, 0.623]],
+    horizon: [[1.0, 1.0, 0.95], [0.95, 0.72, 0.58], [0.71, 0.7, 0.84], [0.406, 0.599, 0.769]],
+    cloudLit: [[0.9, 0.9, 1.0], [1.0, 0.82, 0.66], [0.98, 0.93, 0.95], [0.92, 0.935, 0.955]],
+    cloudShade: [[0.4, 0.42, 0.72], [0.5, 0.42, 0.52], [0.54, 0.5, 0.64], [0.6, 0.64, 0.72]],
     sun: [[0.72, 0.7, 1.0], [1.0, 0.7, 0.4], [1.0, 0.88, 0.75], [1.0, 0.97, 0.9]],
     skySpread: 0.6, skyLevel: 0.86, gradLo: -0.1, gradHi: 0.9,
-    sunHalo: 0.3, sunCore: 0.22, horizonWarm: 0.35, sunDistance: 1.4,
+    sunHalo: 0.3, sunCore: 0.22, horizonWarm: 0.35, sunDistance: 1.7,
     cloudBrightness: 0.6,
-    shadowK1: 0.85, shadowK2: 0.52, shadowTap1: 0.045, shadowTap2: 0.095,
-    cloudLow: 0.16, cloudHigh: 0.55, bumpScale: 11.0, bumpAmount: 0.65, wispScale: 2.9, wispAmount: 0.35, bumpMorph: 0.05,
-    cloudCover: 0.5, drifterCount: 10, sigmaMin: 0.045, sigmaMax: 0.085, dyeRate: 1.05, puffRate: 0.45,
-    dissipation: 0.34, drifterForce: 10, turbulence: 0.45, flowSpeed: 0.5, viscosity: 0.3,
+    shadowK1: 1.3, shadowK2: 0.8, shadowTap1: 0.045, shadowTap2: 0.095,
+    cloudLow: 0.12, cloudHigh: 0.24, bumpScale: 13.0, bumpAmount: 0.7, wispScale: 2.9, wispAmount: 0.45, bumpMorph: 0.05,
+    cloudCover: 0.5, drifterCount: 20, sigmaMin: 0.024, sigmaMax: 0.045, dyeRate: 2.6, puffRate: 0.6,
+    dissipation: 0.45, drifterForce: 1, turbulence: 0.45, flowSpeed: 0.5, viscosity: 0.6,
   };
-  const BEFORE = Object.assign(clone(SHIPPED), { skySpread: 1, skyLevel: 1, sunDistance: 1 });
-  BEFORE.zenith[0] = [0.2, 0.2, 0.42];
-  BEFORE.horizon[0] = [0.9, 0.5, 0.46];
-  BEFORE.cloudLit[0] = [0.98, 0.62, 0.55];
-  BEFORE.cloudShade[0] = [0.36, 0.26, 0.4];
-  BEFORE.sun[0] = [1.0, 0.45, 0.25];
   const MORNING_WARMTH = [1.04, 1.0, 0.86];
   const KEY_E = [-0.02, 0.08, 0.25, 0.65];
   const KEY_NAMES = ["Horizon glow", "Golden hour", "Early evening", "Midday"];
@@ -357,12 +346,23 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
     { id: "sun", label: "Sun", k: "SUN_KEY" },
   ];
 
-  // ---- Controls. Every slider grows what its label names (right = more). ----
+  // ---- Controls. Every slider grows what its label names (right = more).
+  // Six up front; everything else folds into More controls. ----
   const direct = (key) => ({ get: (p) => p[key], set: (p, v) => { p[key] = v; } });
+  const MAIN = { id: "main", title: "Sky and clouds", note: "Cloud amount and Cloud size change the simulation itself, so they show as new puffs form and apply to both halves of a comparison.", controls: [
+    { id: "skyLevel", label: "Sky brightness", min: 0.5, max: 1.2, step: 0.01, ...direct("skyLevel"), consts: (p) => `SKY_LEVEL ${f(p.skyLevel)}` },
+    { id: "skySpread", label: "Colour range", min: 0, max: 1.2, step: 0.01, ...direct("skySpread"), consts: (p) => `SKY_SPREAD ${f(p.skySpread)}` },
+    { id: "sunDistance", label: "Sun distance", min: 0.8, max: 2.5, step: 0.01, ...direct("sunDistance"), consts: (p) => `SUN_DISTANCE ${f(p.sunDistance)}` },
+    { id: "dyeRate", label: "Cloud amount", min: 0.5, max: 5, step: 0.05, ...direct("dyeRate"), consts: (p) => `DRIFTER_DYE_RATE ${f(p.dyeRate)}` },
+    { id: "cloudSize", label: "Cloud size", min: 0.5, max: 2.2, step: 0.01,
+      // Scales the puffs and the bulges together, so a bigger cloud keeps its lumpiness.
+      get: (p) => p.sigmaMin / 0.024,
+      set: (p, v) => { const was = p.sigmaMin / 0.024; p.bumpScale *= was / v; p.sigmaMin = 0.024 * v; p.sigmaMax = 0.045 * v; },
+      consts: (p) => `DRIFTER_SIGMA_MIN ${f(p.sigmaMin)} · MAX ${f(p.sigmaMax)} · CLOUD_BUMP_SCALE ${f(p.bumpScale)}` },
+    { id: "bumpAmount", label: "Bumpiness", min: 0, max: 1, step: 0.01, ...direct("bumpAmount"), consts: (p) => `CLOUD_BUMP_AMOUNT ${f(p.bumpAmount)}` },
+  ] };
   const GROUPS = [
-    { id: "sky", title: "Sky", note: "The two trims on top of every key: brightness and how many hues the gradient spans.", controls: [
-      { id: "skyLevel", label: "Sky brightness", min: 0.5, max: 1.2, step: 0.01, ...direct("skyLevel"), consts: (p) => `SKY_LEVEL ${f(p.skyLevel)}` },
-      { id: "skySpread", label: "Colour range", min: 0, max: 1.2, step: 0.01, ...direct("skySpread"), consts: (p) => `SKY_SPREAD ${f(p.skySpread)}` },
+    { id: "sky", title: "Sky gradient", controls: [
       { id: "horizonReach", label: "Horizon reach", min: -0.3, max: 0.9, step: 0.01,
         get: (p) => (p.gradLo + p.gradHi) / 2, set: (p, v) => { const w = p.gradHi - p.gradLo; p.gradLo = v - w / 2; p.gradHi = v + w / 2; },
         consts: (p) => `SKY_GRADIENT_LO ${f(p.gradLo)} · HI ${f(p.gradHi)}` },
@@ -370,76 +370,57 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
         get: (p) => p.gradHi - p.gradLo, set: (p, v) => { const m = (p.gradLo + p.gradHi) / 2; p.gradLo = m - v / 2; p.gradHi = m + v / 2; },
         consts: (p) => `SKY_GRADIENT_LO ${f(p.gradLo)} · HI ${f(p.gradHi)}` },
     ] },
-    { id: "keys", title: "Key colours", keys: true },
-    { id: "sun", title: "Sun", controls: [
-      { id: "sunDistance", label: "Sun distance", min: 0.8, max: 2.5, step: 0.01, ...direct("sunDistance"), consts: (p) => `SUN_DISTANCE ${f(p.sunDistance)}` },
+    { id: "keys", title: "Colours by time of day", keys: true },
+    { id: "sun", title: "Sun glow", controls: [
       { id: "sunHalo", label: "Sun halo", min: 0, max: 0.7, step: 0.01, ...direct("sunHalo"), consts: (p) => `SUN_HALO ${f(p.sunHalo)}` },
       { id: "sunCore", label: "Sun core", min: 0, max: 0.6, step: 0.01, ...direct("sunCore"), consts: (p) => `SUN_CORE ${f(p.sunCore)}` },
       { id: "horizonWarm", label: "Horizon warmth", min: 0, max: 0.9, step: 0.01, ...direct("horizonWarm"), consts: (p) => `HORIZON_WARM ${f(p.horizonWarm)}` },
     ] },
-    { id: "cloudcol", title: "Cloud colour", controls: [
+    { id: "cloudcol", title: "Cloud light", controls: [
       { id: "cloudBrightness", label: "Cloud brightness", min: 0, max: 1, step: 0.01, ...direct("cloudBrightness"), consts: (p) => `setting cloudBrightness ${f(p.cloudBrightness)}` },
       { id: "shadowDepth", label: "Shadow depth", min: 0, max: 2.5, step: 0.01,
-        get: (p) => p.shadowK1 / 0.85, set: (p, v) => { p.shadowK1 = 0.85 * v; p.shadowK2 = 0.52 * v; },
+        get: (p) => p.shadowK1 / 1.3, set: (p, v) => { p.shadowK1 = 1.3 * v; p.shadowK2 = 0.8 * v; },
         consts: (p) => `CLOUD_SHADOW_K1 ${f(p.shadowK1)} · K2 ${f(p.shadowK2)}` },
       { id: "shadowReach", label: "Shadow reach", min: 0.3, max: 2.5, step: 0.01,
         get: (p) => p.shadowTap1 / 0.045, set: (p, v) => { p.shadowTap1 = 0.045 * v; p.shadowTap2 = 0.095 * v; },
         consts: (p) => `CLOUD_SHADOW_TAP1 ${f(p.shadowTap1)} · TAP2 ${f(p.shadowTap2)}` },
     ] },
-    { id: "shape", title: "Cloud shape", note: "How the simulated density turns into cloud: the threshold, its edge, and the cauliflower texture.", controls: [
+    { id: "shape", title: "Cloud edges", controls: [
       { id: "extent", label: "Cloud extent", min: 0, max: 1, step: 0.01,
         get: (p) => (0.35 - p.cloudLow) / 0.3, set: (p, v) => { const w = p.cloudHigh - p.cloudLow; p.cloudLow = 0.35 - 0.3 * v; p.cloudHigh = p.cloudLow + w; },
         consts: (p) => `CLOUD_LOW ${f(p.cloudLow)} · HIGH ${f(p.cloudHigh)}` },
       { id: "edgeSoft", label: "Edge softness", min: 0.04, max: 0.8, step: 0.01,
         get: (p) => p.cloudHigh - p.cloudLow, set: (p, v) => { p.cloudHigh = p.cloudLow + v; },
         consts: (p) => `CLOUD_LOW ${f(p.cloudLow)} · HIGH ${f(p.cloudHigh)}` },
-      { id: "bumpSize", label: "Bump size", min: 0, max: 1, step: 0.01,
-        get: (p) => (24 - p.bumpScale) / 20, set: (p, v) => { p.bumpScale = 24 - 20 * v; },
+      { id: "bumpSize", label: "Bulge size", min: 0.3, max: 2.5, step: 0.01,
+        get: (p) => 13 / p.bumpScale, set: (p, v) => { p.bumpScale = 13 / v; },
         consts: (p) => `CLOUD_BUMP_SCALE ${f(p.bumpScale)}` },
-      { id: "bumpAmount", label: "Bump strength", min: 0, max: 0.9, step: 0.01, ...direct("bumpAmount"), consts: (p) => `CLOUD_BUMP_AMOUNT ${f(p.bumpAmount)}` },
       { id: "wispAmount", label: "Wisps", min: 0, max: 0.8, step: 0.01, ...direct("wispAmount"), consts: (p) => `CLOUD_WISP_AMOUNT ${f(p.wispAmount)}` },
       { id: "wispScale", label: "Wisp fineness", min: 1.2, max: 6, step: 0.05, ...direct("wispScale"), consts: (p) => `CLOUD_WISP_SCALE ${f(p.wispScale)}` },
       { id: "bumpMorph", label: "Morph speed", min: 0, max: 0.2, step: 0.005, ...direct("bumpMorph"), consts: (p) => `CLOUD_BUMP_MORPH ${f(p.bumpMorph)}` },
     ] },
-    { id: "motion", title: "Cloud motion", sim: true, note: "These drive the simulation itself, so they change every variation tile and both halves of a comparison. New settings show as new puffs form; Restart clears the sky.", controls: [
+    { id: "motion", title: "Simulation", sim: true, note: "New settings show as new puffs form; Restart clears the sky.", controls: [
       { id: "cloudCover", label: "Cloud cover", min: 0, max: 1, step: 0.01, ...direct("cloudCover"), consts: (p) => `setting cloudCover ${f(p.cloudCover)}` },
-      { id: "drifterCount", label: "Puff sources", min: 1, max: Sim ? Sim.SPLAT_SLOTS : 12, step: 1, ...direct("drifterCount"), digits: 0, consts: (p) => `DRIFTER_SEEDS 1..${p.drifterCount}` },
-      { id: "puffSize", label: "Puff size", min: 0.4, max: 2.2, step: 0.01,
-        get: (p) => p.sigmaMin / 0.045, set: (p, v) => { p.sigmaMin = 0.045 * v; p.sigmaMax = 0.085 * v; },
-        consts: (p) => `DRIFTER_SIGMA_MIN ${f(p.sigmaMin)} · MAX ${f(p.sigmaMax)}` },
-      { id: "dyeRate", label: "Puff output", min: 0.2, max: 2.5, step: 0.01, ...direct("dyeRate"), consts: (p) => `DRIFTER_DYE_RATE ${f(p.dyeRate)}` },
+      { id: "drifterCount", label: "Puff sources", min: 1, max: Sim ? Sim.SPLAT_SLOTS : 20, step: 1, ...direct("drifterCount"), digits: 0, consts: (p) => `DRIFTER_SEEDS 1..${p.drifterCount}` },
       { id: "puffRate", label: "Puff tempo", min: 0.1, max: 1.2, step: 0.01, ...direct("puffRate"), consts: (p) => `DRIFTER_PUFF_RATE ${f(p.puffRate)}` },
       { id: "dissipation", label: "Fade", min: 0, max: 1, step: 0.01, ...direct("dissipation"), consts: (p) => `DYE_DISSIPATION ${f(p.dissipation)}` },
-      { id: "drifterForce", label: "Push", min: 0, max: 30, step: 0.5, ...direct("drifterForce"), consts: (p) => `DRIFTER_FORCE ${f(p.drifterForce)}` },
+      { id: "drifterForce", label: "Push", min: 0, max: 12, step: 0.1, ...direct("drifterForce"), consts: (p) => `DRIFTER_FORCE ${f(p.drifterForce)}` },
       { id: "turbulence", label: "Turbulence", min: 0, max: 1, step: 0.01, ...direct("turbulence"), consts: (p) => `setting turbulence ${f(p.turbulence)}` },
       { id: "flowSpeed", label: "Flow speed", min: 0, max: 1, step: 0.01, ...direct("flowSpeed"), consts: (p) => `setting flowSpeed ${f(p.flowSpeed)}` },
       { id: "viscosity", label: "Flow smoothing", min: 0, max: 1, step: 0.01, ...direct("viscosity"), consts: (p) => `SIM_VISCOSITY ${f(p.viscosity)}` },
     ] },
   ];
   const CONTROLS = {};
-  GROUPS.forEach((g) => (g.controls || []).forEach((c) => { CONTROLS[c.id] = c; }));
+  [MAIN].concat(GROUPS).forEach((g) => (g.controls || []).forEach((c) => { CONTROLS[c.id] = c; }));
 
   function f(v) { return String(Number(v.toFixed(3))); }
-
-  // "all" presets replace the whole look; the others only set the keys they
-  // name, so a colour preset keeps your cloud shape and a shape preset your colours.
-  const PRESETS = [
-    { label: "Before today", kind: "all", base: BEFORE },
-    { label: "Shipped", kind: "all", base: SHIPPED },
-    { label: "Dusk mono", kind: "colour", set: { skySpread: 0.3, skyLevel: 0.8, horizonWarm: 0.25, sunHalo: 0.24 } },
-    { label: "Deep evening", kind: "colour", set: { skySpread: 0.5, skyLevel: 0.7, gradLo: -0.35, gradHi: 0.75, sunHalo: 0.22, cloudBrightness: 0.45 } },
-    { label: "Pale haze", kind: "colour", set: { skySpread: 0.45, skyLevel: 0.98, gradLo: -0.2, gradHi: 1.3, shadowK1: 0.6, shadowK2: 0.37 } },
-    { label: "Soft cumulus", kind: "shape", set: { cloudLow: 0.12, cloudHigh: 0.7, bumpScale: 8, bumpAmount: 0.5, wispAmount: 0.5 } },
-    { label: "Crisp cauliflower", kind: "shape", set: { cloudLow: 0.2, cloudHigh: 0.42, bumpScale: 15, bumpAmount: 0.75, wispScale: 3.6 } },
-    { label: "Big slow puffs", kind: "shape", set: { sigmaMin: 0.068, sigmaMax: 0.128, dissipation: 0.22, dyeRate: 0.85, drifterCount: 6, drifterForce: 7, puffRate: 0.3 } },
-  ];
 
   // ---- State ----
   let P = clone(SHIPPED);
   let tod = 0.71;
   let mode = "single";
   let split = 0.5;
-  let refChoice = "before";
+  let refChoice = "shipped";
   let variants = [];
   let playing = false;
   let activeKey = 2;
@@ -449,13 +430,13 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
   let dbState = "pending";
 
   try {
-    const s = JSON.parse(localStorage.getItem("skyBench.state") || "null");
+    const s = JSON.parse(localStorage.getItem("skyBench.state.v2") || "null");
     if (s && s.P && s.P.zenith) { P = Object.assign(clone(SHIPPED), s.P); tod = typeof s.tod === "number" ? s.tod : tod; }
   } catch (e) { /* storage unavailable: start from Shipped */ }
   let persistTimer = 0;
   function persist() {
     clearTimeout(persistTimer);
-    persistTimer = setTimeout(() => { try { localStorage.setItem("skyBench.state", JSON.stringify({ P, tod })); } catch (e) { /* ignore */ } }, 400);
+    persistTimer = setTimeout(() => { try { localStorage.setItem("skyBench.state.v2", JSON.stringify({ P, tod })); } catch (e) { /* ignore */ } }, 400);
   }
   function pushHistory() { history.push(clone(P)); if (history.length > 60) history.shift(); $("undo").disabled = false; }
 
@@ -596,6 +577,9 @@ float hash21(vec2 p) {
   p += dot(p, p + 45.32);
   return fract(p.x * p.y);
 }
+vec2 hash22(vec2 p) {
+  return vec2(hash21(p), hash21(p + 19.19));
+}
 float vnoise(vec2 p) {
   vec2 i = floor(p);
   vec2 f = fract(p);
@@ -616,11 +600,27 @@ float fbm2(vec2 p) {
   }
   return sum;
 }
+float puffNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float d = 8.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 o = vec2(float(x), float(y));
+      d = min(d, length(f - o - 0.15 - 0.7 * hash22(i + o)));
+    }
+  }
+  return 1.0 - clamp(d, 0.0, 1.0);
+}
 float cloudBumpedAt(vec2 uv) {
   float density = max(decodeDye(texture(uDye, uv)).x, 0.0);
-  float bump = fbm2(uv * uBumpScale + vec2(uTime * uBumpMorph, uTime * uBumpMorph * 0.6));
-  float wisp = fbm2(uv * uBumpScale * uWispScale - vec2(uTime * uBumpMorph * 1.7, 0.0));
-  return density * mix(1.0 - uBumpAmount, 1.0 + uBumpAmount, bump) * mix(1.0 - uWispAmount, 1.0 + uWispAmount, wisp);
+  if (density * (1.0 + uWispAmount) < uCloudLow * 0.3) return 0.0;
+  vec2 dyeSize = vec2(textureSize(uDye, 0));
+  vec2 q = uv * vec2(dyeSize.x / max(dyeSize.y, 1.0), 1.0);
+  vec2 drift = vec2(uTime * uBumpMorph, uTime * uBumpMorph * 0.6);
+  float puff = 0.5 * puffNoise(q * uBumpScale + drift) + 0.5 * puffNoise(q * uBumpScale * 2.3 - drift * 1.3 + 7.1);
+  float wisp = fbm2(q * uBumpScale * uWispScale - vec2(uTime * uBumpMorph * 1.7, 0.0));
+  return density * mix(1.0 - uWispAmount, 1.0 + uWispAmount, wisp) - uBumpAmount * (1.0 - puff);
 }
 void dayWeights(float e, out float w[4]) {
   for (int i = 0; i < 4; i++) w[i] = 0.0;
@@ -673,8 +673,8 @@ void main() {
   float bumped = cloudBumpedAt(uv);
   float cloudAlpha = smoothstep(uCloudLow, uCloudHigh, bumped);
   vec2 lightDir = normalize(vec2(-cos(dayAngle) * 0.8, 0.85));
-  float sunNear = max(decodeDye(texture(uDye, uv + lightDir * uShadowTap1)).x, 0.0);
-  float sunFar = max(decodeDye(texture(uDye, uv + lightDir * uShadowTap2)).x, 0.0);
+  float sunNear = max(cloudBumpedAt(uv + lightDir * uShadowTap1), 0.0);
+  float sunFar = max(cloudBumpedAt(uv + lightDir * uShadowTap2), 0.0);
   float shadow = exp(-uShadowK1 * sunNear - uShadowK2 * sunFar);
   vec3 cloudShadow = dayMix(dw, uCloudShadeKey);
   vec3 litKey = dayMix(dw, uCloudLitKey);
@@ -754,16 +754,12 @@ void main() {
   }
 
   function refParams() {
-    if (refChoice === "before") return BEFORE;
-    if (refChoice === "shipped") return SHIPPED;
     const l = savedLooks.find((x) => x.id === refChoice);
-    return l ? Object.assign(clone(SHIPPED), l.params) : BEFORE;
+    return l ? Object.assign(clone(SHIPPED), l.params) : SHIPPED;
   }
   function refName() {
-    if (refChoice === "before") return "Before today";
-    if (refChoice === "shipped") return "Shipped";
     const l = savedLooks.find((x) => x.id === refChoice);
-    return l ? l.name : "Before today";
+    return l ? l.name : "Shipped";
   }
 
   function sizeCanvas() {
@@ -879,27 +875,18 @@ void main() {
     keys.forEach((k) => { const [h, s, l] = rgb2hsl(p[role][k]); p[role][k] = hsl2rgb([h + dh, clamp01(s + ds), clamp(l + dl, 0.02, 0.99)]); });
   }
   function mutate(base) {
-    const d = Number($("varAmt").value);
+    const d = 0.5;
     const r = () => Math.random() * 2 - 1;
     const p = clone(base);
     const w = dayWeights(lightEAt(tod));
     const keys = [0, 1, 2, 3].filter((i) => w[i] > 0.02);
-    if ($("varSky").checked) {
-      shiftRole(p, "zenith", keys, r() * 22 * d, r() * 0.14 * d, r() * 0.08 * d);
-      shiftRole(p, "horizon", keys, r() * 28 * d, r() * 0.14 * d, r() * 0.08 * d);
-      nudge(p, "skySpread", r() * 0.3 * d); nudge(p, "skyLevel", r() * 0.1 * d);
-      nudge(p, "horizonReach", r() * 0.18 * d); nudge(p, "gradSoft", r() * 0.35 * d);
-      nudge(p, "sunHalo", r() * 0.1 * d); nudge(p, "sunDistance", r() * 0.25 * d); nudge(p, "horizonWarm", r() * 0.15 * d);
-    }
-    if ($("varCloudCol").checked) {
-      shiftRole(p, "cloudLit", keys, r() * 14 * d, r() * 0.12 * d, r() * 0.05 * d);
-      shiftRole(p, "cloudShade", keys, r() * 22 * d, r() * 0.14 * d, r() * 0.08 * d);
-      nudge(p, "cloudBrightness", r() * 0.25 * d); nudge(p, "shadowDepth", r() * 0.4 * d); nudge(p, "shadowReach", r() * 0.4 * d);
-    }
-    if ($("varShape").checked) {
-      nudge(p, "extent", r() * 0.16 * d); nudge(p, "edgeSoft", r() * 0.16 * d); nudge(p, "bumpSize", r() * 0.22 * d);
-      nudge(p, "bumpAmount", r() * 0.16 * d); nudge(p, "wispAmount", r() * 0.16 * d); nudge(p, "wispScale", r() * 1.0 * d);
-    }
+    shiftRole(p, "zenith", keys, r() * 22 * d, r() * 0.14 * d, r() * 0.08 * d);
+    shiftRole(p, "horizon", keys, r() * 28 * d, r() * 0.14 * d, r() * 0.08 * d);
+    shiftRole(p, "cloudLit", keys, r() * 14 * d, r() * 0.12 * d, r() * 0.05 * d);
+    shiftRole(p, "cloudShade", keys, r() * 22 * d, r() * 0.14 * d, r() * 0.08 * d);
+    [["skySpread", 0.3], ["skyLevel", 0.1], ["sunDistance", 0.25], ["horizonReach", 0.18], ["gradSoft", 0.35],
+     ["cloudBrightness", 0.25], ["shadowDepth", 0.4], ["bumpAmount", 0.2], ["bumpSize", 0.4], ["edgeSoft", 0.08],
+     ["extent", 0.12], ["wispAmount", 0.16]].forEach(([id, amt]) => nudge(p, id, r() * amt * d));
     return p;
   }
   function rerollVariants() { variants = [P, mutate(P), mutate(P), mutate(P)]; }
@@ -929,30 +916,32 @@ void main() {
   // ---- Rail ----
   const groupsEl = $("groups");
   const ctlEls = {};
-  function buildRail() {
-    GROUPS.forEach((g) => {
-      const det = document.createElement("details");
-      det.className = "group"; det.open = g.id !== "motion";
-      const sum = document.createElement("summary");
-      sum.innerHTML = `${esc(g.title)}`;
-      const aside = document.createElement("span"); aside.className = "aside";
-      const resetBtn = document.createElement("button");
-      resetBtn.type = "button"; resetBtn.className = "btn small"; resetBtn.textContent = g.sim ? "Restart clouds" : "Reset";
-      resetBtn.addEventListener("click", (e) => {
-        e.preventDefault();
-        if (g.sim) { restartClouds(); return; }
-        pushHistory();
-        if (g.keys) ROLES.forEach((r) => { P[r.id][activeKey] = SHIPPED[r.id][activeKey].slice(); });
-        else g.controls.forEach((c) => c.set(P, c.get(SHIPPED)));
-        onLookChanged(true);
-      });
-      aside.appendChild(resetBtn); sum.appendChild(aside); det.appendChild(sum);
-      const body = document.createElement("div"); body.className = "gbody";
-      if (g.note) { const n = document.createElement("p"); n.className = "gnote"; n.textContent = g.note; body.appendChild(n); }
-      if (g.keys) buildKeyEditor(body);
-      (g.controls || []).forEach((c) => body.appendChild(buildControl(c)));
-      det.appendChild(body); groupsEl.appendChild(det);
+  function buildGroup(g, open, parent) {
+    const det = document.createElement("details");
+    det.className = "group"; det.open = open;
+    const sum = document.createElement("summary");
+    sum.textContent = g.title;
+    const aside = document.createElement("span"); aside.className = "aside";
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button"; resetBtn.className = "btn small"; resetBtn.textContent = g.sim ? "Restart clouds" : "Reset";
+    resetBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (g.sim) { restartClouds(); return; }
+      pushHistory();
+      if (g.keys) ROLES.forEach((r) => { P[r.id][activeKey] = SHIPPED[r.id][activeKey].slice(); });
+      else g.controls.forEach((c) => c.set(P, c.get(SHIPPED)));
+      onLookChanged(true);
     });
+    aside.appendChild(resetBtn); sum.appendChild(aside); det.appendChild(sum);
+    const body = document.createElement("div"); body.className = "gbody";
+    if (g.note) { const n = document.createElement("p"); n.className = "gnote"; n.textContent = g.note; body.appendChild(n); }
+    if (g.keys) buildKeyEditor(body);
+    (g.controls || []).forEach((c) => body.appendChild(buildControl(c)));
+    det.appendChild(body); parent.appendChild(det);
+  }
+  function buildRail() {
+    buildGroup(MAIN, true, $("mainGroup"));
+    GROUPS.forEach((g) => buildGroup(g, false, groupsEl));
   }
   function buildControl(c) {
     const row = document.createElement("div"); row.className = "ctl";
@@ -1031,7 +1020,7 @@ void main() {
   }
 
   function onLookChanged() {
-    GROUPS.forEach((g) => (g.controls || []).forEach(refreshControl));
+    [MAIN].concat(GROUPS).forEach((g) => (g.controls || []).forEach(refreshControl));
     renderKeyEditor();
     if (mode === "variations") variants[0] = P;
     readoutDirty = true;
@@ -1093,21 +1082,11 @@ void main() {
   }
 
   // ---- Presets, undo ----
-  function buildPresets() {
-    $("presets").innerHTML = "";
-    PRESETS.forEach((pr) => {
-      const b = document.createElement("button"); b.type = "button"; b.className = "preset";
-      b.innerHTML = `${esc(pr.label)}<small>${pr.kind === "all" ? "" : pr.kind}</small>`;
-      b.addEventListener("click", () => {
-        pushHistory();
-        if (pr.kind === "all") P = clone(pr.base);
-        else Object.assign(P, clone(pr.set));
-        onLookChanged(true);
-        if (mode === "variations") rerollVariants();
-      });
-      $("presets").appendChild(b);
-    });
-  }
+  $("resetAll").addEventListener("click", (e) => {
+    e.preventDefault();
+    pushHistory(); P = clone(SHIPPED); onLookChanged(true);
+    if (mode === "variations") rerollVariants();
+  });
   $("undo").addEventListener("click", (e) => {
     e.preventDefault();
     if (!history.length) return;
@@ -1180,15 +1159,15 @@ void main() {
         clearTimeout(armed); armed = 0;
         if (looksDb && !String(l.id).startsWith("local-")) { try { await looksDb.collection("looks").doc(l.id).delete(); } catch (e) { del.textContent = "Couldn't delete"; } }
         else { savedLooks = savedLooks.filter((x) => x.id !== l.id); storeLocalLooks(); renderLooks(); renderRefOptions(); }
-        if (refChoice === l.id) { refChoice = "before"; renderRefOptions(); }
+        if (refChoice === l.id) { refChoice = "shipped"; renderRefOptions(); }
       });
       ul.appendChild(li);
     });
   }
   function renderRefOptions() {
     const sel = $("refSel");
-    const opts = [["before", "Before today"], ["shipped", "Shipped"]].concat(savedLooks.map((l) => [l.id, "Saved: " + (l.name || "Untitled")]));
-    if (!opts.some(([v]) => v === refChoice)) refChoice = "before";
+    const opts = [["shipped", "Shipped"]].concat(savedLooks.map((l) => [l.id, "Saved: " + (l.name || "Untitled")]));
+    if (!opts.some(([v]) => v === refChoice)) refChoice = "shipped";
     sel.innerHTML = opts.map(([v, t]) => `<option value="${esc(v)}"${v === refChoice ? " selected" : ""}>${esc(t)}</option>`).join("");
     setTag(); readoutDirty = true;
   }
@@ -1235,7 +1214,6 @@ void main() {
   // ---- Boot ----
   buildTicks();
   buildRail();
-  buildPresets();
   buildTiles();
   renderRefOptions();
   onLookChanged(true);
