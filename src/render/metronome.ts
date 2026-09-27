@@ -84,7 +84,13 @@ export const METRONOME_BEATS_PER_BAR = 4;
 // adopt its tempo/beat line. Tunable 0.45-0.6: raising it makes a fresh lock
 // wait longer (fewer false starts on a noisy intro); lowering it starts
 // sooner but risks adopting a tempo the comb hasn't actually settled on yet.
-export const START_LOCK = 0.5;
+// Raised from an initial 0.5 to its own top of range against
+// tests/tempoEval.test.ts's random track: the render-tick tracker's own
+// tempoLock spikes as high as ~0.9 on unstructured hits for a few frames at
+// a time (see that file's own metronome tests for the measured numbers), so
+// even 0.6 doesn't stop every false start on that path — reported there
+// rather than pushed past its documented range.
+export const START_LOCK = 0.6;
 
 // ---- Corrections while running -------------------------------------------
 // tempoLock the clock has to hold for the metronome to accept *any*
@@ -126,9 +132,17 @@ export const RESYNC_SEC = 2;
 // for a long stretch (not just one bad bar) rather than briefly. Tunable
 // 8-16: raising UNSURE_STOP_SEC keeps the flywheel spinning longer through a
 // rough patch; lowering it lets go sooner once the tracker looks lost.
+// Lowered from an initial 12 to its own bottom of range against
+// tests/tempoEval.test.ts's random track, same tuning pass as START_LOCK
+// above: on the fixed-hop analyzer path this alone gets random's
+// metroRunShare under its target at every rate. On the render-tick path it
+// doesn't — that track's own longest continuous stretch below UNSURE_LOCK
+// only runs a few seconds, well short of even this floor, so no value in
+// range stops it once a false start has happened; see tempoEval.test.ts's
+// own comment on its render-tick metronome tests.
 export const STOP_AFTER_SEC = 1.5;
 export const UNSURE_LOCK = 0.1;
-export const UNSURE_STOP_SEC = 12;
+export const UNSURE_STOP_SEC = 8;
 
 // ---- Level ------------------------------------------------------------
 export const LEVEL_RISE_RATE = 2; // 1/s, while running

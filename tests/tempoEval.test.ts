@@ -64,6 +64,13 @@ function printTable(label: string, rows: Record<string, EvalMetrics>): void {
       lockNoTempo: fmt(m.lockNoTempo),
       endBpm: fmt(m.endBpm, 1),
       endLock: fmt(m.endLock),
+      metroOn30ms: fmt(m.metroOn30ms),
+      metroCoverage: fmt(m.metroCoverage),
+      metroIntervalCv: fmt(m.metroIntervalCv),
+      metroBreakdownRun: fmt(m.metroBreakdownRun),
+      metroBreakdownOn30ms: fmt(m.metroBreakdownOn30ms),
+      metroEndRunning: String(m.metroEndRunning),
+      metroRunShare: fmt(m.metroRunShare),
     };
   }
   // eslint-disable-next-line no-console
@@ -137,6 +144,46 @@ describe("tempo eval scoreboard", () => {
     }
     expect(metrics.ramp!.lockWhenWrong).toBeLessThan(metrics.ramp!.lockWhenRight);
   });
+
+  // metronome.ts, scored on the render-tick path — see this file's header
+  // for the render-tick/analyzer split, and metronome.ts's own tests for the
+  // module in isolation. The render-tick path's own tracker is noisier than
+  // the fixed-hop analyzer's (every existing metric above already shows
+  // this), so metroOn30ms alone gets a looser bound here — metroCoverage and
+  // metroIntervalCv don't, since they're forgiving enough (any tick nearby,
+  // rather than a nearby *and* on-time tick) that a genuinely reactive
+  // metronome should still clear them.
+  //
+  // KNOWN GAP (see this session's own report): house's metroCoverage falls
+  // short here (60/30fps) and its metroBreakdownOn30ms falls short at 60fps
+  // only, and random's metroRunShare doesn't clear its bound at either rate.
+  // Both tunables below (START_LOCK, UNSURE_STOP_SEC) are already at the end
+  // of their allowed range that helps most; neither closes the remaining
+  // gap — see the report for what was tried and why it doesn't move further
+  // within range. These assertions are left as specified rather than
+  // loosened.
+  it("metronome: house/hiphop/dnb tick close to the true beat and stay evenly spaced", () => {
+    for (const table of [metrics, metrics30]) {
+      for (const name of ["house", "hiphop", "dnb"]) {
+        expect(table[name]!.metroOn30ms, name).toBeGreaterThanOrEqual(0.75);
+        expect(table[name]!.metroCoverage, name).toBeGreaterThanOrEqual(0.9);
+        expect(table[name]!.metroIntervalCv, name).toBeLessThanOrEqual(0.02);
+      }
+    }
+  });
+
+  it("metronome: house keeps ticking through its breakdown and lets go cleanly after the track ends", () => {
+    for (const table of [metrics, metrics30]) {
+      expect(table.house!.metroBreakdownRun).toBeGreaterThanOrEqual(0.95);
+      expect(table.house!.metroBreakdownOn30ms).toBeGreaterThanOrEqual(0.8);
+      expect(table.house!.metroEndRunning).toBe(false);
+    }
+  });
+
+  it("metronome: random doesn't convince it a tempo is worth running against", () => {
+    expect(metrics.random!.metroRunShare).toBeLessThanOrEqual(0.3);
+    expect(metrics30.random!.metroRunShare).toBeLessThanOrEqual(0.3);
+  });
 });
 
 // The fixed-hop path (tempoAnalyzer.ts, via run.ts's { analyzer: true }) —
@@ -200,6 +247,37 @@ describe("tempo eval scoreboard — fixed-hop analyzer path", () => {
   it("hiphop finds its tempo within a few seconds (looser bound — see comment)", () => {
     for (const [label, table] of Object.entries(analyzerTables)) {
       expect(table.hiphop!.timeToLockSec, label).toBeLessThanOrEqual(4);
+    }
+  });
+
+  // metronome.ts, scored on the fixed-hop path — see this file's header for
+  // the render-tick/analyzer split. Unlike the render-tick describe block
+  // above, every metronome target here holds at every rate: the analyzer's
+  // own onsets are exact audio-clock times rather than tick-timestamped
+  // guesses, so the metronome's phase-follow has nothing to drift against
+  // between corrections the way it does on the render-tick path.
+  it("metronome: house/hiphop/dnb tick close to the true beat and stay evenly spaced", () => {
+    for (const [label, table] of Object.entries(analyzerTables)) {
+      for (const name of ["house", "hiphop", "dnb"]) {
+        const tag = `${name} @ ${label}`;
+        expect(table[name]!.metroOn30ms, tag).toBeGreaterThanOrEqual(0.85);
+        expect(table[name]!.metroCoverage, tag).toBeGreaterThanOrEqual(0.9);
+        expect(table[name]!.metroIntervalCv, tag).toBeLessThanOrEqual(0.02);
+      }
+    }
+  });
+
+  it("metronome: house keeps ticking through its breakdown and lets go cleanly after the track ends", () => {
+    for (const [label, table] of Object.entries(analyzerTables)) {
+      expect(table.house!.metroBreakdownRun, label).toBeGreaterThanOrEqual(0.95);
+      expect(table.house!.metroBreakdownOn30ms, label).toBeGreaterThanOrEqual(0.8);
+      expect(table.house!.metroEndRunning, label).toBe(false);
+    }
+  });
+
+  it("metronome: random doesn't convince it a tempo is worth running against", () => {
+    for (const [label, table] of Object.entries(analyzerTables)) {
+      expect(table.random!.metroRunShare, label).toBeLessThanOrEqual(0.3);
     }
   });
 });
