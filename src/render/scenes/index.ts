@@ -26,6 +26,7 @@ import { inkScene } from "./ink.ts";
 import { crystalScene } from "./crystal/index.ts";
 import { fluidScene } from "./fluid.ts";
 import { silkScene } from "./silk/index.ts";
+import { skyScene } from "./sky/sky.ts";
 import { gatesScene } from "./gates/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
@@ -36,6 +37,7 @@ import { gatesScene } from "./gates/index.ts";
 // what lets vite-scene-links-plugin.ts print its link when you start
 // `npm run dev` with its files changed.)
 registerScene(physarum2Scene);
+registerScene(skyScene);
 registerScene(silkScene);
 registerScene(slatsScene);
 registerScene(physarumScene);
@@ -107,6 +109,7 @@ for (const error of privateScenes.errors) console.warn(`[private scenes] ${error
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
 
 export {
+  skyScene,
   silkScene,
   tesseraScene,
   spectrumScene,
