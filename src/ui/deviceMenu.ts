@@ -3441,8 +3441,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Solo's eye: one floating button just outside the pinned row's left
   // edge, under its port (positionSoloEye) — on <body>, not in the row,
   // since the Scene card's overflow: hidden clips anything hung past the
-  // row's own edge. A plain eye in a rounded square — lid + pupil over a
-  // shut lid, scaled open/shut by controlsTheme.ts's .vc-solo-eye rules.
+  // row's own edge. A tile in the pin colour with an eye-shaped hole cut
+  // through it — dark depth and a glossy pupil down inside, under a rounded
+  // lid that lifts away to open (controlsTheme.ts's .vc-solo-eye rules).
   const soloEyeEl = document.createElement("button");
   soloEyeEl.type = "button";
   soloEyeEl.className = "vc-solo-eye";
@@ -3450,10 +3451,29 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   soloEyeEl.dataset.keycap = "O";
   soloEyeEl.hidden = true;
   soloEyeEl.innerHTML =
-    '<svg viewBox="0 0 24 24" aria-hidden="true">' +
-    '<rect class="vc-eye-frame" x="1.6" y="1.6" width="20.8" height="20.8" rx="4.6"/>' +
-    '<g class="vc-eye-lid"><path d="M5 12 Q12 5.6 19 12 Q12 18.4 5 12Z"/><circle cx="12" cy="12" r="2.6"/></g>' +
-    '<path class="vc-eye-shut" d="M5.2 11.4 Q12 16.6 18.8 11.4"/>' +
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><defs>' +
+    '<linearGradient id="vc-eye-tile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="currentColor"/><stop offset="1" stop-color="currentColor" stop-opacity="0.55"/></linearGradient>' +
+    '<linearGradient id="vc-eye-depth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000"/><stop offset="0.55" stop-color="#07090a"/><stop offset="1" stop-color="#20262a"/></linearGradient>' +
+    '<radialGradient id="vc-eye-ball" cx="0.38" cy="0.32" r="0.75"><stop offset="0" stop-color="#fff"/><stop offset="0.28" stop-color="currentColor"/><stop offset="1" stop-color="#101412"/></radialGradient>' +
+    '<radialGradient id="vc-eye-lidshade" cx="0.5" cy="0.3" r="0.75"><stop offset="0" stop-color="#fff" stop-opacity="0.9"/><stop offset="0.3" stop-color="currentColor"/><stop offset="1" stop-color="#0b0e0d"/></radialGradient>' +
+    '<mask id="vc-eye-hole"><rect width="24" height="24" fill="#fff"/><path d="M4.2 12 Q12 4.6 19.8 12 Q12 19.4 4.2 12Z" fill="#000"/></mask>' +
+    '<clipPath id="vc-eye-clip"><path d="M4.2 12 Q12 4.6 19.8 12 Q12 19.4 4.2 12Z"/></clipPath>' +
+    "</defs>" +
+    // the tile with the hole cut out, and its bevel
+    '<rect x="1.4" y="1.4" width="21.2" height="21.2" rx="4.2" fill="url(#vc-eye-tile)" mask="url(#vc-eye-hole)"/>' +
+    '<path d="M3.2 19.5 V5.6 Q3.2 3.2 5.6 3.2 H19.5" fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="0.9" stroke-linecap="round"/>' +
+    '<path d="M20.8 4.5 V18.4 Q20.8 20.8 18.4 20.8 H4.5" fill="none" stroke="#000" stroke-opacity="0.35" stroke-width="0.9" stroke-linecap="round"/>' +
+    '<g clip-path="url(#vc-eye-clip)">' +
+    // down in the hole: depth, the pupil, the upper rim's shadow
+    '<rect width="24" height="24" fill="url(#vc-eye-depth)"/>' +
+    '<circle cx="12" cy="12.7" r="3.3" fill="url(#vc-eye-ball)"/>' +
+    '<circle cx="10.9" cy="11.4" r="0.8" fill="#fff"/>' +
+    '<path d="M4.2 12 Q12 4.6 19.8 12 Q12 19.4 4.2 12Z" fill="none" stroke="#000" stroke-opacity="0.8" stroke-width="2.4" transform="translate(0 -1.2)"/>' +
+    // the lid: a rounded bump filling the hole when shut, lifting away to open
+    '<g class="vc-eye-lid"><path d="M2 2 H22 V12 Q12 20.2 2 12 Z" fill="url(#vc-eye-lidshade)"/>' +
+    '<path d="M4.4 12.2 Q12 19.4 19.6 12.2" fill="none" stroke="#000" stroke-opacity="0.6" stroke-width="1"/></g>' +
+    "</g>" +
+    '<path d="M4.2 12 Q12 4.6 19.8 12 Q12 19.4 4.2 12Z" fill="none" stroke="#000" stroke-opacity="0.55" stroke-width="0.8"/>' +
     "</svg>";
   soloEyeEl.addEventListener("click", () => setSolo(!soloOn));
   document.body.appendChild(soloEyeEl);

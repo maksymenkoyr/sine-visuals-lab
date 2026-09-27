@@ -573,31 +573,24 @@ body.vc-keys-reveal [data-keycap]::after {
 }
 /* Solo's eye (deviceMenu.ts's positionSoloEye): fixed on <body> just
  * outside the pinned row's left edge, under its port, in the pin's colour —
- * a plain eye in a rounded square: shut while everything shows, peeking half
- * open on hover, wide open (the square tinted and glowing) while this
- * setting is the only thing shown. The lid scales about the eye's own
- * midline, so toggling reads as the eye opening and blinking shut. */
+ * a carved tile with an eye-shaped hole. Shut while everything shows (a
+ * rounded, sphere-shaded lid fills the hole), peeking half open on hover,
+ * lid lifted away (the pupil down in the dark, the tile glowing) while this
+ * setting is the only thing shown. The lid scales from the hole's top edge,
+ * so toggling reads as an eyelid opening and blinking shut. */
 .vc-solo-eye {
   position: fixed; z-index: 31; width: 18px; height: 18px; padding: 0;
   background: none; border: none; cursor: pointer; color: var(--vc-pin-color, ${SCENE_VIOLET});
   --open: 0;
 }
 .vc-solo-eye svg { width: 18px; height: 18px; display: block; overflow: visible; }
-.vc-eye-frame { fill: none; stroke: currentColor; stroke-width: 1.7; transition: fill 0.2s ease; }
 .vc-eye-lid {
-  fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round;
-  transform-origin: 12px 12px; transform: scaleY(var(--open));
-  transition: transform 0.26s cubic-bezier(0.3, 1.5, 0.5, 1);
-}
-.vc-eye-lid circle { fill: currentColor; stroke: none; }
-.vc-eye-shut {
-  fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round;
-  opacity: calc(1 - var(--open)); transition: opacity 0.18s ease;
+  transform-origin: 12px 4.4px; transform: scaleY(calc(1 - var(--open)));
+  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 .vc-solo-eye:hover, .vc-solo-eye:focus-visible { --open: 0.5; outline: none; }
 .vc-solo-eye.vc-solo-eye-on { --open: 1; }
 .vc-solo-eye.vc-solo-eye-on:hover { --open: 0.82; }
-.vc-solo-eye.vc-solo-eye-on .vc-eye-frame { fill: color-mix(in srgb, currentColor 18%, transparent); }
 .vc-solo-eye.vc-solo-eye-on svg { filter: drop-shadow(0 0 3px var(--vc-pin-color, ${SCENE_VIOLET})); }
 @media (prefers-reduced-motion: reduce) {
   .vc-eye-lid { transition: none; }
