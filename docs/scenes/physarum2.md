@@ -66,6 +66,24 @@ and `powder.ts`'s curl noise).
   with the default 0.4 -> 0.1, step 0.05 -> 0.01 and auto weights quartered
   (pulse 0.25 -> 0.06, attack 0.2 -> 0.05), so the default look is unchanged
   and full slider is a 7x step on a hit instead of 2.5x.
+- 2026-09-26/27: user asked for "much more interactive and visual" controls
+  where each population gets its own drivers, and for an architecture that
+  lets any scene have unique custom controls. Prototyped first as a
+  clickable artifact ("Physarum Lab", see Materials). v1's 4x4 number grid
+  for the attraction table was judged unclear; v2 went lab-themed and
+  gamified: a culture dish with a pipette, one specimen box per population
+  running a live pure culture, a relationship web with plain-word rows
+  (Flees / Avoids / Ignores / Follows / Loves), named experiments, a lab log.
+  Framing decided with the user: not four species but four *strains* of
+  *Physarum polycephalum* (strains fuse with kin and keep apart from
+  incompatible ones, which is what the attraction table models), labelled
+  with isolate codes plus an editable nickname. Manual pipette injection
+  converts agents to the selected strain, with a Rebalance button.
+  Pure-culture previews collapsed to one blob on a small torus; a
+  0.5%-per-step random respawn keeps each a live network (measured with a
+  node harness: densest 2% of cells fell from 76% to about 12% of the trail
+  for the widest-turning strain). Implementation (declarative items +
+  widget registry, then per-strain settings here) is planned but not built.
 
 ## Tuning notes
 
