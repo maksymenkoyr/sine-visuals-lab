@@ -111,14 +111,15 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; letter-spacing: 0.01em;
 .pad-head .beh { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pad-body { display: grid; grid-template-columns: 13px minmax(0, 1fr); gap: 3px; }
 .ycap, .xcap { display: flex; gap: 6px; font: 9.5px var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; }
-.ycap { writing-mode: vertical-rl; transform: rotate(180deg); justify-content: flex-start; }
-.xcap { grid-column: 2; justify-content: flex-end; }
-.pads[data-axes="ends"] .ycap, .pads[data-axes="ends"] .xcap { justify-content: space-between; }
-.pads[data-axes="ends"] .ycap span:nth-child(2), .pads[data-axes="ends"] .xcap span:nth-child(2) { color: var(--ink-2); }
+.ycap { writing-mode: vertical-rl; transform: rotate(180deg); justify-content: space-between; }
+.xcap { grid-column: 2; justify-content: space-between; }
+.ycap .sign, .xcap .sign { font-size: 12px; line-height: 1; color: var(--ink-2); }
+.ycap .sign { text-orientation: upright; }
 
 /* naming (prototype only) */
 .namebar { display: grid; gap: 6px; padding: 8px; border: 1px dashed var(--line-hi); border-radius: 8px; }
-.seg.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.seg.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.seg.five button { font-size: 11px; letter-spacing: 0.02em; }
 .seg.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .names { display: grid; gap: 12px; }
 .names-head p { margin: 4px 0 0; max-width: 70ch; color: var(--ink-2); font-size: 12.5px; }
@@ -317,11 +318,7 @@ table.nm { border-collapse: collapse; width: 100%; min-width: 540px; font-size: 
         <div class="sec-label">Pairs</div>
         <div class="namebar" aria-label="Names, prototype only">
           <div class="sec-label">Names · prototype only</div>
-          <div class="seg four" role="radiogroup" aria-label="Naming set" id="nameSeg"></div>
-          <div class="seg two" role="radiogroup" aria-label="Axis labels">
-            <button type="button" role="radio" id="axes-sentence" aria-checked="true">Axis: sentence</button>
-            <button type="button" role="radio" id="axes-ends" aria-checked="false">Axis: ends</button>
-          </div>
+          <div class="seg five" role="radiogroup" aria-label="Naming set" id="nameSeg"></div>
         </div>
         <p class="status" id="pairStatus"></p>
         <div class="pads" id="pads"></div>
@@ -783,43 +780,42 @@ function S(tag, attrs, parent) {
 const NAMES = {
   current: {
     label: "Current",
-    smell: { verb: "follows", ends: ["flees", "follows"], corners: { both: "MERGE", against: "WALL", mix: "CHASE" },
+    smell: { corners: { both: "MERGE", against: "WALL", mix: "CHASE" },
       both: "Merge", against: "Wall", neither: "Strangers",
       mixed: (w, l) => `${w} chases ${l}`, plus: (a, b) => `${a} tails ${b}`, minus: (a, b) => `${a} shuns ${b}` },
-    touch: { verb: "feeds", ends: ["eats", "feeds"], corners: { both: "SHARE", against: "WAR", mix: "PREY" },
+    touch: { corners: { both: "SHARE", against: "WAR", mix: "PREY" },
       both: "Share", against: "War", neither: "Harmless",
       mixed: (w, l) => `${w} preys on ${l}`, plus: (a, b) => `${a} feeds ${b}`, minus: (a, b) => `${a} eats ${b}` },
   },
   ecology: {
     label: "Ecology",
-    smell: { verb: "is drawn to", ends: ["repelled", "drawn"], corners: { both: "FLOCK", against: "TERRITORY", mix: "PURSUIT" },
+    smell: { corners: { both: "FLOCK", against: "TERRITORY", mix: "PURSUIT" },
       both: "Flocking", against: "Territories", neither: "Indifferent",
       mixed: (w, l) => `${w} pursues ${l}`, plus: (a, b) => `${a} follows ${b}`, minus: (a, b) => `${a} avoids ${b}` },
-    touch: { verb: "helps", ends: ["harms", "helps"], corners: { both: "MUTUALISM", against: "COMPETITION", mix: "PREDATION" },
+    touch: { corners: { both: "MUTUALISM", against: "COMPETITION", mix: "PREDATION" },
       both: "Mutualism", against: "Competition", neither: "Neutralism",
       mixed: (w, l) => `${w} preys on ${l}`, plus: (a, b) => `${b} lives off ${a}`, minus: (a, b) => `${a} harms ${b}` },
   },
   plain: {
     label: "Plain",
-    smell: { verb: "goes to", ends: ["away", "toward"], corners: { both: "TOGETHER", against: "APART", mix: "CHASE" },
+    smell: { corners: { both: "TOGETHER", against: "APART", mix: "CHASE" },
       both: "Together", against: "Apart", neither: "Ignore each other",
       mixed: (w, l) => `${w} chases ${l}`, plus: (a, b) => `${a} follows ${b}`, minus: (a, b) => `${a} avoids ${b}` },
-    touch: { verb: "helps", ends: ["harms", "helps"], corners: { both: "HELP", against: "HARM", mix: "USE" },
+    touch: { corners: { both: "HELP", against: "HARM", mix: "USE" },
       both: "Help each other", against: "Harm each other", neither: "No effect",
       mixed: (w, l) => `${w} uses ${l}`, plus: (a, b) => `${a} helps ${b}`, minus: (a, b) => `${a} harms ${b}` },
   },
   playful: {
     label: "Playful",
-    smell: { verb: "likes", ends: ["dodge", "like"], corners: { both: "DANCE", against: "STANDOFF", mix: "TAG" },
+    smell: { corners: { both: "DANCE", against: "STANDOFF", mix: "TAG" },
       both: "Dance", against: "Standoff", neither: "Strangers",
       mixed: (w, l) => `${w} tags ${l}`, plus: (a, b) => `${a} shadows ${b}`, minus: (a, b) => `${a} dodges ${b}` },
-    touch: { verb: "gifts", ends: ["bite", "gift"], corners: { both: "ALLIES", against: "WAR", mix: "VAMPIRE" },
+    touch: { corners: { both: "ALLIES", against: "WAR", mix: "VAMPIRE" },
       both: "Allies", against: "War", neither: "Peace",
       mixed: (w, l) => `${w} drains ${l}`, plus: (a, b) => `${a} gifts ${b}`, minus: (a, b) => `${a} bites ${b}` },
   },
 };
-let nameSet = "current";
-let axisStyle = "sentence";
+let nameSet = "none";
 function pairName(a, b, x, y, ly = layer, set = nameSet) {
   const n = NAMES[set][ly], P = 0.3, A = STRAINS[a].short, B = STRAINS[b].short;
   const touch = ly === "touch";
@@ -833,10 +829,11 @@ function pairName(a, b, x, y, ly = layer, set = nameSet) {
   if (y < -P) return n.minus(B, A);
   return n.neither;
 }
-function axisCaption(from, to, n) {
-  return axisStyle === "ends"
-    ? `<span>${n.ends[0]}</span><span>${from}→${to}</span><span>${n.ends[1]}</span>`
-    : `<span>${from} ${n.verb} ${to} →</span>`;
+// An axis is one strain's value toward the other: − at the low end, + at
+// the high end, the two codes in their own colours between.
+function axisCaption(from, to) {
+  const code = (k) => `<span style="color:${css(k)}">${STRAINS[k].short}</span>`;
+  return `<span class="sign">−</span><span>${code(from)} → ${code(to)}</span><span class="sign">+</span>`;
 }
 const pads = [];
 const pairCultures = [];
@@ -861,9 +858,8 @@ function buildPads() {
   const host = $("pads");
   host.textContent = "";
   pads.length = 0;
-  host.dataset.axes = axisStyle;
   const Ly = LAYERS[layer];
-  const nm = NAMES[nameSet][layer];
+  const nm = nameSet === "none" ? null : NAMES[nameSet][layer];
   const P = Ly.pos.join(","), N = Ly.neg.join(",");
   PAIRS.forEach(([a, b], idx) => {
     const A = STRAINS[a], B = STRAINS[b];
@@ -872,9 +868,9 @@ function buildPads() {
     el.innerHTML = `
       <div class="pad-head"><span class="pair"><i style="background:${css(a)}"></i>${A.short} ⇄ <i style="background:${css(b)}"></i>${B.short}</span><span class="beh"></span></div>
       <div class="pad-body">
-        <div class="ycap">${axisCaption(B.short, A.short, nm)}</div>
+        <div class="ycap">${axisCaption(b, a)}</div>
         <div class="pad-sq" tabindex="0" role="group" aria-label="${A.code} and ${B.code}"><canvas width="144" height="144"></canvas></div>
-        <div class="xcap">${axisCaption(A.short, B.short, nm)}</div>
+        <div class="xcap">${axisCaption(a, b)}</div>
       </div>`;
     const sq = el.querySelector(".pad-sq");
     const cv = sq.querySelector("canvas");
@@ -891,10 +887,12 @@ function buildPads() {
       S("line", { x1: 48.5, y1: 100 - pc(v), x2: 51.5, y2: 100 - pc(v), stroke: "rgba(255,255,255,.3)", "vector-effect": "non-scaling-stroke" }, svg);
     });
     const corner = (x, y, anchor, text) => { const t = S("text", { x, y, "text-anchor": anchor, class: "pad-corner" }, svg); t.textContent = text; };
-    corner(96, 9, "end", nm.corners.both);
-    corner(4, 96, "start", nm.corners.against);
-    corner(96, 96, "end", nm.corners.mix);
-    corner(4, 9, "start", nm.corners.mix);
+    if (nm) {
+      corner(96, 9, "end", nm.corners.both);
+      corner(4, 96, "start", nm.corners.against);
+      corner(96, 96, "end", nm.corners.mix);
+      corner(4, 9, "start", nm.corners.mix);
+    }
     const gx = S("line", { stroke: "rgba(255,255,255,.35)", "stroke-dasharray": "2 2", "vector-effect": "non-scaling-stroke" }, svg);
     const gy = S("line", { stroke: "rgba(255,255,255,.35)", "stroke-dasharray": "2 2", "vector-effect": "non-scaling-stroke" }, svg);
     const dot = S("g", {}, svg);
@@ -951,7 +949,8 @@ function updatePads() {
     p.dot.setAttribute("transform", `translate(${X} ${Y})`);
     p.gx.setAttribute("x1", X); p.gx.setAttribute("y1", Y); p.gx.setAttribute("x2", X); p.gx.setAttribute("y2", 50);
     p.gy.setAttribute("x1", X); p.gy.setAttribute("y1", Y); p.gy.setAttribute("x2", 50); p.gy.setAttribute("y2", Y);
-    p.beh.textContent = pairName(p.a, p.b, x, y);
+    if (nameSet === "none") p.beh.innerHTML = `<span style="color:${css(p.a)}">${fmt(x)}</span> <span style="color:${css(p.b)}">${fmt(y)}</span>`;
+    else p.beh.textContent = pairName(p.a, p.b, x, y);
   });
   if (pairFocus >= 0) {
     const p = pads[pairFocus];
@@ -1020,32 +1019,26 @@ function renderNameTables() {
   [["smell", "nmSmell", "Smell"], ["touch", "nmTouch", "Touch"]].forEach(([ly, id, title]) => {
     const on = (s) => (s === nameSet ? "on" : "");
     const head = `<caption>${title}</caption><thead><tr><th scope="col"></th>${SETS.map((s) => `<th scope="col" class="${on(s)}"><button type="button" data-set="${s}">${NAMES[s].label}</button></th>`).join("")}</tr></thead>`;
-    const axisRow = `<tr><th scope="row">Axis, A1 → B2</th>${SETS.map((s) => { const n = NAMES[s][ly]; return `<td class="${on(s)}">A1 ${n.verb} B2<small>${n.ends[0]} · ${n.ends[1]}</small></td>`; }).join("")}</tr>`;
     const rows = NAME_ROWS[ly].map((r) => `<tr><th scope="row">${r.desc}</th>${SETS.map((s) => `<td class="${on(s)}">${pairName(0, 1, r.x, r.y, ly, s)}${r.corner ? `<small>${NAMES[s][ly].corners[r.corner]}</small>` : ""}</td>`).join("")}</tr>`).join("");
     const t = $(id);
-    t.innerHTML = `${head}<tbody>${axisRow}${rows}</tbody>`;
+    t.innerHTML = `${head}<tbody>${rows}</tbody>`;
     t.querySelectorAll("button[data-set]").forEach((b) => b.addEventListener("click", () => setNames(b.dataset.set)));
   });
 }
-SETS.forEach((s) => {
+const NAME_OPTS = ["none", ...SETS];
+NAME_OPTS.forEach((s) => {
   const b = document.createElement("button");
-  b.type = "button"; b.id = "names-" + s; b.textContent = NAMES[s].label;
+  b.type = "button"; b.id = "names-" + s; b.textContent = s === "none" ? "None" : NAMES[s].label;
   b.setAttribute("role", "radio");
   b.addEventListener("click", () => setNames(s));
   $("nameSeg").appendChild(b);
 });
 function setNames(s) {
   nameSet = s;
-  SETS.forEach((x) => $("names-" + x).setAttribute("aria-checked", String(x === s)));
+  NAME_OPTS.forEach((x) => $("names-" + x).setAttribute("aria-checked", String(x === s)));
   buildPads();
   renderNameTables();
 }
-function setAxes(a) {
-  axisStyle = a;
-  ["sentence", "ends"].forEach((x) => $("axes-" + x).setAttribute("aria-checked", String(x === a)));
-  buildPads();
-}
-["sentence", "ends"].forEach((x) => $("axes-" + x).addEventListener("click", () => setAxes(x)));
 
 // ---------- mix: random, nudge, presets, history strip, auto ----------
 let lockOwn = false;
