@@ -2,6 +2,7 @@ import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_TEAL, withAlpha } from "./controlsTheme.ts";
+import { setHintText } from "./hintSwatches.ts";
 import {
   chipBtnLitStyle,
   chipBtnStyle,
@@ -136,7 +137,7 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
       for (const { mode: m, btn } of buttons) {
         btn.style.cssText = m === mode ? modeChipLitStyle : modeChipStyle;
       }
-      hint.textContent = MODE_OPTIONS.find((o) => o.mode === mode)?.title ?? "";
+      setHintText(hint, MODE_OPTIONS.find((o) => o.mode === mode)?.title ?? "");
     },
   };
 }
@@ -211,12 +212,14 @@ function createQualityRow(deps: PowerCardDeps, accent: string) {
               ? `${PRESET_LABEL[c]} — this device's recommended quality`
               : PRESET_LABEL[c];
       }
-      hint.textContent =
+      setHintText(
+        hint,
         choice === "auto"
           ? `Auto — following this device (${PRESET_LABEL[recommended]})`
           : choice === recommended
             ? `${PRESET_LABEL[choice]} — matches this device's recommendation`
-            : `${PRESET_LABEL[choice]} — overriding the recommended ${PRESET_LABEL[recommended]}`;
+            : `${PRESET_LABEL[choice]} — overriding the recommended ${PRESET_LABEL[recommended]}`,
+      );
     },
   };
 }
@@ -315,7 +318,7 @@ function createStatusRow(accent: string) {
       text.textContent = described.text;
       el.title = described.detail;
       dot.style.backgroundColor = described.dot;
-      hint.textContent = described.detail;
+      setHintText(hint, described.detail);
     },
   };
 }

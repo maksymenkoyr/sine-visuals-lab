@@ -18,6 +18,8 @@
  * there's no room), clamped to the viewport.
  */
 
+import { setHintText } from "./hintSwatches.ts";
+
 export interface Tooltip {
   el: HTMLElement;
   /** Positions and fills the tooltip near `target`, in `color`'s left
@@ -36,7 +38,13 @@ function createTooltipEl(): Tooltip {
 
   function show(target: HTMLElement, color: string, lines: readonly string[]): void {
     el.style.setProperty("--c", color);
-    el.replaceChildren(...lines.map((line) => Object.assign(document.createElement("div"), { textContent: line })));
+    el.replaceChildren(
+      ...lines.map((line) => {
+        const row = document.createElement("div");
+        setHintText(row, line);
+        return row;
+      }),
+    );
     // Shown (off-screen-safe: display:none has no box, so measure only
     // after it's visible) before reading its own size, so offsetWidth/
     // Height reflect the real content rather than a stale previous show.

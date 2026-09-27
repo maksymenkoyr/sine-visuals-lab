@@ -914,7 +914,7 @@ export const SETTINGS: SceneSetting[] = [
   },
   {
     key: "currentDensity",
-    label: "Current density",
+    label: "Current threshold",
     description: "How dense the dye must be before the Currents style lights it up",
     group: "Look",
     advanced: true,

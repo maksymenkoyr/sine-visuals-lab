@@ -28,13 +28,16 @@ spray-injection layer riding on top. Ships from the initial commit and is on mai
 - Imports `NOISE_HASH_GLSL`, `NOISE_MASK`, `NOISE_PERIOD`, `wrapFlow` from
   `src/render/noiseHash.ts` — the shared mobile-safe lattice hash (see Decisions
   below; this scene is the reason that module exists).
-- Reads the phase-locked beat/bar clock (`beatClock.ts`) and the latched one-shot
-  edges on `AnimFrame` (`renderLatch.ts`) rather than raw `FeatureFrame` edges.
+- Reads the latched one-shot edges on `AnimFrame` (`renderLatch.ts`) rather than
+  raw `FeatureFrame` edges; nothing in it reads the phase-locked beat/bar clock
+  (`beatClock.ts`) any more — the bar-locked breathe that was its last consumer
+  is gone (see Decisions).
   `uDropReactivity`/`dropDrive` reads `sectionIntensity.ts`'s slow-tracked
   "which part of the song is this" signal.
-- Its reactive settings still use the signal-links framework
-  (`SceneSetting.reads`, `src/render/signals.ts`) rather than the newer per-setting
-  drive picker — see Known issues for the pending migration.
+- Its reactive settings pick their sources through the per-setting drive picker
+  (`SceneSetting.drive`, `src/render/drives.ts`); only Spectral hue still declares
+  `reads` (`src/render/signals.ts`), since that coupling lives in the shader's own
+  hue phase rather than in a drive value.
 - The onset edges this scene reads (`anim.onset`, `anim.lowOnset`, `anim.dropOnset`)
   are gated upstream by `src/audio/silenceGate.ts`; no code in this file implements
   the gate itself.
@@ -276,6 +279,16 @@ reference-measurement workflow used by later scenes.
   general channel any scene can use for its own settings' graphs; the lines
   are heights for a rise from rest (a hit landing on a still-decaying pulse
   tops out higher on the graph than its rise).
+- 2026-09-26 — "Tempo breathe" becomes "Breathe": the once-per-bar, tempo-locked
+  zoom — and this scene's last read of `beatClock.ts` — was removed, and the dial
+  turned into a patch destination whose zoom follows whatever source is wired to
+  it (`breatheDrive(0.0)` in FRAG, inert at the Scene default), with its auto
+  weights dropped so it is a taste dial like Caustic density rather than something
+  the music profile redecides.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Descriptions corrected: Fog is hazier/softer ridges as it rises, and
+  Sparkle grain is coarser glints as it rises. The old text said the
+  reverse.
 
 ## Tuning notes
 
@@ -323,6 +336,11 @@ reference-measurement workflow used by later scenes.
   headless recipe in Resume here isolates the ripple from every other
   reactive setting for exactly this judgment.
 
+- Breathe is a patch destination: its row's dial is only the zoom's depth, and the
+  row does nothing at all until a source is wired to it (see `breatheDrive(0.0)`'s
+  comment in FRAG and the `breathe` entry in SETTINGS).
+
+
 ## Known issues and next steps
 
 - Kick surge and Beat churn still hand-roll their own trigger/hold/decay logic in
@@ -332,21 +350,15 @@ reference-measurement workflow used by later scenes.
   decay design at all (`rippleEmitter.ts`, the 2026-09-27 Decisions entries),
   which is exactly the family of problem trigger+hold+refractory
   (`beatListener.ts`'s own model) can't solve for a busy or continuous driver.
-- Two related pull requests were open and not yet merged as of this writing, and
-  describe behavior not present in the current code on `main`:
-  - A "Flash from level" crossfade (Beat flash driven by the continuous energy level
-    instead of only the beat pulse, so a sustained wall of noise still reads as a
-    hit) and a "Sparkle from line" drive (Treble sparkle driven by a user-drawn
-    per-band sensitivity line) were prototyped specifically for this scene, along
-    with a note that the sparkle brightness ceiling may still not be enough for the
-    most aggressive setting some material wants.
-  - A broader migration of every reactive-amount setting in this file off the
-    signal-links `reads`/`activeWhen` mechanism onto a newer per-setting drive
-    picker was planned, listing this scene among those to convert; the `reads`
-    entries on the ripple, ripple-source and spectral-hue settings are the
-    pre-migration mechanism, still in place.
-  Check the state of any in-flight work touching this scene before assuming either
-  is live.
+- Two older pull-request prototypes this scene's audio coupling grew from — the
+  "Flash from level" crossfade and the "Sparkle from line" drive — landed as
+  discrete alternative sources on those rows' own pickers rather than as separate
+  dials, and the signal-links-to-drive-picker migration they were bundled with
+  landed too (the `reads` entry left on Spectral hue is deliberate, not pending —
+  see Where the code is). The one concern from that era still open is the sparkle
+  brightness ceiling possibly not being enough for the most aggressive setting
+  some material wants; it has only ever been checked on the synthetic feed
+  (see below).
 - Only the synthetic audio feed has been used to check the sparkle/flash tuning
   above; there has been no measured real-music pass. The ring emitter's own
   constants (see Tuning notes) are likewise screenshot-tuned against synthetic
@@ -378,9 +390,9 @@ reference-measurement workflow used by later scenes.
   matching, wrapped entry in `driftFlows` on the JS side, or it reintroduces the
   mobile seam bug `src/render/noiseHash.ts`'s header documents — the two halves only
   work together.
-- Several pull requests can be in flight against this scene's audio coupling at
-  once (hit strength, line drive, the drive-picker migration); check each one's
-  merge state before trusting a description of "current" behavior against it.
+- Audio-coupling work against this scene can arrive in several places at once
+  (hit strength, line sources, the patch bay); check each one's merge state
+  before trusting a description of "current" behavior against it.
 
 ## History
 
@@ -401,5 +413,9 @@ reference-measurement workflow used by later scenes.
 - #115 (merged 2026-09-18) — Silence gate (global; Caustics was the motivating report)
 - #121 / `fb13048` (2026-09-21) — Mobile-seam fix extracted into shared `noiseHash.ts`
 - #118 (merged 2026-09-19) — hit history and the shared `beatListener.ts`; Caustics itself doesn't use the listener yet
-- #127, #130 — open, not merged as of this writing; see Known issues
-- #154 (2026-09-27) — Beat ripple rebuilt as a real 2D wave simulation (`rippleTank.ts`), replacing the analytic ring pool; a general GPU simulation-pass hook added to `createFullscreenScene` (`fullscreenScene.ts`)
+- #127 / `30e3240`, #130 / `4bc9175`, #136 / `eee37a8` (merged) — graded hit
+  strength, the per-setting drive picker, and the multi-source patch bay —
+  Caustics' reactive settings now pick their sources through the picker
+- #147 (2026-09-26) — Tempo breathe → Breathe: a wirable, inert-until-patched
+  zoom (see Decisions)
+- #154 (2026-09-27) — Beat ripple: rings always reach the edge, then a continuous ring emitter (`rippleEmitter.ts`) sized by salience, with its threshold drawn on the panel graph (`settingMarks.ts`); level/line drive sources fire through `valueTrigger.ts` (see Decisions)

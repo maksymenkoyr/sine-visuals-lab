@@ -315,7 +315,7 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "arms",
-    label: "Arms",
+    label: "Arm tightness",
     description: "How tightly the ink hugs the two axes — higher is a thinner cross with emptier diagonals.",
     group: "Form",
     min: 0.3,

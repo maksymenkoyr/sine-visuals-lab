@@ -56,7 +56,7 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 //  - The Sphere checkbox re-maps the grid onto a globe (and overrides Circle):
 //    columns are longitude, rows latitude, with time mirrored about the
 //    equator so both hemispheres carry the full history. The poles get the
-//    same Center Spike treatment as the disc's center. Circle Squeeze and
+//    same Center Spike treatment as the disc's center. Circle Depth and
 //    CIRCLE_TILT apply to the ball too, so it's really an ellipsoid tipped
 //    toward you.
 //  - The Background Dome checkbox lifts the sky lattice off the flat room
@@ -190,7 +190,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "sphere",
     label: "Sphere",
-    description: "Wrap the spectrogram around a globe: newest ring at the equator, history rippling toward both poles, bass at the front. Circle Squeeze flattens it into an ellipsoid. Overrides Circle",
+    description: "Wrap the spectrogram around a globe: newest ring at the equator, history rippling toward both poles, bass at the front. Circle Depth flattens it into an ellipsoid. Overrides Circle",
     group: "Form",
     min: 0,
     max: 1,
@@ -200,7 +200,7 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "circleSqueeze",
-    label: "Circle Squeeze",
+    label: "Circle Depth",
     description: "Circle and Sphere layouts: depth as a fraction of width -- below 1 is an ellipse/ellipsoid wider than deep, 1 is a true circle/sphere",
     group: "Form",
     min: 0.3,
@@ -230,8 +230,8 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "noiseScale",
-    label: "Noise Scale",
-    description: "Undulation pattern size -- lower is broader/rolling hills",
+    label: "Noise Detail",
+    description: "How fine the undulation pattern is -- lower is broader/rolling hills",
     group: "Form",
     min: 0.01,
     max: 1,
@@ -981,7 +981,7 @@ void main() {
     // The disc is tilted toward the viewer (far rim raised) so it reads as a
     // disc rather than a sliver from the low default camera; displacement
     // follows the disc's own normal.
-    vec3 local = vec3(sin(theta) * r, height, -cos(theta) * r * uCircleSqueeze); // Circle Squeeze: depth radius vs width radius
+    vec3 local = vec3(sin(theta) * r, height, -cos(theta) * r * uCircleSqueeze); // Circle Depth: depth radius vs width radius
     float ct = cos(CIRCLE_TILT), st = sin(CIRCLE_TILT);
     worldPos = vec3(local.x, local.y * ct + local.z * st, CIRCLE_CENTER_Z - local.y * st + local.z * ct);
   } else {
@@ -1199,7 +1199,7 @@ float triLattice(vec2 p) {
 // Wireframe Only surface writes no depth, so without this the backdrop
 // would show through it at full strength and read as being in front.
 // Works in the shape's own tilted, squeezed frame (the inverse of what
-// MESH_VERT applies), so it tracks Circle Squeeze and CIRCLE_TILT exactly.
+// MESH_VERT applies), so it tracks Circle Depth and CIRCLE_TILT exactly.
 float shapeCover(vec3 o, vec3 d) {
   if (uSphere < 0.5 && uCircle < 0.5) return 1.0;
   float ct = cos(CIRCLE_TILT), st = sin(CIRCLE_TILT);
@@ -1506,9 +1506,9 @@ export const meshGridScene: Scene = (() => {
       // slider back to manual every frame (see autoTune.ts).
       //
       // The noise field advances one spectrum frame per push, scaled by
-      // Noise Scale, and wraps on the shader's lattice period so the phase
+      // Noise Detail, and wraps on the shader's lattice period so the phase
       // stays small forever (see file header). Accumulating incrementally
-      // also means a Noise Scale change doesn't jump the field.
+      // also means a Noise Detail change doesn't jump the field.
       const noiseScale = resolveSceneSetting(ID, settingFor("noiseScale"));
       noisePhase = (noisePhase + NOISE_Z_RATE * noiseScale) % NOISE_PERIOD;
 

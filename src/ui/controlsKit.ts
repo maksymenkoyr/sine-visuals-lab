@@ -1,5 +1,6 @@
 import { FONT_DIGITS, FONT_LABEL, FONT_MONO, glassCardStyle, scanlineStyle } from "./controlsTheme.ts";
 import { isFolded, setFolded } from "./panelFolds.ts";
+import { setHintText } from "./hintSwatches.ts";
 
 /**
  * The DOM grammar the controls panel (src/ui/deviceMenu.ts) and its meters
@@ -508,7 +509,7 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
 
   const hint = document.createElement("div");
   hint.className = "vc-hint";
-  hint.textContent = spec.description ?? "";
+  setHintText(hint, spec.description ?? "");
   if (!spec.description) hint.style.display = "none";
 
   el.append(head, strip, hint);

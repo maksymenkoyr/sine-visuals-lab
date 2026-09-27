@@ -168,6 +168,9 @@ are one measurement run each, not standing specs):
   pink, fixed by dimming the red rather than blending toward white; the edge
   stroke width is scaled by ray distance so it holds a constant width on
   screen rather than thinning with depth.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Fog renamed View depth (higher already meant less fog) and Tiling renamed
+  Cell size (higher already meant fewer, bigger cells). Labels only.
 
 ## Tuning notes
 

@@ -65,6 +65,7 @@ import {
   jackKey,
 } from "./driveSources.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
+import { setHintText } from "./hintSwatches.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
 import { createAudioMeters, createMeterRow } from "./audioMeters.ts";
@@ -1372,7 +1373,7 @@ export function createControlRow(spec: ControlRowSpec) {
   const hint = document.createElement("div");
   hint.className = "vc-hint";
   const hintDesc = document.createElement("div");
-  hintDesc.textContent = spec.description ?? "";
+  setHintText(hintDesc, spec.description ?? "");
   const hintAuto = document.createElement("div");
   hintAuto.className = "vc-hint-auto";
   hintAuto.textContent = AUTO_HOLDING_HINT;
@@ -1635,7 +1636,7 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
 
   const hint = document.createElement("div");
   hint.className = "vc-hint";
-  hint.textContent = spec.description ?? "";
+  setHintText(hint, spec.description ?? "");
   if (!spec.description) hint.style.display = "none";
 
   el.append(head, toggle, hint);
@@ -2743,7 +2744,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const restHint = stacked ? "Add a source by name below." : "Click a meter's jack to plug it in or out.";
     const hintBar = document.createElement("div");
     hintBar.className = "vc-drive-bottom-hint";
-    hintBar.textContent = restHint;
+    setHintText(hintBar, restHint);
     function hintedAncestor(target: EventTarget | null): HTMLElement | null {
       return target instanceof HTMLElement ? target.closest<HTMLElement>("[data-hint]") : null;
     }
@@ -2752,19 +2753,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
     panel.addEventListener("pointerover", (e) => {
       const el = hintedAncestor(e.target);
-      if (el) hintBar.textContent = el.dataset.hint!;
+      if (el) setHintText(hintBar, el.dataset.hint!);
     });
     panel.addEventListener("pointerout", (e) => {
       const el = hintedAncestor(e.target);
-      if (el && leftHintedAncestor(el, e.relatedTarget)) hintBar.textContent = restHint;
+      if (el && leftHintedAncestor(el, e.relatedTarget)) setHintText(hintBar, restHint);
     });
     panel.addEventListener("focusin", (e) => {
       const el = hintedAncestor(e.target);
-      if (el) hintBar.textContent = el.dataset.hint!;
+      if (el) setHintText(hintBar, el.dataset.hint!);
     });
     panel.addEventListener("focusout", (e) => {
       const el = hintedAncestor(e.target);
-      if (el && leftHintedAncestor(el, e.relatedTarget)) hintBar.textContent = restHint;
+      if (el && leftHintedAncestor(el, e.relatedTarget)) setHintText(hintBar, restHint);
     });
     panel.appendChild(hintBar);
 
@@ -3397,10 +3398,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // layout's own scroller — cables are hidden there, but a resize crossing
   // the breakpoint mid-scroll should still land on fresh geometry), resize,
   // and a ResizeObserver on both columns (spectrumCol here; controlsCol —
-  // declared further down — observes itself once it exists). Card
-  // fold/unfold piggybacks on the existing columnsWrap MutationObserver
-  // (refreshColumnsFold, below); renderSceneSettings schedules one from its
-  // own tail.
+  // declared further down — observes itself once it exists) and on every
+  // card in them (observed once the panel is assembled, below). A column is
+  // a fixed-height scroller, so a card growing inside it — a row's .vc-hint
+  // unfolding on hover/focus — never resizes the column itself; without the
+  // per-card observation every jack/port below that card moved while its
+  // cable stayed put. The hint's max-height
+  // transition fires this observer every frame it animates, which
+  // scheduleCableRecompute's rAF batching folds into one recompute per
+  // frame. Card fold/unfold piggybacks on the existing columnsWrap
+  // MutationObserver (refreshColumnsFold, below); renderSceneSettings
+  // schedules one from its own tail.
   const cableColumnsRO = new ResizeObserver(scheduleCableRecompute);
   cableColumnsRO.observe(spectrumCol);
   audioMeters.el.addEventListener("scroll", scheduleCableRecompute, { passive: true });
@@ -3558,7 +3566,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoStrengthSlider.style.marginTop = "0";
   const autoStrengthHint = document.createElement("div");
   autoStrengthHint.className = "vc-hint";
-  autoStrengthHint.textContent = AUTO_STRENGTH_HINT;
+  setHintText(autoStrengthHint, AUTO_STRENGTH_HINT);
   autoStrengthRow.append(autoStrengthSlider, autoStrengthHint);
   autoCard.body.appendChild(autoStrengthRow);
   autoCard.el.style.cursor = "pointer";
@@ -3703,7 +3711,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       () => deps.getSmoothing(deps.currentSceneId()),
       () => deps.resolveSmoothingValue(deps.currentSceneId()),
       (value) => deps.onSmoothingChange(deps.currentSceneId(), value),
-      "How quickly the picture follows the sound — drag to the bottom for Off, the meters panel's RAW chip with nothing left to bypass",
+      "How much the picture lags and softens the sound — drag to the bottom for Off, the meters panel's RAW chip with nothing left to bypass",
     ),
   ];
   function syncInputRows(): void {
@@ -4532,6 +4540,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   controlsCol.append(autoRow, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, footer);
   root.append(columnsWrap, controlsCol);
+  // Every card is built once above and lives for the panel's lifetime, so
+  // one pass covers them all — see cableColumnsRO's own comment.
+  for (const card of root.querySelectorAll<HTMLElement>(".vc-card")) cableColumnsRO.observe(card);
   document.body.appendChild(root);
 
   // ---- open / close ----

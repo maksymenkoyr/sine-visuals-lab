@@ -23,7 +23,7 @@ ping-pong state (no reliance on `EXT_color_buffer_float`) and for using
 context. `GROUP_COUNT` keys the trail's three band-group channels, the
 species assignment and the wandering attractors together; `SETTINGS`
 carries the Form/Motion/Look/Post controls (Network scale, Fan angle, Turn
-rate, Wander, Trail decay, Band braid, Crawl speed, Beat surge, Beat
+rate, Wander, Trail decay, Band merge, Crawl speed, Beat surge, Beat
 seeding, Band pull, Glow, Relief, Palette tint, Beat flash), each with its
 own `auto` weights for the Auto-tune system (`src/render/autoTune.ts`).
 
@@ -44,6 +44,9 @@ follows). No video or visual reference was studied for this scene.
   composite exposure set from measured frame statistics); the PR notes it
   had not yet been judged against real music through a mic and might still
   want a tuning pass.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Band braid renamed Band merge: checking it merges the networks. Label
+  only.
 
 ## Tuning notes
 
