@@ -304,12 +304,12 @@ const stylesheet = `
 }
 
 /* A row "wakes" when the pointer is anywhere over it (the row is a far
- * bigger target than its 3px track) or its control has focus: the label
- * tints toward the row's accent, the track glows through a hairline border,
- * and the slider zooms up so the thumb is easy to grab precisely. On top of
- * that flat zoom, --vc-thumb-boost multiplies in a little extra as the
- * pointer nears the thumb specifically — set by deviceMenu.ts's
- * wireThumbMagnet, unset (falls back to 1) everywhere else. */
+ * bigger target than the slider's own 3px track) or its control has focus:
+ * the label tints toward the row's accent and the track glows through a
+ * hairline border. A slider's own bigger, brighter thumb on hover/focus/drag
+ * is drawn by magnetSlider.ts itself, straight off real hover/focus/drag
+ * state rather than a CSS custom property, so nothing here needs to reach
+ * into the slider at all. */
 /* The row frames itself with padding that negative margins cancel out, so
  * the ring + glow around the whole title-and-slider block costs no layout. */
 .vc-row {
@@ -358,68 +358,21 @@ const stylesheet = `
   max-height: 60px; opacity: 1; margin-top: 6px;
 }
 
-/* The whole input is the touch target (taller than the 3px track it draws).
- * The accent comes from the enclosing .vc-row. */
+/* magnetSlider.ts's one slider control — a canvas-drawn ruler, not a native
+ * input type=range (there's no track/thumb pseudo-element rule left to
+ * carve here — the whole look, including the hover/focus/drag thumb size and
+ * the accent-coloured fill, is drawn by that file itself). The whole element
+ * is the touch target (taller than the 3px track it draws); the accent it
+ * paints with comes from its own accent option, not from the enclosing
+ * .vc-row's --vc-accent (a .vc-slider outside a .vc-row, like the patch
+ * bay's own weight controls, has no such ancestor to read it from anyway). */
 .vc-slider {
-  -webkit-appearance: none; appearance: none;
-  display: block; width: 100%; height: 22px; margin: 2px 0 0; padding: 0;
-  background: transparent; cursor: pointer; touch-action: pan-y;
-  --vc-fill: 0%;
-  transform-origin: 50% 50%;
-  transition: transform 0.18s ease;
+  position: relative; display: block; width: 100%; height: 40px; margin: 2px 0 0;
+  cursor: pointer; touch-action: pan-y; outline: none; border-radius: 3px;
 }
-.vc-slider:focus { outline: none; }
-.vc-row:hover .vc-slider, .vc-row:focus-within .vc-slider { transform: scale(1.015, 1.6); }
-/* A .vc-slider outside a .vc-row (the patch bay's own weight controls,
- * deviceMenu.ts's buildWeightSlider) has no :focus-within ancestor to
- * supply the scale/glow above, so give it a plain ring directly instead —
- * keyboard focus stays visible wherever a .vc-slider lives. Harmless
- * layered on top of a .vc-row slider's own effect too. */
-.vc-slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 2px #fff, 0 0 0 4px color-mix(in srgb, var(--vc-accent) 60%, transparent);
-}
-.vc-slider:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 2px #fff, 0 0 0 4px color-mix(in srgb, var(--vc-accent) 60%, transparent);
-}
-.vc-slider::-webkit-slider-runnable-track {
-  height: 3px; border-radius: 2px;
-  background: linear-gradient(var(--vc-accent), var(--vc-accent)) no-repeat 0 0 / var(--vc-fill) 100%, rgba(255, 255, 255, 0.18);
-  box-shadow: 0 0 0 0 transparent;
-  transition: box-shadow 0.18s ease;
-}
-.vc-row:hover .vc-slider::-webkit-slider-runnable-track,
-.vc-row:focus-within .vc-slider::-webkit-slider-runnable-track {
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--vc-accent) 45%, transparent),
-    0 0 8px color-mix(in srgb, var(--vc-accent) 30%, transparent);
-}
-.vc-slider::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 3px; height: 11px; margin-top: -4px;
-  border: none; border-radius: 2px; background: #fff;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-}
-.vc-row:hover .vc-slider::-webkit-slider-thumb,
-.vc-row:focus-within .vc-slider::-webkit-slider-thumb {
-  transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1)));
-  box-shadow: 0 0 6px color-mix(in srgb, var(--vc-accent) 60%, transparent);
-}
-.vc-slider::-moz-range-track {
-  height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.18);
-  transition: box-shadow 0.18s ease;
-}
-.vc-row:hover .vc-slider::-moz-range-track,
-.vc-row:focus-within .vc-slider::-moz-range-track {
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--vc-accent) 45%, transparent),
-    0 0 8px color-mix(in srgb, var(--vc-accent) 30%, transparent);
-}
-.vc-slider::-moz-range-progress { height: 3px; border-radius: 2px; background: var(--vc-accent); }
-.vc-slider::-moz-range-thumb {
-  width: 3px; height: 11px; border: none; border-radius: 2px; background: #fff;
-  transition: transform 0.18s ease;
-}
-.vc-row:hover .vc-slider::-moz-range-thumb,
-.vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1))); }
+.vc-slider canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.vc-slider.vc-dragging { cursor: grabbing; }
+.vc-slider:focus-visible { box-shadow: 0 1px 0 0 color-mix(in srgb, var(--vc-accent) 60%, transparent); }
 
 /* A band fader's hit area (bandFaders.ts): an invisible column over the
  * spectrum canvas, which draws the fader itself. touch-action: none is the
