@@ -25,6 +25,7 @@ import { inkScene } from "./ink.ts";
 import { crystalScene } from "./crystal/index.ts";
 import { fluidScene } from "./fluid.ts";
 import { silkScene } from "./silk/index.ts";
+import { skyScene } from "./sky/sky.ts";
 import { gatesScene } from "./gates/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
@@ -34,6 +35,7 @@ import { gatesScene } from "./gates/index.ts";
 // first tile behind the gallery's draft toggle. (Registering it here is also
 // what lets vite-scene-links-plugin.ts print its link when you start
 // `npm run dev` with its files changed.)
+registerScene(skyScene);
 registerScene(silkScene);
 registerScene(slatsScene);
 registerScene(physarumScene);
@@ -65,6 +67,7 @@ registerScene(ferrofluidScene);
  *  the featured scenes registered above it are deliberately absent. Paid
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
+  "sky",
   "silk",
   "gates",
   "tessera",
@@ -104,6 +107,7 @@ for (const error of privateScenes.errors) console.warn(`[private scenes] ${error
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
 
 export {
+  skyScene,
   silkScene,
   tesseraScene,
   spectrumScene,
