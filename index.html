@@ -225,6 +225,12 @@
        * file is plain HTML, not a templated stylesheet, so these values
        * (font, colors, radius) are kept in sync with src/ui/controlsTheme.ts
        * by hand rather than importing it. */
+      /* The scene keeps playing a demo groove behind this prompt (see
+       * renderIdlePreview in app.ts), so the prompt sits on its own frosted
+       * card: whatever the scene draws underneath — a white flash, a busy
+       * field — the copy keeps the same dark ground and stays readable. The
+       * blur is the nicety; the near-opaque fill alone carries contrast where
+       * backdrop-filter isn't supported. */
       #audioPrompt {
         position: fixed;
         left: 50%;
@@ -234,9 +240,46 @@
         display: none;
         flex-direction: column;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
+        box-sizing: border-box;
+        width: max-content;
+        max-width: calc(100vw - 32px);
+        padding: 14px 18px 16px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 3px;
+        background: rgba(6, 6, 10, 0.88);
+        -webkit-backdrop-filter: blur(14px) saturate(1.2);
+        backdrop-filter: blur(14px) saturate(1.2);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
         font: 400 13px/1.4 "Chakra Petch", system-ui, sans-serif;
         color: #fff;
+      }
+      /* Says why the scene is already moving: it's the demo feed, not the
+       * room. Mono caps like #audioPromptLabel, with a softly pulsing dot. */
+      #audioPromptDemo {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font: 400 10px "Share Tech Mono", ui-monospace, monospace;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.6);
+      }
+      .apDemoDot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #fff;
+        flex: none;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .apDemoDot {
+          animation: ap-demo-pulse 1s ease-out infinite;
+        }
+        @keyframes ap-demo-pulse {
+          0% { opacity: 1; box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.5); }
+          100% { opacity: 0.35; box-shadow: 0 0 0 6px rgba(255, 255, 255, 0); }
+        }
       }
       #audioPromptRow {
         display: flex;
@@ -249,22 +292,33 @@
        * (src/ui/gallery.ts) — mono caps, a shimmer sweeping toward the
        * buttons and a nudging arrow — kept in sync by hand, like the rest of
        * this block. No [data-prompting] toggle needed: the whole prompt only
-       * shows while nothing is listening. */
+       * shows while nothing is listening. The one deliberate difference is a
+       * brighter resting tone (label and shimmer), since this copy sits over
+       * a moving scene rather than the gallery's flat masthead. */
       #audioPromptLabel {
         margin-right: 10px;
         font: 400 10.5px "Share Tech Mono", ui-monospace, monospace;
         letter-spacing: 0.14em;
         text-transform: uppercase;
         white-space: nowrap;
-        color: rgba(255, 255, 255, 0.55);
+        color: rgba(255, 255, 255, 0.7);
       }
       .apHintArrow {
         display: inline-block;
         margin-left: 0.6em;
       }
+      /* On a phone the label can't share a row with both buttons, so it
+       * takes its own line above them rather than wrapping beside one. */
+      @media (max-width: 480px) {
+        #audioPromptLabel {
+          flex-basis: 100%;
+          margin-right: 0;
+          text-align: center;
+        }
+      }
       @media (prefers-reduced-motion: no-preference) {
         .apHintText {
-          background: linear-gradient(90deg, rgba(255, 255, 255, 0.45) 40%, #fff 50%, rgba(255, 255, 255, 0.45) 60%) 100% 0 / 250% 100%;
+          background: linear-gradient(90deg, rgba(255, 255, 255, 0.6) 40%, #fff 50%, rgba(255, 255, 255, 0.6) 60%) 100% 0 / 250% 100%;
           -webkit-background-clip: text;
           background-clip: text;
           color: transparent;
@@ -317,7 +371,7 @@
         max-width: min(420px, 88vw);
         text-align: center;
         font: 400 12px/1.45 system-ui, sans-serif;
-        color: #fff9;
+        color: rgba(255, 255, 255, 0.72);
       }
 
       /* The page's h1 and product blurb are for crawlers and screen readers
@@ -354,6 +408,7 @@
     <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false">&#9974;</button>
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)">&#9881;</button>
     <div id="audioPrompt">
+      <div id="audioPromptDemo"><span class="apDemoDot"></span><span>Playing demo audio</span></div>
       <div id="audioPromptRow">
         <span id="audioPromptLabel" hidden><span class="apHintText">Pick a source to start</span><span class="apHintArrow">›</span></span>
         <button id="audioPromptMicBtn"><span class="apDot"></span><span id="audioPromptMicLabel">Tap to enable mic</span></button>

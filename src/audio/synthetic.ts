@@ -46,7 +46,8 @@ const SECTION_PERIOD_SEC = 26;
 const SECTION_DEPTH = 0.7; // 0 = no section dynamics, 1 = quiet section hits pure noise floor
 
 /** Produces a plausible ~120bpm FeatureFrame with no real audio input, so
- *  gallery preview tiles look alive before the mic is ever granted. Once
+ *  gallery preview tiles — and an open scene, behind its start prompt (see
+ *  idlePreview in app.ts) — look alive before the mic is ever granted. Once
  *  real audio starts flowing, callers just stop calling this and switch to
  *  the live FeatureFrame — there's no state here to tear down. */
 export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {

@@ -40,8 +40,8 @@ import {
   smoothingRateScale,
 } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
-import { createRenderLatch } from "./render/renderLatch.ts";
-import { createDriveEngine } from "./render/drives.ts";
+import { createRenderLatch, type RenderLatch } from "./render/renderLatch.ts";
+import { createDriveEngine, type DriveEngine } from "./render/drives.ts";
 import {
   getDriveLine,
   getDriveLineStrength,
@@ -307,6 +307,20 @@ const renderLatch = createRenderLatch();
 // other store here), so it doesn't need recreating on a scene switch. See
 // src/render/drives.ts's header for accumulate() vs. forScene().
 const driveEngine = createDriveEngine();
+/** The demo groove a scene plays behind the start prompt, so opening a scene
+ *  before any source is picked shows it moving instead of a black screen —
+ *  see idlePreviewActive() and renderIdlePreview(). It keeps its own anim
+ *  clock, latch and drive engine rather than borrowing the ones above: the
+ *  beat clock would otherwise arrive locked to this feed's tempo when the
+ *  real source attaches, and the demo must not train advanceAutoTune's music
+ *  profile either. Purely local — never sent to a paired TV, never counted
+ *  as usage, never shown on the panel's meters. */
+const idlePreview = {
+  feed: createSyntheticFeed(),
+  anim: createAnimClock(),
+  latch: createRenderLatch(),
+  drives: createDriveEngine(),
+};
 let lastRafMs = 0;
 let hudHideTimer: number | undefined;
 
@@ -1474,8 +1488,25 @@ function loop(): void {
   const liveDrives = anim ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
   deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
 
-  if (!lastVis || !anim) return;
+  if (!lastVis || !anim) {
+    if (idlePreviewActive()) renderIdlePreview(nowRafMs, dtSec, smoothing);
+    return;
+  }
 
+  drawScene(nowRafMs, gained!, sensitivity, expansion, anim, renderLatch, driveEngine);
+}
+
+/** The scene's render tail, shared by live audio and the idle preview — each
+ *  passes its own latch and drive engine (see idlePreview's doc comment). */
+function drawScene(
+  nowRafMs: number,
+  gained: FeatureFrame,
+  sensitivity: number,
+  expansion: number,
+  anim: AnimFrame,
+  latch: RenderLatch,
+  engine: DriveEngine,
+): void {
   if (!shouldRenderFrame(nowRafMs, lastRenderMs, renderIntervalMs())) return;
   if (lastRenderFpsMs > 0) {
     const renderDtMs = nowRafMs - lastRenderFpsMs;
@@ -1487,11 +1518,38 @@ function loop(): void {
   const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
-  const displayFrame = applySensitivity(gained!, sensitivity, expansion);
-  const latchedAnim = renderLatch.consume(anim, nowRafMs);
-  const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
+  const displayFrame = applySensitivity(gained, sensitivity, expansion);
+  const latchedAnim = latch.consume(anim, nowRafMs);
+  const drives = engine.forScene(scene.id, scene.settings ?? [], latchedAnim);
   scene.render(mainHost!.ctx, displayFrame, viewport, palette, latchedAnim, drives);
   governor?.recordFrame(nowRafMs);
+}
+
+/** True exactly while the start prompt could be up: in a scene, on this
+ *  device's own audio path, with nothing listening yet. Deliberately wider
+ *  than updateMicPrompt's needsAudio — it stays true while a permission or
+ *  share picker is open, so the demo keeps playing until real audio takes
+ *  over rather than blinking to black in between. */
+function idlePreviewActive(): boolean {
+  return inViz && mode !== "renderer" && !syntheticFeed && !bandAnalyser;
+}
+
+/** One tick of the demo groove behind the start prompt — the same pipeline
+ *  loop() runs for live audio (band gains, anim clock, drives, sensitivity),
+ *  on idlePreview's own state and minus everything live-only: no auto-tune
+ *  training, no meters, no host send. The scene's own settings and the
+ *  Input card still apply, so tweaking a look before picking a source shows
+ *  the result. */
+function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): void {
+  const frame = idlePreview.feed.frame(nowRafMs / 1000);
+  const gained = applyBandGains(frame, getBandGains(scene.id));
+  const anim = idlePreview.anim.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: null });
+  idlePreview.latch.accumulate(anim);
+  const sensitivity = resolveSensitivity(scene.id);
+  const expansion = resolveExpansion(scene.id);
+  const driveEnergy = applySensitivity(gained, sensitivity, expansion).energy;
+  idlePreview.drives.accumulate(dtSec, gained, driveEnergy, anim, scene.id, scene.settings ?? []);
+  drawScene(nowRafMs, gained, sensitivity, expansion, anim, idlePreview.latch, idlePreview.drives);
 }
 
 void boot();
