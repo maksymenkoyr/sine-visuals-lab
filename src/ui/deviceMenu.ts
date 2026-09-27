@@ -794,7 +794,7 @@ const driveResetLinkStyle = `
 
 /** Solo's eye (positionSoloEye) — its box, which controlsTheme.ts's
  *  .vc-solo-eye rule sizes to match. */
-const SOLO_EYE_PX = 16;
+const SOLO_EYE_PX = 18;
 
 // Footer strip.
 const footerStyle = `
@@ -3441,8 +3441,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Solo's eye: one floating button just outside the pinned row's left
   // edge, under its port (positionSoloEye) — on <body>, not in the row,
   // since the Scene card's overflow: hidden clips anything hung past the
-  // row's own edge. Lid + pupil over a shut lid with lashes, scaled
-  // open/shut by controlsTheme.ts's .vc-solo-eye rules.
+  // row's own edge. A plain eye in a rounded square — lid + pupil over a
+  // shut lid, scaled open/shut by controlsTheme.ts's .vc-solo-eye rules.
   const soloEyeEl = document.createElement("button");
   soloEyeEl.type = "button";
   soloEyeEl.className = "vc-solo-eye";
@@ -3451,8 +3451,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   soloEyeEl.hidden = true;
   soloEyeEl.innerHTML =
     '<svg viewBox="0 0 24 24" aria-hidden="true">' +
-    '<g class="vc-eye-lid"><path d="M2.5 12 Q12 3.5 21.5 12 Q12 20.5 2.5 12Z"/><circle cx="12" cy="12" r="3.3"/></g>' +
-    '<path class="vc-eye-shut" d="M3 11 Q12 18.5 21 11 M7 14.6 L5.8 17.4 M12 15.7 L12 18.8 M17 14.6 L18.2 17.4"/>' +
+    '<rect class="vc-eye-frame" x="1.6" y="1.6" width="20.8" height="20.8" rx="4.6"/>' +
+    '<g class="vc-eye-lid"><path d="M5 12 Q12 5.6 19 12 Q12 18.4 5 12Z"/><circle cx="12" cy="12" r="2.6"/></g>' +
+    '<path class="vc-eye-shut" d="M5.2 11.4 Q12 16.6 18.8 11.4"/>' +
     "</svg>";
   soloEyeEl.addEventListener("click", () => setSolo(!soloOn));
   document.body.appendChild(soloEyeEl);

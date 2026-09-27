@@ -572,30 +572,32 @@ body.vc-keys-reveal [data-keycap]::after {
   box-shadow: 0 0 0 1.5px var(--vc-pin-color, ${SCENE_VIOLET});
 }
 /* Solo's eye (deviceMenu.ts's positionSoloEye): fixed on <body> just
- * outside the pinned row's left edge, under its port, in the pin's colour: shut while everything shows,
- * peeking half open on hover, wide open with a lit pupil while this setting
- * is the only thing shown. The lid scales about the eye's own midline, so
- * toggling reads as the eye opening and blinking shut. */
+ * outside the pinned row's left edge, under its port, in the pin's colour —
+ * a plain eye in a rounded square: shut while everything shows, peeking half
+ * open on hover, wide open (the square tinted and glowing) while this
+ * setting is the only thing shown. The lid scales about the eye's own
+ * midline, so toggling reads as the eye opening and blinking shut. */
 .vc-solo-eye {
-  position: fixed; z-index: 31; width: 16px; height: 16px; padding: 0;
+  position: fixed; z-index: 31; width: 18px; height: 18px; padding: 0;
   background: none; border: none; cursor: pointer; color: var(--vc-pin-color, ${SCENE_VIOLET});
   --open: 0;
 }
-.vc-solo-eye svg { width: 16px; height: 16px; display: block; overflow: visible; }
+.vc-solo-eye svg { width: 18px; height: 18px; display: block; overflow: visible; }
+.vc-eye-frame { fill: none; stroke: currentColor; stroke-width: 1.7; transition: fill 0.2s ease; }
 .vc-eye-lid {
-  fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round;
+  fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round;
   transform-origin: 12px 12px; transform: scaleY(var(--open));
-  transition: transform 0.24s cubic-bezier(0.3, 1.5, 0.5, 1);
+  transition: transform 0.26s cubic-bezier(0.3, 1.5, 0.5, 1);
 }
-.vc-eye-lid circle { fill: currentColor; stroke: none; opacity: 0.35; transition: opacity 0.2s ease; }
+.vc-eye-lid circle { fill: currentColor; stroke: none; }
 .vc-eye-shut {
-  fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round;
+  fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round;
   opacity: calc(1 - var(--open)); transition: opacity 0.18s ease;
 }
 .vc-solo-eye:hover, .vc-solo-eye:focus-visible { --open: 0.5; outline: none; }
 .vc-solo-eye.vc-solo-eye-on { --open: 1; }
-.vc-solo-eye.vc-solo-eye-on:hover { --open: 0.8; }
-.vc-solo-eye.vc-solo-eye-on .vc-eye-lid circle { opacity: 1; }
+.vc-solo-eye.vc-solo-eye-on:hover { --open: 0.82; }
+.vc-solo-eye.vc-solo-eye-on .vc-eye-frame { fill: color-mix(in srgb, currentColor 18%, transparent); }
 .vc-solo-eye.vc-solo-eye-on svg { filter: drop-shadow(0 0 3px var(--vc-pin-color, ${SCENE_VIOLET})); }
 @media (prefers-reduced-motion: reduce) {
   .vc-eye-lid { transition: none; }
