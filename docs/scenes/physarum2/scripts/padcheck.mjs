@@ -183,6 +183,121 @@ const expectSel = [true, true, true, false, false, false];
 const selMatches = padClasses.every((c, i) => c.sel === expectSel[i] && c.dim === !expectSel[i]);
 report("selection-dims-unrelated-pads", selMatches, JSON.stringify(padClasses));
 
+// --- Phase 3: Random / Nudge / Keep own trails / Back, wired against the
+// real settings store — the padPads.ts mix row (physarum2-pairs-touch.md's
+// Phase 3, §3.4). ---
+async function readAllTables() {
+  const smell = {};
+  const touch = {};
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      smell[`att${i}${j}`] = await readSetting(`att${i}${j}`);
+      if (i !== j) touch[`touch${i}${j}`] = await readSetting(`touch${i}${j}`);
+    }
+  }
+  return { smell, touch };
+}
+function tablesClose(a, b, eps) {
+  return Object.keys(a).every((k) => Math.abs((a[k] ?? 0) - (b[k] ?? 0)) < eps);
+}
+async function clickPreset(name) {
+  await page.locator(".vc-exp-pill", { hasText: name }).first().click();
+  await page.waitForTimeout(200);
+}
+async function clickMixButton(label) {
+  await page.locator(".vc-mix-row button", { hasText: label }).first().click();
+  await page.waitForTimeout(200);
+}
+
+const ATTRACT_ROWS = [
+  [1.0, -0.85, -1.1, -0.7],
+  [-1.2, 1.1, -0.6, -0.95],
+  [-0.75, -1.05, 0.9, -1.25],
+  [-1.0, -0.65, -1.15, 1.05],
+];
+
+// War: all 12 touch keys land at -0.9, att matches ATTRACT_ROWS exactly
+// (Rivals' own smell table), and the War pill reads pressed.
+const preWar = await readAllTables();
+await clickPreset("War");
+const postWar = await readAllTables();
+const warTouchOk = Object.values(postWar.touch).every((v) => Math.abs(v - -0.9) < 0.02);
+report("war-touch-all-minus-0.9", warTouchOk, JSON.stringify(postWar.touch));
+let attOk = true;
+for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) if (Math.abs(postWar.smell[`att${i}${j}`] - ATTRACT_ROWS[i][j]) > 0.02) attOk = false;
+report("war-att-equals-attract-rows", attOk, JSON.stringify(postWar.smell));
+const warPillPressed = await page.locator(".vc-exp-pill", { hasText: "War" }).first().getAttribute("aria-pressed");
+report("war-pill-pressed", warPillPressed === "true", `aria-pressed=${warPillPressed}`);
+
+// Back: the pre-War values return exactly (within a slider round-trip's own
+// tolerance — the same eps tablesMatch itself uses).
+await clickMixButton("Back");
+const postBack = await readAllTables();
+report("back-restores-pre-war-smell", tablesClose(preWar.smell, postBack.smell, 0.011), JSON.stringify({ pre: preWar.smell, post: postBack.smell }));
+report("back-restores-pre-war-touch", tablesClose(preWar.touch, postBack.touch, 0.011), JSON.stringify({ pre: preWar.touch, post: postBack.touch }));
+
+// Random on Touch: the Smell table is untouched, every rolled Touch value is
+// quantised, and the 12-cell roll landed at least one zero and one non-zero
+// (the exact ~35% zero share is the unit test's job, physarum2Affinity.test.ts).
+await page.locator(".vc-pair-layer-touch").click();
+await page.waitForTimeout(200);
+const preRandomTouch = await readAllTables();
+await clickMixButton("Random touch");
+const postRandomTouch = await readAllTables();
+report("random-touch-leaves-smell-unchanged", tablesClose(preRandomTouch.smell, postRandomTouch.smell, 1e-6), "");
+const touchVals = Object.values(postRandomTouch.touch);
+const onGrid = touchVals.every((v) => Math.abs(v / 0.05 - Math.round(v / 0.05)) < 1e-6);
+report("random-touch-on-0.05-grid", onGrid, JSON.stringify(touchVals));
+report("random-touch-has-zero-and-nonzero", touchVals.some((v) => v === 0) && touchVals.some((v) => v !== 0), JSON.stringify(touchVals));
+
+// Nudge with Keep own trails on Smell: every diagonal (own-trail) cell is
+// unchanged; at least one off-diagonal cell moved (Nudge actually ran).
+// Read the diagonal from the own-trail faders' own live display (.vc-own-val,
+// `tick()`'s own `fmtSigned(getVal(...))` text), not raw localStorage: a
+// diagonal cell at exactly its default never gets a stored key at all
+// (`sceneSettings.ts` only persists a value once it's actually set), so an
+// untouched-by-War-or-Random-or-Back diagonal reads back as `undefined` from
+// storage even though the live resolved value is well-defined.
+async function readOwnTrailValues() {
+  const strs = await page.locator(".vc-own-val").allTextContents();
+  return strs.map((s) => (s.trim().startsWith("−") ? -1 : 1) * parseFloat(s.trim().slice(1)));
+}
+await page.locator(".vc-pair-layer-smell").click();
+await page.waitForTimeout(200);
+const keepOwnBtn = page.locator(".vc-mix-row button", { hasText: "Keep own trails" });
+if ((await keepOwnBtn.getAttribute("aria-pressed")) !== "true") await keepOwnBtn.click();
+await page.waitForTimeout(150);
+const preNudgeDiag = await readOwnTrailValues();
+const preNudge = await readAllTables();
+await clickMixButton("Nudge");
+await page.waitForTimeout(150); // let a tick refresh .vc-own-val from the new stored values
+const postNudgeDiag = await readOwnTrailValues();
+const postNudge = await readAllTables();
+const diagUnchanged = preNudgeDiag.every((v, i) => Math.abs(v - postNudgeDiag[i]) < 0.02);
+report("nudge-keepown-diagonal-unchanged", diagUnchanged, JSON.stringify({ pre: preNudgeDiag, post: postNudgeDiag }));
+const offDiagChanged = [];
+for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) if (i !== j && Math.abs(preNudge.smell[`att${i}${j}`] - postNudge.smell[`att${i}${j}`]) > 1e-9) offDiagChanged.push(`att${i}${j}`);
+report("nudge-changed-some-off-diagonal", offDiagChanged.length > 0, JSON.stringify(offDiagChanged));
+
+// --- Main-scene screenshots, 8s after pressing War / Hunt / Gardens through
+// the real panel UI (not URL overrides) — physarum2-pairs-touch.md's Phase 4
+// asks for these alongside the panel shots below. ---
+async function screenshotSceneAfterPreset(name, fileSuffix) {
+  await clickPreset(name);
+  await page.evaluate(() => document.getElementById("menuBtn")?.click()); // close, an unobstructed shot
+  await page.waitForTimeout(300);
+  await page.waitForTimeout(8000);
+  const file = `${outDir}/scene-${fileSuffix}.png`;
+  await page.screenshot({ path: file }).catch(() => {});
+  console.log("shot", file);
+  await openPanel();
+  await scrollToPairs();
+  await page.waitForTimeout(200);
+}
+await screenshotSceneAfterPreset("War", "war");
+await screenshotSceneAfterPreset("Hunt", "hunt");
+await screenshotSceneAfterPreset("Gardens", "gardens");
+
 // --- 5. Close and reopen the panel (a full rebuild) — pad canvases must be
 // non-blank on the very first draw (the culture wasn't restarted). ---
 await page.evaluate(() => document.getElementById("menuBtn")?.click()); // close
