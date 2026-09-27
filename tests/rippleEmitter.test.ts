@@ -35,6 +35,19 @@ function simulateSingleHit(totalSec = 3): number {
   return total;
 }
 
+/** Same shape as simulateSingleHit, but a climb of `height` (not necessarily
+ *  a full 0->1 jump) and a caller-chosen threshold — Ring threshold's own Off
+ *  switch (`null`) included. */
+function simulateStepClimb(height: number, threshold: number | null, totalSec = 3): number {
+  const state = createRippleEmissionState();
+  for (let i = 0; i < 10; i++) advanceEmission(state, DT, 0, threshold);
+  let total = 0;
+  for (let t = 0; t < totalSec; t += DT) {
+    total += advanceEmission(state, DT, height * Math.exp(-BEAT_PULSE_DECAY * t), threshold);
+  }
+  return total;
+}
+
 describe("advanceEmission", () => {
   it("a clean hit (0->1 jump, beat-pulse decay) emits a total close to 1 — one old-style ring's worth", () => {
     const total = simulateSingleHit();
@@ -223,7 +236,7 @@ describe("advanceEmission on a smooth source — whole climbs, not frame steps",
     const state = createRippleEmissionState();
     for (let t = 0; t < 12; t += DT) {
       const e = advanceEmission(state, DT, bumpSignal(t));
-      const marks = salienceMarks(state);
+      const marks = salienceMarks(state)!; // Ring threshold is on (the default) throughout this test
       if (e > 0) expect(state.smoothed).toBeGreaterThanOrEqual(marks.ringsAbove - 1e-9);
       expect(marks.fullRing).toBeGreaterThan(marks.ringsAbove);
     }
@@ -275,7 +288,60 @@ describe("Ring threshold (the adaptive threshold's margin)", () => {
       advanceEmission(low, DT, 0.2, 0);
       advanceEmission(high, DT, 0.2, 1);
     }
-    expect(salienceMarks(high).ringsAbove).toBeGreaterThan(salienceMarks(low).ringsAbove);
+    expect(salienceMarks(high)!.ringsAbove).toBeGreaterThan(salienceMarks(low)!.ringsAbove);
+  });
+});
+
+describe("Ring threshold Off (threshold: null) — every climb rings, sized by its own climb", () => {
+  it("a background-sized (0.3) climb rings ~0.3 and a clean (1.0) hit still rings ~1", () => {
+    const background = simulateStepClimb(0.3, null);
+    expect(background).toBeGreaterThan(0.25);
+    expect(background).toBeLessThan(0.35);
+    const full = simulateStepClimb(1, null);
+    expect(full).toBeGreaterThan(0.85);
+    expect(full).toBeLessThan(1.05);
+  });
+
+  it("the same busy kick-and-hi-hat background that reads as ~nothing at the default (see the salience describe above) rings for real once the threshold is off", () => {
+    // Same shape as noisyKicks/emitPerHit above (this file's own idiom for a
+    // busy track), inlined here since those are scoped to their own describe.
+    function noiseTotal(threshold: number | null): number {
+      const hits: { t: number; h: number; kick: boolean }[] = [];
+      let seed = 11;
+      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      for (let t = 0; t < 12; t += 0.1) {
+        const kick = Math.abs(t / 0.5 - Math.round(t / 0.5)) < 1e-6;
+        hits.push({ t, h: kick ? 1 : 0.2 + 0.2 * rnd(), kick });
+      }
+      const state = createRippleEmissionState();
+      let pulse = 0;
+      let next = 0;
+      let current = -1;
+      advanceEmission(state, DT, 0, threshold);
+      let total = 0;
+      for (let t = 0; t < 12.5; t += DT) {
+        pulse *= Math.exp(-BEAT_PULSE_DECAY * DT);
+        while (next < hits.length && hits[next]!.t <= t) {
+          pulse = Math.max(pulse, hits[next]!.h);
+          current = next++;
+        }
+        const e = advanceEmission(state, DT, pulse, threshold);
+        if (current >= 0 && t > 4 && !hits[current]!.kick) total += e;
+      }
+      return total;
+    }
+    const atDefault = noiseTotal(RING_THRESHOLD_DEFAULT);
+    const off = noiseTotal(null);
+    expect(atDefault).toBeLessThan(2); // matches the salience describe's own "emit ~nothing" verdict
+    expect(off).toBeGreaterThan(atDefault * 2.5); // the very same hits ring for real once nothing is filtered
+  });
+
+  it("salienceMarks returns null (no bar to draw) while off, and the real bar again once back on", () => {
+    const state = createRippleEmissionState();
+    advanceEmission(state, DT, 0.2, null);
+    expect(salienceMarks(state)).toBeNull();
+    advanceEmission(state, DT, 0.2, RING_THRESHOLD_DEFAULT);
+    expect(salienceMarks(state)).not.toBeNull();
   });
 });
 

@@ -199,7 +199,9 @@ const SETTINGS: SceneSetting[] = [
     // choice.
     // `threshold` is the adaptive "reach to ring" line's margin over its
     // noise-floor estimate (rippleEmitter.ts's ringThresholdBar), adjusted by
-    // the slider under this setting's graph in the panel.
+    // the On/Off toggle + slider under this setting's graph in the panel —
+    // Off (advanceEmission's `threshold: null`) makes every climb ring,
+    // sized only by how far it climbed.
     drive: {
       default: "scene",
       sceneLabel: "Scene: bass or beat hit",
@@ -1477,15 +1479,23 @@ float softCeil(float x, float knee, float ceil) {
         // itself instead of stacking full rings).
         const sceneDefaultSignal = Math.max(anim.lowPulse, anim.beatPulse);
         const rawSignal = drives.value("ripple", sceneDefaultSignal);
-        const emitted = advanceEmission(emission, anim.dtSec, rawSignal, drives.threshold("ripple") ?? RING_THRESHOLD_DEFAULT);
+        // drives.threshold() is null while Ring threshold's own Off switch is
+        // pressed (drives.ts's header's threshold paragraph) — passed through
+        // as-is, since that's exactly what advanceEmission's own `threshold`
+        // param wants for "every climb rings, sized by its own climb".
+        // undefined only means there's no engine at all (PASSTHROUGH_DRIVES).
+        const rippleThreshold = drives.threshold("ripple");
+        const emitted = advanceEmission(emission, anim.dtSec, rawSignal, rippleThreshold === undefined ? RING_THRESHOLD_DEFAULT : rippleThreshold);
         emitter.emit(emitted);
         // The panel draws these on Beat ripple's own "What it receives"
         // graph (settingMarks.ts): the level a bump has to reach to send a
         // ring, and each ring actually sent. Only the one line — a second
         // "full ring" line made the graph harder to read, and a ring's dot
-        // already shows how strong it was.
+        // already shows how strong it was. No lines at all while Ring
+        // threshold is off (salienceMarks returns null) — the ring itself
+        // still shows as a reaction.
         const marks = salienceMarks(emission);
-        publishSettingMarks("caustics", "ripple", [{ value: marks.ringsAbove, label: "reach to ring" }], emitted);
+        publishSettingMarks("caustics", "ripple", marks ? [{ value: marks.ringsAbove, label: "reach to ring" }] : [], emitted);
 
         // A drop is rarer and bigger than an ordinary beat — a stronger ring
         // emitted in addition to whatever the continuous driver above just

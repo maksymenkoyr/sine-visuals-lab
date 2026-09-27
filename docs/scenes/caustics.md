@@ -329,6 +329,29 @@ reference-measurement workflow used by later scenes.
   sent; it autoscales and joins its colour segments. `settingMarks.ts`
   reactions are now kept per reader ("graph", "row") so the two views don't
   steal each other's rings.
+- 2026-09-27 — Ring threshold gets an Off switch (`advanceEmission`'s
+  `threshold: number | null`): every climb rings, sized only by how far it
+  climbed, no standing out required; `salienceMarks` returns no line while
+  off, so the panel draws no dotted line but the ring itself still shows as a
+  reaction. The same idea is generalised to every other drive setting:
+  `drives.ts` now tracks a per-setting adaptive noise gate for any patched
+  setting whose spec doesn't declare its own `SceneSetting.drive.threshold` —
+  a floor/peak tracker plus a slider-picked line, off by default, applied as
+  a soft knee to `value()`/`uniformPair()`/`valueOf()` and a hard cut to
+  `fired()`. Beat ripple keeps its own scene-handled gate exactly as it
+  always has; `drives.ts`'s header explains why a setting is never gated both
+  ways. `driveStore.ts`'s `getDriveThresholdState`/`setDriveThresholdOn`
+  replace the old plain getter/setter so every drive setting's threshold row
+  (`deviceMenu.ts`'s `buildThresholdRow`) can carry an on/off state, not just
+  a value. Reaction dots on both the graph and the row's own sparkline now
+  scale by the square root of their strength rather than linearly, so a range
+  of hit sizes actually reads as a range — before, they looked like only two
+  or three discrete sizes because a hit-kind source's default height is flat:
+  Graded reads the catalogue's own decaying pulse, but the hit *itself*
+  always jumps to exactly 1, so a ring landed at full, at whatever a recent
+  pulse had decayed to, or not at all. Patching a source's height to Loud, or
+  raising the Hit strength card's Dimension, is what actually varies a hit's
+  own size before it ever reaches a ring.
 - 2026-09-26 — "Tempo breathe" becomes "Breathe": the once-per-bar, tempo-locked
   zoom — and this scene's last read of `beatClock.ts` — was removed, and the dial
   turned into a patch destination whose zoom follows whatever source is wired to

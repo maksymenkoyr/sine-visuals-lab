@@ -6,6 +6,7 @@ import { settingScope, type SceneSetting } from "./sceneSettings.ts";
 import {
   defaultDriveSetting,
   driveSettingFromChoice,
+  GENERIC_THRESHOLD_DEFAULT,
   normalizeDriveSetting,
   setPatchMix as pureSetPatchMix,
   setSourceGrid as pureSetSourceGrid,
@@ -74,8 +75,15 @@ interface DriveEntry {
   patch?: StoredDriveSetting;
   line?: number[];
   lineStrength?: number;
-  /** The setting's own threshold (SceneSetting.drive.threshold), 0..1. */
+  /** The setting's own threshold value, 0..1 — scene-handled
+   *  (SceneSetting.drive.threshold) or the generic engine gate every other
+   *  drive setting gets (drives.ts's header's threshold paragraph); see
+   *  getDriveThresholdState. */
   threshold?: number;
+  /** Whether that threshold is switched on. Absent means "use this setting's
+   *  own default" (on for scene-handled, off for generic) — see
+   *  getDriveThresholdState. */
+  thresholdOn?: boolean;
 }
 
 type Store = Record<string, Record<string, DriveEntry>>;
@@ -332,7 +340,8 @@ export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   const entry = entryFor(settingScope(sceneId, spec.key), spec.key);
   delete entry.patch;
   delete entry.choice;
-  delete entry.threshold; // "Reset to scene default" covers the threshold slider too
+  delete entry.threshold; // "Reset to scene default" covers the threshold row too
+  delete entry.thresholdOn;
   persist();
 }
 
@@ -436,17 +445,37 @@ export function resetDriveLineStrength(sceneId: string, spec: SceneSetting): voi
   persist();
 }
 
-/** The setting's own threshold (SceneSetting.drive.threshold), or its
- *  default when untouched. Undefined for a setting that declares none. */
-export function getDriveThreshold(sceneId: string, spec: SceneSetting): number | undefined {
-  const def = spec.drive?.threshold?.default;
-  if (def === undefined) return undefined;
-  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key]?.threshold;
-  return typeof stored === "number" && Number.isFinite(stored) ? Math.min(1, Math.max(0, stored)) : def;
+/** A drive setting's own threshold on/off + value — drives.ts's
+ *  `getDriveThresholdState` doc (its own header's threshold paragraph) for
+ *  what "on" means for each kind. Scene-handled (`spec.drive.threshold`
+ *  declared) starts on, at that declaration's own `default`; every other
+ *  drive setting starts off, at `GENERIC_THRESHOLD_DEFAULT` — so a setting
+ *  nobody has ever touched costs nothing more than reading two `undefined`s
+ *  here. */
+export interface DriveThresholdState {
+  on: boolean;
+  value: number;
 }
 
+export function getDriveThresholdState(sceneId: string, spec: SceneSetting): DriveThresholdState {
+  const declared = spec.drive?.threshold;
+  const defaultOn = declared !== undefined;
+  const defaultValue = declared?.default ?? GENERIC_THRESHOLD_DEFAULT;
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key];
+  const on = typeof stored?.thresholdOn === "boolean" ? stored.thresholdOn : defaultOn;
+  const storedValue = stored?.threshold;
+  const value = typeof storedValue === "number" && Number.isFinite(storedValue) ? Math.min(1, Math.max(0, storedValue)) : defaultValue;
+  return { on, value };
+}
+
+/** Never touches on/off — see setDriveThresholdOn for that. */
 export function setDriveThreshold(sceneId: string, spec: SceneSetting, value: number): void {
   if (!Number.isFinite(value)) return;
   entryFor(settingScope(sceneId, spec.key), spec.key).threshold = Math.min(1, Math.max(0, value));
+  persist();
+}
+
+export function setDriveThresholdOn(sceneId: string, spec: SceneSetting, on: boolean): void {
+  entryFor(settingScope(sceneId, spec.key), spec.key).thresholdOn = on;
   persist();
 }

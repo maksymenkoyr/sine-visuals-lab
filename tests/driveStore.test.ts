@@ -3,8 +3,9 @@ import {
   getDriveSetting,
   setDriveSetting,
   resetDriveSetting,
-  getDriveThreshold,
+  getDriveThresholdState,
   setDriveThreshold,
+  setDriveThresholdOn,
   sanitizeDriveSetting,
   encodeDriveSetting,
   togglePatchSource,
@@ -211,17 +212,28 @@ describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight,
     expect(getDriveSetting(sceneId, SPARKLE)).toBe("scene");
   });
 
-  it("a setting's own threshold: default until moved, clamped, cleared by Reset to scene default", () => {
+  it("a scene-handled threshold: on and at its own default until moved, clamped, cleared by Reset to scene default", () => {
     const sceneId = "threshold-1";
     const spec: SceneSetting = { ...SPARKLE, drive: { ...SPARKLE.drive!, threshold: { default: 0.25, label: "T", hint: "h" } } };
-    expect(getDriveThreshold(sceneId, spec)).toBe(0.25);
+    expect(getDriveThresholdState(sceneId, spec)).toEqual({ on: true, value: 0.25 });
     setDriveThreshold(sceneId, spec, 0.8);
-    expect(getDriveThreshold(sceneId, spec)).toBe(0.8);
+    expect(getDriveThresholdState(sceneId, spec)).toEqual({ on: true, value: 0.8 });
     setDriveThreshold(sceneId, spec, 5);
-    expect(getDriveThreshold(sceneId, spec)).toBe(1);
+    expect(getDriveThresholdState(sceneId, spec)).toEqual({ on: true, value: 1 });
+    setDriveThresholdOn(sceneId, spec, false);
+    expect(getDriveThresholdState(sceneId, spec)).toEqual({ on: false, value: 1 });
     resetDriveSetting(sceneId, spec);
-    expect(getDriveThreshold(sceneId, spec)).toBe(0.25);
-    expect(getDriveThreshold(sceneId, SPARKLE)).toBeUndefined();
+    expect(getDriveThresholdState(sceneId, spec)).toEqual({ on: true, value: 0.25 });
+  });
+
+  it("a generic (undeclared) threshold: off and at GENERIC_THRESHOLD_DEFAULT until touched", () => {
+    const sceneId = "threshold-2";
+    expect(getDriveThresholdState(sceneId, SPARKLE)).toEqual({ on: false, value: 0.25 });
+    setDriveThresholdOn(sceneId, SPARKLE, true);
+    setDriveThreshold(sceneId, SPARKLE, 0.6);
+    expect(getDriveThresholdState(sceneId, SPARKLE)).toEqual({ on: true, value: 0.6 });
+    resetDriveSetting(sceneId, SPARKLE);
+    expect(getDriveThresholdState(sceneId, SPARKLE)).toEqual({ on: false, value: 0.25 });
   });
 
   it("an empty patch survives the storage round trip", () => {

@@ -217,7 +217,9 @@ const RING_THRESHOLD_MARGIN_AT_1 = 3;
 const RING_THRESHOLD_MIN_AT_1 = 0.25;
 
 /** How far a climb must rise above its starting dip before it rings, for
- *  this floor and Ring threshold setting. */
+ *  this floor and Ring threshold setting. Only ever called with the setting
+ *  on — advanceEmission/salienceMarks skip straight to a bar of 0 while it's
+ *  off, per this file's own advanceEmission doc. */
 export function ringThresholdBar(floor: number, threshold: number): number {
   const t = clamp01(threshold);
   const margin = RING_THRESHOLD_MARGIN_AT_0 + (RING_THRESHOLD_MARGIN_AT_1 - RING_THRESHOLD_MARGIN_AT_0) * t;
@@ -241,8 +243,14 @@ export interface RippleEmissionState {
   /** The salience bar and full-ring climb, frozen at the climb's start. */
   climbBar: number;
   climbSpread: number;
-  /** The Ring threshold the last advance used — salienceMarks reads it. */
+  /** The Ring threshold the last advance used, while it was on — salienceMarks
+   *  reads it to recompute the bar between climbs. Meaningless (but kept, not
+   *  reset) while `thresholdOn` is false. */
   threshold: number;
+  /** Whether the last advanceEmission call had a real threshold (Ring
+   *  threshold's own On) or `null` (Off) — salienceMarks reads it to decide
+   *  whether there's a bar to draw at all. */
+  thresholdOn: boolean;
 }
 
 export function createRippleEmissionState(): RippleEmissionState {
@@ -257,6 +265,7 @@ export function createRippleEmissionState(): RippleEmissionState {
     climbBar: 0,
     climbSpread: SALIENCE_SPREAD_MIN,
     threshold: RING_THRESHOLD_DEFAULT,
+    thresholdOn: true,
   };
 }
 
@@ -282,14 +291,25 @@ function learnClimb(state: RippleEmissionState, climb: number): void {
  *  decay emits a total close to 1 (one old-style full-strength ring), while
  *  a constant signal or a slow ramp emits close to 0. Each climb is then
  *  sized by salience (see the SALIENCE_* constants' comment): background
- *  climbs emit ~0, standout ones a full ring. */
+ *  climbs emit ~0, standout ones a full ring.
+ *
+ *  `threshold` is `null` for Ring threshold's own Off switch: every climb
+ *  rings, sized by nothing but its own absolute size (the bar is 0, the
+ *  spread 1, so `target` above is just `clamp01(climb)`) — no standout
+ *  required. The salience trackers (`floor`/`peak`) keep learning regardless
+ *  of on/off, so switching back on doesn't start them from scratch. */
 export function advanceEmission(
   state: RippleEmissionState,
   dtSec: number,
   signal: number,
-  threshold: number = RING_THRESHOLD_DEFAULT,
+  threshold: number | null = RING_THRESHOLD_DEFAULT,
 ): number {
-  state.threshold = threshold;
+  if (threshold === null) {
+    state.thresholdOn = false;
+  } else {
+    state.thresholdOn = true;
+    state.threshold = threshold;
+  }
   if (!state.init) {
     state.smoothed = signal;
     state.init = true;
@@ -318,8 +338,13 @@ export function advanceEmission(
     state.climbing = true;
     state.base = prev;
     state.emittedThisClimb = 0;
-    state.climbBar = ringThresholdBar(state.floor, threshold);
-    state.climbSpread = Math.max(state.peak - state.climbBar, SALIENCE_SPREAD_MIN);
+    if (state.thresholdOn) {
+      state.climbBar = ringThresholdBar(state.floor, state.threshold);
+      state.climbSpread = Math.max(state.peak - state.climbBar, SALIENCE_SPREAD_MIN);
+    } else {
+      state.climbBar = 0;
+      state.climbSpread = 1;
+    }
   }
   const climb = state.smoothed - state.base;
   const target = clamp01((climb - state.climbBar) / state.climbSpread);
@@ -333,8 +358,12 @@ export function advanceEmission(
  *  (settingMarks.ts). `ringsAbove` is the level the signal has to climb to
  *  for a ring to start, `fullRing` the level that makes it full strength,
  *  both measured from where the current climb started (or, between climbs,
- *  from where the signal is now — the dip a next climb would start from). */
-export function salienceMarks(state: RippleEmissionState): { ringsAbove: number; fullRing: number } {
+ *  from where the signal is now — the dip a next climb would start from).
+ *  `null` while Ring threshold is off — there's no bar to draw when every
+ *  climb rings regardless of size (caustics.ts then publishes no lines at
+ *  all, though the ring itself still shows as a reaction). */
+export function salienceMarks(state: RippleEmissionState): { ringsAbove: number; fullRing: number } | null {
+  if (!state.thresholdOn) return null;
   if (state.climbing) {
     return { ringsAbove: state.base + state.climbBar, fullRing: state.base + state.climbBar + state.climbSpread };
   }

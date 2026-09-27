@@ -4,6 +4,7 @@ import {
   gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
+  GENERIC_THRESHOLD_DEFAULT,
   normalizeDriveSetting,
   PASSTHROUGH_DRIVES,
   sameDriveChoice,
@@ -18,7 +19,7 @@ import {
   type DriveSetting,
 } from "../src/render/drives.ts";
 import { createAnimClock, BEAT_PULSE_DECAY_PER_SEC } from "../src/render/animClock.ts";
-import { setDriveLine, setDriveLineStrength, setDriveSetting } from "../src/render/driveStore.ts";
+import { setDriveLine, setDriveLineStrength, setDriveSetting, setDriveThreshold, setDriveThresholdOn } from "../src/render/driveStore.ts";
 import { bandLineDrive } from "../src/audio/bandLine.ts";
 import { SIGNALS, type SignalId } from "../src/render/signals.ts";
 import { GROUP_TUNING } from "../src/render/bandEnergy.ts";
@@ -1128,5 +1129,125 @@ describe("drives: sceneSources — display-only scene-mix metadata", () => {
       }
     }
     expect(checked).toBeGreaterThan(0);
+  });
+});
+
+// ---- The generic engine gate (this file's header's "The threshold" paragraph) ----
+//
+// Every drive setting that doesn't declare its own SceneSetting.drive.
+// threshold gets this for free, off by default. "anim.energy" (a level-kind
+// catalogue entry driven directly by accumulate()'s own `driveEnergy`
+// argument) makes the tracker's own floor/peak fully controllable from a
+// test without needing a real onset; the fired()-blocked case below instead
+// uses an edge-kind source ("feature.onset") with height "loud", so a hit's
+// own combined value is controllable the same way while still going through
+// fired()'s real edge machinery.
+describe("drives: the generic engine gate — every drive setting without its own scene-handled threshold", () => {
+  function energySetting(key = "k"): SceneSetting {
+    return settingWithDrive(key, "anim.energy");
+  }
+
+  it("off (the default): bit-for-bit identical to no gate at all, however the signal moves — gateLine stays undefined", () => {
+    const sceneId = "gate-off-identity";
+    const spec = energySetting();
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+    for (let i = 0; i < 200; i++) {
+      const e = i % 20 < 2 ? 1 : 0.05; // spiky — would train a floor/peak if the gate were mistakenly live
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      const drives = engine.forScene(sceneId, [spec], anim);
+      expect(drives.value("k", -1)).toBe(e);
+      expect(drives.uniformPair("k")).toEqual({ drive: e, custom: 1 });
+      expect(drives.gateLine("k")).toBeUndefined();
+      expect(drives.threshold("k")).toBe(null); // declares none of its own; the engine's own gate is off
+    }
+  });
+
+  it("on: a signal hovering below the line reads ~0 through value(), a bump above passes ≈ its own value", () => {
+    const sceneId = "gate-on-value";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    expect(tick(0.1).threshold("k")).toBe(GENERIC_THRESHOLD_DEFAULT); // switched on, value untouched
+    setDriveThreshold(sceneId, spec, 0.5);
+    for (let i = 0; i < 5; i++) tick(1); // a loud burst teaches the peak
+    let drives = new Array(180).fill(0).map(() => tick(0.1)).at(-1)!; // settles low, well under the line
+    expect(drives.value("k", -1)).toBe(0);
+    expect(drives.gateLine("k")).toBeGreaterThan(0.1);
+
+    drives = tick(1); // another burst — clearly above the line
+    expect(drives.value("k", -1)).toBeCloseTo(1, 5);
+  });
+
+  it("on: t=0 sits at the resting floor, t=1 at the recent peak — the slider moves the line", () => {
+    const sceneId = "gate-on-t";
+    const spec = energySetting();
+    setDriveThresholdOn(sceneId, spec, true);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+
+    function tick(e: number) {
+      const anim = clock.advance(DT, frame());
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    for (let i = 0; i < 5; i++) tick(1);
+    for (let i = 0; i < 120; i++) tick(0.1); // floor settles low, peak stays well above it
+
+    setDriveThreshold(sceneId, spec, 0);
+    const lineAt0 = tick(0.1).gateLine("k")!;
+    setDriveThreshold(sceneId, spec, 1);
+    const lineAt1 = tick(0.1).gateLine("k")!;
+    expect(lineAt1).toBeGreaterThan(lineAt0 + 0.2);
+  });
+
+  it("on: fired() blocks an edge whose own combined value falls under the line", () => {
+    const sceneId = "gate-on-fired";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "feature.onset", weight: 1, height: "loud" }] });
+    setDriveThresholdOn(sceneId, spec, true);
+    setDriveThreshold(sceneId, spec, 0.5);
+    const clock = createAnimClock();
+    const engine = createDriveEngine();
+
+    function tick(onset: boolean, e: number) {
+      const anim = clock.advance(DT, frame({ onset }));
+      engine.accumulate(DT, frame(), e, anim, sceneId, [spec]);
+      return engine.forScene(sceneId, [spec], anim);
+    }
+
+    // Train the trackers with alternating loud (1.0) and quiet (0.1) hits —
+    // Loud height reads driveEnergy straight off the hit, so each hit's own
+    // combined value is exactly the energy it was given. Read fired()/value()
+    // the instant each hit lands: the SceneDrives view is live, not a
+    // snapshot, and a source's own heightEnv keeps decaying underneath it on
+    // every later tick, so a reading has to be taken there and then.
+    let lastLoudFired = false;
+    let lastLoudValue = 0;
+    for (let cycle = 0; cycle < 15; cycle++) {
+      let drives = tick(true, 1);
+      lastLoudFired = drives.fired("k", false);
+      lastLoudValue = drives.value("k", -1);
+      for (let i = 0; i < 10; i++) tick(false, 1);
+      drives = tick(true, 0.1);
+      const quietFired = drives.fired("k", false);
+      const quietValue = drives.value("k", -1);
+      for (let i = 0; i < 10; i++) tick(false, 0.1);
+      if (cycle > 10) {
+        expect(quietFired).toBe(false); // the edge is real, but too weak to pass
+        expect(quietValue).toBe(0);
+      }
+    }
+    expect(lastLoudFired).toBe(true); // the loud hit still fires
+    expect(lastLoudValue).toBe(1);
   });
 });

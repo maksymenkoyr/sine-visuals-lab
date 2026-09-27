@@ -41,6 +41,7 @@ import {
   gateConditionIndices,
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
+  GENERIC_THRESHOLD_DEFAULT,
   sameDriveSetting,
   smoothstep,
   sourceKey,
@@ -52,6 +53,7 @@ import {
   type HitHeight,
   type SceneDrives,
 } from "../render/drives.ts";
+import type { DriveThresholdState } from "../render/driveStore.ts";
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
 import {
   DRIVE_ADD_GROUPS,
@@ -441,10 +443,15 @@ export interface DeviceMenuDeps {
   setDriveLine: (sceneId: string, spec: SceneSetting, heights: ArrayLike<number>) => void;
   resetDriveLine: (sceneId: string, spec: SceneSetting) => void;
   getDriveLineStrength: (sceneId: string, spec: SceneSetting) => number;
-  /** A setting's own threshold slider (SceneSetting.drive.threshold), under
-   *  its graph — driveStore.ts's getDriveThreshold/setDriveThreshold. */
-  getDriveThreshold: (sceneId: string, spec: SceneSetting) => number | undefined;
+  /** Every drive setting's own threshold row, under its graph: on/off +
+   *  value — driveStore.ts's getDriveThresholdState/setDriveThreshold/
+   *  setDriveThresholdOn. Scene-handled (SceneSetting.drive.threshold
+   *  declared) or the generic engine gate every other drive setting gets
+   *  (drives.ts's header's threshold paragraph) — the row looks the same
+   *  either way, just with a different label/hint. */
+  getDriveThresholdState: (sceneId: string, spec: SceneSetting) => DriveThresholdState;
   onSetDriveThreshold: (sceneId: string, spec: SceneSetting, value: number) => void;
+  onSetDriveThresholdOn: (sceneId: string, spec: SceneSetting, on: boolean) => void;
   setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
   /** The Loudness card's Reset chip — starts the integrated LUFS reading
    *  over (src/audio/lufsAnalyser.ts). */
@@ -2292,40 +2299,93 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   const WEIGHT_HINT = "This source's share: 0 ignores it, 1× is normal, 2× doubles it.";
 
-  /** A setting's own threshold (SceneSetting.drive.threshold) as a labelled
-   *  slider under its graph — Beat ripple's "reach to ring" line. Same live-
-   *  write, no-rebuild rule as buildWeightSlider below. */
-  function buildThresholdSlider(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
-    const th = spec.drive!.threshold!;
-    const wrap = document.createElement("label");
-    wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px;`;
-    setHint(wrap, th.hint);
+  const GENERIC_THRESHOLD_HINT =
+    "An adaptive noise gate: the dotted line follows this setting's resting level, and anything under it counts as nothing. Right: only clear peaks get through. Off: everything gets through.";
+
+  /** Every drive setting's own threshold row — On/Off + a labelled 0..1
+   *  slider, right under its graph (or where the graph would be with
+   *  nothing plugged in yet). Scene-handled (SceneSetting.drive.threshold
+   *  declared — Beat ripple's "reach to ring" line) uses its own label/hint
+   *  and starts on; every other drive setting uses the generic label/hint
+   *  and starts off, gated by drives.ts's own engine (that file's header's
+   *  threshold paragraph) — driveStore.ts's getDriveThresholdState/
+   *  setDriveThreshold/setDriveThresholdOn either way. Same live-write,
+   *  no-rebuild rule as buildWeightSlider below; the On/Off buttons share
+   *  buildHeightSeg's own mini-segment styling. */
+  function buildThresholdRow(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
+    const declared = spec.drive?.threshold;
+    const label = declared?.label ?? "Threshold";
+    const hint = declared?.hint ?? GENERIC_THRESHOLD_HINT;
+
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap;`;
+    setHint(wrap, hint);
+
+    const seg = document.createElement("div");
+    seg.style.cssText = driveMiniSegStyle;
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", `${label} on/off`);
+    const onBtn = document.createElement("button");
+    onBtn.type = "button";
+    onBtn.textContent = "On";
+    const offBtn = document.createElement("button");
+    offBtn.type = "button";
+    offBtn.textContent = "Off";
+    seg.append(onBtn, offBtn);
+
     const name = document.createElement("span");
     name.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
-    name.textContent = th.label;
+    name.textContent = label;
     const rng = document.createElement("input");
     rng.type = "range";
     rng.className = "vc-slider";
     rng.min = "0";
     rng.max = "1";
     rng.step = "0.05";
-    rng.setAttribute("aria-label", th.label);
+    rng.setAttribute("aria-label", label);
     rng.style.cssText = driveWeightRangeStyle;
     const out = document.createElement("output");
     out.style.cssText = driveWeightOutStyle;
-    const show = (v: number) => {
+
+    const showValue = (v: number) => {
       rng.value = String(v);
       rng.style.setProperty("--vc-fill", `${v * 100}%`);
       out.textContent = v.toFixed(2);
     };
-    show(deps.getDriveThreshold(sceneId, spec) ?? th.default);
+    const showOnOff = (on: boolean) => {
+      onBtn.setAttribute("aria-pressed", String(on));
+      offBtn.setAttribute("aria-pressed", String(!on));
+      onBtn.style.cssText = on ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      offBtn.style.cssText = !on ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      rng.disabled = !on;
+      rng.style.opacity = on ? "1" : "0.4";
+      out.style.opacity = on ? "1" : "0.4";
+    };
+
+    const state = deps.getDriveThresholdState(sceneId, spec);
+    showValue(state.value);
+    showOnOff(state.on);
+
     rng.addEventListener("input", () => {
       const v = Number(rng.value);
-      show(v);
+      showValue(v);
       deps.onSetDriveThreshold(sceneId, spec, v);
       onLiveEdit();
     });
-    wrap.append(name, rng, out);
+    onBtn.addEventListener("click", () => {
+      if (onBtn.getAttribute("aria-pressed") === "true") return;
+      deps.onSetDriveThresholdOn(sceneId, spec, true);
+      showOnOff(true);
+      onLiveEdit();
+    });
+    offBtn.addEventListener("click", () => {
+      if (offBtn.getAttribute("aria-pressed") === "true") return;
+      deps.onSetDriveThresholdOn(sceneId, spec, false);
+      showOnOff(false);
+      onLiveEdit();
+    });
+
+    wrap.append(seg, name, rng, out);
     return wrap;
   }
 
@@ -2598,6 +2658,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const STRIP_H = 3;
     const MARK_LINE = "rgba(255,255,255,0.55)";
     const MARK_REACTION = "rgba(110,235,225,0.9)";
+    // The generic engine gate's own line has no scene of its own to name it
+    // (unlike Beat ripple's "reach to ring") — one fixed label, used as both
+    // this trace's key in `markTraces` and the text the key row shows for it.
+    const GENERIC_GATE_LINE_LABEL = "below this counts as nothing";
 
     function draw(): void {
       const { w, h } = size;
@@ -2690,7 +2754,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         let total = 0;
         while (k < RING && reactions[at(k)]! > 0.01) total += reactions[at(k++)]!;
         ctx.beginPath();
-        ctx.arc(xs(start), ys(combined[at(start)]!), 1.5 + 3 * Math.min(1, total), 0, Math.PI * 2);
+        ctx.arc(xs(start), ys(combined[at(start)]!), 1.5 + 4.5 * Math.sqrt(Math.min(1, total)), 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -2733,10 +2797,25 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         }
         trace[ringHead] = line.value;
       }
+      // The generic engine gate's own line (drives.ts's header's threshold
+      // paragraph) — undefined for a scene-handled setting (it draws its own
+      // line above instead, through settingMarks.ts) or while the gate is
+      // off. Drawn the same dotted way as a scene's own mark lines, under
+      // one fixed label so it gets its own key entry.
+      const gateLine = drives.gateLine(spec.key);
+      if (gateLine !== undefined) {
+        let trace = markTraces.get(GENERIC_GATE_LINE_LABEL);
+        if (!trace) {
+          trace = new Float32Array(RING).fill(NaN);
+          markTraces.set(GENERIC_GATE_LINE_LABEL, trace);
+        }
+        trace[ringHead] = gateLine;
+      }
       reactions[ringHead] = marks?.reaction ?? 0;
-      if (marks && key.style.display === "none") {
+      if (key.style.display === "none" && (marks || gateLine !== undefined)) {
         key.style.display = "flex";
-        const lineLabel = marks.lines[0]?.label;
+        keyReaction.style.display = marks ? "" : "none"; // no reaction concept for the generic gate alone
+        const lineLabel = marks ? marks.lines[0]?.label : GENERIC_GATE_LINE_LABEL;
         keyLine.innerHTML = lineLabel ? `${keyLineSwatch}${lineLabel}` : "";
       }
       if (isGate) {
@@ -2781,7 +2860,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       patchChanged(sceneId, spec);
     });
     function refreshResetVisibility(): void {
-      const thresholdMoved = spec.drive?.threshold !== undefined && deps.getDriveThreshold(sceneId, spec) !== spec.drive.threshold.default;
+      // A moved threshold counts too — on/off or value, scene-handled or
+      // generic (this row's own default is "on" for the former, "off" for
+      // the latter, mirroring driveStore.ts's getDriveThresholdState).
+      const declared = spec.drive?.threshold;
+      const thresholdState = spec.drive ? deps.getDriveThresholdState(sceneId, spec) : undefined;
+      const thresholdMoved =
+        !!thresholdState &&
+        (thresholdState.on !== (declared !== undefined) || thresholdState.value !== (declared?.default ?? GENERIC_THRESHOLD_DEFAULT));
       resetBtn.hidden = !thresholdMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
     }
 
@@ -2836,7 +2922,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       outputCanvas = graph.canvas;
       tick = graph.tick;
     }
-    if (spec.drive?.threshold) panel.appendChild(buildThresholdSlider(sceneId, spec, refreshResetVisibility));
+    panel.appendChild(buildThresholdRow(sceneId, spec, refreshResetVisibility));
 
     panel.appendChild(resetBtn);
     refreshResetVisibility();
@@ -3055,7 +3141,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           while (k < SPARK_LEN && sparkReact[at(k)]! > 0.01) total += sparkReact[at(k++)]!;
           k--;
           sparkCtx.beginPath();
-          sparkCtx.arc(xs(start), ys(sparkVals[at(start)]!), 1.2 + 1.8 * Math.min(1, total), 0, Math.PI * 2);
+          sparkCtx.arc(xs(start), ys(sparkVals[at(start)]!), 1 + 2.8 * Math.sqrt(Math.min(1, total)), 0, Math.PI * 2);
           sparkCtx.fill();
         }
       }
