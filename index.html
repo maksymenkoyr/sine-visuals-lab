@@ -397,6 +397,12 @@
         color: inherit;
         cursor: pointer;
       }
+      /* The display: flex above beats the [hidden] attribute's UA rule, so
+       * without this the Screen button shows even where
+       * refreshAudioPromptButtons (src/app.ts) hides it. */
+      #audioPrompt button[hidden] {
+        display: none;
+      }
       #audioPrompt button:hover {
         border-color: rgba(255, 255, 255, 0.4);
       }
