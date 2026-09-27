@@ -17,8 +17,8 @@ import type { SceneSetting } from "../../render/sceneSettings.ts";
  * patch, jack, cables, pin — by calling this instead of building its own
  * look-alike. `get`/`set` go through the exact same store path a slider
  * drag uses (deviceMenu's `onSceneSettingChange`), so a widget's own custom
- * controls (Physarum 2's Affinity segmented rows) read/write storage,
- * Looks and reset identically to a plain row, just with different UI.
+ * controls (Physarum 2's Affinity pads) read/write storage, Looks and reset
+ * identically to a plain row, just with different UI.
  *
  * `ctx.rerender()` re-runs the *whole* Scene card (deviceMenu.ts's
  * `renderSceneSettings`) — the same rebuild a scene switch, a Look apply, a
@@ -79,8 +79,11 @@ export interface WidgetCtx {
   /** `specs` filtered to one item family, optionally narrowed to one
    *  item's index — src/render/sceneItems.ts's `SceneSetting.item` tag. */
   specsFor(family: string, index?: number): SceneSetting[];
-  /** The setting's current stored value — resolveSceneSettingValue's
-   *  auto-aware live reading, same as a row's own live readout. */
+  /** The setting's current *stored* value (`getSceneSetting` — not
+   *  auto-tune-resolved: a widget reading a setting the Scene master or Auto
+   *  can scale, like Hostility, sees the manual number, not what the GPU
+   *  actually runs — see physarum2Affinity.ts's pair cultures for a caller
+   *  that has to live with this). */
   get(spec: SceneSetting): number;
   /** Writes through the exact path a slider drag uses. */
   set(spec: SceneSetting, value: number): void;

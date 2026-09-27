@@ -1,5 +1,24 @@
 import { describe, it, expect } from "vitest";
-import { packTouch, smellWeight, TOUCH_EAT_GAIN, TOUCH_FEED_GAIN, TOUCH_MAX_BITE } from "../src/render/scenes/physarum2Affinity.ts";
+import {
+  packTouch,
+  smellWeight,
+  TOUCH_EAT_GAIN,
+  TOUCH_FEED_GAIN,
+  TOUCH_MAX_BITE,
+  AFFINITY_PRESETS,
+  PAIR_WORDS,
+  ATTRACT_ROWS,
+  wordBand,
+  pairZone,
+  pairRelation,
+  fillTemplate,
+  fmtSigned,
+  padPos,
+  padValue,
+  pairsOf,
+  tablesMatch,
+  type PairLayer,
+} from "../src/render/scenes/physarum2Affinity.ts";
 
 // feedRows/eatCols are Float32Array (the GPU's own uniform-array precision),
 // so exact-decimal expectations use toBeCloseTo at a digit count float32
@@ -100,5 +119,195 @@ describe("smellWeight", () => {
     // behave identically everywhere this value is actually used.
     expect(smellWeight(-1.1, 0, 1, 0)).toBeCloseTo(0, 10);
     expect(smellWeight(0.7, 2, 3, 0)).toBeCloseTo(0, 10);
+  });
+});
+
+describe("wordBand", () => {
+  const edges = PAIR_WORDS.layers.smell.bandEdges;
+  it("matches the prototype's landmark bands, farther-from-zero on an edge", () => {
+    expect(wordBand(-0.9, edges)).toBe(0);
+    expect(wordBand(-0.3, edges)).toBe(1);
+    expect(wordBand(0, edges)).toBe(2);
+    expect(wordBand(0.29, edges)).toBe(2);
+    expect(wordBand(-0.29, edges)).toBe(2);
+    expect(wordBand(0.3, edges)).toBe(3);
+    expect(wordBand(0.85, edges)).toBe(4);
+  });
+});
+
+describe("pairZone / pairRelation", () => {
+  const layers: PairLayer[] = ["smell", "touch"];
+  it("all 9 zones give the prototype names for both layers", () => {
+    for (const ly of layers) {
+      const words = PAIR_WORDS.layers[ly];
+      const rel = words.relations!;
+      // both positive -> "both" corner (grid[2][2])
+      expect(pairRelation(words, 1, 1)).toBe(rel.grid[2]![2]);
+      // both negative -> "against" corner (grid[0][0])
+      expect(pairRelation(words, -1, -1)).toBe(rel.grid[0]![0]);
+      // mixed corners
+      expect(pairRelation(words, 1, -1)).toBe(rel.grid[2]![0]);
+      expect(pairRelation(words, -1, 1)).toBe(rel.grid[0]![2]);
+      // plus/minus edges
+      expect(pairRelation(words, 1, 0)).toBe(rel.grid[2]![1]);
+      expect(pairRelation(words, -1, 0)).toBe(rel.grid[0]![1]);
+      expect(pairRelation(words, 0, 1)).toBe(rel.grid[1]![2]);
+      expect(pairRelation(words, 0, -1)).toBe(rel.grid[1]![0]);
+      // neither
+      expect(pairRelation(words, 0, 0)).toBe(rel.grid[1]![1]);
+    }
+  });
+
+  it("pairZone is strict on the edge itself", () => {
+    expect(pairZone(0.3, 0.3)).toBe(0);
+    expect(pairZone(0.31, 0.3)).toBe(1);
+    expect(pairZone(-0.3, 0.3)).toBe(0);
+    expect(pairZone(-0.31, 0.3)).toBe(-1);
+  });
+
+  it("returns undefined when a layer has no relations", () => {
+    expect(pairRelation({ ...PAIR_WORDS.layers.smell, relations: undefined }, 1, 1)).toBeUndefined();
+  });
+});
+
+describe("fillTemplate", () => {
+  it('splits "{A} → {B}" into strain/text/strain tokens', () => {
+    expect(fillTemplate("{A} → {B}", 0, 1)).toEqual([{ strain: 0 }, { text: " → " }, { strain: 1 }]);
+  });
+
+  it("resolves a named var and leaves an unknown token literal", () => {
+    expect(fillTemplate("{word} {B}", 2, 3, { word: "avoids" })).toEqual([{ text: "avoids" }, { text: " " }, { strain: 3 }]);
+    expect(fillTemplate("{nope} {A}", 0, 1)).toEqual([{ text: "{nope}" }, { text: " " }, { strain: 0 }]);
+  });
+
+  it("a template with no tokens is one literal chunk", () => {
+    expect(fillTemplate("Strangers", 0, 1)).toEqual([{ text: "Strangers" }]);
+  });
+});
+
+describe("fmtSigned", () => {
+  it("uses a real minus sign and always shows a sign", () => {
+    expect(fmtSigned(0.6)).toBe("+0.60");
+    expect(fmtSigned(-1.2)).toBe("−1.20");
+    expect(fmtSigned(0)).toBe("+0.00");
+  });
+});
+
+describe("padPos / padValue", () => {
+  it("round-trips through pad-square percentage", () => {
+    for (const v of [-1.5, -0.6, 0, 0.6, 1.5]) {
+      expect(padValue(padPos(v))).toBeCloseTo(v, 10);
+    }
+  });
+
+  it("clamps a percentage outside the drawn range", () => {
+    expect(padValue(0)).toBeCloseTo(-1.5, 5); // ((0-50)/42)*1.5 ~= -1.786 -> clamped
+    expect(padValue(100)).toBeCloseTo(1.5, 5);
+    expect(padValue(-1000)).toBe(-1.5);
+    expect(padValue(1000)).toBe(1.5);
+  });
+});
+
+describe("pairsOf", () => {
+  it("gives the six unordered pairs over 0..3, ascending", () => {
+    expect(pairsOf(4)).toEqual([
+      [0, 1],
+      [0, 2],
+      [0, 3],
+      [1, 2],
+      [1, 3],
+      [2, 3],
+    ]);
+  });
+});
+
+describe("tablesMatch", () => {
+  it("true within epsilon, false past it", () => {
+    const a = [
+      [1, 2],
+      [3, 4],
+    ];
+    const b = [
+      [1.005, 2],
+      [3, 4],
+    ];
+    const c = [
+      [1.02, 2],
+      [3, 4],
+    ];
+    expect(tablesMatch(a, b)).toBe(true);
+    expect(tablesMatch(a, c)).toBe(false);
+  });
+});
+
+describe("PAIR_WORDS vocabulary shape", () => {
+  it("5 ascending bands per layer, 4 ascending edges", () => {
+    for (const ly of ["smell", "touch"] as const) {
+      const words = PAIR_WORDS.layers[ly];
+      expect(words.bands.length).toBe(5);
+      for (let i = 1; i < words.bands.length; i++) expect(words.bands[i]!.at).toBeGreaterThan(words.bands[i - 1]!.at);
+      for (let i = 1; i < words.bandEdges.length; i++) expect(words.bandEdges[i]).toBeGreaterThan(words.bandEdges[i - 1]!);
+    }
+  });
+
+  it("every relations grid is 3x3 and non-empty", () => {
+    for (const ly of ["smell", "touch"] as const) {
+      const grid = PAIR_WORDS.layers[ly].relations!.grid;
+      expect(grid.length).toBe(3);
+      for (const row of grid) {
+        expect(row.length).toBe(3);
+        for (const cell of row) expect(cell.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("showRelations defaults off", () => {
+    expect(PAIR_WORDS.showRelations).toBe(false);
+  });
+});
+
+describe("AFFINITY_PRESETS", () => {
+  it("every smell table is 4x4 and every touch diagonal is 0", () => {
+    for (const preset of AFFINITY_PRESETS) {
+      expect(preset.smell.length).toBe(4);
+      for (const row of preset.smell) expect(row.length).toBe(4);
+      expect(preset.touch.length).toBe(4);
+      for (let i = 0; i < 4; i++) {
+        expect(preset.touch[i]!.length).toBe(4);
+        expect(preset.touch[i]![i]).toBe(0);
+      }
+    }
+  });
+
+  it("Rivals' smell equals ATTRACT_ROWS", () => {
+    const rivals = AFFINITY_PRESETS.find((p) => p.name === "Rivals")!;
+    expect(rivals.smell).toEqual(ATTRACT_ROWS);
+    expect(rivals.touchy).toBe(false);
+  });
+
+  it("non-touchy presets have all-zero touch", () => {
+    for (const preset of AFFINITY_PRESETS.filter((p) => !p.touchy)) {
+      for (const row of preset.touch) for (const v of row) expect(v).toBe(0);
+    }
+  });
+
+  it("Hunt/Gardens/War are touchy with the documented touch tables", () => {
+    const hunt = AFFINITY_PRESETS.find((p) => p.name === "Hunt")!;
+    const gardens = AFFINITY_PRESETS.find((p) => p.name === "Gardens")!;
+    const war = AFFINITY_PRESETS.find((p) => p.name === "War")!;
+    expect(hunt.touchy).toBe(true);
+    expect(gardens.touchy).toBe(true);
+    expect(war.touchy).toBe(true);
+    expect(hunt.touch[0]![1]).toBe(-1.2);
+    expect(hunt.touch[1]![2]).toBe(-1.2);
+    expect(hunt.touch[2]![3]).toBe(-1.2);
+    expect(hunt.touch[3]![0]).toBe(-1.2);
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        if (i === j) continue;
+        expect(gardens.touch[i]![j]).toBe(0.6);
+        expect(war.touch[i]![j]).toBe(-0.9);
+      }
+    }
   });
 });

@@ -11,7 +11,7 @@ import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 import { PASSTHROUGH_DRIVES } from "../drives.ts";
 import { composeSettings, defineItemPairs, defineItems } from "../sceneItems.ts";
 import { packUnit, createBeatSeeder, type BeatSeeder } from "./physarum.ts";
-import { ATTRACT_ROWS, packTouch, smellWeight } from "./physarum2Affinity.ts";
+import { AFFINITY_PRESETS, ATTRACT_ROWS, PAIR_WORDS, packTouch, smellWeight } from "./physarum2Affinity.ts";
 export { ATTRACT_ROWS };
 
 // Physarum 2: a second slime-mould scene, after Michael Fogleman's
@@ -120,10 +120,10 @@ export { ATTRACT_ROWS };
 // `uStrainFeed` (deposit multiplier per strain) and `uStrainColor[4]` (the
 // composite's per-strain colour, after any Stain hue shift). Touch adds two
 // more, both built by `packTouch` (physarum2Affinity.ts) from that frame's
-// `touch<i><j>` values: `uTouchFeedRow[4]` (DEPOSIT_VERT — what a strain's
-// own deposit adds to every strain's trail) and `uEatCol[4]` plus `uEatOn`
-// (DIFFUSE_FRAG — the diffuse's per-channel decay against last step's
-// footprint). Item settings still have no uniforms of their own.
+// `touch<i><j>` values: `uTouchFeedRow[4]` (the deposit vertex shader — what
+// a strain's own deposit adds to every strain's trail) and `uEatCol[4]` plus
+// `uEatOn` (DIFFUSE_FRAG — the diffuse's per-channel decay against last
+// step's footprint). Item settings still have no uniforms of their own.
 //
 // Touch (2026-09-27): `touch<i><j>` lets a strain feed or eat another
 // strain's trail as it steps, independent of Affinity's sensing. Feeding
@@ -148,7 +148,13 @@ export { ATTRACT_ROWS };
 // `TOUCH_EAT_GAIN`/`TOUCH_MAX_BITE` (physarum2Affinity.ts) are the only
 // tuning constants, shared with the Affinity pads' own CPU preview cultures
 // once those exist, so a pad's preview and the main dish read the same
-// gains.
+// gains. The deposit draw itself runs one of two programs built from the
+// same template (`depositVertSrc`/`depositFragSrc`, keyed by `mrt`):
+// `depositProgMrt` (the footprint varying/output above) only while `eatOn`,
+// and `depositProg` — the plain single-output shader, identical otherwise —
+// every other step. A 2026-09-27 perf follow-up found the footprint
+// varying/output alone cost the common (no-Touch) path ~5-10% of a step's
+// time across 800k points even at touch = 0, hence the split.
 //
 // Render: black background; each channel's trail goes through a fixed
 // exposure and a 1/2.2 gamma before being weighted by its strain's own
@@ -912,67 +918,15 @@ function settingFor(key: string): SceneSetting {
 
 // ---------------------------------------------------------------------
 // The panel: one Strains group (specimen boxes + the selected strain's
-// rows + Affinity) — see src/ui/widgets/itemBoxes.ts. `options` is typed
-// `unknown` by PanelSection (scene.ts) precisely so this file, under
-// src/render/, never has to import anything under src/ui/ — see
-// sceneItems.ts's header for why that boundary matters.
+// rows + the Pairs pads) — see src/ui/widgets/itemBoxes.ts and, for the
+// pads themselves, src/ui/widgets/pairPads.ts. `options` is typed `unknown`
+// by PanelSection (scene.ts) precisely so this file, under src/render/,
+// never has to import anything under src/ui/ — see sceneItems.ts's header
+// for why that boundary matters. The Pairs block's words (`PAIR_WORDS`) and
+// presets (`AFFINITY_PRESETS`, which replaces this scene's old, Smell-only
+// `EXPERIMENT_PRESETS`) live in physarum2Affinity.ts instead of here, next
+// to the pure pad logic that reads them.
 // ---------------------------------------------------------------------
-
-const RELATION_WORDS = [
-  { label: "Flees", value: -1.2 },
-  { label: "Avoids", value: -0.6 },
-  { label: "Ignores", value: 0 },
-  { label: "Follows", value: 0.6 },
-  { label: "Loves", value: 1.1 },
-];
-
-// Copied from the approved "Physarum Lab" prototype
-// (docs/scenes/physarum2/artifacts/lab.src.html's EXPERIMENTS) — matrices
-// and one-line hypotheses, unchanged. "Rivals" is this scene's own
-// ATTRACT_ROWS default.
-const EXPERIMENT_PRESETS = [
-  { name: "Rivals", hypothesis: "Every strain guards its own territory.", matrix: ATTRACT_ROWS },
-  {
-    name: "Symbiosis",
-    hypothesis: "Strains share each other's routes.",
-    matrix: [
-      [1, 0.35, 0.2, 0.1],
-      [0.3, 1, 0.35, 0.15],
-      [0.15, 0.3, 1, 0.35],
-      [0.35, 0.15, 0.25, 1],
-    ],
-  },
-  {
-    name: "Chase",
-    hypothesis: "Each strain hunts the next and flees the last.",
-    matrix: [
-      [0.6, 1.2, 0, -1.2],
-      [-1.2, 0.6, 1.2, 0],
-      [0, -1.2, 0.6, 1.2],
-      [1.2, 0, -1.2, 0.6],
-    ],
-  },
-  {
-    name: "Mob",
-    hypothesis: "Everyone piles onto everyone's trails.",
-    matrix: [
-      [1, 0.8, 0.8, 0.8],
-      [0.8, 1, 0.8, 0.8],
-      [0.8, 0.8, 1, 0.8],
-      [0.8, 0.8, 0.8, 1],
-    ],
-  },
-  {
-    name: "Self-avoid",
-    hypothesis: "Like real slime mould, each strain shuns its own old slime and explores.",
-    matrix: [
-      [-0.6, 0, 0, 0],
-      [0, -0.6, 0, 0],
-      [0, 0, -0.6, 0],
-      [0, 0, 0, -0.6],
-    ],
-  },
-];
 
 const PANEL: readonly PanelSection[] = [
   {
@@ -990,10 +944,11 @@ const PANEL: readonly PanelSection[] = [
       // doesn't disturb any other itemBoxes-based scene.
       preview: "physarum2",
       relations: {
-        prefix: "att",
         title: "Affinity",
-        words: RELATION_WORDS,
-        presets: EXPERIMENT_PRESETS,
+        tables: { smell: "att", touch: "touch" },
+        shortLabels: STRAINS.map((s) => s.code.replace(/^PP-/, "")),
+        words: PAIR_WORDS,
+        presets: AFFINITY_PRESETS,
       },
     },
   },
@@ -1288,7 +1243,12 @@ void main() {
 }
 `;
 
-const DEPOSIT_VERT = `#version 300 es
+// The deposit vertex/fragment sources are built from one template, keyed by
+// `mrt`, rather than kept as two hand-copied pairs — see the "Touch" file
+// header paragraph and depositVertSrc/depositFragSrc's own comments for why
+// two full programs exist instead of one that always carries the footprint.
+function depositVertSrc(mrt: boolean): string {
+  return `#version 300 es
 precision highp float;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
@@ -1304,13 +1264,18 @@ uniform vec4 uStrainFeed;
 uniform vec4 uTouchFeedRow[${SPECIES_COUNT}];
 ${PHYSARUM2_GLSL}
 out vec4 vDepositColor;
-// The footprint — this landing's strain as a one-hot /255 unit — is only
-// ever consumed while eatOn is true (see render()'s MRT gating); flat means
-// no interpolation, matching the one-texel point this shader draws.
-flat out vec4 vFootprint;
+${
+  mrt
+    ? `// The footprint — this landing's strain as a one-hot /255 unit — only
+// exists on this MRT variant, run only while eatOn (render()'s program
+// pick); flat means no interpolation, matching the one-texel point this
+// shader draws.
+flat out vec4 vFootprint;`
+    : ""
+}
 
 const float DEPOSIT = ${DEPOSIT.toFixed(4)};
-const float FOOT_UNIT = 1.0 / 255.0;
+${mrt ? "const float FOOT_UNIT = 1.0 / 255.0;" : ""}
 
 // A strain's own deposit multiplier — computed in JS each frame from its
 // Nutrient setting and drive (see the file header's "Uniform budget").
@@ -1339,34 +1304,44 @@ void main() {
   vec2 pos = vec2(unpackUnitR(cp.rg, 1.0), unpackUnitR(cp.ba, 1.0));
   int k = decodeSpecies(cd.b);
   vDepositColor = touchFeedRowFor(k) * (DEPOSIT * strainFeedFor(k));
-  vFootprint = onehot4(k) * FOOT_UNIT;
+  ${mrt ? "vFootprint = onehot4(k) * FOOT_UNIT;" : ""}
   gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);
   // The only point size WebGL guarantees, and the mechanic itself: a
   // one-texel deposit.
   gl_PointSize = 1.0;
 }
 `;
+}
 
-const DEPOSIT_FRAG = `#version 300 es
+function depositFragSrc(mrt: boolean): string {
+  return `#version 300 es
 precision highp float;
 in vec4 vDepositColor;
-flat in vec4 vFootprint;
-// Output 1 (the footprint) is only bound while eatOn's MRT framebuffer is
-// active (render()'s depositFbo); on the single-attachment trailFbo path
-// (draw buffer 1 is NONE) writing to it is discarded, which GLES3/WebGL2
-// allows. If a driver ever complains (GL_INVALID_OPERATION on this draw),
-// the fallback is a second single-output deposit program.
+${
+  mrt
+    ? `flat in vec4 vFootprint;
+// This MRT variant only ever runs while eatOn (render()'s depositProg vs
+// depositProgMrt pick) — see the file header's "Touch" paragraph.
 layout(location = 0) out vec4 outColor;
-layout(location = 1) out vec4 outFootprint;
+layout(location = 1) out vec4 outFootprint;`
+    : `// The plain, single-output variant: every step that isn't eating runs
+// this one, so the common (no-Touch) path never carries the footprint
+// varying or a second blended write — see the file header's "Touch"
+// paragraph and the Phase 1 perf follow-up in docs/scenes/physarum2.md
+// (Measurements): with 800k points, the unused varying/output cost this
+// path ~5-10% of a step even at touch = 0.
+out vec4 outColor;`
+}
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
 ${DRIVE_UNIFORMS_GLSL}
 
 void main() {
   outColor = vDepositColor;
-  outFootprint = vFootprint;
+  ${mrt ? "outFootprint = vFootprint;" : ""}
 }
 `;
+}
 
 const COMPOSITE_FRAG = `#version 300 es
 precision highp float;
@@ -1484,7 +1459,13 @@ function seedAgents(side: number): AgentSeed {
 function createPhysarum2Scene(): Scene {
   let diffuseProg: GLProgram | null = null;
   let simProg: GLProgram | null = null;
+  // Two deposit programs, built from the same template (depositVertSrc/
+  // depositFragSrc) — depositProg is the plain single-output shader run
+  // whenever nothing eats; depositProgMrt adds the footprint varying/output,
+  // run only while eatOn (see the file header's "Touch" paragraph and the
+  // Phase 1 perf follow-up in docs/scenes/physarum2.md).
   let depositProg: GLProgram | null = null;
+  let depositProgMrt: GLProgram | null = null;
   let compositeProg: GLProgram | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;
   let depositVao: WebGLVertexArrayObject | null = null;
@@ -1823,7 +1804,8 @@ function createPhysarum2Scene(): Scene {
       const { gl } = ctx;
       diffuseProg = createProgram(gl, DIFFUSE_FRAG);
       simProg = createProgram(gl, SIM_FRAG);
-      depositProg = createProgram(gl, DEPOSIT_FRAG, DEPOSIT_VERT);
+      depositProg = createProgram(gl, depositFragSrc(false), depositVertSrc(false));
+      depositProgMrt = createProgram(gl, depositFragSrc(true), depositVertSrc(true));
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
       territoryProg = createProgram(gl, TERRITORY_FRAG);
       samplerLocs.clear();
@@ -1878,7 +1860,7 @@ function createPhysarum2Scene(): Scene {
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
-      if (!diffuseProg || !simProg || !depositProg || !compositeProg) return;
+      if (!diffuseProg || !simProg || !depositProg || !depositProgMrt || !compositeProg) return;
       if (!quadVao || !depositVao || !beatSeeder) return;
       const { gl } = ctx;
       ensureTrailTargets(gl);
@@ -1909,6 +1891,12 @@ function createPhysarum2Scene(): Scene {
       // eating actually needs them — see the file header's "Touch"
       // paragraph and ensureFootprintTargets's own doc comment.
       if (eatOn) ensureFootprintTargets(gl);
+      // Stable for this whole frame's step loop: eatOn only changes on the
+      // next resolveStrains() call, and footprintTex is never freed mid-loop
+      // (only on a trail resize or dispose) — so the deposit program and
+      // its target framebuffer are picked once here, not per step.
+      const mrt = eatOn && footprintTex !== null;
+      const depositActive = mrt ? depositProgMrt : depositProg;
 
       const speedSetting = resolveSceneSetting(ID, settingFor("speed"));
       const stepRate = STEP_RATE_MIN + (STEP_RATE_MAX - STEP_RATE_MIN) * speedSetting;
@@ -1954,13 +1942,17 @@ function createPhysarum2Scene(): Scene {
       gl.uniform1i(samplerLoc(gl, simProg, "sim.uAgentDir", "uAgentDir"), 1);
       gl.uniform1i(samplerLoc(gl, simProg, "sim.uTrail", "uTrail"), 2);
 
-      depositProg.use();
-      uploadCommonUniforms(depositProg, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
-      depositProg.setF("uAgentSide", agentSide);
-      depositProg.setV4("uStrainFeed", strainFeed[0]!, strainFeed[1]!, strainFeed[2]!, strainFeed[3]!);
-      depositProg.setV4v("uTouchFeedRow", touchFeedRows);
-      gl.uniform1i(samplerLoc(gl, depositProg, "dep.uAgentPos", "uAgentPos"), 0);
-      gl.uniform1i(samplerLoc(gl, depositProg, "dep.uAgentDir", "uAgentDir"), 1);
+      depositActive.use();
+      uploadCommonUniforms(depositActive, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
+      depositActive.setF("uAgentSide", agentSide);
+      depositActive.setV4("uStrainFeed", strainFeed[0]!, strainFeed[1]!, strainFeed[2]!, strainFeed[3]!);
+      depositActive.setV4v("uTouchFeedRow", touchFeedRows);
+      // Keyed by which program is active (not a shared "dep." prefix): the
+      // two deposit programs are distinct WebGLProgram objects, and a
+      // uniform location cached from one is not valid on the other.
+      const depKeyPrefix = mrt ? "depMrt." : "dep.";
+      gl.uniform1i(samplerLoc(gl, depositActive, `${depKeyPrefix}uAgentPos`, "uAgentPos"), 0);
+      gl.uniform1i(samplerLoc(gl, depositActive, `${depKeyPrefix}uAgentDir`, "uAgentDir"), 1);
 
       for (let step = 0; step < steps; step++) {
         const trailWrite = 1 - trailReadIdx;
@@ -2007,13 +1999,12 @@ function createPhysarum2Scene(): Scene {
         //    Touch is eating, this also writes the footprint MRT attachment
         //    (depositFbo instead of trailFbo) so next step's diffuse can
         //    read this step's landing counts.
-        const mrt = eatOn && footprintTex !== null;
         gl.bindFramebuffer(gl.FRAMEBUFFER, mrt ? depositFbo[trailWrite] : trailFbo[trailWrite]);
         gl.viewport(0, 0, trailSideCur, trailSideCur);
         if (mrt) gl.clearBufferfv(gl.COLOR, 1, FOOT_CLEAR); // the footprint only; the trail (buffer 0) is untouched
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE);
-        depositProg.use();
+        depositActive.use();
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, agentPosTex[agentWrite]);
         gl.activeTexture(gl.TEXTURE1);
@@ -2108,6 +2099,7 @@ function createPhysarum2Scene(): Scene {
       diffuseProg?.dispose();
       simProg?.dispose();
       depositProg?.dispose();
+      depositProgMrt?.dispose();
       compositeProg?.dispose();
       territoryProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
@@ -2133,6 +2125,7 @@ function createPhysarum2Scene(): Scene {
       diffuseProg = null;
       simProg = null;
       depositProg = null;
+      depositProgMrt = null;
       compositeProg = null;
       territoryProg = null;
       quadVao = null;
