@@ -13,6 +13,7 @@ function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
     energy: 0,
     level: 1,
     onset: false,
+    pulseOnset: false,
     bpm: 0,
     onsetPhase: 0,
     ...overrides,
@@ -92,5 +93,42 @@ describe("createAnimClock", () => {
     const anim = clock.advance(DT, frame({ bpm: 120, onset: true }));
     expect(anim.beats).toBeGreaterThanOrEqual(0);
     expect(Number.isFinite(anim.beats)).toBe(true);
+  });
+
+  // Regression for the silence-gate-starves-tempo bug (see
+  // src/audio/types.ts's FeatureFrame.pulseOnset and this file's own
+  // beat.advance() call for the fix): on the render-tick path (no
+  // hit.tempoHits), the beat clock's phase comb must follow
+  // frame.pulseOnset, never the gated frame.onset — feeding it one without
+  // the other must produce opposite outcomes, not just "both work".
+  it("render-tick path: the phase comb locks on pulseOnset hits even while onset never fires", () => {
+    const clock = createAnimClock();
+    const bpm = 120; // one beat every 0.5s
+    const periodSec = 60 / bpm;
+    let t = 0;
+    let lastAnim = clock.advance(DT, frame({ bpm, time: t }));
+    for (let i = 0; i < 600; i++) {
+      t += DT;
+      const dueBeat = Math.floor(t / periodSec) > Math.floor((t - DT) / periodSec);
+      lastAnim = clock.advance(DT, frame({ bpm, time: t, onset: false, pulseOnset: dueBeat }));
+      // The gated visual hit never fires in this scenario, so beatPulse
+      // (raw frame.onset passthrough) must stay exactly 0 throughout.
+      expect(lastAnim.beatPulse).toBe(0);
+    }
+    expect(lastAnim.tempoLock).toBeGreaterThan(0.5);
+  });
+
+  it("render-tick path: onset-only hits (no pulseOnset) never lock the phase comb", () => {
+    const clock = createAnimClock();
+    const bpm = 120;
+    const periodSec = 60 / bpm;
+    let t = 0;
+    let lastAnim = clock.advance(DT, frame({ bpm, time: t }));
+    for (let i = 0; i < 600; i++) {
+      t += DT;
+      const dueBeat = Math.floor(t / periodSec) > Math.floor((t - DT) / periodSec);
+      lastAnim = clock.advance(DT, frame({ bpm, time: t, onset: dueBeat, pulseOnset: false }));
+    }
+    expect(lastAnim.tempoLock).toBeLessThan(0.1);
   });
 });

@@ -215,11 +215,12 @@ const scratchBands = new Float32Array(NUM_BANDS);
 
 /**
  * Applies the sensitivity gain and then the expansion curve to a frame's
- * [0,1] band/energy values. onset/bpm/onsetPhase/time/level pass through
- * untouched — both are a visual gain, not a beat-detection threshold, and
- * `level` specifically must stay the raw, un-gained reading: it's auto
- * mode's input signal for driving these very sliders (see musicProfile.ts),
- * so shaping it here would feed the gain stage its own output.
+ * [0,1] band/energy values. onset/pulseOnset/bpm/onsetPhase/time/level pass
+ * through untouched — both are a visual gain, not a beat-detection
+ * threshold, and `level` specifically must stay the raw, un-gained reading:
+ * it's auto mode's input signal for driving these very sliders (see
+ * musicProfile.ts), so shaping it here would feed the gain stage its own
+ * output.
  */
 export function applySensitivity(frame: FeatureFrame, sensitivity: number, expansion: number): FeatureFrame {
   if (sensitivity === SENSITIVITY_DEFAULT && expansion === EXPANSION_DEFAULT) return frame;
@@ -233,6 +234,7 @@ export function applySensitivity(frame: FeatureFrame, sensitivity: number, expan
     bands: scratchBands,
     energy: shapeExpansion(shapeLevel(frame.energy, sensitivity), expansion),
     onset: frame.onset,
+    pulseOnset: frame.pulseOnset,
     bpm: frame.bpm,
     onsetPhase: frame.onsetPhase,
     level: frame.level,

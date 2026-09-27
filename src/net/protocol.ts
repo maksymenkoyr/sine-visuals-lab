@@ -5,7 +5,7 @@ import { NUM_BANDS } from "../audio/types.ts";
  *   [0]      msg type (1 = feature frame)
  *   [1..24]  bands, Uint8 each (0..1 -> 0..255)
  *   [25]     energy, Uint8
- *   [26]     flags (bit0 = onset)
+ *   [26]     flags (bit0 = onset, bit1 = pulseOnset)
  *   [27..28] onsetPhase, Uint16 (0..1 -> 0..65535) — no consumer reads this
  *            today (FeatureFrame.onsetPhase's own doc has the story); kept
  *            on the wire only because dropping it means a version bump —
@@ -14,6 +14,19 @@ import { NUM_BANDS } from "../audio/types.ts";
  *   [31]     level, Uint8 (0..1 -> 0..255)
  *   [32..39] roomTimeMs, Float64
  * = 40 bytes. The DO relay never parses this — it's a client-only concern.
+ *
+ * bit1 (pulseOnset) was added after bit0 shipped — decodeFeatureFrame ORs it
+ * with `onset` on decode (`(flags & 2) !== 0 || onset`) so a sender that
+ * predates bit1 (never sets it, always 0) still decodes as pulseOnset =
+ * onset, today's behavior, rather than a pulse that never fires. The other
+ * direction, a renderer still on the OLD decoder reading a frame from a
+ * sender that already sends bit1: `flags !== 0` reads any pulse-only frame
+ * (bit1 set, bit0 clear) as `onset` too, i.e. that renderer loses the
+ * silence gate for visual hits — a hit the gate should have dimmed fires
+ * anyway — until it reloads. Harmless otherwise (bit0's own meaning is
+ * unchanged), and not worth a special case: retire this paragraph together
+ * with the legacy-decode fallback below once mixed-version pairing is no
+ * longer a concern.
  *
  * decodeFeatureFrame also accepts the legacy 39-byte layout (no `level`
  * byte, roomTimeMs at [31..38]) and defaults `level` to 0.5 — so a renderer
@@ -25,10 +38,10 @@ import { NUM_BANDS } from "../audio/types.ts";
  * degradation, not a bug, and it can't be told apart from a genuine mid
  * loudness reading, so there's nothing to special-case here.
  *
- * Field names here (`onset`/`onsetPhase`) are TS-side only — the format is
- * purely positional/length-discriminated (see LEGACY_FRAME_BYTES), so
- * renaming a field never touches the bytes on the wire or breaks a paired
- * device running older code.
+ * Field names here (`onset`/`onsetPhase`/`pulseOnset`) are TS-side only —
+ * the format is purely positional/length-discriminated (see
+ * LEGACY_FRAME_BYTES), so renaming a field never touches the bytes on the
+ * wire or breaks a paired device running older code.
  */
 const MSG_FEATURE_FRAME = 1;
 const FRAME_BYTES = 1 + NUM_BANDS + 1 + 1 + 2 + 2 + 1 + 8;
@@ -42,6 +55,7 @@ export interface EncodableFrame {
   bands: Float32Array; // length NUM_BANDS, [0,1]
   energy: number;
   onset: boolean;
+  pulseOnset: boolean;
   bpm: number;
   onsetPhase: number;
   level: number;
@@ -58,7 +72,7 @@ export function encodeFeatureFrame(frame: EncodableFrame, roomTimeMs: number): A
   }
   view.setUint8(o, Math.round(clamp01(frame.energy) * 255));
   o += 1;
-  view.setUint8(o, frame.onset ? 1 : 0);
+  view.setUint8(o, (frame.onset ? 1 : 0) | (frame.pulseOnset ? 2 : 0));
   o += 1;
   view.setUint16(o, Math.round(clamp01(frame.onsetPhase) * 65535), true);
   o += 2;
@@ -74,6 +88,7 @@ export interface DecodedFrame {
   bands: Float32Array;
   energy: number;
   onset: boolean;
+  pulseOnset: boolean;
   bpm: number;
   onsetPhase: number;
   level: number;
@@ -93,7 +108,13 @@ export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
 
   const energy = view.getUint8(o) / 255;
   o += 1;
-  const onset = view.getUint8(o) !== 0;
+  const flags = view.getUint8(o);
+  const onset = (flags & 1) !== 0;
+  // A sender that predates bit1 never sets it — OR with `onset` so it still
+  // decodes as pulseOnset = onset, today's behavior, rather than a pulse
+  // that never fires. See this file's header for the full mixed-version
+  // story.
+  const pulseOnset = (flags & 2) !== 0 || onset;
   o += 1;
   const onsetPhase = view.getUint16(o, true) / 65535;
   o += 2;
@@ -105,5 +126,5 @@ export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
   if (!legacy) o += 1;
   const roomTimeMs = view.getFloat64(o, true);
 
-  return { bands, energy, onset, bpm, onsetPhase, level, roomTimeMs };
+  return { bands, energy, onset, pulseOnset, bpm, onsetPhase, level, roomTimeMs };
 }

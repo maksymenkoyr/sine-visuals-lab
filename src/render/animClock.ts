@@ -1,7 +1,8 @@
 import { type FeatureFrame } from "../audio/types.ts";
 import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import { createFlowClock, type FlowClock } from "./flowClock.ts";
-import { createBeatClock, PHASE_BASS, type BeatClock } from "./beatClock.ts";
+import { createBeatClock, PHASE_BASS, type BeatClock, type TempoHit } from "./beatClock.ts";
+import { createMetronome, type Metronome } from "./metronome.ts";
 import { createBandEnergy, type BandEnergy } from "./bandEnergy.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
@@ -12,9 +13,13 @@ import { hitStrength, type HitShape, type HitParts } from "../audio/hitStrength.
 
 // Bundles every per-frame renderer-side clock a scene might want, so
 // Scene.render() takes one object instead of an ever-growing positional
-// argument list. See flowClock.ts, beatClock.ts, bandEnergy.ts and
-// sectionIntensity.ts for what each field means and why it's derived rather
-// than read straight off FeatureFrame.
+// argument list. See flowClock.ts, beatClock.ts, metronome.ts, bandEnergy.ts
+// and sectionIntensity.ts for what each field means and why it's derived
+// rather than read straight off FeatureFrame. metronome.ts sits on top of
+// beatClock.ts here — advanced right after it, off its own bpm/beats/
+// tempoLock — rather than being its own top-level AnimClock the way
+// flowClock/beatClock are, since it has nothing to contribute but that one
+// derived reading.
 export interface AnimFrame {
   dtSec: number;
   timeSec: number;
@@ -107,6 +112,39 @@ export interface AnimFrame {
    *  resolveHold reads this (alongside tempoLock) to size a hold in beats
    *  rather than a fixed duration. */
   bpm: number;
+  /** metronome.ts's own flywheel clock — see that file's header for why
+   *  this exists alongside beatPhase/beats/tempoBpm above: those follow the
+   *  tracker live (gridPulse.ts falls back to raw hits when unsure, and
+   *  beatClock's own phase wavers/stalls with the estimate); these are
+   *  "always evenly spaced, always at the song's tempo" once adopted, and
+   *  free-run through an unsure patch rather than reacting to it.
+   *  `metronomeOn` is metronome.ts's own `running`. */
+  metronomeOn: boolean;
+  /** The tempo it's actually ticking at — 0 while `!metronomeOn`. */
+  metronomeBpm: number;
+  /** Unwrapped beat count, free-running like `beats` above, but off the
+   *  metronome's own flywheel rather than the live clock. */
+  metronomeBeats: number;
+  /** [0,1) position within the current beat/bar — the metronome's own
+   *  counterparts to `beatPhase`/`barPhase`. */
+  metronomePhase: number;
+  metronomeBarPhase: number;
+  /** 0..1, eases in while running and out while idle (metronome.ts's own
+   *  `level`) — for a scene/signal that wants to fade with the metronome
+   *  rather than snap on/off. */
+  metronomeLevel: number;
+  /** One-shot edges, true only on the tick metronome.ts's own beatTick/
+   *  barTick fired — same family as `onset`/`lowOnset` above: read through
+   *  renderLatch.ts, never straight off a tick a render-capped scene might
+   *  skip. */
+  metronomeBeat: boolean;
+  metronomeBar: boolean;
+  /** Decaying [0,1] envelopes that jump to 1 on metronomeBeat/metronomeBar
+   *  — the metronome's own counterparts to `beatPulse` above, at the same
+   *  BEAT_PULSE_DECAY_PER_SEC rate. JS-side continuous reads for a signal
+   *  that wants the metronome's pulse without consuming its one-shot edge. */
+  metronomePulse: number;
+  metronomeBarPulse: number;
   /** This tick's silence-gate dimmer (src/audio/silenceGate.ts) — the same
    *  value bandEnergy.advance() was called with above, computed once here
    *  from `gate`/`frame.level` (see advance()'s own doc). 1 with no gate or
@@ -164,13 +202,18 @@ export interface AnimClock {
    *  line are both per-setting drive choices now (src/render/drives.ts),
    *  not something animClock does once for the whole scene; `onset`/
    *  `beatPulse` are the raw, ungridded hits and `beats` is the raw unwrapped
-   *  count a `{ source: "beat", grid }` drive grids on its own. */
+   *  count a `{ source: "beat", grid }` drive grids on its own. `hit.tempoHits`
+   *  (src/audio/tempoSource.ts's drained onsets, app.ts's solo mode only —
+   *  see beatClock.ts's own file header for why host/renderer/TV never pass
+   *  this) switches beatClock.ts's phase comb onto that fixed-hop feed for
+   *  this tick instead of the render-tick `frame.onset`/beatRatio pair;
+   *  omitted (every other caller), today's render-tick-only behavior. */
   advance(
     dtSec: number,
     frame: FeatureFrame,
     smoothing?: number,
     gate?: SilenceGateMarks,
-    hit?: { shape: HitShape; beatRatio?: number | null },
+    hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[] },
   ): AnimFrame;
 }
 
@@ -206,11 +249,14 @@ function clamp01(x: number): number {
 export function createAnimClock(): AnimClock {
   const flow: FlowClock = createFlowClock();
   const beat: BeatClock = createBeatClock();
+  const metronome: Metronome = createMetronome();
   const bandEnergy: BandEnergy = createBandEnergy();
   const section: SectionIntensity = createSectionIntensity();
   const profile: MusicProfile = createMusicProfile();
   const centroid: SpectralCentroid = createSpectralCentroid();
   let beatPulse = 0;
+  let metronomePulse = 0;
+  let metronomeBarPulse = 0;
   // Last tick's own low-band onset ratio — see the hitWeight comment above
   // for why this tick's bass weight checks both.
   let prevLowRatio = 0;
@@ -226,7 +272,7 @@ export function createAnimClock(): AnimClock {
       frame: FeatureFrame,
       smoothing = SMOOTHING_DEFAULT,
       gate?: SilenceGateMarks,
-      hit?: { shape: HitShape; beatRatio?: number | null },
+      hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[] },
     ): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
       const dimmer = gate ? silenceGateDimmer(frame.level, gate) : 1;
@@ -239,7 +285,23 @@ export function createAnimClock(): AnimClock {
       const strength = Math.min(HIT_WEIGHT_CAP, Math.max(1, hit?.beatRatio || 1));
       const bass = clamp01((Math.max(lowRatioNow, prevLowRatio) - BASS_WEIGHT_FLOOR) / BASS_WEIGHT_SPAN);
       const hitWeight = strength * (1 + PHASE_BASS * bass);
-      beat.advance(dtSec, frame.bpm, frame.onset, hitWeight);
+      // See beatClock.ts's own file header and its advance()'s doc: the
+      // fixed-hop feed (app.ts's solo mode, when a tempo source is live)
+      // replaces the render-tick beatFired/hitWeight pair entirely rather
+      // than combining with it.
+      if (hit?.tempoHits !== undefined) {
+        beat.advance(dtSec, frame.bpm, false, 1, hit.tempoHits);
+      } else {
+        // frame.pulseOnset, not frame.onset — the phase comb is tempo
+        // tracking, not a visual hit, and must not be starved by the
+        // silence gate (FeatureFrame.pulseOnset's own doc has the measured
+        // failure this replaces: host/TV and this render-tick fallback path
+        // ran the Metronome only ~21-26% of the time on real songs through
+        // a mic, against solo mode's ~94%, because their only feed here was
+        // the gated `onset`).
+        beat.advance(dtSec, frame.bpm, frame.pulseOnset, hitWeight);
+      }
+      metronome.advance(dtSec, { bpm: beat.bpm, beats: beat.beats, tempoLock: beat.tempoLock }, frame.bpm);
       prevLowRatio = lowRatioNow;
       section.advance(dtSec, frame.energy, rateScale);
       profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
@@ -257,6 +319,10 @@ export function createAnimClock(): AnimClock {
           beatPulse = 1;
         }
       }
+      metronomePulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
+      if (metronome.beatTick) metronomePulse = 1;
+      metronomeBarPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
+      if (metronome.barTick) metronomeBarPulse = 1;
 
       return {
         dtSec,
@@ -298,6 +364,16 @@ export function createAnimClock(): AnimClock {
         centroid: centroid.centroid,
         centroidRaw: centroid.raw,
         bpm: frame.bpm,
+        metronomeOn: metronome.running,
+        metronomeBpm: metronome.bpm,
+        metronomeBeats: metronome.beats,
+        metronomePhase: metronome.beatPhase,
+        metronomeBarPhase: metronome.barPhase,
+        metronomeLevel: metronome.level,
+        metronomeBeat: metronome.beatTick,
+        metronomeBar: metronome.barTick,
+        metronomePulse,
+        metronomeBarPulse,
         gateDimmer: dimmer,
         hits: {
           low: { ...bandEnergy.lowDiag },

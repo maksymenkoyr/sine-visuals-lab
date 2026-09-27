@@ -37,6 +37,16 @@ function frame(overrides: Partial<AnimFrame> = {}): AnimFrame {
     centroid: 0,
     centroidRaw: 0,
     bpm: 0,
+    metronomeOn: false,
+    metronomeBpm: 0,
+    metronomeBeats: 0,
+    metronomePhase: 0,
+    metronomeBarPhase: 0,
+    metronomeLevel: 0,
+    metronomeBeat: false,
+    metronomeBar: false,
+    metronomePulse: 0,
+    metronomeBarPulse: 0,
     gateDimmer: 1,
     hits: { low: NULL_DIAG, mid: NULL_DIAG, high: NULL_DIAG },
     hitStrength: { beat: NULL_HIT, low: NULL_HIT, mid: NULL_HIT, high: NULL_HIT },
@@ -66,6 +76,20 @@ describe("createRenderLatch", () => {
     expect(rendered.highOnset).toBe(true);
     expect(rendered.midOnset).toBe(false);
     expect(rendered.onset).toBe(false);
+  });
+
+  it("metronomeBeat/metronomeBar survive a skipped tick, same as onset/lowOnset", () => {
+    const latch = createRenderLatch();
+    latch.accumulate(frame({ metronomeBeat: true })); // this tick never renders
+    latch.accumulate(frame({ metronomeBar: true })); // neither does this one
+    const rendered = latch.consume(frame(), 20); // this one finally does
+    expect(rendered.metronomeBeat).toBe(true);
+    expect(rendered.metronomeBar).toBe(true);
+    // And clears, same as every other edge.
+    latch.accumulate(frame());
+    const next = latch.consume(frame(), 30);
+    expect(next.metronomeBeat).toBe(false);
+    expect(next.metronomeBar).toBe(false);
   });
 
   it("consume clears the pending set — the next consume starts clean", () => {

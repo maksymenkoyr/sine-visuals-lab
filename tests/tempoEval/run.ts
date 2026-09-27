@@ -1,7 +1,11 @@
 import { FeatureExtractor } from "../../src/audio/features.ts";
 import { createAnimClock } from "../../src/render/animClock.ts";
 import { getHitShape } from "../../src/audio/hitStrength.ts";
+import { TempoAnalyzer } from "../../src/audio/tempoAnalyzer.ts";
+import { PHASE_BASS, type TempoHit } from "../../src/render/beatClock.ts";
+import { SILENCE_GATE_CLOSED_DEFAULT, SILENCE_GATE_OPEN_DEFAULT, type SilenceGateMarks } from "../../src/audio/silenceGate.ts";
 import { readBandsDb } from "./bands.ts";
+import { micChain } from "./micChain.ts";
 import { SR, type Track, type TempoSegment } from "./synth.ts";
 
 /**
@@ -13,6 +17,20 @@ import { SR, type Track, type TempoSegment } from "./synth.ts";
  * The permanent, dependency-free scoreboard tests/tempoEval.test.ts asserts
  * targets against (see that file, and the plan/PR that added this harness
  * for what each metric is meant to guard).
+ *
+ * `{ analyzer: true }` swaps the render-tick FeatureExtractor.bpm for the
+ * fixed-hop TempoAnalyzer's own — see tempoAnalyzer.ts's header for why its
+ * numbers are better. It's fed the track's samples in the same 128-sample
+ * blocks (with their own exact start times) app.ts's real AudioWorklet
+ * would, incrementally, up to each render tick's own `time` — never more,
+ * so a track's own future samples can't leak into an earlier tick's
+ * estimate the way it would if the whole buffer were pushed up front. Its
+ * drained onsets become that tick's animClock.advance() tempoHits, exactly
+ * the shape app.ts's currentVisual()/loop() build (agoSec against this same
+ * tick's `time`, weight graded by PHASE_BASS-weighted bass). Every other
+ * metric computed below is unchanged between the two modes — same
+ * FeatureExtractor, same AnimFrame, same ground truth comparison — so the
+ * two tables in tests/tempoEval.test.ts are directly comparable.
  */
 
 export interface EvalMetrics {
@@ -47,6 +65,52 @@ export interface EvalMetrics {
   endBpm: number;
   /** anim.tempoLock at the very last rendered frame. */
   endLock: number;
+  /** Share of metronome ticks (metronome.ts, after TICKS_MIN_SEC, inside a
+   *  tempo segment) whose nearest true beat (track.beats) lands within
+   *  TICKS_TOLERANCE_SEC — the metronome's own counterpart to ticksOn30ms. */
+  metroOn30ms: number;
+  /** Share of true beats (after TICKS_MIN_SEC, inside a tempo segment) with
+   *  a metronome tick within TICKS_TOLERANCE_SEC of them — catches a
+   *  metronome that's dropped out rather than one that's merely offset. */
+  metroCoverage: number;
+  /** Coefficient of variation of consecutive metronome tick intervals
+   *  (after TICKS_MIN_SEC) — how evenly spaced the metronome's own ticks
+   *  are. NaN for a track whose tempo segments aren't all the same bpm
+   *  (ramp) or has none at all (random) — there's no single "even" interval
+   *  to measure against. */
+  metroIntervalCv: number;
+  /** Share of those same intervals within METRO_EVEN_TOL of their median —
+   *  the asserted evenness reading. Unlike the CV, one deliberate phase
+   *  correction (metronome.ts's PHASE_SNAP_BEATS: one longer interval, once
+   *  per start/retune) costs it one interval instead of failing the track,
+   *  while a metronome that keeps wobbling still scores low. Same NaN rule. */
+  metroEvenShare: number;
+  /** house only (any track with a gap between two tempo segments, i.e. a
+   *  breakdown with no drums under it): share of frames inside that gap
+   *  where the metronome is running. NaN for a track with no such gap. */
+  metroBreakdownRun: number;
+  /** Same scope as metroBreakdownRun: share of that gap's own gridBeats
+   *  (Track.gridBeats — every beat of the grid, drums or not) with a
+   *  metronome tick within TICKS_TOLERANCE_SEC. NaN for a track with no
+   *  such gap. */
+  metroBreakdownOn30ms: number;
+  /** Whether the metronome is still running at the very last frame — it
+   *  should have let go by then on any track whose music actually ends. */
+  metroEndRunning: boolean;
+  /** Share of all frames after LOCK_MIN_SEC the metronome is running —
+   *  reported for every track. metronome.ts now runs exactly when
+   *  tempoSettle.ts's own settled bpm is non-zero (no confidence gate — see
+   *  that file's header), so on `random` this tracks bpmPresentShare below,
+   *  not "almost never": whether the tracker was ever fooled into a
+   *  *confident* lock on unstructured hits is lockNoTempo's job, not this
+   *  one's. */
+  metroRunShare: number;
+  /** Share of all frames after LOCK_MIN_SEC where the tracker's own raw
+   *  bpm (FeatureFrame.bpm) is non-zero at all — metroRunShare's own
+   *  target now that starting/stopping is ungated on tempoLock; the two
+   *  should track each other closely (tempoSettle.ts's window is the only
+   *  thing between them). */
+  bpmPresentShare: number;
 }
 
 function currentSegment(segments: TempoSegment[], segPtr: { i: number }, t: number): TempoSegment | null {
@@ -78,20 +142,53 @@ function median(values: number[]): number {
 }
 
 const TICKS_MIN_SEC = 8;
+const METRO_EVEN_TOL = 0.03;
 const LOCK_MIN_SEC = 6;
 const TICKS_TOLERANCE_SEC = 0.03;
 const WARMUP_SEC = 3;
 const LOCK_HOLD_SEC = 2;
+// Matches app.ts's tempoWorklet.ts real AudioWorklet render-quantum feed —
+// see tempoAnalyzer.ts's own hop derivation for why the exact block size
+// doesn't matter to its own hop timing (it's independent of the push()
+// chunking), only to how often this harness calls push().
+const ANALYZER_PUSH_BLOCK = 128;
 
-export function evaluate(track: Track, fps = 60): EvalMetrics {
+export interface EvalOptions {
+  /** Swap the render-tick FeatureExtractor.bpm for the fixed-hop
+   *  TempoAnalyzer's — see this file's own header. */
+  analyzer?: boolean;
+  /** With `analyzer`: take only its bpm, and leave the beat clock on the
+   *  render-tick onset feed — what a paired host/TV actually runs (app.ts's
+   *  currentVisual(): the wire carries the fixed-hop bpm, but those devices'
+   *  own timeline is the jitter buffer's room time, so they never get the
+   *  exact onsets). */
+  hostFeed?: boolean;
+  /** Run the track's audio through micChain.ts before anything reads it —
+   *  the conditions the app actually hears through a mic, rather than the
+   *  track's own clean synthesized master. */
+  mic?: boolean;
+  /** Pass { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT }
+   *  as extractor.update's gate argument and animClock.advance's gate
+   *  argument — exactly like app.ts does in solo mode (see silenceGate.ts's
+   *  header for what the gate does and why it must not starve tempo
+   *  tracking; that's exactly what this option, combined with `mic`, is
+   *  here to measure). */
+  gate?: boolean;
+}
+
+export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMetrics {
+  const mono = opts.mic ? micChain(track.mono, SR) : track.mono;
+  const gate: SilenceGateMarks | undefined = opts.gate ? { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT } : undefined;
   const dt = 1 / fps;
-  const totalDurationSec = track.mono.length / SR;
+  const totalDurationSec = mono.length / SR;
   const nFrames = Math.floor(totalDurationSec * fps);
   const finalSilenceStart = track.tempo.length > 0 ? Math.max(...track.tempo.map((s) => s.to)) : Infinity;
 
   const extractor = new FeatureExtractor();
   const animClock = createAnimClock();
   const shape = getHitShape();
+  const analyzer = opts.analyzer ? new TempoAnalyzer(SR) : null;
+  let analyzerSamplesPushed = 0;
 
   const segPtr = { i: 0 };
   let framesInSeg = 0;
@@ -107,17 +204,54 @@ export function evaluate(track: Track, fps = 60): EvalMetrics {
   let lockNoSum = 0;
   let lockNoCount = 0;
   const trackedBeats: number[] = [];
+  const metroTicks: number[] = [];
+
+  // A gap between two consecutive tempo segments is a stretch with no
+  // audible beat under it at all (house's own breakdown, bars 8-11) — the
+  // one thing metroBreakdownRun/metroBreakdownOn30ms score, on whichever
+  // track (today, only house) actually has one.
+  let breakdownFrom: number | null = null;
+  let breakdownTo: number | null = null;
+  for (let s = 0; s < track.tempo.length - 1; s++) {
+    if (track.tempo[s]!.to < track.tempo[s + 1]!.from) {
+      breakdownFrom = track.tempo[s]!.to;
+      breakdownTo = track.tempo[s + 1]!.from;
+      break;
+    }
+  }
+  let breakdownFrames = 0;
+  let breakdownRunning = 0;
+  let framesAfterLockMin = 0;
+  let framesRunningAfterLockMin = 0;
+  let framesBpmPresentAfterLockMin = 0;
 
   let prevBeatsVal = 0;
+  let prevMetroBeatsVal = 0;
+  let prevMetronomeOn = false;
   let prevTime = 0;
   let lastBpm = 0;
   let lastLock = 0;
+  let lastMetronomeOn = false;
 
   for (let i = 0; i < nFrames; i++) {
     const time = i * dt;
-    const bands = readBandsDb(track.mono, time, SR);
-    const frame = extractor.update(bands, time);
-    const anim = animClock.advance(dt, frame, undefined, undefined, { shape, beatRatio: extractor.fluxRatio });
+    const bands = readBandsDb(mono, time, SR);
+    const frame = extractor.update(bands, time, 1, 1, gate);
+
+    let tempoHits: TempoHit[] | undefined;
+    if (analyzer) {
+      const upToSample = Math.min(mono.length, Math.round(time * SR));
+      while (analyzerSamplesPushed < upToSample) {
+        const end = Math.min(upToSample, analyzerSamplesPushed + ANALYZER_PUSH_BLOCK);
+        analyzer.push(mono.subarray(analyzerSamplesPushed, end), analyzerSamplesPushed / SR);
+        analyzerSamplesPushed = end;
+      }
+      frame.bpm = analyzer.bpm;
+      const onsets = analyzer.drainOnsets();
+      if (!opts.hostFeed) tempoHits = onsets.map((o) => ({ agoSec: time - o.time, weight: o.strength * (1 + PHASE_BASS * o.bass) }));
+    }
+
+    const anim = animClock.advance(dt, frame, undefined, gate, { shape, beatRatio: extractor.fluxRatio, tempoHits });
 
     const seg = currentSegment(track.tempo, segPtr, time);
     if (seg) {
@@ -148,6 +282,16 @@ export function evaluate(track: Track, fps = 60): EvalMetrics {
       }
     }
 
+    if (breakdownFrom !== null && breakdownTo !== null && time >= breakdownFrom && time < breakdownTo) {
+      breakdownFrames++;
+      if (anim.metronomeOn) breakdownRunning++;
+    }
+    if (time > LOCK_MIN_SEC) {
+      framesAfterLockMin++;
+      if (anim.metronomeOn) framesRunningAfterLockMin++;
+      if (frame.bpm > 0) framesBpmPresentAfterLockMin++;
+    }
+
     if (i > 0) {
       let targetFloor = Math.floor(prevBeatsVal) + 1;
       const curFloor = Math.floor(anim.beats);
@@ -159,11 +303,34 @@ export function evaluate(track: Track, fps = 60): EvalMetrics {
         }
         targetFloor++;
       }
+
+      // Metronome ticks — same interpolation, off metronome.ts's own
+      // metronomeBeats instead of beatClock's. Only while it was *already*
+      // running last tick and still is this tick: `metronomeBeats` jumps
+      // discontinuously the instant it adopts a fresh tempo (by design — it
+      // sits straight on the clock's own beat count, not wherever its own
+      // frozen count last stood), and that jump itself is never a real tick
+      // (metronome.ts's own advance() arms it silently) — counting a floor
+      // crossing across that jump would fabricate a burst of fake ticks.
+      if (prevMetronomeOn && anim.metronomeOn) {
+        let mTargetFloor = Math.floor(prevMetroBeatsVal) + 1;
+        const mCurFloor = Math.floor(anim.metronomeBeats);
+        while (mTargetFloor <= mCurFloor) {
+          if (anim.metronomeBeats !== prevMetroBeatsVal) {
+            const frac = (mTargetFloor - prevMetroBeatsVal) / (anim.metronomeBeats - prevMetroBeatsVal);
+            metroTicks.push(prevTime + frac * (time - prevTime));
+          }
+          mTargetFloor++;
+        }
+      }
     }
     prevBeatsVal = anim.beats;
+    prevMetroBeatsVal = anim.metronomeBeats;
+    prevMetronomeOn = anim.metronomeOn;
     prevTime = time;
     lastBpm = frame.bpm;
     lastLock = anim.tempoLock;
+    lastMetronomeOn = anim.metronomeOn;
   }
 
   // ticksOn30ms / medianOffsetMs — a second pass over the tracked beats
@@ -185,6 +352,67 @@ export function evaluate(track: Track, fps = 60): EvalMetrics {
     if (Math.abs(diffSec) < periodSec * 0.5) offsetsMs.push(diffSec * 1000);
   }
 
+  // metroOn30ms — same shape as ticksOn30ms above, over metroTicks against
+  // the same true beats.
+  const metroSegPtr = { i: 0 };
+  let metroQualifying = 0;
+  let metroWithin = 0;
+  for (const mt of metroTicks) {
+    if (mt <= TICKS_MIN_SEC) continue;
+    const seg = currentSegment(track.tempo, metroSegPtr, mt);
+    if (!seg) continue;
+    metroQualifying++;
+    const nearest = nearestBeat(track.beats, mt);
+    if (nearest !== null && Math.abs(mt - nearest) <= TICKS_TOLERANCE_SEC) metroWithin++;
+  }
+
+  // metroCoverage — the reverse direction: for each true beat, is there a
+  // metronome tick near it at all? Catches a metronome that's dropped out
+  // (no nearby tick anywhere), which metroOn30ms alone wouldn't show if the
+  // few ticks it does have all happen to land well.
+  const coverageSegPtr = { i: 0 };
+  let coverageQualifying = 0;
+  let coverageWithin = 0;
+  for (const b of track.beats) {
+    if (b <= TICKS_MIN_SEC) continue;
+    const seg = currentSegment(track.tempo, coverageSegPtr, b);
+    if (!seg) continue;
+    coverageQualifying++;
+    const nearest = nearestBeat(metroTicks, b);
+    if (nearest !== null && Math.abs(nearest - b) <= TICKS_TOLERANCE_SEC) coverageWithin++;
+  }
+
+  // metroIntervalCv — only meaningful for a track whose tempo never changes
+  // (see EvalMetrics.metroIntervalCv's own doc).
+  const sameBpmThroughout = track.tempo.length > 0 && track.tempo.every((s) => s.bpm === track.tempo[0]!.bpm);
+  let metroIntervalCv = NaN;
+  let metroEvenShare = NaN;
+  if (sameBpmThroughout) {
+    const lateTicks = metroTicks.filter((t) => t > TICKS_MIN_SEC);
+    const intervals: number[] = [];
+    for (let k = 1; k < lateTicks.length; k++) intervals.push(lateTicks[k]! - lateTicks[k - 1]!);
+    if (intervals.length > 1) {
+      const meanInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      const variance = intervals.reduce((a, b) => a + (b - meanInterval) ** 2, 0) / intervals.length;
+      metroIntervalCv = meanInterval > 0 ? Math.sqrt(variance) / meanInterval : NaN;
+      const median = [...intervals].sort((a, b) => a - b)[intervals.length >> 1]!;
+      metroEvenShare = intervals.filter((x) => Math.abs(x / median - 1) <= METRO_EVEN_TOL).length / intervals.length;
+    }
+  }
+
+  // metroBreakdownOn30ms — house's own gridBeats (every beat of the grid,
+  // drums or not) inside the breakdown gap, scored against metroTicks.
+  let metroBreakdownOn30ms = NaN;
+  if (breakdownFrom !== null && breakdownTo !== null) {
+    const gridInGap = track.gridBeats.filter((g) => g >= breakdownFrom! && g < breakdownTo!);
+    let gridWithin = 0;
+    for (const g of gridInGap) {
+      const nearest = nearestBeat(metroTicks, g);
+      if (nearest !== null && Math.abs(nearest - g) <= TICKS_TOLERANCE_SEC) gridWithin++;
+    }
+    metroBreakdownOn30ms = gridInGap.length > 0 ? gridWithin / gridInGap.length : NaN;
+  }
+
   return {
     tempoOk: framesInSeg > 0 ? framesOk / framesInSeg : NaN,
     ticksOn30ms: qualifying > 0 ? within30ms / qualifying : NaN,
@@ -196,5 +424,14 @@ export function evaluate(track: Track, fps = 60): EvalMetrics {
     lockNoTempo: lockNoCount > 0 ? lockNoSum / lockNoCount : NaN,
     endBpm: lastBpm,
     endLock: lastLock,
+    metroOn30ms: metroQualifying > 0 ? metroWithin / metroQualifying : NaN,
+    metroCoverage: coverageQualifying > 0 ? coverageWithin / coverageQualifying : NaN,
+    metroIntervalCv,
+    metroEvenShare,
+    metroBreakdownRun: breakdownFrames > 0 ? breakdownRunning / breakdownFrames : NaN,
+    metroBreakdownOn30ms,
+    metroEndRunning: lastMetronomeOn,
+    metroRunShare: framesAfterLockMin > 0 ? framesRunningAfterLockMin / framesAfterLockMin : NaN,
+    bpmPresentShare: framesAfterLockMin > 0 ? framesBpmPresentAfterLockMin / framesAfterLockMin : NaN,
   };
 }

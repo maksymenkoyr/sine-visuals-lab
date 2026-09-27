@@ -105,8 +105,9 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
 
       // beat/beatPhase above are genuinely a synthetic metronome's beat grid
       // (they drive the kick/bass/hat envelopes too) — onset/onsetPhase is
-      // just what FeatureFrame calls that same edge/phase pair.
-      return { time: timeSec, bands, energy, onset: beat, bpm, onsetPhase: beatPhase, level };
+      // just what FeatureFrame calls that same edge/phase pair. There's no
+      // silence gate here to differ from it, so pulseOnset = onset.
+      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level };
     },
   };
 }

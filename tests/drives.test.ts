@@ -38,6 +38,7 @@ function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
     energy: 0,
     level: 1,
     onset: false,
+    pulseOnset: false,
     bpm: 120,
     onsetPhase: 0,
     ...overrides,
