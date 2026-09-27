@@ -313,6 +313,15 @@ reference-measurement workflow used by later scenes.
   minimum). Headless check with Any hit + Loudness patched in: at 0.8 the line
   sits well above the signal and only the kicks ring; at the default the
   quieter hits still send small rings.
+- 2026-09-27 — Moved at the user's request from a separate scene setting to
+  a slider right under Beat ripple's graph: `SceneSetting.drive.threshold`
+  declares it, `driveStore.ts`'s `getDriveThreshold`/`setDriveThreshold` save
+  it with the patch (Reset to scene default clears it), and the scene reads
+  `drives.threshold("ripple")`. The user had seen no difference from the old
+  row; a real mouse drag of the new slider from 0.25 to 1 (Any hit + Loudness
+  patched in) raised the dotted line and removed every small ring, leaving
+  the kicks — the big hits still ring at any setting, since they are the
+  standouts it's measuring against.
 - 2026-09-26 — "Tempo breathe" becomes "Breathe": the once-per-bar, tempo-locked
   zoom — and this scene's last read of `beatClock.ts` — was removed, and the dial
   turned into a patch destination whose zoom follows whatever source is wired to

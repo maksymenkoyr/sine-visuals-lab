@@ -74,6 +74,8 @@ interface DriveEntry {
   patch?: StoredDriveSetting;
   line?: number[];
   lineStrength?: number;
+  /** The setting's own threshold (SceneSetting.drive.threshold), 0..1. */
+  threshold?: number;
 }
 
 type Store = Record<string, Record<string, DriveEntry>>;
@@ -330,6 +332,7 @@ export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   const entry = entryFor(settingScope(sceneId, spec.key), spec.key);
   delete entry.patch;
   delete entry.choice;
+  delete entry.threshold; // "Reset to scene default" covers the threshold slider too
   persist();
 }
 
@@ -430,5 +433,20 @@ export function setDriveLineStrength(sceneId: string, spec: SceneSetting, value:
 
 export function resetDriveLineStrength(sceneId: string, spec: SceneSetting): void {
   delete entryFor(settingScope(sceneId, spec.key), spec.key).lineStrength;
+  persist();
+}
+
+/** The setting's own threshold (SceneSetting.drive.threshold), or its
+ *  default when untouched. Undefined for a setting that declares none. */
+export function getDriveThreshold(sceneId: string, spec: SceneSetting): number | undefined {
+  const def = spec.drive?.threshold?.default;
+  if (def === undefined) return undefined;
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key]?.threshold;
+  return typeof stored === "number" && Number.isFinite(stored) ? Math.min(1, Math.max(0, stored)) : def;
+}
+
+export function setDriveThreshold(sceneId: string, spec: SceneSetting, value: number): void {
+  if (!Number.isFinite(value)) return;
+  entryFor(settingScope(sceneId, spec.key), spec.key).threshold = Math.min(1, Math.max(0, value));
   persist();
 }

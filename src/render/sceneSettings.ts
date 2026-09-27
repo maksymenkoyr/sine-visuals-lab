@@ -128,6 +128,13 @@ export interface SceneSetting {
      *  against the scene's own code, so a stale list is a wrong pill rather
      *  than a broken build — keep it honest by hand. */
     sceneSources?: readonly SignalId[];
+    /** A threshold the scene applies to whatever this setting receives —
+     *  Beat ripple's adaptive "reach to ring" line. The panel shows it as a
+     *  slider right under this setting's graph (deviceMenu.ts), it's saved
+     *  with the rest of this setting's patch (driveStore.ts's
+     *  getDriveThreshold), and the scene reads it with drives.threshold(key).
+     *  0..1; `default` is what an untouched setting uses. */
+    threshold?: { default: number; label: string; hint: string };
   };
   /** This enum is the scene's *variant*: the one setting that decides what
    *  the rest of the settings are even acting on (Kaleidoscope's Style).

@@ -441,6 +441,10 @@ export interface DeviceMenuDeps {
   setDriveLine: (sceneId: string, spec: SceneSetting, heights: ArrayLike<number>) => void;
   resetDriveLine: (sceneId: string, spec: SceneSetting) => void;
   getDriveLineStrength: (sceneId: string, spec: SceneSetting) => number;
+  /** A setting's own threshold slider (SceneSetting.drive.threshold), under
+   *  its graph — driveStore.ts's getDriveThreshold/setDriveThreshold. */
+  getDriveThreshold: (sceneId: string, spec: SceneSetting) => number | undefined;
+  onSetDriveThreshold: (sceneId: string, spec: SceneSetting, value: number) => void;
   setDriveLineStrength: (sceneId: string, spec: SceneSetting, value: number) => void;
   /** The Loudness card's Reset chip — starts the integrated LUFS reading
    *  over (src/audio/lufsAnalyser.ts). */
@@ -2288,6 +2292,43 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   const WEIGHT_HINT = "This source's share: 0 ignores it, 1× is normal, 2× doubles it.";
 
+  /** A setting's own threshold (SceneSetting.drive.threshold) as a labelled
+   *  slider under its graph — Beat ripple's "reach to ring" line. Same live-
+   *  write, no-rebuild rule as buildWeightSlider below. */
+  function buildThresholdSlider(sceneId: string, spec: SceneSetting, onLiveEdit: () => void): HTMLElement {
+    const th = spec.drive!.threshold!;
+    const wrap = document.createElement("label");
+    wrap.style.cssText = `display: flex; align-items: center; gap: 8px; margin-top: 6px;`;
+    setHint(wrap, th.hint);
+    const name = document.createElement("span");
+    name.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
+    name.textContent = th.label;
+    const rng = document.createElement("input");
+    rng.type = "range";
+    rng.className = "vc-slider";
+    rng.min = "0";
+    rng.max = "1";
+    rng.step = "0.05";
+    rng.setAttribute("aria-label", th.label);
+    rng.style.cssText = driveWeightRangeStyle;
+    const out = document.createElement("output");
+    out.style.cssText = driveWeightOutStyle;
+    const show = (v: number) => {
+      rng.value = String(v);
+      rng.style.setProperty("--vc-fill", `${v * 100}%`);
+      out.textContent = v.toFixed(2);
+    };
+    show(deps.getDriveThreshold(sceneId, spec) ?? th.default);
+    rng.addEventListener("input", () => {
+      const v = Number(rng.value);
+      show(v);
+      deps.onSetDriveThreshold(sceneId, spec, v);
+      onLiveEdit();
+    });
+    wrap.append(name, rng, out);
+    return wrap;
+  }
+
   function buildWeightSlider(sceneId: string, spec: SceneSetting, src: DriveSource, onLiveEdit: () => void): HTMLElement {
     const wrap = document.createElement("label");
     wrap.style.cssText = driveWeightWrapStyle;
@@ -2740,7 +2781,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       patchChanged(sceneId, spec);
     });
     function refreshResetVisibility(): void {
-      resetBtn.hidden = sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
+      const thresholdMoved = spec.drive?.threshold !== undefined && deps.getDriveThreshold(sceneId, spec) !== spec.drive.threshold.default;
+      resetBtn.hidden = !thresholdMoved && sameDriveSetting(deps.getDriveSetting(sceneId, spec), defaultDriveSetting(spec));
     }
 
     const head = document.createElement("div");
@@ -2794,6 +2836,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       outputCanvas = graph.canvas;
       tick = graph.tick;
     }
+    if (spec.drive?.threshold) panel.appendChild(buildThresholdSlider(sceneId, spec, refreshResetVisibility));
 
     panel.appendChild(resetBtn);
     refreshResetVisibility();

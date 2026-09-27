@@ -7,7 +7,7 @@ import { createGridPulse, type GridPulse } from "./gridPulse.ts";
 import { beatGridBeats, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { bandLineDrive } from "../audio/bandLine.ts";
 import { GROUP_TUNING } from "./bandEnergy.ts";
-import { getDriveLine, getDriveLineStrength, getDriveSetting } from "./driveStore.ts";
+import { getDriveLine, getDriveLineStrength, getDriveSetting, getDriveThreshold } from "./driveStore.ts";
 import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type ValueTrigger } from "./valueTrigger.ts";
 
 /**
@@ -300,6 +300,11 @@ export interface SceneDrives {
    *  here, since there is no patch to sum — the panel draws that setting's
    *  cables instead of a sparkline). */
   valueOf(key: string): number;
+  /** The setting's own threshold (SceneSetting.drive.threshold, adjusted by
+   *  the slider under its graph), or undefined when it declares none or
+   *  there's no engine behind this (PASSTHROUGH_DRIVES — the caller falls
+   *  back to its own default). */
+  threshold(key: string): number | undefined;
 }
 
 /** Always "scene" — the identity fallback every caller not wired to a real
@@ -315,6 +320,7 @@ export const PASSTHROUGH_DRIVES: SceneDrives = {
   uniformPair: () => ({ drive: 0, custom: 0 }),
   sourceValues: () => null,
   valueOf: () => 0,
+  threshold: () => undefined,
 };
 
 // matches animClock.ts's own BEAT_PULSE_DECAY_PER_SEC exactly (imported, not
@@ -935,6 +941,11 @@ export function createDriveEngine(): DriveEngine {
         valueOf(key) {
           const { setting, gain } = resolve(key);
           return setting === "scene" ? 0 : combine(setting, weightedValues(key, setting)) * gain;
+        },
+
+        threshold(key) {
+          const spec = specByKey.get(key);
+          return spec ? getDriveThreshold(sceneId, spec) : undefined;
         },
       };
     },
