@@ -1251,3 +1251,63 @@ describe("drives: the generic engine gate — every drive setting without its ow
     expect(lastLoudValue).toBe(1);
   });
 });
+
+describe("drives: Beat wave's every-N-beats divider (DriveSource.every)", () => {
+  it("every=1, or absent, is identical to the plain catalogue read", () => {
+    const clock = createAnimClock();
+    const base = clock.advance(DT, frame());
+    const anim = { ...base, beats: 5.25, tempoLock: 0.8 };
+    const engine = createDriveEngine();
+    const sceneId = "beatwave-every-identity";
+    const specDefault = settingWithDrive("k", "anim.beatWave");
+    const specExplicitOne = patchSetting(sceneId, "k2", { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, every: 1 }] });
+    const drives = engine.forScene(sceneId, [specDefault, specExplicitOne], anim);
+    const expected = SIGNALS["anim.beatWave"].read(frame(), anim);
+    expect(drives.value("k", -999)).toBe(expected);
+    expect(drives.value("k2", -999)).toBe(expected);
+  });
+
+  it("every=4 peaks once per 4 beats, not once per beat", () => {
+    const clock = createAnimClock();
+    const base = clock.advance(DT, frame());
+    const engine = createDriveEngine();
+    const sceneId = "beatwave-every-4";
+    const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, every: 4 }] });
+    const valueAt = (beats: number) => engine.forScene(sceneId, [spec], { ...base, beats, tempoLock: 1 }).value("k", -999);
+
+    // Peaks at every multiple of 4 beats...
+    for (const b of [0, 4, 8, 12]) expect(valueAt(b)).toBeCloseTo(1, 6);
+    // ...and troughs exactly halfway through each 4-beat cycle.
+    for (const b of [2, 6, 10]) expect(valueAt(b)).toBeCloseTo(0, 6);
+    // At beat 1 (not a multiple of 4), every=4 reads far from the peak a
+    // plain (every=1) Beat wave would give at that same beat.
+    const plainAt1 = SIGNALS["anim.beatWave"].read(frame(), { ...base, beats: 1, tempoLock: 1 });
+    expect(valueAt(1)).toBeLessThan(plainAt1 - 0.3);
+  });
+
+  it("normalizeDriveSetting drops `every` from a source on any choice but anim.beatWave", () => {
+    const withEvery = { mix: "add" as const, sources: [{ choice: "anim.mid" as const, weight: 1, every: 4 as const }] };
+    const normalized = normalizeDriveSetting(withEvery);
+    expect(normalized).not.toBe("scene");
+    if (normalized !== "scene") expect(normalized.sources[0]!.every).toBeUndefined();
+  });
+
+  it("normalizeDriveSetting drops an out-of-list every value even on anim.beatWave, and keeps a valid one", () => {
+    // `every: 3` isn't a value the DriveEvery type admits — this simulates
+    // foreign/decoded data reaching normalizeDriveSetting some other way
+    // than sanitizeDriveSetting's own (stricter, rejecting) parse.
+    const bad = { mix: "add" as const, sources: [{ choice: "anim.beatWave" as const, weight: 1, every: 3 as unknown as 4 }] };
+    const normBad = normalizeDriveSetting(bad);
+    if (normBad !== "scene") expect(normBad.sources[0]!.every).toBeUndefined();
+
+    const good = { mix: "add" as const, sources: [{ choice: "anim.beatWave" as const, weight: 1, every: 8 as const }] };
+    const normGood = normalizeDriveSetting(good);
+    if (normGood !== "scene") expect(normGood.sources[0]!.every).toBe(8);
+
+    // 1 is the identity default — normalizeDriveSetting keeps it out of the
+    // stored shape, same as it never stores a Graded height or a weight of 1.
+    const one = { mix: "add" as const, sources: [{ choice: "anim.beatWave" as const, weight: 1, every: 1 as const }] };
+    const normOne = normalizeDriveSetting(one);
+    if (normOne !== "scene") expect(normOne.sources[0]!.every).toBeUndefined();
+  });
+});

@@ -118,6 +118,122 @@ export interface RippleProfileParams {
   widthGaussianW: number;
 }
 
+// ---- Ring style -----------------------------------------------------------
+//
+// Caustics' "Ring style" setting picks the per-ring shape buildProfile sums
+// (Bump/Wave) and the emitter's own combining rule for close-together
+// emissions (Merge) — see caustics.ts's own SETTINGS entry for the
+// user-facing picker. Bump is every entry's shape today (a positive gaussian
+// crest, unconditionally) and stays the default so nothing here changes
+// until someone picks a different style.
+//
+// The problem Wave/Merge each answer, in their own way: a fast driver's
+// rings land close enough together (their spacing shrinking as the driver
+// speeds up) that they land closer than a ring's own width, so their
+// (always-positive) Bump crests just pile into a rising, nearly flat
+// plateau — the *slope* that actually refracts the filaments (RIPPLE_REFRACT
+// in caustics.ts) cancels out in the interior of that pile-up, so a busy
+// passage reads as "the centre brightens" rather than "rings are travelling
+// outward". Wave fixes this at the shape level (each ring is zero-mean, so a
+// dense pile-up can't accumulate a rising plateau — see WAVE_TROUGH_SHIFT_SIGMAS'
+// own comment below); Merge fixes it at the emission level instead (fold
+// close emissions into fewer, taller rings, so there's more real spacing
+// between the ones that remain — see mergeWindowSec below). Both are
+// legitimate, different answers to the same complaint, which is exactly why
+// the user gets to compare them live rather than this file picking one.
+export type RingStyle = "bump" | "wave" | "merge";
+
+/** `ringStyle` setting value (0/1/2, rounded — same convention as fluid.ts's
+ *  `symmetryToMirror`) -> the style it picks. Caustics' own SETTINGS entry
+ *  owns the display labels ("Bump"/"Wave"/"Merge"); this is the one place
+ *  the numeric value becomes the internal id buildProfile/emit key off. */
+const RING_STYLES: readonly RingStyle[] = ["bump", "wave", "merge"];
+
+export function ringStyleFor(value: number): RingStyle {
+  const idx = Math.min(RING_STYLES.length - 1, Math.max(0, Math.round(value)));
+  return RING_STYLES[idx]!;
+}
+
+// Wave's own shape: each ring is Bump's crest gaussian minus a second,
+// identically-shaped gaussian trough trailing it by WAVE_TROUGH_SHIFT_SIGMAS
+// standard deviations (sigma = 1/sqrt(2*widthGaussianW), the same sigma
+// buildProfile's Bump branch and tick() already derive) — literally
+// "profile(d) = g(d) - g(d + shift)" for d = r - R, the crest-minus-shifted-
+// trough formulation this feature's own design discussion settled on over a
+// Ricker/second-derivative-of-gaussian wavelet: a Ricker's own two flanking
+// troughs sit within about one sigma of the crest (its natural wavelength is
+// pinned to the ring's own width), which turned out too tight to survive a
+// dense train's superposition — a directly *chosen* trough distance is what
+// lets a train of these still show real separation between one ring's crest
+// and the next's trough rather than blurring back into a plateau. The trough
+// gaussian is subtracted with amplitude 1 (not dialable): a gaussian's own
+// integral doesn't depend on where it's centred, so `g(d) - g(d+shift)`
+// integrates to exactly 0 over d for *any* shift — the "net zero height"
+// property comes free, not from tuning amplitude against shift.
+//
+// Both the crest gaussian and the trough gaussian get Bump's own mirrored
+// term (reflecting each one through r=0 individually, not the combined
+// crest-minus-trough shape as a whole): each is separately an even function
+// of its own offset from its own centre, so each one's own mirror term
+// cancels its own slope at r=0 exactly the way Bump's gIn cancels gOut's,
+// and the sum of two exactly-cancelling pairs still cancels. This is what
+// "keep the mirrored term for the origin" means for a two-gaussian shape —
+// mirroring the *pieces*, not the whole.
+//
+// WAVE_TROUGH_SHIFT_SIGMAS=4 is chosen for the dense-train case Ring style
+// exists for (tests/rippleEmitter.test.ts's own dense-train case): shifting
+// the trough this far behind the crest is what lets a fast train of these
+// keep a large *slope* amplitude in the middle of the pack instead of
+// averaging toward flat the way Bump's same train does (a smaller shift
+// interferes with its own neighbours too closely and washes back out toward
+// flat, much like Bump). The cost is a young ring's own transient: for
+// roughly its first ring-width's worth of travel (until its trough has fully
+// "emerged" past r=0), the mirrored crest and mirrored trough terms interact
+// at comparable strength and the ring's apparent height/slope swings well
+// off its long-run value — even briefly reading near-zero around a third of
+// the way through that window — before settling to match Bump's own
+// full-strength peak from then on. This is Bump's own "the mirrored term
+// adds a little near a young ring" allowance (buildProfile's own single-
+// entry test), just larger, because Wave's own two length scales (the ring's
+// width and the trough's shift) both compete with r=0 instead of one. In a
+// dense train the effect is inaudible/invisible — many overlapping young
+// rings at different phases average it away, which is the whole point of
+// this style — but a single isolated hit will show it plainly; that's a real
+// tradeoff for the user's own live comparison to weigh against Bump's clean
+// (but flat-under-density) alternative, not a bug to hide.
+const WAVE_TROUGH_SHIFT_SIGMAS = 4;
+// The far-field (mirror-free) shape's own peak crest/slope, in the same
+// sigma-normalized units buildProfile's Bump branch already uses (u = d /
+// sigma): C(u) = e^(-u²/2) - e^(-(u+k)²/2) for the crest, S(u) = u·e^(-u²/2)
+// - (u+k)·e^(-(u+k)²/2) for the (pre-normalization) slope shape, k =
+// WAVE_TROUGH_SHIFT_SIGMAS — found by a numeric peak search over each
+// formula (not closed-form; re-run the search if WAVE_TROUGH_SHIFT_SIGMAS
+// ever changes). buildProfile divides by these so a lone full-strength
+// ring's own peak crest/slope land at exactly 1, matching Bump's — the same
+// role slopeNorm plays there, just needing its own peak constant since this
+// shape isn't a plain gaussian.
+const WAVE_CREST_PEAK = 0.9996654331533247;
+const WAVE_SLOPE_PEAK = 0.6439621668208355;
+
+// Merge's own window: two emissions within this many seconds of each other
+// join into one ring instead of becoming two. Sized as the time a ring takes
+// to travel its own width (2·sigma, the span within one standard deviation
+// either side of its peak) at the current Wave speed/Ring width — a fast
+// driver (rings closer together than this) reads as fewer, heavier rings; a
+// slow one (rings further apart) is untouched, same as Bump. Recomputed from
+// whichever RippleProfileParams tick() last saw (see createRippleEmitter's
+// own `lastParams`), since Wave speed/Ring width can move at runtime.
+const MERGE_AMP_CAP = 2.5;
+
+function ringWidthUnits(widthGaussianW: number): number {
+  return 2 / Math.sqrt(2 * widthGaussianW);
+}
+
+function mergeWindowSec(params: RippleProfileParams | null): number {
+  if (!params || params.speedUnitsPerSec <= 0) return 0;
+  return ringWidthUnits(params.widthGaussianW) / params.speedUnitsPerSec;
+}
+
 // ---- Ring envelope ------------------------------------------------------
 
 // A short attack from 0 so a beat reads as a strike on the water, not a cut
@@ -392,23 +508,34 @@ export interface RippleEmitter {
   /** Launch amplitude of each in-flight entry (index < count) — the ring's
    *  strength at rippleEnvelope(0, ...), i.e. before its own attack/decay. */
   readonly amp: Float32Array;
-  /** Launches a new ring of this amplitude at age 0 — or, if this frame
-   *  already launched one (the newest entry is still exactly age 0), adds
-   *  to it instead of spending a second slot, so a drop's own extra kick and
-   *  an ordinary beat landing on the same tick become one ring, not two
-   *  coincident ones (the old pool's own reasoning for merging coincident
-   *  triggers). Amounts below EMIT_MIN_AMP are ignored. If the buffer is
-   *  full, the oldest entry is dropped to make room — in practice this
-   *  should be unreachable: an entry ages out (see tick) long before
-   *  `maxEntries` real hits could stack up. */
-  emit(amp: number): void;
+  /** Launches a new ring of this amplitude at age 0 — or, if the newest
+   *  entry in flight is still within `style`'s own merge window, adds to it
+   *  instead of spending a second slot. For Bump/Merge that window is
+   *  exactly "this frame already launched one" (the newest entry is still
+   *  age 0) — a drop's own extra kick and an ordinary beat landing on the
+   *  same tick become one ring, not two coincident ones (the old pool's own
+   *  reasoning for merging coincident triggers). Merge widens that window to
+   *  mergeWindowSec's own "about one ring-width's travel time" (see that
+   *  function's doc) and caps the merged amplitude at MERGE_AMP_CAP — the
+   *  display's own soft ceiling (RIPPLE_CEIL_KNEE/MAX in caustics.ts) handles
+   *  whatever's left past that. `style` defaults to "bump" (today's only
+   *  shape) so every existing caller/test is unaffected. Amounts below
+   *  EMIT_MIN_AMP are ignored. If the buffer is full, the oldest entry is
+   *  dropped to make room — in practice this should be unreachable: an entry
+   *  ages out (see tick) long before `maxEntries` real hits could stack up. */
+  emit(amp: number, style?: RingStyle): void;
   /** Ages every entry by `dtSec` and drops any that can no longer read as
    *  visible: its own envelope*amp has faded below ENTRY_FADE_FLOOR, or its
    *  ring has already travelled past where buildProfile would ever sample it
    *  (PROFILE_MAX_RADIUS plus its own gaussian tail, 3 standard deviations
-   *  of `params.widthGaussianW`). Call once per frame, before emit() for that
-   *  frame, so a freshly emitted ring starts this frame at age 0 rather than
-   *  ageing before its first sample. */
+   *  of `params.widthGaussianW`) — the same test is valid for every Ring
+   *  style, Wave included, since its trough only ever trails the crest
+   *  (never leads it), so once the crest has exited, the trough has too.
+   *  Call once per frame, before emit() for that frame, so a freshly emitted
+   *  ring starts this frame at age 0 rather than ageing before its first
+   *  sample; also what lets emit()'s own Merge window read `params` back
+   *  (see createRippleEmitter's own `lastParams`) without a caller having to
+   *  pass it to both calls by hand. */
   tick(dtSec: number, params: RippleProfileParams): void;
 }
 
@@ -416,6 +543,15 @@ export function createRippleEmitter(maxEntries = DEFAULT_MAX_ENTRIES): RippleEmi
   const ageSec = new Float32Array(maxEntries);
   const amp = new Float32Array(maxEntries);
   let count = 0;
+  // The params tick() last saw — Merge's own window is sized off the
+  // *current* Wave speed/Ring width (mergeWindowSec), and tick() always runs
+  // once per frame before that frame's own emit() calls (this interface's
+  // own tick() doc), so caching the last-seen params here is what lets
+  // emit() read them without a second argument every caller would otherwise
+  // have to thread through. Never read for Bump/Merge's own "same frame"
+  // check below, since that one doesn't depend on params at all — only
+  // Merge's own wider window does.
+  let lastParams: RippleProfileParams | null = null;
 
   return {
     get count() {
@@ -424,10 +560,18 @@ export function createRippleEmitter(maxEntries = DEFAULT_MAX_ENTRIES): RippleEmi
     ageSec,
     amp,
 
-    emit(amount) {
+    emit(amount, style = "bump") {
       if (amount < EMIT_MIN_AMP) return;
-      if (count > 0 && ageSec[count - 1] === 0) {
-        amp[count - 1] += amount;
+      // Bump/Wave: exactly "this frame already launched one" (age can never
+      // be negative, so `<= 0` means `=== 0`). Merge: widens the window to
+      // mergeWindowSec's own travel-time estimate — "younger than" in this
+      // file's header's own wording, but `<=` (not `<`) is what keeps the
+      // Bump/Wave case above exactly its old behaviour at window 0, and the
+      // boundary itself is a measure-zero case for a continuous age.
+      const mergeWindow = style === "merge" ? mergeWindowSec(lastParams) : 0;
+      if (count > 0 && ageSec[count - 1]! <= mergeWindow) {
+        const merged = amp[count - 1]! + amount;
+        amp[count - 1] = style === "merge" ? Math.min(MERGE_AMP_CAP, merged) : merged;
         return;
       }
       if (count >= maxEntries) {
@@ -443,6 +587,7 @@ export function createRippleEmitter(maxEntries = DEFAULT_MAX_ENTRIES): RippleEmi
     },
 
     tick(dtSec, params) {
+      lastParams = params;
       const sigma = 1 / Math.sqrt(2 * params.widthGaussianW);
       const exitRadius = PROFILE_MAX_RADIUS + 3 * sigma;
       let w = 0;
@@ -491,21 +636,65 @@ export const PROFILE_MAX_RADIUS = 4.2;
  *  entry only touches the samples within its own ±3σ reach (both the outward
  *  crest and, while the ring is still young, the inward mirror near r=0), so
  *  cost stays close to linear in the number of visible rings rather than
- *  PROFILE_SAMPLES * entry count. */
+ *  PROFILE_SAMPLES * entry count. `style` picks the per-ring shape (the
+ *  "Ring style" section above) — defaults to "bump", today's only shape, so
+ *  every existing caller/test is unaffected; "merge" reads the same shape as
+ *  "bump" here (Merge only changes how rings are combined in the emitter,
+ *  never the shape one reads as once it's in flight). */
 export function buildProfile(
   emitter: RippleEmitter,
   params: RippleProfileParams,
   crestOut: Float32Array,
   slopeOut: Float32Array,
+  style: RingStyle = "bump",
 ): void {
   crestOut.fill(0);
   slopeOut.fill(0);
   const { decayPerSec, speedUnitsPerSec, widthGaussianW } = params;
   const sigma = 1 / Math.sqrt(2 * widthGaussianW);
-  const slopeNorm = Math.sqrt(2 * widthGaussianW) * Math.exp(0.5);
   const dr = PROFILE_MAX_RADIUS / (PROFILE_SAMPLES - 1);
   const { ageSec, amp, count } = emitter;
 
+  if (style === "wave") {
+    // See WAVE_TROUGH_SHIFT_SIGMAS/WAVE_CREST_PEAK/WAVE_SLOPE_PEAK's own
+    // comments above for the shape and the two normalizing constants.
+    const shift = WAVE_TROUGH_SHIFT_SIGMAS * sigma;
+    const waveCrestNorm = 1 / WAVE_CREST_PEAK;
+    const waveSlopeNorm = Math.sqrt(2 * widthGaussianW) / WAVE_SLOPE_PEAK;
+    // The trough gaussian's own reach can land further from r0 than the
+    // crest's own ±3σ (its centre, r0 - shift, trails the crest by `shift`)
+    // — widened here so a young ring's trough mirror (which can land well
+    // past r0 itself while the ring is still close to the origin) is never
+    // clipped out of the sampled window.
+    const reach = shift + 3 * sigma;
+    for (let e = 0; e < count; e++) {
+      const age = ageSec[e]!;
+      const s = amp[e]! * rippleEnvelope(age, decayPerSec);
+      if (s < ENTRY_FADE_FLOOR) continue;
+      const r0 = age * speedUnitsPerSec;
+      const r2 = r0 - shift; // the trough's own current radius — may be negative for a young ring; its own mirror term (dInT below) handles that the same way dIn handles r0 < 0 never happening but r2 < 0 routinely does.
+      const loR = Math.max(0, r0 - reach);
+      const hiR = r0 + reach;
+      const loIdx = Math.max(0, Math.floor(loR / dr));
+      const hiIdx = Math.min(PROFILE_SAMPLES - 1, Math.ceil(hiR / dr));
+      for (let i = loIdx; i <= hiIdx; i++) {
+        const r = i * dr;
+        const dOut = r - r0;
+        const dIn = r + r0;
+        const dOutT = r - r2;
+        const dInT = r + r2;
+        const gOut = Math.exp(-dOut * dOut * widthGaussianW);
+        const gIn = Math.exp(-dIn * dIn * widthGaussianW);
+        const gOutT = Math.exp(-dOutT * dOutT * widthGaussianW);
+        const gInT = Math.exp(-dInT * dInT * widthGaussianW);
+        crestOut[i]! += s * (gOut + gIn - (gOutT + gInT)) * waveCrestNorm;
+        slopeOut[i]! += s * (dOut * gOut + dIn * gIn - (dOutT * gOutT + dInT * gInT)) * waveSlopeNorm;
+      }
+    }
+    return;
+  }
+
+  const slopeNorm = Math.sqrt(2 * widthGaussianW) * Math.exp(0.5);
   for (let e = 0; e < count; e++) {
     const age = ageSec[e]!;
     const s = amp[e]! * rippleEnvelope(age, decayPerSec);

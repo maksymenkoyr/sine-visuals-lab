@@ -10,9 +10,11 @@ import {
   rippleEnvelope,
   rippleSpeedFor,
   rippleWidthFor,
+  ringStyleFor,
   salienceMarks,
   ringThresholdBar,
   RING_THRESHOLD_DEFAULT,
+  type RingStyle,
   type RippleProfileParams,
 } from "../src/render/scenes/rippleEmitter.ts";
 
@@ -496,6 +498,184 @@ describe("settings mappings reproduce the old ring pool's fixed constants near t
       prevSpeed = speed;
       prevDecay = decay;
       prevWidth = width;
+    }
+  });
+});
+
+describe("ringStyleFor", () => {
+  it("maps 0/1/2 to bump/wave/merge, and clamps/rounds anything else", () => {
+    expect(ringStyleFor(0)).toBe("bump");
+    expect(ringStyleFor(1)).toBe("wave");
+    expect(ringStyleFor(2)).toBe("merge");
+    expect(ringStyleFor(0.4)).toBe("bump"); // rounds down
+    expect(ringStyleFor(1.6)).toBe("merge"); // rounds up
+    expect(ringStyleFor(-5)).toBe("bump"); // clamps low
+    expect(ringStyleFor(50)).toBe("merge"); // clamps high
+  });
+});
+
+function peakAbs(arr: Float32Array): number {
+  let m = 0;
+  for (let i = 0; i < arr.length; i++) m = Math.max(m, Math.abs(arr[i]!));
+  return m;
+}
+
+describe("Ring style: Wave (a crest and a trough, net zero height)", () => {
+  it("Bump's output is unchanged when style is passed explicitly (bit-identical to the default)", () => {
+    const withStyle = createRippleEmitter();
+    const withoutStyle = createRippleEmitter();
+    withStyle.emit(1, "bump");
+    withoutStyle.emit(1);
+    withStyle.tick(1.2, TYPICAL_PARAMS);
+    withoutStyle.tick(1.2, TYPICAL_PARAMS);
+    const c1 = new Float32Array(PROFILE_SAMPLES);
+    const s1 = new Float32Array(PROFILE_SAMPLES);
+    const c2 = new Float32Array(PROFILE_SAMPLES);
+    const s2 = new Float32Array(PROFILE_SAMPLES);
+    buildProfile(withStyle, TYPICAL_PARAMS, c1, s1, "bump");
+    buildProfile(withoutStyle, TYPICAL_PARAMS, c2, s2);
+    expect(c1).toEqual(c2);
+    expect(s1).toEqual(s2);
+  });
+
+  it("a lone mature ring's profile integrates to ~0 over r (plain dr weighting — see this test's own comment for why not r·dr)", () => {
+    const emitter = createRippleEmitter();
+    emitter.emit(1, "wave");
+    emitter.tick(2.0, TYPICAL_PARAMS); // mature: well past the young-ring transient (WAVE_TROUGH_SHIFT_SIGMAS' own comment in rippleEmitter.ts)
+    const crest = new Float32Array(PROFILE_SAMPLES);
+    const slope = new Float32Array(PROFILE_SAMPLES);
+    buildProfile(emitter, TYPICAL_PARAMS, crest, slope, "wave");
+    const dr = PROFILE_MAX_RADIUS / (PROFILE_SAMPLES - 1);
+    let integral = 0;
+    for (let i = 0; i < PROFILE_SAMPLES; i++) integral += crest[i]! * dr;
+    // Plain dr weighting: the crest-minus-shifted-trough construction is an
+    // exact zero-mean pair over d=r-R for *any* shift (a gaussian's own
+    // integral doesn't depend on where it's centred — WAVE_TROUGH_SHIFT_SIGMAS'
+    // own comment), so this comes out ~0 up to truncation/discretization.
+    // The r·dr-weighted integral is deliberately NOT checked here — it
+    // settles to a positive constant instead, since weighting by r gives the
+    // (larger-r) crest more say than the (smaller-r) trough it's paired
+    // against; dr alone is the honest "net zero height" measure for a
+    // radially-symmetric height field like this one.
+    expect(Math.abs(integral)).toBeLessThan(0.02);
+  });
+
+  it("a lone mature ring's peak slope and peak crest match Bump's within 10%", () => {
+    const ageSec = 2.0;
+    const bump = createRippleEmitter();
+    bump.emit(1, "bump");
+    bump.tick(ageSec, TYPICAL_PARAMS);
+    const wave = createRippleEmitter();
+    wave.emit(1, "wave");
+    wave.tick(ageSec, TYPICAL_PARAMS);
+
+    const bCrest = new Float32Array(PROFILE_SAMPLES);
+    const bSlope = new Float32Array(PROFILE_SAMPLES);
+    const wCrest = new Float32Array(PROFILE_SAMPLES);
+    const wSlope = new Float32Array(PROFILE_SAMPLES);
+    buildProfile(bump, TYPICAL_PARAMS, bCrest, bSlope, "bump");
+    buildProfile(wave, TYPICAL_PARAMS, wCrest, wSlope, "wave");
+
+    const bumpSlopePeak = peakAbs(bSlope);
+    const waveSlopePeak = peakAbs(wSlope);
+    expect(Math.abs(waveSlopePeak - bumpSlopePeak)).toBeLessThan(bumpSlopePeak * 0.1);
+
+    const bumpCrestPeak = peakAbs(bCrest);
+    const waveCrestPeak = peakAbs(wCrest);
+    expect(Math.abs(waveCrestPeak - bumpCrestPeak)).toBeLessThan(bumpCrestPeak * 0.1);
+  });
+
+  it("keeps the slope exactly zero at r=0, same guarantee as Bump (both mirrored gaussians cancel their own slope there)", () => {
+    const cases = [0, 0.05, 0.5, 1.5, 3, 10];
+    for (const age of cases) {
+      const emitter = createRippleEmitter();
+      emitter.emit(1, "wave");
+      emitter.tick(age, TYPICAL_PARAMS);
+      const crest = new Float32Array(PROFILE_SAMPLES);
+      const slope = new Float32Array(PROFILE_SAMPLES);
+      buildProfile(emitter, TYPICAL_PARAMS, crest, slope, "wave");
+      expect(Math.abs(slope[0]!)).toBeLessThan(1e-5);
+    }
+  });
+
+  it("a dense train (emit 1.0 every ~0.27s — this file's own bug-report rate, at default speed/width) keeps a large mid-radius slope amplitude, unlike Bump's near-flat sum there", () => {
+    const period = 1 / 3.7; // ~0.27s
+    const dt = 1 / 60;
+    const totalSec = 8; // several seconds of steady emission — past both styles' own settle time
+    function trainSlope(style: RingStyle): Float32Array {
+      const emitter = createRippleEmitter();
+      let nextEmit = 0;
+      for (let t = 0; t < totalSec; t += dt) {
+        emitter.tick(dt, TYPICAL_PARAMS);
+        if (t >= nextEmit) {
+          emitter.emit(1, style);
+          nextEmit += period;
+        }
+      }
+      const crest = new Float32Array(PROFILE_SAMPLES);
+      const slope = new Float32Array(PROFILE_SAMPLES);
+      buildProfile(emitter, TYPICAL_PARAMS, crest, slope, style);
+      return slope;
+    }
+    const dr = PROFILE_MAX_RADIUS / (PROFILE_SAMPLES - 1);
+    function maxAbsInWindow(arr: Float32Array, loR: number, hiR: number): number {
+      let m = 0;
+      for (let i = 0; i < arr.length; i++) {
+        const r = i * dr;
+        if (r >= loR && r <= hiR) m = Math.max(m, Math.abs(arr[i]!));
+      }
+      return m;
+    }
+    const mb = maxAbsInWindow(trainSlope("bump"), 1, 2.5);
+    const mw = maxAbsInWindow(trainSlope("wave"), 1, 2.5);
+    expect(mw).toBeGreaterThanOrEqual(mb * 3);
+  });
+});
+
+describe("Ring style: Merge (close rings combine into one stronger ring)", () => {
+  /** Emits 1.0 every `period` seconds for `totalSec`, ticking every `dt` —
+   *  the same "continuous emission at a fixed rate" idiom the dense-train
+   *  Wave test above uses, reused here for Merge's own emitter-level effect. */
+  function simulate(style: RingStyle, period: number, totalSec = 10, dt = 1 / 60) {
+    const emitter = createRippleEmitter();
+    let nextEmit = 0;
+    for (let t = 0; t < totalSec; t += dt) {
+      emitter.tick(dt, TYPICAL_PARAMS);
+      if (t >= nextEmit) {
+        emitter.emit(1, style);
+        nextEmit += period;
+      }
+    }
+    return emitter;
+  }
+
+  function avgAmp(e: ReturnType<typeof createRippleEmitter>): number {
+    let sum = 0;
+    for (let i = 0; i < e.count; i++) sum += e.amp[i]!;
+    return sum / e.count;
+  }
+
+  it("at 3.7 emissions/s, fewer ring entries are in flight than Bump, each carrying a larger amplitude", () => {
+    const period = 1 / 3.7;
+    const bump = simulate("bump", period);
+    const merge = simulate("merge", period);
+    expect(merge.count).toBeLessThan(bump.count);
+    expect(avgAmp(merge)).toBeGreaterThan(avgAmp(bump));
+  });
+
+  it("caps a merged amplitude at MERGE_AMP_CAP (2.5) rather than letting it grow without bound", () => {
+    const merge = simulate("merge", 1 / 3.7);
+    for (let i = 0; i < merge.count; i++) expect(merge.amp[i]!).toBeLessThanOrEqual(2.5 + 1e-9);
+  });
+
+  it("at 1 emission/s (slower than the merge window), Merge is identical to Bump — nothing close enough together to combine", () => {
+    const period = 1; // > mergeWindowSec at TYPICAL_PARAMS (~0.6s), so nothing ever merges
+    const bump = simulate("bump", period);
+    const merge = simulate("merge", period);
+    expect(merge.count).toBe(bump.count);
+    for (let i = 0; i < bump.count; i++) {
+      expect(merge.amp[i]).toBeCloseTo(bump.amp[i]!, 6);
+      expect(merge.ageSec[i]).toBeCloseTo(bump.ageSec[i]!, 6);
     }
   });
 });

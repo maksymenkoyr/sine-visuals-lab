@@ -362,6 +362,30 @@ reference-measurement workflow used by later scenes.
   Descriptions corrected: Fog is hazier/softer ridges as it rises, and
   Sparkle grain is coarser glints as it rises. The old text said the
   reverse.
+- 2026-09-27 — Ring style added (Bump/Wave/Merge, `ringStyle`): a fast driver
+  landed rings closer together than a ring's own width, so their
+  (always-positive) Bump crests piled into a rising, nearly flat plateau —
+  the *slope* that actually refracts the filaments cancelled out in the
+  interior of that pile-up, so a busy passage read as "the centre brightens"
+  rather than "rings are travelling outward". Wave answers this at the shape
+  level: each ring is now a crest plus a trailing trough (a second, identically-
+  shaped gaussian subtracted at a fixed offset, both halves mirrored through
+  r=0 the same way Bump's own crest is) so the ring is net-zero height and a
+  dense train can't accumulate a rising plateau — it keeps reading as
+  alternating rings instead. Merge answers it at the emission level instead,
+  with no shape change: emissions landing within about one ring-width's own
+  travel time fold into a single, capped-amplitude ring, so a fast driver
+  reads as fewer, heavier rings rather than more, lighter ones. Both are
+  genuine, different fixes for the same complaint (rippleEmitter.ts's own
+  `RingStyle` section has the exact maths and the tradeoff each one costs —
+  Wave's own young-ring transient in particular). Bump is unchanged and stays
+  the default; the three are meant to be compared live, not immediately
+  ranked.
+- 2026-09-27 — Beat wave (`anim.beatWave`, a drive source everywhere else in
+  the panel too) gained an optional every-N-beats divider
+  (`DriveSource.every`: 1/2/4/8/16, drives.ts's own doc) so its swing can take
+  a whole bar (or two) instead of always one beat; absent/1 is today's plain
+  reading, bit-identical.
 
 ## Tuning notes
 
@@ -436,6 +460,15 @@ reference-measurement workflow used by later scenes.
   above; there has been no measured real-music pass. The ring emitter's own
   constants (see Tuning notes) are likewise screenshot-tuned against synthetic
   audio only, not a measured real-music pass.
+- Ring style's Wave option has a real cost for an isolated hit: while a ring
+  is younger than roughly its own trough-shift distance (`WAVE_TROUGH_SHIFT_SIGMAS`
+  in `rippleEmitter.ts`), its apparent strength swings well off its settled
+  value — even reading near-zero for an instant — before matching Bump's own
+  peak from then on (that file's own comment has the numbers). Invisible in
+  the dense trains Wave exists for; plainly visible on a single, well-spaced
+  beat. Still open: whether that reads as an acceptable "developing ripple"
+  look or needs a smaller shift (at the cost of the dense-train case) once the
+  user has compared the three styles live.
 
 ## Materials
 

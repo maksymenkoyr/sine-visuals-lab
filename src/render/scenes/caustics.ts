@@ -9,6 +9,7 @@ import {
   PROFILE_MAX_RADIUS,
   PROFILE_SAMPLES,
   rippleDecayFor,
+  ringStyleFor,
   rippleSpeedFor,
   rippleWidthFor,
   salienceMarks,
@@ -52,7 +53,12 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // denser rings rather than a stack of identical ones. Wave speed/Wave fade/
 // Ring width (waveSpeed/waveFade/ringWidth) tune the emitted rings
 // themselves — how fast they travel, how fast they fade, how wide each one
-// is; the emission and profile-building logic live in the `extraUniforms`
+// is; Ring style (ringStyle) instead picks what a ring *is* — Bump's own
+// gaussian crest, Wave's crest-plus-trailing-trough (net zero height, so a
+// dense train stays visible as alternating rings instead of piling into a
+// flat plateau), or Merge (folds emissions that land close together into
+// one stronger ring instead of changing the shape at all) — see
+// rippleEmitter.ts's own `RingStyle` section; the emission and profile-building logic live in the `extraUniforms`
 // closure below. uFlash is a brightness punch,
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
 // driftRatePerSec below, not a shader uniform driving the rate directly —
@@ -227,6 +233,23 @@ const SETTINGS: SceneSetting[] = [
     // deliberately not a drive). Read only in rippleEmitter.ts's
     // rippleWidthFor, never uploaded to FRAG directly — only through the
     // crest/slope profile it shapes.
+  },
+  {
+    key: "ringStyle",
+    label: "Ring style",
+    description:
+      "Bump: soft rings. Wave: each ring has a crest and a trough, like real ripples — stays visible when rings come fast. Merge: rings that come close together join into one stronger ring.",
+    group: "Motion",
+    min: 0,
+    max: 2,
+    step: 1,
+    default: 0,
+    type: "enum",
+    options: ["Bump", "Wave", "Merge"],
+    // A shape/combining-rule pick, not an amount or a reactive coupling —
+    // same bucket as Ring width/Wave speed/Wave fade around it (no `auto`,
+    // no `drive`); ringStyleFor (rippleEmitter.ts) maps this setting's own
+    // 0/1/2 to the RingStyle emit()/buildProfile actually take.
   },
   {
     key: "waveSpeed",
@@ -1151,7 +1174,12 @@ void main() {
   // gently pulled toward RIPPLE_CEIL_MAX instead of tearing the pattern.
   float ringCrest = softCeil(ringCrestRaw, ${RIPPLE_CEIL_KNEE.toFixed(2)}, ${RIPPLE_CEIL_MAX.toFixed(2)});
   float ringSlope = softCeil(ringSlopeRaw, ${RIPPLE_CEIL_KNEE.toFixed(2)}, ${RIPPLE_CEIL_MAX.toFixed(2)});
-  float ring = uRipple * ringCrest;
+  // max(., 0.0): Bump/Merge's crest never goes negative (a bare sum of two
+  // positive gaussians), so this is a no-op for them; Wave's own crest can
+  // (its trough dips below the resting level), and a trough shouldn't darken
+  // the picture below its own resting look — only a crest brightens it. The
+  // refraction term below reads ringSlope directly, signed, unaffected.
+  float ring = uRipple * max(ringCrest, 0.0);
   // Scaled by densScale here, once — every later octave builds on q by
   // accumulating onto it (see the loop below), so the whole pattern inherits
   // the frequency change from this one multiply rather than re-scaling p at
@@ -1469,6 +1497,7 @@ float softCeil(float x, float knee, float ceil) {
           speedUnitsPerSec: rippleSpeedFor(getSetting("waveSpeed")),
           widthGaussianW: rippleWidthFor(getSetting("ringWidth")),
         };
+        const ringStyle = ringStyleFor(getSetting("ringStyle"));
         emitter.tick(anim.dtSec, rippleParams);
 
         // The Scene default this setting's drive picker reproduces — "bass
@@ -1486,7 +1515,7 @@ float softCeil(float x, float knee, float ceil) {
         // undefined only means there's no engine at all (PASSTHROUGH_DRIVES).
         const rippleThreshold = drives.threshold("ripple");
         const emitted = advanceEmission(emission, anim.dtSec, rawSignal, rippleThreshold === undefined ? RING_THRESHOLD_DEFAULT : rippleThreshold);
-        emitter.emit(emitted);
+        emitter.emit(emitted, ringStyle);
         // The panel draws these on Beat ripple's own "What it receives"
         // graph (settingMarks.ts): the level a bump has to reach to send a
         // ring, and each ring actually sent. Only the one line — a second
@@ -1504,9 +1533,9 @@ float softCeil(float x, float knee, float ceil) {
         // pulse, but the guard keeps this robust if that ever changes.
         const drop = anim.dropOnset && !prevDropOnset;
         prevDropOnset = anim.dropOnset;
-        if (drop) emitter.emit(RIPPLE_DROP_AMP);
+        if (drop) emitter.emit(RIPPLE_DROP_AMP, ringStyle);
 
-        buildProfile(emitter, rippleParams, crestBuf, slopeBuf);
+        buildProfile(emitter, rippleParams, crestBuf, slopeBuf, ringStyle);
 
         return {
           uDriftFlow: driftFlows(driftPhase + lurch.phase + kickJolt, causticDensityScale(getSetting("causticDensity")), flowBuf),

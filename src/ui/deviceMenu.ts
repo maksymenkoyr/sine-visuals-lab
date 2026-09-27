@@ -429,6 +429,9 @@ export interface DeviceMenuDeps {
   onTogglePatchSource: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice) => void;
   onSetSourceWeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, weight: number) => void;
   onSetSourceHeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, height: HitHeight) => void;
+  /** Beat wave's own every-N-beats divider (buildEverySeg) — only ever shown
+   *  on a plain Beat wave source line. See drives.ts's setSourceEvery. */
+  onSetSourceEvery: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, every: number) => void;
   onSetSourceGrid: (sceneId: string, spec: SceneSetting, grid: BeatGridIndex) => void;
   onSetPatchMix: (sceneId: string, spec: SceneSetting, mix: DriveMix) => void;
   /** The Only when role toggle (buildRoleToggle) — marks `sources[index]`
@@ -2163,6 +2166,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
   ];
 
+  // Beat wave's own every-N-beats divider (DriveSource.every) — only shown
+  // on a plain Beat wave source line (buildSourceLine below); every other
+  // source ignores it outright (drives.ts's own doc on that field).
+  const EVERY_OPTIONS: readonly number[] = [1, 2, 4, 8, 16];
+  const EVERY_HINT = "How many beats one swing takes: 1 = every beat, 4 = once a bar.";
+
   const ROLE_OPTIONS: { role: "plays" | "when"; label: string; hint: string }[] = [
     { role: "plays", label: "Plays", hint: "This source makes the setting move." },
     {
@@ -2230,6 +2239,43 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       seg.appendChild(btn);
     }
     return seg;
+  }
+
+  /** Beat wave's own every-N-beats divider — a visible "Every" label (the
+   *  numbers alone don't say what they count, unlike Height's own
+   *  self-explanatory Graded/Fixed/Loud) plus a buildHeightSeg-styled row of
+   *  chips, one per EVERY_OPTIONS value. Live write + patchChanged, same as
+   *  buildHeightSeg. Only ever built for a plain Beat wave source line
+   *  (buildSourceLine below). */
+  function buildEverySeg(sceneId: string, spec: SceneSetting, src: DriveSource): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `display: flex; align-items: center; gap: 6px;`;
+    setHint(wrap, EVERY_HINT);
+    const label = document.createElement("span");
+    label.style.cssText = driveDrawHintStyle + " white-space: nowrap;";
+    label.textContent = "Every";
+    const seg = document.createElement("div");
+    seg.style.cssText = driveMiniSegStyle;
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Every how many beats");
+    const current = src.every ?? 1;
+    for (const n of EVERY_OPTIONS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = String(n);
+      setHint(btn, EVERY_HINT);
+      btn.setAttribute("aria-description", EVERY_HINT);
+      btn.setAttribute("aria-pressed", String(current === n));
+      btn.style.cssText = current === n ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
+      btn.addEventListener("click", () => {
+        if (current === n) return;
+        deps.onSetSourceEvery(sceneId, spec, src.choice, n);
+        patchChanged(sceneId, spec);
+      });
+      seg.appendChild(btn);
+    }
+    wrap.append(label, seg);
+    return wrap;
   }
 
   /** The Only when role toggle (drives.ts's setSourceRole) — shown on every
@@ -2504,6 +2550,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // edge-kind catalogue entry or a beat grid (drives.ts's own header).
     const isHitKind = isGridSourceChoice(src.choice) || (typeof src.choice === "string" && SIGNALS[src.choice].kind === "edge");
     if (isHitKind) ctrls.appendChild(buildHeightSeg(sceneId, spec, src));
+    // Every-N-beats only ever means anything for a plain Beat wave source
+    // (DriveSource.every's own doc) — never a grid/line/hit-kind source, all
+    // handled by other branches here.
+    if (src.choice === "anim.beatWave") ctrls.appendChild(buildEverySeg(sceneId, spec, src));
     if (isGridSourceChoice(src.choice)) ctrls.appendChild(buildGridChips(sceneId, spec, src));
     if (isLineSourceChoice(src.choice)) {
       lineEditor.strengthRow.style.flex = "1 1 160px";

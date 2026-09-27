@@ -25,8 +25,9 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * **The patch model.** A setting not on `"scene"` is a `DrivePatch`: one or
  * more `DriveSource`s (each a plain `DriveChoice` — a src/render/signals.ts
  * `SignalId`, `{source:"beat", grid}`, or `{source:"line"}` — never
- * `"scene"`, plus a `weight` and, for a hit-kind source, a `height`)
- * combined by the patch's own `mix`:
+ * `"scene"`, plus a `weight`, for a hit-kind source a `height`, and for a
+ * plain `"anim.beatWave"` source an `every` — see DriveSource.every's own
+ * doc) combined by the patch's own `mix`:
  *
  *   - **add** — Σ weight·value. The everyday case: two hits reinforcing
  *     each other, or a hit layered under a sustained level.
@@ -70,8 +71,9 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  *     **Muting.** `DriveSource.off` turns a source off without unplugging
  *     it: `combine()`/`fired()` treat it as absent (contributes nothing,
  *     either as a "plays" term or a condition), but it keeps its own
- *     position, weight, height and role, so switching it back on restores
- *     exactly what it was doing. `sourceValues()` below reports a muted
+ *     position, weight, height, role and (on a Beat wave source) its every-N-
+ *     beats divider, so switching it back on restores exactly what it was
+ *     doing. `sourceValues()` below reports a muted
  *     source's own slot as 0 (still in patch order — the panel's per-source
  *     trace just goes flat rather than disappearing and shifting every
  *     later trace over). If *every* source in a patch is muted, the patch's
@@ -240,6 +242,15 @@ export type DriveChoice = DriveSourceChoice | "scene";
  *  (see this file's header). Absent on a `DriveSource` means Graded. */
 export type HitHeight = "graded" | "fixed" | "loud";
 
+/** Beat wave's own divider (DriveSource.every): how many beats one swing of
+ *  its cosine takes, instead of always one. 1 (or absent) is today's plain
+ *  reading — every value here is one this system already has a name for
+ *  (a beat grid division's own multiples), so a picker offering these five
+ *  reads as "the same kind of choice as a beat grid", not an arbitrary
+ *  slider. */
+export const DRIVE_EVERY_VALUES = [1, 2, 4, 8, 16] as const;
+export type DriveEvery = (typeof DRIVE_EVERY_VALUES)[number];
+
 /** One tap into a patch: `choice` never `"scene"`, `weight` clamped to
  *  0..2 (see `clampWeight` below) wherever a patch is normalized. */
 export interface DriveSource {
@@ -259,6 +270,14 @@ export interface DriveSource {
    *  see this file's header's Muting paragraph. `sourceValues()` still
    *  reports this slot, as 0. */
   off?: true;
+  /** Only meaningful on a plain `"anim.beatWave"` choice (see DRIVE_EVERY_VALUES'
+   *  own doc): swings once every this-many beats instead of once every beat.
+   *  `normalizeDriveSetting` strips this on any other choice, or an
+   *  out-of-list value, rather than carrying a number nothing will ever
+   *  read. Absent (or 1) is today's plain Beat wave reading, bit-identical —
+   *  `sourceRawImpl` (this file's engine) only takes the divider's own
+   *  branch once it's greater than 1. */
+  every?: DriveEvery;
 }
 
 /** How a patch's sources combine into one number — see this file's header
@@ -426,6 +445,17 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
+/** Fractional part in [0, 1) — same convention as beatClock.ts's own
+ *  (unexported) wrap01, reproduced here rather than imported since it's a
+ *  one-line generic helper, not a beat-clock-specific one: `x % 1` alone
+ *  wraps negative inputs to (-1, 0], which every-N-beats' own division
+ *  (below) never actually hits (anim.beats only grows), but a copy that
+ *  doesn't quietly rely on that stays correct if it ever does. */
+function wrap01(x: number): number {
+  const w = x % 1;
+  return w < 0 ? w + 1 : w;
+}
+
 /** Exported for the panel's own gate-open shading (buildOutputGraph) — the
  *  exact function combine()/fired() below use, so a dashed trace's shaded
  *  "open" band never drifts from what the engine actually gates on. */
@@ -490,6 +520,7 @@ export function sameDriveSetting(a: DriveSetting, b: DriveSetting): boolean {
     if ((sa.height ?? "graded") !== (sb.height ?? "graded")) return false;
     if (!!sa.when !== !!sb.when) return false;
     if (!!sa.off !== !!sb.off) return false;
+    if ((sa.every ?? 1) !== (sb.every ?? 1)) return false;
   }
   return true;
 }
@@ -553,6 +584,13 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
     if (src.height !== undefined && src.height !== "graded") source.height = src.height;
     if (src.when === true) source.when = true;
     if (src.off === true) source.off = true;
+    // Only ever meaningful on a plain Beat wave source, and only for a
+    // value the picker actually offers — anything else is dropped rather
+    // than carried as a number nothing will read (DriveSource.every's own
+    // doc, and this file's header on what a drive setting stores).
+    if (src.choice === "anim.beatWave" && src.every !== undefined && src.every !== 1 && (DRIVE_EVERY_VALUES as readonly number[]).includes(src.every)) {
+      source.every = src.every;
+    }
     sources.push(source);
   }
   if (sources.length === 0) return { mix: setting.mix, sources: [] };
@@ -610,6 +648,18 @@ export function setSourceHeight(setting: DriveSetting, choice: DriveSourceChoice
   if (setting === "scene") return setting;
   const key = sourceKey(choice);
   const sources = setting.sources.map((s) => (sourceKey(s.choice) === key ? { ...s, height } : s));
+  return normalizeDriveSetting({ mix: setting.mix, sources });
+}
+
+/** Beat wave's own every-N-beats divider (DriveSource.every — see that
+ *  field's own doc). No-op on `"scene"` or a patch with no source matching
+ *  `choice`; `normalizeDriveSetting` is what actually enforces "only on
+ *  anim.beatWave, only a listed value", so a caller here (or a stray value)
+ *  can't leave a meaningless one behind. */
+export function setSourceEvery(setting: DriveSetting, choice: DriveSourceChoice, every: number): DriveSetting {
+  if (setting === "scene") return setting;
+  const key = sourceKey(choice);
+  const sources = setting.sources.map((s) => (sourceKey(s.choice) === key ? { ...s, every: every as DriveEvery } : s));
   return normalizeDriveSetting({ mix: setting.mix, sources });
 }
 
@@ -914,6 +964,15 @@ export function createDriveEngine(): DriveEngine {
       return wantsHeight ? st.heightEnv : st.gridPulse;
     }
     if (isLineChoice(choice)) return stateFor(sceneId, key, sourceKey(choice)).linePulse;
+    // Beat wave's own every-N-beats divider (DriveSource.every): the plain
+    // catalogue read is exactly this formula at every=1 (anim.beatPhase is
+    // wrap01(anim.beats) — see beatClock.ts's own doc for AnimFrame.beatPhase),
+    // so every>1 is the only case that needs its own read; every=1/absent
+    // falls through to the untouched catalogue.read() below, kept
+    // bit-identical on purpose rather than routed through this formula too.
+    if (choice === "anim.beatWave" && src.every !== undefined && src.every !== 1) {
+      return anim.tempoLock * (0.5 + 0.5 * Math.cos(2 * Math.PI * wrap01(anim.beats / src.every)));
+    }
     const catalogue = SIGNALS[choice];
     if (catalogue.kind === "edge" && wantsHeight) return stateFor(sceneId, key, sourceKey(choice)).heightEnv;
     return catalogue.read(driveFrameScratch, anim);
