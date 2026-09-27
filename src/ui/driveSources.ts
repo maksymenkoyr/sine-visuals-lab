@@ -64,9 +64,9 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.centroid": "where the sound's energy sits, from dark and low to bright and high.",
   "anim.beatWave": "a smooth swing that peaks once every beat, fading out once the metronome stops.",
   "anim.barWave": "the same smooth swing as Beat wave, once every bar instead.",
-  "anim.tempo": "how fast the metronome's own tempo is, from slow to fast.",
+  "anim.tempo": "how fast the BPM card's own tempo is, from slow to fast.",
   "anim.tempoLock": "how confidently the tempo tracker has locked onto a beat.",
-  "anim.metronome": "a steady tick on every beat of the song — evenly spaced, keeps going through breakdowns.",
+  "anim.metronome": "a tick on every beat at the BPM card's own tempo — the same pulse every beat, silent while it reads '--'.",
   "anim.metronomeBar": "the same steady tick as Metronome, once per bar.",
 };
 

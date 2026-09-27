@@ -83,11 +83,13 @@ export type MeterCardId = "scope" | "signal" | "gate" | "lufs" | "rhythm" | "cha
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
- *  Rhythm card's existing BPM-digits/beat-dot block (audioMeters.ts's own
- *  createTempoBlock, predating this catalogue); "wave"/"tempoLevel"/"lock"
- *  are the newer plain meter rows the four `anim.beatWave`/`anim.barWave`/
- *  `anim.tempo`/`anim.tempoLock` signals below point at instead. */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset" | "wave" | "tempoLevel" | "lock" | "metronome";
+ *  Rhythm card's BPM-digits/beat-dot block (audioMeters.ts's own
+ *  createTempoBlock) — now the anchor for both `anim.metronome` and
+ *  `anim.tempo`, whose jacks mount there (the card *is* the metronome's
+ *  number, ticking; see metronome.ts's own header). "wave"/"lock" are the
+ *  plain meter rows `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at
+ *  instead. */
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset" | "wave" | "lock" | "metronome";
 
 export type SignalId =
   | "feature.onset"
@@ -310,11 +312,11 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.tempo",
     label: "Tempo",
     description:
-      "Where the metronome's own tempo (AnimFrame.metronomeBpm) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 while the metronome isn't running.",
+      "Where the BPM card's own number (AnimFrame.metronomeBpm — the metronome ticks at exactly this) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 while the card reads '--'.",
     kind: "level",
     read: (_frame, anim) =>
       anim.metronomeBpm > 0 ? clamp01(Math.log2(anim.metronomeBpm / BPM_MIN) / Math.log2(BPM_MAX / BPM_MIN)) : 0,
-    monitor: { card: "rhythm", row: "tempoLevel" },
+    monitor: { card: "rhythm", row: "tempo" },
   }),
   "anim.tempoLock": signal({
     id: "anim.tempoLock",
@@ -329,11 +331,11 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.metronome",
     label: "Metronome",
     description:
-      "A steady tick evenly spaced at the song's tempo (AnimFrame.metronomeBeat, metronome.ts) — read here as its decaying metronomePulse. Keeps ticking through breakdowns and unsure moments once it's adopted a tempo; silent until it has one.",
+      "A tick on every beat at the BPM card's own tempo (AnimFrame.metronomeBeat, metronome.ts) — read here as its decaying metronomePulse. The same flat pulse every beat; silent while the card reads '--'.",
     kind: "edge",
     read: (_frame, anim) => anim.metronomePulse,
     edge: (anim) => anim.metronomeBeat,
-    monitor: { card: "rhythm", row: "metronome" },
+    monitor: { card: "rhythm", row: "tempo" },
   }),
   "anim.metronomeBar": signal({
     id: "anim.metronomeBar",
