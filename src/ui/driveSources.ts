@@ -36,6 +36,8 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "anim.barWave": "Bar wave",
   "anim.tempo": "Tempo",
   "anim.tempoLock": "Tempo lock",
+  "anim.metronome": "Metronome",
+  "anim.metronomeBar": "Metronome bar",
 };
 
 /** Plain-language descriptions for every source a jack can plug in — the
@@ -60,13 +62,15 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.energy": "overall loudness across every band.",
   "anim.sectionIntensity": "how intense this part of the song is, over the last few seconds.",
   "anim.centroid": "where the sound's energy sits, from dark and low to bright and high.",
-  "anim.beatWave": "a smooth swing that peaks once every beat, fading out without a confident tempo.",
+  "anim.beatWave": "a smooth swing that peaks once every beat, fading out once the metronome stops.",
   "anim.barWave": "the same smooth swing as Beat wave, once every bar instead.",
-  "anim.tempo": "how fast the tracked tempo is, from slow to fast.",
+  "anim.tempo": "how fast the metronome's own tempo is, from slow to fast.",
   "anim.tempoLock": "how confidently the tempo tracker has locked onto a beat.",
+  "anim.metronome": "a steady tick on every beat of the song — evenly spaced, keeps going through breakdowns.",
+  "anim.metronomeBar": "the same steady tick as Metronome, once per bar.",
 };
 
-const GRID_SOURCE_DESCRIPTION = "a steady pulse locked to the tempo.";
+const GRID_SOURCE_DESCRIPTION = "the tracker's beat when it's sure of the tempo; the raw hits while it isn't.";
 const LINE_SOURCE_DESCRIPTION = "your own curve on the spectrum — bars that rise above it drive the setting.";
 
 /** "white" in the plan's own colour list — a near-white rather than pure
@@ -90,6 +94,8 @@ const SIGNAL_SOURCE_COLOR: Record<SignalId, string> = {
   "anim.barWave": DRIVE_WHITE,
   "anim.tempo": DRIVE_WHITE,
   "anim.tempoLock": DRIVE_WHITE,
+  "anim.metronome": DRIVE_WHITE,
+  "anim.metronomeBar": DRIVE_WHITE,
 };
 
 function isGridChoice(choice: DriveSourceChoice): choice is { source: "beat"; grid: number } {
@@ -181,6 +187,17 @@ export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
     label: "Levels",
     choices: ["anim.energy", "anim.low", "anim.mid", "anim.high", "feature.flux", "anim.sectionIntensity", "anim.centroid"],
   },
-  { label: "Tempo", choices: [{ source: "beat", grid: 2 }, "anim.beatWave", "anim.barWave", "anim.tempo", "anim.tempoLock"] },
+  {
+    label: "Tempo",
+    choices: [
+      "anim.metronome",
+      "anim.metronomeBar",
+      { source: "beat", grid: 2 },
+      "anim.beatWave",
+      "anim.barWave",
+      "anim.tempo",
+      "anim.tempoLock",
+    ],
+  },
   { label: "Line", choices: [{ source: "line" }] },
 ];

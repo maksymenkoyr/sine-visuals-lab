@@ -79,7 +79,7 @@ export type MeterCardId = "scope" | "signal" | "gate" | "lufs" | "rhythm" | "cha
  *  createTempoBlock, predating this catalogue); "wave"/"tempoLevel"/"lock"
  *  are the newer plain meter rows the four `anim.beatWave`/`anim.barWave`/
  *  `anim.tempo`/`anim.tempoLock` signals below point at instead. */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset" | "wave" | "tempoLevel" | "lock";
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset" | "wave" | "tempoLevel" | "lock" | "metronome";
 
 export type SignalId =
   | "feature.onset"
@@ -97,7 +97,9 @@ export type SignalId =
   | "anim.beatWave"
   | "anim.barWave"
   | "anim.tempo"
-  | "anim.tempoLock";
+  | "anim.tempoLock"
+  | "anim.metronome"
+  | "anim.metronomeBar";
 
 export interface SignalSpec {
   id: SignalId;
@@ -283,27 +285,27 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.beatWave",
     label: "Beat wave",
     description:
-      "A smooth swing locked to the tempo, once per beat (AnimFrame.tempoLock times a cosine over AnimFrame.beatPhase) — 1 on every tracked beat, 0 halfway between, fading out on its own without a confident tempo rather than needing a separate gate.",
+      "A smooth swing at the metronome's own tempo, once per beat (AnimFrame.metronomeLevel times a cosine over AnimFrame.metronomePhase) — 1 on every metronome beat, 0 halfway between, fading out on its own once the metronome stops (metronome.ts) rather than needing a separate gate.",
     kind: "level",
-    read: (_frame, anim) => anim.tempoLock * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.beatPhase)),
+    read: (_frame, anim) => anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.metronomePhase)),
     monitor: { card: "rhythm", row: "wave" },
   }),
   "anim.barWave": signal({
     id: "anim.barWave",
     label: "Bar wave",
-    description: "The same swing as Beat wave, once per bar instead of once per beat (AnimFrame.barPhase).",
+    description: "The same swing as Beat wave, once per bar instead of once per beat (AnimFrame.metronomeBarPhase).",
     kind: "level",
-    read: (_frame, anim) => anim.tempoLock * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.barPhase)),
+    read: (_frame, anim) => anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.metronomeBarPhase)),
     monitor: { card: "rhythm", row: "wave" },
   }),
   "anim.tempo": signal({
     id: "anim.tempo",
     label: "Tempo",
     description:
-      "Where the tracked tempo (AnimFrame.tempoBpm) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 with no locked tempo.",
+      "Where the metronome's own tempo (AnimFrame.metronomeBpm) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 while the metronome isn't running.",
     kind: "level",
     read: (_frame, anim) =>
-      anim.tempoBpm > 0 ? clamp01(Math.log2(anim.tempoBpm / BPM_MIN) / Math.log2(BPM_MAX / BPM_MIN)) : 0,
+      anim.metronomeBpm > 0 ? clamp01(Math.log2(anim.metronomeBpm / BPM_MIN) / Math.log2(BPM_MAX / BPM_MIN)) : 0,
     monitor: { card: "rhythm", row: "tempoLevel" },
   }),
   "anim.tempoLock": signal({
@@ -314,5 +316,24 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "level",
     read: (_frame, anim) => anim.tempoLock,
     monitor: { card: "rhythm", row: "lock" },
+  }),
+  "anim.metronome": signal({
+    id: "anim.metronome",
+    label: "Metronome",
+    description:
+      "A steady tick evenly spaced at the song's tempo (AnimFrame.metronomeBeat, metronome.ts) — read here as its decaying metronomePulse. Keeps ticking through breakdowns and unsure moments once it's adopted a tempo; silent until it has one.",
+    kind: "edge",
+    read: (_frame, anim) => anim.metronomePulse,
+    edge: (anim) => anim.metronomeBeat,
+    monitor: { card: "rhythm", row: "metronome" },
+  }),
+  "anim.metronomeBar": signal({
+    id: "anim.metronomeBar",
+    label: "Metronome bar",
+    description: "The same steady tick as Metronome, once per bar instead of once per beat.",
+    kind: "edge",
+    read: (_frame, anim) => anim.metronomeBarPulse,
+    edge: (anim) => anim.metronomeBar,
+    monitor: { card: "rhythm", row: "metronome" },
   }),
 };
