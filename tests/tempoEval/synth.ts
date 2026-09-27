@@ -30,6 +30,14 @@ export interface Track {
   mono: Float32Array;
   tempo: TempoSegment[];
   beats: number[];
+  /** Every beat of the track's own tempo grid, drums or not — what a real
+   *  metronome (metronome.ts) is scored against once it's adopted a tempo,
+   *  since it keeps ticking through a stretch with no audible beat (a
+   *  breakdown) rather than falling silent like `beats` (only the beats
+   *  that actually have a drum hit on them) does there. Equal to `beats`
+   *  for every track with no such stretch — only house() below builds a
+   *  separate list. */
+  gridBeats: number[];
 }
 
 // ---- seeded RNG (same small LCG shape tests/features.test.ts already uses) ----
@@ -304,6 +312,10 @@ function house(): Track {
   const buf = allocBuffer(musicEndSec + 5);
   const rand = makeRng(1001);
   const beats: number[] = [];
+  // Every beat of the 124bpm grid, drums or not — what a real metronome is
+  // scored against through the breakdown (bars 8-11), where `beats` itself
+  // goes silent (see Track.gridBeats's own doc).
+  const gridBeats: number[] = [];
 
   for (let s = 0; s < stepsTotal; s++) {
     const t = s * stepSec;
@@ -324,13 +336,14 @@ function house(): Track {
       }
       if (st % 4 === 0) beats.push(t);
     }
+    if (st % 4 === 0) gridBeats.push(t);
   }
 
   const tempo: TempoSegment[] = [
     { from: 0, to: 8 * 16 * stepSec, bpm },
     { from: 12 * 16 * stepSec, to: 20 * 16 * stepSec, bpm },
   ];
-  return { name: "house", mono: finish(buf), tempo, beats };
+  return { name: "house", mono: finish(buf), tempo, beats, gridBeats };
 }
 
 function hiphop(): Track {
@@ -365,7 +378,7 @@ function hiphop(): Track {
   }
 
   const tempo: TempoSegment[] = [{ from: 0, to: musicEndSec, bpm }];
-  return { name: "hiphop", mono: finish(buf), tempo, beats };
+  return { name: "hiphop", mono: finish(buf), tempo, beats, gridBeats: beats };
 }
 
 function dnb(): Track {
@@ -393,7 +406,7 @@ function dnb(): Track {
   }
 
   const tempo: TempoSegment[] = [{ from: 0, to: musicEndSec, bpm }];
-  return { name: "dnb", mono: finish(buf), tempo, beats };
+  return { name: "dnb", mono: finish(buf), tempo, beats, gridBeats: beats };
 }
 
 function rampBpmAt(beat: number): number {
@@ -441,7 +454,7 @@ function ramp(): Track {
     }
   }
 
-  return { name: "ramp", mono: finish(buf), tempo, beats };
+  return { name: "ramp", mono: finish(buf), tempo, beats, gridBeats: beats };
 }
 
 const RANDOM_DURATION_SEC = 30;
@@ -463,7 +476,7 @@ function randomTrack(): Track {
     pad(buf, SR, padStart, CHORDS[(padStart / 3) % CHORDS.length]!, 3, 0.7);
   }
 
-  return { name: "random", mono: finish(buf), tempo: [], beats: [] };
+  return { name: "random", mono: finish(buf), tempo: [], beats: [], gridBeats: [] };
 }
 
 export function buildTracks(): Track[] {
