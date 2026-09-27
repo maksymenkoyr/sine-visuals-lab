@@ -56,6 +56,16 @@ export interface SceneSetting {
    *  group must keep each group's settings contiguous and in
    *  SETTING_GROUPS order (tests/settingGroups.test.ts enforces this). */
   group?: SettingGroup;
+  /** A sub-grouping *inside* a group — a run of *consecutive* settings that
+   *  together control one thing (e.g. Caustics' Drift speed/Speed boost/
+   *  Speed pump). Rendered in the device menu purely as a shared colour —
+   *  no caption, no indent: every row in the family takes the family's own
+   *  accent in place of the Scene card's usual violet (deviceMenu.ts's renderSceneSettings, colours
+   *  from controlsTheme.ts's FAMILY_ACCENTS). Must be a contiguous run and
+   *  must not span a group boundary (tests/settingGroups.test.ts enforces
+   *  both). Ignored on an `advanced` row — an advanced run already has its
+   *  own disclosure, and families don't need to nest inside that too. */
+  family?: string;
   min: number;
   max: number;
   step: number;
@@ -137,6 +147,19 @@ export interface SceneSetting {
      *  against the scene's own code, so a stale list is a wrong pill rather
      *  than a broken build — keep it honest by hand. */
     sceneSources?: readonly SignalId[];
+    /** Declares this setting scene-handled for its own threshold — a gate
+     *  the scene applies itself to whatever this setting receives, shaped
+     *  however its own signal needs (Beat ripple's adaptive "reach to ring"
+     *  line, rippleEmitter.ts, is the original of this). The panel shows the
+     *  On/Off toggle + slider right under this setting's graph
+     *  (deviceMenu.ts), starting on; it's saved with the rest of this
+     *  setting's patch (driveStore.ts's getDriveThresholdState), and the
+     *  scene reads it with drives.threshold(key). 0..1; `default` is what an
+     *  untouched setting uses. Leave this unset and the setting still gets a
+     *  threshold row, starting off — the engine applies a generic adaptive
+     *  gate instead (drives.ts's header's "The threshold" paragraph explains
+     *  why a setting is never gated both ways). */
+    threshold?: { default: number; label: string; hint: string };
   };
   /** This enum is the scene's *variant*: the one setting that decides what
    *  the rest of the settings are even acting on (Kaleidoscope's Style).
@@ -157,6 +180,24 @@ export interface SceneSetting {
    *  directly — at every place a default matters (reset, Looks, the auto
    *  identity at NEUTRAL, the panel's reset arrow). */
   variantDefaults?: Readonly<Record<string, number>>;
+  /** Tags this setting as one instance of a scene-declared item family
+   *  (src/render/sceneItems.ts's header owns the concept) rather than a
+   *  hand-written control: `family` names the item group (e.g. "strain"),
+   *  `index` is which item (0-based), `param` is which per-item control
+   *  this is (e.g. "nutrient"), and `other` is the paired item's index for
+   *  a pairwise family (defineItemPairs's `att<i><j>`, `other` = `j`).
+   *  scene.ts's `Scene.panel` claims every setting whose `item.family`
+   *  matches a section's own `items`, rendering it through a custom widget
+   *  (src/ui/widgets/registry.ts) instead of the device menu's flat
+   *  per-setting loop; src/tuning/bakeDefaults.ts also skips an
+   *  `item`-tagged setting, since its default lives in the scene's own item
+   *  table, not a literal `default:` in source a bake could rewrite. */
+  item?: {
+    family: string;
+    index: number;
+    param: string;
+    other?: number;
+  };
 }
 
 const STORAGE_KEY = "vibe.sceneSettings";

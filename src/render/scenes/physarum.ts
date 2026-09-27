@@ -50,7 +50,7 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 // the low group's trail, G the mid group's, B the high group's, A unused.
 // This is the scene's whole link to the music: a bassline thickens the red
 // network, the hats thicken the blue one, and the picture shows which
-// frequency group owns which branch, with Band braid deciding whether the
+// frequency group owns which branch, with Band merge deciding whether the
 // groups read each other's trail at all or grow in isolation. The map's
 // side comes from agent density, not screen size — trailSide keeps agents
 // per texel roughly constant across the quality presets (see its own
@@ -386,8 +386,8 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "braid",
-    label: "Band braid",
-    description: "0 keeps the band groups' networks separate and braided; 1 merges them into a shared structure",
+    label: "Band merge",
+    description: "Off keeps the band groups' networks separate and braided; on merges them into a shared structure",
     group: "Form",
     min: 0,
     max: 1,
@@ -537,7 +537,7 @@ vec3 speciesMask(float species) {
   return vec3(0.0, 0.0, 1.0);
 }
 
-// Own channel plus uBraid's share of the other two — see Band braid.
+// Own channel plus uBraid's share of the other two — see Band merge.
 float sense(vec3 trailSample, vec3 mask, float braid) {
   float own = dot(trailSample, mask);
   float other = dot(trailSample, vec3(1.0) - mask);

@@ -40,6 +40,16 @@ export const AUTO_SKY = "#59bbfb";
  *  readouts (src/ui/powerCard.ts). */
 export const POWER_TEAL = "#4dd4c0";
 
+/** Colours for a scene setting's `family` (sceneSettings.ts) — each family's
+ *  rows take one in place of SCENE_VIOLET as their own accent — handed out
+ *  in this order as each scene's families first appear (deviceMenu.ts's
+ *  renderSceneSettings), wrapping past the end for a scene with more
+ *  families than colours. Chosen to stay clear of the card accents above
+ *  (SCENE_VIOLET etc.) and of the drive-source colours (driveSources.ts) —
+ *  a family colour and a drive port/cable are two different things on the same
+ *  row and must never be mistaken for each other. */
+export const FAMILY_ACCENTS = ["#8ea2ff", "#f28bd0", "#c9e26b"] as const;
+
 /** Spectrum strip bar tints, one step darker than the card accents they echo. */
 export const STRIP_LOW = "#89e29d";
 export const STRIP_MID = "#c0a2f5";
@@ -125,7 +135,7 @@ const stylesheet = `
  * it), so when one side folds short next to a tall neighbor, the row's own
  * box still covers the gap beside the short side. Left catching clicks,
  * that gap would count as "inside" for deviceMenu.ts's onDocPointerDown
- * (root.contains(target)) and swallow a click meant to close the panel.
+ * (root.contains(target)) and swallow a click meant for the scene.
  * Disabling pointer events on the row itself and re-enabling them on its
  * children (their own boxes correctly hug their real content) lets a click
  * in the gap fall through to whatever's actually behind it. Same reasoning
@@ -175,6 +185,15 @@ const stylesheet = `
 .vc-controls-col {
   width: 314px; flex: none; display: flex; flex-direction: column; gap: 4px;
   max-height: calc(100vh - 74px); overflow-y: auto;
+}
+/* Solo (deviceMenu.ts's setSolo/applySolo): the column takes its full
+ * height and what's left in it sits at the bottom, just above the footer
+ * (wide layout only — stacked, the whole panel is one scroller) —
+ * an auto top margin rather than justify-content: flex-end, which would
+ * make an overflowing pane's top unreachable by scrolling. */
+@media (min-width: ${STACK_BELOW_PX + 1}px) {
+  .vc-root.vc-solo .vc-controls-col { height: calc(100vh - 74px); }
+  .vc-root.vc-solo .vc-controls-col > :not(.vc-solo-hidden):not(.vc-dock) { margin-top: auto; }
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
@@ -285,9 +304,76 @@ const stylesheet = `
 .vc-fold:focus-visible { outline: none; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.7)); }
 
 /* The whole meters column (Bands + the meters strip) hidden by the footer's
- * "Hide meters" button / M (deviceMenu.ts). Outranks the stacked layout's
+ * "Hide left" button / M (deviceMenu.ts). Outranks the stacked layout's
  * display: contents below on specificity, so it holds there too. */
 .vc-root.vc-meters-hidden .vc-spectrum-col { display: none; }
+/* Solo (deviceMenu.ts's applySolo): everything off the paths from the
+ * Scene card and the dock up to the root. !important to beat the inline
+ * and display: contents rules those elements carry in either layout. */
+.vc-solo-hidden { display: none !important; }
+
+/* The footer and the keys list above it, stuck to the bottom of the
+ * controls column so its buttons never scroll out of sight — in the stacked
+ * layout, to the bottom of the screen for as long as the controls last. */
+.vc-dock { position: sticky; bottom: 0; z-index: 2; display: flex; flex-direction: column; }
+
+/* keyHints.ts's hover badge, hold-to-reveal keycaps, and the interactive
+ * keys list below (deviceMenu.ts's keysCard, one row per keyHints.ts's
+ * SHORTCUTS entry).
+ *
+ * A keys-list row's hover/click echo on every live control it names
+ * (deviceMenu.ts's flashOn/clearFlash) — an outline plus one short pulse;
+ * no pointer-events rule needed since this only ever adds a class, never
+ * touches display or position. */
+.vc-key-flash { outline: 1px solid #fff; animation: vc-key-flash-pulse 0.5s ease-out; }
+@keyframes vc-key-flash-pulse {
+  from { box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.35); }
+  to { box-shadow: 0 0 0 5px rgba(255, 255, 255, 0); }
+}
+
+/* Holding Shift (keyHints.ts's hold-to-reveal) shows every tagged
+ * control's own keycap at once — content is the key itself (data-keycap),
+ * so nothing here needs to know what any of them say. .vc-keycap-anchor
+ * opts a normally-static control (a footer button, a row's A/T/↺ chip)
+ * into being its own keycap's positioning context; a control that's
+ * already positioned (index.html's #menuBtn/#fsBtn, both position: fixed)
+ * skips that class — adding position: relative there would fight the
+ * fixed rule via this rule's own higher specificity (two classes beat one),
+ * and fixed already anchors an ::after just fine on its own. The
+ * .vc-block digit badge (deviceMenu.ts's markBlock) carries data-key but
+ * never data-keycap — see keyHints.ts's header — so it never grows one. */
+.vc-keycap-anchor { position: relative; }
+body.vc-keys-reveal [data-keycap]::after {
+  content: attr(data-keycap); position: absolute; top: -7px; right: -7px;
+  min-width: 14px; height: 13px; padding: 0 2px; border-radius: 3px;
+  background: rgba(8, 11, 10, 0.94); border: 1px solid rgba(255, 255, 255, 0.75);
+  color: #fff; font: 600 8.5px/13px ${FONT_MONO}; text-align: center;
+  pointer-events: none; z-index: 41;
+}
+
+/* The keys list itself. Each keyHints.ts SHORTCUTS entry is a full-width
+ * row button (key cap + hint), not a plain two-column definition list, so
+ * it can double as deviceMenu.ts's own click/hover target — the row either
+ * performs its shortcut directly or just flashes every control it names,
+ * depending on whether that's a single action (wireKeysRow). */
+.vc-keys {
+  display: none; flex-direction: column; gap: 1px; padding: 8px 6px;
+  background: rgba(8, 11, 10, 0.72);
+  -webkit-backdrop-filter: blur(20px) saturate(.6) brightness(.5); backdrop-filter: blur(20px) saturate(.6) brightness(.5);
+  border: 1px solid rgba(255, 255, 255, 0.13); border-bottom: none; border-radius: 3px 3px 0 0;
+  font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.75);
+}
+.vc-keys.vc-keys-show { display: flex; }
+.vc-keys-row {
+  display: grid; grid-template-columns: 46px 1fr; gap: 4px 12px; align-items: baseline;
+  width: 100%; background: none; border: none; border-radius: 3px; padding: 4px 6px;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.vc-keys-row:hover, .vc-keys-row:focus-visible { background: rgba(255, 255, 255, 0.09); outline: none; }
+.vc-keys-row:disabled { cursor: default; opacity: 0.55; }
+.vc-keys-key {
+  font: 400 9.5px/1.3 ${FONT_MONO}; letter-spacing: 0.08em; color: #fff; white-space: nowrap;
+}
 
 .vc-scroll { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
 .vc-scroll::-webkit-scrollbar { width: 4px; }
@@ -343,6 +429,17 @@ const stylesheet = `
  * AUTO_HOLDING_HINT) — a second line in the auto system's colour, shown only
  * while auto holds the row, so the description above it stays readable. */
 .vc-hint-auto { color: ${withAlpha(AUTO_SKY, 0.85)}; }
+/* The short line before a colour word in any hint (hintSwatches.ts),
+ * drawn like a meter trace: a thin stroke in the colour (set as its color on
+ * the element) with a soft glow of itself. The word and its line never
+ * wrap apart; the faint ring keeps a black line visible on the dark panel. */
+.vc-swatch-word { white-space: nowrap; }
+.vc-swatch {
+  display: inline-block; width: 1.1em; height: 2px; margin-right: 0.3em;
+  border-radius: 1px; vertical-align: 0.3em; background: currentColor;
+  box-shadow: 0 0 4px currentColor, 0 0 0 0.5px rgba(255, 255, 255, 0.25);
+}
+.vc-swatch-bare .vc-swatch { margin: 0 0.1em; }
 
 /* A row's "reacts to" strip (controlsKit.ts's createSignalStrip) — a sibling
  * of .vc-hint above, not nested inside it, so the two reveal independently:
@@ -421,6 +518,21 @@ const stylesheet = `
 .vc-row:hover .vc-slider::-moz-range-thumb,
 .vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1))); }
 
+/* A linked-item divergent-value tick (deviceMenu.ts's createControlRow,
+ * ControlRowSpec.linkedTicks — itemBoxes.ts's multi-selection, 2026-09-27):
+ * the wrapper sits directly around the slider it belongs to (sized to it
+ * exactly, nothing else in that box), so a tick's own left-offset percentage
+ * (createControlRow's valueToPercent) lands at the same spot on the track a
+ * drag to that value would. Pointer-events: none throughout — a tick is a
+ * readout, never a second handle. */
+.vc-slider-ticks { position: absolute; inset: 0; pointer-events: none; }
+.vc-slider-tick {
+  position: absolute; top: 50%; width: 2px; height: 12px;
+  transform: translate(-50%, -50%); border-radius: 1px;
+  background: var(--c, rgba(255, 255, 255, 0.85));
+  box-shadow: 0 0 3px var(--c, rgba(255, 255, 255, 0.6));
+}
+
 /* A band fader's hit area (bandFaders.ts): an invisible column over the
  * spectrum canvas, which draws the fader itself. touch-action: none is the
  * opposite of the slider's pan-y on purpose — a vertical drag here moves the
@@ -459,14 +571,15 @@ const stylesheet = `
 /* The patch bay (deviceMenu.ts): a drive row's input port and the row's own
  * pinned/preview highlight.
  *
- * The port's position (a 10px ring at the row's own left edge, facing the
- * meters column which docks to the screen's own left edge — see
+ * The port's position (a 10px ring tucked into the row's top-left corner —
+ * the pinned outline's — inset evenly from both edges, on the side facing
+ * the meters column, which docks to the screen's own left edge — see
  * .vc-spectrum-col above) is a plain class rule rather than deviceMenu.ts's
  * own inline cssText, since drivePortStyle() (deviceMenu.ts) only ever
  * writes colour/border/box-shadow inline — the setting's own plugged
  * sources, and the ring that marks it pinned (solid, glowing) vs merely
  * previewed (a bare outline) — never anything this rule already owns.
- * left is small and positive, not hanging past the row into the card's
+ * left is positive, not hanging past the row into the card's
  * own padding: .vc-row's padding/negative-margin pair (below) means a more
  * negative offset here lands outside .vc-card's own overflow: hidden and
  * gets clipped invisible.
@@ -480,17 +593,47 @@ const stylesheet = `
  * background tint, no border — see the row grammar in this file's own
  * header for why a click is what actually expands the patch panel. */
 .vc-drive-port {
-  position: absolute; left: 1px; top: 15px; width: 10px; height: 10px; border-radius: 50%;
+  position: absolute; left: 6px; top: 6px; width: 10px; height: 10px; border-radius: 50%;
   padding: 0; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 .vc-drive-port:hover { transform: scale(1.25); }
 .vc-drive-port:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-/* Room for the port at the row's own left edge, so its label/summary text
- * doesn't sit underneath it (createControlRow's driveRowLeftStyle). */
+/* The port sits tucked into the row's top-left corner (the pinned
+ * outline's), inset evenly from both edges — the label and its summary
+ * start just clear of it. */
 .vc-drive-row-left { padding-left: 14px; }
 .vc-row.vc-drive-pinned {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 8%, transparent);
   box-shadow: 0 0 0 1.5px var(--vc-pin-color, ${SCENE_VIOLET});
+}
+/* Solo's eye (deviceMenu.ts's positionSoloEye): fixed on <body> just
+ * outside the pinned row's left edge, under its port, in the pin's colour —
+ * a carved tile with an eye-shaped hole. Shut while everything shows (two
+ * lids meet at a seam, shaded darker toward the hole's edge so together they
+ * read as one rounded bump), lids drawn back (the pupil down in the dark,
+ * the tile glowing) while this setting is the only thing shown — opening
+ * and closing on click only. Very dim at rest so it doesn't compete with
+ * the row; full strength on hover. Each lid scales toward its own edge of the hole — the
+ * upper up, the lower down — so toggling reads as an eye opening and
+ * blinking shut. */
+.vc-solo-eye {
+  position: fixed; z-index: 31; width: 18px; height: 18px; padding: 0;
+  background: none; border: none; cursor: pointer; color: var(--vc-pin-color, ${SCENE_VIOLET});
+  --open: 0;
+}
+.vc-solo-eye svg { width: 18px; height: 18px; display: block; overflow: visible; }
+.vc-eye-lid-top, .vc-eye-lid-bot {
+  transform: scaleY(calc(1 - var(--open)));
+  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.vc-eye-lid-top { transform-origin: 12px 4.6px; }
+.vc-eye-lid-bot { transform-origin: 12px 19.4px; }
+.vc-solo-eye { opacity: 0.28; transition: opacity 0.18s ease; }
+.vc-solo-eye:hover, .vc-solo-eye:focus-visible { opacity: 1; outline: none; }
+.vc-solo-eye.vc-solo-eye-on { --open: 1; }
+.vc-solo-eye.vc-solo-eye-on svg { filter: drop-shadow(0 0 3px var(--vc-pin-color, ${SCENE_VIOLET})); }
+@media (prefers-reduced-motion: reduce) {
+  .vc-eye-lid-top, .vc-eye-lid-bot { transition: none; }
 }
 .vc-row.vc-drive-preview {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 6%, transparent);
@@ -721,6 +864,138 @@ const stylesheet = `
     to { background-position: 0 0; }
   }
 }
+
+/* ---- src/ui/widgets/itemBoxes.ts + relationWeb.ts/relationRows.ts ----
+ * A scene-declared item widget's own boxes, affinity rows and web — styled
+ * with this file's own tokens/fonts rather than a widget-local stylesheet,
+ * same convention as every other panel piece. Always a two-column grid,
+ * regardless of item count or panel width, so a box stays wide enough for
+ * its code + placeholder swatch even in the narrow (phone) stacked layout —
+ * see itemBoxes.ts's header on why Phase 3's live preview lands in
+ * .vc-item-preview without a layout change. */
+/* The "All" chip + "Editing …" line above the boxes (itemBoxes.ts's
+ * multi-selection, 2026-09-27). */
+.vc-item-selbar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;
+}
+.vc-item-editing {
+  font: 400 10px/1.3 ${FONT_MONO}; color: rgba(255, 255, 255, 0.5); letter-spacing: 0.02em;
+}
+.vc-item-boxes {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px;
+}
+.vc-item-box {
+  display: grid; gap: 6px; padding: 8px; border-radius: 6px; text-align: left; min-width: 0;
+  background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.13); cursor: pointer; font: inherit; color: inherit;
+}
+.vc-item-box:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
+.vc-item-box-sel {
+  border-color: var(--c, ${SCENE_VIOLET});
+  background: color-mix(in srgb, var(--c, ${SCENE_VIOLET}) 14%, transparent);
+}
+.vc-item-box-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.vc-item-led {
+  flex: none; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--c, #fff); box-shadow: 0 0 7px var(--c, #fff);
+}
+.vc-item-code {
+  font: 500 11.5px/1 ${FONT_MONO}; color: #fff; letter-spacing: 0.03em;
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The per-box "in the edit group" checkbox (itemBoxes.ts's Solo paragraph,
+ * 2026-09-27b) — a real <button role="checkbox">, sized to a >=24px touch
+ * target even though its drawn glyph is much smaller, sitting in the box's
+ * own header row (its "corner") after the code label. --c is the box's own
+ * colour custom property, inherited straight from .vc-item-box since the
+ * checkbox is a DOM descendant of it. */
+.vc-item-check {
+  flex: none; width: 24px; height: 24px; padding: 0; margin: -3px -3px -3px 0;
+  border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.04);
+  cursor: pointer; display: grid; place-items: center; transition: background 0.12s ease, border-color 0.12s ease;
+}
+.vc-item-check::after {
+  content: ""; width: 8px; height: 8px; border-radius: 2px; background: transparent; transition: background 0.12s ease;
+}
+.vc-item-check[aria-checked="true"] {
+  border-color: var(--c, ${SCENE_VIOLET});
+  background: color-mix(in srgb, var(--c, ${SCENE_VIOLET}) 22%, transparent);
+}
+.vc-item-check[aria-checked="true"]::after {
+  background: var(--c, ${SCENE_VIOLET});
+  box-shadow: 0 0 5px var(--c, ${SCENE_VIOLET});
+}
+.vc-item-check:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* A live preview (Phase 3) is a <canvas> in this same slot; an item family
+ * with no preview source keeps the plain sized placeholder <div> — either
+ * way the box's layout is untouched. */
+.vc-item-preview {
+  display: block; width: 100%; aspect-ratio: 1; border-radius: 4px;
+  background: color-mix(in srgb, var(--c, #fff) 10%, rgba(0, 0, 0, 0.35));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.vc-item-rows { display: grid; }
+
+/* Phase 3's per-box readouts (POP/TERR/VIG) and the population bar +
+ * Rebalance/Pipette row beneath the boxes — src/ui/widgets/itemBoxes.ts. */
+.vc-item-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-top: 4px; }
+.vc-item-stat { display: grid; justify-items: center; gap: 1px; font: 400 9px/1.1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.45); letter-spacing: 0.04em; }
+.vc-item-stat b { color: #fff; font-weight: 400; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+
+.vc-pop-wrap { display: grid; gap: 6px; justify-items: center; margin: 4px 0 10px; }
+.vc-popbar { display: flex; height: 10px; width: 100%; border-radius: 3px; overflow: hidden; background: rgba(255, 255, 255, 0.08); }
+.vc-popbar span { display: block; height: 100%; transition: width 0.2s ease; }
+.vc-poplabels { display: flex; flex-wrap: wrap; gap: 5px 12px; justify-content: center; font: 400 10px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.65); }
+.vc-poplabels i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 4px; box-shadow: 0 0 5px currentColor; }
+.vc-pop-actions { display: flex; gap: 8px; }
+
+/* The pipette's tap-point flash — position/left/top set inline per tap
+ * (document-body-absolute so it isn't clipped by the panel's own scroll
+ * container); everything else lives here so the keyframes can too. */
+.vc-pipette-ring {
+  position: fixed; width: 10px; height: 10px; margin: -5px 0 0 -5px;
+  border: 2px solid ${BANDS_AMBER}; border-radius: 50%; opacity: 0.95;
+  pointer-events: none; z-index: 9999; animation: vc-pipette-pulse 0.65s ease-out forwards;
+}
+@keyframes vc-pipette-pulse { to { width: 64px; height: 64px; margin: -32px 0 0 -32px; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .vc-pipette-ring { animation: none; opacity: 0; transition: opacity 0.5s ease-out; }
+}
+
+.vc-relweb-wrap { display: flex; justify-content: center; margin: 4px 0 10px; }
+.vc-relweb { width: 100%; max-width: 220px; }
+.vc-relweb-label {
+  font: 500 10px/1 ${FONT_LABEL}; fill: #04050a; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.vc-relweb-node { cursor: pointer; }
+.vc-relweb-node:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 3px; }
+.vc-relweb-sel { opacity: 1; }
+.vc-relweb-dim { opacity: 0.3; }
+
+.vc-relrows { display: grid; gap: 2px; margin-bottom: 8px; }
+.vc-relrow { display: grid; gap: 7px; padding: 8px 2px; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.vc-relrow:first-child { border-top: 0; }
+.vc-relrow-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.vc-relrow-label { font: 500 12px/1.2 ${FONT_LABEL}; color: #fff; }
+.vc-relrow-value {
+  font: 400 12px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.6); font-variant-numeric: tabular-nums; flex: none;
+}
+/* A row where the selected strains disagree (itemBoxes.ts's multi-selection,
+ * 2026-09-27) — a small pill, not a colour change on the row itself, so it
+ * reads as "extra information" rather than an error state. */
+.vc-relrow-mixed {
+  font: 500 9px/1 ${FONT_MONO}; letter-spacing: 0.06em; text-transform: uppercase;
+  color: ${BANDS_AMBER}; border: 1px solid color-mix(in srgb, ${BANDS_AMBER} 55%, transparent);
+  border-radius: 8px; padding: 2px 6px; flex: none;
+}
+
+.vc-exp-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.vc-exp-pill {
+  border: 1px solid rgba(255, 255, 255, 0.18); background: transparent; border-radius: 12px; padding: 4px 10px;
+  font: 500 11px/1 ${FONT_LABEL}; letter-spacing: 0.04em; color: rgba(255, 255, 255, 0.7); cursor: pointer;
+}
+.vc-exp-pill:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+.vc-exp-pill[aria-pressed="true"] { color: ${SCENE_VIOLET}; border-color: ${SCENE_VIOLET}; }
+.vc-exp-hyp { margin: 6px 0 0; width: 100%; color: rgba(255, 255, 255, 0.4); font-size: 11.5px; }
 `;
 
 /** Installs the panel's stylesheet once; safe to call from every creator. */

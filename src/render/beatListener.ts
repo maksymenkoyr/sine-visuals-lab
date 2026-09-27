@@ -4,7 +4,7 @@ import type { SignalId } from "./signals.ts";
 /**
  * The one place trigger + hold + refractory lives — every scene that reacts
  * to "a beat, but not too often" (shards' cut, kaleido's advanceBeatSurge,
- * caustics' advanceLurch, powder's createBigHitDetector, storm/ambience's
+ * caustics' ripple pool, powder's createBigHitDetector, storm/ambience's
  * own pools) used to hand-roll this itself. Shards is the first migration
  * (src/render/scenes/shards/layout.ts's CUT_LISTENER); the rest are
  * follow-ups, not this change.

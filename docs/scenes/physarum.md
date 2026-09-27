@@ -5,7 +5,8 @@ a short distance ahead, steer toward the strongest reading, step forward and
 deposit trail behind them, while the trail map diffuses and evaporates
 between deposits. Nothing is drawn directly — the network is grown frame by
 frame, and it's the gallery's only scene whose structure visibly reorganises
-itself over seconds rather than an instant. Featured, on main.
+itself over seconds rather than an instant. Draft, on main (featured until
+2026-09-27, when it swapped places with Physarum 2).
 
 ## Where the code is
 
@@ -23,7 +24,7 @@ ping-pong state (no reliance on `EXT_color_buffer_float`) and for using
 context. `GROUP_COUNT` keys the trail's three band-group channels, the
 species assignment and the wandering attractors together; `SETTINGS`
 carries the Form/Motion/Look/Post controls (Network scale, Fan angle, Turn
-rate, Wander, Trail decay, Band braid, Crawl speed, Beat surge, Beat
+rate, Wander, Trail decay, Band merge, Crawl speed, Beat surge, Beat
 seeding, Band pull, Glow, Relief, Palette tint, Beat flash), each with its
 own `auto` weights for the Auto-tune system (`src/render/autoTune.ts`).
 
@@ -44,6 +45,12 @@ follows). No video or visual reference was studied for this scene.
   composite exposure set from measured frame statistics); the PR notes it
   had not yet been judged against real music through a mic and might still
   want a tuning pass.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Band braid renamed Band merge: checking it merges the networks. Label
+  only.
+- 2026-09-27: moved behind the gallery's draft toggle (added to
+  `draftIds` in `src/render/scenes/index.ts`), on the user's call, in the
+  same change that featured Physarum 2 in its place. Code untouched.
 
 ## Tuning notes
 

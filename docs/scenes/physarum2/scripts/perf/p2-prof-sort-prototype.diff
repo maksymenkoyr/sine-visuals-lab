@@ -1,0 +1,157 @@
+diff --git a/src/render/scenes/physarum2.ts b/src/render/scenes/physarum2.ts
+index e580e51..928e875 100644
+--- a/src/render/scenes/physarum2.ts
++++ b/src/render/scenes/physarum2.ts
+@@ -9,6 +9,8 @@ import { grainTextureSide } from "./chladni.ts";
+ import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
+ import { PASSTHROUGH_DRIVES } from "../drives.ts";
+ import { packUnit, createBeatSeeder, type BeatSeeder } from "./physarum.ts";
++import { prof, profPoll, p2flag } from "./_p2prof.ts";
++import { createSorter } from "./_p2sort.ts";
+ 
+ // Physarum 2: a second slime-mould scene, after Michael Fogleman's
+ // fogleman/physarum (Go, MIT — https://github.com/fogleman/physarum), studied
+@@ -441,6 +443,7 @@ ${DRIVE_UNIFORMS_GLSL}
+ uniform sampler2D uTrailIn;
+ uniform float uTrailSide;
+ uniform float uNoiseSeed;
++uniform float uFastBlur;
+ ${PHYSARUM2_GLSL}
+ 
+ const float DECAY_MIN = ${DECAY_MIN.toFixed(4)};
+@@ -463,6 +466,7 @@ void main() {
+   // header on why every rate here is per *step*, not per second), all four
+   // species' channels at once.
+   vec4 sum = vec4(0.0);
++  if (uFastBlur < 0.5)
+   for (int dy = -2; dy <= 2; dy++) {
+     float wy = blurWeight(dy);
+     for (int dx = -2; dx <= 2; dx++) {
+@@ -471,6 +475,17 @@ void main() {
+     }
+   }
+ 
++  if (uFastBlur > 0.5) {
++    vec2 inv = vec2(1.0 / uTrailSide);
++    vec2 c = (vec2(texel) + 0.5) * inv;
++    vec4 s9 = vec4(0.0);
++    for (int j = -1; j <= 1; j++) {
++      for (int i = -1; i <= 1; i++) {
++        s9 += texture(uTrailIn, c + vec2(float(i), float(j)) * (4.0 / 3.0) * inv);
++      }
++    }
++    sum = s9 / 9.0;
++  }
+   // Evaporate: multiply, then subtract a floor — physarum.ts's file header
+   // covers why a bare multiply stalls in 8-bit.
+   float decay = mix(DECAY_MIN, DECAY_MAX, uDecay);
+@@ -730,8 +745,9 @@ function seedAgents(side: number): AgentSeed {
+   const pos = new Uint8Array(n * 4);
+   const dir = new Uint8Array(n * 4);
+   for (let i = 0; i < n; i++) {
+-    writeUnit(pos, i * 4, Math.random(), 1);
+-    writeUnit(pos, i * 4 + 2, Math.random(), 1);
++    const sorted = !!p2flag("sortedSeed");
++    writeUnit(pos, i * 4, sorted ? ((i % side) + Math.random()) / side : Math.random(), 1);
++    writeUnit(pos, i * 4 + 2, sorted ? (Math.floor(i / side) + Math.random()) / side : Math.random(), 1);
+     writeUnit(dir, i * 4, Math.random() * TWO_PI, TWO_PI);
+     const k = i % SPECIES_COUNT;
+     dir[i * 4 + 2] = Math.round((k / (SPECIES_COUNT - 1)) * 255);
+@@ -767,6 +783,8 @@ function createPhysarum2Scene(): Scene {
+   // physarum.ts's own seedEpoch.
+   let seedEpoch = 0;
+   let stepAcc = 0;
++  let sorter: ReturnType<typeof createSorter> | null = null;
++  let stepsSinceSort = 0;
+   const bandsBuf = new Float32Array(NUM_BANDS);
+ 
+   function samplerLoc(
+@@ -908,6 +926,7 @@ function createPhysarum2Scene(): Scene {
+       if (!quadVao || !depositVao || !beatSeeder) return;
+       const { gl } = ctx;
+       ensureTrailTargets(gl);
++      profPoll(gl);
+ 
+       // See physarum.ts's file header for why frame.time and not anim.dtSec.
+       const dt = lastFrameTime === null ? 1 / 60 : Math.max(0, Math.min(0.05, frame.time - lastFrameTime));
+@@ -925,7 +944,9 @@ function createPhysarum2Scene(): Scene {
+ 
+       const speedSetting = resolveSceneSetting(ID, settingFor("speed"));
+       const stepRate = STEP_RATE_MIN + (STEP_RATE_MAX - STEP_RATE_MIN) * speedSetting;
+-      const { steps, acc } = stepAccumulator(stepAcc, dt, stepRate);
++      const sa = stepAccumulator(stepAcc, dt, stepRate);
++      const acc = sa.acc;
++      const steps = (p2flag("steps") as number | undefined) ?? sa.steps;
+       stepAcc = acc;
+ 
+       gl.disable(gl.BLEND);
+@@ -938,6 +959,7 @@ function createPhysarum2Scene(): Scene {
+       diffuseProg.use();
+       uploadCommonUniforms(diffuseProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+       diffuseProg.setF("uTrailSide", trailSideCur);
++      diffuseProg.setF("uFastBlur", p2flag("fastBlur") ? 1 : 0);
+       gl.uniform1i(samplerLoc(gl, diffuseProg, "diff.uTrailIn", "uTrailIn"), 0);
+ 
+       simProg.use();
+@@ -953,6 +975,17 @@ function createPhysarum2Scene(): Scene {
+       gl.uniform1i(samplerLoc(gl, depositProg, "dep.uAgentPos", "uAgentPos"), 0);
+       gl.uniform1i(samplerLoc(gl, depositProg, "dep.uAgentDir", "uAgentDir"), 1);
+ 
++      const sortEvery = p2flag("sortEvery") as number | undefined;
++      if (sortEvery) {
++        sorter ??= createSorter(gl, agentSide, agentCount);
++        stepsSinceSort += steps;
++        if (stepsSinceSort >= sortEvery) {
++          stepsSinceSort = 0;
++          const w = 1 - agentRead;
++          sorter.sort(agentFbo[agentRead]!, agentPosTex[agentRead]!, agentDirTex[agentRead]!, agentFbo[w]!, quadVao);
++          agentRead = w;
++        }
++      }
+       for (let step = 0; step < steps; step++) {
+         const trailWrite = 1 - trailReadIdx;
+         const agentWrite = 1 - agentRead;
+@@ -964,7 +997,7 @@ function createPhysarum2Scene(): Scene {
+         diffuseProg.setF("uNoiseSeed", Math.random() * 100);
+         gl.activeTexture(gl.TEXTURE0);
+         gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
+-        drawFullscreenQuad(gl, quadVao);
++        if (!p2flag("noDiffuse")) prof(gl, "diffuse", () => drawFullscreenQuad(gl, quadVao!));
+ 
+         // 2. Sim: agentRead -> agentWrite, sensing the trail diffuse just
+         //    wrote.
+@@ -979,7 +1012,7 @@ function createPhysarum2Scene(): Scene {
+         gl.bindTexture(gl.TEXTURE_2D, agentDirTex[agentRead]);
+         gl.activeTexture(gl.TEXTURE2);
+         gl.bindTexture(gl.TEXTURE_2D, trailTex[trailWrite]);
+-        drawFullscreenQuad(gl, quadVao);
++        if (!p2flag("noSim")) prof(gl, "sim", () => drawFullscreenQuad(gl, quadVao!));
+ 
+         // 3. Deposit: additive points from the agent state sim just wrote,
+         //    into the same trail write target diffuse just produced — never
+@@ -994,7 +1027,7 @@ function createPhysarum2Scene(): Scene {
+         gl.activeTexture(gl.TEXTURE1);
+         gl.bindTexture(gl.TEXTURE_2D, agentDirTex[agentWrite]);
+         gl.bindVertexArray(depositVao);
+-        gl.drawArrays(gl.POINTS, 0, agentCount);
++        if (!p2flag("noDeposit")) prof(gl, "deposit", () => gl.drawArrays(gl.POINTS, 0, agentCount));
+         gl.bindVertexArray(null);
+         gl.disable(gl.BLEND);
+ 
+@@ -1012,7 +1045,7 @@ function createPhysarum2Scene(): Scene {
+       gl.activeTexture(gl.TEXTURE0);
+       gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
+       gl.uniform1i(samplerLoc(gl, compositeProg, "comp.uTrail", "uTrail"), 0);
+-      drawFullscreenQuad(gl, quadVao);
++      prof(gl, "composite", () => drawFullscreenQuad(gl, quadVao!));
+ 
+       // 5. The gallery renders every scene into one shared context each
+       //    tick — must not leak blend state or a bound texture onto the
+@@ -1025,6 +1058,7 @@ function createPhysarum2Scene(): Scene {
+         gl.activeTexture(gl.TEXTURE0 + unit);
+         gl.bindTexture(gl.TEXTURE_2D, null);
+       }
++      if (p2flag("steps") !== undefined) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+     },
+ 
+     dispose(ctx: SceneContext) {

@@ -153,6 +153,7 @@ async function main(): Promise<void> {
       bands: s.bands,
       energy: s.energy,
       onset: s.onsetFired,
+      pulseOnset: s.pulseFired,
       bpm: s.bpm,
       onsetPhase: s.beatPhase,
       level: s.level,

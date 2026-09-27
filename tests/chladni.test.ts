@@ -9,6 +9,7 @@ import {
   grainGain,
   drawnGrainCount,
   MAX_BED_COVERAGE,
+  SAND_AMOUNT_MAX,
   MODE_TABLE,
   ACTIVE_MODES,
   FUNDAMENTAL_HZ_SMALL,
@@ -139,6 +140,65 @@ describe("bed coverage", () => {
         expect((drawn * areaPerGrain) / platePx2).toBeLessThanOrEqual(MAX_BED_COVERAGE + 1e-6);
       }
     }
+  });
+});
+
+describe("sand amount", () => {
+  const count = qualitySettings("high").maxParticles;
+  const platePx2 = 1920 * 1080;
+
+  it("defaults to the full bed when the amount is omitted", () => {
+    expect(drawnGrainCount(count, 4, platePx2)).toBe(drawnGrainCount(count, 4, platePx2, 1));
+  });
+
+  it("scales the drawn count proportionally while the coverage cap is slack", () => {
+    // Tiny grains: the cap (fits) is far above `count`, so amount binds.
+    expect(drawnGrainCount(count, 1, platePx2, 1)).toBe(count);
+    expect(drawnGrainCount(count, 1, platePx2, 0.5)).toBe(count / 2);
+    expect(drawnGrainCount(count, 1, platePx2, 0.25)).toBe(count / 4);
+  });
+
+  it("draws nothing at amount 0 — a bare plate", () => {
+    expect(drawnGrainCount(count, 4, platePx2, 0)).toBe(0);
+  });
+
+  it("still never exceeds the coverage cap at any amount", () => {
+    for (const amount of [0.1, 0.5, 1, 3, 5]) {
+      for (const grainPx of [10, 40]) {
+        const drawn = drawnGrainCount(count, grainPx, platePx2, amount);
+        if (amount <= 1) expect(drawn).toBeLessThanOrEqual(drawnGrainCount(count, grainPx, platePx2, 1));
+        const areaPerGrain = (Math.PI / 4) * grainPx * grainPx * (1 + 0.5 ** 2 / 12);
+        if (drawn > 0) {
+          expect((drawn * areaPerGrain) / platePx2).toBeLessThanOrEqual(MAX_BED_COVERAGE * Math.max(1, amount) + 1e-6);
+        }
+      }
+    }
+  });
+
+  it("is monotonically non-increasing in amount", () => {
+    let prev = drawnGrainCount(count, 4, platePx2, 5);
+    for (let amount = 4.95; amount >= 0; amount -= 0.05) {
+      const drawn = drawnGrainCount(count, 4, platePx2, amount);
+      expect(drawn).toBeLessThanOrEqual(prev);
+      prev = drawn;
+    }
+  });
+
+  it("draws more sand than the tier count above 1, up to SAND_AMOUNT_MAX", () => {
+    expect(drawnGrainCount(count, 1, platePx2, 2)).toBe(count * 2);
+    expect(drawnGrainCount(count, 1, platePx2, SAND_AMOUNT_MAX)).toBe(count * SAND_AMOUNT_MAX);
+  });
+
+  it("grows the coverage cap with the amount, so extra sand isn't clipped back", () => {
+    // Default-ish grain where the 1× cap binds: 5× still draws well past it.
+    const at1 = drawnGrainCount(count, 4, platePx2, 1);
+    const at5 = drawnGrainCount(count, 4, platePx2, 5);
+    expect(at5).toBeGreaterThanOrEqual(at1 * 4.9);
+  });
+
+  it("clamps out-of-range amounts to [0, SAND_AMOUNT_MAX]", () => {
+    expect(drawnGrainCount(count, 1, platePx2, 99)).toBe(count * SAND_AMOUNT_MAX);
+    expect(drawnGrainCount(count, 1, platePx2, -1)).toBe(0);
   });
 });
 

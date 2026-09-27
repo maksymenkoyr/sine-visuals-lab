@@ -1,5 +1,6 @@
 import { FONT_DIGITS, FONT_LABEL, FONT_MONO, glassCardStyle, scanlineStyle } from "./controlsTheme.ts";
 import { isFolded, setFolded } from "./panelFolds.ts";
+import { setHintText } from "./hintSwatches.ts";
 
 /**
  * The DOM grammar the controls panel (src/ui/deviceMenu.ts) and its meters
@@ -481,6 +482,12 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   resetBtn.textContent = "↺";
   resetBtn.title = `Reset ${spec.label} (R)`;
   resetBtn.style.cssText = rowResetStyle;
+  // data-key/data-keycap (src/ui/keyHints.ts): shares the "reset" id every
+  // other row's own ↺ carries, so a keys-list hover/held Shift reaches this
+  // one too.
+  resetBtn.classList.add("vc-keycap-anchor");
+  resetBtn.dataset.key = "reset";
+  resetBtn.dataset.keycap = "R";
   if (spec.signals) right.appendChild(spec.signals.chip);
   right.append(readout, status, resetBtn);
   head.append(label, right);
@@ -508,7 +515,7 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
 
   const hint = document.createElement("div");
   hint.className = "vc-hint";
-  hint.textContent = spec.description ?? "";
+  setHintText(hint, spec.description ?? "");
   if (!spec.description) hint.style.display = "none";
 
   el.append(head, strip, hint);

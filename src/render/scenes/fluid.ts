@@ -64,10 +64,11 @@ import { createFluidBolts, type FluidBolts } from "./fluidBolts.ts";
 // (createPuffState/advancePuff below) rather than a continuous push — it
 // fires on a bass/broadband onset (or, once tempo-locked, on the beat-phase
 // wrap), decays through puffEnv (the same short-attack/exponential-decay
-// shape as caustics' rippleEnvelope), and drives both the centre emitter's
-// force/dye spike and the secondary splats' per-slot delay, so each beat
-// reads as one ring that detaches and stretches into a filament rather than
-// a steady jet. A free-running fallback phase keeps the puffs (and the
+// shape caustics' own ring emitter uses —
+// src/render/scenes/rippleEmitter.ts's rippleEnvelope), and drives both
+// the centre emitter's force/dye spike and the secondary splats' per-slot
+// delay, so each beat reads as one ring that detaches and stretches into a
+// filament rather than a steady jet. A free-running fallback phase keeps the puffs (and the
 // secondary splats' old sawtooth envelope, blended underneath) going in
 // silence. `energy` still drives a small continuous base and, via the
 // `warp` setting (see warpedDt), the sim's own timestep — loud passages run
@@ -155,9 +156,10 @@ export const PUFF_DYE = 4;
 /** Beat puff clock: fires an emitter/splat spike on a bass or broadband
  *  onset (or, once tempo-locked, on the beat-phase wrap), with a
  *  free-running fallback so puffs — and the striations they create — keep
- *  happening in silence. Envelope shape mirrors caustics' rippleEnvelope
- *  (src/render/scenes/caustics.ts): a short attack so a puff reads as a
- *  ring, not a step, then an exponential decay. */
+ *  happening in silence. Envelope shape mirrors the short-attack,
+ *  exponential-decay ring shape caustics' own ring emitter uses
+ *  (src/render/scenes/rippleEmitter.ts's rippleEnvelope): a short attack so
+ *  a puff reads as a ring, not a step, then an exponential decay. */
 export const PUFF_ATTACK = 0.03;
 export const PUFF_DECAY = 6;
 export const PUFF_FALLBACK_AFTER = 1.5;
@@ -912,7 +914,7 @@ export const SETTINGS: SceneSetting[] = [
   },
   {
     key: "currentDensity",
-    label: "Current density",
+    label: "Current threshold",
     description: "How dense the dye must be before the Currents style lights it up",
     group: "Look",
     advanced: true,
@@ -989,10 +991,11 @@ const SETTINGS_UNIFORMS_GLSL = SETTINGS.map((s) => `uniform float ${settingUnifo
 
 // ---------------------------------------------------------------------------
 // Shockwave pool (the Post group's Bass shockwave) — a fixed-size ring pool
-// driven from render() below, same idiom as caustics.ts's ripple pool
-// (createRipplePool there): each slot ages independently and a trigger
-// always reuses the oldest slot, so a fast hit never erases the ring the
-// previous hit already sent out, only adds its own alongside it.
+// driven from render() below, the same idiom caustics.ts's own ripple
+// emitter uses (src/render/scenes/rippleEmitter.ts): each slot ages
+// independently and a trigger always reuses the oldest slot, so a fast hit
+// never erases the ring the previous hit already sent out, only adds its own
+// alongside it.
 // ---------------------------------------------------------------------------
 
 export const SHOCK_SLOTS = 4;

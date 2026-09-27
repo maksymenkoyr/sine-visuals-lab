@@ -80,6 +80,9 @@ addition. `/ref` bundles:
   flooring V (`V_FLOOR`) before taking the gradient.
 - A Sonnet-executed pass of the rebuild plan hit a rate limit mid-edit,
   leaving stray backticks inside a GLSL template literal; finished by hand.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Cell size description corrected: higher already meant bigger cells (and
+  bigger Beads tiles), and the old text said the reverse.
 
 ## Tuning notes
 

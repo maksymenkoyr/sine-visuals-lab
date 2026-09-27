@@ -3,6 +3,9 @@ import {
   getDriveSetting,
   setDriveSetting,
   resetDriveSetting,
+  getDriveThresholdState,
+  setDriveThreshold,
+  setDriveThresholdOn,
   sanitizeDriveSetting,
   encodeDriveSetting,
   togglePatchSource,
@@ -193,18 +196,70 @@ describe("driveStore: sanitizeDriveSetting / encodeDriveSetting", () => {
     expect(sanitizeDriveSetting({ m: "gate", s: [{ c: "anim.low" }, { c: "anim.mid", g: true }] })).toBeNull();
     expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.low", o: "yes" }] })).toBeNull();
   });
+
+  it("encodes/sanitizes a Beat wave source's every-N-beats divider as `e`, round-tripping", () => {
+    const patch: DrivePatch = { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, every: 4 }] };
+    const encoded = encodeDriveSetting(patch);
+    expect(encoded).toEqual({ m: "add", s: [{ c: "anim.beatWave", e: 4 }] });
+    expect(sanitizeDriveSetting(encoded)).toEqual(patch);
+  });
+
+  it("omits `e` for every=1 (the identity default) — encodeDriveSetting still prefers the bare-choice form", () => {
+    expect(encodeDriveSetting({ mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, every: 1 }] })).toBe("anim.beatWave");
+  });
+
+  it("a patch stored before Beat wave's every-N-beats divider existed decodes unchanged — old data simply lacks `e`", () => {
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.beatWave" }] })).toEqual(driveSettingFromChoice("anim.beatWave"));
+    expect(sanitizeDriveSetting("anim.beatWave")).toEqual(driveSettingFromChoice("anim.beatWave"));
+  });
+
+  it("rejects an `e` of the wrong type or an out-of-list value", () => {
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.beatWave", e: "four" }] })).toBeNull();
+    expect(sanitizeDriveSetting({ m: "add", s: [{ c: "anim.beatWave", e: 3 }] })).toBeNull();
+  });
 });
 
 describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight, setSourceHeight, setSourceGrid, setPatchMix)", () => {
   // SPARKLE (not FLASH) throughout — its own drive.default is "scene", so
   // toggling the first source builds a fresh one-source patch rather than
   // adding alongside FLASH's own already-present Beat default.
-  it("togglePatchSource adds then removes a source, landing back on scene when empty", () => {
+  it("togglePatchSource adds then removes a source, leaving nothing plugged in (not the scene's mix)", () => {
     const sceneId = "patch-helper-1";
     togglePatchSource(sceneId, SPARKLE, "anim.lowOnset");
     expect(getDriveSetting(sceneId, SPARKLE)).toEqual(driveSettingFromChoice("anim.lowOnset"));
     togglePatchSource(sceneId, SPARKLE, "anim.lowOnset");
+    expect(getDriveSetting(sceneId, SPARKLE)).toEqual({ mix: "add", sources: [] });
+    resetDriveSetting(sceneId, SPARKLE);
     expect(getDriveSetting(sceneId, SPARKLE)).toBe("scene");
+  });
+
+  it("a scene-handled threshold: on and at its own default until moved, clamped, cleared by Reset to scene default", () => {
+    const sceneId = "threshold-1";
+    const spec: SceneSetting = { ...SPARKLE, drive: { ...SPARKLE.drive!, threshold: { default: 0.25, label: "T", hint: "h" } } };
+    expect(getDriveThresholdState(sceneId, spec)).toEqual({ on: true, value: 0.25 });
+    setDriveThreshold(sceneId, spec, 0.8);
+    expect(getDriveThresholdState(sceneId, spec)).toEqual({ on: true, value: 0.8 });
+    setDriveThreshold(sceneId, spec, 5);
+    expect(getDriveThresholdState(sceneId, spec)).toEqual({ on: true, value: 1 });
+    setDriveThresholdOn(sceneId, spec, false);
+    expect(getDriveThresholdState(sceneId, spec)).toEqual({ on: false, value: 1 });
+    resetDriveSetting(sceneId, spec);
+    expect(getDriveThresholdState(sceneId, spec)).toEqual({ on: true, value: 0.25 });
+  });
+
+  it("a generic (undeclared) threshold: off and at GENERIC_THRESHOLD_DEFAULT until touched", () => {
+    const sceneId = "threshold-2";
+    expect(getDriveThresholdState(sceneId, SPARKLE)).toEqual({ on: false, value: 0.25 });
+    setDriveThresholdOn(sceneId, SPARKLE, true);
+    setDriveThreshold(sceneId, SPARKLE, 0.6);
+    expect(getDriveThresholdState(sceneId, SPARKLE)).toEqual({ on: true, value: 0.6 });
+    resetDriveSetting(sceneId, SPARKLE);
+    expect(getDriveThresholdState(sceneId, SPARKLE)).toEqual({ on: false, value: 0.25 });
+  });
+
+  it("an empty patch survives the storage round trip", () => {
+    const empty: DrivePatch = { mix: "add", sources: [] };
+    expect(sanitizeDriveSetting(encodeDriveSetting(empty))).toEqual(empty);
   });
 
   it("setSourceWeight/setSourceHeight edit one source in place", () => {

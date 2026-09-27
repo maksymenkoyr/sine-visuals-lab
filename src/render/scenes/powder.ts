@@ -147,7 +147,7 @@ const DRAG_QUAD = 1.2;
 const GRAVITY = 0.16;
 const BUOYANCY = 0.12;
 /** Pull back toward the middle, scaled by the quiet-time `calm` signal and by
- *  the Loud swell setting. In a breakdown this is what reforms the blob. */
+ *  the Quiet gather setting. In a breakdown this is what reforms the blob. */
 const GATHER = 1.2;
 /** Spatial frequency of the turbulence field. World units now, not tied to a
  *  cloud radius — the cloud has no radius any more. */
@@ -761,7 +761,7 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "breathe",
-    label: "Loud swell",
+    label: "Quiet gather",
     description: "How strongly a quiet passage gathers the powder back into one turning blob",
     group: "Form",
     min: 0,

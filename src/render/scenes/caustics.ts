@@ -1,17 +1,36 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHash.ts";
+import {
+  advanceEmission,
+  advanceRingRate,
+  autoNarrowWidthW,
+  createRingRateState,
+  buildProfile,
+  createRippleEmissionState,
+  createRippleEmitter,
+  PROFILE_MAX_RADIUS,
+  PROFILE_SAMPLES,
+  rippleDecayFor,
+  ringStyleFor,
+  rippleSpeedFor,
+  rippleWidthFor,
+  salienceMarks,
+  RING_THRESHOLD_DEFAULT,
+  type RippleProfileParams,
+} from "./rippleEmitter.ts";
+import { publishSettingMarks } from "../settingMarks.ts";
 
 // The bright wandering filaments you see on the floor of a sunlit pool.
-// Domain-warped value noise, sharpened into thin ridges. Two renderer-side
-// clocks feed it instead of raw audio: a phase-locked beat/bar clock
-// (beatClock.ts) that only ever nudges toward a detected beat rather than
-// resetting on every onset — the old FeatureFrame.onsetPhase restarted on
-// every hat/fill, which is what made Tempo breathe and Beat ripple stutter —
-// and this scene's own drift accumulator below, kept separate from the
-// shared uFlowPhase so its speed is user-dialable without reintroducing the
-// teleport bug flowClock.ts exists to prevent (scaling an *already
-// accumulated* phase is safe; scaling elapsed time by a live value is not).
+// Domain-warped value noise, sharpened into thin ridges. Motion comes from
+// renderer-side clocks instead of raw audio: the beat edges arrive as the
+// latched one-shots on AnimFrame (renderLatch.ts) — the old
+// FeatureFrame.onsetPhase restarted on every hat/fill, which is what made
+// the old bar-locked breathe and Beat ripple stutter — and this scene's own
+// drift accumulator below, kept separate from the shared uFlowPhase so its
+// speed is user-dialable without reintroducing the teleport bug
+// flowClock.ts exists to prevent (scaling an *already accumulated* phase is
+// safe; scaling elapsed time by a live value is not).
 // Settings map audio onto light and motion rather than position snapping:
 // uFog sets the resting look (how thin/bright the ridges sit between beats,
 // and how much of the dim wash the dark-water floor cut clips away), uFocus
@@ -23,41 +42,60 @@ import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHas
 // fog between beats" right at a time — see this file's git history),
 // uCausticDensity scales the noise field's spatial frequency (more/fewer,
 // finer/fatter filaments; 0.5 is exactly the old fixed frequency),
-// uBreathe locks a once-per-bar zoom to the beat
-// clock, uRipple sends a pool of overlapping drop-rings out from center so a
-// new beat doesn't cut the last ring off, uFlash is a brightness punch,
+// uBreathe is the depth of a zoom only a patched source can move
+// (breatheDrive in FRAG — inert at the Scene default), uRipple drives a continuous ring emitter (rippleEmitter.ts) seated
+// at the center of the frame: rather than launching a whole ring on every
+// yes/no beat (this scene's very first design) or carrying the raw driver
+// through a stepped wave-equation height field (a brief detour — see
+// docs/scenes/caustics.md's 2026-09-26/2026-09-27 entries for why each was
+// replaced), the driver's own *rise* each frame becomes a thin ring's worth
+// of height, launched from the center and left to travel outward and fade on
+// its own. A clean, isolated hit still reads as exactly one full old-style
+// ring; a busy driver naturally ducks itself — it can't rise as far between
+// hits that arrive faster than it can fall back — so it reads as lighter,
+// denser rings rather than a stack of identical ones. Wave speed/Wave fade/
+// Ring width (waveSpeed/waveFade/ringWidth) tune the emitted rings
+// themselves — how fast they travel, how fast they fade, how wide each one
+// is; Ring style (ringStyle) instead picks what a ring *is* — Bump's own
+// gaussian crest, Wave's crest-plus-trailing-trough (net zero height, so a
+// dense train stays visible as alternating rings instead of piling into a
+// flat plateau), or Merge (folds emissions that land close together into
+// one stronger ring instead of changing the shape at all) — see
+// rippleEmitter.ts's own `RingStyle` section; the emission and profile-building logic live in the `extraUniforms`
+// closure below. uFlash is a brightness punch,
 // uDrift is the base wander speed (its own JS-side accumulator — driven by
-// driftRatePerSec below, not a shader uniform driving the rate directly —
-// with driftKick dialing in how much bass onsets pump that speed. driftBeat
-// is a separate, additive impulse (advanceLurch below) fired on anim.onset
-// rather than a rate multiplier — see driftRatePerSec's own comment for why
-// a beat can't read as a lurch by modulating a rate. driftKick also adds its
-// own bounded forward jolt directly to the phase (KICK_JOLT_PHASE/
-// advanceKickJolt below), independent of Drift speed, for the same reason a
-// rate term alone can't read as a kick strike rather than a glide. driftChurn
-// reshapes the filaments themselves on each beat (uChurnDrive in FRAG)
-// instead of moving the phase at all — a third, distinct beat channel from
-// the other two. driftLoud is a geometric speed swing about a neutral pivot
-// (loudSpeedFactor below): quiet passages run proportionally slower, loud
-// ones proportionally faster, so the dial reads as dynamic range rather than
-// extra speed. It's driven by loudSwell — a value advanceLoudSwell derives
-// from FeatureFrame.level, calibrated in-scene against its own
-// slow-contracting extremes — not frame.energy: energy is AGC-normalized per
-// band, and that AGC "re-adapts in ~1.25s and erases quiet-vs-loud by
-// design" (see FeatureFrame.energy's own doc comment in audio/types.ts),
-// which is exactly the dynamic range this dial exists to show. level
-// survives that AGC (audio/types.ts and autoTune.ts both call it "the one
-// field that survives it"), but its resting point is playback/mic-gain
-// dependent, which is what advanceLoudSwell's own calibration is for — see
-// that function's comment for why this isn't sectionIntensity.ts's job
-// (different input, and a deliberately faster calibration timescale).
-// driftLoud also drives uLoudSwell (loudSwellDrive below), an ungated visual
-// swell — a loud passage widens the pool's aperture and lifts the dark-water
-// floor into a glow; a quiet one tightens and deepens it — the fourth
-// distinct non-rate channel alongside Beat surge's lurch, Kick surge's jolt,
-// and Beat churn's reshaping. Not gated behind Drift speed, same reasoning as
-// driftKick's jolt: it's a look, not motion along the phase, so it must still
-// land for anyone who wants a still, breathing pool. uBass/uTurbulence/
+// driftRatePerSec below, not a shader uniform driving the rate directly).
+// driftLevel adds to that rate directly, right now: the louder the music is
+// playing at this instant, the faster the pool wanders, and it drops
+// straight back down the moment the music quietens, with no envelope of its
+// own beyond that instantaneous reading (LEVEL_GAIN * driftLevel *
+// levelValue in driftRatePerSec below). It's driven by loudSwell — a value
+// advanceLoudSwell derives from FeatureFrame.level, calibrated in-scene
+// against its own slow-contracting extremes — not frame.energy: energy is
+// AGC-normalized per band, and that AGC "re-adapts in ~1.25s and erases
+// quiet-vs-loud by design" (see FeatureFrame.energy's own doc comment in
+// audio/types.ts), which is exactly the dynamic range this dial exists to
+// show. level survives that AGC (audio/types.ts and autoTune.ts both call it
+// "the one field that survives it"), but its resting point is
+// playback/mic-gain dependent, which is what advanceLoudSwell's own
+// calibration is for — see that function's comment for why this isn't
+// sectionIntensity.ts's job (different input, and a deliberately faster
+// calibration timescale). driftPump answers the other half of what was
+// asked for it: "energy would pump up drift speed but it would slowly be
+// going back to the one set by drift... like push acceleration in a car" —
+// so unlike driftLevel it doesn't track its input directly. Each push
+// (advancePump below) accelerates a velocity that then coasts back down
+// over PUMP_RELEASE_SEC, the way a car keeps rolling faster for a while
+// after you lift off the gas. Both driftLevel and driftPump are additive on
+// top of the Drift-speed base rather than multipliers on it (see
+// driftRatePerSec below) — a multiplier on a base of zero can only ever stay
+// zero, so additive is what lets either one still move the pool with Drift
+// speed parked at 0. driftLevel also drives uLoudSwell (loudSwellDrive
+// below), an ungated visual swell — a loud passage widens the pool's
+// aperture and lifts the dark-water floor into a glow; a quiet one tightens
+// and deepens it. This is a look rather than motion along the phase, so —
+// not gated behind Drift speed or Speed pump — it must still land for anyone
+// who wants a still, breathing pool. uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
 // / crest glints), and uDropReactivity ties everything to
 // sectionIntensity.ts's slow-tracked "which part of the song is this" signal
@@ -129,114 +167,175 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "breathe",
-    label: "Tempo breathe",
-    description: "Slow zoom locked to the beat, once per bar",
+    label: "Breathe",
+    description: "How far a source you patch in zooms the pool — it does nothing until one is wired to it",
     group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.11,
-    // Bar-locked zoom needs a steady tempo to lock to; slower music has more room for it.
-    auto: { pulse: 0.3, tempo: -0.15 },
+    // The depth a wired signal swings the zoom through, not a signal of its
+    // own — pure taste, so no auto table (same reasoning as causticDensity
+    // above): what it reacts to is the patch bay's choice, and at the Scene
+    // default it reacts to nothing at all (see breatheDrive(0.0) in FRAG).
+    drive: { default: "scene", sceneLabel: "Scene: inert until patched" },
   },
   {
     key: "ripple",
     label: "Beat ripple",
-    description: "Each beat drops a ring that spreads from the center to the edge, like a drop on water; rings overlap instead of replacing each other",
+    description: "Each hit sends a ring out from the center like a drop on water — a busy driver can't rise as far between hits, so it makes lighter, denser rings instead of stacking full ones",
     group: "Motion",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.21,
-    // Rings read best against punchy, uncluttered material.
+    // Waves read best against punchy, uncluttered material.
     auto: { attack: 0.35, pulse: 0.25, density: -0.2 },
     // A bass onset OR a broadband beat, unconditionally — no single
     // catalogue source reproduces that union, so the default is Scene (see
-    // the trigger logic itself, below, and drives.ts's header for why a
-    // Scene default is still bit-identical to today). A drop still rings
-    // its own stronger ring in place of the ordinary one on that tick,
-    // independent of this choice — see the trigger logic.
-    drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"] },
+    // the `extraUniforms` closure below, and drives.ts's header for why a
+    // Scene default is still bit-identical to today). Fed to
+    // rippleEmitter.ts's advanceEmission as a continuous envelope rather
+    // than read as a one-shot trigger — see that file's header for why: a
+    // busy driver naturally ducks itself there (each rise only launches a
+    // ring for however far the envelope climbed since it last fell back),
+    // where a yes/no trigger stacked a full ring on every tick regardless.
+    // This slider scales the *display* — crest brightening and slope-based
+    // refraction, in FRAG — not a launched ring's own amplitude (see
+    // RIPPLE_REFRACT/RIPPLE_CEIL_KNEE's own comment there): the emitter
+    // always launches a full-strength ring for a full hit no matter this
+    // dial's value, the same split the scene's very first ring pool used. A
+    // drop still emits its own stronger ring on top, independent of this
+    // choice.
+    // `threshold` is the adaptive "reach to ring" line's margin over its
+    // noise-floor estimate (rippleEmitter.ts's ringThresholdBar), adjusted by
+    // the On/Off toggle + slider under this setting's graph in the panel —
+    // Off (advanceEmission's `threshold: null`) makes every climb ring,
+    // sized only by how far it climbed.
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: bass or beat hit",
+      sceneSources: ["anim.lowOnset", "feature.onset"],
+      threshold: {
+        default: RING_THRESHOLD_DEFAULT,
+        label: "Ring threshold",
+        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to send a ring. Left: more rings, even from quiet sounds. Right: only clear standouts.",
+      },
+    },
+  },
+  {
+    key: "ringWidth",
+    label: "Ring width",
+    description: "How wide each ring is — wider rings bend the light more softly",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    // Response-shape, not an amount — same bucket as Wave speed/Wave fade
+    // below (drives.ts's header lists this kind of setting among what's
+    // deliberately not a drive). Read only in rippleEmitter.ts's
+    // rippleWidthFor, never uploaded to FRAG directly — only through the
+    // crest/slope profile it shapes.
+  },
+  {
+    key: "ringStyle",
+    label: "Ring style",
+    description:
+      "Bump: soft rings. Wave: each ring has a crest and a trough, like real ripples — stays visible when rings come fast. Merge: rings that come close together join into one stronger ring.",
+    group: "Motion",
+    min: 0,
+    max: 2,
+    step: 1,
+    default: 0,
+    type: "enum",
+    options: ["Bump", "Wave", "Merge"],
+    // A shape/combining-rule pick, not an amount or a reactive coupling —
+    // same bucket as Ring width/Wave speed/Wave fade around it (no `auto`,
+    // no `drive`); ringStyleFor (rippleEmitter.ts) maps this setting's own
+    // 0/1/2 to the RingStyle emit()/buildProfile actually take.
+  },
+  {
+    key: "waveSpeed",
+    label: "Wave speed",
+    description: "How fast a ring travels outward from the center",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    // Response-shape, not an amount — same bucket as Wave fade/Ring width
+    // above (drives.ts's header lists this kind of setting among what's
+    // deliberately not a drive). Read only in rippleEmitter.ts's
+    // rippleSpeedFor, never uploaded to FRAG.
+  },
+  {
+    key: "waveFade",
+    label: "Wave fade",
+    description: "How fast a ring loses energy as it travels — low keeps it visible all the way to the far edge, high dies out quickly",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+    // Read only in rippleEmitter.ts's rippleDecayFor.
   },
   {
     key: "drift",
     label: "Drift speed",
     description: "How fast the filaments wander, independent of the beat. 0.5 = the scene's original speed, 1 = double that.",
     group: "Motion",
+    family: "Drift speed",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.44,
     // Wander speed tracks the music's own tempo. Deliberately no `pulse`
-    // weight: driftBeat already tracks punchiness (pulse: 0.35 below), and
-    // weighting both the same way meant Auto walked them up together on the
-    // same music, compounding the "these read as the same knob" problem the
-    // old multiplicative Beat surge design had.
+    // weight: driftPump already tracks punchiness (pulse: 0.35 below), and
+    // weighting both the same way would let Auto walk them up together on
+    // the same music, compounding the "these read as the same knob" problem
+    // a shared weight always risks between two motion dials.
     auto: { tempo: 0.4 },
   },
   {
-    key: "driftBeat",
-    label: "Beat surge",
-    description: "Drift lurches forward on each beat, then coasts",
+    key: "driftLevel",
+    label: "Speed boost",
+    description: "Drift runs faster the louder the music is right now, and drops straight back to Drift speed when it quietens; the pool's aperture and floor glow swell with it too",
     group: "Motion",
+    family: "Drift speed",
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0.07,
-    // Beat-locked lurches only make sense with real beats to lurch on.
-    auto: { pulse: 0.35, attack: 0.2 },
-    // The lurch fires on anim.onset today — a plain Beat default.
-    drive: { default: "feature.onset" },
-  },
-  {
-    key: "driftKick",
-    label: "Kick surge",
-    description: "Drift pumps on bass hits, ignoring hats and snares — a gentle speed-up at low settings, a distinct jolt at high ones",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.18, // advanceKickJolt weights this dial by driftKick^2, so the jolt's visible range lives in the upper part of it
-    // Dark/bass-heavy mixes carry more kick presence to pump on.
-    auto: { brightness: -0.3, attack: 0.2 },
-    // The jolt is driven continuously by anim.lowPulse today — a plain Bass
-    // hit default (drives.ts's decaying-envelope reading of it, same field).
-    drive: { default: "anim.lowOnset" },
-  },
-  {
-    key: "driftLoud",
-    label: "Loudness surge",
-    description: "Drift speeds up in loud passages and nearly stills in quiet ones; the pool's aperture and floor glow swell with it too",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.74,
+    default: 0.4,
     // Swells with volume read best on tracks with real quiet->loud range;
     // an already-dense mix doesn't need more.
     auto: { dynamics: 0.3, density: -0.15 },
     // Driven by this scene's own calibrated loudSwell (advanceLoudSwell,
     // below) — a bespoke per-scene calibration of FeatureFrame.level, not a
     // catalogue signal (see that function's own comment for why it isn't
-    // just frame.energy/anim.sectionIntensity), so the default is Scene.
-    drive: { default: "scene", sceneLabel: "Scene: this track's own calibrated loudness swing" },
+    // just frame.energy/anim.sectionIntensity: quiet stays quiet over the
+    // tens of seconds AGC'd energy takes to re-adapt), so the default is
+    // Scene. A non-default pick instead reads that source's 0..1 value
+    // directly as levelValue in driftRatePerSec below.
+    drive: { default: "scene", sceneLabel: "Scene: this track's own calibrated loudness" },
   },
   {
-    key: "driftChurn",
-    label: "Beat churn",
-    description: "Each beat reorganizes the filaments in place, instead of only pushing them along",
+    key: "driftPump",
+    label: "Speed pump",
+    description: "Each push accelerates the drift like a gas pedal; the extra speed then coasts back down to Drift speed",
     group: "Motion",
+    family: "Drift speed",
     min: 0,
     max: 1,
     step: 0.05,
-    default: 0,
-    // Same auto weights as Beat surge (pulse/attack) — punchy music wants
-    // both — but its own independent runtime magnitude and a distinct
-    // visual channel; see uChurnDrive's comment in FRAG and extraUniforms.
-    auto: { pulse: 0.3, attack: 0.2 },
-    // Same trigger as Beat surge — anim.onset — but its own independent
-    // envelope (churnPulse, below).
-    drive: { default: "feature.onset" },
+    default: 0.35,
+    // Speed pump only reads as a pump on music with real hits to push against.
+    auto: { pulse: 0.35, attack: 0.2 },
+    // Driven continuously by anim.lowPulse today — a plain Bass hit default
+    // (drives.ts's decaying-envelope reading of it, same field): a kick is
+    // the natural pedal to push against; rewire it to energy or anything
+    // else in the picker.
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "bass",
@@ -281,7 +380,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "fog",
     label: "Fog",
-    description: "How thin and bright the ridges sit at rest, between beats",
+    description: "How hazy and soft the ridges sit at rest, between beats",
     group: "Look",
     min: 0,
     max: 1,
@@ -381,7 +480,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "sparkleGrain",
     label: "Sparkle grain",
-    description: "How fine each glint is",
+    description: "How coarse each glint is",
     group: "Look",
     min: 0,
     max: 1,
@@ -470,31 +569,29 @@ const SETTINGS: SceneSetting[] = [
   },
 ];
 
-// Beat ripple pool. Every ring in flight is summed in the shader, so a new
-// beat only ever adds a ring — it never replaces one. The pool is sized so
-// that the slot a fresh ring reclaims (always the most-faded one, see
-// createRipplePool) has long since left the screen at any musical tempo:
-// with fewer slots and round-robin reuse, the fifth beat of a bar used to
-// erase a ring that was still a third as bright as when it started, which
-// read as the whole pattern being redrawn on that beat.
-const MAX_RIPPLES = 8;
-const RIPPLE_SPEED = 1.1; // units/sec a ring expands at
-const RIPPLE_WIDTH = 4.0; // gaussian tightness of a ring's height profile — lower = wider ring
-const RIPPLE_DECAY_PER_SEC = 0.45; // lower = the ring lives longer and travels farther
-// A drop starts as a dimple that grows into the ring rather than appearing
-// fully formed, so a beat reads as a strike on the water, not a cut.
-const RIPPLE_ATTACK_SEC = 0.06;
-// A drop moment gets one ring this much stronger than an ordinary beat.
-// Used to claim two coincident slots instead, which was the same picture
-// but burned a slot's worth of ring history for nothing.
+// Beat ripple's display-side read of the continuous emitter (rippleEmitter.ts
+// owns emission and profile-building; see that file's header). uRipple (the
+// "ripple" setting) scales crest brightening and slope-based refraction here,
+// at display time — not a launched ring's own amplitude, which is always a
+// full-strength ring for a full hit regardless of this dial (see the
+// "ripple" setting's own comment) — the same split the scene's very first
+// ring pool used, restored here after the wave tank's detour scaled the
+// *source* instead (see docs/scenes/caustics.md's 2026-09-27 entries).
+const RIPPLE_REFRACT = 0.3; // peak p-space displacement at uRipple=1 for one full-strength ring — the old pool's own RIPPLE_REFRACT
+// A soft knee, not a hard clamp, on the crest/slope a pixel reads: unchanged
+// up to RIPPLE_CEIL_KNEE — exactly where a single full-strength ring's own
+// peak sits, by construction (buildProfile normalizes to that) — so one ring
+// looks bit-for-bit like the old pool's; only several overlapping rings
+// pushing past that peak get gently pulled toward RIPPLE_CEIL_MAX instead of
+// tearing the pattern. Applied to crest and to |slope| alike (see softCeil in
+// FRAG) since both are normalized to the same single-ring peak of 1.
+const RIPPLE_CEIL_KNEE = 1.0;
+const RIPPLE_CEIL_MAX = 1.5;
+// A drop moment emits one ring this strong in addition to whatever an
+// ordinary beat is already emitting this tick (see the `extraUniforms`
+// closure below) — carried over from the old ring pool's RIPPLE_DROP_AMP,
+// same reasoning: a drop should read as a bigger strike than a plain beat.
 const RIPPLE_DROP_AMP = 1.8;
-// The refraction the shader applies is the *slope* of the ring's height
-// profile, not its height (see the ripple comment in FRAG). This scales the
-// gaussian derivative so its peak is exactly 1 per unit of ring strength;
-// RIPPLE_REFRACT below is then the peak displacement, in p-space units, of
-// a full-strength ring at uRipple = 1.
-const RIPPLE_SLOPE_NORM = Math.sqrt(2 * RIPPLE_WIDTH) * Math.exp(0.5);
-const RIPPLE_REFRACT = 0.3;
 
 // Hard ceiling on sharp regardless of uFog/uFocus. Was 26 in a brief period
 // where every focus setting shared this same ceiling as its *peak* — lowered
@@ -518,11 +615,18 @@ const FOG_SHARP_HAZY = 2.0;
 const FOG_FLOOR_CRISP = 0.13; // uFog = 0 -> today's old fixed dark-water cut (0.08) is inside this range
 const FOG_FLOOR_HAZY = 0.0;
 
+// uBreathe's zoom depth per full-strength cable — the same 0.10 swing the
+// old bar-locked cosine had at its peak (uBreathe 1, tempoLock 1). The
+// cable supplies the waveform, not this constant; see breatheDrive(0.0) in
+// FRAG for why the scene's own contribution is zero.
+const BREATHE_ZOOM = 0.10;
+
 // uLoudSwell's (loudSwellDrive above) two visual channels, both small at the
-// Loudness surge default (0.4) — see that constant's own comment — and both
+// Speed boost default (0.4) — see that constant's own comment — and both
 // on ground nothing else modulates at runtime: SWELL_ZOOM rides the same `p
-// *=` aperture line as uBreathe but is aperiodic and sustained rather than
-// bar-locked, and SWELL_FLOOR_LIFT rides the same dark-water floor cut uFog
+// *=` aperture line as BREATHE_ZOOM above, but the swell is the scene's own
+// aperiodic, sustained signal while uBreathe only moves when a cable
+// carries it, and SWELL_FLOOR_LIFT rides the same dark-water floor cut uFog
 // sets at rest, so a loud passage glows into that dim wash and a quiet one
 // deepens it, distinct from uFlash/uEnergy/dropDrive, which all brighten the
 // ridge *crests* instead.
@@ -739,57 +843,39 @@ export function driftFlows(phase: number, densScale: number, out: Float32Array =
 // actually cancels out to flowClock.ts's own base rate of 1.0/sec at the
 // slider's new midpoint — see driftRatePerSec below.
 const DRIFT_BASE_RATE = 2.0;
-// Gain the Kick surge slider applies at its own max, audio driver at 1.
-// Loudness surge no longer lives in this additive sum — see loudSpeedFactor
-// below and the file header's driftLoud paragraph: it's a geometric swing
-// applied as a separate multiplier after SURGE_CAP, not a summand inside it,
-// so a maxed Kick surge and a maxed Loudness surge no longer compete for the
-// same headroom. Beat surge used to be a third term here (driftBeat *
-// beatPulse * 2.0) — multiplying the rate meant it could only ever read as
-// "drift, briefly faster": the shader integrates a rate, so a brief bump in
-// it is a slope change, not a discontinuity the eye can catch, and
-// beatPulse's own 1/6s decay area capped the whole effect under 2% of one
-// noise cell even maxed. It's now advanceLurch below — an additive impulse
-// on the phase itself, independent of Drift speed and of Kick surge here.
-const KICK_SURGE_GAIN = 2.0;
-// Hard ceiling on driftBoost * kick surge (loudness's own swing is applied
-// after this — see loudSpeedFactor/DRIFT_RATE_MAX below, not this cap).
-// Uncapped, a maxed Kick surge against a maxed Drop reactivity boost
-// (driftBoost up to 1.8) reaches ~5.4x — 5 keeps the top end close to that
-// while staying a clear, coherent sprint rather than a hard clamp nobody
-// reaches.
-const SURGE_CAP = 5;
+// Gain Speed boost applies at its own max against a fully loud passage
+// (levelValue 1): LEVEL_GAIN/DRIFT_BASE_RATE = 1.5, so Speed boost at 1 adds
+// up to 1.5x the mid Drift speed on top of the base — additive, not a
+// multiplier on it (see driftRatePerSec below), which is what lets it still
+// move the pool with Drift speed parked at 0.
+const LEVEL_GAIN = 3.0;
 
-// Loudness surge's geometric swing (see the file header's driftLoud
-// paragraph for why this reads loudSwell, not frame.energy). Geometric about
-// a neutral pivot — LOUD_SWING^0 = 1 — so a fully quiet passage runs exactly
-// as many times *slower* as a fully loud one runs faster, and loudSwell=0.5
-// (silence, a legacy wire sender defaulting level to 0.5 per protocol.ts, or
-// too little observed range to calibrate — see advanceLoudSwell) is an exact
-// identity: the dial does nothing on material with no measurable dynamics,
-// rather than reading as noise. driftLoud^2 is the same top-weighting idiom
-// advanceKickJolt below uses (driftKick^2), so the default (0.4) keeps
-// roughly today's swing on a realistic chorus (~1.2x) while driftLoud=1
-// spans a dramatic quiet<->loud range (0.125x .. 8x).
-const LOUD_SWING = 4;
-const LOUD_DEPTH_MAX = 1.5;
+// Speed pump's own accumulator (advancePump, below). One hit's whole decaying
+// pulse (drives.ts's continuous reading of a catalogue hit, which decays at
+// BEAT_PULSE_DECAY_PER_SEC, animClock.ts) has an area of about
+// 1/BEAT_PULSE_DECAY_PER_SEC seconds, so PUMP_ACCEL=6.0 is sized so one
+// full-height hit at amount 1 adds about 1.0 phase/s to vel — doubling the
+// mid Drift speed for a moment, the same magnitude a single strike ought to
+// read as. PUMP_RELEASE_SEC is "slowly going back" from the user's own
+// description: at a steady 120bpm (2 hits/sec) that same ~1.0/s per hit
+// settles near 1.0 * 2 * PUMP_RELEASE_SEC = 3/s once the push and the decay
+// balance. PUMP_VEL_CAP keeps a fast, dense passage (a drum roll, hits with
+// little refractory gap between them) from accumulating without bound.
+const PUMP_ACCEL = 6.0;
+const PUMP_RELEASE_SEC = 1.5;
+const PUMP_VEL_CAP = 8;
 
-/** driftLoud (0..1) and loudSwell (0..1, 0.5 = neutral) -> a multiplier on
- *  the drift rate. Exported so tests/caustics.test.ts can pin the identity/
- *  monotonicity properties directly. */
-export function loudSpeedFactor(driftLoud: number, loudSwell: number): number {
-  return Math.pow(LOUD_SWING, LOUD_DEPTH_MAX * driftLoud * driftLoud * (2 * loudSwell - 1));
-}
-
-// Absolute ceiling on the rate driftRatePerSec returns, applied after
-// loudSpeedFactor. Every other term maxed (drift=1, driftBoost=1.8 capped
-// with a maxed Kick surge into SURGE_CAP=5, loudSpeedFactor=8 at
-// loudSwell=1) would otherwise reach DRIFT_BASE_RATE(2) * 5 * 8 = 80/sec;
-// this keeps the top end a fast, coherent sprint instead of an incoherent
-// blur.
+// Absolute ceiling on the rate driftRatePerSec returns. The additive model
+// below can't reach this on its own even with every term maxed at once —
+// base = DRIFT_BASE_RATE(2) * drift(1) * (1 + dropReactivity(1) *
+// sectionIntensity(1) * 0.8) = 3.6, level = LEVEL_GAIN(3), pump capped at
+// PUMP_VEL_CAP(8), summing to 14.6 — so this is now a generous backstop
+// rather than a value any combination of settings is meant to reach, unlike
+// the older multiplicative surge design this rate replaced (see this file's
+// git history), which could actually walk right up to it.
 const DRIFT_RATE_MAX = 20;
 
-// Loudness surge's driver: FeatureFrame.level, fast-tracked and calibrated
+// Speed boost's driver: FeatureFrame.level, fast-tracked and calibrated
 // against its own leaky floor/ceiling. This is the deliberate inverse of
 // sectionIntensity.ts, which contracts its own floor/ceiling on a
 // phrase-length timescale (~3.3s/~12s) so a long quiet passage climbs back
@@ -851,46 +937,57 @@ export function advanceLoudSwell(st: LoudSwellState, dtSec: number, level: numbe
   return LOUD_NEUTRAL + confidence * (raw - LOUD_NEUTRAL);
 }
 
-// loudSwellDrive is uLoudSwell's JS-side source — the same driftLoud^2 *
-// (2*loudSwell - 1) shape as loudSpeedFactor's exponent, but left linear and
-// signed ([-1, 1], 0 at neutral) rather than exponentiated, since FRAG uses
-// it as a direct multiplier on aperture/floor terms rather than a rate
-// ratio. See the file header's driftLoud paragraph for what it drives.
-export function loudSwellDrive(driftLoud: number, loudSwell: number): number {
-  return driftLoud * driftLoud * (2 * loudSwell - 1);
+// loudSwellDrive is uLoudSwell's JS-side source: driftLevel^2 weights how
+// far loudSwell (0..1, 0.5 = neutral) can push it — squared so the swing
+// opens up mostly in the slider's top half rather than growing linearly —
+// left linear and signed ([-1, 1], 0 at neutral) rather than exponentiated,
+// since FRAG uses it as a direct multiplier on aperture/floor terms rather
+// than a rate ratio. See the file header's driftLevel paragraph for what it
+// drives.
+export function loudSwellDrive(driftLevel: number, loudSwell: number): number {
+  return driftLevel * driftLevel * (2 * loudSwell - 1);
 }
 
-// A kick strike also adds a bounded *position* offset on top of driftPhase,
-// separate from the rate term above — see the file header. A rate-only surge
-// integrates a kick's sharp attack into a smooth ramp (the same shape a
-// higher Drift speed already produces, just briefly), so no amount of gain
-// on the rate term can ever make it read as a hit rather than a glide. This
-// term is what actually produces the "pump", and is weighted toward the top
-// of the driftKick slider (driftKick^2 in advanceKickJolt below) so low
-// settings stay purely the existing smooth rate surge.
-// -> ~0.3 of a noise cell in flow's own units (flow = phase * FLOW_X,
-// noise sampled at q*1.7/q*2.3) — clearly visible, well short of a teleport.
-const KICK_JOLT_PHASE = 2.0;
-// One-pole slew rate toward the jolt's target (see advanceKickJolt). Fast
-// enough to read as a strike; not instant, because lowPulse itself steps
-// 0->1 in a single tick (bandEnergy.ts) and stepping driftPhase that fast
-// would tear the field instead of reading as a strike — the same reasoning
-// RIPPLE_ATTACK_SEC applies to a fresh ring, below.
-const KICK_JOLT_SLEW_PER_SEC = 18;
+export interface PumpState {
+  vel: number;
+}
+
+export function createPumpState(): PumpState {
+  return { vel: 0 };
+}
+
+/** Advances Speed pump's own accumulating velocity in place: `input` (0..1 —
+ *  whatever the "driftPump" drive picker is wired to, a hit's decaying
+ *  envelope by default) accelerates `vel` by
+ *  `PUMP_ACCEL * amount * input * dtSec`, then `vel` decays exponentially
+ *  toward 0 with time constant PUMP_RELEASE_SEC — "each push accelerates
+ *  drift speed, then it slowly goes back to the one set by drift", the
+ *  user's own gas-pedal description. `amount` is the driftPump slider
+ *  (0..1); the resulting `vel` is what driftRatePerSec below adds straight
+ *  onto the rate, so a maxed amount with no input still decays to 0 rather
+ *  than holding a floor. Capped at PUMP_VEL_CAP so a dense run of pushes
+ *  can't accumulate without bound. Pure aside from `st`, and exported so
+ *  tests/caustics.test.ts can pin the accelerate/release shape directly. */
+export function advancePump(st: PumpState, dtSec: number, input: number, amount: number): void {
+  st.vel += PUMP_ACCEL * amount * input * dtSec;
+  st.vel *= Math.exp(-dtSec / PUMP_RELEASE_SEC);
+  if (st.vel > PUMP_VEL_CAP) st.vel = PUMP_VEL_CAP;
+}
 
 export interface DriftInputs {
   /** The Drift speed slider, 0..1 (0.5 = original scene speed, 1 = 2x). */
   drift: number;
-  /** Kick surge slider, 0..1. Beat surge is not here — see advanceLurch
-   *  below. */
-  driftKick: number;
-  /** Loudness surge slider, 0..1 — see loudSpeedFactor above. */
-  driftLoud: number;
-  /** anim.lowPulse, already a decaying 0..1 pulse. */
-  lowPulse: number;
-  /** loudSwell (0..1, 0.5 = neutral) — advanceLoudSwell's calibrated
-   *  loudness, not frame.energy; see loudSpeedFactor above for why. */
-  loudSwell: number;
+  /** Speed boost slider, 0..1 — see LEVEL_GAIN above. */
+  driftLevel: number;
+  /** loudSwell by default (0..1, 0.5 = neutral) — advanceLoudSwell's
+   *  calibrated loudness — or whatever source the "driftLevel" picker is
+   *  wired to instead: drives.value("driftLevel", loudSwellCalibrated) in
+   *  extraUniforms below. */
+  levelValue: number;
+  /** Speed pump's own accumulating velocity (advancePump's `vel`), already scaled
+   *  by the driftPump slider and its input, and added straight onto the
+   *  rate — see PUMP_ACCEL/PUMP_RELEASE_SEC above. */
+  pumpVel: number;
   /** Drop reactivity slider (0..1) and sectionIntensity (0..1) — same boost
    *  the shader's dropDrive/dropFlash terms use, so drift speeds up with the
    *  song's own intensity in the same choruses/drops that brighten it. */
@@ -900,112 +997,15 @@ export interface DriftInputs {
 
 /** Pure phase-rate math for the drift accumulator, split out from
  *  extraUniforms so it's directly testable (see tests/caustics.test.ts) —
- *  this is the function that would have caught the 2x-attenuation bug. */
+ *  this is the function that would have caught the 2x-attenuation bug.
+ *  Additive rather than multiplicative: driftLevel and pumpVel both add
+ *  straight onto the Drift-speed base instead of scaling it, which is what
+ *  lets either one still move the pool while Drift speed itself sits at 0 —
+ *  a multiplier on a base of zero can only ever stay zero. */
 export function driftRatePerSec(s: DriftInputs): number {
-  const driftBoost = 1 + s.sectionIntensity * s.dropReactivity * 0.8;
-  const surge = 1 + s.driftKick * s.lowPulse * KICK_SURGE_GAIN;
-  const modulation = Math.min(driftBoost * surge, SURGE_CAP);
-  const loud = loudSpeedFactor(s.driftLoud, s.loudSwell);
-  return Math.min(DRIFT_BASE_RATE * s.drift * modulation * loud, DRIFT_RATE_MAX);
-}
-
-// Beat surge: a damped impulse added directly to the drift phase, fired on
-// anim.onset (the render-latched edge — see renderLatch.ts and this scene's
-// own onset comment further down) rather than modulating driftRatePerSec's
-// rate. Magnitude (LURCH_IMPULSE) and snap (LURCH_DECAY_PER_SEC) are
-// independent knobs here, which the old beatPulse-multiplied design could
-// never offer: beatPulse's own fixed ~1/6s decay area welded "how far" to
-// "how sharp" together, and that fixed area was the real ceiling on how
-// strong a lurch could ever look. Being additive rather than multiplicative
-// on drift also means it fires even at Drift speed 0.
-const LURCH_DECAY_PER_SEC = 9; // tau ~110ms — controls snap
-const LURCH_IMPULSE = 14.4; // controls distance: total displacement per beat
-// is amount * LURCH_IMPULSE / LURCH_DECAY_PER_SEC (1.6 phase units at
-// driftBeat=1, ~5x the old design's maxed displacement).
-// The onset refractory is 100ms (features.ts), so back-to-back onsets could
-// otherwise stack velocity indefinitely; this caps it at 1.5 fires' worth.
-const LURCH_VEL_CAP = LURCH_IMPULSE * 1.5;
-// Beat churn's gain on warpAmt (FRAG) — see uChurnDrive's own comment there,
-// and extraUniforms' churnPulse, for its own independent decaying envelope.
-const CHURN_GAIN = 0.8;
-
-export interface LurchState {
-  vel: number;
-  phase: number;
-}
-
-export function createLurchState(): LurchState {
-  return { vel: 0, phase: 0 };
-}
-
-/** Advances a damped impulse in place: `fired` kicks the velocity up by
- *  `amount * LURCH_IMPULSE` (capped), then the phase integrates that
- *  velocity and the velocity decays exponentially — a fast, symmetric
- *  attack-and-coast, unlike rippleEnvelope's asymmetric ring shape. Pure and
- *  exported for tests/caustics.test.ts. */
-export function advanceLurch(st: LurchState, dtSec: number, fired: boolean, amount: number): void {
-  if (fired) st.vel = Math.min(st.vel + amount * LURCH_IMPULSE, LURCH_VEL_CAP);
-  st.phase += st.vel * dtSec;
-  st.vel *= Math.exp(-dtSec * LURCH_DECAY_PER_SEC);
-}
-
-/** Bounded forward offset added on top of driftPhase for a kick strike — see
- *  KICK_JOLT_PHASE's own comment above for why driftRatePerSec's rate term
- *  can't produce this on its own. Slewed toward its target (never jumped),
- *  so it stays within [0, KICK_JOLT_PHASE] for any driftKick/lowPulse in
- *  [0, 1] and any non-negative dtSec, converging on its own as lowPulse
- *  decays — no separate release handling needed. Exported so
- *  tests/caustics.test.ts can pin its bounds, weighting and decay directly. */
-export function advanceKickJolt(prevJolt: number, driftKick: number, lowPulse: number, dtSec: number): number {
-  const target = KICK_JOLT_PHASE * driftKick * driftKick * lowPulse;
-  return prevJolt + (target - prevJolt) * Math.min(1, KICK_JOLT_SLEW_PER_SEC * dtSec);
-}
-
-/** A ring's strength over its life: a short attack from 0 (the strike),
- *  then an exponential fade slow enough that a ring is still clearly
- *  visible by the time it reaches the far corner of a 16:9 frame (p-space
- *  radius ~3 at this scene's 3x zoom). Pure so tests/caustics.test.ts can
- *  pin that "rings reach the edge" property directly. */
-export function rippleEnvelope(ageSec: number): number {
-  if (ageSec <= 0) return 0;
-  return (1 - Math.exp(-ageSec / RIPPLE_ATTACK_SEC)) * Math.exp(-ageSec * RIPPLE_DECAY_PER_SEC);
-}
-
-/** Pool of rings in flight. Per-slot radius and strength are computed here
- *  each tick and uploaded as two uniform arrays, so the shader only does the
- *  spatial part. Exported for tests/caustics.test.ts. */
-export function createRipplePool() {
-  const age = new Float32Array(MAX_RIPPLES).fill(1e6); // huge = never triggered, fully faded
-  const amp = new Float32Array(MAX_RIPPLES); // 0 = inactive
-  const radius = new Float32Array(MAX_RIPPLES);
-  const strength = new Float32Array(MAX_RIPPLES);
-  return {
-    /** Current ring radius per slot, in p-space units. */
-    radius,
-    /** Current ring strength per slot: amplitude x rippleEnvelope(age). */
-    strength,
-    /** Starts a fresh ring in whichever slot has been fading the longest.
-     *  Never the youngest — a beat must not erase the ring the last beat
-     *  sent out, only add its own. */
-    trigger(amplitude = 1): void {
-      let slot = 0;
-      for (let i = 1; i < MAX_RIPPLES; i++) if (age[i] > age[slot]) slot = i;
-      age[slot] = 0;
-      amp[slot] = amplitude;
-      radius[slot] = 0;
-      strength[slot] = 0;
-    },
-    tick(dtSec: number): void {
-      for (let i = 0; i < MAX_RIPPLES; i++) {
-        age[i] += dtSec;
-        // An inactive slot reports radius 0 (not a huge stale one) so the
-        // arrays stay readable in tests and probes; strength 0 already
-        // makes it contribute nothing.
-        radius[i] = amp[i] > 0 ? age[i] * RIPPLE_SPEED : 0;
-        strength[i] = amp[i] * rippleEnvelope(age[i]);
-      }
-    },
-  };
+  const base = DRIFT_BASE_RATE * s.drift * (1 + s.sectionIntensity * s.dropReactivity * 0.8);
+  const level = LEVEL_GAIN * s.driftLevel * s.levelValue;
+  return Math.min(base + level + s.pumpVel, DRIFT_RATE_MAX);
 }
 
 const FRAG = `
@@ -1034,14 +1034,16 @@ void main() {
   float dropDrive = uDropReactivity * uSectionIntensity;
   float dropFlash = uDropReactivity * uDropPulse;
 
-  // Tempo-locked breathing: a slow zoom once per bar, off the phase-locked
-  // beat clock (never restarts mid-beat) and faded by tempoLock so it eases
-  // in/out with tempo detection instead of popping.
-  float breatheAmt = uBreathe * uTempoLock * 0.10 * cos(uBarPhase * TWO_PI);
-  p *= 1.0 + breatheAmt;
+  // Breathe: the pool zooms on whatever source is patched onto the breathe
+  // setting, at BREATHE_ZOOM depth scaled by uBreathe. The scene's own
+  // contribution is nothing — breatheDrive(0.0) is bit-for-bit no zoom until
+  // a cable carries a signal (the old bar-locked cosine this line replaced
+  // had the beat clock supply the waveform).
+  p *= 1.0 + ${BREATHE_ZOOM.toFixed(2)} * uBreathe * breatheDrive(0.0);
   // Loudness swell's aperture: a loud passage opens the pool wider, a quiet
-  // one tightens it — aperiodic and sustained, unlike uBreathe's bar-locked
-  // zoom above. See SWELL_ZOOM's own comment for why this line, not a new one.
+  // one tightens it — the scene's own sustained signal, where the breath
+  // above only moves when a cable carries it. See SWELL_ZOOM's own comment
+  // for why this line, not a new one.
   p *= 1.0 - ${SWELL_ZOOM.toFixed(2)} * uLoudSwell;
 
   // Bass swell: a sustained radial bulge near center, strongest right on a
@@ -1075,48 +1077,40 @@ void main() {
   vec2 flowBack = vec2(uDriftFlow[${FLOW_BACK}], uDriftFlow[${FLOW_BACK + 1}]);
   vec2 sparkleFlow = vec2(uDriftFlow[${FLOW_SPARKLE}]);
 
-  // Beat ripple pool: every ring in flight (MAX_RIPPLES slots, radius and
-  // strength per slot from createRipplePool) is summed here, so a new beat
-  // adds a ring on top of the ones still travelling instead of replacing
-  // them. Each ring is modelled as a gaussian bump in the water's height at
-  // its current radius, and the pattern is refracted through it the way a
-  // real ripple bends the caustics beneath it: the sampling point shifts
-  // radially by the surface *slope* (the bump's derivative), not by its
-  // height. That matters for two reasons. The slope is an odd function
-  // around the crest — the pattern is pushed outward just inside the ring
-  // and drawn back just outside it — so a passing ring reads as a wave
-  // sweeping through the filaments, where the old height-based push shifted
-  // everything near the ring toward the center in one lump. And the slope
-  // of a bump sitting at radius 0 (a ring that just spawned) is zero at the
-  // origin and grows linearly away from it, so a fresh ring is a smooth
-  // dimple. The old lobe was at full height exactly at the origin, where
-  // radialDir flips sign — a tear that dragged every nearby filament into a
-  // single pinch point on each beat.
-  //
-  // The mirrored term (pLen + r) is what a radially symmetric wave actually
-  // looks like on the other side of the origin. It only matters while a
-  // ring is still small, and its job is to keep the total slope exactly
-  // zero at the origin for every radius, not just at spawn.
+  // Beat ripple: rippleEmitter.ts's continuous ring emitter, built on the
+  // CPU each frame into a 1D radial crest/slope profile (uRippleCrest/
+  // uRippleSlope — see that file's buildProfile) and sampled here at this
+  // pixel's own radius via rippleSampleCrest/rippleSampleSlope (declared in
+  // extraUniformDecls below), in place of the old pool's own per-slot loop
+  // over ring uniforms — see rippleEmitter.ts's header for why this shape
+  // replaced both the pool and, briefly, a real 2D wave simulation. The
+  // pattern is refracted by the ring's *slope*, not its height — the same
+  // reasoning the old pool used: a slope pushes the pattern outward on the
+  // rising side of a ring and draws it back on the falling side, reading as
+  // a wave sweeping through the filaments, where a height-based push would
+  // instead drag everything near a crest toward one lump.
   float pLen = length(p);
   vec2 radialDir = pLen > 1e-4 ? p / pLen : vec2(1.0, 0.0);
-  float ringCrest = 0.0; // summed ring height here — lights the crest
-  float ringSlope = 0.0; // summed radial slope here — refracts the pattern
-  for (int i = 0; i < ${MAX_RIPPLES}; i++) {
-    float s = uRippleStrength[i];
-    float r = uRippleRadius[i];
-    float dOut = pLen - r;
-    float dIn = pLen + r;
-    float gOut = exp(-dOut * dOut * ${RIPPLE_WIDTH.toFixed(2)});
-    float gIn = exp(-dIn * dIn * ${RIPPLE_WIDTH.toFixed(2)});
-    ringCrest += s * (gOut + gIn);
-    ringSlope += s * (dOut * gOut + dIn * gIn);
-  }
-  float ring = uRipple * ringCrest;
+  float ringCrestRaw = rippleSampleCrest(pLen);
+  float ringSlopeRaw = rippleSampleSlope(pLen);
+  // A soft knee, not a hard clamp: unchanged up to RIPPLE_CEIL_KNEE, exactly
+  // where a single full-strength ring's own peak sits by construction (see
+  // RIPPLE_CEIL_KNEE's own comment) — so one ring looks bit-for-bit like the
+  // old pool's; only several overlapping rings pushing past that peak get
+  // gently pulled toward RIPPLE_CEIL_MAX instead of tearing the pattern.
+  float ringCrest = softCeil(ringCrestRaw, ${RIPPLE_CEIL_KNEE.toFixed(2)}, ${RIPPLE_CEIL_MAX.toFixed(2)});
+  float ringSlope = softCeil(ringSlopeRaw, ${RIPPLE_CEIL_KNEE.toFixed(2)}, ${RIPPLE_CEIL_MAX.toFixed(2)});
+  // max(., 0.0): Bump/Merge's crest never goes negative (a bare sum of two
+  // positive gaussians), so this is a no-op for them; Wave's own crest can
+  // (its trough dips below the resting level), and a trough shouldn't darken
+  // the picture below its own resting look — only a crest brightens it. The
+  // refraction term below reads ringSlope directly, signed, unaffected.
+  float ring = uRipple * max(ringCrest, 0.0);
   // Scaled by densScale here, once — every later octave builds on q by
   // accumulating onto it (see the loop below), so the whole pattern inherits
   // the frequency change from this one multiply rather than re-scaling p at
   // each octave separately.
-  vec2 q = (p + radialDir * uRipple * ringSlope * ${(RIPPLE_SLOPE_NORM * RIPPLE_REFRACT).toFixed(4)}) * densScale;
+  vec2 q = (p + radialDir * uRipple * ringSlope * ${RIPPLE_REFRACT.toFixed(3)}) * densScale;
 
   int iterations = int(mix(3.0, 6.0, uDetail));
   float acc = 0.0;
@@ -1145,20 +1139,15 @@ void main() {
   // — removed at the time (see this file's git history) because it moved
   // ridge *positions* on every beat as a side effect of an anti-aliasing fix
   // that didn't demonstrably work, i.e. unwanted motion for no proven
-  // benefit. uChurnDrive below reopens that same channel — warpAmt moving on
-  // the beat — but deliberately this time, as the entire point of the Beat
-  // churn setting, gated by its own slider rather than riding automatically
-  // on Focus snap. It's driven by its own decaying pulse (churnPulse in
-  // extraUniforms below), not the drift lurch's velocity: the lurch's
-  // velocity is kicked by driftBeat's amount, so deriving churn from it
-  // would tie Beat churn's strength to Beat surge and leave churn inert
-  // whenever driftBeat was 0. churnPulse instead fires on the same
-  // anim.onset tick and shares the lurch's LURCH_DECAY_PER_SEC decay, so the
-  // shove and the churn snap together in time without their magnitudes
-  // being coupled. aaSharp below still bounds the pixel-ladder artifact
-  // independent of warpAmt; a maxed Beat churn against a maxed Focus snap is
-  // the case to eyeball for it.
-  float warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2 + dropDrive * 0.7 + uChurnDrive * ${CHURN_GAIN.toFixed(2)});
+  // benefit. uTurbulence below already owns this same warpAmt channel and is
+  // drive-wirable (see the "turbulence" SceneSetting's own drive) — pick Any
+  // hit there instead of reaching for a second, dedicated beat-reshape
+  // control (a "Beat churn" setting used to duplicate exactly this channel
+  // with its own decaying pulse; removed for that reason — see this file's
+  // git history). aaSharp below still bounds the pixel-ladder artifact
+  // independent of warpAmt; a maxed Mid turbulence against a maxed Focus
+  // snap is the case to eyeball for it.
+  float warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2 + dropDrive * 0.7);
   for (int i = 0; i < ${RIDGE_OCTAVES}; i++) {
     if (i >= iterations) break;
     float band = sampleBands(float(i) / ${RIDGE_OCTAVES}.0);
@@ -1326,84 +1315,147 @@ void main() {
 }
 `;
 
-export const causticsScene = createFullscreenScene("caustics", "Caustics", FRAG, {
-  settings: SETTINGS,
-  extraUniformDecls: `uniform float uDriftFlow[${DRIFT_FLOW_LEN}];\nuniform float uChurnDrive;\nuniform float uLoudSwell;\nuniform float uRippleRadius[${MAX_RIPPLES}];\nuniform float uRippleStrength[${MAX_RIPPLES}];`,
-  extraUniforms: (() => {
+export const causticsScene = createFullscreenScene(
+  "caustics",
+  "Caustics",
+  FRAG,
+  (() => {
     let driftPhase = 0;
-    const lurch = createLurchState();
+    const pump = createPumpState();
     const loudSwellState = createLoudSwellState();
-    // Beat churn's own envelope: a plain decaying pulse, jumping to 1 on
-    // anim.onset and decaying at the same LURCH_DECAY_PER_SEC as the lurch —
-    // so a beat's shove and its churn snap on the same tick with the same
-    // sharpness — but with its own magnitude, gated only by driftChurn. It
-    // must NOT be lurch.vel: that's kicked by driftBeat's amount, so at
-    // driftBeat=0 the lurch never gains velocity and a churn derived from it
-    // would silently do nothing however high driftChurn was set, defeating
-    // the point of a second, independent dial.
-    let churnPulse = 0;
-    let kickJolt = 0;
-    const ripples = createRipplePool();
-    let prevDropOnset = false;
     const flowBuf = new Float32Array(DRIFT_FLOW_LEN);
 
-    return (frame, anim, getSetting, drives) => {
-      const driftKick = getSetting("driftKick");
-      const driftLoud = getSetting("driftLoud");
-      // Kept up to date every tick regardless of driftLoud's own drive
-      // choice — see the "driftLoud" SceneSetting's own comment — and
-      // drives.value()'s sceneDefault, so at that setting's Scene default
-      // (today's behavior) loudSwell is exactly this calibrated reading.
-      const loudSwellCalibrated = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
-      const loudSwell = drives.value("driftLoud", loudSwellCalibrated);
-      driftPhase += anim.dtSec * driftRatePerSec({
-        drift: getSetting("drift"),
-        driftKick,
-        driftLoud,
-        // Bass hit's own decaying envelope at driftKick's Beat-hit default —
-        // see the "driftKick" SceneSetting's own comment.
-        lowPulse: drives.value("driftKick", anim.lowPulse),
-        loudSwell,
-        dropReactivity: getSetting("dropReactivity"),
-        sectionIntensity: anim.sectionIntensity,
-      });
-      advanceLurch(lurch, anim.dtSec, drives.fired("driftBeat", anim.onset), getSetting("driftBeat"));
-      churnPulse *= Math.exp(-anim.dtSec * LURCH_DECAY_PER_SEC);
-      if (drives.fired("driftChurn", anim.onset)) churnPulse = 1;
-      const churnDrive = getSetting("driftChurn") * churnPulse;
-      // Not gated behind Drift speed the way the rate term above is — a
-      // kick strike should still land even with drift=0 (see the file
-      // header's driftKick comment). Same drives.value() reading as the
-      // rate term above, not a second independent read.
-      kickJolt = advanceKickJolt(kickJolt, driftKick, drives.value("driftKick", anim.lowPulse), anim.dtSec);
+    // Beat ripple's own emitter state: `emission` conditions the driver
+    // signal into a launched amount each frame (advanceEmission), `emitter`
+    // holds every ring still in flight, and `crestBuf`/`slopeBuf` are the
+    // persistent arrays buildProfile fills and extraUniforms uploads — see
+    // rippleEmitter.ts's header for how the three fit together.
+    const emission = createRippleEmissionState();
+    const ringRate = createRingRateState();
+    const emitter = createRippleEmitter();
+    const crestBuf = new Float32Array(PROFILE_SAMPLES);
+    const slopeBuf = new Float32Array(PROFILE_SAMPLES);
+    let prevDropOnset = false;
 
-      ripples.tick(anim.dtSec);
-      // A drop is rarer and bigger than an ordinary beat — one stronger ring
-      // in place of (not on top of) the beat that usually lands on the same
-      // tick, independent of the "ripple" setting's own drive choice.
-      // Edge-triggered locally since anim.dropOnset is already a one-shot
-      // pulse, but the guard keeps this robust if that ever changes.
-      const drop = anim.dropOnset && !prevDropOnset;
-      prevDropOnset = anim.dropOnset;
-      if (drop) ripples.trigger(RIPPLE_DROP_AMP);
-      // At the "ripple" setting's Scene default this reproduces today's
-      // exact trigger (a bass hit OR a broadband beat, unconditionally —
-      // see that setting's own comment); a non-default pick fires on
-      // whatever single catalogue/grid/line source the picker chose
-      // instead. Reads anim.onset, not frame.onset directly — see
-      // AnimFrame's own doc: a scene reading FeatureFrame.onset can miss
-      // the tick it fired on whenever the render cap skips it, which is
-      // exactly the bug this scene used to have (renderLatch.ts's header
-      // has the story).
-      else if (drives.fired("ripple", anim.lowOnset || anim.onset)) ripples.trigger(1);
+    return {
+      settings: SETTINGS,
+      extraUniformDecls: `
+uniform float uDriftFlow[${DRIFT_FLOW_LEN}];
+uniform float uLoudSwell;
+uniform float uRippleCrest[${PROFILE_SAMPLES}];
+uniform float uRippleSlope[${PROFILE_SAMPLES}];
+// Linear interpolation into a profile array built by rippleEmitter.ts's
+// buildProfile — see FRAG's own comment above the Beat ripple block for how
+// these two feed the display.
+float rippleSampleCrest(float r) {
+  float t = clamp(r / ${PROFILE_MAX_RADIUS.toFixed(2)}, 0.0, 1.0) * ${(PROFILE_SAMPLES - 1).toFixed(1)};
+  int i0 = int(t);
+  int i1 = min(i0 + 1, ${PROFILE_SAMPLES - 1});
+  return mix(uRippleCrest[i0], uRippleCrest[i1], fract(t));
+}
+float rippleSampleSlope(float r) {
+  float t = clamp(r / ${PROFILE_MAX_RADIUS.toFixed(2)}, 0.0, 1.0) * ${(PROFILE_SAMPLES - 1).toFixed(1)};
+  int i0 = int(t);
+  int i1 = min(i0 + 1, ${PROFILE_SAMPLES - 1});
+  return mix(uRippleSlope[i0], uRippleSlope[i1], fract(t));
+}
+// A soft knee, not a hard clamp — see RIPPLE_CEIL_KNEE/RIPPLE_CEIL_MAX's own
+// comment in caustics.ts. Signed, so a slope's own push/pull direction
+// survives the ceiling.
+float softCeil(float x, float knee, float ceil) {
+  float m = abs(x);
+  float c = m <= knee ? m : knee + (ceil - knee) * tanh((m - knee) / (ceil - knee));
+  return sign(x) * c;
+}`,
 
-      return {
-        uDriftFlow: driftFlows(driftPhase + lurch.phase + kickJolt, causticDensityScale(getSetting("causticDensity")), flowBuf),
-        uChurnDrive: churnDrive,
-        uLoudSwell: loudSwellDrive(driftLoud, loudSwell),
-        uRippleRadius: ripples.radius,
-        uRippleStrength: ripples.strength,
-      };
+      extraUniforms: (frame, anim, getSetting, drives) => {
+        const driftLevel = getSetting("driftLevel");
+        // Kept up to date every tick regardless of driftLevel's own drive
+        // choice — see the "driftLevel" SceneSetting's own comment — and
+        // drives.value()'s sceneDefault, so at that setting's Scene default
+        // (today's behavior) levelValue is exactly this calibrated reading.
+        const loudSwellCalibrated = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
+        const levelValue = drives.value("driftLevel", loudSwellCalibrated);
+        // Speed pump's own accelerate-then-release velocity, advanced before the
+        // rate below reads pump.vel, so this tick's push already counts.
+        // Bass hit's own decaying envelope at driftPump's Beat-hit default —
+        // see the "driftPump" SceneSetting's own comment.
+        advancePump(pump, anim.dtSec, drives.value("driftPump", anim.lowPulse), getSetting("driftPump"));
+        driftPhase += anim.dtSec * driftRatePerSec({
+          drift: getSetting("drift"),
+          driftLevel,
+          levelValue,
+          pumpVel: pump.vel,
+          dropReactivity: getSetting("dropReactivity"),
+          sectionIntensity: anim.sectionIntensity,
+        });
+
+        // Beat ripple: age every ring already in flight first, so a ring
+        // emitted below starts this frame at age 0 instead of ageing before
+        // its own first sample (see rippleEmitter.ts's tick's own doc
+        // comment). Wave speed/Wave fade/Ring width are resolved into one
+        // params object shared by tick and buildProfile below.
+        const rippleParams: RippleProfileParams = {
+          decayPerSec: rippleDecayFor(getSetting("waveFade")),
+          speedUnitsPerSec: rippleSpeedFor(getSetting("waveSpeed")),
+          widthGaussianW: rippleWidthFor(getSetting("ringWidth")),
+        };
+        const ringStyle = ringStyleFor(getSetting("ringStyle"));
+        emitter.tick(anim.dtSec, rippleParams);
+
+        // The Scene default this setting's drive picker reproduces — "bass
+        // or beat hit" — read here as the two decaying pulses' max, a
+        // continuous envelope rather than a one-shot edge (see the "ripple"
+        // setting's own comment and advanceEmission's own doc comment for
+        // why a continuous rise-based read is what makes a busy driver duck
+        // itself instead of stacking full rings).
+        const sceneDefaultSignal = Math.max(anim.lowPulse, anim.beatPulse);
+        const rawSignal = drives.value("ripple", sceneDefaultSignal);
+        // drives.threshold() is null while Ring threshold's own Off switch is
+        // pressed (drives.ts's header's threshold paragraph) — passed through
+        // as-is, since that's exactly what advanceEmission's own `threshold`
+        // param wants for "every climb rings, sized by its own climb".
+        // undefined only means there's no engine at all (PASSTHROUGH_DRIVES).
+        const rippleThreshold = drives.threshold("ripple");
+        const emitted = advanceEmission(emission, anim.dtSec, rawSignal, rippleThreshold === undefined ? RING_THRESHOLD_DEFAULT : rippleThreshold);
+        emitter.emit(emitted, ringStyle);
+        // The panel draws these on Beat ripple's own "What it receives"
+        // graph (settingMarks.ts): the level a bump has to reach to send a
+        // ring, and each ring actually sent. Only the one line — a second
+        // "full ring" line made the graph harder to read, and a ring's dot
+        // already shows how strong it was. No lines at all while Ring
+        // threshold is off (salienceMarks returns null) — the ring itself
+        // still shows as a reaction.
+        const marks = salienceMarks(emission);
+        publishSettingMarks("caustics", "ripple", marks ? [{ value: marks.ringsAbove, label: "reach to ring" }] : [], emitted);
+
+        // A drop is rarer and bigger than an ordinary beat — a stronger ring
+        // emitted in addition to whatever the continuous driver above just
+        // emitted, independent of the "ripple" setting's own drive choice.
+        // Edge-triggered locally since anim.dropOnset is already a one-shot
+        // pulse, but the guard keeps this robust if that ever changes.
+        const drop = anim.dropOnset && !prevDropOnset;
+        prevDropOnset = anim.dropOnset;
+        if (drop) emitter.emit(RIPPLE_DROP_AMP, ringStyle);
+
+        // Rings that come close together are drawn narrower so they stay
+        // separate instead of summing to a flat plateau (rippleEmitter.ts's
+        // Auto-narrowing comment). Merge already spaces its rings out by
+        // combining close ones, so it keeps the plain Ring width.
+        advanceRingRate(ringRate, anim.dtSec, emitted);
+        const profileParams: RippleProfileParams =
+          ringStyle === "merge"
+            ? rippleParams
+            : { ...rippleParams, widthGaussianW: autoNarrowWidthW(rippleParams.widthGaussianW, rippleParams.speedUnitsPerSec, ringRate) };
+        buildProfile(emitter, profileParams, crestBuf, slopeBuf, ringStyle);
+
+        return {
+          uDriftFlow: driftFlows(driftPhase, causticDensityScale(getSetting("causticDensity")), flowBuf),
+          uLoudSwell: loudSwellDrive(driftLevel, levelValue),
+          uRippleCrest: crestBuf,
+          uRippleSlope: slopeBuf,
+        };
+      },
     };
   })(),
-});
+);

@@ -21,8 +21,14 @@ import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
  * straight off the render-latched AnimFrame it's handed (see renderLatch.ts
  * and drives.ts's own header), never through `read()` here, which always
  * returns the decaying envelope instead (see the next paragraph). `kind:
- * "level"` entries have no paired edge — `fired()` on one of these falls
- * back to whatever `sceneDefaultFired` the caller passed in, same as Scene.
+ * "level"` entries have no paired edge — a sustained reading has no rising
+ * instant to latch — so `fired()` on one of these instead runs the source's
+ * own weighted reading through a per-source Schmitt trigger
+ * (src/render/valueTrigger.ts) that turns "crossed a fire mark" into a
+ * one-shot the way a real edge would, rather than falling back to whatever
+ * `sceneDefaultFired` the caller passed in (the drawn line, `{ source:
+ * "line" }`, is the other DriveChoice with no edge and takes the same path —
+ * see drives.ts's own header).
  *
  * This is otherwise purely descriptive for the `reads` role: nothing reads
  * a `SceneSetting.reads` entry at render time — the actual driving happens
@@ -33,6 +39,14 @@ import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
  * `SceneSetting.drive` doesn't author `reads` at all — its row's live pill
  * is derived from the drive choice itself instead (sceneSettings.ts's own
  * `drive` doc comment).
+ *
+ * The tempo family splits into two: `anim.metronome`/`anim.metronomeBar`
+ * (and the Beat wave/Bar wave/Tempo entries, which now ride the metronome's
+ * own level/phase/bpm) read metronome.ts's steady, always-evenly-spaced
+ * clock; the plain Beat grid choice (drives.ts's `{source:"beat", grid}`,
+ * gridPulse.ts) reads the tracker's own beat live instead, falling back to
+ * raw hits whenever it isn't sure — see metronome.ts's own header for why
+ * these are two different things rather than one setting.
  *
  * Populate SIGNALS on demand, not exhaustively: an entry no setting cites is
  * an unverifiable claim about where something is visible in the panel — this
@@ -75,11 +89,13 @@ export type MeterCardId = "scope" | "signal" | "gate" | "lufs" | "rhythm" | "cha
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
- *  Rhythm card's existing BPM-digits/beat-dot block (audioMeters.ts's own
- *  createTempoBlock, predating this catalogue); "wave"/"tempoLevel"/"lock"
- *  are the newer plain meter rows the four `anim.beatWave`/`anim.barWave`/
- *  `anim.tempo`/`anim.tempoLock` signals below point at instead. */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset" | "wave" | "tempoLevel" | "lock";
+ *  Rhythm card's BPM-digits/beat-dot block (audioMeters.ts's own
+ *  createTempoBlock) — now the anchor for both `anim.metronome` and
+ *  `anim.tempo`, whose jacks mount there (the card *is* the metronome's
+ *  number, ticking; see metronome.ts's own header). "wave"/"lock" are the
+ *  plain meter rows `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at
+ *  instead. */
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset" | "wave" | "lock" | "metronome";
 
 export type SignalId =
   | "feature.onset"
@@ -97,7 +113,9 @@ export type SignalId =
   | "anim.beatWave"
   | "anim.barWave"
   | "anim.tempo"
-  | "anim.tempoLock";
+  | "anim.tempoLock"
+  | "anim.metronome"
+  | "anim.metronomeBar";
 
 export interface SignalSpec {
   id: SignalId;
@@ -114,8 +132,8 @@ export interface SignalSpec {
    *  what drives.ts's fired() reads for a plain catalogue choice. Required
    *  for every `kind: "edge"` entry (tests/signals.test.ts checks this);
    *  absent for `kind: "level"` entries, which have no natural edge —
-   *  drives.ts's fired() falls back to the caller's own sceneDefaultFired
-   *  for those, same as "scene". */
+   *  drives.ts's fired() converts one of these through a Schmitt trigger
+   *  (valueTrigger.ts) instead, per this file's header. */
   edge?: (anim: AnimFrame) => boolean;
   /** The meter row that displays this, if any — see MeterCardId/MeterRowId's
    *  own doc comments above for why this is a small, hand-maintained set
@@ -283,28 +301,28 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.beatWave",
     label: "Beat wave",
     description:
-      "A smooth swing locked to the tempo, once per beat (AnimFrame.tempoLock times a cosine over AnimFrame.beatPhase) — 1 on every tracked beat, 0 halfway between, fading out on its own without a confident tempo rather than needing a separate gate.",
+      "A smooth swing at the metronome's own tempo, once per beat (AnimFrame.metronomeLevel times a cosine over AnimFrame.metronomePhase) — 1 on every metronome beat, 0 halfway between, fading out on its own once the metronome stops (metronome.ts) rather than needing a separate gate.",
     kind: "level",
-    read: (_frame, anim) => anim.tempoLock * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.beatPhase)),
+    read: (_frame, anim) => anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.metronomePhase)),
     monitor: { card: "rhythm", row: "wave" },
   }),
   "anim.barWave": signal({
     id: "anim.barWave",
     label: "Bar wave",
-    description: "The same swing as Beat wave, once per bar instead of once per beat (AnimFrame.barPhase).",
+    description: "The same swing as Beat wave, once per bar instead of once per beat (AnimFrame.metronomeBarPhase).",
     kind: "level",
-    read: (_frame, anim) => anim.tempoLock * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.barPhase)),
+    read: (_frame, anim) => anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.metronomeBarPhase)),
     monitor: { card: "rhythm", row: "wave" },
   }),
   "anim.tempo": signal({
     id: "anim.tempo",
     label: "Tempo",
     description:
-      "Where the tracked tempo (AnimFrame.tempoBpm) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 with no locked tempo.",
+      "Where the BPM card's own number (AnimFrame.metronomeBpm — the metronome ticks at exactly this) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 while the card reads '--'.",
     kind: "level",
     read: (_frame, anim) =>
-      anim.tempoBpm > 0 ? clamp01(Math.log2(anim.tempoBpm / BPM_MIN) / Math.log2(BPM_MAX / BPM_MIN)) : 0,
-    monitor: { card: "rhythm", row: "tempoLevel" },
+      anim.metronomeBpm > 0 ? clamp01(Math.log2(anim.metronomeBpm / BPM_MIN) / Math.log2(BPM_MAX / BPM_MIN)) : 0,
+    monitor: { card: "rhythm", row: "tempo" },
   }),
   "anim.tempoLock": signal({
     id: "anim.tempoLock",
@@ -314,5 +332,24 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "level",
     read: (_frame, anim) => anim.tempoLock,
     monitor: { card: "rhythm", row: "lock" },
+  }),
+  "anim.metronome": signal({
+    id: "anim.metronome",
+    label: "Metronome",
+    description:
+      "A tick on every beat at the BPM card's own tempo (AnimFrame.metronomeBeat, metronome.ts) — read here as its decaying metronomePulse. The same flat pulse every beat; silent while the card reads '--'.",
+    kind: "edge",
+    read: (_frame, anim) => anim.metronomePulse,
+    edge: (anim) => anim.metronomeBeat,
+    monitor: { card: "rhythm", row: "tempo" },
+  }),
+  "anim.metronomeBar": signal({
+    id: "anim.metronomeBar",
+    label: "Metronome bar",
+    description: "The same steady tick as Metronome, once per bar instead of once per beat.",
+    kind: "edge",
+    read: (_frame, anim) => anim.metronomeBarPulse,
+    edge: (anim) => anim.metronomeBar,
+    monitor: { card: "rhythm", row: "metronome" },
   }),
 };

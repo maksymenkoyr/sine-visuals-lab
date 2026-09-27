@@ -5,6 +5,7 @@ import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformA
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
 import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
+import { createTempoSource, type TempoSource } from "./audio/tempoSource.ts";
 import { NUM_BANDS, type CaptureHandle, type CaptureSourceKind, type FeatureFrame } from "./audio/types.ts";
 import {
   getAudioSourceChoice as getStoredAudioSource,
@@ -40,18 +41,24 @@ import {
   smoothingRateScale,
 } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
-import { createRenderLatch } from "./render/renderLatch.ts";
-import { createDriveEngine } from "./render/drives.ts";
+import { PHASE_BASS, type TempoHit } from "./render/beatClock.ts";
+import { createRenderLatch, type RenderLatch } from "./render/renderLatch.ts";
+import { createDriveEngine, type DriveEngine } from "./render/drives.ts";
 import {
   getDriveLine,
   getDriveLineStrength,
   getDriveSetting,
+  getDriveThresholdState,
+  setDriveThreshold,
+  setDriveThresholdOn,
   resetDriveLine,
   resetDriveSetting,
+  setDriveSetting,
   setDriveLine,
   setDriveLineBand,
   setDriveLineStrength,
   setPatchMix,
+  setSourceEvery,
   setSourceGrid,
   setSourceHeight,
   setSourceMuted,
@@ -140,11 +147,13 @@ import {
   type VisualSample,
 } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
+import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
 import { createControlPanel } from "./ui/controlPanel.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
+import { noteKeyUse } from "./ui/keyHints.ts";
 
 type Mode = "solo" | "host" | "renderer";
 type AnyConn = HostConnection | RendererConnection;
@@ -195,6 +204,13 @@ let lufsAnalyser: LufsAnalyser | null = null;
  *  10-30ms result would already be uncomfortably close to scrolling out of
  *  it. Never built outside import.meta.env.DEV — see attachCapture. */
 let measureAnalyser: WaveformAnalyser | null = null;
+/** The AudioWorklet-hosted fixed-hop tempo tracker (src/audio/tempoSource.ts)
+ *  for the live capture attached in attachCapture() — null until its async
+ *  createTempoSource() resolves, and permanently null (falling back to
+ *  extractor's own render-tick bpm below) on a browser/context that can't
+ *  support it. Disposed and cleared in onCaptureEnded/attachCapture's own
+ *  re-attach, same lifecycle as bandAnalyser above. */
+let tempoSource: TempoSource | null = null;
 /** Rebuilt (not just reset) on every swapAudioSource() — see that function's
  *  comment for why a fresh extractor, not a reset(), is what a source swap
  *  needs. */
@@ -283,6 +299,12 @@ let lastBeatDiag: OnsetDiag | null = null;
 // above. Same solo/host-only availability as lastFixedEnergy and for the
 // same reason.
 let lastFluxRatio: number | null = null;
+/** This tick's fixed-hop tempo onsets (src/audio/tempoSource.ts), solo mode
+ *  only — built in currentVisual() and read by loop() when it builds
+ *  animClock.advance()'s `hit` argument. undefined whenever no tempo
+ *  source is live on this tick (including every host/renderer/TV tick —
+ *  see beatClock.ts's own file header for why those never get this feed). */
+let lastTempoHits: TempoHit[] | undefined = undefined;
 // The silence gate's last reading off this device's own extractor — the
 // Gate card (audioMeters.ts). `fired` is the local extractor's own frame's
 // onset (not the jitter-buffered `lastVis`), so it and `suppressed` always
@@ -308,6 +330,20 @@ const renderLatch = createRenderLatch();
 // other store here), so it doesn't need recreating on a scene switch. See
 // src/render/drives.ts's header for accumulate() vs. forScene().
 const driveEngine = createDriveEngine();
+/** The demo groove a scene plays behind the start prompt, so opening a scene
+ *  before any source is picked shows it moving instead of a black screen —
+ *  see idlePreviewActive() and renderIdlePreview(). It keeps its own anim
+ *  clock, latch and drive engine rather than borrowing the ones above: the
+ *  beat clock would otherwise arrive locked to this feed's tempo when the
+ *  real source attaches, and the demo must not train advanceAutoTune's music
+ *  profile either. Purely local — never sent to a paired TV, never counted
+ *  as usage, never shown on the panel's meters. */
+const idlePreview = {
+  feed: createSyntheticFeed(),
+  anim: createAnimClock(),
+  latch: createRenderLatch(),
+  drives: createDriveEngine(),
+};
 let lastRafMs = 0;
 let hudHideTimer: number | undefined;
 
@@ -513,6 +549,26 @@ function attachCapture(handle: CaptureHandle): void {
   // measureAnalyser's own header explains why this is DEV-only and deep
   // (32768 samples) rather than reusing waveformAnalyser.
   if (import.meta.env.DEV) measureAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode, 32768);
+  // The previous capture's own tempoSource (if any) belonged to its own
+  // AudioContext — stop() (this function's caller, or onCaptureEnded/
+  // swapAudioSource's `previous?.stop()`) closes that context, which tears
+  // the old worklet node down on its own; clearing the reference here is
+  // enough, no explicit dispose() needed for it. createTempoSource() is
+  // async — until it resolves, and on a browser that can't support it
+  // (resolves null), currentVisual() below keeps reading `extractor`'s own
+  // render-tick bpm, exactly as before this existed.
+  tempoSource = null;
+  void createTempoSource(handle.context, handle.sourceNode).then((source) => {
+    // This capture may already have been superseded (a source swap, or the
+    // track ending) by the time the async load resolves — only adopt the
+    // result if `handle` is still the live capture, otherwise dispose the
+    // now-orphaned source instead of leaking its node/sink.
+    if (capture !== handle) {
+      source?.dispose();
+      return;
+    }
+    tempoSource = source;
+  });
   // stop() (used when swapAudioSource retires this handle) does not fire
   // "ended" per spec — only an external stop does — so this listener and a
   // deliberate swap never race each other.
@@ -524,6 +580,17 @@ function attachCapture(handle: CaptureHandle): void {
   // gallery.syncSource's own doc comments for what each covers.
   updateMicPrompt();
   gallery?.syncSource();
+  reportUsage();
+}
+
+/** Counts a scene actually running on live audio (src/net/usage.ts) — called
+ *  from both ends because either can come last: entering a scene with audio
+ *  already live, or audio arriving for the scene already on screen. The
+ *  synthetic feed is automation, so it never counts. */
+function reportUsage(): void {
+  if (!inViz) return;
+  if (mode === "renderer") reportSceneRunning(scene.id, "remote");
+  else if (capture) reportSceneRunning(scene.id, captureAudioSource(capture.kind) === "display" ? "display" : "mic");
 }
 
 /** The live capture's track ended on its own — the user hit Chrome's "Stop
@@ -539,6 +606,8 @@ function onCaptureEnded(handle: CaptureHandle): void {
   waveformAnalyser = null;
   measureAnalyser = null;
   lufsAnalyser = null;
+  tempoSource?.dispose();
+  tempoSource = null;
   audioPromise = null;
   captureFailed = false;
   updateMicPrompt();
@@ -784,6 +853,7 @@ function wireDeviceMenu(): void {
       setSmoothing(sceneId, value);
     },
     getSceneSettings: (sceneId) => getScene(sceneId)?.settings ?? [],
+    getScene: (sceneId) => getScene(sceneId),
     getSceneSettingValue: (sceneId, spec) => getSceneSetting(sceneId, spec),
     getSceneSettingDefault: (sceneId, spec) => settingDefault(sceneId, spec),
     onSceneSettingChange: (sceneId, spec, value) => {
@@ -813,10 +883,13 @@ function wireDeviceMenu(): void {
     onBandGainChange: (sceneId, fader, value) => setBandGain(sceneId, fader, value),
     onBandGainsReset: (sceneId) => resetBandGains(sceneId),
     getDriveSetting: (sceneId, spec) => getDriveSetting(sceneId, spec),
+    onSetDriveSetting: (sceneId, spec, setting) => setDriveSetting(sceneId, spec, setting),
     onResetDriveSetting: (sceneId, spec) => resetDriveSetting(sceneId, spec),
+    onUnplugAll: (sceneId, spec) => setDriveSetting(sceneId, spec, { mix: "add", sources: [] }),
     onTogglePatchSource: (sceneId, spec, choice) => togglePatchSource(sceneId, spec, choice),
     onSetSourceWeight: (sceneId, spec, choice, weight) => setSourceWeight(sceneId, spec, choice, weight),
     onSetSourceHeight: (sceneId, spec, choice, height) => setSourceHeight(sceneId, spec, choice, height),
+    onSetSourceEvery: (sceneId, spec, choice, every) => setSourceEvery(sceneId, spec, choice, every),
     onSetSourceGrid: (sceneId, spec, grid) => setSourceGrid(sceneId, spec, grid),
     onSetPatchMix: (sceneId, spec, mix) => setPatchMix(sceneId, spec, mix),
     onSetSourceRole: (sceneId, spec, index, role) => setSourceRole(sceneId, spec, index, role),
@@ -826,6 +899,9 @@ function wireDeviceMenu(): void {
     setDriveLine: (sceneId, spec, heights) => setDriveLine(sceneId, spec, heights),
     resetDriveLine: (sceneId, spec) => resetDriveLine(sceneId, spec),
     getDriveLineStrength: (sceneId, spec) => getDriveLineStrength(sceneId, spec),
+    getDriveThresholdState: (sceneId, spec) => getDriveThresholdState(sceneId, spec),
+    onSetDriveThreshold: (sceneId, spec, value) => setDriveThreshold(sceneId, spec, value),
+    onSetDriveThresholdOn: (sceneId, spec, on) => setDriveThresholdOn(sceneId, spec, on),
     setDriveLineStrength: (sceneId, spec, value) => setDriveLineStrength(sceneId, spec, value),
     onLufsReset: () => lufsAnalyser?.reset(),
     resolveSceneSettingValue: (sceneId, spec) => resolveSceneSetting(sceneId, spec),
@@ -969,6 +1045,7 @@ async function enterViz(next: Scene): Promise<void> {
 
   if (mode !== "renderer") void ensureAudio();
   updateMicPrompt();
+  reportUsage();
   void requestWakeLock();
   immersive?.resume();
 }
@@ -1114,12 +1191,18 @@ async function boot(): Promise<void> {
     // pass through untouched instead of driving these — mirrors the guard
     // deviceMenu.ts's own document-level handler already uses.
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    if (e.key === "f" || e.key === "F") immersive?.toggle();
+    if (e.key === "f" || e.key === "F") {
+      noteKeyUse("fullscreen");
+      immersive?.toggle();
+    }
     // Only live in a viz — the exact condition that shows menuBtn itself
     // (enterViz/exitToGallery below), so the key and the gear it mirrors
     // appear and disappear together. Reuses the same toggle() the gear's
     // click handler calls, rather than reimplementing open/close here.
-    if ((e.key === "s" || e.key === "S") && inViz) deviceMenu?.toggle();
+    if ((e.key === "s" || e.key === "S") && inViz) {
+      noteKeyUse("panel");
+      deviceMenu?.toggle();
+    }
     if (e.key === "Escape") {
       if (immersive?.active()) {
         immersive.exit();
@@ -1259,6 +1342,10 @@ function captureRawBands(dbBands: Float32Array, range: { min: number; max: numbe
  *  local capture's own envelope (features.ts) honors the same Smoothing
  *  the render path and the anim clock do, including its Off stop. */
 function currentVisual(rateScale: number): FeatureFrame | null {
+  // Reset every tick; only solo mode's own branch below (with a live
+  // tempoSource) sets this back — see its own doc comment on the module
+  // state above for why host/renderer/TV never do.
+  lastTempoHits = undefined;
   if (syntheticFeed) {
     lastRawBands = null;
     // Synthetic frames are generated directly, not sampled from a real
@@ -1293,6 +1380,22 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+    // The fixed-hop tempo source, when live, overrides the render-tick
+    // tracker's own bpm — see tempoAnalyzer.ts's header for why its numbers
+    // are better — and its drained onsets become this tick's tempoHits for
+    // animClock.advance() (loop() reads lastTempoHits when it builds that
+    // call's `hit` argument). `onset.time` is this same capture's own
+    // AudioContext clock (tempoSource.ts's own doc), so `now` (read above)
+    // converts it to agoSec directly. Weight mirrors animClock.ts's own
+    // hitWeight formula (strength graded by PHASE_BASS-weighted bass) so a
+    // kick counts for as much here as a render-tick hit would.
+    if (tempoSource) {
+      f.bpm = tempoSource.bpm;
+      lastTempoHits = tempoSource.drainOnsets().map((o) => ({
+        agoSec: now - o.time,
+        weight: o.strength * (1 + PHASE_BASS * o.bass),
+      }));
+    }
     lastFixedEnergy = extractor.fixedEnergy;
     lastBeatDiag = extractor.onsetDiag;
     lastFluxRatio = extractor.fluxRatio;
@@ -1329,6 +1432,17 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+    // Overwritten before hostConn.sendFrame() below, same as solo mode
+    // above, so the TV and any renderer get the fixed-hop tempo over the
+    // unchanged wire — see currentVisual()'s solo branch for the full
+    // comment. No tempoHits here: this device's own visual timeline (what
+    // sampleToVisual(hostConn.sample()) returns below) is the jitter
+    // buffer's room time, which this capture's local AudioContext onset
+    // times wouldn't line up with — see beatClock.ts's file header.
+    if (tempoSource) {
+      f.bpm = tempoSource.bpm;
+      tempoSource.drainOnsets(); // unused here (see above); drained so they don't queue
+    }
     lastFixedEnergy = extractor.fixedEnergy;
     lastBeatDiag = extractor.onsetDiag;
     lastFluxRatio = extractor.fluxRatio;
@@ -1370,6 +1484,7 @@ function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
     bands: s.bands,
     energy: s.energy,
     onset: s.onsetFired,
+    pulseOnset: s.pulseFired,
     bpm: s.bpm,
     onsetPhase: s.beatPhase,
     level: s.level,
@@ -1423,9 +1538,12 @@ function loop(): void {
   // (null on host/renderer paths with no local extractor — see its own doc
   // comment below) — passed as the graded broadband pulse's own ratio so it
   // doesn't have to fall back to a band's own ratio on a device that has a
-  // real broadband reading to give it.
+  // real broadband reading to give it. `lastTempoHits` is solo-mode-only
+  // (undefined every host/renderer/TV tick — see its own doc comment on the
+  // module state above) and switches beatClock.ts's phase comb onto the
+  // fixed-hop feed for this tick when a tempo source is live.
   const anim = gained
-    ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: lastFluxRatio })
+    ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: lastFluxRatio, tempoHits: lastTempoHits })
     : null;
 
   // Reused for displayFrame at render time below instead of re-resolving —
@@ -1465,8 +1583,25 @@ function loop(): void {
   const liveDrives = anim ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
   deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
 
-  if (!lastVis || !anim) return;
+  if (!lastVis || !anim) {
+    if (idlePreviewActive()) renderIdlePreview(nowRafMs, dtSec, smoothing);
+    return;
+  }
 
+  drawScene(nowRafMs, gained!, sensitivity, expansion, anim, renderLatch, driveEngine);
+}
+
+/** The scene's render tail, shared by live audio and the idle preview — each
+ *  passes its own latch and drive engine (see idlePreview's doc comment). */
+function drawScene(
+  nowRafMs: number,
+  gained: FeatureFrame,
+  sensitivity: number,
+  expansion: number,
+  anim: AnimFrame,
+  latch: RenderLatch,
+  engine: DriveEngine,
+): void {
   if (!shouldRenderFrame(nowRafMs, lastRenderMs, renderIntervalMs())) return;
   if (lastRenderFpsMs > 0) {
     const renderDtMs = nowRafMs - lastRenderFpsMs;
@@ -1478,11 +1613,38 @@ function loop(): void {
   const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
-  const displayFrame = applySensitivity(gained!, sensitivity, expansion);
-  const latchedAnim = renderLatch.consume(anim, nowRafMs);
-  const drives = driveEngine.forScene(scene.id, scene.settings ?? [], latchedAnim);
+  const displayFrame = applySensitivity(gained, sensitivity, expansion);
+  const latchedAnim = latch.consume(anim, nowRafMs);
+  const drives = engine.forScene(scene.id, scene.settings ?? [], latchedAnim);
   scene.render(mainHost!.ctx, displayFrame, viewport, palette, latchedAnim, drives);
   governor?.recordFrame(nowRafMs);
+}
+
+/** True exactly while the start prompt could be up: in a scene, on this
+ *  device's own audio path, with nothing listening yet. Deliberately wider
+ *  than updateMicPrompt's needsAudio — it stays true while a permission or
+ *  share picker is open, so the demo keeps playing until real audio takes
+ *  over rather than blinking to black in between. */
+function idlePreviewActive(): boolean {
+  return inViz && mode !== "renderer" && !syntheticFeed && !bandAnalyser;
+}
+
+/** One tick of the demo groove behind the start prompt — the same pipeline
+ *  loop() runs for live audio (band gains, anim clock, drives, sensitivity),
+ *  on idlePreview's own state and minus everything live-only: no auto-tune
+ *  training, no meters, no host send. The scene's own settings and the
+ *  Input card still apply, so tweaking a look before picking a source shows
+ *  the result. */
+function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): void {
+  const frame = idlePreview.feed.frame(nowRafMs / 1000);
+  const gained = applyBandGains(frame, getBandGains(scene.id));
+  const anim = idlePreview.anim.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: null });
+  idlePreview.latch.accumulate(anim);
+  const sensitivity = resolveSensitivity(scene.id);
+  const expansion = resolveExpansion(scene.id);
+  const driveEnergy = applySensitivity(gained, sensitivity, expansion).energy;
+  idlePreview.drives.accumulate(dtSec, gained, driveEnergy, anim, scene.id, scene.settings ?? []);
+  drawScene(nowRafMs, gained, sensitivity, expansion, anim, idlePreview.latch, idlePreview.drives);
 }
 
 void boot();

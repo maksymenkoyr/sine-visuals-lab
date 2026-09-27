@@ -28,8 +28,8 @@ in the room, which scene is showing — only in memory while devices are
 connected; when the room empties, the state is gone. It also reads your IP
 address from Cloudflare's `CF-Connecting-IP` header to rate-limit how often
 one visitor can create rooms, keeping only recent timestamps per IP in
-memory for that purpose. The server writes nothing to persistent storage and
-keeps no logs of the relayed data.
+memory for that purpose. It keeps no logs of the relayed data, and the only
+thing it stores at all is the anonymous usage count described below.
 
 **Cloudflare hosts the site.** Serving and protecting the site and the relay
 means Cloudflare itself processes IP addresses and request metadata, under
@@ -38,11 +38,23 @@ browser may also send Cloudflare automatic network-error reports (NEL) if a
 request fails — that reporting is part of how Cloudflare operates the edge,
 not something this app adds.
 
-**No accounts, no analytics, no cookies.** The app has no sign-up, no
-tracking or analytics code, and sets no cookies. Settings you change are kept
-in your own browser's local storage and never uploaded — except the device
-id described above, which exists only so pairing can recognize your device
-again.
+**One anonymous usage count.** When a scene starts running on live audio,
+the app sends a single message saying so: which scene, whether the audio is
+the microphone, a shared tab or a paired phone, and nothing else. The server
+adds your country and whether you're on a phone or a computer, both taken
+from the request, and records that as a count in Cloudflare's analytics
+store. It records no IP address, device id or browser details, and nothing
+that links one count to another or to you. Just opening the page or browsing
+the gallery sends nothing. The code is in [`src/net/usage.ts`](src/net/usage.ts)
+and [`server/usage.ts`](server/usage.ts).
+
+**No accounts, no cookies, no tracking.** The app has no sign-up, sets no
+cookies, and does not follow you across visits or sites. Settings you change
+are kept in your own browser's local storage and never uploaded — except the
+device id described above, which exists only so pairing can recognize your
+device again. Cloudflare's own Web Analytics may also count page loads for
+the site; it is cookieless and described in Cloudflare's policy linked
+above.
 
 Because this is open source (AGPL-3.0-or-later), every claim above is
 verifiable in the code this page ships from — see the Source link in the app —

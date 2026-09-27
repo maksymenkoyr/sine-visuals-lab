@@ -1,20 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
-  advanceKickJolt,
   advanceLoudSwell,
-  advanceLurch,
+  advancePump,
   causticDensityScale,
   createLoudSwellState,
-  createLurchState,
-  createRipplePool,
+  createPumpState,
   driftFlows,
   driftRatePerSec,
   focusSharp,
   fogFloorCut,
   fogRestingSharp,
-  loudSpeedFactor,
   loudSwellDrive,
-  rippleEnvelope,
   sparkleBrightGain,
   sparkleDensityExponent,
   sparkleGrainFreq,
@@ -23,19 +19,16 @@ import {
 } from "../src/render/scenes/caustics.ts";
 import { NOISE_PERIOD, wrapFlow } from "../src/render/noiseHash.ts";
 
-// Baseline: everything off except the Drift speed slider itself. Beat surge
-// is no longer part of DriftInputs — it's the separate advanceLurch impulse
-// tested below, added onto the drift phase rather than modulating this rate.
-// loudSwell defaults to 0.5 (neutral) — advanceLoudSwell's "no information
-// yet" reading — so a bare `driftLoud` override doesn't silently mean
-// "maximally loud" the way `energy: 1` used to.
+// Baseline: everything off. driftLevel and pumpVel are additive terms (see
+// driftRatePerSec's own comment) rather than multipliers pivoting around a
+// neutral point, so — unlike the old loudSwell=0.5 "neutral" default this
+// replaced — 0 is the right "nothing happening" default for levelValue too.
 function base(overrides: Partial<DriftInputs> = {}): DriftInputs {
   return {
     drift: 0,
-    driftKick: 0,
-    driftLoud: 0,
-    lowPulse: 0,
-    loudSwell: 0.5,
+    driftLevel: 0,
+    levelValue: 0,
+    pumpVel: 0,
     dropReactivity: 0,
     sectionIntensity: 0,
     ...overrides,
@@ -55,131 +48,82 @@ describe("caustics drift rate", () => {
     expect(driftRatePerSec(base({ drift: 1 }))).toBeCloseTo(2.0, 10);
   });
 
-  it("drift=0 freezes the wander term, regardless of audio or reactivity", () => {
-    expect(driftRatePerSec(base({ drift: 0, driftKick: 1, driftLoud: 1, lowPulse: 1, loudSwell: 1, dropReactivity: 1, sectionIntensity: 1 }))).toBe(0);
+  it("drift=0 freezes the base wander term, regardless of drop reactivity", () => {
+    // Speed boost and Speed pump are additive terms, not multipliers on the base
+    // (see the two tests right below), so this only pins the *base* term's
+    // own dependence on drift — with driftLevel/pumpVel left at 0 too, the
+    // whole rate is 0.
+    expect(driftRatePerSec(base({ drift: 0, dropReactivity: 1, sectionIntensity: 1 }))).toBe(0);
   });
 
-  it("a surge slider at 0 contributes nothing even with its driver maxed", () => {
-    const withoutSurge = driftRatePerSec(base({ drift: 0.5 }));
-    const driverMaxedSliderZero = driftRatePerSec(base({ drift: 0.5, lowPulse: 1, loudSwell: 1 }));
-    expect(driverMaxedSliderZero).toBeCloseTo(withoutSurge, 10);
+  it("Speed boost and Speed pump both still move the rate with Drift speed parked at 0 — the whole point of being additive rather than multiplicative", () => {
+    expect(driftRatePerSec(base({ drift: 0, driftLevel: 1, levelValue: 1, pumpVel: 2 }))).toBeCloseTo(3.0 + 2, 10);
   });
 
-  it("Kick surge at 1 with a full low-band pulse adds its documented gain (2.0x)", () => {
-    expect(driftRatePerSec(base({ drift: 0.5, driftKick: 1, lowPulse: 1 }))).toBeCloseTo(3.0, 10);
+  it("Speed boost at 0 contributes nothing even with levelValue maxed", () => {
+    const withoutBoost = driftRatePerSec(base({ drift: 0.5 }));
+    const boostZeroLevelMaxed = driftRatePerSec(base({ drift: 0.5, levelValue: 1 }));
+    expect(boostZeroLevelMaxed).toBeCloseTo(withoutBoost, 10);
   });
 
-  it("Drop reactivity boosts drift with sectionIntensity even with all surge sliders at 0", () => {
-    // driftBoost = 1 + 1*1*0.8 = 1.8
+  it("Speed boost adds LEVEL_GAIN (3.0) at driftLevel=1 with levelValue=1, and nothing at levelValue=0", () => {
+    expect(driftRatePerSec(base({ drift: 0, driftLevel: 1, levelValue: 1 }))).toBeCloseTo(3.0, 10);
+    expect(driftRatePerSec(base({ drift: 0, driftLevel: 1, levelValue: 0 }))).toBe(0);
+  });
+
+  it("Drop reactivity boosts drift with sectionIntensity even with Speed boost/Speed pump at 0", () => {
+    // base = DRIFT_BASE_RATE(2) * drift(0.5) * (1 + 1*1*0.8) = 1.8
     expect(driftRatePerSec(base({ drift: 0.5, dropReactivity: 1, sectionIntensity: 1 }))).toBeCloseTo(1.8, 10);
   });
 
-  it("every remaining input maxed (loudSwell neutral) clamps to SURGE_CAP (5x the base rate), reproducing the pre-loudness-rework ceiling", () => {
+  it("every term maxed at once (base 3.6, level 3, pump capped at PUMP_VEL_CAP=8) sums to 14.6 — comfortably under DRIFT_RATE_MAX, which is now a generous backstop rather than a value the additive design tries to reach", () => {
     const rate = driftRatePerSec(
       base({
         drift: 1,
-        driftKick: 1,
-        driftLoud: 1,
-        lowPulse: 1,
-        loudSwell: 0.5,
+        driftLevel: 1,
+        levelValue: 1,
+        pumpVel: 8,
         dropReactivity: 1,
         sectionIntensity: 1,
       }),
     );
-    // driftBoost = 1.8, surge = 1 + 2.0 = 3.0, driftBoost*surge = 5.4 > 5
-    // DRIFT_BASE_RATE(2.0) * drift(1) * min(5.4, 5) * loudSpeedFactor(1, 0.5)=1 -> 10.0
-    expect(rate).toBeCloseTo(10.0, 10);
-    expect(Number.isFinite(rate)).toBe(true);
+    expect(rate).toBeCloseTo(14.6, 10);
   });
 
-  it("every remaining input maxed including a fully loud passage clamps to DRIFT_RATE_MAX (20) rather than compounding unbounded", () => {
+  it("still clamps to DRIFT_RATE_MAX (20) if pumpVel is ever larger than advancePump's own cap would allow", () => {
     const rate = driftRatePerSec(
       base({
         drift: 1,
-        driftKick: 1,
-        driftLoud: 1,
-        lowPulse: 1,
-        loudSwell: 1,
+        driftLevel: 1,
+        levelValue: 1,
+        pumpVel: 1000,
         dropReactivity: 1,
         sectionIntensity: 1,
       }),
     );
-    // SURGE_CAP-bound modulation (5) * loudSpeedFactor(1,1) = 4^1.5 = 8 ->
-    // DRIFT_BASE_RATE(2.0) * drift(1) * 5 * 8 = 80, clamped to DRIFT_RATE_MAX.
-    expect(rate).toBeCloseTo(20.0, 10);
-    expect(Number.isFinite(rate)).toBe(true);
+    expect(rate).toBe(20);
   });
 
   it("never produces NaN or a negative rate across a broad random sweep", () => {
     for (let i = 0; i < 500; i++) {
       const s: DriftInputs = {
         drift: Math.random(),
-        driftKick: Math.random(),
-        driftLoud: Math.random(),
-        lowPulse: Math.random(),
-        loudSwell: Math.random(),
+        driftLevel: Math.random(),
+        levelValue: Math.random(),
+        pumpVel: Math.random() * 10,
         dropReactivity: Math.random(),
         sectionIntensity: Math.random(),
       };
       const rate = driftRatePerSec(s);
       expect(Number.isFinite(rate)).toBe(true);
       expect(rate).toBeGreaterThanOrEqual(0);
+      expect(rate).toBeLessThanOrEqual(20);
     }
   });
 });
 
-// loudSpeedFactor is the actual fix: driftLoud used to only be able to gain
-// ~1.5x against an already-flattened frame.energy, which is why cranking it
-// never read as reactive. These pin the geometric-swing properties that make
-// it reactive instead: an exact no-op at neutral loudness/at driftLoud=0, and
-// a wide, monotone quiet<->loud range at driftLoud=1.
-describe("caustics loudness speed swing (loudSpeedFactor)", () => {
-  it("loudSwell=0.5 (neutral) is an exact identity at every driftLoud", () => {
-    for (const driftLoud of [0, 0.25, 0.4, 0.7, 1]) {
-      expect(loudSpeedFactor(driftLoud, 0.5)).toBeCloseTo(1, 10);
-    }
-  });
-
-  it("driftLoud=0 ignores loudSwell entirely", () => {
-    for (const loudSwell of [0, 0.3, 0.7, 1]) {
-      expect(loudSpeedFactor(0, loudSwell)).toBeCloseTo(1, 10);
-    }
-  });
-
-  it("the default (0.4) at a chorus-level loudSwell (0.8) stays close to today's old ~1.2x response, not a barely-perceptible nudge", () => {
-    const factor = loudSpeedFactor(0.4, 0.8);
-    expect(factor).toBeGreaterThan(1.1);
-    expect(factor).toBeLessThan(1.4);
-  });
-
-  it("a maxed Loudness surge spans a dramatic quiet<->loud ratio (>=50x between loudSwell=0 and loudSwell=1)", () => {
-    const quiet = loudSpeedFactor(1, 0);
-    const loud = loudSpeedFactor(1, 1);
-    expect(loud / quiet).toBeGreaterThanOrEqual(50);
-  });
-
-  it("is monotonically non-decreasing in loudSwell at every fixed driftLoud", () => {
-    for (const driftLoud of [0.1, 0.4, 0.7, 1]) {
-      let prev = loudSpeedFactor(driftLoud, 0);
-      for (let s = 0.1; s <= 1; s += 0.1) {
-        const f = loudSpeedFactor(driftLoud, s);
-        expect(f).toBeGreaterThanOrEqual(prev - 1e-9);
-        prev = f;
-      }
-    }
-  });
-
-  it("never produces NaN, a negative, or a zero factor across a broad random sweep", () => {
-    for (let i = 0; i < 500; i++) {
-      const f = loudSpeedFactor(Math.random(), Math.random());
-      expect(Number.isFinite(f)).toBe(true);
-      expect(f).toBeGreaterThan(0);
-    }
-  });
-});
-
-// advanceLoudSwell is what makes loudSpeedFactor's driver gain-independent:
-// it calibrates FeatureFrame.level against its own recently observed range
+// advanceLoudSwell is what makes Speed boost's driver gain-independent: it
+// calibrates FeatureFrame.level against its own recently observed range
 // rather than reading it absolutely, so the dial behaves the same on a quiet
 // room and a loud one. The gain-invariance property below is the one that
 // makes a legacy wire sender (protocol.ts defaults level to 0.5) and silence
@@ -249,11 +193,11 @@ describe("caustics loudness calibration (advanceLoudSwell)", () => {
 
 // loudSwellDrive is uLoudSwell's source — the shader's aperture/floor-glow
 // channel. Small at the slider's default so that channel stays a no-op until
-// someone actually drags Loudness surge up.
+// someone actually drags Speed boost up.
 describe("caustics loudness swell drive (loudSwellDrive)", () => {
-  it("is 0 at loudSwell=0.5 (neutral) for any driftLoud", () => {
-    for (const driftLoud of [0, 0.4, 0.7, 1]) {
-      expect(loudSwellDrive(driftLoud, 0.5)).toBeCloseTo(0, 10);
+  it("is 0 at loudSwell=0.5 (neutral) for any driftLevel", () => {
+    for (const driftLevel of [0, 0.4, 0.7, 1]) {
+      expect(loudSwellDrive(driftLevel, 0.5)).toBeCloseTo(0, 10);
     }
   });
 
@@ -266,117 +210,80 @@ describe("caustics loudness swell drive (loudSwellDrive)", () => {
     }
   });
 
-  it("stays small in magnitude at the Loudness surge default (0.4), even at a fully loud or fully quiet extreme", () => {
+  it("stays small in magnitude at the Speed boost default (0.4), even at a fully loud or fully quiet extreme", () => {
     expect(Math.abs(loudSwellDrive(0.4, 1))).toBeLessThan(0.2);
     expect(Math.abs(loudSwellDrive(0.4, 0))).toBeLessThan(0.2);
   });
 });
 
-describe("caustics beat lurch (advanceLurch)", () => {
-  it("amount=0 never moves the phase, regardless of firing", () => {
-    const st = createLurchState();
-    for (let i = 0; i < 200; i++) advanceLurch(st, 1 / 60, i % 10 === 0, 0);
-    expect(st.phase).toBe(0);
+// advancePump is the "push acceleration in a car" half of the user's own
+// request: each push accelerates a velocity that then coasts back down to
+// whatever Drift/Speed boost are already contributing, rather than tracking
+// its input directly the way Speed boost does.
+describe("caustics pump (advancePump)", () => {
+  it("amount=0 never accelerates vel, regardless of input", () => {
+    const st = createPumpState();
+    for (let i = 0; i < 200; i++) advancePump(st, 1 / 60, Math.random(), 0);
     expect(st.vel).toBe(0);
   });
 
-  it("a single fire's total displacement converges to amount * LURCH_IMPULSE / LURCH_DECAY_PER_SEC", () => {
-    // Integrating the velocity's exponential decay to convergence gives the
-    // impulse's total area; run long enough (10 tau) that the tail is
-    // negligible. LURCH_IMPULSE=14.4, LURCH_DECAY_PER_SEC=9 -> 1.6 at amount=1.
-    // advanceLurch steps phase before decaying velocity (matching the scene's
-    // own frame-by-frame order), so a finite dt systematically overshoots the
-    // continuous integral by a small, dt-proportional amount — this asserts
-    // within that discretization error, not exact convergence.
-    const st = createLurchState();
-    advanceLurch(st, 0, true, 1); // fire once, no phase advance yet
-    const dt = 1 / 1000;
-    for (let i = 0; i < 10000; i++) advanceLurch(st, dt, false, 0); // ~10 tau
-    expect(st.phase).toBeCloseTo(1.6, 1);
+  it("one hit's whole decaying envelope at amount=1 raises vel to a peak well short of PUMP_ACCEL/BEAT_PULSE_DECAY_PER_SEC's naive 1.0 estimate — the release term (PUMP_RELEASE_SEC) is already draining vel during the rise, not just after it", () => {
+    // A back-of-envelope sizing (PUMP_ACCEL / BEAT_PULSE_DECAY_PER_SEC = 1.0,
+    // the file's own DRIFT_RATE_MAX-area comment) ignores that release keeps
+    // acting throughout the rise, not only once the hit has passed — solving
+    // the exact ODE (v' + v/PUMP_RELEASE_SEC = PUMP_ACCEL*e^-6t) puts the true
+    // peak at about 0.76, which this pins directly against the real
+    // discretized function rather than the approximation.
+    const st = createPumpState();
+    const dt = 1 / 60;
+    let peak = 0;
+    for (let i = 0; i < 60; i++) {
+      const t = i * dt;
+      advancePump(st, dt, Math.exp(-6 * t), 1); // BEAT_PULSE_DECAY_PER_SEC's own decay shape (animClock.ts)
+      if (st.vel > peak) peak = st.vel;
+    }
+    expect(peak).toBeGreaterThan(0.7);
+    expect(peak).toBeLessThan(0.9);
   });
 
-  it("phase is monotonically non-decreasing under repeated fires", () => {
-    const st = createLurchState();
-    let prevPhase = st.phase;
-    for (let i = 0; i < 500; i++) {
-      advanceLurch(st, 1 / 60, Math.random() < 0.3, Math.random());
-      expect(st.phase).toBeGreaterThanOrEqual(prevPhase);
-      prevPhase = st.phase;
+  it("once the input stops, vel decays to under 10% of its peak within about 3.5s (PUMP_RELEASE_SEC's own tau)", () => {
+    const st = createPumpState();
+    const dt = 1 / 60;
+    let peak = 0;
+    for (let i = 0; i < 60; i++) {
+      const t = i * dt;
+      advancePump(st, dt, Math.exp(-6 * t), 1);
+      if (st.vel > peak) peak = st.vel;
+    }
+    for (let i = 0; i < 3.5 * 60; i++) advancePump(st, dt, 0, 1);
+    expect(st.vel).toBeLessThan(peak * 0.1);
+  });
+
+  it("a constant full-height input settles at PUMP_VEL_CAP (8) rather than climbing without bound", () => {
+    const st = createPumpState();
+    const dt = 1 / 60;
+    for (let i = 0; i < 60 * 10; i++) advancePump(st, dt, 1, 1); // 10s, well past settling
+    expect(st.vel).toBeCloseTo(8, 5);
+  });
+
+  it("is monotonically non-decreasing in amount at a fixed sustained input", () => {
+    const dt = 1 / 60;
+    let prevVel = -Infinity;
+    for (let amount = 0; amount <= 1; amount += 0.1) {
+      const st = createPumpState();
+      for (let i = 0; i < 60; i++) advancePump(st, dt, 1, amount);
+      expect(st.vel).toBeGreaterThanOrEqual(prevVel - 1e-9);
+      prevVel = st.vel;
     }
   });
 
-  it("velocity never exceeds LURCH_VEL_CAP even under back-to-back fires with no decay time", () => {
-    const st = createLurchState();
-    for (let i = 0; i < 50; i++) advanceLurch(st, 0, true, 1); // fire repeatedly, dt=0 so no decay
-    // LURCH_IMPULSE=14.4, cap = 14.4*1.5 = 21.6
-    expect(st.vel).toBeCloseTo(21.6, 10);
-  });
-
-  it("a maxed Beat surge (amount=1) displaces far more than the old multiplicative design's maxed 0.33 phase units", () => {
-    const st = createLurchState();
-    advanceLurch(st, 0, true, 1);
-    const dt = 1 / 1000;
-    for (let i = 0; i < 10000; i++) advanceLurch(st, dt, false, 0);
-    expect(st.phase).toBeGreaterThan(0.33 * 4); // >4x the old ceiling
-  });
-});
-
-describe("caustics kick jolt", () => {
-  // A rate-only surge can only ever integrate a kick's sharp attack into a
-  // smooth ramp — see driftRatePerSec's own comment. These pin the position
-  // offset that actually produces a strike: it must stay bounded, weighted
-  // toward the top of the driftKick slider, and relax back to ~0 as
-  // lowPulse decays, all without ever depending on Drift speed.
-
-  it("is 0 when driftKick is 0, even with a full low-band pulse", () => {
-    expect(advanceKickJolt(0, 0, 1, 1 / 60)).toBe(0);
-  });
-
-  it("is 0 when lowPulse is 0, even with driftKick maxed", () => {
-    expect(advanceKickJolt(0, 1, 0, 1 / 60)).toBe(0);
-  });
-
-  it("converges toward, but never past, its bound (KICK_JOLT_PHASE = 2.0) when driven at max for a full second", () => {
-    let jolt = 0;
-    for (let i = 0; i < 600; i++) jolt = advanceKickJolt(jolt, 1, 1, 1 / 600);
-    expect(jolt).toBeGreaterThan(1.9);
-    expect(jolt).toBeLessThanOrEqual(2.0);
-  });
-
-  it("is weighted toward the top of the slider: driftKick=0.25 reaches only a small fraction of driftKick=1's steady state", () => {
-    const settle = (driftKick: number) => {
-      let jolt = 0;
-      for (let i = 0; i < 600; i++) jolt = advanceKickJolt(jolt, driftKick, 1, 1 / 600);
-      return jolt;
-    };
-    // driftKick^2 -> 0.25 reaches 1/16th of the max, not 1/4.
-    expect(settle(0.25) / settle(1)).toBeCloseTo(0.0625, 2);
-  });
-
-  it("relaxes back to ~0 within 1s after lowPulse decays, matching a real kick's envelope", () => {
-    let jolt = advanceKickJolt(0, 1, 1, 1 / 600); // struck once
-    let lowPulse = 1;
-    const dt = 1 / 600;
-    for (let i = 0; i < 600; i++) {
-      lowPulse *= Math.exp(-dt * 3.5); // bandEnergy.ts's low-group pulseDecayRate
-      jolt = advanceKickJolt(jolt, 1, lowPulse, dt);
-    }
-    expect(jolt).toBeLessThan(0.1); // <5% of KICK_JOLT_PHASE (2.0) after 1s
-  });
-
-  it("does not depend on Drift speed — a kick still jolts the phase when drift is frozen at 0", () => {
-    // advanceKickJolt has no drift parameter at all; this documents that
-    // independence directly rather than leaving it implicit.
-    expect(advanceKickJolt(0, 1, 1, 1 / 60)).toBeGreaterThan(0);
-  });
-
-  it("never produces NaN or a value outside [0, KICK_JOLT_PHASE] across a broad random sweep", () => {
-    let jolt = 0;
+  it("never produces NaN or a value outside [0, PUMP_VEL_CAP] across a broad random sweep", () => {
+    const st = createPumpState();
     for (let i = 0; i < 500; i++) {
-      jolt = advanceKickJolt(jolt, Math.random(), Math.random(), Math.random() * (1 / 30));
-      expect(Number.isFinite(jolt)).toBe(true);
-      expect(jolt).toBeGreaterThanOrEqual(0);
-      expect(jolt).toBeLessThanOrEqual(2.0);
+      advancePump(st, Math.random() * (1 / 30), Math.random(), Math.random());
+      expect(Number.isFinite(st.vel)).toBe(true);
+      expect(st.vel).toBeGreaterThanOrEqual(0);
+      expect(st.vel).toBeLessThanOrEqual(8);
     }
   });
 });
@@ -506,74 +413,6 @@ describe("caustics caustic density", () => {
       expect(s).toBeGreaterThan(prev);
       prev = s;
     }
-  });
-});
-
-describe("caustics beat ripple pool", () => {
-  /** Index of the slot with the largest value in a pool array. */
-  const argmax = (a: Float32Array) => a.indexOf(Math.max(...a));
-
-  it("a ring starts from nothing (a strike, not a fully formed lobe) and is still clearly visible at the far corner of the frame", () => {
-    expect(rippleEnvelope(0)).toBe(0);
-    // Peak arrives quickly, then fades.
-    expect(rippleEnvelope(0.15)).toBeGreaterThan(0.8);
-    expect(rippleEnvelope(1)).toBeLessThan(rippleEnvelope(0.15));
-    // p-space radius ~3 is the far corner of a 16:9 frame at the scene's 3x
-    // zoom; at RIPPLE_SPEED a ring gets there around 2.8s. "Circles on water
-    // that go from the center to the end" means it must not have faded out
-    // before then.
-    expect(rippleEnvelope(2.8)).toBeGreaterThan(0.2);
-  });
-
-  it("later beats never touch a ring already travelling — its radius keeps growing while it holds its slot", () => {
-    const pool = createRipplePool();
-    pool.trigger();
-    pool.tick(0.5);
-    const slot = argmax(pool.radius);
-    let prev = pool.radius[slot]!;
-    expect(prev).toBeGreaterThan(0);
-    // Fewer beats than there are slots, so this ring is never reclaimed.
-    for (let beat = 0; beat < pool.radius.length - 1; beat++) {
-      pool.trigger();
-      pool.tick(0.5);
-      expect(pool.radius[slot]).toBeGreaterThan(prev);
-      prev = pool.radius[slot]!;
-    }
-  });
-
-  it("when every slot is taken, the most-faded ring is the one reused, never the youngest", () => {
-    const pool = createRipplePool();
-    for (let i = 0; i < pool.radius.length; i++) {
-      pool.trigger();
-      pool.tick(0.5);
-    }
-    const oldest = argmax(pool.radius);
-    const youngest = pool.radius.indexOf(Math.min(...pool.radius));
-    const youngestR = pool.radius[youngest]!;
-    pool.trigger();
-    expect(pool.radius[oldest]).toBe(0);
-    expect(pool.radius[youngest]).toBe(youngestR);
-  });
-
-  it("at a steady fast tempo, the ring a new beat reclaims has already left the frame and faded", () => {
-    const pool = createRipplePool();
-    const beatSec = 60 / 150; // 150 bpm, every beat rings
-    for (let i = 0; i < pool.radius.length; i++) {
-      pool.trigger();
-      pool.tick(beatSec);
-    }
-    const oldest = argmax(pool.radius);
-    expect(pool.radius[oldest]).toBeGreaterThan(3); // past the frame corner
-    expect(pool.strength[oldest]).toBeLessThan(0.25);
-  });
-
-  it("a drop's ring carries its amplitude; untriggered slots contribute nothing", () => {
-    const pool = createRipplePool();
-    pool.trigger(1.8);
-    pool.tick(0.2);
-    const slot = argmax(pool.strength);
-    expect(pool.strength[slot]).toBeCloseTo(1.8 * rippleEnvelope(0.2), 5);
-    for (let i = 0; i < pool.strength.length; i++) if (i !== slot) expect(pool.strength[i]).toBe(0);
   });
 });
 

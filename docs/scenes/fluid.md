@@ -27,8 +27,8 @@ blob scene with no connection to this sim):
   Decisions) with mirror copies fired explicitly via `boltMirrors`.
 - `src/render/scenes/fluid.ts` — the `Scene`: the emitter/splat schedule
   (`EmitterInputs`, `splatEnvelope`, `emitterState`), the beat puff clock
-  (`createPuffState`/`advancePuff`, envelope shaped like `caustics.ts`'s
-  `rippleEnvelope`), the fold-drift state for Auto symmetry
+  (`createPuffState`/`advancePuff`, envelope shaped like `caustics.ts`'s own
+  ring emitter, `src/render/scenes/rippleEmitter.ts`), the fold-drift state for Auto symmetry
   (`createFoldState`/`advanceFold`, drifting across `FOLD_FAMILY` quadrant
   folds), the strobe state machine (`createStrobeState`/`triggerStrobe`/
   `advanceStrobe`/`strobeFrame`, `STROBE_PATTERN`), all `SETTINGS`
@@ -131,6 +131,9 @@ All rounds below landed in the single PR #76 (opened as a draft, merged
   flares in its own colour around a strike. Strobe was rebuilt as
   `STROBE_PATTERN` stepped per render frame (hard single-frame cuts, several
   white then red then black) rather than a smooth ramp.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Current density renamed Current threshold: higher lights fewer currents.
+  Label only.
 
 ## Tuning notes
 

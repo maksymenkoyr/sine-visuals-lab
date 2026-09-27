@@ -56,6 +56,19 @@
  * by the shipped default (tests/silenceGate.test.ts pins this against the
  * real synthetic feed rather than trusting the arithmetic by eye).
  *
+ * The gate governs what a scene *reacts to* (FeatureFrame.onset, and
+ * bandEnergy.ts's band onsets), never tempo tracking. features.ts also
+ * reports FeatureFrame.pulseOnset — the same firing comparison without the
+ * dimmer, on its own refractory — and that is what the tempo vote and the
+ * beat clock read, on the phone and (over the wire's pulse bit) on a paired
+ * TV. It used to be the gated onset, and in a room the gate read as quiet
+ * that starved tempo tracking of every hit: through a mic, the host/TV path
+ * and the no-worklet fallback never started the Metronome at all while the
+ * tempo reading itself was fine. Hiss hits that slip through ungated are
+ * aperiodic, and the tempo comb and the beat clock's confidence already
+ * reject aperiodic hits (tests/tempoEval.test.ts's "through a mic" block
+ * guards both halves).
+ *
  * TV limitation: only the broadband onset flag (FeatureFrame.onset) is
  * computed by a FeatureExtractor and travels pre-gated to a paired TV over
  * src/net/protocol.ts's wire frame. bandEnergy.ts's per-band low/mid/high

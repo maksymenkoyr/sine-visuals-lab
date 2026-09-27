@@ -28,7 +28,7 @@ Close out this working session:
    survives.
 
    Then **save the materials** — anything this session used for a scene that
-   would otherwise be lost (the standing rule in `CLAUDE.md` says where each
+   would otherwise be lost (the standing rule in `AGENTS.md` says where each
    kind goes):
    - scripts written in the session's scratch folder that were used to
      build, measure or screenshot the scene → `docs/scenes/<id>/scripts/`,
@@ -41,11 +41,11 @@ Close out this working session:
      by hand) → under `tools/.cache/refs/<name>/`, named in the record.
 
 4. **Check for doc rot.** For any symbol, file, or param name this session
-   renamed, removed, or changed the meaning of, grep `CLAUDE.md` and `docs/*.md`
-   for the old name. Fix any reference you find — this is the enforcement
-   mechanism behind rule 2 in `CLAUDE.md` ("never write down anything
-   countable"): a reference that names a real symbol will surface itself here
-   the moment that symbol changes.
+   renamed, removed, or changed the meaning of, grep `AGENTS.md`, `CLAUDE.md`
+   and `docs/*.md` for the old name. Fix any reference you find — this is the
+   enforcement mechanism behind rule 2 in `AGENTS.md` ("never write down
+   anything countable"): a reference that names a real symbol will surface
+   itself here the moment that symbol changes.
 
 Report what you changed in `docs/status.md`, which scene records and
 materials you updated, and whether any doc needed a fix.

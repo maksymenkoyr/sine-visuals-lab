@@ -19,6 +19,10 @@ import type { AnimFrame } from "./animClock.ts";
 // only reads AnimFrame's one-shot fields (never FeatureFrame's) can no
 // longer miss one, regardless of render cap or refresh rate.
 //
+// metronome.ts's own metronomeBeat/metronomeBar are latched exactly like
+// onset/lowOnset above — they're one-shot edges off the same render loop, so
+// a render-capped tick can miss one just as easily.
+//
 // Modeled on jitterBuffer.ts's consumeOnsetIfDue — the same "hold a flag
 // until someone consumes it" shape, here local to one device's render loop
 // instead of a network room's playout clock.
@@ -46,6 +50,8 @@ export function createRenderLatch(): RenderLatch {
   let pendingMidOnset = false;
   let pendingHighOnset = false;
   let pendingDropOnset = false;
+  let pendingMetronomeBeat = false;
+  let pendingMetronomeBar = false;
   let lastConsumeMs: number | null = null;
 
   return {
@@ -55,6 +61,8 @@ export function createRenderLatch(): RenderLatch {
       pendingMidOnset ||= anim.midOnset;
       pendingHighOnset ||= anim.highOnset;
       pendingDropOnset ||= anim.dropOnset;
+      pendingMetronomeBeat ||= anim.metronomeBeat;
+      pendingMetronomeBar ||= anim.metronomeBar;
     },
 
     consume(anim: AnimFrame, nowMs: number): AnimFrame {
@@ -71,6 +79,8 @@ export function createRenderLatch(): RenderLatch {
         midOnset: pendingMidOnset,
         highOnset: pendingHighOnset,
         dropOnset: pendingDropOnset,
+        metronomeBeat: pendingMetronomeBeat,
+        metronomeBar: pendingMetronomeBar,
       };
 
       pendingOnset = false;
@@ -78,6 +88,8 @@ export function createRenderLatch(): RenderLatch {
       pendingMidOnset = false;
       pendingHighOnset = false;
       pendingDropOnset = false;
+      pendingMetronomeBeat = false;
+      pendingMetronomeBar = false;
 
       return merged;
     },

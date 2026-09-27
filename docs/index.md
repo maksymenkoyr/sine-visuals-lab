@@ -3,7 +3,8 @@
 This folder is a vault: each note here owns a piece of project knowledge that has
 no single owning file in the codebase. The working rules that decide what earns a
 note — and what belongs in a code comment instead — live in
-[`CLAUDE.md`](../CLAUDE.md) at the repo root, outside this vault. Read those rules
+[`AGENTS.md`](../AGENTS.md) at the repo root, outside this vault
+([`CLAUDE.md`](../CLAUDE.md) imports them for Claude Code). Read those rules
 before adding a note here; this file doesn't restate them.
 
 - [Architecture](architecture.md) — the cross-file map: how a sound in the room

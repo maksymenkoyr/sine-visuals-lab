@@ -15,6 +15,7 @@ import { chladniScene } from "./chladni.ts";
 import { dancersScene } from "./dancers/index.ts";
 import { powderScene } from "./powder.ts";
 import { physarumScene } from "./physarum.ts";
+import { physarum2Scene } from "./physarum2.ts";
 import { stormScene } from "./storm.ts";
 import { ambienceScene } from "./ambience.ts";
 import { kaleidoscopeScene } from "./kaleido/index.ts";
@@ -25,6 +26,7 @@ import { inkScene } from "./ink.ts";
 import { crystalScene } from "./crystal/index.ts";
 import { fluidScene } from "./fluid.ts";
 import { silkScene } from "./silk/index.ts";
+import { skyScene } from "./sky/sky.ts";
 import { gatesScene } from "./gates/index.ts";
 
 // Registration order is gallery display order (listScenes() preserves Map
@@ -34,6 +36,8 @@ import { gatesScene } from "./gates/index.ts";
 // first tile behind the gallery's draft toggle. (Registering it here is also
 // what lets vite-scene-links-plugin.ts print its link when you start
 // `npm run dev` with its files changed.)
+registerScene(physarum2Scene);
+registerScene(skyScene);
 registerScene(silkScene);
 registerScene(slatsScene);
 registerScene(physarumScene);
@@ -66,6 +70,8 @@ registerScene(ferrofluidScene);
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
   "silk",
+  "slats",
+  "physarum",
   "gates",
   "tessera",
   "ink",
@@ -104,6 +110,7 @@ for (const error of privateScenes.errors) console.warn(`[private scenes] ${error
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
 
 export {
+  skyScene,
   silkScene,
   tesseraScene,
   spectrumScene,
@@ -120,6 +127,7 @@ export {
   dancersScene,
   powderScene,
   physarumScene,
+  physarum2Scene,
   stormScene,
   ambienceScene,
   kaleidoscopeScene,

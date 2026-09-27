@@ -6,8 +6,11 @@ import { settingScope, type SceneSetting } from "./sceneSettings.ts";
 import {
   defaultDriveSetting,
   driveSettingFromChoice,
+  DRIVE_EVERY_VALUES,
+  GENERIC_THRESHOLD_DEFAULT,
   normalizeDriveSetting,
   setPatchMix as pureSetPatchMix,
+  setSourceEvery as pureSetSourceEvery,
   setSourceGrid as pureSetSourceGrid,
   setSourceHeight as pureSetSourceHeight,
   setSourceMuted as pureSetSourceMuted,
@@ -74,6 +77,15 @@ interface DriveEntry {
   patch?: StoredDriveSetting;
   line?: number[];
   lineStrength?: number;
+  /** The setting's own threshold value, 0..1 — scene-handled
+   *  (SceneSetting.drive.threshold) or the generic engine gate every other
+   *  drive setting gets (drives.ts's header's threshold paragraph); see
+   *  getDriveThresholdState. */
+  threshold?: number;
+  /** Whether that threshold is switched on. Absent means "use this setting's
+   *  own default" (on for scene-handled, off for generic) — see
+   *  getDriveThresholdState. */
+  thresholdOn?: boolean;
 }
 
 type Store = Record<string, Record<string, DriveEntry>>;
@@ -174,13 +186,20 @@ const DRIVE_MIXES: readonly DriveMix[] = ["add", "max", "gate"];
  *  round-trips through this form, both in localStorage and in a Look's `d`
  *  — see sceneLooks.ts's own header) or a compact patch
  *  `{m: DriveMix, s: [{c: DriveChoice, w?: number, h?: HitHeight, g?: 1,
- *  o?: 1}, …]}`. A source's own `g`/`o` (present only when `true`) are
- *  `DriveSource.when`/`.off` — drives.ts's header covers what each does; `g`
- *  for "gate condition", `o` for "off", one letter each to match `c`/`w`/`h`.
- *  A source's `w`/`h`, if present, must already be a well-shaped value —
- *  out-of-range weight is clamped (`normalizeDriveSetting`), but a wrong
- *  *type* anywhere fails the whole entry rather than silently dropping one
- *  source, so a garbage entry can't quietly resolve to a half-built patch.
+ *  o?: 1, e?: number}, …]}`. A source's own `g`/`o` (present only when
+ *  `true`) are `DriveSource.when`/`.off` — drives.ts's header covers what
+ *  each does; `g` for "gate condition", `o` for "off", one letter each to
+ *  match `c`/`w`/`h`. `e` is `DriveSource.every`, Beat wave's own every-N-
+ *  beats divider (drives.ts's own doc on that field) — a link/patch saved
+ *  before this field existed simply lacks it, and `normalizeDriveSetting`
+ *  strips it right back out on any source it isn't `anim.beatWave`'s own, so
+ *  an old app reading a new source it doesn't otherwise recognise the `e` on
+ *  is unaffected (it never gets this far). A source's `w`/`h`/`e`, if
+ *  present, must already be a well-shaped value — out-of-range weight is
+ *  clamped (`normalizeDriveSetting`), but a wrong *type* or an `e` outside
+ *  DRIVE_EVERY_VALUES anywhere fails the whole entry rather than silently
+ *  dropping one source, so a garbage entry can't quietly resolve to a
+ *  half-built patch.
  *
  *  **Legacy top-level `w`.** Before a source had its own role, `DrivePatch`
  *  carried one gate condition as a single index, encoded at this shape's own
@@ -240,6 +259,11 @@ export function sanitizeDriveSetting(raw: unknown): DriveSetting | null {
       if (rawOff !== 1) return null;
       source.off = true;
     }
+    const rawEvery = (item as { e?: unknown }).e;
+    if (rawEvery !== undefined) {
+      if (typeof rawEvery !== "number" || !(DRIVE_EVERY_VALUES as readonly number[]).includes(rawEvery)) return null;
+      source.every = rawEvery as DriveSource["every"];
+    }
     sources.push(source);
   }
 
@@ -260,15 +284,16 @@ export function sanitizeDriveSetting(raw: unknown): DriveSetting | null {
  *  function. Both `DriveEntry.patch` (localStorage) and a Look's `d` entry
  *  (sceneLooks.ts) are one of these, never a bare `DriveSetting` — see this
  *  file's header for why one canonical shape serves both boundaries. */
-export type StoredDriveSetting = DriveChoice | { m: DriveMix; s: { c: DriveChoice; w?: number; h?: HitHeight; g?: 1; o?: 1 }[] };
+export type StoredDriveSetting = DriveChoice | { m: DriveMix; s: { c: DriveChoice; w?: number; h?: HitHeight; g?: 1; o?: 1; e?: number }[] };
 
 /** `setting` written the way `sanitizeDriveSetting` reads it back: a
- *  one-source, weight-1, Graded, unconditioned, unmuted `add` patch (and
- *  `"scene"`) as the bare `DriveChoice` it's identical to — the same shape
- *  this store/a Look used before patches existed, so an untouched setting
- *  keeps costing no more than it always did and an old app can still make
- *  sense of it — anything else as the compact `{m,s}` form, a source's own
- *  role/mute as its own `g`/`o` (never a top-level field any more — see
+ *  one-source, weight-1, Graded, unconditioned, unmuted, every-1 `add` patch
+ *  (and `"scene"`) as the bare `DriveChoice` it's identical to — the same
+ *  shape this store/a Look used before patches existed, so an untouched
+ *  setting keeps costing no more than it always did and an old app can still
+ *  make sense of it — anything else as the compact `{m,s}` form, a source's
+ *  own role/mute as its own `g`/`o` and (a Beat wave source's own) every-N-
+ *  beats divider as `e` (never a top-level field any more — see
  *  sanitizeDriveSetting's own header for the legacy top-level `w` this still
  *  reads, just never writes). sceneLooks.ts reuses this directly rather than
  *  re-deriving the same compaction. */
@@ -276,18 +301,25 @@ export function encodeDriveSetting(setting: DriveSetting): StoredDriveSetting {
   if (setting === "scene") return "scene";
   if (setting.mix === "add" && setting.sources.length === 1) {
     const only = setting.sources[0]!;
-    if (only.weight === 1 && (only.height === undefined || only.height === "graded") && !only.when && !only.off) {
+    if (
+      only.weight === 1 &&
+      (only.height === undefined || only.height === "graded") &&
+      !only.when &&
+      !only.off &&
+      (only.every === undefined || only.every === 1)
+    ) {
       return only.choice;
     }
   }
   return {
     m: setting.mix,
     s: setting.sources.map((src) => {
-      const entry: { c: DriveChoice; w?: number; h?: HitHeight; g?: 1; o?: 1 } = { c: src.choice };
+      const entry: { c: DriveChoice; w?: number; h?: HitHeight; g?: 1; o?: 1; e?: number } = { c: src.choice };
       if (src.weight !== 1) entry.w = src.weight;
       if (src.height !== undefined && src.height !== "graded") entry.h = src.height;
       if (src.when) entry.g = 1;
       if (src.off) entry.o = 1;
+      if (src.every !== undefined && src.every !== 1) entry.e = src.every;
       return entry;
     }),
   };
@@ -330,6 +362,8 @@ export function resetDriveSetting(sceneId: string, spec: SceneSetting): void {
   const entry = entryFor(settingScope(sceneId, spec.key), spec.key);
   delete entry.patch;
   delete entry.choice;
+  delete entry.threshold; // "Reset to scene default" covers the threshold row too
+  delete entry.thresholdOn;
   persist();
 }
 
@@ -351,6 +385,12 @@ export function setSourceWeight(sceneId: string, spec: SceneSetting, choice: Dri
 
 export function setSourceHeight(sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, height: HitHeight): void {
   setDriveSetting(sceneId, spec, pureSetSourceHeight(getDriveSetting(sceneId, spec), choice, height));
+}
+
+/** Beat wave's own every-N-beats divider (deviceMenu.ts's Every seg) —
+ *  drives.ts's setSourceEvery. */
+export function setSourceEvery(sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, every: number): void {
+  setDriveSetting(sceneId, spec, pureSetSourceEvery(getDriveSetting(sceneId, spec), choice, every));
 }
 
 export function setSourceGrid(sceneId: string, spec: SceneSetting, grid: BeatGridIndex): void {
@@ -430,5 +470,40 @@ export function setDriveLineStrength(sceneId: string, spec: SceneSetting, value:
 
 export function resetDriveLineStrength(sceneId: string, spec: SceneSetting): void {
   delete entryFor(settingScope(sceneId, spec.key), spec.key).lineStrength;
+  persist();
+}
+
+/** A drive setting's own threshold on/off + value — drives.ts's
+ *  `getDriveThresholdState` doc (its own header's threshold paragraph) for
+ *  what "on" means for each kind. Scene-handled (`spec.drive.threshold`
+ *  declared) starts on, at that declaration's own `default`; every other
+ *  drive setting starts off, at `GENERIC_THRESHOLD_DEFAULT` — so a setting
+ *  nobody has ever touched costs nothing more than reading two `undefined`s
+ *  here. */
+export interface DriveThresholdState {
+  on: boolean;
+  value: number;
+}
+
+export function getDriveThresholdState(sceneId: string, spec: SceneSetting): DriveThresholdState {
+  const declared = spec.drive?.threshold;
+  const defaultOn = declared !== undefined;
+  const defaultValue = declared?.default ?? GENERIC_THRESHOLD_DEFAULT;
+  const stored = cache[settingScope(sceneId, spec.key)]?.[spec.key];
+  const on = typeof stored?.thresholdOn === "boolean" ? stored.thresholdOn : defaultOn;
+  const storedValue = stored?.threshold;
+  const value = typeof storedValue === "number" && Number.isFinite(storedValue) ? Math.min(1, Math.max(0, storedValue)) : defaultValue;
+  return { on, value };
+}
+
+/** Never touches on/off — see setDriveThresholdOn for that. */
+export function setDriveThreshold(sceneId: string, spec: SceneSetting, value: number): void {
+  if (!Number.isFinite(value)) return;
+  entryFor(settingScope(sceneId, spec.key), spec.key).threshold = Math.min(1, Math.max(0, value));
+  persist();
+}
+
+export function setDriveThresholdOn(sceneId: string, spec: SceneSetting, on: boolean): void {
+  entryFor(settingScope(sceneId, spec.key), spec.key).thresholdOn = on;
   persist();
 }

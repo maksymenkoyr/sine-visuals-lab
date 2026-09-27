@@ -1,0 +1,1489 @@
+import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../../gl.ts";
+import type { SceneSetting } from "../../sceneSettings.ts";
+import { resolveSceneSetting } from "../../autoTune.ts";
+import type { Scene, SceneContext } from "../../scene.ts";
+import { COMMON_UNIFORMS_GLSL, DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../../sceneCommon.ts";
+import { NUM_BANDS } from "../../../audio/types.ts";
+import { PASSTHROUGH_DRIVES } from "../../drives.ts";
+import { createBeatListener, type HoldBeats } from "../../beatListener.ts";
+import {
+  createFluidSim,
+  detectSimFormat,
+  simIoGlsl,
+  simResolutionFor,
+  sameSimSize,
+  MIRROR_OFF,
+  type FluidSim,
+  type SimFormat,
+  type Splat,
+} from "./skyFluidSim.ts";
+
+// Sky: a real 2D fluid sim driving cloud cover, with two vision illusions
+// layered on top — floaters (in waves) and Haidinger's brush. Picked from
+// the "Open Sky Illusions" preview artifact; the blue field entoptic
+// phenomenon was in the first pass but cut after a live look at real
+// screenshots (small darting dots read as noise rather than an atmospheric
+// illusion once the cloud itself was worth looking at). Vection, Troxler
+// fading, afterimage, the autokinetic effect and pareidolia are
+// deliberately NOT built here either, not even as disabled settings — a
+// later pass's scope, not this one's.
+//
+// The fluid sim (skyFluidSim.ts) is a copy of Neon Fluid's fluidSim.ts, the
+// stable-fluids solver — copied while that scene was still on an unmerged
+// branch, and still separate because Sky raises its SPLAT_SLOTS (Neon
+// Fluid's 4 → 12, one per cloud drifter). The two are otherwise identical;
+// folding them into one module with the slot count as a parameter is an
+// open follow-up. This scene runs
+// it in MIRROR_OFF mode only — full screen, no kaleidoscope fold — the one
+// path that needs no adaptation. Cloud drift is deliberately NOT
+// audio-reactive at a Scene default: DRIFTER_SEEDS.length slow, gently
+// meandering ambient splats (driftCenter, a real-time clock, never warped by
+// anim.flowPhase or frame.energy — the sim step below always passes energy:
+// 0, and no port changes that) keep the sky
+// moving on its own; the two illusions are what carry the music connection,
+// matching the brief's own framing. The ambient amounts (Cloud cover, Flow
+// speed, Turbulence, and the Look-side brightness knobs) each carry a
+// patch-bay jack whose Scene composite is "steady" — they only ever react
+// if someone wires a source to them. Free-slip walls are kept as-is (no wrap
+// boundary) —
+// a possible follow-up, not a v1 blocker, since the drift is slow enough
+// that a wall never reads as one in a normal viewing session.
+//
+// Display is one hand-rolled pass (not createFullscreenScene, which only
+// supports a single pass with no texture of its own to sample) reading the
+// sim's dyeTexture() through skyFluidSim's own simIoGlsl(format) codec —
+// the same reason petri.ts hand-rolls its display pass. Compositing order,
+// sky gradient at the bottom, illusions on top:
+//   sky gradient -> cloud (contrast-shaped extinction blend off dye
+//   density, cross-eroded by a self-written fbm bump for cauliflower
+//   texture and continuous morphing, plus a cheap lit-top/shadowed-bottom
+//   shade from the density gradient — a thin slab, not Storm's Gas-mode
+//   raymarch, which is private to storm.ts) -> Haidinger's brush (faint,
+//   blended into the sky+cloud) -> floaters (drawn last, on top of
+//   everything, since they're the viewer's own eye artifact).
+// The sky/cloud sample the shared room-space canvas (roomUv) since the
+// fluid is one world shared across a Panorama's devices, same as every
+// other world-simulating scene; the two illusions instead centre on *this
+// device's own* screen (vUv, not roomUv) — each is a viewer's own eye
+// artifact, not shared room content, so it has to track the screen the
+// viewer is actually looking at rather than a hypothetical shared-canvas
+// centre that might sit off this device's own slice entirely.
+//
+// Floaters are hollow, near-transparent refractive tubes: a real floater is
+// a strand of vitreous gel refracting the sky behind it, so floaterProfile
+// turns the signed distance to a floater's own edge into a faint bright rim,
+// a thin dark fringe just outside it and a barely-lifted see-through
+// interior, applied as a multiplicative modulation of whatever is behind.
+// Strand paths come from floaterPath, which integrates a heading forward at
+// a fixed step, so a strand's arc length always comes out exactly right and
+// a sharp corner can't form. Dots read the same profile around a disk.
+//
+// They arrive as short-lived stamps, one per spawn event, each laid out
+// like the user's two text-grid references: a streak of cells on a fixed
+// grid (FLOATER_CELL), where the reference's ">" body becomes aligned
+// strands (all following the streak's slant), its "_" fringe becomes short
+// flat strands low in the cell, and its "o" hotspot becomes dots. A streak
+// is a slanted ellipse of density (streakDensity), frayed row by row so
+// each row's run starts and ends at its own column, the references'
+// stair-stepped rows. Every pixel of a cell reads the density at the cell's
+// centre and the cell's own hash fixes its floater's shape, so a drifting
+// streak moves by floaters switching on and off across the grid. Its
+// envelope is subtracted from the density rather than multiplied in, so a
+// streak pops in fringe-first and dissolves cell by cell (body strand to
+// fringe strand to nothing). FLOATER_CELL is sized so a floater plus its
+// fringe fits in one cell, since a pixel only evaluates its own cell.
+//
+// Where and when they arrive is one mechanism — the floater brush (an
+// invisible spawn point the scene owns, stepBrush; NOT Haidinger's bowtie,
+// which has its own phase far below). On each spawn event the brush steps
+// first (its stride is the Brush move setting), then the stamp lands in a
+// small ring around it — pickSwarmCenter nudges to the clearest spot, so a
+// trail of streaks traces the brush's path across the sky and wraps at the
+// edges. What counts as an event, and how many floaters a stamp lays down,
+// is the Floaters setting's drive (the row's jack, src/render/drives.ts):
+// drives.fired() gates the event — at Scene that's the shared beat
+// listener, one stamp per beat — and drives.value() grades the count
+// (floaterCountFromEnergy at Scene: quiet passages sparser, loud ones
+// denser; a wired source replaces both wholesale, so a frequent source
+// stamps more often and its reading sets the count). spawnFloaters refuses
+// a stamp while the Floaters amount product reads 0, and the shader's own
+// off-gate in buildDisplayFrag stops any stamp already live at the same
+// instant — one param, from trigger to count to off.
+//
+// Streaks keep off the real clouds twice over: pickSwarmCenter scores the
+// candidates around the brush against the cloud drifters' current centres,
+// and in the shader a cell over cloud (cloudBumpedAt, the exact field the
+// cloud pass thresholds) draws nothing, with a per-pixel cloudAlpha
+// backstop. Per pixel the cost is one density evaluation per live stamp
+// (MAX_WAVE_BURSTS, each skipped outright when the cell is out of its
+// reach) plus one floater, so no quality-tier gating is needed.
+//
+// Stamps reuse powder.ts's stateless chunk-pool idiom (createWavePool
+// below): a small JS pool of (t0, strength, seed, x, y) slots, uploaded as
+// flat uniform arrays (uBurstT0/uBurstAmp/uBurstSeed/uBurstX/uBurstY —
+// named distinctly from every setting's own auto-generated u<Key>
+// uniform), each slot's whole streak evaluated analytically from its age
+// in the shader.
+//
+// On each beat (the same shared beatListener's edge, gated through the
+// Light waves drive in render()) a thin ring of pale light ripples quickly
+// out from near the centre of view (lightWaveAt), tinted only from the
+// sky's own lavender, rose and pale-cyan tones, and it lights only the
+// floaters' own tubes: the sky and clouds around them never change, so the
+// wave is only seen as a glint passing through a streak.
+//
+// Floater visibility (floaterGain) scales the tubes' contrast, and Floater
+// sustain (waveLifeSec) sets how long each stamp stays; each keeps the
+// life it was given when it fired (uBurstLife), so moving the slider never
+// stretches or cuts short a streak already on screen.
+//
+// The sky runs on its own 24-hour clock. Time of day sets where it sits,
+// Day drift how fast it moves on from there (advanceDayOffset, a scene-owned
+// accumulator like brushPhase, so moving Time of day never resets the
+// drift). The shader lights everything off the sun's elevation (sin of the
+// day angle): sky gradient, sun colour and cloud lit/shade tones all blend
+// between keys at the horizon glow, golden hour, early evening and midday
+// (DAY_KEY_E), mornings warmed toward peach where evenings run pink. There
+// is deliberately no night sky (the user asked to skip it): elevation is
+// floored at the horizon-glow key (DAY_E_FLOOR), so between sunset and
+// sunrise the sky holds a soft twilight glow, and with Day drift on the
+// scene hurries through those hours (nightSpeedup) while the sun's halo
+// slips under the horizon from right to left. A soft sun halo tracks across
+// the frame (rising left, setting right), the horizon warms on the sun's
+// side around sunrise and sunset, the clouds' shadow taps point toward the
+// sun's side (swinging back through overhead while it's down), and
+// Haidinger's brush dims with the daylight it depends on. The default Time
+// of day lands on the early-evening key, which is exactly the fixed look the
+// scene had before the day cycle existed.
+//
+// Haidinger's brush rotates on brushPhase, a plain per-frame accumulator
+// (advanceBrushPhase) owned by this scene — never anim.barPhase, which
+// wraps every bar and would make the brush visibly snap; storm.ts's own
+// scene-local morphPhase/advanceMorphPhase is the precedent for owning a
+// continuously-increasing accumulator instead of reading an unwrapped beat
+// count (animClock.ts's beatClock keeps one internally, but doesn't expose
+// it on AnimFrame). Rotation runs at a fixed real-time rate rather than
+// tempo-locked — the plan's own explicitly-offered alternative, taken here
+// as the simpler of the two: tempo-locking a slow, ambient rotation adds
+// complexity (re-deriving a rate from bpm/tempoLock, handling the unlocked
+// case) for a difference that's unlikely to read as anything but "slightly
+// different speed" at this speed (implementer's call, not eye-verified
+// against the tempo-locked alternative).
+const ID = "sky";
+
+// --- Floater-wave budget (a compile-time loop bound in the display shader). ---
+export const MAX_WAVE_BURSTS = 8; // concurrent floater stamps — one per beat by default, and with a long Floater sustain several stay up at once
+
+// --- Fluid sim tuning. Fixed rather than exposed as settings — the plan's
+// settings list is representative, not exhaustive, and these aren't part of
+// either illusion. Dye rate raised and dissipation lowered from the first
+// pass, which built up too thin and too slowly to read as real cloud cover
+// against a real-sky reference (a still frame of open sky runs 40-50% cloud
+// coverage with a near-white core, not the soft low-alpha wash the first
+// pass produced). ---
+const SIM_VISCOSITY = 0.3;
+const DYE_DISSIPATION = 0.34; // high enough that old puffs thin out instead of piling into one mass
+const SIM_DT_MAX = 1 / 30; // clamps a slow-frame dt so the sim never destabilises
+
+// --- Ambient cloud drift (not audio-reactive — see file header). Many small
+// sources, each wandering around its own home spot spread across the whole
+// frame (driftCenter) and puffing on and off (drifterPuff), so the cover
+// reads as separate airy puffs scattered over the sky. Three big sources
+// orbiting the centre, fed continuously, merged into one central blob. ---
+const DRIFTER_SEEDS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const DRIFT_TANGENT_EPS = 0.08; // finite-difference step used only to find the drift's own heading
+const DRIFTER_SIGMA_MIN = 0.045; // splat radius range, sim uv — varied per seed so puffs aren't all one size
+const DRIFTER_SIGMA_MAX = 0.085;
+const DRIFTER_FORCE = 10; // texels/s^2 at FORCE_REF_ROWS — see skyFluidSim.ts's header; strong enough that the flow shears puffs into drifting shapes rather than leaving round balls where they were laid
+const DRIFTER_DYE_RATE = 1.05; // density/s at the splat centre while puffing, before Cloud cover scales it
+const DRIFTER_PUFF_RATE = 0.45; // rad/s of each source's on/off cycle (~14s per puff) — a long "on" phase grows one puff into a big blob
+
+// --- Floater stamps (streaks of floaters on a grid — see the file
+// header). One stamp per spawn event, laid where the floater brush stands:
+// the brush steps first, the stamp follows, so a trail of streaks traces
+// its path across the sky. ---
+export const WAVE_LIFE_SEC = 1.8; // a wave's life when none is given (createWavePool's trigger default)
+const WAVE_LIFE_MIN_SEC = 0.8; // life at Sustain = 0
+const WAVE_LIFE_MAX_SEC = 8; // life at Sustain = 1
+const FLOATER_GAIN_MAX = 2.4; // floater contrast gain at Visibility = 1 (so the 0.5 default is 1.2x the tuned contrast)
+export const WAVE_DEAD_T0 = -1e9;
+const WAVE_FADE_IN_SEC = 0.15; // the streak's density ramps up this fast — floaters pop in, fringe first
+const WAVE_FADE_OUT_SEC = 0.9; // and ramps back down over this long, so it dissolves ">" -> "_" -> gone
+
+// --- The floater brush: the invisible spawn point that steps across the
+// sky on each stamp (NOT Haidinger's bowtie, which has its own phase far
+// below). `stepBrush` owns the motion; the scene owns the state. ---
+const BRUSH_STRIDE_MAX = 0.35; // uv travelled per stamp at Brush move = 1
+const BRUSH_TURN_MAX = 0.9; // radians of heading wander per stamp
+const BRUSH_HEADING_INIT = 0.9; // starting heading, radians — reset in init()
+const STAMP_CANDIDATES = 6; // spots around the brush pickSwarmCenter scores
+const STAMP_JITTER = 0.1; // uv radius of that candidate ring
+
+// --- Beat light waves: a thin, pale ring of light rippling out from near
+// the centre of view on each beat, seen only where it passes through the
+// floaters. A plain ring of slots — the oldest is always the one
+// overwritten, and the shader retires any wave older than SWEEP_SEC on its
+// own, so nothing needs expiring here. ---
+export const MAX_SWEEPS = 3;
+export const SWEEP_SEC = 0.7; // quick: a ripple, not a slow wipe
+// At most one event per beat — the hold both scene listeners share: the
+// light sweep and the floater brush stamp land on the same beat under Scene
+// (render() advances the one listener once and hands the edge to both).
+const ONE_BEAT_HOLD: HoldBeats = { beats: 1, fallbackSec: 0.4 };
+
+/** Which ring slot the next sweep goes in, given how many have fired so
+ *  far — always the oldest one. */
+export function sweepSlot(fired: number): number {
+  const n = Number.isFinite(fired) ? Math.max(0, Math.floor(fired)) : 0;
+  return n % MAX_SWEEPS;
+}
+
+// --- Day cycle: the sky's own 24-hour clock (see the file header). ---
+const DAY_PERIOD_FAST_SEC = 60; // one whole day per minute at Day drift = 1
+const DAY_PERIOD_RANGE = 30; // ...and 30x slower (half an hour per day) just above Day drift = 0
+
+/** Days per second at a Day drift setting: 0 holds the sky still at Time of
+ *  day; above that, exponential from a half-hour day up to a one-minute day,
+ *  so the low end of the slider still has fine control over slow drifts. */
+export function dayRatePerSec(drift: number): number {
+  const d = Number.isFinite(drift) ? clamp01(drift) : 0;
+  if (d <= 0) return 0;
+  return 1 / (DAY_PERIOD_FAST_SEC * Math.pow(DAY_PERIOD_RANGE, 1 - d));
+}
+
+const NIGHT_SPEEDUP = 12; // how much faster the drift runs while the sun is well below the horizon
+
+/** How much faster than Day drift's own rate the sky moves at a day phase:
+ *  1 while the sun is up, easing up to NIGHT_SPEEDUP once it's below the
+ *  horizon. The scene has no night sky (the shader holds the sunset glow
+ *  while the sun is down), so with drift on it hurries through those hours
+ *  rather than sitting in one frozen twilight for half the cycle. Smooth,
+ *  so the sun's glow slipping under the horizon never visibly lurches. */
+export function nightSpeedup(dayPhase: number): number {
+  const e = sunElevation(dayPhase);
+  const k = clamp01((-0.02 - e) / 0.13); // 0 at the horizon glow key, 1 by e = -0.15
+  return 1 + (NIGHT_SPEEDUP - 1) * k * k * (3 - 2 * k);
+}
+
+/** The day cycle's own accumulator — how far the sky has drifted past Time
+ *  of day, in days, wrapped to [0, 1). Owned by the scene like brushPhase,
+ *  so Time of day can move under it without the drift resetting. `dayPhase`
+ *  is the sky's current phase (Time of day plus this offset), so the drift
+ *  can hurry through the hours the sun is down (nightSpeedup). */
+export function advanceDayOffset(prev: number, dtSec: number, drift: number, dayPhase = 0.5): number {
+  const from = Number.isFinite(prev) ? prev : 0;
+  const dt = Number.isFinite(dtSec) ? Math.max(0, dtSec) : 0;
+  const next = from + dt * dayRatePerSec(drift) * nightSpeedup(dayPhase);
+  return next - Math.floor(next);
+}
+
+/** Sun elevation, -1..1, at a day phase (0 midnight, 0.25 sunrise, 0.5
+ *  noon, 0.75 sunset) — the same curve the display shader lights the sky by. */
+export function sunElevation(dayPhase: number): number {
+  const t = Number.isFinite(dayPhase) ? dayPhase : 0;
+  return Math.sin(2 * Math.PI * (t - 0.25));
+}
+
+// --- Haidinger's brush. ---
+const BRUSH_TURNS_PER_SEC = 0.045; // one full turn every ~22s
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+/** How long a floater wave stays, in seconds, at a Sustain setting: squared,
+ *  so the short end (where a quick flicker vs a brief hold matters most)
+ *  gets most of the slider. */
+export function waveLifeSec(sustain: number): number {
+  const s = Number.isFinite(sustain) ? clamp01(sustain) : 0;
+  return WAVE_LIFE_MIN_SEC + (WAVE_LIFE_MAX_SEC - WAVE_LIFE_MIN_SEC) * s * s;
+}
+
+/** Floater contrast gain at a Visibility setting — 0 hides them, the 0.5
+ *  default is 1.2x the tuned contrast, 1 is double that. */
+export function floaterGain(visibility: number): number {
+  const v = Number.isFinite(visibility) ? clamp01(visibility) : 0;
+  return FLOATER_GAIN_MAX * v;
+}
+
+/** How many floaters a stamp lays down at Scene, from the room's loudness
+ *  this tick: a gentle 0.45..1 grade, so quiet passages stamp sparsely and
+ *  loud ones fill in — the signal deciding the count. This is the scene's
+ *  own composite behind drives.value("floaterDensity", …); a re-patched
+ *  source replaces it wholesale. */
+export function floaterCountFromEnergy(energy: number): number {
+  const e = Number.isFinite(energy) ? clamp01(energy) : 0;
+  return 0.45 + 0.55 * e;
+}
+
+/** The spawn gate every floater stamp passes through (see the file header):
+ *  the graded count comes back only while the Floaters amount product the
+ *  shader draws with (the resolved amount already multiplied by its drive,
+ *  so JS and GLSL gate on the identical number) and the count grade itself
+ *  are above 0 — otherwise 0, and render() stamps nothing. NaN fails closed
+ *  (`!(x > 0)`); live stamps stop drawing through the shader's own off-gate
+ *  in buildDisplayFrag. */
+export function spawnFloaters(amountProduct: number, count: number): number {
+  if (!(amountProduct > 0 && count > 0)) return 0;
+  return count;
+}
+
+/** Haidinger's brush's own accumulator: a plain, continuously increasing
+ *  phase (never anim.barPhase — see file header) so the bowtie glides
+ *  instead of snapping every bar. */
+export function advanceBrushPhase(prev: number, dtSec: number): number {
+  const from = Number.isFinite(prev) ? prev : 0;
+  const dt = Number.isFinite(dtSec) ? Math.max(0, dtSec) : 0;
+  return from + dt * BRUSH_TURNS_PER_SEC * Math.PI * 2;
+}
+
+/** One step of the floater brush — the invisible spawn point, not
+ *  Haidinger's bowtie: the heading wanders by a hashed turn, the point
+ *  advances `stride` uv along it and wraps toroidally, so a trail of stamps
+ *  winds across the sky and keeps going past the edges. stride 0 (Brush
+ *  move = 0) holds the position — stamps pile up — while the heading still
+ *  wanders for when it is released. Pure and deterministic per seed, so
+ *  it's testable without a GL context. */
+export function stepBrush(
+  pos: readonly [number, number],
+  heading: number,
+  stride: number,
+  seed: number,
+): { x: number; y: number; heading: number } {
+  const s = Number.isFinite(seed) ? seed : 0;
+  const fract = (v: number) => v - Math.floor(v);
+  const turn = (fract(Math.sin(s * 21.987 + 3.7) * 43758.5453) - 0.5) * 2 * BRUSH_TURN_MAX;
+  const h = (Number.isFinite(heading) ? heading : BRUSH_HEADING_INIT) + turn;
+  const d = Number.isFinite(stride) ? Math.max(0, stride) : 0;
+  const x0 = (Number.isFinite(pos[0]) ? pos[0] : 0.5) + Math.cos(h) * d;
+  const y0 = (Number.isFinite(pos[1]) ? pos[1] : 0.5) + Math.sin(h) * d;
+  return { x: x0 - Math.floor(x0), y: y0 - Math.floor(y0), heading: h };
+}
+
+/** The ambient drift's own slow meander, in sim uv space: each seed owns a
+ *  home spot (golden-ratio / sqrt(2) low-discrepancy sequences, so
+ *  consecutive integer seeds land evenly spread over the whole frame rather
+ *  than clumped) and wanders a small
+ *  Lissajous-ish loop around it. Pure and deterministic so it's testable
+ *  without a GL context. render() also samples this at
+ *  `tSec + DRIFT_TANGENT_EPS` to get a finite-difference heading for the
+ *  splat's push direction. Stays within [0.04, 0.96] x [0.06, 0.94] — near
+ *  enough to the edges that the sides of the frame get cloud too. */
+export function driftCenter(seed: number, tSec: number): [number, number] {
+  const s = Number.isFinite(seed) ? seed : 0;
+  const t = Number.isFinite(tSec) ? tSec : 0;
+  const fract = (v: number) => v - Math.floor(v);
+  const hx = 0.1 + 0.8 * fract(0.1 + s * 0.6180339887);
+  const hy = 0.12 + 0.76 * fract(0.35 + s * 0.4142135624);
+  const a1 = 0.05 + (Math.abs(s * 0.017) % 0.02);
+  const a2 = 0.07 + (Math.abs(s * 0.013) % 0.02);
+  const x = hx + 0.06 * Math.sin(t * a1 + s * 2.1) * Math.cos(t * a2 * 0.6 + s);
+  const y = hy + 0.06 * Math.cos(t * a2 + s * 1.3);
+  return [x, y];
+}
+
+/** 0..1 dye gate for one source at time t: each seed breathes on and off on
+ *  its own phase, so a source lays down separate puffs that drift apart
+ *  instead of one continuous stream. */
+export function drifterPuff(seed: number, tSec: number): number {
+  const s = Number.isFinite(seed) ? seed : 0;
+  const t = Number.isFinite(tSec) ? tSec : 0;
+  const w = 0.5 + 0.5 * Math.sin(t * DRIFTER_PUFF_RATE * (0.8 + 0.07 * s) + s * 3.7);
+  const e = clamp01((w - 0.35) / 0.4);
+  return e * e * (3 - 2 * e);
+}
+
+/** Where a stamp lands, in screen uv: the clearest of STAMP_CANDIDATES
+ *  hashed spots in a small ring around the brush (plus the brush's own
+ *  spot), i.e. the one farthest from every obstacle — the cloud drifters'
+ *  current centres, since clouds form around them. The brush's stepped
+ *  position decides the region; this only nudges within it, so a trail
+ *  stays a trail. Live waves are deliberately NOT obstacles — a trail is
+ *  meant to accumulate. Pure and deterministic per seed, so it's testable
+ *  without a GL context; the shader's per-floater cloud fade covers
+ *  whatever this heuristic misses. */
+export function pickSwarmCenter(
+  seed: number,
+  brush: readonly [number, number],
+  obstacles: readonly (readonly [number, number])[],
+): [number, number] {
+  const s = Number.isFinite(seed) ? seed : 0;
+  const fract = (v: number) => v - Math.floor(v);
+  const bx = Number.isFinite(brush[0]) ? brush[0] : 0.5;
+  const by = Number.isFinite(brush[1]) ? brush[1] : 0.5;
+  let best: [number, number] = [bx, by];
+  let bestScore = -Infinity;
+  for (let i = 0; i < STAMP_CANDIDATES; i++) {
+    let x = bx;
+    let y = by;
+    if (i > 0) {
+      const a = fract(Math.sin(s * 12.9898 + i * 78.233) * 43758.5453) * Math.PI * 2;
+      const r = (0.3 + 0.7 * fract(Math.sin(s * 39.3468 + i * 11.135) * 24634.6345)) * STAMP_JITTER;
+      x = Math.min(0.97, Math.max(0.03, bx + Math.cos(a) * r));
+      y = Math.min(0.97, Math.max(0.03, by + Math.sin(a) * r));
+    }
+    let score = Infinity;
+    for (const [ox, oy] of obstacles) score = Math.min(score, Math.hypot(x - ox, y - oy));
+    if (score > bestScore) {
+      bestScore = score;
+      best = [x, y];
+    }
+  }
+  return best;
+}
+
+/** One live floater stamp: when it started, how many floaters it lays down
+ *  (0..1, from floaterCountFromEnergy or a wired source's reading), the seed
+ *  its streak's layout hashes from, where it landed (screen uv, from
+ *  pickSwarmCenter at the brush) and how long it lives (from the Sustain
+ *  setting at the moment it fired, so moving the slider never stretches or
+ *  cuts short a streak already on screen). Same stateless-pool idiom as
+ *  powder.ts's createChunkPool — see this file's header. */
+export interface WaveBurst {
+  t0: number;
+  strength: number;
+  seed: number;
+  x: number;
+  y: number;
+  life: number;
+}
+
+export interface WavePool {
+  /** Starts a wave at screen uv (x, y) living `life` seconds (default
+   *  WAVE_LIFE_SEC), reusing a dead slot or displacing the oldest live one. */
+  trigger(nowSec: number, strength: number, seed: number, x?: number, y?: number, life?: number): void;
+  /** Retires every wave older than its own life. */
+  tick(nowSec: number): void;
+  /** How many waves are currently live. */
+  alive(): number;
+  /** Uploads the pool as uBurstT0/uBurstAmp/uBurstSeed/uBurstX/uBurstY/uBurstLife. */
+  upload(prog: GLProgram): void;
+  /** The raw slots, for tests. */
+  readonly bursts: readonly WaveBurst[];
+}
+
+export function createWavePool(): WavePool {
+  const bursts: WaveBurst[] = [];
+  for (let i = 0; i < MAX_WAVE_BURSTS; i++) {
+    bursts.push({ t0: WAVE_DEAD_T0, strength: 0, seed: 0, x: 0.5, y: 0.5, life: WAVE_LIFE_SEC });
+  }
+  const t0Buf = new Float32Array(MAX_WAVE_BURSTS);
+  const ampBuf = new Float32Array(MAX_WAVE_BURSTS);
+  const seedBuf = new Float32Array(MAX_WAVE_BURSTS);
+  const xBuf = new Float32Array(MAX_WAVE_BURSTS);
+  const yBuf = new Float32Array(MAX_WAVE_BURSTS);
+  const lifeBuf = new Float32Array(MAX_WAVE_BURSTS);
+
+  return {
+    bursts,
+    trigger(nowSec, strength, seed, x = 0.5, y = 0.5, life = WAVE_LIFE_SEC): void {
+      let slot = 0;
+      let oldest = Infinity;
+      for (let i = 0; i < bursts.length; i++) {
+        if (bursts[i].t0 === WAVE_DEAD_T0) {
+          slot = i;
+          oldest = -Infinity;
+          break;
+        }
+        if (bursts[i].t0 < oldest) {
+          oldest = bursts[i].t0;
+          slot = i;
+        }
+      }
+      const b = bursts[slot];
+      b.t0 = Number.isFinite(nowSec) ? nowSec : 0;
+      b.strength = clamp01(Number.isFinite(strength) ? strength : 0);
+      b.seed = seed;
+      b.x = Number.isFinite(x) ? x : 0.5;
+      b.y = Number.isFinite(y) ? y : 0.5;
+      b.life = Number.isFinite(life) && life > 0 ? life : WAVE_LIFE_SEC;
+    },
+    tick(nowSec): void {
+      for (const b of bursts) {
+        if (b.t0 !== WAVE_DEAD_T0 && nowSec - b.t0 > b.life) {
+          b.t0 = WAVE_DEAD_T0;
+          b.strength = 0;
+        }
+      }
+    },
+    alive(): number {
+      let n = 0;
+      for (const b of bursts) if (b.t0 !== WAVE_DEAD_T0) n++;
+      return n;
+    },
+    upload(prog): void {
+      for (let i = 0; i < bursts.length; i++) {
+        const b = bursts[i];
+        t0Buf[i] = b.t0;
+        ampBuf[i] = b.strength;
+        seedBuf[i] = b.seed;
+        xBuf[i] = b.x;
+        yBuf[i] = b.y;
+        lifeBuf[i] = b.life;
+      }
+      prog.setFv("uBurstT0", t0Buf);
+      prog.setFv("uBurstAmp", ampBuf);
+      prog.setFv("uBurstSeed", seedBuf);
+      prog.setFv("uBurstX", xBuf);
+      prog.setFv("uBurstY", yBuf);
+      prog.setFv("uBurstLife", lifeBuf);
+    },
+  };
+}
+
+// Every auto table below reproduces its plain `default` when all dials sit
+// at NEUTRAL (musicProfile.ts) — nothing hand-biased; see
+// tests/sky.test.ts. Weights follow autoTune.ts's convention (|weight| in
+// ~0.15..0.5, per-setting sum under ~0.8).
+const SETTINGS: SceneSetting[] = [
+  // Form
+  {
+    key: "cloudCover",
+    label: "Cloud cover",
+    description: "How much dye the ambient drift injects into the sky — thin wisps at the low end, a fuller cover at the high end",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    auto: { density: 0.3 },
+    drive: { default: "scene", sceneLabel: "Scene: steady (no music reaction)" },
+  },
+  // Motion
+  {
+    key: "flowSpeed",
+    label: "Flow speed",
+    description: "How fast the whole fluid evolves — a slow drift at the low end, a brisker roll at the high end",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    auto: { tempo: 0.25 },
+    drive: { default: "scene", sceneLabel: "Scene: steady (no music reaction)" },
+  },
+  {
+    key: "turbulence",
+    label: "Turbulence",
+    description: "How readily the drift curls into swirls and tendrils instead of a smooth roll",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.45,
+    auto: { density: 0.2, tempo: 0.2 },
+    drive: { default: "scene", sceneLabel: "Scene: steady (no music reaction)" },
+  },
+  {
+    key: "floaterDensity",
+    label: "Floaters",
+    description:
+      "How many floaters each stamp lays down — a light touch at the low end, a dense cloud of them at the high end. The signal scales it beat by beat, and 0 stops the brush stamping entirely",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    auto: { density: 0.2, dynamics: 0.15 },
+    // The one floater param: its jack owns the stamp trigger AND how many
+    // floaters a stamp lays down (render(): spawnFloaters gates the spawn on
+    // this amount's product, drives.value() grades the count). Scene
+    // composite is the shared beat listener (one stamp per beat) with the
+    // count riding loudness — see floaterCountFromEnergy — so sceneSources
+    // names both halves a re-patch replaces.
+    drive: { default: "scene", sceneLabel: "Scene: every beat, count rides loudness", sceneSources: ["feature.onset", "anim.energy"] },
+  },
+  {
+    key: "brushMove",
+    label: "Brush move",
+    description: "How far the brush steps across the sky each time it stamps — held in place at 0 (stamps pile up), long hops toward the edges at 1",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+  },
+  {
+    key: "floaterSustain",
+    label: "Floater sustain",
+    description: "How long each wave of floaters stays before it dissolves — a quick flicker at the low end, several seconds of hanging in the sky at the high end",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.35,
+  },
+  {
+    key: "dayDrift",
+    label: "Day drift",
+    description:
+      "How fast the sky moves through its day — held still at 0, a slow daylight drift just above it, a quick one at 1. It hurries through the hours after sunset, since the scene has no night",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.3,
+  },
+  // Look
+  {
+    key: "timeOfDay",
+    label: "Time of day",
+    description:
+      "Where in a 24-hour day the sky sits — 0.25 sunrise, 0.5 noon, 0.75 sunset; between sunset and sunrise it holds a soft twilight glow rather than going dark. With Day drift above zero the sky keeps moving on from here",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    default: 0.71,
+  },
+  {
+    key: "cloudBrightness",
+    label: "Cloud brightness",
+    description: "How brightly lit the cloud tops read against the sky",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    auto: { loudness: 0.2 },
+    drive: { default: "scene", sceneLabel: "Scene: steady (no music reaction)" },
+  },
+  {
+    key: "brushOpacity",
+    label: "Brush opacity",
+    description: "Faintness of Haidinger's brush, the bowtie afterimage that turns slowly over the centre of view",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.35,
+    auto: { density: -0.2 },
+    // The Scene composite honestly reads energy: the shader dims the brush
+    // with uEnergy (buildDisplayFrag's brush term) and that dim *is* what a
+    // re-patch replaces — the whole factor, not just part of it.
+    drive: { default: "scene", sceneLabel: "Scene: dims with energy", sceneSources: ["anim.energy"] },
+  },
+  {
+    key: "floaterVisibility",
+    label: "Floater visibility",
+    description: "How strongly the floaters stand out from the sky behind them — gone at 0, faint and glassy low, crisp and bold high",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    drive: { default: "scene", sceneLabel: "Scene: steady (no music reaction)" },
+  },
+  {
+    key: "lightWaves",
+    label: "Light waves",
+    description: "How brightly the floaters glint in pale sky tints as a ring of light passes through them on each beat",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.6,
+    // The beat sweep's spawn trigger (the brightness itself is this
+    // slider's amount). Scene composite is the beat beatListener — its
+    // one-per-beat hold still owns the cadence under Scene (see render());
+    // its edge is the broadband onset, which is what sceneSources names.
+    drive: { default: "scene", sceneLabel: "Scene: every beat", sceneSources: ["feature.onset"] },
+  },
+];
+
+function settingFor(key: string): SceneSetting {
+  const s = SETTINGS.find((x) => x.key === key);
+  if (!s) throw new Error(`sky: unknown setting ${key}`);
+  return s;
+}
+
+const SETTINGS_UNIFORMS_GLSL = SETTINGS.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
+
+// Per drive setting (see drives.ts's header): u<Key>Drive/u<Key>Custom plus
+// the <key>Drive(sceneDefault) helper the display frag calls at each
+// coupling's site — at Custom=0 (Scene) the helper returns sceneDefault
+// bit-for-bit, so every call site below is unchanged until a source is
+// picked.
+const DRIVE_UNIFORMS_GLSL = DRIVE_GLSL(SETTINGS);
+
+function buildDisplayFrag(format: SimFormat): string {
+  return `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+${COMMON_UNIFORMS_GLSL}
+${SETTINGS_UNIFORMS_GLSL}
+${DRIVE_UNIFORMS_GLSL}
+${ROOM_UV_GLSL}
+${simIoGlsl(format)}
+uniform sampler2D uDye;
+uniform float uBrushPhase;
+uniform float uBurstT0[${MAX_WAVE_BURSTS}];
+uniform float uBurstAmp[${MAX_WAVE_BURSTS}];
+uniform float uBurstSeed[${MAX_WAVE_BURSTS}];
+uniform float uBurstX[${MAX_WAVE_BURSTS}];
+uniform float uBurstY[${MAX_WAVE_BURSTS}];
+uniform float uBurstLife[${MAX_WAVE_BURSTS}]; // each wave's own life, from Floater sustain when it fired
+uniform float uSweepT0[${MAX_SWEEPS}];
+uniform float uSweepSeed[${MAX_SWEEPS}];
+uniform float uFloaterGain; // floaterGain(Floater visibility)
+uniform float uDayPhase; // 0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset (see advanceDayOffset)
+
+const int MAX_WAVE_BURSTS_C = ${MAX_WAVE_BURSTS};
+const float WAVE_FADE_IN = ${WAVE_FADE_IN_SEC.toFixed(3)};
+const float WAVE_FADE_OUT = ${WAVE_FADE_OUT_SEC.toFixed(3)};
+const int MAX_SWEEPS_C = ${MAX_SWEEPS};
+const float SWEEP_SEC_C = ${SWEEP_SEC.toFixed(3)};
+// A beat light wave (see the wave loop in main): a ring expanding from
+// within SWEEP_ORIGIN_SPREAD of the centre of view, SWEEP_WIDTH thick in
+// screen p-units (a thin front with a short soft trail), its edge rippled
+// by SWEEP_WOBBLE in SWEEP_WOBBLE_LOBES lobes around the ring (a whole
+// number, so the ripple closes up with no seam), easing out as it spreads
+// like a ripple on water. Coloured only from pale tints already in the
+// sky's own palette (SWEEP_TINT_*), drifting between them around the ring
+// and across its width, and screen-blended at up to SWEEP_ALPHA (times the
+// Light waves setting): a soft glint in the floaters, not a rainbow.
+const float SWEEP_WIDTH = 0.045;
+const float SWEEP_WOBBLE = 0.02;
+const float SWEEP_WOBBLE_LOBES = 5.0;
+const float SWEEP_ORIGIN_SPREAD = 0.12;
+const float SWEEP_EASE = 1.8; // >1 eases the ring out: fast from the centre, slowing as it spreads
+const float SWEEP_ALPHA = 0.42;
+const vec3 SWEEP_TINT_A = vec3(0.84, 0.80, 1.00); // lavender, the early-evening zenith lifted
+const vec3 SWEEP_TINT_B = vec3(1.00, 0.86, 0.90); // rose, the sunset cloud tone lifted
+const vec3 SWEEP_TINT_C = vec3(0.82, 0.94, 1.00); // pale cyan, the midday horizon lifted
+
+// The day cycle's light, keyed on sun elevation (sin of the day angle, -1 at
+// midnight to +1 at noon) rather than on clock time, so dawn and dusk share
+// one set of keys and only differ where main() warms mornings toward peach.
+// Keys, low to high: the glow right at the horizon, golden hour, early
+// evening (the look this scene had before it had a day cycle, which the
+// default Time of day lands on) and midday. There is deliberately no night:
+// elevation is floored at the first key (DAY_E_FLOOR), so once the sun is
+// down the sky holds its sunset glow until sunrise, and with Day drift on the
+// scene hurries through those hours (nightSpeedup). Each colour blends
+// between its two neighbouring keys (dayWeights).
+const float DAY_KEY_E[4] = float[4](-0.02, 0.08, 0.25, 0.65);
+const float DAY_E_FLOOR = -0.02;
+const vec3 SKY_ZENITH[4] = vec3[4](
+  vec3(0.200, 0.200, 0.420), vec3(0.300, 0.360, 0.600), vec3(0.370, 0.440, 0.650), vec3(0.260, 0.450, 0.780));
+const vec3 SKY_HORIZON[4] = vec3[4](
+  vec3(0.900, 0.500, 0.460), vec3(0.950, 0.720, 0.580), vec3(0.710, 0.700, 0.840), vec3(0.700, 0.800, 0.930));
+const vec3 CLOUD_LIT_KEY[4] = vec3[4](
+  vec3(0.980, 0.620, 0.550), vec3(1.000, 0.820, 0.660), vec3(0.980, 0.930, 0.950), vec3(1.000, 0.990, 0.970));
+const vec3 CLOUD_SHADE_KEY[4] = vec3[4](
+  vec3(0.360, 0.260, 0.400), vec3(0.500, 0.420, 0.520), vec3(0.540, 0.500, 0.640), vec3(0.580, 0.620, 0.720));
+const vec3 SUN_KEY[4] = vec3[4](
+  vec3(1.000, 0.450, 0.250), vec3(1.000, 0.700, 0.400), vec3(1.000, 0.880, 0.750), vec3(1.000, 0.970, 0.900));
+const vec3 MORNING_WARMTH = vec3(1.04, 1.0, 0.86); // mornings lean peach/gold where evenings lean pink
+// The sun's place in the frame: it rises at the left, sets at the right, and
+// is near the top of the frame at noon, horizon at the bottom edge. Its glow
+// is a wide soft halo plus a tighter core (no hard disc), and around sunrise
+// and sunset the horizon warms most on the sun's own side.
+const float SUN_X_SPAN = 0.62; // fraction of the frame's width the sun's path spans either side of centre
+const float SUN_HALO = 0.30;
+const float SUN_CORE = 0.22;
+const float HORIZON_WARM = 0.35;
+
+const float CLOUD_LOW = 0.16; // bumped density below this reads as clear sky
+const float CLOUD_HIGH = 0.55; // bumped density above this reads as a solid, opaque cloud body — a wide band, so edges fade through semi-transparent wisps (airy) rather than a hard cut-out
+const float CLOUD_WISP_SCALE = 2.9; // second, finer bump octave, relative to CLOUD_BUMP_SCALE — frays the edges into wisps
+const float CLOUD_WISP_AMOUNT = 0.35;
+const float CLOUD_BUMP_SCALE = 11.0; // fbm frequency, room-uv units — the cauliflower texture
+const float CLOUD_BUMP_MORPH = 0.05; // fbm domain drift per second — churn beyond plain advection
+const float CLOUD_BUMP_AMOUNT = 0.65; // how hard the bump noise erodes/thickens the edge
+// Two shadow taps toward the light (the sun, from
+// whichever side of the frame it sits on; see main) — storm.ts's Gas
+// mode's own two-tap technique (SUN_DIR + densityCheap/shape at 0.18/0.5,
+// exp(-1.9*s1-1.15*s2), mixed as a colour ramp not a brightness scalar),
+// ported from its 3D raymarch to a plain 2D density lookup. A single
+// adjacent-texel check (the first pass's own shadeAmt) only ever sees
+// edges; a wide cloud's flat interior has no local gradient at that scale,
+// which is why v1 read as one flat tone instead of a folded mass.
+const float CLOUD_SHADOW_TAP1 = 0.045;
+const float CLOUD_SHADOW_TAP2 = 0.095;
+// Calibrated against this scene's own measured density range (median ~0.8,
+// p90 ~1.65 inside the cloud silhouette — much higher than storm.ts's own
+// 3D density scale, which is why its 1.9/1.15 weights collapsed shadow to
+// ~0 almost everywhere here on the first try, read directly off a debug
+// render rather than re-guessed blind).
+const float CLOUD_SHADOW_K1 = 0.85;
+const float CLOUD_SHADOW_K2 = 0.52;
+const float BRUSH_R_CORE = 0.03;
+const float BRUSH_R_IN = 0.22;
+const float BRUSH_R_OUT = 0.34;
+const float BRUSH_BASE = 0.4;
+// Floater waves (see the file header): each wave is a streak of the small
+// refractive-tube floaters laid out on a fixed grid, arranged like the
+// user's text-grid references, where ">" fills a streak's body, "_" runs
+// along its ragged fringe and an "o" sits inside some. Here a body cell
+// holds an aligned strand, a fringe cell a short flat strand low in the
+// cell, and a hotspot cell a round floater dot. FLOATER_CELL is sized so the
+// longest strand plus its fringe fits inside one cell, since a pixel only
+// ever evaluates the floater in its own cell.
+// Every floater size below (and the grid cell with them) is multiplied by
+// FLOATER_SCALE: the user asked for floaters 2.5x smaller than the
+// reference-matched sizes, then 20% bigger again, with the grid scaling
+// alongside so a streak keeps
+// its extent and just holds more, finer floaters. At this scale the tube is
+// only a few pixels across, so floaterProfile floors its bands at
+// FLOATER_MIN_PX screen pixels rather than letting the rim alias away.
+const float FLOATER_SCALE = 0.48;
+const float FLOATER_MIN_PX = 0.8;
+const vec2 FLOATER_CELL = vec2(0.06, 0.045) * FLOATER_SCALE;
+const float CELL_T_BODY = 0.42; // streak density above this puts an aligned strand in the cell (the reference's ">")
+const float CELL_T_FRINGE = 0.12; // between this and CELL_T_BODY, a short flat strand (the reference's "_"); below, nothing
+const float CELL_T_HOT = 0.25; // hotspot field above this, inside the body, puts a dot there instead (the reference's "o")
+const float FRINGE_DROP = -0.011 * FLOATER_SCALE; // the fringe strand sits this far below the cell centre, like "_" under ">"
+// Streak shape, screen p-units: an ellipse of half-extent between
+// STREAK_L_MIN and STREAK_L_MAX (by the wave's size), tilted up to the right
+// by a hashed slant, frayed row by row by STREAK_RAG noise so each row's run
+// starts and ends at its own column, the references' stair-stepped rows.
+const vec2 STREAK_L_MIN = vec2(0.14, 0.04);
+const vec2 STREAK_L_MAX = vec2(0.6, 0.13); // the long, thin reference streak runs ~1.0 x 0.2 of screen height
+const float STREAK_SLANT_MIN = 0.12;
+const float STREAK_SLANT_MAX = 0.45; // radians up to the right; the reference rises ~20 degrees
+const float STREAK_RAG = 0.45;
+const float STREAK_HOT_CHANCE = 0.5; // fraction of streaks with a dot hotspot (one reference has one, the other none)
+const vec2 STREAK_DRIFT = vec2(0.09, 0.012); // p-units/s, scaled by Flow speed; quick, since a streak only lives a couple of seconds by default (Floater sustain)
+const int FLOATER_SEGMENTS = 10; // path points per strand (head at index 0), see floaterPath
+const float BODY_LEN_MIN = 0.036 * FLOATER_SCALE; // body strand arc length, screen p-units, hashed per cell
+const float BODY_LEN_MAX = 0.048 * FLOATER_SCALE;
+const float FRINGE_LEN_MIN = 0.02 * FLOATER_SCALE; // fringe strands are short
+const float FRINGE_LEN_MAX = 0.03 * FLOATER_SCALE;
+const float BODY_HEADING_JITTER = 0.16; // radians around the streak's own slant, so body strands read as aligned
+// floaterPath's heading theta(t) = B1*sin(2*pi*f1*t+p1) + B2*sin(2*pi*f2*t+p2):
+// a dominant gentle bend (B1/f1) plus a much smaller, faster wobble (B2/f2),
+// all hashed once per seed. Because heading is integrated forward rather
+// than offsetting each point sideways by an independent function of t, arc
+// length always comes out exactly right and the bend rate stays bounded; a
+// real side-by-side against a floater reference showed per-point-independent
+// kinks read as an angular zigzag, not the reference's smooth curve.
+const float FLOATER_B1_MIN = 0.3; // dominant bend swing, radians (random sign per seed)
+const float FLOATER_B1_MAX = 0.6;
+const float FLOATER_F1_MIN = 0.5; // dominant bend's cycles over the strand
+const float FLOATER_F1_MAX = 1.0;
+const float FLOATER_B2_MIN = 0.1; // secondary wobble, radians; texture, not a second kink
+const float FLOATER_B2_MAX = 0.2;
+const float FLOATER_F2_MIN = 3.0;
+const float FLOATER_F2_MAX = 5.0;
+// The refractive-tube profile (floaterProfile below), measured off a
+// brightness cross-section of a floater reference at sky luminance ~172: a
+// thin dark fringe just outside the edge, a brighter rim just inside it, and
+// a barely-lifted see-through interior, everything within about +-10% of the
+// background, never a solid painted line.
+const float FLOATER_R = 0.0028 * FLOATER_SCALE; // strand tube half-width, screen p-units
+const float FLOATER_RIM_W = 0.0014 * FLOATER_SCALE; // bright-rim band width, just inside the edge
+const float FLOATER_FRINGE_W = 0.0022 * FLOATER_SCALE; // dark-fringe band width, just outside the edge
+const float FLOATER_INTERIOR = 0.02; // relative lum delta well inside the edge
+const float FLOATER_RIM = 0.17; // relative lum delta at the rim peak — raised well past the measured 0.07 for contrast at the small size
+const float FLOATER_FRINGE = 0.23; // relative lum delta (negative) at the fringe peak — raised from the measured 0.10 likewise
+const float FLOATER_DOT_R_MIN = 0.005 * FLOATER_SCALE; // dot radius, screen p-units
+const float FLOATER_DOT_R_MAX = 0.0068 * FLOATER_SCALE;
+const vec3 FLOATER_COOL_TINT = vec3(0.94, 0.99, 1.06); // faint cool bias applied only to the rim's brightening (see main()); the fringe's darkening stays neutral
+
+// This scene's own small hash/noise family — independently written (the
+// same fract/dot idiom every other scene's hash21 uses, CLAUDE.md's
+// standing rule against porting), not shared with any other scene's.
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+vec2 hash22(vec2 p) {
+  return vec2(hash21(p), hash21(p + 19.19));
+}
+
+// Value-noise fbm for the cloud's bump texture only — this scene's own,
+// independently written (not shared with ink.ts/moire.ts/kaleido's own fbm
+// functions; see the file header on the per-scene-copy pattern this repo
+// already uses for noise).
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float a = hash21(i);
+  float b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0));
+  float d = hash21(i + vec2(1.0, 1.0));
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm2(vec2 p) {
+  float sum = 0.0;
+  float amp = 0.5;
+  for (int i = 0; i < 3; i++) {
+    sum += amp * vnoise(p);
+    p *= 2.02;
+    amp *= 0.5;
+  }
+  return sum;
+}
+
+// The cloud pass's own pre-threshold field at a room uv: dye density eroded
+// by the two bump octaves. Shared by the cloud pass and the floaters' "keep
+// off the clouds" fade, so both agree exactly on where cloud is.
+float cloudBumpedAt(vec2 uv) {
+  float density = max(decodeDye(texture(uDye, uv)).x, 0.0);
+  float bump = fbm2(uv * CLOUD_BUMP_SCALE + vec2(uTime * CLOUD_BUMP_MORPH, uTime * CLOUD_BUMP_MORPH * 0.6));
+  float wisp = fbm2(uv * CLOUD_BUMP_SCALE * CLOUD_WISP_SCALE - vec2(uTime * CLOUD_BUMP_MORPH * 1.7, 0.0));
+  return density * mix(1.0 - CLOUD_BUMP_AMOUNT, 1.0 + CLOUD_BUMP_AMOUNT, bump) * mix(1.0 - CLOUD_WISP_AMOUNT, 1.0 + CLOUD_WISP_AMOUNT, wisp);
+}
+
+// Signed relative-luminance delta for a point at true signed distance s from
+// a floater's own edge (negative inside, screen p-units): a small lift deep
+// inside (FLOATER_INTERIOR), rising through a bright rim just inside the edge
+// (FLOATER_RIM, peaking at s = -FLOATER_RIM_W/2) into a dark fringe just
+// outside it (FLOATER_FRINGE, peaking at s = FLOATER_FRINGE_W/2), fading
+// smoothly to exactly 0 by s = FLOATER_FRINGE_W*2.0. Shared by strands and
+// dots; they differ only in how s is computed. Built from smooth bumps, not
+// hard-edged bands, since the reference itself is a little soft.
+float floaterProfile(float s) {
+  float px = FLOATER_MIN_PX / max(uResolution.y, 1.0);
+  float rimW = max(FLOATER_RIM_W, px);
+  float fringeW = max(FLOATER_FRINGE_W, px);
+  float interior = FLOATER_INTERIOR * (1.0 - smoothstep(-rimW, 0.0, s));
+  float rimD = (s + rimW * 0.5) / (rimW * 0.5);
+  float rim = FLOATER_RIM * exp(-rimD * rimD);
+  float fringeD = (s - fringeW * 0.5) / (fringeW * 0.5);
+  float fringe = -FLOATER_FRINGE * exp(-fringeD * fringeD);
+  float cutoff = 1.0 - smoothstep(fringeW, fringeW * 2.0, s);
+  return (interior + rim + fringe) * cutoff;
+}
+
+// Builds a strand's curved path of arc length 'len' into 'pts' (head at
+// index 0, FLOATER_SEGMENTS points) by integrating a heading forward at a
+// fixed step (see the FLOATER_B1_MIN..FLOATER_F2_MAX comment above), then
+// re-centres it on its own average and rotates it so its chord (head to
+// tail) points along 'heading', which is what lines strands up in parallel
+// however each one curls along the way.
+void floaterPath(float seed, float heading, float len, out vec2 pts[FLOATER_SEGMENTS]) {
+  float thetaSign = hash21(vec2(seed, 26.0)) < 0.5 ? -1.0 : 1.0;
+  float b1 = thetaSign * mix(FLOATER_B1_MIN, FLOATER_B1_MAX, hash21(vec2(seed, 21.0)));
+  float f1 = mix(FLOATER_F1_MIN, FLOATER_F1_MAX, hash21(vec2(seed, 27.0)));
+  float p1 = hash21(vec2(seed, 22.0)) * 6.28318;
+  float b2 = mix(FLOATER_B2_MIN, FLOATER_B2_MAX, hash21(vec2(seed, 28.0)));
+  float f2 = mix(FLOATER_F2_MIN, FLOATER_F2_MAX, hash21(vec2(seed, 23.0)));
+  float p2 = hash21(vec2(seed, 24.0)) * 6.28318;
+  float stepLen = len / float(FLOATER_SEGMENTS - 1);
+  pts[0] = vec2(0.0);
+  for (int i = 1; i < FLOATER_SEGMENTS; i++) {
+    // Heading sampled at the segment's own midpoint t (midpoint-rule
+    // integration of theta(t)).
+    float tMid = (float(i) - 0.5) / float(FLOATER_SEGMENTS - 1);
+    float theta = b1 * sin(6.28318 * f1 * tMid + p1) + b2 * sin(6.28318 * f2 * tMid + p2);
+    pts[i] = pts[i - 1] + stepLen * vec2(cos(theta), sin(theta));
+  }
+  vec2 sum = vec2(0.0);
+  for (int i = 0; i < FLOATER_SEGMENTS; i++) sum += pts[i];
+  vec2 mid = sum / float(FLOATER_SEGMENTS);
+  vec2 chord = pts[FLOATER_SEGMENTS - 1] - pts[0];
+  float turn = heading - atan(chord.y, chord.x);
+  mat2 rot = mat2(cos(turn), sin(turn), -sin(turn), cos(turn));
+  for (int i = 0; i < FLOATER_SEGMENTS; i++) pts[i] = rot * (pts[i] - mid);
+}
+
+// A strand floater's signed distance at p (negative inside the tube): a
+// hollow refractive tube of half-width FLOATER_R around the path
+// floaterPath builds, centred on basePos. main() turns it into the tube's
+// brightness (floaterProfile) and into where a light wave lights it.
+float floaterStrand(vec2 p, vec2 basePos, float seed, float heading, float len) {
+  vec2 pts[FLOATER_SEGMENTS];
+  floaterPath(seed, heading, len, pts);
+  vec2 pLocal = p - basePos;
+  float dMin = 1.0e6;
+  for (int i = 1; i < FLOATER_SEGMENTS; i++) {
+    vec2 pa = pLocal - pts[i - 1];
+    vec2 ba = pts[i] - pts[i - 1];
+    float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1.0e-6), 0.0, 1.0);
+    dMin = min(dMin, length(pa - ba * h));
+  }
+  return dMin - max(FLOATER_R, FLOATER_MIN_PX / max(uResolution.y, 1.0));
+}
+
+// Blend weights for the four day keys at sun elevation e: only the two keys
+// either side of e carry weight, eased between (smoothstep) so the sky never
+// shows a kink in its colour as it passes a key.
+void dayWeights(float e, out float w[4]) {
+  for (int i = 0; i < 4; i++) w[i] = 0.0;
+  float ec = clamp(e, DAY_KEY_E[0], DAY_KEY_E[3]);
+  for (int i = 0; i < 3; i++) {
+    if (ec <= DAY_KEY_E[i + 1]) {
+      float f = smoothstep(DAY_KEY_E[i], DAY_KEY_E[i + 1], ec);
+      w[i] = 1.0 - f;
+      w[i + 1] = f;
+      return;
+    }
+  }
+  w[3] = 1.0;
+}
+
+vec3 dayMix(float w[4], vec3 k[4]) {
+  return w[0] * k[0] + w[1] * k[1] + w[2] * k[2] + w[3] * k[3];
+}
+
+// One stamp's streak density at cell centre c (screen p-units), its slant in
+// 'slant', and its dot hotspot field in 'hot'. The envelope is subtracted
+// from the density rather than multiplied into it, so a streak pops in
+// fringe-first and dissolves cell by cell: each body strand gives way to a
+// fringe strand, then each fringe strand to empty sky, not the whole streak
+// fading at once.
+// size is the Floaters amount (the one param) times this stamp's own count
+// grade (render()'s spawnFloaters output — the signal deciding how many
+// floaters the stamp lays down): the density product sets the ceiling, amp
+// scales it per event, and the product gate in main()'s wave loop keeps any
+// of it from drawing while the amount is 0.
+float streakDensity(vec2 c, vec2 centre, float seed, float amp, float age, float life, out float slant, out float hot) {
+  float size = clamp(uFloaterDensity * 1.3 * floaterDensityDrive(1.0), 0.1, 1.0) * clamp(amp, 0.0, 1.0);
+  vec2 L = mix(STREAK_L_MIN, STREAK_L_MAX, size);
+  slant = mix(STREAK_SLANT_MIN, STREAK_SLANT_MAX, hash21(vec2(seed, 51.0)));
+  vec2 d = c - centre;
+  float cs = cos(slant);
+  float sn = sin(slant);
+  vec2 q = vec2(cs * d.x + sn * d.y, -sn * d.x + cs * d.y);
+  // Row fray: noise keyed on the grid row (and only coarsely on position
+  // along the streak), so a whole row's run shifts together.
+  float row = floor(c.y / FLOATER_CELL.y);
+  float rag = (vnoise(vec2(row * 0.9 * FLOATER_SCALE + seed * 7.1, q.x / L.x * 2.2 + seed)) - 0.5) * STREAK_RAG;
+  vec2 e = q / L;
+  float fadeOut = min(WAVE_FADE_OUT, life * 0.5); // a short-sustain wave still gets a clean pop in and out
+  float env = smoothstep(0.0, WAVE_FADE_IN, age) * (1.0 - smoothstep(life - fadeOut, life, age));
+  hot = 0.0;
+  if (hash21(vec2(seed, 52.0)) < STREAK_HOT_CHANCE) {
+    vec2 hc = (hash22(vec2(seed, 53.0)) - 0.5) * vec2(0.9, 0.5) * L;
+    vec2 he = (q - hc) / (L * vec2(0.3, 0.45));
+    hot = (1.0 - dot(he, he)) * env;
+  }
+  return 1.0 - dot(e, e) + rag - (1.0 - env) * 1.1;
+}
+
+// The beat light waves' glow at p (see the SWEEP_WIDTH comment): the sum of
+// every live wave's thin ring rippling out from near the centre of view,
+// each tinted from the sky's own pale palette. main() applies it only inside
+// the floaters' tubes.
+vec3 lightWaveAt(vec2 p, float devAspect) {
+  vec3 glow = vec3(0.0);
+  for (int i = 0; i < MAX_SWEEPS_C; i++) {
+    float age = uTime - uSweepT0[i];
+    if (age < 0.0 || age > SWEEP_SEC_C) continue;
+    float seed = uSweepSeed[i];
+    float t = age / SWEEP_SEC_C;
+    vec2 origin = (hash22(vec2(seed, 63.0)) - 0.5) * 2.0 * SWEEP_ORIGIN_SPREAD;
+    vec2 rel = p - origin;
+    float ang = atan(rel.y, rel.x);
+    // Far enough to clear the frame's farthest corner from any origin.
+    float reach = 0.5 * length(vec2(devAspect, 1.0)) + SWEEP_ORIGIN_SPREAD * 1.5 + SWEEP_WIDTH * 3.0;
+    float front = reach * (1.0 - pow(1.0 - t, SWEEP_EASE));
+    float radius = length(rel) + SWEEP_WOBBLE * sin(ang * SWEEP_WOBBLE_LOBES + seed * 6.0 + uTime * 1.7);
+    float x = (radius - front) / SWEEP_WIDTH;
+    // A crisp leading edge and a short soft trail inside the ring.
+    float band = x > 0.0 ? exp(-x * x * 3.0) : exp(-x * x * 0.6);
+    float drift = 0.5 + 0.5 * sin(ang * 2.0 + seed * 4.1);
+    vec3 tint = mix(mix(SWEEP_TINT_A, SWEEP_TINT_B, drift), SWEEP_TINT_C, 0.5 + 0.5 * cos(x * 1.3 + seed));
+    float fade = smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(0.6, 1.0, t));
+    glow += tint * band * fade;
+  }
+  return glow;
+}
+
+void main() {
+  vec2 uv = roomUv(vUv);
+  // The two illusions live in this device's own screen space, not the
+  // shared room canvas — see the file header on why.
+  float devAspect = uResolution.x / max(uResolution.y, 1.0);
+  vec2 p = (vUv - 0.5) * vec2(devAspect, 1.0);
+
+  // 1. Sky, lit by the day cycle (see the DAY_KEY_E comment): a vertical
+  // gradient between the keyed zenith and horizon colours for this sun
+  // elevation, mornings warmed toward peach around the horizon glow, a
+  // soft sun halo wherever the sun sits in the frame, horizon warmth pooled
+  // on the sun's side around sunrise and sunset; no night (see the DAY_KEY_E
+  // comment). The early-evening key is the earlier fixed look,
+  // itself measured against a real hazy sky and then taken a step darker
+  // with a faint pink-purple cast at the user's request.
+  float px = 1.0 / max(uResolution.y, 1.0);
+  float dayAngle = 6.28318 * (uDayPhase - 0.25);
+  float sunE = sin(dayAngle);
+  float lightE = max(sunE, DAY_E_FLOOR); // no night: the sky holds its sunset glow while the sun is down
+  float dw[4];
+  dayWeights(lightE, dw);
+  vec3 zenith = dayMix(dw, SKY_ZENITH);
+  vec3 horizon = dayMix(dw, SKY_HORIZON);
+  vec3 sunCol = dayMix(dw, SUN_KEY);
+  float glowHour = 1.0 - smoothstep(0.05, 0.3, abs(lightE)); // 1 around sunrise/sunset (and all through the skipped night), 0 by mid-morning
+  // 1 at sunrise, 0 at sunset, easing between through noon and midnight: a
+  // hard morning/evening switch would show, since the sky never goes dark.
+  float morning = 0.5 + 0.5 * cos(dayAngle);
+  horizon = mix(horizon, horizon * MORNING_WARMTH, morning * glowHour);
+  sunCol = mix(sunCol, sunCol * MORNING_WARMTH, morning * glowHour);
+  vec3 color = mix(horizon, zenith, smoothstep(-0.1, 0.9, uv.y));
+
+  vec2 sunP = vec2(-cos(dayAngle) * SUN_X_SPAN * devAspect, -0.55 + 1.05 * sunE);
+  float sunD = length(p - sunP);
+  float sunUp = smoothstep(-0.25, 0.02, sunE);
+  vec3 glow = sunCol * (SUN_HALO * exp(-sunD * 2.4) + SUN_CORE * exp(-sunD * 9.0)) * sunUp;
+  float onSunSide = exp(-abs(p.x - sunP.x) / (0.8 * devAspect));
+  float lowInSky = pow(1.0 - clamp(uv.y, 0.0, 1.0), 2.5);
+  glow += sunCol * HORIZON_WARM * glowHour * onSunSide * lowInSky;
+  color += glow;
+
+
+  // 2. Cloud cover: the sim's own dye density thresholded (CLOUD_LOW/HIGH)
+  // rather than blended with a plain extinction curve — a gain/gamma remap
+  // on a smooth density field stays smooth no matter how it's curved, so it
+  // never grows a real edge; only an actual threshold does. A slowly
+  // time-drifting fbm (CLOUD_BUMP_*) eats into the density's own edge for
+  // the cauliflower bump texture and keeps the shape visibly morphing
+  // beyond plain advection, the same "erode a silhouette with noise" idea
+  // as Storm's Gas mode (storm.ts), independently written per the file
+  // header.
+  //
+  // Shading is Storm's own two-tap sun-shadow technique (lightDir below,
+  // CLOUD_SHADOW_TAP1-2/CLOUD_SHADOW_K1-2 above), ported from its 3D
+  // raymarch to a plain 2D density lookup: sample density toward a fixed
+  // light direction at two distances, run it through Beer's law, and use
+  // the result to pick a point on a colour ramp (mix), not as a brightness
+  // multiplier. The first pass's shading only compared immediate neighbour
+  // texels, which sees an edge but nothing in a wide cloud's flat interior —
+  // this reaches far enough across the body to shade actual folds.
+  float bumped = cloudBumpedAt(uv);
+  float cloudAlpha = smoothstep(CLOUD_LOW, CLOUD_HIGH, bumped);
+  // Light from the sun's side of the frame, always from somewhat above; as
+  // the sun passes under the horizon between sunset and sunrise it swings
+  // back through overhead, so cloud shading never jumps.
+  vec2 lightDir = normalize(vec2(-cos(dayAngle) * 0.8, 0.85));
+  float sunNear = max(decodeDye(texture(uDye, uv + lightDir * CLOUD_SHADOW_TAP1)).x, 0.0);
+  float sunFar = max(decodeDye(texture(uDye, uv + lightDir * CLOUD_SHADOW_TAP2)).x, 0.0);
+  float shadow = exp(-CLOUD_SHADOW_K1 * sunNear - CLOUD_SHADOW_K2 * sunFar);
+  // Keyed with the sky (CLOUD_LIT_KEY/CLOUD_SHADE_KEY), so clouds sit in the
+  // same light: white at midday, gold and pink toward sunset, dim moonlit
+  // grey at night. The midday pair was measured off a real hazy-cumulus
+  // photo (shadow-fold RGB≈(156,151,172)/255, highlight RGB≈(255,255,254)/255).
+  vec3 cloudShadow = dayMix(dw, CLOUD_SHADE_KEY);
+  vec3 cloudLit = mix(dayMix(dw, CLOUD_LIT_KEY), dayMix(dw, CLOUD_LIT_KEY) * MORNING_WARMTH, morning * glowHour);
+  // Thin, barely-there cloud is sunlit through, never shadowed — without
+  // this, half-faded puffs blend a shadow tone into the sky and read as
+  // grey smudges instead of airy haze.
+  shadow = mix(1.0, shadow, smoothstep(0.0, 0.8, cloudAlpha));
+  vec3 cloudColor = mix(cloudShadow, cloudLit, shadow) * (0.85 + 0.3 * uCloudBrightness * cloudBrightnessDrive(1.0));
+  color = mix(color, cloudColor, cloudAlpha);
+
+  // 3. Haidinger's brush: a faint bowtie centred on the fixation point,
+  // rotating on uBrushPhase — under/with the sky+cloud, per the file
+  // header's compositing order, so it never sits on top of the floaters.
+  float r = length(p);
+  float ang = atan(p.y, p.x) - uBrushPhase;
+  float lobe = cos(2.0 * ang);
+  float radial = smoothstep(0.0, BRUSH_R_CORE, r) * smoothstep(BRUSH_R_OUT, BRUSH_R_IN, r);
+  vec3 brushTint = mix(vec3(0.82, 0.85, 1.05), vec3(1.05, 0.98, 0.82), lobe * 0.5 + 0.5);
+  // The brush is polarised skylight, so it dims toward the low twilight glow.
+  float daylight = smoothstep(-0.1, 0.25, lightE);
+  float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * brushOpacityDrive(1.0 - 0.4 * uEnergy) * daylight, 0.0, 1.0);
+  color = mix(color, color * brushTint, brushAmt);
+
+  // 4. Floater waves (see the file header): snap this pixel to its grid
+  // cell, take the densest live streak at the cell's centre, and from that
+  // density decide what floater (if any) the cell holds: an aligned strand
+  // in the body, a short flat strand on the fringe, a dot in a hotspot. Each
+  // floater is a refractive tube (floaterProfile), applied as a modulation of
+  // what's behind it rather than a painted colour. The cell's own hash fixes
+  // its floater's shape, so a drifting streak moves by floaters switching on
+  // and off across a fixed grid.
+  vec2 cellId = floor(p / FLOATER_CELL);
+  vec2 cellC = (cellId + 0.5) * FLOATER_CELL;
+  vec2 wind = STREAK_DRIFT * (0.5 + uFlowSpeed * flowSpeedDrive(1.0));
+  float dens = -1.0;
+  float hot = 0.0;
+  float slant = 0.0;
+  // Draw-side off-gate, the twin of render()'s spawnFloaters: with the
+  // Floaters density product at 0 nothing new stamps, and any stamp still
+  // live stops drawing this instant — dens stays below every threshold
+  // below, so neither the streaks nor their sweep glints (inside the
+  // dens > CELL_T_FRINGE block) are drawn until the amount comes back.
+  float densityAmt = uFloaterDensity * floaterDensityDrive(1.0);
+  bool floatersOn = densityAmt > 0.0;
+  for (int b = 0; b < MAX_WAVE_BURSTS_C; b++) {
+    if (!floatersOn) break;
+    float age = uTime - uBurstT0[b];
+    float life = uBurstLife[b];
+    if (age < 0.0 || age > life) continue;
+    vec2 centre = (vec2(uBurstX[b], uBurstY[b]) - 0.5) * vec2(devAspect, 1.0) + wind * age;
+    // Rag can push density past the ellipse by at most ~5%, never further.
+    if (length(cellC - centre) > STREAK_L_MAX.x * 1.1) continue;
+    float h;
+    float sl;
+    float d = streakDensity(cellC, centre, uBurstSeed[b], uBurstAmp[b], age, life, sl, h);
+    if (d > dens) {
+      dens = d;
+      hot = h;
+      slant = sl;
+    }
+  }
+  if (dens > CELL_T_FRINGE) {
+    // Keep off the clouds: the cell's centre, looked up in the same field the
+    // cloud pass thresholds, with a margin below CLOUD_LOW so a streak gives
+    // way before a cloud's visible edge reaches it.
+    float clear = 1.0 - smoothstep(CLOUD_LOW * 0.3, CLOUD_LOW * 0.85, cloudBumpedAt(roomUv(cellC / vec2(devAspect, 1.0) + 0.5)));
+    float cellSeed = hash21(cellId * 0.731 + 17.3) * 97.0 + cellId.x * 0.013;
+    float s;
+    if (dens > CELL_T_BODY && hot > CELL_T_HOT) {
+      float r = mix(FLOATER_DOT_R_MIN, FLOATER_DOT_R_MAX, hash21(vec2(cellSeed, 15.0)));
+      s = length(p - cellC) - max(r, FLOATER_MIN_PX * px);
+    } else if (dens > CELL_T_BODY) {
+      float len = mix(BODY_LEN_MIN, BODY_LEN_MAX, hash21(vec2(cellSeed, 25.0)));
+      float heading = slant + (hash21(vec2(cellSeed, 44.0)) - 0.5) * BODY_HEADING_JITTER;
+      s = floaterStrand(p, cellC, cellSeed, heading, len);
+    } else {
+      float len = mix(FRINGE_LEN_MIN, FRINGE_LEN_MAX, hash21(vec2(cellSeed, 25.0)));
+      s = floaterStrand(p, cellC + vec2(0.0, FRINGE_DROP), cellSeed, 0.0, len);
+    }
+    float vis = clear * (1.0 - cloudAlpha);
+    float delta = clamp(floaterProfile(s) * uFloaterGain, -0.55, 0.55) * vis;
+    color *= 1.0 + min(delta, 0.0) + max(delta, 0.0) * FLOATER_COOL_TINT;
+
+    // Beat light waves pass through the floaters only: each live wave is a
+    // thin ring rippling out from near the centre of view (see the
+    // SWEEP_WIDTH comment), and it lights just this floater's own tube
+    // (inside it and its rim), screen-blended so a floater glints a pale
+    // sky tint as the ring crosses it while the sky and clouds around it stay
+    // untouched.
+    float tube = 1.0 - smoothstep(0.0, max(FLOATER_FRINGE_W, FLOATER_MIN_PX * px), s);
+    if (tube > 0.0) {
+      vec3 sweepGlow = lightWaveAt(p, devAspect);
+      vec3 lit = clamp(sweepGlow * SWEEP_ALPHA * uLightWaves * tube * vis, 0.0, 1.0);
+      color = 1.0 - (1.0 - color) * (1.0 - lit);
+    }
+  }
+
+  outColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+}
+`;
+}
+
+function createSkyScene(): Scene {
+  let displayProg: GLProgram | null = null;
+  let quadVao: WebGLVertexArrayObject | null = null;
+  let sim: FluidSim | null = null;
+  let dyeLoc: WebGLUniformLocation | null = null;
+  let wavePool: WavePool | null = null;
+  const bandsBuf = new Float32Array(NUM_BANDS);
+  const drifterSplats: Splat[] = DRIFTER_SEEDS.map((seed) => ({
+    x: 0.5,
+    y: 0.5,
+    sigma: DRIFTER_SIGMA_MIN + (DRIFTER_SIGMA_MAX - DRIFTER_SIGMA_MIN) * ((seed * 0.618034) % 1),
+    fx: 0,
+    fy: 0,
+    dye: 0,
+    tag: 0,
+    ring: 0,
+  }));
+  // The same drifters' current centres, reused as pickSwarmCenter's obstacles.
+  const drifterCentres: [number, number][] = DRIFTER_SEEDS.map(() => [0.5, 0.5]);
+
+  let ambientT = 0;
+  let brushPhase = 0;
+  let dayOffset = 0;
+  // The one scene listener: a beat edge held to one event per beat. Its
+  // decision feeds BOTH the beat light sweep and the floater brush stamp
+  // (render() advances it once), so under Scene a ring glint and a new
+  // stamp land on the same beat; a re-patch on either row gates
+  // independently, since drives.fired() ignores this edge once a source is
+  // wired in.
+  const beatListener = createBeatListener({ source: "beat", hold: ONE_BEAT_HOLD });
+  const sweepT0 = new Float32Array(MAX_SWEEPS).fill(WAVE_DEAD_T0);
+  const sweepSeed = new Float32Array(MAX_SWEEPS);
+  let sweepsFired = 0;
+  // The floater brush's own state — the invisible spawn point that steps
+  // across the sky once per stamp (stepBrush). Unrelated to Haidinger's
+  // brushPhase far below.
+  let brushX = 0.5;
+  let brushY = 0.5;
+  let brushHeading = BRUSH_HEADING_INIT;
+  let waveSeedCounter = 0;
+  let lastFrameTime: number | null = null;
+
+  return {
+    id: ID,
+    name: "Sky",
+    settings: SETTINGS,
+
+    init(ctx: SceneContext) {
+      const { gl } = ctx;
+      quadVao = createFullscreenQuad(gl);
+      const format = detectSimFormat(gl);
+      const initSize = simResolutionFor(
+        ctx.quality.detail,
+        Math.max(1, gl.drawingBufferWidth),
+        Math.max(1, gl.drawingBufferHeight),
+        MIRROR_OFF,
+      );
+      sim = createFluidSim(gl, quadVao, initSize, format);
+      displayProg = createProgram(gl, buildDisplayFrag(format));
+      dyeLoc = gl.getUniformLocation(displayProg.program, "uDye");
+      wavePool = createWavePool();
+
+      ambientT = 0;
+      brushPhase = 0;
+      dayOffset = 0;
+      beatListener.reset();
+      brushX = 0.5;
+      brushY = 0.5;
+      brushHeading = BRUSH_HEADING_INIT;
+      sweepT0.fill(WAVE_DEAD_T0);
+      sweepsFired = 0;
+      waveSeedCounter = 0;
+      lastFrameTime = null;
+    },
+
+    render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
+      if (!displayProg || !quadVao || !sim || !wavePool) return;
+      const { gl } = ctx;
+
+      const dt = lastFrameTime === null ? 1 / 60 : Math.max(0, Math.min(0.1, frame.time - lastFrameTime));
+      lastFrameTime = frame.time;
+
+      // Rebuild the sim whenever the drawing buffer (or the quality
+      // governor's detail) changes — same pattern as powder.ts's glow
+      // targets.
+      const wantSize = simResolutionFor(
+        ctx.quality.detail,
+        Math.max(1, gl.drawingBufferWidth),
+        Math.max(1, gl.drawingBufferHeight),
+        MIRROR_OFF,
+      );
+      if (!sameSimSize(wantSize, sim.size)) sim.resize(wantSize);
+
+      // Each amount below is the slider (resolveSceneSetting) times its own
+      // drive's reading — drives.value(key, 1) is 1 at a Scene default
+      // (drives.ts's identity rule), so nothing here moves until a source
+      // is picked on the row.
+      const cloudCoverAmount = resolveSceneSetting(ID, settingFor("cloudCover")) * drives.value("cloudCover", 1);
+      const flowSpeedAmount = resolveSceneSetting(ID, settingFor("flowSpeed")) * drives.value("flowSpeed", 1);
+      const turbulenceAmount = resolveSceneSetting(ID, settingFor("turbulence")) * drives.value("turbulence", 1);
+
+      // Ambient cloud drift — a real-time clock, deliberately not
+      // audio-reactive (see file header).
+      ambientT += dt;
+      for (let i = 0; i < DRIFTER_SEEDS.length; i++) {
+        const seed = DRIFTER_SEEDS[i];
+        const [x0, y0] = driftCenter(seed, ambientT);
+        const [x1, y1] = driftCenter(seed, ambientT + DRIFT_TANGENT_EPS);
+        const dx = x1 - x0;
+        const dy = y1 - y0;
+        const len = Math.hypot(dx, dy) || 1;
+        const s = drifterSplats[i];
+        s.x = x0;
+        s.y = y0;
+        s.fx = (dx / len) * DRIFTER_FORCE * (0.5 + flowSpeedAmount);
+        s.fy = (dy / len) * DRIFTER_FORCE * (0.5 + flowSpeedAmount);
+        s.dye = DRIFTER_DYE_RATE * drifterPuff(seed, ambientT) * (0.25 + 0.75 * cloudCoverAmount);
+        drifterCentres[i][0] = x0;
+        drifterCentres[i][1] = y0;
+      }
+
+      const simDt = Math.min(SIM_DT_MAX, dt * (0.5 + 1.5 * flowSpeedAmount));
+      sim.step({
+        dt: simDt,
+        curl: turbulenceAmount,
+        dissipation: DYE_DISSIPATION,
+        energy: 0, // cloud drift is not audio-reactive in v1 — see file header
+        viscosity: SIM_VISCOSITY,
+        splats: drifterSplats,
+      });
+
+      // Floaters: one stamp per spawn event, laid where the brush stands —
+      // the brush steps first, the stamp follows (see file header). The
+      // listener advances every tick regardless of drive choice so its
+      // one-per-beat hold clock keeps running for the Scene default
+      // (physarum.ts's beatSeeder note says the same); drives.fired() gates
+      // the event, drives.value() grades how many floaters the stamp lays
+      // down (floaterCountFromEnergy at Scene), and spawnFloaters refuses
+      // both while the Floaters product is 0 — the same product the
+      // shader's off-gate checks, so a live stamp dies the instant the
+      // slider hits 0 and no invisible pool slot is ever taken.
+      wavePool.tick(anim.timeSec);
+      const beatFired = beatListener.advance(anim).fired;
+      if (drives.fired("lightWaves", beatFired)) {
+        const slot = sweepSlot(sweepsFired);
+        sweepT0[slot] = anim.timeSec;
+        sweepSeed[slot] = sweepsFired * 1.618 + 3.0;
+        sweepsFired++;
+      }
+      const floaterAmount = resolveSceneSetting(ID, settingFor("floaterDensity")) * drives.value("floaterDensity", 1);
+      if (drives.fired("floaterDensity", beatFired)) {
+        const count = spawnFloaters(floaterAmount, drives.value("floaterDensity", floaterCountFromEnergy(frame.energy)));
+        if (count > 0) {
+          const seed = waveSeedCounter++;
+          const stride = BRUSH_STRIDE_MAX * resolveSceneSetting(ID, settingFor("brushMove"));
+          const next = stepBrush([brushX, brushY], brushHeading, stride, seed);
+          brushX = next.x;
+          brushY = next.y;
+          brushHeading = next.heading;
+          // The brush picks the region; pickSwarmCenter nudges to the
+          // clearest spot within it (cloud drifters only — a trail is meant
+          // to accumulate). The shader's per-floater cloud fade is the
+          // second net.
+          const [cx, cy] = pickSwarmCenter(seed, [brushX, brushY], drifterCentres);
+          wavePool.trigger(
+            anim.timeSec,
+            count,
+            seed,
+            cx,
+            cy,
+            waveLifeSec(resolveSceneSetting(ID, settingFor("floaterSustain"))),
+          );
+        }
+      }
+
+      // Haidinger's brush — a continuously increasing accumulator, never
+      // anim.barPhase (see file header).
+      brushPhase = advanceBrushPhase(brushPhase, dt);
+
+      // Day cycle: Time of day is where the sky starts, Day drift how fast it
+      // moves on from there, hurrying through the hours the sun is down
+      // (see file header).
+      const timeOfDay = resolveSceneSetting(ID, settingFor("timeOfDay"));
+      const wrap = (v: number) => v - Math.floor(v);
+      dayOffset = advanceDayOffset(dayOffset, dt, resolveSceneSetting(ID, settingFor("dayDrift")), wrap(timeOfDay + dayOffset));
+      const dayPhase = wrap(timeOfDay + dayOffset);
+
+      gl.disable(gl.BLEND);
+      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+      displayProg.use();
+      uploadCommonUniforms(displayProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+      displayProg.setF("uBrushPhase", brushPhase);
+      displayProg.setF("uDayPhase", dayPhase);
+      displayProg.setF(
+        "uFloaterGain",
+        floaterGain(resolveSceneSetting(ID, settingFor("floaterVisibility")) * drives.value("floaterVisibility", 1)),
+      );
+      wavePool.upload(displayProg);
+      displayProg.setFv("uSweepT0", sweepT0);
+      displayProg.setFv("uSweepSeed", sweepSeed);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, sim.dyeTexture());
+      gl.uniform1i(dyeLoc, 0);
+      drawFullscreenQuad(gl, quadVao);
+
+      // The gallery renders every scene into one shared context each tick —
+      // must not leak a bound texture onto the next tile.
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    },
+
+    dispose(ctx: SceneContext) {
+      const { gl } = ctx;
+      sim?.dispose();
+      displayProg?.dispose();
+      if (quadVao) gl.deleteVertexArray(quadVao);
+      sim = null;
+      displayProg = null;
+      quadVao = null;
+      dyeLoc = null;
+      wavePool = null;
+      lastFrameTime = null;
+    },
+  };
+}
+
+export const skyScene = createSkyScene();

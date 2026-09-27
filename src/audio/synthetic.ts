@@ -37,7 +37,7 @@ const NOISE_FLOOR = 0.04;
 // envelopes below. Without this, every band's variation was beat-to-beat
 // only — energy and level swung in lockstep with the metronome but carried
 // no longer, quieter/louder arc across a stretch of audio, so a feature
-// driven by real dynamic range (Caustics' Loudness surge, see
+// driven by real dynamic range (Caustics' Speed boost, see
 // render/scenes/caustics.ts's advanceLoudSwell) had nothing to calibrate
 // against on this feed: it would settle near neutral forever regardless of
 // whether the feature actually worked. Long enough (multiple bars at typical
@@ -46,7 +46,8 @@ const SECTION_PERIOD_SEC = 26;
 const SECTION_DEPTH = 0.7; // 0 = no section dynamics, 1 = quiet section hits pure noise floor
 
 /** Produces a plausible ~120bpm FeatureFrame with no real audio input, so
- *  gallery preview tiles look alive before the mic is ever granted. Once
+ *  gallery preview tiles — and an open scene, behind its start prompt (see
+ *  idlePreview in app.ts) — look alive before the mic is ever granted. Once
  *  real audio starts flowing, callers just stop calling this and switch to
  *  the live FeatureFrame — there's no state here to tear down. */
 export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
@@ -104,8 +105,9 @@ export function createSyntheticFeed(opts: SyntheticOpts = {}): SyntheticFeed {
 
       // beat/beatPhase above are genuinely a synthetic metronome's beat grid
       // (they drive the kick/bass/hat envelopes too) — onset/onsetPhase is
-      // just what FeatureFrame calls that same edge/phase pair.
-      return { time: timeSec, bands, energy, onset: beat, bpm, onsetPhase: beatPhase, level };
+      // just what FeatureFrame calls that same edge/phase pair. There's no
+      // silence gate here to differ from it, so pulseOnset = onset.
+      return { time: timeSec, bands, energy, onset: beat, pulseOnset: beat, bpm, onsetPhase: beatPhase, level };
     },
   };
 }
