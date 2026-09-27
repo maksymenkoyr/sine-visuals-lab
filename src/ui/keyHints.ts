@@ -105,7 +105,9 @@ function hintLine(el: HTMLElement): string | null {
   // The gear turns into a close cross while the panel is open (index.html's
   // #menuBtn rules) — the hint follows it.
   if (s && id === "panel" && el.getAttribute("aria-pressed") === "true") return `Close controls · ${s.key}`;
-  if (s && id === "solo" && el.closest(".vc-solo")) return `Show all · ${s.key}`;
+  // Solo's eye floats on <body>, outside the panel, so it carries its own
+  // on/off state rather than sitting under .vc-solo.
+  if (s && id === "solo" && (el.closest(".vc-solo") || el.classList.contains("vc-solo-eye-on"))) return `Show all · ${s.key}`;
   if (s && id === "solo" && el.classList.contains("vc-solo-eye")) return `Show only this · ${s.key}`;
   return s ? `${s.label} · ${s.key}` : null;
 }
@@ -283,5 +285,9 @@ export function installKeyHints(tipCallback: (text: string) => void): void {
     if (lastPointerType === "touch") return;
     const el = taggedAncestor(e.target);
     if (el?.dataset.key) noteMouseUse(el.dataset.key);
+    // A toggle's own handler has already run (this listener is on the
+    // document, so it hears the click last) — redraw the hint in case the
+    // click just flipped what it says (the gear, Solo's eye).
+    if (el && el === hovered) showHint(el);
   });
 }

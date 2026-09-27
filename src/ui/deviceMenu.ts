@@ -1905,6 +1905,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Solo's on/off (setSolo/applySolo, by the footer) — declared up here
   // because togglePin and every pinned patch panel's own Solo chip read it.
   let soloOn = false;
+  // Whether the panel is open (open/close, below) — declared up here since
+  // setSolo's cable-visibility refresh runs during construction.
+  let isOpen = false;
   /** The last setting `previewDrive` was actually handed a non-null value
    *  for — unlike `preview` itself, this never goes back to null when the
    *  pointer leaves. It's what a jack click reaches for when nothing's
@@ -3408,7 +3411,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     });
   }
   function refreshCableVisibility(): void {
-    cableLayer.setVisible(isOpen && !narrowMQ.matches);
+    // Soloed, the meters column is hidden, so a cable would run to a jack
+    // that isn't on screen — the cables go with it.
+    cableLayer.setVisible(isOpen && !narrowMQ.matches && !soloOn);
   }
   narrowMQ.addEventListener("change", () => {
     refreshCableVisibility();
@@ -4663,6 +4668,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (on) controlsCol.style.paddingTop = `${Math.max(0, -moved)}px`;
     else (narrowMQ.matches ? root : controlsCol).scrollTop += moved;
     syncSoloEye(soloEyeEl);
+    refreshCableVisibility();
     soloBtn.textContent = on ? "All  O" : "Solo  O";
     soloBtn.title = on ? "Show everything again (O)" : "Show only the pinned setting — or the Scene card, when none is pinned (O)";
     soloBtn.style.color = on ? "#fff" : "inherit";
@@ -4782,7 +4788,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   document.body.appendChild(root);
 
   // ---- open / close ----
-  let isOpen = false;
+  // (isOpen itself is declared up with soloOn — setSolo reads it.)
 
   // A tap outside the panel leaves it open — it's corner-docked so you can
   // work the scene beside it, and it closes only from the gear, Hide UI, S
