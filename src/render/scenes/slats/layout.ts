@@ -260,7 +260,7 @@ export function packSlats(slats: readonly PackedSlat[]): Float32Array {
 
 /** Time constant of the beat-triggered height/brightness kick (sync
  *  hypothesis 1) — short enough to read as a strike, the same family as
- *  caustics.ts's RIPPLE_ATTACK_SEC/LURCH_DECAY_PER_SEC. */
+ *  caustics.ts's RIPPLE_ATTACK_SEC/CHURN_DECAY_PER_SEC. */
 export const ONSET_ENV_TAU_SEC = 0.12;
 
 export interface OnsetEnvelope {
@@ -275,7 +275,7 @@ export function createOnsetEnvelope(): OnsetEnvelope {
  *  `onset` — a fresh beat always wins even mid-decay. Pure aside from
  *  `state`, and exported so tests/slats.test.ts can pin the decay/retrigger
  *  shape directly. A non-finite or backwards dt is treated as no time
- *  passing, the same guard caustics.ts's advanceLurch and ambience.ts's
+ *  passing, the same guard caustics.ts's advancePump and ambience.ts's
  *  choreographer use. */
 export function advanceOnsetEnvelope(
   state: OnsetEnvelope,

@@ -9,13 +9,13 @@ spray-injection layer riding on top. Ships from the initial commit and is on mai
 
 - `src/render/scenes/caustics.ts` — the scene module (`createFullscreenScene`,
   `SETTINGS`, the `FRAG` template, and an `extraUniforms` closure that advances the
-  drift phase, the beat lurch, beat churn, kick jolt, loudness-swell calibration and
+  drift phase, Pump's own accumulator, beat churn, loudness-swell calibration and
   the ripple pool every frame).
 - Its response math is factored into small pure functions exported specifically so
   `tests/caustics.test.ts` can pin them directly: `focusSharp`, `fogRestingSharp`,
-  `fogFloorCut`, `causticDensityScale`, `driftRatePerSec`, `loudSpeedFactor`,
-  `advanceLoudSwell`, `loudSwellDrive`, `advanceLurch`, `advanceKickJolt`,
-  `rippleEnvelope`, `createRipplePool`, `driftFlows`, and the `sparkle*` helpers.
+  `fogFloorCut`, `causticDensityScale`, `driftRatePerSec`, `advanceLoudSwell`,
+  `loudSwellDrive`, `advancePump`, `rippleEnvelope`, `createRipplePool`,
+  `driftFlows`, and the `sparkle*` helpers.
 - Imports `NOISE_HASH_GLSL`, `NOISE_MASK`, `NOISE_PERIOD`, `wrapFlow` from
   `src/render/noiseHash.ts` — the shared mobile-safe lattice hash (see Decisions
   below; this scene is the reason that module exists).
@@ -119,6 +119,35 @@ reference-measurement workflow used by later scenes.
   Descriptions corrected: Fog is hazier/softer ridges as it rises, and
   Sparkle grain is coarser glints as it rises. The old text said the
   reverse.
+- 2026-09-27 — Beat surge, Kick surge and Loudness surge collapsed into two
+  dials: Speed boost and Pump. Beat surge and Kick surge were the same
+  motion (a rate surge plus an additive phase impulse) on two different
+  hit sources, and the per-setting drive picker already lets one dial
+  choose which hit it reacts to — a second dial for "the other hit" no
+  longer earned its keep. Beat surge in particular had also stopped
+  working as advertised: it read `drives.fired()`, a boolean edge, so
+  wiring it to a level or line source silently kept firing only on
+  onsets rather than reading that source's level. The user asked for two
+  motions instead: an instant, level-following speed increase ("direct
+  increase to drift speed based on current level of energy") and a
+  push that decays back to the Drift-speed base rather than tracking its
+  input directly ("energy would pump up drift speed but it would slowly be
+  going back to the one set by drift... like push acceleration in a car").
+  Speed boost (`driftLevel`) is `LEVEL_GAIN * driftLevel * levelValue` added
+  straight onto the rate — `levelValue` is this scene's own calibrated
+  loudness (`advanceLoudSwell`) by default, same reasoning as the old
+  Loudness surge, just linear instead of a geometric swing about a neutral
+  pivot. Pump (`driftPump`) replaced `advanceLurch`/`advanceKickJolt` with a
+  single accumulator (`advancePump`): a hit accelerates a velocity
+  (`PUMP_ACCEL`) that decays exponentially (`PUMP_RELEASE_SEC`) and is
+  capped (`PUMP_VEL_CAP`), added onto the rate the same additive way. Both
+  terms are additive rather than multiplicative on the Drift-speed base —
+  the reason either one still moves the pool with Drift speed at 0 — so
+  `DRIFT_RATE_MAX` is now a generous backstop the additive model can't
+  reach on its own rather than a value the design tries to walk up to.
+  Beat churn's own envelope decay constant was renamed from
+  `LURCH_DECAY_PER_SEC` to `CHURN_DECAY_PER_SEC` (same value) now that it's
+  no longer shared with a lurch; its behavior is unchanged.
 
 ## Tuning notes
 
@@ -132,10 +161,13 @@ reference-measurement workflow used by later scenes.
   the domain warp bunches several octaves' contours together and exactly on a beat
   (when sharp jumps). A maxed Focus snap against a maxed Beat churn is the case to
   eyeball for it.
-- Loudness surge reads `advanceLoudSwell`'s own slow-contracting (tens-of-seconds)
+- Speed boost reads `advanceLoudSwell`'s own slow-contracting (tens-of-seconds)
   calibration of `FeatureFrame.level`, not `frame.energy`, so it settles into the
   room or playback's own observed range instead of re-normalizing away the very
   quiet-vs-loud contrast it exists to show.
+- Speed boost and Pump are both additive on top of the Drift-speed base
+  (`driftRatePerSec`), not multipliers on it, which is why either one still
+  moves the pool with Drift speed itself parked at 0.
 - Ripple source switches Beat ripple between "bass hits only" and "bass hits plus
   any broadband beat" at a fixed threshold — useful for restricting rings on a busy
   mix so they don't machine-gun.
@@ -152,9 +184,9 @@ reference-measurement workflow used by later scenes.
 
 ## Known issues and next steps
 
-- Beat ripple, Kick surge and Beat churn still hand-roll their own trigger/hold/
-  decay logic in this file rather than using the shared beat-listener module that
-  later scenes are meant to converge on; migrating them was flagged as a follow-up
+- Beat ripple and Beat churn still hand-roll their own trigger/hold/decay logic
+  in this file rather than using the shared beat-listener module that later
+  scenes are meant to converge on; migrating them was flagged as a follow-up
   but is not done.
 - Two older pull-request prototypes this scene's audio coupling grew from — the
   "Flash from level" crossfade and the "Sparkle from line" drive — landed as

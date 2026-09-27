@@ -21,7 +21,7 @@ import { NUM_BANDS } from "../audio/types.ts";
  * that has, instead of going black. Drop that fallback once mixed-version
  * pairing is no longer a concern. 0.5 is also exactly advanceLoudSwell's
  * neutral reading (see render/scenes/caustics.ts), so a legacy sender makes
- * Caustics' Loudness surge a quiet no-op rather than a wrong one — a safe
+ * Caustics' Speed boost a quiet no-op rather than a wrong one — a safe
  * degradation, not a bug, and it can't be told apart from a genuine mid
  * loudness reading, so there's nothing to special-case here.
  *
