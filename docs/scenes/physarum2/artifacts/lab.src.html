@@ -34,28 +34,24 @@ body {
 button { font: inherit; color: inherit; }
 button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 1px solid var(--violet); outline-offset: 2px; }
 
-.app { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px; max-width: 1440px; margin: 0 auto; align-items: start; }
+.app { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 32px; max-width: 1440px; margin: 0 auto; align-items: start; }
 @media (max-width: 960px) { .app { grid-template-columns: minmax(0, 1fr); } }
 
-/* ---------- stage: culture dish ---------- */
+/* ---------- stage: plain rectangular scene view (no dish framing) ---------- */
 .stage {
   position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px);
   display: grid; gap: 12px; padding: 14px; border-radius: 10px;
   border: 1px solid var(--line);
-  background-color: #05070707;
-  background-image:
-    linear-gradient(rgba(140, 220, 200, .05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(140, 220, 200, .05) 1px, transparent 1px);
-  background-size: 16px 16px;
+  background: #05070a;
 }
 @media (max-width: 960px) { .stage { position: relative; top: 0; } }
 
-.dish-outer { position: relative; width: 100%; max-width: 480px; margin: 0 auto; aspect-ratio: 1 / 1; }
-.dish-clip {
-  position: absolute; inset: 5%; border-radius: 50%; overflow: hidden;
+.scene-frame {
+  position: relative; width: 100%; aspect-ratio: 16 / 9;
+  border-radius: 4px; overflow: hidden; border: 1px solid var(--line);
   background: #000; cursor: crosshair;
 }
-.dish-clip canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+.scene-frame canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .ring-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .ring {
   position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px;
@@ -66,32 +62,12 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 1
 @media (prefers-reduced-motion: reduce) {
   .ring { animation: none; opacity: 0; transition: opacity .5s ease-out; width: 18%; height: 18%; margin: -9% 0 0 -9%; }
 }
-.rim { position: absolute; inset: 5%; border-radius: 50%; pointer-events: none;
-  box-shadow:
-    inset 0 0 0 2px rgba(255, 255, 255, .16),
-    inset 0 0 0 7px rgba(0, 0, 0, .6),
-    inset 0 0 0 9px rgba(255, 255, 255, .045),
-    0 12px 30px rgba(0, 0, 0, .55);
+/* The one HUD element kept from the "no dish" cut — the song phase only. */
+.hud-phase {
+  position: absolute; right: 8px; top: 6px; font: 400 10.5px/1.3 var(--mono);
+  letter-spacing: .06em; text-transform: uppercase; color: var(--amber);
+  pointer-events: none; text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
 }
-.rim::before {
-  content: ""; position: absolute; inset: 0; border-radius: 50%;
-  background: radial-gradient(ellipse 60% 32% at 30% 20%, rgba(255, 255, 255, .13), transparent 55%);
-}
-.dish-hud {
-  position: absolute; font: 400 10.5px/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase;
-  color: rgba(255, 255, 255, .72); pointer-events: none;
-}
-.dish-hud.tl { left: 8%; top: 2%; }
-.dish-hud.tr { right: 8%; top: 2%; color: var(--amber); }
-.dish-hud.bl { left: 8%; bottom: 2%; }
-.scale { display: inline-flex; align-items: center; gap: 5px; }
-.scale i { width: 20px; height: 2px; background: rgba(255, 255, 255, .55); display: inline-block; }
-
-.popbar-wrap { display: grid; gap: 6px; justify-items: center; }
-.popbar { display: flex; height: 12px; width: 100%; max-width: 480px; border-radius: 3px; overflow: hidden; background: rgba(255, 255, 255, .08); }
-.popbar span { display: block; height: 100%; }
-.poplabels { display: flex; flex-wrap: wrap; gap: 5px 12px; justify-content: center; font: 400 10.5px/1 var(--mono); color: var(--ink-2); }
-.poplabels i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 4px; box-shadow: 0 0 5px currentColor; }
 
 .intro { color: var(--ink-2); font-size: 12px; max-width: 64ch; margin: 0; }
 .intro b { color: var(--ink); font-weight: 500; }
@@ -107,51 +83,98 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 1
 .toggle[aria-checked="true"]::after { transform: translateX(14px); background: #0a0c0b; }
 @media (prefers-reduced-motion: reduce) { .toggle::after { transition: none; } }
 
-.card { position: relative; background: var(--glass); border: 1px solid var(--line); border-top-color: var(--line-hi); border-radius: 8px; padding: 14px; backdrop-filter: blur(14px); display: grid; gap: 12px; min-width: 0; }
-.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.card { position: relative; background: var(--glass); border: 1px solid var(--line); border-top-color: var(--line-hi); border-radius: 8px; padding: 14px; backdrop-filter: blur(14px); display: grid; gap: 2px; min-width: 0; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 .card-head h2 { margin: 0; font: 600 12px/1 var(--label); letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
 .card-head p { margin: 4px 0 0; color: var(--ink-3); font-size: 11.5px; }
-.wtag { font: 400 10px/1 var(--mono); color: var(--amber); border: 1px dashed rgba(249,185,108,.55); border-radius: 3px; padding: 3px 6px; letter-spacing: .04em; }
+.wtag { font: 400 9.5px/1 var(--mono); color: var(--amber); border: 1px dashed rgba(249,185,108,.55); border-radius: 3px; padding: 2.5px 6px; letter-spacing: .04em; white-space: nowrap; }
 body:not(.show-arch) .wtag { display: none; }
+.chip-reset { font: 400 9.5px/1.2 var(--mono); letter-spacing: .04em; color: rgba(255,255,255,.55); background: transparent; border: 1px solid rgba(255,255,255,.18); border-radius: 4px; padding: 2.5px 7px; cursor: pointer; }
+.chip-reset:hover { color: #fff; border-color: rgba(255,255,255,.45); }
 
-.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
-.seg button { background: transparent; border: 0; padding: 6px 10px; font: 500 10.5px/1 var(--label); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); cursor: pointer; }
-.seg button + button { border-left: 1px solid var(--line); }
-.seg button[aria-pressed="true"] { background: rgba(255,255,255,.09); color: #fff; }
+/* A step down from the card title — one per group of ordinary rows, and one
+   for each custom widget nested inside the Strains group. */
+.group-heading {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  font: 400 9.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: rgba(255,255,255,.5); margin: 16px 0 6px; padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.1);
+}
+.group-heading.first { margin-top: 2px; padding-top: 0; border-top: 0; }
+.group-sub { margin: 0 0 8px; color: var(--ink-3); font-size: 11.5px; max-width: 60ch; }
+.mini-label { font: 400 9px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); margin: 10px 0 6px; }
 
-/* ---------- specimen boxes ---------- */
-.specimens { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-@media (max-width: 520px) { .specimens { grid-template-columns: minmax(0, 1fr); } }
-.specimen { position: relative; display: grid; gap: 8px; padding: 10px; border-radius: 6px; border: 1px solid var(--line); background: rgba(255,255,255,.025); cursor: pointer; text-align: left; min-width: 0; }
+/* ---------- monitor strip (patch-bay bonus) ---------- */
+.monitor { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,.02); flex-wrap: wrap; }
+.monitor-label { font: 400 9.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); flex: none; }
+.monitor-jacks { display: flex; gap: 15px; flex-wrap: wrap; flex: 1; }
+.mon-jack { display: grid; justify-items: center; gap: 3px; background: none; border: 0; cursor: pointer; padding: 2px; }
+.mon-jack .dot {
+  width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--c);
+  background: radial-gradient(circle, rgba(5,4,8,.9) 0 34%, color-mix(in srgb, var(--c) 20%, transparent) 36%);
+  transition: transform .15s ease, box-shadow .2s ease;
+}
+.mon-jack:hover .dot { transform: scale(1.18); }
+.mon-jack.armed .dot { background: var(--c); box-shadow: 0 0 9px var(--c); transform: scale(1.1); }
+.mon-jack .lbl { font: 400 8.5px/1 var(--mono); color: var(--ink-3); letter-spacing: .02em; white-space: nowrap; }
+.mon-jack.armed .lbl { color: #fff; }
+
+/* ---------- specimen boxes (compact, code-only) ---------- */
+.specimens { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 640px) { .specimens { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.specimen { position: relative; display: grid; gap: 6px; padding: 8px; border-radius: 6px; border: 1px solid var(--line); background: rgba(255,255,255,.025); cursor: pointer; text-align: left; min-width: 0; }
 .specimen[aria-pressed="true"] { border-color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); }
 .specimen.muted { opacity: .5; }
-.sp-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.sp-head .led { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
-.sp-code { font: 400 10.5px/1 var(--mono); color: var(--ink-3); letter-spacing: .04em; flex: none; }
-.sp-nick {
-  font: 500 12.5px/1.2 var(--label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
-  flex: 1; border-radius: 3px; padding: 1px 3px; margin: -1px -3px; cursor: text;
-}
-.sp-nick[contenteditable="true"] { outline: 1px solid var(--violet); background: rgba(255,255,255,.07); white-space: normal; cursor: text; }
-.sp-eye { margin-left: auto; flex: none; border: 0; background: transparent; color: var(--ink-3); cursor: pointer; font: 400 12px/1 var(--mono); padding: 3px; }
+.sp-head { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.sp-head .led { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 7px var(--c); }
+.sp-code { font: 500 11.5px/1 var(--mono); color: #fff; letter-spacing: .03em; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-eye { margin-left: auto; flex: none; border: 0; background: transparent; color: var(--ink-3); cursor: pointer; font: 400 11px/1 var(--mono); padding: 2px; }
 .specimen.muted .sp-eye { color: var(--red); }
-.sp-body { display: flex; gap: 9px; align-items: flex-start; min-width: 0; }
-.sp-preview { flex: none; width: 92px; height: 92px; border-radius: 5px; overflow: hidden; border: 1px solid rgba(255,255,255,.09); background: #000; }
-.sp-preview canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
-.sp-stats { flex: 1; display: grid; gap: 5px; min-width: 0; align-content: start; }
-.sp-stats .sr { display: flex; align-items: center; gap: 6px; font: 400 10.5px/1.2 var(--mono); color: var(--ink-2); }
-.sp-stats .sr .k { color: var(--ink-3); letter-spacing: .06em; width: 30px; flex: none; }
-.sp-stats .sr b { color: #fff; font-weight: 400; font-variant-numeric: tabular-nums; flex: none; }
-.vigbar { flex: 1; height: 5px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; min-width: 24px; }
-.vigbar span { display: block; height: 100%; background: var(--c); }
+.sp-body { display: grid; gap: 7px; min-width: 0; }
+.sp-preview { width: 100%; aspect-ratio: 1; max-width: 100%; border-radius: 4px; overflow: hidden; border: 1px solid rgba(255,255,255,.09); background: #000; }
+.sp-preview canvas { width: 100%; height: 100%; display: block; }
+.sp-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; min-width: 0; }
+.sp-stat { display: grid; justify-items: center; gap: 1px; font: 400 9px/1.1 var(--mono); color: var(--ink-3); letter-spacing: .04em; }
+.sp-stat b { color: #fff; font-weight: 400; font-size: 10.5px; font-variant-numeric: tabular-nums; }
 
-.rows { display: grid; gap: 4px; }
-.row { display: grid; gap: 6px; padding: 9px 2px 10px; border-top: 1px solid rgba(255,255,255,.06); }
-.row:first-child { border-top: 0; }
-.row-top { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.row-top .lbl { font: 500 13px/1.2 var(--label); color: var(--violet); flex: none; }
-.row-top .val { margin-left: auto; font: 400 15px/1 var(--mono); color: #fff; font-variant-numeric: tabular-nums; }
-.row-desc { color: var(--ink-3); font-size: 11.5px; }
+.pop-wrap { display: grid; gap: 6px; justify-items: center; margin-top: 10px; }
+.popbar { display: flex; height: 10px; width: 100%; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,.08); }
+.popbar span { display: block; height: 100%; }
+.poplabels { display: flex; flex-wrap: wrap; gap: 5px 12px; justify-content: center; font: 400 10px/1 var(--mono); color: var(--ink-2); }
+.poplabels i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 4px; box-shadow: 0 0 5px currentColor; }
+.pill { border: 1px solid var(--line); background: transparent; border-radius: 12px; padding: 4px 10px; font: 500 11px/1 var(--label); letter-spacing: .05em; color: var(--ink-2); cursor: pointer; }
+.pill:hover { color: #fff; border-color: var(--line-hi); }
+
+/* ---------- the wirable row (mirrors deviceMenu.ts createControlRow + buildDriveRow) ---------- */
+.wr-rows { display: grid; }
+.wr { position: relative; padding: 8px 10px 9px 24px; margin: 0 -10px; border-radius: 6px; transition: background-color .15s ease, box-shadow .15s ease; }
+.wr + .wr { border-top: 1px solid rgba(255,255,255,.06); }
+.wr:hover, .wr:focus-within { background-color: rgba(195,165,249,.06); box-shadow: 0 0 0 1px rgba(195,165,249,.35), 0 0 14px rgba(195,165,249,.14); }
+.wr.wr-pinned { background-color: rgba(195,165,249,.10); box-shadow: 0 0 0 1.5px var(--violet); }
+.wr.wr-enum { padding-left: 10px; }
+.wr-port {
+  position: absolute; left: 6px; top: 16px; width: 10px; height: 10px; border-radius: 50%;
+  padding: 0; cursor: pointer; transition: transform .15s ease;
+}
+.wr-port:hover { transform: scale(1.25); }
+.wr-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.wr-left { min-width: 0; cursor: pointer; }
+.wr-label { font: 500 13px/1.25 var(--label); color: var(--violet); }
+.wr-summary { font: 400 10px/1.3 var(--mono); color: var(--ink-3); margin-top: 2px; }
+.wr-right { display: flex; align-items: center; gap: 6px; flex: none; margin-left: 8px; }
+.wr-readout { font: 400 15px/1 var(--mono); color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wr-chip { font: 400 9.5px/1 var(--mono); padding: 3px 7px; border-radius: 9999px; border: 1px solid var(--line); background: transparent; color: var(--ink-3); cursor: pointer; }
+.wr-chip.lit { color: #0a0c0b; }
+.wr-a.lit { background: var(--sky); border-color: var(--sky); }
+.wr-t.lit { background: var(--amber); border-color: var(--amber); }
+.wr-reset { font: 400 12px/1 var(--mono); color: var(--ink-3); background: none; border: none; cursor: pointer; visibility: hidden; padding: 0; }
+.wr-slot { margin-top: 7px; }
+.wr-desc { color: var(--ink-3); font-size: 11px; margin-top: 4px; }
+.wr-enum-strip { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; margin-top: 7px; width: fit-content; }
+.wr-enum-strip button { background: transparent; border: 0; padding: 6px 10px; font: 500 10.5px/1 var(--label); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); cursor: pointer; }
+.wr-enum-strip button + button { border-left: 1px solid var(--line); }
+.wr-enum-strip button.on { background: rgba(255,255,255,.09); color: #fff; }
+
 .slider { position: relative; height: 18px; touch-action: none; cursor: pointer; }
 .slider .track { position: absolute; left: 0; right: 0; top: 7px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.14); overflow: hidden; }
 .slider .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--acc, var(--violet)); opacity: .85; }
@@ -161,18 +184,15 @@ body:not(.show-arch) .wtag { display: none; }
 .slider.hue .track { background: linear-gradient(90deg, hsl(0 90% 60%), hsl(60 90% 60%), hsl(120 90% 60%), hsl(180 90% 60%), hsl(240 90% 60%), hsl(300 90% 60%), hsl(360 90% 60%)); }
 .slider.hue .fill { display: none; }
 
-.chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 8px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.03); font: 400 11px/1.1 var(--mono); color: var(--ink-2); cursor: pointer; }
-.chip:hover { border-color: var(--line-hi); color: var(--ink); }
-.chip i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); }
-.chip .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip.empty { border-style: dashed; color: var(--ink-3); }
-.chip[aria-expanded="true"] { border-color: var(--amber); color: var(--amber); }
-.row-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.row-meta canvas { flex: 1; min-width: 40px; height: 16px; }
-
-/* receives (stimulus mix) patch */
-.patch { margin-top: 4px; padding: 10px; border-radius: 6px; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.08); display: grid; gap: 9px; }
-.patch h3 { margin: 0; font: 500 10.5px/1 var(--label); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
+/* receives patch */
+.patch { margin-top: 8px; padding: 10px; border-radius: 6px; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.08); display: grid; gap: 9px; }
+.patch-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.patch-eyebrow { font: 500 10px/1 var(--label); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
+.patch-empty { color: var(--ink-3); font-size: 11.5px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { background: transparent; border: 0; padding: 6px 10px; font: 500 10.5px/1 var(--label); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: rgba(255,255,255,.09); color: #fff; }
 .src { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
 .src .nm { display: flex; align-items: center; gap: 7px; font-size: 12.5px; min-width: 0; }
 .src .nm i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); flex: none; }
@@ -188,11 +208,12 @@ body:not(.show-arch) .wtag { display: none; }
 .out .cap { display: flex; justify-content: space-between; font: 400 10px/1 var(--mono); letter-spacing: .1em; color: var(--ink-3); text-transform: uppercase; }
 .out .cap b { color: #fff; font-weight: 400; font-size: 12px; }
 .out canvas { width: 100%; height: 40px; }
+.patch-reset { justify-self: start; background: none; border: none; color: var(--ink-2); font: 400 11px/1 var(--mono); text-decoration: underline; cursor: pointer; padding: 0; }
 
-/* ---------- relation web ---------- */
+/* ---------- affinity web (compact overview) ---------- */
 .relweb-wrap { display: flex; justify-content: center; }
-.relweb { width: 100%; max-width: 320px; height: auto; overflow: visible; }
-.relweb .node-lbl { font: 500 10px 'Chakra Petch', sans-serif; fill: #05070707; fill: #04050a; text-transform: uppercase; letter-spacing: .03em; }
+.relweb { width: auto; max-height: 200px; overflow: visible; display: block; margin: 0 auto; }
+.relweb .node-lbl { font: 500 10px 'Chakra Petch', sans-serif; fill: #04050a; text-transform: uppercase; letter-spacing: .03em; }
 .relweb .node-hit { cursor: pointer; }
 .relweb .node-hit:focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; }
 .relweb .arrow.sel, .relweb .loop.sel { opacity: 1; }
@@ -215,24 +236,13 @@ body:not(.show-arch) .wtag { display: none; }
 .exp-pill[aria-pressed="true"] { color: var(--violet); border-color: var(--violet); }
 .exp-hypothesis { margin: 2px 0 0; width: 100%; color: var(--ink-3); font-size: 11.5px; }
 
-.pill { border: 1px solid var(--line); background: transparent; border-radius: 12px; padding: 4px 10px; font: 500 11px/1 var(--label); letter-spacing: .05em; color: var(--ink-2); cursor: pointer; }
-.pill:hover { color: #fff; border-color: var(--line-hi); }
-.pill[aria-pressed="true"] { color: var(--amber); border-color: var(--amber); }
+/* ---------- lab log: a 3-line ticker, not a card ---------- */
+.lablog-mini { list-style: none; margin: 12px 0 0; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.06); display: grid; gap: 3px; font: 400 10.5px/1.3 var(--mono); color: var(--ink-2); max-height: 4.4em; overflow: hidden; }
+.lablog-mini li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lablog-mini b { color: var(--sky); font-weight: 400; }
+.lablog-mini .empty { color: var(--ink-3); }
 
-/* ---------- pipette ---------- */
-.pip-controls { display: grid; gap: 10px; }
-.pip-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.pop-note { display: grid; gap: 4px; }
-.pop-note .note { font-size: 11.5px; color: var(--ink-3); }
-.pop-note .note.warn { color: var(--amber); }
-.aside { color: var(--ink-3); font-size: 10.5px; letter-spacing: .03em; text-transform: uppercase; margin: 0; }
-
-/* ---------- lab log ---------- */
-.lablog { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; font: 400 11.5px/1.4 var(--mono); color: var(--ink-2); max-height: 230px; overflow-y: auto; }
-.lablog li { border-top: 1px solid rgba(255,255,255,.06); padding-top: 5px; }
-.lablog li:first-child { border-top: 0; padding-top: 0; }
-.lablog b { color: var(--sky); font-weight: 400; }
-.lablog .empty { color: var(--ink-3); }
+.aside { color: var(--ink-3); font-size: 10.5px; letter-spacing: .03em; text-transform: uppercase; margin: 10px 0 0; }
 
 /* ---------- architecture ---------- */
 .arch { display: grid; gap: 10px; }
@@ -245,120 +255,128 @@ body:not(.show-arch) .wtag { display: none; }
 .flow span { border: 1px solid var(--line); border-radius: 4px; padding: 5px 8px; }
 .flow em { font-style: normal; color: var(--ink-3); }
 
+/* Document-absolute, not fixed: a fixed overlay re-bakes itself at every
+   scroll tile of a full-page screenshot (Playwright stitches tall pages by
+   scrolling and re-capturing, and a fixed element rides along each tile),
+   which drew one duplicated cable down the entire page length instead of a
+   single line between its two real endpoints. Absolute + scrollX/scrollY-
+   corrected endpoints (drawCable) scrolls with the document like any other
+   content, so it also needs no scroll listener to stay correct. */
+#cableLayer { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 5; overflow: visible; }
+
 @media (prefers-reduced-motion: reduce) { .slider .ghost { transition: none; } }
 </style>
 
 <div class="app">
-  <section class="stage" aria-label="Culture dish">
-    <div class="dish-outer" id="dishOuter">
-      <div class="dish-clip" id="dishClip" tabindex="0" role="button"
-           aria-label="Culture dish. Click anywhere to inject the selected strain, or press Enter to inject at the centre.">
-        <canvas id="view" width="192" height="192"></canvas>
-        <div class="ring-layer" id="ringLayer"></div>
-      </div>
-      <div class="rim" aria-hidden="true"></div>
-      <div class="dish-hud tl" id="cultureClock">CULTURE 07 &middot; T+00:00</div>
-      <div class="dish-hud tr" id="phaseTag">PHASE: INTRO</div>
-      <div class="dish-hud bl"><span class="scale"><i></i>1&nbsp;mm</span></div>
+  <section class="stage" aria-label="Scene view">
+    <div class="scene-frame" id="sceneFrame" tabindex="0" role="button"
+         aria-label="Scene view. Click to inject the selected strain, or press Enter to inject at the centre.">
+      <canvas id="view" width="960" height="540"></canvas>
+      <div class="ring-layer" id="ringLayer"></div>
+      <div class="hud-phase" id="phaseTag">PHASE: INTRO</div>
     </div>
-    <div class="popbar-wrap">
-      <div class="popbar" id="popbar"></div>
-      <div class="poplabels" id="poplabels"></div>
-      <button class="pill" id="rebalanceBtn" aria-label="Rebalance all cultures to 25% each">Rebalance</button>
-    </div>
-    <p class="intro"><b>Interface prototype.</b> The dish is a small CPU physarum sim fed by a fake 124&nbsp;BPM
-      track that cycles intro &rarr; build &rarr; drop &rarr; break. Select a strain below, then click inside the
-      dish to inject a colony of it &mdash; every other control changes the culture live.</p>
+    <p class="intro"><b>Interface prototype.</b> A small CPU physarum sim fed by a fake 124&nbsp;BPM
+      track that cycles intro &rarr; build &rarr; drop &rarr; break. Select a strain below, then click the
+      scene to inject a colony of it &mdash; every other control changes the network live.</p>
   </section>
 
-  <main class="panel">
+  <main class="panel" id="panel">
     <div class="topbar">
       <h1>Viz controls &middot; Physarum 2</h1>
       <label class="switch"><button class="toggle" id="archToggle" role="switch" aria-checked="false" aria-label="Show widget names"></button>Show how it's built</label>
     </div>
 
-    <section class="card" id="strainsCard">
+    <div class="monitor" aria-label="Monitor jacks — click one, then a row's port, to wire it in">
+      <span class="monitor-label">Monitor</span>
+      <div class="monitor-jacks" id="monitorJacks"></div>
+    </div>
+
+    <section class="card" id="sceneCard">
       <div class="card-head">
-        <div><h2>Strains</h2><p>Four cultures of <i>Physarum polycephalum</i>. Each has its own controls, and each control picks its own stimulus.</p></div>
-        <span class="wtag">widget: strainBoxes</span>
+        <h2>Scene &middot; Physarum 2</h2>
+        <button class="chip-reset" id="sceneResetBtn" title="Reset every scene setting">Reset</button>
       </div>
+
+      <div class="group-heading first">Strains<span class="wtag">widget: strainBoxes</span></div>
+      <p class="group-sub">Four cultures of <i>Physarum polycephalum</i>. Each control below has its own
+        Receives patch &mdash; click a label, jack or summary to rewire it.</p>
       <div class="specimens" id="specimens"></div>
-      <div class="rows" id="rows"></div>
-    </section>
-
-    <section class="card" id="relCard">
-      <div class="card-head">
-        <div><h2>Who follows whom</h2><p>Green follows a strain's trail, red avoids it, dashed grey ignores it. Click a node to focus that strain.</p></div>
-        <span class="wtag">widget: relationWeb</span>
+      <div class="pop-wrap">
+        <div class="popbar" id="popbar"></div>
+        <div class="poplabels" id="poplabels"></div>
+        <button class="pill" id="rebalanceBtn" aria-label="Rebalance all cultures to 25% each">Rebalance</button>
       </div>
-      <div class="relweb-wrap"><svg class="relweb" id="web" viewBox="0 0 300 240" role="img" aria-label="Strain relation web"></svg></div>
+      <div class="wr-rows" id="strainRows"></div>
+
+      <div class="group-heading" style="margin-top:18px;">Affinity<span class="wtag">widget: affinityWeb</span></div>
+      <p class="group-sub">How strongly the selected strain is drawn to, or repelled by, each trail.</p>
+      <div class="relweb-wrap"><svg class="relweb" id="web" viewBox="0 0 300 240" role="img" aria-label="Strain affinity overview"></svg></div>
       <div class="relrows" id="relRows"></div>
-      <div>
-        <div class="experiments" id="experiments"></div>
-      </div>
-      <div class="rows" id="hostilityRow"></div>
-    </section>
+      <div class="mini-label">Experiments</div>
+      <div class="experiments" id="experiments"></div>
 
-    <section class="card" id="pipetteCard">
-      <div class="card-head">
-        <div><h2>Pipette</h2><p>Auto-injects on a trigger; tap the dish to inject the selected strain by hand.</p></div>
-        <span class="wtag">widget: seedPad</span>
-      </div>
-      <div class="rows" id="pipRows"></div>
-      <div class="pip-controls">
-        <div class="pip-row">
-          <div class="seg" role="group" aria-label="Auto-inject from">
-            <button id="autoAll" aria-pressed="true">All strains</button>
-            <button id="autoSel" aria-pressed="false">Selected strain</button>
-          </div>
-        </div>
-        <div class="pip-row">
-          <button class="pill" id="spotMode" aria-pressed="false">Random spot</button>
-          <button class="pill" id="pinNext" aria-pressed="false">Pin next spot</button>
-        </div>
-        <div class="pop-note">
-          <div class="note" id="doseNote"></div>
-        </div>
-        <p class="aside">This screen only &mdash; settings don't reach the TV in the real app.</p>
-      </div>
-    </section>
+      <ul class="lablog-mini" id="labLog"><li class="empty">Waiting for the first event&hellip;</li></ul>
 
-    <section class="card" id="logCard">
-      <div class="card-head"><div><h2>Lab log</h2></div><span class="wtag">widget: labLog</span></div>
-      <ul class="lablog" id="labLog"><li class="empty">Waiting for the first event&hellip;</li></ul>
+      <div class="group-heading">Form</div>
+      <div class="wr-rows" id="formRows"></div>
+
+      <div class="group-heading">Motion</div>
+      <div class="wr-rows" id="motionRows"></div>
+
+      <div class="group-heading">Look</div>
+      <div class="wr-rows" id="lookRows"></div>
+      <button type="button" class="mini-label" id="lookAdvToggle" style="background:none;border:0;cursor:pointer;text-align:left;padding:0;"></button>
+      <div class="wr-rows" id="lookAdvBody" style="display:none;"></div>
+
+      <div class="group-heading">Post</div>
+      <div class="wr-rows" id="postRows"></div>
+
+      <p class="aside">This screen only &mdash; settings don't reach the TV in the real app.</p>
     </section>
 
     <section class="card arch" id="archCard">
       <div class="card-head"><div><h2>How this maps to the app</h2></div><span class="wtag">architecture</span></div>
-      <p>The scene declares <b>items</b> and <b>widgets</b> as data. It never builds UI itself, which keeps the TV and the private scenes free of panel code.</p>
+      <p>The scene declares <b>items</b> and a <b>panel</b> row list as data. It never builds UI itself, which
+        keeps the TV and the private scenes free of panel code.</p>
       <div class="code"><span class="c">// physarum2.ts</span>
 <span class="k">items</span>: [{
-  id: <span class="s">"strains"</span>, count: 4,
-  codes: [<span class="s">"PP-A1"</span>, <span class="s">"PP-B2"</span>, <span class="s">"PP-C3"</span>, <span class="s">"PP-D4"</span>],
-  nicknames: [<span class="s">"Highway"</span>, <span class="s">"Mesh"</span>, <span class="s">"Spotter"</span>, <span class="s">"Labyrinth"</span>],
+  id: <span class="s">"strains"</span>, count: 4, codes: [<span class="s">"PP-A1"</span>, <span class="s">"PP-B2"</span>, <span class="s">"PP-C3"</span>, <span class="s">"PP-D4"</span>],
   params: [
-    { key: <span class="s">"nutrient"</span>, label: <span class="s">"Nutrient"</span>,
-      drive: { perItem: [<span class="s">"level.low"</span>, <span class="s">"level.mid"</span>, <span class="s">"level.high"</span>, <span class="s">"level.all"</span>] } },
+    { key: <span class="s">"nutrient"</span>, label: <span class="s">"Nutrient"</span>, drive: { perItem: [<span class="s">"level.low"</span>, <span class="s">"level.mid"</span>, <span class="s">"level.high"</span>, <span class="s">"level.all"</span>] } },
     { key: <span class="s">"sensor"</span>, label: <span class="s">"Sensor range"</span> }, { key: <span class="s">"turn"</span>, label: <span class="s">"Turn angle"</span> },
     { key: <span class="s">"speed"</span>, label: <span class="s">"Speed"</span> }, { key: <span class="s">"excitability"</span>, label: <span class="s">"Excitability"</span>, drive: {…} },
     { key: <span class="s">"stain"</span>, label: <span class="s">"Stain"</span>, kind: <span class="s">"hue"</span> },
   ],
 }],
 <span class="k">panel</span>: [
-  { widget: <span class="s">"strainBoxes"</span>,  items: <span class="s">"strains"</span> },
-  { widget: <span class="s">"relationWeb"</span>,   items: <span class="s">"strains"</span>, key: <span class="s">"att"</span>, presets: {…} },
-  { widget: <span class="s">"seedPad"</span>,       keys: { share: <span class="s">"dose"</span>, spread: <span class="s">"spread"</span> } },
-  { widget: <span class="s">"labLog"</span> },
+  { group: <span class="s">"Strains"</span>, widget: <span class="s">"strainBoxes"</span>,  items: <span class="s">"strains"</span> },
+  { group: <span class="s">"Strains"</span>, widget: <span class="s">"affinityWeb"</span>, items: <span class="s">"strains"</span>, key: <span class="s">"att"</span>, presets: {…} },
+  { group: <span class="s">"Form"</span>, key: <span class="s">"networkScale"</span>, label: <span class="s">"Network scale"</span> },
+  { group: <span class="s">"Form"</span>, key: <span class="s">"trailDecay"</span>, label: <span class="s">"Trail decay"</span> },
+  { group: <span class="s">"Form"</span>, key: <span class="s">"hostility"</span>, label: <span class="s">"Hostility"</span> },
+  { group: <span class="s">"Motion"</span>, key: <span class="s">"crawlSpeed"</span>, label: <span class="s">"Crawl speed"</span> },
+  { group: <span class="s">"Motion"</span>, key: <span class="s">"dose"</span>, label: <span class="s">"Dose"</span> },
+  { group: <span class="s">"Motion"</span>, key: <span class="s">"spread"</span>, label: <span class="s">"Spread"</span> },
+  { group: <span class="s">"Motion"</span>, key: <span class="s">"autoFrom"</span>, label: <span class="s">"Auto-inject from"</span>, kind: <span class="s">"enum"</span> },
+  { group: <span class="s">"Look"</span>, key: <span class="s">"exposure"</span>, label: <span class="s">"Exposure"</span> },
+  { group: <span class="s">"Look"</span>, key: <span class="s">"paletteTint"</span>, label: <span class="s">"Palette tint"</span>, advanced: <span class="k">true</span> },
+  { group: <span class="s">"Post"</span>, key: <span class="s">"beatFlash"</span>, label: <span class="s">"Beat flash"</span> },
 ],</div>
-      <div class="flow"><span>items + widgets</span><em>compile to</em><span>nutrient0…nutrient3, att00…att33</span><em>stored, driven, saved in Looks like</em><span>any other setting</span></div>
+      <div class="flow"><span>items + panel</span><em>compile to</em><span>nutrient0…nutrient3, att00…att33, networkScale…</span><em>stored, driven, saved in Looks like</em><span>any other setting</span></div>
       <ul>
-        <li><b>Nothing downstream changes.</b> Every strain control becomes an ordinary keyed setting, so stimuli, Auto, saved Looks and share links work on day one.</li>
-        <li><b>Widgets are reusable.</b> They live in one registry in the panel code. relationWeb could edit Gates' object pairs, seedPad could place Petri drops or Powder emitters, and strainBoxes could hold Kaleidoscope layers.</li>
-        <li><b>The standard row is the building block.</b> Every row inside a widget is the same slider, readout and stimulus chip used everywhere else, so there is one way to wire music to anything.</li>
+        <li><b>One card, same rows.</b> renderSceneSettings walks the <code>panel</code> list in order: a group
+          heading whenever <code>group</code> changes, then either the named custom widget or an ordinary
+          createControlRow slider for everything else &mdash; the Strains group's own widgets are just two
+          more entries in that list, not a separate card.</li>
+        <li><b>Nothing downstream changes.</b> Every strain control and every global control becomes an
+          ordinary keyed setting, so Receives patches, Auto, saved Looks and share links work on day one.</li>
+        <li><b>Widgets are reusable.</b> They live in one registry in the panel code. affinityWeb could edit
+          Gates' object pairs, strainBoxes' seedPad half could place Petri drops or Powder emitters.</li>
       </ul>
     </section>
   </main>
 </div>
+<svg id="cableLayer"></svg>
 
 <script>
 /*ENGINE*/
@@ -375,19 +393,23 @@ const SRC = Object.fromEntries(SOURCES.filter((s) => s.id !== "line").map((s) =>
 const ADD_GROUPS = [["Hits", ["hit.beat", "hit.low", "hit.mid", "hit.high", "hit.drop"]], ["Levels", ["level.all", "level.low", "level.mid", "level.high", "flux", "section", "centroid"]], ["Tempo", ["grid.1", "grid.4"]]];
 
 // ---------- the model: every control is a flat keyed setting ----------
+// Nicknames are gone per feedback ("change name cos its stupid" -> Affinity,
+// and drop the nicknames entirely) -- every strain is labelled by its
+// isolate code only, everywhere (boxes, affinity rows, web labels, log,
+// population bar).
 const STRAINS = [
-  { code: "PP-A1", nickname: "Highway", hue: 2, sa: 22 },
-  { code: "PP-B2", nickname: "Mesh", hue: 40, sa: 60 },
-  { code: "PP-C3", nickname: "Spotter", hue: 172, sa: 95 },
-  { code: "PP-D4", nickname: "Labyrinth", hue: 262, sa: 35 },
+  { code: "PP-A1", hue: 2, sa: 22 },
+  { code: "PP-B2", hue: 40, sa: 60 },
+  { code: "PP-C3", hue: 172, sa: 95 },
+  { code: "PP-D4", hue: 262, sa: 35 },
 ];
 const PARAMS = [
-  { key: "nutrient", label: "Nutrient", desc: "How much trail it lays down. Its stimulus sets what makes it lay more.", def: [0.6, 0.6, 0.6, 0.55], drive: [["level.low"], ["level.mid"], ["level.high"], ["level.all"]], mode: "amount" },
+  { key: "nutrient", label: "Nutrient", desc: "How much trail it lays down. Its Receives patch sets what makes it lay more.", def: [0.6, 0.6, 0.6, 0.55], drive: [["level.low"], ["level.mid"], ["level.high"], ["level.all"]], mode: "amount" },
   { key: "sensor", label: "Sensor range", desc: "How far ahead it smells. Longer range grows bigger, smoother networks.", def: [0.5, 0.25, 0.75, 0.12] },
   { key: "turn", label: "Turn angle", desc: "How sharply it turns toward a scent.", def: [0.32, 0.28, 0.85, 0.16] },
-  { key: "speed", label: "Speed", desc: "How far it moves each step.", def: [0.55, 0.38, 0.8, 0.12] },
-  { key: "excitability", label: "Excitability", desc: "How hard its stimulus kicks its speed.", def: [0.35, 0.25, 0.3, 0.4], drive: [["hit.low"], ["grid.1"], ["hit.high"], ["hit.beat"]], mode: "amount" },
-  { key: "stain", label: "Stain", desc: "Its colour. A stimulus here shifts the colour with the music.", def: STRAINS.map((s) => s.hue / 360), kind: "hue" },
+  { key: "speed", label: "Speed", desc: "How far it moves each step, on top of the global Crawl speed.", def: [0.55, 0.38, 0.8, 0.12] },
+  { key: "excitability", label: "Excitability", desc: "How hard its Receives patch kicks its speed.", def: [0.35, 0.25, 0.3, 0.4], drive: [["hit.low"], ["grid.1"], ["hit.high"], ["hit.beat"]], mode: "amount" },
+  { key: "stain", label: "Stain", desc: "Its colour. Wiring a source here shifts the colour with the music.", def: STRAINS.map((s) => s.hue / 360), kind: "hue" },
 ];
 const ATT_DEFAULT = [[1.0, -0.85, -1.1, -0.7], [-1.2, 1.1, -0.6, -0.95], [-0.75, -1.05, 0.9, -1.25], [-1.0, -0.65, -1.15, 1.05]];
 const EXPERIMENTS = [
@@ -399,15 +421,38 @@ const EXPERIMENTS = [
 ];
 const ANCHORS = [["Flees", -1.2], ["Avoids", -0.6], ["Ignores", 0], ["Follows", 0.6], ["Loves", 1.1]];
 
-const settings = {}; // key -> { key, label, desc, value, def, patch: {mix, sources:[{id,w}]}, mode, kind, hist }
+const settings = {}; // key -> { key, label, desc, value, def, patch: {mix, sources:[{id,w}]}, defaultPatch, mode, kind, min, max, fmt, hist }
 function addSetting(key, o) {
-  settings[key] = { key, value: o.def, hist: new Float32Array(240), histHead: 0, eff: o.def, drive: 0, patch: { mix: "add", sources: (o.drive || []).map((id) => ({ id, w: 1 })) }, ...o };
+  const patch = { mix: "add", sources: (o.drive || []).map((id) => ({ id, w: 1 })) };
+  const defaultPatch = { mix: patch.mix, sources: patch.sources.map((x) => ({ ...x })) };
+  // `drive` goes last: o.drive is the list of default source ids (used for the
+  // patch above), and letting it overwrite the numeric live drive made every
+  // strain's step NaN during the boot warm-up — those agents then sat in the
+  // corner cell forever.
+  settings[key] = { key, value: o.def, def: o.def, hist: new Float32Array(240), histHead: 0, eff: o.def, patch, defaultPatch, ...o, drive: 0 };
 }
 PARAMS.forEach((p) => STRAINS.forEach((_, k) => addSetting(p.key + k, { label: p.label, desc: p.desc, def: p.def[k], drive: p.drive ? p.drive[k] : [], mode: p.mode || "push", kind: p.kind })));
 for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) addSetting(`att${i}${j}`, { label: "", def: ATT_DEFAULT[i][j], min: -1.5, max: 1.5 });
-addSetting("hostility", { label: "Hostility", desc: "Scales every avoid/follow between different strains. Driven by song intensity here, so the drop pushes the cultures apart.", def: 0.5, drive: ["section"], mode: "push" });
-addSetting("dose", { label: "Dose", desc: "Share of agents the auto-trigger moves (or, by hand, converts) per injection. The stimulus is the trigger.", def: 0.06, drive: ["grid.4"], mode: "trigger", max: 0.4 });
+
+// Form
+addSetting("networkScale", { label: "Network scale", desc: "Coarseness of the sensed mesh, on top of each strain's own Sensor range.", def: 1, min: 0.4, max: 2.2, step: 0.02, fmt: (v) => v.toFixed(2) + "×" });
+addSetting("trailDecay", { label: "Trail decay", desc: "How long a trail lingers before fading. Higher holds the network together longer.", def: 0.9, min: 0.8, max: 0.97, step: 0.005, fmt: (v) => v.toFixed(3) });
+addSetting("hostility", { label: "Hostility", desc: "Scales every avoid/follow between different strains. Wired to song intensity by default, so the drop pushes the cultures apart.", def: 0.5, drive: ["section"], mode: "push" });
+// Motion
+addSetting("crawlSpeed", { label: "Crawl speed", desc: "Global pace multiplier over every strain's own Speed.", def: 1, min: 0.4, max: 2.0, step: 0.02, fmt: (v) => v.toFixed(2) + "×" });
+addSetting("dose", { label: "Dose", desc: "Share of agents the auto-trigger moves (or, by hand, converts) per injection. Its Receives patch is the trigger.", def: 0.06, drive: ["grid.4"], mode: "trigger", max: 0.4 });
 addSetting("spread", { label: "Spread", desc: "How wide a colony starts.", def: 0.35 });
+// Look
+addSetting("exposure", { label: "Exposure", desc: "Overall brightness of the trail render.", def: 0.75, min: 0.4, max: 1.3, step: 0.01, fmt: (v) => v.toFixed(2) });
+addSetting("paletteTint", { label: "Palette tint", desc: "Shifts every strain's Stain colour together, without changing any strain's own hue.", def: 0, kind: "hue", advanced: true });
+// Post
+addSetting("beatFlash", { label: "Beat flash", desc: "How much a beat brightens the whole render.", def: 0.4, min: 0, max: 1.2, step: 0.02, fmt: (v) => v.toFixed(2) });
+
+const FORM_KEYS = ["networkScale", "trailDecay", "hostility"];
+const MOTION_KEYS = ["crawlSpeed", "dose", "spread"];
+const LOOK_KEYS = ["exposure"];
+const LOOK_ADVANCED_KEYS = ["paletteTint"];
+const POST_KEYS = ["beatFlash"];
 
 // ---------- stimuli: one read per source per frame, then each patch combines ----------
 const readers = Object.fromEntries(Object.values(SRC).map((s) => [s.id, makeReader(s, { height: "standout" })]));
@@ -422,16 +467,46 @@ function evalSetting(s) {
   const d = driveOf(s);
   s.drive = d;
   const hasDrive = s.patch.sources.length > 0;
+  const lo = s.min ?? 0, hi = s.max ?? 1;
   if (s.mode === "amount") s.eff = hasDrive ? s.value * (0.25 + 1.5 * d) : s.value;
   else if (s.kind === "hue") s.eff = (s.value + (hasDrive ? d * 0.18 : 0)) % 1;
   else if (s.mode === "trigger") s.eff = s.value;
-  else s.eff = hasDrive ? clamp01(s.value + (1 - s.value) * d * 0.7) : s.value;
+  // Generalised "push toward the top of this row's own range" -- not
+  // hardcoded to 0..1, so a ranged global (Network scale, Trail decay,
+  // Crawl speed, Exposure, Beat flash) stays inside its own min/max once
+  // wired, instead of the old 0..1-only formula clamping it wrong.
+  else s.eff = hasDrive ? Math.min(hi, Math.max(lo, s.value + (hi - s.value) * d * 0.7)) : s.value;
   s.hist[s.histHead] = hasDrive ? d : 0;
   s.histHead = (s.histHead + 1) % s.hist.length;
 }
+function formatSetting(s) {
+  if (s.fmt) return s.fmt(s.value);
+  if (s.kind === "hue") return Math.round(s.value * 360) + "°";
+  if (s.mode === "trigger") return Math.round(s.value * 100) + "%";
+  return s.value.toFixed(2);
+}
+function driveSummaryText(s) {
+  const src = s.patch.sources;
+  if (!src.length) return "Scene default — nothing wired";
+  const names = src.map((x) => SRC[x.id].label);
+  return names.join(s.patch.mix === "add" ? " + " : s.patch.mix === "max" ? " or " : " when ");
+}
+function portStyle(s) {
+  const src = s.patch.sources;
+  if (!src.length) return "border: 1.5px dashed rgba(255,255,255,.4); background: transparent;";
+  const cols = src.map((x) => SRC[x.id].colour);
+  const bg = cols.length <= 1 ? cols[0] : `conic-gradient(${cols.map((c, i) => `${c} ${(i / cols.length) * 100}% ${((i + 1) / cols.length) * 100}%`).join(", ")})`;
+  return `border: 1.5px solid rgba(8,11,10,.75); background: ${bg}; box-shadow: 0 0 6px ${cols[0]}88;`;
+}
+function sameSourcesAndMix(a, b) {
+  if (a.mix !== b.mix || a.sources.length !== b.sources.length) return false;
+  return a.sources.every((x, i) => x.id === b.sources[i].id && Math.abs(x.w - b.sources[i].w) < 1e-6);
+}
 
-// ---------- the culture dish: main physarum sim ----------
-const W = 192, H = 192, N = 24000, CELLS = W * H;
+// ---------- the scene: main physarum sim ----------
+// 256x144 (16:9, like a real full-screen scene view) instead of v2's 192x192
+// dish -- same total cell count (36864), so performance is unchanged.
+const W = 256, H = 144, N = 24000, CELLS = W * H;
 const trail = [0, 1, 2, 3].map(() => new Float32Array(CELLS));
 const tmp = new Float32Array(CELLS);
 const ax = new Float32Array(N), ay = new Float32Array(N), ah = new Float32Array(N), ak = new Uint8Array(N);
@@ -443,13 +518,13 @@ const TERR_THRESHOLD = 0.02;
 
 // The one place a strain's settings become motion numbers -- shared with
 // every specimen box's preview via strainMotion()/applySurge() (strainPreview.js).
-// A pure culture has no rival trail to push against, so on its own it keeps
-// coarsening; strainPreview.js's RESPAWN_PER_STEP keeps each box a live
-// network instead.
+// Network scale and Crawl speed are GLOBAL multipliers layered on top of that
+// shared per-strain motion, so previews react to them too.
 function strainCfg(k) {
   const m = strainMotion({ sa: STRAINS[k].sa, nutrient: settings["nutrient" + k].eff, sensor: settings["sensor" + k].eff, turn: settings["turn" + k].eff, speed: settings["speed" + k].eff });
+  m.reach *= settings.networkScale.eff;
   const exc = settings["excitability" + k];
-  m.step = applySurge(m.step, exc.value, exc.drive);
+  m.step = applySurge(m.step, exc.value, exc.drive) * settings.crawlSpeed.eff;
   return m;
 }
 
@@ -459,11 +534,6 @@ function simStep() {
   const cfg = [0, 1, 2, 3].map((k) => strainCfg(k));
   const T0 = trail[0], T1 = trail[1], T2 = trail[2], T3 = trail[3];
   const sense = (x, y, a) => {
-    // Math.floor, not |0: |0 truncates toward zero, so a probe at e.g.
-    // y=-0.3 would floor to row 0 instead of wrapping to row H-1, biasing
-    // the sensed trail near the seam. Matters most for the small, single-
-    // strain preview grid; harmless-looking on the big multi-strain dish
-    // but wrong regardless.
     let xi = Math.floor(x), yi = Math.floor(y);
     xi = ((xi % W) + W) % W; yi = ((yi % H) + H) % H;
     const p = yi * W + xi;
@@ -484,7 +554,8 @@ function simStep() {
     ax[i] = nx; ay[i] = ny; ah[i] = nh;
     trail[k][(ny | 0) * W + (nx | 0)] += c.deposit;
   }
-  // 3x3 box blur (separable, wrapped) + decay
+  // 3x3 box blur (separable, wrapped) + decay (Trail decay, a global setting now).
+  const decay = settings.trailDecay.eff / 9;
   for (let k = 0; k < 4; k++) {
     const T = trail[k];
     let m = 0;
@@ -494,7 +565,7 @@ function simStep() {
     }
     for (let y = 0; y < H; y++) {
       const up = ((y + H - 1) % H) * W, r = y * W, dn = ((y + 1) % H) * W;
-      for (let x = 0; x < W; x++) { const v = (tmp[up + x] + tmp[r + x] + tmp[dn + x]) * (0.9 / 9); T[r + x] = v; m += v; }
+      for (let x = 0; x < W; x++) { const v = (tmp[up + x] + tmp[r + x] + tmp[dn + x]) * decay; T[r + x] = v; m += v; }
     }
     mass[k] = m;
   }
@@ -517,12 +588,10 @@ function popCountsNow() {
 
 // ---------- pipette: hand injection (converts) + auto-trigger (moves) ----------
 const pinnedSpot = { x: 0.5, y: 0.5, set: false };
-let pinArmed = false;
 let autoFrom = "all"; // "all" | "selected"
-let autoSpotMode = "random"; // "random" | "pinned"
 const autoState = { prevDrive: 0, cooldown: 0 };
 
-function seedRadius() { return (0.02 + settings.spread.value * 0.18) * H; }
+function seedRadius() { return (0.02 + settings.spread.eff * 0.18) * H; }
 
 function showRing(cx, cy) {
   const ring = document.createElement("div");
@@ -535,7 +604,7 @@ function showRing(cx, cy) {
 
 function injectAt(cx, cy, strainK) {
   const rad = seedRadius();
-  const want = Math.round(settings.dose.value * N);
+  const want = Math.round(settings.dose.eff * N);
   let moved = 0, guard = 0;
   while (moved < want && guard++ < want * 6 + 50) {
     const i = (Math.random() * N) | 0;
@@ -547,7 +616,7 @@ function injectAt(cx, cy, strainK) {
     moved++;
   }
   showRing(cx, cy);
-  logEvent(`Injected ${STRAINS[strainK].code} at (${Math.round(cx * 99)}, ${Math.round(cy * 99)}) &middot; ${Math.round(settings.dose.value * 100)}%`);
+  logEvent(`Injected ${STRAINS[strainK].code} at (${Math.round(cx * 99)}, ${Math.round(cy * 99)}) &middot; ${Math.round(settings.dose.eff * 100)}%`);
 }
 
 function maybeAutoInject(dt) {
@@ -558,10 +627,10 @@ function maybeAutoInject(dt) {
   autoState.prevDrive = d;
   if (!fire) return;
   autoState.cooldown = 0.15;
-  const cx = autoSpotMode === "pinned" && pinnedSpot.set ? pinnedSpot.x : Math.random();
-  const cy = autoSpotMode === "pinned" && pinnedSpot.set ? pinnedSpot.y : Math.random();
+  const cx = pinnedSpot.set ? pinnedSpot.x : Math.random();
+  const cy = pinnedSpot.set ? pinnedSpot.y : Math.random();
   const rad = seedRadius();
-  const want = Math.round(s.value * N);
+  const want = Math.round(s.eff * N);
   let moved = 0, guard = 0;
   while (moved < want && guard++ < want * 6 + 50) {
     const i = (Math.random() * N) | 0;
@@ -573,16 +642,6 @@ function maybeAutoInject(dt) {
     moved++;
   }
   showRing(cx, cy);
-}
-
-function updateDoseNote() {
-  const share = settings.dose.value;
-  const n = Math.round(share * N).toLocaleString();
-  const note = $("doseNote");
-  let text = `Moves ${n} agents (${Math.round(share * 100)}%) per trigger — the rest of the dish keeps ${Math.round((1 - share) * 100)}%.`;
-  if (share > 0.15) text += " The rest of the dish goes dark.";
-  note.textContent = text;
-  note.classList.toggle("warn", share > 0.15);
 }
 
 // ---------- render ----------
@@ -597,9 +656,9 @@ function hsl(h, s, l) {
 const colours = [[1, 0, 0], [1, 1, 0], [0, 1, 1], [1, 0, 1]];
 function speciesCss(k) { const c = colours[k]; return `rgb(${(c[0] * 255) | 0},${(c[1] * 255) | 0},${(c[2] * 255) | 0})`; }
 const GAMMA = new Float32Array(256); for (let i = 0; i < 256; i++) GAMMA[i] = Math.pow(i / 255, 1 / 2.2);
-function render(flashAmt) {
-  for (let k = 0; k < 4; k++) colours[k] = hsl(settings["stain" + k].eff, 0.95, 0.58);
-  const d = img.data, exp = 0.75 * (1 + flashAmt * 0.6);
+function render(beatPulse) {
+  for (let k = 0; k < 4; k++) colours[k] = hsl((settings["stain" + k].eff + settings.paletteTint.eff) % 1, 0.95, 0.58);
+  const d = img.data, exp = settings.exposure.eff * (1 + beatPulse * settings.beatFlash.eff);
   for (let p = 0, q = 0; p < CELLS; p++, q += 4) {
     let r = 0, g = 0, b = 0;
     for (let k = 0; k < 4; k++) {
@@ -618,7 +677,8 @@ function render(flashAmt) {
 
 // ---------- UI state ----------
 let selected = 0;
-const rowHandles = []; // { s, el, update() }
+const rowHandles = []; // { s, update(), tick() }
+const wireRows = {}; // key -> { port, update() } -- for the cable-layer bonus
 
 function sliderEl(s, opts = {}) {
   const min = s.min ?? 0, max = s.max ?? 1;
@@ -650,111 +710,272 @@ function sliderEl(s, opts = {}) {
   return el;
 }
 
-function chipText(s) {
-  const src = s.patch.sources;
-  if (!src.length) return null;
-  const joiner = s.patch.mix === "add" ? " + " : s.patch.mix === "max" ? " or " : " when ";
-  return src.map((x) => SRC[x.id].label).join(joiner);
+// ---------- monitor strip + click-to-wire (patch-bay bonus) ----------
+const MONITOR_IDS = ["level.low", "level.mid", "level.high", "hit.beat", "grid.4"];
+const monitorJackEls = {};
+let armedSource = null;
+function buildMonitor() {
+  const host = $("monitorJacks"); host.innerHTML = "";
+  MONITOR_IDS.forEach((id) => {
+    const src = SRC[id];
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "mon-jack";
+    b.style.setProperty("--c", src.colour);
+    b.title = `${src.label} — click, then a row's port, to wire it in`;
+    b.innerHTML = `<span class="dot"></span><span class="lbl"></span>`;
+    b.querySelector(".lbl").textContent = src.short || src.label;
+    b.addEventListener("click", () => setArmed(id));
+    host.appendChild(b);
+    monitorJackEls[id] = b;
+  });
+}
+function setArmed(id) {
+  armedSource = armedSource === id ? null : id;
+  Object.entries(monitorJackEls).forEach(([sid, el]) => el.classList.toggle("armed", sid === armedSource));
+}
+function addSourceToPatch(s, id) {
+  if (!s.patch.sources.some((x) => x.id === id)) s.patch.sources.push({ id, w: 1 });
+  wireRows[s.key]?.update();
+  refreshAll();
+  recomputeCables();
+}
+const NS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs) { const el = document.createElementNS(NS, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); return el; }
+function recomputeCables() {
+  const svg = $("cableLayer");
+  svg.setAttribute("width", String(document.documentElement.scrollWidth));
+  svg.setAttribute("height", String(document.documentElement.scrollHeight));
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  let lane = 0;
+  Object.entries(wireRows).forEach(([key, w]) => {
+    if (!w.port.isConnected) return;
+    const s = settings[key];
+    if (!s) return;
+    s.patch.sources.forEach((src) => {
+      const jackEl = monitorJackEls[src.id];
+      if (!jackEl) return;
+      drawCable(svg, jackEl, w.port, SRC[src.id].colour, lane++);
+    });
+  });
+}
+// Cables run down a gutter left of the panel, like the app's own patch bay
+// (CABLE_GUTTER_PX in controlsTheme.ts), so they never cross the controls.
+// Each cable gets its own lane in the gutter so parallel runs stay readable.
+function drawCable(svg, a, b, colour, lane) {
+  // Document-relative (rect + scroll offset), matching #cableLayer's own
+  // absolute (not fixed) positioning -- see its CSS comment.
+  const sx = window.scrollX, sy = window.scrollY;
+  const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+  const x1 = ra.left + ra.width / 2 + sx, y1 = ra.top + ra.height / 2 + sy;
+  const x2 = rb.left + rb.width / 2 + sx, y2 = rb.top + rb.height / 2 + sy;
+  const panelLeft = $("panel") ? $("panel").getBoundingClientRect().left + sx : x2 - 10;
+  const gx = Math.max(4, panelLeft - 6 - (lane % 5) * 3);
+  const topY = y1 - 14; // leave the monitor jack upward, clear of the strip
+  const f = (v) => v.toFixed(1);
+  const d = `M${f(x1)},${f(y1)} C${f(x1)},${f(topY)} ${f(gx)},${f(topY)} ${f(gx)},${f(y1 + 10)} L${f(gx)},${f(y2 - 14)} C${f(gx)},${f(y2)} ${f(x2 - 10)},${f(y2)} ${f(x2)},${f(y2)}`;
+  svg.appendChild(svgEl("path", { d, stroke: colour, "stroke-width": 4, fill: "none", opacity: 0.16 }));
+  svg.appendChild(svgEl("path", { d, stroke: colour, "stroke-width": 1.4, fill: "none", opacity: 0.85 }));
 }
 
-function buildRow(s, host) {
+// ---------- the wirable row: mirrors deviceMenu.ts createControlRow + buildDriveRow ----------
+function buildWireRow(s, host) {
   const row = document.createElement("div");
-  row.className = "row";
-  row.innerHTML = `<div class="row-top"><span class="lbl"></span><span class="val"></span></div><div class="row-desc"></div><div class="row-meta"><button class="chip"><i></i><span class="txt"></span></button><canvas width="240" height="32" aria-hidden="true"></canvas></div>`;
-  row.querySelector(".lbl").textContent = s.label;
-  row.querySelector(".row-desc").textContent = s.desc || "";
+  row.className = "wr";
+  row.innerHTML = `
+    <button class="wr-port" type="button"></button>
+    <div class="wr-head">
+      <div class="wr-left">
+        <div class="wr-label"></div>
+        <div class="wr-summary"></div>
+      </div>
+      <div class="wr-right">
+        <span class="wr-readout"></span>
+        <button class="wr-chip wr-a" type="button">A</button>
+        <button class="wr-chip wr-t" type="button">T</button>
+        <button class="wr-reset" type="button">&#8630;</button>
+      </div>
+    </div>
+    <div class="wr-slot"></div>
+    <div class="wr-desc"></div>`;
+  row.querySelector(".wr-label").textContent = s.label;
+  row.querySelector(".wr-desc").textContent = s.desc || "";
+  const port = row.querySelector(".wr-port");
+  port.title = `${s.label} — click to open its Receives patch`;
+  port.setAttribute("aria-label", `${s.label} patch bay port`);
+  const left = row.querySelector(".wr-left");
+  const summary = row.querySelector(".wr-summary");
+  const readout = row.querySelector(".wr-readout");
+  const aBtn = row.querySelector(".wr-a");
+  const tBtn = row.querySelector(".wr-t");
+  const resetBtn = row.querySelector(".wr-reset");
+  aBtn.title = `Auto-tune ${s.label}`;
+  tBtn.title = `Turn ${s.label} off`;
+  resetBtn.title = `Reset ${s.label}`;
+
   const sl = sliderEl(s);
-  row.insertBefore(sl, row.querySelector(".row-meta"));
-  const chip = row.querySelector(".chip");
-  const spark = row.querySelector("canvas");
+  row.querySelector(".wr-slot").appendChild(sl);
+
   let patchEl = null;
-  chip.setAttribute("aria-expanded", "false");
-  chip.addEventListener("click", () => {
-    if (patchEl) { patchEl.remove(); patchEl = null; chip.setAttribute("aria-expanded", "false"); return; }
-    patchEl = buildPatch(s, () => { update(); });
-    row.appendChild(patchEl); chip.setAttribute("aria-expanded", "true");
+  function togglePatch() {
+    if (patchEl) { patchEl.remove(); patchEl = null; row.classList.remove("wr-pinned"); return; }
+    patchEl = buildPatch(s, () => { update(); recomputeCables(); });
+    row.appendChild(patchEl);
+    row.classList.add("wr-pinned");
+  }
+  left.addEventListener("click", togglePatch);
+  port.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (armedSource) { addSourceToPatch(s, armedSource); setArmed(null); return; }
+    togglePatch();
   });
-  host.appendChild(row);
+
+  // T: mute to floor, restore on a second press -- forgotten by any other write.
+  let offStored = null;
+  function clearOff() { if (offStored !== null) { offStored = null; tBtn.classList.remove("lit"); } }
+  tBtn.addEventListener("click", () => {
+    if (offStored === null) { offStored = s.value; s.value = s.min ?? 0; tBtn.classList.add("lit"); }
+    else { s.value = offStored; offStored = null; tBtn.classList.remove("lit"); }
+    update();
+  });
+
+  // A: this prototype has no real music-profile auto-tune to hand off to, so
+  // this is a visual stand-in only -- it freezes the row (dim + a hint line)
+  // rather than genuinely retuning it live. See docs/scenes/physarum2/artifacts
+  // for the honest caveat.
+  let autoOn = false;
+  aBtn.addEventListener("click", () => { autoOn = !autoOn; aBtn.classList.toggle("lit", autoOn); update(); });
+
+  resetBtn.addEventListener("click", () => { s.value = s.def; clearOff(); update(); });
+
   function update() {
-    const txt = chipText(s);
-    chip.classList.toggle("empty", !txt);
-    chip.querySelector(".txt").textContent = txt ? `stimulus: ${txt}` : "+ add stimulus";
-    const first = s.patch.sources[0];
-    chip.querySelector("i").style.display = first ? "" : "none";
-    if (first) chip.style.setProperty("--c", SRC[first.id].colour);
-    sl.classList.toggle("driven", !!txt && s.mode !== "amount" && s.mode !== "trigger");
+    port.style.cssText = portStyle(s);
+    summary.textContent = driveSummaryText(s);
+    sl.classList.toggle("driven", s.patch.sources.length > 0);
+    row.querySelector(".wr-desc").style.opacity = autoOn ? "0.5" : "1";
     patchEl?.refresh?.();
   }
+  wireRows[s.key] = { port, update };
+
   const h = {
     s, update,
     tick() {
-      const disp = s.kind === "hue" ? Math.round(s.value * 360) + "°" : s.mode === "trigger" ? Math.round(s.value * 100) + "%" : s.value.toFixed(2);
-      row.querySelector(".val").textContent = disp;
+      readout.textContent = formatSetting(s);
+      resetBtn.style.visibility = Math.abs(s.value - s.def) > 1e-6 ? "visible" : "hidden";
       sl.update(s.value, s.eff);
-      drawSpark(spark, s, firstColour(s));
       patchEl?.tick?.();
     },
   };
-  const firstColour = (s) => (s.patch.sources[0] ? SRC[s.patch.sources[0].id].colour : "#888");
-  update(); rowHandles.push(h);
+  update();
+  host.appendChild(row);
+  rowHandles.push(h);
   return h;
 }
 
-function drawSpark(cv, s, colour) {
-  const c = cv.getContext("2d"), w = cv.width, h = cv.height;
-  c.clearRect(0, 0, w, h);
-  if (!s.patch.sources.length) return;
-  c.strokeStyle = colour; c.lineWidth = 1.5; c.globalAlpha = 0.9; c.beginPath();
-  const n = 120;
-  for (let i = 0; i < n; i++) {
-    const v = s.hist[(s.histHead - n + i + s.hist.length) % s.hist.length];
-    const x = (i / (n - 1)) * w, y = h - 2 - v * (h - 4);
-    i ? c.lineTo(x, y) : c.moveTo(x, y);
+// An enum row (mirrors deviceMenu.ts createPickerRow): no jack -- like the
+// real app, a picker is never drive-capable, only a numeric row is.
+function buildEnumRow(label, desc, options, get, set, defIdx) {
+  const row = document.createElement("div");
+  row.className = "wr wr-enum";
+  row.innerHTML = `
+    <div class="wr-head">
+      <div class="wr-left" style="cursor:default;">
+        <div class="wr-label"></div>
+      </div>
+      <div class="wr-right">
+        <span class="wr-readout"></span>
+        <button class="wr-reset" type="button">&#8630;</button>
+      </div>
+    </div>
+    <div class="wr-enum-strip" role="radiogroup"></div>
+    <div class="wr-desc"></div>`;
+  row.querySelector(".wr-label").textContent = label;
+  row.querySelector(".wr-desc").textContent = desc || "";
+  const strip = row.querySelector(".wr-enum-strip");
+  const readout = row.querySelector(".wr-readout");
+  const resetBtn = row.querySelector(".wr-reset");
+  resetBtn.title = `Reset ${label}`;
+  const btns = options.map((name, i) => {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = name;
+    b.setAttribute("role", "radio");
+    b.addEventListener("click", () => { set(i); apply(); });
+    strip.appendChild(b);
+    return b;
+  });
+  function apply() {
+    const cur = get();
+    btns.forEach((b, i) => { b.classList.toggle("on", i === cur); b.setAttribute("aria-pressed", String(i === cur)); });
+    readout.textContent = options[cur];
+    resetBtn.style.visibility = cur !== defIdx ? "visible" : "hidden";
   }
-  c.stroke(); c.globalAlpha = 1;
+  resetBtn.addEventListener("click", () => { set(defIdx); apply(); });
+  apply();
+  return { el: row, refresh: apply };
 }
 
 function buildPatch(s, onChange) {
   const el = document.createElement("div");
   el.className = "patch";
+  const change = () => { onChange(); };
   const render = () => {
     el.innerHTML = "";
-    const h3 = document.createElement("h3"); h3.textContent = "Stimulus mix"; el.appendChild(h3);
+    const head = document.createElement("div"); head.className = "patch-head";
+    const eyebrow = document.createElement("span"); eyebrow.className = "patch-eyebrow"; eyebrow.textContent = "Receives";
+    head.appendChild(eyebrow);
     const seg = document.createElement("div"); seg.className = "seg"; seg.setAttribute("role", "group");
     [["add", "Add"], ["max", "Strongest"], ["gate", "Only when"]].forEach(([m, lab]) => {
-      const b = document.createElement("button"); b.textContent = lab; b.setAttribute("aria-pressed", String(s.patch.mix === m));
-      b.onclick = () => { s.patch.mix = m; render(); onChange(); }; seg.appendChild(b);
+      const b = document.createElement("button"); b.type = "button"; b.textContent = lab; b.setAttribute("aria-pressed", String(s.patch.mix === m));
+      b.onclick = () => { s.patch.mix = m; render(); change(); };
+      seg.appendChild(b);
     });
-    el.appendChild(seg);
+    head.appendChild(seg);
+    el.appendChild(head);
+
+    if (!s.patch.sources.length) {
+      const empty = document.createElement("div"); empty.className = "patch-empty";
+      empty.textContent = "Not wired — this control uses its own value. Add a source below, or click a monitor jack then this row's port.";
+      el.appendChild(empty);
+    }
     s.patch.sources.forEach((x, idx) => {
       const src = SRC[x.id];
       const line = document.createElement("div"); line.className = "src";
       line.style.setProperty("--c", src.colour);
-      line.innerHTML = `<span class="nm"><i></i><span></span></span><span></span><span class="w"></span><button class="x" aria-label="Remove ${src.label}">×</button>`;
+      line.innerHTML = `<span class="nm"><i></i><span></span></span><span></span><span class="w"></span><button class="x" type="button" aria-label="Remove ${src.label}">&times;</button>`;
       line.querySelector(".nm span").textContent = (s.patch.mix === "gate" && idx === 1 ? "only when " : "") + src.label;
       const wl = line.querySelector(".w");
       const ws = sliderEl({ min: 0, max: 2, value: x.w, label: "weight" }, { acc: src.colour, label: `${src.label} weight`, get: () => x.w, onValue: (v) => { x.w = v; } });
       line.appendChild(ws);
-      line.querySelector(".x").onclick = () => { s.patch.sources.splice(idx, 1); render(); onChange(); };
+      line.querySelector(".x").onclick = () => { s.patch.sources.splice(idx, 1); render(); change(); };
       line.tickW = () => { wl.textContent = x.w.toFixed(2) + "×"; ws.update(x.w); };
       line.tickW();
       el.appendChild(line);
     });
+
     const adds = document.createElement("div"); adds.className = "adds";
     ADD_GROUPS.forEach(([g, ids]) => {
       const gl = document.createElement("span"); gl.className = "grp"; gl.textContent = "+ " + g; adds.appendChild(gl);
       ids.forEach((id) => {
-        const b = document.createElement("button"); b.style.setProperty("--c", SRC[id].colour);
+        const b = document.createElement("button"); b.type = "button"; b.style.setProperty("--c", SRC[id].colour);
         b.innerHTML = `<i></i>${SRC[id].label}`; b.disabled = s.patch.sources.some((x) => x.id === id);
-        b.onclick = () => { s.patch.sources.push({ id, w: 1 }); render(); onChange(); };
+        b.onclick = () => { s.patch.sources.push({ id, w: 1 }); render(); change(); };
         adds.appendChild(b);
       });
     });
     el.appendChild(adds);
+
     const out = document.createElement("div"); out.className = "out";
     out.innerHTML = `<div class="cap"><span>What it receives &middot; last 4 s</span><b>0.00</b></div><canvas width="480" height="80"></canvas>`;
     el.appendChild(out);
     el._out = out;
+
+    const resetBtn = document.createElement("button"); resetBtn.type = "button"; resetBtn.className = "patch-reset";
+    resetBtn.textContent = "Reset to scene default";
+    resetBtn.hidden = sameSourcesAndMix(s.patch, s.defaultPatch);
+    resetBtn.onclick = () => {
+      s.patch.mix = s.defaultPatch.mix;
+      s.patch.sources = s.defaultPatch.sources.map((x) => ({ ...x }));
+      render(); change();
+    };
+    el.appendChild(resetBtn);
   };
   render();
   el.refresh = () => {};
@@ -788,38 +1009,20 @@ function buildSpecimens() {
       <div class="sp-head">
         <i class="led"></i>
         <span class="sp-code"></span>
-        <span class="sp-nick" contenteditable="false" tabindex="0" role="textbox" aria-label="Nickname, click to rename"></span>
-        <button class="sp-eye" aria-label="Hide from dish">&#9673;</button>
+        <button class="sp-eye" aria-label="Hide from scene">&#9673;</button>
       </div>
       <div class="sp-body">
         <div class="sp-preview"><canvas width="120" height="120"></canvas></div>
         <div class="sp-stats">
-          <div class="sr"><span class="k">POP</span><b class="v-pop">&mdash;</b></div>
-          <div class="sr"><span class="k">TERR</span><b class="v-terr">&mdash;</b></div>
-          <div class="sr"><span class="k">VIG</span><div class="vigbar"><span></span></div><b class="v-vig">0.00</b></div>
+          <div class="sp-stat"><span>POP</span><b class="v-pop">&mdash;</b></div>
+          <div class="sp-stat"><span>TERR</span><b class="v-terr">&mdash;</b></div>
+          <div class="sp-stat"><span>VIG</span><b class="v-vig">0.00</b></div>
         </div>
       </div>`;
     box.querySelector(".sp-code").textContent = sp.code;
-    const nick = box.querySelector(".sp-nick");
-    nick.textContent = sp.nickname;
-    nick.addEventListener("click", (e) => { e.stopPropagation(); nick.contentEditable = "true"; nick.focus(); });
-    nick.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Enter") { e.preventDefault(); nick.blur(); }
-    });
-    nick.addEventListener("blur", () => {
-      nick.contentEditable = "false";
-      const t = nick.textContent.trim();
-      sp.nickname = t || sp.nickname;
-      nick.textContent = sp.nickname;
-      buildRelRows(); renderWeb();
-    });
     box.querySelector(".sp-eye").addEventListener("click", (e) => { e.stopPropagation(); muted[k] = !muted[k]; syncSpecimenSelection(); });
-    box.addEventListener("click", (e) => { if (e.target.closest(".sp-nick") || e.target.closest(".sp-eye")) return; selected = k; onSelectStrain(); });
-    box.addEventListener("keydown", (e) => {
-      if (e.target.closest(".sp-nick")) return;
-      if (e.key === "Enter" || e.key === " ") { selected = k; onSelectStrain(); e.preventDefault(); }
-    });
+    box.addEventListener("click", (e) => { if (e.target.closest(".sp-eye")) return; selected = k; onSelectStrain(); });
+    box.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { selected = k; onSelectStrain(); e.preventDefault(); } });
     host.appendChild(box);
     const cv = box.querySelector(".sp-preview canvas");
     const sim = createStrainPreview({ size: 96, agents: 4500, seed: 1000 + k * 97 });
@@ -839,7 +1042,7 @@ function syncSpecimenSelection() {
     box.setAttribute("aria-pressed", String(k === selected));
     box.classList.toggle("muted", muted[k]);
     box.style.setProperty("--c", speciesCss(k));
-    box.querySelector(".sp-eye").setAttribute("aria-label", muted[k] ? `Show ${STRAINS[k].nickname} on the dish` : `Hide ${STRAINS[k].nickname} from the dish`);
+    box.querySelector(".sp-eye").setAttribute("aria-label", muted[k] ? `Show ${STRAINS[k].code} on the scene` : `Hide ${STRAINS[k].code} from the scene`);
   });
 }
 function tickPreviews() {
@@ -855,32 +1058,29 @@ function updateSpecimenStats(popCounts) {
     p.box.querySelector(".v-terr").textContent = Math.round(territory[k] * 100) + "%";
     const vig = settings["nutrient" + k].drive;
     p.box.querySelector(".v-vig").textContent = vig.toFixed(2);
-    p.box.querySelector(".vigbar span").style.width = Math.round(vig * 100) + "%";
   });
 }
 
 let paramRowHandles = [];
-function buildParamRows() {
+function buildStrainRows() {
   rowHandles.splice(0, rowHandles.length, ...rowHandles.filter((h) => !paramRowHandles.includes(h)));
   paramRowHandles = [];
-  const host = $("rows"); host.innerHTML = "";
-  PARAMS.forEach((p) => paramRowHandles.push(buildRow(settings[p.key + selected], host)));
+  const host = $("strainRows"); host.innerHTML = "";
+  PARAMS.forEach((p) => paramRowHandles.push(buildWireRow(settings[p.key + selected], host)));
 }
 function onSelectStrain() {
   syncSpecimenSelection();
-  buildParamRows();
+  buildStrainRows();
   buildRelRows();
   renderWeb();
 }
 
-// ---------- relation web ----------
+// ---------- affinity web (compact overview) ----------
 const NODE_POS = [{ x: 75, y: 55 }, { x: 225, y: 55 }, { x: 225, y: 185 }, { x: 75, y: 185 }];
 const NODE_R = 26;
 function relWord(v) { return v > 0.08 ? "follows" : v < -0.08 ? "avoids" : "ignores"; }
 function fmtSigned(v) { return (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2); }
 function arrowColour(v) { return v > 0.08 ? "#8ce6a0" : v < -0.08 ? "#ef6a6a" : "rgba(255,255,255,.35)"; }
-const NS = "http://www.w3.org/2000/svg";
-function svgEl(tag, attrs) { const el = document.createElementNS(NS, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); return el; }
 
 function renderWeb() {
   const svg = $("web"); svg.innerHTML = "";
@@ -899,7 +1099,7 @@ function renderWeb() {
       const dashed = Math.abs(v) <= 0.08;
       const path = svgEl("path", { d: `M${sx.toFixed(1)},${sy.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)}`, class: "arrow " + (i === selected ? "sel" : "dim"), fill: "none", stroke: col, "stroke-width": (1 + Math.abs(v) * 3).toFixed(2) });
       if (dashed) path.setAttribute("stroke-dasharray", "3,4");
-      const title = svgEl("title", {}); title.textContent = `${STRAINS[i].nickname} ${relWord(v)} ${STRAINS[j].nickname} (${fmtSigned(v)})`;
+      const title = svgEl("title", {}); title.textContent = `${STRAINS[i].code} ${relWord(v)} ${STRAINS[j].code} (${fmtSigned(v)})`;
       path.appendChild(title);
       svg.appendChild(path);
       const tx = ex - mx, ty = ey - my, tl = Math.hypot(tx, ty) || 1;
@@ -919,21 +1119,21 @@ function renderWeb() {
     const lcx = p.x + nx * (NODE_R + 9), lcy = p.y + ny * (NODE_R + 9);
     const col = arrowColour(v);
     const loop = svgEl("circle", { cx: lcx.toFixed(1), cy: lcy.toFixed(1), r: 8, fill: "none", stroke: col, "stroke-width": (1 + Math.abs(v) * 2).toFixed(2), class: "loop " + (i === selected ? "sel" : "dim") });
-    const t = svgEl("title", {}); t.textContent = `${sp.nickname} → its own trail: ${relWord(v)} (${fmtSigned(v)})`;
+    const t = svgEl("title", {}); t.textContent = `${sp.code} → own trail: ${relWord(v)} (${fmtSigned(v)})`;
     loop.appendChild(t);
     svg.appendChild(loop);
   });
   STRAINS.forEach((sp, k) => {
     const p = NODE_POS[k], col = speciesCss(k);
     const g = svgEl("g", {});
-    const c = svgEl("circle", { cx: p.x, cy: p.y, r: NODE_R, fill: col, class: "node-hit", tabindex: "0", role: "button", "aria-label": `Select ${sp.nickname}` });
+    const c = svgEl("circle", { cx: p.x, cy: p.y, r: NODE_R, fill: col, class: "node-hit", tabindex: "0", role: "button", "aria-label": `Select ${sp.code}` });
     c.style.filter = `drop-shadow(0 0 6px ${col})`;
     c.addEventListener("click", () => { selected = k; onSelectStrain(); });
     c.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { selected = k; onSelectStrain(); e.preventDefault(); } });
     g.appendChild(c);
     if (k === selected) g.appendChild(svgEl("circle", { cx: p.x, cy: p.y, r: NODE_R + 4, fill: "none", stroke: "#fff", opacity: 0.55, "stroke-width": 1.5 }));
     const label = svgEl("text", { x: p.x, y: p.y + 4, "text-anchor": "middle", class: "node-lbl" });
-    label.textContent = sp.nickname;
+    label.textContent = sp.code;
     g.appendChild(label);
     svg.appendChild(g);
   });
@@ -974,13 +1174,13 @@ function buildRelRows() {
     const key = `att${selected}${j}`;
     const s = settings[key];
     const row = document.createElement("div"); row.className = "relrow";
-    const label = j === selected ? `${STRAINS[selected].nickname} → its own trail` : `${STRAINS[selected].nickname} → ${STRAINS[j].nickname}`;
+    const label = j === selected ? `${STRAINS[selected].code} → own trail` : `${STRAINS[selected].code} → ${STRAINS[j].code}`;
     row.innerHTML = `<div class="rl-top"><span class="rl-lbl"></span><span class="rl-val"></span></div><div class="segword" role="group"></div>`;
     row.querySelector(".rl-lbl").textContent = label;
     row.querySelector(".segword").setAttribute("aria-label", label);
     const seg = row.querySelector(".segword");
     ANCHORS.forEach(([name, val]) => {
-      const b = document.createElement("button"); b.textContent = name;
+      const b = document.createElement("button"); b.type = "button"; b.textContent = name;
       b.onclick = () => { s.value = val; refreshRelRow(row, s); afterRelChange(); };
       seg.appendChild(b);
     });
@@ -997,7 +1197,7 @@ function refreshRelRow(row, s) {
 function buildExperiments() {
   const host = $("experiments"); host.innerHTML = "";
   EXPERIMENTS.forEach((ex) => {
-    const b = document.createElement("button"); b.className = "exp-pill"; b.textContent = ex.name; b.dataset.name = ex.name;
+    const b = document.createElement("button"); b.type = "button"; b.className = "exp-pill"; b.textContent = ex.name; b.dataset.name = ex.name;
     b.onclick = () => {
       ex.table.forEach((row, i) => row.forEach((v, j) => { settings[`att${i}${j}`].value = v; }));
       activeExperiment = ex.name;
@@ -1024,7 +1224,7 @@ function renderPopBar(counts) {
   const labels = $("poplabels"); labels.innerHTML = "";
   STRAINS.forEach((sp, k) => {
     const s = document.createElement("span");
-    s.innerHTML = `<i style="color:${speciesCss(k)}"></i>${sp.nickname} ${Math.round((counts[k] / N) * 100)}%`;
+    s.innerHTML = `<i style="color:${speciesCss(k)}"></i>${sp.code} ${Math.round((counts[k] / N) * 100)}%`;
     labels.appendChild(s);
   });
 }
@@ -1036,40 +1236,56 @@ $("rebalanceBtn").addEventListener("click", () => {
   logEvent("Rebalanced cultures");
 });
 
-// ---------- pipette wiring ----------
-const dishClip = $("dishClip");
-function dishInject(cx, cy) {
-  if (pinArmed) {
-    pinnedSpot.x = cx; pinnedSpot.y = cy; pinnedSpot.set = true; pinArmed = false;
-    $("pinNext").setAttribute("aria-pressed", "false");
-    showRing(cx, cy);
-    return;
-  }
+// ---------- pipette wiring (tap the scene to inject) ----------
+const sceneFrame = $("sceneFrame");
+function sceneInject(cx, cy) {
   injectAt(cx, cy, selected);
 }
-dishClip.addEventListener("pointerdown", (e) => {
-  const r = dishClip.getBoundingClientRect();
-  dishInject(clamp01((e.clientX - r.left) / r.width), clamp01((e.clientY - r.top) / r.height));
+sceneFrame.addEventListener("pointerdown", (e) => {
+  const r = sceneFrame.getBoundingClientRect();
+  sceneInject(clamp01((e.clientX - r.left) / r.width), clamp01((e.clientY - r.top) / r.height));
 });
-dishClip.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { dishInject(0.5, 0.5); e.preventDefault(); } });
-$("autoAll").addEventListener("click", () => { autoFrom = "all"; $("autoAll").setAttribute("aria-pressed", "true"); $("autoSel").setAttribute("aria-pressed", "false"); });
-$("autoSel").addEventListener("click", () => { autoFrom = "selected"; $("autoAll").setAttribute("aria-pressed", "false"); $("autoSel").setAttribute("aria-pressed", "true"); });
-$("spotMode").addEventListener("click", () => {
-  autoSpotMode = autoSpotMode === "random" ? "pinned" : "random";
-  $("spotMode").textContent = autoSpotMode === "random" ? "Random spot" : "Pinned spot";
-  $("spotMode").setAttribute("aria-pressed", String(autoSpotMode === "pinned"));
-});
-$("pinNext").addEventListener("click", () => {
-  pinArmed = !pinArmed;
-  $("pinNext").setAttribute("aria-pressed", String(pinArmed));
-});
-function buildPipetteRows() {
-  const host = $("pipRows"); host.innerHTML = "";
-  buildRow(settings.dose, host);
-  buildRow(settings.spread, host);
-}
+sceneFrame.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { sceneInject(0.5, 0.5); e.preventDefault(); } });
 
-// ---------- lab log ----------
+// ---------- global rows: Form / Motion / Look / Post ----------
+function buildGlobalRows() {
+  const form = $("formRows"); form.innerHTML = "";
+  FORM_KEYS.forEach((k) => buildWireRow(settings[k], form));
+
+  const motion = $("motionRows"); motion.innerHTML = "";
+  MOTION_KEYS.forEach((k) => buildWireRow(settings[k], motion));
+  const enumRow = buildEnumRow(
+    "Auto-inject from",
+    "Which strains the auto-trigger (Dose) can move agents from.",
+    ["All strains", "Selected strain"],
+    () => (autoFrom === "all" ? 0 : 1),
+    (i) => { autoFrom = i === 0 ? "all" : "selected"; },
+    0,
+  );
+  motion.appendChild(enumRow.el);
+
+  const look = $("lookRows"); look.innerHTML = "";
+  LOOK_KEYS.forEach((k) => buildWireRow(settings[k], look));
+  const advBody = $("lookAdvBody"); advBody.innerHTML = "";
+  LOOK_ADVANCED_KEYS.forEach((k) => buildWireRow(settings[k], advBody));
+  const advToggle = $("lookAdvToggle");
+  let advOpen = false;
+  function applyAdv() {
+    advBody.style.display = advOpen ? "" : "none";
+    advToggle.textContent = `${advOpen ? "▾ Hide" : "▸ Show"} ${LOOK_ADVANCED_KEYS.length} look control${LOOK_ADVANCED_KEYS.length === 1 ? "" : "s"}`;
+  }
+  advToggle.onclick = () => { advOpen = !advOpen; applyAdv(); };
+  applyAdv();
+
+  const post = $("postRows"); post.innerHTML = "";
+  POST_KEYS.forEach((k) => buildWireRow(settings[k], post));
+}
+$("sceneResetBtn").addEventListener("click", () => {
+  Object.values(settings).forEach((s) => { if (s.def !== undefined) s.value = s.def; });
+  refreshAll();
+});
+
+// ---------- lab log: a 3-line ticker ----------
 let simTime = 0;
 const logEntries = [];
 function clockText() {
@@ -1079,7 +1295,7 @@ function clockText() {
 }
 function logEvent(text) {
   logEntries.unshift({ t: clockText(), text });
-  if (logEntries.length > 8) logEntries.length = 8;
+  if (logEntries.length > 3) logEntries.length = 3;
   renderLog();
 }
 function renderLog() {
@@ -1106,9 +1322,6 @@ function maybeLogLeader(dt) {
 
 // ---------- HUD + colours ----------
 function updateHud(f) {
-  const total = Math.floor(f.t);
-  const mm = String(Math.floor(total / 60)).padStart(2, "0"), ss = String(total % 60).padStart(2, "0");
-  $("cultureClock").innerHTML = `CULTURE 07 &middot; T+${mm}:${ss}`;
   $("phaseTag").textContent = `PHASE: ${f.phrase.toUpperCase()}`;
 }
 function syncColours() {
@@ -1122,26 +1335,30 @@ $("archToggle").addEventListener("click", () => {
   $("archToggle").setAttribute("aria-checked", String(on));
 });
 
+// No scroll listener: #cableLayer is document-absolute, so a cable's
+// document-relative coordinates (drawCable) don't drift as the page scrolls.
+window.addEventListener("resize", recomputeCables);
+
 // ---------- boot ----------
+buildMonitor();
 buildSpecimens();
-buildParamRows();
+buildStrainRows();
 buildRelRows();
 buildExperiments();
 renderWeb();
-buildPipetteRows();
-buildRow(settings.hostility, $("hostilityRow"));
+buildGlobalRows();
 
 for (let i = 0; i < 90; i++) { for (const k in settings) settings[k].eff = settings[k].value; simStep(); }
 previews.forEach((p, k) => { for (let i = 0; i < 60; i++) p.sim.step(strainCfg(k)); });
 computeTerritory();
 syncColours();
-updateDoseNote();
 renderPopBar(popCountsNow());
 refreshAll();
+recomputeCables();
 
 let last = performance.now(), uiTick = 0, statTick = 0;
 function frame(now) {
-  // Clamped to >=0: the boot warmup above (dish + 4 previews) is heavy enough
+  // Clamped to >=0: the boot warmup above (scene + 4 previews) is heavy enough
   // that Chromium can deliver a first rAF timestamp that predates the
   // performance.now() taken right after it, which would otherwise go
   // negative here and corrupt Sim's phrase index.
@@ -1153,7 +1370,7 @@ function frame(now) {
   maybeAutoInject(dt);
   simStep();
   tickPreviews();
-  render(f.pulse.beat * 0.4);
+  render(f.pulse.beat);
   updateHud(f);
   maybeLogPhase(f.phrase);
   if (++statTick % 15 === 0) {
@@ -1163,7 +1380,7 @@ function frame(now) {
     renderPopBar(counts);
   }
   maybeLogLeader(dt);
-  if (++uiTick % 2 === 0) { refreshAll(); syncColours(); updateDoseNote(); }
+  if (++uiTick % 2 === 0) { refreshAll(); syncColours(); recomputeCables(); }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

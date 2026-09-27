@@ -1,8 +1,10 @@
 // Loads the built prototype, waits for it to settle, prints page errors, and
 // takes full-page screenshots at 1440 wide (desktop) and 400 wide (phone).
 // Run with: node look.mjs [--click]
-// --click also clicks the first strain box and opens the first stimulus
-// chip before the wide shot, so the Stimulus mix patch shows in the screenshot.
+// --click also clicks the first strain box, arms the "Bass level" monitor
+// jack and wires it into the Sensor range row (demonstrating the patch-bay
+// bonus's click-to-wire + cable), then opens the Nutrient row's own Receives
+// patch, before the wide shot.
 import { chromium } from "/Users/yaro/projects/audio-visualization/node_modules/playwright/index.mjs";
 
 const dir = new URL(".", import.meta.url);
@@ -21,7 +23,11 @@ async function shoot(width, height, path, withClicks) {
   if (withClicks) {
     await page.evaluate(() => document.querySelector("#specimens .specimen")?.click());
     await page.waitForTimeout(300);
-    await page.evaluate(() => document.querySelector("#rows .chip")?.click());
+    await page.evaluate(() => document.querySelectorAll("#monitorJacks .mon-jack")[0]?.click());
+    await page.waitForTimeout(150);
+    await page.evaluate(() => document.querySelectorAll("#strainRows .wr .wr-port")[1]?.click());
+    await page.waitForTimeout(150);
+    await page.evaluate(() => document.querySelector("#strainRows .wr .wr-left")?.click());
     await page.waitForTimeout(1200);
   }
   await page.screenshot({ path, fullPage: true });
