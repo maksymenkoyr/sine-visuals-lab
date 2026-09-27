@@ -17,7 +17,7 @@ import type { SceneLook } from "../render/sceneLooks.ts";
 import { createLooksCard } from "./looksCard.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
-import { takeSettingMarks, type SettingMarkLine } from "../render/settingMarks.ts";
+import { takeSettingMarks } from "../render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import { type BandSplit } from "../audio/bandSplit.ts";
 import { AUTO_GAIN_DEFAULT, AUTO_GAIN_MAX, AUTO_GAIN_MIN } from "../audio/autoGain.ts";
@@ -2524,8 +2524,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const gateOpen = new Uint8Array(RING);
     // A scene's own reference lines and reactions for this setting
     // (settingMarks.ts) — e.g. Beat ripple's salience bar and each ring sent.
+    // Lines are recorded per tick (a scene's line can move — Beat ripple's
+    // rides the signal) and drawn as traces, labelled at their latest point.
     const reactions = new Float32Array(RING);
-    let markLines: SettingMarkLine[] = [];
+    const markTraces = new Map<string, Float32Array>();
     let ringHead = 0;
     let filled = 0;
 
@@ -2584,16 +2586,27 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       ctx.lineWidth = 1;
       ctx.font = "9px ui-monospace, monospace";
       ctx.textAlign = "right";
-      for (const line of markLines) {
-        if (!(line.value > 0) || line.value > 1) continue;
-        const y = ys(line.value);
+      for (const [label, trace] of markTraces) {
         ctx.strokeStyle = MARK_LINE;
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
+        let penDown = false;
+        for (let k = RING - n; k < RING; k++) {
+          const v = trace[at(k)]!;
+          // NaN = no line that tick; above the chart = off the top.
+          if (!(v >= 0) || v > 1) {
+            penDown = false;
+            continue;
+          }
+          if (penDown) ctx.lineTo(xs(k), ys(v));
+          else ctx.moveTo(xs(k), ys(v));
+          penDown = true;
+        }
         ctx.stroke();
-        ctx.fillStyle = MARK_LINE;
-        ctx.fillText(line.label, w - 2, y - 2);
+        const last = trace[at(RING - 1)]!;
+        if (last >= 0 && last <= 1) {
+          ctx.fillStyle = MARK_LINE;
+          ctx.fillText(label, w - 2, ys(last) - 2);
+        }
       }
       ctx.setLineDash([]);
       ctx.fillStyle = MARK_REACTION;
@@ -2645,7 +2658,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const v = drives.valueOf(spec.key);
       combined[ringHead] = v;
       const marks = takeSettingMarks(sceneId, spec.key);
-      markLines = marks?.lines ?? [];
+      for (const trace of markTraces.values()) trace[ringHead] = NaN;
+      for (const line of marks?.lines ?? []) {
+        let trace = markTraces.get(line.label);
+        if (!trace) {
+          trace = new Float32Array(RING).fill(NaN);
+          markTraces.set(line.label, trace);
+        }
+        trace[ringHead] = line.value;
+      }
       reactions[ringHead] = marks?.reaction ?? 0;
       if (isGate) {
         let open = 1;

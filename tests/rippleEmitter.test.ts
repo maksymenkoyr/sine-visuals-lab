@@ -10,6 +10,7 @@ import {
   rippleEnvelope,
   rippleSpeedFor,
   rippleWidthFor,
+  salienceMarks,
   type RippleProfileParams,
 } from "../src/render/scenes/rippleEmitter.ts";
 
@@ -168,6 +169,62 @@ describe("advanceEmission salience — a ring is sized by how much a hit stands 
     const late = emitted.filter((_, i) => hits[i]!.t > 5);
     const mean = late.reduce((a, b) => a + b, 0) / late.length;
     expect(mean).toBeLessThan(0.3);
+  });
+});
+
+describe("advanceEmission on a smooth source — whole climbs, not frame steps", () => {
+  // A level sitting high with smooth raised-cosine bumps, alternating a big
+  // (0.25) and a small (0.06) one every second, each 0.5 s long — the shape a
+  // level or drawn-line source gives, not a hit envelope.
+  const bumpSignal = (t: number) => {
+    const k = Math.floor(t);
+    const ph = t - k;
+    const size = k % 2 === 0 ? 0.25 : 0.06;
+    return 0.75 + (ph < 0.5 ? size * 0.5 * (1 - Math.cos((ph / 0.5) * 2 * Math.PI)) : 0);
+  };
+
+  /** Per bump: total emitted and how many separate runs of emitting frames. */
+  function runBumps(dt: number, seconds: number) {
+    const state = createRippleEmissionState();
+    const totals: number[] = [];
+    const runs: number[] = [];
+    let wasEmitting = false;
+    for (let t = 0; t < seconds; t += dt) {
+      const k = Math.floor(t);
+      const e = advanceEmission(state, dt, bumpSignal(t));
+      totals[k] = (totals[k] ?? 0) + e;
+      if (e > 0 && !wasEmitting) runs[k] = (runs[k] ?? 0) + 1;
+      wasEmitting = e > 0;
+    }
+    return { totals, runs };
+  }
+
+  it("each big bump sends one ring, small bumps send nothing once it has learned the source", () => {
+    const { totals, runs } = runBumps(DT, 20);
+    for (let k = 6; k < 20; k++) {
+      if (k % 2 === 0) {
+        expect(totals[k]!).toBeGreaterThan(0.7);
+        expect(runs[k]).toBe(1);
+      } else {
+        expect(totals[k] ?? 0).toBeLessThan(0.15);
+      }
+    }
+  });
+
+  it("a bump's ring is the same size at 30 and 120 fps", () => {
+    const slow = runBumps(1 / 30, 12).totals;
+    const fast = runBumps(1 / 120, 12).totals;
+    for (let k = 6; k < 12; k += 2) expect(Math.abs(slow[k]! - fast[k]!)).toBeLessThan(0.1);
+  });
+
+  it("a ring only starts once the signal is above the drawn 'rings above' line", () => {
+    const state = createRippleEmissionState();
+    for (let t = 0; t < 12; t += DT) {
+      const e = advanceEmission(state, DT, bumpSignal(t));
+      const marks = salienceMarks(state);
+      if (e > 0) expect(state.smoothed).toBeGreaterThanOrEqual(marks.ringsAbove - 1e-9);
+      expect(marks.fullRing).toBeGreaterThan(marks.ringsAbove);
+    }
   });
 });
 

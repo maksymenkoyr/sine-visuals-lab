@@ -168,8 +168,18 @@ const RISE_DEADBAND_PER_SEC = 0.5;
 // every one of them makes the driver jump; sized by absolute height, each
 // sent a fresh ring from the centre every fraction of a second, burying the
 // ring the real hit sent (it read as the ripple being reset by noise; only a
-// hit followed by clean silence looked right). Two trackers, updated on each
-// rise event (a frame's rise past SALIENCE_EVENT_MIN):
+// hit followed by clean silence looked right).
+//
+// A rise is measured as a whole *climb* — from the last dip to wherever the
+// signal has got to — not frame by frame. A hit is a one-frame climb; a
+// smooth source (a level, a drawn line) climbs over many frames, and sized
+// per frame each step was too small to count, so the trackers below never
+// learned that source and every climbing frame sent its own small ring. Per
+// climb, the ring grows as the climb does (each frame emits only what the
+// climb's salience has gained since the last frame, so a slow bump starts
+// its ring the moment it crosses the bar), and the finished climb's total
+// is what the trackers learn from. Two trackers, updated when a climb ends
+// (a climb past SALIENCE_EVENT_MIN):
 //   - the peak follows the *big* rises: it jumps straight to a bigger one
 //     and eases down slowly toward a smaller one;
 //   - the floor is the running average of the *background* rises only —
@@ -196,14 +206,41 @@ const SALIENCE_SPREAD_MIN = 0.3;
 export interface RippleEmissionState {
   smoothed: number;
   init: boolean;
-  /** Salience floor — the size of the frequent, background rises. */
+  /** Salience floor — the size of the frequent, background climbs. */
   floor: number;
-  /** Salience peak — the size of the big rises. */
+  /** Salience peak — the size of the big climbs. */
   peak: number;
+  /** Whether the signal is climbing right now. */
+  climbing: boolean;
+  /** The level the current climb started from (the last dip). */
+  base: number;
+  /** Ring height already emitted for the current climb. */
+  emittedThisClimb: number;
+  /** The salience bar and full-ring climb, frozen at the climb's start. */
+  climbBar: number;
+  climbSpread: number;
 }
 
 export function createRippleEmissionState(): RippleEmissionState {
-  return { smoothed: 0, init: false, floor: 0, peak: 0 };
+  return {
+    smoothed: 0,
+    init: false,
+    floor: 0,
+    peak: 0,
+    climbing: false,
+    base: 0,
+    emittedThisClimb: 0,
+    climbBar: 0,
+    climbSpread: SALIENCE_SPREAD_MIN,
+  };
+}
+
+function learnClimb(state: RippleEmissionState, climb: number): void {
+  if (climb < SALIENCE_EVENT_MIN) return;
+  if (climb < SALIENCE_BACKGROUND_FRACTION * state.peak || climb < state.floor) {
+    state.floor += (climb - state.floor) * SALIENCE_FLOOR_RATE;
+  }
+  state.peak = climb > state.peak ? climb : state.peak + (climb - state.peak) * SALIENCE_PEAK_DOWN;
 }
 
 /** Conditions a raw driver reading into "how much ring height to launch this
@@ -218,9 +255,9 @@ export function createRippleEmissionState(): RippleEmissionState {
  *  Pure aside from `state`, and exported so tests/rippleEmitter.test.ts can
  *  pin the load-bearing property directly: a clean 0->1 jump followed by a
  *  decay emits a total close to 1 (one old-style full-strength ring), while
- *  a constant signal or a slow ramp emits close to 0. The rise is then sized
- *  by salience (see SALIENCE_EVENT_MIN's comment): background hits emit ~0,
- *  standout hits a full ring. */
+ *  a constant signal or a slow ramp emits close to 0. Each climb is then
+ *  sized by salience (see the SALIENCE_* constants' comment): background
+ *  climbs emit ~0, standout ones a full ring. */
 export function advanceEmission(state: RippleEmissionState, dtSec: number, signal: number): number {
   if (!state.init) {
     state.smoothed = signal;
@@ -230,35 +267,49 @@ export function advanceEmission(state: RippleEmissionState, dtSec: number, signa
   const prev = state.smoothed;
   const rate = 1 - Math.exp(-dtSec / EMISSION_SMOOTH_TAU_SEC);
   state.smoothed = prev + (signal - prev) * rate;
-  const delta = state.smoothed - prev;
-  const rise = Math.max(0, delta - RISE_DEADBAND_PER_SEC * dtSec);
+  const rising = state.smoothed - prev > RISE_DEADBAND_PER_SEC * dtSec;
 
   state.floor *= Math.exp(-dtSec / SALIENCE_FLOOR_RELAX_SEC);
   state.peak = state.floor + (state.peak - state.floor) * Math.exp(-dtSec / SALIENCE_PEAK_RELAX_SEC);
-  if (rise <= 0) return 0;
-  // Sized against the trackers as they stood *before* this rise, so a hit
-  // bigger than anything recent reads as a full ring rather than as merely
-  // equal to a peak it just raised.
-  const bar = SALIENCE_MARGIN * state.floor;
-  const emitted = clamp01((rise - bar) / Math.max(state.peak - bar, SALIENCE_SPREAD_MIN));
-  if (rise >= SALIENCE_EVENT_MIN) {
-    if (rise < SALIENCE_BACKGROUND_FRACTION * state.peak || rise < state.floor) {
-      state.floor += (rise - state.floor) * SALIENCE_FLOOR_RATE;
+
+  if (!rising) {
+    if (state.climbing) {
+      state.climbing = false;
+      learnClimb(state, prev - state.base);
     }
-    state.peak = rise > state.peak ? rise : state.peak + (rise - state.peak) * SALIENCE_PEAK_DOWN;
+    return 0;
   }
+  if (!state.climbing) {
+    // A new climb from the last dip. The bar and spread are frozen here, as
+    // the trackers stood *before* this climb, so a climb bigger than
+    // anything recent reads as a full ring rather than as merely equal to a
+    // peak it is itself raising.
+    state.climbing = true;
+    state.base = prev;
+    state.emittedThisClimb = 0;
+    state.climbBar = SALIENCE_MARGIN * state.floor;
+    state.climbSpread = Math.max(state.peak - state.climbBar, SALIENCE_SPREAD_MIN);
+  }
+  const climb = state.smoothed - state.base;
+  const target = clamp01((climb - state.climbBar) / state.climbSpread);
+  const emitted = Math.max(0, target - state.emittedThisClimb);
+  state.emittedThisClimb = Math.max(state.emittedThisClimb, target);
   return emitted;
 }
 
-/** Where advanceEmission's salience currently puts the line, as heights a
- *  rise from rest would have to reach: `ringsAbove` is the bar a rise must
- *  clear to emit anything, `fullRing` the rise that emits a full-strength
- *  ring. For the panel's graph (settingMarks.ts) — a rise that starts from a
- *  pulse still decaying from the last hit tops out higher on the graph than
- *  the rise itself, so read these as "from rest". */
+/** Where advanceEmission's salience puts the line right now, as signal
+ *  heights on the same axis the driver is plotted on — for the panel's graph
+ *  (settingMarks.ts). `ringsAbove` is the level the signal has to climb to
+ *  for a ring to start, `fullRing` the level that makes it full strength,
+ *  both measured from where the current climb started (or, between climbs,
+ *  from where the signal is now — the dip a next climb would start from). */
 export function salienceMarks(state: RippleEmissionState): { ringsAbove: number; fullRing: number } {
+  if (state.climbing) {
+    return { ringsAbove: state.base + state.climbBar, fullRing: state.base + state.climbBar + state.climbSpread };
+  }
   const bar = SALIENCE_MARGIN * state.floor;
-  return { ringsAbove: bar, fullRing: bar + Math.max(state.peak - bar, SALIENCE_SPREAD_MIN) };
+  const spread = Math.max(state.peak - bar, SALIENCE_SPREAD_MIN);
+  return { ringsAbove: state.smoothed + bar, fullRing: state.smoothed + bar + spread };
 }
 
 // ---- Ring buffer ----------------------------------------------------------

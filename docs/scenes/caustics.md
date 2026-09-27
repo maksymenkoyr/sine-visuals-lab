@@ -279,6 +279,23 @@ reference-measurement workflow used by later scenes.
   general channel any scene can use for its own settings' graphs; the lines
   are heights for a rise from rest (a hit landing on a still-decaying pulse
   tops out higher on the graph than its rise).
+- 2026-09-27 — The user couldn't read that graph with a level-type source
+  plugged in: the signal sat around 0.8–0.96 while the "full ring" line sat
+  at ~0.35 (a jump size from zero, not a height on the curve), "rings above"
+  was missing, and rings came in clusters. Cause: salience compared each
+  frame's step on its own; a smooth source climbs a little every frame, each
+  step below `SALIENCE_EVENT_MIN`, so the trackers never learned it (bar stuck
+  at 0) and every climbing frame sent its own small ring. Now
+  `advanceEmission` measures a whole *climb* from the last dip: the ring
+  grows as the climb crosses the bar and nears the full-ring height, and the
+  finished climb teaches the trackers. `salienceMarks` returns real heights —
+  last dip (or the signal, between climbs) plus bar / full ring — and the
+  panel draws them as traces riding the signal. In
+  `tests/rippleEmitter.test.ts`, a level at 0.75 with alternating 0.25 and 0.06
+  bumps: every big bump sends one ring (> 0.7), small ones < 0.15, the same at
+  30 and 120 fps; a ring never starts below the drawn line. With a clean hit
+  source and no background the bar is 0, so "rings above" sits on the signal
+  itself: any climb rings.
 - 2026-09-26 — "Tempo breathe" becomes "Breathe": the once-per-bar, tempo-locked
   zoom — and this scene's last read of `beatClock.ts` — was removed, and the dial
   turned into a patch destination whose zoom follows whatever source is wired to
