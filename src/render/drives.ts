@@ -819,6 +819,9 @@ function heightDecayPerSec(choice: DriveSourceChoice): number {
       return GROUP_TUNING.high.pulseDecayRate;
     case "anim.dropOnset":
       return DROP_PULSE_DECAY_PER_SEC;
+    case "anim.metronome":
+    case "anim.metronomeBar":
+      return BEAT_PULSE_DECAY_PER_SEC; // matches animClock.ts's own metronomePulse/metronomeBarPulse decay
     default:
       return BEAT_PULSE_DECAY_PER_SEC; // unreached — every edge-kind SignalId is listed above
   }
@@ -829,7 +832,8 @@ function heightDecayPerSec(choice: DriveSourceChoice): number {
  *  band onset, sectionIntensity's trend for Drop (its own composite
  *  "loudness" — Drop has no group level of its own to read), and the
  *  sensitivity-applied broadband level (matching Loudness · All exactly)
- *  for Any hit and every beat-grid stop, since neither is band-specific. */
+ *  for Any hit, every beat-grid stop, and the metronome (Metronome/
+ *  Metronome bar), since none of those is band-specific. */
 function loudLevel(choice: DriveSourceChoice, anim: AnimFrame, driveEnergy: number): number {
   if (isGridChoice(choice)) return driveEnergy;
   switch (choice) {
@@ -841,6 +845,9 @@ function loudLevel(choice: DriveSourceChoice, anim: AnimFrame, driveEnergy: numb
       return anim.high;
     case "anim.dropOnset":
       return anim.sectionIntensity;
+    case "anim.metronome":
+    case "anim.metronomeBar":
+      return driveEnergy; // same broadband level as "feature.onset" (Any hit)
     default:
       return driveEnergy; // "feature.onset" (Any hit) and unreached edge cases
   }
@@ -891,6 +898,7 @@ const driveFrameScratch: FeatureFrame = {
   bands: new Float32Array(NUM_BANDS),
   energy: 0,
   onset: false,
+  pulseOnset: false,
   bpm: 0,
   onsetPhase: 0,
   level: 0,
@@ -965,13 +973,14 @@ export function createDriveEngine(): DriveEngine {
     }
     if (isLineChoice(choice)) return stateFor(sceneId, key, sourceKey(choice)).linePulse;
     // Beat wave's own every-N-beats divider (DriveSource.every): the plain
-    // catalogue read is exactly this formula at every=1 (anim.beatPhase is
-    // wrap01(anim.beats) — see beatClock.ts's own doc for AnimFrame.beatPhase),
-    // so every>1 is the only case that needs its own read; every=1/absent
+    // catalogue read is exactly this formula at every=1 (it swings over the
+    // metronome's own phase, and metronomePhase is the fractional part of
+    // metronomeBeats — see AnimFrame's metronome fields in animClock.ts), so
+    // every>1 is the only case that needs its own read; every=1/absent
     // falls through to the untouched catalogue.read() below, kept
     // bit-identical on purpose rather than routed through this formula too.
     if (choice === "anim.beatWave" && src.every !== undefined && src.every !== 1) {
-      return anim.tempoLock * (0.5 + 0.5 * Math.cos(2 * Math.PI * wrap01(anim.beats / src.every)));
+      return anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * wrap01(anim.metronomeBeats / src.every)));
     }
     const catalogue = SIGNALS[choice];
     if (catalogue.kind === "edge" && wantsHeight) return stateFor(sceneId, key, sourceKey(choice)).heightEnv;

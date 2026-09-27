@@ -143,8 +143,8 @@ import { setHintText } from "./hintSwatches.ts";
  * counterpart to it, for diagnosing "is this a bad measurement or just a
  * slow ease": Section reads sectionIntensity's un-slewed target
  * (anim.raw.sectionIntensity), the Character dials read musicProfile's
- * pre-ease targets (anim.raw.profile), BPM skips this file's own settle()
- * pass and shows the estimator's raw candidate, and the waveform's peak
+ * pre-ease targets (anim.raw.profile), BPM shows the estimator's raw
+ * candidate instead of tempoSettle.ts's settled reading, and the waveform's peak
  * readout drops the peak-hold decay. Level and the beat dot are already raw
  * and don't change. Energy has no pre-envelope value threaded through
  * AnimFrame, so it reads the mean of `rawBands` instead — the same
@@ -195,7 +195,8 @@ export interface AudioMeters {
    *  frame — folding buys back the layout/canvas cost, not just the screen
    *  space. `rateScale` is app.ts's already-resolved sensitivity.ts's
    *  smoothingRateScale for this tick — non-finite (the Smoothing row's Off
-   *  stop) bypasses this file's own BPM settle and waveform peak-hold, the
+   *  stop) bypasses this file's own BPM display (showing the raw estimate
+   *  instead of tempoSettle.ts's settled reading) and waveform peak-hold, the
    *  same way `raw` already does, so RAW and processed agree exactly (see
    *  file header). `beatDiag` is FeatureExtractor.onsetDiag — this frame's
    *  full broadband onset diagnostic (ratio, gated, blocked — see
@@ -354,18 +355,30 @@ const tickStyle = `position: absolute; top: -2px; bottom: -2px; width: 1px; back
 // 6px reach past the row's content) so the two read as one line. Digits,
 // caption, and a beat dot beneath. The dot rests at a dim BEAT_COLOR that
 // brightens with beatClock's tempoLock (an unconfident guess stays dim);
-// each beat it jumps to white inside a BEAT_COLOR halo and eases back into
-// the colour as the halo fades — white-to-orange is the beat.
+// each metronome tick it jumps to white inside a BEAT_COLOR halo and eases
+// back into the colour as the halo fades — white-to-orange is the beat.
 // A .vc-row's ring reaches 8px past its content into the card padding; the
 // block reaches the same 8px on its right, and the gap between the two is
 // what's left of that reach — so card edge → ring, ring → block, and block →
 // card edge are all the same 4px.
+//
+// The block is also this card's jack host for anim.metronome/anim.tempo
+// (mountJack, below): tempoJackHostStyle sits absolutely positioned at the
+// block's own vertical center, its two jacks pinned to the block's left/
+// right edges — using the block's *width*, never adding a row and so never
+// growing the Section row it's welded beside (rhythmRowStyle's own
+// align-items: stretch would otherwise carry any height this block gains
+// straight into Section's).
 const rhythmRowStyle = `display: flex; gap: 12px; align-items: stretch;`;
 const tempoBlockStyle = (accent: string) => `
   width: 74px; flex-shrink: 0; display: grid; place-items: center; text-align: center;
-  margin: -6px -8px -6px 0; border-radius: 4px;
+  margin: -6px -8px -6px 0; border-radius: 4px; position: relative;
   background-color: color-mix(in srgb, ${accent} 6%, transparent);
   box-shadow: 0 0 0 1px color-mix(in srgb, ${accent} 45%, transparent);
+`;
+const tempoJackHostStyle = `
+  position: absolute; top: 50%; left: 3px; right: 3px; transform: translateY(-50%);
+  display: flex; justify-content: space-between;
 `;
 const BEAT_COLOR = HOT_RED;
 const DOT_EASE =
@@ -399,21 +412,13 @@ const tickLabelStyle = `
 const LUFS_TITLE =
   "Short-term loudness: the last 3 s, K-weighted like a broadcast meter. I is the gated average since Reset.";
 const TEMPO_TITLE =
-  "Tempo. The dot flashes white on every beat and settles back to its colour, brighter as the tracker gets sure.";
-// The raw estimate flits between candidates (half/double-time, a fill), but
-// a song's tempo hardly ever changes — so the readout shows the value that
-// most of the last TEMPO_SETTLE_SEC of readings agree on (within
-// TEMPO_SETTLE_TOL of the window's median, at least TEMPO_SETTLE_SHARE of
-// them). A majority rather than an unbroken run: on a real mic the estimate
-// can blip for an onset or two, and a run that resets on every blip never
-// settles at all. Once shown, a value only moves for an agreed value at
-// least TEMPO_HOLD_BPM away — enough to stop 124/125 flicker, small enough
-// that an early reading a couple of bpm off is corrected rather than
-// held. Display-only; nothing downstream reads this.
-const TEMPO_SETTLE_SEC = 1.5;
-const TEMPO_SETTLE_TOL = 0.03;
-const TEMPO_SETTLE_SHARE = 0.6;
-const TEMPO_HOLD_BPM = 2;
+  "Tempo. The dot flashes white on every metronome tick and settles back to its colour, brighter as the tracker gets sure.";
+// The settle rule that decides the digits below (a majority-agreement window
+// over the raw estimate, so 124/125 flicker and half/double-time candidates
+// don't reach the display) now lives in tempoSettle.ts, shared with
+// metronome.ts — see that file's own header. This card just formats
+// anim.metronomeBpm; the RAW chip / Smoothing Off bypass that settle and
+// show the raw estimate instead (see this file's own header).
 const waveCanvasStyle = `display: block; width: 100%; height: ${WAVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
 // The Signal card's history trace: level, energy, and the fixed-mapping
 // reference over the last HISTORY_SPAN_SEC, one column per CSS pixel so the
@@ -853,6 +858,8 @@ function createTempoBlock(accent: string) {
   const el = document.createElement("div");
   el.style.cssText = tempoBlockStyle(accent);
   el.title = TEMPO_TITLE;
+  const jackHost = document.createElement("div");
+  jackHost.style.cssText = tempoJackHostStyle;
   const inner = document.createElement("div");
   const dot = document.createElement("div");
   dot.style.cssText = tempoDotStyle;
@@ -862,14 +869,12 @@ function createTempoBlock(accent: string) {
   caption.style.cssText = tempoCaptionStyle;
   caption.textContent = "BPM";
   inner.append(digits, caption, dot);
-  el.appendChild(inner);
+  el.append(jackHost, inner);
 
   let restColor = withAlpha(BEAT_COLOR, 0.25);
   let lit = false;
   let lastLockStep = -1;
   let shownBpm = 0;
-  let wasRaw = false;
-  const samples: { atMs: number; bpm: number }[] = [];
   digits.textContent = "--";
 
   function settle(): void {
@@ -880,8 +885,14 @@ function createTempoBlock(accent: string) {
 
   return {
     el,
+    /** The two jacks (anim.metronome, anim.tempo) mount here — see
+     *  tempoBlockStyle's own comment for why this is absolutely positioned
+     *  rather than a row. */
+    jackHost,
     /** Per frame. `lock` (0..1) sets the resting tint; a lit dot eases back
-     *  to it on the frame after its beat. */
+     *  to it on the frame after its beat. `beat` is anim.metronomeBeat, not
+     *  a raw hit — the dot now flashes with the metronome, same as this
+     *  card's own number ticks with it. */
     update(lock: number, beat: boolean): void {
       // Quantised so the resting tint isn't rewritten every frame.
       const step = Math.round(lock * 20);
@@ -906,46 +917,14 @@ function createTempoBlock(accent: string) {
         lit = true;
       }
     },
-    /** At the text tick, with the raw estimate (0 = none): settles it
-     *  before showing — see TEMPO_SETTLE_SEC. `raw` bypasses the settle pass
-     *  entirely and shows the estimate as-is — true for the meters' RAW
-     *  chip, and also (from update() below) whenever `rateScale` is
-     *  non-finite (Smoothing's Off stop), so the processed reading lands on
-     *  the exact same unsettled number RAW already shows rather than merely
-     *  a fast-settling one. Samples keep accumulating underneath either way,
-     *  so settle() picks up cleanly the moment `raw` goes back to false. */
-    settle(bpm: number, nowMs: number, raw: boolean): void {
-      samples.push({ atMs: nowMs, bpm });
-      while (samples.length && samples[0].atMs < nowMs - TEMPO_SETTLE_SEC * 1000) samples.shift();
-
-      if (raw) {
-        wasRaw = true;
-        digits.textContent = bpm > 0 ? String(Math.round(bpm)) : "--";
-        return;
-      }
-      if (wasRaw) {
-        // Force a repaint back to the settled value: the digits currently
-        // show whatever the raw estimate last landed on, which the guards
-        // below won't necessarily overwrite on their own.
-        wasRaw = false;
-        digits.textContent = shownBpm > 0 ? String(shownBpm) : "--";
-      }
-      if (samples.length < 2 || nowMs - samples[0].atMs < TEMPO_SETTLE_SEC * 800) return;
-
-      const sorted = samples.map((s) => s.bpm).sort((a, b) => a - b);
-      const median = sorted[sorted.length >> 1];
-      const tol = Math.max(1, median * TEMPO_SETTLE_TOL);
-      let agree = 0;
-      let sum = 0;
-      for (const v of sorted) {
-        if (Math.abs(v - median) > tol) continue;
-        agree++;
-        sum += v;
-      }
-      if (agree < samples.length * TEMPO_SETTLE_SHARE) return;
-
-      const next = median > 0 ? Math.round(sum / agree) : 0;
-      if (next === shownBpm || (shownBpm > 0 && next > 0 && Math.abs(next - shownBpm) < TEMPO_HOLD_BPM)) return;
+    /** At the text tick: `bpm` is already the number to show (0 = none) —
+     *  the caller picks anim.metronomeBpm normally, or the unsettled raw
+     *  estimate under the RAW chip / Smoothing Off (see this file's own
+     *  header) — this just formats it. Keyed so a card that isn't
+     *  repainting every tick doesn't rewrite identical text. */
+    setBpm(bpm: number): void {
+      const next = bpm > 0 ? Math.round(bpm) : 0;
+      if (next === shownBpm) return;
       shownBpm = next;
       digits.textContent = shownBpm > 0 ? String(shownBpm) : "--";
     },
@@ -1670,6 +1649,12 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   mountJack("anim.sectionIntensity", section.right, section.el);
   mountJack("anim.dropOnset", section.right, section.el);
   const tempo = createTempoBlock(NEUTRAL_ACCENT);
+  // Both mount here rather than on their old rows (the Metronome row below,
+  // and the deleted Tempo row) — the BPM card *is* the metronome's number
+  // now, so this is the one place both jacks belong (see signals.ts's own
+  // MeterRowId comment and mountJack's "one mount per choice" doc below).
+  mountJack("anim.metronome", tempo.jackHost, tempo.el);
+  mountJack("anim.tempo", tempo.jackHost, tempo.el);
   const rhythmRow = document.createElement("div");
   rhythmRow.style.cssText = rhythmRowStyle;
   rhythmRow.append(section.el, tempo.el);
@@ -1688,7 +1673,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     accent: NEUTRAL_ACCENT,
     unit: "s",
     description:
-      "Detected beats (red) against the tracker's predicted grid (blue, tall when locked, short when unsure). On the grid is locked; between ticks is a double; a tick with nothing under it is a miss.",
+      "The tracker's beat when it's sure of the tempo (blue, tall when locked, short when unsure); the raw detected hits while it isn't (red). On the grid is locked; between ticks is a double; a tick with nothing under it is a miss. For a tick that never wavers regardless, see Metronome below.",
     hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
   });
   const beatTrace = createTraceStrip(
@@ -1705,15 +1690,31 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // grid division to one shared key, so it lights/toggles for *any*
   // division a patch happens to hold, matching the Tempo add-chip.
   mountJack({ source: "beat", grid: 2 }, beat.right, beat.el);
-  // The two "shape of the beat" drives that read straight off the beat
-  // clock — a smooth swing rather than a hit — traced on one shared row
-  // the same way createHitsHistory's own lanes share the Hits row below.
+  // The metronome's own steady tick (metronome.ts, ticking at exactly the
+  // BPM card's own number — see that card's jacks above) — one series only,
+  // every tick the same height: this row is "1/0, like a metronome", the
+  // whole point the user asked for, not a second copy of the Beat row's own
+  // red hits line.
+  const metronomeRow = createMeterRow({
+    label: "Metronome",
+    accent: NEUTRAL_ACCENT,
+    unit: "bpm",
+    description:
+      "The last few seconds of metronome ticks, one per beat at the BPM shown above, all the same height; nothing while the BPM reads \"--\".",
+    hintColors: { blue: BEAT_GRID_COLOR },
+  });
+  const metronomeTrace = createTraceStrip([{ color: BEAT_GRID_COLOR, width: 1.5 }], BEAT_TRACE_HEIGHT_CSS_PX);
+  metronomeRow.el.children[1].replaceWith(metronomeTrace.canvas);
+  mountJack("anim.metronomeBar", metronomeRow.right, metronomeRow.el);
+  // The two "shape of the beat" drives that read straight off the metronome
+  // — a smooth swing rather than a hit — traced on one shared row the same
+  // way createHitsHistory's own lanes share the Hits row below.
   const wave = createMeterRow({
     label: "Wave",
     accent: NEUTRAL_ACCENT,
     unit: "s",
     description:
-      "Beat wave (red) and bar wave (blue): a smooth swing that peaks on every beat, or once a bar. It fades out while the tempo isn't locked. Plug either into a setting to make it sway in time.",
+      "Beat wave (red) and bar wave (blue): a smooth swing that peaks on every beat, or once a bar. It fades out with the metronome (above) rather than the live tempo lock. Plug either into a setting to make it sway in time.",
     hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
   });
   const waveTrace = createTraceStrip(
@@ -1727,15 +1728,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   wave.setReadout(String(HISTORY_SPAN_SEC));
   mountJack("anim.beatWave", wave.right, wave.el);
   mountJack("anim.barWave", wave.right, wave.el);
-
-  const tempoLevel = createMeterRow({
-    label: "Tempo",
-    accent: NEUTRAL_ACCENT,
-    unit: "bpm",
-    description:
-      "How fast the tracked tempo is, from the slowest to the fastest the tracker listens for. Plug it into a setting to make fast songs move faster.",
-  });
-  mountJack("anim.tempo", tempoLevel.right, tempoLevel.el);
 
   const lock = createMeterRow({
     label: "Lock",
@@ -1768,9 +1760,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     spacer(),
     beat.el,
     spacer(),
-    wave.el,
+    metronomeRow.el,
     spacer(),
-    tempoLevel.el,
+    wave.el,
     spacer(),
     lock.el,
     spacer(),
@@ -2080,8 +2072,8 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["hits", hitsHistory.el],
     ["centroid", centroidRow.el],
     ["onset", onset.el],
+    ["metronome", metronomeRow.el],
     ["wave", wave.el],
-    ["tempoLevel", tempoLevel.el],
     ["lock", lock.el],
   ]);
 
@@ -2161,11 +2153,16 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // ---- Rhythm ----
       if (!rhythmCard.fold?.isFolded()) {
         const sectionVal = anim ? (raw ? anim.raw.sectionIntensity : anim.sectionIntensity) : null;
-        tempo.update(anim?.tempoLock ?? 0, !!frame?.onset);
+        // The dot flashes on the metronome's own tick, not a raw hit — this
+        // card's dot and digits both now come from the same tempoSettle.ts
+        // reading (metronome.ts's own header).
+        tempo.update(anim?.tempoLock ?? 0, !!anim?.metronomeBeat);
         section.setValue(sectionVal, dtSec);
         if (anim?.dropOnset) section.flash(HOT_RED);
         if (text) {
-          tempo.settle(frame?.bpm ?? 0, nowMs, raw || smoothingOff);
+          // RAW / Smoothing Off show the unsettled raw estimate, exactly as
+          // before this card's own settle pass moved into tempoSettle.ts.
+          tempo.setBpm(raw || smoothingOff ? (frame?.bpm ?? 0) : (anim?.metronomeBpm ?? 0));
           section.setReadout(
             sectionVal === null ? "--" : pct(sectionVal),
             sectionVal === null ? IDLE : {},
@@ -2184,21 +2181,30 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           beatTrace.push([null, null], nowMs);
         }
         beatTrace.draw();
+        // The metronome's own tick: full height exactly on metronomeBeat (a
+        // real one-shot edge), nothing between ticks — one series, unlike
+        // the Beat row's red-hits-plus-blue-grid pair above (this file's own
+        // header / the Metronome row's own description for why).
+        metronomeTrace.push([anim ? (anim.metronomeBeat ? 1 : 0) : null], nowMs);
+        metronomeTrace.draw();
+        if (text) {
+          metronomeRow.setReadout(
+            anim && anim.metronomeBpm > 0 ? String(Math.round(anim.metronomeBpm)) : "--",
+            anim && anim.metronomeBpm > 0 ? {} : IDLE,
+          );
+        }
         // Fed through SIGNALS[id].read() itself, not a hand-copied formula,
         // so this row and a setting driven by the same signal always agree
         // on the number (see this file's header and signals.ts's own).
         if (frame && anim) {
           waveTrace.push([SIGNALS["anim.beatWave"].read(frame, anim), SIGNALS["anim.barWave"].read(frame, anim)], nowMs);
-          tempoLevel.setValue(SIGNALS["anim.tempo"].read(frame, anim), dtSec);
           lock.setValue(SIGNALS["anim.tempoLock"].read(frame, anim), dtSec);
         } else {
           waveTrace.push([null, null], nowMs);
-          tempoLevel.setValue(null, dtSec);
           lock.setValue(null, dtSec);
         }
         waveTrace.draw();
         if (text) {
-          tempoLevel.setReadout(anim && anim.tempoBpm > 0 ? String(Math.round(anim.tempoBpm)) : "--", anim && anim.tempoBpm > 0 ? {} : IDLE);
           lock.setReadout(anim ? pct(anim.tempoLock) : "--", anim ? {} : IDLE);
         }
         // Local diagnostic, same availability as fixedEnergy (null on a
@@ -2215,6 +2221,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
         // and Centroid — and forget the last phase so unfolding mid-track
         // doesn't read the jump across the fold as a wrap.
         beatTrace.resetColumn();
+        metronomeTrace.resetColumn();
         waveTrace.resetColumn();
         hitsHistory.resetColumn();
         prevBeatPhase = null;

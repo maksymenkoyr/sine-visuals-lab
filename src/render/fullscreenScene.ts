@@ -50,7 +50,7 @@ export function createFullscreenScene(
       getSetting: (key: string) => number,
       /** See Scene.render()'s own `drives` param (scene.ts) — a JS trigger
        *  reads `drives.fired("ripple", anim.lowOnset)`; a continuous JS
-       *  coupling reads `drives.value("driftKick", anim.lowPulse)`. Always
+       *  coupling reads `drives.value("driftPump", anim.lowPulse)`. Always
        *  present here (defaults to PASSTHROUGH_DRIVES when the scene itself
        *  wasn't given one), so an extraUniforms closure never has to guard
        *  against it being undefined. */

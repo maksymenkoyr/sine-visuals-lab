@@ -4,6 +4,7 @@ export interface TimedFrame {
   bands: Float32Array;
   energy: number;
   onset: boolean;
+  pulseOnset: boolean;
   bpm: number;
   level: number;
   roomTimeMs: number;
@@ -31,6 +32,13 @@ export class JitterBuffer {
   private frames: TimedFrame[] = [];
   private lastOnsetRoomTimeMs = -Infinity;
   private lastFiredOnsetRoomTimeMs = -Infinity;
+  // Same one-shot-due-tracking pair as onset above, but for the ungated
+  // pulse onset (see FeatureFrame.pulseOnset) — tempo tracking on a
+  // host/renderer/TV must read this, never lastOnsetRoomTimeMs, or the
+  // silence gate that already dimmed `onset` before it reached the wire
+  // would also starve the beat clock on the other end.
+  private lastPulseRoomTimeMs = -Infinity;
+  private lastFiredPulseRoomTimeMs = -Infinity;
   private bpm = 0;
 
   // Reused across sampleAt() calls to avoid a per-render-tick allocation.
@@ -52,6 +60,7 @@ export class JitterBuffer {
     while (this.frames.length > 2 && this.frames[0].roomTimeMs < cutoff) this.frames.shift();
 
     if (frame.onset) this.lastOnsetRoomTimeMs = frame.roomTimeMs;
+    if (frame.pulseOnset) this.lastPulseRoomTimeMs = frame.roomTimeMs;
     if (frame.bpm > 0) this.bpm = frame.bpm;
   }
 
@@ -107,6 +116,16 @@ export class JitterBuffer {
     if (this.lastOnsetRoomTimeMs <= this.lastFiredOnsetRoomTimeMs) return false;
     if (targetMs < this.lastOnsetRoomTimeMs) return false;
     this.lastFiredOnsetRoomTimeMs = this.lastOnsetRoomTimeMs;
+    return true;
+  }
+
+  /** Same one-shot shape as consumeOnsetIfDue above, off the ungated pulse
+   *  onset instead — what a host/renderer/TV's own beat clock must read for
+   *  tempo tracking (see this class's lastPulseRoomTimeMs doc). */
+  consumePulseIfDue(targetMs: number): boolean {
+    if (this.lastPulseRoomTimeMs <= this.lastFiredPulseRoomTimeMs) return false;
+    if (targetMs < this.lastPulseRoomTimeMs) return false;
+    this.lastFiredPulseRoomTimeMs = this.lastPulseRoomTimeMs;
     return true;
   }
 

@@ -54,6 +54,43 @@ describe("scene setting groups", () => {
     }
   });
 
+  it("each scene's families form one contiguous run and never span a group", () => {
+    // renderSceneSettings() (deviceMenu.ts) opens a fresh `.vc-family` rail
+    // whenever spec.family changes from the previous spec's, and closes it
+    // outright on a group change — a family that reopens after a gap, or
+    // that crosses into a new group mid-run, would silently render as two
+    // separate rails (or a rail whose rows don't share the group heading
+    // above them). Advanced rows don't render inside a family rail at all
+    // (SceneSetting.family's own doc comment), so they're treated the same
+    // as no family here too.
+    for (const scene of listScenes()) {
+      const specs = scene.settings ?? [];
+      const seen = new Set<string>();
+      let lastFamily: string | undefined;
+      let familyGroup: string | undefined;
+      for (const spec of specs) {
+        if (spec.advanced || spec.family === undefined) {
+          lastFamily = undefined;
+          continue;
+        }
+        if (spec.family !== lastFamily) {
+          expect(
+            seen.has(spec.family),
+            `${scene.id}'s "${spec.family}" family is split into more than one run`,
+          ).toBe(false);
+          seen.add(spec.family);
+          familyGroup = spec.group;
+        } else {
+          expect(
+            spec.group,
+            `${scene.id}'s "${spec.family}" family spans a group boundary`,
+          ).toBe(familyGroup);
+        }
+        lastFamily = spec.family;
+      }
+    }
+  });
+
   it("at most one advanced run per group", () => {
     // The advanced-section fold id (deviceMenu.ts's createAdvancedSection
     // call) is keyed by (sceneId, group) only, and its row-count loop scans

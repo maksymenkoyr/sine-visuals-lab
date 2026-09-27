@@ -39,6 +39,7 @@ function frame(overrides: Partial<FeatureFrame> = {}): FeatureFrame {
     energy: 0,
     level: 1,
     onset: false,
+    pulseOnset: false,
     bpm: 120,
     onsetPhase: 0,
     ...overrides,
@@ -368,27 +369,26 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     expect(drives.uniformPair("turbulence")).toEqual({ drive: anim.mid, custom: 1 });
   });
 
-  it("bass and driftKick default to Bass hit, matching anim.lowPulse exactly", () => {
+  it("bass and driftPump default to Bass hit, matching anim.lowPulse exactly", () => {
     const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.7), onset: true });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
     expect(drives.uniformPair("bass")).toEqual({ drive: anim.lowPulse, custom: 1 });
-    expect(drives.value("driftKick", -1)).toBe(anim.lowPulse);
+    expect(drives.value("driftPump", -1)).toBe(anim.lowPulse);
   });
 
-  it("driftBeat and driftChurn default to Beat, matching anim.onset exactly for fired()", () => {
-    const anim = animWith({ onset: true });
+  it("driftPump defaults to Bass hit, matching anim.lowOnset exactly for fired()", () => {
+    const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.9), onset: false });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
-    expect(drives.fired("driftBeat", false)).toBe(anim.onset);
-    expect(drives.fired("driftChurn", false)).toBe(anim.onset);
+    expect(drives.fired("driftPump", false)).toBe(anim.lowOnset);
   });
 
-  it("sparkle, injection, ripple and driftLoud default to Scene", () => {
+  it("sparkle, injection, ripple and driftLevel default to Scene", () => {
     const anim = animWith({});
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
-    for (const key of ["sparkle", "injection", "ripple", "driftLoud"]) {
+    for (const key of ["sparkle", "injection", "ripple", "driftLevel"]) {
       expect(drives.uniformPair(key)).toEqual({ drive: 0, custom: 0 });
       expect(byKey(key).drive!.sceneLabel).toBeTruthy();
     }
@@ -1256,7 +1256,7 @@ describe("drives: Beat wave's every-N-beats divider (DriveSource.every)", () => 
   it("every=1, or absent, is identical to the plain catalogue read", () => {
     const clock = createAnimClock();
     const base = clock.advance(DT, frame());
-    const anim = { ...base, beats: 5.25, tempoLock: 0.8 };
+    const anim = { ...base, metronomeBeats: 5.25, metronomePhase: 0.25, metronomeLevel: 0.8 };
     const engine = createDriveEngine();
     const sceneId = "beatwave-every-identity";
     const specDefault = settingWithDrive("k", "anim.beatWave");
@@ -1273,7 +1273,10 @@ describe("drives: Beat wave's every-N-beats divider (DriveSource.every)", () => 
     const engine = createDriveEngine();
     const sceneId = "beatwave-every-4";
     const spec = patchSetting(sceneId, "k", { mix: "add", sources: [{ choice: "anim.beatWave", weight: 1, every: 4 }] });
-    const valueAt = (beats: number) => engine.forScene(sceneId, [spec], { ...base, beats, tempoLock: 1 }).value("k", -999);
+    // Beat wave follows the metronome (metronomeBeats/metronomePhase/
+    // metronomeLevel), so the test drives those, keeping phase = frac(beats).
+    const at = (beats: number) => ({ ...base, metronomeBeats: beats, metronomePhase: beats - Math.floor(beats), metronomeLevel: 1 });
+    const valueAt = (beats: number) => engine.forScene(sceneId, [spec], at(beats)).value("k", -999);
 
     // Peaks at every multiple of 4 beats...
     for (const b of [0, 4, 8, 12]) expect(valueAt(b)).toBeCloseTo(1, 6);
@@ -1281,7 +1284,7 @@ describe("drives: Beat wave's every-N-beats divider (DriveSource.every)", () => 
     for (const b of [2, 6, 10]) expect(valueAt(b)).toBeCloseTo(0, 6);
     // At beat 1 (not a multiple of 4), every=4 reads far from the peak a
     // plain (every=1) Beat wave would give at that same beat.
-    const plainAt1 = SIGNALS["anim.beatWave"].read(frame(), { ...base, beats: 1, tempoLock: 1 });
+    const plainAt1 = SIGNALS["anim.beatWave"].read(frame(), at(1));
     expect(valueAt(1)).toBeLessThan(plainAt1 - 0.3);
   });
 

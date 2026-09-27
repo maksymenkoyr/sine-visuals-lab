@@ -40,6 +40,16 @@ export const AUTO_SKY = "#59bbfb";
  *  readouts (src/ui/powerCard.ts). */
 export const POWER_TEAL = "#4dd4c0";
 
+/** Colours for a scene setting's `family` (sceneSettings.ts) — each family's
+ *  rows take one in place of SCENE_VIOLET as their own accent — handed out
+ *  in this order as each scene's families first appear (deviceMenu.ts's
+ *  renderSceneSettings), wrapping past the end for a scene with more
+ *  families than colours. Chosen to stay clear of the card accents above
+ *  (SCENE_VIOLET etc.) and of the drive-source colours (driveSources.ts) —
+ *  a family colour and a drive port/cable are two different things on the same
+ *  row and must never be mistaken for each other. */
+export const FAMILY_ACCENTS = ["#8ea2ff", "#f28bd0", "#c9e26b"] as const;
+
 /** Spectrum strip bar tints, one step darker than the card accents they echo. */
 export const STRIP_LOW = "#89e29d";
 export const STRIP_MID = "#c0a2f5";
@@ -125,7 +135,7 @@ const stylesheet = `
  * it), so when one side folds short next to a tall neighbor, the row's own
  * box still covers the gap beside the short side. Left catching clicks,
  * that gap would count as "inside" for deviceMenu.ts's onDocPointerDown
- * (root.contains(target)) and swallow a click meant to close the panel.
+ * (root.contains(target)) and swallow a click meant for the scene.
  * Disabling pointer events on the row itself and re-enabling them on its
  * children (their own boxes correctly hug their real content) lets a click
  * in the gap fall through to whatever's actually behind it. Same reasoning
@@ -175,6 +185,15 @@ const stylesheet = `
 .vc-controls-col {
   width: 314px; flex: none; display: flex; flex-direction: column; gap: 4px;
   max-height: calc(100vh - 74px); overflow-y: auto;
+}
+/* Solo (deviceMenu.ts's setSolo/applySolo): the column takes its full
+ * height and what's left in it sits at the bottom, just above the footer
+ * (wide layout only — stacked, the whole panel is one scroller) —
+ * an auto top margin rather than justify-content: flex-end, which would
+ * make an overflowing pane's top unreachable by scrolling. */
+@media (min-width: ${STACK_BELOW_PX + 1}px) {
+  .vc-root.vc-solo .vc-controls-col { height: calc(100vh - 74px); }
+  .vc-root.vc-solo .vc-controls-col > :not(.vc-solo-hidden):not(.vc-dock) { margin-top: auto; }
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
@@ -285,9 +304,76 @@ const stylesheet = `
 .vc-fold:focus-visible { outline: none; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.7)); }
 
 /* The whole meters column (Bands + the meters strip) hidden by the footer's
- * "Hide meters" button / M (deviceMenu.ts). Outranks the stacked layout's
+ * "Hide left" button / M (deviceMenu.ts). Outranks the stacked layout's
  * display: contents below on specificity, so it holds there too. */
 .vc-root.vc-meters-hidden .vc-spectrum-col { display: none; }
+/* Solo (deviceMenu.ts's applySolo): everything off the paths from the
+ * Scene card and the dock up to the root. !important to beat the inline
+ * and display: contents rules those elements carry in either layout. */
+.vc-solo-hidden { display: none !important; }
+
+/* The footer and the keys list above it, stuck to the bottom of the
+ * controls column so its buttons never scroll out of sight — in the stacked
+ * layout, to the bottom of the screen for as long as the controls last. */
+.vc-dock { position: sticky; bottom: 0; z-index: 2; display: flex; flex-direction: column; }
+
+/* keyHints.ts's hover badge, hold-to-reveal keycaps, and the interactive
+ * keys list below (deviceMenu.ts's keysCard, one row per keyHints.ts's
+ * SHORTCUTS entry).
+ *
+ * A keys-list row's hover/click echo on every live control it names
+ * (deviceMenu.ts's flashOn/clearFlash) — an outline plus one short pulse;
+ * no pointer-events rule needed since this only ever adds a class, never
+ * touches display or position. */
+.vc-key-flash { outline: 1px solid #fff; animation: vc-key-flash-pulse 0.5s ease-out; }
+@keyframes vc-key-flash-pulse {
+  from { box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.35); }
+  to { box-shadow: 0 0 0 5px rgba(255, 255, 255, 0); }
+}
+
+/* Holding Shift (keyHints.ts's hold-to-reveal) shows every tagged
+ * control's own keycap at once — content is the key itself (data-keycap),
+ * so nothing here needs to know what any of them say. .vc-keycap-anchor
+ * opts a normally-static control (a footer button, a row's A/T/↺ chip)
+ * into being its own keycap's positioning context; a control that's
+ * already positioned (index.html's #menuBtn/#fsBtn, both position: fixed)
+ * skips that class — adding position: relative there would fight the
+ * fixed rule via this rule's own higher specificity (two classes beat one),
+ * and fixed already anchors an ::after just fine on its own. The
+ * .vc-block digit badge (deviceMenu.ts's markBlock) carries data-key but
+ * never data-keycap — see keyHints.ts's header — so it never grows one. */
+.vc-keycap-anchor { position: relative; }
+body.vc-keys-reveal [data-keycap]::after {
+  content: attr(data-keycap); position: absolute; top: -7px; right: -7px;
+  min-width: 14px; height: 13px; padding: 0 2px; border-radius: 3px;
+  background: rgba(8, 11, 10, 0.94); border: 1px solid rgba(255, 255, 255, 0.75);
+  color: #fff; font: 600 8.5px/13px ${FONT_MONO}; text-align: center;
+  pointer-events: none; z-index: 41;
+}
+
+/* The keys list itself. Each keyHints.ts SHORTCUTS entry is a full-width
+ * row button (key cap + hint), not a plain two-column definition list, so
+ * it can double as deviceMenu.ts's own click/hover target — the row either
+ * performs its shortcut directly or just flashes every control it names,
+ * depending on whether that's a single action (wireKeysRow). */
+.vc-keys {
+  display: none; flex-direction: column; gap: 1px; padding: 8px 6px;
+  background: rgba(8, 11, 10, 0.72);
+  -webkit-backdrop-filter: blur(20px) saturate(.6) brightness(.5); backdrop-filter: blur(20px) saturate(.6) brightness(.5);
+  border: 1px solid rgba(255, 255, 255, 0.13); border-bottom: none; border-radius: 3px 3px 0 0;
+  font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.75);
+}
+.vc-keys.vc-keys-show { display: flex; }
+.vc-keys-row {
+  display: grid; grid-template-columns: 46px 1fr; gap: 4px 12px; align-items: baseline;
+  width: 100%; background: none; border: none; border-radius: 3px; padding: 4px 6px;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.vc-keys-row:hover, .vc-keys-row:focus-visible { background: rgba(255, 255, 255, 0.09); outline: none; }
+.vc-keys-row:disabled { cursor: default; opacity: 0.55; }
+.vc-keys-key {
+  font: 400 9.5px/1.3 ${FONT_MONO}; letter-spacing: 0.08em; color: #fff; white-space: nowrap;
+}
 
 .vc-scroll { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
 .vc-scroll::-webkit-scrollbar { width: 4px; }
@@ -470,14 +556,15 @@ const stylesheet = `
 /* The patch bay (deviceMenu.ts): a drive row's input port and the row's own
  * pinned/preview highlight.
  *
- * The port's position (a 10px ring at the row's own left edge, facing the
- * meters column which docks to the screen's own left edge — see
+ * The port's position (a 10px ring tucked into the row's top-left corner —
+ * the pinned outline's — inset evenly from both edges, on the side facing
+ * the meters column, which docks to the screen's own left edge — see
  * .vc-spectrum-col above) is a plain class rule rather than deviceMenu.ts's
  * own inline cssText, since drivePortStyle() (deviceMenu.ts) only ever
  * writes colour/border/box-shadow inline — the setting's own plugged
  * sources, and the ring that marks it pinned (solid, glowing) vs merely
  * previewed (a bare outline) — never anything this rule already owns.
- * left is small and positive, not hanging past the row into the card's
+ * left is positive, not hanging past the row into the card's
  * own padding: .vc-row's padding/negative-margin pair (below) means a more
  * negative offset here lands outside .vc-card's own overflow: hidden and
  * gets clipped invisible.
@@ -491,17 +578,47 @@ const stylesheet = `
  * background tint, no border — see the row grammar in this file's own
  * header for why a click is what actually expands the patch panel. */
 .vc-drive-port {
-  position: absolute; left: 1px; top: 15px; width: 10px; height: 10px; border-radius: 50%;
+  position: absolute; left: 6px; top: 6px; width: 10px; height: 10px; border-radius: 50%;
   padding: 0; cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 .vc-drive-port:hover { transform: scale(1.25); }
 .vc-drive-port:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-/* Room for the port at the row's own left edge, so its label/summary text
- * doesn't sit underneath it (createControlRow's driveRowLeftStyle). */
+/* The port sits tucked into the row's top-left corner (the pinned
+ * outline's), inset evenly from both edges — the label and its summary
+ * start just clear of it. */
 .vc-drive-row-left { padding-left: 14px; }
 .vc-row.vc-drive-pinned {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 8%, transparent);
   box-shadow: 0 0 0 1.5px var(--vc-pin-color, ${SCENE_VIOLET});
+}
+/* Solo's eye (deviceMenu.ts's positionSoloEye): fixed on <body> just
+ * outside the pinned row's left edge, under its port, in the pin's colour —
+ * a carved tile with an eye-shaped hole. Shut while everything shows (two
+ * lids meet at a seam, shaded darker toward the hole's edge so together they
+ * read as one rounded bump), lids drawn back (the pupil down in the dark,
+ * the tile glowing) while this setting is the only thing shown — opening
+ * and closing on click only. Very dim at rest so it doesn't compete with
+ * the row; full strength on hover. Each lid scales toward its own edge of the hole — the
+ * upper up, the lower down — so toggling reads as an eye opening and
+ * blinking shut. */
+.vc-solo-eye {
+  position: fixed; z-index: 31; width: 18px; height: 18px; padding: 0;
+  background: none; border: none; cursor: pointer; color: var(--vc-pin-color, ${SCENE_VIOLET});
+  --open: 0;
+}
+.vc-solo-eye svg { width: 18px; height: 18px; display: block; overflow: visible; }
+.vc-eye-lid-top, .vc-eye-lid-bot {
+  transform: scaleY(calc(1 - var(--open)));
+  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.vc-eye-lid-top { transform-origin: 12px 4.6px; }
+.vc-eye-lid-bot { transform-origin: 12px 19.4px; }
+.vc-solo-eye { opacity: 0.28; transition: opacity 0.18s ease; }
+.vc-solo-eye:hover, .vc-solo-eye:focus-visible { opacity: 1; outline: none; }
+.vc-solo-eye.vc-solo-eye-on { --open: 1; }
+.vc-solo-eye.vc-solo-eye-on svg { filter: drop-shadow(0 0 3px var(--vc-pin-color, ${SCENE_VIOLET})); }
+@media (prefers-reduced-motion: reduce) {
+  .vc-eye-lid-top, .vc-eye-lid-bot { transition: none; }
 }
 .vc-row.vc-drive-preview {
   background-color: color-mix(in srgb, var(--vc-pin-color, ${SCENE_VIOLET}) 6%, transparent);

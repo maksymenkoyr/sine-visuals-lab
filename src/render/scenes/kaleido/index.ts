@@ -99,8 +99,8 @@ const BEAT_SWELL = 0.07;
 const FLOW_RATE_MIN = 0.2;
 const FLOW_RATE_MAX = 3.0;
 const FLOW_BASS_GAIN = 1.2;
-/** Beat surge on the flow: a damped velocity impulse (caustics' lurch shape),
- *  not a phase jump — a jump moved every band a step in one frame, which read
+/** Beat surge on the flow: kaleido's own damped velocity impulse, not a phase
+ *  jump — a jump moved every band a step in one frame, which read
  *  as the picture being redrawn rather than pushed. Total displacement per
  *  beat at Beat surge = 1 is SURGE_BANDS regardless of softness; the Surge
  *  ease slider sets how long the push lasts, from SURGE_TAU_SNAPPY to

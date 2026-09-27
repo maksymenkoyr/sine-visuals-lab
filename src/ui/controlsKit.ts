@@ -482,6 +482,12 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   resetBtn.textContent = "↺";
   resetBtn.title = `Reset ${spec.label} (R)`;
   resetBtn.style.cssText = rowResetStyle;
+  // data-key/data-keycap (src/ui/keyHints.ts): shares the "reset" id every
+  // other row's own ↺ carries, so a keys-list hover/held Shift reaches this
+  // one too.
+  resetBtn.classList.add("vc-keycap-anchor");
+  resetBtn.dataset.key = "reset";
+  resetBtn.dataset.keycap = "R";
   if (spec.signals) right.appendChild(spec.signals.chip);
   right.append(readout, status, resetBtn);
   head.append(label, right);

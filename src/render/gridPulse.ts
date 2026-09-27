@@ -17,6 +17,14 @@
 // Band edges (lowOnset/midOnset/highOnset) are deliberately not gridded —
 // they *are* hits by definition (a low onset is a kick), and a scene reads
 // them for that.
+//
+// This module's own fallback is deliberate, not a gap to close: "the
+// tracker's beat when it's sure, raw hits when it isn't" is what the plain
+// Beat grid choice has always meant. A source that's *always* an evenly
+// spaced metronome regardless of how sure the tracker is — never the raw
+// hits, never wavering with a live estimate — is metronome.ts instead
+// (src/render/signals.ts's anim.metronome/anim.metronomeBar); the two are
+// exposed as separate drive sources rather than one setting doing both.
 
 export const GRID_LOCK_ON = 0.35;
 export const GRID_LOCK_OFF = 0.2;

@@ -8,14 +8,13 @@ spray-injection layer riding on top. Ships from the initial commit and is on mai
 ## Where the code is
 
 - `src/render/scenes/caustics.ts` — the scene module (`createFullscreenScene`,
-  `SETTINGS`, the `FRAG` template, an `extraUniforms` closure that advances the
-  drift phase, the beat lurch, beat churn, kick jolt, loudness-swell
-  calibration and Beat ripple's own emitter/profile every frame).
+  `SETTINGS`, the `FRAG` template, and an `extraUniforms` closure that advances the
+  drift phase, Speed pump's own accumulator, loudness-swell calibration and
+  Beat ripple's own emitter/profile every frame).
 - Its response math is factored into small pure functions exported specifically so
   `tests/caustics.test.ts` can pin them directly: `focusSharp`, `fogRestingSharp`,
-  `fogFloorCut`, `causticDensityScale`, `driftRatePerSec`, `loudSpeedFactor`,
-  `advanceLoudSwell`, `loudSwellDrive`, `advanceLurch`, `advanceKickJolt`,
-  `driftFlows`, and the `sparkle*` helpers.
+  `fogFloorCut`, `causticDensityScale`, `driftRatePerSec`, `advanceLoudSwell`,
+  `loudSwellDrive`, `advancePump`, `driftFlows`, and the `sparkle*` helpers.
 - `src/render/scenes/rippleEmitter.ts` — Beat ripple's own continuous ring
   emitter: `advanceEmission` conditions the driver's own rise each frame into
   a launched ring amount, `createRippleEmitter` keeps every ring in flight as
@@ -404,6 +403,52 @@ reference-measurement workflow used by later scenes.
   >5× the peak-to-peak slope; hits every 2 s keep Ring width. Stills at 240
   bpm still don't show ring spacing legibly, like every Caustics still — to
   be judged live.
+- 2026-09-27 — Beat surge, Kick surge and Loudness surge collapsed into two
+  dials: Speed boost and Speed pump. Beat surge and Kick surge were the same
+  motion (a rate surge plus an additive phase impulse) on two different
+  hit sources, and the per-setting drive picker already lets one dial
+  choose which hit it reacts to — a second dial for "the other hit" no
+  longer earned its keep. Beat surge in particular had also stopped
+  working as advertised: it read `drives.fired()`, a boolean edge, so
+  wiring it to a level or line source silently kept firing only on
+  onsets rather than reading that source's level. The user asked for two
+  motions instead: an instant, level-following speed increase ("direct
+  increase to drift speed based on current level of energy") and a
+  push that decays back to the Drift-speed base rather than tracking its
+  input directly ("energy would pump up drift speed but it would slowly be
+  going back to the one set by drift... like push acceleration in a car").
+  Speed boost (`driftLevel`) is `LEVEL_GAIN * driftLevel * levelValue` added
+  straight onto the rate — `levelValue` is this scene's own calibrated
+  loudness (`advanceLoudSwell`) by default, same reasoning as the old
+  Loudness surge, just linear instead of a geometric swing about a neutral
+  pivot. Speed pump (`driftPump`) replaced `advanceLurch`/`advanceKickJolt` with a
+  single accumulator (`advancePump`): a hit accelerates a velocity
+  (`PUMP_ACCEL`) that decays exponentially (`PUMP_RELEASE_SEC`) and is
+  capped (`PUMP_VEL_CAP`), added onto the rate the same additive way. Both
+  terms are additive rather than multiplicative on the Drift-speed base —
+  the reason either one still moves the pool with Drift speed at 0 — so
+  `DRIFT_RATE_MAX` is now a generous backstop the additive model can't
+  reach on its own rather than a value the design tries to walk up to.
+  Beat churn's own envelope decay constant was renamed from
+  `LURCH_DECAY_PER_SEC` to `CHURN_DECAY_PER_SEC` (same value) now that it's
+  no longer shared with a lurch; its behavior is unchanged.
+- 2026-09-27 — Beat churn removed: it spiked `warpAmt` (the domain warp) on
+  every onset with its own ~110ms decay, reshaping the whole field each beat —
+  "too chaotic" against the rest of Motion's beat-locked dials, and a
+  duplicate of `uTurbulence`'s existing warpAmt channel besides (Mid
+  turbulence already reshapes the filaments, and its drive picker already
+  lets it react to Any hit instead of only the mid band). Wire Turbulence to
+  a hit source for the same beat-locked reshaping in its place.
+  `CHURN_DECAY_PER_SEC`/`CHURN_GAIN`/`uChurnDrive`/`churnPulse` are gone with
+  it.
+- 2026-09-27 — Drift speed, Speed boost and Speed pump grouped into a shared
+  colour family (`SceneSetting.family`, a new generic device-menu mechanism —
+  see `sceneSettings.ts`, `controlsTheme.ts`'s `FAMILY_ACCENTS` and
+  `deviceMenu.ts`'s `renderSceneSettings`) so the three read visibly as one
+  thing — "all that is about drift speed" — in the panel instead of three
+  unrelated Motion rows. A first cut added a left rail, an indent and a
+  caption; the user asked for just the colour ("colour is enough"), so the
+  rows sit flush and only their accent changes.
 
 ## Tuning notes
 
@@ -415,9 +460,9 @@ reference-measurement workflow used by later scenes.
   specifically to keep the ridge's `pow()` short of a step function — past that
   point it "pixel-ladders" into a rainbow-fringed stair-step, worst exactly where
   the domain warp bunches several octaves' contours together and exactly on a beat
-  (when sharp jumps). A maxed Focus snap against a maxed Beat churn is the case to
-  eyeball for it.
-- Loudness surge reads `advanceLoudSwell`'s own slow-contracting (tens-of-seconds)
+  (when sharp jumps). A maxed Focus snap against a maxed Mid turbulence is the case
+  to eyeball for it.
+- Speed boost reads `advanceLoudSwell`'s own slow-contracting (tens-of-seconds)
   calibration of `FeatureFrame.level`, not `frame.energy`, so it settles into the
   room or playback's own observed range instead of re-normalizing away the very
   quiet-vs-loud contrast it exists to show.
@@ -428,6 +473,9 @@ reference-measurement workflow used by later scenes.
   `advanceEmission` reads whatever the picked source's continuous reading does
   and launches a ring for its own rise, busy or not (see the 2026-09-27
   Decisions entries).
+- Speed boost and Speed pump are both additive on top of the Drift-speed base
+  (`driftRatePerSec`), not multipliers on it, which is why either one still
+  moves the pool with Drift speed itself parked at 0.
 - Drift speed's default reproduces the scene's original wander speed exactly (see
   the `driftRatePerSec` regression test, which exists because an earlier version of
   this constant doubled up an attenuation already baked into the flow term and ran
@@ -458,13 +506,10 @@ reference-measurement workflow used by later scenes.
 
 ## Known issues and next steps
 
-- Kick surge and Beat churn still hand-roll their own trigger/hold/decay logic in
-  this file rather than using the shared beat-listener module that later scenes
-  are meant to converge on; migrating them was flagged as a follow-up but is not
-  done. Beat ripple no longer belongs on this list — it isn't a trigger/hold/
-  decay design at all (`rippleEmitter.ts`, the 2026-09-27 Decisions entries),
-  which is exactly the family of problem trigger+hold+refractory
-  (`beatListener.ts`'s own model) can't solve for a busy or continuous driver.
+- Nothing in this file hand-rolls trigger/hold/decay logic any more: Kick
+  surge and Beat churn were removed on main (Speed pump replaced them), and
+  Beat ripple is a continuous emitter (`rippleEmitter.ts`), not a trigger
+  design, so the shared beat-listener migration no longer applies here.
 - Two older pull-request prototypes this scene's audio coupling grew from — the
   "Flash from level" crossfade and the "Sparkle from line" drive — landed as
   discrete alternative sources on those rows' own pickers rather than as separate

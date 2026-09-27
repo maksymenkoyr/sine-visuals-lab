@@ -148,6 +148,55 @@
         bottom: 16px;
         right: 16px;
       }
+      /* The gear doubles as the panel's close button, and says so: open
+       * (aria-pressed, set by deviceMenu.ts's open/close), it spins half a
+       * turn while its teeth retract, and a red cross springs out of the
+       * hub. The red is controlsTheme.ts's HOT_RED; this pressed ring
+       * overrides that file's shared .iconBtn[aria-pressed] one for the
+       * gear alone. */
+      /* app.ts shows the button with an inline display: block, so the icon is
+       * centred by margin, not flex: (36 - 2px border - 18) / 2. */
+      #menuBtn svg { width: 18px; height: 18px; display: block; margin: 8px auto; overflow: visible; }
+      #menuBtn .mb-gear {
+        transform-origin: 12px 12px;
+        transform: rotate(var(--gr, 0deg));
+        transition: transform 0.46s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      #menuBtn:not([aria-pressed="true"]):hover .mb-gear { --gr: 18deg; }
+      #menuBtn[aria-pressed="true"] .mb-gear { --gr: 180deg; }
+      #menuBtn .mb-ring {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.3;
+        transform-origin: 12px 12px;
+        transform: scale(var(--rs, 1));
+        transition: transform 0.34s cubic-bezier(0.4, 0, 0.2, 1) 0.04s, opacity 0.28s ease 0.04s;
+      }
+      #menuBtn .mb-tooth {
+        fill: currentColor;
+        transform-origin: 12px 12px;
+        transform: rotate(var(--a)) scaleY(var(--ts, 1));
+        transition: transform 0.36s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.28s ease;
+      }
+      #menuBtn .mb-bar {
+        fill: #ef4444;
+        opacity: 0;
+        transform-origin: 12px 12px;
+        transform: rotate(var(--a)) scaleY(var(--bs, 0));
+        transition: transform 0.36s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.24s ease;
+      }
+      #menuBtn[aria-pressed="true"] .mb-ring { --rs: 0.3; opacity: 0; }
+      #menuBtn[aria-pressed="true"] .mb-tooth { --ts: 0; opacity: 0; }
+      #menuBtn[aria-pressed="true"] .mb-bar { --bs: 1; opacity: 1; transition-delay: 0.14s; }
+      #menuBtn[aria-pressed="true"] { border-color: rgba(239, 68, 68, 0.55); }
+      #menuBtn[aria-pressed="true"]:hover { border-color: rgba(239, 68, 68, 0.8); box-shadow: 0 0 14px rgba(239, 68, 68, 0.45); }
+      @media (prefers-reduced-motion: reduce) {
+        #menuBtn .mb-gear, #menuBtn .mb-ring, #menuBtn .mb-tooth, #menuBtn .mb-bar {
+          transition-property: opacity !important;
+          transition-duration: 0.18s !important;
+          transition-delay: 0s !important;
+        }
+      }
       #fsBtn {
         bottom: 16px;
         right: 58px; /* one button and a 6px gap in from #menuBtn */
@@ -225,6 +274,12 @@
        * file is plain HTML, not a templated stylesheet, so these values
        * (font, colors, radius) are kept in sync with src/ui/controlsTheme.ts
        * by hand rather than importing it. */
+      /* The scene keeps playing a demo groove behind this prompt (see
+       * renderIdlePreview in app.ts), so the prompt sits on its own frosted
+       * card: whatever the scene draws underneath — a white flash, a busy
+       * field — the copy keeps the same dark ground and stays readable. The
+       * blur is the nicety; the near-opaque fill alone carries contrast where
+       * backdrop-filter isn't supported. */
       #audioPrompt {
         position: fixed;
         left: 50%;
@@ -234,9 +289,46 @@
         display: none;
         flex-direction: column;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
+        box-sizing: border-box;
+        width: max-content;
+        max-width: calc(100vw - 32px);
+        padding: 14px 18px 16px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 3px;
+        background: rgba(6, 6, 10, 0.88);
+        -webkit-backdrop-filter: blur(14px) saturate(1.2);
+        backdrop-filter: blur(14px) saturate(1.2);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
         font: 400 13px/1.4 "Chakra Petch", system-ui, sans-serif;
         color: #fff;
+      }
+      /* Says why the scene is already moving: it's the demo feed, not the
+       * room. Mono caps like #audioPromptLabel, with a softly pulsing dot. */
+      #audioPromptDemo {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font: 400 10px "Share Tech Mono", ui-monospace, monospace;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.6);
+      }
+      .apDemoDot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #fff;
+        flex: none;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .apDemoDot {
+          animation: ap-demo-pulse 1s ease-out infinite;
+        }
+        @keyframes ap-demo-pulse {
+          0% { opacity: 1; box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.5); }
+          100% { opacity: 0.35; box-shadow: 0 0 0 6px rgba(255, 255, 255, 0); }
+        }
       }
       #audioPromptRow {
         display: flex;
@@ -249,22 +341,33 @@
        * (src/ui/gallery.ts) — mono caps, a shimmer sweeping toward the
        * buttons and a nudging arrow — kept in sync by hand, like the rest of
        * this block. No [data-prompting] toggle needed: the whole prompt only
-       * shows while nothing is listening. */
+       * shows while nothing is listening. The one deliberate difference is a
+       * brighter resting tone (label and shimmer), since this copy sits over
+       * a moving scene rather than the gallery's flat masthead. */
       #audioPromptLabel {
         margin-right: 10px;
         font: 400 10.5px "Share Tech Mono", ui-monospace, monospace;
         letter-spacing: 0.14em;
         text-transform: uppercase;
         white-space: nowrap;
-        color: rgba(255, 255, 255, 0.55);
+        color: rgba(255, 255, 255, 0.7);
       }
       .apHintArrow {
         display: inline-block;
         margin-left: 0.6em;
       }
+      /* On a phone the label can't share a row with both buttons, so it
+       * takes its own line above them rather than wrapping beside one. */
+      @media (max-width: 480px) {
+        #audioPromptLabel {
+          flex-basis: 100%;
+          margin-right: 0;
+          text-align: center;
+        }
+      }
       @media (prefers-reduced-motion: no-preference) {
         .apHintText {
-          background: linear-gradient(90deg, rgba(255, 255, 255, 0.45) 40%, #fff 50%, rgba(255, 255, 255, 0.45) 60%) 100% 0 / 250% 100%;
+          background: linear-gradient(90deg, rgba(255, 255, 255, 0.6) 40%, #fff 50%, rgba(255, 255, 255, 0.6) 60%) 100% 0 / 250% 100%;
           -webkit-background-clip: text;
           background-clip: text;
           color: transparent;
@@ -317,7 +420,7 @@
         max-width: min(420px, 88vw);
         text-align: center;
         font: 400 12px/1.45 system-ui, sans-serif;
-        color: #fff9;
+        color: rgba(255, 255, 255, 0.72);
       }
 
       /* The page's h1 and product blurb are for crawlers and screen readers
@@ -351,9 +454,26 @@
       <button id="stopBtn" class="iconBtn" title="Stop listening and release the audio source">STOP MIC</button>
       <button id="panelBtn" class="iconBtn" title="Screens paired to this room">&#9638; ROOM</button>
     </div>
-    <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false">&#9974;</button>
-    <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)">&#9881;</button>
+    <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false" data-key="fullscreen" data-keycap="F">&#9974;</button>
+    <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)" data-key="panel" data-keycap="S">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <g class="mb-gear">
+          <circle class="mb-ring" cx="12" cy="12" r="6" />
+          <rect class="mb-tooth" style="--a: 0deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 45deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 90deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 135deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 180deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 225deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 270deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 315deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+        </g>
+        <rect class="mb-bar" style="--a: 45deg" x="10.8" y="3.7" width="2.4" height="16.6" rx="1.2" />
+        <rect class="mb-bar" style="--a: -45deg" x="10.8" y="3.7" width="2.4" height="16.6" rx="1.2" />
+      </svg>
+    </button>
     <div id="audioPrompt">
+      <div id="audioPromptDemo"><span class="apDemoDot"></span><span>Playing demo audio</span></div>
       <div id="audioPromptRow">
         <span id="audioPromptLabel" hidden><span class="apHintText">Pick a source to start</span><span class="apHintArrow">›</span></span>
         <button id="audioPromptMicBtn"><span class="apDot"></span><span id="audioPromptMicLabel">Tap to enable mic</span></button>
