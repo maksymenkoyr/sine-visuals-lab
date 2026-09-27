@@ -6,8 +6,8 @@ singletons, stacked in overlapping translucent depth layers and seen in
 shallow perspective. Every beat kicks slab height and slat brightness; band
 thickness and flutter track the high band and overall energy continuously;
 the whole layout re-forms on a slow crossfade and can restart early at a bar
-boundary. Featured on `main` (graduated out of `DRAFT_SCENE_IDS` in the same
-PR that added it).
+boundary. Draft, on `main` (featured from the PR that added it until
+2026-09-27, when the user moved it back behind the draft toggle).
 
 ## Where the code is
 
@@ -98,6 +98,9 @@ layers never overlapped so nothing stacked toward white.
 - **PR #100 (merged 2026-09-18).** Shipped the scene and, in the same PR,
   graduated it out of `DRAFT_SCENE_IDS` — first among the scenes so listed —
   rather than landing it as a draft.
+- **2026-09-27 — back to draft.** Added to `draftIds` in
+  `src/render/scenes/index.ts` on the user's call, in the same change that
+  featured Physarum 2 (and, via its own PR, Sky). Code untouched.
 
 ## Tuning notes
 

@@ -69,8 +69,9 @@ registerScene(ferrofluidScene);
  *  the featured scenes registered above it are deliberately absent. Paid
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
-  "physarum2",
   "silk",
+  "slats",
+  "physarum",
   "gates",
   "tessera",
   "ink",
