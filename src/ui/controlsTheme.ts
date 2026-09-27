@@ -343,6 +343,17 @@ const stylesheet = `
  * AUTO_HOLDING_HINT) — a second line in the auto system's colour, shown only
  * while auto holds the row, so the description above it stays readable. */
 .vc-hint-auto { color: ${withAlpha(AUTO_SKY, 0.85)}; }
+/* The short line before a colour word in any hint (hintSwatches.ts),
+ * drawn like a meter trace: a thin stroke in the colour (set as its color on
+ * the element) with a soft glow of itself. The word and its line never
+ * wrap apart; the faint ring keeps a black line visible on the dark panel. */
+.vc-swatch-word { white-space: nowrap; }
+.vc-swatch {
+  display: inline-block; width: 1.1em; height: 2px; margin-right: 0.3em;
+  border-radius: 1px; vertical-align: 0.3em; background: currentColor;
+  box-shadow: 0 0 4px currentColor, 0 0 0 0.5px rgba(255, 255, 255, 0.25);
+}
+.vc-swatch-bare .vc-swatch { margin: 0 0.1em; }
 
 /* A row's "reacts to" strip (controlsKit.ts's createSignalStrip) — a sibling
  * of .vc-hint above, not nested inside it, so the two reveal independently:

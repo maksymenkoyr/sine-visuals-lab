@@ -61,6 +61,7 @@ import {
 // createAudioMeters actually call across the two at runtime, well after
 // both modules have finished loading).
 import { createControlRow } from "./deviceMenu.ts";
+import { setHintText } from "./hintSwatches.ts";
 
 /**
  * The meters under the spectrum card: everything the audio pipeline already
@@ -713,6 +714,10 @@ export interface MeterRowSpec {
   /** The hint that unfolds on hover/tap. Omit for a row that explains
    *  itself (the waveform) — no hint, and nothing to focus for. */
   description?: string;
+  /** The colour a word in `description` stands for when it names a trace
+   *  drawn in a specific colour (hintSwatches.ts) — "red" beat ticks are
+   *  `BEAT_COLOR`, not the generic red. */
+  hintColors?: Readonly<Record<string, string>>;
   /** Fixed marks at these fractions of the track — the dials' NEUTRAL, the
    *  Loudness card's targets. A labelled tick gets its text just under the
    *  track. */
@@ -782,7 +787,7 @@ export function createMeterRow(spec: MeterRowSpec) {
 
   const hint = document.createElement("div");
   hint.className = "vc-hint";
-  hint.textContent = spec.description ?? "";
+  setHintText(hint, spec.description ?? "", spec.hintColors);
   if (!spec.description) hint.style.display = "none";
 
   el.append(head, meter, hint);
@@ -1220,7 +1225,7 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
         const hint = hitsRuleHint(getSilenceGate);
         if (hint !== lastHint) {
           lastHint = hint;
-          row.el.querySelector<HTMLElement>(".vc-hint")!.textContent = hint;
+          setHintText(row.el.querySelector<HTMLElement>(".vc-hint")!, hint);
         }
       }
     },
@@ -1589,6 +1594,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     unit: "s",
     description:
       "Level against the two Input-card marks (dashed), zoomed in so the upper mark sits mid-height. Green ticks are beats that fired; red ticks are hits the gate stopped because the room was too quiet.",
+    hintColors: { green: INPUT_GREEN, red: HOT_RED },
   });
   // Paint order: the two tick series first, then Dimmer, then Level on top
   // — the same "Level lands last" order Signal's own History uses. A tick
@@ -1683,6 +1689,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     unit: "s",
     description:
       "Detected beats (red) against the tracker's predicted grid (blue, tall when locked, short when unsure). On the grid is locked; between ticks is a double; a tick with nothing under it is a miss.",
+    hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
   });
   const beatTrace = createTraceStrip(
     [
@@ -1707,6 +1714,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     unit: "s",
     description:
       "Beat wave (red) and bar wave (blue): a smooth swing that peaks on every beat, or once a bar. It fades out while the tempo isn't locked. Plug either into a setting to make it sway in time.",
+    hintColors: { red: BEAT_COLOR, blue: BEAT_GRID_COLOR },
   });
   const waveTrace = createTraceStrip(
     [
