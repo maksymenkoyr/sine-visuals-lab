@@ -80,6 +80,7 @@ import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
+  FAMILY_ACCENTS,
   FONT_LABEL,
   FONT_MONO,
   GLASS_FILTER,
@@ -4242,8 +4243,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // `specs` is the active scene's full settings list, needed only to resolve
   // a SignalLink.activeWhen predicate against a *sibling* setting by key
   // (spec.reads below) — every other branch here only ever touches `spec`
-  // itself.
-  function appendSettingRow(container: HTMLElement, sceneId: string, spec: SceneSetting, specs: SceneSetting[]): void {
+  // itself. `accent` defaults to the Scene card's usual SCENE_VIOLET;
+  // renderSceneSettings passes a family's own colour instead for a row
+  // in a family (spec.family), so the A/T chips — styled
+  // directly from this parameter, not from the row's `--vc-accent` CSS
+  // variable — tint correctly too.
+  function appendSettingRow(
+    container: HTMLElement,
+    sceneId: string,
+    spec: SceneSetting,
+    specs: SceneSetting[],
+    accent: string = SCENE_VIOLET,
+  ): void {
     // A sibling setting's live (auto-aware) value, by key — what a
     // SignalLink.activeWhen predicate reads (see signals.ts's SignalLink doc
     // comment). Falls back to 0 for an unknown key rather than throwing: a
@@ -4320,12 +4331,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const signals = reads?.length
         ? createSignalStrip(
             reads.map((r) => ({ label: r.signal.label, description: r.signal.description, onReveal: r.onReveal })),
-            SCENE_VIOLET,
+            accent,
           )
         : undefined;
       const picker = createPickerRow({
         label: spec.label,
-        accent: SCENE_VIOLET,
+        accent,
         options: spec.options,
         defaultValue: deps.getSceneSettingDefault(sceneId, spec),
         description: spec.description,
@@ -4363,7 +4374,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (spec.type === "boolean") {
       const toggleEl = createToggleRow({
         label: spec.label,
-        accent: SCENE_VIOLET,
+        accent,
         defaultValue: deps.getSceneSettingDefault(sceneId, spec),
         description: spec.description,
         get: () => deps.getSceneSettingValue(sceneId, spec),
@@ -4383,7 +4394,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
     const row = createControlRow({
       label: spec.label,
-      accent: SCENE_VIOLET,
+      accent,
       min: spec.min,
       max: spec.max,
       step: spec.step,
@@ -4444,6 +4455,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // spec.advanced entries is being appended into, or null between runs —
     // reset whenever a group heading appears so a run never spans a group.
     let advancedBody: HTMLElement | null = null;
+    // familyAccents hands out FAMILY_ACCENTS (SceneSetting.family) in the
+    // order this scene's family names are first seen, wrapping past the
+    // end, and remembers the assignment for the rest of this render so
+    // every row of a family gets the same colour.
+    const familyAccents = new Map<string, string>();
+    const accentForFamily = (family: string): string => {
+      let accent = familyAccents.get(family);
+      if (!accent) {
+        accent = FAMILY_ACCENTS[familyAccents.size % FAMILY_ACCENTS.length];
+        familyAccents.set(family, accent);
+      }
+      return accent;
+    };
     for (let i = 0; i < specs.length; i++) {
       const spec = specs[i];
       const groupChanged = spec.group !== undefined && spec.group !== lastGroup;
@@ -4457,6 +4481,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       lastGroup = spec.group;
 
       if (spec.advanced) {
+        // Families don't reach into an advanced run — see SceneSetting.family's
+        // own doc comment (sceneSettings.ts).
         if (!advancedBody) {
           if (!groupChanged && !first) sceneRows.appendChild(spacer());
           let count = 1;
@@ -4479,7 +4505,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
       if (!groupChanged && !first) sceneRows.appendChild(spacer());
       first = false;
-      appendSettingRow(sceneRows, sceneId, spec, specs);
+      // A family's own colour rides straight in as this row's `accent` (not
+      // a post-hoc --vc-accent override) so the A/T chips — styled directly
+      // from the accent passed to createControlRow/createPickerRow/
+      // createToggleRow, not from that CSS variable — tint correctly too,
+      // not just the slider fill and label.
+      const accent = spec.family !== undefined ? accentForFamily(spec.family) : SCENE_VIOLET;
+      appendSettingRow(sceneRows, sceneId, spec, specs, accent);
     }
 
     // The Scene card title is itself the block only when the active scene

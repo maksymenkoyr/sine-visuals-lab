@@ -40,6 +40,16 @@ export const AUTO_SKY = "#59bbfb";
  *  readouts (src/ui/powerCard.ts). */
 export const POWER_TEAL = "#4dd4c0";
 
+/** Colours for a scene setting's `family` (sceneSettings.ts) — each family's
+ *  rows take one in place of SCENE_VIOLET as their own accent — handed out
+ *  in this order as each scene's families first appear (deviceMenu.ts's
+ *  renderSceneSettings), wrapping past the end for a scene with more
+ *  families than colours. Chosen to stay clear of the card accents above
+ *  (SCENE_VIOLET etc.) and of the drive-source colours (driveSources.ts) —
+ *  a family colour and a drive port/cable are two different things on the same
+ *  row and must never be mistaken for each other. */
+export const FAMILY_ACCENTS = ["#8ea2ff", "#f28bd0", "#c9e26b"] as const;
+
 /** Spectrum strip bar tints, one step darker than the card accents they echo. */
 export const STRIP_LOW = "#89e29d";
 export const STRIP_MID = "#c0a2f5";

@@ -304,27 +304,26 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     expect(drives.uniformPair("turbulence")).toEqual({ drive: anim.mid, custom: 1 });
   });
 
-  it("bass and driftKick default to Bass hit, matching anim.lowPulse exactly", () => {
+  it("bass and driftPump default to Bass hit, matching anim.lowPulse exactly", () => {
     const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.7), onset: true });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
     expect(drives.uniformPair("bass")).toEqual({ drive: anim.lowPulse, custom: 1 });
-    expect(drives.value("driftKick", -1)).toBe(anim.lowPulse);
+    expect(drives.value("driftPump", -1)).toBe(anim.lowPulse);
   });
 
-  it("driftBeat and driftChurn default to Beat, matching anim.onset exactly for fired()", () => {
-    const anim = animWith({ onset: true });
+  it("driftPump defaults to Bass hit, matching anim.lowOnset exactly for fired()", () => {
+    const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.9), onset: false });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
-    expect(drives.fired("driftBeat", false)).toBe(anim.onset);
-    expect(drives.fired("driftChurn", false)).toBe(anim.onset);
+    expect(drives.fired("driftPump", false)).toBe(anim.lowOnset);
   });
 
-  it("sparkle, injection, ripple and driftLoud default to Scene", () => {
+  it("sparkle, injection, ripple and driftLevel default to Scene", () => {
     const anim = animWith({});
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
-    for (const key of ["sparkle", "injection", "ripple", "driftLoud"]) {
+    for (const key of ["sparkle", "injection", "ripple", "driftLevel"]) {
       expect(drives.uniformPair(key)).toEqual({ drive: 0, custom: 0 });
       expect(byKey(key).drive!.sceneLabel).toBeTruthy();
     }

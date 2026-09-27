@@ -37,7 +37,7 @@ const NOISE_FLOOR = 0.04;
 // envelopes below. Without this, every band's variation was beat-to-beat
 // only — energy and level swung in lockstep with the metronome but carried
 // no longer, quieter/louder arc across a stretch of audio, so a feature
-// driven by real dynamic range (Caustics' Loudness surge, see
+// driven by real dynamic range (Caustics' Speed boost, see
 // render/scenes/caustics.ts's advanceLoudSwell) had nothing to calibrate
 // against on this feed: it would settle near neutral forever regardless of
 // whether the feature actually worked. Long enough (multiple bars at typical
