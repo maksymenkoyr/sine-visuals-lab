@@ -329,6 +329,18 @@ and `powder.ts`'s curl noise).
 - **2026-09-27, featured.** Taken out of `draftIds` on the user's call, in
   the same change that moved Physarum and Slats behind the draft toggle.
   Code untouched.
+- **2026-09-27, Affinity rethink (prototype only).** The user found the
+  word chips limiting (`RELATION_WORDS` can only write five points of the
+  −1.5…+1.5 `att<i><j>` range, and a preset's in-between value is lost on
+  the first click) and the block "not fun, not comfortable". Agreed so far:
+  continuous sliders with the words as landmarks under the track, **no
+  snap**, and a Random button that re-mixes the table. Before building,
+  the user asked for interface ideas: "Affinity Studio" (Materials) shows
+  Pairs (one 2D pad per pair, both directions in one drag, corners named
+  Merge/Wall/Chase, each pad a live two-strain culture), Orbit (drag a
+  trail closer to follow it) and Rows (the agreed sliders), plus Random,
+  Nudge, Keep own trails, Auto and a strip of past mixes with snapshots.
+  Waiting on the user's pick.
 
 ## Tuning notes
 
@@ -355,7 +367,9 @@ applies there too. Tuned so far only against the synthetic feed at
   the affinity, drag them in to follow / out to avoid, rings for the five
   words, own-trail as the centre's halo) plus a live one-line summary
   ("PP-C3 chases PP-A1 and PP-B2, runs from PP-D4 …"); presets unchanged.
-  The user wanted a prototype-first round for panel UX before.
+  The user wanted a prototype-first round for panel UX before. Now
+  prototyped with two alternatives in "Affinity Studio" (Decisions,
+  2026-09-27 Affinity rethink); waiting on the user's pick.
 - "Dose" confused the user: it is the share of all agents moved into one new
   colony per trigger (default a beat-pulse rise), and the share each Pipette
   tap converts. At 0.48 half the dish jumps every beat and the rest goes
@@ -425,6 +439,10 @@ applies there too. Tuned so far only against the synthetic feed at
   strain-motion mapping and pure-culture preview), `engine.js` (fake-music
   engine from the drives prototypes); `node build.mjs` writes the page,
   `node look.mjs [--click]` screenshots it at wide and phone width.
+- Artifact "Affinity Studio" (Affinity interface ideas, private):
+  https://claude.ai/artifact/7Ja3hE75HJecRHF29bRHiY — self-contained source
+  `physarum2/artifacts/affinity-studio.html` (publish it as is; its culture
+  is `lab.src.html`'s dish stepper generalised to any subset of strains).
 - No `/ref` bundle. Headless shots for tuning:
   `docs/scenes/_shared/scripts/shot.mjs --scene physarum2 --bpm 120
   --settings '{…}'` (the session's scratch variant only differed in taking a
