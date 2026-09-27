@@ -144,6 +144,7 @@ import { createControlPanel } from "./ui/controlPanel.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
+import { noteKeyUse } from "./ui/keyHints.ts";
 
 type Mode = "solo" | "host" | "renderer";
 type AnyConn = HostConnection | RendererConnection;
@@ -1137,12 +1138,18 @@ async function boot(): Promise<void> {
     // pass through untouched instead of driving these — mirrors the guard
     // deviceMenu.ts's own document-level handler already uses.
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    if (e.key === "f" || e.key === "F") immersive?.toggle();
+    if (e.key === "f" || e.key === "F") {
+      noteKeyUse("fullscreen");
+      immersive?.toggle();
+    }
     // Only live in a viz — the exact condition that shows menuBtn itself
     // (enterViz/exitToGallery below), so the key and the gear it mirrors
     // appear and disappear together. Reuses the same toggle() the gear's
     // click handler calls, rather than reimplementing open/close here.
-    if ((e.key === "s" || e.key === "S") && inViz) deviceMenu?.toggle();
+    if ((e.key === "s" || e.key === "S") && inViz) {
+      noteKeyUse("panel");
+      deviceMenu?.toggle();
+    }
     if (e.key === "Escape") {
       if (immersive?.active()) {
         immersive.exit();

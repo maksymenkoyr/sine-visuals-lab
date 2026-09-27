@@ -148,6 +148,55 @@
         bottom: 16px;
         right: 16px;
       }
+      /* The gear doubles as the panel's close button, and says so: open
+       * (aria-pressed, set by deviceMenu.ts's open/close), it spins half a
+       * turn while its teeth retract, and a red cross springs out of the
+       * hub. The red is controlsTheme.ts's HOT_RED; this pressed ring
+       * overrides that file's shared .iconBtn[aria-pressed] one for the
+       * gear alone. */
+      /* app.ts shows the button with an inline display: block, so the icon is
+       * centred by margin, not flex: (36 - 2px border - 18) / 2. */
+      #menuBtn svg { width: 18px; height: 18px; display: block; margin: 8px auto; overflow: visible; }
+      #menuBtn .mb-gear {
+        transform-origin: 12px 12px;
+        transform: rotate(var(--gr, 0deg));
+        transition: transform 0.46s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      #menuBtn:not([aria-pressed="true"]):hover .mb-gear { --gr: 18deg; }
+      #menuBtn[aria-pressed="true"] .mb-gear { --gr: 180deg; }
+      #menuBtn .mb-ring {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.3;
+        transform-origin: 12px 12px;
+        transform: scale(var(--rs, 1));
+        transition: transform 0.34s cubic-bezier(0.4, 0, 0.2, 1) 0.04s, opacity 0.28s ease 0.04s;
+      }
+      #menuBtn .mb-tooth {
+        fill: currentColor;
+        transform-origin: 12px 12px;
+        transform: rotate(var(--a)) scaleY(var(--ts, 1));
+        transition: transform 0.36s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.28s ease;
+      }
+      #menuBtn .mb-bar {
+        fill: #ef4444;
+        opacity: 0;
+        transform-origin: 12px 12px;
+        transform: rotate(var(--a)) scaleY(var(--bs, 0));
+        transition: transform 0.36s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.24s ease;
+      }
+      #menuBtn[aria-pressed="true"] .mb-ring { --rs: 0.3; opacity: 0; }
+      #menuBtn[aria-pressed="true"] .mb-tooth { --ts: 0; opacity: 0; }
+      #menuBtn[aria-pressed="true"] .mb-bar { --bs: 1; opacity: 1; transition-delay: 0.14s; }
+      #menuBtn[aria-pressed="true"] { border-color: rgba(239, 68, 68, 0.55); }
+      #menuBtn[aria-pressed="true"]:hover { border-color: rgba(239, 68, 68, 0.8); box-shadow: 0 0 14px rgba(239, 68, 68, 0.45); }
+      @media (prefers-reduced-motion: reduce) {
+        #menuBtn .mb-gear, #menuBtn .mb-ring, #menuBtn .mb-tooth, #menuBtn .mb-bar {
+          transition-property: opacity !important;
+          transition-duration: 0.18s !important;
+          transition-delay: 0s !important;
+        }
+      }
       #fsBtn {
         bottom: 16px;
         right: 58px; /* one button and a 6px gap in from #menuBtn */
@@ -405,8 +454,24 @@
       <button id="stopBtn" class="iconBtn" title="Stop listening and release the audio source">STOP MIC</button>
       <button id="panelBtn" class="iconBtn" title="Screens paired to this room">&#9638; ROOM</button>
     </div>
-    <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false">&#9974;</button>
-    <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)">&#9881;</button>
+    <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false" data-key="fullscreen" data-keycap="F">&#9974;</button>
+    <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)" data-key="panel" data-keycap="S">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <g class="mb-gear">
+          <circle class="mb-ring" cx="12" cy="12" r="6" />
+          <rect class="mb-tooth" style="--a: 0deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 45deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 90deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 135deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 180deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 225deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 270deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+          <rect class="mb-tooth" style="--a: 315deg" x="10.85" y="2.2" width="2.3" height="2.6" rx="0.5" />
+        </g>
+        <rect class="mb-bar" style="--a: 45deg" x="10.8" y="3.7" width="2.4" height="16.6" rx="1.2" />
+        <rect class="mb-bar" style="--a: -45deg" x="10.8" y="3.7" width="2.4" height="16.6" rx="1.2" />
+      </svg>
+    </button>
     <div id="audioPrompt">
       <div id="audioPromptDemo"><span class="apDemoDot"></span><span>Playing demo audio</span></div>
       <div id="audioPromptRow">
