@@ -5,8 +5,8 @@ own motion profile and its own trail channel, sensing every strain's trail at
 once through a weighted sum (the `att<i><j>` settings, defaulting to
 ATTRACT_ROWS) — strongly its own, weakly or negatively everyone else's. That
 mutual avoidance is what separates the four networks into distinct,
-interlocking coloured territories rather than one shared mesh. Draft, on this
-branch (not yet on main).
+interlocking coloured territories rather than one shared mesh. Featured, on
+main (a draft until 2026-09-27).
 
 ## Where the code is
 
@@ -16,8 +16,8 @@ per-step fixed-rate stepper, the RGBA=strain trail, evaporation precision,
 the composite's exposure/gamma, and — since 2026-09-27 — the per-strain
 settings and the "Uniform budget" note on how they reach the shader without
 their own uniforms). Registered as `physarum2Scene` via `registerScene` in
-`src/render/scenes/index.ts` (first line of registration, newest-draft-first
-convention), and listed in that file's `draftIds`.
+`src/render/scenes/index.ts` (first line of registration, newest first within
+its gallery group), and absent from that file's `draftIds`, so featured.
 
 Reuses `packUnit` and `createBeatSeeder` from `physarum.ts` (the same 16-bit
 packing round trip and the same beat-rise detector with its own refractory),
@@ -326,6 +326,9 @@ and `powder.ts`'s curl noise).
   `mountRows` also snapshots and disposes `pinRowHandles`, or a strain
   switch would leave stale pin handles behind. The pin handoff uses
   `main`'s pin-only `pinSetting`. Merged as #153 (squash 646b1ce).
+- **2026-09-27, featured.** Taken out of `draftIds` on the user's call, in
+  the same change that moved Physarum and Slats behind the draft toggle.
+  Code untouched.
 
 ## Tuning notes
 
