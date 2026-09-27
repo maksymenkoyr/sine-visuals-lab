@@ -3,6 +3,9 @@ import type { SceneSetting } from "../sceneSettings.ts";
 import { NOISE_HASH_GLSL, NOISE_MASK, NOISE_PERIOD, wrapFlow } from "../noiseHash.ts";
 import {
   advanceEmission,
+  advanceRingRate,
+  autoNarrowWidthW,
+  createRingRateState,
   buildProfile,
   createRippleEmissionState,
   createRippleEmitter,
@@ -1420,6 +1423,7 @@ export const causticsScene = createFullscreenScene(
     // persistent arrays buildProfile fills and extraUniforms uploads — see
     // rippleEmitter.ts's header for how the three fit together.
     const emission = createRippleEmissionState();
+    const ringRate = createRingRateState();
     const emitter = createRippleEmitter();
     const crestBuf = new Float32Array(PROFILE_SAMPLES);
     const slopeBuf = new Float32Array(PROFILE_SAMPLES);
@@ -1535,7 +1539,16 @@ float softCeil(float x, float knee, float ceil) {
         prevDropOnset = anim.dropOnset;
         if (drop) emitter.emit(RIPPLE_DROP_AMP, ringStyle);
 
-        buildProfile(emitter, rippleParams, crestBuf, slopeBuf, ringStyle);
+        // Rings that come close together are drawn narrower so they stay
+        // separate instead of summing to a flat plateau (rippleEmitter.ts's
+        // Auto-narrowing comment). Merge already spaces its rings out by
+        // combining close ones, so it keeps the plain Ring width.
+        advanceRingRate(ringRate, anim.dtSec, emitted);
+        const profileParams: RippleProfileParams =
+          ringStyle === "merge"
+            ? rippleParams
+            : { ...rippleParams, widthGaussianW: autoNarrowWidthW(rippleParams.widthGaussianW, rippleParams.speedUnitsPerSec, ringRate) };
+        buildProfile(emitter, profileParams, crestBuf, slopeBuf, ringStyle);
 
         return {
           uDriftFlow: driftFlows(driftPhase + lurch.phase + kickJolt, causticDensityScale(getSetting("causticDensity")), flowBuf),

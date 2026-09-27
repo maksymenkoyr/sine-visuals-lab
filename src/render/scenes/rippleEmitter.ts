@@ -106,6 +106,71 @@ export function rippleWidthFor(ringWidth: number): number {
   return RING_GAUSSIAN_W_AT_0 * Math.pow(RING_GAUSSIAN_W_AT_1 / RING_GAUSSIAN_W_AT_0, t);
 }
 
+// ---- Auto-narrowing -------------------------------------------------------
+//
+// Rings in a steady train are identical and evenly spaced, and a train of
+// identical soft rings sums to a flat plateau: the surface only keeps a
+// visible ripple (slope) at the train's own spacing if each ring is narrow
+// next to that spacing. For gaussian rings the ripple left in the sum falls
+// off as exp(-2π²σ²/spacing²) — about a third of a lone ring's at
+// σ = spacing/4, under 1% at σ = spacing/2. Ring width's own default is
+// already past that at an ordinary beat, and a fast driver (a Beat wave
+// swinging several times a second) left nothing but the centre moving.
+// Real water does the same thing on its own: a source bobbing faster makes
+// shorter waves. So the ring width is capped at NARROW_SPREAD_PER_GAP of the
+// current gap between rings (speed × time between ring starts, smoothed),
+// never wider than the user's Ring width and never narrower than
+// NARROW_MAX_W allows. A pause lets the gap estimate grow again, so the next
+// lone hit is back to full width.
+const NARROW_SPREAD_PER_GAP = 0.25;
+const NARROW_MAX_W = 200; // σ ≈ 0.05 p-space units, a few profile samples wide
+const NARROW_EVENT_MIN = 0.05; // an emission run has to reach this to count as a ring start
+const NARROW_INTERVAL_RATE = 0.35; // how fast the smoothed interval follows each new one
+
+export interface RingRateState {
+  /** Seconds since the last ring start. */
+  sinceStartSec: number;
+  /** Smoothed seconds between ring starts (Infinity until two starts). */
+  intervalSec: number;
+  /** Whether the previous frame was already emitting (a run in progress). */
+  emitting: boolean;
+  started: boolean;
+}
+
+export function createRingRateState(): RingRateState {
+  return { sinceStartSec: Infinity, intervalSec: Infinity, emitting: false, started: false };
+}
+
+/** Tracks how often rings start, from each frame's emitted amount. */
+export function advanceRingRate(state: RingRateState, dtSec: number, emitted: number): void {
+  state.sinceStartSec += dtSec;
+  const on = emitted > NARROW_EVENT_MIN;
+  if (on && !state.emitting) {
+    if (state.started && Number.isFinite(state.sinceStartSec)) {
+      state.intervalSec = Number.isFinite(state.intervalSec)
+        ? state.intervalSec + (state.sinceStartSec - state.intervalSec) * NARROW_INTERVAL_RATE
+        : state.sinceStartSec;
+    }
+    state.started = true;
+    state.sinceStartSec = 0;
+  }
+  state.emitting = on;
+}
+
+/** The gaussian tightness buildProfile should use: the user's Ring width,
+ *  tightened when rings come close enough together to blur into each other
+ *  (see the Auto-narrowing comment above). */
+export function autoNarrowWidthW(userW: number, speedUnitsPerSec: number, rate: RingRateState): number {
+  // A long pause counts as a wide gap, so a lone hit isn't narrowed by the
+  // rate of a busy passage that has already ended.
+  const gapSec = Math.max(rate.intervalSec, rate.sinceStartSec);
+  if (!Number.isFinite(gapSec)) return userW;
+  const sigmaMax = NARROW_SPREAD_PER_GAP * speedUnitsPerSec * gapSec;
+  if (sigmaMax <= 0) return Math.max(userW, NARROW_MAX_W);
+  const neededW = 1 / (2 * sigmaMax * sigmaMax);
+  return Math.max(userW, Math.min(neededW, NARROW_MAX_W));
+}
+
 /** The three resolved physics values buildProfile/RippleEmitter.tick need
  *  each frame, bundled so a caller only has to thread one object through
  *  instead of three loose numbers. */

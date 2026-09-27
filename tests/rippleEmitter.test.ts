@@ -4,6 +4,9 @@ import {
   buildProfile,
   createRippleEmissionState,
   createRippleEmitter,
+  createRingRateState,
+  advanceRingRate,
+  autoNarrowWidthW,
   PROFILE_MAX_RADIUS,
   PROFILE_SAMPLES,
   rippleDecayFor,
@@ -629,6 +632,73 @@ describe("Ring style: Wave (a crest and a trough, net zero height)", () => {
     const mb = maxAbsInWindow(trainSlope("bump"), 1, 2.5);
     const mw = maxAbsInWindow(trainSlope("wave"), 1, 2.5);
     expect(mw).toBeGreaterThanOrEqual(mb * 3);
+  });
+});
+
+describe("auto-narrowing: rings that come close together stay separate", () => {
+  const dt = 1 / 60;
+  const dr = PROFILE_MAX_RADIUS / (PROFILE_SAMPLES - 1);
+
+  /** Emits 1.0 every `period` s for 8 s, tracking the ring rate; returns the
+   *  final slope profile built with or without auto-narrowing. */
+  function train(period: number, narrow: boolean) {
+    const emitter = createRippleEmitter();
+    const rate = createRingRateState();
+    let nextEmit = 0;
+    for (let t = 0; t < 8; t += dt) {
+      emitter.tick(dt, TYPICAL_PARAMS);
+      let e = 0;
+      if (t >= nextEmit) {
+        e = 1;
+        nextEmit += period;
+      }
+      emitter.emit(e, "bump");
+      advanceRingRate(rate, dt, e);
+    }
+    const w = narrow ? autoNarrowWidthW(TYPICAL_PARAMS.widthGaussianW, TYPICAL_PARAMS.speedUnitsPerSec, rate) : TYPICAL_PARAMS.widthGaussianW;
+    const crest = new Float32Array(PROFILE_SAMPLES);
+    const slope = new Float32Array(PROFILE_SAMPLES);
+    buildProfile(emitter, { ...TYPICAL_PARAMS, widthGaussianW: w }, crest, slope, "bump");
+    return { slope, w };
+  }
+  /** Sign changes and peak-to-peak of the slope over r in [1, 2.5] — how
+   *  many separate ring edges the eye gets there, and how strongly. */
+  function ripple(slope: Float32Array) {
+    let flips = 0;
+    let lo = Infinity;
+    let hi = -Infinity;
+    let prev = 0;
+    for (let i = 0; i < slope.length; i++) {
+      const r = i * dr;
+      if (r < 1 || r > 2.5) continue;
+      const s = slope[i]!;
+      if (prev !== 0 && Math.sign(s) !== Math.sign(prev)) flips++;
+      prev = s;
+      lo = Math.min(lo, s);
+      hi = Math.max(hi, s);
+    }
+    return { flips, p2p: hi - lo };
+  }
+
+  it("a fast train (3.7 rings/s) turns from a flat plateau into separate rings", () => {
+    const plain = ripple(train(1 / 3.7, false).slope);
+    const narrowed = ripple(train(1 / 3.7, true).slope);
+    expect(plain.flips).toBeLessThanOrEqual(1);
+    expect(narrowed.flips).toBeGreaterThanOrEqual(6);
+    expect(narrowed.p2p).toBeGreaterThan(plain.p2p * 5);
+  });
+
+  it("slow hits (one every 2 s) keep the user's Ring width", () => {
+    expect(train(2, true).w).toBe(TYPICAL_PARAMS.widthGaussianW);
+  });
+
+  it("after a pause, the next lone hit is back to full width", () => {
+    const rate = createRingRateState();
+    for (let t = 0; t < 4; t += dt) advanceRingRate(rate, dt, Math.round(t * 60) % 16 === 0 ? 1 : 0);
+    const busy = autoNarrowWidthW(4, 1.1, rate);
+    for (let t = 0; t < 5; t += dt) advanceRingRate(rate, dt, 0);
+    expect(busy).toBeGreaterThan(4);
+    expect(autoNarrowWidthW(4, 1.1, rate)).toBe(4);
   });
 });
 

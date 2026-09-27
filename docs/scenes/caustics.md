@@ -387,6 +387,24 @@ reference-measurement workflow used by later scenes.
   a whole bar (or two) instead of always one beat; absent/1 is today's plain
   reading, bit-identical.
 
+- 2026-09-27 — Wave, as first built, didn't fix the fast-driver case: a
+  steady train of identical rings sums to a plateau, and a crest-minus-trough
+  shape built from the same soft gaussians is that plateau minus a shifted
+  copy of itself — still flat once the train is steady (the Wave dense-train
+  test passed on the build-up region). Headless at 240 bpm, Wave rendered
+  close to the no-ripple frame. The real cause in every style is ring width
+  versus the gap between rings: the ripple left in a gaussian train falls off
+  as exp(−2π²σ²/gap²), so rings need σ ≤ about a quarter of the gap — which
+  the default Ring width already misses at an ordinary 120 bpm. Added
+  auto-narrowing (`advanceRingRate`/`autoNarrowWidthW`, rippleEmitter.ts's
+  Auto-narrowing comment): the ring width is capped at a fraction of the
+  current gap, never wider than Ring width, back to full width after a
+  pause; Merge keeps the plain width. In `tests/rippleEmitter.test.ts` a 3.7
+  rings/s train goes from ≤1 slope sign change over r∈[1, 2.5] to ≥6, with
+  >5× the peak-to-peak slope; hits every 2 s keep Ring width. Stills at 240
+  bpm still don't show ring spacing legibly, like every Caustics still — to
+  be judged live.
+
 ## Tuning notes
 
 - Fog sets the resting sharpness and dark-water floor cut (0 = crisp threads on
