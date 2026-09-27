@@ -144,6 +144,8 @@ import {
  * `preview` instead of a picker); there's no layout change, just the port
  * lighting (cables and meter glow are Phase 2b). Clicking the row's label,
  * summary or port instead *pins* it (togglePin) — one setting at a time —
+ * and so does a click anywhere else on the card that isn't a control of its
+ * own (the description, the sparkline, the padding; pin-only, never unpins) —
  * and expands its patch panel inline in the row, below the sparkline; the
  * slider alone never pins, only previews, so dragging an amount can't
  * accidentally swap which panel is open. Escape, clicking the pinned row's
@@ -317,7 +319,10 @@ import {
  * closes it, M hides/shows the meters column. Tab / Shift+Tab walk a ring over every
  * .vc-slider/.vc-toggle/.vc-picker/.vc-fader in document order, wrapping at both ends
  * and skipping every chip and button — so Tab alone never leaves the panel
- * and never lands anywhere but a control. On whichever control has focus, A
+ * and never lands anywhere but a control. That's the soft (preview) walk;
+ * while a setting is pinned, Tab / Shift+Tab instead carry the pin itself
+ * to the next/previous drive row, wrapping (moveTabPin) — skipping the
+ * pinned row's own patch panel and every row that can't be pinned. On whichever control has focus, A
  * toggles auto, R resets, T mutes/restores (see above; a fader's arrow keys
  * are its own, in bandFaders.ts). A focused
  * slider also takes Home/End to its min/max — the browser's own native
@@ -953,13 +958,17 @@ export interface ControlRowSpec {
    *  `below` mounts as the row's last child (the sparkline, and — once
    *  pinned — the patch panel); `onPin` fires on a click anywhere in the
    *  label/summary wrapper or on `port` (stopPropagation'd so it never also
-   *  triggers this row's own click-to-focus-slider handler below). Omit for
+   *  triggers this row's own click-to-focus-slider handler below) and
+   *  toggles; `pin` fires on a click anywhere else on the card that isn't
+   *  one of its own controls (ROW_OWN_CONTROLS) and only ever pins, so a
+   *  stray click on a pinned card's description can't close it. Omit for
    *  a setting with no `drive`. */
   drivePanel?: {
     port: HTMLElement;
     summary: HTMLElement;
     below: HTMLElement;
     onPin: () => void;
+    pin: () => void;
   };
 }
 
@@ -1092,6 +1101,12 @@ function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
     pointerFocusOriginated = false;
   });
 }
+
+/** What a click on a drive row's card leaves alone rather than pinning
+ *  (createControlRow's row click handler): anything that's a control in its
+ *  own right — the slider, the A/T/reset chips, the signal pills — and the
+ *  pinned patch panel, whose own chips and buttons rebuild it. */
+const ROW_OWN_CONTROLS = "button, input, select, textarea, a, [role], .vc-drive-patch";
 
 /** The pointer's fraction along `slider`'s track (0 at min, 1 at max,
  *  clamped) — used by wireSliderQuickJump's c binding below. A keydown
@@ -1381,7 +1396,11 @@ export function createControlRow(spec: ControlRowSpec) {
   el.append(head, slider, hint);
   if (signalIndicator) el.appendChild(signalIndicator.strip);
   if (spec.drivePanel) el.appendChild(spec.drivePanel.below);
-  el.addEventListener("click", () => slider.focus());
+  el.addEventListener("click", (e) => {
+    slider.focus();
+    const own = (e.target as Element).closest(ROW_OWN_CONTROLS);
+    if (spec.drivePanel && !(own && el.contains(own))) spec.drivePanel.pin();
+  });
   wireHoverFocus(el, slider);
   wireThumbMagnet(el, slider);
   wireSliderQuickJump(el, slider);
@@ -2982,6 +3001,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshPatchHighlight();
   }
 
+  /** Pins without ever unpinning — a click on a card's own dead space
+   *  (createControlRow's `drivePanel.pin`). */
+  function pinDrive(sceneId: string, spec: SceneSetting): void {
+    if (!samePair(pinned, { sceneId, spec })) togglePin(sceneId, spec);
+  }
+
   /** The only place `preview` is written. See previewDrive's own callers
    *  (appendSettingRow's onRowFocusIn) for the hover-dwell contract this
    *  mirrors from the row-selection system it replaces. */
@@ -4262,7 +4287,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
       reads,
       drivePanel: driveBuild
-        ? { port: driveBuild.port, summary: driveBuild.summary, below: driveBuild.below, onPin: () => togglePin(sceneId, spec) }
+        ? { port: driveBuild.port, summary: driveBuild.summary, below: driveBuild.below, onPin: () => togglePin(sceneId, spec), pin: () => pinDrive(sceneId, spec) }
         : undefined,
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
@@ -4540,7 +4565,26 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     );
   }
 
+  /** Tab while something is pinned: the pin moves to the next/previous
+   *  visible drive row (wrapping), and keyboard focus follows onto that
+   *  row's own control — focused first, pinned second, since togglePin
+   *  clears the preview that focus just set. */
+  function moveTabPin(e: KeyboardEvent, from: { sceneId: string; spec: SceneSetting }): void {
+    const rows = driveRowHandles.filter((h) => h.rowEl.getClientRects().length > 0);
+    if (rows.length === 0) return;
+    const idx = rows.findIndex((h) => samePair(from, h));
+    const next = rows[(idx + (e.shiftKey ? -1 : 1) + rows.length) % rows.length]!;
+    e.preventDefault();
+    next.rowEl.querySelector<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker")?.focus({ preventScroll: true });
+    pinDrive(next.sceneId, next.spec);
+    next.rowEl.scrollIntoView({ block: "nearest" });
+  }
+
   function handleTab(e: KeyboardEvent): void {
+    if (pinned) {
+      moveTabPin(e, pinned);
+      return;
+    }
     const elements = ringElements();
     if (elements.length === 0) return;
     const idx = document.activeElement instanceof HTMLElement ? elements.indexOf(document.activeElement) : -1;
