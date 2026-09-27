@@ -75,7 +75,7 @@ import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 const WOBBLE = 0.15; // periods of small along-the-line undulation baked into phiA itself, independent of Warp depth's displacement
 const FRESH_MIX = 0.65; // how much of the field is the fast-reseeding component vs. the slow persistent one
 const STRETCH_ACROSS_SHARE = 0.75; // share (in log terms) of the wandered stretch that compresses the across-streak axis; the rest lengthens the along axis — see FRAG's domain comment
-const NOISE_BASE_FREQ = 0.55; // lattice cells per half-height at Cloud size 1 — measured so a cloud's half-correlation length lands in the reference's band
+const NOISE_BASE_FREQ = 0.55; // lattice cells per half-height at Cloud detail 1 — measured so a cloud's half-correlation length lands in the reference's band
 const INK_A = 0.87; // the fixed grating's ink strength: its lines read near-black but not clipped, as the reference's do
 const INK_B = 0.75; // the displaced grating's — measured lighter: where it fills the fixed grating's gaps they go grey, not black, so a dark cloud bottoms out well above ink-on-ink
 const AA_FADE_LOW_PX = 1.5; // at/below this line period both gratings are fully faded to their own mean (duty)
@@ -138,15 +138,16 @@ const SETTINGS: SceneSetting[] = [
   },
   {
     key: "scale",
-    label: "Cloud size",
-    description: "How large the dark clouds read against the frame",
+    label: "Cloud detail",
+    description: "How many, and how small, the dark clouds read against the frame",
     group: "Form",
     min: 0.4,
     max: 3,
     step: 0.05,
     default: 1,
     // Dense, busy music reads better with several small clouds than one dominant one.
-    auto: { density: -0.2 },
+    // (uScale multiplies the noise frequency, so higher = smaller clouds.)
+    auto: { density: 0.2 },
   },
   {
     key: "depth",

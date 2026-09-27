@@ -13,6 +13,13 @@ workers_dev = true
 name = "ROOM"
 class_name = "Room"
 
+# Usage counts (server/usage.ts). Prod only: bindings aren't inherited by
+# [env.preview], and that's deliberate — a preview's traffic is the owner's
+# and reviewers', not visitors'. The dataset is created on first write.
+[[analytics_engine_datasets]]
+binding = "USAGE"
+dataset = "sinevisualslab_usage"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
@@ -22,6 +29,10 @@ new_sqlite_classes = ["Room"]
 # Paths that don't match a file in dist/ (i.e. /api/*) fall through to fetch().
 [assets]
 directory = "./dist"
+binding = "ASSETS"
+# Only the homepage runs the Worker first, so it can 301 the bare domain to
+# www (server/worker.ts); everything else is still served straight from dist/.
+run_worker_first = ["/"]
 
 # Custom Domains, not route patterns: this Worker serves the site as well as the
 # API, so every path on these hostnames must reach it. Cloudflare creates the
@@ -57,6 +68,9 @@ custom_domain = true
 #    are always explicit), so the ROOM binding is repeated here verbatim.
 [env.preview]
 routes = []
+# No usage counts from previews (see the dataset's comment above); spelled
+# out so wrangler doesn't warn that the binding wasn't inherited.
+analytics_engine_datasets = []
 
 [[env.preview.durable_objects.bindings]]
 name = "ROOM"

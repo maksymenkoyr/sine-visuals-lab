@@ -9,7 +9,7 @@
      * Same string feeds og/twitter below and the JSON-LD graph. -->
     <meta
       name="description"
-      content="Real-time WebGL music visualizer in your browser: microphone or screen audio drives reactive visuals, and your phone pairs with a TV. Free, no install."
+      content="Free real-time music visualizer in your browser: a gallery of WebGL scenes that follow the beat, tempo and tone of your microphone or screen audio. No install."
     />
     <!-- Both sinevisualslab.com and www. serve this page (two custom_domain
      * routes in wrangler.toml); www is the one Google indexes, so www is
@@ -25,7 +25,7 @@
     <meta property="og:title" content="Sine Visuals Lab" />
     <meta
       property="og:description"
-      content="Real-time WebGL music visualizer in your browser: microphone or screen audio drives reactive visuals, and your phone pairs with a TV. Free, no install."
+      content="Free real-time music visualizer in your browser: a gallery of WebGL scenes that follow the beat, tempo and tone of your microphone or screen audio. No install."
     />
     <meta property="og:url" content="https://www.sinevisualslab.com/" />
     <meta property="og:image" content="https://www.sinevisualslab.com/og.jpg" />
@@ -36,7 +36,7 @@
     <meta name="twitter:title" content="Sine Visuals Lab" />
     <meta
       name="twitter:description"
-      content="Real-time WebGL music visualizer in your browser: microphone or screen audio drives reactive visuals, and your phone pairs with a TV. Free, no install."
+      content="Free real-time music visualizer in your browser: a gallery of WebGL scenes that follow the beat, tempo and tone of your microphone or screen audio. No install."
     />
     <meta name="twitter:image" content="https://www.sinevisualslab.com/og.jpg" />
     <script type="application/ld+json">
@@ -44,11 +44,22 @@
         "@context": "https://schema.org",
         "@graph": [
           {
+            "@type": "Organization",
+            "@id": "https://www.sinevisualslab.com/#org",
+            "name": "Sine Visuals Lab",
+            "alternateName": "sinevisualslab",
+            "url": "https://www.sinevisualslab.com/",
+            "logo": "https://www.sinevisualslab.com/icon-512.png",
+            "sameAs": ["https://github.com/maksymenkoyr/sine-visuals-lab"]
+          },
+          {
             "@type": "WebSite",
             "name": "Sine Visuals Lab",
+            "alternateName": ["sinevisualslab", "Sine Visuals"],
+            "publisher": { "@id": "https://www.sinevisualslab.com/#org" },
             "url": "https://www.sinevisualslab.com/",
             "inLanguage": "en",
-            "description": "Real-time WebGL music visualizer in your browser: microphone or screen audio drives reactive visuals, and your phone pairs with a TV. Free, no install."
+            "description": "Free real-time music visualizer in your browser: a gallery of WebGL scenes that follow the beat, tempo and tone of your microphone or screen audio. No install."
           },
           {
             "@type": "WebApplication",
@@ -57,7 +68,7 @@
             "applicationCategory": "MultimediaApplication",
             "operatingSystem": "Any",
             "browserRequirements": "Requires WebGL2",
-            "description": "Real-time WebGL music visualizer in your browser: microphone or screen audio drives reactive visuals, and your phone pairs with a TV. Free, no install.",
+            "description": "Free real-time music visualizer in your browser: a gallery of WebGL scenes that follow the beat, tempo and tone of your microphone or screen audio. No install.",
             "image": "https://www.sinevisualslab.com/icon-512.png",
             "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
             "sameAs": ["https://github.com/maksymenkoyr/sine-visuals-lab"]
@@ -65,7 +76,10 @@
         ]
       }
     </script>
-    <title>Sine Visuals Lab</title>
+    <!-- The blue link Google shows. Brand first (a brand search must match it),
+     * then the words people actually search — the bare name alone ranked for
+     * nothing but itself. -->
+    <title>Sine Visuals Lab — Free Online Music Visualizer</title>
     <style>
       html, body {
         margin: 0;
@@ -323,11 +337,11 @@
     </style>
   </head>
   <body>
-    <h1 class="sr-only">Sine Visuals Lab</h1>
+    <h1 class="sr-only">Sine Visuals Lab — a free online music visualizer</h1>
     <p class="sr-only">
       Pick a scene from the gallery and let your microphone or a shared screen drive it — every
-      setting can react to the music. Pair your phone with a TV and the visuals follow along on
-      the big screen. Runs entirely in the browser; nothing to install.
+      setting can react to the music: the beat, the tempo, the bass, the brightness of the sound.
+      Runs entirely in the browser; nothing to install.
     </p>
     <canvas id="gl"></canvas>
     <div id="hud"></div>

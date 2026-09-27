@@ -131,6 +131,10 @@ None — original design.
   regrouped onto the shared `SettingGroup` vocabulary (Form/Motion/Look/
   Camera/Post in `sceneSettings.ts`). Reordering and labeling only — no key,
   default, or auto value changed.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Circle Squeeze renamed Circle Depth (higher already meant deeper) and
+  Noise Scale renamed Noise Detail (it is a frequency, so higher already
+  meant finer). Labels only.
 
 ## Tuning notes
 
@@ -138,10 +142,10 @@ None — original design.
   (ridge amplitude, has an `auto` mapping to dynamics/brightness), Valley
   (canyon vs. ridge curvature), Grid Density (vertex-grid multiplier,
   rebuilds buffers on change), Circle / Sphere (layout toggles — Sphere
-  overrides Circle when both are on), Circle Squeeze (ellipse/ellipsoid
+  overrides Circle when both are on), Circle Depth (ellipse/ellipsoid
   ratio for either layout), Wave Gain (how hard a band's change is pushed
   before soft-clipping), Center Spike (pole/center treatment for Circle and
-  Sphere), Noise Scale, Dots / Dot Reactivity, and the Background Mesh /
+  Sphere), Noise Detail, Dots / Dot Reactivity, and the Background Mesh /
   Background Dome / Dome Distance / Dome Radius / Dome Density group for the
   sky lattice.
 - **Motion**: Waves Outward (which ring counts as newest), Wave Memory

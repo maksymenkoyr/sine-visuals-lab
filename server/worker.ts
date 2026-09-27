@@ -1,9 +1,11 @@
 import { Room, type Env } from "./room.ts";
+import { isBotUserAgent, parseUsageEvent, usageDataPoint } from "./usage.ts";
 
 export { Room };
 
 // Uppercase letters + digits, minus visually ambiguous ones (0/O, 1/I/L).
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const APEX_HOST = "sinevisualslab.com";
 const ROOM_PATH_RE = /^\/api\/room\/([A-Z2-9]{4})\/ws$/;
 
 function randomRoomCode(): string {
@@ -49,6 +51,19 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    // The bare domain serves the same site as www, so without this Google
+    // sees two copies of the homepage. Only `/` is routed here ahead of the
+    // assets (run_worker_first in wrangler.toml) — it's the one page that
+    // gets indexed, and every asset request stays off the Worker.
+    if (url.pathname === "/") {
+      // The Host header, not url.hostname: `wrangler dev` rewrites request.url
+      // to the first route in wrangler.toml, which is the apex.
+      if (request.headers.get("Host") === APEX_HOST) {
+        return Response.redirect(`https://www.${APEX_HOST}/${url.search}`, 301);
+      }
+      return env.ASSETS.fetch(request);
+    }
+
     if (url.pathname === "/api/room" && request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
@@ -62,6 +77,18 @@ export default {
         });
       }
       return Response.json({ code: randomRoomCode() }, { headers: CORS_HEADERS });
+    }
+
+    // Fire-and-forget beacon from src/net/usage.ts; always 204 so a bad or
+    // unrecorded event is indistinguishable from a counted one to the client.
+    if (url.pathname === "/api/usage" && request.method === "POST") {
+      const ua = request.headers.get("User-Agent") ?? "";
+      const ev = parseUsageEvent(await request.json().catch(() => null));
+      if (ev && env.USAGE && !isBotUserAgent(ua)) {
+        const country = typeof request.cf?.country === "string" ? request.cf.country : "XX";
+        env.USAGE.writeDataPoint(usageDataPoint(ev, country, ua));
+      }
+      return new Response(null, { status: 204 });
     }
 
     const match = url.pathname.match(ROOM_PATH_RE);

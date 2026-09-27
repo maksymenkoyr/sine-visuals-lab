@@ -482,8 +482,8 @@ const SETTINGS: SceneSetting[] = [
     // `uDetail`, which COMMON_UNIFORMS_GLSL already owns as the quality proxy
     // — two declarations of the same name is a shader compile error.
     key: "grain",
-    label: "Detail",
-    description: "How hard the noise erodes the cloud into billows, how big a voxel is, how big each point or lattice node draws, and how brightly a filament burns",
+    label: "Grain",
+    description: "How coarse the cloud gets: how hard the noise erodes the cloud into billows, how big a voxel is, how big each point or lattice node draws, and how brightly a filament burns",
     // Form, not Look — three of its four shader uses (erosion depth, voxel
     // size, point/node pixel size) are size/structure; only the filament
     // gain at the end is a brightness term.

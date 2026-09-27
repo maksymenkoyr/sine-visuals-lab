@@ -115,6 +115,10 @@ reference-measurement workflow used by later scenes.
   it (`breatheDrive(0.0)` in FRAG, inert at the Scene default), with its auto
   weights dropped so it is a taste dial like Caustic density rather than something
   the music profile redecides.
+- 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
+  Descriptions corrected: Fog is hazier/softer ridges as it rises, and
+  Sparkle grain is coarser glints as it rises. The old text said the
+  reverse.
 
 ## Tuning notes
 

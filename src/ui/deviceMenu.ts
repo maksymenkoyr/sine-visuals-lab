@@ -3364,10 +3364,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // layout's own scroller — cables are hidden there, but a resize crossing
   // the breakpoint mid-scroll should still land on fresh geometry), resize,
   // and a ResizeObserver on both columns (spectrumCol here; controlsCol —
-  // declared further down — observes itself once it exists). Card
-  // fold/unfold piggybacks on the existing columnsWrap MutationObserver
-  // (refreshColumnsFold, below); renderSceneSettings schedules one from its
-  // own tail.
+  // declared further down — observes itself once it exists) and on every
+  // card in them (observed once the panel is assembled, below). A column is
+  // a fixed-height scroller, so a card growing inside it — a row's .vc-hint
+  // unfolding on hover/focus — never resizes the column itself; without the
+  // per-card observation every jack/port below that card moved while its
+  // cable stayed put. The hint's max-height
+  // transition fires this observer every frame it animates, which
+  // scheduleCableRecompute's rAF batching folds into one recompute per
+  // frame. Card fold/unfold piggybacks on the existing columnsWrap
+  // MutationObserver (refreshColumnsFold, below); renderSceneSettings
+  // schedules one from its own tail.
   const cableColumnsRO = new ResizeObserver(scheduleCableRecompute);
   cableColumnsRO.observe(spectrumCol);
   audioMeters.el.addEventListener("scroll", scheduleCableRecompute, { passive: true });
@@ -3670,7 +3677,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       () => deps.getSmoothing(deps.currentSceneId()),
       () => deps.resolveSmoothingValue(deps.currentSceneId()),
       (value) => deps.onSmoothingChange(deps.currentSceneId(), value),
-      "How quickly the picture follows the sound — drag to the bottom for Off, the meters panel's RAW chip with nothing left to bypass",
+      "How much the picture lags and softens the sound — drag to the bottom for Off, the meters panel's RAW chip with nothing left to bypass",
     ),
   ];
   function syncInputRows(): void {
@@ -4499,6 +4506,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   controlsCol.append(autoRow, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, footer);
   root.append(columnsWrap, controlsCol);
+  // Every card is built once above and lives for the panel's lifetime, so
+  // one pass covers them all — see cableColumnsRO's own comment.
+  for (const card of root.querySelectorAll<HTMLElement>(".vc-card")) cableColumnsRO.observe(card);
   document.body.appendChild(root);
 
   // ---- open / close ----

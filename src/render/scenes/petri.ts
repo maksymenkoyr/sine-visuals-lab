@@ -192,7 +192,7 @@ const SETTINGS: SceneSetting[] = [
     key: "scale",
     label: "Cell size",
     description:
-      "Zooms the pattern — bigger cells at the low end, a finer weave at the high end (Beads: how densely the floor is tiled)",
+      "Zooms the pattern — a finer weave at the low end, bigger cells at the high end (Beads: bigger floor tiles)",
     group: "Form",
     min: 0.5,
     max: 2.5,
