@@ -1682,7 +1682,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     accent: NEUTRAL_ACCENT,
     unit: "s",
     description:
-      "Detected beats (red) against the tracker's predicted grid (blue, tall when locked, short when unsure). On the grid is locked; between ticks is a double; a tick with nothing under it is a miss.",
+      "The tracker's beat when it's sure of the tempo (blue, tall when locked, short when unsure); the raw detected hits while it isn't (red). On the grid is locked; between ticks is a double; a tick with nothing under it is a miss. For a tick that never wavers regardless, see Metronome below.",
   });
   const beatTrace = createTraceStrip(
     [
