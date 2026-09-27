@@ -1467,18 +1467,12 @@ float softCeil(float x, float knee, float ceil) {
         const emitted = advanceEmission(emission, anim.dtSec, rawSignal);
         emitter.emit(emitted);
         // The panel draws these on Beat ripple's own "What it receives"
-        // graph (settingMarks.ts): where the salience bar sits, and each
-        // ring actually sent.
+        // graph (settingMarks.ts): the level a bump has to reach to send a
+        // ring, and each ring actually sent. Only the one line — a second
+        // "full ring" line made the graph harder to read, and a ring's dot
+        // already shows how strong it was.
         const marks = salienceMarks(emission);
-        publishSettingMarks(
-          "caustics",
-          "ripple",
-          [
-            { value: marks.ringsAbove, label: "rings above" },
-            { value: marks.fullRing, label: "full ring" },
-          ],
-          emitted,
-        );
+        publishSettingMarks("caustics", "ripple", [{ value: marks.ringsAbove, label: "reach to ring" }], emitted);
 
         // A drop is rarer and bigger than an ordinary beat — a stronger ring
         // emitted in addition to whatever the continuous driver above just

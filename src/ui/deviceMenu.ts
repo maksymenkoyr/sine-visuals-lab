@@ -243,9 +243,9 @@ import {
  * click on its jack does).
  *
  * Every control in the patch panel explains itself two ways (setHint,
- * this file's own "cover everything with hints" pass): a `title` (the
- * browser's native delayed tooltip, and an `aria-description` alongside it
- * for a screen reader) and a `data-hint` the panel's own bottom hint line
+ * this file's own "cover everything with hints" pass): an `aria-description`
+ * for a screen reader (no `title` — the native tooltip only repeated the
+ * bottom line) and a `data-hint` the panel's own bottom hint line
  * (buildPatchPanel's `hintBar`) reads off whichever control is currently
  * hovered or keyboard-focused, through one delegated pointerover/
  * pointerout/focusin/focusout pair on the panel root — never a
@@ -2123,16 +2123,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // `deps`; patchChanged() below is the one place a mutation is followed by
   // a rebuild. ----
 
-  /** Sets a control's plain-language hint two ways at once: `title` (the
-   *  browser's own delayed native tooltip, and a screen reader's
-   *  accessible description) and `data-hint` (buildPatchPanel's own bottom
-   *  hint line reads this off whichever control is hovered/focused right
-   *  now — the "cover everything with hints" pass's one delegated
-   *  mechanism, never a per-control listener). Every interactive element
-   *  inside the patch panel goes through this rather than setting `title`
-   *  by hand, so the two never drift apart. */
+  /** Sets a control's plain-language hint: `data-hint` (buildPatchPanel's
+   *  own bottom hint line reads this off whichever control is hovered/
+   *  focused right now — the "cover everything with hints" pass's one
+   *  delegated mechanism, never a per-control listener) and
+   *  `aria-description` for a screen reader. Deliberately no `title`: the
+   *  native tooltip repeated the bottom line's text a second time on top of
+   *  the panel. Every element inside the patch panel goes through this, so
+   *  the two never drift apart. */
   function setHint(el: HTMLElement, text: string): void {
-    el.title = text;
+    el.setAttribute("aria-description", text);
     el.dataset.hint = text;
   }
 
@@ -2499,7 +2499,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const wrap = document.createElement("div");
     setHint(
       wrap,
-      "What this setting receives over the last 4 seconds. Thin lines: each source after its weight (dashed: a condition; a muted source draws no trace). Dark: the gate was blocked. Bottom strip: lit while open. White: the result. If the scene marks it: dotted lines are the scene's own thresholds, and cyan ticks along the bottom are each reaction it produced (taller = stronger).",
+      "The last 4 seconds. White: what this setting receives. Thin coloured lines: each source (dashed: a condition). Dark: the gate was closed. Dotted line and cyan dots, when shown: see the key under the graph.",
     );
     const head = document.createElement("div");
     head.style.cssText = driveOutHeadStyle;
@@ -2512,7 +2512,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     head.append(eyebrow, val);
     const canvas = document.createElement("canvas");
     canvas.style.cssText = driveOutCanvasStyle;
-    wrap.append(head, canvas);
+    // Key for a scene's own marks (settingMarks.ts), shown only once the
+    // scene has published some: the first line's label for the dotted trace,
+    // and the cyan dot for a reaction.
+    const key = document.createElement("div");
+    key.style.cssText = "display:none;gap:12px;margin-top:4px;font-size:11px;color:rgba(255,255,255,0.6);";
+    const keyReaction = document.createElement("span");
+    keyReaction.innerHTML = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:rgba(110,235,225,0.95);margin-right:5px;vertical-align:0"></span>ring sent';
+    const keyLine = document.createElement("span");
+    const keyLineSwatch = '<span style="display:inline-block;width:14px;border-top:1px dotted rgba(255,255,255,0.7);margin-right:5px;vertical-align:3px"></span>';
+    key.append(keyReaction, keyLine);
+    wrap.append(head, canvas, key);
     const ctx = canvas.getContext("2d")!;
     const size = trackDriveCanvas(canvas);
 
@@ -2555,8 +2565,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const n = Math.min(filled, RING);
       if (n < 2) return;
       const xs = (k: number) => (k / (RING - 1)) * w;
-      const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v)) * (h - 6);
       const at = (k: number) => (ringHead - RING + k + 1 + RING * 2) % RING;
+      // The chart grows to fit: several sources added together can go past
+      // 1, and a scene's line rides above the signal — clipping both at 1
+      // flattened the result against the top and hid the line.
+      let top = 1;
+      for (let k = RING - n; k < RING; k++) {
+        const idx = at(k);
+        top = Math.max(top, combined[idx]!);
+        for (const trace of perSource) top = Math.max(top, trace[idx]!);
+        for (const trace of markTraces.values()) if (trace[idx]! >= 0) top = Math.max(top, trace[idx]!);
+      }
+      top *= 1.05;
+      const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v / top)) * (h - 6);
 
       if (isGate) {
         ctx.fillStyle = BLOCKED_FILL;
@@ -2589,17 +2610,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
       ctx.setLineDash([2, 3]);
       ctx.lineWidth = 1;
-      ctx.font = "9px ui-monospace, monospace";
-      ctx.textAlign = "right";
-      for (const [label, trace] of markTraces) {
-        ctx.strokeStyle = MARK_LINE;
+      ctx.strokeStyle = MARK_LINE;
+      for (const trace of markTraces.values()) {
         ctx.beginPath();
         let penDown = false;
         for (let k = RING - n; k < RING; k++) {
           const v = trace[at(k)]!;
-          // NaN = no line that tick; above the chart = off the top.
-          if (!(v >= 0) || v > 1) {
-            penDown = false;
+          if (!(v >= 0)) {
+            penDown = false; // NaN = no line that tick
             continue;
           }
           if (penDown) ctx.lineTo(xs(k), ys(v));
@@ -2607,20 +2625,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           penDown = true;
         }
         ctx.stroke();
-        const last = trace[at(RING - 1)]!;
-        if (last >= 0 && last <= 1) {
-          ctx.fillStyle = MARK_LINE;
-          ctx.fillText(label, w - 2, ys(last) - 2);
-        }
       }
       ctx.setLineDash([]);
-      ctx.fillStyle = MARK_REACTION;
-      for (let k = RING - n; k < RING; k++) {
-        const r = reactions[at(k)]!;
-        if (r <= 0.01) continue;
-        const tall = 3 + Math.min(1, r) * (h * 0.3);
-        ctx.fillRect(xs(k) - 1, h - tall, 2, tall);
-      }
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.6;
       ctx.beginPath();
@@ -2632,6 +2638,20 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
+
+      // A reaction that spans several ticks (a slow climb) is one dot, at the
+      // tick it started, sized by its total — drawn on the white line so it
+      // sits on the bump that caused it.
+      ctx.fillStyle = MARK_REACTION;
+      for (let k = RING - n; k < RING; k++) {
+        if (reactions[at(k)]! <= 0.01) continue;
+        const start = k;
+        let total = 0;
+        while (k < RING && reactions[at(k)]! > 0.01) total += reactions[at(k++)]!;
+        ctx.beginPath();
+        ctx.arc(xs(start), ys(combined[at(start)]!), 1.5 + 3 * Math.min(1, total), 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       if (isGate) {
         const colW = Math.max(1, w / (RING - 1));
@@ -2673,6 +2693,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         trace[ringHead] = line.value;
       }
       reactions[ringHead] = marks?.reaction ?? 0;
+      if (marks && key.style.display === "none") {
+        key.style.display = "flex";
+        const lineLabel = marks.lines[0]?.label;
+        keyLine.innerHTML = lineLabel ? `${keyLineSwatch}${lineLabel}` : "";
+      }
       if (isGate) {
         let open = 1;
         let anyCondition = false;

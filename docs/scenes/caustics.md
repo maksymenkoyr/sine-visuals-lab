@@ -296,6 +296,14 @@ reference-measurement workflow used by later scenes.
   30 and 120 fps; a ring never starts below the drawn line. With a clean hit
   source and no background the bar is 0, so "rings above" sits on the signal
   itself: any climb rings.
+- 2026-09-27 — Graph still hard to read with two sources added together: the
+  result went past 1 and was flattened against the top, the lines went off
+  the chart, and two dotted lines plus a bar row were too much to decode. Now
+  the chart autoscales to what it shows, Beat ripple publishes one line
+  ("reach to ring"; the full-ring line is gone), each ring is a cyan dot on
+  the bump that sent it (sized by strength), and a one-line key under the
+  graph names both. The panel's native `title` tooltips were dropped too
+  (`setHint` in `deviceMenu.ts`): they repeated the bottom hint line's text.
 - 2026-09-26 — "Tempo breathe" becomes "Breathe": the once-per-bar, tempo-locked
   zoom — and this scene's last read of `beatClock.ts` — was removed, and the dial
   turned into a patch destination whose zoom follows whatever source is wired to
