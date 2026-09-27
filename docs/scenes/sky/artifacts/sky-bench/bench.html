@@ -323,7 +323,8 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
 
   // ---- The look: every constant sky.ts reads for the sky and clouds. ----
   // SHIPPED mirrors sky.ts on this branch; BEFORE is the scene before the
-  // darker, narrower sky (SKY_SPREAD and SKY_LEVEL at 1).
+  // darker, narrower sky and the farther sun (SKY_SPREAD, SKY_LEVEL and
+  // SUN_DISTANCE at 1).
   const SHIPPED = {
     zenith: [[0.2, 0.2, 0.42], [0.3, 0.36, 0.6], [0.37, 0.44, 0.65], [0.26, 0.45, 0.78]],
     horizon: [[0.9, 0.5, 0.46], [0.95, 0.72, 0.58], [0.71, 0.7, 0.84], [0.7, 0.8, 0.93]],
@@ -331,14 +332,14 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
     cloudShade: [[0.36, 0.26, 0.4], [0.5, 0.42, 0.52], [0.54, 0.5, 0.64], [0.58, 0.62, 0.72]],
     sun: [[1.0, 0.45, 0.25], [1.0, 0.7, 0.4], [1.0, 0.88, 0.75], [1.0, 0.97, 0.9]],
     skySpread: 0.6, skyLevel: 0.86, gradLo: -0.1, gradHi: 0.9,
-    sunHalo: 0.3, sunCore: 0.22, horizonWarm: 0.35,
+    sunHalo: 0.3, sunCore: 0.22, horizonWarm: 0.35, sunDistance: 1.4,
     cloudBrightness: 0.6,
     shadowK1: 0.85, shadowK2: 0.52, shadowTap1: 0.045, shadowTap2: 0.095,
     cloudLow: 0.16, cloudHigh: 0.55, bumpScale: 11.0, bumpAmount: 0.65, wispScale: 2.9, wispAmount: 0.35, bumpMorph: 0.05,
     cloudCover: 0.5, drifterCount: 10, sigmaMin: 0.045, sigmaMax: 0.085, dyeRate: 1.05, puffRate: 0.45,
     dissipation: 0.34, drifterForce: 10, turbulence: 0.45, flowSpeed: 0.5, viscosity: 0.3,
   };
-  const BEFORE = Object.assign(clone(SHIPPED), { skySpread: 1, skyLevel: 1 });
+  const BEFORE = Object.assign(clone(SHIPPED), { skySpread: 1, skyLevel: 1, sunDistance: 1 });
   const MORNING_WARMTH = [1.04, 1.0, 0.86];
   const KEY_E = [-0.02, 0.08, 0.25, 0.65];
   const KEY_NAMES = ["Horizon glow", "Golden hour", "Early evening", "Midday"];
@@ -366,6 +367,7 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
     ] },
     { id: "keys", title: "Key colours", keys: true },
     { id: "sun", title: "Sun", controls: [
+      { id: "sunDistance", label: "Sun distance", min: 0.8, max: 2.5, step: 0.01, ...direct("sunDistance"), consts: (p) => `SUN_DISTANCE ${f(p.sunDistance)}` },
       { id: "sunHalo", label: "Sun halo", min: 0, max: 0.7, step: 0.01, ...direct("sunHalo"), consts: (p) => `SUN_HALO ${f(p.sunHalo)}` },
       { id: "sunCore", label: "Sun core", min: 0, max: 0.6, step: 0.01, ...direct("sunCore"), consts: (p) => `SUN_CORE ${f(p.sunCore)}` },
       { id: "horizonWarm", label: "Horizon warmth", min: 0, max: 0.9, step: 0.01, ...direct("horizonWarm"), consts: (p) => `HORIZON_WARM ${f(p.horizonWarm)}` },
@@ -499,7 +501,7 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
     sun = mix3(sun, sun.map((v, i) => v * MORNING_WARMTH[i]), morning * glowHour);
     let col = mix3(hor, zen, smooth(p.gradLo, p.gradHi, y));
     const px = (x - 0.5) * aspect, py = y - 0.5;
-    const sx = -Math.cos(dayAngle) * 0.62 * aspect, sy = -0.55 + 1.05 * sunE;
+    const sx = -Math.cos(dayAngle) * 0.62 * aspect * p.sunDistance, sy = (-0.55 + 1.05 * sunE) * p.sunDistance;
     const d = Math.hypot(px - sx, py - sy);
     const up = smooth(-0.25, 0.02, sunE);
     const g1 = (p.sunHalo * Math.exp(-d * 2.4) + p.sunCore * Math.exp(-d * 9)) * up;
@@ -562,6 +564,7 @@ uniform float uGradHi;
 uniform float uSunHalo;
 uniform float uSunCore;
 uniform float uHorizonWarm;
+uniform float uSunDistance;
 uniform float uCloudLow;
 uniform float uCloudHigh;
 uniform float uWispScale;
@@ -649,7 +652,7 @@ void main() {
   sunCol = mix(sunCol, sunCol * MORNING_WARMTH, morning * glowHour);
   vec3 color = mix(horizon, zenith, smoothstep(uGradLo, uGradHi, uv.y));
 
-  vec2 sunP = vec2(-cos(dayAngle) * SUN_X_SPAN * devAspect, -0.55 + 1.05 * sunE);
+  vec2 sunP = vec2(-cos(dayAngle) * SUN_X_SPAN * devAspect, -0.55 + 1.05 * sunE) * uSunDistance;
   float sunD = length(p - sunP);
   float sunUp = smoothstep(-0.25, 0.02, sunE);
   vec3 glow = sunCol * (uSunHalo * exp(-sunD * 2.4) + uSunCore * exp(-sunD * 9.0)) * sunUp;
@@ -736,7 +739,7 @@ void main() {
     prog.setF("uDayPhase", tod);
     v3arr("uZenith", p.zenith); v3arr("uHorizon", p.horizon); v3arr("uCloudLitKey", p.cloudLit); v3arr("uCloudShadeKey", p.cloudShade); v3arr("uSunKey", p.sun);
     prog.setF("uSkySpread", p.skySpread); prog.setF("uSkyLevel", p.skyLevel); prog.setF("uGradLo", p.gradLo); prog.setF("uGradHi", p.gradHi);
-    prog.setF("uSunHalo", p.sunHalo); prog.setF("uSunCore", p.sunCore); prog.setF("uHorizonWarm", p.horizonWarm);
+    prog.setF("uSunHalo", p.sunHalo); prog.setF("uSunCore", p.sunCore); prog.setF("uHorizonWarm", p.horizonWarm); prog.setF("uSunDistance", p.sunDistance);
     prog.setF("uCloudLow", p.cloudLow); prog.setF("uCloudHigh", Math.max(p.cloudHigh, p.cloudLow + 1e-3));
     prog.setF("uWispScale", p.wispScale); prog.setF("uWispAmount", p.wispAmount);
     prog.setF("uBumpScale", p.bumpScale); prog.setF("uBumpMorph", p.bumpMorph); prog.setF("uBumpAmount", p.bumpAmount);
@@ -881,7 +884,7 @@ void main() {
       shiftRole(p, "horizon", keys, r() * 28 * d, r() * 0.14 * d, r() * 0.08 * d);
       nudge(p, "skySpread", r() * 0.3 * d); nudge(p, "skyLevel", r() * 0.1 * d);
       nudge(p, "horizonReach", r() * 0.18 * d); nudge(p, "gradSoft", r() * 0.35 * d);
-      nudge(p, "sunHalo", r() * 0.1 * d); nudge(p, "horizonWarm", r() * 0.15 * d);
+      nudge(p, "sunHalo", r() * 0.1 * d); nudge(p, "sunDistance", r() * 0.25 * d); nudge(p, "horizonWarm", r() * 0.15 * d);
     }
     if ($("varCloudCol").checked) {
       shiftRole(p, "cloudLit", keys, r() * 14 * d, r() * 0.12 * d, r() * 0.05 * d);
@@ -1197,7 +1200,7 @@ void main() {
     const glsl = [];
     ROLES.forEach((r) => { if (all || diff(r.id)) { if (diff(r.id)) changed++; glsl.push(`const vec3 ${r.k}[4] = vec3[4](\n  ${vec3s(P[r.id])});`); } });
     const fl = [["skySpread", "SKY_SPREAD"], ["skyLevel", "SKY_LEVEL"], ["gradLo", "SKY_GRADIENT_LO"], ["gradHi", "SKY_GRADIENT_HI"],
-      ["sunHalo", "SUN_HALO"], ["sunCore", "SUN_CORE"], ["horizonWarm", "HORIZON_WARM"],
+      ["sunDistance", "SUN_DISTANCE"], ["sunHalo", "SUN_HALO"], ["sunCore", "SUN_CORE"], ["horizonWarm", "HORIZON_WARM"],
       ["cloudLow", "CLOUD_LOW"], ["cloudHigh", "CLOUD_HIGH"], ["wispScale", "CLOUD_WISP_SCALE"], ["wispAmount", "CLOUD_WISP_AMOUNT"],
       ["bumpScale", "CLOUD_BUMP_SCALE"], ["bumpMorph", "CLOUD_BUMP_MORPH"], ["bumpAmount", "CLOUD_BUMP_AMOUNT"],
       ["shadowTap1", "CLOUD_SHADOW_TAP1"], ["shadowTap2", "CLOUD_SHADOW_TAP2"], ["shadowK1", "CLOUD_SHADOW_K1"], ["shadowK2", "CLOUD_SHADOW_K2"]];

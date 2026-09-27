@@ -90,6 +90,12 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   became 229° → 261°, lightness 0.49 / 0.81 became 0.42 / 0.71. Sunset
   (0.745): 242° → 8° became 259° → 357°, bottom saturation 0.89 → 0.53.
   Midday barely moves (217° / 214° either way).
+- 2026-09-27 — sun pushed out (`SUN_DISTANCE` 1.4). By the shader's own
+  glow terms at the default Time of day (0.71), the nearest frame edge
+  was 0.16 from the sun (halo 0.68, core 0.24 of full strength) and is
+  now 0.54 (halo 0.27, core ~0). At noon the sun moved from on the top
+  edge to 0.2 above it. Bottom-tenth lightness at golden hour (0.745)
+  went 0.67 → 0.63.
 
 ## Decisions and pivots
 
@@ -191,6 +197,11 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   tuning bench sets has a name in `sky.ts`. The bench (Materials) runs
   the real `skyFluidSim.ts` under a port of the sky and cloud passes, with
   compare and variations; the user picks the final look there.
+- 2026-09-27 — "I want the sun further from the frame." The sun's path
+  hugged the frame (on the top edge at noon, just past the right edge by
+  early evening), so its halo and core washed a corner. `SUN_DISTANCE`
+  scales the whole path outward from the frame's centre; the bench has
+  it as its Sun distance slider.
 
 ## Tuning notes
 
@@ -324,4 +335,5 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   Wave frequency retired).
 - Moved back from the private repo to `src/render/scenes/sky/` (#170,
   replayed onto `main` and featured in this PR).
-- Darker, narrower sky (`SKY_SPREAD`, `SKY_LEVEL`); Sky tuning bench.
+- Darker, narrower sky (`SKY_SPREAD`, `SKY_LEVEL`); Sky tuning bench;
+  sun further out (`SUN_DISTANCE`).

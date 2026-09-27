@@ -794,8 +794,12 @@ const float SKY_GRADIENT_HI = 0.9;
 // The sun's place in the frame: it rises at the left, sets at the right, and
 // is near the top of the frame at noon, horizon at the bottom edge. Its glow
 // is a wide soft halo plus a tighter core (no hard disc), and around sunrise
-// and sunset the horizon warms most on the sun's own side.
+// and sunset the horizon warms most on the sun's own side. SUN_DISTANCE then
+// pushes that whole path outward from the frame's centre: at 1 the sun hugs
+// the frame (on the top edge at noon, just past the right edge by early
+// evening); above 1 it sits further out, so less of its glow reaches the frame.
 const float SUN_X_SPAN = 0.62; // fraction of the frame's width the sun's path spans either side of centre
+const float SUN_DISTANCE = 1.4;
 const float SUN_HALO = 0.30;
 const float SUN_CORE = 0.22;
 const float HORIZON_WARM = 0.35;
@@ -1134,7 +1138,7 @@ void main() {
   sunCol = mix(sunCol, sunCol * MORNING_WARMTH, morning * glowHour);
   vec3 color = mix(horizon, zenith, smoothstep(SKY_GRADIENT_LO, SKY_GRADIENT_HI, uv.y));
 
-  vec2 sunP = vec2(-cos(dayAngle) * SUN_X_SPAN * devAspect, -0.55 + 1.05 * sunE);
+  vec2 sunP = vec2(-cos(dayAngle) * SUN_X_SPAN * devAspect, -0.55 + 1.05 * sunE) * SUN_DISTANCE;
   float sunD = length(p - sunP);
   float sunUp = smoothstep(-0.25, 0.02, sunE);
   vec3 glow = sunCol * (SUN_HALO * exp(-sunD * 2.4) + SUN_CORE * exp(-sunD * 9.0)) * sunUp;
