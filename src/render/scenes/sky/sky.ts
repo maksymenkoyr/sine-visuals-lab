@@ -762,25 +762,50 @@ const vec3 SWEEP_TINT_C = vec3(0.82, 0.94, 1.00); // pale cyan, the midday horiz
 // elevation is floored at the first key (DAY_E_FLOOR), so once the sun is
 // down the sky holds its sunset glow until sunrise, and with Day drift on the
 // scene hurries through those hours (nightSpeedup). Each colour blends
-// between its two neighbouring keys (dayWeights).
+// between its two neighbouring keys (dayWeights). That first key is
+// therefore the darkest the sky ever gets, and the user set it by a palette
+// reference: one blue-violet family (hue ~224-244), deep saturated indigo
+// through periwinkle to lavender-white, no warm tones. Its zenith and horizon
+// are solved (docs/scenes/sky/scripts/solve_key.py) so that after
+// SKY_SPREAD/SKY_LEVEL the top edge renders ~(0.24, 0.29, 0.68) and the
+// bottom ~(0.84, 0.86, 0.975); the horizon is capped at 1.
 const float DAY_KEY_E[4] = float[4](-0.02, 0.08, 0.25, 0.65);
 const float DAY_E_FLOOR = -0.02;
 const vec3 SKY_ZENITH[4] = vec3[4](
-  vec3(0.200, 0.200, 0.420), vec3(0.300, 0.360, 0.600), vec3(0.370, 0.440, 0.650), vec3(0.260, 0.450, 0.780));
+  vec3(0.245, 0.328, 0.984), vec3(0.300, 0.360, 0.600), vec3(0.370, 0.440, 0.650), vec3(0.260, 0.450, 0.780));
 const vec3 SKY_HORIZON[4] = vec3[4](
-  vec3(0.900, 0.500, 0.460), vec3(0.950, 0.720, 0.580), vec3(0.710, 0.700, 0.840), vec3(0.700, 0.800, 0.930));
+  vec3(1.000, 1.000, 0.950), vec3(0.950, 0.720, 0.580), vec3(0.710, 0.700, 0.840), vec3(0.700, 0.800, 0.930));
 const vec3 CLOUD_LIT_KEY[4] = vec3[4](
-  vec3(0.980, 0.620, 0.550), vec3(1.000, 0.820, 0.660), vec3(0.980, 0.930, 0.950), vec3(1.000, 0.990, 0.970));
+  vec3(0.900, 0.900, 1.000), vec3(1.000, 0.820, 0.660), vec3(0.980, 0.930, 0.950), vec3(1.000, 0.990, 0.970));
 const vec3 CLOUD_SHADE_KEY[4] = vec3[4](
-  vec3(0.360, 0.260, 0.400), vec3(0.500, 0.420, 0.520), vec3(0.540, 0.500, 0.640), vec3(0.580, 0.620, 0.720));
+  vec3(0.400, 0.420, 0.720), vec3(0.500, 0.420, 0.520), vec3(0.540, 0.500, 0.640), vec3(0.580, 0.620, 0.720));
 const vec3 SUN_KEY[4] = vec3[4](
-  vec3(1.000, 0.450, 0.250), vec3(1.000, 0.700, 0.400), vec3(1.000, 0.880, 0.750), vec3(1.000, 0.970, 0.900));
+  vec3(0.720, 0.700, 1.000), vec3(1.000, 0.700, 0.400), vec3(1.000, 0.880, 0.750), vec3(1.000, 0.970, 0.900));
 const vec3 MORNING_WARMTH = vec3(1.04, 1.0, 0.86); // mornings lean peach/gold where evenings lean pink
+// Two whole-sky trims applied on top of every key, after the sun's glow is
+// added (see main): SKY_SPREAD pulls each sky pixel's hue and saturation
+// toward the colour halfway between the keyed zenith and horizon while
+// keeping its brightness, so the gradient spans fewer colours (1 = the keys
+// as written; a sunset went navy to coral, over 120 degrees of hue);
+// SKY_LEVEL then dims the whole sky. Clouds are untouched, so they stand out
+// a little more against it.
+const float SKY_SPREAD = 0.6;
+const float SKY_LEVEL = 0.86;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+// The horizon-to-zenith gradient runs between these two heights, in screen
+// uv.y (0 bottom, 1 top): LO below 0 means the bottom edge already carries a
+// little of the zenith colour, and HI below 1 means the top tenth is pure zenith.
+const float SKY_GRADIENT_LO = -0.1;
+const float SKY_GRADIENT_HI = 0.9;
 // The sun's place in the frame: it rises at the left, sets at the right, and
 // is near the top of the frame at noon, horizon at the bottom edge. Its glow
 // is a wide soft halo plus a tighter core (no hard disc), and around sunrise
-// and sunset the horizon warms most on the sun's own side.
+// and sunset the horizon warms most on the sun's own side. SUN_DISTANCE then
+// pushes that whole path outward from the frame's centre: at 1 the sun hugs
+// the frame (on the top edge at noon, just past the right edge by early
+// evening); above 1 it sits further out, so less of its glow reaches the frame.
 const float SUN_X_SPAN = 0.62; // fraction of the frame's width the sun's path spans either side of centre
+const float SUN_DISTANCE = 1.4;
 const float SUN_HALO = 0.30;
 const float SUN_CORE = 0.22;
 const float HORIZON_WARM = 0.35;
@@ -1117,9 +1142,9 @@ void main() {
   float morning = 0.5 + 0.5 * cos(dayAngle);
   horizon = mix(horizon, horizon * MORNING_WARMTH, morning * glowHour);
   sunCol = mix(sunCol, sunCol * MORNING_WARMTH, morning * glowHour);
-  vec3 color = mix(horizon, zenith, smoothstep(-0.1, 0.9, uv.y));
+  vec3 color = mix(horizon, zenith, smoothstep(SKY_GRADIENT_LO, SKY_GRADIENT_HI, uv.y));
 
-  vec2 sunP = vec2(-cos(dayAngle) * SUN_X_SPAN * devAspect, -0.55 + 1.05 * sunE);
+  vec2 sunP = vec2(-cos(dayAngle) * SUN_X_SPAN * devAspect, -0.55 + 1.05 * sunE) * SUN_DISTANCE;
   float sunD = length(p - sunP);
   float sunUp = smoothstep(-0.25, 0.02, sunE);
   vec3 glow = sunCol * (SUN_HALO * exp(-sunD * 2.4) + SUN_CORE * exp(-sunD * 9.0)) * sunUp;
@@ -1127,6 +1152,13 @@ void main() {
   float lowInSky = pow(1.0 - clamp(uv.y, 0.0, 1.0), 2.5);
   glow += sunCol * HORIZON_WARM * glowHour * onSunSide * lowInSky;
   color += glow;
+  // Narrow the sky's colour range, then darken it (SKY_SPREAD, SKY_LEVEL).
+  // Chroma here is colour over its own luma, so the pull moves hue and
+  // saturation and leaves brightness where the keys put it.
+  vec3 skyMid = 0.5 * (zenith + horizon);
+  vec3 midChroma = skyMid / max(dot(skyMid, LUMA), 1e-3);
+  float skyLuma = max(dot(color, LUMA), 1e-3);
+  color = skyLuma * mix(midChroma, color / skyLuma, SKY_SPREAD) * SKY_LEVEL;
 
 
   // 2. Cloud cover: the sim's own dye density thresholded (CLOUD_LOW/HIGH)
@@ -1157,8 +1189,8 @@ void main() {
   float sunFar = max(decodeDye(texture(uDye, uv + lightDir * CLOUD_SHADOW_TAP2)).x, 0.0);
   float shadow = exp(-CLOUD_SHADOW_K1 * sunNear - CLOUD_SHADOW_K2 * sunFar);
   // Keyed with the sky (CLOUD_LIT_KEY/CLOUD_SHADE_KEY), so clouds sit in the
-  // same light: white at midday, gold and pink toward sunset, dim moonlit
-  // grey at night. The midday pair was measured off a real hazy-cumulus
+  // same light: white at midday, gold toward sunset, lavender-white over
+  // periwinkle once the sun is down. The midday pair was measured off a real hazy-cumulus
   // photo (shadow-fold RGB≈(156,151,172)/255, highlight RGB≈(255,255,254)/255).
   vec3 cloudShadow = dayMix(dw, CLOUD_SHADE_KEY);
   vec3 cloudLit = mix(dayMix(dw, CLOUD_LIT_KEY), dayMix(dw, CLOUD_LIT_KEY) * MORNING_WARMTH, morning * glowHour);

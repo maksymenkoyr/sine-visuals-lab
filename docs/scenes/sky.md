@@ -56,6 +56,14 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   start of the session, with seven candidate sky-gazing illusions. The user
   picked three: blue field entoptic phenomenon (later cut), floaters and
   Haidinger's brush.
+- A product landing page's gradient background (the Codex page), pasted
+  2026-09-27 as "the colour palette I like; the darkest it gets should be
+  around there". Studied for its colour palette only; it set the Horizon
+  glow key. Local bundle `sky-palette-ref`.
+- A phone photo of fair-weather cumulus on a deep blue sky, pasted
+  2026-09-28 with "too many settings right now". Studied for cloud
+  structure (count, sizes, heaped outlines, lit tops over grey bases) and
+  the midday blue. Local bundle `sky-cumulus-ref`.
 
 ## Measurements
 
@@ -84,6 +92,51 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   low/mid/high onsets.
 - 2026-09-24 — a drifted day spends under 10% of its time in the skipped
   night (`nightSpeedup`, pinned by a test).
+- 2026-09-27 — darker, narrower sky (`SKY_SPREAD` 0.6, `SKY_LEVEL` 0.86).
+  Mean colour of the top and bottom tenth of a 1280×800 frame, Day drift 0,
+  clouds included. Early evening (Time of day 0.71): hue 226° → 315°
+  became 229° → 261°, lightness 0.49 / 0.81 became 0.42 / 0.71. Sunset
+  (0.745): 242° → 8° became 259° → 357°, bottom saturation 0.89 → 0.53.
+  Midday barely moves (217° / 214° either way).
+- 2026-09-27 — sun pushed out (`SUN_DISTANCE` 1.4). By the shader's own
+  glow terms at the default Time of day (0.71), the nearest frame edge
+  was 0.16 from the sun (halo 0.68, core 0.24 of full strength) and is
+  now 0.54 (halo 0.27, core ~0). At noon the sun moved from on the top
+  edge to 0.2 above it. Bottom-tenth lightness at golden hour (0.745)
+  went 0.67 → 0.63.
+- 2026-09-27 — palette reference (`sky-palette-ref`, background only,
+  text and the app window masked, `measure_palette.py`): hue p5..p95
+  224°..244°. Luma p10 / p25 / p50 / p75 / p90 = 0.30 / 0.53 / 0.64 /
+  0.76 / 0.86, darkest 5% (0.108, 0.137, 0.322). k-means palette, dark to
+  light: (0.152, 0.179, 0.395), (0.420, 0.445, 0.690), (0.468, 0.524,
+  0.883), (0.604, 0.636, 0.885), (0.710, 0.747, 0.941), (0.847, 0.861,
+  0.970).
+- 2026-09-27 — our new floor (Time of day 0.9), measured the same way:
+  hue 227°..235°. Luma 0.31 / 0.35 / 0.56 / 0.75 / 0.88. Palette (0.255,
+  0.304, 0.690), (0.354, 0.397, 0.742), (0.471, 0.507, 0.805), (0.608,
+  0.631, 0.869), (0.735, 0.754, 0.950), (0.871, 0.888, 0.998). The light
+  and mid tones match. The dark end stops at luma 0.31 (the reference's
+  corners reach 0.14), and the gradient keeps more of the frame near the
+  zenith, so the median is 0.56 vs 0.64. Before this, the floor's top was
+  navy, about (0.21, 0.17, 0.29).
+- 2026-09-28 — cumulus photo (`sky-cumulus-ref`, `measure_clouds.py`,
+  cloudness from blue-minus-red): coverage 32.8%, 8 clouds ≥ 0.3% of the
+  frame plus 7 smaller pieces, the biggest holding 27% of the cloud area,
+  size (equivalent diameter / sqrt(frame area)) p50 0.21, outline
+  crinkliness 3.1 (the haze between clouds counts). Clear sky top (0.231,
+  0.366, 0.590), bottom (0.332, 0.508, 0.700). Cloud luma p5 / p50 / p95
+  0.77 / 0.84 / 0.90.
+- 2026-09-28 — ours before the rework, same portrait frame at noon: one
+  smoky hook-shaped mass, 3 clouds, the biggest holding 93%, crinkliness
+  2.3, and a pale horizon with no clear sky in the bottom fifth.
+- 2026-09-28 — ours after the cumulus round (reverted the same day, see
+  Decisions), two samples 20 s apart: coverage 27–28%, 7–8
+  clouds plus fragments, the biggest 24–33%, size p50 0.17–0.22,
+  crinkliness 1.5–1.6. Clear sky top (0.231, 0.368, 0.593), bottom
+  (0.328, 0.501, 0.697). Cloud luma p5 / p50 / p95 0.85 / 0.95 / 0.96.
+- 2026-09-28 — frame rate, real GPU, 2560×1600: 120 fps before (the
+  display cap), 48 with the cumulus round's edge noise, 120 again once
+  clear sky skipped it.
 
 ## Decisions and pivots
 
@@ -175,6 +228,64 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   same round that featured Physarum 2 and moved Physarum and Slats behind
   the draft toggle (#173). Replayed onto `main` from #170, whose branch
   predated Physarum 2's registration and no longer merged cleanly.
+- 2026-09-27 — "Sky a bit darker, and the spectre narrower." Read as the
+  sky's colour range, which ran navy to coral at sunset. Two whole-sky
+  trims now apply after the day keys and the sun's glow: `SKY_SPREAD`
+  pulls each sky pixel's hue and saturation toward the gradient's mid
+  colour while keeping its brightness, and `SKY_LEVEL` dims it. Clouds are
+  untouched, so they stand out a little more. The gradient's bounds became
+  named constants (`SKY_GRADIENT_LO`/`HI`), so every value the new Sky
+  tuning bench sets has a name in `sky.ts`. The bench (Materials) runs
+  the real `skyFluidSim.ts` under a port of the sky and cloud passes, with
+  compare and variations; the user picks the final look there.
+- 2026-09-27 — "I want the sun further from the frame." The sun's path
+  hugged the frame (on the top edge at noon, just past the right edge by
+  early evening), so its halo and core washed a corner. `SUN_DISTANCE`
+  scales the whole path outward from the frame's centre; the bench has
+  it as its Sun distance slider.
+- 2026-09-27 — "I like the colour palette here; something around there
+  should be the darkest it gets", with a pasted indigo-periwinkle-lavender
+  gradient. The darkest state is the Horizon glow key, which the sky holds
+  from sunset to sunrise. It went from navy over coral to that palette:
+  zenith and horizon solved through the sky trims (`solve_key.py`) for a
+  saturated indigo top and a lavender-white bottom, lavender-white clouds
+  over periwinkle shade, and a lavender sun glow in place of orange.
+  Golden hour stays the one warm key. Its top is now as dark as the
+  floor's (luma ~0.31), and the floor reads more vivid than the default
+  early evening, which the narrowing left a greyish lavender.
+- 2026-09-28 — "Too many settings right now", with a photo of scattered
+  fair-weather cumulus. Read as: fewer bench controls, and clouds like
+  that. Side by side ours was one smoky hook; the rounds that followed:
+  - Smoke tails came from the drifters' push shearing each puff; a weak
+    push (`DRIFTER_FORCE` 10 → 1) and more viscosity keep puffs compact.
+  - Smooth potato outlines: value noise only wobbles an edge. The edge is
+    now carved by a cellular "puff" noise (`puffNoise`), subtracted rather
+    than multiplied, so it bites the thin edge into round bulges and
+    leaves dense interiors whole. The noise runs in the dye texture's
+    square texels; in plain uv it was stretched by the frame's aspect.
+  - Shading taps read the carved field, so each bulge shades the one below.
+  - Clumping was the puff timing, not the flow: at any moment the sources
+    that happen to be puffing can sit together and merge. More, smaller
+    sources (`SPLAT_SLOTS` 12 → 20) with longer on-phases spread them.
+  - The midday key was solved to the photo's blue, compensating the noon
+    sun halo, and `SUN_DISTANCE` went 1.4 → 1.7 so the halo stops lifting
+    the top.
+  - The new edge cost the frame rate (120 → 48 fps); clear sky now skips
+    it, which is exact, since it can't reach any threshold there.
+  The bench dropped to six controls up front (Sky brightness, Colour range,
+  Sun distance, Cloud amount, Cloud size, Bumpiness), the rest folded
+  under More controls; its presets and "Before today" went.
+- 2026-09-28 — "In the end you definitely made it worse." The cumulus
+  round's scene changes are reverted: `sky.ts` and `skyFluidSim.ts` are
+  back to the palette-matched commit (soft fluid clouds, 12 slots, the
+  strong push, midday key and `SUN_DISTANCE` 1.4 as before). Every round
+  was judged on the photo's portrait frame, where the numbers converged;
+  on the wide desktop frame the result was small hard-edged blobs that
+  looked pasted on, and none of the matched numbers said so. The soft
+  airy clouds with wispy tails were the better look. The six-control
+  bench stayed, pointing at the restored clouds. Lesson: judge a look
+  change on the frame the user watches, side by side with the previous
+  version, not only against the reference.
 
 ## Tuning notes
 
@@ -190,6 +301,11 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
 - Light-wave glints are deliberately faint and fast; if they're lost on
   real music, raise Light waves before touching the shader.
 - No `/tune sky` pass yet, and no real-GPU look.
+- Sky colours and cloud shapes are tuned on the Sky tuning bench
+  (Materials): the same sim and shader maths, six controls up front and
+  the rest under More controls, looks saved to its `looks` collection. Its display shader is a hand
+  port, so after changing the sky or cloud passes in `buildDisplayFrag`,
+  re-port them in `bench.html` and rebuild with `build_bench.mjs`.
 
 ## Known issues and next steps
 
@@ -238,11 +354,29 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
 - `docs/scenes/sky/` — the concept artifact's source and the session
   scripts (screenshot series, day sweep, reference measurers); its
   `README.md` lists them.
+- Sky tuning bench — [artifact](https://claude.ai/artifact/LDfRvM66zaudcP1svR8px7),
+  source in `docs/scenes/sky/artifacts/sky-bench/`, built by
+  `docs/scenes/sky/scripts/build_bench.mjs` (inlines the real sim).
+  Saved looks: `ArtifactData` list of its `looks` collection; each
+  look's `params` uses the bench's own keys, which its "Code for sky.ts"
+  panel maps to constant names.
 - The pasted reference stills, our screenshots and the measurement outputs
   are the local bundle `sky-stills` (`tools/.cache/refs/sky-stills/` of the
   checkout that built the scene, `.claude/worktrees/sky-scene/`). It isn't
   in the private archive yet: `python3 tools/ref-archive.py sky-stills
   --from .claude/worktrees/sky-scene/tools/.cache/refs`.
+- The palette reference is the local bundle `sky-palette-ref`
+  (`tools/.cache/refs/sky-palette-ref/` of `.claude/worktrees/sky-public/`),
+  not archived yet: `python3 tools/ref-archive.py sky-palette-ref --from
+  .claude/worktrees/sky-public/tools/.cache/refs`. `measure_palette.py`
+  measured it and `solve_key.py` turned the targets into key values (both
+  in `docs/scenes/sky/scripts/`).
+- The cumulus photo is the local bundle `sky-cumulus-ref` (same place, not
+  archived yet: `python3 tools/ref-archive.py sky-cumulus-ref --from
+  .claude/worktrees/sky-public/tools/.cache/refs`). `measure_clouds.py`
+  measures it and our renders the same way; `set_consts.py` sets named
+  constants in `sky.ts` for a tuning round. The round they served was
+  reverted (Decisions, 2026-09-28); the scripts stay for the next one.
 
 ## Resume here
 
@@ -297,3 +431,6 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   Wave frequency retired).
 - Moved back from the private repo to `src/render/scenes/sky/` (#170,
   replayed onto `main` and featured in this PR).
+- Darker, narrower sky (`SKY_SPREAD`, `SKY_LEVEL`); Sky tuning bench;
+  sun further out (`SUN_DISTANCE`); palette-matched darkest key; a
+  cumulus round from a photo, reverted; bench cut to six controls.
