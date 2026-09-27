@@ -15,6 +15,7 @@ import { chladniScene } from "./chladni.ts";
 import { dancersScene } from "./dancers/index.ts";
 import { powderScene } from "./powder.ts";
 import { physarumScene } from "./physarum.ts";
+import { physarum2Scene } from "./physarum2.ts";
 import { stormScene } from "./storm.ts";
 import { ambienceScene } from "./ambience.ts";
 import { kaleidoscopeScene } from "./kaleido/index.ts";
@@ -34,6 +35,7 @@ import { gatesScene } from "./gates/index.ts";
 // first tile behind the gallery's draft toggle. (Registering it here is also
 // what lets vite-scene-links-plugin.ts print its link when you start
 // `npm run dev` with its files changed.)
+registerScene(physarum2Scene);
 registerScene(silkScene);
 registerScene(slatsScene);
 registerScene(physarumScene);
@@ -65,6 +67,7 @@ registerScene(ferrofluidScene);
  *  the featured scenes registered above it are deliberately absent. Paid
  *  scenes checked out locally add themselves below (see privateScenes.ts). */
 const draftIds = new Set([
+  "physarum2",
   "silk",
   "gates",
   "tessera",
@@ -120,6 +123,7 @@ export {
   dancersScene,
   powderScene,
   physarumScene,
+  physarum2Scene,
   stormScene,
   ambienceScene,
   kaleidoscopeScene,

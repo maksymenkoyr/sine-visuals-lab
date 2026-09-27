@@ -140,7 +140,12 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 function skippedNote(res: BakeResponse): string {
-  return res.skipped && res.skipped.length > 0 ? ` (skipped ${res.skipped.join(", ")}: pinned/overridden)` : "";
+  const parts: string[] = [];
+  if (res.skipped && res.skipped.length > 0) parts.push(`${res.skipped.join(", ")}: pinned/overridden`);
+  if (res.skippedGenerated && res.skippedGenerated.length > 0) {
+    parts.push(`${res.skippedGenerated.join(", ")}: generated — edit the item table in the scene`);
+  }
+  return parts.length > 0 ? ` (skipped ${parts.join("; ")})` : "";
 }
 
 /** Lines for the confirmation notice — shown immediately on a successful

@@ -518,6 +518,21 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-row:hover .vc-slider::-moz-range-thumb,
 .vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1))); }
 
+/* A linked-item divergent-value tick (deviceMenu.ts's createControlRow,
+ * ControlRowSpec.linkedTicks — itemBoxes.ts's multi-selection, 2026-09-27):
+ * the wrapper sits directly around the slider it belongs to (sized to it
+ * exactly, nothing else in that box), so a tick's own left-offset percentage
+ * (createControlRow's valueToPercent) lands at the same spot on the track a
+ * drag to that value would. Pointer-events: none throughout — a tick is a
+ * readout, never a second handle. */
+.vc-slider-ticks { position: absolute; inset: 0; pointer-events: none; }
+.vc-slider-tick {
+  position: absolute; top: 50%; width: 2px; height: 12px;
+  transform: translate(-50%, -50%); border-radius: 1px;
+  background: var(--c, rgba(255, 255, 255, 0.85));
+  box-shadow: 0 0 3px var(--c, rgba(255, 255, 255, 0.6));
+}
+
 /* A band fader's hit area (bandFaders.ts): an invisible column over the
  * spectrum canvas, which draws the fader itself. touch-action: none is the
  * opposite of the slider's pan-y on purpose — a vertical drag here moves the
@@ -849,6 +864,138 @@ body.vc-keys-reveal [data-keycap]::after {
     to { background-position: 0 0; }
   }
 }
+
+/* ---- src/ui/widgets/itemBoxes.ts + relationWeb.ts/relationRows.ts ----
+ * A scene-declared item widget's own boxes, affinity rows and web — styled
+ * with this file's own tokens/fonts rather than a widget-local stylesheet,
+ * same convention as every other panel piece. Always a two-column grid,
+ * regardless of item count or panel width, so a box stays wide enough for
+ * its code + placeholder swatch even in the narrow (phone) stacked layout —
+ * see itemBoxes.ts's header on why Phase 3's live preview lands in
+ * .vc-item-preview without a layout change. */
+/* The "All" chip + "Editing …" line above the boxes (itemBoxes.ts's
+ * multi-selection, 2026-09-27). */
+.vc-item-selbar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;
+}
+.vc-item-editing {
+  font: 400 10px/1.3 ${FONT_MONO}; color: rgba(255, 255, 255, 0.5); letter-spacing: 0.02em;
+}
+.vc-item-boxes {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px;
+}
+.vc-item-box {
+  display: grid; gap: 6px; padding: 8px; border-radius: 6px; text-align: left; min-width: 0;
+  background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.13); cursor: pointer; font: inherit; color: inherit;
+}
+.vc-item-box:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
+.vc-item-box-sel {
+  border-color: var(--c, ${SCENE_VIOLET});
+  background: color-mix(in srgb, var(--c, ${SCENE_VIOLET}) 14%, transparent);
+}
+.vc-item-box-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.vc-item-led {
+  flex: none; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--c, #fff); box-shadow: 0 0 7px var(--c, #fff);
+}
+.vc-item-code {
+  font: 500 11.5px/1 ${FONT_MONO}; color: #fff; letter-spacing: 0.03em;
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The per-box "in the edit group" checkbox (itemBoxes.ts's Solo paragraph,
+ * 2026-09-27b) — a real <button role="checkbox">, sized to a >=24px touch
+ * target even though its drawn glyph is much smaller, sitting in the box's
+ * own header row (its "corner") after the code label. --c is the box's own
+ * colour custom property, inherited straight from .vc-item-box since the
+ * checkbox is a DOM descendant of it. */
+.vc-item-check {
+  flex: none; width: 24px; height: 24px; padding: 0; margin: -3px -3px -3px 0;
+  border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.04);
+  cursor: pointer; display: grid; place-items: center; transition: background 0.12s ease, border-color 0.12s ease;
+}
+.vc-item-check::after {
+  content: ""; width: 8px; height: 8px; border-radius: 2px; background: transparent; transition: background 0.12s ease;
+}
+.vc-item-check[aria-checked="true"] {
+  border-color: var(--c, ${SCENE_VIOLET});
+  background: color-mix(in srgb, var(--c, ${SCENE_VIOLET}) 22%, transparent);
+}
+.vc-item-check[aria-checked="true"]::after {
+  background: var(--c, ${SCENE_VIOLET});
+  box-shadow: 0 0 5px var(--c, ${SCENE_VIOLET});
+}
+.vc-item-check:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* A live preview (Phase 3) is a <canvas> in this same slot; an item family
+ * with no preview source keeps the plain sized placeholder <div> — either
+ * way the box's layout is untouched. */
+.vc-item-preview {
+  display: block; width: 100%; aspect-ratio: 1; border-radius: 4px;
+  background: color-mix(in srgb, var(--c, #fff) 10%, rgba(0, 0, 0, 0.35));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.vc-item-rows { display: grid; }
+
+/* Phase 3's per-box readouts (POP/TERR/VIG) and the population bar +
+ * Rebalance/Pipette row beneath the boxes — src/ui/widgets/itemBoxes.ts. */
+.vc-item-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-top: 4px; }
+.vc-item-stat { display: grid; justify-items: center; gap: 1px; font: 400 9px/1.1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.45); letter-spacing: 0.04em; }
+.vc-item-stat b { color: #fff; font-weight: 400; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+
+.vc-pop-wrap { display: grid; gap: 6px; justify-items: center; margin: 4px 0 10px; }
+.vc-popbar { display: flex; height: 10px; width: 100%; border-radius: 3px; overflow: hidden; background: rgba(255, 255, 255, 0.08); }
+.vc-popbar span { display: block; height: 100%; transition: width 0.2s ease; }
+.vc-poplabels { display: flex; flex-wrap: wrap; gap: 5px 12px; justify-content: center; font: 400 10px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.65); }
+.vc-poplabels i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 4px; box-shadow: 0 0 5px currentColor; }
+.vc-pop-actions { display: flex; gap: 8px; }
+
+/* The pipette's tap-point flash — position/left/top set inline per tap
+ * (document-body-absolute so it isn't clipped by the panel's own scroll
+ * container); everything else lives here so the keyframes can too. */
+.vc-pipette-ring {
+  position: fixed; width: 10px; height: 10px; margin: -5px 0 0 -5px;
+  border: 2px solid ${BANDS_AMBER}; border-radius: 50%; opacity: 0.95;
+  pointer-events: none; z-index: 9999; animation: vc-pipette-pulse 0.65s ease-out forwards;
+}
+@keyframes vc-pipette-pulse { to { width: 64px; height: 64px; margin: -32px 0 0 -32px; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .vc-pipette-ring { animation: none; opacity: 0; transition: opacity 0.5s ease-out; }
+}
+
+.vc-relweb-wrap { display: flex; justify-content: center; margin: 4px 0 10px; }
+.vc-relweb { width: 100%; max-width: 220px; }
+.vc-relweb-label {
+  font: 500 10px/1 ${FONT_LABEL}; fill: #04050a; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.vc-relweb-node { cursor: pointer; }
+.vc-relweb-node:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 3px; }
+.vc-relweb-sel { opacity: 1; }
+.vc-relweb-dim { opacity: 0.3; }
+
+.vc-relrows { display: grid; gap: 2px; margin-bottom: 8px; }
+.vc-relrow { display: grid; gap: 7px; padding: 8px 2px; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.vc-relrow:first-child { border-top: 0; }
+.vc-relrow-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.vc-relrow-label { font: 500 12px/1.2 ${FONT_LABEL}; color: #fff; }
+.vc-relrow-value {
+  font: 400 12px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.6); font-variant-numeric: tabular-nums; flex: none;
+}
+/* A row where the selected strains disagree (itemBoxes.ts's multi-selection,
+ * 2026-09-27) — a small pill, not a colour change on the row itself, so it
+ * reads as "extra information" rather than an error state. */
+.vc-relrow-mixed {
+  font: 500 9px/1 ${FONT_MONO}; letter-spacing: 0.06em; text-transform: uppercase;
+  color: ${BANDS_AMBER}; border: 1px solid color-mix(in srgb, ${BANDS_AMBER} 55%, transparent);
+  border-radius: 8px; padding: 2px 6px; flex: none;
+}
+
+.vc-exp-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.vc-exp-pill {
+  border: 1px solid rgba(255, 255, 255, 0.18); background: transparent; border-radius: 12px; padding: 4px 10px;
+  font: 500 11px/1 ${FONT_LABEL}; letter-spacing: 0.04em; color: rgba(255, 255, 255, 0.7); cursor: pointer;
+}
+.vc-exp-pill:hover { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+.vc-exp-pill[aria-pressed="true"] { color: ${SCENE_VIOLET}; border-color: ${SCENE_VIOLET}; }
+.vc-exp-hyp { margin: 6px 0 0; width: 100%; color: rgba(255, 255, 255, 0.4); font-size: 11.5px; }
 `;
 
 /** Installs the panel's stylesheet once; safe to call from every creator. */

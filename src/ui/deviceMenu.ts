@@ -14,7 +14,14 @@ import {
 } from "../audio/sensitivity.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
 import type { SceneLook } from "../render/sceneLooks.ts";
+import type { Scene } from "../render/scene.ts";
 import { createLooksCard } from "./looksCard.ts";
+// Side-effect import: registers every built-in widget (registerWidget) so a
+// scene's Scene.panel sections resolve — see widgets/registry.ts's header
+// for the panel/widget split this file is the one place that renders.
+import "./widgets/index.ts";
+import { getWidget, type LinkedSetting, type WidgetCtx } from "./widgets/registry.ts";
+import { formatMixedSummary } from "./widgets/itemSelection.ts";
 import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
 import { takeSettingMarks } from "../render/settingMarks.ts";
@@ -406,6 +413,10 @@ export interface DeviceMenuDeps {
   onSmoothingChange: (sceneId: string, value: number) => void;
   /** Empty for scenes with nothing to tune — the card hides itself. */
   getSceneSettings: (sceneId: string) => SceneSetting[];
+  /** The active scene object, for its optional `panel` (src/render/scene.ts)
+   *  — used only to render a scene-declared item widget ahead of the flat
+   *  settings loop; nothing else here reaches into a Scene directly. */
+  getScene: (sceneId: string) => Scene | undefined;
   getSceneSettingValue: (sceneId: string, spec: SceneSetting) => number;
   /** A setting's resting value under the scene's current variant (see
    *  SceneSetting.variant) — what the row's reset arrow returns it to. */
@@ -445,6 +456,17 @@ export interface DeviceMenuDeps {
    *  patches (and, while a patch has a source on Frequencies, independent
    *  drawn lines — see getDriveLine below). */
   getDriveSetting: (sceneId: string, spec: SceneSetting) => DriveSetting;
+  /** Writes a whole DriveSetting straight through (driveStore.ts's own
+   *  `setDriveSetting`) — the one generic primitive every other `onSetXxx`
+   *  below is a narrower pure-function wrapper around. appendSettingRow's
+   *  multi-item-selection bridge (registry.ts's `appendRow` `linked` option)
+   *  is the only caller today: after any patch edit on a row with `linked`
+   *  siblings, it copies the row's own freshly-written DriveSetting onto
+   *  each of them verbatim — correct even for a `"scene"` choice, since two
+   *  items' own scene defaults can legitimately differ (see
+   *  itemBoxes.ts/physarum2.ts's Nutrient, whose scene default is each
+   *  strain's own band). */
+  onSetDriveSetting: (sceneId: string, spec: SceneSetting, setting: DriveSetting) => void;
   onResetDriveSetting: (sceneId: string, spec: SceneSetting) => void;
   /** Leaves the setting with nothing plugged in — it stops reacting to the
    *  music (drives.ts's normalizeDriveSetting keeps an empty patch empty).
@@ -1018,6 +1040,19 @@ export interface ControlRowSpec {
    *  a pinned card can't close it. Every Scene-card row passes it, drive or
    *  not; omit for a row that can't be pinned. */
   onCardPin?: () => void;
+  /** Other selected items' own current value for this exact setting — the
+   *  multi-item-selection bridge (registry.ts's `appendRow` `linked` option,
+   *  itemBoxes.ts's multi-strain edit). Present (possibly with 0 entries)
+   *  only for a row appendSettingRow built with `linked`; every other row
+   *  omits this field entirely, so it never allocates the tick-mark DOM at
+   *  all. A tick is drawn on the slider track at a linked value's own
+   *  position (its own colour, or a neutral one) only while it disagrees
+   *  with this row's current value — `row.setLinkedTicks` (the returned
+   *  object) is how a caller keeps this current after its own commit
+   *  changes which of them still disagree, since only this row's own edits
+   *  can ever change any of them (their own rows never render while
+   *  selected together). */
+  linkedTicks?: readonly { value: number; colour?: string }[];
 }
 
 /** One SceneSetting.reads entry (sceneSettings.ts's SignalLink) resolved
@@ -1471,7 +1506,26 @@ export function createControlRow(spec: ControlRowSpec) {
   hintAuto.textContent = AUTO_HOLDING_HINT;
   hint.append(hintDesc, hintAuto);
 
-  el.append(head, slider, hint);
+  // A divergent-value tick per linked item (ControlRowSpec.linkedTicks) is
+  // drawn absolutely inside a small wrapper sized exactly to the slider's own
+  // box, rather than over the whole row — only built when a row actually
+  // has `linkedTicks` at all (undefined, not just empty, so an ordinary
+  // single-item row never allocates this). See renderTicks()/setLinkedTicks
+  // below for how a tick's own left offset matches the slider's log/linear
+  // mapping.
+  let ticksWrap: HTMLElement | null = null;
+  if (spec.linkedTicks !== undefined) {
+    const sliderBox = document.createElement("div");
+    sliderBox.style.cssText = "position: relative;";
+    sliderBox.appendChild(slider);
+    ticksWrap = document.createElement("div");
+    ticksWrap.className = "vc-slider-ticks";
+    ticksWrap.setAttribute("aria-hidden", "true");
+    sliderBox.appendChild(ticksWrap);
+    el.append(head, sliderBox, hint);
+  } else {
+    el.append(head, slider, hint);
+  }
   if (signalIndicator) el.appendChild(signalIndicator.strip);
   if (spec.drivePanel) el.appendChild(spec.drivePanel.below);
   el.addEventListener("click", (e) => {
@@ -1525,14 +1579,42 @@ export function createControlRow(spec: ControlRowSpec) {
     hint.style.display = spec.description || auto ? "" : "none";
   }
 
+  // The slider's own left-offset percentage for `value`, sharing the exact
+  // log/linear/zeroAtMin mapping display() uses for its own fill — a
+  // linked-item tick (renderTicks below) has to land at the same spot on the
+  // track a slider drag to that same value would.
+  function valueToPercent(value: number): number {
+    const sliderValue = valueToSlider(value);
+    const lo = Number(slider.min);
+    const hi = Number(slider.max);
+    const pct = hi > lo ? ((sliderValue - lo) / (hi - lo)) * 100 : 0;
+    return Math.max(0, Math.min(100, pct));
+  }
+
+  // Other selected items' own values (ControlRowSpec.linkedTicks) — kept
+  // live by setLinkedTicks below, initialized from the spec so the very
+  // first render (a fresh selection with already-differing values) shows
+  // them without waiting for an edit.
+  let linkedTicksData: readonly { value: number; colour?: string }[] = spec.linkedTicks ?? [];
+  function renderTicks(): void {
+    if (!ticksWrap) return;
+    ticksWrap.replaceChildren();
+    for (const t of linkedTicksData) {
+      if (Math.abs(t.value - lastValue) <= 1e-6) continue; // only while they differ
+      const tick = document.createElement("i");
+      tick.className = "vc-slider-tick";
+      tick.style.left = `${valueToPercent(t.value)}%`;
+      if (t.colour) tick.style.setProperty("--c", t.colour);
+      ticksWrap.appendChild(tick);
+    }
+  }
+
   function display(value: number, auto: boolean): void {
     lastValue = value;
     const sliderValue = valueToSlider(value);
     slider.value = String(sliderValue);
-    const lo = Number(slider.min);
-    const hi = Number(slider.max);
-    const pct = hi > lo ? ((sliderValue - lo) / (hi - lo)) * 100 : 0;
-    slider.style.setProperty("--vc-fill", `${Math.max(0, Math.min(100, pct))}%`);
+    slider.style.setProperty("--vc-fill", `${valueToPercent(value)}%`);
+    renderTicks();
     setReadout(value);
     // setReadout just overwrote digits.style.cssText wholesale, which would
     // silently pop the digits back over an open typed-entry field on every
@@ -1682,6 +1764,16 @@ export function createControlRow(spec: ControlRowSpec) {
           active: r.active(),
         })),
       );
+    },
+    /** Replaces linkedTicks with fresh values and redraws — the caller
+     *  (appendSettingRow) calls this right after propagating its own commit
+     *  to every linked setting, so a tick that just became equal disappears
+     *  immediately rather than waiting for the next full rebuild. A no-op
+     *  when this row was never built with `linkedTicks` in the first place. */
+    setLinkedTicks(ticks: readonly { value: number; colour?: string }[]): void {
+      if (!ticksWrap) return;
+      linkedTicksData = ticks;
+      renderTicks();
     },
   };
 }
@@ -1960,6 +2052,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Whether the panel is open (open/close, below) — declared up here since
   // setSolo's cable-visibility refresh runs during construction.
   let isOpen = false;
+  // Set by a mountRows dispose that removed the pinned row; consumed by the
+  // very next mountRows (see mountRows).
+  let pinHandoff: { family: string; param: string; other?: number } | null = null;
   /** The last setting `previewDrive` was actually handed a non-null value
    *  for — unlike `preview` itself, this never goes back to null when the
    *  pointer leaves. It's what a jack click reaches for when nothing's
@@ -2192,6 +2287,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  so the hint reads as "this is what you'd get" rather than jargon. */
   function driveDefaultSummary(spec: SceneSetting): string {
     return driveSummaryText(spec, defaultDriveSetting(spec));
+  }
+
+  /** The short form driveSummaryText's own "scene" branch would otherwise
+   *  spell out ("Scene mix: bass level") — just "Scene", for the "Mixed —
+   *  …" line below, where every part has to stay short enough to read as a
+   *  list. */
+  function driveShortSummary(spec: SceneSetting, setting: DriveSetting): string {
+    return setting === "scene" ? "Scene" : driveSummaryText(spec, setting);
+  }
+
+  /** A drive row's own summary text, "Mixed — …" once its linked siblings
+   *  (registry.ts's `appendRow` `linked` option) actually disagree with
+   *  `setting` — the multi-item-selection bridge's drive-summary half (the
+   *  tick marks on a numeric row are createControlRow's own concern; this is
+   *  buildDriveRow's). Plain `driveSummaryText` otherwise, identical to a
+   *  row with no `linked` at all. */
+  function driveSummaryForRow(sceneId: string, spec: SceneSetting, setting: DriveSetting): string {
+    const entry = linkedByKey.get(spec.key);
+    if (!entry?.linked.length) return driveSummaryText(spec, setting);
+    const differs = entry.linked.some((l) => !sameDriveSetting(deps.getDriveSetting(sceneId, l.spec), setting));
+    if (!differs) return driveSummaryText(spec, setting);
+    return formatMixedSummary([
+      { label: entry.ownLabel ?? spec.label, text: driveShortSummary(spec, setting) },
+      ...entry.linked.map((l) => ({ label: l.label, text: driveShortSummary(l.spec, deps.getDriveSetting(sceneId, l.spec)) })),
+    ]);
   }
 
   /** The setting's own first plugged source's colour, or SCENE_VIOLET for
@@ -2566,6 +2686,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       setFill(w);
       setOut(w);
       deps.onSetSourceWeight(sceneId, spec, src.choice, w);
+      syncLinkedDriveSetting(sceneId, spec);
       onLiveEdit();
     });
     wrap.append(rng, out);
@@ -3190,7 +3311,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       port.title = isPinned()
         ? "Pinned — click again or press Esc to close."
         : "Click to pin this setting and choose what it listens to.";
-      summary.textContent = driveSummaryText(spec, setting);
+      summary.textContent = driveSummaryForRow(sceneId, spec, setting);
       // --vc-pin-color: read by controlsTheme.ts's .vc-drive-pinned/
       // .vc-drive-preview for this row's own border/tint — always kept
       // current even at state "none" so it's already right the instant
@@ -3365,12 +3486,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     };
   }
 
+  /** The multi-item-selection bridge's drive/patch choke point (registry.ts's
+   *  `appendRow` `linked` option) — copies `spec`'s own just-written
+   *  DriveSetting onto every linked setting verbatim (`deps.onSetDriveSetting`
+   *  — DeviceMenuDeps's own doc comment on why a straight copy, "scene"
+   *  included, is always correct here). A no-op when `spec.key` has no
+   *  `linked` entries (every ordinary row). Called from `patchChanged` below
+   *  and, separately, from buildWeightSlider's own live `input` (which never
+   *  calls patchChanged — see that comment) since a weight drag is still a
+   *  patch mutation this bridge has to fan out, even though it doesn't
+   *  otherwise rebuild anything. */
+  function syncLinkedDriveSetting(sceneId: string, spec: SceneSetting): void {
+    const entry = linkedByKey.get(spec.key);
+    if (!entry?.linked.length) return;
+    const setting = deps.getDriveSetting(sceneId, spec);
+    for (const l of entry.linked) deps.onSetDriveSetting(sceneId, l.spec, setting);
+  }
+
   /** The only place a patch mutation is followed by a rebuild — every
    *  control inside buildPatchPanel() calls through here after writing to
    *  `deps`, except a weight slider's own `input` (buildWeightSlider's
    *  onLiveEdit only refreshes the reset link, never rebuilds — this file's
-   *  own carried click-loss rule). */
+   *  own carried click-loss rule; it calls syncLinkedDriveSetting itself
+   *  instead of going through here). */
   function patchChanged(sceneId: string, spec: SceneSetting): void {
+    syncLinkedDriveSetting(sceneId, spec);
     const h = driveRowHandles.find((r) => r.sceneId === sceneId && r.spec.key === spec.key);
     h?.refreshMeta();
     h?.rebuildIfPinned();
@@ -4496,6 +4636,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAuto(): void;
   }
   let sceneRowHandles: SceneRowHandle[] = [];
+  // Cleanup callbacks a widget registered via WidgetCtx.onDispose
+  // (widgets/registry.ts) — run once, right before the next full rebuild.
+  let widgetDisposers: (() => void)[] = [];
+
+  // registry.ts's `appendRow` `linked` option, by the primary row's own
+  // spec.key — rebuilt from scratch on every renderSceneSettings() call
+  // exactly like sceneRowHandles/driveRowHandles above, since it's only ever
+  // read for a row on the currently-mounted card. `ownLabel` is the primary
+  // item's own short name, needed only to build a "Mixed — …" drive summary
+  // alongside `linked`'s own labels (see buildDriveRow's refreshMeta and
+  // patchChanged's syncLinkedDriveSetting below).
+  let linkedByKey: Map<string, { ownLabel?: string; linked: readonly LinkedSetting[] }> = new Map();
 
   // Looks: named snapshots of the Scene card's own settings above — see
   // src/render/sceneLooks.ts. Hidden the same way sceneCard is when the
@@ -4603,13 +4755,32 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // in a family (spec.family), so the A/T chips — styled
   // directly from this parameter, not from the row's `--vc-accent` CSS
   // variable — tint correctly too.
+  // `opts.linked`/`opts.ownLabel` are registry.ts's `appendRow` own
+  // multi-item-selection bridge (itemBoxes.ts's multi-strain edit,
+  // 2026-09-27) — see that file's doc comment on `appendRow` for the full
+  // contract; `setLinkedValue` below is the one choke point every plain
+  // value edit (slider drag, typed value, reset arrow, T mute, an Auto
+  // toggle) goes through, so `linked` only has to be threaded once here
+  // rather than at each of the three branches below. A drive/patch edit's
+  // own choke point is `patchChanged`/`syncLinkedDriveSetting`, further down
+  // this file, since a patch mutation is never a `deps.onSceneSettingChange`
+  // call in the first place.
   function appendSettingRow(
     container: HTMLElement,
     sceneId: string,
     spec: SceneSetting,
     specs: SceneSetting[],
     accent: string = SCENE_VIOLET,
+    opts?: { ownLabel?: string; linked?: readonly LinkedSetting[] },
   ): void {
+    const linked = opts?.linked ?? [];
+    if (linked.length) linkedByKey.set(spec.key, { ownLabel: opts?.ownLabel, linked });
+
+    function setLinkedValue(value: number): void {
+      deps.onSceneSettingChange(sceneId, spec, value);
+      for (const l of linked) deps.onSceneSettingChange(sceneId, l.spec, value);
+    }
+
     // A sibling setting's live (auto-aware) value, by key — what a
     // SignalLink.activeWhen predicate reads (see signals.ts's SignalLink doc
     // comment). Falls back to 0 for an unknown key rather than throwing: a
@@ -4720,7 +4891,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         description: spec.description,
         get: () => deps.getSceneSettingValue(sceneId, spec),
         set: (value) => {
-          deps.onSceneSettingChange(sceneId, spec, value);
+          setLinkedValue(value);
           // A variant switch swaps every other row's profile (values,
           // defaults, auto state), so the card is rebuilt around it.
           if (spec.variant) renderSceneSettings();
@@ -4757,7 +4928,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         defaultValue: deps.getSceneSettingDefault(sceneId, spec),
         description: spec.description,
         get: () => deps.getSceneSettingValue(sceneId, spec),
-        set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
+        set: setLinkedValue,
       });
       wirePreviewFocus(toggleEl);
       registerPinRow(toggleEl, null, toggleEl.querySelector<HTMLElement>(".vc-toggle"));
@@ -4788,7 +4959,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       auto: spec.auto || spec.macro
         ? {
             isEnabled: () => deps.isSettingAutoEnabled(sceneId, spec.key),
-            toggle: (on) => deps.onSettingAutoToggle(sceneId, spec, on),
+            toggle: (on) => {
+              deps.onSettingAutoToggle(sceneId, spec, on);
+              for (const l of linked) deps.onSettingAutoToggle(sceneId, l.spec, on);
+            },
             resolveLive: () => deps.resolveSceneSettingValue(sceneId, spec),
             getManual: () => deps.getSceneSettingValue(sceneId, spec),
           }
@@ -4799,8 +4973,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         ? { port: driveBuild.port, summary: driveBuild.summary, below: driveBuild.below, onPin: () => togglePin(sceneId, spec) }
         : undefined,
       onCardPin: () => pinSetting(sceneId, spec),
+      linkedTicks: linked.length
+        ? linked.map((l) => ({ value: deps.getSceneSettingValue(sceneId, l.spec), colour: l.colour }))
+        : undefined,
     });
-    row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
+    row.onChange((value) => {
+      setLinkedValue(value);
+      if (linked.length) row.setLinkedTicks(linked.map((l) => ({ value, colour: l.colour })));
+    });
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));
     wirePreviewFocus(row.el);
     container.appendChild(row.el);
@@ -4809,6 +4989,86 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (driveHandle) driveRowHandles.push(driveHandle);
     registerPinRow(row.el, driveHandle);
     wireBandHighlight(row.el, reads);
+  }
+
+  /** registry.ts's `WidgetCtx.mountRows` — a scoped sibling of
+   *  `appendSettingRow` above: builds `rows` into a single host div appended
+   *  to `container`, snapshotting `sceneRowHandles`/`driveRowHandles`/
+   *  `driveSparkCanvases` before and after so the returned `dispose()` can
+   *  unregister exactly what this call added (and `linkedByKey` entries by
+   *  the same rows' own keys) rather than the whole card's worth
+   *  `renderSceneSettings` resets. Mirrors that function's own pinned-row
+   *  reconciliation (its tail, below) for just the rows this call built: a
+   *  mount that happens to recreate the currently-pinned row picks the
+   *  patch panel back up instead of waiting for the next full rebuild. See
+   *  registry.ts's header for why a widget (itemBoxes.ts's selection
+   *  change) reaches for this instead of `ctx.rerender()`. */
+  function mountRows(
+    container: HTMLElement,
+    sceneId: string,
+    specs: SceneSetting[],
+    rows: readonly { spec: SceneSetting; ownLabel?: string; linked?: readonly LinkedSetting[] }[],
+  ): { dispose(): void } {
+    const host = document.createElement("div");
+    container.appendChild(host);
+
+    const sceneRowStart = sceneRowHandles.length;
+    const driveRowStart = driveRowHandles.length;
+    const sparkStart = driveSparkCanvases.length;
+    const pinRowStart = pinRowHandles.length;
+    for (const r of rows) appendSettingRow(host, sceneId, r.spec, specs, SCENE_VIOLET, { ownLabel: r.ownLabel, linked: r.linked });
+
+    const addedSceneRows = sceneRowHandles.slice(sceneRowStart);
+    const addedDriveRows = driveRowHandles.slice(driveRowStart);
+    const addedSparks = driveSparkCanvases.slice(sparkStart);
+    // Every row registers here too (registerPinRow), drive or not.
+    const addedPinRows = pinRowHandles.slice(pinRowStart);
+
+    if (pinned) {
+      const stillHere = addedPinRows.find((r) => r.sceneId === pinned!.sceneId && r.spec.key === pinned!.spec.key);
+      stillHere?.refreshPin();
+    }
+    // A pin handed off by the previous mount's dispose (below): re-pin the
+    // same per-item control on whichever item this mount shows, so switching
+    // strains keeps the patch bay aimed at "Nutrient", not at a hidden row.
+    const handoff = pinHandoff;
+    pinHandoff = null;
+    if (handoff && !pinned) {
+      const same = rows.find(
+        (r) =>
+          r.spec.item?.family === handoff.family &&
+          r.spec.item.param === handoff.param &&
+          r.spec.item.other === handoff.other,
+      );
+      if (same) pinSetting(sceneId, same.spec);
+    }
+
+    let disposed = false;
+    return {
+      dispose(): void {
+        if (disposed) return;
+        disposed = true;
+        sceneRowHandles = sceneRowHandles.filter((h) => !addedSceneRows.includes(h));
+        driveRowHandles = driveRowHandles.filter((h) => !addedDriveRows.includes(h));
+        pinRowHandles = pinRowHandles.filter((h) => !addedPinRows.includes(h));
+        for (const c of addedSparks) untrackDriveCanvas(c);
+        driveSparkCanvases = driveSparkCanvases.filter((c) => !addedSparks.includes(c));
+        for (const r of rows) linkedByKey.delete(r.spec.key);
+        host.remove();
+        const ownsKey = (p: { sceneId: string; spec: SceneSetting } | null): boolean =>
+          p !== null && p.sceneId === sceneId && rows.some((r) => r.spec.key === p.spec.key);
+        // Never leave the pin (or a hover preview) on a row that no longer
+        // exists: unpin, and remember which per-item control it was so the
+        // next mountRows can re-pin its counterpart (see above).
+        if (ownsKey(pinned)) {
+          const item = pinned!.spec.item;
+          togglePin(pinned!.sceneId, pinned!.spec);
+          pinHandoff = item ? { family: item.family, param: item.param, other: item.other } : null;
+        }
+        if (ownsKey(preview)) previewDrive(null);
+        refreshPatchHighlight();
+      },
+    };
   }
 
   function renderSceneSettings(): void {
@@ -4820,6 +5080,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     driveSparkCanvases = [];
     driveRowHandles = [];
     pinRowHandles = [];
+    linkedByKey = new Map();
+    for (const dispose of widgetDisposers) dispose();
+    widgetDisposers = [];
     sceneCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.refresh();
@@ -4852,8 +5115,68 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
       return accent;
     };
+
+    // Scene-declared item widgets (src/render/sceneItems.ts, scene.ts's
+    // Scene.panel) render first, inside this same card — see
+    // src/ui/widgets/registry.ts's header. Every setting whose
+    // `item.family` a section claims is then skipped by the flat loop
+    // below, exactly as if it weren't in `specs` at all.
+    const scene = deps.getScene(sceneId);
+    const panelSections = scene?.panel ?? [];
+    const claimedFamilies = new Set(
+      panelSections.map((s) => s.items).filter((x): x is string => x !== undefined),
+    );
+    for (const section of panelSections) {
+      const build = getWidget(section.widget);
+      // tests/sceneKeys.test.ts checks every panel widget id is registered
+      // ahead of time — a missing one here just renders nothing rather than
+      // throwing in a live panel.
+      if (!build) continue;
+      hasGroups = true;
+      const heading = groupHeading(section.title, first);
+      markBlock(heading);
+      sceneRows.appendChild(heading);
+      first = false;
+      const host = document.createElement("div");
+      sceneRows.appendChild(host);
+
+      const tickFns: (() => void)[] = [];
+      const ctx: WidgetCtx = {
+        sceneId,
+        specs,
+        specsFor: (family, index) =>
+          specs.filter((s) => s.item?.family === family && (index === undefined || s.item.index === index)),
+        get: (spec) => deps.getSceneSettingValue(sceneId, spec),
+        set: (spec, value) => deps.onSceneSettingChange(sceneId, spec, value),
+        appendRow: (rowContainer, spec, opts) => appendSettingRow(rowContainer, sceneId, spec, specs, SCENE_VIOLET, opts),
+        mountRows: (rowContainer, rows) => mountRows(rowContainer, sceneId, specs, rows),
+        // The exact same live reading a row's own sparkline draws — see
+        // WidgetCtx.driveValue's own doc comment (registry.ts).
+        driveValue: (spec) => lastDrives?.valueOf(spec.key) ?? 0,
+        probe: () => deps.getScene(sceneId)?.probe?.() ?? null,
+        command: (name, args) => deps.getScene(sceneId)?.command?.(name, args),
+        onTick: (fn) => tickFns.push(fn),
+        onDispose: (fn) => widgetDisposers.push(fn),
+        // A whole-card rebuild rather than patching this section's own DOM
+        // — see registry.ts's header for why that's the right amount of
+        // work here (it reuses every bit of jack/cable/pin teardown below
+        // for free).
+        rerender: () => renderSceneSettings(),
+      };
+      build(host, section, ctx);
+      if (tickFns.length > 0) {
+        sceneRowHandles.push({
+          updateSignalPills: () => {
+            for (const fn of tickFns) fn();
+          },
+          refreshAuto: () => {},
+        });
+      }
+    }
+
     for (let i = 0; i < specs.length; i++) {
       const spec = specs[i];
+      if (spec.item && claimedFamilies.has(spec.item.family)) continue;
       const groupChanged = spec.group !== undefined && spec.group !== lastGroup;
       if (groupChanged) {
         hasGroups = true;
