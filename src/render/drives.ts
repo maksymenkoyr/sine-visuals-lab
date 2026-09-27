@@ -444,7 +444,12 @@ export function defaultDriveSetting(spec: SceneSetting): DriveSetting {
 
 /** Clamps every source's weight, drops a source whose key collides with an
  *  earlier one in the same patch (first occurrence wins) or a second line
- *  source, and collapses an empty result to `"scene"`. Also carries the
+ *  source, and keeps an empty result empty: a patch with nothing plugged in
+ *  listens to nothing (value 0, never fires). It used to collapse to
+ *  `"scene"`, which made unplugging the last source silently fall back to
+ *  the scene's own mix — Beat ripple's "bass or beat hit" could never be
+ *  disconnected. The panel's "Reset to scene default" is the one way back
+ *  to `"scene"`. Also carries the
  *  legacy top-level `when: n` a patch built before per-source roles existed
  *  can still show up with at runtime (driveStore.ts's sanitizeDriveSetting
  *  does the same for the wire-format twin of this field, top-level `w`):
@@ -479,7 +484,7 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
     if (src.off === true) source.off = true;
     sources.push(source);
   }
-  if (sources.length === 0) return "scene";
+  if (sources.length === 0) return { mix: setting.mix, sources: [] };
 
   if (legacyWhen !== undefined && !sources.some((s) => s.when)) {
     const idx = Math.min(sources.length - 1, Math.max(0, Math.round(legacyWhen)));

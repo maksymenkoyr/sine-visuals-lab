@@ -440,8 +440,20 @@ describe("drives: patch normalization — weight clamp, dedupe, empty -> scene",
     expect(normalized.sources[0]).toEqual({ choice: "anim.low", weight: 1 });
   });
 
-  it("an empty patch normalizes to scene", () => {
-    expect(normalizeDriveSetting({ mix: "add", sources: [] })).toBe("scene");
+  it("an empty patch stays empty — nothing plugged in, not the scene's mix", () => {
+    expect(normalizeDriveSetting({ mix: "add", sources: [] })).toEqual({ mix: "add", sources: [] });
+  });
+
+  it("an empty patch listens to nothing: value 0, never fires, even when the scene's own trigger fires", () => {
+    const clock = createAnimClock();
+    const anim = clock.advance(DT, frame({ onset: true }));
+    const engine = createDriveEngine();
+    const spec = settingWithDrive("unplugged", "feature.onset");
+    setDriveSetting("empty-patch-scene", spec, { mix: "add", sources: [] });
+    const drives = engine.forScene("empty-patch-scene", [spec], anim);
+    expect(drives.value("unplugged", 0.8)).toBe(0);
+    expect(drives.fired("unplugged", true)).toBe(false);
+    expect(drives.uniformPair("unplugged")).toEqual({ drive: 0, custom: 1 });
   });
 
   it("sameDriveSetting compares mix, source order, weight and height", () => {

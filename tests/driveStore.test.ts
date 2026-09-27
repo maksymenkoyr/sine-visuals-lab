@@ -199,12 +199,19 @@ describe("driveStore: patch-editing helpers (togglePatchSource, setSourceWeight,
   // SPARKLE (not FLASH) throughout — its own drive.default is "scene", so
   // toggling the first source builds a fresh one-source patch rather than
   // adding alongside FLASH's own already-present Beat default.
-  it("togglePatchSource adds then removes a source, landing back on scene when empty", () => {
+  it("togglePatchSource adds then removes a source, leaving nothing plugged in (not the scene's mix)", () => {
     const sceneId = "patch-helper-1";
     togglePatchSource(sceneId, SPARKLE, "anim.lowOnset");
     expect(getDriveSetting(sceneId, SPARKLE)).toEqual(driveSettingFromChoice("anim.lowOnset"));
     togglePatchSource(sceneId, SPARKLE, "anim.lowOnset");
+    expect(getDriveSetting(sceneId, SPARKLE)).toEqual({ mix: "add", sources: [] });
+    resetDriveSetting(sceneId, SPARKLE);
     expect(getDriveSetting(sceneId, SPARKLE)).toBe("scene");
+  });
+
+  it("an empty patch survives the storage round trip", () => {
+    const empty: DrivePatch = { mix: "add", sources: [] };
+    expect(sanitizeDriveSetting(encodeDriveSetting(empty))).toEqual(empty);
   });
 
   it("setSourceWeight/setSourceHeight edit one source in place", () => {

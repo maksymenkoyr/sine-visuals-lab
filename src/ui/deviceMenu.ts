@@ -419,6 +419,11 @@ export interface DeviceMenuDeps {
    *  drawn lines — see getDriveLine below). */
   getDriveSetting: (sceneId: string, spec: SceneSetting) => DriveSetting;
   onResetDriveSetting: (sceneId: string, spec: SceneSetting) => void;
+  /** Leaves the setting with nothing plugged in — it stops reacting to the
+   *  music (drives.ts's normalizeDriveSetting keeps an empty patch empty).
+   *  The panel offers it while the setting plays its scene's own mix, which
+   *  otherwise has no source line of its own to unplug. */
+  onUnplugAll: (sceneId: string, spec: SceneSetting) => void;
   onTogglePatchSource: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice) => void;
   onSetSourceWeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, weight: number) => void;
   onSetSourceHeight: (sceneId: string, spec: SceneSetting, choice: DriveSourceChoice, height: HitHeight) => void;
@@ -2723,15 +2728,31 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
     const list = document.createElement("div");
     list.style.cssText = driveSrcListStyle;
-    if (!patch.sources.length) {
+    if (setting === "scene") {
+      // The scene's own mix has no source line of its own, so it gets its
+      // own Unplug — without it the scene's mix could never be disconnected.
       const empty = document.createElement("div");
       empty.style.cssText = driveEmptySrcStyle;
-      // An empty patch is always "scene" (normalizeDriveSetting), so the
-      // setting is playing its scene's own mix — not standing still.
       const mix = spec.drive?.sceneLabel?.replace(/^Scene:\s*/, "");
       empty.textContent = mix
         ? `Playing the scene's own mix: ${mix}. Plug in a meter to replace it.`
         : "Playing the scene's own mix. Plug in a meter to replace it.";
+      const unplug = document.createElement("button");
+      unplug.type = "button";
+      unplug.style.cssText = driveResetLinkStyle;
+      unplug.textContent = "Unplug";
+      setHint(unplug, "Disconnect the scene's own mix, so this setting doesn't react to the music.");
+      unplug.addEventListener("click", () => {
+        deps.onUnplugAll(sceneId, spec);
+        patchChanged(sceneId, spec);
+      });
+      list.append(empty, unplug);
+    } else if (!patch.sources.length) {
+      // An empty patch stays empty (normalizeDriveSetting): nothing plugged
+      // in, so the setting holds still.
+      const empty = document.createElement("div");
+      empty.style.cssText = driveEmptySrcStyle;
+      empty.textContent = "Nothing plugged in, so this doesn't react to the music. Plug in a meter, or reset to the scene default.";
       list.appendChild(empty);
     }
     patch.sources.forEach((src, i) => {
