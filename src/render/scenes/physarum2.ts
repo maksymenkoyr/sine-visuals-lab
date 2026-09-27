@@ -920,6 +920,7 @@ const PANEL: readonly PanelSection[] = [
     options: {
       labels: STRAINS.map((s) => s.code),
       colours: STRAINS.map((s) => cssColor(s.color)),
+      itemNoun: "strains",
       rowOrder: ["nutrient", "sensor", "turn", "stride", "excite", "stain"],
       // Phase 3's live pure-culture preview — src/ui/widgets/previews.ts's
       // registry id. itemBoxes.ts falls back to the old empty placeholder

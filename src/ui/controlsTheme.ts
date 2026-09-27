@@ -518,6 +518,21 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-row:hover .vc-slider::-moz-range-thumb,
 .vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1))); }
 
+/* A linked-item divergent-value tick (deviceMenu.ts's createControlRow,
+ * ControlRowSpec.linkedTicks — itemBoxes.ts's multi-selection, 2026-09-27):
+ * the wrapper sits directly around the slider it belongs to (sized to it
+ * exactly, nothing else in that box), so a tick's own left-offset percentage
+ * (createControlRow's valueToPercent) lands at the same spot on the track a
+ * drag to that value would. Pointer-events: none throughout — a tick is a
+ * readout, never a second handle. */
+.vc-slider-ticks { position: absolute; inset: 0; pointer-events: none; }
+.vc-slider-tick {
+  position: absolute; top: 50%; width: 2px; height: 12px;
+  transform: translate(-50%, -50%); border-radius: 1px;
+  background: var(--c, rgba(255, 255, 255, 0.85));
+  box-shadow: 0 0 3px var(--c, rgba(255, 255, 255, 0.6));
+}
+
 /* A band fader's hit area (bandFaders.ts): an invisible column over the
  * spectrum canvas, which draws the fader itself. touch-action: none is the
  * opposite of the slider's pan-y on purpose — a vertical drag here moves the
@@ -858,6 +873,14 @@ body.vc-keys-reveal [data-keycap]::after {
  * its code + placeholder swatch even in the narrow (phone) stacked layout —
  * see itemBoxes.ts's header on why Phase 3's live preview lands in
  * .vc-item-preview without a layout change. */
+/* The "All" chip + "Editing …" line above the boxes (itemBoxes.ts's
+ * multi-selection, 2026-09-27). */
+.vc-item-selbar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;
+}
+.vc-item-editing {
+  font: 400 10px/1.3 ${FONT_MONO}; color: rgba(255, 255, 255, 0.5); letter-spacing: 0.02em;
+}
 .vc-item-boxes {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px;
 }
@@ -931,6 +954,14 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-relrow-label { font: 500 12px/1.2 ${FONT_LABEL}; color: #fff; }
 .vc-relrow-value {
   font: 400 12px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.6); font-variant-numeric: tabular-nums; flex: none;
+}
+/* A row where the selected strains disagree (itemBoxes.ts's multi-selection,
+ * 2026-09-27) — a small pill, not a colour change on the row itself, so it
+ * reads as "extra information" rather than an error state. */
+.vc-relrow-mixed {
+  font: 500 9px/1 ${FONT_MONO}; letter-spacing: 0.06em; text-transform: uppercase;
+  color: ${BANDS_AMBER}; border: 1px solid color-mix(in srgb, ${BANDS_AMBER} 55%, transparent);
+  border-radius: 8px; padding: 2px 6px; flex: none;
 }
 
 .vc-exp-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

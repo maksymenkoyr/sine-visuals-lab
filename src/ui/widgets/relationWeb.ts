@@ -3,11 +3,13 @@
  * `options.relations` block (see itemBoxes.ts's header) — nodes in each
  * item's own colour, a curved arrow per ordered pair (green follows / red
  * avoids, width by |value|, dashed near zero), a small self-loop per item
- * for its own "diagonal" pair, and the selected item's own arrows/loop lit
- * while every other pair dims. Clicking a node selects that item (the
- * caller re-renders — see registry.ts's WidgetCtx.rerender). Rebuilt whole
- * on every call rather than patched in place — cheap at the row counts an
- * item widget has, and it keeps this module free of any retained state.
+ * for its own "diagonal" pair, and every selected item's own arrows/loop lit
+ * while every other pair dims (a multi-selection, 2026-09-27, lights all of
+ * them at once — not just the primary). Clicking a node toggles it in/out of
+ * the selection, exactly like clicking its own specimen box (the caller
+ * re-renders — see registry.ts's WidgetCtx.rerender). Rebuilt whole on every
+ * call rather than patched in place — cheap at the row counts an item widget
+ * has, and it keeps this module free of any retained state.
  */
 
 const NS = "http://www.w3.org/2000/svg";
@@ -50,9 +52,12 @@ export interface RelationWebSpec {
   /** CSS colour per item, same order as `labels`. */
   colours: readonly string[];
   labels: readonly string[];
-  selected: number;
+  /** Every currently-selected item, never empty — every one of them is
+   *  drawn lit (this file's header). */
+  selected: readonly number[];
   /** Reads the stored `i -> j` value (the affinity/attraction setting). */
   get(i: number, j: number): number;
+  /** Toggles `i` in/out of the selection, like clicking its own box. */
   onSelect(i: number): void;
 }
 
@@ -85,7 +90,7 @@ export function buildRelationWeb(spec: RelationWebSpec): SVGSVGElement {
       const mx = (sx + ex) / 2 + px * bend;
       const my = (sy + ey) / 2 + py * bend;
       const col = relColour(v);
-      const cls = `vc-relweb-arrow ${i === selected ? "vc-relweb-sel" : "vc-relweb-dim"}`;
+      const cls = `vc-relweb-arrow ${selected.includes(i) ? "vc-relweb-sel" : "vc-relweb-dim"}`;
       const path = svgEl("path", {
         d: `M${sx.toFixed(1)},${sy.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)}`,
         class: cls,
@@ -136,7 +141,7 @@ export function buildRelationWeb(spec: RelationWebSpec): SVGSVGElement {
       fill: "none",
       stroke: col,
       "stroke-width": (1 + Math.abs(v) * 2).toFixed(2),
-      class: `vc-relweb-loop ${i === selected ? "vc-relweb-sel" : "vc-relweb-dim"}`,
+      class: `vc-relweb-loop ${selected.includes(i) ? "vc-relweb-sel" : "vc-relweb-dim"}`,
     });
     const title = svgEl("title", {});
     title.textContent = `${labels[i]} → own trail: ${relWord(v)} (${fmtSigned(v)})`;
@@ -156,7 +161,7 @@ export function buildRelationWeb(spec: RelationWebSpec): SVGSVGElement {
       class: "vc-relweb-node",
       tabindex: "0",
       role: "button",
-      "aria-label": `Select ${labels[i]}`,
+      "aria-label": `Toggle ${labels[i]}`,
     });
     c.style.filter = `drop-shadow(0 0 6px ${col})`;
     c.style.cursor = "pointer";
@@ -168,7 +173,7 @@ export function buildRelationWeb(spec: RelationWebSpec): SVGSVGElement {
       }
     });
     g.appendChild(c);
-    if (i === selected) {
+    if (selected.includes(i)) {
       g.appendChild(
         svgEl("circle", {
           cx: String(p.x),

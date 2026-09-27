@@ -41,6 +41,20 @@ import type { SceneSetting } from "../../render/sceneSettings.ts";
  * their own rows already tick through the handles `appendRow` registers.
  */
 
+/** One other selected item's own same-param setting — see `appendRow`'s own
+ *  `opts.linked` doc comment below for the full contract. */
+export interface LinkedSetting {
+  /** The same-param setting on another selected item (e.g. another
+   *  strain's own Nutrient spec). */
+  spec: SceneSetting;
+  /** This item's own short display name (e.g. "PP-C3"), for a "Mixed — …"
+   *  drive summary. */
+  label: string;
+  /** This item's own colour, reused for its divergent-value tick — omitted
+   *  draws a neutral tick instead. */
+  colour?: string;
+}
+
 export interface WidgetCtx {
   sceneId: string;
   /** The active scene's full, flat settings list (SceneSetting[]) — the
@@ -72,8 +86,23 @@ export interface WidgetCtx {
   command(name: string, args: Record<string, number>): void;
   /** Mounts `spec` as a real device-menu row (drive chip, Receives patch,
    *  jack, cables, A/T, reset — deviceMenu.ts's own `appendSettingRow`)
-   *  into `container`. */
-  appendRow(container: HTMLElement, spec: SceneSetting): void;
+   *  into `container`. `opts.linked` is the multi-item-selection bridge
+   *  (itemBoxes.ts's own multi-strain edit, 2026-09-27): every OTHER item
+   *  currently selected alongside `spec`'s own item, sharing the same
+   *  `spec.item.param`. When given, deviceMenu applies any edit this row
+   *  makes — a value (slider drag, typed value, reset arrow, T mute), an
+   *  Auto toggle, or a drive/patch change (anything in the Receives panel,
+   *  jack/cable wiring, reset to scene default) — to every linked setting
+   *  too, and shows a divergent-value tick per linked item on a numeric
+   *  row's slider track (and a "Mixed — …" drive summary) for as long as
+   *  they disagree with `spec`. `opts.ownLabel` is `spec`'s own item's
+   *  short name (e.g. "PP-A1") — needed only to name it in that "Mixed —
+   *  …" line alongside `linked`'s own labels; harmless to omit when
+   *  `linked` is empty/omitted, which makes this an ordinary single-item
+   *  row exactly as before. See itemSelection.ts for the pure toggle/
+   *  primary/mixed-text rules a caller like itemBoxes.ts builds `opts`
+   *  from. */
+  appendRow(container: HTMLElement, spec: SceneSetting, opts?: { ownLabel?: string; linked?: readonly LinkedSetting[] }): void;
   /** Registers `fn` to run on every device-menu tick (unthrottled) while
    *  this section is mounted — cleared automatically on the next rebuild. */
   onTick(fn: () => void): void;

@@ -1,10 +1,18 @@
 import type { SceneSetting } from "../../render/sceneSettings.ts";
 import { createStrainPreview, type StrainPreview } from "../../render/scenes/physarum2Preview.ts";
 import { chipBtnLitStyle, chipBtnStyle, createChipButton, groupHeading } from "../controlsKit.ts";
-import { registerWidget, type WidgetCtx } from "./registry.ts";
+import { registerWidget, type LinkedSetting, type WidgetCtx } from "./registry.ts";
 import { getPreviewSource } from "./previews.ts";
 import { buildRelationPresets, buildRelationRows, type RelationPreset, type RelationWord } from "./relationRows.ts";
 import { buildRelationWeb } from "./relationWeb.ts";
+import {
+  affinityRowTargets,
+  allItemsSelected,
+  editingHeading,
+  primarySelection,
+  sameSelection,
+  toggleItemSelection,
+} from "./itemSelection.ts";
 
 /**
  * The generic "item boxes" widget: one specimen box per item of a
@@ -29,6 +37,20 @@ import { buildRelationWeb } from "./relationWeb.ts";
  * family) — a convenience only, wrapped in try/catch like every other
  * localStorage read/write in this codebase (sceneSettings.ts's own store is
  * the precedent).
+ *
+ * **Multi-selection (2026-09-27).** A box click TOGGLES that item in/out of
+ * the selection (itemSelection.ts's `toggleItemSelection`) rather than
+ * replacing it — several boxes stay lit at once, and the last remaining one
+ * can't be tapped off. The "All" chip above the boxes selects every item at
+ * once; the "Editing …" line under it names the current set
+ * (`editingHeading`). The rows below the boxes are always the PRIMARY item's
+ * own (`primarySelection` — the lowest selected index, "first in code
+ * order"), but every edit made there is handed to `ctx.appendRow` as
+ * `{ ownLabel, linked }` (registry.ts's own doc comment on that option) so
+ * deviceMenu.ts fans the edit out to every other selected item's same
+ * setting, draws a divergent-value tick per one that still disagrees, and
+ * folds a disagreeing drive/patch into a "Mixed — …" summary. Affinity's own
+ * per-row fan-out (`affinityRowTargets`) follows the same selection.
  *
  * **Phase 3 (`options.preview`).** When set, `src/ui/widgets/previews.ts`'s
  * registry resolves it to a `PreviewSource` (size/agent count + an
@@ -73,6 +95,10 @@ export interface ItemBoxesOptions {
   /** `SceneSetting.item.param` values to render, in display order, for
    *  whichever item is selected. */
   rowOrder: readonly string[];
+  /** Plural noun for the "Editing all `itemNoun`" heading once every item is
+   *  selected (itemSelection.ts's `editingHeading`) — e.g. "strains".
+   *  Defaults to "items" so a family that never names one still reads. */
+  itemNoun?: string;
   /** A registered id in src/ui/widgets/previews.ts — see this file's header.
    *  Omit for the old sized placeholder swatch (no live preview/readouts/
    *  population bar/pipette). */
@@ -114,19 +140,29 @@ function showPipetteRing(clientX: number, clientY: number): void {
   setTimeout(() => ring.remove(), 700);
 }
 
-function readSelected(sceneId: string, family: string, count: number): number {
+/** Reads the persisted selection set, ascending/deduped/non-empty. Also
+ *  reads the pre-multi-select shape (a bare JSON number — `String(index)`
+ *  is valid JSON) as that one index, so a browser that saved a single
+ *  selection before this change upgrades cleanly instead of losing it. */
+function readSelectedSet(sceneId: string, family: string, count: number): number[] {
   try {
     const raw = localStorage.getItem(selectStoreKey(sceneId, family));
-    const n = raw === null ? NaN : parseInt(raw, 10);
-    return Number.isFinite(n) && n >= 0 && n < count ? n : 0;
+    if (raw === null) return [0];
+    const parsed: unknown = JSON.parse(raw);
+    const arr = typeof parsed === "number" ? [parsed] : Array.isArray(parsed) ? parsed : null;
+    if (!arr) return [0];
+    const valid = [...new Set(arr.filter((n): n is number => Number.isInteger(n) && n >= 0 && n < count))].sort(
+      (a, b) => a - b,
+    );
+    return valid.length ? valid : [0];
   } catch {
-    return 0;
+    return [0];
   }
 }
 
-function writeSelected(sceneId: string, family: string, index: number): void {
+function writeSelectedSet(sceneId: string, family: string, indices: readonly number[]): void {
   try {
-    localStorage.setItem(selectStoreKey(sceneId, family), String(index));
+    localStorage.setItem(selectStoreKey(sceneId, family), JSON.stringify(indices));
   } catch {
     // Not fatal — the selection just won't survive a reload.
   }
@@ -142,6 +178,34 @@ function findPairSpec(
   return specs.find((s) => s.item?.family === family && s.item.param === param && s.item.index === i && s.item.other === j);
 }
 
+/** Phase 3 preview sims persist across a widget rebuild (a box click, an
+ *  Affinity edit — anything that calls `ctx.rerender()`) instead of
+ *  restarting from noise every time: keyed by (scene, family, item index),
+ *  looked up here and reattached to whatever new `<canvas>` this build made
+ *  for it, rather than recreated with the rest of this function's own DOM.
+ *  `PREVIEW_CACHE_MAX` is a safety net, not a real limit — one item family's
+ *  worth of entries never gets close to it; it only matters if a session
+ *  somehow visits far more item-preview scenes than exist today, and even
+ *  then it just drops the oldest rather than growing forever. */
+const PREVIEW_CACHE_MAX = 24;
+const previewCache = new Map<string, StrainPreview>();
+
+function cachedPreview(sceneId: string, family: string, index: number, size: number, agents: number): StrainPreview {
+  const key = `${sceneId}:${family}:${index}`;
+  let sim = previewCache.get(key);
+  if (!sim) {
+    // Distinct, deterministic seeds per box — same spirit as the
+    // "Physarum Lab" prototype's own `1000 + k * 97`.
+    sim = createStrainPreview({ size, agents, seed: 1000 + index * 97 });
+    previewCache.set(key, sim);
+    if (previewCache.size > PREVIEW_CACHE_MAX) {
+      const oldest = previewCache.keys().next().value;
+      if (oldest !== undefined) previewCache.delete(oldest);
+    }
+  }
+  return sim;
+}
+
 registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) => {
   const family = section.items;
   const opts = section.options as ItemBoxesOptions | undefined;
@@ -150,8 +214,21 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   const count = labels.length;
   if (count === 0) return;
 
-  const selected = readSelected(ctx.sceneId, family, count);
+  const selectedSet = readSelectedSet(ctx.sceneId, family, count);
+  const primary = primarySelection(selectedSet);
   const previewSource = opts.preview ? getPreviewSource(opts.preview) : undefined;
+
+  // Shared by the box click handler, the "All" chip and the web overview's
+  // own node click — see this file's header's Multi-selection paragraph.
+  // A `const` arrow, not a hoisted function declaration, so TypeScript keeps
+  // narrowing `family` (PanelSection.items, string | undefined) past the
+  // early-return guard above.
+  const toggleAndRerender = (i: number): void => {
+    const next = toggleItemSelection(selectedSet, i);
+    if (sameSelection(next, selectedSet)) return;
+    writeSelectedSet(ctx.sceneId, family, next);
+    ctx.rerender();
+  };
 
   // Phase 3 per-box state, filled in the loop below only when a preview
   // source is registered — see this file's header.
@@ -161,15 +238,39 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   const previewVisible: boolean[] = [];
   const readoutEls: ({ pop: HTMLElement; terr: HTMLElement; vig: HTMLElement } | undefined)[] = [];
 
+  // The "All" chip + "Editing …" line — see this file's header's
+  // Multi-selection paragraph. Placed above the boxes (registry.ts's
+  // appendRow doc allows either that or the section's own heading row; the
+  // heading row is built by deviceMenu.ts before this widget ever mounts,
+  // so it isn't reachable from here).
+  const selBar = document.createElement("div");
+  selBar.className = "vc-item-selbar";
+  const allBtn = createChipButton("All", `Select every ${opts.itemNoun ?? "item"}`, () => {
+    const next = allItemsSelected(count);
+    if (sameSelection(next, selectedSet)) return;
+    writeSelectedSet(ctx.sceneId, family, next);
+    ctx.rerender();
+  });
+  const editingEl = document.createElement("span");
+  editingEl.className = "vc-item-editing";
+  editingEl.textContent = editingHeading(
+    selectedSet.map((i) => labels[i] ?? ""),
+    selectedSet.length === count,
+    opts.itemNoun ?? "items",
+  );
+  selBar.append(allBtn, editingEl);
+  container.appendChild(selBar);
+
   const boxesEl = document.createElement("div");
   boxesEl.className = "vc-item-boxes";
   for (let i = 0; i < count; i++) {
+    const isSel = selectedSet.includes(i);
     const box = document.createElement("button");
     box.type = "button";
-    box.className = "vc-item-box" + (i === selected ? " vc-item-box-sel" : "");
+    box.className = "vc-item-box" + (isSel ? " vc-item-box-sel" : "");
     box.style.setProperty("--c", opts.colours[i] ?? "#fff");
-    box.setAttribute("aria-pressed", String(i === selected));
-    box.setAttribute("aria-label", `Select ${labels[i]}`);
+    box.setAttribute("aria-pressed", String(isSel));
+    box.setAttribute("aria-label", `Toggle ${labels[i]}`);
 
     const head = document.createElement("div");
     head.className = "vc-item-box-head";
@@ -190,9 +291,10 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
       off.width = previewSource.size;
       off.height = previewSource.size;
       previewOffscreen[i] = off;
-      // Distinct, deterministic seeds per box — same spirit as the
-      // "Physarum Lab" prototype's own `1000 + k * 97`.
-      previewSims[i] = createStrainPreview({ size: previewSource.size, agents: previewSource.agents, seed: 1000 + i * 97 });
+      // Reattached from the persisted cache rather than recreated — see
+      // this file's own cachedPreview doc comment (the "cultures restart on
+      // every click" fix).
+      previewSims[i] = cachedPreview(ctx.sceneId, family, i, previewSource.size, previewSource.agents);
       previewVisible[i] = false;
       previewEl = canvas;
     } else {
@@ -225,11 +327,7 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
       readoutEls[i] = { pop: pop.val, terr: terr.val, vig: vig.val };
     }
 
-    box.addEventListener("click", () => {
-      if (i === selected) return;
-      writeSelected(ctx.sceneId, family, i);
-      ctx.rerender();
-    });
+    box.addEventListener("click", () => toggleAndRerender(i));
     boxesEl.appendChild(box);
   }
   container.appendChild(boxesEl);
@@ -288,7 +386,7 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     let pipetteArmed = pipetteArmedByFamily.get(pipetteKey) ?? false;
     const pipetteBtn = createChipButton(
       "Pipette",
-      "Arm, then tap the visualisation to inject the selected strain there — this screen only, settings/commands don't reach the TV",
+      "Arm, then tap the visualisation to inject the primary strain there — this screen only, settings/commands don't reach the TV",
       () => {
         pipetteArmed = !pipetteArmed;
         pipetteArmedByFamily.set(pipetteKey, pipetteArmed);
@@ -321,7 +419,7 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
       // paragraph on why this is the one flip needed here.
       const x = clamp01((e.clientX - rect.left) / rect.width);
       const y = clamp01(1 - (e.clientY - rect.top) / rect.height);
-      ctx.command("inject", { x, y, strain: selected });
+      ctx.command("inject", { x, y, strain: primary });
       showPipetteRing(e.clientX, e.clientY);
     };
     const onKeyDown = (e: KeyboardEvent): void => {
@@ -411,10 +509,17 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
 
   const rowsEl = document.createElement("div");
   rowsEl.className = "vc-item-rows";
-  const itemSpecs = ctx.specsFor(family, selected);
+  const primarySpecs = ctx.specsFor(family, primary);
+  const otherSelected = selectedSet.filter((i) => i !== primary);
   for (const paramKey of opts.rowOrder) {
-    const spec = itemSpecs.find((s) => s.item?.param === paramKey);
-    if (spec) ctx.appendRow(rowsEl, spec);
+    const spec = primarySpecs.find((s) => s.item?.param === paramKey);
+    if (!spec) continue;
+    const linked: LinkedSetting[] = [];
+    for (const i of otherSelected) {
+      const otherSpec = ctx.specsFor(family, i).find((s) => s.item?.param === paramKey);
+      if (otherSpec) linked.push({ spec: otherSpec, label: labels[i] ?? "", colour: opts.colours[i] });
+    }
+    ctx.appendRow(rowsEl, spec, linked.length ? { ownLabel: labels[primary] ?? "", linked } : undefined);
   }
   container.appendChild(rowsEl);
 
@@ -427,9 +532,14 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
     return spec ? ctx.get(spec) : 0;
   };
-  const setRel = (i: number, j: number, value: number): void => {
-    const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
-    if (spec) ctx.set(spec, value);
+  // Applies `value` to every pair a multi-selection's row `rowJ` affects
+  // (itemSelection.ts's `affinityRowTargets`) — see relationRows.ts's own
+  // header for what row `rowJ` means.
+  const applyAffinityRow = (rowJ: number, value: number): void => {
+    for (const { i, j } of affinityRowTargets(selectedSet, primary, rowJ)) {
+      const spec = findPairSpec(ctx.specs, family, rel.prefix, i, j);
+      if (spec) ctx.set(spec, value);
+    }
     ctx.rerender();
   };
 
@@ -440,18 +550,16 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
       count,
       colours: opts.colours,
       labels,
-      selected,
+      selected: selectedSet,
       get: getRel,
-      onSelect: (i) => {
-        if (i === selected) return;
-        writeSelected(ctx.sceneId, family, i);
-        ctx.rerender();
-      },
+      onSelect: toggleAndRerender,
     }),
   );
   container.appendChild(webWrap);
 
-  container.appendChild(buildRelationRows({ count, labels, selected, words: rel.words, get: getRel, set: setRel }));
+  container.appendChild(
+    buildRelationRows({ count, labels, selected: selectedSet, words: rel.words, get: getRel, applyRow: applyAffinityRow }),
+  );
 
   if (rel.presets?.length) {
     container.appendChild(

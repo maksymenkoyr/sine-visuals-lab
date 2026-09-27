@@ -206,6 +206,50 @@ and `powder.ts`'s curl noise).
   from the prototype was skipped (the brief allowed it: "skip if it
   clutters") — the POP/TERR/VIG readouts plus the population bar already
   cover what it would have narrated.
+- **2026-09-27, multi-strain editing.** A box click now TOGGLES a strain
+  in/out of the edit group instead of replacing the selection — any
+  combination stays selected, an "All" chip picks every strain at once, and
+  an "Editing PP-A1 + PP-C3" (or "Editing all strains") line above the boxes
+  names the current set (`src/ui/widgets/itemSelection.ts`, new pure module,
+  `tests/itemSelection.test.ts`). Rows still show only the PRIMARY strain's
+  own (the lowest selected index), but every edit made there — a value, an
+  Auto toggle, or a drive/patch change — now fans out to every other
+  selected strain's same setting. The mechanism is generic, not
+  physarum2-specific: `src/ui/widgets/registry.ts`'s `WidgetCtx.appendRow`
+  grew an optional third argument, `{ ownLabel, linked }`
+  (`LinkedSetting[]`), and `deviceMenu.ts` applies any edit on that row to
+  `linked` too through the two choke points that already existed for a
+  single-item row — the row's own `onChange`/`auto.toggle` for a value, and
+  `patchChanged`/a new `syncLinkedDriveSetting` (plus a new
+  `DeviceMenuDeps.onSetDriveSetting`, wrapping `driveStore.ts`'s own
+  `setDriveSetting`) for a drive/patch edit — rather than a second parallel
+  edit path. A drive/patch edit copies the whole resolved `DriveSetting`
+  (`"scene"` included) onto every linked strain's own setting verbatim; that
+  first felt wrong for Nutrient (whose scene default is *each strain's own
+  band*, not one shared thing) until realizing copying `"scene"` is exactly
+  correct — each strain then keeps reading its own band, only a real patch's
+  *sources* actually get shared. `createControlRow` grew an optional
+  `linkedTicks` (a divergent-value tick per linked strain, drawn on the
+  slider track at that strain's own value, in its own colour, only while it
+  disagrees) and a `setLinkedTicks` method the caller refreshes right after
+  its own commit, since a linked strain's own row never renders while
+  selected together — nothing else can change what the tick should show.
+  Affinity's per-row fan-out is `itemSelection.ts`'s own
+  `affinityRowTargets`: the "→ own trail" row sets every selected strain's
+  own diagonal, a "→ target" row sets every selected strain *except the
+  target itself* toward it, and a small "mixed" pill shows when the
+  selection disagrees on a row (`relationRows.ts`); the web overview
+  (`relationWeb.ts`) now lights every selected node, and a node click toggles
+  like a box. Also fixed while in there: a box click's `ctx.rerender()`
+  rebuilds the whole Scene card, and `itemBoxes.ts` used to recreate every
+  specimen box's preview sim from its fixed seed on every rebuild, so all
+  four cultures restarted from noise on *any* click (a box, an Affinity
+  word, anything). Preview sims now live in a small module-level cache keyed
+  by `${sceneId}:${family}:${index}`, looked up (not recreated) on each
+  rebuild and reattached to whatever new `<canvas>` that rebuild made —
+  headless-verified by screenshotting one box's preview before/mid/after two
+  extra rerender-triggering clicks: the trail pattern is visibly the same
+  evolving shape throughout, not reset.
 
 ## Tuning notes
 
@@ -262,6 +306,16 @@ applies there too. Tuned so far only against the synthetic feed at
   inject/rebalance events) — the plan allowed skipping it if it clutters;
   the POP/TERR/VIG readouts and the population bar cover the same ground
   without a fourth thing to read.
+- The multi-strain edit's Auto-toggle fan-out (`appendSettingRow`'s
+  `linked` propagation, deviceMenu.ts) is generic but unexercised here:
+  none of the per-strain settings carry an `auto` table yet (the
+  nutrient/excite/sensor/turn/stride/stain bullet above), so there's no
+  live case where toggling A actually had anything to fan out to. Worth a
+  real check once per-strain auto-tuning exists.
+- The pipette now always injects the PRIMARY strain (the lowest selected
+  index) regardless of how many are selected — it never had a selection of
+  its own, and multi-select didn't add one; picking a specific strain to
+  inject still means selecting it alone first.
 
 ## Materials
 
@@ -323,3 +377,9 @@ panel rendering in system fonts headlessly — see headless-app-driving.md.
   previews, POP/TERR/VIG readouts, the population bar, Rebalance and the
   pipette, plus `seedSpread`/`seedFrom` and the "Dose" relabel. Still on
   `worktree-physarum2`, still not merged to main (PR #153).
+- 2026-09-27: Multi-strain editing in the Strains widget (see Decisions and
+  pivots above) — toggle selection, "All", the generic `linked` bridge on
+  `WidgetCtx.appendRow`, divergent-value ticks, "Mixed — …" drive summaries,
+  Affinity's multi-target fan-out, and the preview-cache fix for cultures
+  restarting on every click. Still on `worktree-physarum2`, still not merged
+  to main.
