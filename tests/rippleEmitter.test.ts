@@ -11,6 +11,8 @@ import {
   rippleSpeedFor,
   rippleWidthFor,
   salienceMarks,
+  ringThresholdBar,
+  RING_THRESHOLD_DEFAULT,
   type RippleProfileParams,
 } from "../src/render/scenes/rippleEmitter.ts";
 
@@ -225,6 +227,55 @@ describe("advanceEmission on a smooth source — whole climbs, not frame steps",
       if (e > 0) expect(state.smoothed).toBeGreaterThanOrEqual(marks.ringsAbove - 1e-9);
       expect(marks.fullRing).toBeGreaterThan(marks.ringsAbove);
     }
+  });
+});
+
+describe("Ring threshold (the adaptive threshold's margin)", () => {
+  it("the default is exactly the old fixed bar: 1.5x the floor, no minimum", () => {
+    expect(ringThresholdBar(0.2, RING_THRESHOLD_DEFAULT)).toBeCloseTo(0.3, 10);
+    expect(ringThresholdBar(0, RING_THRESHOLD_DEFAULT)).toBe(0);
+  });
+
+  it("raising it rings less on the busy kick-and-hi-hat case; lowering it rings more", () => {
+    const totalFaint = (threshold: number) => {
+      const state = createRippleEmissionState();
+      let pulse = 0;
+      let faint = 0;
+      let seed = 11;
+      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      advanceEmission(state, DT, 0, threshold);
+      for (let f = 0; f < 60 * 12; f++) {
+        const t = f * DT;
+        pulse *= Math.exp(-BEAT_PULSE_DECAY * DT);
+        const tick = f % 6 === 0; // every 0.1 s
+        const kick = f % 30 === 0; // every 0.5 s
+        if (kick) pulse = 1;
+        else if (tick) pulse = Math.max(pulse, 0.2 + 0.2 * rnd());
+        const e = advanceEmission(state, DT, pulse, threshold);
+        if (t > 4 && !(f % 30 < 3)) faint += e; // emission not caused by a kick
+      }
+      return faint;
+    };
+    expect(totalFaint(0)).toBeGreaterThan(totalFaint(RING_THRESHOLD_DEFAULT));
+    expect(totalFaint(1)).toBeLessThan(totalFaint(RING_THRESHOLD_DEFAULT) + 1e-9);
+  });
+
+  it("at its top it still blocks small jumps on a clean source (floor 0)", () => {
+    const state = createRippleEmissionState();
+    advanceEmission(state, DT, 0, 1);
+    let total = 0;
+    for (let t = 0; t < 1; t += DT) total += advanceEmission(state, DT, 0.15 * Math.exp(-BEAT_PULSE_DECAY * t), 1);
+    expect(total).toBe(0);
+  });
+
+  it("the drawn line follows it", () => {
+    const low = createRippleEmissionState();
+    const high = createRippleEmissionState();
+    for (let t = 0; t < 1; t += DT) {
+      advanceEmission(low, DT, 0.2, 0);
+      advanceEmission(high, DT, 0.2, 1);
+    }
+    expect(salienceMarks(high).ringsAbove).toBeGreaterThan(salienceMarks(low).ringsAbove);
   });
 });
 

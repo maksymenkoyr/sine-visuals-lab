@@ -87,6 +87,11 @@ canvas { display: block; width: 100%; max-width: 100%; background: var(--screen)
 #graph { aspect-ratio: 2 / 1; }
 #water { aspect-ratio: 1 / 1; }
 .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.threshold { display: flex; flex-direction: column; gap: 6px; }
+.threshold label { font-weight: 700; display: flex; justify-content: space-between; max-width: 420px; }
+.thr-val { font-family: var(--mono); font-weight: 600; }
+.threshold input { width: 100%; max-width: 420px; height: 32px; accent-color: var(--accent); }
+.threshold input:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 .status { font-size: 17px; }
 .status strong { font-family: var(--mono); font-weight: 600; }
 .what { color: var(--muted); font-size: 17px; }
@@ -150,6 +155,11 @@ details p { margin-top: 10px; }
           <span class="view-label" id="water-label">The water</span>
           <canvas id="water" width="520" height="520" role="img" aria-labelledby="water-label" aria-describedby="status"></canvas>
         </div>
+      </div>
+      <div class="threshold">
+        <label for="thr">Ring threshold <span class="thr-val" id="thr-val">0.25</span></label>
+        <input id="thr" type="range" min="0" max="1" step="0.05" value="0.25" aria-describedby="thr-help">
+        <p class="what" id="thr-help">The same slider as in the app. Move it right and the dotted line rises: fewer, clearer rings. Move it left: more rings, even from quiet sounds.</p>
       </div>
       <div class="row">
         <p class="status" id="status" aria-live="polite">Starting…</p>
@@ -219,7 +229,8 @@ details p { margin-top: 10px; }
 
   <section aria-labelledby="set">
     <h2 id="set">Settings that change the rings</h2>
-    <p>These change how the rings look, not when they happen.</p>
+    <p>These four change how the rings look, not when they happen.</p>
+    <p><b>Ring threshold</b> is the one setting that changes <i>when</i> rings happen: it moves the dotted line. Its technical name is an adaptive threshold. The app estimates the level of the everyday sounds (the noise floor), and the line sits a margin above it.</p>
     <ul class="settings">
       <li><b>Beat ripple</b><span>How strongly the rings bend the light. At 0 the water stays still.</span></li>
       <li><b>Ring width</b><span>Thin, sharp rings or wide, soft ones.</span></li>
@@ -234,8 +245,15 @@ details p { margin-top: 10px; }
   // ---- The app's rules (rippleEmitter.ts advanceEmission), same constants ----
   const SMOOTH_TAU = 0.005, DEADBAND = 0.5;
   const EVENT_MIN = 0.05, BACKGROUND_FRACTION = 0.6, FLOOR_RATE = 0.2, PEAK_DOWN = 0.05;
-  const MARGIN = 1.5, FLOOR_RELAX = 3, PEAK_RELAX = 6, SPREAD_MIN = 0.3;
+  const FLOOR_RELAX = 3, PEAK_RELAX = 6, SPREAD_MIN = 0.3;
   const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+  // Ring threshold, as ringThresholdBar in the app: margin 1x..3x the floor,
+  // plus a minimum that grows only above the default (0.25).
+  let threshold = 0.25;
+  function thresholdBar(floor) {
+    const t = clamp01(threshold);
+    return (1 + 2 * t) * floor + 0.25 * Math.max(0, (t - 0.25) / 0.75);
+  }
 
   function newListener() {
     return { smoothed: 0, init: false, floor: 0, peak: 0, climbing: false, base: 0, emitted: 0, bar: 0, spread: SPREAD_MIN };
@@ -265,7 +283,7 @@ details p { margin-top: 10px; }
       s.climbing = true;
       s.base = prev;
       s.emitted = 0;
-      s.bar = MARGIN * s.floor;
+      s.bar = thresholdBar(s.floor);
       s.spread = Math.max(s.peak - s.bar, SPREAD_MIN);
     }
     const target = clamp01((s.smoothed - s.base - s.bar) / s.spread);
@@ -275,7 +293,7 @@ details p { margin-top: 10px; }
   }
   function reachLine(s) {
     if (s.climbing) return s.base + s.bar;
-    return s.smoothed + MARGIN * s.floor;
+    return s.smoothed + thresholdBar(s.floor);
   }
 
   // ---- Made-up music ----
@@ -436,6 +454,12 @@ details p { margin-top: 10px; }
   }
   for (const b of document.querySelectorAll("[data-m]")) b.addEventListener("click", () => choose(b.dataset.m));
   pauseBtn.addEventListener("click", () => setPaused(!paused));
+  const thr = document.getElementById("thr"), thrVal = document.getElementById("thr-val");
+  thr.addEventListener("input", () => {
+    threshold = Number(thr.value);
+    thrVal.textContent = threshold.toFixed(2);
+    if (paused) { drawGraph(); drawWater(); }
+  });
   setPaused(paused);
   choose("busy");
   requestAnimationFrame(frame);

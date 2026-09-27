@@ -187,9 +187,12 @@ const RISE_DEADBAND_PER_SEC = 0.5;
 //     floor itself). A hit near the peak never raises the floor, so a steady
 //     four-on-the-floor of equal kicks keeps ringing at full strength however
 //     long it runs.
-// A rise emits (rise − SALIENCE_MARGIN·floor) / (peak − SALIENCE_MARGIN·floor),
-// clamped to 0..1: background hits sit near the floor and emit ~nothing, a
-// hit at the peak emits a full ring. SALIENCE_SPREAD_MIN keeps that ratio
+// A rise emits (rise − bar) / (peak − bar), clamped to 0..1, where the bar
+// is ringThresholdBar — a margin above the floor plus a small fixed minimum,
+// both set by the user's Ring threshold setting. In signal-processing terms
+// this is an adaptive threshold: the floor is a noise-floor estimate, and
+// the bar sits a margin above it. Background hits sit near the floor and
+// emit ~nothing, a hit at the peak emits a full ring. SALIENCE_SPREAD_MIN keeps that ratio
 // from amplifying tiny differences when every recent rise is about the same
 // size (a noise-only passage). Both trackers relax over time
 // (SALIENCE_*_RELAX_SEC), so after a quiet spell even a modest hit stands out
@@ -198,10 +201,29 @@ const SALIENCE_EVENT_MIN = 0.05; // a rise smaller than this doesn't move the tr
 const SALIENCE_BACKGROUND_FRACTION = 0.6; // a rise below this share of the peak counts as background
 const SALIENCE_FLOOR_RATE = 0.2; // per background event, toward that rise
 const SALIENCE_PEAK_DOWN = 0.05; // per event, toward a smaller rise
-const SALIENCE_MARGIN = 1.5; // a rise must clear this multiple of the floor to ring at all
 const SALIENCE_FLOOR_RELAX_SEC = 3; // floor decays toward 0 with this time constant
 const SALIENCE_PEAK_RELAX_SEC = 6; // peak decays toward the floor with this time constant
 const SALIENCE_SPREAD_MIN = 0.3;
+
+// Ring threshold (0..1) → the bar. The margin runs from 1× the floor (ring
+// on anything just above the everyday sounds) to 3×. Above the default a
+// fixed minimum also grows, up to RING_THRESHOLD_MIN_AT_1, so raising the
+// setting still does something on a clean source whose floor is 0.
+// RING_THRESHOLD_DEFAULT is exactly the behaviour before this was a setting:
+// a 1.5× margin and no minimum.
+export const RING_THRESHOLD_DEFAULT = 0.25;
+const RING_THRESHOLD_MARGIN_AT_0 = 1;
+const RING_THRESHOLD_MARGIN_AT_1 = 3;
+const RING_THRESHOLD_MIN_AT_1 = 0.25;
+
+/** How far a climb must rise above its starting dip before it rings, for
+ *  this floor and Ring threshold setting. */
+export function ringThresholdBar(floor: number, threshold: number): number {
+  const t = clamp01(threshold);
+  const margin = RING_THRESHOLD_MARGIN_AT_0 + (RING_THRESHOLD_MARGIN_AT_1 - RING_THRESHOLD_MARGIN_AT_0) * t;
+  const minimum = RING_THRESHOLD_MIN_AT_1 * Math.max(0, (t - RING_THRESHOLD_DEFAULT) / (1 - RING_THRESHOLD_DEFAULT));
+  return margin * floor + minimum;
+}
 
 export interface RippleEmissionState {
   smoothed: number;
@@ -219,6 +241,8 @@ export interface RippleEmissionState {
   /** The salience bar and full-ring climb, frozen at the climb's start. */
   climbBar: number;
   climbSpread: number;
+  /** The Ring threshold the last advance used — salienceMarks reads it. */
+  threshold: number;
 }
 
 export function createRippleEmissionState(): RippleEmissionState {
@@ -232,6 +256,7 @@ export function createRippleEmissionState(): RippleEmissionState {
     emittedThisClimb: 0,
     climbBar: 0,
     climbSpread: SALIENCE_SPREAD_MIN,
+    threshold: RING_THRESHOLD_DEFAULT,
   };
 }
 
@@ -258,7 +283,13 @@ function learnClimb(state: RippleEmissionState, climb: number): void {
  *  a constant signal or a slow ramp emits close to 0. Each climb is then
  *  sized by salience (see the SALIENCE_* constants' comment): background
  *  climbs emit ~0, standout ones a full ring. */
-export function advanceEmission(state: RippleEmissionState, dtSec: number, signal: number): number {
+export function advanceEmission(
+  state: RippleEmissionState,
+  dtSec: number,
+  signal: number,
+  threshold: number = RING_THRESHOLD_DEFAULT,
+): number {
+  state.threshold = threshold;
   if (!state.init) {
     state.smoothed = signal;
     state.init = true;
@@ -287,7 +318,7 @@ export function advanceEmission(state: RippleEmissionState, dtSec: number, signa
     state.climbing = true;
     state.base = prev;
     state.emittedThisClimb = 0;
-    state.climbBar = SALIENCE_MARGIN * state.floor;
+    state.climbBar = ringThresholdBar(state.floor, threshold);
     state.climbSpread = Math.max(state.peak - state.climbBar, SALIENCE_SPREAD_MIN);
   }
   const climb = state.smoothed - state.base;
@@ -307,7 +338,7 @@ export function salienceMarks(state: RippleEmissionState): { ringsAbove: number;
   if (state.climbing) {
     return { ringsAbove: state.base + state.climbBar, fullRing: state.base + state.climbBar + state.climbSpread };
   }
-  const bar = SALIENCE_MARGIN * state.floor;
+  const bar = ringThresholdBar(state.floor, state.threshold);
   const spread = Math.max(state.peak - bar, SALIENCE_SPREAD_MIN);
   return { ringsAbove: state.smoothed + bar, fullRing: state.smoothed + bar + spread };
 }

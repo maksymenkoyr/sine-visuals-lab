@@ -12,6 +12,7 @@ import {
   rippleSpeedFor,
   rippleWidthFor,
   salienceMarks,
+  RING_THRESHOLD_DEFAULT,
   type RippleProfileParams,
 } from "./rippleEmitter.ts";
 import { publishSettingMarks } from "../settingMarks.ts";
@@ -197,6 +198,20 @@ const SETTINGS: SceneSetting[] = [
     // drop still emits its own stronger ring on top, independent of this
     // choice.
     drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"] },
+  },
+  {
+    key: "ringThreshold",
+    label: "Ring threshold",
+    description: "How far a sound has to stand out from the everyday ones to send a ring — the dotted line on Beat ripple's graph. Lower: more rings, even from quiet sounds. Higher: only clear standouts",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: RING_THRESHOLD_DEFAULT,
+    // The adaptive threshold's margin over its noise-floor estimate
+    // (rippleEmitter.ts's ringThresholdBar) — a response-shape setting like
+    // Ring width below, not an amount, so no drive. Read only in
+    // extraUniforms (advanceEmission), never uploaded to FRAG.
   },
   {
     key: "ringWidth",
@@ -1464,7 +1479,7 @@ float softCeil(float x, float knee, float ceil) {
         // itself instead of stacking full rings).
         const sceneDefaultSignal = Math.max(anim.lowPulse, anim.beatPulse);
         const rawSignal = drives.value("ripple", sceneDefaultSignal);
-        const emitted = advanceEmission(emission, anim.dtSec, rawSignal);
+        const emitted = advanceEmission(emission, anim.dtSec, rawSignal, getSetting("ringThreshold"));
         emitter.emit(emitted);
         // The panel draws these on Beat ripple's own "What it receives"
         // graph (settingMarks.ts): the level a bump has to reach to send a

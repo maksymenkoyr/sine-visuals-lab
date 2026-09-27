@@ -304,6 +304,15 @@ reference-measurement workflow used by later scenes.
   the bump that sent it (sized by strength), and a one-line key under the
   graph names both. The panel's native `title` tooltips were dropped too
   (`setHint` in `deviceMenu.ts`): they repeated the bottom hint line's text.
+- 2026-09-27 — The dotted line is an adaptive threshold: the floor tracker is
+  a noise-floor estimate and the line sits a margin above it. Made
+  adjustable as `ringThreshold` (Ring threshold), through `ringThresholdBar`:
+  the margin runs 1×–3× the floor, and above the default a fixed minimum
+  grows too (so it still bites on a clean source whose floor is 0). The
+  default, `RING_THRESHOLD_DEFAULT`, is exactly the old fixed bar (1.5×, no
+  minimum). Headless check with Any hit + Loudness patched in: at 0.8 the line
+  sits well above the signal and only the kicks ring; at the default the
+  quieter hits still send small rings.
 - 2026-09-26 — "Tempo breathe" becomes "Breathe": the once-per-bar, tempo-locked
   zoom — and this scene's last read of `beatClock.ts` — was removed, and the dial
   turned into a patch destination whose zoom follows whatever source is wired to
