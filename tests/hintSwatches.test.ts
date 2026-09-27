@@ -10,9 +10,9 @@ describe("splitHintText", () => {
 
   it("marks each colour word, keeping the original casing and order", () => {
     expect(splitHintText("Green ticks fired; red ticks stopped.")).toEqual([
-      { text: "Green", color: COLOUR_WORDS.green },
+      { text: "Green", color: COLOUR_WORDS.green, name: "Green" },
       { text: " ticks fired; " },
-      { text: "red", color: COLOUR_WORDS.red },
+      { text: "red", color: COLOUR_WORDS.red, name: "red" },
       { text: " ticks stopped." },
     ]);
   });
@@ -26,7 +26,7 @@ describe("splitHintText", () => {
       "red",
       "white-hot",
     ]);
-    expect(runs[3]).toEqual({ text: "ice blue", color: COLOUR_WORDS["ice blue"] });
+    expect(runs[3]).toEqual({ text: "ice blue", color: COLOUR_WORDS["ice blue"], name: "ice blue" });
   });
 
   it("ignores colour words inside longer words", () => {
@@ -34,10 +34,19 @@ describe("splitHintText", () => {
   });
 
   it("lets a caller swap in the colour actually drawn", () => {
-    expect(splitHintText("Beats (red)", { red: "#123456" })).toEqual([
-      { text: "Beats (" },
-      { text: "red", color: "#123456" },
-      { text: ")" },
+    expect(splitHintText("Beats are red", { red: "#123456" })).toEqual([
+      { text: "Beats are " },
+      { text: "red", color: "#123456", name: "red" },
+    ]);
+  });
+
+  it("turns a lone parenthesised colour into the line alone", () => {
+    expect(splitHintText("Beats (red) and grid (blue, tall when locked)")).toEqual([
+      { text: "Beats " },
+      { text: "", color: COLOUR_WORDS.red, name: "red" },
+      { text: " and grid (" },
+      { text: "blue", color: COLOUR_WORDS.blue, name: "blue" },
+      { text: ", tall when locked)" },
     ]);
   });
 });

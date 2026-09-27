@@ -1,8 +1,10 @@
 /**
  * Colour swatches in hint text: every hint that names a colour ("Green
  * ticks are beats that fired", "glows hot red instead of ice blue") shows
- * a small dot of that colour just before the word, so the reader matches
- * the word to the picture without guessing which red is meant.
+ * a short line of that colour — drawn like a meter's trace — just before
+ * the word, so the reader matches the word to the picture without guessing
+ * which red is meant. A word that is a whole parenthetical ("beats (red)")
+ * is a legend, and becomes the line alone.
  *
  * One entry point, `setHintText`, used by every hint surface in place of
  * `textContent =`: the panel rows' `.vc-hint` (controlsKit.ts,
@@ -58,7 +60,9 @@ const COLOUR_RE = new RegExp(
   "gi",
 );
 
-export type HintRun = { text: string } | { text: string; color: string };
+/** A colour run's `text` is empty in the legend form ("(red)" → the line
+ *  alone); `name` is always the colour word as written. */
+export type HintRun = { text: string } | { text: string; color: string; name: string };
 
 /** Splits `text` into plain runs and colour-word runs, in order. A colour
  *  run's `color` is `colors[phrase]` when given, else `COLOUR_WORDS`. */
@@ -71,9 +75,13 @@ export function splitHintText(text: string, colors?: Readonly<Record<string, str
     const lookup = key in COLOUR_WORDS ? key : key.replace("-", " ");
     const color = colors?.[lookup] ?? COLOUR_WORDS[lookup];
     if (!color) continue;
-    if (at > last) runs.push({ text: text.slice(last, at) });
-    runs.push({ text: m[0], color });
-    last = at + m[0].length;
+    // A word that is the whole parenthetical — "beats (red)" — is a legend:
+    // the line alone says it, so the word and its brackets go.
+    const bare = text[at - 1] === "(" && text[at + m[0].length] === ")";
+    const start = bare ? at - 1 : at;
+    if (start > last) runs.push({ text: text.slice(last, start) });
+    runs.push({ text: bare ? "" : m[0], color, name: m[0] });
+    last = at + m[0].length + (bare ? 1 : 0);
   }
   if (last < text.length) runs.push({ text: text.slice(last) });
   return runs;
@@ -86,11 +94,17 @@ export function setHintText(el: HTMLElement, text: string, colors?: Readonly<Rec
       if (!("color" in run)) return document.createTextNode(run.text);
       const word = document.createElement("span");
       word.className = "vc-swatch-word";
-      const dot = document.createElement("span");
-      dot.className = "vc-swatch";
-      dot.style.background = run.color;
-      dot.setAttribute("aria-hidden", "true");
-      word.append(dot, run.text);
+      const line = document.createElement("span");
+      line.className = "vc-swatch";
+      line.style.color = run.color;
+      line.setAttribute("aria-hidden", "true");
+      word.append(line, run.text);
+      if (!run.text) {
+        // Legend form: the word is gone from the text, so say it to a reader.
+        word.setAttribute("role", "img");
+        word.setAttribute("aria-label", run.name);
+        word.classList.add("vc-swatch-bare");
+      }
       return word;
     }),
   );
