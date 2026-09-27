@@ -28,8 +28,8 @@ registered right after Physarum 2 and absent from `draftIds` in
     `DAY_KEY_E` keys.
   - Haidinger's brush: `advanceBrushPhase`.
 - `src/render/scenes/sky/skyFluidSim.ts` — the stable-fluids solver, a copy of
-  Neon Fluid's `fluidSim.ts` that differs only in `SPLAT_SLOTS` and its dye
-  pass skipping idle slots (see Known issues).
+  Neon Fluid's `fluidSim.ts` that differs only in `SPLAT_SLOTS` (see Known
+  issues).
 - `tests/sky.test.ts` and `tests/skyFluidSim.test.ts`.
 - Shared systems: `beatListener.ts` (one shared `beat` listener — its
   edge feeds both the floater stamp and the light sweep); `sceneCommon.ts`'s common
@@ -129,13 +129,14 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
 - 2026-09-28 — ours before the rework, same portrait frame at noon: one
   smoky hook-shaped mass, 3 clouds, the biggest holding 93%, crinkliness
   2.3, and a pale horizon with no clear sky in the bottom fifth.
-- 2026-09-28 — ours after, two samples 20 s apart: coverage 27–28%, 7–8
+- 2026-09-28 — ours after the cumulus round (reverted the same day, see
+  Decisions), two samples 20 s apart: coverage 27–28%, 7–8
   clouds plus fragments, the biggest 24–33%, size p50 0.17–0.22,
   crinkliness 1.5–1.6. Clear sky top (0.231, 0.368, 0.593), bottom
   (0.328, 0.501, 0.697). Cloud luma p5 / p50 / p95 0.85 / 0.95 / 0.96.
 - 2026-09-28 — frame rate, real GPU, 2560×1600: 120 fps before (the
-  display cap), 48 with the new edge noise, 120 again once clear sky
-  skips it.
+  display cap), 48 with the cumulus round's edge noise, 120 again once
+  clear sky skipped it.
 
 ## Decisions and pivots
 
@@ -273,8 +274,18 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
     it, which is exact, since it can't reach any threshold there.
   The bench dropped to six controls up front (Sky brightness, Colour range,
   Sun distance, Cloud amount, Cloud size, Bumpiness), the rest folded
-  under More controls; its presets and "Before today" went, since the old
-  cloud engine no longer exists to compare against.
+  under More controls; its presets and "Before today" went.
+- 2026-09-28 — "In the end you definitely made it worse." The cumulus
+  round's scene changes are reverted: `sky.ts` and `skyFluidSim.ts` are
+  back to the palette-matched commit (soft fluid clouds, 12 slots, the
+  strong push, midday key and `SUN_DISTANCE` 1.4 as before). Every round
+  was judged on the photo's portrait frame, where the numbers converged;
+  on the wide desktop frame the result was small hard-edged blobs that
+  looked pasted on, and none of the matched numbers said so. The soft
+  airy clouds with wispy tails were the better look. The six-control
+  bench stayed, pointing at the restored clouds. Lesson: judge a look
+  change on the frame the user watches, side by side with the previous
+  version, not only against the reference.
 
 ## Tuning notes
 
@@ -291,22 +302,12 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   real music, raise Light waves before touching the shader.
 - No `/tune sky` pass yet, and no real-GPU look.
 - Sky colours and cloud shapes are tuned on the Sky tuning bench
-  (Materials): the same sim and shader maths, every constant a slider,
-  looks saved to its `looks` collection. Its display shader is a hand
+  (Materials): the same sim and shader maths, six controls up front and
+  the rest under More controls, looks saved to its `looks` collection. Its display shader is a hand
   port, so after changing the sky or cloud passes in `buildDisplayFrag`,
   re-port them in `bench.html` and rebuild with `build_bench.mjs`.
 
 ## Known issues and next steps
-
-- Cumulus rework, 2026-09-28, still open against the photo:
-  - Outlines are less ragged (crinkliness 1.6 vs 3.1) and there is no haze
-    between clouds.
-  - Shaded bases are lighter (luma 0.87 vs 0.78), partly the photo's
-    exposure; Shadow depth on the bench is the knob.
-  - On a wide desktop frame the clouds come out smaller and sparser than
-    on a phone, since the puffs are sized in sim uv.
-  - Every cloud pixel runs the edge noise three times (cloud plus two
-    shadow taps); a full-cover sky on a phone is untested.
 
 - Review, 2026-09-27 (headless, real GPU, synthetic 120 BPM and Billie
   Jean through the fake mic):
@@ -332,8 +333,8 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
     `MAX_WAVE_BURSTS`, and the oldest live streak is cut off mid-life.
 
 - Fold `skyFluidSim.ts` into `fluidSim.ts`, with the splat slot count as a
-  parameter. Sky needs 20 (plus the idle-slot skip), Neon Fluid uses 4;
-  the files are otherwise identical.
+  parameter. Sky needs 12, Neon Fluid uses 4; the files are otherwise
+  identical.
 - The brush trail, the Scene count-by-loudness curve and light-wave glint
   brightness haven't been checked on real music yet; Brush move's stride
   scale (`BRUSH_STRIDE_MAX`) and `floaterCountFromEnergy`'s grade are the
@@ -374,7 +375,8 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   archived yet: `python3 tools/ref-archive.py sky-cumulus-ref --from
   .claude/worktrees/sky-public/tools/.cache/refs`). `measure_clouds.py`
   measures it and our renders the same way; `set_consts.py` sets named
-  constants in `sky.ts` for a tuning round.
+  constants in `sky.ts` for a tuning round. The round they served was
+  reverted (Decisions, 2026-09-28); the scripts stay for the next one.
 
 ## Resume here
 
@@ -430,5 +432,5 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
 - Moved back from the private repo to `src/render/scenes/sky/` (#170,
   replayed onto `main` and featured in this PR).
 - Darker, narrower sky (`SKY_SPREAD`, `SKY_LEVEL`); Sky tuning bench;
-  sun further out (`SUN_DISTANCE`); palette-matched darkest key; cumulus
-  clouds from a photo (puff carve, 20 sources); bench cut to six controls.
+  sun further out (`SUN_DISTANCE`); palette-matched darkest key; a
+  cumulus round from a photo, reverted; bench cut to six controls.

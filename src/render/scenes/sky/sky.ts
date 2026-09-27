@@ -31,8 +31,7 @@ import {
 // The fluid sim (skyFluidSim.ts) is a copy of Neon Fluid's fluidSim.ts, the
 // stable-fluids solver — copied while that scene was still on an unmerged
 // branch, and still separate because Sky raises its SPLAT_SLOTS (Neon
-// Fluid's 4 → 20, one per cloud drifter) and its dye pass skips idle
-// slots. The two are otherwise identical;
+// Fluid's 4 → 12, one per cloud drifter). The two are otherwise identical;
 // folding them into one module with the slot count as a parameter is an
 // open follow-up. This scene runs
 // it in MIRROR_OFF mode only — full screen, no kaleidoscope fold — the one
@@ -55,10 +54,10 @@ import {
 // sim's dyeTexture() through skyFluidSim's own simIoGlsl(format) codec —
 // the same reason petri.ts hand-rolls its display pass. Compositing order,
 // sky gradient at the bottom, illusions on top:
-//   sky gradient -> cloud (dye density thresholded after a self-written
-//   cellular "puff" noise carves its edge into cauliflower heaps that keep
-//   morphing, plus a lit-top/shadowed-base shade from two taps of that
-//   carved field toward the sun — a thin slab, not Storm's Gas-mode
+//   sky gradient -> cloud (contrast-shaped extinction blend off dye
+//   density, cross-eroded by a self-written fbm bump for cauliflower
+//   texture and continuous morphing, plus a cheap lit-top/shadowed-bottom
+//   shade from the density gradient — a thin slab, not Storm's Gas-mode
 //   raymarch, which is private to storm.ts) -> Haidinger's brush (faint,
 //   blended into the sky+cloud) -> floaters (drawn last, on top of
 //   everything, since they're the viewer's own eye artifact).
@@ -182,26 +181,22 @@ export const MAX_WAVE_BURSTS = 8; // concurrent floater stamps — one per beat 
 // against a real-sky reference (a still frame of open sky runs 40-50% cloud
 // coverage with a near-white core, not the soft low-alpha wash the first
 // pass produced). ---
-const SIM_VISCOSITY = 0.6;
-const DYE_DISSIPATION = 0.45; // high enough that old puffs thin out instead of piling into one mass
+const SIM_VISCOSITY = 0.3;
+const DYE_DISSIPATION = 0.34; // high enough that old puffs thin out instead of piling into one mass
 const SIM_DT_MAX = 1 / 30; // clamps a slow-frame dt so the sim never destabilises
 
 // --- Ambient cloud drift (not audio-reactive — see file header). Many small
 // sources, each wandering around its own home spot spread across the whole
 // frame (driftCenter) and puffing on and off (drifterPuff), so the cover
-// reads as separate heaps scattered over the sky, the fair-weather cumulus of
-// the user's reference photo. Three big sources orbiting the centre, fed
-// continuously, merged into one central blob; ten strongly pushing ones
-// sheared their puffs into smoke tails, and the swirls their pushes added
-// up to swept neighbours into one mass. So there are many small sources
-// now, pushing gently. ---
-const DRIFTER_SEEDS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+// reads as separate airy puffs scattered over the sky. Three big sources
+// orbiting the centre, fed continuously, merged into one central blob. ---
+const DRIFTER_SEEDS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const DRIFT_TANGENT_EPS = 0.08; // finite-difference step used only to find the drift's own heading
-const DRIFTER_SIGMA_MIN = 0.024; // splat radius range, sim uv — varied per seed so puffs aren't all one size
-const DRIFTER_SIGMA_MAX = 0.045;
-const DRIFTER_FORCE = 1; // texels/s^2 at FORCE_REF_ROWS — see skyFluidSim.ts's header; gentle, so a puff drifts as a compact heap instead of shearing into a tail
-const DRIFTER_DYE_RATE = 2.6; // density/s at the splat centre while puffing, before Cloud cover scales it
-const DRIFTER_PUFF_RATE = 0.6; // rad/s of each source's on/off cycle (5-12 s per puff, by seed) — a long "on" phase grows one puff into a big blob
+const DRIFTER_SIGMA_MIN = 0.045; // splat radius range, sim uv — varied per seed so puffs aren't all one size
+const DRIFTER_SIGMA_MAX = 0.085;
+const DRIFTER_FORCE = 10; // texels/s^2 at FORCE_REF_ROWS — see skyFluidSim.ts's header; strong enough that the flow shears puffs into drifting shapes rather than leaving round balls where they were laid
+const DRIFTER_DYE_RATE = 1.05; // density/s at the splat centre while puffing, before Cloud cover scales it
+const DRIFTER_PUFF_RATE = 0.45; // rad/s of each source's on/off cycle (~14s per puff) — a long "on" phase grows one puff into a big blob
 
 // --- Floater stamps (streaks of floaters on a grid — see the file
 // header). One stamp per spawn event, laid where the floater brush stands:
@@ -777,13 +772,13 @@ const vec3 SWEEP_TINT_C = vec3(0.82, 0.94, 1.00); // pale cyan, the midday horiz
 const float DAY_KEY_E[4] = float[4](-0.02, 0.08, 0.25, 0.65);
 const float DAY_E_FLOOR = -0.02;
 const vec3 SKY_ZENITH[4] = vec3[4](
-  vec3(0.245, 0.328, 0.984), vec3(0.300, 0.360, 0.600), vec3(0.370, 0.440, 0.650), vec3(0.167, 0.325, 0.623));
+  vec3(0.245, 0.328, 0.984), vec3(0.300, 0.360, 0.600), vec3(0.370, 0.440, 0.650), vec3(0.260, 0.450, 0.780));
 const vec3 SKY_HORIZON[4] = vec3[4](
-  vec3(1.000, 1.000, 0.950), vec3(0.950, 0.720, 0.580), vec3(0.710, 0.700, 0.840), vec3(0.406, 0.599, 0.769));
+  vec3(1.000, 1.000, 0.950), vec3(0.950, 0.720, 0.580), vec3(0.710, 0.700, 0.840), vec3(0.700, 0.800, 0.930));
 const vec3 CLOUD_LIT_KEY[4] = vec3[4](
-  vec3(0.900, 0.900, 1.000), vec3(1.000, 0.820, 0.660), vec3(0.980, 0.930, 0.950), vec3(0.920, 0.935, 0.955));
+  vec3(0.900, 0.900, 1.000), vec3(1.000, 0.820, 0.660), vec3(0.980, 0.930, 0.950), vec3(1.000, 0.990, 0.970));
 const vec3 CLOUD_SHADE_KEY[4] = vec3[4](
-  vec3(0.400, 0.420, 0.720), vec3(0.500, 0.420, 0.520), vec3(0.540, 0.500, 0.640), vec3(0.600, 0.640, 0.720));
+  vec3(0.400, 0.420, 0.720), vec3(0.500, 0.420, 0.520), vec3(0.540, 0.500, 0.640), vec3(0.580, 0.620, 0.720));
 const vec3 SUN_KEY[4] = vec3[4](
   vec3(0.720, 0.700, 1.000), vec3(1.000, 0.700, 0.400), vec3(1.000, 0.880, 0.750), vec3(1.000, 0.970, 0.900));
 const vec3 MORNING_WARMTH = vec3(1.04, 1.0, 0.86); // mornings lean peach/gold where evenings lean pink
@@ -810,18 +805,18 @@ const float SKY_GRADIENT_HI = 0.9;
 // the frame (on the top edge at noon, just past the right edge by early
 // evening); above 1 it sits further out, so less of its glow reaches the frame.
 const float SUN_X_SPAN = 0.62; // fraction of the frame's width the sun's path spans either side of centre
-const float SUN_DISTANCE = 1.7;
+const float SUN_DISTANCE = 1.4;
 const float SUN_HALO = 0.30;
 const float SUN_CORE = 0.22;
 const float HORIZON_WARM = 0.35;
 
-const float CLOUD_LOW = 0.12; // bumped density below this reads as clear sky
-const float CLOUD_HIGH = 0.24; // bumped density above this reads as a solid, opaque cloud body — a narrow band, so a heap's edge is crisp and only the wisp octave frays it
+const float CLOUD_LOW = 0.16; // bumped density below this reads as clear sky
+const float CLOUD_HIGH = 0.55; // bumped density above this reads as a solid, opaque cloud body — a wide band, so edges fade through semi-transparent wisps (airy) rather than a hard cut-out
 const float CLOUD_WISP_SCALE = 2.9; // second, finer bump octave, relative to CLOUD_BUMP_SCALE — frays the edges into wisps
-const float CLOUD_WISP_AMOUNT = 0.45;
-const float CLOUD_BUMP_SCALE = 13.0; // puff-noise cells per dye-texture height (a second octave runs 2.3x finer) — the size of the bulges
-const float CLOUD_BUMP_MORPH = 0.05; // noise domain drift per second — churn beyond plain advection
-const float CLOUD_BUMP_AMOUNT = 0.7; // how deep the puff carve bites into the edge, in dye-density units
+const float CLOUD_WISP_AMOUNT = 0.35;
+const float CLOUD_BUMP_SCALE = 11.0; // fbm frequency, room-uv units — the cauliflower texture
+const float CLOUD_BUMP_MORPH = 0.05; // fbm domain drift per second — churn beyond plain advection
+const float CLOUD_BUMP_AMOUNT = 0.65; // how hard the bump noise erodes/thickens the edge
 // Two shadow taps toward the light (the sun, from
 // whichever side of the frame it sits on; see main) — storm.ts's Gas
 // mode's own two-tap technique (SUN_DIR + densityCheap/shape at 0.18/0.5,
@@ -832,14 +827,13 @@ const float CLOUD_BUMP_AMOUNT = 0.7; // how deep the puff carve bites into the e
 // which is why v1 read as one flat tone instead of a folded mass.
 const float CLOUD_SHADOW_TAP1 = 0.045;
 const float CLOUD_SHADOW_TAP2 = 0.095;
-// First calibrated against this scene's own measured density range (median
-// ~0.8, p90 ~1.65 inside the cloud silhouette — much higher than storm.ts's
-// own 3D density scale, which is why its 1.9/1.15 weights collapsed shadow
-// to ~0 almost everywhere here, read directly off a debug render) as
-// 0.85/0.52; raised when the taps moved onto the carved field, which reads
-// lower than raw dye, and the cumulus reference showed greyer bases.
-const float CLOUD_SHADOW_K1 = 1.3;
-const float CLOUD_SHADOW_K2 = 0.8;
+// Calibrated against this scene's own measured density range (median ~0.8,
+// p90 ~1.65 inside the cloud silhouette — much higher than storm.ts's own
+// 3D density scale, which is why its 1.9/1.15 weights collapsed shadow to
+// ~0 almost everywhere here on the first try, read directly off a debug
+// render rather than re-guessed blind).
+const float CLOUD_SHADOW_K1 = 0.85;
+const float CLOUD_SHADOW_K2 = 0.52;
 const float BRUSH_R_CORE = 0.03;
 const float BRUSH_R_IN = 0.22;
 const float BRUSH_R_OUT = 0.34;
@@ -955,41 +949,11 @@ float fbm2(vec2 p) {
 // The cloud pass's own pre-threshold field at a room uv: dye density eroded
 // by the two bump octaves. Shared by the cloud pass and the floaters' "keep
 // off the clouds" fade, so both agree exactly on where cloud is.
-// Cellular "puff" noise for the cauliflower edge: 1 at one hashed point per
-// noise cell, falling off with distance to the nearest point. Carving the
-// density with its complement leaves an outline made of round bulges, the
-// way a cumulus edge is a chain of convex heaps; value noise (fbm2) only
-// ever wobbled the edge into smooth potato shapes.
-float puffNoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  float d = 8.0;
-  for (int y = -1; y <= 1; y++) {
-    for (int x = -1; x <= 1; x++) {
-      vec2 o = vec2(float(x), float(y));
-      d = min(d, length(f - o - 0.15 - 0.7 * hash22(i + o)));
-    }
-  }
-  return 1.0 - clamp(d, 0.0, 1.0);
-}
-
-// The noise runs in the dye texture's own square texels (uv stretched by its
-// aspect), so a bulge is as wide as it is tall on any screen shape; in plain
-// uv it came out stretched along the frame's long side. The puff carve is
-// subtracted, not multiplied, so it bites the thin edge hard and leaves a
-// dense interior whole; the finer fbm wisp octave then frays what's left.
 float cloudBumpedAt(vec2 uv) {
   float density = max(decodeDye(texture(uDye, uv)).x, 0.0);
-  // Clear sky, most of the frame, can't reach even the lowest threshold that
-  // reads this (the floaters' keep-off margin, CLOUD_LOW * 0.3) whatever the
-  // noise says, so skip the noise there: it was over half the frame time.
-  if (density * (1.0 + CLOUD_WISP_AMOUNT) < CLOUD_LOW * 0.3) return 0.0;
-  vec2 dyeSize = vec2(textureSize(uDye, 0));
-  vec2 q = uv * vec2(dyeSize.x / max(dyeSize.y, 1.0), 1.0);
-  vec2 drift = vec2(uTime * CLOUD_BUMP_MORPH, uTime * CLOUD_BUMP_MORPH * 0.6);
-  float puff = 0.5 * puffNoise(q * CLOUD_BUMP_SCALE + drift) + 0.5 * puffNoise(q * CLOUD_BUMP_SCALE * 2.3 - drift * 1.3 + 7.1);
-  float wisp = fbm2(q * CLOUD_BUMP_SCALE * CLOUD_WISP_SCALE - vec2(uTime * CLOUD_BUMP_MORPH * 1.7, 0.0));
-  return density * mix(1.0 - CLOUD_WISP_AMOUNT, 1.0 + CLOUD_WISP_AMOUNT, wisp) - CLOUD_BUMP_AMOUNT * (1.0 - puff);
+  float bump = fbm2(uv * CLOUD_BUMP_SCALE + vec2(uTime * CLOUD_BUMP_MORPH, uTime * CLOUD_BUMP_MORPH * 0.6));
+  float wisp = fbm2(uv * CLOUD_BUMP_SCALE * CLOUD_WISP_SCALE - vec2(uTime * CLOUD_BUMP_MORPH * 1.7, 0.0));
+  return density * mix(1.0 - CLOUD_BUMP_AMOUNT, 1.0 + CLOUD_BUMP_AMOUNT, bump) * mix(1.0 - CLOUD_WISP_AMOUNT, 1.0 + CLOUD_WISP_AMOUNT, wisp);
 }
 
 // Signed relative-luminance delta for a point at true signed distance s from
@@ -1200,16 +1164,16 @@ void main() {
   // 2. Cloud cover: the sim's own dye density thresholded (CLOUD_LOW/HIGH)
   // rather than blended with a plain extinction curve — a gain/gamma remap
   // on a smooth density field stays smooth no matter how it's curved, so it
-  // never grows a real edge; only an actual threshold does. Before the
-  // threshold, cloudBumpedAt carves the edge with a slowly drifting cellular
-  // puff noise (CLOUD_BUMP_*) into round heaps and keeps them visibly
-  // morphing beyond plain advection, the same "erode a silhouette with
-  // noise" idea as Storm's Gas mode (storm.ts), independently written per
-  // the file header.
+  // never grows a real edge; only an actual threshold does. A slowly
+  // time-drifting fbm (CLOUD_BUMP_*) eats into the density's own edge for
+  // the cauliflower bump texture and keeps the shape visibly morphing
+  // beyond plain advection, the same "erode a silhouette with noise" idea
+  // as Storm's Gas mode (storm.ts), independently written per the file
+  // header.
   //
   // Shading is Storm's own two-tap sun-shadow technique (lightDir below,
   // CLOUD_SHADOW_TAP1-2/CLOUD_SHADOW_K1-2 above), ported from its 3D
-  // raymarch to a 2D lookup of the carved field: sample it toward a fixed
+  // raymarch to a plain 2D density lookup: sample density toward a fixed
   // light direction at two distances, run it through Beer's law, and use
   // the result to pick a point on a colour ramp (mix), not as a brightness
   // multiplier. The first pass's shading only compared immediate neighbour
@@ -1221,11 +1185,8 @@ void main() {
   // the sun passes under the horizon between sunset and sunrise it swings
   // back through overhead, so cloud shading never jumps.
   vec2 lightDir = normalize(vec2(-cos(dayAngle) * 0.8, 0.85));
-  // The taps read the carved field, not raw dye, so each bulge shades the
-  // one below it (bright heap tops, grey crevices and bases) rather than the
-  // whole cloud getting one smooth ramp.
-  float sunNear = max(cloudBumpedAt(uv + lightDir * CLOUD_SHADOW_TAP1), 0.0);
-  float sunFar = max(cloudBumpedAt(uv + lightDir * CLOUD_SHADOW_TAP2), 0.0);
+  float sunNear = max(decodeDye(texture(uDye, uv + lightDir * CLOUD_SHADOW_TAP1)).x, 0.0);
+  float sunFar = max(decodeDye(texture(uDye, uv + lightDir * CLOUD_SHADOW_TAP2)).x, 0.0);
   float shadow = exp(-CLOUD_SHADOW_K1 * sunNear - CLOUD_SHADOW_K2 * sunFar);
   // Keyed with the sky (CLOUD_LIT_KEY/CLOUD_SHADE_KEY), so clouds sit in the
   // same light: white at midday, gold toward sunset, lavender-white over
