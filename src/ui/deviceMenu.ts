@@ -146,11 +146,13 @@ import {
  * `preview` instead of a picker); there's no layout change, just the port
  * lighting (cables and meter glow are Phase 2b). Clicking the row's label,
  * summary or port instead *pins* it (togglePin) — one setting at a time —
- * and so does a click anywhere else on the card that isn't a control of its
- * own (the description, the sparkline, the padding; pin-only, never unpins) —
- * and expands its patch panel inline in the row, below the sparkline; the
- * slider alone never pins, only previews, so dragging an amount can't
- * accidentally swap which panel is open. Escape, clicking the pinned row's
+ * and so does a click anywhere else on the card — the slider included —
+ * that isn't one of its side chips (isCardPress; pin-only, never unpins) —
+ * and expands its patch panel inline in the row, below the sparkline. The
+ * slider pins on `click`, i.e. once a drag is released, so the panel it
+ * swaps can't shift the row mid-drag. A row with no `drive` (a slider,
+ * switch or picker) pins the same way and gets the same ring, Solo and Tab
+ * — just no patch panel, and a jack click passes it by (jackTarget). Escape, clicking the pinned row's
  * own label again, or switching scene unpins (onKeyDown, togglePin,
  * renderSceneSettings's own tail). The patch panel (buildPatchPanel) is
  * rebuilt only on a genuine patch edit — a mix/height/division button, an
@@ -984,17 +986,18 @@ export interface ControlRowSpec {
    *  pinned — the patch panel); `onPin` fires on a click anywhere in the
    *  label/summary wrapper or on `port` (stopPropagation'd so it never also
    *  triggers this row's own click-to-focus-slider handler below) and
-   *  toggles; `pin` fires on a click anywhere else on the card that isn't
-   *  one of its own controls (ROW_OWN_CONTROLS) and only ever pins, so a
-   *  stray click on a pinned card's description can't close it. Omit for
-   *  a setting with no `drive`. */
+   *  toggles. Omit for a setting with no `drive`. */
   drivePanel?: {
     port: HTMLElement;
     summary: HTMLElement;
     below: HTMLElement;
     onPin: () => void;
-    pin: () => void;
   };
+  /** Fires on a click anywhere on the card, the slider included, that isn't
+   *  one of its side controls (isCardPress) — pin-only, so a stray click on
+   *  a pinned card can't close it. Every Scene-card row passes it, drive or
+   *  not; omit for a row that can't be pinned. */
+  onCardPin?: () => void;
 }
 
 /** One SceneSetting.reads entry (sceneSettings.ts's SignalLink) resolved
@@ -1134,11 +1137,21 @@ function wireHoverFocus(row: HTMLElement, control: HTMLElement): void {
   });
 }
 
-/** What a click on a drive row's card leaves alone rather than pinning
- *  (createControlRow's row click handler): anything that's a control in its
- *  own right — the slider, the A/T/reset chips, the signal pills — and the
- *  pinned patch panel, whose own chips and buttons rebuild it. */
+/** What a click on a row's card leaves alone rather than pinning
+ *  (isCardPress): anything that's a control in its own right — the A/T/reset
+ *  chips, the signal pills — and the pinned patch panel, whose own chips and
+ *  buttons rebuild it. The row's own value control counts as the card. */
 const ROW_OWN_CONTROLS = "button, input, select, textarea, a, [role], .vc-drive-patch";
+
+/** A click on `row` counts as pressing the card itself — its padding, text,
+ *  sparkline, or its own value control `main` (the slider, switch or picker
+ *  strip; `click` only lands once the pointer is up, so a slider drag
+ *  finishes before a patch panel elsewhere collapses and shifts the row) —
+ *  rather than one of its side controls. */
+function isCardPress(row: HTMLElement, main: HTMLElement, target: EventTarget | null): boolean {
+  const own = (target as Element | null)?.closest(ROW_OWN_CONTROLS);
+  return !own || !row.contains(own) || main.contains(own);
+}
 
 /** The pointer's fraction along `slider`'s track (0 at min, 1 at max,
  *  clamped) — used by wireSliderQuickJump's c binding below. A keydown
@@ -1443,8 +1456,7 @@ export function createControlRow(spec: ControlRowSpec) {
   if (spec.drivePanel) el.appendChild(spec.drivePanel.below);
   el.addEventListener("click", (e) => {
     slider.focus();
-    const own = (e.target as Element).closest(ROW_OWN_CONTROLS);
-    if (spec.drivePanel && !(own && el.contains(own))) spec.drivePanel.pin();
+    if (spec.onCardPin && isCardPress(el, slider, e.target)) spec.onCardPin();
   });
   wireHoverFocus(el, slider);
   wireThumbMagnet(el, slider);
@@ -2074,6 +2086,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void;
   }
   let driveRowHandles: DriveRowHandle[] = [];
+  /** Every Scene-card row that can be pinned — all of them, drive or not,
+   *  in document order: what togglePin refreshes, Tab walks (moveTabPin)
+   *  and a rebuild re-finds the pin in. A drive row's refreshPin is its
+   *  DriveRowHandle's (patch panel and all); any other row's just toggles
+   *  the .vc-drive-pinned ring, so Solo, its eye and Tab treat both alike. */
+  interface PinRowHandle {
+    sceneId: string;
+    spec: SceneSetting;
+    rowEl: HTMLElement;
+    refreshPin(): void;
+  }
+  let pinRowHandles: PinRowHandle[] = [];
   // Every row's sparkline canvas, so renderSceneSettings can unobserve them
   // (driveCanvasRO below) before discarding the old Scene card's rows —
   // otherwise a scene switch would leave the observer holding a detached
@@ -3045,7 +3069,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     preview = null;
     activeOutputTick = null;
     if (!pinned) lastPinnedSetting = null;
-    for (const h of driveRowHandles) h.refreshPin();
+    for (const h of pinRowHandles) h.refreshPin();
     // preview just went to null above — resyncs every row's own
     // .vc-drive-preview against that, since refreshPin() (above) never
     // touches it and a row other than the one just clicked could otherwise
@@ -3059,9 +3083,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     scheduleCableRecompute();
   }
 
-  /** Pins without ever unpinning — a click on a card's own dead space
-   *  (createControlRow's `drivePanel.pin`). */
-  function pinDrive(sceneId: string, spec: SceneSetting): void {
+  /** Pins without ever unpinning — a press on a card (isCardPress). */
+  function pinSetting(sceneId: string, spec: SceneSetting): void {
     if (!samePair(pinned, { sceneId, spec })) togglePin(sceneId, spec);
   }
 
@@ -3188,11 +3211,24 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     return shownSelection() !== null;
   }
 
+  /** What a jack click plugs into: the pinned setting if it takes drives,
+   *  else the last one previewed (always a drive row — previewDrive is
+   *  handed null for any other). A pinned no-drive row has no patch. */
+  function jackTarget(): { sceneId: string; spec: SceneSetting } | null {
+    return (pinned?.spec.drive ? pinned : null) ?? lastPreview;
+  }
+
+  /** `choice` is already plugged into `target`'s patch. */
+  function jackFeeds(target: { sceneId: string; spec: SceneSetting }, choice: DriveSourceChoice): boolean {
+    const setting = deps.getDriveSetting(target.sceneId, target.spec);
+    return setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
+  }
+
   function jackDescribe(choice: DriveSourceChoice): { aria: string; title: string } {
     const name = driveSourceLabel(choice);
-    const target = pinned ?? lastPreview;
+    const target = jackTarget();
     if (!target) return { aria: `${name} — pick a setting first`, title: name };
-    const already = jackIsPinned(choice);
+    const already = jackFeeds(target, choice);
     const verb = already ? "Unplug" : "Plug";
     const prep = already ? "from" : "into";
     return { aria: `${verb} ${name} ${prep} ${target.spec.label}`, title: name };
@@ -3204,9 +3240,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  previewed yet, unplug what's already there, or plug in. */
   function jackTooltipLines(choice: DriveSourceChoice): string[] {
     const line1 = `${driveSourceLabel(choice)} — ${driveSourceDescription(choice)}`;
-    const target = pinned ?? lastPreview;
+    const target = jackTarget();
     if (!target) return [line1, "Pin a setting first"];
-    const line2 = jackIsPinned(choice) ? `Click to unplug from ${target.spec.label}` : `Click to plug into ${target.spec.label}`;
+    const line2 = jackFeeds(target, choice) ? `Click to unplug from ${target.spec.label}` : `Click to plug into ${target.spec.label}`;
     return [line1, line2];
   }
 
@@ -3218,14 +3254,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   let justAddedKey: string | null = null;
 
   function onJackClick(choice: DriveSourceChoice): void {
-    const target = pinned ?? lastPreview;
+    const target = jackTarget();
     if (!target) {
       showToast("Pick a setting first");
       return;
     }
-    if (!pinned) togglePin(target.sceneId, target.spec);
-    const setting = deps.getDriveSetting(target.sceneId, target.spec);
-    const existed = setting !== "scene" && setting.sources.some((s) => jackKey(s.choice) === jackKey(choice));
+    pinSetting(target.sceneId, target.spec);
+    const existed = jackFeeds(target, choice);
     justAddedKey = existed ? null : jackKey(choice);
     deps.onTogglePatchSource(target.sceneId, target.spec, choice);
     patchChanged(target.sceneId, target.spec);
@@ -4314,6 +4349,29 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
      *  leaving the ring of rows entirely. `el` is the whole row (slider,
      *  A/T/reset chips and all), so a focus change *within* it (e.g. Tab to
      *  its own reset chip) isn't a leave. */
+    /** Makes this row pinnable (pinRowHandles). A drive row brings its own
+     *  handle, and createControlRow wires its card press (onCardPin); any
+     *  other row's `main` control is passed so a press on it, or on the card
+     *  around it, pins. */
+    function registerPinRow(rowEl: HTMLElement, drive: DriveRowHandle | null, main?: HTMLElement | null): void {
+      if (main) {
+        rowEl.addEventListener("click", (e) => {
+          if (isCardPress(rowEl, main, e.target)) pinSetting(sceneId, spec);
+        });
+      }
+      if (drive) {
+        pinRowHandles.push(drive);
+        return;
+      }
+      rowEl.style.setProperty("--vc-pin-color", accent);
+      pinRowHandles.push({
+        sceneId,
+        spec,
+        rowEl,
+        refreshPin: () => rowEl.classList.toggle("vc-drive-pinned", samePair(pinned, { sceneId, spec })),
+      });
+    }
+
     function wirePreviewFocus(el: HTMLElement): void {
       el.addEventListener("focusin", onRowFocusIn);
       el.addEventListener("focusout", (e) => {
@@ -4354,6 +4412,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         signals,
       });
       wirePreviewFocus(picker.el);
+      registerPinRow(picker.el, null, picker.el.querySelector<HTMLElement>(".vc-picker"));
       container.appendChild(picker.el);
       if (signals && reads) {
         sceneRowHandles.push({
@@ -4381,6 +4440,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         set: (value) => deps.onSceneSettingChange(sceneId, spec, value),
       });
       wirePreviewFocus(toggleEl);
+      registerPinRow(toggleEl, null, toggleEl.querySelector<HTMLElement>(".vc-toggle"));
       container.appendChild(toggleEl);
       return;
     }
@@ -4416,15 +4476,18 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
       reads,
       drivePanel: driveBuild
-        ? { port: driveBuild.port, summary: driveBuild.summary, below: driveBuild.below, onPin: () => togglePin(sceneId, spec), pin: () => pinDrive(sceneId, spec) }
+        ? { port: driveBuild.port, summary: driveBuild.summary, below: driveBuild.below, onPin: () => togglePin(sceneId, spec) }
         : undefined,
+      onCardPin: () => pinSetting(sceneId, spec),
     });
     row.onChange((value) => deps.onSceneSettingChange(sceneId, spec, value));
     row.sync(() => deps.getSceneSettingValue(sceneId, spec));
     wirePreviewFocus(row.el);
     container.appendChild(row.el);
     sceneRowHandles.push(row);
-    if (driveBuild) driveRowHandles.push(driveBuild.bind(row.el));
+    const driveHandle = driveBuild ? driveBuild.bind(row.el) : null;
+    if (driveHandle) driveRowHandles.push(driveHandle);
+    registerPinRow(row.el, driveHandle);
     wireBandHighlight(row.el, reads);
   }
 
@@ -4436,6 +4499,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (const c of driveSparkCanvases) untrackDriveCanvas(c);
     driveSparkCanvases = [];
     driveRowHandles = [];
+    pinRowHandles = [];
     sceneCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.refresh();
@@ -4536,7 +4600,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     preview = null;
     cancelPendingPreview();
     if (pinned) {
-      const stillHere = driveRowHandles.find((r) => r.sceneId === pinned!.sceneId && r.spec.key === pinned!.spec.key);
+      const stillHere = pinRowHandles.find((r) => r.sceneId === pinned!.sceneId && r.spec.key === pinned!.spec.key);
       if (stillHere) stillHere.refreshPin();
       else {
         pinned = null;
@@ -4900,13 +4964,13 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  row's own control — focused first, pinned second, since togglePin
    *  clears the preview that focus just set. */
   function moveTabPin(e: KeyboardEvent, from: { sceneId: string; spec: SceneSetting }): void {
-    const rows = driveRowHandles.filter((h) => h.rowEl.getClientRects().length > 0);
+    const rows = pinRowHandles.filter((h) => h.rowEl.getClientRects().length > 0);
     if (rows.length === 0) return;
     const idx = rows.findIndex((h) => samePair(from, h));
     const next = rows[(idx + (e.shiftKey ? -1 : 1) + rows.length) % rows.length]!;
     e.preventDefault();
     next.rowEl.querySelector<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker")?.focus({ preventScroll: true });
-    pinDrive(next.sceneId, next.spec);
+    pinSetting(next.sceneId, next.spec);
     next.rowEl.scrollIntoView({ block: "nearest" });
   }
 
@@ -5181,7 +5245,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // just presence, so an unrelated 100ms tick never rebuilds a panel the
       // user might have a pointer down on (this file's own carried
       // click-loss rule).
-      if (pinned) {
+      if (pinned?.spec.drive) {
         const current = deps.getDriveSetting(pinned.sceneId, pinned.spec);
         if (!sameDriveSetting(current, lastPinnedSetting ?? "scene")) patchChanged(pinned.sceneId, pinned.spec);
       }
