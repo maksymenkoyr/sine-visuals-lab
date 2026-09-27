@@ -323,14 +323,14 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
 
   // ---- The look: every constant sky.ts reads for the sky and clouds. ----
   // SHIPPED mirrors sky.ts on this branch; BEFORE is the scene before the
-  // darker, narrower sky and the farther sun (SKY_SPREAD, SKY_LEVEL and
-  // SUN_DISTANCE at 1).
+  // darker, narrower sky, the farther sun and the palette-matched darkest
+  // key (SKY_SPREAD, SKY_LEVEL and SUN_DISTANCE at 1, the old coral glow key).
   const SHIPPED = {
-    zenith: [[0.2, 0.2, 0.42], [0.3, 0.36, 0.6], [0.37, 0.44, 0.65], [0.26, 0.45, 0.78]],
-    horizon: [[0.9, 0.5, 0.46], [0.95, 0.72, 0.58], [0.71, 0.7, 0.84], [0.7, 0.8, 0.93]],
-    cloudLit: [[0.98, 0.62, 0.55], [1.0, 0.82, 0.66], [0.98, 0.93, 0.95], [1.0, 0.99, 0.97]],
-    cloudShade: [[0.36, 0.26, 0.4], [0.5, 0.42, 0.52], [0.54, 0.5, 0.64], [0.58, 0.62, 0.72]],
-    sun: [[1.0, 0.45, 0.25], [1.0, 0.7, 0.4], [1.0, 0.88, 0.75], [1.0, 0.97, 0.9]],
+    zenith: [[0.245, 0.328, 0.984], [0.3, 0.36, 0.6], [0.37, 0.44, 0.65], [0.26, 0.45, 0.78]],
+    horizon: [[1.0, 1.0, 0.95], [0.95, 0.72, 0.58], [0.71, 0.7, 0.84], [0.7, 0.8, 0.93]],
+    cloudLit: [[0.9, 0.9, 1.0], [1.0, 0.82, 0.66], [0.98, 0.93, 0.95], [1.0, 0.99, 0.97]],
+    cloudShade: [[0.4, 0.42, 0.72], [0.5, 0.42, 0.52], [0.54, 0.5, 0.64], [0.58, 0.62, 0.72]],
+    sun: [[0.72, 0.7, 1.0], [1.0, 0.7, 0.4], [1.0, 0.88, 0.75], [1.0, 0.97, 0.9]],
     skySpread: 0.6, skyLevel: 0.86, gradLo: -0.1, gradHi: 0.9,
     sunHalo: 0.3, sunCore: 0.22, horizonWarm: 0.35, sunDistance: 1.4,
     cloudBrightness: 0.6,
@@ -340,6 +340,11 @@ pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); 
     dissipation: 0.34, drifterForce: 10, turbulence: 0.45, flowSpeed: 0.5, viscosity: 0.3,
   };
   const BEFORE = Object.assign(clone(SHIPPED), { skySpread: 1, skyLevel: 1, sunDistance: 1 });
+  BEFORE.zenith[0] = [0.2, 0.2, 0.42];
+  BEFORE.horizon[0] = [0.9, 0.5, 0.46];
+  BEFORE.cloudLit[0] = [0.98, 0.62, 0.55];
+  BEFORE.cloudShade[0] = [0.36, 0.26, 0.4];
+  BEFORE.sun[0] = [1.0, 0.45, 0.25];
   const MORNING_WARMTH = [1.04, 1.0, 0.86];
   const KEY_E = [-0.02, 0.08, 0.25, 0.65];
   const KEY_NAMES = ["Horizon glow", "Golden hour", "Early evening", "Midday"];

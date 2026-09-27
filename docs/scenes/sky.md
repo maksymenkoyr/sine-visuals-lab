@@ -56,6 +56,10 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   start of the session, with seven candidate sky-gazing illusions. The user
   picked three: blue field entoptic phenomenon (later cut), floaters and
   Haidinger's brush.
+- A product landing page's gradient background (the Codex page), pasted
+  2026-09-27 as "the colour palette I like; the darkest it gets should be
+  around there". Studied for its colour palette only; it set the Horizon
+  glow key. Local bundle `sky-palette-ref`.
 
 ## Measurements
 
@@ -96,6 +100,21 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   now 0.54 (halo 0.27, core ~0). At noon the sun moved from on the top
   edge to 0.2 above it. Bottom-tenth lightness at golden hour (0.745)
   went 0.67 → 0.63.
+- 2026-09-27 — palette reference (`sky-palette-ref`, background only,
+  text and the app window masked, `measure_palette.py`): hue p5..p95
+  224°..244°. Luma p10 / p25 / p50 / p75 / p90 = 0.30 / 0.53 / 0.64 /
+  0.76 / 0.86, darkest 5% (0.108, 0.137, 0.322). k-means palette, dark to
+  light: (0.152, 0.179, 0.395), (0.420, 0.445, 0.690), (0.468, 0.524,
+  0.883), (0.604, 0.636, 0.885), (0.710, 0.747, 0.941), (0.847, 0.861,
+  0.970).
+- 2026-09-27 — our new floor (Time of day 0.9), measured the same way:
+  hue 227°..235°. Luma 0.31 / 0.35 / 0.56 / 0.75 / 0.88. Palette (0.255,
+  0.304, 0.690), (0.354, 0.397, 0.742), (0.471, 0.507, 0.805), (0.608,
+  0.631, 0.869), (0.735, 0.754, 0.950), (0.871, 0.888, 0.998). The light
+  and mid tones match. The dark end stops at luma 0.31 (the reference's
+  corners reach 0.14), and the gradient keeps more of the frame near the
+  zenith, so the median is 0.56 vs 0.64. Before this, the floor's top was
+  navy, about (0.21, 0.17, 0.29).
 
 ## Decisions and pivots
 
@@ -202,6 +221,16 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   early evening), so its halo and core washed a corner. `SUN_DISTANCE`
   scales the whole path outward from the frame's centre; the bench has
   it as its Sun distance slider.
+- 2026-09-27 — "I like the colour palette here; something around there
+  should be the darkest it gets", with a pasted indigo-periwinkle-lavender
+  gradient. The darkest state is the Horizon glow key, which the sky holds
+  from sunset to sunrise. It went from navy over coral to that palette:
+  zenith and horizon solved through the sky trims (`solve_key.py`) for a
+  saturated indigo top and a lavender-white bottom, lavender-white clouds
+  over periwinkle shade, and a lavender sun glow in place of orange.
+  Golden hour stays the one warm key. Its top is now as dark as the
+  floor's (luma ~0.31), and the floor reads more vivid than the default
+  early evening, which the narrowing left a greyish lavender.
 
 ## Tuning notes
 
@@ -281,6 +310,12 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   checkout that built the scene, `.claude/worktrees/sky-scene/`). It isn't
   in the private archive yet: `python3 tools/ref-archive.py sky-stills
   --from .claude/worktrees/sky-scene/tools/.cache/refs`.
+- The palette reference is the local bundle `sky-palette-ref`
+  (`tools/.cache/refs/sky-palette-ref/` of `.claude/worktrees/sky-public/`),
+  not archived yet: `python3 tools/ref-archive.py sky-palette-ref --from
+  .claude/worktrees/sky-public/tools/.cache/refs`. `measure_palette.py`
+  measured it and `solve_key.py` turned the targets into key values (both
+  in `docs/scenes/sky/scripts/`).
 
 ## Resume here
 
@@ -336,4 +371,4 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
 - Moved back from the private repo to `src/render/scenes/sky/` (#170,
   replayed onto `main` and featured in this PR).
 - Darker, narrower sky (`SKY_SPREAD`, `SKY_LEVEL`); Sky tuning bench;
-  sun further out (`SUN_DISTANCE`).
+  sun further out (`SUN_DISTANCE`); palette-matched darkest key.
