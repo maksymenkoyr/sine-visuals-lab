@@ -1,5 +1,12 @@
 import type { SceneSetting } from "./sceneSettings.ts";
-import { getSceneSetting, setVariantResolver, settingDefault, settingScope } from "./sceneSettings.ts";
+import {
+  getSceneMaster,
+  getSceneSetting,
+  SCENE_MASTER_DEFAULT,
+  setVariantResolver,
+  settingDefault,
+  settingScope,
+} from "./sceneSettings.ts";
 import {
   EXPANSION_DEFAULT,
   EXPANSION_MAX,
@@ -56,6 +63,12 @@ import { getPin } from "../tuning/pins.ts";
  * spec.default" identity at rest. It shares this module's auto-on store and
  * slew, so dragging a macro-driven setting "goes manual" the same way
  * dragging an auto one does — see resolve() below.
+ *
+ * This module is also where the device-wide scene master (sceneSettings.ts's
+ * getSceneMaster) gets multiplied into every resolved value — see
+ * resolveSceneSetting's own doc for the rules (scaled once, at the outermost
+ * resolve; never on drives, enums/booleans, the Input card's gain stages, or
+ * a DEV pin/override).
  */
 
 // Weight-authoring convention (see the `auto:` tables in caustics.ts and
@@ -410,12 +423,17 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
   // A macro-driven setting has no auto weights of its own — its target
   // tracks the driver's own resolved value (itself auto/override/manual as
   // usual), not the music profile directly. Drivers don't carry a `macro` of
-  // their own, so this recurses exactly one level deep.
+  // their own, so this recurses exactly one level deep. The driver read here
+  // is resolveUnscaled, NOT resolveSceneSetting: the scene master (below)
+  // must touch each param exactly once, at the outermost resolve — feeding
+  // the scaled driver into this displacement and then scaling the sub-param
+  // too would square the master's effect across a macro group like Caustics'
+  // Sparkle.
   const target = spec.auto
     ? computeAutoTarget(spec, latestProfile, strength, settingDefault(sceneId, spec))
     : computeMacroTarget(
         spec,
-        resolveSceneSetting(sceneId, spec.macro!.driver),
+        resolveUnscaled(sceneId, spec.macro!.driver),
         settingDefault(sceneId, spec),
         settingDefault(sceneId, spec.macro!.driver),
       );
@@ -428,11 +446,44 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
   return next;
 }
 
-/** The effective value for a scene setting: its auto target if auto, the
- *  manually-stored value otherwise. Drop-in replacement for getSceneSetting
- *  at every render-time read site. */
-export function resolveSceneSetting(sceneId: string, spec: SceneSetting): number {
+/** Resolve without the scene master applied — the inner rung. Only the
+ *  public resolveSceneSetting below scales, and the macro recursion inside
+ *  resolve() reads drivers through here so a param is never scaled twice. */
+function resolveUnscaled(sceneId: string, spec: SceneSetting): number {
   return resolve(sceneId, spec, getSceneSetting(sceneId, spec));
+}
+
+/** The effective value for a scene setting: its auto target if auto, the
+ *  manually-stored value otherwise — then the device-wide scene master
+ *  (sceneSettings.ts's getSceneMaster) multiplied in: value × master,
+ *  clamped back to the spec's own [min, max]. Drop-in replacement for
+ *  getSceneSetting at every render-time read site, which is what makes one
+ *  scale here cover the shader upload (sceneCommon.ts), every scene's own
+ *  settingFor/JS reads, and the panel's live readouts alike.
+ *
+ *  Rules the master keeps:
+ *  - applied to the final resolved value only — manual, auto and macro
+ *    outcomes alike — and never to a drive reading (u<Key>Drive stays the
+ *    raw signal; gates and combines must not move — drives.ts's header);
+ *  - never to an enum or boolean (their values are chip indices / 0-1
+ *    flags, not amounts), so the variant setting is naturally exempt too;
+ *  - never to Sensitivity/Expansion/Smoothing, which resolve through
+ *    resolveSensitivity and friends below and are audio gain, not scene
+ *    params;
+ *  - never over a DEV override or pin: those are deliberately typed,
+ *    often out-of-range values (tuning/overrides.ts, tuning/pins.ts), and
+ *    clamping them back in would break the tuning affordance.
+ *  master === 1 returns the resolved value untouched, so every identity
+ *  test (auto at NEUTRAL, drives at defaults) stays bit-for-bit. */
+export function resolveSceneSetting(sceneId: string, spec: SceneSetting): number {
+  const value = resolveUnscaled(sceneId, spec);
+  const master = getSceneMaster();
+  if (master === SCENE_MASTER_DEFAULT) return value;
+  if (spec.type === "boolean" || spec.type === "enum") return value;
+  if (import.meta.env.DEV && (getOverride(sceneId, spec.key) !== undefined || getPin(sceneId, spec.key) !== undefined)) {
+    return value;
+  }
+  return clampToSpec(spec, value * master);
 }
 
 // A scene's variant (SceneSetting.variant) is read through this resolver

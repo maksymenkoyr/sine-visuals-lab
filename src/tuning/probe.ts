@@ -7,7 +7,7 @@
 import type { FeatureFrame } from "../audio/types.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
-import { getSceneSetting } from "../render/sceneSettings.ts";
+import { getSceneMaster, getSceneSetting } from "../render/sceneSettings.ts";
 import { getOverride, isAutoPinned } from "./overrides.ts";
 import { getPin } from "./pins.ts";
 import { isAutoEnabled, resolveSceneSetting } from "../render/autoTune.ts";
@@ -47,8 +47,10 @@ export interface ProbeSettingValue {
   resolved: number;
   /** "override" (pinned by the tuning bus, incl. auto-pin), "pin" (typed
    *  into the row past its spec range — see tuning/pins.ts), "auto"
-   *  (music-driven), or "manual" (auto disabled for this key,
-   *  resolved === base). */
+   *  (music-driven), or "manual" (auto disabled for this key — base is the
+   *  stored value; `resolved` is that value once resolveSceneSetting has
+   *  applied the device-wide scene master, so the two only match while the
+   *  master sits at its identity default — see getSceneMaster). */
   mode: "override" | "pin" | "auto" | "manual";
 }
 
@@ -59,6 +61,11 @@ export interface ProbeSnapshot {
   scene: string;
   renderScale: number;
   govLevel: number;
+  /** The device-wide scene master every `settings[*].resolved` below has
+   *  already been multiplied by (getSceneMaster) — reported so a session
+   *  can tell a master≠1 run apart from a params run instead of reading a
+   *  mysterious uniform offset. */
+  master: number;
   bands: { low: number; mid: number; high: number; energy: number };
   beat: { fired: boolean; bpm: number; phase: number };
   section: number;
@@ -101,6 +108,7 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
     scene: sceneId,
     renderScale: input.renderScale,
     govLevel: input.govLevel,
+    master: getSceneMaster(),
     bands: { low: anim?.low ?? 0, mid: anim?.mid ?? 0, high: anim?.high ?? 0, energy: vis?.energy ?? 0 },
     beat: { fired: anim?.onset ?? false, bpm: vis?.bpm ?? 0, phase: anim?.beatPhase ?? 0 },
     section: anim?.sectionIntensity ?? 0,
@@ -115,7 +123,7 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
 export function formatProbe(snap: ProbeSnapshot): string {
   const lines: string[] = [];
   lines.push(
-    `t=${snap.t.toFixed(2)} fps=${snap.fps.toFixed(0)} quality=${snap.quality} scene=${snap.scene} scale=${snap.renderScale.toFixed(2)} gov=${snap.govLevel}`,
+    `t=${snap.t.toFixed(2)} fps=${snap.fps.toFixed(0)} quality=${snap.quality} scene=${snap.scene} scale=${snap.renderScale.toFixed(2)} gov=${snap.govLevel} master=${snap.master.toFixed(2)}`,
   );
   lines.push(
     `low=${snap.bands.low.toFixed(2)} mid=${snap.bands.mid.toFixed(2)} high=${snap.bands.high.toFixed(2)} energy=${snap.bands.energy.toFixed(2)}`,
