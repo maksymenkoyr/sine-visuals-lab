@@ -776,6 +776,21 @@ const vec3 CLOUD_SHADE_KEY[4] = vec3[4](
 const vec3 SUN_KEY[4] = vec3[4](
   vec3(1.000, 0.450, 0.250), vec3(1.000, 0.700, 0.400), vec3(1.000, 0.880, 0.750), vec3(1.000, 0.970, 0.900));
 const vec3 MORNING_WARMTH = vec3(1.04, 1.0, 0.86); // mornings lean peach/gold where evenings lean pink
+// Two whole-sky trims applied on top of every key, after the sun's glow is
+// added (see main): SKY_SPREAD pulls each sky pixel's hue and saturation
+// toward the colour halfway between the keyed zenith and horizon while
+// keeping its brightness, so the gradient spans fewer colours (1 = the keys
+// as written; a sunset went navy to coral, over 120 degrees of hue);
+// SKY_LEVEL then dims the whole sky. Clouds are untouched, so they stand out
+// a little more against it.
+const float SKY_SPREAD = 0.6;
+const float SKY_LEVEL = 0.86;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+// The horizon-to-zenith gradient runs between these two heights, in screen
+// uv.y (0 bottom, 1 top): LO below 0 means the bottom edge already carries a
+// little of the zenith colour, and HI below 1 means the top tenth is pure zenith.
+const float SKY_GRADIENT_LO = -0.1;
+const float SKY_GRADIENT_HI = 0.9;
 // The sun's place in the frame: it rises at the left, sets at the right, and
 // is near the top of the frame at noon, horizon at the bottom edge. Its glow
 // is a wide soft halo plus a tighter core (no hard disc), and around sunrise
@@ -1117,7 +1132,7 @@ void main() {
   float morning = 0.5 + 0.5 * cos(dayAngle);
   horizon = mix(horizon, horizon * MORNING_WARMTH, morning * glowHour);
   sunCol = mix(sunCol, sunCol * MORNING_WARMTH, morning * glowHour);
-  vec3 color = mix(horizon, zenith, smoothstep(-0.1, 0.9, uv.y));
+  vec3 color = mix(horizon, zenith, smoothstep(SKY_GRADIENT_LO, SKY_GRADIENT_HI, uv.y));
 
   vec2 sunP = vec2(-cos(dayAngle) * SUN_X_SPAN * devAspect, -0.55 + 1.05 * sunE);
   float sunD = length(p - sunP);
@@ -1127,6 +1142,13 @@ void main() {
   float lowInSky = pow(1.0 - clamp(uv.y, 0.0, 1.0), 2.5);
   glow += sunCol * HORIZON_WARM * glowHour * onSunSide * lowInSky;
   color += glow;
+  // Narrow the sky's colour range, then darken it (SKY_SPREAD, SKY_LEVEL).
+  // Chroma here is colour over its own luma, so the pull moves hue and
+  // saturation and leaves brightness where the keys put it.
+  vec3 skyMid = 0.5 * (zenith + horizon);
+  vec3 midChroma = skyMid / max(dot(skyMid, LUMA), 1e-3);
+  float skyLuma = max(dot(color, LUMA), 1e-3);
+  color = skyLuma * mix(midChroma, color / skyLuma, SKY_SPREAD) * SKY_LEVEL;
 
 
   // 2. Cloud cover: the sim's own dye density thresholded (CLOUD_LOW/HIGH)

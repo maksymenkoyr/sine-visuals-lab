@@ -84,6 +84,12 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   low/mid/high onsets.
 - 2026-09-24 — a drifted day spends under 10% of its time in the skipped
   night (`nightSpeedup`, pinned by a test).
+- 2026-09-27 — darker, narrower sky (`SKY_SPREAD` 0.6, `SKY_LEVEL` 0.86).
+  Mean colour of the top and bottom tenth of a 1280×800 frame, Day drift 0,
+  clouds included. Early evening (Time of day 0.71): hue 226° → 315°
+  became 229° → 261°, lightness 0.49 / 0.81 became 0.42 / 0.71. Sunset
+  (0.745): 242° → 8° became 259° → 357°, bottom saturation 0.89 → 0.53.
+  Midday barely moves (217° / 214° either way).
 
 ## Decisions and pivots
 
@@ -175,6 +181,16 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   same round that featured Physarum 2 and moved Physarum and Slats behind
   the draft toggle (#173). Replayed onto `main` from #170, whose branch
   predated Physarum 2's registration and no longer merged cleanly.
+- 2026-09-27 — "Sky a bit darker, and the spectre narrower." Read as the
+  sky's colour range, which ran navy to coral at sunset. Two whole-sky
+  trims now apply after the day keys and the sun's glow: `SKY_SPREAD`
+  pulls each sky pixel's hue and saturation toward the gradient's mid
+  colour while keeping its brightness, and `SKY_LEVEL` dims it. Clouds are
+  untouched, so they stand out a little more. The gradient's bounds became
+  named constants (`SKY_GRADIENT_LO`/`HI`), so every value the new Sky
+  tuning bench sets has a name in `sky.ts`. The bench (Materials) runs
+  the real `skyFluidSim.ts` under a port of the sky and cloud passes, with
+  compare and variations; the user picks the final look there.
 
 ## Tuning notes
 
@@ -190,6 +206,11 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
 - Light-wave glints are deliberately faint and fast; if they're lost on
   real music, raise Light waves before touching the shader.
 - No `/tune sky` pass yet, and no real-GPU look.
+- Sky colours and cloud shapes are tuned on the Sky tuning bench
+  (Materials): the same sim and shader maths, every constant a slider,
+  looks saved to its `looks` collection. Its display shader is a hand
+  port, so after changing the sky or cloud passes in `buildDisplayFrag`,
+  re-port them in `bench.html` and rebuild with `build_bench.mjs`.
 
 ## Known issues and next steps
 
@@ -238,6 +259,12 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
 - `docs/scenes/sky/` — the concept artifact's source and the session
   scripts (screenshot series, day sweep, reference measurers); its
   `README.md` lists them.
+- Sky tuning bench — [artifact](https://claude.ai/artifact/LDfRvM66zaudcP1svR8px7),
+  source in `docs/scenes/sky/artifacts/sky-bench/`, built by
+  `docs/scenes/sky/scripts/build_bench.mjs` (inlines the real sim).
+  Saved looks: `ArtifactData` list of its `looks` collection; each
+  look's `params` uses the bench's own keys, which its "Code for sky.ts"
+  panel maps to constant names.
 - The pasted reference stills, our screenshots and the measurement outputs
   are the local bundle `sky-stills` (`tools/.cache/refs/sky-stills/` of the
   checkout that built the scene, `.claude/worktrees/sky-scene/`). It isn't
@@ -297,3 +324,4 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   Wave frequency retired).
 - Moved back from the private repo to `src/render/scenes/sky/` (#170,
   replayed onto `main` and featured in this PR).
+- Darker, narrower sky (`SKY_SPREAD`, `SKY_LEVEL`); Sky tuning bench.

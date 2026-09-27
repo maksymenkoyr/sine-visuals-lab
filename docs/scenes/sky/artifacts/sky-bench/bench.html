@@ -1,0 +1,1243 @@
+<title>Sky Tuning Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+/* A colour-grading surround: one deliberate dark, near-neutral look so the
+   preview is the only saturated thing on screen. Single theme by choice. */
+:root {
+  color-scheme: dark;
+  --bg: #1a1b1e;
+  --panel: #212226;
+  --raised: #292a2f;
+  --line: #34363d;
+  --line-soft: #2a2c32;
+  --text: #e6e6e9;
+  --muted: #a0a2ab;
+  --faint: #70737c;
+  --accent: #f1c98a;
+  --accent-ink: #1a1b1e;
+  --warn: #ec9384;
+  --ui: "Chakra Petch", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --mono: "Share Tech Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 var(--ui);
+  padding-inline: 16px;
+  padding-block: 16px 48px;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code, output, .mono { font-family: var(--mono); }
+
+.app { max-width: 1500px; margin: 0 auto; display: grid; gap: 16px; }
+.top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 10px 24px; }
+.top h1 { margin: 0; font: 600 22px/1.1 var(--ui); letter-spacing: .02em; text-wrap: balance; }
+.top p { margin: 6px 0 0; color: var(--muted); max-width: 66ch; }
+.top p code { color: var(--text); }
+.status { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 12px/1 var(--mono); color: var(--faint); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; white-space: nowrap; }
+.chip.on { color: var(--text); border-color: #4b4e57; }
+.chip.warn { color: var(--warn); border-color: #5a3a35; }
+
+.bench { display: grid; grid-template-columns: minmax(0, 1fr) 372px; gap: 20px; align-items: start; }
+.stage { display: grid; gap: 12px; min-width: 0; }
+@media (min-width: 1001px) {
+  .stage { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); }
+}
+@media (max-width: 1000px) {
+  .bench { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Preview */
+.view {
+  position: relative;
+  width: min(100%, calc(62vh * 1.6));
+  aspect-ratio: 16 / 10;
+  max-width: 100%;
+  margin-inline: auto;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0f1012;
+  box-shadow: 0 0 0 1px var(--line);
+  touch-action: none;
+}
+.view canvas { display: block; width: 100%; height: 100%; }
+.tags { position: absolute; inset: 0; pointer-events: none; }
+.tag {
+  position: absolute; font: 12px/1 var(--mono); color: #f4f4f6;
+  background: rgba(16, 17, 20, .62); padding: 5px 8px; border-radius: 4px;
+  letter-spacing: .02em; white-space: nowrap;
+}
+.divider { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(255, 255, 255, .85); pointer-events: none; }
+.divider::after {
+  content: ""; position: absolute; top: 50%; left: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  border-radius: 50%; background: rgba(16, 17, 20, .7); border: 2px solid rgba(255, 255, 255, .9);
+}
+.tiles { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.tile {
+  position: relative; border: 0; margin: 0; padding: 0; background: transparent; cursor: pointer;
+  outline-offset: -3px;
+}
+.tile:hover { box-shadow: inset 0 0 0 2px rgba(241, 201, 138, .9); }
+.tile[data-i="0"] { cursor: default; }
+.tile[data-i="0"]:hover { box-shadow: none; }
+.tile .tag { left: 8px; top: 8px; }
+.tile .pick { position: absolute; right: 8px; bottom: 8px; font: 12px/1 var(--mono); background: var(--accent); color: var(--accent-ink); padding: 5px 8px; border-radius: 4px; opacity: 0; transition: opacity .12s; }
+.tile:hover .pick, .tile:focus-visible .pick { opacity: 1; }
+.glerr { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); }
+
+/* Time of day */
+.timebar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; width: min(100%, calc(62vh * 1.6)); margin-inline: auto; }
+.timewrap { display: grid; gap: 2px; min-width: 0; }
+.timewrap label { font-size: 12px; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+.ticks { position: relative; height: 16px; font: 11px/1 var(--mono); color: var(--faint); }
+.ticks span { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }
+.ticks span.key { color: var(--accent); }
+.todval { font: 18px/1 var(--mono); min-width: 5ch; text-align: right; }
+
+/* Mode + tools */
+.modes { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; width: min(100%, calc(62vh * 1.6)); margin-inline: auto; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 7px 12px; cursor: pointer; color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--raised); color: var(--text); }
+.modeopts { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--muted); font-size: 13px; }
+.modeopts label { display: inline-flex; gap: 6px; align-items: center; }
+.modeopts .ctlmini { display: inline-flex; gap: 8px; align-items: center; }
+.modeopts .ctlmini input[type=range] { width: 110px; }
+select { background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; max-width: 220px; }
+.btn { border: 1px solid var(--line); background: var(--raised); color: var(--text); border-radius: 6px; padding: 7px 12px; cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: #50535c; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.btn.small { padding: 4px 9px; font-size: 13px; }
+.btn:disabled { opacity: .45; cursor: default; }
+.iconbtn { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line); background: var(--raised); cursor: pointer; }
+.iconbtn svg { width: 14px; height: 14px; fill: var(--text); }
+
+/* Readout */
+.readout { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 18px; align-items: center; width: min(100%, calc(62vh * 1.6)); margin-inline: auto; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel); }
+.readout canvas { width: 100%; height: 40px; display: block; }
+.readout dl { margin: 0; display: flex; gap: 16px; }
+.readout dt { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+.readout dd { margin: 0; font: 16px/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+.readout dd small { color: var(--faint); font-size: 12px; }
+@media (max-width: 560px) { .readout { grid-template-columns: minmax(0, 1fr); } }
+
+/* Rail */
+.rail { display: grid; gap: 10px; min-width: 0; }
+.group { border: 1px solid var(--line-soft); border-radius: 8px; background: var(--panel); }
+.group > summary {
+  list-style: none; cursor: pointer; padding: 11px 14px; display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 13px;
+}
+.group > summary::-webkit-details-marker { display: none; }
+.group > summary .aside { font: 12px var(--mono); text-transform: none; letter-spacing: 0; color: var(--faint); font-weight: 400; }
+.group[open] > summary { border-bottom: 1px solid var(--line-soft); }
+.gbody { padding: 12px 14px 14px; display: grid; gap: 14px; }
+.gnote { margin: 0; color: var(--muted); font-size: 13px; }
+
+.ctl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: baseline; }
+.ctl label { font-weight: 500; display: inline-flex; gap: 6px; align-items: baseline; }
+.ctl .changed { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; transform: translateY(-1px); }
+.ctl .val { display: inline-flex; gap: 6px; align-items: baseline; }
+.ctl output { font-size: 13px; font-variant-numeric: tabular-nums; }
+.ctl .reset { border: 0; background: none; color: var(--faint); cursor: pointer; padding: 0 2px; font-size: 13px; }
+.ctl .reset:hover { color: var(--accent); }
+.ctl input[type=range] { grid-column: 1 / -1; }
+.ctl .const { grid-column: 1 / -1; font: 11px/1.2 var(--mono); color: var(--faint); overflow-wrap: anywhere; }
+
+input[type=range] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 20px; background: transparent; cursor: pointer; margin: 0;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--muted) 0 var(--fill, 50%), var(--line) var(--fill, 50%) 100%);
+}
+input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line); }
+input[type=range]::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--muted); }
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; margin-top: -5px;
+  background: var(--text); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--muted);
+}
+input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--text); border: 2px solid var(--bg); }
+input[type=range].time::-webkit-slider-runnable-track {
+  height: 6px;
+  background: linear-gradient(90deg, #3a3f5a 0%, #6a5a7a 22%, #c9a48a 25%, #7fa6d6 36%, #8fb6e6 50%, #7fa6d6 64%, #c98f86 74%, #7a5a86 78%, #3a3f5a 100%);
+}
+input[type=range].time::-webkit-slider-thumb { margin-top: -4px; }
+input[type=range].time::-moz-range-track { height: 6px; background: linear-gradient(90deg, #3a3f5a 0%, #6a5a7a 22%, #c9a48a 25%, #7fa6d6 36%, #8fb6e6 50%, #7fa6d6 64%, #c98f86 74%, #7a5a86 78%, #3a3f5a 100%); }
+input[type=range].time::-moz-range-progress { background: transparent; }
+
+/* Key colours */
+.keytabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.keytab { border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 6px 4px 5px; cursor: pointer; display: grid; gap: 5px; text-align: center; font-size: 12px; color: var(--muted); }
+.keytab[aria-pressed="true"] { background: var(--raised); color: var(--text); border-color: #50535c; }
+.keytab .w { height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.keytab .w i { display: block; height: 100%; background: var(--accent); width: 0; }
+.swatches { display: grid; gap: 8px; }
+.sw { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; }
+.sw input[type=color] { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 6px; padding: 0; background: none; cursor: pointer; }
+.sw input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+.sw input[type=color]::-webkit-color-swatch { border: 0; border-radius: 5px; }
+.sw input[type=color]::-moz-color-swatch { border: 0; border-radius: 5px; }
+.sw .nm { font-weight: 500; display: inline-flex; gap: 6px; align-items: baseline; }
+.sw .hex { font: 12px var(--mono); color: var(--muted); }
+
+/* Looks */
+.presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 5px 11px; cursor: pointer; font-size: 13px; color: var(--text); }
+.preset:hover { border-color: var(--accent); }
+.preset small { color: var(--faint); margin-left: 4px; }
+.saveform { display: grid; gap: 8px; }
+.saveform input, .saveform textarea { width: 100%; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+.saveform textarea { resize: vertical; min-height: 54px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.msg { font-size: 13px; color: var(--muted); }
+.msg.ok { color: var(--accent); }
+.msg.err { color: var(--warn); }
+.looklist { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.look { border: 1px solid var(--line-soft); border-radius: 6px; padding: 9px 10px; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 4px 10px; background: var(--bg); }
+.look .mini { grid-row: span 2; width: 34px; height: 34px; border-radius: 4px; }
+.look .ttl { font-weight: 600; overflow-wrap: anywhere; }
+.look .meta { font: 11px var(--mono); color: var(--faint); }
+.look .note { grid-column: 1 / -1; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.look .row { grid-column: 1 / -1; }
+.empty { color: var(--faint); font-size: 13px; margin: 0; }
+pre.code { margin: 0; max-height: 360px; overflow: auto; background: var(--bg); border: 1px solid var(--line-soft); border-radius: 6px; padding: 10px; font: 12px/1.5 var(--mono); color: #cfd0d6; white-space: pre; }
+.toprow { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+@media (prefers-reduced-motion: reduce) { .tile .pick { transition: none; } }
+</style>
+
+<div class="app">
+  <header class="top">
+    <div>
+      <h1>Sky tuning bench</h1>
+      <p>Colours and cloud shapes for the <b>Sky</b> scene, running on the scene's own cloud simulation. Find a look, save it, and Claude bakes it into <code>sky.ts</code>.</p>
+    </div>
+    <div class="status" id="status" aria-live="polite"></div>
+  </header>
+
+  <main class="bench">
+    <section class="stage" aria-label="Preview">
+      <div class="view" id="view">
+        <canvas id="gl" aria-label="Live preview of the Sky scene's sky and clouds"></canvas>
+        <div class="tags" id="tags"></div>
+        <div class="tiles" id="tiles" hidden></div>
+        <div class="glerr" id="glerr" hidden></div>
+      </div>
+
+      <div class="timebar">
+        <button class="iconbtn" id="play" type="button" aria-label="Run the day" title="Run the day (one day per minute)">
+          <svg viewBox="0 0 14 14" aria-hidden="true"><path id="playIcon" d="M3 1.5v11l9-5.5z"/></svg>
+        </button>
+        <div class="timewrap">
+          <label for="tod">Time of day</label>
+          <input type="range" class="time" id="tod" min="0" max="1" step="0.001" value="0.71">
+          <div class="ticks" id="ticks"></div>
+        </div>
+        <output class="todval" id="todOut" for="tod">0.710</output>
+      </div>
+
+      <div class="modes">
+        <div class="seg" role="group" aria-label="View">
+          <button type="button" data-mode="single" aria-pressed="true">Single</button>
+          <button type="button" data-mode="compare" aria-pressed="false">Compare</button>
+          <button type="button" data-mode="variations" aria-pressed="false">Variations</button>
+        </div>
+        <div class="modeopts" id="optCompare" hidden>
+          <label for="refSel">Left half</label>
+          <select id="refSel"></select>
+          <span>Drag across the preview to move the divider.</span>
+        </div>
+        <div class="modeopts" id="optVariations" hidden>
+          <span class="ctlmini"><label for="varAmt">How different</label><input type="range" id="varAmt" min="0.1" max="1" step="0.05" value="0.5"></span>
+          <label><input type="checkbox" id="varSky" checked> Sky colours</label>
+          <label><input type="checkbox" id="varCloudCol" checked> Cloud colours</label>
+          <label><input type="checkbox" id="varShape" checked> Cloud shape</label>
+          <button class="btn small" id="reroll" type="button">New variations</button>
+        </div>
+      </div>
+
+      <div class="readout">
+        <canvas id="hue" aria-label="Hues the sky spans at this time of day"></canvas>
+        <dl>
+          <div><dt>Hue span</dt><dd id="spanOut">0°</dd></div>
+          <div><dt>Top</dt><dd id="topOut">0</dd></div>
+          <div><dt>Bottom</dt><dd id="botOut">0</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <aside class="rail" id="rail" aria-label="Controls">
+      <details class="group" open id="gLooks">
+        <summary>Looks <span class="aside" id="undoWrap"><button class="btn small" id="undo" type="button" disabled>Undo</button></span></summary>
+        <div class="gbody">
+          <div>
+            <p class="gnote" style="margin-bottom:8px">Start from a preset. Colour presets keep your cloud shape, and shape presets keep your colours.</p>
+            <div class="presets" id="presets"></div>
+          </div>
+          <form class="saveform" id="saveForm">
+            <label for="lookName" class="gnote">Save this look for Claude</label>
+            <input id="lookName" maxlength="60" placeholder="Name, e.g. Dusk with soft puffs" autocomplete="off">
+            <textarea id="lookNote" maxlength="400" placeholder="Optional note: what you like, what's still off"></textarea>
+            <div class="row"><button class="btn primary" type="submit" id="saveBtn">Save look</button><span class="msg" id="saveMsg"></span></div>
+          </form>
+          <div>
+            <div class="toprow"><span class="gnote">Saved looks</span></div>
+            <ul class="looklist" id="looks"></ul>
+          </div>
+        </div>
+      </details>
+      <div id="groups" style="display:grid;gap:10px"></div>
+      <details class="group" id="gCode">
+        <summary>Code for sky.ts <span class="aside" id="codeCount"></span></summary>
+        <div class="gbody">
+          <div class="row">
+            <label class="gnote"><input type="checkbox" id="codeAll"> Show every constant, not only changes</label>
+          </div>
+          <pre class="code" id="code" tabindex="0"></pre>
+          <div class="row"><button class="btn small" id="copyCode" type="button">Copy</button><span class="msg" id="copyMsg"></span></div>
+        </div>
+      </details>
+    </aside>
+  </main>
+</div>
+
+<script>/*SKY_SIM_BUNDLE*/</script>
+<script>
+(function () {
+  "use strict";
+  const Sim = window.SkySim;
+  const TAU = Math.PI * 2;
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const clamp01 = (v) => clamp(v, 0, 1);
+  const smooth = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+  const wrap = (v) => v - Math.floor(v);
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  const $ = (id) => document.getElementById(id);
+
+  // ---- The look: every constant sky.ts reads for the sky and clouds. ----
+  // SHIPPED mirrors sky.ts on this branch; BEFORE is the scene before the
+  // darker, narrower sky (SKY_SPREAD and SKY_LEVEL at 1).
+  const SHIPPED = {
+    zenith: [[0.2, 0.2, 0.42], [0.3, 0.36, 0.6], [0.37, 0.44, 0.65], [0.26, 0.45, 0.78]],
+    horizon: [[0.9, 0.5, 0.46], [0.95, 0.72, 0.58], [0.71, 0.7, 0.84], [0.7, 0.8, 0.93]],
+    cloudLit: [[0.98, 0.62, 0.55], [1.0, 0.82, 0.66], [0.98, 0.93, 0.95], [1.0, 0.99, 0.97]],
+    cloudShade: [[0.36, 0.26, 0.4], [0.5, 0.42, 0.52], [0.54, 0.5, 0.64], [0.58, 0.62, 0.72]],
+    sun: [[1.0, 0.45, 0.25], [1.0, 0.7, 0.4], [1.0, 0.88, 0.75], [1.0, 0.97, 0.9]],
+    skySpread: 0.6, skyLevel: 0.86, gradLo: -0.1, gradHi: 0.9,
+    sunHalo: 0.3, sunCore: 0.22, horizonWarm: 0.35,
+    cloudBrightness: 0.6,
+    shadowK1: 0.85, shadowK2: 0.52, shadowTap1: 0.045, shadowTap2: 0.095,
+    cloudLow: 0.16, cloudHigh: 0.55, bumpScale: 11.0, bumpAmount: 0.65, wispScale: 2.9, wispAmount: 0.35, bumpMorph: 0.05,
+    cloudCover: 0.5, drifterCount: 10, sigmaMin: 0.045, sigmaMax: 0.085, dyeRate: 1.05, puffRate: 0.45,
+    dissipation: 0.34, drifterForce: 10, turbulence: 0.45, flowSpeed: 0.5, viscosity: 0.3,
+  };
+  const BEFORE = Object.assign(clone(SHIPPED), { skySpread: 1, skyLevel: 1 });
+  const MORNING_WARMTH = [1.04, 1.0, 0.86];
+  const KEY_E = [-0.02, 0.08, 0.25, 0.65];
+  const KEY_NAMES = ["Horizon glow", "Golden hour", "Early evening", "Midday"];
+  const KEY_TIME = [0.753, 0.737, 0.71, 0.5];
+  const ROLES = [
+    { id: "zenith", label: "Zenith", k: "SKY_ZENITH" },
+    { id: "horizon", label: "Horizon", k: "SKY_HORIZON" },
+    { id: "cloudLit", label: "Cloud lit", k: "CLOUD_LIT_KEY" },
+    { id: "cloudShade", label: "Cloud shade", k: "CLOUD_SHADE_KEY" },
+    { id: "sun", label: "Sun", k: "SUN_KEY" },
+  ];
+
+  // ---- Controls. Every slider grows what its label names (right = more). ----
+  const direct = (key) => ({ get: (p) => p[key], set: (p, v) => { p[key] = v; } });
+  const GROUPS = [
+    { id: "sky", title: "Sky", note: "The two trims on top of every key: brightness and how many hues the gradient spans.", controls: [
+      { id: "skyLevel", label: "Sky brightness", min: 0.5, max: 1.2, step: 0.01, ...direct("skyLevel"), consts: (p) => `SKY_LEVEL ${f(p.skyLevel)}` },
+      { id: "skySpread", label: "Colour range", min: 0, max: 1.2, step: 0.01, ...direct("skySpread"), consts: (p) => `SKY_SPREAD ${f(p.skySpread)}` },
+      { id: "horizonReach", label: "Horizon reach", min: -0.3, max: 0.9, step: 0.01,
+        get: (p) => (p.gradLo + p.gradHi) / 2, set: (p, v) => { const w = p.gradHi - p.gradLo; p.gradLo = v - w / 2; p.gradHi = v + w / 2; },
+        consts: (p) => `SKY_GRADIENT_LO ${f(p.gradLo)} · HI ${f(p.gradHi)}` },
+      { id: "gradSoft", label: "Gradient softness", min: 0.2, max: 1.8, step: 0.01,
+        get: (p) => p.gradHi - p.gradLo, set: (p, v) => { const m = (p.gradLo + p.gradHi) / 2; p.gradLo = m - v / 2; p.gradHi = m + v / 2; },
+        consts: (p) => `SKY_GRADIENT_LO ${f(p.gradLo)} · HI ${f(p.gradHi)}` },
+    ] },
+    { id: "keys", title: "Key colours", keys: true },
+    { id: "sun", title: "Sun", controls: [
+      { id: "sunHalo", label: "Sun halo", min: 0, max: 0.7, step: 0.01, ...direct("sunHalo"), consts: (p) => `SUN_HALO ${f(p.sunHalo)}` },
+      { id: "sunCore", label: "Sun core", min: 0, max: 0.6, step: 0.01, ...direct("sunCore"), consts: (p) => `SUN_CORE ${f(p.sunCore)}` },
+      { id: "horizonWarm", label: "Horizon warmth", min: 0, max: 0.9, step: 0.01, ...direct("horizonWarm"), consts: (p) => `HORIZON_WARM ${f(p.horizonWarm)}` },
+    ] },
+    { id: "cloudcol", title: "Cloud colour", controls: [
+      { id: "cloudBrightness", label: "Cloud brightness", min: 0, max: 1, step: 0.01, ...direct("cloudBrightness"), consts: (p) => `setting cloudBrightness ${f(p.cloudBrightness)}` },
+      { id: "shadowDepth", label: "Shadow depth", min: 0, max: 2.5, step: 0.01,
+        get: (p) => p.shadowK1 / 0.85, set: (p, v) => { p.shadowK1 = 0.85 * v; p.shadowK2 = 0.52 * v; },
+        consts: (p) => `CLOUD_SHADOW_K1 ${f(p.shadowK1)} · K2 ${f(p.shadowK2)}` },
+      { id: "shadowReach", label: "Shadow reach", min: 0.3, max: 2.5, step: 0.01,
+        get: (p) => p.shadowTap1 / 0.045, set: (p, v) => { p.shadowTap1 = 0.045 * v; p.shadowTap2 = 0.095 * v; },
+        consts: (p) => `CLOUD_SHADOW_TAP1 ${f(p.shadowTap1)} · TAP2 ${f(p.shadowTap2)}` },
+    ] },
+    { id: "shape", title: "Cloud shape", note: "How the simulated density turns into cloud: the threshold, its edge, and the cauliflower texture.", controls: [
+      { id: "extent", label: "Cloud extent", min: 0, max: 1, step: 0.01,
+        get: (p) => (0.35 - p.cloudLow) / 0.3, set: (p, v) => { const w = p.cloudHigh - p.cloudLow; p.cloudLow = 0.35 - 0.3 * v; p.cloudHigh = p.cloudLow + w; },
+        consts: (p) => `CLOUD_LOW ${f(p.cloudLow)} · HIGH ${f(p.cloudHigh)}` },
+      { id: "edgeSoft", label: "Edge softness", min: 0.04, max: 0.8, step: 0.01,
+        get: (p) => p.cloudHigh - p.cloudLow, set: (p, v) => { p.cloudHigh = p.cloudLow + v; },
+        consts: (p) => `CLOUD_LOW ${f(p.cloudLow)} · HIGH ${f(p.cloudHigh)}` },
+      { id: "bumpSize", label: "Bump size", min: 0, max: 1, step: 0.01,
+        get: (p) => (24 - p.bumpScale) / 20, set: (p, v) => { p.bumpScale = 24 - 20 * v; },
+        consts: (p) => `CLOUD_BUMP_SCALE ${f(p.bumpScale)}` },
+      { id: "bumpAmount", label: "Bump strength", min: 0, max: 0.9, step: 0.01, ...direct("bumpAmount"), consts: (p) => `CLOUD_BUMP_AMOUNT ${f(p.bumpAmount)}` },
+      { id: "wispAmount", label: "Wisps", min: 0, max: 0.8, step: 0.01, ...direct("wispAmount"), consts: (p) => `CLOUD_WISP_AMOUNT ${f(p.wispAmount)}` },
+      { id: "wispScale", label: "Wisp fineness", min: 1.2, max: 6, step: 0.05, ...direct("wispScale"), consts: (p) => `CLOUD_WISP_SCALE ${f(p.wispScale)}` },
+      { id: "bumpMorph", label: "Morph speed", min: 0, max: 0.2, step: 0.005, ...direct("bumpMorph"), consts: (p) => `CLOUD_BUMP_MORPH ${f(p.bumpMorph)}` },
+    ] },
+    { id: "motion", title: "Cloud motion", sim: true, note: "These drive the simulation itself, so they change every variation tile and both halves of a comparison. New settings show as new puffs form; Restart clears the sky.", controls: [
+      { id: "cloudCover", label: "Cloud cover", min: 0, max: 1, step: 0.01, ...direct("cloudCover"), consts: (p) => `setting cloudCover ${f(p.cloudCover)}` },
+      { id: "drifterCount", label: "Puff sources", min: 1, max: Sim ? Sim.SPLAT_SLOTS : 12, step: 1, ...direct("drifterCount"), digits: 0, consts: (p) => `DRIFTER_SEEDS 1..${p.drifterCount}` },
+      { id: "puffSize", label: "Puff size", min: 0.4, max: 2.2, step: 0.01,
+        get: (p) => p.sigmaMin / 0.045, set: (p, v) => { p.sigmaMin = 0.045 * v; p.sigmaMax = 0.085 * v; },
+        consts: (p) => `DRIFTER_SIGMA_MIN ${f(p.sigmaMin)} · MAX ${f(p.sigmaMax)}` },
+      { id: "dyeRate", label: "Puff output", min: 0.2, max: 2.5, step: 0.01, ...direct("dyeRate"), consts: (p) => `DRIFTER_DYE_RATE ${f(p.dyeRate)}` },
+      { id: "puffRate", label: "Puff tempo", min: 0.1, max: 1.2, step: 0.01, ...direct("puffRate"), consts: (p) => `DRIFTER_PUFF_RATE ${f(p.puffRate)}` },
+      { id: "dissipation", label: "Fade", min: 0, max: 1, step: 0.01, ...direct("dissipation"), consts: (p) => `DYE_DISSIPATION ${f(p.dissipation)}` },
+      { id: "drifterForce", label: "Push", min: 0, max: 30, step: 0.5, ...direct("drifterForce"), consts: (p) => `DRIFTER_FORCE ${f(p.drifterForce)}` },
+      { id: "turbulence", label: "Turbulence", min: 0, max: 1, step: 0.01, ...direct("turbulence"), consts: (p) => `setting turbulence ${f(p.turbulence)}` },
+      { id: "flowSpeed", label: "Flow speed", min: 0, max: 1, step: 0.01, ...direct("flowSpeed"), consts: (p) => `setting flowSpeed ${f(p.flowSpeed)}` },
+      { id: "viscosity", label: "Flow smoothing", min: 0, max: 1, step: 0.01, ...direct("viscosity"), consts: (p) => `SIM_VISCOSITY ${f(p.viscosity)}` },
+    ] },
+  ];
+  const CONTROLS = {};
+  GROUPS.forEach((g) => (g.controls || []).forEach((c) => { CONTROLS[c.id] = c; }));
+
+  function f(v) { return String(Number(v.toFixed(3))); }
+
+  // "all" presets replace the whole look; the others only set the keys they
+  // name, so a colour preset keeps your cloud shape and a shape preset your colours.
+  const PRESETS = [
+    { label: "Before today", kind: "all", base: BEFORE },
+    { label: "Shipped", kind: "all", base: SHIPPED },
+    { label: "Dusk mono", kind: "colour", set: { skySpread: 0.3, skyLevel: 0.8, horizonWarm: 0.25, sunHalo: 0.24 } },
+    { label: "Deep evening", kind: "colour", set: { skySpread: 0.5, skyLevel: 0.7, gradLo: -0.35, gradHi: 0.75, sunHalo: 0.22, cloudBrightness: 0.45 } },
+    { label: "Pale haze", kind: "colour", set: { skySpread: 0.45, skyLevel: 0.98, gradLo: -0.2, gradHi: 1.3, shadowK1: 0.6, shadowK2: 0.37 } },
+    { label: "Soft cumulus", kind: "shape", set: { cloudLow: 0.12, cloudHigh: 0.7, bumpScale: 8, bumpAmount: 0.5, wispAmount: 0.5 } },
+    { label: "Crisp cauliflower", kind: "shape", set: { cloudLow: 0.2, cloudHigh: 0.42, bumpScale: 15, bumpAmount: 0.75, wispScale: 3.6 } },
+    { label: "Big slow puffs", kind: "shape", set: { sigmaMin: 0.068, sigmaMax: 0.128, dissipation: 0.22, dyeRate: 0.85, drifterCount: 6, drifterForce: 7, puffRate: 0.3 } },
+  ];
+
+  // ---- State ----
+  let P = clone(SHIPPED);
+  let tod = 0.71;
+  let mode = "single";
+  let split = 0.5;
+  let refChoice = "before";
+  let variants = [];
+  let playing = false;
+  let activeKey = 2;
+  const history = [];
+  let savedLooks = [];
+  let looksDb = null;
+  let dbState = "pending";
+
+  try {
+    const s = JSON.parse(localStorage.getItem("skyBench.state") || "null");
+    if (s && s.P && s.P.zenith) { P = Object.assign(clone(SHIPPED), s.P); tod = typeof s.tod === "number" ? s.tod : tod; }
+  } catch (e) { /* storage unavailable: start from Shipped */ }
+  let persistTimer = 0;
+  function persist() {
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => { try { localStorage.setItem("skyBench.state", JSON.stringify({ P, tod })); } catch (e) { /* ignore */ } }, 400);
+  }
+  function pushHistory() { history.push(clone(P)); if (history.length > 60) history.shift(); $("undo").disabled = false; }
+
+  // ---- The scene's own maths (copied from sky.ts: driftCenter, drifterPuff,
+  // nightSpeedup, and the shader's dayWeights) ----
+  function driftCenter(s, t) {
+    const hx = 0.1 + 0.8 * wrap(0.1 + s * 0.6180339887);
+    const hy = 0.12 + 0.76 * wrap(0.35 + s * 0.4142135624);
+    const a1 = 0.05 + (Math.abs(s * 0.017) % 0.02);
+    const a2 = 0.07 + (Math.abs(s * 0.013) % 0.02);
+    return [hx + 0.06 * Math.sin(t * a1 + s * 2.1) * Math.cos(t * a2 * 0.6 + s), hy + 0.06 * Math.cos(t * a2 + s * 1.3)];
+  }
+  function drifterPuff(s, t, rate) {
+    const w = 0.5 + 0.5 * Math.sin(t * rate * (0.8 + 0.07 * s) + s * 3.7);
+    const e = clamp01((w - 0.35) / 0.4);
+    return e * e * (3 - 2 * e);
+  }
+  function nightSpeedup(phase) {
+    const e = Math.sin(TAU * (phase - 0.25));
+    const k = clamp01((-0.02 - e) / 0.13);
+    return 1 + 11 * k * k * (3 - 2 * k);
+  }
+  function dayWeights(e) {
+    const w = [0, 0, 0, 0];
+    const ec = clamp(e, KEY_E[0], KEY_E[3]);
+    for (let i = 0; i < 3; i++) {
+      if (ec <= KEY_E[i + 1]) { const t = smooth(KEY_E[i], KEY_E[i + 1], ec); w[i] = 1 - t; w[i + 1] = t; return w; }
+    }
+    w[3] = 1; return w;
+  }
+  const lightEAt = (phase) => Math.max(Math.sin(TAU * (phase - 0.25)), -0.02);
+  const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const keyMix = (w, arr) => [0, 1, 2].map((c) => w[0] * arr[0][c] + w[1] * arr[1][c] + w[2] * arr[2][c] + w[3] * arr[3][c]);
+  const luma = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+
+  // The display shader's sky colour at one screen point, for the readout.
+  function skyAt(p, phase, x, y, aspect) {
+    const dayAngle = TAU * (phase - 0.25);
+    const sunE = Math.sin(dayAngle);
+    const lightE = Math.max(sunE, -0.02);
+    const w = dayWeights(lightE);
+    const zen = keyMix(w, p.zenith);
+    let hor = keyMix(w, p.horizon);
+    let sun = keyMix(w, p.sun);
+    const glowHour = 1 - smooth(0.05, 0.3, Math.abs(lightE));
+    const morning = 0.5 + 0.5 * Math.cos(dayAngle);
+    hor = mix3(hor, hor.map((v, i) => v * MORNING_WARMTH[i]), morning * glowHour);
+    sun = mix3(sun, sun.map((v, i) => v * MORNING_WARMTH[i]), morning * glowHour);
+    let col = mix3(hor, zen, smooth(p.gradLo, p.gradHi, y));
+    const px = (x - 0.5) * aspect, py = y - 0.5;
+    const sx = -Math.cos(dayAngle) * 0.62 * aspect, sy = -0.55 + 1.05 * sunE;
+    const d = Math.hypot(px - sx, py - sy);
+    const up = smooth(-0.25, 0.02, sunE);
+    const g1 = (p.sunHalo * Math.exp(-d * 2.4) + p.sunCore * Math.exp(-d * 9)) * up;
+    const g2 = p.horizonWarm * glowHour * Math.exp(-Math.abs(px - sx) / (0.8 * aspect)) * Math.pow(1 - clamp01(y), 2.5);
+    col = col.map((v, i) => v + sun[i] * (g1 + g2));
+    const mid = mix3(hor, zen, 0.5);
+    const midL = Math.max(luma(mid), 1e-3);
+    const L = Math.max(luma(col), 1e-3);
+    return col.map((v, i) => clamp01(L * ((mid[i] / midL) + (v / L - mid[i] / midL) * p.skySpread) * p.skyLevel));
+  }
+
+  // ---- Colour helpers ----
+  function rgb2hsl(c) {
+    const [r, g, b] = c.map(clamp01);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+    let h = 0, s = 0;
+    if (d > 1e-6) {
+      s = clamp01(d / Math.max(1e-6, 1 - Math.abs(2 * l - 1)));
+      if (max === r) h = ((g - b) / d) % 6; else if (max === g) h = (b - r) / d + 2; else h = (r - g) / d + 4;
+      h *= 60; if (h < 0) h += 360;
+    }
+    return [h, s, l];
+  }
+  function hsl2rgb([h, s, l]) {
+    const c = (1 - Math.abs(2 * l - 1)) * s, hp = (((h % 360) + 360) % 360) / 60, x = c * (1 - Math.abs((hp % 2) - 1));
+    let r = 0, g = 0, b = 0;
+    if (hp < 1) [r, g, b] = [c, x, 0]; else if (hp < 2) [r, g, b] = [x, c, 0]; else if (hp < 3) [r, g, b] = [0, c, x];
+    else if (hp < 4) [r, g, b] = [0, x, c]; else if (hp < 5) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x];
+    const m = l - c / 2; return [r + m, g + m, b + m].map((v) => Number(clamp01(v).toFixed(3)));
+  }
+  const toHex = (c) => "#" + c.map((v) => Math.round(clamp01(v) * 255).toString(16).padStart(2, "0")).join("");
+  const fromHex = (h) => [1, 3, 5].map((i) => Number((parseInt(h.slice(i, i + 2), 16) / 255).toFixed(3)));
+  const cssRgb = (c) => `rgb(${c.map((v) => Math.round(clamp01(v) * 255)).join(",")})`;
+
+  // ---- GL ----
+  const canvas = $("gl");
+  let gl = null, sim = null, prog = null, vao = null, dyeLoc = null, format = "half", simSize = null;
+  let ambientT = 0, preroll = 0, lastT = null, t0 = performance.now();
+  const splats = [];
+
+  function displayFrag(fmt) {
+    return `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+${Sim.simIoGlsl(fmt)}
+uniform sampler2D uDye;
+uniform vec2 uResolution;
+uniform float uTime;
+uniform float uDayPhase;
+uniform vec3 uZenith[4];
+uniform vec3 uHorizon[4];
+uniform vec3 uCloudLitKey[4];
+uniform vec3 uCloudShadeKey[4];
+uniform vec3 uSunKey[4];
+uniform float uSkySpread;
+uniform float uSkyLevel;
+uniform float uGradLo;
+uniform float uGradHi;
+uniform float uSunHalo;
+uniform float uSunCore;
+uniform float uHorizonWarm;
+uniform float uCloudLow;
+uniform float uCloudHigh;
+uniform float uWispScale;
+uniform float uWispAmount;
+uniform float uBumpScale;
+uniform float uBumpMorph;
+uniform float uBumpAmount;
+uniform float uShadowTap1;
+uniform float uShadowTap2;
+uniform float uShadowK1;
+uniform float uShadowK2;
+uniform float uCloudBrightness;
+
+// A port of sky.ts's buildDisplayFrag, sky and cloud passes only (no
+// floaters, no Haidinger's brush), with its constants as uniforms.
+const float DAY_KEY_E[4] = float[4](-0.02, 0.08, 0.25, 0.65);
+const float DAY_E_FLOOR = -0.02;
+const vec3 MORNING_WARMTH = vec3(1.04, 1.0, 0.86);
+const float SUN_X_SPAN = 0.62;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float a = hash21(i);
+  float b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0));
+  float d = hash21(i + vec2(1.0, 1.0));
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+float fbm2(vec2 p) {
+  float sum = 0.0;
+  float amp = 0.5;
+  for (int i = 0; i < 3; i++) {
+    sum += amp * vnoise(p);
+    p *= 2.02;
+    amp *= 0.5;
+  }
+  return sum;
+}
+float cloudBumpedAt(vec2 uv) {
+  float density = max(decodeDye(texture(uDye, uv)).x, 0.0);
+  float bump = fbm2(uv * uBumpScale + vec2(uTime * uBumpMorph, uTime * uBumpMorph * 0.6));
+  float wisp = fbm2(uv * uBumpScale * uWispScale - vec2(uTime * uBumpMorph * 1.7, 0.0));
+  return density * mix(1.0 - uBumpAmount, 1.0 + uBumpAmount, bump) * mix(1.0 - uWispAmount, 1.0 + uWispAmount, wisp);
+}
+void dayWeights(float e, out float w[4]) {
+  for (int i = 0; i < 4; i++) w[i] = 0.0;
+  float ec = clamp(e, DAY_KEY_E[0], DAY_KEY_E[3]);
+  for (int i = 0; i < 3; i++) {
+    if (ec <= DAY_KEY_E[i + 1]) {
+      float f = smoothstep(DAY_KEY_E[i], DAY_KEY_E[i + 1], ec);
+      w[i] = 1.0 - f;
+      w[i + 1] = f;
+      return;
+    }
+  }
+  w[3] = 1.0;
+}
+vec3 dayMix(float w[4], vec3 k[4]) {
+  return w[0] * k[0] + w[1] * k[1] + w[2] * k[2] + w[3] * k[3];
+}
+
+void main() {
+  vec2 uv = vUv;
+  float devAspect = uResolution.x / max(uResolution.y, 1.0);
+  vec2 p = (vUv - 0.5) * vec2(devAspect, 1.0);
+  float dayAngle = 6.28318 * (uDayPhase - 0.25);
+  float sunE = sin(dayAngle);
+  float lightE = max(sunE, DAY_E_FLOOR);
+  float dw[4];
+  dayWeights(lightE, dw);
+  vec3 zenith = dayMix(dw, uZenith);
+  vec3 horizon = dayMix(dw, uHorizon);
+  vec3 sunCol = dayMix(dw, uSunKey);
+  float glowHour = 1.0 - smoothstep(0.05, 0.3, abs(lightE));
+  float morning = 0.5 + 0.5 * cos(dayAngle);
+  horizon = mix(horizon, horizon * MORNING_WARMTH, morning * glowHour);
+  sunCol = mix(sunCol, sunCol * MORNING_WARMTH, morning * glowHour);
+  vec3 color = mix(horizon, zenith, smoothstep(uGradLo, uGradHi, uv.y));
+
+  vec2 sunP = vec2(-cos(dayAngle) * SUN_X_SPAN * devAspect, -0.55 + 1.05 * sunE);
+  float sunD = length(p - sunP);
+  float sunUp = smoothstep(-0.25, 0.02, sunE);
+  vec3 glow = sunCol * (uSunHalo * exp(-sunD * 2.4) + uSunCore * exp(-sunD * 9.0)) * sunUp;
+  float onSunSide = exp(-abs(p.x - sunP.x) / (0.8 * devAspect));
+  float lowInSky = pow(1.0 - clamp(uv.y, 0.0, 1.0), 2.5);
+  glow += sunCol * uHorizonWarm * glowHour * onSunSide * lowInSky;
+  color += glow;
+  vec3 skyMid = 0.5 * (zenith + horizon);
+  vec3 midChroma = skyMid / max(dot(skyMid, LUMA), 1e-3);
+  float skyLuma = max(dot(color, LUMA), 1e-3);
+  color = skyLuma * mix(midChroma, color / skyLuma, uSkySpread) * uSkyLevel;
+
+  float bumped = cloudBumpedAt(uv);
+  float cloudAlpha = smoothstep(uCloudLow, uCloudHigh, bumped);
+  vec2 lightDir = normalize(vec2(-cos(dayAngle) * 0.8, 0.85));
+  float sunNear = max(decodeDye(texture(uDye, uv + lightDir * uShadowTap1)).x, 0.0);
+  float sunFar = max(decodeDye(texture(uDye, uv + lightDir * uShadowTap2)).x, 0.0);
+  float shadow = exp(-uShadowK1 * sunNear - uShadowK2 * sunFar);
+  vec3 cloudShadow = dayMix(dw, uCloudShadeKey);
+  vec3 litKey = dayMix(dw, uCloudLitKey);
+  vec3 cloudLit = mix(litKey, litKey * MORNING_WARMTH, morning * glowHour);
+  shadow = mix(1.0, shadow, smoothstep(0.0, 0.8, cloudAlpha));
+  vec3 cloudColor = mix(cloudShadow, cloudLit, shadow) * (0.85 + 0.3 * uCloudBrightness);
+  color = mix(color, cloudColor, cloudAlpha);
+  outColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+}
+`;
+  }
+
+  function initGL() {
+    if (!Sim) return fail("The cloud simulation didn't load.");
+    gl = canvas.getContext("webgl2", { antialias: false, alpha: false, premultipliedAlpha: false });
+    if (!gl) return fail("This browser has no WebGL2, which the Sky scene needs. Try a desktop Chrome, Edge, Firefox or Safari.");
+    try {
+      format = Sim.detectSimFormat(gl);
+      vao = Sim.createFullscreenQuad(gl);
+      const small = Math.min(window.innerWidth, window.innerHeight) < 700;
+      simSize = Sim.simResolutionFor(small ? 0.3 : 0.7, 1600, 1000, Sim.MIRROR_OFF);
+      sim = Sim.createFluidSim(gl, vao, simSize, format);
+      prog = Sim.createProgram(gl, displayFrag(format));
+      dyeLoc = gl.getUniformLocation(prog.program, "uDye");
+    } catch (e) {
+      return fail("The preview couldn't start: " + (e && e.message ? e.message.split("\n")[0] : e));
+    }
+    restartClouds();
+    return true;
+  }
+  function fail(msg) { const el = $("glerr"); el.hidden = false; el.textContent = msg; setChip("gpu", "No preview", "warn"); return false; }
+
+  function restartClouds() {
+    if (!sim) return;
+    sim.dispose();
+    sim = Sim.createFluidSim(gl, vao, simSize, format);
+    ambientT = 0;
+    preroll = 360;
+  }
+
+  function stepSim(dt) {
+    const n = Math.round(P.drifterCount);
+    splats.length = 0;
+    for (let i = 0; i < n; i++) {
+      const seed = i + 1;
+      const [x0, y0] = driftCenter(seed, ambientT);
+      const [x1, y1] = driftCenter(seed, ambientT + 0.08);
+      const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy) || 1;
+      const push = P.drifterForce * (0.5 + P.flowSpeed);
+      splats.push({
+        x: x0, y: y0,
+        sigma: P.sigmaMin + (P.sigmaMax - P.sigmaMin) * ((seed * 0.618034) % 1),
+        fx: (dx / len) * push, fy: (dy / len) * push,
+        dye: P.dyeRate * drifterPuff(seed, ambientT, P.puffRate) * (0.25 + 0.75 * P.cloudCover),
+        tag: 0, ring: 0,
+      });
+    }
+    sim.step({ dt: Math.min(1 / 30, dt * (0.5 + 1.5 * P.flowSpeed)), curl: P.turbulence, dissipation: P.dissipation, energy: 0, viscosity: P.viscosity, splats });
+  }
+
+  const f12 = new Float32Array(12);
+  function v3arr(name, arr) { for (let i = 0; i < 4; i++) for (let c = 0; c < 3; c++) f12[i * 3 + c] = arr[i][c]; prog.setV3v(name, f12); }
+  function drawTile(p, x, y, w, h, time) {
+    gl.viewport(x, y, w, h);
+    prog.setV2("uResolution", w, h);
+    prog.setF("uTime", time);
+    prog.setF("uDayPhase", tod);
+    v3arr("uZenith", p.zenith); v3arr("uHorizon", p.horizon); v3arr("uCloudLitKey", p.cloudLit); v3arr("uCloudShadeKey", p.cloudShade); v3arr("uSunKey", p.sun);
+    prog.setF("uSkySpread", p.skySpread); prog.setF("uSkyLevel", p.skyLevel); prog.setF("uGradLo", p.gradLo); prog.setF("uGradHi", p.gradHi);
+    prog.setF("uSunHalo", p.sunHalo); prog.setF("uSunCore", p.sunCore); prog.setF("uHorizonWarm", p.horizonWarm);
+    prog.setF("uCloudLow", p.cloudLow); prog.setF("uCloudHigh", Math.max(p.cloudHigh, p.cloudLow + 1e-3));
+    prog.setF("uWispScale", p.wispScale); prog.setF("uWispAmount", p.wispAmount);
+    prog.setF("uBumpScale", p.bumpScale); prog.setF("uBumpMorph", p.bumpMorph); prog.setF("uBumpAmount", p.bumpAmount);
+    prog.setF("uShadowTap1", p.shadowTap1); prog.setF("uShadowTap2", p.shadowTap2); prog.setF("uShadowK1", p.shadowK1); prog.setF("uShadowK2", p.shadowK2);
+    prog.setF("uCloudBrightness", p.cloudBrightness);
+    Sim.drawFullscreenQuad(gl, vao);
+  }
+
+  function refParams() {
+    if (refChoice === "before") return BEFORE;
+    if (refChoice === "shipped") return SHIPPED;
+    const l = savedLooks.find((x) => x.id === refChoice);
+    return l ? Object.assign(clone(SHIPPED), l.params) : BEFORE;
+  }
+  function refName() {
+    if (refChoice === "before") return "Before today";
+    if (refChoice === "shipped") return "Shipped";
+    const l = savedLooks.find((x) => x.id === refChoice);
+    return l ? l.name : "Before today";
+  }
+
+  function sizeCanvas() {
+    const r = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const w = Math.max(2, Math.round(r.width * dpr)), h = Math.max(2, Math.round(r.height * dpr));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  }
+
+  function draw(time) {
+    const W = canvas.width, H = canvas.height;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.disable(gl.BLEND);
+    prog.use();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, sim.dyeTexture());
+    gl.uniform1i(dyeLoc, 0);
+    if (mode === "compare") {
+      const sx = Math.round(split * W);
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(0, 0, sx, H); drawTile(refParams(), 0, 0, W, H, time);
+      gl.scissor(sx, 0, W - sx, H); drawTile(P, 0, 0, W, H, time);
+      gl.disable(gl.SCISSOR_TEST);
+    } else if (mode === "variations") {
+      gl.viewport(0, 0, W, H);
+      gl.clearColor(0.1, 0.105, 0.118, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      const g = Math.max(2, Math.round(W / 400));
+      const tw = Math.floor((W - g) / 2), th = Math.floor((H - g) / 2);
+      const list = [P, variants[1] || P, variants[2] || P, variants[3] || P];
+      for (let i = 0; i < 4; i++) {
+        const col = i % 2, top = i < 2;
+        drawTile(list[i], col ? tw + g : 0, top ? th + g : 0, tw, th, time);
+      }
+    } else {
+      drawTile(P, 0, 0, W, H, time);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, null);
+  }
+
+  let readoutDirty = true;
+  function frame(nowMs) {
+    const t = (nowMs - t0) / 1000;
+    const dt = lastT === null ? 1 / 60 : clamp(t - lastT, 0, 0.1);
+    lastT = t;
+    if (playing) { tod = wrap(tod + (dt / 60) * nightSpeedup(tod)); syncTod(); }
+    sizeCanvas();
+    if (preroll > 0) {
+      const n = Math.min(preroll, 24);
+      for (let i = 0; i < n; i++) { ambientT += 1 / 30; stepSim(1 / 30); }
+      preroll -= n;
+      setTag();
+    } else {
+      ambientT += dt;
+      stepSim(dt);
+    }
+    draw(t);
+    if (readoutDirty) { readoutDirty = false; updateReadout(); }
+    requestAnimationFrame(frame);
+  }
+
+  // ---- Overlay tags, compare divider, variation tiles ----
+  const tagsEl = $("tags"), tilesEl = $("tiles");
+  function setTag() {
+    let html = "";
+    if (preroll > 0) html += `<span class="tag" style="left:8px;bottom:8px">Growing clouds…</span>`;
+    if (mode === "compare") {
+      html += `<span class="tag" style="left:8px;top:8px">${esc(refName())}</span>`;
+      html += `<span class="tag" style="right:8px;top:8px">Yours</span>`;
+      html += `<span class="divider" style="left:${(split * 100).toFixed(2)}%"></span>`;
+    }
+    tagsEl.innerHTML = html;
+  }
+  function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
+  function buildTiles() {
+    tilesEl.innerHTML = "";
+    ["Current", "A", "B", "C"].forEach((name, i) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "tile"; b.dataset.i = String(i);
+      b.setAttribute("aria-label", i === 0 ? "Current look" : `Keep variation ${name}`);
+      b.innerHTML = `<span class="tag">${name}</span>` + (i ? `<span class="pick">Keep ${name}</span>` : "");
+      if (i) b.addEventListener("click", () => { pushHistory(); P = clone(variants[i]); onLookChanged(true); rerollVariants(); });
+      tilesEl.appendChild(b);
+    });
+  }
+  const view = $("view");
+  let dragging = false;
+  view.addEventListener("pointerdown", (e) => {
+    if (mode !== "compare") return;
+    dragging = true; view.setPointerCapture(e.pointerId); moveSplit(e);
+  });
+  view.addEventListener("pointermove", (e) => { if (dragging) moveSplit(e); });
+  view.addEventListener("pointerup", () => { dragging = false; });
+  view.addEventListener("pointercancel", () => { dragging = false; });
+  function moveSplit(e) { const r = view.getBoundingClientRect(); split = clamp((e.clientX - r.left) / r.width, 0.02, 0.98); setTag(); }
+
+  function setMode(m) {
+    mode = m;
+    document.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === m)));
+    $("optCompare").hidden = m !== "compare";
+    $("optVariations").hidden = m !== "variations";
+    tilesEl.hidden = m !== "variations";
+    view.style.cursor = m === "compare" ? "ew-resize" : "";
+    if (m === "variations" && variants.length === 0) rerollVariants();
+    setTag(); readoutDirty = true;
+  }
+  document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+  // ---- Variations: nudges around the current look, limited to the day
+  // keys in view right now, so what changes is what you see. ----
+  function nudge(p, id, amt) { const c = CONTROLS[id]; c.set(p, clamp(c.get(p) + amt, c.min, c.max)); }
+  function shiftRole(p, role, keys, dh, ds, dl) {
+    keys.forEach((k) => { const [h, s, l] = rgb2hsl(p[role][k]); p[role][k] = hsl2rgb([h + dh, clamp01(s + ds), clamp(l + dl, 0.02, 0.99)]); });
+  }
+  function mutate(base) {
+    const d = Number($("varAmt").value);
+    const r = () => Math.random() * 2 - 1;
+    const p = clone(base);
+    const w = dayWeights(lightEAt(tod));
+    const keys = [0, 1, 2, 3].filter((i) => w[i] > 0.02);
+    if ($("varSky").checked) {
+      shiftRole(p, "zenith", keys, r() * 22 * d, r() * 0.14 * d, r() * 0.08 * d);
+      shiftRole(p, "horizon", keys, r() * 28 * d, r() * 0.14 * d, r() * 0.08 * d);
+      nudge(p, "skySpread", r() * 0.3 * d); nudge(p, "skyLevel", r() * 0.1 * d);
+      nudge(p, "horizonReach", r() * 0.18 * d); nudge(p, "gradSoft", r() * 0.35 * d);
+      nudge(p, "sunHalo", r() * 0.1 * d); nudge(p, "horizonWarm", r() * 0.15 * d);
+    }
+    if ($("varCloudCol").checked) {
+      shiftRole(p, "cloudLit", keys, r() * 14 * d, r() * 0.12 * d, r() * 0.05 * d);
+      shiftRole(p, "cloudShade", keys, r() * 22 * d, r() * 0.14 * d, r() * 0.08 * d);
+      nudge(p, "cloudBrightness", r() * 0.25 * d); nudge(p, "shadowDepth", r() * 0.4 * d); nudge(p, "shadowReach", r() * 0.4 * d);
+    }
+    if ($("varShape").checked) {
+      nudge(p, "extent", r() * 0.16 * d); nudge(p, "edgeSoft", r() * 0.16 * d); nudge(p, "bumpSize", r() * 0.22 * d);
+      nudge(p, "bumpAmount", r() * 0.16 * d); nudge(p, "wispAmount", r() * 0.16 * d); nudge(p, "wispScale", r() * 1.0 * d);
+    }
+    return p;
+  }
+  function rerollVariants() { variants = [P, mutate(P), mutate(P), mutate(P)]; }
+  $("reroll").addEventListener("click", rerollVariants);
+
+  // ---- Time of day ----
+  const todEl = $("tod");
+  function syncTod() {
+    todEl.value = String(tod);
+    $("todOut").textContent = tod.toFixed(3);
+    readoutDirty = true;
+    renderKeyWeights();
+    persist();
+  }
+  todEl.addEventListener("input", () => { tod = Number(todEl.value); if (playing) togglePlay(); syncTod(); });
+  function buildTicks() {
+    const marks = [[0, "0"], [0.25, "sunrise"], [0.5, "noon"], [0.75, "sunset"], [1, "24h"]];
+    $("ticks").innerHTML = marks.map(([x, l]) => `<span style="left:${x * 100}%${x === 0 ? ";transform:none" : x === 1 ? ";transform:translateX(-100%)" : ""}">${l}</span>`).join("");
+  }
+  function togglePlay() {
+    playing = !playing;
+    $("playIcon").setAttribute("d", playing ? "M3 1.5h3v11H3zM8 1.5h3v11H8z" : "M3 1.5v11l9-5.5z");
+    $("play").setAttribute("aria-label", playing ? "Pause the day" : "Run the day");
+  }
+  $("play").addEventListener("click", togglePlay);
+
+  // ---- Rail ----
+  const groupsEl = $("groups");
+  const ctlEls = {};
+  function buildRail() {
+    GROUPS.forEach((g) => {
+      const det = document.createElement("details");
+      det.className = "group"; det.open = g.id !== "motion";
+      const sum = document.createElement("summary");
+      sum.innerHTML = `${esc(g.title)}`;
+      const aside = document.createElement("span"); aside.className = "aside";
+      const resetBtn = document.createElement("button");
+      resetBtn.type = "button"; resetBtn.className = "btn small"; resetBtn.textContent = g.sim ? "Restart clouds" : "Reset";
+      resetBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (g.sim) { restartClouds(); return; }
+        pushHistory();
+        if (g.keys) ROLES.forEach((r) => { P[r.id][activeKey] = SHIPPED[r.id][activeKey].slice(); });
+        else g.controls.forEach((c) => c.set(P, c.get(SHIPPED)));
+        onLookChanged(true);
+      });
+      aside.appendChild(resetBtn); sum.appendChild(aside); det.appendChild(sum);
+      const body = document.createElement("div"); body.className = "gbody";
+      if (g.note) { const n = document.createElement("p"); n.className = "gnote"; n.textContent = g.note; body.appendChild(n); }
+      if (g.keys) buildKeyEditor(body);
+      (g.controls || []).forEach((c) => body.appendChild(buildControl(c)));
+      det.appendChild(body); groupsEl.appendChild(det);
+    });
+  }
+  function buildControl(c) {
+    const row = document.createElement("div"); row.className = "ctl";
+    const id = "c-" + c.id;
+    row.innerHTML = `<label for="${id}"><span class="changed" hidden></span>${esc(c.label)}</label>
+      <span class="val"><output for="${id}"></output><button type="button" class="reset" title="Back to shipped" aria-label="Reset ${esc(c.label)}" hidden>↺</button></span>
+      <input type="range" id="${id}" min="${c.min}" max="${c.max}" step="${c.step}">
+      <code class="const"></code>`;
+    const input = row.querySelector("input");
+    let pushed = false;
+    input.addEventListener("pointerdown", () => { pushHistory(); pushed = true; });
+    input.addEventListener("keydown", () => { if (!pushed) { pushHistory(); pushed = true; } });
+    input.addEventListener("change", () => { pushed = false; });
+    input.addEventListener("input", () => { c.set(P, Number(input.value)); onLookChanged(false, c.id); });
+    row.querySelector(".reset").addEventListener("click", () => { pushHistory(); c.set(P, c.get(SHIPPED)); onLookChanged(true); });
+    ctlEls[c.id] = { row, input, out: row.querySelector("output"), cst: row.querySelector(".const"), dot: row.querySelector(".changed"), reset: row.querySelector(".reset") };
+    return row;
+  }
+  function refreshControl(c) {
+    const e = ctlEls[c.id]; const v = c.get(P);
+    e.input.value = String(v);
+    e.input.style.setProperty("--fill", `${(clamp01((v - c.min) / (c.max - c.min)) * 100).toFixed(1)}%`);
+    e.out.textContent = c.digits === 0 ? String(Math.round(v)) : v.toFixed(2);
+    e.cst.textContent = c.consts(P);
+    const changed = Math.abs(v - c.get(SHIPPED)) > 1e-6;
+    e.dot.hidden = !changed; e.reset.hidden = !changed;
+  }
+
+  // Key colour editor: one tab per day key; the bar under each tab is how much
+  // that key contributes at the current time of day.
+  let keyTabsEl, swEl;
+  function buildKeyEditor(body) {
+    const n = document.createElement("p"); n.className = "gnote";
+    n.textContent = "The sky blends between four keys by sun height. Picking a key jumps the time of day to it; the bar shows how much each key is in view right now.";
+    body.appendChild(n);
+    keyTabsEl = document.createElement("div"); keyTabsEl.className = "keytabs"; keyTabsEl.setAttribute("role", "group"); keyTabsEl.setAttribute("aria-label", "Day key");
+    KEY_NAMES.forEach((name, i) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "keytab";
+      b.innerHTML = `<span>${name}</span><span class="w"><i></i></span>`;
+      b.addEventListener("click", () => { activeKey = i; tod = KEY_TIME[i]; if (playing) togglePlay(); syncTod(); renderKeyEditor(); });
+      keyTabsEl.appendChild(b);
+    });
+    body.appendChild(keyTabsEl);
+    swEl = document.createElement("div"); swEl.className = "swatches"; body.appendChild(swEl);
+    ROLES.forEach((r) => {
+      const row = document.createElement("div"); row.className = "sw";
+      const id = "k-" + r.id;
+      row.innerHTML = `<input type="color" id="${id}" aria-label="${r.label} colour">
+        <label class="nm" for="${id}"><span class="changed" hidden style="width:6px;height:6px;border-radius:50%;background:var(--accent)"></span>${r.label}</label>
+        <span class="hex"></span>
+        <button type="button" class="btn small" hidden>Reset</button>`;
+      const input = row.querySelector("input");
+      input.addEventListener("focus", () => pushHistory(), { once: false });
+      input.addEventListener("input", () => { P[r.id][activeKey] = fromHex(input.value); onLookChanged(false); });
+      row.querySelector("button").addEventListener("click", () => { pushHistory(); P[r.id][activeKey] = SHIPPED[r.id][activeKey].slice(); onLookChanged(true); });
+      swEl.appendChild(row);
+    });
+  }
+  function renderKeyWeights() {
+    if (!keyTabsEl) return;
+    const w = dayWeights(lightEAt(tod));
+    [...keyTabsEl.children].forEach((b, i) => { b.querySelector("i").style.width = `${(w[i] * 100).toFixed(0)}%`; });
+  }
+  function renderKeyEditor() {
+    if (!keyTabsEl) return;
+    [...keyTabsEl.children].forEach((b, i) => b.setAttribute("aria-pressed", String(i === activeKey)));
+    renderKeyWeights();
+    [...swEl.children].forEach((row, j) => {
+      const r = ROLES[j]; const c = P[r.id][activeKey];
+      const input = row.querySelector("input");
+      if (document.activeElement !== input) input.value = toHex(c);
+      row.querySelector(".hex").textContent = `${r.k}[${activeKey}] ${c.map((v) => v.toFixed(3)).join(" ")}`;
+      const changed = c.some((v, i) => Math.abs(v - SHIPPED[r.id][activeKey][i]) > 1e-6);
+      row.querySelector(".changed").hidden = !changed; row.querySelector("button").hidden = !changed;
+    });
+  }
+
+  function onLookChanged() {
+    GROUPS.forEach((g) => (g.controls || []).forEach(refreshControl));
+    renderKeyEditor();
+    if (mode === "variations") variants[0] = P;
+    readoutDirty = true;
+    renderCode();
+    persist();
+  }
+
+  // ---- Readout: which hues the sky spans, and how bright top and bottom are ----
+  const hueCanvas = $("hue");
+  function spanOf(p) {
+    const aspect = 1.6, hues = [];
+    let top = 0, bot = 0;
+    for (const x of [0.12, 0.5, 0.88]) {
+      for (let j = 0; j <= 12; j++) {
+        const y = j / 12; const c = skyAt(p, tod, x, y, aspect);
+        const [h, s] = rgb2hsl(c);
+        if (s > 0.06) hues.push({ a: (h - 120 + 360) % 360, c });
+        if (j === 12) top += luma(c) / 3; if (j === 0) bot += luma(c) / 3;
+      }
+    }
+    let lo = 360, hi = 0;
+    hues.forEach((h) => { lo = Math.min(lo, h.a); hi = Math.max(hi, h.a); });
+    return { hues, lo, hi, span: hues.length ? hi - lo : 0, top, bot };
+  }
+  function updateReadout() {
+    const cur = spanOf(P);
+    const ref = mode === "compare" ? spanOf(refParams()) : null;
+    $("spanOut").innerHTML = `${cur.span.toFixed(0)}°` + (ref ? ` <small>vs ${ref.span.toFixed(0)}°</small>` : "");
+    $("topOut").innerHTML = `${(cur.top * 100).toFixed(0)}` + (ref ? ` <small>vs ${(ref.top * 100).toFixed(0)}</small>` : "");
+    $("botOut").innerHTML = `${(cur.bot * 100).toFixed(0)}` + (ref ? ` <small>vs ${(ref.bot * 100).toFixed(0)}</small>` : "");
+    drawHue(cur, ref);
+  }
+  function drawHue(cur, ref) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = Math.max(10, Math.round(hueCanvas.clientWidth * dpr)), H = Math.round(40 * dpr);
+    if (hueCanvas.width !== W || hueCanvas.height !== H) { hueCanvas.width = W; hueCanvas.height = H; }
+    const g = hueCanvas.getContext("2d");
+    g.clearRect(0, 0, W, H);
+    const barY = 14 * dpr, barH = 6 * dpr;
+    for (let i = 0; i < 180; i++) {
+      const a = (i / 180) * 360;
+      g.fillStyle = `hsl(${(a + 120) % 360} 45% 45% / .55)`;
+      g.fillRect((i / 180) * W, barY, W / 180 + 1, barH);
+    }
+    const X = (a) => (a / 360) * W;
+    if (ref && ref.hues.length) {
+      g.strokeStyle = "rgba(160,162,171,.8)"; g.lineWidth = 1 * dpr;
+      g.strokeRect(X(ref.lo), barY - 3 * dpr, Math.max(2, X(ref.hi) - X(ref.lo)), barH + 6 * dpr);
+    }
+    if (cur.hues.length) {
+      g.fillStyle = "rgba(241,201,138,.22)";
+      g.fillRect(X(cur.lo), 2 * dpr, Math.max(2, X(cur.hi) - X(cur.lo)), barY - 4 * dpr);
+      cur.hues.forEach((h) => { g.fillStyle = cssRgb(h.c); g.fillRect(X(h.a) - dpr, 3 * dpr, 2 * dpr, barY - 6 * dpr); });
+    }
+    g.fillStyle = "#70737c"; g.font = `${10 * dpr}px "Share Tech Mono", monospace`; g.textBaseline = "top";
+    [[180, "cyan"], [240, "blue"], [300, "magenta"], [360, "red"], [420, "yellow"]].forEach(([h, l]) => {
+      const x = X(h - 120); g.fillText(l, Math.min(W - 44 * dpr, x - 12 * dpr), barY + barH + 4 * dpr);
+    });
+  }
+
+  // ---- Presets, undo ----
+  function buildPresets() {
+    $("presets").innerHTML = "";
+    PRESETS.forEach((pr) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "preset";
+      b.innerHTML = `${esc(pr.label)}<small>${pr.kind === "all" ? "" : pr.kind}</small>`;
+      b.addEventListener("click", () => {
+        pushHistory();
+        if (pr.kind === "all") P = clone(pr.base);
+        else Object.assign(P, clone(pr.set));
+        onLookChanged(true);
+        if (mode === "variations") rerollVariants();
+      });
+      $("presets").appendChild(b);
+    });
+  }
+  $("undo").addEventListener("click", (e) => {
+    e.preventDefault();
+    if (!history.length) return;
+    P = history.pop(); $("undo").disabled = history.length === 0;
+    onLookChanged(true);
+    if (mode === "variations") rerollVariants();
+  });
+
+  // ---- Saved looks (the artifact's db, so Claude can read them back) ----
+  function setChip(id, text, cls) {
+    let el = document.querySelector(`.chip[data-id="${id}"]`);
+    if (!el) { el = document.createElement("span"); el.className = "chip"; el.dataset.id = id; $("status").appendChild(el); }
+    el.textContent = text; el.className = "chip" + (cls ? " " + cls : "");
+  }
+  async function initDb() {
+    setChip("db", "Saving: connecting");
+    let db = null;
+    try { db = window.claude && window.claude.use ? await window.claude.use("db") : null; } catch (e) { db = null; }
+    if (!db) { dbState = "local"; setChip("db", "Saving: this browser only", "warn"); loadLocalLooks(); return; }
+    looksDb = db; dbState = "db"; setChip("db", "Saving: shared with Claude", "on");
+    db.collection("looks").orderBy("createdAt", "desc").limit(80).onSnapshot((snap) => {
+      savedLooks = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+      renderLooks(); renderRefOptions();
+    }, () => { setChip("db", "Saving: unavailable", "warn"); });
+  }
+  function loadLocalLooks() {
+    try { savedLooks = JSON.parse(localStorage.getItem("skyBench.looks") || "[]"); } catch (e) { savedLooks = []; }
+    renderLooks(); renderRefOptions();
+  }
+  function storeLocalLooks() { try { localStorage.setItem("skyBench.looks", JSON.stringify(savedLooks)); } catch (e) { /* ignore */ } }
+
+  $("saveForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("lookName").value.trim() || `Look ${savedLooks.length + 1}`;
+    const doc = { name, note: $("lookNote").value.trim(), createdAt: new Date().toISOString(), viewedAt: Number(tod.toFixed(3)), params: clone(P) };
+    const msg = $("saveMsg"); $("saveBtn").disabled = true;
+    try {
+      if (looksDb) await looksDb.collection("looks").add(doc);
+      else { savedLooks.unshift(Object.assign({ id: "local-" + Date.now() }, doc)); storeLocalLooks(); renderLooks(); renderRefOptions(); }
+      msg.className = "msg ok";
+      msg.textContent = looksDb ? `Saved “${name}”. Tell Claude to use it.` : `Saved “${name}” in this browser. Copy the code below to hand it to Claude.`;
+      $("lookName").value = ""; $("lookNote").value = "";
+    } catch (err) {
+      msg.className = "msg err";
+      msg.textContent = err && err.code === "quota_exceeded" ? "The look list is full. Delete an old look, then save again." : "Couldn't save. Check your connection and try again.";
+    }
+    $("saveBtn").disabled = false;
+  });
+
+  function renderLooks() {
+    const ul = $("looks"); ul.innerHTML = "";
+    if (!savedLooks.length) { ul.innerHTML = `<li class="empty">No saved looks yet.</li>`; return; }
+    savedLooks.forEach((l) => {
+      const p = Object.assign(clone(SHIPPED), l.params || {});
+      const ph = typeof l.viewedAt === "number" ? l.viewedAt : 0.71;
+      const top = skyAt(p, ph, 0.5, 1, 1.6), bot = skyAt(p, ph, 0.5, 0, 1.6);
+      const li = document.createElement("li"); li.className = "look";
+      const when = l.createdAt ? new Date(l.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+      li.innerHTML = `<span class="mini" style="background:linear-gradient(${cssRgb(top)},${cssRgb(bot)})"></span>
+        <span class="ttl">${esc(l.name || "Untitled")}</span>
+        <span class="meta">${esc(when)} · time ${ph.toFixed(3)}</span>
+        ${l.note ? `<span class="note">${esc(l.note)}</span>` : ""}
+        <span class="row"><button class="btn small" data-a="load" type="button">Load</button><button class="btn small" data-a="ref" type="button">Compare with</button><button class="btn small" data-a="del" type="button">Delete</button></span>`;
+      li.querySelector('[data-a="load"]').addEventListener("click", () => { pushHistory(); P = p; tod = ph; syncTod(); onLookChanged(true); if (mode === "variations") rerollVariants(); });
+      li.querySelector('[data-a="ref"]').addEventListener("click", () => { refChoice = l.id; renderRefOptions(); setMode("compare"); });
+      const del = li.querySelector('[data-a="del"]');
+      let armed = 0;
+      del.addEventListener("click", async () => {
+        if (!armed) { armed = setTimeout(() => { armed = 0; del.textContent = "Delete"; }, 3000); del.textContent = "Confirm delete"; return; }
+        clearTimeout(armed); armed = 0;
+        if (looksDb && !String(l.id).startsWith("local-")) { try { await looksDb.collection("looks").doc(l.id).delete(); } catch (e) { del.textContent = "Couldn't delete"; } }
+        else { savedLooks = savedLooks.filter((x) => x.id !== l.id); storeLocalLooks(); renderLooks(); renderRefOptions(); }
+        if (refChoice === l.id) { refChoice = "before"; renderRefOptions(); }
+      });
+      ul.appendChild(li);
+    });
+  }
+  function renderRefOptions() {
+    const sel = $("refSel");
+    const opts = [["before", "Before today"], ["shipped", "Shipped"]].concat(savedLooks.map((l) => [l.id, "Saved: " + (l.name || "Untitled")]));
+    if (!opts.some(([v]) => v === refChoice)) refChoice = "before";
+    sel.innerHTML = opts.map(([v, t]) => `<option value="${esc(v)}"${v === refChoice ? " selected" : ""}>${esc(t)}</option>`).join("");
+    setTag(); readoutDirty = true;
+  }
+  $("refSel").addEventListener("change", (e) => { refChoice = e.target.value; setTag(); readoutDirty = true; });
+
+  // ---- Code for sky.ts ----
+  const glslF = (v) => { const s = String(Number(v.toFixed(4))); return s.includes(".") ? s : s + ".0"; };
+  const vec3s = (arr) => arr.map((c) => `vec3(${c.map((v) => v.toFixed(3)).join(", ")})`).join(", ");
+  function renderCode() {
+    const all = $("codeAll").checked;
+    const diff = (k) => JSON.stringify(P[k]) !== JSON.stringify(SHIPPED[k]);
+    const lines = [];
+    let changed = 0;
+    const glsl = [];
+    ROLES.forEach((r) => { if (all || diff(r.id)) { if (diff(r.id)) changed++; glsl.push(`const vec3 ${r.k}[4] = vec3[4](\n  ${vec3s(P[r.id])});`); } });
+    const fl = [["skySpread", "SKY_SPREAD"], ["skyLevel", "SKY_LEVEL"], ["gradLo", "SKY_GRADIENT_LO"], ["gradHi", "SKY_GRADIENT_HI"],
+      ["sunHalo", "SUN_HALO"], ["sunCore", "SUN_CORE"], ["horizonWarm", "HORIZON_WARM"],
+      ["cloudLow", "CLOUD_LOW"], ["cloudHigh", "CLOUD_HIGH"], ["wispScale", "CLOUD_WISP_SCALE"], ["wispAmount", "CLOUD_WISP_AMOUNT"],
+      ["bumpScale", "CLOUD_BUMP_SCALE"], ["bumpMorph", "CLOUD_BUMP_MORPH"], ["bumpAmount", "CLOUD_BUMP_AMOUNT"],
+      ["shadowTap1", "CLOUD_SHADOW_TAP1"], ["shadowTap2", "CLOUD_SHADOW_TAP2"], ["shadowK1", "CLOUD_SHADOW_K1"], ["shadowK2", "CLOUD_SHADOW_K2"]];
+    fl.forEach(([k, n]) => { if (all || diff(k)) { if (diff(k)) changed++; glsl.push(`const float ${n} = ${glslF(P[k])};`); } });
+    if (glsl.length) lines.push("// buildDisplayFrag constants", ...glsl, "");
+    const js = [];
+    [["dissipation", "DYE_DISSIPATION"], ["viscosity", "SIM_VISCOSITY"], ["sigmaMin", "DRIFTER_SIGMA_MIN"], ["sigmaMax", "DRIFTER_SIGMA_MAX"],
+      ["drifterForce", "DRIFTER_FORCE"], ["dyeRate", "DRIFTER_DYE_RATE"], ["puffRate", "DRIFTER_PUFF_RATE"]].forEach(([k, n]) => {
+      if (all || diff(k)) { if (diff(k)) changed++; js.push(`const ${n} = ${Number(P[k].toFixed(4))};`); }
+    });
+    if (all || diff("drifterCount")) { if (diff("drifterCount")) changed++; js.push(`const DRIFTER_SEEDS: readonly number[] = [${Array.from({ length: Math.round(P.drifterCount) }, (_, i) => i + 1).join(", ")}];`); }
+    if (js.length) lines.push("// module constants", ...js, "");
+    const st = [];
+    ["cloudCover", "flowSpeed", "turbulence", "cloudBrightness"].forEach((k) => { if (all || diff(k)) { if (diff(k)) changed++; st.push(`${k}: default ${Number(P[k].toFixed(2))}`); } });
+    if (st.length) lines.push("// SETTINGS defaults", ...st);
+    $("code").textContent = lines.length ? lines.join("\n") : "No changes from what's shipped.";
+    $("codeCount").textContent = changed ? `${changed} changed` : "";
+  }
+  $("codeAll").addEventListener("change", renderCode);
+  $("copyCode").addEventListener("click", () => {
+    const text = $("code").textContent, msg = $("copyMsg");
+    const done = () => { msg.className = "msg ok"; msg.textContent = "Copied."; };
+    const fallback = () => { const r = document.createRange(); r.selectNodeContents($("code")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); msg.className = "msg"; msg.textContent = "Selected. Press Ctrl+C or ⌘C."; };
+    try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
+  });
+
+  // ---- Boot ----
+  buildTicks();
+  buildRail();
+  buildPresets();
+  buildTiles();
+  renderRefOptions();
+  onLookChanged(true);
+  syncTod();
+  setMode("single");
+  if (initGL()) {
+    setChip("gpu", `Sim ${simSize.dyeW}×${simSize.dyeH} · ${format === "half" ? "float" : "8-bit"}`, "on");
+    requestAnimationFrame(frame);
+  }
+  initDb();
+  window.addEventListener("resize", () => { readoutDirty = true; });
+})();
+</script>
