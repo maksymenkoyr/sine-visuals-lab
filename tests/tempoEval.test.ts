@@ -52,6 +52,24 @@ for (const track of tracks) metricsH60[track.name] = evaluate(track, 60, { analy
 const metricsH30: Record<string, EvalMetrics> = {};
 for (const track of tracks) metricsH30[track.name] = evaluate(track, 30, { analyzer: true, hostFeed: true });
 
+// Real songs, through a mic, with the silence gate at its shipped defaults —
+// see the plan/PR that added this block for the measured bug it reproduces:
+// with the render-tick onset feed gated by room level (features.ts's
+// `onset`), the host/TV path and the render-tick fallback path lost most of
+// the Metronome's own running time on real music played through a simulated
+// speaker->room->mic chain (tempoEval/micChain.ts), while solo mode (fed by
+// the AudioWorklet analyser's own ungated onsets) was unaffected. Three
+// tables, same three shapes as the clean-signal tables above: host/TV
+// (`hostFeed`), render-tick (no `analyzer`), and solo (`analyzer` without
+// `hostFeed`) — all three now read the tracker's own ungated pulse onset
+// (FeatureFrame.pulseOnset) for tempo, not the visual, gated `onset`.
+const metricsMicHost: Record<string, EvalMetrics> = {};
+for (const track of tracks) metricsMicHost[track.name] = evaluate(track, 60, { analyzer: true, hostFeed: true, mic: true, gate: true });
+const metricsMicRender: Record<string, EvalMetrics> = {};
+for (const track of tracks) metricsMicRender[track.name] = evaluate(track, 60, { mic: true, gate: true });
+const metricsMicSolo: Record<string, EvalMetrics> = {};
+for (const track of tracks) metricsMicSolo[track.name] = evaluate(track, 60, { analyzer: true, mic: true, gate: true });
+
 function fmt(v: number, digits = 3): string {
   return Number.isFinite(v) ? v.toFixed(digits) : "--";
 }
@@ -91,6 +109,9 @@ printTable("30 fps (analyzer)", metricsA30);
 printTable("15 fps (analyzer)", metricsA15);
 printTable("60 fps (host/TV)", metricsH60);
 printTable("30 fps (host/TV)", metricsH30);
+printTable("60 fps, through a mic, gate on (host/TV)", metricsMicHost);
+printTable("60 fps, through a mic, gate on (render-tick)", metricsMicRender);
+printTable("60 fps, through a mic, gate on (solo)", metricsMicSolo);
 
 // Accuracy is scored after a WARMUP_SEC warm-up (tempoOkSteady), with the
 // first lock's speed as its own column and target (timeToLockSec): the
@@ -293,5 +314,50 @@ describe("tempo eval scoreboard — host/TV path", () => {
   it("metronome: random doesn't convince it a tempo is worth running against", () => {
     expect(metricsH60.random!.metroRunShare).toBeLessThanOrEqual(0.3);
     expect(metricsH30.random!.metroRunShare).toBeLessThanOrEqual(0.3);
+  });
+});
+
+// Through a mic, silence gate on — see metricsMicHost/metricsMicRender/
+// metricsMicSolo's own comment above for what this reproduces and why. All
+// three paths must hold the Metronome running through house/hiphop/dnb,
+// close to the beat, without the gate starving it — and random must still
+// not convince it a tempo is worth running against, print-only otherwise.
+describe("tempo eval scoreboard — through a mic, silence gate on", () => {
+  // Baseline (pre-fix — see the commit that added this block): host/render
+  // both read metroRunShare 0.000 on house/hiphop/dnb (the gated render-tick
+  // onset starves the beat clock's phase comb entirely); solo already runs
+  // house/dnb fine (its beat clock never sees the gate) but still fails
+  // hiphop, whose tempo the fixed-hop analyzer itself never locks under this
+  // mic simulation, gate or no gate — see the PR that landed this block for
+  // that measurement. it.fails here only until the pulseOnset fix
+  // (FeatureFrame.pulseOnset) lands — see this file's git history.
+  it.fails("host/TV: metronome keeps running and stays close to the beat", () => {
+    for (const name of ["house", "hiphop", "dnb"]) {
+      expect(metricsMicHost[name]!.metroRunShare, name).toBeGreaterThanOrEqual(0.8);
+      expect(metricsMicHost[name]!.metroOn30ms, name).toBeGreaterThanOrEqual(0.75);
+    }
+    // eslint-disable-next-line no-console
+    console.log(`host/TV random metroRunShare=${metricsMicHost.random!.metroRunShare.toFixed(3)}`);
+    expect(metricsMicHost.random!.metroRunShare).toBeLessThanOrEqual(0.3);
+  });
+
+  it.fails("render-tick: metronome keeps running and stays close to the beat", () => {
+    for (const name of ["house", "hiphop", "dnb"]) {
+      expect(metricsMicRender[name]!.metroRunShare, name).toBeGreaterThanOrEqual(0.8);
+      expect(metricsMicRender[name]!.metroOn30ms, name).toBeGreaterThanOrEqual(0.75);
+    }
+    // eslint-disable-next-line no-console
+    console.log(`render-tick random metroRunShare=${metricsMicRender.random!.metroRunShare.toFixed(3)}`);
+    expect(metricsMicRender.random!.metroRunShare).toBeLessThanOrEqual(0.3);
+  });
+
+  it.fails("solo: metronome keeps running and stays close to the beat", () => {
+    for (const name of ["house", "hiphop", "dnb"]) {
+      expect(metricsMicSolo[name]!.metroRunShare, name).toBeGreaterThanOrEqual(0.8);
+      expect(metricsMicSolo[name]!.metroOn30ms, name).toBeGreaterThanOrEqual(0.75);
+    }
+    // eslint-disable-next-line no-console
+    console.log(`solo random metroRunShare=${metricsMicSolo.random!.metroRunShare.toFixed(3)}`);
+    expect(metricsMicSolo.random!.metroRunShare).toBeLessThanOrEqual(0.3);
   });
 });

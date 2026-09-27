@@ -3,7 +3,9 @@ import { createAnimClock } from "../../src/render/animClock.ts";
 import { getHitShape } from "../../src/audio/hitStrength.ts";
 import { TempoAnalyzer } from "../../src/audio/tempoAnalyzer.ts";
 import { PHASE_BASS, type TempoHit } from "../../src/render/beatClock.ts";
+import { SILENCE_GATE_CLOSED_DEFAULT, SILENCE_GATE_OPEN_DEFAULT, type SilenceGateMarks } from "../../src/audio/silenceGate.ts";
 import { readBandsDb } from "./bands.ts";
+import { micChain } from "./micChain.ts";
 import { SR, type Track, type TempoSegment } from "./synth.ts";
 
 /**
@@ -145,11 +147,24 @@ export interface EvalOptions {
    *  own timeline is the jitter buffer's room time, so they never get the
    *  exact onsets). */
   hostFeed?: boolean;
+  /** Run the track's audio through micChain.ts before anything reads it —
+   *  the conditions the app actually hears through a mic, rather than the
+   *  track's own clean synthesized master. */
+  mic?: boolean;
+  /** Pass { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT }
+   *  as extractor.update's gate argument and animClock.advance's gate
+   *  argument — exactly like app.ts does in solo mode (see silenceGate.ts's
+   *  header for what the gate does and why it must not starve tempo
+   *  tracking; that's exactly what this option, combined with `mic`, is
+   *  here to measure). */
+  gate?: boolean;
 }
 
 export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMetrics {
+  const mono = opts.mic ? micChain(track.mono, SR) : track.mono;
+  const gate: SilenceGateMarks | undefined = opts.gate ? { closed: SILENCE_GATE_CLOSED_DEFAULT, open: SILENCE_GATE_OPEN_DEFAULT } : undefined;
   const dt = 1 / fps;
-  const totalDurationSec = track.mono.length / SR;
+  const totalDurationSec = mono.length / SR;
   const nFrames = Math.floor(totalDurationSec * fps);
   const finalSilenceStart = track.tempo.length > 0 ? Math.max(...track.tempo.map((s) => s.to)) : Infinity;
 
@@ -203,15 +218,15 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
 
   for (let i = 0; i < nFrames; i++) {
     const time = i * dt;
-    const bands = readBandsDb(track.mono, time, SR);
-    const frame = extractor.update(bands, time);
+    const bands = readBandsDb(mono, time, SR);
+    const frame = extractor.update(bands, time, 1, 1, gate);
 
     let tempoHits: TempoHit[] | undefined;
     if (analyzer) {
-      const upToSample = Math.min(track.mono.length, Math.round(time * SR));
+      const upToSample = Math.min(mono.length, Math.round(time * SR));
       while (analyzerSamplesPushed < upToSample) {
         const end = Math.min(upToSample, analyzerSamplesPushed + ANALYZER_PUSH_BLOCK);
-        analyzer.push(track.mono.subarray(analyzerSamplesPushed, end), analyzerSamplesPushed / SR);
+        analyzer.push(mono.subarray(analyzerSamplesPushed, end), analyzerSamplesPushed / SR);
         analyzerSamplesPushed = end;
       }
       frame.bpm = analyzer.bpm;
@@ -219,7 +234,7 @@ export function evaluate(track: Track, fps = 60, opts: EvalOptions = {}): EvalMe
       if (!opts.hostFeed) tempoHits = onsets.map((o) => ({ agoSec: time - o.time, weight: o.strength * (1 + PHASE_BASS * o.bass) }));
     }
 
-    const anim = animClock.advance(dt, frame, undefined, undefined, { shape, beatRatio: extractor.fluxRatio, tempoHits });
+    const anim = animClock.advance(dt, frame, undefined, gate, { shape, beatRatio: extractor.fluxRatio, tempoHits });
 
     const seg = currentSegment(track.tempo, segPtr, time);
     if (seg) {
