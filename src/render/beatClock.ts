@@ -12,6 +12,14 @@
 // room-time clock (see app.ts's currentVisual), which the fixed-hop
 // tracker's local AudioContext times wouldn't line up with.
 //
+// metronome.ts sits directly on top of this clock (animClock.ts advances it
+// right after this one, off this clock's own bpm/beats/tempoLock): where
+// this clock's own phase/tempo keep tracking every live change — necessary
+// for it to do its job, correcting toward the actual hits — metronome.ts
+// deliberately doesn't, once it's confident enough to adopt a tempo. See
+// that file's own header for why a scene wanting a source that never
+// wavers or drops out reads that instead of this clock's beatPhase/beats.
+//
 // The naive version of "where are we in the beat" is
 // FeatureFrame.onsetPhase, which the extractor (and jitterBuffer, for remote
 // frames) resets to exactly 0 on *every* detected onset. With only a 100ms

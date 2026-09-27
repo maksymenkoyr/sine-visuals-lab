@@ -13,9 +13,13 @@ import { hitStrength, type HitShape, type HitParts } from "../audio/hitStrength.
 
 // Bundles every per-frame renderer-side clock a scene might want, so
 // Scene.render() takes one object instead of an ever-growing positional
-// argument list. See flowClock.ts, beatClock.ts, bandEnergy.ts and
-// sectionIntensity.ts for what each field means and why it's derived rather
-// than read straight off FeatureFrame.
+// argument list. See flowClock.ts, beatClock.ts, metronome.ts, bandEnergy.ts
+// and sectionIntensity.ts for what each field means and why it's derived
+// rather than read straight off FeatureFrame. metronome.ts sits on top of
+// beatClock.ts here — advanced right after it, off its own bpm/beats/
+// tempoLock — rather than being its own top-level AnimClock the way
+// flowClock/beatClock are, since it has nothing to contribute but that one
+// derived reading.
 export interface AnimFrame {
   dtSec: number;
   timeSec: number;

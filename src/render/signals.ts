@@ -34,6 +34,14 @@ import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
  * is derived from the drive choice itself instead (sceneSettings.ts's own
  * `drive` doc comment).
  *
+ * The tempo family splits into two: `anim.metronome`/`anim.metronomeBar`
+ * (and the Beat wave/Bar wave/Tempo entries, which now ride the metronome's
+ * own level/phase/bpm) read metronome.ts's steady, always-evenly-spaced
+ * clock; the plain Beat grid choice (drives.ts's `{source:"beat", grid}`,
+ * gridPulse.ts) reads the tracker's own beat live instead, falling back to
+ * raw hits whenever it isn't sure — see metronome.ts's own header for why
+ * these are two different things rather than one setting.
+ *
  * Populate SIGNALS on demand, not exhaustively: an entry no setting cites is
  * an unverifiable claim about where something is visible in the panel — this
  * relaxes once a drive's picker offers the *whole* catalogue on every row

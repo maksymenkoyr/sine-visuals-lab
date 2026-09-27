@@ -27,8 +27,9 @@ Sensitivity/Expansion/Smoothing controls on top of that.
 
 Each render tick, `src/render/animClock.ts`'s `createAnimClock` takes the current
 `FeatureFrame` and produces one `AnimFrame` — flow phase, phase-locked beat/bar
-clock, per-band energy and onset pulses, section intensity, spectral centroid
-(`src/render/spectralCentroid.ts`). Scenes never read
+clock (`src/render/beatClock.ts`), the always-evenly-spaced metronome built on
+top of it (`src/render/metronome.ts`), per-band energy and onset pulses, section
+intensity, spectral centroid (`src/render/spectralCentroid.ts`). Scenes never read
 `FeatureFrame` fields directly for anything animated; they read `AnimFrame`,
 because it's already shaped for motion (see the field comments in `animClock.ts`
 for why each one is derived rather than a straight passthrough).
