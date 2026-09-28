@@ -202,6 +202,8 @@ const stylesheet = `
 }
 .gal-foot-links { display: flex; gap: 16px; }
 .gal-foot a { color: inherit; text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.25); }
+/* The version reads as typed ("0.1.4 - beta"), not in the footer's capitals. */
+.gal-foot a.gal-ver { text-transform: none; }
 .gal-foot a:hover { color: #fff; }
 
 @media (max-width: ${NARROW_BELOW_PX}px) {
@@ -542,7 +544,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
   // stays the same dim colour as the rest of the footer, any other channel is
   // flagged in BANDS_AMBER so it's obvious at a glance this tab isn't on
   // stable.
-  const versionLink = el("a", "", versionLabel(BUILD_INFO));
+  const versionLink = el("a", "gal-ver", versionLabel(BUILD_INFO));
   versionLink.href = versionHref(BUILD_INFO);
   versionLink.target = "_blank";
   versionLink.rel = "noopener";

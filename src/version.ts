@@ -81,30 +81,22 @@ export const BUILD_INFO: BuildInfo =
 const shortSha = (commit: string): string => commit.slice(0, 7);
 
 /**
- * The corner label's text, per channel:
- *
- *  - stable and insider: just the version — `"v0.3.0"`, `"v0.3.12"`. It
- *    changes with every build that matters, so the PR and commit it came
- *    from live in versionHint() instead. Without a version (a manual
- *    `SVL_CHANNEL=…` build with no `SVL_VERSION`) it degrades to
- *    `"stable · da38a37"` / `"insider · da38a37"` rather than lying.
- *  - preview: `"preview · PR #185 · da38a37"`.
- *  - dev: `"dev · da38a37"`, with a trailing `"*"` when the tree was dirty at
- *    build time, or just `"dev"` when there's no commit to show at all (a
- *    checkout with no `.git`).
+ * The corner label's text: the version number and nothing else — `"0.3.0"`
+ * on stable, `"0.3.12 - beta"` on insider (the owner's own word for an
+ * Insider build's version). Everything else — the channel, the PR, the
+ * commit, when it was built — lives in versionHint(). A build with no version
+ * shows just its channel: `"preview"`, `"dev"`, or (a manual `SVL_CHANNEL=…`
+ * build with no `SVL_VERSION`) `"stable"` / `"beta"`.
  */
 export function versionLabel(info: BuildInfo): string {
-  const sha = shortSha(info.commit);
   switch (info.channel) {
     case "stable":
+      return info.version ?? "stable";
     case "insider":
-      if (info.version) return `v${info.version}`;
-      return sha ? `${info.channel} · ${sha}` : info.channel;
+      return info.version ? `${info.version} - beta` : "beta";
     case "preview":
-      return sha ? `preview · PR #${info.pr} · ${sha}` : `preview · PR #${info.pr}`;
     case "dev":
-      if (!sha) return "dev";
-      return `dev · ${sha}${info.dirty ? "*" : ""}`;
+      return info.channel;
   }
 }
 
@@ -158,7 +150,7 @@ export function versionHint(info: BuildInfo): string[] {
       if (info.version) lines.push("Each release bumps the middle number");
       break;
     case "insider":
-      lines.push("Insider — updates with every merge");
+      lines.push("Beta = Insider: updates every merge");
       if (info.version) lines.push("Each merge bumps the last number");
       if (info.pr) lines.push(`#${info.pr} — last pull request merged`);
       break;

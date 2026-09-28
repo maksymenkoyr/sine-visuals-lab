@@ -20,26 +20,16 @@ const withCommit = (over: Partial<BuildInfo>): BuildInfo => ({
 });
 
 describe("versionLabel", () => {
-  it("shows just the version on stable and insider", () => {
-    expect(versionLabel(withCommit({ channel: "stable", version: "0.3.0" }))).toBe("v0.3.0");
-    expect(versionLabel(withCommit({ channel: "insider", version: "0.3.12", pr: 183 }))).toBe("v0.3.12");
+  it("shows only the number on stable, and the number plus beta on insider", () => {
+    expect(versionLabel(withCommit({ channel: "stable", version: "0.3.0" }))).toBe("0.3.0");
+    expect(versionLabel(withCommit({ channel: "insider", version: "0.1.4", pr: 183 }))).toBe("0.1.4 - beta");
   });
 
-  it("falls back to the commit when CI passed no version", () => {
-    expect(versionLabel(withCommit({ channel: "stable" }))).toBe("stable · da38a37");
-    expect(versionLabel(withCommit({ channel: "insider" }))).toBe("insider · da38a37");
-  });
-
-  it("spells out the PR on preview", () => {
-    expect(versionLabel(withCommit({ channel: "preview", pr: 185 }))).toBe("preview · PR #185 · da38a37");
-  });
-
-  it("shows the commit on dev, with a dirty marker", () => {
-    expect(versionLabel(withCommit({ channel: "dev" }))).toBe("dev · da38a37");
-    expect(versionLabel(withCommit({ channel: "dev", dirty: true }))).toBe("dev · da38a37*");
-  });
-
-  it("degrades to just 'dev' when there is no commit at all", () => {
+  it("shows just the channel when there is no version", () => {
+    expect(versionLabel(withCommit({ channel: "stable" }))).toBe("stable");
+    expect(versionLabel(withCommit({ channel: "insider" }))).toBe("beta");
+    expect(versionLabel(withCommit({ channel: "preview", pr: 185 }))).toBe("preview");
+    expect(versionLabel(withCommit({ channel: "dev", dirty: true }))).toBe("dev");
     expect(versionLabel(base)).toBe("dev");
   });
 });
@@ -72,7 +62,7 @@ describe("versionHint", () => {
 
   it("explains the numbers, PR and commit on insider", () => {
     expect(versionHint(withCommit({ channel: "insider", version: "0.3.12", pr: 183 }))).toEqual([
-      "Insider — updates with every merge",
+      "Beta = Insider: updates every merge",
       "Each merge bumps the last number",
       "#183 — last pull request merged",
       "da38a37 — the commit it was built from",
