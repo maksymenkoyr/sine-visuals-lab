@@ -64,6 +64,11 @@ import { setHintText } from "../hintSwatches.ts";
  * on screen, then the same for the other table when one exists — the axis
  * captions a pad's own body already draws with, not a word phrase.
  *
+ * **Flat around zero (2026-09-28).** Pads and own-trail faders both map the
+ * pointer through `padValue` (and draw through its inverse `padPos`), which
+ * bends the line by `PAD_CURVE` so the stretch around a relation's sign flip
+ * is fine and gentle, steeper toward the edges.
+ *
  * **Values are continuous.** Dragging a pad or an own-trail fader stores at
  * 0.01 resolution (`round01` below) — not the settings' own 0.05 `step`,
  * which only bounds a keyboard nudge and the Scene panel's generic numeric
@@ -467,7 +472,10 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     const fromPointer = (e: PointerEvent): void => {
       const r = fader.getBoundingClientRect();
       const t = r.height > 0 ? 1 - (e.clientY - r.top) / r.height : 0.5;
-      setVal("smell", k, k, AFFINITY_MIN + Math.max(0, Math.min(1, t)) * (AFFINITY_MAX - AFFINITY_MIN));
+      // padValue, the inverse of the padPos the thumb is drawn with: the
+      // thumb stays under the pointer, and the fader shares the pads' flat
+      // stretch around zero (PAD_CURVE).
+      setVal("smell", k, k, padValue(t * 100));
     };
     fader.addEventListener("pointerdown", (e) => {
       e.preventDefault();

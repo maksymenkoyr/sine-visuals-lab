@@ -596,6 +596,30 @@ and `powder.ts`'s curl noise).
   once, as Lanes or Knobs, with Sensor angle, Trail life and a Share bar
   added. Nothing built; the user closed the session to finish the rest of
   the UI in a later one — see Resume here.
+- **2026-09-28: Strain Console v2–v5 (prototype only).** The user asked why
+  the Share split was set by hand: "should't it be a consequences of out
+  other settings". The Share bar became a read-only Headcount: agents
+  switch to the strain whose ink *per agent* beats their own ×1.5 under
+  them, with a 4% floor, plus a Switching slider and Rebalance. Comparing
+  raw ink snowballed (D4 at Trail life 0.97 took 88% and A1 died); per agent,
+  the strains coexist (defaults ≈ 15/30/25/28%, same D4 change ≈ 46–48%) —
+  `scripts/recruit.mjs`. Then, on request: knobs drag on both axes
+  (right/up = more, Shift fine, Alt all four, default tick), a faint + / −
+  on each knob that lights toward the drag and fades at a limit, and stain
+  **Synergy** (the user's idea): the stains they set are kept, and what's
+  shown is pulled toward the nearest four-hue harmony, anchored on the stain
+  being set. Checks: `scripts/consolecheck.mjs`, `knobcheck.mjs`,
+  `synergycheck.mjs`. Scene not changed for any of it yet.
+- **2026-09-28: pads are flat around the zero line.** The user: when the
+  pointer crosses the line where a relation flips, the change should be
+  "much smoother around this divider line". `padValue`/`padPos` now bend by
+  `PAD_CURVE` (value grows as the distance from the line squared; the edges
+  still reach the full range), and the own-trail faders read the pointer
+  through `padValue` too — they had used a straight full-height mapping
+  while drawing with `padPos`, so the thumb drifted off the pointer away
+  from the middle. Measured on a 119 px pad (`scripts/padcurve.mjs`): 5% of
+  the width from the line went from ±0.18 to ±0.02, 10% from ±0.36 to
+  ±0.09, 20% from ±0.71 to ±0.34.
 
 ## Tuning notes
 
