@@ -12,7 +12,8 @@ regenerate it at session close.
   pads with plain `− A → B +` axes and numbers only, rows that wake, pin and
   solo like the rest of the panel, previews that move with the music,
   Random / Nudge / Back / presets. Typecheck and tests green, `padcheck.mjs`
-  30/30. **Conflicts with `main` in `src/ui/deviceMenu.ts`** (#178).
+  30/30. `main` merged in (its `deviceMenu.ts` conflict with #178 resolved);
+  mergeable, still a draft.
 - **Physarum 2 per-strain settings** — the user finds them unusable.
   Prototype "Strain Console"
   (https://claude.ai/artifact/Y32bYpyxHC5otWgG967f7D, source
@@ -28,8 +29,6 @@ regenerate it at session close.
 
 - Strain Console: Lanes or Knobs? Which of Sensor angle, Trail life and
   Share become real per-strain settings?
-- Sync #176 with `main`: rebase and force-push (the repo's usual way, needs
-  the user's OK), or merge `main` in?
 - Pairs pads: add a one-line legend ("+ steers toward that trail, − steers
   away" / "+ adds to that trail, − erases part of it")?
 - Physarum 2's Gardens preset washes toward white; "Dose" is still easy to
@@ -38,7 +37,7 @@ regenerate it at session close.
 
 ## Next up
 
-- Resolve #176's `deviceMenu.ts` conflict, then mark it ready.
+- Mark #176 ready once CI is green and the user has tried it.
 - Build the per-strain layout the user picks from the Strain Console.
 - Close #70; prune worktrees whose PRs merged (31 besides `main`; check each
   one's PR with `gh pr view`).
