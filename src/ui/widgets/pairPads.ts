@@ -24,6 +24,9 @@ import {
 import { createPairCulture, type PairCulture } from "../../render/scenes/physarum2Preview.ts";
 import type { WidgetCtx } from "./registry.ts";
 import type { PreviewEffective, PreviewSource } from "./previews.ts";
+import { rowHeadStyle, rowLabelStyle, spacer } from "../controlsKit.ts";
+import { SCENE_VIOLET } from "../controlsTheme.ts";
+import { setHintText } from "../hintSwatches.ts";
 
 /**
  * The Pairs widget: one live two-strain culture per pad, a Smell/Touch
@@ -38,9 +41,9 @@ import type { PreviewEffective, PreviewSource } from "./previews.ts";
  *
  * Built once per widget mount (`buildPairPads` runs once; itemBoxes.ts never
  * calls it again for a selection change) and updated in place from then on —
- * `setSelection` only touches classes, `tick` only touches text/transforms/
- * canvas pixels — so a pad's own live culture (see below) is never restarted
- * by a click the way a full rebuild would restart it.
+ * `tick` only touches text/transforms/canvas pixels — so a pad's own live
+ * culture (see below) is never restarted by a click the way a full rebuild
+ * would restart it.
  *
  * Every word a person reads here comes from `PairWords` (physarum2Affinity.ts)
  * — this file has no label/sentence literal of its own for anything other
@@ -82,10 +85,48 @@ import type { PreviewEffective, PreviewSource } from "./previews.ts";
  * no history entry of its own — flipping it changes no value. None of this
  * calls `ctx.rerender()`; `tick()` already reflects a `ctx.set` on the next
  * frame the same way a slider drag does.
+ *
+ * **Its own card, four rows (2026-09-28).** The user: "the problem is this
+ * whole card not clickable and never gets focus" (unlike every other row in
+ * the panel, the block never woke on hover/focus and a press never pinned
+ * it) and "also can u add some air. make this for example as separate card,
+ * with gaps [pointing at the pads grid]." `itemBoxes.ts` now mounts this
+ * whole widget through `ctx.mountCard` (registry.ts) instead of appending it
+ * into the Scene card body after a plain `groupHeading` — a real card
+ * (title "Affinity", `SCENE_VIOLET`, its own `foldId`) that sits right after
+ * the Scene card and is torn down and rebuilt by `renderSceneSettings`
+ * exactly like the Scene card's own contents. Inside it, the switch, the
+ * own-trail strip, the pads grid and the mix row each became a plain
+ * `.vc-row` (controlsTheme.ts's own wake-on-hover/focus grammar) registered
+ * pinnable through `ctx.registerCard` — see that function's own doc comment
+ * (registry.ts) for the synthetic-`SceneSetting` pin identity a row like the
+ * pairs grid or the mix row needs, since neither edits one single setting.
+ * The long per-layer `how` paragraph moved into the Layer row's own
+ * `.vc-hint` (hidden until that row wakes); the pairs row's status line
+ * stays outside its hint and always visible, since a value read only while
+ * hovered would go blank mid-drag the moment a captured pointer left the
+ * row's own box. `.vc-pads`' own gap (controlsTheme.ts) grew for the "gaps"
+ * the user asked for.
+ *
+ * **No selection styling (2026-09-28 follow-up).** The user, after seeing
+ * only three of six pads keep their normal look once a strain box was
+ * selected: "why only three works? clean up this focus mess around this
+ * card." The box selection (itemBoxes.ts) no longer reaches into this
+ * widget at all — every pad and own-trail fader renders identically
+ * regardless of which strain box is selected; the only highlights left here
+ * are the `.vc-row` wake/pin rings the card work above adds and the plain
+ * `:focus-visible` outline a pad/fader already had. `setSelection` and the
+ * `vc-pad-sel`/`vc-pad-dim`/`vc-own-sel`/`vc-own-dim` rules it drove are
+ * gone; itemBoxes.ts's own box selection (the strain rows below the boxes)
+ * is unaffected.
  */
 
 export interface PairPadsSpec {
   ctx: WidgetCtx;
+  /** The Affinity card's body (`WidgetCtx.mountCard`, built by itemBoxes.ts)
+   *  — this builder appends its whole DOM into it directly rather than
+   *  handing an element back for the caller to place. */
+  container: HTMLElement;
   family: string;
   count: number;
   /** Full display codes, e.g. "PP-A1" — the pad's `aria-label` and the
@@ -120,10 +161,6 @@ export interface PairPadsSpec {
 }
 
 export interface PairPadsHandle {
-  el: HTMLElement;
-  /** Applies the box selection's dim/highlight to every pad + own fader — no
-   *  DOM is rebuilt (this file's header). */
-  setSelection(sel: readonly number[]): void;
   /** Reads live values, redraws changed pads' markers/header/status, and
    *  (every other call, visible pads only) steps + redraws each pad's live
    *  culture — called from `itemBoxes.ts`'s `ctx.onTick`. */
@@ -194,6 +231,20 @@ function parseCssRgb(css: string): readonly [number, number, number] {
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+/** Focuses `el` for a pointer press so its arrow keys work, tagged
+ *  `vc-pf` until the next key or blur. The press's preventDefault makes
+ *  Chrome read the script focus as keyboard focus and draw the
+ *  :focus-visible ring on a mouse press; controlsTheme.ts hides the ring
+ *  while the tag is on, so it only shows for real keyboard focus. */
+function pointerFocus(el: HTMLElement): void {
+  el.classList.add("vc-pf");
+  el.focus({ preventScroll: true });
+  if (el.dataset.pfWired) return;
+  el.dataset.pfWired = "1";
+  el.addEventListener("keydown", () => el.classList.remove("vc-pf"));
+  el.addEventListener("blur", () => el.classList.remove("vc-pf"));
+}
+
 function svgEl<K extends keyof SVGElementTagNameMap>(
   tag: K,
   attrs: Record<string, string | number>,
@@ -226,12 +277,49 @@ function findPairSpec(ctx: WidgetCtx, family: string, param: string, i: number, 
   return ctx.specsFor(family, i).find((s) => s.item?.param === param && s.item.other === j);
 }
 
+/** A synthetic pin identity for one of this widget's four rows — see
+ *  `WidgetCtx.registerCard`'s own doc comment (registry.ts) for why a
+ *  non-drive `SceneSetting`-shaped token, not a real per-cell `att`/`touch`
+ *  spec, is the right choice: a row here can touch many cells at once (the
+ *  whole pads grid, the mix buttons), so no single real spec would honestly
+ *  name it. `key` only ever needs to be unique within this one widget mount
+ *  (`stateKey` already is, per-scene-per-family) — never read by
+ *  `ctx.get`/`ctx.set`, never part of `ctx.specs`/`ctx.specsFor`. */
+function rowSpec(stateKey: string, part: string, label: string): SceneSetting {
+  return { key: `${stateKey}:row:${part}`, label, min: 0, max: 1, step: 1, default: 0 };
+}
+
+/** One of this card's four `.vc-row`s: a `.vc-label` head, a body the caller
+ *  fills, and a `.vc-hint` that unfolds on hover/focus like any other row
+ *  (controlsTheme.ts) — pinnable through `ctx.registerCard` with `row`
+ *  itself as its own "value control" (registry.ts's own doc comment), so a
+ *  press anywhere in it — a pad, a fader, a button — pins it. */
+function buildRow(ctx: WidgetCtx, spec: SceneSetting, title: string, hint: string): { row: HTMLElement; body: HTMLElement; hintEl: HTMLElement } {
+  const row = document.createElement("div");
+  row.className = "vc-row";
+  row.style.setProperty("--vc-accent", SCENE_VIOLET);
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  label.textContent = title;
+  head.appendChild(label);
+  const body = document.createElement("div");
+  const hintEl = document.createElement("div");
+  hintEl.className = "vc-hint";
+  setHintText(hintEl, hint);
+  row.append(head, body, hintEl);
+  ctx.registerCard(row, spec);
+  return { row, body, hintEl };
+}
+
 // ---------------------------------------------------------------------
 // The builder.
 // ---------------------------------------------------------------------
 
 export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
-  const { ctx, family, count, labels, shortLabels, colours, tables, words, presets, effective, pair, stateKey } = spec;
+  const { ctx, container, family, count, labels, shortLabels, colours, tables, words, presets, effective, pair, stateKey } = spec;
 
   let state = pairState.get(stateKey);
   if (!state) {
@@ -306,13 +394,14 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   const root = document.createElement("div");
   root.className = "vc-pair";
 
-  // --- Smell / Touch switch --------------------------------------------
+  // --- Row 1: Smell / Touch switch ---------------------------------------
+  const layerRow = buildRow(ctx, rowSpec(stateKey, "layer", "Affinity layer"), words.ui.layer, "");
   const layerBtns = new Map<PairLayer, HTMLButtonElement>();
-  const layersEl = document.createElement("div");
-  layersEl.className = "vc-pair-layers";
-  layersEl.setAttribute("role", "radiogroup");
-  layersEl.setAttribute("aria-label", words.ui.pairs);
   if (hasTouch) {
+    const layersEl = document.createElement("div");
+    layersEl.className = "vc-pair-layers";
+    layersEl.setAttribute("role", "radiogroup");
+    layersEl.setAttribute("aria-label", words.ui.pairs);
     (["smell", "touch"] as const).forEach((ly) => {
       const w = words.layers[ly];
       const btn = document.createElement("button");
@@ -328,28 +417,19 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
       layerBtns.set(ly, btn);
       layersEl.appendChild(btn);
     });
-    root.appendChild(layersEl);
+    layerRow.body.appendChild(layersEl);
   }
 
-  const howEl = document.createElement("p");
-  howEl.className = "vc-pair-how";
-  root.appendChild(howEl);
-
-  // --- Own trail strip (Smell only) ------------------------------------
-  const ownLabel = document.createElement("div");
-  ownLabel.className = "vc-pair-label";
-  ownLabel.textContent = words.ui.ownTrail;
-  root.appendChild(ownLabel);
-
+  // --- Row 2: own-trail strip (Smell only) -------------------------------
+  const ownRow = buildRow(ctx, rowSpec(stateKey, "own", "Own trail"), words.ui.ownTrail, words.ui.ownHint);
   const ownStripEl = document.createElement("div");
   ownStripEl.className = "vc-own-strip";
   const ownNoteEl = document.createElement("p");
   ownNoteEl.className = "vc-own-note";
   ownNoteEl.textContent = words.ui.ownNote;
-  root.append(ownStripEl, ownNoteEl);
+  ownRow.body.append(ownStripEl, ownNoteEl);
 
   interface OwnFader {
-    el: HTMLElement;
     thumb: HTMLElement;
     fill: HTMLElement;
     valueEl: HTMLElement;
@@ -391,7 +471,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     };
     fader.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      fader.focus();
+      pointerFocus(fader);
       fader.setPointerCapture(e.pointerId);
       dragging = true;
       fromPointer(e);
@@ -426,24 +506,21 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
     box.append(code, fader, valueEl);
     ownStripEl.appendChild(box);
-    ownFaders.push({ el: box, thumb, fill, valueEl, k });
+    ownFaders.push({ thumb, fill, valueEl, k });
   }
 
-  // --- Pairs status + pads grid -----------------------------------------
-  const pairsLabel = document.createElement("div");
-  pairsLabel.className = "vc-pair-label";
-  pairsLabel.textContent = words.ui.pairs;
-  root.appendChild(pairsLabel);
+  // --- Row 3: pairs status + pads grid ------------------------------------
+  const pairsRow = buildRow(ctx, rowSpec(stateKey, "pairs", "Affinity pairs"), words.ui.pairs, words.ui.pairsHint);
 
   const statusEl = document.createElement("p");
   statusEl.className = "vc-pair-status";
   statusEl.id = `${stateKey.replace(/[^a-zA-Z0-9]/g, "-")}-pair-status`;
   statusEl.setAttribute("aria-live", "polite");
-  root.appendChild(statusEl);
+  pairsRow.body.appendChild(statusEl);
 
   const padsGrid = document.createElement("div");
   padsGrid.className = "vc-pads";
-  root.appendChild(padsGrid);
+  pairsRow.body.appendChild(padsGrid);
 
   interface PadHandle {
     a: number;
@@ -553,7 +630,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     };
     sq.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      sq.focus();
+      pointerFocus(sq);
       sq.setPointerCapture(e.pointerId);
       dragging = true;
       focusIdx = idx;
@@ -709,7 +786,10 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     }
   }
 
-  // --- Mix row (Phase 3: Random / Nudge / Keep own trails / Back) ---------
+  // --- Row 4: mix row (Phase 3: Random / Nudge / Keep own trails / Back) +
+  // presets --------------------------------------------------------------
+  const mixSectionRow = buildRow(ctx, rowSpec(stateKey, "mix", "Affinity mix"), words.ui.mixTitle, words.ui.mixHint);
+
   const mixRow = document.createElement("div");
   mixRow.className = "vc-mix-row";
   const randomBtn = document.createElement("button");
@@ -727,7 +807,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   backBtn.disabled = true;
   backBtn.textContent = words.ui.back;
   mixRow.append(randomBtn, nudgeBtn, keepOwnBtn, backBtn);
-  root.appendChild(mixRow);
+  mixSectionRow.body.appendChild(mixRow);
 
   /** Reflects `state.history`/`state.keepOwn` onto the mix row's own button
    *  state — called after every action that can change either (push, pop,
@@ -821,7 +901,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     presetsEl.append(touchyLabel, touchyGroup);
   }
   presetsEl.appendChild(hypEl);
-  root.appendChild(presetsEl);
+  mixSectionRow.body.appendChild(presetsEl);
 
   let lastSig = "";
   function refreshPresetHighlight(): void {
@@ -843,7 +923,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   // --- Layer switching ------------------------------------------------
   function setLayer(layer: PairLayer): void {
     state!.layer = layer;
-    root.dataset.layer = layer;
+    layerRow.row.dataset.layer = layer;
     for (const [ly, btn] of layerBtns) btn.setAttribute("aria-checked", String(ly === layer));
     // A plain style toggle, not the `hidden` attribute: `.vc-own-strip` has
     // its own authored `display: grid`, which would outrank the UA
@@ -855,7 +935,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     // Keep own trails only means anything on Smell (Touch's diagonal has no
     // setting to preserve at all) — same visibility rule as the strip itself.
     keepOwnBtn.style.display = layer === "smell" ? "" : "none";
-    howEl.textContent = words.layers[layer].how;
+    setHintText(layerRow.hintEl, words.layers[layer].how);
     randomBtn.textContent = words.ui.random[layer];
     focusIdx = -1;
     for (const pad of pads) {
@@ -1006,23 +1086,12 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   refreshAll();
   refreshMixRow(); // reflect state.history/keepOwn, which can predate this mount
 
-  function setSelection(sel: readonly number[]): void {
-    const all = sel.length === count;
-    for (const pad of pads) {
-      const on = all || sel.includes(pad.a) || sel.includes(pad.b);
-      pad.el.classList.toggle("vc-pad-sel", on && !all);
-      pad.el.classList.toggle("vc-pad-dim", !on);
-    }
-    for (const f of ownFaders) {
-      const on = all || sel.includes(f.k);
-      f.el.classList.toggle("vc-own-sel", on && !all);
-      f.el.classList.toggle("vc-own-dim", !on);
-    }
-  }
+  root.append(layerRow.row, spacer(), ownRow.row, spacer(), pairsRow.row, spacer(), mixSectionRow.row);
+  container.appendChild(root);
 
   function dispose(): void {
     io?.disconnect();
   }
 
-  return { el: root, setSelection, tick, dispose };
+  return { tick, dispose };
 }

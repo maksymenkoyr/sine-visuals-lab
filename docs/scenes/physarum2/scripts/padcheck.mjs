@@ -31,7 +31,7 @@ const browser = await chromium.launch({
     "--autoplay-policy=no-user-gesture-required",
   ],
 });
-const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 1000 } });
+const ctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2 });
 const page = await ctx.newPage();
 const errors = [];
 // Console text for a failed resource load never carries the URL, so a
@@ -58,18 +58,83 @@ async function scrollToScene() {
   await page.waitForTimeout(250);
 }
 
+// The Affinity block is its own card (WidgetCtx.mountCard, 2026-09-28) right
+// after the Scene card, not a heading inside it — .vc-widget-card is the
+// generic class mountCard adds so a script (or a second widget card) can
+// find it without matching on title text, same reasoning as scrollToScene's
+// own ".vc-card-head" match.
 async function scrollToPairs() {
   await page.evaluate(() => {
-    const els = [...document.querySelectorAll("h4, .vc-group-heading, div")];
-    const heading = els.find((e) => e.textContent?.trim() === "Affinity" && e.children.length === 0);
-    heading?.scrollIntoView({ block: "start" });
+    document.querySelector(".vc-widget-card")?.scrollIntoView({ block: "start" });
   });
   await page.waitForTimeout(250);
 }
 
+// The card (four rows, a six-pad grid with real air between them) is taller
+// than the 1000px/844px viewports this script otherwise drives at — an
+// element screenshot taller than the current viewport makes Playwright
+// resize the viewport and re-lay-out before capturing, which drags this
+// page's own position:fixed chrome (the fullscreen/close buttons, the
+// footer dock) into the crop at whatever the resized viewport now puts them.
+// Bumping the viewport height to fit the card first (then restoring it)
+// avoids that reflow entirely, so the shot is exactly the card.
+// Whichever ancestor actually clips the card differs by layout: the wide
+// layout scrolls .vc-controls-col (its own `calc(100vh - 74px)` max-height,
+// controlsTheme.ts), the stacked/narrow layout scrolls the page root instead
+// (that same rule turns into `max-height: none` there). Rather than special-
+// case either, this checks the one thing that actually matters — is the
+// card's own last bit of content really PAINTED on screen — and grows the
+// viewport until it is, so it self-corrects for whichever ancestor (or
+// margin) is doing the clipping.
+async function cardFullyPainted(locator) {
+  return locator.evaluate((el) => {
+    const last = el.querySelector(".vc-exp-hyp") || el.lastElementChild;
+    if (!last) return true;
+    const r = last.getBoundingClientRect();
+    if (r.height === 0 || r.bottom > window.innerHeight || r.top < 0) return false;
+    const x = Math.min(window.innerWidth - 1, Math.max(0, r.left + 2));
+    const y = r.top + r.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    return !!hit && (hit === last || last.contains(hit) || el.contains(hit));
+  });
+}
+
+async function screenshotWholeCard(locator, path, onReady) {
+  const original = page.viewportSize();
+  let height = original.height;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (await cardFullyPainted(locator)) break;
+    const box = await locator.boundingBox();
+    height = Math.max(height + 200, box ? Math.ceil(box.height) + 150 : height + 200);
+    await page.setViewportSize({ width: original.width, height });
+    await scrollToPairs();
+  }
+  // The resize+rescroll above can carry a row out from under a mouse left
+  // parked over it earlier (screen position moves; the cursor doesn't) —
+  // onReady re-establishes anything hover-dependent right before the shot.
+  if (onReady) await onReady();
+  await locator.screenshot({ path }).catch(() => {});
+  if (height !== original.height) {
+    await page.setViewportSize(original);
+    await scrollToPairs();
+  }
+}
+
 async function openPanel() {
-  await page.evaluate(() => document.getElementById("menuBtn")?.click());
-  await page.waitForTimeout(500);
+  // #menuBtn only exists once app.ts has finished booting — waited for
+  // explicitly (rather than a fixed timeout) since gotoScene's re-entry
+  // (after the "Escape unpins" check backs the app out to the gallery) can
+  // land here before the button exists. Idempotent (checks .vc-open first)
+  // rather than an unconditional click: `#/v/physarum2` is a same-document
+  // hash navigation, not a real reload — the panel's own `isOpen` (and
+  // everything else in JS memory) survives the gallery round trip, so a
+  // blind click here would toggle an already-open panel *closed* instead.
+  await page.waitForSelector("#menuBtn", { state: "visible", timeout: 15000 });
+  const isOpen = await page.evaluate(() => document.querySelector(".vc-root")?.classList.contains("vc-open"));
+  if (!isOpen) {
+    await page.evaluate(() => document.getElementById("menuBtn")?.click());
+    await page.waitForTimeout(500);
+  }
   await scrollToScene();
 }
 
@@ -103,15 +168,28 @@ async function dragPad(loc, fromFx, fromFy, toFx, toFy) {
   await page.waitForTimeout(200);
 }
 
+// A bare Escape, live-tested below (the "Escape unpins" check), is also
+// app.ts's own global "back out to the gallery" shortcut — a real key event
+// reaches every keydown listener on document, not just deviceMenu's own, and
+// neither ever calls stopPropagation. That's true of Escape on ANY pinned
+// row, not something this card's own pin work introduced (verified against a
+// plain Scene-card row too) — so every check after "Escape unpins" below
+// re-enters the scene through this same URL rather than assuming the panel
+// is still open on it.
+const SCENE_URL = `https://localhost:${port}/?audio=synthetic&bpm=120#/v/physarum2`;
+async function gotoScene() {
+  await page.goto(SCENE_URL);
+  await page.waitForTimeout(1500);
+  await openPanel();
+  await scrollToPairs();
+}
+
 await page.evaluate(() => {
   try {
     localStorage.clear();
   } catch {}
 });
-await page.goto(`https://localhost:${port}/?audio=synthetic&bpm=120#/v/physarum2`);
-await page.waitForTimeout(1500);
-await openPanel();
-await scrollToPairs();
+await gotoScene();
 // Let the pads' cultures step for a bit before the first screenshot/pixel
 // check, same reasoning as solocheck.mjs's own warm-up wait.
 await page.waitForTimeout(3000);
@@ -121,9 +199,16 @@ const padSquares = page.locator(".vc-pads .vc-pad-sq");
 const padCount = await pads.count();
 report("six-pads", padCount === 6, `count=${padCount}`);
 
+// The Affinity card itself (title + body), for the "whole card" screenshots
+// and the fold/pin/solo checks below — its four rows, in document order.
+const affinityCard = page.locator(".vc-widget-card").first();
+const affinityRows = affinityCard.locator(".vc-row");
+const layerRowLoc = affinityRows.nth(0);
+const mixRowLoc = affinityRows.nth(3);
+
 // --- 1. Screenshots of the Affinity block, Smell layer, at 1440 and 390. ---
-const affinityBlock = page.locator(".vc-pair").first();
-await affinityBlock.screenshot({ path: `${outDir}/pairs-smell-1440.png` }).catch(() => {});
+const affinityBlock = affinityCard;
+await screenshotWholeCard(affinityBlock, `${outDir}/pairs-smell-1440.png`);
 console.log("shot", `${outDir}/pairs-smell-1440.png`);
 
 // --- 2. Drag the A1<->B2 pad (pairsOf(4)'s first pair) from centre toward
@@ -139,6 +224,38 @@ report("drag-smell-att10", att10 > 0.3, `att10=${att10}`);
 const markerTransform = await pads.nth(0).locator(".vc-pad-marker").getAttribute("transform");
 report("marker-moved", !!markerTransform && !/translate\(50 50\)/.test(markerTransform), `transform=${markerTransform}`);
 
+// --- 2b. The card wakes on hover/focus and pins on press, like every other
+// row in the panel (2026-09-28 card work). The drag above already released
+// its mouse-up over the same pad it went down on, which fires a real click —
+// so the Pairs row (the pad's ancestor .vc-row) should already read pinned. ---
+const pairsRowLoc = affinityRows.nth(2);
+const pinnedAfterPadPress = await pairsRowLoc.evaluate((el) => el.classList.contains("vc-drive-pinned"));
+report("pad-press-pins-pairs-row", pinnedAfterPadPress, `pinned=${pinnedAfterPadPress}`);
+
+const mixBoxShadowIdle = await mixRowLoc.evaluate((el) => getComputedStyle(el).boxShadow);
+await mixRowLoc.hover();
+await page.waitForTimeout(200);
+const mixBoxShadowHover = await mixRowLoc.evaluate((el) => getComputedStyle(el).boxShadow);
+report("hover-wakes-row", mixBoxShadowHover !== mixBoxShadowIdle, `idle=${mixBoxShadowIdle} hover=${mixBoxShadowHover}`);
+
+// One row pinned (Pairs, from the drag above) and a different row hovered
+// (Mix) in the same shot.
+await screenshotWholeCard(affinityBlock, `${outDir}/pairs-hover-pin-1440.png`, () => mixRowLoc.hover());
+console.log("shot", `${outDir}/pairs-hover-pin-1440.png`);
+
+await page.mouse.move(0, 0); // stop hovering the mix row before Escape
+await page.keyboard.press("Escape");
+await page.waitForTimeout(150);
+const pinnedAfterEscape = await pairsRowLoc.evaluate((el) => el.classList.contains("vc-drive-pinned"));
+report("escape-unpins-row", !pinnedAfterEscape, `pinned=${pinnedAfterEscape}`);
+// That same Escape also backed the app out to the gallery (SCENE_URL's own
+// comment) — re-enter before anything below assumes the render loop (and so
+// the pads' own live cultures) is still running. `#/v/physarum2` is a
+// same-document hash navigation, not a reload, so every earlier drag/setting
+// and the device menu's own open/pinned state all survive the round trip
+// untouched — openPanel() below is idempotent for exactly this reason.
+await gotoScene();
+
 // --- 3. Switch to Touch: diamonds + blue/orange tints, own-strip hidden. ---
 const touchBtn = page.locator(".vc-pair-layer-touch");
 const hasTouchLayer = (await touchBtn.count()) > 0;
@@ -150,7 +267,7 @@ if (hasTouchLayer) {
   report("own-strip-hidden-on-touch", ownStripHidden, `hidden=${ownStripHidden}`);
   const markerShape = await pads.nth(0).locator(".vc-pad-marker path").count();
   report("touch-marker-is-diamond", markerShape >= 2, `path-count=${markerShape}`);
-  await affinityBlock.screenshot({ path: `${outDir}/pairs-touch-1440.png` }).catch(() => {});
+  await screenshotWholeCard(affinityBlock, `${outDir}/pairs-touch-1440.png`);
   console.log("shot", `${outDir}/pairs-touch-1440.png`);
 
   // Drag to bottom-left: both touch01 and touch10 negative (eating).
@@ -165,8 +282,10 @@ if (hasTouchLayer) {
   await page.waitForTimeout(300);
 }
 
-// --- 4. Tag a pad canvas, click a strain box, confirm the node survives and
-// selection classes land on the right pads. ---
+// --- 4. Tag a pad canvas, click a strain box, confirm the node survives a
+// selection change (the box selection no longer touches this widget at all,
+// 2026-09-28 follow-up — see pairPads.ts's own header — so there's nothing
+// left to check about pad classes here, only that nothing gets rebuilt). ---
 await page.evaluate(() => {
   document.querySelectorAll(".vc-pad-canvas")[0]?.setAttribute("data-tag", "pad0-canvas-marker");
 });
@@ -175,13 +294,8 @@ await boxes.nth(0).click(); // solo PP-A1
 await page.waitForTimeout(300);
 const tagSurvived = await page.evaluate(() => document.querySelectorAll(".vc-pad-canvas")[0]?.getAttribute("data-tag"));
 report("pad-canvas-survives-selection", tagSurvived === "pad0-canvas-marker", `tag=${tagSurvived}`);
-const padClasses = await pads.evaluateAll((els) => els.map((el) => ({ sel: el.classList.contains("vc-pad-sel"), dim: el.classList.contains("vc-pad-dim") })));
-// pairsOf(4) = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]] — with PP-A1 (0) solo,
-// pads 0/1/2 touch strain 0 and should be lit; pads 3/4/5 (strains 1,2,3
-// only) should dim.
-const expectSel = [true, true, true, false, false, false];
-const selMatches = padClasses.every((c, i) => c.sel === expectSel[i] && c.dim === !expectSel[i]);
-report("selection-dims-unrelated-pads", selMatches, JSON.stringify(padClasses));
+const noSelectionStyling = await pads.evaluateAll((els) => els.every((el) => !el.classList.contains("vc-pad-sel") && !el.classList.contains("vc-pad-dim")));
+report("no-selection-styling-on-pads", noSelectionStyling, `noSelectionStyling=${noSelectionStyling}`);
 
 // --- Phase 3: Random / Nudge / Keep own trails / Back, wired against the
 // real settings store — the padPads.ts mix row (physarum2-pairs-touch.md's
@@ -320,6 +434,54 @@ report("pad-culture-not-restarted", pixelSum > 0, `pixelSum=${pixelSum}`);
 const relevant = errors.filter((e) => !/ERR_CONNECTION_REFUSED/.test(e));
 report("no-console-errors", relevant.length === 0, JSON.stringify(relevant));
 
+// --- 7. Solo: pin the Layer row via a plain background press (away from its
+// switch buttons — isCardPress's own "press anywhere on the row" rule), turn
+// Solo on (O), confirm a top-level sibling column (Power/Bands+meters) is
+// hidden while the Affinity card itself (on the path to the pinned row)
+// isn't, then turn Solo back off and unpin. Run after every check that reads
+// a pill/button inside this card (Solo hides every row but the pinned one). ---
+await scrollToPairs();
+await layerRowLoc.click({ position: { x: 6, y: 6 } });
+await page.waitForTimeout(150);
+const layerPinned = await layerRowLoc.evaluate((el) => el.classList.contains("vc-drive-pinned"));
+report("layer-row-pins-on-background-press", layerPinned, `pinned=${layerPinned}`);
+await page.keyboard.press("o");
+await page.waitForTimeout(300);
+// applySolo() marks the whole .vc-cols-wrap (Power + Bands/meters) hidden as
+// one unit rather than recursing into it — .vc-power-col itself never gets
+// the class (it doesn't need to; an ancestor already carries it), so that's
+// the element to check, not .vc-power-col directly.
+const colsWrapHiddenUnderSolo = await page.evaluate(() => !!document.querySelector(".vc-cols-wrap.vc-solo-hidden"));
+const affinityCardHiddenUnderSolo = await affinityCard.evaluate((el) => el.classList.contains("vc-solo-hidden"));
+report(
+  "solo-hides-rest-of-panel-not-pinned-card",
+  colsWrapHiddenUnderSolo && !affinityCardHiddenUnderSolo,
+  `colsWrapHidden=${colsWrapHiddenUnderSolo} cardHidden=${affinityCardHiddenUnderSolo}`,
+);
+await page.keyboard.press("o"); // solo off
+await page.waitForTimeout(200);
+// Left pinned on purpose — Escape (as proven above) also backs the app out
+// to the gallery, which the Fold check below doesn't need to deal with; the
+// fold chevron isn't inside a .vc-row, so pin state doesn't affect it.
+
+// --- 8. Fold persistence: folding the Affinity card, closing the panel and
+// reopening it (a full renderSceneSettings rebuild) must leave it folded —
+// panelFolds.ts's own localStorage-backed persistence, the same mechanism
+// every other card's fold already relies on. ---
+await affinityCard.locator(".vc-fold").click();
+await page.waitForTimeout(150);
+const foldedBeforeReopen = await affinityCard.evaluate((el) => el.classList.contains("vc-folded"));
+report("affinity-card-folds", foldedBeforeReopen, `folded=${foldedBeforeReopen}`);
+await page.evaluate(() => document.getElementById("menuBtn")?.click()); // close
+await page.waitForTimeout(300);
+await openPanel();
+await scrollToPairs();
+const foldedAfterReopen = await page.locator(".vc-widget-card").first().evaluate((el) => el.classList.contains("vc-folded"));
+report("affinity-card-fold-persists-across-reopen", foldedAfterReopen, `folded=${foldedAfterReopen}`);
+// Unfold again — the phone-width section below expects the card open.
+await page.locator(".vc-widget-card .vc-fold").first().click();
+await page.waitForTimeout(150);
+
 // --- Phone-width screenshot, Smell layer — reload, not just resize: the
 // stacked layout is a media-query breakpoint the app applies at load/reflow
 // time (solocheck.mjs's own phone-screenshot section does the same). ---
@@ -329,14 +491,14 @@ await page.waitForTimeout(1500);
 await openPanel();
 await scrollToPairs();
 await page.waitForTimeout(1500); // let the pads' cultures draw at least once
-await affinityBlock.screenshot({ path: `${outDir}/pairs-smell-390.png` }).catch(() => {});
+await screenshotWholeCard(affinityBlock, `${outDir}/pairs-smell-390.png`);
 console.log("shot", `${outDir}/pairs-smell-390.png`);
 const touchBtn390 = page.locator(".vc-pair-layer-touch");
 if ((await touchBtn390.count()) > 0) {
   await touchBtn390.click();
   await page.waitForTimeout(300);
   await scrollToPairs();
-  await affinityBlock.screenshot({ path: `${outDir}/pairs-touch-390.png` }).catch(() => {});
+  await screenshotWholeCard(affinityBlock, `${outDir}/pairs-touch-390.png`);
   console.log("shot", `${outDir}/pairs-touch-390.png`);
 }
 

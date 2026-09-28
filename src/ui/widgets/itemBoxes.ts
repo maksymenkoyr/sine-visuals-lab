@@ -1,7 +1,8 @@
 import type { SceneSetting } from "../../render/sceneSettings.ts";
 import { createStrainPreview, type StrainPreview } from "../../render/scenes/physarum2Preview.ts";
 import type { AffinityPreset, PairWords } from "../../render/scenes/physarum2Affinity.ts";
-import { chipBtnLitStyle, chipBtnStyle, createChipButton, groupHeading } from "../controlsKit.ts";
+import { chipBtnLitStyle, chipBtnStyle, createChipButton } from "../controlsKit.ts";
+import { SCENE_VIOLET } from "../controlsTheme.ts";
 import { registerWidget, type LinkedSetting, type WidgetCtx } from "./registry.ts";
 import { getPreviewSource } from "./previews.ts";
 import { buildPairPads } from "./pairPads.ts";
@@ -19,14 +20,16 @@ import { allItemsSelected, editingHeading, primarySelection, sameSelection, solo
  * `rowOrder` — the per-item param keys (`SceneSetting.item.param`) to show,
  * in order — an optional `relations` block for a *pairwise* family
  * (`att<i><j>`/`touch<i><j>`, via `sceneItems.ts`'s `defineItemPairs`): the
- * Pairs pads (`src/ui/widgets/pairPads.ts`'s `buildPairPads`, a live
- * two-strain culture behind each pad, a Smell/Touch switch and named
- * presets) — and an optional `preview` id (Phase 3). Affinity has no
- * selection of its own — it always follows the box selection (the approved
- * UX) — so a click on a box funnels through `updateSelection` below (see the
- * Solo paragraph further down for what that actually rebuilds), and a
- * selection change calls the pads' own `setPairsSelection` in turn. The
- * current selection is the one piece of state this widget keeps of its own,
+ * Pairs pads (`src/ui/widgets/pairPads.ts`'s `buildPairPads`, mounted into
+ * its own card via `ctx.mountCard` — see that function's own file header,
+ * "Its own card, four rows" — a live two-strain culture behind each pad, a
+ * Smell/Touch switch and named presets) — and an optional `preview` id
+ * (Phase 3). A click on a box funnels through `updateSelection` below (see
+ * the Solo paragraph further down for what that actually rebuilds); the
+ * Pairs card no longer reacts to the selection at all (2026-09-28: the user
+ * found a dimmed pad for an unselected strain read as "only three [pads]
+ * work" — see pairPads.ts's own header). The current selection is the one
+ * piece of state this widget keeps of its own,
  * in localStorage keyed by (scene, family) — a convenience only, wrapped in
  * try/catch like every other localStorage read/write in this codebase
  * (sceneSettings.ts's own store is the precedent).
@@ -41,8 +44,8 @@ import { allItemsSelected, editingHeading, primarySelection, sameSelection, solo
  * item's same setting, draws a divergent-value tick per one that still
  * disagrees, and folds a disagreeing drive/patch into a "Mixed — …" summary.
  * The Pairs pads don't fan a drag out across a multi-selection the way a row
- * does — a pad is already a specific pair, so a selection just dims the pads
- * that don't touch it (`setPairsSelection`, below).
+ * does — since 2026-09-28 they don't read the selection at all (see the
+ * paragraph above).
  *
  * **Solo vs. group, and no redraw on click (2026-09-27b).** A tap on a box
  * BODY *solos* — the selection becomes exactly that one item, even when a
@@ -55,10 +58,10 @@ import { allItemsSelected, editingHeading, primarySelection, sameSelection, solo
  * Shift/Cmd/Ctrl-modified tap on the body does the same toggle for a desktop
  * user who'd rather not aim for the checkbox. None of this calls
  * `ctx.rerender()` any more: a selection change only (a) updates the box
- * classes/checkboxes/"Editing" line in place (`refreshBoxSelection`),
+ * classes/checkboxes/"Editing" line in place (`refreshBoxSelection`) and
  * (b) disposes and re-mounts the rows section through `ctx.mountRows`
- * (`mountRowsSection`), and (c) re-applies the pads' selection highlight
- * (`pairPads.ts`'s `setSelection`). The boxes themselves, their live preview
+ * (`mountRowsSection`) — the Pairs pads have nothing left to update on a
+ * selection change (see above). The boxes themselves, their live preview
  * canvases and sims, the pads, and the tick loop are all built once per
  * widget mount and never touched by a selection change — see registry.ts's
  * header for why `ctx.mountRows` exists rather than reaching for
@@ -234,13 +237,11 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   let primary = primarySelection(selectedSet);
   const previewSource = opts.preview ? getPreviewSource(opts.preview) : undefined;
 
-  // Set once the rows section / Pairs pads below actually mount — see
-  // `mountRowsSection` and the `if (rel)` block near the end of this builder.
-  // Predeclared here (rather than as `function` declarations nested inside
-  // an `if`, which module strict mode block-scopes) so `updateSelection`
-  // above can reach either regardless of source order.
+  // Set once the rows section below actually mounts — see `mountRowsSection`.
+  // Predeclared here (rather than a `function` declaration nested inside an
+  // `if`, which module strict mode block-scopes) so `updateSelection` above
+  // can reach it regardless of source order.
   let rowsHandle: { dispose(): void } | undefined;
-  let setPairsSelection: ((sel: readonly number[]) => void) | undefined;
 
   // Every box's own element and checkbox, filled by the box-building loop
   // below. `refreshBoxSelection` is the only thing that ever touches them
@@ -278,7 +279,6 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     writeSelectedSet(ctx.sceneId, family, next);
     refreshBoxSelection();
     mountRowsSection();
-    setPairsSelection?.(selectedSet);
   }
 
   // Phase 3 per-box state, filled in the loop below only when a preview
@@ -621,14 +621,24 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   const rel = opts.relations;
   if (!rel) return;
 
-  container.appendChild(groupHeading(rel.title));
-  // buildPairPads is built once here, exactly like the boxes above — never
-  // rebuilt by a selection change (this file's header's Solo paragraph).
-  // `pair`/`effective` are the same previewSource this widget's own boxes
-  // already resolved above (`opts.preview`), so a pad's culture reads the
-  // identical live motion/colour a specimen box's own preview does.
+  // Its own card, right after the Scene card — see pairPads.ts's own file
+  // header, "Its own card, four rows" (2026-09-28), for why this replaced a
+  // plain `groupHeading` inside the Scene card body. Built once here, exactly
+  // like the boxes above — never rebuilt by a selection change (this file's
+  // header's Solo paragraph); `mountCard` itself is only ever rebuilt by
+  // `renderSceneSettings` (deviceMenu.ts), the same trigger that rebuilds
+  // this whole widget. `pair`/`effective` are the same previewSource this
+  // widget's own boxes already resolved above (`opts.preview`), so a pad's
+  // culture reads the identical live motion/colour a specimen box's own
+  // preview does.
+  const card = ctx.mountCard({
+    title: rel.title,
+    accent: SCENE_VIOLET,
+    foldId: `${ctx.sceneId}-${family}-affinity`,
+  });
   const pads = buildPairPads({
     ctx,
+    container: card.body,
     family,
     count,
     labels,
@@ -641,9 +651,6 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     pair: previewSource?.pair,
     stateKey: `${ctx.sceneId}:${family}`,
   });
-  container.appendChild(pads.el);
-  pads.setSelection(selectedSet);
-  setPairsSelection = (sel) => pads.setSelection(sel);
   ctx.onTick(() => pads.tick());
   ctx.onDispose(() => pads.dispose());
 });

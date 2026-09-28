@@ -964,9 +964,13 @@ body.vc-keys-reveal [data-keycap]::after {
 /* ---- src/ui/widgets/pairPads.ts ----
  * The Pairs widget: the Smell/Touch switch, the own-trail strip's vertical
  * faders, the six pads (a live culture canvas under an SVG overlay) and the
- * mix row/presets below them. Replaces the old .vc-relweb*/.vc-relrow* rules
- * above this comment's own predecessor (relationWeb.ts/relationRows.ts,
- * deleted the same day this widget landed). */
+ * mix row/presets below them, one plain .vc-row (this file's own wake-on-
+ * hover/focus + .vc-drive-pinned grammar) per section since 2026-09-28's own
+ * card mount (pairPads.ts's file header, "Its own card, four rows") — no
+ * rules of its own needed for that part, since every row already gets it for
+ * free. Replaces the old .vc-relweb*/.vc-relrow* rules above this comment's
+ * own predecessor (relationWeb.ts/relationRows.ts, deleted the same day this
+ * widget landed). */
 .vc-pair-layers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
 .vc-pair-layer {
   display: grid; gap: 2px; text-align: left; padding: 8px 10px; cursor: pointer; font: inherit; color: inherit;
@@ -983,7 +987,6 @@ body.vc-keys-reveal [data-keycap]::after {
   background: rgba(var(--lc), 0.06);
 }
 .vc-pair-layer[aria-checked="true"] b { color: rgb(var(--lc)); }
-.vc-pair-how { margin: 0 0 10px; font-size: 12px; color: rgba(255, 255, 255, 0.4); }
 .vc-pair-label {
   font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255, 255, 255, 0.45);
   margin: 10px 0 6px;
@@ -993,8 +996,6 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-own { display: grid; justify-items: center; gap: 4px; padding: 8px 4px 6px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; }
 .vc-own-code { font: 500 11px/1 ${FONT_MONO}; }
 .vc-own-val { font: 400 10.5px/1.25 ${FONT_MONO}; color: rgba(255, 255, 255, 0.6); text-align: center; }
-.vc-own-sel { border-color: var(--c, ${SCENE_VIOLET}); }
-.vc-own-dim { opacity: 0.45; }
 .vc-own-note { margin: 0 0 10px; font-size: 12px; color: rgba(255, 255, 255, 0.4); padding: 8px 10px; border: 1px dashed rgba(255, 255, 255, 0.14); border-radius: 6px; }
 /* The own-trail fader — a vertical version of the same slider grammar a pad
  * axis draws with (--c is the strain's own colour, set on .vc-own). */
@@ -1012,7 +1013,10 @@ body.vc-keys-reveal [data-keycap]::after {
 
 .vc-pair-status { min-height: 2.6em; margin: 0 0 10px; font-size: 12.5px; color: rgba(255, 255, 255, 0.6); }
 
-.vc-pads { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+/* gap 18px, up from the original 12px — the user asked for "gaps" between
+ * the pads once they saw them next to the Signal/Gate cards' own airier row
+ * spacing (2026-09-28). */
+.vc-pads { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 12px; }
 .vc-pad { display: grid; gap: 5px; }
 .vc-pad-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font: 400 11px/1 ${FONT_MONO}; }
 .vc-pad-body { display: grid; grid-template-columns: 13px minmax(0, 1fr); gap: 3px; }
@@ -1029,6 +1033,8 @@ body.vc-keys-reveal [data-keycap]::after {
   border: 1px solid rgba(255, 255, 255, 0.12); touch-action: none; cursor: crosshair;
 }
 .vc-pad-sq:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
+/* A pointer press focuses the pad/fader for its keys without the ring (pairPads.ts's pointerFocus). */
+.vc-pad-sq.vc-pf:focus-visible, .vc-vfader.vc-pf:focus-visible { outline: none; }
 .vc-pad-canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.85; }
 .vc-pad-sq svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .vc-pad-axis { stroke: rgba(255, 255, 255, 0.2); vector-effect: non-scaling-stroke; }
@@ -1038,10 +1044,6 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-pad-ring { vector-effect: non-scaling-stroke; }
 .vc-pad-ring-white { stroke: rgba(255, 255, 255, 0.9); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
 .vc-pad-beh { color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Selection dim/highlight (itemBoxes.ts's box selection, followed here —
- * this widget has no selector of its own, see its header). */
-.vc-pad-sel { outline: 1px solid ${SCENE_VIOLET}; outline-offset: 2px; border-radius: 8px; }
-.vc-pad-dim { opacity: 0.45; }
 
 /* Random / Nudge / Keep own trails / Back (pairPads.ts's own header, "The mix
  * row"). Back starts disabled (an empty history) via the plain disabled

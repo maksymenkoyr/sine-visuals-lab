@@ -86,6 +86,25 @@ were added for it: `seedSpread` ("Spread", replacing the old fixed
 relabelled "Dose". See `tests/physarum2Preview.test.ts` and the Phase 3
 additions to `tests/physarum2.test.ts`.
 
+**The Affinity card (2026-09-28).** `pairPads.ts`'s widget no longer appends
+into the Scene card body — `itemBoxes.ts` mounts it into its own card via
+`WidgetCtx.mountCard` (`src/ui/widgets/registry.ts`), a sibling of the Scene
+card built and torn down by `deviceMenu.ts`'s `renderSceneSettings` the same
+way, into a `sceneWidgetCardsHost` div placed right after `sceneCard.el`.
+Inside it, the Smell/Touch switch, the own-trail strip, the pads grid and the
+mix row are each a plain `.vc-row`, made pinnable/soloable through
+`WidgetCtx.registerCard` — `deviceMenu.ts`'s `registerPinnableRow`, factored
+out of `appendSettingRow`'s own `registerPinRow` for this, so both paths
+share one pin/solo/Tab implementation. `registerCard`'s own doc comment
+(registry.ts) has the pin-identity rationale: a row like the pads grid or the
+mix row edits more than one setting at once, so it's keyed by a *synthetic*
+`SceneSetting` (`pairPads.ts`'s `rowSpec` — a unique `key`, unused filler
+`label`/`min`/`max`/`step`/`default`, never read by `ctx.get`/`ctx.set` or
+uploaded anywhere) rather than a real `att`/`touch` spec that would
+misrepresent which cells the row actually edits. Solo/the solo eye/jumpToBlock
+now search `sceneWidgetCardsHost` alongside `sceneCard.el` for whichever card
+holds the pinned row (`pinnableCards`/`findPinnedRowEl`, deviceMenu.ts).
+
 ## References
 
 https://github.com/fogleman/physarum (MIT) — studied for the multi-species/
@@ -527,6 +546,48 @@ and `powder.ts`'s curl noise).
   - Tuned and screenshotted against synthetic audio only (`bpm=120`); not
     yet checked against real music from a mic (same standing gap as every
     other tuning note in this record).
+- **2026-09-28: pad and box previews move with the music.** The user: "these
+  doesn't move at all. like 0 dynamic." Both live previews (a specimen box's
+  own single-strain culture and a pad's two-strain culture) read their drives
+  through `WidgetCtx.driveValue`, which reports 0 while a control is still on
+  its Scene default — the common case, since Nutrient and Excitability are
+  driven by their Scene source by default (each strain's own band, and the
+  beat pulse; `resolveStrains`), not by a patched source — so every preview
+  ran as if the room were silent even while the main dish reacted normally. `probe()` now
+  reports every strain's live drive readings (and the automatic beat reseed's
+  `seedEpoch`/`seedDose`/`seedRadius`, as actually resolved) alongside
+  population/territory, and `effective()` prefers those over `driveValue`;
+  each pad also mirrors the reseed itself via the new `seedColony`. Pads step
+  on a wall-clock time budget (`PAD_STEPS_PER_SEC`, capped per tick by
+  `PAD_MAX_STEPS_PER_TICK`) instead of once every other panel tick, which had
+  been running them at a quarter of the scene's own pace on a 30 fps display,
+  and the pad cultures are drawn less dimmed under their chrome. Landed in
+  c900a28.
+- **2026-09-28: the Affinity block becomes its own card.** The user: "the
+  problem is this whole card not clickable and never gets focus" (unlike
+  every other row in the panel, it never woke on hover/focus and a press
+  never pinned it) and "also can u add some air. make this for example as
+  separate card, with gaps [pointing at the pads grid]. mb u can see couple
+  others good examples." Landed as `WidgetCtx.mountCard`/`registerCard`
+  (registry.ts) — see "Where the code is" above for the mechanism — with the
+  Smell/Touch switch, own-trail strip, pads grid and mix row each a plain
+  `.vc-row` (wakes on hover/focus, pins on press, Escape unpins, Solo shows
+  only it). `.vc-pads`' own gap grew from the original 12px to 18px for the
+  "gaps" the user pointed at. Immediate follow-up, same session, after
+  reviewing a screenshot with a strain box selected: "why only three works?
+  clean up this focus mess around this card" — the box-selection lit/dim
+  styling this widget had carried since it was built (`setSelection`,
+  `vc-pad-sel`/`vc-pad-dim`/`vc-own-sel`/`vc-own-dim`, "Selection as lit/dim
+  pads" above) read as broken once only some pads kept their normal look, so
+  it was removed outright: every pad and own-trail fader now renders
+  identically regardless of the box selection, and the only highlights left
+  in the card are the standard `.vc-row` wake/pin rings and each pad/fader's
+  own `:focus-visible` outline — for keyboard focus only: a pad or fader
+  focuses itself on a pointer press (so its arrow keys work) with a
+  preventDefault'ed press, which Chrome reads as keyboard focus and ringed
+  inside the pinned row's own ring; `pairPads.ts`'s `pointerFocus` tags
+  that focus so the ring stays off until a key is pressed. itemBoxes.ts's
+  own box selection (the strain rows below the boxes) is unaffected.
 
 ## Tuning notes
 
