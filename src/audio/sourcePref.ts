@@ -33,9 +33,13 @@
  *
  * Which share TYPE yields audio is a second, independent dimension, and it's
  * the one people actually get wrong. In Chrome's picker a tab share offers
- * "Also share tab audio", an entire-screen share offers "Also share system
- * audio", and a window share offers neither — a window is silent no matter
- * what. Leave the box unticked and getDisplayMedia hands back a video-only
+ * "Also share tab audio" and an entire-screen share offers "Also share system
+ * audio". A window share carries that one app's sound — captureDisplayAudio()
+ * asks for `windowAudio: "window"`; without it Chrome offered the whole
+ * system's audio there, so sharing a silent Spotify window heard a YouTube
+ * tab. Per-app window audio needs a recent Chrome (141+, and on macOS its
+ * application-audio capture); older ones give a window share no audio box.
+ * Leave the box unticked and getDisplayMedia hands back a video-only
  * stream, which is exactly the case captureDisplayAudio() throws on.
  * DISPLAY_SHARE_GUIDE below is the one-line user-facing form of this
  * paragraph; the start prompt (src/app.ts), the Input card's Source row
@@ -158,4 +162,4 @@ export function displayCaptureSupported(): boolean {
  *  this file's header. Worded to stand alone so every surface can render it
  *  verbatim rather than paraphrasing it into three slightly different truths. */
 export const DISPLAY_SHARE_GUIDE =
-  'A screen share is silent unless you tick "Also share tab audio" (a tab) or "Also share system audio" (a whole screen) — a single window carries no audio.';
+  'A screen share is silent unless you tick its audio box: a tab shares that tab, a window shares that app (e.g. Spotify), a whole screen shares everything playing.';
