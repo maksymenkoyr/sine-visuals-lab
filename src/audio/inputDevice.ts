@@ -97,6 +97,42 @@ export function setInputDevicePref(next: InputDevicePref | null): void {
   persist();
 }
 
+/**
+ * Inputs hidden from the Source row's list — the virtual devices other apps
+ * install (Steam Streaming, Zoom, Teams) that nobody here will ever listen
+ * to. Kept by label, not id, for the same reason the choice above keeps a
+ * label: ids rotate, names don't. Hiding only declutters the list — the
+ * Source row still shows a hidden input while it's the live one, and the
+ * idle preview (src/audio/inputPreview.ts) skips it.
+ */
+const HIDDEN_KEY = "vibe.hiddenInputs";
+
+function loadHidden(): Set<string> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]");
+    return new Set(Array.isArray(parsed) ? parsed.filter((l): l is string => typeof l === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+let hidden = loadHidden();
+
+export function isInputHidden(label: string): boolean {
+  return hidden.has(label);
+}
+
+export function setInputHidden(label: string, hide: boolean): void {
+  hidden = new Set(hidden);
+  if (hide) hidden.add(label);
+  else hidden.delete(label);
+  try {
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify([...hidden]));
+  } catch {
+    // Not fatal — the list just won't persist across reloads.
+  }
+}
+
 /** The real, pickable inputs out of an enumerateDevices() list, in the
  *  browser's order. Empty until the mic permission has been granted once —
  *  before that browsers hand back placeholder entries with no id or label,

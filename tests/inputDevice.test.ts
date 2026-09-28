@@ -8,7 +8,20 @@ import {
   isMissingDeviceError,
   inputKind,
   deviceLabel,
+  isInputHidden,
+  setInputHidden,
 } from "../src/audio/inputDevice.ts";
+
+describe("hidden inputs", () => {
+  it("hides and shows by label", () => {
+    expect(isInputHidden("Steam Streaming Microphone")).toBe(false);
+    setInputHidden("Steam Streaming Microphone", true);
+    expect(isInputHidden("Steam Streaming Microphone")).toBe(true);
+    expect(isInputHidden("MacBook Pro Microphone")).toBe(false);
+    setInputHidden("Steam Streaming Microphone", false);
+    expect(isInputHidden("Steam Streaming Microphone")).toBe(false);
+  });
+});
 
 describe("deviceLabel", () => {
   it("gives the default input's track the real device's own name", () => {
