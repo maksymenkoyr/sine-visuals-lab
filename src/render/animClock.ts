@@ -159,8 +159,8 @@ export interface AnimFrame {
   /** This tick's silence-gate dimmer (src/audio/silenceGate.ts) — the same
    *  value bandEnergy.advance() was called with above, computed once here
    *  from `gate`/`frame.level` (see advance()'s own doc). 1 with no gate or
-   *  a fully open room, down toward 0 the quieter the room reads. The
-   *  Rhythm card's hits history reads this to shade the ground (alpha
+   *  a fully open room, down toward 0 the quieter the room reads. The Hits
+   *  card's hits history reads this to shade the ground (alpha
    *  proportional to `1 - gateDimmer`, so a half-open gate reads lighter
    *  than a shut one); a BeatListener's "bass"/"mid"/"high" sources are
    *  gated by construction (lowOnset/midOnset/highOnset are already false
@@ -180,7 +180,7 @@ export interface AnimFrame {
    *  the `hit` param below. Copies, same reasoning as `hits` above copying
    *  bandEnergy's own diags: these hold the *last fired hit's* numbers
    *  (they only change on that detector's own onset), which is exactly what
-   *  the meters panel's Hit strength card (audioMeters.ts) wants to watch
+   *  the Hits card's own Shape section (audioMeters.ts) wants to watch
    *  without an old AnimFrame changing under it later. */
   hitStrength: { beat: HitParts; low: HitParts; mid: HitParts; high: HitParts };
 }

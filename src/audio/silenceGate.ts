@@ -125,8 +125,9 @@ export interface SilenceGateMarks {
  *  this tick. `dimmer` is FeatureExtractor.gateDimmer, `fired` is that same
  *  tick's FeatureFrame.onset, `suppressed` is FeatureExtractor.suppressed.
  *  One definition, shared by app.ts's `lastGate`, deviceMenu.ts's
- *  DeviceMenu.update(), and audioMeters.ts's AudioMeters.update() and Gate
- *  card, so none of them can drift into an incompatible shape. `null`
+ *  DeviceMenu.update(), and audioMeters.ts's AudioMeters.update() and
+ *  Signal card's Gate row, so none of them can drift into an incompatible
+ *  shape. `null`
  *  wherever a device has no local extractor to read (a renderer, the
  *  synthetic feed) — the same null-hides-itself convention
  *  lastFixedEnergy/lastFluxRatio already use. */

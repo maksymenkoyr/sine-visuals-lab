@@ -194,7 +194,7 @@ export class FeatureExtractor {
    *  Mutated in place every update() (like bandEnergy.ts's own group
    *  diags), so this is an alias, not a snapshot: read it before the next
    *  update() call. A local diagnostic like fixedEnergy/bandSpanDb above,
-   *  never part of FeatureFrame — the Rhythm card's hits history in
+   *  never part of FeatureFrame — the Hits card's hits history in
    *  audioMeters.ts is the one consumer. */
   get onsetDiag(): Readonly<OnsetDiag> {
     return this.diag;
@@ -204,7 +204,7 @@ export class FeatureExtractor {
    *  firing comparison — see silenceGate.ts's silenceGateDimmer. 1 with no
    *  `gate` argument (or whenever the gate is off), down toward 0 the
    *  quieter the room reads. A local diagnostic like fluxRatio above, never
-   *  part of FeatureFrame — the Gate card's Dimmer row and History trace
+   *  part of FeatureFrame — the Signal card's Gate row and its trace
    *  (audioMeters.ts) are the one reader. */
   get gateDimmer(): number {
     return this.lastGateDimmer;
@@ -214,8 +214,9 @@ export class FeatureExtractor {
    *  dimmer stopped `onset` from firing — see update()'s own comment on why
    *  this needs a one-shot spacing separate from the refractory a suppressed
    *  hit deliberately doesn't start. A local diagnostic like fluxRatio
-   *  above, never part of FeatureFrame — the Gate card's History trace
-   *  (audioMeters.ts) marks where a hit was stopped. */
+   *  above, never part of FeatureFrame — gated hits show up as faint ticks
+   *  on the Hits card's own lanes; the Signal card's Gate row no longer
+   *  marks them. */
   get suppressed(): boolean {
     return this.lastSuppressed;
   }
@@ -236,7 +237,7 @@ export class FeatureExtractor {
   // local diagnostic like fixedEnergy/bandSpanDb above, never part of
   // FeatureFrame: the onset flag it explains is a boolean by design, but a
   // tuning session wants to see how hard a hit cleared the bar (or how
-  // close it came) — the Rhythm card's hits history in audioMeters.ts.
+  // close it came) — the Hits card's hits history in audioMeters.ts.
   private lastFluxRatio = 0;
   private lastGateDimmer = 1;
   private lastSuppressed = false;
