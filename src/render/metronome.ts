@@ -1,16 +1,16 @@
 import { createTempoSettle } from "./tempoSettle.ts";
 
-// The metronome *is* the BPM card's number, ticking: evenly spaced at
-// exactly the tempo audioMeters.ts's BPM card shows, silent whenever that
-// card reads "--". The user asked for this directly — looking at the old
+// The metronome *is* the Tempo card's BPM, ticking: evenly spaced at
+// exactly the tempo audioMeters.ts's Tempo card shows, silent whenever that
+// BPM reads "--". The user asked for this directly — looking at the old
 // Rhythm card: "we already have bpm. can we pull metronome from it" — after
 // the old confidence-gated start (tempoLock held above a line for a while
 // before this would run at all) left the Metronome on "--" for long
-// stretches while the BPM card, right beside it, already had a number.
+// stretches while the BPM, right beside it, already had a number.
 // tempoSettle.ts is the one settle rule both now read, so they can't
 // disagree by construction; see that file's header for the rule itself.
 //
-// What this trades away: it ticks whenever the BPM card shows a number,
+// What this trades away: it ticks whenever the BPM shows a number,
 // including on music where that number is only ever a guess (a beatless
 // pad, a loose room recording) — same as the card itself already does. It
 // is not a claim that the tempo is *right*, only that it's the same number
@@ -46,8 +46,8 @@ export interface MetronomeClockInput {
 }
 
 export interface Metronome {
-  /** False whenever tempoSettle's own held value is 0 (the BPM card reads
-   *  "--") — never gated on tempoLock; see this file's own header. */
+  /** False whenever tempoSettle's own held value is 0 (the Tempo card's BPM
+   *  reads "--") — never gated on tempoLock; see this file's own header. */
   readonly running: boolean;
   /** The tempo it's actually ticking at — exactly tempoSettle's held value
    *  while running (unrounded), 0 while idle. Not the same object as
@@ -74,7 +74,8 @@ export interface Metronome {
   /** Advances by dtSec. `clock` is beatClock's own reading this tick;
    *  `rawBpm` is the tracker's *unsmoothed* bpm (FeatureFrame.bpm passed
    *  through — AnimFrame.bpm) — the same number tempoSettle.ts settles for
-   *  the BPM card, pushed here every tick so the two can never disagree.
+   *  the Tempo card's BPM, pushed here every tick so the two can never
+   *  disagree.
    *  Call once per render tick, same placement as beatClock's own
    *  advance(). */
   advance(dtSec: number, clock: MetronomeClockInput, rawBpm: number): void;
@@ -113,7 +114,8 @@ export const PHASE_FOLLOW_MAX_RATE = 0.25; // beats/s
 // ahead of it, `beats` holds still for the difference (one longer interval)
 // rather than stepping back, so `beats` stays monotonic and no beat can tick
 // twice. An earlier version always jumped forward, which from "ahead" meant
-// most of a beat and drew a near-double tick in the panel's Metronome row.
+// most of a beat and drew a near-double tick in the panel's Timing strip's
+// Metronome lane.
 export const PHASE_SNAP_BEATS = 0.15;
 // Tempo follow while confident: only actually pulls `bpm` toward clock.bpm
 // while the two are already close (within RESYNC_RATIO) — see the next
