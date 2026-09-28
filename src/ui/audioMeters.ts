@@ -39,8 +39,6 @@ import {
   withAlpha,
 } from "./controlsTheme.ts";
 import {
-  chipBtnLitStyle,
-  chipBtnStyle,
   createAdvancedSection,
   createCard,
   createChipButton,
@@ -77,37 +75,40 @@ import { setHintText } from "./hintSwatches.ts";
  * runs, Beat is everything about *when*, Song is the slow trend over a whole
  * track.
  *
- *  - Scope (first): a rolling waveform of the last few seconds with a clip
- *    warning, read straight off this device's mic by waveformAnalyser.ts.
- *    Local-only by construction — samples never cross src/net/protocol.ts's
- *    wire frame, so a mic-less renderer has nothing to show here and the
- *    card hides itself. (No stereo width/balance: a phone or laptop mic is
- *    mono, so they'd read "mono" nearly always.)
- *  - Signal: FeatureFrame.level (pre-AGC, absolute) beside .energy (post-AGC)
- *    — the only way to see features.ts's adaptive floor/peak doing its job,
- *    since its whole point is to make that invisible downstream — and under
- *    them a History trace of both over the last HISTORY_SPAN_SEC, with
- *    FeatureExtractor.fixedEnergy (energy as it would read with auto-gain
- *    at its minimum) as a dim reference line. The gap between energy and
- *    that reference is exactly what the Input card's Auto-gain amount is
- *    adding; sliding it down closes the gap. (No raw low/mid/high energy
- *    spectrum strip already shows that. Their post-bandEnergy pulses live
- *    in the Hits card's own hits history instead — see below.) Last, a
- *    Gate row: the silence gate's (src/audio/silenceGate.ts) own Dimmer
- *    reading — how much of a hit's strength the gate is currently letting
- *    through — with a trace beneath it, inserted the way the Character
- *    card's Centroid row inserts its own, of Level against the Input
- *    card's two marks (dashed guides, zoomed so the upper one sits
- *    mid-height); hits the gate actually stops show up as faint ticks on
- *    the Hits card rather than a series of their own here. Local-only like
- *    fixedEnergy above — a device with no FeatureExtractor of its own (a
- *    renderer, the synthetic feed) reads Gate idle too, same as the Hits
- *    card's own Beat lane.
- *  - Loudness: the broadcast measurement — BS.1770 / EBU R128 LUFS from
- *    lufsAnalyser.ts (math in lufs.ts). Momentary on the bar with the
+ *  - Signal (first): everything this device's own mic measures, before any
+ *    beat/tempo logic runs — Waveform leads it off: a rolling picture of the
+ *    last few seconds with a clip warning, read straight off this device's
+ *    mic by waveformAnalyser.ts. Local-only by construction — samples never
+ *    cross src/net/protocol.ts's wire frame, so a mic-less renderer has
+ *    nothing to show here and the row hides itself. (No stereo
+ *    width/balance: a phone or laptop mic is mono, so they'd read "mono"
+ *    nearly always.) Then Level: FeatureFrame.level (pre-AGC, absolute).
+ *    Loudness next — the broadcast measurement, BS.1770 / EBU R128 LUFS
+ *    from lufsAnalyser.ts (math in lufs.ts): Momentary on the bar with the
  *    LUFS_TARGET_* marks, Short-term as the big number, Integrated beneath
- *    with a Reset chip. Local-only like the Scope, since it needs this
- *    device's own samples; hidden on a mic-less renderer.
+ *    with a Reset chip in the card's own header. Local-only like Waveform,
+ *    since it needs this device's own samples; hidden on a mic-less
+ *    renderer, the header's Reset chip along with it. Energy is Level's
+ *    post-AGC sibling — the only way to see features.ts's adaptive
+ *    floor/peak doing its job, since its whole point is to make that
+ *    invisible downstream — and under it a History trace of both Level and
+ *    Energy over the last HISTORY_SPAN_SEC, with FeatureExtractor.fixedEnergy
+ *    (energy as it would read with auto-gain at its minimum) as a dim
+ *    reference line. The gap between Energy and that reference is exactly
+ *    what the Input card's Auto-gain amount is adding; sliding it down
+ *    closes the gap. (No raw low/mid/high energy — the spectrum strip
+ *    already shows that. Their post-bandEnergy pulses live in the Hits
+ *    card's own hits history instead — see below.) Last, a Gate row: the
+ *    silence gate's (src/audio/silenceGate.ts) own Dimmer reading — how
+ *    much of a hit's strength the gate is currently letting through — with
+ *    a trace beneath it, inserted the way the Character card's Brightness
+ *    row inserts its own Centroid trace, of Level against the Input card's
+ *    two marks (dashed guides, zoomed so the upper one sits mid-height);
+ *    hits the gate actually stops show up as faint ticks on the Hits card
+ *    rather than a series of their own here. Local-only like fixedEnergy
+ *    above — a device with no FeatureExtractor of its own (a renderer, the
+ *    synthetic feed) reads Gate idle too, same as the Hits card's own Beat
+ *    lane.
  *  - Hits: one lane each for Beat (the broadband detector) and
  *    bandEnergy.ts's Low/Mid/High (createHitsHistory), tracing each one's
  *    ratio against its firing threshold plus a tick for every
@@ -140,12 +141,15 @@ import { setHintText } from "./hintSwatches.ts";
  *    pulse on a hit.
  *  - Character: first, Section — sectionIntensity with a drop flash, the
  *    phrase-level trend the dials below are the instant-by-instant texture
- *    of. Then one row per entry in MUSIC_DIALS (never a hardcoded list),
- *    each marking NEUTRAL with a tick — what autoTune.ts resolves every "A"
- *    chip against, otherwise invisible. Copy comes from DIAL_LABELS. Last,
- *    one hand-added Centroid row (not a MUSIC_DIALS entry) for
- *    spectralCentroid.ts's fast, range-adapted counterpart to the slow
- *    Brightness dial just above it.
+ *    of. Then a 2-column grid of every entry in MUSIC_DIALS except
+ *    brightness (never a hardcoded list — filtered, so a new dial can't
+ *    ship without a cell here), each marking NEUTRAL with a tick — what
+ *    autoTune.ts resolves every "A" chip against, otherwise invisible. Copy
+ *    comes from DIAL_LABELS. Last, a full-width Brightness row: the dial's
+ *    own meter, with spectralCentroid.ts's fast, range-adapted Centroid
+ *    traced directly under its bar (not a MUSIC_DIALS entry of its own —
+ *    it's the live signal Brightness is the track-level summary of) and a
+ *    small legend naming the trace.
  *
  * Fills move every frame; readout text at ~10Hz (the same reasoning as
  * deviceMenu.ts's AUTO_UI_REFRESH_MS — text writes cost layout, and eyes
@@ -156,19 +160,21 @@ import { setHintText } from "./hintSwatches.ts";
  * work entirely — folding buys back the per-frame cost, not just the
  * screen space.
  *
- * The RAW chip above the cards flips every row that has a pre-smoothing
- * counterpart to it, for diagnosing "is this a bad measurement or just a
- * slow ease": Section reads sectionIntensity's un-slewed target
- * (anim.raw.sectionIntensity), the Character dials read musicProfile's
- * pre-ease targets (anim.raw.profile), BPM shows the estimator's raw
- * candidate instead of tempoSettle.ts's settled reading, and the waveform's
- * readout shows this buffer's instant peak instead of AnimFrame.wavePeak's
- * held one (animClock.ts). Level and the beat dot are already raw
- * and don't change. Energy has no pre-envelope value threaded through
- * AnimFrame, so it reads the mean of `rawBands` instead — the same
+ * setRaw (called by deviceMenu.ts's one merged RAW chip, in the column head
+ * above "Sound" — see that file's own comment for why one chip drives this
+ * and the spectrum strip's own raw mode together) flips every row that has
+ * a pre-smoothing counterpart to it, for diagnosing "is this a bad
+ * measurement or just a slow ease": Section reads sectionIntensity's
+ * un-slewed target (anim.raw.sectionIntensity), the Character dials read
+ * musicProfile's pre-ease targets (anim.raw.profile), BPM shows the
+ * estimator's raw candidate instead of tempoSettle.ts's settled reading,
+ * and the waveform's readout shows this buffer's instant peak instead of
+ * AnimFrame.wavePeak's held one (animClock.ts). Level and the beat dot are
+ * already raw and don't change. Energy has no pre-envelope value threaded
+ * through AnimFrame, so it reads the mean of `rawBands` instead — the same
  * pre-AGC/pre-envelope feed app.ts's captureRawBands hands the spectrum
  * strip's own listening-post chip. That feed is local-only, so Energy reads
- * idle under RAW on a mic-less renderer, same as the Scope card hiding
+ * idle under RAW on a mic-less renderer, same as the Waveform row hiding
  * itself. A folded card still skips its own work when RAW is on — the flag
  * only changes what a card computes while it's open, not whether folding
  * buys back that cost. The waveform's auto-zoom is NOT part of this: it's a
@@ -176,11 +182,11 @@ import { setHintText } from "./hintSwatches.ts";
  * stays on in both modes.
  *
  * The patch bay's jacks (src/ui/jack.ts) mount on every row above that a
- * drive source can feed — Waveform (Scope), Energy (Signal), Section's own
- * Song+Drop pair and Centroid (Character), the BPM block's own
- * Metronome+Tempo pair, Lock, the Timing strip's own Grid/Metronome jacks
- * (createTimingStrip) and Wave's Beat/Bar pair (Tempo), and one per
- * hits-history lane plus a second
+ * drive source can feed — Waveform and Energy (Signal), Section's own
+ * Song+Drop pair and Centroid, on the Brightness row (Character), the BPM
+ * block's own Metronome+Tempo pair, Lock, the Timing strip's own
+ * Grid/Metronome jacks (createTimingStrip) and Wave's Beat/Bar pair
+ * (Tempo), and one per hits-history lane plus a second
  * Beat-lane jack for Onset surge (createHitsHistory's own laneMounts, Hits)
  * — plus the Bands card's own level rows (BAND_LEVEL_CHOICES, deviceMenu.ts)
  * and its Frequencies corner, built directly
@@ -208,10 +214,11 @@ export interface AudioMeters {
   el: HTMLElement;
   /** Fed every frame while the panel is open. `frame`/`anim` null before
    *  audio is up (idle readouts); `mono`/`rawBands` null on any device
-   *  without a local analyser (Scope card hidden; Energy reads idle under
-   *  RAW — see file header); `fixedEnergy` null on any device without a
-   *  local FeatureExtractor (the History trace drops its reference line);
-   *  `lufs` null on any device without a local lufsAnalyser (Loudness card
+   *  without a local analyser (the Signal card's Waveform row hidden;
+   *  Energy reads idle under RAW — see file header); `fixedEnergy` null on
+   *  any device without a local FeatureExtractor (the History trace drops
+   *  its reference line); `lufs` null on any device without a local
+   *  lufsAnalyser (the Signal card's Loudness row and header Reset chip
    *  hidden). A folded card skips its computation and DOM writes for the
    *  frame — folding buys back the layout/canvas cost, not just the screen
    *  space. `rateScale` is app.ts's already-resolved sensitivity.ts's
@@ -242,6 +249,12 @@ export interface AudioMeters {
     beatDiag: OnsetDiag | null,
     gate: SilenceGateReading | null,
   ): void;
+  /** Sets the meters' own raw mode (this file's own showRaw flag — see file
+   *  header for what it changes per row). Called by deviceMenu.ts's one
+   *  merged RAW chip alongside spectrumStrip.setShowRaw, so a single click
+   *  always keeps the two in sync rather than this file owning a chip of
+   *  its own. */
+  setRaw(on: boolean): void;
   /** Unfolds `card` if needed (the same click-the-chevron move
    *  deviceMenu.ts's jumpToBlock makes for a folded settings card), scrolls
    *  `row` into view and flashes it — the "reacts to" strip's jump target
@@ -262,7 +275,8 @@ export interface AudioMeters {
 }
 
 export interface AudioMetersDeps {
-  /** The Loudness card's Reset chip: start the integrated reading over. */
+  /** The Signal card's Reset chip (its header, beside Loudness): start the
+   *  integrated reading over. */
   onLufsReset: () => void;
   /** The Signal card's Gate row's trace guides and the Hits card's hits
    *  history hint (hitsRuleHint) — the same two marks the Input card's
@@ -416,12 +430,13 @@ const tempoDotStyle = `
 `;
 const tempoDigitsStyle = `${digitsStyle} font-size: 13px; color: #fff; transition: color 0.4s ease-out;`;
 const tempoCaptionStyle = `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: rgba(255,255,255,0.4); margin-top: 2px;`;
-// Loudness card. The bar spans LUFS_SCALE_MIN..MAX — a broadcast meter's
-// range, with the two targets people actually aim at marked: EBU R128's
-// −23 for broadcast, and the level streaming services normalise to
-// (LUFS_TARGET_STREAMING), above which the bar and digits go hot since a
-// louder mix will just be turned down on delivery. The block beside the bar
-// is the Tempo block's shape, wider for a signed one-decimal reading.
+// The Signal card's Loudness row. The bar spans LUFS_SCALE_MIN..MAX — a
+// broadcast meter's range, with the two targets people actually aim at
+// marked: EBU R128's −23 for broadcast, and the level streaming services
+// normalise to (LUFS_TARGET_STREAMING), above which the bar and digits go
+// hot since a louder mix will just be turned down on delivery. The block
+// beside the bar is the Tempo block's shape, wider for a signed
+// one-decimal reading.
 const LUFS_SCALE_MIN = -60;
 const LUFS_SCALE_MAX = 0;
 const LUFS_TARGET_EBU = -23;
@@ -753,7 +768,7 @@ export interface MeterRowSpec {
    *  `BEAT_COLOR`, not the generic red. */
   hintColors?: Readonly<Record<string, string>>;
   /** Fixed marks at these fractions of the track — the dials' NEUTRAL, the
-   *  Loudness card's targets. A labelled tick gets its text just under the
+   *  Loudness row's targets. A labelled tick gets its text just under the
    *  track. */
   ticks?: { at: number; label?: string }[];
 }
@@ -1584,9 +1599,10 @@ function createHitCurve() {
   };
 }
 
-/** The Loudness card's welded block: Short-term as the big seven-segment
- *  reading (toFixed's ASCII minus renders in DSEG7), "LUFS" under it, and
- *  the Integrated reading beneath that. Digits go hot past LUFS_HOT. */
+/** The Signal card's Loudness welded block: Short-term as the big
+ *  seven-segment reading (toFixed's ASCII minus renders in DSEG7), "LUFS"
+ *  under it, and the Integrated reading beneath that. Digits go hot past
+ *  LUFS_HOT. */
 function createLufsBlock(accent: string) {
   const el = document.createElement("div");
   el.style.cssText = lufsBlockStyle(accent);
@@ -1625,23 +1641,25 @@ function createLufsBlock(accent: string) {
 
 const IDLE: ReadoutOpts = { textual: true, unit: "" };
 const pct = (v: number) => String(Math.round(clamp(v, 0, 1) * 100));
+/** Shows or hides a Signal-card row that only exists with a local mic.
+ *  Restores the element's own inline display rather than blanking it — a
+ *  row built with `display: flex` in its cssText (the welded Loudness row)
+ *  would otherwise fall back to block and stack its LUFS block under the bar. */
+const shownDisplay = new WeakMap<HTMLElement, string>();
+function setShown(el: HTMLElement, on: boolean): void {
+  if (!shownDisplay.has(el)) shownDisplay.set(el, el.style.display);
+  el.style.display = on ? shownDisplay.get(el)! : "none";
+}
 const meanOf = (v: Float32Array) => {
   let sum = 0;
   for (let i = 0; i < v.length; i++) sum += v[i];
   return v.length > 0 ? sum / v.length : 0;
 };
 
-// A slim control strip above the cards, not itself a card — "Meters" reads
-// as a section label the same way groupHeading marks a block of rows
-// elsewhere, with the RAW chip in the same right-hand slot a card's own
-// header chip would sit in (see createCard's `right`).
-const metersHeaderStyle = `display: flex; align-items: center; justify-content: space-between; margin: 2px 0 10px;`;
-const metersHeaderLabelStyle = `${groupHeadingFirstStyle} margin: 0;`;
-const RAW_CHIP_TITLE =
-  "Every reading below its pre-smoothing value: Section, Character and BPM jitter frame to frame instead of easing. That easing is built into the pipeline, not a setting — Reset won't close the gap. Drag Smoothing (Input card) to Off instead: at Off, every eased reading lands on exactly what RAW already shows, so there's nothing left to toggle.";
-
 // The Sound/Beat/Song dividers between cards — plain `div`s appended
-// straight into `root`, not part of any card. Modelled on controlsKit.ts's
+// straight into `root` (and, for "Sound", into deviceMenu.ts's own column
+// head block above the Bands card — see meterGroupHeading's own export),
+// not part of any card. Modelled on controlsKit.ts's
 // own groupHeadingFirstStyle (mono, uppercase, letter-spaced, dim) rather
 // than its bordered groupHeadingStyle: a border here would read as a second
 // card edge sitting right under the real one, and these mark a break
@@ -1650,12 +1668,24 @@ const RAW_CHIP_TITLE =
 // header) is what actually separates a heading from the card above it.
 const meterGroupHeadingStyle = `${groupHeadingFirstStyle} margin: 18px 0 8px;`;
 
-function meterGroupHeading(text: string): HTMLElement {
+/** Exported so deviceMenu.ts can build the "Sound" heading (in its own
+ *  column head block, right above the Bands card) with the identical look
+ *  this file uses for "Beat"/"Song" below — one owner for the style, since
+ *  the three headings mark one continuous Sound/Beat/Song sequence split
+ *  only by the Bands card sitting between the first heading and the rest. */
+export function meterGroupHeading(text: string): HTMLElement {
   const el = document.createElement("div");
   el.textContent = text;
   el.style.cssText = meterGroupHeadingStyle;
   return el;
 }
+
+// The Character card's dial grid (every MUSIC_DIALS entry but brightness,
+// which gets its own full-width row below instead — see this file's header)
+// — two columns rather than the stacked rows every other card uses, since
+// seven-odd one-line dial rows made Character the tallest card by far with
+// nothing but whitespace between short label/tick/hint rows to show for it.
+const characterGridStyle = `display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px;`;
 
 export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   const root = document.createElement("div");
@@ -1688,19 +1718,28 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     return jack;
   }
 
+  // Set only by the returned object's setRaw — see this file's header and
+  // AudioMeters.setRaw's own doc comment for why this file no longer owns a
+  // RAW chip of its own.
   let showRaw = false;
-  const metersHeader = document.createElement("div");
-  metersHeader.style.cssText = metersHeaderStyle;
-  const metersHeaderLabel = document.createElement("div");
-  metersHeaderLabel.textContent = "Meters";
-  metersHeaderLabel.style.cssText = metersHeaderLabelStyle;
-  const rawChip = createChipButton("RAW", RAW_CHIP_TITLE, () => {
-    showRaw = !showRaw;
-    rawChip.style.cssText = showRaw ? chipBtnLitStyle : chipBtnStyle;
-  });
-  metersHeader.append(metersHeaderLabel, rawChip);
 
-  // ---- Signal ----
+  // ---- Signal: Waveform, Level, Loudness, Energy, History, Gate ----
+  // Waveform leads the card — see file header. The trace takes the meter's
+  // place under the head, like History/Gate's own traces below.
+  const waveform = createMeterRow({
+    label: "Waveform",
+    accent: NEUTRAL_ACCENT,
+    unit: "%",
+  });
+  const waveCanvas = document.createElement("canvas");
+  waveCanvas.style.cssText = waveCanvasStyle;
+  waveform.el.children[1].replaceWith(waveCanvas);
+  const waveCtx = waveCanvas.getContext("2d")!;
+  mountJack("anim.wavePeak", waveform.right, waveform.el);
+  // Row + its own trailing spacer, toggled together on any device with no
+  // local mic (mono === null) — see update()'s own Signal block.
+  const waveformSpacer = spacer();
+
   const level = createMeterRow({
     label: "Level",
     accent: INPUT_GREEN,
@@ -1708,6 +1747,38 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     description:
       "How loud the room is on a fixed quiet-to-loud scale. Doesn't auto-adjust: a quiet room reads low and stays low.",
   });
+
+  // Loudness: the broadcast measurement — BS.1770 / EBU R128 LUFS from
+  // lufsAnalyser.ts (math in lufs.ts). The bar and this row's own readout
+  // are Momentary (the last 400 ms); the welded block beside it is
+  // Short-term (the last 3 s) over Integrated (the gated average since
+  // Reset — the card header's own Reset chip below, not a row of its own).
+  const lufsRow = createMeterRow({
+    label: "Loudness",
+    accent: NEUTRAL_ACCENT,
+    description:
+      "Loudness the way broadcast meters measure it (BS.1770, K-weighted). The bar and this number are the last 400 ms; the big number the last 3 s; I the gated average since Reset. −23 is the EBU R128 broadcast target; streaming services normalise to about −14, and the bar goes red above it.",
+    ticks: [
+      { at: lufsFrac(LUFS_TARGET_EBU), label: String(LUFS_TARGET_EBU) },
+      { at: lufsFrac(LUFS_TARGET_STREAMING), label: String(LUFS_TARGET_STREAMING) },
+    ],
+  });
+  lufsRow.el.style.flex = "1";
+  lufsRow.el.style.minWidth = "0";
+  const lufsBlock = createLufsBlock(NEUTRAL_ACCENT);
+  const lufsWelded = document.createElement("div");
+  lufsWelded.style.cssText = weldedRowStyle;
+  lufsWelded.append(lufsRow.el, lufsBlock.el);
+  // Row + its own trailing spacer, toggled together (with the card header's
+  // own Reset chip below) on any device with no local lufsAnalyser — see
+  // update()'s own Signal block.
+  const loudnessSpacer = spacer();
+  const lufsResetChip = createChipButton(
+    "Reset I",
+    "Start the integrated loudness reading over",
+    deps.onLufsReset,
+  );
+
   const energy = createMeterRow({
     label: "Energy",
     accent: INPUT_GREEN,
@@ -1778,34 +1849,29 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     { color: GATE_DIMMER_COLOR, label: "Dimmer" },
   ]);
   gateHistoryStrip.canvas.after(gateLegend.el);
-  const signalCard = createCard({ title: "Signal", accent: INPUT_GREEN, foldId: "signal" });
-  signalCard.body.append(level.el, spacer(), energy.el, spacer(), history.el, spacer(), gateRow.el);
-
-  // ---- Loudness ----
-  const lufsRow = createMeterRow({
-    label: "Momentary",
-    accent: NEUTRAL_ACCENT,
-    description:
-      "Loudness the way broadcast meters measure it (BS.1770, K-weighted). The bar and this number are the last 400 ms; the big number the last 3 s; I the gated average since Reset. −23 is the EBU R128 broadcast target; streaming services normalise to about −14, and the bar goes red above it.",
-    ticks: [
-      { at: lufsFrac(LUFS_TARGET_EBU), label: String(LUFS_TARGET_EBU) },
-      { at: lufsFrac(LUFS_TARGET_STREAMING), label: String(LUFS_TARGET_STREAMING) },
-    ],
+  const signalCard = createCard({
+    title: "Signal",
+    accent: INPUT_GREEN,
+    foldId: "signal",
+    right: lufsResetChip,
   });
-  lufsRow.el.style.flex = "1";
-  lufsRow.el.style.minWidth = "0";
-  const lufsBlock = createLufsBlock(NEUTRAL_ACCENT);
-  const lufsWelded = document.createElement("div");
-  lufsWelded.style.cssText = weldedRowStyle;
-  lufsWelded.append(lufsRow.el, lufsBlock.el);
-  const lufsCard = createCard({
-    title: "Loudness",
-    accent: NEUTRAL_ACCENT,
-    foldId: "lufs",
-    right: createChipButton("Reset", "Start the integrated reading over", deps.onLufsReset),
-  });
-  lufsCard.body.appendChild(lufsWelded);
-  lufsCard.el.style.display = "none";
+  signalCard.body.append(
+    waveform.el,
+    waveformSpacer,
+    level.el,
+    spacer(),
+    lufsWelded,
+    loudnessSpacer,
+    energy.el,
+    spacer(),
+    history.el,
+    spacer(),
+    gateRow.el,
+  );
+  // Row-level visibility (mono/lufs null on a device with no local
+  // analyser) — see update()'s own Signal block for the toggles and the
+  // "don't accumulate a column while hidden" behaviour they carry.
+  let waveformShown = false;
   let lufsShown = false;
 
   // ---- Hits ----
@@ -1968,7 +2034,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   });
   mountJack("anim.sectionIntensity", section.right, section.el);
   mountJack("anim.dropOnset", section.right, section.el);
-  const dialRows = MUSIC_DIALS.map((dial) => ({
+  // Every MUSIC_DIALS entry except brightness, which gets its own full-width
+  // row below (with the live Centroid trace under its bar) instead of a grid
+  // cell — filtered, never a hardcoded list, so a new dial lands in the grid
+  // by construction.
+  const dialRows = MUSIC_DIALS.filter((dial) => dial !== "brightness").map((dial) => ({
     dial,
     row: createMeterRow({
       label: DIAL_LABELS[dial].label,
@@ -1977,59 +2047,41 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       ticks: [{ at: NEUTRAL[dial] }],
     }),
   }));
-  // Fast counterpart to the (slow, eased) Brightness dial above — see
-  // spectralCentroid.ts. Hand-added rather than folded into dialRows: it's
-  // not one of MUSIC_DIALS, just placed alongside them because it's the
-  // live signal Brightness is the track-level summary of.
-  const centroidRow = createMeterRow({
-    label: "Centroid",
+  const dialGrid = document.createElement("div");
+  dialGrid.style.cssText = characterGridStyle;
+  dialRows.forEach(({ row }) => dialGrid.appendChild(row.el));
+
+  // Brightness: the dial's own meter row (readout = the slow, eased dial
+  // value, same as every other dialRows entry), with spectralCentroid.ts's
+  // fast, range-adapted Centroid traced directly under its bar rather than a
+  // row of its own — it's the live signal Brightness is the track-level
+  // summary of, not a MUSIC_DIALS entry.
+  const brightnessRow = createMeterRow({
+    label: DIAL_LABELS.brightness.label,
     accent: AUTO_SKY,
-    description: "Live spectral centroid, range-adapted to this track's own recent swing — 0.5 is its own recent middle, not an absolute mid-spectrum reading. The fast counterpart to Brightness above. Below the bar, the last few seconds of it — the shape brightness moves in, since an instant reading alone just jitters.",
-    ticks: [{ at: 0.5 }],
+    description: DIAL_LABELS.brightness.description,
+    ticks: [{ at: NEUTRAL.brightness }],
   });
-  mountJack("anim.centroid", centroidRow.right, centroidRow.el);
+  mountJack("anim.centroid", brightnessRow.right, brightnessRow.el);
   // Inserted before the hint (el's 3rd child), so it sits under the meter
-  // like the Signal card's History — always visible, not hover-revealed.
-  // One series, so no legend; RAW briefly mixes raw/processed samples in
-  // the same trace right after a toggle, until HISTORY_SPAN_SEC rolls the
-  // pre-toggle column out — harmless, and self-heals.
+  // like the Signal card's History. RAW briefly mixes raw/processed samples
+  // in the same trace right after a toggle, until HISTORY_SPAN_SEC rolls the
+  // pre-toggle column out — harmless, and self-heals. The small legend under
+  // it is what tells the two readings (the bar's own Brightness value, the
+  // trace's live Centroid) apart.
   const centroidTrace = createTraceStrip([{ color: AUTO_SKY, width: 1.5 }], CENTROID_TRACE_HEIGHT_CSS_PX);
-  centroidRow.el.insertBefore(centroidTrace.canvas, centroidRow.el.children[2]);
+  brightnessRow.el.insertBefore(centroidTrace.canvas, brightnessRow.el.children[2]);
+  const centroidLegend = createTraceLegend([{ color: AUTO_SKY, label: "Centroid (live)" }]);
+  centroidTrace.canvas.after(centroidLegend.el);
+
   const characterCard = createCard({ title: "Character", accent: AUTO_SKY, foldId: "character" });
-  characterCard.body.append(section.el, spacer());
-  dialRows.forEach(({ row }, i) => {
-    if (i > 0) characterCard.body.appendChild(spacer());
-    characterCard.body.appendChild(row.el);
-  });
-  characterCard.body.appendChild(spacer());
-  characterCard.body.appendChild(centroidRow.el);
+  characterCard.body.append(section.el, spacer(), dialGrid, spacer(), brightnessRow.el);
 
-  // ---- Scope ----
-  const waveform = createMeterRow({
-    label: "Waveform",
-    accent: NEUTRAL_ACCENT,
-    unit: "%",
-  });
-  // The trace takes the meter's place under the head.
-  const waveCanvas = document.createElement("canvas");
-  waveCanvas.style.cssText = waveCanvasStyle;
-  waveform.el.children[1].replaceWith(waveCanvas);
-  const waveCtx = waveCanvas.getContext("2d")!;
-  mountJack("anim.wavePeak", waveform.right, waveform.el);
-  const scopeCard = createCard({ title: "Scope", accent: NEUTRAL_ACCENT, foldId: "scope" });
-  scopeCard.body.appendChild(waveform.el);
-  scopeCard.el.style.display = "none";
-  let scopeShown = false;
-
-  // Sound/Beat/Song, per the file header. The scope leads Sound: it's the
-  // one live picture of the sound itself, and the first thing to check when
-  // the visuals seem off.
+  // Sound/Beat/Song, per the file header. Signal leads Sound: it's the raw
+  // picture of the sound itself, and the first thing to check when the
+  // visuals seem off.
   root.append(
-    metersHeader,
-    meterGroupHeading("Sound"),
-    scopeCard.el,
     signalCard.el,
-    lufsCard.el,
     meterGroupHeading("Beat"),
     hitsCard.el,
     tempoCard.el,
@@ -2153,9 +2205,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // wrapper, so a jump highlights only the half of the welded row the
   // signal is about.
   const cardElements: Record<MeterCardId, HTMLElement> = {
-    scope: scopeCard.el,
     signal: signalCard.el,
-    lufs: lufsCard.el,
     hits: hitsCard.el,
     tempo: tempoCard.el,
     character: characterCard.el,
@@ -2164,7 +2214,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["section", section.el],
     ["tempo", tempo.el],
     ["hits", hitsHistory.el],
-    ["centroid", centroidRow.el],
+    ["centroid", brightnessRow.el],
     ["wave", wave.el],
     ["lock", lock.el],
     ["timing", timingStrip.el],
@@ -2189,12 +2239,46 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       // match (see file header).
       const smoothingOff = !Number.isFinite(rateScale);
 
-      // ---- Signal (incl. Gate) ----
+      // ---- Signal: Waveform, Level, Loudness, Energy, History, Gate ----
       // Level is already raw and doesn't change; Energy's raw counterpart
-      // is rawBands (see file header), local-only like mono/the Scope card.
-      // Gate has no RAW branch: it's already an instant, local reading with
-      // no pre-smoothing counterpart threaded through AnimFrame to switch to.
+      // is rawBands (see file header), local-only like mono. Gate has no RAW
+      // branch: it's already an instant, local reading with no pre-smoothing
+      // counterpart threaded through AnimFrame to switch to.
       if (!signalCard.fold?.isFolded()) {
+        // Waveform — hidden (with its own trailing spacer) on any device
+        // with no local mic; see AudioMeters.update's own doc comment.
+        const showWaveform = mono !== null;
+        if (showWaveform !== waveformShown) {
+          waveformShown = showWaveform;
+          setShown(waveform.el, showWaveform);
+          setShown(waveformSpacer, showWaveform);
+        }
+        if (mono) {
+          const clipped = isClipping(mono);
+          pushWave(mono, clipped, nowMs);
+          drawWave();
+          const instPeak = peak(mono);
+          // The held reading is AnimFrame.wavePeak (animClock.ts), not local
+          // state here, so this readout and the Waveform jack's own
+          // `anim.wavePeak` drive source read one number. instPeak covers a
+          // tick with no anim frame yet.
+          if (text) {
+            if (clipped)
+              waveform.setReadout("CLIP", {
+                textual: true,
+                color: HOT_RED,
+                unit: "",
+              });
+            else waveform.setReadout(pct(raw ? instPeak : anim ? anim.wavePeak : instPeak));
+          }
+        } else {
+          // Don't accumulate a column while there's nothing to sample — on
+          // mono's return this starts a fresh one instead of the elapsed gap
+          // reading as a stall and committing a burst of catch-up columns
+          // (see pushWave).
+          colStartMs = null;
+        }
+
         const energyVal = raw
           ? rawBands
             ? meanOf(rawBands)
@@ -2216,6 +2300,27 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           historyStrip.draw();
           histLegend.setEntryEnabled(2, fixedEnergy !== null);
         }
+
+        // Loudness — hidden (with its own trailing spacer, and the card
+        // header's own Reset chip) on any device with no local lufsAnalyser.
+        const showLufs = lufs !== null;
+        if (showLufs !== lufsShown) {
+          lufsShown = showLufs;
+          setShown(lufsWelded, showLufs);
+          setShown(loudnessSpacer, showLufs);
+          setShown(lufsResetChip, showLufs);
+        }
+        if (lufs) {
+          const m = lufs.momentary;
+          const live = Number.isFinite(m);
+          lufsRow.setValue(live ? lufsFrac(m) : 0, dtSec);
+          lufsRow.setFillColor(m > LUFS_HOT ? HOT_RED : NEUTRAL_ACCENT);
+          if (text) {
+            lufsRow.setReadout(live ? m.toFixed(1) : "--", live ? {} : IDLE);
+            lufsBlock.set(lufs);
+          }
+        }
+
         gateRow.setValue(gate ? gate.dimmer : null, dtSec);
         if (text) gateRow.setReadout(gate ? pct(gate.dimmer) : "--", gate ? {} : IDLE);
         // Level plots off `frame` regardless of `gate` — it doesn't need a
@@ -2229,7 +2334,9 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
           gateHistoryStrip.draw();
         }
       } else {
-        // Folded: don't accumulate a column while hidden, same as the Scope.
+        // Folded: don't accumulate a column while hidden, same as every
+        // other trace below.
+        colStartMs = null;
         historyStrip.resetColumn();
         gateHistoryStrip.resetColumn();
       }
@@ -2322,69 +2429,26 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
               v === null ? IDLE : {},
             );
         }
-        const cv = anim ? (raw ? anim.centroidRaw : anim.centroid) : null;
-        centroidRow.setValue(cv, dtSec);
+        // Brightness: the dial's own value on the bar/readout, exactly like
+        // every dialRows entry above; the trace under it is the live
+        // Centroid instead (see this file's header).
+        const brightnessVal = anim ? (raw ? anim.raw.profile.brightness : anim.profile.brightness) : null;
+        brightnessRow.setValue(brightnessVal, dtSec);
         if (text)
-          centroidRow.setReadout(
-            cv === null ? "--" : cv.toFixed(2),
-            cv === null ? IDLE : {},
+          brightnessRow.setReadout(
+            brightnessVal === null ? "--" : brightnessVal.toFixed(2),
+            brightnessVal === null ? IDLE : {},
           );
+        const cv = anim ? (raw ? anim.centroidRaw : anim.centroid) : null;
         centroidTrace.push([cv], nowMs);
         centroidTrace.draw();
       } else {
         // Folded: don't accumulate a column while hidden, same as History.
         centroidTrace.resetColumn();
       }
-
-      // ---- Loudness ----
-      const showLufs = lufs !== null;
-      if (showLufs !== lufsShown) {
-        lufsShown = showLufs;
-        lufsCard.el.style.display = showLufs ? "" : "none";
-      }
-      if (lufs && !lufsCard.fold?.isFolded()) {
-        const m = lufs.momentary;
-        const live = Number.isFinite(m);
-        lufsRow.setValue(live ? lufsFrac(m) : 0, dtSec);
-        lufsRow.setFillColor(m > LUFS_HOT ? HOT_RED : NEUTRAL_ACCENT);
-        if (text) {
-          lufsRow.setReadout(live ? m.toFixed(1) : "--", live ? {} : IDLE);
-          lufsBlock.set(lufs);
-        }
-      }
-
-      // ---- Scope ----
-      const showScope = mono !== null;
-      if (showScope !== scopeShown) {
-        scopeShown = showScope;
-        scopeCard.el.style.display = showScope ? "" : "none";
-      }
-      if (!mono) return;
-      if (scopeCard.fold?.isFolded()) {
-        // Don't accumulate a column while hidden — on unfold this starts a
-        // fresh one instead of the elapsed gap reading as a stall and
-        // committing a burst of catch-up columns (see pushWave).
-        colStartMs = null;
-        return;
-      }
-      const clipped = isClipping(mono);
-      pushWave(mono, clipped, nowMs);
-      drawWave();
-      const instPeak = peak(mono);
-      // The held reading is AnimFrame.wavePeak (animClock.ts), not local
-      // state here, so this readout and the Waveform jack's `anim.wavePeak`
-      // drive source read one number — and it keeps tracking while this
-      // card is folded (the early return above), so a drive never goes
-      // stale. instPeak covers a tick with no anim frame yet.
-      if (text) {
-        if (clipped)
-          waveform.setReadout("CLIP", {
-            textual: true,
-            color: HOT_RED,
-            unit: "",
-          });
-        else waveform.setReadout(pct(raw ? instPeak : anim ? anim.wavePeak : instPeak));
-      }
+    },
+    setRaw(on): void {
+      showRaw = on;
     },
     revealRow(card, row): void {
       const cardEl = cardElements[card];

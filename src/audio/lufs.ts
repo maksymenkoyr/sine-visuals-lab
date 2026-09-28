@@ -25,8 +25,8 @@
  * stereo source reads 3–6 dB low against a true two-channel BS.1770 sum —
  * documented here, not corrected.
  *
- * Display-only: the reading lives in the controls panel's Loudness card and
- * never reaches FeatureFrame, the wire frame, or Auto mode's `loudness`
+ * Display-only: the reading lives in the controls panel's Signal card (its
+ * Loudness row) and never reaches FeatureFrame, the wire frame, or Auto mode's `loudness`
  * dial (musicProfile.ts — an unrelated [0,1] dial eased from
  * FeatureFrame.level, which is why nothing here is named "loudness").
  */

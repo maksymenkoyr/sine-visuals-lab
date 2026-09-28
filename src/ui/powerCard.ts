@@ -17,8 +17,11 @@ import {
 } from "./controlsKit.ts";
 
 /**
- * The Power card — leftmost column in the panel (deviceMenu.ts), left of the
- * Bands card. A quality-preset override plus a 3-way Auto/On/Off override for
+ * The Power card (deviceMenu.ts) — its own column, sitting immediately left
+ * of the settings column on the right (the Bands+meters column docks
+ * independently to the opposite screen edge; see controlsTheme.ts's
+ * CABLE_GUTTER_PX comment for how the two sides are laid out). A
+ * quality-preset override plus a 3-way Auto/On/Off override for
  * the quality governor (src/render/governor.ts, src/render/powerMode.ts),
  * plus a status line and readouts explaining what the governor actually
  * decided this session and why — including the one state a frame-gap-only
@@ -28,7 +31,7 @@ import {
  * governor.ts's "Authority probe").
  *
  * Shape, top to bottom: the status line right under the title (the Bands
- * card's scene · live-dot · source line is the model — small caps mono with
+ * column's own live-dot · source line is the model — small caps mono with
  * a coloured dot, hover/tap for the long explanation), then two controls —
  * Quality (src/render/qualityPref.ts) and Energy saving, both rows in the
  * panel's grammar with a chip group where a slider would sit — then a
