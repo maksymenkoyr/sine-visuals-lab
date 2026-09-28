@@ -137,3 +137,41 @@ export function isMissingDeviceError(err: unknown): boolean {
   const name = (err as { name?: unknown } | null)?.name;
   return name === "OverconstrainedError" || name === "NotFoundError";
 }
+
+/** What kind of input a device's name sounds like — the browser gives only a
+ *  name, never a device category, so this is a guess from it, not a fact.
+ *  Checked in order: a loopback driver's name (BlackHole, Loopback,
+ *  Soundflower, VB-Cable, a generic "virtual" device, Windows' Stereo Mix,
+ *  "What U Hear") is checked first because some carry "mic" in their own
+ *  name too (e.g. a virtual "microphone" driver); a mic-shaped name (mic,
+ *  microphone, headset, AirPods, a webcam/camera's built-in mic) next;
+ *  anything else — a USB audio interface, a mixer's own sound card — is
+ *  "line": a cable feeding in something that isn't this device's own
+ *  mic. Used for the Input card's Source row (src/ui/deviceMenu.ts) and the
+ *  labels named after it in src/app.ts (the stop button, the start prompt's
+ *  Mic button, the gallery masthead's picker). */
+export type InputKind = "mic" | "line" | "loopback";
+
+const LOOPBACK_RE = /blackhole|loopback|soundflower|vb-?cable|virtual|stereo mix|what u hear/i;
+const MIC_RE = /mic|microphone|headset|airpods|webcam|camera/i;
+
+export function inputKind(label: string): InputKind {
+  if (LOOPBACK_RE.test(label)) return "loopback";
+  if (MIC_RE.test(label)) return "mic";
+  return "line";
+}
+
+/** The Source row's per-kind tag + tooltip, and the words src/app.ts's
+ *  labels name a kind by (its `tag`, upper- or lower-cased to fit). */
+export const INPUT_KIND_TEXT: Record<InputKind, { tag: string; title: string }> = {
+  mic: { tag: "MIC", title: "A microphone — hears the room" },
+  line: {
+    tag: "LINE IN",
+    title: "A cable input — e.g. a USB audio interface fed from the DJ mixer",
+  },
+  loopback: {
+    tag: "LOOPBACK",
+    title:
+      "A virtual input carrying this computer's own sound (BlackHole, Loopback, Stereo Mix) — hears what this computer plays, no mic or screen share needed",
+  },
+};
