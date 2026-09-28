@@ -97,6 +97,9 @@ export interface CardSpec {
    *  chevron in the header, and a click anywhere on the header outside
    *  `right`. Unique per mounted card ("bands", "scope", "signal", …). */
   foldId?: string;
+  /** Starts folded until the user first opens it (panelFolds.ts's
+   *  defaultFolded) — the Power card, whose readouts most people never need. */
+  defaultFolded?: boolean;
   /** Lets a card animate its own fold instead of createCard flipping
    *  `.vc-folded` directly (see powerCard.ts for the one user of this).
    *  Called with the intended next state and an `apply` callback that
@@ -163,7 +166,7 @@ export function createCard(
     // Tracked separately from the .vc-folded class itself so a click that
     // lands mid-animation (before spec.foldTransition's own apply() has run)
     // toggles the *intended* state, not whatever the DOM currently shows.
-    let folded = isFolded(foldId);
+    let folded = isFolded(foldId, spec.defaultFolded);
     const apply = (f: boolean): void => {
       el.classList.toggle("vc-folded", f);
       foldBtn.setAttribute("aria-expanded", String(!f));
@@ -174,7 +177,7 @@ export function createCard(
     const toggle = (): void => {
       const next = !folded;
       folded = next;
-      setFolded(foldId, next);
+      setFolded(foldId, next, spec.defaultFolded);
       if (spec.foldTransition) spec.foldTransition(next, () => apply(next));
       else apply(next);
     };
@@ -316,7 +319,7 @@ export function createAdvancedSection(id: string, label: string): AdvancedSectio
   toggle.addEventListener("click", () => {
     const next = body.style.display === "none";
     apply(next);
-    setFolded(id, !next);
+    setFolded(id, !next, true);
   });
 
   wrap.append(toggle, body);

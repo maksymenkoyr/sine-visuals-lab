@@ -44,6 +44,8 @@ import {
  * chips are never auto-tunable and stay out of the Tab ring, same as the
  * palette chips they're modeled on (deviceMenu.ts).
  *
+ * It starts folded (CardSpec.defaultFolded) until someone first opens it —
+ * the quality governor runs on its own, and these readouts are diagnostics.
  * Folded, in the wide layout, this card is a small square (POWER_SQUARE_PX)
  * showing a power glyph in place of a title bar — it sits directly against
  * the settings column (deviceMenu.ts), so a plain full-width folded bar
@@ -408,14 +410,19 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   let pad!: HTMLElement;
   let square!: HTMLButtonElement;
 
-  const EASE = "cubic-bezier(.3,0,.2,1)";
-  const FOLD_MS = 360;
-  const UNFOLD_MS = 380;
+  // Width and height are two eased moves, not one keyframe list with a
+  // corner in it: that version came to a dead stop between the two phases
+  // (one eased out to zero speed, the other eased in from rest). Starting
+  // the second move OVERLAP_MS before the first ends rounds the corner off
+  // while it still reads as "left, then down".
+  const EASE = "cubic-bezier(.4,0,.2,1)";
+  const PHASE_MS = 320;
+  const OVERLAP_MS = 100;
   // The card's content and the glyph crossfade inside the square's own
-  // footprint: during the last stretch of a fold, the first of an unfold.
-  // Without it the square briefly shows the header's chevron (the pad's
-  // right end) before the glyph arrives, or both at once.
-  const FADE_SHARE = 0.3;
+  // footprint: at the tail of a fold, the start of an unfold. Without it the
+  // square briefly shows the header's chevron (the pad's right end) before
+  // the glyph arrives, or both at once.
+  const FADE_MS = 180;
 
   // Folded, in the wide layout, Power is a square that opens leftward
   // (width) before downward (height) — see this file's own header comment
@@ -436,35 +443,32 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
     const padFrom = wasFolded ? 0 : Number(getComputedStyle(pad).opacity);
     const glyphFrom = wasFolded ? 1 : Number(getComputedStyle(square).opacity);
     stopRunning();
+    // A move with nothing left to do (a click that reversed a transition
+    // part-way) takes no time, so the other one doesn't sit waiting for it.
+    const phase = (a: number, b: number): number => (Math.abs(a - b) < 0.5 ? 0 : PHASE_MS);
+    const secondDelay = (firstMs: number): number => Math.max(0, firstMs - OVERLAP_MS);
+    const move = (prop: "width" | "height", a: number, b: number, delay: number, duration: number, fill: FillMode) =>
+      el.animate([{ [prop]: `${a}px` }, { [prop]: `${b}px` }], { delay, duration, easing: EASE, fill });
+    const fade = (target: HTMLElement, a: number, b: number, delay: number, fill: FillMode) =>
+      target.animate(
+        [
+          { visibility: "visible", opacity: a },
+          { visibility: "visible", opacity: b },
+        ],
+        { delay, duration: FADE_MS, easing: "ease", fill },
+      );
     if (folding) {
       // Up first, then right into the square. apply() — the class flip that
-      // hides the pad and shows the glyph for good — lands only once the
-      // shrink finishes; until then the fades hold that end state.
-      const fadeAt = 1 - FADE_SHARE;
-      const size = el.animate(
-        [
-          { width: `${from.width}px`, height: `${from.height}px`, easing: EASE },
-          { width: `${from.width}px`, height: `${POWER_SQUARE_PX}px`, offset: 0.55, easing: EASE },
-          { width: `${POWER_SQUARE_PX}px`, height: `${POWER_SQUARE_PX}px` },
-        ],
-        { duration: FOLD_MS, fill: "forwards" },
-      );
-      running = [
-        size,
-        pad.animate([{ opacity: padFrom }, { opacity: padFrom, offset: fadeAt }, { opacity: 0 }], {
-          duration: FOLD_MS,
-          fill: "forwards",
-        }),
-        square.animate(
-          [
-            { visibility: "visible", opacity: glyphFrom },
-            { visibility: "visible", opacity: glyphFrom, offset: fadeAt },
-            { visibility: "visible", opacity: 1 },
-          ],
-          { duration: FOLD_MS, fill: "forwards" },
-        ),
-      ];
-      size.finished.then(
+      // hides the pad and shows the glyph for good — lands only once both
+      // moves finish; until then `fill` holds each end state.
+      const upMs = phase(from.height, POWER_SQUARE_PX);
+      const rightAt = secondDelay(upMs);
+      const rightMs = phase(from.width, POWER_SQUARE_PX);
+      const fadeAt = Math.max(0, rightAt + rightMs - FADE_MS);
+      const up = move("height", from.height, POWER_SQUARE_PX, 0, upMs, "forwards");
+      const right = move("width", from.width, POWER_SQUARE_PX, rightAt, rightMs, "both");
+      running = [up, right, fade(pad, padFrom, 0, fadeAt, "both"), fade(square, glyphFrom, 1, fadeAt, "both")];
+      Promise.all([up.finished, right.finished]).then(
         () => {
           apply();
           stopRunning();
@@ -478,33 +482,15 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
       // Left first, then down.
       apply(); // class off -> natural size
       const to = el.getBoundingClientRect();
-      const size = el.animate(
-        [
-          { width: `${from.width}px`, height: `${from.height}px`, easing: EASE },
-          { width: `${to.width}px`, height: `${from.height}px`, offset: 0.45, easing: EASE },
-          { width: `${to.width}px`, height: `${to.height}px` },
-        ],
-        { duration: UNFOLD_MS },
-      );
-      running = [
-        size,
-        pad.animate([{ opacity: padFrom }, { opacity: 1, offset: FADE_SHARE }, { opacity: 1 }], {
-          duration: UNFOLD_MS,
-        }),
-        square.animate(
-          [
-            { visibility: "visible", opacity: glyphFrom },
-            { visibility: "visible", opacity: 0, offset: FADE_SHARE },
-            { visibility: "visible", opacity: 0 },
-          ],
-          { duration: UNFOLD_MS },
-        ),
-      ];
-      size.finished.then(stopRunning, () => {});
+      const leftMs = phase(from.width, to.width);
+      const left = move("width", from.width, to.width, 0, leftMs, "none");
+      const down = move("height", from.height, to.height, secondDelay(leftMs), phase(from.height, to.height), "backwards");
+      running = [left, down, fade(pad, padFrom, 1, 0, "backwards"), fade(square, glyphFrom, 0, 0, "none")];
+      Promise.all([left.finished, down.finished]).then(stopRunning, () => {});
     }
   }
 
-  const card = createCard({ title: "Power", accent: POWER_TEAL, foldId: "power", foldTransition });
+  const card = createCard({ title: "Power", accent: POWER_TEAL, foldId: "power", defaultFolded: true, foldTransition });
   cardEl = card.el;
   cardEl.classList.add("vc-power-card");
   pad = cardEl.querySelector<HTMLElement>(".vc-card-pad")!;
@@ -520,7 +506,7 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   square.title = "Expand Power";
   square.setAttribute("aria-controls", card.body.id);
   square.innerHTML =
-    '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">' +
+    '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">' +
     '<path d="M5.2 3.9a5.2 5.2 0 1 0 5.6 0"/>' +
     '<path d="M8 2v5.5"/>' +
     "</svg>";

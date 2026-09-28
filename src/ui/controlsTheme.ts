@@ -87,10 +87,13 @@ export const CABLE_GUTTER_PX = 56;
  *  stacked media query below for how Power folds into that single column. */
 export const STACK_BELOW_PX = 940 + CABLE_GUTTER_PX;
 
-/** The folded Power card's side, in the wide layout (powerCard.ts) — the
- *  height of a folded card's title bar. The Auto master bar (deviceMenu.ts)
- *  matches this height so it lines up with the square beside it. */
-export const POWER_SQUARE_PX = 32;
+/** The folded Power card's side, in the wide layout (powerCard.ts) — a
+ *  notch under a folded card's title bar (FOLDED_BAR_PX), so it reads as a
+ *  button rather than a card. */
+export const POWER_SQUARE_PX = 26;
+/** A folded card's title-bar height; the Auto master bar (deviceMenu.ts)
+ *  is set to it so it sits in the same register as the cards below it. */
+export const FOLDED_BAR_PX = 32;
 
 /** `#rrggbb` + alpha in [0,1] -> `#rrggbbaa`. */
 export function withAlpha(hex: string, alpha: number): string {

@@ -55,16 +55,20 @@ function persist(): void {
 }
 
 /** `defaultFolded` covers a disclosure that should start collapsed the first
- *  time it's ever seen (a scene's `advanced` settings sub-section) rather
- *  than the card convention above of starting open — still governed by the
- *  same "absent key means never explicitly toggled" rule, just with the
- *  opposite starting point. */
+ *  time it's ever seen (a scene's `advanced` settings sub-section, the Power
+ *  card) rather than the card convention above of starting open — still
+ *  governed by the same "absent key means never explicitly toggled" rule,
+ *  just with the opposite starting point. */
 export function isFolded(cardId: string, defaultFolded = false): boolean {
   return cache[cardId] ?? defaultFolded;
 }
 
-export function setFolded(cardId: string, folded: boolean): void {
-  if (folded) cache = { ...cache, [cardId]: true };
+/** Stores only a deviation from the id's own default — pass the same
+ *  `defaultFolded` as isFolded. Matching the default clears the key, which
+ *  is why a default-folded id must say so here: an opened one has to be
+ *  written as `false`, or the next load reads the absent key as folded. */
+export function setFolded(cardId: string, folded: boolean, defaultFolded = false): void {
+  if (folded !== defaultFolded) cache = { ...cache, [cardId]: folded };
   else {
     if (!(cardId in cache)) return;
     const { [cardId]: _omit, ...rest } = cache;

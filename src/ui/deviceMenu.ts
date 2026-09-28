@@ -95,6 +95,7 @@ import {
   AUTO_SKY,
   BANDS_AMBER,
   FAMILY_ACCENTS,
+  FOLDED_BAR_PX,
   FONT_LABEL,
   FONT_MONO,
   GLASS_FILTER,
@@ -103,7 +104,6 @@ import {
   HOT_YELLOW,
   INPUT_GREEN,
   LIVE_DOT,
-  POWER_SQUARE_PX,
   SCENE_VIOLET,
   STACK_BELOW_PX,
   ensureControlsStyles,
@@ -678,10 +678,10 @@ const offChipManualStyle = (accent: string) =>
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
 
 // The Auto master bar — its own slim full-width strip at the top of the
-// settings column, sized to match folded Power's square (POWER_SQUARE_PX,
-// controlsTheme.ts) so the two sit level side by side in the wide layout.
+// settings column, a folded card's title-bar height (FOLDED_BAR_PX,
+// controlsTheme.ts).
 const autoMasterBaseStyle = `
-  width: 100%; box-sizing: border-box; height: ${POWER_SQUARE_PX}px; flex-shrink: 0;
+  width: 100%; box-sizing: border-box; height: ${FOLDED_BAR_PX}px; flex-shrink: 0;
   cursor: pointer; padding: 0; border-radius: 3px;
   -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
 `;
@@ -4164,8 +4164,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // The global "Auto" master switch — toggles every auto-capable row, scene
   // settings plus Sensitivity/Expansion/Smoothing (see app.ts's
   // isSceneAuto wiring). Its own slim full-width bar at the top of the
-  // settings column, the same height as folded Power's square (see
-  // controlsTheme.ts's POWER_SQUARE_PX) so the two line up side by side.
+  // settings column, beside folded Power's square.
   // Overlaps the Input card's own Auto button (below, and see micAuto.ts's
   // header) on the Sensitivity/Expansion/Smoothing rows only — a scene's own
   // settings stay this button's alone — so toggling either refreshes the
