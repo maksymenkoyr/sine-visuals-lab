@@ -100,6 +100,7 @@ jobs:
       - name: Scene versions
         id: scenes
         run: |
+          # shellcheck disable=SC2016  # backticks/`${…}` below are JS template literals for node -e, not shell
           node -e '
           const fs = require("fs");
           const info = JSON.parse(fs.readFileSync("dist/version.json", "utf8"));
