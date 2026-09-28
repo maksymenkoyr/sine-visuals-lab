@@ -14,7 +14,7 @@ const PARAMS_PATH = path.join(root, "tuning", "params.json");
 const MARKS_DIR = path.join(root, "tuning", "marks");
 const SCENES_DIR = path.join(root, "src", "render", "scenes");
 
-const DEFAULT_PARAMS = { scene: null, autoPin: true, settings: {} };
+const DEFAULT_PARAMS = { scene: null, autoPin: false, settings: {} };
 
 function readParams(): unknown {
   try {
