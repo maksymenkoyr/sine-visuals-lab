@@ -1,5 +1,5 @@
 import type { CaptureHandle, CaptureSourceKind } from "./types.ts";
-import { DISPLAY_SHARE_GUIDE } from "./sourcePref.ts";
+import { displayAudioProblem } from "./sourcePref.ts";
 
 /**
  * Constraints tuned for music, not speech. All three MUST be false: browsers
@@ -60,9 +60,10 @@ export async function captureDisplayAudio(): Promise<CaptureHandle> {
     video: true,
     audio: MUSIC_AUDIO_CONSTRAINTS,
   });
-  if (stream.getAudioTracks().length === 0) {
+  const problem = displayAudioProblem(stream.getAudioTracks(), /Mac/.test(navigator.userAgent));
+  if (problem) {
     for (const track of stream.getTracks()) track.stop();
-    throw new Error(`That share had no audio track. ${DISPLAY_SHARE_GUIDE}`);
+    throw new Error(problem);
   }
   // We only need the audio; drop the video track immediately.
   for (const track of stream.getVideoTracks()) track.stop();
