@@ -64,6 +64,21 @@ function whiteNoise(samples: number, seed = 1): Float32Array {
   return buf;
 }
 
+/** A sustained musical note — fundamental plus a couple of harmonics, at a
+ *  quiet level (a pad breakdown, not a hot signal) — the false-positive case
+ *  mainsHumHz's HUM_PEAK_SPAN_SEC check exists for: a note whose period
+ *  happens to land near a whole multiple of the 50/60 Hz search lag clears
+ *  HUM_CORR there too, even though the note's OWN autocorrelation peak sits
+ *  well away from that lag, at its actual period. */
+function noteSignal(hz: number, sampleRate: number, samples: number, amplitude = 0.05): Float32Array {
+  const buf = new Float32Array(samples);
+  for (let i = 0; i < samples; i++) {
+    const t = i / sampleRate;
+    buf[i] = amplitude * (Math.sin(2 * Math.PI * hz * t) + 0.15 * Math.sin(2 * Math.PI * hz * 2 * t) + 0.08 * Math.sin(2 * Math.PI * hz * 3 * t));
+  }
+  return buf;
+}
+
 /** A train of kick drums, each a fast 150->50 Hz pitch sweep over a decaying
  *  envelope, retriggered on a period unrelated to either mains lag — real
  *  percussive content, not hum, and not periodic at a fixed 50/60 Hz lag
@@ -107,6 +122,28 @@ describe("mainsHumHz", () => {
   it("digital silence reads null, not a false lock", () => {
     expect(mainsHumHz(new Float32Array(4096), 48000)).toBeNull();
   });
+
+  // A held note whose period lands near a whole multiple of the 50/60 Hz
+  // search lag clears HUM_CORR too (D3=146.83 Hz: 146.83*960/48000 = 2.937
+  // cycles at the 50 Hz lag, r(960) ~ 0.92; B3=246.94 Hz similarly ~0.93) —
+  // a quiet pad breakdown holding either note must never read as hum.
+  it("a sustained D3 (146.83 Hz) note never locks, even though it clears HUM_CORR at the 50 Hz lag", () => {
+    expect(mainsHumHz(noteSignal(146.83, 48000, 4096), 48000)).toBeNull();
+  });
+
+  it("a sustained B3 (246.94 Hz) note never locks, even though it clears HUM_CORR at the 50 Hz lag too", () => {
+    expect(mainsHumHz(noteSignal(246.94, 48000, 4096), 48000)).toBeNull();
+  });
+
+  // Real mains drifts within about ±0.2 Hz of nominal — must still lock.
+  it("still locks on mains a little off nominal (50.2 Hz, 49.8 Hz)", () => {
+    expect(mainsHumHz(humSignal(50.2, 48000, 4096), 48000)).toBe(50);
+    expect(mainsHumHz(humSignal(49.8, 48000, 4096), 48000)).toBe(50);
+  });
+
+  it("still locks on 60 Hz mains a little off nominal (59.8 Hz)", () => {
+    expect(mainsHumHz(humSignal(59.8, 48000, 4096), 48000)).toBe(60);
+  });
 });
 
 // ---- createInputHealth's state machine ---------------------------------
@@ -145,6 +182,34 @@ describe("createInputHealth", () => {
     it("reports both for a mono track (peakR null) even though there's only one channel to blame", () => {
       const ih = createInputHealth();
       expect(ih.advance(DT, measure({ peakL: 1, peakR: null }))).toEqual({ kind: "clipping", channel: "both" });
+    });
+
+    it("accumulates to 'both' when a clip lands on the other side within a previous clip's hold", () => {
+      const ih = createInputHealth();
+      expect(ih.advance(DT, measure({ peakL: 1, peakR: 0 }))).toEqual({ kind: "clipping", channel: "left" }); // t=0
+
+      // ~1s later (60 ticks at DT), well inside CLIP_HOLD_SEC (3s) — a right
+      // clip now must accumulate to "both", not overwrite to "right".
+      advanceTicks(ih, 59, measure());
+      const both = ih.advance(DT, measure({ peakL: 0, peakR: 1 })); // t=1
+      expect(both).toEqual({ kind: "clipping", channel: "both" });
+
+      // "both" persists for the rest of the hold (re-armed by the t=1 clip)
+      // even with no further clips.
+      const stillBoth = advanceTicks(ih, Math.round(CLIP_HOLD_SEC * 60) - 10, measure());
+      expect(stillBoth).toEqual({ kind: "clipping", channel: "both" });
+    });
+
+    it("resets to a fresh single side once the hold has actually expired", () => {
+      const ih = createInputHealth();
+      ih.advance(DT, measure({ peakL: 1, peakR: 0 }));
+      advanceTicks(ih, Math.round(CLIP_HOLD_SEC * 60) + 10, measure()); // let the hold fully run out
+      expect(ih.advance(DT, measure()).kind).toBe("ok");
+
+      // A clip on the other side now starts fresh — no stale "both" left
+      // over from the expired hold.
+      const freshRight = ih.advance(DT, measure({ peakL: 0, peakR: 1 }));
+      expect(freshRight).toEqual({ kind: "clipping", channel: "right" });
     });
   });
 

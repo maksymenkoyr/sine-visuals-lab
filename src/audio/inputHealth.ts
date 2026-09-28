@@ -46,9 +46,11 @@ export type InputHealthKind = "ok" | "clipping" | "skipping" | "silent" | "hum";
 export interface InputHealthReading {
   kind: InputHealthKind;
   /** Which channel was clipping, held for the reading's CLIP_HOLD_SEC —
-   *  "both" for a mono track (there's only ever one channel to blame) or a
-   *  tick where both channels rode the rail together. Only meaningful for
-   *  kind "clipping". */
+   *  "both" for a mono track (there's only ever one channel to blame), a
+   *  tick where both channels rode the rail together, or a channel that
+   *  clipped anywhere within the current hold after a different channel
+   *  already had (accumulated, not overwritten — see createInputHealth).
+   *  Only meaningful for kind "clipping". */
   channel?: "left" | "right" | "both";
   /** The mains frequency mainsHumHz() locked onto. Only meaningful for kind
    *  "hum". */
@@ -136,6 +138,17 @@ export const HUM_CORR = 0.9;
  *  reasoning as SILENT_DB, just a stricter floor so a near-silent hum isn't
  *  mistaken for hum riding on genuine silence. */
 export const HUM_FLOOR_DB = -80;
+/** Half-width, in seconds of lag, for mainsHumHz's local-maximum check — see
+ *  that function for why HUM_CORR alone isn't enough. The mains grid holds
+ *  50/60 Hz within about ±0.2 Hz — under 4 samples of lag drift at audio
+ *  sample rates — so real hum's autocorrelation peak sits right at (or a
+ *  couple of samples from) the nominal 50/60 Hz lag; a musical note whose
+ *  period happens to land near a whole cycle count at that same lag peaks
+ *  well away from it, at its OWN period instead — tens of samples off. A
+ *  span scaled to the sample rate (12 samples at 48 kHz, 11 at 44.1 kHz)
+ *  comfortably covers the mains drift while staying well short of a real
+ *  note's own peak. */
+export const HUM_PEAK_SPAN_SEC = 0.00025;
 
 /** Normalized autocorrelation of `x` against itself, shifted by `lag`
  *  samples, over the overlapping region — 1.0 for a perfectly periodic
@@ -161,17 +174,26 @@ function autocorrelation(x: Float32Array, lag: number): number {
  * Mains hum detector: normalized autocorrelation of `mono` against itself,
  * one period later, at 50 Hz and at 60 Hz — a steady hum (with whatever
  * harmonics on top) lines back up almost exactly with itself a period on;
- * music generally doesn't. Returns whichever of the two clears HUM_CORR,
- * preferring the higher correlation when both do; null when the buffer is
- * quieter than HUM_FLOOR_DB (nothing to correlate) or neither clears the
- * bar.
+ * music generally doesn't. Returns whichever of the two clears HUM_CORR AND
+ * is a genuine local maximum there (see HUM_PEAK_SPAN_SEC), preferring the
+ * higher correlation when both do; null when the buffer is quieter than
+ * HUM_FLOOR_DB (nothing to correlate) or neither qualifies.
  *
- * Known limit: a sustained bass note within about a semitone of 50/60 Hz
- * autocorrelates with itself just as well as real hum does — this function
- * alone can't tell them apart. createInputHealth's HUM_AFTER_SEC hold is
- * what keeps a single held note from reading as hum: a bass note that long
- * and that steady is already an unusual mix choice, and a real ground loop
- * hum, unlike a bass note, never stops.
+ * HUM_CORR alone isn't enough: a musical note whose frequency happens to put
+ * a near-whole number of its own cycles inside the 50/60 Hz lag also clears
+ * it. A held D3 (146.83 Hz) puts 2.937 cycles inside the 50 Hz lag at 48kHz
+ * — r ≈ 0.92, comfortably over HUM_CORR — even though D3's OWN
+ * autocorrelation peak sits at 981 samples (3 full cycles), 21 samples away.
+ * B3 (246.94 Hz) does the same at ≈0.93. Requiring the candidate lag to
+ * itself be a local peak (not just above the bar) rejects both without
+ * touching a real hum's own reading, since real hum's peak IS at that lag.
+ *
+ * Known limit: a note within about a semitone of 50/60 Hz can still slip
+ * through — its own peak would then sit within HUM_PEAK_SPAN_SEC of the
+ * nominal lag too. createInputHealth's HUM_AFTER_SEC hold is what keeps a
+ * single held note like that from reading as hum: a bass note that long and
+ * that steady is already an unusual mix choice, and a real ground loop hum,
+ * unlike a bass note, never stops.
  */
 export function mainsHumHz(mono: Float32Array, sampleRate: number): 50 | 60 | null {
   if (mono.length < 2 || sampleRate <= 0) return null;
@@ -179,15 +201,22 @@ export function mainsHumHz(mono: Float32Array, sampleRate: number): 50 | 60 | nu
   const levelDb = level > 0 ? 20 * Math.log10(level) : -Infinity;
   if (levelDb < HUM_FLOOR_DB) return null;
 
-  const r50 = autocorrelation(mono, Math.round(sampleRate / 50));
-  const r60 = autocorrelation(mono, Math.round(sampleRate / 60));
+  const peakSpan = Math.max(1, Math.round(sampleRate * HUM_PEAK_SPAN_SEC));
+  const isMainsPeak = (lag: number, r: number): boolean =>
+    r >= autocorrelation(mono, lag - peakSpan) && r >= autocorrelation(mono, lag + peakSpan);
+
+  const lag50 = Math.round(sampleRate / 50);
+  const lag60 = Math.round(sampleRate / 60);
+  const r50 = autocorrelation(mono, lag50);
+  const r60 = autocorrelation(mono, lag60);
+
   let best: 50 | 60 | null = null;
   let bestR = HUM_CORR;
-  if (r50 >= bestR) {
+  if (r50 >= bestR && isMainsPeak(lag50, r50)) {
     best = 50;
     bestR = r50;
   }
-  if (r60 >= bestR) {
+  if (r60 >= bestR && isMainsPeak(lag60, r60)) {
     best = 60;
     bestR = r60;
   }
@@ -239,8 +268,15 @@ export function createInputHealth(): InputHealth {
     const clippedL = m.peakL >= CLIP_LEVEL;
     const clippedR = m.peakR !== null && m.peakR >= CLIP_LEVEL;
     if (clippedL || clippedR) {
+      const side: "left" | "right" | "both" = m.peakR === null || (clippedL && clippedR) ? "both" : clippedL ? "left" : "right";
+      // A clip on the OTHER side while still inside a previous clip's hold
+      // accumulates to "both" instead of overwriting it — left/right/both
+      // is over the whole hold, not just this tick. clipHoldSec here is
+      // still last tick's value (checked before it's re-armed below), so
+      // this only accumulates while a hold was actually still running; once
+      // it's fully expired the next clip starts fresh from its own side.
+      clipChannel = clipHoldSec > 0 && clipChannel !== side ? "both" : side;
       clipHoldSec = CLIP_HOLD_SEC;
-      clipChannel = m.peakR === null || (clippedL && clippedR) ? "both" : clippedL ? "left" : "right";
     } else if (clipHoldSec > 0) {
       clipHoldSec = Math.max(0, clipHoldSec - dt);
     }
