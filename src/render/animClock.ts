@@ -3,6 +3,7 @@ import type { OnsetDiag } from "../audio/onsetDiag.ts";
 import { createFlowClock, type FlowClock } from "./flowClock.ts";
 import { createBeatClock, PHASE_BASS, type BeatClock, type TempoHit } from "./beatClock.ts";
 import { createMetronome, type Metronome } from "./metronome.ts";
+import { createBeatTrimmer, getBeatTrim, type BeatTrimmer } from "./beatTrim.ts";
 import { createBandEnergy, type BandEnergy } from "./bandEnergy.ts";
 import { createSectionIntensity, type SectionIntensity } from "./sectionIntensity.ts";
 import { createMusicProfile, type MusicProfile, type DialValues } from "./musicProfile.ts";
@@ -55,17 +56,19 @@ export interface AnimFrame {
   /** The raw mic waveform's peak |sample| this tick, peak-held — jumps to a
    *  louder peak at once, then falls at WAVE_PEAK_FALL_PER_SEC times this
    *  tick's smoothing rateScale (so Smoothing's Off stop, rateScale =
-   *  Infinity, makes it exactly the instantaneous peak, same as the Scope
-   *  card's RAW reading). It's the one number the Scope card's Waveform
+   *  Infinity, makes it exactly the instantaneous peak, same as the Signal
+   *  card's RAW reading). It's the one number the Signal card's Waveform
    *  readout shows and the `anim.wavePeak` drive source (signals.ts) reads —
    *  computed here once so both read the same thing. Linear amplitude [0,1]
    *  of the raw capture (before auto-gain/sensitivity), not normalized. 0
    *  whenever `hit.wavePeak` is omitted/null (TV, renderer, previews — no
    *  local mic), same as `beatRatio` above. */
   wavePeak: number;
-  /** Phase-locked beat/bar clock — see beatClock.ts. Never restarts mid-beat
-   *  the way FeatureFrame.onsetPhase can (that field has no reader today —
-   *  this superseded it). */
+  /** Phase-locked beat/bar clock — see beatClock.ts — corrected by
+   *  beatTrim.ts (a bar resync, a ×2/÷2 tracking-error fix, a small
+   *  earlier/later nudge; see that file for why and the math). Never
+   *  restarts mid-beat the way FeatureFrame.onsetPhase can (that field has
+   *  no reader today — this superseded it). */
   beatPhase: number;
   barPhase: number;
   /** How confidently the phase comb's own chosen correction has settled —
@@ -74,16 +77,18 @@ export interface AnimFrame {
    *  read this, not beatClock.ts's own `confidence` (the raw, un-eased
    *  target this ramps toward). */
   tempoLock: number;
-  /** beatClock.ts's own unwrapped beat count — free-running, never resets.
-   *  JS-side only, like `raw`/`hits` below: src/render/drives.ts's
-   *  `{ source: "beat", grid }` choice is what actually turns this into a
-   *  gridded pulse per setting (src/render/gridPulse.ts), off this same
-   *  field. No scene reads it directly. */
+  /** beatClock.ts's own unwrapped beat count, corrected by beatTrim.ts (see
+   *  beatPhase above) — free-running, never resets. JS-side only, like
+   *  `raw`/`hits` below: src/render/drives.ts's `{ source: "beat", grid }`
+   *  choice is what actually turns this into a gridded pulse per setting
+   *  (src/render/gridPulse.ts), off this same field. No scene reads it
+   *  directly. */
   beats: number;
   /** beatClock.ts's own smoothed tempo — the bpm its phase is actually
-   *  running at (BPM_TRACK_RATE-eased), as opposed to `bpm` below (the raw
-   *  FeatureFrame/wire passthrough). src/render/signals.ts's "Tempo" signal
-   *  reads this. */
+   *  running at (BPM_TRACK_RATE-eased) — × beatTrim.ts's own multiplier
+   *  (1 by default), as opposed to `bpm` below (the raw FeatureFrame/wire
+   *  passthrough, also × that multiplier — see its own doc).
+   *  src/render/signals.ts's "Tempo" signal reads this. */
   tempoBpm: number;
   /** Slewed low/mid/high band levels and their onset pulses — see bandEnergy.ts. */
   low: number;
@@ -119,35 +124,43 @@ export interface AnimFrame {
   /** The unsmoothed, absolute counterpart to centroid — see
    *  spectralCentroid.ts. */
   centroidRaw: number;
-  /** FeatureFrame.bpm passed through unchanged — beatListener.ts's
-   *  resolveHold reads this (alongside tempoLock) to size a hold in beats
-   *  rather than a fixed duration. */
+  /** FeatureFrame.bpm × beatTrim.ts's own multiplier (1 by default — see
+   *  that file) — beatListener.ts's resolveHold reads this (alongside
+   *  tempoLock) to size a hold in beats rather than a fixed duration, so a
+   *  hold sized in beats keeps its real-time length in step with a ×2/÷2
+   *  correction. The BPM card's RAW mode reads FeatureFrame.bpm directly
+   *  instead of this field — deliberately left raw/unmultiplied. */
   bpm: number;
-  /** metronome.ts's own flywheel clock — see that file's header for why
-   *  this exists alongside beatPhase/beats/tempoBpm above: those follow the
-   *  tracker live (gridPulse.ts falls back to raw hits when unsure, and
+  /** metronome.ts's own flywheel clock, also corrected by beatTrim.ts (its
+   *  own second BeatTrimmer instance, "metroTrim" — see animClock.ts's own
+   *  wiring and beatTrim.ts's header) — see metronome.ts's file header for
+   *  why this exists alongside beatPhase/beats/tempoBpm above: those follow
+   *  the tracker live (gridPulse.ts falls back to raw hits when unsure, and
    *  beatClock's own phase wavers/stalls with the estimate); these are
    *  "always evenly spaced, always at the song's tempo" once adopted, and
    *  free-run through an unsure patch rather than reacting to it.
    *  `metronomeOn` is metronome.ts's own `running`. */
   metronomeOn: boolean;
-  /** The tempo it's actually ticking at — 0 while `!metronomeOn`. */
+  /** The tempo it's actually ticking at, × beatTrim.ts's own multiplier —
+   *  0 while `!metronomeOn`. */
   metronomeBpm: number;
   /** Unwrapped beat count, free-running like `beats` above, but off the
-   *  metronome's own flywheel rather than the live clock. */
+   *  metronome's own (corrected) flywheel rather than the live clock. */
   metronomeBeats: number;
   /** [0,1) position within the current beat/bar — the metronome's own
-   *  counterparts to `beatPhase`/`barPhase`. */
+   *  (corrected) counterparts to `beatPhase`/`barPhase`. */
   metronomePhase: number;
   metronomeBarPhase: number;
   /** 0..1, eases in while running and out while idle (metronome.ts's own
    *  `level`) — for a scene/signal that wants to fade with the metronome
    *  rather than snap on/off. */
   metronomeLevel: number;
-  /** One-shot edges, true only on the tick metronome.ts's own beatTick/
-   *  barTick fired — same family as `onset`/`lowOnset` above: read through
-   *  renderLatch.ts, never straight off a tick a render-capped scene might
-   *  skip. */
+  /** One-shot edges, true only on the tick beatTrim.ts's own metroTrim
+   *  crossed a whole beat/bar AND metronome.ts is actually running (a
+   *  multiplier/resync change while idle can move metroTrim's own anchor
+   *  with no real tick to show for it — see beatTrim.ts) — same family as
+   *  `onset`/`lowOnset` above: read through renderLatch.ts, never straight
+   *  off a tick a render-capped scene might skip. */
   metronomeBeat: boolean;
   metronomeBar: boolean;
   /** Decaying [0,1] envelopes that jump to 1 on metronomeBeat/metronomeBar
@@ -159,8 +172,8 @@ export interface AnimFrame {
   /** This tick's silence-gate dimmer (src/audio/silenceGate.ts) — the same
    *  value bandEnergy.advance() was called with above, computed once here
    *  from `gate`/`frame.level` (see advance()'s own doc). 1 with no gate or
-   *  a fully open room, down toward 0 the quieter the room reads. The
-   *  Rhythm card's hits history reads this to shade the ground (alpha
+   *  a fully open room, down toward 0 the quieter the room reads. The Hits
+   *  card's hits history reads this to shade the ground (alpha
    *  proportional to `1 - gateDimmer`, so a half-open gate reads lighter
    *  than a shut one); a BeatListener's "bass"/"mid"/"high" sources are
    *  gated by construction (lowOnset/midOnset/highOnset are already false
@@ -180,7 +193,7 @@ export interface AnimFrame {
    *  the `hit` param below. Copies, same reasoning as `hits` above copying
    *  bandEnergy's own diags: these hold the *last fired hit's* numbers
    *  (they only change on that detector's own onset), which is exactly what
-   *  the meters panel's Hit strength card (audioMeters.ts) wants to watch
+   *  the Hits card's own Shape section (audioMeters.ts) wants to watch
    *  without an old AnimFrame changing under it later. */
   hitStrength: { beat: HitParts; low: HitParts; mid: HitParts; high: HitParts };
 }
@@ -240,7 +253,7 @@ export const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts 
 // AnimFrame.wavePeak's own fall rate — matches the meters' own peak-hold
 // fall (audioMeters.ts's PEAK_FALL_PER_SEC, spectrumStrip.ts's peak-hold
 // decay), so moving the hold in here (from audioMeters.ts's own local state)
-// doesn't change how the Scope card's Waveform readout looks or feels.
+// doesn't change how the Signal card's Waveform readout looks or feels.
 export const WAVE_PEAK_FALL_PER_SEC = 1.2;
 
 // The phase comb's own hit weight (beatClock.ts's advance()) — how much this
@@ -270,6 +283,14 @@ export function createAnimClock(): AnimClock {
   const flow: FlowClock = createFlowClock();
   const beat: BeatClock = createBeatClock();
   const metronome: Metronome = createMetronome();
+  // beatTrim.ts's correction layer — one trimmer per clock (see that
+  // file's header for why two, and its exact wiring below). `wasRunning`
+  // catches the tick metronome.ts's own `running` turns true so metroTrim
+  // can adopt clockTrim's current multiplier/anchor right then, the same
+  // tick the raw metronome itself adopts clock.beats.
+  const clockTrim: BeatTrimmer = createBeatTrimmer();
+  const metroTrim: BeatTrimmer = createBeatTrimmer();
+  let wasRunning = false;
   const bandEnergy: BandEnergy = createBandEnergy();
   const section: SectionIntensity = createSectionIntensity();
   const profile: MusicProfile = createMusicProfile();
@@ -333,6 +354,21 @@ export function createAnimClock(): AnimClock {
         beat.advance(dtSec, frame.bpm, frame.pulseOnset, hitWeight);
       }
       metronome.advance(dtSec, { bpm: beat.bpm, beats: beat.beats, tempoLock: beat.tempoLock }, frame.bpm);
+      // beatTrim.ts's correction layer, one trimmer per clock — see that
+      // file's header and this module's own AnimFrame field docs. Both
+      // trimmers read the same settings snapshot this tick.
+      const trim = getBeatTrim();
+      const c = clockTrim.advance(beat.beats, beat.bpm, trim);
+      if (metronome.running && !wasRunning) {
+        // The raw metronome itself just adopted clock.beats this same
+        // tick (metronome.ts's own `beats = clock.beats`) — mirror that on
+        // the corrected count before advancing metroTrim, and arm it so
+        // that adoption jump isn't mistaken for beats actually crossed.
+        metroTrim.adoptFrom(clockTrim);
+        metroTrim.rearm();
+      }
+      const mt = metroTrim.advance(metronome.beats, metronome.bpm, trim);
+      wasRunning = metronome.running;
       prevLowRatio = lowRatioNow;
       section.advance(dtSec, frame.energy, rateScale);
       profile.advance(dtSec, frame, { tempoLock: beat.tempoLock, sectionIntensity: section.intensity }, rateScale);
@@ -351,9 +387,9 @@ export function createAnimClock(): AnimClock {
         }
       }
       metronomePulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
-      if (metronome.beatTick) metronomePulse = 1;
+      if (mt.beatTick) metronomePulse = 1;
       metronomeBarPulse *= Math.exp(-dtSec * BEAT_PULSE_DECAY_PER_SEC * rateScale);
-      if (metronome.barTick) metronomeBarPulse = 1;
+      if (mt.barTick) metronomeBarPulse = 1;
 
       return {
         dtSec,
@@ -363,11 +399,11 @@ export function createAnimClock(): AnimClock {
         onset,
         beatRatio: hit?.beatRatio ?? 0,
         wavePeak,
-        beatPhase: beat.beatPhase,
-        barPhase: beat.barPhase,
+        beatPhase: c.beatPhase,
+        barPhase: c.barPhase,
         tempoLock: beat.tempoLock,
-        beats: beat.beats,
-        tempoBpm: beat.bpm,
+        beats: c.beats,
+        tempoBpm: c.bpm,
         low: bandEnergy.low,
         mid: bandEnergy.mid,
         high: bandEnergy.high,
@@ -395,15 +431,15 @@ export function createAnimClock(): AnimClock {
         },
         centroid: centroid.centroid,
         centroidRaw: centroid.raw,
-        bpm: frame.bpm,
+        bpm: frame.bpm * trim.multiplier,
         metronomeOn: metronome.running,
-        metronomeBpm: metronome.bpm,
-        metronomeBeats: metronome.beats,
-        metronomePhase: metronome.beatPhase,
-        metronomeBarPhase: metronome.barPhase,
+        metronomeBpm: mt.bpm,
+        metronomeBeats: mt.beats,
+        metronomePhase: mt.beatPhase,
+        metronomeBarPhase: mt.barPhase,
         metronomeLevel: metronome.level,
-        metronomeBeat: metronome.beatTick,
-        metronomeBar: metronome.barTick,
+        metronomeBeat: metronome.running && mt.beatTick,
+        metronomeBar: metronome.running && mt.barTick,
         metronomePulse,
         metronomeBarPulse,
         gateDimmer: dimmer,

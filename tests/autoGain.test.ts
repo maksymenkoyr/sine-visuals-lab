@@ -106,15 +106,28 @@ describe("auto-gain auto mode", () => {
     expect(isAutoGainAuto()).toBe(false);
   });
 
-  it("eases gradually toward the target — a short dt only moves it partway", () => {
+  it("eases gradually toward the target — a very short tick only moves it partway", () => {
     setAutoGain(AUTO_GAIN_MIN); // seed point
     setAutoGainAuto(true);
-    // A crushed span asks for AUTO_GAIN_MAX; one second in should be well on
-    // the way but nowhere near arrived, given the ~10s time constant.
-    feedAutoGainMeasurement(0, 1);
-    const afterOneSec = resolveAutoGain();
-    expect(afterOneSec).toBeGreaterThan(AUTO_GAIN_MIN);
-    expect(afterOneSec).toBeLessThan(AUTO_GAIN_MAX * 0.5);
+    // warmRate's ceiling (1/WARM_T0_SEC, at warmSec=0) is the fastest this
+    // ever eases — even that isn't an instant snap to the target on one
+    // small tick.
+    feedAutoGainMeasurement(0, 0.05);
+    const afterOneTick = resolveAutoGain();
+    expect(afterOneTick).toBeGreaterThan(AUTO_GAIN_MIN);
+    expect(afterOneTick).toBeLessThan(AUTO_GAIN_MAX * 0.5);
+  });
+
+  // The regression test for warmStart.ts's whole point: fed in realistic
+  // per-tick slices (not one giant dt), ~3s should already be most of the
+  // way there — where the old, unwarmed ~10s ease (EASE_RATE alone, no
+  // warmRate) would still be nowhere close (~26% in, by the same math).
+  it("warm start gets most of the way to the target within ~3s of realistic ticks", () => {
+    setAutoGain(AUTO_GAIN_MIN);
+    setAutoGainAuto(true);
+    const dt = 0.1;
+    for (let t = 0; t < 3; t += dt) feedAutoGainMeasurement(0, dt);
+    expect(resolveAutoGain()).toBeGreaterThan(AUTO_GAIN_MAX * 0.8);
   });
 
   it("converges to the target given enough time", () => {

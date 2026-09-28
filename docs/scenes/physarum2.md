@@ -329,6 +329,33 @@ and `powder.ts`'s curl noise).
 - **2026-09-27, featured.** Taken out of `draftIds` on the user's call, in
   the same change that moved Physarum and Slats behind the draft toggle.
   Code untouched.
+- **2026-09-28, drive-defaults audit.** "If a parameter doesn't have a
+  driver it should not affect the scene; wire it appropriately to what they
+  were using as default, rather than turning it off by default" (one of
+  four featured scenes audited — see sky.md, caustics.md, chladni.md for the
+  others). Sensor range, Turn angle, Speed and Stain (all four strains) went
+  from a Scene default that read a bare 0 (inert until patched) to that
+  strain's own band — `STRAIN_BAND_SIGNALS`, the same per-strain band
+  Nutrient already defaults to — each with a per-item `drive.gain`
+  (`MOTION_JACK_GAIN` 0.15 for the first three, `STAIN_JACK_GAIN` 0.2 for
+  Stain) taming a sustained band level before it reaches `pushToward1`/the
+  hue shift. Both couplings were already identity at drive 0, so no formula
+  changed. The gains were tuned from side-by-side headless frames (synthetic
+  120 BPM, t=15 s and 21 s) against the pre-change look: a first cut at 0.4
+  motion turned the curly, looping network into long straight parallel
+  streams, and 0.5 stain rotated the red strain to salmon-orange on the loud
+  synthetic bass; at 0.15/0.2 the loops and the strains' own colours are
+  back while each strain still moves and tints with its band. The Scene
+  fallback passed to `drives.value` for these four is the band times the
+  same gain, so gallery tiles (`PASSTHROUGH_DRIVES`) match the real dish.
+  Nutrient's own Unplug bug got a separate fix: `feed = lerp(1,
+  FEED_BASE + FEED_GAIN * drive.nutrient, raw.nutrient)` read drive 0 as its
+  rest, which put `feed` at `lerp(1, FEED_BASE, raw.nutrient)` — a raised
+  slider laid down *less* trail once its jack was unplugged. `NUTRIENT_REST
+  = (1 - FEED_BASE) / FEED_GAIN` is now passed as `drives.value`'s own
+  `rest` everywhere Nutrient's drive is read (`resolveStrains`,
+  `previews.ts`'s Strains preview), so `feed` is exactly 1 — the plain
+  slider, no drive at all — the instant nothing is plugged in.
 
 ## Tuning notes
 

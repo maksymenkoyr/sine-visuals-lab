@@ -95,7 +95,7 @@ export interface CardSpec {
   right?: HTMLElement;
   /** Opts this card into a persisted collapse toggle (panelFolds.ts): a
    *  chevron in the header, and a click anywhere on the header outside
-   *  `right`. Unique per mounted card ("bands", "scope", "signal", …). */
+   *  `right`. Unique per mounted card ("bands", "signal", "hits", …). */
   foldId?: string;
   /** Starts folded until the user first opens it (panelFolds.ts's
    *  defaultFolded) — the Power card, whose readouts most people never need. */
@@ -289,6 +289,11 @@ export interface AdvancedSection {
   el: HTMLElement;
   /** Append rows here — hidden via `display: none` while collapsed. */
   body: HTMLElement;
+  /** True while `body` is showing — a caller that draws something extra
+   *  only while a disclosure is open (audioMeters.ts's Hits card, its own
+   *  Shape section) reads this each frame rather than tracking the state
+   *  itself a second time. */
+  isOpen(): boolean;
 }
 
 /** A per-group disclosure for rows a scene marked SceneSetting.advanced —
@@ -323,7 +328,7 @@ export function createAdvancedSection(id: string, label: string): AdvancedSectio
   });
 
   wrap.append(toggle, body);
-  return { el: wrap, body };
+  return { el: wrap, body, isOpen: () => body.style.display !== "none" };
 }
 
 // The "reacts to" strip (a setting row) and its always-visible head chip —
@@ -499,7 +504,7 @@ export function createPickerRow(spec: PickerRowSpec): PickerRow {
   const readout = document.createElement("span");
   readout.style.cssText = `${digitsTextStyle} color: #fff;`;
   // A dim note after the readout for state the host wants to show beside
-  // the choice (the Rhythm card's "waiting for tempo"); empty by default.
+  // the choice (the Tempo card's "waiting for tempo"); empty by default.
   const status = document.createElement("span");
   status.style.cssText = pickerStatusStyle;
   const resetBtn = document.createElement("button");

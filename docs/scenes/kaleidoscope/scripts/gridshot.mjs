@@ -1,5 +1,5 @@
 // Kaleidoscope: opens the scene with the panel, clicks a Beat grid chip,
-// screenshots the Rhythm card, and prints the probe for a few seconds (to
+// screenshots the Tempo card, and prints the probe for a few seconds (to
 // check beat=1(grid) lines land where expected).
 // Rescued from a working session on 2026-09-04.
 // usage: node gridshot.mjs <outPrefix> [--port P] [--scene S] [--bpm N] [--grid IDX]
@@ -41,8 +41,8 @@ for (let i = 0; i < 240; i++) {
 }
 console.log(`probe: fired on grid ${gridBeats}, raw ${rawBeats}`);
 console.log(await page.evaluate(() => window.__viz?.probeText?.().split("\n").slice(0, 3).join("\n")));
-// Rhythm card screenshot: locate by its title.
-const card = await page.evaluateHandle(() => [...document.querySelectorAll("*")].find((n) => n.children.length === 0 && n.textContent?.trim() === "Rhythm")?.closest(".vc-card") ?? document.body);
+// Tempo card screenshot: locate by its title.
+const card = await page.evaluateHandle(() => [...document.querySelectorAll("*")].find((n) => n.children.length === 0 && n.textContent?.trim() === "Tempo")?.closest(".vc-card") ?? document.body);
 const box = await card.boundingBox();
 await page.screenshot({ path: `${out}-rhythm.png`, clip: box ? { x: box.x - 4, y: box.y - 4, width: box.width + 8, height: Math.min(box.height + 8, 720 - box.y) } : undefined });
 await page.screenshot({ path: `${out}-full.png` });

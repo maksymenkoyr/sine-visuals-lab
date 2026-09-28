@@ -76,9 +76,10 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  *     doing. `sourceValues()` below reports a muted
  *     source's own slot as 0 (still in patch order — the panel's per-source
  *     trace just goes flat rather than disappearing and shifting every
- *     later trace over). If *every* source in a patch is muted, the patch's
- *     value is 0 regardless of mix — the setting simply holds its resting
- *     look, same as a value of 0 always has.
+ *     later trace over). If *every* source in a patch is muted,
+ *     `hasLiveSource` (below) reads false and `value()`/`valueOf()` return
+ *     the caller's own `rest` regardless of mix — not an honest 0 read off
+ *     `combine()` — see this header's own "Nothing plugged in" paragraph.
  *
  *   The combined value is finally scaled by the setting's own `drive.gain`
  *   (unchanged from before patches existed — see the uniformPair doc below).
@@ -142,6 +143,28 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * Graded is the untouched catalogue/grid/line reading). See
  * tests/drives.test.ts's identity check, which walks every registered
  * scene's drive settings and asserts exactly this.
+ *
+ * **Nothing plugged in.** Two rules a jack's `drive.default` and a scene's
+ * own coupling formula both have to hold for (2026-09-28): (1) a jack's
+ * default always reacts to the music — never a constant, and never a Scene
+ * composite that turns out to be one in disguise; a setting nothing in the
+ * catalogue genuinely fits simply declares no `drive` at all. (2) with
+ * nothing plugged in — every source unplugged (an empty patch), muted, or
+ * (in a `gate` mix) only a `when` condition left with no source actually
+ * "playing", see `hasLiveSource` below — the music stops moving the
+ * setting and nothing else changes: `value()`/`valueOf()` return the
+ * caller's own `rest` argument (default 0) in that case, skipping `gain`
+ * and the generic gate entirely, rather than reading `combine()`'s honest 0
+ * for an empty sum. A caller whose neutral silence isn't 0 (Caustics'
+ * `driftLevel` swell, physarum2's `nutrient`) passes its own `rest`; every
+ * other caller's implicit 0 is exactly right for a hit-only setting (Beat
+ * flash, Beat ripple) that simply has nothing to react to. `uniformPair()`
+ * has no `rest` of its own — an unplugged patch still uploads `{drive: 0,
+ * custom: 1}` — so this is also why every GLSL coupling built on that pair
+ * has to be identity at drive 0 in its own right: a lift on top of the
+ * slider (`v + (1 - v) * k * d`, a factor `1 + k*d`/`1 - k*d`), never
+ * `slider * drive` for an amount that exists without music, which would
+ * zero it (or run it backwards) the instant a jack sits empty.
  *
  * **The threshold: scene-handled vs. engine-gated.** `SceneSetting.drive.
  * threshold` marks a setting scene-handled: the scene owns the whole idea of
@@ -296,11 +319,13 @@ export type DriveSetting = "scene" | DrivePatch;
 
 export interface SceneDrives {
   /** The resolved value for a value-style (GLSL/JS-continuous) consumer:
-   *  `sceneDefault` passed straight through for `"scene"`, else the patch's
-   *  mix-combined reading (each source's own weighted value — its decaying
-   *  envelope for a hit-kind source, its level for a level-kind one) times
-   *  `drive.gain`. */
-  value(key: string, sceneDefault: number): number;
+   *  `sceneDefault` passed straight through for `"scene"`; for a patch with
+   *  no live source (`hasLiveSource` below is false — this file's header's
+   *  "Nothing plugged in" paragraph), `rest` (default 0) unchanged, with no
+   *  `gain` or generic gate applied; otherwise the patch's mix-combined
+   *  reading (each source's own weighted value — its decaying envelope for
+   *  a hit-kind source, its level for a level-kind one) times `drive.gain`. */
+  value(key: string, sceneDefault: number, rest?: number): number;
   /** The resolved one-shot trigger for a JS-side spawn/impulse:
    *  `sceneDefaultFired` passed straight through for `"scene"`; for `add`/
    *  `max`, the OR of every non-muted source's own edge — a grid source's
@@ -330,7 +355,12 @@ export interface SceneDrives {
    *  scene authors use value()/fired() instead. `custom` is 0 for `"scene"`
    *  (mix() then reduces to sceneDefault exactly) and 1 otherwise; `drive`
    *  is the same combined-then-gained reading value() gives (0 when
-   *  `custom` is 0 — unused by the shader's mix() either way). */
+   *  `custom` is 0 — unused by the shader's mix() either way). Unlike
+   *  value(), this has no `rest` of its own: a patch with no live source
+   *  still uploads `{drive: 0, custom: 1}` (`combine()`'s honest empty sum),
+   *  which is exactly why a GLSL `<key>Drive(sceneDefault)` coupling has to
+   *  be identity at drive 0 on its own terms — see this file's header's
+   *  "Nothing plugged in" paragraph. */
   uniformPair(key: string): { drive: number; custom: number };
   /** Each source's own `weight·value` this tick, in patch order, un-gained —
    *  the panel's per-source trace and its ghost lines in the output graph. A
@@ -343,8 +373,10 @@ export interface SceneDrives {
    *  give — for a row's own live sparkline, without a caller having to know
    *  a scene's own `sceneDefault` for a "scene" setting (which returns 0
    *  here, since there is no patch to sum — the panel draws that setting's
-   *  cables instead of a sparkline). */
-  valueOf(key: string): number;
+   *  cables instead of a sparkline). For a patch with no live source,
+   *  `rest` (default 0) — the same rule value() applies, this file's
+   *  header's "Nothing plugged in" paragraph. */
+  valueOf(key: string, rest?: number): number;
   /** This setting's own threshold value when its threshold is on (whether
    *  scene-handled — SceneSetting.drive.threshold, adjusted by the slider
    *  under its graph — or the generic engine gate every other patched
@@ -371,12 +403,12 @@ export interface SceneDrives {
  *  drive system at all — the same invariant a catalogue default's identity
  *  gives at the engine level (see this file's header). */
 export const PASSTHROUGH_DRIVES: SceneDrives = {
-  value: (_key, sceneDefault) => sceneDefault,
+  value: (_key, sceneDefault, _rest) => sceneDefault,
   fired: (_key, sceneDefaultFired) => sceneDefaultFired,
   excess: () => null,
   uniformPair: () => ({ drive: 0, custom: 0 }),
   sourceValues: () => null,
-  valueOf: () => 0,
+  valueOf: (_key, _rest) => 0,
   threshold: () => undefined,
   gateLine: () => undefined,
 };
@@ -478,6 +510,18 @@ export function gateConditionIndices(patch: DrivePatch): number[] {
   return out;
 }
 
+/** True iff `patch` has at least one source that actually contributes a
+ *  reading right now: not muted (`off`), and — in a `gate` mix only — not a
+ *  bare condition (`when` gates a `plays` source instead of playing itself;
+ *  `add`/`max` ignore `when` entirely, so it never disqualifies a source in
+ *  those mixes). `value()`/`valueOf()` below read this to decide whether a
+ *  patch has anything plugged in at all, or whether the caller's own `rest`
+ *  should stand in unchanged — see this file's header's "Nothing plugged
+ *  in" paragraph. */
+export function hasLiveSource(patch: DrivePatch): boolean {
+  return patch.sources.some((s) => !s.off && !(patch.mix === "gate" && s.when));
+}
+
 function isGridChoice(choice: DriveSourceChoice): choice is { source: "beat"; grid: BeatGridIndex } {
   return typeof choice === "object" && choice.source === "beat";
 }
@@ -499,8 +543,8 @@ export function sourceKey(choice: DriveSourceChoice): string {
  *  source and `setSourceGrid` re-grids it in place, so toggling *any*
  *  division unplugs whichever one is there. `normalizeDriveSetting`'s dedupe
  *  and `togglePatchSource` key by this; driveSources.ts's jackKey is it too,
- *  so the Beat row's jack (which always carries the default division) can
- *  unplug a patch whose grid was re-gridded to Bar. */
+ *  so the Timing strip's Grid jack (which always carries the default
+ *  division) can unplug a patch whose grid was re-gridded to Bar. */
 export function sourceSlot(choice: DriveSourceChoice): string {
   return isGridChoice(choice) ? "grid" : sourceKey(choice);
 }
@@ -558,7 +602,9 @@ export function defaultDriveSetting(spec: SceneSetting): DriveSetting {
 /** Clamps every source's weight, drops a source whose key collides with an
  *  earlier one in the same patch (first occurrence wins) or a second line
  *  source, and keeps an empty result empty: a patch with nothing plugged in
- *  listens to nothing (value 0, never fires). It used to collapse to
+ *  reads as the caller's own `rest` (0 unless the read passes one — this
+ *  file's header's "Nothing plugged in" paragraph) and never fires. It used
+ *  to collapse to
  *  `"scene"`, which made unplugging the last source silently fall back to
  *  the scene's own mix — Beat ripple's "bass or beat hit" could never be
  *  disconnected. The panel's "Reset to scene default" is the one way back
@@ -1149,9 +1195,10 @@ export function createDriveEngine(): DriveEngine {
       }
 
       return {
-        value(key, sceneDefault) {
+        value(key, sceneDefault, rest = 0) {
           const { setting, gain } = resolve(key);
           if (setting === "scene") return sceneDefault;
+          if (!hasLiveSource(setting)) return rest;
           return applyGenericGate(key, combine(setting, weightedValues(key, setting)) * gain);
         },
 
@@ -1219,9 +1266,11 @@ export function createDriveEngine(): DriveEngine {
           return out;
         },
 
-        valueOf(key) {
+        valueOf(key, rest = 0) {
           const { setting, gain } = resolve(key);
-          return setting === "scene" ? 0 : applyGenericGate(key, combine(setting, weightedValues(key, setting)) * gain);
+          if (setting === "scene") return 0;
+          if (!hasLiveSource(setting)) return rest;
+          return applyGenericGate(key, combine(setting, weightedValues(key, setting)) * gain);
         },
 
         threshold(key) {

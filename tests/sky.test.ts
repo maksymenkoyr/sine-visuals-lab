@@ -20,10 +20,12 @@ import {
   WAVE_DEAD_T0,
   spawnFloaters,
   skyScene,
+  liftByDrive,
 } from "../src/render/scenes/sky/sky.ts";
 import { computeAutoTarget } from "../src/render/autoTune.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 import { SIGNALS } from "../src/render/signals.ts";
+import type { DriveChoice } from "../src/render/drives.ts";
 import type { GLProgram } from "../src/render/gl.ts";
 
 /** A GLProgram stub that only records the float-array uploads — same
@@ -490,26 +492,50 @@ describe("sky scene registration", () => {
   });
 });
 
-// The patch-bay table (src/render/drives.ts's header owns the system).
-// Every drive default here is "scene" — the whole point: each port's Scene
-// composite reproduces today's coupling (or today's no-reaction) bit-for-bit,
-// and a jack only changes the look once someone picks a source. The second
-// test pins the boundary the other way: the settings drives.ts calls
-// response-shape/timeline params carry no jack at all.
+// The patch-bay table (src/render/drives.ts's header owns the system). Every
+// jack's default now reacts to the music (drives.ts's header's "Nothing
+// plugged in" paragraph): Floaters and Light waves keep a Scene composite
+// (a genuine mix of more than one signal), and every other ambient jack
+// below defaults to one plain catalogue signal, lifted on top of its own
+// slider (liftByDrive/skyLift) rather than the old "steady"/no-reaction
+// Scene mix. The second test pins the boundary the other way: the settings
+// drives.ts calls response-shape/timeline params carry no jack at all.
 describe("sky's patch-bay drives", () => {
   const driveKeys = (skyScene.settings ?? []).filter((s) => s.drive).map((s) => s.key);
+  const specFor = (key: string) => (skyScene.settings ?? []).find((s) => s.key === key)!;
+  // Every ambient jack's own new default — the reading its coupling lifts
+  // the slider toward (SETTINGS' own per-setting comments in sky.ts).
+  const CATALOGUE_DEFAULTS: Record<string, DriveChoice> = {
+    cloudCover: "anim.sectionIntensity",
+    flowSpeed: "anim.energy",
+    turbulence: "anim.low",
+    cloudBrightness: "anim.mid",
+    floaterVisibility: "anim.high",
+    brushOpacity: "anim.energy",
+  };
 
-  it("exactly these settings carry a jack, all Scene-default with a label and catalogue-honest sceneSources", () => {
+  it("exactly these settings carry a jack", () => {
     expect(driveKeys.sort()).toEqual(
       ["brushOpacity", "cloudBrightness", "cloudCover", "flowSpeed", "floaterDensity", "floaterVisibility", "lightWaves", "turbulence"].sort(),
     );
-    for (const s of skyScene.settings ?? []) {
-      if (!s.drive) continue;
-      expect(s.drive.default, `${s.key}.drive.default`).toBe("scene");
-      expect(s.drive.sceneLabel, `${s.key}.drive.sceneLabel`).toBeTruthy();
-      for (const src of s.drive.sceneSources ?? []) {
-        expect(Object.keys(SIGNALS), `${s.key}.drive.sceneSources`).toContain(src);
+  });
+
+  it("floaterDensity and lightWaves stay Scene-default with a label and catalogue-honest sceneSources", () => {
+    for (const key of ["floaterDensity", "lightWaves"]) {
+      const spec = specFor(key);
+      expect(spec.drive!.default, `${key}.drive.default`).toBe("scene");
+      expect(spec.drive!.sceneLabel, `${key}.drive.sceneLabel`).toBeTruthy();
+      for (const src of spec.drive!.sceneSources ?? []) {
+        expect(Object.keys(SIGNALS), `${key}.drive.sceneSources`).toContain(src);
       }
+    }
+  });
+
+  it("every other ambient jack defaults to exactly its own plain catalogue signal, with no sceneLabel", () => {
+    for (const [key, id] of Object.entries(CATALOGUE_DEFAULTS)) {
+      const spec = specFor(key);
+      expect(spec.drive!.default, `${key}.drive.default`).toBe(id);
+      expect(spec.drive!.sceneLabel, `${key}.drive.sceneLabel`).toBeUndefined();
     }
   });
 
@@ -530,6 +556,28 @@ describe("sky's patch-bay drives", () => {
   it("floaters has no hand-authored reads — its live pill comes from the drive choice", () => {
     const spec = (skyScene.settings ?? []).find((s) => s.key === "floaterDensity");
     expect(spec!.reads).toBeUndefined();
+  });
+});
+
+// liftByDrive: the coupling the ambient amounts above use instead of a bare
+// `slider * drive` — drives.ts's header's "Nothing plugged in" paragraph.
+describe("liftByDrive", () => {
+  it("is identity at drive 0, monotone increasing in drive, and never exceeds 1", () => {
+    for (const amount of [0, 0.2, 0.5, 0.8, 1]) {
+      expect(liftByDrive(amount, 0)).toBeCloseTo(amount, 10);
+      let prev = liftByDrive(amount, 0);
+      for (const drive of [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2]) {
+        const v = liftByDrive(amount, drive);
+        expect(v).toBeGreaterThanOrEqual(prev);
+        expect(v).toBeLessThanOrEqual(1);
+        prev = v;
+      }
+    }
+  });
+
+  it("fails closed to a finite number on non-finite input", () => {
+    expect(Number.isFinite(liftByDrive(NaN, 1))).toBe(true);
+    expect(Number.isFinite(liftByDrive(0.5, NaN))).toBe(true);
   });
 });
 

@@ -8,6 +8,7 @@ import {
   createLoudSwellState,
   createPumpState,
   DENSITY_GLIDE_SEC,
+  densityTargetFor,
   driftFlows,
   driftRatePerSec,
   focusSharp,
@@ -416,6 +417,22 @@ describe("caustics caustic density", () => {
       expect(s).toBeGreaterThan(prev);
       prev = s;
     }
+  });
+
+  // drives.ts's header's "Nothing plugged in" paragraph: an unplugged jack
+  // (drive 0) leaves exactly the slider, never the coarsest cells.
+  it("densityTargetFor is the slider at drive 0, rises with the drive, and stays in 0..1", () => {
+    for (const slider of [0, 0.35, 0.7, 1]) {
+      expect(densityTargetFor(slider, 0)).toBeCloseTo(slider, 10);
+      let prev = densityTargetFor(slider, 0);
+      for (const drive of [0.25, 0.5, 1, 2]) {
+        const t = densityTargetFor(slider, drive);
+        expect(t).toBeGreaterThanOrEqual(prev);
+        expect(t).toBeLessThanOrEqual(1);
+        prev = t;
+      }
+    }
+    expect(densityTargetFor(0.35, NaN)).toBeCloseTo(0.35, 10);
   });
 });
 

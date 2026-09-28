@@ -324,11 +324,24 @@ const LEGACY_MOTION: readonly { sensorDist: number; turnDeg: number; strideDist:
 // record has that history). ---
 const SURGE_GAIN = 6.0;
 
-// --- The Sensor range/Turn angle/Speed/Stain "inert until patched" drive
-// formula (see the file header) — caustics.ts's own `breathe` pattern, read
-// in JS instead of GLSL: at drive 0 (unpatched) this is the identity
-// (eff === v), so the default look never depends on it. ---
+// --- The Sensor range/Turn angle/Speed/Stain drive formula (see the file
+// header): each strain's own band (STRAIN_BAND_SIGNALS below, same as its
+// own Nutrient) nudges it toward 1 by default now, rather than sitting
+// inert until patched — caustics.ts's own `breathe` pattern, read in JS
+// instead of GLSL. Identity at drive 0 either way (eff === v), so an
+// unplugged jack (or a muted source) still leaves a strain's own look
+// exactly where its slider puts it. ---
 const PUSH_GAIN = 0.7;
+// Per-item gain (SceneSetting.drive.gain) for the Sensor range/Turn
+// angle/Speed and Stain jacks' own per-strain band default: tames a
+// sustained band level (anim.low/mid/high/energy can sit near 1 through a
+// whole loud passage) before it reaches pushToward1/the stain shift below,
+// so the default reads as a nudge rather than pinning every strain toward 1
+// (or rotating a strain off its own identity colour) for as long as the
+// band stays loud. Tuned from side-by-side frames against the pre-jack look —
+// the scene's record has the rejected values and what they did.
+const MOTION_JACK_GAIN = 0.15; // Sensor range/Turn angle/Speed
+const STAIN_JACK_GAIN = 0.2; // Stain
 /** Stain's own drive gain — a patched source shifts hue by up to this many
  *  turns on top of the stored shift. */
 const STAIN_DRIVE_GAIN = 0.18;
@@ -357,6 +370,16 @@ const EVAP_DITHER = 1.0;
 export const DEPOSIT = 0.03;
 const FEED_BASE = 0.35;
 const FEED_GAIN = 1.65;
+/** Nutrient's own rest — passed as `drives.value`/`ctx.driveValue`'s third
+ *  argument everywhere Nutrient's drive is read (resolveStrains below,
+ *  src/ui/widgets/previews.ts's own Strains preview), so an unplugged jack
+ *  (or every source muted) reads as exactly this instead of drives.ts's
+ *  plain rest of 0: `feed = lerp(1, FEED_BASE + FEED_GAIN * NUTRIENT_REST,
+ *  raw.nutrient) === 1` for every raw.nutrient (solving FEED_BASE +
+ *  FEED_GAIN * x = 1 for x). Rest 0 made `feed` run backwards — a raised
+ *  slider laid down LESS trail (feed sliding toward FEED_BASE, not staying
+ *  at 1) the moment its jack was unplugged. */
+export const NUTRIENT_REST = (1 - FEED_BASE) / FEED_GAIN;
 
 // --- Composite exposure and gamma — Fogleman's own render step (file
 // header), our own numbers. ---
@@ -411,10 +434,10 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 
 /** Rotates `rgb`'s hue by `shift` (turns, wrapping) — the Stain setting's
  *  live colour shift over a strain's base colour. `shift === 0` returns
- *  `rgb` completely unchanged, without any HSL round trip, so Stain's
- *  default (0, inert until patched) reproduces STRAINS' own colour
- *  bit-for-bit rather than whatever precision an RGB->HSL->RGB conversion
- *  happens to leave (tests/physarum2.test.ts checks this identity). */
+ *  `rgb` completely unchanged, without any HSL round trip — the identity an
+ *  unplugged or silent Stain (raw 0, drive 0) still needs to hold exactly,
+ *  rather than whatever precision an RGB->HSL->RGB conversion happens to
+ *  leave (tests/physarum2.test.ts checks this identity). */
 export function hueRotateRGB(rgb: readonly [number, number, number], shift: number): [number, number, number] {
   if (shift === 0) return [rgb[0], rgb[1], rgb[2]];
   const [h, s, l] = rgbToHsl(rgb);
@@ -452,10 +475,13 @@ export interface StrainRawValues {
 }
 
 /** A strain's live drive reading for each of the same six controls — the GPU
- *  path reads `drives.value(key, sceneDefault)` (a per-strain band for
- *  Nutrient, `anim.beatPulse` for Excitability, 0 elsewhere); the preview
- *  reads `WidgetCtx.driveValue(spec)` (the same 0-for-"Scene" reading a
- *  row's own sparkline shows) — see src/ui/widgets/registry.ts's header. */
+ *  path reads `drives.value(key, sceneDefault, rest?)` (a per-strain band
+ *  for Nutrient/Sensor range/Turn angle/Speed/Stain — STRAIN_BAND_SIGNALS —
+ *  `anim.beatPulse` for Excitability; Nutrient alone passes NUTRIENT_REST as
+ *  its own `rest`, since an unplugged jack there must read as exactly 1, not
+ *  0 — see that constant's own doc); the preview reads
+ *  `WidgetCtx.driveValue(spec, rest?)` the same way — see
+ *  src/ui/widgets/registry.ts's header. */
 export interface StrainDriveValues {
   nutrient: number;
   excite: number;
@@ -594,6 +620,12 @@ export function screenToFieldUv(uv: { x: number; y: number }, viewport: Viewport
 // ---------------------------------------------------------------------
 
 const BAND_LABELS = ["low", "mid", "high", "overall"] as const;
+/** Each strain's own band, in strain order — reused for the Sensor
+ *  range/Turn angle/Speed/Stain jacks' own default below (a strain's own
+ *  band drives its own motion the same as it already drives its own
+ *  Nutrient) and for Nutrient's own `sceneSources` (its Scene composite is
+ *  honestly this same per-strain band). */
+export const STRAIN_BAND_SIGNALS = ["anim.low", "anim.mid", "anim.high", "anim.energy"] as const;
 
 const nutrientSettings = defineItems("strain", SPECIES_COUNT, {
   key: "nutrient",
@@ -607,7 +639,7 @@ const nutrientSettings = defineItems("strain", SPECIES_COUNT, {
   drive: {
     default: "scene",
     sceneLabel: (k) => `Scene: ${BAND_LABELS[k]} level`,
-    sceneSources: (k) => [(["anim.low", "anim.mid", "anim.high", "anim.energy"] as const)[k]!],
+    sceneSources: (k) => [STRAIN_BAND_SIGNALS[k]!],
   },
 });
 
@@ -634,7 +666,11 @@ const sensorSettings = defineItems("strain", SPECIES_COUNT, {
   max: 1,
   step: 0.02,
   default: (k) => distToSensorSlider(LEGACY_MOTION[k]!.sensorDist),
-  drive: { default: "scene", sceneLabel: "Scene: inert until patched" },
+  // This strain's own band by default (STRAIN_BAND_SIGNALS, same signal as
+  // its own Nutrient) — a loud band nudges the range out a little further;
+  // pushToward1 is identity at drive 0, so an unplugged jack (or every
+  // source muted) leaves the slider's own range exactly where it sits.
+  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
 });
 
 const turnSettings = defineItems("strain", SPECIES_COUNT, {
@@ -646,7 +682,9 @@ const turnSettings = defineItems("strain", SPECIES_COUNT, {
   max: 1,
   step: 0.02,
   default: (k) => degToTurnSlider(LEGACY_MOTION[k]!.turnDeg),
-  drive: { default: "scene", sceneLabel: "Scene: inert until patched" },
+  // This strain's own band by default — a loud band nudges the turn a
+  // little sharper; identity at drive 0, same reasoning as Sensor range.
+  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
 });
 
 const strideSettings = defineItems("strain", SPECIES_COUNT, {
@@ -658,7 +696,9 @@ const strideSettings = defineItems("strain", SPECIES_COUNT, {
   max: 1,
   step: 0.02,
   default: (k) => distToStrideSlider(LEGACY_MOTION[k]!.strideDist),
-  drive: { default: "scene", sceneLabel: "Scene: inert until patched" },
+  // This strain's own band by default — a loud band nudges the speed a
+  // little further; identity at drive 0, same reasoning as Sensor range.
+  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: MOTION_JACK_GAIN },
 });
 
 const stainSettings = defineItems("strain", SPECIES_COUNT, {
@@ -670,7 +710,11 @@ const stainSettings = defineItems("strain", SPECIES_COUNT, {
   max: 0.5,
   step: 0.01,
   default: 0,
-  drive: { default: "scene", sceneLabel: "Scene: inert until patched" },
+  // This strain's own band by default — a loud band shifts the hue a little
+  // further. The additive `drive.stain*STAIN_DRIVE_GAIN` term
+  // (resolveStrainEffective) is already 0 at drive 0, so an unplugged jack
+  // leaves the slider's own shift alone.
+  drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: STAIN_JACK_GAIN },
 });
 
 const attSettings = defineItemPairs("strain", SPECIES_COUNT, {
@@ -1591,9 +1635,9 @@ function createPhysarum2Scene(): Scene {
   /** Resolves every per-strain setting for this frame into the scratch
    *  arrays above — see the file header's "Uniform budget". Pure JS: reads
    *  `resolveSceneSetting` (so a dev pin/override still applies even though
-   *  these bypass uploadCommonUniforms) and `drives.value(key, sceneDefault)`
-   *  (the JS twin of the generated `<key>Drive(sceneDefault)` GLSL helper —
-   *  see drives.ts's header), one strain at a time. */
+   *  these bypass uploadCommonUniforms) and `drives.value(key, sceneDefault,
+   *  rest?)` (the JS twin of the generated `<key>Drive(sceneDefault)` GLSL
+   *  helper — see drives.ts's header), one strain at a time. */
   function resolveStrains(frame: { energy: number }, anim: { low: number; mid: number; high: number; beatPulse: number }, drives: Parameters<Scene["render"]>[5]): void {
     const d = drives ?? PASSTHROUGH_DRIVES;
     for (let k = 0; k < SPECIES_COUNT; k++) {
@@ -1606,13 +1650,19 @@ function createPhysarum2Scene(): Scene {
         stride: resolveSceneSetting(ID, strideSettings[k]!),
         stain: resolveSceneSetting(ID, stainSettings[k]!),
       };
+      // Each sceneDefault is the reading that control's own default equals —
+      // the strain's band, times the jack's own gain — so a stale stored
+      // "scene" preference, or PASSTHROUGH_DRIVES (no engine at all), behaves
+      // exactly like the default. Nutrient alone passes a rest of its own
+      // (NUTRIENT_REST's doc); every other coupling here is identity at 0.
+      const motionDefault = bandDefault * MOTION_JACK_GAIN;
       const drive: StrainDriveValues = {
-        nutrient: d.value(nutrientSettings[k]!.key, bandDefault),
+        nutrient: d.value(nutrientSettings[k]!.key, bandDefault, NUTRIENT_REST),
         excite: d.value(exciteSettings[k]!.key, anim.beatPulse),
-        sensor: d.value(sensorSettings[k]!.key, 0),
-        turn: d.value(turnSettings[k]!.key, 0),
-        stride: d.value(strideSettings[k]!.key, 0),
-        stain: d.value(stainSettings[k]!.key, 0),
+        sensor: d.value(sensorSettings[k]!.key, motionDefault),
+        turn: d.value(turnSettings[k]!.key, motionDefault),
+        stride: d.value(strideSettings[k]!.key, motionDefault),
+        stain: d.value(stainSettings[k]!.key, bandDefault * STAIN_JACK_GAIN),
       };
       // What probe() reports as the strain's vigour: the signal actually
       // feeding its Nutrient this frame, scene default included (the

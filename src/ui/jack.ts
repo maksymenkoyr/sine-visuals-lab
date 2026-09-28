@@ -4,7 +4,7 @@
  * feed into a pinned setting. One module because the identical button
  * mounts wherever a reactive row/lane lives — the Bands card's own level
  * rows and its Frequencies corner (deviceMenu.ts), and every meter row
- * audioMeters.ts owns (Rhythm/Signal/Character) — and every one of them
+ * audioMeters.ts owns (Hits/Tempo/Signal/Character) — and every one of them
  * needs to look and behave the same way.
  *
  * This file only ever draws visual state; it never touches a DriveSetting.

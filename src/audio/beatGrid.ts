@@ -13,7 +13,8 @@
  * quantise menu does: 1/4 is one beat, 1/8 half a beat, 1/2 two beats, 1
  * bar four, 2 bars eight. The tracker has no downbeat detector, so a bar
  * starts on whichever beat it happened to lock on — steady, not
- * necessarily musically "on the one".
+ * necessarily musically "on the one" — unless the operator sets it by
+ * hand with the B key (src/render/beatTrim.ts).
  *
  * This module only owns the note-value vocabulary now — the choice itself
  * is stored per setting, variant-scoped, in src/render/driveStore.ts (one

@@ -81,23 +81,25 @@ import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
 
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
  *  Populated on demand: add an id here only once some SignalSpec below
- *  actually points at that card. "gate" (src/audio/silenceGate.ts) is the
- *  one exception — audioMeters.ts's `cardElements` needs every MeterCardId
- *  as a key regardless, so it's listed here even though no SignalSpec below
- *  points at it yet. */
-export type MeterCardId = "scope" | "signal" | "gate" | "lufs" | "rhythm" | "character";
+ *  actually points at that card. */
+export type MeterCardId = "signal" | "hits" | "tempo" | "character";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
- *  Rhythm card's BPM-digits/beat-dot block (audioMeters.ts's own
- *  createTempoBlock) — now the anchor for both `anim.metronome` and
+ *  Tempo card's BPM-digits/beat-dot block (audioMeters.ts's own
+ *  createTempoBlock) — the anchor for both `anim.metronome` and
  *  `anim.tempo`, whose jacks mount there (the card *is* the metronome's
  *  number, ticking; see metronome.ts's own header). "wave"/"lock" are the
  *  plain meter rows `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at
- *  instead. "waveform" is the Scope card's own Waveform row (audioMeters.ts's
+ *  instead; "timing" is the Tempo card's own Timing strip
+ *  (createTimingStrip), the anchor for `anim.metronomeBar`. "waveform" is
+ *  the Signal card's own Waveform row, first in its body (audioMeters.ts's
  *  `waveform` meter row) — `anim.wavePeak`'s anchor, not to be confused with
- *  "wave" above (the beat/bar swing trace, a different row entirely). */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset" | "wave" | "lock" | "metronome" | "waveform";
+ *  "wave" above (the beat/bar swing trace, a different row entirely).
+ *  "centroid" is the Character card's Brightness row (dialRows' own
+ *  `brightness` entry) — `anim.centroid`'s anchor, since its trace now
+ *  draws directly under that dial's bar rather than a row of its own. */
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "timing" | "waveform";
 
 export type SignalId =
   | "feature.onset"
@@ -190,11 +192,11 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "feature.onset",
     label: "Beat",
     description:
-      "The broadband onset flag straight off the audio pipeline (FeatureFrame.onset) — read here as AnimFrame.beatPulse, its decaying continuous form (animClock.ts), which is also what the Rhythm card's beat dot lights from and its hit history's Beat lane tracks.",
+      "The broadband onset flag straight off the audio pipeline (FeatureFrame.onset) — read here as AnimFrame.beatPulse, its decaying continuous form (animClock.ts). The Hits card's Beat lane marks every one it fired.",
     kind: "edge",
     read: (_frame, anim) => anim.beatPulse,
     edge: (anim) => anim.onset,
-    monitor: { card: "rhythm", row: "hits" },
+    monitor: { card: "hits", row: "hits" },
     bandRange: "all",
   }),
   "feature.flux": signal({
@@ -204,7 +206,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "How close the broadband onset detector is to firing right now (AnimFrame.beatRatio, features.ts's own unclamped fluxRatio), rescaled so 0.6 (a clear near-miss) reads 0 and 2.0 reads 1 — the same flux 'Beat' fires on, read continuously instead of as a one-shot, so a scene can lean into an approaching hit rather than only ever react after it lands.",
     kind: "level",
     read: (_frame, anim) => clamp01((anim.beatRatio - 0.6) / 1.4),
-    monitor: { card: "rhythm", row: "onset" },
+    monitor: { card: "hits", row: "hits" },
     bandRange: "all",
   }),
   "anim.lowOnset": signal({
@@ -215,7 +217,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.lowPulse,
     edge: (anim) => anim.lowOnset,
-    monitor: { card: "rhythm", row: "hits" },
+    monitor: { card: "hits", row: "hits" },
     bandRange: "low",
   }),
   "anim.midOnset": signal({
@@ -226,7 +228,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.midPulse,
     edge: (anim) => anim.midOnset,
-    monitor: { card: "rhythm", row: "hits" },
+    monitor: { card: "hits", row: "hits" },
     bandRange: "mid",
   }),
   "anim.highOnset": signal({
@@ -237,7 +239,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.highPulse,
     edge: (anim) => anim.highOnset,
-    monitor: { card: "rhythm", row: "hits" },
+    monitor: { card: "hits", row: "hits" },
     bandRange: "high",
   }),
   "anim.low": signal({
@@ -289,13 +291,13 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.dropPulse,
     edge: (anim) => anim.dropOnset,
-    monitor: { card: "rhythm", row: "section" },
+    monitor: { card: "character", row: "section" },
   }),
   "anim.centroid": signal({
     id: "anim.centroid",
     label: "Centroid",
     description:
-      "The live spectral centroid (AnimFrame.centroid, spectralCentroid.ts) — a fast, range-adapted counterpart to the slow Brightness dial above it on the Character card.",
+      "The live spectral centroid (AnimFrame.centroid, spectralCentroid.ts) — a fast, range-adapted counterpart to the slow Brightness dial, traced directly under its bar on the Character card.",
     kind: "level",
     read: (_frame, anim) => anim.centroid,
     monitor: { card: "character", row: "centroid" },
@@ -304,10 +306,10 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.wavePeak",
     label: "Waveform",
     description:
-      "The Scope card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. 0 on a device with no local mic (the TV).",
+      "The Signal card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. 0 on a device with no local mic (the TV).",
     kind: "level",
     read: (_frame, anim) => anim.wavePeak,
-    monitor: { card: "scope", row: "waveform" },
+    monitor: { card: "signal", row: "waveform" },
     bandRange: "all",
   }),
   "anim.beatWave": signal({
@@ -317,7 +319,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
       "A smooth swing at the metronome's own tempo, once per beat (AnimFrame.metronomeLevel times a cosine over AnimFrame.metronomePhase) — 1 on every metronome beat, 0 halfway between, fading out on its own once the metronome stops (metronome.ts) rather than needing a separate gate.",
     kind: "level",
     read: (_frame, anim) => anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.metronomePhase)),
-    monitor: { card: "rhythm", row: "wave" },
+    monitor: { card: "tempo", row: "wave" },
   }),
   "anim.barWave": signal({
     id: "anim.barWave",
@@ -325,36 +327,36 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     description: "The same swing as Beat wave, once per bar instead of once per beat (AnimFrame.metronomeBarPhase).",
     kind: "level",
     read: (_frame, anim) => anim.metronomeLevel * (0.5 + 0.5 * Math.cos(2 * Math.PI * anim.metronomeBarPhase)),
-    monitor: { card: "rhythm", row: "wave" },
+    monitor: { card: "tempo", row: "wave" },
   }),
   "anim.tempo": signal({
     id: "anim.tempo",
     label: "Tempo",
     description:
-      "Where the BPM card's own number (AnimFrame.metronomeBpm — the metronome ticks at exactly this) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 while the card reads '--'.",
+      "Where the Tempo card's own BPM (AnimFrame.metronomeBpm — the metronome ticks at exactly this) sits in the range this tracker actually searches (features.ts's BPM_MIN..BPM_MAX), log-scaled since tempo is felt in ratios, not raw BPM — 0 while the card reads '--'.",
     kind: "level",
     read: (_frame, anim) =>
       anim.metronomeBpm > 0 ? clamp01(Math.log2(anim.metronomeBpm / BPM_MIN) / Math.log2(BPM_MAX / BPM_MIN)) : 0,
-    monitor: { card: "rhythm", row: "tempo" },
+    monitor: { card: "tempo", row: "tempo" },
   }),
   "anim.tempoLock": signal({
     id: "anim.tempoLock",
     label: "Tempo lock",
     description:
-      "How confidently the beat clock has locked onto the tempo (AnimFrame.tempoLock, beatClock.ts) — the same number the Rhythm card's tempo dot brightens with.",
+      "How confidently the beat clock has locked onto the tempo (AnimFrame.tempoLock, beatClock.ts) — the same number the Tempo card's tempo dot brightens with.",
     kind: "level",
     read: (_frame, anim) => anim.tempoLock,
-    monitor: { card: "rhythm", row: "lock" },
+    monitor: { card: "tempo", row: "lock" },
   }),
   "anim.metronome": signal({
     id: "anim.metronome",
     label: "Metronome",
     description:
-      "A tick on every beat at the BPM card's own tempo (AnimFrame.metronomeBeat, metronome.ts) — read here as its decaying metronomePulse. The same flat pulse every beat; silent while the card reads '--'.",
+      "A tick on every beat at the Tempo card's own BPM (AnimFrame.metronomeBeat, metronome.ts) — read here as its decaying metronomePulse. The same flat pulse every beat; silent while the card reads '--'.",
     kind: "edge",
     read: (_frame, anim) => anim.metronomePulse,
     edge: (anim) => anim.metronomeBeat,
-    monitor: { card: "rhythm", row: "tempo" },
+    monitor: { card: "tempo", row: "tempo" },
   }),
   "anim.metronomeBar": signal({
     id: "anim.metronomeBar",
@@ -363,6 +365,6 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "edge",
     read: (_frame, anim) => anim.metronomeBarPulse,
     edge: (anim) => anim.metronomeBar,
-    monitor: { card: "rhythm", row: "metronome" },
+    monitor: { card: "tempo", row: "timing" },
   }),
 };

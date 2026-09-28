@@ -184,7 +184,9 @@ const stylesheet = `
  * stacked media query below dissolves it into root's own single column
  * (display: contents), which also neutralizes position: fixed here since
  * a display: contents element generates no box of its own to position. The
- * spectrum card stays put; the meters (src/ui/audioMeters.ts) scroll in
+ * bands block (deviceMenu.ts's .vc-bands-block — the column head, its
+ * "Sound" heading and the Bands card, travelling together as one
+ * .vc-spectrum-card) stays put; the meters (src/ui/audioMeters.ts) scroll in
  * their own strip beneath it. Its top clears index.html's #sceneNav (the
  * "‹ Gallery" chip row, 36px tall at top:16px, which shares this corner)
  * by an 8px gap rather than covering it. */
@@ -304,7 +306,8 @@ const stylesheet = `
     max-height: calc(100dvh - 74px);
   }
   .vc-root > *, .vc-spectrum-col > * { flex-shrink: 0; }
-  /* Dissolve the spectrum column so its card and the meters become root
+  /* Dissolve the spectrum column so its bands block (.vc-spectrum-card —
+   * see the comment above .vc-spectrum-col) and the meters become root
    * items in their own right: spectrum, then the controls, then the meters
    * last — a phone shouldn't have to scroll past a screen of readouts to
    * reach a slider. */
@@ -470,6 +473,31 @@ body.vc-keys-reveal [data-keycap]::after {
     0 0 0 1px color-mix(in srgb, var(--vc-accent) 45%, transparent),
     0 0 14px color-mix(in srgb, var(--vc-accent) 22%, transparent);
 }
+/* One input in the Source row's list (deviceMenu.ts's buildRow) lights up
+ * under the pointer, inside the whole row's own glow above. Box-shadow and
+ * filter only: the input's border and background are inline styles its
+ * refresh() rewrites per state (live, dashed, hidden), and an inline style
+ * beats any rule here. Off where hover can't be meant (touch: it would stick
+ * after a tap). */
+.vc-src-row { transition: box-shadow 0.18s ease, filter 0.18s ease; }
+.vc-src-row:focus-visible { outline: none; }
+@media (hover: hover) {
+  .vc-src-row:hover, .vc-src-row:focus-visible {
+    filter: brightness(1.2);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--vc-accent) 35%, transparent),
+      inset 0 0 16px color-mix(in srgb, var(--vc-accent) 12%, transparent),
+      0 0 12px color-mix(in srgb, var(--vc-accent) 18%, transparent);
+  }
+}
+@media (hover: none) {
+  .vc-src-row:focus-visible {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-accent) 45%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vc-src-row { transition: none; }
+}
 .vc-label { color: #fff; transition: color 0.18s ease, text-shadow 0.18s ease; }
 .vc-row:hover .vc-label, .vc-row:focus-within .vc-label {
   color: var(--vc-accent);
@@ -573,6 +601,14 @@ body.vc-keys-reveal [data-keycap]::after {
 }
 .vc-row:hover .vc-slider::-moz-range-thumb,
 .vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1))); }
+
+/* A row muted by its T chip (deviceMenu.ts's createControlRow): the thumb
+ * stays on the value a second T restores, so the track greys out and the
+ * thumb turns FADER_OFF — "off, and this is where it comes back to" — while
+ * an auto-held row keeps its accent. */
+.vc-row-off .vc-slider { --vc-accent: rgba(255, 255, 255, 0.28); }
+.vc-row-off .vc-slider::-webkit-slider-thumb { background: ${FADER_OFF}; }
+.vc-row-off .vc-slider::-moz-range-thumb { background: ${FADER_OFF}; }
 
 /* A linked-item divergent-value tick (deviceMenu.ts's createControlRow,
  * ControlRowSpec.linkedTicks — itemBoxes.ts's multi-selection, 2026-09-27):
@@ -920,6 +956,15 @@ body.vc-keys-reveal [data-keycap]::after {
     to { background-position: 0 0; }
   }
 }
+
+/* The Source row's status line while src/audio/inputHealth.ts reads
+ * anything but ok (deviceMenu.ts's inputHealthText) — the same warning ramp
+ * HOT_YELLOW/HOT_RED already stand for elsewhere (the Input card's level
+ * wash as it nears clipping, the meters' clip/drop flashes). Never set at
+ * the same time as [data-prompting] above — that only applies while nothing
+ * is live, and a health reading only exists once something is. */
+.vc-src-status[data-warn="amber"] { color: ${HOT_YELLOW}; }
+.vc-src-status[data-warn="red"] { color: ${HOT_RED}; }
 
 /* ---- src/ui/widgets/itemBoxes.ts + relationWeb.ts/relationRows.ts ----
  * A scene-declared item widget's own boxes, affinity rows and web — styled

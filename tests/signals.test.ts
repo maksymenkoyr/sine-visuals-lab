@@ -23,8 +23,8 @@ describe("signals registry", () => {
     // small sets signals.ts's own MeterCardId/MeterRowId comments describe,
     // and fails loudly if they ever drift — the two are meant to change
     // together, rarely, both by hand.
-    const knownCards = new Set(["scope", "signal", "lufs", "rhythm", "character"]);
-    const knownRows = new Set(["section", "tempo", "hits", "centroid", "onset", "wave", "lock", "metronome", "waveform"]);
+    const knownCards = new Set(["signal", "hits", "tempo", "character"]);
+    const knownRows = new Set(["section", "tempo", "hits", "centroid", "wave", "lock", "timing", "waveform"]);
     for (const spec of Object.values(SIGNALS)) {
       if (!spec.monitor) continue;
       expect(knownCards.has(spec.monitor.card)).toBe(true);

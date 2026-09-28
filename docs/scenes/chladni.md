@@ -103,6 +103,15 @@ measured from a reference clip.
   onto the figure. Measured headless at 1280×720, synthetic 120 BPM: mean
   luma 37 at 1, 102 at 5 right after raising (fresh sand scattered), and
   after ~10 s at 5 the nodal lines are thick solid bands instead of dust.
+- 2026-09-28 — Audited for the drive-defaults rule ("if a parameter doesn't
+  have a driver it should not affect the scene" — one of four featured
+  scenes checked, see sky.md/caustics.md/physarum2.md for the others):
+  clean, no change. Every jack already carries a real default (`shake`/
+  `fieldGlow` → All level, `kick`/`beatFlash` → Bass hit/Beat, `highGlow` →
+  Scene: treble level + hits, a genuine composite) and every coupling is
+  already identity at drive 0 (`shake*(0.25+2.4*d)`, the `(0.3+d)` glow
+  floor, every other term a pure additive reaction amount), so unplugging a
+  jack already just stops the reaction — nothing else changes.
 
 ## Tuning notes
 

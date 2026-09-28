@@ -469,6 +469,74 @@ reference-measurement workflow used by later scenes.
   swells density rather than snapping it. Checked headless: before/after
   bursts after the same change (jump vs. ease), and the panel row showing the
   new jack.
+- 2026-09-28 — Performance: the spray loop was most of the frame. The user
+  reported "huge problems with performance". Timed on an M1 Pro at a
+  MacBook Retina canvas (3024x1890) with `tools/gpu-bench.mjs`, Caustics cost
+  about 20 ms of GPU per frame in the bench and 19-36 ms in the running app
+  (26-27 fps there) — against about 8 ms for Ink and 5 ms for Moiré. Bisecting
+  FRAG with `caustics/scripts/shader-bisect.py`: the Spray injection block was
+  about 60% of it (about 12.5 ms), the six-octave ridge loop about 7 ms,
+  everything else about 1.5 ms. The Beat ripple profile arrays
+  (`uRippleCrest`/`uRippleSlope`, the first suspect) cost nothing measurable.
+  Spray had been this expensive since #65, but only became everyone's cost
+  when the 2026-09-25 "bake params" commit (`337ee13`) raised its default from
+  0 to 0.67: it ran `INJECTION_DROPS` droplets for each of the 3x3 nozzle
+  cells around every pixel, on every frame. The fix changes no pixel:
+  - the loop visits the 2x2 nozzle cells whose centers straddle the pixel,
+    not the 3x3 around its own cell, and skips a nozzle outright when it
+    sits farther than `INJECTION_LIT_RADIUS` from the pixel. Both are exact
+    for the same reason: no droplet lights anything beyond that radius from
+    its nozzle (its glow is under 1e-6 there), and a module-load check
+    throws if retuning reach, jitter or droplet size ever breaks that;
+  - the whole loop is skipped where `sprayGain` (every factor the field is
+    multiplied by — crest gate, treble drive, Spray, Sparkle) is zero, so
+    dark water and treble-free stretches pay nothing.
+  Result, interleaved runs on the bench: 19.7 → 11.1 ms per Retina frame
+  (the spray block itself about 12.5 → 3.6 ms); in the app, 26-27 → 38 fps at
+  the same canvas. The same deterministic frames rendered before and after
+  differ in at most 28 of 921,600 pixels, by 1/255 (the skipped 1e-6 glow
+  tails), while switching the spray off changes 6-13% of pixels by up to
+  58/255 — so the spray was on screen in the frames compared. Tried and
+  dropped: skipping individual far droplets inside the loop measured slightly
+  slower (neighbouring pixels diverge). What's left is the ridge loop — see
+  Known issues.
+- 2026-09-28 — Beat ripple, Ring width, Ring style, Wave speed and Wave fade
+  grouped into a second colour family, "Beat ripple", on the user's ask to
+  put them "in different colour group" — the four ring controls tune only
+  the rings Beat ripple emits, but read as more violet Motion rows between
+  Breathe and Drift. Accents go out in the order families first appear, so
+  this family (above Drift in `SETTINGS`) takes the first accent and Drift
+  speed's family moves to the second.
+- 2026-09-28 — Drive-defaults audit: "if a parameter doesn't have a driver
+  it should not affect the scene; wire it appropriately to what they were
+  using as default, rather than turning it off by default" (one of four
+  featured scenes audited — see sky.md, physarum2.md, chladni.md for the
+  others). Breathe went from a Scene default that read a bare 0 (no
+  reaction until patched) to Bar wave — the once-per-bar zoom it carried
+  before #147 removed Breathe's own direct `beatClock` read, brought back
+  here through the drive system instead. Spray injection went from a Scene
+  default that read a bare 1 (an unfiltered pass-through of Sparkle's own
+  gating) to Treble hit, applied as a lift
+  (`1.0 + INJECTION_DRIVE_LIFT * injectionDrive(uHighPulse)`) rather than a
+  bare multiplier, so unplugging the jack sprays exactly what the slider
+  says instead of nothing. Speed boost's own Scene composite
+  (`advanceLoudSwell`'s calibrated loudness) was already a real reaction and
+  keeps its default, but its swell read (`loudSwellDrive`, feeding
+  `uLoudSwell`) now passes `LOUD_NEUTRAL` (0.5) as `drives.value`'s own
+  `rest`: an unplugged Speed boost jack used to read 0 there, which
+  `loudSwellDrive` treats as a permanent "quiet" tightening that grows with
+  the slider, rather than the neutral swell an unplugged jack should show.
+  The rate side of the same reading (`driftRatePerSec`) keeps the engine's
+  plain rest of 0, its own neutral (an unplugged jack adds no extra speed).
+  Caustic density, made wirable earlier the same day on Sky's old "Scene:
+  steady" convention (`slider * drive`, 1 at Scene), got the same treatment
+  as Sky's ambient jacks: Section by default (the pool resolves finer as a
+  song builds), lifted on top of the slider by `densityTargetFor`
+  (`DENSITY_DRIVE_LIFT` 0.3 — kept small because the field spans
+  `DENSITY_SPAN_OCTAVES`), so unplugging it no longer drops the target to 0,
+  the coarsest cells, whatever the slider said. `advanceDensityFlow` still
+  glides every change in. Sparkle, Ripple, driftPump and the rest were
+  already real reactions and are untouched.
 
 ## Tuning notes
 
@@ -519,9 +587,11 @@ reference-measurement workflow used by later scenes.
   headless recipe in Resume here isolates the ripple from every other
   reactive setting for exactly this judgment.
 
-- Breathe is a patch destination: its row's dial is only the zoom's depth, and the
-  row does nothing at all until a source is wired to it (see `breatheDrive(0.0)`'s
-  comment in FRAG and the `breathe` entry in SETTINGS).
+- Breathe is a patch destination: its row's dial is only the zoom's depth,
+  and the source it swings that depth through is Bar wave by default (once a
+  bar), same as the old bar-locked cosine it replaced — not "no reaction at
+  all" (see `breatheDrive(0.0)`'s comment in FRAG, now just the stale-"scene"
+  fallback, and the `breathe` entry in SETTINGS).
 
 
 ## Known issues and next steps
@@ -555,6 +625,18 @@ reference-measurement workflow used by later scenes.
   beat. Still open: whether that reads as an acceptable "developing ripple"
   look or needs a smaller shift (at the cost of the dense-train case) once the
   user has compared the three styles live.
+- After the 2026-09-28 spray fix, the ridge loop in FRAG (three `noise()`
+  calls per octave, at the octave count `uDetail` picks) is about three
+  quarters of the frame, and a Retina MacBook canvas still sits below 60 fps
+  at full resolution (the governor steps it down from there). Its integer
+  hash is at most about 30% of the frame — measured by swapping in a
+  near-free (wrong-looking) hash, the `freeHash` variant of
+  `caustics/scripts/shader-bisect.py`. The one way found to claw part of that
+  back without changing a pixel is a lookup texture holding `hashCell`'s
+  exact values (for `NOISE_PERIOD` squared cells, the four corners of a
+  cell per texel, so a `noise()` call is one `texelFetch`). It needs texture
+  support in `createFullscreenScene` and touches `noiseHash.ts`, which Ink
+  shares, so it wasn't done in the same change.
 
 ## Materials
 
@@ -564,6 +646,7 @@ reference-measurement workflow used by later scenes.
 - Artifact: [How Beat Ripple Listens](https://claude.ai/artifact/8ZJgP3mSY8Me4U9epRgwB5). Source saved as `caustics/artifacts/beat-ripple-listens.html`. A plain-language, accessible explainer of the current Beat ripple: a live demo (four kinds of made-up music) running a copy of `advanceEmission`'s rules with the same constants, drawing the panel's graph and the water side by side, plus a key, the four steps and a short Q&A. If `advanceEmission` or its `SALIENCE_*` constants change, the copy in that page has to change with them.
 - Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider, why level/line sources used to silently ignore `fired()`, and a demo of the hysteresis signal→trigger converter shipped as `src/render/valueTrigger.ts` (this file's second 2026-09-26 entry above). Superseded as a picture of Beat ripple itself by the wave-tank rewrite and then the continuous ring emitter (both 2026-09-27 Decisions entries; every version it compares is now history) — the current emitter (`rippleEmitter.ts`) restores most of what that artifact's "old" side showed, now launched continuously off the driver's own rise instead of a yes/no trigger. `valueTrigger.ts` is unaffected and still used elsewhere.
 - `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
+- `caustics/scripts/shader-bisect.py` — the 2026-09-28 performance work: times FRAG with one part switched off at a time, and pixel-diffs the scene against any git ref. Runs on `tools/gpu-bench.mjs` (general: any scene, bench or in-app timing), whose header explains why each benchmark frame has to end its render pass on an Apple GPU.
 
 ## Resume here
 
@@ -583,6 +666,11 @@ reference-measurement workflow used by later scenes.
   matching, wrapped entry in `driftFlows` on the JS side, or it reintroduces the
   mobile seam bug `src/render/noiseHash.ts`'s header documents — the two halves only
   work together.
+- Before and after any FRAG change that could cost GPU time, time it with
+  `node tools/gpu-bench.mjs --port P --scenes caustics --w 3024 --h 1890`
+  (a baseline interleaved, since GPU clocks drift) — the Spray loop went
+  unnoticed at 60% of the frame for weeks. A change meant to be invisible can
+  be proved so with `caustics/scripts/shader-bisect.py --pixdiff <ref>`.
 - Audio-coupling work against this scene can arrive in several places at once
   (hit strength, line sources, the patch bay); check each one's merge state
   before trusting a description of "current" behavior against it.
@@ -612,3 +700,4 @@ reference-measurement workflow used by later scenes.
 - #147 (2026-09-26) — Tempo breathe → Breathe: a wirable, inert-until-patched
   zoom (see Decisions)
 - #154 (2026-09-27) — Beat ripple: rings always reach the edge, then a continuous ring emitter (`rippleEmitter.ts`) sized by salience, with its threshold drawn on the panel graph (`settingMarks.ts`); level/line drive sources fire through `valueTrigger.ts` (see Decisions)
+- #185 (2026-09-28) — Spray loop: 2x2 nozzle cells, far nozzles skipped, gated on its own brightness — the frame's GPU cost roughly halved, no pixel changed (see Decisions)

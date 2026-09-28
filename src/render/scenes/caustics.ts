@@ -42,10 +42,10 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // fog between beats" right at a time — see this file's git history),
 // Caustic density scales the noise field's spatial frequency (more/fewer,
 // finer/fatter filaments; 0.5 is exactly the old fixed frequency) — wirable
-// (a patched source scales the slider, which stays the peak), and eased in
-// by advanceDensityFlow rather than applied on the frame it changes,
-// uBreathe is the depth of a zoom only a patched source can move
-// (breatheDrive in FRAG — inert at the Scene default), uRipple drives a continuous ring emitter (rippleEmitter.ts) seated
+// (its source lifts the slider toward a finer mesh, Section by default), and
+// eased in by advanceDensityFlow rather than applied on the frame it changes,
+// uBreathe is the depth of a zoom its own source moves — Bar wave by
+// default, once per bar (breatheDrive in FRAG) — uRipple drives a continuous ring emitter (rippleEmitter.ts) seated
 // at the center of the frame: rather than launching a whole ring on every
 // yes/no beat (this scene's very first design) or carrying the raw driver
 // through a stepped wave-equation height field (a brief detour — see
@@ -158,7 +158,7 @@ const SETTINGS: SceneSetting[] = [
     key: "causticDensity",
     label: "Caustic density",
     description:
-      "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high. A source patched in scales it (the slider is the peak); a change — from the slider or a patched source — eases in rather than snapping.",
+      "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high. Its source pushes it finer (a chorus, by default); a change — from the slider or the source — eases in rather than snapping.",
     group: "Form",
     min: 0,
     max: 1,
@@ -167,18 +167,17 @@ const SETTINGS: SceneSetting[] = [
     // Pure framing geometry the user tunes to taste, same reasoning as
     // sparkleGrain's weight: 0 — not something the music profile should
     // silently redecide underneath a chosen look (no `auto` table).
-    // Wirable on the same "Scene: steady" convention as Sky's cloudCover
-    // (sky.ts): drives.value() reads exactly 1 at the Scene default, and a
-    // patched source scales the slider rather than replacing it, so the
-    // slider stays the peak (`densityTarget` in extraUniforms). The result
-    // is only a target — advanceDensityFlow glides the drawn density toward
-    // it, so neither a drag nor a patched source can snap the field.
-    drive: { default: "scene", sceneLabel: "Scene: steady (no music reaction)" },
+    // Wirable, on Section by default: the pool resolves into a finer mesh as
+    // the song builds, lifted on top of the slider (densityTargetFor), so an
+    // unplugged jack leaves exactly the slider's own density. The result is
+    // only a target — advanceDensityFlow glides the drawn density toward it,
+    // so neither a drag nor a source can snap the field.
+    drive: { default: "anim.sectionIntensity" },
   },
   {
     key: "breathe",
     label: "Breathe",
-    description: "How far a source you patch in zooms the pool — it does nothing until one is wired to it",
+    description: "How far the pool zooms in and out with its source — once a bar by default",
     group: "Motion",
     min: 0,
     max: 1,
@@ -186,15 +185,22 @@ const SETTINGS: SceneSetting[] = [
     default: 0.11,
     // The depth a wired signal swings the zoom through, not a signal of its
     // own — pure taste, so no auto table (same reasoning as causticDensity
-    // above): what it reacts to is the patch bay's choice, and at the Scene
-    // default it reacts to nothing at all (see breatheDrive(0.0) in FRAG).
-    drive: { default: "scene", sceneLabel: "Scene: inert until patched" },
+    // above): what it reacts to is the patch bay's choice. Bar wave is the
+    // default rather than a Scene composite that reacts to nothing: it's
+    // what the once-per-bar zoom rode before #147 removed Breathe's own
+    // direct beatClock read, brought back here through the drive system.
+    // Identity at drive 0 either way (breatheDrive(0.0) in FRAG), so an
+    // unplugged jack still leaves the pool exactly where its slider sits.
+    drive: { default: "anim.barWave" },
   },
   {
     key: "ripple",
     label: "Beat ripple",
     description: "Each hit sends a ring out from the center like a drop on water — a busy driver can't rise as far between hits, so it makes lighter, denser rings instead of stacking full ones",
     group: "Motion",
+    // One colour for this row and the four ring controls under it, so the
+    // ripple's own set reads apart from Breathe above and Drift below.
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,
@@ -238,6 +244,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Ring width",
     description: "How wide each ring is — wider rings bend the light more softly",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,
@@ -254,6 +261,7 @@ const SETTINGS: SceneSetting[] = [
     description:
       "Bump: soft rings. Wave: each ring has a crest and a trough, like real ripples — stays visible when rings come fast. Merge: rings that come close together join into one stronger ring.",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 2,
     step: 1,
@@ -270,6 +278,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Wave speed",
     description: "How fast a ring travels outward from the center",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,
@@ -284,6 +293,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Wave fade",
     description: "How fast a ring loses energy as it travels — low keeps it visible all the way to the far edge, high dies out quickly",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,
@@ -326,7 +336,13 @@ const SETTINGS: SceneSetting[] = [
     // just frame.energy/anim.sectionIntensity: quiet stays quiet over the
     // tens of seconds AGC'd energy takes to re-adapt), so the default is
     // Scene. A non-default pick instead reads that source's 0..1 value
-    // directly as levelValue in driftRatePerSec below.
+    // directly as levelValue in driftRatePerSec below. extraUniforms reads
+    // this one patch twice with different rests (LOUD_NEUTRAL's own doc):
+    // the rate (driftRatePerSec) at rest 0, its own neutral (an unplugged
+    // jack adds no extra speed); the aperture/floor swell (loudSwellDrive)
+    // at rest LOUD_NEUTRAL, since loudSwellDrive's neutral is 0.5, not 0 —
+    // an unplugged jack reading 0 there swelled as permanent "quiet"
+    // tightening that grew with this very slider.
     drive: { default: "scene", sceneLabel: "Scene: this track's own calibrated loudness" },
   },
   {
@@ -550,7 +566,8 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "injection",
     label: "Spray injection",
-    description: "Glints also spray fine droplets outward, like fuel atomizing through a nozzle — spreading from many points across the pattern",
+    description:
+      "Glints also spray fine droplets outward, like fuel atomizing through a nozzle — rides Sparkle's own glints, and a treble hit throws extra spray on top; unplugged it sprays exactly what the slider says",
     group: "Look",
     min: 0,
     max: 1,
@@ -559,12 +576,14 @@ const SETTINGS: SceneSetting[] = [
     // Same reasoning as sparkleGrain: a shape/taste choice, not an
     // intensity one, so the master knob leaves it alone.
     macro: { driver: SPARKLE, weight: 0 },
-    // No extra gating of its own today — droplets already ride Sparkle's
-    // own hits+line composite (the shared crest gate and treble drive every
-    // glint uses), so the identity scene default is a bare 1.0, not a
-    // second signal. Offered anyway so a non-default pick (e.g. Bass hit)
-    // can give the spray its own trigger independent of the glints it rides.
-    drive: { default: "scene", sceneLabel: "Scene: unfiltered (rides Sparkle's own gating)" },
+    // Droplets already ride Sparkle's own hits+line composite (the shared
+    // crest gate and treble drive every glint uses) — this jack is a second,
+    // independent gate on top of that, a treble hit throwing a little extra
+    // spray by default (INJECTION_DRIVE_LIFT below is a lift, identity at
+    // drive 0, so an unplugged jack still sprays exactly what the slider
+    // says rather than the old bare-1.0 "scene" reading, which an Unplug
+    // silently zeroed).
+    drive: { default: "anim.highOnset" },
   },
   {
     key: "injectionReverse",
@@ -628,15 +647,17 @@ const FOG_FLOOR_HAZY = 0.0;
 // uBreathe's zoom depth per full-strength cable — the same 0.10 swing the
 // old bar-locked cosine had at its peak (uBreathe 1, tempoLock 1). The
 // cable supplies the waveform, not this constant; see breatheDrive(0.0) in
-// FRAG for why the scene's own contribution is zero.
+// FRAG for why a stale-"scene" fallback (never reached at Breathe's own
+// default, Bar wave) still swings zero.
 const BREATHE_ZOOM = 0.10;
 
 // uLoudSwell's (loudSwellDrive above) two visual channels, both small at the
 // Speed boost default (0.4) — see that constant's own comment — and both
 // on ground nothing else modulates at runtime: SWELL_ZOOM rides the same `p
 // *=` aperture line as BREATHE_ZOOM above, but the swell is the scene's own
-// aperiodic, sustained signal while uBreathe only moves when a cable
-// carries it, and SWELL_FLOOR_LIFT rides the same dark-water floor cut uFog
+// aperiodic, sustained signal while uBreathe swings once per bar by default
+// (or whatever a re-patched cable carries), and SWELL_FLOOR_LIFT rides the
+// same dark-water floor cut uFog
 // sets at rest, so a loud passage glows into that dim wash and a quiet one
 // deepens it, distinct from uFlash/uEnergy/dropDrive, which all brighten the
 // ridge *crests* instead.
@@ -665,6 +686,21 @@ const FOCUS_SNAP_RATIO = 1.3;
 // off that, mild enough that both ends still read as this scene's own
 // pool-caustics look rather than a different pattern entirely.
 const DENSITY_SPAN_OCTAVES = 2.4;
+// How far Caustic density's own source lifts the slider toward the finest
+// mesh at a full reading. A lift, identity at drive 0 (drives.ts's header's
+// "Nothing plugged in" paragraph), so an unplugged jack leaves the slider's
+// own density; kept well under a full push because the field spans
+// DENSITY_SPAN_OCTAVES and a chorus shouldn't re-scale the whole pool.
+const DENSITY_DRIVE_LIFT = 0.15;
+
+/** Caustic density's target (advanceDensityFlow glides toward it): the
+ *  slider lifted toward 1 by its drive's reading — the slider exactly at
+ *  drive 0, never outside 0..1 (a patched source's weight can exceed 1). */
+export function densityTargetFor(slider: number, drive: number): number {
+  const s = Math.min(1, Math.max(0, slider));
+  const d = Number.isFinite(drive) ? drive : 0;
+  return Math.min(1, Math.max(0, s + (1 - s) * DENSITY_DRIVE_LIFT * d));
+}
 
 /** uFog (0..1) -> the sharpness the ridges sit at with no beat driving them.
  *  Default 0.4 reproduces today's old fixed floor (4) closely. */
@@ -784,6 +820,35 @@ const INJECTION_NOZZLE_JITTER = 0.5; // nozzle offset from its cell center, so n
 const INJECTION_NEAR_R = 0.14; // droplet radius right at the nozzle, before atomizing
 const INJECTION_FAR_R = 0.05; // droplet radius once fully atomized
 const INJECTION_GAIN = 1.3; // brightness of the summed field relative to a glint's own peak
+// Spray injection's own jack (a treble hit, by default): a lift on top of
+// the field's own brightness — `1.0 + INJECTION_DRIVE_LIFT * injectionDrive(uHighPulse)`,
+// identity at drive 0 — rather than the old bare `injectionDrive(1.0)`
+// multiplier, which read as exactly 0 (not 1) the instant the jack was
+// unplugged (drives.ts's header's "Nothing plugged in" paragraph).
+const INJECTION_DRIVE_LIFT = 1.0;
+
+// How far from its own nozzle any droplet can light a pixel — the spray
+// loop is the scene's single most expensive block (measured 2026-09-28:
+// ~60% of a Retina frame's GPU time when every pixel ran INJECTION_DROPS
+// droplets for each of the 3x3 cells around it), so FRAG uses this twice to
+// skip work that can't show. A droplet's glow is exp(-2.2 (d/r)^2), counted
+// out to INJECTION_GLOW_REACH_R of its own radius (beyond it the glow is
+// under 1e-6), and its radius shrinks linearly from NEAR_R to FAR_R over its
+// travel, so the farthest any droplet lights is the larger of the two travel
+// endpoints. FRAG skips a nozzle farther than this from the pixel outright,
+// and only visits the 2x2 nozzle cells whose centers straddle the pixel —
+// exact as long as a nozzle (within JITTER/2 of its cell center) plus this
+// reach stays inside one cell of that center, checked below, since retuning
+// reach, jitter or droplet size past it would silently clip droplets at the
+// cell seams.
+const INJECTION_GLOW_REACH_R = 2.5;
+const INJECTION_LIT_RADIUS = Math.max(
+  INJECTION_GLOW_REACH_R * INJECTION_NEAR_R,
+  INJECTION_REACH + INJECTION_GLOW_REACH_R * INJECTION_FAR_R,
+);
+if (INJECTION_NOZZLE_JITTER / 2 + INJECTION_LIT_RADIUS > 1) {
+  throw new Error("caustics: spray droplets reach past the 2x2 nozzle cells FRAG visits — widen the search or shrink reach/jitter/radius");
+}
 
 // Every hashed field in FRAG is periodic in NOISE_PERIOD cells (the shared
 // lattice hash in noiseHash.ts — see the file header's precision paragraph
@@ -937,6 +1002,11 @@ const LOUD_FAST_RATE_PER_SEC = 5; // ~0.2s: a loud bar registers at once, withou
 const LOUD_ENV_EXPAND_RATE_PER_SEC = 1 / 0.3; // ~0.3s: a new extreme is grabbed almost immediately
 const LOUD_ENV_CONTRACT_RATE_PER_SEC = 1 / 30; // ~30s: an old extreme is forgotten slowly — see above
 const LOUD_MIN_RANGE = 0.15; // below this observed range, confidence blends the output toward neutral instead of amplifying noise
+// advanceLoudSwell's own seed/no-signal value (0.5 = neither expand nor
+// contract the pool) — also what extraUniforms passes as drives.value()'s
+// `rest` for the "driftLevel" jack when it feeds loudSwellDrive, so an
+// unplugged jack reads as this same neutral there instead of drives.ts's
+// plain rest of 0 (loudSwellDrive's own doc comment below).
 const LOUD_NEUTRAL = 0.5;
 
 export interface LoudSwellState {
@@ -985,12 +1055,15 @@ export function advanceLoudSwell(st: LoudSwellState, dtSec: number, level: numbe
 }
 
 // loudSwellDrive is uLoudSwell's JS-side source: driftLevel^2 weights how
-// far loudSwell (0..1, 0.5 = neutral) can push it — squared so the swing
-// opens up mostly in the slider's top half rather than growing linearly —
-// left linear and signed ([-1, 1], 0 at neutral) rather than exponentiated,
-// since FRAG uses it as a direct multiplier on aperture/floor terms rather
-// than a rate ratio. See the file header's driftLevel paragraph for what it
-// drives.
+// far loudSwell (0..1, LOUD_NEUTRAL = neutral) can push it — squared so the
+// swing opens up mostly in the slider's top half rather than growing
+// linearly — left linear and signed ([-1, 1], 0 at neutral) rather than
+// exponentiated, since FRAG uses it as a direct multiplier on aperture/floor
+// terms rather than a rate ratio. See the file header's driftLevel
+// paragraph for what it drives. Its neutral isn't 0 — loudSwellDrive(d, 0)
+// is a permanent -d² "quiet" tightening — so an unplugged "driftLevel" jack
+// (drives.ts's header's "Nothing plugged in" paragraph) has to read
+// LOUD_NEUTRAL here, not the engine's plain rest of 0 (extraUniforms below).
 export function loudSwellDrive(driftLevel: number, loudSwell: number): number {
   return driftLevel * driftLevel * (2 * loudSwell - 1);
 }
@@ -1082,10 +1155,13 @@ void main() {
   float dropFlash = uDropReactivity * uDropPulse;
 
   // Breathe: the pool zooms on whatever source is patched onto the breathe
-  // setting, at BREATHE_ZOOM depth scaled by uBreathe. The scene's own
-  // contribution is nothing — breatheDrive(0.0) is bit-for-bit no zoom until
-  // a cable carries a signal (the old bar-locked cosine this line replaced
-  // had the beat clock supply the waveform).
+  // setting, at BREATHE_ZOOM depth scaled by uBreathe — Bar wave by default,
+  // the once-per-bar swing the old bar-locked cosine this line replaced used
+  // to get straight off the beat clock. The literal 0.0 argument here is
+  // only ever read for a stale-"scene" fallback (Custom=0, unreachable at
+  // Breathe's own default) or no drive engine at all (PASSTHROUGH_DRIVES) —
+  // bit-for-bit no zoom in either of those cases, not "the scene's own
+  // contribution" (there's a real one now: Bar wave).
   p *= 1.0 + ${BREATHE_ZOOM.toFixed(2)} * uBreathe * breatheDrive(0.0);
   // Loudness swell's aperture: a loud passage opens the pool wider, a quiet
   // one tightens it — the scene's own sustained signal, where the breath
@@ -1272,9 +1348,12 @@ void main() {
   // uSparkle * sparkleGlintDrive * crestGate * sparkleGain — so spray shows
   // up where and when the hats sparkle, and adds nothing until uInjection is
   // raised. injectionDrive() (generated by DRIVE_GLSL from the "injection"
-  // setting's own drive) is a second, independent gate on top of that —
-  // 1.0 at its Scene default (see that setting's own comment in SETTINGS),
-  // so it adds nothing extra until a non-default source is picked. Droplet
+  // setting's own drive) is a second, independent gate on top of that — a
+  // treble hit throws a little extra spray by default (see that setting's
+  // own comment in SETTINGS), applied as a lift
+  // (1.0 + INJECTION_DRIVE_LIFT * injectionDrive(uHighPulse)) rather than a
+  // bare multiplier, so an unplugged jack sprays exactly what uInjection
+  // already says instead of nothing at all. Droplet
   // radius shrinks with actual distance from its nozzle
   // (INJECTION_REACH), not with time, so it reads as a stream atomizing
   // into mist regardless of travel direction; the ease-out on dist makes
@@ -1287,15 +1366,27 @@ void main() {
   // nearNozzleFade — which depends purely on distance, not on time or
   // direction — pulls it to zero exactly as it arrives, reading as suction
   // rather than fading mist.
+  //
+  // The loop only runs where its result can show: sprayGain is every factor
+  // the field gets multiplied by, so a pixel below the crest gate (dark
+  // water), a frame with no treble drive, or Spray at 0 skips it outright.
+  // It visits the 2x2 nozzle cells whose centers straddle ip, not the 3x3
+  // around ip's own cell, and skips any nozzle farther than
+  // INJECTION_LIT_RADIUS — see that constant for why neither drops a
+  // droplet that could light this pixel.
+  float sprayGain = uSparkle * sparkleGlintDrive * crestGate * sparkleGain * uInjection * (1.0 + ${INJECTION_DRIVE_LIFT.toFixed(1)} * injectionDrive(uHighPulse)) * ${INJECTION_GAIN.toFixed(2)};
   float injectionField = 0.0;
-  if (uInjection > 0.0) {
+  if (sprayGain > 0.0) {
     vec2 ip = (sparkleQ * sparkleFreq + sparkleFlow) * ${INJECTION_CELLS_PER_GRAIN.toFixed(2)};
-    for (int gx = -1; gx <= 1; gx++) {
-      for (int gy = -1; gy <= 1; gy++) {
-        vec2 cellId = floor(ip) + vec2(float(gx), float(gy));
+    vec2 nearCell = floor(ip - 0.5);
+    for (int gx = 0; gx <= 1; gx++) {
+      for (int gy = 0; gy <= 1; gy++) {
+        vec2 cellId = nearCell + vec2(float(gx), float(gy));
         // Its own lattice period (INJECTION_MASK) — this field wraps at
         // NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN cells, see INJECTION_MASK's comment.
         vec2 nozzle = cellId + 0.5 + (hash2Cell(cellId, ${INJECTION_MASK}, 1u) - 0.5) * ${INJECTION_NOZZLE_JITTER.toFixed(2)};
+        vec2 toNozzle = ip - nozzle;
+        if (dot(toNozzle, toNozzle) > ${(INJECTION_LIT_RADIUS * INJECTION_LIT_RADIUS).toFixed(4)}) continue;
         for (int k = 0; k < ${INJECTION_DROPS}; k++) {
           vec2 rnd = hash2Cell(cellId, ${INJECTION_MASK}, 2u + uint(k));
           float cyclePos = fract(uTime * ${INJECTION_RATE.toFixed(2)} + rnd.x);
@@ -1314,7 +1405,7 @@ void main() {
       }
     }
   }
-  acc += uSparkle * sparkleGlintDrive * crestGate * sparkleGain * uInjection * injectionDrive(1.0) * injectionField * ${INJECTION_GAIN.toFixed(2)};
+  acc += sprayGain * injectionField;
 
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
@@ -1425,9 +1516,17 @@ float softCeil(float x, float knee, float ceil) {
         // Kept up to date every tick regardless of driftLevel's own drive
         // choice — see the "driftLevel" SceneSetting's own comment — and
         // drives.value()'s sceneDefault, so at that setting's Scene default
-        // (today's behavior) levelValue is exactly this calibrated reading.
+        // (today's behavior) levelValue/swellValue are exactly this
+        // calibrated reading.
         const loudSwellCalibrated = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
+        // Two reads of the same patch, different rests for an unplugged jack
+        // (drives.ts's header's "Nothing plugged in" paragraph): the rate
+        // below only ever adds on top of Drift speed's own base, so nothing
+        // plugged in should add nothing — rest 0, its own neutral. The swell
+        // read passes LOUD_NEUTRAL instead — loudSwellDrive's own neutral
+        // isn't 0 (see that function's own doc comment).
         const levelValue = drives.value("driftLevel", loudSwellCalibrated);
+        const swellValue = drives.value("driftLevel", loudSwellCalibrated, LOUD_NEUTRAL);
         // Speed pump's own accelerate-then-release velocity, advanced before the
         // rate below reads pump.vel, so this tick's push already counts.
         // Bass hit's own decaying envelope at driftPump's Beat-hit default —
@@ -1441,12 +1540,12 @@ float softCeil(float x, float knee, float ceil) {
           dropReactivity: getSetting("dropReactivity"),
           sectionIntensity: anim.sectionIntensity,
         });
-        // Caustic density: the slider times whatever's patched onto it (1 at
-        // the Scene default), clamped to the slider's own range — a patched
-        // source's weight can exceed 1 (drives.ts), and the look is only
-        // tuned across causticDensityScale's 0..1 reach. advanceDensityFlow
-        // glides toward it and folds the live value into the drift phase.
-        const densityTarget = Math.min(1, Math.max(0, getSetting("causticDensity") * drives.value("causticDensity", 1)));
+        // Caustic density: the slider lifted toward a finer mesh by its own
+        // source (densityTargetFor — the slider exactly when nothing is
+        // plugged in). advanceDensityFlow glides toward it and folds the live
+        // value into the drift phase. The sceneDefault is the reading the
+        // default (Section) equals, for a stale stored "scene".
+        const densityTarget = densityTargetFor(getSetting("causticDensity"), drives.value("causticDensity", anim.sectionIntensity));
         advanceDensityFlow(densityFlow, anim.dtSec, densityTarget, phaseStep);
 
         // Beat ripple: age every ring already in flight first, so a ring
@@ -1511,7 +1610,7 @@ float softCeil(float x, float knee, float ceil) {
         return {
           uDriftFlow: driftFlows(densityFlow.scaledPhase, flowBuf),
           uDensityLive: densityFlow.live ?? densityTarget,
-          uLoudSwell: loudSwellDrive(driftLevel, levelValue),
+          uLoudSwell: loudSwellDrive(driftLevel, swellValue),
           uRippleCrest: crestBuf,
           uRippleSlope: slopeBuf,
         };

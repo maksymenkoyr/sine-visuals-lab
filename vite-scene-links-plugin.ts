@@ -5,7 +5,10 @@ import type { Plugin, ViteDevServer } from "vite";
 
 /**
  * Dev-only: right after Vite's own URLs, prints a direct link to the scene
- * you're working on — and nothing else. "Working on" means git says so: a
+ * you're working on, with that scene's own version (src/render/sceneVersions.ts;
+ * tools/sceneVersionLib.mjs owns how it's counted) ahead of the link, e.g.
+ * `Caustics 0.2.3+dev  https://…/#/v/caustics` — and nothing else. "Working on"
+ * means git says so: a
  * scene counts when a file that only it imports (under `src/render/scenes/`)
  * is modified or untracked in the working tree, or differs from the merge
  * base with `origin/main` (i.e. was touched by this branch) — for a paid scene
@@ -83,10 +86,19 @@ async function printSceneLinks(server: ViteDevServer): Promise<void> {
     const { getScene } = (await server.ssrLoadModule("/src/render/scene.ts")) as {
       getScene: (id: string) => { id: string; name: string } | undefined;
     };
+    // Loaded after the registry (sceneClosures() above already
+    // ssrLoadModule'd it): vite-scene-versions-plugin.ts's transform appends
+    // a setSceneVersions(...) call to the registry's own source, so by now
+    // this SSR-side module instance already has every scene's version set.
+    const { sceneVersionOf } = (await server.ssrLoadModule("/src/render/sceneVersions.ts")) as {
+      sceneVersionOf: (id: string) => string | null;
+    };
     const base = origin.replace(/\/$/, "");
     const lines = ids.map((id) => {
       const name = getScene(id)?.name ?? id;
-      return `  ${name}  ${base}/#/v/${id}${DRAFT_SCENE_IDS.has(id) ? "  (draft)" : ""}`;
+      const version = sceneVersionOf(id);
+      const label = version ? `${name} ${version}` : name;
+      return `  ${label}  ${base}/#/v/${id}${DRAFT_SCENE_IDS.has(id) ? "  (draft)" : ""}`;
     });
     // A query — ?audio=synthetic&bpm=…, ?quality=… — goes *before* the hash:
     // app.ts reads location.search, so one placed after it lands on the gallery.

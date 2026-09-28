@@ -1,4 +1,5 @@
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
+import { warmRate } from "../audio/warmStart.ts";
 
 /**
  * Describes *the track*, not the current instant — the continuous [0,1]
@@ -21,6 +22,18 @@ import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
  * directly — the one field that survives features.ts's adaptive floor/peak
  * AGC — so this produces identical dials whether frames arrive from a local
  * mic or a relayed room feed.
+ *
+ * Every dial ease below, plus the DYNAMICS_MEAN_RATE/DYNAMICS_MAD_RATE
+ * trackers dynamics rides on, runs its steady-state rate through
+ * src/audio/warmStart.ts's warmRate() first, keyed off `signalSec` — seconds
+ * of actual signal this profile has seen (see hasSignal/the increment at the
+ * end of advance()), not wall-clock time, so a stretch of silence never
+ * "uses up" the warm-up. This doesn't change what a dial does through
+ * silence — it still holds at NEUTRAL exactly as before — or how it behaves
+ * once settled: the steady-state rates above are exactly what shipped, just
+ * no longer also standing in for a start-up rate. All warmRate() shortens is
+ * how long a fresh session (or one just past a silent stretch) takes to
+ * catch up to the track, the same fix autoGain.ts's own EASE_RATE got.
  */
 export type MusicDial = "pulse" | "tempo" | "brightness" | "density" | "dynamics" | "attack" | "loudness";
 
@@ -124,8 +137,11 @@ function ease(current: number, target: number, rate: number, dt: number, scale: 
   return current + (target - current) * Math.min(1, rate * dt * scale);
 }
 
-// How fast each dial eases toward its latest measurement. All slow on
-// purpose — these describe the track, not the instant (see file header).
+// How fast each dial eases toward its latest measurement, once warmed up.
+// All slow on purpose — these describe the track, not the instant (see file
+// header) — and all run through warmRate() in advance() below, so a fresh
+// profile (or one just past a silent stretch) starts faster than this and
+// eases into exactly this rate as `signalSec` grows.
 const PULSE_EASE_RATE = 0.3; // ~3s
 const TEMPO_EASE_RATE = 0.15; // ~7s — bpm lock is already gated by tempoLock below
 const BRIGHTNESS_EASE_RATE = 0.2; // ~5s
@@ -164,7 +180,10 @@ const SILENCE_PEAK = 0.03;
 // same leaky-estimator shape used everywhere else in this codebase instead
 // of a ring buffer. The MAD rate is deliberately slower than
 // sectionIntensity's own floor/ceiling so this reflects a whole song's
-// swing, not one section change.
+// swing, not one section change. Both rates are steady-state, like the
+// dial eases above — advance() runs them through warmRate() too, so these
+// two trackers also warm up fast rather than crawling up from 0 for their
+// own ~10s/~25s.
 const DYNAMICS_MEAN_RATE = 0.1; // ~10s
 const DYNAMICS_MAD_RATE = 0.04; // ~25s
 const DYNAMICS_MAD_REF = 0.16; // MAD at/above this reads as "fully dynamic"
@@ -194,6 +213,12 @@ export function createMusicProfile(): MusicProfile {
   let fluxSlow = 0;
   const prevBands = new Float32Array(NUM_BANDS);
   let primed = false;
+  // Seconds of actual signal this profile has seen — advances only on ticks
+  // where hasSignal is true (see the increment at the end of advance()), so
+  // a stretch of silence never counts toward warming up. Feeds every
+  // warmRate() call below; see the file header for why elapsed-signal-time
+  // rather than wall-clock time.
+  let signalSec = 0;
   const targets: DialValues = {
     pulse: 0.5,
     tempo: 0.5,
@@ -227,6 +252,10 @@ export function createMusicProfile(): MusicProfile {
         if (v > peak) peak = v;
       }
       const hasSignal = peak > SILENCE_PEAK;
+      // Read before this tick's increment (at the end of advance()) so every
+      // warmRate() call below — and dynMean/dynMad's own — sees the same
+      // elapsed-signal-time, not a value that crept forward mid-tick.
+      const warmSec = signalSec;
 
       // --- pulse ---
       onsetRate *= Math.exp(-dt * ONSET_RATE_DECAY);
@@ -234,18 +263,18 @@ export function createMusicProfile(): MusicProfile {
       const pulseTarget = hasSignal
         ? clamp01(0.4 * clamp01(onsetRate / ONSET_RATE_REF) + 0.6 * tempoLock)
         : 0.5;
-      pulse = ease(pulse, pulseTarget, PULSE_EASE_RATE, dt, rateScale);
+      pulse = ease(pulse, pulseTarget, warmRate(PULSE_EASE_RATE, warmSec), dt, rateScale);
       targets.pulse = pulseTarget;
 
       // --- tempo ---
       const bpmNorm = clamp01((frame.bpm - BPM_LOW) / (BPM_HIGH - BPM_LOW));
       const tempoTarget = 0.5 + (bpmNorm - 0.5) * tempoLock; // folds toward neutral while unlocked
-      tempo = ease(tempo, tempoTarget, TEMPO_EASE_RATE, dt, rateScale);
+      tempo = ease(tempo, tempoTarget, warmRate(TEMPO_EASE_RATE, warmSec), dt, rateScale);
       targets.tempo = tempoTarget;
 
       // --- brightness (spectral centroid) & density (active-band fraction) ---
       const brightnessTarget = bandSum > 1e-4 ? clamp01(weightedSum / bandSum / (NUM_BANDS - 1)) : 0.5;
-      brightness = ease(brightness, brightnessTarget, BRIGHTNESS_EASE_RATE, dt, rateScale);
+      brightness = ease(brightness, brightnessTarget, warmRate(BRIGHTNESS_EASE_RATE, warmSec), dt, rateScale);
       targets.brightness = brightnessTarget;
 
       let densityTarget = 0.5;
@@ -255,15 +284,15 @@ export function createMusicProfile(): MusicProfile {
         for (let b = 0; b < NUM_BANDS; b++) if (frame.bands[b] > threshold) active++;
         densityTarget = clamp01(active / NUM_BANDS);
       }
-      density = ease(density, densityTarget, DENSITY_EASE_RATE, dt, rateScale);
+      density = ease(density, densityTarget, warmRate(DENSITY_EASE_RATE, warmSec), dt, rateScale);
       targets.density = densityTarget;
 
       // --- dynamics ---
       const intensity = clamp01(inputs.sectionIntensity);
-      dynMean += (intensity - dynMean) * Math.min(1, DYNAMICS_MEAN_RATE * dt);
-      dynMad += (Math.abs(intensity - dynMean) - dynMad) * Math.min(1, DYNAMICS_MAD_RATE * dt);
+      dynMean += (intensity - dynMean) * Math.min(1, warmRate(DYNAMICS_MEAN_RATE, warmSec) * dt);
+      dynMad += (Math.abs(intensity - dynMean) - dynMad) * Math.min(1, warmRate(DYNAMICS_MAD_RATE, warmSec) * dt);
       const dynamicsTarget = hasSignal ? clamp01(dynMad / DYNAMICS_MAD_REF) : 0.5;
-      dynamics = ease(dynamics, dynamicsTarget, DYNAMICS_EASE_RATE, dt, rateScale);
+      dynamics = ease(dynamics, dynamicsTarget, warmRate(DYNAMICS_EASE_RATE, warmSec), dt, rateScale);
       targets.dynamics = dynamicsTarget;
 
       // --- attack ---
@@ -277,11 +306,13 @@ export function createMusicProfile(): MusicProfile {
         prevBands.set(frame.bands);
         flux /= NUM_BANDS;
 
+        // FLUX_FAST_RATE/FLUX_SLOW_RATE stay bare — already fast (~0.17s/~2s,
+        // see their own comments above), so no warm-up fix applies here.
         fluxFast += (flux - fluxFast) * Math.min(1, FLUX_FAST_RATE * dt);
         fluxSlow += (flux - fluxSlow) * Math.min(1, FLUX_SLOW_RATE * dt);
         const ratio = fluxSlow > 1e-4 ? fluxFast / fluxSlow : 1;
         const attackTarget = hasSignal ? clamp01((ratio - 1) / (ATTACK_REF - 1)) : 0.5;
-        attack = ease(attack, attackTarget, ATTACK_EASE_RATE, dt, rateScale);
+        attack = ease(attack, attackTarget, warmRate(ATTACK_EASE_RATE, warmSec), dt, rateScale);
         targets.attack = attackTarget;
       }
 
@@ -293,9 +324,15 @@ export function createMusicProfile(): MusicProfile {
       // targets.loudness too, so RAW mode doesn't contradict that freeze.
       if (hasSignal) {
         const loudnessTarget = clamp01(frame.level);
-        loudness = ease(loudness, loudnessTarget, LOUDNESS_EASE_RATE, dt, rateScale);
+        loudness = ease(loudness, loudnessTarget, warmRate(LOUDNESS_EASE_RATE, warmSec), dt, rateScale);
         targets.loudness = loudnessTarget;
       }
+
+      // Advance signal-time only now that every warmRate() call above has
+      // read `warmSec` — and only on a tick that actually had signal, so a
+      // silent stretch never counts toward warming up (see the file header
+      // and `signalSec`'s own comment above).
+      if (hasSignal) signalSec += dt;
 
       (state as { pulse: number }).pulse = pulse;
       (state as { tempo: number }).tempo = tempo;

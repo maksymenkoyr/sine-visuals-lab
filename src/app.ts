@@ -1,9 +1,28 @@
-import { DRAFT_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
-import { captureMic, captureDisplayAudio } from "./audio/capture.ts";
+import { DRAFT_SCENE_IDS, PAID_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
+import { captureMic, captureDisplayAudio, listAudioInputDevices } from "./audio/capture.ts";
+import {
+  getInputDevicePref,
+  setInputDevicePref,
+  inputDeviceOptions,
+  defaultInputLabel,
+  resolveInputDeviceId,
+  isMissingDeviceError,
+  deviceLabel,
+  isInputHidden,
+  setInputHidden,
+  previewWouldDisturb,
+  inputKind,
+  INPUT_KIND_TEXT,
+  type InputDevicePref,
+  type InputDeviceOption,
+} from "./audio/inputDevice.ts";
+import { inputPreviewSupported, createInputPreview, type InputPreview } from "./audio/inputPreview.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
-import { peak } from "./audio/waveform.ts";
+import { peak, rms } from "./audio/waveform.ts";
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
+import { createInputHealthTap, type InputHealthTap } from "./audio/inputHealthTap.ts";
+import { createInputHealth, mainsHumHz, type InputHealthReading, type InputMeasure } from "./audio/inputHealth.ts";
 import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
 import { createTempoSource, type TempoSource } from "./audio/tempoSource.ts";
@@ -43,6 +62,7 @@ import {
 } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { PHASE_BASS, type TempoHit } from "./render/beatClock.ts";
+import { getBeatTrim, requestBarResync, resetBeatTrim, stepTempoMultiplier, nudgeBeatOffset } from "./render/beatTrim.ts";
 import { createRenderLatch, type RenderLatch } from "./render/renderLatch.ts";
 import { createDriveEngine, type DriveEngine } from "./render/drives.ts";
 import {
@@ -78,6 +98,13 @@ import {
   settingDefault,
   type SceneSetting,
 } from "./render/sceneSettings.ts";
+import {
+  createPictureMeter,
+  createPictureAverager,
+  PICTURE_GAP_RESET_MS,
+  PICTURE_SAMPLE_INTERVAL_MS,
+} from "./render/pictureMeter.ts";
+import { createPictureReadback, type PictureReadback } from "./render/pictureReadback.ts";
 import {
   applyLook,
   captureLook,
@@ -147,12 +174,17 @@ import {
 } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
-import { createDeviceMenu, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
+import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
 import { createControlPanel } from "./ui/controlPanel.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
+import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
+import { pinEverything } from "./pinnedAssets.ts";
+import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
+import { sceneVersionHint, sceneVersionOf } from "./render/sceneVersions.ts";
+import { bindHint, hideTooltip } from "./ui/tooltip.ts";
 
 type Mode = "solo" | "host" | "renderer";
 type AnyConn = HostConnection | RendererConnection;
@@ -165,6 +197,7 @@ const panelBtn = document.getElementById("panelBtn") as HTMLButtonElement;
 const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
+const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
@@ -188,14 +221,23 @@ let soloFallbackTriggered = false;
 let capture: CaptureHandle | null = null;
 let bandAnalyser: BandAnalyser | null = null;
 /** Time-domain sibling of bandAnalyser — the waveform for the controls
- *  panel's Scope card (src/ui/audioMeters.ts). Never touches FeatureExtractor
- *  or the wire frame: this is display-only data local to this device, not a
- *  render-driving signal. See waveformAnalyser.ts's header for why. */
+ *  panel's Signal card, its Waveform row (src/ui/audioMeters.ts). Never
+ *  touches FeatureExtractor or the wire frame: this is display-only data
+ *  local to this device, not a render-driving signal. See
+ *  waveformAnalyser.ts's header for why. */
 let waveformAnalyser: WaveformAnalyser | null = null;
-/** K-weighted loudness tap for the panel's Loudness card
+/** K-weighted loudness tap for the panel's Signal card, its Loudness row
  *  (src/audio/lufsAnalyser.ts) — display-only and local, like the waveform
  *  analyser above. */
 let lufsAnalyser: LufsAnalyser | null = null;
+/** Per-channel peaks + dropped-frame count for src/audio/inputHealth.ts —
+ *  display-only and local, same lifecycle as waveformAnalyser above (built in
+ *  attachCapture, disposed in onCaptureEnded). */
+let inputHealthTap: InputHealthTap | null = null;
+/** The one state machine instance for the whole session — see
+ *  inputHealth.ts's own header for why it's a single long-lived `reset()`
+ *  rather than a fresh one per capture, unlike inputHealthTap above. */
+const inputHealth = createInputHealth();
 /** DEV-only: a deep (32768-sample, ~682ms) sibling of waveformAnalyser, for
  *  tools/audio-latency.mjs to locate a test click's exact arrival sample —
  *  see that tool's header. waveformAnalyser's own 2048 samples (42.7ms at
@@ -256,6 +298,24 @@ const effectivePreset = (): QualityPreset => (qualityChoice === "auto" ? detecte
  *  the whole session; only which scene is mounted on it changes. */
 let mainHost: SceneHost | null = null;
 
+/** The Master card's Picture block and tools/master-sweep.mjs share this one
+ *  measurement path — see src/render/pictureMeter.ts for what each measure
+ *  means and src/render/pictureReadback.ts for how the thumbnail feeding it
+ *  is captured. `pictureReadback` is created lazily, on mainHost's own GL
+ *  context, the first time pictureWanted() actually asks for a sample — a
+ *  session that never opens the panel and isn't driving a headless sweep
+ *  never allocates the blit chain. */
+let pictureReadback: PictureReadback | null = null;
+const pictureMeter = createPictureMeter();
+const pictureAverager = createPictureAverager();
+/** DEV-only override (tuning/debug.ts's `picture.force`): sample the picture
+ *  even with the panel closed, for a headless sweep that never opens it. */
+let pictureForced = false;
+/** Last time samplePicture() kicked off a new capture — paced to
+ *  PICTURE_SAMPLE_INTERVAL_MS independently of the render loop's own rate,
+ *  which usually runs faster. */
+let lastPictureKickMs = -Infinity;
+
 let gallery: Gallery | null = null;
 let deviceMenu: DeviceMenu | null = null;
 let immersive: ImmersiveMode | null = null;
@@ -276,7 +336,7 @@ let lastVis: FeatureFrame | null = null;
 let lastRawBands: Float32Array | null = null;
 /** This tick's waveform samples, straight off waveformAnalyser — same
  *  solo/host-only availability as lastRawBands above, for the same reason
- *  (no local mic on a renderer device). Feeds the Scope card. */
+ *  (no local mic on a renderer device). Feeds the Signal card's Waveform row. */
 let lastMono: Float32Array | null = null;
 /** This tick's deep waveform samples, straight off measureAnalyser — DEV
  *  only, see that variable's own comment. Same buffer identity every read;
@@ -286,7 +346,7 @@ let lastDeepMono: Float32Array | null = null;
 // card's history trace draws it as the "auto-gain fully off" reference. Null
 // wherever no local extractor ran this frame (renderer, synthetic feed).
 let lastFixedEnergy: number | null = null;
-// FeatureExtractor.onsetDiag from this device's own extractor — the Rhythm
+// FeatureExtractor.onsetDiag from this device's own extractor — the Hits
 // card's hits history. Same solo/host-only availability as lastFixedEnergy
 // above and for the same reason. Read synchronously the same tick it's set
 // (deviceMenu.update() below), before the next currentVisual() call mutates
@@ -294,7 +354,7 @@ let lastFixedEnergy: number | null = null;
 let lastBeatDiag: OnsetDiag | null = null;
 // FeatureExtractor.fluxRatio from this device's own extractor — tuning/
 // debug.ts's getInput() (tools/audio-latency.mjs's click-track latency
-// measurement), a separate consumer from the Rhythm card's hits history
+// measurement), a separate consumer from the Hits card's hits history
 // above. Same solo/host-only availability as lastFixedEnergy and for the
 // same reason.
 let lastFluxRatio: number | null = null;
@@ -305,15 +365,21 @@ let lastFluxRatio: number | null = null;
  *  see beatClock.ts's own file header for why those never get this feed). */
 let lastTempoHits: TempoHit[] | undefined = undefined;
 // The silence gate's last reading off this device's own extractor — the
-// Gate card (audioMeters.ts). `fired` is the local extractor's own frame's
-// onset (not the jitter-buffered `lastVis`), so it and `suppressed` always
-// describe the same tick's decision — see the two currentVisual() branches
-// below where this is set. Same solo/host-only availability as lastBeatDiag
-// above and for the same reason.
+// Signal card's Gate row (audioMeters.ts). `fired` is the local extractor's
+// own frame's onset (not the jitter-buffered `lastVis`), so it and
+// `suppressed` always describe the same tick's decision — see the two
+// currentVisual() branches below where this is set. Same solo/host-only
+// availability as lastBeatDiag above and for the same reason.
 let lastGate: SilenceGateReading | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
- *  availability as lastMono, for the Loudness card. */
+ *  availability as lastMono, for the Signal card's Loudness row. */
 let lastLufs: LufsReading | null = null;
+/** This tick's src/audio/inputHealth.ts reading — same solo/host-only
+ *  availability as lastGate above and for the same reason. Read by the
+ *  Source row's status line (src/ui/deviceMenu.ts) via the deviceMenu deps'
+ *  getInputHealth, not passed through DeviceMenu.update() — that row
+ *  refreshes on its own slower timer, not every rAF tick. */
+let lastInputHealth: InputHealthReading | null = null;
 const rawBandsScratch = new Float32Array(NUM_BANDS);
 
 const animClock = createAnimClock();
@@ -438,6 +504,54 @@ function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, quality.preset));
 }
 
+/** Fills and re-binds the scene view's own version corner (`#sceneVersion` in
+ *  index.html) for `next` — called from applyScene() and enterViz() below so
+ *  it stays current across a scene switch, not just once at boot. Shows
+ *  "<Scene name> <its version>" in brighter white (a `+dev` suffix in amber),
+ *  a dim middle dot, then the build's own label (src/version.ts) in its
+ *  usual place and colour — or, when the scene has no version of its own
+ *  (unregistered/private, or a build vite-scene-versions-plugin.ts never ran
+ *  for — src/render/sceneVersions.ts's header), just the build's own label,
+ *  same as before per-scene versions existed. The hint is the scene's own
+ *  lines (sceneVersionHint()) ahead of the build's (versionHint()).
+ *  bindHint() itself is safe to call again on the same element — it updates
+ *  the bound hint text rather than stacking a second set of listeners
+ *  (src/ui/tooltip.ts). */
+function updateSceneVersionLabel(next: Scene): void {
+  const appLabel = versionLabel(BUILD_INFO);
+  const offStable = BUILD_INFO.channel !== "stable";
+  const hintColor = offStable ? BANDS_AMBER : "rgba(255,255,255,.4)";
+  const sceneVer = sceneVersionOf(next.id);
+
+  sceneVersion.style.removeProperty("color"); // clear a previous scene-less fallback's inline colour
+  sceneVersion.replaceChildren();
+  if (!sceneVer) {
+    sceneVersion.textContent = appLabel;
+    if (offStable) sceneVersion.style.color = BANDS_AMBER;
+    bindHint(sceneVersion, hintColor, versionHint(BUILD_INFO));
+    return;
+  }
+
+  const isDev = sceneVer.endsWith("+dev");
+  const base = isDev ? sceneVer.slice(0, -"+dev".length) : sceneVer;
+  const nameEl = document.createElement("span");
+  nameEl.className = "svScene";
+  nameEl.textContent = `${next.name} ${base}`;
+  if (isDev) {
+    const dev = document.createElement("span");
+    dev.className = "svDev";
+    dev.textContent = "+dev";
+    nameEl.appendChild(dev);
+  }
+  const sep = document.createElement("span");
+  sep.textContent = " · ";
+  const appEl = document.createElement("span");
+  appEl.textContent = appLabel;
+  if (offStable) appEl.style.color = BANDS_AMBER;
+  sceneVersion.append(nameEl, sep, appEl);
+  bindHint(sceneVersion, hintColor, [...sceneVersionHint(next.name, sceneVer), ...versionHint(BUILD_INFO)]);
+}
+
 /** Routes both local picks (device menu) and remote commands (control panel on
  *  another device) through the same path, so the roster always reflects reality. */
 function applyScene(next: Scene): void {
@@ -445,6 +559,7 @@ function applyScene(next: Scene): void {
   mainHost.unmountAll();
   mainHost.mount(next);
   scene = next;
+  updateSceneVersionLabel(next);
   showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
   if (inViz) navigate({ kind: "viz", sceneId: scene.id }, "replace");
@@ -519,32 +634,170 @@ function autoStartSource(): AudioSourceChoice | null {
 }
 
 function startCapture(choice: AudioSourceChoice): Promise<CaptureHandle> {
-  return choice === "display" ? captureDisplayAudio() : captureMic();
+  return choice === "display" ? captureDisplayAudio() : startMic();
 }
 
-/** Maps a capture's kind to the panel's AudioSource vocabulary. "device" (a
- *  specific input device, e.g. a loopback driver) has no capture.ts caller
- *  yet and so no distinct AudioSource of its own — treat it as "mic" for
- *  status purposes until it does. */
-function captureAudioSource(kind: CaptureSourceKind): AudioSource {
-  switch (kind) {
-    case "display":
-      return "display";
-    case "mic":
-    case "device":
-      return "mic";
+/** The Mic source: the input chosen in the Input card's Source row
+ *  (src/audio/inputDevice.ts), or the system default when none is. A chosen
+ *  device that isn't plugged in never leaves the scene deaf — it falls back
+ *  to the default input and says so on the HUD; the devicechange listener
+ *  (onInputDevicesChanged) moves back once the device shows up. */
+async function startMic(): Promise<CaptureHandle> {
+  const pref = getInputDevicePref();
+  if (!pref) return captureMic();
+  const before = await listDevicesQuietly();
+  const chosen = await openChosenInput(pref, before);
+  if (chosen) return chosen;
+  const fallback = await captureMic();
+  // No labels before the first grant (inputDeviceOptions' doc), so a device
+  // whose id has since rotated (inputDevice.ts's header) can only be found
+  // by its label now that the fallback's own grant made labels readable.
+  if (inputDeviceOptions(before).length === 0) {
+    const late = await openChosenInput(pref, await listDevicesQuietly()).catch(() => null);
+    if (late) {
+      fallback.stop();
+      return late;
+    }
+  }
+  showHud(`${pref.label || "The chosen input"} isn't connected — listening to the default input`);
+  return fallback;
+}
+
+/** Opens the chosen input as it resolves against `devices` — null when it's
+ *  missing, so startMic can fall back. Re-stores the id when the device was
+ *  found by its label under a new one. */
+async function openChosenInput(pref: InputDevicePref, devices: MediaDeviceInfo[]): Promise<CaptureHandle | null> {
+  const resolved = resolveInputDeviceId(pref, devices);
+  if (resolved === "missing" || resolved.deviceId === null) return null;
+  try {
+    const handle = await captureMic(resolved.deviceId);
+    if (resolved.deviceId !== pref.deviceId) setInputDevicePref({ deviceId: resolved.deviceId, label: pref.label });
+    return handle;
+  } catch (err) {
+    if (isMissingDeviceError(err)) return null;
+    throw err;
   }
 }
 
-/** Builds bandAnalyser/waveformAnalyser/lufsAnalyser off a freshly started
- *  capture, and hangs a listener off its audio track so an externally-ended
- *  share (Chrome's "Stop sharing" bar, a revoked mic permission) is noticed
- *  instead of silently freezing the visuals at zero — see onCaptureEnded. */
+function listDevicesQuietly(): Promise<MediaDeviceInfo[]> {
+  if (!navigator.mediaDevices?.enumerateDevices) return Promise.resolve([]);
+  return listAudioInputDevices().catch(() => []);
+}
+
+/** The pickable inputs and the OS default's name, cached for the Source
+ *  row's dropdown (its refresh runs on a timer and reads synchronously).
+ *  Refreshed at boot, on every devicechange, and after each capture attaches
+ *  — the first mic grant is what makes labels readable at all. */
+let inputDevices: InputDeviceOption[] = [];
+let defaultInputName: string | null = null;
+
+async function refreshInputDevices(): Promise<MediaDeviceInfo[]> {
+  const devices = await listDevicesQuietly();
+  inputDevices = inputDeviceOptions(devices);
+  defaultInputName = defaultInputLabel(devices);
+  syncInputPreview();
+  return devices;
+}
+
+/** The Source row's idle signal-preview meters (src/audio/inputPreview.ts) —
+ *  owned here, one instance for the session. `inputPreviewActive` is the
+ *  panel's own on/off (deviceMenu.ts's open()/close(), via
+ *  DeviceMenuDeps.setInputPreviewActive); on top of that this only ever runs
+ *  where inputPreviewSupported() and there's at least one pickable option to
+ *  preview (mic permission granted) — otherwise it's stopped outright rather
+ *  than left open with nothing to show. Re-synced here on every call site
+ *  that can change what it should be previewing: refreshInputDevices()
+ *  itself (a new/removed device), and attachCapture/onCaptureEnded (which
+ *  input is LIVE, and so excluded from the preview, changes independently of
+ *  the device list). Hidden inputs and ones a preview would disturb
+ *  (Bluetooth headsets, an iPhone's mic — previewWouldDisturb in
+ *  src/audio/inputDevice.ts) are never opened either. */
+let inputPreview: InputPreview | null = null;
+let inputPreviewActive = false;
+
+function syncInputPreview(): void {
+  if (!inputPreviewActive || !inputPreviewSupported() || inputDevices.length === 0) {
+    inputPreview?.stop();
+    inputPreview = null;
+    return;
+  }
+  if (!inputPreview) inputPreview = createInputPreview();
+  const live = liveInputLabel();
+  inputPreview.sync(
+    inputDevices
+      .filter((o) => o.label !== live && !isInputHidden(o.label) && !previewWouldDisturb(o.label))
+      .map((o) => o.deviceId),
+  );
+}
+
+/** An input was plugged in or pulled. Besides refreshing the dropdown: if the
+ *  chosen input just (re)appeared while the mic is listening to something
+ *  else — the default it fell back to, because the interface went in after
+ *  the scene started or its cable was pulled mid-set — move over to it now,
+ *  instead of making someone find the dropdown again. */
+async function onInputDevicesChanged(): Promise<void> {
+  const devices = await refreshInputDevices();
+  const pref = getInputDevicePref();
+  if (!pref || capture?.kind !== "mic" || !bandAnalyser || swapPromise) return;
+  const resolved = resolveInputDeviceId(pref, devices);
+  if (resolved === "missing" || resolved.deviceId === null) return;
+  const liveId = capture.stream.getAudioTracks()[0]?.getSettings().deviceId;
+  if (resolved.deviceId !== liveId) void swapAudioSource("mic", true);
+}
+
+/** The device the live mic is actually hearing, by name — the Source row's
+ *  status line. Null for a screen share (no device to name) or no capture. */
+function liveInputLabel(): string | null {
+  if (capture?.kind !== "mic") return null;
+  return deviceLabel(capture.stream.getAudioTracks()[0]?.label ?? "") || null;
+}
+
+/** The Source row picked an input ("" = the system default). Picking one is
+ *  asking to hear it, so this also switches to it — from the default mic, or
+ *  from a screen share — rather than only remembering it for next time. */
+function chooseInputDevice(deviceId: string): void {
+  const current = getInputDevicePref();
+  const option = inputDevices.find((o) => o.deviceId === deviceId);
+  // The dropdown's own "not connected" entry for the stored choice isn't in
+  // inputDevices — re-picking it keeps that choice, it doesn't clear it.
+  const next = option ? { deviceId, label: option.label } : current?.deviceId === deviceId ? current : null;
+  setInputDevicePref(next);
+  // The chosen input's kind (src/audio/inputDevice.ts's inputKind) names the
+  // start prompt's Mic button and the gallery masthead's picker — both need
+  // a fresh label the moment the choice changes, not just on their own
+  // unrelated refresh triggers.
+  refreshAudioPromptButtons();
+  gallery?.syncSource();
+  if (mode === "renderer" || syntheticFeed) return;
+  if (!bandAnalyser) {
+    setAudioSourceChoice("mic");
+    void ensureAudio("mic");
+  } else void swapAudioSource("mic", true);
+}
+
+/** Maps a capture's kind to the panel's AudioSource vocabulary. A chosen
+ *  input device (a mixer's USB interface) is still the "mic" source — only
+ *  which device it opens differs. */
+function captureAudioSource(kind: CaptureSourceKind): AudioSource {
+  return kind;
+}
+
+/** Builds bandAnalyser/waveformAnalyser/lufsAnalyser/inputHealthTap off a
+ *  freshly started capture, and hangs a listener off its audio track so an
+ *  externally-ended share (Chrome's "Stop sharing" bar, a revoked mic
+ *  permission) is noticed instead of silently freezing the visuals at zero —
+ *  see onCaptureEnded. Also the one place a capture swap (swapAudioSource)
+ *  re-attaches, so it disposes the previous inputHealthTap and resets the
+ *  state machine itself — inputHealth.ts's reading must never carry over
+ *  from one input to the next. */
 function attachCapture(handle: CaptureHandle): void {
   capture = handle;
   bandAnalyser = createBandAnalyser(handle.context, handle.sourceNode);
   waveformAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode);
   lufsAnalyser = createLufsAnalyser(handle.context, handle.sourceNode);
+  inputHealthTap?.dispose();
+  inputHealthTap = createInputHealthTap(handle.context, handle.sourceNode, handle.stream);
+  inputHealth.reset();
   // measureAnalyser's own header explains why this is DEV-only and deep
   // (32768 samples) rather than reusing waveformAnalyser.
   if (import.meta.env.DEV) measureAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode, 32768);
@@ -580,6 +833,13 @@ function attachCapture(handle: CaptureHandle): void {
   updateMicPrompt();
   gallery?.syncSource();
   reportUsage();
+  // A first mic grant is what makes input labels readable (see
+  // refreshInputDevices) — the Source row's device list fills in from here.
+  // refreshInputDevices() re-syncs the preview off the freshly-read device
+  // list on its own; this capture becoming live also changes which device
+  // the preview should exclude, so it needs its own re-sync too.
+  void refreshInputDevices();
+  syncInputPreview();
 }
 
 /** Counts a scene actually running on live audio (src/net/usage.ts) — called
@@ -593,10 +853,15 @@ function reportUsage(): void {
 }
 
 /** The live capture's track ended on its own — the user hit Chrome's "Stop
- *  sharing" bar, or the OS revoked a mic permission mid-session. Tears down
- *  and re-shows the start prompt rather than leaving the visuals frozen at
- *  zero. Deliberately doesn't fall back to another source — that would fire
- *  a permission prompt the user didn't ask for. */
+ *  sharing" bar, the OS revoked a mic permission mid-session, or the input
+ *  device itself went away (a USB interface unplugged). Tears down and
+ *  re-shows the start prompt rather than leaving the visuals frozen at zero.
+ *  Deliberately doesn't fall back to another source — that would fire a
+ *  permission prompt the user didn't ask for. The one exception is the mic
+ *  itself while its permission still stands: reopening it prompts nobody, and
+ *  it's what keeps a set going when a cable is pulled — startMic lands on
+ *  whatever input is left, and onInputDevicesChanged moves back once the
+ *  chosen one returns. */
 function onCaptureEnded(handle: CaptureHandle): void {
   if (capture !== handle) return; // already superseded by a swap
   handle.stop();
@@ -605,12 +870,17 @@ function onCaptureEnded(handle: CaptureHandle): void {
   waveformAnalyser = null;
   measureAnalyser = null;
   lufsAnalyser = null;
+  inputHealthTap?.dispose();
+  inputHealthTap = null;
+  inputHealth.reset();
   tempoSource?.dispose();
   tempoSource = null;
   audioPromise = null;
   captureFailed = false;
   updateMicPrompt();
   gallery?.syncSource();
+  syncInputPreview(); // nothing live now, so the preview can cover every device again
+  if (handle.kind === "mic" && micPermission === "granted") void ensureAudio("mic");
 }
 
 /** Turns a capture failure into copy the user can act on. A mic denial points
@@ -665,11 +935,15 @@ function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
  *  cancels the share picker, this rejects, and the old capture must still be
  *  the one running — starting-then-swapping guarantees that; tearing the old
  *  one down first would not. The room connection is untouched either way:
- *  hostConn is independent of capture, so a paired TV keeps rendering. */
-function swapAudioSource(next: AudioSourceChoice): Promise<void> {
+ *  hostConn is independent of capture, so a paired TV keeps rendering.
+ *  `restart` reopens even the source already live — the mic moving to a
+ *  different input device (chooseInputDevice, onInputDevicesChanged). */
+function swapAudioSource(next: AudioSourceChoice, restart = false): Promise<void> {
   if (!bandAnalyser || syntheticFeed || mode === "renderer") return Promise.resolve();
-  if (capture?.kind === next) return Promise.resolve();
-  if (swapPromise) return swapPromise;
+  if (capture?.kind === next && !restart) return Promise.resolve();
+  // A restart queues behind a swap in flight rather than dropping: a second
+  // device picked mid-swap is the one that has to end up live.
+  if (swapPromise) return restart ? swapPromise.then(() => swapAudioSource(next, true)) : swapPromise;
   const previous = capture;
   const attempt = (async () => {
     const handle = await startCapture(next);
@@ -695,6 +969,18 @@ function swapAudioSource(next: AudioSourceChoice): Promise<void> {
   return swapPromise;
 }
 
+/** "Mic"/"Line in"/"Loopback" for the CHOSEN input (getInputDevicePref) —
+ *  named after what it is rather than the generic "Mic", the same words the
+ *  Source row's own kind tag uses (src/audio/inputDevice.ts's
+ *  INPUT_KIND_TEXT). No stored choice (the system default) reads as "Mic": a
+ *  laptop's own default input almost always is one. */
+function inputChoiceLabel(): string {
+  const pref = getInputDevicePref();
+  if (!pref) return "Mic";
+  const kind = inputKind(pref.label);
+  return kind === "mic" ? "Mic" : kind === "line" ? "Line in" : "Loopback";
+}
+
 /** Shows/hides the start prompt and — since display capture's availability
  *  never changes mid-session — decides once whether it offers a Mic/Screen
  *  choice or just Mic, matching the original single-button prompt exactly
@@ -708,7 +994,7 @@ function refreshAudioPromptButtons(): void {
   audioPromptDisplayBtn.hidden = !canDisplay;
   // Set on the label span, not the button itself — the button also holds
   // .apDot, and overwriting textContent on the button would wipe it out.
-  audioPromptMicLabel.textContent = canDisplay ? "Mic" : "Tap to enable mic";
+  audioPromptMicLabel.textContent = canDisplay ? inputChoiceLabel() : "Tap to enable mic";
   audioPromptGuide.textContent = DISPLAY_SHARE_GUIDE;
   audioPromptGuide.hidden = !canDisplay;
 }
@@ -719,8 +1005,15 @@ function refreshAudioPromptButtons(): void {
  *  (capture attached, ended, failed; viz entered). */
 function updateStopBtn(): void {
   stopBtn.style.display = inViz && capture && bandAnalyser ? "block" : "none";
-  // Names the thing it stops, so the label is never a guess.
-  stopBtn.textContent = capture?.kind === "display" ? "STOP SHARE" : "STOP MIC";
+  // Names the thing it stops, so the label is never a guess. The LIVE
+  // device's own label (liveInputLabel), not the stored choice — a fallback
+  // to the default while the chosen interface is unplugged should read as
+  // stopping whatever's actually listening, not the absent one. No label at
+  // all (the moment right before a track's label settles) reads as "MIC",
+  // the same neutral default inputKind's own "mic" case already is.
+  const label = liveInputLabel();
+  const kind = label ? inputKind(label) : "mic";
+  stopBtn.textContent = capture?.kind === "display" ? "STOP SHARE" : `STOP ${INPUT_KIND_TEXT[kind].tag}`;
 }
 
 function updateMicPrompt(): void {
@@ -811,9 +1104,9 @@ function wireDeviceMenu(): void {
   deviceMenu = createDeviceMenu({
     getPalettes: () => menuItems(PALETTES),
     currentSceneId: () => scene.id,
-    currentSceneName: () => scene.name,
     currentPaletteId: () => palette.id,
-    // What the Bands card's status line reports as the audio source. A
+    // What the column head's status line (above the Bands card) reports as
+    // the audio source. A
     // renderer has no local analyser — its bands arrive over the room.
     getAudioStatus: () => ({
       source: syntheticFeed ? "synthetic" : mode === "renderer" ? "remote" : capture ? captureAudioSource(capture.kind) : "none",
@@ -834,7 +1127,32 @@ function wireDeviceMenu(): void {
         void ensureAudio(choice);
       } else void swapAudioSource(choice);
     },
+    // The Source row's device list (src/audio/inputDevice.ts).
+    getInputDevices: () => {
+      const pref = getInputDevicePref();
+      const resolved = resolveInputDeviceId(pref, inputDevices.map((o) => ({ kind: "audioinput" as const, ...o })));
+      return {
+        options: inputDevices,
+        defaultLabel: defaultInputName,
+        missing: pref && resolved === "missing" ? pref : null,
+        liveLabel: liveInputLabel(),
+      };
+    },
+    onInputDeviceChange: (deviceId) => chooseInputDevice(deviceId),
     canCaptureDisplay: () => displayCaptureSupported(),
+    // The Source row's status line — src/audio/inputHealth.ts. Read on the
+    // row's own refresh timer, same as getSourceState/getInputDevices above,
+    // not on every rAF tick (see lastInputHealth's own doc comment).
+    getInputHealth: () => lastInputHealth,
+    getInputLevel: (deviceId) => inputPreview?.level(deviceId) ?? null,
+    setInputPreviewActive: (active) => {
+      inputPreviewActive = active;
+      syncInputPreview();
+    },
+    onInputHiddenChange: (label, hide) => {
+      setInputHidden(label, hide);
+      syncInputPreview(); // a hidden input's idle preview closes, a shown one opens
+    },
     onPickPalette: (id) => applyPalette(getPalette(id)),
     getSensitivity: (sceneId) => getSensitivity(sceneId),
     onSensitivityChange: (sceneId, value) => {
@@ -927,6 +1245,11 @@ function wireDeviceMenu(): void {
       ),
     getSceneMaster: () => getSceneMaster(),
     onSceneMasterChange: (value) => setSceneMaster(value),
+    // The Master card's Picture block — null whenever the meter's gone stale
+    // (the panel was just opened, so nothing has pushed a reading into it
+    // yet, or the sampling loop is gapped for longer than a full reset — see
+    // PICTURE_GAP_RESET_MS) rather than showing a frozen last reading.
+    getPictureReading: () => (performance.now() - pictureMeter.lastAtMs < PICTURE_GAP_RESET_MS ? pictureMeter.latest() : null),
     getAutoGain: () => getAutoGain(),
     onAutoGainChange: (value) => {
       setAutoGainAuto(false);
@@ -1032,6 +1355,7 @@ async function enterViz(next: Scene): Promise<void> {
   mainHost!.unmountAll();
   mainHost!.mount(next);
   scene = next;
+  updateSceneVersionLabel(next);
 
   showHud(`${mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id, viewport);
@@ -1039,6 +1363,7 @@ async function enterViz(next: Scene): Promise<void> {
   menuBtn.style.display = "block";
   fsBtn.style.display = "block";
   if (!bypassGallery) backBtn.style.display = "block";
+  sceneVersion.style.display = "inline";
 
   if (mode !== "renderer") void ensureAudio();
   updateMicPrompt();
@@ -1057,6 +1382,8 @@ function exitToGallery(): void {
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
   stopBtn.style.display = "none";
+  sceneVersion.style.display = "none";
+  hideTooltip(); // a version hint left open by a tap mustn't follow us out
   audioPrompt.style.display = "none";
   mainHost?.unmountAll();
   canvas.style.display = "none";
@@ -1083,12 +1410,36 @@ function applyRoute(route: Route): void {
 }
 
 async function boot(): Promise<void> {
+  // Injects the panel's stylesheet before anything else so its DSEG7
+  // @font-face rule (controlsTheme.ts) is already in document.fonts by the
+  // time pinEverything()'s sweep runs below — otherwise the font would only
+  // enter document.fonts whenever the settings panel first opens
+  // (deviceMenu.ts's own ensureControlsStyles() call), which can be well
+  // after a deploy has moved on. Idempotent and scoped to panel classes, so
+  // calling it this early changes nothing the gallery itself shows.
+  ensureControlsStyles();
+  // Starts the after-load, at-idle sweep that fetches every pinAsset() (the
+  // tempo worklet, the Dancers clip library) and loads every registered font
+  // — see src/pinnedAssets.ts's header for why a page must never need its
+  // own origin's files again after this point.
+  pinEverything();
+
+  // The scene's own version corner (#sceneVersion in index.html) is filled
+  // by updateSceneVersionLabel() from enterViz()/applyScene() below, for
+  // whichever scene is actually shown — nothing to do here before one of
+  // those runs (the element starts `display: none` in index.html).
+
   // Started first so it resolves alongside detectQuality()'s await below;
   // awaited before routing, since a deep-linked scene's enterViz() makes the
   // first autoStartSource() call.
   const micPermissionReady = watchMicPermission((p) => {
     micPermission = p;
   });
+  // The Source row's input dropdown — see refreshInputDevices and
+  // onInputDevicesChanged. Labels are already readable here whenever the
+  // mic's permission was granted on an earlier visit.
+  void refreshInputDevices();
+  navigator.mediaDevices?.addEventListener?.("devicechange", () => void onInputDevicesChanged());
 
   if (!document.createElement("canvas").getContext) {
     fatalError("Canvas unsupported");
@@ -1215,6 +1566,42 @@ async function boot(): Promise<void> {
       }
       if (inViz && !bypassGallery) navigate({ kind: "gallery" }, "push");
     }
+    // Beat trim: bar resync, ×2/÷2 and a small earlier/later nudge — see
+    // src/render/beatTrim.ts for the why and the math. e.code (physical
+    // key), not e.key like f/s above, so a Cyrillic or German layout still
+    // reaches these; only live in a viz, like S, and skipped while typing
+    // somewhere, the same guard deviceMenu.ts's own hotkeys already use.
+    if (inViz && !isTypingTarget(e.target)) {
+      if (e.code === "KeyB") {
+        e.preventDefault();
+        noteKeyUse("beat-one");
+        if (e.shiftKey) {
+          resetBeatTrim();
+          showHud("Tempo ×1, beat timing reset");
+        } else {
+          requestBarResync();
+          showHud("This beat is the 1");
+        }
+      } else if (e.code === "BracketRight" || e.code === "BracketLeft") {
+        e.preventDefault();
+        noteKeyUse("tempo-x");
+        // lastAnim is one render tick stale (this handler runs synchronously
+        // on keydown, before the next animClock.advance() picks up the new
+        // multiplier) — so its own metronomeBpm still carries the *old*
+        // multiplier. Divide that back out to the un-multiplied tempo, then
+        // apply the new multiplier, rather than showing a beat behind.
+        const before = getBeatTrim();
+        const baseBpm = lastAnim?.metronomeOn && before.multiplier > 0 ? lastAnim.metronomeBpm / before.multiplier : 0;
+        const m = stepTempoMultiplier(e.code === "BracketRight" ? 1 : -1);
+        const label = m === 2 ? "×2" : m === 0.5 ? "÷2" : "×1";
+        showHud(`Tempo ${label}${baseBpm > 0 ? ` — ${Math.round(baseBpm * m)} BPM` : ""}`);
+      } else if (e.code === "Comma" || e.code === "Period") {
+        e.preventDefault();
+        noteKeyUse("beat-nudge");
+        const off = nudgeBeatOffset(e.code === "Comma" ? 10 : -10);
+        showHud(off === 0 ? "Beats on time" : off > 0 ? `Beats ${off} ms earlier` : `Beats ${-off} ms later`);
+      }
+    }
   });
   backBtn.addEventListener("click", () => navigate({ kind: "gallery" }, "push"));
   // Stop is the deliberate form of what onCaptureEnded handles when the
@@ -1256,6 +1643,7 @@ async function boot(): Promise<void> {
       onDisabledPick: (id, reason) => showHud(`${id}: ${reason}`, true),
       canCaptureDisplay: () => displayCaptureSupported(),
       sourceState: () => currentSourceState(),
+      micLabel: () => inputChoiceLabel(),
       onSourceChoice: (next) => {
         if (bandAnalyser) return swapAudioSource(next); // persists the pref itself, once the swap lands
         // Nothing live yet: remember the choice AND start it, inside this same
@@ -1321,6 +1709,19 @@ async function boot(): Promise<void> {
         sampleRate: capture?.context.sampleRate ?? null,
         fluxRatio: lastFluxRatio,
       }),
+      // The Master card's Picture block, driven headlessly — tools/master-
+      // sweep.mjs's __viz.pictureForce/picture/pictureReset, and __viz.
+      // setMaster/scenes for its per-(scene, master value) sweep.
+      picture: {
+        force: (on: boolean) => {
+          pictureForced = on;
+        },
+        read: () => ({ latest: pictureMeter.latest(), mean: pictureAverager.mean(), samples: pictureAverager.count }),
+        reset: () => pictureAverager.reset(),
+      },
+      setMaster: (v: number) => setSceneMaster(v),
+      scenes: () =>
+        listScenes().map((s) => ({ id: s.id, name: s.name, draft: DRAFT_SCENE_IDS.has(s.id), paid: PAID_SCENE_IDS.has(s.id) })),
     });
   }
 
@@ -1338,6 +1739,23 @@ function captureRawBands(dbBands: Float32Array, range: { min: number; max: numbe
     rawBandsScratch[i] = Math.min(1, Math.max(0, (dbBands[i] - range.min) / span));
   }
   return rawBandsScratch;
+}
+
+/** This tick's InputMeasure for src/audio/inputHealth.ts: peakL/peakR/
+ *  glitchFrames off the tap's own read(), rmsDb/humHz off `mono` — the same
+ *  buffer lastMono was just set to (see currentVisual()'s solo/host
+ *  branches, the only callers). Takes `mono` as an argument rather than
+ *  reading lastMono itself so this stays a plain function of its inputs. */
+function buildInputMeasure(tap: InputHealthTap, mono: Float32Array, sampleRate: number): InputMeasure {
+  const read = tap.read();
+  const monoRms = rms(mono);
+  return {
+    peakL: read.peakL,
+    peakR: read.peakR,
+    rmsDb: monoRms > 0 ? 20 * Math.log10(monoRms) : -Infinity,
+    humHz: mainsHumHz(mono, sampleRate),
+    glitchFrames: read.glitchFrames,
+  };
 }
 
 /** @param rateScale sensitivity.ts's smoothingRateScale(resolveSmoothing(scene.id)),
@@ -1363,6 +1781,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastBeatDiag = null;
     lastFluxRatio = null;
     lastGate = null;
+    lastInputHealth = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
@@ -1376,12 +1795,17 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastBeatDiag = null;
       lastFluxRatio = null;
       lastGate = null;
+      lastInputHealth = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+    lastInputHealth =
+      inputHealthTap && lastMono
+        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
+        : null;
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
@@ -1428,12 +1852,17 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastBeatDiag = null;
       lastFluxRatio = null;
       lastGate = null;
+      lastInputHealth = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+    lastInputHealth =
+      inputHealthTap && lastMono
+        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
+        : null;
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
@@ -1471,6 +1900,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   lastBeatDiag = null;
   lastFluxRatio = null;
   lastGate = null;
+  lastInputHealth = null;
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
@@ -1547,7 +1977,7 @@ function loop(): void {
   // (undefined every host/renderer/TV tick — see its own doc comment on the
   // module state above) and switches beatClock.ts's phase comb onto the
   // fixed-hop feed for this tick when a tempo source is live. `lastMono`'s
-  // own peak feeds AnimFrame.wavePeak (the Scope card's Waveform readout and
+  // own peak feeds AnimFrame.wavePeak (the Signal card's Waveform readout and
   // its drive jack); null on any device with no local mic.
   const anim = gained
     ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), {
@@ -1629,7 +2059,43 @@ function drawScene(
   const latchedAnim = latch.consume(anim, nowRafMs);
   const drives = engine.forScene(scene.id, scene.settings ?? [], latchedAnim);
   scene.render(mainHost!.ctx, displayFrame, viewport, palette, latchedAnim, drives);
+  // Right after the scene has drawn — and nowhere else — because the
+  // default framebuffer (preserveDrawingBuffer is false, gl.ts) only holds
+  // this frame until the browser composites it; pictureReadback.ts's own
+  // header says why this has to run in the same task as the render. Gated
+  // behind pictureWanted() since it costs a few blits and a tiny readback,
+  // worth paying only while the Master card's Picture block is actually
+  // visible or a headless sweep asked for it (pictureForced).
+  if (pictureWanted()) samplePicture(nowRafMs);
   governor?.recordFrame(nowRafMs);
+}
+
+/** Whether anything currently wants a live picture reading — the Master
+ *  card's Picture block while it's open, or a headless driver that forced it
+ *  on (tuning/debug.ts's `picture.force`, tools/master-sweep.mjs's own
+ *  `__viz.pictureForce(true)`). */
+function pictureWanted(): boolean {
+  return pictureForced || (deviceMenu?.isOpen() ?? false);
+}
+
+/** Drains whatever thumbnail finished since the last tick into the meter/
+ *  averager, then — no more than PICTURE_SAMPLE_INTERVAL_MS apart — kicks off
+ *  the next one. The readback itself is created lazily, on mainHost's own GL
+ *  context, the first tick this is actually called. */
+function samplePicture(nowRafMs: number): void {
+  if (!pictureReadback) pictureReadback = createPictureReadback(mainHost!.ctx.gl);
+  const t = pictureReadback.poll();
+  if (t) {
+    const r = pictureMeter.push(t.px, t.w, t.h, t.atMs);
+    pictureAverager.add(r);
+  }
+  // Half a 60 fps frame of slack: rAF timestamps jitter, and without it a
+  // 60 fps render lands just short of the interval on its fourth frame and
+  // samples every fifth instead (12 Hz, not 15).
+  if (nowRafMs - lastPictureKickMs >= PICTURE_SAMPLE_INTERVAL_MS - 8) {
+    pictureReadback.capture(canvas.width, canvas.height, nowRafMs);
+    lastPictureKickMs = nowRafMs;
+  }
 }
 
 /** True exactly while the start prompt could be up: in a scene, on this
