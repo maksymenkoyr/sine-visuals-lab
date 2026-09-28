@@ -4,6 +4,7 @@ import {
   setAudioSourceChoice,
   resolveSourceState,
   displayCaptureSupported,
+  displayAudioProblem,
   watchMicPermission,
   AUDIO_SOURCE_DEFAULT,
   type MicPermission,
@@ -157,5 +158,20 @@ describe("displayCaptureSupported", () => {
   it("is true when getDisplayMedia is present", () => {
     vi.stubGlobal("navigator", { mediaDevices: { getDisplayMedia: () => Promise.resolve() } });
     expect(displayCaptureSupported()).toBe(true);
+  });
+});
+
+describe("displayAudioProblem", () => {
+  it("passes a share with a live audio track", () => {
+    expect(displayAudioProblem([{ readyState: "live" }], true)).toBeNull();
+  });
+
+  it("explains a share with no audio track", () => {
+    expect(displayAudioProblem([], true)).toMatch(/no audio track/);
+  });
+
+  it("points a Mac at the system permission when the audio track arrived already ended", () => {
+    expect(displayAudioProblem([{ readyState: "ended" }], true)).toMatch(/Screen & System Audio Recording/);
+    expect(displayAudioProblem([{ readyState: "ended" }], false)).not.toMatch(/macOS/);
   });
 });

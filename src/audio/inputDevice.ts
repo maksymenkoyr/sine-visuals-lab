@@ -1,0 +1,238 @@
+/**
+ * Which audio input the Mic source opens — the system default, or one
+ * specific device: a USB audio interface fed from a DJ mixer's REC/Booth out,
+ * a mixer's own built-in USB sound card, a loopback driver. Global per device
+ * like sourcePref.ts's mic-vs-screen choice (which input a device listens to
+ * describes the device, not one scene's look), and it only ever refines "mic":
+ * Screen capture has no device to pick.
+ *
+ * The stored choice is the device's id AND its label. An id alone doesn't
+ * survive the things that happen between a sound check and a set: Chrome
+ * scopes ids per origin and re-keys them when site data is cleared, so a
+ * reload on a different host, or after a reset, sees a new id for the same
+ * interface. resolveInputDeviceId() falls back to the label for exactly that.
+ *
+ * Nothing here opens a capture — src/app.ts's startMic() resolves the choice
+ * against a fresh enumerateDevices() list, opens it through capture.ts's
+ * captureMic(), and falls back to the system default (saying so) when the
+ * chosen device isn't plugged in, so a missing interface never leaves the
+ * scene deaf. The Input card's Source row (src/ui/deviceMenu.ts) is the
+ * picker.
+ *
+ * Same in-memory-cache-over-localStorage pattern as sourcePref.ts.
+ */
+
+/** One stored choice. Absent (null from getInputDevicePref) = the system
+ *  default input, whatever the OS currently has selected. */
+export interface InputDevicePref {
+  deviceId: string;
+  label: string;
+}
+
+/** One entry the picker can offer — a real device, never the browser's
+ *  "default"/"communications" aliases (see inputDeviceOptions). */
+export interface InputDeviceOption {
+  deviceId: string;
+  label: string;
+}
+
+/** The two aliases Chromium lists next to the real devices: "default" (the
+ *  OS's current default, which the picker's own "System default" entry
+ *  already stands for) and "communications" (Windows' separate default for
+ *  calls). Offering either would duplicate a real device under a second name. */
+const ALIAS_IDS = new Set(["default", "communications"]);
+
+/** Chromium labels the "default" alias "Default - <real device label>". */
+const DEFAULT_LABEL_PREFIX = /^Default\s*-\s*/;
+
+/** A label as the picker lists it. Opening the default input hands back a
+ *  track labelled like its alias ("Default - MacBook Pro Microphone"), which
+ *  would never match the real device's own row — so a live track's label
+ *  goes through this before anything compares it to an option's. */
+export function deviceLabel(label: string): string {
+  return label.replace(DEFAULT_LABEL_PREFIX, "");
+}
+
+const STORAGE_KEY = "vibe.audioInputDevice";
+
+function loadInitial(): InputDevicePref | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      typeof (parsed as InputDevicePref).deviceId === "string" &&
+      typeof (parsed as InputDevicePref).label === "string" &&
+      (parsed as InputDevicePref).deviceId !== ""
+    ) {
+      const { deviceId, label } = parsed as InputDevicePref;
+      return { deviceId, label };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+let cache: InputDevicePref | null = loadInitial();
+
+function persist(): void {
+  try {
+    if (cache) localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
+    else localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Not fatal — the choice just won't persist across reloads.
+  }
+}
+
+export function getInputDevicePref(): InputDevicePref | null {
+  return cache;
+}
+
+/** Null (or an empty id) goes back to the system default. */
+export function setInputDevicePref(next: InputDevicePref | null): void {
+  cache = next && next.deviceId !== "" ? { deviceId: next.deviceId, label: next.label } : null;
+  persist();
+}
+
+/**
+ * Inputs hidden from the Source row's list — the virtual devices other apps
+ * install (Steam Streaming, Zoom, Teams) that nobody here will ever listen
+ * to. Kept by label, not id, for the same reason the choice above keeps a
+ * label: ids rotate, names don't. Hiding only declutters the list — the
+ * Source row still shows a hidden input while it's the live one, and the
+ * idle preview (src/audio/inputPreview.ts) skips it.
+ */
+const HIDDEN_KEY = "vibe.hiddenInputs";
+
+function loadHidden(): Set<string> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]");
+    return new Set(Array.isArray(parsed) ? parsed.filter((l): l is string => typeof l === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+let hidden = loadHidden();
+
+export function isInputHidden(label: string): boolean {
+  return hidden.has(label);
+}
+
+export function setInputHidden(label: string, hide: boolean): void {
+  hidden = new Set(hidden);
+  if (hide) hidden.add(label);
+  else hidden.delete(label);
+  try {
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify([...hidden]));
+  } catch {
+    // Not fatal — the list just won't persist across reloads.
+  }
+}
+
+/** The real, pickable inputs out of an enumerateDevices() list, in the
+ *  browser's order. Empty until the mic permission has been granted once —
+ *  before that browsers hand back placeholder entries with no id or label,
+ *  which is nothing a person could choose between. */
+export function inputDeviceOptions(devices: readonly Pick<MediaDeviceInfo, "kind" | "deviceId" | "label">[]): InputDeviceOption[] {
+  const out: InputDeviceOption[] = [];
+  for (const d of devices) {
+    if (d.kind !== "audioinput" || d.deviceId === "" || d.label === "" || ALIAS_IDS.has(d.deviceId)) continue;
+    out.push({ deviceId: d.deviceId, label: d.label });
+  }
+  return out;
+}
+
+/** The real device the OS default currently points at, by label ("MacBook
+ *  Pro Microphone"), for the picker's "System default (…)" entry — or null
+ *  where the browser lists no "default" alias (Firefox, Safari). */
+export function defaultInputLabel(devices: readonly Pick<MediaDeviceInfo, "kind" | "deviceId" | "label">[]): string | null {
+  const alias = devices.find((d) => d.kind === "audioinput" && d.deviceId === "default" && d.label !== "");
+  return alias ? deviceLabel(alias.label) : null;
+}
+
+/** What a stored choice resolves to against the devices listed right now:
+ *  - `{ deviceId }`: open that device — the stored id when it's listed, or
+ *    the id now carrying the stored label (the re-keyed case in this file's
+ *    header), or the stored id as-is when the list can't say (no labels yet:
+ *    the permission isn't granted, so let getUserMedia itself find out).
+ *  - `missing`: the list is readable and the device isn't in it — unplugged.
+ *  Null pref = the system default: nothing to resolve. */
+export function resolveInputDeviceId(
+  pref: InputDevicePref | null,
+  devices: readonly Pick<MediaDeviceInfo, "kind" | "deviceId" | "label">[],
+): { deviceId: string | null } | "missing" {
+  if (!pref) return { deviceId: null };
+  const options = inputDeviceOptions(devices);
+  if (options.length === 0) return { deviceId: pref.deviceId };
+  if (options.some((o) => o.deviceId === pref.deviceId)) return { deviceId: pref.deviceId };
+  const byLabel = options.find((o) => o.label === pref.label);
+  return byLabel ? { deviceId: byLabel.deviceId } : "missing";
+}
+
+/** getUserMedia's rejection for an exact deviceId that isn't there: Chrome
+ *  and Firefox raise OverconstrainedError, Safari NotFoundError. Anything
+ *  else (a denied permission above all) is a real failure, not a reason to
+ *  quietly fall back to another input. */
+export function isMissingDeviceError(err: unknown): boolean {
+  const name = (err as { name?: unknown } | null)?.name;
+  return name === "OverconstrainedError" || name === "NotFoundError";
+}
+
+/** What kind of input a device's name sounds like — the browser gives only a
+ *  name, never a device category, so this is a guess from it, not a fact.
+ *  Checked in order: a loopback driver's name (BlackHole, Loopback,
+ *  Soundflower, VB-Cable, a generic "virtual" device, Windows' Stereo Mix,
+ *  "What U Hear") is checked first because some carry "mic" in their own
+ *  name too (e.g. a virtual "microphone" driver); a mic-shaped name (mic,
+ *  microphone, headset, AirPods, any Bluetooth headset — Chrome on macOS
+ *  suffixes its name "(Bluetooth)", Windows calls it "Hands-Free" — a
+ *  webcam/camera's built-in mic) next;
+ *  anything else — a USB audio interface, a mixer's own sound card — is
+ *  "line": a cable feeding in something that isn't this device's own
+ *  mic. Used for the Input card's Source row (src/ui/deviceMenu.ts) and the
+ *  labels named after it in src/app.ts (the stop button, the start prompt's
+ *  Mic button, the gallery masthead's picker). */
+export type InputKind = "mic" | "line" | "loopback";
+
+const LOOPBACK_RE = /blackhole|loopback|soundflower|vb-?cable|virtual|stereo mix|what u hear/i;
+const MIC_RE = /mic|microphone|headset|airpods|bluetooth|hands-free|webcam|camera/i;
+
+export function inputKind(label: string): InputKind {
+  if (LOOPBACK_RE.test(label)) return "loopback";
+  if (MIC_RE.test(label)) return "mic";
+  return "line";
+}
+
+/** Inputs the Source row's idle preview (src/audio/inputPreview.ts) must
+ *  never open just to draw a meter. Opening a Bluetooth headset's mic
+ *  (AirPods included) drops its playback to call quality for as long as the
+ *  stream stays open; opening an iPhone's or iPad's Continuity mic makes the
+ *  phone chime and show a "connected" screen. Chrome on macOS suffixes a
+ *  Bluetooth input's name "(Bluetooth)" (and renames any AirPods to "AirPods
+ *  (Bluetooth)"), Windows calls one "Hands-Free", and a Continuity mic carries
+ *  only the phone's name — so this is a name check, and a Bluetooth headset
+ *  whose name says none of that (Firefox adds no suffix) still gets a meter. */
+const NO_PREVIEW_RE = /\(bluetooth\)|hands-free|airpods|\biphone\b|\bipad\b/i;
+
+export function previewWouldDisturb(label: string): boolean {
+  return NO_PREVIEW_RE.test(label);
+}
+
+/** The Source row's per-kind tag + tooltip, and the words src/app.ts's
+ *  labels name a kind by (its `tag`, upper- or lower-cased to fit). */
+export const INPUT_KIND_TEXT: Record<InputKind, { tag: string; title: string }> = {
+  mic: { tag: "MIC", title: "A microphone — hears the room" },
+  line: {
+    tag: "LINE IN",
+    title: "A cable input — e.g. a USB audio interface fed from the DJ mixer",
+  },
+  loopback: {
+    tag: "LOOPBACK",
+    title:
+      "A virtual input carrying this computer's own sound (BlackHole, Loopback, Stereo Mix) — hears what this computer plays, no mic or screen share needed",
+  },
+};

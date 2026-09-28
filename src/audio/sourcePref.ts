@@ -6,7 +6,9 @@
  *
  * - "mic": the microphone (src/audio/capture.ts's captureMic). Always
  *   available, but picks up room noise, HVAC, and the room's own reverb —
- *   colours everything it hears.
+ *   colours everything it hears. Unless it's a line input: which device
+ *   "mic" opens (a USB interface fed from a DJ mixer, say) is a separate
+ *   choice — src/audio/inputDevice.ts.
  * - "display": captureDisplayAudio's getDisplayMedia capture. The cleaner
  *   signal — sharing an entire screen with system audio catches a native
  *   desktop app (e.g. Spotify), sharing a single Chrome tab catches just that
@@ -45,6 +47,13 @@
  * paragraph; the start prompt (src/app.ts), the Input card's Source row
  * (src/ui/deviceMenu.ts) and that throw (src/audio/capture.ts) all render the
  * same constant, so the wording can't drift apart across the three.
+ *
+ * A ticked box can still come back silent on macOS: if the system's "Screen &
+ * System Audio Recording" permission is off for the browser, Chrome no longer
+ * fails the share — it hands back an audio track that has already ended
+ * (Chromium's user_media_processor.cc ignores a system-permission failure on
+ * display audio). displayAudioProblem() below checks for that as well as for
+ * no audio track at all, so the share says why instead of going quietly dead.
  *
  * Same in-memory-cache-over-localStorage pattern as powerMode.ts: the cache is
  * the source of truth for get/set within a session, seeded once from
@@ -163,3 +172,16 @@ export function displayCaptureSupported(): boolean {
  *  verbatim rather than paraphrasing it into three slightly different truths. */
 export const DISPLAY_SHARE_GUIDE =
   'A screen share is silent unless you tick its audio box: a tab shares that tab, a window shares that app (e.g. Spotify), a whole screen shares everything playing.';
+
+/** Why a finished share has nothing to listen to, or null when it does —
+ *  see the macOS-permission paragraph in this file's header. Pure (takes the
+ *  share's audio tracks and whether this is a Mac) so it's node-testable;
+ *  src/audio/capture.ts throws the message, and src/app.ts's
+ *  captureErrorMessage shows it. */
+export function displayAudioProblem(audioTracks: readonly Pick<MediaStreamTrack, "readyState">[], onMac: boolean): string | null {
+  if (audioTracks.length === 0) return `That share had no audio track. ${DISPLAY_SHARE_GUIDE}`;
+  if (audioTracks.some((t) => t.readyState === "live")) return null;
+  return onMac
+    ? "macOS blocked the browser from recording this computer's sound — allow it under System Settings → Privacy & Security → Screen & System Audio Recording"
+    : "The share's audio stopped before it started";
+}

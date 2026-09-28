@@ -58,7 +58,7 @@ export interface FeatureFrame {
   onsetPhase: number;
 }
 
-export type CaptureSourceKind = "mic" | "display" | "device";
+export type CaptureSourceKind = "mic" | "display";
 
 export interface CaptureHandle {
   kind: CaptureSourceKind;

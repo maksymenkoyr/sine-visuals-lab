@@ -1,9 +1,28 @@
 import { DRAFT_SCENE_IDS, PAID_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
-import { captureMic, captureDisplayAudio } from "./audio/capture.ts";
+import { captureMic, captureDisplayAudio, listAudioInputDevices } from "./audio/capture.ts";
+import {
+  getInputDevicePref,
+  setInputDevicePref,
+  inputDeviceOptions,
+  defaultInputLabel,
+  resolveInputDeviceId,
+  isMissingDeviceError,
+  deviceLabel,
+  isInputHidden,
+  setInputHidden,
+  previewWouldDisturb,
+  inputKind,
+  INPUT_KIND_TEXT,
+  type InputDevicePref,
+  type InputDeviceOption,
+} from "./audio/inputDevice.ts";
+import { inputPreviewSupported, createInputPreview, type InputPreview } from "./audio/inputPreview.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
-import { peak } from "./audio/waveform.ts";
+import { peak, rms } from "./audio/waveform.ts";
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
+import { createInputHealthTap, type InputHealthTap } from "./audio/inputHealthTap.ts";
+import { createInputHealth, mainsHumHz, type InputHealthReading, type InputMeasure } from "./audio/inputHealth.ts";
 import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
 import { createTempoSource, type TempoSource } from "./audio/tempoSource.ts";
@@ -211,6 +230,14 @@ let waveformAnalyser: WaveformAnalyser | null = null;
  *  (src/audio/lufsAnalyser.ts) — display-only and local, like the waveform
  *  analyser above. */
 let lufsAnalyser: LufsAnalyser | null = null;
+/** Per-channel peaks + dropped-frame count for src/audio/inputHealth.ts —
+ *  display-only and local, same lifecycle as waveformAnalyser above (built in
+ *  attachCapture, disposed in onCaptureEnded). */
+let inputHealthTap: InputHealthTap | null = null;
+/** The one state machine instance for the whole session — see
+ *  inputHealth.ts's own header for why it's a single long-lived `reset()`
+ *  rather than a fresh one per capture, unlike inputHealthTap above. */
+const inputHealth = createInputHealth();
 /** DEV-only: a deep (32768-sample, ~682ms) sibling of waveformAnalyser, for
  *  tools/audio-latency.mjs to locate a test click's exact arrival sample —
  *  see that tool's header. waveformAnalyser's own 2048 samples (42.7ms at
@@ -347,6 +374,12 @@ let lastGate: SilenceGateReading | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
  *  availability as lastMono, for the Signal card's Loudness row. */
 let lastLufs: LufsReading | null = null;
+/** This tick's src/audio/inputHealth.ts reading — same solo/host-only
+ *  availability as lastGate above and for the same reason. Read by the
+ *  Source row's status line (src/ui/deviceMenu.ts) via the deviceMenu deps'
+ *  getInputHealth, not passed through DeviceMenu.update() — that row
+ *  refreshes on its own slower timer, not every rAF tick. */
+let lastInputHealth: InputHealthReading | null = null;
 const rawBandsScratch = new Float32Array(NUM_BANDS);
 
 const animClock = createAnimClock();
@@ -601,32 +634,170 @@ function autoStartSource(): AudioSourceChoice | null {
 }
 
 function startCapture(choice: AudioSourceChoice): Promise<CaptureHandle> {
-  return choice === "display" ? captureDisplayAudio() : captureMic();
+  return choice === "display" ? captureDisplayAudio() : startMic();
 }
 
-/** Maps a capture's kind to the panel's AudioSource vocabulary. "device" (a
- *  specific input device, e.g. a loopback driver) has no capture.ts caller
- *  yet and so no distinct AudioSource of its own — treat it as "mic" for
- *  status purposes until it does. */
-function captureAudioSource(kind: CaptureSourceKind): AudioSource {
-  switch (kind) {
-    case "display":
-      return "display";
-    case "mic":
-    case "device":
-      return "mic";
+/** The Mic source: the input chosen in the Input card's Source row
+ *  (src/audio/inputDevice.ts), or the system default when none is. A chosen
+ *  device that isn't plugged in never leaves the scene deaf — it falls back
+ *  to the default input and says so on the HUD; the devicechange listener
+ *  (onInputDevicesChanged) moves back once the device shows up. */
+async function startMic(): Promise<CaptureHandle> {
+  const pref = getInputDevicePref();
+  if (!pref) return captureMic();
+  const before = await listDevicesQuietly();
+  const chosen = await openChosenInput(pref, before);
+  if (chosen) return chosen;
+  const fallback = await captureMic();
+  // No labels before the first grant (inputDeviceOptions' doc), so a device
+  // whose id has since rotated (inputDevice.ts's header) can only be found
+  // by its label now that the fallback's own grant made labels readable.
+  if (inputDeviceOptions(before).length === 0) {
+    const late = await openChosenInput(pref, await listDevicesQuietly()).catch(() => null);
+    if (late) {
+      fallback.stop();
+      return late;
+    }
+  }
+  showHud(`${pref.label || "The chosen input"} isn't connected — listening to the default input`);
+  return fallback;
+}
+
+/** Opens the chosen input as it resolves against `devices` — null when it's
+ *  missing, so startMic can fall back. Re-stores the id when the device was
+ *  found by its label under a new one. */
+async function openChosenInput(pref: InputDevicePref, devices: MediaDeviceInfo[]): Promise<CaptureHandle | null> {
+  const resolved = resolveInputDeviceId(pref, devices);
+  if (resolved === "missing" || resolved.deviceId === null) return null;
+  try {
+    const handle = await captureMic(resolved.deviceId);
+    if (resolved.deviceId !== pref.deviceId) setInputDevicePref({ deviceId: resolved.deviceId, label: pref.label });
+    return handle;
+  } catch (err) {
+    if (isMissingDeviceError(err)) return null;
+    throw err;
   }
 }
 
-/** Builds bandAnalyser/waveformAnalyser/lufsAnalyser off a freshly started
- *  capture, and hangs a listener off its audio track so an externally-ended
- *  share (Chrome's "Stop sharing" bar, a revoked mic permission) is noticed
- *  instead of silently freezing the visuals at zero — see onCaptureEnded. */
+function listDevicesQuietly(): Promise<MediaDeviceInfo[]> {
+  if (!navigator.mediaDevices?.enumerateDevices) return Promise.resolve([]);
+  return listAudioInputDevices().catch(() => []);
+}
+
+/** The pickable inputs and the OS default's name, cached for the Source
+ *  row's dropdown (its refresh runs on a timer and reads synchronously).
+ *  Refreshed at boot, on every devicechange, and after each capture attaches
+ *  — the first mic grant is what makes labels readable at all. */
+let inputDevices: InputDeviceOption[] = [];
+let defaultInputName: string | null = null;
+
+async function refreshInputDevices(): Promise<MediaDeviceInfo[]> {
+  const devices = await listDevicesQuietly();
+  inputDevices = inputDeviceOptions(devices);
+  defaultInputName = defaultInputLabel(devices);
+  syncInputPreview();
+  return devices;
+}
+
+/** The Source row's idle signal-preview meters (src/audio/inputPreview.ts) —
+ *  owned here, one instance for the session. `inputPreviewActive` is the
+ *  panel's own on/off (deviceMenu.ts's open()/close(), via
+ *  DeviceMenuDeps.setInputPreviewActive); on top of that this only ever runs
+ *  where inputPreviewSupported() and there's at least one pickable option to
+ *  preview (mic permission granted) — otherwise it's stopped outright rather
+ *  than left open with nothing to show. Re-synced here on every call site
+ *  that can change what it should be previewing: refreshInputDevices()
+ *  itself (a new/removed device), and attachCapture/onCaptureEnded (which
+ *  input is LIVE, and so excluded from the preview, changes independently of
+ *  the device list). Hidden inputs and ones a preview would disturb
+ *  (Bluetooth headsets, an iPhone's mic — previewWouldDisturb in
+ *  src/audio/inputDevice.ts) are never opened either. */
+let inputPreview: InputPreview | null = null;
+let inputPreviewActive = false;
+
+function syncInputPreview(): void {
+  if (!inputPreviewActive || !inputPreviewSupported() || inputDevices.length === 0) {
+    inputPreview?.stop();
+    inputPreview = null;
+    return;
+  }
+  if (!inputPreview) inputPreview = createInputPreview();
+  const live = liveInputLabel();
+  inputPreview.sync(
+    inputDevices
+      .filter((o) => o.label !== live && !isInputHidden(o.label) && !previewWouldDisturb(o.label))
+      .map((o) => o.deviceId),
+  );
+}
+
+/** An input was plugged in or pulled. Besides refreshing the dropdown: if the
+ *  chosen input just (re)appeared while the mic is listening to something
+ *  else — the default it fell back to, because the interface went in after
+ *  the scene started or its cable was pulled mid-set — move over to it now,
+ *  instead of making someone find the dropdown again. */
+async function onInputDevicesChanged(): Promise<void> {
+  const devices = await refreshInputDevices();
+  const pref = getInputDevicePref();
+  if (!pref || capture?.kind !== "mic" || !bandAnalyser || swapPromise) return;
+  const resolved = resolveInputDeviceId(pref, devices);
+  if (resolved === "missing" || resolved.deviceId === null) return;
+  const liveId = capture.stream.getAudioTracks()[0]?.getSettings().deviceId;
+  if (resolved.deviceId !== liveId) void swapAudioSource("mic", true);
+}
+
+/** The device the live mic is actually hearing, by name — the Source row's
+ *  status line. Null for a screen share (no device to name) or no capture. */
+function liveInputLabel(): string | null {
+  if (capture?.kind !== "mic") return null;
+  return deviceLabel(capture.stream.getAudioTracks()[0]?.label ?? "") || null;
+}
+
+/** The Source row picked an input ("" = the system default). Picking one is
+ *  asking to hear it, so this also switches to it — from the default mic, or
+ *  from a screen share — rather than only remembering it for next time. */
+function chooseInputDevice(deviceId: string): void {
+  const current = getInputDevicePref();
+  const option = inputDevices.find((o) => o.deviceId === deviceId);
+  // The dropdown's own "not connected" entry for the stored choice isn't in
+  // inputDevices — re-picking it keeps that choice, it doesn't clear it.
+  const next = option ? { deviceId, label: option.label } : current?.deviceId === deviceId ? current : null;
+  setInputDevicePref(next);
+  // The chosen input's kind (src/audio/inputDevice.ts's inputKind) names the
+  // start prompt's Mic button and the gallery masthead's picker — both need
+  // a fresh label the moment the choice changes, not just on their own
+  // unrelated refresh triggers.
+  refreshAudioPromptButtons();
+  gallery?.syncSource();
+  if (mode === "renderer" || syntheticFeed) return;
+  if (!bandAnalyser) {
+    setAudioSourceChoice("mic");
+    void ensureAudio("mic");
+  } else void swapAudioSource("mic", true);
+}
+
+/** Maps a capture's kind to the panel's AudioSource vocabulary. A chosen
+ *  input device (a mixer's USB interface) is still the "mic" source — only
+ *  which device it opens differs. */
+function captureAudioSource(kind: CaptureSourceKind): AudioSource {
+  return kind;
+}
+
+/** Builds bandAnalyser/waveformAnalyser/lufsAnalyser/inputHealthTap off a
+ *  freshly started capture, and hangs a listener off its audio track so an
+ *  externally-ended share (Chrome's "Stop sharing" bar, a revoked mic
+ *  permission) is noticed instead of silently freezing the visuals at zero —
+ *  see onCaptureEnded. Also the one place a capture swap (swapAudioSource)
+ *  re-attaches, so it disposes the previous inputHealthTap and resets the
+ *  state machine itself — inputHealth.ts's reading must never carry over
+ *  from one input to the next. */
 function attachCapture(handle: CaptureHandle): void {
   capture = handle;
   bandAnalyser = createBandAnalyser(handle.context, handle.sourceNode);
   waveformAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode);
   lufsAnalyser = createLufsAnalyser(handle.context, handle.sourceNode);
+  inputHealthTap?.dispose();
+  inputHealthTap = createInputHealthTap(handle.context, handle.sourceNode, handle.stream);
+  inputHealth.reset();
   // measureAnalyser's own header explains why this is DEV-only and deep
   // (32768 samples) rather than reusing waveformAnalyser.
   if (import.meta.env.DEV) measureAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode, 32768);
@@ -662,6 +833,13 @@ function attachCapture(handle: CaptureHandle): void {
   updateMicPrompt();
   gallery?.syncSource();
   reportUsage();
+  // A first mic grant is what makes input labels readable (see
+  // refreshInputDevices) — the Source row's device list fills in from here.
+  // refreshInputDevices() re-syncs the preview off the freshly-read device
+  // list on its own; this capture becoming live also changes which device
+  // the preview should exclude, so it needs its own re-sync too.
+  void refreshInputDevices();
+  syncInputPreview();
 }
 
 /** Counts a scene actually running on live audio (src/net/usage.ts) — called
@@ -675,10 +853,15 @@ function reportUsage(): void {
 }
 
 /** The live capture's track ended on its own — the user hit Chrome's "Stop
- *  sharing" bar, or the OS revoked a mic permission mid-session. Tears down
- *  and re-shows the start prompt rather than leaving the visuals frozen at
- *  zero. Deliberately doesn't fall back to another source — that would fire
- *  a permission prompt the user didn't ask for. */
+ *  sharing" bar, the OS revoked a mic permission mid-session, or the input
+ *  device itself went away (a USB interface unplugged). Tears down and
+ *  re-shows the start prompt rather than leaving the visuals frozen at zero.
+ *  Deliberately doesn't fall back to another source — that would fire a
+ *  permission prompt the user didn't ask for. The one exception is the mic
+ *  itself while its permission still stands: reopening it prompts nobody, and
+ *  it's what keeps a set going when a cable is pulled — startMic lands on
+ *  whatever input is left, and onInputDevicesChanged moves back once the
+ *  chosen one returns. */
 function onCaptureEnded(handle: CaptureHandle): void {
   if (capture !== handle) return; // already superseded by a swap
   handle.stop();
@@ -687,12 +870,17 @@ function onCaptureEnded(handle: CaptureHandle): void {
   waveformAnalyser = null;
   measureAnalyser = null;
   lufsAnalyser = null;
+  inputHealthTap?.dispose();
+  inputHealthTap = null;
+  inputHealth.reset();
   tempoSource?.dispose();
   tempoSource = null;
   audioPromise = null;
   captureFailed = false;
   updateMicPrompt();
   gallery?.syncSource();
+  syncInputPreview(); // nothing live now, so the preview can cover every device again
+  if (handle.kind === "mic" && micPermission === "granted") void ensureAudio("mic");
 }
 
 /** Turns a capture failure into copy the user can act on. A mic denial points
@@ -747,11 +935,15 @@ function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
  *  cancels the share picker, this rejects, and the old capture must still be
  *  the one running — starting-then-swapping guarantees that; tearing the old
  *  one down first would not. The room connection is untouched either way:
- *  hostConn is independent of capture, so a paired TV keeps rendering. */
-function swapAudioSource(next: AudioSourceChoice): Promise<void> {
+ *  hostConn is independent of capture, so a paired TV keeps rendering.
+ *  `restart` reopens even the source already live — the mic moving to a
+ *  different input device (chooseInputDevice, onInputDevicesChanged). */
+function swapAudioSource(next: AudioSourceChoice, restart = false): Promise<void> {
   if (!bandAnalyser || syntheticFeed || mode === "renderer") return Promise.resolve();
-  if (capture?.kind === next) return Promise.resolve();
-  if (swapPromise) return swapPromise;
+  if (capture?.kind === next && !restart) return Promise.resolve();
+  // A restart queues behind a swap in flight rather than dropping: a second
+  // device picked mid-swap is the one that has to end up live.
+  if (swapPromise) return restart ? swapPromise.then(() => swapAudioSource(next, true)) : swapPromise;
   const previous = capture;
   const attempt = (async () => {
     const handle = await startCapture(next);
@@ -777,6 +969,18 @@ function swapAudioSource(next: AudioSourceChoice): Promise<void> {
   return swapPromise;
 }
 
+/** "Mic"/"Line in"/"Loopback" for the CHOSEN input (getInputDevicePref) —
+ *  named after what it is rather than the generic "Mic", the same words the
+ *  Source row's own kind tag uses (src/audio/inputDevice.ts's
+ *  INPUT_KIND_TEXT). No stored choice (the system default) reads as "Mic": a
+ *  laptop's own default input almost always is one. */
+function inputChoiceLabel(): string {
+  const pref = getInputDevicePref();
+  if (!pref) return "Mic";
+  const kind = inputKind(pref.label);
+  return kind === "mic" ? "Mic" : kind === "line" ? "Line in" : "Loopback";
+}
+
 /** Shows/hides the start prompt and — since display capture's availability
  *  never changes mid-session — decides once whether it offers a Mic/Screen
  *  choice or just Mic, matching the original single-button prompt exactly
@@ -790,7 +994,7 @@ function refreshAudioPromptButtons(): void {
   audioPromptDisplayBtn.hidden = !canDisplay;
   // Set on the label span, not the button itself — the button also holds
   // .apDot, and overwriting textContent on the button would wipe it out.
-  audioPromptMicLabel.textContent = canDisplay ? "Mic" : "Tap to enable mic";
+  audioPromptMicLabel.textContent = canDisplay ? inputChoiceLabel() : "Tap to enable mic";
   audioPromptGuide.textContent = DISPLAY_SHARE_GUIDE;
   audioPromptGuide.hidden = !canDisplay;
 }
@@ -801,8 +1005,15 @@ function refreshAudioPromptButtons(): void {
  *  (capture attached, ended, failed; viz entered). */
 function updateStopBtn(): void {
   stopBtn.style.display = inViz && capture && bandAnalyser ? "block" : "none";
-  // Names the thing it stops, so the label is never a guess.
-  stopBtn.textContent = capture?.kind === "display" ? "STOP SHARE" : "STOP MIC";
+  // Names the thing it stops, so the label is never a guess. The LIVE
+  // device's own label (liveInputLabel), not the stored choice — a fallback
+  // to the default while the chosen interface is unplugged should read as
+  // stopping whatever's actually listening, not the absent one. No label at
+  // all (the moment right before a track's label settles) reads as "MIC",
+  // the same neutral default inputKind's own "mic" case already is.
+  const label = liveInputLabel();
+  const kind = label ? inputKind(label) : "mic";
+  stopBtn.textContent = capture?.kind === "display" ? "STOP SHARE" : `STOP ${INPUT_KIND_TEXT[kind].tag}`;
 }
 
 function updateMicPrompt(): void {
@@ -916,7 +1127,32 @@ function wireDeviceMenu(): void {
         void ensureAudio(choice);
       } else void swapAudioSource(choice);
     },
+    // The Source row's device list (src/audio/inputDevice.ts).
+    getInputDevices: () => {
+      const pref = getInputDevicePref();
+      const resolved = resolveInputDeviceId(pref, inputDevices.map((o) => ({ kind: "audioinput" as const, ...o })));
+      return {
+        options: inputDevices,
+        defaultLabel: defaultInputName,
+        missing: pref && resolved === "missing" ? pref : null,
+        liveLabel: liveInputLabel(),
+      };
+    },
+    onInputDeviceChange: (deviceId) => chooseInputDevice(deviceId),
     canCaptureDisplay: () => displayCaptureSupported(),
+    // The Source row's status line — src/audio/inputHealth.ts. Read on the
+    // row's own refresh timer, same as getSourceState/getInputDevices above,
+    // not on every rAF tick (see lastInputHealth's own doc comment).
+    getInputHealth: () => lastInputHealth,
+    getInputLevel: (deviceId) => inputPreview?.level(deviceId) ?? null,
+    setInputPreviewActive: (active) => {
+      inputPreviewActive = active;
+      syncInputPreview();
+    },
+    onInputHiddenChange: (label, hide) => {
+      setInputHidden(label, hide);
+      syncInputPreview(); // a hidden input's idle preview closes, a shown one opens
+    },
     onPickPalette: (id) => applyPalette(getPalette(id)),
     getSensitivity: (sceneId) => getSensitivity(sceneId),
     onSensitivityChange: (sceneId, value) => {
@@ -1199,6 +1435,11 @@ async function boot(): Promise<void> {
   const micPermissionReady = watchMicPermission((p) => {
     micPermission = p;
   });
+  // The Source row's input dropdown — see refreshInputDevices and
+  // onInputDevicesChanged. Labels are already readable here whenever the
+  // mic's permission was granted on an earlier visit.
+  void refreshInputDevices();
+  navigator.mediaDevices?.addEventListener?.("devicechange", () => void onInputDevicesChanged());
 
   if (!document.createElement("canvas").getContext) {
     fatalError("Canvas unsupported");
@@ -1402,6 +1643,7 @@ async function boot(): Promise<void> {
       onDisabledPick: (id, reason) => showHud(`${id}: ${reason}`, true),
       canCaptureDisplay: () => displayCaptureSupported(),
       sourceState: () => currentSourceState(),
+      micLabel: () => inputChoiceLabel(),
       onSourceChoice: (next) => {
         if (bandAnalyser) return swapAudioSource(next); // persists the pref itself, once the swap lands
         // Nothing live yet: remember the choice AND start it, inside this same
@@ -1499,6 +1741,23 @@ function captureRawBands(dbBands: Float32Array, range: { min: number; max: numbe
   return rawBandsScratch;
 }
 
+/** This tick's InputMeasure for src/audio/inputHealth.ts: peakL/peakR/
+ *  glitchFrames off the tap's own read(), rmsDb/humHz off `mono` — the same
+ *  buffer lastMono was just set to (see currentVisual()'s solo/host
+ *  branches, the only callers). Takes `mono` as an argument rather than
+ *  reading lastMono itself so this stays a plain function of its inputs. */
+function buildInputMeasure(tap: InputHealthTap, mono: Float32Array, sampleRate: number): InputMeasure {
+  const read = tap.read();
+  const monoRms = rms(mono);
+  return {
+    peakL: read.peakL,
+    peakR: read.peakR,
+    rmsDb: monoRms > 0 ? 20 * Math.log10(monoRms) : -Infinity,
+    humHz: mainsHumHz(mono, sampleRate),
+    glitchFrames: read.glitchFrames,
+  };
+}
+
 /** @param rateScale sensitivity.ts's smoothingRateScale(resolveSmoothing(scene.id)),
  *  computed once per tick by loop() and reused for animClock.advance() below
  *  — resolveSmoothing() slews its auto value, so calling it a second time
@@ -1522,6 +1781,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastBeatDiag = null;
     lastFluxRatio = null;
     lastGate = null;
+    lastInputHealth = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
@@ -1535,12 +1795,17 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastBeatDiag = null;
       lastFluxRatio = null;
       lastGate = null;
+      lastInputHealth = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+    lastInputHealth =
+      inputHealthTap && lastMono
+        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
+        : null;
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
@@ -1587,12 +1852,17 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastBeatDiag = null;
       lastFluxRatio = null;
       lastGate = null;
+      lastInputHealth = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+    lastInputHealth =
+      inputHealthTap && lastMono
+        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
+        : null;
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
@@ -1630,6 +1900,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   lastBeatDiag = null;
   lastFluxRatio = null;
   lastGate = null;
+  lastInputHealth = null;
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
