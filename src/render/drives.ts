@@ -494,6 +494,17 @@ export function sourceKey(choice: DriveSourceChoice): string {
   return choice.source === "beat" ? `grid:${choice.grid}` : "line";
 }
 
+/** What a patch holds at most one of: `sourceKey`, except every beat-grid
+ *  division shares the one slot `"grid"` — a patch carries a single grid
+ *  source and `setSourceGrid` re-grids it in place, so toggling *any*
+ *  division unplugs whichever one is there. `normalizeDriveSetting`'s dedupe
+ *  and `togglePatchSource` key by this; driveSources.ts's jackKey is it too,
+ *  so the Beat row's jack (which always carries the default division) can
+ *  unplug a patch whose grid was re-gridded to Bar. */
+export function sourceSlot(choice: DriveSourceChoice): string {
+  return isGridChoice(choice) ? "grid" : sourceKey(choice);
+}
+
 /** Structural equality for two DriveChoice values — plain values compare by
  *  `===`, the two object shapes compare by their one field. Used by the
  *  panel to compare a source against a patch's existing sources, and by
@@ -563,8 +574,9 @@ export function defaultDriveSetting(spec: SceneSetting): DriveSetting {
  *  were unplugged, or decoded/hand-built data — `setSourceRole`'s own
  *  refusal below already blocks it through the role toggle) has every
  *  `when` cleared rather than guessing which one should stay a condition. This is the one place a patch's own invariants
- *  (this file's header: unique source keys, at most one line source, weight
- *  in 0..2, never every source a condition) are enforced, so driveStore.ts's
+ *  (this file's header: unique `sourceSlot`s — so at most one grid source
+ *  and one line source — weight in 0..2, never every source a condition)
+ *  are enforced, so driveStore.ts's
  *  sanitizer and every patch-editing helper below can build through this
  *  rather than re-checking the rules themselves. Deliberately does *not*
  *  invent a condition for a `gate` patch that simply has none marked yet —
@@ -577,7 +589,7 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
   const seen = new Set<string>();
   const sources: DriveSource[] = [];
   for (const src of setting.sources) {
-    const key = sourceKey(src.choice);
+    const key = sourceSlot(src.choice);
     if (seen.has(key)) continue;
     seen.add(key);
     const source: DriveSource = { choice: src.choice, weight: clampWeight(src.weight) };
@@ -617,8 +629,10 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
 // testable without a localStorage stub and so the store stays the only
 // place that decides *when* to persist.
 
-/** Adds `choice` to the patch (weight 1, Graded) if it isn't already a
- *  source, removes it if it is. `"scene"` becomes a fresh one-source `add`
+/** Adds `choice` to the patch (weight 1, Graded) if nothing holds its
+ *  `sourceSlot` yet, removes whatever does if something does — so a grid
+ *  choice of any division unplugs the patch's grid source, whichever
+ *  division it's on. `"scene"` becomes a fresh one-source `add`
  *  patch on the first add. An empty result normalizes to `"scene"`. A
  *  source's own role/mute travel with it automatically now — nothing to
  *  re-find by key across the edit (drives.ts used to track a single
@@ -627,10 +641,10 @@ export function normalizeDriveSetting(setting: DriveSetting): DriveSetting {
  *  `normalizeDriveSetting`'s own all-conditions backstop. */
 export function togglePatchSource(setting: DriveSetting, choice: DriveSourceChoice): DriveSetting {
   if (setting === "scene") return { mix: "add", sources: [{ choice, weight: DRIVE_WEIGHT_DEFAULT }] };
-  const key = sourceKey(choice);
-  const exists = setting.sources.some((s) => sourceKey(s.choice) === key);
+  const key = sourceSlot(choice);
+  const exists = setting.sources.some((s) => sourceSlot(s.choice) === key);
   const sources = exists
-    ? setting.sources.filter((s) => sourceKey(s.choice) !== key)
+    ? setting.sources.filter((s) => sourceSlot(s.choice) !== key)
     : [...setting.sources, { choice, weight: DRIVE_WEIGHT_DEFAULT }];
   return normalizeDriveSetting({ mix: setting.mix, sources });
 }

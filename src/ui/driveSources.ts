@@ -1,5 +1,5 @@
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
-import { sourceKey, type DriveSourceChoice } from "../render/drives.ts";
+import { sourceSlot, type DriveSourceChoice } from "../render/drives.ts";
 import type { SignalId } from "../render/signals.ts";
 import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";
 
@@ -142,10 +142,11 @@ export function isLineSourceChoice(choice: DriveSourceChoice): boolean {
  *  header) and the Beat row's jack/the Tempo add-chip both mean "toggle
  *  whichever one's already there", never one specific division (this is
  *  the same collapse buildAddChips' own Tempo-chip click handler in
- *  deviceMenu.ts applies by hand). Every other choice keys by its own
- *  drives.ts sourceKey, unchanged. */
+ *  deviceMenu.ts applies by hand). It's drives.ts's sourceSlot — the same
+ *  identity the store toggles and dedupes by, so a jack that reads
+ *  "plugged" always unplugs on click. */
 export function jackKey(choice: DriveSourceChoice): string {
-  return isGridSourceChoice(choice) ? "grid" : sourceKey(choice);
+  return sourceSlot(choice);
 }
 
 /** The full display label — a row's source summary, a patch source line's
