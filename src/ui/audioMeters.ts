@@ -144,8 +144,9 @@ import { setHintText } from "./hintSwatches.ts";
  * slow ease": Section reads sectionIntensity's un-slewed target
  * (anim.raw.sectionIntensity), the Character dials read musicProfile's
  * pre-ease targets (anim.raw.profile), BPM shows the estimator's raw
- * candidate instead of tempoSettle.ts's settled reading, and the waveform's peak
- * readout drops the peak-hold decay. Level and the beat dot are already raw
+ * candidate instead of tempoSettle.ts's settled reading, and the waveform's
+ * readout shows this buffer's instant peak instead of AnimFrame.wavePeak's
+ * held one (animClock.ts). Level and the beat dot are already raw
  * and don't change. Energy has no pre-envelope value threaded through
  * AnimFrame, so it reads the mean of `rawBands` instead — the same
  * pre-AGC/pre-envelope feed app.ts's captureRawBands hands the spectrum
@@ -177,10 +178,10 @@ import { setHintText } from "./hintSwatches.ts";
  * sensitivity.ts's smoothingRateScale) is what actually closes the gap: at
  * the Smoothing row's Off stop it's Infinity, and every stage upstream of
  * this file (features.ts's envelope, sectionIntensity.ts's INTENSITY_SLEW,
- * musicProfile.ts's eases) plus this file's own BPM settle and waveform
- * peak-hold snap straight to their targets — see sensitivity.ts's header for
- * the full account of why RAW is then a genuine no-op rather than merely
- * fast.
+ * musicProfile.ts's eases, animClock.ts's own wavePeak hold) plus this
+ * file's own BPM settle snap straight to their targets — see sensitivity.ts's
+ * header for the full account of why RAW is then a genuine no-op rather than
+ * merely fast.
  */
 
 export interface AudioMeters {
@@ -196,9 +197,12 @@ export interface AudioMeters {
    *  space. `rateScale` is app.ts's already-resolved sensitivity.ts's
    *  smoothingRateScale for this tick — non-finite (the Smoothing row's Off
    *  stop) bypasses this file's own BPM display (showing the raw estimate
-   *  instead of tempoSettle.ts's settled reading) and waveform peak-hold, the
-   *  same way `raw` already does, so RAW and processed agree exactly (see
-   *  file header). `beatDiag` is FeatureExtractor.onsetDiag — this frame's
+   *  instead of tempoSettle.ts's settled reading), the same way `raw`
+   *  already does, so RAW and processed agree exactly (see file header).
+   *  `anim.wavePeak`'s own peak-hold answers to this same non-finite stop,
+   *  but inside animClock.ts (it's handed the identical `smoothing` this
+   *  tick, one call earlier in app.ts's loop), not to this `rateScale`
+   *  parameter directly. `beatDiag` is FeatureExtractor.onsetDiag — this frame's
    *  full broadband onset diagnostic (ratio, gated, blocked — see
    *  onsetDiag.ts's OnsetDiag), null on the same devices as `fixedEnergy`
    *  (the hits history's Beat lane draws no ratio trace there, same as
@@ -1923,6 +1927,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   waveCanvas.style.cssText = waveCanvasStyle;
   waveform.el.children[1].replaceWith(waveCanvas);
   const waveCtx = waveCanvas.getContext("2d")!;
+  mountJack("anim.wavePeak", waveform.right, waveform.el);
   const scopeCard = createCard({ title: "Scope", accent: NEUTRAL_ACCENT, foldId: "scope" });
   scopeCard.body.appendChild(waveform.el);
   scopeCard.el.style.display = "none";
@@ -2049,9 +2054,6 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
 
   let lastMs: number | null = null;
   let lastTextMs = 0;
-  // Peak-hold for the waveform readout: one buffer's peak jumps around too
-  // fast to read, so it holds and falls at the meters' cap rate.
-  let wavePeak = 0;
 
   // src/render/signals.ts's monitor anchors — populated on demand as a
   // SignalSpec starts pointing at a card/row, never exhaustively (see
@@ -2075,6 +2077,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
     ["metronome", metronomeRow.el],
     ["wave", wave.el],
     ["lock", lock.el],
+    ["waveform", waveform.el],
   ]);
 
   return {
@@ -2088,9 +2091,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       if (text) lastTextMs = nowMs;
       const raw = showRaw;
       // Smoothing's Off stop (sensitivity.ts's smoothingRateScale returns
-      // Infinity there) — bypasses this file's own BPM settle and waveform
-      // peak-hold the same way `raw` does, so RAW has nothing left to show
-      // that the processed reading doesn't already match (see file header).
+      // Infinity there) — bypasses this file's own BPM settle the same way
+      // `raw` does (animClock.ts's own wavePeak hold answers to the same
+      // stop independently, off the identical `smoothing` value), so RAW
+      // has nothing left to show that the processed reading doesn't already
+      // match (see file header).
       const smoothingOff = !Number.isFinite(rateScale);
 
       // ---- Signal ----
@@ -2321,10 +2326,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
       pushWave(mono, clipped, nowMs);
       drawWave();
       const instPeak = peak(mono);
-      // finite - Infinity is exactly -Infinity (IEEE754), and Math.max
-      // against that is exactly instPeak — no separate smoothingOff branch
-      // needed here, unlike the ease()-style blends elsewhere.
-      wavePeak = Math.max(instPeak, wavePeak - PEAK_FALL_PER_SEC * rateScale * dtSec);
+      // The held reading is AnimFrame.wavePeak (animClock.ts), not local
+      // state here, so this readout and the Waveform jack's `anim.wavePeak`
+      // drive source read one number — and it keeps tracking while this
+      // card is folded (the early return above), so a drive never goes
+      // stale. instPeak covers a tick with no anim frame yet.
       if (text) {
         if (clipped)
           waveform.setReadout("CLIP", {
@@ -2332,7 +2338,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
             color: HOT_RED,
             unit: "",
           });
-        else waveform.setReadout(pct(raw ? instPeak : wavePeak));
+        else waveform.setReadout(pct(raw ? instPeak : anim ? anim.wavePeak : instPeak));
       }
     },
     revealRow(card, row): void {

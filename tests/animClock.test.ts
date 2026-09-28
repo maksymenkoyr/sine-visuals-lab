@@ -1,8 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { createAnimClock } from "../src/render/animClock.ts";
+import { createAnimClock, WAVE_PEAK_FALL_PER_SEC } from "../src/render/animClock.ts";
 import { NUM_BANDS, type FeatureFrame } from "../src/audio/types.ts";
 import type { SilenceGateMarks } from "../src/audio/silenceGate.ts";
 import type { HitShape } from "../src/audio/hitStrength.ts";
+import { smoothingRateScale, SMOOTHING_DEFAULT } from "../src/audio/sensitivity.ts";
+
+// Reused wherever a test needs to pass `hit` just to reach `wavePeak` —
+// its own fields don't matter when no onset fires this tick.
+const NEUTRAL_SHAPE: HitShape = { amount: 1, knee: 1, loudness: 1, floor: 0 };
 
 const DT = 1 / 60;
 
@@ -130,5 +135,35 @@ describe("createAnimClock", () => {
       lastAnim = clock.advance(DT, frame({ bpm, time: t, onset: dueBeat, pulseOnset: false }));
     }
     expect(lastAnim.tempoLock).toBeLessThan(0.1);
+  });
+});
+
+describe("AnimFrame.wavePeak", () => {
+  it("omitted hit.wavePeak holds nothing — reads exactly 0 (no local mic)", () => {
+    const clock = createAnimClock();
+    const anim = clock.advance(DT, frame());
+    expect(anim.wavePeak).toBe(0);
+  });
+
+  it("peak-holds a louder reading, falling at WAVE_PEAK_FALL_PER_SEC times the tick's smoothing rateScale", () => {
+    const clock = createAnimClock();
+    const dtSec = 0.1;
+    const rateScale = smoothingRateScale(SMOOTHING_DEFAULT);
+    let anim = clock.advance(dtSec, frame(), SMOOTHING_DEFAULT, undefined, { shape: NEUTRAL_SHAPE, wavePeak: 0.5 });
+    expect(anim.wavePeak).toBe(0.5);
+    // The next tick's own instant peak (0.1) is quieter than the held 0.5,
+    // so the reading falls toward it rather than snapping down to it.
+    anim = clock.advance(dtSec, frame(), SMOOTHING_DEFAULT, undefined, { shape: NEUTRAL_SHAPE, wavePeak: 0.1 });
+    expect(anim.wavePeak).toBeCloseTo(0.5 - WAVE_PEAK_FALL_PER_SEC * rateScale * dtSec, 10);
+    expect(anim.wavePeak).toBeLessThan(0.5);
+    expect(anim.wavePeak).toBeGreaterThan(0.1);
+  });
+
+  it("a louder instant peak replaces the held one immediately, not eased toward", () => {
+    const clock = createAnimClock();
+    let anim = clock.advance(DT, frame(), SMOOTHING_DEFAULT, undefined, { shape: NEUTRAL_SHAPE, wavePeak: 0.2 });
+    expect(anim.wavePeak).toBe(0.2);
+    anim = clock.advance(DT, frame(), SMOOTHING_DEFAULT, undefined, { shape: NEUTRAL_SHAPE, wavePeak: 0.9 });
+    expect(anim.wavePeak).toBe(0.9);
   });
 });
