@@ -8,7 +8,7 @@ import { SOURCE_URL } from "./brand.ts";
  * `curl https://www.sinevisualslab.com/version.json` answers "what's live"
  * without opening the page).
  *
- * Four channels, four places they're deployed:
+ * The channels, and where each is deployed:
  *
  *  - **stable** — the top-level Worker (`audio-viz-room`, wrangler.toml's
  *    top level) on sinevisualslab.com and www. Only changes when someone
@@ -24,7 +24,7 @@ import { SOURCE_URL } from "./brand.ts";
  *    deploys here (`.github/workflows/deploy.yml`), so it's always current
  *    with the tip of `main` and never needs a person to decide to ship it.
  *  - **preview** — `[env.preview]`, one throwaway Worker per open pull
- *    request (unchanged by this file's work — deploy.yml already ran these).
+ *    request (deploy.yml).
  *  - **dev** — `npm run dev` / `npm run build` with no `SVL_CHANNEL` set:
  *    whatever's on disk, dirty or not.
  *

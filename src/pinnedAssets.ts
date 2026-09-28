@@ -16,9 +16,12 @@
  * as soon as its module registers itself, which in practice means at load —
  * see src/render/scenes/dancers/index.ts's own comment for why that's still
  * worth pinning: a fetch racing the rest of page load can lose that race),
- * and every panel font (only requested once `ensureControlsStyles()` in
- * src/ui/controlsTheme.ts has injected the `@font-face` rules that reference
- * them, which itself only happens the first time the settings panel opens).
+ * and every font: a `@font-face` file is only requested the first time text
+ * in that face is drawn — the @fontsource faces controlsTheme.ts and
+ * brandMark.ts import are declared at load but mostly first drawn by the
+ * settings panel, and DSEG7's `@font-face` isn't even declared until
+ * `ensureControlsStyles()` (src/ui/controlsTheme.ts) injects it, which is why
+ * src/app.ts calls that at boot.
  * If a deploy has landed in between a late one of these and the load that
  * kicked it off, that fetch 404s — a visitor who loaded the gallery before a
  * release and starts the mic after it gets a tempo tracker that silently
