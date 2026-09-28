@@ -10,9 +10,11 @@
  *   "mic" opens (a USB interface fed from a DJ mixer, say) is a separate
  *   choice — src/audio/inputDevice.ts.
  * - "display": captureDisplayAudio's getDisplayMedia capture. The cleaner
- *   signal — sharing an entire screen with system audio catches a native
- *   desktop app (e.g. Spotify), sharing a single Chrome tab catches just that
- *   tab's audio with no other app or notification bleeding in.
+ *   signal — sharing a native desktop app's window (e.g. the Spotify app)
+ *   catches just that app's sound where the browser can capture one app (see
+ *   the share-TYPE paragraph below), an entire screen with system audio
+ *   catches everything the computer plays, and a single Chrome tab catches
+ *   just that tab's audio with no other app or notification bleeding in.
  *
  * displayCaptureSupported() gates whether "display" is offered at all.
  * getDisplayMedia-with-audio support is a desktop-Chromium feature, not a Web
@@ -36,9 +38,15 @@
  * Which share TYPE yields audio is a second, independent dimension, and it's
  * the one people actually get wrong. In Chrome's picker a tab share offers
  * "Also share tab audio", an entire-screen share offers "Also share system
- * audio", and a window share offers neither — a window is silent no matter
- * what. Leave the box unticked and getDisplayMedia hands back a video-only
- * stream, which is exactly the case captureDisplayAudio() throws on.
+ * audio", and a window share offers "Also share app audio (from all its
+ * windows and related apps)" — that one app's sound — because
+ * captureDisplayAudio asks for `windowAudio: "window"`. Chrome can capture a
+ * single app on macOS 14.2+ (Core Audio taps; on by default since mid-2026,
+ * Chromium's kApplicationAudioCaptureMac) and on Windows; where it can't, a
+ * window share falls back to offering system audio, or nothing (Chromium's
+ * desktop_media_picker_views.cc, GetWindowCaptureAudioType). Leave the box
+ * unticked and getDisplayMedia hands back a video-only stream, which is
+ * exactly the case captureDisplayAudio() throws on.
  * DISPLAY_SHARE_GUIDE below is the one-line user-facing form of this
  * paragraph; the start prompt (src/app.ts), the Input card's Source row
  * (src/ui/deviceMenu.ts) and that throw (src/audio/capture.ts) all render the
@@ -167,7 +175,7 @@ export function displayCaptureSupported(): boolean {
  *  this file's header. Worded to stand alone so every surface can render it
  *  verbatim rather than paraphrasing it into three slightly different truths. */
 export const DISPLAY_SHARE_GUIDE =
-  'A screen share is silent unless you tick "Also share tab audio" (a tab) or "Also share system audio" (a whole screen) — a single window carries no audio.';
+  'A share is silent unless you tick its audio box: "Also share tab audio" for a tab, "Also share app audio" for a window (just that app, e.g. Spotify), "Also share system audio" for the entire screen.';
 
 /** Why a finished share has nothing to listen to, or null when it does —
  *  see the macOS-permission paragraph in this file's header. Pure (takes the

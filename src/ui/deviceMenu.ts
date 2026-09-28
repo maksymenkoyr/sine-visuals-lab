@@ -4590,7 +4590,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     list.style.cssText = sourceListStyle;
     const caption = document.createElement("div");
     caption.style.cssText = sourceScreenCaptionStyle;
-    caption.textContent = "OR SHARE A TAB / SCREEN";
+    caption.textContent = "OR SHARE A TAB, WINDOW OR SCREEN";
 
     const guide = document.createElement("div");
     guide.style.cssText = sourceGuideStyle;
@@ -4656,8 +4656,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       const row = buildRow("screen");
       row.name.textContent = "Screen share";
       // Apps (Spotify, a DJ app) aren't inputs, so they never appear in the
-      // list above — an Entire-screen share is how a browser hears them.
-      row.sub.textContent = "any app's sound, e.g. Spotify — pick Entire screen";
+      // list above — sharing the app's window (just its sound; see
+      // sourcePref.ts's share-TYPE paragraph) or the Entire screen is how a
+      // browser hears them.
+      row.sub.textContent = "an app's sound: share its window (e.g. Spotify) — or Entire screen for everything";
       row.btn.title = "Share screen audio";
       row.btn.addEventListener("click", () => deps.onAudioSourceChange("display"));
       return row;

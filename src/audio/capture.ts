@@ -48,18 +48,32 @@ export async function captureMic(deviceId?: string): Promise<CaptureHandle> {
   return buildHandle("mic", stream, context);
 }
 
+/** getDisplayMedia's newer hints (the Screen Capture spec's
+ *  DisplayMediaStreamOptions) that TypeScript's DOM lib doesn't list yet. A
+ *  browser that doesn't know one ignores it. */
+interface ShareOptions extends DisplayMediaStreamOptions {
+  windowAudio?: "system" | "window" | "exclude";
+  audioSelection?: "preferred";
+}
+
 /**
  * Capture a shared tab/window/screen's audio (Chrome/Edge desktop). This is
  * the cleanest possible signal for a desktop host: no room noise, no mic
  * coloration, and no gesture-gated permission prompt beyond the picker.
  * See sourcePref.ts's header for exactly which browser/OS combinations this
- * actually yields audio on.
+ * actually yields audio on — and for the two hints below: `windowAudio:
+ * "window"` makes a window share offer that one app's sound (the Spotify
+ * app, say) instead of the whole system's, and `audioSelection` steers the
+ * picker toward ticking its audio box.
  */
 export async function captureDisplayAudio(): Promise<CaptureHandle> {
-  const stream = await navigator.mediaDevices.getDisplayMedia({
+  const options: ShareOptions = {
     video: true,
     audio: MUSIC_AUDIO_CONSTRAINTS,
-  });
+    windowAudio: "window",
+    audioSelection: "preferred",
+  };
+  const stream = await navigator.mediaDevices.getDisplayMedia(options);
   const problem = displayAudioProblem(stream.getAudioTracks(), /Mac/.test(navigator.userAgent));
   if (problem) {
     for (const track of stream.getTracks()) track.stop();
