@@ -45,16 +45,16 @@ honoured by `autoTune.ts`'s `resolveSceneSetting`): a signed relation value's
 meaning is its exact position, so the device-wide Scene master must never
 scale it. `scene.panel` (one `PanelSection` naming the `itemBoxes` widget —
 `src/ui/widgets/itemBoxes.ts`) renders them as specimen boxes + the selected
-strain's rows + the Pairs block (`src/ui/widgets/pairPads.ts`'s
-`buildPairPads`: a Smell/Touch switch, an own-trail fader strip, one
-two-strain-culture pad per pair (`pairsOf`), a Random/Nudge/Keep own
-trails/Back mix row and
-named presets — replacing the old plain-word rows/SVG-web pair,
-`relationRows.ts`/`relationWeb.ts`, both deleted) inside the device menu's
-Scene card, ahead of the remaining flat rows (Network scale, Trail decay,
-Hostility [renamed from Rivalry, same key `rivalry`], Crawl speed, Beat
-seeding, Exposure, Palette tint, Beat flash), each of the latter still
-carrying its own `auto` weights as before. `src/render/scenes/
+strain's rows inside the device menu's Scene card, ahead of the remaining
+flat rows (Network scale, Trail decay, Hostility [renamed from Rivalry, same
+key `rivalry`], Crawl speed, Beat seeding, Exposure, Palette tint, Beat
+flash), each of the latter still carrying its own `auto` weights as before;
+and the Pairs block (`src/ui/widgets/pairPads.ts`'s `buildPairPads`: a
+Smell/Touch switch, an own-trail fader strip, one two-strain-culture pad per
+pair (`pairsOf`), a Random/Nudge/Keep own trails/Back mix row and named
+presets — replacing the old plain-word rows/SVG-web pair,
+`relationRows.ts`/`relationWeb.ts`, both deleted) in its own Affinity card
+right after the Scene card ("The Affinity card" below). `src/render/scenes/
 physarum2Affinity.ts` is the DOM-free home for both tables' shared logic and
 words: `ATTRACT_ROWS`, `smellWeight` (Hostility folded into a raw Smell
 value, shared by the GPU packing and the pads), `packTouch` (Touch's GPU

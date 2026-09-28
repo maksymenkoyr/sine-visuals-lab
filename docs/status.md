@@ -7,23 +7,25 @@ regenerate it at session close.
 ## In flight
 
 - **Physarum 2: Pairs pads + Touch** — draft #176, branch
-  `worktree-affinity-ui`. Touch is a second pair table (strains feed or eat
-  each other's trails, `touch<i><j>`). Affinity is now its own card: Pairs
-  pads with plain `− A → B +` axes and numbers only, rows that wake, pin and
-  solo like the rest of the panel, previews that move with the music,
-  Random / Nudge / Back / presets. Typecheck and tests green, `padcheck.mjs`
-  30/30. `main` merged in (its `deviceMenu.ts` conflict with #178 resolved);
-  mergeable, still a draft.
+  `worktree-affinity-ui`, `main` merged in, mergeable and CI green. Touch is
+  a second pair table (strains feed or eat each other's trails,
+  `touch<i><j>`). Affinity is its own card: Pairs pads with plain
+  `− A → B +` axes and numbers only, rows that wake, pin and solo like the
+  rest of the panel, previews that move with the music, Random / Nudge /
+  Back / presets. Heads-up: #189 (remove the Auto master bar) edits the same
+  `controlsCol.append` line in `deviceMenu.ts`, so whichever lands second
+  gets a one-line conflict.
 - **Physarum 2 per-strain settings** — the user finds them unusable.
   Prototype "Strain Console"
   (https://claude.ai/artifact/Y32bYpyxHC5otWgG967f7D, source
   `docs/scenes/physarum2/artifacts/strain-console.html`); nothing built.
-  The Physarum 2 record's "Resume here" is the starting point.
-- **Other open PRs:** #184 Caustics ripple colour family; #183 Scope
-  Waveform jack (draft); #181 doc-check; #180 drive defaults audit (draft);
-  #171 no screen capture on phones; #160 magnet slider; #103 mic latency
-  line; #74 architecture doc (draft); #73 Auto dial ranking (draft). #70 is a
-  stale status snapshot — close it.
+  Start from the Physarum 2 record's "Resume here".
+- **Other open PRs:** #190 release channels; #189 remove the Auto master bar
+  (draft); #188 Input card source list (draft); #187 Master picture meter
+  (draft); #184 Caustics ripple colour family; #180 drive defaults audit
+  (draft); #171 no screen capture on phones; #160 magnet slider; #103 mic
+  latency line; #74 architecture doc (draft); #73 Auto dial ranking (draft).
+  #70 is a stale status snapshot — close it.
 
 ## Open questions
 
@@ -37,7 +39,7 @@ regenerate it at session close.
 
 ## Next up
 
-- Mark #176 ready once CI is green and the user has tried it.
+- The user tries #176, then mark it ready.
 - Build the per-strain layout the user picks from the Strain Console.
-- Close #70; prune worktrees whose PRs merged (31 besides `main`; check each
+- Close #70; prune worktrees whose PRs merged (33 besides `main`; check each
   one's PR with `gh pr view`).
