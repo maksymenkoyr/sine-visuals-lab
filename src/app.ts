@@ -1052,6 +1052,10 @@ async function enterViz(next: Scene): Promise<void> {
 
 function exitToGallery(): void {
   inViz = false;
+  // The panel belongs to the viz — its gear hides just below, so leaving it
+  // open would strand it over the gallery with no way to close it. Every
+  // exit (Escape, the back button, browser Back) funnels through here.
+  deviceMenu?.close();
   menuBtn.style.display = "none";
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
@@ -1204,6 +1208,10 @@ async function boot(): Promise<void> {
       deviceMenu?.toggle();
     }
     if (e.key === "Escape") {
+      // The panel's own document-level handler runs first and claims Escape
+      // to unpin a pinned card (preventDefault) — that press shouldn't also
+      // throw the viewer out of the scene.
+      if (e.defaultPrevented) return;
       if (immersive?.active()) {
         immersive.exit();
         return;
