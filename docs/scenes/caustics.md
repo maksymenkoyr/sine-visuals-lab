@@ -469,6 +469,37 @@ reference-measurement workflow used by later scenes.
   swells density rather than snapping it. Checked headless: before/after
   bursts after the same change (jump vs. ease), and the panel row showing the
   new jack.
+- 2026-09-28 — Performance: the spray loop was most of the frame. The user
+  reported "huge problems with performance". Timed on an M1 Pro at a
+  MacBook Retina canvas (3024x1890) with `tools/gpu-bench.mjs`, Caustics cost
+  about 20 ms of GPU per frame in the bench and 19-36 ms in the running app
+  (26-27 fps there) — against about 8 ms for Ink and 5 ms for Moiré. Bisecting
+  FRAG with `caustics/scripts/shader-bisect.py`: the Spray injection block was
+  about 60% of it (about 12.5 ms), the six-octave ridge loop about 7 ms,
+  everything else about 1.5 ms. The Beat ripple profile arrays
+  (`uRippleCrest`/`uRippleSlope`, the first suspect) cost nothing measurable.
+  Spray had been this expensive since #65, but only became everyone's cost
+  when the 2026-09-25 "bake params" commit (`337ee13`) raised its default from
+  0 to 0.67: it ran `INJECTION_DROPS` droplets for each of the 3x3 nozzle
+  cells around every pixel, on every frame. The fix changes no pixel:
+  - the loop visits the 2x2 nozzle cells whose centers straddle the pixel,
+    not the 3x3 around its own cell, and skips a nozzle outright when it
+    sits farther than `INJECTION_LIT_RADIUS` from the pixel. Both are exact
+    for the same reason: no droplet lights anything beyond that radius from
+    its nozzle (its glow is under 1e-6 there), and a module-load check
+    throws if retuning reach, jitter or droplet size ever breaks that;
+  - the whole loop is skipped where `sprayGain` (every factor the field is
+    multiplied by — crest gate, treble drive, Spray, Sparkle) is zero, so
+    dark water and treble-free stretches pay nothing.
+  Result, interleaved runs on the bench: 19.7 → 11.1 ms per Retina frame
+  (the spray block itself about 12.5 → 3.6 ms); in the app, 26-27 → 38 fps at
+  the same canvas. The same deterministic frames rendered before and after
+  differ in at most 28 of 921,600 pixels, by 1/255 (the skipped 1e-6 glow
+  tails), while switching the spray off changes 6-13% of pixels by up to
+  58/255 — so the spray was on screen in the frames compared. Tried and
+  dropped: skipping individual far droplets inside the loop measured slightly
+  slower (neighbouring pixels diverge). What's left is the ridge loop — see
+  Known issues.
 
 ## Tuning notes
 
@@ -555,6 +586,18 @@ reference-measurement workflow used by later scenes.
   beat. Still open: whether that reads as an acceptable "developing ripple"
   look or needs a smaller shift (at the cost of the dense-train case) once the
   user has compared the three styles live.
+- After the 2026-09-28 spray fix, the ridge loop in FRAG (three `noise()`
+  calls per octave, at the octave count `uDetail` picks) is about three
+  quarters of the frame, and a Retina MacBook canvas still sits below 60 fps
+  at full resolution (the governor steps it down from there). Its integer
+  hash is at most about 30% of the frame — measured by swapping in a
+  near-free (wrong-looking) hash, the `freeHash` variant of
+  `caustics/scripts/shader-bisect.py`. The one way found to claw part of that
+  back without changing a pixel is a lookup texture holding `hashCell`'s
+  exact values (for `NOISE_PERIOD` squared cells, the four corners of a
+  cell per texel, so a `noise()` call is one `texelFetch`). It needs texture
+  support in `createFullscreenScene` and touches `noiseHash.ts`, which Ink
+  shares, so it wasn't done in the same change.
 
 ## Materials
 
@@ -564,6 +607,7 @@ reference-measurement workflow used by later scenes.
 - Artifact: [How Beat Ripple Listens](https://claude.ai/artifact/8ZJgP3mSY8Me4U9epRgwB5). Source saved as `caustics/artifacts/beat-ripple-listens.html`. A plain-language, accessible explainer of the current Beat ripple: a live demo (four kinds of made-up music) running a copy of `advanceEmission`'s rules with the same constants, drawing the panel's graph and the water side by side, plus a key, the four steps and a short Q&A. If `advanceEmission` or its `SALIENCE_*` constants change, the copy in that page has to change with them.
 - Artifact: [Caustics Ripple Pool](https://claude.ai/artifact/XHPGPwgvy7RvTWuk3ihrnF). Source saved as `caustics/artifacts/caustics-ripple-pool.html`. Old vs new ring pool live under a hit-rate slider, why level/line sources used to silently ignore `fired()`, and a demo of the hysteresis signal→trigger converter shipped as `src/render/valueTrigger.ts` (this file's second 2026-09-26 entry above). Superseded as a picture of Beat ripple itself by the wave-tank rewrite and then the continuous ring emitter (both 2026-09-27 Decisions entries; every version it compares is now history) — the current emitter (`rippleEmitter.ts`) restores most of what that artifact's "old" side showed, now launched continuously off the driver's own rise instead of a yes/no trigger. `valueTrigger.ts` is unaffected and still used elsewhere.
 - `caustics/scripts/` — the session scripts used to screenshot, probe or measure the scene, rescued from working sessions; each header says what it's for and how to run it, and they may need adjusting to the current code.
+- `caustics/scripts/shader-bisect.py` — the 2026-09-28 performance work: times FRAG with one part switched off at a time, and pixel-diffs the scene against any git ref. Runs on `tools/gpu-bench.mjs` (general: any scene, bench or in-app timing), whose header explains why each benchmark frame has to end its render pass on an Apple GPU.
 
 ## Resume here
 
@@ -583,6 +627,11 @@ reference-measurement workflow used by later scenes.
   matching, wrapped entry in `driftFlows` on the JS side, or it reintroduces the
   mobile seam bug `src/render/noiseHash.ts`'s header documents — the two halves only
   work together.
+- Before and after any FRAG change that could cost GPU time, time it with
+  `node tools/gpu-bench.mjs --port P --scenes caustics --w 3024 --h 1890`
+  (a baseline interleaved, since GPU clocks drift) — the Spray loop went
+  unnoticed at 60% of the frame for weeks. A change meant to be invisible can
+  be proved so with `caustics/scripts/shader-bisect.py --pixdiff <ref>`.
 - Audio-coupling work against this scene can arrive in several places at once
   (hit strength, line sources, the patch bay); check each one's merge state
   before trusting a description of "current" behavior against it.
@@ -612,3 +661,4 @@ reference-measurement workflow used by later scenes.
 - #147 (2026-09-26) — Tempo breathe → Breathe: a wirable, inert-until-patched
   zoom (see Decisions)
 - #154 (2026-09-27) — Beat ripple: rings always reach the edge, then a continuous ring emitter (`rippleEmitter.ts`) sized by salience, with its threshold drawn on the panel graph (`settingMarks.ts`); level/line drive sources fire through `valueTrigger.ts` (see Decisions)
+- #185 (2026-09-28) — Spray loop: 2x2 nozzle cells, far nozzles skipped, gated on its own brightness — the frame's GPU cost roughly halved, no pixel changed (see Decisions)
