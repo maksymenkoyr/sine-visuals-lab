@@ -588,6 +588,14 @@ and `powder.ts`'s curl noise).
   inside the pinned row's own ring; `pairPads.ts`'s `pointerFocus` tags
   that focus so the ring stays off until a key is pressed. itemBoxes.ts's
   own box selection (the strain rows below the boxes) is unaffected.
+- **2026-09-28: the per-strain settings are next (prototype only).** The
+  user, pointing at the Strains block (specimen boxes + the selected
+  strain's rows) and the Affinity Studio's per-strain knob bench: "now lets
+  address the rest of setting and these in particular … rn its unusable".
+  Prototyped as "Strain Console" (Materials): all four strains' settings at
+  once, as Lanes or Knobs, with Sensor angle, Trail life and a Share bar
+  added. Nothing built; the user closed the session to finish the rest of
+  the UI in a later one — see Resume here.
 
 ## Tuning notes
 
@@ -606,6 +614,15 @@ applies there too. Tuned so far only against the synthetic feed at
 `bpm=120`; not yet judged against real music through a mic.
 
 ## Known issues and next steps
+
+- **The per-strain settings are unusable** (the user, 2026-09-28): the
+  Strains block edits one strain at a time through the box selection (tap =
+  solo, checkbox/Shift = group, All), its rows are tall and wordy, and the
+  selection tooltip covers the boxes. The "Strain Console" prototype
+  (Materials) is the proposed replacement; waiting on the user's two calls:
+  Lanes or Knobs, and which of Sensor angle / Trail life / Share become real
+  per-strain settings (today: fixed `STRAINS.sensorAngleRad`, one global
+  Trail decay `uDecay`, an equal split with only Pipette/Rebalance moving it).
 
 - Not yet checked against real music from a mic — synthetic-feed tuning only.
 - "Dose" confused the user: it is the share of all agents moved into one new
@@ -722,6 +739,16 @@ applies there too. Tuned so far only against the synthetic feed at
   Pairs, with Touch as a full table, plain "−  A → B  +" axes and no corner
   words; its Off / One-knob Touch modes and naming-set switcher remain for
   comparison only (Decisions and pivots' "Affinity Studio v3" entry).
+- Artifact "Strain Console" (per-strain settings redesign, private):
+  https://claude.ai/artifact/Y32bYpyxHC5otWgG967f7D — self-contained source
+  `physarum2/artifacts/strain-console.html`: every per-strain setting for
+  all four strains at once as Lanes (one row per setting, a lane per strain
+  on a shared scale, a Link toggle) or Knobs (a setting-by-strain matrix),
+  plus Sensor angle, Trail life and a Share bar dragged at its dividers, on
+  a live culture with a fixed 124 BPM pulse on Excitability. Not built yet —
+  see Known issues. `node physarum2/artifacts/look-studio.mjs --page
+  strain-console.html --out <dir>` (or `--page affinity-studio.html`)
+  screenshots either prototype page as the artifact viewer shows it.
 - No `/ref` bundle. Headless shots for tuning:
   `docs/scenes/_shared/scripts/shot.mjs --scene physarum2 --bpm 120
   --settings '{…}'` (the session's scratch variant only differed in taking a
@@ -750,8 +777,10 @@ applies there too. Tuned so far only against the synthetic feed at
     physarum2.ts untouched again; never commit it.
   - `padcheck.mjs` — the Pairs pads' own headless check: real mouse
     down/wait/up drags on a pad and an own-trail fader, the Smell/Touch
-    switch, selection dim/highlight, a panel close/reopen (a culture must
-    not restart), and (Random/Nudge/Keep own trails/Back) a preset applying
+    switch, the Affinity card's rows waking on hover and pinning on a press
+    (Escape unpins, Solo hides the rest, the fold persists), a pad canvas
+    surviving a strain-box selection change and a panel close/reopen (a
+    culture must not restart), and (Random/Nudge/Keep own trails/Back) a preset applying
     exactly, Back restoring the pre-preset tables exactly, a Touch-layer
     Random leaving Smell alone, and a Smell Nudge with Keep own trails
     leaving every own-trail fader unchanged. Also takes the panel
@@ -763,12 +792,30 @@ applies there too. Tuned so far only against the synthetic feed at
     "open at the boxes, no pads visible" control so the pads' own marginal
     cost isn't confounded with the pre-existing cost of opening the panel at
     all under throttling (see that script's own header, and Measurements).
+  - `padmotion.mjs` — how much a pad's live culture changes over 0.5 s vs
+    10 s (block means, not agent flicker) plus two crops 3 s apart; the
+    probe behind the 2026-09-28 "pads don't move" fix.
+  - `docs/scenes/_shared/scripts/panelscroll.mjs` (shared) — screenshots
+    every panel column top to bottom, for judging cards, gaps and rows as a
+    whole.
 - Phase 3's pipette and frame-time checks were one-off session scripts and
   weren't kept; their results are in Measurements.
 
 ## Resume here
 
-`npm run dev`, then `/?audio=synthetic&bpm=120#/v/physarum2`. Pure logic
+**Next session: the per-strain settings.** Open the "Strain Console"
+artifact (Materials; source `physarum2/artifacts/strain-console.html`) with
+the user, get the two calls in Known issues' first item, then build the
+chosen layout into the Strains block the way Affinity was built: its own
+card if it fits (`WidgetCtx.mountCard`), `.vc-row` rows registered with
+`WidgetCtx.registerCard`, numbers only, every word as data. Each lane or
+knob is an existing per-strain setting (`nutrient`/`excite`/`sensor`/`turn`/
+`stride`/`stain` `<k>`), so a press should pin that strain's own setting and
+open its Receives patch as the rows do today. The user reviews panel UX in a
+prototype first and prefers plain − / + and numbers to outcome words.
+
+`npm run dev`, then `#/v/physarum2` (headless checks add
+`?audio=synthetic&bpm=120` before the hash). Pure logic
 (`physarum2TrailSide`, `stepAccumulator`, `hueRotateRGB`,
 `resolveStrainEffective`, the sensor/turn/stride/seedSpread slider<->physical
 mappings, `equalPopulation`/`applyInjection`, `classifyTerritory`,

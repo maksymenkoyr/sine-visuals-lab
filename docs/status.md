@@ -6,38 +6,39 @@ regenerate it at session close.
 
 ## In flight
 
-- **Physarum 2 is on `main`** (#153, merged 2026-09-27, still a draft scene).
-  It shipped with a reusable framework any scene can use: per-item settings
-  (`src/render/sceneItems.ts`) and custom Scene-card widgets declared in
-  `Scene.panel` (`src/ui/widgets/`). Physarum 2 uses it for its strain boxes
-  (live cultures, POP/TERR/VIG, Pipette, Rebalance), per-strain wirable rows,
-  solo/group strain editing and Affinity. Record: `docs/scenes/physarum2.md`.
-- **Wrap branch `wrap-physarum2`**: this snapshot, the Physarum 2 record's
-  Measurements and saved scripts, an `AGENTS.md` read-first row for the
-  widget framework, one `tuning/VOCAB.md` line. Needs a PR.
-- **Open PRs:** Magnet slider #160 (touches every panel slider — rebase over
-  the widget framework and check strain rows + linked ticks still work);
-  Sky back as a free scene #170; phone/tablet screen-capture fix #171;
-  Scene master #149; mic latency line #103; architecture doc #74; Auto dial
-  ranking #73. #70 is a stale status snapshot — close it.
+- **Physarum 2: Pairs pads + Touch** — draft #176, branch
+  `worktree-affinity-ui`. Touch is a second pair table (strains feed or eat
+  each other's trails, `touch<i><j>`). Affinity is now its own card: Pairs
+  pads with plain `− A → B +` axes and numbers only, rows that wake, pin and
+  solo like the rest of the panel, previews that move with the music,
+  Random / Nudge / Back / presets. Typecheck and tests green, `padcheck.mjs`
+  30/30. **Conflicts with `main` in `src/ui/deviceMenu.ts`** (#178).
+- **Physarum 2 per-strain settings** — the user finds them unusable.
+  Prototype "Strain Console"
+  (https://claude.ai/artifact/Y32bYpyxHC5otWgG967f7D, source
+  `docs/scenes/physarum2/artifacts/strain-console.html`); nothing built.
+  The Physarum 2 record's "Resume here" is the starting point.
+- **Other open PRs:** #184 Caustics ripple colour family; #183 Scope
+  Waveform jack (draft); #181 doc-check; #180 drive defaults audit (draft);
+  #171 no screen capture on phones; #160 magnet slider; #103 mic latency
+  line; #74 architecture doc (draft); #73 Auto dial ranking (draft). #70 is a
+  stale status snapshot — close it.
 
 ## Open questions
 
-- Affinity: the user found the relationship web "odd and not informative".
-  An orbit view (drag strains closer to follow, farther to avoid) plus a
-  live one-line summary is proposed — prototype first, or build?
-- Physarum 2 "Dose" is easy to misread; its label/description should say
-  "share of agents moved into a new colony per trigger (and per Pipette tap)".
-- Physarum steps can be ≈ 3.5× cheaper with a periodic spatial re-sort of
-  agent storage (measured, look unchanged, prototype in
-  `docs/scenes/physarum2/scripts/perf/`). Build it for `physarum2` and
-  `physarum`?
-- Neither Physarum scene has been judged on real music through a mic.
+- Strain Console: Lanes or Knobs? Which of Sensor angle, Trail life and
+  Share become real per-strain settings?
+- Sync #176 with `main`: rebase and force-push (the repo's usual way, needs
+  the user's OK), or merge `main` in?
+- Pairs pads: add a one-line legend ("+ steers toward that trail, − steers
+  away" / "+ adds to that trail, − erases part of it")?
+- Physarum 2's Gardens preset washes toward white; "Dose" is still easy to
+  misread; the spatial re-sort (≈ 3.5× cheaper steps) is unbuilt; neither
+  Physarum scene has been judged on real music through a mic.
 
 ## Next up
 
-- Open the PR for `wrap-physarum2`.
-- Affinity redesign (per the answer above).
-- Rebase #160 over the widget framework; close #70.
-- 26 worktrees exist and most belong to squash-merged PRs (`git branch
-  --merged` misses those): check each one's PR with `gh pr view` and prune.
+- Resolve #176's `deviceMenu.ts` conflict, then mark it ready.
+- Build the per-strain layout the user picks from the Strain Console.
+- Close #70; prune worktrees whose PRs merged (31 besides `main`; check each
+  one's PR with `gh pr view`).
