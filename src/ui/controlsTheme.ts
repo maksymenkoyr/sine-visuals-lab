@@ -946,6 +946,15 @@ body.vc-keys-reveal [data-keycap]::after {
   }
 }
 
+/* The Source row's status line while src/audio/inputHealth.ts reads
+ * anything but ok (deviceMenu.ts's inputHealthText) — the same warning ramp
+ * HOT_YELLOW/HOT_RED already stand for elsewhere (the Input card's level
+ * wash as it nears clipping, the meters' clip/drop flashes). Never set at
+ * the same time as [data-prompting] above — that only applies while nothing
+ * is live, and a health reading only exists once something is. */
+.vc-src-status[data-warn="amber"] { color: ${HOT_YELLOW}; }
+.vc-src-status[data-warn="red"] { color: ${HOT_RED}; }
+
 /* ---- src/ui/widgets/itemBoxes.ts + relationWeb.ts/relationRows.ts ----
  * A scene-declared item widget's own boxes, affinity rows and web — styled
  * with this file's own tokens/fonts rather than a widget-local stylesheet,

@@ -91,6 +91,7 @@ import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { inputKind, isInputHidden, INPUT_KIND_TEXT, type InputDeviceOption, type InputDevicePref, type InputKind } from "../audio/inputDevice.ts";
+import type { InputHealthReading } from "../audio/inputHealth.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -434,6 +435,13 @@ export interface DeviceMenuDeps {
   /** Whether this browser can offer the Screen option at all — see
    *  sourcePref.ts's header for the exact browser/OS matrix. */
   canCaptureDisplay: () => boolean;
+  /** This tick's src/audio/inputHealth.ts reading for the live capture. Null
+   *  wherever there's no local tap to read one off (a renderer, the
+   *  synthetic feed, or before the very first tick after a capture starts) —
+   *  a healthy input reads `{ kind: "ok" }`, never null. Read on the Source
+   *  row's own refresh(), not every rAF tick — see createSourceRow's
+   *  refresh. */
+  getInputHealth: () => InputHealthReading | null;
   /** 0..1 signal-preview level for a device that ISN'T the live one, or null
    *  wherever its preview isn't open (src/audio/inputPreview.ts — an
    *  unsupported browser, or it just hasn't opened yet). The live row uses
@@ -4554,6 +4562,48 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     };
   }
 
+  /** silent's wording depends on what kind of input is live — a line, mic or
+   *  loopback device, or a screen share — unlike clipping/skipping/hum's
+   *  fixed text, so it's broken out. Screen share is checked via
+   *  state.choice, same as the status line's own "Listening to screen
+   *  share" branch in refresh(); a real device via inputDevice.ts's
+   *  inputKind on liveLabel, defaulting to the mic wording where the label
+   *  itself is unknown — the same fallback the "Listening to …" line uses. */
+  function silentSourceText(state: SourceState, liveLabel: string | null): string {
+    if (state.choice === "display") return "Nothing playing";
+    const kind = liveLabel ? inputKind(liveLabel) : "mic";
+    if (kind === "loopback") return "Nothing playing";
+    if (kind === "line") return "No sound coming in — check the cable and the mixer's REC/booth level";
+    return "The mic hears nothing";
+  }
+
+  /** The Source row's status line while a deps.getInputHealth() reading is
+   *  anything but "ok" — src/audio/inputHealth.ts's header explains what
+   *  triggers each kind. Null for "ok" (nothing to show — refresh() falls
+   *  back to "Listening to …"). Red only for clipping, the one kind with an
+   *  immediate, obvious fix (turn something down); the rest are amber
+   *  "check your setup" nudges. */
+  function inputHealthText(
+    reading: InputHealthReading,
+    state: SourceState,
+    liveLabel: string | null,
+  ): { text: string; warn: "amber" | "red" } | null {
+    switch (reading.kind) {
+      case "clipping": {
+        const side = reading.channel === "left" ? " (left channel)" : reading.channel === "right" ? " (right channel)" : "";
+        return { text: `Too loud — clipping. Turn down the mixer's level or the interface gain${side}`, warn: "red" };
+      }
+      case "skipping":
+        return { text: "The audio keeps skipping — try another USB port or cable", warn: "amber" };
+      case "hum":
+        return { text: `Hum on the line (${reading.humHz ?? 50} Hz) — try the laptop on battery`, warn: "amber" };
+      case "silent":
+        return { text: silentSourceText(state, liveLabel), warn: "amber" };
+      default:
+        return null;
+    }
+  }
+
   function createSourceRow() {
     const el = document.createElement("div");
     el.className = "vc-row";
@@ -4758,13 +4808,25 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         // See .vc-src-status[data-prompting] (controlsTheme.ts) for the
         // shimmer this drives while nothing's live yet.
         status.toggleAttribute("data-prompting", !state.live && !editing);
+        // src/audio/inputHealth.ts's reading, worded by inputHealthText
+        // above — takes over the status line in place of "Listening to …"
+        // whenever the live input isn't ok. Never checked while editing:
+        // that state already owns the line ("Tap an input to hide or show
+        // it"), and while nothing's live there's no input to read health on.
+        const warning = state.live && !editing ? inputHealthText(deps.getInputHealth() ?? { kind: "ok" }, state, liveLabel) : null;
+        // See .vc-src-status[data-warn] (controlsTheme.ts) for the colour —
+        // absent (not just falsy) so its CSS rule doesn't match at all.
+        if (warning) status.setAttribute("data-warn", warning.warn);
+        else status.removeAttribute("data-warn");
         status.textContent = editing
           ? "Tap an input to hide or show it"
           : !state.live
             ? "Pick a source above"
-            : state.choice === "display"
-              ? "Listening to screen share"
-              : `Listening to ${liveLabel ?? "the microphone"}`;
+            : warning
+              ? warning.text
+              : state.choice === "display"
+                ? "Listening to screen share"
+                : `Listening to ${liveLabel ?? "the microphone"}`;
     }
 
     return {
