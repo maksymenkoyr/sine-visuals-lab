@@ -3595,6 +3595,33 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (!samePair(pinned, { sceneId, spec })) togglePin(sceneId, spec);
   }
 
+  /** Registers `rowEl` into `pinRowHandles` outside the drive system's own
+   *  `DriveRowHandle` path — `appendSettingRow`'s own `registerPinRow` calls
+   *  this for its non-drive branch (a toggle/enum/plain-slider row), and
+   *  `WidgetCtx.registerCard` (registry.ts's own doc comment has the full
+   *  contract, including why `spec` is often a synthetic identity rather
+   *  than a real setting) is the exact same call for a widget's own custom
+   *  row. `main`, when given, is the row's own value control: a click
+   *  anywhere on `rowEl` that isn't some OTHER in-row control (isCardPress)
+   *  pins — passing `rowEl` itself as `main` (every WidgetCtx.registerCard
+   *  caller does) makes every press anywhere in the row count, pads/faders/
+   *  buttons included, matching this file's header's "press anywhere on the
+   *  card pins it" rule for an ordinary row. */
+  function registerPinnableRow(sceneId: string, spec: SceneSetting, accent: string, rowEl: HTMLElement, main?: HTMLElement | null): void {
+    if (main) {
+      rowEl.addEventListener("click", (e) => {
+        if (isCardPress(rowEl, main, e.target)) pinSetting(sceneId, spec);
+      });
+    }
+    rowEl.style.setProperty("--vc-pin-color", accent);
+    pinRowHandles.push({
+      sceneId,
+      spec,
+      rowEl,
+      refreshPin: () => rowEl.classList.toggle("vc-drive-pinned", samePair(pinned, { sceneId, spec })),
+    });
+  }
+
   /** The only place `preview` is written. See previewDrive's own callers
    *  (appendSettingRow's onRowFocusIn) for the hover-dwell contract this
    *  mirrors from the row-selection system it replaces. */
@@ -4056,7 +4083,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  hides it — closed panel, nothing pinned, or the row scrolled out of
    *  its column. Rides every cable recompute (scroll, resize, pin, solo). */
   function positionSoloEye(): void {
-    const row = isOpen ? sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned") : null;
+    const row = isOpen ? findPinnedRowEl() : null;
     const r = row?.getBoundingClientRect();
     const col = (narrowMQ.matches ? root : controlsCol).getBoundingClientRect();
     const top = r ? r.top + 20 : 0;
@@ -4771,6 +4798,35 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   sceneCard.el.style.display = "none";
   const sceneRows = document.createElement("div");
   sceneCard.body.appendChild(sceneRows);
+  // Cards a widget mounts alongside the Scene card (WidgetCtx.mountCard,
+  // registry.ts — Physarum 2's Affinity card is the first) — a plain host,
+  // not a card of its own, sitting right after the Scene card in the
+  // controls column (controlsCol.append below) so a mounted card reads as
+  // "one more block after the Scene card" rather than a floating extra.
+  // Cleared at the top of every renderSceneSettings() call exactly like
+  // sceneRows.innerHTML, so a widget card never survives a scene switch/Look
+  // apply/card Reset it wasn't rebuilt by. pinnableCards()/findPinnedRowEl()
+  // below search it alongside sceneCard.el for whichever card holds the
+  // currently pinned row, since a row built through WidgetCtx.registerCard
+  // pins exactly like a Scene-card row (registerPinnableRow, below) but can
+  // live in either card.
+  const sceneWidgetCardsHost = document.createElement("div");
+  /** Every top-level card a Scene-setting row's pin can live in — the Scene
+   *  card itself, plus whatever `sceneWidgetCardsHost` currently holds. */
+  function pinnableCards(): HTMLElement[] {
+    return [sceneCard.el, ...sceneWidgetCardsHost.querySelectorAll<HTMLElement>(":scope > .vc-card")];
+  }
+  /** The currently `.vc-drive-pinned` row, wherever it lives — replaces the
+   *  several `sceneCard.el.querySelector(".vc-drive-pinned")` call sites
+   *  Solo/the solo eye/jumpToBlock used before a widget could mount a second
+   *  pinnable card. */
+  function findPinnedRowEl(): HTMLElement | null {
+    for (const card of pinnableCards()) {
+      const row = card.querySelector<HTMLElement>(".vc-drive-pinned");
+      if (row) return row;
+    }
+    return null;
+  }
   // What the per-tick loop and the auto refresh need from a scene row — a
   // slider row (createControlRow) satisfies it as is; an enum picker with
   // `reads` supplies its own pair (see appendSettingRow).
@@ -4986,24 +5042,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     /** Makes this row pinnable (pinRowHandles). A drive row brings its own
      *  handle, and createControlRow wires its card press (onCardPin); any
      *  other row's `main` control is passed so a press on it, or on the card
-     *  around it, pins. */
+     *  around it, pins — the non-drive case is `registerPinnableRow`, shared
+     *  with `WidgetCtx.registerCard` (see that function's own doc comment). */
     function registerPinRow(rowEl: HTMLElement, drive: DriveRowHandle | null, main?: HTMLElement | null): void {
-      if (main) {
-        rowEl.addEventListener("click", (e) => {
-          if (isCardPress(rowEl, main, e.target)) pinSetting(sceneId, spec);
-        });
-      }
       if (drive) {
+        if (main) {
+          rowEl.addEventListener("click", (e) => {
+            if (isCardPress(rowEl, main, e.target)) pinSetting(sceneId, spec);
+          });
+        }
         pinRowHandles.push(drive);
         return;
       }
-      rowEl.style.setProperty("--vc-pin-color", accent);
-      pinRowHandles.push({
-        sceneId,
-        spec,
-        rowEl,
-        refreshPin: () => rowEl.classList.toggle("vc-drive-pinned", samePair(pinned, { sceneId, spec })),
-      });
+      registerPinnableRow(sceneId, spec, accent, rowEl, main);
     }
 
     function wirePreviewFocus(el: HTMLElement): void {
@@ -5218,6 +5269,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const sceneId = deps.currentSceneId();
     const specs = deps.getSceneSettings(sceneId);
     sceneRows.innerHTML = "";
+    sceneWidgetCardsHost.innerHTML = "";
     sceneRowHandles = [];
     for (const c of driveSparkCanvases) untrackDriveCanvas(c);
     driveSparkCanvases = [];
@@ -5293,6 +5345,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         set: (spec, value) => deps.onSceneSettingChange(sceneId, spec, value),
         appendRow: (rowContainer, spec, opts) => appendSettingRow(rowContainer, sceneId, spec, specs, SCENE_VIOLET, opts),
         mountRows: (rowContainer, rows) => mountRows(rowContainer, sceneId, specs, rows),
+        mountCard: (spec) => {
+          const card = createCard(spec);
+          // Own class beyond the generic .vc-card so a script (padcheck.mjs)
+          // or a future second widget card can find "a card a widget
+          // mounted" without matching on its title text.
+          card.el.classList.add("vc-widget-card");
+          markBlock(card.title);
+          sceneWidgetCardsHost.appendChild(card.el);
+          return { el: card.el, body: card.body };
+        },
+        registerCard: (rowEl, spec) => registerPinnableRow(sceneId, spec, SCENE_VIOLET, rowEl, rowEl),
         // The exact same live reading a row's own sparkline draws — see
         // WidgetCtx.driveValue's own doc comment (registry.ts).
         driveValue: (spec) => lastDrives?.valueOf(spec.key) ?? 0,
@@ -5567,7 +5630,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // stays where it is — the column scrolls so the rest of the panel comes
     // back around it; only when the column can't scroll that far (a pane
     // near the top of the list) does it slide the rest of the way.
-    const anchor = sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned") ?? sceneCard.el;
+    const anchor = findPinnedRowEl() ?? sceneCard.el;
     const before = anchor.getBoundingClientRect().top;
     soloOn = on;
     applySolo();
@@ -5609,11 +5672,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (const el of [...root.querySelectorAll(".vc-solo-hidden")]) el.classList.remove("vc-solo-hidden");
     root.classList.toggle("vc-solo", soloOn);
     if (!soloOn) return;
-    if (sceneCard.el.classList.contains("vc-folded")) sceneCard.el.querySelector<HTMLButtonElement>(".vc-fold")?.click();
     // A pinned setting (its row plus its patch pane, the one outlined in
-    // its source colour) is the thing being worked on — it alone stays,
-    // the meters column included in what goes.
-    const pinnedRow = sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned");
+    // its source colour) is the thing being worked on — it alone stays, the
+    // meters column included in what goes. The pinned row can live in the
+    // Scene card or a card a widget mounted beside it (WidgetCtx.mountCard);
+    // whichever one holds it is unfolded the same way the Scene card alone
+    // used to be.
+    const pinnedRow = findPinnedRowEl();
+    const activeCard = pinnedRow?.closest<HTMLElement>(".vc-card") ?? sceneCard.el;
+    if (activeCard.classList.contains("vc-folded")) activeCard.querySelector<HTMLButtonElement>(".vc-fold")?.click();
     const leaves = new Set<Element>([pinnedRow ?? sceneCard.el, dock]);
     const onPath = new Set<Element>();
     for (const leaf of leaves) for (let n: Element | null = leaf; n && n !== root; n = n.parentElement) onPath.add(n);
@@ -5673,7 +5740,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAutoMaster();
   }
 
-  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, dock);
+  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, paletteCard.el, dock);
   root.append(columnsWrap, controlsCol);
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
@@ -5758,7 +5825,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (!heading) return;
     // Soloed, a jump outside what's soloed needs the rest of the panel
     // back rather than trying to move the solo onto it.
-    if (soloOn && !(sceneCard.el.querySelector(".vc-drive-pinned") ?? sceneCard.el).contains(heading)) setSolo(false);
+    if (soloOn && !(findPinnedRowEl() ?? sceneCard.el).contains(heading)) setSolo(false);
     // A folded card's controls have no layout box and are invisible to
     // ringElements() below — unfold first, or the jump would silently land
     // on the next block's control instead.

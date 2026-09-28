@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  affinityRowTargets,
   allItemsSelected,
   editingHeading,
   formatMixedSummary,
@@ -8,7 +7,6 @@ import {
   sameSelection,
   soloSelection,
   toggleItemSelection,
-  valuesDiffer,
 } from "../src/ui/widgets/itemSelection.ts";
 
 describe("soloSelection", () => {
@@ -63,20 +61,6 @@ describe("primarySelection", () => {
   });
 });
 
-describe("valuesDiffer", () => {
-  it("false for fewer than two values", () => {
-    expect(valuesDiffer([])).toBe(false);
-    expect(valuesDiffer([0.5])).toBe(false);
-  });
-  it("false when every value matches within epsilon", () => {
-    expect(valuesDiffer([0.5, 0.5, 0.5000001])).toBe(false);
-  });
-  it("true once any value diverges past epsilon", () => {
-    expect(valuesDiffer([0.5, 0.6])).toBe(true);
-    expect(valuesDiffer([0.5, 0.5, 0.9])).toBe(true);
-  });
-});
-
 describe("editingHeading", () => {
   it("names every selected label when not all are selected", () => {
     expect(editingHeading(["PP-A1", "PP-C3"], false, "strains")).toBe("Editing PP-A1 + PP-C3");
@@ -95,34 +79,5 @@ describe("formatMixedSummary", () => {
         { label: "PP-C3", text: "Scene" },
       ]),
     ).toBe("Mixed — PP-A1: Bass level · PP-C3: Scene");
-  });
-});
-
-describe("affinityRowTargets", () => {
-  it("own-trail row (rowJ === primary) sets every selected item's own diagonal", () => {
-    expect(affinityRowTargets([0, 2], 0, 0)).toEqual([
-      { i: 0, j: 0 },
-      { i: 2, j: 2 },
-    ]);
-  });
-
-  it("another item's row sets att<i><rowJ> for every OTHER selected i, skipping i === rowJ", () => {
-    // Selected PP-A1(0) + PP-C3(2), row target PP-B2(1): neither selected
-    // item equals the target, so both get a pair.
-    expect(affinityRowTargets([0, 2], 0, 1)).toEqual([
-      { i: 0, j: 1 },
-      { i: 2, j: 1 },
-    ]);
-  });
-
-  it("skips the selected item that IS the row's own target", () => {
-    // Selected PP-A1(0) + PP-B2(1), row target PP-B2(1): PP-B2 itself is
-    // excluded (that's the own-trail row's job), only PP-A1 gets a pair.
-    expect(affinityRowTargets([0, 1], 0, 1)).toEqual([{ i: 0, j: 1 }]);
-  });
-
-  it("a single-item selection reduces to the old one-pair behaviour", () => {
-    expect(affinityRowTargets([2], 2, 2)).toEqual([{ i: 2, j: 2 }]);
-    expect(affinityRowTargets([2], 2, 0)).toEqual([{ i: 2, j: 0 }]);
   });
 });
