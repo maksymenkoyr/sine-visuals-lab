@@ -55,6 +55,11 @@ export async function captureDisplayAudio(): Promise<CaptureHandle> {
   const stream = await navigator.mediaDevices.getDisplayMedia({
     video: true,
     audio: MUSIC_AUDIO_CONSTRAINTS,
+    // A window share hears only that app (the Spotify app, say), never the
+    // whole Mac — left unset, Chrome offers system audio there, so the share
+    // picked up a YouTube tab playing elsewhere. Chrome 141+; not yet in the
+    // DOM typings, hence the spread.
+    ...{ windowAudio: "window" },
   });
   if (stream.getAudioTracks().length === 0) {
     for (const track of stream.getTracks()) track.stop();
