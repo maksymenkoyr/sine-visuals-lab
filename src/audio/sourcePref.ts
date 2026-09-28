@@ -6,7 +6,9 @@
  *
  * - "mic": the microphone (src/audio/capture.ts's captureMic). Always
  *   available, but picks up room noise, HVAC, and the room's own reverb —
- *   colours everything it hears.
+ *   colours everything it hears. Unless it's a line input: which device
+ *   "mic" opens (a USB interface fed from a DJ mixer, say) is a separate
+ *   choice — src/audio/inputDevice.ts.
  * - "display": captureDisplayAudio's getDisplayMedia capture. The cleaner
  *   signal — sharing an entire screen with system audio catches a native
  *   desktop app (e.g. Spotify), sharing a single Chrome tab catches just that

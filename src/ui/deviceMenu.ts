@@ -90,6 +90,7 @@ import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
+import type { InputDeviceOption, InputDevicePref } from "../audio/inputDevice.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -383,6 +384,22 @@ export interface MenuItem {
 }
 
 export type AudioSource = "mic" | "display" | "remote" | "synthetic" | "none";
+
+/** What the Source row's input dropdown shows — see DeviceMenuDeps.getInputDevices. */
+export interface InputDevicesState {
+  /** Pickable inputs; empty until the mic permission's first grant, which
+   *  hides the dropdown (there's nothing nameable to choose between yet). */
+  options: InputDeviceOption[];
+  /** The OS default's device name, for the "System default (…)" entry. */
+  defaultLabel: string | null;
+  /** The chosen input's id among `options`; null = the system default. */
+  chosen: string | null;
+  /** A chosen input that isn't plugged in — listed as "not connected" so the
+   *  dropdown still says what was picked while the default fills in. */
+  missing: InputDevicePref | null;
+  /** The device the live mic is actually hearing, or null. */
+  liveLabel: string | null;
+}
 export interface AudioStatus {
   source: AudioSource;
   /** The local AudioContext's rate, when there is one. */
@@ -407,6 +424,13 @@ export interface DeviceMenuDeps {
    *  card's `lufs` frame field. */
   getSourceState: () => SourceState | null;
   onAudioSourceChange: (choice: AudioSourceChoice) => void;
+  /** The Source row's input dropdown — which device the Mic source opens
+   *  (src/audio/inputDevice.ts). Read on the row's own refresh timer, so
+   *  src/app.ts answers from a cache, never a fresh enumerateDevices(). */
+  getInputDevices: () => InputDevicesState;
+  /** A pick from that dropdown — "" is the system default. src/app.ts also
+   *  switches to it (see its chooseInputDevice). */
+  onInputDeviceChange: (deviceId: string) => void;
   /** Whether this browser can offer the Screen option at all — see
    *  sourcePref.ts's header for the exact browser/OS matrix. */
   canCaptureDisplay: () => boolean;
@@ -4334,6 +4358,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // two states as the chip itself (idle/live) in refresh() below.
   const sourceDotStyle = `display: inline-block; width: 6px; height: 6px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.45); box-sizing: border-box; margin-right: 6px; vertical-align: middle;`;
   const sourceDotLiveStyle = `${sourceDotStyle} background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN};`;
+  // The input dropdown under the chips — the chips' own border/radius/type,
+  // full width, dark enough that the OS's native option list stays legible.
+  const inputSelectStyle = `display: block; width: 100%; box-sizing: border-box; margin-top: 6px; font: 400 11px/1.3 ${FONT_MONO}; color: rgba(255,255,255,0.8); background: #111; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px; padding: 4px 6px; cursor: pointer; text-overflow: ellipsis;`;
   // Always visible while Screen is the active source, not a .vc-hint: the hint
   // only reveals on hover/focus, and on touch that means after the tap that
   // already opened the picker — too late to be a guide. Same reasoning as
@@ -4388,11 +4415,50 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     guide.style.cssText = sourceGuideStyle;
     guide.textContent = DISPLAY_SHARE_GUIDE;
 
+    // Which device the Mic source opens — a native <select>, so a phone gets
+    // its own picker sheet and a long device name never has to fit a chip.
+    // Picking one also switches to it (app.ts's chooseInputDevice), which is
+    // why it stays visible under Screen too: it's the way back to a
+    // particular input, not a setting of the Mic chip alone.
+    const inputSelect = document.createElement("select");
+    inputSelect.title = "Which input Mic listens to — e.g. a USB audio interface fed from the mixer";
+    inputSelect.setAttribute("aria-label", "Audio input");
+    inputSelect.style.cssText = inputSelectStyle;
+    inputSelect.addEventListener("change", () => deps.onInputDeviceChange(inputSelect.value));
+    // Rebuilt only when what it lists changes: refresh() runs on a timer, and
+    // replacing the options under an open native picker would close it.
+    let inputSelectKey = "";
+
     const status = document.createElement("div");
     status.className = "vc-src-status";
     status.style.cssText = sourceStatusStyle;
 
-    el.append(head, list, guide, status);
+    el.append(head, list, inputSelect, guide, status);
+
+    function refreshInputSelect(): string | null {
+      const devices = deps.getInputDevices();
+      inputSelect.style.display = devices.options.length === 0 ? "none" : "";
+      const entries: { value: string; text: string }[] = [
+        { value: "", text: devices.defaultLabel ? `System default (${devices.defaultLabel})` : "System default" },
+        ...devices.options.map((o) => ({ value: o.deviceId, text: o.label })),
+      ];
+      if (devices.missing) entries.push({ value: devices.missing.deviceId, text: `${devices.missing.label} — not connected` });
+      const selected = devices.missing ? devices.missing.deviceId : (devices.chosen ?? "");
+      const key = JSON.stringify([entries, selected]);
+      if (key !== inputSelectKey && document.activeElement !== inputSelect) {
+        inputSelectKey = key;
+        inputSelect.replaceChildren(
+          ...entries.map((e) => {
+            const opt = document.createElement("option");
+            opt.value = e.value;
+            opt.textContent = e.text;
+            opt.selected = e.value === selected;
+            return opt;
+          }),
+        );
+      }
+      return devices.liveLabel;
+    }
 
     return {
       el,
@@ -4400,6 +4466,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         const state = deps.getSourceState();
         el.style.display = state === null ? "none" : "";
         if (state === null) return;
+        const liveLabel = refreshInputSelect();
         const canDisplay = deps.canCaptureDisplay();
         for (const { choice: c, btn, dot } of buttons) {
           // Live is the only state a chip ever paints — a stored preference
@@ -4415,7 +4482,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         // shimmer this drives while nothing's live yet.
         status.toggleAttribute("data-prompting", !state.live);
         const name = SOURCE_OPTIONS.find((o) => o.choice === state.choice)?.text ?? "";
-        status.textContent = state.live ? `${name} — listening` : "Pick a source above";
+        // Names the device a live mic actually opened, so a fallback to the
+        // default (the chosen interface unplugged) reads as exactly that.
+        const device = state.live && state.choice === "mic" && liveLabel ? ` to ${liveLabel}` : "";
+        status.textContent = state.live ? `${name} — listening${device}` : "Pick a source above";
       },
     };
   }

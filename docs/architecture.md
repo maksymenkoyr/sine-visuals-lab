@@ -9,7 +9,9 @@ module's header — this doc doesn't restate it.
 
 `src/audio/capture.ts` opens the mic or, on a desktop host, a shared screen/tab's
 audio — a user choice persisted by `src/audio/sourcePref.ts`, surfaced in the start
-prompt and the Input card's Source row — and hands back a raw stream.
+prompt and the Input card's Source row, where `src/audio/inputDevice.ts` also picks
+which input device the mic means (e.g. a USB interface fed from a DJ mixer) — and
+hands back a raw stream.
 `src/audio/analyser.ts` runs the FFT and splits it into bands
 (`src/audio/bandSplit.ts` / `bandScale.ts` decide the band edges). `src/audio/
 features.ts` turns raw bands into a `FeatureFrame` — this is where the adaptive
