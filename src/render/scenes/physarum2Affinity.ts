@@ -403,20 +403,28 @@ export function fmtSigned(v: number): string {
   return (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2);
 }
 
+/** How a pad's distance from its zero line becomes a value: the value grows
+ *  as that distance to this power, so the pad is flat around the line where a
+ *  relation flips sign (the user, 2026-09-28: crossing it should be "much
+ *  smoother") and steeper toward the edges, which still reach
+ *  AFFINITY_MIN/MAX. 1 would be the old straight line. */
+export const PAD_CURVE = 2;
+
 /** A value's position across a pad square, as a percentage (0..100, centred
- *  on 50 at v=0) — the prototype's own `pc`. 42, not 50, leaves room for the
- *  marker's own radius/ring at the extremes without clipping against the
- *  pad's border. */
+ *  on 50 at v=0) — the prototype's own `pc`, bent by PAD_CURVE. 42, not 50,
+ *  leaves room for the marker's own radius/ring at the extremes without
+ *  clipping against the pad's border. */
 export function padPos(v: number): number {
-  return 50 + (v / AFFINITY_MAX) * 42;
+  const t = Math.min(1, Math.abs(v) / AFFINITY_MAX);
+  return 50 + Math.sign(v) * Math.pow(t, 1 / PAD_CURVE) * 42;
 }
 
 /** `padPos`'s inverse, clamped to `[AFFINITY_MIN, AFFINITY_MAX]` — a pointer
  *  position outside the pad's own drawn range still yields a valid, clamped
  *  value (the prototype's own `pv`). */
 export function padValue(pct: number): number {
-  const v = ((pct - 50) / 42) * AFFINITY_MAX;
-  return Math.max(AFFINITY_MIN, Math.min(AFFINITY_MAX, v));
+  const u = Math.max(-1, Math.min(1, (pct - 50) / 42));
+  return Math.sign(u) * Math.pow(Math.abs(u), PAD_CURVE) * AFFINITY_MAX;
 }
 
 /** Every unordered pair over `0..n-1`, ascending — the six pads' own (a, b)

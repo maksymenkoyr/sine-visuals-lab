@@ -228,10 +228,28 @@ describe("padPos / padValue", () => {
   });
 
   it("clamps a percentage outside the drawn range", () => {
-    expect(padValue(0)).toBeCloseTo(-1.5, 5); // ((0-50)/42)*1.5 ~= -1.786 -> clamped
+    expect(padValue(0)).toBeCloseTo(-1.5, 5); // (0-50)/42 ~= -1.19 -> clamped to the edge
     expect(padValue(100)).toBeCloseTo(1.5, 5);
     expect(padValue(-1000)).toBe(-1.5);
     expect(padValue(1000)).toBe(1.5);
+  });
+
+  it("is flat around the zero line and still reaches the ends", () => {
+    const near = padValue(50 + 42 * 0.1); // a tenth of the way out
+    expect(near).toBeGreaterThan(0);
+    expect(near).toBeLessThan(0.1 * 1.5 * 0.5); // well under the straight line's value
+    expect(padValue(50 - 42 * 0.1)).toBeCloseTo(-near, 10);
+    expect(padValue(92)).toBeCloseTo(1.5, 10);
+    expect(padValue(8)).toBeCloseTo(-1.5, 10);
+  });
+
+  it("only ever grows left to right", () => {
+    let prev = -Infinity;
+    for (let pct = 0; pct <= 100; pct += 0.5) {
+      const v = padValue(pct);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      prev = v;
+    }
   });
 });
 
