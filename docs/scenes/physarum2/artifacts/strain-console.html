@@ -4,7 +4,10 @@
 <style>
 /* Prototype for Physarum 2's per-strain settings (docs/scenes/physarum2.md).
    Self-contained: the culture is lab.src.html's dish stepper with per-strain
-   sensor angle, trail life and share added; a fixed 124 BPM pulse stands in
+   sensor angle and trail life added, plus strain switching (an agent joins the
+   strain whose ink per agent outweighs its own where it stands), so the
+   headcount follows the settings instead of being set by hand —
+   scripts/recruit.mjs is the headless check. A fixed 124 BPM pulse stands in
    for the music on Excitability. */
 :root {
   color-scheme: dark;
@@ -68,14 +71,18 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
 .pv .code { font: 11px var(--mono); display: flex; justify-content: space-between; }
 .pv .code span:last-child { color: var(--ink-3); }
 
-/* share bar */
-.share { position: relative; height: 30px; border-radius: 6px; overflow: visible; display: flex; touch-action: none; user-select: none; -webkit-user-select: none; }
-.share .seg { height: 100%; display: flex; align-items: center; justify-content: center; font: 11px var(--mono); color: #0b0f10; overflow: hidden; white-space: nowrap; min-width: 0; }
-.share .seg:first-child { border-radius: 6px 0 0 6px; }
-.share .seg:last-child { border-radius: 0 6px 6px 0; }
-.share .div { position: absolute; top: -4px; bottom: -4px; width: 14px; margin-left: -7px; cursor: ew-resize; display: flex; justify-content: center; outline: none; }
-.share .div::after { content: ""; width: 3px; height: 100%; border-radius: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
-.share .div:focus-visible::after { background: var(--violet); }
+/* headcount bar: read-only, it follows the culture */
+.share { height: 30px; border-radius: 6px; overflow: hidden; display: flex; }
+.share .seg { height: 100%; display: flex; align-items: center; justify-content: center; font: 11px var(--mono); color: #0b0f10; overflow: hidden; white-space: nowrap; min-width: 0; transition: width 0.4s linear; }
+.share .seg + .seg { box-shadow: inset 1px 0 0 rgba(0, 0, 0, 0.55); }
+.single { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 8px; }
+.single .v { font: 11px var(--mono); text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+/* stain synergy: slider beside a small hue wheel */
+.syn { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 14px; }
+.wheel { position: relative; width: 64px; height: 64px; }
+.wheel .ring { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(hsl(0 90% 58%), hsl(60 90% 58%), hsl(120 90% 58%), hsl(180 90% 58%), hsl(240 90% 58%), hsl(300 90% 58%), hsl(360 90% 58%)); opacity: 0.55; -webkit-mask: radial-gradient(circle, transparent 60%, #000 61%); mask: radial-gradient(circle, transparent 60%, #000 61%); }
+.wheel svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.row-head .harm { font: 11px var(--mono); color: var(--ink-3); }
 
 /* lanes */
 .lanes { display: grid; gap: 3px; }
@@ -94,9 +101,27 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
 .knobs { display: grid; grid-template-columns: 92px repeat(4, minmax(0, 1fr)); row-gap: 6px; column-gap: 4px; align-items: center; }
 .knobs .hd { font: 11px var(--mono); text-align: center; }
 .knobs .lbl { font-size: 12.5px; color: var(--ink-2); display: flex; align-items: center; gap: 4px; line-height: 1.15; }
-.knob { display: grid; justify-items: center; gap: 1px; cursor: ns-resize; touch-action: none; outline: none; border-radius: 6px; padding: 3px 0; }
+.knob { display: grid; justify-items: center; gap: 1px; cursor: move; touch-action: none; outline: none; border-radius: 6px; padding: 3px 0; }
 .knob:hover, .knob:focus-visible { background: rgba(255, 255, 255, 0.05); }
+.knob.active { background: rgba(195, 165, 249, 0.1); box-shadow: 0 0 0 1px rgba(195, 165, 249, 0.4); }
+.knob.active .kv { color: #fff; }
+.knobs .lbl.on { color: var(--violet); }
+.knobs .hd { transition: text-shadow 0.12s ease; }
+.knobs .hd.on { text-shadow: 0 0 8px currentColor; }
 .knob svg { width: 34px; height: 34px; display: block; }
+/* direction signs: + up-right, − down-left, the diagonal a drag turns it
+   along. Faint at rest, brighter on hover, lit in the strain's colour and
+   nudged outward on the side you're moving toward, nearly gone at the end
+   you can't go past. */
+.kw { position: relative; width: 34px; height: 34px; }
+.kw .sg { position: absolute; font: 600 11px/1 var(--mono); color: var(--ink-3); opacity: 0.55; pointer-events: none; transition: opacity 0.15s ease, transform 0.15s ease, color 0.15s ease, text-shadow 0.15s ease; }
+.kw .sg.plus { top: -3px; right: -9px; }
+.kw .sg.minus { bottom: -1px; left: -9px; }
+.knob:hover .sg, .knob:focus-visible .sg, .knob.active .sg { opacity: 0.9; color: var(--ink-2); }
+.knob .sg.lit { opacity: 1; color: var(--sc); text-shadow: 0 0 4px var(--sc), 0 0 10px var(--sc); }
+.knob .sg.plus.lit { transform: translate(3px, -3px) scale(1.7); }
+.knob .sg.minus.lit { transform: translate(-3px, 3px) scale(1.7); }
+.knob .sg.end { opacity: 0.12 !important; }
 .knob .kv { font: 10px var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
 /* notes */
@@ -112,7 +137,7 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
   <header>
     <div class="eyebrow">Physarum 2 · Strains prototype</div>
     <h1>Strain Console</h1>
-    <p class="intro">Every per-strain setting for all four strains at once, in two layouts to compare, plus the three the scene doesn't have yet (Sensor angle, Trail life, Share). The culture on the left runs on these values, and a steady 124 BPM pulse stands in for the music on Excitability.</p>
+    <p class="intro">Every per-strain setting for all four strains at once, in two layouts to compare, plus what the scene doesn't have yet: Sensor angle, Trail life, and a headcount that follows the settings instead of being set by hand. The culture on the left runs on these values, and a steady 124 BPM pulse stands in for the music on Excitability.</p>
   </header>
 
   <div class="app">
@@ -122,7 +147,7 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
         <div class="beat"><i id="beatDot"></i>124 BPM</div>
         <button class="reseed" id="reseedBtn" type="button">Reseed</button>
       </div>
-      <p class="stage-note">Hover a row to read what it does. Drag a lane or a knob; double-click to reset it. With Link on, dragging one strain moves all four by the same amount.</p>
+      <p class="stage-note">Hover a row to read what it does. Drag a lane or a knob (knobs any way: right or up = more); double-click to reset it. With Link on, or Alt on a knob, dragging one strain moves all four by the same amount; Shift on a knob is fine steps.</p>
     </section>
 
     <section class="panel" aria-label="Strains card">
@@ -135,9 +160,14 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
         <div class="card-head"><span class="card-title">Strains</span></div>
         <div class="previews" id="previews"></div>
         <div class="row" id="shareRow">
-          <div class="row-head"><span class="row-title">Share <span class="new">NEW</span></span><button class="chipbtn" id="evenBtn" type="button">Even</button></div>
-          <div class="share" id="share" aria-label="Share of agents per strain"></div>
-          <div class="hint">How the agents split between the strains. Drag a divider; the four always add up to 100%.</div>
+          <div class="row-head"><span class="row-title">Headcount <span class="new">NEW</span></span><button class="chipbtn" id="evenBtn" type="button">Rebalance</button></div>
+          <div class="share" id="share" role="img" aria-label="Share of agents per strain"></div>
+          <div class="hint">How the agents are split between the strains right now. Nobody sets it: agents switch to whichever strain's ink outweighs their own, so a strain with more Nutrient or longer Trail life grows. Rebalance puts it back to 25% each.</div>
+        </div>
+        <div class="row" id="switchRow">
+          <div class="row-head"><span class="row-title">Switching <span class="new">NEW</span></span></div>
+          <div class="single"><div class="track" id="switchTrack" tabindex="0" role="slider" aria-label="Switching"><div class="rail"></div><div class="fill" style="background:var(--violet)"></div><div class="th" style="background:var(--violet)"></div></div><span class="v" id="switchVal"></span></div>
+          <div class="hint">How readily an agent joins the strain whose ink outweighs its own where it stands. At 0 the headcount stays where it is.</div>
         </div>
       </div>
 
@@ -147,7 +177,7 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
       </div>
 
       <div class="card" id="knobsCard" hidden>
-        <div class="card-head"><span class="card-title">Per strain</span><span class="how">drag a knob up or down</span></div>
+        <div class="card-head"><span class="card-title">Per strain</span><span class="how">drag any way: right or up = more</span></div>
         <div class="knobs" id="knobs"></div>
       </div>
     </section>
@@ -165,7 +195,7 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
     <article class="note">
       <h3>Knobs</h3>
       <dl>
-        <dt>You do</dt><dd>A small knob per strain per setting; drag up or down.</dd>
+        <dt>You do</dt><dd>A small knob per strain per setting; drag any way, right or up turns it up. The faint + and − on each knob point the way, light up on the side you're turning toward, and fade at a limit. Hold Shift for fine steps, Alt to turn all four strains together. The small tick is the default; double-click goes back to it.</dd>
         <dt>Good</dt><dd>Compact, reads like a mixer, a strain's whole character is one column.</dd>
         <dt>Costs</dt><dd>Knobs are harder to set exactly and to compare than lanes.</dd>
       </dl>
@@ -173,7 +203,9 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
     <article class="note">
       <h3>In the app</h3>
       <dl>
-        <dt>Settings</dt><dd>Each lane or knob is the existing per-strain setting (nutrient, excite, sensor, turn, stride, stain), so pressing one pins that strain's setting and opens its Receives patch as today. Sensor angle, Trail life and Share would be new per-strain settings.</dd>
+        <dt>Settings</dt><dd>Each lane or knob is the existing per-strain setting (nutrient, excite, sensor, turn, stride, stain), so pressing one pins that strain's setting and opens its Receives patch as today. Sensor angle and Trail life would be new per-strain settings.</dd>
+        <dt>Synergy</dt><dd>One scene-wide setting. The stored stains stay what you set; the scene shows them pulled toward the nearest harmony, so turning Synergy down gives your own colours back.</dd>
+        <dt>Headcount</dt><dd>Replaces the hand-set Share bar: the split is a result of the other settings. In the scene, the sim pass would rewrite an agent's strain when another strain's ink per agent outweighs its own, a floor keeps every strain alive, and the counts come from a readback instead of being tracked in JS. The pipette and Rebalance keep working on top.</dd>
         <dt>Replaces</dt><dd>The one-strain-at-a-time rows and the tap / checkbox selection. The live previews stay, smaller.</dd>
       </dl>
     </article>
@@ -200,10 +232,68 @@ const PARAMS = [
   { key: "stain", label: "Stain", min: 0, max: 1, def: [2, 40, 172, 262].map((h) => h / 360), hue: true, fmt: (v) => `${Math.round(v * 360)}°`, hint: "Its colour." },
 ];
 const V = {};
+const updaters = [];
 PARAMS.forEach((p) => { V[p.key] = p.def.slice(); });
 const fmtOf = (p) => p.fmt ?? ((v) => v.toFixed(2));
+
+// ---------- stain synergy ----------
+// Stain is stored twice: rawStain is what you set; V.stain is what's shown,
+// rawStain pulled toward the nearest harmony by Synergy (0 = exactly what you
+// set, 1 = exactly the harmony). "Nearest" tries every harmony in HARMONIES,
+// every way of giving the four strains its four places, and — with no anchor
+// — the best rotation; with an anchor (the stain you last set by hand) the
+// rotation is fixed so that stain stays exactly where you put it and the
+// other three move. The current harmony is kept unless another fits clearly
+// better (HARMONY_STICK), so a drag doesn't flicker between two that fit
+// about as well. Hues are in turns (0..1) throughout.
+const HARMONIES = [
+  { name: "Square", at: [0, 90, 180, 270] },
+  { name: "Rectangle", at: [0, 60, 180, 240] },
+  { name: "Two pairs", at: [0, 30, 180, 210] },
+  { name: "Split", at: [0, 150, 180, 210] },
+  { name: "Analogous", at: [0, 30, 60, 90] },
+];
+const PERMS = [];
+(function perm(a, rest) { if (!rest.length) { PERMS.push(a); return; } rest.forEach((x, i) => perm([...a, x], rest.filter((_, j) => j !== i))); })([], [0, 1, 2, 3]);
+const wrapTurn = (d) => d - Math.round(d);
+const unitTurn = (h) => ((h % 1) + 1) % 1;
+const HARMONY_STICK = 1.6;
+function nearestHarmony(h, anchor, keep) {
+  let best = null, kept = null;
+  for (const hm of HARMONIES) for (const pm of PERMS) {
+    const off = pm.map((j) => hm.at[j] / 360);
+    let rot;
+    if (anchor >= 0) rot = h[anchor] - off[anchor];
+    else {
+      let sx = 0, sy = 0;
+      for (let i = 0; i < 4; i++) { const a = (h[i] - off[i]) * 2 * Math.PI; sx += Math.cos(a); sy += Math.sin(a); }
+      rot = Math.atan2(sy, sx) / (2 * Math.PI);
+    }
+    let cost = 0;
+    for (let i = 0; i < 4; i++) cost += wrapTurn(rot + off[i] - h[i]) ** 2;
+    const fit = { cost, name: hm.name, target: off.map((o) => unitTurn(rot + o)) };
+    if (!best || cost < best.cost) best = fit;
+    if (hm.name === keep && (!kept || cost < kept.cost)) kept = fit;
+  }
+  return kept && kept.cost <= best.cost * HARMONY_STICK + 1e-5 ? kept : best;
+}
+const rawStain = V.stain.slice();
+let synergy = 0, stainAnchor = -1, harmony = nearestHarmony(rawStain, -1);
+function applySynergy() {
+  harmony = nearestHarmony(rawStain, stainAnchor, harmony.name);
+  for (let k = 0; k < 4; k++) V.stain[k] = unitTurn(rawStain[k] + synergy * wrapTurn(harmony.target[k] - rawStain[k]));
+}
+const setSynergy = (v) => { synergy = Math.max(0, Math.min(1, v)); applySynergy(); };
+
+// Strain switching: each step an agent, with probability SWITCH_MAX *
+// switching, compares the ink under it per agent (a strain's ink divided by
+// its share of the headcount, so a big strain has to earn its size); if
+// another strain's beats its own by SWITCH_MARGIN it joins that strain. No
+// strain drops below SWITCH_FLOOR of the agents. scripts/recruit.mjs runs the
+// same rule headlessly.
+const SWITCH_MAX = 0.05, SWITCH_MARGIN = 1.5, SWITCH_FLOOR = 0.04, SWITCH_MIN_INK = 0.02;
+let switching = 0.4;
 let shares = [0.25, 0.25, 0.25, 0.25];
-let sharesVersion = 0;
 
 function hsl(h, s, l) {
   const a = s * Math.min(l, 1 - l);
@@ -231,7 +321,7 @@ function motionOf(k) {
     decay: V.life[k] / 9,
   };
 }
-function makeCulture(W, H, N, kinds, respawn, useShares) {
+function makeCulture(W, H, N, kinds, respawn, switches) {
   const K = kinds.length, CELLS = W * H;
   const T = kinds.map(() => new Float32Array(CELLS));
   const tmp = new Float32Array(CELLS);
@@ -240,20 +330,16 @@ function makeCulture(W, H, N, kinds, respawn, useShares) {
   const off = document.createElement("canvas"); off.width = W; off.height = H;
   const octx = off.getContext("2d"), img = octx.createImageData(W, H);
   const A = kinds.map(() => new Float32Array(K));
-  let ver = -1;
-  function assign() {
-    let w = useShares ? kinds.map((k) => shares[k]) : kinds.map(() => 1);
-    let tot = w.reduce((a, b) => a + b, 0);
-    if (tot <= 0) { w = w.map(() => 1); tot = K; }
-    const cum = []; let c = 0;
-    for (const x of w) { c += x / tot; cum.push(c); }
-    for (let i = 0; i < N; i++) { let b = 0; while (b < K - 1 && u[i] >= cum[b]) b++; ak[i] = b; }
-    ver = sharesVersion;
+  const count = new Array(K).fill(0);
+  const minCount = Math.round(SWITCH_FLOOR * N);
+  function rebalance() {
+    count.fill(0);
+    for (let i = 0; i < N; i++) { ak[i] = Math.min(K - 1, Math.floor(u[i] * K)); count[ak[i]]++; }
   }
+  // Like the app's reseed: agents move, their strain stays.
   function reseed() {
     for (let i = 0; i < N; i++) { ax[i] = Math.random() * W; ay[i] = Math.random() * H; ah[i] = Math.random() * Math.PI * 2; }
     T.forEach((t) => t.fill(0));
-    assign();
   }
   function sense(x, y, w) {
     let xi = Math.floor(x), yi = Math.floor(y);
@@ -263,12 +349,21 @@ function makeCulture(W, H, N, kinds, respawn, useShares) {
     return s;
   }
   function step() {
-    if (useShares && ver !== sharesVersion) assign();
     for (let a = 0; a < K; a++) for (let b = 0; b < K; b++) A[a][b] = K === 1 ? 1 : RIVALS[kinds[a]][kinds[b]];
     const M = kinds.map((k) => motionOf(k));
+    const rate = switches ? SWITCH_MAX * switching : 0;
+    const perAgent = count.map((c) => N / K / Math.max(1, c));
     for (let i = 0; i < N; i++) {
       if (respawn > 0 && Math.random() < respawn) { ax[i] = Math.random() * W; ay[i] = Math.random() * H; ah[i] = Math.random() * Math.PI * 2; continue; }
-      const a = ak[i], m = M[a], w = A[a], h = ah[i], x = ax[i], y = ay[i];
+      let a = ak[i];
+      const x = ax[i], y = ay[i];
+      if (rate > 0 && count[a] > minCount && Math.random() < rate) {
+        const p = (y | 0) * W + (x | 0);
+        let best = a, bv = T[a][p] * perAgent[a] * SWITCH_MARGIN;
+        for (let b = 0; b < K; b++) { const v = T[b][p] * perAgent[b]; if (b !== a && v > bv) { bv = v; best = b; } }
+        if (best !== a && bv > SWITCH_MIN_INK) { count[a]--; count[best]++; ak[i] = a = best; }
+      }
+      const m = M[a], w = A[a], h = ah[i];
       const sC = sense(x + Math.cos(h) * m.reach, y + Math.sin(h) * m.reach, w);
       const sL = sense(x + Math.cos(h - m.sensorAngle) * m.reach, y + Math.sin(h - m.sensorAngle) * m.reach, w);
       const sR = sense(x + Math.cos(h + m.sensorAngle) * m.reach, y + Math.sin(h + m.sensorAngle) * m.reach, w);
@@ -303,13 +398,16 @@ function makeCulture(W, H, N, kinds, respawn, useShares) {
     }
     octx.putImageData(img, 0, 0);
   }
+  rebalance();
   reseed();
-  return { step, render, reseed, off };
+  return { step, render, reseed, rebalance, off, shares: () => count.map((c) => c / N) };
 }
 
 const main = makeCulture(256, 144, 24000, [0, 1, 2, 3], 0.0015, true);
 const view = $("view"), vctx = view.getContext("2d");
 $("reseedBtn").addEventListener("click", () => main.reseed());
+// A read-only hook for headless checks: the live split and the switching knob.
+window.strainConsole = { shares: () => main.shares(), setSwitching: (v) => { switching = Math.max(0, Math.min(1, v)); }, V, rawStain, setSynergy, harmony: () => harmony, setStain: (k, h) => setVal(PARAMS.find((p) => p.key === "stain"), k, h, false) };
 
 // ---------- previews ----------
 const previews = [0, 1, 2, 3].map((k) => {
@@ -323,69 +421,89 @@ const previews = [0, 1, 2, 3].map((k) => {
   return { el, cult, ctx: el.querySelector("canvas").getContext("2d"), code: spans[0], pct: spans[1] };
 });
 
-// ---------- share bar ----------
+// ---------- headcount bar (read-only) ----------
 const shareEl = $("share");
+const segs = [0, 1, 2, 3].map(() => { const seg = document.createElement("div"); seg.className = "seg"; shareEl.appendChild(seg); return seg; });
 function renderShare() {
-  shareEl.textContent = "";
-  let cum = 0;
   shares.forEach((s, k) => {
-    const seg = document.createElement("div");
-    seg.className = "seg";
+    const seg = segs[k];
     seg.style.width = `${s * 100}%`;
     seg.style.background = cssOf(k);
     seg.textContent = s > 0.12 ? `${CODES[k]} ${Math.round(s * 100)}%` : s > 0.06 ? `${Math.round(s * 100)}` : "";
-    shareEl.appendChild(seg);
   });
-  for (let i = 0; i < 3; i++) {
-    cum += shares[i];
-    const d = document.createElement("div");
-    d.className = "div"; d.tabIndex = 0;
-    d.setAttribute("role", "slider");
-    d.setAttribute("aria-label", `Split between ${CODES[i]} and ${CODES[i + 1]}`);
-    d.setAttribute("aria-valuenow", String(Math.round(cum * 100)));
-    d.style.left = `${cum * 100}%`;
-    wireDivider(d, i);
-    shareEl.appendChild(d);
-  }
+  shareEl.setAttribute("aria-label", "Share of agents per strain: " + shares.map((s, k) => `${CODES[k]} ${Math.round(s * 100)}%`).join(", "));
 }
-function moveDivider(i, b) {
-  const left = shares.slice(0, i).reduce((a, x) => a + x, 0);
-  const right = left + shares[i] + shares[i + 1];
-  b = Math.max(left, Math.min(right, b));
-  shares[i] = b - left; shares[i + 1] = right - b;
-  sharesVersion++;
-}
-let dragDiv = -1;
-function wireDivider(d, i) {
-  d.addEventListener("pointerdown", (e) => { e.preventDefault(); dragDiv = i; shareEl.setPointerCapture(e.pointerId); });
-  d.addEventListener("keydown", (e) => {
-    const s = e.shiftKey ? 0.05 : 0.01;
-    const left = shares.slice(0, i + 1).reduce((a, x) => a + x, 0);
-    if (e.key === "ArrowRight" || e.key === "ArrowUp") moveDivider(i, left + s);
-    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") moveDivider(i, left - s);
+$("evenBtn").addEventListener("click", () => { main.rebalance(); shares = main.shares(); renderShare(); });
+
+// ---------- one-value sliders (Switching, Synergy) ----------
+function singleSlider(track, vEl, get, set, def) {
+  const fill = track.querySelector(".fill"), th = track.querySelector(".th");
+  let dragging = false;
+  const fromX = (e) => { const r = track.getBoundingClientRect(); set(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); };
+  track.addEventListener("pointerdown", (e) => { e.preventDefault(); track.focus(); track.setPointerCapture(e.pointerId); dragging = true; fromX(e); });
+  track.addEventListener("pointermove", (e) => { if (dragging) fromX(e); });
+  track.addEventListener("pointerup", () => { dragging = false; });
+  track.addEventListener("pointercancel", () => { dragging = false; });
+  track.addEventListener("dblclick", () => set(def));
+  track.addEventListener("keydown", (e) => {
+    const st = e.shiftKey ? 0.1 : 0.01;
+    if (e.key === "ArrowRight" || e.key === "ArrowUp") set(Math.min(1, get() + st));
+    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") set(Math.max(0, get() - st));
     else return;
-    e.preventDefault(); renderShare(); shareEl.querySelectorAll(".div")[i].focus();
+    e.preventDefault();
+  });
+  updaters.push(() => {
+    const v = get();
+    th.style.left = `${v * 100}%`; fill.style.width = `${v * 100}%`;
+    vEl.textContent = v.toFixed(2);
+    track.setAttribute("aria-valuenow", v.toFixed(2));
   });
 }
-shareEl.addEventListener("pointermove", (e) => {
-  if (dragDiv < 0) return;
-  const r = shareEl.getBoundingClientRect();
-  moveDivider(dragDiv, (e.clientX - r.left) / r.width);
-  const i = dragDiv; renderShare(); dragDiv = i;
-});
-shareEl.addEventListener("pointerup", () => { dragDiv = -1; });
-shareEl.addEventListener("pointercancel", () => { dragDiv = -1; });
-$("evenBtn").addEventListener("click", () => { shares = [0.25, 0.25, 0.25, 0.25]; sharesVersion++; renderShare(); });
+singleSlider($("switchTrack"), $("switchVal"), () => switching, (v) => { switching = v; }, 0.4);
+
+// Synergy sits under the stains in both layouts; both copies share one value.
+function buildSynergyRow(host) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = `<div class="row-head"><span class="row-title">Synergy <span class="new">NEW</span></span><span class="harm"></span></div>
+    <div class="syn"><div class="wheel" aria-hidden="true"><div class="ring"></div><svg viewBox="-32 -32 64 64"><polygon fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.5)" stroke-width="1"/><g class="raw"></g><g class="dots"></g></svg></div>
+    <div class="single"><div class="track" tabindex="0" role="slider" aria-label="Stain synergy"><div class="rail"></div><div class="fill" style="background:var(--violet)"></div><div class="th" style="background:var(--violet)"></div></div><span class="v"></span></div></div>
+    <div class="hint">Pulls the stains toward the nearest colour harmony on the wheel. The stain you're setting stays where you put it and the other three move to match. At 0 the stains are exactly what you set. Hollow dots are what you set, filled dots are what's shown.</div>`;
+  host.appendChild(row);
+  singleSlider(row.querySelector(".track"), row.querySelector(".v"), () => synergy, setSynergy, 0);
+  const NS = "http://www.w3.org/2000/svg";
+  const poly = row.querySelector("polygon"), harm = row.querySelector(".harm");
+  const mk = (g, r, filled) => [0, 1, 2, 3].map(() => { const c = document.createElementNS(NS, "circle"); c.setAttribute("r", r); if (!filled) { c.setAttribute("fill", "none"); c.setAttribute("stroke-width", "1.2"); } else { c.setAttribute("stroke", "#0b0f10"); c.setAttribute("stroke-width", "1.5"); } row.querySelector(g).appendChild(c); return c; });
+  const raws = mk(".raw", 2.6, false), dots = mk(".dots", 4, true);
+  // Hue 0 at the top, clockwise — the same way the conic ring is painted.
+  const at = (h, r) => [Math.sin(h * 2 * Math.PI) * r, -Math.cos(h * 2 * Math.PI) * r];
+  updaters.push(() => {
+    harm.textContent = `nearest: ${harmony.name}`;
+    const order = [0, 1, 2, 3].sort((a, b) => V.stain[a] - V.stain[b]);
+    poly.setAttribute("points", order.map((k) => at(V.stain[k], 25).map((x) => x.toFixed(2)).join(",")).join(" "));
+    for (let k = 0; k < 4; k++) {
+      const [x, y] = at(V.stain[k], 25);
+      dots[k].setAttribute("cx", x.toFixed(2)); dots[k].setAttribute("cy", y.toFixed(2)); dots[k].setAttribute("fill", cssOf(k));
+      const [rx, ry] = at(rawStain[k], 15);
+      raws[k].setAttribute("cx", rx.toFixed(2)); raws[k].setAttribute("cy", ry.toFixed(2)); raws[k].setAttribute("stroke", cssOf(k));
+      raws[k].style.opacity = synergy > 0 ? "1" : "0";
+    }
+  });
+}
 
 // ---------- lanes ----------
-const updaters = [];
 let links = {};
 function setVal(p, k, v, linked) {
   const clamp = (x) => Math.max(p.min, Math.min(p.max, x));
+  // Grabbing a stain Synergy has moved starts from what you see: it becomes
+  // your setting (and the anchor), so nothing jumps under the pointer.
+  if (p.key === "stain" && k !== stainAnchor) rawStain[k] = V.stain[k];
+  const arr = p.key === "stain" ? rawStain : V[p.key];
   if (linked) {
-    const d = clamp(v) - V[p.key][k];
-    for (let j = 0; j < 4; j++) V[p.key][j] = clamp(V[p.key][j] + d);
-  } else V[p.key][k] = clamp(v);
+    const d = clamp(v) - arr[k];
+    for (let j = 0; j < 4; j++) arr[j] = clamp(arr[j] + d);
+  } else arr[k] = clamp(v);
+  if (p.key === "stain") { stainAnchor = k; applySynergy(); }
 }
 function buildLanes() {
   const host = $("laneRows");
@@ -445,6 +563,7 @@ function buildKnobs() {
   PARAMS.forEach((p) => {
     const l = document.createElement("div");
     l.className = "lbl";
+    const lbl = l;
     l.innerHTML = `${p.label}${p.isNew ? ' <span class="new">NEW</span>' : ""}`;
     l.title = p.hint;
     host.appendChild(l);
@@ -452,19 +571,45 @@ function buildKnobs() {
       const kn = document.createElement("div");
       kn.className = "knob"; kn.tabIndex = 0;
       kn.setAttribute("role", "slider"); kn.setAttribute("aria-label", `${p.label} ${CODES[k]}`);
-      kn.innerHTML = `<svg viewBox="0 0 34 34" aria-hidden="true"><path class="bg" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="3" stroke-linecap="round"/><path class="fg" fill="none" stroke-width="3" stroke-linecap="round"/><line class="nd" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg><span class="kv"></span>`;
+      kn.innerHTML = `<div class="kw"><span class="sg plus" aria-hidden="true">+</span><span class="sg minus" aria-hidden="true">−</span><svg viewBox="0 0 34 34" aria-hidden="true"><path class="bg" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="3" stroke-linecap="round"/><path class="fg" fill="none" stroke-width="3" stroke-linecap="round"/><line class="df" stroke="rgba(255,255,255,.55)" stroke-width="1.5" stroke-linecap="round"/><line class="nd" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></div><span class="kv"></span>`;
       const bg = kn.querySelector(".bg"), fg = kn.querySelector(".fg"), nd = kn.querySelector(".nd"), kv = kn.querySelector(".kv");
       bg.setAttribute("d", arcPath(13, A0, A0 + ARC));
+      // The default, as a small tick just outside the arc.
+      const ad = A0 + ARC * ((p.def[k] - p.min) / (p.max - p.min)), df = kn.querySelector(".df");
+      df.setAttribute("x1", (17 + 14.5 * Math.cos(ad)).toFixed(2)); df.setAttribute("y1", (17 + 14.5 * Math.sin(ad)).toFixed(2));
+      df.setAttribute("x2", (17 + 17 * Math.cos(ad)).toFixed(2)); df.setAttribute("y2", (17 + 17 * Math.sin(ad)).toFixed(2));
+      // Drag any way: right and up both add, left and down both take away,
+      // KNOB_PX of travel sweeps the whole range. Shift is 1/5 the speed; Alt
+      // moves all four strains by the same amount (the lanes' Link). Each
+      // move is applied from the last pointer position, so pressing or
+      // releasing Shift/Alt mid-drag never jumps the value.
+      const KNOB_PX = 140;
       let drag = null;
-      kn.addEventListener("pointerdown", (e) => { e.preventDefault(); kn.focus(); kn.setPointerCapture(e.pointerId); drag = { y: e.clientY, v: V[p.key][k] }; });
-      kn.addEventListener("pointermove", (e) => { if (!drag) return; setVal(p, k, drag.v + ((drag.y - e.clientY) / 140) * (p.max - p.min), false); });
-      kn.addEventListener("pointerup", () => { drag = null; });
-      kn.addEventListener("pointercancel", () => { drag = null; });
+      const plus = kn.querySelector(".sg.plus"), minus = kn.querySelector(".sg.minus");
+      let litTimer = 0;
+      const lightSign = (dir) => {
+        plus.classList.toggle("lit", dir > 0); minus.classList.toggle("lit", dir < 0);
+        clearTimeout(litTimer);
+        litTimer = setTimeout(() => { plus.classList.remove("lit"); minus.classList.remove("lit"); }, 260);
+      };
+      const on = (x) => { kn.classList.toggle("active", x); lbl.classList.toggle("on", x); heads[k].classList.toggle("on", x); };
+      kn.addEventListener("pointerdown", (e) => { e.preventDefault(); kn.focus(); kn.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY }; on(true); });
+      kn.addEventListener("pointermove", (e) => {
+        if (!drag) return;
+        const px = (e.clientX - drag.x) + (drag.y - e.clientY);
+        drag.x = e.clientX; drag.y = e.clientY;
+        if (px) lightSign(px);
+        const d = (px / KNOB_PX) * (p.max - p.min) * (e.shiftKey ? 0.2 : 1);
+        setVal(p, k, V[p.key][k] + d, e.altKey);
+      });
+      const end = () => { drag = null; on(false); };
+      kn.addEventListener("pointerup", end);
+      kn.addEventListener("pointercancel", end);
       kn.addEventListener("dblclick", () => setVal(p, k, p.def[k], false));
       kn.addEventListener("keydown", (e) => {
         const s = (p.max - p.min) * (e.shiftKey ? 0.1 : 0.01);
-        if (e.key === "ArrowUp" || e.key === "ArrowRight") setVal(p, k, V[p.key][k] + s, false);
-        else if (e.key === "ArrowDown" || e.key === "ArrowLeft") setVal(p, k, V[p.key][k] - s, false);
+        if (e.key === "ArrowUp" || e.key === "ArrowRight") { setVal(p, k, V[p.key][k] + s, e.altKey); lightSign(1); }
+        else if (e.key === "ArrowDown" || e.key === "ArrowLeft") { setVal(p, k, V[p.key][k] - s, e.altKey); lightSign(-1); }
         else return;
         e.preventDefault();
       });
@@ -477,6 +622,8 @@ function buildKnobs() {
         nd.setAttribute("x2", (17 + 12 * Math.cos(a)).toFixed(2)); nd.setAttribute("y2", (17 + 12 * Math.sin(a)).toFixed(2));
         kv.textContent = fmtOf(p)(V[p.key][k]);
         kn.setAttribute("aria-valuenow", V[p.key][k].toFixed(3));
+        kn.style.setProperty("--sc", cssOf(k));
+        plus.classList.toggle("end", t > 0.998); minus.classList.toggle("end", t < 0.002);
       });
     }
   });
@@ -494,6 +641,8 @@ function showTab(t) {
 // ---------- boot + loop ----------
 buildLanes();
 buildKnobs();
+buildSynergyRow($("laneRows"));
+buildSynergyRow($("knobsCard"));
 renderShare();
 for (let i = 0; i < 90; i++) main.step();
 let last = performance.now(), tick = 0, lastStain = "";
@@ -517,7 +666,7 @@ function frame(now) {
   });
   updaters.forEach((u) => u());
   const stainSig = V.stain.map((h) => h.toFixed(3)).join();
-  if (stainSig !== lastStain && dragDiv < 0) { lastStain = stainSig; renderShare(); }
+  if (tick % 15 === 0 || stainSig !== lastStain) { lastStain = stainSig; shares = main.shares(); renderShare(); }
   tick++;
   requestAnimationFrame(frame);
 }
