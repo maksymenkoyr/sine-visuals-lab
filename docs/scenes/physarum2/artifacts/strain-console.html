@@ -109,6 +109,19 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
 .knobs .hd { transition: text-shadow 0.12s ease; }
 .knobs .hd.on { text-shadow: 0 0 8px currentColor; }
 .knob svg { width: 34px; height: 34px; display: block; }
+/* direction signs: + up-right, − down-left, the diagonal a drag turns it
+   along. Faint at rest, brighter on hover, lit in the strain's colour and
+   nudged outward on the side you're moving toward, nearly gone at the end
+   you can't go past. */
+.kw { position: relative; width: 34px; height: 34px; }
+.kw .sg { position: absolute; font: 600 11px/1 var(--mono); color: var(--ink-3); opacity: 0.55; pointer-events: none; transition: opacity 0.15s ease, transform 0.15s ease, color 0.15s ease, text-shadow 0.15s ease; }
+.kw .sg.plus { top: -3px; right: -9px; }
+.kw .sg.minus { bottom: -1px; left: -9px; }
+.knob:hover .sg, .knob:focus-visible .sg, .knob.active .sg { opacity: 0.9; color: var(--ink-2); }
+.knob .sg.lit { opacity: 1; color: var(--sc); text-shadow: 0 0 4px var(--sc), 0 0 10px var(--sc); }
+.knob .sg.plus.lit { transform: translate(3px, -3px) scale(1.7); }
+.knob .sg.minus.lit { transform: translate(-3px, 3px) scale(1.7); }
+.knob .sg.end { opacity: 0.12 !important; }
 .knob .kv { font: 10px var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
 /* notes */
@@ -182,7 +195,7 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
     <article class="note">
       <h3>Knobs</h3>
       <dl>
-        <dt>You do</dt><dd>A small knob per strain per setting; drag any way, right or up turns it up. Hold Shift for fine steps, Alt to turn all four strains together. The small tick is the default; double-click goes back to it.</dd>
+        <dt>You do</dt><dd>A small knob per strain per setting; drag any way, right or up turns it up. The faint + and − on each knob point the way, light up on the side you're turning toward, and fade at a limit. Hold Shift for fine steps, Alt to turn all four strains together. The small tick is the default; double-click goes back to it.</dd>
         <dt>Good</dt><dd>Compact, reads like a mixer, a strain's whole character is one column.</dd>
         <dt>Costs</dt><dd>Knobs are harder to set exactly and to compare than lanes.</dd>
       </dl>
@@ -558,7 +571,7 @@ function buildKnobs() {
       const kn = document.createElement("div");
       kn.className = "knob"; kn.tabIndex = 0;
       kn.setAttribute("role", "slider"); kn.setAttribute("aria-label", `${p.label} ${CODES[k]}`);
-      kn.innerHTML = `<svg viewBox="0 0 34 34" aria-hidden="true"><path class="bg" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="3" stroke-linecap="round"/><path class="fg" fill="none" stroke-width="3" stroke-linecap="round"/><line class="df" stroke="rgba(255,255,255,.55)" stroke-width="1.5" stroke-linecap="round"/><line class="nd" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg><span class="kv"></span>`;
+      kn.innerHTML = `<div class="kw"><span class="sg plus" aria-hidden="true">+</span><span class="sg minus" aria-hidden="true">−</span><svg viewBox="0 0 34 34" aria-hidden="true"><path class="bg" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="3" stroke-linecap="round"/><path class="fg" fill="none" stroke-width="3" stroke-linecap="round"/><line class="df" stroke="rgba(255,255,255,.55)" stroke-width="1.5" stroke-linecap="round"/><line class="nd" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></div><span class="kv"></span>`;
       const bg = kn.querySelector(".bg"), fg = kn.querySelector(".fg"), nd = kn.querySelector(".nd"), kv = kn.querySelector(".kv");
       bg.setAttribute("d", arcPath(13, A0, A0 + ARC));
       // The default, as a small tick just outside the arc.
@@ -572,12 +585,20 @@ function buildKnobs() {
       // releasing Shift/Alt mid-drag never jumps the value.
       const KNOB_PX = 140;
       let drag = null;
+      const plus = kn.querySelector(".sg.plus"), minus = kn.querySelector(".sg.minus");
+      let litTimer = 0;
+      const lightSign = (dir) => {
+        plus.classList.toggle("lit", dir > 0); minus.classList.toggle("lit", dir < 0);
+        clearTimeout(litTimer);
+        litTimer = setTimeout(() => { plus.classList.remove("lit"); minus.classList.remove("lit"); }, 260);
+      };
       const on = (x) => { kn.classList.toggle("active", x); lbl.classList.toggle("on", x); heads[k].classList.toggle("on", x); };
       kn.addEventListener("pointerdown", (e) => { e.preventDefault(); kn.focus(); kn.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY }; on(true); });
       kn.addEventListener("pointermove", (e) => {
         if (!drag) return;
         const px = (e.clientX - drag.x) + (drag.y - e.clientY);
         drag.x = e.clientX; drag.y = e.clientY;
+        if (px) lightSign(px);
         const d = (px / KNOB_PX) * (p.max - p.min) * (e.shiftKey ? 0.2 : 1);
         setVal(p, k, V[p.key][k] + d, e.altKey);
       });
@@ -587,8 +608,8 @@ function buildKnobs() {
       kn.addEventListener("dblclick", () => setVal(p, k, p.def[k], false));
       kn.addEventListener("keydown", (e) => {
         const s = (p.max - p.min) * (e.shiftKey ? 0.1 : 0.01);
-        if (e.key === "ArrowUp" || e.key === "ArrowRight") setVal(p, k, V[p.key][k] + s, e.altKey);
-        else if (e.key === "ArrowDown" || e.key === "ArrowLeft") setVal(p, k, V[p.key][k] - s, e.altKey);
+        if (e.key === "ArrowUp" || e.key === "ArrowRight") { setVal(p, k, V[p.key][k] + s, e.altKey); lightSign(1); }
+        else if (e.key === "ArrowDown" || e.key === "ArrowLeft") { setVal(p, k, V[p.key][k] - s, e.altKey); lightSign(-1); }
         else return;
         e.preventDefault();
       });
@@ -601,6 +622,8 @@ function buildKnobs() {
         nd.setAttribute("x2", (17 + 12 * Math.cos(a)).toFixed(2)); nd.setAttribute("y2", (17 + 12 * Math.sin(a)).toFixed(2));
         kv.textContent = fmtOf(p)(V[p.key][k]);
         kn.setAttribute("aria-valuenow", V[p.key][k].toFixed(3));
+        kn.style.setProperty("--sc", cssOf(k));
+        plus.classList.toggle("end", t > 0.998); minus.classList.toggle("end", t < 0.002);
       });
     }
   });
