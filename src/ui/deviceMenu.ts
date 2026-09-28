@@ -1093,10 +1093,11 @@ interface ResolvedSignalRead {
 }
 
 /** Shared by every document-level hotkey (H, Tab, the digits) and by
- *  wireHoverFocus below: ignored while typing somewhere (a range slider
+ *  wireHoverFocus below, and imported into app.ts for its own beat-trim keys
+ *  (B, [, ], comma, period): ignored while typing somewhere (a range slider
  *  keeping focus after a drag is fine — that's still "in the panel", there's
  *  just nothing to type in the panel itself). */
-function isTypingTarget(t: EventTarget | null): boolean {
+export function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
   const tag = t.tagName;
   if (tag === "TEXTAREA" || t.isContentEditable) return true;

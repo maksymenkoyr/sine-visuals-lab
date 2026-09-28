@@ -67,7 +67,12 @@ export interface ProbeSnapshot {
    *  mysterious uniform offset. */
   master: number;
   bands: { low: number; mid: number; high: number; energy: number };
-  beat: { fired: boolean; bpm: number; phase: number };
+  /** barPhase and metronomeBpm are src/render/beatTrim.ts's own corrected
+   *  readings (AnimFrame.barPhase/metronomeBpm) — surfaced here so a
+   *  headless check can confirm a bar resync / ×2 / ÷2 landed without
+   *  capturing pixels (see this file's own header, "answer with numbers,
+   *  not pixels"). */
+  beat: { fired: boolean; bpm: number; phase: number; barPhase: number; metronomeBpm: number };
   section: number;
   drop: number;
   centroid: number;
@@ -110,7 +115,13 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
     govLevel: input.govLevel,
     master: getSceneMaster(),
     bands: { low: anim?.low ?? 0, mid: anim?.mid ?? 0, high: anim?.high ?? 0, energy: vis?.energy ?? 0 },
-    beat: { fired: anim?.onset ?? false, bpm: vis?.bpm ?? 0, phase: anim?.beatPhase ?? 0 },
+    beat: {
+      fired: anim?.onset ?? false,
+      bpm: vis?.bpm ?? 0,
+      phase: anim?.beatPhase ?? 0,
+      barPhase: anim?.barPhase ?? 0,
+      metronomeBpm: anim?.metronomeBpm ?? 0,
+    },
     section: anim?.sectionIntensity ?? 0,
     drop: anim?.dropPulse ?? 0,
     centroid: anim?.centroid ?? 0,
@@ -129,7 +140,7 @@ export function formatProbe(snap: ProbeSnapshot): string {
     `low=${snap.bands.low.toFixed(2)} mid=${snap.bands.mid.toFixed(2)} high=${snap.bands.high.toFixed(2)} energy=${snap.bands.energy.toFixed(2)}`,
   );
   lines.push(
-    `beat=${snap.beat.fired ? 1 : 0} bpm=${snap.beat.bpm.toFixed(1)} phase=${snap.beat.phase.toFixed(2)} | section=${snap.section.toFixed(2)} drop=${snap.drop.toFixed(2)} centroid=${snap.centroid.toFixed(2)}`,
+    `beat=${snap.beat.fired ? 1 : 0} bpm=${snap.beat.bpm.toFixed(1)} phase=${snap.beat.phase.toFixed(2)} barPhase=${snap.beat.barPhase.toFixed(2)} metroBpm=${snap.beat.metronomeBpm.toFixed(1)} | section=${snap.section.toFixed(2)} drop=${snap.drop.toFixed(2)} centroid=${snap.centroid.toFixed(2)}`,
   );
   for (const [key, v] of Object.entries(snap.settings)) {
     const tag =

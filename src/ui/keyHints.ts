@@ -77,6 +77,9 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "Z X C", id: "zxc", label: "Slider jump", hint: "Slider to middle · max · pointer" },
   { key: "Esc", id: "esc", label: "Unpin", hint: "Unpin a patched setting" },
   { key: "?", id: "keys", label: "Keys", hint: "This list" },
+  { key: "B", id: "beat-one", label: "The 1", hint: "This beat is the 1 (⇧ clears ×2/÷2 and nudge)" },
+  { key: "[ ]", id: "tempo-x", label: "Tempo ÷2 ×2", hint: "Halve / double the beat" },
+  { key: ", .", id: "beat-nudge", label: "Nudge", hint: "Beats 10 ms earlier / later" },
 ];
 
 function shortcutFor(id: string): Shortcut | undefined {
