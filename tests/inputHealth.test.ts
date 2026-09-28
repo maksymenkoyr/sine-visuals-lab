@@ -64,6 +64,28 @@ function whiteNoise(samples: number, seed = 1): Float32Array {
   return buf;
 }
 
+function rms(x: Float32Array): number {
+  let s = 0;
+  for (let i = 0; i < x.length; i++) s += x[i] * x[i];
+  return Math.sqrt(s / x.length);
+}
+
+/** One long, phase-continuous 50/60 Hz hum (humSignal's own odd-harmonics
+ *  shape) with white noise added at `noiseDbBelow` dB relative to the hum's
+ *  OWN rms — a noise floor under real hum, not the clean tone the other hum
+ *  tests use. One long buffer, not `windows` separately generated ones, so
+ *  slicing it into consecutive windows matches how the real tap hands
+ *  mainsHumHz consecutive buffers off one continuously running capture
+ *  (phase carries over at each window boundary, same as real audio would). */
+function noisyHumSignal(hz: number, sampleRate: number, totalSamples: number, noiseDbBelow: number, seed = 7): Float32Array {
+  const hum = humSignal(hz, sampleRate, totalSamples);
+  const noiseGain = rms(hum) * Math.pow(10, -noiseDbBelow / 20);
+  const noise = whiteNoise(totalSamples, seed);
+  const out = new Float32Array(totalSamples);
+  for (let i = 0; i < totalSamples; i++) out[i] = hum[i] + noise[i] * noiseGain;
+  return out;
+}
+
 /** A sustained musical note — fundamental plus a couple of harmonics, at a
  *  quiet level (a pad breakdown, not a hot signal) — the false-positive case
  *  mainsHumHz's HUM_PEAK_SPAN_SEC check exists for: a note whose period
@@ -143,6 +165,25 @@ describe("mainsHumHz", () => {
 
   it("still locks on 60 Hz mains a little off nominal (59.8 Hz)", () => {
     expect(mainsHumHz(humSignal(59.8, 48000, 4096), 48000)).toBe(60);
+  });
+
+  // A real hum's own margin over its HUM_PEAK_SPAN_SEC neighbours is only a
+  // couple thousandths (see HUM_PEAK_TOL's own doc) — this drives 200
+  // consecutive windows of one continuous 50 Hz-plus-noise capture through
+  // mainsHumHz the way the real tap would, one buffer at a time, and checks
+  // the lock holds on at least 95% of them rather than trusting a single
+  // clean buffer the way the other hum tests do.
+  it("keeps locking on noisy real-world hum across many consecutive windows", () => {
+    const sampleRate = 44100;
+    const windowSamples = 2048;
+    const windowCount = 200;
+    const signal = noisyHumSignal(50, sampleRate, windowSamples * windowCount, 25);
+    let hits = 0;
+    for (let w = 0; w < windowCount; w++) {
+      const window = signal.subarray(w * windowSamples, (w + 1) * windowSamples);
+      if (mainsHumHz(window, sampleRate) === 50) hits++;
+    }
+    expect(hits / windowCount).toBeGreaterThanOrEqual(0.95);
   });
 });
 

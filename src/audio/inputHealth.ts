@@ -149,6 +149,16 @@ export const HUM_FLOOR_DB = -80;
  *  comfortably covers the mains drift while staying well short of a real
  *  note's own peak. */
 export const HUM_PEAK_SPAN_SEC = 0.00025;
+/** How far r(L) may sit below its neighbours and still count as "the" local
+ *  peak — see mainsHumHz's own local-max check. A real hum's own margin
+ *  there is tiny: even a bare, noiseless 50 Hz tone only leads its
+ *  neighbours by about 0.003 (cos(2π·12/960) ≈ 0.997 at 48kHz — the whole
+ *  HUM_PEAK_SPAN_SEC window covers just over one hundredth of a cycle), so a
+ *  strict >= would make real hum's own detection just as fragile as the
+ *  false positive this check exists to reject. D3/B3 (mainsHumHz's own
+ *  worked example) miss by 0.06 or more — over 6x this tolerance — so
+ *  raising the bar this far still rejects them cleanly. */
+export const HUM_PEAK_TOL = 0.01;
 
 /** Normalized autocorrelation of `x` against itself, shifted by `lag`
  *  samples, over the overlapping region — 1.0 for a perfectly periodic
@@ -175,9 +185,9 @@ function autocorrelation(x: Float32Array, lag: number): number {
  * one period later, at 50 Hz and at 60 Hz — a steady hum (with whatever
  * harmonics on top) lines back up almost exactly with itself a period on;
  * music generally doesn't. Returns whichever of the two clears HUM_CORR AND
- * is a genuine local maximum there (see HUM_PEAK_SPAN_SEC), preferring the
- * higher correlation when both do; null when the buffer is quieter than
- * HUM_FLOOR_DB (nothing to correlate) or neither qualifies.
+ * is a genuine local maximum there, within HUM_PEAK_TOL (see below),
+ * preferring the higher correlation when both do; null when the buffer is
+ * quieter than HUM_FLOOR_DB (nothing to correlate) or neither qualifies.
  *
  * HUM_CORR alone isn't enough: a musical note whose frequency happens to put
  * a near-whole number of its own cycles inside the 50/60 Hz lag also clears
@@ -186,7 +196,11 @@ function autocorrelation(x: Float32Array, lag: number): number {
  * autocorrelation peak sits at 981 samples (3 full cycles), 21 samples away.
  * B3 (246.94 Hz) does the same at ≈0.93. Requiring the candidate lag to
  * itself be a local peak (not just above the bar) rejects both without
- * touching a real hum's own reading, since real hum's peak IS at that lag.
+ * touching a real hum's own reading, since real hum's peak IS at that lag —
+ * but only WITH some slack (HUM_PEAK_TOL): real hum's own margin over its
+ * HUM_PEAK_SPAN_SEC neighbours is a couple thousandths, not the 0.06+ D3/B3
+ * miss by, so a bare `>=` would make genuine hum nearly as fragile as the
+ * false positive this check exists to reject.
  *
  * Known limit: a note within about a semitone of 50/60 Hz can still slip
  * through — its own peak would then sit within HUM_PEAK_SPAN_SEC of the
@@ -203,7 +217,7 @@ export function mainsHumHz(mono: Float32Array, sampleRate: number): 50 | 60 | nu
 
   const peakSpan = Math.max(1, Math.round(sampleRate * HUM_PEAK_SPAN_SEC));
   const isMainsPeak = (lag: number, r: number): boolean =>
-    r >= autocorrelation(mono, lag - peakSpan) && r >= autocorrelation(mono, lag + peakSpan);
+    r >= autocorrelation(mono, lag - peakSpan) - HUM_PEAK_TOL && r >= autocorrelation(mono, lag + peakSpan) - HUM_PEAK_TOL;
 
   const lag50 = Math.round(sampleRate / 50);
   const lag60 = Math.round(sampleRate / 60);
