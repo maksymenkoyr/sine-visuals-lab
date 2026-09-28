@@ -6,7 +6,8 @@ import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRe
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
 import { SOURCE_URL } from "../brand.ts";
-import { BUILD_INFO, versionHref, versionLabel, versionTitle } from "../version.ts";
+import { BUILD_INFO, channelBadge, versionHref, versionLabel, versionTitle } from "../version.ts";
+import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
@@ -94,6 +95,12 @@ const stylesheet = `
 .gal-mono { font: 400 10.5px ${FONT_MONO}; text-transform: uppercase; }
 
 .gal-mast { display: flex; align-items: center; justify-content: space-between; gap: 16px 32px; flex-wrap: wrap; }
+.gal-brand { display: flex; align-items: center; gap: 14px; }
+.gal-channel {
+  letter-spacing: .14em; color: ${BANDS_AMBER}; background: none; cursor: help;
+  border: 1px solid ${withAlpha(BANDS_AMBER, 0.5)}; border-radius: 3px; padding: 3px 8px;
+}
+.gal-channel:hover, .gal-channel:focus-visible { border-color: ${BANDS_AMBER}; outline: none; }
 .gal-source { display: flex; flex-direction: column; gap: 5px; }
 .gal-source-top { display: flex; align-items: center; gap: 14px; }
 /* .gal-source-label and .gal-source-hint share one grid cell (justify-items:
@@ -435,7 +442,36 @@ export function createGallery(deps: GalleryDeps): Gallery {
   if (sourceHint) sourceSlot.appendChild(sourceHint);
   sourceTop.append(sourceSlot, sourceRow);
   source.appendChild(sourceTop);
-  mast.append(createBrandMark(56), source);
+  // The channel badge beside the mark — only off stable (channelBadge() in
+  // src/version.ts decides which channels get one and owns its text). Its
+  // hint is the panel's shared tooltip (tooltip.ts): on hover or focus for a
+  // mouse/keyboard, on tap for touch, where pointerleave fires straight after
+  // the tap and would hide it at once — so a tap shows it until the next
+  // press anywhere.
+  const brand = el("div", "gal-brand");
+  brand.append(createBrandMark(56));
+  const badge = channelBadge(BUILD_INFO);
+  if (badge) {
+    const tag = el("button", "gal-mono gal-channel", badge.label);
+    tag.type = "button";
+    tag.setAttribute("aria-label", `${badge.label}. ${badge.hint.join(" ")}`);
+    const show = (): void => showTooltip(tag, BANDS_AMBER, badge.hint);
+    tag.addEventListener("pointerenter", (e) => {
+      if (e.pointerType === "mouse") show();
+    });
+    tag.addEventListener("pointerleave", (e) => {
+      if (e.pointerType === "mouse") hideTooltip();
+    });
+    tag.addEventListener("focus", show);
+    tag.addEventListener("blur", hideTooltip);
+    tag.addEventListener("click", () => {
+      show();
+      // Next tick, so this tap's own events can't close it again.
+      setTimeout(() => document.addEventListener("pointerdown", hideTooltip, { once: true }), 0);
+    });
+    brand.appendChild(tag);
+  }
+  mast.append(brand, source);
 
   const errorBanner = el("div", "gal-error");
   errorBanner.setAttribute("role", "alert");
@@ -773,6 +809,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
     },
 
     hide(): void {
+      hideTooltip(); // a badge hint left open by a tap mustn't linger over the scene
       // Deliberately does NOT unmount the preview scenes: SceneHost.mount()
       // already steals ownership from whichever host currently holds a
       // scene (see sceneHost.ts), so when the fullscreen viz mounts the one

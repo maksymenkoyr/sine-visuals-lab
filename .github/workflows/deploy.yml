@@ -1,13 +1,13 @@
-# Checks every pull request; builds and deploys the Next channel on every push
+# Checks every pull request; builds and deploys the Insider channel on every push
 # to main; deploys a throwaway preview Worker for every open pull request.
 #
-# Next (wrangler.toml's `[env.next]`, the Worker `audio-viz-room-next` on
-# next.sinevisualslab.com) is the channel that tracks main automatically —
+# Insider (wrangler.toml's `[env.insider]`, the Worker `audio-viz-room-insider` on
+# insider.sinevisualslab.com) is the channel that tracks main automatically —
 # every push here ships there within minutes, no one has to decide to release
 # it. The **Stable** channel (the top-level Worker, sinevisualslab.com and
 # www) is deliberately not touched by this workflow at all: it only changes
 # when someone runs `.github/workflows/release.yml` (`npm run release`),
-# which promotes whatever commit Next is currently serving — see that
+# which promotes whatever commit Insider is currently serving — see that
 # workflow's own header for why a manual, separate step, and src/version.ts
 # for what the two channels mean to a visitor.
 #
@@ -52,11 +52,11 @@ jobs:
       contents: read
       # For the sticky preview-URL comment.
       pull-requests: write
-    # Serialize Next deploys so two merges landing close together can't race
+    # Serialize Insider deploys so two merges landing close together can't race
     # each other onto the Worker; previews serialize per PR instead, so a burst
     # of pushes settles on the last one without blocking other PRs.
     concurrency:
-      group: ${{ github.event_name == 'pull_request' && format('preview-{0}', github.event.number) || 'deploy-next' }}
+      group: ${{ github.event_name == 'pull_request' && format('preview-{0}', github.event.number) || 'deploy-insider' }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -70,14 +70,14 @@ jobs:
 
       # The gates named in AGENTS.md. typecheck covers both tsconfigs, so the
       # Worker source is checked before it ships. They gate every deploy this
-      # workflow makes (Next and every preview) — Stable's own gates are
+      # workflow makes (Insider and every preview) — Stable's own gates are
       # release.yml's own npm ci/typecheck/test steps, run again there against
       # whatever commit is actually being promoted.
       - run: npm run typecheck
       - run: npm run test
 
       # SVL_CHANNEL picks src/version.ts's channel: "preview" on a pull
-      # request, "next" on a push to main — there's no third case this
+      # request, "insider" on a push to main — there's no third case this
       # workflow builds. SVL_COMMIT/SVL_PR are passed explicitly because the
       # commit this job actually built isn't always `git rev-parse HEAD` in
       # this checkout: a pull_request event checks out a merge commit of the
@@ -85,17 +85,17 @@ jobs:
       # head commit a reader would recognize.
       - run: npm run build
         env:
-          SVL_CHANNEL: ${{ github.event_name == 'pull_request' && 'preview' || 'next' }}
+          SVL_CHANNEL: ${{ github.event_name == 'pull_request' && 'preview' || 'insider' }}
           SVL_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
           SVL_PR: ${{ github.event.pull_request.number }}
 
-      - name: Deploy to Next
+      - name: Deploy to Insider
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --env next
+          command: deploy --env insider
 
       - name: Deploy PR preview
         id: preview

@@ -13,14 +13,14 @@ import { SOURCE_URL } from "./brand.ts";
  *  - **stable** — the top-level Worker (`audio-viz-room`, wrangler.toml's
  *    top level) on sinevisualslab.com and www. Only changes when someone
  *    runs the release workflow (`.github/workflows/release.yml`, `npm run
- *    release`), which promotes whatever commit the *Next* channel is
+ *    release`), which promotes whatever commit the *Insider* channel is
  *    currently serving — not necessarily `main`'s tip — tags it, deploys the
  *    top-level Worker, and publishes a GitHub Release. Released every couple
  *    of days, or whenever there's something worth shipping to everyone; a
  *    release is also the only moment a phone/TV paired on stable drops,
  *    since deploying restarts the Room Durable Objects (server/room.ts).
- *  - **next** — `wrangler.toml`'s `[env.next]`, the Worker
- *    `audio-viz-room-next` on next.sinevisualslab.com. Every push to `main`
+ *  - **insider** — `wrangler.toml`'s `[env.insider]`, the Worker
+ *    `audio-viz-room-insider` on insider.sinevisualslab.com. Every push to `main`
  *    deploys here (`.github/workflows/deploy.yml`), so it's always current
  *    with the tip of `main` and never needs a person to decide to ship it.
  *  - **preview** — `[env.preview]`, one throwaway Worker per open pull
@@ -48,7 +48,7 @@ import { SOURCE_URL } from "./brand.ts";
  * needs it.
  */
 export interface BuildInfo {
-  channel: "stable" | "next" | "preview" | "dev";
+  channel: "stable" | "insider" | "preview" | "dev";
   /** The release tag (e.g. "v2026.09.28"), only ever set on the stable
    *  channel — see release.yml. Every other channel is null. */
   version: string | null;
@@ -86,10 +86,10 @@ const shortSha = (commit: string): string => commit.slice(0, 7);
  *  - stable, unreleased build (shouldn't normally happen, but a manual
  *    `SVL_CHANNEL=stable` build with no `SVL_VERSION` degrades rather than
  *    lying): `"stable · da38a37"`.
- *  - next: `"next · #183 · da38a37"`, or `"next · da38a37"` when the commit
- *    has no associated PR (a direct push to main).
+ *  - insider: `"insider · #183 · da38a37"`, or `"insider · da38a37"` when
+ *    the commit has no associated PR (a direct push to main).
  *  - preview: `"preview · PR #185 · da38a37"` — spelled out, since a preview
- *    reader doesn't already have "this is a PR" from context the way Next's
+ *    reader doesn't already have "this is a PR" from context the way Insider's
  *    reader does.
  *  - dev: `"dev · da38a37"`, with a trailing `"*"` when the tree was dirty at
  *    build time, or just `"dev"` when there's no commit to show at all (a
@@ -100,14 +100,28 @@ export function versionLabel(info: BuildInfo): string {
   switch (info.channel) {
     case "stable":
       return info.version ?? (sha ? `stable · ${sha}` : "stable");
-    case "next":
-      return sha ? `next · ${info.pr ? `#${info.pr} · ` : ""}${sha}` : "next";
+    case "insider":
+      return sha ? `insider · ${info.pr ? `#${info.pr} · ` : ""}${sha}` : "insider";
     case "preview":
       return sha ? `preview · PR #${info.pr} · ${sha}` : `preview · PR #${info.pr}`;
     case "dev":
       if (!sha) return "dev";
       return `dev · ${sha}${info.dirty ? "*" : ""}`;
   }
+}
+
+/**
+ * The masthead badge (src/ui/gallery.ts) that tells a visitor they're not on
+ * stable — its text and the lines of its hover/tap hint. Insider only: a PR
+ * preview's own URL and comment already say what it is, and a `dev` badge
+ * would sit in every local screenshot.
+ */
+export function channelBadge(info: BuildInfo): { label: string; hint: readonly string[] } | null {
+  if (info.channel !== "insider") return null;
+  return {
+    label: "Insider",
+    hint: ["Insider build: every change lands here first.", "Can be rough. Stable is at sinevisualslab.com"],
+  };
 }
 
 /**
@@ -135,7 +149,7 @@ const formatBuiltAt = (builtAt: string): string | null => {
 export function versionTitle(info: BuildInfo): string {
   const built = formatBuiltAt(info.builtAt);
   const from = info.commit ? `built${built ? ` ${built}` : ""} from ${info.commit}` : null;
-  // Only next spells the PR out here — preview's own prefix already names it,
+  // Only insider spells the PR out here — preview's own prefix already names it,
   // and stable/dev's PR (the PR that landed the promoted/committed change, if
   // any) isn't the headline fact either of those channels is being asked.
   const prSuffix = info.pr ? ` (#${info.pr})` : "";
@@ -145,8 +159,8 @@ export function versionTitle(info: BuildInfo): string {
       return info.version
         ? `Stable release ${info.version}${from ? ` — ${from}` : ""}`
         : `Stable channel${from ? ` — ${from}` : " — no build info available"}`;
-    case "next":
-      return `Next channel${from ? ` — ${from}${prSuffix}` : " — no build info available"}`;
+    case "insider":
+      return `Insider channel${from ? ` — ${from}${prSuffix}` : " — no build info available"}`;
     case "preview":
       return `Preview of PR #${info.pr}${from ? ` — ${from}` : ""}`;
     case "dev":

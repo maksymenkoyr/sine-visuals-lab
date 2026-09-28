@@ -11,7 +11,7 @@ import type { BuildInfo } from "./src/version.ts";
  * job that invokes `vite build`, not from anything this plugin can discover
  * on its own:
  *
- *  - `SVL_CHANNEL` — set by .github/workflows/deploy.yml ("next" on a push to
+ *  - `SVL_CHANNEL` — set by .github/workflows/deploy.yml ("insider" on a push to
  *    main, "preview" on a pull request) and release.yml ("stable"). Anything
  *    else, including unset (a local `npm run dev` or `npm run build`), is
  *    "dev" — there's no CI job for it to be anything else.
@@ -31,7 +31,7 @@ import type { BuildInfo } from "./src/version.ts";
  * request in a `vite dev` session and every asset in a `vite build` reports
  * the same info.
  */
-const CHANNELS = new Set(["stable", "next", "preview"]);
+const CHANNELS = new Set(["stable", "insider", "preview"]);
 
 function computeBuildInfo(): BuildInfo {
   const envChannel = process.env.SVL_CHANNEL;
@@ -60,7 +60,7 @@ function computeBuildInfo(): BuildInfo {
   }
 
   // "dirty" only means anything for a `dev` build's own working tree — a CI
-  // checkout of a specific commit (next/preview/stable) is never dirty by
+  // checkout of a specific commit (insider/preview/stable) is never dirty by
   // construction, so there's no reason to pay for the `git status` call there.
   const dirty = channel === "dev" && git("status", "--porcelain") !== "";
 
@@ -81,7 +81,7 @@ const ROBOTS_META_RE = /<meta[^>]+name\s*=\s*["']robots["']/i;
  * src/version.ts) for both `vite dev` and `vite build`, emits `version.json`
  * into a build's dist/ so `curl https://www.sinevisualslab.com/version.json`
  * answers "what's live" without opening the page, and marks every non-stable
- * build `noindex` so Next and PR previews never compete with www in search
+ * build `noindex` so Insider and PR previews never compete with www in search
  * (index.html's canonical already points at www — see that file's own
  * comment; this just makes it explicit for a host that isn't canonical at
  * all). Registered unconditionally in vite.config.ts, like legalNoticesPlugin.

@@ -20,12 +20,12 @@ npm run dev:worker    # Cloudflare Worker backend, for phone/TV room pairing
 ```
 
 `npm run build` produces a static bundle (`tsc -b && vite build`). Two
-deployed channels: pushing to `main` ships the **Next** channel
-(next.sinevisualslab.com) automatically, on every push — see
+deployed channels: pushing to `main` ships the **Insider** channel
+(insider.sinevisualslab.com) automatically, on every push — see
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The **Stable**
 channel (sinevisualslab.com — also what a local `npm run deploy` ships to)
 only updates on a deliberate release (`npm run release`), which promotes
-whatever commit Next is currently serving — see
+whatever commit Insider is currently serving — see
 [`.github/workflows/release.yml`](.github/workflows/release.yml) and
 `src/version.ts`. Every open pull request also gets its own throwaway preview
 Worker (URL posted as a comment on the PR).

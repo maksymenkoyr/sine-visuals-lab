@@ -67,8 +67,8 @@ claim, so specifics there are expected to age out immediately.
 - `npm run dev:worker` — the Cloudflare Worker backend, for phone/TV pairing.
 
 `npm run typecheck` and `npm run test` also run in CI on every pull request, and
-gate every deploy: a push to `main` deploys the Next channel
-(next.sinevisualslab.com, `.github/workflows/deploy.yml`), and the Stable
+gate every deploy: a push to `main` deploys the Insider channel
+(insider.sinevisualslab.com, `.github/workflows/deploy.yml`), and the Stable
 channel (www.sinevisualslab.com) only changes on a release (`npm run
 release`) — see `.github/workflows/release.yml`, which runs the same two
 gates again against whatever commit it's promoting.
@@ -98,7 +98,7 @@ after all three pass; include the screenshot paths in your summary.
 | Any existing scene | `docs/scenes/<id>.md` — its record: references, measurements, every decision and pivot, what's still off, how to resume |
 | The tempo tracker (BPM in `src/audio/features.ts`, `src/audio/tempoAnalyzer.ts`, `src/render/beatClock.ts`, `src/render/tempoSettle.ts`, `src/render/metronome.ts`) | `tests/tempoEval.test.ts` header — run `npm run eval:tempo` before and after; it scores the real tracker (and metronome.ts's own metronome, on top of it) on synthesized tracks with known beats, both the render-tick and fixed-hop paths |
 | A paid scene, or anything under `src/render/scenes/private/` | `src/render/scenes/privateScenes.ts` header — the contract, and why that folder never reaches this repo or the deployed site |
-| The version label, the Stable/Next channels, or releasing | `src/version.ts` header |
+| The version label, the Stable/Insider channels, or releasing | `src/version.ts` header |
 | A `?url` import, or any file the page fetches from its own origin after load | `src/pinnedAssets.ts` header |
 
 ## Standing rules not worth their own doc
