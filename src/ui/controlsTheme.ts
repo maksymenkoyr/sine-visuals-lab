@@ -966,22 +966,14 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-src-status[data-warn="amber"] { color: ${HOT_YELLOW}; }
 .vc-src-status[data-warn="red"] { color: ${HOT_RED}; }
 
-/* ---- src/ui/widgets/itemBoxes.ts + pairPads.ts ----
- * A scene-declared item widget's own boxes and (for a pairwise family) the
- * Pairs pads — styled with this file's own tokens/fonts rather than a
+/* ---- src/ui/widgets/itemBoxes.ts + strainConsole.ts + pairPads.ts ----
+ * A scene-declared item widget's own boxes, its Strain Console (Lanes/Knobs)
+ * and (for a pairwise family) the Pairs pads — styled with this file's own tokens/fonts rather than a
  * widget-local stylesheet, same convention as every other panel piece.
  * Always a two-column grid, regardless of item count or panel width, so a
  * box stays wide enough for its code + placeholder swatch even in the narrow
  * (phone) stacked layout — see itemBoxes.ts's header on why Phase 3's live
  * preview lands in .vc-item-preview without a layout change. */
-/* The "All" chip + "Editing …" line above the boxes (itemBoxes.ts's
- * multi-selection, 2026-09-27). */
-.vc-item-selbar {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;
-}
-.vc-item-editing {
-  font: 400 10px/1.3 ${FONT_MONO}; color: rgba(255, 255, 255, 0.5); letter-spacing: 0.02em;
-}
 .vc-item-boxes {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px;
 }
@@ -1003,29 +995,6 @@ body.vc-keys-reveal [data-keycap]::after {
   font: 500 11.5px/1 ${FONT_MONO}; color: #fff; letter-spacing: 0.03em;
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* The per-box "in the edit group" checkbox (itemBoxes.ts's Solo paragraph,
- * 2026-09-27b) — a real <button role="checkbox">, sized to a >=24px touch
- * target even though its drawn glyph is much smaller, sitting in the box's
- * own header row (its "corner") after the code label. --c is the box's own
- * colour custom property, inherited straight from .vc-item-box since the
- * checkbox is a DOM descendant of it. */
-.vc-item-check {
-  flex: none; width: 24px; height: 24px; padding: 0; margin: -3px -3px -3px 0;
-  border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.04);
-  cursor: pointer; display: grid; place-items: center; transition: background 0.12s ease, border-color 0.12s ease;
-}
-.vc-item-check::after {
-  content: ""; width: 8px; height: 8px; border-radius: 2px; background: transparent; transition: background 0.12s ease;
-}
-.vc-item-check[aria-checked="true"] {
-  border-color: var(--c, ${SCENE_VIOLET});
-  background: color-mix(in srgb, var(--c, ${SCENE_VIOLET}) 22%, transparent);
-}
-.vc-item-check[aria-checked="true"]::after {
-  background: var(--c, ${SCENE_VIOLET});
-  box-shadow: 0 0 5px var(--c, ${SCENE_VIOLET});
-}
-.vc-item-check:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 /* A live preview (Phase 3) is a <canvas> in this same slot; an item family
  * with no preview source keeps the plain sized placeholder <div> — either
  * way the box's layout is untouched. */
@@ -1034,8 +1003,6 @@ body.vc-keys-reveal [data-keycap]::after {
   background: color-mix(in srgb, var(--c, #fff) 10%, rgba(0, 0, 0, 0.35));
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
-.vc-item-rows { display: grid; }
-
 /* Phase 3's per-box readouts (POP/TERR/VIG) and the population bar +
  * Rebalance/Pipette row beneath the boxes — src/ui/widgets/itemBoxes.ts. */
 .vc-item-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-top: 4px; }
@@ -1048,6 +1015,100 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-poplabels { display: flex; flex-wrap: wrap; gap: 5px 12px; justify-content: center; font: 400 10px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.65); }
 .vc-poplabels i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 4px; box-shadow: 0 0 5px currentColor; }
 .vc-pop-actions { display: flex; gap: 8px; }
+
+/* ---- src/ui/widgets/strainConsole.ts ----
+ * The Strain Console card: a Lanes/Knobs switch, one row per setting with a
+ * lane per strain (or a setting-by-strain grid of knobs), the real setting row
+ * mounted under the grid for the last lane or knob touched, and Stain Synergy
+ * with its hue wheel. --sc is a knob's strain colour, set inline per tick. */
+.vc-sc-tabs {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.13); border-radius: 8px; margin-bottom: 10px;
+}
+.vc-sc-tab {
+  border: 0; background: none; border-radius: 6px; padding: 6px 0; cursor: pointer;
+  font: 400 11px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255, 255, 255, 0.64);
+}
+.vc-sc-tab[aria-selected="true"] {
+  background: rgba(255, 255, 255, 0.08); color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+}
+.vc-sc-tab:focus-visible, .vc-sc-track:focus-visible, .vc-sc-knob:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
+.vc-sc-lanes[hidden], .vc-sc-knobs[hidden], .vc-sc-detail[hidden] { display: none; }
+.vc-sc-lanes { display: grid; gap: 6px; }
+.vc-sc-row {
+  display: grid; gap: 6px; padding: 8px 10px; margin-inline: -10px; border-radius: 6px;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.vc-sc-row:hover, .vc-sc-row:focus-within {
+  background: rgba(195, 165, 249, 0.06); box-shadow: 0 0 0 1px rgba(195, 165, 249, 0.4), 0 0 14px rgba(195, 165, 249, 0.18);
+}
+.vc-sc-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.vc-sc-row-title { font: 400 14px/1.2 ${FONT_LABEL}; color: #fff; }
+.vc-sc-row:hover .vc-sc-row-title, .vc-sc-row:focus-within .vc-sc-row-title { color: ${SCENE_VIOLET}; }
+.vc-sc-chip {
+  padding: 3px 8px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.24); background: rgba(255, 255, 255, 0.04);
+  font: 400 10px/1 ${FONT_MONO}; letter-spacing: 0.08em; color: rgba(255, 255, 255, 0.64); cursor: pointer;
+}
+.vc-sc-chip:hover { color: #fff; }
+.vc-sc-chip[aria-pressed="true"] { color: #fff; border-color: ${SCENE_VIOLET}; background: rgba(195, 165, 249, 0.14); }
+.vc-sc-lane-list { display: grid; gap: 3px; }
+.vc-sc-lane { display: grid; grid-template-columns: 30px minmax(0, 1fr) 44px; align-items: center; gap: 8px; height: 16px; }
+.vc-sc-lane-code { font: 400 10px/1 ${FONT_MONO}; white-space: nowrap; overflow: hidden; }
+.vc-sc-lane-val { font: 400 11px/1 ${FONT_MONO}; text-align: right; color: rgba(255, 255, 255, 0.64); font-variant-numeric: tabular-nums; }
+.vc-sc-track { position: relative; height: 16px; cursor: pointer; touch-action: none; outline: none; }
+.vc-sc-rail { position: absolute; left: 0; right: 0; top: 7px; height: 2px; border-radius: 1px; background: rgba(255, 255, 255, 0.14); }
+.vc-sc-fill { position: absolute; left: 0; top: 7px; height: 2px; border-radius: 1px; }
+.vc-sc-thumb {
+  position: absolute; top: 2px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%;
+  border: 2px solid #0b0f10; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+/* A hue lane's rail is the strain's own hue across the Stain range. */
+.vc-sc-rail[style*="gradient"] { height: 4px; top: 6px; opacity: 0.7; }
+
+.vc-sc-knobs { display: grid; grid-template-columns: 92px repeat(var(--n, 4), minmax(0, 1fr)); row-gap: 6px; column-gap: 4px; align-items: center; }
+.vc-sc-knob-head { font: 400 11px/1 ${FONT_MONO}; text-align: center; transition: text-shadow 0.12s ease; }
+.vc-sc-knob-head.on { text-shadow: 0 0 8px currentColor; }
+.vc-sc-knob-label { font: 400 12.5px/1.15 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.64); }
+.vc-sc-knob-label.on { color: ${SCENE_VIOLET}; }
+.vc-sc-knob { display: grid; justify-items: center; gap: 1px; cursor: move; touch-action: none; outline: none; border-radius: 6px; padding: 3px 0; }
+.vc-sc-knob:hover, .vc-sc-knob:focus-visible { background: rgba(255, 255, 255, 0.05); }
+.vc-sc-knob.active { background: rgba(195, 165, 249, 0.1); box-shadow: 0 0 0 1px rgba(195, 165, 249, 0.4); }
+.vc-sc-knob.active .vc-sc-knob-val { color: #fff; }
+.vc-sc-knob svg { width: 34px; height: 34px; display: block; }
+.vc-sc-knob-val { font: 400 10px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.64); font-variant-numeric: tabular-nums; }
+/* + up-right and − down-left of a knob: the diagonal a drag turns it along.
+ * Faint at rest, brighter on hover, lit in the strain's colour and nudged
+ * outward on the side being turned toward, nearly gone at the end it can't
+ * go past. */
+.vc-sc-kw { position: relative; width: 34px; height: 34px; }
+.vc-sc-sign {
+  position: absolute; font: 600 11px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.4); opacity: 0.55; pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease, color 0.15s ease, text-shadow 0.15s ease;
+}
+.vc-sc-plus { top: -3px; right: -9px; }
+.vc-sc-minus { bottom: -1px; left: -9px; }
+.vc-sc-knob:hover .vc-sc-sign, .vc-sc-knob:focus-visible .vc-sc-sign, .vc-sc-knob.active .vc-sc-sign { opacity: 0.9; color: rgba(255, 255, 255, 0.64); }
+.vc-sc-sign.lit { opacity: 1 !important; color: var(--sc, #fff) !important; text-shadow: 0 0 4px var(--sc, #fff), 0 0 10px var(--sc, #fff); }
+.vc-sc-plus.lit { transform: translate(3px, -3px) scale(1.7); }
+.vc-sc-minus.lit { transform: translate(-3px, 3px) scale(1.7); }
+.vc-sc-sign.end { opacity: 0.12 !important; }
+
+.vc-sc-detail { display: grid; gap: 4px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.vc-sc-detail-head { font: 400 11px/1 ${FONT_MONO}; letter-spacing: 0.08em; }
+
+.vc-sc-syn { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 14px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.vc-sc-wheel { position: relative; width: 64px; height: 64px; }
+.vc-sc-wheel-ring {
+  position: absolute; inset: 0; border-radius: 50%; opacity: 0.55;
+  background: conic-gradient(hsl(0 90% 58%), hsl(60 90% 58%), hsl(120 90% 58%), hsl(180 90% 58%), hsl(240 90% 58%), hsl(300 90% 58%), hsl(360 90% 58%));
+  -webkit-mask: radial-gradient(circle, transparent 60%, #000 61%); mask: radial-gradient(circle, transparent 60%, #000 61%);
+}
+.vc-sc-wheel svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.vc-sc-syn-left { display: grid; justify-items: center; gap: 4px; }
+.vc-sc-harmony { font: 400 9px/1.1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.5); min-height: 10px; text-align: center; }
+@media (prefers-reduced-motion: reduce) {
+  .vc-sc-row, .vc-sc-sign, .vc-sc-knob-head { transition: none; }
+}
 
 /* The pipette's tap-point flash — position/left/top set inline per tap
  * (document-body-absolute so it isn't clipped by the panel's own scroll

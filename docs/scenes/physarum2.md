@@ -21,6 +21,16 @@ their own uniforms). Registered as `physarum2Scene` via `registerScene` in
 `src/render/scenes/index.ts` (first line of registration, newest first within
 its gallery group), and absent from that file's `draftIds`, so featured.
 
+The Strain Console (2026-09-29): `src/ui/widgets/strainConsole.ts` (Lanes,
+Knobs and the Synergy row — its header is the source for the gestures),
+`src/ui/widgets/consoleMath.ts` (the pure arithmetic,
+`tests/consoleMath.test.ts`), mounted by `itemBoxes.ts` as its own "Per
+strain" card between the Strains block and the Affinity card. The colour
+harmony fit is `physarum2Synergy.ts` (pure, `tests/physarum2Synergy.test.ts`),
+the recruiting rule is `SIM_FRAG`'s Headcount block (`SWITCH_MAX`'s comment
+has the rule), and the measured headcount is `POP_FRAG` through
+`createPixelReadback` (the same non-blocking readback Territory uses).
+
 Reuses `packUnit` and `createBeatSeeder` from `physarum.ts` (the same 16-bit
 packing round trip and the same beat-rise detector with its own refractory),
 and `grainTextureSide` from `chladni.ts` for the agent-state texture sizing.
@@ -648,6 +658,54 @@ and `powder.ts`'s curl noise).
   `previews.ts`'s Strains preview), so `feed` is exactly 1 — the plain
   slider, no drive at all — the instant nothing is plugged in.
 
+- **2026-09-29: the Strain Console is built.** The user answered the two
+  open calls: **both** layouts (Lanes and Knobs, a switch at the top of the
+  card) and **all four** extras real: Sensor angle, Trail life, Headcount and
+  Synergy. What changed:
+  - Settings. `angle<k>` is a plain slider in degrees (5-120), default each
+    strain's own `STRAINS.sensorAngleRad`. `life<k>` is 0-1, default 0.5;
+    `lifeToDecayMul` scales the shared Trail decay by 2^(+-1.5) across the
+    slider (`DIFFUSE_FRAG`'s `uLifeMul`, one multiplier per channel; right =
+    the trail lasts longer). Global `switching` (Motion, default 0.4) and
+    `synergy` (Look, default 0). Neither `angle` nor `life` has a jack (they
+    were never audio-driven). Every default reproduces the shipped look except
+    that Switching is on.
+  - Headcount. Agents change strain in `SIM_FRAG`: the prototype's rule
+    (ink per agent under them, x1.5 margin, a 4% floor, 5% x Switching per
+    step) plus `SWITCH_PRESSURE`. The prototype's plain per-agent ink, ported
+    as is, ended 4/35/12/49% (synthetic 120 BPM, 15 s, `?quality=low`): PP-D4's
+    tight network lays a far denser trail per agent in this dish than in the
+    prototype. Dividing by (share x strains)^2 instead settles at 16/32/18/35
+    with all four alive (`scripts/headcountcheck.mjs`), close to the
+    prototype's 15/30/25/28. Not tuned against real music.
+  - The counts. `POP_FRAG` writes each 8x8-ish block's strain fractions into a
+    32x32 target, read back every 250 ms while the panel is open or Switching
+    is on; the JS-tracked `population` is now only the instant expected value
+    after a Rebalance or a pipette tap. `createPixelReadback` was factored out
+    of the territory code and serves both.
+  - Synergy. `physarum2Synergy.ts` is the prototype's fit. The scene infers
+    the anchor itself from which *stored* stain changed last (one alone =
+    the anchor; several at once - Link, Alt, a Look, a reset - frees the
+    rotation), so nothing extra travels between phone and TV. `probe()` now
+    reports `shownStain<k>` and `harmony`, so the console's Stain controls show
+    what the dish shows and start a drag from it (a grabbed stain becomes the
+    setting), and the previews tint with the shown colour. Checked with real
+    mouse drags (`scripts/consoledrive.mjs`): raw +0.22 / -0.08 with Synergy at
+    1 shows +0.197 / -0.08 (the hand-set one exact) / +0.053 / -0.002, nearest
+    Rectangle.
+  - The panel. The boxes lost their selection: a tap aims the pipette at that
+    strain and arms it. The one-strain-at-a-time rows and the multi-edit
+    `linked` fan-out are no longer used by this scene (the bridge stays in
+    `deviceMenu.ts` for a future item widget). A press on a lane or knob ends
+    by mounting that setting's real row under the grid (`ctx.mountRows`) -
+    where its jack, Receives patch and reset live. `PanelSection.settings`
+    (new) lets a widget claim plain settings so the Scene card's flat list
+    skips them: Switching sits under the headcount bar, Synergy under the
+    stains. `solocheck.mjs` went with the selection.
+  - Checks: `npm run typecheck`, the full suite (2321 tests), headless
+    Playwright on the panel in both layouts (`scripts/consoleshot.mjs`), the
+    headcount freezing at Switching 0 and moving otherwise, no shader errors.
+
 ## Tuning notes
 
 Judge the look by whether black background still dominates and the four
@@ -666,14 +724,19 @@ applies there too. Tuned so far only against the synthetic feed at
 
 ## Known issues and next steps
 
-- **The per-strain settings are unusable** (the user, 2026-09-28): the
-  Strains block edits one strain at a time through the box selection (tap =
-  solo, checkbox/Shift = group, All), its rows are tall and wordy, and the
-  selection tooltip covers the boxes. The "Strain Console" prototype
-  (Materials) is the proposed replacement; waiting on the user's two calls:
-  Lanes or Knobs, and which of Sensor angle / Trail life / Share become real
-  per-strain settings (today: fixed `STRAINS.sensorAngleRad`, one global
-  Trail decay `uDecay`, an equal split with only Pipette/Rebalance moving it).
+- Switching's default is tuned on the synthetic feed only. With real
+  music the split may want another default or `SWITCH_PRESSURE`, and a
+  strain with a very sparse network can sit at the `SWITCH_FLOOR` share by
+  design - worth a listen.
+- The console has no Auto (A) chip per lane or knob; those live in the
+  row it mounts under the grid. Whether Sensor angle and Trail life want a
+  jack of their own is open.
+- The Synergy anchor is inferred per device from which stored stain changed
+  last, so a TV that joins mid-session starts with no anchor (free
+  rotation) until a stain moves.
+- Trail life isn't in the Affinity pads' own live cultures
+  (`createPairCulture` keeps the shared decay); the specimen boxes and the
+  pads' sensor angle do use their settings.
 
 - Not yet checked against real music from a mic — synthetic-feed tuning only.
 - "Dose" confused the user: it is the share of all agents moved into one new
@@ -796,8 +859,9 @@ applies there too. Tuned so far only against the synthetic feed at
   all four strains at once as Lanes (one row per setting, a lane per strain
   on a shared scale, a Link toggle) or Knobs (a setting-by-strain matrix),
   plus Sensor angle, Trail life and a Share bar dragged at its dividers, on
-  a live culture with a fixed 124 BPM pulse on Excitability. Not built yet —
-  see Known issues. `node physarum2/artifacts/look-studio.mjs --page
+  a live culture with a fixed 124 BPM pulse on Excitability. Built
+  2026-09-29 (Decisions and pivots); the page stays as the prototype it was
+  built from (v5, with Headcount and Synergy). `node physarum2/artifacts/look-studio.mjs --page
   strain-console.html --out <dir>` (or `--page affinity-studio.html`)
   screenshots either prototype page as the artifact viewer shows it.
 - No `/ref` bundle. Headless shots for tuning:
@@ -810,12 +874,15 @@ applies there too. Tuned so far only against the synthetic feed at
   up; `--port` to match):
   - `panelshot.mjs` — opens the panel (`#menuBtn`), scrolls to the Scene
     card, screenshots at a given width.
-  - `solocheck.mjs` — the strain-selection check: solo / checkbox / Shift /
-    All, no-redraw (tagged DOM survives a click), no remount on a slider
-    drag, cable and pin handoff on a strain switch. Two of its checks are
-    stale: "cable-disappears" fails correctly now that the pin moves to the
-    new strain (the remaining cable is its scene-default source), and
-    "no-console-errors" trips on the worktree font 403s.
+  - `headcountcheck.mjs` — Switching's headcount read off the population
+    bar with the panel open (moves at the default, frozen at 0), plus
+    Trail life / Sensor angle overrides and any shader error.
+  - `consoleshot.mjs` — screenshots the Strain Console (Lanes, `--knobs`)
+    or the Strains card above it (`--scene-card`).
+  - `consoledrive.mjs` — the console under real mouse drags: a lane, Link,
+    double-click reset, a knob (right+up = more), an Alt knob moving all
+    four, then Synergy pulled up through its real slider with two stains
+    set by hand.
   - `previewcheck.mjs` — node harness for the pure-culture collapse numbers
     in Measurements.
   - `perf/` — `tput.mjs` plus the spatial re-sort prototype
@@ -854,16 +921,13 @@ applies there too. Tuned so far only against the synthetic feed at
 
 ## Resume here
 
-**Next session: the per-strain settings.** Open the "Strain Console"
-artifact (Materials; source `physarum2/artifacts/strain-console.html`) with
-the user, get the two calls in Known issues' first item, then build the
-chosen layout into the Strains block the way Affinity was built: its own
-card if it fits (`WidgetCtx.mountCard`), `.vc-row` rows registered with
-`WidgetCtx.registerCard`, numbers only, every word as data. Each lane or
-knob is an existing per-strain setting (`nutrient`/`excite`/`sensor`/`turn`/
-`stride`/`stain` `<k>`), so a press should pin that strain's own setting and
-open its Receives patch as the rows do today. The user reviews panel UX in a
-prototype first and prefers plain − / + and numbers to outcome words.
+**The Strain Console is built** (2026-09-29; Decisions and pivots has what
+and why). What's left is Known issues: a real-music listen at Switching's
+default and `SWITCH_PRESSURE`, and per-lane jacks if wanted. The console's
+rows are the existing per-strain settings (`nutrient`/`excite`/`sensor`/
+`angle`/`turn`/`stride`/`life`/`stain` `<k>`), so a change there reads,
+resets and shares through Looks like any slider. The user reviews panel UX
+in a prototype first and prefers plain - / + and numbers to outcome words.
 
 `npm run dev`, then `#/v/physarum2` (headless checks add
 `?audio=synthetic&bpm=120` before the hash). Pure logic

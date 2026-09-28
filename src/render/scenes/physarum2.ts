@@ -177,10 +177,22 @@ export { ATTRACT_ROWS };
 //   panel or the TV never triggers a single readback). `classifyTerritory`
 //   (pure, tested) turns the 256 texels into a share per strain — the cells
 //   where that strain's channel reads largest, above TERRITORY_THRESHOLD.
-// - **Population** per strain: tracked analytically in JS, no readback —
-//   `equalPopulation`/`applyInjection` (pure, tested) instead reproduce, in
-//   expectation, exactly what the GPU's uniform-random inject/rebalance
-//   passes do to the real per-agent species distribution.
+// - **Population** per strain (the Headcount): *measured* — POP_FRAG counts
+//   the agents' strain channel into a 32x32 target of block fractions, read
+//   back through the same non-blocking `createPixelReadback` as Territory
+//   every POP_INTERVAL_MS while the panel is open *or* Switching is on
+//   (recruiting reads the shares every step), and `populationFromBlocks`
+//   (pure, tested) turns the blocks into shares. Since agents can change
+//   strain on their own (Switching, below) it can no longer be tracked
+//   analytically; `equalPopulation`/`applyInjection` still give the instant,
+//   expected value right after a Rebalance or a pipette tap, until the next
+//   readback lands.
+// - **Switching** (Headcount): SIM_FRAG lets an agent join the strain whose
+//   ink *per agent* under it outweighs its own — see SWITCH_MAX's comment
+//   for the rule and why it is per agent. The split between strains is a
+//   result of the other settings (Nutrient, Trail life, Sensor range, …),
+//   not a setting; `switching` only says how readily agents move, 0 keeping
+//   every agent in its strain.
 // - **command("inject", {x,y,strain})**: x,y are 0..1 in the *screen* space
 //   of this device's own viewport (the same space SIM_FRAG's fragment
 //   coordinates start from before roomUv/coverUv) — `screenToFieldUv` (a pure
@@ -1093,11 +1105,26 @@ const PANEL: readonly PanelSection[] = [
     widget: "itemBoxes",
     title: "Strains",
     items: "strain",
+    // Switching and Synergy are drawn by the widget itself (under the
+    // headcount bar and under the Strain Console's stains), so the Scene
+    // card's flat list leaves them out.
+    settings: ["switching", "synergy"],
     options: {
       labels: STRAINS.map((s) => s.code),
       colours: STRAINS.map((s) => cssColor(s.color)),
-      itemNoun: "strains",
-      rowOrder: ["nutrient", "sensor", "turn", "stride", "excite", "stain"],
+      headcountSetting: "switching",
+      // The Strain Console card: every per-strain setting for all the strains
+      // at once, as Lanes or Knobs, with Stain Synergy under them — see
+      // src/ui/widgets/strainConsole.ts. The order is the row/column order.
+      console: {
+        title: "Per strain",
+        params: ["nutrient", "excite", "sensor", "angle", "turn", "stride", "life", "stain"],
+        formats: { angle: "degrees", stain: "turns" },
+        // A Stain is a hue shift over the strain's own base colour, so each
+        // lane's rail and the Synergy wheel need the base hue (turns).
+        hue: { param: "stain", baseHues: STRAINS.map((s) => rgbToHsl(s.color)[0]) },
+        synergy: { key: "synergy" },
+      },
       // Phase 3's live pure-culture preview — src/ui/widgets/previews.ts's
       // registry id. itemBoxes.ts falls back to the old empty placeholder
       // swatch when a widget's options carry no preview id at all, so this
