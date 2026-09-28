@@ -1550,7 +1550,12 @@ export function createControlRow(spec: ControlRowSpec) {
   if (signalIndicator) el.appendChild(signalIndicator.strip);
   if (spec.drivePanel) el.appendChild(spec.drivePanel.below);
   el.addEventListener("click", (e) => {
-    slider.focus();
+    // The pinned patch panel sits inside this row, so its clicks bubble
+    // here too: they keep their own focus, since pulling it to the slider
+    // (far above, once the panel's scrolled into view) scrolled the column
+    // up under the pointer. preventScroll for the same reason as
+    // wireHoverFocus.
+    if (!spec.drivePanel?.below.contains(e.target as Node)) slider.focus({ preventScroll: true });
     if (spec.onCardPin && isCardPress(el, slider, e.target)) spec.onCardPin();
   });
   wireHoverFocus(el, slider);
@@ -2076,6 +2081,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Solo's on/off (setSolo/applySolo, by the footer) — declared up here
   // because togglePin and every pinned patch panel's own Solo chip read it.
   let soloOn = false;
+  // Whether the wide layout's "+ Add by name" disclosure is open
+  // (buildAddChips). Kept here, not per panel, because adding a source
+  // rebuilds the patch panel, and a fresh `false` closed the chip list
+  // under the pointer after every add. View state for this session only,
+  // like Solo.
+  let addChipsOpen = false;
   // Whether the panel is open (open/close, below) — declared up here since
   // setSolo's cable-visibility refresh runs during construction.
   let isOpen = false;
@@ -2834,18 +2845,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       toggle.type = "button";
       toggle.style.cssText = driveAddDisclosureStyle;
       toggle.textContent = "+ Add by name";
-      toggle.setAttribute("aria-expanded", "false");
       groupsHost = document.createElement("div");
-      groupsHost.style.cssText = `${driveAddGroupsStyle} display: none;`;
       // A plain style toggle, not the `hidden` attribute: `driveAddGroupsStyle`
       // already sets an inline `display`, which would otherwise outrank the
       // UA stylesheet's `[hidden] { display: none }` rule and leave this
       // visible regardless of the attribute.
-      let open = false;
+      const sync = () => {
+        groupsHost.style.cssText = `${driveAddGroupsStyle} display: ${addChipsOpen ? "flex" : "none"};`;
+        toggle.setAttribute("aria-expanded", String(addChipsOpen));
+      };
+      sync();
       toggle.addEventListener("click", () => {
-        open = !open;
-        groupsHost.style.display = open ? "flex" : "none";
-        toggle.setAttribute("aria-expanded", String(open));
+        addChipsOpen = !addChipsOpen;
+        sync();
       });
       wrap.append(toggle, groupsHost);
     } else {
