@@ -100,6 +100,7 @@ after all three pass; include the screenshot paths in your summary.
 | The tempo tracker (BPM in `src/audio/features.ts`, `src/audio/tempoAnalyzer.ts`, `src/render/beatClock.ts`, `src/render/tempoSettle.ts`, `src/render/metronome.ts`) | `tests/tempoEval.test.ts` header — run `npm run eval:tempo` before and after; it scores the real tracker (and metronome.ts's own metronome, on top of it) on synthesized tracks with known beats, both the render-tick and fixed-hop paths |
 | A paid scene, or anything under `src/render/scenes/private/` | `src/render/scenes/privateScenes.ts` header — the contract, and why that folder never reaches this repo or the deployed site |
 | The version label, the Stable/Insider channels, or releasing | `src/version.ts` header |
+| A scene's own version (how it's counted, where it shows, bumping a scene's major) | `tools/sceneVersionLib.mjs` header |
 | A `?url` import, or any file the page fetches from its own origin after load | `src/pinnedAssets.ts` header |
 
 ## Standing rules not worth their own doc

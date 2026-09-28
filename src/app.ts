@@ -156,6 +156,7 @@ import { noteKeyUse } from "./ui/keyHints.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
 import { pinEverything } from "./pinnedAssets.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
+import { sceneVersionHint, sceneVersionOf } from "./render/sceneVersions.ts";
 import { bindHint, hideTooltip } from "./ui/tooltip.ts";
 
 type Mode = "solo" | "host" | "renderer";
@@ -443,6 +444,54 @@ function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, quality.preset));
 }
 
+/** Fills and re-binds the scene view's own version corner (`#sceneVersion` in
+ *  index.html) for `next` — called from applyScene() and enterViz() below so
+ *  it stays current across a scene switch, not just once at boot. Shows
+ *  "<Scene name> <its version>" in brighter white (a `+dev` suffix in amber),
+ *  a dim middle dot, then the build's own label (src/version.ts) in its
+ *  usual place and colour — or, when the scene has no version of its own
+ *  (unregistered/private, or a build vite-scene-versions-plugin.ts never ran
+ *  for — src/render/sceneVersions.ts's header), just the build's own label,
+ *  same as before per-scene versions existed. The hint is the scene's own
+ *  lines (sceneVersionHint()) ahead of the build's (versionHint()).
+ *  bindHint() itself is safe to call again on the same element — it updates
+ *  the bound hint text rather than stacking a second set of listeners
+ *  (src/ui/tooltip.ts). */
+function updateSceneVersionLabel(next: Scene): void {
+  const appLabel = versionLabel(BUILD_INFO);
+  const offStable = BUILD_INFO.channel !== "stable";
+  const hintColor = offStable ? BANDS_AMBER : "rgba(255,255,255,.4)";
+  const sceneVer = sceneVersionOf(next.id);
+
+  sceneVersion.style.removeProperty("color"); // clear a previous scene-less fallback's inline colour
+  sceneVersion.replaceChildren();
+  if (!sceneVer) {
+    sceneVersion.textContent = appLabel;
+    if (offStable) sceneVersion.style.color = BANDS_AMBER;
+    bindHint(sceneVersion, hintColor, versionHint(BUILD_INFO));
+    return;
+  }
+
+  const isDev = sceneVer.endsWith("+dev");
+  const base = isDev ? sceneVer.slice(0, -"+dev".length) : sceneVer;
+  const nameEl = document.createElement("span");
+  nameEl.className = "svScene";
+  nameEl.textContent = `${next.name} ${base}`;
+  if (isDev) {
+    const dev = document.createElement("span");
+    dev.className = "svDev";
+    dev.textContent = "+dev";
+    nameEl.appendChild(dev);
+  }
+  const sep = document.createElement("span");
+  sep.textContent = " · ";
+  const appEl = document.createElement("span");
+  appEl.textContent = appLabel;
+  if (offStable) appEl.style.color = BANDS_AMBER;
+  sceneVersion.append(nameEl, sep, appEl);
+  bindHint(sceneVersion, hintColor, [...sceneVersionHint(next.name, sceneVer), ...versionHint(BUILD_INFO)]);
+}
+
 /** Routes both local picks (device menu) and remote commands (control panel on
  *  another device) through the same path, so the roster always reflects reality. */
 function applyScene(next: Scene): void {
@@ -450,6 +499,7 @@ function applyScene(next: Scene): void {
   mainHost.unmountAll();
   mainHost.mount(next);
   scene = next;
+  updateSceneVersionLabel(next);
   showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
   if (inViz) navigate({ kind: "viz", sceneId: scene.id }, "replace");
@@ -1037,6 +1087,7 @@ async function enterViz(next: Scene): Promise<void> {
   mainHost!.unmountAll();
   mainHost!.mount(next);
   scene = next;
+  updateSceneVersionLabel(next);
 
   showHud(`${mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id, viewport);
@@ -1105,13 +1156,10 @@ async function boot(): Promise<void> {
   // own origin's files again after this point.
   pinEverything();
 
-  // The scene's own version corner (#sceneVersion in index.html, shown by
-  // enterViz) — the same label and hint as the gallery footer's
-  // (src/version.ts), so the build is visible from inside a scene too.
-  const offStable = BUILD_INFO.channel !== "stable";
-  sceneVersion.textContent = versionLabel(BUILD_INFO);
-  if (offStable) sceneVersion.style.color = BANDS_AMBER;
-  bindHint(sceneVersion, offStable ? BANDS_AMBER : "rgba(255,255,255,.4)", versionHint(BUILD_INFO));
+  // The scene's own version corner (#sceneVersion in index.html) is filled
+  // by updateSceneVersionLabel() from enterViz()/applyScene() below, for
+  // whichever scene is actually shown — nothing to do here before one of
+  // those runs (the element starts `display: none` in index.html).
 
   // Started first so it resolves alongside detectQuality()'s await below;
   // awaited before routing, since a deep-linked scene's enterViz() makes the

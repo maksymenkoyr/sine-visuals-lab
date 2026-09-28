@@ -227,7 +227,11 @@
       /* The build's version (src/version.ts's versionLabel), as plain text at
        * the end of the row rather than a chip — it's read, not pressed; its
        * hint (src/ui/tooltip.ts's bindHint, wired in app.ts) carries the
-       * rest. Colour is set from app.ts: dim on stable, amber elsewhere. */
+       * rest. Colour is set from app.ts: dim on stable, amber elsewhere.
+       * app.ts's updateSceneVersionLabel() fills this with "<Scene name>
+       * <its version>", a dim middle dot, then the build's own label — or,
+       * with no scene version to show, just the build's label as plain text
+       * (this rule's own dim colour, same as always). */
       #sceneVersion {
         display: none;
         margin-left: 8px;
@@ -239,6 +243,16 @@
         outline: none;
         transition: opacity 0.4s;
         text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+      }
+      /* The scene name + its own version, brighter than the build label
+       * beside it — #f9b96c below is controlsTheme.ts's BANDS_AMBER, kept in
+       * sync by hand like every other colour in this plain (not templated)
+       * file. */
+      #sceneVersion .svScene {
+        color: rgba(255, 255, 255, 0.92);
+      }
+      #sceneVersion .svDev {
+        color: #f9b96c;
       }
       /* Every button in this row says what it does in words — a bare square
        * or grid glyph read as nothing in particular. */

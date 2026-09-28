@@ -17,8 +17,11 @@
 # Each release bumps the minor version and resets the patch (0.3.12 on
 # Insider → 0.4.0 here); the major only moves when package.json's major has
 # been raised by hand. The release commit is tagged `vX.Y.0` and gets a
-# GitHub Release listing the pull requests since the previous one. A re-run
-# of the same production commit keeps its version and skips the Release.
+# GitHub Release listing the pull requests since the previous one, with a
+# "Scenes updated in this release" note prepended for whichever scenes this
+# release actually changes (tools/sceneVersionLib.mjs owns how each scene's
+# own version, alongside the build's, is counted). A re-run of the same
+# production commit keeps its version and skips the Release.
 #
 # This is also the only moment a phone and TV paired on Stable drop:
 # deploying a Worker with Durable Objects restarts them, and the Room a
@@ -90,6 +93,30 @@ jobs:
           SVL_VERSION: ${{ steps.pick.outputs.version }}
           SVL_COMMIT: ${{ github.sha }}
 
+      # Every scene's own version (tools/sceneVersionLib.mjs) from this
+      # build's own version.json — `node -e`, not `jq` — both as a job-summary
+      # table and as the "Scenes updated in this release" note the Publish
+      # step below prepends to the GitHub Release.
+      - name: Scene versions
+        id: scenes
+        run: |
+          node -e '
+          const fs = require("fs");
+          const info = JSON.parse(fs.readFileSync("dist/version.json", "utf8"));
+          const scenes = info.scenes || {};
+          const changed = info.scenesChanged || [];
+          const units = Object.keys(scenes).sort();
+          if (units.length > 0) {
+            const rows = units.map((u) => `| ${u} | ${scenes[u]} |`);
+            const table = ["", "### Scene versions", "", "| Scene | Version |", "|---|---|", ...rows, ""].join("\n");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
+          }
+          const notes = changed.length > 0
+            ? ["**Scenes updated in this release:**", ...changed.map((u) => `- \`${u}\` ${scenes[u]}`), "", ""].join("\n")
+            : "";
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `notes<<SCENE_NOTES_EOF\n${notes}\nSCENE_NOTES_EOF\n`);
+          '
+
       - name: Deploy to Stable
         uses: cloudflare/wrangler-action@v3
         with:
@@ -104,12 +131,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.pick.outputs.tag }}
           FIRST: ${{ steps.pick.outputs.first }}
+          # Empty when no scene changed in this release — both branches below
+          # stay correct with nothing prepended.
+          SCENE_NOTES: ${{ steps.scenes.outputs.notes }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "$TAG is already released; redeployed it without a new Release."
           elif [ "$FIRST" = "true" ]; then
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "First release on the stable channel."
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "${SCENE_NOTES}First release on the stable channel."
           else
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+            # --generate-notes builds the usual PR-list notes; --notes here
+            # *prepends* to them rather than replacing them (gh release
+            # create --help).
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$SCENE_NOTES" --generate-notes
           fi

@@ -65,11 +65,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # An Insider build counts its patch version from the full history
-          # and origin/production (tools/app-version.mjs); a PR build needs
-          # neither. (Written this way round because `x && 0 || 1` is always
-          # 1 — 0 is falsy in an expression.)
-          fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
+          # Full history and every branch (including origin/production) for
+          # every event, not just a push to main: an Insider build counts its
+          # own patch version from them (tools/app-version.mjs), and now a PR
+          # build needs them too — every scene's own version
+          # (tools/sceneVersionLib.mjs) is counted the same way, so a preview
+          # build carries them just like Insider does.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -111,6 +113,26 @@ jobs:
           # Empty on a pull request (the step above is skipped) — a preview
           # carries no version.
           SVL_VERSION: ${{ steps.version.outputs.version }}
+
+      # Every scene's own version (tools/sceneVersionLib.mjs), straight from
+      # the build's own version.json rather than a second git read — `node
+      # -e`, not `jq`, so this needs nothing beyond the `actions/setup-node`
+      # step above. Push only: a PR preview's build carries `scenes` too now
+      # (the fetch-depth fix above), but its summary is the sticky preview
+      # comment below, not this job's own.
+      - name: Scene versions summary
+        if: github.event_name == 'push'
+        run: |
+          node -e '
+          const fs = require("fs");
+          const info = JSON.parse(fs.readFileSync("dist/version.json", "utf8"));
+          const scenes = info.scenes || {};
+          const units = Object.keys(scenes).sort();
+          if (units.length === 0) process.exit(0);
+          const rows = units.map((u) => `| ${u} | ${scenes[u]} |`);
+          const table = ["", "### Scene versions", "", "| Scene | Version |", "|---|---|", ...rows, ""].join("\n");
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
+          '
 
       - name: Deploy to Insider
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

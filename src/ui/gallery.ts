@@ -7,6 +7,7 @@ import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
 import { SOURCE_URL } from "../brand.ts";
 import { BUILD_INFO, channelBadge, versionHint, versionHref, versionLabel } from "../version.ts";
+import { sceneVersionOf } from "../render/sceneVersions.ts";
 import { bindHint, hideTooltip } from "./tooltip.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
@@ -182,18 +183,27 @@ const stylesheet = `
 .gal-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .gal-shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(5,7,10,.7), transparent 40%); pointer-events: none; }
 .gal-over { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
-.gal-name { font: 400 14px/1 ${FONT_LABEL}; min-width: 0; }
+/* Name + this scene's own version (src/render/sceneVersions.ts), on one row:
+ * the name ellipsizes first, the version never truncates (gal-ver is flex:none). */
+.gal-name { font: 400 14px/1 ${FONT_LABEL}; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.gal-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .gal-reason {
   font: 400 11px ${FONT_MONO}; letter-spacing: .14em; flex: none; white-space: nowrap;
   color: rgba(255,255,255,.7); border: 1px solid rgba(255,255,255,.3);
   border-radius: 3px; padding: 5px 10px; background: rgba(5,7,10,.5);
 }
 .gal-cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; }
-.gal-cap-name { font: 400 13px ${FONT_LABEL}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.gal-cap-name { font: 400 13px ${FONT_LABEL}; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.gal-cap-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .gal-tag {
   font: 400 9.5px ${FONT_MONO}; letter-spacing: .12em; text-transform: uppercase; flex: none;
   color: ${SCENE_VIOLET}; border: 1px solid ${withAlpha(SCENE_VIOLET, 0.5)}; border-radius: 3px; padding: 2px 6px;
 }
+/* A scene's own version, small and dim beside its name — never truncated
+ * (flex: none, so the name's ellipsis absorbs any overflow instead). A
+ * "+dev" suffix (uncommitted changes to that scene) reads in BANDS_AMBER. */
+.gal-ver { font: 400 10px ${FONT_MONO}; letter-spacing: .06em; color: rgba(255,255,255,.4); flex: none; }
+.gal-ver-dev { color: ${BANDS_AMBER}; }
 
 .gal-foot {
   display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap;
@@ -242,6 +252,20 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+/** A tile caption's small version badge for `sceneId` — null if it has none
+ *  (unregistered/private, or a build vite-scene-versions-plugin.ts never ran
+ *  for; src/render/sceneVersions.ts's header). A `+dev` suffix splits into
+ *  its own amber span, same rule as the scene view's own corner (src/app.ts's
+ *  updateSceneVersionLabel). */
+function sceneVersionBadge(sceneId: string): HTMLElement | null {
+  const version = sceneVersionOf(sceneId);
+  if (!version) return null;
+  const isDev = version.endsWith("+dev");
+  const badge = el("span", "gal-ver", isDev ? version.slice(0, -"+dev".length) : version);
+  if (isDev) badge.appendChild(el("span", "gal-ver-dev", "+dev"));
+  return badge;
 }
 
 
@@ -637,18 +661,27 @@ export function createGallery(deps: GalleryDeps): Gallery {
     shot.appendChild(canvas);
 
     const reason = entry.enabled ? null : (entry.reason ?? "Unavailable");
+    const verBadge = sceneVersionBadge(entry.scene.id);
     if (entry.draft) {
-      // Small tile: the picture, then a caption bar with the name and a tag
-      // (the reason it can't run here takes the tag's place when it can't).
+      // Small tile: the picture, then a caption bar with the name (plus its
+      // own version, if it has one) and a tag (the reason it can't run here
+      // takes the tag's place when it can't).
       const cap = el("div", "gal-cap");
-      cap.append(el("div", "gal-cap-name", entry.scene.name), el("div", "gal-tag", reason ?? "Draft"));
+      const capName = el("div", "gal-cap-name");
+      capName.append(el("div", "gal-cap-name-text", entry.scene.name));
+      if (verBadge) capName.append(verBadge);
+      cap.append(capName, el("div", "gal-tag", reason ?? "Draft"));
       btn.append(shot, cap);
     } else {
-      // Large tile: the name sits over the picture's darkened foot, joined by
-      // the reason when the scene can't run here. The whole tile is the call
-      // to action, so a runnable one carries no button of its own.
+      // Large tile: the name (plus its own version) sits over the picture's
+      // darkened foot, joined by the reason when the scene can't run here.
+      // The whole tile is the call to action, so a runnable one carries no
+      // button of its own.
       const over = el("div", "gal-over");
-      over.append(el("div", "gal-name", entry.scene.name));
+      const nameRow = el("div", "gal-name");
+      nameRow.append(el("div", "gal-name-text", entry.scene.name));
+      if (verBadge) nameRow.append(verBadge);
+      over.append(nameRow);
       if (reason) over.append(el("div", "gal-reason", reason));
       shot.append(el("div", "gal-shade"), over);
       btn.appendChild(shot);

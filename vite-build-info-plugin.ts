@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import type { Plugin } from "vite";
 import type { BuildInfo } from "./src/version.ts";
+import { getCachedSceneVersions } from "./tools/sceneVersions.mjs";
 
 /**
  * Stamps every build with where it came from and where it's going — the data
@@ -33,9 +34,17 @@ import type { BuildInfo } from "./src/version.ts";
  */
 const CHANNELS = new Set(["stable", "insider", "preview"]);
 
-function computeBuildInfo(): BuildInfo {
+/** `SVL_CHANNEL`, defaulted to `"dev"` — the one place this decision gets
+ *  made. vite-scene-versions-plugin.ts imports this rather than re-reading
+ *  the env var, so a scene's `+dev` suffix and the build's own channel badge
+ *  can never disagree about whether this is a real CI build. */
+export function resolveChannel(): BuildInfo["channel"] {
   const envChannel = process.env.SVL_CHANNEL;
-  const channel = (CHANNELS.has(envChannel ?? "") ? envChannel : "dev") as BuildInfo["channel"];
+  return (CHANNELS.has(envChannel ?? "") ? envChannel : "dev") as BuildInfo["channel"];
+}
+
+function computeBuildInfo(): BuildInfo {
+  const channel = resolveChannel();
 
   const git = (...args: string[]): string => {
     try {
@@ -84,21 +93,45 @@ const ROBOTS_META_RE = /<meta[^>]+name\s*=\s*["']robots["']/i;
  * build `noindex` so Insider and PR previews never compete with www in search
  * (index.html's canonical already points at www — see that file's own
  * comment; this just makes it explicit for a host that isn't canonical at
- * all). Registered unconditionally in vite.config.ts, like legalNoticesPlugin.
+ * all). `version.json` also carries `scenes` (every registered scene's own
+ * version — tools/sceneVersionLib.mjs owns how it's counted) and, on stable,
+ * `scenesChanged` (release.yml reads this for its Release notes) — computed
+ * once via tools/sceneVersions.mjs and shared with vite-scene-versions-plugin.ts,
+ * which is what actually shows a scene's version on the page. Registered
+ * unconditionally in vite.config.ts, like legalNoticesPlugin.
  */
 export function buildInfoPlugin(): Plugin {
   const info = computeBuildInfo();
+  let root = process.cwd();
 
   return {
     name: "viz-build-info",
+    configResolved(config) {
+      root = config.root;
+    },
     config() {
       return { define: { __BUILD_INFO__: JSON.stringify(info) } };
     },
-    generateBundle() {
+    async generateBundle() {
+      // Shares one git read with vite-scene-versions-plugin.ts
+      // (getCachedSceneVersions's own memoization) rather than computing the
+      // scene territory and history twice per build. `scenes` is every
+      // registered scene's own version (tools/sceneVersionLib.mjs); `scenesChanged`
+      // — stable only — is which of them this release actually ships a
+      // change to, for release.yml's Release notes. Both are omitted
+      // (version.json keeps its plain BuildInfo shape) if git/origin/production
+      // wasn't available — see that module's header for why that's not a
+      // build failure.
+      const scenes = await getCachedSceneVersions({ root, channel: info.channel });
+      const payload: BuildInfo & { scenes?: Record<string, string>; scenesChanged?: string[] } = { ...info };
+      if (scenes) {
+        payload.scenes = scenes.byUnit;
+        if (info.channel === "stable") payload.scenesChanged = scenes.changedUnits;
+      }
       this.emitFile({
         type: "asset",
         fileName: "version.json",
-        source: JSON.stringify(info, null, 2) + "\n",
+        source: JSON.stringify(payload, null, 2) + "\n",
       });
     },
     transformIndexHtml(html) {
