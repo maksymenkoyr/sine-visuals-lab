@@ -4822,6 +4822,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   function buildRow(kind: "device" | "screen"): SourceRowHandle {
     const btn = document.createElement("button");
     btn.type = "button";
+    btn.className = "vc-src-row"; // hover glow — controlsTheme.ts
     let dot: HTMLSpanElement | null = null;
     let glyph: SVGSVGElement | null = null;
     if (kind === "screen") {

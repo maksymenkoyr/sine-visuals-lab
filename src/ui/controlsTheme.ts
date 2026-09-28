@@ -473,6 +473,31 @@ body.vc-keys-reveal [data-keycap]::after {
     0 0 0 1px color-mix(in srgb, var(--vc-accent) 45%, transparent),
     0 0 14px color-mix(in srgb, var(--vc-accent) 22%, transparent);
 }
+/* One input in the Source row's list (deviceMenu.ts's buildRow) lights up
+ * under the pointer, inside the whole row's own glow above. Box-shadow and
+ * filter only: the input's border and background are inline styles its
+ * refresh() rewrites per state (live, dashed, hidden), and an inline style
+ * beats any rule here. Off where hover can't be meant (touch: it would stick
+ * after a tap). */
+.vc-src-row { transition: box-shadow 0.18s ease, filter 0.18s ease; }
+.vc-src-row:focus-visible { outline: none; }
+@media (hover: hover) {
+  .vc-src-row:hover, .vc-src-row:focus-visible {
+    filter: brightness(1.2);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--vc-accent) 35%, transparent),
+      inset 0 0 16px color-mix(in srgb, var(--vc-accent) 12%, transparent),
+      0 0 12px color-mix(in srgb, var(--vc-accent) 18%, transparent);
+  }
+}
+@media (hover: none) {
+  .vc-src-row:focus-visible {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vc-accent) 45%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vc-src-row { transition: none; }
+}
 .vc-label { color: #fff; transition: color 0.18s ease, text-shadow 0.18s ease; }
 .vc-row:hover .vc-label, .vc-row:focus-within .vc-label {
   color: var(--vc-accent);
