@@ -205,7 +205,10 @@ const stylesheet = `
 /* A scene's own version, small and dim beside its name — never truncated
  * (flex: none, so the name's ellipsis absorbs any overflow instead). A
  * "+dev" suffix (uncommitted changes to that scene) reads in BANDS_AMBER. */
-.gal-scene-ver { font: 400 10px ${FONT_MONO}; letter-spacing: .06em; color: rgba(255,255,255,.4); flex: none; }
+.gal-scene-ver {
+  font: 400 11px ${FONT_MONO}; letter-spacing: .06em; color: rgba(255,255,255,.75); flex: none;
+  text-shadow: 0 1px 3px rgba(0,0,0,.85); /* sits on a live preview, not a flat ground */
+}
 .gal-scene-ver-dev { color: ${BANDS_AMBER}; }
 
 .gal-foot {
