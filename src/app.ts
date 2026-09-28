@@ -19,8 +19,10 @@ import {
 import { inputPreviewSupported, createInputPreview, type InputPreview } from "./audio/inputPreview.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
-import { peak } from "./audio/waveform.ts";
+import { peak, rms } from "./audio/waveform.ts";
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
+import { createInputHealthTap, type InputHealthTap } from "./audio/inputHealthTap.ts";
+import { createInputHealth, mainsHumHz, type InputHealthReading, type InputMeasure } from "./audio/inputHealth.ts";
 import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
 import { createTempoSource, type TempoSource } from "./audio/tempoSource.ts";
@@ -228,6 +230,14 @@ let waveformAnalyser: WaveformAnalyser | null = null;
  *  (src/audio/lufsAnalyser.ts) — display-only and local, like the waveform
  *  analyser above. */
 let lufsAnalyser: LufsAnalyser | null = null;
+/** Per-channel peaks + dropped-frame count for src/audio/inputHealth.ts —
+ *  display-only and local, same lifecycle as waveformAnalyser above (built in
+ *  attachCapture, disposed in onCaptureEnded). */
+let inputHealthTap: InputHealthTap | null = null;
+/** The one state machine instance for the whole session — see
+ *  inputHealth.ts's own header for why it's a single long-lived `reset()`
+ *  rather than a fresh one per capture, unlike inputHealthTap above. */
+const inputHealth = createInputHealth();
 /** DEV-only: a deep (32768-sample, ~682ms) sibling of waveformAnalyser, for
  *  tools/audio-latency.mjs to locate a test click's exact arrival sample —
  *  see that tool's header. waveformAnalyser's own 2048 samples (42.7ms at
@@ -364,6 +374,12 @@ let lastGate: SilenceGateReading | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
  *  availability as lastMono, for the Signal card's Loudness row. */
 let lastLufs: LufsReading | null = null;
+/** This tick's src/audio/inputHealth.ts reading — same solo/host-only
+ *  availability as lastGate above and for the same reason. Read by the
+ *  Source row's status line (src/ui/deviceMenu.ts) via the deviceMenu deps'
+ *  getInputHealth, not passed through DeviceMenu.update() — that row
+ *  refreshes on its own slower timer, not every rAF tick. */
+let lastInputHealth: InputHealthReading | null = null;
 const rawBandsScratch = new Float32Array(NUM_BANDS);
 
 const animClock = createAnimClock();
@@ -766,15 +782,22 @@ function captureAudioSource(kind: CaptureSourceKind): AudioSource {
   return kind;
 }
 
-/** Builds bandAnalyser/waveformAnalyser/lufsAnalyser off a freshly started
- *  capture, and hangs a listener off its audio track so an externally-ended
- *  share (Chrome's "Stop sharing" bar, a revoked mic permission) is noticed
- *  instead of silently freezing the visuals at zero — see onCaptureEnded. */
+/** Builds bandAnalyser/waveformAnalyser/lufsAnalyser/inputHealthTap off a
+ *  freshly started capture, and hangs a listener off its audio track so an
+ *  externally-ended share (Chrome's "Stop sharing" bar, a revoked mic
+ *  permission) is noticed instead of silently freezing the visuals at zero —
+ *  see onCaptureEnded. Also the one place a capture swap (swapAudioSource)
+ *  re-attaches, so it disposes the previous inputHealthTap and resets the
+ *  state machine itself — inputHealth.ts's reading must never carry over
+ *  from one input to the next. */
 function attachCapture(handle: CaptureHandle): void {
   capture = handle;
   bandAnalyser = createBandAnalyser(handle.context, handle.sourceNode);
   waveformAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode);
   lufsAnalyser = createLufsAnalyser(handle.context, handle.sourceNode);
+  inputHealthTap?.dispose();
+  inputHealthTap = createInputHealthTap(handle.context, handle.sourceNode, handle.stream);
+  inputHealth.reset();
   // measureAnalyser's own header explains why this is DEV-only and deep
   // (32768 samples) rather than reusing waveformAnalyser.
   if (import.meta.env.DEV) measureAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode, 32768);
@@ -847,6 +870,9 @@ function onCaptureEnded(handle: CaptureHandle): void {
   waveformAnalyser = null;
   measureAnalyser = null;
   lufsAnalyser = null;
+  inputHealthTap?.dispose();
+  inputHealthTap = null;
+  inputHealth.reset();
   tempoSource?.dispose();
   tempoSource = null;
   audioPromise = null;
@@ -1114,6 +1140,10 @@ function wireDeviceMenu(): void {
     },
     onInputDeviceChange: (deviceId) => chooseInputDevice(deviceId),
     canCaptureDisplay: () => displayCaptureSupported(),
+    // The Source row's status line — src/audio/inputHealth.ts. Read on the
+    // row's own refresh timer, same as getSourceState/getInputDevices above,
+    // not on every rAF tick (see lastInputHealth's own doc comment).
+    getInputHealth: () => lastInputHealth,
     getInputLevel: (deviceId) => inputPreview?.level(deviceId) ?? null,
     setInputPreviewActive: (active) => {
       inputPreviewActive = active;
@@ -1711,6 +1741,23 @@ function captureRawBands(dbBands: Float32Array, range: { min: number; max: numbe
   return rawBandsScratch;
 }
 
+/** This tick's InputMeasure for src/audio/inputHealth.ts: peakL/peakR/
+ *  glitchFrames off the tap's own read(), rmsDb/humHz off `mono` — the same
+ *  buffer lastMono was just set to (see currentVisual()'s solo/host
+ *  branches, the only callers). Takes `mono` as an argument rather than
+ *  reading lastMono itself so this stays a plain function of its inputs. */
+function buildInputMeasure(tap: InputHealthTap, mono: Float32Array, sampleRate: number): InputMeasure {
+  const read = tap.read();
+  const monoRms = rms(mono);
+  return {
+    peakL: read.peakL,
+    peakR: read.peakR,
+    rmsDb: monoRms > 0 ? 20 * Math.log10(monoRms) : -Infinity,
+    humHz: mainsHumHz(mono, sampleRate),
+    glitchFrames: read.glitchFrames,
+  };
+}
+
 /** @param rateScale sensitivity.ts's smoothingRateScale(resolveSmoothing(scene.id)),
  *  computed once per tick by loop() and reused for animClock.advance() below
  *  — resolveSmoothing() slews its auto value, so calling it a second time
@@ -1734,6 +1781,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastBeatDiag = null;
     lastFluxRatio = null;
     lastGate = null;
+    lastInputHealth = null;
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
@@ -1747,12 +1795,17 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastBeatDiag = null;
       lastFluxRatio = null;
       lastGate = null;
+      lastInputHealth = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+    lastInputHealth =
+      inputHealthTap && lastMono
+        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
+        : null;
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
@@ -1799,12 +1852,17 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       lastBeatDiag = null;
       lastFluxRatio = null;
       lastGate = null;
+      lastInputHealth = null;
       return null;
     }
     const now = capture.context.currentTime;
     const dbBands = bandAnalyser.readBandsDb();
     lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
     lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+    lastInputHealth =
+      inputHealthTap && lastMono
+        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
+        : null;
     lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
     lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
     const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
@@ -1842,6 +1900,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   lastBeatDiag = null;
   lastFluxRatio = null;
   lastGate = null;
+  lastInputHealth = null;
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
