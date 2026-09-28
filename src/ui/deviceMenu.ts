@@ -94,6 +94,7 @@ import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
+  FADER_OFF,
   FAMILY_ACCENTS,
   FOLDED_BAR_PX,
   FONT_LABEL,
@@ -328,9 +329,10 @@ import {
  * auto owns the value, outlined when the user has taken the row manual,
  * absent when the setting has no auto weights (see autoTune.ts). The T chip
  * mutes the row to its floor (0 for a zeroAtMin row, spec.min otherwise) and
- * restores the value it had on a second press; any other write to the row
- * (drag, ↺, a card Reset, auto taking over) forgets that restore point and
- * unlights it — it's a toggle, not a memory. ↺ only appears once a value is
+ * restores the value it had on a second press — the thumb stays put while
+ * muted; only the readout (Off) and the colours change. Any other write to
+ * the row (drag, ↺, a card Reset, auto taking over) forgets that restore
+ * point and unlights it — it's a toggle, not a memory. ↺ only appears once a value is
  * off its default, doubling as a "you changed this" marker. A chip's letter
  * *is* its hotkey once the row's control has keyboard focus — and
  * wireHoverFocus gives it that focus on genuine pointer movement over the
@@ -670,9 +672,10 @@ const autoChipLitStyle = (accent: string) =>
 const autoChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
 // "T" chip: mutes the row to its floor and back (see the header comment).
-// Shares the A chip's geometry; filled in a neutral tone rather than the
-// row's accent since "muted" is a state, not one of the per-card systems.
-const offChipLitStyle = `${autoChipBaseStyle} background: rgba(255,255,255,0.82); border: 1px solid rgba(255,255,255,0.82); color: #070a09;`;
+// Shares the A chip's geometry, but lit it fills with FADER_OFF — the panel's
+// one "this is off" colour, the band faders' too — rather than the row's
+// accent, so a muted row never reads as a lit A chip at a glance.
+const offChipLitStyle = `${autoChipBaseStyle} background: ${FADER_OFF}; border: 1px solid ${FADER_OFF}; color: #070a09;`;
 const offChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
@@ -1572,10 +1575,10 @@ export function createControlRow(spec: ControlRowSpec) {
     return isLog ? valueToPos(value) : value;
   }
 
-  function setReadout(value: number): void {
-    if (spec.zeroAtMin && value <= 0) {
+  function setReadout(value: number, muted: boolean): void {
+    if (muted || (spec.zeroAtMin && value <= 0)) {
       digits.textContent = "Off";
-      digits.style.cssText = digitsTextStyle;
+      digits.style.cssText = `${digitsTextStyle} color: ${FADER_OFF};`;
       unit.style.display = "none";
       return;
     }
@@ -1620,13 +1623,24 @@ export function createControlRow(spec: ControlRowSpec) {
     }
   }
 
+  // Non-null while the row is muted (T pressed) — the value to restore on the
+  // next T, and where display() holds the thumb meanwhile. Any write to the
+  // row that isn't the mute/restore itself forgets this, via clearOff(), so
+  // the chip never claims a restore point that no longer means anything.
+  let offStoredValue: number | null = null;
+
   function display(value: number, auto: boolean): void {
     lastValue = value;
-    const sliderValue = valueToSlider(value);
-    slider.value = String(sliderValue);
-    slider.style.setProperty("--vc-fill", `${valueToPercent(value)}%`);
+    // Muted (T): the setting runs at its floor, but the thumb stays where it
+    // was — on the value a second T brings back — and the row greys out
+    // (.vc-row-off, controlsTheme.ts) instead of sliding to the left end.
+    const muted = offStoredValue !== null && !auto;
+    const shown = muted ? offStoredValue! : value;
+    slider.value = String(valueToSlider(shown));
+    slider.style.setProperty("--vc-fill", `${valueToPercent(shown)}%`);
+    el.classList.toggle("vc-row-off", muted);
     renderTicks();
-    setReadout(value);
+    setReadout(value, muted);
     // setReadout just overwrote digits.style.cssText wholesale, which would
     // silently pop the digits back over an open typed-entry field on every
     // refresh (e.g. an auto row's ~100ms tick) — reassert the field's
@@ -1649,11 +1663,6 @@ export function createControlRow(spec: ControlRowSpec) {
     setHint(on);
   }
 
-  // Non-null while the row is muted (T pressed) — the value to restore on the
-  // next T. Any write to the row that isn't the mute/restore itself forgets
-  // this, via clearOff(), so the chip never claims a restore point that no
-  // longer means anything.
-  let offStoredValue: number | null = null;
   function refreshOffChip(): void {
     offChip.style.cssText = offStoredValue !== null ? offChipLitStyle : offChipManualStyle(spec.accent);
   }

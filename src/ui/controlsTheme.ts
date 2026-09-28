@@ -574,6 +574,14 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-row:hover .vc-slider::-moz-range-thumb,
 .vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1))); }
 
+/* A row muted by its T chip (deviceMenu.ts's createControlRow): the thumb
+ * stays on the value a second T restores, so the track greys out and the
+ * thumb turns FADER_OFF — "off, and this is where it comes back to" — while
+ * an auto-held row keeps its accent. */
+.vc-row-off .vc-slider { --vc-accent: rgba(255, 255, 255, 0.28); }
+.vc-row-off .vc-slider::-webkit-slider-thumb { background: ${FADER_OFF}; }
+.vc-row-off .vc-slider::-moz-range-thumb { background: ${FADER_OFF}; }
+
 /* A linked-item divergent-value tick (deviceMenu.ts's createControlRow,
  * ControlRowSpec.linkedTicks — itemBoxes.ts's multi-selection, 2026-09-27):
  * the wrapper sits directly around the slider it belongs to (sized to it
