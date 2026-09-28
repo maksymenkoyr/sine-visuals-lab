@@ -195,6 +195,9 @@ const SETTINGS: SceneSetting[] = [
     label: "Beat ripple",
     description: "Each hit sends a ring out from the center like a drop on water — a busy driver can't rise as far between hits, so it makes lighter, denser rings instead of stacking full ones",
     group: "Motion",
+    // One colour for this row and the four ring controls under it, so the
+    // ripple's own set reads apart from Breathe above and Drift below.
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,
@@ -238,6 +241,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Ring width",
     description: "How wide each ring is — wider rings bend the light more softly",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,
@@ -254,6 +258,7 @@ const SETTINGS: SceneSetting[] = [
     description:
       "Bump: soft rings. Wave: each ring has a crest and a trough, like real ripples — stays visible when rings come fast. Merge: rings that come close together join into one stronger ring.",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 2,
     step: 1,
@@ -270,6 +275,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Wave speed",
     description: "How fast a ring travels outward from the center",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,
@@ -284,6 +290,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Wave fade",
     description: "How fast a ring loses energy as it travels — low keeps it visible all the way to the far edge, high dies out quickly",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,

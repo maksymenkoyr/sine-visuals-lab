@@ -500,6 +500,13 @@ reference-measurement workflow used by later scenes.
   dropped: skipping individual far droplets inside the loop measured slightly
   slower (neighbouring pixels diverge). What's left is the ridge loop — see
   Known issues.
+- 2026-09-28 — Beat ripple, Ring width, Ring style, Wave speed and Wave fade
+  grouped into a second colour family, "Beat ripple", on the user's ask to
+  put them "in different colour group" — the four ring controls tune only
+  the rings Beat ripple emits, but read as more violet Motion rows between
+  Breathe and Drift. Accents go out in the order families first appear, so
+  this family (above Drift in `SETTINGS`) takes the first accent and Drift
+  speed's family moves to the second.
 
 ## Tuning notes
 
