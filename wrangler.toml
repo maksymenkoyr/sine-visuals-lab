@@ -64,9 +64,14 @@ custom_domain = true
 # Same two things [env.preview] has to spell out, for the same reasons — see
 # that section's comment for `durable_objects`; `routes` here is this
 # environment's *own* domain rather than an override, since (unlike preview)
-# Insider does want a stable custom domain of its own.
+# Insider does want a stable custom domain of its own. It answers on www. too,
+# as Stable does, for anyone who types the www habitually — a custom domain gets
+# its own certificate, which the zone's Universal SSL (one level deep) wouldn't.
 [env.insider]
-routes = [{ pattern = "insider.sinevisualslab.com", custom_domain = true }]
+routes = [
+  { pattern = "insider.sinevisualslab.com", custom_domain = true },
+  { pattern = "www.insider.sinevisualslab.com", custom_domain = true },
+]
 # Insider's traffic is the owner's own testing, like a preview's — not visitors'.
 analytics_engine_datasets = []
 
