@@ -4,7 +4,10 @@
 <style>
 /* Prototype for Physarum 2's per-strain settings (docs/scenes/physarum2.md).
    Self-contained: the culture is lab.src.html's dish stepper with per-strain
-   sensor angle, trail life and share added; a fixed 124 BPM pulse stands in
+   sensor angle and trail life added, plus strain switching (an agent joins the
+   strain whose ink per agent outweighs its own where it stands), so the
+   headcount follows the settings instead of being set by hand —
+   scripts/recruit.mjs is the headless check. A fixed 124 BPM pulse stands in
    for the music on Excitability. */
 :root {
   color-scheme: dark;
@@ -68,14 +71,12 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
 .pv .code { font: 11px var(--mono); display: flex; justify-content: space-between; }
 .pv .code span:last-child { color: var(--ink-3); }
 
-/* share bar */
-.share { position: relative; height: 30px; border-radius: 6px; overflow: visible; display: flex; touch-action: none; user-select: none; -webkit-user-select: none; }
-.share .seg { height: 100%; display: flex; align-items: center; justify-content: center; font: 11px var(--mono); color: #0b0f10; overflow: hidden; white-space: nowrap; min-width: 0; }
-.share .seg:first-child { border-radius: 6px 0 0 6px; }
-.share .seg:last-child { border-radius: 0 6px 6px 0; }
-.share .div { position: absolute; top: -4px; bottom: -4px; width: 14px; margin-left: -7px; cursor: ew-resize; display: flex; justify-content: center; outline: none; }
-.share .div::after { content: ""; width: 3px; height: 100%; border-radius: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
-.share .div:focus-visible::after { background: var(--violet); }
+/* headcount bar: read-only, it follows the culture */
+.share { height: 30px; border-radius: 6px; overflow: hidden; display: flex; }
+.share .seg { height: 100%; display: flex; align-items: center; justify-content: center; font: 11px var(--mono); color: #0b0f10; overflow: hidden; white-space: nowrap; min-width: 0; transition: width 0.4s linear; }
+.share .seg + .seg { box-shadow: inset 1px 0 0 rgba(0, 0, 0, 0.55); }
+.single { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 8px; }
+.single .v { font: 11px var(--mono); text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
 /* lanes */
 .lanes { display: grid; gap: 3px; }
@@ -112,7 +113,7 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
   <header>
     <div class="eyebrow">Physarum 2 · Strains prototype</div>
     <h1>Strain Console</h1>
-    <p class="intro">Every per-strain setting for all four strains at once, in two layouts to compare, plus the three the scene doesn't have yet (Sensor angle, Trail life, Share). The culture on the left runs on these values, and a steady 124 BPM pulse stands in for the music on Excitability.</p>
+    <p class="intro">Every per-strain setting for all four strains at once, in two layouts to compare, plus what the scene doesn't have yet: Sensor angle, Trail life, and a headcount that follows the settings instead of being set by hand. The culture on the left runs on these values, and a steady 124 BPM pulse stands in for the music on Excitability.</p>
   </header>
 
   <div class="app">
@@ -135,9 +136,14 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
         <div class="card-head"><span class="card-title">Strains</span></div>
         <div class="previews" id="previews"></div>
         <div class="row" id="shareRow">
-          <div class="row-head"><span class="row-title">Share <span class="new">NEW</span></span><button class="chipbtn" id="evenBtn" type="button">Even</button></div>
-          <div class="share" id="share" aria-label="Share of agents per strain"></div>
-          <div class="hint">How the agents split between the strains. Drag a divider; the four always add up to 100%.</div>
+          <div class="row-head"><span class="row-title">Headcount <span class="new">NEW</span></span><button class="chipbtn" id="evenBtn" type="button">Rebalance</button></div>
+          <div class="share" id="share" role="img" aria-label="Share of agents per strain"></div>
+          <div class="hint">How the agents are split between the strains right now. Nobody sets it: agents switch to whichever strain's ink outweighs their own, so a strain with more Nutrient or longer Trail life grows. Rebalance puts it back to 25% each.</div>
+        </div>
+        <div class="row" id="switchRow">
+          <div class="row-head"><span class="row-title">Switching <span class="new">NEW</span></span></div>
+          <div class="single"><div class="track" id="switchTrack" tabindex="0" role="slider" aria-label="Switching"><div class="rail"></div><div class="fill" style="background:var(--violet)"></div><div class="th" style="background:var(--violet)"></div></div><span class="v" id="switchVal"></span></div>
+          <div class="hint">How readily an agent joins the strain whose ink outweighs its own where it stands. At 0 the headcount stays where it is.</div>
         </div>
       </div>
 
@@ -173,7 +179,8 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
     <article class="note">
       <h3>In the app</h3>
       <dl>
-        <dt>Settings</dt><dd>Each lane or knob is the existing per-strain setting (nutrient, excite, sensor, turn, stride, stain), so pressing one pins that strain's setting and opens its Receives patch as today. Sensor angle, Trail life and Share would be new per-strain settings.</dd>
+        <dt>Settings</dt><dd>Each lane or knob is the existing per-strain setting (nutrient, excite, sensor, turn, stride, stain), so pressing one pins that strain's setting and opens its Receives patch as today. Sensor angle and Trail life would be new per-strain settings.</dd>
+        <dt>Headcount</dt><dd>Replaces the hand-set Share bar: the split is a result of the other settings. In the scene, the sim pass would rewrite an agent's strain when another strain's ink per agent outweighs its own, a floor keeps every strain alive, and the counts come from a readback instead of being tracked in JS. The pipette and Rebalance keep working on top.</dd>
         <dt>Replaces</dt><dd>The one-strain-at-a-time rows and the tap / checkbox selection. The live previews stay, smaller.</dd>
       </dl>
     </article>
@@ -200,10 +207,18 @@ const PARAMS = [
   { key: "stain", label: "Stain", min: 0, max: 1, def: [2, 40, 172, 262].map((h) => h / 360), hue: true, fmt: (v) => `${Math.round(v * 360)}°`, hint: "Its colour." },
 ];
 const V = {};
+const updaters = [];
 PARAMS.forEach((p) => { V[p.key] = p.def.slice(); });
 const fmtOf = (p) => p.fmt ?? ((v) => v.toFixed(2));
+// Strain switching: each step an agent, with probability SWITCH_MAX *
+// switching, compares the ink under it per agent (a strain's ink divided by
+// its share of the headcount, so a big strain has to earn its size); if
+// another strain's beats its own by SWITCH_MARGIN it joins that strain. No
+// strain drops below SWITCH_FLOOR of the agents. scripts/recruit.mjs runs the
+// same rule headlessly.
+const SWITCH_MAX = 0.05, SWITCH_MARGIN = 1.5, SWITCH_FLOOR = 0.04, SWITCH_MIN_INK = 0.02;
+let switching = 0.4;
 let shares = [0.25, 0.25, 0.25, 0.25];
-let sharesVersion = 0;
 
 function hsl(h, s, l) {
   const a = s * Math.min(l, 1 - l);
@@ -231,7 +246,7 @@ function motionOf(k) {
     decay: V.life[k] / 9,
   };
 }
-function makeCulture(W, H, N, kinds, respawn, useShares) {
+function makeCulture(W, H, N, kinds, respawn, switches) {
   const K = kinds.length, CELLS = W * H;
   const T = kinds.map(() => new Float32Array(CELLS));
   const tmp = new Float32Array(CELLS);
@@ -240,20 +255,16 @@ function makeCulture(W, H, N, kinds, respawn, useShares) {
   const off = document.createElement("canvas"); off.width = W; off.height = H;
   const octx = off.getContext("2d"), img = octx.createImageData(W, H);
   const A = kinds.map(() => new Float32Array(K));
-  let ver = -1;
-  function assign() {
-    let w = useShares ? kinds.map((k) => shares[k]) : kinds.map(() => 1);
-    let tot = w.reduce((a, b) => a + b, 0);
-    if (tot <= 0) { w = w.map(() => 1); tot = K; }
-    const cum = []; let c = 0;
-    for (const x of w) { c += x / tot; cum.push(c); }
-    for (let i = 0; i < N; i++) { let b = 0; while (b < K - 1 && u[i] >= cum[b]) b++; ak[i] = b; }
-    ver = sharesVersion;
+  const count = new Array(K).fill(0);
+  const minCount = Math.round(SWITCH_FLOOR * N);
+  function rebalance() {
+    count.fill(0);
+    for (let i = 0; i < N; i++) { ak[i] = Math.min(K - 1, Math.floor(u[i] * K)); count[ak[i]]++; }
   }
+  // Like the app's reseed: agents move, their strain stays.
   function reseed() {
     for (let i = 0; i < N; i++) { ax[i] = Math.random() * W; ay[i] = Math.random() * H; ah[i] = Math.random() * Math.PI * 2; }
     T.forEach((t) => t.fill(0));
-    assign();
   }
   function sense(x, y, w) {
     let xi = Math.floor(x), yi = Math.floor(y);
@@ -263,12 +274,21 @@ function makeCulture(W, H, N, kinds, respawn, useShares) {
     return s;
   }
   function step() {
-    if (useShares && ver !== sharesVersion) assign();
     for (let a = 0; a < K; a++) for (let b = 0; b < K; b++) A[a][b] = K === 1 ? 1 : RIVALS[kinds[a]][kinds[b]];
     const M = kinds.map((k) => motionOf(k));
+    const rate = switches ? SWITCH_MAX * switching : 0;
+    const perAgent = count.map((c) => N / K / Math.max(1, c));
     for (let i = 0; i < N; i++) {
       if (respawn > 0 && Math.random() < respawn) { ax[i] = Math.random() * W; ay[i] = Math.random() * H; ah[i] = Math.random() * Math.PI * 2; continue; }
-      const a = ak[i], m = M[a], w = A[a], h = ah[i], x = ax[i], y = ay[i];
+      let a = ak[i];
+      const x = ax[i], y = ay[i];
+      if (rate > 0 && count[a] > minCount && Math.random() < rate) {
+        const p = (y | 0) * W + (x | 0);
+        let best = a, bv = T[a][p] * perAgent[a] * SWITCH_MARGIN;
+        for (let b = 0; b < K; b++) { const v = T[b][p] * perAgent[b]; if (b !== a && v > bv) { bv = v; best = b; } }
+        if (best !== a && bv > SWITCH_MIN_INK) { count[a]--; count[best]++; ak[i] = a = best; }
+      }
+      const m = M[a], w = A[a], h = ah[i];
       const sC = sense(x + Math.cos(h) * m.reach, y + Math.sin(h) * m.reach, w);
       const sL = sense(x + Math.cos(h - m.sensorAngle) * m.reach, y + Math.sin(h - m.sensorAngle) * m.reach, w);
       const sR = sense(x + Math.cos(h + m.sensorAngle) * m.reach, y + Math.sin(h + m.sensorAngle) * m.reach, w);
@@ -303,13 +323,16 @@ function makeCulture(W, H, N, kinds, respawn, useShares) {
     }
     octx.putImageData(img, 0, 0);
   }
+  rebalance();
   reseed();
-  return { step, render, reseed, off };
+  return { step, render, reseed, rebalance, off, shares: () => count.map((c) => c / N) };
 }
 
 const main = makeCulture(256, 144, 24000, [0, 1, 2, 3], 0.0015, true);
 const view = $("view"), vctx = view.getContext("2d");
 $("reseedBtn").addEventListener("click", () => main.reseed());
+// A read-only hook for headless checks: the live split and the switching knob.
+window.strainConsole = { shares: () => main.shares(), setSwitching: (v) => { switching = Math.max(0, Math.min(1, v)); }, V };
 
 // ---------- previews ----------
 const previews = [0, 1, 2, 3].map((k) => {
@@ -323,62 +346,46 @@ const previews = [0, 1, 2, 3].map((k) => {
   return { el, cult, ctx: el.querySelector("canvas").getContext("2d"), code: spans[0], pct: spans[1] };
 });
 
-// ---------- share bar ----------
+// ---------- headcount bar (read-only) ----------
 const shareEl = $("share");
+const segs = [0, 1, 2, 3].map(() => { const seg = document.createElement("div"); seg.className = "seg"; shareEl.appendChild(seg); return seg; });
 function renderShare() {
-  shareEl.textContent = "";
-  let cum = 0;
   shares.forEach((s, k) => {
-    const seg = document.createElement("div");
-    seg.className = "seg";
+    const seg = segs[k];
     seg.style.width = `${s * 100}%`;
     seg.style.background = cssOf(k);
     seg.textContent = s > 0.12 ? `${CODES[k]} ${Math.round(s * 100)}%` : s > 0.06 ? `${Math.round(s * 100)}` : "";
-    shareEl.appendChild(seg);
   });
-  for (let i = 0; i < 3; i++) {
-    cum += shares[i];
-    const d = document.createElement("div");
-    d.className = "div"; d.tabIndex = 0;
-    d.setAttribute("role", "slider");
-    d.setAttribute("aria-label", `Split between ${CODES[i]} and ${CODES[i + 1]}`);
-    d.setAttribute("aria-valuenow", String(Math.round(cum * 100)));
-    d.style.left = `${cum * 100}%`;
-    wireDivider(d, i);
-    shareEl.appendChild(d);
-  }
+  shareEl.setAttribute("aria-label", "Share of agents per strain: " + shares.map((s, k) => `${CODES[k]} ${Math.round(s * 100)}%`).join(", "));
 }
-function moveDivider(i, b) {
-  const left = shares.slice(0, i).reduce((a, x) => a + x, 0);
-  const right = left + shares[i] + shares[i + 1];
-  b = Math.max(left, Math.min(right, b));
-  shares[i] = b - left; shares[i + 1] = right - b;
-  sharesVersion++;
-}
-let dragDiv = -1;
-function wireDivider(d, i) {
-  d.addEventListener("pointerdown", (e) => { e.preventDefault(); dragDiv = i; shareEl.setPointerCapture(e.pointerId); });
-  d.addEventListener("keydown", (e) => {
-    const s = e.shiftKey ? 0.05 : 0.01;
-    const left = shares.slice(0, i + 1).reduce((a, x) => a + x, 0);
-    if (e.key === "ArrowRight" || e.key === "ArrowUp") moveDivider(i, left + s);
-    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") moveDivider(i, left - s);
+$("evenBtn").addEventListener("click", () => { main.rebalance(); shares = main.shares(); renderShare(); });
+
+// ---------- switching (one global slider) ----------
+(() => {
+  const track = $("switchTrack"), fill = track.querySelector(".fill"), th = track.querySelector(".th"), vEl = $("switchVal");
+  let dragging = false;
+  const set = (v) => { switching = Math.max(0, Math.min(1, v)); };
+  const fromX = (e) => { const r = track.getBoundingClientRect(); set((e.clientX - r.left) / r.width); };
+  track.addEventListener("pointerdown", (e) => { e.preventDefault(); track.focus(); track.setPointerCapture(e.pointerId); dragging = true; fromX(e); });
+  track.addEventListener("pointermove", (e) => { if (dragging) fromX(e); });
+  track.addEventListener("pointerup", () => { dragging = false; });
+  track.addEventListener("pointercancel", () => { dragging = false; });
+  track.addEventListener("dblclick", () => set(0.4));
+  track.addEventListener("keydown", (e) => {
+    const st = e.shiftKey ? 0.1 : 0.01;
+    if (e.key === "ArrowRight" || e.key === "ArrowUp") set(switching + st);
+    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") set(switching - st);
     else return;
-    e.preventDefault(); renderShare(); shareEl.querySelectorAll(".div")[i].focus();
+    e.preventDefault();
   });
-}
-shareEl.addEventListener("pointermove", (e) => {
-  if (dragDiv < 0) return;
-  const r = shareEl.getBoundingClientRect();
-  moveDivider(dragDiv, (e.clientX - r.left) / r.width);
-  const i = dragDiv; renderShare(); dragDiv = i;
-});
-shareEl.addEventListener("pointerup", () => { dragDiv = -1; });
-shareEl.addEventListener("pointercancel", () => { dragDiv = -1; });
-$("evenBtn").addEventListener("click", () => { shares = [0.25, 0.25, 0.25, 0.25]; sharesVersion++; renderShare(); });
+  updaters.push(() => {
+    th.style.left = `${switching * 100}%`; fill.style.width = `${switching * 100}%`;
+    vEl.textContent = switching.toFixed(2);
+    track.setAttribute("aria-valuenow", switching.toFixed(2));
+  });
+})();
 
 // ---------- lanes ----------
-const updaters = [];
 let links = {};
 function setVal(p, k, v, linked) {
   const clamp = (x) => Math.max(p.min, Math.min(p.max, x));
@@ -517,7 +524,7 @@ function frame(now) {
   });
   updaters.forEach((u) => u());
   const stainSig = V.stain.map((h) => h.toFixed(3)).join();
-  if (stainSig !== lastStain && dragDiv < 0) { lastStain = stainSig; renderShare(); }
+  if (tick % 15 === 0 || stainSig !== lastStain) { lastStain = stainSig; shares = main.shares(); renderShare(); }
   tick++;
   requestAnimationFrame(frame);
 }
