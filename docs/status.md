@@ -7,7 +7,7 @@ regenerate it at session close.
 ## In flight
 
 - **Physarum 2: Pairs pads + Touch** — draft #176, branch
-  `worktree-affinity-ui`, `main` merged in, mergeable and CI green. Touch is
+  `worktree-affinity-ui`, rebased onto `main`. Touch is
   a second pair table (strains feed or eat each other's trails,
   `touch<i><j>`). Affinity is its own card: Pairs pads with plain
   `− A → B +` axes and numbers only, rows that wake, pin and solo like the
