@@ -45,6 +45,14 @@ const ALIAS_IDS = new Set(["default", "communications"]);
 /** Chromium labels the "default" alias "Default - <real device label>". */
 const DEFAULT_LABEL_PREFIX = /^Default\s*-\s*/;
 
+/** A label as the picker lists it. Opening the default input hands back a
+ *  track labelled like its alias ("Default - MacBook Pro Microphone"), which
+ *  would never match the real device's own row — so a live track's label
+ *  goes through this before anything compares it to an option's. */
+export function deviceLabel(label: string): string {
+  return label.replace(DEFAULT_LABEL_PREFIX, "");
+}
+
 const STORAGE_KEY = "vibe.audioInputDevice";
 
 function loadInitial(): InputDevicePref | null {
@@ -107,7 +115,7 @@ export function inputDeviceOptions(devices: readonly Pick<MediaDeviceInfo, "kind
  *  where the browser lists no "default" alias (Firefox, Safari). */
 export function defaultInputLabel(devices: readonly Pick<MediaDeviceInfo, "kind" | "deviceId" | "label">[]): string | null {
   const alias = devices.find((d) => d.kind === "audioinput" && d.deviceId === "default" && d.label !== "");
-  return alias ? alias.label.replace(DEFAULT_LABEL_PREFIX, "") : null;
+  return alias ? deviceLabel(alias.label) : null;
 }
 
 /** What a stored choice resolves to against the devices listed right now:

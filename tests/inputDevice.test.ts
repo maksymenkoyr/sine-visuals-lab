@@ -7,7 +7,15 @@ import {
   resolveInputDeviceId,
   isMissingDeviceError,
   inputKind,
+  deviceLabel,
 } from "../src/audio/inputDevice.ts";
+
+describe("deviceLabel", () => {
+  it("gives the default input's track the real device's own name", () => {
+    expect(deviceLabel("Default - MacBook Pro Microphone (Built-in)")).toBe("MacBook Pro Microphone (Built-in)");
+    expect(deviceLabel("USB Audio CODEC")).toBe("USB Audio CODEC");
+  });
+});
 
 type Device = Pick<MediaDeviceInfo, "kind" | "deviceId" | "label">;
 

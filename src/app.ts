@@ -7,6 +7,7 @@ import {
   defaultInputLabel,
   resolveInputDeviceId,
   isMissingDeviceError,
+  deviceLabel,
   inputKind,
   INPUT_KIND_TEXT,
   type InputDevicePref,
@@ -641,7 +642,7 @@ async function onInputDevicesChanged(): Promise<void> {
  *  status line. Null for a screen share (no device to name) or no capture. */
 function liveInputLabel(): string | null {
   if (capture?.kind !== "mic") return null;
-  return capture.stream.getAudioTracks()[0]?.label || null;
+  return deviceLabel(capture.stream.getAudioTracks()[0]?.label ?? "") || null;
 }
 
 /** The Source row picked an input ("" = the system default). Picking one is
