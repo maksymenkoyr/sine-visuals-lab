@@ -59,5 +59,8 @@ npm run typecheck
 npm run test
 ```
 
-Both also run automatically on every pull request — see
-[.github/workflows/deploy.yml](.github/workflows/deploy.yml).
+Both also run automatically on every pull request, and again on every deploy —
+see [.github/workflows/deploy.yml](.github/workflows/deploy.yml) (PR checks
+and previews, plus the Insider channel on every push to `main`) and
+[.github/workflows/release.yml](.github/workflows/release.yml) (the Stable
+channel, released deliberately rather than on every push).

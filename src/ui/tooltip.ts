@@ -87,3 +87,68 @@ export function showTooltip(target: HTMLElement, color: string, lines: readonly 
 export function hideTooltip(): void {
   singleton?.hide();
 }
+
+/**
+ * Gives `target` this tooltip as a standing hint — the version label and
+ * Insider badge in the gallery (src/ui/gallery.ts) and the version label in
+ * a scene (src/app.ts, whose content changes on every scene switch — see
+ * `boundHints` below for why that's a plain update, not a second bind). On
+ * hover or focus for a mouse/keyboard, on tap for touch — where pointerleave
+ * fires straight after the tap and would hide it at once, so a tap shows it
+ * until the next press anywhere else. On a link, that first tap only shows
+ * the hint; a second tap while it's up follows the link.
+ */
+const boundHints = new WeakMap<HTMLElement, { color: string; lines: readonly string[] }>();
+
+export function bindHint(target: HTMLElement, color: string, lines: readonly string[]): void {
+  // Already bound (e.g. app.ts re-describing #sceneVersion after a scene
+  // switch): update what show() reads instead of adding a second set of
+  // listeners — every call after the first would otherwise fire its own,
+  // stacking forever over a long session.
+  const existing = boundHints.get(target);
+  if (existing) {
+    existing.color = color;
+    existing.lines = lines;
+    return;
+  }
+  const state = { color, lines };
+  boundHints.set(target, state);
+
+  let lastPointer = "mouse";
+  let tapShown = false;
+  const show = (): void => showTooltip(target, state.color, state.lines);
+  const dismiss = (e: PointerEvent): void => {
+    if (target.contains(e.target as Node)) {
+      document.addEventListener("pointerdown", dismiss, { once: true });
+      return;
+    }
+    tapShown = false;
+    hideTooltip();
+  };
+  target.addEventListener("pointerdown", (e) => {
+    lastPointer = e.pointerType;
+  });
+  target.addEventListener("pointerenter", (e) => {
+    if (e.pointerType === "mouse") show();
+  });
+  target.addEventListener("pointerleave", (e) => {
+    if (e.pointerType === "mouse") hideTooltip();
+  });
+  target.addEventListener("focus", show);
+  target.addEventListener("blur", () => {
+    if (!tapShown) hideTooltip();
+  });
+  target.addEventListener("click", (e) => {
+    // A mouse already has the hint from hovering, and a keyboard activation
+    // (detail 0) means "follow the link" — neither needs the tap path.
+    if (lastPointer === "mouse" || e.detail === 0) return;
+    if (tapShown && target instanceof HTMLAnchorElement) return;
+    e.preventDefault();
+    show();
+    if (!tapShown) {
+      tapShown = true;
+      // Next tick, so this tap's own events can't close it again.
+      setTimeout(() => document.addEventListener("pointerdown", dismiss, { once: true }), 0);
+    }
+  });
+}

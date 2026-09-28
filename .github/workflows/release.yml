@@ -1,0 +1,149 @@
+# Ships the **Stable** release channel — the top-level Worker
+# (`audio-viz-room`, wrangler.toml's top level) on sinevisualslab.com and www.
+# Every other deploy in this repo is automatic (deploy.yml ships Insider on
+# every push to main, and a preview on every PR push); this one runs only when
+# main is merged into the `production` branch, because shipping to everyone is
+# a decision, not a side effect of merging.
+#
+# To release: `npm run release` opens a pull request from main into
+# production (or open one by hand); merging it runs this workflow. Merge it
+# with **Create a merge commit** — never squash or rebase: production has to
+# keep main's own commits for the version count (tools/appVersionLib.mjs) to
+# find the last release on main's history. The first step below refuses to
+# deploy if production has picked up a commit that isn't on main and isn't a
+# merge, so a squashed release fails loudly instead of skewing every number
+# after it.
+#
+# Each release bumps the minor version and resets the patch (0.3.12 on
+# Insider → 0.4.0 here); the major only moves when package.json's major has
+# been raised by hand. The release commit is tagged `vX.Y.0` and gets a
+# GitHub Release listing the pull requests since the previous one, with a
+# "Scenes updated in this release" note prepended for whichever scenes this
+# release actually changes (tools/sceneVersionLib.mjs owns how each scene's
+# own version, alongside the build's, is counted). A re-run of the same
+# production commit keeps its version and skips the Release.
+#
+# This is also the only moment a phone and TV paired on Stable drop:
+# deploying a Worker with Durable Objects restarts them, and the Room a
+# paired session lives in (server/room.ts) is one. Releasing every couple of
+# days rather than continuously is what keeps that rare instead of routine.
+name: Release
+
+on:
+  push:
+    branches: [production]
+
+permissions:
+  contents: write # the tag + GitHub Release
+
+concurrency:
+  group: deploy-stable
+  cancel-in-progress: false
+
+env:
+  # Same reasoning as deploy.yml's own copy of this: npm ci's postinstall
+  # would otherwise try to download Playwright's browsers, which nothing in
+  # this workflow (or CI generally) runs.
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history and tags: the version is counted from them.
+          fetch-depth: 0
+
+      - name: Check production only holds main's commits
+        run: |
+          set -euo pipefail
+          stray=$(git rev-list --no-merges origin/main..HEAD)
+          if [ -n "$stray" ]; then
+            echo "::error::production has commits that aren't on main (a squash or rebase merge, or a direct push?): $stray — merge main into production with a merge commit instead"
+            exit 1
+          fi
+
+      - name: Pick the version
+        id: pick
+        run: |
+          set -euo pipefail
+          version=$(node tools/app-version.mjs stable)
+          # A previous strict release tag decides between generated notes
+          # and a first-release note (read before this release's tag exists).
+          if git tag --merged HEAD | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+'; then first=false; else first=true; fi
+          { echo "version=$version"; echo "tag=v$version"; echo "first=$first"; } >> "$GITHUB_OUTPUT"
+          echo "### Stable $version" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # Same gates as every other deploy (AGENTS.md, deploy.yml), run again on
+      # the exact commit being released.
+      - run: npm run typecheck
+      - run: npm run test
+
+      - run: npm run build
+        env:
+          SVL_CHANNEL: stable
+          SVL_VERSION: ${{ steps.pick.outputs.version }}
+          SVL_COMMIT: ${{ github.sha }}
+
+      # Every scene's own version (tools/sceneVersionLib.mjs) from this
+      # build's own version.json — `node -e`, not `jq` — both as a job-summary
+      # table and as the "Scenes updated in this release" note the Publish
+      # step below prepends to the GitHub Release.
+      - name: Scene versions
+        id: scenes
+        run: |
+          # shellcheck disable=SC2016  # backticks/`${…}` below are JS template literals for node -e, not shell
+          node -e '
+          const fs = require("fs");
+          const info = JSON.parse(fs.readFileSync("dist/version.json", "utf8"));
+          const scenes = info.scenes || {};
+          const changed = info.scenesChanged || [];
+          const units = Object.keys(scenes).sort();
+          if (units.length > 0) {
+            const rows = units.map((u) => `| ${u} | ${scenes[u]} |`);
+            const table = ["", "### Scene versions", "", "| Scene | Version |", "|---|---|", ...rows, ""].join("\n");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
+          }
+          const notes = changed.length > 0
+            ? ["**Scenes updated in this release:**", ...changed.map((u) => `- \`${u}\` ${scenes[u]}`), "", ""].join("\n")
+            : "";
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `notes<<SCENE_NOTES_EOF\n${notes}\nSCENE_NOTES_EOF\n`);
+          '
+
+      - name: Deploy to Stable
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Labels this deploy in Cloudflare's Deployments list with the
+          # version the site shows.
+          command: deploy --tag ${{ steps.pick.outputs.tag }} --message "Stable ${{ steps.pick.outputs.version }}, commit ${{ github.sha }}"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.pick.outputs.tag }}
+          FIRST: ${{ steps.pick.outputs.first }}
+          # Empty when no scene changed in this release — both branches below
+          # stay correct with nothing prepended.
+          SCENE_NOTES: ${{ steps.scenes.outputs.notes }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG is already released; redeployed it without a new Release."
+          elif [ "$FIRST" = "true" ]; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "${SCENE_NOTES}First release on the stable channel."
+          else
+            # --generate-notes builds the usual PR-list notes; --notes here
+            # *prepends* to them rather than replacing them (gh release
+            # create --help).
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$SCENE_NOTES" --generate-notes
+          fi

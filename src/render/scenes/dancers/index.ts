@@ -44,6 +44,16 @@ import clipsUrl from "./clips.bin?url";
 import { STICK_SKIN_GLSL } from "./stickSkin.ts";
 import { SKELETON_SKIN_GLSL } from "./skeletonSkin.ts";
 import { FAST_RENDERERS_GLSL } from "./fastRenderers.ts";
+import { pinAsset } from "../../../pinnedAssets.ts";
+
+// Pinned (src/pinnedAssets.ts): this module's own fetch below fires as soon
+// as it's imported (scenes/index.ts registers every scene eagerly, so that's
+// effectively page load, not "whenever Dancers is picked"), but pinAsset's
+// retry-on-failure means a fetch that loses a race with the rest of page
+// load still gets a second try — from pinEverything()'s later sweep — rather
+// than leaving this scene without its clip library for the rest of the tab's
+// session.
+const clips = pinAsset(clipsUrl);
 
 export const DANCERS_ID = "dancers";
 
@@ -378,8 +388,8 @@ export const dancersScene = createFullscreenScene(DANCERS_ID, "Dancers", FRAG, {
     // can't — tests import this module under node) the dancer sways.
     let library: ClipLibrary | null = null;
     if (typeof window !== "undefined" && typeof fetch === "function") {
-      fetch(clipsUrl)
-        .then((r) => r.arrayBuffer())
+      clips
+        .bytes()
         .then((buf) => {
           library = decodeClipLibrary(buf);
           choreographer.setLibrary(library);

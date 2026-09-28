@@ -160,6 +160,11 @@ import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
+import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
+import { pinEverything } from "./pinnedAssets.ts";
+import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
+import { sceneVersionHint, sceneVersionOf } from "./render/sceneVersions.ts";
+import { bindHint, hideTooltip } from "./ui/tooltip.ts";
 
 type Mode = "solo" | "host" | "renderer";
 type AnyConn = HostConnection | RendererConnection;
@@ -172,6 +177,7 @@ const panelBtn = document.getElementById("panelBtn") as HTMLButtonElement;
 const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
+const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
@@ -463,6 +469,54 @@ function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, quality.preset));
 }
 
+/** Fills and re-binds the scene view's own version corner (`#sceneVersion` in
+ *  index.html) for `next` — called from applyScene() and enterViz() below so
+ *  it stays current across a scene switch, not just once at boot. Shows
+ *  "<Scene name> <its version>" in brighter white (a `+dev` suffix in amber),
+ *  a dim middle dot, then the build's own label (src/version.ts) in its
+ *  usual place and colour — or, when the scene has no version of its own
+ *  (unregistered/private, or a build vite-scene-versions-plugin.ts never ran
+ *  for — src/render/sceneVersions.ts's header), just the build's own label,
+ *  same as before per-scene versions existed. The hint is the scene's own
+ *  lines (sceneVersionHint()) ahead of the build's (versionHint()).
+ *  bindHint() itself is safe to call again on the same element — it updates
+ *  the bound hint text rather than stacking a second set of listeners
+ *  (src/ui/tooltip.ts). */
+function updateSceneVersionLabel(next: Scene): void {
+  const appLabel = versionLabel(BUILD_INFO);
+  const offStable = BUILD_INFO.channel !== "stable";
+  const hintColor = offStable ? BANDS_AMBER : "rgba(255,255,255,.4)";
+  const sceneVer = sceneVersionOf(next.id);
+
+  sceneVersion.style.removeProperty("color"); // clear a previous scene-less fallback's inline colour
+  sceneVersion.replaceChildren();
+  if (!sceneVer) {
+    sceneVersion.textContent = appLabel;
+    if (offStable) sceneVersion.style.color = BANDS_AMBER;
+    bindHint(sceneVersion, hintColor, versionHint(BUILD_INFO));
+    return;
+  }
+
+  const isDev = sceneVer.endsWith("+dev");
+  const base = isDev ? sceneVer.slice(0, -"+dev".length) : sceneVer;
+  const nameEl = document.createElement("span");
+  nameEl.className = "svScene";
+  nameEl.textContent = `${next.name} ${base}`;
+  if (isDev) {
+    const dev = document.createElement("span");
+    dev.className = "svDev";
+    dev.textContent = "+dev";
+    nameEl.appendChild(dev);
+  }
+  const sep = document.createElement("span");
+  sep.textContent = " · ";
+  const appEl = document.createElement("span");
+  appEl.textContent = appLabel;
+  if (offStable) appEl.style.color = BANDS_AMBER;
+  sceneVersion.append(nameEl, sep, appEl);
+  bindHint(sceneVersion, hintColor, [...sceneVersionHint(next.name, sceneVer), ...versionHint(BUILD_INFO)]);
+}
+
 /** Routes both local picks (device menu) and remote commands (control panel on
  *  another device) through the same path, so the roster always reflects reality. */
 function applyScene(next: Scene): void {
@@ -470,6 +524,7 @@ function applyScene(next: Scene): void {
   mainHost.unmountAll();
   mainHost.mount(next);
   scene = next;
+  updateSceneVersionLabel(next);
   showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
   if (inViz) navigate({ kind: "viz", sceneId: scene.id }, "replace");
@@ -1062,6 +1117,7 @@ async function enterViz(next: Scene): Promise<void> {
   mainHost!.unmountAll();
   mainHost!.mount(next);
   scene = next;
+  updateSceneVersionLabel(next);
 
   showHud(`${mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id, viewport);
@@ -1069,6 +1125,7 @@ async function enterViz(next: Scene): Promise<void> {
   menuBtn.style.display = "block";
   fsBtn.style.display = "block";
   if (!bypassGallery) backBtn.style.display = "block";
+  sceneVersion.style.display = "inline";
 
   if (mode !== "renderer") void ensureAudio();
   updateMicPrompt();
@@ -1087,6 +1144,8 @@ function exitToGallery(): void {
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
   stopBtn.style.display = "none";
+  sceneVersion.style.display = "none";
+  hideTooltip(); // a version hint left open by a tap mustn't follow us out
   audioPrompt.style.display = "none";
   mainHost?.unmountAll();
   canvas.style.display = "none";
@@ -1113,6 +1172,25 @@ function applyRoute(route: Route): void {
 }
 
 async function boot(): Promise<void> {
+  // Injects the panel's stylesheet before anything else so its DSEG7
+  // @font-face rule (controlsTheme.ts) is already in document.fonts by the
+  // time pinEverything()'s sweep runs below — otherwise the font would only
+  // enter document.fonts whenever the settings panel first opens
+  // (deviceMenu.ts's own ensureControlsStyles() call), which can be well
+  // after a deploy has moved on. Idempotent and scoped to panel classes, so
+  // calling it this early changes nothing the gallery itself shows.
+  ensureControlsStyles();
+  // Starts the after-load, at-idle sweep that fetches every pinAsset() (the
+  // tempo worklet, the Dancers clip library) and loads every registered font
+  // — see src/pinnedAssets.ts's header for why a page must never need its
+  // own origin's files again after this point.
+  pinEverything();
+
+  // The scene's own version corner (#sceneVersion in index.html) is filled
+  // by updateSceneVersionLabel() from enterViz()/applyScene() below, for
+  // whichever scene is actually shown — nothing to do here before one of
+  // those runs (the element starts `display: none` in index.html).
+
   // Started first so it resolves alongside detectQuality()'s await below;
   // awaited before routing, since a deep-linked scene's enterViz() makes the
   // first autoStartSource() call.

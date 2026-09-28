@@ -224,6 +224,36 @@
       #sceneNav .iconBtn:hover {
         border-color: rgba(255, 255, 255, 0.4);
       }
+      /* The build's version (src/version.ts's versionLabel), as plain text at
+       * the end of the row rather than a chip — it's read, not pressed; its
+       * hint (src/ui/tooltip.ts's bindHint, wired in app.ts) carries the
+       * rest. Colour is set from app.ts: dim on stable, amber elsewhere.
+       * app.ts's updateSceneVersionLabel() fills this with "<Scene name>
+       * <its version>", a dim middle dot, then the build's own label — or,
+       * with no scene version to show, just the build's label as plain text
+       * (this rule's own dim colour, same as always). */
+      #sceneVersion {
+        display: none;
+        margin-left: 8px;
+        font: 400 11px/36px "Share Tech Mono", ui-monospace, monospace;
+        letter-spacing: 0.1em;
+        color: rgba(255, 255, 255, 0.45);
+        white-space: nowrap;
+        cursor: help;
+        outline: none;
+        transition: opacity 0.4s;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+      }
+      /* The scene name + its own version, brighter than the build label
+       * beside it — #f9b96c below is controlsTheme.ts's BANDS_AMBER, kept in
+       * sync by hand like every other colour in this plain (not templated)
+       * file. */
+      #sceneVersion .svScene {
+        color: rgba(255, 255, 255, 0.92);
+      }
+      #sceneVersion .svDev {
+        color: #f9b96c;
+      }
       /* Every button in this row says what it does in words — a bare square
        * or grid glyph read as nothing in particular. */
       #sceneNav .iconBtn {
@@ -258,7 +288,8 @@
         cursor: none;
       }
       body.chrome-idle .iconBtn,
-      body.chrome-idle #roomCode {
+      body.chrome-idle #roomCode,
+      body.chrome-idle #sceneVersion {
         opacity: 0;
         pointer-events: none;
       }
@@ -453,6 +484,7 @@
       <button id="backBtn" class="iconBtn" aria-label="Back to gallery">&#8249; GALLERY</button>
       <button id="stopBtn" class="iconBtn" title="Stop listening and release the audio source">STOP MIC</button>
       <button id="panelBtn" class="iconBtn" title="Screens paired to this room">&#9638; ROOM</button>
+      <span id="sceneVersion" tabindex="0"></span>
     </div>
     <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false" data-key="fullscreen" data-keycap="F">&#9974;</button>
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)" data-key="panel" data-keycap="S">

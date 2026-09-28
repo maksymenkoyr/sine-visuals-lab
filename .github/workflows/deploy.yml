@@ -1,5 +1,17 @@
-# Checks every pull request; builds and deploys the Worker on every push to main;
-# deploys a throwaway preview Worker for every open pull request.
+# Checks every pull request; builds and deploys the Insider channel on every push
+# to main; deploys a throwaway preview Worker for every open pull request.
+#
+# Insider (wrangler.toml's `[env.insider]`, the Worker `audio-viz-room-insider` on
+# insider.sinevisualslab.com) is the channel that tracks main automatically —
+# every push here ships there within minutes, no one has to decide to release
+# it. The **Stable** channel (the top-level Worker, sinevisualslab.com and
+# www) is deliberately not touched by this workflow at all: it only changes
+# when main is merged into the `production` branch, which runs
+# `.github/workflows/release.yml` — see that workflow's own header for why a
+# separate, deliberate step, and src/version.ts for what the two channels
+# mean to a visitor. Each Insider build's version is the last release's
+# MAJOR.MINOR with the patch counting merges since
+# (tools/appVersionLib.mjs).
 #
 # The build step is not optional decoration: `wrangler deploy` uploads ./dist
 # (the [assets] block in wrangler.toml) but never builds it, and dist/ is
@@ -13,7 +25,7 @@
 # sticky comment on the PR — mic and phone/TV pairing both work there, since
 # workers.dev is HTTPS and the client talks to its own origin. Dev-only features
 # (tuning overrides, pins) are compiled out of a build, so a preview shows what
-# prod would, not what `npm run dev` shows.
+# a real deploy would, not what `npm run dev` shows.
 #
 # Previews only run for PRs from branches in this repo: a PR from a fork has no
 # access to the Cloudflare secrets, so its deploy step is skipped by the `if`.
@@ -42,14 +54,24 @@ jobs:
       contents: read
       # For the sticky preview-URL comment.
       pull-requests: write
-    # Serialize prod deploys so two merges landing close together can't race
+    # Serialize Insider deploys so two merges landing close together can't race
     # each other onto the Worker; previews serialize per PR instead, so a burst
     # of pushes settles on the last one without blocking other PRs.
     concurrency:
-      group: ${{ github.event_name == 'pull_request' && format('preview-{0}', github.event.number) || 'deploy-main' }}
+      group: ${{ github.event_name == 'pull_request' && format('preview-{0}', github.event.number) || 'deploy-insider' }}
       cancel-in-progress: false
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history and every branch (including origin/production) for
+          # every event, not just a push to main: an Insider build counts its
+          # own patch version from them (tools/app-version.mjs), and now a PR
+          # build needs them too — every scene's own version
+          # (tools/sceneVersionLib.mjs) is counted the same way, so a preview
+          # build carries them just like Insider does.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -58,19 +80,70 @@ jobs:
 
       - run: npm ci
 
-      # The gates named in CLAUDE.md. typecheck covers both tsconfigs, so the
-      # Worker source is checked before it ships.
+      # The gates named in AGENTS.md. typecheck covers both tsconfigs, so the
+      # Worker source is checked before it ships. They gate every deploy this
+      # workflow makes (Insider and every preview) — Stable's own gates are
+      # release.yml's own npm ci/typecheck/test steps, run again there against
+      # the production commit being released.
       - run: npm run typecheck
       - run: npm run test
 
-      - run: npm run build
+      - name: Pick the Insider version
+        id: version
+        if: github.event_name == 'push'
+        # Assigned first so a failure fails the step (an `echo "$(…)"` would
+        # swallow it and ship an unversioned build).
+        run: |
+          version=$(node tools/app-version.mjs insider)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "### Insider $version - beta" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Deploy to Cloudflare
+      # SVL_CHANNEL picks src/version.ts's channel: "preview" on a pull
+      # request, "insider" on a push to main — there's no third case this
+      # workflow builds. SVL_COMMIT/SVL_PR are passed explicitly because the
+      # commit this job actually built isn't always `git rev-parse HEAD` in
+      # this checkout: a pull_request event checks out a merge commit of the
+      # PR branch into main, so HEAD is that synthetic merge, not the PR's own
+      # head commit a reader would recognize.
+      - run: npm run build
+        env:
+          SVL_CHANNEL: ${{ github.event_name == 'pull_request' && 'preview' || 'insider' }}
+          SVL_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          SVL_PR: ${{ github.event.pull_request.number }}
+          # Empty on a pull request (the step above is skipped) — a preview
+          # carries no version.
+          SVL_VERSION: ${{ steps.version.outputs.version }}
+
+      # Every scene's own version (tools/sceneVersionLib.mjs), straight from
+      # the build's own version.json rather than a second git read — `node
+      # -e`, not `jq`, so this needs nothing beyond the `actions/setup-node`
+      # step above. Push only: a PR preview's build carries `scenes` too now
+      # (the fetch-depth fix above), but its summary is the sticky preview
+      # comment below, not this job's own.
+      - name: Scene versions summary
+        if: github.event_name == 'push'
+        run: |
+          # shellcheck disable=SC2016  # backticks/`${…}` below are JS template literals for node -e, not shell
+          node -e '
+          const fs = require("fs");
+          const info = JSON.parse(fs.readFileSync("dist/version.json", "utf8"));
+          const scenes = info.scenes || {};
+          const units = Object.keys(scenes).sort();
+          if (units.length === 0) process.exit(0);
+          const rows = units.map((u) => `| ${u} | ${scenes[u]} |`);
+          const table = ["", "### Scene versions", "", "| Scene | Version |", "|---|---|", ...rows, ""].join("\n");
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
+          '
+
+      - name: Deploy to Insider
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # --tag/--message label this deploy in Cloudflare's own Deployments
+          # list with the same version the site shows.
+          command: deploy --env insider --tag v${{ steps.version.outputs.version }}-beta --message "Insider ${{ steps.version.outputs.version }} - beta, commit ${{ github.sha }}"
 
       - name: Deploy PR preview
         id: preview
@@ -147,6 +220,31 @@ jobs:
   # the "other Workers depend on this" check, which can't apply to a Worker
   # nothing else binds to. A preview that never deployed (fork PR, or the gates
   # failed on every push) makes this a harmless "not found".
+  # Tags each Insider build `vX.Y.Z-beta` on the commit it shipped, so the
+  # version the site shows can be found in git (`git fetch --tags`). A job of
+  # its own because it needs write access, which the ship job — running a
+  # pull request's code on PR events — shouldn't hold. It checks nothing out
+  # and runs no repo code: one API call. The `-beta` suffix keeps these out of
+  # the release count (tools/appVersionLib.mjs reads strict vX.Y.Z only), and
+  # GitHub Releases are only ever made for Stable (release.yml).
+  tag-insider:
+    needs: ship
+    if: github.event_name == 'push' && needs.ship.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Tag the Insider build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.ship.outputs.version }}-beta
+        run: |
+          if gh api "repos/${{ github.repository }}/git/refs" -f ref="refs/tags/$TAG" -f sha="${{ github.sha }}" >/dev/null; then
+            echo "Tagged $TAG" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Couldn't create $TAG (already there from a re-run?)"
+          fi
+
   teardown-preview:
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
