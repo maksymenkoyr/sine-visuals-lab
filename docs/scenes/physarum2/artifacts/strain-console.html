@@ -95,8 +95,13 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
 .knobs { display: grid; grid-template-columns: 92px repeat(4, minmax(0, 1fr)); row-gap: 6px; column-gap: 4px; align-items: center; }
 .knobs .hd { font: 11px var(--mono); text-align: center; }
 .knobs .lbl { font-size: 12.5px; color: var(--ink-2); display: flex; align-items: center; gap: 4px; line-height: 1.15; }
-.knob { display: grid; justify-items: center; gap: 1px; cursor: ns-resize; touch-action: none; outline: none; border-radius: 6px; padding: 3px 0; }
+.knob { display: grid; justify-items: center; gap: 1px; cursor: move; touch-action: none; outline: none; border-radius: 6px; padding: 3px 0; }
 .knob:hover, .knob:focus-visible { background: rgba(255, 255, 255, 0.05); }
+.knob.active { background: rgba(195, 165, 249, 0.1); box-shadow: 0 0 0 1px rgba(195, 165, 249, 0.4); }
+.knob.active .kv { color: #fff; }
+.knobs .lbl.on { color: var(--violet); }
+.knobs .hd { transition: text-shadow 0.12s ease; }
+.knobs .hd.on { text-shadow: 0 0 8px currentColor; }
 .knob svg { width: 34px; height: 34px; display: block; }
 .knob .kv { font: 10px var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
@@ -123,7 +128,7 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
         <div class="beat"><i id="beatDot"></i>124 BPM</div>
         <button class="reseed" id="reseedBtn" type="button">Reseed</button>
       </div>
-      <p class="stage-note">Hover a row to read what it does. Drag a lane or a knob; double-click to reset it. With Link on, dragging one strain moves all four by the same amount.</p>
+      <p class="stage-note">Hover a row to read what it does. Drag a lane or a knob (knobs any way: right or up = more); double-click to reset it. With Link on, or Alt on a knob, dragging one strain moves all four by the same amount; Shift on a knob is fine steps.</p>
     </section>
 
     <section class="panel" aria-label="Strains card">
@@ -153,7 +158,7 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
       </div>
 
       <div class="card" id="knobsCard" hidden>
-        <div class="card-head"><span class="card-title">Per strain</span><span class="how">drag a knob up or down</span></div>
+        <div class="card-head"><span class="card-title">Per strain</span><span class="how">drag any way: right or up = more</span></div>
         <div class="knobs" id="knobs"></div>
       </div>
     </section>
@@ -171,7 +176,7 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
     <article class="note">
       <h3>Knobs</h3>
       <dl>
-        <dt>You do</dt><dd>A small knob per strain per setting; drag up or down.</dd>
+        <dt>You do</dt><dd>A small knob per strain per setting; drag any way, right or up turns it up. Hold Shift for fine steps, Alt to turn all four strains together. The small tick is the default; double-click goes back to it.</dd>
         <dt>Good</dt><dd>Compact, reads like a mixer, a strain's whole character is one column.</dd>
         <dt>Costs</dt><dd>Knobs are harder to set exactly and to compare than lanes.</dd>
       </dl>
@@ -452,6 +457,7 @@ function buildKnobs() {
   PARAMS.forEach((p) => {
     const l = document.createElement("div");
     l.className = "lbl";
+    const lbl = l;
     l.innerHTML = `${p.label}${p.isNew ? ' <span class="new">NEW</span>' : ""}`;
     l.title = p.hint;
     host.appendChild(l);
@@ -459,19 +465,37 @@ function buildKnobs() {
       const kn = document.createElement("div");
       kn.className = "knob"; kn.tabIndex = 0;
       kn.setAttribute("role", "slider"); kn.setAttribute("aria-label", `${p.label} ${CODES[k]}`);
-      kn.innerHTML = `<svg viewBox="0 0 34 34" aria-hidden="true"><path class="bg" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="3" stroke-linecap="round"/><path class="fg" fill="none" stroke-width="3" stroke-linecap="round"/><line class="nd" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg><span class="kv"></span>`;
+      kn.innerHTML = `<svg viewBox="0 0 34 34" aria-hidden="true"><path class="bg" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="3" stroke-linecap="round"/><path class="fg" fill="none" stroke-width="3" stroke-linecap="round"/><line class="df" stroke="rgba(255,255,255,.55)" stroke-width="1.5" stroke-linecap="round"/><line class="nd" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg><span class="kv"></span>`;
       const bg = kn.querySelector(".bg"), fg = kn.querySelector(".fg"), nd = kn.querySelector(".nd"), kv = kn.querySelector(".kv");
       bg.setAttribute("d", arcPath(13, A0, A0 + ARC));
+      // The default, as a small tick just outside the arc.
+      const ad = A0 + ARC * ((p.def[k] - p.min) / (p.max - p.min)), df = kn.querySelector(".df");
+      df.setAttribute("x1", (17 + 14.5 * Math.cos(ad)).toFixed(2)); df.setAttribute("y1", (17 + 14.5 * Math.sin(ad)).toFixed(2));
+      df.setAttribute("x2", (17 + 17 * Math.cos(ad)).toFixed(2)); df.setAttribute("y2", (17 + 17 * Math.sin(ad)).toFixed(2));
+      // Drag any way: right and up both add, left and down both take away,
+      // KNOB_PX of travel sweeps the whole range. Shift is 1/5 the speed; Alt
+      // moves all four strains by the same amount (the lanes' Link). Each
+      // move is applied from the last pointer position, so pressing or
+      // releasing Shift/Alt mid-drag never jumps the value.
+      const KNOB_PX = 140;
       let drag = null;
-      kn.addEventListener("pointerdown", (e) => { e.preventDefault(); kn.focus(); kn.setPointerCapture(e.pointerId); drag = { y: e.clientY, v: V[p.key][k] }; });
-      kn.addEventListener("pointermove", (e) => { if (!drag) return; setVal(p, k, drag.v + ((drag.y - e.clientY) / 140) * (p.max - p.min), false); });
-      kn.addEventListener("pointerup", () => { drag = null; });
-      kn.addEventListener("pointercancel", () => { drag = null; });
+      const on = (x) => { kn.classList.toggle("active", x); lbl.classList.toggle("on", x); heads[k].classList.toggle("on", x); };
+      kn.addEventListener("pointerdown", (e) => { e.preventDefault(); kn.focus(); kn.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY }; on(true); });
+      kn.addEventListener("pointermove", (e) => {
+        if (!drag) return;
+        const px = (e.clientX - drag.x) + (drag.y - e.clientY);
+        drag.x = e.clientX; drag.y = e.clientY;
+        const d = (px / KNOB_PX) * (p.max - p.min) * (e.shiftKey ? 0.2 : 1);
+        setVal(p, k, V[p.key][k] + d, e.altKey);
+      });
+      const end = () => { drag = null; on(false); };
+      kn.addEventListener("pointerup", end);
+      kn.addEventListener("pointercancel", end);
       kn.addEventListener("dblclick", () => setVal(p, k, p.def[k], false));
       kn.addEventListener("keydown", (e) => {
         const s = (p.max - p.min) * (e.shiftKey ? 0.1 : 0.01);
-        if (e.key === "ArrowUp" || e.key === "ArrowRight") setVal(p, k, V[p.key][k] + s, false);
-        else if (e.key === "ArrowDown" || e.key === "ArrowLeft") setVal(p, k, V[p.key][k] - s, false);
+        if (e.key === "ArrowUp" || e.key === "ArrowRight") setVal(p, k, V[p.key][k] + s, e.altKey);
+        else if (e.key === "ArrowDown" || e.key === "ArrowLeft") setVal(p, k, V[p.key][k] - s, e.altKey);
         else return;
         e.preventDefault();
       });
