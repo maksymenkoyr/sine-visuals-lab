@@ -82,7 +82,8 @@ import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
-import { createAudioMeters, createMeterRow } from "./audioMeters.ts";
+import { createAudioMeters, createMeterRow, createTraceStrip } from "./audioMeters.ts";
+import { PICTURE_MEASURES, displayLevel, type PictureReading } from "../render/pictureMeter.ts";
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
 import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
@@ -534,6 +535,12 @@ export interface DeviceMenuDeps {
    *  nor sent to the TV. */
   getSceneMaster: () => number;
   onSceneMasterChange: (value: number) => void;
+  /** This tick's picture reading for the Master card's Picture block — null
+   *  whenever the meter has gone stale (the panel was just opened, or
+   *  nothing has forced sampling with the panel closed) rather than a frozen
+   *  last value. See src/render/pictureMeter.ts for what each measure
+   *  means. */
+  getPictureReading: () => PictureReading | null;
   /** Dev-only: read/write/clear an unclamped pin for a param row (see
    *  tuning/pins.ts) — its presence is what turns a row's readout into a
    *  typable field, and its absence in a production build is what hides
@@ -4187,6 +4194,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // not disappear on a scene that declares no settings of its own — those
   // scenes simply have nothing for it to move. The Scene card's violet,
   // because what it scales is that card's contents.
+  //
+  // Below the Scale row, the Picture block answers "how intense is the
+  // *picture*, in every way" — five compact traces (Brightness/Colour/
+  // Motion/Detail/Flashes), measured from the rendered frame itself rather
+  // than from any setting or drive, since a setting carries no "more
+  // intense" direction of its own. See src/render/pictureMeter.ts for what
+  // each measure means and why; tools/master-sweep.mjs walks the same five
+  // numbers across every scene and every Scale value headlessly.
   const masterCard = createCard({ title: "Master", accent: SCENE_VIOLET });
   markBlock(masterCard.title);
   const masterRow = createControlRow({
@@ -4203,6 +4218,51 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
   masterRow.onChange((value) => deps.onSceneMasterChange(value));
   masterCard.body.appendChild(masterRow.el);
+
+  // Picture block — see the comment above const masterCard. A plain
+  // .vc-row/.vc-hint block (not createMeterRow's bar-meter shape: there's no
+  // single "amount" here to fill a track with, just five independent
+  // readouts), one grid row per PICTURE_MEASURES entry: caption · 10s trace
+  // (createTraceStrip, exported from audioMeters.ts for this) · 0-100
+  // readout. caption uses the same register as powerCard.ts's own
+  // readoutCaptionStyle (kept local — the two files' row shapes otherwise
+  // share nothing worth a third file).
+  const pictureHeading = groupHeading("Picture");
+  const pictureCaptionStyle = `
+    font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
+    color: rgba(255,255,255,0.5); white-space: nowrap;
+  `;
+  // digitsTextStyle for "--": DSEG7 (digitsStyle's face) has no dashes — the
+  // same textual/digits swap createMeterRow's own setReadout makes.
+  const pictureReadoutDigitsStyle = `${digitsStyle} font-size: 11px; color: #fff; display: block; text-align: right;`;
+  const pictureReadoutTextStyle = `${digitsTextStyle} font-size: 11px; color: #fff; display: block; text-align: right;`;
+  const pictureBlock = document.createElement("div");
+  pictureBlock.className = "vc-row";
+  pictureBlock.tabIndex = 0;
+  pictureBlock.style.setProperty("--vc-accent", SCENE_VIOLET);
+  const pictureGrid = document.createElement("div");
+  pictureGrid.style.cssText = `display: grid; grid-template-columns: 76px minmax(0, 1fr) 26px; align-items: center; gap: 5px 8px;`;
+  const pictureHint = document.createElement("div");
+  pictureHint.className = "vc-hint";
+  setHintText(
+    pictureHint,
+    "Measured from the picture itself, 15 times a second, over the last 10 s. 100 is about as far as scenes go; a few go further and stay pinned at 100.",
+  );
+  const pictureRows = PICTURE_MEASURES.map((measure) => {
+    const caption = document.createElement("div");
+    caption.textContent = measure.label;
+    caption.title = measure.description;
+    caption.style.cssText = pictureCaptionStyle;
+    const strip = createTraceStrip([{ color: SCENE_VIOLET, width: 1.5 }], 18);
+    strip.canvas.style.marginTop = "0";
+    const readout = document.createElement("span");
+    readout.style.cssText = pictureReadoutTextStyle;
+    readout.textContent = "--";
+    pictureGrid.append(caption, strip.canvas, readout);
+    return { measure, strip, readout, lastText: "--" };
+  });
+  pictureBlock.append(pictureGrid, pictureHint);
+  masterCard.body.append(pictureHeading, pictureBlock);
 
   // Binds a row's typed-entry field to deps.devPin for one (scene, key) —
   // undefined (no typable readout) whenever devPin itself is, i.e. every
@@ -5700,6 +5760,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // AUTO_UI_REFRESH_MS's 10 Hz).
   const SPARKLINE_REFRESH_MS = 1000 / 30;
   let lastSparklineMs = 0;
+  // The Picture block's five readouts (its traces redraw every tick, same
+  // reasoning as the sparklines above); the readout text itself rides this
+  // slower cadence, same reasoning and rate as AUTO_UI_REFRESH_MS but kept
+  // separate since the two blocks' DOM writes are otherwise independent.
+  const PICTURE_TEXT_REFRESH_MS = 100;
+  let lastPictureTextMs = 0;
 
   return {
     toggle() {
@@ -5815,6 +5881,27 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         lastSparklineMs = nowMs;
         for (const h of driveRowHandles) h.tickSparkline(drives, frame, anim);
         activeOutputTick?.(drives);
+      }
+
+      // Picture: five compact traces of the finished frame's own measured
+      // intensity (src/render/pictureMeter.ts) — drawn every tick, same
+      // reasoning as the sparklines above (canvas draws are cheap; a DOM
+      // write is what's throttled). deps.getPictureReading() is null
+      // whenever the meter's gone stale, which a null level draws as a gap
+      // in the trace and "--" in the readout, same as every other meter row.
+      const pictureReading = deps.getPictureReading();
+      const pictureTextDue = nowMs - lastPictureTextMs >= PICTURE_TEXT_REFRESH_MS;
+      if (pictureTextDue) lastPictureTextMs = nowMs;
+      for (const row of pictureRows) {
+        const level = displayLevel(row.measure, pictureReading ? pictureReading[row.measure.key] : null);
+        row.strip.push([level], nowMs);
+        row.strip.draw();
+        if (!pictureTextDue) continue;
+        const text = level === null ? "--" : String(Math.round(level * 100));
+        if (text === row.lastText) continue;
+        row.lastText = text;
+        row.readout.textContent = text;
+        row.readout.style.cssText = text === "--" ? pictureReadoutTextStyle : pictureReadoutDigitsStyle;
       }
 
       if (nowMs - lastAutoRefreshMs < AUTO_UI_REFRESH_MS) return;
