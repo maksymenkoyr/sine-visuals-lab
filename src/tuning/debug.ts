@@ -32,9 +32,23 @@ import { applyTuningParams, initTuningBus, type TuningParams } from "./bus.ts";
 import { clearAllPins } from "./pins.ts";
 import { mountTuningUI } from "./ui.ts";
 import { bakeDefaults, bakeEdits, type BakeResponse, type DefaultEdit } from "./bakeDefaults.ts";
+import { PICTURE_MEASURES, type PictureMeasure, type PictureReading } from "../render/pictureMeter.ts";
 
 export interface TuningDeps {
   getInput: () => ProbeInput;
+  /** The Master card's Picture block's own live state — see
+   *  src/render/pictureMeter.ts. Optional: absent whenever app.ts hasn't
+   *  wired it (there's only ever one caller, but the shape stays optional so
+   *  a `pictureForce`/`picture`/`pictureReset` call from a stale page fails
+   *  with a clear error rather than a silent no-op). */
+  picture?: {
+    force: (on: boolean) => void;
+    read: () => { latest: PictureReading | null; mean: PictureReading; samples: number };
+    reset: () => void;
+  };
+  /** tools/master-sweep.mjs's own knobs — see api.setMaster/api.scenes below. */
+  setMaster?: (v: number) => void;
+  scenes?: () => { id: string; name: string; draft: boolean; paid: boolean }[];
 }
 
 /** Cheap, side-effect-free onset readout for a headless driver polling every
@@ -84,6 +98,34 @@ interface VizDebugApi {
    *  call only on a detected onset edge, not every tick (see
    *  AudioBufferSnapshot's own comment). */
   audioBuffer(): AudioBufferSnapshot;
+  /** Samples the picture even with the panel closed (normally only an open
+   *  panel pays for it) — what tools/master-sweep.mjs turns on before it
+   *  starts averaging a (scene, master value) point. Throws if deps.picture
+   *  isn't wired. */
+  pictureForce(on: boolean): void;
+  /** This tick's picture reading plus the running mean since the last
+   *  pictureReset() — see src/render/pictureMeter.ts's PictureReading/
+   *  PictureAverager. Throws if deps.picture isn't wired. */
+  picture(): { latest: PictureReading | null; mean: PictureReading; samples: number };
+  /** Zeroes the running mean pictureReset() reads back via picture().mean —
+   *  tools/master-sweep.mjs calls this once a (scene, master value) point has
+   *  settled, so the mean it reads afterward only covers its own measurement
+   *  window. Throws if deps.picture isn't wired. */
+  pictureReset(): void;
+  /** The five measures' labels/fullScale/description, straight off
+   *  PICTURE_MEASURES — what tools/master-sweep.mjs's sweep.json records so a
+   *  reader doesn't have to already know pictureMeter.ts's own constants. */
+  pictureMeasures(): { key: PictureMeasure["key"]; label: string; fullScale: number; description: string }[];
+  /** Sets the device-wide scene master (sceneSettings.ts's getSceneMaster) —
+   *  the scripted twin of dragging the Master card's Scale row. (The sweep
+   *  itself pins the value in localStorage before load instead, so a point
+   *  starts at its value from the first frame.) Throws if deps.setMaster
+   *  isn't wired. */
+  setMaster(v: number): void;
+  /** Every registered scene's id/name/draft/paid — tools/master-sweep.mjs's
+   *  scene list (`--scenes all|featured|id,id` resolves against this).
+   *  Throws if deps.scenes isn't wired. */
+  scenes(): { id: string; name: string; draft: boolean; paid: boolean }[];
 }
 
 type CaptureMeta = ProbeSnapshot & { kind: "mark" | "clip" };
@@ -237,6 +279,27 @@ export function initTuning(deps: TuningDeps): void {
     audioBuffer: () => {
       const input = deps.getInput();
       return { mono: input.deepMono ? Array.from(input.deepMono) : null, sampleRate: input.sampleRate ?? null };
+    },
+    pictureForce: (on) => {
+      if (!deps.picture) throw new Error("tuning/debug: picture not wired");
+      deps.picture.force(on);
+    },
+    picture: () => {
+      if (!deps.picture) throw new Error("tuning/debug: picture not wired");
+      return deps.picture.read();
+    },
+    pictureReset: () => {
+      if (!deps.picture) throw new Error("tuning/debug: picture not wired");
+      deps.picture.reset();
+    },
+    pictureMeasures: () => PICTURE_MEASURES.map(({ key, label, fullScale, description }) => ({ key, label, fullScale, description })),
+    setMaster: (v) => {
+      if (!deps.setMaster) throw new Error("tuning/debug: setMaster not wired");
+      deps.setMaster(v);
+    },
+    scenes: () => {
+      if (!deps.scenes) throw new Error("tuning/debug: scenes not wired");
+      return deps.scenes();
     },
   };
   (window as unknown as { __viz: VizDebugApi }).__viz = api;

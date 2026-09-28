@@ -609,14 +609,16 @@ function createColumnRing(seriesCount: number, heightPx: number) {
 
 /** A rolling line-trace view over createColumnRing — the Signal card's
  *  History (three series: level, energy, the fixed-mapping reference), the
- *  Character card's Centroid trace (one series, no legend) and the Gate
- *  card's History (its own series plus `guides`) all drive one of these.
+ *  Character card's Centroid trace (one series, no legend), the Gate card's
+ *  History (its own series plus `guides`) and, exported for it, the Master
+ *  card's Picture block (deviceMenu.ts — five one-series strips, one per
+ *  src/render/pictureMeter.ts measure) all drive one of these.
  *
  *  `guides`, when given, replaces draw()'s own fixed mid-height line with
  *  dashed horizontal lines at each entry's `at` (0..1, the same y scale the
  *  series use) — the Gate History's two Input-card marks. Read fresh every
  *  draw() call (not cached), since a mark can move while the card is open. */
-function createTraceStrip(series: TraceStripSeries[], heightPx: number, guides?: () => TraceStripGuide[]) {
+export function createTraceStrip(series: TraceStripSeries[], heightPx: number, guides?: () => TraceStripGuide[]) {
   const ring = createColumnRing(series.length, heightPx);
   const { canvas, ctx } = ring;
   const yOf = (v: number) => 1 + (1 - clamp(v, 0, 1)) * (heightPx - 2);
