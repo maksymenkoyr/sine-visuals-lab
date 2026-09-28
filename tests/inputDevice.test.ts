@@ -10,6 +10,7 @@ import {
   deviceLabel,
   isInputHidden,
   setInputHidden,
+  previewWouldDisturb,
 } from "../src/audio/inputDevice.ts";
 
 describe("hidden inputs", () => {
@@ -124,6 +125,19 @@ describe("inputKind", () => {
     expect(inputKind("BlackHole 2ch")).toBe("loopback");
     expect(inputKind("Stereo Mix (Realtek)")).toBe("loopback");
     expect(inputKind("AirPods Pro")).toBe("mic");
+    expect(inputKind("WH-1000XM4 (Bluetooth)")).toBe("mic");
+  });
+});
+
+describe("previewWouldDisturb", () => {
+  it("skips Bluetooth headsets and phone mics, not interfaces or built-in mics", () => {
+    expect(previewWouldDisturb("AirPods (Bluetooth)")).toBe(true);
+    expect(previewWouldDisturb("WH-1000XM4 (Bluetooth)")).toBe(true);
+    expect(previewWouldDisturb("Headset (Bose QC35 II Hands-Free AG Audio)")).toBe(true);
+    expect(previewWouldDisturb("Yaro's iPhone Microphone")).toBe(true);
+    expect(previewWouldDisturb("MacBook Pro Microphone (Built-in)")).toBe(false);
+    expect(previewWouldDisturb("USB Audio CODEC (08bb:2902)")).toBe(false);
+    expect(previewWouldDisturb("BlackHole 2ch (Virtual)")).toBe(false);
   });
 });
 

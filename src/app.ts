@@ -10,6 +10,7 @@ import {
   deviceLabel,
   isInputHidden,
   setInputHidden,
+  previewWouldDisturb,
   inputKind,
   INPUT_KIND_TEXT,
   type InputDevicePref,
@@ -692,7 +693,9 @@ async function refreshInputDevices(): Promise<MediaDeviceInfo[]> {
  *  that can change what it should be previewing: refreshInputDevices()
  *  itself (a new/removed device), and attachCapture/onCaptureEnded (which
  *  input is LIVE, and so excluded from the preview, changes independently of
- *  the device list). */
+ *  the device list). Hidden inputs and ones a preview would disturb
+ *  (Bluetooth headsets, an iPhone's mic — previewWouldDisturb in
+ *  src/audio/inputDevice.ts) are never opened either. */
 let inputPreview: InputPreview | null = null;
 let inputPreviewActive = false;
 
@@ -704,7 +707,11 @@ function syncInputPreview(): void {
   }
   if (!inputPreview) inputPreview = createInputPreview();
   const live = liveInputLabel();
-  inputPreview.sync(inputDevices.filter((o) => o.label !== live && !isInputHidden(o.label)).map((o) => o.deviceId));
+  inputPreview.sync(
+    inputDevices
+      .filter((o) => o.label !== live && !isInputHidden(o.label) && !previewWouldDisturb(o.label))
+      .map((o) => o.deviceId),
+  );
 }
 
 /** An input was plugged in or pulled. Besides refreshing the dropdown: if the

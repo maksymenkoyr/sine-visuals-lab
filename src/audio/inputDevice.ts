@@ -188,7 +188,9 @@ export function isMissingDeviceError(err: unknown): boolean {
  *  Soundflower, VB-Cable, a generic "virtual" device, Windows' Stereo Mix,
  *  "What U Hear") is checked first because some carry "mic" in their own
  *  name too (e.g. a virtual "microphone" driver); a mic-shaped name (mic,
- *  microphone, headset, AirPods, a webcam/camera's built-in mic) next;
+ *  microphone, headset, AirPods, any Bluetooth headset — Chrome on macOS
+ *  suffixes its name "(Bluetooth)", Windows calls it "Hands-Free" — a
+ *  webcam/camera's built-in mic) next;
  *  anything else — a USB audio interface, a mixer's own sound card — is
  *  "line": a cable feeding in something that isn't this device's own
  *  mic. Used for the Input card's Source row (src/ui/deviceMenu.ts) and the
@@ -197,12 +199,27 @@ export function isMissingDeviceError(err: unknown): boolean {
 export type InputKind = "mic" | "line" | "loopback";
 
 const LOOPBACK_RE = /blackhole|loopback|soundflower|vb-?cable|virtual|stereo mix|what u hear/i;
-const MIC_RE = /mic|microphone|headset|airpods|webcam|camera/i;
+const MIC_RE = /mic|microphone|headset|airpods|bluetooth|hands-free|webcam|camera/i;
 
 export function inputKind(label: string): InputKind {
   if (LOOPBACK_RE.test(label)) return "loopback";
   if (MIC_RE.test(label)) return "mic";
   return "line";
+}
+
+/** Inputs the Source row's idle preview (src/audio/inputPreview.ts) must
+ *  never open just to draw a meter. Opening a Bluetooth headset's mic
+ *  (AirPods included) drops its playback to call quality for as long as the
+ *  stream stays open; opening an iPhone's or iPad's Continuity mic makes the
+ *  phone chime and show a "connected" screen. Chrome on macOS suffixes a
+ *  Bluetooth input's name "(Bluetooth)" (and renames any AirPods to "AirPods
+ *  (Bluetooth)"), Windows calls one "Hands-Free", and a Continuity mic carries
+ *  only the phone's name — so this is a name check, and a Bluetooth headset
+ *  whose name says none of that (Firefox adds no suffix) still gets a meter. */
+const NO_PREVIEW_RE = /\(bluetooth\)|hands-free|airpods|\biphone\b|\bipad\b/i;
+
+export function previewWouldDisturb(label: string): boolean {
+  return NO_PREVIEW_RE.test(label);
 }
 
 /** The Source row's per-kind tag + tooltip, and the words src/app.ts's
