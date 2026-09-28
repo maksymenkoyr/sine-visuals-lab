@@ -77,6 +77,12 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
 .share .seg + .seg { box-shadow: inset 1px 0 0 rgba(0, 0, 0, 0.55); }
 .single { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 8px; }
 .single .v { font: 11px var(--mono); text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+/* stain synergy: slider beside a small hue wheel */
+.syn { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 14px; }
+.wheel { position: relative; width: 64px; height: 64px; }
+.wheel .ring { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(hsl(0 90% 58%), hsl(60 90% 58%), hsl(120 90% 58%), hsl(180 90% 58%), hsl(240 90% 58%), hsl(300 90% 58%), hsl(360 90% 58%)); opacity: 0.55; -webkit-mask: radial-gradient(circle, transparent 60%, #000 61%); mask: radial-gradient(circle, transparent 60%, #000 61%); }
+.wheel svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.row-head .harm { font: 11px var(--mono); color: var(--ink-3); }
 
 /* lanes */
 .lanes { display: grid; gap: 3px; }
@@ -185,6 +191,7 @@ h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
       <h3>In the app</h3>
       <dl>
         <dt>Settings</dt><dd>Each lane or knob is the existing per-strain setting (nutrient, excite, sensor, turn, stride, stain), so pressing one pins that strain's setting and opens its Receives patch as today. Sensor angle and Trail life would be new per-strain settings.</dd>
+        <dt>Synergy</dt><dd>One scene-wide setting. The stored stains stay what you set; the scene shows them pulled toward the nearest harmony, so turning Synergy down gives your own colours back.</dd>
         <dt>Headcount</dt><dd>Replaces the hand-set Share bar: the split is a result of the other settings. In the scene, the sim pass would rewrite an agent's strain when another strain's ink per agent outweighs its own, a floor keeps every strain alive, and the counts come from a readback instead of being tracked in JS. The pipette and Rebalance keep working on top.</dd>
         <dt>Replaces</dt><dd>The one-strain-at-a-time rows and the tap / checkbox selection. The live previews stay, smaller.</dd>
       </dl>
@@ -215,6 +222,56 @@ const V = {};
 const updaters = [];
 PARAMS.forEach((p) => { V[p.key] = p.def.slice(); });
 const fmtOf = (p) => p.fmt ?? ((v) => v.toFixed(2));
+
+// ---------- stain synergy ----------
+// Stain is stored twice: rawStain is what you set; V.stain is what's shown,
+// rawStain pulled toward the nearest harmony by Synergy (0 = exactly what you
+// set, 1 = exactly the harmony). "Nearest" tries every harmony in HARMONIES,
+// every way of giving the four strains its four places, and — with no anchor
+// — the best rotation; with an anchor (the stain you last set by hand) the
+// rotation is fixed so that stain stays exactly where you put it and the
+// other three move. The current harmony is kept unless another fits clearly
+// better (HARMONY_STICK), so a drag doesn't flicker between two that fit
+// about as well. Hues are in turns (0..1) throughout.
+const HARMONIES = [
+  { name: "Square", at: [0, 90, 180, 270] },
+  { name: "Rectangle", at: [0, 60, 180, 240] },
+  { name: "Two pairs", at: [0, 30, 180, 210] },
+  { name: "Split", at: [0, 150, 180, 210] },
+  { name: "Analogous", at: [0, 30, 60, 90] },
+];
+const PERMS = [];
+(function perm(a, rest) { if (!rest.length) { PERMS.push(a); return; } rest.forEach((x, i) => perm([...a, x], rest.filter((_, j) => j !== i))); })([], [0, 1, 2, 3]);
+const wrapTurn = (d) => d - Math.round(d);
+const unitTurn = (h) => ((h % 1) + 1) % 1;
+const HARMONY_STICK = 1.6;
+function nearestHarmony(h, anchor, keep) {
+  let best = null, kept = null;
+  for (const hm of HARMONIES) for (const pm of PERMS) {
+    const off = pm.map((j) => hm.at[j] / 360);
+    let rot;
+    if (anchor >= 0) rot = h[anchor] - off[anchor];
+    else {
+      let sx = 0, sy = 0;
+      for (let i = 0; i < 4; i++) { const a = (h[i] - off[i]) * 2 * Math.PI; sx += Math.cos(a); sy += Math.sin(a); }
+      rot = Math.atan2(sy, sx) / (2 * Math.PI);
+    }
+    let cost = 0;
+    for (let i = 0; i < 4; i++) cost += wrapTurn(rot + off[i] - h[i]) ** 2;
+    const fit = { cost, name: hm.name, target: off.map((o) => unitTurn(rot + o)) };
+    if (!best || cost < best.cost) best = fit;
+    if (hm.name === keep && (!kept || cost < kept.cost)) kept = fit;
+  }
+  return kept && kept.cost <= best.cost * HARMONY_STICK + 1e-5 ? kept : best;
+}
+const rawStain = V.stain.slice();
+let synergy = 0, stainAnchor = -1, harmony = nearestHarmony(rawStain, -1);
+function applySynergy() {
+  harmony = nearestHarmony(rawStain, stainAnchor, harmony.name);
+  for (let k = 0; k < 4; k++) V.stain[k] = unitTurn(rawStain[k] + synergy * wrapTurn(harmony.target[k] - rawStain[k]));
+}
+const setSynergy = (v) => { synergy = Math.max(0, Math.min(1, v)); applySynergy(); };
+
 // Strain switching: each step an agent, with probability SWITCH_MAX *
 // switching, compares the ink under it per agent (a strain's ink divided by
 // its share of the headcount, so a big strain has to earn its size); if
@@ -337,7 +394,7 @@ const main = makeCulture(256, 144, 24000, [0, 1, 2, 3], 0.0015, true);
 const view = $("view"), vctx = view.getContext("2d");
 $("reseedBtn").addEventListener("click", () => main.reseed());
 // A read-only hook for headless checks: the live split and the switching knob.
-window.strainConsole = { shares: () => main.shares(), setSwitching: (v) => { switching = Math.max(0, Math.min(1, v)); }, V };
+window.strainConsole = { shares: () => main.shares(), setSwitching: (v) => { switching = Math.max(0, Math.min(1, v)); }, V, rawStain, setSynergy, harmony: () => harmony, setStain: (k, h) => setVal(PARAMS.find((p) => p.key === "stain"), k, h, false) };
 
 // ---------- previews ----------
 const previews = [0, 1, 2, 3].map((k) => {
@@ -365,39 +422,75 @@ function renderShare() {
 }
 $("evenBtn").addEventListener("click", () => { main.rebalance(); shares = main.shares(); renderShare(); });
 
-// ---------- switching (one global slider) ----------
-(() => {
-  const track = $("switchTrack"), fill = track.querySelector(".fill"), th = track.querySelector(".th"), vEl = $("switchVal");
+// ---------- one-value sliders (Switching, Synergy) ----------
+function singleSlider(track, vEl, get, set, def) {
+  const fill = track.querySelector(".fill"), th = track.querySelector(".th");
   let dragging = false;
-  const set = (v) => { switching = Math.max(0, Math.min(1, v)); };
-  const fromX = (e) => { const r = track.getBoundingClientRect(); set((e.clientX - r.left) / r.width); };
+  const fromX = (e) => { const r = track.getBoundingClientRect(); set(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); };
   track.addEventListener("pointerdown", (e) => { e.preventDefault(); track.focus(); track.setPointerCapture(e.pointerId); dragging = true; fromX(e); });
   track.addEventListener("pointermove", (e) => { if (dragging) fromX(e); });
   track.addEventListener("pointerup", () => { dragging = false; });
   track.addEventListener("pointercancel", () => { dragging = false; });
-  track.addEventListener("dblclick", () => set(0.4));
+  track.addEventListener("dblclick", () => set(def));
   track.addEventListener("keydown", (e) => {
     const st = e.shiftKey ? 0.1 : 0.01;
-    if (e.key === "ArrowRight" || e.key === "ArrowUp") set(switching + st);
-    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") set(switching - st);
+    if (e.key === "ArrowRight" || e.key === "ArrowUp") set(Math.min(1, get() + st));
+    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") set(Math.max(0, get() - st));
     else return;
     e.preventDefault();
   });
   updaters.push(() => {
-    th.style.left = `${switching * 100}%`; fill.style.width = `${switching * 100}%`;
-    vEl.textContent = switching.toFixed(2);
-    track.setAttribute("aria-valuenow", switching.toFixed(2));
+    const v = get();
+    th.style.left = `${v * 100}%`; fill.style.width = `${v * 100}%`;
+    vEl.textContent = v.toFixed(2);
+    track.setAttribute("aria-valuenow", v.toFixed(2));
   });
-})();
+}
+singleSlider($("switchTrack"), $("switchVal"), () => switching, (v) => { switching = v; }, 0.4);
+
+// Synergy sits under the stains in both layouts; both copies share one value.
+function buildSynergyRow(host) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = `<div class="row-head"><span class="row-title">Synergy <span class="new">NEW</span></span><span class="harm"></span></div>
+    <div class="syn"><div class="wheel" aria-hidden="true"><div class="ring"></div><svg viewBox="-32 -32 64 64"><polygon fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.5)" stroke-width="1"/><g class="raw"></g><g class="dots"></g></svg></div>
+    <div class="single"><div class="track" tabindex="0" role="slider" aria-label="Stain synergy"><div class="rail"></div><div class="fill" style="background:var(--violet)"></div><div class="th" style="background:var(--violet)"></div></div><span class="v"></span></div></div>
+    <div class="hint">Pulls the stains toward the nearest colour harmony on the wheel. The stain you're setting stays where you put it and the other three move to match. At 0 the stains are exactly what you set. Hollow dots are what you set, filled dots are what's shown.</div>`;
+  host.appendChild(row);
+  singleSlider(row.querySelector(".track"), row.querySelector(".v"), () => synergy, setSynergy, 0);
+  const NS = "http://www.w3.org/2000/svg";
+  const poly = row.querySelector("polygon"), harm = row.querySelector(".harm");
+  const mk = (g, r, filled) => [0, 1, 2, 3].map(() => { const c = document.createElementNS(NS, "circle"); c.setAttribute("r", r); if (!filled) { c.setAttribute("fill", "none"); c.setAttribute("stroke-width", "1.2"); } else { c.setAttribute("stroke", "#0b0f10"); c.setAttribute("stroke-width", "1.5"); } row.querySelector(g).appendChild(c); return c; });
+  const raws = mk(".raw", 2.6, false), dots = mk(".dots", 4, true);
+  // Hue 0 at the top, clockwise — the same way the conic ring is painted.
+  const at = (h, r) => [Math.sin(h * 2 * Math.PI) * r, -Math.cos(h * 2 * Math.PI) * r];
+  updaters.push(() => {
+    harm.textContent = `nearest: ${harmony.name}`;
+    const order = [0, 1, 2, 3].sort((a, b) => V.stain[a] - V.stain[b]);
+    poly.setAttribute("points", order.map((k) => at(V.stain[k], 25).map((x) => x.toFixed(2)).join(",")).join(" "));
+    for (let k = 0; k < 4; k++) {
+      const [x, y] = at(V.stain[k], 25);
+      dots[k].setAttribute("cx", x.toFixed(2)); dots[k].setAttribute("cy", y.toFixed(2)); dots[k].setAttribute("fill", cssOf(k));
+      const [rx, ry] = at(rawStain[k], 15);
+      raws[k].setAttribute("cx", rx.toFixed(2)); raws[k].setAttribute("cy", ry.toFixed(2)); raws[k].setAttribute("stroke", cssOf(k));
+      raws[k].style.opacity = synergy > 0 ? "1" : "0";
+    }
+  });
+}
 
 // ---------- lanes ----------
 let links = {};
 function setVal(p, k, v, linked) {
   const clamp = (x) => Math.max(p.min, Math.min(p.max, x));
+  // Grabbing a stain Synergy has moved starts from what you see: it becomes
+  // your setting (and the anchor), so nothing jumps under the pointer.
+  if (p.key === "stain" && k !== stainAnchor) rawStain[k] = V.stain[k];
+  const arr = p.key === "stain" ? rawStain : V[p.key];
   if (linked) {
-    const d = clamp(v) - V[p.key][k];
-    for (let j = 0; j < 4; j++) V[p.key][j] = clamp(V[p.key][j] + d);
-  } else V[p.key][k] = clamp(v);
+    const d = clamp(v) - arr[k];
+    for (let j = 0; j < 4; j++) arr[j] = clamp(arr[j] + d);
+  } else arr[k] = clamp(v);
+  if (p.key === "stain") { stainAnchor = k; applySynergy(); }
 }
 function buildLanes() {
   const host = $("laneRows");
@@ -525,6 +618,8 @@ function showTab(t) {
 // ---------- boot + loop ----------
 buildLanes();
 buildKnobs();
+buildSynergyRow($("laneRows"));
+buildSynergyRow($("knobsCard"));
 renderShare();
 for (let i = 0; i < 90; i++) main.step();
 let last = performance.now(), tick = 0, lastStain = "";
