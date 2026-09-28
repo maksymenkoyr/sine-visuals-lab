@@ -14,7 +14,8 @@ spray-injection layer riding on top. Ships from the initial commit and is on mai
 - Its response math is factored into small pure functions exported specifically so
   `tests/caustics.test.ts` can pin them directly: `focusSharp`, `fogRestingSharp`,
   `fogFloorCut`, `causticDensityScale`, `driftRatePerSec`, `advanceLoudSwell`,
-  `loudSwellDrive`, `advancePump`, `driftFlows`, and the `sparkle*` helpers.
+  `loudSwellDrive`, `advancePump`, `driftFlows`, `advanceDensityFlow` (Caustic
+  density's own glide — see Decisions), and the `sparkle*` helpers.
 - `src/render/scenes/rippleEmitter.ts` — Beat ripple's own continuous ring
   emitter: `advanceEmission` conditions the driver's own rise each frame into
   a launched ring amount, `createRippleEmitter` keeps every ring in flight as
@@ -449,6 +450,25 @@ reference-measurement workflow used by later scenes.
   unrelated Motion rows. A first cut added a left rail, an indent and a
   caption; the user asked for just the colour ("colour is enough"), so the
   rows sit flush and only their accent changes.
+- 2026-09-28 — Caustic density made wirable and smooth, on the user's ask:
+  "make it smoother, so the density gradually changes to what is in the
+  slider — now if you change it, it ruins it a bit." The ruin was a jump, not
+  a zoom: `driftFlows` multiplied the whole accumulated drift phase by the
+  density live that frame, so any change rescaled all the distance the field
+  had ever travelled and teleported the pattern (worse the longer the scene
+  had run; after a ~25 s soak, the frame after a 0.35 → 0.65 change was an
+  unrelated mesh). Fix: `advanceDensityFlow` scales only each tick's own
+  phase step by the live density and sums it, so a change bends the drift
+  rate from then on and never moves what's already travelled; and it glides
+  the drawn density toward the target (`DENSITY_GLIDE_SEC` = 0.6 s time
+  constant, first tick snaps), uploaded as `uDensityLive` — FRAG no longer
+  reads the raw setting uniform. Wirable on Sky's "Scene: steady (no music
+  reaction)" convention: slider × `drives.value(key, 1)`, so the slider is the
+  peak and a patched source scales it, clamped to 0..1 (a source weight can
+  reach 2). The glide applies to the patched reading too — a hit source
+  swells density rather than snapping it. Checked headless: before/after
+  bursts after the same change (jump vs. ease), and the panel row showing the
+  new jack.
 
 ## Tuning notes
 
@@ -519,6 +539,9 @@ reference-measurement workflow used by later scenes.
   brightness ceiling possibly not being enough for the most aggressive setting
   some material wants; it has only ever been checked on the synthetic feed
   (see below).
+- Caustic density's glide (`DENSITY_GLIDE_SEC`) was picked for slider drags;
+  nobody has yet watched a real source patched onto density with real music,
+  so whether a hit source reads as too soft under the glide is still open.
 - Only the synthetic audio feed has been used to check the sparkle/flash tuning
   above; there has been no measured real-music pass. The ring emitter's own
   constants (see Tuning notes) are likewise screenshot-tuned against synthetic
