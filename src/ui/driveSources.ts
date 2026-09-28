@@ -32,6 +32,7 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "anim.energy": "Loudness",
   "anim.sectionIntensity": "Song intensity",
   "anim.centroid": "Brightness",
+  "anim.wavePeak": "Waveform",
   "anim.beatWave": "Beat wave",
   "anim.barWave": "Bar wave",
   "anim.tempo": "Tempo",
@@ -62,6 +63,7 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.energy": "overall loudness across every band.",
   "anim.sectionIntensity": "how intense this part of the song is, over the last few seconds.",
   "anim.centroid": "where the sound's energy sits, from dark and low to bright and high.",
+  "anim.wavePeak": "the peak of the raw sound wave — the same % the Scope card's Waveform shows.",
   "anim.beatWave": "a smooth swing that peaks once every beat (or every few, with its own divider), fading out once the metronome stops.",
   "anim.barWave": "the same smooth swing as Beat wave, once every bar instead.",
   "anim.tempo": "how fast the BPM card's own tempo is, from slow to fast.",
@@ -90,6 +92,7 @@ const SIGNAL_SOURCE_COLOR: Record<SignalId, string> = {
   "anim.energy": INPUT_GREEN,
   "anim.sectionIntensity": POWER_TEAL,
   "anim.centroid": AUTO_SKY,
+  "anim.wavePeak": DRIVE_WHITE,
   "anim.beatWave": DRIVE_WHITE,
   "anim.barWave": DRIVE_WHITE,
   "anim.tempo": DRIVE_WHITE,
@@ -186,7 +189,7 @@ export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
   { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.dropOnset"] },
   {
     label: "Levels",
-    choices: ["anim.energy", "anim.low", "anim.mid", "anim.high", "feature.flux", "anim.sectionIntensity", "anim.centroid"],
+    choices: ["anim.energy", "anim.wavePeak", "anim.low", "anim.mid", "anim.high", "feature.flux", "anim.sectionIntensity", "anim.centroid"],
   },
   {
     label: "Tempo",

@@ -94,8 +94,10 @@ export type MeterCardId = "scope" | "signal" | "gate" | "lufs" | "rhythm" | "cha
  *  `anim.tempo`, whose jacks mount there (the card *is* the metronome's
  *  number, ticking; see metronome.ts's own header). "wave"/"lock" are the
  *  plain meter rows `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at
- *  instead. */
-export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset" | "wave" | "lock" | "metronome";
+ *  instead. "waveform" is the Scope card's own Waveform row (audioMeters.ts's
+ *  `waveform` meter row) — `anim.wavePeak`'s anchor, not to be confused with
+ *  "wave" above (the beat/bar swing trace, a different row entirely). */
+export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "onset" | "wave" | "lock" | "metronome" | "waveform";
 
 export type SignalId =
   | "feature.onset"
@@ -110,6 +112,7 @@ export type SignalId =
   | "anim.energy"
   | "anim.sectionIntensity"
   | "anim.centroid"
+  | "anim.wavePeak"
   | "anim.beatWave"
   | "anim.barWave"
   | "anim.tempo"
@@ -296,6 +299,16 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     kind: "level",
     read: (_frame, anim) => anim.centroid,
     monitor: { card: "character", row: "centroid" },
+  }),
+  "anim.wavePeak": signal({
+    id: "anim.wavePeak",
+    label: "Waveform",
+    description:
+      "The Scope card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. 0 on a device with no local mic (the TV).",
+    kind: "level",
+    read: (_frame, anim) => anim.wavePeak,
+    monitor: { card: "scope", row: "waveform" },
+    bandRange: "all",
   }),
   "anim.beatWave": signal({
     id: "anim.beatWave",

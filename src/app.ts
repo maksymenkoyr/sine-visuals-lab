@@ -2,6 +2,7 @@ import { DRAFT_SCENE_IDS } from "./render/scenes/index.ts"; // also registers bu
 import { captureMic, captureDisplayAudio } from "./audio/capture.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
+import { peak } from "./audio/waveform.ts";
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
 import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
@@ -1545,9 +1546,16 @@ function loop(): void {
   // real broadband reading to give it. `lastTempoHits` is solo-mode-only
   // (undefined every host/renderer/TV tick — see its own doc comment on the
   // module state above) and switches beatClock.ts's phase comb onto the
-  // fixed-hop feed for this tick when a tempo source is live.
+  // fixed-hop feed for this tick when a tempo source is live. `lastMono`'s
+  // own peak feeds AnimFrame.wavePeak (the Scope card's Waveform readout and
+  // its drive jack); null on any device with no local mic.
   const anim = gained
-    ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: lastFluxRatio, tempoHits: lastTempoHits })
+    ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), {
+        shape: getHitShape(),
+        beatRatio: lastFluxRatio,
+        tempoHits: lastTempoHits,
+        wavePeak: lastMono ? peak(lastMono) : null,
+      })
     : null;
 
   // Reused for displayFrame at render time below instead of re-resolving —
