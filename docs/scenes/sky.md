@@ -286,6 +286,31 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   bench stayed, pointing at the restored clouds. Lesson: judge a look
   change on the frame the user watches, side by side with the previous
   version, not only against the reference.
+- 2026-09-28 — Drive-defaults audit: "if a parameter doesn't have a driver
+  it should not affect the scene; wire it appropriately to what they were
+  using as default, rather than turning it off by default" (one of four
+  featured scenes audited — see caustics.md, physarum2.md, chladni.md for
+  the others). Cloud cover, Flow speed, Turbulence, Cloud brightness and
+  Floater visibility had each shipped as a "steady" Scene-default jack that
+  only ever reacted once someone patched a source; each now defaults to a
+  real signal (Section intensity, All level, Bass level, Mid level, Treble
+  level) lifted on top of its own slider (`liftByDrive`/`skyLift`, identity
+  at drive 0, `SKY_DRIVE_LIFT` 0.5) instead of a bare `slider * drive`,
+  which dropped every one of them to its floor the instant its jack was
+  unplugged. Brush opacity's "dims with energy" Scene composite became a
+  plain All level default with the dim factor itself moved outside the
+  drive macro (`1.0 - 0.4 * brushOpacityDrive(uEnergy)`) — the same look at
+  default, but the old `brushOpacityDrive(1.0 - 0.4 * uEnergy)` zeroed the
+  whole factor, brush gone entirely, once unplugged. Checked headless
+  (synthetic 120 BPM, t=8 s and 10 s, before vs after): at default the soft
+  clouds read the same, a touch fuller as the music lifts them; with all six
+  jacks unplugged the old build collapsed to faint wisps, the new one shows
+  the sliders' own full clouds. The streak-wind
+  formula dropped its own `flowSpeedDrive(1.0)` factor outright: Flow
+  speed's drive already moves the fluid (through the sim's dt/force), so
+  reading it a second time in the wind formula made every streak jump the
+  instant any source was patched in. Floaters and Light waves were left
+  alone — real composites, not disguised constants.
 
 ## Tuning notes
 

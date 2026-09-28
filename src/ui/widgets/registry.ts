@@ -85,15 +85,19 @@ export interface WidgetCtx {
   /** Writes through the exact path a slider drag uses. */
   set(spec: SceneSetting, value: number): void;
   /** The setting's current live drive reading — the exact number a row's own
-   *  sparkline draws (`SceneDrives.valueOf(key)`, drives.ts): 0 while the
-   *  setting is still on its "Scene" default (a row's sparkline shows the
+   *  sparkline draws (`SceneDrives.valueOf(key, rest)`, drives.ts): 0 while
+   *  the setting is still on its "Scene" default (a row's sparkline shows the
    *  same flat 0 until something is actually patched — see drives.ts's
-   *  header), the real combined/gained reading once patched, and 0 while the
-   *  panel is closed or nothing is playing. Exists so a preview widget
+   *  header), `rest` (default 0) while a real patch has nothing plugged in
+   *  (every source unplugged or muted — drives.ts's header's "Nothing
+   *  plugged in" paragraph: the reading to use so an unplugged jack doesn't
+   *  read as an honest 0 for a control whose neutral isn't 0), the real
+   *  combined/gained reading once patched and live, and 0 while the panel is
+   *  closed or nothing is playing. Exists so a preview widget
    *  (src/ui/widgets/previews.ts) can reproduce a scene's own effective-value
    *  formula (physarum2.ts's `resolveStrainEffective`) without recomputing
    *  any drive-combination arithmetic of its own. */
-  driveValue(spec: SceneSetting): number;
+  driveValue(spec: SceneSetting, rest?: number): number;
   /** Passthrough to the active scene's own `probe()` (scene.ts) — null for a
    *  scene with none. */
   probe(): Record<string, number> | null;

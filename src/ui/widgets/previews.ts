@@ -1,4 +1,4 @@
-import { STRAINS, DEPOSIT, resolveStrainEffective, type StrainRawValues, type StrainDriveValues } from "../../render/scenes/physarum2.ts";
+import { STRAINS, DEPOSIT, NUTRIENT_REST, resolveStrainEffective, type StrainRawValues, type StrainDriveValues } from "../../render/scenes/physarum2.ts";
 import type { StrainPreviewMotion } from "../../render/scenes/physarum2Preview.ts";
 import type { SceneSetting } from "../../render/sceneSettings.ts";
 import type { WidgetCtx } from "./registry.ts";
@@ -77,10 +77,17 @@ registerPreviewSource("physarum2", {
       stain: specs.stain ? ctx.get(specs.stain) : 0,
     };
     // ctx.driveValue reads the exact same thing each control's own
-    // sparkline shows — 0 while still on "Scene" (see WidgetCtx.driveValue's
-    // own doc comment), the real reading once patched.
+    // sparkline shows: 0 while Nutrient itself still sits on its own "Scene"
+    // per-strain-band composite (see WidgetCtx.driveValue's own doc
+    // comment), the real combined reading for every other control, which
+    // now defaults to its own strain's band directly rather than sitting
+    // inert until patched. Nutrient alone passes its own rest
+    // (NUTRIENT_REST) — see that constant's own doc — so an unplugged jack
+    // there doesn't run the slider backwards; every other control's
+    // coupling (pushToward1, Stain's additive term) is already identity at
+    // the engine's plain rest of 0.
     const drive: StrainDriveValues = {
-      nutrient: specs.nutrient ? ctx.driveValue(specs.nutrient) : 0,
+      nutrient: specs.nutrient ? ctx.driveValue(specs.nutrient, NUTRIENT_REST) : NUTRIENT_REST,
       excite: specs.excite ? ctx.driveValue(specs.excite) : 0,
       sensor: specs.sensor ? ctx.driveValue(specs.sensor) : 0,
       turn: specs.turn ? ctx.driveValue(specs.turn) : 0,

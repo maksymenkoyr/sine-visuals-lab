@@ -5,6 +5,7 @@ import {
   GATE_OPEN_HIGH,
   GATE_OPEN_LOW,
   GENERIC_THRESHOLD_DEFAULT,
+  hasLiveSource,
   normalizeDriveSetting,
   PASSTHROUGH_DRIVES,
   sameDriveChoice,
@@ -200,6 +201,96 @@ describe("drives: Scene passthrough", () => {
   });
 });
 
+// The rule the 2026-09-28 audit landed (this file's header's "Nothing
+// plugged in" paragraph): a patch with nothing plugged in reads as the
+// caller's own `rest` (default 0) rather than an honest 0 off combine() —
+// value()/valueOf() only, never uniformPair() (a GLSL coupling has to be
+// identity at drive 0 in its own right instead — see the header).
+describe("drives: nothing plugged in — rest instead of an honest 0", () => {
+  it("hasLiveSource is false for an empty patch, every source muted, or (in a gate mix) only a `when` condition left", () => {
+    expect(hasLiveSource({ mix: "add", sources: [] })).toBe(false);
+    expect(hasLiveSource({ mix: "add", sources: [{ choice: "anim.mid", weight: 1, off: true }] })).toBe(false);
+    expect(hasLiveSource({ mix: "gate", sources: [{ choice: "anim.mid", weight: 1, when: true }] })).toBe(false);
+    // A live "plays" source, even alongside a muted one, counts.
+    expect(
+      hasLiveSource({
+        mix: "add",
+        sources: [
+          { choice: "anim.mid", weight: 1, off: true },
+          { choice: "anim.high", weight: 1 },
+        ],
+      }),
+    ).toBe(true);
+    // A gate's own muted "plays" source alongside a live condition: the
+    // condition never counts as live on its own (this file's header's gate
+    // paragraph — a condition gates a player, it doesn't play itself).
+    expect(
+      hasLiveSource({
+        mix: "gate",
+        sources: [
+          { choice: "anim.mid", weight: 1, off: true },
+          { choice: "anim.high", weight: 1, when: true },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("value()/valueOf() return the caller's rest (default 0) for an empty patch, skipping gain/gate entirely", () => {
+    const anim = createAnimClock().advance(DT, frame());
+    const engine = createDriveEngine();
+    const sceneId = "rest-empty-scene";
+    const spec = patchSetting(sceneId, "amount", { mix: "add", sources: [] });
+    const drives = engine.forScene(sceneId, [spec], anim);
+    expect(drives.value("amount", -999)).toBe(0);
+    expect(drives.value("amount", -999, 0.7)).toBe(0.7);
+    expect(drives.valueOf("amount")).toBe(0);
+    expect(drives.valueOf("amount", 0.7)).toBe(0.7);
+  });
+
+  it("every source muted reads as rest too", () => {
+    const anim = createAnimClock().advance(DT, frame({ bands: new Float32Array(NUM_BANDS).fill(0.9) }));
+    const engine = createDriveEngine();
+    const sceneId = "rest-muted-scene";
+    const spec = patchSetting(sceneId, "amount", { mix: "add", sources: [{ choice: "anim.mid", weight: 1, off: true }] });
+    const drives = engine.forScene(sceneId, [spec], anim);
+    expect(drives.value("amount", -999, 0.5)).toBe(0.5);
+  });
+
+  it("a gate patch whose only unmuted source is a `when` condition reads as rest (the condition never plays on its own)", () => {
+    const anim = createAnimClock().advance(DT, frame({ bands: new Float32Array(NUM_BANDS).fill(0.9) }));
+    const engine = createDriveEngine();
+    const sceneId = "rest-gate-scene";
+    const spec = patchSetting(sceneId, "amount", {
+      mix: "gate",
+      sources: [
+        { choice: "anim.mid", weight: 1, off: true },
+        { choice: "anim.high", weight: 1, when: true },
+      ],
+    });
+    const drives = engine.forScene(sceneId, [spec], anim);
+    expect(drives.value("amount", -999, 0.3)).toBe(0.3);
+  });
+
+  it("a live source reading exactly 0 is 0, not rest", () => {
+    const anim = createAnimClock().advance(DT, frame()); // anim.mid is 0 with no bands driven up
+    const engine = createDriveEngine();
+    const spec = settingWithDrive("amount", "anim.mid");
+    const drives = engine.forScene("rest-vs-zero-scene", [spec], anim);
+    expect(drives.value("amount", -999, 0.7)).toBe(0);
+    expect(drives.valueOf("amount", 0.7)).toBe(0);
+  });
+
+  it("rest defaults to 0 when omitted", () => {
+    const anim = createAnimClock().advance(DT, frame());
+    const engine = createDriveEngine();
+    const sceneId = "rest-default-scene";
+    const spec = patchSetting(sceneId, "amount", { mix: "add", sources: [] });
+    const drives = engine.forScene(sceneId, [spec], anim);
+    expect(drives.value("amount", -999)).toBe(0);
+    expect(drives.valueOf("amount")).toBe(0);
+  });
+});
+
 describe("drives: beat-grid choice", () => {
   const GRID_QUARTER = 2; // BEAT_GRIDS index for "1/4" — see src/audio/beatGrid.ts
 
@@ -340,6 +431,24 @@ describe("drives: identity at defaults, across every registered scene", () => {
   });
 });
 
+// The lexical backstop for rule 1 of the 2026-09-28 audit (this file's
+// header's "Nothing plugged in" paragraph): a jack's default always reacts
+// to the music, so no registered scene's sceneLabel should still read like a
+// constant or an unfiltered pass-through dressed up as a Scene composite.
+describe("drives: no lingering \"steady\"/\"inert\"/\"unfiltered\" Scene composite", () => {
+  it("no registered scene's drive.sceneLabel matches /steady|inert|unfiltered|no music/i", () => {
+    let checked = 0;
+    for (const scene of listScenes()) {
+      for (const spec of scene.settings ?? []) {
+        if (!spec.drive?.sceneLabel) continue;
+        checked++;
+        expect(spec.drive.sceneLabel, `${scene.id}'s "${spec.key}".drive.sceneLabel`).not.toMatch(/steady|inert|unfiltered|no music/i);
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+});
+
 // Caustics-specific: pins the exact old uniform each simple-GLSL setting's
 // default reproduces, and which settings default to Scene — the concrete
 // version of the generic walk above, for the one scene Phase 1 migrated.
@@ -384,14 +493,28 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     expect(drives.fired("driftPump", false)).toBe(anim.lowOnset);
   });
 
-  it("sparkle, injection, ripple and driftLevel default to Scene", () => {
+  it("sparkle, ripple and driftLevel default to Scene", () => {
     const anim = animWith({});
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
-    for (const key of ["sparkle", "injection", "ripple", "driftLevel"]) {
+    for (const key of ["sparkle", "ripple", "driftLevel"]) {
       expect(drives.uniformPair(key)).toEqual({ drive: 0, custom: 0 });
       expect(byKey(key).drive!.sceneLabel).toBeTruthy();
     }
+  });
+
+  // Neither was ever a real composite — breathe read a bare 0 (no reaction at
+  // all) and injection a bare 1 (an unfiltered pass-through) — so per
+  // drives.ts's header's "Nothing plugged in" paragraph they now each carry
+  // a real catalogue default instead of "scene".
+  it("breathe defaults to Bar wave and injection to Treble hit, both Custom=1 with the drive equal to that catalogue reading", () => {
+    const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.8), onset: true });
+    const engine = createDriveEngine();
+    const drives = engine.forScene("caustics", settings, anim);
+    expect(byKey("breathe").drive!.default).toBe("anim.barWave");
+    expect(drives.uniformPair("breathe")).toEqual({ drive: SIGNALS["anim.barWave"].read(frame(), anim), custom: 1 });
+    expect(byKey("injection").drive!.default).toBe("anim.highOnset");
+    expect(drives.uniformPair("injection")).toEqual({ drive: anim.highPulse, custom: 1 });
   });
 
   it("ripple's Scene default reproduces today's exact trigger (bass hit OR beat hit, unconditionally)", () => {

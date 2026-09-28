@@ -130,7 +130,12 @@ export interface SceneSetting {
    *  required when `default` is `"scene"`, since there's no catalogue label
    *  to fall back to. `gain` scales a catalogue source's [0,1] reading to
    *  the shape this setting's own composite otherwise expects; omit for 1
-   *  (no scaling). */
+   *  (no scaling). `default` must itself react to the music — never a
+   *  constant — and `"scene"` is only for a composite that genuinely reads
+   *  more than one signal, never a dressed-up constant: see drives.ts's
+   *  header's "Nothing plugged in" paragraph for why (and for what an
+   *  unplugged jack must do instead: leave the setting exactly where its
+   *  slider puts it, never collapse, vanish or run backwards). */
   drive?: {
     default: import("./drives.ts").DriveChoice;
     sceneLabel?: string;

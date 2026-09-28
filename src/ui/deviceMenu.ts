@@ -5132,7 +5132,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         mountRows: (rowContainer, rows) => mountRows(rowContainer, sceneId, specs, rows),
         // The exact same live reading a row's own sparkline draws — see
         // WidgetCtx.driveValue's own doc comment (registry.ts).
-        driveValue: (spec) => lastDrives?.valueOf(spec.key) ?? 0,
+        driveValue: (spec, rest) => lastDrives?.valueOf(spec.key, rest) ?? rest ?? 0,
         probe: () => deps.getScene(sceneId)?.probe?.() ?? null,
         command: (name, args) => deps.getScene(sceneId)?.command?.(name, args),
         onTick: (fn) => tickFns.push(fn),

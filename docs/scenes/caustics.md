@@ -449,6 +449,29 @@ reference-measurement workflow used by later scenes.
   unrelated Motion rows. A first cut added a left rail, an indent and a
   caption; the user asked for just the colour ("colour is enough"), so the
   rows sit flush and only their accent changes.
+- 2026-09-28 — Drive-defaults audit: "if a parameter doesn't have a driver
+  it should not affect the scene; wire it appropriately to what they were
+  using as default, rather than turning it off by default" (one of four
+  featured scenes audited — see sky.md, physarum2.md, chladni.md for the
+  others). Breathe went from a Scene default that read a bare 0 (no
+  reaction until patched) to Bar wave — the once-per-bar zoom it carried
+  before #147 removed Breathe's own direct `beatClock` read, brought back
+  here through the drive system instead. Spray injection went from a Scene
+  default that read a bare 1 (an unfiltered pass-through of Sparkle's own
+  gating) to Treble hit, applied as a lift
+  (`1.0 + INJECTION_DRIVE_LIFT * injectionDrive(uHighPulse)`) rather than a
+  bare multiplier, so unplugging the jack sprays exactly what the slider
+  says instead of nothing. Speed boost's own Scene composite
+  (`advanceLoudSwell`'s calibrated loudness) was already a real reaction and
+  keeps its default, but its swell read (`loudSwellDrive`, feeding
+  `uLoudSwell`) now passes `LOUD_NEUTRAL` (0.5) as `drives.value`'s own
+  `rest`: an unplugged Speed boost jack used to read 0 there, which
+  `loudSwellDrive` treats as a permanent "quiet" tightening that grows with
+  the slider, rather than the neutral swell an unplugged jack should show.
+  The rate side of the same reading (`driftRatePerSec`) keeps the engine's
+  plain rest of 0, its own neutral (an unplugged jack adds no extra speed).
+  Sparkle, Ripple, driftPump and the rest were already real reactions and
+  are untouched.
 
 ## Tuning notes
 
@@ -499,9 +522,11 @@ reference-measurement workflow used by later scenes.
   headless recipe in Resume here isolates the ripple from every other
   reactive setting for exactly this judgment.
 
-- Breathe is a patch destination: its row's dial is only the zoom's depth, and the
-  row does nothing at all until a source is wired to it (see `breatheDrive(0.0)`'s
-  comment in FRAG and the `breathe` entry in SETTINGS).
+- Breathe is a patch destination: its row's dial is only the zoom's depth,
+  and the source it swings that depth through is Bar wave by default (once a
+  bar), same as the old bar-locked cosine it replaced — not "no reaction at
+  all" (see `breatheDrive(0.0)`'s comment in FRAG, now just the stale-"scene"
+  fallback, and the `breathe` entry in SETTINGS).
 
 
 ## Known issues and next steps
