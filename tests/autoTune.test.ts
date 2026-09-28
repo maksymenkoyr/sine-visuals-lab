@@ -24,7 +24,6 @@ import {
   setAutoEnabled,
   isSceneAuto,
   setSceneAuto,
-  setAutoStrength,
   seedAuto,
   getSensitivitySpec,
   getExpansionSpec,
@@ -228,7 +227,6 @@ describe("auto state and resolution", () => {
   it("a freshly-seen param resolves at its target immediately, with no glide-in", () => {
     const sceneId = "scene-auto-4";
     setAutoEnabled(sceneId, SPEC.key, true);
-    setAutoStrength(1);
     const highTempo: DialValues = { ...NEUTRAL, tempo: 1 };
     advanceAutoTune(1 / 60, highTempo);
     const target = computeAutoTarget(SPEC, highTempo, 1);
@@ -238,7 +236,6 @@ describe("auto state and resolution", () => {
   it("converges toward a new target over repeated per-tick advance+resolve calls", () => {
     const sceneId = "scene-auto-5";
     setAutoEnabled(sceneId, SPEC.key, true);
-    setAutoStrength(1);
     advanceAutoTune(1 / 60, NEUTRAL);
     const atDefault = resolveSceneSetting(sceneId, SPEC);
     expect(atDefault).toBeCloseTo(SPEC.default, 5);
@@ -273,7 +270,6 @@ describe("auto state and resolution", () => {
 
   it("resolveSensitivity follows the same auto/manual split as scene settings", () => {
     const sceneId = "scene-auto-7";
-    setAutoStrength(1);
     const extreme: DialValues = { ...NEUTRAL, dynamics: 1, density: 0 }; // positive deviation for both weights
 
     setAutoEnabled(sceneId, SENSITIVITY_AUTO_KEY, false);
@@ -290,7 +286,6 @@ describe("auto state and resolution", () => {
 
   it("resolveExpansion is a full parallel to resolveSensitivity, including its opposite-signed weight", () => {
     const sceneId = "scene-auto-8";
-    setAutoStrength(1);
     setExpansion(sceneId, 1); // manual store's default
 
     setAutoEnabled(sceneId, EXPANSION_AUTO_KEY, false);
@@ -309,7 +304,6 @@ describe("auto state and resolution", () => {
 
   it("resolveSmoothing pulls smoothing down (snappier) for a percussive track", () => {
     const sceneId = "scene-auto-10";
-    setAutoStrength(1);
     setSmoothing(sceneId, 1); // manual store's default
 
     setAutoEnabled(sceneId, SMOOTHING_AUTO_KEY, false);
@@ -337,7 +331,6 @@ describe("auto state and resolution", () => {
     setAutoEnabled(sceneId, SENSITIVITY_AUTO_KEY, true);
     setAutoEnabled(sceneId, EXPANSION_AUTO_KEY, true);
     setAutoEnabled(sceneId, SMOOTHING_AUTO_KEY, true);
-    setAutoStrength(1);
     advanceAutoTune(1, { ...NEUTRAL, dynamics: 1, density: 0 });
     resolveSensitivity(sceneId);
     resolveExpansion(sceneId);
@@ -535,7 +528,7 @@ describe("caustics Focus snap auto weights", () => {
     expect(delta).toBeLessThanOrEqual(0.15);
   });
 
-  it("stays bounded even at maximum Auto strength", () => {
+  it("stays bounded even at computeAutoTarget's maximum scale argument", () => {
     const delta = computeAutoTarget(focusSpec, steadyPercussive, 2) - focusSpec.default;
     expect(delta).toBeLessThanOrEqual(0.3);
   });
