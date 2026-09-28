@@ -983,3 +983,6 @@ panel rendering in system fonts headlessly (not needed for the scripts to pass).
   with readouts, Pipette and Rebalance, multi-strain editing, and solo/group
   selection without a card rebuild — each step is a dated entry under
   Decisions and pivots.
+- #213 (draft, 2026-09-29): the Strain Console in the app — Lanes and Knobs,
+  Sensor angle, Trail life, Switching (Headcount) and Synergy; the box
+  selection and its rows went.
