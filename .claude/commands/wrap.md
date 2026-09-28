@@ -54,5 +54,13 @@ Close out this working session:
    reference that names a real symbol will surface itself here the moment
    that symbol changes.
 
+   After fixing, record a verdict for each flagged paragraph — `stale` if it
+   really was wrong, `fine` if the flag was noise — and `missed` for any
+   stale paragraph you found some other way that the tool didn't flag, via
+   `npm run doc-check -- --verdict <ref>=<stale|fine|missed> ...` (ref is
+   `doc:line`, from the tool's own output). `npm run doc-check -- --report`
+   shows how well it's doing (precision, cost, calibration) across every run
+   recorded so far.
+
 Report what you changed in `docs/status.md`, which scene records and
 materials you updated, and whether any doc needed a fix.
