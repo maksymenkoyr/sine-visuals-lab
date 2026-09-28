@@ -2691,12 +2691,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     setOut(src.weight);
     // Live store write + readout on every drag frame, no rebuild — a full
     // buildPatchPanel() here would tear out the very slider being dragged
-    // (this file's own carried click-loss rule).
+    // (this file's own carried click-loss rule). The snapshot moves with the
+    // write for the same reason: sameDriveSetting compares weights, so a
+    // stale lastPinnedSetting reads this drag as an external change and
+    // update()'s ~10 Hz check rebuilds the panel mid-drag anyway.
     rng.addEventListener("input", () => {
       const w = Number(rng.value);
       setFill(w);
       setOut(w);
       deps.onSetSourceWeight(sceneId, spec, src.choice, w);
+      if (samePair(pinned, { sceneId, spec })) lastPinnedSetting = deps.getDriveSetting(sceneId, spec);
       syncLinkedDriveSetting(sceneId, spec);
       onLiveEdit();
     });
