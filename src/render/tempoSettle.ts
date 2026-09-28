@@ -29,9 +29,9 @@
  * held that guess for seconds after the tracker had moved on.
  *
  * One pure module rather than two copies, because two callers now need the
- * identical number: src/ui/audioMeters.ts's BPM card shows it (rounded for
+ * identical number: src/ui/audioMeters.ts's Tempo card shows it (rounded for
  * display; see its own createTempoBlock), and src/render/metronome.ts ticks
- * at it unrounded — "the metronome *is* the BPM card's number, ticking" only
+ * at it unrounded — "the metronome *is* the Tempo card's BPM, ticking" only
  * holds if both read this same settle.
  */
 
@@ -44,7 +44,7 @@ export const RETUNE_SURE_SEC = 1;
 export const RETUNE_UNSURE_SEC = 5;
 
 export interface TempoSettle {
-  /** The settled tempo — what the BPM card shows and the metronome ticks
+  /** The settled tempo — what the Tempo card's BPM shows and the metronome ticks
    *  at. 0 = none ("--"). Unrounded — a caller that wants digits rounds it
    *  itself. */
   readonly bpm: number;

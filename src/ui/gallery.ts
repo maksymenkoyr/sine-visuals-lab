@@ -6,6 +6,9 @@ import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRe
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
 import { SOURCE_URL } from "../brand.ts";
+import { BUILD_INFO, channelBadge, versionHint, versionHref, versionLabel } from "../version.ts";
+import { sceneVersionOf } from "../render/sceneVersions.ts";
+import { bindHint, hideTooltip } from "./tooltip.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
@@ -93,6 +96,12 @@ const stylesheet = `
 .gal-mono { font: 400 10.5px ${FONT_MONO}; text-transform: uppercase; }
 
 .gal-mast { display: flex; align-items: center; justify-content: space-between; gap: 16px 32px; flex-wrap: wrap; }
+.gal-brand { display: flex; align-items: center; gap: 14px; }
+.gal-channel {
+  letter-spacing: .14em; color: ${BANDS_AMBER}; background: none; cursor: help;
+  border: 1px solid ${withAlpha(BANDS_AMBER, 0.5)}; border-radius: 3px; padding: 3px 8px;
+}
+.gal-channel:hover, .gal-channel:focus-visible { border-color: ${BANDS_AMBER}; outline: none; }
 .gal-source { display: flex; flex-direction: column; gap: 5px; }
 .gal-source-top { display: flex; align-items: center; gap: 14px; }
 /* .gal-source-label and .gal-source-hint share one grid cell (justify-items:
@@ -174,24 +183,43 @@ const stylesheet = `
 .gal-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .gal-shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(5,7,10,.7), transparent 40%); pointer-events: none; }
 .gal-over { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
-.gal-name { font: 400 14px/1 ${FONT_LABEL}; min-width: 0; }
+/* Name + this scene's own version (src/render/sceneVersions.ts), on one row:
+ * the name ellipsizes first, the version never truncates (gal-scene-ver is
+ * flex:none). Named gal-scene-ver, not gal-ver, to stay clear of the
+ * footer's own .gal-ver (the *build's* version link, below) — same class,
+ * different element, would otherwise silently restyle one from the other. */
+.gal-name { font: 400 14px/1 ${FONT_LABEL}; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.gal-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .gal-reason {
   font: 400 11px ${FONT_MONO}; letter-spacing: .14em; flex: none; white-space: nowrap;
   color: rgba(255,255,255,.7); border: 1px solid rgba(255,255,255,.3);
   border-radius: 3px; padding: 5px 10px; background: rgba(5,7,10,.5);
 }
 .gal-cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; }
-.gal-cap-name { font: 400 13px ${FONT_LABEL}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.gal-cap-name { font: 400 13px ${FONT_LABEL}; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.gal-cap-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .gal-tag {
   font: 400 9.5px ${FONT_MONO}; letter-spacing: .12em; text-transform: uppercase; flex: none;
   color: ${SCENE_VIOLET}; border: 1px solid ${withAlpha(SCENE_VIOLET, 0.5)}; border-radius: 3px; padding: 2px 6px;
 }
+/* A scene's own version, small and dim beside its name — never truncated
+ * (flex: none, so the name's ellipsis absorbs any overflow instead). A
+ * "+dev" suffix (uncommitted changes to that scene) reads in BANDS_AMBER. */
+.gal-scene-ver {
+  font: 400 11px ${FONT_MONO}; letter-spacing: .06em; color: rgba(255,255,255,.75); flex: none;
+  text-shadow: 0 1px 3px rgba(0,0,0,.85); /* sits on a live preview, not a flat ground */
+}
+.gal-scene-ver-dev { color: ${BANDS_AMBER}; }
 
 .gal-foot {
-  display: flex; justify-content: flex-end; gap: 16px; letter-spacing: .1em;
+  display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap;
+  gap: 8px 16px; letter-spacing: .1em;
   padding-top: 16px; border-top: 1px solid rgba(255,255,255,.08); color: rgba(255,255,255,.4);
 }
+.gal-foot-links { display: flex; gap: 16px; }
 .gal-foot a { color: inherit; text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.25); }
+/* The version reads as typed ("0.1.4 - beta"), not in the footer's capitals. */
+.gal-foot a.gal-ver { text-transform: none; }
 .gal-foot a:hover { color: #fff; }
 
 @media (max-width: ${NARROW_BELOW_PX}px) {
@@ -231,6 +259,21 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   if (text !== undefined) node.textContent = text;
   return node;
 }
+
+/** A tile caption's small version badge for `sceneId` — null if it has none
+ *  (unregistered/private, or a build vite-scene-versions-plugin.ts never ran
+ *  for; src/render/sceneVersions.ts's header). A `+dev` suffix splits into
+ *  its own amber span, same rule as the scene view's own corner (src/app.ts's
+ *  updateSceneVersionLabel). */
+function sceneVersionBadge(sceneId: string): HTMLElement | null {
+  const version = sceneVersionOf(sceneId);
+  if (!version) return null;
+  const isDev = version.endsWith("+dev");
+  const badge = el("span", "gal-scene-ver", isDev ? version.slice(0, -"+dev".length) : version);
+  if (isDev) badge.appendChild(el("span", "gal-scene-ver-dev", "+dev"));
+  return badge;
+}
+
 
 const PREVIEW_W = 480;
 const PREVIEW_H = 270;
@@ -432,7 +475,19 @@ export function createGallery(deps: GalleryDeps): Gallery {
   if (sourceHint) sourceSlot.appendChild(sourceHint);
   sourceTop.append(sourceSlot, sourceRow);
   source.appendChild(sourceTop);
-  mast.append(createBrandMark(56), source);
+  // The channel badge beside the mark — only off stable (channelBadge() in
+  // src/version.ts decides which channels get one and owns its text).
+  const brand = el("div", "gal-brand");
+  brand.append(createBrandMark(56));
+  const badge = channelBadge(BUILD_INFO);
+  if (badge) {
+    const tag = el("button", "gal-mono gal-channel", badge.label);
+    tag.type = "button";
+    tag.setAttribute("aria-label", `${badge.label}. ${badge.hint.join(" ")}`);
+    bindHint(tag, BANDS_AMBER, badge.hint);
+    brand.appendChild(tag);
+  }
+  mast.append(brand, source);
 
   const errorBanner = el("div", "gal-error");
   errorBanner.setAttribute("role", "alert");
@@ -468,6 +523,20 @@ export function createGallery(deps: GalleryDeps): Gallery {
   // ships alongside the build (dist/*.txt), since MIT and the SIL Open Font
   // License both require their notices to travel with copies of the site.
   const foot = el("div", "gal-mono gal-foot");
+  // What build is live, on the left (src/version.ts owns the label, link and
+  // hint text — the hint says what each part of the label means) — stable
+  // stays the same dim colour as the rest of the footer, any other channel is
+  // flagged in BANDS_AMBER so it's obvious at a glance this tab isn't on
+  // stable.
+  const versionLink = el("a", "gal-ver", versionLabel(BUILD_INFO));
+  versionLink.href = versionHref(BUILD_INFO);
+  versionLink.target = "_blank";
+  versionLink.rel = "noopener";
+  const offStable = BUILD_INFO.channel !== "stable";
+  if (offStable) versionLink.style.color = BANDS_AMBER;
+  const hint = versionHint(BUILD_INFO);
+  versionLink.setAttribute("aria-label", hint.join(". "));
+  bindHint(versionLink, offStable ? BANDS_AMBER : "rgba(255,255,255,.4)", hint);
   const sourceLink = el("a", "", "Source · AGPL-3.0");
   sourceLink.href = SOURCE_URL;
   sourceLink.target = "_blank";
@@ -480,7 +549,9 @@ export function createGallery(deps: GalleryDeps): Gallery {
   privacyLink.href = "/PRIVACY.txt";
   privacyLink.target = "_blank";
   privacyLink.rel = "noopener";
-  foot.append(sourceLink, licensesLink, privacyLink);
+  const footLinks = el("div", "gal-foot-links");
+  footLinks.append(sourceLink, licensesLink, privacyLink);
+  foot.append(versionLink, footLinks);
 
   page.append(mast, errorBanner, released, draftSection, foot);
   root.appendChild(page);
@@ -596,18 +667,27 @@ export function createGallery(deps: GalleryDeps): Gallery {
     shot.appendChild(canvas);
 
     const reason = entry.enabled ? null : (entry.reason ?? "Unavailable");
+    const verBadge = sceneVersionBadge(entry.scene.id);
     if (entry.draft) {
-      // Small tile: the picture, then a caption bar with the name and a tag
-      // (the reason it can't run here takes the tag's place when it can't).
+      // Small tile: the picture, then a caption bar with the name (plus its
+      // own version, if it has one) and a tag (the reason it can't run here
+      // takes the tag's place when it can't).
       const cap = el("div", "gal-cap");
-      cap.append(el("div", "gal-cap-name", entry.scene.name), el("div", "gal-tag", reason ?? "Draft"));
+      const capName = el("div", "gal-cap-name");
+      capName.append(el("div", "gal-cap-name-text", entry.scene.name));
+      if (verBadge) capName.append(verBadge);
+      cap.append(capName, el("div", "gal-tag", reason ?? "Draft"));
       btn.append(shot, cap);
     } else {
-      // Large tile: the name sits over the picture's darkened foot, joined by
-      // the reason when the scene can't run here. The whole tile is the call
-      // to action, so a runnable one carries no button of its own.
+      // Large tile: the name (plus its own version) sits over the picture's
+      // darkened foot, joined by the reason when the scene can't run here.
+      // The whole tile is the call to action, so a runnable one carries no
+      // button of its own.
       const over = el("div", "gal-over");
-      over.append(el("div", "gal-name", entry.scene.name));
+      const nameRow = el("div", "gal-name");
+      nameRow.append(el("div", "gal-name-text", entry.scene.name));
+      if (verBadge) nameRow.append(verBadge);
+      over.append(nameRow);
       if (reason) over.append(el("div", "gal-reason", reason));
       shot.append(el("div", "gal-shade"), over);
       btn.appendChild(shot);
@@ -758,6 +838,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
     },
 
     hide(): void {
+      hideTooltip(); // a badge hint left open by a tap mustn't linger over the scene
       // Deliberately does NOT unmount the preview scenes: SceneHost.mount()
       // already steals ownership from whichever host currently holds a
       // scene (see sceneHost.ts), so when the fullscreen viz mounts the one

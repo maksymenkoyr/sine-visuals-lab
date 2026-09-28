@@ -1,7 +1,8 @@
-import { DRAFT_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
+import { DRAFT_SCENE_IDS, PAID_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
 import { captureMic, captureDisplayAudio } from "./audio/capture.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
+import { peak } from "./audio/waveform.ts";
 import { createLufsAnalyser, type LufsAnalyser } from "./audio/lufsAnalyser.ts";
 import type { LufsReading } from "./audio/lufs.ts";
 import { FeatureExtractor } from "./audio/features.ts";
@@ -78,6 +79,13 @@ import {
   type SceneSetting,
 } from "./render/sceneSettings.ts";
 import {
+  createPictureMeter,
+  createPictureAverager,
+  PICTURE_GAP_RESET_MS,
+  PICTURE_SAMPLE_INTERVAL_MS,
+} from "./render/pictureMeter.ts";
+import { createPictureReadback, type PictureReadback } from "./render/pictureReadback.ts";
+import {
   applyLook,
   captureLook,
   decodeLook,
@@ -152,6 +160,11 @@ import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
+import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
+import { pinEverything } from "./pinnedAssets.ts";
+import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
+import { sceneVersionHint, sceneVersionOf } from "./render/sceneVersions.ts";
+import { bindHint, hideTooltip } from "./ui/tooltip.ts";
 
 type Mode = "solo" | "host" | "renderer";
 type AnyConn = HostConnection | RendererConnection;
@@ -164,6 +177,7 @@ const panelBtn = document.getElementById("panelBtn") as HTMLButtonElement;
 const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
+const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
@@ -255,6 +269,24 @@ const effectivePreset = (): QualityPreset => (qualityChoice === "auto" ? detecte
  *  the whole session; only which scene is mounted on it changes. */
 let mainHost: SceneHost | null = null;
 
+/** The Master card's Picture block and tools/master-sweep.mjs share this one
+ *  measurement path — see src/render/pictureMeter.ts for what each measure
+ *  means and src/render/pictureReadback.ts for how the thumbnail feeding it
+ *  is captured. `pictureReadback` is created lazily, on mainHost's own GL
+ *  context, the first time pictureWanted() actually asks for a sample — a
+ *  session that never opens the panel and isn't driving a headless sweep
+ *  never allocates the blit chain. */
+let pictureReadback: PictureReadback | null = null;
+const pictureMeter = createPictureMeter();
+const pictureAverager = createPictureAverager();
+/** DEV-only override (tuning/debug.ts's `picture.force`): sample the picture
+ *  even with the panel closed, for a headless sweep that never opens it. */
+let pictureForced = false;
+/** Last time samplePicture() kicked off a new capture — paced to
+ *  PICTURE_SAMPLE_INTERVAL_MS independently of the render loop's own rate,
+ *  which usually runs faster. */
+let lastPictureKickMs = -Infinity;
+
 let gallery: Gallery | null = null;
 let deviceMenu: DeviceMenu | null = null;
 let immersive: ImmersiveMode | null = null;
@@ -285,7 +317,7 @@ let lastDeepMono: Float32Array | null = null;
 // card's history trace draws it as the "auto-gain fully off" reference. Null
 // wherever no local extractor ran this frame (renderer, synthetic feed).
 let lastFixedEnergy: number | null = null;
-// FeatureExtractor.onsetDiag from this device's own extractor — the Rhythm
+// FeatureExtractor.onsetDiag from this device's own extractor — the Hits
 // card's hits history. Same solo/host-only availability as lastFixedEnergy
 // above and for the same reason. Read synchronously the same tick it's set
 // (deviceMenu.update() below), before the next currentVisual() call mutates
@@ -293,7 +325,7 @@ let lastFixedEnergy: number | null = null;
 let lastBeatDiag: OnsetDiag | null = null;
 // FeatureExtractor.fluxRatio from this device's own extractor — tuning/
 // debug.ts's getInput() (tools/audio-latency.mjs's click-track latency
-// measurement), a separate consumer from the Rhythm card's hits history
+// measurement), a separate consumer from the Hits card's hits history
 // above. Same solo/host-only availability as lastFixedEnergy and for the
 // same reason.
 let lastFluxRatio: number | null = null;
@@ -304,11 +336,11 @@ let lastFluxRatio: number | null = null;
  *  see beatClock.ts's own file header for why those never get this feed). */
 let lastTempoHits: TempoHit[] | undefined = undefined;
 // The silence gate's last reading off this device's own extractor — the
-// Gate card (audioMeters.ts). `fired` is the local extractor's own frame's
-// onset (not the jitter-buffered `lastVis`), so it and `suppressed` always
-// describe the same tick's decision — see the two currentVisual() branches
-// below where this is set. Same solo/host-only availability as lastBeatDiag
-// above and for the same reason.
+// Signal card's Gate row (audioMeters.ts). `fired` is the local extractor's
+// own frame's onset (not the jitter-buffered `lastVis`), so it and
+// `suppressed` always describe the same tick's decision — see the two
+// currentVisual() branches below where this is set. Same solo/host-only
+// availability as lastBeatDiag above and for the same reason.
 let lastGate: SilenceGateReading | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
  *  availability as lastMono, for the Loudness card. */
@@ -437,6 +469,54 @@ function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, quality.preset));
 }
 
+/** Fills and re-binds the scene view's own version corner (`#sceneVersion` in
+ *  index.html) for `next` — called from applyScene() and enterViz() below so
+ *  it stays current across a scene switch, not just once at boot. Shows
+ *  "<Scene name> <its version>" in brighter white (a `+dev` suffix in amber),
+ *  a dim middle dot, then the build's own label (src/version.ts) in its
+ *  usual place and colour — or, when the scene has no version of its own
+ *  (unregistered/private, or a build vite-scene-versions-plugin.ts never ran
+ *  for — src/render/sceneVersions.ts's header), just the build's own label,
+ *  same as before per-scene versions existed. The hint is the scene's own
+ *  lines (sceneVersionHint()) ahead of the build's (versionHint()).
+ *  bindHint() itself is safe to call again on the same element — it updates
+ *  the bound hint text rather than stacking a second set of listeners
+ *  (src/ui/tooltip.ts). */
+function updateSceneVersionLabel(next: Scene): void {
+  const appLabel = versionLabel(BUILD_INFO);
+  const offStable = BUILD_INFO.channel !== "stable";
+  const hintColor = offStable ? BANDS_AMBER : "rgba(255,255,255,.4)";
+  const sceneVer = sceneVersionOf(next.id);
+
+  sceneVersion.style.removeProperty("color"); // clear a previous scene-less fallback's inline colour
+  sceneVersion.replaceChildren();
+  if (!sceneVer) {
+    sceneVersion.textContent = appLabel;
+    if (offStable) sceneVersion.style.color = BANDS_AMBER;
+    bindHint(sceneVersion, hintColor, versionHint(BUILD_INFO));
+    return;
+  }
+
+  const isDev = sceneVer.endsWith("+dev");
+  const base = isDev ? sceneVer.slice(0, -"+dev".length) : sceneVer;
+  const nameEl = document.createElement("span");
+  nameEl.className = "svScene";
+  nameEl.textContent = `${next.name} ${base}`;
+  if (isDev) {
+    const dev = document.createElement("span");
+    dev.className = "svDev";
+    dev.textContent = "+dev";
+    nameEl.appendChild(dev);
+  }
+  const sep = document.createElement("span");
+  sep.textContent = " · ";
+  const appEl = document.createElement("span");
+  appEl.textContent = appLabel;
+  if (offStable) appEl.style.color = BANDS_AMBER;
+  sceneVersion.append(nameEl, sep, appEl);
+  bindHint(sceneVersion, hintColor, [...sceneVersionHint(next.name, sceneVer), ...versionHint(BUILD_INFO)]);
+}
+
 /** Routes both local picks (device menu) and remote commands (control panel on
  *  another device) through the same path, so the roster always reflects reality. */
 function applyScene(next: Scene): void {
@@ -444,6 +524,7 @@ function applyScene(next: Scene): void {
   mainHost.unmountAll();
   mainHost.mount(next);
   scene = next;
+  updateSceneVersionLabel(next);
   showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
   if (inViz) navigate({ kind: "viz", sceneId: scene.id }, "replace");
@@ -926,6 +1007,11 @@ function wireDeviceMenu(): void {
       ),
     getSceneMaster: () => getSceneMaster(),
     onSceneMasterChange: (value) => setSceneMaster(value),
+    // The Master card's Picture block — null whenever the meter's gone stale
+    // (the panel was just opened, so nothing has pushed a reading into it
+    // yet, or the sampling loop is gapped for longer than a full reset — see
+    // PICTURE_GAP_RESET_MS) rather than showing a frozen last reading.
+    getPictureReading: () => (performance.now() - pictureMeter.lastAtMs < PICTURE_GAP_RESET_MS ? pictureMeter.latest() : null),
     getAutoGain: () => getAutoGain(),
     onAutoGainChange: (value) => {
       setAutoGainAuto(false);
@@ -1031,6 +1117,7 @@ async function enterViz(next: Scene): Promise<void> {
   mainHost!.unmountAll();
   mainHost!.mount(next);
   scene = next;
+  updateSceneVersionLabel(next);
 
   showHud(`${mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id, viewport);
@@ -1038,6 +1125,7 @@ async function enterViz(next: Scene): Promise<void> {
   menuBtn.style.display = "block";
   fsBtn.style.display = "block";
   if (!bypassGallery) backBtn.style.display = "block";
+  sceneVersion.style.display = "inline";
 
   if (mode !== "renderer") void ensureAudio();
   updateMicPrompt();
@@ -1056,6 +1144,8 @@ function exitToGallery(): void {
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
   stopBtn.style.display = "none";
+  sceneVersion.style.display = "none";
+  hideTooltip(); // a version hint left open by a tap mustn't follow us out
   audioPrompt.style.display = "none";
   mainHost?.unmountAll();
   canvas.style.display = "none";
@@ -1082,6 +1172,25 @@ function applyRoute(route: Route): void {
 }
 
 async function boot(): Promise<void> {
+  // Injects the panel's stylesheet before anything else so its DSEG7
+  // @font-face rule (controlsTheme.ts) is already in document.fonts by the
+  // time pinEverything()'s sweep runs below — otherwise the font would only
+  // enter document.fonts whenever the settings panel first opens
+  // (deviceMenu.ts's own ensureControlsStyles() call), which can be well
+  // after a deploy has moved on. Idempotent and scoped to panel classes, so
+  // calling it this early changes nothing the gallery itself shows.
+  ensureControlsStyles();
+  // Starts the after-load, at-idle sweep that fetches every pinAsset() (the
+  // tempo worklet, the Dancers clip library) and loads every registered font
+  // — see src/pinnedAssets.ts's header for why a page must never need its
+  // own origin's files again after this point.
+  pinEverything();
+
+  // The scene's own version corner (#sceneVersion in index.html) is filled
+  // by updateSceneVersionLabel() from enterViz()/applyScene() below, for
+  // whichever scene is actually shown — nothing to do here before one of
+  // those runs (the element starts `display: none` in index.html).
+
   // Started first so it resolves alongside detectQuality()'s await below;
   // awaited before routing, since a deep-linked scene's enterViz() makes the
   // first autoStartSource() call.
@@ -1320,6 +1429,19 @@ async function boot(): Promise<void> {
         sampleRate: capture?.context.sampleRate ?? null,
         fluxRatio: lastFluxRatio,
       }),
+      // The Master card's Picture block, driven headlessly — tools/master-
+      // sweep.mjs's __viz.pictureForce/picture/pictureReset, and __viz.
+      // setMaster/scenes for its per-(scene, master value) sweep.
+      picture: {
+        force: (on: boolean) => {
+          pictureForced = on;
+        },
+        read: () => ({ latest: pictureMeter.latest(), mean: pictureAverager.mean(), samples: pictureAverager.count }),
+        reset: () => pictureAverager.reset(),
+      },
+      setMaster: (v: number) => setSceneMaster(v),
+      scenes: () =>
+        listScenes().map((s) => ({ id: s.id, name: s.name, draft: DRAFT_SCENE_IDS.has(s.id), paid: PAID_SCENE_IDS.has(s.id) })),
     });
   }
 
@@ -1545,9 +1667,16 @@ function loop(): void {
   // real broadband reading to give it. `lastTempoHits` is solo-mode-only
   // (undefined every host/renderer/TV tick — see its own doc comment on the
   // module state above) and switches beatClock.ts's phase comb onto the
-  // fixed-hop feed for this tick when a tempo source is live.
+  // fixed-hop feed for this tick when a tempo source is live. `lastMono`'s
+  // own peak feeds AnimFrame.wavePeak (the Scope card's Waveform readout and
+  // its drive jack); null on any device with no local mic.
   const anim = gained
-    ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: lastFluxRatio, tempoHits: lastTempoHits })
+    ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), {
+        shape: getHitShape(),
+        beatRatio: lastFluxRatio,
+        tempoHits: lastTempoHits,
+        wavePeak: lastMono ? peak(lastMono) : null,
+      })
     : null;
 
   // Reused for displayFrame at render time below instead of re-resolving —
@@ -1621,7 +1750,43 @@ function drawScene(
   const latchedAnim = latch.consume(anim, nowRafMs);
   const drives = engine.forScene(scene.id, scene.settings ?? [], latchedAnim);
   scene.render(mainHost!.ctx, displayFrame, viewport, palette, latchedAnim, drives);
+  // Right after the scene has drawn — and nowhere else — because the
+  // default framebuffer (preserveDrawingBuffer is false, gl.ts) only holds
+  // this frame until the browser composites it; pictureReadback.ts's own
+  // header says why this has to run in the same task as the render. Gated
+  // behind pictureWanted() since it costs a few blits and a tiny readback,
+  // worth paying only while the Master card's Picture block is actually
+  // visible or a headless sweep asked for it (pictureForced).
+  if (pictureWanted()) samplePicture(nowRafMs);
   governor?.recordFrame(nowRafMs);
+}
+
+/** Whether anything currently wants a live picture reading — the Master
+ *  card's Picture block while it's open, or a headless driver that forced it
+ *  on (tuning/debug.ts's `picture.force`, tools/master-sweep.mjs's own
+ *  `__viz.pictureForce(true)`). */
+function pictureWanted(): boolean {
+  return pictureForced || (deviceMenu?.isOpen() ?? false);
+}
+
+/** Drains whatever thumbnail finished since the last tick into the meter/
+ *  averager, then — no more than PICTURE_SAMPLE_INTERVAL_MS apart — kicks off
+ *  the next one. The readback itself is created lazily, on mainHost's own GL
+ *  context, the first tick this is actually called. */
+function samplePicture(nowRafMs: number): void {
+  if (!pictureReadback) pictureReadback = createPictureReadback(mainHost!.ctx.gl);
+  const t = pictureReadback.poll();
+  if (t) {
+    const r = pictureMeter.push(t.px, t.w, t.h, t.atMs);
+    pictureAverager.add(r);
+  }
+  // Half a 60 fps frame of slack: rAF timestamps jitter, and without it a
+  // 60 fps render lands just short of the interval on its fourth frame and
+  // samples every fifth instead (12 Hz, not 15).
+  if (nowRafMs - lastPictureKickMs >= PICTURE_SAMPLE_INTERVAL_MS - 8) {
+    pictureReadback.capture(canvas.width, canvas.height, nowRafMs);
+    lastPictureKickMs = nowRafMs;
+  }
 }
 
 /** True exactly while the start prompt could be up: in a scene, on this

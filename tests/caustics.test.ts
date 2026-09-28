@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
+  advanceDensityFlow,
   advanceLoudSwell,
   advancePump,
   causticDensityScale,
+  createDensityFlowState,
   createLoudSwellState,
   createPumpState,
+  DENSITY_GLIDE_SEC,
+  densityTargetFor,
   driftFlows,
   driftRatePerSec,
   focusSharp,
@@ -414,6 +418,22 @@ describe("caustics caustic density", () => {
       prev = s;
     }
   });
+
+  // drives.ts's header's "Nothing plugged in" paragraph: an unplugged jack
+  // (drive 0) leaves exactly the slider, never the coarsest cells.
+  it("densityTargetFor is the slider at drive 0, rises with the drive, and stays in 0..1", () => {
+    for (const slider of [0, 0.35, 0.7, 1]) {
+      expect(densityTargetFor(slider, 0)).toBeCloseTo(slider, 10);
+      let prev = densityTargetFor(slider, 0);
+      for (const drive of [0.25, 0.5, 1, 2]) {
+        const t = densityTargetFor(slider, drive);
+        expect(t).toBeGreaterThanOrEqual(prev);
+        expect(t).toBeLessThanOrEqual(1);
+        prev = t;
+      }
+    }
+    expect(densityTargetFor(0.35, NaN)).toBeCloseTo(0.35, 10);
+  });
 });
 
 describe("driftFlows keeps every shader-side offset bounded (mobile precision seams)", () => {
@@ -426,9 +446,12 @@ describe("driftFlows keeps every shader-side offset bounded (mobile precision se
   const HUGE_PHASE = 1e9; // hours at the drift-rate cap, and then some
 
   it("stays in [0, NOISE_PERIOD) for every entry, at any phase", () => {
+    // The phase arrives already density-scaled (advanceDensityFlow), so
+    // cover the density range by pre-multiplying, as a constant density
+    // would accumulate.
     for (const phase of [0, 1, 123.456, -50, 1e4, HUGE_PHASE, -HUGE_PHASE]) {
-      for (const dens of [causticDensityScale(0), causticDensityScale(0.5), causticDensityScale(1)]) {
-        const flows = driftFlows(phase, dens);
+      for (const densScale of [causticDensityScale(0), causticDensityScale(0.5), causticDensityScale(1)]) {
+        const flows = driftFlows(phase * densScale);
         expect(flows.length).toBeGreaterThan(0);
         for (const v of flows) {
           expect(v).toBeGreaterThanOrEqual(0);
@@ -439,10 +462,11 @@ describe("driftFlows keeps every shader-side offset bounded (mobile precision se
   });
 
   it("is congruent to the unwrapped offset — a wrap is a whole number of periods", () => {
-    // Forward warp x/y entries are phase * FLOW_X / FLOW_Y * densScale; check
-    // them against an independently computed modulo at a phase where fp32
-    // would have long since lost sub-cell resolution.
-    const flows = driftFlows(HUGE_PHASE, 1);
+    // Forward warp x/y entries are phase * FLOW_X / FLOW_Y; check them
+    // against an independently computed modulo at a phase where fp32 would
+    // have long since lost sub-cell resolution. densScale = 1 (density 0.5)
+    // is the identity, so the phase passed in is the unscaled HUGE_PHASE.
+    const flows = driftFlows(HUGE_PHASE);
     const fx = HUGE_PHASE * 0.15;
     const fy = -HUGE_PHASE * 0.09;
     const mod = (x: number) => ((x % NOISE_PERIOD) + NOISE_PERIOD) % NOISE_PERIOD;
@@ -459,8 +483,8 @@ describe("driftFlows keeps every shader-side offset bounded (mobile precision se
     // modulo the period, i.e. either +delta*0.15 or that minus the period.
     const period = NOISE_PERIOD / 0.15; // phase units per wrap of flows[0]
     const delta = 0.01;
-    const before = driftFlows(period * 3 - delta / 2, 1)[0];
-    const after = driftFlows(period * 3 + delta / 2, 1)[0];
+    const before = driftFlows(period * 3 - delta / 2)[0];
+    const after = driftFlows(period * 3 + delta / 2)[0];
     const step = wrapFlow(after - before);
     // Tolerance: the upload buffer is a Float32Array, so a value just under
     // the period carries fp32 rounding — still orders of magnitude below a
@@ -469,7 +493,80 @@ describe("driftFlows keeps every shader-side offset bounded (mobile precision se
   });
 
   it("reuses the caller's buffer, so the per-frame upload allocates nothing", () => {
-    const buf = driftFlows(1, 1);
-    expect(driftFlows(2, 1, buf)).toBe(buf);
+    const buf = driftFlows(1);
+    expect(driftFlows(2, buf)).toBe(buf);
+  });
+});
+
+// Dragging Caustic density used to teleport the whole drift field: the
+// offsets were the entire accumulated phase times whatever density was live
+// that frame. advanceDensityFlow scales only each tick's own step, and
+// glides the density itself — see its doc comment.
+describe("caustic density glide (advanceDensityFlow)", () => {
+  it("the first tick snaps straight to the target — no glide-in when the scene first mounts", () => {
+    const st = createDensityFlowState();
+    expect(st.live).toBeNull();
+    advanceDensityFlow(st, 1 / 60, 0.8, 0);
+    expect(st.live).toBeCloseTo(0.8, 10);
+  });
+
+  it("a step change covers ~63% (1 - 1/e) of the gap after DENSITY_GLIDE_SEC of small steady ticks, monotonically and without overshoot", () => {
+    const st = createDensityFlowState();
+    const dt = 1 / 60;
+    advanceDensityFlow(st, dt, 0.35, 0); // seed live at the starting density (first tick snaps)
+    let prev = st.live!;
+    const totalTicks = Math.round(DENSITY_GLIDE_SEC / dt);
+    for (let i = 0; i < totalTicks; i++) {
+      advanceDensityFlow(st, dt, 0.9, 0);
+      expect(st.live!).toBeGreaterThanOrEqual(prev - 1e-9); // monotone
+      expect(st.live!).toBeLessThanOrEqual(0.9 + 1e-9); // never overshoots the target
+      prev = st.live!;
+    }
+    const expected = 0.35 + (0.9 - 0.35) * (1 - Math.exp(-1));
+    expect(st.live!).toBeCloseTo(expected, 3);
+  });
+
+  it("converges to the target over a long run", () => {
+    const st = createDensityFlowState();
+    advanceDensityFlow(st, 1 / 60, 0.1, 0);
+    for (let i = 0; i < 60 * 10; i++) advanceDensityFlow(st, 1 / 60, 0.95, 0);
+    expect(st.live!).toBeCloseTo(0.95, 4);
+  });
+
+  it("an abrupt density change after a long run moves every drift offset by only one tick's worth, never a jump", () => {
+    const st = createDensityFlowState();
+    advanceDensityFlow(st, 1 / 60, 0.35, 0); // seed live at the starting density
+    // Stand in for a scene that's been drifting for a very long time —
+    // exactly the case that made the old bug worse the longer a session ran.
+    st.scaledPhase = 1e6;
+    const before = driftFlows(st.scaledPhase);
+
+    // The slider jumps 0.35 -> 0.9 in a single, ordinary tick.
+    const phaseStep = 1 / 60;
+    advanceDensityFlow(st, 1 / 60, 0.9, phaseStep);
+    const after = driftFlows(st.scaledPhase);
+
+    for (let i = 0; i < before.length; i++) {
+      // Circular distance on the wrapped [0, NOISE_PERIOD) ring — a naive
+      // difference would read a legitimate small step as huge whenever it
+      // happens to straddle the wrap.
+      const d = wrapFlow(after[i] - before[i]);
+      const circDist = Math.min(d, NOISE_PERIOD - d);
+      expect(circDist).toBeLessThan(0.1); // well under a noise unit
+    }
+  });
+
+  it("with phaseStep 0 (Drift speed at 0), a density change moves no flow entry at all", () => {
+    const st = createDensityFlowState();
+    advanceDensityFlow(st, 1 / 60, 0.35, 0);
+    st.scaledPhase = 12345.6789;
+    const before = driftFlows(st.scaledPhase);
+
+    advanceDensityFlow(st, 1 / 60, 0.9, 0); // no phase advance at all this tick
+    const after = driftFlows(st.scaledPhase);
+
+    for (let i = 0; i < before.length; i++) {
+      expect(after[i]).toBe(before[i]);
+    }
   });
 });

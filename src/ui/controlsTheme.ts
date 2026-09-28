@@ -574,6 +574,14 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-row:hover .vc-slider::-moz-range-thumb,
 .vc-row:focus-within .vc-slider::-moz-range-thumb { transform: scaleX(calc(1.7 * var(--vc-thumb-boost, 1))); }
 
+/* A row muted by its T chip (deviceMenu.ts's createControlRow): the thumb
+ * stays on the value a second T restores, so the track greys out and the
+ * thumb turns FADER_OFF — "off, and this is where it comes back to" — while
+ * an auto-held row keeps its accent. */
+.vc-row-off .vc-slider { --vc-accent: rgba(255, 255, 255, 0.28); }
+.vc-row-off .vc-slider::-webkit-slider-thumb { background: ${FADER_OFF}; }
+.vc-row-off .vc-slider::-moz-range-thumb { background: ${FADER_OFF}; }
+
 /* A linked-item divergent-value tick (deviceMenu.ts's createControlRow,
  * ControlRowSpec.linkedTicks — itemBoxes.ts's multi-selection, 2026-09-27):
  * the wrapper sits directly around the slider it belongs to (sized to it
@@ -921,14 +929,14 @@ body.vc-keys-reveal [data-keycap]::after {
   }
 }
 
-/* ---- src/ui/widgets/itemBoxes.ts + relationWeb.ts/relationRows.ts ----
- * A scene-declared item widget's own boxes, affinity rows and web — styled
- * with this file's own tokens/fonts rather than a widget-local stylesheet,
- * same convention as every other panel piece. Always a two-column grid,
- * regardless of item count or panel width, so a box stays wide enough for
- * its code + placeholder swatch even in the narrow (phone) stacked layout —
- * see itemBoxes.ts's header on why Phase 3's live preview lands in
- * .vc-item-preview without a layout change. */
+/* ---- src/ui/widgets/itemBoxes.ts + pairPads.ts ----
+ * A scene-declared item widget's own boxes and (for a pairwise family) the
+ * Pairs pads — styled with this file's own tokens/fonts rather than a
+ * widget-local stylesheet, same convention as every other panel piece.
+ * Always a two-column grid, regardless of item count or panel width, so a
+ * box stays wide enough for its code + placeholder swatch even in the narrow
+ * (phone) stacked layout — see itemBoxes.ts's header on why Phase 3's live
+ * preview lands in .vc-item-preview without a layout change. */
 /* The "All" chip + "Editing …" line above the boxes (itemBoxes.ts's
  * multi-selection, 2026-09-27). */
 .vc-item-selbar {
@@ -1017,32 +1025,102 @@ body.vc-keys-reveal [data-keycap]::after {
   .vc-pipette-ring { animation: none; opacity: 0; transition: opacity 0.5s ease-out; }
 }
 
-.vc-relweb-wrap { display: flex; justify-content: center; margin: 4px 0 10px; }
-.vc-relweb { width: 100%; max-width: 220px; }
-.vc-relweb-label {
-  font: 500 10px/1 ${FONT_LABEL}; fill: #04050a; text-transform: uppercase; letter-spacing: 0.03em;
+/* ---- src/ui/widgets/pairPads.ts ----
+ * The Pairs widget: the Smell/Touch switch, the own-trail strip's vertical
+ * faders, the six pads (a live culture canvas under an SVG overlay) and the
+ * mix row/presets below them, one plain .vc-row (this file's own wake-on-
+ * hover/focus + .vc-drive-pinned grammar) per section since 2026-09-28's own
+ * card mount (pairPads.ts's file header, "Its own card, four rows") — no
+ * rules of its own needed for that part, since every row already gets it for
+ * free. Replaces the old .vc-relweb*/.vc-relrow* rules above this comment's
+ * own predecessor (relationWeb.ts/relationRows.ts, deleted the same day this
+ * widget landed). */
+.vc-pair-layers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+.vc-pair-layer {
+  display: grid; gap: 2px; text-align: left; padding: 8px 10px; cursor: pointer; font: inherit; color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; background: rgba(255, 255, 255, 0.02);
 }
-.vc-relweb-node { cursor: pointer; }
-.vc-relweb-node:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 3px; }
-.vc-relweb-sel { opacity: 1; }
-.vc-relweb-dim { opacity: 0.3; }
+.vc-pair-layer b { font: 600 13px/1.2 ${FONT_LABEL}; letter-spacing: 0.02em; }
+.vc-pair-layer span { font-size: 11.5px; line-height: 1.3; color: rgba(255, 255, 255, 0.4); }
+/* --lc (the layer's own accent) comes from PAIR_LOOK's smell/touch pos
+ * colour, set once per button since it never changes after mount. */
+.vc-pair-layer-smell { --lc: 140, 230, 160; }
+.vc-pair-layer-touch { --lc: 89, 187, 251; }
+.vc-pair-layer[aria-checked="true"] {
+  border-color: rgb(var(--lc)); box-shadow: inset 0 0 0 1px rgb(var(--lc)), 0 0 18px -8px rgb(var(--lc));
+  background: rgba(var(--lc), 0.06);
+}
+.vc-pair-layer[aria-checked="true"] b { color: rgb(var(--lc)); }
+.vc-pair-label {
+  font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255, 255, 255, 0.45);
+  margin: 10px 0 6px;
+}
 
-.vc-relrows { display: grid; gap: 2px; margin-bottom: 8px; }
-.vc-relrow { display: grid; gap: 7px; padding: 8px 2px; border-top: 1px solid rgba(255, 255, 255, 0.06); }
-.vc-relrow:first-child { border-top: 0; }
-.vc-relrow-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.vc-relrow-label { font: 500 12px/1.2 ${FONT_LABEL}; color: #fff; }
-.vc-relrow-value {
-  font: 400 12px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.6); font-variant-numeric: tabular-nums; flex: none;
+.vc-own-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 4px; }
+.vc-own { display: grid; justify-items: center; gap: 4px; padding: 8px 4px 6px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; }
+.vc-own-code { font: 500 11px/1 ${FONT_MONO}; }
+.vc-own-val { font: 400 10.5px/1.25 ${FONT_MONO}; color: rgba(255, 255, 255, 0.6); text-align: center; }
+.vc-own-note { margin: 0 0 10px; font-size: 12px; color: rgba(255, 255, 255, 0.4); padding: 8px 10px; border: 1px dashed rgba(255, 255, 255, 0.14); border-radius: 6px; }
+/* The own-trail fader — a vertical version of the same slider grammar a pad
+ * axis draws with (--c is the strain's own colour, set on .vc-own). */
+.vc-vfader { position: relative; width: 26px; height: 92px; margin: 0 auto; touch-action: none; cursor: pointer; outline: none; }
+.vc-vfader:focus-visible { outline: 1px solid ${SCENE_VIOLET}; outline-offset: 3px; }
+.vc-vfader-track {
+  position: absolute; left: 11px; width: 4px; top: 0; bottom: 0; border-radius: 2px;
+  background: linear-gradient(0deg, rgba(239, 106, 106, 0.55), rgba(239, 106, 106, 0.14) 42%, rgba(255, 255, 255, 0.14) 50%, rgba(140, 230, 160, 0.14) 58%, rgba(140, 230, 160, 0.55));
 }
-/* A row where the selected strains disagree (itemBoxes.ts's multi-selection,
- * 2026-09-27) — a small pill, not a colour change on the row itself, so it
- * reads as "extra information" rather than an error state. */
-.vc-relrow-mixed {
-  font: 500 9px/1 ${FONT_MONO}; letter-spacing: 0.06em; text-transform: uppercase;
-  color: ${BANDS_AMBER}; border: 1px solid color-mix(in srgb, ${BANDS_AMBER} 55%, transparent);
-  border-radius: 8px; padding: 2px 6px; flex: none;
+.vc-vfader-fill { position: absolute; left: 11px; width: 4px; border-radius: 2px; background: var(--c, ${SCENE_VIOLET}); opacity: 0.7; }
+.vc-vfader-thumb {
+  position: absolute; left: 5px; width: 16px; height: 16px; margin: 0 0 -8px 0; border-radius: 50%;
+  background: #0b0f10; border: 2px solid var(--c, ${SCENE_VIOLET}); box-shadow: 0 0 12px -2px var(--c, ${SCENE_VIOLET});
 }
+
+.vc-pair-status { min-height: 2.6em; margin: 0 0 10px; font-size: 12.5px; color: rgba(255, 255, 255, 0.6); }
+
+/* gap 18px, up from the original 12px — the user asked for "gaps" between
+ * the pads once they saw them next to the Signal/Gate cards' own airier row
+ * spacing (2026-09-28). */
+.vc-pads { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 12px; }
+.vc-pad { display: grid; gap: 5px; }
+.vc-pad-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font: 400 11px/1 ${FONT_MONO}; }
+.vc-pad-body { display: grid; grid-template-columns: 13px minmax(0, 1fr); gap: 3px; }
+.vc-pad-xcap, .vc-pad-ycap {
+  display: flex; gap: 6px; font: 400 9.5px/1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.4); white-space: nowrap; overflow: hidden;
+}
+.vc-pad-ycap { writing-mode: vertical-rl; transform: rotate(180deg); justify-content: space-between; }
+.vc-pad-xcap { grid-column: 2; justify-content: space-between; }
+.vc-pad-sign { font-size: 12px; line-height: 1; color: rgba(255, 255, 255, 0.55); }
+/* vertical-rl lays a Latin glyph on its side, so the y axis's "−" would read as "|". */
+.vc-pad-ycap .vc-pad-sign { text-orientation: upright; }
+.vc-pad-sq {
+  position: relative; grid-column: 2; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.12); touch-action: none; cursor: crosshair;
+}
+.vc-pad-sq:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
+/* A pointer press focuses the pad/fader for its keys without the ring (pairPads.ts's pointerFocus). */
+.vc-pad-sq.vc-pf:focus-visible, .vc-vfader.vc-pf:focus-visible { outline: none; }
+.vc-pad-canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.85; }
+.vc-pad-sq svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.vc-pad-axis { stroke: rgba(255, 255, 255, 0.2); vector-effect: non-scaling-stroke; }
+.vc-pad-tick { stroke: rgba(255, 255, 255, 0.3); vector-effect: non-scaling-stroke; }
+.vc-pad-guide { stroke: rgba(255, 255, 255, 0.35); stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; }
+.vc-pad-corner { font: 6.2px ${FONT_MONO}; fill: rgba(255, 255, 255, 0.45); letter-spacing: 0.06em; }
+.vc-pad-ring { vector-effect: non-scaling-stroke; }
+.vc-pad-ring-white { stroke: rgba(255, 255, 255, 0.9); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
+.vc-pad-beh { color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Random / Nudge / Keep own trails / Back (pairPads.ts's own header, "The mix
+ * row"). Back starts disabled (an empty history) via the plain disabled
+ * state; Keep own trails toggles via aria-pressed, styled the same violet
+ * as a pressed .vc-exp-pill below. */
+.vc-mix-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.vc-mix-row button {
+  font: 400 11px/1 ${FONT_MONO}; letter-spacing: 0.05em; text-transform: uppercase; color: rgba(255, 255, 255, 0.7);
+  background: transparent; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px; padding: 6px 10px; cursor: pointer;
+}
+.vc-mix-row button:hover:not(:disabled) { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+.vc-mix-row button:disabled { color: rgba(255, 255, 255, 0.25); border-color: rgba(255, 255, 255, 0.1); cursor: not-allowed; }
+.vc-mix-row button[aria-pressed="true"] { color: ${SCENE_VIOLET}; border-color: ${SCENE_VIOLET}; }
 
 .vc-exp-pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .vc-exp-pill {

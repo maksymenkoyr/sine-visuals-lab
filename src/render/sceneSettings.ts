@@ -14,7 +14,9 @@ import type { SignalId, SignalLink } from "./signals.ts";
  * stages, so like them it stays out of Looks/share codes and off the
  * phone→TV wire (which only carries scene/palette/viewport — net/room.ts).
  * Storage lives here; the scaling itself happens at the single resolve
- * choke point, resolveSceneSetting in autoTune.ts.
+ * choke point, resolveSceneSetting in autoTune.ts, which honours a per-
+ * setting `masterScale: false` opt-out (see SceneSetting.masterScale below)
+ * for a value the master would otherwise distort past recognition.
  */
 
 /**
@@ -203,6 +205,13 @@ export interface SceneSetting {
     param: string;
     other?: number;
   };
+  /** Set false to exempt this setting from the device-wide scene master
+   *  (autoTune.ts's resolveSceneSetting): a signed relation value whose
+   *  meaning is its exact position (Physarum 2's att/touch pair tables),
+   *  where ×0 or a clamped ×2 would change which relation it is, and the
+   *  panel would show the stored value while the scene runs the scaled
+   *  one. */
+  masterScale?: false;
 }
 
 const STORAGE_KEY = "vibe.sceneSettings";
@@ -323,7 +332,10 @@ export function variantFirst(specs: readonly SceneSetting[]): SceneSetting[] {
 // store above. Raw multiply at resolve time: resolved' = resolved × master,
 // clamped back to the spec's own [min, max] (autoTune.ts's
 // resolveSceneSetting). 1 is identity; 0 collapses every numeric param to
-// its floor, which is what an honest raw multiply means.
+// its floor, which is what an honest raw multiply means. No setting carries
+// a sense of "more intense" for this to lean on, so to see what the master
+// actually does to the picture, look at the picture — the Master card's own
+// Picture block (src/ui/deviceMenu.ts), measured by src/render/pictureMeter.ts.
 export const SCENE_MASTER_MIN = 0;
 export const SCENE_MASTER_MAX = 2;
 export const SCENE_MASTER_DEFAULT = 1;

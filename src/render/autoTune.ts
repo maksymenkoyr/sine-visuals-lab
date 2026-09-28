@@ -431,6 +431,10 @@ function resolveUnscaled(sceneId: string, spec: SceneSetting): number {
  *    raw signal; gates and combines must not move — drives.ts's header);
  *  - never to an enum or boolean (their values are chip indices / 0-1
  *    flags, not amounts), so the variant setting is naturally exempt too;
+ *  - never to a spec with `masterScale: false` (SceneSettings.masterScale):
+ *    a signed relation value whose meaning is its exact position, where ×0
+ *    or a clamped ×2 would change which relation it is (Physarum 2's
+ *    att/touch pair tables);
  *  - never to Sensitivity/Expansion/Smoothing, which resolve through
  *    resolveSensitivity and friends below and are audio gain, not scene
  *    params;
@@ -444,6 +448,7 @@ export function resolveSceneSetting(sceneId: string, spec: SceneSetting): number
   const master = getSceneMaster();
   if (master === SCENE_MASTER_DEFAULT) return value;
   if (spec.type === "boolean" || spec.type === "enum") return value;
+  if (spec.masterScale === false) return value;
   if (import.meta.env.DEV && (getOverride(sceneId, spec.key) !== undefined || getPin(sceneId, spec.key) !== undefined)) {
     return value;
   }

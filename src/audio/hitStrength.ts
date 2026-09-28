@@ -24,8 +24,8 @@
  * returns exactly 1, whatever the other three fields hold — the graded path
  * is opt-in per device, and every scene tuned against a flat pulse keeps
  * looking exactly the way it did before this module existed until someone
- * actually raises Dimension (the amount slider's label in the meters panel,
- * src/ui/audioMeters.ts).
+ * actually raises Dimension (the amount slider's label in Shape, the Hits
+ * card's own disclosure — src/ui/audioMeters.ts).
  *
  * Global per device (not per scene, unlike src/audio/sensitivity.ts and
  * src/render/sceneSettings.ts) and threaded the same way as
@@ -63,9 +63,10 @@ export const HIT_AMOUNT_MIN = 0;
 export const HIT_AMOUNT_MAX = 1;
 export const HIT_AMOUNT_DEFAULT = 0;
 
-// The knee's own slider range (src/ui/audioMeters.ts) — narrow enough
-// (0.05) that a hit barely over the line already reads as near-full
-// stand-out, wide enough (4) that even a big clearance stays soft.
+// The knee's own slider range (the Hits card's Shape section,
+// src/ui/audioMeters.ts) — narrow enough (0.05) that a hit barely over the
+// line already reads as near-full stand-out, wide enough (4) that even a
+// big clearance stays soft.
 export const HIT_KNEE_MIN = 0.05;
 export const HIT_KNEE_MAX = 4;
 export const HIT_KNEE_DEFAULT = 1;
@@ -156,9 +157,9 @@ export function resetHitShape(): void {
 // ---- The pure formula --------------------------------------------------
 
 /** ratio (1 = bare trigger) -> 0..1, 0 at/below the firing line. Exported on
- *  its own for the meters panel's Curve monitor (src/ui/audioMeters.ts),
- *  which plots this same function of ratio to show what a knee setting
- *  actually does. */
+ *  its own for the Hits card's Shape section's own Curve monitor
+ *  (src/ui/audioMeters.ts), which plots this same function of ratio to show
+ *  what a knee setting actually does. */
 export function hitStandout(ratio: number, knee: number): number {
   const r = Number.isFinite(ratio) ? ratio : 1;
   const k = Number.isFinite(knee) && knee > 0 ? knee : HIT_KNEE_DEFAULT;

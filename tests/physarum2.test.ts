@@ -36,9 +36,11 @@ import {
   type StrainDriveValues,
 } from "../src/render/scenes/physarum2.ts";
 import { FULL_VIEWPORT, type Viewport } from "../src/render/scene.ts";
-import { computeAutoTarget } from "../src/render/autoTune.ts";
+import { computeAutoTarget, setAutoEnabled } from "../src/render/autoTune.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 import { qualitySettings } from "../src/render/quality.ts";
+import { getSceneSetting, resetSceneSettings, setSceneSetting } from "../src/render/sceneSettings.ts";
+import { applyLook, captureLook, decodeLook, encodeLook } from "../src/render/sceneLooks.ts";
 
 describe("physarum2TrailSide", () => {
   it("holds agent density per texel roughly constant across the quality presets' agent counts", () => {
@@ -243,6 +245,70 @@ describe("per-strain settings", () => {
     expect(panel.length).toBe(1);
     expect(panel[0]!.widget).toBe("itemBoxes");
     expect(panel[0]!.items).toBe("strain");
+  });
+
+  it("generates exactly the off-diagonal touch<i><j> keys — no touchii", () => {
+    for (let i = 0; i < SPECIES_COUNT; i++) {
+      for (let j = 0; j < SPECIES_COUNT; j++) {
+        const spec = settings.find((s) => s.key === `touch${i}${j}`);
+        if (i === j) {
+          expect(spec, `touch${i}${j} should not exist`).toBeUndefined();
+        } else {
+          expect(spec, `missing touch${i}${j}`).toBeDefined();
+          expect(spec!.default).toBe(0);
+          expect(spec!.min).toBe(-1.5);
+          expect(spec!.max).toBe(1.5);
+          expect(spec!.item).toEqual({ family: "strain", index: i, param: "touch", other: j });
+        }
+      }
+    }
+  });
+
+  it("att and touch are all exempt from the scene master and have no auto/drive", () => {
+    for (const spec of settings) {
+      if (spec.item?.param === "att" || spec.item?.param === "touch") {
+        expect(spec.masterScale, `${spec.key} masterScale`).toBe(false);
+        expect(spec.auto, `${spec.key} auto`).toBeUndefined();
+        expect(spec.drive, `${spec.key} drive`).toBeUndefined();
+      }
+    }
+  });
+});
+
+describe("physarum2 Looks back-compat (att/touch)", () => {
+  const ID = "physarum2";
+  const specs = physarum2Scene.settings ?? [];
+
+  it("an old Look with no touch keys resets every touch key to 0", () => {
+    // Dirty every touch value first, so a Look that says nothing about touch
+    // must still be authoritative (applyLook puts an absent key back to its
+    // default, not leaving it untouched) — see sceneLooks.ts's header.
+    for (const spec of specs) {
+      if (spec.item?.param === "touch") setSceneSetting(ID, spec, -0.9);
+    }
+    applyLook({ name: "old", sceneId: ID, manual: { att01: 0.5 } }, specs);
+    for (const spec of specs) {
+      if (spec.item?.param === "touch") expect(getSceneSetting(ID, spec)).toBe(0);
+    }
+    resetSceneSettings(ID, specs);
+  });
+
+  it("a captured/encoded/decoded Look round-trips a touch value", () => {
+    const touch01 = specs.find((s) => s.key === "touch01")!;
+    // The previous test's applyLook put every key not in its manual (every
+    // touch key included) back into auto — captureLook only captures a
+    // key's manual value while it's NOT auto, so this test's own dirty step
+    // must explicitly turn auto back off first.
+    setAutoEnabled(ID, touch01.key, false);
+    setSceneSetting(ID, touch01, -0.9);
+    const look = captureLook("mine", ID, specs);
+    const code = encodeLook(look);
+    const decoded = decodeLook(code)!;
+    expect(decoded).not.toBeNull();
+    resetSceneSettings(ID, specs);
+    applyLook(decoded, specs);
+    expect(getSceneSetting(ID, touch01)).toBe(-0.9);
+    resetSceneSettings(ID, specs);
   });
 });
 

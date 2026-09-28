@@ -54,7 +54,9 @@ repo. `src/render/scenes/privateScenes.ts` has the contract.
 3. Register the scene as a side effect in `src/render/scenes/index.ts`
    (`registerScene(yourScene)`) and export it there like its neighbours. A new
    scene goes *first* among the drafts — that file's header comment owns the
-   ordering rule and why.
+   ordering rule and why. Once it's registered this way, it gets its own
+   MAJOR.MINOR.PATCH automatically — `tools/sceneVersionLib.mjs`'s header owns
+   how it's counted and how to raise its major by hand.
 4. If it should degrade or disable below some hardware quality, set `minQuality`
    on the `Scene` object — see `src/render/quality.ts` for what each preset means.
 5. If the scene needs data it can't compute (the dancers' captured moves are

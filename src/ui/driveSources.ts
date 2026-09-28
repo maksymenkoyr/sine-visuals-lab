@@ -1,5 +1,5 @@
 import { BEAT_GRIDS, type BeatGridIndex } from "../audio/beatGrid.ts";
-import { sourceKey, type DriveSourceChoice } from "../render/drives.ts";
+import { sourceSlot, type DriveSourceChoice } from "../render/drives.ts";
 import type { SignalId } from "../render/signals.ts";
 import { AUTO_SKY, BANDS_AMBER, HOT_RED, HOT_YELLOW, INPUT_GREEN, POWER_TEAL, STRIP_HIGH, STRIP_LOW, STRIP_MID } from "./controlsTheme.ts";
 
@@ -32,6 +32,7 @@ const SIGNAL_SOURCE_LABEL: Record<SignalId, string> = {
   "anim.energy": "Loudness",
   "anim.sectionIntensity": "Song intensity",
   "anim.centroid": "Brightness",
+  "anim.wavePeak": "Waveform",
   "anim.beatWave": "Beat wave",
   "anim.barWave": "Bar wave",
   "anim.tempo": "Tempo",
@@ -62,11 +63,12 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.energy": "overall loudness across every band.",
   "anim.sectionIntensity": "how intense this part of the song is, over the last few seconds.",
   "anim.centroid": "where the sound's energy sits, from dark and low to bright and high.",
+  "anim.wavePeak": "the peak of the raw sound wave — the same % the Scope card's Waveform shows.",
   "anim.beatWave": "a smooth swing that peaks once every beat (or every few, with its own divider), fading out once the metronome stops.",
   "anim.barWave": "the same smooth swing as Beat wave, once every bar instead.",
-  "anim.tempo": "how fast the BPM card's own tempo is, from slow to fast.",
+  "anim.tempo": "how fast the Tempo card's own BPM is, from slow to fast.",
   "anim.tempoLock": "how confidently the tempo tracker has locked onto a beat.",
-  "anim.metronome": "a tick on every beat at the BPM card's own tempo — the same pulse every beat, silent while it reads '--'.",
+  "anim.metronome": "a tick on every beat at the Tempo card's own BPM — the same pulse every beat, silent while it reads '--'.",
   "anim.metronomeBar": "the same steady tick as Metronome, once per bar.",
 };
 
@@ -90,6 +92,7 @@ const SIGNAL_SOURCE_COLOR: Record<SignalId, string> = {
   "anim.energy": INPUT_GREEN,
   "anim.sectionIntensity": POWER_TEAL,
   "anim.centroid": AUTO_SKY,
+  "anim.wavePeak": DRIVE_WHITE,
   "anim.beatWave": DRIVE_WHITE,
   "anim.barWave": DRIVE_WHITE,
   "anim.tempo": DRIVE_WHITE,
@@ -139,13 +142,14 @@ export function isLineSourceChoice(choice: DriveSourceChoice): boolean {
 /** The identity a patch-bay jack (src/ui/jack.ts) keys itself by — every
  *  grid division collapses to one shared key ("grid"), since a patch
  *  carries at most one grid source regardless of division (drives.ts's own
- *  header) and the Beat row's jack/the Tempo add-chip both mean "toggle
- *  whichever one's already there", never one specific division (this is
+ *  header) and the Timing strip's Grid jack/the Tempo add-chip both mean
+ *  "toggle whichever one's already there", never one specific division (this is
  *  the same collapse buildAddChips' own Tempo-chip click handler in
- *  deviceMenu.ts applies by hand). Every other choice keys by its own
- *  drives.ts sourceKey, unchanged. */
+ *  deviceMenu.ts applies by hand). It's drives.ts's sourceSlot — the same
+ *  identity the store toggles and dedupes by, so a jack that reads
+ *  "plugged" always unplugs on click. */
 export function jackKey(choice: DriveSourceChoice): string {
-  return isGridSourceChoice(choice) ? "grid" : sourceKey(choice);
+  return sourceSlot(choice);
 }
 
 /** The full display label — a row's source summary, a patch source line's
@@ -185,7 +189,7 @@ export const DRIVE_ADD_GROUPS: readonly DriveAddGroup[] = [
   { label: "Hits", choices: ["feature.onset", "anim.lowOnset", "anim.midOnset", "anim.highOnset", "anim.dropOnset"] },
   {
     label: "Levels",
-    choices: ["anim.energy", "anim.low", "anim.mid", "anim.high", "feature.flux", "anim.sectionIntensity", "anim.centroid"],
+    choices: ["anim.energy", "anim.wavePeak", "anim.low", "anim.mid", "anim.high", "feature.flux", "anim.sectionIntensity", "anim.centroid"],
   },
   {
     label: "Tempo",

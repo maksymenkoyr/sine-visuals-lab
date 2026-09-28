@@ -52,6 +52,17 @@ export interface AnimFrame {
    *  ("Onset surge") reads this so a scene can lean into a build-up before
    *  the beat actually lands, not just react after. */
   beatRatio: number;
+  /** The raw mic waveform's peak |sample| this tick, peak-held — jumps to a
+   *  louder peak at once, then falls at WAVE_PEAK_FALL_PER_SEC times this
+   *  tick's smoothing rateScale (so Smoothing's Off stop, rateScale =
+   *  Infinity, makes it exactly the instantaneous peak, same as the Scope
+   *  card's RAW reading). It's the one number the Scope card's Waveform
+   *  readout shows and the `anim.wavePeak` drive source (signals.ts) reads —
+   *  computed here once so both read the same thing. Linear amplitude [0,1]
+   *  of the raw capture (before auto-gain/sensitivity), not normalized. 0
+   *  whenever `hit.wavePeak` is omitted/null (TV, renderer, previews — no
+   *  local mic), same as `beatRatio` above. */
+  wavePeak: number;
   /** Phase-locked beat/bar clock — see beatClock.ts. Never restarts mid-beat
    *  the way FeatureFrame.onsetPhase can (that field has no reader today —
    *  this superseded it). */
@@ -148,8 +159,8 @@ export interface AnimFrame {
   /** This tick's silence-gate dimmer (src/audio/silenceGate.ts) — the same
    *  value bandEnergy.advance() was called with above, computed once here
    *  from `gate`/`frame.level` (see advance()'s own doc). 1 with no gate or
-   *  a fully open room, down toward 0 the quieter the room reads. The
-   *  Rhythm card's hits history reads this to shade the ground (alpha
+   *  a fully open room, down toward 0 the quieter the room reads. The Hits
+   *  card's hits history reads this to shade the ground (alpha
    *  proportional to `1 - gateDimmer`, so a half-open gate reads lighter
    *  than a shut one); a BeatListener's "bass"/"mid"/"high" sources are
    *  gated by construction (lowOnset/midOnset/highOnset are already false
@@ -169,7 +180,7 @@ export interface AnimFrame {
    *  the `hit` param below. Copies, same reasoning as `hits` above copying
    *  bandEnergy's own diags: these hold the *last fired hit's* numbers
    *  (they only change on that detector's own onset), which is exactly what
-   *  the meters panel's Hit strength card (audioMeters.ts) wants to watch
+   *  the Hits card's own Shape section (audioMeters.ts) wants to watch
    *  without an old AnimFrame changing under it later. */
   hitStrength: { beat: HitParts; low: HitParts; mid: HitParts; high: HitParts };
 }
@@ -207,13 +218,16 @@ export interface AnimClock {
    *  see beatClock.ts's own file header for why host/renderer/TV never pass
    *  this) switches beatClock.ts's phase comb onto that fixed-hop feed for
    *  this tick instead of the render-tick `frame.onset`/beatRatio pair;
-   *  omitted (every other caller), today's render-tick-only behavior. */
+   *  omitted (every other caller), today's render-tick-only behavior.
+   *  `hit.wavePeak` is this tick's instantaneous waveform peak
+   *  (src/audio/waveform.ts's `peak()` over app.ts's lastMono) — solo/host
+   *  only, feeding AnimFrame.wavePeak's own peak-hold. */
   advance(
     dtSec: number,
     frame: FeatureFrame,
     smoothing?: number,
     gate?: SilenceGateMarks,
-    hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[] },
+    hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[]; wavePeak?: number | null },
   ): AnimFrame;
 }
 
@@ -222,6 +236,12 @@ export interface AnimClock {
 // hand-duplicating it (its own header explains why: "read it from
 // animClock/bandEnergy; don't invent one").
 export const BEAT_PULSE_DECAY_PER_SEC = 6; // matches the existing app.ts/tv.ts broadband beatPulse decay
+
+// AnimFrame.wavePeak's own fall rate — matches the meters' own peak-hold
+// fall (audioMeters.ts's PEAK_FALL_PER_SEC, spectrumStrip.ts's peak-hold
+// decay), so moving the hold in here (from audioMeters.ts's own local state)
+// doesn't change how the Scope card's Waveform readout looks or feels.
+export const WAVE_PEAK_FALL_PER_SEC = 1.2;
 
 // The phase comb's own hit weight (beatClock.ts's advance()) — how much this
 // tick's beat vote counts, so a big, obvious hit corrects the clock harder
@@ -257,6 +277,8 @@ export function createAnimClock(): AnimClock {
   let beatPulse = 0;
   let metronomePulse = 0;
   let metronomeBarPulse = 0;
+  // AnimFrame.wavePeak's own held state — see that field's own doc comment.
+  let wavePeak = 0;
   // Last tick's own low-band onset ratio — see the hitWeight comment above
   // for why this tick's bass weight checks both.
   let prevLowRatio = 0;
@@ -272,9 +294,18 @@ export function createAnimClock(): AnimClock {
       frame: FeatureFrame,
       smoothing = SMOOTHING_DEFAULT,
       gate?: SilenceGateMarks,
-      hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[] },
+      hit?: { shape: HitShape; beatRatio?: number | null; tempoHits?: TempoHit[]; wavePeak?: number | null },
     ): AnimFrame {
       const rateScale = smoothingRateScale(smoothing);
+      // AnimFrame.wavePeak's own peak-hold — see that field's own doc
+      // comment. `hit.wavePeak` omitted/null (no local mic) holds nothing:
+      // it snaps straight to 0, the same as `beatRatio` above. Otherwise a
+      // finite `inst` minus a non-finite Infinity rateScale (Smoothing's Off
+      // stop) is exactly -Infinity (IEEE754), so Math.max against that lands
+      // on `inst` exactly — no separate smoothingOff branch needed, the same
+      // reasoning audioMeters.ts's own former peak-hold relied on.
+      const inst = hit?.wavePeak;
+      wavePeak = inst == null ? 0 : Math.max(inst, wavePeak - WAVE_PEAK_FALL_PER_SEC * rateScale * dtSec);
       const dimmer = gate ? silenceGateDimmer(frame.level, gate) : 1;
       const flowPhase = flow.advance(dtSec, frame.energy);
       // bandEnergy runs before beat, not after — see the hitWeight comment
@@ -331,6 +362,7 @@ export function createAnimClock(): AnimClock {
         beatPulse,
         onset,
         beatRatio: hit?.beatRatio ?? 0,
+        wavePeak,
         beatPhase: beat.beatPhase,
         barPhase: beat.barPhase,
         tempoLock: beat.tempoLock,

@@ -20,7 +20,18 @@
  * share exactly one strain-motion formula (physarum2.ts's file header, "the
  * one strain-motion mapping") even though they run on differently-sized
  * fields.
+ *
+ * `createPairCulture` (2026-09-27, the Pairs widget) is the same idea for
+ * *two* strains at once: a pure port of the prototype's `makeCulture` called
+ * with `K = 2` (`affinity-studio.html:514-602`), so a Pairs pad's own live
+ * two-strain dish reads Touch's feed/eat exactly the way a specimen box's
+ * `StrainPreview` reads Smell alone. It shares `TOUCH_FEED_GAIN`/
+ * `TOUCH_EAT_GAIN`/`TOUCH_MAX_BITE` with physarum2.ts's GPU packing
+ * (physarum2Affinity.ts) rather than recalibrating for the CPU, so a pad's
+ * preview and the main dish agree on what a given Touch value looks like.
  */
+
+import { TOUCH_EAT_GAIN, TOUCH_FEED_GAIN, TOUCH_MAX_BITE } from "./physarum2Affinity.ts";
 
 const TWO_PI = Math.PI * 2;
 
@@ -183,4 +194,216 @@ export function createStrainPreview(opts: StrainPreviewOptions = {}): StrainPrev
   }
 
   return { size, step, pixels };
+}
+
+// ---------------------------------------------------------------------
+// Pair cultures — a live two-strain dish behind one Pairs pad. See this
+// file's header.
+// ---------------------------------------------------------------------
+
+/** 0..1 per channel, same convention as `StrainPreview.pixels`'s `rgb`. */
+export type RGB = readonly [number, number, number];
+
+/** Fraction of agents re-spawned at random each step — the prototype's own
+ *  pair-culture value (`affinity-studio.html`'s `ensurePairCultures`:
+ *  `makeCulture(72, 72, 1600, [a, b], 0.004)`), higher than the single-strain
+ *  `RESPAWN_PER_STEP` since a two-strain dish this small coarsens faster. */
+export const PAIR_RESPAWN_PER_STEP = 0.004;
+
+export interface PairCultureInputs {
+  motion: readonly [StrainPreviewMotion, StrainPreviewMotion];
+  /** `smell[i][j]` — strain `i`'s sensing weight against strain `j`'s trail,
+   *  in this pad's own *local* 0/1 indices (not the scene's strain indices),
+   *  Hostility already folded in (`smellWeight`) for `i !== j`; `i === j` is
+   *  the (unaffected) own-trail weight. */
+  smell: readonly [readonly [number, number], readonly [number, number]];
+  /** `touch[i][j]` — what strain `i`'s steps do to strain `j`'s trail, same
+   *  local indices; the diagonal is never read (Touch has no own-strain
+   *  meaning, `defineItemPairs`'s `diagonal: false`). */
+  touch: readonly [readonly [number, number], readonly [number, number]];
+}
+
+export interface PairCulture {
+  readonly size: number;
+  /** Runs one simulation step for both strains at once — sense/turn/move,
+   *  Touch's feed/eat at the landed cell, then each channel's own 3x3
+   *  blur+decay (`StrainPreview.step`'s own kernel). */
+  step(inputs: PairCultureInputs): void;
+  /** Renders both channels, additively combined and tinted by `colors`, into
+   *  a caller-owned buffer (`out`, `size*size*4` bytes) — no per-frame
+   *  allocation, since a pad redraws whenever it steps (pairPads.ts's own
+   *  stepping cadence). Alpha is always 255. */
+  pixelsInto(out: Uint8ClampedArray, colors: readonly [RGB, RGB]): void;
+  /** Each channel's raw trail sum — for tests only (a pixel-space assertion
+   *  would have to redo the same gamma/exposure curve `pixelsInto` applies). */
+  totals(): [number, number];
+  /** The scene's automatic beat reseed, at pad scale: each agent, with
+   *  probability `share`, jumps into one disc of `radius` (a fraction of the
+   *  dish's side, like the scene's field-unit Spread) at a random centre,
+   *  with a random heading and its strain unchanged. Without this a pad's
+   *  network settles into a fixed shape within seconds, while the scene's
+   *  own keeps being rebuilt on every beat. */
+  seedColony(share: number, radius: number): void;
+}
+
+export interface PairCultureOptions {
+  size?: number;
+  agents?: number;
+  seed?: number;
+}
+
+/** A pure port of the prototype's `makeCulture` fixed at `K = 2` — see this
+ *  file's header. Deliberately its own tiny torus per pad, exactly like
+ *  `createStrainPreview`, not a slice of the real scene's trail map. */
+export function createPairCulture(opts: PairCultureOptions = {}): PairCulture {
+  const size = Math.max(1, Math.floor(opts.size ?? 72));
+  const agents = Math.max(1, Math.floor(opts.agents ?? 1600));
+  const rnd = mulberry32(opts.seed ?? 1);
+  const CELLS = size * size;
+  const trail: [Float32Array, Float32Array] = [new Float32Array(CELLS), new Float32Array(CELLS)];
+  const tmp = new Float32Array(CELLS);
+  const ax = new Float32Array(agents);
+  const ay = new Float32Array(agents);
+  const ah = new Float32Array(agents);
+  // Fixed 50/50 split by index parity — same as the prototype's `kinds`
+  // list, and simpler than physarum2.ts's own Share-weighted `assign` (no
+  // per-strain Share setting exists for a two-strain pad).
+  const ak = new Uint8Array(agents);
+  for (let i = 0; i < agents; i++) {
+    ax[i] = rnd() * size;
+    ay[i] = rnd() * size;
+    ah[i] = rnd() * TWO_PI;
+    ak[i] = i & 1;
+  }
+
+  const GAMMA = new Float32Array(256);
+  for (let i = 0; i < 256; i++) GAMMA[i] = Math.pow(i / 255, GAMMA_INV);
+
+  function sense(x: number, y: number, w0: number, w1: number): number {
+    let xi = Math.floor(x);
+    let yi = Math.floor(y);
+    xi = ((xi % size) + size) % size;
+    yi = ((yi % size) + size) % size;
+    const p = yi * size + xi;
+    return w0 * trail[0]![p]! + w1 * trail[1]![p]!;
+  }
+
+  function step(inputs: PairCultureInputs): void {
+    const { motion, smell, touch } = inputs;
+    for (let i = 0; i < agents; i++) {
+      if (rnd() < PAIR_RESPAWN_PER_STEP) {
+        ax[i] = rnd() * size;
+        ay[i] = rnd() * size;
+        ah[i] = rnd() * TWO_PI;
+        continue;
+      }
+      const a = ak[i]! as 0 | 1;
+      const m = motion[a]!;
+      const w0 = smell[a]![0]!;
+      const w1 = smell[a]![1]!;
+      const h = ah[i]!;
+      const x = ax[i]!;
+      const y = ay[i]!;
+      const sC = sense(x + Math.cos(h) * m.reach, y + Math.sin(h) * m.reach, w0, w1);
+      const sL = sense(x + Math.cos(h - m.sensorAngle) * m.reach, y + Math.sin(h - m.sensorAngle) * m.reach, w0, w1);
+      const sR = sense(x + Math.cos(h + m.sensorAngle) * m.reach, y + Math.sin(h + m.sensorAngle) * m.reach, w0, w1);
+      let nh = h;
+      if (sC >= sL && sC >= sR) {
+        // hold heading
+      } else if (sL > sC && sR > sC) {
+        nh += (rnd() < 0.5 ? -1 : 1) * m.turn;
+      } else if (sL > sR) {
+        nh -= m.turn;
+      } else {
+        nh += m.turn;
+      }
+      let nx = x + Math.cos(nh) * m.step;
+      let ny = y + Math.sin(nh) * m.step;
+      if (nx < 0) nx += size;
+      else if (nx >= size) nx -= size;
+      if (ny < 0) ny += size;
+      else if (ny >= size) ny -= size;
+      ax[i] = nx;
+      ay[i] = ny;
+      ah[i] = nh;
+      const cell = (ny | 0) * size + (nx | 0);
+      trail[a]![cell]! += m.deposit;
+      // Touch (physarum2Affinity.ts's packTouch, the CPU twin): the other
+      // local strain's channel gains a share of this deposit if fed, or
+      // loses a share of what's already there if eaten. Diagonal (b === a)
+      // never applies — see this function's own `touch` doc.
+      const b = (1 - a) as 0 | 1;
+      const v = touch[a]![b]!;
+      if (v > 0) trail[b]![cell]! += v * m.deposit * TOUCH_FEED_GAIN;
+      else if (v < 0) trail[b]![cell]! *= 1 - Math.min(TOUCH_MAX_BITE, -v * TOUCH_EAT_GAIN);
+    }
+    // 3x3 box blur (separable, wrapped) + decay, same kernel/decay as
+    // StrainPreview.step, applied to each channel independently.
+    for (let k = 0; k < 2; k++) {
+      const t = trail[k]!;
+      for (let y = 0; y < size; y++) {
+        const r = y * size;
+        for (let x = 0; x < size; x++) {
+          tmp[r + x] = t[r + ((x + size - 1) % size)]! + t[r + x]! + t[r + ((x + 1) % size)]!;
+        }
+      }
+      for (let y = 0; y < size; y++) {
+        const r = y * size;
+        const up = ((y + size - 1) % size) * size;
+        const dn = ((y + 1) % size) * size;
+        for (let x = 0; x < size; x++) {
+          t[r + x] = (tmp[up + x]! + tmp[r + x]! + tmp[dn + x]!) * (0.9 / 9);
+        }
+      }
+    }
+  }
+
+  function pixelsInto(out: Uint8ClampedArray, colors: readonly [RGB, RGB]): void {
+    for (let p = 0, q = 0; p < CELLS; p++, q += 4) {
+      let r = 0;
+      let g = 0;
+      let bl = 0;
+      for (let k = 0; k < 2; k++) {
+        let t = trail[k]![p]! * EXPOSURE;
+        if (t <= 0.002) continue;
+        if (t > 1) t = 1;
+        t = GAMMA[(t * 255) | 0]!;
+        const c = colors[k]!;
+        r += t * c[0];
+        g += t * c[1];
+        bl += t * c[2];
+      }
+      out[q] = Math.min(255, r * 255);
+      out[q + 1] = Math.min(255, g * 255);
+      out[q + 2] = Math.min(255, bl * 255);
+      out[q + 3] = 255;
+    }
+  }
+
+  function totals(): [number, number] {
+    let t0 = 0;
+    let t1 = 0;
+    for (let p = 0; p < CELLS; p++) {
+      t0 += trail[0]![p]!;
+      t1 += trail[1]![p]!;
+    }
+    return [t0, t1];
+  }
+
+  function seedColony(share: number, radius: number): void {
+    if (!(share > 0)) return;
+    const cx = rnd() * size;
+    const cy = rnd() * size;
+    const r = Math.max(0, radius) * size;
+    for (let i = 0; i < agents; i++) {
+      if (rnd() >= share) continue;
+      const d = r * Math.sqrt(rnd());
+      const th = rnd() * TWO_PI;
+      ax[i] = (((cx + Math.cos(th) * d) % size) + size) % size;
+      ay[i] = (((cy + Math.sin(th) * d) % size) + size) % size;
+      ah[i] = rnd() * TWO_PI;
+    }
+  }
+
+  return { size, step, pixelsInto, totals, seedColony };
 }

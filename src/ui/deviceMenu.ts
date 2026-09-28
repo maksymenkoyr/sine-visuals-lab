@@ -82,7 +82,14 @@ import { setHintText } from "./hintSwatches.ts";
 import { installKeyHints, noteKeyUse, SHORTCUTS, welcomeOnce } from "./keyHints.ts";
 import { createBandFaders } from "./bandFaders.ts";
 import { createBandLineEditor } from "./bandLineEditor.ts";
-import { createAudioMeters, createMeterRow } from "./audioMeters.ts";
+import { createAudioMeters, createMeterRow, createTraceStrip } from "./audioMeters.ts";
+import {
+  PICTURE_MEASURES,
+  displayLevel,
+  overallLevel,
+  type PictureMeasureKey,
+  type PictureReading,
+} from "../render/pictureMeter.ts";
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
 import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
@@ -94,6 +101,7 @@ import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
   BANDS_AMBER,
+  FADER_OFF,
   FAMILY_ACCENTS,
   FOLDED_BAR_PX,
   FONT_LABEL,
@@ -183,7 +191,7 @@ import {
  * layout, since Phase 2b's jacks (the primary way in) are far away there.
  *
  * Jacks and cables (Phase 2b) are how a meter actually gets plugged in.
- * Every reactive meter row/lane — audioMeters.ts's own (Rhythm/Signal/
+ * Every reactive meter row/lane — audioMeters.ts's own (Hits/Tempo/Signal/
  * Character) plus this file's own Bands level rows (BAND_LEVEL_CHOICES) and
  * its Frequencies corner (mountBandsJack) — grows a jack (src/ui/jack.ts): a
  * ring in its source's colour, filled when it feeds the shown (preview ??
@@ -320,17 +328,18 @@ import {
  * which goes through DeviceMenuDeps, this doesn't, since nothing outside
  * src/ui/ ever needs to know which card is folded.
  *
- * Row grammar (createControlRow, exported for audioMeters.ts's Hit strength
- * card to reuse directly rather than duplicate; most meter rows instead
+ * Row grammar (createControlRow, exported for audioMeters.ts's Hits card's
+ * Shape section to reuse directly rather than duplicate; most meter rows instead
  * follow the same grammar with a meter in the slider's place — the shared
  * pieces live in controlsKit.ts): label · seven-segment readout + unit ·
  * "A" chip · "T" chip · ↺. The A chip *is* the auto indicator — filled when
  * auto owns the value, outlined when the user has taken the row manual,
  * absent when the setting has no auto weights (see autoTune.ts). The T chip
  * mutes the row to its floor (0 for a zeroAtMin row, spec.min otherwise) and
- * restores the value it had on a second press; any other write to the row
- * (drag, ↺, a card Reset, auto taking over) forgets that restore point and
- * unlights it — it's a toggle, not a memory. ↺ only appears once a value is
+ * restores the value it had on a second press — the thumb stays put while
+ * muted; only the readout (Off) and the colours change. Any other write to
+ * the row (drag, ↺, a card Reset, auto taking over) forgets that restore
+ * point and unlights it — it's a toggle, not a memory. ↺ only appears once a value is
  * off its default, doubling as a "you changed this" marker. A chip's letter
  * *is* its hotkey once the row's control has keyboard focus — and
  * wireHoverFocus gives it that focus on genuine pointer movement over the
@@ -534,6 +543,12 @@ export interface DeviceMenuDeps {
    *  nor sent to the TV. */
   getSceneMaster: () => number;
   onSceneMasterChange: (value: number) => void;
+  /** This tick's picture reading for the Master card's Picture block — null
+   *  whenever the meter has gone stale (the panel was just opened, or
+   *  nothing has forced sampling with the panel closed) rather than a frozen
+   *  last value. See src/render/pictureMeter.ts for what each measure
+   *  means. */
+  getPictureReading: () => PictureReading | null;
   /** Dev-only: read/write/clear an unclamped pin for a param row (see
    *  tuning/pins.ts) — its presence is what turns a row's readout into a
    *  typable field, and its absence in a production build is what hides
@@ -574,7 +589,7 @@ export interface DeviceMenuDeps {
   isSilenceGateAuto: () => boolean;
   onSilenceGateAutoToggle: (on: boolean) => void;
   resolveSilenceGate: () => SilenceGateMarks;
-  /** The Hit strength card's four sliders (src/audio/hitStrength.ts) — see
+  /** The Hits card's Shape sliders (src/audio/hitStrength.ts) — see
    *  audioMeters.ts's AudioMetersDeps.hitShape. Global per device, like
    *  getSilenceGate above, not per scene: how a hit's stand-out and
    *  loudness should blend into its pulse height is a taste about
@@ -628,7 +643,7 @@ export interface DeviceMenu {
    *  FeatureExtractor.onsetDiag, null on the same paths as `fixedEnergy`.
    *  `gate` is this device's own SilenceGateReading (src/audio/silenceGate.ts)
    *  — app.ts's `lastGate` — null on the same paths as `fixedEnergy`, for the
-   *  Gate card. `drives` is this tick's SceneDrives (src/render/drives.ts),
+   *  Signal card's Gate row. `drives` is this tick's SceneDrives (src/render/drives.ts),
    *  off the same *un-latched* AnimFrame as `anim` — null on the same paths.
    *  A drive row's live pill reads its uniformPair() (the same number a
    *  scene's u<Key>Drive uniform gets), and the Frequencies overlay reads
@@ -670,9 +685,10 @@ const autoChipLitStyle = (accent: string) =>
 const autoChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
 // "T" chip: mutes the row to its floor and back (see the header comment).
-// Shares the A chip's geometry; filled in a neutral tone rather than the
-// row's accent since "muted" is a state, not one of the per-card systems.
-const offChipLitStyle = `${autoChipBaseStyle} background: rgba(255,255,255,0.82); border: 1px solid rgba(255,255,255,0.82); color: #070a09;`;
+// Shares the A chip's geometry, but lit it fills with FADER_OFF — the panel's
+// one "this is off" colour, the band faders' too — rather than the row's
+// accent, so a muted row never reads as a lit A chip at a glance.
+const offChipLitStyle = `${autoChipBaseStyle} background: ${FADER_OFF}; border: 1px solid ${FADER_OFF}; color: #070a09;`;
 const offChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
@@ -970,11 +986,9 @@ function unmarkBlock(heading: HTMLElement): void {
   heading.querySelector(".vc-block-n")?.remove();
 }
 
-// Exported so audioMeters.ts's Hit strength card (src/audio/hitStrength.ts)
-// can reuse this same slider row instead of duplicating it — the meters
-// panel already builds one control this way (the Rhythm card's Beat grid
-// row is a picker, not a slider; see createControlRow's own doc comment for
-// the row grammar this shares).
+// Exported so audioMeters.ts's Hits card's Shape section
+// (src/audio/hitStrength.ts) can reuse this same slider row instead of
+// duplicating it — the meters panel already builds one control this way.
 export interface ControlRowSpec {
   label: string;
   accent: string;
@@ -1540,7 +1554,12 @@ export function createControlRow(spec: ControlRowSpec) {
   if (signalIndicator) el.appendChild(signalIndicator.strip);
   if (spec.drivePanel) el.appendChild(spec.drivePanel.below);
   el.addEventListener("click", (e) => {
-    slider.focus();
+    // The pinned patch panel sits inside this row, so its clicks bubble
+    // here too: they keep their own focus, since pulling it to the slider
+    // (far above, once the panel's scrolled into view) scrolled the column
+    // up under the pointer. preventScroll for the same reason as
+    // wireHoverFocus.
+    if (!spec.drivePanel?.below.contains(e.target as Node)) slider.focus({ preventScroll: true });
     if (spec.onCardPin && isCardPress(el, slider, e.target)) spec.onCardPin();
   });
   wireHoverFocus(el, slider);
@@ -1572,10 +1591,10 @@ export function createControlRow(spec: ControlRowSpec) {
     return isLog ? valueToPos(value) : value;
   }
 
-  function setReadout(value: number): void {
-    if (spec.zeroAtMin && value <= 0) {
+  function setReadout(value: number, muted: boolean): void {
+    if (muted || (spec.zeroAtMin && value <= 0)) {
       digits.textContent = "Off";
-      digits.style.cssText = digitsTextStyle;
+      digits.style.cssText = `${digitsTextStyle} color: ${FADER_OFF};`;
       unit.style.display = "none";
       return;
     }
@@ -1620,13 +1639,24 @@ export function createControlRow(spec: ControlRowSpec) {
     }
   }
 
+  // Non-null while the row is muted (T pressed) — the value to restore on the
+  // next T, and where display() holds the thumb meanwhile. Any write to the
+  // row that isn't the mute/restore itself forgets this, via clearOff(), so
+  // the chip never claims a restore point that no longer means anything.
+  let offStoredValue: number | null = null;
+
   function display(value: number, auto: boolean): void {
     lastValue = value;
-    const sliderValue = valueToSlider(value);
-    slider.value = String(sliderValue);
-    slider.style.setProperty("--vc-fill", `${valueToPercent(value)}%`);
+    // Muted (T): the setting runs at its floor, but the thumb stays where it
+    // was — on the value a second T brings back — and the row greys out
+    // (.vc-row-off, controlsTheme.ts) instead of sliding to the left end.
+    const muted = offStoredValue !== null && !auto;
+    const shown = muted ? offStoredValue! : value;
+    slider.value = String(valueToSlider(shown));
+    slider.style.setProperty("--vc-fill", `${valueToPercent(shown)}%`);
+    el.classList.toggle("vc-row-off", muted);
     renderTicks();
-    setReadout(value);
+    setReadout(value, muted);
     // setReadout just overwrote digits.style.cssText wholesale, which would
     // silently pop the digits back over an open typed-entry field on every
     // refresh (e.g. an auto row's ~100ms tick) — reassert the field's
@@ -1649,11 +1679,6 @@ export function createControlRow(spec: ControlRowSpec) {
     setHint(on);
   }
 
-  // Non-null while the row is muted (T pressed) — the value to restore on the
-  // next T. Any write to the row that isn't the mute/restore itself forgets
-  // this, via clearOff(), so the chip never claims a restore point that no
-  // longer means anything.
-  let offStoredValue: number | null = null;
   function refreshOffChip(): void {
     offChip.style.cssText = offStoredValue !== null ? offChipLitStyle : offChipManualStyle(spec.accent);
   }
@@ -2060,6 +2085,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Solo's on/off (setSolo/applySolo, by the footer) — declared up here
   // because togglePin and every pinned patch panel's own Solo chip read it.
   let soloOn = false;
+  // Whether the wide layout's "+ Add by name" disclosure is open
+  // (buildAddChips). Kept here, not per panel, because adding a source
+  // rebuilds the patch panel, and a fresh `false` closed the chip list
+  // under the pointer after every add. View state for this session only,
+  // like Solo.
+  let addChipsOpen = false;
   // Whether the panel is open (open/close, below) — declared up here since
   // setSolo's cable-visibility refresh runs during construction.
   let isOpen = false;
@@ -2389,7 +2420,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ];
 
   const HEIGHT_OPTIONS: { h: HitHeight; label: string; hint: string }[] = [
-    { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by the Hit strength card." },
+    { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by Shape on the Hits card." },
     { h: "fixed", label: "Fixed", hint: "Every hit is a full-height pulse, however quiet." },
     { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
   ];
@@ -2691,12 +2722,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     setOut(src.weight);
     // Live store write + readout on every drag frame, no rebuild — a full
     // buildPatchPanel() here would tear out the very slider being dragged
-    // (this file's own carried click-loss rule).
+    // (this file's own carried click-loss rule). The snapshot moves with the
+    // write for the same reason: sameDriveSetting compares weights, so a
+    // stale lastPinnedSetting reads this drag as an external change and
+    // update()'s ~10 Hz check rebuilds the panel mid-drag anyway.
     rng.addEventListener("input", () => {
       const w = Number(rng.value);
       setFill(w);
       setOut(w);
       deps.onSetSourceWeight(sceneId, spec, src.choice, w);
+      if (samePair(pinned, { sceneId, spec })) lastPinnedSetting = deps.getDriveSetting(sceneId, spec);
       syncLinkedDriveSetting(sceneId, spec);
       onLiveEdit();
     });
@@ -2814,18 +2849,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       toggle.type = "button";
       toggle.style.cssText = driveAddDisclosureStyle;
       toggle.textContent = "+ Add by name";
-      toggle.setAttribute("aria-expanded", "false");
       groupsHost = document.createElement("div");
-      groupsHost.style.cssText = `${driveAddGroupsStyle} display: none;`;
       // A plain style toggle, not the `hidden` attribute: `driveAddGroupsStyle`
       // already sets an inline `display`, which would otherwise outrank the
       // UA stylesheet's `[hidden] { display: none }` rule and leave this
       // visible regardless of the attribute.
-      let open = false;
+      const sync = () => {
+        groupsHost.style.cssText = `${driveAddGroupsStyle} display: ${addChipsOpen ? "flex" : "none"};`;
+        toggle.setAttribute("aria-expanded", String(addChipsOpen));
+      };
+      sync();
       toggle.addEventListener("click", () => {
-        open = !open;
-        groupsHost.style.display = open ? "flex" : "none";
-        toggle.setAttribute("aria-expanded", String(open));
+        addChipsOpen = !addChipsOpen;
+        sync();
       });
       wrap.append(toggle, groupsHost);
     } else {
@@ -3559,6 +3595,33 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (!samePair(pinned, { sceneId, spec })) togglePin(sceneId, spec);
   }
 
+  /** Registers `rowEl` into `pinRowHandles` outside the drive system's own
+   *  `DriveRowHandle` path — `appendSettingRow`'s own `registerPinRow` calls
+   *  this for its non-drive branch (a toggle/enum/plain-slider row), and
+   *  `WidgetCtx.registerCard` (registry.ts's own doc comment has the full
+   *  contract, including why `spec` is often a synthetic identity rather
+   *  than a real setting) is the exact same call for a widget's own custom
+   *  row. `main`, when given, is the row's own value control: a click
+   *  anywhere on `rowEl` that isn't some OTHER in-row control (isCardPress)
+   *  pins — passing `rowEl` itself as `main` (every WidgetCtx.registerCard
+   *  caller does) makes every press anywhere in the row count, pads/faders/
+   *  buttons included, matching this file's header's "press anywhere on the
+   *  card pins it" rule for an ordinary row. */
+  function registerPinnableRow(sceneId: string, spec: SceneSetting, accent: string, rowEl: HTMLElement, main?: HTMLElement | null): void {
+    if (main) {
+      rowEl.addEventListener("click", (e) => {
+        if (isCardPress(rowEl, main, e.target)) pinSetting(sceneId, spec);
+      });
+    }
+    rowEl.style.setProperty("--vc-pin-color", accent);
+    pinRowHandles.push({
+      sceneId,
+      spec,
+      rowEl,
+      refreshPin: () => rowEl.classList.toggle("vc-drive-pinned", samePair(pinned, { sceneId, spec })),
+    });
+  }
+
   /** The only place `preview` is written. See previewDrive's own callers
    *  (appendSettingRow's onRowFocusIn) for the hover-dwell contract this
    *  mirrors from the row-selection system it replaces. */
@@ -3580,8 +3643,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // logic — one contract, two mount points. driveSources.ts's jackKey is
   // the identity every comparison below uses: it collapses every beat-grid
   // division to one shared key, since a patch carries at most one and the
-  // Beat row's jack always means "whichever one's there", never a specific
-  // division.
+  // Timing strip's Grid jack always means "whichever one's there", never a
+  // specific division.
   // ---------------------------------------------------------------------
 
   function shownSelection(): { sceneId: string; spec: SceneSetting } | null {
@@ -4020,7 +4083,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  hides it — closed panel, nothing pinned, or the row scrolled out of
    *  its column. Rides every cable recompute (scroll, resize, pin, solo). */
   function positionSoloEye(): void {
-    const row = isOpen ? sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned") : null;
+    const row = isOpen ? findPinnedRowEl() : null;
     const r = row?.getBoundingClientRect();
     const col = (narrowMQ.matches ? root : controlsCol).getBoundingClientRect();
     const top = r ? r.top + 20 : 0;
@@ -4187,6 +4250,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // not disappear on a scene that declares no settings of its own — those
   // scenes simply have nothing for it to move. The Scene card's violet,
   // because what it scales is that card's contents.
+  //
+  // Below the Scale row, the Picture block answers "how intense is the
+  // *picture*, in every way" — five compact traces (Brightness/Colour/
+  // Motion/Detail/Flashes), measured from the rendered frame itself rather
+  // than from any setting or drive, since a setting carries no "more
+  // intense" direction of its own. See src/render/pictureMeter.ts for what
+  // each measure means and why; tools/master-sweep.mjs walks the same five
+  // numbers across every scene and every Scale value headlessly.
   const masterCard = createCard({ title: "Master", accent: SCENE_VIOLET });
   markBlock(masterCard.title);
   const masterRow = createControlRow({
@@ -4203,6 +4274,125 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   });
   masterRow.onChange((value) => deps.onSceneMasterChange(value));
   masterCard.body.appendChild(masterRow.el);
+
+  // Picture block — see the comment above const masterCard. A plain
+  // .vc-row/.vc-hint block (not createMeterRow's bar-meter shape: there's no
+  // single "amount" here to fill a track with, just independent readouts).
+  // Folded (the default) it's one Overall row: a taller trace overlaying
+  // every PICTURE_MEASURES entry in its PICTURE_COLORS colour, with
+  // overallLevel's combined line on top in the card's violet and its number
+  // as the readout. A click (or Enter/Space) unfolds one grid row per
+  // measure: caption · 10s trace (createTraceStrip, exported from
+  // audioMeters.ts for this) · 0-100 readout, each caption in its trace's
+  // colour so the rows double as the legend. They fold to zero height, not
+  // display: none — a trace strip only records while its canvas has a width
+  // (createColumnRing's ensureSize), so this way each row unfolds with its
+  // last 10 s already drawn. caption uses the same register as powerCard.ts's
+  // own readoutCaptionStyle (kept local — the two files' row shapes
+  // otherwise share nothing worth a third file).
+  const pictureHeading = groupHeading("Picture");
+  const pictureCaptionStyle = `
+    font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase;
+    color: rgba(255,255,255,0.5); white-space: nowrap;
+  `;
+  // digitsTextStyle for "--": DSEG7 (digitsStyle's face) has no dashes — the
+  // same textual/digits swap createMeterRow's own setReadout makes.
+  const pictureReadoutDigitsStyle = `${digitsStyle} font-size: 11px; color: #fff; display: block; text-align: right;`;
+  const pictureReadoutTextStyle = `${digitsTextStyle} font-size: 11px; color: #fff; display: block; text-align: right;`;
+  // One colour per measure, shared by its own row and its line in the Overall
+  // overlay. Kept clear of SCENE_VIOLET, which is the Overall line itself; a
+  // Record so a new PictureMeasureKey can't ship without one.
+  const PICTURE_COLORS: Record<PictureMeasureKey, string> = {
+    brightness: "#f4f4f4",
+    colour: "#f28bd0",
+    motion: "#59bbfb",
+    detail: "#8ce6a0",
+    flashes: "#eab308",
+  };
+  const pictureGridStyle = `display: grid; grid-template-columns: 76px minmax(0, 1fr) 26px; align-items: center; gap: 5px 8px;`;
+  const pictureBlock = document.createElement("div");
+  pictureBlock.className = "vc-row";
+  pictureBlock.tabIndex = 0;
+  pictureBlock.setAttribute("role", "button");
+  pictureBlock.style.cursor = "pointer";
+  pictureBlock.style.setProperty("--vc-accent", SCENE_VIOLET);
+
+  const pictureSummary = document.createElement("div");
+  pictureSummary.style.cssText = pictureGridStyle;
+  const pictureCaret = document.createElement("span");
+  const pictureSummaryCaption = document.createElement("div");
+  pictureSummaryCaption.style.cssText = `${pictureCaptionStyle} color: rgba(255,255,255,0.75);`;
+  pictureSummaryCaption.append(pictureCaret, "Overall");
+  const pictureSummaryStrip = createTraceStrip(
+    [
+      ...PICTURE_MEASURES.map((m) => ({ color: withAlpha(PICTURE_COLORS[m.key], 0.55), width: 1 })),
+      { color: SCENE_VIOLET, width: 2.5 },
+    ],
+    40,
+  );
+  pictureSummaryStrip.canvas.style.marginTop = "0";
+  const pictureSummaryReadout = document.createElement("span");
+  pictureSummaryReadout.style.cssText = pictureReadoutTextStyle;
+  pictureSummaryReadout.textContent = "--";
+  pictureSummary.append(pictureSummaryCaption, pictureSummaryStrip.canvas, pictureSummaryReadout);
+  let pictureSummaryText = "--";
+
+  // Folded, the overlay's colours need naming somewhere: a one-line key
+  // under the combined trace, hidden once the rows (whose captions carry the
+  // same colours) show.
+  const pictureLegend = document.createElement("div");
+  pictureLegend.style.cssText = `flex-wrap: wrap; gap: 2px 10px; margin: 5px 0 0 84px; font: 400 8.5px/1.2 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase;`;
+  for (const m of PICTURE_MEASURES) {
+    const key = document.createElement("span");
+    key.textContent = m.label;
+    key.style.color = PICTURE_COLORS[m.key];
+    pictureLegend.appendChild(key);
+  }
+
+  const pictureGrid = document.createElement("div");
+  pictureGrid.style.cssText = `${pictureGridStyle} padding-top: 6px;`;
+  const pictureFold = document.createElement("div");
+  pictureFold.style.overflow = "hidden";
+  pictureFold.appendChild(pictureGrid);
+  const pictureHint = document.createElement("div");
+  pictureHint.className = "vc-hint";
+  setHintText(
+    pictureHint,
+    "Measured from the picture itself, 15 times a second, over the last 10 s. Overall is the average of them all. 100 is about as far as scenes go; a few go further and stay pinned at 100. Click to show or hide each one on its own.",
+  );
+  const pictureRows = PICTURE_MEASURES.map((measure) => {
+    const caption = document.createElement("div");
+    caption.textContent = measure.label;
+    caption.title = measure.description;
+    caption.style.cssText = `${pictureCaptionStyle} color: ${PICTURE_COLORS[measure.key]};`;
+    const strip = createTraceStrip([{ color: PICTURE_COLORS[measure.key], width: 1.5 }], 18);
+    strip.canvas.style.marginTop = "0";
+    const readout = document.createElement("span");
+    readout.style.cssText = pictureReadoutTextStyle;
+    readout.textContent = "--";
+    pictureGrid.append(caption, strip.canvas, readout);
+    return { measure, strip, readout, lastText: "--" };
+  });
+
+  let pictureOpen = false;
+  function setPictureOpen(open: boolean): void {
+    pictureOpen = open;
+    pictureBlock.setAttribute("aria-expanded", String(open));
+    pictureCaret.textContent = open ? "▾ " : "▸ ";
+    pictureFold.style.height = open ? "" : "0";
+    pictureFold.inert = !open;
+    pictureLegend.style.display = open ? "none" : "flex";
+  }
+  setPictureOpen(false);
+  pictureBlock.addEventListener("click", () => setPictureOpen(!pictureOpen));
+  pictureBlock.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    setPictureOpen(!pictureOpen);
+  });
+
+  pictureBlock.append(pictureSummary, pictureLegend, pictureFold, pictureHint);
+  masterCard.body.append(pictureHeading, pictureBlock);
 
   // Binds a row's typed-entry field to deps.devPin for one (scene, key) —
   // undefined (no typable readout) whenever devPin itself is, i.e. every
@@ -4608,6 +4798,35 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   sceneCard.el.style.display = "none";
   const sceneRows = document.createElement("div");
   sceneCard.body.appendChild(sceneRows);
+  // Cards a widget mounts alongside the Scene card (WidgetCtx.mountCard,
+  // registry.ts — Physarum 2's Affinity card is the first) — a plain host,
+  // not a card of its own, sitting right after the Scene card in the
+  // controls column (controlsCol.append below) so a mounted card reads as
+  // "one more block after the Scene card" rather than a floating extra.
+  // Cleared at the top of every renderSceneSettings() call exactly like
+  // sceneRows.innerHTML, so a widget card never survives a scene switch/Look
+  // apply/card Reset it wasn't rebuilt by. pinnableCards()/findPinnedRowEl()
+  // below search it alongside sceneCard.el for whichever card holds the
+  // currently pinned row, since a row built through WidgetCtx.registerCard
+  // pins exactly like a Scene-card row (registerPinnableRow, below) but can
+  // live in either card.
+  const sceneWidgetCardsHost = document.createElement("div");
+  /** Every top-level card a Scene-setting row's pin can live in — the Scene
+   *  card itself, plus whatever `sceneWidgetCardsHost` currently holds. */
+  function pinnableCards(): HTMLElement[] {
+    return [sceneCard.el, ...sceneWidgetCardsHost.querySelectorAll<HTMLElement>(":scope > .vc-card")];
+  }
+  /** The currently `.vc-drive-pinned` row, wherever it lives — replaces the
+   *  several `sceneCard.el.querySelector(".vc-drive-pinned")` call sites
+   *  Solo/the solo eye/jumpToBlock used before a widget could mount a second
+   *  pinnable card. */
+  function findPinnedRowEl(): HTMLElement | null {
+    for (const card of pinnableCards()) {
+      const row = card.querySelector<HTMLElement>(".vc-drive-pinned");
+      if (row) return row;
+    }
+    return null;
+  }
   // What the per-tick loop and the auto refresh need from a scene row — a
   // slider row (createControlRow) satisfies it as is; an enum picker with
   // `reads` supplies its own pair (see appendSettingRow).
@@ -4823,24 +5042,19 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     /** Makes this row pinnable (pinRowHandles). A drive row brings its own
      *  handle, and createControlRow wires its card press (onCardPin); any
      *  other row's `main` control is passed so a press on it, or on the card
-     *  around it, pins. */
+     *  around it, pins — the non-drive case is `registerPinnableRow`, shared
+     *  with `WidgetCtx.registerCard` (see that function's own doc comment). */
     function registerPinRow(rowEl: HTMLElement, drive: DriveRowHandle | null, main?: HTMLElement | null): void {
-      if (main) {
-        rowEl.addEventListener("click", (e) => {
-          if (isCardPress(rowEl, main, e.target)) pinSetting(sceneId, spec);
-        });
-      }
       if (drive) {
+        if (main) {
+          rowEl.addEventListener("click", (e) => {
+            if (isCardPress(rowEl, main, e.target)) pinSetting(sceneId, spec);
+          });
+        }
         pinRowHandles.push(drive);
         return;
       }
-      rowEl.style.setProperty("--vc-pin-color", accent);
-      pinRowHandles.push({
-        sceneId,
-        spec,
-        rowEl,
-        refreshPin: () => rowEl.classList.toggle("vc-drive-pinned", samePair(pinned, { sceneId, spec })),
-      });
+      registerPinnableRow(sceneId, spec, accent, rowEl, main);
     }
 
     function wirePreviewFocus(el: HTMLElement): void {
@@ -5055,6 +5269,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const sceneId = deps.currentSceneId();
     const specs = deps.getSceneSettings(sceneId);
     sceneRows.innerHTML = "";
+    sceneWidgetCardsHost.innerHTML = "";
     sceneRowHandles = [];
     for (const c of driveSparkCanvases) untrackDriveCanvas(c);
     driveSparkCanvases = [];
@@ -5130,6 +5345,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         set: (spec, value) => deps.onSceneSettingChange(sceneId, spec, value),
         appendRow: (rowContainer, spec, opts) => appendSettingRow(rowContainer, sceneId, spec, specs, SCENE_VIOLET, opts),
         mountRows: (rowContainer, rows) => mountRows(rowContainer, sceneId, specs, rows),
+        mountCard: (spec) => {
+          const card = createCard(spec);
+          // Own class beyond the generic .vc-card so a script (padcheck.mjs)
+          // or a future second widget card can find "a card a widget
+          // mounted" without matching on its title text.
+          card.el.classList.add("vc-widget-card");
+          markBlock(card.title);
+          sceneWidgetCardsHost.appendChild(card.el);
+          return { el: card.el, body: card.body };
+        },
+        registerCard: (rowEl, spec) => registerPinnableRow(sceneId, spec, SCENE_VIOLET, rowEl, rowEl),
         // The exact same live reading a row's own sparkline draws — see
         // WidgetCtx.driveValue's own doc comment (registry.ts).
         driveValue: (spec, rest) => lastDrives?.valueOf(spec.key, rest) ?? rest ?? 0,
@@ -5404,7 +5630,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // stays where it is — the column scrolls so the rest of the panel comes
     // back around it; only when the column can't scroll that far (a pane
     // near the top of the list) does it slide the rest of the way.
-    const anchor = sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned") ?? sceneCard.el;
+    const anchor = findPinnedRowEl() ?? sceneCard.el;
     const before = anchor.getBoundingClientRect().top;
     soloOn = on;
     applySolo();
@@ -5446,11 +5672,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (const el of [...root.querySelectorAll(".vc-solo-hidden")]) el.classList.remove("vc-solo-hidden");
     root.classList.toggle("vc-solo", soloOn);
     if (!soloOn) return;
-    if (sceneCard.el.classList.contains("vc-folded")) sceneCard.el.querySelector<HTMLButtonElement>(".vc-fold")?.click();
     // A pinned setting (its row plus its patch pane, the one outlined in
-    // its source colour) is the thing being worked on — it alone stays,
-    // the meters column included in what goes.
-    const pinnedRow = sceneCard.el.querySelector<HTMLElement>(".vc-drive-pinned");
+    // its source colour) is the thing being worked on — it alone stays, the
+    // meters column included in what goes. The pinned row can live in the
+    // Scene card or a card a widget mounted beside it (WidgetCtx.mountCard);
+    // whichever one holds it is unfolded the same way the Scene card alone
+    // used to be.
+    const pinnedRow = findPinnedRowEl();
+    const activeCard = pinnedRow?.closest<HTMLElement>(".vc-card") ?? sceneCard.el;
+    if (activeCard.classList.contains("vc-folded")) activeCard.querySelector<HTMLButtonElement>(".vc-fold")?.click();
     const leaves = new Set<Element>([pinnedRow ?? sceneCard.el, dock]);
     const onPath = new Set<Element>();
     for (const leaf of leaves) for (let n: Element | null = leaf; n && n !== root; n = n.parentElement) onPath.add(n);
@@ -5510,7 +5740,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAutoMaster();
   }
 
-  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, dock);
+  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, sceneWidgetCardsHost, looksCard.el, paletteCard.el, dock);
   root.append(columnsWrap, controlsCol);
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
@@ -5595,7 +5825,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     if (!heading) return;
     // Soloed, a jump outside what's soloed needs the rest of the panel
     // back rather than trying to move the solo onto it.
-    if (soloOn && !(sceneCard.el.querySelector(".vc-drive-pinned") ?? sceneCard.el).contains(heading)) setSolo(false);
+    if (soloOn && !(findPinnedRowEl() ?? sceneCard.el).contains(heading)) setSolo(false);
     // A folded card's controls have no layout box and are invisible to
     // ringElements() below — unfold first, or the jump would silently land
     // on the next block's control instead.
@@ -5700,6 +5930,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // AUTO_UI_REFRESH_MS's 10 Hz).
   const SPARKLINE_REFRESH_MS = 1000 / 30;
   let lastSparklineMs = 0;
+  // The Picture block's five readouts (its traces redraw every tick, same
+  // reasoning as the sparklines above); the readout text itself rides this
+  // slower cadence, same reasoning and rate as AUTO_UI_REFRESH_MS but kept
+  // separate since the two blocks' DOM writes are otherwise independent.
+  const PICTURE_TEXT_REFRESH_MS = 100;
+  let lastPictureTextMs = 0;
 
   return {
     toggle() {
@@ -5816,6 +6052,44 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         for (const h of driveRowHandles) h.tickSparkline(drives, frame, anim);
         activeOutputTick?.(drives);
       }
+
+      // Picture: the Overall trace plus one compact trace per measure of the
+      // finished frame's own intensity (src/render/pictureMeter.ts) — drawn every tick, same
+      // reasoning as the sparklines above (canvas draws are cheap; a DOM
+      // write is what's throttled). deps.getPictureReading() is null
+      // whenever the meter's gone stale, which a null level draws as a gap
+      // in the trace and "--" in the readout, same as every other meter row.
+      const pictureReading = deps.getPictureReading();
+      const pictureTextDue = nowMs - lastPictureTextMs >= PICTURE_TEXT_REFRESH_MS;
+      if (pictureTextDue) lastPictureTextMs = nowMs;
+      const pictureLevels = pictureRows.map((row) =>
+        displayLevel(row.measure, pictureReading ? pictureReading[row.measure.key] : null),
+      );
+      const pictureOverall = overallLevel(pictureLevels);
+      pictureSummaryStrip.push([...pictureLevels, pictureOverall], nowMs);
+      pictureSummaryStrip.draw();
+      if (pictureTextDue) {
+        const text = pictureOverall === null ? "--" : String(Math.round(pictureOverall * 100));
+        if (text !== pictureSummaryText) {
+          pictureSummaryText = text;
+          pictureSummaryReadout.textContent = text;
+          pictureSummaryReadout.style.cssText = text === "--" ? pictureReadoutTextStyle : pictureReadoutDigitsStyle;
+        }
+      }
+      pictureRows.forEach((row, i) => {
+        const level = pictureLevels[i]!;
+        // Folded rows still record (see the Picture block's comment); they
+        // only skip the redraw and the readout nobody can see.
+        row.strip.push([level], nowMs);
+        if (!pictureOpen) return;
+        row.strip.draw();
+        if (!pictureTextDue) return;
+        const text = level === null ? "--" : String(Math.round(level * 100));
+        if (text === row.lastText) return;
+        row.lastText = text;
+        row.readout.textContent = text;
+        row.readout.style.cssText = text === "--" ? pictureReadoutTextStyle : pictureReadoutDigitsStyle;
+      });
 
       if (nowMs - lastAutoRefreshMs < AUTO_UI_REFRESH_MS) return;
       lastAutoRefreshMs = nowMs;

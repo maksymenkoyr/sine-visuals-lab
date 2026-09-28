@@ -40,8 +40,10 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // where one slider tried to own both and could only ever get one of "peak
 // reachable at any setting", "resting look stays put", "doesn't collapse to
 // fog between beats" right at a time — see this file's git history),
-// uCausticDensity scales the noise field's spatial frequency (more/fewer,
-// finer/fatter filaments; 0.5 is exactly the old fixed frequency),
+// Caustic density scales the noise field's spatial frequency (more/fewer,
+// finer/fatter filaments; 0.5 is exactly the old fixed frequency) — wirable
+// (its source lifts the slider toward a finer mesh, Section by default), and
+// eased in by advanceDensityFlow rather than applied on the frame it changes,
 // uBreathe is the depth of a zoom its own source moves — Bar wave by
 // default, once per bar (breatheDrive in FRAG) — uRipple drives a continuous ring emitter (rippleEmitter.ts) seated
 // at the center of the frame: rather than launching a whole ring on every
@@ -104,9 +106,9 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // spikes.
 //
 // Precision, or why nothing the shader hashes ever grows with session
-// length: the drift phase only ever accumulates (see driftPhase in
-// extraUniforms — never reset, so the field never jumps), and for a long
-// time it was uploaded raw and added to every noise coordinate in FRAG. A
+// length: the drift phase only ever accumulates (advanceDensityFlow's
+// scaledPhase — never reset, so the field never jumps), and for a long time
+// it was uploaded raw and added to every noise coordinate in FRAG. A
 // value-noise hash built on fract() of a large product loses its low bits
 // as that offset climbs, and on mobile GPU compilers the shared corner
 // hash between two neighbouring cells stopped agreeing well before the
@@ -155,7 +157,8 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "causticDensity",
     label: "Caustic density",
-    description: "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high",
+    description:
+      "How many filaments the pattern resolves into — fewer, fatter cells at low values, a finer mesh at high. Its source pushes it finer (a chorus, by default); a change — from the slider or the source — eases in rather than snapping.",
     group: "Form",
     min: 0,
     max: 1,
@@ -163,7 +166,13 @@ const SETTINGS: SceneSetting[] = [
     default: 0.35, // 0.5 on this dial was the scene's old fixed noise-sampling frequency
     // Pure framing geometry the user tunes to taste, same reasoning as
     // sparkleGrain's weight: 0 — not something the music profile should
-    // silently redecide underneath a chosen look.
+    // silently redecide underneath a chosen look (no `auto` table).
+    // Wirable, on Section by default: the pool resolves into a finer mesh as
+    // the song builds, lifted on top of the slider (densityTargetFor), so an
+    // unplugged jack leaves exactly the slider's own density. The result is
+    // only a target — advanceDensityFlow glides the drawn density toward it,
+    // so neither a drag nor a source can snap the field.
+    drive: { default: "anim.sectionIntensity" },
   },
   {
     key: "breathe",
@@ -189,6 +198,9 @@ const SETTINGS: SceneSetting[] = [
     label: "Beat ripple",
     description: "Each hit sends a ring out from the center like a drop on water — a busy driver can't rise as far between hits, so it makes lighter, denser rings instead of stacking full ones",
     group: "Motion",
+    // One colour for this row and the four ring controls under it, so the
+    // ripple's own set reads apart from Breathe above and Drift below.
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,
@@ -232,6 +244,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Ring width",
     description: "How wide each ring is — wider rings bend the light more softly",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,
@@ -248,6 +261,7 @@ const SETTINGS: SceneSetting[] = [
     description:
       "Bump: soft rings. Wave: each ring has a crest and a trough, like real ripples — stays visible when rings come fast. Merge: rings that come close together join into one stronger ring.",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 2,
     step: 1,
@@ -264,6 +278,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Wave speed",
     description: "How fast a ring travels outward from the center",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,
@@ -278,6 +293,7 @@ const SETTINGS: SceneSetting[] = [
     label: "Wave fade",
     description: "How fast a ring loses energy as it travels — low keeps it visible all the way to the far edge, high dies out quickly",
     group: "Motion",
+    family: "Beat ripple",
     min: 0,
     max: 1,
     step: 0.05,
@@ -665,11 +681,26 @@ const SWELL_FLOOR_LIFT = 0.8;
 // uFocus no matter how the slider is dragged.
 const FOCUS_SNAP_RATIO = 1.3;
 
-// uCausticDensity's reach: 0.5 is exactly today's old fixed noise-sampling
-// frequency (densScale = 1); the endpoints are ±1.2 octaves off that, mild
-// enough that both ends still read as this scene's own pool-caustics look
-// rather than a different pattern entirely.
+// Caustic density's reach (causticDensityScale below): 0.5 is exactly today's old fixed
+// noise-sampling frequency (densScale = 1); the endpoints are ±1.2 octaves
+// off that, mild enough that both ends still read as this scene's own
+// pool-caustics look rather than a different pattern entirely.
 const DENSITY_SPAN_OCTAVES = 2.4;
+// How far Caustic density's own source lifts the slider toward the finest
+// mesh at a full reading. A lift, identity at drive 0 (drives.ts's header's
+// "Nothing plugged in" paragraph), so an unplugged jack leaves the slider's
+// own density; kept well under a full push because the field spans
+// DENSITY_SPAN_OCTAVES and a chorus shouldn't re-scale the whole pool.
+const DENSITY_DRIVE_LIFT = 0.15;
+
+/** Caustic density's target (advanceDensityFlow glides toward it): the
+ *  slider lifted toward 1 by its drive's reading — the slider exactly at
+ *  drive 0, never outside 0..1 (a patched source's weight can exceed 1). */
+export function densityTargetFor(slider: number, drive: number): number {
+  const s = Math.min(1, Math.max(0, slider));
+  const d = Number.isFinite(drive) ? drive : 0;
+  return Math.min(1, Math.max(0, s + (1 - s) * DENSITY_DRIVE_LIFT * d));
+}
 
 /** uFog (0..1) -> the sharpness the ridges sit at with no beat driving them.
  *  Default 0.4 reproduces today's old fixed floor (4) closely. */
@@ -697,8 +728,9 @@ export function focusSharp(fog: number, focus: number, beatPulse: number): numbe
   return Math.min(rest * (1 + focus * beatPulse * FOCUS_SNAP_RATIO), FOCUS_SHARP_MAX);
 }
 
-/** uCausticDensity (0..1) -> the noise-sampling frequency multiplier. Default
- *  0.5 -> 1.0, today's old fixed frequency exactly. */
+/** Caustic density (0..1) -> the noise-sampling frequency multiplier. 0.5 ->
+ *  1.0, the old fixed frequency exactly. FRAG computes the same curve from
+ *  uDensityLive. */
 export function causticDensityScale(density: number): number {
   return Math.pow(2, (density - 0.5) * DENSITY_SPAN_OCTAVES);
 }
@@ -795,6 +827,29 @@ const INJECTION_GAIN = 1.3; // brightness of the summed field relative to a glin
 // unplugged (drives.ts's header's "Nothing plugged in" paragraph).
 const INJECTION_DRIVE_LIFT = 1.0;
 
+// How far from its own nozzle any droplet can light a pixel — the spray
+// loop is the scene's single most expensive block (measured 2026-09-28:
+// ~60% of a Retina frame's GPU time when every pixel ran INJECTION_DROPS
+// droplets for each of the 3x3 cells around it), so FRAG uses this twice to
+// skip work that can't show. A droplet's glow is exp(-2.2 (d/r)^2), counted
+// out to INJECTION_GLOW_REACH_R of its own radius (beyond it the glow is
+// under 1e-6), and its radius shrinks linearly from NEAR_R to FAR_R over its
+// travel, so the farthest any droplet lights is the larger of the two travel
+// endpoints. FRAG skips a nozzle farther than this from the pixel outright,
+// and only visits the 2x2 nozzle cells whose centers straddle the pixel —
+// exact as long as a nozzle (within JITTER/2 of its cell center) plus this
+// reach stays inside one cell of that center, checked below, since retuning
+// reach, jitter or droplet size past it would silently clip droplets at the
+// cell seams.
+const INJECTION_GLOW_REACH_R = 2.5;
+const INJECTION_LIT_RADIUS = Math.max(
+  INJECTION_GLOW_REACH_R * INJECTION_NEAR_R,
+  INJECTION_REACH + INJECTION_GLOW_REACH_R * INJECTION_FAR_R,
+);
+if (INJECTION_NOZZLE_JITTER / 2 + INJECTION_LIT_RADIUS > 1) {
+  throw new Error("caustics: spray droplets reach past the 2x2 nozzle cells FRAG visits — widen the search or shrink reach/jitter/radius");
+}
+
 // Every hashed field in FRAG is periodic in NOISE_PERIOD cells (the shared
 // lattice hash in noiseHash.ts — see the file header's precision paragraph
 // and that file's for how the period was sized). The finest consumer is the
@@ -832,13 +887,13 @@ const DRIFT_FLOW_LEN = FLOW_SPARKLE + 1;
 /** Fills `out` with every drift offset FRAG adds to a noise coordinate, each
  *  already wrapped by wrapFlow: the field is periodic in NOISE_PERIOD
  *  (hashCell in FRAG), so each entry is equivalent to its unwrapped value
- *  and the GPU never sees the raw, ever-growing phase. `densScale` is
- *  causticDensityScale() of the live density setting — the same factor the
- *  shader applies to q, folded in here so a finer/coarser pattern keeps the
- *  same screen-space drift speed (see uCausticDensity's comment in FRAG). */
-export function driftFlows(phase: number, densScale: number, out: Float32Array = new Float32Array(DRIFT_FLOW_LEN)): Float32Array {
-  const fx = phase * FLOW_X * densScale;
-  const fy = phase * FLOW_Y * densScale;
+ *  and the GPU never sees the raw, ever-growing phase. `phase` is
+ *  advanceDensityFlow's `scaledPhase`, which already carries the density
+ *  factor the shader applies to q (see that function for why it's folded
+ *  in per tick rather than here). */
+export function driftFlows(phase: number, out: Float32Array = new Float32Array(DRIFT_FLOW_LEN)): Float32Array {
+  const fx = phase * FLOW_X;
+  const fy = phase * FLOW_Y;
   out[FLOW_FWD] = wrapFlow(fx);
   out[FLOW_FWD + 1] = wrapFlow(fy);
   out[FLOW_BACK] = wrapFlow(-fx);
@@ -848,8 +903,44 @@ export function driftFlows(phase: number, densScale: number, out: Float32Array =
     out[FLOW_RIDGE + 2 * i] = wrapFlow(fx * k);
     out[FLOW_RIDGE + 2 * i + 1] = wrapFlow(fy * k);
   }
-  out[FLOW_SPARKLE] = wrapFlow(phase * SPARKLE_FLOW * densScale);
+  out[FLOW_SPARKLE] = wrapFlow(phase * SPARKLE_FLOW);
   return out;
+}
+
+// Caustic density's glide: the exponential time constant the live density
+// eases toward its target with (~95% of a slider move lands within 3τ).
+// Slow enough that a drag reads as the pool easing to a finer/coarser mesh
+// rather than snapping; fast enough that a patched level source still
+// visibly follows the music instead of averaging every swing away.
+export const DENSITY_GLIDE_SEC = 0.6;
+
+/** advanceDensityFlow's state: `live` is the glided density (null until the
+ *  first tick), `scaledPhase` the density-scaled drift phase driftFlows
+ *  reads. */
+export interface DensityFlowState {
+  live: number | null;
+  scaledPhase: number;
+}
+
+export function createDensityFlowState(): DensityFlowState {
+  return { live: null, scaledPhase: 0 };
+}
+
+/** One tick: `live` glides toward `targetDensity` over DENSITY_GLIDE_SEC
+ *  (the first tick snaps, so the scene doesn't ease in on load), then
+ *  `scaledPhase` gains this tick's `phaseStep` scaled by the live density.
+ *
+ *  Scaling each tick's step, never the running total, is the point. The
+ *  drift offsets used to be the whole accumulated phase times whatever
+ *  density was live that frame, so any density change rescaled all the
+ *  distance the field had ever travelled and teleported it — worse the
+ *  longer the scene had run. Now a change only bends the drift rate from
+ *  here on. At a constant density the sum is exactly the old product, so
+ *  screen-space drift speed is still independent of density (rate ×
+ *  densScale in noise space, sampled at densScale × the frequency). */
+export function advanceDensityFlow(state: DensityFlowState, dtSec: number, targetDensity: number, phaseStep: number): void {
+  state.live = state.live === null ? targetDensity : state.live + (targetDensity - state.live) * (1 - Math.exp(-dtSec / DENSITY_GLIDE_SEC));
+  state.scaledPhase += phaseStep * causticDensityScale(state.live);
 }
 
 // Own accumulator for the domain-warp drift: never reset, only advanced, so
@@ -1089,16 +1180,18 @@ void main() {
   // point — every filament near the middle gets dragged into a pinch.
   p += dir0 * bassBulge * 0.22 * exp(-pLen0 * 0.8) * smoothstep(0.0, 0.4, pLen0);
 
-  // uCausticDensity scales the noise field's own sampling frequency — more,
-  // finer filaments at higher values. Applied once, here, to q's starting
-  // point; every later use of q inherits it because q is built by
-  // accumulating onto that scaled start (see q's definition below), not by
-  // re-scaling p at each octave separately. The drift offsets in uDriftFlow
-  // carry the same factor (driftFlows folds it in JS-side) so a finer/
-  // coarser pattern doesn't also drift visibly faster/slower on screen —
-  // screen-space drift speed is flowRate / (samplingFreq), and densScale
-  // cancels between the two.
-  float densScale = pow(2.0, (uCausticDensity - 0.5) * ${DENSITY_SPAN_OCTAVES.toFixed(2)});
+  // uDensityLive scales the noise field's own sampling frequency — more,
+  // finer filaments at higher values. It's the glided, drive-scaled density
+  // advanceDensityFlow keeps (the raw uCausticDensity setting uniform isn't
+  // read, so a change eases in instead of landing in one frame). Applied
+  // once, here, to q's starting point; every later use of q inherits it
+  // because q is built by accumulating onto that scaled start (see q's
+  // definition below), not by re-scaling p at each octave separately. The
+  // drift offsets in uDriftFlow carry the same factor, folded in per tick
+  // JS-side (advanceDensityFlow), so a finer/coarser pattern doesn't also
+  // drift visibly faster/slower on screen — screen-space drift speed is
+  // flowRate / (samplingFreq), and densScale cancels between the two.
+  float densScale = pow(2.0, (uDensityLive - 0.5) * ${DENSITY_SPAN_OCTAVES.toFixed(2)});
 
   // This scene's own drift (uDriftFlow, uploaded by extraUniforms below)
   // replaces the shared uFlowPhase so drift speed is dialable. It arrives
@@ -1273,15 +1366,27 @@ void main() {
   // nearNozzleFade — which depends purely on distance, not on time or
   // direction — pulls it to zero exactly as it arrives, reading as suction
   // rather than fading mist.
+  //
+  // The loop only runs where its result can show: sprayGain is every factor
+  // the field gets multiplied by, so a pixel below the crest gate (dark
+  // water), a frame with no treble drive, or Spray at 0 skips it outright.
+  // It visits the 2x2 nozzle cells whose centers straddle ip, not the 3x3
+  // around ip's own cell, and skips any nozzle farther than
+  // INJECTION_LIT_RADIUS — see that constant for why neither drops a
+  // droplet that could light this pixel.
+  float sprayGain = uSparkle * sparkleGlintDrive * crestGate * sparkleGain * uInjection * (1.0 + ${INJECTION_DRIVE_LIFT.toFixed(1)} * injectionDrive(uHighPulse)) * ${INJECTION_GAIN.toFixed(2)};
   float injectionField = 0.0;
-  if (uInjection > 0.0) {
+  if (sprayGain > 0.0) {
     vec2 ip = (sparkleQ * sparkleFreq + sparkleFlow) * ${INJECTION_CELLS_PER_GRAIN.toFixed(2)};
-    for (int gx = -1; gx <= 1; gx++) {
-      for (int gy = -1; gy <= 1; gy++) {
-        vec2 cellId = floor(ip) + vec2(float(gx), float(gy));
+    vec2 nearCell = floor(ip - 0.5);
+    for (int gx = 0; gx <= 1; gx++) {
+      for (int gy = 0; gy <= 1; gy++) {
+        vec2 cellId = nearCell + vec2(float(gx), float(gy));
         // Its own lattice period (INJECTION_MASK) — this field wraps at
         // NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN cells, see INJECTION_MASK's comment.
         vec2 nozzle = cellId + 0.5 + (hash2Cell(cellId, ${INJECTION_MASK}, 1u) - 0.5) * ${INJECTION_NOZZLE_JITTER.toFixed(2)};
+        vec2 toNozzle = ip - nozzle;
+        if (dot(toNozzle, toNozzle) > ${(INJECTION_LIT_RADIUS * INJECTION_LIT_RADIUS).toFixed(4)}) continue;
         for (int k = 0; k < ${INJECTION_DROPS}; k++) {
           vec2 rnd = hash2Cell(cellId, ${INJECTION_MASK}, 2u + uint(k));
           float cyclePos = fract(uTime * ${INJECTION_RATE.toFixed(2)} + rnd.x);
@@ -1300,7 +1405,7 @@ void main() {
       }
     }
   }
-  acc += uSparkle * sparkleGlintDrive * crestGate * sparkleGain * uInjection * (1.0 + ${INJECTION_DRIVE_LIFT.toFixed(1)} * injectionDrive(uHighPulse)) * injectionField * ${INJECTION_GAIN.toFixed(2)};
+  acc += sprayGain * injectionField;
 
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
@@ -1355,7 +1460,7 @@ export const causticsScene = createFullscreenScene(
   "Caustics",
   FRAG,
   (() => {
-    let driftPhase = 0;
+    const densityFlow = createDensityFlowState();
     const pump = createPumpState();
     const loudSwellState = createLoudSwellState();
     const flowBuf = new Float32Array(DRIFT_FLOW_LEN);
@@ -1376,6 +1481,9 @@ export const causticsScene = createFullscreenScene(
       settings: SETTINGS,
       extraUniformDecls: `
 uniform float uDriftFlow[${DRIFT_FLOW_LEN}];
+// The glided, drive-scaled Caustic density (advanceDensityFlow) — see
+// densScale in FRAG.
+uniform float uDensityLive;
 uniform float uLoudSwell;
 uniform float uRippleCrest[${PROFILE_SAMPLES}];
 uniform float uRippleSlope[${PROFILE_SAMPLES}];
@@ -1424,7 +1532,7 @@ float softCeil(float x, float knee, float ceil) {
         // Bass hit's own decaying envelope at driftPump's Beat-hit default —
         // see the "driftPump" SceneSetting's own comment.
         advancePump(pump, anim.dtSec, drives.value("driftPump", anim.lowPulse), getSetting("driftPump"));
-        driftPhase += anim.dtSec * driftRatePerSec({
+        const phaseStep = anim.dtSec * driftRatePerSec({
           drift: getSetting("drift"),
           driftLevel,
           levelValue,
@@ -1432,6 +1540,13 @@ float softCeil(float x, float knee, float ceil) {
           dropReactivity: getSetting("dropReactivity"),
           sectionIntensity: anim.sectionIntensity,
         });
+        // Caustic density: the slider lifted toward a finer mesh by its own
+        // source (densityTargetFor — the slider exactly when nothing is
+        // plugged in). advanceDensityFlow glides toward it and folds the live
+        // value into the drift phase. The sceneDefault is the reading the
+        // default (Section) equals, for a stale stored "scene".
+        const densityTarget = densityTargetFor(getSetting("causticDensity"), drives.value("causticDensity", anim.sectionIntensity));
+        advanceDensityFlow(densityFlow, anim.dtSec, densityTarget, phaseStep);
 
         // Beat ripple: age every ring already in flight first, so a ring
         // emitted below starts this frame at age 0 instead of ageing before
@@ -1493,7 +1608,8 @@ float softCeil(float x, float knee, float ceil) {
         buildProfile(emitter, profileParams, crestBuf, slopeBuf, ringStyle);
 
         return {
-          uDriftFlow: driftFlows(driftPhase, causticDensityScale(getSetting("causticDensity")), flowBuf),
+          uDriftFlow: driftFlows(densityFlow.scaledPhase, flowBuf),
+          uDensityLive: densityFlow.live ?? densityTarget,
           uLoudSwell: loudSwellDrive(driftLevel, swellValue),
           uRippleCrest: crestBuf,
           uRippleSlope: slopeBuf,

@@ -301,7 +301,13 @@ describe("silence gate auto mode", () => {
     const riseDelta = afterRise - beforeRise.closed;
     expect(dropDelta).toBeGreaterThan(0);
     expect(riseDelta).toBeGreaterThan(0);
-    expect(dropDelta).toBeGreaterThan(riseDelta * 3);
+    // FLOOR_DROP_RATE/FLOOR_RISE_RATE is 4x now (was 10x before
+    // FLOOR_RISE_RATE's own speedup) — and the two legs aren't symmetric
+    // around `floor` (SILENCE_GATE_AUTO_MARGIN puts `closed` 0.02 above it,
+    // so "closed - 0.1" and "closed + 0.1" aren't equally distant from
+    // `floor` itself), which narrows the ratio actually observed here.
+    // 2x keeps a comfortable margin below that either way.
+    expect(dropDelta).toBeGreaterThan(riseDelta * 2);
   });
 
   it("auto closed never reaches SILENCE_GATE_MIN, even after a very long silence", () => {

@@ -11,6 +11,8 @@ import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts"
 import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
+import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
+import { pinEverything } from "./pinnedAssets.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
 import { createDriveEngine } from "./render/drives.ts";
@@ -23,9 +25,12 @@ const badge = document.getElementById("badge") as HTMLDivElement;
 
 // The AGPL §13 network-source offer — see src/brand.ts. Same visual language
 // as #badge (tv.html), opposite corner, dimmer: present but not competing
-// with the visualization.
+// with the visualization. Carries the version label too (src/version.ts) —
+// this corner is the TV's only chrome, so it doubles as the version corner
+// the gallery footer (src/ui/gallery.ts) shows on the phone/laptop entry.
 const sourceLink = document.createElement("a");
-sourceLink.textContent = "Source (AGPL-3.0)";
+sourceLink.textContent = `Source (AGPL-3.0) · ${versionLabel(BUILD_INFO)}`;
+sourceLink.title = versionHint(BUILD_INFO).join("\n");
 sourceLink.href = SOURCE_URL;
 sourceLink.target = "_blank";
 sourceLink.rel = "noopener";
@@ -36,6 +41,12 @@ sourceLink.style.cssText = `
   border-radius: 999px; text-decoration: none;
 `;
 document.body.appendChild(sourceLink);
+
+// Fetches every pinned asset (src/pinnedAssets.ts — the same registry
+// app.ts's own call warms) after load, at idle, so a TV left open across a
+// deploy doesn't 404 the first time something it's already holding onto
+// (the Dancers clip library, the tempo worklet, a panel font) is needed.
+pinEverything();
 
 const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
 const presetAllows = (s: Scene, p: QualityPreset): boolean =>

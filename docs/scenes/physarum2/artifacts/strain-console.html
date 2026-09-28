@@ -1,0 +1,526 @@
+<title>Physarum Strain Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=Share+Tech+Mono&display=swap">
+<style>
+/* Prototype for Physarum 2's per-strain settings (docs/scenes/physarum2.md).
+   Self-contained: the culture is lab.src.html's dish stepper with per-strain
+   sensor angle, trail life and share added; a fixed 124 BPM pulse stands in
+   for the music on Excitability. */
+:root {
+  color-scheme: dark;
+  --ground: #070a0b;
+  --panel: #0c1011;
+  --line: rgba(255, 255, 255, 0.12);
+  --line-hi: rgba(255, 255, 255, 0.24);
+  --ink: rgba(255, 255, 255, 0.9);
+  --ink-2: rgba(255, 255, 255, 0.64);
+  --ink-3: rgba(255, 255, 255, 0.4);
+  --violet: #c3a5f9;
+  --label: 'Chakra Petch', system-ui, sans-serif;
+  --mono: 'Share Tech Mono', ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 400 13px/1.45 var(--label); padding-inline: 16px; padding-block: 20px 56px; }
+button { font: inherit; color: inherit; }
+button:focus-visible, [tabindex]:focus-visible { outline: 1px solid var(--violet); outline-offset: 2px; }
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 22px; }
+.eyebrow { font: 11px/1.2 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-3); }
+h1 { font: 600 26px/1.1 var(--label); margin: 6px 0 8px; text-wrap: balance; }
+.intro { max-width: 70ch; color: var(--ink-2); margin: 0; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 384px); gap: 24px; align-items: start; }
+@media (max-width: 900px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+.stage { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #040607; }
+@media (max-width: 900px) { .stage { position: relative; top: 0; } }
+.view { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 4px; overflow: hidden; background: #000; border: 1px solid var(--line); }
+.view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.beat { position: absolute; left: 10px; top: 10px; display: flex; align-items: center; gap: 6px; font: 11px var(--mono); color: var(--ink-2); background: rgba(0, 0, 0, 0.5); padding: 3px 8px; border-radius: 5px; }
+.beat i { width: 8px; height: 8px; border-radius: 50%; background: #fff; opacity: 0.15; }
+.reseed { position: absolute; right: 8px; top: 8px; padding: 4px 9px; border-radius: 5px; border: 1px solid var(--line-hi); background: rgba(0, 0, 0, 0.55); font: 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); cursor: pointer; }
+.stage-note { margin: 0; font-size: 12px; color: var(--ink-3); }
+
+/* the panel mock: cards with air, rows that wake on hover */
+.panel { display: grid; gap: 14px; }
+.tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; }
+.tab { border: 0; background: none; border-radius: 6px; padding: 7px 0; cursor: pointer; font: 12px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
+.tab[aria-selected="true"] { background: rgba(255, 255, 255, 0.08); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-hi); }
+.how { margin: 0; font-size: 12px; color: var(--ink-3); }
+.card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 12px 14px 14px; display: grid; gap: 12px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.card-title { font: 12px/1.2 var(--mono); letter-spacing: 0.18em; text-transform: uppercase; color: var(--violet); }
+.chipbtn { padding: 4px 9px; border-radius: 5px; border: 1px solid var(--line-hi); background: rgba(255, 255, 255, 0.04); font: 11px var(--mono); letter-spacing: 0.06em; color: var(--ink-2); cursor: pointer; }
+.chipbtn:hover { color: var(--ink); }
+.chipbtn[aria-pressed="true"] { color: #fff; border-color: var(--violet); background: rgba(195, 165, 249, 0.14); }
+.row { position: relative; display: grid; gap: 6px; padding: 8px 10px; margin-inline: -10px; border-radius: 6px; transition: background-color 0.15s ease, box-shadow 0.15s ease; }
+.row:hover, .row:focus-within { background: rgba(195, 165, 249, 0.06); box-shadow: 0 0 0 1px rgba(195, 165, 249, 0.4), 0 0 14px rgba(195, 165, 249, 0.18); }
+.row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.row-title { font-size: 14px; color: #fff; display: inline-flex; align-items: baseline; gap: 6px; }
+.row:hover .row-title, .row:focus-within .row-title { color: var(--violet); }
+.new { font: 9.5px var(--mono); letter-spacing: 0.1em; color: #8ce6a0; border: 1px solid rgba(140, 230, 160, 0.4); border-radius: 3px; padding: 0 3px; }
+.hint { max-height: 0; opacity: 0; overflow: hidden; font-size: 11.5px; color: var(--ink-2); transition: max-height 0.18s ease, opacity 0.18s ease; }
+.row:hover .hint, .row:focus-within .hint { max-height: 80px; opacity: 1; }
+
+/* previews */
+.previews { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pv { display: grid; gap: 4px; }
+.pv canvas { width: 100%; aspect-ratio: 1; border-radius: 6px; border: 1px solid var(--line); background: #000; display: block; }
+.pv .code { font: 11px var(--mono); display: flex; justify-content: space-between; }
+.pv .code span:last-child { color: var(--ink-3); }
+
+/* share bar */
+.share { position: relative; height: 30px; border-radius: 6px; overflow: visible; display: flex; touch-action: none; user-select: none; -webkit-user-select: none; }
+.share .seg { height: 100%; display: flex; align-items: center; justify-content: center; font: 11px var(--mono); color: #0b0f10; overflow: hidden; white-space: nowrap; min-width: 0; }
+.share .seg:first-child { border-radius: 6px 0 0 6px; }
+.share .seg:last-child { border-radius: 0 6px 6px 0; }
+.share .div { position: absolute; top: -4px; bottom: -4px; width: 14px; margin-left: -7px; cursor: ew-resize; display: flex; justify-content: center; outline: none; }
+.share .div::after { content: ""; width: 3px; height: 100%; border-radius: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
+.share .div:focus-visible::after { background: var(--violet); }
+
+/* lanes */
+.lanes { display: grid; gap: 3px; }
+.lane { display: grid; grid-template-columns: 24px minmax(0, 1fr) 44px; align-items: center; gap: 8px; height: 16px; }
+.lane .c { font: 10px var(--mono); }
+.lane .v { font: 11px var(--mono); text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.track { position: relative; height: 16px; cursor: pointer; touch-action: none; outline: none; }
+.track .rail { position: absolute; left: 0; right: 0; top: 7px; height: 2px; border-radius: 1px; background: rgba(255, 255, 255, 0.14); }
+.track .fill { position: absolute; left: 0; top: 7px; height: 2px; border-radius: 1px; }
+.track .th { position: absolute; top: 2px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; border: 2px solid #0b0f10; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5); }
+.track:focus-visible .th { box-shadow: 0 0 0 2px var(--violet); }
+.track.hue .rail { height: 4px; top: 6px; background: linear-gradient(90deg, hsl(0 90% 58%), hsl(60 90% 58%), hsl(120 90% 58%), hsl(180 90% 58%), hsl(240 90% 58%), hsl(300 90% 58%), hsl(360 90% 58%)); opacity: 0.7; }
+.link { font: 10px var(--mono); letter-spacing: 0.08em; }
+
+/* knobs */
+.knobs { display: grid; grid-template-columns: 92px repeat(4, minmax(0, 1fr)); row-gap: 6px; column-gap: 4px; align-items: center; }
+.knobs .hd { font: 11px var(--mono); text-align: center; }
+.knobs .lbl { font-size: 12.5px; color: var(--ink-2); display: flex; align-items: center; gap: 4px; line-height: 1.15; }
+.knob { display: grid; justify-items: center; gap: 1px; cursor: ns-resize; touch-action: none; outline: none; border-radius: 6px; padding: 3px 0; }
+.knob:hover, .knob:focus-visible { background: rgba(255, 255, 255, 0.05); }
+.knob svg { width: 34px; height: 34px; display: block; }
+.knob .kv { font: 10px var(--mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* notes */
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.note { border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 8px; align-content: start; background: #090d0e; }
+.note h3 { margin: 0; font: 600 14px/1.2 var(--label); }
+.note dl { margin: 0; display: grid; gap: 6px; }
+.note dt { font: 10.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.note dd { margin: 0; color: var(--ink-2); font-size: 12.5px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Physarum 2 · Strains prototype</div>
+    <h1>Strain Console</h1>
+    <p class="intro">Every per-strain setting for all four strains at once, in two layouts to compare, plus the three the scene doesn't have yet (Sensor angle, Trail life, Share). The culture on the left runs on these values, and a steady 124 BPM pulse stands in for the music on Excitability.</p>
+  </header>
+
+  <div class="app">
+    <section class="stage" aria-label="Culture">
+      <div class="view">
+        <canvas id="view" width="768" height="432"></canvas>
+        <div class="beat"><i id="beatDot"></i>124 BPM</div>
+        <button class="reseed" id="reseedBtn" type="button">Reseed</button>
+      </div>
+      <p class="stage-note">Hover a row to read what it does. Drag a lane or a knob; double-click to reset it. With Link on, dragging one strain moves all four by the same amount.</p>
+    </section>
+
+    <section class="panel" aria-label="Strains card">
+      <div class="tabs" role="tablist" aria-label="Layout">
+        <button class="tab" role="tab" id="tab-lanes" aria-selected="true" type="button">Lanes</button>
+        <button class="tab" role="tab" id="tab-knobs" aria-selected="false" type="button">Knobs</button>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><span class="card-title">Strains</span></div>
+        <div class="previews" id="previews"></div>
+        <div class="row" id="shareRow">
+          <div class="row-head"><span class="row-title">Share <span class="new">NEW</span></span><button class="chipbtn" id="evenBtn" type="button">Even</button></div>
+          <div class="share" id="share" aria-label="Share of agents per strain"></div>
+          <div class="hint">How the agents split between the strains. Drag a divider; the four always add up to 100%.</div>
+        </div>
+      </div>
+
+      <div class="card" id="lanesCard">
+        <div class="card-head"><span class="card-title">Per strain</span><span class="how">shared scale, one lane each</span></div>
+        <div id="laneRows" style="display:grid;gap:10px"></div>
+      </div>
+
+      <div class="card" id="knobsCard" hidden>
+        <div class="card-head"><span class="card-title">Per strain</span><span class="how">drag a knob up or down</span></div>
+        <div class="knobs" id="knobs"></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="notes" aria-label="How the layouts compare">
+    <article class="note">
+      <h3>Lanes</h3>
+      <dl>
+        <dt>You do</dt><dd>One row per setting with a thin lane per strain on the same scale. Drag a lane; Link moves all four together.</dd>
+        <dt>Good</dt><dd>You see at a glance where each strain sits on a setting and edit any strain without selecting it first. Exact, keyboard friendly.</dd>
+        <dt>Costs</dt><dd>Tall: one row per setting.</dd>
+      </dl>
+    </article>
+    <article class="note">
+      <h3>Knobs</h3>
+      <dl>
+        <dt>You do</dt><dd>A small knob per strain per setting; drag up or down.</dd>
+        <dt>Good</dt><dd>Compact, reads like a mixer, a strain's whole character is one column.</dd>
+        <dt>Costs</dt><dd>Knobs are harder to set exactly and to compare than lanes.</dd>
+      </dl>
+    </article>
+    <article class="note">
+      <h3>In the app</h3>
+      <dl>
+        <dt>Settings</dt><dd>Each lane or knob is the existing per-strain setting (nutrient, excite, sensor, turn, stride, stain), so pressing one pins that strain's setting and opens its Receives patch as today. Sensor angle, Trail life and Share would be new per-strain settings.</dd>
+        <dt>Replaces</dt><dd>The one-strain-at-a-time rows and the tap / checkbox selection. The live previews stay, smaller.</dd>
+      </dl>
+    </article>
+  </section>
+</div>
+
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const DEG = Math.PI / 180;
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const CODES = ["A1", "B2", "C3", "D4"];
+// Defaults from lab.src.html's PARAMS; Sensor angle from the app's STRAINS.
+const PARAMS = [
+  { key: "nutrient", label: "Nutrient", min: 0, max: 1, def: [0.6, 0.6, 0.6, 0.55], hint: "How much trail it lays down." },
+  { key: "excite", label: "Excitability", min: 0, max: 1, def: [0.35, 0.25, 0.3, 0.4], hint: "How hard the beat kicks its speed." },
+  { key: "sensor", label: "Sensor range", min: 0, max: 1, def: [0.5, 0.25, 0.75, 0.12], hint: "How far ahead it smells. Longer grows bigger, smoother networks." },
+  { key: "angle", label: "Sensor angle", min: 5, max: 120, def: [22, 60, 95, 35], isNew: true, fmt: (v) => `${Math.round(v)}°`, hint: "How wide apart its left and right sensors look. With Turn angle, it decides the pattern it grows." },
+  { key: "turn", label: "Turn angle", min: 0, max: 1, def: [0.32, 0.28, 0.85, 0.16], hint: "How sharply it turns toward a scent." },
+  { key: "speed", label: "Speed", min: 0, max: 1, def: [0.55, 0.38, 0.8, 0.12], hint: "How far it moves each step." },
+  { key: "life", label: "Trail life", min: 0.8, max: 0.97, def: [0.9, 0.9, 0.9, 0.9], isNew: true, fmt: (v) => v.toFixed(3), hint: "How much of its trail survives each step. Higher keeps its roads longer." },
+  { key: "stain", label: "Stain", min: 0, max: 1, def: [2, 40, 172, 262].map((h) => h / 360), hue: true, fmt: (v) => `${Math.round(v * 360)}°`, hint: "Its colour." },
+];
+const V = {};
+PARAMS.forEach((p) => { V[p.key] = p.def.slice(); });
+const fmtOf = (p) => p.fmt ?? ((v) => v.toFixed(2));
+let shares = [0.25, 0.25, 0.25, 0.25];
+let sharesVersion = 0;
+
+function hsl(h, s, l) {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => { const k = (n + h * 12) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+  return [f(0), f(8), f(4)];
+}
+const rgbOf = (k) => hsl(((V.stain[k] % 1) + 1) % 1, 0.95, 0.58);
+const cssOf = (k, a = 1) => { const c = rgbOf(k); return `rgba(${(c[0] * 255) | 0},${(c[1] * 255) | 0},${(c[2] * 255) | 0},${a})`; };
+
+// ---------- the beat stand-in ----------
+const BEAT = 60 / 124;
+let clock = 0, pulse = 0;
+
+// ---------- culture ----------
+const RIVALS = [[1.0, -0.85, -1.1, -0.7], [-1.2, 1.1, -0.6, -0.95], [-0.75, -1.05, 0.9, -1.25], [-1.0, -0.65, -1.15, 1.05]];
+const GAMMA = new Float32Array(256);
+for (let i = 0; i < 256; i++) GAMMA[i] = Math.pow(i / 255, 1 / 2.2);
+function motionOf(k) {
+  return {
+    sensorAngle: V.angle[k] * DEG,
+    reach: 1.2 + V.sensor[k] * 13,
+    turn: (4 + V.turn[k] * 110) * DEG,
+    step: (0.25 + V.speed[k] * 1.9) * (1 + V.excite[k] * 3.5 * pulse),
+    deposit: 0.07 * V.nutrient[k],
+    decay: V.life[k] / 9,
+  };
+}
+function makeCulture(W, H, N, kinds, respawn, useShares) {
+  const K = kinds.length, CELLS = W * H;
+  const T = kinds.map(() => new Float32Array(CELLS));
+  const tmp = new Float32Array(CELLS);
+  const ax = new Float32Array(N), ay = new Float32Array(N), ah = new Float32Array(N), ak = new Uint8Array(N), u = new Float32Array(N);
+  for (let i = 0; i < N; i++) u[i] = Math.random();
+  const off = document.createElement("canvas"); off.width = W; off.height = H;
+  const octx = off.getContext("2d"), img = octx.createImageData(W, H);
+  const A = kinds.map(() => new Float32Array(K));
+  let ver = -1;
+  function assign() {
+    let w = useShares ? kinds.map((k) => shares[k]) : kinds.map(() => 1);
+    let tot = w.reduce((a, b) => a + b, 0);
+    if (tot <= 0) { w = w.map(() => 1); tot = K; }
+    const cum = []; let c = 0;
+    for (const x of w) { c += x / tot; cum.push(c); }
+    for (let i = 0; i < N; i++) { let b = 0; while (b < K - 1 && u[i] >= cum[b]) b++; ak[i] = b; }
+    ver = sharesVersion;
+  }
+  function reseed() {
+    for (let i = 0; i < N; i++) { ax[i] = Math.random() * W; ay[i] = Math.random() * H; ah[i] = Math.random() * Math.PI * 2; }
+    T.forEach((t) => t.fill(0));
+    assign();
+  }
+  function sense(x, y, w) {
+    let xi = Math.floor(x), yi = Math.floor(y);
+    xi = ((xi % W) + W) % W; yi = ((yi % H) + H) % H;
+    const p = yi * W + xi; let s = 0;
+    for (let b = 0; b < K; b++) s += w[b] * T[b][p];
+    return s;
+  }
+  function step() {
+    if (useShares && ver !== sharesVersion) assign();
+    for (let a = 0; a < K; a++) for (let b = 0; b < K; b++) A[a][b] = K === 1 ? 1 : RIVALS[kinds[a]][kinds[b]];
+    const M = kinds.map((k) => motionOf(k));
+    for (let i = 0; i < N; i++) {
+      if (respawn > 0 && Math.random() < respawn) { ax[i] = Math.random() * W; ay[i] = Math.random() * H; ah[i] = Math.random() * Math.PI * 2; continue; }
+      const a = ak[i], m = M[a], w = A[a], h = ah[i], x = ax[i], y = ay[i];
+      const sC = sense(x + Math.cos(h) * m.reach, y + Math.sin(h) * m.reach, w);
+      const sL = sense(x + Math.cos(h - m.sensorAngle) * m.reach, y + Math.sin(h - m.sensorAngle) * m.reach, w);
+      const sR = sense(x + Math.cos(h + m.sensorAngle) * m.reach, y + Math.sin(h + m.sensorAngle) * m.reach, w);
+      let nh = h;
+      if (sC >= sL && sC >= sR) { /* hold */ } else if (sL > sC && sR > sC) nh += (Math.random() < 0.5 ? -1 : 1) * m.turn;
+      else if (sL > sR) nh -= m.turn; else nh += m.turn;
+      let nx = x + Math.cos(nh) * m.step, ny = y + Math.sin(nh) * m.step;
+      if (nx < 0) nx += W; else if (nx >= W) nx -= W;
+      if (ny < 0) ny += H; else if (ny >= H) ny -= H;
+      ax[i] = nx; ay[i] = ny; ah[i] = nh;
+      T[a][(ny | 0) * W + (nx | 0)] += m.deposit;
+    }
+    for (let b = 0; b < K; b++) {
+      const t = T[b], decay = M[b].decay;
+      for (let y = 0; y < H; y++) { const r = y * W; for (let x = 0; x < W; x++) tmp[r + x] = t[r + ((x + W - 1) % W)] + t[r + x] + t[r + ((x + 1) % W)]; }
+      for (let y = 0; y < H; y++) {
+        const up = ((y + H - 1) % H) * W, r = y * W, dn = ((y + 1) % H) * W;
+        for (let x = 0; x < W; x++) t[r + x] = (tmp[up + x] + tmp[r + x] + tmp[dn + x]) * decay;
+      }
+    }
+  }
+  function render(exposure) {
+    const d = img.data, cols = kinds.map((k) => rgbOf(k));
+    for (let p = 0, q = 0; p < CELLS; p++, q += 4) {
+      let r = 0, g = 0, bl = 0;
+      for (let b = 0; b < K; b++) {
+        let t = T[b][p] * exposure; if (t <= 0.002) continue; if (t > 1) t = 1;
+        t = GAMMA[(t * 255) | 0]; const c = cols[b];
+        r += t * c[0]; g += t * c[1]; bl += t * c[2];
+      }
+      d[q] = r > 1 ? 255 : r * 255; d[q + 1] = g > 1 ? 255 : g * 255; d[q + 2] = bl > 1 ? 255 : bl * 255; d[q + 3] = 255;
+    }
+    octx.putImageData(img, 0, 0);
+  }
+  reseed();
+  return { step, render, reseed, off };
+}
+
+const main = makeCulture(256, 144, 24000, [0, 1, 2, 3], 0.0015, true);
+const view = $("view"), vctx = view.getContext("2d");
+$("reseedBtn").addEventListener("click", () => main.reseed());
+
+// ---------- previews ----------
+const previews = [0, 1, 2, 3].map((k) => {
+  const el = document.createElement("div");
+  el.className = "pv";
+  el.innerHTML = `<canvas width="112" height="112"></canvas><div class="code"><span></span><span></span></div>`;
+  $("previews").appendChild(el);
+  const cult = makeCulture(56, 56, 900, [k], 0.005, false);
+  for (let i = 0; i < 30; i++) cult.step();
+  const spans = el.querySelectorAll(".code span");
+  return { el, cult, ctx: el.querySelector("canvas").getContext("2d"), code: spans[0], pct: spans[1] };
+});
+
+// ---------- share bar ----------
+const shareEl = $("share");
+function renderShare() {
+  shareEl.textContent = "";
+  let cum = 0;
+  shares.forEach((s, k) => {
+    const seg = document.createElement("div");
+    seg.className = "seg";
+    seg.style.width = `${s * 100}%`;
+    seg.style.background = cssOf(k);
+    seg.textContent = s > 0.12 ? `${CODES[k]} ${Math.round(s * 100)}%` : s > 0.06 ? `${Math.round(s * 100)}` : "";
+    shareEl.appendChild(seg);
+  });
+  for (let i = 0; i < 3; i++) {
+    cum += shares[i];
+    const d = document.createElement("div");
+    d.className = "div"; d.tabIndex = 0;
+    d.setAttribute("role", "slider");
+    d.setAttribute("aria-label", `Split between ${CODES[i]} and ${CODES[i + 1]}`);
+    d.setAttribute("aria-valuenow", String(Math.round(cum * 100)));
+    d.style.left = `${cum * 100}%`;
+    wireDivider(d, i);
+    shareEl.appendChild(d);
+  }
+}
+function moveDivider(i, b) {
+  const left = shares.slice(0, i).reduce((a, x) => a + x, 0);
+  const right = left + shares[i] + shares[i + 1];
+  b = Math.max(left, Math.min(right, b));
+  shares[i] = b - left; shares[i + 1] = right - b;
+  sharesVersion++;
+}
+let dragDiv = -1;
+function wireDivider(d, i) {
+  d.addEventListener("pointerdown", (e) => { e.preventDefault(); dragDiv = i; shareEl.setPointerCapture(e.pointerId); });
+  d.addEventListener("keydown", (e) => {
+    const s = e.shiftKey ? 0.05 : 0.01;
+    const left = shares.slice(0, i + 1).reduce((a, x) => a + x, 0);
+    if (e.key === "ArrowRight" || e.key === "ArrowUp") moveDivider(i, left + s);
+    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") moveDivider(i, left - s);
+    else return;
+    e.preventDefault(); renderShare(); shareEl.querySelectorAll(".div")[i].focus();
+  });
+}
+shareEl.addEventListener("pointermove", (e) => {
+  if (dragDiv < 0) return;
+  const r = shareEl.getBoundingClientRect();
+  moveDivider(dragDiv, (e.clientX - r.left) / r.width);
+  const i = dragDiv; renderShare(); dragDiv = i;
+});
+shareEl.addEventListener("pointerup", () => { dragDiv = -1; });
+shareEl.addEventListener("pointercancel", () => { dragDiv = -1; });
+$("evenBtn").addEventListener("click", () => { shares = [0.25, 0.25, 0.25, 0.25]; sharesVersion++; renderShare(); });
+
+// ---------- lanes ----------
+const updaters = [];
+let links = {};
+function setVal(p, k, v, linked) {
+  const clamp = (x) => Math.max(p.min, Math.min(p.max, x));
+  if (linked) {
+    const d = clamp(v) - V[p.key][k];
+    for (let j = 0; j < 4; j++) V[p.key][j] = clamp(V[p.key][j] + d);
+  } else V[p.key][k] = clamp(v);
+}
+function buildLanes() {
+  const host = $("laneRows");
+  PARAMS.forEach((p) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<div class="row-head"><span class="row-title">${p.label}${p.isNew ? ' <span class="new">NEW</span>' : ""}</span><button class="chipbtn link" type="button" aria-pressed="false">Link</button></div><div class="lanes"></div><div class="hint">${p.hint}</div>`;
+    const linkBtn = row.querySelector(".link");
+    linkBtn.addEventListener("click", () => { links[p.key] = !links[p.key]; linkBtn.setAttribute("aria-pressed", String(!!links[p.key])); });
+    const lanes = row.querySelector(".lanes");
+    for (let k = 0; k < 4; k++) {
+      const lane = document.createElement("div");
+      lane.className = "lane";
+      lane.innerHTML = `<span class="c"></span><div class="track${p.hue ? " hue" : ""}" tabindex="0" role="slider" aria-label="${p.label} ${CODES[k]}"><div class="rail"></div><div class="fill"></div><div class="th"></div></div><span class="v"></span>`;
+      const track = lane.querySelector(".track"), fill = lane.querySelector(".fill"), th = lane.querySelector(".th"), c = lane.querySelector(".c"), vEl = lane.querySelector(".v");
+      let dragging = false;
+      const fromX = (e) => { const r = track.getBoundingClientRect(); setVal(p, k, p.min + Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (p.max - p.min), links[p.key]); };
+      track.addEventListener("pointerdown", (e) => { e.preventDefault(); track.focus(); track.setPointerCapture(e.pointerId); dragging = true; fromX(e); });
+      track.addEventListener("pointermove", (e) => { if (dragging) fromX(e); });
+      track.addEventListener("pointerup", () => { dragging = false; });
+      track.addEventListener("pointercancel", () => { dragging = false; });
+      track.addEventListener("dblclick", () => setVal(p, k, p.def[k], false));
+      track.addEventListener("keydown", (e) => {
+        const s = (p.max - p.min) * (e.shiftKey ? 0.1 : 0.01);
+        if (e.key === "ArrowRight" || e.key === "ArrowUp") setVal(p, k, V[p.key][k] + s, links[p.key]);
+        else if (e.key === "ArrowLeft" || e.key === "ArrowDown") setVal(p, k, V[p.key][k] - s, links[p.key]);
+        else return;
+        e.preventDefault();
+      });
+      lanes.appendChild(lane);
+      updaters.push(() => {
+        const v = V[p.key][k], pos = ((v - p.min) / (p.max - p.min)) * 100, col = cssOf(k);
+        th.style.left = `${pos}%`; th.style.background = p.hue ? cssOf(k) : col;
+        fill.style.width = p.hue ? "0" : `${pos}%`; fill.style.background = col;
+        c.textContent = CODES[k]; c.style.color = col;
+        vEl.textContent = fmtOf(p)(v);
+        track.setAttribute("aria-valuenow", v.toFixed(3));
+      });
+    }
+    host.appendChild(row);
+  });
+}
+
+// ---------- knobs ----------
+const ARC = 270 * DEG, A0 = 135 * DEG;
+function arcPath(r, a0, a1) {
+  const p = (a) => [17 + r * Math.cos(a), 17 + r * Math.sin(a)];
+  const [x0, y0] = p(a0), [x1, y1] = p(a1);
+  return `M${x0.toFixed(2)},${y0.toFixed(2)} A${r},${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1.toFixed(2)},${y1.toFixed(2)}`;
+}
+function buildKnobs() {
+  const host = $("knobs");
+  host.appendChild(document.createElement("div"));
+  const heads = [];
+  for (let k = 0; k < 4; k++) { const h = document.createElement("div"); h.className = "hd"; h.textContent = CODES[k]; host.appendChild(h); heads.push(h); }
+  updaters.push(() => heads.forEach((h, k) => { h.style.color = cssOf(k); }));
+  PARAMS.forEach((p) => {
+    const l = document.createElement("div");
+    l.className = "lbl";
+    l.innerHTML = `${p.label}${p.isNew ? ' <span class="new">NEW</span>' : ""}`;
+    l.title = p.hint;
+    host.appendChild(l);
+    for (let k = 0; k < 4; k++) {
+      const kn = document.createElement("div");
+      kn.className = "knob"; kn.tabIndex = 0;
+      kn.setAttribute("role", "slider"); kn.setAttribute("aria-label", `${p.label} ${CODES[k]}`);
+      kn.innerHTML = `<svg viewBox="0 0 34 34" aria-hidden="true"><path class="bg" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="3" stroke-linecap="round"/><path class="fg" fill="none" stroke-width="3" stroke-linecap="round"/><line class="nd" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg><span class="kv"></span>`;
+      const bg = kn.querySelector(".bg"), fg = kn.querySelector(".fg"), nd = kn.querySelector(".nd"), kv = kn.querySelector(".kv");
+      bg.setAttribute("d", arcPath(13, A0, A0 + ARC));
+      let drag = null;
+      kn.addEventListener("pointerdown", (e) => { e.preventDefault(); kn.focus(); kn.setPointerCapture(e.pointerId); drag = { y: e.clientY, v: V[p.key][k] }; });
+      kn.addEventListener("pointermove", (e) => { if (!drag) return; setVal(p, k, drag.v + ((drag.y - e.clientY) / 140) * (p.max - p.min), false); });
+      kn.addEventListener("pointerup", () => { drag = null; });
+      kn.addEventListener("pointercancel", () => { drag = null; });
+      kn.addEventListener("dblclick", () => setVal(p, k, p.def[k], false));
+      kn.addEventListener("keydown", (e) => {
+        const s = (p.max - p.min) * (e.shiftKey ? 0.1 : 0.01);
+        if (e.key === "ArrowUp" || e.key === "ArrowRight") setVal(p, k, V[p.key][k] + s, false);
+        else if (e.key === "ArrowDown" || e.key === "ArrowLeft") setVal(p, k, V[p.key][k] - s, false);
+        else return;
+        e.preventDefault();
+      });
+      host.appendChild(kn);
+      updaters.push(() => {
+        const t = (V[p.key][k] - p.min) / (p.max - p.min), a = A0 + ARC * t;
+        fg.setAttribute("d", t > 0.002 ? arcPath(13, A0, a) : "");
+        fg.setAttribute("stroke", cssOf(k));
+        nd.setAttribute("x1", (17 + 6 * Math.cos(a)).toFixed(2)); nd.setAttribute("y1", (17 + 6 * Math.sin(a)).toFixed(2));
+        nd.setAttribute("x2", (17 + 12 * Math.cos(a)).toFixed(2)); nd.setAttribute("y2", (17 + 12 * Math.sin(a)).toFixed(2));
+        kv.textContent = fmtOf(p)(V[p.key][k]);
+        kn.setAttribute("aria-valuenow", V[p.key][k].toFixed(3));
+      });
+    }
+  });
+}
+
+// ---------- tabs ----------
+function showTab(t) {
+  ["lanes", "knobs"].forEach((x) => {
+    $("tab-" + x).setAttribute("aria-selected", String(x === t));
+    $(x + "Card").hidden = x !== t;
+  });
+}
+["lanes", "knobs"].forEach((x) => $("tab-" + x).addEventListener("click", () => showTab(x)));
+
+// ---------- boot + loop ----------
+buildLanes();
+buildKnobs();
+renderShare();
+for (let i = 0; i < 90; i++) main.step();
+let last = performance.now(), tick = 0, lastStain = "";
+function frame(now) {
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+  last = now;
+  clock += dt;
+  pulse = reduced ? 0 : Math.exp(-(clock % BEAT) * 7);
+  $("beatDot").style.opacity = String(0.15 + 0.85 * pulse);
+  main.step();
+  main.render(0.8);
+  vctx.imageSmoothingEnabled = true; vctx.imageSmoothingQuality = "high";
+  vctx.drawImage(main.off, 0, 0, view.width, view.height);
+  if (tick % 2 === 0) previews.forEach((pv, k) => {
+    pv.cult.step();
+    pv.cult.render(0.85);
+    pv.ctx.imageSmoothingEnabled = true;
+    pv.ctx.drawImage(pv.cult.off, 0, 0, 112, 112);
+    pv.code.textContent = CODES[k]; pv.code.style.color = cssOf(k);
+    pv.pct.textContent = `${Math.round(shares[k] * 100)}%`;
+  });
+  updaters.forEach((u) => u());
+  const stainSig = V.stain.map((h) => h.toFixed(3)).join();
+  if (stainSig !== lastStain && dragDiv < 0) { lastStain = stainSig; renderShare(); }
+  tick++;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>

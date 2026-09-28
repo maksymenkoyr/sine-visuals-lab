@@ -1,5 +1,6 @@
 import workletUrl from "./tempoWorklet.ts?worker&url";
 import type { TempoOnset } from "./tempoAnalyzer.ts";
+import { pinAsset } from "../pinnedAssets.ts";
 
 /**
  * Main-thread handle onto the AudioWorklet-hosted TempoAnalyzer (see
@@ -49,11 +50,16 @@ export interface TempoSource {
 
 const MAX_PENDING_ONSETS = 64;
 
+// Pinned (src/pinnedAssets.ts): addModule() is called lazily, the first time
+// the mic starts, which can be long after load — and long after a deploy has
+// replaced dist/ out from under a tab that's been open the whole time.
+const tempoWorklet = pinAsset(workletUrl);
+
 export async function createTempoSource(context: AudioContext, sourceNode: AudioNode): Promise<TempoSource | null> {
   if (!context.audioWorklet) return null; // no AudioWorklet support at all
 
   try {
-    await context.audioWorklet.addModule(workletUrl);
+    await context.audioWorklet.addModule(await tempoWorklet.url("text/javascript"));
   } catch (err) {
     if (import.meta.env.DEV) console.warn("tempoSource: audioWorklet.addModule failed, falling back to the render-tick tracker", err);
     return null;

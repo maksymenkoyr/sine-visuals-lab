@@ -109,6 +109,11 @@ for (const error of privateScenes.errors) console.warn(`[private scenes] ${error
 
 export const DRAFT_SCENE_IDS: ReadonlySet<string> = draftIds;
 
+// Ids of the scenes collected from ./private/ above — tools/master-sweep.mjs
+// skips these by default (--include-paid opts back in): nothing measured
+// about a paid scene may land in this public repo.
+export const PAID_SCENE_IDS: ReadonlySet<string> = new Set(privateScenes.scenes.map((s) => s.id));
+
 export {
   skyScene,
   silkScene,

@@ -1,0 +1,470 @@
+<title>Master Sweep</title>
+<!--
+  The report page tools/master-sweep.mjs fills in: it replaces the
+  __SWEEP_DATA__ placeholder below with its sweep.json and writes the result
+  twice — publish.html (this fragment as-is, for claude.ai's Artifact
+  publishing, which supplies its own document skeleton) and index.html (the
+  same, wrapped in a doctype for opening locally). The measures, their labels,
+  descriptions and display scales all come from the data (src/render/
+  pictureMeter.ts's PICTURE_MEASURES, read through __viz.pictureMeasures()),
+  so nothing here needs editing when a measure changes.
+
+  One deliberate look: the app's own dark instrument panel (controlsTheme.ts's
+  fonts and Scene violet), so a report reads as part of the same tool.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=Share+Tech+Mono&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --ground: #07080b;
+    --panel: #0e1015;
+    --panel-edge: rgba(255, 255, 255, 0.08);
+    --ink: #eef0f4;
+    --ink-2: rgba(238, 240, 244, 0.66);
+    --ink-3: rgba(238, 240, 244, 0.42);
+    --accent: #c3a5f9;
+    --accent-wash: rgba(195, 165, 249, 0.12);
+    --field: rgba(238, 240, 244, 0.14);
+    --hover: rgba(255, 255, 255, 0.78);
+    --grid: rgba(255, 255, 255, 0.07);
+    --rule: rgba(255, 255, 255, 0.3);
+    --label: "Chakra Petch", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "Share Tech Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 400 14px/1.5 var(--label);
+    padding-inline: 16px;
+    padding-block: 28px 48px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 28px; }
+  h1, h2 { font-weight: 600; margin: 0; text-wrap: balance; }
+  h1 { font-size: 30px; line-height: 1.1; letter-spacing: 0.01em; }
+  h2 { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); font-weight: 500; }
+  p { margin: 0; }
+  .lede { max-width: 68ch; color: var(--ink-2); }
+  .eyebrow { font: 400 11px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 6px 18px;
+    font: 400 12px/1.4 var(--mono); color: var(--ink-3);
+  }
+  .meta b { color: var(--ink-2); font-weight: 400; }
+  header { display: grid; gap: 12px; }
+
+  /* Scene picker */
+  .picker { display: grid; gap: 10px; }
+  .chip-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .chip-group > span {
+    font: 400 10.5px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-3); margin-right: 4px; min-width: 64px;
+  }
+  .chip {
+    font: 500 12.5px/1 var(--label); letter-spacing: 0.02em; color: var(--ink-2);
+    background: transparent; border: 1px solid var(--panel-edge); border-radius: 3px;
+    padding: 6px 10px; cursor: pointer;
+  }
+  .chip:hover { color: var(--ink); border-color: rgba(255, 255, 255, 0.22); }
+  .chip[aria-pressed="true"] { color: #0b0714; background: var(--accent); border-color: var(--accent); }
+  .chip:focus-visible, tr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 20px; font: 400 12px/1 var(--mono); color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .key { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--accent); }
+  .key.field { border-top: 1px solid rgba(238, 240, 244, 0.4); }
+  .key.rule { width: 0; height: 12px; border-top: 0; border-left: 1px solid var(--rule); }
+
+  /* Small multiples */
+  .panels { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 4px;
+    padding: 14px 14px 10px; display: grid; gap: 4px; position: relative; min-width: 0;
+  }
+  .panel h3 { margin: 0; font: 600 15px/1.2 var(--label); letter-spacing: 0.02em; }
+  .panel .desc { font-size: 12.5px; line-height: 1.4; color: var(--ink-3); min-height: 2.8em; }
+  .panel svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
+  .axis text { font: 400 10.5px var(--mono); fill: var(--ink-3); }
+  .axis .rule-label { fill: var(--ink-2); }
+  .gridline { stroke: var(--grid); stroke-width: 1; }
+  .master-rule { stroke: var(--rule); stroke-width: 1; }
+  .field-line { fill: none; stroke: var(--field); stroke-width: 1; stroke-linejoin: round; stroke-linecap: round; }
+  .hover-line { fill: none; stroke: var(--hover); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .sel-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .sel-dot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+  .end-label { font: 400 12px var(--mono); fill: var(--ink); }
+  .crosshair { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1; }
+  .tip {
+    position: absolute; pointer-events: none; z-index: 2;
+    background: #171a21; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 4px;
+    padding: 8px 10px; display: grid; gap: 5px; min-width: 150px;
+    font: 400 12px/1.2 var(--label); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+  .tip .at { font: 400 11px/1 var(--mono); color: var(--ink-3); letter-spacing: 0.06em; }
+  .tip .row { display: grid; grid-template-columns: 14px auto 1fr; align-items: center; gap: 8px; }
+  .tip .row i { display: block; width: 14px; border-top: 2px solid var(--accent); }
+  .tip .row i.h { border-top-color: var(--hover); }
+  .tip .row b { font: 400 14px/1 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+  .tip .row span { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Table view */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--panel-edge); border-radius: 4px; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; min-width: 860px; }
+  th, td { padding: 9px 12px; text-align: left; vertical-align: middle; }
+  thead th {
+    font: 400 10.5px/1.2 var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-3); border-bottom: 1px solid var(--panel-edge); white-space: nowrap;
+  }
+  tbody tr { border-top: 1px solid rgba(255, 255, 255, 0.04); cursor: pointer; }
+  tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+  tbody tr[aria-selected="true"] { background: var(--accent-wash); }
+  td.scene { font-weight: 500; white-space: nowrap; }
+  td.scene small { display: block; font: 400 10.5px/1.3 var(--mono); color: var(--ink-3); letter-spacing: 0.08em; text-transform: uppercase; }
+  .cell { display: grid; grid-template-columns: 30px 72px; align-items: center; gap: 8px; }
+  .cell b { font: 400 14px/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; font-weight: 400; }
+  .range { position: relative; height: 8px; }
+  .range::before { content: ""; position: absolute; inset: 3.5px 0 auto; height: 1px; background: var(--grid); }
+  .range .span { position: absolute; top: 2px; height: 4px; border-radius: 2px; background: rgba(195, 165, 249, 0.45); }
+  .range .now { position: absolute; top: 0; width: 2px; height: 8px; background: var(--ink); border-radius: 1px; }
+  td.moves { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+  td.moves b { font: 400 13px/1 var(--mono); color: var(--ink); font-weight: 400; }
+  .pill {
+    display: inline-block; font: 400 10.5px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 4px 7px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, 0.18); color: var(--ink-2);
+  }
+  .note { font-size: 12.5px; color: var(--ink-3); max-width: 80ch; }
+  .empty { color: var(--ink-3); }
+  @media (max-width: 520px) {
+    h1 { font-size: 24px; }
+    .chip-group > span { min-width: 0; width: 100%; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .chip, tbody tr { transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+  }
+</style>
+
+<script id="sweep-data" type="application/json">__SWEEP_DATA__</script>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Sine Visuals Lab · Master dial</div>
+    <h1>Master Sweep</h1>
+    <p class="lede">What the Master dial does to each scene's picture. Every scene was rendered on the same synthetic track at each Master setting, and the finished frames were measured the same way the Master card measures them live. 100 is about as far as scenes go on each measure; the few that go further show past it here and pin at 100 on the card.</p>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section class="picker" aria-label="Scene">
+    <div class="chip-group" id="chips-featured"><span>Featured</span></div>
+    <div class="chip-group" id="chips-draft"><span>Drafts</span></div>
+  </section>
+
+  <section style="display:grid; gap:12px" aria-labelledby="h-curves">
+    <h2 id="h-curves">Each measure across the dial</h2>
+    <div class="legend">
+      <span><i class="key"></i><em id="legend-sel" style="font-style:normal"></em></span>
+      <span><i class="key field"></i>Other scenes</span>
+      <span><i class="key rule"></i>1.00× — as dialed</span>
+    </div>
+    <div class="panels" id="panels"></div>
+  </section>
+
+  <section style="display:grid; gap:12px" aria-labelledby="h-table">
+    <h2 id="h-table">Every scene at a glance</h2>
+    <p class="note">Each cell shows the reading at 1.00×. The bar under it spans the lowest to highest reading anywhere on the dial, and the white tick marks where 1.00× sits. The last column names the measure the dial moves most and how. A spread under about 10, or under a sixth of the reading itself, is run-to-run noise, so a scene whose every measure stays inside that barely changes with the dial.</p>
+    <div class="table-scroll"><table id="table"></table></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  const data = JSON.parse(document.getElementById("sweep-data").textContent);
+  const measures = data.measures;
+  const scenes = data.scenes.filter((s) => s.points && s.points.length);
+  const values = data.values.slice().sort((a, b) => a - b);
+  const xMin = values[0];
+  const xMax = values[values.length - 1];
+  const SVG = "http://www.w3.org/2000/svg";
+
+  // Display units: 100 = the measure's fullScale, same as the Master card.
+  const disp = (m, raw) => (raw === null || raw === undefined ? null : (raw / m.fullScale) * 100);
+  const pointAt = (s, v) => s.points.find((p) => p.master === v) || null;
+  const seriesOf = (s, m) => values.map((v) => {
+    const p = pointAt(s, v);
+    return p && !p.error ? disp(m, p.mean[m.key]) : null;
+  });
+  const nearestTo = (v) => values.reduce((best, x) => (Math.abs(x - v) < Math.abs(best - v) ? x : best), values[0]);
+  // Spectrum and the other scenes with nothing for the dial to scale still
+  // wander by about this much between points, so a smaller spread is noise.
+  const NOISE = 10;
+  // A round tick step giving four or five labelled lines up to `top`.
+  const niceStep = (top) => {
+    const raw = top / 4;
+    const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / pow;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * pow;
+  };
+  const DIALED = nearestTo(1);
+  const fmtX = (v) => `${v.toFixed(2)}×`;
+  const fmtV = (v) => (v === null ? "—" : String(Math.round(v)));
+
+  let selected = null;
+  try {
+    const h = decodeURIComponent(location.hash.replace(/^#/, ""));
+    if (scenes.some((s) => s.id === h)) selected = h;
+  } catch (e) { /* no deep link */ }
+  if (!selected && scenes.length) selected = scenes[0].id;
+  const byId = new Map(scenes.map((s) => [s.id, s]));
+
+  function el(tag, attrs, text) {
+    const n = document.createElement(tag);
+    if (attrs) for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  function svgEl(tag, attrs) {
+    const n = document.createElementNS(SVG, tag);
+    if (attrs) for (const k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+
+  // ---- header meta ----
+  const meta = document.getElementById("meta");
+  const metaBits = [
+    ["Audio", `synthetic, ${data.bpm} BPM`],
+    ["Measured", `${(data.settleMs / 1000).toFixed(1)}–${((data.settleMs + data.windowMs) / 1000).toFixed(1)} s after load`],
+    ["Frame", data.size],
+    ["Dial", values.map((v) => v.toFixed(2)).join(" · ")],
+    ["Commit", data.gitHead || "—"],
+    ["Run", (data.generated || "").slice(0, 16).replace("T", " ")],
+  ];
+  for (const [k, v] of metaBits) {
+    const s = el("span");
+    s.append(document.createTextNode(`${k} `), el("b", null, v));
+    meta.append(s);
+  }
+
+  // ---- chips ----
+  const chips = new Map();
+  for (const s of scenes) {
+    const b = el("button", { type: "button", class: "chip", "aria-pressed": "false" }, s.name);
+    b.addEventListener("click", () => select(s.id));
+    document.getElementById(s.draft ? "chips-draft" : "chips-featured").append(b);
+    chips.set(s.id, b);
+  }
+  for (const id of ["chips-featured", "chips-draft"]) {
+    const g = document.getElementById(id);
+    if (g.children.length === 1) g.hidden = true;
+  }
+
+  // ---- panels ----
+  const W = 340, H = 196, ML = 30, MR = 36, MT = 12, MB = 26;
+  const px = (v) => ML + ((v - xMin) / (xMax - xMin || 1)) * (W - ML - MR);
+  const panels = measures.map((m) => {
+    const series = new Map(scenes.map((s) => [s.id, seriesOf(s, m)]));
+    let top = 100;
+    for (const ys of series.values()) for (const y of ys) if (y !== null) top = Math.max(top, y);
+    const step = niceStep(top);
+    top = Math.ceil(top / step) * step;
+    const py = (y) => MT + (1 - y / top) * (H - MT - MB);
+
+    const wrap = el("div", { class: "panel" });
+    wrap.append(el("h3", null, m.label), el("p", { class: "desc" }, m.description));
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${m.label} for every scene across the Master dial` });
+    const axis = svgEl("g", { class: "axis" });
+    for (let t = 0; t <= top + 1e-9; t += step) {
+      axis.append(svgEl("line", { class: "gridline", x1: ML, x2: W - MR, y1: py(t), y2: py(t) }));
+      const tx = svgEl("text", { x: ML - 6, y: py(t) + 3.5, "text-anchor": "end" });
+      tx.textContent = String(Math.round(t));
+      axis.append(tx);
+    }
+    for (const v of values) {
+      if (Math.abs(v * 2 - Math.round(v * 2)) > 1e-6) continue; // label every half step
+      const tx = svgEl("text", { x: px(v), y: H - 8, "text-anchor": "middle" });
+      tx.textContent = `${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}×`;
+      if (v === DIALED) tx.setAttribute("class", "rule-label");
+      axis.append(tx);
+    }
+    axis.append(svgEl("line", { class: "master-rule", x1: px(DIALED), x2: px(DIALED), y1: MT - 4, y2: H - MB }));
+    svg.append(axis);
+
+    const pathOf = (ys) => {
+      let d = "", pen = false;
+      ys.forEach((y, i) => {
+        if (y === null) { pen = false; return; }
+        d += `${pen ? "L" : "M"}${px(values[i]).toFixed(1)},${py(y).toFixed(1)}`;
+        pen = true;
+      });
+      return d;
+    };
+    const field = svgEl("g");
+    for (const s of scenes) field.append(svgEl("path", { class: "field-line", d: pathOf(series.get(s.id)) }));
+    svg.append(field);
+    const cross = svgEl("line", { class: "crosshair", y1: MT - 4, y2: H - MB, visibility: "hidden" });
+    const hoverG = svgEl("g");
+    const selG = svgEl("g");
+    svg.append(cross, hoverG, selG);
+    wrap.append(svg);
+    const tip = el("div", { class: "tip", hidden: "" });
+    wrap.append(tip);
+
+    function drawSel() {
+      selG.replaceChildren();
+      const ys = series.get(selected);
+      if (!ys) return;
+      selG.append(svgEl("path", { class: "sel-line", d: pathOf(ys) }));
+      ys.forEach((y, i) => { if (y !== null) selG.append(svgEl("circle", { class: "sel-dot", cx: px(values[i]), cy: py(y), r: 4 })); });
+      let last = ys.length - 1;
+      while (last >= 0 && ys[last] === null) last--;
+      if (last >= 0) {
+        const t = svgEl("text", { class: "end-label", x: px(values[last]) + 8, y: py(ys[last]) + 4 });
+        t.textContent = fmtV(ys[last]);
+        selG.append(t);
+      }
+    }
+
+    let hoverId = null;
+    function onMove(ev) {
+      const pt = svg.createSVGPoint();
+      pt.x = ev.clientX; pt.y = ev.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const p = pt.matrixTransform(ctm.inverse());
+      const xv = xMin + ((p.x - ML) / (W - ML - MR)) * (xMax - xMin);
+      const i = values.indexOf(nearestTo(Math.min(xMax, Math.max(xMin, xv))));
+      const yv = (1 - (p.y - MT) / (H - MT - MB)) * top;
+      let best = null, bestD = Infinity;
+      for (const [id, ys] of series) {
+        if (ys[i] === null) continue;
+        const d = Math.abs(ys[i] - yv);
+        if (d < bestD) { bestD = d; best = id; }
+      }
+      hoverId = best;
+      cross.setAttribute("x1", px(values[i])); cross.setAttribute("x2", px(values[i]));
+      cross.setAttribute("visibility", "visible");
+      hoverG.replaceChildren();
+      if (best && best !== selected) hoverG.append(svgEl("path", { class: "hover-line", d: pathOf(series.get(best)) }));
+      tip.replaceChildren(el("div", { class: "at" }, `Master ${fmtX(values[i])}`));
+      const row = (cls, v, name) => {
+        const r = el("div", { class: "row" });
+        r.append(el("i", cls ? { class: cls } : null), el("b", null, fmtV(v)), el("span", null, name));
+        tip.append(r);
+      };
+      const selYs = series.get(selected);
+      if (selYs) row("", selYs[i], byId.get(selected).name);
+      if (best && best !== selected) row("h", series.get(best)[i], byId.get(best).name);
+      tip.hidden = false;
+      const box = wrap.getBoundingClientRect();
+      const sx = (px(values[i]) / W) * svg.getBoundingClientRect().width + (svg.getBoundingClientRect().left - box.left);
+      const tw = tip.offsetWidth;
+      const left = sx + 14 + tw > box.width - 8 ? sx - 14 - tw : sx + 14;
+      tip.style.left = `${Math.max(8, left)}px`;
+      tip.style.top = `${Math.max(8, ev.clientY - box.top - tip.offsetHeight - 10)}px`;
+    }
+    function onLeave() {
+      hoverId = null;
+      hoverG.replaceChildren();
+      cross.setAttribute("visibility", "hidden");
+      tip.hidden = true;
+    }
+    svg.addEventListener("pointermove", onMove);
+    svg.addEventListener("pointerleave", onLeave);
+    svg.addEventListener("click", () => { if (hoverId) select(hoverId); });
+
+    document.getElementById("panels").append(wrap);
+    return { drawSel, onLeave };
+  });
+
+  // ---- table ----
+  const table = document.getElementById("table");
+  const thead = el("thead");
+  const hr = el("tr");
+  hr.append(el("th", null, "Scene"));
+  for (const m of measures) hr.append(el("th", { title: m.description }, m.label));
+  hr.append(el("th", null, "Dial moves most"));
+  thead.append(hr);
+  const tbody = el("tbody");
+  const rows = new Map();
+  const tops = measures.map((m) => {
+    let top = 100;
+    for (const s of scenes) for (const y of seriesOf(s, m)) if (y !== null) top = Math.max(top, y);
+    return top;
+  });
+  for (const s of scenes) {
+    const tr = el("tr", { tabindex: "0", "aria-selected": "false" });
+    const name = el("td", { class: "scene" }, s.name);
+    const errs = s.points.filter((p) => p.error).length;
+    name.append(el("small", null, errs ? `${s.id} · ${errs} failed` : s.id));
+    tr.append(name);
+    let most = null;
+    measures.forEach((m, k) => {
+      const ys = seriesOf(s, m);
+      const known = ys.filter((y) => y !== null);
+      const td = el("td");
+      if (!known.length) { td.append(el("span", { class: "empty" }, "—")); tr.append(td); return; }
+      const lo = Math.min(...known), hi = Math.max(...known);
+      const at1 = ys[values.indexOf(DIALED)];
+      const cell = el("div", { class: "cell", title: `${m.label}: ${fmtV(lo)}–${fmtV(hi)} across the dial` });
+      cell.append(el("b", null, fmtV(at1)));
+      const range = el("div", { class: "range" });
+      const span = el("div", { class: "span" });
+      span.style.left = `${(lo / tops[k]) * 100}%`;
+      span.style.width = `${Math.max(2, ((hi - lo) / tops[k]) * 100)}%`;
+      range.append(span);
+      if (at1 !== null) {
+        const now = el("div", { class: "now" });
+        now.style.left = `calc(${(at1 / tops[k]) * 100}% - 1px)`;
+        range.append(now);
+      }
+      cell.append(range);
+      td.append(cell);
+      tr.append(td);
+      // Noise grows with the level (Tunnel's flashes sit near 100 and wander
+      // by more than 10 with nothing on the dial to scale), so a spread only
+      // counts once it clears both the floor and a share of the peak.
+      const significant = hi - lo >= Math.max(NOISE, 0.15 * hi);
+      if (significant && (!most || hi - lo > most.range)) most = { range: hi - lo, label: m.label, ys, lo, hi };
+    });
+    const mv = el("td", { class: "moves" });
+    if (!most) mv.append(el("span", { class: "pill" }, "Barely changes"));
+    else {
+      // Rises / falls when the ends account for most of the spread;
+      // otherwise the dial's effect turns around mid-way, so name where.
+      const known = most.ys.map((y, i) => [values[i], y]).filter(([, y]) => y !== null);
+      const [, first] = known[0];
+      const [, last] = known[known.length - 1];
+      let text;
+      if (last - first >= 0.6 * most.range) text = `rises ${fmtV(first)} → ${fmtV(last)}`;
+      else if (first - last >= 0.6 * most.range) text = `falls ${fmtV(first)} → ${fmtV(last)}`;
+      else {
+        const peak = known.find(([, y]) => y === most.hi);
+        const dip = known.find(([, y]) => y === most.lo);
+        const peakInside = peak !== known[0] && peak !== known[known.length - 1];
+        text = peakInside ? `peaks at ${fmtX(peak[0])} (${fmtV(peak[1])})` : `dips at ${fmtX(dip[0])} (${fmtV(dip[1])})`;
+      }
+      mv.append(document.createTextNode(`${most.label} `), el("b", null, text));
+    }
+    tr.append(mv);
+    tr.addEventListener("click", () => select(s.id));
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(s.id); } });
+    tbody.append(tr);
+    rows.set(s.id, tr);
+  }
+  table.append(thead, tbody);
+
+  function select(id) {
+    if (!byId.has(id)) return;
+    selected = id;
+    for (const [k, b] of chips) b.setAttribute("aria-pressed", String(k === id));
+    for (const [k, r] of rows) r.setAttribute("aria-selected", String(k === id));
+    document.getElementById("legend-sel").textContent = byId.get(id).name;
+    for (const p of panels) { p.onLeave(); p.drawSel(); }
+    try { history.replaceState(null, "", `#${id}`); } catch (e) { /* sandboxed */ }
+  }
+  if (selected) select(selected);
+})();
+</script>

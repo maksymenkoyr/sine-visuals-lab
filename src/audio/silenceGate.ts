@@ -125,8 +125,9 @@ export interface SilenceGateMarks {
  *  this tick. `dimmer` is FeatureExtractor.gateDimmer, `fired` is that same
  *  tick's FeatureFrame.onset, `suppressed` is FeatureExtractor.suppressed.
  *  One definition, shared by app.ts's `lastGate`, deviceMenu.ts's
- *  DeviceMenu.update(), and audioMeters.ts's AudioMeters.update() and Gate
- *  card, so none of them can drift into an incompatible shape. `null`
+ *  DeviceMenu.update(), and audioMeters.ts's AudioMeters.update() and
+ *  Signal card's Gate row, so none of them can drift into an incompatible
+ *  shape. `null`
  *  wherever a device has no local extractor to read (a renderer, the
  *  synthetic feed) — the same null-hides-itself convention
  *  lastFixedEnergy/lastFluxRatio already use. */
@@ -274,11 +275,16 @@ const SILENCE_GATE_AUTO_STEADY_SPAN = 0.02;
 const ENVELOPE_DECAY_RATE = 1 / SILENCE_GATE_AUTO_WINDOW_SEC;
 
 // Time constants for easing the floor estimate toward a steady window's
-// mean (slow — seconds-scale, like autoGain.ts's own EASE_RATE) versus
-// following a level that's dropped below the current estimate (fast — the
-// room just proved it can be quieter, so there's no reason to keep gating
-// on a stale high estimate for another several seconds).
-const FLOOR_RISE_RATE = 0.1;
+// mean (slow — seconds-scale, like autoGain.ts's own EASE_RATE, and changed
+// to the same ~4s alongside it) versus following a level that's dropped
+// below the current estimate (fast — the room just proved it can be
+// quieter, so there's no reason to keep gating on a stale high estimate for
+// another several seconds). No warmStart.ts warm-up here, unlike
+// autoGain.ts/musicProfile.ts: this floor only ever rises during a steady
+// window it has to wait to observe in the first place, and it already drops
+// to a new low in ~1s, so there's no slow start-up this rate is otherwise
+// forced to double as.
+const FLOOR_RISE_RATE = 0.25;
 const FLOOR_DROP_RATE = 1;
 
 /** Pure — this tracker's current floor estimate to the two gate marks that

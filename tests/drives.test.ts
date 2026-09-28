@@ -503,14 +503,16 @@ describe("drives: caustics defaults reproduce today's couplings exactly", () => 
     }
   });
 
-  // Neither was ever a real composite — breathe read a bare 0 (no reaction at
-  // all) and injection a bare 1 (an unfiltered pass-through) — so per
-  // drives.ts's header's "Nothing plugged in" paragraph they now each carry
-  // a real catalogue default instead of "scene".
-  it("breathe defaults to Bar wave and injection to Treble hit, both Custom=1 with the drive equal to that catalogue reading", () => {
+  // None was ever a real composite — breathe read a bare 0 (no reaction at
+  // all), injection and causticDensity a bare 1 (an unfiltered
+  // pass-through) — so per drives.ts's header's "Nothing plugged in"
+  // paragraph they now each carry a real catalogue default instead of "scene".
+  it("breathe defaults to Bar wave, injection to Treble hit and causticDensity to Section, each Custom=1 with the drive equal to that catalogue reading", () => {
     const anim = animWith({ bands: new Float32Array(NUM_BANDS).fill(0.8), onset: true });
     const engine = createDriveEngine();
     const drives = engine.forScene("caustics", settings, anim);
+    expect(byKey("causticDensity").drive!.default).toBe("anim.sectionIntensity");
+    expect(drives.value("causticDensity", -1)).toBe(anim.sectionIntensity);
     expect(byKey("breathe").drive!.default).toBe("anim.barWave");
     expect(drives.uniformPair("breathe")).toEqual({ drive: SIGNALS["anim.barWave"].read(frame(), anim), custom: 1 });
     expect(byKey("injection").drive!.default).toBe("anim.highOnset");
@@ -865,6 +867,36 @@ describe("drives: a source's own role/mute travel with it through togglePatchSou
     expect(gateConditionIndices(next)).toEqual([0]); // still A
     expect(next.sources[1]!.off).toBe(true); // B still muted
     expect(next.sources[2]!.when).toBeUndefined(); // C plain "plays"
+  });
+});
+
+describe("drives: a patch holds one grid source, whatever its division (sourceSlot)", () => {
+  it("toggling the Beat jack's default division unplugs a grid re-gridded to Bar, instead of adding a second grid", () => {
+    // The Timing strip's Grid jack always carries { grid: 2 }; the patch's
+    // own grid was moved to Bar (3) by its division chips.
+    const patch: DrivePatch = {
+      mix: "add",
+      sources: [
+        { choice: { source: "beat", grid: 3 }, weight: 1.6 },
+        { choice: "feature.onset", weight: 1 },
+      ],
+    };
+    const next = togglePatchSource(patch, { source: "beat", grid: 2 });
+    if (next === "scene") throw new Error("unreachable");
+    expect(next.sources.map((s) => s.choice)).toEqual(["feature.onset"]);
+  });
+
+  it("normalizeDriveSetting keeps only the first of two grid sources (a patch saved before the fix)", () => {
+    const next = normalizeDriveSetting({
+      mix: "add",
+      sources: [
+        { choice: { source: "beat", grid: 3 }, weight: 1.6 },
+        { choice: "feature.onset", weight: 1 },
+        { choice: { source: "beat", grid: 2 }, weight: 1 },
+      ],
+    });
+    if (next === "scene") throw new Error("unreachable");
+    expect(next.sources.map((s) => s.choice)).toEqual([{ source: "beat", grid: 3 }, "feature.onset"]);
   });
 });
 

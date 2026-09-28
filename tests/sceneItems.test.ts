@@ -111,6 +111,29 @@ describe("defineItemPairs", () => {
     const specs = defineItemPairs("strain", 2, { key: "att", min: -1.5, max: 1.5, step: 0.05, default: () => 0 });
     expect(specs[1]!.label).toBe("strain 0→1");
   });
+
+  it("diagonal: false skips i === j, giving exactly the off-diagonal keys", () => {
+    const specs = defineItemPairs("strain", 3, { key: "touch", min: -1.5, max: 1.5, step: 0.05, default: 0, diagonal: false });
+    expect(specs.map((s) => s.key)).toEqual(["touch01", "touch02", "touch10", "touch12", "touch20", "touch21"]);
+    expect(specs.map((s) => [s.item?.index, s.item?.other])).toEqual([
+      [0, 1],
+      [0, 2],
+      [1, 0],
+      [1, 2],
+      [2, 0],
+      [2, 1],
+    ]);
+  });
+
+  it("copies masterScale: false onto every generated spec", () => {
+    const specs = defineItemPairs("strain", 2, { key: "att", min: -1.5, max: 1.5, step: 0.05, default: 0, masterScale: false });
+    for (const s of specs) expect(s.masterScale).toBe(false);
+  });
+
+  it("masterScale is undefined when not given", () => {
+    const specs = defineItemPairs("strain", 2, { key: "att", min: -1.5, max: 1.5, step: 0.05, default: 0 });
+    for (const s of specs) expect(s.masterScale).toBeUndefined();
+  });
 });
 
 describe("composeSettings", () => {
