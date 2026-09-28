@@ -1,7 +1,7 @@
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
 import type { QualityPreset } from "../render/quality.ts";
-import { AUTO_SKY, FONT_MONO, POWER_TEAL, withAlpha } from "./controlsTheme.ts";
+import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
 import {
   chipBtnLitStyle,
@@ -43,6 +43,24 @@ import {
  * auto-refresh tick (see deviceMenu.ts's update()), not per frame. The mode
  * chips are never auto-tunable and stay out of the Tab ring, same as the
  * palette chips they're modeled on (deviceMenu.ts).
+ *
+ * It starts folded (CardSpec.defaultFolded) until someone first opens it —
+ * the quality governor runs on its own, and these readouts are diagnostics.
+ * Folded, in the wide layout, this card is a small square (POWER_SQUARE_PX)
+ * showing a power glyph in place of a title bar — it sits directly against
+ * the settings column (deviceMenu.ts), so a plain full-width folded bar
+ * would leave a wide empty strip between the two; a square instead hugs the
+ * column it's next to. Unfolding animates the width open first (growing
+ * leftward, away from the settings column, square -> 200px) and only then
+ * the height open (growing downward) — the reverse on folding — so the
+ * motion always reads as a clip opening/closing rather than the card
+ * resizing in place. The card's content stays laid out at full width
+ * throughout (never reflowing) and is simply clipped by the card's own
+ * overflow: hidden (glassCardStyle), which is what makes that clip-opening
+ * reading possible — see createPowerCard's foldTransition and
+ * controlsTheme.ts's .vc-power-card rules. Below STACK_BELOW_PX the panel
+ * stacks into one column and Power folds to a plain title bar like every
+ * other card, no square, no animation.
  */
 
 export interface PowerStatus {
@@ -143,8 +161,8 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
 }
 
 // Quality row's chip group wraps rather than squeezing five chips onto one
-// line — the column (controlsTheme.ts's .vc-power-col) is 200px, too narrow
-// for [Auto][High][Mid][Low][Floor] on a single row at a legible size.
+// line — the open card (controlsTheme.ts's .vc-power-card) is 200px, too
+// narrow for [Auto][High][Mid][Low][Floor] on a single row at a legible size.
 const qualityListStyle = `display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;`;
 const qualityChipStyle = `${chipBtnStyle} flex: 1 1 auto; text-align: center; padding-top: 4px; padding-bottom: 4px; min-width: 38px;`;
 const qualityChipLitStyle = `${chipBtnLitStyle} flex: 1 1 auto; text-align: center; padding-top: 4px; padding-bottom: 4px; min-width: 38px;`;
@@ -374,7 +392,134 @@ function createReadoutLine(caption: string) {
 }
 
 export function createPowerCard(deps: PowerCardDeps): PowerCard {
-  const card = createCard({ title: "Power", accent: POWER_TEAL, foldId: "power" });
+  // Only read at the moment of a fold click, so a viewport/preference change
+  // between clicks always takes effect on the next one — no resize listener
+  // needed, matchMedia's own .matches is always current.
+  const WIDE = window.matchMedia(`(min-width: ${STACK_BELOW_PX + 1}px)`);
+  const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)");
+  // Every animation of the transition in flight (size, content fade, glyph
+  // fade) — a second click mid-transition cancels them all together.
+  let running: Animation[] = [];
+  const stopRunning = (): void => {
+    for (const a of running) a.cancel();
+    running = [];
+  };
+  // cardEl/pad/square are assigned right after createCard returns, below —
+  // foldTransition itself only ever runs later, from a click.
+  let cardEl!: HTMLDivElement;
+  let pad!: HTMLElement;
+  let square!: HTMLButtonElement;
+
+  // Width and height are two eased moves, not one keyframe list with a
+  // corner in it: that version came to a dead stop between the two phases
+  // (one eased out to zero speed, the other eased in from rest). Starting
+  // the second move OVERLAP_MS before the first ends rounds the corner off
+  // while it still reads as "left, then down".
+  const EASE = "cubic-bezier(.4,0,.2,1)";
+  const PHASE_MS = 320;
+  const OVERLAP_MS = 100;
+  // The card's content and the glyph crossfade inside the square's own
+  // footprint: at the tail of a fold, the start of an unfold. Without it the
+  // square briefly shows the header's chevron (the pad's right end) before
+  // the glyph arrives, or both at once.
+  const FADE_MS = 180;
+
+  // Folded, in the wide layout, Power is a square that opens leftward
+  // (width) before downward (height) — see this file's own header comment
+  // for why. Folding reverses that. The stacked layout, reduced motion, and
+  // very old browsers without Element.animate all skip straight to the
+  // plain class toggle (apply()).
+  function foldTransition(folding: boolean, apply: () => void): void {
+    const el = cardEl;
+    if (!WIDE.matches || REDUCE.matches || typeof el.animate !== "function") {
+      stopRunning();
+      apply();
+      return;
+    }
+    // Measured before cancelling, so a click mid-transition carries on from
+    // wherever the previous one had got to rather than jumping.
+    const wasFolded = el.classList.contains("vc-folded");
+    const from = el.getBoundingClientRect();
+    const padFrom = wasFolded ? 0 : Number(getComputedStyle(pad).opacity);
+    const glyphFrom = wasFolded ? 1 : Number(getComputedStyle(square).opacity);
+    stopRunning();
+    // A move with nothing left to do (a click that reversed a transition
+    // part-way) takes no time, so the other one doesn't sit waiting for it.
+    const phase = (a: number, b: number): number => (Math.abs(a - b) < 0.5 ? 0 : PHASE_MS);
+    const secondDelay = (firstMs: number): number => Math.max(0, firstMs - OVERLAP_MS);
+    const move = (prop: "width" | "height", a: number, b: number, delay: number, duration: number, fill: FillMode) =>
+      el.animate([{ [prop]: `${a}px` }, { [prop]: `${b}px` }], { delay, duration, easing: EASE, fill });
+    const fade = (target: HTMLElement, a: number, b: number, delay: number, fill: FillMode) =>
+      target.animate(
+        [
+          { visibility: "visible", opacity: a },
+          { visibility: "visible", opacity: b },
+        ],
+        { delay, duration: FADE_MS, easing: "ease", fill },
+      );
+    if (folding) {
+      // Up first, then right into the square. apply() — the class flip that
+      // hides the pad and shows the glyph for good — lands only once both
+      // moves finish; until then `fill` holds each end state.
+      const upMs = phase(from.height, POWER_SQUARE_PX);
+      const rightAt = secondDelay(upMs);
+      const rightMs = phase(from.width, POWER_SQUARE_PX);
+      const fadeAt = Math.max(0, rightAt + rightMs - FADE_MS);
+      const up = move("height", from.height, POWER_SQUARE_PX, 0, upMs, "forwards");
+      const right = move("width", from.width, POWER_SQUARE_PX, rightAt, rightMs, "both");
+      running = [up, right, fade(pad, padFrom, 0, fadeAt, "both"), fade(square, glyphFrom, 1, fadeAt, "both")];
+      Promise.all([up.finished, right.finished]).then(
+        () => {
+          apply();
+          stopRunning();
+        },
+        // A cancelled animation's `finished` rejects — a newer transition
+        // (e.g. a second click mid-fold) superseded this one, and it's that
+        // transition's own apply() that gets to run, never this one.
+        () => {},
+      );
+    } else {
+      // Left first, then down.
+      apply(); // class off -> natural size
+      const to = el.getBoundingClientRect();
+      const leftMs = phase(from.width, to.width);
+      const left = move("width", from.width, to.width, 0, leftMs, "none");
+      const down = move("height", from.height, to.height, secondDelay(leftMs), phase(from.height, to.height), "backwards");
+      running = [left, down, fade(pad, padFrom, 1, 0, "backwards"), fade(square, glyphFrom, 0, 0, "none")];
+      Promise.all([left.finished, down.finished]).then(stopRunning, () => {});
+    }
+  }
+
+  const card = createCard({ title: "Power", accent: POWER_TEAL, foldId: "power", defaultFolded: true, foldTransition });
+  cardEl = card.el;
+  cardEl.classList.add("vc-power-card");
+  pad = cardEl.querySelector<HTMLElement>(".vc-card-pad")!;
+
+  // The compact power glyph shown only while folded (controlsTheme.ts's
+  // .vc-power-card.vc-folded > .vc-power-square) — appended to the card
+  // element itself, not the pad, so it survives the pad's own
+  // visibility: hidden while folded (see this file's header comment).
+  square = document.createElement("button");
+  square.type = "button";
+  square.className = "vc-power-square";
+  square.setAttribute("aria-label", "Expand Power");
+  square.title = "Expand Power";
+  square.setAttribute("aria-controls", card.body.id);
+  square.innerHTML =
+    '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">' +
+    '<path d="M5.2 3.9a5.2 5.2 0 1 0 5.6 0"/>' +
+    '<path d="M8 2v5.5"/>' +
+    "</svg>";
+  // stopPropagation: the header's own click-to-toggle listener (createCard)
+  // doesn't cover this button (it isn't inside the header), but it costs
+  // nothing to be explicit and it matches every other in-card control's
+  // click handling.
+  square.addEventListener("click", (e) => {
+    e.stopPropagation();
+    card.fold!.toggle();
+  });
+  cardEl.appendChild(square);
+
   const betaBadge = document.createElement("span");
   betaBadge.textContent = "Beta";
   betaBadge.style.cssText = betaBadgeStyle;

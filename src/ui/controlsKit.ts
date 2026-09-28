@@ -17,7 +17,10 @@ import { setHintText } from "./hintSwatches.ts";
  * column, today) are unaffected. The header's margin-bottom and the body's
  * bottom padding live in controlsTheme.ts's .vc-card-head/.vc-card-pad
  * rules rather than the inline styles below, so .vc-folded can zero them —
- * an inline style would otherwise win over that class rule.
+ * an inline style would otherwise win over that class rule. A card can
+ * additionally animate its own fold via CardSpec.foldTransition (see its own
+ * doc comment, and powerCard.ts for the one card that uses it) instead of
+ * `.vc-folded` snapping straight on/off.
  *
  * createAdvancedSection is the equivalent disclosure for a run of rows
  * inside a card's body rather than a whole card — see its own comment for
@@ -94,10 +97,25 @@ export interface CardSpec {
    *  chevron in the header, and a click anywhere on the header outside
    *  `right`. Unique per mounted card ("bands", "scope", "signal", …). */
   foldId?: string;
+  /** Starts folded until the user first opens it (panelFolds.ts's
+   *  defaultFolded) — the Power card, whose readouts most people never need. */
+  defaultFolded?: boolean;
+  /** Lets a card animate its own fold instead of createCard flipping
+   *  `.vc-folded` directly (see powerCard.ts for the one user of this).
+   *  Called with the intended next state and an `apply` callback that
+   *  actually toggles the class; must call `apply` exactly once, either
+   *  immediately or when the card's own animation ends — and never after a
+   *  newer transition has superseded it (e.g. a second click mid-animation).
+   *  Persisting the fold state (setFolded) still happens immediately in
+   *  toggle(), independent of when apply() actually runs. */
+  foldTransition?: (folding: boolean, apply: () => void) => void;
 }
 
 export interface CardFold {
   isFolded(): boolean;
+  /** Toggles the fold the same way clicking the header/chevron does — so
+   *  another control (powerCard.ts's square button) can open/close the card. */
+  toggle(): void;
 }
 
 /** A glass card: scanline overlay, header row (title + optional right slot),
@@ -145,17 +163,23 @@ export function createCard(
     header.appendChild(foldBtn);
     header.style.cursor = "pointer";
 
-    const apply = (folded: boolean): void => {
-      el.classList.toggle("vc-folded", folded);
-      foldBtn.setAttribute("aria-expanded", String(!folded));
-      foldBtn.title = folded ? `Expand ${spec.title}` : `Collapse ${spec.title}`;
+    // Tracked separately from the .vc-folded class itself so a click that
+    // lands mid-animation (before spec.foldTransition's own apply() has run)
+    // toggles the *intended* state, not whatever the DOM currently shows.
+    let folded = isFolded(foldId, spec.defaultFolded);
+    const apply = (f: boolean): void => {
+      el.classList.toggle("vc-folded", f);
+      foldBtn.setAttribute("aria-expanded", String(!f));
+      foldBtn.title = f ? `Expand ${spec.title}` : `Collapse ${spec.title}`;
     };
-    apply(isFolded(foldId));
+    apply(folded);
 
     const toggle = (): void => {
-      const next = !el.classList.contains("vc-folded");
-      apply(next);
-      setFolded(foldId, next);
+      const next = !folded;
+      folded = next;
+      setFolded(foldId, next, spec.defaultFolded);
+      if (spec.foldTransition) spec.foldTransition(next, () => apply(next));
+      else apply(next);
     };
     // stopPropagation so a chevron click doesn't also fire the header's own
     // click-to-toggle listener below and double-toggle.
@@ -168,7 +192,7 @@ export function createCard(
       toggle();
     });
 
-    fold = { isFolded: () => el.classList.contains("vc-folded") };
+    fold = { isFolded: () => folded, toggle };
   }
 
   pad.append(header, body);
@@ -295,7 +319,7 @@ export function createAdvancedSection(id: string, label: string): AdvancedSectio
   toggle.addEventListener("click", () => {
     const next = body.style.display === "none";
     apply(next);
-    setFolded(id, !next);
+    setFolded(id, !next, true);
   });
 
   wrap.append(toggle, body);

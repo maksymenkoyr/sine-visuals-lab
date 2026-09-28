@@ -87,6 +87,14 @@ export const CABLE_GUTTER_PX = 56;
  *  stacked media query below for how Power folds into that single column. */
 export const STACK_BELOW_PX = 940 + CABLE_GUTTER_PX;
 
+/** The folded Power card's side, in the wide layout (powerCard.ts) — a
+ *  notch under a folded card's title bar (FOLDED_BAR_PX), so it reads as a
+ *  button rather than a card. */
+export const POWER_SQUARE_PX = 26;
+/** A folded card's title-bar height; the Auto master bar (deviceMenu.ts)
+ *  is set to it so it sits in the same register as the cards below it. */
+export const FOLDED_BAR_PX = 32;
+
 /** `#rrggbb` + alpha in [0,1] -> `#rrggbbaa`. */
 export function withAlpha(hex: string, alpha: number): string {
   const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255)
@@ -156,12 +164,19 @@ const stylesheet = `
  * status readouts — one compact card, not a scrolling stack, so this column
  * is narrower than .vc-spectrum-col. Sits inside .vc-cols-wrap immediately
  * left of the settings column (.vc-controls-col, below), on the screen's
- * right edge. */
+ * right edge. Open, its card is 200px wide (the wide-layout media query
+ * below); folded, the card itself shrinks to a POWER_SQUARE_PX square (see
+ * that constant's own comment) and this column hugs it — width: auto in
+ * that same media query, overridden below. */
 .vc-power-col {
   width: 200px; flex: none; display: flex; flex-direction: column; gap: 4px;
   max-height: calc(100vh - 74px);
 }
 .vc-power-col > * { flex-shrink: 0; }
+/* The power glyph button shown only while the card is folded (in the wide
+ * layout — see the media query below); stacked, Power folds to a plain
+ * title bar like every other card, so this never shows there. */
+.vc-power-square { display: none; }
 /* The meters side. In the wide layout (the base rules here) it docks to the
  * screen's own top-left corner, independently of .vc-root's top-right
  * anchor — see .vc-root's own comment above for why that's safe for
@@ -197,6 +212,47 @@ const stylesheet = `
 }
 /* Cards scroll past the column's edge rather than squashing to fit it. */
 .vc-controls-col > * { flex-shrink: 0; }
+/* Power folds to a small square (POWER_SQUARE_PX) instead of a full-width
+ * title bar, in the wide layout only (see powerCard.ts's own header for why:
+ * it sits against the settings column, so growing leftward on unfold keeps
+ * that column still, and the animation needs the card's content laid out at
+ * full width throughout — never reflowing — so it can be clipped instead of
+ * resized). .vc-power-col hugs the card rather than reserving the full 200px
+ * so the square doesn't leave a blank gap next to it. */
+@media (min-width: ${STACK_BELOW_PX + 1}px) {
+  .vc-power-col { width: auto; align-items: flex-end; }
+  /* flex-end (not stretch) means a narrower-than-200px card overflows its
+   * fixed-width pad on the LEFT — clipped by the card's own overflow: hidden
+   * (glassCardStyle) — so the pad's content stays exactly where it was on
+   * screen instead of sliding to follow the card's shrinking left edge. */
+  .vc-power-card {
+    box-sizing: border-box; width: 200px;
+    display: flex; justify-content: flex-end; align-items: flex-start;
+  }
+  /* The card's own 1px border eats into its 200px box; 198px keeps the pad's
+   * padding identical to the pre-fold-square layout. flex: none so it never
+   * shrinks to make room for the square button below (that button is
+   * absolutely positioned and takes no flex space, but the pad must not
+   * shrink to less than its own written width just because it can). */
+  .vc-power-card > .vc-card-pad { flex: none; width: 198px; box-sizing: border-box; }
+  .vc-power-card.vc-folded { width: ${POWER_SQUARE_PX}px; height: ${POWER_SQUARE_PX}px; }
+  /* Hidden rather than removed: the pad's content stays laid out at full
+   * width underneath so nothing needs to reflow when the square unfolds. */
+  .vc-power-card.vc-folded > .vc-card-pad { visibility: hidden; }
+  /* Pinned to the card's right edge at the folded square's own inner size
+   * (inside the 1px border), not inset: 0 — so the glyph stays put while the
+   * card opens and closes around it (powerCard.ts's foldTransition). */
+  .vc-power-square {
+    display: grid; place-items: center; position: absolute; z-index: 1;
+    top: 0; right: 0; width: ${POWER_SQUARE_PX - 2}px; height: ${POWER_SQUARE_PX - 2}px;
+    padding: 0; margin: 0; background: transparent; border: 0; cursor: pointer;
+    color: ${POWER_TEAL}; opacity: 0; visibility: hidden; pointer-events: none;
+    transition: color 0.15s ease;
+  }
+  .vc-power-card.vc-folded > .vc-power-square { opacity: 1; visibility: visible; pointer-events: auto; }
+  .vc-power-square:hover, .vc-power-square:focus-visible { color: #fff; }
+  .vc-power-square:focus-visible { outline: none; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.7)); }
+}
 /* Power + the settings column travel together in .vc-root's own flex row;
  * .vc-cols-wrap here is Power's own wrapper (the meters column left it for
  * an independent dock above, leaving this holding just the fold toggle and

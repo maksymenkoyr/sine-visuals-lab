@@ -136,8 +136,6 @@ import {
   setAutoEnabled,
   isSceneAuto,
   setSceneAuto,
-  getAutoStrength,
-  setAutoStrength,
   seedAuto,
 } from "./render/autoTune.ts";
 import {
@@ -926,8 +924,6 @@ function wireDeviceMenu(): void {
         [...(getScene(sceneId)?.settings ?? []), getSensitivitySpec(), getExpansionSpec(), getSmoothingSpec()],
         on,
       ),
-    getAutoStrength: () => getAutoStrength(),
-    onAutoStrengthChange: (value) => setAutoStrength(value),
     getSceneMaster: () => getSceneMaster(),
     onSceneMasterChange: (value) => setSceneMaster(value),
     getAutoGain: () => getAutoGain(),

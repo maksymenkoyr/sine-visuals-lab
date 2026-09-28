@@ -27,7 +27,6 @@ import { createLooksCard } from "./looksCard.ts";
 import "./widgets/index.ts";
 import { getWidget, type LinkedSetting, type WidgetCtx } from "./widgets/registry.ts";
 import { formatMixedSummary } from "./widgets/itemSelection.ts";
-import { AUTO_STRENGTH_DEFAULT, AUTO_STRENGTH_MIN, AUTO_STRENGTH_MAX } from "../render/autoTune.ts";
 import { SIGNALS, type SignalId, type SignalSpec } from "../render/signals.ts";
 import { takeSettingMarks } from "../render/settingMarks.ts";
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
@@ -96,6 +95,7 @@ import {
   AUTO_SKY,
   BANDS_AMBER,
   FAMILY_ACCENTS,
+  FOLDED_BAR_PX,
   FONT_LABEL,
   FONT_MONO,
   GLASS_FILTER,
@@ -141,8 +141,8 @@ import {
  * cables (src/ui/cableLayer.ts) showing through the open middle: the Bands
  * card (scene name, audio source, and the live bars with the band faders
  * drawn over them — see src/ui/bandFaders.ts) anchored top-left, and the
- * controls column anchored top-right alongside Power, whose cards run Auto
- * strength (with the Auto master block welded to it) → Input
+ * controls column anchored top-right alongside Power, whose cards run the
+ * Auto master bar → Input
  * (its own header carries a second Auto button, next to Reset — see
  * src/audio/micAuto.ts for how it differs from the master block) → Scene →
  * Palette → a footer strip. A drive setting (SceneSetting.drive — see
@@ -528,12 +528,10 @@ export interface DeviceMenuDeps {
   /** Whether every auto-capable setting on this scene (incl. Sensitivity/Expansion/Smoothing) is auto. */
   isSceneAuto: (sceneId: string) => boolean;
   onSceneAutoToggle: (sceneId: string, on: boolean) => void;
-  getAutoStrength: () => number;
-  onAutoStrengthChange: (value: number) => void;
   /** The device-wide scene master (sceneSettings.ts's getSceneMaster) — one
    *  dial over every numeric scene param, resolved in autoTune.ts's
-   *  resolveSceneSetting. Device-local like getAutoStrength above, so it is
-   *  neither captured in a Look nor sent to the TV. */
+   *  resolveSceneSetting. Device-local, so it is neither captured in a Look
+   *  nor sent to the TV. */
   getSceneMaster: () => number;
   onSceneMasterChange: (value: number) => void;
   /** Dev-only: read/write/clear an unclamped pin for a param row (see
@@ -678,17 +676,19 @@ const offChipLitStyle = `${autoChipBaseStyle} background: rgba(255,255,255,0.82)
 const offChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
-const AUTO_STRENGTH_HINT = "How hard auto pushes every A control";
 
-// Auto strength card + the master block welded to its right.
-const autoRowStyle = `display: flex; gap: 4px; align-items: stretch;`;
+// The Auto master bar — its own slim full-width strip at the top of the
+// settings column, a folded card's title-bar height (FOLDED_BAR_PX,
+// controlsTheme.ts).
 const autoMasterBaseStyle = `
-  width: 74px; flex-shrink: 0; display: grid; place-items: center; text-align: center;
+  width: 100%; box-sizing: border-box; height: ${FOLDED_BAR_PX}px; flex-shrink: 0;
   cursor: pointer; padding: 0; border-radius: 3px;
   -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
 `;
 const autoMasterStyle = `${autoMasterBaseStyle} background: rgba(8,11,10,0.2); border: 1px solid ${withAlpha(AUTO_SKY, 0.3)};`;
 const autoMasterLitStyle = `${autoMasterBaseStyle} background: ${withAlpha("#1479b0", 0.28)}; border: 1px solid ${withAlpha(AUTO_SKY, 0.6)};`;
+// Label + ON/OFF sub-label inline on one line, centred in the bar.
+const autoMasterInnerStyle = `display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 100%;`;
 const autoMasterLabelStyle = (lit: boolean) =>
   `font: 500 13px/1.2 ${FONT_LABEL}; color: ${lit ? "#a0e7ff" : "rgba(255,255,255,0.55)"};`;
 const autoMasterSubStyle = (lit: boolean) =>
@@ -698,8 +698,8 @@ const autoMasterSubStyle = (lit: boolean) =>
 // "the whole mic" covers) — a compact, header-sized member of the
 // autoMaster* family above: same lit/unlit shape, same backdrop-filtered
 // pill, scaled down to sit beside a Reset chip in a card header instead of
-// welded to the strength card, and given the Input card's own accent
-// (INPUT_GREEN) rather than the strength card's sky blue.
+// spanning the settings column, and given the Input card's own accent
+// (INPUT_GREEN) rather than the Auto bar's sky blue.
 const micAutoBaseStyle = `
   font: 500 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.04em; padding: 2.5px 8px;
   border-radius: 4px; cursor: pointer;
@@ -4100,15 +4100,17 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // When "Hide left" is active, Bands and the meter cards are excluded
   // from the check (isFolded(METERS_COLUMN), not an offsetParent probe —
   // that forces a synchronous layout on every class mutation in the
-  // column, which stalled the panel once enough cards had folded), so
-  // folding Power alone while meters are hidden also counts as "everything
-  // folded".
+  // column, which stalled the panel once enough cards had folded) — and so
+  // is Power itself, since folded Power is already its own compact square
+  // (powerCard.ts) in the wide layout; the wrapper only ever needs the "▸"
+  // triangle to stand in for a folded *card*, so with meters hidden there's
+  // nothing left for it to collapse for. With meters shown, every card in
+  // Power + the meters column folded still counts as "everything folded".
   function refreshColumnsFold(): void {
     const cards = [...columnsWrap.querySelectorAll<HTMLElement>(".vc-card")];
-    const relevant = isFolded(METERS_COLUMN) ? cards.filter((c) => c === powerCard.el) : cards;
     columnsWrap.classList.toggle(
       "vc-cols-folded",
-      relevant.length > 0 && relevant.every((c) => c.classList.contains("vc-folded")),
+      !isFolded(METERS_COLUMN) && cards.length > 0 && cards.every((c) => c.classList.contains("vc-folded")),
     );
     // This MutationObserver already fires for every fold/unfold in the
     // Power+Bands+meters column (it observes columnsWrap's own subtree) —
@@ -4159,86 +4161,28 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   cableColumnsRO.observe(controlsCol);
   controlsCol.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
-  // Auto strength: how far auto is allowed to push a setting from its default
-  // (see autoTune.ts's computeAutoTarget). Global per device.
-  const autoStrengthReadout = document.createElement("div");
-  autoStrengthReadout.style.cssText = readoutStyle;
-  const autoStrengthDigits = document.createElement("span");
-  autoStrengthDigits.style.cssText = digitsStyle;
-  autoStrengthReadout.appendChild(autoStrengthDigits);
-  const autoCard = createCard({ title: "Auto strength", accent: AUTO_SKY, right: autoStrengthReadout });
-  markBlock(autoCard.title);
-  autoCard.el.style.flex = "1";
-  autoCard.el.style.minWidth = "0";
-  const autoStrengthRow = document.createElement("div");
-  autoStrengthRow.className = "vc-row";
-  const autoStrengthSlider = document.createElement("input");
-  autoStrengthSlider.type = "range";
-  autoStrengthSlider.className = "vc-slider";
-  autoStrengthSlider.setAttribute("aria-label", "Auto strength");
-  autoStrengthSlider.min = String(AUTO_STRENGTH_MIN);
-  autoStrengthSlider.max = String(AUTO_STRENGTH_MAX);
-  autoStrengthSlider.step = "any";
-  autoStrengthRow.style.setProperty("--vc-accent", AUTO_SKY);
-  autoStrengthSlider.style.marginTop = "0";
-  const autoStrengthHint = document.createElement("div");
-  autoStrengthHint.className = "vc-hint";
-  setHintText(autoStrengthHint, AUTO_STRENGTH_HINT);
-  autoStrengthRow.append(autoStrengthSlider, autoStrengthHint);
-  autoCard.body.appendChild(autoStrengthRow);
-  autoCard.el.style.cursor = "pointer";
-  autoCard.el.addEventListener("click", () => autoStrengthSlider.focus());
-  // Scoped to the row, not autoCard.el like the click handler above: click's
-  // wider scope (hovering the card title still focuses the slider) is a
-  // deliberate convenience, but hover-focus firing there too would mean just
-  // reading the card's title steals focus onto the slider.
-  wireHoverFocus(autoStrengthRow, autoStrengthSlider);
-  wireThumbMagnet(autoCard.el, autoStrengthSlider);
-  wireSliderQuickJump(autoStrengthRow, autoStrengthSlider);
-
-  function showAutoStrength(value: number): void {
-    autoStrengthSlider.value = String(value);
-    autoStrengthSlider.style.setProperty(
-      "--vc-fill",
-      `${((value - AUTO_STRENGTH_MIN) / (AUTO_STRENGTH_MAX - AUTO_STRENGTH_MIN)) * 100}%`,
-    );
-    autoStrengthDigits.textContent = value.toFixed(2);
-  }
-  function refreshAutoStrengthDisplay(): void {
-    showAutoStrength(deps.getAutoStrength());
-  }
-  autoStrengthSlider.addEventListener("input", () => {
-    autoStrengthOffStored = null;
-    const value = Number(autoStrengthSlider.value);
-    showAutoStrength(value);
-    deps.onAutoStrengthChange(value);
-  });
-
   // The global "Auto" master switch — toggles every auto-capable row, scene
   // settings plus Sensitivity/Expansion/Smoothing (see app.ts's
-  // isSceneAuto wiring). Welded to the strength card's right edge, sharing
-  // its accent without being nested inside its border. Overlaps the Input
-  // card's own Auto button (below, and see micAuto.ts's header) on the
-  // Sensitivity/Expansion/Smoothing rows only — a scene's own settings stay
-  // this button's alone — so toggling either refreshes the other's lit
-  // state (see toggleAutoMaster/toggleMicAuto).
+  // isSceneAuto wiring). Its own slim full-width bar at the top of the
+  // settings column, beside folded Power's square.
+  // Overlaps the Input card's own Auto button (below, and see micAuto.ts's
+  // header) on the Sensitivity/Expansion/Smoothing rows only — a scene's own
+  // settings stay this button's alone — so toggling either refreshes the
+  // other's lit state (see toggleAutoMaster/toggleMicAuto).
   const autoMasterBtn = document.createElement("button");
   autoMasterBtn.title = "Auto-tune everything — sensitivity, expansion, smoothing, and every scene setting";
   const autoMasterLabel = document.createElement("div");
   autoMasterLabel.textContent = "Auto";
   const autoMasterSub = document.createElement("div");
   const autoMasterInner = document.createElement("div");
+  autoMasterInner.style.cssText = autoMasterInnerStyle;
   autoMasterInner.append(autoMasterLabel, autoMasterSub);
   autoMasterBtn.appendChild(autoMasterInner);
-
-  const autoRow = document.createElement("div");
-  autoRow.style.cssText = autoRowStyle;
-  autoRow.append(autoCard.el, autoMasterBtn);
 
   // Master: one device-wide dial over every numeric scene param, multiplied
   // in at autoTune.ts's resolveSceneSetting (scaled once, never on drives,
   // enums/booleans, or the Input card's gain stages — see that doc). Sits
-  // between Auto strength and Input as its own always-visible card: it is
+  // between the Auto bar and Input as its own always-visible card: it is
   // not part of the auto system, and unlike the Scene card below it must
   // not disappear on a scene that declares no settings of its own — those
   // scenes simply have nothing for it to move. The Scene card's violet,
@@ -5324,7 +5268,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Footer strip: the view toggles (keys, solo, the meters column) and a way
   // out. It lives in the column that never hides, rather than above Bands: a
   // chip up there had to be its own row, which pushed the whole column down
-  // out of line with Power and Auto strength. The dock that holds it is
+  // out of line with Power and the Auto bar. The dock that holds it is
   // sticky to the bottom of that column (.vc-dock, controlsTheme.ts) — at
   // the bottom of the scroll, the buttons were out of sight whenever the
   // column overflowed, which it almost always does.
@@ -5534,9 +5478,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     autoMasterSub.textContent = lit ? "ON" : "OFF";
   }
 
-  // Shared by the master button's own click and the Auto strength row's A
-  // hotkey (see wireRowKeys below) — the master switch *is* that block's auto
-  // control, so A on the strength slider reaches for it rather than no-oping.
   // Overlaps the Input card's own Auto button (micAuto.ts) on the
   // Sensitivity/Expansion/Smoothing rows, which both toggles share — refresh
   // that button too, since flipping every scene setting to manual/auto here
@@ -5569,34 +5510,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshAutoMaster();
   }
 
-  // R/T for the strength slider itself — same reset/restore-point contract as
-  // a row built through createControlRow (see the header comment), hand-
-  // rolled since this one-off row isn't built through it.
-  let autoStrengthOffStored: number | null = null;
-  function resetAutoStrength(): void {
-    autoStrengthOffStored = null;
-    showAutoStrength(AUTO_STRENGTH_DEFAULT);
-    deps.onAutoStrengthChange(AUTO_STRENGTH_DEFAULT);
-  }
-  function toggleAutoStrengthOff(): void {
-    if (autoStrengthOffStored !== null) {
-      const restore = autoStrengthOffStored;
-      autoStrengthOffStored = null;
-      showAutoStrength(restore);
-      deps.onAutoStrengthChange(restore);
-    } else {
-      autoStrengthOffStored = Number(autoStrengthSlider.value);
-      showAutoStrength(AUTO_STRENGTH_MIN);
-      deps.onAutoStrengthChange(AUTO_STRENGTH_MIN);
-    }
-  }
-  wireRowKeys(autoStrengthSlider, {
-    auto: toggleAutoMaster,
-    reset: resetAutoStrength,
-    toggleOff: toggleAutoStrengthOff,
-  });
-
-  controlsCol.append(autoRow, masterCard.el, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, dock);
+  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, dock);
   root.append(columnsWrap, controlsCol);
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
@@ -5747,7 +5661,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     renderSceneSettings();
     refreshBandsSplit();
     refreshBandFaders();
-    refreshAutoStrengthDisplay();
     masterRow.sync(() => deps.getSceneMaster());
     // Whatever was rebuilt above comes in unmarked.
     applySolo();

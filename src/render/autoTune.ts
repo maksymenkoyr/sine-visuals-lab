@@ -96,11 +96,6 @@ export type AutoWeights = Partial<Record<MusicDial, number>>;
 const DIAL_EXPAND = 2.5;
 
 const STORAGE_KEY_AUTO_ON = "vibe.sceneAuto";
-const STORAGE_KEY_STRENGTH = "vibe.autoStrength";
-
-export const AUTO_STRENGTH_MIN = 0;
-export const AUTO_STRENGTH_MAX = 2;
-export const AUTO_STRENGTH_DEFAULT = 1;
 
 /** Reserved settings keys for the Sensitivity/Expansion/Smoothing pseudo-
  *  params — can't collide with a real SceneSetting.key, which must be a
@@ -247,37 +242,13 @@ function loadAutoStore(): AutoStore {
   }
 }
 
-function loadStrength(): number {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_STRENGTH);
-    const value = raw === null ? NaN : Number(raw);
-    return Number.isFinite(value) ? clampStrength(value) : AUTO_STRENGTH_DEFAULT;
-  } catch {
-    return AUTO_STRENGTH_DEFAULT;
-  }
-}
-
-function clampStrength(value: number): number {
-  if (!Number.isFinite(value)) return AUTO_STRENGTH_DEFAULT;
-  return Math.min(AUTO_STRENGTH_MAX, Math.max(AUTO_STRENGTH_MIN, value));
-}
-
 const autoOn: AutoStore = loadAutoStore();
-let strength = loadStrength();
 
 function persistAutoStore(): void {
   try {
     localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(autoOn));
   } catch {
     // Not fatal — auto/manual choices just won't persist across reloads.
-  }
-}
-
-function persistStrength(): void {
-  try {
-    localStorage.setItem(STORAGE_KEY_STRENGTH, String(strength));
-  } catch {
-    // Not fatal — see persistAutoStore.
   }
 }
 
@@ -321,15 +292,6 @@ export function isSceneAuto(sceneId: string, specs: readonly SceneSetting[]): bo
 
 export function setSceneAuto(sceneId: string, specs: readonly SceneSetting[], on: boolean): void {
   for (const s of specs) if (s.auto || s.macro) setAutoEnabled(sceneId, s.key, on);
-}
-
-export function getAutoStrength(): number {
-  return strength;
-}
-
-export function setAutoStrength(value: number): void {
-  strength = clampStrength(value);
-  persistStrength();
 }
 
 function clampToSpec(spec: SceneSetting, value: number, base = spec.default): number {
@@ -430,7 +392,9 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
   // too would square the master's effect across a macro group like Caustics'
   // Sparkle.
   const target = spec.auto
-    ? computeAutoTarget(spec, latestProfile, strength, settingDefault(sceneId, spec))
+    ? // Full scale: the device-wide Auto strength dial is gone.
+      // computeAutoTarget keeps its scale argument for the tests that probe it.
+      computeAutoTarget(spec, latestProfile, 1, settingDefault(sceneId, spec))
     : computeMacroTarget(
         spec,
         resolveUnscaled(sceneId, spec.macro!.driver),

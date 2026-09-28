@@ -22,6 +22,14 @@ describe("panel fold persistence", () => {
     expect(isFolded("rhythm")).toBe(false);
   });
 
+  it("keeps a default-folded id open once opened, and folded again once folded", () => {
+    expect(isFolded("starts-folded", true)).toBe(true);
+    setFolded("starts-folded", false, true);
+    expect(isFolded("starts-folded", true)).toBe(false);
+    setFolded("starts-folded", true, true);
+    expect(isFolded("starts-folded", true)).toBe(true);
+  });
+
   it("hides the meters column under its own id without touching a card's", () => {
     setFolded(METERS_COLUMN, true);
     expect(isFolded(METERS_COLUMN)).toBe(true);
