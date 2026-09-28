@@ -7,9 +7,12 @@ import {
   defaultInputLabel,
   resolveInputDeviceId,
   isMissingDeviceError,
+  inputKind,
+  INPUT_KIND_TEXT,
   type InputDevicePref,
   type InputDeviceOption,
 } from "./audio/inputDevice.ts";
+import { inputPreviewSupported, createInputPreview, type InputPreview } from "./audio/inputPreview.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
 import { peak } from "./audio/waveform.ts";
@@ -590,7 +593,33 @@ async function refreshInputDevices(): Promise<MediaDeviceInfo[]> {
   const devices = await listDevicesQuietly();
   inputDevices = inputDeviceOptions(devices);
   defaultInputName = defaultInputLabel(devices);
+  syncInputPreview();
   return devices;
+}
+
+/** The Source row's idle signal-preview meters (src/audio/inputPreview.ts) —
+ *  owned here, one instance for the session. `inputPreviewActive` is the
+ *  panel's own on/off (deviceMenu.ts's open()/close(), via
+ *  DeviceMenuDeps.setInputPreviewActive); on top of that this only ever runs
+ *  where inputPreviewSupported() and there's at least one pickable option to
+ *  preview (mic permission granted) — otherwise it's stopped outright rather
+ *  than left open with nothing to show. Re-synced here on every call site
+ *  that can change what it should be previewing: refreshInputDevices()
+ *  itself (a new/removed device), and attachCapture/onCaptureEnded (which
+ *  input is LIVE, and so excluded from the preview, changes independently of
+ *  the device list). */
+let inputPreview: InputPreview | null = null;
+let inputPreviewActive = false;
+
+function syncInputPreview(): void {
+  if (!inputPreviewActive || !inputPreviewSupported() || inputDevices.length === 0) {
+    inputPreview?.stop();
+    inputPreview = null;
+    return;
+  }
+  if (!inputPreview) inputPreview = createInputPreview();
+  const live = liveInputLabel();
+  inputPreview.sync(inputDevices.filter((o) => o.label !== live).map((o) => o.deviceId));
 }
 
 /** An input was plugged in or pulled. Besides refreshing the dropdown: if the
@@ -625,6 +654,12 @@ function chooseInputDevice(deviceId: string): void {
   // inputDevices — re-picking it keeps that choice, it doesn't clear it.
   const next = option ? { deviceId, label: option.label } : current?.deviceId === deviceId ? current : null;
   setInputDevicePref(next);
+  // The chosen input's kind (src/audio/inputDevice.ts's inputKind) names the
+  // start prompt's Mic button and the gallery masthead's picker — both need
+  // a fresh label the moment the choice changes, not just on their own
+  // unrelated refresh triggers.
+  refreshAudioPromptButtons();
+  gallery?.syncSource();
   if (mode === "renderer" || syntheticFeed) return;
   if (!bandAnalyser) {
     setAudioSourceChoice("mic");
@@ -684,8 +719,12 @@ function attachCapture(handle: CaptureHandle): void {
   gallery?.syncSource();
   reportUsage();
   // A first mic grant is what makes input labels readable (see
-  // refreshInputDevices) — the Source row's dropdown fills in from here.
+  // refreshInputDevices) — the Source row's device list fills in from here.
+  // refreshInputDevices() re-syncs the preview off the freshly-read device
+  // list on its own; this capture becoming live also changes which device
+  // the preview should exclude, so it needs its own re-sync too.
   void refreshInputDevices();
+  syncInputPreview();
 }
 
 /** Counts a scene actually running on live audio (src/net/usage.ts) — called
@@ -722,6 +761,7 @@ function onCaptureEnded(handle: CaptureHandle): void {
   captureFailed = false;
   updateMicPrompt();
   gallery?.syncSource();
+  syncInputPreview(); // nothing live now, so the preview can cover every device again
   if (handle.kind === "mic" && micPermission === "granted") void ensureAudio("mic");
 }
 
@@ -811,6 +851,18 @@ function swapAudioSource(next: AudioSourceChoice, restart = false): Promise<void
   return swapPromise;
 }
 
+/** "Mic"/"Line in"/"Loopback" for the CHOSEN input (getInputDevicePref) —
+ *  named after what it is rather than the generic "Mic", the same words the
+ *  Source row's own kind tag uses (src/audio/inputDevice.ts's
+ *  INPUT_KIND_TEXT). No stored choice (the system default) reads as "Mic": a
+ *  laptop's own default input almost always is one. */
+function inputChoiceLabel(): string {
+  const pref = getInputDevicePref();
+  if (!pref) return "Mic";
+  const kind = inputKind(pref.label);
+  return kind === "mic" ? "Mic" : kind === "line" ? "Line in" : "Loopback";
+}
+
 /** Shows/hides the start prompt and — since display capture's availability
  *  never changes mid-session — decides once whether it offers a Mic/Screen
  *  choice or just Mic, matching the original single-button prompt exactly
@@ -824,7 +876,7 @@ function refreshAudioPromptButtons(): void {
   audioPromptDisplayBtn.hidden = !canDisplay;
   // Set on the label span, not the button itself — the button also holds
   // .apDot, and overwriting textContent on the button would wipe it out.
-  audioPromptMicLabel.textContent = canDisplay ? "Mic" : "Tap to enable mic";
+  audioPromptMicLabel.textContent = canDisplay ? inputChoiceLabel() : "Tap to enable mic";
   audioPromptGuide.textContent = DISPLAY_SHARE_GUIDE;
   audioPromptGuide.hidden = !canDisplay;
 }
@@ -835,8 +887,15 @@ function refreshAudioPromptButtons(): void {
  *  (capture attached, ended, failed; viz entered). */
 function updateStopBtn(): void {
   stopBtn.style.display = inViz && capture && bandAnalyser ? "block" : "none";
-  // Names the thing it stops, so the label is never a guess.
-  stopBtn.textContent = capture?.kind === "display" ? "STOP SHARE" : "STOP MIC";
+  // Names the thing it stops, so the label is never a guess. The LIVE
+  // device's own label (liveInputLabel), not the stored choice — a fallback
+  // to the default while the chosen interface is unplugged should read as
+  // stopping whatever's actually listening, not the absent one. No label at
+  // all (the moment right before a track's label settles) reads as "MIC",
+  // the same neutral default inputKind's own "mic" case already is.
+  const label = liveInputLabel();
+  const kind = label ? inputKind(label) : "mic";
+  stopBtn.textContent = capture?.kind === "display" ? "STOP SHARE" : `STOP ${INPUT_KIND_TEXT[kind].tag}`;
 }
 
 function updateMicPrompt(): void {
@@ -950,20 +1009,24 @@ function wireDeviceMenu(): void {
         void ensureAudio(choice);
       } else void swapAudioSource(choice);
     },
-    // The Source row's input dropdown (src/audio/inputDevice.ts).
+    // The Source row's device list (src/audio/inputDevice.ts).
     getInputDevices: () => {
       const pref = getInputDevicePref();
       const resolved = resolveInputDeviceId(pref, inputDevices.map((o) => ({ kind: "audioinput" as const, ...o })));
       return {
         options: inputDevices,
         defaultLabel: defaultInputName,
-        chosen: pref && resolved !== "missing" && resolved.deviceId !== null ? resolved.deviceId : null,
         missing: pref && resolved === "missing" ? pref : null,
         liveLabel: liveInputLabel(),
       };
     },
     onInputDeviceChange: (deviceId) => chooseInputDevice(deviceId),
     canCaptureDisplay: () => displayCaptureSupported(),
+    getInputLevel: (deviceId) => inputPreview?.level(deviceId) ?? null,
+    setInputPreviewActive: (active) => {
+      inputPreviewActive = active;
+      syncInputPreview();
+    },
     onPickPalette: (id) => applyPalette(getPalette(id)),
     getSensitivity: (sceneId) => getSensitivity(sceneId),
     onSensitivityChange: (sceneId, value) => {
@@ -1390,6 +1453,7 @@ async function boot(): Promise<void> {
       onDisabledPick: (id, reason) => showHud(`${id}: ${reason}`, true),
       canCaptureDisplay: () => displayCaptureSupported(),
       sourceState: () => currentSourceState(),
+      micLabel: () => inputChoiceLabel(),
       onSourceChoice: (next) => {
         if (bandAnalyser) return swapAudioSource(next); // persists the pref itself, once the swap lands
         // Nothing live yet: remember the choice AND start it, inside this same

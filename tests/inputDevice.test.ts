@@ -6,6 +6,7 @@ import {
   defaultInputLabel,
   resolveInputDeviceId,
   isMissingDeviceError,
+  inputKind,
 } from "../src/audio/inputDevice.ts";
 
 type Device = Pick<MediaDeviceInfo, "kind" | "deviceId" | "label">;
@@ -90,6 +91,18 @@ describe("isMissingDeviceError", () => {
     expect(isMissingDeviceError({ name: "NotAllowedError" })).toBe(false);
     expect(isMissingDeviceError(null)).toBe(false);
     expect(isMissingDeviceError("boom")).toBe(false);
+  });
+});
+
+describe("inputKind", () => {
+  it("guesses from the device name", () => {
+    expect(inputKind("MacBook Pro Microphone")).toBe("mic");
+    expect(inputKind("USB Audio CODEC")).toBe("line");
+    expect(inputKind("Scarlett Solo USB")).toBe("line");
+    expect(inputKind("DJM-450")).toBe("line");
+    expect(inputKind("BlackHole 2ch")).toBe("loopback");
+    expect(inputKind("Stereo Mix (Realtek)")).toBe("loopback");
+    expect(inputKind("AirPods Pro")).toBe("mic");
   });
 });
 

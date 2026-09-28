@@ -90,7 +90,7 @@ import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
-import type { InputDeviceOption, InputDevicePref } from "../audio/inputDevice.ts";
+import { inputKind, INPUT_KIND_TEXT, type InputDeviceOption, type InputDevicePref, type InputKind } from "../audio/inputDevice.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -385,17 +385,17 @@ export interface MenuItem {
 
 export type AudioSource = "mic" | "display" | "remote" | "synthetic" | "none";
 
-/** What the Source row's input dropdown shows — see DeviceMenuDeps.getInputDevices. */
+/** What the Source row's device list shows — see DeviceMenuDeps.getInputDevices. */
 export interface InputDevicesState {
   /** Pickable inputs; empty until the mic permission's first grant, which
-   *  hides the dropdown (there's nothing nameable to choose between yet). */
+   *  shows a single "Microphone" placeholder row instead (there's nothing
+   *  nameable to choose between yet). */
   options: InputDeviceOption[];
-  /** The OS default's device name, for the "System default (…)" entry. */
+  /** The OS default's device name — its own row gets a "System default"
+   *  sub-line. */
   defaultLabel: string | null;
-  /** The chosen input's id among `options`; null = the system default. */
-  chosen: string | null;
-  /** A chosen input that isn't plugged in — listed as "not connected" so the
-   *  dropdown still says what was picked while the default fills in. */
+  /** A chosen input that isn't plugged in — its own dashed "not connected"
+   *  row, so the list still says what was picked while the default fills in. */
   missing: InputDevicePref | null;
   /** The device the live mic is actually hearing, or null. */
   liveLabel: string | null;
@@ -424,16 +424,26 @@ export interface DeviceMenuDeps {
    *  card's `lufs` frame field. */
   getSourceState: () => SourceState | null;
   onAudioSourceChange: (choice: AudioSourceChoice) => void;
-  /** The Source row's input dropdown — which device the Mic source opens
+  /** The Source row's device list — which device the Mic source opens
    *  (src/audio/inputDevice.ts). Read on the row's own refresh timer, so
    *  src/app.ts answers from a cache, never a fresh enumerateDevices(). */
   getInputDevices: () => InputDevicesState;
-  /** A pick from that dropdown — "" is the system default. src/app.ts also
-   *  switches to it (see its chooseInputDevice). */
+  /** A pick from that list. src/app.ts also switches to it (see its
+   *  chooseInputDevice). */
   onInputDeviceChange: (deviceId: string) => void;
   /** Whether this browser can offer the Screen option at all — see
    *  sourcePref.ts's header for the exact browser/OS matrix. */
   canCaptureDisplay: () => boolean;
+  /** 0..1 signal-preview level for a device that ISN'T the live one, or null
+   *  wherever its preview isn't open (src/audio/inputPreview.ts — an
+   *  unsupported browser, or it just hasn't opened yet). The live row uses
+   *  this tick's FeatureFrame.level instead (handed to DeviceMenu.update()),
+   *  not this — see createSourceRow's updateMeters. */
+  getInputLevel: (deviceId: string) => number | null;
+  /** Whether the Source row's idle meters should be running at all — true
+   *  only while the panel is open; see inputPreview.ts's header for why it's
+   *  gated further (browser support, whether there's anything to preview). */
+  setInputPreviewActive: (active: boolean) => void;
   getSensitivity: (sceneId: string) => number;
   onSensitivityChange: (sceneId: string, value: number) => void;
   getExpansion: (sceneId: string) => number;
@@ -4333,34 +4343,87 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     syncSilenceGateRows();
   }
 
-  // Source: mic vs. captured screen/tab audio (src/audio/sourcePref.ts). Not
-  // gain-mapped like the rows below, so it's not built through
-  // createControlRow — a label plus a chip group where a slider would sit,
-  // same pattern as powerCard.ts's Energy-saving row (its chips are outside
-  // the Tab ring for the same reason: cycling through settings numbers, not
-  // switching device, is what Tab is for). Sits first in the card, above
-  // Auto-gain, since it decides what everything below is even listening to.
-  // Deliberately left out of this card's Reset chip below, same as
-  // Auto-gain and the Silence gate rows further down — that chip resets
-  // per-scene taste, not a device-wide input choice — and out of inputRows,
-  // since it has no Auto behavior to wire through that array's shared call
-  // sites.
-  const sourceListStyle = `display: flex; gap: 4px; margin-top: 4px;`;
-  const sourceChipStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px;`;
+  // Source: one list of every pickable input, plus Screen at the bottom
+  // (src/audio/sourcePref.ts for mic-vs-display, src/audio/inputDevice.ts for
+  // which device Mic opens). Not gain-mapped like the rows below, so it's not
+  // built through createControlRow — a label plus a list of rows where a
+  // slider would sit. Sits first in the card, above Auto-gain, since it
+  // decides what everything below is even listening to. Deliberately left
+  // out of this card's Reset chip below, same as Auto-gain and the Silence
+  // gate rows further down — that chip resets per-scene taste, not a
+  // device-wide input choice — and out of inputRows, since it has no Auto
+  // behavior to wire through that array's shared call sites.
+  //
+  // CRITICAL: refresh() runs on the panel's own ~10Hz timer (this file's own
+  // update()) — rebuilding the row list's DOM there breaks a click in
+  // progress (pointerdown lands on one node, pointerup on its replacement,
+  // and the browser never fires "click" across that gap). buildRows() below
+  // is called only when a structure key says the actual set of rows changed
+  // (which options exist, the missing device, the default label, whether
+  // Screen is offered); every other refresh() call updates the existing
+  // nodes' classes/text in place, same as this file's other polled rows.
+  const sourceListStyle = `display: flex; flex-direction: column; gap: 4px; margin-top: 4px;`;
+  // One row: [dot or glyph] [name + optional dim sub-line] [meter] [kind tag].
+  // Shared by a real device, the "not connected" placeholder, the
+  // pre-permission "Microphone" placeholder, and the Screen row.
+  const sourceRowStyle = `
+    display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center;
+    width: 100%; box-sizing: border-box; text-align: left; cursor: pointer;
+    background: transparent; color: rgba(255,255,255,0.75);
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 4px; padding: 7px 8px;
+    font: 400 12.5px/1.25 ${FONT_LABEL};
+  `;
   // Live = green border + green tint, the same INPUT_GREEN language as the
   // gallery masthead's .gal-src[data-state="live"] and this row's own accent
   // (--vc-accent, set below) — echoing "listening now" in the same colour on
-  // both surfaces rather than the generic white "lit" chip look every other
-  // enum picker in this panel uses.
-  const sourceChipLiveStyle = `${chipBtnStyle} flex: 1; text-align: center; padding-top: 4px; padding-bottom: 4px; border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; color: #fff;`;
-  // The chip's status dot — same status-light idiom as the gallery's
-  // .gal-src-dot, one small element whose border/fill swaps with the same
-  // two states as the chip itself (idle/live) in refresh() below.
-  const sourceDotStyle = `display: inline-block; width: 6px; height: 6px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.45); box-sizing: border-box; margin-right: 6px; vertical-align: middle;`;
-  const sourceDotLiveStyle = `${sourceDotStyle} background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN};`;
-  // The input dropdown under the chips — the chips' own border/radius/type,
-  // full width, dark enough that the OS's native option list stays legible.
-  const inputSelectStyle = `display: block; width: 100%; box-sizing: border-box; margin-top: 6px; font: 400 11px/1.3 ${FONT_MONO}; color: rgba(255,255,255,0.8); background: #111; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px; padding: 4px 6px; cursor: pointer; text-overflow: ellipsis;`;
+  // both surfaces rather than a generic "lit" look.
+  const sourceRowLiveStyle = `${sourceRowStyle} border-color: ${withAlpha(INPUT_GREEN, 0.7)}; background: ${withAlpha(INPUT_GREEN, 0.12)}; color: #fff;`;
+  // Dashed = not a real, present option right now — the missing device and
+  // the Screen row (a share, not a device, always reads this way) both use it.
+  const sourceRowDashedStyle = `${sourceRowStyle} border-style: dashed; border-color: rgba(255,255,255,0.22); color: rgba(255,255,255,0.55);`;
+  const sourceRowDotStyle = `width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.45); box-sizing: border-box;`;
+  const sourceRowDotLiveStyle = `${sourceRowDotStyle} background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN};`;
+  const sourceRowNameWrapStyle = `min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;`;
+  const sourceRowSubStyle = `display: block; font: 400 10.5px/1.3 ${FONT_MONO}; color: rgba(255,255,255,0.45);`;
+  // The missing row's own sub-line ("not connected") reads as a warning, not
+  // just a description — same amber this file uses for any other "pay
+  // attention" text (BANDS_AMBER).
+  const sourceRowSubWarnStyle = `${sourceRowSubStyle} color: ${BANDS_AMBER};`;
+  const sourceRowRightStyle = `display: flex; align-items: center; gap: 8px; flex-shrink: 0;`;
+  // Kind tag: what the browser's device name sounds like (inputDevice.ts's
+  // inputKind) — neutral for a mic, INPUT_GREEN for a line input (this
+  // file's own accent for "the input actually carrying signal"), a cool
+  // violet-blue for a loopback driver so it reads as clearly different from
+  // both.
+  const sourceTagStyle = `
+    font: 400 9px/1 ${FONT_MONO}; letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 3px 5px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.22);
+    color: rgba(255,255,255,0.6); white-space: nowrap; flex-shrink: 0;
+  `;
+  const sourceTagLineStyle = `${sourceTagStyle} border-color: ${withAlpha(INPUT_GREEN, 0.45)}; color: ${INPUT_GREEN};`;
+  const sourceTagLoopbackStyle = `${sourceTagStyle} border-color: rgba(150,170,255,0.45); color: #a9b6ff;`;
+  const SOURCE_TAG_STYLE: Record<InputKind, string> = {
+    mic: sourceTagStyle,
+    line: sourceTagLineStyle,
+    loopback: sourceTagLoopbackStyle,
+  };
+  // 12-segment level meter, reused for the live row (green, taller) and an
+  // idle row's signal preview (grey, shorter — see inputPreview.ts). Segment
+  // nodes are fixed once built; only their own style is ever touched, on
+  // every rAF tick while the panel's open (this file's own update(), not
+  // this row's slower structural refresh() — see the CRITICAL note above).
+  const SOURCE_METER_SEGMENTS = 12;
+  const sourceMeterStyle = (tall: boolean) =>
+    `display: inline-grid; grid-template-columns: repeat(${SOURCE_METER_SEGMENTS}, 3px); gap: 1.5px; height: ${tall ? 9 : 7}px; align-items: stretch; flex-shrink: 0;`;
+  const sourceMeterSegLiveOnStyle = `background: ${INPUT_GREEN}; border-radius: 1px;`;
+  const sourceMeterSegLiveOffStyle = `background: rgba(255,255,255,0.12); border-radius: 1px;`;
+  const sourceMeterSegIdleOnStyle = `background: rgba(255,255,255,0.35); border-radius: 1px;`;
+  const sourceMeterSegIdleOffStyle = `background: rgba(255,255,255,0.08); border-radius: 1px;`;
+  // The small caption over the Screen row — set apart from the device list
+  // above it (a share isn't a device this computer has), same mono/uppercase
+  // idiom as driveEyebrowStyle elsewhere in this file, dimmer since it's not
+  // a card-level label.
+  const sourceScreenCaptionStyle = `margin-top: 10px; font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.35);`;
   // Always visible while Screen is the active source, not a .vc-hint: the hint
   // only reveals on hover/focus, and on touch that means after the tap that
   // already opened the picker — too late to be a guide. Same reasoning as
@@ -4369,21 +4432,115 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Same always-on reasoning as sourceGuideStyle just above — the status line
   // built from this state (refresh() below) is the row's answer to "which
   // one is picked and is it actually listening", so it can't be hover-gated
-  // either. Per-option description now lives only in the chip's title
-  // tooltip (SOURCE_OPTIONS.title) rather than duplicated here. No inline
-  // color: the .vc-src-status class (controlsTheme.ts) owns it instead, so
-  // its [data-prompting] shimmer override — set in refresh() below — can
-  // actually win; an inline color here would beat any class rule regardless
-  // of specificity.
+  // either. No inline color: the .vc-src-status class (controlsTheme.ts) owns
+  // it instead, so its [data-prompting] shimmer override — set in refresh()
+  // below — can actually win; an inline color here would beat any class rule
+  // regardless of specificity.
   const sourceStatusStyle = `margin-top: 6px; font: 400 11px/1.45 ${FONT_LABEL};`;
-  const SOURCE_OPTIONS: { choice: AudioSourceChoice; text: string; title: string }[] = [
-    { choice: "mic", text: "Mic", title: "The room's microphone" },
-    {
-      choice: "display",
-      text: "Screen",
-      title: "A shared screen or tab's audio — cleaner than the room mic",
-    },
-  ];
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  // A small monitor glyph in place of a device row's dot — Screen isn't a
+  // device this computer has, so it gets its own icon rather than borrowing
+  // the dot language real inputs use.
+  function buildScreenGlyph(): SVGSVGElement {
+    const svg = document.createElementNS(SVG_NS, "svg") as SVGSVGElement;
+    svg.setAttribute("width", "14");
+    svg.setAttribute("height", "11");
+    svg.setAttribute("viewBox", "0 0 14 11");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.2");
+    svg.style.flexShrink = "0";
+    const rect = document.createElementNS(SVG_NS, "rect");
+    rect.setAttribute("x", "0.6");
+    rect.setAttribute("y", "0.6");
+    rect.setAttribute("width", "12.8");
+    rect.setAttribute("height", "8");
+    rect.setAttribute("rx", "1");
+    const stand = document.createElementNS(SVG_NS, "line");
+    stand.setAttribute("x1", "7");
+    stand.setAttribute("y1", "8.6");
+    stand.setAttribute("x2", "7");
+    stand.setAttribute("y2", "10.4");
+    const base = document.createElementNS(SVG_NS, "line");
+    base.setAttribute("x1", "4.3");
+    base.setAttribute("y1", "10.4");
+    base.setAttribute("x2", "9.7");
+    base.setAttribute("y2", "10.4");
+    svg.append(rect, stand, base);
+    return svg;
+  }
+
+  // One row's live nodes, built once and reused across refresh()es that
+  // don't change the row list itself — see the CRITICAL note above.
+  interface SourceRowHandle {
+    btn: HTMLButtonElement;
+    dot: HTMLSpanElement | null;
+    glyph: SVGSVGElement | null;
+    name: HTMLSpanElement;
+    sub: HTMLSpanElement;
+    meter: HTMLSpanElement;
+    segments: HTMLSpanElement[];
+    tag: HTMLSpanElement | null;
+    /** null for the Screen row and the pre-permission placeholder — nothing
+     *  to hand onInputDeviceChange. */
+    deviceId: string | null;
+    isScreen: boolean;
+    /** The chosen-but-absent device's own row — dashed, fixed "not
+     *  connected" sub-line, never the live row's default-label/loopback text. */
+    isMissing: boolean;
+    isLive: boolean; // set by refresh(), read by the per-tick meter update
+  }
+
+  function buildRow(kind: "device" | "screen"): SourceRowHandle {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    let dot: HTMLSpanElement | null = null;
+    let glyph: SVGSVGElement | null = null;
+    if (kind === "screen") {
+      glyph = buildScreenGlyph();
+    } else {
+      dot = document.createElement("span");
+      dot.style.cssText = sourceRowDotStyle;
+    }
+    const nameWrap = document.createElement("span");
+    nameWrap.style.cssText = sourceRowNameWrapStyle;
+    const name = document.createElement("span");
+    const sub = document.createElement("span");
+    sub.style.cssText = sourceRowSubStyle;
+    nameWrap.append(name, sub);
+    const right = document.createElement("span");
+    right.style.cssText = sourceRowRightStyle;
+    const meter = document.createElement("span");
+    const segments: HTMLSpanElement[] = [];
+    for (let i = 0; i < SOURCE_METER_SEGMENTS; i++) {
+      const seg = document.createElement("span");
+      meter.appendChild(seg);
+      segments.push(seg);
+    }
+    right.appendChild(meter);
+    let tag: HTMLSpanElement | null = null;
+    if (kind === "device") {
+      tag = document.createElement("span");
+      right.appendChild(tag);
+    }
+    btn.append(dot ?? glyph!, nameWrap, right);
+    return {
+      btn,
+      dot,
+      glyph,
+      name,
+      sub,
+      meter,
+      segments,
+      tag,
+      deviceId: null,
+      isScreen: kind === "screen",
+      isMissing: false,
+      isLive: false,
+    };
+  }
+
   function createSourceRow() {
     const el = document.createElement("div");
     el.className = "vc-row";
@@ -4399,63 +4556,102 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
     const list = document.createElement("div");
     list.style.cssText = sourceListStyle;
-    const buttons = SOURCE_OPTIONS.map((opt) => {
-      const btn = document.createElement("button");
-      btn.title = opt.title;
-      btn.style.cssText = sourceChipStyle;
-      const dot = document.createElement("span");
-      dot.style.cssText = sourceDotStyle;
-      btn.append(dot, document.createTextNode(opt.text));
-      btn.addEventListener("click", () => deps.onAudioSourceChange(opt.choice));
-      return { choice: opt.choice, btn, dot };
-    });
-    list.append(...buttons.map((b) => b.btn));
+    const caption = document.createElement("div");
+    caption.style.cssText = sourceScreenCaptionStyle;
+    caption.textContent = "OR SHARE A TAB / SCREEN";
 
     const guide = document.createElement("div");
     guide.style.cssText = sourceGuideStyle;
     guide.textContent = DISPLAY_SHARE_GUIDE;
 
-    // Which device the Mic source opens — a native <select>, so a phone gets
-    // its own picker sheet and a long device name never has to fit a chip.
-    // Picking one also switches to it (app.ts's chooseInputDevice), which is
-    // why it stays visible under Screen too: it's the way back to a
-    // particular input, not a setting of the Mic chip alone.
-    const inputSelect = document.createElement("select");
-    inputSelect.title = "Which input Mic listens to — e.g. a USB audio interface fed from the mixer";
-    inputSelect.setAttribute("aria-label", "Audio input");
-    inputSelect.style.cssText = inputSelectStyle;
-    inputSelect.addEventListener("change", () => deps.onInputDeviceChange(inputSelect.value));
-    // Rebuilt only when what it lists changes: refresh() runs on a timer, and
-    // replacing the options under an open native picker would close it.
-    let inputSelectKey = "";
-
     const status = document.createElement("div");
     status.className = "vc-src-status";
     status.style.cssText = sourceStatusStyle;
 
-    el.append(head, list, inputSelect, guide, status);
+    el.append(head, list, guide, status);
 
-    function refreshInputSelect(): string | null {
+    // The pre-permission placeholder is its own row, not a device row: it
+    // has no deviceId, no kind tag, and starts the mic instead of switching
+    // input — one tap grants the permission that fills the real list in.
+    function buildPermissionRow(): SourceRowHandle {
+      const row = buildRow("device");
+      row.name.textContent = "Microphone";
+      row.sub.textContent = "allow access to list every input";
+      row.btn.title = "Listen with this device's microphone";
+      row.btn.addEventListener("click", () => deps.onAudioSourceChange("mic"));
+      return row;
+    }
+
+    function buildDeviceRow(deviceId: string, label: string): SourceRowHandle {
+      const row = buildRow("device");
+      row.name.textContent = label;
+      row.deviceId = deviceId;
+      const kind = inputKind(label);
+      row.btn.title = INPUT_KIND_TEXT[kind].title;
+      row.tag!.textContent = INPUT_KIND_TEXT[kind].tag;
+      row.tag!.style.cssText = SOURCE_TAG_STYLE[kind];
+      row.btn.addEventListener("click", () => {
+        if (row.isLive) return;
+        deps.onInputDeviceChange(deviceId);
+      });
+      return row;
+    }
+
+    function buildMissingRow(pref: InputDevicePref): SourceRowHandle {
+      const row = buildRow("device");
+      row.name.textContent = pref.label;
+      row.deviceId = pref.deviceId;
+      row.isMissing = true;
+      row.sub.style.cssText = sourceRowSubWarnStyle;
+      row.sub.textContent = "not connected";
+      const kind = inputKind(pref.label);
+      row.btn.title = INPUT_KIND_TEXT[kind].title;
+      row.tag!.textContent = INPUT_KIND_TEXT[kind].tag;
+      row.tag!.style.cssText = SOURCE_TAG_STYLE[kind];
+      row.btn.addEventListener("click", () => deps.onInputDeviceChange(pref.deviceId));
+      return row;
+    }
+
+    function buildScreenRow(): SourceRowHandle {
+      const row = buildRow("screen");
+      row.name.textContent = "Screen share";
+      row.sub.textContent = "Chrome asks which tab or screen";
+      row.btn.title = "Share screen audio";
+      row.btn.addEventListener("click", () => deps.onAudioSourceChange("display"));
+      return row;
+    }
+
+    let rows: SourceRowHandle[] = [];
+    let structureKey = "";
+
+    // Rebuilds the row list only when what it should contain changed — see
+    // the CRITICAL note above buildRow for why a rebuild on every refresh()
+    // would eat clicks. Returns the live device's label, same contract
+    // refreshInputSelect used to have.
+    function syncRowList(): string | null {
       const devices = deps.getInputDevices();
-      inputSelect.style.display = devices.options.length === 0 ? "none" : "";
-      const entries: { value: string; text: string }[] = [
-        { value: "", text: devices.defaultLabel ? `System default (${devices.defaultLabel})` : "System default" },
-        ...devices.options.map((o) => ({ value: o.deviceId, text: o.label })),
-      ];
-      if (devices.missing) entries.push({ value: devices.missing.deviceId, text: `${devices.missing.label} — not connected` });
-      const selected = devices.missing ? devices.missing.deviceId : (devices.chosen ?? "");
-      const key = JSON.stringify([entries, selected]);
-      if (key !== inputSelectKey && document.activeElement !== inputSelect) {
-        inputSelectKey = key;
-        inputSelect.replaceChildren(
-          ...entries.map((e) => {
-            const opt = document.createElement("option");
-            opt.value = e.value;
-            opt.textContent = e.text;
-            opt.selected = e.value === selected;
-            return opt;
-          }),
-        );
+      const canDisplay = deps.canCaptureDisplay();
+      const key = JSON.stringify([devices.options, devices.missing, devices.defaultLabel, canDisplay]);
+      if (key !== structureKey) {
+        structureKey = key;
+        const next: SourceRowHandle[] = [];
+        if (devices.options.length === 0) {
+          next.push(buildPermissionRow());
+        } else {
+          for (const o of devices.options) next.push(buildDeviceRow(o.deviceId, o.label));
+          if (devices.missing) next.push(buildMissingRow(devices.missing));
+        }
+        if (canDisplay) next.push(buildScreenRow());
+        rows = next;
+        // The caption sits directly above the Screen row, whatever came
+        // before it (real devices, the missing placeholder, or the
+        // pre-permission row) — it's what marks Screen as not one of them.
+        const children: Node[] = [];
+        for (const row of rows) {
+          if (row.isScreen) children.push(caption);
+          children.push(row.btn);
+        }
+        list.replaceChildren(...children);
       }
       return devices.liveLabel;
     }
@@ -4466,26 +4662,61 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         const state = deps.getSourceState();
         el.style.display = state === null ? "none" : "";
         if (state === null) return;
-        const liveLabel = refreshInputSelect();
-        const canDisplay = deps.canCaptureDisplay();
-        for (const { choice: c, btn, dot } of buttons) {
-          // Live is the only state a chip ever paints — a stored preference
-          // or a granted mic permission never highlights a chip on its own
-          // (see SourceState's doc comment in sourcePref.ts).
-          const isLive = c === state.choice && state.live;
-          btn.style.cssText = isLive ? sourceChipLiveStyle : sourceChipStyle;
-          dot.style.cssText = isLive ? sourceDotLiveStyle : sourceDotStyle;
-          btn.hidden = c === "display" && !canDisplay;
+        const liveLabel = syncRowList();
+        const devices = deps.getInputDevices();
+        for (const row of rows) {
+          const isLive =
+            state.live &&
+            (row.isScreen ? state.choice === "display" : state.choice === "mic" && row.name.textContent === liveLabel);
+          row.isLive = isLive;
+          // The missing row's own sub-line ("not connected") and the
+          // pre-permission placeholder's ("allow access to list every
+          // input") are fixed at build time and never touched here — only a
+          // real, present device row's sub-line depends on live/default/kind
+          // state that can change without the row list itself being rebuilt.
+          if (!row.isScreen && !row.isMissing && row.deviceId !== null) {
+            row.sub.textContent =
+              isLive && devices.missing
+                ? "filling in until it's back"
+                : row.name.textContent === devices.defaultLabel
+                  ? "System default"
+                  : inputKind(row.name.textContent ?? "") === "loopback"
+                    ? "this computer's own sound"
+                    : "";
+            row.sub.style.display = row.sub.textContent ? "" : "none";
+          }
+          row.btn.style.cssText = isLive ? sourceRowLiveStyle : row.isMissing || row.isScreen ? sourceRowDashedStyle : sourceRowStyle;
+          if (row.dot) row.dot.style.cssText = isLive ? sourceRowDotLiveStyle : sourceRowDotStyle;
+          if (row.glyph) row.glyph.style.color = isLive ? INPUT_GREEN : "rgba(255,255,255,0.55)";
         }
         guide.style.display = state.choice === "display" ? "" : "none";
         // See .vc-src-status[data-prompting] (controlsTheme.ts) for the
         // shimmer this drives while nothing's live yet.
         status.toggleAttribute("data-prompting", !state.live);
-        const name = SOURCE_OPTIONS.find((o) => o.choice === state.choice)?.text ?? "";
-        // Names the device a live mic actually opened, so a fallback to the
-        // default (the chosen interface unplugged) reads as exactly that.
-        const device = state.live && state.choice === "mic" && liveLabel ? ` to ${liveLabel}` : "";
-        status.textContent = state.live ? `${name} — listening${device}` : "Pick a source above";
+        status.textContent = !state.live
+          ? "Pick a source above"
+          : state.choice === "display"
+            ? "Listening to screen share"
+            : `Listening to ${liveLabel ?? "the microphone"}`;
+      },
+      // Meter segments only — called every rAF tick while the panel's open
+      // (this file's own update(), unthrottled like the Bands strip), so the
+      // live meter tracks frame.level as closely as the rest of the panel's
+      // live meters. `liveLevel` is this tick's FeatureFrame.level; idle rows
+      // read deps.getInputLevel(id) instead (src/audio/inputPreview.ts),
+      // null wherever that device's preview isn't open (unsupported browser,
+      // or it just hasn't opened yet) — its meter keeps its slot but shows
+      // no lit segments.
+      updateMeters(liveLevel: number | null): void {
+        for (const row of rows) {
+          const level = row.isLive ? Math.min(1, Math.max(0, liveLevel ?? 0)) : row.deviceId ? deps.getInputLevel(row.deviceId) : null;
+          row.meter.style.cssText = sourceMeterStyle(row.isLive);
+          row.meter.style.visibility = level === null ? "hidden" : "visible";
+          const lit = level === null ? 0 : Math.round(level * SOURCE_METER_SEGMENTS);
+          const onStyle = row.isLive ? sourceMeterSegLiveOnStyle : sourceMeterSegIdleOnStyle;
+          const offStyle = row.isLive ? sourceMeterSegLiveOffStyle : sourceMeterSegIdleOffStyle;
+          for (let i = 0; i < row.segments.length; i++) row.segments[i].style.cssText = i < lit ? onStyle : offStyle;
+        }
       },
     };
   }
@@ -5742,6 +5973,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     document.addEventListener("keydown", onKeyDown);
     refreshCableVisibility();
     scheduleCableRecompute();
+    // The Source row's idle signal-preview meters (inputPreview.ts) only run
+    // while there's a row list open to show them on.
+    deps.setInputPreviewActive(true);
   }
 
   function close() {
@@ -5754,6 +5988,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshCableVisibility();
     toastEl.classList.remove("vc-toast-show");
     positionSoloEye();
+    deps.setInputPreviewActive(false);
   }
 
   // Cache of the last --wash value written, so update() (called every rAF
@@ -5804,6 +6039,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // rebuilds anything on the rare tick this fires.
       if (pinned && pinned.sceneId !== deps.currentSceneId()) togglePin(pinned.sceneId, pinned.spec);
       audioMeters.update(frame, anim, mono, rawBands, rateScale, fixedEnergy, lufs, beatDiag, gate);
+      // Unthrottled, same reasoning as the Bands strip a few lines below —
+      // the live row's meter should track frame.level as closely as any
+      // other live meter in this panel, not just at the row list's own
+      // AUTO_UI_REFRESH_MS structural-refresh cadence.
+      sourceRow.updateMeters(frame?.level ?? null);
       // The cable layer's own per-tick flow (dashoffset only, no reads —
       // see cableLayer.ts's header) and the Bands card's own level rows;
       // both need a live dtSec and the freshest anim/drives this tick.

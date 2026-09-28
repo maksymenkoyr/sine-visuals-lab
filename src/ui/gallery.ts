@@ -44,6 +44,12 @@ export interface GalleryDeps {
    *  SourceState's doc comment in sourcePref.ts). Same signal drives the
    *  Input card's Source row (src/ui/deviceMenu.ts's createSourceRow). */
   sourceState: () => SourceState;
+  /** "Mic"/"Line in"/"Loopback" for the currently CHOSEN input
+   *  (src/audio/inputDevice.ts's inputKind over getInputDevicePref) — names
+   *  the Mic button's own name (not its hint line), the same word the Input
+   *  card's Source row and the start prompt use for it (src/app.ts's
+   *  inputChoiceLabel). */
+  micLabel: () => string;
   /** Fired inside the picker's click, so starting — or live-swapping to —
    *  screen capture still has its user gesture: a click here starts listening
    *  at once, it doesn't wait for a tile. Resolves once the choice has settled (a cancelled
@@ -376,7 +382,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
     sourceRow.setAttribute("aria-label", "Sound source");
   }
   const LIVE_LABEL = "LISTENING";
-  const sourceButtons = new Map<AudioSourceChoice, { btn: HTMLButtonElement; hintEl: HTMLElement; descriptor: string }>();
+  const sourceButtons = new Map<AudioSourceChoice, { btn: HTMLButtonElement; nameEl: HTMLElement; hintEl: HTMLElement; descriptor: string }>();
   // Only where there's an actual choice to nudge toward — the solo path (no
   // display capture) has nothing to pick between, so it keeps just the plain
   // label, same as before this hint existed.
@@ -398,6 +404,12 @@ export function createGallery(deps: GalleryDeps): Gallery {
       entry.btn.dataset.state = uiState;
       if (canChoose) entry.btn.setAttribute("aria-checked", String(uiState === "live"));
       entry.hintEl.textContent = uiState === "live" ? LIVE_LABEL : entry.descriptor;
+      // The Mic button's own name is the CHOSEN input's kind ("Mic"/"Line
+      // in"/"Loopback" — src/audio/inputDevice.ts), not a fixed "Microphone":
+      // a picked USB interface or loopback driver should read as what it is
+      // here too, the same word the Input card's Source row and the start
+      // prompt use (see deps.micLabel's own doc comment).
+      if (choice === "mic") entry.nameEl.textContent = deps.micLabel();
     }
     if (sourceHint) {
       // Both children live in .gal-source-slot's one grid cell — see that
@@ -414,7 +426,8 @@ export function createGallery(deps: GalleryDeps): Gallery {
     if (title) btn.title = title;
     const hintEl = el("div", "gal-src-hint", descriptor);
     const text = el("div", "");
-    text.append(el("div", "gal-src-name", name), hintEl);
+    const nameEl = el("div", "gal-src-name", name);
+    text.append(nameEl, hintEl);
     btn.append(el("div", "gal-src-dot"), text);
     if (canChoose) {
       btn.setAttribute("role", "radio");
@@ -423,9 +436,11 @@ export function createGallery(deps: GalleryDeps): Gallery {
       btn.dataset.solo = "";
       btn.tabIndex = -1;
     }
-    sourceButtons.set(choice, { btn, hintEl, descriptor });
+    sourceButtons.set(choice, { btn, nameEl, hintEl, descriptor });
     sourceRow.appendChild(btn);
   };
+  // "Microphone" is only the initial paint — refreshSource() below repaints
+  // it as the chosen input's own kind on every call, deps.micLabel() first.
   addSource("mic", "Microphone", "ROOM AUDIO");
   if (canChoose) addSource("display", "Share a tab", "CLEANER SIGNAL", DISPLAY_SHARE_GUIDE);
   sourceSlot.appendChild(sourceLabel);
