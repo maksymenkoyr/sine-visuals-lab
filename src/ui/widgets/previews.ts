@@ -1,4 +1,4 @@
-import { STRAINS, DEPOSIT, resolveStrainEffective, type StrainRawValues, type StrainDriveValues } from "../../render/scenes/physarum2.ts";
+import { STRAINS, DEPOSIT, NUTRIENT_REST, resolveStrainEffective, type StrainRawValues, type StrainDriveValues } from "../../render/scenes/physarum2.ts";
 import type { StrainPreviewMotion, PairCultureInputs } from "../../render/scenes/physarum2Preview.ts";
 import { smellWeight } from "../../render/scenes/physarum2Affinity.ts";
 import type { SceneSetting } from "../../render/sceneSettings.ts";
@@ -104,16 +104,17 @@ registerPreviewSource("physarum2", {
     // way the dish does. ctx.driveValue, the fallback when the scene isn't
     // reporting, reads 0 while a control is still on "Scene" (see
     // WidgetCtx.driveValue's own doc comment), which left every preview
-    // running without the music.
+    // running without the music. Nutrient's fallback passes its own rest
+    // (NUTRIENT_REST's doc): unplugged, its neutral isn't 0.
     const live = ctx.probe();
-    const dv = (p: StrainParam): number => {
+    const dv = (p: StrainParam, rest = 0): number => {
       const v = live?.[`drive_${p}${k}`];
       if (typeof v === "number") return v;
       const spec = specs[p];
-      return spec ? ctx.driveValue(spec) : 0;
+      return spec ? ctx.driveValue(spec, rest) : rest;
     };
     const drive: StrainDriveValues = {
-      nutrient: dv("nutrient"),
+      nutrient: dv("nutrient", NUTRIENT_REST),
       excite: dv("excite"),
       sensor: dv("sensor"),
       turn: dv("turn"),

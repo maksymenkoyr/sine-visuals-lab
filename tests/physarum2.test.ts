@@ -30,6 +30,8 @@ import {
   coverUvJs,
   uncoverUvJs,
   screenToFieldUv,
+  STRAIN_BAND_SIGNALS,
+  NUTRIENT_REST,
   type StrainRawValues,
   type StrainDriveValues,
 } from "../src/render/scenes/physarum2.ts";
@@ -222,6 +224,16 @@ describe("per-strain settings", () => {
     }
   });
 
+  it("sensor/turn/stride/stain each default to their own strain's band (STRAIN_BAND_SIGNALS), same as Nutrient's own Scene composite", () => {
+    for (let k = 0; k < SPECIES_COUNT; k++) {
+      for (const param of ["sensor", "turn", "stride", "stain"] as const) {
+        expect(settings.find((s) => s.key === `${param}${k}`)!.drive?.default, `${param}${k}`).toBe(STRAIN_BAND_SIGNALS[k]);
+      }
+      expect(settings.find((s) => s.key === `nutrient${k}`)!.drive?.default, `nutrient${k}`).toBe("scene");
+      expect(settings.find((s) => s.key === `nutrient${k}`)!.drive?.sceneSources, `nutrient${k}.sceneSources`).toEqual([STRAIN_BAND_SIGNALS[k]]);
+    }
+  });
+
   it("stain defaults to 0 for every strain (Stain's own colour, unshifted)", () => {
     for (let k = 0; k < SPECIES_COUNT; k++) {
       expect(settings.find((s) => s.key === `stain${k}`)!.default).toBe(0);
@@ -387,6 +399,15 @@ describe("resolveStrainEffective — the one strain-motion mapping (shared by th
     const raw: StrainRawValues = { ...zeroRaw, stain: 0.2 };
     const eff = resolveStrainEffective(0, raw, zeroDrive);
     expect(eff.color).not.toEqual(STRAINS[0]!.color);
+  });
+
+  it("with drive.nutrient at NUTRIENT_REST, feed is exactly 1 regardless of the raw slider (an unplugged Nutrient jack doesn't run the slider backwards)", () => {
+    for (const nutrient of [0, 0.6, 1]) {
+      const raw: StrainRawValues = { ...zeroRaw, nutrient };
+      const drive: StrainDriveValues = { ...zeroDrive, nutrient: NUTRIENT_REST };
+      const eff = resolveStrainEffective(0, raw, drive);
+      expect(eff.feed).toBeCloseTo(1, 9);
+    }
   });
 });
 

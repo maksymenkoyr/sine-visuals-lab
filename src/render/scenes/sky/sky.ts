@@ -35,16 +35,22 @@ import {
 // folding them into one module with the slot count as a parameter is an
 // open follow-up. This scene runs
 // it in MIRROR_OFF mode only — full screen, no kaleidoscope fold — the one
-// path that needs no adaptation. Cloud drift is deliberately NOT
-// audio-reactive at a Scene default: DRIFTER_SEEDS.length slow, gently
+// path that needs no adaptation. Cloud drift's own clock is deliberately
+// NOT audio-reactive: DRIFTER_SEEDS.length slow, gently
 // meandering ambient splats (driftCenter, a real-time clock, never warped by
 // anim.flowPhase or frame.energy — the sim step below always passes energy:
 // 0, and no port changes that) keep the sky
-// moving on its own; the two illusions are what carry the music connection,
-// matching the brief's own framing. The ambient amounts (Cloud cover, Flow
-// speed, Turbulence, and the Look-side brightness knobs) each carry a
-// patch-bay jack whose Scene composite is "steady" — they only ever react
-// if someone wires a source to them. Free-slip walls are kept as-is (no wrap
+// moving on its own regardless of what's plugged into any jack; the two
+// illusions are what carry the music connection most directly, matching the
+// brief's own framing. The ambient amounts (Cloud cover, Flow
+// speed, Turbulence, and the Look-side brightness/visibility knobs) each
+// carry a patch-bay jack whose default now rides a real source (Section/All
+// level/Bass level/Mid level/Treble level — see SETTINGS below) as a lift on
+// top of the slider (liftByDrive/skyLift: `amount + (1-amount)*k*drive` —
+// drives.ts's header's "Nothing plugged in" paragraph): a loud passage
+// lifts the amount above its slider, while a quiet one — or an unplugged
+// jack, or every source muted — shows exactly the slider's own sky, never
+// a collapsed or reversed one. Free-slip walls are kept as-is (no wrap
 // boundary) —
 // a possible follow-up, not a v1 blocker, since the drift is slow enough
 // that a wall never reads as one in a normal viewing session.
@@ -289,6 +295,25 @@ const BRUSH_TURNS_PER_SEC = 0.045; // one full turn every ~22s
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+// How far the ambient amounts below (Cloud cover, Flow speed, Turbulence,
+// Cloud brightness, Floater visibility) lift above their own slider when
+// their jack's drive reads 1 — drives.ts's header's "Nothing plugged in"
+// paragraph: each of these is an amount that exists with no music at all,
+// so its coupling has to be identity at drive 0 rather than a plain `slider
+// * drive`, which would zero the amount out (or run it backwards) the
+// instant a jack sits unplugged. `skyLift` (FRAG, below) is this formula's
+// GLSL twin.
+const SKY_DRIVE_LIFT = 0.5;
+
+/** `amount` lifted toward 1 by `drive` — identity at drive 0
+ *  (`liftByDrive(amount, 0) === amount`), monotone increasing in drive,
+ *  never above 1. See SKY_DRIVE_LIFT's own comment. */
+export function liftByDrive(amount: number, drive: number): number {
+  const a = Number.isFinite(amount) ? clamp01(amount) : 0;
+  const d = Number.isFinite(drive) ? drive : 0;
+  return clamp01(a + (1 - a) * SKY_DRIVE_LIFT * d);
 }
 
 /** How long a floater wave stays, in seconds, at a Sustain setting: squared,
@@ -547,7 +572,10 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { density: 0.3 },
-    drive: { default: "scene", sceneLabel: "Scene: steady (no music reaction)" },
+    // A plain Section default — a chorus gathers a little more cloud than a
+    // verse does; lifted on top of the slider (liftByDrive in render()), so
+    // an unplugged jack leaves Cloud cover exactly where its slider sits.
+    drive: { default: "anim.sectionIntensity" },
   },
   // Motion
   {
@@ -560,7 +588,12 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { tempo: 0.25 },
-    drive: { default: "scene", sceneLabel: "Scene: steady (no music reaction)" },
+    // A plain All level default — the room's own energy nudges the fluid to
+    // roll a little faster (liftByDrive in render(), which is where the
+    // drive actually moves the fluid, through the sim's own dt/force — the
+    // streak-wind formula in FRAG deliberately reads the slider alone; see
+    // that formula's own comment).
+    drive: { default: "anim.energy" },
   },
   {
     key: "turbulence",
@@ -572,7 +605,9 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.45,
     auto: { density: 0.2, tempo: 0.2 },
-    drive: { default: "scene", sceneLabel: "Scene: steady (no music reaction)" },
+    // A plain Bass level default — a bass-heavy passage curls the drift into
+    // a few more swirls (liftByDrive in render()).
+    drive: { default: "anim.low" },
   },
   {
     key: "floaterDensity",
@@ -646,22 +681,25 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { loudness: 0.2 },
-    drive: { default: "scene", sceneLabel: "Scene: steady (no music reaction)" },
+    // A plain Mid level default — the cloud tops lift a little brighter with
+    // the mids (skyLift in FRAG, the GLSL twin of liftByDrive).
+    drive: { default: "anim.mid" },
   },
   {
     key: "brushOpacity",
     label: "Brush opacity",
-    description: "Faintness of Haidinger's brush, the bowtie afterimage that turns slowly over the centre of view",
+    description: "Faintness of Haidinger's brush, the bowtie afterimage that turns slowly over the centre of view — dims a little further as the music gets louder",
     group: "Look",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.35,
     auto: { density: -0.2 },
-    // The Scene composite honestly reads energy: the shader dims the brush
-    // with uEnergy (buildDisplayFrag's brush term) and that dim *is* what a
-    // re-patch replaces — the whole factor, not just part of it.
-    drive: { default: "scene", sceneLabel: "Scene: dims with energy", sceneSources: ["anim.energy"] },
+    // A plain All level default: the shader dims the brush by
+    // (1 - 0.4 * brushOpacityDrive(uEnergy)) (buildDisplayFrag's brush
+    // term) — identity at drive 0, so an unplugged jack leaves the brush at
+    // the slider's own opacity rather than making it vanish.
+    drive: { default: "anim.energy" },
   },
   {
     key: "floaterVisibility",
@@ -672,7 +710,9 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.05,
     default: 0.5,
-    drive: { default: "scene", sceneLabel: "Scene: steady (no music reaction)" },
+    // A plain Treble level default — floaters stand out a little more with
+    // the hats/cymbals (liftByDrive in render()).
+    drive: { default: "anim.high" },
   },
   {
     key: "lightWaves",
@@ -906,6 +946,14 @@ const float FLOATER_FRINGE = 0.23; // relative lum delta (negative) at the fring
 const float FLOATER_DOT_R_MIN = 0.005 * FLOATER_SCALE; // dot radius, screen p-units
 const float FLOATER_DOT_R_MAX = 0.0068 * FLOATER_SCALE;
 const vec3 FLOATER_COOL_TINT = vec3(0.94, 0.99, 1.06); // faint cool bias applied only to the rim's brightening (see main()); the fringe's darkening stays neutral
+
+// skyLift's own GLSL twin of the JS liftByDrive above — same formula, same
+// SKY_DRIVE_LIFT constant, for a drive coupling read straight in FRAG
+// (cloudBrightness below) rather than resolved in render().
+const float SKY_DRIVE_LIFT_C = ${SKY_DRIVE_LIFT.toFixed(2)};
+float skyLift(float amount, float drive) {
+  return clamp(amount + (1.0 - amount) * SKY_DRIVE_LIFT_C * drive, 0.0, 1.0);
+}
 
 // This scene's own small hash/noise family — independently written (the
 // same fract/dot idiom every other scene's hash21 uses, CLAUDE.md's
@@ -1198,7 +1246,11 @@ void main() {
   // this, half-faded puffs blend a shadow tone into the sky and read as
   // grey smudges instead of airy haze.
   shadow = mix(1.0, shadow, smoothstep(0.0, 0.8, cloudAlpha));
-  vec3 cloudColor = mix(cloudShadow, cloudLit, shadow) * (0.85 + 0.3 * uCloudBrightness * cloudBrightnessDrive(1.0));
+  // cloudBrightnessDrive(uMid) is the reading Cloud brightness's own default
+  // (anim.mid) equals; skyLift lifts uCloudBrightness toward 1 by it,
+  // identity at drive 0 so an unplugged jack leaves the slider's own
+  // brightness alone (drives.ts's header's "Nothing plugged in" paragraph).
+  vec3 cloudColor = mix(cloudShadow, cloudLit, shadow) * (0.85 + 0.3 * skyLift(uCloudBrightness, cloudBrightnessDrive(uMid)));
   color = mix(color, cloudColor, cloudAlpha);
 
   // 3. Haidinger's brush: a faint bowtie centred on the fixation point,
@@ -1211,7 +1263,11 @@ void main() {
   vec3 brushTint = mix(vec3(0.82, 0.85, 1.05), vec3(1.05, 0.98, 0.82), lobe * 0.5 + 0.5);
   // The brush is polarised skylight, so it dims toward the low twilight glow.
   float daylight = smoothstep(-0.1, 0.25, lightE);
-  float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * brushOpacityDrive(1.0 - 0.4 * uEnergy) * daylight, 0.0, 1.0);
+  // The dim factor itself is (1.0 - k*drive) (identity at drive 0), not the
+  // old brushOpacityDrive(1.0-0.4*uEnergy) — that put the WHOLE factor
+  // inside the drive macro, so an unplugged jack (Custom=1, drive=0) zeroed
+  // it outright and made the brush vanish rather than sit at full opacity.
+  float brushAmt = clamp(uBrushOpacity * BRUSH_BASE * radial * abs(lobe) * (1.0 - 0.4 * brushOpacityDrive(uEnergy)) * daylight, 0.0, 1.0);
   color = mix(color, color * brushTint, brushAmt);
 
   // 4. Floater waves (see the file header): snap this pixel to its grid
@@ -1224,7 +1280,11 @@ void main() {
   // and off across a fixed grid.
   vec2 cellId = floor(p / FLOATER_CELL);
   vec2 cellC = (cellId + 0.5) * FLOATER_CELL;
-  vec2 wind = STREAK_DRIFT * (0.5 + uFlowSpeed * flowSpeedDrive(1.0));
+  // The slider alone — Flow speed's own drive already moves the fluid
+  // (render()'s flowSpeedAmount, integrated through the sim's own dt/force);
+  // multiplying it in again here made every streak visibly jump the instant
+  // any live source was patched in.
+  vec2 wind = STREAK_DRIFT * (0.5 + uFlowSpeed);
   float dens = -1.0;
   float hot = 0.0;
   float slant = 0.0;
@@ -1386,13 +1446,16 @@ function createSkyScene(): Scene {
       );
       if (!sameSimSize(wantSize, sim.size)) sim.resize(wantSize);
 
-      // Each amount below is the slider (resolveSceneSetting) times its own
-      // drive's reading — drives.value(key, 1) is 1 at a Scene default
-      // (drives.ts's identity rule), so nothing here moves until a source
-      // is picked on the row.
-      const cloudCoverAmount = resolveSceneSetting(ID, settingFor("cloudCover")) * drives.value("cloudCover", 1);
-      const flowSpeedAmount = resolveSceneSetting(ID, settingFor("flowSpeed")) * drives.value("flowSpeed", 1);
-      const turbulenceAmount = resolveSceneSetting(ID, settingFor("turbulence")) * drives.value("turbulence", 1);
+      // Each amount below is its own slider lifted toward 1 by its own
+      // drive's reading (liftByDrive) — identity at drive 0, so an unplugged
+      // jack (or every source muted) shows exactly the slider's own amount,
+      // never a collapsed or reversed one. The sceneDefault argument passed
+      // to drives.value() is the live reading each setting's own default
+      // equals, so a stale stored "scene" preference behaves like that
+      // default too (drives.ts's header's "Nothing plugged in" paragraph).
+      const cloudCoverAmount = liftByDrive(resolveSceneSetting(ID, settingFor("cloudCover")), drives.value("cloudCover", anim.sectionIntensity));
+      const flowSpeedAmount = liftByDrive(resolveSceneSetting(ID, settingFor("flowSpeed")), drives.value("flowSpeed", frame.energy));
+      const turbulenceAmount = liftByDrive(resolveSceneSetting(ID, settingFor("turbulence")), drives.value("turbulence", anim.low));
 
       // Ambient cloud drift — a real-time clock, deliberately not
       // audio-reactive (see file header).
@@ -1488,7 +1551,7 @@ function createSkyScene(): Scene {
       displayProg.setF("uDayPhase", dayPhase);
       displayProg.setF(
         "uFloaterGain",
-        floaterGain(resolveSceneSetting(ID, settingFor("floaterVisibility")) * drives.value("floaterVisibility", 1)),
+        floaterGain(liftByDrive(resolveSceneSetting(ID, settingFor("floaterVisibility")), drives.value("floaterVisibility", anim.high))),
       );
       wavePool.upload(displayProg);
       displayProg.setFv("uSweepT0", sweepT0);
