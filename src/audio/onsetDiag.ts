@@ -1,7 +1,7 @@
 /**
  * The shared diagnostic shape every onset detector's per-frame reading
  * takes — FeatureExtractor.onsetDiag (features.ts) and each of
- * bandEnergy.ts's lowDiag/midDiag/highDiag — so the meters panel
+ * bandEnergy.ts's lowDiag/midDiag/highDiag — so the meters panel's Hits card
  * (src/ui/audioMeters.ts's hits history) can render all four the same way.
  * This file owns no gate of its own: the actual silence gate a detector
  * weights its firing comparison by lives in src/audio/silenceGate.ts (two

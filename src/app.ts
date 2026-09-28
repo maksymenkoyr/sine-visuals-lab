@@ -286,7 +286,7 @@ let lastDeepMono: Float32Array | null = null;
 // card's history trace draws it as the "auto-gain fully off" reference. Null
 // wherever no local extractor ran this frame (renderer, synthetic feed).
 let lastFixedEnergy: number | null = null;
-// FeatureExtractor.onsetDiag from this device's own extractor — the Rhythm
+// FeatureExtractor.onsetDiag from this device's own extractor — the Hits
 // card's hits history. Same solo/host-only availability as lastFixedEnergy
 // above and for the same reason. Read synchronously the same tick it's set
 // (deviceMenu.update() below), before the next currentVisual() call mutates
@@ -294,7 +294,7 @@ let lastFixedEnergy: number | null = null;
 let lastBeatDiag: OnsetDiag | null = null;
 // FeatureExtractor.fluxRatio from this device's own extractor — tuning/
 // debug.ts's getInput() (tools/audio-latency.mjs's click-track latency
-// measurement), a separate consumer from the Rhythm card's hits history
+// measurement), a separate consumer from the Hits card's hits history
 // above. Same solo/host-only availability as lastFixedEnergy and for the
 // same reason.
 let lastFluxRatio: number | null = null;
@@ -305,11 +305,11 @@ let lastFluxRatio: number | null = null;
  *  see beatClock.ts's own file header for why those never get this feed). */
 let lastTempoHits: TempoHit[] | undefined = undefined;
 // The silence gate's last reading off this device's own extractor — the
-// Gate card (audioMeters.ts). `fired` is the local extractor's own frame's
-// onset (not the jitter-buffered `lastVis`), so it and `suppressed` always
-// describe the same tick's decision — see the two currentVisual() branches
-// below where this is set. Same solo/host-only availability as lastBeatDiag
-// above and for the same reason.
+// Signal card's Gate row (audioMeters.ts). `fired` is the local extractor's
+// own frame's onset (not the jitter-buffered `lastVis`), so it and
+// `suppressed` always describe the same tick's decision — see the two
+// currentVisual() branches below where this is set. Same solo/host-only
+// availability as lastBeatDiag above and for the same reason.
 let lastGate: SilenceGateReading | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
  *  availability as lastMono, for the Loudness card. */

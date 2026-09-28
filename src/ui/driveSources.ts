@@ -66,9 +66,9 @@ const SIGNAL_SOURCE_DESCRIPTION: Record<SignalId, string> = {
   "anim.wavePeak": "the peak of the raw sound wave — the same % the Scope card's Waveform shows.",
   "anim.beatWave": "a smooth swing that peaks once every beat (or every few, with its own divider), fading out once the metronome stops.",
   "anim.barWave": "the same smooth swing as Beat wave, once every bar instead.",
-  "anim.tempo": "how fast the BPM card's own tempo is, from slow to fast.",
+  "anim.tempo": "how fast the Tempo card's own BPM is, from slow to fast.",
   "anim.tempoLock": "how confidently the tempo tracker has locked onto a beat.",
-  "anim.metronome": "a tick on every beat at the BPM card's own tempo — the same pulse every beat, silent while it reads '--'.",
+  "anim.metronome": "a tick on every beat at the Tempo card's own BPM — the same pulse every beat, silent while it reads '--'.",
   "anim.metronomeBar": "the same steady tick as Metronome, once per bar.",
 };
 
@@ -142,8 +142,8 @@ export function isLineSourceChoice(choice: DriveSourceChoice): boolean {
 /** The identity a patch-bay jack (src/ui/jack.ts) keys itself by — every
  *  grid division collapses to one shared key ("grid"), since a patch
  *  carries at most one grid source regardless of division (drives.ts's own
- *  header) and the Beat row's jack/the Tempo add-chip both mean "toggle
- *  whichever one's already there", never one specific division (this is
+ *  header) and the Timing strip's Grid jack/the Tempo add-chip both mean
+ *  "toggle whichever one's already there", never one specific division (this is
  *  the same collapse buildAddChips' own Tempo-chip click handler in
  *  deviceMenu.ts applies by hand). It's drives.ts's sourceSlot — the same
  *  identity the store toggles and dedupes by, so a jack that reads

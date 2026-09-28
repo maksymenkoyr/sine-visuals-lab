@@ -499,8 +499,8 @@ export function sourceKey(choice: DriveSourceChoice): string {
  *  source and `setSourceGrid` re-grids it in place, so toggling *any*
  *  division unplugs whichever one is there. `normalizeDriveSetting`'s dedupe
  *  and `togglePatchSource` key by this; driveSources.ts's jackKey is it too,
- *  so the Beat row's jack (which always carries the default division) can
- *  unplug a patch whose grid was re-gridded to Bar. */
+ *  so the Timing strip's Grid jack (which always carries the default
+ *  division) can unplug a patch whose grid was re-gridded to Bar. */
 export function sourceSlot(choice: DriveSourceChoice): string {
   return isGridChoice(choice) ? "grid" : sourceKey(choice);
 }

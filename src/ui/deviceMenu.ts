@@ -183,7 +183,7 @@ import {
  * layout, since Phase 2b's jacks (the primary way in) are far away there.
  *
  * Jacks and cables (Phase 2b) are how a meter actually gets plugged in.
- * Every reactive meter row/lane — audioMeters.ts's own (Rhythm/Signal/
+ * Every reactive meter row/lane — audioMeters.ts's own (Hits/Tempo/Signal/
  * Character) plus this file's own Bands level rows (BAND_LEVEL_CHOICES) and
  * its Frequencies corner (mountBandsJack) — grows a jack (src/ui/jack.ts): a
  * ring in its source's colour, filled when it feeds the shown (preview ??
@@ -320,8 +320,8 @@ import {
  * which goes through DeviceMenuDeps, this doesn't, since nothing outside
  * src/ui/ ever needs to know which card is folded.
  *
- * Row grammar (createControlRow, exported for audioMeters.ts's Hit strength
- * card to reuse directly rather than duplicate; most meter rows instead
+ * Row grammar (createControlRow, exported for audioMeters.ts's Hits card's
+ * Shape section to reuse directly rather than duplicate; most meter rows instead
  * follow the same grammar with a meter in the slider's place — the shared
  * pieces live in controlsKit.ts): label · seven-segment readout + unit ·
  * "A" chip · "T" chip · ↺. The A chip *is* the auto indicator — filled when
@@ -574,7 +574,7 @@ export interface DeviceMenuDeps {
   isSilenceGateAuto: () => boolean;
   onSilenceGateAutoToggle: (on: boolean) => void;
   resolveSilenceGate: () => SilenceGateMarks;
-  /** The Hit strength card's four sliders (src/audio/hitStrength.ts) — see
+  /** The Hits card's Shape sliders (src/audio/hitStrength.ts) — see
    *  audioMeters.ts's AudioMetersDeps.hitShape. Global per device, like
    *  getSilenceGate above, not per scene: how a hit's stand-out and
    *  loudness should blend into its pulse height is a taste about
@@ -628,7 +628,7 @@ export interface DeviceMenu {
    *  FeatureExtractor.onsetDiag, null on the same paths as `fixedEnergy`.
    *  `gate` is this device's own SilenceGateReading (src/audio/silenceGate.ts)
    *  — app.ts's `lastGate` — null on the same paths as `fixedEnergy`, for the
-   *  Gate card. `drives` is this tick's SceneDrives (src/render/drives.ts),
+   *  Signal card's Gate row. `drives` is this tick's SceneDrives (src/render/drives.ts),
    *  off the same *un-latched* AnimFrame as `anim` — null on the same paths.
    *  A drive row's live pill reads its uniformPair() (the same number a
    *  scene's u<Key>Drive uniform gets), and the Frequencies overlay reads
@@ -970,11 +970,9 @@ function unmarkBlock(heading: HTMLElement): void {
   heading.querySelector(".vc-block-n")?.remove();
 }
 
-// Exported so audioMeters.ts's Hit strength card (src/audio/hitStrength.ts)
-// can reuse this same slider row instead of duplicating it — the meters
-// panel already builds one control this way (the Rhythm card's Beat grid
-// row is a picker, not a slider; see createControlRow's own doc comment for
-// the row grammar this shares).
+// Exported so audioMeters.ts's Hits card's Shape section
+// (src/audio/hitStrength.ts) can reuse this same slider row instead of
+// duplicating it — the meters panel already builds one control this way.
 export interface ControlRowSpec {
   label: string;
   accent: string;
@@ -2389,7 +2387,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   ];
 
   const HEIGHT_OPTIONS: { h: HitHeight; label: string; hint: string }[] = [
-    { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by the Hit strength card." },
+    { h: "graded", label: "Graded", hint: "Each hit is as tall as how hard it hit — shaped by Shape on the Hits card." },
     { h: "fixed", label: "Fixed", hint: "Every hit is a full-height pulse, however quiet." },
     { h: "loud", label: "Loud", hint: "Each hit is as tall as its band was loud at that moment." },
   ];
@@ -3580,8 +3578,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // logic — one contract, two mount points. driveSources.ts's jackKey is
   // the identity every comparison below uses: it collapses every beat-grid
   // division to one shared key, since a patch carries at most one and the
-  // Beat row's jack always means "whichever one's there", never a specific
-  // division.
+  // Timing strip's Grid jack always means "whichever one's there", never a
+  // specific division.
   // ---------------------------------------------------------------------
 
   function shownSelection(): { sceneId: string; spec: SceneSetting } | null {
