@@ -1,5 +1,15 @@
 import { DRAFT_SCENE_IDS, PAID_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
-import { captureMic, captureDisplayAudio } from "./audio/capture.ts";
+import { captureMic, captureDisplayAudio, listAudioInputDevices } from "./audio/capture.ts";
+import {
+  getInputDevicePref,
+  setInputDevicePref,
+  inputDeviceOptions,
+  defaultInputLabel,
+  resolveInputDeviceId,
+  isMissingDeviceError,
+  type InputDevicePref,
+  type InputDeviceOption,
+} from "./audio/inputDevice.ts";
 import { createBandAnalyser, type BandAnalyser } from "./audio/analyser.ts";
 import { createWaveformAnalyser, type WaveformAnalyser } from "./audio/waveformAnalyser.ts";
 import { peak } from "./audio/waveform.ts";
@@ -601,21 +611,114 @@ function autoStartSource(): AudioSourceChoice | null {
 }
 
 function startCapture(choice: AudioSourceChoice): Promise<CaptureHandle> {
-  return choice === "display" ? captureDisplayAudio() : captureMic();
+  return choice === "display" ? captureDisplayAudio() : startMic();
 }
 
-/** Maps a capture's kind to the panel's AudioSource vocabulary. "device" (a
- *  specific input device, e.g. a loopback driver) has no capture.ts caller
- *  yet and so no distinct AudioSource of its own — treat it as "mic" for
- *  status purposes until it does. */
-function captureAudioSource(kind: CaptureSourceKind): AudioSource {
-  switch (kind) {
-    case "display":
-      return "display";
-    case "mic":
-    case "device":
-      return "mic";
+/** The Mic source: the input chosen in the Input card's Source row
+ *  (src/audio/inputDevice.ts), or the system default when none is. A chosen
+ *  device that isn't plugged in never leaves the scene deaf — it falls back
+ *  to the default input and says so on the HUD; the devicechange listener
+ *  (onInputDevicesChanged) moves back once the device shows up. */
+async function startMic(): Promise<CaptureHandle> {
+  const pref = getInputDevicePref();
+  if (!pref) return captureMic();
+  const before = await listDevicesQuietly();
+  const chosen = await openChosenInput(pref, before);
+  if (chosen) return chosen;
+  const fallback = await captureMic();
+  // No labels before the first grant (inputDeviceOptions' doc), so a device
+  // whose id has since rotated (inputDevice.ts's header) can only be found
+  // by its label now that the fallback's own grant made labels readable.
+  if (inputDeviceOptions(before).length === 0) {
+    const late = await openChosenInput(pref, await listDevicesQuietly()).catch(() => null);
+    if (late) {
+      fallback.stop();
+      return late;
+    }
   }
+  showHud(`${pref.label || "The chosen input"} isn't connected — listening to the default input`);
+  return fallback;
+}
+
+/** Opens the chosen input as it resolves against `devices` — null when it's
+ *  missing, so startMic can fall back. Re-stores the id when the device was
+ *  found by its label under a new one. */
+async function openChosenInput(pref: InputDevicePref, devices: MediaDeviceInfo[]): Promise<CaptureHandle | null> {
+  const resolved = resolveInputDeviceId(pref, devices);
+  if (resolved === "missing" || resolved.deviceId === null) return null;
+  try {
+    const handle = await captureMic(resolved.deviceId);
+    if (resolved.deviceId !== pref.deviceId) setInputDevicePref({ deviceId: resolved.deviceId, label: pref.label });
+    return handle;
+  } catch (err) {
+    if (isMissingDeviceError(err)) return null;
+    throw err;
+  }
+}
+
+function listDevicesQuietly(): Promise<MediaDeviceInfo[]> {
+  if (!navigator.mediaDevices?.enumerateDevices) return Promise.resolve([]);
+  return listAudioInputDevices().catch(() => []);
+}
+
+/** The pickable inputs and the OS default's name, cached for the Source
+ *  row's dropdown (its refresh runs on a timer and reads synchronously).
+ *  Refreshed at boot, on every devicechange, and after each capture attaches
+ *  — the first mic grant is what makes labels readable at all. */
+let inputDevices: InputDeviceOption[] = [];
+let defaultInputName: string | null = null;
+
+async function refreshInputDevices(): Promise<MediaDeviceInfo[]> {
+  const devices = await listDevicesQuietly();
+  inputDevices = inputDeviceOptions(devices);
+  defaultInputName = defaultInputLabel(devices);
+  return devices;
+}
+
+/** An input was plugged in or pulled. Besides refreshing the dropdown: if the
+ *  chosen input just (re)appeared while the mic is listening to something
+ *  else — the default it fell back to, because the interface went in after
+ *  the scene started or its cable was pulled mid-set — move over to it now,
+ *  instead of making someone find the dropdown again. */
+async function onInputDevicesChanged(): Promise<void> {
+  const devices = await refreshInputDevices();
+  const pref = getInputDevicePref();
+  if (!pref || capture?.kind !== "mic" || !bandAnalyser || swapPromise) return;
+  const resolved = resolveInputDeviceId(pref, devices);
+  if (resolved === "missing" || resolved.deviceId === null) return;
+  const liveId = capture.stream.getAudioTracks()[0]?.getSettings().deviceId;
+  if (resolved.deviceId !== liveId) void swapAudioSource("mic", true);
+}
+
+/** The device the live mic is actually hearing, by name — the Source row's
+ *  status line. Null for a screen share (no device to name) or no capture. */
+function liveInputLabel(): string | null {
+  if (capture?.kind !== "mic") return null;
+  return capture.stream.getAudioTracks()[0]?.label || null;
+}
+
+/** The Source row picked an input ("" = the system default). Picking one is
+ *  asking to hear it, so this also switches to it — from the default mic, or
+ *  from a screen share — rather than only remembering it for next time. */
+function chooseInputDevice(deviceId: string): void {
+  const current = getInputDevicePref();
+  const option = inputDevices.find((o) => o.deviceId === deviceId);
+  // The dropdown's own "not connected" entry for the stored choice isn't in
+  // inputDevices — re-picking it keeps that choice, it doesn't clear it.
+  const next = option ? { deviceId, label: option.label } : current?.deviceId === deviceId ? current : null;
+  setInputDevicePref(next);
+  if (mode === "renderer" || syntheticFeed) return;
+  if (!bandAnalyser) {
+    setAudioSourceChoice("mic");
+    void ensureAudio("mic");
+  } else void swapAudioSource("mic", true);
+}
+
+/** Maps a capture's kind to the panel's AudioSource vocabulary. A chosen
+ *  input device (a mixer's USB interface) is still the "mic" source — only
+ *  which device it opens differs. */
+function captureAudioSource(kind: CaptureSourceKind): AudioSource {
+  return kind;
 }
 
 /** Builds bandAnalyser/waveformAnalyser/lufsAnalyser off a freshly started
@@ -662,6 +765,9 @@ function attachCapture(handle: CaptureHandle): void {
   updateMicPrompt();
   gallery?.syncSource();
   reportUsage();
+  // A first mic grant is what makes input labels readable (see
+  // refreshInputDevices) — the Source row's dropdown fills in from here.
+  void refreshInputDevices();
 }
 
 /** Counts a scene actually running on live audio (src/net/usage.ts) — called
@@ -675,10 +781,15 @@ function reportUsage(): void {
 }
 
 /** The live capture's track ended on its own — the user hit Chrome's "Stop
- *  sharing" bar, or the OS revoked a mic permission mid-session. Tears down
- *  and re-shows the start prompt rather than leaving the visuals frozen at
- *  zero. Deliberately doesn't fall back to another source — that would fire
- *  a permission prompt the user didn't ask for. */
+ *  sharing" bar, the OS revoked a mic permission mid-session, or the input
+ *  device itself went away (a USB interface unplugged). Tears down and
+ *  re-shows the start prompt rather than leaving the visuals frozen at zero.
+ *  Deliberately doesn't fall back to another source — that would fire a
+ *  permission prompt the user didn't ask for. The one exception is the mic
+ *  itself while its permission still stands: reopening it prompts nobody, and
+ *  it's what keeps a set going when a cable is pulled — startMic lands on
+ *  whatever input is left, and onInputDevicesChanged moves back once the
+ *  chosen one returns. */
 function onCaptureEnded(handle: CaptureHandle): void {
   if (capture !== handle) return; // already superseded by a swap
   handle.stop();
@@ -693,6 +804,7 @@ function onCaptureEnded(handle: CaptureHandle): void {
   captureFailed = false;
   updateMicPrompt();
   gallery?.syncSource();
+  if (handle.kind === "mic" && micPermission === "granted") void ensureAudio("mic");
 }
 
 /** Turns a capture failure into copy the user can act on. A mic denial points
@@ -747,11 +859,15 @@ function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
  *  cancels the share picker, this rejects, and the old capture must still be
  *  the one running — starting-then-swapping guarantees that; tearing the old
  *  one down first would not. The room connection is untouched either way:
- *  hostConn is independent of capture, so a paired TV keeps rendering. */
-function swapAudioSource(next: AudioSourceChoice): Promise<void> {
+ *  hostConn is independent of capture, so a paired TV keeps rendering.
+ *  `restart` reopens even the source already live — the mic moving to a
+ *  different input device (chooseInputDevice, onInputDevicesChanged). */
+function swapAudioSource(next: AudioSourceChoice, restart = false): Promise<void> {
   if (!bandAnalyser || syntheticFeed || mode === "renderer") return Promise.resolve();
-  if (capture?.kind === next) return Promise.resolve();
-  if (swapPromise) return swapPromise;
+  if (capture?.kind === next && !restart) return Promise.resolve();
+  // A restart queues behind a swap in flight rather than dropping: a second
+  // device picked mid-swap is the one that has to end up live.
+  if (swapPromise) return restart ? swapPromise.then(() => swapAudioSource(next, true)) : swapPromise;
   const previous = capture;
   const attempt = (async () => {
     const handle = await startCapture(next);
@@ -916,6 +1032,19 @@ function wireDeviceMenu(): void {
         void ensureAudio(choice);
       } else void swapAudioSource(choice);
     },
+    // The Source row's input dropdown (src/audio/inputDevice.ts).
+    getInputDevices: () => {
+      const pref = getInputDevicePref();
+      const resolved = resolveInputDeviceId(pref, inputDevices.map((o) => ({ kind: "audioinput" as const, ...o })));
+      return {
+        options: inputDevices,
+        defaultLabel: defaultInputName,
+        chosen: pref && resolved !== "missing" && resolved.deviceId !== null ? resolved.deviceId : null,
+        missing: pref && resolved === "missing" ? pref : null,
+        liveLabel: liveInputLabel(),
+      };
+    },
+    onInputDeviceChange: (deviceId) => chooseInputDevice(deviceId),
     canCaptureDisplay: () => displayCaptureSupported(),
     onPickPalette: (id) => applyPalette(getPalette(id)),
     getSensitivity: (sceneId) => getSensitivity(sceneId),
@@ -1199,6 +1328,11 @@ async function boot(): Promise<void> {
   const micPermissionReady = watchMicPermission((p) => {
     micPermission = p;
   });
+  // The Source row's input dropdown — see refreshInputDevices and
+  // onInputDevicesChanged. Labels are already readable here whenever the
+  // mic's permission was granted on an earlier visit.
+  void refreshInputDevices();
+  navigator.mediaDevices?.addEventListener?.("devicechange", () => void onInputDevicesChanged());
 
   if (!document.createElement("canvas").getContext) {
     fatalError("Canvas unsupported");

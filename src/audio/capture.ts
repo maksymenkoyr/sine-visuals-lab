@@ -30,7 +30,11 @@ function buildHandle(
   };
 }
 
-/** Default mic capture, using the currently selected input device. */
+/** Mic capture — the system default input, or exactly `deviceId` (a USB
+ *  audio interface, a mixer's own USB sound card; see inputDevice.ts for the
+ *  choice and src/app.ts's startMic for resolving it). An exact id that
+ *  isn't plugged in rejects rather than silently opening another input —
+ *  startMic decides what to fall back to, and says so. */
 export async function captureMic(deviceId?: string): Promise<CaptureHandle> {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -73,19 +77,9 @@ export async function captureDisplayAudio(): Promise<CaptureHandle> {
   return buildHandle("display", stream, context);
 }
 
-/** List available audio input devices (labels only populate after a permission grant). */
+/** List available audio input devices (labels only populate after a permission
+ *  grant — see inputDevice.ts's inputDeviceOptions for what's pickable). */
 export async function listAudioInputDevices(): Promise<MediaDeviceInfo[]> {
   const devices = await navigator.mediaDevices.enumerateDevices();
   return devices.filter((d) => d.kind === "audioinput");
-}
-
-/** Capture from a specific selected input device (e.g. a USB mixer interface). */
-export async function captureDevice(deviceId: string): Promise<CaptureHandle> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { ...MUSIC_AUDIO_CONSTRAINTS, deviceId: { exact: deviceId } },
-  });
-  // Explicit even though it's the default — states the intent (lowest
-  // achievable input latency) and guards against a future default change.
-  const context = new AudioContext({ latencyHint: "interactive" });
-  return buildHandle("device", stream, context);
 }
