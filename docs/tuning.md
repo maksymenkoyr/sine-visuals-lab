@@ -15,6 +15,12 @@ reload where an override doesn't. `resolve()` (`src/render/autoTune.ts`) checks
 an override first, then a pin, then auto-pin, so a value the param bus explicitly
 sets always wins over a pin left over from an earlier by-hand session.
 
+`tuning/params.json`'s `autoPin` ships `false`, so a dev session resolves Auto
+exactly like the deployed site — the music keeps pushing auto-driven settings
+around, same as production. A tuning run that wants to hold a value still
+while judging it sets `"autoPin": true` in `tuning/params.json` (or passes it
+to `window.__viz.setParams`) to stop the music from pushing it around.
+
 ## Reproducibility
 
 Tune against synthetic audio so a result is comparable across sessions:

@@ -35,6 +35,8 @@
  * back off.
  */
 
+import { warmRate } from "./warmStart.ts";
+
 const STORAGE_KEY = "vibe.autoGain";
 const STORAGE_KEY_AUTO = "vibe.autoGainAuto";
 export const AUTO_GAIN_MIN = 0;
@@ -74,6 +76,11 @@ let autoOn: boolean = loadInitialAuto();
 // and on setAutoGainAuto(true)) so a fresh page load with auto already on
 // doesn't start from a stale reading.
 let eased: number = cache;
+// Seconds fed to feedAutoGainMeasurement since auto last turned on — never
+// persisted, like `eased` itself, and reset alongside it in
+// setAutoGainAuto(true) so a fresh warm-up starts every time auto is
+// re-enabled, not just on module load. Feeds warmStart.ts's warmRate() below.
+let warmSec = 0;
 
 function persist(): void {
   try {
@@ -109,7 +116,10 @@ export function setAutoGainAuto(on: boolean): void {
   autoOn = on;
   // Seed from the manual value so the row doesn't jump on the chip click —
   // same reasoning as autoTune.ts's seedAuto for the scene-setting rows.
-  if (on) eased = cache;
+  if (on) {
+    eased = cache;
+    warmSec = 0;
+  }
   persistAuto();
 }
 
@@ -132,13 +142,16 @@ export function resolveAutoGain(): number {
 const SPAN_CRUSHED_DB = 15;
 const SPAN_FULL_DB = 45;
 
-// Time constant for easing toward the target below — ~10s to reach ~63% of
-// the way there, on the order of musicProfile.ts's own dial eases (e.g.
-// TEMPO_EASE_RATE's ~7s). Deliberately slow: the Signal card's history
-// trace (src/ui/audioMeters.ts) draws the gap this amount opens between
-// Level and Energy, and a value that tracked the room in real time would
-// make that gap breathe with the music instead of with the room.
-const EASE_RATE = 0.1;
+// Steady-state time constant for easing toward the target below — ~4s to
+// reach ~63% of the way there. Still deliberately slower than the music:
+// the Signal card's history trace (src/ui/audioMeters.ts) draws the gap this
+// amount opens between Level and Energy, and a value that tracked the room
+// in real time would make that gap breathe with the music instead of with
+// the room. It no longer also has to double as this tracker's start-up
+// speed — warmStart.ts's warmRate() handles the first WARM_T0_SEC-ish
+// seconds after auto turns on (see `warmSec` below), so this constant is
+// free to describe only the steady-state averaging.
+const EASE_RATE = 0.25;
 
 /** Pure mapping from a measured mean band span to the auto-gain amount that
  *  span calls for — wider room span needs less help, narrower needs more.
@@ -161,5 +174,6 @@ export function feedAutoGainMeasurement(meanSpanDb: number, dtSec: number): void
   if (!autoOn) return;
   const target = autoGainForSpan(meanSpanDb);
   const dt = Number.isFinite(dtSec) ? Math.max(0, dtSec) : 0;
-  eased += (target - eased) * (1 - Math.exp(-EASE_RATE * dt));
+  eased += (target - eased) * (1 - Math.exp(-warmRate(EASE_RATE, warmSec) * dt));
+  warmSec += dt;
 }

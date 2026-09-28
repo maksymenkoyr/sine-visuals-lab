@@ -9,9 +9,11 @@
  *   never resolveSceneSetting (the live auto-resolved one). autoTune.ts's
  *   computeAutoTarget/computeMacroTarget are built on "at NEUTRAL dials,
  *   resolved === spec.default bit-for-bit"; baking the live-slewed resolved
- *   value would break that identity and drift it further on every bake. With
- *   tuning/params.json's shipped autoPin: true, resolve() returns the manual
- *   value anyway, so in the normal dev session the two coincide.
+ *   value would break that identity and drift it further on every bake.
+ *   tuning/params.json ships autoPin: false (resolving Auto exactly like the
+ *   deployed site — see docs/tuning.md), so a session judging a setting
+ *   under Auto sets autoPin: true itself; with it set, resolve() returns the
+ *   manual value instead, and the two coincide.
  * - A bake never clears sceneSettings.ts's store afterward. After the reload
  *   that a write triggers, the stored value and the freshly-compiled default
  *   are the same number, so the row's displayed value, its ↺ target, and the
