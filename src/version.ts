@@ -22,7 +22,8 @@ import { SOURCE_URL } from "./brand.ts";
  *    `audio-viz-room-insider` on insider.sinevisualslab.com. Every push to
  *    `main` deploys here (`.github/workflows/deploy.yml`), so it's always
  *    current with the tip of `main` and never needs a person to decide to
- *    ship it.
+ *    ship it. Each build is published as a GitHub pre-release
+ *    `vX.Y.Z-beta`, and its version is commented on the PR it shipped.
  *  - **preview** — `[env.preview]`, one throwaway Worker per open pull
  *    request (deploy.yml).
  *  - **dev** — `npm run dev` / `npm run build` with no `SVL_CHANNEL` set:
@@ -116,11 +117,13 @@ export function channelBadge(info: BuildInfo): { label: string; hint: readonly s
 
 /**
  * Where the label links to: the GitHub Release for a released stable build,
+ * or the pre-release `vX.Y.Z-beta` deploy.yml publishes for an insider one,
  * else the commit it was built from, else just the repo (no commit known at
  * all — an unlikely `.git`-less checkout).
  */
 export function versionHref(info: BuildInfo): string {
   if (info.channel === "stable" && info.version) return `${SOURCE_URL}/releases/tag/v${info.version}`;
+  if (info.channel === "insider" && info.version) return `${SOURCE_URL}/releases/tag/v${info.version}-beta`;
   if (info.commit) return `${SOURCE_URL}/commit/${info.commit}`;
   return SOURCE_URL;
 }

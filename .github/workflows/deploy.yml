@@ -220,29 +220,53 @@ jobs:
   # the "other Workers depend on this" check, which can't apply to a Worker
   # nothing else binds to. A preview that never deployed (fork PR, or the gates
   # failed on every push) makes this a harmless "not found".
-  # Tags each Insider build `vX.Y.Z-beta` on the commit it shipped, so the
-  # version the site shows can be found in git (`git fetch --tags`). A job of
-  # its own because it needs write access, which the ship job — running a
+  # Publishes each Insider build as a GitHub pre-release `vX.Y.Z-beta` on the
+  # commit it shipped (creating that tag), and comments the version on the pull
+  # request that commit landed through — so the version shows where people
+  # look: the repo page's Releases sidebar, the commit's own page (GitHub lists
+  # a commit's tags there, never in the commit list), and the PR itself. A job
+  # of its own because it needs write access, which the ship job — running a
   # pull request's code on PR events — shouldn't hold. It checks nothing out
-  # and runs no repo code: one API call. The `-beta` suffix keeps these out of
-  # the release count (tools/appVersionLib.mjs reads strict vX.Y.Z only), and
-  # GitHub Releases are only ever made for Stable (release.yml).
+  # and runs no repo code: a few API calls. The `-beta` suffix keeps these out
+  # of the release count (tools/appVersionLib.mjs reads strict vX.Y.Z only),
+  # and `--prerelease` keeps them from ever being marked Latest — that's
+  # Stable's (release.yml).
   tag-insider:
     needs: ship
     if: github.event_name == 'push' && needs.ship.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
-      - name: Tag the Insider build
+      - name: Publish the Insider pre-release
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.ship.outputs.version }}
           TAG: v${{ needs.ship.outputs.version }}-beta
+          SHA: ${{ github.sha }}
         run: |
-          if gh api "repos/${{ github.repository }}/git/refs" -f ref="refs/tags/$TAG" -f sha="${{ github.sha }}" >/dev/null; then
-            echo "Tagged $TAG" >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          # The PR this squash-merged commit came from; empty for a direct push.
+          pr=$(gh api "repos/$REPO/commits/$SHA/pulls" -q '.[0].number // empty' 2>/dev/null || true)
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "::warning::$TAG is already published (a re-run?); left it alone"
+            exit 0
+          fi
+          if [ -n "$pr" ]; then
+            title=$(gh api "repos/$REPO/pulls/$pr" -q .title)
+            notes="$title (#$pr)"
           else
-            echo "::warning::Couldn't create $TAG (already there from a re-run?)"
+            notes="$(gh api "repos/$REPO/commits/$SHA" -q '.commit.message | split("\n")[0]')"
+          fi
+          notes="$notes"$'\n\n'"Live on Insider: https://insider.sinevisualslab.com — commit $SHA"
+          gh release create "$TAG" --repo "$REPO" --target "$SHA" --prerelease \
+            --title "$VERSION - beta" --notes "$notes"
+          echo "Published $TAG" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$pr" ]; then
+            gh pr comment "$pr" --repo "$REPO" \
+              --body "Shipped to Insider as **$VERSION - beta** — [$TAG](https://github.com/$REPO/releases/tag/$TAG)"
           fi
 
   teardown-preview:

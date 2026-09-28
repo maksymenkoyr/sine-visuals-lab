@@ -39,6 +39,12 @@ describe("versionHref", () => {
     expect(versionHref(withCommit({ channel: "stable", version: "0.3.0" }))).toBe(`${SOURCE_URL}/releases/tag/v0.3.0`);
   });
 
+  it("links to the pre-release tag on a versioned insider build", () => {
+    expect(versionHref(withCommit({ channel: "insider", version: "0.0.11" }))).toBe(
+      `${SOURCE_URL}/releases/tag/v0.0.11-beta`,
+    );
+  });
+
   it("links to the commit otherwise, for every channel", () => {
     for (const channel of ["stable", "insider", "preview", "dev"] as const) {
       expect(versionHref(withCommit({ channel }))).toBe(`${SOURCE_URL}/commit/da38a37f0000000000000000000000000000000`);
