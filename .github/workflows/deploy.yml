@@ -1,5 +1,15 @@
-# Checks every pull request; builds and deploys the Worker on every push to main;
-# deploys a throwaway preview Worker for every open pull request.
+# Checks every pull request; builds and deploys the Next channel on every push
+# to main; deploys a throwaway preview Worker for every open pull request.
+#
+# Next (wrangler.toml's `[env.next]`, the Worker `audio-viz-room-next` on
+# next.sinevisualslab.com) is the channel that tracks main automatically —
+# every push here ships there within minutes, no one has to decide to release
+# it. The **Stable** channel (the top-level Worker, sinevisualslab.com and
+# www) is deliberately not touched by this workflow at all: it only changes
+# when someone runs `.github/workflows/release.yml` (`npm run release`),
+# which promotes whatever commit Next is currently serving — see that
+# workflow's own header for why a manual, separate step, and src/version.ts
+# for what the two channels mean to a visitor.
 #
 # The build step is not optional decoration: `wrangler deploy` uploads ./dist
 # (the [assets] block in wrangler.toml) but never builds it, and dist/ is
@@ -13,7 +23,7 @@
 # sticky comment on the PR — mic and phone/TV pairing both work there, since
 # workers.dev is HTTPS and the client talks to its own origin. Dev-only features
 # (tuning overrides, pins) are compiled out of a build, so a preview shows what
-# prod would, not what `npm run dev` shows.
+# a real deploy would, not what `npm run dev` shows.
 #
 # Previews only run for PRs from branches in this repo: a PR from a fork has no
 # access to the Cloudflare secrets, so its deploy step is skipped by the `if`.
@@ -42,11 +52,11 @@ jobs:
       contents: read
       # For the sticky preview-URL comment.
       pull-requests: write
-    # Serialize prod deploys so two merges landing close together can't race
+    # Serialize Next deploys so two merges landing close together can't race
     # each other onto the Worker; previews serialize per PR instead, so a burst
     # of pushes settles on the last one without blocking other PRs.
     concurrency:
-      group: ${{ github.event_name == 'pull_request' && format('preview-{0}', github.event.number) || 'deploy-main' }}
+      group: ${{ github.event_name == 'pull_request' && format('preview-{0}', github.event.number) || 'deploy-next' }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -58,19 +68,34 @@ jobs:
 
       - run: npm ci
 
-      # The gates named in CLAUDE.md. typecheck covers both tsconfigs, so the
-      # Worker source is checked before it ships.
+      # The gates named in AGENTS.md. typecheck covers both tsconfigs, so the
+      # Worker source is checked before it ships. They gate every deploy this
+      # workflow makes (Next and every preview) — Stable's own gates are
+      # release.yml's own npm ci/typecheck/test steps, run again there against
+      # whatever commit is actually being promoted.
       - run: npm run typecheck
       - run: npm run test
 
+      # SVL_CHANNEL picks src/version.ts's channel: "preview" on a pull
+      # request, "next" on a push to main — there's no third case this
+      # workflow builds. SVL_COMMIT/SVL_PR are passed explicitly because the
+      # commit this job actually built isn't always `git rev-parse HEAD` in
+      # this checkout: a pull_request event checks out a merge commit of the
+      # PR branch into main, so HEAD is that synthetic merge, not the PR's own
+      # head commit a reader would recognize.
       - run: npm run build
+        env:
+          SVL_CHANNEL: ${{ github.event_name == 'pull_request' && 'preview' || 'next' }}
+          SVL_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          SVL_PR: ${{ github.event.pull_request.number }}
 
-      - name: Deploy to Cloudflare
+      - name: Deploy to Next
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env next
 
       - name: Deploy PR preview
         id: preview

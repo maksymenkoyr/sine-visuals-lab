@@ -39,8 +39,11 @@ run_worker_first = ["/"]
 # proxied DNS record and the certificate from these entries.
 #
 # These live here rather than in the dashboard on purpose: `wrangler deploy`
-# overrides dashboard-configured routes whenever config omits them, and every
-# push to main deploys (.github/workflows/deploy.yml).
+# overrides dashboard-configured routes whenever config omits them. This is
+# the **Stable** release channel (src/version.ts owns what that means): the
+# top-level Worker deploys only from `.github/workflows/release.yml` (`npm run
+# release`), never automatically from a push to main — that's `[env.next]`
+# below.
 [[routes]]
 pattern = "sinevisualslab.com"
 custom_domain = true
@@ -48,6 +51,28 @@ custom_domain = true
 [[routes]]
 pattern = "www.sinevisualslab.com"
 custom_domain = true
+
+# ---------------------------------------------------------------------------
+# The **Next** channel — `wrangler deploy --env next`, run by
+# .github/workflows/deploy.yml on every push to main. Worker name is
+# wrangler's own `<name>-<env>` default (`audio-viz-room-next`, unset here on
+# purpose, same as [env.preview] below never setting one); the Worker serves
+# next.sinevisualslab.com, always built from whatever just landed on main, so
+# there's a place to see (and pair a phone/TV against) the tip of main without
+# waiting for a release.
+#
+# Same two things [env.preview] has to spell out, for the same reasons — see
+# that section's comment for `durable_objects`; `routes` here is this
+# environment's *own* domain rather than an override, since (unlike preview)
+# Next does want a stable custom domain of its own.
+[env.next]
+routes = [{ pattern = "next.sinevisualslab.com", custom_domain = true }]
+# Next's traffic is the owner's own testing, like a preview's — not visitors'.
+analytics_engine_datasets = []
+
+[[env.next.durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
 
 # ---------------------------------------------------------------------------
 # Per-PR preview Workers — `wrangler deploy --env preview --name <pr-name>`,

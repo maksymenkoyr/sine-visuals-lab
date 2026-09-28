@@ -20,7 +20,7 @@
     "composite": true,
     "tsBuildInfoFile": "./tsconfig.tsbuildinfo"
   },
-  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "vite-tuning-plugin.ts", "vite-scene-links-plugin.ts", "vite-legal-notices-plugin.ts", "sceneDefaultsPatch.ts"],
+  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "vite-tuning-plugin.ts", "vite-scene-links-plugin.ts", "vite-legal-notices-plugin.ts", "vite-build-info-plugin.ts", "sceneDefaultsPatch.ts"],
   // The one Worker file the client and tests import: the usage-count wire
   // format. It's plain TS with no Workers or DOM types, so both projects can
   // compile it; "files" entries aren't subject to "exclude".

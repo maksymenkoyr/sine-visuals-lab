@@ -153,6 +153,8 @@ import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
+import { ensureControlsStyles } from "./ui/controlsTheme.ts";
+import { pinEverything } from "./pinnedAssets.ts";
 
 type Mode = "solo" | "host" | "renderer";
 type AnyConn = HostConnection | RendererConnection;
@@ -1083,6 +1085,20 @@ function applyRoute(route: Route): void {
 }
 
 async function boot(): Promise<void> {
+  // Injects the panel's stylesheet before anything else so its DSEG7
+  // @font-face rule (controlsTheme.ts) is already in document.fonts by the
+  // time pinEverything()'s sweep runs below — otherwise the font would only
+  // enter document.fonts whenever the settings panel first opens
+  // (deviceMenu.ts's own ensureControlsStyles() call), which can be well
+  // after a deploy has moved on. Idempotent and scoped to panel classes, so
+  // calling it this early changes nothing the gallery itself shows.
+  ensureControlsStyles();
+  // Starts the after-load, at-idle sweep that fetches every pinAsset() (the
+  // tempo worklet, the Dancers clip library) and loads every registered font
+  // — see src/pinnedAssets.ts's header for why a page must never need its
+  // own origin's files again after this point.
+  pinEverything();
+
   // Started first so it resolves alongside detectQuality()'s await below;
   // awaited before routing, since a deep-linked scene's enterViz() makes the
   // first autoStartSource() call.

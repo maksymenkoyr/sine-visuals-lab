@@ -6,6 +6,7 @@ import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRe
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
 import { SOURCE_URL } from "../brand.ts";
+import { BUILD_INFO, versionHref, versionLabel, versionTitle } from "../version.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
@@ -188,9 +189,11 @@ const stylesheet = `
 }
 
 .gal-foot {
-  display: flex; justify-content: flex-end; gap: 16px; letter-spacing: .1em;
+  display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap;
+  gap: 8px 16px; letter-spacing: .1em;
   padding-top: 16px; border-top: 1px solid rgba(255,255,255,.08); color: rgba(255,255,255,.4);
 }
+.gal-foot-links { display: flex; gap: 16px; }
 .gal-foot a { color: inherit; text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.25); }
 .gal-foot a:hover { color: #fff; }
 
@@ -468,6 +471,16 @@ export function createGallery(deps: GalleryDeps): Gallery {
   // ships alongside the build (dist/*.txt), since MIT and the SIL Open Font
   // License both require their notices to travel with copies of the site.
   const foot = el("div", "gal-mono gal-foot");
+  // What build is live, on the left (src/version.ts owns the label/link/
+  // tooltip text) — stable stays the same dim colour as the rest of the
+  // footer, any other channel is flagged in BANDS_AMBER so it's obvious at a
+  // glance this tab isn't on stable.
+  const versionLink = el("a", "", versionLabel(BUILD_INFO));
+  versionLink.href = versionHref(BUILD_INFO);
+  versionLink.title = versionTitle(BUILD_INFO);
+  versionLink.target = "_blank";
+  versionLink.rel = "noopener";
+  if (BUILD_INFO.channel !== "stable") versionLink.style.color = BANDS_AMBER;
   const sourceLink = el("a", "", "Source · AGPL-3.0");
   sourceLink.href = SOURCE_URL;
   sourceLink.target = "_blank";
@@ -480,7 +493,9 @@ export function createGallery(deps: GalleryDeps): Gallery {
   privacyLink.href = "/PRIVACY.txt";
   privacyLink.target = "_blank";
   privacyLink.rel = "noopener";
-  foot.append(sourceLink, licensesLink, privacyLink);
+  const footLinks = el("div", "gal-foot-links");
+  footLinks.append(sourceLink, licensesLink, privacyLink);
+  foot.append(versionLink, footLinks);
 
   page.append(mast, errorBanner, released, draftSection, foot);
   root.appendChild(page);
