@@ -254,6 +254,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # wrangler-action runs the wrangler pinned in package.json only when
+      # it's installed; without this it falls back to its own wrangler 3,
+      # whose install fails on our workers-types peer — and continue-on-error
+      # below hid that until closed PRs' previews filled the account's
+      # Durable Object namespace limit and new previews stopped deploying.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
       - name: Delete PR preview
         uses: cloudflare/wrangler-action@v3
         continue-on-error: true
