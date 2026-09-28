@@ -785,6 +785,29 @@ const INJECTION_NEAR_R = 0.14; // droplet radius right at the nozzle, before ato
 const INJECTION_FAR_R = 0.05; // droplet radius once fully atomized
 const INJECTION_GAIN = 1.3; // brightness of the summed field relative to a glint's own peak
 
+// How far from its own nozzle any droplet can light a pixel — the spray
+// loop is the scene's single most expensive block (measured 2026-09-28:
+// ~60% of a Retina frame's GPU time when every pixel ran INJECTION_DROPS
+// droplets for each of the 3x3 cells around it), so FRAG uses this twice to
+// skip work that can't show. A droplet's glow is exp(-2.2 (d/r)^2), counted
+// out to INJECTION_GLOW_REACH_R of its own radius (beyond it the glow is
+// under 1e-6), and its radius shrinks linearly from NEAR_R to FAR_R over its
+// travel, so the farthest any droplet lights is the larger of the two travel
+// endpoints. FRAG skips a nozzle farther than this from the pixel outright,
+// and only visits the 2x2 nozzle cells whose centers straddle the pixel —
+// exact as long as a nozzle (within JITTER/2 of its cell center) plus this
+// reach stays inside one cell of that center, checked below, since retuning
+// reach, jitter or droplet size past it would silently clip droplets at the
+// cell seams.
+const INJECTION_GLOW_REACH_R = 2.5;
+const INJECTION_LIT_RADIUS = Math.max(
+  INJECTION_GLOW_REACH_R * INJECTION_NEAR_R,
+  INJECTION_REACH + INJECTION_GLOW_REACH_R * INJECTION_FAR_R,
+);
+if (INJECTION_NOZZLE_JITTER / 2 + INJECTION_LIT_RADIUS > 1) {
+  throw new Error("caustics: spray droplets reach past the 2x2 nozzle cells FRAG visits — widen the search or shrink reach/jitter/radius");
+}
+
 // Every hashed field in FRAG is periodic in NOISE_PERIOD cells (the shared
 // lattice hash in noiseHash.ts — see the file header's precision paragraph
 // and that file's for how the period was sized). The finest consumer is the
@@ -1287,15 +1310,27 @@ void main() {
   // nearNozzleFade — which depends purely on distance, not on time or
   // direction — pulls it to zero exactly as it arrives, reading as suction
   // rather than fading mist.
+  //
+  // The loop only runs where its result can show: sprayGain is every factor
+  // the field gets multiplied by, so a pixel below the crest gate (dark
+  // water), a frame with no treble drive, or Spray at 0 skips it outright.
+  // It visits the 2x2 nozzle cells whose centers straddle ip, not the 3x3
+  // around ip's own cell, and skips any nozzle farther than
+  // INJECTION_LIT_RADIUS — see that constant for why neither drops a
+  // droplet that could light this pixel.
+  float sprayGain = uSparkle * sparkleGlintDrive * crestGate * sparkleGain * uInjection * injectionDrive(1.0) * ${INJECTION_GAIN.toFixed(2)};
   float injectionField = 0.0;
-  if (uInjection > 0.0) {
+  if (sprayGain > 0.0) {
     vec2 ip = (sparkleQ * sparkleFreq + sparkleFlow) * ${INJECTION_CELLS_PER_GRAIN.toFixed(2)};
-    for (int gx = -1; gx <= 1; gx++) {
-      for (int gy = -1; gy <= 1; gy++) {
-        vec2 cellId = floor(ip) + vec2(float(gx), float(gy));
+    vec2 nearCell = floor(ip - 0.5);
+    for (int gx = 0; gx <= 1; gx++) {
+      for (int gy = 0; gy <= 1; gy++) {
+        vec2 cellId = nearCell + vec2(float(gx), float(gy));
         // Its own lattice period (INJECTION_MASK) — this field wraps at
         // NOISE_PERIOD * INJECTION_CELLS_PER_GRAIN cells, see INJECTION_MASK's comment.
         vec2 nozzle = cellId + 0.5 + (hash2Cell(cellId, ${INJECTION_MASK}, 1u) - 0.5) * ${INJECTION_NOZZLE_JITTER.toFixed(2)};
+        vec2 toNozzle = ip - nozzle;
+        if (dot(toNozzle, toNozzle) > ${(INJECTION_LIT_RADIUS * INJECTION_LIT_RADIUS).toFixed(4)}) continue;
         for (int k = 0; k < ${INJECTION_DROPS}; k++) {
           vec2 rnd = hash2Cell(cellId, ${INJECTION_MASK}, 2u + uint(k));
           float cyclePos = fract(uTime * ${INJECTION_RATE.toFixed(2)} + rnd.x);
@@ -1314,7 +1349,7 @@ void main() {
       }
     }
   }
-  acc += uSparkle * sparkleGlintDrive * crestGate * sparkleGain * uInjection * injectionDrive(1.0) * injectionField * ${INJECTION_GAIN.toFixed(2)};
+  acc += sprayGain * injectionField;
 
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
