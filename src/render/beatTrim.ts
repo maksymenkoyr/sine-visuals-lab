@@ -231,13 +231,21 @@ export function createBeatTrimmer(): BeatTrimmer {
       // above can ever cost this a bit.
       if (state.m === 1 && state.k === 0 && s.offsetMs === 0) outF = inBeats;
 
-      // Ticks: a running max so a "later" nudge easing outF back a hair
-      // right after a tick can never make that same tick fire again (it can
-      // still nudge the *returned* beats/beatPhase back a hair — only the
-      // tick edge is protected). An armed tick establishes lastFloor/
-      // lastBarFloor from this instant without comparing (nothing to
-      // compare a bootstrap/jump against).
-      const tickVal = Math.max(outF, state.lastTickVal);
+      // Ticks: the running max only guards the small backward moves a
+      // "later" nudge causes *between* normal ticks (easing outF back a
+      // hair right after one fired can never make that same tick fire
+      // again — it can still nudge the *returned* beats/beatPhase back a
+      // hair, only the tick edge is protected). An armed tick takes its
+      // baseline from outF itself, not the max: arming means the
+      // underlying clock just jumped (bootstrap, a multiplier change, a
+      // resync, or metronome.ts adopting a fresh, possibly *smaller*
+      // clock.beats on restart — phase-follow's wrapHalf only ever
+      // corrects the fractional beat-line error, so its own beats can sit
+      // whole beats ahead of the clock's when it stops, uncorrected). Using
+      // the stale high-water mark there would baseline lastFloor/
+      // lastBarFloor too high and silence every tick until outF climbed
+      // back past it.
+      const tickVal = state.armed ? outF : Math.max(outF, state.lastTickVal);
       let beatTick = false;
       let barTick = false;
       if (state.armed) {

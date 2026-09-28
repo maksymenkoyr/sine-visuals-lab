@@ -246,6 +246,38 @@ describe("beatTrim adoptFrom/rearm", () => {
   });
 });
 
+describe("beatTrim tick arming (backward jump)", () => {
+  it("ticks resume immediately after rearm() when inBeats jumps backward by several beats", () => {
+    const t = createBeatTrimmer();
+    // Build a running-max high-water mark well above where we're about to
+    // jump back to (mirrors metronome.ts free-running ahead of the clock
+    // before a restart — see animClock.ts's wiring / this file's fix).
+    t.advance(0, 120, IDENTITY);
+    t.advance(10, 120, IDENTITY);
+
+    // rearm() then a call with a much lower inBeats — the same shape as
+    // metroTrim.adoptFrom + rearm() right before metronome.beats jumps
+    // backward to a freshly-adopted, smaller clock.beats.
+    t.rearm();
+    const armedResult = t.advance(3, 120, IDENTITY);
+    expect(armedResult.beatTick).toBe(false); // the arm tick itself never fires
+    expect(armedResult.barTick).toBe(false);
+
+    // Ticks must resume immediately from the NEW (lower) position, not
+    // wait for beats to climb back past the stale high-water mark of 10 —
+    // that would mean many beats of a silent metronome after a restart.
+    const r1 = t.advance(3.5, 120, IDENTITY);
+    expect(r1.beatTick).toBe(false); // still inside beat 3
+    const r2 = t.advance(4.2, 120, IDENTITY);
+    expect(r2.beatTick).toBe(true); // crossed from beat 3 into beat 4
+    expect(r2.barTick).toBe(true); // and from bar 0 into bar 1 (floor(3.5/4)=0 -> floor(4.2/4)=1)
+    const r3 = t.advance(5.1, 120, IDENTITY);
+    expect(r3.beatTick).toBe(true); // crossed from beat 4 into beat 5 — well
+    // below the old high-water mark of 10, proving the clamp isn't still
+    // holding ticks back.
+  });
+});
+
 describe("metronome trimmer wiring mirrors animClock.ts's own pattern (identity)", () => {
   it("ticks and beats match the raw metronome's own beatTick/barTick/beats exactly through start/stop/restart", () => {
     const metronome: Metronome = createMetronome();
@@ -263,8 +295,15 @@ describe("metronome trimmer wiring mirrors animClock.ts's own pattern (identity)
     // to survive.
     let fakeClockBeats = 0;
 
-    function tick(bpm: number, tempoLock: number, rawBpm: number): void {
-      fakeClockBeats += DT * (bpm > 0 ? bpm / 60 : 0);
+    // clockGrowthBpm defaults to bpm (the original, still-used shape for
+    // every call below except the free-run stretch added at the end) —
+    // passing 0 there freezes fakeClockBeats for a tick while metronome
+    // itself keeps advancing at `bpm`, the same divergence phase-follow's
+    // wrapHalf can leave permanently uncorrected in real operation (it only
+    // ever measures the *fractional* beat-line error — see beatTrim.ts's
+    // fix comment on the tick-arming bug this reproduces).
+    function tick(bpm: number, tempoLock: number, rawBpm: number, clockGrowthBpm = bpm): void {
+      fakeClockBeats += DT * (clockGrowthBpm > 0 ? clockGrowthBpm / 60 : 0);
       const clockInput = { bpm, beats: fakeClockBeats, tempoLock };
       metronome.advance(DT, clockInput, rawBpm);
       clockTrim.advance(fakeClockBeats, bpm, s);
@@ -292,5 +331,24 @@ describe("metronome trimmer wiring mirrors animClock.ts's own pattern (identity)
     for (let i = 0; i < settleSteps; i++) tick(140, 1, 140);
     expect(metronome.running).toBe(true);
     for (let i = 0; i < runSteps; i++) tick(140, 1, 140);
+
+    // Now let the metronome free-run *ahead* of the clock by >1 beat before
+    // stopping (tempoLock 0 keeps phase-follow dark for this stretch, so
+    // nothing pulls it back) and restart — the restart's freshly-adopted
+    // clock.beats then sits several whole beats *below* the metronome's own
+    // frozen count, exactly the shape metronome.ts's `beats = clock.beats`
+    // produces for real (see beatTrim.ts's fix comment). Every tick,
+    // including every one right after this restart, must still match the
+    // raw metronome exactly — this is what the tick-arming bug broke.
+    const driftSteps = Math.round(2 / DT); // ~2s at 140bpm ≈ 4.67 beats
+    for (let i = 0; i < driftSteps; i++) tick(140, 0, 140, 0); // clock frozen, metronome keeps ticking
+    expect(metronome.beats - fakeClockBeats).toBeGreaterThan(1); // sanity: real drift, not a rounding artifact
+
+    for (let i = 0; i < settleSteps; i++) tick(0, 0, 0);
+    expect(metronome.running).toBe(false);
+
+    for (let i = 0; i < settleSteps; i++) tick(100, 0, 100);
+    expect(metronome.running).toBe(true);
+    for (let i = 0; i < runSteps; i++) tick(100, 1, 100);
   });
 });
