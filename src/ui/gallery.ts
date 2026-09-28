@@ -184,7 +184,10 @@ const stylesheet = `
 .gal-shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(5,7,10,.7), transparent 40%); pointer-events: none; }
 .gal-over { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
 /* Name + this scene's own version (src/render/sceneVersions.ts), on one row:
- * the name ellipsizes first, the version never truncates (gal-ver is flex:none). */
+ * the name ellipsizes first, the version never truncates (gal-scene-ver is
+ * flex:none). Named gal-scene-ver, not gal-ver, to stay clear of the
+ * footer's own .gal-ver (the *build's* version link, below) — same class,
+ * different element, would otherwise silently restyle one from the other. */
 .gal-name { font: 400 14px/1 ${FONT_LABEL}; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
 .gal-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .gal-reason {
@@ -202,8 +205,8 @@ const stylesheet = `
 /* A scene's own version, small and dim beside its name — never truncated
  * (flex: none, so the name's ellipsis absorbs any overflow instead). A
  * "+dev" suffix (uncommitted changes to that scene) reads in BANDS_AMBER. */
-.gal-ver { font: 400 10px ${FONT_MONO}; letter-spacing: .06em; color: rgba(255,255,255,.4); flex: none; }
-.gal-ver-dev { color: ${BANDS_AMBER}; }
+.gal-scene-ver { font: 400 10px ${FONT_MONO}; letter-spacing: .06em; color: rgba(255,255,255,.4); flex: none; }
+.gal-scene-ver-dev { color: ${BANDS_AMBER}; }
 
 .gal-foot {
   display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap;
@@ -263,8 +266,8 @@ function sceneVersionBadge(sceneId: string): HTMLElement | null {
   const version = sceneVersionOf(sceneId);
   if (!version) return null;
   const isDev = version.endsWith("+dev");
-  const badge = el("span", "gal-ver", isDev ? version.slice(0, -"+dev".length) : version);
-  if (isDev) badge.appendChild(el("span", "gal-ver-dev", "+dev"));
+  const badge = el("span", "gal-scene-ver", isDev ? version.slice(0, -"+dev".length) : version);
+  if (isDev) badge.appendChild(el("span", "gal-scene-ver-dev", "+dev"));
   return badge;
 }
 
