@@ -201,11 +201,25 @@ export interface PairWords {
   showRelations: boolean;
   layers: Record<PairLayer, LayerWords>;
   ui: {
+    /** The Smell/Touch switch row's own `.vc-label` title (pairPads.ts's card
+     *  row grammar, 2026-09-28) — shown even on a family with no Touch table
+     *  (`tables.touch` omitted), whose row then carries only the hint. */
+    layer: string;
     ownTrail: string;
     /** Replaces the own-trail strip on the Touch layer, which has no
      *  own-strain meaning (`defineItemPairs`'s `diagonal: false`). */
     ownNote: string;
+    /** The own-trail row's `.vc-hint` — hidden until that row wakes
+     *  (hover/focus), same as every other row's hint (controlsTheme.ts's
+     *  `.vc-row:hover .vc-hint`). */
+    ownHint: string;
     pairs: string;
+    /** The pairs row's `.vc-hint`. The status line itself (`statusIdle`
+     *  below and its live readings) stays outside the hint and always
+     *  visible — a value read only while a row happens to be hovered would
+     *  be unreadable mid-drag if the pointer ever left the row's box while
+     *  captured. */
+    pairsHint: string;
     /** Shown in the status line while no pad has focus/hover/drag. */
     statusIdle: string;
     random: Record<PairLayer, string>;
@@ -218,6 +232,11 @@ export interface PairWords {
     customMix: string;
     /** A pad square's `aria-label` template (`{A}`/`{B}`). */
     padAria: string;
+    /** The mix row's own `.vc-label` title, above Random/Nudge/Keep own
+     *  trails/Back and the preset pills. */
+    mixTitle: string;
+    /** The mix row's `.vc-hint`. */
+    mixHint: string;
   };
 }
 
@@ -280,9 +299,12 @@ export const PAIR_WORDS: PairWords = {
     },
   },
   ui: {
+    layer: "Layer",
     ownTrail: "Own trail",
     ownNote: "Each strain always lays its own trail. Touch is only about everyone else's.",
+    ownHint: "Drag a strain's own fader: up follows more of its own trail, down less.",
     pairs: "Pairs",
+    pairsHint: "Drag inside a pad to set both directions at once — across is the first strain's pull on the second, up is the reverse.",
     statusIdle: "Hover or drag a pad to read both directions, in both tables.",
     random: { smell: "Random smell", touch: "Random touch" },
     nudge: "Nudge",
@@ -292,6 +314,8 @@ export const PAIR_WORDS: PairWords = {
     presetsTouch: "With touch",
     customMix: "Custom mix — not one of the experiments above.",
     padAria: "{A} and {B}",
+    mixTitle: "Mix",
+    mixHint: "Random rerolls the table on screen, Nudge jitters it, Back undoes the last change — presets below jump to a named starting point.",
   },
 };
 
