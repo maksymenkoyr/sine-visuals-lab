@@ -190,6 +190,22 @@ export function displayLevel(measure: PictureMeasure, raw: number | null): numbe
   return Math.min(1, Math.max(0, raw / measure.fullScale));
 }
 
+/** The Master card's folded Picture block's one combined number — the plain
+ *  mean of every measure's display level (displayLevel above), skipping the
+ *  ones with no reading yet; null only when none has one. A plain mean
+ *  because no measure outranks another in "how intense": a dark, busy frame
+ *  and a bright, still one are both somewhere in the middle. */
+export function overallLevel(levels: readonly (number | null)[]): number | null {
+  let sum = 0;
+  let n = 0;
+  for (const v of levels) {
+    if (v === null) continue;
+    sum += v;
+    n++;
+  }
+  return n > 0 ? sum / n : null;
+}
+
 /** Feeds one thumbnail per call, in order, and keeps exactly the state the
  *  next call's Motion/Flashes need — see createPictureMeter. */
 export interface PictureMeter {
