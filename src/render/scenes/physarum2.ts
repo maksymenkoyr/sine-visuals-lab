@@ -12,6 +12,7 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 import { composeSettings, defineItemPairs, defineItems } from "../sceneItems.ts";
 import { packUnit, createBeatSeeder, type BeatSeeder } from "./physarum.ts";
 import { AFFINITY_PRESETS, ATTRACT_ROWS, PAIR_WORDS, packTouch, smellWeight } from "./physarum2Affinity.ts";
+import { createSynergyTracker, wrapTurn } from "./physarum2Synergy.ts";
 export { ATTRACT_ROWS };
 
 // Physarum 2: a second slime-mould scene, after Michael Fogleman's
@@ -318,6 +319,40 @@ const TURN_DEG_MAX = 120; // min is 0
 const STRIDE_MIN = 0.2;
 const STRIDE_MAX = 2;
 
+// Sensor angle is a plain slider in degrees (right = a wider fan of sensors);
+// its default per strain is that strain's own STRAINS.sensorAngleRad, so the
+// shipped look is unchanged.
+export const ANGLE_MIN_DEG = 5;
+export const ANGLE_MAX_DEG = 120;
+// Trail life: slider 0..1, right = the trail lasts longer. It scales the
+// global Trail decay for this strain's channel by 2^(±LIFE_OCTAVES) across the
+// slider, exactly 1 at the middle (LIFE_DEFAULT) so the default reproduces the
+// shared decay.
+const LIFE_OCTAVES = 1.5;
+export const LIFE_DEFAULT = 0.5;
+/** The multiplier on a strain's evaporation rate for a Trail life slider
+ *  value — 1 at LIFE_DEFAULT, below 1 (slower evaporation) to the right. */
+export function lifeToDecayMul(life: number): number {
+  return Math.pow(2, (LIFE_DEFAULT - clamp01(life)) * 2 * LIFE_OCTAVES);
+}
+
+// Headcount: the split of agents between strains is a result, not a setting.
+// Each step an agent, with probability SWITCH_MAX * Switching, compares the
+// ink under it *per agent* (a strain's trail there divided by its share of the
+// headcount, so a big strain has to earn its size); if another strain's beats
+// its own by SWITCH_MARGIN it joins that strain, provided that ink is at least
+// SWITCH_MIN_INK (trail units). No strain is left below SWITCH_FLOOR of the
+// agents: nobody leaves one at the floor, and a strain's share is never
+// divided by less than it. Comparing raw ink instead snowballed one strain to
+// 88% (docs/scenes/physarum2/scripts/recruit.mjs is the headless check of this
+// rule). The shares come from a GPU count (POP_FRAG, read back a few times a
+// second) — not tracked in JS, since a strain can now change under any agent.
+export const SWITCHING_DEFAULT = 0.4;
+const SWITCH_MAX = 0.05;
+const SWITCH_MARGIN = 1.5;
+export const SWITCH_FLOOR = 0.04;
+const SWITCH_MIN_INK = 0.03;
+
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
@@ -510,6 +545,10 @@ export interface StrainRawValues {
   turn: number;
   stride: number;
   stain: number;
+  /** Sensor angle in degrees. */
+  angle: number;
+  /** Trail life slider, 0..1. */
+  life: number;
 }
 
 /** A strain's live drive reading for each of the same six controls — the GPU
@@ -530,6 +569,14 @@ export interface StrainDriveValues {
 }
 
 export interface StrainEffective {
+  /** Radians — SIM_FRAG's `cfg.x`. */
+  sensorAngleRad: number;
+  /** Multiplier on the global Trail decay for this strain's channel —
+   *  DIFFUSE_FRAG's `uLifeMul`. */
+  decayMul: number;
+  /** The Stain shift in turns (stored value plus drive), before Synergy —
+   *  `color` below is the base colour rotated by exactly this. */
+  stainShift: number;
   /** Reference-texel units — SIM_FRAG's `cfg.y`. */
   sensorDist: number;
   rotationRad: number;
@@ -554,8 +601,10 @@ export function resolveStrainEffective(k: number, raw: StrainRawValues, drive: S
   const rotationRad = turnSliderToDeg(turnEff) * DEG;
   const strideEff = clamp01(pushToward1(raw.stride, drive.stride));
   const stepDist = strideSliderToDist(strideEff) * surge;
-  const color = hueRotateRGB(strain.color, raw.stain + drive.stain * STAIN_DRIVE_GAIN);
-  return { sensorDist, rotationRad, stepDist, feed, color };
+  const stainShift = raw.stain + drive.stain * STAIN_DRIVE_GAIN;
+  const color = hueRotateRGB(strain.color, stainShift);
+  const sensorAngleRad = Math.max(ANGLE_MIN_DEG, Math.min(ANGLE_MAX_DEG, raw.angle)) * DEG;
+  return { sensorAngleRad, decayMul: lifeToDecayMul(raw.life), stainShift, sensorDist, rotationRad, stepDist, feed, color };
 }
 
 // ---------------------------------------------------------------------
@@ -565,6 +614,18 @@ export function resolveStrainEffective(k: number, raw: StrainRawValues, drive: S
 
 export function equalPopulation(count: number): number[] {
   return new Array(count).fill(1 / count);
+}
+
+/** The measured headcount: POP_FRAG writes, per block of agent texels, the
+ *  fraction of that block in each strain (RGBA8, channel k = strain k);
+ *  averaging every block and normalising gives each strain's share of all
+ *  agents. Falls back to an equal split for an empty/all-zero buffer. Pure and
+ *  tested on a synthetic buffer. */
+export function populationFromBlocks(buf: ArrayLike<number>, cellCount: number, count: number): number[] {
+  const sums = new Array<number>(count).fill(0);
+  for (let i = 0; i < cellCount; i++) for (let k = 0; k < count; k++) sums[k]! += (buf[i * 4 + k] ?? 0) / 255;
+  const total = sums.reduce((a, b) => a + b, 0);
+  return total > 0 ? sums.map((v) => v / total) : equalPopulation(count);
 }
 
 /** `pop_k <- pop_k*(1-d) + (k===strain ? d : 0)` — matches, in expectation,
@@ -755,6 +816,31 @@ const stainSettings = defineItems("strain", SPECIES_COUNT, {
   drive: { default: (k) => STRAIN_BAND_SIGNALS[k]!, gain: STAIN_JACK_GAIN },
 });
 
+// Sensor angle and Trail life have no jack (plain sliders): neither was ever
+// audio-driven, and the Strain Console (src/ui/widgets/strainConsole.ts) is
+// where they live.
+const angleSettings = defineItems("strain", SPECIES_COUNT, {
+  key: "angle",
+  label: "Sensor angle",
+  description: "How wide apart this strain's left and right sensors look, in degrees — with Turn angle it decides the pattern it grows",
+  group: "Form",
+  min: ANGLE_MIN_DEG,
+  max: ANGLE_MAX_DEG,
+  step: 1,
+  default: (k) => Math.round(STRAINS[k]!.sensorAngleRad / DEG),
+});
+
+const lifeSettings = defineItems("strain", SPECIES_COUNT, {
+  key: "life",
+  label: "Trail life",
+  description: "How long this strain's trail lasts before it evaporates — more keeps its roads longer",
+  group: "Form",
+  min: 0,
+  max: 1,
+  step: 0.02,
+  default: LIFE_DEFAULT, // the shared Trail decay, unchanged
+});
+
 const attSettings = defineItemPairs("strain", SPECIES_COUNT, {
   key: "att",
   label: (i, j) => (i === j ? `${STRAINS[i]!.code} → own trail` : `${STRAINS[i]!.code} → ${STRAINS[j]!.code}`),
@@ -806,6 +892,8 @@ const STRAIN_ITEM_SETTINGS: readonly SceneSetting[] = [
   ...turnSettings,
   ...strideSettings,
   ...stainSettings,
+  ...angleSettings,
+  ...lifeSettings,
   ...attSettings,
   ...touchSettings,
 ];
@@ -886,6 +974,17 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
     drive: { default: "scene", sceneLabel: "Scene: a rise in the beat pulse (bonus on a raw onset)", sceneSources: ["feature.onset"] },
   },
   {
+    key: "switching",
+    label: "Switching",
+    description:
+      "How readily an agent joins the strain whose ink outweighs its own where it stands, so the headcount follows the settings — 0 keeps every agent in its strain",
+    group: "Motion",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: SWITCHING_DEFAULT,
+  },
+  {
     key: "seedSpread",
     label: "Spread",
     description: "Radius of the disc a beat's reseed, or the pipette's injection, lands agents in",
@@ -920,6 +1019,17 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { loudness: 0.2 },
+  },
+  {
+    key: "synergy",
+    label: "Synergy",
+    description:
+      "Pulls the four stains toward the nearest colour harmony — 0 shows them as set, 1 snaps them onto it (the stains you set are kept)",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0,
   },
   {
     key: "paletteMix",
@@ -1076,6 +1186,9 @@ uniform float uNoiseSeed;
 // four components, one array entry per *victim* channel j.
 uniform sampler2D uFootprint;
 uniform float uEatOn;
+// Per-strain Trail life: each channel's evaporation is the shared Trail decay
+// times this strain's own multiplier (lifeToDecayMul) — 1 at the default.
+uniform vec4 uLifeMul;
 uniform vec4 uEatCol[${SPECIES_COUNT}];
 ${PHYSARUM2_GLSL}
 
@@ -1109,8 +1222,8 @@ void main() {
 
   // Evaporate: multiply, then subtract a floor — physarum.ts's file header
   // covers why a bare multiply stalls in 8-bit.
-  float decay = mix(DECAY_MIN, DECAY_MAX, uDecay);
-  vec4 trail = max(vec4(0.0), sum * (1.0 - decay) - EVAP_FLOOR);
+  vec4 decay = clamp(vec4(mix(DECAY_MIN, DECAY_MAX, uDecay)) * uLifeMul, 0.0, 0.95);
+  vec4 trail = max(vec4(0.0), sum * (vec4(1.0) - decay) - EVAP_FLOOR);
 
   // Touch's eating — see the file header's Touch paragraph: n_i strain-i
   // landings here last step (exact integers in RGBA8); channel j keeps
@@ -1155,8 +1268,16 @@ uniform float uInjectX;
 uniform float uInjectY;
 uniform float uInjectStrain;
 uniform float uRebalanceFresh;
+// Headcount (see SWITCH_MAX's comment): each strain's current share of all
+// agents, from the last POP_FRAG readback. uSwitching (the setting) is the
+// only thing that turns recruiting on.
+uniform vec4 uPop;
 ${PHYSARUM2_GLSL}
 
+const float SWITCH_MAX = ${SWITCH_MAX.toFixed(4)};
+const float SWITCH_MARGIN = ${SWITCH_MARGIN.toFixed(4)};
+const float SWITCH_FLOOR = ${SWITCH_FLOOR.toFixed(4)};
+const float SWITCH_MIN_INK = ${SWITCH_MIN_INK.toFixed(4)};
 const float SCALE_MIN = ${SCALE_MIN.toFixed(4)};
 const float SCALE_MAX = ${SCALE_MAX.toFixed(4)};
 const float SEED_SPREAD_MIN = ${SEED_SPREAD_MIN.toFixed(4)};
@@ -1193,6 +1314,28 @@ void main() {
     int side = int(uAgentSide);
     int idx = texel.y * side + texel.x;
     k = idx - (idx / SPECIES_COUNT) * SPECIES_COUNT;
+  }
+
+  // Headcount: an agent may join the strain whose ink per agent, where it
+  // stands, beats its own — see SWITCH_MAX's comment in physarum2.ts. Applied
+  // before sensing, so a recruited agent turns with its NEW strain's motion,
+  // like a rebalanced one. Skipped entirely at Switching 0, and on the frame a
+  // Rebalance sets every agent's strain by hand.
+  if (uSwitching > 0.0 && uRebalanceFresh < 0.5) {
+    vec2 rseed = vec2(texel) * 0.173 + uNoiseSeed * 1.7 + 3.1;
+    if (hash21(rseed) < SWITCH_MAX * uSwitching && dot(uPop, onehot4(k)) > SWITCH_FLOOR) {
+      vec4 per = texture(uTrail, pos) / (max(uPop, vec4(SWITCH_FLOOR)) * float(SPECIES_COUNT));
+      float own = dot(per, onehot4(k));
+      float bestV = own * SWITCH_MARGIN;
+      int best = k;
+      for (int j = 0; j < SPECIES_COUNT; j++) {
+        if (j != k && per[j] > bestV) {
+          bestV = per[j];
+          best = j;
+        }
+      }
+      if (best != k && bestV > SWITCH_MIN_INK) k = best;
+    }
   }
 
   vec4 cfg = speciesConfig(k);
@@ -1471,6 +1614,34 @@ void main() {
 }
 `;
 
+// Headcount count: each fragment covers one block of agent texels and writes
+// the fraction of them in each strain (channel k = strain k); populationFromBlocks
+// averages the blocks. A block's fraction is quantised to 1/255, which the
+// average over every block washes out.
+const POP_FRAG = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uAgentDir;
+uniform float uAgentSide;
+uniform float uBlock;
+
+void main() {
+  ivec2 outTexel = ivec2(gl_FragCoord.xy);
+  int block = int(uBlock + 0.5);
+  int side = int(uAgentSide + 0.5);
+  vec4 sum = vec4(0.0);
+  for (int j = 0; j < block; j++) {
+    for (int i = 0; i < block; i++) {
+      ivec2 t = outTexel * block + ivec2(i, j);
+      if (t.x >= side || t.y >= side) continue;
+      int k = int(floor(texelFetch(uAgentDir, t, 0).b * ${(SPECIES_COUNT - 1).toFixed(1)} + 0.5));
+      sum[k] += 1.0;
+    }
+  }
+  outColor = sum / float(block * block);
+}
+`;
+
 interface AgentSeed {
   pos: Uint8Array;
   dir: Uint8Array;
@@ -1498,6 +1669,92 @@ function seedAgents(side: number): AgentSeed {
     dir[i * 4 + 3] = 0; // unused
   }
   return { pos, dir };
+}
+
+/** A small render target read back without ever stalling the CPU: the target
+ *  is drawn, `readPixels` goes to a PIXEL_PACK_BUFFER (returns immediately),
+ *  and the bytes are only drained once `fenceSync` says the GPU is done — never
+ *  a synchronous readPixels. Territory and Headcount each own one. Built lazily
+ *  on the first `begin`, so a session that never needs it never allocates it. */
+interface PixelReadback {
+  /** A readback is in flight. */
+  readonly busy: boolean;
+  /** The finished pixels the moment they land (once), else null. */
+  poll(gl: WebGL2RenderingContext): Uint8Array | null;
+  /** Binds the target, runs `draw` into it, and starts the readback. */
+  begin(gl: WebGL2RenderingContext, draw: () => void): void;
+  dispose(gl: WebGL2RenderingContext): void;
+}
+
+function createPixelReadback(side: number): PixelReadback {
+  let tex: WebGLTexture | null = null;
+  let fbo: WebGLFramebuffer | null = null;
+  let pbo: WebGLBuffer | null = null;
+  let sync: WebGLSync | null = null;
+  const out = new Uint8Array(side * side * 4);
+  function ensure(gl: WebGL2RenderingContext): void {
+    if (tex && fbo && pbo) return;
+    tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, side, side, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    pbo = gl.createBuffer();
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, side * side * 4, gl.STREAM_READ);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  }
+  return {
+    get busy() {
+      return sync !== null;
+    },
+    poll(gl) {
+      if (!sync) return null;
+      const status = gl.clientWaitSync(sync, 0, 0);
+      if (status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED) {
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+        gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, out);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        gl.deleteSync(sync);
+        sync = null;
+        return out;
+      }
+      if (status === gl.WAIT_FAILED) {
+        gl.deleteSync(sync);
+        sync = null;
+      }
+      return null;
+    },
+    begin(gl, draw) {
+      ensure(gl);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.viewport(0, 0, side, side);
+      draw();
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo);
+      gl.readPixels(0, 0, side, side, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    },
+    dispose(gl) {
+      if (sync) gl.deleteSync(sync);
+      if (fbo) gl.deleteFramebuffer(fbo);
+      if (tex) gl.deleteTexture(tex);
+      if (pbo) gl.deleteBuffer(pbo);
+      sync = null;
+      fbo = null;
+      tex = null;
+      pbo = null;
+    },
+  };
 }
 
 function createPhysarum2Scene(): Scene {
@@ -1552,6 +1809,8 @@ function createPhysarum2Scene(): Scene {
   // Per-strain scratch, resolved fresh every render() call — see the file
   // header's "Uniform budget". Allocated once and reused so a busy render
   // loop never allocates.
+  const strainSensorAngle = new Float32Array(SPECIES_COUNT);
+  const strainStainDrive = new Float32Array(SPECIES_COUNT);
   const strainSensorDist = new Float32Array(SPECIES_COUNT);
   const strainRotationRad = new Float32Array(SPECIES_COUNT);
   const strainStepDist = new Float32Array(SPECIES_COUNT);
@@ -1598,15 +1857,28 @@ function createPhysarum2Scene(): Scene {
   // and only while probe() has been called within the last PROBE_IDLE_MS.
   let territory: number[] = equalPopulation(SPECIES_COUNT);
   let territoryProg: GLProgram | null = null;
-  let territoryTex: WebGLTexture | null = null;
-  let territoryFbo: WebGLFramebuffer | null = null;
-  let territoryPbo: WebGLBuffer | null = null;
-  let territorySync: WebGLSync | null = null;
+  const TERRITORY_SIDE = 16;
+  const territoryRb = createPixelReadback(TERRITORY_SIDE);
   let lastProbeMs = -Infinity;
   let lastTerritoryKickMs = -Infinity;
-  const TERRITORY_SIDE = 16;
   const TERRITORY_INTERVAL_MS = 500;
   const PROBE_IDLE_MS = 2000;
+  // Headcount: the measured share of agents per strain — POP_FRAG's block
+  // fractions, read back every POP_INTERVAL_MS while the panel is open or
+  // Switching is on (recruiting needs the shares even with the panel closed).
+  let popProg: GLProgram | null = null;
+  const POP_SIDE = 32;
+  const popRb = createPixelReadback(POP_SIDE);
+  let lastPopKickMs = -Infinity;
+  const POP_INTERVAL_MS = 250;
+  // Stain Synergy — remembers which stain was set last (see physarum2Synergy.ts).
+  const synergyTracker = createSynergyTracker(STRAINS.map((s) => rgbToHsl(s.color)[0]));
+  const strainLifeMul = new Float32Array(SPECIES_COUNT);
+  const rawStain = new Array<number>(SPECIES_COUNT).fill(0);
+  // The stains as shown (Synergy applied, drive excluded), for probe() — what
+  // the Strain Console grabs when a dragged stain starts from what's on screen.
+  const shownStain = new Float32Array(SPECIES_COUNT);
+  let harmonyIdx = 0;
 
   function samplerLoc(
     gl: WebGL2RenderingContext,
@@ -1726,80 +1998,56 @@ function createPhysarum2Scene(): Scene {
     trailReadIdx = 0;
   }
 
-  /** Lazily creates the 16x16 downsample target + its readback PBO — called
-   *  only the first time a territory readback actually kicks off, so a
-   *  session that never opens the panel (or opens it but never leaves it
-   *  idle long enough for probe() to matter) never allocates them. */
-  function ensureTerritoryTargets(gl: WebGL2RenderingContext): void {
-    if (territoryTex && territoryFbo && territoryPbo) return;
-    territoryTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, territoryTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, TERRITORY_SIDE, TERRITORY_SIDE, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    territoryFbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, territoryFbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, territoryTex, 0);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    territoryPbo = gl.createBuffer();
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, territoryPbo);
-    gl.bufferData(gl.PIXEL_PACK_BUFFER, TERRITORY_SIDE * TERRITORY_SIDE * 4, gl.STREAM_READ);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-  }
-
   /** Territory (Phase 3): polls any in-flight readback (never a blocking
-   *  wait — clientWaitSync with a 0 timeout just asks "is it done yet"), and
-   *  kicks off at most one more every TERRITORY_INTERVAL_MS, only while
-   *  probe() has actually been called within the last PROBE_IDLE_MS — see
-   *  the file header. Never calls gl.readPixels synchronously: the readback
-   *  always targets a bound PIXEL_PACK_BUFFER (returns immediately) and is
-   *  only ever drained through getBufferSubData once fenceSync says the GPU
-   *  is done, so this never stalls the render loop waiting on the GPU. */
+   *  wait — see createPixelReadback), and kicks off at most one more every
+   *  TERRITORY_INTERVAL_MS, only while probe() has actually been called within
+   *  the last PROBE_IDLE_MS — see the file header. */
   function pollTerritory(gl: WebGL2RenderingContext, nowMs: number): void {
-    if (territorySync) {
-      const status = gl.clientWaitSync(territorySync, 0, 0);
-      if (status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED) {
-        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, territoryPbo);
-        const out = new Uint8Array(TERRITORY_SIDE * TERRITORY_SIDE * 4);
-        gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, out);
-        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-        gl.deleteSync(territorySync);
-        territorySync = null;
-        territory = classifyTerritory(out, TERRITORY_SIDE * TERRITORY_SIDE, SPECIES_COUNT);
-      } else if (status === gl.WAIT_FAILED) {
-        gl.deleteSync(territorySync);
-        territorySync = null;
-      }
-      return; // one readback in flight at a time
-    }
+    const done = territoryRb.poll(gl);
+    if (done) territory = classifyTerritory(done, TERRITORY_SIDE * TERRITORY_SIDE, SPECIES_COUNT);
+    if (done || territoryRb.busy) return; // one readback in flight at a time
     if (nowMs - lastProbeMs > PROBE_IDLE_MS) return;
     if (nowMs - lastTerritoryKickMs < TERRITORY_INTERVAL_MS) return;
     if (!territoryProg || !quadVao || trailSideCur === 0) return;
-    ensureTerritoryTargets(gl);
-    if (!territoryTex || !territoryFbo || !territoryPbo) return;
     lastTerritoryKickMs = nowMs;
-
     const block = Math.max(1, Math.floor(trailSideCur / TERRITORY_SIDE));
-    gl.bindFramebuffer(gl.FRAMEBUFFER, territoryFbo);
-    gl.viewport(0, 0, TERRITORY_SIDE, TERRITORY_SIDE);
-    territoryProg.use();
-    territoryProg.setF("uTrailSide", trailSideCur);
-    territoryProg.setF("uBlock", block);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
-    gl.uniform1i(samplerLoc(gl, territoryProg, "terr.uTrail", "uTrail"), 0);
-    drawFullscreenQuad(gl, quadVao);
+    const prog = territoryProg;
+    const quad = quadVao;
+    territoryRb.begin(gl, () => {
+      prog.use();
+      prog.setF("uTrailSide", trailSideCur);
+      prog.setF("uBlock", block);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
+      gl.uniform1i(samplerLoc(gl, prog, "terr.uTrail", "uTrail"), 0);
+      drawFullscreenQuad(gl, quad);
+    });
+  }
 
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, territoryPbo);
-    gl.readPixels(0, 0, TERRITORY_SIDE, TERRITORY_SIDE, gl.RGBA, gl.UNSIGNED_BYTE, 0);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    territorySync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindTexture(gl.TEXTURE_2D, null);
+  /** Headcount: the same non-blocking readback as territory, over the agents'
+   *  strain channel (POP_FRAG). Runs while the panel is open (probe() called
+   *  recently) or while Switching is on — recruiting reads the shares every
+   *  step, panel or not. */
+  function pollPopulation(gl: WebGL2RenderingContext, nowMs: number, recruiting: boolean): void {
+    const done = popRb.poll(gl);
+    if (done) population = populationFromBlocks(done, POP_SIDE * POP_SIDE, SPECIES_COUNT);
+    if (done || popRb.busy) return;
+    if (!recruiting && nowMs - lastProbeMs > PROBE_IDLE_MS) return;
+    if (nowMs - lastPopKickMs < POP_INTERVAL_MS) return;
+    if (!popProg || !quadVao) return;
+    lastPopKickMs = nowMs;
+    const block = Math.max(1, Math.ceil(agentSide / POP_SIDE));
+    const prog = popProg;
+    const quad = quadVao;
+    popRb.begin(gl, () => {
+      prog.use();
+      prog.setF("uAgentSide", agentSide);
+      prog.setF("uBlock", block);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, agentDirTex[agentRead]);
+      gl.uniform1i(samplerLoc(gl, prog, "pop.uAgentDir", "uAgentDir"), 0);
+      drawFullscreenQuad(gl, quad);
+    });
   }
 
   /** Resolves every per-strain setting for this frame into the scratch
@@ -1820,7 +2068,10 @@ function createPhysarum2Scene(): Scene {
         turn: resolveSceneSetting(ID, turnSettings[k]!),
         stride: resolveSceneSetting(ID, strideSettings[k]!),
         stain: resolveSceneSetting(ID, stainSettings[k]!),
+        angle: resolveSceneSetting(ID, angleSettings[k]!),
+        life: resolveSceneSetting(ID, lifeSettings[k]!),
       };
+      rawStain[k] = raw.stain;
       // Each sceneDefault is the reading that control's own default equals —
       // the strain's band, times the jack's own gain — so a stale stored
       // "scene" preference, or PASSTHROUGH_DRIVES (no engine at all), behaves
@@ -1841,18 +2092,32 @@ function createPhysarum2Scene(): Scene {
       vigour[k] = drive.nutrient;
       liveDrive[k] = drive;
       const eff = resolveStrainEffective(k, raw, drive);
+      strainSensorAngle[k] = eff.sensorAngleRad;
+      strainLifeMul[k] = eff.decayMul;
       strainSensorDist[k] = eff.sensorDist;
       strainRotationRad[k] = eff.rotationRad;
       strainStepDist[k] = eff.stepDist;
       strainFeed[k] = eff.feed;
-      strainColor[k * 3] = eff.color[0];
-      strainColor[k * 3 + 1] = eff.color[1];
-      strainColor[k * 3 + 2] = eff.color[2];
+      strainStainDrive[k] = eff.stainShift - raw.stain;
 
       for (let j = 0; j < SPECIES_COUNT; j++) {
         attRow[k * SPECIES_COUNT + j] = smellWeight(resolveSceneSetting(ID, attSpecAt(k, j)), k, j, rivalry);
         touchVal[k * SPECIES_COUNT + j] = k === j ? 0 : resolveSceneSetting(ID, touchSpecAt(k, j)!);
       }
+    }
+    // Stain Synergy: the stored stains pulled toward the nearest harmony. At
+    // Synergy 0 the shift comes back exactly as stored, so the colour below is
+    // bit-identical to `eff.color`. The drive's own (band-driven) term rides on
+    // top of the pulled stain, as it always rode on the stored one.
+    const synergy = resolveSceneSetting(ID, settingFor("synergy"));
+    const pulled = synergyTracker.update(rawStain, synergy);
+    harmonyIdx = pulled.harmony;
+    for (let k = 0; k < SPECIES_COUNT; k++) {
+      shownStain[k] = pulled.shift[k]!;
+      const color = hueRotateRGB(STRAINS[k]!.color, pulled.shift[k]! + strainStainDrive[k]!);
+      strainColor[k * 3] = color[0];
+      strainColor[k * 3 + 1] = color[1];
+      strainColor[k * 3 + 2] = color[2];
     }
     eatOn = packTouch(touchVal, SPECIES_COUNT, touchFeedRows, eatCols);
   }
@@ -1871,6 +2136,7 @@ function createPhysarum2Scene(): Scene {
       depositProgMrt = createProgram(gl, depositFragSrc(true), depositVertSrc(true));
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
       territoryProg = createProgram(gl, TERRITORY_FRAG);
+      popProg = createProgram(gl, POP_FRAG);
       samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
       // No vertex attributes at all — every agent is addressed by
@@ -1907,16 +2173,17 @@ function createPhysarum2Scene(): Scene {
       seedEpoch = 0;
       stepAcc = 0;
 
-      // Phase 3 state — see the file header. territoryTex/Fbo/Pbo are
-      // created lazily (ensureTerritoryTargets) the first time a readback is
-      // actually kicked off; dispose() frees them, so a fresh init() never
-      // needs to free a previous run's own.
+      // Phase 3 state — see the file header. The territory and headcount
+      // readback targets (createPixelReadback) are created lazily the first
+      // time one is actually kicked off; dispose() frees them, so a fresh
+      // init() never needs to free a previous run's own.
       population = equalPopulation(SPECIES_COUNT);
       territory = new Array(SPECIES_COUNT).fill(0);
       pendingInject = null;
       pendingRebalance = false;
       lastProbeMs = -Infinity;
       lastTerritoryKickMs = -Infinity;
+      lastPopKickMs = -Infinity;
       lastViewport = FULL_VIEWPORT;
       lastResW = gl.drawingBufferWidth || 1;
       lastResH = gl.drawingBufferHeight || 1;
@@ -1977,6 +2244,7 @@ function createPhysarum2Scene(): Scene {
       uploadCommonUniforms(diffuseProg, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
       diffuseProg.setF("uTrailSide", trailSideCur);
       diffuseProg.setV4v("uEatCol", eatCols);
+      diffuseProg.setV4("uLifeMul", strainLifeMul[0]!, strainLifeMul[1]!, strainLifeMul[2]!, strainLifeMul[3]!);
       gl.uniform1i(samplerLoc(gl, diffuseProg, "diff.uTrailIn", "uTrailIn"), 0);
       gl.uniform1i(samplerLoc(gl, diffuseProg, "diff.uFootprint", "uFootprint"), 1);
 
@@ -1984,8 +2252,7 @@ function createPhysarum2Scene(): Scene {
       uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
       simProg.setF("uSeedEpoch", seedEpoch);
       for (let k = 0; k < SPECIES_COUNT; k++) {
-        const strain = STRAINS[k]!;
-        simProg.setV4(`uSpecies[${k}]`, strain.sensorAngleRad, strainSensorDist[k]!, strainRotationRad[k]!, strainStepDist[k]!);
+        simProg.setV4(`uSpecies[${k}]`, strainSensorAngle[k]!, strainSensorDist[k]!, strainRotationRad[k]!, strainStepDist[k]!);
         simProg.setV4(
           `uAttractRow[${k}]`,
           attRow[k * SPECIES_COUNT]!,
@@ -1995,6 +2262,7 @@ function createPhysarum2Scene(): Scene {
         );
       }
       simProg.setF("uAgentSide", agentSide);
+      simProg.setV4("uPop", population[0]!, population[1]!, population[2]!, population[3]!);
       // Phase 3's one-shots (constant across every step this frame runs;
       // only uInjectFresh/uRebalanceFresh below vary, gated to the frame's
       // first step) — see the file header's command() paragraphs.
@@ -2095,7 +2363,9 @@ function createPhysarum2Scene(): Scene {
       // another, using the freshest trail this frame produced — see the file
       // header and pollTerritory's own doc comment. Never affects the
       // uniforms/bindings the composite pass below sets up itself.
-      pollTerritory(gl, performance.now());
+      const nowMs = performance.now();
+      pollTerritory(gl, nowMs);
+      pollPopulation(gl, nowMs, resolveSceneSetting(ID, settingFor("switching")) > 0);
 
       // 4. Composite to the default framebuffer — always, even when this
       //    frame owed zero steps (the picture just doesn't advance).
@@ -2143,6 +2413,12 @@ function createPhysarum2Scene(): Scene {
       // mirror (pairPads.ts): the counter steps once per reseed, with the
       // share moved (Dose) and the disc radius (Spread, field-unit) that
       // reseed used, both as resolved (Auto included), not as stored.
+      // Synergy: each stain as shown (the set shift pulled toward the
+      // harmony, in turns, wrapped to the Stain slider's -0.5..0.5) and which
+      // harmony (an index into physarum2Synergy.ts's HARMONIES) — the Strain
+      // Console starts a dragged stain from what is on screen.
+      for (let k = 0; k < SPECIES_COUNT; k++) out[`shownStain${k}`] = wrapTurn(shownStain[k]!);
+      out.harmony = harmonyIdx;
       out.seedEpoch = seedEpoch;
       out.seedDose = resolveSceneSetting(ID, settingFor("seed"));
       out.seedRadius = seedSpreadSliderToRadius(resolveSceneSetting(ID, settingFor("seedSpread")));
@@ -2174,6 +2450,7 @@ function createPhysarum2Scene(): Scene {
       depositProgMrt?.dispose();
       compositeProg?.dispose();
       territoryProg?.dispose();
+      popProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
       if (depositVao) gl.deleteVertexArray(depositVao);
       for (let i = 0; i < 2; i++) {
@@ -2185,14 +2462,8 @@ function createPhysarum2Scene(): Scene {
         agentDirTex[i] = null;
       }
       freeTrailTargets(gl);
-      if (territorySync) gl.deleteSync(territorySync);
-      if (territoryFbo) gl.deleteFramebuffer(territoryFbo);
-      if (territoryTex) gl.deleteTexture(territoryTex);
-      if (territoryPbo) gl.deleteBuffer(territoryPbo);
-      territorySync = null;
-      territoryFbo = null;
-      territoryTex = null;
-      territoryPbo = null;
+      territoryRb.dispose(gl);
+      popRb.dispose(gl);
       samplerLocs.clear();
       diffuseProg = null;
       simProg = null;
@@ -2200,6 +2471,7 @@ function createPhysarum2Scene(): Scene {
       depositProgMrt = null;
       compositeProg = null;
       territoryProg = null;
+      popProg = null;
       quadVao = null;
       depositVao = null;
       lastFrameTime = null;
