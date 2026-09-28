@@ -3,10 +3,15 @@ import {
   buildRequest,
   candidateParagraphs,
   chunk,
+  costUsd,
+  JEV_USD_PER_MTOK,
   MAX_QUESTIONS,
+  parseVerdicts,
   splitParagraphs,
+  summarizeRuns,
   touchedNames,
 } from "../tools/docCheckLib.mjs";
+import type { Judgment, Run, Verdict } from "../tools/docCheckLib.d.mts";
 
 describe("splitParagraphs", () => {
   it("splits on blank lines and reports the 1-based line of the first line", () => {
@@ -165,5 +170,167 @@ describe("chunk", () => {
 
   it("exposes MAX_QUESTIONS as the request batch cap", () => {
     expect(MAX_QUESTIONS).toBe(60);
+  });
+});
+
+describe("costUsd", () => {
+  it("prices input tokens at the Jev rate, output tokens free", () => {
+    expect(costUsd(1_000_000)).toBeCloseTo(JEV_USD_PER_MTOK);
+    expect(costUsd(0)).toBe(0);
+  });
+
+  it("scales linearly for a partial million", () => {
+    expect(costUsd(500_000)).toBeCloseTo(JEV_USD_PER_MTOK / 2);
+  });
+});
+
+describe("parseVerdicts", () => {
+  it("parses ref=value pairs into a map", () => {
+    expect(parseVerdicts(["docs/x.md:12=stale", "AGENTS.md:5=fine"])).toEqual({
+      "docs/x.md:12": "stale",
+      "AGENTS.md:5": "fine",
+    });
+  });
+
+  it("throws on a value that isn't stale/fine/missed", () => {
+    expect(() => parseVerdicts(["docs/x.md:12=maybe"])).toThrow();
+  });
+
+  it("throws on an arg with no =", () => {
+    expect(() => parseVerdicts(["docs/x.md:12"])).toThrow();
+  });
+
+  it("splits on the LAST = so a ref containing : or = still works", () => {
+    // A ref is "doc:line"; splitting on the last "=" keeps that intact even
+    // if a path segment happened to contain "=".
+    expect(parseVerdicts(["docs/a=b.md:7=missed"])).toEqual({ "docs/a=b.md:7": "missed" });
+  });
+});
+
+describe("summarizeRuns", () => {
+  function judgment(ref: string, opts: { p?: number; flagged?: boolean } = {}): Judgment {
+    const [doc, line] = ref.split(":");
+    return {
+      ref,
+      doc,
+      line: Number(line),
+      file: "src/foo.ts",
+      names: ["foo"],
+      p: opts.p ?? 0.9,
+      flagged: opts.flagged ?? true,
+      hash: "abc1234567",
+      excerpt: "…",
+    };
+  }
+
+  // Builds a minimal judged run; `verdicts` is the run's own recorded map,
+  // keyed by judgment ref, the way `--verdict` writes it.
+  function judgedRun(judgments: Judgment[], verdicts: Record<string, Verdict> = {}, overrides: Partial<Run> = {}): Run {
+    return {
+      id: "20260928-000000",
+      at: "2026-09-28T00:00:00.000Z",
+      mode: "judged",
+      branch: "main",
+      head: "abc123",
+      base: "origin/main",
+      threshold: 0.5,
+      model: "jev-1.13",
+      files: ["src/foo.ts"],
+      requests: [{ n: 0, file: "src/foo.ts", questions: judgments.length, inputTokens: 1000, ms: 500, attempts: 1, model: "jev-1.13" }],
+      judgments,
+      totals: {
+        candidates: judgments.length,
+        flagged: judgments.filter((j) => j.flagged).length,
+        inputTokens: 1000,
+        costUsd: costUsd(1000),
+        ms: 500,
+        candidateChars: 100,
+        flaggedChars: judgments.some((j) => j.flagged) ? 60 : 0,
+      },
+      verdicts,
+      ...overrides,
+    };
+  }
+
+  function unjudgedRun(overrides: Partial<Run> = {}): Run {
+    return {
+      id: "u1",
+      at: "2026-09-28T00:00:00.000Z",
+      mode: "unjudged",
+      branch: "main",
+      head: "abc123",
+      base: "origin/main",
+      threshold: 0.5,
+      model: null,
+      files: ["src/foo.ts"],
+      requests: [],
+      judgments: [],
+      totals: { candidates: 3, flagged: 0, inputTokens: 0, costUsd: 0, ms: 0, candidateChars: 300, flaggedChars: 0 },
+      verdicts: {},
+      ...overrides,
+    };
+  }
+
+  it("counts runs by mode and collects distinct models", () => {
+    const runs = [judgedRun([judgment("docs/a.md:1")]), unjudgedRun({ id: "20260928-000001" })];
+    const s = summarizeRuns(runs);
+    expect(s.runs).toEqual({ total: 2, judged: 1, unjudged: 1, models: ["jev-1.13"] });
+  });
+
+  it("excludes unjudged runs from token/latency totals and averages", () => {
+    const s = summarizeRuns([unjudgedRun()]);
+    expect(s.totals.inputTokens).toBe(0);
+    expect(s.totals.meanRequestMs).toBeNull();
+    expect(s.totals.maxRequestMs).toBeNull();
+    expect(s.totals.costPerRunUsd).toBeNull();
+  });
+
+  it("computes precision from flagged judgments with stale/fine verdicts", () => {
+    const runs = [
+      judgedRun(
+        [judgment("docs/a.md:1"), judgment("docs/b.md:2"), judgment("docs/c.md:3")],
+        { "docs/a.md:1": "stale", "docs/b.md:2": "stale", "docs/c.md:3": "fine" },
+      ),
+    ];
+    const s = summarizeRuns(runs);
+    expect(s.effectiveness.hasVerdicts).toBe(true);
+    expect(s.effectiveness.precision).toBeCloseTo(2 / 3);
+    expect(s.effectiveness.falsePositiveCount).toBe(1);
+  });
+
+  it("counts a missed verdict and an unflagged-but-stale judgment as misses", () => {
+    const runs = [
+      judgedRun(
+        [judgment("docs/a.md:1", { flagged: false, p: 0.1 })],
+        { "docs/a.md:1": "stale", "docs/never-flagged.md:99": "missed" },
+      ),
+    ];
+    const s = summarizeRuns(runs);
+    expect(s.effectiveness.misses).toBe(2);
+    expect(s.effectiveness.staleUnflaggedCount).toBe(1);
+  });
+
+  it("reports n/a-shaped output when no verdicts exist", () => {
+    const runs = [judgedRun([judgment("docs/a.md:1")])];
+    const s = summarizeRuns(runs);
+    expect(s.effectiveness.hasVerdicts).toBe(false);
+    expect(s.effectiveness.precision).toBeNull();
+    expect(s.calibration.every((b) => b.count === 0)).toBe(true);
+  });
+
+  it("buckets calibration by p, including p=1 in the top bucket", () => {
+    const runs = [
+      judgedRun(
+        [judgment("docs/a.md:1", { p: 0.1 }), judgment("docs/b.md:2", { p: 1 }), judgment("docs/c.md:3", { p: 0.85 })],
+        { "docs/a.md:1": "fine", "docs/b.md:2": "stale", "docs/c.md:3": "stale" },
+      ),
+    ];
+    const s = summarizeRuns(runs);
+    const low = s.calibration.find((b) => b.bucket === "[0,.2)")!;
+    const top = s.calibration.find((b) => b.bucket === "[.8,1]")!;
+    expect(low.count).toBe(1);
+    expect(low.staleRate).toBe(0);
+    expect(top.count).toBe(2);
+    expect(top.staleRate).toBe(1);
   });
 });

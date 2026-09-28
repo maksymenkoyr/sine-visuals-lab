@@ -161,3 +161,134 @@ export function chunk(array, size) {
   for (let i = 0; i < array.length; i += size) out.push(array.slice(i, i + size));
   return out;
 }
+
+// Jev 1.13 input price per million tokens; output tokens (the noul answers)
+// are free. https://docs.typesafe.ai/models
+export const JEV_USD_PER_MTOK = 0.042;
+
+/** Cost in USD of a judged run's `inputTokens` at the Jev pricing above. */
+export function costUsd(inputTokens) {
+  return (inputTokens / 1_000_000) * JEV_USD_PER_MTOK;
+}
+
+const VALID_VERDICTS = new Set(["stale", "fine", "missed"]);
+
+/** Parse `--verdict` args, each of the form `ref=value` (e.g.
+ *  `docs/x.md:42=stale`), into a `{ ref: value }` map. A ref can itself
+ *  contain `=` or `:` (paths and hashes do), so each arg is split on its
+ *  LAST `=`, not its first. Throws on a value outside stale/fine/missed. */
+export function parseVerdicts(args) {
+  const out = {};
+  for (const arg of args) {
+    const eq = arg.lastIndexOf("=");
+    if (eq === -1) throw new Error(`Bad --verdict arg (expected ref=value): "${arg}"`);
+    const ref = arg.slice(0, eq);
+    const value = arg.slice(eq + 1);
+    if (!VALID_VERDICTS.has(value)) {
+      throw new Error(`Bad verdict "${value}" for ${ref} (expected stale, fine, or missed)`);
+    }
+    out[ref] = value;
+  }
+  return out;
+}
+
+// Calibration buckets for `summarizeRuns`: half-open except the last, which
+// closes at 1 so a p of exactly 1 still lands somewhere.
+const CALIBRATION_BUCKETS = [
+  [0, 0.2, "[0,.2)"],
+  [0.2, 0.4, "[.2,.4)"],
+  [0.4, 0.6, "[.4,.6)"],
+  [0.6, 0.8, "[.6,.8)"],
+  [0.8, 1.0001, "[.8,1]"],
+];
+
+/** Aggregate parsed `runs.jsonl` lines into the numbers `doc-check --report`
+ *  prints: totals/averages over judged runs (unjudged runs made no API call,
+ *  so they're excluded from token/latency/cost figures), and effectiveness
+ *  and calibration from whatever `--verdict` has recorded so far across all
+ *  runs. Pure — the CLI does all the formatting. */
+export function summarizeRuns(runs) {
+  const judgedRuns = runs.filter((r) => r.mode === "judged");
+  const unjudgedRuns = runs.filter((r) => r.mode === "unjudged");
+  const models = [...new Set(judgedRuns.map((r) => r.model).filter(Boolean))].sort();
+
+  const sum = (arr, f) => arr.reduce((n, x) => n + f(x), 0);
+  const candidates = sum(judgedRuns, (r) => r.totals?.candidates ?? 0);
+  const flagged = sum(judgedRuns, (r) => r.totals?.flagged ?? 0);
+  const inputTokens = sum(judgedRuns, (r) => r.totals?.inputTokens ?? 0);
+  const costTotal = sum(judgedRuns, (r) => r.totals?.costUsd ?? 0);
+  const candidateChars = sum(judgedRuns, (r) => r.totals?.candidateChars ?? 0);
+  const flaggedChars = sum(judgedRuns, (r) => r.totals?.flaggedChars ?? 0);
+  const requestMs = judgedRuns.flatMap((r) => (r.requests ?? []).map((req) => req.ms));
+
+  const totals = {
+    candidates,
+    flagged,
+    inputTokens,
+    costUsd: costTotal,
+    costPerRunUsd: judgedRuns.length > 0 ? costTotal / judgedRuns.length : null,
+    meanRequestMs: requestMs.length > 0 ? requestMs.reduce((a, b) => a + b, 0) / requestMs.length : null,
+    maxRequestMs: requestMs.length > 0 ? Math.max(...requestMs) : null,
+    readingSavedPct: candidateChars > 0 ? (1 - flaggedChars / candidateChars) * 100 : null,
+  };
+
+  // Every judgment across every run (judged or not — a candidate can be
+  // hand-verdicted even unjudged), paired with that same run's recorded
+  // verdict for its ref, if any.
+  const allJudgments = [];
+  for (const r of runs) {
+    for (const j of r.judgments ?? []) {
+      allJudgments.push({ ...j, runId: r.id, verdict: r.verdicts?.[j.ref] ?? null });
+    }
+  }
+  const missedVerdicts = sum(runs, (r) => Object.values(r.verdicts ?? {}).filter((v) => v === "missed").length);
+
+  const truePositives = allJudgments.filter((j) => j.flagged === true && j.verdict === "stale");
+  const falsePositiveJudgments = allJudgments.filter((j) => j.flagged === true && j.verdict === "fine");
+  const staleUnflagged = allJudgments.filter((j) => !j.flagged && j.verdict === "stale");
+  const hasVerdicts = missedVerdicts > 0 || allJudgments.some((j) => j.verdict !== null);
+
+  const effectiveness = {
+    hasVerdicts,
+    precision:
+      truePositives.length + falsePositiveJudgments.length > 0
+        ? truePositives.length / (truePositives.length + falsePositiveJudgments.length)
+        : null,
+    misses: missedVerdicts + staleUnflagged.length,
+    staleUnflaggedCount: staleUnflagged.length,
+    truePositiveCount: truePositives.length,
+    falsePositiveCount: falsePositiveJudgments.length,
+  };
+
+  const verdicted = allJudgments.filter((j) => j.p !== null && (j.verdict === "stale" || j.verdict === "fine"));
+  const calibration = CALIBRATION_BUCKETS.map(([lo, hi, bucket]) => {
+    const inBucket = verdicted.filter((j) => j.p >= lo && j.p < hi);
+    const staleCount = inBucket.filter((j) => j.verdict === "stale").length;
+    return { bucket, count: inBucket.length, staleRate: inBucket.length > 0 ? staleCount / inBucket.length : null };
+  });
+
+  const falsePositives = falsePositiveJudgments
+    .slice()
+    .reverse()
+    .slice(0, 10)
+    .map((j) => ({ ref: j.ref, p: j.p, run: j.runId, excerpt: j.excerpt }));
+
+  const recentRuns = runs.slice(-5).map((r) => ({
+    id: r.id,
+    branch: r.branch,
+    mode: r.mode,
+    candidates: r.totals?.candidates ?? 0,
+    flagged: r.totals?.flagged ?? 0,
+    inputTokens: r.totals?.inputTokens ?? 0,
+    costUsd: r.totals?.costUsd ?? 0,
+  }));
+
+  return {
+    runs: { total: runs.length, judged: judgedRuns.length, unjudged: unjudgedRuns.length, models },
+    totals,
+    effectiveness,
+    calibration,
+    falsePositives,
+    recentRuns,
+  };
+}
