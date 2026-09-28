@@ -82,7 +82,7 @@ import { BPM_MIN, BPM_MAX } from "../audio/features.ts";
 /** Every card src/ui/audioMeters.ts mounts, keyed by its own `foldId`.
  *  Populated on demand: add an id here only once some SignalSpec below
  *  actually points at that card. */
-export type MeterCardId = "scope" | "signal" | "lufs" | "hits" | "tempo" | "character";
+export type MeterCardId = "signal" | "hits" | "tempo" | "character";
 
 /** A row within a card, for the same anchor — only rows a SignalSpec
  *  currently points at need an id (see MeterCardId above). "tempo" is the
@@ -93,9 +93,12 @@ export type MeterCardId = "scope" | "signal" | "lufs" | "hits" | "tempo" | "char
  *  plain meter rows `anim.beatWave`/`anim.barWave`/`anim.tempoLock` point at
  *  instead; "timing" is the Tempo card's own Timing strip
  *  (createTimingStrip), the anchor for `anim.metronomeBar`. "waveform" is
- *  the Scope card's own Waveform row (audioMeters.ts's `waveform` meter
- *  row) — `anim.wavePeak`'s anchor, not to be confused with "wave" above
- *  (the beat/bar swing trace, a different row entirely). */
+ *  the Signal card's own Waveform row, first in its body (audioMeters.ts's
+ *  `waveform` meter row) — `anim.wavePeak`'s anchor, not to be confused with
+ *  "wave" above (the beat/bar swing trace, a different row entirely).
+ *  "centroid" is the Character card's Brightness row (dialRows' own
+ *  `brightness` entry) — `anim.centroid`'s anchor, since its trace now
+ *  draws directly under that dial's bar rather than a row of its own. */
 export type MeterRowId = "section" | "tempo" | "hits" | "centroid" | "wave" | "lock" | "timing" | "waveform";
 
 export type SignalId =
@@ -294,7 +297,7 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.centroid",
     label: "Centroid",
     description:
-      "The live spectral centroid (AnimFrame.centroid, spectralCentroid.ts) — a fast, range-adapted counterpart to the slow Brightness dial above it on the Character card.",
+      "The live spectral centroid (AnimFrame.centroid, spectralCentroid.ts) — a fast, range-adapted counterpart to the slow Brightness dial, traced directly under its bar on the Character card.",
     kind: "level",
     read: (_frame, anim) => anim.centroid,
     monitor: { card: "character", row: "centroid" },
@@ -303,10 +306,10 @@ export const SIGNALS: Record<SignalId, SignalSpec> = {
     id: "anim.wavePeak",
     label: "Waveform",
     description:
-      "The Scope card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. 0 on a device with no local mic (the TV).",
+      "The Signal card's own Waveform reading (AnimFrame.wavePeak) — the raw mic wave's peak, held and falling like the readout, the same number the card shows as a percentage; raw amplitude before auto-gain, so unlike All level it gets bigger when the room actually gets louder. 0 on a device with no local mic (the TV).",
     kind: "level",
     read: (_frame, anim) => anim.wavePeak,
-    monitor: { card: "scope", row: "waveform" },
+    monitor: { card: "signal", row: "waveform" },
     bandRange: "all",
   }),
   "anim.beatWave": signal({

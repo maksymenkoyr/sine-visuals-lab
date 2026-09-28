@@ -9,10 +9,10 @@ describe("panel fold persistence", () => {
   });
 
   it("round-trips folded and unfolded", () => {
-    setFolded("scope", true);
-    expect(isFolded("scope")).toBe(true);
-    setFolded("scope", false);
-    expect(isFolded("scope")).toBe(false);
+    setFolded("signal", true);
+    expect(isFolded("signal")).toBe(true);
+    setFolded("signal", false);
+    expect(isFolded("signal")).toBe(false);
   });
 
   it("keeps different card ids independent", () => {

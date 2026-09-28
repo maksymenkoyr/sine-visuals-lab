@@ -50,18 +50,18 @@ scene), read by `src/app.ts`, which is the phone/controller/gallery entry
 
 The controls panel's meters (`src/ui/audioMeters.ts`, under the spectrum card
 in `src/ui/deviceMenu.ts`) are the one place that reads outside this pipeline:
-their Scope card is fed by `src/audio/waveformAnalyser.ts` (math in
-`waveform.ts`), which reads time-domain samples straight off this device's own
-mic, entirely separate from
+their Signal card's Waveform row is fed by `src/audio/waveformAnalyser.ts`
+(math in `waveform.ts`), which reads time-domain samples straight off this
+device's own mic, entirely separate from
 `FeatureFrame`/`AnimFrame` and never touching the wire in "Phone to TV" below —
-a viewer with no local mic doesn't get that card at all. Their Signal card's
-history trace likewise reads `FeatureExtractor.fixedEnergy`, a local
+a viewer with no local mic doesn't get that row at all. The same card's
+History trace likewise reads `FeatureExtractor.fixedEnergy`, a local
 diagnostic off this device's own extractor (see `src/audio/features.ts`), not a
-`FeatureFrame` field — the Signal card's own Gate row right after it reads
-that same extractor's `gateDimmer` diagnostic the same way. The Loudness
-card is the same kind of read: BS.1770 LUFS
+`FeatureFrame` field — its own Gate row right after it reads
+that same extractor's `gateDimmer` diagnostic the same way. Its Loudness row
+is the same kind of read: BS.1770 LUFS
 from `src/audio/lufsAnalyser.ts` (math in `lufs.ts`), a K-weighting chain off
-this device's own capture, hidden on a mic-less renderer like the Scope.
+this device's own capture, hidden on a mic-less renderer like the Waveform row.
 
 `src/render/signals.ts` is the seam between those meters and a scene's own
 `settings`: a scene can mark a `SceneSetting` with `reads`, naming which of

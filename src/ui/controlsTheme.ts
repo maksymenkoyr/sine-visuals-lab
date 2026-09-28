@@ -184,7 +184,9 @@ const stylesheet = `
  * stacked media query below dissolves it into root's own single column
  * (display: contents), which also neutralizes position: fixed here since
  * a display: contents element generates no box of its own to position. The
- * spectrum card stays put; the meters (src/ui/audioMeters.ts) scroll in
+ * bands block (deviceMenu.ts's .vc-bands-block — the column head, its
+ * "Sound" heading and the Bands card, travelling together as one
+ * .vc-spectrum-card) stays put; the meters (src/ui/audioMeters.ts) scroll in
  * their own strip beneath it. Its top clears index.html's #sceneNav (the
  * "‹ Gallery" chip row, 36px tall at top:16px, which shares this corner)
  * by an 8px gap rather than covering it. */
@@ -304,7 +306,8 @@ const stylesheet = `
     max-height: calc(100dvh - 74px);
   }
   .vc-root > *, .vc-spectrum-col > * { flex-shrink: 0; }
-  /* Dissolve the spectrum column so its card and the meters become root
+  /* Dissolve the spectrum column so its bands block (.vc-spectrum-card —
+   * see the comment above .vc-spectrum-col) and the meters become root
    * items in their own right: spectrum, then the controls, then the meters
    * last — a phone shouldn't have to scroll past a screen of readouts to
    * reach a slider. */

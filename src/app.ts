@@ -201,11 +201,12 @@ let soloFallbackTriggered = false;
 let capture: CaptureHandle | null = null;
 let bandAnalyser: BandAnalyser | null = null;
 /** Time-domain sibling of bandAnalyser — the waveform for the controls
- *  panel's Scope card (src/ui/audioMeters.ts). Never touches FeatureExtractor
- *  or the wire frame: this is display-only data local to this device, not a
- *  render-driving signal. See waveformAnalyser.ts's header for why. */
+ *  panel's Signal card, its Waveform row (src/ui/audioMeters.ts). Never
+ *  touches FeatureExtractor or the wire frame: this is display-only data
+ *  local to this device, not a render-driving signal. See
+ *  waveformAnalyser.ts's header for why. */
 let waveformAnalyser: WaveformAnalyser | null = null;
-/** K-weighted loudness tap for the panel's Loudness card
+/** K-weighted loudness tap for the panel's Signal card, its Loudness row
  *  (src/audio/lufsAnalyser.ts) — display-only and local, like the waveform
  *  analyser above. */
 let lufsAnalyser: LufsAnalyser | null = null;
@@ -307,7 +308,7 @@ let lastVis: FeatureFrame | null = null;
 let lastRawBands: Float32Array | null = null;
 /** This tick's waveform samples, straight off waveformAnalyser — same
  *  solo/host-only availability as lastRawBands above, for the same reason
- *  (no local mic on a renderer device). Feeds the Scope card. */
+ *  (no local mic on a renderer device). Feeds the Signal card's Waveform row. */
 let lastMono: Float32Array | null = null;
 /** This tick's deep waveform samples, straight off measureAnalyser — DEV
  *  only, see that variable's own comment. Same buffer identity every read;
@@ -343,7 +344,7 @@ let lastTempoHits: TempoHit[] | undefined = undefined;
 // availability as lastBeatDiag above and for the same reason.
 let lastGate: SilenceGateReading | null = null;
 /** This tick's LUFS reading off lufsAnalyser — same solo/host-only
- *  availability as lastMono, for the Loudness card. */
+ *  availability as lastMono, for the Signal card's Loudness row. */
 let lastLufs: LufsReading | null = null;
 const rawBandsScratch = new Float32Array(NUM_BANDS);
 
@@ -891,9 +892,9 @@ function wireDeviceMenu(): void {
   deviceMenu = createDeviceMenu({
     getPalettes: () => menuItems(PALETTES),
     currentSceneId: () => scene.id,
-    currentSceneName: () => scene.name,
     currentPaletteId: () => palette.id,
-    // What the Bands card's status line reports as the audio source. A
+    // What the column head's status line (above the Bands card) reports as
+    // the audio source. A
     // renderer has no local analyser — its bands arrive over the room.
     getAudioStatus: () => ({
       source: syntheticFeed ? "synthetic" : mode === "renderer" ? "remote" : capture ? captureAudioSource(capture.kind) : "none",
@@ -1668,7 +1669,7 @@ function loop(): void {
   // (undefined every host/renderer/TV tick — see its own doc comment on the
   // module state above) and switches beatClock.ts's phase comb onto the
   // fixed-hop feed for this tick when a tempo source is live. `lastMono`'s
-  // own peak feeds AnimFrame.wavePeak (the Scope card's Waveform readout and
+  // own peak feeds AnimFrame.wavePeak (the Signal card's Waveform readout and
   // its drive jack); null on any device with no local mic.
   const anim = gained
     ? animClock.advance(dtSec, gained, smoothing, resolveSilenceGate(), {
