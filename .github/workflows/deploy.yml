@@ -60,6 +60,8 @@ jobs:
     concurrency:
       group: ${{ github.event_name == 'pull_request' && format('preview-{0}', github.event.number) || 'deploy-insider' }}
       cancel-in-progress: false
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -87,7 +89,12 @@ jobs:
       - name: Pick the Insider version
         id: version
         if: github.event_name == 'push'
-        run: echo "version=$(node tools/app-version.mjs insider)" >> "$GITHUB_OUTPUT"
+        # Assigned first so a failure fails the step (an `echo "$(…)"` would
+        # swallow it and ship an unversioned build).
+        run: |
+          version=$(node tools/app-version.mjs insider)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "### Insider $version - beta" >> "$GITHUB_STEP_SUMMARY"
 
       # SVL_CHANNEL picks src/version.ts's channel: "preview" on a pull
       # request, "insider" on a push to main — there's no third case this
@@ -111,7 +118,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --env insider
+          # --tag/--message label this deploy in Cloudflare's own Deployments
+          # list with the same version the site shows.
+          command: deploy --env insider --tag v${{ steps.version.outputs.version }}-beta --message "Insider ${{ steps.version.outputs.version }} - beta, commit ${{ github.sha }}"
 
       - name: Deploy PR preview
         id: preview
@@ -188,6 +197,31 @@ jobs:
   # the "other Workers depend on this" check, which can't apply to a Worker
   # nothing else binds to. A preview that never deployed (fork PR, or the gates
   # failed on every push) makes this a harmless "not found".
+  # Tags each Insider build `vX.Y.Z-beta` on the commit it shipped, so the
+  # version the site shows can be found in git (`git fetch --tags`). A job of
+  # its own because it needs write access, which the ship job — running a
+  # pull request's code on PR events — shouldn't hold. It checks nothing out
+  # and runs no repo code: one API call. The `-beta` suffix keeps these out of
+  # the release count (tools/appVersionLib.mjs reads strict vX.Y.Z only), and
+  # GitHub Releases are only ever made for Stable (release.yml).
+  tag-insider:
+    needs: ship
+    if: github.event_name == 'push' && needs.ship.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Tag the Insider build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.ship.outputs.version }}-beta
+        run: |
+          if gh api "repos/${{ github.repository }}/git/refs" -f ref="refs/tags/$TAG" -f sha="${{ github.sha }}" >/dev/null; then
+            echo "Tagged $TAG" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Couldn't create $TAG (already there from a re-run?)"
+          fi
+
   teardown-preview:
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest

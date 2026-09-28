@@ -87,3 +87,52 @@ export function showTooltip(target: HTMLElement, color: string, lines: readonly 
 export function hideTooltip(): void {
   singleton?.hide();
 }
+
+/**
+ * Gives `target` this tooltip as a standing hint — the version label and
+ * Insider badge in the gallery (src/ui/gallery.ts) and the version label in
+ * a scene (src/app.ts). On hover or focus for a mouse/keyboard, on tap for
+ * touch — where pointerleave fires straight after the tap and would hide it
+ * at once, so a tap shows it until the next press anywhere else. On a link,
+ * that first tap only shows the hint; a second tap while it's up follows the
+ * link.
+ */
+export function bindHint(target: HTMLElement, color: string, lines: readonly string[]): void {
+  let lastPointer = "mouse";
+  let tapShown = false;
+  const show = (): void => showTooltip(target, color, lines);
+  const dismiss = (e: PointerEvent): void => {
+    if (target.contains(e.target as Node)) {
+      document.addEventListener("pointerdown", dismiss, { once: true });
+      return;
+    }
+    tapShown = false;
+    hideTooltip();
+  };
+  target.addEventListener("pointerdown", (e) => {
+    lastPointer = e.pointerType;
+  });
+  target.addEventListener("pointerenter", (e) => {
+    if (e.pointerType === "mouse") show();
+  });
+  target.addEventListener("pointerleave", (e) => {
+    if (e.pointerType === "mouse") hideTooltip();
+  });
+  target.addEventListener("focus", show);
+  target.addEventListener("blur", () => {
+    if (!tapShown) hideTooltip();
+  });
+  target.addEventListener("click", (e) => {
+    // A mouse already has the hint from hovering, and a keyboard activation
+    // (detail 0) means "follow the link" — neither needs the tap path.
+    if (lastPointer === "mouse" || e.detail === 0) return;
+    if (tapShown && target instanceof HTMLAnchorElement) return;
+    e.preventDefault();
+    show();
+    if (!tapShown) {
+      tapShown = true;
+      // Next tick, so this tap's own events can't close it again.
+      setTimeout(() => document.addEventListener("pointerdown", dismiss, { once: true }), 0);
+    }
+  });
+}

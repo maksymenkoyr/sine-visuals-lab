@@ -153,8 +153,10 @@ import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
-import { ensureControlsStyles } from "./ui/controlsTheme.ts";
+import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
 import { pinEverything } from "./pinnedAssets.ts";
+import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
+import { bindHint, hideTooltip } from "./ui/tooltip.ts";
 
 type Mode = "solo" | "host" | "renderer";
 type AnyConn = HostConnection | RendererConnection;
@@ -167,6 +169,7 @@ const panelBtn = document.getElementById("panelBtn") as HTMLButtonElement;
 const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
+const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
@@ -1041,6 +1044,7 @@ async function enterViz(next: Scene): Promise<void> {
   menuBtn.style.display = "block";
   fsBtn.style.display = "block";
   if (!bypassGallery) backBtn.style.display = "block";
+  sceneVersion.style.display = "inline";
 
   if (mode !== "renderer") void ensureAudio();
   updateMicPrompt();
@@ -1059,6 +1063,8 @@ function exitToGallery(): void {
   fsBtn.style.display = "none";
   backBtn.style.display = "none";
   stopBtn.style.display = "none";
+  sceneVersion.style.display = "none";
+  hideTooltip(); // a version hint left open by a tap mustn't follow us out
   audioPrompt.style.display = "none";
   mainHost?.unmountAll();
   canvas.style.display = "none";
@@ -1098,6 +1104,14 @@ async function boot(): Promise<void> {
   // — see src/pinnedAssets.ts's header for why a page must never need its
   // own origin's files again after this point.
   pinEverything();
+
+  // The scene's own version corner (#sceneVersion in index.html, shown by
+  // enterViz) — the same label and hint as the gallery footer's
+  // (src/version.ts), so the build is visible from inside a scene too.
+  const offStable = BUILD_INFO.channel !== "stable";
+  sceneVersion.textContent = versionLabel(BUILD_INFO);
+  if (offStable) sceneVersion.style.color = BANDS_AMBER;
+  bindHint(sceneVersion, offStable ? BANDS_AMBER : "rgba(255,255,255,.4)", versionHint(BUILD_INFO));
 
   // Started first so it resolves alongside detectQuality()'s await below;
   // awaited before routing, since a deep-linked scene's enterViz() makes the

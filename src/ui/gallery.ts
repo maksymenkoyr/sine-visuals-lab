@@ -7,7 +7,7 @@ import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
 import { SOURCE_URL } from "../brand.ts";
 import { BUILD_INFO, channelBadge, versionHint, versionHref, versionLabel } from "../version.ts";
-import { hideTooltip, showTooltip } from "./tooltip.ts";
+import { bindHint, hideTooltip } from "./tooltip.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
@@ -244,52 +244,6 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   return node;
 }
 
-/**
- * Gives `target` the panel's shared tooltip (tooltip.ts) as a hint: on hover
- * or focus for a mouse/keyboard, on tap for touch — where pointerleave fires
- * straight after the tap and would hide it at once, so a tap shows it until
- * the next press anywhere else. On a link, that first tap only shows the
- * hint; a second tap while it's up follows the link.
- */
-function bindHint(target: HTMLElement, color: string, lines: readonly string[]): void {
-  let lastPointer = "mouse";
-  let tapShown = false;
-  const show = (): void => showTooltip(target, color, lines);
-  const dismiss = (e: PointerEvent): void => {
-    if (target.contains(e.target as Node)) {
-      document.addEventListener("pointerdown", dismiss, { once: true });
-      return;
-    }
-    tapShown = false;
-    hideTooltip();
-  };
-  target.addEventListener("pointerdown", (e) => {
-    lastPointer = e.pointerType;
-  });
-  target.addEventListener("pointerenter", (e) => {
-    if (e.pointerType === "mouse") show();
-  });
-  target.addEventListener("pointerleave", (e) => {
-    if (e.pointerType === "mouse") hideTooltip();
-  });
-  target.addEventListener("focus", show);
-  target.addEventListener("blur", () => {
-    if (!tapShown) hideTooltip();
-  });
-  target.addEventListener("click", (e) => {
-    // A mouse already has the hint from hovering, and a keyboard activation
-    // (detail 0) means "follow the link" — neither needs the tap path.
-    if (lastPointer === "mouse" || e.detail === 0) return;
-    if (tapShown && target instanceof HTMLAnchorElement) return;
-    e.preventDefault();
-    show();
-    if (!tapShown) {
-      tapShown = true;
-      // Next tick, so this tap's own events can't close it again.
-      setTimeout(() => document.addEventListener("pointerdown", dismiss, { once: true }), 0);
-    }
-  });
-}
 
 const PREVIEW_W = 480;
 const PREVIEW_H = 270;
