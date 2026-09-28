@@ -6,7 +6,7 @@ import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRe
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
 import { SOURCE_URL } from "../brand.ts";
-import { BUILD_INFO, channelBadge, versionHref, versionLabel, versionTitle } from "../version.ts";
+import { BUILD_INFO, channelBadge, versionHint, versionHref, versionLabel } from "../version.ts";
 import { hideTooltip, showTooltip } from "./tooltip.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
@@ -242,6 +242,53 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   return node;
 }
 
+/**
+ * Gives `target` the panel's shared tooltip (tooltip.ts) as a hint: on hover
+ * or focus for a mouse/keyboard, on tap for touch — where pointerleave fires
+ * straight after the tap and would hide it at once, so a tap shows it until
+ * the next press anywhere else. On a link, that first tap only shows the
+ * hint; a second tap while it's up follows the link.
+ */
+function bindHint(target: HTMLElement, color: string, lines: readonly string[]): void {
+  let lastPointer = "mouse";
+  let tapShown = false;
+  const show = (): void => showTooltip(target, color, lines);
+  const dismiss = (e: PointerEvent): void => {
+    if (target.contains(e.target as Node)) {
+      document.addEventListener("pointerdown", dismiss, { once: true });
+      return;
+    }
+    tapShown = false;
+    hideTooltip();
+  };
+  target.addEventListener("pointerdown", (e) => {
+    lastPointer = e.pointerType;
+  });
+  target.addEventListener("pointerenter", (e) => {
+    if (e.pointerType === "mouse") show();
+  });
+  target.addEventListener("pointerleave", (e) => {
+    if (e.pointerType === "mouse") hideTooltip();
+  });
+  target.addEventListener("focus", show);
+  target.addEventListener("blur", () => {
+    if (!tapShown) hideTooltip();
+  });
+  target.addEventListener("click", (e) => {
+    // A mouse already has the hint from hovering, and a keyboard activation
+    // (detail 0) means "follow the link" — neither needs the tap path.
+    if (lastPointer === "mouse" || e.detail === 0) return;
+    if (tapShown && target instanceof HTMLAnchorElement) return;
+    e.preventDefault();
+    show();
+    if (!tapShown) {
+      tapShown = true;
+      // Next tick, so this tap's own events can't close it again.
+      setTimeout(() => document.addEventListener("pointerdown", dismiss, { once: true }), 0);
+    }
+  });
+}
+
 const PREVIEW_W = 480;
 const PREVIEW_H = 270;
 
@@ -443,11 +490,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
   sourceTop.append(sourceSlot, sourceRow);
   source.appendChild(sourceTop);
   // The channel badge beside the mark — only off stable (channelBadge() in
-  // src/version.ts decides which channels get one and owns its text). Its
-  // hint is the panel's shared tooltip (tooltip.ts): on hover or focus for a
-  // mouse/keyboard, on tap for touch, where pointerleave fires straight after
-  // the tap and would hide it at once — so a tap shows it until the next
-  // press anywhere.
+  // src/version.ts decides which channels get one and owns its text).
   const brand = el("div", "gal-brand");
   brand.append(createBrandMark(56));
   const badge = channelBadge(BUILD_INFO);
@@ -455,20 +498,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
     const tag = el("button", "gal-mono gal-channel", badge.label);
     tag.type = "button";
     tag.setAttribute("aria-label", `${badge.label}. ${badge.hint.join(" ")}`);
-    const show = (): void => showTooltip(tag, BANDS_AMBER, badge.hint);
-    tag.addEventListener("pointerenter", (e) => {
-      if (e.pointerType === "mouse") show();
-    });
-    tag.addEventListener("pointerleave", (e) => {
-      if (e.pointerType === "mouse") hideTooltip();
-    });
-    tag.addEventListener("focus", show);
-    tag.addEventListener("blur", hideTooltip);
-    tag.addEventListener("click", () => {
-      show();
-      // Next tick, so this tap's own events can't close it again.
-      setTimeout(() => document.addEventListener("pointerdown", hideTooltip, { once: true }), 0);
-    });
+    bindHint(tag, BANDS_AMBER, badge.hint);
     brand.appendChild(tag);
   }
   mast.append(brand, source);
@@ -507,16 +537,20 @@ export function createGallery(deps: GalleryDeps): Gallery {
   // ships alongside the build (dist/*.txt), since MIT and the SIL Open Font
   // License both require their notices to travel with copies of the site.
   const foot = el("div", "gal-mono gal-foot");
-  // What build is live, on the left (src/version.ts owns the label/link/
-  // tooltip text) — stable stays the same dim colour as the rest of the
-  // footer, any other channel is flagged in BANDS_AMBER so it's obvious at a
-  // glance this tab isn't on stable.
+  // What build is live, on the left (src/version.ts owns the label, link and
+  // hint text — the hint says what each part of the label means) — stable
+  // stays the same dim colour as the rest of the footer, any other channel is
+  // flagged in BANDS_AMBER so it's obvious at a glance this tab isn't on
+  // stable.
   const versionLink = el("a", "", versionLabel(BUILD_INFO));
   versionLink.href = versionHref(BUILD_INFO);
-  versionLink.title = versionTitle(BUILD_INFO);
   versionLink.target = "_blank";
   versionLink.rel = "noopener";
-  if (BUILD_INFO.channel !== "stable") versionLink.style.color = BANDS_AMBER;
+  const offStable = BUILD_INFO.channel !== "stable";
+  if (offStable) versionLink.style.color = BANDS_AMBER;
+  const hint = versionHint(BUILD_INFO);
+  versionLink.setAttribute("aria-label", hint.join(". "));
+  bindHint(versionLink, offStable ? BANDS_AMBER : "rgba(255,255,255,.4)", hint);
   const sourceLink = el("a", "", "Source · AGPL-3.0");
   sourceLink.href = SOURCE_URL;
   sourceLink.target = "_blank";

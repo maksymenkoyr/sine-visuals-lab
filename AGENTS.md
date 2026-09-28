@@ -69,9 +69,10 @@ claim, so specifics there are expected to age out immediately.
 `npm run typecheck` and `npm run test` also run in CI on every pull request, and
 gate every deploy: a push to `main` deploys the Insider channel
 (insider.sinevisualslab.com, `.github/workflows/deploy.yml`), and the Stable
-channel (www.sinevisualslab.com) only changes on a release (`npm run
-release`) — see `.github/workflows/release.yml`, which runs the same two
-gates again against whatever commit it's promoting.
+channel (www.sinevisualslab.com) only changes when `main` is merged into the
+`production` branch (`npm run release` opens that PR; merge it with a merge
+commit, never squash) — see `.github/workflows/release.yml`, which runs the
+same two gates again on the commit it's releasing.
 
 ## Testing
 

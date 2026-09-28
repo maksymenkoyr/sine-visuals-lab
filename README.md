@@ -24,10 +24,11 @@ deployed channels: pushing to `main` ships the **Insider** channel
 (insider.sinevisualslab.com) automatically, on every push — see
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The **Stable**
 channel (sinevisualslab.com — also what a local `npm run deploy` ships to)
-only updates on a deliberate release (`npm run release`), which promotes
-whatever commit Insider is currently serving — see
-[`.github/workflows/release.yml`](.github/workflows/release.yml) and
-`src/version.ts`. Every open pull request also gets its own throwaway preview
+only updates when `main` is merged into the `production` branch
+(`npm run release` opens that pull request; merge it with a merge commit) —
+see [`.github/workflows/release.yml`](.github/workflows/release.yml) and
+`src/version.ts`. Every merge to `main` bumps the patch version, every release
+bumps the minor, and the major is set by hand in `package.json`. Every open pull request also gets its own throwaway preview
 Worker (URL posted as a comment on the PR).
 
 ## Architecture

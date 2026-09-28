@@ -41,8 +41,8 @@ run_worker_first = ["/"]
 # These live here rather than in the dashboard on purpose: `wrangler deploy`
 # overrides dashboard-configured routes whenever config omits them. This is
 # the **Stable** release channel (src/version.ts owns what that means): the
-# top-level Worker deploys only from `.github/workflows/release.yml` (`npm run
-# release`), never automatically from a push to main — that's `[env.insider]`
+# top-level Worker deploys only from `.github/workflows/release.yml`, on a
+# merge into the `production` branch, never from a push to main — that's `[env.insider]`
 # below.
 [[routes]]
 pattern = "sinevisualslab.com"

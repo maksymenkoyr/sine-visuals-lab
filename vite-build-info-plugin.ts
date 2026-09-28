@@ -15,13 +15,13 @@ import type { BuildInfo } from "./src/version.ts";
  *    main, "preview" on a pull request) and release.yml ("stable"). Anything
  *    else, including unset (a local `npm run dev` or `npm run build`), is
  *    "dev" — there's no CI job for it to be anything else.
- *  - `SVL_VERSION` — only release.yml sets this, to the tag it just picked
- *    (see that workflow's header for the date-based scheme). Every other
- *    channel ships with no version, and versionLabel() in src/version.ts
- *    falls back to the commit for them.
+ *  - `SVL_VERSION` — MAJOR.MINOR.PATCH from tools/app-version.mjs, set by
+ *    release.yml (stable) and deploy.yml (insider); tools/appVersionLib.mjs
+ *    owns how the numbers move. Previews and dev builds ship with no
+ *    version, and versionLabel() in src/version.ts shows the commit instead.
  *  - `SVL_COMMIT` / `SVL_PR` — CI passes these explicitly because the commit
- *    actually being built (release.yml checks out a past commit; deploy.yml's
- *    PR build checks out a merge of the PR branch) isn't always `git
+ *    actually being built (deploy.yml's PR build checks out a merge of the
+ *    PR branch) isn't always `git
  *    rev-parse HEAD` in the checkout doing the building. Locally, falling
  *    back to HEAD and to parsing the last commit subject for a trailing
  *    `(#123)` (how GitHub writes a squash-merge subject) gives a `dev` build

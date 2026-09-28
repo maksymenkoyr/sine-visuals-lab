@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { channelBadge, versionLabel, versionHref, versionTitle, type BuildInfo } from "../src/version.ts";
+import { channelBadge, versionHint, versionLabel, versionHref, type BuildInfo } from "../src/version.ts";
 
 const SOURCE_URL = "https://github.com/maksymenkoyr/sine-visuals-lab";
 
@@ -20,20 +20,14 @@ const withCommit = (over: Partial<BuildInfo>): BuildInfo => ({
 });
 
 describe("versionLabel", () => {
-  it("shows the tag as-is on a released stable build", () => {
-    expect(versionLabel(withCommit({ channel: "stable", version: "v2026.09.28" }))).toBe("v2026.09.28");
+  it("shows just the version on stable and insider", () => {
+    expect(versionLabel(withCommit({ channel: "stable", version: "0.3.0" }))).toBe("v0.3.0");
+    expect(versionLabel(withCommit({ channel: "insider", version: "0.3.12", pr: 183 }))).toBe("v0.3.12");
   });
 
-  it("falls back to the commit on an unreleased stable build", () => {
+  it("falls back to the commit when CI passed no version", () => {
     expect(versionLabel(withCommit({ channel: "stable" }))).toBe("stable · da38a37");
-  });
-
-  it("shows the PR and commit on insider", () => {
-    expect(versionLabel(withCommit({ channel: "insider", pr: 183 }))).toBe("insider · #183 · da38a37");
-  });
-
-  it("drops the PR segment on insider when there is none", () => {
-    expect(versionLabel(withCommit({ channel: "insider", pr: null }))).toBe("insider · da38a37");
+    expect(versionLabel(withCommit({ channel: "insider" }))).toBe("insider · da38a37");
   });
 
   it("spells out the PR on preview", () => {
@@ -52,7 +46,7 @@ describe("versionLabel", () => {
 
 describe("versionHref", () => {
   it("links to the release tag on a released stable build", () => {
-    expect(versionHref(withCommit({ channel: "stable", version: "v2026.09.28" }))).toBe(`${SOURCE_URL}/releases/tag/v2026.09.28`);
+    expect(versionHref(withCommit({ channel: "stable", version: "0.3.0" }))).toBe(`${SOURCE_URL}/releases/tag/v0.3.0`);
   });
 
   it("links to the commit otherwise, for every channel", () => {
@@ -66,33 +60,41 @@ describe("versionHref", () => {
   });
 });
 
-describe("versionTitle", () => {
-  it("names the release on stable", () => {
-    expect(versionTitle(withCommit({ channel: "stable", version: "v2026.09.28" }))).toBe(
-      "Stable release v2026.09.28 — built 2026-09-28 14:05 UTC from da38a37f0000000000000000000000000000000",
-    );
+describe("versionHint", () => {
+  it("explains the numbers and commit on stable", () => {
+    expect(versionHint(withCommit({ channel: "stable", version: "0.3.0" }))).toEqual([
+      "Stable — updates only on a release",
+      "Each release bumps the middle number",
+      "da38a37 — the commit it was built from",
+      "Built 2026-09-28 14:05 UTC",
+    ]);
   });
 
-  it("names the channel and PR on insider", () => {
-    expect(versionTitle(withCommit({ channel: "insider", pr: 183 }))).toBe(
-      "Insider channel — built 2026-09-28 14:05 UTC from da38a37f0000000000000000000000000000000 (#183)",
-    );
+  it("explains the numbers, PR and commit on insider", () => {
+    expect(versionHint(withCommit({ channel: "insider", version: "0.3.12", pr: 183 }))).toEqual([
+      "Insider — updates with every merge",
+      "Each merge bumps the last number",
+      "#183 — last pull request merged",
+      "da38a37 — the commit it was built from",
+      "Built 2026-09-28 14:05 UTC",
+    ]);
+  });
+
+  it("skips the PR line when there is no PR", () => {
+    const lines = versionHint(withCommit({ channel: "insider", pr: null }));
+    expect(lines.some((l) => l.startsWith("#"))).toBe(false);
   });
 
   it("names the PR on preview", () => {
-    expect(versionTitle(withCommit({ channel: "preview", pr: 185 }))).toBe(
-      "Preview of PR #185 — built 2026-09-28 14:05 UTC from da38a37f0000000000000000000000000000000",
-    );
+    expect(versionHint(withCommit({ channel: "preview", pr: 185 }))[0]).toBe("Preview of pull request #185");
   });
 
   it("mentions uncommitted changes on a dirty dev build", () => {
-    expect(versionTitle(withCommit({ channel: "dev", dirty: true }))).toBe(
-      "Dev build — built 2026-09-28 14:05 UTC from da38a37f0000000000000000000000000000000, with uncommitted changes",
-    );
+    expect(versionHint(withCommit({ channel: "dev", dirty: true }))[0]).toBe("Local dev build, with uncommitted changes");
   });
 
   it("degrades gracefully with no build info at all", () => {
-    expect(versionTitle(base)).toBe("Dev build");
+    expect(versionHint(base)).toEqual(["Local dev build"]);
   });
 });
 

@@ -1,46 +1,37 @@
 # Ships the **Stable** release channel — the top-level Worker
 # (`audio-viz-room`, wrangler.toml's top level) on sinevisualslab.com and www.
-# Every other deploy in this repo is automatic (deploy.yml ships Insider on every
-# push to main, and a preview on every PR push); this is the one that isn't,
-# because shipping to everyone is a decision, not a side effect of merging.
+# Every other deploy in this repo is automatic (deploy.yml ships Insider on
+# every push to main, and a preview on every PR push); this one runs only when
+# main is merged into the `production` branch, because shipping to everyone is
+# a decision, not a side effect of merging.
 #
-# To release: `npm run release` (runs `gh workflow run release.yml --ref
-# main`), or Actions → Release → Run workflow. Both accept an optional `ref`
-# input — a commit or branch to release instead of the default. Leave it
-# blank almost always: the default is "whatever commit the Insider channel is
-# currently serving", found by asking the GitHub API for the headSha of the
-# last successful push-to-main run of deploy.yml, *not* main's own tip. main
-# moves fast, with several sessions landing work concurrently (see AGENTS.md's
-# git workflow section) — its tip at the moment someone clicks "release" is
-# whatever most recently merged, which nobody has necessarily looked at
-# running. What's been sitting on insider.sinevisualslab.com is what's actually
-# been exercised, so that's what ships. The `ref` input exists for the
-# exception: releasing a specific known-good commit when Insider has since moved
-# on to something you don't want to ship yet.
+# To release: `npm run release` opens a pull request from main into
+# production (or open one by hand); merging it runs this workflow. Merge it
+# with **Create a merge commit** — never squash or rebase: production has to
+# keep main's own commits for the version count (tools/appVersionLib.mjs) to
+# find the last release on main's history. The first step below refuses to
+# deploy if production has picked up a commit that isn't on main and isn't a
+# merge, so a squashed release fails loudly instead of skewing every number
+# after it.
 #
-# The picked commit is tagged `vYYYY.MM.DD` (UTC), with `.2`, `.3`, … appended
-# if a release already landed that day — a release is a dated snapshot of
-# "what's live", not a semantic-version claim about the size of the change, so
-# the date is the meaningful part and a same-day second release is the
-# expected shape of a hotfix, not an edge case to hide.
+# Each release bumps the minor version and resets the patch (0.3.12 on
+# Insider → 0.4.0 here); the major only moves when package.json's major has
+# been raised by hand. The release commit is tagged `vX.Y.0` and gets a
+# GitHub Release listing the pull requests since the previous one. A re-run
+# of the same production commit keeps its version and skips the Release.
 #
-# This is also the only moment a phone and TV paired on Stable drop: deploying
-# a Worker with Durable Objects restarts them, and the Room a paired session
-# lives in (server/room.ts) is one. Releasing every couple of days rather than
-# continuously is what keeps that rare instead of routine.
+# This is also the only moment a phone and TV paired on Stable drop:
+# deploying a Worker with Durable Objects restarts them, and the Room a
+# paired session lives in (server/room.ts) is one. Releasing every couple of
+# days rather than continuously is what keeps that rare instead of routine.
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      ref:
-        description: "Commit or branch to release (blank = the commit Insider is serving)"
-        required: false
-        default: ""
+  push:
+    branches: [production]
 
 permissions:
   contents: write # the tag + GitHub Release
-  actions: read # finding Insider's last deploy
 
 concurrency:
   group: deploy-stable
@@ -58,30 +49,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          # Full history and tags: the version is counted from them.
           fetch-depth: 0
 
-      - name: Pick the commit and the tag
-        id: pick
-        env:
-          GH_TOKEN: ${{ github.token }}
-          INPUT_REF: ${{ inputs.ref }}
+      - name: Check production only holds main's commits
         run: |
           set -euo pipefail
-          if [ -n "$INPUT_REF" ]; then
-            sha=$(git rev-parse --verify "$INPUT_REF^{commit}")
-          else
-            sha=$(gh run list --workflow deploy.yml --branch main --event push --status success --limit 1 --json headSha --jq '.[0].headSha')
+          stray=$(git rev-list --no-merges origin/main..HEAD)
+          if [ -n "$stray" ]; then
+            echo "::error::production has commits that aren't on main (a squash or rebase merge, or a direct push?): $stray — merge main into production with a merge commit instead"
+            exit 1
           fi
-          if [ -z "$sha" ]; then echo "::error::No successful Insider deploy found — pass a ref"; exit 1; fi
-          git merge-base --is-ancestor "$sha" origin/main || { echo "::error::$sha is not on main"; exit 1; }
-          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$sha" 2>/dev/null || true)
-          if [ -n "$prev" ] && [ "$(git rev-list -n1 "$prev")" = "$sha" ]; then echo "::error::$sha is already released as $prev"; exit 1; fi
-          base="v$(date -u +%Y.%m.%d)"; tag="$base"; n=2
-          while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do tag="$base.$n"; n=$((n+1)); done
-          { echo "sha=$sha"; echo "tag=$tag"; echo "prev=$prev"; } >> "$GITHUB_OUTPUT"
 
-      - run: git checkout --detach "${{ steps.pick.outputs.sha }}"
+      - name: Pick the version
+        id: pick
+        run: |
+          set -euo pipefail
+          version=$(node tools/app-version.mjs stable)
+          # A previous strict release tag decides between generated notes
+          # and a first-release note (read before this release's tag exists).
+          if git tag --merged HEAD | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+'; then first=false; else first=true; fi
+          { echo "version=$version"; echo "tag=v$version"; echo "first=$first"; } >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         with:
@@ -90,18 +78,16 @@ jobs:
 
       - run: npm ci
 
-      # Same gates as every other deploy (AGENTS.md, deploy.yml) — run again
-      # here, against the exact commit being promoted, rather than trusted
-      # from whenever deploy.yml last ran it: a release can pick an older
-      # commit via `ref`, and the gates should cover whatever actually ships.
+      # Same gates as every other deploy (AGENTS.md, deploy.yml), run again on
+      # the exact commit being released.
       - run: npm run typecheck
       - run: npm run test
 
       - run: npm run build
         env:
           SVL_CHANNEL: stable
-          SVL_VERSION: ${{ steps.pick.outputs.tag }}
-          SVL_COMMIT: ${{ steps.pick.outputs.sha }}
+          SVL_VERSION: ${{ steps.pick.outputs.version }}
+          SVL_COMMIT: ${{ github.sha }}
 
       - name: Deploy to Stable
         uses: cloudflare/wrangler-action@v3
@@ -113,12 +99,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.pick.outputs.tag }}
-          SHA: ${{ steps.pick.outputs.sha }}
-          PREV: ${{ steps.pick.outputs.prev }}
+          FIRST: ${{ steps.pick.outputs.first }}
         run: |
           set -euo pipefail
-          if [ -z "$PREV" ]; then
-            gh release create "$TAG" --target "$SHA" --title "$TAG" --notes "First release on the stable channel."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG is already released; redeployed it without a new Release."
+          elif [ "$FIRST" = "true" ]; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "First release on the stable channel."
           else
-            gh release create "$TAG" --target "$SHA" --title "$TAG" --generate-notes --notes-start-tag "$PREV"
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
           fi

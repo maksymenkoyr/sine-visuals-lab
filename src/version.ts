@@ -11,31 +11,31 @@ import { SOURCE_URL } from "./brand.ts";
  * The channels, and where each is deployed:
  *
  *  - **stable** — the top-level Worker (`audio-viz-room`, wrangler.toml's
- *    top level) on sinevisualslab.com and www. Only changes when someone
- *    runs the release workflow (`.github/workflows/release.yml`, `npm run
- *    release`), which promotes whatever commit the *Insider* channel is
- *    currently serving — not necessarily `main`'s tip — tags it, deploys the
- *    top-level Worker, and publishes a GitHub Release. Released every couple
- *    of days, or whenever there's something worth shipping to everyone; a
- *    release is also the only moment a phone/TV paired on stable drops,
- *    since deploying restarts the Room Durable Objects (server/room.ts).
+ *    top level) on sinevisualslab.com and www. Only changes when main is
+ *    merged into the `production` branch (`npm run release` opens that pull
+ *    request; `.github/workflows/release.yml` deploys the merge, tags it and
+ *    publishes a GitHub Release). Released every couple of days, or whenever
+ *    there's something worth shipping to everyone; a release is also the
+ *    only moment a phone/TV paired on stable drops, since deploying restarts
+ *    the Room Durable Objects (server/room.ts).
  *  - **insider** — `wrangler.toml`'s `[env.insider]`, the Worker
- *    `audio-viz-room-insider` on insider.sinevisualslab.com. Every push to `main`
- *    deploys here (`.github/workflows/deploy.yml`), so it's always current
- *    with the tip of `main` and never needs a person to decide to ship it.
+ *    `audio-viz-room-insider` on insider.sinevisualslab.com. Every push to
+ *    `main` deploys here (`.github/workflows/deploy.yml`), so it's always
+ *    current with the tip of `main` and never needs a person to decide to
+ *    ship it.
  *  - **preview** — `[env.preview]`, one throwaway Worker per open pull
  *    request (deploy.yml).
  *  - **dev** — `npm run dev` / `npm run build` with no `SVL_CHANNEL` set:
  *    whatever's on disk, dirty or not.
  *
- * The tag scheme is date-based UTC (`vYYYY.MM.DD`, with `.2`, `.3`, … appended
- * if a release already landed that day) — see release.yml's own header for
- * why the *day* is what's meaningful, not a sequence number nobody would
- * recognize.
+ * Stable and Insider carry a MAJOR.MINOR.PATCH version: every merge to main
+ * bumps the patch, every Stable release bumps the minor, and the major is
+ * set by hand in package.json — tools/appVersionLib.mjs's header owns the
+ * rules, and CI passes the result in as `SVL_VERSION`.
  *
  * `versionLabel()` below is what actually renders per channel — see its own
  * comment for the exact text each channel gets — and `versionHref()` /
- * `versionTitle()` are its link target and tooltip.
+ * `versionHint()` are its link target and hover/tap hint.
  *
  * The invariant this whole system exists to protect: **a page, once loaded,
  * never needs its own origin's files again.** There's no service worker and
@@ -49,8 +49,9 @@ import { SOURCE_URL } from "./brand.ts";
  */
 export interface BuildInfo {
   channel: "stable" | "insider" | "preview" | "dev";
-  /** The release tag (e.g. "v2026.09.28"), only ever set on the stable
-   *  channel — see release.yml. Every other channel is null. */
+  /** MAJOR.MINOR.PATCH with no leading "v" (e.g. "0.3.12"), set on the
+   *  stable and insider channels (tools/appVersionLib.mjs). Previews and
+   *  dev builds have none: null. */
   version: string | null;
   /** Full commit SHA this was built from, or "" if it couldn't be
    *  determined (e.g. a checkout with no `.git`). */
@@ -82,15 +83,12 @@ const shortSha = (commit: string): string => commit.slice(0, 7);
 /**
  * The corner label's text, per channel:
  *
- *  - stable, released: the tag as-is — `"v2026.09.28"`.
- *  - stable, unreleased build (shouldn't normally happen, but a manual
- *    `SVL_CHANNEL=stable` build with no `SVL_VERSION` degrades rather than
- *    lying): `"stable · da38a37"`.
- *  - insider: `"insider · #183 · da38a37"`, or `"insider · da38a37"` when
- *    the commit has no associated PR (a direct push to main).
- *  - preview: `"preview · PR #185 · da38a37"` — spelled out, since a preview
- *    reader doesn't already have "this is a PR" from context the way Insider's
- *    reader does.
+ *  - stable and insider: just the version — `"v0.3.0"`, `"v0.3.12"`. It
+ *    changes with every build that matters, so the PR and commit it came
+ *    from live in versionHint() instead. Without a version (a manual
+ *    `SVL_CHANNEL=…` build with no `SVL_VERSION`) it degrades to
+ *    `"stable · da38a37"` / `"insider · da38a37"` rather than lying.
+ *  - preview: `"preview · PR #185 · da38a37"`.
  *  - dev: `"dev · da38a37"`, with a trailing `"*"` when the tree was dirty at
  *    build time, or just `"dev"` when there's no commit to show at all (a
  *    checkout with no `.git`).
@@ -99,9 +97,9 @@ export function versionLabel(info: BuildInfo): string {
   const sha = shortSha(info.commit);
   switch (info.channel) {
     case "stable":
-      return info.version ?? (sha ? `stable · ${sha}` : "stable");
     case "insider":
-      return sha ? `insider · ${info.pr ? `#${info.pr} · ` : ""}${sha}` : "insider";
+      if (info.version) return `v${info.version}`;
+      return sha ? `${info.channel} · ${sha}` : info.channel;
     case "preview":
       return sha ? `preview · PR #${info.pr} · ${sha}` : `preview · PR #${info.pr}`;
     case "dev":
@@ -130,7 +128,7 @@ export function channelBadge(info: BuildInfo): { label: string; hint: readonly s
  * all — an unlikely `.git`-less checkout).
  */
 export function versionHref(info: BuildInfo): string {
-  if (info.channel === "stable" && info.version) return `${SOURCE_URL}/releases/tag/${info.version}`;
+  if (info.channel === "stable" && info.version) return `${SOURCE_URL}/releases/tag/v${info.version}`;
   if (info.commit) return `${SOURCE_URL}/commit/${info.commit}`;
   return SOURCE_URL;
 }
@@ -144,26 +142,34 @@ const formatBuiltAt = (builtAt: string): string | null => {
   return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 };
 
-/** A readable tooltip for the label — the channel, when it was built, and
- *  from what, spelled out in full rather than the label's abbreviations. */
-export function versionTitle(info: BuildInfo): string {
+/**
+ * The label's hover/tap hint, one line per row: what kind of build this is
+ * and how often it changes, then what each part of the label means — so
+ * nobody has to know that `#183` is a pull request or `da38a37` a commit.
+ * Parts the label doesn't show (no PR, no commit) get no line.
+ */
+export function versionHint(info: BuildInfo): string[] {
+  const sha = shortSha(info.commit);
   const built = formatBuiltAt(info.builtAt);
-  const from = info.commit ? `built${built ? ` ${built}` : ""} from ${info.commit}` : null;
-  // Only insider spells the PR out here — preview's own prefix already names it,
-  // and stable/dev's PR (the PR that landed the promoted/committed change, if
-  // any) isn't the headline fact either of those channels is being asked.
-  const prSuffix = info.pr ? ` (#${info.pr})` : "";
-
+  const lines: string[] = [];
   switch (info.channel) {
     case "stable":
-      return info.version
-        ? `Stable release ${info.version}${from ? ` — ${from}` : ""}`
-        : `Stable channel${from ? ` — ${from}` : " — no build info available"}`;
+      lines.push("Stable — updates only on a release");
+      if (info.version) lines.push("Each release bumps the middle number");
+      break;
     case "insider":
-      return `Insider channel${from ? ` — ${from}${prSuffix}` : " — no build info available"}`;
+      lines.push("Insider — updates with every merge");
+      if (info.version) lines.push("Each merge bumps the last number");
+      if (info.pr) lines.push(`#${info.pr} — last pull request merged`);
+      break;
     case "preview":
-      return `Preview of PR #${info.pr}${from ? ` — ${from}` : ""}`;
+      lines.push(`Preview of pull request #${info.pr}`);
+      break;
     case "dev":
-      return from ? `Dev build — ${from}${info.dirty ? ", with uncommitted changes" : ""}` : "Dev build";
+      lines.push(info.dirty ? "Local dev build, with uncommitted changes" : "Local dev build");
+      break;
   }
+  if (sha) lines.push(`${sha} — the commit it was built from`);
+  if (built) lines.push(`Built ${built}`);
+  return lines;
 }

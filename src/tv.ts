@@ -11,7 +11,7 @@ import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts"
 import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
-import { BUILD_INFO, versionLabel, versionTitle } from "./version.ts";
+import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
 import { pinEverything } from "./pinnedAssets.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
@@ -30,7 +30,7 @@ const badge = document.getElementById("badge") as HTMLDivElement;
 // the gallery footer (src/ui/gallery.ts) shows on the phone/laptop entry.
 const sourceLink = document.createElement("a");
 sourceLink.textContent = `Source (AGPL-3.0) · ${versionLabel(BUILD_INFO)}`;
-sourceLink.title = versionTitle(BUILD_INFO);
+sourceLink.title = versionHint(BUILD_INFO).join("\n");
 sourceLink.href = SOURCE_URL;
 sourceLink.target = "_blank";
 sourceLink.rel = "noopener";

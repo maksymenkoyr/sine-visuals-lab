@@ -6,10 +6,12 @@
 # every push here ships there within minutes, no one has to decide to release
 # it. The **Stable** channel (the top-level Worker, sinevisualslab.com and
 # www) is deliberately not touched by this workflow at all: it only changes
-# when someone runs `.github/workflows/release.yml` (`npm run release`),
-# which promotes whatever commit Insider is currently serving — see that
-# workflow's own header for why a manual, separate step, and src/version.ts
-# for what the two channels mean to a visitor.
+# when main is merged into the `production` branch, which runs
+# `.github/workflows/release.yml` — see that workflow's own header for why a
+# separate, deliberate step, and src/version.ts for what the two channels
+# mean to a visitor. Each Insider build's version is the last release's
+# MAJOR.MINOR with the patch counting merges since
+# (tools/appVersionLib.mjs).
 #
 # The build step is not optional decoration: `wrangler deploy` uploads ./dist
 # (the [assets] block in wrangler.toml) but never builds it, and dist/ is
@@ -60,6 +62,12 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          # An Insider build counts its patch version from the full history
+          # and origin/production (tools/app-version.mjs); a PR build needs
+          # neither. (Written this way round because `x && 0 || 1` is always
+          # 1 — 0 is falsy in an expression.)
+          fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
 
       - uses: actions/setup-node@v4
         with:
@@ -72,9 +80,14 @@ jobs:
       # Worker source is checked before it ships. They gate every deploy this
       # workflow makes (Insider and every preview) — Stable's own gates are
       # release.yml's own npm ci/typecheck/test steps, run again there against
-      # whatever commit is actually being promoted.
+      # the production commit being released.
       - run: npm run typecheck
       - run: npm run test
+
+      - name: Pick the Insider version
+        id: version
+        if: github.event_name == 'push'
+        run: echo "version=$(node tools/app-version.mjs insider)" >> "$GITHUB_OUTPUT"
 
       # SVL_CHANNEL picks src/version.ts's channel: "preview" on a pull
       # request, "insider" on a push to main — there's no third case this
@@ -88,6 +101,9 @@ jobs:
           SVL_CHANNEL: ${{ github.event_name == 'pull_request' && 'preview' || 'insider' }}
           SVL_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
           SVL_PR: ${{ github.event.pull_request.number }}
+          # Empty on a pull request (the step above is skipped) — a preview
+          # carries no version.
+          SVL_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Deploy to Insider
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
