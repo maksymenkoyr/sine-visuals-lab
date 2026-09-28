@@ -1,4 +1,7 @@
 # Sine Visuals Lab
+[`Try it now!`](https://www.sinevisualslab.com/)
+<img width="1440" height="876" alt="image" src="https://github.com/user-attachments/assets/371d24ca-ad9a-4b4a-8e54-0721ecd3e4f2" />
+
 
 A browser-based, real-time audio visualizer rendered with WebGL2: point it at
 a microphone or a shared screen and a gallery of scenes follows the beat,
