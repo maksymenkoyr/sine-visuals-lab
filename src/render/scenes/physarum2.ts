@@ -352,6 +352,12 @@ const SWITCH_MAX = 0.05;
 const SWITCH_MARGIN = 1.5;
 export const SWITCH_FLOOR = 0.04;
 const SWITCH_MIN_INK = 0.03;
+// How hard a strain's size counts against its ink: ink is divided by
+// (share * strains)^SWITCH_PRESSURE. At 1 (the prototype's plain "ink per
+// agent") a strain that lays a dense trail on this GPU dish (Turn/Sensor range
+// packed tight) still ended near 50% and another sat on the floor; 2 makes the
+// split settle on roughly the square root of each strain's ink density instead.
+const SWITCH_PRESSURE = 2;
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -1278,6 +1284,7 @@ const float SWITCH_MAX = ${SWITCH_MAX.toFixed(4)};
 const float SWITCH_MARGIN = ${SWITCH_MARGIN.toFixed(4)};
 const float SWITCH_FLOOR = ${SWITCH_FLOOR.toFixed(4)};
 const float SWITCH_MIN_INK = ${SWITCH_MIN_INK.toFixed(4)};
+const float SWITCH_PRESSURE = ${SWITCH_PRESSURE.toFixed(4)};
 const float SCALE_MIN = ${SCALE_MIN.toFixed(4)};
 const float SCALE_MAX = ${SCALE_MAX.toFixed(4)};
 const float SEED_SPREAD_MIN = ${SEED_SPREAD_MIN.toFixed(4)};
@@ -1324,7 +1331,7 @@ void main() {
   if (uSwitching > 0.0 && uRebalanceFresh < 0.5) {
     vec2 rseed = vec2(texel) * 0.173 + uNoiseSeed * 1.7 + 3.1;
     if (hash21(rseed) < SWITCH_MAX * uSwitching && dot(uPop, onehot4(k)) > SWITCH_FLOOR) {
-      vec4 per = texture(uTrail, pos) / (max(uPop, vec4(SWITCH_FLOOR)) * float(SPECIES_COUNT));
+      vec4 per = texture(uTrail, pos) / pow(max(uPop, vec4(SWITCH_FLOOR)) * float(SPECIES_COUNT), vec4(SWITCH_PRESSURE));
       float own = dot(per, onehot4(k));
       float bestV = own * SWITCH_MARGIN;
       int best = k;
