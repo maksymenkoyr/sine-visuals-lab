@@ -43,6 +43,7 @@ import {
 } from "./audio/sensitivity.ts";
 import { createAnimClock, type AnimFrame } from "./render/animClock.ts";
 import { PHASE_BASS, type TempoHit } from "./render/beatClock.ts";
+import { getBeatTrim, requestBarResync, resetBeatTrim, stepTempoMultiplier, nudgeBeatOffset } from "./render/beatTrim.ts";
 import { createRenderLatch, type RenderLatch } from "./render/renderLatch.ts";
 import { createDriveEngine, type DriveEngine } from "./render/drives.ts";
 import {
@@ -154,7 +155,7 @@ import {
 } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
-import { createDeviceMenu, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
+import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
 import { createControlPanel } from "./ui/controlPanel.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
@@ -1322,6 +1323,42 @@ async function boot(): Promise<void> {
         return;
       }
       if (inViz && !bypassGallery) navigate({ kind: "gallery" }, "push");
+    }
+    // Beat trim: bar resync, ×2/÷2 and a small earlier/later nudge — see
+    // src/render/beatTrim.ts for the why and the math. e.code (physical
+    // key), not e.key like f/s above, so a Cyrillic or German layout still
+    // reaches these; only live in a viz, like S, and skipped while typing
+    // somewhere, the same guard deviceMenu.ts's own hotkeys already use.
+    if (inViz && !isTypingTarget(e.target)) {
+      if (e.code === "KeyB") {
+        e.preventDefault();
+        noteKeyUse("beat-one");
+        if (e.shiftKey) {
+          resetBeatTrim();
+          showHud("Tempo ×1, beat timing reset");
+        } else {
+          requestBarResync();
+          showHud("This beat is the 1");
+        }
+      } else if (e.code === "BracketRight" || e.code === "BracketLeft") {
+        e.preventDefault();
+        noteKeyUse("tempo-x");
+        // lastAnim is one render tick stale (this handler runs synchronously
+        // on keydown, before the next animClock.advance() picks up the new
+        // multiplier) — so its own metronomeBpm still carries the *old*
+        // multiplier. Divide that back out to the un-multiplied tempo, then
+        // apply the new multiplier, rather than showing a beat behind.
+        const before = getBeatTrim();
+        const baseBpm = lastAnim?.metronomeOn && before.multiplier > 0 ? lastAnim.metronomeBpm / before.multiplier : 0;
+        const m = stepTempoMultiplier(e.code === "BracketRight" ? 1 : -1);
+        const label = m === 2 ? "×2" : m === 0.5 ? "÷2" : "×1";
+        showHud(`Tempo ${label}${baseBpm > 0 ? ` — ${Math.round(baseBpm * m)} BPM` : ""}`);
+      } else if (e.code === "Comma" || e.code === "Period") {
+        e.preventDefault();
+        noteKeyUse("beat-nudge");
+        const off = nudgeBeatOffset(e.code === "Comma" ? 10 : -10);
+        showHud(off === 0 ? "Beats on time" : off > 0 ? `Beats ${off} ms earlier` : `Beats ${-off} ms later`);
+      }
     }
   });
   backBtn.addEventListener("click", () => navigate({ kind: "gallery" }, "push"));
