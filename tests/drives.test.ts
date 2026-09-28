@@ -745,6 +745,36 @@ describe("drives: a source's own role/mute travel with it through togglePatchSou
   });
 });
 
+describe("drives: a patch holds one grid source, whatever its division (sourceSlot)", () => {
+  it("toggling the Beat jack's default division unplugs a grid re-gridded to Bar, instead of adding a second grid", () => {
+    // The Beat row's jack always carries { grid: 2 }; the patch's own grid
+    // was moved to Bar (3) by its division chips.
+    const patch: DrivePatch = {
+      mix: "add",
+      sources: [
+        { choice: { source: "beat", grid: 3 }, weight: 1.6 },
+        { choice: "feature.onset", weight: 1 },
+      ],
+    };
+    const next = togglePatchSource(patch, { source: "beat", grid: 2 });
+    if (next === "scene") throw new Error("unreachable");
+    expect(next.sources.map((s) => s.choice)).toEqual(["feature.onset"]);
+  });
+
+  it("normalizeDriveSetting keeps only the first of two grid sources (a patch saved before the fix)", () => {
+    const next = normalizeDriveSetting({
+      mix: "add",
+      sources: [
+        { choice: { source: "beat", grid: 3 }, weight: 1.6 },
+        { choice: "feature.onset", weight: 1 },
+        { choice: { source: "beat", grid: 2 }, weight: 1 },
+      ],
+    });
+    if (next === "scene") throw new Error("unreachable");
+    expect(next.sources.map((s) => s.choice)).toEqual([{ source: "beat", grid: 3 }, "feature.onset"]);
+  });
+});
+
 describe("drives: multi-source patch mixing (add/max/gate) and gain", () => {
   it("add sums every source's own weight * value", () => {
     const clock = createAnimClock();
