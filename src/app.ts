@@ -8,6 +8,8 @@ import {
   resolveInputDeviceId,
   isMissingDeviceError,
   deviceLabel,
+  isInputHidden,
+  setInputHidden,
   inputKind,
   INPUT_KIND_TEXT,
   type InputDevicePref,
@@ -620,7 +622,7 @@ function syncInputPreview(): void {
   }
   if (!inputPreview) inputPreview = createInputPreview();
   const live = liveInputLabel();
-  inputPreview.sync(inputDevices.filter((o) => o.label !== live).map((o) => o.deviceId));
+  inputPreview.sync(inputDevices.filter((o) => o.label !== live && !isInputHidden(o.label)).map((o) => o.deviceId));
 }
 
 /** An input was plugged in or pulled. Besides refreshing the dropdown: if the
@@ -1027,6 +1029,10 @@ function wireDeviceMenu(): void {
     setInputPreviewActive: (active) => {
       inputPreviewActive = active;
       syncInputPreview();
+    },
+    onInputHiddenChange: (label, hide) => {
+      setInputHidden(label, hide);
+      syncInputPreview(); // a hidden input's idle preview closes, a shown one opens
     },
     onPickPalette: (id) => applyPalette(getPalette(id)),
     getSensitivity: (sceneId) => getSensitivity(sceneId),

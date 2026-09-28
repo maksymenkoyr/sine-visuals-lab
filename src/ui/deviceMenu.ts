@@ -90,7 +90,7 @@ import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
-import { inputKind, INPUT_KIND_TEXT, type InputDeviceOption, type InputDevicePref, type InputKind } from "../audio/inputDevice.ts";
+import { inputKind, isInputHidden, INPUT_KIND_TEXT, type InputDeviceOption, type InputDevicePref, type InputKind } from "../audio/inputDevice.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import {
   AUTO_SKY,
@@ -444,6 +444,10 @@ export interface DeviceMenuDeps {
    *  only while the panel is open; see inputPreview.ts's header for why it's
    *  gated further (browser support, whether there's anything to preview). */
   setInputPreviewActive: (active: boolean) => void;
+  /** The Source row's Edit mode hid or showed an input, by label (see
+   *  inputDevice.ts's hidden-inputs paragraph). src/app.ts stores it and
+   *  re-syncs the idle preview, which skips hidden inputs. */
+  onInputHiddenChange: (label: string, hide: boolean) => void;
   getSensitivity: (sceneId: string) => number;
   onSensitivityChange: (sceneId: string, value: number) => void;
   getExpansion: (sceneId: string) => number;
@@ -4383,8 +4387,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   const sourceRowDashedStyle = `${sourceRowStyle} border-style: dashed; border-color: rgba(255,255,255,0.22); color: rgba(255,255,255,0.55);`;
   const sourceRowDotStyle = `width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.45); box-sizing: border-box;`;
   const sourceRowDotLiveStyle = `${sourceRowDotStyle} background: ${INPUT_GREEN}; border-color: ${INPUT_GREEN};`;
-  const sourceRowNameWrapStyle = `min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;`;
-  const sourceRowSubStyle = `display: block; font: 400 10.5px/1.3 ${FONT_MONO}; color: rgba(255,255,255,0.45);`;
+  // The name truncates on one line (device names run long — "Steam Streaming
+  // Microphone"); the sub-line under it wraps instead, since it's the hint a
+  // truncation would cut in half.
+  const sourceRowNameWrapStyle = `min-width: 0; display: flex; flex-direction: column;`;
+  const sourceRowNameStyle = `display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;`;
+  const sourceRowSubStyle = `display: block; white-space: normal; font: 400 10.5px/1.3 ${FONT_MONO}; color: rgba(255,255,255,0.45);`;
   // The missing row's own sub-line ("not connected") reads as a warning, not
   // just a description — same amber this file uses for any other "pay
   // attention" text (BANDS_AMBER).
@@ -4423,6 +4431,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // above it (a share isn't a device this computer has), same mono/uppercase
   // idiom as driveEyebrowStyle elsewhere in this file, dimmer since it's not
   // a card-level label.
+  // The "2 hidden" line under the device rows — plain dim text that opens
+  // Edit, deliberately quieter than a row so it never reads as an input.
+  const sourceHiddenLineStyle = `align-self: flex-start; margin-top: 2px; padding: 2px 0; background: none; border: 0; cursor: pointer; font: 400 10.5px/1.3 ${FONT_MONO}; color: rgba(255,255,255,0.4); text-decoration: underline dotted rgba(255,255,255,0.25); text-underline-offset: 3px;`;
   const sourceScreenCaptionStyle = `margin-top: 10px; font: 400 9.5px/1 ${FONT_MONO}; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.35);`;
   // Always visible while Screen is the active source, not a .vc-hint: the hint
   // only reveals on hover/focus, and on touch that means after the tap that
@@ -4506,6 +4517,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const nameWrap = document.createElement("span");
     nameWrap.style.cssText = sourceRowNameWrapStyle;
     const name = document.createElement("span");
+    name.style.cssText = sourceRowNameStyle;
     const sub = document.createElement("span");
     sub.style.cssText = sourceRowSubStyle;
     nameWrap.append(name, sub);
@@ -4554,6 +4566,25 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     label.style.cssText = rowLabelStyle;
     head.appendChild(label);
 
+    // Edit mode: tapping an input hides or shows it instead of picking it
+    // (inputDevice.ts's hidden inputs). A mode, not a per-row ✕, because the
+    // rows are buttons already (no nesting a second one inside) and a hover-
+    // only control would be unreachable on touch.
+    let editing = false;
+    const editBtn = createChipButton("Edit", "Hide inputs you never use, or show them again", () => {
+      editing = !editing;
+      refresh();
+    });
+    head.appendChild(editBtn);
+
+    const hiddenLine = document.createElement("button");
+    hiddenLine.type = "button";
+    hiddenLine.style.cssText = sourceHiddenLineStyle;
+    hiddenLine.addEventListener("click", () => {
+      editing = true;
+      refresh();
+    });
+
     const list = document.createElement("div");
     list.style.cssText = sourceListStyle;
     const caption = document.createElement("div");
@@ -4591,6 +4622,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       row.tag!.textContent = INPUT_KIND_TEXT[kind].tag;
       row.tag!.style.cssText = SOURCE_TAG_STYLE[kind];
       row.btn.addEventListener("click", () => {
+        if (editing) {
+          // The input being listened to stays — hiding it would hide the
+          // answer to "what am I hearing".
+          if (row.isLive) return;
+          deps.onInputHiddenChange(label, !isInputHidden(label));
+          refresh();
+          return;
+        }
         if (row.isLive) return;
         deps.onInputDeviceChange(deviceId);
       });
@@ -4615,7 +4654,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     function buildScreenRow(): SourceRowHandle {
       const row = buildRow("screen");
       row.name.textContent = "Screen share";
-      row.sub.textContent = "Chrome asks which tab or screen";
+      // Apps (Spotify, a DJ app) aren't inputs, so they never appear in the
+      // list above — an Entire-screen share is how a browser hears them.
+      row.sub.textContent = "any app's sound, e.g. Spotify — pick Entire screen";
       row.btn.title = "Share screen audio";
       row.btn.addEventListener("click", () => deps.onAudioSourceChange("display"));
       return row;
@@ -4631,34 +4672,47 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     function syncRowList(): string | null {
       const devices = deps.getInputDevices();
       const canDisplay = deps.canCaptureDisplay();
-      const key = JSON.stringify([devices.options, devices.missing, devices.defaultLabel, canDisplay]);
+      // Outside Edit a hidden input drops out of the list — unless it's the
+      // one being heard, which always shows. In Edit every input shows (the
+      // hidden ones dimmed, see refresh()) so any of them can come back.
+      const shown = devices.options.filter((o) => editing || !isInputHidden(o.label) || o.label === devices.liveLabel);
+      const hiddenCount = devices.options.length - shown.length;
+      const key = JSON.stringify([shown, devices.missing, devices.defaultLabel, canDisplay, editing, hiddenCount]);
       if (key !== structureKey) {
         structureKey = key;
         const next: SourceRowHandle[] = [];
         if (devices.options.length === 0) {
           next.push(buildPermissionRow());
         } else {
-          for (const o of devices.options) next.push(buildDeviceRow(o.deviceId, o.label));
+          for (const o of shown) next.push(buildDeviceRow(o.deviceId, o.label));
           if (devices.missing) next.push(buildMissingRow(devices.missing));
         }
-        if (canDisplay) next.push(buildScreenRow());
+        // Screen isn't an input, so Edit has nothing to do with it.
+        if (canDisplay && !editing) next.push(buildScreenRow());
         rows = next;
+        hiddenLine.textContent = `${hiddenCount} hidden — Edit to show`;
         // The caption sits directly above the Screen row, whatever came
         // before it (real devices, the missing placeholder, or the
         // pre-permission row) — it's what marks Screen as not one of them.
         const children: Node[] = [];
         for (const row of rows) {
-          if (row.isScreen) children.push(caption);
+          if (row.isScreen) {
+            if (hiddenCount > 0) children.push(hiddenLine);
+            children.push(caption);
+          }
           children.push(row.btn);
         }
+        if (hiddenCount > 0 && !rows.some((r) => r.isScreen)) children.push(hiddenLine);
         list.replaceChildren(...children);
       }
+      editBtn.textContent = editing ? "Done" : "Edit";
+      editBtn.style.cssText = editing ? chipBtnLitStyle : chipBtnStyle;
+      // Nothing to hide before the permission lists real inputs.
+      editBtn.style.display = devices.options.length === 0 ? "none" : "";
       return devices.liveLabel;
     }
 
-    return {
-      el,
-      refresh(): void {
+    function refresh(): void {
         const state = deps.getSourceState();
         el.style.display = state === null ? "none" : "";
         if (state === null) return;
@@ -4674,30 +4728,49 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           // input") are fixed at build time and never touched here — only a
           // real, present device row's sub-line depends on live/default/kind
           // state that can change without the row list itself being rebuilt.
+          const label = row.name.textContent ?? "";
+          const isHidden = row.deviceId !== null && !row.isMissing && isInputHidden(label);
           if (!row.isScreen && !row.isMissing && row.deviceId !== null) {
-            row.sub.textContent =
-              isLive && devices.missing
+            row.sub.textContent = editing
+              ? isLive
+                ? "listening — can't hide"
+                : isHidden
+                  ? "hidden — tap to show"
+                  : "tap to hide"
+              : isLive && devices.missing
                 ? "filling in until it's back"
-                : row.name.textContent === devices.defaultLabel
+                : label === devices.defaultLabel
                   ? "System default"
-                  : inputKind(row.name.textContent ?? "") === "loopback"
+                  : inputKind(label) === "loopback"
                     ? "this computer's own sound"
                     : "";
-            row.sub.style.display = row.sub.textContent ? "" : "none";
+            row.sub.style.display = row.sub.textContent ? "block" : "none";
           }
           row.btn.style.cssText = isLive ? sourceRowLiveStyle : row.isMissing || row.isScreen ? sourceRowDashedStyle : sourceRowStyle;
+          if (editing && isHidden) row.btn.style.opacity = "0.45";
           if (row.dot) row.dot.style.cssText = isLive ? sourceRowDotLiveStyle : sourceRowDotStyle;
           if (row.glyph) row.glyph.style.color = isLive ? INPUT_GREEN : "rgba(255,255,255,0.55)";
         }
-        guide.style.display = state.choice === "display" ? "" : "none";
+        guide.style.display = state.choice === "display" && !editing ? "" : "none";
         // See .vc-src-status[data-prompting] (controlsTheme.ts) for the
         // shimmer this drives while nothing's live yet.
-        status.toggleAttribute("data-prompting", !state.live);
-        status.textContent = !state.live
-          ? "Pick a source above"
-          : state.choice === "display"
-            ? "Listening to screen share"
-            : `Listening to ${liveLabel ?? "the microphone"}`;
+        status.toggleAttribute("data-prompting", !state.live && !editing);
+        status.textContent = editing
+          ? "Tap an input to hide or show it"
+          : !state.live
+            ? "Pick a source above"
+            : state.choice === "display"
+              ? "Listening to screen share"
+              : `Listening to ${liveLabel ?? "the microphone"}`;
+    }
+
+    return {
+      el,
+      refresh,
+      /** Closing the panel leaves Edit, so it never reopens with taps that
+       *  hide instead of pick. */
+      endEdit(): void {
+        editing = false;
       },
       // Meter segments only — called every rAF tick while the panel's open
       // (this file's own update(), unthrottled like the Bands strip), so the
@@ -5989,6 +6062,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     toastEl.classList.remove("vc-toast-show");
     positionSoloEye();
     deps.setInputPreviewActive(false);
+    sourceRow.endEdit();
   }
 
   // Cache of the last --wash value written, so update() (called every rAF
