@@ -22,8 +22,6 @@ import {
   advanceAutoTune,
   isAutoEnabled,
   setAutoEnabled,
-  isSceneAuto,
-  setSceneAuto,
   seedAuto,
   getSensitivitySpec,
   getExpansionSpec,
@@ -254,18 +252,6 @@ describe("auto state and resolution", () => {
       last = resolveSceneSetting(sceneId, SPEC);
     }
     expect(last).toBeCloseTo(target, 2);
-  });
-
-  it("isSceneAuto is false by default, and true only once every auto-capable setting passed to it is switched to auto", () => {
-    const sceneId = "scene-auto-6";
-    const specs = [SPEC, getSensitivitySpec(), getExpansionSpec(), getSmoothingSpec()];
-    expect(isSceneAuto(sceneId, specs)).toBe(false);
-    setSceneAuto(sceneId, specs, true);
-    expect(isSceneAuto(sceneId, specs)).toBe(true);
-    setAutoEnabled(sceneId, SPEC.key, false);
-    expect(isSceneAuto(sceneId, specs)).toBe(false);
-    setSceneAuto(sceneId, specs, true);
-    expect(isSceneAuto(sceneId, specs)).toBe(true);
   });
 
   it("resolveSensitivity follows the same auto/manual split as scene settings", () => {

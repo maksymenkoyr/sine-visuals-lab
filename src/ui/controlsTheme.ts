@@ -34,7 +34,7 @@ export const SCENE_VIOLET = "#c3a5f9";
 export const BANDS_AMBER = "#f9b96c";
 /** A fader that's been pulled all the way down to Off (spectrumStrip.ts, bandFaders.ts). */
 export const FADER_OFF = "#f08a8a";
-/** The global auto system — strength knob and master switch. */
+/** The auto system — auto chips and hints, and the readouts auto tunes from. */
 export const AUTO_SKY = "#59bbfb";
 /** Energy saving mode — the governor's Auto/On/Off override and its status
  *  readouts (src/ui/powerCard.ts). */
@@ -88,12 +88,9 @@ export const CABLE_GUTTER_PX = 56;
 export const STACK_BELOW_PX = 940 + CABLE_GUTTER_PX;
 
 /** The folded Power card's side, in the wide layout (powerCard.ts) — a
- *  notch under a folded card's title bar (FOLDED_BAR_PX), so it reads as a
- *  button rather than a card. */
+ *  notch under a folded card's title bar, so it reads as a button rather
+ *  than a card. */
 export const POWER_SQUARE_PX = 26;
-/** A folded card's title-bar height; the Auto master bar (deviceMenu.ts)
- *  is set to it so it sits in the same register as the cards below it. */
-export const FOLDED_BAR_PX = 32;
 
 /** `#rrggbb` + alpha in [0,1] -> `#rrggbbaa`. */
 export function withAlpha(hex: string, alpha: number): string {

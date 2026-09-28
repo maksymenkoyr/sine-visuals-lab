@@ -135,8 +135,6 @@ import {
   getSmoothingSpec,
   isAutoEnabled,
   setAutoEnabled,
-  isSceneAuto,
-  setSceneAuto,
   seedAuto,
 } from "./render/autoTune.ts";
 import {
@@ -912,19 +910,6 @@ function wireDeviceMenu(): void {
     getSmoothingSpec: () => getSmoothingSpec(),
     isSettingAutoEnabled: (sceneId, key) => isAutoEnabled(sceneId, key),
     onSettingAutoToggle,
-    isSceneAuto: (sceneId) =>
-      isSceneAuto(sceneId, [
-        ...(getScene(sceneId)?.settings ?? []),
-        getSensitivitySpec(),
-        getExpansionSpec(),
-        getSmoothingSpec(),
-      ]),
-    onSceneAutoToggle: (sceneId, on) =>
-      setSceneAuto(
-        sceneId,
-        [...(getScene(sceneId)?.settings ?? []), getSensitivitySpec(), getExpansionSpec(), getSmoothingSpec()],
-        on,
-      ),
     getSceneMaster: () => getSceneMaster(),
     onSceneMasterChange: (value) => setSceneMaster(value),
     getAutoGain: () => getAutoGain(),

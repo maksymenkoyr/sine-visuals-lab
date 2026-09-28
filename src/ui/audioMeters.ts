@@ -353,14 +353,14 @@ const fillStyle = (accent: string) =>
   `position: absolute; top: 0; left: 0; height: 100%; width: 0; border-radius: 2px; background-color: ${accent}; transition: ${FADE};`;
 const capStyle = `position: absolute; top: -1px; bottom: -1px; width: 1.5px; left: 0; background: #fff; visibility: hidden;`;
 const tickStyle = `position: absolute; top: -2px; bottom: -2px; width: 1px; background: rgba(255,255,255,0.55);`;
-// Tempo is a compact block welded beside the Section row — the Auto master
-// block's shape (deviceMenu.ts), framed like a woken .vc-row (the same ring
-// and tint controlsTheme.ts gives the Section row on hover, with the same
-// 6px reach past the row's content) so the two read as one line. Digits,
-// caption, and a beat dot beneath. The dot rests at a dim BEAT_COLOR that
-// brightens with beatClock's tempoLock (an unconfident guess stays dim);
-// each metronome tick it jumps to white inside a BEAT_COLOR halo and eases
-// back into the colour as the halo fades — white-to-orange is the beat.
+// Tempo is a compact block welded beside the Section row, framed like a
+// woken .vc-row (the same ring and tint controlsTheme.ts gives the Section
+// row on hover, with the same 6px reach past the row's content) so the two
+// read as one line. Digits, caption, and a beat dot beneath. The dot rests
+// at a dim BEAT_COLOR that brightens with beatClock's tempoLock (an
+// unconfident guess stays dim); each metronome tick it jumps to white
+// inside a BEAT_COLOR halo and eases back into the colour as the halo
+// fades — white-to-orange is the beat.
 // A .vc-row's ring reaches 8px past its content into the card padding; the
 // block reaches the same 8px on its right, and the gap between the two is
 // what's left of that reach — so card edge → ring, ring → block, and block →

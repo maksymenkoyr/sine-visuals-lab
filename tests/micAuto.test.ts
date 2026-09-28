@@ -15,9 +15,8 @@ import {
 // actual dependencies is both simpler and a better regression guard than
 // faking them out. `onSettingAutoToggle` here is the plain setAutoEnabled
 // path rather than app.ts's own seed-on-enable wrapper — that wrapper's
-// seeding is app.ts's integration concern (verified separately, e.g. by the
-// isSceneAuto-style behavior in tests/autoTune.test.ts), not something
-// isMicAuto/setMicAuto themselves need to exercise.
+// seeding is app.ts's integration concern, not something isMicAuto/
+// setMicAuto themselves need to exercise.
 const members: MicAutoMembers = {
   isAutoGainAuto,
   setAutoGainAuto,
@@ -30,10 +29,8 @@ const members: MicAutoMembers = {
   onSettingAutoToggle: (sceneId, spec, on) => setAutoEnabled(sceneId, spec.key, on),
 };
 
-// Modelled on tests/autoTune.test.ts's isSceneAuto test — same "false by
-// default, true only once every member is on, false again the moment any
-// one member goes back to manual" contract, just over micAuto.ts's own
-// fixed member list instead of an arbitrary specs array.
+// The contract: true only once every member is on, false again the moment
+// any one member goes back to manual.
 describe("isMicAuto / setMicAuto", () => {
   const sceneId = "mic-auto-test-scene";
 

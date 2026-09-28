@@ -280,20 +280,6 @@ export function setAutoEnabled(sceneId: string, key: string, on: boolean): void 
   persistAutoStore();
 }
 
-/** Whether every auto-capable setting on this scene is currently auto —
- *  drives the scene's master toggle. Settings with neither an `auto` nor a
- *  `macro` field can't be toggled, so they don't count against it. Pass
- *  Sensitivity/Expansion/Smoothing specs alongside a scene's own settings
- *  if the master toggle should cover them too (see app.ts). */
-export function isSceneAuto(sceneId: string, specs: readonly SceneSetting[]): boolean {
-  const relevant = specs.filter((s) => s.auto || s.macro);
-  return relevant.length > 0 && relevant.every((s) => isAutoEnabled(sceneId, s.key));
-}
-
-export function setSceneAuto(sceneId: string, specs: readonly SceneSetting[], on: boolean): void {
-  for (const s of specs) if (s.auto || s.macro) setAutoEnabled(sceneId, s.key, on);
-}
-
 function clampToSpec(spec: SceneSetting, value: number, base = spec.default): number {
   if (!Number.isFinite(value)) return base;
   return Math.min(spec.max, Math.max(spec.min, value));

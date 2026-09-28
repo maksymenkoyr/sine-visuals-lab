@@ -95,7 +95,6 @@ import {
   AUTO_SKY,
   BANDS_AMBER,
   FAMILY_ACCENTS,
-  FOLDED_BAR_PX,
   FONT_LABEL,
   FONT_MONO,
   GLASS_FILTER,
@@ -141,11 +140,10 @@ import {
  * cables (src/ui/cableLayer.ts) showing through the open middle: the Bands
  * card (scene name, audio source, and the live bars with the band faders
  * drawn over them — see src/ui/bandFaders.ts) anchored top-left, and the
- * controls column anchored top-right alongside Power, whose cards run the
- * Auto master bar → Input
- * (its own header carries a second Auto button, next to Reset — see
- * src/audio/micAuto.ts for how it differs from the master block) → Scene →
- * Palette → a footer strip. A drive setting (SceneSetting.drive — see
+ * controls column anchored top-right alongside Power, whose cards run
+ * Master → Input (its own header carries an Auto button, next to Reset,
+ * that hands the whole mic to auto — see src/audio/micAuto.ts) → Scene →
+ * Looks → Palette → a footer strip. A drive setting (SceneSetting.drive — see
  * src/render/drives.ts) is the patch bay: its row grows an input port (a
  * small ring at the row's left edge, in its first source's colour —
  * src/ui/driveSources.ts owns every source's colour and label), a source
@@ -525,9 +523,6 @@ export interface DeviceMenuDeps {
   getSmoothingSpec: () => SceneSetting;
   isSettingAutoEnabled: (sceneId: string, key: string) => boolean;
   onSettingAutoToggle: (sceneId: string, spec: SceneSetting, on: boolean) => void;
-  /** Whether every auto-capable setting on this scene (incl. Sensitivity/Expansion/Smoothing) is auto. */
-  isSceneAuto: (sceneId: string) => boolean;
-  onSceneAutoToggle: (sceneId: string, on: boolean) => void;
   /** The device-wide scene master (sceneSettings.ts's getSceneMaster) — one
    *  dial over every numeric scene param, resolved in autoTune.ts's
    *  resolveSceneSetting. Device-local, so it is neither captured in a Look
@@ -551,9 +546,7 @@ export interface DeviceMenuDeps {
   onAutoGainChange: (value: number) => void;
   /** The row's own "A" chip — auto-resolves the amount from the room's
    *  measured span rather than MUSIC_DIALS (see autoGain.ts's header for
-   *  why). Independent of the master Auto button: that toggle is scoped to
-   *  isSceneAuto's per-scene auto-on store, and this setting is device-global
-   *  like getAutoGain above. */
+   *  why). Device-global like getAutoGain above, not per scene. */
   isAutoGainAuto: () => boolean;
   onAutoGainAutoToggle: (on: boolean) => void;
   resolveAutoGain: () => number;
@@ -569,8 +562,8 @@ export interface DeviceMenuDeps {
   onSilenceGateOpenChange: (value: number) => void;
   /** The gate rows' own "A" chips — one flag for both marks (see
    *  silenceGate.ts's "Auto mode" header paragraph for why steadiness, not
-   *  MUSIC_DIALS, is what they resolve against). Independent of the master
-   *  Auto button the same way isAutoGainAuto above is. */
+   *  MUSIC_DIALS, is what they resolve against). Device-global, the same
+   *  way isAutoGainAuto above is. */
   isSilenceGateAuto: () => boolean;
   onSilenceGateAutoToggle: (on: boolean) => void;
   resolveSilenceGate: () => SilenceGateMarks;
@@ -583,8 +576,7 @@ export interface DeviceMenuDeps {
   setHitShape: (partial: Partial<HitShape>) => void;
   /** Whether every member of "the whole mic" is on auto for this scene —
    *  drives the Input card's own Auto button. See src/audio/micAuto.ts's
-   *  header for exactly what that membership is and how it overlaps
-   *  isSceneAuto above. */
+   *  header for exactly what that membership is. */
   isMicAuto: (sceneId: string) => boolean;
   onMicAutoToggle: (sceneId: string, on: boolean) => void;
   /** Energy saving mode (src/render/powerMode.ts) — the Power card's
@@ -677,29 +669,10 @@ const offChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
 
-// The Auto master bar — its own slim full-width strip at the top of the
-// settings column, a folded card's title-bar height (FOLDED_BAR_PX,
-// controlsTheme.ts).
-const autoMasterBaseStyle = `
-  width: 100%; box-sizing: border-box; height: ${FOLDED_BAR_PX}px; flex-shrink: 0;
-  cursor: pointer; padding: 0; border-radius: 3px;
-  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
-`;
-const autoMasterStyle = `${autoMasterBaseStyle} background: rgba(8,11,10,0.2); border: 1px solid ${withAlpha(AUTO_SKY, 0.3)};`;
-const autoMasterLitStyle = `${autoMasterBaseStyle} background: ${withAlpha("#1479b0", 0.28)}; border: 1px solid ${withAlpha(AUTO_SKY, 0.6)};`;
-// Label + ON/OFF sub-label inline on one line, centred in the bar.
-const autoMasterInnerStyle = `display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 100%;`;
-const autoMasterLabelStyle = (lit: boolean) =>
-  `font: 500 13px/1.2 ${FONT_LABEL}; color: ${lit ? "#a0e7ff" : "rgba(255,255,255,0.55)"};`;
-const autoMasterSubStyle = (lit: boolean) =>
-  `font: 400 8.5px/1.4 ${FONT_MONO}; letter-spacing: 0.14em; color: ${lit ? withAlpha("#8dccf9", 0.8) : "rgba(255,255,255,0.4)"};`;
-
 // The Input card's own "Auto" button (see micAuto.ts's header for what
-// "the whole mic" covers) — a compact, header-sized member of the
-// autoMaster* family above: same lit/unlit shape, same backdrop-filtered
-// pill, scaled down to sit beside a Reset chip in a card header instead of
-// spanning the settings column, and given the Input card's own accent
-// (INPUT_GREEN) rather than the Auto bar's sky blue.
+// "the whole mic" covers) — a compact, backdrop-filtered pill sized to sit
+// beside a Reset chip in a card header, lit in the Input card's own accent
+// (INPUT_GREEN).
 const micAutoBaseStyle = `
   font: 500 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.04em; padding: 2.5px 8px;
   border-radius: 4px; cursor: pointer;
@@ -4161,32 +4134,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   cableColumnsRO.observe(controlsCol);
   controlsCol.addEventListener("scroll", scheduleCableRecompute, { passive: true });
 
-  // The global "Auto" master switch — toggles every auto-capable row, scene
-  // settings plus Sensitivity/Expansion/Smoothing (see app.ts's
-  // isSceneAuto wiring). Its own slim full-width bar at the top of the
-  // settings column, beside folded Power's square.
-  // Overlaps the Input card's own Auto button (below, and see micAuto.ts's
-  // header) on the Sensitivity/Expansion/Smoothing rows only — a scene's own
-  // settings stay this button's alone — so toggling either refreshes the
-  // other's lit state (see toggleAutoMaster/toggleMicAuto).
-  const autoMasterBtn = document.createElement("button");
-  autoMasterBtn.title = "Auto-tune everything — sensitivity, expansion, smoothing, and every scene setting";
-  const autoMasterLabel = document.createElement("div");
-  autoMasterLabel.textContent = "Auto";
-  const autoMasterSub = document.createElement("div");
-  const autoMasterInner = document.createElement("div");
-  autoMasterInner.style.cssText = autoMasterInnerStyle;
-  autoMasterInner.append(autoMasterLabel, autoMasterSub);
-  autoMasterBtn.appendChild(autoMasterInner);
-
   // Master: one device-wide dial over every numeric scene param, multiplied
   // in at autoTune.ts's resolveSceneSetting (scaled once, never on drives,
   // enums/booleans, or the Input card's gain stages — see that doc). Sits
-  // between the Auto bar and Input as its own always-visible card: it is
-  // not part of the auto system, and unlike the Scene card below it must
-  // not disappear on a scene that declares no settings of its own — those
-  // scenes simply have nothing for it to move. The Scene card's violet,
-  // because what it scales is that card's contents.
+  // at the top of the settings column, above Input, as its own
+  // always-visible card: it is not part of the auto system, and unlike the
+  // Scene card below it must not disappear on a scene that declares no
+  // settings of its own — those scenes simply have nothing for it to move.
+  // The Scene card's violet, because what it scales is that card's
+  // contents.
   const masterCard = createCard({ title: "Master", accent: SCENE_VIOLET });
   markBlock(masterCard.title);
   const masterRow = createControlRow({
@@ -4542,10 +4498,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   syncSilenceGateRows();
 
   // The Input card's own Auto button — hands the whole mic to auto in one
-  // tap (see micAuto.ts's header for exactly what that covers). refreshMicAuto
-  // and toggleMicAuto themselves live further down, by refreshAutoMaster/
-  // toggleAutoMaster — the scene master toggle they overlap on the
-  // Sensitivity/Expansion/Smoothing rows — but the button is built here
+  // tap (see micAuto.ts's header for exactly what that covers).
+  // refreshMicAuto and toggleMicAuto themselves live further down, just
+  // before the controls column is assembled, but the button is built here
   // since it's part of this card's own header.
   const micAutoBtn = document.createElement("button");
   micAutoBtn.textContent = "Auto";
@@ -4567,7 +4522,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // onChange above took those rows back to manual without going through
       // a row's own commit(), so its onAutoToggled hook never heard about it.
       refreshMicAuto();
-      refreshAutoMaster();
     }),
   );
 
@@ -5066,7 +5020,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     sceneCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.el.style.display = specs.length === 0 ? "none" : "";
     looksCard.refresh();
-    refreshAutoMaster();
     // Not scene-specific like the rest of this function, but this is the
     // one place that already re-syncs on every open()/scene-change/Look
     // apply (see this function's own callers) — piggybacking here means
@@ -5268,10 +5221,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Footer strip: the view toggles (keys, solo, the meters column) and a way
   // out. It lives in the column that never hides, rather than above Bands: a
   // chip up there had to be its own row, which pushed the whole column down
-  // out of line with Power and the Auto bar. The dock that holds it is
-  // sticky to the bottom of that column (.vc-dock, controlsTheme.ts) — at
-  // the bottom of the scroll, the buttons were out of sight whenever the
-  // column overflowed, which it almost always does.
+  // out of line with Power and the top of the settings column. The dock
+  // that holds it is sticky to the bottom of that column (.vc-dock,
+  // controlsTheme.ts) — at the bottom of the scroll, the buttons were out
+  // of sight whenever the column overflowed, which it almost always does.
   const footer = document.createElement("div");
   footer.style.cssText = footerStyle;
   // data-key/data-keycap (keyHints.ts): each footer button *is* the control
@@ -5470,31 +5423,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // on screen than showToast's own default toast duration.
   installKeyHints((text) => showToast(text, 4000));
 
-  function refreshAutoMaster(): void {
-    const lit = deps.isSceneAuto(deps.currentSceneId());
-    autoMasterBtn.style.cssText = lit ? autoMasterLitStyle : autoMasterStyle;
-    autoMasterLabel.style.cssText = autoMasterLabelStyle(lit);
-    autoMasterSub.style.cssText = autoMasterSubStyle(lit);
-    autoMasterSub.textContent = lit ? "ON" : "OFF";
-  }
-
-  // Overlaps the Input card's own Auto button (micAuto.ts) on the
-  // Sensitivity/Expansion/Smoothing rows, which both toggles share — refresh
-  // that button too, since flipping every scene setting to manual/auto here
-  // can just as easily have flipped it out from under mic-auto's own lit
-  // state as the reverse.
-  function toggleAutoMaster(): void {
-    const sceneId = deps.currentSceneId();
-    deps.onSceneAutoToggle(sceneId, !deps.isSceneAuto(sceneId));
-    renderSceneSettings();
-    syncInputRows();
-    refreshMicAuto();
-  }
-  autoMasterBtn.addEventListener("click", toggleAutoMaster);
-
   // The Input card's own Auto button — see micAuto.ts's header for exactly
-  // which members "the whole mic" covers, and this file's card-anatomy
-  // header comment for how it relates to the scene master above.
+  // which members "the whole mic" covers.
   function refreshMicAuto(): void {
     const lit = deps.isMicAuto(deps.currentSceneId());
     micAutoBtn.style.cssText = lit ? micAutoLitStyle : micAutoStyle;
@@ -5504,13 +5434,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     deps.onMicAutoToggle(sceneId, !deps.isMicAuto(sceneId));
     syncInputRows();
     refreshMicAuto();
-    // The Sensitivity/Expansion/Smoothing members are shared with the scene
-    // master (see toggleAutoMaster above) — a mic-auto toggle can just as
-    // easily have flipped that button's own lit state.
-    refreshAutoMaster();
   }
 
-  controlsCol.append(autoMasterBtn, masterCard.el, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, dock);
+  controlsCol.append(masterCard.el, inputCard.el, sceneCard.el, looksCard.el, paletteCard.el, dock);
   root.append(columnsWrap, controlsCol);
   // Every card is built once above and lives for the panel's lifetime, so
   // one pass covers them all — see cableColumnsRO's own comment.
