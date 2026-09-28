@@ -40,12 +40,19 @@ Close out this working session:
    - reference material used outside `/ref` (a pasted still, frames pulled
      by hand) → under `tools/.cache/refs/<name>/`, named in the record.
 
-4. **Check for doc rot.** For any symbol, file, or param name this session
-   renamed, removed, or changed the meaning of, grep `AGENTS.md`, `CLAUDE.md`
-   and `docs/*.md` for the old name. Fix any reference you find — this is the
-   enforcement mechanism behind rule 2 in `AGENTS.md` ("never write down
-   anything countable"): a reference that names a real symbol will surface
-   itself here the moment that symbol changes.
+4. **Check for doc rot.** Run `npm run doc-check` first — it narrows this to
+   the doc paragraphs that mention code this branch changed and, with a
+   `TYPESAFE_API_KEY` configured, flags which of those the change actually
+   made wrong; read and fix only the flagged paragraphs. Without a key it
+   lists the same candidate paragraphs unjudged — read those instead. Then,
+   for any symbol, file, or param name this session renamed, removed, or
+   changed the meaning of, grep `AGENTS.md`, `CLAUDE.md` and `docs/*.md` for
+   the old name as a fallback — this catches a rename the tool's diff-based
+   search can miss, like a name only mentioned in prose rather than declared
+   in code. Fix any reference you find — this is the enforcement mechanism
+   behind rule 2 in `AGENTS.md` ("never write down anything countable"): a
+   reference that names a real symbol will surface itself here the moment
+   that symbol changes.
 
 Report what you changed in `docs/status.md`, which scene records and
 materials you updated, and whether any doc needed a fix.
