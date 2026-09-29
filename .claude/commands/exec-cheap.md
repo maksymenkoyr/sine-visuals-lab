@@ -1,6 +1,7 @@
 ---
 description: Hand a written plan to the cheap OpenRouter model, then verify its work here
 argument-hint: <plans/topic.md>
+disable-model-invocation: true
 ---
 
 Execute the plan in `$1` with the cheap model (`tools/cheap.sh`, an OpenRouter
