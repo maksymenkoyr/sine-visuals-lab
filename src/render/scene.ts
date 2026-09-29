@@ -41,6 +41,10 @@ export interface PanelSection {
   /** The SceneSetting.item.family this section claims and renders. Omit
    *  for a future widget with nothing item-shaped to claim. */
   items?: string;
+  /** Keys of plain (non-item) settings this section renders itself (through
+   *  `WidgetCtx.appendRow`, next to what they belong with) — the Scene card's
+   *  flat list skips them so they aren't shown twice. */
+  settings?: readonly string[];
   /** Widget-specific configuration — each widget's own module documents its
    *  shape (e.g. itemBoxes.ts's ItemBoxesOptions). */
   options?: unknown;

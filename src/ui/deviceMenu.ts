@@ -5886,6 +5886,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     const claimedFamilies = new Set(
       panelSections.map((s) => s.items).filter((x): x is string => x !== undefined),
     );
+    // Plain settings a section renders itself (PanelSection.settings) — the
+    // flat loop below skips these too.
+    const claimedKeys = new Set(panelSections.flatMap((s) => s.settings ?? []));
     for (const section of panelSections) {
       const build = getWidget(section.widget);
       // tests/sceneKeys.test.ts checks every panel widget id is registered
@@ -5948,6 +5951,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     for (let i = 0; i < specs.length; i++) {
       const spec = specs[i];
       if (spec.item && claimedFamilies.has(spec.item.family)) continue;
+      if (claimedKeys.has(spec.key)) continue;
       const groupChanged = spec.group !== undefined && spec.group !== lastGroup;
       if (groupChanged) {
         hasGroups = true;

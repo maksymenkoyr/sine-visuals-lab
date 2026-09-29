@@ -1,4 +1,4 @@
-import { STRAINS, DEPOSIT, NUTRIENT_REST, resolveStrainEffective, type StrainRawValues, type StrainDriveValues } from "../../render/scenes/physarum2.ts";
+import { STRAINS, DEPOSIT, LIFE_DEFAULT, NUTRIENT_REST, hueRotateRGB, resolveStrainEffective, type StrainRawValues, type StrainDriveValues } from "../../render/scenes/physarum2.ts";
 import type { StrainPreviewMotion, PairCultureInputs } from "../../render/scenes/physarum2Preview.ts";
 import { smellWeight } from "../../render/scenes/physarum2Affinity.ts";
 import type { SceneSetting } from "../../render/sceneSettings.ts";
@@ -75,7 +75,9 @@ export function getPreviewSource(id: string): PreviewSource | undefined {
  *  whole field shrunk down or a meaninglessly tight zoom. */
 const REF_TEXELS_PER_PREVIEW_CELL = 4;
 
-const STRAIN_PARAMS = ["nutrient", "excite", "sensor", "turn", "stride", "stain"] as const;
+const STRAIN_PARAMS = ["nutrient", "excite", "sensor", "turn", "stride", "stain", "angle", "life"] as const;
+/** The params that have a drive reading (a jack) — Sensor angle and Trail life have none. */
+type DrivenParam = Exclude<StrainParam, "angle" | "life">;
 type StrainParam = (typeof STRAIN_PARAMS)[number];
 
 function strainSpecs(ctx: WidgetCtx, k: number): Record<StrainParam, SceneSetting | undefined> {
@@ -97,6 +99,8 @@ registerPreviewSource("physarum2", {
       turn: specs.turn ? ctx.get(specs.turn) : 0,
       stride: specs.stride ? ctx.get(specs.stride) : 0,
       stain: specs.stain ? ctx.get(specs.stain) : 0,
+      angle: specs.angle ? ctx.get(specs.angle) : STRAINS[k]!.sensorAngleRad / (Math.PI / 180),
+      life: specs.life ? ctx.get(specs.life) : LIFE_DEFAULT,
     };
     // The drive readings the scene itself applied last frame (its probe()'s
     // drive_<param><k>), Scene defaults included — a band on Nutrient, the
@@ -107,7 +111,7 @@ registerPreviewSource("physarum2", {
     // running without the music. Nutrient's fallback passes its own rest
     // (NUTRIENT_REST's doc): unplugged, its neutral isn't 0.
     const live = ctx.probe();
-    const dv = (p: StrainParam, rest = 0): number => {
+    const dv = (p: DrivenParam, rest = 0): number => {
       const v = live?.[`drive_${p}${k}`];
       if (typeof v === "number") return v;
       const spec = specs[p];
@@ -123,13 +127,20 @@ registerPreviewSource("physarum2", {
     };
     const eff = resolveStrainEffective(k, raw, drive);
     const motion: StrainPreviewMotion = {
-      sensorAngle: STRAINS[k]!.sensorAngleRad,
+      sensorAngle: eff.sensorAngleRad,
       reach: eff.sensorDist / REF_TEXELS_PER_PREVIEW_CELL,
       turn: eff.rotationRad,
       step: eff.stepDist / REF_TEXELS_PER_PREVIEW_CELL,
       deposit: DEPOSIT * eff.feed,
+      decayMul: eff.decayMul,
     };
-    return { motion, color: eff.color };
+    // Stain Synergy pulls the four stains toward a harmony in the dish; the
+    // scene reports each stain as shown (probe's shownStain<k>), so the box
+    // is the colour the dish actually runs, not the one set.
+    const shown = live?.[`shownStain${k}`];
+    const color =
+      typeof shown === "number" ? hueRotateRGB(STRAINS[k]!.color, shown + (eff.stainShift - raw.stain)) : eff.color;
+    return { motion, color };
   },
   pair: {
     // The prototype's own pair-culture numbers (affinity-studio.html's

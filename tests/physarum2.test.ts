@@ -32,6 +32,12 @@ import {
   screenToFieldUv,
   STRAIN_BAND_SIGNALS,
   NUTRIENT_REST,
+  LIFE_DEFAULT,
+  lifeToDecayMul,
+  ANGLE_MIN_DEG,
+  ANGLE_MAX_DEG,
+  SWITCHING_DEFAULT,
+  populationFromBlocks,
   type StrainRawValues,
   type StrainDriveValues,
 } from "../src/render/scenes/physarum2.ts";
@@ -350,14 +356,14 @@ describe("Phase 3 settings: Dose (relabelled seed), Spread, Auto-inject from", (
     expect(spec.max).toBe(SPECIES_COUNT);
   });
 
-  it("Dose/Spread/Auto-inject from all sit in one contiguous Motion run with Crawl speed", () => {
+  it("Dose/Switching/Spread/Auto-inject from all sit in one contiguous Motion run with Crawl speed", () => {
     const motionKeys = settings.filter((s) => s.group === "Motion").map((s) => s.key);
-    expect(motionKeys).toEqual(["speed", "seed", "seedSpread", "seedFrom"]);
+    expect(motionKeys).toEqual(["speed", "seed", "switching", "seedSpread", "seedFrom"]);
   });
 });
 
 describe("resolveStrainEffective — the one strain-motion mapping (shared by the GPU packing and the specimen-box previews)", () => {
-  const zeroRaw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
+  const zeroRaw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 22, life: LIFE_DEFAULT };
   const zeroDrive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
 
   it("at zero raw values and zero drive, reproduces the sliders' own MIN and the strain's unshifted colour", () => {
@@ -408,6 +414,65 @@ describe("resolveStrainEffective — the one strain-motion mapping (shared by th
       const eff = resolveStrainEffective(0, raw, drive);
       expect(eff.feed).toBeCloseTo(1, 9);
     }
+  });
+});
+
+describe("Strain Console settings: Sensor angle, Trail life, Switching, Synergy", () => {
+  const settings = physarum2Scene.settings ?? [];
+
+  it("Sensor angle is a per-strain slider in degrees whose default is the strain's own fixed angle", () => {
+    for (let k = 0; k < SPECIES_COUNT; k++) {
+      const spec = settings.find((s) => s.key === `angle${k}`)!;
+      expect(spec.item).toEqual({ family: "strain", index: k, param: "angle" });
+      expect(spec.min).toBe(ANGLE_MIN_DEG);
+      expect(spec.max).toBe(ANGLE_MAX_DEG);
+      expect(spec.default * (Math.PI / 180)).toBeCloseTo(STRAINS[k]!.sensorAngleRad, 2);
+    }
+  });
+
+  it("the effective sensor angle is the stored one in radians (clamped to the slider's range)", () => {
+    const raw: StrainRawValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0, angle: 60, life: LIFE_DEFAULT };
+    const drive: StrainDriveValues = { nutrient: 0, excite: 0, sensor: 0, turn: 0, stride: 0, stain: 0 };
+    expect(resolveStrainEffective(0, raw, drive).sensorAngleRad).toBeCloseTo(60 * (Math.PI / 180), 9);
+    expect(resolveStrainEffective(0, { ...raw, angle: 999 }, drive).sensorAngleRad).toBeCloseTo(ANGLE_MAX_DEG * (Math.PI / 180), 9);
+  });
+
+  it("Trail life defaults to the shared decay exactly and right = a longer-lived trail", () => {
+    for (let k = 0; k < SPECIES_COUNT; k++) {
+      const spec = settings.find((s) => s.key === `life${k}`)!;
+      expect(spec.item).toEqual({ family: "strain", index: k, param: "life" });
+      expect(spec.default).toBe(LIFE_DEFAULT);
+    }
+    expect(lifeToDecayMul(LIFE_DEFAULT)).toBe(1);
+    expect(lifeToDecayMul(1)).toBeLessThan(1);
+    expect(lifeToDecayMul(0)).toBeGreaterThan(1);
+    expect(lifeToDecayMul(0.7)).toBeLessThan(lifeToDecayMul(0.4));
+  });
+
+  it("Switching is a Motion slider on by default; Synergy is a Look slider off by default (the stored stains are the look)", () => {
+    const sw = settings.find((s) => s.key === "switching")!;
+    expect(sw.group).toBe("Motion");
+    expect(sw.default).toBe(SWITCHING_DEFAULT);
+    const sy = settings.find((s) => s.key === "synergy")!;
+    expect(sy.group).toBe("Look");
+    expect(sy.default).toBe(0);
+  });
+});
+
+describe("populationFromBlocks (Headcount's GPU count)", () => {
+  it("averages the blocks' strain fractions and normalises to shares summing to 1", () => {
+    // Two blocks: the first all strain 0, the second half strain 1 / half strain 2.
+    const buf = [255, 0, 0, 0, 0, 128, 127, 0];
+    const pop = populationFromBlocks(buf, 2, 4);
+    expect(pop.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 9);
+    expect(pop[0]).toBeCloseTo(0.5, 2);
+    expect(pop[1]).toBeCloseTo(0.25, 2);
+    expect(pop[2]).toBeCloseTo(0.25, 2);
+    expect(pop[3]).toBe(0);
+  });
+
+  it("falls back to an equal split for an empty buffer", () => {
+    expect(populationFromBlocks([0, 0, 0, 0], 1, 4)).toEqual(equalPopulation(4));
   });
 });
 

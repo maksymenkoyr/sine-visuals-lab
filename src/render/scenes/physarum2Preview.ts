@@ -61,6 +61,9 @@ export interface StrainPreviewMotion {
   step: number;
   /** Absolute amount added to the landed cell's trail value this step. */
   deposit: number;
+  /** Multiplier on the preview's evaporation (Trail life —
+   *  physarum2.ts's `lifeToDecayMul`); 1 or omitted is the shared decay. */
+  decayMul?: number;
 }
 
 export interface StrainPreview {
@@ -169,12 +172,13 @@ export function createStrainPreview(opts: StrainPreviewOptions = {}): StrainPrev
         tmp[r + x] = trail[r + ((x + size - 1) % size)]! + trail[r + x]! + trail[r + ((x + 1) % size)]!;
       }
     }
+    const keep = (1 - 0.1 * Math.max(0, Math.min(9, m.decayMul ?? 1))) / 9;
     for (let y = 0; y < size; y++) {
       const r = y * size;
       const up = ((y + size - 1) % size) * size;
       const dn = ((y + 1) % size) * size;
       for (let x = 0; x < size; x++) {
-        trail[r + x] = (tmp[up + x]! + tmp[r + x]! + tmp[dn + x]!) * (0.9 / 9);
+        trail[r + x] = (tmp[up + x]! + tmp[r + x]! + tmp[dn + x]!) * keep;
       }
     }
   }
