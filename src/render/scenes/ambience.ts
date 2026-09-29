@@ -603,7 +603,7 @@ export function createChoreographer(rng: Rng = Math.random): Choreographer {
 
 // Every table below reproduces its plain `default` when all dials sit at
 // NEUTRAL (musicProfile.ts) — nothing is hand-biased. `pulse` is kept small:
-// it floors near 0.9 on any locked-tempo track (see the Focus snap comment in
+// it floors near 0.9 on any locked-tempo track (see the Fog pulse comment in
 // caustics.ts), so a large pulse weight is a constant offset in disguise.
 const SETTINGS: SceneSetting[] = [
   {
