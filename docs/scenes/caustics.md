@@ -32,8 +32,6 @@ spray-injection layer riding on top. Ships from the initial commit and is on mai
   raw `FeatureFrame` edges; nothing in it reads the phase-locked beat/bar clock
   (`beatClock.ts`) any more — the bar-locked breathe that was its last consumer
   is gone (see Decisions).
-  `uDropReactivity`/`dropDrive` reads `sectionIntensity.ts`'s slow-tracked
-  "which part of the song is this" signal.
 - Its reactive settings pick their sources through the per-setting drive picker
   (`SceneSetting.drive`, `src/render/drives.ts`); only Spectral hue still declares
   `reads` (`src/render/signals.ts`), since that coupling lives in the shader's own
@@ -537,6 +535,18 @@ reference-measurement workflow used by later scenes.
   the coarsest cells, whatever the slider said. `advanceDensityFlow` still
   glides every change in. Sparkle, Ripple, driftPump and the rest were
   already real reactions and are untouched.
+- 2026-09-29 — Drop reactivity removed entirely (user call, same day on
+  Storm): the `dropReactivity` setting and every consumer of it — the
+  shader's `dropDrive`/`dropFlash` terms (turbulence warp, the `acc`
+  brightness chain) and the section-boost factor in `driftRatePerSec` —
+  are gone. The pool no longer swells, brightens or accelerates on
+  choruses and drops; `DRIFT_BASE_RATE * s.drift` is the whole base term,
+  and the `DRIFT_RATE_MAX` backstop comment's arithmetic was re-derived
+  from it (the "every term maxed" test now pins 13, not 14.6). Raw
+  section/drop reads never behind the dial (Caustic density's Section
+  drive, the onset edges this file reads for ripple) are untouched.
+  Stored values, auto flags and Look codes carrying the old key are
+  ignored by every reader — they iterate live specs — so no migration.
 
 ## Tuning notes
 

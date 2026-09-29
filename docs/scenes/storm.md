@@ -132,6 +132,16 @@ Studied, not copied, across two look references:
 - 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
   Detail (`grain`) renamed Grain, and its description now leads with
   coarseness: higher already meant bigger voxels and points. Label only.
+- 2026-09-29 — Drop reactivity removed entirely (user call, same day on
+  Caustics): the `dropStorm` setting, its `anim.dropOnset` drive, the
+  `STRIKE_DROP_BURST` refractory-bypassing strike burst in `render()` and
+  the whole-frame drop flash at `VOLUME_FRAG`'s two `uDropStorm` sites are
+  all gone. A drop no longer fires its own burst or frame flash; ordinary
+  bass/beat strikes (`strike`'s Scene union) and the morph's drop-rise kick
+  (`beatAmp`) still read the raw anim signals. The earlier
+  `dropOnset`-as-level machine-gun bug above is now unreachable from this
+  scene. Stored values, auto flags and Look codes carrying the old key are
+  ignored by every reader — they iterate live specs — so no migration.
 
 ## Tuning notes
 

@@ -33,14 +33,12 @@ function base(overrides: Partial<DriftInputs> = {}): DriftInputs {
     driftLevel: 0,
     levelValue: 0,
     pumpVel: 0,
-    dropReactivity: 0,
-    sectionIntensity: 0,
     ...overrides,
   };
 }
 
 describe("caustics drift rate", () => {
-  it("drift=0.5 with silence and no reactivity reproduces the scene's original speed (1.0/sec, matching flowClock's base rate)", () => {
+  it("drift=0.5 with silence and nothing else contributing reproduces the scene's original speed (1.0/sec, matching flowClock's base rate)", () => {
     // This is the regression test: the old DRIFT_BASE_RATE (0.15) doubled up
     // with a 0.15 already baked into the shader's flow term, so the old
     // default (drift=1) actually ran at ~0.15/sec — 6.7x too slow. At the
@@ -48,16 +46,16 @@ describe("caustics drift rate", () => {
     expect(driftRatePerSec(base({ drift: 0.5 }))).toBeCloseTo(1.0, 10);
   });
 
-  it("drift=1 with silence and no reactivity is exactly double the original speed", () => {
+  it("drift=1 with silence and nothing else contributing is exactly double the original speed", () => {
     expect(driftRatePerSec(base({ drift: 1 }))).toBeCloseTo(2.0, 10);
   });
 
-  it("drift=0 freezes the base wander term, regardless of drop reactivity", () => {
+  it("drift=0 freezes the base wander term", () => {
     // Speed boost and Speed pump are additive terms, not multipliers on the base
     // (see the two tests right below), so this only pins the *base* term's
     // own dependence on drift — with driftLevel/pumpVel left at 0 too, the
     // whole rate is 0.
-    expect(driftRatePerSec(base({ drift: 0, dropReactivity: 1, sectionIntensity: 1 }))).toBe(0);
+    expect(driftRatePerSec(base({ drift: 0 }))).toBe(0);
   });
 
   it("Speed boost and Speed pump both still move the rate with Drift speed parked at 0 — the whole point of being additive rather than multiplicative", () => {
@@ -75,23 +73,16 @@ describe("caustics drift rate", () => {
     expect(driftRatePerSec(base({ drift: 0, driftLevel: 1, levelValue: 0 }))).toBe(0);
   });
 
-  it("Drop reactivity boosts drift with sectionIntensity even with Speed boost/Speed pump at 0", () => {
-    // base = DRIFT_BASE_RATE(2) * drift(0.5) * (1 + 1*1*0.8) = 1.8
-    expect(driftRatePerSec(base({ drift: 0.5, dropReactivity: 1, sectionIntensity: 1 }))).toBeCloseTo(1.8, 10);
-  });
-
-  it("every term maxed at once (base 3.6, level 3, pump capped at PUMP_VEL_CAP=8) sums to 14.6 — comfortably under DRIFT_RATE_MAX, which is now a generous backstop rather than a value the additive design tries to reach", () => {
+  it("every term maxed at once (base 2, level 3, pump capped at PUMP_VEL_CAP=8) sums to 13 — comfortably under DRIFT_RATE_MAX, which is now a generous backstop rather than a value the additive design tries to reach", () => {
     const rate = driftRatePerSec(
       base({
         drift: 1,
         driftLevel: 1,
         levelValue: 1,
         pumpVel: 8,
-        dropReactivity: 1,
-        sectionIntensity: 1,
       }),
     );
-    expect(rate).toBeCloseTo(14.6, 10);
+    expect(rate).toBeCloseTo(13, 10);
   });
 
   it("still clamps to DRIFT_RATE_MAX (20) if pumpVel is ever larger than advancePump's own cap would allow", () => {
@@ -101,8 +92,6 @@ describe("caustics drift rate", () => {
         driftLevel: 1,
         levelValue: 1,
         pumpVel: 1000,
-        dropReactivity: 1,
-        sectionIntensity: 1,
       }),
     );
     expect(rate).toBe(20);
@@ -115,8 +104,6 @@ describe("caustics drift rate", () => {
         driftLevel: Math.random(),
         levelValue: Math.random(),
         pumpVel: Math.random() * 10,
-        dropReactivity: Math.random(),
-        sectionIntensity: Math.random(),
       };
       const rate = driftRatePerSec(s);
       expect(Number.isFinite(rate)).toBe(true);
