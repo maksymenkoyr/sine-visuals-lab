@@ -3149,7 +3149,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // source at full scale), so the top of the graph always means that and
       // the trace never rescales as peaks scroll out of the 4 s window. A
       // scene's own mark line that rides above the signal clips at the top.
-      const top = Math.max(0.05, driveCeiling(patch, spec.drive?.gain ?? 1));
+      // Read live: a weight drag swaps the stored setting without rebuilding
+      // this graph, so the captured `patch` would keep the old top.
+      const live = deps.getDriveSetting(sceneId, spec);
+      const top = Math.max(0.05, driveCeiling(live === "scene" ? patch : live, spec.drive?.gain ?? 1));
       const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v / top)) * (h - 6);
 
       if (isGate) {
