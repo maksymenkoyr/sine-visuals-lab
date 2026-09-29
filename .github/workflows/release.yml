@@ -17,7 +17,8 @@
 # Each release bumps the minor version and resets the patch (0.3.12 on
 # Insider → 0.4.0 here); the major only moves when package.json's major has
 # been raised by hand. The release commit is tagged `vX.Y.0` and gets a
-# GitHub Release listing the pull requests since the previous one, with a
+# GitHub Release listing the pull requests since the previous one (each of
+# which gets a "Released to Stable as X" comment back), with a
 # "Scenes updated in this release" note prepended for whichever scenes this
 # release actually changes (tools/sceneVersionLib.mjs owns how each scene's
 # own version, alongside the build's, is counted). A re-run of the same
@@ -35,6 +36,7 @@ on:
 
 permissions:
   contents: write # the tag + GitHub Release
+  pull-requests: write # the "Released to Stable" comment on each shipped PR
 
 concurrency:
   group: deploy-stable
@@ -146,4 +148,17 @@ jobs:
             # *prepends* to them rather than replacing them (gh release
             # create --help).
             gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$SCENE_NOTES" --generate-notes
+            # The other direction of the release notes' PR list: tell each
+            # shipped PR which release carried it (deploy.yml does the same
+            # for Insider). PRs are the `(#N)` every squash-merged commit on
+            # main ends with, between the previous strict release tag and this
+            # commit. Best-effort: a failed comment never fails a release
+            # that is already live.
+            prev=$(git tag --merged HEAD | grep -Ex 'v[0-9]+\.[0-9]+\.[0-9]+' | grep -vx "$TAG" | sort -V | tail -1 || true)
+            git log --no-merges --format=%s ${prev:+"$prev..HEAD"} \
+              | { grep -oE '\(#[0-9]+\)$' || true; } | tr -d '(#)' | sort -un | while read -r pr; do
+                gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" \
+                  --body "Released to Stable as **${TAG#v}** — [$TAG](https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG)" \
+                  || echo "::warning::could not comment on #$pr"
+              done
           fi
