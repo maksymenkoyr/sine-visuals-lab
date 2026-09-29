@@ -114,7 +114,7 @@ import {
   FOLDED_BAR_PX,
   FONT_LABEL,
   FONT_MONO,
-  GLASS_FILTER,
+  GLASS_BG,
   HOT_RED,
   HOT_YELLOW,
   INPUT_GREEN,
@@ -791,10 +791,9 @@ const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
 const autoMasterBaseStyle = `
   width: 100%; box-sizing: border-box; height: ${FOLDED_BAR_PX}px; flex-shrink: 0;
   cursor: pointer; padding: 0; border-radius: 3px;
-  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
 `;
-const autoMasterStyle = `${autoMasterBaseStyle} background: rgba(8,11,10,0.2); border: 1px solid ${withAlpha(AUTO_SKY, 0.3)};`;
-const autoMasterLitStyle = `${autoMasterBaseStyle} background: ${withAlpha("#1479b0", 0.28)}; border: 1px solid ${withAlpha(AUTO_SKY, 0.6)};`;
+const autoMasterStyle = `${autoMasterBaseStyle} background: ${GLASS_BG}; border: 1px solid ${withAlpha(AUTO_SKY, 0.3)};`;
+const autoMasterLitStyle = `${autoMasterBaseStyle} background: linear-gradient(${withAlpha("#1479b0", 0.28)}, ${withAlpha("#1479b0", 0.28)}), ${GLASS_BG}; border: 1px solid ${withAlpha(AUTO_SKY, 0.6)};`;
 // Label + ON/OFF sub-label inline on one line, centred in the bar.
 const autoMasterInnerStyle = `display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 100%;`;
 const autoMasterLabelStyle = (lit: boolean) =>
@@ -804,17 +803,16 @@ const autoMasterSubStyle = (lit: boolean) =>
 
 // The Input card's own "Auto" button (see micAuto.ts's header for what
 // "the whole mic" covers) — a compact, header-sized member of the
-// autoMaster* family above: same lit/unlit shape, same backdrop-filtered
+// autoMaster* family above: same lit/unlit shape, same glass-tinted
 // pill, scaled down to sit beside a Reset chip in a card header instead of
 // spanning the settings column, and given the Input card's own accent
 // (INPUT_GREEN) rather than the Auto bar's sky blue.
 const micAutoBaseStyle = `
   font: 500 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.04em; padding: 2.5px 8px;
   border-radius: 4px; cursor: pointer;
-  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
 `;
-const micAutoStyle = `${micAutoBaseStyle} background: rgba(8,11,10,0.2); border: 1px solid ${withAlpha(INPUT_GREEN, 0.35)}; color: rgba(255,255,255,0.55);`;
-const micAutoLitStyle = `${micAutoBaseStyle} background: ${withAlpha(INPUT_GREEN, 0.28)}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.7)}; color: #eafff0;`;
+const micAutoStyle = `${micAutoBaseStyle} background: ${GLASS_BG}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.35)}; color: rgba(255,255,255,0.55);`;
+const micAutoLitStyle = `${micAutoBaseStyle} background: linear-gradient(${withAlpha(INPUT_GREEN, 0.28)}, ${withAlpha(INPUT_GREEN, 0.28)}), ${GLASS_BG}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.7)}; color: #eafff0;`;
 // Wraps the Auto button and the Reset chip in the Input card's header —
 // createCard's `right` slot takes one element, not a list.
 const inputCardHeaderRightStyle = `display: flex; align-items: center; gap: 6px;`;
@@ -989,8 +987,7 @@ const SOLO_EYE_PX = 18;
 // Footer strip.
 const footerStyle = `
   display: flex; align-items: center; justify-content: space-between; padding: 7px 12px;
-  background: rgba(8,11,10,0.26);
-  -webkit-backdrop-filter: blur(20px) saturate(.6) brightness(.5); backdrop-filter: blur(20px) saturate(.6) brightness(.5);
+  background: ${GLASS_BG};
   border: 1px solid rgba(255,255,255,0.13); border-radius: 3px;
   font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.5);
 `;
