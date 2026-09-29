@@ -863,19 +863,27 @@ body.vc-keys-reveal [data-keycap]::after {
  * .vc-cable-g group is the only part that answers the pointer — its width,
  * not the visible core's, is what makes a thin cable easy to press — and
  * pressing is jack.ts-style click (its mousedown never moves focus). The
- * same stroke carries the small hover lift: the core a touch thicker, the
- * glow a touch brighter, the muted flat path brighter still, eased so it
- * doesn't pop. Preview/scene-mix cables never grow one of these (no
- * per-source press), so they stay purely decorative. */
+ * same stroke carries the hover lift: a neon-ish glow in the cable's own
+ * colour (the group carries that colour as its CSS "color", so the
+ * drop-shadow below resolves per cable via currentColor — a tight bloom
+ * plus a wider halo, eased in on both), the core thicker and at full
+ * opacity, the glow layer brighter and wider, the flow spark brighter,
+ * the muted flat path brighter still. Preview/scene-mix cables never grow
+ * a hit stroke (no per-source press), so they stay purely decorative and
+ * never light up like this. */
 .vc-cable-hit { fill: none; stroke: transparent; stroke-width: 14; stroke-linecap: round; pointer-events: stroke; cursor: pointer; }
-.vc-cable-core { transition: stroke-width 0.12s ease; }
-.vc-cable-glow { transition: opacity 0.12s ease; }
+.vc-cable-g { transition: filter 0.15s ease; }
+.vc-cable-core { transition: stroke-width 0.12s ease, opacity 0.12s ease; }
+.vc-cable-glow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
+.vc-cable-flow { transition: opacity 0.12s ease; }
 .vc-cable-muted { transition: opacity 0.12s ease; }
-.vc-cable-g:hover .vc-cable-core { stroke-width: 2.5; }
-.vc-cable-g:hover .vc-cable-glow { opacity: 0.28; }
-.vc-cable-g:hover .vc-cable-muted { opacity: 0.65; }
+.vc-cable-g:hover { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor); }
+.vc-cable-g:hover .vc-cable-core { stroke-width: 3; opacity: 1; }
+.vc-cable-g:hover .vc-cable-glow { opacity: 0.5; stroke-width: 9; }
+.vc-cable-g:hover .vc-cable-flow { opacity: 1; }
+.vc-cable-g:hover .vc-cable-muted { opacity: 0.8; }
 @media (prefers-reduced-motion: reduce) {
-  .vc-cable-core, .vc-cable-glow, .vc-cable-muted { transition: none; }
+  .vc-cable-g, .vc-cable-core, .vc-cable-glow, .vc-cable-flow, .vc-cable-muted { transition: none; }
 }
 
 /* "Pick a setting first" — a jack clicked with nothing pinned and nothing

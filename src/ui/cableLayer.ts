@@ -30,8 +30,10 @@
  * width is what makes a thin cable easy to press), and a click on the
  * stroke calls onPress — deviceMenu.ts wires it to the same patch toggle
  * the source line's own × button takes, so pressing a cable unplugs it.
- * The group also carries the small hover lift (controlsTheme.ts's
- * .vc-cable-g:hover rules — a slightly thicker core, a brighter glow).
+ * The group also carries the hover lift (controlsTheme.ts's
+ * .vc-cable-g:hover rules — a neon-ish bloom in the cable's own colour,
+ * a thicker core, a brighter glow) and holds that colour as its CSS
+ * `color` so the bloom's currentColor resolves per cable.
  * deviceMenu.ts only ever sets onPress on the pinned group's real patch
  * sources: a preview cable and a display-only scene mix are decoration,
  * not something a press should edit.
@@ -235,10 +237,14 @@ function pathEl(cls: string, d: string, color: string): SVGPathElement {
  *  the glow/core/flow (or flat) paths and, for a pressable source, the
  *  hit stroke that answers the pointer; `.vc-cable-g:hover` (the hover
  *  lift) keys off the group being hovered, which the hit stroke's own
- *  hit-testing propagates to. */
-function groupEl(): SVGGElement {
+ *  hit-testing propagates to. The cable's own colour also rides the
+ *  group as CSS `color`, so the hover bloom's currentColor drop-shadow
+ *  (controlsTheme.ts) resolves per cable without that rule ever naming
+ *  a colour. */
+function groupEl(color: string): SVGGElement {
   const g = document.createElementNS(NS, "g");
   g.setAttribute("class", "vc-cable-g");
+  g.style.color = color;
   return g;
 }
 
@@ -314,7 +320,7 @@ export function createCableLayer(): CableLayer {
         // to carry — overriding cond/soft outright (this file's own
         // CableSourceSpec.muted doc).
         if (src.muted) {
-          const g = groupEl();
+          const g = groupEl(src.color);
           g.append(pathEl("vc-cable-muted", d, src.color));
           attachPress(g, src.onPress, d);
           svg.append(g);
@@ -335,7 +341,7 @@ export function createCableLayer(): CableLayer {
         }
         const off = offsets.get(key) ?? 0;
         flow.setAttribute("stroke-dashoffset", off.toFixed(2));
-        const g = groupEl();
+        const g = groupEl(src.color);
         g.append(glow, core, flow);
         attachPress(g, src.onPress, d);
         svg.append(g);
