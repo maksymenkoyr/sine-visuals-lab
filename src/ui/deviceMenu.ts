@@ -234,7 +234,12 @@ import {
  * selection/patch change, scroll of either scrolling column, resize, a
  * card fold, a Scene-card rebuild — scheduleCableRecompute), with only
  * `stroke-dashoffset` written per tick, on the pinned group alone
- * (cableLayer.tick, flow speed off each source's own live value).
+ * (cableLayer.tick, flow speed off each source's own live value). A
+ * pinned cable is also pressable: cableGroupFor gives its real patch
+ * sources an onPress, and cableLayer.ts draws a hit stroke over the
+ * group for it, so pressing a cable unplugs that source — the same
+ * toggle as the source line's own × button. A preview cable and a
+ * display-only scene-mix cable stay decoration (no per-source press).
  *
  * In Only when mode, a source's *role* (drives.ts's `DriveSource.when`) is
  * its own, independent flag — several lines can be marked "Only when" at
@@ -4093,8 +4098,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  once each from cableSpecsForShown below. `isNew`/justAddedKey only
    *  ever applies to the pinned group in practice (a patch can't be edited
    *  without pinning it first — see onJackClick), but there's no reason to
-   *  special-case that away here. */
-  function cableGroupFor(sel: { sceneId: string; spec: SceneSetting } | null): CableGroupSpec {
+   *  special-case that away here. `interactive` marks the pinned group: its
+   *  real patch sources get cableLayer.ts's own onPress, so pressing a
+   *  cable unplugs that source — the same toggle the source line's own ×
+   *  button takes (below). A preview group is never interactive (a hover
+   *  preview isn't a committed patch), and a `"scene"` setting's display-
+   *  only sceneSources are never interactive from either group (they have
+   *  no per-source unplug — the row's own Unplug button owns that). */
+  function cableGroupFor(sel: { sceneId: string; spec: SceneSetting } | null, interactive: boolean): CableGroupSpec {
     if (!sel) return { sources: [], portEl: null };
     const handle = driveRowHandles.find((r) => r.sceneId === sel.sceneId && r.spec.key === sel.spec.key);
     if (!handle) return { sources: [], portEl: null };
@@ -4119,7 +4130,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // (controlsTheme.ts's .vc-cable-cond), consistent with the source
       // line's own dashed marker and the output graph's dashed trace. A
       // muted source draws in the flat, dashed `.vc-cable-muted` style
-      // instead (no glow, no flow) regardless of role.
+      // instead (no glow/flow) regardless of role.
+      const target = sel;
       const conditionIdxs = setting.mix === "gate" ? gateConditionIndices(setting) : [];
       setting.sources.forEach((src, idx) => {
         const key = jackKey(src.choice);
@@ -4135,6 +4147,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           jackEl,
           getValue: () => lastDrives?.sourceValues(specKey)?.[idx] ?? 0,
           isNew: key === justAddedKey,
+          // Press-to-unplug, pinned group only — the same toggle the
+          // source line's own × button takes (see this function's header).
+          onPress: interactive
+            ? () => {
+                justAddedKey = null;
+                deps.onTogglePatchSource(target.sceneId, target.spec, src.choice);
+                patchChanged(target.sceneId, target.spec);
+              }
+            : undefined,
         });
       });
     }
@@ -4145,8 +4166,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
    *  its header and activePreview() above for why these are independent
    *  rather than one "shown" selection. */
   function cableSpecsForShown(): { pinned: CableGroupSpec; preview: CableGroupSpec } {
-    const pinnedGroup = cableGroupFor(pinned);
-    const previewGroup = cableGroupFor(activePreview());
+    const pinnedGroup = cableGroupFor(pinned, true);
+    const previewGroup = cableGroupFor(activePreview(), false);
     justAddedKey = null;
     return { pinned: pinnedGroup, preview: previewGroup };
   }
@@ -6329,7 +6350,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // panel's own switch.
   function onDocPointerDown(e: PointerEvent) {
     const t = e.target as Node | null;
-    if (t && (root.contains(t) || deps.toggleButton.contains(t) || soloEyeEl.contains(t))) return;
+    // The cable layer sits on <body>, outside root (cableLayer.ts's own
+    // header — it's above every card on purpose), but pressing a cable is a
+    // patch edit like a jack click, not a click on the scene: without this
+    // clause a cable press would unpin the setting it just unplugged from.
+    if (t && (root.contains(t) || deps.toggleButton.contains(t) || soloEyeEl.contains(t) || cableLayer.el.contains(t)))
+      return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && root.contains(active)) active.blur();
     if (pinned) togglePin(pinned.sceneId, pinned.spec);

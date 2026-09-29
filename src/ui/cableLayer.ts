@@ -23,6 +23,19 @@
  * same physical jack can carry both a pinned and a preview cable at once
  * without their flow offsets colliding.
  *
+ * A source carrying its own onPress (CableSourceSpec below) is pressable:
+ * it's drawn inside a `.vc-cable-g` group with a transparent hit stroke
+ * over it (controlsTheme.ts's .vc-cable-hit — the layer itself stays
+ * pointer-events:none, so only that stroke answers the pointer, and its
+ * width is what makes a thin cable easy to press), and a click on the
+ * stroke calls onPress — deviceMenu.ts wires it to the same patch toggle
+ * the source line's own × button takes, so pressing a cable unplugs it.
+ * The group also carries the small hover lift (controlsTheme.ts's
+ * .vc-cable-g:hover rules — a slightly thicker core, a brighter glow).
+ * deviceMenu.ts only ever sets onPress on the pinned group's real patch
+ * sources: a preview cable and a display-only scene mix are decoration,
+ * not something a press should edit.
+ *
  * Every cable leaves its jack and enters its port through a short straight
  * CABLE_STUB_PX run before the bezier takes over (cablePathD) — a real
  * patch cable doesn't leave a socket at an angle. The bezier's own travel
@@ -88,6 +101,13 @@ export interface CableSourceSpec {
   /** Read every tick — flow speed rides this source's own live value.
    *  Unused for a preview cable (it never animates). */
   getValue: () => number;
+  /** Pressing this cable's hit stroke unplugs the source — see this
+   *  file's header. When set, the cable is wrapped in a `.vc-cable-g`
+   *  group with a `.vc-cable-hit` stroke over it that answers the
+   *  pointer; when absent the paths stay plain and click-transparent.
+   *  deviceMenu.ts's cableGroupFor only ever sets it on the pinned
+   *  group's real patch sources. */
+  onPress?: () => void;
   /** This source was just toggled on — draws on over ~250ms
    *  (controlsTheme.ts's vc-cable-new rule) instead of appearing instantly.
    *  Only ever true on the pinned group — a preview is never mid-edit. */
@@ -211,6 +231,33 @@ function pathEl(cls: string, d: string, color: string): SVGPathElement {
   return p;
 }
 
+/** One drawn cable's own wrapper group — see this file's header. Holds
+ *  the glow/core/flow (or flat) paths and, for a pressable source, the
+ *  hit stroke that answers the pointer; `.vc-cable-g:hover` (the hover
+ *  lift) keys off the group being hovered, which the hit stroke's own
+ *  hit-testing propagates to. */
+function groupEl(): SVGGElement {
+  const g = document.createElementNS(NS, "g");
+  g.setAttribute("class", "vc-cable-g");
+  return g;
+}
+
+/** The transparent press target over one pressable cable — see this
+ *  file's header. mousedown is dropped like jack.ts does its own, so a
+ *  press never moves focus off whatever row was focused (focus opening/
+ *  closing a row's hint would slide the port out from under the held
+ *  button); Tab still never reaches the layer (aria-hidden). */
+function attachPress(g: SVGGElement, onPress: (() => void) | undefined, d: string): void {
+  if (!onPress) return;
+  const hit = pathEl("vc-cable-hit", d, "transparent");
+  hit.addEventListener("mousedown", (e) => e.preventDefault());
+  hit.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onPress();
+  });
+  g.append(hit);
+}
+
 interface Resolved {
   src: CableSourceSpec;
   pt: { x: number; y: number };
@@ -267,7 +314,10 @@ export function createCableLayer(): CableLayer {
         // to carry — overriding cond/soft outright (this file's own
         // CableSourceSpec.muted doc).
         if (src.muted) {
-          svg.append(pathEl("vc-cable-muted", d, src.color));
+          const g = groupEl();
+          g.append(pathEl("vc-cable-muted", d, src.color));
+          attachPress(g, src.onPress, d);
+          svg.append(g);
           continue;
         }
         const soft = src.soft ? " vc-cable-soft" : "";
@@ -285,7 +335,10 @@ export function createCableLayer(): CableLayer {
         }
         const off = offsets.get(key) ?? 0;
         flow.setAttribute("stroke-dashoffset", off.toFixed(2));
-        svg.append(glow, core, flow);
+        const g = groupEl();
+        g.append(glow, core, flow);
+        attachPress(g, src.onPress, d);
+        svg.append(g);
         flows.push({ el: flow, key, getValue: src.getValue });
       }
     }

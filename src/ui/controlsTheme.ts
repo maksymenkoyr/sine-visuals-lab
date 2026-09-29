@@ -857,6 +857,26 @@ body.vc-keys-reveal [data-keycap]::after {
  * .vc-cable-cond's 9/6 or .vc-cable-preview's 3/3 so it reads as its own,
  * quieter thing rather than a variant of either. */
 .vc-cable-muted { fill: none; stroke-width: 1; stroke-dasharray: 14 8; opacity: 0.3; }
+/* Pressing a cable unplugs it (src/ui/cableLayer.ts's onPress, wired by
+ * src/ui/deviceMenu.ts's cableGroupFor). The layer above stays
+ * pointer-events:none, so this transparent hit stroke over the cable's own
+ * .vc-cable-g group is the only part that answers the pointer — its width,
+ * not the visible core's, is what makes a thin cable easy to press — and
+ * pressing is jack.ts-style click (its mousedown never moves focus). The
+ * same stroke carries the small hover lift: the core a touch thicker, the
+ * glow a touch brighter, the muted flat path brighter still, eased so it
+ * doesn't pop. Preview/scene-mix cables never grow one of these (no
+ * per-source press), so they stay purely decorative. */
+.vc-cable-hit { fill: none; stroke: transparent; stroke-width: 14; stroke-linecap: round; pointer-events: stroke; cursor: pointer; }
+.vc-cable-core { transition: stroke-width 0.12s ease; }
+.vc-cable-glow { transition: opacity 0.12s ease; }
+.vc-cable-muted { transition: opacity 0.12s ease; }
+.vc-cable-g:hover .vc-cable-core { stroke-width: 2.5; }
+.vc-cable-g:hover .vc-cable-glow { opacity: 0.28; }
+.vc-cable-g:hover .vc-cable-muted { opacity: 0.65; }
+@media (prefers-reduced-motion: reduce) {
+  .vc-cable-core, .vc-cable-glow, .vc-cable-muted { transition: none; }
+}
 
 /* "Pick a setting first" — a jack clicked with nothing pinned and nothing
  * ever previewed (deviceMenu.ts's showToast). */
