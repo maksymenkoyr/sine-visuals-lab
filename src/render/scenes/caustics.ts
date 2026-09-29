@@ -99,11 +99,7 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // not gated behind Drift speed or Speed pump — it must still land for anyone
 // who wants a still, breathing pool. uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
-// / crest glints), and uDropReactivity ties everything to
-// sectionIntensity.ts's slow-tracked "which part of the song is this" signal
-// — a chorus or drop reads as a sustained, brighter, faster, more turbulent
-// surface, with a one-shot extra-strong ring at the exact moment intensity
-// spikes.
+// / crest glints).
 //
 // Precision, or why nothing the shader hashes ever grows with session
 // length: the drift phase only ever accumulates (advanceDensityFlow's
@@ -392,18 +388,6 @@ const SETTINGS: SceneSetting[] = [
     drive: { default: "anim.mid" },
   },
   {
-    key: "dropReactivity",
-    label: "Drop reactivity",
-    description: "Choruses and drops push brightness, turbulence, ripple and drift",
-    group: "Motion",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.76,
-    // Only lean into drop behavior on a track that actually has real dynamic swings.
-    auto: { dynamics: 0.45 },
-  },
-  {
     key: "fog",
     label: "Fog",
     description: "How hazy and soft the ridges sit at rest, between beats",
@@ -659,8 +643,8 @@ const BREATHE_ZOOM = 0.10;
 // (or whatever a re-patched cable carries), and SWELL_FLOOR_LIFT rides the
 // same dark-water floor cut uFog
 // sets at rest, so a loud passage glows into that dim wash and a quiet one
-// deepens it, distinct from uFlash/uEnergy/dropDrive, which all brighten the
-// ridge *crests* instead.
+// deepens it, distinct from uFlash/uEnergy, which brighten the ridge
+// *crests* instead.
 const SWELL_ZOOM = 0.25;
 const SWELL_FLOOR_LIFT = 0.8;
 
@@ -979,9 +963,8 @@ const PUMP_VEL_CAP = 8;
 
 // Absolute ceiling on the rate driftRatePerSec returns. The additive model
 // below can't reach this on its own even with every term maxed at once —
-// base = DRIFT_BASE_RATE(2) * drift(1) * (1 + dropReactivity(1) *
-// sectionIntensity(1) * 0.8) = 3.6, level = LEVEL_GAIN(3), pump capped at
-// PUMP_VEL_CAP(8), summing to 14.6 — so this is now a generous backstop
+// base = DRIFT_BASE_RATE(2) * drift(1) = 2, level = LEVEL_GAIN(3), pump
+// capped at PUMP_VEL_CAP(8), summing to 13 — so this is now a generous backstop
 // rather than a value any combination of settings is meant to reach, unlike
 // the older multiplicative surge design this rate replaced (see this file's
 // git history), which could actually walk right up to it.
@@ -1108,11 +1091,6 @@ export interface DriftInputs {
    *  by the driftPump slider and its input, and added straight onto the
    *  rate — see PUMP_ACCEL/PUMP_RELEASE_SEC above. */
   pumpVel: number;
-  /** Drop reactivity slider (0..1) and sectionIntensity (0..1) — same boost
-   *  the shader's dropDrive/dropFlash terms use, so drift speeds up with the
-   *  song's own intensity in the same choruses/drops that brighten it. */
-  dropReactivity: number;
-  sectionIntensity: number;
 }
 
 /** Pure phase-rate math for the drift accumulator, split out from
@@ -1123,7 +1101,7 @@ export interface DriftInputs {
  *  lets either one still move the pool while Drift speed itself sits at 0 —
  *  a multiplier on a base of zero can only ever stay zero. */
 export function driftRatePerSec(s: DriftInputs): number {
-  const base = DRIFT_BASE_RATE * s.drift * (1 + s.sectionIntensity * s.dropReactivity * 0.8);
+  const base = DRIFT_BASE_RATE * s.drift;
   const level = LEVEL_GAIN * s.driftLevel * s.levelValue;
   return Math.min(base + level + s.pumpVel, DRIFT_RATE_MAX);
 }
@@ -1150,9 +1128,6 @@ void main() {
   vec2 uv = roomUv(vUv);
   vec2 aspectFix = vec2(uResolution.x / uResolution.y, 1.0);
   vec2 p = (uv - 0.5) * aspectFix * 3.0;
-
-  float dropDrive = uDropReactivity * uSectionIntensity;
-  float dropFlash = uDropReactivity * uDropPulse;
 
   // Breathe: the pool zooms on whatever source is patched onto the breathe
   // setting, at BREATHE_ZOOM depth scaled by uBreathe — Bar wave by default,
@@ -1272,7 +1247,7 @@ void main() {
   // git history). aaSharp below still bounds the pixel-ladder artifact
   // independent of warpAmt; a maxed Mid turbulence against a maxed Focus
   // snap is the case to eyeball for it.
-  float warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2 + dropDrive * 0.7);
+  float warpAmt = 0.45 * (1.0 + uTurbulence * turbulenceDrive(uMid) * 1.2);
   for (int i = 0; i < ${RIDGE_OCTAVES}; i++) {
     if (i >= iterations) break;
     float band = sampleBands(float(i) / ${RIDGE_OCTAVES}.0);
@@ -1410,8 +1385,7 @@ void main() {
   // Soft center bloom on a bass hit, on top of the geometric bulge above.
   acc += bassBulge * exp(-pLen0 * 1.5) * 0.6;
 
-  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * flashDrive(uBeatPulse) * 1.5 + ring * 0.8
-       + dropDrive * 0.5 + dropFlash * 1.2;
+  acc *= 0.35 + pow(uEnergy, 1.5) * 0.7 + uFlash * flashDrive(uBeatPulse) * 1.5 + ring * 0.8;
   // Dark-water floor: uFog=0 clips almost exactly today's old fixed cut
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips
   // nothing at all, so the dim wash the haze sits in actually glows instead.
@@ -1537,8 +1511,6 @@ float softCeil(float x, float knee, float ceil) {
           driftLevel,
           levelValue,
           pumpVel: pump.vel,
-          dropReactivity: getSetting("dropReactivity"),
-          sectionIntensity: anim.sectionIntensity,
         });
         // Caustic density: the slider lifted toward a finer mesh by its own
         // source (densityTargetFor — the slider exactly when nothing is

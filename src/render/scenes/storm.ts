@@ -150,8 +150,7 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 //    uDetail, so the low preset marches a genuinely cheaper cloud.
 //  - Beat trigger: a low-band onset or a broadband beat fires one strike; the
 //    pool's refractory window folds the two into a single strike when they
-//    land on adjacent frames (they usually do). A drop fires a burst of
-//    STRIKE_DROP_BURST strikes that bypass the refractory.
+//    land on adjacent frames (they usually do).
 //  - Beats are detected as *rises* in anim.beatPulse / lowPulse / dropPulse
 //    rather than from the one-shot flags (frame.onset, anim.lowOnset,
 //    anim.dropOnset), and the pool is aged by this scene's own render
@@ -257,7 +256,6 @@ const BOUND_X = CLOUD_EXTENT_X * 1.35;
 const BOUND_Y = CLOUD_EXTENT_Y * 1.7;
 const BOUND_Z = CLOUD_EXTENT_Z * 1.45;
 const STRIKE_REFRACTORY_SEC = 0.06;
-const STRIKE_DROP_BURST = 3;
 // How long a strike's segment is: a channel that crosses most of the cloud
 // rather than one lobe of it. sampleStrikeSegment still keeps both endpoints
 // inside the bounding ellipsoid, so however long the draw comes out the light
@@ -599,8 +597,8 @@ const SETTINGS: SceneSetting[] = [
     default: 0.75,
     auto: { attack: 0.3, pulse: 0.15 },
     // Gates the pool's ordinary strike (render()) — a bass hit OR a beat
-    // hit, unconditionally (a drop instead fires dropStorm's own burst): no
-    // single catalogue source covers that union, so the default is Scene.
+    // hit: no single catalogue source covers that union, so the default is
+    // Scene.
     // uStrike's own GLSL sites are all plain gain curves on the setting's
     // own resolved value, no live signal, so nothing there needs wrapping.
     drive: { default: "scene", sceneLabel: "Scene: bass or beat hit", sceneSources: ["anim.lowOnset", "feature.onset"] },
@@ -711,24 +709,6 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { brightness: 0.25, density: 0.2 },
-  },
-  {
-    key: "dropStorm",
-    label: "Drop reactivity",
-    description: "Size of the lightning burst on a detected drop",
-    // Look, not Motion — unlike caustics' Drop reactivity, this only scales
-    // how many strikes fire and how bright they are (see STRIKE_DROP_BURST
-    // below), never the cloud's shape or position.
-    group: "Look",
-    min: 0,
-    max: 1,
-    step: 0.05,
-    default: 0.6,
-    auto: { dynamics: 0.45 },
-    // Gates both the burst of extra pool strikes (render()) and the
-    // whole-frame drop flash (uDropPulse, VOLUME_FRAG, 2 sites) — a single
-    // signal (Drop) at both, so the default is the catalogue source.
-    drive: { default: "anim.dropOnset" },
   },
 ];
 
@@ -2662,12 +2642,10 @@ void main() {
 
   // The geometry modes: no march at all. The lattice, the point pass or the
   // strands draw the cloud, so all this pass owes them is something to draw
-  // over — sky, the haze around each live bolt, and the drop flash. Every
-  // pixel is still written (nothing else in the shared gallery context clears
-  // colour).
+  // over — sky and the haze around each live bolt. Every pixel is still
+  // written (nothing else in the shared gallery context clears colour).
   if (!march) {
-    vec3 flat_ = bg + boltColor() * 0.1 * uDropStorm * dropStormDrive(uDropPulse);
-    outColor = vec4(tonemap(flat_), 1.0);
+    outColor = vec4(tonemap(bg), 1.0);
     return;
   }
 
@@ -2867,9 +2845,6 @@ void main() {
       col = bg * T + acc;
     }
   }
-
-  // Whole-frame flash on a drop, in front of the volume rather than behind it.
-  col += boltColor() * 0.1 * uDropStorm * dropStormDrive(uDropPulse);
 
   outColor = vec4(tonemap(col), 1.0);
 }
@@ -3609,7 +3584,6 @@ export const stormScene: Scene = (() => {
       // frame (see autoTune.ts and the same note in meshGrid.ts).
       const afterglow = resolveSceneSetting(ID, settingFor("afterglow"));
       const flicker = resolveSceneSetting(ID, settingFor("flicker"));
-      const dropStorm = resolveSceneSetting(ID, settingFor("dropStorm"));
       const density = resolveSceneSetting(ID, settingFor("density"));
       const cloudShape = resolveSceneSetting(ID, settingFor("cloudShape"));
       const morphSpeed = resolveSceneSetting(ID, settingFor("morphSpeed"));
@@ -3667,15 +3641,9 @@ export const stormScene: Scene = (() => {
       const lightStruck = (fired: boolean): void => {
         if (fired && cells && pool && pool.lastSlot >= 0) cells.lightSegment(pool.posA, pool.posB, pool.lastSlot);
       };
-      // Single signal (Drop) — a catalogue default — vs. a union of bass and
-      // beat hits — a Scene default; see the "dropStorm"/"strike" settings'
-      // own comments.
-      if (drives.fired("dropStorm", dropRose)) {
-        // A drop is a burst of ordinary-strength strikes in different lobes
-        // (a cloud-wide flash), not one overdriven strike — three at full
-        // amplitude already saturate most of the cloud.
-        for (let i = 0; i < STRIKE_DROP_BURST; i++) lightStruck(pool.trigger(0.8 + 0.6 * dropStorm, true));
-      } else if (drives.fired("strike", lowRose || beatRose)) {
+      // Single catalogue source wouldn't cover the bass-or-beat union the
+      // ordinary strike needs — see the "strike" setting's own comment.
+      if (drives.fired("strike", lowRose || beatRose)) {
         lightStruck(pool.trigger(0.7 + 0.5 * (lowRose ? anim.lowPulse : 0), false));
       }
       // On top of whatever the strike lit: a beat picks its own sections, so
