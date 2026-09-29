@@ -17,11 +17,6 @@ Anthropic model routing — that no other tool shares.
 - Once a detailed plan exists, execute it with Sonnet whenever possible (an
   agent with `model: "sonnet"`). Keep the stronger model for planning and
   review.
-- `/exec-cheap plans/<topic>.md` hands a plan to an OpenRouter model in a
-  separate Claude Code process (`tools/cheap.sh` owns the setup) and verifies
-  the result here. Use it only when the user types `/exec-cheap` themselves;
-  otherwise ignore it entirely — don't suggest it, don't route work to it, and
-  the Sonnet rule above stands unchanged. Never for paid scenes.
 - The session commands are `/new-scene`, `/ref`, `/tune` and `/wrap`
   (`.claude/commands/`): `/new-scene` walks the add-a-scene checklist and
   starts the scene's record; `/ref` and `/tune` say what a record gains from
