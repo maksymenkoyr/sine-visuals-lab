@@ -2401,6 +2401,32 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     tickSparkline(drives: SceneDrives, frame: FeatureFrame | null, anim: AnimFrame | null): void;
   }
   let driveRowHandles: DriveRowHandle[] = [];
+
+  // Peak-hold between graph samples. The sparklines and the output graph
+  // sample at SPARKLINE_REFRESH_MS, but a hit is a one-tick spike that
+  // decays right away — a sample landing a tick or two after the hit drew
+  // a Fixed hit (every one starts at exactly 1) at 0.8-0.9 and the peaks
+  // looked uneven. notePeaks() runs every frame and remembers the highest
+  // reading per setting (combined and per source); the 30 Hz tick draws
+  // max(now, that), then the update loop clears it.
+  const peakSeen = new Map<string, { v: number; src: number[] }>();
+  function notePeaks(drives: SceneDrives): void {
+    for (const h of driveRowHandles) {
+      if (deps.getDriveSetting(h.sceneId, h.spec) === "scene") continue;
+      const key = h.spec.key;
+      let p = peakSeen.get(key);
+      if (!p) {
+        p = { v: 0, src: [] };
+        peakSeen.set(key, p);
+      }
+      p.v = Math.max(p.v, drives.valueOf(key));
+      const vals = drives.sourceValues(key);
+      if (vals) for (let i = 0; i < vals.length; i++) p.src[i] = Math.max(p.src[i] ?? 0, vals[i]!);
+    }
+  }
+  const heldValue = (key: string, now: number): number => Math.max(now, peakSeen.get(key)?.v ?? 0);
+  const heldSource = (key: string, i: number, now: number): number => Math.max(now, peakSeen.get(key)?.src[i] ?? 0);
+
   /** Every Scene-card row that can be pinned — all of them, drive or not,
    *  in document order: what togglePin refreshes, Tab walks (moveTabPin)
    *  and a rebuild re-finds the pin in. A drive row's refreshPin is its
@@ -3257,8 +3283,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     function tick(drives: SceneDrives): void {
       ringHead = (ringHead + 1) % RING;
       const src = drives.sourceValues(spec.key);
-      for (let i = 0; i < perSource.length; i++) perSource[i]![ringHead] = src?.[i] ?? 0;
-      const v = drives.valueOf(spec.key);
+      for (let i = 0; i < perSource.length; i++) perSource[i]![ringHead] = heldSource(spec.key, i, src?.[i] ?? 0);
+      const v = heldValue(spec.key, drives.valueOf(spec.key));
       combined[ringHead] = v;
       const marks = takeSettingMarks(sceneId, spec.key, "graph");
       for (const trace of markTraces.values()) trace[ringHead] = NaN;
@@ -3652,7 +3678,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           col = withAlpha(SCENE_VIOLET, 0.35);
         }
       } else {
-        v = drives.valueOf(spec.key);
+        v = heldValue(spec.key, drives.valueOf(spec.key));
         col = SCENE_VIOLET;
         if (setting.sources.length) {
           const vals = drives.sourceValues(spec.key);
@@ -6626,10 +6652,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // pinned row's output graph (if it has one) rides the same tick.
       // Skipped while the Scene card is folded or there's nothing to read
       // yet — canvas draws only, never a DOM rebuild.
-      if (drives && driveRowHandles.length && !sceneCard.fold?.isFolded() && nowMs - lastSparklineMs >= SPARKLINE_REFRESH_MS) {
-        lastSparklineMs = nowMs;
-        for (const h of driveRowHandles) h.tickSparkline(drives, frame, anim);
-        activeOutputTick?.(drives);
+      if (drives && driveRowHandles.length && !sceneCard.fold?.isFolded()) {
+        notePeaks(drives);
+        if (nowMs - lastSparklineMs >= SPARKLINE_REFRESH_MS) {
+          lastSparklineMs = nowMs;
+          for (const h of driveRowHandles) h.tickSparkline(drives, frame, anim);
+          activeOutputTick?.(drives);
+          peakSeen.clear();
+        }
       }
 
       // Picture: the Overall trace plus one compact trace per measure of the
