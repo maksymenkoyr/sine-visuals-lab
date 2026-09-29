@@ -14,7 +14,6 @@ import {
   focusSharp,
   fogFloorCut,
   fogRestingSharp,
-  loudSwellDrive,
   sparkleBrightGain,
   sparkleDensityExponent,
   sparkleGrainFreq,
@@ -118,7 +117,9 @@ describe("caustics drift rate", () => {
 // rather than reading it absolutely, so the dial behaves the same on a quiet
 // room and a loud one. The gain-invariance property below is the one that
 // makes a legacy wire sender (protocol.ts defaults level to 0.5) and silence
-// degrade safely to neutral instead of pinning loud or quiet.
+// degrade safely to neutral instead of pinning loud or quiet. Rate-only since
+// the swell channel (loudSwellDrive → uLoudSwell) was deleted — this feeds
+// driftRatePerSec's levelValue, never the aperture or floor.
 describe("caustics loudness calibration (advanceLoudSwell)", () => {
   const settle = (level: number, ticks = 3000, dt = 1 / 60): number => {
     const st = createLoudSwellState();
@@ -179,31 +180,6 @@ describe("caustics loudness calibration (advanceLoudSwell)", () => {
   it("the first call seeds calibration from that sample and returns neutral, rather than reporting a false full range", () => {
     const st = createLoudSwellState();
     expect(advanceLoudSwell(st, 1 / 60, 0.9)).toBeCloseTo(0.5, 10);
-  });
-});
-
-// loudSwellDrive is uLoudSwell's source — the shader's aperture/floor-glow
-// channel. Small at the slider's default so that channel stays a no-op until
-// someone actually drags Speed boost up.
-describe("caustics loudness swell drive (loudSwellDrive)", () => {
-  it("is 0 at loudSwell=0.5 (neutral) for any driftLevel", () => {
-    for (const driftLevel of [0, 0.4, 0.7, 1]) {
-      expect(loudSwellDrive(driftLevel, 0.5)).toBeCloseTo(0, 10);
-    }
-  });
-
-  it("stays within [-1, 1] across a broad random sweep", () => {
-    for (let i = 0; i < 500; i++) {
-      const d = loudSwellDrive(Math.random(), Math.random());
-      expect(Number.isFinite(d)).toBe(true);
-      expect(d).toBeGreaterThanOrEqual(-1);
-      expect(d).toBeLessThanOrEqual(1);
-    }
-  });
-
-  it("stays small in magnitude at the Speed boost default (0.4), even at a fully loud or fully quiet extreme", () => {
-    expect(Math.abs(loudSwellDrive(0.4, 1))).toBeLessThan(0.2);
-    expect(Math.abs(loudSwellDrive(0.4, 0))).toBeLessThan(0.2);
   });
 });
 

@@ -9,12 +9,12 @@ spray-injection layer riding on top. Ships from the initial commit and is on mai
 
 - `src/render/scenes/caustics.ts` — the scene module (`createFullscreenScene`,
   `SETTINGS`, the `FRAG` template, and an `extraUniforms` closure that advances the
-  drift phase, Speed pump's own accumulator, loudness-swell calibration and
-  Beat ripple's own emitter/profile every frame).
+  drift phase, Speed pump's own accumulator, loudness calibration for Speed
+  boost's rate and Beat ripple's own emitter/profile every frame).
 - Its response math is factored into small pure functions exported specifically so
   `tests/caustics.test.ts` can pin them directly: `focusSharp`, `fogRestingSharp`,
   `fogFloorCut`, `causticDensityScale`, `driftRatePerSec`, `advanceLoudSwell`,
-  `loudSwellDrive`, `advancePump`, `driftFlows`, `advanceDensityFlow` (Caustic
+  `advancePump`, `driftFlows`, `advanceDensityFlow` (Caustic
   density's own glide — see Decisions), and the `sparkle*` helpers.
 - `src/render/scenes/rippleEmitter.ts` — Beat ripple's own continuous ring
   emitter: `advanceEmission` conditions the driver's own rise each frame into
@@ -532,7 +532,7 @@ reference-measurement workflow used by later scenes.
   song builds), lifted on top of the slider by `densityTargetFor`
   (`DENSITY_DRIVE_LIFT` 0.3 — kept small because the field spans
   `DENSITY_SPAN_OCTAVES`), so unplugging it no longer drops the target to 0,
-  the coarsest cells, whatever the slider said. `advanceDensityFlow` still
+  the coarsest cells, whatever the slider said.   `advanceDensityFlow` still
   glides every change in. Sparkle, Ripple, driftPump and the rest were
   already real reactions and are untouched.
 - 2026-09-29 — Drop reactivity removed entirely (user call, same day on
@@ -547,6 +547,21 @@ reference-measurement workflow used by later scenes.
   drive, the onset edges this file reads for ripple) are untouched.
   Stored values, auto flags and Look codes carrying the old key are
   ignored by every reader — they iterate live specs — so no migration.
+- 2026-09-29 — Speed boost made rate-only, on the user's report that a high
+  setting "starts behaving like breathe — zooming in and out". The dial was
+  two channels on one slider: the drift rate (`driftRatePerSec`'s `level`
+  term, the speed the label promises) and a loudness swell look fed by the
+  same jack through `loudSwellDrive` → `uLoudSwell`, which scaled the sample
+  coordinates (`SWELL_ZOOM`, same `p *=` aperture line Breathe rides) and
+  lifted the dark-water floor (`SWELL_FLOOR_LIFT`). The swell's amplitude
+  was weighted by the slider squared, so it stayed quiet near the default
+  and opened up in the top half — high Speed boost read as an aperiodic
+  breathing zoom, deeper than full Breathe. Deleted, not promoted to its
+  own dial: speed is speed, Breathe already owns the zoom look, Fog already
+  owns the floor. `advanceLoudSwell` stays (it still calibrates the rate's
+  `levelValue`); `loudSwellDrive`, `SWELL_ZOOM`, `SWELL_FLOOR_LIFT`,
+  `uLoudSwell` and the second jack read (`swellValue`, the one that needed
+  `LOUD_NEUTRAL` as its rest) are gone.
 
 ## Tuning notes
 
@@ -563,7 +578,8 @@ reference-measurement workflow used by later scenes.
 - Speed boost reads `advanceLoudSwell`'s own slow-contracting (tens-of-seconds)
   calibration of `FeatureFrame.level`, not `frame.energy`, so it settles into the
   room or playback's own observed range instead of re-normalizing away the very
-  quiet-vs-loud contrast it exists to show.
+  quiet-vs-loud contrast it exists to show. It feeds only the drift rate —
+  never the aperture or floor (see the 2026-09-29 decision).
 - Beat ripple's drive picker still chooses what feeds the emitter (Scene default
   is bass hits or any broadband beat, continuous; picking a single catalogue
   source instead reads that source's own level/pulse) — but there's no longer a
@@ -662,11 +678,17 @@ reference-measurement workflow used by later scenes.
 
 - `npm run dev`, then open the scene directly:
   `/?audio=synthetic&bpm=120#/v/caustics` (any query goes before the hash).
-- `tests/caustics.test.ts` pins the drift-rate, focus-snap and loudness-swell
-  invariants directly; Beat ripple's own emission and profile invariants
+- `tests/caustics.test.ts` pins the drift-rate, focus-snap and loudness
+  calibration (`advanceLoudSwell`) invariants directly; Beat ripple's own
+  emission and profile invariants
   (`advanceEmission`, `rippleEnvelope`, `createRippleEmitter`, `buildProfile`)
   are `tests/rippleEmitter.test.ts`'s job now — run both before touching any
   of the exported pure functions rather than eyeballing the shader.
+- A headless check that Speed boost stays rate-only (no aperture zoom): run
+  `caustics/scripts/swell-shot.mjs` against base and against this branch with
+  `causticDensity` frozen — base's frame-to-frame distance carries the
+  `uLoudSwell` swing this branch removed, and the printed numbers plus the
+  saved stills are the comparison.
 - A headless render check for Beat ripple specifically: force `ripple:1` and
   zero every other Motion setting via `window.__viz.setParams` (a Playwright
   script following this pattern is what this file's 2026-09-27 Decisions entries

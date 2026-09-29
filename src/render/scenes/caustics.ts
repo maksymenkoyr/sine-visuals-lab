@@ -92,12 +92,11 @@ import { publishSettingMarks } from "../settingMarks.ts";
 // top of the Drift-speed base rather than multipliers on it (see
 // driftRatePerSec below) — a multiplier on a base of zero can only ever stay
 // zero, so additive is what lets either one still move the pool with Drift
-// speed parked at 0. driftLevel also drives uLoudSwell (loudSwellDrive
-// below), an ungated visual swell — a loud passage widens the pool's
-// aperture and lifts the dark-water floor into a glow; a quiet one tightens
-// and deepens it. This is a look rather than motion along the phase, so —
-// not gated behind Drift speed or Speed pump — it must still land for anyone
-// who wants a still, breathing pool. uBass/uTurbulence/
+// speed parked at 0. Speed boost is rate-only: it never touches the pool's
+// aperture or the floor (an earlier loudSwell → uLoudSwell channel zoomed
+// the pool the way Breathe does, which read as Speed boost "breathing" at
+// high settings — removed; see docs/scenes/caustics.md's decision entry).
+// uBass/uTurbulence/
 // uSparkle give the low/mid/high bands each a distinct visual (swell / churn
 // / crest glints).
 //
@@ -316,7 +315,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "driftLevel",
     label: "Speed boost",
-    description: "Drift runs faster the louder the music is right now, and drops straight back to Drift speed when it quietens; the pool's aperture and floor glow swell with it too",
+    description: "Drift runs faster the louder the music is right now, and drops straight back to Drift speed when it quietens",
     group: "Motion",
     family: "Drift speed",
     min: 0,
@@ -332,13 +331,8 @@ const SETTINGS: SceneSetting[] = [
     // just frame.energy/anim.sectionIntensity: quiet stays quiet over the
     // tens of seconds AGC'd energy takes to re-adapt), so the default is
     // Scene. A non-default pick instead reads that source's 0..1 value
-    // directly as levelValue in driftRatePerSec below. extraUniforms reads
-    // this one patch twice with different rests (LOUD_NEUTRAL's own doc):
-    // the rate (driftRatePerSec) at rest 0, its own neutral (an unplugged
-    // jack adds no extra speed); the aperture/floor swell (loudSwellDrive)
-    // at rest LOUD_NEUTRAL, since loudSwellDrive's neutral is 0.5, not 0 —
-    // an unplugged jack reading 0 there swelled as permanent "quiet"
-    // tightening that grew with this very slider.
+    // directly as levelValue in driftRatePerSec below. Rate-only: one jack
+    // read, rest 0 (an unplugged jack adds no extra speed).
     drive: { default: "scene", sceneLabel: "Scene: this track's own calibrated loudness" },
   },
   {
@@ -634,19 +628,6 @@ const FOG_FLOOR_HAZY = 0.0;
 // FRAG for why a stale-"scene" fallback (never reached at Breathe's own
 // default, Bar wave) still swings zero.
 const BREATHE_ZOOM = 0.10;
-
-// uLoudSwell's (loudSwellDrive above) two visual channels, both small at the
-// Speed boost default (0.4) — see that constant's own comment — and both
-// on ground nothing else modulates at runtime: SWELL_ZOOM rides the same `p
-// *=` aperture line as BREATHE_ZOOM above, but the swell is the scene's own
-// aperiodic, sustained signal while uBreathe swings once per bar by default
-// (or whatever a re-patched cable carries), and SWELL_FLOOR_LIFT rides the
-// same dark-water floor cut uFog
-// sets at rest, so a loud passage glows into that dim wash and a quiet one
-// deepens it, distinct from uFlash/uEnergy, which brighten the ridge
-// *crests* instead.
-const SWELL_ZOOM = 0.25;
-const SWELL_FLOOR_LIFT = 0.8;
 
 // uFocus=1 on a full beat (uBeatPulse=1) multiplies the resting sharpness by
 // (1 + FOCUS_SNAP_RATIO) — see focusSharp below. Chosen so the defaults (fog
@@ -986,10 +967,7 @@ const LOUD_ENV_EXPAND_RATE_PER_SEC = 1 / 0.3; // ~0.3s: a new extreme is grabbed
 const LOUD_ENV_CONTRACT_RATE_PER_SEC = 1 / 30; // ~30s: an old extreme is forgotten slowly — see above
 const LOUD_MIN_RANGE = 0.15; // below this observed range, confidence blends the output toward neutral instead of amplifying noise
 // advanceLoudSwell's own seed/no-signal value (0.5 = neither expand nor
-// contract the pool) — also what extraUniforms passes as drives.value()'s
-// `rest` for the "driftLevel" jack when it feeds loudSwellDrive, so an
-// unplugged jack reads as this same neutral there instead of drives.ts's
-// plain rest of 0 (loudSwellDrive's own doc comment below).
+// contract — the calibration's neutral, where level sits mid-range).
 const LOUD_NEUTRAL = 0.5;
 
 export interface LoudSwellState {
@@ -1035,20 +1013,6 @@ export function advanceLoudSwell(st: LoudSwellState, dtSec: number, level: numbe
   const raw = range > 1e-4 ? clamp01((st.fast - st.floor) / range) : LOUD_NEUTRAL;
   const confidence = clamp01(range / LOUD_MIN_RANGE);
   return LOUD_NEUTRAL + confidence * (raw - LOUD_NEUTRAL);
-}
-
-// loudSwellDrive is uLoudSwell's JS-side source: driftLevel^2 weights how
-// far loudSwell (0..1, LOUD_NEUTRAL = neutral) can push it — squared so the
-// swing opens up mostly in the slider's top half rather than growing
-// linearly — left linear and signed ([-1, 1], 0 at neutral) rather than
-// exponentiated, since FRAG uses it as a direct multiplier on aperture/floor
-// terms rather than a rate ratio. See the file header's driftLevel
-// paragraph for what it drives. Its neutral isn't 0 — loudSwellDrive(d, 0)
-// is a permanent -d² "quiet" tightening — so an unplugged "driftLevel" jack
-// (drives.ts's header's "Nothing plugged in" paragraph) has to read
-// LOUD_NEUTRAL here, not the engine's plain rest of 0 (extraUniforms below).
-export function loudSwellDrive(driftLevel: number, loudSwell: number): number {
-  return driftLevel * driftLevel * (2 * loudSwell - 1);
 }
 
 export interface PumpState {
@@ -1138,11 +1102,6 @@ void main() {
   // bit-for-bit no zoom in either of those cases, not "the scene's own
   // contribution" (there's a real one now: Bar wave).
   p *= 1.0 + ${BREATHE_ZOOM.toFixed(2)} * uBreathe * breatheDrive(0.0);
-  // Loudness swell's aperture: a loud passage opens the pool wider, a quiet
-  // one tightens it — the scene's own sustained signal, where the breath
-  // above only moves when a cable carries it. See SWELL_ZOOM's own comment
-  // for why this line, not a new one.
-  p *= 1.0 - ${SWELL_ZOOM.toFixed(2)} * uLoudSwell;
 
   // Bass swell: a sustained radial bulge near center, strongest right on a
   // low-band onset and fading outward — distinct from the beat ripple, which
@@ -1389,11 +1348,7 @@ void main() {
   // Dark-water floor: uFog=0 clips almost exactly today's old fixed cut
   // (0.08), so filaments read as bright threads on black water; uFog=1 clips
   // nothing at all, so the dim wash the haze sits in actually glows instead.
-  // Loudness swell's floor lift: a loud passage glows the dim wash between
-  // filaments instead of clipping it away; a quiet one deepens the cut
-  // toward flat black water. See SWELL_FLOOR_LIFT's own comment.
-  acc = max(0.0, acc - mix(${FOG_FLOOR_CRISP.toFixed(2)}, ${FOG_FLOOR_HAZY.toFixed(2)}, uFog)
-    * max(0.0, 1.0 - ${SWELL_FLOOR_LIFT.toFixed(2)} * uLoudSwell));
+  acc = max(0.0, acc - mix(${FOG_FLOOR_CRISP.toFixed(2)}, ${FOG_FLOOR_HAZY.toFixed(2)}, uFog));
   // Hue phase rides brightness (a ridge crest tints differently than the
   // dim water around it) through a cosine, which wraps through its full
   // hue cycle for roughly a unit change of phase. Raw acc can swing several
@@ -1458,7 +1413,6 @@ uniform float uDriftFlow[${DRIFT_FLOW_LEN}];
 // The glided, drive-scaled Caustic density (advanceDensityFlow) — see
 // densScale in FRAG.
 uniform float uDensityLive;
-uniform float uLoudSwell;
 uniform float uRippleCrest[${PROFILE_SAMPLES}];
 uniform float uRippleSlope[${PROFILE_SAMPLES}];
 // Linear interpolation into a profile array built by rippleEmitter.ts's
@@ -1490,17 +1444,12 @@ float softCeil(float x, float knee, float ceil) {
         // Kept up to date every tick regardless of driftLevel's own drive
         // choice — see the "driftLevel" SceneSetting's own comment — and
         // drives.value()'s sceneDefault, so at that setting's Scene default
-        // (today's behavior) levelValue/swellValue are exactly this
-        // calibrated reading.
+        // (today's behavior) levelValue is exactly this calibrated reading.
         const loudSwellCalibrated = advanceLoudSwell(loudSwellState, anim.dtSec, frame.level);
-        // Two reads of the same patch, different rests for an unplugged jack
-        // (drives.ts's header's "Nothing plugged in" paragraph): the rate
-        // below only ever adds on top of Drift speed's own base, so nothing
-        // plugged in should add nothing — rest 0, its own neutral. The swell
-        // read passes LOUD_NEUTRAL instead — loudSwellDrive's own neutral
-        // isn't 0 (see that function's own doc comment).
+        // Rest 0 for an unplugged jack (drives.ts's header's "Nothing
+        // plugged in" paragraph): the rate only ever adds on top of Drift
+        // speed's own base, so nothing plugged in should add nothing.
         const levelValue = drives.value("driftLevel", loudSwellCalibrated);
-        const swellValue = drives.value("driftLevel", loudSwellCalibrated, LOUD_NEUTRAL);
         // Speed pump's own accelerate-then-release velocity, advanced before the
         // rate below reads pump.vel, so this tick's push already counts.
         // Bass hit's own decaying envelope at driftPump's Beat-hit default —
@@ -1582,7 +1531,6 @@ float softCeil(float x, float knee, float ceil) {
         return {
           uDriftFlow: driftFlows(densityFlow.scaledPhase, flowBuf),
           uDensityLive: densityFlow.live ?? densityTarget,
-          uLoudSwell: loudSwellDrive(driftLevel, swellValue),
           uRippleCrest: crestBuf,
           uRippleSlope: slopeBuf,
         };
