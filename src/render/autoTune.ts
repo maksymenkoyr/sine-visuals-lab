@@ -1,7 +1,9 @@
 import type { SceneSetting } from "./sceneSettings.ts";
 import {
+  getSceneExpansion,
   getSceneMaster,
   getSceneSetting,
+  SCENE_EXPANSION_DEFAULT,
   SCENE_MASTER_DEFAULT,
   setVariantResolver,
   settingDefault,
@@ -441,18 +443,30 @@ function resolveUnscaled(sceneId: string, spec: SceneSetting): number {
  *  - never over a DEV override or pin: those are deliberately typed,
  *    often out-of-range values (tuning/overrides.ts, tuning/pins.ts), and
  *    clamping them back in would break the tuning affordance.
- *  master === 1 returns the resolved value untouched, so every identity
+ *  Then the master's Expansion (sceneSettings.ts's getSceneExpansion): the
+ *  scaled value's position along its slider, (v − min) / (max − min),
+ *  through the Input card's own shapeExpansion curve and back — the same
+ *  S-curve about the midpoint, in the same order (gain first, then curve)
+ *  as applySensitivity runs Sensitivity then Expansion. Every rule above
+ *  covers it too; `masterScale: false` opts a spec out of both dials.
+ *
+ *  Both dials at 1 return the resolved value untouched, so every identity
  *  test (auto at NEUTRAL, drives at defaults) stays bit-for-bit. */
 export function resolveSceneSetting(sceneId: string, spec: SceneSetting): number {
   const value = resolveUnscaled(sceneId, spec);
   const master = getSceneMaster();
-  if (master === SCENE_MASTER_DEFAULT) return value;
+  const expansion = getSceneExpansion();
+  if (master === SCENE_MASTER_DEFAULT && expansion === SCENE_EXPANSION_DEFAULT) return value;
   if (spec.type === "boolean" || spec.type === "enum") return value;
   if (spec.masterScale === false) return value;
   if (import.meta.env.DEV && (getOverride(sceneId, spec.key) !== undefined || getPin(sceneId, spec.key) !== undefined)) {
     return value;
   }
-  return clampToSpec(spec, value * master);
+  const scaled = master === SCENE_MASTER_DEFAULT ? value : clampToSpec(spec, value * master);
+  if (expansion === SCENE_EXPANSION_DEFAULT || spec.max <= spec.min) return scaled;
+  const span = spec.max - spec.min;
+  const pos = (scaled - spec.min) / span;
+  return clampToSpec(spec, spec.min + shapeExpansion(pos, expansion) * span);
 }
 
 // A scene's variant (SceneSetting.variant) is read through this resolver

@@ -7,7 +7,7 @@
 import type { FeatureFrame } from "../audio/types.ts";
 import type { AnimFrame } from "../render/animClock.ts";
 import type { SceneSetting } from "../render/sceneSettings.ts";
-import { getSceneMaster, getSceneSetting } from "../render/sceneSettings.ts";
+import { getSceneExpansion, getSceneMaster, getSceneSetting } from "../render/sceneSettings.ts";
 import { getOverride, isAutoPinned } from "./overrides.ts";
 import { getPin } from "./pins.ts";
 import { isAutoEnabled, resolveSceneSetting } from "../render/autoTune.ts";
@@ -50,7 +50,8 @@ export interface ProbeSettingValue {
    *  (music-driven), or "manual" (auto disabled for this key — base is the
    *  stored value; `resolved` is that value once resolveSceneSetting has
    *  applied the device-wide scene master, so the two only match while the
-   *  master sits at its identity default — see getSceneMaster). */
+   *  master's Scale and Expansion sit at their identity defaults — see
+   *  getSceneMaster/getSceneExpansion). */
   mode: "override" | "pin" | "auto" | "manual";
 }
 
@@ -66,6 +67,9 @@ export interface ProbeSnapshot {
    *  can tell a master≠1 run apart from a params run instead of reading a
    *  mysterious uniform offset. */
   master: number;
+  /** The master's Expansion dial (getSceneExpansion), applied to every
+   *  `settings[*].resolved` after `master` — same reason for reporting it. */
+  masterExpansion: number;
   bands: { low: number; mid: number; high: number; energy: number };
   /** barPhase and metronomeBpm are src/render/beatTrim.ts's own corrected
    *  readings (AnimFrame.barPhase/metronomeBpm) — surfaced here so a
@@ -114,6 +118,7 @@ export function buildProbeSnapshot(input: ProbeInput): ProbeSnapshot {
     renderScale: input.renderScale,
     govLevel: input.govLevel,
     master: getSceneMaster(),
+    masterExpansion: getSceneExpansion(),
     bands: { low: anim?.low ?? 0, mid: anim?.mid ?? 0, high: anim?.high ?? 0, energy: vis?.energy ?? 0 },
     beat: {
       fired: anim?.onset ?? false,
