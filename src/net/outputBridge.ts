@@ -4,6 +4,8 @@ import {
   createOutputPresence,
   type CueController,
   type OutputParams,
+  type OutputPower,
+  type OutputRenderStatus,
   type ToMain,
   type ToOutput,
 } from "./outputSync.ts";
@@ -71,6 +73,11 @@ export interface OutputBridge {
   go(): void;
   update(nowMs: number): void;
   pushFrame(frame: FeatureFrame, extras: { beatRatio: number | null; wavePeak: number | null }, params: OutputParams): void;
+  /** Send the output its Quality / Energy saving now (it also gets them on
+   *  every heartbeat reply). No-op while no output is open. */
+  sendPower(): void;
+  /** The output's last reported render readouts, null while it is closed. */
+  outputStatus(): OutputRenderStatus | null;
 }
 
 export interface OutputBridgeOptions {
@@ -80,6 +87,8 @@ export interface OutputBridgeOptions {
   /** Defaults to the real localStorage. */
   storage?: Pick<Storage, "getItem" | "key" | "length">;
   openWindow?: () => Window | null;
+  /** The output's Quality and Energy saving choice (render/outputPower.ts). */
+  power: () => OutputPower;
 }
 
 export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
@@ -95,11 +104,13 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
   let latestParams: OutputParams = { sens: 1, exp: 1, smoothing: 1 };
   let lastPollMs = -Infinity;
   let lastStatusKey = "";
+  let lastStatus: OutputRenderStatus | null = null;
 
   function closed(): void {
     presence.bye();
     outputOpen = false;
     win = null;
+    lastStatus = null;
     cue.outputClosed();
   }
 
@@ -113,6 +124,13 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
       closed();
       return;
     }
+    if (m.t === "status") {
+      // A sign of life, nothing more: the hello path below re-sends state.
+      lastStatus = m.s;
+      presence.seen(performance.now());
+      outputOpen = true;
+      return;
+    }
     presence.seen(performance.now());
     outputOpen = true;
     // A window that lost its state (fresh, or reloaded) is sent the current
@@ -121,6 +139,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
       preview();
       cue.outputOpened();
     }
+    transport.post({ t: "power", power: opts.power() });
   });
 
   function status(): OutputStatus {
@@ -166,6 +185,10 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
       }
       emitIfChanged();
     },
+    sendPower() {
+      if (outputOpen) transport.post({ t: "power", power: opts.power() });
+    },
+    outputStatus: () => (outputOpen ? lastStatus : null),
     pushFrame(frame, extras, params) {
       latestParams = params;
       if (!outputOpen) return;

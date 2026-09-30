@@ -1,5 +1,6 @@
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
+import type { PreviewSize } from "../render/outputPower.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
@@ -40,6 +41,11 @@ import {
  * read as a settings form. They're a small mono caption beside a
  * seven-segment value, the same register as the band captions under the
  * spectrum strip.
+ *
+ * The same card is built twice (deviceMenu.ts), differing only in the deps and
+ * options it is given: the main window's, which reads "Preview" and gains the
+ * Preview size row while a pop-out output is open (src/render/outputPower.ts),
+ * and the "Output" card that edits and reads back that window's own settings.
  *
  * Read-only except the mode chips; every value comes from
  * PowerCardDeps.getPowerStatus(), polled at the panel's existing ~10Hz
@@ -99,6 +105,22 @@ export interface PowerCardDeps {
   getQualityChoice: () => QualityChoice;
   onQualityChoiceChange: (choice: QualityChoice) => void;
   getPowerStatus: () => PowerStatus;
+  /** True while the card describes the main window's preview of a pop-out
+   *  output (app.ts's previewActive) rather than the device itself: shows the
+   *  Preview size row. The three below are only read then. */
+  isPreview?: () => boolean;
+  getPreviewSize?: () => PreviewSize;
+  onPreviewSizeChange?: (size: PreviewSize) => void;
+}
+
+/** What tells one Power card from another: the main window's (defaults) and
+ *  the Output card, which drives the pop-out window's own settings. */
+export interface PowerCardOptions {
+  title?: string;
+  /** Key for the card's remembered fold state. */
+  foldId?: string;
+  /** Names the folded square for assistive tech and its tooltip, like the title. */
+  glyphLabel?: string;
 }
 
 export interface PowerCard {
@@ -106,6 +128,10 @@ export interface PowerCard {
   title: HTMLElement;
   /** Pulls a fresh PowerStatus and updates the chips/status/readouts. */
   refresh(): void;
+  /** Renames the card ("Preview" while an output is open), keeping the Beta badge. */
+  setTitle(text: string): void;
+  /** Shows or hides the whole card. */
+  setVisible(on: boolean): void;
 }
 
 const IDLE_DOT = "rgba(255,255,255,0.3)";
@@ -159,6 +185,55 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
         btn.style.cssText = m === mode ? modeChipLitStyle : modeChipStyle;
       }
       setHintText(hint, MODE_OPTIONS.find((o) => o.mode === mode)?.title ?? "");
+    },
+  };
+}
+
+const SIZE_OPTIONS: { size: PreviewSize; text: string }[] = [
+  { size: "third", text: "1/3" },
+  { size: "half", text: "1/2" },
+  { size: "full", text: "Full" },
+];
+const SIZE_HINT = "Preview drawn at a third, half or the full window size while the output is open";
+
+/** The Preview size row, shown only while the card describes a preview:
+ *  createModeRow's shape (label, chips, hint), small to large left to right. */
+function createSizeRow(deps: PowerCardDeps, accent: string) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.style.setProperty("--vc-accent", accent);
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = "Preview size";
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  head.appendChild(label);
+
+  const list = document.createElement("div");
+  list.style.cssText = modeListStyle;
+  const buttons = SIZE_OPTIONS.map((opt) => {
+    const btn = document.createElement("button");
+    btn.textContent = opt.text;
+    btn.style.cssText = modeChipStyle;
+    btn.addEventListener("click", () => deps.onPreviewSizeChange?.(opt.size));
+    return { size: opt.size, btn };
+  });
+  list.append(...buttons.map((b) => b.btn));
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  setHintText(hint, SIZE_HINT);
+
+  el.append(head, list, hint);
+
+  return {
+    el,
+    refresh(size: PreviewSize): void {
+      for (const { size: s, btn } of buttons) {
+        btn.style.cssText = s === size ? modeChipLitStyle : modeChipStyle;
+      }
     },
   };
 }
@@ -394,7 +469,10 @@ function createReadoutLine(caption: string) {
   };
 }
 
-export function createPowerCard(deps: PowerCardDeps): PowerCard {
+export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}): PowerCard {
+  const title = opts.title ?? "Power";
+  const foldId = opts.foldId ?? "power";
+  const glyphLabel = opts.glyphLabel ?? title;
   // Only read at the moment of a fold click, so a viewport/preference change
   // between clicks always takes effect on the next one — no resize listener
   // needed, matchMedia's own .matches is always current.
@@ -493,7 +571,7 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
     }
   }
 
-  const card = createCard({ title: "Power", accent: POWER_TEAL, foldId: "power", defaultFolded: true, foldTransition });
+  const card = createCard({ title, accent: POWER_TEAL, foldId, defaultFolded: true, foldTransition });
   cardEl = card.el;
   cardEl.classList.add("vc-power-card");
   pad = cardEl.querySelector<HTMLElement>(".vc-card-pad")!;
@@ -505,8 +583,8 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   square = document.createElement("button");
   square.type = "button";
   square.className = "vc-power-square";
-  square.setAttribute("aria-label", "Expand Power");
-  square.title = "Expand Power";
+  square.setAttribute("aria-label", `Expand ${glyphLabel}`);
+  square.title = `Expand ${glyphLabel}`;
   square.setAttribute("aria-controls", card.body.id);
   square.innerHTML =
     '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">' +
@@ -532,6 +610,8 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   hairline.style.cssText = hairlineStyle;
   const qualityRow = createQualityRow(deps, POWER_TEAL);
   const modeRow = createModeRow(deps, POWER_TEAL);
+  const sizeRow = createSizeRow(deps, POWER_TEAL);
+  sizeRow.el.style.display = "none";
 
   const readoutsHeading = document.createElement("div");
   readoutsHeading.textContent = "Readouts";
@@ -543,12 +623,15 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   const detail = createReadoutLine("Detail");
   readouts.append(fps.el, res.el, detail.el);
 
-  card.body.append(statusRow.el, hairline, qualityRow.el, spacer(), modeRow.el, readoutsHeading, readouts);
+  card.body.append(statusRow.el, hairline, qualityRow.el, spacer(), sizeRow.el, modeRow.el, readoutsHeading, readouts);
 
   function refresh(): void {
     const status = deps.getPowerStatus();
     statusRow.refresh(status);
     qualityRow.refresh(status.choice, status.recommended);
+    const preview = deps.isPreview?.() ?? false;
+    sizeRow.el.style.display = preview ? "" : "none";
+    if (preview && deps.getPreviewSize) sizeRow.refresh(deps.getPreviewSize());
     modeRow.refresh(status.mode);
     fps.set(status.fps > 0 ? [digits(String(Math.round(status.fps)))] : [text("--")]);
     res.set([digits(String(status.bufferWidth)), join("×"), digits(String(status.bufferHeight))]);
@@ -556,5 +639,21 @@ export function createPowerCard(deps: PowerCardDeps): PowerCard {
   }
   refresh();
 
-  return { el: card.el, title: card.title, refresh };
+  function setTitle(text: string): void {
+    const node = card.title.firstChild;
+    if (node && node.nodeType === Node.TEXT_NODE) {
+      if ((node as Text).data !== text) (node as Text).data = text;
+    }
+    const label = `Expand ${opts.glyphLabel ?? text}`;
+    if (square.title !== label) {
+      square.title = label;
+      square.setAttribute("aria-label", label);
+    }
+  }
+
+  function setVisible(on: boolean): void {
+    card.el.style.display = on ? "" : "none";
+  }
+
+  return { el: card.el, title: card.title, refresh, setTitle, setVisible };
 }

@@ -99,6 +99,9 @@ second window fed by the main window over a BroadcastChannel instead of the room
 socket, with Cue/Go to hold or send what it shows. Everything about it — why
 `tv.ts` itself couldn't be reused, the message layer, what crosses — is the header
 of `src/net/outputSync.ts`; `src/net/outputBridge.ts` is the main window's end.
+While an output is open the main window renders only a cheap preview (its own
+Quality, in a smaller box), and the output has its own Quality and Energy saving,
+set from the Output Power card; `src/render/outputPower.ts` owns those settings.
 
 ## Where the quality/perf ceiling comes from
 

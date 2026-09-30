@@ -15,8 +15,10 @@
  */
 
 /** Keys that belong to one window or one person's chrome, never mirrored:
- *  the room identity, panel/tip/toast state, and which audio source this
- *  machine picked (the output gets frames, not audio). */
+ *  the room identity, panel/tip/toast state, which audio source this
+ *  machine picked (the output gets frames, not audio), and each window's
+ *  own quality and power settings (render/outputPower.ts: the output's
+ *  travel as a `power` message, outside Cue). */
 export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "vibe.deviceId",
   "vibe.keyTips",
@@ -25,6 +27,12 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "vibe.bakeToast",
   "vibe.audioSource",
   "vibe.audioInputDevice",
+  "vibe.quality",
+  "vibe.powerMode",
+  "vibe.output.quality",
+  "vibe.output.powerMode",
+  "vibe.preview.quality",
+  "vibe.preview.size",
 ]);
 
 /** Key prefixes the main window rewrites continuously on its own (auto-
