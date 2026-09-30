@@ -215,9 +215,20 @@ export interface SceneSetting {
    *  panel would show the stored value while the scene runs the scaled
    *  one. */
   masterScale?: false;
+  /** Set false for a numeric slider that does real work whenever its value
+   *  moves — rebuilds geometry, reseeds a simulation — so the pop-out
+   *  output's Play glide (src/net/outputGlide.ts) must switch it in one step
+   *  rather than walk it through every value in between. Only plain
+   *  fine-stepped sliders glide at all (outputGlide.ts's glideSafe); this is
+   *  the opt-out for the few of those that shouldn't. */
+  glide?: false;
 }
 
-const STORAGE_KEY = "vibe.sceneSettings";
+/** Where every scene's stored values live: `{ scope: { key: number } }`, the
+ *  scope being settingScope(). Exported for src/net/outputGlide.ts, which
+ *  moves the numeric ones smoothly. */
+export const SCENE_SETTINGS_KEY = "vibe.sceneSettings";
+const STORAGE_KEY = SCENE_SETTINGS_KEY;
 
 // Which setting is each scene's variant (SceneSetting.variant), registered
 // by scene.ts's registerScene so the scoped reads below can find it without
@@ -399,12 +410,16 @@ function createDeviceDial(storageKey: string, min: number, max: number, defaultV
   };
 }
 
-const masterDial = createDeviceDial("vibe.sceneMaster", SCENE_MASTER_MIN, SCENE_MASTER_MAX, SCENE_MASTER_DEFAULT);
+/** Storage keys of the two device-wide dials — exported for src/net/outputGlide.ts. */
+export const SCENE_MASTER_KEY = "vibe.sceneMaster";
+export const SCENE_EXPANSION_KEY = "vibe.sceneExpansion";
+
+const masterDial = createDeviceDial(SCENE_MASTER_KEY, SCENE_MASTER_MIN, SCENE_MASTER_MAX, SCENE_MASTER_DEFAULT);
 export const getSceneMaster = masterDial.get;
 export const setSceneMaster = masterDial.set;
 
 const expansionDial = createDeviceDial(
-  "vibe.sceneExpansion",
+  SCENE_EXPANSION_KEY,
   SCENE_EXPANSION_MIN,
   SCENE_EXPANSION_MAX,
   SCENE_EXPANSION_DEFAULT,

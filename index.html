@@ -277,30 +277,143 @@
         color: rgba(255, 255, 255, 0.8);
         white-space: nowrap;
       }
-      /* Pop-out output (src/ui/outputControls.ts): the state chip reads as
-       * plain text like #sceneVersion; it and GO turn amber while the output
-       * differs from the preview — amber is controlsTheme.ts's BANDS_AMBER,
-       * kept in sync by hand like the other colours in this file. */
+      /* Pop-out output controls (src/ui/outputControls.ts), top centre and big:
+       * CUE orange, PLAY green. The state line under them reads as plain text.
+       * Fills: Cue on = solid orange; a key/click flashes its button
+       * (.pressed); a held Option charges PLAY left to right (.charging) and
+       * a glide in flight fills it again (.gliding), both through --charge.
+       * The bar fades with the rest of the chrome when idle, except while it
+       * has something to say (.attn: cue on, holding for Play, output apart,
+       * charging, gliding). */
+      #outBar {
+        position: fixed;
+        top: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 6;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        transition: opacity 0.4s;
+        pointer-events: none;
+      }
+      #outKeys {
+        display: flex;
+        gap: 14px;
+      }
+      .outKey {
+        --c: #3ddc84;
+        position: relative;
+        overflow: hidden;
+        display: none;
+        pointer-events: auto;
+        min-width: 176px;
+        height: 62px;
+        padding: 0 26px;
+        border-radius: 12px;
+        border: 2px solid var(--c);
+        background: rgba(8, 11, 10, 0.55);
+        -webkit-backdrop-filter: blur(18px) saturate(0.6) brightness(0.5);
+        backdrop-filter: blur(18px) saturate(0.6) brightness(0.5);
+        color: var(--c);
+        font-family: "Share Tech Mono", ui-monospace, monospace;
+        text-align: center;
+        cursor: pointer;
+        transition: background 0.12s, color 0.12s, box-shadow 0.12s, transform 0.08s;
+      }
+      #cueBtn {
+        --c: #ff9f1c;
+      }
+      .outKey b {
+        position: relative;
+        display: block;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.2em;
+        line-height: 1.1;
+      }
+      .outKey small {
+        position: relative;
+        display: block;
+        margin-top: 4px;
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        opacity: 0.7;
+      }
+      .outKey::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: var(--c);
+        opacity: 0;
+        transform-origin: left center;
+        transform: scaleX(var(--charge, 0));
+        transition: opacity 0.12s;
+      }
+      .outKey:hover {
+        box-shadow: 0 0 14px var(--c);
+      }
+      #cueBtn[aria-pressed="true"] {
+        background: var(--c);
+        color: #140c00;
+        box-shadow: 0 0 22px var(--c);
+      }
+      .outKey.pressed {
+        background: var(--c);
+        color: #06130b;
+        box-shadow: 0 0 28px var(--c);
+        transform: scale(0.96);
+      }
+      .outKey.charging::before,
+      .outKey.gliding::before {
+        opacity: 0.9;
+      }
+      .outKey.charging,
+      .outKey.gliding {
+        color: #fff;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+      }
+      #goBtn.differs:not(.charging):not(.gliding) {
+        animation: outPulse 1.4s ease-in-out infinite;
+      }
+      @keyframes outPulse {
+        50% {
+          box-shadow: 0 0 20px var(--c);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #goBtn.differs:not(.charging):not(.gliding) {
+          animation: none;
+        }
+      }
       #outState {
         display: none;
-        margin-left: 4px;
-        font: 400 11px/36px "Share Tech Mono", ui-monospace, monospace;
-        letter-spacing: 0.1em;
-        color: rgba(255, 255, 255, 0.45);
+        font: 400 12px/1.2 "Share Tech Mono", ui-monospace, monospace;
+        letter-spacing: 0.14em;
+        color: rgba(255, 255, 255, 0.55);
         white-space: nowrap;
-        transition: opacity 0.4s;
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
       }
       #outState.differs {
-        color: #f9b96c;
+        color: #ff9f1c;
       }
-      #goBtn.differs {
-        border-color: #f9b96c;
-        color: #f9b96c;
+      #outState.charging {
+        color: #3ddc84;
       }
-      body.chrome-idle #outState {
+      body.chrome-idle #outBar:not(.attn) {
         opacity: 0;
         pointer-events: none;
+      }
+      @media (max-width: 520px) {
+        .outKey {
+          min-width: 120px;
+          height: 52px;
+          padding: 0 12px;
+        }
+        .outKey b {
+          font-size: 18px;
+        }
       }
       #stopBtn::before {
         content: "";
@@ -523,10 +636,16 @@
       <button id="stopBtn" class="iconBtn" title="Stop listening and release the audio source">STOP MIC</button>
       <button id="panelBtn" class="iconBtn" title="Screens paired to this room">&#9638; ROOM</button>
       <button id="outBtn" class="iconBtn" aria-pressed="false">POP OUT</button>
-      <button id="cueBtn" class="iconBtn" aria-pressed="false" title="Hold the output while you tune; GO sends your changes" data-key="cue" data-keycap="K">CUE</button>
-      <button id="goBtn" class="iconBtn" title="Send this scene and its settings to the output" data-key="go" data-keycap="G">GO</button>
-      <span id="outState"></span>
       <span id="sceneVersion" tabindex="0"></span>
+    </div>
+    <!-- Pop-out output controls (src/ui/outputControls.ts), top centre: shown
+         only while an output window is open. -->
+    <div id="outBar">
+      <div id="outKeys">
+        <button id="cueBtn" class="outKey" aria-pressed="false" title="Hold the output while you tune — leaving Cue sends nothing; PLAY does (Space)" data-key="cue" data-keycap="Space"><b>CUE</b><small>SPACE</small></button>
+        <button id="goBtn" class="outKey" title="Send this scene and its settings to the output — tap Option to send at once, hold it to glide there (Option)" data-key="go" data-keycap="⌥"><b>PLAY</b><small>OPTION</small></button>
+      </div>
+      <span id="outState"></span>
     </div>
     <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false" data-key="fullscreen" data-keycap="F">&#9974;</button>
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)" data-key="panel" data-keycap="S">

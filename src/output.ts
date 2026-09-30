@@ -18,6 +18,7 @@ import { getHitShape } from "./audio/hitStrength.ts";
 import { applySensitivity } from "./audio/sensitivity.ts";
 import { pinEverything } from "./pinnedAssets.ts";
 import { createBroadcastTransport } from "./net/outputBridge.ts";
+import { createGlide, type Glide } from "./net/outputGlide.ts";
 import { createFrameInbox, type OutputPower, type OutputState, type ToMain, type ToOutput } from "./net/outputSync.ts";
 import { applySyncedStorage } from "./net/syncedStores.ts";
 
@@ -129,6 +130,29 @@ let lastRenderMs = 0;
 let lastRenderFpsMs = 0;
 let lastFps = 0;
 let blank = false;
+/** The look the output is showing right now (a glide's half-way step
+ *  included) — what the next glide starts from. */
+let current: OutputState | null = null;
+/** A smooth arrival in progress (net/outputGlide.ts). Any state message
+ *  without `glideMs` ends it by jumping straight to that look. */
+let glide: Glide | null = null;
+
+/** One step of a glide: stores and params only — scene, palette and quality
+ *  are exactly as they were until the glide lands through applyState(). */
+function stepGlide(nowMs: number): void {
+  if (!glide) return;
+  const { state, done } = glide.at(nowMs);
+  if (done) {
+    glide = null;
+    applyState(state);
+    return;
+  }
+  // `current` follows the half-way look too, so a second Play pressed
+  // mid-glide starts from where the picture is, not from where it left.
+  current = state;
+  applySyncedStorage(state.storage, outputStorage);
+  inbox.setParams(state.params);
+}
 
 /** Brings `quality` and the governor in line with the output's own choice.
  *  `quality` is mutated in place — the host's context and the governor hold
@@ -154,6 +178,7 @@ function applyQuality(): void {
 }
 
 function applyState(state: OutputState): void {
+  current = state;
   // Stores first, so a scene's init() and first render already see the
   // settings that go with it.
   applySyncedStorage(state.storage, outputStorage);
@@ -176,9 +201,22 @@ transport.onMessage((m) => {
   if (m.t === "state") {
     // Frames and states can arrive before the GL context is up (detectQuality
     // runs first); the main window re-sends on the next heartbeat.
-    if (host) applyState(m.state);
+    if (host) {
+      const started =
+        m.glideMs && current && scene ? createGlide(current, m.state, scene.settings ?? [], performance.now(), m.glideMs) : null;
+      if (started) glide = started;
+      else {
+        glide = null;
+        applyState(m.state);
+      }
+    }
   } else if (m.t === "frame") {
-    inbox.push(m.f, performance.now());
+    // While a glide runs it owns Sensitivity/Expansion/Smoothing: the
+    // frame's own copy (only sent while following) must not yank them.
+    if (glide && m.f.p) {
+      const { p: _held, ...rest } = m.f;
+      inbox.push(rest, performance.now());
+    } else inbox.push(m.f, performance.now());
   } else if (m.t === "power") {
     power = m.power;
     if (host) applyQuality();
@@ -228,6 +266,7 @@ async function main(): Promise<void> {
     const dtSec = Math.max(1e-4, (nowMs - lastRafMs) / 1000);
     lastRafMs = nowMs;
 
+    stepGlide(nowMs);
     const frame = inbox.take();
     if (!scene || !haveState || !frame || inbox.ageMs(nowMs) > STALE_MS) {
       if (!blank && sceneCtx) {

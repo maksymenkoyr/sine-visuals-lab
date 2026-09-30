@@ -463,6 +463,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.6,
     auto: { density: 0.3 },
+    glide: false,
   },
   {
     key: "cloudShape",
