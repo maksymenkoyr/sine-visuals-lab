@@ -185,6 +185,7 @@ import { noteKeyUse } from "./ui/keyHints.ts";
 import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
 import type { ToMain, ToOutput } from "./net/outputSync.ts";
 import { createOutputControls, type OutputControls } from "./ui/outputControls.ts";
+import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./ui/outputKeys.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
 import { pinEverything } from "./pinnedAssets.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
@@ -207,6 +208,7 @@ const outBtn = document.getElementById("outBtn") as HTMLButtonElement;
 const cueBtn = document.getElementById("cueBtn") as HTMLButtonElement;
 const goBtn = document.getElementById("goBtn") as HTMLButtonElement;
 const outStateEl = document.getElementById("outState") as HTMLSpanElement;
+const outBarEl = document.getElementById("outBar") as HTMLElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
@@ -507,6 +509,100 @@ function showHud(text: string, persist = false): void {
       hud.style.opacity = "0";
     }, 3000);
   }
+}
+
+function showCueHud(): void {
+  const s = outputBridge?.status();
+  showHud(
+    s?.cue
+      ? "Cue on: the output is held"
+      : s?.waiting
+        ? "Cue off: the output holds until you press Play"
+        : "Cue off: the output follows",
+  );
+}
+
+/** Space = Cue, Option = Play (tap sends at once, hold glides) — the why, and
+ *  what a glide touches, is src/ui/outputKeys.ts's header. Capture phase, so a
+ *  focused button or checkbox never also sees the Space; both are inert unless
+ *  an output window is open, leaving Space to the page as before. */
+function wireOutputKeys(controls: OutputControls): void {
+  const playKey = createPlayKey();
+  let chargeRaf = 0;
+  let spaceHeld = false;
+
+  function chargeTick(): void {
+    const ms = playKey.holdMs(performance.now());
+    if (ms === null) {
+      chargeRaf = 0;
+      controls.charge(null);
+      return;
+    }
+    // Inside the tap window nothing shows yet: a tap must not flicker a charge.
+    controls.charge(ms >= PLAY_TAP_MAX_MS ? ms : null);
+    chargeRaf = requestAnimationFrame(chargeTick);
+  }
+
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (
+        e.code === "Space" &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        inViz &&
+        !isTypingTarget(e.target) &&
+        controls.active()
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        spaceHeld = true;
+        if (e.repeat) return;
+        noteKeyUse("cue");
+        controls.toggleCue();
+        showCueHud();
+        return;
+      }
+      if (e.key === "Alt") {
+        if (e.repeat || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        if (!inViz || isTypingTarget(e.target) || !controls.active()) return;
+        playKey.down(performance.now());
+        if (!chargeRaf) chargeRaf = requestAnimationFrame(chargeTick);
+        return;
+      }
+      playKey.cancel(); // any other key while Option is down: a chord, not a Play
+    },
+    true,
+  );
+
+  window.addEventListener(
+    "keyup",
+    (e) => {
+      if (e.code === "Space" && spaceHeld) {
+        spaceHeld = false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      if (e.key !== "Alt") return;
+      const hold = playKey.up(performance.now());
+      if (hold === null || !controls.active()) return;
+      const glideMs = glideMsForHold(hold);
+      const result = controls.go(glideMs ?? undefined);
+      noteKeyUse("go");
+      if (result === "glide" && glideMs !== null) showHud(`Play: gliding over ${(glideMs / 1000).toFixed(1)} s`);
+      else if (glideMs !== null) showHud("Play: sent at once — a glide only runs within one scene");
+      else showHud("Play: sent to output");
+    },
+    true,
+  );
+
+  window.addEventListener("pointerdown", () => playKey.cancel(), true);
+  const drop = (): void => playKey.reset();
+  window.addEventListener("blur", drop);
+  document.addEventListener("visibilitychange", drop);
 }
 
 async function requestWakeLock(): Promise<void> {
@@ -1558,8 +1654,9 @@ async function boot(): Promise<void> {
     transport: createBroadcastTransport<ToOutput, ToMain>(),
     look: () => ({ scene: scene.id, palette: palette.id }),
   });
-  outputControls = createOutputControls(outputBridge, { popBtn: outBtn, cueBtn, goBtn, stateEl: outStateEl });
+  outputControls = createOutputControls(outputBridge, { popBtn: outBtn, cueBtn, goBtn, stateEl: outStateEl, barEl: outBarEl });
   outputControls.setVisible(inViz);
+  wireOutputKeys(outputControls);
 
   void requestWakeLock();
   document.addEventListener("visibilitychange", () => {
@@ -1600,17 +1697,17 @@ async function boot(): Promise<void> {
     // reaches these; only live in a viz, like S, and skipped while typing
     // somewhere, the same guard deviceMenu.ts's own hotkeys already use.
     if (inViz && !isTypingTarget(e.target)) {
-      // Output window: K holds it (Cue), G sends the preview (Go). Plain
-      // letters rather than Space/Enter, which also press whichever button
-      // has focus. No-ops unless an output window is open.
+      // Output window: K holds it (Cue), G plays (an instant send) — plain-
+      // letter twins of Space and Option, which wireOutputKeys below owns.
+      // No-ops unless an output window is open.
       if (e.code === "KeyG" && outputControls?.go()) {
         e.preventDefault();
         noteKeyUse("go");
-        showHud("Sent to output");
+        showHud("Play: sent to output");
       } else if (e.code === "KeyK" && outputControls?.toggleCue()) {
         e.preventDefault();
         noteKeyUse("cue");
-        showHud(outputBridge?.status().cue ? "Cue on: output is held" : "Cue off: output follows");
+        showCueHud();
       } else if (e.code === "KeyB") {
         e.preventDefault();
         noteKeyUse("beat-one");

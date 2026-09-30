@@ -175,6 +175,7 @@ const SETTINGS: SceneSetting[] = [
     max: 3,
     step: 0.25,
     default: 2,
+    glide: false,
   },
   {
     key: "circle",

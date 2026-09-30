@@ -58,6 +58,9 @@ export function createBroadcastTransport<Out, In>(name = OUTPUT_CHANNEL): Transp
 export interface OutputStatus {
   open: boolean;
   cue: boolean;
+  /** Cue was turned off with the output holding something else: nothing
+   *  crosses until Go (outputSync.ts's createCueController). */
+  waiting: boolean;
   /** Output shows something other than the preview. */
   differs: boolean;
 }
@@ -68,7 +71,10 @@ export interface OutputBridge {
   status(): OutputStatus;
   onStatus(cb: (s: OutputStatus) => void): void;
   setCue(on: boolean): void;
-  go(): void;
+  /** Send the preview across. With `glideMs` > 0 the output arrives over that
+   *  long — but only within one scene (never across a scene change, which goes
+   *  instantly). Returns whether a glide was actually asked for. */
+  go(glideMs?: number): boolean;
   update(nowMs: number): void;
   pushFrame(frame: FeatureFrame, extras: { beatRatio: number | null; wavePeak: number | null }, params: OutputParams): void;
 }
@@ -87,8 +93,9 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
   const storage = opts.storage ?? localStorage;
   const presence = createOutputPresence();
   let outputOpen = false;
-  const cue: CueController = createCueController((state) => {
-    if (outputOpen) transport.post({ t: "state", state });
+  const cue: CueController = createCueController((state, glideMs) => {
+    if (!outputOpen) return;
+    transport.post(glideMs && glideMs > 0 ? { t: "state", state, glideMs } : { t: "state", state });
   });
   const listeners: Array<(s: OutputStatus) => void> = [];
   let win: Window | null = null;
@@ -124,12 +131,12 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
   });
 
   function status(): OutputStatus {
-    return { open: outputOpen, cue: cue.cueOn(), differs: outputOpen && cue.differs() };
+    return { open: outputOpen, cue: cue.cueOn(), waiting: outputOpen && cue.waitingForGo(), differs: outputOpen && cue.differs() };
   }
 
   function emitIfChanged(): void {
     const s = status();
-    const key = `${s.open}|${s.cue}|${s.differs}`;
+    const key = `${s.open}|${s.cue}|${s.waiting}|${s.differs}`;
     if (key === lastStatusKey) return;
     lastStatusKey = key;
     for (const cb of listeners) cb(s);
@@ -152,10 +159,14 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
       cue.setCue(on);
       emitIfChanged();
     },
-    go() {
+    go(glideMs) {
       preview();
-      cue.go();
+      // A glide never crosses a scene change: that goes instantly.
+      const held = cue.held();
+      const glide = !!glideMs && glideMs > 0 && held !== null && held.scene === opts.look().scene;
+      cue.go(glide ? glideMs : undefined);
       emitIfChanged();
+      return glide;
     },
     update(nowMs) {
       if (win && win.closed) closed();
@@ -182,7 +193,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
           onsetPhase: frame.onsetPhase,
           beatRatio: extras.beatRatio,
           wavePeak: extras.wavePeak,
-          ...(cue.cueOn() ? {} : { p: params }),
+          ...(cue.following() ? { p: params } : {}),
         },
       });
     },
