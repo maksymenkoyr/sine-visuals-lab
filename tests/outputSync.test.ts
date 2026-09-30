@@ -66,14 +66,61 @@ describe("createCueController", () => {
     expect(c.cueOn()).toBe(true); // Go does not turn Cue off
   });
 
-  it("turning Cue off catches the output up to the preview", () => {
+  it("turning Cue off sends nothing: the output waits for Go, then mirrors again", () => {
     const sent: string[] = [];
     const c = createCueController((s) => sent.push(s.scene));
     c.preview(state("a"));
     c.setCue(true);
     c.preview(state("b"));
     c.setCue(false);
+    expect(sent).toEqual(["a"]);
+    expect(c.differs()).toBe(true);
+    expect(c.waitingForGo()).toBe(true);
+    expect(c.following()).toBe(false);
+    c.preview(state("c")); // still tuning while it waits: still nothing crosses
+    expect(sent).toEqual(["a"]);
+    c.go();
+    expect(sent).toEqual(["a", "c"]);
+    expect(c.waitingForGo()).toBe(false);
+    expect(c.following()).toBe(true);
+    c.preview(state("d")); // mirroring has resumed
+    expect(sent).toEqual(["a", "c", "d"]);
+  });
+
+  it("turning Cue off with nothing apart just resumes mirroring", () => {
+    const sent: string[] = [];
+    const c = createCueController((s) => sent.push(s.scene));
+    c.preview(state("a"));
+    c.setCue(true);
+    c.setCue(false);
+    expect(c.waitingForGo()).toBe(false);
+    c.preview(state("b"));
     expect(sent).toEqual(["a", "b"]);
+  });
+
+  it("a Go can ask for a glide length, which travels with the send", () => {
+    const sent: Array<[string, number | undefined]> = [];
+    const c = createCueController((s, g) => sent.push([s.scene, g]));
+    c.preview(state("a"));
+    c.setCue(true);
+    c.preview(state("a", { k: "v" }));
+    c.go(6000);
+    c.go();
+    expect(sent).toEqual([
+      ["a", undefined],
+      ["a", 6000],
+      ["a", undefined],
+    ]);
+  });
+
+  it("an output that reconnects while waiting for Go gets the preview and stops waiting", () => {
+    const c = createCueController(() => undefined);
+    c.preview(state("a"));
+    c.setCue(true);
+    c.preview(state("b"));
+    c.setCue(false);
+    c.outputOpened();
+    expect(c.waitingForGo()).toBe(false);
     expect(c.differs()).toBe(false);
   });
 

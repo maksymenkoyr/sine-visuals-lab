@@ -66,6 +66,7 @@ const SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 1,
     auto: { density: 0.3 },
+    glide: false,
   },
   {
     key: "spread",

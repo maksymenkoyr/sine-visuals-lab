@@ -80,8 +80,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { key: "B", id: "beat-one", label: "The 1", hint: "This beat is the 1 (⇧ clears ×2/÷2 and nudge)" },
   { key: "[ ]", id: "tempo-x", label: "Tempo ÷2 ×2", hint: "Halve / double the beat" },
   { key: ", .", id: "beat-nudge", label: "Nudge", hint: "Beats 10 ms earlier / later" },
-  { key: "K", id: "cue", label: "Cue", hint: "Hold the output window while you tune" },
-  { key: "G", id: "go", label: "Go", hint: "Send this look to the output window" },
+  { key: "Space", id: "cue", label: "Cue", hint: "Hold the output window while you tune — leaving Cue sends nothing (K does the same)" },
+  { key: "⌥ Option", id: "go", label: "Play", hint: "Send this look to the output window: tap = at once, hold = glide there over twice as long (G sends at once)" },
 ];
 
 function shortcutFor(id: string): Shortcut | undefined {

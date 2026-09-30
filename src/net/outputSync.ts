@@ -22,15 +22,19 @@ import { VOLATILE_PREFIXES } from "./syncedStores.ts";
  *    future, can be forgotten; Quality, master dials, Looks, drives, gate
  *    marks all ride along). The output applies it into a private in-memory
  *    storage (net/outputStorage.ts), never the real localStorage the main
- *    window owns. Sent when the look changes (mirror mode), on Go, and when
- *    an output (re)connects.
+ *    window owns. Sent when the look changes (mirror mode), on Go (Play in the
+ *    UI), and when an output (re)connects. A Go may carry `glideMs`: the
+ *    output then arrives over that long instead of switching (outputGlide.ts).
+ *    Leaving Cue sends nothing: with the output holding something other than
+ *    the preview, it keeps it until Go, and only then mirroring resumes
+ *    (createCueController's `waiting`).
  *  - `frame`: one per main render tick — the band-gained feature frame (the
  *    same one the main scene sees before Sensitivity/Expansion), plus the
  *    live-only extras the output's anim clock can't recompute (the local
  *    extractor's broadband ratio, the waveform peak). `p` carries the
  *    main window's resolved Sensitivity/Expansion/Smoothing for its scene;
- *    it is left off while Cue holds the output, so the held look keeps the
- *    numbers it was sent with.
+ *    it is left off unless the output is mirroring live (Cue off, nothing
+ *    waiting for Go), so a held look keeps the numbers it was sent with.
  *  - `hello`/`bye` from the output: a once-a-second heartbeat (so the main
  *    window's button reflects a closed window) and a goodbye on unload.
  */
@@ -63,7 +67,10 @@ export interface WireFrame extends FeatureFrame {
   p?: OutputParams;
 }
 
-export type ToOutput = { t: "state"; state: OutputState } | { t: "frame"; f: WireFrame };
+/** `glideMs` (state only): the output arrives at this look over that long
+ *  instead of switching at once — src/net/outputGlide.ts says what moves
+ *  smoothly and what waits. Absent is the plain instant send. */
+export type ToOutput = { t: "state"; state: OutputState; glideMs?: number } | { t: "frame"; f: WireFrame };
 export type ToMain = { t: "hello"; haveState: boolean } | { t: "bye" };
 
 /** Identity of what the output is showing, for "does the output match the
@@ -83,8 +90,16 @@ export interface CueController {
   preview(state: OutputState): void;
   setCue(on: boolean): void;
   cueOn(): boolean;
-  /** Send the preview to the output now, cue or not. */
-  go(): void;
+  /** True while the output is waiting for Go: Cue was turned off with the
+   *  preview and output apart, so nothing crosses until Go is pressed. */
+  waitingForGo(): boolean;
+  /** True while the output mirrors the preview live (Cue off, nothing
+   *  waiting) — the only time the main window's resolved Sensitivity/
+   *  Expansion/Smoothing ride along on frames. */
+  following(): boolean;
+  /** Send the preview to the output now, cue or not; `glideMs` asks the
+   *  output to arrive over that long (see ToOutput). */
+  go(glideMs?: number): void;
   /** An output window just appeared (or re-announced itself after the main
    *  window reloaded): it gets whatever it should be showing now. */
   outputOpened(): void;
@@ -96,40 +111,50 @@ export interface CueController {
 }
 
 /** Cue / Go. Cue off: the output mirrors the preview. Cue on: the preview
- *  moves alone, the output keeps what it had until Go. */
-export function createCueController(send: (state: OutputState) => void): CueController {
+ *  moves alone, the output keeps what it had until Go. Turning Cue off while
+ *  the two differ does NOT send the preview across — the output keeps what it
+ *  had until Go is pressed (then mirroring resumes), so leaving Cue can never
+ *  change what the audience sees. */
+export function createCueController(send: (state: OutputState, glideMs?: number) => void): CueController {
   let cue = false;
+  let waiting = false;
   let previewState: OutputState | null = null;
   let sent: OutputState | null = null;
   let sentKey = "";
 
-  function push(state: OutputState): void {
+  function push(state: OutputState, glideMs?: number): void {
     sent = state;
     sentKey = stateKey(state);
-    send(state);
+    send(state, glideMs);
   }
 
   return {
     preview(state) {
       previewState = state;
-      if (!cue && (sent === null || stateKey(state) !== sentKey)) push(state);
+      if (!cue && !waiting && (sent === null || stateKey(state) !== sentKey)) push(state);
     },
     setCue(on) {
       cue = on;
-      if (!on && previewState) push(previewState);
+      // Leaving Cue with the output holding something else: wait for Go.
+      waiting = !on && previewState !== null && sent !== null && stateKey(previewState) !== sentKey;
     },
     cueOn: () => cue,
-    go() {
-      if (previewState) push(previewState);
+    waitingForGo: () => waiting,
+    following: () => !cue && !waiting,
+    go(glideMs) {
+      waiting = false;
+      if (previewState) push(previewState, glideMs);
     },
     outputOpened() {
       sent = null;
       sentKey = "";
+      waiting = false;
       if (previewState) push(previewState);
     },
     outputClosed() {
       sent = null;
       sentKey = "";
+      waiting = false;
     },
     differs() {
       return previewState !== null && sent !== null && stateKey(previewState) !== sentKey;

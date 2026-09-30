@@ -96,9 +96,11 @@ app.ts` drives `AnimFrame` straight from its own local `FeatureFrame`s.
 
 The same-machine cousin of the TV: `output.html` → `src/output.ts`, a chrome-free
 second window fed by the main window over a BroadcastChannel instead of the room
-socket, with Cue/Go to hold or send what it shows. Everything about it — why
+socket, with Cue/Play to hold or send what it shows. Everything about it — why
 `tv.ts` itself couldn't be reused, the message layer, what crosses — is the header
 of `src/net/outputSync.ts`; `src/net/outputBridge.ts` is the main window's end.
+The keys and the hold-to-glide gesture are the header of `src/ui/outputKeys.ts`;
+what a glide may and may not move smoothly is the header of `src/net/outputGlide.ts`.
 
 ## Where the quality/perf ceiling comes from
 
