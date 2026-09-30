@@ -565,18 +565,7 @@ function showHud(text: string, persist = false): void {
   }
 }
 
-function showCueHud(): void {
-  const s = outputBridge?.status();
-  showHud(
-    s?.cue
-      ? "Cue on: the output is held"
-      : s?.waiting
-        ? "Cue off: the output holds until you press Play"
-        : "Cue off: the output follows",
-  );
-}
-
-/** Space = Cue, Option = Play (tap sends at once, hold glides) — the why, and
+/** Space = Cue (held), Option = Play (tap sends at once, hold glides) — the why, and
  *  what a glide touches, is src/ui/outputKeys.ts's header. Capture phase, so a
  *  focused button or checkbox never also sees the Space; both are inert unless
  *  an output window is open, leaving Space to the page as before. */
@@ -615,8 +604,7 @@ function wireOutputKeys(controls: OutputControls): void {
         spaceHeld = true;
         if (e.repeat) return;
         noteKeyUse("cue");
-        controls.toggleCue();
-        showCueHud();
+        controls.holdCue(true);
         return;
       }
       if (e.key === "Alt") {
@@ -636,10 +624,12 @@ function wireOutputKeys(controls: OutputControls): void {
     (e) => {
       if (e.code === "Space" && spaceHeld) {
         spaceHeld = false;
+        controls.holdCue(false);
         e.preventDefault();
         e.stopImmediatePropagation();
         return;
       }
+      if (e.code === "KeyK") controls.holdCue(false);
       if (e.key !== "Alt") return;
       const hold = playKey.up(performance.now());
       if (hold === null || !controls.active()) return;
@@ -654,7 +644,11 @@ function wireOutputKeys(controls: OutputControls): void {
   );
 
   window.addEventListener("pointerdown", () => playKey.cancel(), true);
-  const drop = (): void => playKey.reset();
+  const drop = (): void => {
+    playKey.reset();
+    spaceHeld = false;
+    controls.holdCue(false); // the key-up will never arrive: the master goes back
+  };
   window.addEventListener("blur", drop);
   document.addEventListener("visibilitychange", drop);
 }
@@ -1786,17 +1780,19 @@ async function boot(): Promise<void> {
     // reaches these; only live in a viz, like S, and skipped while typing
     // somewhere, the same guard deviceMenu.ts's own hotkeys already use.
     if (inViz && !isTypingTarget(e.target)) {
-      // Output window: K holds it (Cue), G plays (an instant send) — plain-
+      // Output window: K is Cue (hold it), G plays (an instant send) — plain-
       // letter twins of Space and Option, which wireOutputKeys below owns.
       // No-ops unless an output window is open.
       if (e.code === "KeyG" && outputControls?.go()) {
         e.preventDefault();
         noteKeyUse("go");
         showHud("Play: sent to output");
-      } else if (e.code === "KeyK" && outputControls?.toggleCue()) {
-        e.preventDefault();
-        noteKeyUse("cue");
-        showCueHud();
+      } else if (e.code === "KeyK") {
+        // Held like Space: wireOutputKeys's keyup lets go.
+        if (outputControls?.holdCue(true)) {
+          e.preventDefault();
+          if (!e.repeat) noteKeyUse("cue");
+        }
       } else if (e.code === "KeyB") {
         e.preventDefault();
         noteKeyUse("beat-one");

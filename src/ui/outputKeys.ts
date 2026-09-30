@@ -4,10 +4,12 @@ import { GLIDE_MAX_MS, GLIDE_MIN_MS } from "../net/outputGlide.ts";
  * The keyboard gestures of the pop-out output (src/ui/outputControls.ts is
  * the on-screen half, src/app.ts wires both):
  *
- *  - Space is Cue, toggled. app.ts takes it in the capture phase while an
- *    output window is open, so it can't also press whichever button or
- *    checkbox has focus. Cmd+Space / Ctrl+Space are macOS's own and never
- *    reach the page; any modifier held makes it not ours.
+ *  - Space is Cue, held like a DJ mixer's: the preview is on the output only
+ *    while the key is down, and releasing it (or losing window focus) puts
+ *    the output back (net/outputSync.ts's createCueController). app.ts takes
+ *    it in the capture phase while an output window is open, so it can't also
+ *    press whichever button or checkbox has focus. Cmd+Space / Ctrl+Space are
+ *    macOS's own and never reach the page; any modifier held makes it not ours.
  *  - Option (Alt) is Play, on a bare press only: a quick tap sends the look
  *    across at once, a longer hold charges and, on release, glides there over
  *    GLIDE_PER_HOLD times the hold (net/outputGlide.ts says what moves

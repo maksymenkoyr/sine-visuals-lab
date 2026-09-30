@@ -7,16 +7,16 @@ import { glideMsForHold } from "./outputKeys.ts";
  * big, CUE orange and PLAY green; the keys are src/ui/outputKeys.ts).
  *
  * POP OUT opens (or focuses) the output window. Once one is alive the bar
- * appears: CUE holds the output while the main window keeps tuning, PLAY
- * sends the main window's look across (a longer hold glides there — see
- * net/outputGlide.ts), and the state line says whether the output matches the
- * preview. Leaving CUE never sends anything by itself: the output keeps what
- * it had until PLAY (net/outputSync.ts's createCueController), and the line
- * reads "HOLDING — PRESS PLAY" meanwhile. Hidden outside a scene, like the
- * other chrome.
+ * appears, and works like a DJ mixer's Cue and Play: the output window is the
+ * master and keeps its look however the main window is tuned. HOLD CUE to put
+ * the main window's look on the master — only while it's held; let go and the
+ * master goes back to what it had. PLAY makes the main window's look the
+ * master's for good (a longer hold glides there — see net/outputGlide.ts).
+ * The state line says which it is (net/outputSync.ts's createCueController).
+ * Hidden outside a scene, like the other chrome.
  *
- * Press feedback lives here too: every key or click flashes its button
- * (`pressed`), a held Option fills PLAY while it charges (`charging`, the
+ * Press feedback lives here too: a Play key or click flashes PLAY (`pressed`),
+ * CUE stays lit while it's held, a held Option fills PLAY while it charges (`charging`, the
  * `--charge` fill) and a glide in flight fills it back up over its length.
  */
 
@@ -41,7 +41,9 @@ export interface OutputControls {
   /** Keyboard paths — no-ops (null/false) unless an output window is open.
    *  `glideMs` > 0 asks for a smooth arrival; a scene change ignores it. */
   go(glideMs?: number): PlayResult;
-  toggleCue(): boolean;
+  /** Cue down (true) or up (false): the preview is on the output only while
+   *  it's down. Idempotent; false when no output is open (an up still lets go). */
+  holdCue(on: boolean): boolean;
   /** While Option is held: how long, or null when it isn't (clears the charge). */
   charge(holdMs: number | null): void;
 }
@@ -78,9 +80,8 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
       return g === null ? "RELEASE TO SEND" : `RELEASE TO GLIDE ${fmtSeconds(g)}`;
     }
     if (gliding()) return `GLIDING — ${fmtSeconds(Math.max(0, glideEnd - performance.now()))} LEFT`;
-    if (s.cue) return s.differs ? "CUE — OUTPUT HELD" : "CUE — OUTPUT HELD, NO CHANGES";
-    if (s.waiting) return "HOLDING — PRESS PLAY";
-    return s.differs ? "OUT ≠ PREVIEW" : "OUT = PREVIEW";
+    if (s.cue) return "CUE — PREVIEW ON OUTPUT";
+    return s.differs ? "OUT ≠ PREVIEW — PLAY TO SEND" : "OUT = PREVIEW";
   }
 
   function render(s: OutputStatus): void {
@@ -94,12 +95,12 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     goBtn.style.display = show ? "block" : "none";
     stateEl.style.display = show ? "block" : "none";
     cueBtn.setAttribute("aria-pressed", String(s.cue));
-    goBtn.classList.toggle("differs", s.differs || s.waiting);
+    goBtn.classList.toggle("differs", s.differs);
     goBtn.classList.toggle("charging", holdMs !== null);
     goBtn.classList.toggle("gliding", gliding());
-    stateEl.classList.toggle("differs", s.differs || s.waiting);
+    stateEl.classList.toggle("differs", s.differs);
     stateEl.classList.toggle("charging", holdMs !== null || gliding());
-    barEl.classList.toggle("attn", show && (s.cue || s.waiting || s.differs || holdMs !== null || gliding()));
+    barEl.classList.toggle("attn", show && (s.cue || s.differs || holdMs !== null || gliding()));
     stateEl.textContent = stateText(s);
   }
 
@@ -136,15 +137,25 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     return glided ? "glide" : "sent";
   }
 
-  function toggleCue(): boolean {
+  function holdCue(on: boolean): boolean {
+    if (!on) {
+      if (bridge.status().cue) bridge.setCue(false);
+      return false;
+    }
     if (!active()) return false;
-    flash(cueBtn);
-    bridge.setCue(!bridge.status().cue);
+    if (!bridge.status().cue) bridge.setCue(true);
     return true;
   }
 
   popBtn.addEventListener("click", () => bridge.open());
-  cueBtn.addEventListener("click", () => toggleCue());
+  // Held, not toggled: pointer capture keeps the release coming even if the
+  // pointer slides off the button while it's down.
+  cueBtn.addEventListener("pointerdown", (e) => {
+    cueBtn.setPointerCapture(e.pointerId);
+    holdCue(true);
+  });
+  cueBtn.addEventListener("pointerup", () => holdCue(false));
+  cueBtn.addEventListener("pointercancel", () => holdCue(false));
   goBtn.addEventListener("click", () => go());
   bridge.onStatus(render);
   render(status);
@@ -156,7 +167,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     },
     active,
     go,
-    toggleCue,
+    holdCue,
     charge(ms) {
       holdMs = ms;
       // A glide in flight owns the fill; only a hold that's really charging takes it over.

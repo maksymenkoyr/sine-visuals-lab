@@ -59,10 +59,8 @@ export function createBroadcastTransport<Out, In>(name = OUTPUT_CHANNEL): Transp
 
 export interface OutputStatus {
   open: boolean;
+  /** Cue is held: the output shows the preview (outputSync.ts's createCueController). */
   cue: boolean;
-  /** Cue was turned off with the output holding something else: nothing
-   *  crosses until Go (outputSync.ts's createCueController). */
-  waiting: boolean;
   /** Output shows something other than the preview. */
   differs: boolean;
 }
@@ -141,7 +139,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
     presence.seen(performance.now());
     outputOpen = true;
     // A window that lost its state (fresh, or reloaded) is sent the current
-    // one; one that still has it keeps whatever Cue was holding for it.
+    // one; one that still has it keeps its program.
     if (!m.haveState || cue.held() === null) {
       preview();
       cue.outputOpened();
@@ -150,12 +148,12 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
   });
 
   function status(): OutputStatus {
-    return { open: outputOpen, cue: cue.cueOn(), waiting: outputOpen && cue.waitingForGo(), differs: outputOpen && cue.differs() };
+    return { open: outputOpen, cue: outputOpen && cue.cueOn(), differs: outputOpen && cue.differs() };
   }
 
   function emitIfChanged(): void {
     const s = status();
-    const key = `${s.open}|${s.cue}|${s.waiting}|${s.differs}`;
+    const key = `${s.open}|${s.cue}|${s.differs}`;
     if (key === lastStatusKey) return;
     lastStatusKey = key;
     for (const cb of listeners) cb(s);
@@ -182,7 +180,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
       preview();
       // A glide never crosses a scene change: that goes instantly.
       const held = cue.held();
-      const glide = !!glideMs && glideMs > 0 && held !== null && held.scene === opts.look().scene;
+      const glide = !!glideMs && glideMs > 0 && !cue.cueOn() && held !== null && held.scene === opts.look().scene;
       cue.go(glide ? glideMs : undefined);
       emitIfChanged();
       return glide;
