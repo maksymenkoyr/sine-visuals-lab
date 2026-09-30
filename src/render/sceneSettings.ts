@@ -1,4 +1,5 @@
 import type { SignalId, SignalLink } from "./signals.ts";
+import { EXPANSION_DEFAULT, EXPANSION_MAX, EXPANSION_MIN } from "../audio/sensitivity.ts";
 
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
@@ -7,8 +8,9 @@ import type { SignalId, SignalLink } from "./signals.ts";
  * even where localStorage is unavailable (node test env, Safari private
  * mode) — only cross-reload persistence depends on it.
  *
- * Also home to the one device-wide master multiplier (getSceneMaster below):
- * a single dial over every numeric scene param, stored as a scalar rather
+ * Also home to the device-wide master (getSceneMaster and getSceneExpansion
+ * below): the Master card's Scale and Expansion dials over every numeric
+ * scene param, each stored as a scalar rather
  * than per scene because it describes this room's taste, not one scene's —
  * the same device-local class of preference as audio/sensitivity.ts's gain
  * stages, so like them it stays out of Looks/share codes and off the
@@ -340,39 +342,61 @@ export const SCENE_MASTER_MIN = 0;
 export const SCENE_MASTER_MAX = 2;
 export const SCENE_MASTER_DEFAULT = 1;
 
-const MASTER_STORAGE_KEY = "vibe.sceneMaster";
+// The master's second dial: Expansion — the Input card's own Expansion curve
+// (audio/sensitivity.ts's shapeExpansion, same range) bent over each numeric
+// scene param's position along its slider, after Scale (autoTune.ts's
+// resolveSceneSetting). A param sitting past the middle of its track is
+// pushed further toward max, one short of the middle further toward min —
+// the gap between a scene's low and high params widens, as the mic's widens
+// the gap between quiet and loud. 1 is identity.
+export const SCENE_EXPANSION_MIN = EXPANSION_MIN;
+export const SCENE_EXPANSION_MAX = EXPANSION_MAX;
+export const SCENE_EXPANSION_DEFAULT = EXPANSION_DEFAULT;
 
-function clampMaster(value: number): number {
-  if (!Number.isFinite(value)) return SCENE_MASTER_DEFAULT;
-  return Math.min(SCENE_MASTER_MAX, Math.max(SCENE_MASTER_MIN, value));
-}
-
-function loadMaster(): number {
-  try {
-    const raw = localStorage.getItem(MASTER_STORAGE_KEY);
-    // Number(null) is 0, not NaN — an absent key must mean the default
-    // (identity), not a master that blanks every param.
-    if (raw === null) return SCENE_MASTER_DEFAULT;
-    return clampMaster(Number(raw));
-  } catch {
-    return SCENE_MASTER_DEFAULT;
+// One device-wide dial: in-memory first, seeded once from localStorage —
+// same cache-over-storage shape as the per-scene store above, for the same
+// reasons (node test env, Safari private mode).
+function createDeviceDial(storageKey: string, min: number, max: number, defaultValue: number) {
+  function clamp(value: number): number {
+    if (!Number.isFinite(value)) return defaultValue;
+    return Math.min(max, Math.max(min, value));
   }
-}
 
-// In-memory first, seeded once from localStorage — same cache-over-storage
-// shape as the per-scene store above, for the same reasons (node test env,
-// Safari private mode).
-let master = loadMaster();
-
-export function getSceneMaster(): number {
-  return master;
-}
-
-export function setSceneMaster(value: number): void {
-  master = clampMaster(value);
-  try {
-    localStorage.setItem(MASTER_STORAGE_KEY, String(master));
-  } catch {
-    // Not fatal — the master just won't persist across reloads.
+  function load(): number {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      // Number(null) is 0, not NaN — an absent key must mean the default
+      // (identity), not a master that blanks every param.
+      if (raw === null) return defaultValue;
+      return clamp(Number(raw));
+    } catch {
+      return defaultValue;
+    }
   }
+
+  let value = load();
+  return {
+    get: (): number => value,
+    set(next: number): void {
+      value = clamp(next);
+      try {
+        localStorage.setItem(storageKey, String(value));
+      } catch {
+        // Not fatal — the dial just won't persist across reloads.
+      }
+    },
+  };
 }
+
+const masterDial = createDeviceDial("vibe.sceneMaster", SCENE_MASTER_MIN, SCENE_MASTER_MAX, SCENE_MASTER_DEFAULT);
+export const getSceneMaster = masterDial.get;
+export const setSceneMaster = masterDial.set;
+
+const expansionDial = createDeviceDial(
+  "vibe.sceneExpansion",
+  SCENE_EXPANSION_MIN,
+  SCENE_EXPANSION_MAX,
+  SCENE_EXPANSION_DEFAULT,
+);
+export const getSceneExpansion = expansionDial.get;
+export const setSceneExpansion = expansionDial.set;

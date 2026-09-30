@@ -68,9 +68,10 @@ check — synthetic audio is for comparing runs, not for judging how a scene fee
 4. **Numeric probe.** `src/tuning/probe.ts` builds a compact per-frame snapshot:
    each setting's `base` (plain default), `resolved` (what actually reached the
    shader), and `mode` (`ProbeSettingValue["mode"]` — override/pin/auto/manual),
-   plus the device-wide scene master (`getSceneMaster`) every `resolved` has
-   already been multiplied by — leave it at its identity default while tuning,
-   or read it off the snapshot's header line before trusting a delta.
+   plus the device-wide scene master's two dials (`getSceneMaster`,
+   `getSceneExpansion`) every `resolved` has already passed through — leave
+   both at their identity defaults while tuning, or read them off the
+   snapshot before trusting a delta.
    Its own stated principle, worth keeping: *answer with numbers, not pixels* —
    read the probe before trusting your eyes on whether a change landed. Drive it
    headlessly with `tools/tune-probe.mjs`.

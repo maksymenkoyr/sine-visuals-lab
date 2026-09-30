@@ -90,9 +90,11 @@ import {
 import { createSyntheticFeed, type SyntheticFeed } from "./audio/synthetic.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import {
+  getSceneExpansion,
   getSceneMaster,
   getSceneSetting,
   resetSceneSettings,
+  setSceneExpansion,
   setSceneMaster,
   setSceneSetting,
   settingDefault,
@@ -1245,6 +1247,8 @@ function wireDeviceMenu(): void {
       ),
     getSceneMaster: () => getSceneMaster(),
     onSceneMasterChange: (value) => setSceneMaster(value),
+    getSceneExpansion: () => getSceneExpansion(),
+    onSceneExpansionChange: (value) => setSceneExpansion(value),
     // The Master card's Picture block — null whenever the meter's gone stale
     // (the panel was just opened, so nothing has pushed a reading into it
     // yet, or the sampling loop is gapped for longer than a full reset — see

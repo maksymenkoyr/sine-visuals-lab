@@ -13,6 +13,9 @@ import {
   shapeLevel,
 } from "../audio/sensitivity.ts";
 import {
+  SCENE_EXPANSION_DEFAULT,
+  SCENE_EXPANSION_MAX,
+  SCENE_EXPANSION_MIN,
   SCENE_MASTER_DEFAULT,
   SCENE_MASTER_MAX,
   SCENE_MASTER_MIN,
@@ -597,6 +600,12 @@ export interface DeviceMenuDeps {
    *  nor sent to the TV. */
   getSceneMaster: () => number;
   onSceneMasterChange: (value: number) => void;
+  /** The master's Expansion dial (sceneSettings.ts's getSceneExpansion) —
+   *  the Input card's Expansion curve over every numeric scene param's
+   *  slider position, applied after Scale in resolveSceneSetting. Device-
+   *  local like Scale. */
+  getSceneExpansion: () => number;
+  onSceneExpansionChange: (value: number) => void;
   /** This tick's picture reading for the Master card's Picture block — null
    *  whenever the meter has gone stale (the panel was just opened, or
    *  nothing has forced sampling with the panel closed) rather than a frozen
@@ -4414,8 +4423,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   autoMasterInner.append(autoMasterLabel, autoMasterSub);
   autoMasterBtn.appendChild(autoMasterInner);
 
-  // Master: one device-wide dial over every numeric scene param, multiplied
-  // in at autoTune.ts's resolveSceneSetting (scaled once, never on drives,
+  // Master: device-wide dials over every numeric scene param — Scale and
+  // Expansion — applied at autoTune.ts's resolveSceneSetting (once, never on drives,
   // enums/booleans, or the Input card's gain stages — see that doc). Sits
   // between the Auto bar and Input as its own always-visible card: it is
   // not part of the auto system, and unlike the Scene card below it must
@@ -4445,7 +4454,22 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     description: "Scales every scene param at once — 1 is as dialed",
   });
   masterRow.onChange((value) => deps.onSceneMasterChange(value));
-  masterCard.body.appendChild(masterRow.el);
+  // The Input card's Expansion, over the scene's params instead of the
+  // mic's levels — same range, log slider and readout as that row, so the
+  // two read as the same control (see resolveSceneSetting for the curve).
+  const masterExpansionRow = createControlRow({
+    label: "Expansion",
+    accent: SCENE_VIOLET,
+    min: SCENE_EXPANSION_MIN,
+    max: SCENE_EXPANSION_MAX,
+    defaultValue: SCENE_EXPANSION_DEFAULT,
+    mapping: "log",
+    unit: "×",
+    format: formatGain,
+    description: "Pushes every scene param away from the middle of its slider — 1 is as dialed",
+  });
+  masterExpansionRow.onChange((value) => deps.onSceneExpansionChange(value));
+  masterCard.body.append(masterRow.el, masterExpansionRow.el);
 
   // Picture block — see the comment above const masterCard. A plain
   // .vc-row/.vc-hint block (not createMeterRow's bar-meter shape: there's no
@@ -6461,6 +6485,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     refreshBandsSplit();
     refreshBandFaders();
     masterRow.sync(() => deps.getSceneMaster());
+    masterExpansionRow.sync(() => deps.getSceneExpansion());
     // Whatever was rebuilt above comes in unmarked.
     applySolo();
     root.classList.add("vc-open");
