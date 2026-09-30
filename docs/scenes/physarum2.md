@@ -706,6 +706,21 @@ and `powder.ts`'s curl noise).
     Playwright on the panel in both layouts (`scripts/consoleshot.mjs`), the
     headcount freezing at Switching 0 and moving otherwise, no shader errors.
 
+- **2026-09-30: Synergy made the other stains jump.** User: "when synergy turned
+  on stains movement is odd." Dragging one stain slowly round the wheel at
+  Synergy 1 (simulated on the real tracker, 1° steps) made the other three
+  shown hues snap 30-120° in one step about ten times a revolution. Cause:
+  `HARMONY_STICK` kept the harmony's *name* only, so which strain sits at which
+  place was re-picked from scratch every change, and any ordering that won by a
+  hair moved three hues at once. Fix in `physarum2Synergy.ts`: the sticky choice
+  is now harmony *and* place (`HarmonyFit.place`), and the shown pull eases to
+  the fitted one over `SETTLE_SECONDS` (the tracker's new `dt`); the stain being
+  dragged is exempt and stays under the pointer, and at rest the pull settles
+  exactly on the fit. `tests/physarum2Synergy.test.ts` drags a stain a full turn
+  at 60 fps and bounds the other hues' per-frame move. Screenshots of the dish
+  at Synergy 0 and 1 render clean; the glide itself is timing and was judged
+  from the test, not a frame.
+
 ## Tuning notes
 
 Judge the look by whether black background still dominates and the four

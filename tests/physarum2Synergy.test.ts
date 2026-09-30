@@ -33,7 +33,9 @@ describe("nearestHarmony", () => {
   it("keeps the current harmony unless another fits clearly better", () => {
     const hues = [0, 60, 175, 240].map(deg);
     const first = nearestHarmony(hues, -1);
-    expect(nearestHarmony(hues, -1, first.name).name).toBe(first.name);
+    const again = nearestHarmony(hues, -1, first);
+    expect(again.name).toBe(first.name);
+    expect(again.place).toBe(first.place);
   });
 });
 
@@ -65,5 +67,42 @@ describe("createSynergyTracker", () => {
     tracker.update([0, 0, 0, 0], 1);
     const { shift } = tracker.update([0.05, 0.05, 0.05, 0.05], 1);
     shift.forEach((v) => expect(v).toBeCloseTo(0.05, 6));
+  });
+
+  it("dragging one stain round the wheel never snaps the other three", () => {
+    // A full turn in three seconds at 60 fps (6° a frame). Before the glide,
+    // the other hues jumped 30–120° in a single frame whenever another
+    // harmony or ordering won.
+    const dt = 1 / 60;
+    for (const drag of [0, 2]) {
+      const tracker = createSynergyTracker(BASE);
+      const raw = [0, 0, 0, 0];
+      let prev = tracker.update(raw, 1, dt).shift.map((s, k) => BASE[k]! + s);
+      let worst = 0;
+      for (let f = 1; f <= 180; f++) {
+        raw[drag] = deg(2 * f);
+        const r = tracker.update(raw, 1, dt);
+        const cur = r.shift.map((s, k) => BASE[k]! + s);
+        expect(cur[drag]).toBeCloseTo(BASE[drag]! + raw[drag]!, 9); // the dragged stain stays put
+        cur.forEach((c, k) => {
+          if (k !== drag) worst = Math.max(worst, Math.abs(wrapTurn(c - prev[k]!)) * 360);
+        });
+        prev = cur;
+      }
+      expect(worst).toBeLessThan(22);
+    }
+  });
+
+  it("settles on the fitted pull once the drag stops", () => {
+    const tracker = createSynergyTracker(BASE);
+    tracker.update([0, 0, 0, 0], 1, 1 / 60);
+    const at = (dt?: number) => tracker.update([0, 0.3, 0, 0], 1, dt).shift;
+    at(1 / 60);
+    let eased = at(1 / 60);
+    for (let f = 0; f < 120; f++) eased = at(1 / 60);
+    const direct = createSynergyTracker(BASE);
+    direct.update([0, 0, 0, 0], 1);
+    const want = direct.update([0, 0.3, 0, 0], 1).shift;
+    eased.forEach((v, k) => expect(v).toBeCloseTo(want[k]!, 4));
   });
 });

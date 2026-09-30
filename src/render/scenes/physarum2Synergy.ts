@@ -12,9 +12,11 @@
  * harmony in HARMONIES, every way of giving the four strains its four places,
  * and — with no anchor — the best rotation; with an anchor (the stain last
  * changed by hand) the rotation is fixed so that stain stays exactly where it
- * was put and the other three move. The current harmony is kept unless another
- * fits clearly better (HARMONY_STICK), so a drag doesn't flicker between two
- * that fit about as well.
+ * was put and the other three move. The current choice — harmony *and* which
+ * strain sits at which place — is kept unless another fits clearly better
+ * (HARMONY_STICK), so a drag doesn't flicker between two that fit about as
+ * well; when a switch does happen, the tracker glides the other three hues to
+ * their new places (SETTLE_SECONDS) instead of snapping them.
  *
  * Hues are in turns (0..1) throughout. A Physarum 2 stain is a hue *shift*
  * over the strain's own base colour (`hueRotateRGB` in physarum2.ts), so the
@@ -45,9 +47,13 @@ const PERMS: number[][] = [];
   rest.forEach((x, i) => perm([...a, x], rest.filter((_, j) => j !== i)));
 })([], [0, 1, 2, 3]);
 
-/** A different harmony must fit this much better (cost ratio) to replace the
- *  current one. */
+/** A different harmony, or the same one with the strains in different places,
+ *  must fit this much better (cost ratio) to replace the current choice. */
 export const HARMONY_STICK = 1.6;
+
+/** Time constant, seconds, of the glide the shown hues take to a new target
+ *  (a knob drag, a switch of harmony or of places). */
+export const SETTLE_SECONDS = 0.12;
 
 /** The shortest signed distance between two hues, in turns: (-0.5, 0.5]. */
 export const wrapTurn = (d: number): number => d - Math.round(d);
@@ -56,19 +62,26 @@ export const unitTurn = (h: number): number => ((h % 1) + 1) % 1;
 export interface HarmonyFit {
   cost: number;
   name: string;
+  /** Which way of giving the strains their places (index into PERMS). */
+  place: number;
   /** Where each strain lands, in turns 0..1. */
   target: number[];
 }
 
 /** The nearest harmony to four hues (turns). `anchor` is the index of the hue
  *  that must stay exactly where it is (-1 for none: the best rotation);
- *  `keep` is the current harmony's name, kept unless another fits clearly
- *  better (HARMONY_STICK). */
-export function nearestHarmony(h: readonly number[], anchor: number, keep?: string): HarmonyFit {
+ *  `keep` is the current choice (a previous fit), kept unless another fits
+ *  clearly better (HARMONY_STICK). */
+export function nearestHarmony(
+  h: readonly number[],
+  anchor: number,
+  keep?: Pick<HarmonyFit, "name" | "place">,
+): HarmonyFit {
   let best: HarmonyFit | null = null;
   let kept: HarmonyFit | null = null;
   for (const hm of HARMONIES) {
-    for (const pm of PERMS) {
+    for (let place = 0; place < PERMS.length; place++) {
+      const pm = PERMS[place]!;
       const off = pm.map((j) => hm.at[j]! / 360);
       let rot: number;
       if (anchor >= 0) {
@@ -85,9 +98,9 @@ export function nearestHarmony(h: readonly number[], anchor: number, keep?: stri
       }
       let cost = 0;
       for (let i = 0; i < 4; i++) cost += wrapTurn(rot + off[i]! - h[i]!) ** 2;
-      const fit: HarmonyFit = { cost, name: hm.name, target: off.map((o) => unitTurn(rot + o)) };
+      const fit: HarmonyFit = { cost, name: hm.name, place, target: off.map((o) => unitTurn(rot + o)) };
       if (!best || cost < best.cost) best = fit;
-      if (hm.name === keep && (!kept || cost < kept.cost)) kept = fit;
+      if (keep && hm.name === keep.name && place === keep.place) kept = fit;
     }
   }
   return kept && kept.cost <= best!.cost * HARMONY_STICK + 1e-5 ? kept : best!;
@@ -102,22 +115,29 @@ export interface SynergyResult {
 }
 
 export interface SynergyTracker {
-  /** `rawShift` are the four stored stain shifts (turns), `synergy` 0..1. */
-  update(rawShift: readonly number[], synergy: number): SynergyResult;
+  /** `rawShift` are the four stored stain shifts (turns), `synergy` 0..1.
+   *  `dt` is the seconds since the last call: the shown hues glide to their
+   *  target over SETTLE_SECONDS. Omitted, they arrive at once. */
+  update(rawShift: readonly number[], synergy: number, dt?: number): SynergyResult;
 }
 
 /** Remembers, between frames, which stain was changed last (the anchor) and
- *  which harmony is current (the sticky choice). A stain is "changed by hand"
- *  when it alone moved; several moving together (Link, Alt, a Look, a reset)
- *  frees the rotation instead. */
+ *  which harmony and places are current (the sticky choice). A stain is
+ *  "changed by hand" when it alone moved; several moving together (Link, Alt,
+ *  a Look, a reset) frees the rotation instead. The pull each strain is shown
+ *  with eases toward the fitted one, except the anchor's (always 0): the stain
+ *  being dragged stays under the pointer. */
 export function createSynergyTracker(baseHue: readonly number[]): SynergyTracker {
   let prev: number[] | null = null;
   let anchor = -1;
-  let keep: string | undefined;
+  let keep: HarmonyFit | undefined;
   let lastKey = "";
-  let last: SynergyResult = { shift: baseHue.map(() => 0), harmony: 0 };
+  let harmony = 0;
+  /** The fitted pull per strain (turns), and the eased pull actually shown. */
+  let goal: number[] = baseHue.map(() => 0);
+  let shown: number[] | null = null;
   return {
-    update(rawShift, synergy) {
+    update(rawShift, synergy, dt = Infinity) {
       if (prev) {
         const changed: number[] = [];
         for (let k = 0; k < rawShift.length; k++) if (Math.abs(rawShift[k]! - prev[k]!) > 1e-6) changed.push(k);
@@ -126,15 +146,21 @@ export function createSynergyTracker(baseHue: readonly number[]): SynergyTracker
       }
       prev = rawShift.slice();
       const key = `${rawShift.join(",")}|${synergy}|${anchor}`;
-      if (key === lastKey) return last;
-      lastKey = key;
-      const hues = rawShift.map((s, k) => baseHue[k]! + s);
-      const fit = nearestHarmony(hues, anchor, keep);
-      keep = fit.name;
-      const s = Math.max(0, Math.min(1, synergy));
-      const shift = rawShift.map((raw, k) => raw + s * wrapTurn(fit.target[k]! - hues[k]!));
-      last = { shift, harmony: Math.max(0, HARMONIES.findIndex((hm) => hm.name === fit.name)) };
-      return last;
+      if (key !== lastKey) {
+        lastKey = key;
+        const hues = rawShift.map((s, k) => baseHue[k]! + s);
+        const fit = nearestHarmony(hues, anchor, keep);
+        keep = fit;
+        const s = Math.max(0, Math.min(1, synergy));
+        goal = hues.map((hue, k) => s * wrapTurn(fit.target[k]! - hue));
+        harmony = Math.max(0, HARMONIES.findIndex((hm) => hm.name === fit.name));
+      }
+      if (!shown) shown = goal.slice();
+      else {
+        const a = dt === Infinity ? 1 : 1 - Math.exp(-Math.max(0, dt) / SETTLE_SECONDS);
+        shown = shown.map((p, k) => (k === anchor || Math.abs(goal[k]! - p) < 1e-5 ? goal[k]! : p + a * (goal[k]! - p)));
+      }
+      return { shift: rawShift.map((raw, k) => raw + shown![k]!), harmony };
     },
   };
 }
