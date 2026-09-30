@@ -5,14 +5,13 @@ import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
 import { detectQuality, parseQualityPreset, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
 import { getScene, FULL_VIEWPORT, type Scene, type SceneContext } from "./render/scene.ts";
-import { getQualityChoice } from "./render/qualityPref.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, type Palette } from "./render/palette.ts";
 import { createAnimClock } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createDriveEngine } from "./render/drives.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
@@ -20,7 +19,7 @@ import { applySensitivity } from "./audio/sensitivity.ts";
 import { pinEverything } from "./pinnedAssets.ts";
 import { createBroadcastTransport } from "./net/outputBridge.ts";
 import { createGlide, type Glide } from "./net/outputGlide.ts";
-import { createFrameInbox, type OutputState, type ToMain, type ToOutput } from "./net/outputSync.ts";
+import { createFrameInbox, type OutputPower, type OutputState, type ToMain, type ToOutput } from "./net/outputSync.ts";
 import { applySyncedStorage } from "./net/syncedStores.ts";
 
 /**
@@ -40,6 +39,8 @@ import { applySyncedStorage } from "./net/syncedStores.ts";
 
 /** No frame this long -> black. Long enough to ride out a main-window hiccup. */
 const STALE_MS = 5000;
+/** How often the render readouts go to the main window's Output Power card. */
+const STATUS_MS = 500;
 /** The output announces itself this often (the main window's presence check). */
 const HEARTBEAT_MS = 1000;
 const CURSOR_IDLE_MS = 2000;
@@ -103,9 +104,16 @@ pinEverything();
 // ---- Rendering ----
 
 let quality: QualitySettings = qualitySettings("mid");
-/** What detectQuality() found on this window; used only while the main
- *  window's Quality choice (render/qualityPref.ts, mirrored in) is Auto. */
+/** What detectQuality() found on this window; used only while the output's
+ *  Quality choice is Auto (or a dev pin, which stands in for it). */
 let detectedPreset: QualityPreset = "mid";
+/** The output's own Quality and Energy saving (render/outputPower.ts), as the
+ *  main window's Output Power card last sent them. The defaults are the
+ *  stores' own, for the moment before the first `power` message arrives. */
+let power: OutputPower = { quality: "high", mode: "off" };
+/** A dev pin wins over the choice so headless `?quality=` captures stay
+ *  reproducible; otherwise Auto falls back to this window's benchmark. */
+const resolvePreset = (): QualityPreset => (pinned || power.quality === "auto" ? detectedPreset : power.quality);
 /** The dev `?quality=` pin the main window passes along (net/outputBridge.ts's
  *  open()): like app.ts, a pinned preset means no governor. */
 let pinned = false;
@@ -119,6 +127,8 @@ const driveEngine = createDriveEngine();
 let governor: QualityGovernor | null = null;
 let lastRafMs = 0;
 let lastRenderMs = 0;
+let lastRenderFpsMs = 0;
+let lastFps = 0;
 let blank = false;
 /** The look the output is showing right now (a glide's half-way step
  *  included) — what the next glide starts from. */
@@ -144,6 +154,29 @@ function stepGlide(nowMs: number): void {
   inbox.setParams(state.params);
 }
 
+/** Brings `quality` and the governor in line with the output's own choice.
+ *  `quality` is mutated in place — the host's context and the governor hold
+ *  it. Returns whether the preset changed, which the caller answers by
+ *  remounting the scene (geometry is sized at init). */
+function syncQuality(): boolean {
+  const preset = resolvePreset();
+  const changed = preset !== quality.preset;
+  if (changed) {
+    Object.assign(quality, qualitySettings(preset));
+    governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
+  }
+  governor?.setEnabled(power.mode === "auto");
+  return changed;
+}
+
+/** A `power` message: re-resolve, and re-init the current scene if the preset moved. */
+function applyQuality(): void {
+  if (syncQuality() && scene && presetAllows(scene, quality.preset)) {
+    host.unmountAll();
+    host.mount(scene);
+  }
+}
+
 function applyState(state: OutputState): void {
   current = state;
   // Stores first, so a scene's init() and first render already see the
@@ -152,16 +185,7 @@ function applyState(state: OutputState): void {
   inbox.setParams(state.params);
   palette = getPalette(state.palette);
 
-  // Same rule as app.ts's effectivePreset(): the main window's Quality
-  // choice wins, Auto falls back to this window's own benchmark. `quality`
-  // is mutated in place — the host's context and the governor hold it.
-  const choice = getQualityChoice();
-  const preset = choice === "auto" ? detectedPreset : choice;
-  const qualityChanged = preset !== quality.preset;
-  if (qualityChanged) {
-    Object.assign(quality, qualitySettings(preset));
-    governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
-  }
+  const qualityChanged = syncQuality();
 
   const next = getScene(state.scene);
   if (next && presetAllows(next, quality.preset) && (next !== scene || qualityChanged)) {
@@ -193,6 +217,9 @@ transport.onMessage((m) => {
       const { p: _held, ...rest } = m.f;
       inbox.push(rest, performance.now());
     } else inbox.push(m.f, performance.now());
+  } else if (m.t === "power") {
+    power = m.power;
+    if (host) applyQuality();
   }
 });
 
@@ -207,11 +234,28 @@ async function main(): Promise<void> {
   const devPin = import.meta.env.DEV ? parseQualityPreset(new URLSearchParams(location.search)) : null;
   pinned = devPin !== null;
   detectedPreset = devPin ?? (await detectQuality());
-  quality = qualitySettings(detectedPreset);
+  quality = qualitySettings(resolvePreset());
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
+  governor?.setEnabled(power.mode === "auto");
   host = createSceneHost(gl, quality);
   sceneCtx = host.ctx;
   hello();
+  window.setInterval(() => {
+    transport.post({
+      t: "status",
+      s: {
+        preset: quality.preset,
+        recommended: detectedPreset,
+        fps: lastFps,
+        level: governor?.level ?? null,
+        maxLevel: governor?.maxLevel ?? 0,
+        fraction: governor?.fraction ?? 1,
+        standingDown: governor?.standingDown ?? false,
+        bufferWidth: canvas.width,
+        bufferHeight: canvas.height,
+      },
+    });
+  }, STATUS_MS);
 
   lastRafMs = performance.now();
 
@@ -246,7 +290,10 @@ async function main(): Promise<void> {
     const displayFrame = applySensitivity(frame, p.sens, p.exp);
     driveEngine.accumulate(dtSec, frame, displayFrame.energy, anim, scene.id, scene.settings ?? []);
 
-    if (!shouldRenderFrame(nowMs, lastRenderMs, targetFrameIntervalMs(quality.preset))) return;
+    const interval = power.mode === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(quality.preset);
+    if (!shouldRenderFrame(nowMs, lastRenderMs, interval)) return;
+    if (lastRenderFpsMs > 0 && nowMs > lastRenderFpsMs) lastFps = 1000 / (nowMs - lastRenderFpsMs);
+    lastRenderFpsMs = nowMs;
     lastRenderMs = nowMs;
 
     const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);

@@ -1,5 +1,4 @@
 import type { QualityPreset } from "./quality.ts";
-import { registerSyncedStore } from "../net/syncedStores.ts";
 
 /**
  * User override for which quality preset drives rendering, global per device
@@ -19,6 +18,9 @@ import { registerSyncedStore } from "../net/syncedStores.ts";
  *   working as intended, not a bug. A user who knows their device better
  *   than the benchmark, or wants to trade sharpness for headroom, sets this
  *   directly.
+ *
+ * Private to its window (net/syncedStores.ts's PRIVATE_KEYS): the pop-out
+ * output has its own quality choice (src/render/outputPower.ts).
  *
  * Same in-memory-cache-over-localStorage pattern as powerMode.ts: the cache
  * is the source of truth for get/set within a session, seeded once from
@@ -45,11 +47,6 @@ function loadInitial(): QualityChoice {
 }
 
 let cache: QualityChoice = loadInitial();
-
-// Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
-registerSyncedStore(STORAGE_KEY, () => {
-  cache = loadInitial();
-});
 
 function persist(): void {
   try {

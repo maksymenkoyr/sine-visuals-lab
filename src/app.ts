@@ -144,6 +144,18 @@ import { isMicAuto, setMicAuto } from "./audio/micAuto.ts";
 import type { OnsetDiag } from "./audio/onsetDiag.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
+import {
+  getOutputPowerMode,
+  getOutputQualityChoice,
+  getPreviewQualityChoice,
+  getPreviewSize,
+  PREVIEW_SIZE_FRACTION,
+  setOutputPowerMode,
+  setOutputQualityChoice,
+  setPreviewQualityChoice,
+  setPreviewSize,
+  type PreviewSize,
+} from "./render/outputPower.ts";
 import { nominalBandEdgesHz } from "./audio/bandScale.ts";
 import {
   applyBandGains,
@@ -183,7 +195,7 @@ import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
 import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
-import type { ToMain, ToOutput } from "./net/outputSync.ts";
+import type { OutputPower, ToMain, ToOutput } from "./net/outputSync.ts";
 import { createOutputControls, type OutputControls } from "./ui/outputControls.ts";
 import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./ui/outputKeys.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
@@ -305,6 +317,30 @@ let qualityChoice: QualityChoice = getQualityChoice();
 /** Auto follows the boot benchmark; any other choice pins that preset
  *  instead — see src/render/qualityPref.ts. */
 const effectivePreset = (): QualityPreset => (qualityChoice === "auto" ? detectedPreset : qualityChoice);
+/** While a pop-out output window is open this window is only a preview
+ *  (net/outputSync.ts's Cue / Go), so it renders cheaper: its own quality
+ *  choice and a smaller box, both from src/render/outputPower.ts. The output's
+ *  own quality and energy saving live there too and travel to it as a
+ *  `power` message. */
+let previewChoice: QualityChoice = getPreviewQualityChoice();
+let previewSize: PreviewSize = getPreviewSize();
+let outputPower: OutputPower = { quality: getOutputQualityChoice(), mode: getOutputPowerMode() };
+/** True while an output window is open and a scene is showing: recomputed
+ *  every tick (render loop, right after outputBridge.update). */
+let previewActive = false;
+const presetRank = (p: QualityPreset): number => PRESET_ORDER.indexOf(p);
+/** The preset this window actually renders at. effectivePreset() is the
+ *  DEVICE's preset and stays the one every scene-availability check uses, so
+ *  the preview's lower quality never hides a scene from the gallery; this is
+ *  only what the mounted scene is drawn with. While previewing, the preview
+ *  choice, raised to the scene's own `minQuality` floor. A dev pin wins, so
+ *  headless `?quality=` captures stay reproducible. */
+function renderPreset(): QualityPreset {
+  if (!previewActive || pinned) return effectivePreset();
+  const wanted = previewChoice === "auto" ? detectedPreset : previewChoice;
+  const floor = scene.minQuality;
+  return floor && presetRank(floor) > presetRank(wanted) ? floor : wanted;
+}
 /** The main fullscreen GL context — created once at boot and kept alive for
  *  the whole session; only which scene is mounted on it changes. */
 let mainHost: SceneHost | null = null;
@@ -479,21 +515,39 @@ function applyPowerMode(mode: PowerMode): void {
   governor?.setEnabled(mode === "auto");
 }
 
-/** Applies a quality-choice change (src/render/qualityPref.ts) to the live
- *  session: mutates the shared `quality` object in place — rather than
+/** Applies a change of what this window renders at (src/render/qualityPref.ts,
+ *  or the preview's own while an output is open — see renderPreset()) to the
+ *  live session: mutates the shared `quality` object in place — rather than
  *  reassigning it — so mainHost's SceneContext, the gallery, and the
  *  governor's own closure (which snapshots it as `baseline` at construction)
  *  all pick it up without a remount. The governor itself is rebuilt rather
  *  than re-baselined: its targetFrameMs also depends on the preset (the
  *  floor preset caps at RENDER_FPS_CAP_FLOOR), and a rebuild resets its
  *  measurement state for free — the same clean-slate rule setEnabled(true)
- *  already follows. No-op on the numeric knobs while pinned (a dev
- *  `?quality=`/`?tier=` override): see boot()'s comment on `pinned`. */
-function applyQualityChoice(choice: QualityChoice): void {
-  qualityChoice = choice;
-  Object.assign(quality, qualitySettings(effectivePreset()));
+ *  already follows. Does nothing when the resolved preset is the one already
+ *  in force, so the governor's measurement is left alone. No-op on the
+ *  numeric knobs while pinned (a dev `?quality=`/`?tier=` override): see
+ *  boot()'s comment on `pinned`.
+ *
+ *  `remount` re-inits the mounted scene (geometry is sized at init), for the
+ *  preview starting or stopping under a scene that is already showing. */
+function applyRenderQuality(remount = false): void {
+  const preset = renderPreset();
+  if (preset === quality.preset) return;
+  Object.assign(quality, qualitySettings(preset));
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
+  if (remount && inViz && mainHost) {
+    mainHost.unmountAll();
+    mainHost.mount(scene);
+  }
+}
+
+/** The preview's box (index.html's `body.output-preview #gl`): on while an
+ *  output is open and the size isn't Full. */
+function applyPreviewBox(): void {
+  document.body.classList.toggle("output-preview", previewActive && previewSize !== "full");
+  document.body.style.setProperty("--preview-frac", String(PREVIEW_SIZE_FRACTION[previewSize]));
 }
 
 function activeConn(): AnyConn | null {
@@ -614,7 +668,7 @@ async function requestWakeLock(): Promise<void> {
 }
 
 function availableScenes(): Scene[] {
-  return listScenes().filter((s) => presetAllows(s, quality.preset));
+  return listScenes().filter((s) => presetAllows(s, effectivePreset()));
 }
 
 /** Fills and re-binds the scene view's own version corner (`#sceneVersion` in
@@ -669,9 +723,12 @@ function updateSceneVersionLabel(next: Scene): void {
  *  another device) through the same path, so the roster always reflects reality. */
 function applyScene(next: Scene): void {
   if (!mainHost) return;
+  scene = next;
+  // Before the mount, which sizes geometry from `quality`: the new scene's
+  // minQuality may differ from the last one's while previewing.
+  if (previewActive) applyRenderQuality();
   mainHost.unmountAll();
   mainHost.mount(next);
-  scene = next;
   updateSceneVersionLabel(next);
   showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
@@ -1397,14 +1454,42 @@ function wireDeviceMenu(): void {
       setPowerMode(mode);
       applyPowerMode(mode);
     },
-    getQualityChoice: () => qualityChoice,
+    // While an output is open the card is the preview's: its Quality chips
+    // bind to the preview's own choice, not the device's.
+    getQualityChoice: () => (previewActive ? previewChoice : qualityChoice),
     onQualityChoiceChange: (choice) => {
-      setQualityChoice(choice);
-      applyQualityChoice(choice);
+      if (previewActive) {
+        setPreviewQualityChoice(choice);
+        previewChoice = choice;
+      } else {
+        setQualityChoice(choice);
+        qualityChoice = choice;
+      }
+      applyRenderQuality();
+    },
+    isPreview: () => previewActive,
+    getPreviewSize: () => previewSize,
+    onPreviewSizeChange: (size) => {
+      setPreviewSize(size);
+      previewSize = size;
+      applyPreviewBox();
+    },
+    getOutputPowerStatus: () => outputBridge?.outputStatus() ?? null,
+    getOutputQualityChoice: () => outputPower.quality,
+    onOutputQualityChoiceChange: (choice) => {
+      setOutputQualityChoice(choice);
+      outputPower = { ...outputPower, quality: choice };
+      outputBridge?.sendPower();
+    },
+    getOutputPowerMode: () => outputPower.mode,
+    onOutputPowerModeChange: (mode) => {
+      setOutputPowerMode(mode);
+      outputPower = { ...outputPower, mode };
+      outputBridge?.sendPower();
     },
     getPowerStatus: () => ({
       mode: powerMode,
-      choice: qualityChoice,
+      choice: previewActive ? previewChoice : qualityChoice,
       recommended: detectedPreset,
       fps: lastFps,
       level: governor?.level ?? null,
@@ -1444,7 +1529,7 @@ function wireRoomControls(conn: AnyConn): void {
   conn.onCommand((cmd) => {
     if (cmd.scene) {
       const s = getScene(cmd.scene);
-      if (s && presetAllows(s, quality.preset)) {
+      if (s && presetAllows(s, effectivePreset())) {
         if (inViz) applyScene(s);
         else {
           // Commanded while idle on the gallery (e.g. a mosaic/panorama
@@ -1467,9 +1552,12 @@ async function enterViz(next: Scene): Promise<void> {
   inViz = true;
   canvas.style.display = "block";
 
+  scene = next;
+  // Before the mount (see applyScene); previewActive is still false on a
+  // fresh entry and turns on at the next tick, which remounts if needed.
+  if (previewActive) applyRenderQuality();
   mainHost!.unmountAll();
   mainHost!.mount(next);
-  scene = next;
   updateSceneVersionLabel(next);
 
   showHud(`${mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
@@ -1518,7 +1606,7 @@ function applyRoute(route: Route): void {
   }
   if (inViz && route.sceneId === scene.id) return; // our own applyScene() echo
   const s = getScene(route.sceneId);
-  if (!s || !presetAllows(s, quality.preset)) {
+  if (!s || !presetAllows(s, effectivePreset())) {
     showHud(s ? "scene unavailable on this device" : "unknown scene", true);
     navigate({ kind: "gallery" }, "replace");
     return;
@@ -1603,9 +1691,9 @@ async function boot(): Promise<void> {
   const devPin = import.meta.env.DEV ? parseQualityPreset(params) : null;
   pinned = devPin !== null;
   detectedPreset = devPin ?? (await detectQuality());
-  quality = qualitySettings(effectivePreset());
+  quality = qualitySettings(renderPreset());
   mainHost = createSceneHost(gl, quality);
-  if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
+  if (!presetAllows(scene, effectivePreset())) scene = availableScenes()[0] ?? scene;
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
 
@@ -1653,6 +1741,7 @@ async function boot(): Promise<void> {
   outputBridge = createOutputBridge({
     transport: createBroadcastTransport<ToOutput, ToMain>(),
     look: () => ({ scene: scene.id, palette: palette.id }),
+    power: () => outputPower,
   });
   outputControls = createOutputControls(outputBridge, { popBtn: outBtn, cueBtn, goBtn, stateEl: outStateEl, barEl: outBarEl });
   outputControls.setVisible(inViz);
@@ -1758,7 +1847,7 @@ async function boot(): Promise<void> {
     gallery = createGallery({
       scenes: () =>
         listScenes().map((s) => {
-          const enabled = presetAllows(s, quality.preset);
+          const enabled = presetAllows(s, effectivePreset());
           return {
             scene: s,
             enabled,
@@ -2087,6 +2176,12 @@ function loop(): void {
   const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
   if (outputBridge) {
     outputBridge.update(nowRafMs);
+    const nextActive = inViz && outputBridge.status().open;
+    if (nextActive !== previewActive) {
+      previewActive = nextActive;
+      applyRenderQuality(true);
+      applyPreviewBox();
+    }
     if (gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null }, { sens: outputSens, exp: outputExp, smoothing });
   }
 

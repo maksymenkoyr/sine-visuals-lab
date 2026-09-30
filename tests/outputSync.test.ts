@@ -237,6 +237,12 @@ describe("syncedStores", () => {
       "vibe.someFutureStore": "1",
       "vibe.deviceId": "abc",
       "vibe.keyTips": "{}",
+      "vibe.quality": "high",
+      "vibe.powerMode": "off",
+      "vibe.output.quality": "high",
+      "vibe.output.powerMode": "off",
+      "vibe.preview.quality": "floor",
+      "vibe.preview.size": "half",
     });
     expect(captureSyncedStorage(live)).toEqual({ "vibe.sceneSettings": "{}", "vibe.someFutureStore": "1" });
   });

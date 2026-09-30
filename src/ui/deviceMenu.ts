@@ -96,6 +96,8 @@ import {
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
 import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
+import type { PreviewSize } from "../render/outputPower.ts";
+import type { OutputRenderStatus } from "../net/outputSync.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
@@ -679,6 +681,21 @@ export interface DeviceMenuDeps {
    *  governor actually decided this session, and why. Polled at the panel's
    *  existing ~10Hz auto-refresh tick, not per frame. */
   getPowerStatus: () => PowerStatus;
+  /** True while a pop-out output window is open: the main Power card then
+   *  describes this window's preview (titled "Preview", Quality bound to the
+   *  preview's own choice) and gains the size row below. */
+  isPreview: () => boolean;
+  getPreviewSize: () => PreviewSize;
+  onPreviewSizeChange: (size: PreviewSize) => void;
+  /** The pop-out output's live render readouts, null while none is open —
+   *  the second, "Output" Power card shows only while this is non-null. */
+  getOutputPowerStatus: () => OutputRenderStatus | null;
+  /** The output's own Quality choice and Energy saving (src/render/outputPower.ts),
+   *  edited on the Output card and sent to its window. */
+  getOutputQualityChoice: () => QualityChoice;
+  onOutputQualityChoiceChange: (choice: QualityChoice) => void;
+  getOutputPowerMode: () => PowerMode;
+  onOutputPowerModeChange: (mode: PowerMode) => void;
   /** The button that opens this menu — excluded from the tap-outside
    *  focus reset, and ringed (aria-pressed) while the panel is open. */
   toggleButton: HTMLElement;
@@ -2018,10 +2035,42 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     getQualityChoice: deps.getQualityChoice,
     onQualityChoiceChange: deps.onQualityChoiceChange,
     getPowerStatus: deps.getPowerStatus,
+    isPreview: deps.isPreview,
+    getPreviewSize: deps.getPreviewSize,
+    onPreviewSizeChange: deps.onPreviewSizeChange,
   });
+  // The pop-out output's own Power card, under the main one, shown only
+  // while an output window is open. Same card, other deps: its status is
+  // what the output reports (net/outputSync.ts's OutputRenderStatus).
+  const outputPowerCard = createPowerCard(
+    {
+      getPowerMode: deps.getOutputPowerMode,
+      onPowerModeChange: deps.onOutputPowerModeChange,
+      getQualityChoice: deps.getOutputQualityChoice,
+      onQualityChoiceChange: deps.onOutputQualityChoiceChange,
+      getPowerStatus: () => {
+        const s = deps.getOutputPowerStatus();
+        return {
+          mode: deps.getOutputPowerMode(),
+          choice: deps.getOutputQualityChoice(),
+          recommended: s?.recommended ?? "high",
+          fps: s?.fps ?? 0,
+          level: s ? s.level : null,
+          maxLevel: s?.maxLevel ?? 0,
+          fraction: s?.fraction ?? 1,
+          standingDown: s?.standingDown ?? false,
+          bufferWidth: s?.bufferWidth ?? 0,
+          bufferHeight: s?.bufferHeight ?? 0,
+        };
+      },
+    },
+    { title: "Output", foldId: "powerOutput" },
+  );
+  outputPowerCard.setVisible(false);
+  let outputPowerShown = false;
   const powerCol = document.createElement("div");
   powerCol.className = "vc-power-col";
-  powerCol.appendChild(powerCard.el);
+  powerCol.append(powerCard.el, outputPowerCard.el);
 
   // ---- spectrum column: the Bands card ----
   // The live spectrum and the band gains are one card: the strip is the
@@ -4349,7 +4398,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // nothing left for it to collapse for. With meters shown, every card in
   // Power + the meters column folded still counts as "everything folded".
   function refreshColumnsFold(): void {
-    const cards = [...columnsWrap.querySelectorAll<HTMLElement>(".vc-card")];
+    const cards = [...columnsWrap.querySelectorAll<HTMLElement>(".vc-card")].filter((c) => c.style.display !== "none");
     columnsWrap.classList.toggle(
       "vc-cols-folded",
       !isFolded(METERS_COLUMN) && cards.length > 0 && cards.every((c) => c.classList.contains("vc-folded")),
@@ -6699,7 +6748,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       lastAutoRefreshMs = nowMs;
 
       refreshSpectrumHeader();
+      powerCard.setTitle(deps.isPreview() ? "Preview" : "Power");
       powerCard.refresh();
+      const outputShown = deps.getOutputPowerStatus() !== null;
+      if (outputShown !== outputPowerShown) {
+        outputPowerShown = outputShown;
+        outputPowerCard.setVisible(outputShown);
+        // A hidden card can't count toward "everything folded".
+        refreshColumnsFold();
+      }
+      if (outputShown) outputPowerCard.refresh();
       sourceRow.refresh();
       for (const { row } of inputRows) row.refreshAuto();
       autoGainRow.refreshAuto();

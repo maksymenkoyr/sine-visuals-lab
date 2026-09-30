@@ -1,4 +1,7 @@
 import type { FeatureFrame } from "../audio/types.ts";
+import type { PowerMode } from "../render/powerMode.ts";
+import type { QualityPreset } from "../render/quality.ts";
+import type { QualityChoice } from "../render/qualityPref.ts";
 import { VOLATILE_PREFIXES } from "./syncedStores.ts";
 
 /**
@@ -35,8 +38,16 @@ import { VOLATILE_PREFIXES } from "./syncedStores.ts";
  *    main window's resolved Sensitivity/Expansion/Smoothing for its scene;
  *    it is left off unless the output is mirroring live (Cue off, nothing
  *    waiting for Go), so a held look keeps the numbers it was sent with.
+ *  - `power`: the output's own Quality and Energy saving choice
+ *    (render/outputPower.ts). Not part of the look, so Cue never holds it and
+ *    the synced snapshot never carries it: it is how this window renders.
+ *    Re-sent with every heartbeat reply, so a missed one heals.
  *  - `hello`/`bye` from the output: a once-a-second heartbeat (so the main
  *    window's button reflects a closed window) and a goodbye on unload.
+ *  - `status` from the output: its live render readouts (preset, fps,
+ *    governor), twice a second, for the Output Power card in the main
+ *    window's panel. Also counts as a sign of life, but unlike `hello` it
+ *    never makes the main window re-send state.
  */
 
 /** Sensitivity, Expansion and Smoothing as the main window resolved them
@@ -67,11 +78,36 @@ export interface WireFrame extends FeatureFrame {
   p?: OutputParams;
 }
 
+/** How the output window renders: its Quality choice and Energy saving mode. */
+export interface OutputPower {
+  quality: QualityChoice;
+  mode: PowerMode;
+}
+
+/** The output window's live render readouts — the fields of the Power card's
+ *  PowerStatus that only the output can measure (ui/powerCard.ts). */
+export interface OutputRenderStatus {
+  preset: QualityPreset;
+  /** What Auto resolves to on the output's own GPU. */
+  recommended: QualityPreset;
+  fps: number;
+  /** Governor step, null while a dev pin skips the governor. */
+  level: number | null;
+  maxLevel: number;
+  fraction: number;
+  standingDown: boolean;
+  bufferWidth: number;
+  bufferHeight: number;
+}
+
 /** `glideMs` (state only): the output arrives at this look over that long
  *  instead of switching at once — src/net/outputGlide.ts says what moves
  *  smoothly and what waits. Absent is the plain instant send. */
-export type ToOutput = { t: "state"; state: OutputState; glideMs?: number } | { t: "frame"; f: WireFrame };
-export type ToMain = { t: "hello"; haveState: boolean } | { t: "bye" };
+export type ToOutput =
+  | { t: "state"; state: OutputState; glideMs?: number }
+  | { t: "frame"; f: WireFrame }
+  | { t: "power"; power: OutputPower };
+export type ToMain = { t: "hello"; haveState: boolean } | { t: "bye" } | { t: "status"; s: OutputRenderStatus };
 
 /** Identity of what the output is showing, for "does the output match the
  *  preview" — scene, palette and the stored settings. `params` and the keys
