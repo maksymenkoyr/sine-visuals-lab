@@ -32,115 +32,118 @@ describe("stateKey", () => {
 });
 
 describe("createCueController", () => {
-  it("mirrors every change while Cue is off, and only changes", () => {
+  it("seeds the output once, then holds it however the preview is tuned", () => {
     const sent: string[] = [];
     const c = createCueController((s) => sent.push(s.scene));
     c.preview(state("a"));
-    c.preview(state("a")); // unchanged -> nothing sent
-    c.preview(state("b"));
-    expect(sent).toEqual(["a", "b"]);
-    expect(c.differs()).toBe(false);
-  });
-
-  it("holds the output while Cue is on and reports the difference", () => {
-    const sent: string[] = [];
-    const c = createCueController((s) => sent.push(s.scene));
-    c.preview(state("a"));
-    c.setCue(true);
     c.preview(state("b"));
     c.preview(state("b", { k: "v" }));
     expect(sent).toEqual(["a"]);
     expect(c.differs()).toBe(true);
+    expect(c.following()).toBe(false);
     expect(c.held()?.scene).toBe("a");
   });
 
-  it("Go sends the whole preview, settings included, and clears the difference", () => {
+  it("holding Cue puts the preview on the output and follows live edits", () => {
+    const sent: string[] = [];
+    const c = createCueController((s) => sent.push(s.scene));
+    c.preview(state("a"));
+    c.preview(state("b"));
+    c.setCue(true);
+    expect(sent).toEqual(["a", "b"]);
+    expect(c.differs()).toBe(false);
+    expect(c.following()).toBe(true);
+    c.preview(state("b")); // unchanged -> nothing sent
+    c.preview(state("c"));
+    expect(sent).toEqual(["a", "b", "c"]);
+  });
+
+  it("releasing Cue puts back what the output had", () => {
+    const sent: string[] = [];
+    const c = createCueController((s) => sent.push(s.scene));
+    c.preview(state("a"));
+    c.preview(state("b"));
+    c.setCue(true);
+    c.setCue(false);
+    expect(sent).toEqual(["a", "b", "a"]);
+    expect(c.held()?.scene).toBe("a");
+    expect(c.differs()).toBe(true);
+    c.preview(state("c")); // and it is held again
+    expect(sent).toEqual(["a", "b", "a"]);
+  });
+
+  it("a Cue with nothing apart sends nothing either way", () => {
+    const sent: string[] = [];
+    const c = createCueController((s) => sent.push(s.scene));
+    c.preview(state("a"));
+    c.setCue(true);
+    c.setCue(false);
+    expect(sent).toEqual(["a"]);
+  });
+
+  it("Play sends the whole preview, settings included, for good", () => {
     const sent: OutputState[] = [];
     const c = createCueController((s) => sent.push(s));
     c.preview(state("a"));
-    c.setCue(true);
     c.preview(state("b", { k: "v" }));
     c.go();
     expect(sent.at(-1)).toEqual(state("b", { k: "v" }));
     expect(c.differs()).toBe(false);
-    expect(c.cueOn()).toBe(true); // Go does not turn Cue off
+    c.setCue(true);
+    c.setCue(false); // nothing to put back: the program is the preview
+    expect(sent).toHaveLength(2);
+    c.preview(state("c")); // and it stays held afterwards
+    expect(sent).toHaveLength(2);
   });
 
-  it("turning Cue off sends nothing: the output waits for Go, then mirrors again", () => {
+  it("Play while Cue is held makes that look the one a release returns to", () => {
     const sent: string[] = [];
     const c = createCueController((s) => sent.push(s.scene));
     c.preview(state("a"));
-    c.setCue(true);
     c.preview(state("b"));
-    c.setCue(false);
-    expect(sent).toEqual(["a"]);
-    expect(c.differs()).toBe(true);
-    expect(c.waitingForGo()).toBe(true);
-    expect(c.following()).toBe(false);
-    c.preview(state("c")); // still tuning while it waits: still nothing crosses
-    expect(sent).toEqual(["a"]);
+    c.setCue(true);
     c.go();
-    expect(sent).toEqual(["a", "c"]);
-    expect(c.waitingForGo()).toBe(false);
-    expect(c.following()).toBe(true);
-    c.preview(state("d")); // mirroring has resumed
-    expect(sent).toEqual(["a", "c", "d"]);
-  });
-
-  it("turning Cue off with nothing apart just resumes mirroring", () => {
-    const sent: string[] = [];
-    const c = createCueController((s) => sent.push(s.scene));
-    c.preview(state("a"));
-    c.setCue(true);
     c.setCue(false);
-    expect(c.waitingForGo()).toBe(false);
-    c.preview(state("b"));
-    expect(sent).toEqual(["a", "b"]);
+    expect(sent).toEqual(["a", "b", "b"]);
+    expect(c.held()?.scene).toBe("b");
   });
 
-  it("a Go can ask for a glide length, which travels with the send", () => {
+  it("a Play can ask for a glide length, which travels with the send, unless Cue is held", () => {
     const sent: Array<[string, number | undefined]> = [];
     const c = createCueController((s, g) => sent.push([s.scene, g]));
     c.preview(state("a"));
-    c.setCue(true);
     c.preview(state("a", { k: "v" }));
     c.go(6000);
-    c.go();
+    c.preview(state("a", { k: "w" }));
+    c.setCue(true);
+    c.go(6000);
     expect(sent).toEqual([
       ["a", undefined],
       ["a", 6000],
-      ["a", undefined],
+      ["a", undefined], // Cue: the preview goes on at once
+      ["a", undefined], // Play under Cue: nothing to glide from
     ]);
   });
 
-  it("an output that reconnects while waiting for Go gets the preview and stops waiting", () => {
-    const c = createCueController(() => undefined);
-    c.preview(state("a"));
-    c.setCue(true);
-    c.preview(state("b"));
-    c.setCue(false);
-    c.outputOpened();
-    expect(c.waitingForGo()).toBe(false);
-    expect(c.differs()).toBe(false);
-  });
-
-  it("a setting-only change counts as a difference under Cue", () => {
+  it("a setting-only change counts as a difference", () => {
     const c = createCueController(() => undefined);
     c.preview(state("a", { s: "1" }));
-    c.setCue(true);
     c.preview(state("a", { s: "2" }));
     expect(c.differs()).toBe(true);
   });
 
-  it("an output that opens (or reconnects) gets the preview, even under Cue", () => {
+  it("an output that opens (or reconnects) gets the preview as its program", () => {
     const sent: string[] = [];
     const c = createCueController((s) => sent.push(s.scene));
     c.preview(state("a"));
-    c.setCue(true);
     c.preview(state("b"));
     c.outputOpened();
     expect(sent.at(-1)).toBe("b");
     expect(c.differs()).toBe(false);
+    c.preview(state("c"));
+    c.setCue(true);
+    c.setCue(false);
+    expect(sent.at(-1)).toBe("b");
   });
 
   it("closing forgets what the output had", () => {

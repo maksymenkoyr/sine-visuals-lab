@@ -25,19 +25,19 @@ import { VOLATILE_PREFIXES } from "./syncedStores.ts";
  *    future, can be forgotten; Quality, master dials, Looks, drives, gate
  *    marks all ride along). The output applies it into a private in-memory
  *    storage (net/outputStorage.ts), never the real localStorage the main
- *    window owns. Sent when the look changes (mirror mode), on Go (Play in the
- *    UI), and when an output (re)connects. A Go may carry `glideMs`: the
- *    output then arrives over that long instead of switching (outputGlide.ts).
- *    Leaving Cue sends nothing: with the output holding something other than
- *    the preview, it keeps it until Go, and only then mirroring resumes
- *    (createCueController's `waiting`).
+ *    window owns. Sent when an output (re)connects, on Go (Play in the UI),
+ *    while Cue is held (the preview, following live) and when Cue is released
+ *    (the program Play last put there). A Go may carry `glideMs`: the output
+ *    then arrives over that long instead of switching (outputGlide.ts). The
+ *    output is the master, as on a DJ mixer: tuning the preview sends nothing
+ *    (createCueController).
  *  - `frame`: one per main render tick — the band-gained feature frame (the
  *    same one the main scene sees before Sensitivity/Expansion), plus the
  *    live-only extras the output's anim clock can't recompute (the local
  *    extractor's broadband ratio, the waveform peak). `p` carries the
  *    main window's resolved Sensitivity/Expansion/Smoothing for its scene;
- *    it is left off unless the output is mirroring live (Cue off, nothing
- *    waiting for Go), so a held look keeps the numbers it was sent with.
+ *    it is left off unless the output shows the preview live (Cue held, or
+ *    the two match), so a held look keeps the numbers it was sent with.
  *  - `power`: the output's own Quality and Energy saving choice
  *    (render/outputPower.ts). Not part of the look, so Cue never holds it and
  *    the synced snapshot never carries it: it is how this window renders.
@@ -74,7 +74,7 @@ export interface WireFrame extends FeatureFrame {
   beatRatio: number | null;
   /** Waveform peak for AnimFrame.wavePeak, null off a local mic. */
   wavePeak: number | null;
-  /** See the header; absent while Cue holds the output. */
+  /** See the header; absent while the output shows its own look, not the preview. */
   p?: OutputParams;
 }
 
@@ -122,22 +122,25 @@ export function stateKey(s: OutputState): string {
 
 export interface CueController {
   /** Main window's current look — call as often as you like (every tick is
-   *  fine; it only acts on a change). In mirror mode a change is sent. */
+   *  fine; it only acts on a change). Reaches the output only while Cue is
+   *  held (and once, to seed an output that has nothing yet). */
   preview(state: OutputState): void;
+  /** Cue pressed (true) or released (false). Pressed: the output shows the
+   *  preview, following it live. Released: it goes back to what Go last put
+   *  there. */
   setCue(on: boolean): void;
   cueOn(): boolean;
-  /** True while the output is waiting for Go: Cue was turned off with the
-   *  preview and output apart, so nothing crosses until Go is pressed. */
-  waitingForGo(): boolean;
-  /** True while the output mirrors the preview live (Cue off, nothing
-   *  waiting) — the only time the main window's resolved Sensitivity/
-   *  Expansion/Smoothing ride along on frames. */
+  /** True while the output shows the preview live — Cue held, or the two
+   *  match — the only time the main window's resolved Sensitivity/Expansion/
+   *  Smoothing ride along on frames. */
   following(): boolean;
-  /** Send the preview to the output now, cue or not; `glideMs` asks the
-   *  output to arrive over that long (see ToOutput). */
+  /** Play: the preview becomes what the output shows, for good (a released
+   *  Cue returns to it). `glideMs` asks the output to arrive over that long
+   *  (see ToOutput); ignored while Cue is held, when the output already
+   *  shows the preview. */
   go(glideMs?: number): void;
   /** An output window just appeared (or re-announced itself after the main
-   *  window reloaded): it gets whatever it should be showing now. */
+   *  window reloaded): it gets the preview as its program. */
   outputOpened(): void;
   outputClosed(): void;
   /** True while the output shows something other than the preview. */
@@ -146,15 +149,16 @@ export interface CueController {
   held(): OutputState | null;
 }
 
-/** Cue / Go. Cue off: the output mirrors the preview. Cue on: the preview
- *  moves alone, the output keeps what it had until Go. Turning Cue off while
- *  the two differ does NOT send the preview across — the output keeps what it
- *  had until Go is pressed (then mirroring resumes), so leaving Cue can never
- *  change what the audience sees. */
+/** Cue / Play, as on a DJ mixer. The output is the master: it keeps its
+ *  program — what Play last sent it — however the preview is tuned. Holding
+ *  Cue puts the preview on the master for as long as it's held (and lets it
+ *  follow live edits); releasing Cue puts the program back. Play makes the
+ *  preview the new program, so a Cue released afterwards has nothing to undo. */
 export function createCueController(send: (state: OutputState, glideMs?: number) => void): CueController {
   let cue = false;
-  let waiting = false;
   let previewState: OutputState | null = null;
+  /** What Play last put on the output — what a released Cue returns to. */
+  let program: OutputState | null = null;
   let sent: OutputState | null = null;
   let sentKey = "";
 
@@ -164,37 +168,44 @@ export function createCueController(send: (state: OutputState, glideMs?: number)
     send(state, glideMs);
   }
 
+  function differs(): boolean {
+    return previewState !== null && sent !== null && stateKey(previewState) !== sentKey;
+  }
+
   return {
     preview(state) {
       previewState = state;
-      if (!cue && !waiting && (sent === null || stateKey(state) !== sentKey)) push(state);
+      if (sent === null) {
+        program = state;
+        push(state);
+      } else if (cue && stateKey(state) !== sentKey) push(state);
     },
     setCue(on) {
+      if (on === cue) return;
       cue = on;
-      // Leaving Cue with the output holding something else: wait for Go.
-      waiting = !on && previewState !== null && sent !== null && stateKey(previewState) !== sentKey;
+      if (on) {
+        if (previewState && differs()) push(previewState);
+      } else if (program && stateKey(program) !== sentKey) push(program);
     },
     cueOn: () => cue,
-    waitingForGo: () => waiting,
-    following: () => !cue && !waiting,
+    following: () => cue || !differs(),
     go(glideMs) {
-      waiting = false;
-      if (previewState) push(previewState, glideMs);
+      if (!previewState) return;
+      program = previewState;
+      push(previewState, cue ? undefined : glideMs);
     },
     outputOpened() {
       sent = null;
       sentKey = "";
-      waiting = false;
+      program = previewState;
       if (previewState) push(previewState);
     },
     outputClosed() {
       sent = null;
       sentKey = "";
-      waiting = false;
+      program = null;
     },
-    differs() {
-      return previewState !== null && sent !== null && stateKey(previewState) !== sentKey;
-    },
+    differs,
     held: () => sent,
   };
 }
