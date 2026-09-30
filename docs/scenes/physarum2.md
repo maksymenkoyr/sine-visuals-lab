@@ -934,6 +934,15 @@ applies there too. Tuned so far only against the synthetic feed at
 - Phase 3's pipette and frame-time checks were one-off session scripts and
   weren't kept; their results are in Measurements.
 
+## Crawl speed jack (2026-09-30)
+
+Crawl speed (`speed`) now has a drive jack, like the per-strain Speed: its
+default is Loudness, scaled by `MOTION_JACK_GAIN` and lifted toward the top
+of the slider with `pushToward1`, so an unplugged jack leaves the pace where
+the slider sits. It is read in JS in `render()` (`drives.value`) before the
+step rate is mapped — the stepper is fixed-rate, not a GLSL uniform. Not
+judged on real music yet.
+
 ## Resume here
 
 **The Strain Console is built** (2026-09-29; Decisions and pivots has what

@@ -963,6 +963,11 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
     step: 0.05,
     default: 0.5,
     auto: { tempo: 0.3, pulse: 0.15 },
+    // Loudness by default, lifting the pace toward the top of the slider
+    // (pushToward1, identity at drive 0 — an unplugged jack leaves Crawl
+    // speed exactly where the slider puts it), same shape and gain as the
+    // per-strain Speed jacks.
+    drive: { default: "anim.energy", gain: MOTION_JACK_GAIN },
   },
   {
     key: "seed",
@@ -2262,7 +2267,9 @@ function createPhysarum2Scene(): Scene {
       const mrt = eatOn && footprintTex !== null;
       const depositActive = mrt ? depositProgMrt : depositProg;
 
-      const speedSetting = resolveSceneSetting(ID, settingFor("speed"));
+      const speedSpec = settingFor("speed");
+      const speedDrive = (drives ?? PASSTHROUGH_DRIVES).value(speedSpec.key, frame.energy * MOTION_JACK_GAIN);
+      const speedSetting = clamp01(pushToward1(resolveSceneSetting(ID, speedSpec), speedDrive));
       const stepRate = STEP_RATE_MIN + (STEP_RATE_MAX - STEP_RATE_MIN) * speedSetting;
       const { steps, acc } = stepAccumulator(stepAcc, dt, stepRate);
       stepAcc = acc;
