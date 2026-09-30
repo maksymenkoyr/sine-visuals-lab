@@ -2090,7 +2090,7 @@ function createPhysarum2Scene(): Scene {
    *  these bypass uploadCommonUniforms) and `drives.value(key, sceneDefault,
    *  rest?)` (the JS twin of the generated `<key>Drive(sceneDefault)` GLSL
    *  helper — see drives.ts's header), one strain at a time. */
-  function resolveStrains(frame: { energy: number }, anim: { low: number; mid: number; high: number; beatPulse: number }, drives: Parameters<Scene["render"]>[5]): void {
+  function resolveStrains(dt: number, frame: { energy: number }, anim: { low: number; mid: number; high: number; beatPulse: number }, drives: Parameters<Scene["render"]>[5]): void {
     const d = drives ?? PASSTHROUGH_DRIVES;
     const rivalry = resolveSceneSetting(ID, settingFor("rivalry"));
     for (let k = 0; k < SPECIES_COUNT; k++) {
@@ -2144,7 +2144,7 @@ function createPhysarum2Scene(): Scene {
     // bit-identical to `eff.color`. The drive's own (band-driven) term rides on
     // top of the pulled stain, as it always rode on the stored one.
     const synergy = resolveSceneSetting(ID, settingFor("synergy"));
-    const pulled = synergyTracker.update(rawStain, synergy);
+    const pulled = synergyTracker.update(rawStain, synergy, dt);
     harmonyIdx = pulled.harmony;
     for (let k = 0; k < SPECIES_COUNT; k++) {
       shownStain[k] = pulled.shift[k]!;
@@ -2250,7 +2250,7 @@ function createPhysarum2Scene(): Scene {
       const seedFresh = drives.fired("seed", beatSeeder.advance(dt, anim.beatPulse, anim.onset));
       if (seedFresh) seedEpoch++;
 
-      resolveStrains(frame, anim, drives);
+      resolveStrains(dt, frame, anim, drives);
       // Lazily build the footprint/MRT targets the first time Touch's
       // eating actually needs them — see the file header's "Touch"
       // paragraph and ensureFootprintTargets's own doc comment.
