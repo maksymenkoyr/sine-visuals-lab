@@ -1,4 +1,5 @@
 import type { SceneSetting } from "./sceneSettings.ts";
+import { registerSyncedStore } from "../net/syncedStores.ts";
 import {
   getSceneExpansion,
   getSceneMaster,
@@ -245,6 +246,12 @@ function loadAutoStore(): AutoStore {
 }
 
 const autoOn: AutoStore = loadAutoStore();
+
+// Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+registerSyncedStore(STORAGE_KEY_AUTO_ON, () => {
+  for (const k of Object.keys(autoOn)) delete autoOn[k];
+  Object.assign(autoOn, loadAutoStore());
+});
 
 function persistAutoStore(): void {
   try {

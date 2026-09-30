@@ -39,6 +39,7 @@ export default defineConfig(({ command }) => ({
       input: {
         main: root("index.html"),
         tv: root("tv.html"),
+        output: root("output.html"),
       },
     },
   },

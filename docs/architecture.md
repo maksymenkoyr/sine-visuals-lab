@@ -92,6 +92,14 @@ Cloudflare Durable Object.
 A device that's alone in a room (no pairing) never touches any of this — `src/
 app.ts` drives `AnimFrame` straight from its own local `FeatureFrame`s.
 
+## Pop-out output window
+
+The same-machine cousin of the TV: `output.html` → `src/output.ts`, a chrome-free
+second window fed by the main window over a BroadcastChannel instead of the room
+socket, with Cue/Go to hold or send what it shows. Everything about it — why
+`tv.ts` itself couldn't be reused, the message layer, what crosses — is the header
+of `src/net/outputSync.ts`; `src/net/outputBridge.ts` is the main window's end.
+
 ## Where the quality/perf ceiling comes from
 
 `src/render/quality.ts` (`detectQuality`) picks a quality preset once at

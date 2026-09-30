@@ -182,6 +182,9 @@ import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
+import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
+import type { ToMain, ToOutput } from "./net/outputSync.ts";
+import { createOutputControls, type OutputControls } from "./ui/outputControls.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
 import { pinEverything } from "./pinnedAssets.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
@@ -200,6 +203,10 @@ const backBtn = document.getElementById("backBtn") as HTMLButtonElement;
 const fsBtn = document.getElementById("fsBtn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stopBtn") as HTMLButtonElement;
 const sceneVersion = document.getElementById("sceneVersion") as HTMLSpanElement;
+const outBtn = document.getElementById("outBtn") as HTMLButtonElement;
+const cueBtn = document.getElementById("cueBtn") as HTMLButtonElement;
+const goBtn = document.getElementById("goBtn") as HTMLButtonElement;
+const outStateEl = document.getElementById("outState") as HTMLSpanElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
 const audioPromptMicBtn = document.getElementById("audioPromptMicBtn") as HTMLButtonElement;
@@ -420,6 +427,14 @@ let hudHideTimer: number | undefined;
  *  prod build (just two numbers/an object reference, no allocation beyond
  *  what animClock.advance already does), so no DEV guard needed here. */
 let lastAnim: AnimFrame | null = null;
+
+/** The pop-out output window (net/outputBridge.ts), created at boot. The two
+ *  numbers are this window's last resolved Sensitivity/Expansion, which the
+ *  bridge streams along with each frame (net/outputSync.ts's `p`). */
+let outputBridge: OutputBridge | null = null;
+let outputControls: OutputControls | null = null;
+let outputSens = 1;
+let outputExp = 1;
 let lastRenderFpsMs = 0;
 let lastFps = 0;
 
@@ -1368,6 +1383,7 @@ async function enterViz(next: Scene): Promise<void> {
   fsBtn.style.display = "block";
   if (!bypassGallery) backBtn.style.display = "block";
   sceneVersion.style.display = "inline";
+  outputControls?.setVisible(true);
 
   if (mode !== "renderer") void ensureAudio();
   updateMicPrompt();
@@ -1387,6 +1403,7 @@ function exitToGallery(): void {
   backBtn.style.display = "none";
   stopBtn.style.display = "none";
   sceneVersion.style.display = "none";
+  outputControls?.setVisible(false);
   hideTooltip(); // a version hint left open by a tap mustn't follow us out
   audioPrompt.style.display = "none";
   mainHost?.unmountAll();
@@ -1537,6 +1554,13 @@ async function boot(): Promise<void> {
   });
   fsBtn.addEventListener("click", () => immersive!.toggle());
 
+  outputBridge = createOutputBridge({
+    transport: createBroadcastTransport<ToOutput, ToMain>(),
+    look: () => ({ scene: scene.id, palette: palette.id }),
+  });
+  outputControls = createOutputControls(outputBridge, { popBtn: outBtn, cueBtn, goBtn, stateEl: outStateEl });
+  outputControls.setVisible(inViz);
+
   void requestWakeLock();
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") void requestWakeLock();
@@ -1576,7 +1600,18 @@ async function boot(): Promise<void> {
     // reaches these; only live in a viz, like S, and skipped while typing
     // somewhere, the same guard deviceMenu.ts's own hotkeys already use.
     if (inViz && !isTypingTarget(e.target)) {
-      if (e.code === "KeyB") {
+      // Output window: K holds it (Cue), G sends the preview (Go). Plain
+      // letters rather than Space/Enter, which also press whichever button
+      // has focus. No-ops unless an output window is open.
+      if (e.code === "KeyG" && outputControls?.go()) {
+        e.preventDefault();
+        noteKeyUse("go");
+        showHud("Sent to output");
+      } else if (e.code === "KeyK" && outputControls?.toggleCue()) {
+        e.preventDefault();
+        noteKeyUse("cue");
+        showHud(outputBridge?.status().cue ? "Cue on: output is held" : "Cue off: output follows");
+      } else if (e.code === "KeyB") {
         e.preventDefault();
         noteKeyUse("beat-one");
         if (e.shiftKey) {
@@ -1949,6 +1984,15 @@ function loop(): void {
   // just sitting on the gallery with nothing on screen.
   lastVis = currentVisual(rateScale);
 
+  // The pop-out output (net/outputBridge.ts) keeps streaming even while this
+  // window sits on the gallery, so a stray Esc never blanks the projector —
+  // which is why the band-gained frame is built before the inViz return.
+  const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
+  if (outputBridge) {
+    outputBridge.update(nowRafMs);
+    if (gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null }, { sens: outputSens, exp: outputExp, smoothing });
+  }
+
   if (!inViz) {
     gallery?.tick(nowRafMs);
     return;
@@ -1962,8 +2006,6 @@ function loop(): void {
   // ungained — it still feeds hostConn.sendFrame, which shouldn't hear a
   // purely local gain tweak — and is also what the strip draws as the ghost
   // behind a faded bar.
-  const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
-
   // Anim clock now advances here, ahead of deviceMenu.update() below — the
   // listening post's transport/bands/section/dial meters (audioMeters.ts)
   // read this tick's AnimFrame, not just the raw FeatureFrame. Only advances
@@ -2007,6 +2049,8 @@ function loop(): void {
 
     sensitivity = resolveSensitivity(scene.id);
     expansion = resolveExpansion(scene.id);
+    outputSens = sensitivity;
+    outputExp = expansion;
     // The drive engine's own per-tick advance (src/render/drives.ts's
     // header) — grid pulses and a setting's own drawn-line peak-hold need
     // every rAF tick, not just a render tick, same reasoning as
@@ -2120,6 +2164,7 @@ function idlePreviewActive(): boolean {
 function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): void {
   const frame = idlePreview.feed.frame(nowRafMs / 1000);
   const gained = applyBandGains(frame, getBandGains(scene.id));
+  outputBridge?.pushFrame(gained, { beatRatio: null, wavePeak: null }, { sens: outputSens, exp: outputExp, smoothing });
   const anim = idlePreview.anim.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: null });
   idlePreview.latch.accumulate(anim);
   const sensitivity = resolveSensitivity(scene.id);
