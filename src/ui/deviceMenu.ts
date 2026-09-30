@@ -730,6 +730,10 @@ export interface DeviceMenu {
   /** Whether the panel is currently open — lets immersive fullscreen mode
    *  (src/ui/fullscreen.ts) skip idle-hiding the gear out from under it. */
   isOpen(): boolean;
+  /** The stores changed under the panel (a remote-control edit): refresh
+   *  every card from them, once nothing is being dragged. A no-op while the
+   *  panel is closed — open() re-reads everything anyway. */
+  refreshFromStores(): void;
 }
 
 // ---- styles --------------------------------------------------------------
@@ -6472,8 +6476,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     }
   }
 
-  function open() {
-    welcomeOnce();
+  /** Re-reads every card from its store — what open() does, and what
+   *  refreshFromStores() does when another device changed them. */
+  function refreshAll() {
     refreshSpectrumHeader();
     renderPalettes();
     sourceRow.refresh();
@@ -6488,6 +6493,32 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     masterExpansionRow.sync(() => deps.getSceneExpansion());
     // Whatever was rebuilt above comes in unmarked.
     applySolo();
+  }
+
+  // A remote-control edit (src/net/remoteLink.ts) lands in the stores while
+  // the panel may be open under someone's fingers: a rebuild mid-drag tears
+  // out the slider being dragged (this file's click-loss rule), so it waits
+  // for the pointer to come up, and bursts of edits collapse into one rebuild.
+  let storesDirty = false;
+  let pointerIsDown = false;
+  let refreshTimer = 0;
+  function flushStoreRefresh() {
+    window.clearTimeout(refreshTimer);
+    if (!storesDirty || !isOpen) return;
+    if (pointerIsDown) {
+      refreshTimer = window.setTimeout(flushStoreRefresh, 200);
+      return;
+    }
+    storesDirty = false;
+    refreshAll();
+  }
+  document.addEventListener("pointerdown", () => (pointerIsDown = true), true);
+  document.addEventListener("pointerup", () => (pointerIsDown = false), true);
+  document.addEventListener("pointercancel", () => (pointerIsDown = false), true);
+
+  function open() {
+    welcomeOnce();
+    refreshAll();
     root.classList.add("vc-open");
     deps.toggleButton.setAttribute("aria-pressed", "true");
     deps.toggleButton.title = "Close controls (S)";
@@ -6543,6 +6574,11 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     },
     close,
     isOpen: () => isOpen,
+    refreshFromStores() {
+      storesDirty = true;
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(flushStoreRefresh, 150);
+    },
     update(
       frame: FeatureFrame | null,
       rawBands: Float32Array | null,

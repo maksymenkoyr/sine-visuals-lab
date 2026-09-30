@@ -1,4 +1,5 @@
 import { NUM_BANDS } from "./types.ts";
+import { registerSyncedStore } from "../net/syncedStores.ts";
 
 /**
  * Persisted low/mid/high crossover for src/render/bandEnergy.ts, tunable from
@@ -54,6 +55,13 @@ function clampSplit(split: BandSplit): BandSplit {
 
 let cache: BandSplit = loadInitial();
 let version = 0;
+
+// Re-seeds from localStorage after a synced snapshot / remote edit
+// (net/syncedStores.ts).
+registerSyncedStore(STORAGE_KEY, () => {
+  cache = loadInitial();
+  version++;
+});
 
 function persist(): void {
   try {

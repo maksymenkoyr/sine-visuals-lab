@@ -32,7 +32,29 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
  *  never read as a difference between preview and output. */
 export const VOLATILE_PREFIXES: readonly string[] = ["vibe.silenceGate", "vibe.autoGain"];
 
+/** Keys the output window mirrors but a remote-control link does NOT, because
+ *  they describe the machine, not the show: render quality and power, and the
+ *  input-side adaptive marks. (PRIVATE_KEYS are excluded from both.) */
+export const DEVICE_LOCAL_PREFIXES: readonly string[] = [
+  "vibe.quality",
+  "vibe.powerMode",
+  "vibe.silenceGate",
+  "vibe.autoGain",
+  "vibe.devPins",
+];
+
+/** Whether a remote-control link may carry this key (net/remoteSync.ts). */
+export function remoteSyncable(key: string): boolean {
+  return key.startsWith("vibe.") && !PRIVATE_KEYS.has(key) && !DEVICE_LOCAL_PREFIXES.some((p) => key.startsWith(p));
+}
+
 const hooks: Array<() => void> = [];
+
+/** Re-reads every registered store from localStorage — call after writing
+ *  keys into it. */
+export function runSyncedHooks(): void {
+  for (const reload of hooks) reload();
+}
 
 /** Runs after a snapshot is applied, once per distinct function. `key` only
  *  documents which store the hook belongs to. */
@@ -73,5 +95,5 @@ export function applySyncedStorage(
   }
   for (const k of existing) if (!(k in values) && !PRIVATE_KEYS.has(k)) storage.removeItem(k);
   for (const k of Object.keys(values)) storage.setItem(k, values[k]);
-  for (const reload of hooks) reload();
+  runSyncedHooks();
 }

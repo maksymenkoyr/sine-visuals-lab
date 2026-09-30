@@ -121,7 +121,32 @@ export class Room extends DurableObject<Env> {
       palette?: string;
       viewport?: unknown;
       targetId?: string;
+      to?: string;
+      body?: unknown;
     };
+
+    // Remote-control messages (src/net/remoteSync.ts): opaque to the DO. A
+    // renderer's go to the host(s), the host's to every renderer, or to one
+    // device when `to` names it. `from` is stamped here from the socket's own
+    // registration so a sender can't pose as another device.
+    if (m.type === "ctl" && m.body && typeof m.body === "object") {
+      const sender = ws.deserializeAttachment() as SocketAttachment | null;
+      if (!sender) return;
+      const out = JSON.stringify({ type: "ctl", from: sender.deviceId, body: m.body });
+      const targets =
+        typeof m.to === "string"
+          ? this.ctx.getWebSockets(m.to)
+          : this.ctx.getWebSockets(sender.role === "host" ? "renderer" : "host");
+      for (const target of targets) {
+        if (target === ws) continue;
+        try {
+          target.send(out);
+        } catch {
+          // Mid-close.
+        }
+      }
+      return;
+    }
 
     // Clock sync: echo the client's send time plus this DO's own wall
     // clock, immediately, so the client can estimate offset + RTT.
