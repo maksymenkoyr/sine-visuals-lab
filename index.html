@@ -264,6 +264,31 @@
         color: rgba(255, 255, 255, 0.8);
         white-space: nowrap;
       }
+      /* Pop-out output (src/ui/outputControls.ts): the state chip reads as
+       * plain text like #sceneVersion; it and GO turn amber while the output
+       * differs from the preview — amber is controlsTheme.ts's BANDS_AMBER,
+       * kept in sync by hand like the other colours in this file. */
+      #outState {
+        display: none;
+        margin-left: 4px;
+        font: 400 11px/36px "Share Tech Mono", ui-monospace, monospace;
+        letter-spacing: 0.1em;
+        color: rgba(255, 255, 255, 0.45);
+        white-space: nowrap;
+        transition: opacity 0.4s;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+      }
+      #outState.differs {
+        color: #f9b96c;
+      }
+      #goBtn.differs {
+        border-color: #f9b96c;
+        color: #f9b96c;
+      }
+      body.chrome-idle #outState {
+        opacity: 0;
+        pointer-events: none;
+      }
       #stopBtn::before {
         content: "";
         display: inline-block;
@@ -484,6 +509,10 @@
       <button id="backBtn" class="iconBtn" aria-label="Back to gallery">&#8249; GALLERY</button>
       <button id="stopBtn" class="iconBtn" title="Stop listening and release the audio source">STOP MIC</button>
       <button id="panelBtn" class="iconBtn" title="Screens paired to this room">&#9638; ROOM</button>
+      <button id="outBtn" class="iconBtn" aria-pressed="false">POP OUT</button>
+      <button id="cueBtn" class="iconBtn" aria-pressed="false" title="Hold the output while you tune; GO sends your changes" data-key="cue" data-keycap="K">CUE</button>
+      <button id="goBtn" class="iconBtn" title="Send this scene and its settings to the output" data-key="go" data-keycap="G">GO</button>
+      <span id="outState"></span>
       <span id="sceneVersion" tabindex="0"></span>
     </div>
     <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false" data-key="fullscreen" data-keycap="F">&#9974;</button>

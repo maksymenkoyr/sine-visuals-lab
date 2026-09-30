@@ -1,5 +1,6 @@
 import type { SignalId, SignalLink } from "./signals.ts";
 import { EXPANSION_DEFAULT, EXPANSION_MAX, EXPANSION_MIN } from "../audio/sensitivity.ts";
+import { registerSyncedStore } from "../net/syncedStores.ts";
 
 /**
  * Per-scene user-tunable parameters, uploaded to the shader as `uniform float
@@ -288,6 +289,13 @@ function loadInitial(): Store {
 
 const cache: Store = loadInitial();
 
+// Re-seeds the cache from localStorage — how the pop-out output window picks
+// up a snapshot (net/syncedStores.ts).
+registerSyncedStore(STORAGE_KEY, () => {
+  for (const k of Object.keys(cache)) delete cache[k];
+  Object.assign(cache, loadInitial());
+});
+
 function persist(): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
@@ -375,6 +383,9 @@ function createDeviceDial(storageKey: string, min: number, max: number, defaultV
   }
 
   let value = load();
+  registerSyncedStore(storageKey, () => {
+    value = load();
+  });
   return {
     get: (): number => value,
     set(next: number): void {

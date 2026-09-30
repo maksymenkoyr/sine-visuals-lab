@@ -1,4 +1,5 @@
 import { NUM_BANDS } from "../audio/types.ts";
+import { registerSyncedStore } from "../net/syncedStores.ts";
 import { LINE_HEIGHT_DEFAULT, LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, sanitizeLine } from "../audio/bandLine.ts";
 import { BEAT_GRIDS, BEAT_GRID_DEFAULT, LEGACY_BEAT_GRID_STORAGE_KEY, type BeatGridIndex } from "../audio/beatGrid.ts";
 import { SIGNALS } from "./signals.ts";
@@ -104,6 +105,12 @@ function loadInitial(): Store {
 }
 
 const cache: Store = loadInitial();
+
+// Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+registerSyncedStore(STORAGE_KEY, () => {
+  for (const k of Object.keys(cache)) delete cache[k];
+  Object.assign(cache, loadInitial());
+});
 
 function persist(): void {
   try {

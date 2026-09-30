@@ -59,6 +59,8 @@ export interface HitShape {
   floor: number;
 }
 
+import { registerSyncedStore } from "../net/syncedStores.ts";
+
 export const HIT_AMOUNT_MIN = 0;
 export const HIT_AMOUNT_MAX = 1;
 export const HIT_AMOUNT_DEFAULT = 0;
@@ -111,6 +113,18 @@ let amountCache = loadField(STORAGE_KEY_AMOUNT, HIT_AMOUNT_MIN, HIT_AMOUNT_MAX, 
 let kneeCache = loadField(STORAGE_KEY_KNEE, HIT_KNEE_MIN, HIT_KNEE_MAX, HIT_KNEE_DEFAULT);
 let loudnessCache = loadField(STORAGE_KEY_LOUDNESS, HIT_LOUDNESS_MIN, HIT_LOUDNESS_MAX, HIT_LOUDNESS_DEFAULT);
 let floorCache = loadField(STORAGE_KEY_FLOOR, HIT_FLOOR_MIN, HIT_FLOOR_MAX, HIT_FLOOR_DEFAULT);
+
+// Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+function reload(): void {
+  amountCache = loadField(STORAGE_KEY_AMOUNT, HIT_AMOUNT_MIN, HIT_AMOUNT_MAX, HIT_AMOUNT_DEFAULT);
+  kneeCache = loadField(STORAGE_KEY_KNEE, HIT_KNEE_MIN, HIT_KNEE_MAX, HIT_KNEE_DEFAULT);
+  loudnessCache = loadField(STORAGE_KEY_LOUDNESS, HIT_LOUDNESS_MIN, HIT_LOUDNESS_MAX, HIT_LOUDNESS_DEFAULT);
+  floorCache = loadField(STORAGE_KEY_FLOOR, HIT_FLOOR_MIN, HIT_FLOOR_MAX, HIT_FLOOR_DEFAULT);
+  snapshot = null;
+}
+for (const key of [STORAGE_KEY_AMOUNT, STORAGE_KEY_KNEE, STORAGE_KEY_LOUDNESS, STORAGE_KEY_FLOOR]) {
+  registerSyncedStore(key, reload);
+}
 
 function persist(): void {
   snapshot = null;
