@@ -1,4 +1,5 @@
 import type { QualityPreset } from "./quality.ts";
+import { registerSyncedStore } from "../net/syncedStores.ts";
 
 /**
  * User override for which quality preset drives rendering, global per device
@@ -44,6 +45,11 @@ function loadInitial(): QualityChoice {
 }
 
 let cache: QualityChoice = loadInitial();
+
+// Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+registerSyncedStore(STORAGE_KEY, () => {
+  cache = loadInitial();
+});
 
 function persist(): void {
   try {

@@ -1,4 +1,5 @@
 import type { FeatureFrame } from "../audio/types.ts";
+import { VOLATILE_PREFIXES } from "./syncedStores.ts";
 
 /**
  * The pop-out output window's message layer: what the main window (the
@@ -16,8 +17,10 @@ import type { FeatureFrame } from "../audio/types.ts";
  * and needs them *held* while Cue is on, so the output page is a renderer
  * in tv.ts's mould (same scene/anim/drive pipeline) fed by these messages
  * instead of the room socket. What crosses is:
- *  - `state`: scene + palette + a snapshot of every store registered in
- *    net/syncedStores.ts. The output applies it into a private in-memory
+ *  - `state`: scene + palette + a snapshot of every localStorage key the
+ *    app writes (net/syncedStores.ts — wholesale, so no store, present or
+ *    future, can be forgotten; Quality, master dials, Looks, drives, gate
+ *    marks all ride along). The output applies it into a private in-memory
  *    storage (net/outputStorage.ts), never the real localStorage the main
  *    window owns. Sent when the look changes (mirror mode), on Go, and when
  *    an output (re)connects.
@@ -46,7 +49,7 @@ export const DEFAULT_OUTPUT_PARAMS: OutputParams = { sens: 1, exp: 1, smoothing:
 export interface OutputState {
   scene: string;
   palette: string;
-  /** net/syncedStores.ts's captureSyncedStorage. */
+  /** Every mirrored localStorage key — net/syncedStores.ts's captureSyncedStorage. */
   storage: Record<string, string>;
   params: OutputParams;
 }
@@ -64,10 +67,13 @@ export type ToOutput = { t: "state"; state: OutputState } | { t: "frame"; f: Wir
 export type ToMain = { t: "hello"; haveState: boolean } | { t: "bye" };
 
 /** Identity of what the output is showing, for "does the output match the
- *  preview" — scene, palette and the synced stores. `params` is left out:
- *  Auto slews it continuously, which would read as a permanent difference. */
+ *  preview" — scene, palette and the stored settings. `params` and the keys
+ *  the main window rewrites on its own (VOLATILE_PREFIXES) are left out:
+ *  Auto slews them continuously, which would read as a permanent difference. */
 export function stateKey(s: OutputState): string {
-  const keys = Object.keys(s.storage).sort();
+  const keys = Object.keys(s.storage)
+    .filter((k) => !VOLATILE_PREFIXES.some((p) => k.startsWith(p)))
+    .sort();
   return JSON.stringify([s.scene, s.palette, keys.map((k) => [k, s.storage[k]])]);
 }
 

@@ -3,8 +3,9 @@
 import { outputStorage } from "./net/outputStorage.ts";
 import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
 import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
-import { detectQuality, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
+import { detectQuality, parseQualityPreset, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
 import { getScene, FULL_VIEWPORT, type Scene, type SceneContext } from "./render/scene.ts";
+import { getQualityChoice } from "./render/qualityPref.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, type Palette } from "./render/palette.ts";
 import { createAnimClock } from "./render/animClock.ts";
@@ -101,6 +102,12 @@ pinEverything();
 // ---- Rendering ----
 
 let quality: QualitySettings = qualitySettings("mid");
+/** What detectQuality() found on this window; used only while the main
+ *  window's Quality choice (render/qualityPref.ts, mirrored in) is Auto. */
+let detectedPreset: QualityPreset = "mid";
+/** The dev `?quality=` pin the main window passes along (net/outputBridge.ts's
+ *  open()): like app.ts, a pinned preset means no governor. */
+let pinned = false;
 let host: SceneHost;
 let sceneCtx: SceneContext;
 let scene: Scene | null = null;
@@ -119,8 +126,21 @@ function applyState(state: OutputState): void {
   applySyncedStorage(state.storage, outputStorage);
   inbox.setParams(state.params);
   palette = getPalette(state.palette);
+
+  // Same rule as app.ts's effectivePreset(): the main window's Quality
+  // choice wins, Auto falls back to this window's own benchmark. `quality`
+  // is mutated in place — the host's context and the governor hold it.
+  const choice = getQualityChoice();
+  const preset = choice === "auto" ? detectedPreset : choice;
+  const qualityChanged = preset !== quality.preset;
+  if (qualityChanged) {
+    Object.assign(quality, qualitySettings(preset));
+    governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
+  }
+
   const next = getScene(state.scene);
-  if (next && presetAllows(next, quality.preset) && next !== scene) {
+  if (next && presetAllows(next, quality.preset) && (next !== scene || qualityChanged)) {
+    // A quality change re-inits the scene too: geometry is sized at init.
     host.unmountAll();
     host.mount(next);
     scene = next;
@@ -146,8 +166,11 @@ async function main(): Promise<void> {
     console.error(err);
     return;
   }
-  quality = qualitySettings(await detectQuality());
-  governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
+  const devPin = import.meta.env.DEV ? parseQualityPreset(new URLSearchParams(location.search)) : null;
+  pinned = devPin !== null;
+  detectedPreset = devPin ?? (await detectQuality());
+  quality = qualitySettings(detectedPreset);
+  governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   host = createSceneHost(gl, quality);
   sceneCtx = host.ctx;
   hello();

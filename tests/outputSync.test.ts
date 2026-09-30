@@ -169,29 +169,47 @@ describe("createOutputPresence", () => {
   });
 });
 
+function fakeStorage(init: Record<string, string> = {}) {
+  const m = new Map<string, string>(Object.entries(init));
+  return {
+    m,
+    get length() {
+      return m.size;
+    },
+    key: (i: number) => [...m.keys()][i] ?? null,
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => void m.set(k, v),
+    removeItem: (k: string) => void m.delete(k),
+  };
+}
+
 describe("syncedStores", () => {
-  it("captures only registered keys and applies a snapshot through their reloaders", () => {
-    const priv = new Map<string, string>([["t.synced", "old"]]);
+  it("captures every key except the private ones, registered or not", () => {
+    const live = fakeStorage({
+      "vibe.sceneSettings": "{}",
+      "vibe.someFutureStore": "1",
+      "vibe.deviceId": "abc",
+      "vibe.keyTips": "{}",
+    });
+    expect(captureSyncedStorage(live)).toEqual({ "vibe.sceneSettings": "{}", "vibe.someFutureStore": "1" });
+  });
+
+  it("applies a snapshot wholesale and runs the store hooks after the write", () => {
+    const priv = fakeStorage({ "vibe.stale": "x", "vibe.deviceId": "keep" });
     let loaded: string | undefined;
     registerSyncedStore("t.synced", () => {
-      loaded = priv.get("t.synced");
+      loaded = priv.getItem("t.synced") ?? undefined;
     });
-    const live = new Map<string, string>([
-      ["t.synced", "live"],
-      ["t.other", "untouched"],
-    ]);
-    expect(captureSyncedStorage({ getItem: (k) => live.get(k) ?? null })).toEqual({ "t.synced": "live" });
-
-    const storage = {
-      setItem: (k: string, v: string) => void priv.set(k, v),
-      removeItem: (k: string) => void priv.delete(k),
-    };
-    applySyncedStorage({ "t.synced": "held" }, storage);
-    expect(priv.get("t.synced")).toBe("held");
+    applySyncedStorage({ "t.synced": "held" }, priv);
+    expect(priv.getItem("t.synced")).toBe("held");
     expect(loaded).toBe("held"); // the store re-read after the write
-    // A key the snapshot lacks is removed (a setting reset to default).
-    applySyncedStorage({}, storage);
-    expect(priv.has("t.synced")).toBe(false);
-    expect(loaded).toBeUndefined();
+    expect(priv.getItem("vibe.stale")).toBeNull(); // not in the snapshot -> gone
+    expect(priv.getItem("vibe.deviceId")).toBe("keep"); // private keys are left alone
+  });
+
+  it("does not count continuously rewritten keys as a difference", () => {
+    const a = stateKey(state("x", { "vibe.silenceGateClosed": "0.1" }));
+    const b = stateKey(state("x", { "vibe.silenceGateClosed": "0.2" }));
+    expect(a).toBe(b);
   });
 });

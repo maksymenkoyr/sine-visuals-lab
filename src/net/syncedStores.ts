@@ -1,68 +1,77 @@
 /**
- * The registry of localStorage-backed stores that shape what a scene looks
- * like — the ones a second renderer window (the pop-out output, see
- * outputSync.ts) has to copy from the main window to draw the same picture.
+ * What a second renderer window (the pop-out output, see outputSync.ts)
+ * copies from the main window: every localStorage key the app writes, except
+ * the ones in PRIVATE_KEYS. Wholesale on purpose — a store added next year is
+ * mirrored without anyone remembering to list it.
  *
- * Every such store is an in-memory cache seeded once from localStorage (see
- * render/sceneSettings.ts's header for the pattern), so copying the stored
- * text is not enough: the cache has to be re-read too. A store opts in with
- * one line at module level, `registerSyncedStore(KEY, reload)`, where
- * `reload` empties its cache and re-seeds it from localStorage. Nothing else
- * in the repo lists these keys, so a new store that forgets to register
- * simply isn't mirrored to the output — it never silently half-works.
+ * Copying the text is not enough, because stores are in-memory caches seeded
+ * once from localStorage (render/sceneSettings.ts's header has the pattern).
+ * A store whose cache the output renders from registers a hook,
+ * `registerSyncedStore(KEY, reload)`, that re-seeds it after a snapshot is
+ * applied. A store that forgets still gets its text mirrored, and re-reads it
+ * at the next output reload; the hook is what makes it live.
  *
  * Kept import-free on purpose: stores in render/ and audio/ both import it.
  */
 
-interface SyncedStore {
-  key: string;
-  reload: () => void;
+/** Keys that belong to one window or one person's chrome, never mirrored:
+ *  the room identity, panel/tip/toast state, and which audio source this
+ *  machine picked (the output gets frames, not audio). */
+export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
+  "vibe.deviceId",
+  "vibe.keyTips",
+  "vibe.panelFolds",
+  "vibe.hiddenInputs",
+  "vibe.bakeToast",
+  "vibe.audioSource",
+  "vibe.audioInputDevice",
+]);
+
+/** Key prefixes the main window rewrites continuously on its own (auto-
+ *  tracked marks): mirrored, but ignored by outputSync.ts's stateKey so they
+ *  never read as a difference between preview and output. */
+export const VOLATILE_PREFIXES: readonly string[] = ["vibe.silenceGate", "vibe.autoGain"];
+
+const hooks: Array<() => void> = [];
+
+/** Runs after a snapshot is applied, once per distinct function. `key` only
+ *  documents which store the hook belongs to. */
+export function registerSyncedStore(_key: string, reload: () => void): void {
+  if (!hooks.includes(reload)) hooks.push(reload);
 }
 
-const stores: SyncedStore[] = [];
+type Keyed = Pick<Storage, "getItem" | "key" | "length">;
 
-/** `reload` may be shared by several keys of one store (hit strength); the
- *  apply step below runs each distinct function once. */
-export function registerSyncedStore(key: string, reload: () => void): void {
-  stores.push({ key, reload });
-}
-
-/** The keys every registered store persists under, in registration order. */
-export function syncedStorageKeys(): string[] {
-  return stores.map((s) => s.key);
-}
-
-/** Every synced key's current stored text (absent keys omitted). */
-export function captureSyncedStorage(storage: Pick<Storage, "getItem">): Record<string, string> {
+/** Every mirrored key's current text. */
+export function captureSyncedStorage(storage: Keyed): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const { key } of stores) {
-    let raw: string | null = null;
-    try {
-      raw = storage.getItem(key);
-    } catch {
-      // Unreadable storage reads as "nothing stored" — the defaults.
+  try {
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (key === null || PRIVATE_KEYS.has(key)) continue;
+      const raw = storage.getItem(key);
+      if (raw !== null) out[key] = raw;
     }
-    if (raw !== null) out[key] = raw;
+  } catch {
+    // Unreadable storage reads as "nothing stored" — the defaults.
   }
   return out;
 }
 
-/** Writes a captured snapshot into `storage` (removing synced keys it lacks,
- *  so a setting reset to default there resets here too), then makes every
- *  store re-read it. The output window passes its private in-memory
- *  storage, never the real one the main window owns. */
+/** Makes `storage` hold exactly this snapshot (keys it lacks are removed, so
+ *  a setting reset to default there resets here too), then runs every store
+ *  hook. The output window passes its private in-memory storage, never the
+ *  real one the main window owns. */
 export function applySyncedStorage(
   values: Record<string, string>,
-  storage: Pick<Storage, "setItem" | "removeItem">,
+  storage: Pick<Storage, "setItem" | "removeItem" | "key" | "length">,
 ): void {
-  for (const { key } of stores) {
-    if (key in values) storage.setItem(key, values[key]);
-    else storage.removeItem(key);
+  const existing: string[] = [];
+  for (let i = 0; i < storage.length; i++) {
+    const k = storage.key(i);
+    if (k !== null) existing.push(k);
   }
-  const done = new Set<() => void>();
-  for (const { reload } of stores) {
-    if (done.has(reload)) continue;
-    done.add(reload);
-    reload();
-  }
+  for (const k of existing) if (!(k in values) && !PRIVATE_KEYS.has(k)) storage.removeItem(k);
+  for (const k of Object.keys(values)) storage.setItem(k, values[k]);
+  for (const reload of hooks) reload();
 }

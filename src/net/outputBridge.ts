@@ -29,6 +29,19 @@ export const OUTPUT_WINDOW_NAME = "svl-output";
 /** How often the look (scene, palette, synced stores) is re-read to spot a change. */
 const LOOK_POLL_MS = 120;
 
+/** The dev `?quality=`/`?tier=` pin, if this window has one, to hand on to the
+ *  output (render/quality.ts's parseQualityPreset) so both render alike. */
+function qualityPinQuery(): string {
+  const src = new URLSearchParams(location.search);
+  const out = new URLSearchParams();
+  for (const k of ["quality", "tier"]) {
+    const v = src.get(k);
+    if (v !== null) out.set(k, v);
+  }
+  const s = out.toString();
+  return s ? `?${s}` : "";
+}
+
 export interface Transport<Out, In> {
   post(msg: Out): void;
   onMessage(cb: (msg: In) => void): void;
@@ -65,7 +78,7 @@ export interface OutputBridgeOptions {
   /** The main window's current scene and palette ids. */
   look: () => { scene: string; palette: string };
   /** Defaults to the real localStorage. */
-  storage?: Pick<Storage, "getItem">;
+  storage?: Pick<Storage, "getItem" | "key" | "length">;
   openWindow?: () => Window | null;
 }
 
@@ -130,7 +143,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
       }
       win = opts.openWindow
         ? opts.openWindow()
-        : window.open(OUTPUT_URL, OUTPUT_WINDOW_NAME, "popup=yes,width=1280,height=720");
+        : window.open(OUTPUT_URL + qualityPinQuery(), OUTPUT_WINDOW_NAME, "popup=yes,width=1280,height=720");
     },
     status,
     onStatus: (cb) => listeners.push(cb),

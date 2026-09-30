@@ -102,6 +102,8 @@
  * there — this is what keeps every headless screenshot undimmed by default.
  */
 
+import { registerSyncedStore } from "../net/syncedStores.ts";
+
 const STORAGE_KEY_CLOSED = "vibe.silenceGateClosed";
 const STORAGE_KEY_OPEN = "vibe.silenceGateOpen";
 
@@ -161,6 +163,17 @@ let openCache = loadMark(STORAGE_KEY_OPEN, SILENCE_GATE_OPEN_DEFAULT);
 if (openCache < closedCache + SILENCE_GATE_MIN_WIDTH) {
   closedCache = Math.max(SILENCE_GATE_MIN, openCache - SILENCE_GATE_MIN_WIDTH);
 }
+
+// Re-seeds from localStorage for the pop-out output window (net/syncedStores.ts).
+registerSyncedStore(STORAGE_KEY_CLOSED, () => {
+  closedCache = loadMark(STORAGE_KEY_CLOSED, SILENCE_GATE_CLOSED_DEFAULT);
+  openCache = loadMark(STORAGE_KEY_OPEN, SILENCE_GATE_OPEN_DEFAULT);
+  if (openCache < closedCache + SILENCE_GATE_MIN_WIDTH) {
+    closedCache = Math.max(SILENCE_GATE_MIN, openCache - SILENCE_GATE_MIN_WIDTH);
+  }
+  snapshot = null;
+  autoOn = loadInitialAuto();
+});
 
 function persist(): void {
   snapshot = null;
