@@ -185,6 +185,10 @@ import { noteKeyUse } from "./ui/keyHints.ts";
 import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
 import type { ToMain, ToOutput } from "./net/outputSync.ts";
 import { createOutputControls, type OutputControls } from "./ui/outputControls.ts";
+import { createHostLink, createRemoteLink, type HostLink, type ModelPort, type RemoteLink } from "./net/remoteLink.ts";
+import { applyOps, MODEL_PALETTE, MODEL_SCENE, serializeValue, toModel, touchedKeys, type Model } from "./net/remoteSync.ts";
+import { captureSyncedStorage, remoteSyncable, runSyncedHooks } from "./net/syncedStores.ts";
+import { createJoinChip, hostBadgeText, remoteBadgeText, type JoinChip } from "./ui/remoteControls.ts";
 import { BANDS_AMBER, ensureControlsStyles } from "./ui/controlsTheme.ts";
 import { pinEverything } from "./pinnedAssets.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
@@ -435,6 +439,88 @@ let outputBridge: OutputBridge | null = null;
 let outputControls: OutputControls | null = null;
 let outputSens = 1;
 let outputExp = 1;
+
+// ---- Remote control (net/remoteSync.ts has the design) ----
+let hostLink: HostLink | null = null;
+let remoteLink: RemoteLink | null = null;
+/** `?room=CODE&remote=1`: a renderer that drives the host instead of watching
+ *  it — never falls back to its own mic. */
+let remoteMode = false;
+let joinChip: JoinChip | null = null;
+/** Per tab (sessionStorage): the room this host reuses across a reload, so a
+ *  linked remote finds it again, and whether it has allowed remote control. */
+const HOST_ROOM_KEY = "svl.hostRoom";
+const REMOTE_ARMED_KEY = "svl.remoteArmed";
+
+function remoteArmed(): boolean {
+  try {
+    return sessionStorage.getItem(REMOTE_ARMED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function captureModel(): Model {
+  const m = toModel(captureSyncedStorage(localStorage));
+  m[MODEL_SCENE] = scene.id;
+  m[MODEL_PALETTE] = palette.id;
+  return m;
+}
+
+function writeModelKeys(model: Model, keys: Iterable<string>): void {
+  for (const k of keys) {
+    if (k === MODEL_SCENE || k === MODEL_PALETTE || !remoteSyncable(k)) continue;
+    try {
+      const v = model[k];
+      if (v === undefined) localStorage.removeItem(k);
+      else localStorage.setItem(k, serializeValue(v));
+    } catch {
+      // Storage unavailable: the edit just won't persist across a reload.
+    }
+  }
+}
+
+/** Follow the model's scene/palette the way a local pick would. */
+function followModelLook(model: Model): void {
+  const sceneId = model[MODEL_SCENE];
+  if (typeof sceneId === "string" && sceneId !== scene.id) {
+    const s = getScene(sceneId);
+    if (s && presetAllows(s, quality.preset)) applyScene(s);
+  }
+  const paletteId = model[MODEL_PALETTE];
+  if (typeof paletteId === "string" && paletteId !== palette.id) applyPalette(getPalette(paletteId));
+}
+
+/** The app as a remote-control link sees it (net/remoteLink.ts's ModelPort). */
+const modelPort: ModelPort = {
+  capture: captureModel,
+  apply(ops) {
+    const cur = captureModel();
+    applyOps(cur, ops);
+    writeModelKeys(cur, touchedKeys(ops));
+    runSyncedHooks();
+    followModelLook(cur);
+    deviceMenu?.refreshFromStores();
+  },
+  adopt(model) {
+    writeModelKeys(model, new Set([...Object.keys(captureModel()), ...Object.keys(model)]));
+    runSyncedHooks();
+    followModelLook(model);
+    deviceMenu?.refreshFromStores();
+    // A remote that just linked from the gallery lands in the host's scene.
+    if (remoteMode && !inViz) navigate({ kind: "viz", sceneId: scene.id }, "replace");
+  },
+};
+
+function updateRoomBadge(): void {
+  if (!roomCode) return;
+  if (remoteLink) roomCodeEl.textContent = remoteBadgeText(roomCode, remoteLink.state());
+  else if (hostLink) roomCodeEl.textContent = hostBadgeText(roomCode, remoteArmed(), hostLink.remotes());
+}
+
+function syncJoinChip(): void {
+  joinChip?.setVisible(!inViz && !bypassGallery && !remoteMode);
+}
 let lastRenderFpsMs = 0;
 let lastFps = 0;
 
@@ -926,7 +1012,7 @@ function captureErrorMessage(choice: AudioSourceChoice, err: unknown): string {
  *  working while browsing — and is torn down only by an explicit
  *  swapAudioSource() or the capture's own track ending (onCaptureEnded above). */
 function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
-  if (syntheticFeed) return Promise.resolve();
+  if (syntheticFeed || remoteMode) return Promise.resolve(); // a remote never opens a mic
   if (audioPromise) return audioPromise;
   const choice = explicit ?? autoStartSource();
   if (choice === null) {
@@ -1384,6 +1470,7 @@ async function enterViz(next: Scene): Promise<void> {
   if (!bypassGallery) backBtn.style.display = "block";
   sceneVersion.style.display = "inline";
   outputControls?.setVisible(true);
+  syncJoinChip();
 
   if (mode !== "renderer") void ensureAudio();
   updateMicPrompt();
@@ -1406,6 +1493,7 @@ function exitToGallery(): void {
   outputControls?.setVisible(false);
   hideTooltip(); // a version hint left open by a tap mustn't follow us out
   audioPrompt.style.display = "none";
+  syncJoinChip();
   mainHost?.unmountAll();
   canvas.style.display = "none";
   immersive?.pause();
@@ -1485,7 +1573,11 @@ async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const joinCode = params.get("room");
   const wantsHostRole = params.get("role") === "host";
-  bypassGallery = !!joinCode && !wantsHostRole;
+  // A plain ?room=CODE is a watcher (no gallery); ?room=CODE&remote=1 is a
+  // controller, which keeps the gallery so it can pick scenes.
+  const asRenderer = !!joinCode && !wantsHostRole;
+  remoteMode = asRenderer && params.get("remote") === "1";
+  bypassGallery = asRenderer && !remoteMode;
 
   if (params.get("audio") === "synthetic") {
     const bpm = Number(params.get("bpm"));
@@ -1513,18 +1605,31 @@ async function boot(): Promise<void> {
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
 
-  if (bypassGallery) {
-    // Plain ?room=CODE — join as a mic-less renderer (e.g. a second laptop just watching).
+  if (asRenderer) {
+    // ?room=CODE — join as a mic-less renderer: a second laptop just watching,
+    // or (`remote=1`) one that controls the host.
     mode = "renderer";
     roomCode = joinCode!.toUpperCase();
-    rendererConn = new RendererConnection(roomCode);
-    startRendererDisconnectWatch();
+    rendererConn = new RendererConnection(roomCode, { reconnect: remoteMode });
+    if (!remoteMode) startRendererDisconnectWatch();
   } else {
     // No code -> create a fresh room and host it (the classic "open the site" flow).
     // ?room=CODE&role=host -> become host of a code someone else (a TV) already created.
     try {
-      roomCode = joinCode ? joinCode.toUpperCase() : await createRoomCode();
-      hostConn = new HostConnection(roomCode);
+      // A reload keeps the tab's room, so a linked remote finds the host again.
+      let remembered: string | null = null;
+      try {
+        remembered = sessionStorage.getItem(HOST_ROOM_KEY);
+      } catch {
+        // no sessionStorage: a reload just makes a new room
+      }
+      roomCode = joinCode ? joinCode.toUpperCase() : remembered && /^[A-Z2-9]{4}$/.test(remembered) ? remembered : await createRoomCode();
+      try {
+        sessionStorage.setItem(HOST_ROOM_KEY, roomCode);
+      } catch {
+        // see above
+      }
+      hostConn = new HostConnection(roomCode, { reconnect: true });
       mode = "host";
     } catch (err) {
       console.warn("Room server unreachable, running solo:", err);
@@ -1534,14 +1639,21 @@ async function boot(): Promise<void> {
   }
 
   if (mode === "host" && roomCode) {
-    roomCodeEl.textContent = `room: ${roomCode}`;
     roomCodeEl.style.display = "block";
-    const invite = createJoinScreen("renderer");
+    roomCodeEl.title = "Remote control: let another laptop or phone drive this one";
+    const invite = createJoinScreen("remote");
     invite.setCode(roomCode);
     roomCodeEl.addEventListener("click", () => {
+      try {
+        sessionStorage.setItem(REMOTE_ARMED_KEY, "1");
+      } catch {
+        // can't remember it across a reload; allowed for now
+      }
+      updateRoomBadge();
       invite.show();
-      window.setTimeout(() => invite.hide(), 8000);
     });
+  } else if (remoteMode && roomCode) {
+    roomCodeEl.style.display = "block";
   }
 
   wireDeviceMenu();
@@ -1554,12 +1666,22 @@ async function boot(): Promise<void> {
   });
   fsBtn.addEventListener("click", () => immersive!.toggle());
 
-  outputBridge = createOutputBridge({
-    transport: createBroadcastTransport<ToOutput, ToMain>(),
-    look: () => ({ scene: scene.id, palette: palette.id }),
-  });
-  outputControls = createOutputControls(outputBridge, { popBtn: outBtn, cueBtn, goBtn, stateEl: outStateEl });
+  const outputEls = { popBtn: outBtn, cueBtn, goBtn, stateEl: outStateEl };
+  if (remoteMode && rendererConn) {
+    // A remote drives the host's output window; it has none of its own.
+    remoteLink = createRemoteLink({ conn: rendererConn, port: modelPort });
+    remoteLink.onState(updateRoomBadge);
+    outputControls = createOutputControls(remoteLink.output, outputEls, { popOut: false });
+  } else {
+    outputBridge = createOutputBridge({
+      transport: createBroadcastTransport<ToOutput, ToMain>(),
+      look: () => ({ scene: scene.id, palette: palette.id }),
+    });
+    outputControls = createOutputControls(outputBridge, outputEls);
+    if (hostConn) hostLink = createHostLink({ conn: hostConn, port: modelPort, output: outputBridge, isArmed: remoteArmed, onRemotes: updateRoomBadge });
+  }
   outputControls.setVisible(inViz);
+  updateRoomBadge();
 
   void requestWakeLock();
   document.addEventListener("visibilitychange", () => {
@@ -1658,6 +1780,12 @@ async function boot(): Promise<void> {
   if (bypassGallery) {
     void enterViz(scene);
   } else {
+    // The gallery's way in to Remote control: type a host's code and this
+    // device becomes its controller (net/remoteSync.ts).
+    joinChip = createJoinChip((code) => {
+      location.href = `${location.pathname}?room=${code}&remote=1`;
+    });
+    syncJoinChip();
     gallery = createGallery({
       scenes: () =>
         listScenes().map((s) => {
@@ -1821,7 +1949,9 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     lastFluxRatio = null;
     lastGate = null;
     lastInputHealth = null;
-    return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
+    const synthetic = syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
+    hostConn?.sendFrame(synthetic); // a linked remote's preview follows it too
+    return synthetic;
   }
 
   if (mode === "solo") {
@@ -1943,7 +2073,7 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
-    if (rendererHasData && rendererConn.msSinceLastFrame > STALE_TIMEOUT_MS) {
+    if (!remoteMode && rendererHasData && rendererConn.msSinceLastFrame > STALE_TIMEOUT_MS) {
       void fallBackToSolo(rendererConn.connected ? "went quiet" : "disconnected");
     }
     return sampleToVisual(s);
@@ -1988,6 +2118,8 @@ function loop(): void {
   // window sits on the gallery, so a stray Esc never blanks the projector —
   // which is why the band-gained frame is built before the inViz return.
   const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
+  hostLink?.tick(nowRafMs);
+  remoteLink?.tick(nowRafMs);
   if (outputBridge) {
     outputBridge.update(nowRafMs);
     if (gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null }, { sens: outputSens, exp: outputExp, smoothing });
@@ -2164,6 +2296,7 @@ function idlePreviewActive(): boolean {
 function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): void {
   const frame = idlePreview.feed.frame(nowRafMs / 1000);
   const gained = applyBandGains(frame, getBandGains(scene.id));
+  hostConn?.sendFrame(frame);
   outputBridge?.pushFrame(gained, { beatRatio: null, wavePeak: null }, { sens: outputSens, exp: outputExp, smoothing });
   const anim = idlePreview.anim.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: null });
   idlePreview.latch.accumulate(anim);

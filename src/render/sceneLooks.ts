@@ -1,4 +1,5 @@
 import type { SceneSetting } from "./sceneSettings.ts";
+import { registerSyncedStore } from "../net/syncedStores.ts";
 import { getSceneSetting, setSceneSetting, settingDefault, variantFirst } from "./sceneSettings.ts";
 import { isAutoEnabled, seedAuto, setAutoEnabled } from "./autoTune.ts";
 import { defaultDriveSetting, sameDriveSetting, type DriveSetting } from "./drives.ts";
@@ -95,6 +96,13 @@ function loadInitial(): Store {
 }
 
 const cache: Store = loadInitial();
+
+// Re-seeds from localStorage after a synced snapshot / remote edit
+// (net/syncedStores.ts).
+registerSyncedStore(STORAGE_KEY, () => {
+  for (const k of Object.keys(cache)) delete cache[k];
+  Object.assign(cache, loadInitial());
+});
 
 function persist(): void {
   try {

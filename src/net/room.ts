@@ -12,6 +12,10 @@ import type { Viewport } from "../render/scene.ts";
  *  to desync from and no network hop in its own path. */
 export const RENDER_DELAY_MS = 120;
 
+/** Reconnect backoff (RoomConnectionBase's `reconnect` option). */
+const RECONNECT_MIN_MS = 1000;
+const RECONNECT_MAX_MS = 5000;
+
 /** Broadcast rate over the wire; local (own-screen) rendering stays at full framerate. */
 const BROADCAST_INTERVAL_MS = 1000 / 30;
 
@@ -87,6 +91,7 @@ export async function createRoomCode(): Promise<string> {
 
 type ControlMessage =
   | { type: "pong"; t0: number; tServer: number }
+  | { type: "ctl"; body: unknown; from?: string }
   | { type: "roster"; devices: RosterEntry[] }
   | { type: "command"; scene?: string; palette?: string; viewport?: Viewport };
 
@@ -114,6 +119,9 @@ function parseControlMessage(data: unknown): ControlMessage | null {
   if (m.type === "pong" && typeof m.t0 === "number" && typeof m.tServer === "number") {
     return { type: "pong", t0: m.t0, tServer: m.tServer };
   }
+  if (m.type === "ctl" && m.body && typeof m.body === "object") {
+    return { type: "ctl", body: m.body, from: typeof m.from === "string" ? m.from : undefined };
+  }
   if (m.type === "roster" && Array.isArray(m.devices)) {
     return { type: "roster", devices: m.devices as RosterEntry[] };
   }
@@ -139,29 +147,57 @@ abstract class RoomConnectionBase {
   private roster: RosterEntry[] = [];
   private rosterListeners: Array<(r: RosterEntry[]) => void> = [];
   private commandListeners: Array<(c: DeviceCommand) => void> = [];
+  private ctlListeners: Array<(body: unknown, from: string | undefined) => void> = [];
+  private openListeners: Array<() => void> = [];
   // Announcing a device is a "last write wins" fire-once call made right at
   // startup, often before the handshake finishes (e.g. while detectQuality()'s
   // benchmark is still running) — queue it and flush on open rather than
   // silently dropping it, or the device would never appear in anyone's roster.
-  private pendingHello: { scene: string; palette: string; viewport?: Viewport } | null = null;
+  // Kept after sending (not cleared) so a reconnect can announce again.
+  private lastHello: { scene: string; palette: string; viewport?: Viewport } | null = null;
+  private readonly reconnect: boolean;
+  private stopped = false;
+  private retryMs = RECONNECT_MIN_MS;
 
-  constructor(code: string, role: "host" | "renderer") {
-    this.ws = new WebSocket(wsUrl(code, role, this.deviceId));
-    this.ws.binaryType = "arraybuffer";
+  /** `opts.reconnect`: reopen the socket after a drop (backoff, capped) and
+   *  announce again. Off by default — the TV entry keeps its old behaviour;
+   *  the app turns it on for the host and for a remote controller. */
+  constructor(
+    private readonly code: string,
+    private readonly role: "host" | "renderer",
+    opts: { reconnect?: boolean } = {},
+  ) {
+    this.reconnect = opts.reconnect === true;
     this.clock = new ClockSync((t0) => {
       if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: "ping", t0 }));
     });
+    this.ws = this.openSocket();
+  }
 
-    this.ws.addEventListener("open", () => {
+  private openSocket(): WebSocket {
+    const ws = new WebSocket(wsUrl(this.code, this.role, this.deviceId));
+    ws.binaryType = "arraybuffer";
+    ws.addEventListener("open", () => {
       this._connected = true;
+      this.retryMs = RECONNECT_MIN_MS;
       this.clock.start();
-      if (this.pendingHello) this.ws.send(JSON.stringify({ type: "hello", ...this.pendingHello }));
+      if (this.lastHello) ws.send(JSON.stringify({ type: "hello", ...this.lastHello }));
+      for (const cb of this.openListeners) cb();
     });
-    this.ws.addEventListener("close", () => {
+    ws.addEventListener("close", () => {
+      if (ws !== this.ws) return; // a superseded socket
       this._connected = false;
       this.clock.stop();
+      if (this.reconnect && !this.stopped) {
+        const wait = this.retryMs;
+        this.retryMs = Math.min(RECONNECT_MAX_MS, this.retryMs * 2);
+        setTimeout(() => {
+          if (!this.stopped) this.ws = this.openSocket();
+        }, wait);
+      }
     });
-    this.ws.addEventListener("message", (e: MessageEvent) => this.onMessage(e.data));
+    ws.addEventListener("message", (e: MessageEvent) => this.onMessage(e.data));
+    return ws;
   }
 
   get connected(): boolean {
@@ -186,6 +222,26 @@ abstract class RoomConnectionBase {
     };
   }
 
+  /** Fires on the first open and on every reconnect. */
+  onOpen(cb: () => void): void {
+    this.openListeners.push(cb);
+  }
+
+  /** Remote-control messages (net/remoteSync.ts) relayed by the room: a
+   *  remote's reach the host, the host's reach every remote. `from` is the
+   *  sender's deviceId, stamped by the room, not the sender. */
+  onCtl(cb: (body: unknown, from: string | undefined) => void): void {
+    this.ctlListeners.push(cb);
+  }
+
+  /** Send a remote-control message — to the other side of the room, or, with
+   *  `to`, to one device. False if the socket isn't open (nothing is queued). */
+  sendCtl(body: unknown, to?: string): boolean {
+    if (this.ws.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify({ type: "ctl", to, body }));
+    return true;
+  }
+
   /** Fires when another device (typically a control panel) commands this one. */
   onCommand(cb: (c: DeviceCommand) => void): () => void {
     this.commandListeners.push(cb);
@@ -197,10 +253,9 @@ abstract class RoomConnectionBase {
   /** Announce (or update) this device's own scene/palette(+viewport) so the roster stays current.
    *  `viewport` is optional — omit it to leave the room's idea of this device's slice untouched. */
   sendHello(scene: string, palette: string, viewport?: Viewport): void {
-    this.pendingHello = { scene, palette, viewport };
+    this.lastHello = { scene, palette, viewport };
     if (this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "hello", scene, palette, viewport }));
-      this.pendingHello = null;
     }
   }
 
@@ -212,6 +267,7 @@ abstract class RoomConnectionBase {
   }
 
   close(): void {
+    this.stopped = true;
     this.clock.stop();
     this.ws.close();
   }
@@ -229,6 +285,8 @@ abstract class RoomConnectionBase {
     } else if (msg.type === "roster") {
       this.roster = msg.devices;
       for (const cb of this.rosterListeners) cb(this.roster);
+    } else if (msg.type === "ctl") {
+      for (const cb of this.ctlListeners) cb(msg.body, msg.from);
     } else if (msg.type === "command") {
       for (const cb of this.commandListeners) cb({ scene: msg.scene, palette: msg.palette, viewport: msg.viewport });
     }
@@ -264,8 +322,8 @@ abstract class RoomConnectionBase {
 export class HostConnection extends RoomConnectionBase {
   private lastSentMs = -Infinity;
 
-  constructor(code: string) {
-    super(code, "host");
+  constructor(code: string, opts?: { reconnect?: boolean }) {
+    super(code, "host", opts);
   }
 
   /** Alone in the room (roster is empty pre-hello, or just this device's own
@@ -291,8 +349,8 @@ export class HostConnection extends RoomConnectionBase {
 }
 
 export class RendererConnection extends RoomConnectionBase {
-  constructor(code: string) {
-    super(code, "renderer");
+  constructor(code: string, opts?: { reconnect?: boolean }) {
+    super(code, "renderer", opts);
   }
 
   protected override onMessage(data: unknown): void {

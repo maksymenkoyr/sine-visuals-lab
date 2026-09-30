@@ -1,4 +1,5 @@
 import { NUM_BANDS, type FeatureFrame } from "./types.ts";
+import { registerSyncedStore } from "../net/syncedStores.ts";
 
 /**
  * Per-scene mic sensitivity, expansion, and smoothing: three visual gain
@@ -81,6 +82,13 @@ export function createPerSceneSetting(
   }
 
   const cache: Record<string, number> = loadInitial();
+
+  // Re-seeds from localStorage after a synced snapshot / remote edit
+  // (net/syncedStores.ts).
+  registerSyncedStore(storageKey, () => {
+    for (const k of Object.keys(cache)) delete cache[k];
+    Object.assign(cache, loadInitial());
+  });
 
   function persist(): void {
     try {

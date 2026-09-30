@@ -15,6 +15,11 @@ import { NUM_BANDS } from "../audio/types.ts";
  *   [32..39] roomTimeMs, Float64
  * = 40 bytes. The DO relay never parses this — it's a client-only concern.
  *
+ * Not everything on the room socket is a feature frame: JSON `ctl` messages
+ * (Remote control — src/net/remoteSync.ts's header) ride the same socket in
+ * both directions, relayed opaquely by server/room.ts. They never touch this
+ * binary format, and a device that doesn't know them (the TV entry) ignores them.
+ *
  * bit1 (pulseOnset) was added after bit0 shipped — decodeFeatureFrame ORs it
  * with `onset` on decode (`(flags & 2) !== 0 || onset`) so a sender that
  * predates bit1 (never sets it, always 0) still decodes as pulseOnset =

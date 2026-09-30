@@ -100,6 +100,14 @@ socket, with Cue/Go to hold or send what it shows. Everything about it — why
 `tv.ts` itself couldn't be reused, the message layer, what crosses — is the header
 of `src/net/outputSync.ts`; `src/net/outputBridge.ts` is the main window's end.
 
+## Remote control
+
+One laptop, iPad or phone driving another over the room connection: the host
+keeps the audio, the render and the output window; a remote (`?room=CODE&remote=1`)
+runs the normal panel against the host's frames and edits the host's stored
+settings, scene and Cue/Go. The design, merge rule and join/reconnect behaviour
+are the header of `src/net/remoteSync.ts`; `src/net/remoteLink.ts` is the glue.
+
 ## Where the quality/perf ceiling comes from
 
 `src/render/quality.ts` (`detectQuality`) picks a quality preset once at

@@ -1,4 +1,5 @@
-import type { OutputBridge, OutputStatus } from "../net/outputBridge.ts";
+import type { OutputStatus } from "../net/outputBridge.ts";
+import type { OutputPanel } from "../net/remoteLink.ts";
 
 /**
  * The scene-nav buttons for the pop-out output window (index.html's
@@ -28,12 +29,19 @@ export interface OutputControls {
   toggleCue(): boolean;
 }
 
-export function createOutputControls(bridge: OutputBridge, els: OutputControlElements): OutputControls {
+/** `opts.popOut: false` hides POP OUT — a remote controller (net/remoteLink.ts)
+ *  drives the host's output window but cannot open it. */
+export function createOutputControls(
+  bridge: OutputPanel,
+  els: OutputControlElements,
+  opts: { popOut?: boolean } = {},
+): OutputControls {
   const { popBtn, cueBtn, goBtn, stateEl } = els;
   let visible = false;
+  const popOut = opts.popOut !== false;
 
   function render(s: OutputStatus): void {
-    popBtn.style.display = visible ? "block" : "none";
+    popBtn.style.display = visible && popOut ? "block" : "none";
     popBtn.textContent = s.open ? "OUTPUT ●" : "POP OUT";
     popBtn.setAttribute("aria-pressed", String(s.open));
     popBtn.title = s.open ? "Output window is open — click to bring it to the front" : "Open the scene in its own window for a second screen or projector";

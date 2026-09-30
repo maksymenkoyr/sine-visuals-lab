@@ -6,8 +6,8 @@ import { drawQrCode } from "./qr.ts";
  * for an existing host inviting spectators to join as mic-less renderers —
  * scanning it must not create a second competing host in the same room.
  */
-export function joinUrlFor(code: string, role: "host" | "renderer"): string {
-  const query = role === "host" ? `room=${code}&role=host` : `room=${code}`;
+export function joinUrlFor(code: string, role: "host" | "renderer" | "remote"): string {
+  const query = role === "host" ? `room=${code}&role=host` : role === "remote" ? `room=${code}&remote=1` : `room=${code}`;
   return `${location.origin}/?${query}`;
 }
 
@@ -23,7 +23,7 @@ export interface JoinScreen {
  * expansion of the host's small room-code badge elsewhere.
  */
 export function createJoinScreen(
-  role: "host" | "renderer",
+  role: "host" | "renderer" | "remote",
   container: HTMLElement = document.body,
 ): JoinScreen {
   const root = document.createElement("div");
@@ -35,7 +35,8 @@ export function createJoinScreen(
   `;
 
   const title = document.createElement("div");
-  title.textContent = role === "host" ? "Scan to start the music" : "Scan to join the room";
+  title.textContent =
+    role === "host" ? "Scan to start the music" : role === "remote" ? "Scan to control this show" : "Scan to join the room";
   // Fixed size first as a fallback for TV browsers without clamp() (pre-Chrome 79); clamp() wins where supported.
   title.style.cssText = "font-weight: 600; opacity: 0.85; font-size: 22px; font-size: clamp(16px, 2.6vw, 26px);";
 
@@ -54,6 +55,9 @@ export function createJoinScreen(
     "font-family: ui-monospace, monospace; opacity: 0.5; font-size: 13px; font-size: clamp(11px, 1.4vw, 15px);";
 
   root.append(title, qrCanvas, codeEl, hint);
+  // The TV's own screen stays up until a host connects; every other one is an
+  // on-demand overlay and closes on a click.
+  if (role !== "host") root.addEventListener("click", () => (root.style.display = "none"));
   container.appendChild(root);
 
   return {

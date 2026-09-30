@@ -93,7 +93,8 @@ after all three pass; include the screenshot paths in your summary.
 | A scene's per-item settings (several strains/layers/objects with the same controls) or a custom widget in its Scene card | `src/render/sceneItems.ts` header, then `src/ui/widgets/registry.ts` header — items compile to plain keyed settings; widgets are data in `Scene.panel` |
 | Making a setting audio-reactive (what it reacts to: a hit, a grid tick, a level, a drawn frequency line) | `src/render/drives.ts` header — a scene reads `<key>Drive(…)`, never a signal directly |
 | Anything the site records about its visitors, or `PRIVACY.md` | `server/usage.ts` header — the one usage count, what it stores, and the `?me=1` owner flag |
-| The pop-out output window, Cue/Go, or a new localStorage-backed store that changes how a scene looks (it must register with `src/net/syncedStores.ts` to reach the output) | `src/net/outputSync.ts` header |
+| The pop-out output window or Cue/Go | `src/net/outputSync.ts` header |
+| Remote control (one laptop/phone driving another over the room), or a new in-memory cache over localStorage that a remote edit must reach (register it with `src/net/syncedStores.ts`) | `src/net/remoteSync.ts` header, then `src/net/remoteLink.ts` |
 | The saved-look share-code format | `src/render/sceneLooks.ts` header — links in the wild outlive the schema |
 | The build target (`es2017`) | `vite.config.ts`, the comment at the `target:` line |
 | A scene that hashes a noise lattice, or adds a growing phase to a noise coordinate | `src/render/noiseHash.ts` header — the mobile seams fix, and the two halves every scene must take together |
