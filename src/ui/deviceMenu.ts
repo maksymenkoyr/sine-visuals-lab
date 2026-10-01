@@ -50,6 +50,7 @@ import { BAND_FADER_COUNT } from "../audio/bandGains.ts";
 import { LINE_STRENGTH_DEFAULT } from "../audio/bandLine.ts";
 import {
   defaultDriveSetting,
+  driveCeiling,
   DRIVE_WEIGHT_MAX,
   DRIVE_WEIGHT_MIN,
   gateConditionIndices,
@@ -3202,17 +3203,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (n < 2) return;
       const xs = (k: number) => (k / (RING - 1)) * w;
       const at = (k: number) => (ringHead - RING + k + 1 + RING * 2) % RING;
-      // The chart grows to fit: several sources added together can go past
-      // 1, and a scene's line rides above the signal — clipping both at 1
-      // flattened the result against the top and hid the line.
-      let top = 1;
-      for (let k = RING - n; k < RING; k++) {
-        const idx = at(k);
-        top = Math.max(top, combined[idx]!);
-        for (const trace of perSource) top = Math.max(top, trace[idx]!);
-        for (const trace of markTraces.values()) if (trace[idx]! >= 0) top = Math.max(top, trace[idx]!);
-      }
-      top *= 1.05;
+      // A fixed top: the most this setting can receive (driveCeiling — every
+      // source at full scale), so the top of the graph always means that and
+      // the trace never rescales as peaks scroll out of the 4 s window. A
+      // scene's own mark line that rides above the signal clips at the top.
+      // Read live: a weight drag swaps the stored setting without rebuilding
+      // this graph, so the captured `patch` would keep the old top.
+      const live = deps.getDriveSetting(sceneId, spec);
+      const top = Math.max(0.05, driveCeiling(live === "scene" ? patch : live, spec.drive?.gain ?? 1));
       const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v / top)) * (h - 6);
 
       if (isGate) {
@@ -3263,6 +3261,23 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         ctx.stroke();
       }
       ctx.setLineDash([]);
+      if (top !== 1) {
+        // Where 1.0 (the normal maximum) sits, and the top's own number.
+        if (top > 1) {
+          ctx.setLineDash([2, 3]);
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = MARK_LINE;
+          ctx.beginPath();
+          ctx.moveTo(0, ys(1));
+          ctx.lineTo(w, ys(1));
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        ctx.font = `400 10px ${FONT_MONO}`;
+        ctx.textBaseline = "top";
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.fillText(top.toFixed(1), 4, 3);
+      }
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.6;
       ctx.beginPath();
