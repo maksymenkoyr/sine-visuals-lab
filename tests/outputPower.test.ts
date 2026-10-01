@@ -1,12 +1,14 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   clampResolution,
+  getOutputCastMode,
   getOutputPowerMode,
   getOutputQualityChoice,
   getOutputResolution,
   getPreviewQualityChoice,
   getPreviewResolution,
   getPreviewSize,
+  OUTPUT_CAST_DEFAULT,
   OUTPUT_POWER_MODE_DEFAULT,
   OUTPUT_QUALITY_DEFAULT,
   PREVIEW_QUALITY_DEFAULT,
@@ -15,6 +17,7 @@ import {
   RESOLUTION_DEFAULT,
   RESOLUTION_MAX,
   RESOLUTION_MIN,
+  setOutputCastMode,
   setOutputPowerMode,
   setOutputQualityChoice,
   setOutputResolution,
@@ -33,6 +36,8 @@ describe("output/preview settings", () => {
     expect(OUTPUT_POWER_MODE_DEFAULT).toBe("off");
     expect(PREVIEW_QUALITY_DEFAULT).toBe("floor");
     expect(PREVIEW_SIZE_DEFAULT).toBe("half");
+    expect(OUTPUT_CAST_DEFAULT).toBe("off");
+    expect(getOutputCastMode()).toBe("off");
     expect(getOutputQualityChoice()).toBe("high");
     expect(getOutputPowerMode()).toBe("off");
     expect(getPreviewQualityChoice()).toBe("floor");
@@ -51,6 +56,10 @@ describe("output/preview settings", () => {
     for (const m of ["auto", "on", "off"] as const) {
       setOutputPowerMode(m);
       expect(getOutputPowerMode()).toBe(m);
+    }
+    for (const c of ["off", "on", "soft"] as const) {
+      setOutputCastMode(c);
+      expect(getOutputCastMode()).toBe(c);
     }
     for (const s of ["third", "half", "full"] as const) {
       setPreviewSize(s);
@@ -101,6 +110,7 @@ describe("seeding from localStorage", () => {
     const data: Record<string, string> = {
       "vibe.output.quality": "mid",
       "vibe.output.powerMode": "auto",
+      "vibe.output.cast": "soft",
       "vibe.preview.quality": "auto",
       "vibe.preview.size": "full",
       "vibe.output.resolution": "0.5",
@@ -111,6 +121,7 @@ describe("seeding from localStorage", () => {
     const fresh = await import("../src/render/outputPower.ts");
     expect(fresh.getOutputQualityChoice()).toBe("mid");
     expect(fresh.getOutputPowerMode()).toBe("auto");
+    expect(fresh.getOutputCastMode()).toBe("soft");
     expect(fresh.getPreviewQualityChoice()).toBe("auto");
     expect(fresh.getPreviewSize()).toBe("full");
     expect(fresh.getOutputResolution()).toBe(0.5);
@@ -121,6 +132,7 @@ describe("seeding from localStorage", () => {
     const data: Record<string, string> = {
       "vibe.output.quality": "ultra",
       "vibe.output.powerMode": "maybe",
+      "vibe.output.cast": "huge",
       "vibe.preview.quality": "",
       "vibe.preview.size": "huge",
       "vibe.output.resolution": "sharp",
@@ -131,6 +143,7 @@ describe("seeding from localStorage", () => {
     const fresh = await import("../src/render/outputPower.ts");
     expect(fresh.getOutputQualityChoice()).toBe("high");
     expect(fresh.getOutputPowerMode()).toBe("off");
+    expect(fresh.getOutputCastMode()).toBe("off");
     expect(fresh.getPreviewQualityChoice()).toBe("floor");
     expect(fresh.getPreviewSize()).toBe("half");
     expect(fresh.getOutputResolution()).toBe(RESOLUTION_DEFAULT);

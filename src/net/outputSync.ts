@@ -1,5 +1,6 @@
 import type { FeatureFrame } from "../audio/types.ts";
 import type { HeldEffects } from "../render/heldEffects.ts";
+import type { CastMode } from "../render/outputPower.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
@@ -56,8 +57,9 @@ import { SHELF_KEYS, VOLATILE_PREFIXES } from "./syncedStores.ts";
  *    they describe the room and the mic, not the look, so a held look never
  *    keeps stale ones (and under Auto the stored marks stay at their defaults
  *    while the controller's room-floor tracker moves the real ones).
- *  - `power`: the output's own Quality, Energy saving and Resolution choice
- *    (render/outputPower.ts). Not part of the look, so Cue never holds it and
+ *  - `power`: the output's own Quality, Energy saving, Resolution and Cast
+ *    choice (render/outputPower.ts; Cast is how it is drawn for Chrome's
+ *    Cast). Not part of the look, so Cue never holds it and
  *    the synced snapshot never carries it: it is how this window renders.
  *    Re-sent with every heartbeat reply, so a missed one heals.
  *  - `effects`: the held effects (render/heldEffects.ts's EFFECTS) the main
@@ -112,12 +114,14 @@ export interface WireFrame extends FeatureFrame {
   gate?: SilenceGateMarks;
 }
 
-/** How the output window renders: its Quality choice, Energy saving mode and
- *  Resolution scale (outputPower.ts's RESOLUTION_MIN..RESOLUTION_MAX). */
+/** How the output window renders: its Quality choice, Energy saving mode,
+ *  Resolution scale (outputPower.ts's RESOLUTION_MIN..RESOLUTION_MAX) and
+ *  Cast mode (render/outputPower.ts). */
 export interface OutputPower {
   quality: QualityChoice;
   mode: PowerMode;
   resolution: number;
+  cast: CastMode;
 }
 
 /** The output window's live render readouts — the fields of the Power card's
