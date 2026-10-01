@@ -684,17 +684,23 @@ export interface DeviceMenuDeps {
   getPowerStatus: () => PowerStatus;
   /** True while a pop-out output window is open: the main Power card then
    *  describes this window's preview (titled "Preview", Quality bound to the
-   *  preview's own choice) and gains the size row below. */
+   *  preview's own choice) and gains the size and resolution rows. */
   isPreview: () => boolean;
   getPreviewSize: () => PreviewSize;
   onPreviewSizeChange: (size: PreviewSize) => void;
+  /** The preview's and the output's Resolution scale (src/render/outputPower.ts),
+   *  a fraction from RESOLUTION_MIN to RESOLUTION_MAX. */
+  getPreviewResolution: () => number;
+  onPreviewResolutionChange: (value: number) => void;
   /** The pop-out output's live render readouts, null while none is open —
    *  the second, "Output" Power card shows only while this is non-null. */
   getOutputPowerStatus: () => OutputRenderStatus | null;
-  /** The output's own Quality choice and Energy saving (src/render/outputPower.ts),
-   *  edited on the Output card and sent to its window. */
+  /** The output's own Quality choice, Resolution and Energy saving
+   *  (src/render/outputPower.ts), edited on the Output card and sent to its window. */
   getOutputQualityChoice: () => QualityChoice;
   onOutputQualityChoiceChange: (choice: QualityChoice) => void;
+  getOutputResolution: () => number;
+  onOutputResolutionChange: (value: number) => void;
   getOutputPowerMode: () => PowerMode;
   onOutputPowerModeChange: (mode: PowerMode) => void;
   /** The button that opens this menu — excluded from the tap-outside
@@ -2027,9 +2033,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
 
   // ---- power column: energy saving mode ----
   // Leftmost — a compact card, not a scrolling stack, so it isn't wired into
-  // the digit-block keyboard jump (renumberBlocks/markBlock): its only
-  // controls are plain chip buttons, outside the .vc-slider/.vc-toggle/
-  // .vc-fader Tab ring, the same as the palette chips they're modeled on.
+  // the digit-block keyboard jump (renumberBlocks/markBlock): its controls
+  // are plain chip buttons plus the Resolution slider, all kept outside the
+  // Tab ring (ringElements() skips this column), the same as the palette
+  // chips they're modeled on.
   const powerCard = createPowerCard({
     getPowerMode: deps.getPowerMode,
     onPowerModeChange: deps.onPowerModeChange,
@@ -2039,6 +2046,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     isPreview: deps.isPreview,
     getPreviewSize: deps.getPreviewSize,
     onPreviewSizeChange: deps.onPreviewSizeChange,
+    getResolution: deps.getPreviewResolution,
+    onResolutionChange: deps.onPreviewResolutionChange,
   });
   // The pop-out output's own Power card, under the main one, shown only
   // while an output window is open. Same card, other deps: its status is
@@ -2049,6 +2058,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       onPowerModeChange: deps.onOutputPowerModeChange,
       getQualityChoice: deps.getOutputQualityChoice,
       onQualityChoiceChange: deps.onOutputQualityChoiceChange,
+      getResolution: deps.getOutputResolution,
+      onResolutionChange: deps.onOutputResolutionChange,
       getPowerStatus: () => {
         const s = deps.getOutputPowerStatus();
         return {
@@ -6433,9 +6444,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // only ever appended into a source line, this card's own assembly
   // section) — a control inside any of those would otherwise sit in the
   // ring and fail to focus.
+  // The Power column's Resolution slider is left out, as its chips are: a
+  // folded Power card is only visibility:hidden (it keeps its layout box), so
+  // it would pass the filter below and Tab would dead-end on a hidden control.
   function ringElements(): HTMLElement[] {
     return [...root.querySelectorAll<HTMLElement>(".vc-slider, .vc-toggle, .vc-picker, .vc-fader")].filter(
-      (el) => el.getClientRects().length > 0,
+      (el) => el.getClientRects().length > 0 && !el.closest(".vc-power-col"),
     );
   }
 

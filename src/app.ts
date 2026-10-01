@@ -147,12 +147,16 @@ import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render
 import {
   getOutputPowerMode,
   getOutputQualityChoice,
+  getOutputResolution,
   getPreviewQualityChoice,
+  getPreviewResolution,
   getPreviewSize,
   PREVIEW_SIZE_FRACTION,
   setOutputPowerMode,
   setOutputQualityChoice,
+  setOutputResolution,
   setPreviewQualityChoice,
+  setPreviewResolution,
   setPreviewSize,
   type PreviewSize,
 } from "./render/outputPower.ts";
@@ -324,7 +328,12 @@ const effectivePreset = (): QualityPreset => (qualityChoice === "auto" ? detecte
  *  `power` message. */
 let previewChoice: QualityChoice = getPreviewQualityChoice();
 let previewSize: PreviewSize = getPreviewSize();
-let outputPower: OutputPower = { quality: getOutputQualityChoice(), mode: getOutputPowerMode() };
+let previewResolution = getPreviewResolution();
+let outputPower: OutputPower = {
+  quality: getOutputQualityChoice(),
+  mode: getOutputPowerMode(),
+  resolution: getOutputResolution(),
+};
 /** True while an output window is open and a scene is showing: recomputed
  *  every tick (render loop, right after outputBridge.update). */
 let previewActive = false;
@@ -340,6 +349,11 @@ function renderPreset(): QualityPreset {
   const wanted = previewChoice === "auto" ? detectedPreset : previewChoice;
   const floor = scene.minQuality;
   return floor && presetRank(floor) > presetRank(wanted) ? floor : wanted;
+}
+/** The scale this window's canvas is resized by: the quality's own, times the
+ *  preview's Resolution while an output is open (render/outputPower.ts). */
+function renderScale(): number {
+  return quality.renderScale * (previewActive ? previewResolution : 1);
 }
 /** The main fullscreen GL context — created once at boot and kept alive for
  *  the whole session; only which scene is mounted on it changes. */
@@ -1469,11 +1483,22 @@ function wireDeviceMenu(): void {
       previewSize = size;
       applyPreviewBox();
     },
+    getPreviewResolution: () => previewResolution,
+    onPreviewResolutionChange: (value) => {
+      setPreviewResolution(value);
+      previewResolution = getPreviewResolution();
+    },
     getOutputPowerStatus: () => outputBridge?.outputStatus() ?? null,
     getOutputQualityChoice: () => outputPower.quality,
     onOutputQualityChoiceChange: (choice) => {
       setOutputQualityChoice(choice);
       outputPower = { ...outputPower, quality: choice };
+      outputBridge?.sendPower();
+    },
+    getOutputResolution: () => outputPower.resolution,
+    onOutputResolutionChange: (value) => {
+      setOutputResolution(value);
+      outputPower = { ...outputPower, resolution: getOutputResolution() };
       outputBridge?.sendPower();
     },
     getOutputPowerMode: () => outputPower.mode,
@@ -1925,7 +1950,7 @@ async function boot(): Promise<void> {
         fps: lastFps,
         vis: lastVis,
         anim: lastAnim,
-        renderScale: quality.renderScale,
+        renderScale: renderScale(),
         govLevel: governor?.level ?? 0,
         deepMono: lastDeepMono,
         sampleRate: capture?.context.sampleRate ?? null,
@@ -2289,7 +2314,7 @@ function drawScene(
   lastRenderFpsMs = nowRafMs;
   lastRenderMs = nowRafMs;
 
-  const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
+  const resized = resizeCanvasToDisplaySize(canvas, renderScale());
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
 
   const displayFrame = applySensitivity(gained, sensitivity, expansion);
