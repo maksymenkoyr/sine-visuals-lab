@@ -306,11 +306,14 @@ describe("caustics sparkle sub-param mapping", () => {
 // focusSharp is the single function this scene's git history keeps breaking
 // one invariant of at a time (see the FOCUS_SNAP_RATIO comment): a fixed
 // ceiling that made every focus setting snap to the same peak (so the
-// slider stopped moving the actual snap), or a floor that scaled together
+// slider stopped moving the actual swing), or a floor that scaled together
 // with the peak (so the slider read as "merely thinner lines", not more
-// snap). These pin all three properties simultaneously.
-describe("caustics focus snap / fog", () => {
-  it("uFocus = 0 means no snap at all, at any beatPulse", () => {
+// pulse). The pulse itself was reversed when the slider was renamed Fog
+// pulse (a beat now hazes *down* toward Fog's soft end, the reciprocal of
+// the old Focus snap's multiply), but these invariants are the same three,
+// stated for the new direction.
+describe("caustics Fog pulse / fog", () => {
+  it("uFocus = 0 means no pulse at all, at any beatPulse", () => {
     for (const fog of [0, 0.4, 1]) {
       const rest = focusSharp(fog, 0, 0);
       for (const beatPulse of [0.3, 0.7, 1]) {
@@ -328,30 +331,33 @@ describe("caustics focus snap / fog", () => {
     }
   });
 
-  it("sharp is non-decreasing in uFocus at any fixed fog/beatPulse (the historical inversion regression)", () => {
+  it("sharp is non-increasing in uFocus at any fixed fog/beatPulse (more pulse = more haze)", () => {
     for (const fog of [0, 0.4, 0.7, 1]) {
       for (const beatPulse of [0, 0.3, 0.7, 1]) {
         let prev = focusSharp(fog, 0, beatPulse);
         for (let focus = 0.1; focus <= 1; focus += 0.1) {
           const s = focusSharp(fog, focus, beatPulse);
-          expect(s).toBeGreaterThanOrEqual(prev - 1e-9);
+          expect(s).toBeLessThanOrEqual(prev + 1e-9);
           prev = s;
         }
       }
     }
   });
 
-  it("stays filamentary at the defaults, matching the scene's original swing (~2x, never collapsing to pure fog)", () => {
+  it("a full beat at the defaults hazes by the scene's original swing (~1.91x softer), without collapsing to pure fog", () => {
     const rest = focusSharp(0.4, 0.7, 0);
-    const peak = focusSharp(0.4, 0.7, 1);
+    const pulsed = focusSharp(0.4, 0.7, 1);
     expect(rest).toBeGreaterThan(8);
-    expect(peak / rest).toBeCloseTo(1.91, 1);
+    expect(rest / pulsed).toBeCloseTo(1.91, 1);
+    expect(pulsed).toBeGreaterThan(4);
   });
 
-  it("never exceeds FOCUS_SHARP_MAX (the anti pixel-ladder ceiling) regardless of inputs", () => {
+  it("never exceeds the resting sharpness, and never reaches zero, regardless of inputs", () => {
     for (let i = 0; i < 200; i++) {
-      const s = focusSharp(Math.random(), Math.random(), Math.random());
-      expect(s).toBeLessThanOrEqual(18 + 1e-9);
+      const fog = Math.random();
+      const s = focusSharp(fog, Math.random(), Math.random());
+      expect(s).toBeLessThanOrEqual(fogRestingSharp(fog) + 1e-9);
+      expect(s).toBeGreaterThan(0);
     }
   });
 

@@ -562,19 +562,38 @@ reference-measurement workflow used by later scenes.
   `levelValue`); `loudSwellDrive`, `SWELL_ZOOM`, `SWELL_FLOOR_LIFT`,
   `uLoudSwell` and the second jack read (`swellValue`, the one that needed
   `LOUD_NEUTRAL` as its rest) are gone.
+- 2026-09-29 — Focus snap rebuilt as **Fog pulse**, on the user's ask to
+  "rebuild a bit focus snap… logic the same… name a bit different, something
+  related to fog… put them in the same colour group… make it reverse". Three
+  parts, all in `caustics.ts` + its tests: (1) the label became Fog pulse and
+  the two rows Fog/Fog pulse got `family: "Fog"` — Caustics' third colour
+  family, taking the next accent in first-seen order after Beat ripple and
+  Drift speed; (2) the direction reversed while the logic stayed a pure
+  operator on Fog's resting value: `focusSharp` now *divides* rest by
+  `(1 + focus·beat·FOCUS_SNAP_RATIO)` instead of multiplying it up, so a beat
+  hazes the ridges toward Fog's soft end rather than snapping them crisp,
+  always positive and never above rest — which retires `FOCUS_SHARP_MAX`
+  (dead under the divide; the anti-ladder `fwidth` cap in FRAG stays for the
+  crisp-resting case); (3) the key stays `focus` (uFocus, `focusSharp`,
+  `focusDrive`), so wire format, saved looks, drive wiring, auto weights and
+  the baked default are untouched. The resting look at any Fog setting is
+  unchanged; only the on-beat direction flipped. `tests/caustics.test.ts`
+  now pins non-increasing monotonicity in focus ("more pulse = more haze")
+  and "never above rest, never zero" in place of the old snap's ceiling case.
 
 ## Tuning notes
 
 - Fog sets the resting sharpness and dark-water floor cut (0 = crisp threads on
-  black water, 1 = hazy, glowing wash); Focus is a pure multiplier on top of it,
-  driven by the beat pulse — 0 means no snap at all, and dragging Focus never moves
-  the resting look (`fogRestingSharp`, `focusSharp`).
-- `FOCUS_SHARP_MAX` and the `fwidth`-based per-ridge exponent cap in `FRAG` exist
-  specifically to keep the ridge's `pow()` short of a step function — past that
-  point it "pixel-ladders" into a rainbow-fringed stair-step, worst exactly where
-  the domain warp bunches several octaves' contours together and exactly on a beat
-  (when sharp jumps). A maxed Focus snap against a maxed Mid turbulence is the case
-  to eyeball for it.
+  black water, 1 = hazy, glowing wash); Fog pulse is a pure divisor on top of it,
+  driven by the beat pulse — 0 means no pulse at all, a full reading pulls a beat
+  ~1/2.1 as sharp as rest (at the setting's own default), and dragging Fog pulse
+  never moves the resting look (`fogRestingSharp`, `focusSharp`).
+- The `fwidth`-based per-ridge exponent cap in `FRAG` exists specifically to keep
+  the ridge's `pow()` short of a step function — past that point it "pixel-ladders"
+  into a rainbow-fringed stair-step, worst exactly where the domain warp bunches
+  several octaves' contours together. Fog pulse can't trigger it any more (its beat
+  only ever widens lines); the case to eyeball is a crisp resting look (Fog low)
+  against a maxed Mid turbulence.
 - Speed boost reads `advanceLoudSwell`'s own slow-contracting (tens-of-seconds)
   calibration of `FeatureFrame.level`, not `frame.energy`, so it settles into the
   room or playback's own observed range instead of re-normalizing away the very
@@ -678,7 +697,7 @@ reference-measurement workflow used by later scenes.
 
 - `npm run dev`, then open the scene directly:
   `/?audio=synthetic&bpm=120#/v/caustics` (any query goes before the hash).
-- `tests/caustics.test.ts` pins the drift-rate, focus-snap and loudness
+- `tests/caustics.test.ts` pins the drift-rate, Fog pulse and loudness
   calibration (`advanceLoudSwell`) invariants directly; Beat ripple's own
   emission and profile invariants
   (`advanceEmission`, `rippleEnvelope`, `createRippleEmitter`, `buildProfile`)

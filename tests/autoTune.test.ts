@@ -501,16 +501,16 @@ describe("auto-on store: legacy-key migration and false-entry pruning", () => {
   });
 });
 
-describe("caustics Focus snap auto weights", () => {
-  // Regression guard on the weight change in caustics.ts's `focus` spec.
+describe("caustics Fog pulse auto weights", () => {
+  // Regression guard on the weight change in caustics.ts's `focus` spec
+  // (labelled Fog pulse; key still `focus`).
   // The old weights ({ pulse: 0.35, attack: 0.25 }) displaced focus by
   // ~0.20 from its default on a steady percussive track and held it there
   // for the whole track — `pulse` alone floors near 0.92 once tempo locks
   // (it's 60% tempoLock, which saturates for almost any music with a steady
-  // beat), so this wasn't a rare edge case. Focus sitting near 1 saturates
-  // the beat snap against FOCUS_SHARP_MAX on nearly every hit rather than
-  // responding to a specific one (the failure mode the setting's own
-  // comment in caustics.ts describes).
+  // beat), so this wasn't a rare edge case. Focus sitting near 1 makes every
+  // hit pull the same near-max haze rather than responding to a specific one
+  // (the failure mode the setting's own comment in caustics.ts describes).
   //
   // The bounds are on the *displacement* from the default, not the absolute
   // value: defaults get baked from dialled-in values by Option+D
