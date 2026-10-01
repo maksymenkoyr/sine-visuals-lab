@@ -589,9 +589,10 @@ function wireOutputKeys(controls: OutputControls): void {
   window.addEventListener(
     "keydown",
     (e) => {
+      // Option is allowed here: Play is pressed while Cue is held, and Space's
+      // auto-repeat then carries altKey — it must stay a Cue, not cancel the Play.
       if (
         e.code === "Space" &&
-        !e.altKey &&
         !e.ctrlKey &&
         !e.metaKey &&
         !e.shiftKey &&

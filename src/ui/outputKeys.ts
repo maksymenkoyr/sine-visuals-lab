@@ -9,7 +9,10 @@ import { GLIDE_MAX_MS, GLIDE_MIN_MS } from "../net/outputGlide.ts";
  *    the output back (net/outputSync.ts's createCueController). app.ts takes
  *    it in the capture phase while an output window is open, so it can't also
  *    press whichever button or checkbox has focus. Cmd+Space / Ctrl+Space are
- *    macOS's own and never reach the page; any modifier held makes it not ours.
+ *    macOS's own and never reach the page; Cmd, Ctrl or Shift held makes it
+ *    not ours. Option is let through: Play while Cue is held sends what the
+ *    Cue shows as the new look, and Space's auto-repeat then carries Option —
+ *    it must not read as the chord that cancels the Play.
  *  - Option (Alt) is Play, on a bare press only: a quick tap sends the look
  *    across at once, a longer hold charges and, on release, glides there over
  *    GLIDE_PER_HOLD times the hold (net/outputGlide.ts says what moves
