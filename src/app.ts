@@ -145,11 +145,13 @@ import type { OnsetDiag } from "./audio/onsetDiag.ts";
 import { getPowerMode, setPowerMode, type PowerMode } from "./render/powerMode.ts";
 import { getQualityChoice, setQualityChoice, type QualityChoice } from "./render/qualityPref.ts";
 import {
+  getOutputCastMode,
   getOutputPowerMode,
   getOutputQualityChoice,
   getPreviewQualityChoice,
   getPreviewSize,
   PREVIEW_SIZE_FRACTION,
+  setOutputCastMode,
   setOutputPowerMode,
   setOutputQualityChoice,
   setPreviewQualityChoice,
@@ -324,7 +326,7 @@ const effectivePreset = (): QualityPreset => (qualityChoice === "auto" ? detecte
  *  `power` message. */
 let previewChoice: QualityChoice = getPreviewQualityChoice();
 let previewSize: PreviewSize = getPreviewSize();
-let outputPower: OutputPower = { quality: getOutputQualityChoice(), mode: getOutputPowerMode() };
+let outputPower: OutputPower = { quality: getOutputQualityChoice(), mode: getOutputPowerMode(), cast: getOutputCastMode() };
 /** True while an output window is open and a scene is showing: recomputed
  *  every tick (render loop, right after outputBridge.update). */
 let previewActive = false;
@@ -1480,6 +1482,12 @@ function wireDeviceMenu(): void {
     onOutputPowerModeChange: (mode) => {
       setOutputPowerMode(mode);
       outputPower = { ...outputPower, mode };
+      outputBridge?.sendPower();
+    },
+    getOutputCastMode: () => outputPower.cast,
+    onOutputCastModeChange: (cast) => {
+      setOutputCastMode(cast);
+      outputPower = { ...outputPower, cast };
       outputBridge?.sendPower();
     },
     getPowerStatus: () => ({

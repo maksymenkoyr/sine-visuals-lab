@@ -1,4 +1,5 @@
 import type { FeatureFrame } from "../audio/types.ts";
+import type { CastMode } from "../render/outputPower.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
@@ -38,8 +39,8 @@ import { VOLATILE_PREFIXES } from "./syncedStores.ts";
  *    main window's resolved Sensitivity/Expansion/Smoothing for its scene;
  *    it is left off unless the output shows the preview live (Cue held, or
  *    the two match), so a held look keeps the numbers it was sent with.
- *  - `power`: the output's own Quality and Energy saving choice
- *    (render/outputPower.ts). Not part of the look, so Cue never holds it and
+ *  - `power`: the output's own Quality, Energy saving and Cast choice
+ *    (render/outputPower.ts; Cast is how it is drawn for Chrome's Cast). Not part of the look, so Cue never holds it and
  *    the synced snapshot never carries it: it is how this window renders.
  *    Re-sent with every heartbeat reply, so a missed one heals.
  *  - `hello`/`bye` from the output: a once-a-second heartbeat (so the main
@@ -78,10 +79,12 @@ export interface WireFrame extends FeatureFrame {
   p?: OutputParams;
 }
 
-/** How the output window renders: its Quality choice and Energy saving mode. */
+/** How the output window renders: its Quality choice, Energy saving mode and
+ *  Cast mode (render/outputPower.ts). */
 export interface OutputPower {
   quality: QualityChoice;
   mode: PowerMode;
+  cast: CastMode;
 }
 
 /** The output window's live render readouts — the fields of the Power card's

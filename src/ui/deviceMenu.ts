@@ -96,7 +96,7 @@ import {
 import { createJack, setRowFed, type JackHandle } from "./jack.ts";
 import { createCableLayer, type CableGroupSpec, type CableSourceSpec } from "./cableLayer.ts";
 import { createPowerCard, type PowerStatus } from "./powerCard.ts";
-import type { PreviewSize } from "../render/outputPower.ts";
+import type { CastMode, PreviewSize } from "../render/outputPower.ts";
 import type { OutputRenderStatus } from "../net/outputSync.ts";
 import { isFolded, setFolded, METERS_COLUMN } from "./panelFolds.ts";
 import type { PowerMode } from "../render/powerMode.ts";
@@ -694,6 +694,8 @@ export interface DeviceMenuDeps {
    *  edited on the Output card and sent to its window. */
   getOutputQualityChoice: () => QualityChoice;
   onOutputQualityChoiceChange: (choice: QualityChoice) => void;
+  getOutputCastMode: () => CastMode;
+  onOutputCastModeChange: (mode: CastMode) => void;
   getOutputPowerMode: () => PowerMode;
   onOutputPowerModeChange: (mode: PowerMode) => void;
   /** The button that opens this menu — excluded from the tap-outside
@@ -2046,6 +2048,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     {
       getPowerMode: deps.getOutputPowerMode,
       onPowerModeChange: deps.onOutputPowerModeChange,
+      getCastMode: deps.getOutputCastMode,
+      onCastModeChange: deps.onOutputCastModeChange,
       getQualityChoice: deps.getOutputQualityChoice,
       onQualityChoiceChange: deps.onOutputQualityChoiceChange,
       getPowerStatus: () => {

@@ -11,6 +11,7 @@ import { createAnimClock } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
+import { CAST_BUFFER_HEIGHT, CAST_FPS, CAST_SOFT_BLUR_PX } from "./render/outputPower.ts";
 import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createDriveEngine } from "./render/drives.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
@@ -110,7 +111,7 @@ let detectedPreset: QualityPreset = "mid";
 /** The output's own Quality and Energy saving (render/outputPower.ts), as the
  *  main window's Output Power card last sent them. The defaults are the
  *  stores' own, for the moment before the first `power` message arrives. */
-let power: OutputPower = { quality: "high", mode: "off" };
+let power: OutputPower = { quality: "high", mode: "off", cast: "off" };
 /** A dev pin wins over the choice so headless `?quality=` captures stay
  *  reproducible; otherwise Auto falls back to this window's benchmark. */
 const resolvePreset = (): QualityPreset => (pinned || power.quality === "auto" ? detectedPreset : power.quality);
@@ -219,6 +220,7 @@ transport.onMessage((m) => {
     } else inbox.push(m.f, performance.now());
   } else if (m.t === "power") {
     power = m.power;
+    canvas.style.filter = power.cast === "soft" ? `blur(${CAST_SOFT_BLUR_PX}px)` : "";
     if (host) applyQuality();
   }
 });
@@ -290,13 +292,19 @@ async function main(): Promise<void> {
     const displayFrame = applySensitivity(frame, p.sens, p.exp);
     driveEngine.accumulate(dtSec, frame, displayFrame.energy, anim, scene.id, scene.settings ?? []);
 
-    const interval = power.mode === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(quality.preset);
+    const casting = power.cast !== "off";
+    let interval = power.mode === "on" ? 1000 / RENDER_FPS_CAP_FLOOR : targetFrameIntervalMs(quality.preset);
+    if (casting) interval = Math.max(interval, 1000 / CAST_FPS);
     if (!shouldRenderFrame(nowMs, lastRenderMs, interval)) return;
     if (lastRenderFpsMs > 0 && nowMs > lastRenderFpsMs) lastFps = 1000 / (nowMs - lastRenderFpsMs);
     lastRenderFpsMs = nowMs;
     lastRenderMs = nowMs;
 
-    const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
+    const resized = resizeCanvasToDisplaySize(
+      canvas,
+      quality.renderScale,
+      casting ? { dpr: 1, maxHeight: CAST_BUFFER_HEIGHT } : undefined,
+    );
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);
 
     const latchedAnim = renderLatch.consume(anim, nowMs);

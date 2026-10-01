@@ -31,7 +31,7 @@ function setup() {
     transport: t.transport,
     look: () => ({ scene: "spectrum", palette: "neon" }),
     storage,
-    power: () => ({ quality: "mid", mode: "auto" }),
+    power: () => ({ quality: "mid", mode: "auto", cast: "soft" }),
   });
   return { ...t, bridge };
 }
@@ -50,7 +50,7 @@ describe("outputBridge status and power", () => {
     const { posted, receive } = setup();
     receive({ t: "hello", haveState: false });
     expect(posted[0].t).toBe("state");
-    expect(posted[posted.length - 1]).toEqual({ t: "power", power: { quality: "mid", mode: "auto" } });
+    expect(posted[posted.length - 1]).toEqual({ t: "power", power: { quality: "mid", mode: "auto", cast: "soft" } });
     // A heartbeat from a window that has its state only re-sends power.
     posted.length = 0;
     receive({ t: "hello", haveState: true });
@@ -63,7 +63,7 @@ describe("outputBridge status and power", () => {
     expect(posted).toEqual([]);
     receive({ t: "status", s: status });
     bridge.sendPower();
-    expect(posted).toEqual([{ t: "power", power: { quality: "mid", mode: "auto" } }]);
+    expect(posted).toEqual([{ t: "power", power: { quality: "mid", mode: "auto", cast: "soft" } }]);
   });
 
   it("a goodbye clears the status", () => {
