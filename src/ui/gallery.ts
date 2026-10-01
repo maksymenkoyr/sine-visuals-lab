@@ -5,7 +5,7 @@ import { createSyntheticFeed } from "../audio/synthetic.ts";
 import { createPreviewRenderer, type PreviewRenderer } from "../render/previewRenderer.ts";
 import { createAnimClock, type AnimClock } from "../render/animClock.ts";
 import { PALETTES, type Palette } from "../render/palette.ts";
-import { SOURCE_URL } from "../brand.ts";
+import { INSTAGRAM_URL, SOURCE_URL } from "../brand.ts";
 import { BUILD_INFO, channelBadge, versionHint, versionHref, versionLabel } from "../version.ts";
 import { sceneVersionOf } from "../render/sceneVersions.ts";
 import { bindHint, hideTooltip } from "./tooltip.ts";
@@ -564,8 +564,12 @@ export function createGallery(deps: GalleryDeps): Gallery {
   privacyLink.href = "/PRIVACY.txt";
   privacyLink.target = "_blank";
   privacyLink.rel = "noopener";
+  const instagramLink = el("a", "", "Instagram");
+  instagramLink.href = INSTAGRAM_URL;
+  instagramLink.target = "_blank";
+  instagramLink.rel = "noopener";
   const footLinks = el("div", "gal-foot-links");
-  footLinks.append(sourceLink, licensesLink, privacyLink);
+  footLinks.append(sourceLink, instagramLink, licensesLink, privacyLink);
   foot.append(versionLink, footLinks);
 
   page.append(mast, errorBanner, released, draftSection, foot);
