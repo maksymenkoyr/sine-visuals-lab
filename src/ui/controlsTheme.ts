@@ -857,6 +857,34 @@ body.vc-keys-reveal [data-keycap]::after {
  * .vc-cable-cond's 9/6 or .vc-cable-preview's 3/3 so it reads as its own,
  * quieter thing rather than a variant of either. */
 .vc-cable-muted { fill: none; stroke-width: 1; stroke-dasharray: 14 8; opacity: 0.3; }
+/* Pressing a cable unplugs it (src/ui/cableLayer.ts's onPress, wired by
+ * src/ui/deviceMenu.ts's cableGroupFor). The layer above stays
+ * pointer-events:none, so this transparent hit stroke over the cable's own
+ * .vc-cable-g group is the only part that answers the pointer — its width,
+ * not the visible core's, is what makes a thin cable easy to press — and
+ * pressing is jack.ts-style click (its mousedown never moves focus). The
+ * same stroke carries the hover lift: a neon-ish glow in the cable's own
+ * colour (the group carries that colour as its CSS "color", so the
+ * drop-shadow below resolves per cable via currentColor — a tight bloom
+ * plus a wider halo, eased in on both), the core thicker and at full
+ * opacity, the glow layer brighter and wider, the flow spark brighter,
+ * the muted flat path brighter still. Preview/scene-mix cables never grow
+ * a hit stroke (no per-source press), so they stay purely decorative and
+ * never light up like this. */
+.vc-cable-hit { fill: none; stroke: transparent; stroke-width: 14; stroke-linecap: round; pointer-events: stroke; cursor: pointer; }
+.vc-cable-g { transition: filter 0.15s ease; }
+.vc-cable-core { transition: stroke-width 0.12s ease, opacity 0.12s ease; }
+.vc-cable-glow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
+.vc-cable-flow { transition: opacity 0.12s ease; }
+.vc-cable-muted { transition: opacity 0.12s ease; }
+.vc-cable-g:hover { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor); }
+.vc-cable-g:hover .vc-cable-core { stroke-width: 3; opacity: 1; }
+.vc-cable-g:hover .vc-cable-glow { opacity: 0.5; stroke-width: 9; }
+.vc-cable-g:hover .vc-cable-flow { opacity: 1; }
+.vc-cable-g:hover .vc-cable-muted { opacity: 0.8; }
+@media (prefers-reduced-motion: reduce) {
+  .vc-cable-g, .vc-cable-core, .vc-cable-glow, .vc-cable-flow, .vc-cable-muted { transition: none; }
+}
 
 /* "Pick a setting first" — a jack clicked with nothing pinned and nothing
  * ever previewed (deviceMenu.ts's showToast). */
