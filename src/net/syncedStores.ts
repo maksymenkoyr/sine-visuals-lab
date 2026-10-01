@@ -31,6 +31,7 @@ export const PRIVATE_KEYS: ReadonlySet<string> = new Set([
   "vibe.powerMode",
   "vibe.output.quality",
   "vibe.output.powerMode",
+  "vibe.output.cast",
   "vibe.preview.quality",
   "vibe.preview.size",
 ]);

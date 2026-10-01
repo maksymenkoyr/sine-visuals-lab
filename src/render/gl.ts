@@ -160,18 +160,51 @@ function getCssSize(canvas: HTMLCanvasElement): CssSize {
   return size;
 }
 
+/** Overrides for a window drawn at a fixed, device-independent size (the
+ *  output under Cast, render/outputPower.ts): `dpr` replaces the device's
+ *  pixel density, `maxHeight` caps the buffer's height, width following. */
+export interface BufferLimits {
+  dpr?: number;
+  maxHeight?: number;
+}
+
+/** The drawing buffer for a CSS box: size * density * renderScale, within
+ *  `limits`. Pure, so the Cast sizing is testable. */
+export function displayBufferSize(
+  cssWidth: number,
+  cssHeight: number,
+  deviceDpr: number,
+  renderScale: number,
+  limits: BufferLimits = {},
+): { width: number; height: number } {
+  const dpr = limits.dpr ?? Math.min(deviceDpr || 1, 2);
+  let width = cssWidth * dpr * renderScale;
+  let height = cssHeight * dpr * renderScale;
+  if (limits.maxHeight !== undefined && height > limits.maxHeight) {
+    width *= limits.maxHeight / height;
+    height = limits.maxHeight;
+  }
+  return { width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)) };
+}
+
 /**
- * Resizes the canvas backing store to CSS size * devicePixelRatio * renderScale.
+ * Resizes the canvas backing store to CSS size * devicePixelRatio * renderScale
+ * (within `limits`, if given).
  * Returns true if the size actually changed (caller should gl.viewport() then).
  */
 export function resizeCanvasToDisplaySize(
   canvas: HTMLCanvasElement,
   renderScale: number,
+  limits?: BufferLimits,
 ): boolean {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const cssSize = getCssSize(canvas);
-  const width = Math.max(1, Math.round(cssSize.width * dpr * renderScale));
-  const height = Math.max(1, Math.round(cssSize.height * dpr * renderScale));
+  const { width, height } = displayBufferSize(
+    cssSize.width,
+    cssSize.height,
+    window.devicePixelRatio,
+    renderScale,
+    limits,
+  );
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
