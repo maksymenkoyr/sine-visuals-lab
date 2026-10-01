@@ -155,8 +155,8 @@ import { createValueTrigger, stepValueTrigger, VALUE_TRIGGER_UPPER_DEFAULT, type
  * setting and nothing else changes: `value()`/`valueOf()` return the
  * caller's own `rest` argument (default 0) in that case, skipping `gain`
  * and the generic gate entirely, rather than reading `combine()`'s honest 0
- * for an empty sum. A caller whose neutral silence isn't 0 (Caustics'
- * `driftLevel` swell, physarum2's `nutrient`) passes its own `rest`; every
+ * for an empty sum. A caller whose neutral silence isn't 0 (physarum2's
+ * `nutrient`) passes its own `rest`; every
  * other caller's implicit 0 is exactly right for a hit-only setting (Beat
  * flash, Beat ripple) that simply has nothing to react to. `uniformPair()`
  * has no `rest` of its own — an unplugged patch still uploads `{drive: 0,
