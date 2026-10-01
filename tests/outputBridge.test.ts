@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createOutputBridge, type Transport } from "../src/net/outputBridge.ts";
-import type { OutputRenderStatus, ToMain, ToOutput } from "../src/net/outputSync.ts";
+import type { OutputPower, OutputRenderStatus, ToMain, ToOutput } from "../src/net/outputSync.ts";
 
 function fakeTransport() {
   const posted: ToOutput[] = [];
@@ -25,13 +25,16 @@ const status: OutputRenderStatus = {
   bufferHeight: 1080,
 };
 
+// A non-default resolution, so the expectations below also show it travels.
+const POWER: OutputPower = { quality: "mid", mode: "auto", resolution: 0.5 };
+
 function setup() {
   const t = fakeTransport();
   const bridge = createOutputBridge({
     transport: t.transport,
     look: () => ({ scene: "spectrum", palette: "neon" }),
     storage,
-    power: () => ({ quality: "mid", mode: "auto" }),
+    power: () => POWER,
   });
   return { ...t, bridge };
 }
@@ -50,7 +53,7 @@ describe("outputBridge status and power", () => {
     const { posted, receive } = setup();
     receive({ t: "hello", haveState: false });
     expect(posted[0].t).toBe("state");
-    expect(posted[posted.length - 1]).toEqual({ t: "power", power: { quality: "mid", mode: "auto" } });
+    expect(posted[posted.length - 1]).toEqual({ t: "power", power: POWER });
     // A heartbeat from a window that has its state only re-sends power.
     posted.length = 0;
     receive({ t: "hello", haveState: true });
@@ -63,7 +66,7 @@ describe("outputBridge status and power", () => {
     expect(posted).toEqual([]);
     receive({ t: "status", s: status });
     bridge.sendPower();
-    expect(posted).toEqual([{ t: "power", power: { quality: "mid", mode: "auto" } }]);
+    expect(posted).toEqual([{ t: "power", power: POWER }]);
   });
 
   it("a goodbye clears the status", () => {

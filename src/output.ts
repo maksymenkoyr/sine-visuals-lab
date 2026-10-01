@@ -20,6 +20,7 @@ import { pinEverything } from "./pinnedAssets.ts";
 import { createBroadcastTransport } from "./net/outputBridge.ts";
 import { createGlide, type Glide } from "./net/outputGlide.ts";
 import { createFrameInbox, type OutputPower, type OutputState, type ToMain, type ToOutput } from "./net/outputSync.ts";
+import { clampResolution, RESOLUTION_DEFAULT } from "./render/outputPower.ts";
 import { applySyncedStorage } from "./net/syncedStores.ts";
 
 /**
@@ -107,10 +108,10 @@ let quality: QualitySettings = qualitySettings("mid");
 /** What detectQuality() found on this window; used only while the output's
  *  Quality choice is Auto (or a dev pin, which stands in for it). */
 let detectedPreset: QualityPreset = "mid";
-/** The output's own Quality and Energy saving (render/outputPower.ts), as the
- *  main window's Output Power card last sent them. The defaults are the
+/** The output's own Quality, Energy saving and Resolution (render/outputPower.ts),
+ *  as the main window's Output Power card last sent them. The defaults are the
  *  stores' own, for the moment before the first `power` message arrives. */
-let power: OutputPower = { quality: "high", mode: "off" };
+let power: OutputPower = { quality: "high", mode: "off", resolution: RESOLUTION_DEFAULT };
 /** A dev pin wins over the choice so headless `?quality=` captures stay
  *  reproducible; otherwise Auto falls back to this window's benchmark. */
 const resolvePreset = (): QualityPreset => (pinned || power.quality === "auto" ? detectedPreset : power.quality);
@@ -296,7 +297,9 @@ async function main(): Promise<void> {
     lastRenderFpsMs = nowMs;
     lastRenderMs = nowMs;
 
-    const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
+    // Resolution multiplies the quality's scale (governor steps included), so
+    // it takes effect on this very resize — no remount, unlike a Quality change.
+    const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale * clampResolution(power.resolution));
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);
 
     const latchedAnim = renderLatch.consume(anim, nowMs);

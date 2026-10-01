@@ -1,17 +1,25 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
+  clampResolution,
   getOutputPowerMode,
   getOutputQualityChoice,
+  getOutputResolution,
   getPreviewQualityChoice,
+  getPreviewResolution,
   getPreviewSize,
   OUTPUT_POWER_MODE_DEFAULT,
   OUTPUT_QUALITY_DEFAULT,
   PREVIEW_QUALITY_DEFAULT,
   PREVIEW_SIZE_DEFAULT,
   PREVIEW_SIZE_FRACTION,
+  RESOLUTION_DEFAULT,
+  RESOLUTION_MAX,
+  RESOLUTION_MIN,
   setOutputPowerMode,
   setOutputQualityChoice,
+  setOutputResolution,
   setPreviewQualityChoice,
+  setPreviewResolution,
   setPreviewSize,
 } from "../src/render/outputPower.ts";
 
@@ -29,6 +37,8 @@ describe("output/preview settings", () => {
     expect(getOutputPowerMode()).toBe("off");
     expect(getPreviewQualityChoice()).toBe("floor");
     expect(getPreviewSize()).toBe("half");
+    expect(getOutputResolution()).toBe(RESOLUTION_DEFAULT);
+    expect(getPreviewResolution()).toBe(RESOLUTION_DEFAULT);
   });
 
   it("round-trips a set", () => {
@@ -46,6 +56,32 @@ describe("output/preview settings", () => {
       setPreviewSize(s);
       expect(getPreviewSize()).toBe(s);
     }
+  });
+
+  it("round-trips a resolution and clamps it into range", () => {
+    setOutputResolution(0.5);
+    setPreviewResolution(0.75);
+    expect(getOutputResolution()).toBe(0.5);
+    expect(getPreviewResolution()).toBe(0.75);
+    setOutputResolution(0);
+    expect(getOutputResolution()).toBe(RESOLUTION_MIN);
+    setPreviewResolution(4);
+    expect(getPreviewResolution()).toBe(RESOLUTION_MAX);
+  });
+
+  it("treats a non-number resolution as the default", () => {
+    // A `power` message from an older build carries no resolution at all, and
+    // a NaN here would size the output's canvas to nothing.
+    for (const junk of [undefined, null, "0.5", Number.NaN, Infinity]) {
+      expect(clampResolution(junk)).toBe(RESOLUTION_DEFAULT);
+    }
+    expect(clampResolution(0.6)).toBe(0.6);
+  });
+
+  it("keeps the resolution range a real, full-size-capped scale", () => {
+    expect(RESOLUTION_MIN).toBeGreaterThan(0);
+    expect(RESOLUTION_MIN).toBeLessThan(RESOLUTION_MAX);
+    expect(RESOLUTION_DEFAULT).toBe(RESOLUTION_MAX);
   });
 
   it("orders the size fractions small to large", () => {
@@ -67,6 +103,8 @@ describe("seeding from localStorage", () => {
       "vibe.output.powerMode": "auto",
       "vibe.preview.quality": "auto",
       "vibe.preview.size": "full",
+      "vibe.output.resolution": "0.5",
+      "vibe.preview.resolution": "0.35",
     };
     vi.stubGlobal("localStorage", { getItem: (k: string) => data[k] ?? null, setItem: () => undefined });
     vi.resetModules();
@@ -75,6 +113,8 @@ describe("seeding from localStorage", () => {
     expect(fresh.getOutputPowerMode()).toBe("auto");
     expect(fresh.getPreviewQualityChoice()).toBe("auto");
     expect(fresh.getPreviewSize()).toBe("full");
+    expect(fresh.getOutputResolution()).toBe(0.5);
+    expect(fresh.getPreviewResolution()).toBe(0.35);
   });
 
   it("falls back to the defaults on junk", async () => {
@@ -83,6 +123,8 @@ describe("seeding from localStorage", () => {
       "vibe.output.powerMode": "maybe",
       "vibe.preview.quality": "",
       "vibe.preview.size": "huge",
+      "vibe.output.resolution": "sharp",
+      "vibe.preview.resolution": "0.01",
     };
     vi.stubGlobal("localStorage", { getItem: (k: string) => data[k] ?? null, setItem: () => undefined });
     vi.resetModules();
@@ -91,5 +133,8 @@ describe("seeding from localStorage", () => {
     expect(fresh.getOutputPowerMode()).toBe("off");
     expect(fresh.getPreviewQualityChoice()).toBe("floor");
     expect(fresh.getPreviewSize()).toBe("half");
+    expect(fresh.getOutputResolution()).toBe(RESOLUTION_DEFAULT);
+    // Out of range clamps rather than falls back: the stored number was a real choice.
+    expect(fresh.getPreviewResolution()).toBe(RESOLUTION_MIN);
   });
 });

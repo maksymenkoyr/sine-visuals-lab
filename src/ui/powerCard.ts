@@ -1,6 +1,6 @@
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
-import type { PreviewSize } from "../render/outputPower.ts";
+import { RESOLUTION_MAX, RESOLUTION_MIN, type PreviewSize } from "../render/outputPower.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
@@ -11,6 +11,7 @@ import {
   digitsStyle,
   digitsTextStyle,
   groupHeadingStyle,
+  readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
   spacer,
@@ -33,10 +34,11 @@ import {
  *
  * Shape, top to bottom: the status line right under the title (the Bands
  * column's own live-dot · source line is the model — small caps mono with
- * a coloured dot, hover/tap for the long explanation), then two controls —
- * Quality (src/render/qualityPref.ts) and Energy saving, both rows in the
- * panel's grammar with a chip group where a slider would sit — then a
- * "Readouts" group of diagnostics. Those are deliberately not rows: a row's
+ * a coloured dot, hover/tap for the long explanation), then the controls —
+ * Quality (src/render/qualityPref.ts), Resolution and Energy saving; the
+ * chip rows are in the panel's grammar with a chip group where a slider
+ * would sit, and Resolution is the one real slider — then a "Readouts"
+ * group of diagnostics. Those are deliberately not rows: a row's
  * 14.5px label is for something you act on, and four of them made this card
  * read as a settings form. They're a small mono caption beside a
  * seven-segment value, the same register as the band captions under the
@@ -44,8 +46,13 @@ import {
  *
  * The same card is built twice (deviceMenu.ts), differing only in the deps and
  * options it is given: the main window's, which reads "Preview" and gains the
- * Preview size row while a pop-out output is open (src/render/outputPower.ts),
- * and the "Output" card that edits and reads back that window's own settings.
+ * Preview size and Resolution rows while a pop-out output is open
+ * (src/render/outputPower.ts), and the "Output" card that edits and reads
+ * back that window's own settings. Resolution is a plain scale on the
+ * drawing buffer, multiplied into the quality's own scale where the window
+ * resizes its canvas; the Resolution readout below shows the pixels that
+ * come out. Its slider is a `.vc-slider` but sits outside the panel's Tab
+ * ring (deviceMenu.ts's ringElements), as the chips do.
  *
  * Read-only except the mode chips; every value comes from
  * PowerCardDeps.getPowerStatus(), polled at the panel's existing ~10Hz
@@ -111,6 +118,11 @@ export interface PowerCardDeps {
   isPreview?: () => boolean;
   getPreviewSize?: () => PreviewSize;
   onPreviewSizeChange?: (size: PreviewSize) => void;
+  /** The Resolution slider's value, a fraction from RESOLUTION_MIN to
+   *  RESOLUTION_MAX. The row shows when both are given, and — if `isPreview`
+   *  is — only while previewing. */
+  getResolution?: () => number;
+  onResolutionChange?: (value: number) => void;
 }
 
 /** What tells one Power card from another: the main window's (defaults) and
@@ -236,6 +248,67 @@ function createSizeRow(deps: PowerCardDeps, accent: string) {
       }
     },
   };
+}
+
+const RESOLUTION_HINT =
+  "Pixels drawn, as a share of the full count: 50% draws a quarter of them. Applies on top of Quality, and the Resolution readout below shows the result";
+const resolutionOutStyle = `${readoutStyle} min-width: 38px; justify-content: flex-end;`;
+
+/** The Resolution row: label and a seven-segment percentage over a plain
+ *  slider, where the other rows have chips — it is a continuous scale, not a
+ *  pick. Right = more pixels, up to the full count at the right end. The row
+ *  commits on every drag frame (no rebuild, so the slider being dragged is
+ *  never torn out). */
+function createResolutionRow(deps: PowerCardDeps, accent: string) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.style.setProperty("--vc-accent", accent);
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = "Resolution";
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  const out = document.createElement("div");
+  out.style.cssText = resolutionOutStyle;
+  const outDigits = document.createElement("span");
+  outDigits.style.cssText = digitsStyle;
+  const outUnit = document.createElement("span");
+  outUnit.textContent = "%";
+  outUnit.style.cssText = unitStyle;
+  out.append(outDigits, outUnit);
+  head.append(label, out);
+
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.className = "vc-slider";
+  slider.min = String(Math.round(RESOLUTION_MIN * 100));
+  slider.max = String(Math.round(RESOLUTION_MAX * 100));
+  slider.step = "5";
+  slider.setAttribute("aria-label", "Resolution");
+  slider.setAttribute("aria-description", RESOLUTION_HINT);
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+  setHintText(hint, RESOLUTION_HINT);
+
+  el.append(head, slider, hint);
+
+  const show = (fraction: number): void => {
+    const pct = Math.round(fraction * 100);
+    slider.value = String(pct);
+    const lo = Number(slider.min);
+    slider.style.setProperty("--vc-fill", `${((pct - lo) / (Number(slider.max) - lo)) * 100}%`);
+    outDigits.textContent = String(pct);
+  };
+  slider.addEventListener("input", () => {
+    const fraction = Number(slider.value) / 100;
+    show(fraction);
+    deps.onResolutionChange?.(fraction);
+  });
+
+  return { el, refresh: show };
 }
 
 // Quality row's chip group wraps rather than squeezing five chips onto one
@@ -612,6 +685,8 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   const modeRow = createModeRow(deps, POWER_TEAL);
   const sizeRow = createSizeRow(deps, POWER_TEAL);
   sizeRow.el.style.display = "none";
+  const resolutionRow = createResolutionRow(deps, POWER_TEAL);
+  resolutionRow.el.style.display = "none";
 
   const readoutsHeading = document.createElement("div");
   readoutsHeading.textContent = "Readouts";
@@ -623,7 +698,17 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   const detail = createReadoutLine("Detail");
   readouts.append(fps.el, res.el, detail.el);
 
-  card.body.append(statusRow.el, hairline, qualityRow.el, spacer(), sizeRow.el, modeRow.el, readoutsHeading, readouts);
+  card.body.append(
+    statusRow.el,
+    hairline,
+    qualityRow.el,
+    resolutionRow.el,
+    spacer(),
+    sizeRow.el,
+    modeRow.el,
+    readoutsHeading,
+    readouts,
+  );
 
   function refresh(): void {
     const status = deps.getPowerStatus();
@@ -632,6 +717,11 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     const preview = deps.isPreview?.() ?? false;
     sizeRow.el.style.display = preview ? "" : "none";
     if (preview && deps.getPreviewSize) sizeRow.refresh(deps.getPreviewSize());
+    // The Output card has no isPreview and always shows its row; the main
+    // card's follows the preview, like the size row above.
+    const resolutionShown = !!deps.getResolution && (deps.isPreview ? preview : true);
+    resolutionRow.el.style.display = resolutionShown ? "" : "none";
+    if (resolutionShown) resolutionRow.refresh(deps.getResolution!());
     modeRow.refresh(status.mode);
     fps.set(status.fps > 0 ? [digits(String(Math.round(status.fps)))] : [text("--")]);
     res.set([digits(String(status.bufferWidth)), join("×"), digits(String(status.bufferHeight))]);

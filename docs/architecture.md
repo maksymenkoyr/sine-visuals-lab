@@ -102,8 +102,9 @@ of `src/net/outputSync.ts`; `src/net/outputBridge.ts` is the main window's end.
 The keys and the hold-to-glide gesture are the header of `src/ui/outputKeys.ts`;
 what a glide may and may not move smoothly is the header of `src/net/outputGlide.ts`.
 While an output is open the main window renders only a cheap preview (its own
-Quality, in a smaller box), and the output has its own Quality and Energy saving,
-set from the Output Power card; `src/render/outputPower.ts` owns those settings.
+Quality and Resolution, in a smaller box), and the output has its own Quality,
+Resolution and Energy saving, set from the Output Power card;
+`src/render/outputPower.ts` owns those settings.
 
 ## Where the quality/perf ceiling comes from
 
