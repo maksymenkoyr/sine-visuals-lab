@@ -138,6 +138,13 @@ None — original design.
 - 2026-10-02: `buildGridTriangles` fills a preallocated `Uint32Array` instead
   of growing an array and copying it (Grid Density rebuilds the grid on every
   step). Same indices, same order.
+- 2026-10-02: history rows are pushed at a fixed `ROWS_PER_SECOND` (via
+  `rowsToPush`) instead of one per rendered frame, and the noise scroll
+  advances per pushed row. Waterfall depth and noise speed were tied to the
+  render rate (half the seconds of history at the 30 fps floor and Energy
+  saving, other depths on a gated 75 Hz panel). A frame covering several rows
+  eases from the last row to its own so 30 fps doesn't stair-step; at a steady
+  60 fps the picture is pixel-identical (`tools/gpu-bench.mjs --compare`).
 
 ## Tuning notes
 

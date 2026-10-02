@@ -138,7 +138,8 @@ const SPHERE_RADIUS = 30.0; // Sphere layout: radius of the globe at rest (share
 const FOG_K = 1.0 / 110.0; // 1/(view depth) at which fog reaches 1/e
 const LINE_PX = 1.2; // grid line width in pixels before anti-aliasing
 const NOISE_PERIOD = 64.0; // lattice period of the noise field's time axis (see noisePeriodic)
-const NOISE_Z_RATE = 0.25; // noise-lattice cells the field scrolls per spectrum frame at noiseScale 1
+const NOISE_Z_RATE = 0.25; // noise-lattice cells the field scrolls per history row at noiseScale 1
+const ROWS_PER_SECOND = 60; // history rows pushed per second, whatever rate render() is called at
 
 // Every knob the algorithm actually supports is exposed as a live setting
 // rather than a baked-in constant, so the space it covers is fully
@@ -656,6 +657,17 @@ export function buildGridTriangles(cols: number, rows: number = cols): Uint32Arr
     }
   }
   return tris;
+}
+
+/** How many history rows to push this render, from the time it covers: the
+ *  waterfall is a span of *time*, so rows arrive at `rate` per second however
+ *  fast render() is called (60 or 30 fps, or a gated 37.5). `acc` is the
+ *  fractional row carried between calls; the result is capped at `max` (a
+ *  stall can't push more than the ring holds) and its `acc` is the new carry. */
+export function rowsToPush(acc: number, dt: number, rate: number, max: number): { n: number; acc: number } {
+  const total = acc + Math.max(0, dt) * rate;
+  const whole = Math.floor(total + 1e-6);
+  return { n: Math.min(max, whole), acc: Math.max(0, total - whole) };
 }
 
 /** A rolling ring buffer of the last `frames` spectrum frames (each `bands`
@@ -1333,7 +1345,14 @@ export const meshGridScene: Scene = (() => {
   let beatPulse = 0; // beat impulse with its release applied (stage one of the envelope)
   let beatEnv = 0; // beatPulse with the attack applied (stage two) -- what the shaders get
   let bandBase: Float32Array | null = null; // per-band slow average the wave is measured against
-  const waveRow = new Float32Array(NUM_BANDS); // the row pushed into the history each frame
+  const waveRow = new Float32Array(NUM_BANDS); // this frame's target row; the rows pushed ease toward it
+  const lastPushedRow = new Float32Array(NUM_BANDS); // the last row written, so a frame covering several rows steps smoothly
+  const pushRow = new Float32Array(NUM_BANDS);
+  // Fractional history rows carried between frames (rowsToPush). Starts
+  // mid-row so the ±half-row of timestamp jitter at a steady 60 fps never
+  // flips a frame between zero and two rows.
+  let rowAcc = 0.5;
+  let newestRow = HISTORY_FRAMES - 1; // the history row last written (the ring starts flat, so any row is valid)
   let noisePhase = 0;
   let lastFrameTime: number | null = null;
   let builtDensity = 0;
@@ -1398,6 +1417,9 @@ export const meshGridScene: Scene = (() => {
       // The history's rest value is 0.5 (a row is signed change, see render),
       // so it starts flat rather than as one giant trough.
       history.data.fill(0.5);
+      lastPushedRow.fill(0.5);
+      rowAcc = 0.5;
+      newestRow = HISTORY_FRAMES - 1;
       gl.bindTexture(gl.TEXTURE_2D, historyTex);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NUM_BANDS, HISTORY_FRAMES, gl.RED, gl.FLOAT, history.data);
       gl.bindTexture(gl.TEXTURE_2D, null);
@@ -1492,32 +1514,44 @@ export const meshGridScene: Scene = (() => {
         prev = waveRow[i];
         waveRow[i] = 0.5 + 0.5 * Math.tanh(waveGain * blurred);
       }
-      const newestRow = history.push(waveRow);
-      gl.bindTexture(gl.TEXTURE_2D, historyTex);
-      gl.texSubImage2D(
-        gl.TEXTURE_2D,
-        0,
-        0,
-        newestRow,
-        NUM_BANDS,
-        1,
-        gl.RED,
-        gl.FLOAT,
-        history.data,
-        newestRow * NUM_BANDS,
-      );
+      // One row per 1/ROWS_PER_SECOND of time, not one per render: at a 30 fps
+      // cap a frame covers two rows (eased from the last row to this frame's
+      // so the waterfall doesn't stair-step), and a frame that covers none
+      // leaves the history alone. Waterfall depth and the noise scroll below
+      // therefore span the same seconds whatever the render rate.
+      const rows = rowsToPush(rowAcc, dt, ROWS_PER_SECOND, HISTORY_FRAMES);
+      rowAcc = rows.acc;
+      if (rows.n > 0) gl.bindTexture(gl.TEXTURE_2D, historyTex);
+      for (let k = 1; k <= rows.n; k++) {
+        const t = k / rows.n;
+        for (let i = 0; i < NUM_BANDS; i++) pushRow[i] = lastPushedRow[i] + (waveRow[i] - lastPushedRow[i]) * t;
+        newestRow = history.push(pushRow);
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,
+          0,
+          0,
+          newestRow,
+          NUM_BANDS,
+          1,
+          gl.RED,
+          gl.FLOAT,
+          history.data,
+          newestRow * NUM_BANDS,
+        );
+      }
+      if (rows.n > 0) lastPushedRow.set(waveRow);
 
       // resolveSceneSetting (not getSceneSetting) for every base read below —
       // uploadCommonUniforms already wrote the auto-resolved values; reading
       // the raw manual value here would silently re-stomp an auto-tuned
       // slider back to manual every frame (see autoTune.ts).
       //
-      // The noise field advances one spectrum frame per push, scaled by
+      // The noise field advances one history row per push, scaled by
       // Noise Detail, and wraps on the shader's lattice period so the phase
       // stays small forever (see file header). Accumulating incrementally
       // also means a Noise Detail change doesn't jump the field.
       const noiseScale = resolveSceneSetting(ID, settingFor("noiseScale"));
-      noisePhase = (noisePhase + NOISE_Z_RATE * noiseScale) % NOISE_PERIOD;
+      noisePhase = (noisePhase + NOISE_Z_RATE * noiseScale * rows.n) % NOISE_PERIOD;
 
       const gridDensity = resolveSceneSetting(ID, settingFor("gridDensity"));
       if (gridDensity !== builtDensity) buildGrid(ctx, gridDensity);
@@ -1609,6 +1643,8 @@ export const meshGridScene: Scene = (() => {
       historyTex = null;
       historyLoc = null;
       history = null;
+      rowAcc = 0.5;
+      newestRow = HISTORY_FRAMES - 1;
       smoothedBands = null;
       prevRawBands = null;
       bandBase = null;

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildGridPositions,
   buildGridTriangles,
+  rowsToPush,
   createSpectrumHistory,
   gridDimsForQuality,
   historyRowFor,
@@ -136,5 +137,47 @@ describe("meshGrid spectrum history", () => {
     expect(historyRowFor(10, 0.5, 0.4, 20)).toBeCloseTo(6);
     // Wrap case: newestRow=2, back=5 -> -3 -> wraps to frames-3.
     expect(historyRowFor(2, 1, 0.5, 10)).toBeCloseTo(7);
+  });
+});
+
+describe("meshGrid history rows per second", () => {
+  const run = (dts: number[], acc = 0.5) => {
+    let total = 0;
+    const per: number[] = [];
+    for (const dt of dts) {
+      const r = rowsToPush(acc, dt, 60, 200);
+      acc = r.acc;
+      total += r.n;
+      per.push(r.n);
+    }
+    return { total, per };
+  };
+
+  it("pushes one row per frame at 60 fps, even with timestamp jitter", () => {
+    const steady = run(Array(60).fill(1 / 60));
+    expect(steady.total).toBe(60);
+    expect(steady.per.every((n) => n === 1)).toBe(true);
+    const jitter = run(Array.from({ length: 60 }, (_, i) => (1 + (i % 2 ? 0.2 : -0.2)) / 60));
+    expect(jitter.per.every((n) => n === 1)).toBe(true);
+  });
+
+  it("covers the same time at 30 fps, and at an uneven gated cadence", () => {
+    const half = run(Array(30).fill(1 / 30));
+    expect(half.total).toBe(60);
+    expect(half.per.every((n) => n === 2)).toBe(true);
+    // 75 Hz panel gated to every other tick: 1/37.5 s per render.
+    const gated = run(Array(75).fill(1 / 37.5));
+    expect(gated.total).toBeGreaterThanOrEqual(119);
+    expect(gated.total).toBeLessThanOrEqual(120);
+  });
+
+  it("caps a stall at the ring size, pushes nothing for no time, and keeps the carry", () => {
+    expect(rowsToPush(0.5, 0.25, 60, 10).n).toBe(10);
+    expect(rowsToPush(0.5, 0.25, 60, 200).n).toBe(15);
+    expect(rowsToPush(0.5, 0, 60, 200)).toEqual({ n: 0, acc: 0.5 });
+    expect(rowsToPush(0.5, -1, 60, 200).n).toBe(0);
+    const r = rowsToPush(0.25, 1 / 120, 60, 200); // 0.25 + 0.5 rows: none yet
+    expect(r.n).toBe(0);
+    expect(r.acc).toBeCloseTo(0.75, 9);
   });
 });
