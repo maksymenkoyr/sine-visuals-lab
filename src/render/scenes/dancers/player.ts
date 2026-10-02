@@ -252,9 +252,12 @@ export function createClipPlayer(library: ClipLibrary, seed = 1): ClipPlayer {
             current = next;
             currentStart = bar;
             currentCycle = clipCycleBars(next, params.bpm);
-          } else if (current) {
-            // The same move again: re-read the tempo mode, and if it moved
-            // restart the loop on this downbeat rather than jump mid-loop.
+          } else if (current && bar >= holdUntil) {
+            // The same move held out its time and is picked again: re-read the
+            // tempo mode, and if it moved restart the loop on this downbeat
+            // (a drop-forced re-pick mid-hold keeps the loop it has). Where the
+            // hold isn't a whole number of loops this restart is itself a
+            // jump back to frame 0, which is the price of the new tempo mode.
             const cycle = clipCycleBars(current, params.bpm);
             if (cycle !== currentCycle) {
               currentCycle = cycle;

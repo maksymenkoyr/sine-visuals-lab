@@ -167,15 +167,16 @@ describe("dancers clip player", () => {
   });
 
   it("re-reads the loop length when the same clip is picked again after its hold", () => {
-    const lib = buildLibrary([makeClip({ name: "solo", beats: 8, nativeBpm: 100 })]);
+    const lib = buildLibrary([makeClip({ name: "solo", beats: 3, nativeBpm: 100 })]);
     const player = createClipPlayer(lib, 1);
     const out = createPose();
-    // 130 bpm for the hold (4 bars), then 140 bpm (half-time, a 4-bar loop).
-    for (let i = 0; i <= 5 * 60; i++) player.advance((i % 60) / 60, params({ bpm: i < 4 * 60 ? 130 : 140 }), out);
-    // At bar 4 the clip re-latched to the 4-bar loop (restarting on the
-    // downbeat): one bar later, at bar 5, it sits a quarter of the way round.
+    // 100 bpm: a 0.75-bar loop, held round(1.5) = 2 bars. Then 140 bpm
+    // (half-time): a 1.5-bar loop, picked up again at bar 2.
+    for (let i = 0; i <= 2 * 60 + 15; i++) player.advance((i % 60) / 60, params({ bpm: i < 2 * 60 ? 100 : 140 }), out);
+    // The loop restarted on the bar-2 downbeat, so a quarter bar later it is
+    // 0.25 / 1.5 of the way round (continuing from bar 0 would give 0.5).
     const want = createPose();
-    sampleClip(lib.clips[0], 0.25, want);
+    sampleClip(lib.clips[0], 0.25 / 1.5, want);
     for (let k = 0; k < want.length; k++) expect(out[k]).toBeCloseTo(want[k], 5);
   });
 
