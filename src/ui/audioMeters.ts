@@ -1150,13 +1150,24 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   laneMounts.push({ choice: "feature.flux", glowEl: laneMounts[0]!.glowEl });
 
   // Fire timestamps per lane, for the legend's "N fires in the last span"
-  // note — pruned to HISTORY_SPAN_SEC on read, same window the trace shows.
+  // note — pruned to HISTORY_SPAN_SEC, same window the trace shows. Pruned
+  // when a fire is logged as well as on read: the legend (the only reader)
+  // is skipped while the Shape disclosure is open, and a log that is only
+  // pruned on read would grow for as long as Shape stays open.
   const fireLog: number[][] = HITS_LANES.map(() => []);
-  function firesInSpan(lane: number, nowMs: number): number {
+  function pruneFires(lane: number, nowMs: number): number[] {
     const log = fireLog[lane];
     const cutoff = nowMs - HISTORY_SPAN_SEC * 1000;
-    while (log.length && log[0] < cutoff) log.shift();
-    return log.length;
+    let stale = 0;
+    while (stale < log.length && log[stale] < cutoff) stale++;
+    if (stale > 0) log.splice(0, stale);
+    return log;
+  }
+  function logFire(lane: number, nowMs: number): void {
+    pruneFires(lane, nowMs).push(nowMs);
+  }
+  function firesInSpan(lane: number, nowMs: number): number {
+    return pruneFires(lane, nowMs).length;
   }
 
   function laneTop(laneIdx: number): number {
@@ -1328,10 +1339,10 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
         setLane(3, anim.hits.high.ratio, highVerdict, anim.highOnset, anim.hitStrength.high);
         vals[HITS_GROUND_IDX] = 1 - anim.gateDimmer;
         ring.push(vals, nowMs);
-        if (beatFired) fireLog[0].push(nowMs);
-        if (anim.lowOnset) fireLog[1].push(nowMs);
-        if (anim.midOnset) fireLog[2].push(nowMs);
-        if (anim.highOnset) fireLog[3].push(nowMs);
+        if (beatFired) logFire(0, nowMs);
+        if (anim.lowOnset) logFire(1, nowMs);
+        if (anim.midOnset) logFire(2, nowMs);
+        if (anim.highOnset) logFire(3, nowMs);
       } else {
         ring.push(new Array(HITS_SERIES_COUNT).fill(null), nowMs);
       }
@@ -1871,8 +1882,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // Row-level visibility (mono/lufs null on a device with no local
   // analyser) — see update()'s own Signal block for the toggles and the
   // "don't accumulate a column while hidden" behaviour they carry.
-  let waveformShown = false;
-  let lufsShown = false;
+  // null until the first unfolded tick applies the real state: the rows are
+  // built visible, so a mic-less device (where nothing ever shows) must still
+  // get its first setShown(false) rather than compare false !== false.
+  let waveformShown: boolean | null = null;
+  let lufsShown: boolean | null = null;
 
   // ---- Hits ----
   const hitsHistory = createHitsHistory(deps.getSilenceGate, mountJack);
