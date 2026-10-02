@@ -97,7 +97,9 @@ export function createProgram(
   };
 }
 
-/** A single [-1,1] clip-space quad, drawn as a triangle strip. */
+/** One oversized clip-space triangle, (-1,-1), (3,-1), (-1,3), that covers the
+ *  whole [-1,1] viewport — draw it with drawFullscreenQuad (TRIANGLES, three
+ *  vertices), never as a strip. The name is historical. */
 export function createFullscreenQuad(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
   const vao = gl.createVertexArray();
   if (!vao) throw new Error("createVertexArray failed");
