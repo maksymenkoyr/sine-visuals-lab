@@ -362,6 +362,15 @@ const FLOW_NORM = 5;
 // O(FIL_STEPS^2) fetches per strand.
 const FIL_STEPS = 10;
 const FIL_STEP_LEN = 0.06;
+// How fast the tangle's field crawls at the two ends of the `flow` setting, as
+// a multiple of the flow clock — see filamentFlowRate.
+const FIL_FLOW_RATE_MIN = 0.15;
+const FIL_FLOW_RATE_MAX = 1.6;
+// The tangle's slow churn against itself, in radians per second at flow rate 1
+// (the sin() term in flowCoord).
+const FIL_WOBBLE_RATE = 0.2;
+// Radians of cloud turn per unit of flow clock at Swirl = 1.
+const SWIRL_RAD_PER_FLOW = 0.35;
 // Cloud units -> flow texture coordinate. One repeat of the volume every
 // 1/FLOW_FREQ units, with the coarsest lattice (FLOW_VALUE_CELLS[0]) setting
 // the largest swirl in it.
@@ -933,6 +942,14 @@ export function filamentStrandCount(maxParticles: number): number {
   return Math.max(FIL_MIN_STRANDS, Math.min(FIL_MAX_STRANDS, n));
 }
 
+/** How fast Filaments' flow field crawls, off the `flow` setting: a
+ *  multiple of the flow clock, accumulated by advanceRatePhase into the
+ *  shader's crawl phases. */
+export function filamentFlowRate(flow: number): number {
+  const f = Number.isFinite(flow) ? Math.min(1, Math.max(0, flow)) : 0;
+  return FIL_FLOW_RATE_MIN + (FIL_FLOW_RATE_MAX - FIL_FLOW_RATE_MIN) * f;
+}
+
 /** The strand vertex buffers: for strand `s`, `steps + 1` consecutive
  *  vertices, one per point along the trace (step index 0..steps). All of a
  *  strand's vertices carry its seed point and per-strand random value
@@ -1300,6 +1317,27 @@ export function advanceMorphPhase(
   const glide = MORPH_BASE_RATE * (0.2 + 2.8 * speed) * Math.min(1, speed / MORPH_OFF_KNEE);
   const kick = Math.min(MORPH_BEAT_KICK * beat * amp, MORPH_BEAT_KICK);
   return from + Math.min(MORPH_MAX_STEP, dt * glide + kick);
+}
+
+/** One frame of a phase that a live setting scales: the running total of
+ *  (clock advance) x (rate), so the setting only ever changes how fast the
+ *  phase moves from here on and never where it already is. The direct form,
+ *  `clock * rate`, is the trap flowClock.ts's header describes — `clock` is
+ *  roughly the seconds since the page loaded, so a small change in `rate`
+ *  becomes a jump in the phase that grows with uptime (a Swirl step that
+ *  turns the whole cloud, a Play glide that spins it for several turns).
+ *
+ *  `acc` is the phase so far and `prevClock` the clock it was last advanced
+ *  to; either being null (first frame, after init()) or the clock running
+ *  backwards re-seeds to `clock * rate`, which is exactly what the direct
+ *  form would draw at that moment. At a constant rate the result is that
+ *  same `clock * rate` every frame, so nothing changes unless the setting
+ *  does. Non-finite inputs fall back the way advanceMorphPhase's do. */
+export function advanceRatePhase(acc: number | null, prevClock: number | null, clock: number, rate: number): number {
+  const r = Number.isFinite(rate) ? rate : 0;
+  const c = Number.isFinite(clock) ? clock : 0;
+  if (acc === null || prevClock === null || !Number.isFinite(acc) || !(c >= prevClock)) return c * r;
+  return acc + (c - prevClock) * r;
 }
 
 /** shapeAt sampled over the bounding box as `size`^3 texels of RGBA8,
@@ -2065,6 +2103,11 @@ const CAMERA_GLSL = `
 #define FOCAL_Y ${(1 / Math.tan((CAM_FOV_DEG * Math.PI) / 360)).toFixed(5)}
 #define TILT 0.22
 
+// The cloud's turn so far, in radians — an accumulated rate (see
+// advanceRatePhase), not uFlowPhase * uSwirl, so Swirl can move without the
+// cloud jumping.
+uniform float uSwirlAngle;
+
 float swellScale() {
   return 1.0 + 0.25 * uSwell * swellDrive(uLow);
 }
@@ -2079,7 +2122,7 @@ vec3 rotX(vec3 p, float ct, float st) {
 
 vec3 cloudToView(vec3 p) {
   p *= swellScale();
-  float a = uFlowPhase * uSwirl * 0.35;
+  float a = uSwirlAngle;
   p = rotY(p, cos(a), sin(a));
   p = rotX(p, cos(TILT), sin(TILT));
   // Camera on +z looking at the origin.
@@ -2089,7 +2132,7 @@ vec3 cloudToView(vec3 p) {
 // Undoes cloudToView's swirl and tilt. A point additionally divides by
 // swellScale(); a direction doesn't need to, since it gets normalized.
 vec3 unrotate(vec3 q) {
-  float a = uFlowPhase * uSwirl * 0.35;
+  float a = uSwirlAngle;
   q = rotX(q, cos(TILT), -sin(TILT));
   return rotY(q, cos(a), -sin(a));
 }
@@ -2913,10 +2956,11 @@ float hash11(float x) {
   return fract(sin(x * 127.1) * 43758.5453);
 }
 
-// How fast the tangle crawls, off the Flow setting.
-float flowRate() {
-  return mix(0.15, 1.6, uFlow);
-}
+// The tangle's two accumulated crawl phases. JS integrates the Flow setting's
+// rate (filamentFlowRate, advanceRatePhase) over the clock, so a Flow change
+// alters the crawl speed rather than re-seating the whole field.
+uniform float uFlowCrawl;   // flowPhase integrated at the flow rate
+uniform float uFlowWobble;  // time * 0.2 integrated at the flow rate
 
 // Where the flow field is read — the same scrolling idea flowSpace() uses for
 // the gas: the whole field drifts downwind and churns against itself, so the
@@ -2929,8 +2973,8 @@ float flowRate() {
 // inside one swirl. Identity at freq 1 whatever the mix.
 vec3 flowCoord(vec3 p) {
   vec3 q = p * FLOW_FREQ * mix(1.0, uGasFreq, GAS_FREQ_STRANDS)
-    + vec3(uFlowPhase * 0.05, 0.0, uFlowPhase * 0.025) * flowRate();
-  return q + 0.03 * sin(q.zxy * 2.0 + uTime * 0.2 * flowRate());
+    + vec3(uFlowCrawl * 0.05, 0.0, uFlowCrawl * 0.025);
+  return q + 0.03 * sin(q.zxy * 2.0 + uFlowWobble);
 }
 
 // textureLod, not texture: a vertex shader has no derivatives to pick a level
@@ -3105,6 +3149,14 @@ export const stormScene: Scene = (() => {
   // The shape morph's own accumulated phase, in variants — see
   // advanceMorphPhase. Wraps through shapePhaseWeights, so it only grows.
   let morphPhase = 0;
+  // The rate-scaled phases (advanceRatePhase) and the clocks they were last
+  // advanced to. null until the first frame so each seeds to what the direct
+  // product would draw.
+  let swirlAngle: number | null = null;
+  let flowCrawl: number | null = null;
+  let flowWobble: number | null = null;
+  let prevFlowPhase: number | null = null;
+  let prevTimeSec: number | null = null;
   const bandsBuf = new Float32Array(NUM_BANDS);
 
   return {
@@ -3304,6 +3356,7 @@ export const stormScene: Scene = (() => {
       prevHighPulse = 0;
       lastTimeSec = null;
       morphPhase = 0;
+      swirlAngle = flowCrawl = flowWobble = prevFlowPhase = prevTimeSec = null;
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
@@ -3325,6 +3378,18 @@ export const stormScene: Scene = (() => {
       const gas = GAS_RECIPES[
         Math.min(GAS_RECIPES.length - 1, Math.max(0, Math.round(resolveSceneSetting(ID, settingFor("gasType")))))
       ];
+
+      // Swirl and Flow scale a clock that has been running since the page
+      // loaded, so each is integrated as a rate rather than multiplied in
+      // (advanceRatePhase). The shader reads the accumulated results.
+      const swirl = resolveSceneSetting(ID, settingFor("swirl"));
+      const flow = resolveSceneSetting(ID, settingFor("flow"));
+      const flowRate = filamentFlowRate(flow);
+      swirlAngle = advanceRatePhase(swirlAngle, prevFlowPhase, anim.flowPhase, swirl * SWIRL_RAD_PER_FLOW);
+      flowCrawl = advanceRatePhase(flowCrawl, prevFlowPhase, anim.flowPhase, flowRate);
+      flowWobble = advanceRatePhase(flowWobble, prevTimeSec, anim.timeSec, FIL_WOBBLE_RATE * flowRate);
+      prevFlowPhase = anim.flowPhase;
+      prevTimeSec = anim.timeSec;
 
       // Time since this scene last drew — see the file header for why this
       // isn't anim.dtSec. Guards the first frame and any backwards jump.
@@ -3389,6 +3454,7 @@ export const stormScene: Scene = (() => {
       gl.disable(gl.BLEND);
       prog.use();
       uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+      prog.setF("uSwirlAngle", swirlAngle);
       prog.setV3v("uStrikeA", pool.posA);
       prog.setV3v("uStrikeB", pool.posB);
       prog.setFv("uStrikeStrength", pool.strength);
@@ -3466,6 +3532,7 @@ export const stormScene: Scene = (() => {
         if (meshVertCount > 0) {
           meshProg.use();
           uploadCommonUniforms(meshProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+          meshProg.setF("uSwirlAngle", swirlAngle);
           meshProg.setV3v("uStrikeA", pool.posA);
           meshProg.setV3v("uStrikeB", pool.posB);
           meshProg.setFv("uStrikeStrength", pool.strength);
@@ -3480,6 +3547,7 @@ export const stormScene: Scene = (() => {
       } else if (mode === MODE_POINTS) {
         pointProg.use();
         uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+        pointProg.setF("uSwirlAngle", swirlAngle);
         pointProg.setV3v("uStrikeA", pool.posA);
         pointProg.setV3v("uStrikeB", pool.posB);
         pointProg.setFv("uStrikeStrength", pool.strength);
@@ -3493,6 +3561,9 @@ export const stormScene: Scene = (() => {
       } else if (mode === MODE_FILAMENTS) {
         filProg.use();
         uploadCommonUniforms(filProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+        filProg.setF("uSwirlAngle", swirlAngle);
+        filProg.setF("uFlowCrawl", flowCrawl);
+        filProg.setF("uFlowWobble", flowWobble);
         filProg.setV3v("uStrikeA", pool.posA);
         filProg.setV3v("uStrikeB", pool.posB);
         filProg.setFv("uStrikeStrength", pool.strength);
@@ -3531,6 +3602,7 @@ export const stormScene: Scene = (() => {
       if (anyLive) {
         boltProg.use();
         uploadCommonUniforms(boltProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+        boltProg.setF("uSwirlAngle", swirlAngle);
         // One strip per live slot: the whole tree — channel, branches and the
         // unused branch slots — is one run of vertices whose joins have no
         // area (see buildBoltTree), so a bolt is one draw however it forked.

@@ -159,6 +159,18 @@ Studied, not copied, across two look references:
   re-mesh cadence is paced by `MESH_MIN_INTERVAL` (several a second at the
   default Morph speed, not "about once a second"), and Filaments has no gas
   march behind it, so only `gas.freq` reaches the strands.
+- 2026-10-02 — Swirl and Flow no longer multiply the page-lifetime flow clock.
+  The cloud's turn was `uFlowPhase * uSwirl * 0.35` and the tangle's field
+  offset was `uFlowPhase * 0.05 * flowRate()`, so after a few minutes a small
+  Swirl or Flow step (or an Auto drift, or a Play glide) jumped the picture by
+  turns. The scene now integrates each as a rate (`advanceRatePhase`, the same
+  idea as `advanceMorphPhase`) and the shaders read `uSwirlAngle`,
+  `uFlowCrawl` and `uFlowWobble`. At constant settings the picture is
+  unchanged; measured at a 24 s clock, a Swirl 0.40 to 0.45 step moved the
+  cloud's turn by 0.03 rad where it used to move it by 0.45 rad (and it grew
+  with uptime). The gas march's own `uFlowPhase * 0.06` scroll is untouched:
+  its multiplier is the gas type's recipe, a discrete choice rather than a
+  live slider.
 
 ## Tuning notes
 

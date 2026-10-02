@@ -10,6 +10,8 @@ import {
   SHAPE_VARIANTS,
   STRIKE_LEN_MAX,
   advanceMorphPhase,
+  advanceRatePhase,
+  filamentFlowRate,
   buildBoltTree,
   buildCloud,
   buildFilamentIndices,
@@ -370,6 +372,71 @@ describe("storm bolt tree", () => {
     buildBoltTree(createRng(2), ends[0], ends[1], out, STRIDE);
     expect(Array.from(out.subarray(0, STRIDE)).every((v) => v === 0)).toBe(true);
     expect(vertAt(out, 0, STRIDE).p[0]).toBeCloseTo(ends[0][0], 6);
+  });
+});
+
+describe("storm rate phase", () => {
+  const DT = 1 / 60;
+
+  it("at a constant rate is the direct clock * rate product, frame after frame", () => {
+    let acc: number | null = null;
+    let prev: number | null = null;
+    let clock = 700; // a scene opened a while after page load
+    for (let i = 0; i < 600; i++) {
+      acc = advanceRatePhase(acc, prev, clock, 0.14);
+      prev = clock;
+      expect(acc).toBeCloseTo(clock * 0.14, 9);
+      clock += DT * 1.3; // the flow clock runs a little fast under audio
+    }
+  });
+
+  it("a rate change at a large clock moves the phase by one frame's worth, not by clock * delta-rate", () => {
+    let acc: number | null = advanceRatePhase(null, null, 1000, 0.14);
+    const before = acc;
+    acc = advanceRatePhase(acc, 1000, 1000 + DT, 0.7); // Swirl dragged up five-fold
+    expect(acc - before).toBeCloseTo(DT * 0.7, 9);
+    // The direct product would have jumped by 1000 * (0.7 - 0.14) = 560.
+    expect(Math.abs(acc - before)).toBeLessThan(0.05);
+  });
+
+  it("a glide of the rate integrates to a smooth phase", () => {
+    let acc: number | null = null;
+    let prev: number | null = null;
+    let last = 0;
+    let maxStep = 0;
+    for (let i = 0; i < 300; i++) {
+      const clock = 500 + i * DT;
+      acc = advanceRatePhase(acc, prev, clock, 0.4 + (0.4 * i) / 300);
+      prev = clock;
+      if (i > 0) maxStep = Math.max(maxStep, Math.abs(acc - last));
+      last = acc;
+    }
+    expect(maxStep).toBeLessThan(DT * 0.8 + 1e-9);
+  });
+
+  it("re-seeds to clock * rate from a null seed or a backwards clock", () => {
+    expect(advanceRatePhase(null, null, 12, 0.5)).toBe(6);
+    expect(advanceRatePhase(3, null, 12, 0.5)).toBe(6);
+    expect(advanceRatePhase(99, 50, 12, 0.5)).toBe(6);
+  });
+
+  it("holds still at rate 0 and stays finite on non-finite input", () => {
+    expect(advanceRatePhase(4, 10, 20, 0)).toBe(4);
+    expect(Number.isFinite(advanceRatePhase(Number.NaN, 10, 20, 1))).toBe(true);
+    expect(Number.isFinite(advanceRatePhase(4, 10, Number.NaN, 1))).toBe(true);
+    expect(Number.isFinite(advanceRatePhase(4, 10, 20, Number.NaN))).toBe(true);
+  });
+
+  it("the Flow setting maps to a crawl rate that only ever grows with it", () => {
+    let prev = filamentFlowRate(0);
+    expect(prev).toBeGreaterThan(0);
+    for (let f = 0.05; f <= 1.0001; f += 0.05) {
+      const r = filamentFlowRate(f);
+      expect(r).toBeGreaterThan(prev);
+      prev = r;
+    }
+    expect(filamentFlowRate(2)).toBe(filamentFlowRate(1));
+    expect(filamentFlowRate(Number.NaN)).toBe(filamentFlowRate(0));
   });
 });
 
