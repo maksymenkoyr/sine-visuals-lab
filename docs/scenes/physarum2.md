@@ -721,6 +721,15 @@ and `powder.ts`'s curl noise).
   at Synergy 0 and 1 render clean; the glide itself is timing and was judged
   from the test, not a frame.
 
+- **2026-10-02: a Quality pick now remounts the scene.** Review finding: the
+  agent count is `quality.maxParticles * AGENT_MULTIPLIER`, read once in
+  `init()`, and the governor only ever moves the cheap composite
+  (`renderScale`, steps, detail) - never the agent count. The Quality menu
+  changed `quality` in place without a remount, so picking Low while in this
+  scene kept the High preset's agents until the next scene switch. The device
+  menu's Quality choice now calls `applyRenderQuality(true)` in `src/app.ts`,
+  so the culture re-seeds at the new count. The scene file is unchanged.
+
 ## Tuning notes
 
 Judge the look by whether black background still dominates and the four

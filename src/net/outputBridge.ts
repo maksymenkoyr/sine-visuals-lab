@@ -1,3 +1,4 @@
+import type { SilenceGateMarks } from "../audio/silenceGate.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import {
   createCueController,
@@ -76,7 +77,11 @@ export interface OutputBridge {
    *  instantly). Returns whether a glide was actually asked for. */
   go(glideMs?: number): boolean;
   update(nowMs: number): void;
-  pushFrame(frame: FeatureFrame, extras: { beatRatio: number | null; wavePeak: number | null }, params: OutputParams): void;
+  pushFrame(
+    frame: FeatureFrame,
+    extras: { beatRatio: number | null; wavePeak: number | null; gate: SilenceGateMarks },
+    params: OutputParams,
+  ): void;
   /** Send the output its Quality / Energy saving now (it also gets them on
    *  every heartbeat reply). No-op while no output is open. */
   sendPower(): void;
@@ -214,6 +219,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
           onsetPhase: frame.onsetPhase,
           beatRatio: extras.beatRatio,
           wavePeak: extras.wavePeak,
+          gate: extras.gate,
           ...(cue.following() ? { p: params } : {}),
         },
       });
