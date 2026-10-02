@@ -117,6 +117,7 @@ import {
   listLooks,
   primeUndo,
   saveLook,
+  saveSharedLook,
   takeUndo,
 } from "./render/sceneLooks.ts";
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
@@ -1922,7 +1923,7 @@ async function boot(): Promise<void> {
       } else if (!targetScene) {
         setTimeout(() => showHud("that look is for an unknown scene", true), 0);
       } else {
-        saveLook(look);
+        saveSharedLook(look);
         const specs = targetScene.settings ?? [];
         primeUndo(look.sceneId, specs);
         applyLook(look, specs);
