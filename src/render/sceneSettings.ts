@@ -241,10 +241,6 @@ export function registerVariant(sceneId: string, specs: readonly SceneSetting[] 
   else variantSpecs.delete(sceneId);
 }
 
-export function getVariantSpec(sceneId: string): SceneSetting | undefined {
-  return variantSpecs.get(sceneId);
-}
-
 // How the variant's *effective* value is read. The stored value by default;
 // autoTune.ts swaps in its resolver at load, so a dev override or pin on
 // the variant (tuning/overrides.ts, pins.ts) switches profiles the same way

@@ -1,9 +1,10 @@
 /**
- * Lifted from the Storm scene's bolt generator (`src/render/scenes/storm.ts`
- * on `origin/worktree-storm-scene`) so the Fluid scene's lightning and
- * Storm's own lightning share one implementation instead of two copies of
- * the same math. Storm's branch should import from here when it lands,
- * rather than keeping its own copy.
+ * The bolt generator both lightning scenes share: the Fluid scene's lightning
+ * (`src/render/scenes/fluidBolts.ts`) and Storm's own
+ * (`src/render/scenes/storm.ts`, which imports from here and re-exports what
+ * its tests read). It started as Storm's own code, lifted out so the two
+ * scenes' bolts stay one implementation instead of two copies of the same
+ * math.
  *
  * A bolt is a branched tree of jagged polylines (`jagPolyline`'s midpoint
  * displacement) packed into one strike's fixed slice of a shared vertex
@@ -17,12 +18,12 @@
  * (endpoints, refractory, amplitude — see `src/render/scenes/fluidBolts.ts`
  * for the Fluid scene's) and calls into this module only for the shape and
  * timing math. 2D callers (the Fluid scene) pass z = 0 throughout; the
- * 3-component layout stays so a 3D caller (Storm) can adopt this module
- * unchanged. Unlike Storm's original, `buildBoltTree` here does not clamp
- * branch tips to any bounding volume — Storm's version pulled them back
- * inside its cloud's ellipsoid, which is scene geometry this module has no
- * business knowing about. A caller that needs its bolts contained should
- * clamp the endpoints it passes in, or clamp `buildBoltTree`'s output.
+ * 3-component layout stays so a 3D caller (Storm) can use this module
+ * unchanged. `buildBoltTree` does not clamp branch tips to any bounding
+ * volume by default — that is scene geometry this module has no business
+ * knowing about. A caller that needs its forks contained passes `clampTip`
+ * (Storm pulls them back inside its cloud's ellipsoid); one that needs the
+ * whole bolt contained can also clamp the endpoints it passes in.
  */
 
 /** Segments in a bolt's main channel; the channel is this many vertices plus
@@ -230,13 +231,17 @@ type BoltLine = { pts: Float32Array; len: number; peak: number; level: number };
  *
  *  Writes into `out` at `offset` when given — a pool can keep every slot's
  *  tree in one flat array — and returns the array written. `a`/`b` (and every
- *  intermediate point) are 3-component; a 2D caller passes z = 0. */
+ *  intermediate point) are 3-component; a 2D caller passes z = 0. `clampTip`,
+ *  when given, maps each fork's tip (before its polyline is kinked, and
+ *  before its length is measured) to where it should end up — the one place
+ *  a caller's own bounds enter the tree. */
 export function buildBoltTree(
   rng: () => number,
   a: readonly number[],
   b: readonly number[],
   out: Float32Array = new Float32Array(BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS),
   offset = 0,
+  clampTip?: (tip: [number, number, number]) => [number, number, number],
 ): Float32Array {
   const mainLen = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) || 1e-6;
   const main: BoltLine = {
@@ -249,8 +254,10 @@ export function buildBoltTree(
 
   // A fork off an interior vertex of `parent`: the parent's own direction
   // there, swung off by an angle around a random perpendicular, run out to a
-  // fraction of the parent's length. Starting exactly on a parent vertex is
-  // what makes the join invisible — both polylines are zero-width there.
+  // fraction of the parent's length, and handed to `clampTip` (when given) to
+  // be pulled back inside the caller's volume. Starting exactly on a parent
+  // vertex is what makes the join invisible — both polylines are zero-width
+  // there.
   const forkFrom = (parent: BoltLine): BoltLine => {
     const n = parent.pts.length / 3;
     const i = 1 + Math.floor(rng() * (n - 2));
@@ -280,11 +287,12 @@ export function buildBoltTree(
     const ca = Math.cos(ang);
     const sa = Math.sin(ang);
     const len = parent.len * (BOLT_BRANCH_LEN_MIN + rng() * (BOLT_BRANCH_LEN_MAX - BOLT_BRANCH_LEN_MIN));
-    const tip = [
+    const reach: [number, number, number] = [
       root[0] + (tan[0] * ca + px * sa) * len,
       root[1] + (tan[1] * ca + py * sa) * len,
       root[2] + (tan[2] * ca + pz * sa) * len,
     ];
+    const tip = clampTip ? clampTip(reach) : reach;
     return {
       pts: jagPolyline(rng, root, tip, BOLT_BRANCH_SEGMENTS, BOLT_BRANCH_JITTER),
       len: Math.hypot(tip[0] - root[0], tip[1] - root[1], tip[2] - root[2]) || 1e-6,

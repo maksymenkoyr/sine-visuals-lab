@@ -32,6 +32,20 @@ export function isQualityPreset(value: string): value is QualityPreset {
   return Object.prototype.hasOwnProperty.call(PRESET_TABLE, value);
 }
 
+/** Weakest to strongest: a preset runs everything at or below its own rank. */
+export const QUALITY_PRESET_ORDER: readonly QualityPreset[] = ["floor", "low", "mid", "high"];
+
+export function presetRank(preset: QualityPreset): number {
+  return QUALITY_PRESET_ORDER.indexOf(preset);
+}
+
+/** Whether a scene (anything with a `minQuality` floor, as Scene has) is
+ *  willing to run at `preset`. The one rule app.ts, tv.ts and output.ts all
+ *  filter scenes by. Structural, so this file needn't import scene.ts. */
+export function presetAllows(s: { minQuality?: QualityPreset }, preset: QualityPreset): boolean {
+  return !s.minQuality || presetRank(preset) >= presetRank(s.minQuality);
+}
+
 export function qualitySettings(preset: QualityPreset): QualitySettings {
   return { preset, ...PRESET_TABLE[preset] };
 }
@@ -105,10 +119,6 @@ export async function detectQuality(): Promise<QualityPreset> {
     const msPerFrame = elapsedMs / BENCH_FRAMES;
 
     prog.dispose();
-    // Deterministically release the context rather than waiting on GC — the
-    // page is about to open two more (main + gallery preview) and browsers
-    // cap live WebGL contexts fairly low (iOS Safari evicts aggressively).
-    gl.getExtension("WEBGL_lose_context")?.loseContext();
 
     // Thresholds picked so a 2018+ TV SoC lands in "low", a mid phone in
     // "mid", and a discrete/desktop GPU in "high".
@@ -117,5 +127,12 @@ export async function detectQuality(): Promise<QualityPreset> {
     return "low";
   } catch {
     return "floor";
+  } finally {
+    // Deterministically release the context rather than waiting on GC — the
+    // page is about to open two more (main + gallery preview) and browsers
+    // cap live WebGL contexts fairly low (iOS Safari evicts aggressively).
+    // In a `finally` so the failure path (a shader that won't compile, a
+    // throwing GL call) releases it too.
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }

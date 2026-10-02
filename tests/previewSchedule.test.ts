@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { selectDueTiles, type ScheduleCandidate } from "../src/render/previewSchedule.ts";
+import { GATE_TOLERANCE_MS, shouldRenderFrame } from "../src/render/framePace.ts";
 
 describe("selectDueTiles", () => {
   it("draws a never-drawn tile before anything else", () => {
@@ -74,5 +75,37 @@ describe("selectDueTiles", () => {
 
   it("returns nothing for an empty candidate list", () => {
     expect(selectDueTiles([], 1000, 5)).toEqual([]);
+  });
+
+  describe("tolerance (the tick gate's own slack)", () => {
+    it("treats a tile a hair short of its interval as due only when given the tolerance", () => {
+      const candidates: ScheduleCandidate[] = [{ lastDrawMs: 1000, targetIntervalMs: 16.667 }];
+      expect(selectDueTiles(candidates, 1016.6, 1)).toEqual([]);
+      expect(selectDueTiles(candidates, 1016.6, 1, GATE_TOLERANCE_MS)).toEqual([0]);
+    });
+
+    it("draws every no-contention tile on every tick the gate admits, on a jittery 60 Hz display", () => {
+      const interval = 1000 / 60;
+      const tiles: ScheduleCandidate[] = [1, 2, 3].map(() => ({ lastDrawMs: 1000, targetIntervalMs: interval }));
+      let gateMs = 1000;
+      let now = 1000;
+      let admitted = 0;
+      for (let tick = 0; tick < 60; tick++) {
+        now += tick % 2 === 0 ? 16.6 : 16.7; // rAF spacing straddling the interval
+        if (!shouldRenderFrame(now, gateMs, interval)) continue;
+        gateMs = now;
+        admitted++;
+        const due = selectDueTiles(tiles, now, 3, GATE_TOLERANCE_MS);
+        expect(due.length).toBe(3);
+        for (const i of due) tiles[i].lastDrawMs = now;
+      }
+      expect(admitted).toBeGreaterThan(50);
+    });
+
+    it("does not pull a slower band's tile forward by more than the tolerance", () => {
+      const near: ScheduleCandidate[] = [{ lastDrawMs: 1000, targetIntervalMs: 50 }];
+      expect(selectDueTiles(near, 1033.4, 1, GATE_TOLERANCE_MS)).toEqual([]);
+      expect(selectDueTiles(near, 1049.9, 1, GATE_TOLERANCE_MS)).toEqual([0]);
+    });
   });
 });

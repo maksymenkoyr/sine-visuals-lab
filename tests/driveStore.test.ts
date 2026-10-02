@@ -130,6 +130,16 @@ describe("driveStore: sanitizeDriveSetting / encodeDriveSetting", () => {
     expect(sanitized).toEqual({ mix: "add", sources: [{ choice: "anim.mid", weight: 2 }] });
   });
 
+  // SIGNALS is a plain object, so an `in` check would let these through and
+  // drives.ts would throw reading `.read` off the inherited function.
+  it("rejects Object.prototype names as a signal id, bare or inside a patch", () => {
+    for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      expect(sanitizeDriveSetting(name)).toBeNull();
+      expect(sanitizeDriveSetting({ m: "add", s: [{ c: name }] })).toBeNull();
+    }
+    expect(sanitizeDriveSetting("feature.onset")).not.toBeNull();
+  });
+
   it("rejects a garbage mix, a malformed source, or an unknown height", () => {
     expect(sanitizeDriveSetting({ m: "nonsense", s: [{ c: "anim.mid" }] })).toBeNull();
     expect(sanitizeDriveSetting({ m: "add", s: [{ c: "not-a-real-signal" }] })).toBeNull();
@@ -365,6 +375,30 @@ describe("driveStore: line strength", () => {
   });
 });
 
+describe("driveStore: getDriveSetting memo", () => {
+  it("returns the same object until the stored value changes", () => {
+    const sceneId = "ds-memo";
+    setDriveSetting(sceneId, FLASH, driveSettingFromChoice("anim.lowOnset"));
+    const a = getDriveSetting(sceneId, FLASH);
+    expect(getDriveSetting(sceneId, FLASH)).toBe(a);
+    setSourceWeight(sceneId, FLASH, "anim.lowOnset", 0.5);
+    const b = getDriveSetting(sceneId, FLASH);
+    expect(b).not.toBe(a);
+    expect((b as DrivePatch).sources[0]!.weight).toBe(0.5);
+    expect(getDriveSetting(sceneId, FLASH)).toBe(b);
+  });
+
+  it("shares the default for an untouched setting, and a reset returns to it", () => {
+    const sceneId = "ds-memo-default";
+    const a = getDriveSetting(sceneId, FLASH);
+    expect(getDriveSetting(sceneId, FLASH)).toBe(a);
+    setDriveSetting(sceneId, FLASH, driveSettingFromChoice("anim.mid"));
+    expect(getDriveSetting(sceneId, FLASH)).toEqual(driveSettingFromChoice("anim.mid"));
+    resetDriveSetting(sceneId, FLASH);
+    expect(getDriveSetting(sceneId, FLASH)).toEqual(driveSettingFromChoice("feature.onset"));
+  });
+});
+
 describe("driveStore with a stubbed localStorage", () => {
   // The legacy-grid snapshot and this store's own cache are both seeded once
   // at module load — so exercising "what's in storage at first import" means
@@ -413,6 +447,37 @@ describe("driveStore with a stubbed localStorage", () => {
     // the legacy `choice` field — a one-source patch on a grid choice still
     // encodes as the bare choice object (see driveStore.ts's own header).
     expect(persisted.caustics?.flash?.patch).toEqual({ source: "beat", grid: 3 });
+  });
+
+  it("Reset to default stays at the default — it doesn't re-apply the legacy grid, even after a reload", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.beatGrid", JSON.stringify({ caustics: 3 }));
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+
+    vi.resetModules();
+    const fresh = await import("../src/render/driveStore.ts");
+    expect(fresh.getDriveSetting("caustics", FLASH)).toEqual(driveSettingFromChoice({ source: "beat", grid: 3 }));
+
+    fresh.resetDriveSetting("caustics", FLASH);
+    expect(fresh.getDriveSetting("caustics", FLASH)).toEqual(driveSettingFromChoice("feature.onset"));
+
+    vi.resetModules();
+    const reloaded = await import("../src/render/driveStore.ts");
+    expect(reloaded.getDriveSetting("caustics", FLASH)).toEqual(driveSettingFromChoice("feature.onset"));
+  });
+
+  it("Reset leaves no stored patch for a setting with nothing to migrate", async () => {
+    const fake = makeFakeLocalStorage();
+    fake.setItem("vibe.beatGrid", JSON.stringify({ caustics: 3 }));
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+
+    vi.resetModules();
+    const fresh = await import("../src/render/driveStore.ts");
+    fresh.setDriveSetting("caustics", SPARKLE, driveSettingFromChoice("anim.mid"));
+    fresh.resetDriveSetting("caustics", SPARKLE);
+    expect(fresh.getDriveSetting("caustics", SPARKLE)).toBe("scene");
+    const persisted = JSON.parse(fake.raw.get("vibe.drives") ?? "{}");
+    expect(persisted.caustics?.sparkle?.patch).toBeUndefined();
   });
 
   it("never migrates a setting whose default isn't the plain Beat catalogue choice", async () => {

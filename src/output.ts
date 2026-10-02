@@ -2,8 +2,8 @@
 // before any store module seeds its cache (net/outputStorage.ts).
 import { outputStorage } from "./net/outputStorage.ts";
 import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
-import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
-import { detectQuality, parseQualityPreset, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
+import { createGL, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
+import { detectQuality, parseQualityPreset, presetAllows, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
 import { getScene, FULL_VIEWPORT, type Scene, type SceneContext } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, type Palette } from "./render/palette.ts";
@@ -11,7 +11,7 @@ import { createAnimClock } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createDriveEngine } from "./render/drives.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
@@ -22,6 +22,7 @@ import { createGlide, type Glide } from "./net/outputGlide.ts";
 import { createFrameInbox, type OutputPower, type OutputState, type ToMain, type ToOutput } from "./net/outputSync.ts";
 import { clampResolution, RESOLUTION_DEFAULT } from "./render/outputPower.ts";
 import { applySyncedStorage } from "./net/syncedStores.ts";
+import { requestWakeLock } from "./ui/wakeLock.ts";
 
 /**
  * The pop-out output page (output.html): the main window's scene on its own
@@ -49,13 +50,15 @@ const HINT_MS = 6000;
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 
-const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
-const presetAllows = (s: Scene, p: QualityPreset): boolean =>
-  !s.minQuality || PRESET_ORDER.indexOf(p) >= PRESET_ORDER.indexOf(s.minQuality);
-
 const transport = createBroadcastTransport<ToMain, ToOutput>();
 const inbox = createFrameInbox();
 let haveState = false;
+/** Where the output parks the look it is showing across its own context-loss
+ *  reload (main()'s watchContextLoss), so the main window's held program
+ *  survives instead of the reloaded page being sent the editable preview. */
+const RESTORE_KEY = "svl-output-restore";
+let contextLost = false;
+let reloading = false;
 
 function hello(): void {
   transport.post({ t: "hello", haveState });
@@ -85,20 +88,18 @@ wakeCursor();
 const hint = document.getElementById("hint");
 window.setTimeout(() => hint?.classList.add("gone"), HINT_MS);
 
-async function requestWakeLock(): Promise<void> {
-  try {
-    await navigator.wakeLock?.request("screen");
-  } catch {
-    // Not fatal — the screen may just dim.
-  }
-}
 void requestWakeLock();
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") void requestWakeLock();
 });
 
 window.setInterval(hello, HEARTBEAT_MS);
-window.addEventListener("pagehide", () => transport.post({ t: "bye" }));
+// Skipped when this page is reloading itself after a GPU context loss (below):
+// the main window must keep seeing an output that is merely blinking, with its
+// Cue/Play program intact, rather than one that was closed.
+window.addEventListener("pagehide", () => {
+  if (!reloading) transport.post({ t: "bye" });
+});
 
 pinEverything();
 
@@ -172,9 +173,30 @@ function syncQuality(): boolean {
 
 /** A `power` message: re-resolve, and re-init the current scene if the preset moved. */
 function applyQuality(): void {
-  if (syncQuality() && scene && presetAllows(scene, quality.preset)) {
-    host.unmountAll();
-    host.mount(scene);
+  if (syncQuality() && scene && presetAllows(scene, quality.preset)) mountScene(scene);
+}
+
+/** Puts `next` on the host. If its init() throws (a shader this GPU won't
+ *  compile, a missing float target) the output carries on with the scene it
+ *  had, or goes black when there is none or it is `next` itself being
+ *  re-initialised: never a half-built scene whose render() throws every frame. */
+function mountScene(next: Scene): void {
+  const prev = scene;
+  host.unmountAll();
+  try {
+    host.mount(next);
+    scene = next;
+    return;
+  } catch (err) {
+    console.error(`Output: "${next.name}" failed to start:`, err);
+  }
+  scene = null;
+  if (!prev || prev === next) return;
+  try {
+    host.mount(prev);
+    scene = prev;
+  } catch (err) {
+    console.error(`Output: "${prev.name}" failed to restart:`, err);
   }
 }
 
@@ -191,9 +213,7 @@ function applyState(state: OutputState): void {
   const next = getScene(state.scene);
   if (next && presetAllows(next, quality.preset) && (next !== scene || qualityChanged)) {
     // A quality change re-inits the scene too: geometry is sized at init.
-    host.unmountAll();
-    host.mount(next);
-    scene = next;
+    mountScene(next);
   }
   haveState = true;
 }
@@ -232,6 +252,23 @@ async function main(): Promise<void> {
     console.error(err);
     return;
   }
+  // See gl.ts's watchContextLoss(): the loop idles while the context is gone,
+  // and on restore the page reloads, with the current look parked for itself.
+  watchContextLoss(
+    canvas,
+    () => {
+      contextLost = true;
+    },
+    () => {
+      try {
+        if (current) sessionStorage.setItem(RESTORE_KEY, JSON.stringify(current));
+      } catch {
+        // Storage blocked: the main window re-sends its preview instead.
+      }
+      reloading = true;
+      location.reload();
+    },
+  );
   const devPin = import.meta.env.DEV ? parseQualityPreset(new URLSearchParams(location.search)) : null;
   pinned = devPin !== null;
   detectedPreset = devPin ?? (await detectQuality());
@@ -240,6 +277,18 @@ async function main(): Promise<void> {
   governor?.setEnabled(power.mode === "auto");
   host = createSceneHost(gl, quality);
   sceneCtx = host.ctx;
+  // Back from a context-loss reload: take the parked look first, so the very
+  // first hello says haveState and the main window keeps its program.
+  try {
+    const raw = sessionStorage.getItem(RESTORE_KEY);
+    sessionStorage.removeItem(RESTORE_KEY);
+    const parked = raw ? (JSON.parse(raw) as Partial<OutputState>) : null;
+    if (parked && typeof parked.scene === "string" && typeof parked.palette === "string" && parked.storage && parked.params) {
+      applyState(parked as OutputState);
+    }
+  } catch (err) {
+    console.error("Output: couldn't restore the look after a graphics reset:", err);
+  }
   hello();
   window.setInterval(() => {
     transport.post({
@@ -262,6 +311,7 @@ async function main(): Promise<void> {
 
   function loop(): void {
     requestAnimationFrame(loop);
+    if (contextLost) return;
 
     const nowMs = performance.now();
     const dtSec = Math.max(1e-4, (nowMs - lastRafMs) / 1000);
@@ -281,7 +331,10 @@ async function main(): Promise<void> {
     blank = false;
 
     const p = inbox.params();
-    const anim = animClock.advance(dtSec, frame, p.smoothing, getSilenceGate(), {
+    // The controller's resolved marks (its Auto room-floor tracker moves them,
+    // and nothing in this window feeds that tracker); this window's own stored
+    // marks only stand in for a controller that doesn't send any.
+    const anim = animClock.advance(dtSec, frame, p.smoothing, frame.gate ?? getSilenceGate(), {
       shape: getHitShape(),
       beatRatio: frame.beatRatio,
       wavePeak: frame.wavePeak,
@@ -295,7 +348,7 @@ async function main(): Promise<void> {
     if (!shouldRenderFrame(nowMs, lastRenderMs, interval)) return;
     if (lastRenderFpsMs > 0 && nowMs > lastRenderFpsMs) lastFps = 1000 / (nowMs - lastRenderFpsMs);
     lastRenderFpsMs = nowMs;
-    lastRenderMs = nowMs;
+    lastRenderMs = nextRenderAnchor(nowMs, lastRenderMs, interval);
 
     // Resolution multiplies the quality's scale (governor steps included), so
     // it takes effect on this very resize — no remount, unlike a Quality change.

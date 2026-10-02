@@ -91,8 +91,8 @@ interface VizDebugApi {
    *  scene setting (resolveSceneSetting), which advances the auto-tune slew
    *  map (autoTune.ts) as a side effect on every call. Polling that every
    *  rAF tick would perturb the running scene; this doesn't. Also distinct
-   *  from probe().beat.fired, which is anim.onset (grid-filtered) rather
-   *  than this raw pre-grid flag. */
+   *  from probe().beat.fired, which is the raw anim.onset (renderLatch-latched,
+   *  no grid) rather than this pre-latch FeatureFrame flag. */
   audioProbe(): AudioProbeSnapshot;
   /** The deep waveform buffer behind the tick audioProbe() just reported —
    *  call only on a detected onset edge, not every tick (see
