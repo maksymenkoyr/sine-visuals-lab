@@ -28,8 +28,8 @@ Close out this working session:
    survives.
 
    Then **save the materials** — anything this session used for a scene that
-   would otherwise be lost (the standing rule in `AGENTS.md` says where each
-   kind goes):
+   would otherwise be lost (the Materials section of
+   `docs/scenes/_template.md` says where each kind goes):
    - scripts written in the session's scratch folder that were used to
      build, measure or screenshot the scene → `docs/scenes/<id>/scripts/`,
      with absolute local paths made repo-relative;
