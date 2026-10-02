@@ -2,13 +2,25 @@
  * Panel blur: whether the controls panel's glass blurs the scene behind it.
  * Global per device, like src/render/qualityPref.ts.
  *
- * The blur is a CSS backdrop-filter, and every filtered layer re-reads the
- * WebGL canvas behind it each frame (the canvas changes every frame). With a
- * panel's worth of cards that is a real GPU cost — measured 2026-09-29 at
- * roughly 1 ms/frame on a light scene and 5+ ms on Caustics — and the blur
- * radius made no difference, only whether a filter exists at all. So it
- * defaults off, and "off" is a darker flat tint rather than the lighter one
- * the blur needed, to keep the text readable without it.
+ * The blur is a CSS backdrop-filter, and the browser re-filters the WebGL
+ * canvas behind it every frame (the canvas changes every frame) at full
+ * device resolution. That is a real GPU cost — measured 2026-09-29 at
+ * roughly 1 ms/frame on a light scene and 5+ ms on Caustics. It defaults on
+ * anyway: the frosted panel is the intended look, the quality governor
+ * (src/render/governor.ts) absorbs the cost on a scene that runs out of
+ * budget, and "Off" stays one click away in the Power card. "Off" is a
+ * darker flat tint rather than the lighter one the blur needs, to keep the
+ * text readable without it.
+ *
+ * What the cost scales with (2026-10-02, headless Metal, dpr 2, Caustics
+ * open panel): the blurred *area*. Neither the blur radius nor the number of
+ * filtered layers matters — one filter per column cost the same as one per
+ * card, while a lone 1px filtered element cost next to nothing. A copy of
+ * the canvas into a small 2D canvas, blurred there and drawn back under the
+ * cards, cost as much again just for the cross-context copy. So the one
+ * cheaper blur left is inside the renderer: a downsampled, blurred copy of
+ * the finished frame (the halving blits src/render/pictureReadback.ts
+ * already does) drawn into the canvas under the cards' rects.
  *
  * Both looks are CSS custom properties on <html> (see applyGlassBlur and
  * controlsTheme.ts's GLASS_BG / GLASS_FILTER): every glass surface reads
@@ -19,7 +31,7 @@
  */
 
 const STORAGE_KEY = "vibe.panelBlur";
-export const GLASS_BLUR_DEFAULT = false;
+export const GLASS_BLUR_DEFAULT = true;
 
 function loadInitial(): boolean {
   try {
