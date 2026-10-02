@@ -881,20 +881,28 @@ body.vc-keys-reveal [data-keycap]::after {
  * colour (the group carries that colour as its CSS "color", so the
  * drop-shadow below resolves per cable via currentColor — a tight bloom
  * plus a wider halo, eased in on both), the core thicker and at full
- * opacity, the glow layer brighter and wider, the flow spark brighter,
- * the muted flat path brighter still. Preview/scene-mix cables never grow
- * a hit stroke (no per-source press), so they stay purely decorative and
- * never light up like this. */
+ * opacity, the glow layer brighter and wider, the flow beads lifted
+ * toward white and just wider than that core — at the resting width and
+ * colour they'd sink into the thicker core and the bloom, and the cable
+ * would stop showing its signal flowing exactly while it's being looked
+ * at — the muted flat path brighter still. The bead lift is motion-only:
+ * under reduced motion the flow layer is a solid line (see above), and
+ * whitening it would just recolour the cable. Preview/scene-mix cables
+ * never grow a hit stroke (no per-source press), so they stay purely
+ * decorative and never light up like this. */
 .vc-cable-hit { fill: none; stroke: transparent; stroke-width: 14; stroke-linecap: round; pointer-events: stroke; cursor: pointer; }
 .vc-cable-g { transition: filter 0.15s ease; }
 .vc-cable-core { transition: stroke-width 0.12s ease, opacity 0.12s ease; }
 .vc-cable-glow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
-.vc-cable-flow { transition: opacity 0.12s ease; }
+.vc-cable-flow { transition: opacity 0.12s ease, stroke-width 0.12s ease; }
 .vc-cable-muted { transition: opacity 0.12s ease; }
 .vc-cable-g:hover { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 9px currentColor); }
 .vc-cable-g:hover .vc-cable-core { stroke-width: 3; opacity: 1; }
 .vc-cable-g:hover .vc-cable-glow { opacity: 0.5; stroke-width: 9; }
 .vc-cable-g:hover .vc-cable-flow { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .vc-cable-g:hover .vc-cable-flow { stroke-width: 3.5; stroke: color-mix(in srgb, currentColor 25%, white); }
+}
 .vc-cable-g:hover .vc-cable-muted { opacity: 0.8; }
 @media (prefers-reduced-motion: reduce) {
   .vc-cable-g, .vc-cable-core, .vc-cable-glow, .vc-cable-flow, .vc-cable-muted { transition: none; }
