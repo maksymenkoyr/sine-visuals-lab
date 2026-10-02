@@ -1,7 +1,4 @@
-# CLAUDE.md
-
-The shared rules are imported here from @AGENTS.md — don't read that file a
-second time. Below are the rules that only apply to Claude Code.
+@AGENTS.md
 
 ## Claude Code only
 

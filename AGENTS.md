@@ -1,9 +1,7 @@
 # AGENTS.md
 
-The working rules for this repo, shared by every coding tool. Claude Code gets
-them through [`CLAUDE.md`](CLAUDE.md), which imports this file. Every other tool
-reads this file and ignores `CLAUDE.md`. Older comments and docs cite
-`CLAUDE.md` for these rules — they mean this file.
+The working rules for this repo, shared by every coding tool. Older comments
+and docs cite `CLAUDE.md` for these rules — they mean this file.
 
 A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` →
 `src/app.ts` (controller + gallery) and `tv.html` → `src/tv.ts` (paired display).
