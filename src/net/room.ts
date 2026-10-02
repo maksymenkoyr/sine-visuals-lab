@@ -62,14 +62,23 @@ export interface DeviceCommand {
   viewport?: Viewport;
 }
 
+/** Used when storage is blocked (Safari/WebKit private modes, sandboxed
+ *  frames): one id per page load, shared by every connection in the page, so a
+ *  host and a renderer in the same tab still agree on who "this device" is. */
+let sessionDeviceId: string | null = null;
+
 function readDeviceId(): string {
   const KEY = "vibe.deviceId";
-  let id = localStorage.getItem(KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(KEY, id);
+  try {
+    let id = localStorage.getItem(KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(KEY, id);
+    }
+    return id;
+  } catch {
+    return (sessionDeviceId ??= crypto.randomUUID());
   }
-  return id;
 }
 
 function wsUrl(code: string, role: "host" | "renderer", ownDeviceId: string): string {
