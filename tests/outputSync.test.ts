@@ -246,6 +246,11 @@ describe("syncedStores", () => {
       "vibe.output.powerMode": "off",
       "vibe.preview.quality": "floor",
       "vibe.preview.size": "half",
+      // Pairing sessions hold room secrets: never mirrored to the pop-out.
+      "svl.hostRoom": "{}",
+      "svl.controllerSession": "{}",
+      "svl.tvSession": "{}",
+      "svl.pendingAdopt": "{}",
     });
     expect(captureSyncedStorage(live)).toEqual({ "vibe.sceneSettings": "{}", "vibe.someFutureStore": "1" });
   });

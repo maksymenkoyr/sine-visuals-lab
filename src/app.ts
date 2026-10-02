@@ -1,3 +1,7 @@
+// FIRST import, before any store evaluates: on a phone opened as a room
+// controller it puts the in-memory look overlay over localStorage — see the
+// header of net/controllerStorageBoot.ts. A no-op for every other page.
+import "./net/controllerStorageBoot.ts";
 import { DRAFT_SCENE_IDS, PAID_SCENE_IDS } from "./render/scenes/index.ts"; // also registers built-in scenes (side effect)
 import { captureMic, captureDisplayAudio, listAudioInputDevices } from "./audio/capture.ts";
 import {
@@ -185,11 +189,24 @@ import {
   seedAuto,
 } from "./render/autoTune.ts";
 import {
+  ControllerConnection,
   createRoomCode,
   HostConnection,
   RendererConnection,
   type VisualSample,
 } from "./net/room.ts";
+import { WORKER_ORIGIN } from "./net/config.ts";
+import { realStorage } from "./net/realStorage.ts";
+import { captureRoomStorage, applyRoomStorage } from "./net/syncedStores.ts";
+import { createLookSync, LOOK_PUBLISH_MS } from "./net/lookSync.ts";
+import { planBoot } from "./net/bootPlan.ts";
+import { clearSession, readSession, writeSession, type HostRoomSession } from "./net/sessions.ts";
+import { planHostRoom } from "./net/hostRoom.ts";
+import { postAdopt } from "./net/adopt.ts";
+import { createControllerLook, type ControllerLook } from "./net/controllerLook.ts";
+import { controllerBadgeText, controllerPreview } from "./net/controllerPreview.ts";
+import { ROSTER_WAIT_MS, hasNewRenderer, rendererIds, waitForRoster } from "./net/screenJoin.ts";
+import { newKey } from "./net/pairing.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
@@ -210,7 +227,7 @@ import { sceneVersionHint, sceneVersionOf } from "./render/sceneVersions.ts";
 import { bindHint, hideTooltip } from "./ui/tooltip.ts";
 
 type Mode = "solo" | "host" | "renderer";
-type AnyConn = HostConnection | RendererConnection;
+type AnyConn = HostConnection | RendererConnection | ControllerConnection;
 
 const canvas = document.getElementById("gl") as HTMLCanvasElement;
 const hud = document.getElementById("hud") as HTMLDivElement;
@@ -245,6 +262,23 @@ let hostConn: HostConnection | null = null;
 let rendererConn: RendererConnection | null = null;
 let rendererHasData = false;
 let soloFallbackTriggered = false;
+/** A phone that edits the room's look instead of listening (net/lookSync.ts has
+ *  the protocol, boot() the pairing). It is deliberately still `mode ===
+ *  "renderer"` — no capture, no Source row, usage counted as "remote" — because
+ *  the many `mode !== "renderer"` checks below default to "open the mic" and a
+ *  fourth mode would fall straight into them. What differs is gated on this flag
+ *  alone, so a solo, host or legacy-renderer page never takes a controller
+ *  branch. */
+let isController = false;
+let controllerConn: ControllerConnection | null = null;
+/** Controller only: the look this phone reads and writes for the room, and the
+ *  scene and palette ids the room holds even when this phone cannot show them
+ *  (net/controllerLook.ts). Null on every other page, which is what keeps the
+ *  notes in applyScene / applyPalette / enterViz inert there. */
+let controllerLook: ControllerLook | null = null;
+/** Controller only: the laptop has stopped sending frames (the room badge says
+ *  so). Set by currentVisual() from net/controllerPreview.ts. */
+let laptopWaiting = false;
 
 let capture: CaptureHandle | null = null;
 let bandAnalyser: BandAnalyser | null = null;
@@ -336,7 +370,9 @@ let outputPower: OutputPower = {
   resolution: getOutputResolution(),
 };
 /** True while an output window is open and a scene is showing: recomputed
- *  every tick (render loop, right after outputBridge.update). */
+ *  every tick (render loop, right after outputBridge.update). A phone
+ *  controller is always previewing whatever it shows — the room's TV is the
+ *  real picture — so for it this is just "a scene is showing". */
 let previewActive = false;
 const presetRank = (p: QualityPreset): number => PRESET_ORDER.indexOf(p);
 /** The preset this window actually renders at. effectivePreset() is the
@@ -382,9 +418,10 @@ let gallery: Gallery | null = null;
 let deviceMenu: DeviceMenu | null = null;
 let immersive: ImmersiveMode | null = null;
 let inViz = false;
-/** `?room=CODE` (no role=host) — a mic-less renderer joining someone else's
+/** `?room=CODE` (no role) — a mic-less renderer joining someone else's
  *  room. The scene is dictated by the host, so there's nothing to browse:
- *  the gallery is never built and routing is skipped entirely. */
+ *  the gallery is never built and routing is skipped entirely. A phone
+ *  controller is the opposite: it browses and picks, so it never sets this. */
 let bypassGallery = false;
 /** This tick's feature frame, shared by the fullscreen scene render and (via
  *  gallery.liveFrame) the gallery preview tiles once real audio is running. */
@@ -559,14 +596,16 @@ function applyRenderQuality(remount = false): void {
 }
 
 /** The preview's box (index.html's `body.output-preview #gl`): on while an
- *  output is open and the size isn't Full. */
+ *  output is open and the size isn't Full. A phone controller previews cheaply
+ *  (renderPreset) but keeps the whole screen: a half-size picture on a phone
+ *  is no preview at all. */
 function applyPreviewBox(): void {
-  document.body.classList.toggle("output-preview", previewActive && previewSize !== "full");
+  document.body.classList.toggle("output-preview", previewActive && previewSize !== "full" && !isController);
   document.body.style.setProperty("--preview-frac", String(PREVIEW_SIZE_FRACTION[previewSize]));
 }
 
 function activeConn(): AnyConn | null {
-  return hostConn ?? rendererConn;
+  return hostConn ?? controllerConn ?? rendererConn;
 }
 
 function showHud(text: string, persist = false): void {
@@ -734,6 +773,7 @@ function updateSceneVersionLabel(next: Scene): void {
 function applyScene(next: Scene): void {
   if (!mainHost) return;
   scene = next;
+  controllerLook?.noteScene(next.id);
   // Before the mount, which sizes geometry from `quality`: the new scene's
   // minQuality may differ from the last one's while previewing.
   if (previewActive) applyRenderQuality();
@@ -747,6 +787,7 @@ function applyScene(next: Scene): void {
 
 function applyPalette(next: Palette): void {
   palette = next;
+  controllerLook?.notePalette(next.id);
   showHud(`palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
 }
@@ -896,7 +937,9 @@ let inputPreview: InputPreview | null = null;
 let inputPreviewActive = false;
 
 function syncInputPreview(): void {
-  if (!inputPreviewActive || !inputPreviewSupported() || inputDevices.length === 0) {
+  // A phone controller listens to nothing — opening the panel must not light
+  // its mic indicator by previewing the inputs it once had permission for.
+  if (isController || !inputPreviewActive || !inputPreviewSupported() || inputDevices.length === 0) {
     inputPreview?.stop();
     inputPreview = null;
     return;
@@ -1089,7 +1132,9 @@ function captureErrorMessage(choice: AudioSourceChoice, err: unknown): string {
  *  working while browsing — and is torn down only by an explicit
  *  swapAudioSource() or the capture's own track ending (onCaptureEnded above). */
 function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
-  if (syntheticFeed) return Promise.resolve();
+  // A phone controller hears the room through the host's frames; the gallery's
+  // tile taps and source picker reach here too, and must not open its mic.
+  if (syntheticFeed || isController) return Promise.resolve();
   if (audioPromise) return audioPromise;
   const choice = explicit ?? autoStartSource();
   if (choice === null) {
@@ -1210,7 +1255,8 @@ function updateMicPrompt(): void {
 
 /** Renderer lost (or never reached) its room — fall back to this device's own mic, per the plan's Solo model. */
 async function fallBackToSolo(reason: string): Promise<void> {
-  if (soloFallbackTriggered) return;
+  // A controller never becomes a solo mic: it reconnects, or is told to re-pair.
+  if (soloFallbackTriggered || isController) return;
   soloFallbackTriggered = true;
   showHud(`room ${reason} — switching to solo mic`);
 
@@ -1478,6 +1524,8 @@ function wireDeviceMenu(): void {
       applyRenderQuality();
     },
     isPreview: () => previewActive,
+    // applyPreviewBox() leaves a phone controller's preview full page.
+    canResizePreview: () => !isController,
     getPreviewSize: () => previewSize,
     onPreviewSizeChange: (size) => {
       setPreviewSize(size);
@@ -1543,6 +1591,9 @@ function wireRoomControls(conn: AnyConn): void {
     scenes: menuItems(availableScenes()),
     palettes: menuItems(PALETTES),
     selfDeviceId: conn.deviceId,
+    // A phone controller is not in the roster it reads, so "Sync all to me"
+    // copies the look it is showing instead.
+    getSelfLook: () => (isController ? { scene: scene.id, palette: palette.id } : null),
   });
   panelBtn.style.display = "block";
   panelBtn.addEventListener("click", () => panel.toggle());
@@ -1568,12 +1619,249 @@ function wireRoomControls(conn: AnyConn): void {
   conn.sendHello(scene.id, palette.id, viewport);
 }
 
+/** A full-screen, plain-words stop for a page that cannot go on: a phone that
+ *  has to scan again, or whose room has gone. Not showHud — that is small,
+ *  dim and fades, and there is nothing behind this worth looking at. */
+function showPairingNotice(title: string, body: string): void {
+  const root = document.createElement("div");
+  root.style.cssText = `
+    position: fixed; inset: 0; z-index: 30;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; background: #000; color: #fff;
+    font-family: system-ui, sans-serif; text-align: center; padding: 24px;
+  `;
+  const heading = document.createElement("div");
+  heading.style.cssText = "font-weight: 600; font-size: 22px;";
+  heading.textContent = title;
+  const text = document.createElement("div");
+  text.style.cssText = "opacity: 0.7; font-size: 16px; max-width: 28em;";
+  text.textContent = body;
+  root.append(heading, text);
+  document.body.appendChild(root);
+}
+
+/** Two tabs on one laptop share one localStorage, so without this a second tab
+ *  would resume the first one's room and fight it for the host seat. The first
+ *  tab to ask keeps the lock for as long as it lives (the grant ends when the
+ *  promise the callback returns settles, and that one never does). False where
+ *  Web Locks are missing or another tab holds it; src/net/hostRoom.ts then
+ *  starts a new room. */
+function takeHostRoomLock(): Promise<boolean> {
+  if (!navigator.locks) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    try {
+      void navigator.locks
+        .request("svl-host-room", { ifAvailable: true }, (lock) => {
+          resolve(lock !== null);
+          return lock ? new Promise<void>(() => {}) : undefined;
+        })
+        .catch(() => resolve(false));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+/** The laptop's own keyed room: the one this tab had before if it may resume it
+ *  (hostRoom.ts has the rule), else a fresh code with fresh keys. Only the tab
+ *  holding the lock saves a new room, so a second tab can't take the first
+ *  one's reload away from it. */
+async function openHostRoom(): Promise<HostRoomSession> {
+  const lockHeld = await takeHostRoomLock();
+  const plan = planHostRoom(readSession("host", realStorage), Date.now(), lockHeld);
+  if (plan.kind === "resume") return plan.session;
+  const session: HostRoomSession = { room: await createRoomCode(), hostKey: newKey(), roomKey: newKey(), ts: Date.now() };
+  if (lockHeld) writeSession("host", session, realStorage);
+  return session;
+}
+
+/** The controller's side of the look protocol (net/lookSync.ts): what the
+ *  phone's panel changes goes out through tick(), and what the room says
+ *  comes back through the connection's look messages. What the phone reads and
+ *  writes is net/controllerLook.ts, which remembers the room's scene and palette
+ *  even when this phone can't show them. */
+function startControllerLook(conn: ControllerConnection): void {
+  const look = createControllerLook({
+    paletteId: () => palette.id,
+    canShowPalette: (id) => PALETTES.some((p) => p.id === id),
+    showPalette: (id) => applyPalette(getPalette(id)),
+    showScene(id) {
+      const next = getScene(id);
+      if (next && next.id !== scene.id && presetAllows(next, effectivePreset())) {
+        if (inViz) applyScene(next);
+        else scene = next;
+      }
+    },
+    captureStorage: () => captureRoomStorage(localStorage),
+    applyStorage: (storage) => applyRoomStorage(storage, localStorage),
+  });
+  controllerLook = look;
+  const sync = createLookSync({
+    read: look.io.read,
+    write: look.io.write,
+    send: (msg) => conn.sendLook(msg),
+    onReject: (reason) =>
+      showHud(reason === "size" ? "Settings too large to sync" : "Not allowed to change this room", true),
+  });
+  conn.onLook((m) => {
+    if (m.type === "look") sync.onSnapshot(m.rev, m.doc);
+    else if (m.type === "lookPatch") sync.onPatch(m.rev, m);
+    else if (m.type === "lookAck") sync.onAck(m.n, m.rev);
+    else sync.onReject(m.n, m.reason);
+  });
+  conn.onState((s) => {
+    if (s !== "open") sync.onDisconnect();
+  });
+  window.setInterval(() => sync.tick(), LOOK_PUBLISH_MS);
+}
+
+/** How long the phone waits for a TV it has just handed to the room to show up
+ *  in the roster before saying it didn't. */
+const SCREEN_JOIN_WAIT_MS = 10_000;
+
+/** The stop for a phone that has met a TV before the laptop. */
+function showScanLaptopNotice(): void {
+  showPairingNotice(
+    "Now scan the QR on the laptop",
+    "The screen is waiting. On the laptop, click the room code at the top right to show the QR.",
+  );
+}
+
+/** Hands the TV waiting in `slot` to this phone's room (net/adopt.ts), then
+ *  reports in plain words: the room's roster is what proves the TV arrived.
+ *  The request goes out only once the room has delivered its first roster
+ *  (net/screenJoin.ts has why): the renderers in it were there before, so only
+ *  a screen that appears after it is the new one. `needHost` is for a TV
+ *  scanned before the laptop, which uses the room of a saved session, and that
+ *  room may be one the laptop has left: the request then also waits for the
+ *  laptop to be in the roster, and without it keeps the TV for the laptop's QR
+ *  (the `pending` session) instead of sending it into a dead room. */
+async function adoptScreen(
+  conn: ControllerConnection,
+  room: string,
+  key: string,
+  slot: string,
+  nonce: string,
+  needHost: boolean,
+): Promise<void> {
+  const wait = await waitForRoster(conn, { needHost, timeoutMs: ROSTER_WAIT_MS });
+  if (wait.kind !== "ready") {
+    writeSession("pending", { slot, nonce, ts: Date.now() }, realStorage);
+    // A refused join has already stopped the page with its own notice (startController).
+    if (wait.kind === "no-host") showScanLaptopNotice();
+    return;
+  }
+  const known = rendererIds(wait.roster);
+  let arrived = false;
+  let onArrive: (() => void) | null = null;
+  const stopWatching = conn.onRosterChange((roster) => {
+    if (arrived || !hasNewRenderer(roster, known)) return;
+    arrived = true;
+    stopWatching();
+    if (onArrive) onArrive();
+  });
+
+  const outcome = await postAdopt(WORKER_ORIGIN, slot, { room, k: key, n: nonce });
+  if (outcome !== "ok") {
+    stopWatching();
+    showHud(
+      outcome === "no-screen"
+        ? "That screen isn't waiting.\nCheck it still shows the code,\nthen scan it again."
+        : outcome === "throttled"
+          ? "Too many tries.\nWait a minute, then scan the screen again."
+          : "Couldn't reach the room.\nScan the screen again.",
+      true,
+    );
+    return;
+  }
+  if (arrived) {
+    showHud("Screen joined");
+    return;
+  }
+  onArrive = () => showHud("Screen joined");
+  window.setTimeout(() => {
+    if (arrived) return;
+    stopWatching();
+    showHud("The screen didn't answer.\nScan its code again.", true);
+  }, SCREEN_JOIN_WAIT_MS);
+}
+
+/** Boots this page as a room's phone controller; the rest of boot() is the same
+ *  as for any device. Connects with the room key, remembers it for reloads,
+ *  takes the secrets out of the address bar, starts the look protocol and, when
+ *  a TV's QR is in play (this page's own link, or one scanned earlier and
+ *  saved), hands that TV to the room. */
+function startController(
+  target: { room: string; key: string; keyFromUrl: boolean },
+  adopt: { slot: string; nonce: string } | null,
+  /** The link carried a TV QR that didn't parse: the query still gets this
+   *  controller's room and role, as for any other TV link, so a reload resumes. */
+  tvLinkWasBad = false,
+): void {
+  mode = "renderer";
+  isController = true;
+  roomCode = target.room;
+  document.body.classList.add("controller"); // index.html: no sound-source picker on the gallery
+  const conn = new ControllerConnection(target.room, { auth: { roomKey: target.key }, reconnect: true });
+  controllerConn = conn;
+
+  if (target.keyFromUrl) {
+    writeSession("controller", { room: target.room, key: target.key, ts: Date.now() }, realStorage);
+  }
+  if (target.keyFromUrl || adopt || tvLinkWasBad) {
+    // The room and role stay (a reload resumes from the saved session, and
+    // the query must come before the hash); the key and a TV link's nonce
+    // don't stay in the address bar, the history or a screenshot of either.
+    const kept = new URLSearchParams(location.search);
+    kept.delete("k");
+    kept.delete("adopt");
+    kept.delete("n");
+    kept.set("room", target.room);
+    kept.set("role", "controller");
+    history.replaceState(null, "", `${location.pathname}?${kept.toString()}${location.hash}`);
+  }
+
+  paintControllerBadge();
+  roomCodeEl.style.display = "block";
+  conn.onState((s) => {
+    paintControllerBadge();
+    if (s === "denied") {
+      clearSession("controller", realStorage);
+      showPairingNotice("This room is closed", "Scan the QR on the laptop again to reconnect.");
+    }
+  });
+  startControllerLook(conn);
+
+  // A TV scanned before the laptop is waiting in storage; this page's own link,
+  // if it has one, is the newer of the two. A link that carries a TV's QR is
+  // the one case where the room is a saved session's rather than the laptop's
+  // own QR, so only that one has to check the laptop is still in it.
+  const pending = readSession("pending", realStorage);
+  if (pending) clearSession("pending", realStorage);
+  const request = adopt ?? (pending ? { slot: pending.slot, nonce: pending.nonce } : null);
+  if (request) void adoptScreen(conn, target.room, target.key, request.slot, request.nonce, adopt !== null);
+}
+
+/** The phone controller's room badge: the room, plus whether the connection is
+ *  down or the laptop has stopped sending (net/controllerPreview.ts has the words). */
+function paintControllerBadge(): void {
+  if (!controllerConn || !roomCode) return;
+  roomCodeEl.textContent = controllerBadgeText(roomCode, controllerConn.state, laptopWaiting);
+}
+
+function setLaptopWaiting(waiting: boolean): void {
+  if (waiting === laptopWaiting) return;
+  laptopWaiting = waiting;
+  paintControllerBadge();
+}
+
 async function enterViz(next: Scene): Promise<void> {
   gallery?.hide();
   inViz = true;
   canvas.style.display = "block";
 
   scene = next;
+  controllerLook?.noteScene(next.id);
   // Before the mount (see applyScene); previewActive is still false on a
   // fresh entry and turns on at the next tick, which remounts if needed.
   if (previewActive) applyRenderQuality();
@@ -1581,7 +1869,7 @@ async function enterViz(next: Scene): Promise<void> {
   mainHost!.mount(next);
   updateSceneVersionLabel(next);
 
-  showHud(`${mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
+  showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
   activeConn()?.sendHello(scene.id, palette.id, viewport);
 
   menuBtn.style.display = "block";
@@ -1688,9 +1976,46 @@ async function boot(): Promise<void> {
   }
 
   const params = new URLSearchParams(location.search);
-  const joinCode = params.get("room");
-  const wantsHostRole = params.get("role") === "host";
-  bypassGallery = !!joinCode && !wantsHostRole;
+  // What this page load means (net/bootPlan.ts decides from the query alone;
+  // the saved controller session stands in for a key the address bar no
+  // longer carries after a reload).
+  const controllerSession = readSession("controller", realStorage);
+  const planned = planBoot(location.search, controllerSession);
+  // A TV link that doesn't parse says so and boots as the link reads without
+  // it (net/bootPlan.ts has what that is); it never makes this phone a host.
+  const badAdoptLink = planned.kind === "bad-adopt-link";
+  const plan = planned.kind === "bad-adopt-link" ? planned.then : planned;
+  if (badAdoptLink) {
+    // Out of the address bar before anything reads it again, so a reload does
+    // not repeat the message; a controller resume rewrites the whole query
+    // itself (startController).
+    const kept = new URLSearchParams(location.search);
+    kept.delete("adopt");
+    kept.delete("n");
+    const query = kept.toString();
+    history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
+  }
+  if (plan.kind === "need-pairing") {
+    // Never quietly become a second host and ask for the mic.
+    showPairingNotice("Scan the QR on the laptop again", "On the laptop, click the room code at the top right to show it.");
+    return;
+  }
+  let controllerTarget: { room: string; key: string; keyFromUrl: boolean } | null = null;
+  let adoptRequest: { slot: string; nonce: string } | null = null;
+  if (plan.kind === "controller") {
+    controllerTarget = plan;
+  } else if (plan.kind === "adopt") {
+    if (!controllerSession) {
+      // Scanned the TV before the laptop: keep the TV's slot and nonce just
+      // long enough for the laptop's QR to finish the pairing.
+      writeSession("pending", { slot: plan.slot, nonce: plan.nonce, ts: Date.now() }, realStorage);
+      showScanLaptopNotice();
+      return;
+    }
+    controllerTarget = { room: controllerSession.room, key: controllerSession.key, keyFromUrl: false };
+    adoptRequest = { slot: plan.slot, nonce: plan.nonce };
+  }
+  bypassGallery = plan.kind === "renderer";
 
   if (params.get("audio") === "synthetic") {
     const bpm = Number(params.get("bpm"));
@@ -1718,18 +2043,50 @@ async function boot(): Promise<void> {
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
 
-  if (bypassGallery) {
+  // The laptop's room key, when it hosts a keyed room: what its QR carries.
+  let hostRoomKey: string | null = null;
+  if (controllerTarget) {
+    // The laptop's QR (or a TV's, with a controller session already saved) —
+    // a phone that edits the room's look and previews it from the host's frames.
+    startController(controllerTarget, adoptRequest, badAdoptLink);
+  } else if (plan.kind === "renderer") {
     // Plain ?room=CODE — join as a mic-less renderer (e.g. a second laptop just watching).
+    // With the room's key (the laptop's watch-only link) the room is claimed, so it
+    // is kept alive across drops; a keyless one stays the old one-shot socket.
     mode = "renderer";
-    roomCode = joinCode!.toUpperCase();
-    rendererConn = new RendererConnection(roomCode);
+    roomCode = plan.room;
+    rendererConn = new RendererConnection(
+      roomCode,
+      plan.key ? { auth: { roomKey: plan.key }, reconnect: true } : undefined,
+    );
     startRendererDisconnectWatch();
+  } else if (plan.kind === "solo") {
+    // A TV link that didn't parse, on a phone with no controller session:
+    // the page on its own, not a new room.
+    mode = "solo";
+    roomCode = null;
   } else {
     // No code -> create a fresh room and host it (the classic "open the site" flow).
     // ?room=CODE&role=host -> become host of a code someone else (a TV) already created.
     try {
-      roomCode = joinCode ? joinCode.toUpperCase() : await createRoomCode();
-      hostConn = new HostConnection(roomCode);
+      if (plan.kind === "host-join") {
+        roomCode = plan.room;
+        hostConn = new HostConnection(roomCode);
+      } else {
+        // The classic flow's room is claimed by this laptop and keyed (openHostRoom).
+        const hostRoom = await openHostRoom();
+        roomCode = hostRoom.room;
+        hostRoomKey = hostRoom.roomKey;
+        hostConn = new HostConnection(roomCode, {
+          auth: { hostKey: hostRoom.hostKey, roomKey: hostRoom.roomKey },
+          reconnect: true,
+        });
+        hostConn.onState((s) => {
+          if (s !== "denied") return;
+          clearSession("host", realStorage);
+          showHud("The room refused this laptop — reload to start a new one", true);
+        });
+      }
       mode = "host";
     } catch (err) {
       console.warn("Room server unreachable, running solo:", err);
@@ -1738,13 +2095,21 @@ async function boot(): Promise<void> {
     }
   }
 
-  if ((mode === "host" || mode === "renderer") && roomCode) {
+  if (badAdoptLink) showHud("That screen link isn't valid.\nScan the QR on the TV again.", true);
+
+  // A phone controller paints its own badge (paintControllerBadge: connection
+  // state, no click); every other room member gets the room view below.
+  if ((mode === "host" || mode === "renderer") && roomCode && !isController) {
     roomCodeEl.textContent = `room: ${roomCode}`;
     roomCodeEl.style.display = "block";
     // The room view: this room's QR + code, and the field to type another
     // room's code. Stays open until dismissed — it holds a text field now.
-    const invite = createJoinScreen("renderer", document.body, { dismissible: true });
-    invite.setCode(roomCode);
+    // A keyed host's overlay carries the controller link (and a watch-only
+    // toggle); a keyed spectator can pass on the key it was invited with; the
+    // old room a phone hosts for a TV has no key to put in a link.
+    const roomKey = hostRoomKey ?? (plan.kind === "renderer" ? plan.key : undefined);
+    const invite = createJoinScreen(hostRoomKey ? "controller" : "renderer", document.body, { dismissible: true });
+    invite.setCode(roomCode, roomKey ? { key: roomKey } : undefined);
     roomCodeEl.addEventListener("click", () => invite.show());
   }
 
@@ -1758,14 +2123,19 @@ async function boot(): Promise<void> {
   });
   fsBtn.addEventListener("click", () => immersive!.toggle());
 
-  outputBridge = createOutputBridge({
-    transport: createBroadcastTransport<ToOutput, ToMain>(),
-    look: () => ({ scene: scene.id, palette: palette.id }),
-    power: () => outputPower,
-  });
-  outputControls = createOutputControls(outputBridge, { popBtn: outBtn, cueBtn, goBtn, stateEl: outStateEl, barEl: outBarEl });
-  outputControls.setVisible(inViz);
-  wireOutputKeys(outputControls);
+  // A phone controller has no pop-out: no bridge, no Cue/Play buttons or keys
+  // (every other use of these two is null-safe, and #outBtn/#cueBtn/#goBtn
+  // stay hidden as index.html ships them).
+  if (!isController) {
+    outputBridge = createOutputBridge({
+      transport: createBroadcastTransport<ToOutput, ToMain>(),
+      look: () => ({ scene: scene.id, palette: palette.id }),
+      power: () => outputPower,
+    });
+    outputControls = createOutputControls(outputBridge, { popBtn: outBtn, cueBtn, goBtn, stateEl: outStateEl, barEl: outBarEl });
+    outputControls.setVisible(inViz);
+    wireOutputKeys(outputControls);
+  }
 
   void requestWakeLock();
   document.addEventListener("visibilitychange", () => {
@@ -2154,6 +2524,21 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   lastFluxRatio = null;
   lastGate = null;
   lastInputHealth = null;
+  // A phone controller previews the host's frames and has nothing to fall back
+  // to: no solo mic, and its own socket reconnects (net/room.ts). A laptop that
+  // stops sending is a different matter, since the socket stays open; the
+  // preview goes silent and the badge says it is waiting (net/controllerPreview.ts),
+  // never fallBackToSolo as the legacy renderer below does.
+  if (controllerConn) {
+    const preview = controllerPreview(
+      controllerConn.sample(),
+      controllerConn.msSinceLastFrame,
+      controllerConn.state,
+      STALE_TIMEOUT_MS,
+    );
+    setLaptopWaiting(preview.waiting);
+    return sampleToVisual(preview.sample);
+  }
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
@@ -2210,16 +2595,16 @@ function tick(): void {
   // window sits on the gallery, so a stray Esc never blanks the projector —
   // which is why the band-gained frame is built before the inViz return.
   const gained = lastVis ? applyBandGains(lastVis, getBandGains(scene.id)) : null;
-  if (outputBridge) {
-    outputBridge.update(nowRafMs);
-    const nextActive = inViz && outputBridge.status().open;
-    if (nextActive !== previewActive) {
-      previewActive = nextActive;
-      applyRenderQuality(true);
-      applyPreviewBox();
-    }
-    if (gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null }, { sens: outputSens, exp: outputExp, smoothing });
+  outputBridge?.update(nowRafMs);
+  // The preview transition sits outside the bridge check because a phone
+  // controller has no bridge yet still previews, whenever a scene is showing.
+  const nextActive = isController ? inViz : inViz && !!outputBridge && outputBridge.status().open;
+  if (nextActive !== previewActive) {
+    previewActive = nextActive;
+    applyRenderQuality(true);
+    applyPreviewBox();
   }
+  if (outputBridge && gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null }, { sens: outputSens, exp: outputExp, smoothing });
 
   if (!inViz) {
     if (!document.hidden) gallery?.tick(nowRafMs);

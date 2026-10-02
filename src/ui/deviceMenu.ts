@@ -691,6 +691,9 @@ export interface DeviceMenuDeps {
    *  describes this window's preview (titled "Preview", Quality bound to the
    *  preview's own choice) and gains the size and resolution rows. */
   isPreview: () => boolean;
+  /** False when the preview has no box to resize (a phone controller's), which
+   *  hides the Size row; absent means it can. */
+  canResizePreview?: () => boolean;
   getPreviewSize: () => PreviewSize;
   onPreviewSizeChange: (size: PreviewSize) => void;
   /** The preview's and the output's Resolution scale (src/render/outputPower.ts),
@@ -2049,6 +2052,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     onQualityChoiceChange: deps.onQualityChoiceChange,
     getPowerStatus: deps.getPowerStatus,
     isPreview: deps.isPreview,
+    canResizePreview: deps.canResizePreview,
     getPreviewSize: deps.getPreviewSize,
     onPreviewSizeChange: deps.onPreviewSizeChange,
     getResolution: deps.getPreviewResolution,

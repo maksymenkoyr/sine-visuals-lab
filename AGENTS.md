@@ -13,7 +13,7 @@ Older comments and docs in this repo cite `CLAUDE.md` for the rules below —
 they mean this file.
 
 A browser-based, real-time WebGL2 audio visualizer with a phone→TV pairing mode.
-Two entry points: `index.html` → `src/app.ts` (phone/controller + gallery) and
+Two entry points: `index.html` → `src/app.ts` (laptop host, phone controller and gallery) and
 `tv.html` → `src/tv.ts` (the paired display). See `README.md` for the pitch and
 `docs/index.md` for how the pieces fit together.
 
@@ -87,13 +87,14 @@ after all three pass; include the screenshot paths in your summary.
 | Touching... | Read first |
 |---|---|
 | Any broad question — architecture, adding a scene, tuning, what's in flight | `docs/index.md` — the documentation map |
-| The wire format between phone and TV | `src/net/protocol.ts` header — includes the legacy-decode sunset condition |
+| The binary feature-frame format (host to screens) | `src/net/protocol.ts` header — includes the legacy-decode sunset condition |
+| The room, pairing, the phone controller, or the TV's look | `src/net/roomMessages.ts` header (the JSON message vocabulary) and `server/roomRules.ts` header (who may join and send); `src/net/lookSync.ts` header for how the look stays in step |
 | Why a setting resolves the way it does under Auto | `src/render/autoTune.ts` and `src/render/musicProfile.ts` headers |
 | The settings/uniform system itself | `src/render/sceneSettings.ts` header |
 | A scene's per-item settings (several strains/layers/objects with the same controls) or a custom widget in its Scene card | `src/render/sceneItems.ts` header, then `src/ui/widgets/registry.ts` header — items compile to plain keyed settings; widgets are data in `Scene.panel` |
 | Making a setting audio-reactive (what it reacts to: a hit, a grid tick, a level, a drawn frequency line) | `src/render/drives.ts` header — a scene reads `<key>Drive(…)`, never a signal directly |
-| Anything the site records about its visitors, or `PRIVACY.md` | `server/usage.ts` header — the one usage count, what it stores, and the `?me=1` owner flag |
-| The pop-out output window, Cue/Play, or a new localStorage-backed store that changes how a scene looks (it must register with `src/net/syncedStores.ts` to reach the output) | `src/net/outputSync.ts` header |
+| Anything the site records about its visitors, or `PRIVACY.md` | `server/usage.ts` header — the one usage count, what it stores, and the `?me=1` owner flag; `server/roomRules.ts` and `server/roomCore.ts` headers for what a claimed room keeps and where the keys travel |
+| The pop-out output window, Cue/Play, or a new localStorage-backed store that changes how a scene looks (it must register with `src/net/syncedStores.ts` to reach the output or a room's TV) | `src/net/outputSync.ts` header |
 | The Cue/Play keys, or a setting that must not glide when Play is held (`glide: false`) | `src/ui/outputKeys.ts` header, then `src/net/outputGlide.ts` header — a glide only ever moves plain fine-stepped sliders, the two Master dials and the resolved Sensitivity/Expansion/Smoothing; everything else switches when it lands |
 | The saved-look share-code format | `src/render/sceneLooks.ts` header — links in the wild outlive the schema |
 | The build target (`es2017`) | `vite.config.ts`, the comment at the `target:` line |
