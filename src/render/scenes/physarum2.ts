@@ -50,7 +50,8 @@ export { ATTRACT_ROWS };
 // - The model is defined per *simulation step*, not per second: Fogleman's
 //   rule turns an agent by a fixed angle each iteration and diffuses/decays
 //   the trail by a fixed amount each iteration, so this scene runs a
-//   fixed-rate stepper (STEP_RATE_MIN/MAX across the Crawl speed setting,
+//   fixed-rate stepper (crawlStepRate: STEP_RATE_MIN/MAX across the Crawl
+//   speed setting plus Speed boost and Speed pump on top,
 //   stepAccumulator's carry-over) in render(), rather than scaling every
 //   rate by frame.time's dt the way physarum.ts's continuous model does. Each
 //   step is diffuse -> sense/turn/move -> deposit, in that order, for the
@@ -298,6 +299,73 @@ export function stepAccumulator(prevAcc: number, dt: number, stepRate: number): 
   return { steps, acc };
 }
 
+// --- Crawl speed, Speed boost and Speed pump: the same three-part pace as
+// caustics.ts's Drift speed / Speed boost / Speed pump (see its header for the
+// user's own "push acceleration in a car" brief), in steps/s instead of phase
+// rate. Crawl speed is the base (STEP_RATE_MIN..STEP_RATE_MAX); the other two
+// add straight on top of it, so each still moves the sim with the base parked
+// at its slowest. Speed boost follows the music's level right now and drops
+// back the moment it quietens; Speed pump has its own accumulating velocity
+// (advanceCrawlPump) that each hit pushes up and that then coasts back down
+// to the base. ---
+/** Steps/s Speed boost adds at its full slider with its driver at 1. */
+const CRAWL_LEVEL_GAIN = 60;
+/** Speed pump's own accumulator: one hit's decaying envelope adds up to about
+ *  CRAWL_PUMP_ACCEL * amount * (the envelope's area) steps/s, which then
+ *  coasts back with time constant CRAWL_PUMP_RELEASE_SEC; CRAWL_PUMP_VEL_CAP
+ *  keeps a dense run of hits from accumulating without bound. */
+const CRAWL_PUMP_ACCEL = 220;
+const CRAWL_PUMP_RELEASE_SEC = 1.5;
+const CRAWL_PUMP_VEL_CAP = 60;
+/** Hard ceiling on the summed rate. Past this the stepper only drops backlog
+ *  (MAX_STEPS_PER_FRAME at 60 fps is 180 steps/s) and costs GPU for nothing. */
+const STEP_RATE_CAP = 150;
+
+export interface CrawlPumpState {
+  vel: number;
+}
+
+export function createCrawlPumpState(): CrawlPumpState {
+  return { vel: 0 };
+}
+
+/** Advances Speed pump's velocity in place: `input` (0..1, whatever the
+ *  "speedPump" driver is wired to — a bass hit's decaying envelope by default)
+ *  accelerates `vel` by `CRAWL_PUMP_ACCEL * amount * input * dtSec`, then `vel`
+ *  decays exponentially toward 0 with time constant CRAWL_PUMP_RELEASE_SEC and
+ *  is capped at CRAWL_PUMP_VEL_CAP. `amount` is the Speed pump slider (0..1);
+ *  a maxed amount with no input still decays to 0 rather than holding a floor.
+ *  Pure aside from `st`, exported so tests pin the accelerate/release shape. */
+export function advanceCrawlPump(st: CrawlPumpState, dtSec: number, input: number, amount: number): void {
+  const dt = Number.isFinite(dtSec) && dtSec > 0 ? dtSec : 0;
+  const x = Number.isFinite(input) ? Math.max(0, input) : 0;
+  const a = Number.isFinite(amount) ? Math.max(0, amount) : 0;
+  st.vel += CRAWL_PUMP_ACCEL * a * x * dt;
+  st.vel *= Math.exp(-dt / CRAWL_PUMP_RELEASE_SEC);
+  if (st.vel > CRAWL_PUMP_VEL_CAP) st.vel = CRAWL_PUMP_VEL_CAP;
+}
+
+export interface CrawlRateInputs {
+  /** The Crawl speed slider, 0..1. */
+  speed: number;
+  /** The Speed boost slider, 0..1. */
+  boost: number;
+  /** What Speed boost's driver reads right now, 0..1 (0 when unplugged). */
+  level: number;
+  /** advanceCrawlPump's `vel`, already scaled by the Speed pump slider. */
+  pumpVel: number;
+}
+
+/** Steps per second: the Crawl speed base plus Speed boost's level term plus
+ *  Speed pump's velocity, capped at STEP_RATE_CAP. Additive, like caustics.ts's
+ *  driftRatePerSec, so boost and pump still move the sim with the base at its
+ *  slowest. Pure and tested. */
+export function crawlStepRate(s: CrawlRateInputs): number {
+  const base = STEP_RATE_MIN + (STEP_RATE_MAX - STEP_RATE_MIN) * clamp01(s.speed);
+  const level = CRAWL_LEVEL_GAIN * clamp01(s.boost) * clamp01(s.level);
+  return Math.min(base + level + Math.max(0, s.pumpVel), STEP_RATE_CAP);
+}
+
 // --- "Spread"'s linear map onto the reseed/inject disc's radius (unit-
 // square units) — see the file header for why this scene clusters a reseed
 // instead of scattering it field-wide like physarum.ts's own beat seeding.
@@ -433,12 +501,6 @@ const PUSH_GAIN = 0.7;
 // the scene's record has the rejected values and what they did.
 const MOTION_JACK_GAIN = 0.15; // Sensor range/Turn angle/Speed
 const STAIN_JACK_GAIN = 0.2; // Stain
-/** Crawl speed's own drive gain. Not MOTION_JACK_GAIN: that nudge is right for
- *  one strain's Sensor/Turn/Speed among four, but Crawl is the whole sim's
- *  pace, passed through pushToward1 and then the 30..120 step-rate map — at
- *  0.15 a full-scale Loudness moved the default pace by only ~6% (75 → 80
- *  steps/s), too little to see. At 1 the same peak is ~+40%. */
-const CRAWL_JACK_GAIN = 1;
 /** Stain's own drive gain — a patched source shifts hue by up to this many
  *  turns on top of the stored shift. */
 const STAIN_DRIVE_GAIN = 0.18;
@@ -962,18 +1024,44 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
   {
     key: "speed",
     label: "Crawl speed",
-    description: "How many simulation steps run per second — the whole sim's pace",
+    description: "The base pace: how many simulation steps run per second before Speed boost and Speed pump add to it",
     group: "Motion",
+    family: "Crawl speed",
     min: 0,
     max: 1,
     step: 0.05,
     default: 0.5,
     auto: { tempo: 0.3, pulse: 0.15 },
-    // Loudness by default, lifting the pace toward the top of the slider
-    // (pushToward1, identity at drive 0 — an unplugged jack leaves Crawl
-    // speed exactly where the slider puts it), same shape and gain as the
-    // per-strain Speed jacks.
-    drive: { default: "anim.energy", gain: CRAWL_JACK_GAIN },
+  },
+  {
+    key: "speedBoost",
+    label: "Speed boost",
+    description: "The sim runs faster the louder the music is right now, and drops straight back to Crawl speed when it quietens",
+    group: "Motion",
+    family: "Crawl speed",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.5,
+    auto: { dynamics: 0.3, density: -0.15 },
+    // Loudness by default; an unplugged jack adds nothing (rest 0), since
+    // this only ever adds on top of Crawl speed.
+    drive: { default: "anim.energy" },
+  },
+  {
+    key: "speedPump",
+    label: "Speed pump",
+    description: "Each push accelerates the crawl like a gas pedal; the extra speed then coasts back down to Crawl speed",
+    group: "Motion",
+    family: "Crawl speed",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.35,
+    // Only reads as a pump on music with real hits to push against.
+    auto: { pulse: 0.35, attack: 0.2 },
+    // A kick is the natural pedal to push against; rewire it in the picker.
+    drive: { default: "anim.lowOnset" },
   },
   {
     key: "seed",
@@ -1849,6 +1937,7 @@ function createPhysarum2Scene(): Scene {
   // physarum.ts's own seedEpoch.
   let seedEpoch = 0;
   let stepAcc = 0;
+  const crawlPump = createCrawlPumpState();
   const bandsBuf = new Float32Array(NUM_BANDS);
 
   // Per-strain scratch, resolved fresh every render() call — see the file
@@ -2240,6 +2329,7 @@ function createPhysarum2Scene(): Scene {
       beatSeeder = createBeatSeeder();
       seedEpoch = 0;
       stepAcc = 0;
+      crawlPump.vel = 0;
 
       // Phase 3 state — see the file header. The territory and headcount
       // readback targets (createPixelReadback) are created lazily the first
@@ -2302,10 +2392,20 @@ function createPhysarum2Scene(): Scene {
       const mrt = eatOn && footprintTex !== null;
       const depositActive = mrt ? depositProgMrt : depositProg;
 
-      const speedSpec = settingFor("speed");
-      const speedDrive = (drives ?? PASSTHROUGH_DRIVES).value(speedSpec.key, frame.energy * CRAWL_JACK_GAIN);
-      const speedSetting = clamp01(pushToward1(resolveSceneSetting(ID, speedSpec), speedDrive));
-      const stepRate = STEP_RATE_MIN + (STEP_RATE_MAX - STEP_RATE_MIN) * speedSetting;
+      // Crawl speed (base) + Speed boost (level, rest 0 unplugged) + Speed
+      // pump (its own accelerate-then-coast velocity, advanced first so this
+      // frame's push already counts) — see crawlStepRate. Read in JS: the
+      // stepper is fixed-rate, not a GLSL uniform.
+      const d = drives ?? PASSTHROUGH_DRIVES;
+      const pumpSpec = settingFor("speedPump");
+      advanceCrawlPump(crawlPump, dt, d.value(pumpSpec.key, anim.lowPulse), resolveSceneSetting(ID, pumpSpec));
+      const boostSpec = settingFor("speedBoost");
+      const stepRate = crawlStepRate({
+        speed: resolveSceneSetting(ID, settingFor("speed")),
+        boost: resolveSceneSetting(ID, boostSpec),
+        level: d.value(boostSpec.key, frame.energy),
+        pumpVel: crawlPump.vel,
+      });
       const { steps, acc } = stepAccumulator(stepAcc, dt, stepRate);
       stepAcc = acc;
 
@@ -2558,6 +2658,7 @@ function createPhysarum2Scene(): Scene {
       beatSeeder = null;
       seedEpoch = 0;
       stepAcc = 0;
+      crawlPump.vel = 0;
       trailSideCur = 0;
       pendingInject = null;
       pendingRebalance = false;

@@ -980,6 +980,18 @@ moved the default pace ~6% at full-scale Loudness (75 → 80 steps/s). Crawl now
 has its own `CRAWL_JACK_GAIN` (1): about +40% at a loud peak, ~+15% on a
 typical level. Not yet judged by eye on real music.
 
+2026-10-03: Crawl speed is now the three-part pace Caustics has (user: "work
+same way as in caustics. base speed, pump, acceleration"). `speed` is the base
+only and lost its jack; **Speed boost** (`speedBoost`, Loudness) and **Speed
+pump** (`speedPump`, Bass hit; its accelerate-then-coast velocity is
+`advanceCrawlPump`, the twin of caustics.ts's `advancePump`) add steps/s on top
+via `crawlStepRate`, capped at `STEP_RATE_CAP`. Additive, so both still move
+the sim with the base at its slowest. The old `speed` jack's stored choice, if
+any, is not migrated (the jack moved to Speed boost; unchecked what a stale
+entry does). The constants
+(`CRAWL_LEVEL_GAIN`, `CRAWL_PUMP_*`) are first guesses sized from Caustics's
+shape, not yet judged by eye or on real music.
+
 ## Resume here
 
 **The Strain Console is built** (2026-09-29; Decisions and pivots has what
