@@ -25,7 +25,10 @@ import {
   SKY_SPLAT_SLOTS,
   SHADER_SEED_PERIOD,
   wrapShaderSeed,
+  cloudNoiseFlows,
+  CLOUD_FLOW_LEN,
 } from "../src/render/scenes/sky/sky.ts";
+import { NOISE_PERIOD } from "../src/render/noiseHash.ts";
 import { computeAutoTarget, resolveSceneSetting } from "../src/render/autoTune.ts";
 import { setSceneMaster, setSceneExpansion, SCENE_MASTER_DEFAULT, SCENE_EXPANSION_DEFAULT } from "../src/render/sceneSettings.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
@@ -514,6 +517,39 @@ describe("sky's SETTINGS follow the auto weight-authoring convention", () => {
       }
       expect(sum, `${s.key} sum of |auto weights|`).toBeLessThan(0.8);
     }
+  });
+});
+
+describe("cloudNoiseFlows", () => {
+  it("equals the raw per-octave drift for a short session", () => {
+    const f = cloudNoiseFlows(10);
+    // octave 0: bump (0.05, 0.03) per second, wisp (-0.085, 0), wrapped into [0, NOISE_PERIOD)
+    expect(f[0]).toBeCloseTo(0.5, 5);
+    expect(f[1]).toBeCloseTo(0.3, 5);
+    expect(f[2]).toBeCloseTo(NOISE_PERIOD - 0.85, 4);
+    expect(f[3]).toBe(0);
+    // octave 1 sees the same offset scaled by the fbm lacunarity
+    expect(f[4]).toBeCloseTo(0.5 * 2.02, 5);
+    expect(f[5]).toBeCloseTo(0.3 * 2.02, 5);
+  });
+
+  it("keeps every offset inside the lattice period however long the session runs", () => {
+    for (const t of [0, 1, 3600, 86400, 1e6, 1e9, 123456.789]) {
+      const f = cloudNoiseFlows(t);
+      expect(f.length).toBe(CLOUD_FLOW_LEN);
+      for (const v of f) {
+        expect(Number.isFinite(v)).toBe(true);
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThan(NOISE_PERIOD);
+      }
+    }
+  });
+
+  it("is deterministic, reuses a given buffer, and survives non-finite time", () => {
+    const buf = new Float32Array(CLOUD_FLOW_LEN);
+    expect(cloudNoiseFlows(77.7, buf)).toBe(buf);
+    expect(Array.from(buf)).toEqual(Array.from(cloudNoiseFlows(77.7)));
+    for (const v of cloudNoiseFlows(NaN)) expect(v).toBe(0);
   });
 });
 

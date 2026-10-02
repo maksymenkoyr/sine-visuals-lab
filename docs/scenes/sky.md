@@ -343,6 +343,17 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   dumps of frames 30, 75 and 200 (with floaters on screen) show 0 pixels
   changed. Most pixels were running the full `streakDensity` for every live
   stamp; the bench gpu time dropped a little (3.6 to 3.1-3.6 ms, noisy).
+- 2026-10-02 — Review pass: the cloud bump and wisp noise followed the mobile
+  seams rule in `src/render/noiseHash.ts`. They added the raw session time to
+  the noise coordinate and hashed with `fract(p * 123.34)`, the pattern that
+  breaks into cell-aligned seams on phone GPUs within hours (and on desktop
+  later). `vnoise` now hashes the integer cell with `NOISE_HASH_GLSL`, and the
+  drift is a per-octave offset computed in float64 and wrapped on the JS side
+  (`cloudNoiseFlows` -> `uCloudFlow`); the streaks' row fray shares `vnoise`,
+  so it moved to the integer hash too. Same scales, drift speeds and value
+  statistics, so the clouds read the same (checked side by side, bench frames
+  30/75/200 and live shots) but the exact pattern differs, so those frames
+  changed by design. Not checked on a real phone.
 
 ## Tuning notes
 
