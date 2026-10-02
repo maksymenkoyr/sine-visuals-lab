@@ -102,6 +102,11 @@ export default {
 
     const match = url.pathname.match(ROOM_PATH_RE);
     if (match) {
+      // Answer a plain GET here: the Room's own Upgrade check would run only
+      // after a Durable Object was instantiated or woken for it.
+      if (request.headers.get("Upgrade") !== "websocket") {
+        return new Response("expected websocket", { status: 426 });
+      }
       const stub = env.ROOM.get(env.ROOM.idFromName(match[1]));
       return stub.fetch(request);
     }

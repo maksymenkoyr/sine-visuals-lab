@@ -3,6 +3,7 @@ import { encodeFeatureFrame, decodeFeatureFrame, type EncodableFrame } from "./p
 import { ClockSync } from "./clock.ts";
 import { JitterBuffer, type TimedFrame } from "./jitterBuffer.ts";
 import { SlewLimiter } from "./slewLimiter.ts";
+import { WireDecimator } from "./wireDecimator.ts";
 import { realStorage } from "./realStorage.ts";
 import { reconnectDelayMs, isTerminalClose, isSilent, PROBE_TIMEOUT_MS } from "./reconnect.ts";
 import { parseControlMessage, type DeviceCommand, type RosterEntry } from "./roomMessages.ts";
@@ -512,7 +513,7 @@ abstract class RoomConnectionBase {
 }
 
 export class HostConnection extends RoomConnectionBase {
-  private lastSentMs = -Infinity;
+  private decimator = new WireDecimator(BROADCAST_INTERVAL_MS);
 
   constructor(code: string, opts?: ConnOptions) {
     super(code, "host", opts);
@@ -536,9 +537,11 @@ export class HostConnection extends RoomConnectionBase {
     const roomTimeMs = this.clock.roomNow();
     this.pushFrame({ ...frame, roomTimeMs });
 
-    if (roomTimeMs - this.lastSentMs < BROADCAST_INTERVAL_MS) return;
-    this.lastSentMs = roomTimeMs;
-    this.sendRaw(encodeFeatureFrame(frame, roomTimeMs));
+    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset);
+    if (!d.send) return;
+    // The latches are cleared even if the socket isn't open, so a stale hit
+    // isn't replayed on reconnect.
+    this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
   }
 }
 

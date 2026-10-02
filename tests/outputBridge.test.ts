@@ -60,6 +60,28 @@ describe("outputBridge status and power", () => {
     expect(posted.map((m) => m.t)).toEqual(["power"]);
   });
 
+  it("a Play pressed while presence had lapsed reaches the output when it returns", () => {
+    let scene = "spectrum";
+    const t = fakeTransport();
+    const bridge = createOutputBridge({
+      transport: t.transport,
+      look: () => ({ scene, palette: "neon" }),
+      storage,
+      power: () => POWER,
+    });
+    t.receive({ t: "hello", haveState: false }); // output seeded with spectrum
+    t.posted.length = 0;
+    bridge.update(performance.now() + 4000); // no heartbeat for over 3 s
+    expect(bridge.status().open).toBe(false);
+    scene = "mesh";
+    bridge.go(); // dropped: nobody is listening
+    expect(t.posted).toEqual([]);
+    t.receive({ t: "hello", haveState: true }); // the output is back, with its state
+    const states = t.posted.filter((m) => m.t === "state");
+    expect(states).toHaveLength(1);
+    expect(states[0].t === "state" && states[0].state.scene).toBe("mesh");
+  });
+
   it("sendPower posts only while an output is open", () => {
     const { bridge, posted, receive } = setup();
     bridge.sendPower();

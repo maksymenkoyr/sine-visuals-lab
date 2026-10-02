@@ -1,5 +1,5 @@
-import type { PowerMode } from "./powerMode.ts";
-import type { QualityChoice } from "./qualityPref.ts";
+import { isPowerMode, type PowerMode } from "./powerMode.ts";
+import { isQualityChoice, type QualityChoice } from "./qualityPref.ts";
 
 /**
  * Quality and energy settings for the pop-out output window (see
@@ -71,14 +71,6 @@ const PREVIEW_QUALITY_KEY = "vibe.preview.quality";
 const PREVIEW_SIZE_KEY = "vibe.preview.size";
 const OUTPUT_RESOLUTION_KEY = "vibe.output.resolution";
 const PREVIEW_RESOLUTION_KEY = "vibe.preview.resolution";
-
-function isQualityChoice(value: string): value is QualityChoice {
-  return value === "auto" || value === "high" || value === "mid" || value === "low" || value === "floor";
-}
-
-function isPowerMode(value: string): value is PowerMode {
-  return value === "auto" || value === "on" || value === "off";
-}
 
 function isPreviewSize(value: string): value is PreviewSize {
   return value === "third" || value === "half" || value === "full";

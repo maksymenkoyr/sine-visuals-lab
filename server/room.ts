@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { LOOK_LIMITS } from "./lookDoc.ts";
 import { RoomCore, readAttachment, type CoreHost, type CoreSocket } from "./roomCore.ts";
-import { ROOM_CLOSE_DENIED, hashKey, validKey } from "./roomRules.ts";
+import { MAX_SOCKETS_PER_ROOM, ROOM_CLOSE_DENIED, hashKey, validKey } from "./roomRules.ts";
 
 export interface Env {
   ROOM: DurableObjectNamespace;
@@ -29,7 +29,10 @@ export interface Env {
  * A refused join is not an HTTP error: a browser WebSocket can't read the
  * status, so the socket is opened and closed at once with ROOM_CLOSE_DENIED,
  * which is how the client tells "these credentials are dead" from "the
- * network blinked". The one HTTP route handled here is the TV adopt relay.
+ * network blinked". A full room (MAX_SOCKETS_PER_ROOM) is the exception: it is
+ * not a verdict on the credentials, so it is a plain 429 and the client's
+ * reconnect treats it like any other drop. The one HTTP route handled here is
+ * the TV adopt relay.
  */
 export class Room extends DurableObject<Env> {
   private core!: RoomCore;
@@ -49,6 +52,9 @@ export class Room extends DurableObject<Env> {
     if (request.method === "POST" && url.pathname.endsWith("/adopt")) return this.handleAdopt(request);
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("expected websocket", { status: 426 });
+    }
+    if (this.ctx.getWebSockets().length >= MAX_SOCKETS_PER_ROOM) {
+      return new Response("room full", { status: 429 });
     }
 
     const params = url.searchParams;

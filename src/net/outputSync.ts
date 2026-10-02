@@ -153,6 +153,12 @@ export interface CueController {
    *  (see ToOutput); ignored while Cue is held, when the output already
    *  shows the preview. */
   go(glideMs?: number): void;
+  /** Re-sends whatever the output should be showing right now (the preview
+   *  while Cue is held, else the program) if it differs from what it was last
+   *  *delivered*. For an output that reappears with its state intact after a
+   *  stretch the send callback reported as undelivered: a Play or Cue pressed
+   *  then moved the controller's intent but never reached the window. */
+  resync(): void;
   /** An output window just appeared (or re-announced itself after the main
    *  window reloaded): it gets the preview as its program. */
   outputOpened(): void;
@@ -168,56 +174,77 @@ export interface CueController {
  *  Cue puts the preview on the master for as long as it's held (and lets it
  *  follow live edits); releasing Cue puts the program back. Play makes the
  *  preview the new program, so a Cue released afterwards has nothing to undo. */
-export function createCueController(send: (state: OutputState, glideMs?: number) => void): CueController {
+export function createCueController(
+  /** Returns false when the message could not be delivered (no output window
+   *  listening right now): the controller then leaves `held()` at what the
+   *  output really has, so a later resync() can catch it up. */
+  send: (state: OutputState, glideMs?: number) => boolean | void,
+): CueController {
   let cue = false;
   let previewState: OutputState | null = null;
+  /** previewState's and program's stateKey, computed once when each is set:
+   *  differs() and following() run on every render tick, and a stateKey
+   *  sorts and stringifies the whole mirrored storage. A state object is
+   *  never mutated after capture, so the key can't go stale. */
+  let previewKey = "";
   /** What Play last put on the output — what a released Cue returns to. */
   let program: OutputState | null = null;
+  let programKey = "";
   let sent: OutputState | null = null;
   let sentKey = "";
 
   function push(state: OutputState, glideMs?: number): void {
+    if (send(state, glideMs) === false) return;
     sent = state;
-    sentKey = stateKey(state);
-    send(state, glideMs);
+    sentKey = state === previewState ? previewKey : state === program ? programKey : stateKey(state);
   }
 
   function differs(): boolean {
-    return previewState !== null && sent !== null && stateKey(previewState) !== sentKey;
+    return previewState !== null && sent !== null && previewKey !== sentKey;
   }
 
   return {
     preview(state) {
       previewState = state;
+      previewKey = stateKey(state);
       if (sent === null) {
         program = state;
+        programKey = previewKey;
         push(state);
-      } else if (cue && stateKey(state) !== sentKey) push(state);
+      } else if (cue && previewKey !== sentKey) push(state);
     },
     setCue(on) {
       if (on === cue) return;
       cue = on;
       if (on) {
         if (previewState && differs()) push(previewState);
-      } else if (program && stateKey(program) !== sentKey) push(program);
+      } else if (program && programKey !== sentKey) push(program);
     },
     cueOn: () => cue,
     following: () => cue || !differs(),
     go(glideMs) {
       if (!previewState) return;
       program = previewState;
+      programKey = previewKey;
       push(previewState, cue ? undefined : glideMs);
+    },
+    resync() {
+      const target = cue ? previewState : program;
+      const key = cue ? previewKey : programKey;
+      if (target && key !== sentKey) push(target);
     },
     outputOpened() {
       sent = null;
       sentKey = "";
       program = previewState;
+      programKey = previewKey;
       if (previewState) push(previewState);
     },
     outputClosed() {
       sent = null;
       sentKey = "";
       program = null;
+      programKey = "";
     },
     differs,
     held: () => sent,

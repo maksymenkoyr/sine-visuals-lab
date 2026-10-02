@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { getQualityChoice, setQualityChoice, QUALITY_CHOICE_DEFAULT } from "../src/render/qualityPref.ts";
+import { getQualityChoice, isQualityChoice, setQualityChoice, QUALITY_CHOICE_DEFAULT } from "../src/render/qualityPref.ts";
 
 // Like powerMode/autoGain/bandSplit, qualityPref has no per-scene keying —
 // it's one global value — so every test must reset first to avoid leaking
@@ -22,5 +22,12 @@ describe("quality choice persistence", () => {
       setQualityChoice(choice);
       expect(getQualityChoice()).toBe(choice);
     }
+  });
+});
+
+describe("isQualityChoice", () => {
+  it("accepts auto and every preset, nothing inherited", () => {
+    for (const v of ["auto", "high", "mid", "low", "floor"]) expect(isQualityChoice(v)).toBe(true);
+    for (const v of ["toString", "__proto__", "constructor", "", "HIGH"]) expect(isQualityChoice(v)).toBe(false);
   });
 });

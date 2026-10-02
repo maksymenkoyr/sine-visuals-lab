@@ -34,7 +34,7 @@ describe("stateKey", () => {
 describe("createCueController", () => {
   it("seeds the output once, then holds it however the preview is tuned", () => {
     const sent: string[] = [];
-    const c = createCueController((s) => sent.push(s.scene));
+    const c = createCueController((s) => void sent.push(s.scene));
     c.preview(state("a"));
     c.preview(state("b"));
     c.preview(state("b", { k: "v" }));
@@ -46,7 +46,7 @@ describe("createCueController", () => {
 
   it("holding Cue puts the preview on the output and follows live edits", () => {
     const sent: string[] = [];
-    const c = createCueController((s) => sent.push(s.scene));
+    const c = createCueController((s) => void sent.push(s.scene));
     c.preview(state("a"));
     c.preview(state("b"));
     c.setCue(true);
@@ -60,7 +60,7 @@ describe("createCueController", () => {
 
   it("releasing Cue puts back what the output had", () => {
     const sent: string[] = [];
-    const c = createCueController((s) => sent.push(s.scene));
+    const c = createCueController((s) => void sent.push(s.scene));
     c.preview(state("a"));
     c.preview(state("b"));
     c.setCue(true);
@@ -74,7 +74,7 @@ describe("createCueController", () => {
 
   it("a Cue with nothing apart sends nothing either way", () => {
     const sent: string[] = [];
-    const c = createCueController((s) => sent.push(s.scene));
+    const c = createCueController((s) => void sent.push(s.scene));
     c.preview(state("a"));
     c.setCue(true);
     c.setCue(false);
@@ -83,7 +83,7 @@ describe("createCueController", () => {
 
   it("Play sends the whole preview, settings included, for good", () => {
     const sent: OutputState[] = [];
-    const c = createCueController((s) => sent.push(s));
+    const c = createCueController((s) => void sent.push(s));
     c.preview(state("a"));
     c.preview(state("b", { k: "v" }));
     c.go();
@@ -98,7 +98,7 @@ describe("createCueController", () => {
 
   it("Play while Cue is held makes that look the one a release returns to", () => {
     const sent: string[] = [];
-    const c = createCueController((s) => sent.push(s.scene));
+    const c = createCueController((s) => void sent.push(s.scene));
     c.preview(state("a"));
     c.preview(state("b"));
     c.setCue(true);
@@ -110,7 +110,7 @@ describe("createCueController", () => {
 
   it("a Play can ask for a glide length, which travels with the send, unless Cue is held", () => {
     const sent: Array<[string, number | undefined]> = [];
-    const c = createCueController((s, g) => sent.push([s.scene, g]));
+    const c = createCueController((s, g) => void sent.push([s.scene, g]));
     c.preview(state("a"));
     c.preview(state("a", { k: "v" }));
     c.go(6000);
@@ -134,7 +134,7 @@ describe("createCueController", () => {
 
   it("an output that opens (or reconnects) gets the preview as its program", () => {
     const sent: string[] = [];
-    const c = createCueController((s) => sent.push(s.scene));
+    const c = createCueController((s) => void sent.push(s.scene));
     c.preview(state("a"));
     c.preview(state("b"));
     c.outputOpened();
@@ -144,6 +144,82 @@ describe("createCueController", () => {
     c.setCue(true);
     c.setCue(false);
     expect(sent.at(-1)).toBe("b");
+  });
+
+  it("an undelivered push leaves held() at what the output really has, until resync", () => {
+    const sent: string[] = [];
+    let delivered = true;
+    const c = createCueController((s) => {
+      if (!delivered) return false;
+      sent.push(s.scene);
+      return true;
+    });
+    c.preview(state("a"));
+    delivered = false;
+    c.preview(state("b"));
+    c.go();
+    expect(sent).toEqual(["a"]);
+    expect(c.held()?.scene).toBe("a");
+    expect(c.differs()).toBe(true);
+    delivered = true;
+    c.resync();
+    expect(sent).toEqual(["a", "b"]);
+    expect(c.held()?.scene).toBe("b");
+    expect(c.differs()).toBe(false);
+    c.resync(); // nothing left to catch up
+    expect(sent).toEqual(["a", "b"]);
+  });
+
+  it("resync also re-sends the program after a Cue release that was dropped", () => {
+    const sent: string[] = [];
+    let delivered = true;
+    const c = createCueController((s) => {
+      if (!delivered) return false;
+      sent.push(s.scene);
+      return true;
+    });
+    c.preview(state("a"));
+    c.preview(state("b"));
+    c.setCue(true); // output shows b
+    delivered = false;
+    c.setCue(false); // the put-back to a never arrives
+    expect(c.held()?.scene).toBe("b");
+    delivered = true;
+    c.resync();
+    expect(sent).toEqual(["a", "b", "a"]);
+    expect(c.held()?.scene).toBe("a");
+  });
+
+  it("differs() and following() reuse the preview's key instead of rebuilding it", () => {
+    let keyReads = 0;
+    const counted = new Proxy({ a: "1", b: "2" } as Record<string, string>, {
+      ownKeys(t) {
+        keyReads++;
+        return Reflect.ownKeys(t);
+      },
+    });
+    const c = createCueController(() => undefined);
+    c.preview(state("a", counted));
+    const afterPreview = keyReads;
+    for (let i = 0; i < 100; i++) {
+      c.differs();
+      c.following();
+    }
+    expect(keyReads).toBe(afterPreview);
+  });
+
+  it("differs() follows the preview through Play and back", () => {
+    const c = createCueController(() => undefined);
+    c.preview(state("a", { k: "1" }));
+    c.go();
+    c.preview(state("a", { k: "2" }));
+    expect(c.differs()).toBe(true);
+    c.go();
+    expect(c.differs()).toBe(false);
+    c.preview(state("a", { k: "1" }));
+    expect(c.differs()).toBe(true);
+    c.preview(state("a", { k: "2" }));
+    expect(c.differs()).toBe(false);
   });
 
   it("closing forgets what the output had", () => {
@@ -246,6 +322,8 @@ describe("syncedStores", () => {
       "vibe.output.powerMode": "off",
       "vibe.preview.quality": "floor",
       "vibe.preview.size": "half",
+      "vibe.output.resolution": "0.5",
+      "vibe.preview.resolution": "0.5",
       // Pairing sessions hold room secrets: never mirrored to the pop-out.
       "svl.hostRoom": "{}",
       "svl.controllerSession": "{}",
@@ -253,6 +331,12 @@ describe("syncedStores", () => {
       "svl.pendingAdopt": "{}",
     });
     expect(captureSyncedStorage(live)).toEqual({ "vibe.sceneSettings": "{}", "vibe.someFutureStore": "1" });
+  });
+
+  it("a resolution change in the preview window is not a difference for the output", () => {
+    const at = (resolution: string) =>
+      state("x", captureSyncedStorage(fakeStorage({ "vibe.sceneSettings": "{}", "vibe.preview.resolution": resolution })));
+    expect(stateKey(at("1"))).toBe(stateKey(at("0.5")));
   });
 
   it("applies a snapshot wholesale and runs the store hooks after the write", () => {
