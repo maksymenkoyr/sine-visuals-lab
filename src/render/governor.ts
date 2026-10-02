@@ -93,7 +93,7 @@ export interface QualityGovernor {
    *  current wall-clock time in ms. Steps the shared QualitySettings object's
    *  numeric knobs down under sustained load and back up once comfortable
    *  again. Never touches `quality.preset` itself: that label drives which
-   *  scenes are selectable (see presetAllows in app.ts/tv.ts), and changing
+   *  scenes are selectable (see presetAllows in quality.ts), and changing
    *  it mid-session would make the running scene or gallery entries vanish. */
   recordFrame(nowMs: number): void;
   /** Current step index, 0 = full detected-preset quality. For a debug HUD
