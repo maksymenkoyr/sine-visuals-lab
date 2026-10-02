@@ -22,6 +22,16 @@ const PRESET_TABLE: Record<QualityPreset, Omit<QualitySettings, "preset">> = {
   floor: { renderScale: 0.5, maxParticles: 4_000, raymarchSteps: 28, bloomPasses: 0, detail: 0.25 },
 };
 
+/** Whether `value` is one of PRESET_TABLE's keys. The one guard every stored
+ *  or received preset name goes through (qualityPref.ts, outputPower.ts), so a
+ *  preset added to the table is accepted everywhere at once. hasOwnProperty,
+ *  not `in`, so "toString" and "__proto__" are rejected; the call form rather
+ *  than Object.hasOwn because the build targets es2017 and old browsers lack
+ *  it at runtime. */
+export function isQualityPreset(value: string): value is QualityPreset {
+  return Object.prototype.hasOwnProperty.call(PRESET_TABLE, value);
+}
+
 export function qualitySettings(preset: QualityPreset): QualitySettings {
   return { preset, ...PRESET_TABLE[preset] };
 }
@@ -35,7 +45,7 @@ export function qualitySettings(preset: QualityPreset): QualitySettings {
  *  auto-detect path rather than silently picking a preset. */
 export function parseQualityPreset(params: URLSearchParams): QualityPreset | null {
   const value = params.get("quality") ?? params.get("tier");
-  return value !== null && Object.hasOwn(PRESET_TABLE, value) ? (value as QualityPreset) : null;
+  return value !== null && isQualityPreset(value) ? value : null;
 }
 
 const BENCH_SIZE = 256;
