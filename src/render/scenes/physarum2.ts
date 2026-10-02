@@ -10,7 +10,15 @@ import { grainTextureSide } from "./chladni.ts";
 import { FLOAT_HASH_GLSL } from "../noiseHash.ts";
 import { PASSTHROUGH_DRIVES } from "../drives.ts";
 import { composeSettings, defineItemPairs, defineItems } from "../sceneItems.ts";
-import { packUnit, createBeatSeeder, type BeatSeeder } from "./physarum.ts";
+import { packUnit, SEED_RISE_REFRACTORY_SEC } from "./physarum.ts";
+import {
+  advanceStandout,
+  createRippleEmissionState,
+  RING_THRESHOLD_DEFAULT,
+  salienceMarks,
+  type RippleEmissionState,
+} from "./rippleEmitter.ts";
+import { publishSettingMarks } from "../settingMarks.ts";
 import { AFFINITY_PRESETS, ATTRACT_ROWS, PAIR_WORDS, packTouch, smellWeight } from "./physarum2Affinity.ts";
 import { createSynergyTracker, wrapTurn } from "./physarum2Synergy.ts";
 export { ATTRACT_ROWS };
@@ -66,9 +74,11 @@ export { ATTRACT_ROWS };
 // side, at its own STRAINS entry's fixed sensor angle and its own live
 // Sensor range. Centre strongest holds course; centre weakest (both sides
 // beat it) turns its own live Turn angle in a random direction; anything
-// else turns toward whichever side read stronger. Reseeding on a beat reuses
-// physarum.ts's own createBeatSeeder (the same rise-detector, the same
-// refractory) but doesn't scatter the chosen agents across the whole field
+// else turns toward whichever side read stronger. Reseeding on a beat reads
+// the driver the way Caustics' Beat ripple does (rippleEmitter.ts's
+// advanceStandout: a climb that stands out from the everyday ones, with
+// Dose's own "Dose threshold" jack and graph line) behind physarum.ts's own
+// reseed refractory, but doesn't scatter the chosen agents across the whole field
 // the way physarum.ts's reseed does: they drop into a small disc (the
 // "Spread" setting's radius) around one hash-chosen point per epoch, so a
 // beat reads as a new colony visibly sprouting from a point rather than a
@@ -1082,13 +1092,25 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
     // radius-0.06 disc still read as a white blob).
     default: 0.01,
     auto: { attack: 0.25, dynamics: 0.15 },
-    // The trigger is this scene's own beatSeeder (a *rise* in the decaying
-    // beat pulse, onset folded in as a bonus) — physarum.ts's own "seed"
-    // setting, same reasoning, same default. command("inject") (the pipette,
-    // Phase 3) reads this setting's plain stored amount too, with no drive
-    // involved — the drive only ever gates the *automatic* trigger, never the
-    // pipette's own one-shot command. See the file header.
-    drive: { default: "scene", sceneLabel: "Scene: a rise in the beat pulse (bonus on a raw onset)", sceneSources: ["feature.onset"] },
+    // The trigger is a *climb* in the decaying beat pulse that stands out from
+    // the everyday ones (rippleEmitter.ts's advanceStandout, the same filter
+    // Caustics' Beat ripple uses), so a busy passage reseeds only on its
+    // clear hits instead of on every tick. Scene-handled threshold: the scene
+    // owns the idea (drive.threshold, read back with drives.threshold), so the
+    // engine's own generic gate stays out of it. command("inject") (the
+    // pipette, Phase 3) reads this setting's plain stored amount too, with no
+    // drive involved — the drive only ever gates the *automatic* trigger,
+    // never the pipette's own one-shot command. See the file header.
+    drive: {
+      default: "scene",
+      sceneLabel: "Scene: a beat hit that stands out",
+      sceneSources: ["feature.onset"],
+      threshold: {
+        default: RING_THRESHOLD_DEFAULT,
+        label: "Dose threshold",
+        hint: "Moves the dotted line: how far a sound has to stand out from the everyday ones to start a new colony. Left: more colonies, even from quiet sounds. Right: only clear standouts.",
+      },
+    },
   },
   {
     key: "switching",
@@ -1931,10 +1953,12 @@ function createPhysarum2Scene(): Scene {
   let agentCount = 0;
   let trailSideCur = 0;
   let lastFrameTime: number | null = null;
-  let beatSeeder: BeatSeeder | null = null;
-  // How many times a reseed has actually fired — kept separate from
-  // beatSeeder.epoch (its own beat-rise bookkeeping), same convention as
-  // physarum.ts's own seedEpoch.
+  // The automatic reseed's standout tracker (advanceStandout) and the time
+  // since the last reseed, for physarum.ts's refractory.
+  let seedEmission: RippleEmissionState | null = null;
+  let sinceSeedSec = SEED_RISE_REFRACTORY_SEC * 10;
+  // How many times a reseed has actually fired; rotates the reseed
+  // cluster's centre, same convention as physarum.ts's own seedEpoch.
   let seedEpoch = 0;
   let stepAcc = 0;
   const crawlPump = createCrawlPumpState();
@@ -2326,7 +2350,8 @@ function createPhysarum2Scene(): Scene {
 
       agentRead = 0;
       lastFrameTime = null;
-      beatSeeder = createBeatSeeder();
+      seedEmission = createRippleEmissionState();
+      sinceSeedSec = SEED_RISE_REFRACTORY_SEC * 10;
       seedEpoch = 0;
       stepAcc = 0;
       crawlPump.vel = 0;
@@ -2352,7 +2377,7 @@ function createPhysarum2Scene(): Scene {
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
       if (!diffuseProg || !simProg || !depositProg || !depositProgMrt || !compositeProg) return;
-      if (!quadVao || !depositVao || !beatSeeder) return;
+      if (!quadVao || !depositVao || !seedEmission) return;
       const { gl } = ctx;
       ensureTrailTargets(gl);
 
@@ -2367,15 +2392,28 @@ function createPhysarum2Scene(): Scene {
       const dt = lastFrameTime === null ? 1 / 60 : Math.max(0, Math.min(0.05, frame.time - lastFrameTime));
       lastFrameTime = frame.time;
 
-      // beatSeeder.advance() is this setting's Scene default (see its own
-      // comment in GLOBAL_SETTINGS) — always called so its internal
-      // refractory clock keeps running regardless of the setting's actual
-      // drive choice. drives.fired() is what actually gates the reseed
-      // below; seedEpoch (not beatSeeder.epoch) is what rotates the reseed
-      // cluster's centre, so a non-default choice still varies it across
-      // repeated fires.
-      const seedFresh = drives.fired("seed", beatSeeder.advance(dt, anim.beatPulse, anim.onset));
+      // The tracker always advances so its learned floor/peak keep running
+      // whatever drive Dose is patched to; drives.value() is the beat pulse
+      // by default, or the patched source's envelope (a hit, a grid tick, a
+      // level, a drawn line). drives.threshold() is null while Dose
+      // threshold's Off switch is pressed (every climb counts) and undefined
+      // only with no engine at all (PASSTHROUGH_DRIVES). seedEpoch rotates
+      // the reseed cluster's centre, so every fire lands somewhere new.
+      const seedThreshold = drives.threshold("seed");
+      const standout = advanceStandout(
+        seedEmission,
+        dt,
+        drives.value("seed", anim.beatPulse),
+        seedThreshold === undefined ? RING_THRESHOLD_DEFAULT : seedThreshold,
+      );
+      sinceSeedSec += dt;
+      const seedFresh = standout && sinceSeedSec >= SEED_RISE_REFRACTORY_SEC;
+      // The panel draws the line a climb has to reach, and a dot for each
+      // colony started (settingMarks.ts); no line while the threshold is off.
+      const seedMarks = salienceMarks(seedEmission);
+      publishSettingMarks(ID, "seed", seedMarks ? [{ value: seedMarks.ringsAbove, label: "reach to start a colony" }] : [], seedFresh ? 1 : 0);
       if (seedFresh) {
+        sinceSeedSec = 0;
         seedEpoch++;
         pendingSeed = true;
       }
@@ -2655,7 +2693,7 @@ function createPhysarum2Scene(): Scene {
       quadVao = null;
       depositVao = null;
       lastFrameTime = null;
-      beatSeeder = null;
+      seedEmission = null;
       seedEpoch = 0;
       stepAcc = 0;
       crawlPump.vel = 0;

@@ -534,6 +534,36 @@ export function advanceEmission(
   return emitted;
 }
 
+/** How much of a full ring a climb must have earned before advanceStandout
+ *  says yes. A background blip that only just clears the line emits a sliver
+ *  of a ring (the ring it would draw is faint); a hit that really stands out
+ *  earns most of one in a single step, so half is a clean divide. */
+const STANDOUT_FIRE_LEVEL = 0.5;
+/** With the threshold Off a climb is sized by its own height alone (no bar,
+ *  no spread), so the level is just "an audible climb" — the same size the
+ *  salience trackers already ignore below (SALIENCE_EVENT_MIN). */
+const STANDOUT_FIRE_LEVEL_OFF = 0.1;
+
+/** advanceEmission as a yes/no: true on the frame a climb has earned
+ *  STANDOUT_FIRE_LEVEL of a full ring, once per climb — the rest of that
+ *  climb (and every climb that stays under) answers false. For a scene that
+ *  wants a single event per standout hit rather than a graded amount (Physarum
+ *  2's Dose reseed), with the same learned floor/peak and the same
+ *  Ring-threshold-style setting Caustics' Beat ripple has, so a hit has to
+ *  stand out from the everyday ones to count. `threshold` is `null` for the
+ *  Off switch: every climb counts, sized by its own climb. */
+export function advanceStandout(
+  state: RippleEmissionState,
+  dtSec: number,
+  signal: number,
+  threshold: number | null = RING_THRESHOLD_DEFAULT,
+): boolean {
+  const level = threshold === null ? STANDOUT_FIRE_LEVEL_OFF : STANDOUT_FIRE_LEVEL;
+  const before = state.climbing ? state.emittedThisClimb : 0;
+  advanceEmission(state, dtSec, signal, threshold);
+  return state.climbing && state.emittedThisClimb >= level && before < level;
+}
+
 /** Where advanceEmission's salience puts the line right now, as signal
  *  heights on the same axis the driver is plotted on — for the panel's graph
  *  (settingMarks.ts). `ringsAbove` is the level the signal has to climb to

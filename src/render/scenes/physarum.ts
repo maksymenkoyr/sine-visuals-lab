@@ -144,7 +144,7 @@ export function trailSide(agentCount: number, maxSide: number): number {
 
 /** Shortest gap between two epoch steps, so one beat can't advance the seed
  *  epoch twice — see the file header. */
-const SEED_RISE_REFRACTORY_SEC = 0.1;
+export const SEED_RISE_REFRACTORY_SEC = 0.1;
 
 export interface BeatSeeder {
   /** How many times the epoch has stepped — folded into the reseed hash so
