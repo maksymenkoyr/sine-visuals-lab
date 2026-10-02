@@ -370,13 +370,13 @@ export function advanceSilk(st: SilkState, input: SilkInputs, opts: SilkOpts): S
     st.travelT = 0;
     st.barsSinceChange = 0;
   }
-  // A Fold pin must show up now, not at the next regime change, which may be 16-32 s away or —
-  // in silence — never. Once any travel in flight has landed, retarget the
-  // fold alone: every other field already sits at its target, so `from`
-  // becomes `to` with no visible step and only foldMix glides over
-  // REGIME_TRAVEL_SEC. (Mid-travel it waits out the last second rather
-  // than snapshotting, which would drop an in-flight zoom flip.) Auto has
-  // no pin to enforce; its next pickRegime re-rolls the fold anyway.
+  // A Fold pin must show up now, not at the next regime change, which may be
+  // 16-32 s away or — in silence — never. Once any travel in flight has
+  // landed, retarget the fold alone: every other field already sits at its
+  // target, so `from` becomes `to` with no visible step and only foldMix
+  // glides over REGIME_TRAVEL_SEC. (Mid-travel it waits out the last second
+  // rather than snapshotting, which would drop an in-flight zoom flip.) Auto
+  // has no pin to enforce; its next pickRegime re-rolls the fold anyway.
   const foldPin = opts.foldOpt === 1 ? 0 : opts.foldOpt === 2 ? 1 : null;
   if (foldPin !== null && st.to.foldMix !== foldPin && st.travelT >= REGIME_TRAVEL_SEC) {
     st.from = st.to;

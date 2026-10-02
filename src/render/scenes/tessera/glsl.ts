@@ -375,14 +375,14 @@ void main() {
   float aspect = roomAspect();
   float NEARZ = 0.08;
   // Comfortably past anything the scene ever draws (SHELL_RADIUS in
-  // lattice.ts plus the far camera at CAM_FAR sum to well under it). History: with a 16-bit depth renderbuffer a
-  // far plane well past the geometry wasted most of the precision on empty
-  // space no geometry ever reaches, and at high Fill values hundreds of
-  // near-touching, near-coplanar tube walls a few hundredths of a unit apart
-  // lose the z-fight, dropping out into a sparse, thin-looking result. A far
-  // plane that actually bounds the geometry fixed that; index.ts now
-  // allocates a 24-bit depth renderbuffer as well, which keeps the margin
-  // generous.
+  // lattice.ts plus the far camera at CAM_FAR sum to well under it). History:
+  // with a 16-bit depth renderbuffer a far plane well past the geometry
+  // wasted most of the precision on empty space no geometry ever reaches, and
+  // at high Fill values hundreds of near-touching, near-coplanar tube walls a
+  // few hundredths of a unit apart lose the z-fight, dropping out into a
+  // sparse, thin-looking result. A far plane that actually bounds the
+  // geometry fixed that; index.ts now allocates a 24-bit depth renderbuffer
+  // as well, which keeps the margin generous.
   float FARZ = 8.0;
   // Tessera's Dolly deliberately brings the camera close to the ball
   // surface, and a loud passage's length reactivity can push a near-pole
