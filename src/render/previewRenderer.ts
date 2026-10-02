@@ -17,6 +17,9 @@ type TileSink =
 
 export interface PreviewRenderer {
   readonly host: SceneHost;
+  /** True from the shared context's loss until the browser restores it —
+   *  nothing can be compiled or drawn meanwhile. */
+  isLost(): boolean;
   setSize(w: number, h: number): void;
   attach(canvas: HTMLCanvasElement): TileSink | null;
   drawTo(
@@ -80,6 +83,8 @@ export function createPreviewRenderer(quality: QualitySettings): PreviewRenderer
 
   return {
     host,
+
+    isLost: () => lost,
 
     setSize(w: number, h: number): void {
       width = Math.max(1, Math.round(w));

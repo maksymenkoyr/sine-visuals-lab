@@ -612,7 +612,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
   // Bumped by every buildTiles() so an in-flight progressive draft build
   // (see expandDrafts) from a previous cycle notices and stops.
   let draftBuildGen = 0;
-  /** How many draft tiles the in-flight build has mounted so far — drives the
+  /** How many draft tiles the in-flight build has built so far — drives the
    *  toggle's loading label; -1 = no build in flight. */
   let draftsBuiltCount = -1;
 
@@ -760,14 +760,13 @@ export function createGallery(deps: GalleryDeps): Gallery {
       : `${draftsExpanded ? "Hide" : "Show"} ${n} ${n === 1 ? "draft" : "drafts"}`;
   }
 
-  // Draft tiles are built one per animation frame rather than all at once:
-  // each buildTile() compiles that scene's shaders synchronously, and doing
-  // every draft in one click handler froze the page — the button couldn't
-  // even repaint to say it was working. Spreading them out lets the toggle
-  // show its loading label first, then the grid fill in tile by tile while
-  // the page stays responsive. The extra leading frame is deliberate: rAF
-  // callbacks run *before* that frame's paint, so without it the first
-  // compile would still land ahead of the label's first repaint.
+  // Draft tiles are built one per animation frame rather than all at once.
+  // buildTile() only builds DOM now (tick() mounts each scene lazily, one per
+  // tick), so this staging survives mainly for the loading label: it lets the
+  // toggle repaint to say it is working, then the grid fills in tile by tile.
+  // The extra leading frame is deliberate: rAF callbacks run *before* that
+  // frame's paint, so without it the first tile would still land ahead of the
+  // label's first repaint.
   function buildDraftsProgressively(): void {
     const gen = draftBuildGen;
     draftsBuiltCount = 0;
@@ -876,9 +875,9 @@ export function createGallery(deps: GalleryDeps): Gallery {
       // shader recompiled the next time the gallery is shown.
       visible = false;
       root.style.display = "none";
-      // Cancel a draft build still in flight: its steps would keep compiling
-      // shaders (one scene per frame) under the fullscreen scene's frames,
-      // into tiles the next show() discards anyway — buildTiles() rebuilds
+      // Cancel a draft build still in flight: its steps would keep building
+      // DOM (one tile per frame) under the fullscreen scene's frames, into
+      // tiles the next show() discards anyway — buildTiles() rebuilds
       // everything and re-expands the section (draftsExpanded survives).
       draftBuildGen++;
       draftsBuiltCount = -1;
@@ -891,6 +890,10 @@ export function createGallery(deps: GalleryDeps): Gallery {
     tick(nowMs: number): void {
       if (!visible || !preview || !budgetController) return;
       if (document.visibilityState !== "visible") return;
+      // A lost shared context can neither compile nor draw: a lazy mount now
+      // would throw and permanently drop the tile (t.sink = null) even though
+      // the restore is coming. drawTo's own guard covers already-mounted ones.
+      if (preview.isLost()) return;
       const intervalMs = tickIntervalMs(preset);
       // shouldRenderFrame(), not a raw `<` comparison — see framePace.ts's
       // header for why the naive comparison quantizes against vsync and
