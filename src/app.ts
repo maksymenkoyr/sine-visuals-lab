@@ -280,9 +280,9 @@ let measureAnalyser: WaveformAnalyser | null = null;
  *  support it. Disposed and cleared in onCaptureEnded/attachCapture's own
  *  re-attach, same lifecycle as bandAnalyser above. */
 let tempoSource: TempoSource | null = null;
-/** Rebuilt (not just reset) on every swapAudioSource() — see that function's
- *  comment for why a fresh extractor, not a reset(), is what a source swap
- *  needs. */
+/** Rebuilt (not just reset) on every attachCapture() — see that function's
+ *  comment for why a fresh extractor, not a reset(), is what a new capture
+ *  needs. The initial one only serves the ticks before any capture exists. */
 let extractor = new FeatureExtractor();
 /** Set on first mic/display-capture attempt; cached so re-entering a viz
  *  never re-prompts. Cleared back to null on failure, or when the capture's
@@ -972,6 +972,17 @@ function captureAudioSource(kind: CaptureSourceKind): AudioSource {
  *  from one input to the next. */
 function attachCapture(handle: CaptureHandle): void {
   capture = handle;
+  // A fresh extractor, not a reset(): FeatureExtractor has none, and two
+  // things must not carry over from the previous capture. Its clocks
+  // (lastPulseTime, lastOnsetTime, peakHoldUntil, ...) are absolute
+  // AudioContext.currentTime values, and a new context restarts near 0 — the
+  // old extractor would sit "in the future" and fire no onset, pulse or band
+  // decay until the new clock caught up (a mic reopened after a pulled cable
+  // mid-set; a share started after the last one ended). And its adaptive
+  // AGC's envelope would blow the visuals out for its ~1.25s re-adaptation
+  // window on the big level jump a mic-to-screen swap usually is (a room mic
+  // is far quieter than captured system audio).
+  extractor = new FeatureExtractor();
   bandAnalyser = createBandAnalyser(handle.context, handle.sourceNode);
   waveformAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode);
   lufsAnalyser = createLufsAnalyser(handle.context, handle.sourceNode);
@@ -1041,8 +1052,9 @@ function reportUsage(): void {
  *  itself while its permission still stands: reopening it prompts nobody, and
  *  it's what keeps a set going when a cable is pulled — startMic lands on
  *  whatever input is left, and onInputDevicesChanged moves back once the
- *  chosen one returns. */
-function onCaptureEnded(handle: CaptureHandle): void {
+ *  chosen one returns. The Stop button is the deliberate form of this and
+ *  passes `reopen = false`: it must release the mic, not reopen it. */
+function onCaptureEnded(handle: CaptureHandle, reopen = true): void {
   if (capture !== handle) return; // already superseded by a swap
   handle.stop();
   capture = null;
@@ -1060,7 +1072,7 @@ function onCaptureEnded(handle: CaptureHandle): void {
   updateMicPrompt();
   gallery?.syncSource();
   syncInputPreview(); // nothing live now, so the preview can cover every device again
-  if (handle.kind === "mic" && micPermission === "granted") void ensureAudio("mic");
+  if (reopen && handle.kind === "mic" && micPermission === "granted") void ensureAudio("mic");
 }
 
 /** Turns a capture failure into copy the user can act on. A mic denial points
@@ -1129,12 +1141,6 @@ function swapAudioSource(next: AudioSourceChoice, restart = false): Promise<void
     const handle = await startCapture(next);
     previous?.stop();
     attachCapture(handle); // also repaints the stop button, so its label names the new source
-    // A fresh extractor, not a reset(): FeatureExtractor has none, and
-    // letting its adaptive AGC's envelope carry over would blow the visuals
-    // out for its ~1.25s re-adaptation window on the big level jump a
-    // mic-to-screen swap usually is (a room mic is far quieter than captured
-    // system audio).
-    extractor = new FeatureExtractor();
     setAudioSourceChoice(next);
     captureFailed = false;
   })();
@@ -1856,7 +1862,7 @@ async function boot(): Promise<void> {
   // start prompt back so listening resumes only on a tap. The room
   // connection is untouched, same as there.
   stopBtn.addEventListener("click", () => {
-    if (capture) onCaptureEnded(capture);
+    if (capture) onCaptureEnded(capture, false);
   });
   refreshAudioPromptButtons(); // support never changes mid-session, so this runs once
   audioPromptMicBtn.addEventListener("click", () => void ensureAudio("mic"));
