@@ -373,7 +373,7 @@ const pictureAverager = createPictureAverager();
 /** DEV-only override (tuning/debug.ts's `picture.force`): sample the picture
  *  even with the panel closed, for a headless sweep that never opens it. */
 let pictureForced = false;
-/** Last time samplePicture() kicked off a new capture — paced to
+/** Last time capturePicture() kicked off a new capture — paced to
  *  PICTURE_SAMPLE_INTERVAL_MS independently of the render loop's own rate,
  *  which usually runs faster. */
 let lastPictureKickMs = -Infinity;
@@ -2342,6 +2342,13 @@ function drawScene(
   const displayFrame = applySensitivity(gained, sensitivity, expansion);
   const latchedAnim = latch.consume(anim, nowRafMs);
   const drives = engine.forScene(scene.id, scene.settings ?? [], latchedAnim);
+  // Drain the previous capture *before* this frame's draws are queued: the
+  // readback is a synchronous round trip in Chrome, so asking for it after
+  // scene.render would make the main thread wait for the whole frame's GPU
+  // work (a 12-16 ms stall per call with the panel open). Its fence has had
+  // a full frame to signal by now.
+  const picturePolled = pictureWanted();
+  if (picturePolled) pollPicture();
   scene.render(mainHost!.ctx, displayFrame, viewport, palette, latchedAnim, drives);
   // Right after the scene has drawn — and nowhere else — because the
   // default framebuffer (preserveDrawingBuffer is false, gl.ts) only holds
@@ -2350,7 +2357,7 @@ function drawScene(
   // behind pictureWanted() since it costs a few blits and a tiny readback,
   // worth paying only while the Master card's Picture block is actually
   // visible or a headless sweep asked for it (pictureForced).
-  if (pictureWanted()) samplePicture(nowRafMs);
+  if (picturePolled) capturePicture(nowRafMs);
   governor?.recordFrame(nowRafMs);
 }
 
@@ -2362,22 +2369,32 @@ function pictureWanted(): boolean {
   return pictureForced || (deviceMenu?.isOpen() ?? false);
 }
 
-/** Drains whatever thumbnail finished since the last tick into the meter/
- *  averager, then — no more than PICTURE_SAMPLE_INTERVAL_MS apart — kicks off
- *  the next one. The readback itself is created lazily, on mainHost's own GL
- *  context, the first tick this is actually called. */
-function samplePicture(nowRafMs: number): void {
+/** The readback is created lazily, on mainHost's own GL context, the first
+ *  tick a sample is actually asked for. */
+function ensurePictureReadback(): PictureReadback {
   if (!pictureReadback) pictureReadback = createPictureReadback(mainHost!.ctx.gl);
-  const t = pictureReadback.poll();
+  return pictureReadback;
+}
+
+/** Drains whatever thumbnail finished since the last tick into the meter/
+ *  averager. Runs before the scene draws (see drawScene); the readback's
+ *  result buffer is reused, so the push happens immediately. */
+function pollPicture(): void {
+  const t = ensurePictureReadback().poll();
   if (t) {
     const r = pictureMeter.push(t.px, t.w, t.h, t.atMs);
     pictureAverager.add(r);
   }
+}
+
+/** Kicks off the next thumbnail, no more than PICTURE_SAMPLE_INTERVAL_MS
+ *  apart. Runs right after the scene draws, in the same task. */
+function capturePicture(nowRafMs: number): void {
   // Half a 60 fps frame of slack: rAF timestamps jitter, and without it a
   // 60 fps render lands just short of the interval on its fourth frame and
   // samples every fifth instead (12 Hz, not 15).
   if (nowRafMs - lastPictureKickMs >= PICTURE_SAMPLE_INTERVAL_MS - 8) {
-    pictureReadback.capture(canvas.width, canvas.height, nowRafMs);
+    ensurePictureReadback().capture(canvas.width, canvas.height, nowRafMs);
     lastPictureKickMs = nowRafMs;
   }
 }
