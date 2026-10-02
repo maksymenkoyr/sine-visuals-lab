@@ -14,9 +14,8 @@
 // clock (morph - k*morphStepPerEcho). A real ping-pong feedback buffer
 // blurs a little on every resample — after ~20 steps the reference's ~3px
 // line spacing would be mush (see the Tessera scene's "feedback draws a
-// path, not the object" lesson) — so only the diffuse haze beyond the
-// crisp echoes is a real feedback texture (index.ts's tail pass); it lags
-// one frame behind the sharp picture, which is invisible on a slow haze.
+// path, not the object" lesson) — so there is no feedback texture at all;
+// the diffuse haze is the sharp pass's own `fill` term.
 //
 // Regime values are NOT rewound per echo (a deliberate simplification):
 // they travel on a REGIME_TRAVEL_SEC (1s) timescale, ECHO_MAX echoes span
@@ -192,7 +191,8 @@ function lerpRegime(a: RegimeTarget, b: RegimeTarget, t: number): RegimeTarget {
 /** `foldOpt`: 0 = Auto (regime picks 8 most of the time, per the
  *  reference), 1 = pin every regime to fold 8, 2 = pin to fold 6 — the
  *  scene's `fold` enum setting, read straight through so a manual pin
- *  overrides every future pick without touching the travel machinery. */
+ *  overrides every future pick without touching the travel machinery
+ *  (advanceSilk separately glides the *current* regime onto a pin). */
 function pickRegime(idx: number, foldOpt: number): RegimeTarget {
   const h1 = hash01(idx, 1);
   const h2 = hash01(idx, 2);
@@ -370,6 +370,20 @@ export function advanceSilk(st: SilkState, input: SilkInputs, opts: SilkOpts): S
     st.travelT = 0;
     st.barsSinceChange = 0;
   }
+  // A Fold pin (or going back to Auto's pinned-then-free state) must show
+  // up now, not at the next regime change, which may be 16-32 s away or —
+  // in silence — never. Once any travel in flight has landed, retarget the
+  // fold alone: every other field already sits at its target, so `from`
+  // becomes `to` with no visible step and only foldMix glides over
+  // REGIME_TRAVEL_SEC. (Mid-travel it waits out the last second rather
+  // than snapshotting, which would drop an in-flight zoom flip.) Auto has
+  // no pin to enforce; its next pickRegime re-rolls the fold anyway.
+  const foldPin = opts.foldOpt === 1 ? 0 : opts.foldOpt === 2 ? 1 : null;
+  if (foldPin !== null && st.to.foldMix !== foldPin && st.travelT >= REGIME_TRAVEL_SEC) {
+    st.from = st.to;
+    st.to = { ...st.to, foldMix: foldPin };
+    st.travelT = 0;
+  }
   const e = smootherstep(st.travelT / REGIME_TRAVEL_SEC);
   const flipping = st.from.zoomDir !== st.to.zoomDir;
   // The hole dips hardest exactly when a flip's blended direction crosses
@@ -428,29 +442,4 @@ export function fillEchoFlows(morph: number, morphStepPerEcho: number, count: nu
       oy = ny * FLOW_LACUNARITY;
     }
   }
-}
-
-/** The tail buffer's per-step decay, in the sqrt-encoded domain the shader
- *  stores (see index.ts's header): `s' = max(s*sqrt(decay) - floor, 0)`.
- *  Exported so tests/silk.test.ts can prove the floor is what makes every
- *  level actually reach 0 — without it, `s*sqrt(decay)` alone never clears
- *  the last representable step once rounding gives the same value back. */
-export function tailDecayStep(s: number, decay: number, floor: number): number {
-  return Math.max(s * Math.sqrt(decay) - floor, 0);
-}
-
-/** How many `tailDecayStep` calls (each simulating one 8-bit code, i.e.
- *  rounded to the nearest 1/255) it takes a starting level to reach
- *  exactly 0. Infinity if it never does (no floor, or decay >= 1). Test-only
- *  proof that the shader's decay actually clears every trail rather than
- *  freezing above 0 — see the header's "8-bit floor" paragraph. */
-export function stepsToZero(startCode: number, decay: number, floor: number, maxSteps = 10_000): number {
-  let s = startCode / 255;
-  for (let n = 0; n < maxSteps; n++) {
-    if (s <= 0) return n;
-    const next = tailDecayStep(s, decay, floor);
-    // Emulate 8-bit storage: the GPU rounds to the nearest 1/255 on write.
-    s = Math.round(next * 255) / 255;
-  }
-  return Infinity;
 }
