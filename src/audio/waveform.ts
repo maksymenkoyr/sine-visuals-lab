@@ -2,7 +2,7 @@
  * Pure time-domain measurements over a sample buffer — no AudioContext
  * involved, so these are unit-testable the same way features.ts's math is:
  * feed a plain Float32Array, assert on the number back. The buffer itself
- * comes from AnalyserNode.getFloatTimeDomainData() via stereo.ts, which is
+ * comes from AnalyserNode.getFloatTimeDomainData() via waveformAnalyser.ts, which is
  * the one place in the pipeline that actually reads raw samples — everything
  * else in src/audio/ only ever sees frequency-domain (dB) data.
  *

@@ -321,7 +321,7 @@ export const tesseraScene: Scene = (() => {
   let compositeProg: GLProgram | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;
   let emptyVao: WebGLVertexArrayObject | null = null;
-  // Full-res sharp target with depth, half-res blur pair -- shards.ts's shape.
+  // Full-res sharp target with depth, half-res blur pair -- shards/index.ts's shape.
   let sharpTex: WebGLTexture | null = null;
   let sharpFbo: WebGLFramebuffer | null = null;
   let depthRb: WebGLRenderbuffer | null = null;
@@ -353,7 +353,7 @@ export const tesseraScene: Scene = (() => {
   const ringStartBuf = new Float32Array(MAX_RINGS + 1);
   const ringSlotsBuf = new Float32Array(MAX_RINGS);
 
-  /** GLProgram has no integer setter; samplers need one (shards.ts/powder.ts idiom). */
+  /** GLProgram has no integer setter; samplers need one (shards/index.ts/powder.ts idiom). */
   function samplerLoc(gl: WebGL2RenderingContext, prog: GLProgram, key: string, name: string) {
     let l = samplerLocs.get(key);
     if (l === undefined) {
@@ -439,7 +439,7 @@ export const tesseraScene: Scene = (() => {
       quadVao = createFullscreenQuad(gl);
       // No vertex attributes at all -- corner from gl_VertexID, ring/slot
       // from gl_InstanceID -- so the boxes draw from an empty VAO
-      // (ambience.ts's DOT_VERT, shards.ts's prisms).
+      // (ambience.ts's DOT_VERT, shards/glsl.ts's prisms).
       emptyVao = gl.createVertexArray();
       samplerLocs.clear();
       rollRad = 0;
