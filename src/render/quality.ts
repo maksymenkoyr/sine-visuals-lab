@@ -35,7 +35,7 @@ export function qualitySettings(preset: QualityPreset): QualitySettings {
  *  auto-detect path rather than silently picking a preset. */
 export function parseQualityPreset(params: URLSearchParams): QualityPreset | null {
   const value = params.get("quality") ?? params.get("tier");
-  return value !== null && Object.hasOwn(PRESET_TABLE, value) ? (value as QualityPreset) : null;
+  return value !== null && Object.prototype.hasOwnProperty.call(PRESET_TABLE, value) ? (value as QualityPreset) : null;
 }
 
 const BENCH_SIZE = 256;

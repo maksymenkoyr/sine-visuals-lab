@@ -92,6 +92,10 @@ original work built around that data.
   addition of `fastRenderers.ts`'s two cheap renderers (Capsules, Flat) let
   the raymarcher hand over below `RAYMARCH_MIN_DETAIL`, so the scene now
   registers as runnable on every preset including the TV floor.
+- **2026-10-02:** `rig.ts`'s bone-index table `B` is built with a plain loop
+  instead of `Object.fromEntries`. It runs at module load, which the TV
+  bundle evaluates too, and the older TV runtimes the es2017 build target
+  exists for lack `fromEntries`. Same table, same indices — no visual change.
 
 ## Tuning notes
 
