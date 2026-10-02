@@ -4,8 +4,9 @@ import { createFullscreenScene } from "../fullscreenScene.ts";
 // A raymarched black-chrome blob that grows spikes toward one fixed
 // direction per band (spread evenly via the golden angle), each spike's
 // height driven by that band's energy. Fresnel + specular give it an
-// oil-slick sheen. Sculptural and glossy; the most expensive of the
-// fullscreen raymarch scenes, so it leans on uMaxSteps the way tunnel.ts
+// oil-slick sheen. Sculptural and glossy; the heaviest of the
+// small single-shader fullscreen raymarch scenes (Dancers is a larger
+// raymarched scene of its own), so it leans on uMaxSteps the way tunnel.ts
 // does.
 const FRAG = `
 const int MAX_STEPS = 64;
@@ -79,7 +80,7 @@ void main() {
 }
 `;
 
-// The most expensive scene (see comment above) — worse than tunnel.ts, which
+// The heaviest of the small raymarch scenes (see comment above) — worse than tunnel.ts, which
 // itself is gated to minQuality "low". uMaxSteps alone isn't enough protection:
 // gate the gallery/scene picker too, or a floor-quality device can select it.
 export const ferrofluidScene = createFullscreenScene("ferrofluid", "Ferrofluid", FRAG, { minQuality: "mid" });

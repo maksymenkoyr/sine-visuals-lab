@@ -4,8 +4,9 @@ A raymarched black-chrome blob that grows spikes toward one fixed direction
 per band (spread via the golden angle), each spike's height driven by
 that band's energy, lit with Fresnel + specular for an oil-slick sheen.
 Small, original scene; a draft (in `DRAFT_SCENE_IDS`), on `main` since the
-initial commit. Its own header comment calls it out as the most expensive
-of the small fullscreen scenes, gated to `minQuality: "mid"`.
+initial commit. Its own header comment calls it out as the heaviest of
+the small single-shader fullscreen raymarch scenes (Dancers is a larger
+raymarched scene of its own), gated to `minQuality: "mid"`.
 
 ## Where the code is
 

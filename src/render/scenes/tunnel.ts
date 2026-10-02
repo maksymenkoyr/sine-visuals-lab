@@ -5,9 +5,12 @@ const BASE_SPEED = 1.2;
 const SPEED_PER_BPM = 0.004;
 /** How fast the speed eases toward the tempo's (per second). */
 const SPEED_EASE_PER_SEC = 2;
-/** The longest clock step that still counts as motion (a hidden tab, or the
- *  clock swapped for another, must not fling the camera down the tunnel). */
-const MAX_STEP_SEC = 0.1;
+/** The longest clock step that still counts as motion. Ordinary low-rate
+ *  frames (gallery tiles redraw every ~167-333 ms, slower under Energy
+ *  saving, and devices under 10 fps) must advance in full; only a
+ *  hidden-tab-scale gap, or the clock swapped for another, is clamped so it
+ *  can't fling the camera down the tunnel. */
+const MAX_STEP_SEC = 1;
 
 export interface TunnelCamera {
   z: number; // distance travelled down the tunnel

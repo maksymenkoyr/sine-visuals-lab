@@ -30,6 +30,13 @@ describe("tunnel camera", () => {
     const z = advanceTunnelCamera(cam, 50, 120);
     expect(advanceTunnelCamera(cam, 5, 120)).toBe(z); // clock restarted younger
     const far = advanceTunnelCamera(cam, 5 + 600, 120); // tab hidden for ten minutes
-    expect(far - z).toBeLessThanOrEqual(0.1 * (1.2 + 120 * 0.004) + 1e-9);
+    expect(far - z).toBeLessThanOrEqual(1 * (1.2 + 120 * 0.004) + 1e-9);
+  });
+
+  it("a slow frame (a gallery tile, ~3 fps) still advances by its full step", () => {
+    const cam = createTunnelCamera();
+    const z = advanceTunnelCamera(cam, 10, 120);
+    const next = advanceTunnelCamera(cam, 10.3, 120);
+    expect(next - z).toBeCloseTo(0.3 * (1.2 + 120 * 0.004));
   });
 });
