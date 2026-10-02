@@ -101,6 +101,16 @@ layers never overlapped so nothing stacked toward white.
 - **2026-09-27 — back to draft.** Added to `draftIds` in
   `src/render/scenes/index.ts` on the user's call, in the same change that
   featured Physarum 2 (and, via its own PR, Sky). Code untouched.
+- **2026-10-02 — review fixes: Roll and mid-fade reshuffles.** Roll was
+  `uRoll x uTime`, so dragging it after ten minutes re-aimed the wall by
+  (change in rate x seconds elapsed); it is now an accumulated phase
+  (`advanceRollPhase` in `layout.ts`, uploaded as `uRollAngle`), so Roll
+  changes the speed from here on and Roll = 0 holds the angle. The rotation
+  also now runs in aspect-corrected space, so the wall turns rigidly instead
+  of squashing past 90 degrees on a wide canvas. A bar reshuffle landing
+  mid-fade used to restart at `morphT = 0` against the untouched A buffer,
+  popping the wall back to the old layout; `bakeMorph` now writes the mix
+  that is on screen into A first, so the new fade starts from it.
 
 ## Tuning notes
 
