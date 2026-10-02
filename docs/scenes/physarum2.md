@@ -992,6 +992,23 @@ entry does). The constants
 (`CRAWL_LEVEL_GAIN`, `CRAWL_PUMP_*`) are first guesses sized from Caustics's
 shape, not yet judged by eye or on real music.
 
+## Dose threshold (2026-10-03)
+
+The user asked for the same "tell one signal from another" behaviour on Dose
+that Caustics' Beat ripple has. Before, Dose's default Scene trigger fired on
+any rise in the beat pulse (physarum.ts's `createBeatSeeder`), so a busy
+passage reseeded on every tick; only a *patched* source got the engine's
+generic gate, and the default had none. Dose now reads the driver the way the
+ripple does: `advanceStandout` (`rippleEmitter.ts`) wraps `advanceEmission`
+and answers yes once per climb that earns half a ring, i.e. one that stands
+out from the learned floor of everyday climbs. `seed` declares a
+`drive.threshold` ("Dose threshold"), so the panel gives it the same dotted
+line, On/Off switch and slider as Beat ripple, and `publishSettingMarks`
+draws the line and a dot per colony started. The reseed keeps physarum.ts's
+refractory (`SEED_RISE_REFRACTORY_SEC`, now exported). The pipette is
+untouched. Not yet judged on real music; the default line is
+`RING_THRESHOLD_DEFAULT`, the ripple's own.
+
 ## Resume here
 
 **The Strain Console is built** (2026-09-29; Decisions and pivots has what
