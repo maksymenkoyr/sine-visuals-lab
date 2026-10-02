@@ -9,7 +9,7 @@ import {
 } from "../server/roomCore.ts";
 import { LOOK_LIMITS } from "../server/lookDoc.ts";
 import { LOOK_PUBLISH_MS } from "../src/net/lookSync.ts";
-import { ROOM_CLOSE_DENIED, ROOM_IDLE_TTL_MS, adoptTag, hashKey } from "../server/roomRules.ts";
+import { ROOM_CLOSE_DENIED, ROOM_IDLE_TTL_MS, ADOPT_ANY_TAG, adoptTag, hashKey } from "../server/roomRules.ts";
 
 // A fake room: sockets that record what they were sent, a Map for storage and
 // an alarm slot, driven through the same calls server/room.ts makes.
@@ -487,10 +487,29 @@ describe("adopt", () => {
     const room = new Room();
     const tv = await room.need({ role: "renderer", deviceId: "tv", adopt: N });
     const host = await room.need({ role: "host", deviceId: "laptop" });
-    expect(tv.tags).toEqual(["renderer", "tv", adoptTag(N)]);
+    expect(tv.tags).toEqual(["renderer", "tv", adoptTag(N), ADOPT_ANY_TAG]);
     expect(room.core.adopt(body)).toEqual({ status: 200, body: { delivered: 1 } });
     expect(tv.msgs("adopt")).toEqual([expected]);
     expect(host.sent).toEqual([]);
+  });
+
+  it("a body without a nonce (a laptop's typed code) reaches every screen waiting in the slot", async () => {
+    const room = new Room();
+    const tv = await room.need({ role: "renderer", deviceId: "tv", adopt: N });
+    const plain = await room.need({ role: "renderer", deviceId: "plain" });
+    expect(room.core.adopt({ room: "ABCD", k: K })).toEqual({ status: 200, body: { delivered: 1 } });
+    expect(tv.msgs("adopt")).toEqual([{ type: "adopt", room: "ABCD", k: K }]);
+    expect(plain.sent).toEqual([]);
+    expect(room.core.adopt({ room: "ABCD", k: K, n: "short" }).status).toBe(400);
+  });
+
+  it("a body without a nonce is refused, delivering nothing, when a second socket waits in the slot", async () => {
+    const room = new Room();
+    const tv = await room.need({ role: "renderer", deviceId: "tv", adopt: N });
+    const bystander = await room.need({ role: "renderer", deviceId: "bystander", adopt: "g".repeat(22) });
+    expect(room.core.adopt({ room: "ABCD", k: K })).toEqual({ status: 409, body: { delivered: 0 } });
+    expect(tv.sent).toEqual([]);
+    expect(bystander.sent).toEqual([]);
   });
 
   it("never reaches a bystander sitting in the slot, whatever they present", async () => {
@@ -590,7 +609,6 @@ describe("adopt", () => {
       { ...body, k: "short" },
       { ...body, k: 12 },
       { ...body, n: "bad nonce bad nonce!!" },
-      { room: "ABCD", k: K },
     ];
     for (const b of bad) expect(room.core.adopt(b)).toEqual({ status: 400, body: { error: "bad-request" } });
     expect(tv.sent).toEqual([]);

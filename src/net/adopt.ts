@@ -20,18 +20,20 @@
  * - ok: a waiting screen held the nonce and was told.
  * - no-screen: no waiting screen took it (the TV rotated, was closed, or the
  *   slot code or nonce was misread).
+ * - ambiguous: a code-only adopt found more than one socket waiting in the slot,
+ *   so the room delivered nothing (server/roomCore.ts `adopt`).
  * - throttled: this address has sent too many adopts lately.
  * - error: anything else, including the network being down.
  */
 
 import { ROOM_CODE_RE } from "./pairing.ts";
 
-export type AdoptOutcome = "ok" | "no-screen" | "throttled" | "error";
+export type AdoptOutcome = "ok" | "no-screen" | "ambiguous" | "throttled" | "error";
 
 export async function postAdopt(
   origin: string,
   slot: string,
-  body: { room: string; k: string; n: string },
+  body: { room: string; k: string; n?: string },
   fetchFn: typeof fetch = fetch,
 ): Promise<AdoptOutcome> {
   // The slot goes into the path, so it must be a plain room code.
@@ -44,6 +46,7 @@ export async function postAdopt(
     });
     if (res.status === 200) return "ok";
     if (res.status === 404) return "no-screen";
+    if (res.status === 409) return "ambiguous";
     if (res.status === 429) return "throttled";
     return "error";
   } catch {

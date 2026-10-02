@@ -99,6 +99,11 @@ export function adoptTag(nonce: string): string {
   return `adopt:${nonce}`;
 }
 
+/** The tag every waiting TV carries besides its own `adoptTag`, so an adopt
+ *  that names only the slot's code (typed on a laptop, no QR to read) still
+ *  finds it. No nonce can equal it: a nonce is a long base64url key. */
+export const ADOPT_ANY_TAG = "adopt:any";
+
 /** A `setDevice` target is addressed by its socket tag, so it must be a
  *  legal device id — never a role tag, which would fan the command out. */
 export function validTargetTag(s: unknown): s is string {

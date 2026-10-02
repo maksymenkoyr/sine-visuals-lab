@@ -50,7 +50,9 @@ import type { LookDoc, LookServerMsg } from "../server/lookDoc.ts";
  * presses OK twice. The nonce in the QR, not anything the server holds, is
  * what proves an adoption was meant for this screen: the slot socket presents
  * it when it joins, so the room hands the adopt (which carries the room key)
- * to that socket and not to anyone else who sat down in the slot.
+ * to that socket and not to anyone else who sat down in the slot. A laptop
+ * can also adopt this screen by typing its code, with no nonce; the room
+ * delivers that only while this is the one screen waiting in the slot.
  *
  * The QR screen also carries a field to type a room code (ui/joinScreen.ts,
  * `{ tv: true }`), which reloads this page with `?room=CODE` and joins that
@@ -370,10 +372,11 @@ function typedRoomRefused(): void {
 }
 
 /** A phone handed this screen a room. Only an unpaired screen takes one, and
- *  only with the nonce its own QR carries; anything else is somebody else's
+ *  only with the nonce its own QR carries (a laptop's adopt by typed code
+ *  carries none, see roomCore `adopt`); a wrong nonce is somebody else's
  *  request or a replay and is ignored. */
 function onAdopt(m: AdoptMessage): void {
-  if (phase !== "pair" || nonce === "" || m.n !== nonce) return;
+  if (phase !== "pair" || nonce === "" || (m.n !== undefined && m.n !== nonce)) return;
   stopPairing();
   writeSession("tv", { room: m.room, key: m.k, ts: Date.now() }, realStorage);
   joinRoom(m.room, m.k);
