@@ -546,7 +546,8 @@ function applyPowerMode(mode: PowerMode): void {
  *  boot()'s comment on `pinned`.
  *
  *  `remount` re-inits the mounted scene (geometry is sized at init), for the
- *  preview starting or stopping under a scene that is already showing. */
+ *  preview starting or stopping under a scene that is already showing, and for
+ *  an explicit Quality choice (the scene's buffers follow quality.maxParticles). */
 function applyRenderQuality(remount = false): void {
   const preset = renderPreset();
   if (preset === quality.preset) return;
@@ -1482,7 +1483,11 @@ function wireDeviceMenu(): void {
         setQualityChoice(choice);
         qualityChoice = choice;
       }
-      applyRenderQuality();
+      // Remount: a scene sizes its particle/agent buffers at init() from
+      // quality.maxParticles, and the governor never moves that count, so
+      // without it a Low pick keeps the High preset's agent count until the
+      // next scene switch.
+      applyRenderQuality(true);
     },
     isPreview: () => previewActive,
     getPreviewSize: () => previewSize,
