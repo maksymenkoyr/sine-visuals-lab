@@ -2,6 +2,7 @@ import type { FeatureFrame } from "../audio/types.ts";
 import type { PowerMode } from "../render/powerMode.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import type { QualityChoice } from "../render/qualityPref.ts";
+import type { SilenceGateMarks } from "../audio/silenceGate.ts";
 import { VOLATILE_PREFIXES } from "./syncedStores.ts";
 
 /**
@@ -41,6 +42,10 @@ import { VOLATILE_PREFIXES } from "./syncedStores.ts";
  *    main window's resolved Sensitivity/Expansion/Smoothing for its scene;
  *    it is left off unless the output shows the preview live (Cue held, or
  *    the two match), so a held look keeps the numbers it was sent with.
+ *    `gate` is the main window's resolved silence-gate marks, always sent:
+ *    they describe the room and the mic, not the look, so a held look never
+ *    keeps stale ones (and under Auto the stored marks stay at their defaults
+ *    while the controller's room-floor tracker moves the real ones).
  *  - `power`: the output's own Quality, Energy saving and Resolution choice
  *    (render/outputPower.ts). Not part of the look, so Cue never holds it and
  *    the synced snapshot never carries it: it is how this window renders.
@@ -79,6 +84,10 @@ export interface WireFrame extends FeatureFrame {
   wavePeak: number | null;
   /** See the header; absent while the output shows its own look, not the preview. */
   p?: OutputParams;
+  /** The main window's resolved silence-gate marks (audio/silenceGate.ts's
+   *  resolveSilenceGate), for the output's own band-onset detectors; see the
+   *  header. Optional only for an older main window that doesn't send it. */
+  gate?: SilenceGateMarks;
 }
 
 /** How the output window renders: its Quality choice, Energy saving mode and

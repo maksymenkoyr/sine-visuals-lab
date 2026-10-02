@@ -12,7 +12,15 @@ export function parseRoute(hash: string): Route {
   if (!hash || hash === "#" || hash === "#/") return GALLERY;
   const m = VIZ_RE.exec(hash);
   if (!m || !m[1]) return GALLERY;
-  return { kind: "viz", sceneId: decodeURIComponent(m[1]).toLowerCase() };
+  let id: string;
+  try {
+    id = decodeURIComponent(m[1]);
+  } catch {
+    // A lone or truncated %-escape (a share link a chat app chopped): the
+    // hash is untrusted input, and a throw here would abort boot().
+    return GALLERY;
+  }
+  return { kind: "viz", sceneId: id.toLowerCase() };
 }
 
 export function routeToHash(route: Route): string {

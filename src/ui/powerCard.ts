@@ -4,6 +4,7 @@ import { RESOLUTION_MAX, RESOLUTION_MIN, type PreviewSize } from "../render/outp
 import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
+import { applyGlassBlur, getGlassBlur, setGlassBlur } from "./glassPref.ts";
 import {
   chipBtnLitStyle,
   chipBtnStyle,
@@ -193,15 +194,71 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
 
   el.append(head, list, hint);
 
+  // refresh() runs every auto-refresh tick (deviceMenu.ts), and the chips'
+  // cssText and the hint's rebuilt children are the same until the mode
+  // changes — only write when it does.
+  let last: PowerMode | null = null;
   return {
     el,
     refresh(mode: PowerMode): void {
+      if (mode === last) return;
+      last = mode;
       for (const { mode: m, btn } of buttons) {
         btn.style.cssText = m === mode ? modeChipLitStyle : modeChipStyle;
       }
       setHintText(hint, MODE_OPTIONS.find((o) => o.mode === mode)?.title ?? "");
     },
   };
+}
+
+const BLUR_OPTIONS: { on: boolean; text: string; title: string }[] = [
+  { on: false, text: "Off", title: "Flat dark panels — lightest on the GPU" },
+  { on: true, text: "On", title: "Frosted glass: the scene blurs behind the panels. Costs frame rate, most on heavy scenes" },
+];
+
+/** Panel blur (glassPref.ts): the one row here that changes how the panel
+ *  itself looks rather than how the scene renders — it lives in this card
+ *  because what it trades is GPU time, same as Quality and Energy saving. */
+function createBlurRow(accent: string) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.style.setProperty("--vc-accent", accent);
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = "Panel blur";
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  head.appendChild(label);
+
+  const list = document.createElement("div");
+  list.style.cssText = modeListStyle;
+  const buttons = BLUR_OPTIONS.map((opt) => {
+    const btn = document.createElement("button");
+    btn.textContent = opt.text;
+    btn.title = opt.title;
+    btn.style.cssText = modeChipStyle;
+    btn.addEventListener("click", () => {
+      setGlassBlur(opt.on);
+      refresh();
+    });
+    return { on: opt.on, btn };
+  });
+  list.append(...buttons.map((b) => b.btn));
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+
+  el.append(head, list, hint);
+
+  function refresh(): void {
+    const on = getGlassBlur();
+    for (const b of buttons) b.btn.style.cssText = b.on === on ? modeChipLitStyle : modeChipStyle;
+    setHintText(hint, BLUR_OPTIONS.find((o) => o.on === on)?.title ?? "");
+  }
+  refresh();
+  return { el, refresh };
 }
 
 const SIZE_OPTIONS: { size: PreviewSize; text: string }[] = [
@@ -243,9 +300,13 @@ function createSizeRow(deps: PowerCardDeps, accent: string) {
 
   el.append(head, list, hint);
 
+  // Only write when the size changes — see createModeRow's `last`.
+  let last: PreviewSize | null = null;
   return {
     el,
     refresh(size: PreviewSize): void {
+      if (size === last) return;
+      last = size;
       for (const { size: s, btn } of buttons) {
         btn.style.cssText = s === size ? modeChipLitStyle : modeChipStyle;
       }
@@ -369,9 +430,15 @@ function createQualityRow(deps: PowerCardDeps, accent: string) {
 
   el.append(head, list, hint);
 
+  // Everything below is a function of these two — only write when either
+  // changes (see createModeRow's `last`).
+  let lastKey = "";
   return {
     el,
     refresh(choice: QualityChoice, recommended: QualityPreset): void {
+      const key = `${choice}|${recommended}`;
+      if (key === lastKey) return;
+      lastKey = key;
       for (const { choice: c, btn } of buttons) {
         const selected = c === choice;
         const isRecommended = c === recommended;
@@ -483,14 +550,28 @@ function createStatusRow(accent: string) {
 
   el.append(line, hint);
 
+  // Each write only when its own value moved (see createModeRow's `last`);
+  // the hint rebuilds its child nodes, so it matters most.
+  let lastText: string | null = null;
+  let lastDetail: string | null = null;
+  let lastDot: string | null = null;
   return {
     el,
     refresh(status: PowerStatus): void {
       const described = describeStatus(status, accent);
-      text.textContent = described.text;
-      el.title = described.detail;
-      dot.style.backgroundColor = described.dot;
-      setHintText(hint, described.detail);
+      if (described.text !== lastText) {
+        lastText = described.text;
+        text.textContent = described.text;
+      }
+      if (described.detail !== lastDetail) {
+        lastDetail = described.detail;
+        el.title = described.detail;
+        setHintText(hint, described.detail);
+      }
+      if (described.dot !== lastDot) {
+        lastDot = described.dot;
+        dot.style.backgroundColor = described.dot;
+      }
     },
   };
 }
@@ -701,6 +782,10 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   const detail = createReadoutLine("Detail");
   readouts.append(fps.el, res.el, detail.el);
 
+  // Seed <html>'s glass class from the saved choice before the panel first shows.
+  applyGlassBlur();
+  const blurRow = createBlurRow(POWER_TEAL);
+
   card.body.append(
     statusRow.el,
     hairline,
@@ -709,6 +794,8 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     spacer(),
     sizeRow.el,
     modeRow.el,
+    spacer(),
+    blurRow.el,
     readoutsHeading,
     readouts,
   );

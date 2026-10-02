@@ -14,7 +14,7 @@
  * how far above it to go — see its comment for why sectionIntensity alone
  * was the wrong gauge.
  */
-import { B, CH_LIFT, CH_ROOT_X, CH_ROOT_Z, createPose, lerpPose, mulBoneEuler, resetPose, type Pose } from "./rig.ts";
+import { B, CH_ROOT_X, CH_ROOT_Z, mulBoneEuler, resetPose, type Pose } from "./rig.ts";
 
 /** The slice of AnimFrame (plus FeatureFrame.bpm) the dance reads — see
  *  animClock.ts for what each clock means. */
@@ -46,7 +46,6 @@ const SIDES: readonly Side[] = ["L", "R"];
 // ---- Pose algebra ----------------------------------------------------------
 
 export const restPose = resetPose;
-export { lerpPose };
 
 /** Layers yaw·pitch·roll onto what the bone already carries (rig.ts). */
 const add = mulBoneEuler;
@@ -64,9 +63,6 @@ export function armSwing(pose: Pose, side: Side, forward: number, spread: number
 /** Bend an elbow so the forearm comes forward/up. */
 export function elbowFlex(pose: Pose, side: Side, amount: number): void {
   add(pose, side === "L" ? B.L_forearm : B.R_forearm, amount, 0, 0);
-}
-export function wristBend(pose: Pose, side: Side, amount: number): void {
-  add(pose, side === "L" ? B.L_hand : B.R_hand, amount, 0, 0);
 }
 /** Swing a thigh forward (+Z) and spread it outward from the hip. */
 export function legSwing(pose: Pose, side: Side, forward: number, spread: number): void {
@@ -97,10 +93,6 @@ export function jawOpen(pose: Pose, amount: number): void {
 export function rootShift(pose: Pose, x: number, z: number): void {
   pose[CH_ROOT_X] += x;
   pose[CH_ROOT_Z] += z;
-}
-/** Hop: raise the whole figure off the floor. */
-export function lift(pose: Pose, height: number): void {
-  pose[CH_LIFT] += Math.max(0, height);
 }
 
 // ---- Procedural poses -------------------------------------------------------
@@ -187,6 +179,3 @@ export function effectiveIntensity(sectionIntensity: number, tempoLock: number, 
   const drive = Math.max(sectionIntensity, beatFloor);
   return Math.min(1, Math.max(0, drive + (groove - 0.5) * GROOVE_BIAS));
 }
-
-/** Scratch pose factory for callers that blend several poses per frame. */
-export const newPose = createPose;

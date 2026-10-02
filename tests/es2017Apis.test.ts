@@ -30,11 +30,15 @@ const FILES = [
   "src/net/bootPlan.ts",
   "src/net/tvPhase.ts",
   "src/net/pendingSlot.ts",
+  "src/net/controllerLook.ts",
+  "src/net/controllerPreview.ts",
+  "src/net/screenJoin.ts",
   "src/net/roomCode.ts",
   "src/net/room.ts",
   "src/net/tvStorageBoot.ts",
   "src/net/controllerStorageBoot.ts",
   "src/ui/joinScreen.ts",
+  "src/ui/wakeLock.ts", // was inline in tv.ts until it was shared with the app
   "src/tv.ts",
 ];
 

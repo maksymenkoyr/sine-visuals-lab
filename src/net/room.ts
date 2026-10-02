@@ -82,10 +82,9 @@ export interface ConnOptions {
  *  the connection reconnects. */
 export type ConnState = "connecting" | "open" | "closed" | "denied";
 
-/** Fallback for a browser without storage: a fresh id per page load. */
+/** A random UUID v4. crypto.randomUUID needs a recent Chrome;
+ *  getRandomValues is old enough for any TV browser. */
 function newDeviceId(): string {
-  // The built-in UUID call needs a recent Chrome; getRandomValues is old
-  // enough for any TV browser.
   const b = new Uint8Array(16);
   crypto.getRandomValues(b);
   b[6] = (b[6] & 0x0f) | 0x40;
@@ -94,6 +93,11 @@ function newDeviceId(): string {
   for (let i = 0; i < b.length; i++) hex += (b[i] + 0x100).toString(16).slice(1);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+/** Used when storage is blocked (Safari/WebKit private modes, sandboxed
+ *  frames): one id per page load, shared by every connection in the page, so a
+ *  host and a renderer in the same tab still agree on who "this device" is. */
+let sessionDeviceId: string | null = null;
 
 // Read through the real storage, not `localStorage`: on a paired phone or TV
 // the global is the in-memory overlay (realStorage.ts), and the device id must
@@ -109,25 +113,37 @@ function readDeviceId(): string {
     }
     return id;
   } catch {
-    return newDeviceId();
+    return (sessionDeviceId ??= newDeviceId());
   }
 }
 
 export function roomWsUrl(code: string, role: RoomRole, deviceId: string, extra?: Record<string, string>): string {
   const proto = WORKER_ORIGIN.startsWith("https") ? "wss" : "ws";
   const host = WORKER_ORIGIN.replace(/^https?:\/\//, "");
-  let url = `${proto}://${host}/api/room/${code}/ws?role=${role}&deviceId=${encodeURIComponent(deviceId)}`;
+  let url = `${proto}://${host}/api/room/${encodeURIComponent(code)}/ws?role=${role}&deviceId=${encodeURIComponent(deviceId)}`;
   if (extra) {
     for (const name of Object.keys(extra)) url += `&${encodeURIComponent(name)}=${encodeURIComponent(extra[name])}`;
   }
   return url;
 }
 
-export async function createRoomCode(): Promise<string> {
-  const res = await fetch(`${WORKER_ORIGIN}/api/room`, { method: "POST" });
-  if (!res.ok) throw new Error(`room create failed: ${res.status}`);
-  const body = (await res.json()) as { code: string };
-  return body.code;
+/** Asks the Worker for a fresh room. Gives up after `timeoutMs`, because the
+ *  callers (boot, the TV page) wait on it before showing anything and a
+ *  stalled request — a captive portal, a cold or black-holed Worker — neither
+ *  resolves nor rejects; a timeout rejects, and boot's catch runs solo.
+ *  AbortController + setTimeout rather than AbortSignal.timeout, which older
+ *  Safari and TV browsers lack. */
+export async function createRoomCode(timeoutMs = 4000): Promise<string> {
+  const ctl = new AbortController();
+  const timer = window.setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${WORKER_ORIGIN}/api/room`, { method: "POST", signal: ctl.signal });
+    if (!res.ok) throw new Error(`room create failed: ${res.status}`);
+    const body = (await res.json()) as { code: string };
+    return body.code;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 /** The query parameters a join carries beyond role and device id: the keys it

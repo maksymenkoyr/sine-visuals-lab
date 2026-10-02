@@ -1,4 +1,4 @@
-import { createGL } from "./gl.ts";
+import { createGL, watchContextLoss } from "./gl.ts";
 import { createSceneHost, type SceneHost } from "./sceneHost.ts";
 import { FULL_VIEWPORT, type Scene } from "./scene.ts";
 import type { Palette } from "./palette.ts";
@@ -17,6 +17,9 @@ type TileSink =
 
 export interface PreviewRenderer {
   readonly host: SceneHost;
+  /** True from the shared context's loss until the browser restores it —
+   *  nothing can be compiled or drawn meanwhile. */
+  isLost(): boolean;
   setSize(w: number, h: number): void;
   attach(canvas: HTMLCanvasElement): TileSink | null;
   drawTo(
@@ -59,8 +62,29 @@ export function createPreviewRenderer(quality: QualitySettings): PreviewRenderer
 
   const host = createSceneHost(gl, quality);
 
+  // A lost shared context blanks every tile at once. Unlike the main canvas
+  // this one recovers in place instead of reloading the page: on restore the
+  // scenes are unmounted (their handles are all dead) and drawTo() mounts
+  // each one afresh the next time its tile is due. dispose() below loses the
+  // context on purpose, and `disposed` keeps that from being "recovered".
+  let disposed = false;
+  let lost = false;
+  watchContextLoss(
+    shared,
+    () => {
+      lost = !disposed;
+    },
+    () => {
+      if (disposed) return;
+      lost = false;
+      host.unmountAll();
+    },
+  );
+
   return {
     host,
+
+    isLost: () => lost,
 
     setSize(w: number, h: number): void {
       width = Math.max(1, Math.round(w));
@@ -79,6 +103,7 @@ export function createPreviewRenderer(quality: QualitySettings): PreviewRenderer
     },
 
     drawTo(sink, scene, frame, palette, anim): void {
+      if (lost) return; // nothing to draw with until the browser restores the context
       host.mount(scene); // no-op after the first call for this scene
       gl.viewport(0, 0, width, height);
       scene.render(host.ctx, frame, FULL_VIEWPORT, palette, anim);
@@ -99,6 +124,7 @@ export function createPreviewRenderer(quality: QualitySettings): PreviewRenderer
     },
 
     dispose(): void {
+      disposed = true;
       host.unmountAll();
       gl.getExtension("WEBGL_lose_context")?.loseContext();
     },

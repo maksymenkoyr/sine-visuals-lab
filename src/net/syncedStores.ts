@@ -59,7 +59,8 @@ export const VOLATILE_PREFIXES: readonly string[] = ["vibe.silenceGate", "vibe.a
 /** Keys under `vibe.*` that are one device's own and so never join the room
  *  look, though the pop-out still mirrors them: the Looks library (a shelf of
  *  looks, not the look on screen), dev pins, each window's output/preview
- *  settings and the strain console's panel layout. Every `vibe.` key literal
+ *  settings and the panel's own chrome (the strain console's layout, the
+ *  glass blur, ui/glassPref.ts). Every `vibe.` key literal
  *  in src is classified in tests/syncedScope.test.ts, so a new key cannot
  *  slip into the room unseen — add it here if it is device-local. */
 export const ROOM_EXCLUDED_PREFIXES: readonly string[] = [
@@ -68,6 +69,7 @@ export const ROOM_EXCLUDED_PREFIXES: readonly string[] = [
   "vibe.output.",
   "vibe.preview.",
   "vibe.strainConsole.layout.",
+  "vibe.panelBlur",
 ];
 
 /** Whether `key` belongs to the room look. Only `vibe.` keys ever do, which

@@ -399,4 +399,18 @@ describe("band energy", () => {
     const kicks = expectedKicks(2.5, 20);
     expect(onsets).toBeGreaterThanOrEqual(Math.round(kicks * 0.9));
   });
+
+  it("stays finite on a zero, NaN or negative step with Smoothing Off", () => {
+    // dtSec = 0 against rateScale = Infinity is Infinity * 0 = NaN in the
+    // level slew and the pulse decay unless the clamp reaches them too.
+    for (const bad of [0, Number.NaN, -1]) {
+      const energy = createBandEnergy();
+      for (let i = 0; i < 5; i++) {
+        energy.advance(bad, bandsWith([0, 1, 2, 3, 8, 9, 20, 21]), Infinity);
+        for (const v of [energy.low, energy.mid, energy.high, energy.lowPulse, energy.midPulse, energy.highPulse]) {
+          expect(Number.isFinite(v)).toBe(true);
+        }
+      }
+    }
+  });
 });

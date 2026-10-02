@@ -56,8 +56,6 @@ export const STRIP_MID = "#c0a2f5";
 export const STRIP_HIGH = "#f6b15b";
 /** The "audio is flowing" dot in the spectrum card header. */
 export const LIVE_DOT = "#83dc97";
-/** Rule under the spectrum card header. */
-export const HAIRLINE = "#efb062";
 /** The warning ramp: the Input card's level wash as it nears clipping, and
  *  the meters' clip/drop flashes (src/ui/audioMeters.ts). yellow-500 / red-500. */
 export const HOT_YELLOW = "#eab308";
@@ -103,12 +101,20 @@ export function withAlpha(hex: string, alpha: number): string {
   return `${hex}${a}`;
 }
 
-// Glass that darkens and desaturates whatever scene is behind it, so text
-// holds its contrast over bright caustics without an opaque backdrop.
-export const GLASS_FILTER = "blur(20px) saturate(.6) brightness(.5) contrast(1.08)";
+// Glass: the panel's surfaces either blur the scene behind them (lighter tint,
+// the default) or sit on a darker flat tint with no filter. Both are CSS
+// custom properties set from the `vc-glass-blur` class on <html> (the
+// stylesheet below; the preference is src/ui/glassPref.ts, which also holds
+// what the blur costs): a backdrop-filter re-processes the WebGL canvas
+// behind it every frame, so it is a real GPU cost.
+// Every glass surface takes both properties inline — GLASS_BG for the
+// `background`, GLASS_FILTER for the (-webkit-)backdrop-filter — so the
+// switch is one class toggle.
+export const GLASS_BG = "var(--vc-glass-bg)";
+export const GLASS_FILTER = "var(--vc-glass-filter)";
 export const glassCardStyle = `
   position: relative; overflow: hidden;
-  background: rgba(8, 11, 10, 0.2);
+  background: ${GLASS_BG};
   -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
   border: 1px solid rgba(255, 255, 255, 0.13); border-top-color: rgba(255, 255, 255, 0.22);
   border-radius: 3px;
@@ -122,6 +128,14 @@ export const scanlineStyle = `
 const STYLE_ID = "vc-controls-styles";
 
 const stylesheet = `
+:root {
+  --vc-glass-bg: rgba(8, 11, 10, 0.82);
+  --vc-glass-filter: none;
+}
+:root.vc-glass-blur {
+  --vc-glass-bg: rgba(8, 11, 10, 0.2);
+  --vc-glass-filter: blur(20px) saturate(.6) brightness(.5) contrast(1.08);
+}
 @font-face {
   font-family: 'DSEG7-Classic';
   src: url(${dseg7Url}) format('woff2');
@@ -417,8 +431,8 @@ body.vc-keys-reveal [data-keycap]::after {
  * depending on whether that's a single action (wireKeysRow). */
 .vc-keys {
   display: none; flex-direction: column; gap: 1px; padding: 8px 6px;
-  background: rgba(8, 11, 10, 0.72);
-  -webkit-backdrop-filter: blur(20px) saturate(.6) brightness(.5); backdrop-filter: blur(20px) saturate(.6) brightness(.5);
+  background: var(--vc-glass-bg);
+  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
   border: 1px solid rgba(255, 255, 255, 0.13); border-bottom: none; border-radius: 3px 3px 0 0;
   font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.75);
 }

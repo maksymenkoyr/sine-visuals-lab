@@ -721,6 +721,15 @@ and `powder.ts`'s curl noise).
   at Synergy 0 and 1 render clean; the glide itself is timing and was judged
   from the test, not a frame.
 
+- **2026-10-02: a Quality pick now remounts the scene.** Review finding: the
+  agent count is `quality.maxParticles * AGENT_MULTIPLIER`, read once in
+  `init()`, and the governor only ever moves the cheap composite
+  (`renderScale`, steps, detail) - never the agent count. The Quality menu
+  changed `quality` in place without a remount, so picking Low while in this
+  scene kept the High preset's agents until the next scene switch. The device
+  menu's Quality choice now calls `applyRenderQuality(true)` in `src/app.ts`,
+  so the culture re-seeds at the new count. The scene file is unchanged.
+
 ## Tuning notes
 
 Judge the look by whether black background still dominates and the four
@@ -937,11 +946,17 @@ applies there too. Tuned so far only against the synthetic feed at
 ## Crawl speed jack (2026-09-30)
 
 Crawl speed (`speed`) now has a drive jack, like the per-strain Speed: its
-default is Loudness, scaled by `MOTION_JACK_GAIN` and lifted toward the top
+default is Loudness, scaled by `CRAWL_JACK_GAIN` and lifted toward the top
 of the slider with `pushToward1`, so an unplugged jack leaves the pace where
 the slider sits. It is read in JS in `render()` (`drives.value`) before the
 step rate is mapped — the stepper is fixed-rate, not a GLSL uniform. Not
 judged on real music yet.
+
+2026-10-02: the user reported Crawl "doesn't react much to the driver". It
+was sharing `MOTION_JACK_GAIN` (0.15, right for one strain among four), which
+moved the default pace ~6% at full-scale Loudness (75 → 80 steps/s). Crawl now
+has its own `CRAWL_JACK_GAIN` (1): about +40% at a loud peak, ~+15% on a
+typical level. Not yet judged by eye on real music.
 
 ## Resume here
 

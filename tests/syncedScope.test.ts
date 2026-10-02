@@ -76,10 +76,11 @@ const CLASSIFIED: Record<string, boolean> = {
   "vibe.preview.quality": false,
   "vibe.preview.size": false,
   "vibe.preview.resolution": false,
-  // A library and a dev tool, not the look on screen; and a panel layout.
+  // A library and a dev tool, not the look on screen; and the panel's own chrome.
   "vibe.looks": false,
   "vibe.devPins": false,
   "vibe.strainConsole.layout.": false,
+  "vibe.panelBlur": false,
 };
 
 function sourceFiles(dir: string): string[] {

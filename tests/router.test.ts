@@ -20,6 +20,13 @@ describe("parseRoute", () => {
     expect(parseRoute("#/v/a/b")).toEqual({ kind: "gallery" });
   });
 
+  it("falls back to the gallery instead of throwing on a malformed percent-escape", () => {
+    expect(parseRoute("#/v/%")).toEqual({ kind: "gallery" });
+    expect(parseRoute("#/v/mesh%")).toEqual({ kind: "gallery" });
+    expect(parseRoute("#/v/%E0%A4%A")).toEqual({ kind: "gallery" });
+    expect(parseRoute("#/v/mesh")).toEqual({ kind: "viz", sceneId: "mesh" });
+  });
+
   it("does not validate the scene id against a registry — that's caller policy", () => {
     expect(parseRoute("#/v/not-a-real-scene")).toEqual({ kind: "viz", sceneId: "not-a-real-scene" });
   });

@@ -2,21 +2,22 @@
 // before any store module seeds its cache from localStorage (net/roomStorage.ts).
 import "./net/tvStorageBoot.ts";
 import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
-import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
-import { detectQuality, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
+import { createGL, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
+import { detectQuality, presetAllows, qualitySettings, type QualitySettings } from "./render/quality.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type SceneContext, type Viewport } from "./render/scene.ts";
 import { getPalette, type Palette } from "./render/palette.ts";
 import { createAnimClock } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune, resolveExpansion, resolveSensitivity, resolveSmoothing } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createRoomCode, RendererConnection, type DeviceCommand } from "./net/room.ts";
 import { roomCodeFromParam } from "./net/roomCode.ts";
 import { createJoinScreen, type JoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
 import { pinEverything } from "./pinnedAssets.ts";
+import { requestWakeLock } from "./ui/wakeLock.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
 import { applyBandGains, getBandGains } from "./audio/bandGains.ts";
@@ -121,10 +122,6 @@ document.body.appendChild(pill);
 // (the Dancers clip library, the tempo worklet, a panel font) is needed.
 pinEverything();
 
-const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
-const presetAllows = (s: Scene, p: QualityPreset): boolean =>
-  !s.minQuality || PRESET_ORDER.indexOf(p) >= PRESET_ORDER.indexOf(s.minQuality);
-
 let scene: Scene = getScene("spectrum")!;
 let palette: Palette = getPalette("neon");
 let viewport: Viewport = FULL_VIEWPORT;
@@ -132,6 +129,9 @@ let quality: QualitySettings = qualitySettings("mid");
 let sceneCtx: SceneContext;
 let join: JoinScreen;
 
+/** True from the canvas's `webglcontextlost` until the page reloads on the
+ *  restore (main()'s watchContextLoss): the loop draws nothing meanwhile. */
+let glLost = false;
 const animClock = createAnimClock();
 // See renderLatch.ts / app.ts's own instance: turns anim.dtSec into wall
 // time since the last *rendered* frame and keeps a one-shot edge alive
@@ -181,19 +181,51 @@ function announce(): void {
   conn?.sendHello(scene.id, palette.id, viewport);
 }
 
+/** Swaps the running scene for `next`. If `next`'s init() throws (a shader
+ *  this TV's GPU won't compile) the scene it replaced is brought back, rather
+ *  than leaving a half-built one whose render() throws every frame. */
 function switchScene(next: Scene): void {
-  scene.dispose(sceneCtx);
-  scene = next;
-  scene.init(sceneCtx);
+  const prev = scene;
+  prev.dispose(sceneCtx);
+  try {
+    next.init(sceneCtx);
+    scene = next;
+  } catch (err) {
+    console.error(`TV: "${next.name}" failed to start:`, err);
+    try {
+      next.dispose(sceneCtx);
+    } catch {
+      // Whatever init() half-built; the original error is the one to report.
+    }
+    try {
+      prev.init(sceneCtx);
+    } catch (err2) {
+      console.error(`TV: "${prev.name}" failed to restart:`, err2);
+    }
+  }
   announce();
 }
 
-async function requestWakeLock(): Promise<void> {
-  try {
-    await navigator.wakeLock?.request("screen");
-  } catch {
-    // Not fatal — some browsers/contexts deny it; screen may just dim.
+/** Boot mount: the current scene, else the first of availableScenes() whose
+ *  init() succeeds (a shader this TV's GPU won't compile must not leave the
+ *  screen blank before the room badge ever appears). False if none mounts. */
+function mountFirstScene(): boolean {
+  const candidates = [scene, ...availableScenes().filter((s) => s !== scene)];
+  for (const next of candidates) {
+    try {
+      next.init(sceneCtx);
+      scene = next;
+      return true;
+    } catch (err) {
+      console.error(`TV: "${next.name}" failed to start:`, err);
+      try {
+        next.dispose(sceneCtx);
+      } catch {
+        // Whatever init() half-built; the original error is the one to report.
+      }
+    }
   }
+  return false;
 }
 
 // ---- The pill ----
@@ -456,11 +488,28 @@ async function main(): Promise<void> {
     return;
   }
 
+  // See gl.ts's watchContextLoss(): a restored context means every scene's GL
+  // objects are dead, so the page reloads. A paired TV reads its saved room
+  // and key back (net/sessions.ts), a typed-code one still has `?room=` in the
+  // address, and an unpaired one gets a fresh QR; none needs the old code put
+  // back, so the phone stays connected.
+  watchContextLoss(
+    canvas,
+    () => {
+      glLost = true;
+    },
+    () => location.reload(),
+  );
+
   quality = qualitySettings(await detectQuality());
   sceneCtx = { gl, quality };
   if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
   governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
-  scene.init(sceneCtx);
+  if (!mountFirstScene()) {
+    badge.textContent = "No scene can run on this TV's GPU";
+    badge.style.display = "block";
+    return;
+  }
 
   // The join screen's typed-code field (`{ tv: true }`: one plain Join) reloads
   // this page with `?room=CODE`. The QR and its big code are the TV's own
@@ -521,6 +570,7 @@ async function main(): Promise<void> {
 
   function loop(): void {
     requestAnimationFrame(loop);
+    if (glLost) return;
 
     const nowRafMs = performance.now();
     const dtSec = Math.max(1e-4, (nowRafMs - lastRafMs) / 1000);
@@ -548,7 +598,7 @@ async function main(): Promise<void> {
     // The same per-tick chain as app.ts's loop() and drawScene(), minus what
     // needs a local extractor or a panel. The host sends ungained frames, so
     // the Bands card's faders (part of the look) are applied here. Smoothing is
-    // resolved exactly once per tick — resolveSmoothing() slews its auto value.
+    // resolved once per tick, as app.ts's tick() does.
     // The silence gate's marks are this device's own (volatile, not in the
     // look), and there is no `beatRatio` — a paired TV never runs a local
     // broadband FeatureExtractor — so a graded broadband beatPulse falls back
@@ -566,8 +616,9 @@ async function main(): Promise<void> {
     const expansion = resolveExpansion(scene.id);
     driveEngine.accumulate(dtSec, gained, applySensitivity(gained, sensitivity, expansion).energy, anim, scene.id, scene.settings ?? []);
 
-    if (!shouldRenderFrame(nowRafMs, lastRenderMs, targetFrameIntervalMs(quality.preset))) return;
-    lastRenderMs = nowRafMs;
+    const intervalMs = targetFrameIntervalMs(quality.preset);
+    if (!shouldRenderFrame(nowRafMs, lastRenderMs, intervalMs)) return;
+    lastRenderMs = nextRenderAnchor(nowRafMs, lastRenderMs, intervalMs);
 
     const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);

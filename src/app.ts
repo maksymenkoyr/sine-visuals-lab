@@ -42,15 +42,17 @@ import {
   type MicPermission,
   type SourceState,
 } from "./audio/sourcePref.ts";
-import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
+import { createGL, refreshCssSize, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
 import {
   detectQuality,
   parseQualityPreset,
+  presetAllows,
+  presetRank,
   qualitySettings,
   type QualityPreset,
   type QualitySettings,
 } from "./render/quality.ts";
-import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type Viewport } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, PALETTES, type Palette } from "./render/palette.ts";
@@ -121,6 +123,7 @@ import {
   listLooks,
   primeUndo,
   saveLook,
+  saveSharedLook,
   takeUndo,
 } from "./render/sceneLooks.ts";
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
@@ -175,6 +178,7 @@ import {
 } from "./audio/bandGains.ts";
 import {
   advanceAutoTune,
+  tickAutoTune,
   resolveSceneSetting,
   resolveSensitivity,
   resolveExpansion,
@@ -214,6 +218,7 @@ import { createControlPanel } from "./ui/controlPanel.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
+import { requestWakeLock } from "./ui/wakeLock.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
 import { shouldTickInBackground, startBackgroundTick } from "./net/backgroundTick.ts";
 import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
@@ -250,11 +255,8 @@ const audioPromptMicLabel = document.getElementById("audioPromptMicLabel") as HT
 const audioPromptDisplayBtn = document.getElementById("audioPromptDisplayBtn") as HTMLButtonElement;
 const audioPromptGuide = document.getElementById("audioPromptGuide") as HTMLParagraphElement;
 
-const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
 /** No new frame in this long -> the host is gone even if our own socket to the relay is still open. */
 const STALE_TIMEOUT_MS = 3000;
-const presetAllows = (s: Scene, p: QualityPreset): boolean =>
-  !s.minQuality || PRESET_ORDER.indexOf(p) >= PRESET_ORDER.indexOf(s.minQuality);
 
 let mode: Mode = "solo";
 let roomCode: string | null = null;
@@ -314,9 +316,9 @@ let measureAnalyser: WaveformAnalyser | null = null;
  *  support it. Disposed and cleared in onCaptureEnded/attachCapture's own
  *  re-attach, same lifecycle as bandAnalyser above. */
 let tempoSource: TempoSource | null = null;
-/** Rebuilt (not just reset) on every swapAudioSource() — see that function's
- *  comment for why a fresh extractor, not a reset(), is what a source swap
- *  needs. */
+/** Rebuilt (not just reset) on every attachCapture() — see that function's
+ *  comment for why a fresh extractor, not a reset(), is what a new capture
+ *  needs. The initial one only serves the ticks before any capture exists. */
 let extractor = new FeatureExtractor();
 /** Set on first mic/display-capture attempt; cached so re-entering a viz
  *  never re-prompts. Cleared back to null on failure, or when the capture's
@@ -374,7 +376,6 @@ let outputPower: OutputPower = {
  *  controller is always previewing whatever it shows — the room's TV is the
  *  real picture — so for it this is just "a scene is showing". */
 let previewActive = false;
-const presetRank = (p: QualityPreset): number => PRESET_ORDER.indexOf(p);
 /** The preset this window actually renders at. effectivePreset() is the
  *  DEVICE's preset and stays the one every scene-availability check uses, so
  *  the preview's lower quality never hides a scene from the gallery; this is
@@ -395,6 +396,10 @@ function renderScale(): number {
 /** The main fullscreen GL context — created once at boot and kept alive for
  *  the whole session; only which scene is mounted on it changes. */
 let mainHost: SceneHost | null = null;
+/** True from the main canvas's `webglcontextlost` until the page reloads on
+ *  the restore (see boot()): drawScene() draws nothing, and the picture
+ *  readback isn't rebuilt against a dead context. */
+let glLost = false;
 
 /** The Master card's Picture block and tools/master-sweep.mjs share this one
  *  measurement path — see src/render/pictureMeter.ts for what each measure
@@ -582,17 +587,15 @@ function applyPowerMode(mode: PowerMode): void {
  *  boot()'s comment on `pinned`.
  *
  *  `remount` re-inits the mounted scene (geometry is sized at init), for the
- *  preview starting or stopping under a scene that is already showing. */
+ *  preview starting or stopping under a scene that is already showing, and for
+ *  an explicit Quality choice (the scene's buffers follow quality.maxParticles). */
 function applyRenderQuality(remount = false): void {
   const preset = renderPreset();
   if (preset === quality.preset) return;
   Object.assign(quality, qualitySettings(preset));
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
-  if (remount && inViz && mainHost) {
-    mainHost.unmountAll();
-    mainHost.mount(scene);
-  }
+  if (remount && inViz && mainHost) mountOrBail(scene, scene);
 }
 
 /** The preview's box (index.html's `body.output-preview #gl`): on while an
@@ -708,14 +711,6 @@ function wireOutputKeys(controls: OutputControls): void {
   document.addEventListener("visibilitychange", drop);
 }
 
-async function requestWakeLock(): Promise<void> {
-  try {
-    await navigator.wakeLock?.request("screen");
-  } catch {
-    // Not fatal — some browsers/contexts deny it; screen may just dim.
-  }
-}
-
 function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, effectivePreset()));
 }
@@ -768,17 +763,46 @@ function updateSceneVersionLabel(next: Scene): void {
   bindHint(sceneVersion, hintColor, [...sceneVersionHint(next.name, sceneVer), ...versionHint(BUILD_INFO)]);
 }
 
+/** Puts `next` on the main host (clearing whatever was mounted first), or, if
+ *  its init() throws (a shader this GPU won't compile, a float target it
+ *  lacks), says so and leaves it: back to the gallery, or to `prev` when there
+ *  is no gallery (a `?room=` renderer). Returns whether `next` is running.
+ *  Callers keep `scene` pointing at `next` until this answers, and must stop
+ *  when it returns false: `scene` has been put back and the HUD explains. */
+function mountOrBail(next: Scene, prev: Scene): boolean {
+  const host = mainHost!;
+  host.unmountAll();
+  try {
+    host.mount(next);
+    return true;
+  } catch (err) {
+    console.error(`"${next.name}" failed to start:`, err);
+  }
+  showHud(`${next.name} can't run on this device`, true);
+  scene = prev;
+  if (!bypassGallery) {
+    navigate({ kind: "gallery" }, "replace");
+  } else if (prev !== next) {
+    try {
+      host.mount(prev);
+    } catch (err) {
+      console.error(`"${prev.name}" failed to restart:`, err);
+    }
+  }
+  return false;
+}
+
 /** Routes both local picks (device menu) and remote commands (control panel on
  *  another device) through the same path, so the roster always reflects reality. */
 function applyScene(next: Scene): void {
   if (!mainHost) return;
+  const prev = scene;
   scene = next;
   controllerLook?.noteScene(next.id);
   // Before the mount, which sizes geometry from `quality`: the new scene's
   // minQuality may differ from the last one's while previewing.
   if (previewActive) applyRenderQuality();
-  mainHost.unmountAll();
-  mainHost.mount(next);
+  if (!mountOrBail(next, prev)) return;
   updateSceneVersionLabel(next);
   showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
@@ -1015,6 +1039,17 @@ function captureAudioSource(kind: CaptureSourceKind): AudioSource {
  *  from one input to the next. */
 function attachCapture(handle: CaptureHandle): void {
   capture = handle;
+  // A fresh extractor, not a reset(): FeatureExtractor has none, and two
+  // things must not carry over from the previous capture. Its clocks
+  // (lastPulseTime, lastOnsetTime, peakHoldUntil, ...) are absolute
+  // AudioContext.currentTime values, and a new context restarts near 0 — the
+  // old extractor would sit "in the future" and fire no onset, pulse or band
+  // decay until the new clock caught up (a mic reopened after a pulled cable
+  // mid-set; a share started after the last one ended). And its adaptive
+  // AGC's envelope would blow the visuals out for its ~1.25s re-adaptation
+  // window on the big level jump a mic-to-screen swap usually is (a room mic
+  // is far quieter than captured system audio).
+  extractor = new FeatureExtractor();
   bandAnalyser = createBandAnalyser(handle.context, handle.sourceNode);
   waveformAnalyser = createWaveformAnalyser(handle.context, handle.sourceNode);
   lufsAnalyser = createLufsAnalyser(handle.context, handle.sourceNode);
@@ -1084,8 +1119,9 @@ function reportUsage(): void {
  *  itself while its permission still stands: reopening it prompts nobody, and
  *  it's what keeps a set going when a cable is pulled — startMic lands on
  *  whatever input is left, and onInputDevicesChanged moves back once the
- *  chosen one returns. */
-function onCaptureEnded(handle: CaptureHandle): void {
+ *  chosen one returns. The Stop button is the deliberate form of this and
+ *  passes `reopen = false`: it must release the mic, not reopen it. */
+function onCaptureEnded(handle: CaptureHandle, reopen = true): void {
   if (capture !== handle) return; // already superseded by a swap
   handle.stop();
   capture = null;
@@ -1103,7 +1139,7 @@ function onCaptureEnded(handle: CaptureHandle): void {
   updateMicPrompt();
   gallery?.syncSource();
   syncInputPreview(); // nothing live now, so the preview can cover every device again
-  if (handle.kind === "mic" && micPermission === "granted") void ensureAudio("mic");
+  if (reopen && handle.kind === "mic" && micPermission === "granted") void ensureAudio("mic");
 }
 
 /** Turns a capture failure into copy the user can act on. A mic denial points
@@ -1174,12 +1210,6 @@ function swapAudioSource(next: AudioSourceChoice, restart = false): Promise<void
     const handle = await startCapture(next);
     previous?.stop();
     attachCapture(handle); // also repaints the stop button, so its label names the new source
-    // A fresh extractor, not a reset(): FeatureExtractor has none, and
-    // letting its adaptive AGC's envelope carry over would blow the visuals
-    // out for its ~1.25s re-adaptation window on the big level jump a
-    // mic-to-screen swap usually is (a room mic is far quieter than captured
-    // system audio).
-    extractor = new FeatureExtractor();
     setAudioSourceChoice(next);
     captureFailed = false;
   })();
@@ -1521,7 +1551,11 @@ function wireDeviceMenu(): void {
         setQualityChoice(choice);
         qualityChoice = choice;
       }
-      applyRenderQuality();
+      // Remount: a scene sizes its particle/agent buffers at init() from
+      // quality.maxParticles, and the governor never moves that count, so
+      // without it a Low pick keeps the High preset's agent count until the
+      // next scene switch.
+      applyRenderQuality(true);
     },
     isPreview: () => previewActive,
     // applyPreviewBox() leaves a phone controller's preview full page.
@@ -1859,14 +1893,17 @@ async function enterViz(next: Scene): Promise<void> {
   gallery?.hide();
   inViz = true;
   canvas.style.display = "block";
+  // The resize observer's cache still says 0x0 from while the canvas was
+  // hidden; without this the first frame would be a 1x1 buffer (gl.ts).
+  refreshCssSize(canvas);
 
+  const prev = scene;
   scene = next;
   controllerLook?.noteScene(next.id);
   // Before the mount (see applyScene); previewActive is still false on a
   // fresh entry and turns on at the next tick, which remounts if needed.
   if (previewActive) applyRenderQuality();
-  mainHost!.unmountAll();
-  mainHost!.mount(next);
+  if (!mountOrBail(next, prev)) return;
   updateSceneVersionLabel(next);
 
   showHud(`${isController ? "remote" : mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
@@ -1974,6 +2011,18 @@ async function boot(): Promise<void> {
     fatalError("WebGL2 unsupported on this device");
     return;
   }
+  // A GPU reset or a backgrounded phone can take the context away. gl.ts's
+  // watchContextLoss() is what lets the browser give it back; every scene's
+  // programs and buffers died with it, so the restore reloads the page (the
+  // route is in the hash, and a granted mic restarts on its own).
+  watchContextLoss(
+    canvas,
+    () => {
+      glLost = true;
+      showHud("graphics reset — reloading", true);
+    },
+    () => location.reload(),
+  );
 
   const params = new URLSearchParams(location.search);
   // What this page load means (net/bootPlan.ts decides from the query alone;
@@ -2016,6 +2065,18 @@ async function boot(): Promise<void> {
     adoptRequest = { slot: plan.slot, nonce: plan.nonce };
   }
   bypassGallery = plan.kind === "renderer";
+  // A ?room= that isn't a code the Worker could have issued (a stray '#' or
+  // other odd character, say) is ignored and the page loads normally rather
+  // than aborting boot; say so for whoever is looking at the console.
+  if (plan.kind !== "adopt" && params.get("room") && !("room" in plan)) {
+    console.warn("Ignoring a malformed ?room= code:", params.get("room"));
+  }
+  // The new room's request goes out now so its round trip overlaps
+  // detectQuality()'s benchmark below instead of following it; it's awaited
+  // (with the solo fallback) where the room is wired. The catch here only
+  // silences the unhandled-rejection warning while nothing awaits it yet.
+  const hostRoomPromise = plan.kind === "host-new" ? openHostRoom() : null;
+  hostRoomPromise?.catch(() => {});
 
   if (params.get("audio") === "synthetic") {
     const bpm = Number(params.get("bpm"));
@@ -2074,7 +2135,7 @@ async function boot(): Promise<void> {
         hostConn = new HostConnection(roomCode);
       } else {
         // The classic flow's room is claimed by this laptop and keyed (openHostRoom).
-        const hostRoom = await openHostRoom();
+        const hostRoom = await hostRoomPromise!;
         roomCode = hostRoom.room;
         hostRoomKey = hostRoom.roomKey;
         hostConn = new HostConnection(roomCode, {
@@ -2147,7 +2208,11 @@ async function boot(): Promise<void> {
     // pass through untouched instead of driving these — mirrors the guard
     // deviceMenu.ts's own document-level handler already uses.
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    if (e.key === "f" || e.key === "F") {
+    // F and S are letters, so they must not fire while one is being typed —
+    // a look named "Fast", or a pasted share code, in the Looks card's inputs
+    // (a range slider keeping focus still counts as not typing).
+    const typing = isTypingTarget(e.target);
+    if ((e.key === "f" || e.key === "F") && !typing) {
       noteKeyUse("fullscreen");
       immersive?.toggle();
     }
@@ -2155,7 +2220,7 @@ async function boot(): Promise<void> {
     // (enterViz/exitToGallery below), so the key and the gear it mirrors
     // appear and disappear together. Reuses the same toggle() the gear's
     // click handler calls, rather than reimplementing open/close here.
-    if ((e.key === "s" || e.key === "S") && inViz) {
+    if ((e.key === "s" || e.key === "S") && inViz && !typing) {
       noteKeyUse("panel");
       deviceMenu?.toggle();
     }
@@ -2175,7 +2240,7 @@ async function boot(): Promise<void> {
     // key), not e.key like f/s above, so a Cyrillic or German layout still
     // reaches these; only live in a viz, like S, and skipped while typing
     // somewhere, the same guard deviceMenu.ts's own hotkeys already use.
-    if (inViz && !isTypingTarget(e.target)) {
+    if (inViz && !typing) {
       // Output window: K is Cue (hold it), G plays (an instant send) — plain-
       // letter twins of Space and Option, which wireOutputKeys below owns.
       // No-ops unless an output window is open.
@@ -2226,7 +2291,7 @@ async function boot(): Promise<void> {
   // start prompt back so listening resumes only on a tap. The room
   // connection is untouched, same as there.
   stopBtn.addEventListener("click", () => {
-    if (capture) onCaptureEnded(capture);
+    if (capture) onCaptureEnded(capture, false);
   });
   refreshAudioPromptButtons(); // support never changes mid-session, so this runs once
   audioPromptMicBtn.addEventListener("click", () => void ensureAudio("mic"));
@@ -2291,7 +2356,7 @@ async function boot(): Promise<void> {
       } else if (!targetScene) {
         setTimeout(() => showHud("that look is for an unknown scene", true), 0);
       } else {
-        saveLook(look);
+        saveSharedLook(look);
         const specs = targetScene.settings ?? [];
         primeUndo(look.sceneId, specs);
         applyLook(look, specs);
@@ -2381,6 +2446,61 @@ function buildInputMeasure(tap: InputHealthTap, mono: Float32Array, sampleRate: 
   };
 }
 
+/** Nothing local to read this tick (synthetic feed, no capture yet, or a
+ *  renderer with no mic): every reading the meters take from this device's own
+ *  extractor and analysers goes back to null, so a card never keeps showing a
+ *  stale value from the previous mode. One place, so a new reading is added
+ *  here once rather than at each of currentVisual()'s early-out sites. */
+function clearLocalReadings(): void {
+  lastRawBands = null;
+  lastMono = null;
+  lastDeepMono = null;
+  lastLufs = null;
+  lastFixedEnergy = null;
+  lastBeatDiag = null;
+  lastFluxRatio = null;
+  lastGate = null;
+  lastInputHealth = null;
+}
+
+/** One tick's read of this device's own live capture — the bands, scope,
+ *  input health and LUFS readings, the extractor's frame, and the meters'
+ *  diagnostics off it — shared by currentVisual()'s solo and host branches,
+ *  which differ only in what they do with the tempo source and the frame
+ *  afterwards. `now` is the capture's own AudioContext clock. */
+function readLocalCapture(
+  bandAnalyser: BandAnalyser,
+  capture: CaptureHandle,
+  rateScale: number,
+): { f: FeatureFrame; now: number } {
+  const now = capture.context.currentTime;
+  const dbBands = bandAnalyser.readBandsDb();
+  lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
+  lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+  lastInputHealth =
+    inputHealthTap && lastMono
+      ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
+      : null;
+  lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
+  lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
+  const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+  lastFixedEnergy = extractor.fixedEnergy;
+  lastBeatDiag = extractor.onsetDiag;
+  lastFluxRatio = extractor.fluxRatio;
+  // `fired` is this local extractor's own frame's onset, not the
+  // jitter-buffered visual frame currentVisual() returns for host mode
+  // (sampleToVisual(hostConn.sample())) — so fired and suppressed always
+  // describe the same tick's decision.
+  lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
+  // Feeds next tick's resolveAutoGain(), not this one's — see
+  // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
+  feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
+  // Same one-tick lag, same reason — see feedSilenceGateMeasurement's own
+  // doc comment.
+  feedSilenceGateMeasurement(f.level, extractor.dtSec);
+  return { f, now };
+}
+
 /** @param rateScale sensitivity.ts's smoothingRateScale(resolveSmoothing(scene.id)),
  *  computed once per tick by loop() and reused for animClock.advance() below
  *  — resolveSmoothing() slews its auto value, so calling it a second time
@@ -2393,45 +2513,19 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   // state above for why host/renderer/TV never do.
   lastTempoHits = undefined;
   if (syntheticFeed) {
-    lastRawBands = null;
     // Synthetic frames are generated directly, not sampled from a real
     // signal — there's nothing for the scope to trace, so its card
     // correctly stays hidden here (see audioMeters.ts).
-    lastMono = null;
-    lastDeepMono = null;
-    lastLufs = null;
-    lastFixedEnergy = null;
-    lastBeatDiag = null;
-    lastFluxRatio = null;
-    lastGate = null;
-    lastInputHealth = null;
+    clearLocalReadings();
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
   if (mode === "solo") {
     if (!bandAnalyser || !capture) {
-      lastRawBands = null;
-      lastMono = null;
-      lastDeepMono = null;
-      lastLufs = null;
-      lastFixedEnergy = null;
-      lastBeatDiag = null;
-      lastFluxRatio = null;
-      lastGate = null;
-      lastInputHealth = null;
+      clearLocalReadings();
       return null;
     }
-    const now = capture.context.currentTime;
-    const dbBands = bandAnalyser.readBandsDb();
-    lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
-    lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    lastInputHealth =
-      inputHealthTap && lastMono
-        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
-        : null;
-    lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
-    lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+    const { f, now } = readLocalCapture(bandAnalyser, capture, rateScale);
     // The fixed-hop tempo source, when live, overrides the render-tick
     // tracker's own bpm — see tempoAnalyzer.ts's header for why its numbers
     // are better — and its drained onsets become this tick's tempoHits for
@@ -2448,47 +2542,15 @@ function currentVisual(rateScale: number): FeatureFrame | null {
         weight: o.strength * (1 + PHASE_BASS * o.bass),
       }));
     }
-    lastFixedEnergy = extractor.fixedEnergy;
-    lastBeatDiag = extractor.onsetDiag;
-    lastFluxRatio = extractor.fluxRatio;
-    // `fired` is this local extractor's own frame's onset, not the
-    // jitter-buffered visual frame currentVisual() returns for host mode
-    // (sampleToVisual(hostConn.sample())) — so fired and suppressed always
-    // describe the same tick's decision.
-    lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
-    // Feeds next tick's resolveAutoGain(), not this one's — see
-    // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
-    feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
-    // Same one-tick lag, same reason — see feedSilenceGateMeasurement's own
-    // doc comment.
-    feedSilenceGateMeasurement(f.level, extractor.dtSec);
     return f;
   }
 
   if (mode === "host") {
     if (!bandAnalyser || !capture || !hostConn) {
-      lastRawBands = null;
-      lastMono = null;
-      lastDeepMono = null;
-      lastLufs = null;
-      lastFixedEnergy = null;
-      lastBeatDiag = null;
-      lastFluxRatio = null;
-      lastGate = null;
-      lastInputHealth = null;
+      clearLocalReadings();
       return null;
     }
-    const now = capture.context.currentTime;
-    const dbBands = bandAnalyser.readBandsDb();
-    lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
-    lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    lastInputHealth =
-      inputHealthTap && lastMono
-        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
-        : null;
-    lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
-    lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+    const { f } = readLocalCapture(bandAnalyser, capture, rateScale);
     // Overwritten before hostConn.sendFrame() below, same as solo mode
     // above, so the TV and any renderer get the fixed-hop tempo over the
     // unchanged wire — see currentVisual()'s solo branch for the full
@@ -2500,30 +2562,12 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       f.bpm = tempoSource.bpm;
       tempoSource.drainOnsets(); // unused here (see above); drained so they don't queue
     }
-    lastFixedEnergy = extractor.fixedEnergy;
-    lastBeatDiag = extractor.onsetDiag;
-    lastFluxRatio = extractor.fluxRatio;
-    lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
-    // Feeds next tick's resolveAutoGain(), not this one's — see
-    // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
-    feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
-    // Same one-tick lag, same reason — see feedSilenceGateMeasurement's own
-    // doc comment.
-    feedSilenceGateMeasurement(f.level, extractor.dtSec);
     hostConn.sendFrame(f);
     return sampleToVisual(hostConn.sample());
   }
 
   // renderer — no local mic, so no raw signal to show.
-  lastRawBands = null;
-  lastMono = null;
-  lastDeepMono = null;
-  lastLufs = null;
-  lastFixedEnergy = null;
-  lastBeatDiag = null;
-  lastFluxRatio = null;
-  lastGate = null;
-  lastInputHealth = null;
+  clearLocalReadings();
   // A phone controller previews the host's frames and has nothing to fall back
   // to: no solo mic, and its own socket reconnects (net/room.ts). A laptop that
   // stops sending is a different matter, since the socket stays open; the
@@ -2579,10 +2623,9 @@ function tick(): void {
   const dtSec = Math.max(1e-4, (nowRafMs - lastRafMs) / 1000);
   lastRafMs = nowRafMs;
 
-  // Resolved exactly once per tick and reused everywhere below (extractor,
-  // anim clock, the meters) — resolveSmoothing() slews its own auto value
-  // via a mutated module-level map (autoTune.ts's `slewed`), so calling it
-  // a second time this tick would double-apply that slew.
+  // Resolved once per tick and reused everywhere below (extractor, anim
+  // clock, the meters) — a second call would be harmless (autoTune.ts steps
+  // each auto value once per tick, on its own clock), just wasted work.
   const smoothing = resolveSmoothing(scene.id);
   const rateScale = smoothingRateScale(smoothing);
 
@@ -2604,7 +2647,7 @@ function tick(): void {
     applyRenderQuality(true);
     applyPreviewBox();
   }
-  if (outputBridge && gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null }, { sens: outputSens, exp: outputExp, smoothing });
+  if (outputBridge && gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
 
   if (!inViz) {
     if (!document.hidden) gallery?.tick(nowRafMs);
@@ -2648,8 +2691,7 @@ function tick(): void {
     : null;
 
   // Reused for displayFrame at render time below instead of re-resolving —
-  // see the comment on `smoothing` above for why a second resolve*() call
-  // this tick would double-apply the auto slew.
+  // see the comment on `smoothing` above.
   let sensitivity = 1;
   let expansion = 1;
 
@@ -2691,7 +2733,9 @@ function tick(): void {
     return;
   }
 
-  const liveDrives = anim ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
+  // Only built while the panel is open: update() returns before it touches
+  // `drives` when closed, and forScene() allocates a Map and a dozen closures.
+  const liveDrives = anim && deviceMenu?.isOpen() ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
   deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
 
   if (!lastVis || !anim) {
@@ -2713,13 +2757,15 @@ function drawScene(
   latch: RenderLatch,
   engine: DriveEngine,
 ): void {
-  if (!shouldRenderFrame(nowRafMs, lastRenderMs, renderIntervalMs())) return;
+  if (glLost) return;
+  const intervalMs = renderIntervalMs();
+  if (!shouldRenderFrame(nowRafMs, lastRenderMs, intervalMs)) return;
   if (lastRenderFpsMs > 0) {
     const renderDtMs = nowRafMs - lastRenderFpsMs;
     if (renderDtMs > 0) lastFps = 1000 / renderDtMs;
   }
   lastRenderFpsMs = nowRafMs;
-  lastRenderMs = nowRafMs;
+  lastRenderMs = nextRenderAnchor(nowRafMs, lastRenderMs, intervalMs);
 
   const resized = resizeCanvasToDisplaySize(canvas, renderScale());
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);
@@ -2783,9 +2829,12 @@ function idlePreviewActive(): boolean {
  *  Input card still apply, so tweaking a look before picking a source shows
  *  the result. */
 function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): void {
+  // Clock only — no profile, so the demo still can't train it, but the auto
+  // Sensitivity/Expansion below keep gliding instead of freezing at one step.
+  tickAutoTune(dtSec);
   const frame = idlePreview.feed.frame(nowRafMs / 1000);
   const gained = applyBandGains(frame, getBandGains(scene.id));
-  outputBridge?.pushFrame(gained, { beatRatio: null, wavePeak: null }, { sens: outputSens, exp: outputExp, smoothing });
+  outputBridge?.pushFrame(gained, { beatRatio: null, wavePeak: null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
   const anim = idlePreview.anim.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: null });
   idlePreview.latch.accumulate(anim);
   const sensitivity = resolveSensitivity(scene.id);
