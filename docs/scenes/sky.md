@@ -327,6 +327,15 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   from the wrong hour). Day drift, a rate, stays scaled. Also dropped a stale
   sentence from the drifter comment that described the old three-source
   central blob. No change at the default Master and Expansion.
+- 2026-10-02 — Review pass: the seeds the shader hashes are wrapped to
+  `SHADER_SEED_PERIOD` on upload (stamps in `createWavePool`'s `upload`,
+  sweeps where `sweepSeed` is filled). They counted up for the whole session
+  and went straight into `hash21`'s `fract(seed * 123.34)`, so after a few
+  thousand stamps (hours of a gig) fp32 left it a handful of values and every
+  streak came out nearly the same shape and slant. The JS counters (brush
+  walk, swarm centre) keep the full count. Bench dumps of frames 30, 75 and
+  200 are identical to before: the first period of stamps and sweeps hashes
+  exactly as it did.
 
 ## Tuning notes
 

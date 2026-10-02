@@ -23,6 +23,8 @@ import {
   liftByDrive,
   DRIFTER_SEEDS,
   SKY_SPLAT_SLOTS,
+  SHADER_SEED_PERIOD,
+  wrapShaderSeed,
 } from "../src/render/scenes/sky/sky.ts";
 import { computeAutoTarget, resolveSceneSetting } from "../src/render/autoTune.ts";
 import { setSceneMaster, setSceneExpansion, SCENE_MASTER_DEFAULT, SCENE_EXPANSION_DEFAULT } from "../src/render/sceneSettings.ts";
@@ -433,6 +435,27 @@ describe("wave pool", () => {
     expect(slot).toBeGreaterThanOrEqual(0);
     expect(uploads.uBurstAmp[slot]).toBeCloseTo(0.8, 6);
     expect(uploads.uBurstSeed[slot]).toBeCloseTo(12.25, 6);
+  });
+
+  it("uploads the seed wrapped to SHADER_SEED_PERIOD, leaving the pool's own seed whole", () => {
+    const pool = createWavePool();
+    pool.trigger(1, 0.8, SHADER_SEED_PERIOD + 5);
+    pool.trigger(2, 0.8, 3);
+    const { prog, uploads } = fakeProgram();
+    pool.upload(prog);
+    expect(uploads.uBurstSeed[uploads.uBurstT0.indexOf(1)]).toBeCloseTo(5, 6);
+    expect(uploads.uBurstSeed[uploads.uBurstT0.indexOf(2)]).toBeCloseTo(3, 6);
+    expect(pool.bursts.map((b) => b.seed)).toContain(SHADER_SEED_PERIOD + 5);
+  });
+
+  it("wrapShaderSeed keeps a long session's seeds small, and is exact for the first period", () => {
+    expect(wrapShaderSeed(0)).toBe(0);
+    expect(wrapShaderSeed(255)).toBe(255);
+    expect(wrapShaderSeed(256)).toBe(0);
+    expect(wrapShaderSeed(1e9 + 0.5)).toBeGreaterThanOrEqual(0);
+    expect(wrapShaderSeed(1e9 + 0.5)).toBeLessThan(SHADER_SEED_PERIOD);
+    expect(wrapShaderSeed(-1)).toBe(SHADER_SEED_PERIOD - 1);
+    expect(wrapShaderSeed(NaN)).toBe(0);
   });
 
   it("uploads a live wave's spawn position, defaulting to the screen centre", () => {

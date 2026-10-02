@@ -488,6 +488,23 @@ export interface WavePool {
   readonly bursts: readonly WaveBurst[];
 }
 
+/** Period of the seeds the shader hashes (a stamp's uBurstSeed, a sweep's
+ *  uSweepSeed). The shader's fract-based hash21 multiplies the seed by about
+ *  123 before taking fract(), and fp32 keeps only 23 bits of that product, so
+ *  an ever-growing seed leaves it fewer and fewer fractional bits (one stamp
+ *  per beat runs it dry within hours of a gig) and every streak or sweep
+ *  ends up with nearly the same hash. Wrapping what reaches the GPU keeps
+ *  256 * 123 ~ 3.2e4, which still leaves about 8 fractional bits; the JS
+ *  counters themselves (stepBrush, pickSwarmCenter) never wrap. */
+export const SHADER_SEED_PERIOD = 256;
+
+/** x reduced into [0, SHADER_SEED_PERIOD), in float64 — safe for fractions
+ *  and negatives. */
+export function wrapShaderSeed(x: number): number {
+  const w = x - Math.floor(x / SHADER_SEED_PERIOD) * SHADER_SEED_PERIOD;
+  return Number.isFinite(w) ? w : 0;
+}
+
 export function createWavePool(): WavePool {
   const bursts: WaveBurst[] = [];
   for (let i = 0; i < MAX_WAVE_BURSTS; i++) {
@@ -542,7 +559,7 @@ export function createWavePool(): WavePool {
         const b = bursts[i];
         t0Buf[i] = b.t0;
         ampBuf[i] = b.strength;
-        seedBuf[i] = b.seed;
+        seedBuf[i] = wrapShaderSeed(b.seed);
         xBuf[i] = b.x;
         yBuf[i] = b.y;
         lifeBuf[i] = b.life;
@@ -1506,7 +1523,7 @@ function createSkyScene(): Scene {
       if (drives.fired("lightWaves", beatFired)) {
         const slot = sweepSlot(sweepsFired);
         sweepT0[slot] = anim.timeSec;
-        sweepSeed[slot] = sweepsFired * 1.618 + 3.0;
+        sweepSeed[slot] = wrapShaderSeed(sweepsFired) * 1.618 + 3.0;
         sweepsFired++;
       }
       const floaterAmount = resolveSceneSetting(ID, settingFor("floaterDensity")) * drives.value("floaterDensity", 1);
