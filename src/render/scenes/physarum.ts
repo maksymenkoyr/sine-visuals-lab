@@ -320,6 +320,21 @@ const GLOW_BASE = 2.0;
 const GLOW_SPAN = 8.0;
 const FLASH_GAIN = 1.6;
 
+// --- Vividness: the composite's roll-off is Reinhard, and a per-channel
+// Reinhard is what washes the picture out — the brightest channel of a
+// dense filament is squeezed hardest, so the colour drifts toward grey-white
+// exactly where the network is thickest. Vividness blends that toward a
+// hue-preserving roll-off (one scale for all three channels, taken from the
+// brightest) and pushes saturation away from the pixel's own luminance. The
+// other half of the wash is upstream of the roll-off: the three species'
+// colours sum to near-grey wherever their trails overlap, so Vividness also
+// raises the trail channels to a power (total preserved) so the dominant
+// species wins the pixel instead of averaging with the others. At 0 the
+// picture is the old per-channel look; VIVID_SAT_BOOST and VIVID_SEPARATION
+// are the extra saturation and the extra exponent at 1. ---
+const VIVID_SAT_BOOST = 0.8;
+const VIVID_SEPARATION = 1.5;
+
 function normalize3(x: number, y: number, z: number): [number, number, number] {
   const m = Math.hypot(x, y, z) || 1;
   return [x / m, y / m, z / m];
@@ -456,6 +471,16 @@ const SETTINGS: SceneSetting[] = [
     },
   },
   // --- Look ---
+  {
+    key: "vivid",
+    label: "Vividness",
+    description: "How saturated the colours stay where the network is dense — 0 lets them wash toward white",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: 0.7,
+  },
   {
     key: "glow",
     label: "Glow",
@@ -814,6 +839,8 @@ const float SMOOTH_SIDE = ${SMOOTH_SIDE.toFixed(4)};
 const float GLOW_BASE = ${GLOW_BASE.toFixed(4)};
 const float GLOW_SPAN = ${GLOW_SPAN.toFixed(4)};
 const float FLASH_GAIN = ${FLASH_GAIN.toFixed(4)};
+const float VIVID_SAT_BOOST = ${VIVID_SAT_BOOST.toFixed(4)};
+const float VIVID_SEPARATION = ${VIVID_SEPARATION.toFixed(4)};
 
 void main() {
   vec2 ruv = roomUv(vUv);
@@ -834,8 +861,12 @@ void main() {
   vec3 tU = texture(uTrail, fract(fuv + vec2(0.0, texel.y))).rgb;
   vec3 trail = tC * SMOOTH_CENTER + (tL + tR + tD + tU) * SMOOTH_SIDE;
 
-  vec3 col = trail.r * COLOR_LOW + trail.g * COLOR_MID + trail.b * COLOR_HIGH;
   float total = trail.r + trail.g + trail.b;
+  // Species separation (see VIVID_SEPARATION): same total, dominant species
+  // weighted up. The palette tint and relief below read the same totals.
+  vec3 sep = pow(trail, vec3(1.0 + VIVID_SEPARATION * uVivid));
+  sep *= total / max(sep.r + sep.g + sep.b, 1e-6);
+  vec3 col = sep.r * COLOR_LOW + sep.g * COLOR_MID + sep.b * COLOR_HIGH;
   vec3 palCol = palette(0.15 + 0.5 * total, uPalA, uPalB, uPalC, uPalD) * total;
   col = mix(col, palCol, uPaletteMix);
 
@@ -854,10 +885,17 @@ void main() {
   col *= GLOW_BASE + GLOW_SPAN * uGlow;
   col *= 1.0 + uFlash * flashDrive(uBeatPulse) * FLASH_GAIN;
 
-  // Per-channel roll-off so a saturated overlap goes white rather than
-  // shifting hue (powder.ts's Reinhard note).
-  col = col / (1.0 + col);
-  outColor = vec4(col, 1.0);
+  // Roll-off. Per-channel Reinhard lets a saturated overlap go white rather
+  // than shift hue (powder.ts's Reinhard note), but it is also what washes
+  // the network out; Vividness blends toward one shared scale taken from the
+  // brightest channel, which keeps the hue and the channel ratios, then
+  // pushes saturation away from luminance (see VIVID_SAT_BOOST).
+  vec3 soft = col / (1.0 + col);
+  vec3 keepHue = col / (1.0 + max(col.r, max(col.g, col.b)));
+  col = mix(soft, keepHue, uVivid);
+  float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = max(mix(vec3(lum), col, 1.0 + VIVID_SAT_BOOST * uVivid), 0.0);
+  outColor = vec4(min(col, vec3(1.0)), 1.0);
 }
 `;
 

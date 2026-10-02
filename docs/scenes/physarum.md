@@ -23,10 +23,8 @@ ping-pong state (no reliance on `EXT_color_buffer_float`) and for using
 `unpackUnit` — are covered by `tests/physarum.test.ts` without a GL
 context. `GROUP_COUNT` keys the trail's three band-group channels, the
 species assignment and the wandering attractors together; `SETTINGS`
-carries the Form/Motion/Look/Post controls (Network scale, Fan angle, Turn
-rate, Wander, Trail decay, Band merge, Crawl speed, Beat surge, Beat
-seeding, Band pull, Glow, Relief, Palette tint, Beat flash), each with its
-own `auto` weights for the Auto-tune system (`src/render/autoTune.ts`).
+carries the Form/Motion/Look/Post controls, each with its own `auto` weights
+where it has any, for the Auto-tune system (`src/render/autoTune.ts`).
 
 ## References
 
@@ -51,6 +49,15 @@ follows). No video or visual reference was studied for this scene.
 - 2026-09-27: moved behind the gallery's draft toggle (added to
   `draftIds` in `src/render/scenes/index.ts`), on the user's call, in the
   same change that featured Physarum 2 in its place. Code untouched.
+- 2026-10-02: the network read washed out toward grey-white. Two causes,
+  both in `COMPOSITE_FRAG`: the per-channel Reinhard roll-off squeezes the
+  brightest channel of a dense filament hardest, and the three species'
+  colours sum to near-grey where their trails overlap. Added the Vividness
+  setting (`vivid`, first in Look), which blends toward a hue-preserving
+  roll-off, pushes saturation, and weights the dominant species up
+  (`VIVID_SAT_BOOST`, `VIVID_SEPARATION`). 0 is the old look; the default is
+  above 0, so the shipped look is more saturated than before. Checked on the
+  synthetic feed only.
 
 ## Tuning notes
 
