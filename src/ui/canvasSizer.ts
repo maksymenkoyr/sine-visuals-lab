@@ -2,10 +2,11 @@
  * The one place a meter canvas's backing store is sized to its card.
  *
  * Every rolling meter in the panel (the spectrum strip, the column rings
- * behind the Hits/Loudness/Level history, the waveform, the hit-curve plot)
- * draws into a canvas whose CSS width is whatever its card gives it and whose
- * backing store must be that width times devicePixelRatio, or the browser
- * stretches it. Each used to carry its own copy of this logic; they all
+ * behind the trace strips — Signal History, Gate, Centroid and the Master
+ * Picture block — and behind Hits and Timing, the waveform, the hit-curve
+ * plot, the band line editor) draws into a canvas whose CSS width is
+ * whatever its card gives it and whose backing store must be that width
+ * times devicePixelRatio, or the browser stretches it. Each used to carry its own copy of this logic; they all
  * share this one so they agree on three rules:
  *
  *  - No layout means no size: a width of 0 (panel closed, card folded)
