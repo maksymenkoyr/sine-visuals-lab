@@ -105,8 +105,8 @@ describe("nextRenderAnchor", () => {
     for (const hz of [60, 75, 90, 120, 144, 165]) {
       const n = renderCount(hz, interval, 10);
       expect(n, `${hz} Hz`).toBeGreaterThan(588);
-      // 144 Hz lands ~61.7: the gate admits a tick up to the tolerance early.
-      expect(n, `${hz} Hz`).toBeLessThan(625);
+      // 144 and 165 Hz land ~61.7: the gate admits a tick up to the tolerance early.
+      expect(n, `${hz} Hz`).toBeLessThan(hz === 144 || hz === 165 ? 625 : 612);
     }
   });
 
