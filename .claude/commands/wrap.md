@@ -28,8 +28,8 @@ Close out this working session:
    survives.
 
    Then **save the materials** — anything this session used for a scene that
-   would otherwise be lost (the standing rule in `AGENTS.md` says where each
-   kind goes):
+   would otherwise be lost (the Materials section of
+   `docs/scenes/_template.md` says where each kind goes):
    - scripts written in the session's scratch folder that were used to
      build, measure or screenshot the scene → `docs/scenes/<id>/scripts/`,
      with absolute local paths made repo-relative;
@@ -50,7 +50,7 @@ Close out this working session:
    the old name as a fallback — this catches a rename the tool's diff-based
    search can miss, like a name only mentioned in prose rather than declared
    in code. Fix any reference you find — this is the enforcement mechanism
-   behind rule 2 in `AGENTS.md` ("never write down anything countable"): a
+   behind rule 2 in `CLAUDE.md` ("never write down anything countable"): a
    reference that names a real symbol will surface itself here the moment
    that symbol changes.
 
