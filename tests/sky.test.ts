@@ -21,6 +21,8 @@ import {
   spawnFloaters,
   skyScene,
   liftByDrive,
+  DRIFTER_SEEDS,
+  SKY_SPLAT_SLOTS,
 } from "../src/render/scenes/sky/sky.ts";
 import { computeAutoTarget } from "../src/render/autoTune.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
@@ -611,5 +613,11 @@ describe("floater stamp gate", () => {
   it("the spawn amount rests above the gate at its default (the shipped look can't self-silence), and the Scene grade never reads 0", () => {
     expect(setting("floaterDensity").default).toBeGreaterThan(0);
     expect(floaterCountFromEnergy(0)).toBeGreaterThan(0);
+  });
+});
+
+describe("SKY_SPLAT_SLOTS", () => {
+  it("has a splat slot for every cloud drifter (the sim silently drops slots past it)", () => {
+    expect(DRIFTER_SEEDS.length).toBeLessThanOrEqual(SKY_SPLAT_SLOTS);
   });
 });

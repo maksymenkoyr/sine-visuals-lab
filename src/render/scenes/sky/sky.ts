@@ -16,7 +16,7 @@ import {
   type FluidSim,
   type SimFormat,
   type Splat,
-} from "./skyFluidSim.ts";
+} from "../fluidSim.ts";
 
 // Sky: a real 2D fluid sim driving cloud cover, with two vision illusions
 // layered on top — floaters (in waves) and Haidinger's brush. Picked from
@@ -28,13 +28,10 @@ import {
 // deliberately NOT built here either, not even as disabled settings — a
 // later pass's scope, not this one's.
 //
-// The fluid sim (skyFluidSim.ts) is a copy of Neon Fluid's fluidSim.ts, the
-// stable-fluids solver — copied while that scene was still on an unmerged
-// branch, and still separate because Sky raises its SPLAT_SLOTS (Neon
-// Fluid's 4 → 12, one per cloud drifter). The two are otherwise identical;
-// folding them into one module with the slot count as a parameter is an
-// open follow-up. This scene runs
-// it in MIRROR_OFF mode only — full screen, no kaleidoscope fold — the one
+// The fluid sim is Neon Fluid's stable-fluids solver, fluidSim.ts, shared:
+// Sky passes its own splat-slot count (SKY_SPLAT_SLOTS, one per cloud
+// drifter) and turns the edge pass off, since only dyeTexture() is read.
+// This scene runs it in MIRROR_OFF mode only — full screen, no kaleidoscope fold — the one
 // path that needs no adaptation. Cloud drift's own clock is deliberately
 // NOT audio-reactive: DRIFTER_SEEDS.length slow, gently
 // meandering ambient splats (driftCenter, a real-time clock, never warped by
@@ -57,7 +54,7 @@ import {
 //
 // Display is one hand-rolled pass (not createFullscreenScene, which only
 // supports a single pass with no texture of its own to sample) reading the
-// sim's dyeTexture() through skyFluidSim's own simIoGlsl(format) codec —
+// sim's dyeTexture() through fluidSim.ts's simIoGlsl(format) codec —
 // the same reason petri.ts hand-rolls its display pass. Compositing order,
 // sky gradient at the bottom, illusions on top:
 //   sky gradient -> cloud (contrast-shaped extinction blend off dye
@@ -196,11 +193,16 @@ const SIM_DT_MAX = 1 / 30; // clamps a slow-frame dt so the sim never destabilis
 // frame (driftCenter) and puffing on and off (drifterPuff), so the cover
 // reads as separate airy puffs scattered over the sky. Three big sources
 // orbiting the centre, fed continuously, merged into one central blob. ---
-const DRIFTER_SEEDS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+export const DRIFTER_SEEDS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+/** Splat slots Sky asks fluidSim.ts for (Neon Fluid's default is 4): one
+ *  cloud source per DRIFTER_SEEDS entry, with headroom — every drifter past
+ *  this count would be silently dropped by the sim. tests/sky.test.ts checks
+ *  DRIFTER_SEEDS fits. */
+export const SKY_SPLAT_SLOTS = 12;
 const DRIFT_TANGENT_EPS = 0.08; // finite-difference step used only to find the drift's own heading
 const DRIFTER_SIGMA_MIN = 0.045; // splat radius range, sim uv — varied per seed so puffs aren't all one size
 const DRIFTER_SIGMA_MAX = 0.085;
-const DRIFTER_FORCE = 10; // texels/s^2 at FORCE_REF_ROWS — see skyFluidSim.ts's header; strong enough that the flow shears puffs into drifting shapes rather than leaving round balls where they were laid
+const DRIFTER_FORCE = 10; // texels/s^2 at FORCE_REF_ROWS — see fluidSim.ts's header; strong enough that the flow shears puffs into drifting shapes rather than leaving round balls where they were laid
 const DRIFTER_DYE_RATE = 1.05; // density/s at the splat centre while puffing, before Cloud cover scales it
 const DRIFTER_PUFF_RATE = 0.45; // rad/s of each source's on/off cycle (~14s per puff) — a long "on" phase grows one puff into a big blob
 
@@ -1410,7 +1412,7 @@ function createSkyScene(): Scene {
         Math.max(1, gl.drawingBufferHeight),
         MIRROR_OFF,
       );
-      sim = createFluidSim(gl, quadVao, initSize, format);
+      sim = createFluidSim(gl, quadVao, initSize, format, { splatSlots: SKY_SPLAT_SLOTS, edge: false });
       displayProg = createProgram(gl, buildDisplayFrag(format));
       dyeLoc = gl.getUniformLocation(displayProg.program, "uDye");
       wavePool = createWavePool();

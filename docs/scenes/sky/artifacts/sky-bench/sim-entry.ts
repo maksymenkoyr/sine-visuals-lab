@@ -9,8 +9,11 @@ import {
   MIRROR_OFF,
   simIoGlsl,
   simResolutionFor,
-  SPLAT_SLOTS,
-} from "../../../../../src/render/scenes/sky/skyFluidSim.ts";
+} from "../../../../../src/render/scenes/fluidSim.ts";
+
+// Sky's own splat-slot count (sky.ts's SKY_SPLAT_SLOTS) — the page passes it
+// to createFluidSim along with edge: false, as the scene does.
+const SPLAT_SLOTS = 12;
 
 (window as unknown as { SkySim: unknown }).SkySim = {
   createFullscreenQuad,

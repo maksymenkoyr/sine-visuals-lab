@@ -7,6 +7,10 @@ import { createProgram, drawFullscreenQuad, type GLProgram } from "../gl.ts";
 // scenes, settings, or audio — src/render/scenes/fluid.ts is the layer that
 // turns music into Splat forces and renders the result; this module just
 // steps the field forward each frame and hands back the dye/edge textures.
+// Two scenes share it: Neon Fluid (fluid.ts, the defaults) and Sky
+// (sky/sky.ts), which passes its own `splatSlots` and turns the edge pass
+// off — see FluidSimOptions. Mirror modes other than MIRROR_OFF are used
+// only by Neon Fluid.
 //
 // The method is textbook stable fluids: semi-Lagrangian advection (Stam
 // 1999, "Stable Fluids"), Jacobi-iterated pressure projection to remove
@@ -260,9 +264,25 @@ export const BYTE_VEL_RANGE = 200;
 export const BYTE_SCALAR_RANGE = 50;
 export const BYTE_DYE_RANGE = 4;
 
-/** Slot 0 is always the centre emitter; slots 1..SPLAT_SLOTS-1 are the
- *  periodic accent splats. */
+/** Neon Fluid's splat-slot count: slot 0 is always the centre emitter;
+ *  slots 1..SPLAT_SLOTS-1 are the periodic accent splats. It is the default
+ *  for createFluidSim's `splatSlots` option — a scene that needs more (Sky's
+ *  cloud drifters, see sky.ts) passes its own, and the count is baked into
+ *  the force and dye shaders, so every extra slot costs each texel of those
+ *  two passes another loop iteration. */
 export const SPLAT_SLOTS = 4;
+
+/** Options for createFluidSim. */
+export interface FluidSimOptions {
+  /** How many splats a step takes (default SPLAT_SLOTS). Slots past this are
+   *  silently dropped; fewer entries than this leave the rest empty. */
+  splatSlots?: number;
+  /** Run the Sobel edge pass and its mip chain, for edgeTexture() (default
+   *  true). Only Neon Fluid's neon halo reads it; a scene that samples just
+   *  dyeTexture() turns it off and saves a full-dye-grid pass plus the mip
+   *  rebuild every step, and edgeTexture() then returns null. */
+  edge?: boolean;
+}
 
 /** A single force/dye injection point, in sim uv with force in
  *  texels/s^2 at FORCE_REF_ROWS rows. `tag` marks the emitter (1) vs a
@@ -294,7 +314,8 @@ export interface SimStepInputs {
   /** Viscosity setting, 0..1 — scales how many VISCOSITY_BODY blur passes
    *  run on velocity each step (see viscosityPasses). */
   viscosity: number;
-  /** Exactly SPLAT_SLOTS entries (see fluid.ts's emitterState). */
+  /** One entry per splat slot (see fluid.ts's emitterState for the default
+   *  SPLAT_SLOTS); missing entries are empty slots, extras are dropped. */
   splats: readonly Splat[];
 }
 
@@ -307,6 +328,7 @@ export interface FluidSim {
    *  via decodeVel) — for a display pass that wants the live flow direction
    *  rather than just dye density (see fluid.ts's Currents sparkle style). */
   velTexture(): WebGLTexture | null;
+  /** Null when the sim was created with `edge: false`. */
   edgeTexture(): WebGLTexture | null;
   resize(size: SimSize): void;
   dispose(): void;
@@ -398,7 +420,7 @@ vec4 encodeDye(vec2 d) { return vec4(clamp(d / BYTE_DYE_RANGE_C, 0.0, 1.0) + vec
 // Shared prefix for every sim pass: the two generic input samplers
 // (`uVel`/`uAux` — which field is bound to which unit varies per pass, see
 // createFluidSim's step()), the codec, and the mirror ghost-cell helpers.
-function simPrefix(format: SimFormat): string {
+function simPrefix(format: SimFormat, slots: number): string {
   return `#version 300 es
 precision highp float;
 precision highp int;
@@ -419,14 +441,15 @@ uniform float uForceScale;
 uniform float uCurl;
 uniform float uEnergy;
 uniform float uFade;
-uniform vec4 uSplatPos[${SPLAT_SLOTS}];
-uniform vec4 uSplatVel[${SPLAT_SLOTS}];
+uniform vec4 uSplatPos[${slots}];
+uniform vec4 uSplatVel[${slots}];
 
 const float VEL_DAMP_PER_SEC = ${VEL_DAMP_PER_SEC.toFixed(4)};
 const float DYE_MAX = ${DYE_MAX.toFixed(4)};
 const float CURL_EPS_BASE = ${CURL_EPS_BASE.toFixed(4)};
 const float CURL_EPS_ENERGY = ${CURL_EPS_ENERGY.toFixed(4)};
 const int CURL_STENCIL_C = ${CURL_STENCIL};
+const int SPLAT_SLOTS_C = ${slots};
 const float EDGE_GAIN = ${EDGE_GAIN.toFixed(4)};
 const float TAG_FADE_MULT = ${TAG_FADE_MULT.toFixed(4)};
 const float EDGE_LO = ${EDGE_LO.toFixed(4)};
@@ -596,7 +619,7 @@ void main() {
   vec2 force = eps * vec2(n.y, -n.x) * c;
 
   vec2 uv = vUv;
-  for (int i = 0; i < ${SPLAT_SLOTS}; i++) {
+  for (int i = 0; i < SPLAT_SLOTS_C; i++) {
     force += uSplatVel[i].xy * splatForceWeight(uv, i);
   }
 
@@ -694,15 +717,22 @@ ${
 `
     : `  vec2 d = dyeAt(back);
 `
-}  // Dye diffusion: same 4-neighbour blend as the velocity's viscosity used
-  // to blend inline (E1: DYE_SMOOTH = 0 by default — MacCormack keeps dye
-  // sharp on its own; the blend stays wired so it can be swept back up).
+}${
+  DYE_SMOOTH > 0
+    ? `  // Dye diffusion: same 4-neighbour blend as the velocity's viscosity used
+  // to blend inline. Compiled in only while DYE_SMOOTH > 0 (E1: it is 0 by
+  // default — MacCormack keeps dye sharp on its own), because uSmooth is a
+  // runtime uniform and the compiler can't drop the four extra fetches of a
+  // blend whose weight is always 0.
   vec2 avg = 0.25 * (dyeAt(back + vec2(uTexel.x, 0.0)) + dyeAt(back - vec2(uTexel.x, 0.0))
                    + dyeAt(back + vec2(0.0, uTexel.y)) + dyeAt(back - vec2(0.0, uTexel.y)));
-  d = mix(d, avg, uSmooth) / vec2(1.0 + uFade * uDt, 1.0 + uFade * TAG_FADE_MULT * uDt);
+  d = mix(d, avg, uSmooth);
+`
+    : ""
+}  d = d / vec2(1.0 + uFade * uDt, 1.0 + uFade * TAG_FADE_MULT * uDt);
 
   vec2 inj = vec2(0.0);
-  for (int i = 0; i < ${SPLAT_SLOTS}; i++) {
+  for (int i = 0; i < SPLAT_SLOTS_C; i++) {
     float tag = uSplatPos[i].w;
     float rate = uSplatVel[i].z * splatDyeWeight(uv, i) * uDt;
     inj.x += rate;
@@ -817,15 +847,20 @@ interface PassProgram {
   velLoc: WebGLUniformLocation | null;
   auxLoc: WebGLUniformLocation | null;
   aux2Loc: WebGLUniformLocation | null;
+  /** Whether the shader reads the splat arrays. The compiler strips unused
+   *  uniforms, so this is true for exactly the force and dye-advection
+   *  programs — the only passes that need the per-step splat upload. */
+  usesSplats: boolean;
 }
 
-function makePass(gl: WebGL2RenderingContext, format: SimFormat, body: string): PassProgram {
-  const prog = createProgram(gl, simPrefix(format) + body);
+function makePass(gl: WebGL2RenderingContext, format: SimFormat, slots: number, body: string): PassProgram {
+  const prog = createProgram(gl, simPrefix(format, slots) + body);
   return {
     prog,
     velLoc: gl.getUniformLocation(prog.program, "uVel"),
     auxLoc: gl.getUniformLocation(prog.program, "uAux"),
     aux2Loc: gl.getUniformLocation(prog.program, "uAux2"),
+    usesSplats: gl.getUniformLocation(prog.program, "uSplatPos[0]") !== null,
   };
 }
 
@@ -850,19 +885,26 @@ export function createFluidSim(
   quadVao: WebGLVertexArrayObject,
   initialSize: SimSize,
   format: SimFormat,
+  opts: FluidSimOptions = {},
 ): FluidSim {
+  const slots = opts.splatSlots ?? SPLAT_SLOTS;
+  const withEdge = opts.edge ?? true;
   const passes = {
-    advectVel: makePass(gl, format, ADVECT_VEL_BODY),
-    viscosity: makePass(gl, format, VISCOSITY_BODY),
-    curl: makePass(gl, format, CURL_BODY),
-    force: makePass(gl, format, FORCE_BODY),
-    divergence: makePass(gl, format, DIVERGENCE_BODY),
-    jacobi: makePass(gl, format, JACOBI_BODY),
-    gradient: makePass(gl, format, GRADIENT_BODY),
-    advectDyePredict: makePass(gl, format, ADVECT_DYE_PREDICT_BODY),
-    advectDye: makePass(gl, format, ADVECT_DYE_BODY),
-    edge: makePass(gl, format, EDGE_BODY),
+    advectVel: makePass(gl, format, slots, ADVECT_VEL_BODY),
+    viscosity: makePass(gl, format, slots, VISCOSITY_BODY),
+    curl: makePass(gl, format, slots, CURL_BODY),
+    force: makePass(gl, format, slots, FORCE_BODY),
+    divergence: makePass(gl, format, slots, DIVERGENCE_BODY),
+    jacobi: makePass(gl, format, slots, JACOBI_BODY),
+    gradient: makePass(gl, format, slots, GRADIENT_BODY),
+    advectDyePredict: makePass(gl, format, slots, ADVECT_DYE_PREDICT_BODY),
+    advectDye: makePass(gl, format, slots, ADVECT_DYE_BODY),
+    edge: withEdge ? makePass(gl, format, slots, EDGE_BODY) : null,
   };
+  // The splats as the shaders' uSplatPos / uSplatVel arrays, refilled once
+  // per step() and uploaded only to the programs that read them (usesSplats).
+  const splatPosBuf = new Float32Array(slots * 4);
+  const splatVelBuf = new Float32Array(slots * 4);
 
   let size = initialSize;
   let vel: [SimTarget, SimTarget];
@@ -871,7 +913,7 @@ export function createFluidSim(
   let divTarget: SimTarget;
   let dye: [SimTarget, SimTarget];
   let dyeTemp: SimTarget;
-  let edgeTarget: SimTarget;
+  let edgeTarget: SimTarget | null = null;
   let velRead = 0;
   let pRead = 0;
   let dyeRead = 0;
@@ -892,7 +934,7 @@ export function createFluidSim(
       createTarget(gl, s.dyeW, s.dyeH, "dye", format, "linear"),
     ];
     dyeTemp = createTarget(gl, s.dyeW, s.dyeH, "dye", format, "linear");
-    edgeTarget = createTarget(gl, s.dyeW, s.dyeH, "edge", format, "mipmap");
+    edgeTarget = withEdge ? createTarget(gl, s.dyeW, s.dyeH, "edge", format, "mipmap") : null;
     velRead = 0;
     pRead = 0;
     dyeRead = 0;
@@ -905,7 +947,7 @@ export function createFluidSim(
     deleteTarget(gl, divTarget);
     for (const t of dye) deleteTarget(gl, t);
     deleteTarget(gl, dyeTemp);
-    deleteTarget(gl, edgeTarget);
+    if (edgeTarget) deleteTarget(gl, edgeTarget);
   }
 
   allocate(size);
@@ -922,7 +964,6 @@ export function createFluidSim(
     curl: number,
     energy: number,
     fade: number,
-    splats: readonly Splat[],
     smooth = 0,
     aux2Tex: WebGLTexture | null = null,
   ): void {
@@ -950,18 +991,9 @@ export function createFluidSim(
     pp.prog.setF("uCurl", curl);
     pp.prog.setF("uEnergy", energy);
     pp.prog.setF("uFade", fade);
-    for (let i = 0; i < SPLAT_SLOTS; i++) {
-      const sp = splats[i];
-      if (sp) {
-        pp.prog.setV4(`uSplatPos[${i}]`, sp.x, sp.y, sp.sigma, sp.tag);
-        // .w is E3b's ring radius (0 = plain gaussian blob) — see
-        // splatDyeWeight / splatForceWeight in simPrefix.
-        pp.prog.setV4(`uSplatVel[${i}]`, sp.fx, sp.fy, sp.dye, sp.ring);
-      } else {
-        pp.prog.setV4(`uSplatPos[${i}]`, 0, 0, 1, 0);
-        // A missing splat's ring stays 0 (last component) — plain blob.
-        pp.prog.setV4(`uSplatVel[${i}]`, 0, 0, 0, 0);
-      }
+    if (pp.usesSplats) {
+      pp.prog.setV4v("uSplatPos", splatPosBuf);
+      pp.prog.setV4v("uSplatVel", splatVelBuf);
     }
     drawFullscreenQuad(gl, quadVao);
   }
@@ -974,6 +1006,33 @@ export function createFluidSim(
 
     step(inputs: SimStepInputs): void {
       const { dt, curl, dissipation, energy, viscosity, splats } = inputs;
+      for (let i = 0; i < slots; i++) {
+        const sp = splats[i];
+        const o = i * 4;
+        if (sp) {
+          splatPosBuf[o] = sp.x;
+          splatPosBuf[o + 1] = sp.y;
+          splatPosBuf[o + 2] = sp.sigma;
+          splatPosBuf[o + 3] = sp.tag;
+          // .w is E3b's ring radius (0 = plain gaussian blob) — see
+          // splatDyeWeight / splatForceWeight in simPrefix.
+          splatVelBuf[o] = sp.fx;
+          splatVelBuf[o + 1] = sp.fy;
+          splatVelBuf[o + 2] = sp.dye;
+          splatVelBuf[o + 3] = sp.ring;
+        } else {
+          // A missing splat is empty: sigma 1 (no divide by zero), no force,
+          // no dye, and a ring radius of 0 (plain blob).
+          splatPosBuf[o] = 0;
+          splatPosBuf[o + 1] = 0;
+          splatPosBuf[o + 2] = 1;
+          splatPosBuf[o + 3] = 0;
+          splatVelBuf[o] = 0;
+          splatVelBuf[o + 1] = 0;
+          splatVelBuf[o + 2] = 0;
+          splatVelBuf[o + 3] = 0;
+        }
+      }
       const fade = DYE_FADE_MIN + (DYE_FADE_MAX - DYE_FADE_MIN) * clamp01(dissipation);
       const velTexel: readonly [number, number] = [1 / size.velW, 1 / size.velH];
       const aspect = size.velW / size.velH;
@@ -982,7 +1041,7 @@ export function createFluidSim(
       // 1. advect velocity (plain semi-Lagrangian + damping — viscosity is
       // its own pass now, see below).
       let vw = 1 - velRead;
-      drawPass(passes.advectVel, vel[vw], vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, splats);
+      drawPass(passes.advectVel, vel[vw], vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade);
       velRead = vw;
 
       // 1b. viscosity: viscosityPasses(viscosity).full 5-tap blur passes at
@@ -991,37 +1050,37 @@ export function createFluidSim(
       const { full: viscFull, frac: viscFrac } = viscosityPasses(viscosity);
       for (let i = 0; i < viscFull; i++) {
         vw = 1 - velRead;
-        drawPass(passes.viscosity, vel[vw], vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, splats, VISC_K);
+        drawPass(passes.viscosity, vel[vw], vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, VISC_K);
         velRead = vw;
       }
       if (viscFrac > 1e-3) {
         vw = 1 - velRead;
-        drawPass(passes.viscosity, vel[vw], vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, splats, VISC_K * viscFrac);
+        drawPass(passes.viscosity, vel[vw], vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, VISC_K * viscFrac);
         velRead = vw;
       }
 
       // 2. curl.
-      drawPass(passes.curl, curlTarget, vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, splats);
+      drawPass(passes.curl, curlTarget, vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade);
 
       // 3. force: vorticity confinement + splats.
       vw = 1 - velRead;
-      drawPass(passes.force, vel[vw], vel[velRead].tex, curlTarget.tex, dt, velTexel, aspect, forceScale, curl, energy, fade, splats);
+      drawPass(passes.force, vel[vw], vel[velRead].tex, curlTarget.tex, dt, velTexel, aspect, forceScale, curl, energy, fade);
       velRead = vw;
 
       // 4. divergence.
-      drawPass(passes.divergence, divTarget, vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, splats);
+      drawPass(passes.divergence, divTarget, vel[velRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade);
 
       // 5. jacobi x N, pressure ping-ponged and warm-started (never
       // cleared here — only createTarget's initial/resize clear touches it).
       for (let i = 0; i < size.jacobiIters; i++) {
         const pw = 1 - pRead;
-        drawPass(passes.jacobi, pressure[pw], pressure[pRead].tex, divTarget.tex, dt, velTexel, aspect, forceScale, curl, energy, fade, splats);
+        drawPass(passes.jacobi, pressure[pw], pressure[pRead].tex, divTarget.tex, dt, velTexel, aspect, forceScale, curl, energy, fade);
         pRead = pw;
       }
 
       // 6. gradient: project out the pressure gradient.
       vw = 1 - velRead;
-      drawPass(passes.gradient, vel[vw], vel[velRead].tex, pressure[pRead].tex, dt, velTexel, aspect, forceScale, curl, energy, fade, splats);
+      drawPass(passes.gradient, vel[vw], vel[velRead].tex, pressure[pRead].tex, dt, velTexel, aspect, forceScale, curl, energy, fade);
       velRead = vw;
 
       // 7. advect dye with the projected velocity.
@@ -1029,15 +1088,18 @@ export function createFluidSim(
       // With DYE_MACCORMACK the predictor writes the plain semi-Lagrangian
       // result to dyeTemp and the main pass corrects it (see the two bodies).
       if (DYE_MACCORMACK) {
-        drawPass(passes.advectDyePredict, dyeTemp, vel[velRead].tex, dye[dyeRead].tex, dt, velTexel, aspect, forceScale, curl, energy, fade, splats);
+        drawPass(passes.advectDyePredict, dyeTemp, vel[velRead].tex, dye[dyeRead].tex, dt, velTexel, aspect, forceScale, curl, energy, fade);
       }
-      drawPass(passes.advectDye, dye[dw], vel[velRead].tex, dye[dyeRead].tex, dt, velTexel, aspect, forceScale, curl, energy, fade, splats, DYE_SMOOTH, DYE_MACCORMACK ? dyeTemp.tex : null);
+      drawPass(passes.advectDye, dye[dw], vel[velRead].tex, dye[dyeRead].tex, dt, velTexel, aspect, forceScale, curl, energy, fade, DYE_SMOOTH, DYE_MACCORMACK ? dyeTemp.tex : null);
       dyeRead = dw;
 
-      // 8. edge (Sobel of dye.r) + mipmap chain for the display pass's halo.
-      drawPass(passes.edge, edgeTarget, dye[dyeRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade, splats);
-      gl.bindTexture(gl.TEXTURE_2D, edgeTarget.tex);
-      gl.generateMipmap(gl.TEXTURE_2D);
+      // 8. edge (Sobel of dye.r) + mipmap chain for the display pass's halo
+      // — skipped when the scene never reads edgeTexture() (opts.edge).
+      if (passes.edge && edgeTarget) {
+        drawPass(passes.edge, edgeTarget, dye[dyeRead].tex, null, dt, velTexel, aspect, forceScale, curl, energy, fade);
+        gl.bindTexture(gl.TEXTURE_2D, edgeTarget.tex);
+        gl.generateMipmap(gl.TEXTURE_2D);
+      }
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -1058,7 +1120,7 @@ export function createFluidSim(
     },
 
     edgeTexture(): WebGLTexture | null {
-      return edgeTarget.tex;
+      return edgeTarget ? edgeTarget.tex : null;
     },
 
     resize(newSize: SimSize): void {
@@ -1078,7 +1140,7 @@ export function createFluidSim(
       passes.gradient.prog.dispose();
       passes.advectDyePredict.prog.dispose();
       passes.advectDye.prog.dispose();
-      passes.edge.prog.dispose();
+      passes.edge?.prog.dispose();
     },
   };
 }

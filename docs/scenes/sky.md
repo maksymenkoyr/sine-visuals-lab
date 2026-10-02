@@ -27,10 +27,10 @@ registered right after Physarum 2 and absent from `draftIds` in
     `sunElevation`; in the shader `dayWeights` and `dayMix` over the
     `DAY_KEY_E` keys.
   - Haidinger's brush: `advanceBrushPhase`.
-- `src/render/scenes/sky/skyFluidSim.ts` — the stable-fluids solver, a copy of
-  Neon Fluid's `fluidSim.ts` that differs only in `SPLAT_SLOTS` (see Known
-  issues).
-- `tests/sky.test.ts` and `tests/skyFluidSim.test.ts`.
+- `src/render/scenes/fluidSim.ts` — the stable-fluids solver, shared with Neon
+  Fluid. Sky passes `SKY_SPLAT_SLOTS` as its `splatSlots` and `edge: false`.
+- `tests/sky.test.ts`; the solver's pure helpers are tested in
+  `tests/fluid.test.ts`.
 - Shared systems: `beatListener.ts` (one shared `beat` listener — its
   edge feeds both the floater stamp and the light sweep); `sceneCommon.ts`'s common
   uniforms and `ROOM_UV_GLSL` (clouds use room space; the eye illusions use
@@ -311,6 +311,15 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   reading it a second time in the wind formula made every streak jump the
   instant any source was patched in. Floaters and Light waves were left
   alone — real composites, not disguised constants.
+- 2026-10-02 — Review pass: Sky's private copy of the fluid solver is gone.
+  `sky/skyFluidSim.ts` differed from `fluidSim.ts` only in the splat slot
+  count, so the count became `createFluidSim`'s `splatSlots` option
+  (`SKY_SPLAT_SLOTS` here; `sky.test.ts` checks `DRIFTER_SEEDS` fits) and Sky
+  imports the shared module. Sky also passes `edge: false`: it only samples
+  `dyeTexture()`, so the Sobel edge pass and its mip rebuild no longer run
+  every frame. Checked with `tools/gpu-bench.mjs` dumps of frames 30 and 75
+  before and after: 0 pixels changed. The sim solver itself is now shared
+  territory (no scene's version moves when it changes).
 
 ## Tuning notes
 
@@ -357,9 +366,6 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   - With a long Floater sustain, one stamp per beat outruns
     `MAX_WAVE_BURSTS`, and the oldest live streak is cut off mid-life.
 
-- Fold `skyFluidSim.ts` into `fluidSim.ts`, with the splat slot count as a
-  parameter. Sky needs 12, Neon Fluid uses 4; the files are otherwise
-  identical.
 - The brush trail, the Scene count-by-loudness curve and light-wave glint
   brightness haven't been checked on real music yet; Brush move's stride
   scale (`BRUSH_STRIDE_MAX`) and `floaterCountFromEnergy`'s grade are the
