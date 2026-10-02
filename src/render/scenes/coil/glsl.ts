@@ -1,4 +1,5 @@
 import { PALETTE_GLSL } from "../../palette.ts";
+import { COIL_RAMP } from "./coilMotion.ts";
 import { DRIVE_GLSL, ROOM_UV_GLSL, settingUniformName } from "../../sceneCommon.ts";
 import type { SceneSetting } from "../../sceneSettings.ts";
 
@@ -25,6 +26,14 @@ export const GROUND_RGB: readonly [number, number, number] = [170 / 255, 133 / 2
  *  Measurements. Without it the recursion never returns to plain ground
  *  after the coil has filled a frame. */
 export const FEEDBACK_FADE = 0.7;
+
+function glslVec3(c: readonly [number, number, number]): string {
+  return `vec3(${c.map((x) => x.toFixed(3)).join(", ")})`;
+}
+const RAMP_STOPS = COIL_RAMP.stops.map((s) => s.toFixed(2));
+function rampSpan(a: number, b: number): string {
+  return (COIL_RAMP.stops[b] - COIL_RAMP.stops[a]).toFixed(4);
+}
 
 export function buildSettingUniformsGlsl(settings: readonly SceneSetting[]): string {
   return settings.map((s) => `uniform float ${settingUniformName(s.key)};`).join("\n");
@@ -60,8 +69,7 @@ uniform float uShapeArmsBlend;
 // zero level-set exact (an ellipse boundary) while giving a reasonably
 // metric-scaled SDF off it, which is what the bisection refine and the
 // outer-copy edge shade both want.
-float lobeSdf(vec2 q, float ang, float a, float b) {
-  float ca = cos(ang), sa = sin(ang);
+float lobeSdf(vec2 q, float ca, float sa, float a, float b) {
   vec2 c = uShapeVerm * vec2(ca, sa);
   vec2 u = q - c;
   vec2 local = vec2(u.x * ca + u.y * sa, -u.x * sa + u.y * ca);
@@ -86,12 +94,14 @@ float coilSdf(vec2 q) {
   float wob = 1.0 + uShapeWobble * cos(2.0 * armsEff * phi);
   p /= max(wob, 0.2);
 
-  float d = 1.0e5;
-  for (int j = 0; j < 4; j++) {
-    float ang = uShapeBaseAngle + float(j) * 1.5707963267948966;
-    float lobeScale = (j == 1 || j == 3) ? max(uShapeArmsBlend, 0.001) : 1.0;
-    d = min(d, lobeSdf(p, ang, uShapeLobeA * lobeScale, uShapeLobeB * lobeScale));
-  }
+  // The four lobe directions are the base direction turned by 0/90/180/270
+  // degrees, so one cos/sin of the base angle gives all of them.
+  float c0 = cos(uShapeBaseAngle), s0 = sin(uShapeBaseAngle);
+  float lobeScale13 = max(uShapeArmsBlend, 0.001);
+  float d = lobeSdf(p, c0, s0, uShapeLobeA, uShapeLobeB);
+  d = min(d, lobeSdf(p, -s0, c0, uShapeLobeA * lobeScale13, uShapeLobeB * lobeScale13));
+  d = min(d, lobeSdf(p, -c0, -s0, uShapeLobeA, uShapeLobeB));
+  d = min(d, lobeSdf(p, s0, -c0, uShapeLobeA * lobeScale13, uShapeLobeB * lobeScale13));
   return d;
 }
 
@@ -163,22 +173,22 @@ StackHit findVisibleCopy(vec2 p, float lMin, float lMax, int steps) {
 // t=0.5. The run lengths give the red/blue share the ref's frames measure
 // (docs/scenes/coil/scripts/palette_share.py) — the "sharp edge on one side,
 // soft gradient on the other" band look.
-// Measured k-means colours (index.ts's
-// header). coilMotion.ts's coilPaletteRGB mirrors this exactly for
-// tests/coil.test.ts — keep the two in sync by hand.
+// Measured k-means colours (index.ts's header). Generated from
+// coilMotion.ts's COIL_RAMP, the table coilPaletteRGB evaluates in
+// tests/coil.test.ts, so the two cannot drift apart.
 vec3 paletteRamp(float t) {
   float u = fract(t);
-  vec3 red = vec3(0.769, 0.176, 0.314);
-  vec3 pink = vec3(0.835, 0.482, 0.584);
-  vec3 blue = vec3(0.365, 0.549, 0.863);
-  vec3 lilac = vec3(0.745, 0.729, 0.843);
-  vec3 white = vec3(0.910, 0.902, 0.949);
-  if (u < 0.15) return red;
-  if (u < 0.25) return mix(red, pink, (u - 0.15) / 0.1);
-  if (u < 0.5) return mix(pink, white, (u - 0.25) / 0.25);
-  if (u < 0.65) return blue;
-  if (u < 0.75) return mix(blue, lilac, (u - 0.65) / 0.1);
-  return mix(lilac, white, (u - 0.75) / 0.25);
+  vec3 red = ${glslVec3(COIL_RAMP.red)};
+  vec3 pink = ${glslVec3(COIL_RAMP.pink)};
+  vec3 blue = ${glslVec3(COIL_RAMP.blue)};
+  vec3 lilac = ${glslVec3(COIL_RAMP.lilac)};
+  vec3 white = ${glslVec3(COIL_RAMP.white)};
+  if (u < ${RAMP_STOPS[0]}) return red;
+  if (u < ${RAMP_STOPS[1]}) return mix(red, pink, (u - ${RAMP_STOPS[0]}) / ${rampSpan(0, 1)});
+  if (u < ${RAMP_STOPS[2]}) return mix(pink, white, (u - ${RAMP_STOPS[1]}) / ${rampSpan(1, 2)});
+  if (u < ${RAMP_STOPS[3]}) return blue;
+  if (u < ${RAMP_STOPS[4]}) return mix(blue, lilac, (u - ${RAMP_STOPS[3]}) / ${rampSpan(3, 4)});
+  return mix(lilac, white, (u - ${RAMP_STOPS[4]}) / ${(1 - COIL_RAMP.stops[4]).toFixed(4)});
 }
 `;
 
@@ -209,7 +219,19 @@ void main() {
   vec2 p = vec2(p0.x * ca - p0.y * sa, p0.x * sa + p0.y * ca);
 
   float lMin = log(2.0 / max(uResolution.y, 1.0)) - 0.5;
-  StackHit hit = findVisibleCopy(p, lMin, uL, int(uMaxSteps));
+  // No copy reaches past rMax: copy l's silhouette sits within
+  // outerR * outerR * (1 + |wobble|) of its centre in its own unit space
+  // (lobes reach verm + max(a, b) = outerR, undone by coilSdf's own divide
+  // and wobble), and scaling by e^l for the largest copy l = uL gives the
+  // screen radius (a few percent of margin on top). A pixel outside it is
+  // background without marching — most of the frame right after a reset,
+  // when uL is small, and every corner pixel.
+  float outerR = max(uShapeVerm + max(uShapeLobeA, uShapeLobeB), 0.05);
+  float rMax = exp(uL) * outerR * outerR * (1.0 + abs(uShapeWobble)) * 1.05;
+  StackHit hit;
+  hit.found = false;
+  hit.l = lMin;
+  if (length(p) <= rMax) hit = findVisibleCopy(p, lMin, uL, int(uMaxSteps));
 
   if (hit.found) {
     float period = ${BASE_PERIOD.toFixed(4)} / max(uStripes, 0.05);
