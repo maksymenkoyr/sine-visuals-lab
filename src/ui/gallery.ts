@@ -874,6 +874,12 @@ export function createGallery(deps: GalleryDeps): Gallery {
       // shader recompiled the next time the gallery is shown.
       visible = false;
       root.style.display = "none";
+      // Cancel a draft build still in flight: its steps would keep compiling
+      // shaders (one scene per frame) under the fullscreen scene's frames,
+      // into tiles the next show() discards anyway — buildTiles() rebuilds
+      // everything and re-expands the section (draftsExpanded survives).
+      draftBuildGen++;
+      draftsBuiltCount = -1;
     },
 
     syncSource(): void {
