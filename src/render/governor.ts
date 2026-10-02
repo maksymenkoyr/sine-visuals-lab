@@ -75,11 +75,13 @@ const MAX_ACHIEVABLE_MULT = 1.5;
 // both the throttle lifting and the page's own workload changing while
 // still throttled. A probe that did help just resumes ordinary one-rung
 // stepping from the bottom, same recovery path as before — and it is
-// remembered (probeConfirmed): the probe runs once per measurement regime,
-// so climbing back to level 0 and going over budget again steps down one
-// rung at a time instead of re-running the deep cut (which would drop the
-// picture to the bottom rung, and reallocate every render target, on every
-// lap). A cadence shift or Energy saving toggling re-arms it.
+// remembered (probeConfirmed): climbing back to level 0 and going over budget
+// again within STEP_UP_RETRY_WINDOW_MS steps down one rung at a time instead
+// of re-running the deep cut (which would drop the picture to the bottom rung,
+// and reallocate every render target, on every lap). Once that window has
+// passed, level 0 over budget probes again, so a throttle that starts after a
+// long comfortable stretch is still caught. A cadence shift or Energy saving
+// toggling also re-arms it.
 const PROBE_LEVEL = QUALITY_STEPS.length - 1;
 // How much the EWMA has to improve, as a fraction of its pre-probe value,
 // to count as "the cut helped." Comfortably below what a real GPU-bound
@@ -242,8 +244,7 @@ export function createQualityGovernor(quality: QualitySettings, targetFrameMs: n
           // "not our bottleneck" verdict might no longer hold.
           if (Math.abs(ewmaMs - pacedEwmaMs) > pacedEwmaMs * CADENCE_SHIFT_FRAC) {
             standingDown = false;
-            // The regime changed, so the old verdict (and anything learned
-            // about which rungs are comfortable) no longer applies.
+            // The regime changed, so the old probe verdict no longer applies.
             probeConfirmed = false;
             overStreak = 0;
             underStreak = 0;
@@ -277,10 +278,15 @@ export function createQualityGovernor(quality: QualitySettings, targetFrameMs: n
             overStreak++;
             underStreak = 0;
             if (overStreak >= STEP_DOWN_FRAMES && level < QUALITY_STEPS.length - 1) {
-              if (level === 0 && !probeConfirmed) {
+              if (level === 0 && !(probeConfirmed && lastStepUpTo === 0 && nowMs - lastStepUpMs < STEP_UP_RETRY_WINDOW_MS)) {
                 // First correction out of a fully comfortable level —
                 // probe before committing rather than trusting the
-                // diagnosis (see the "Authority probe" comment above).
+                // diagnosis (see the "Authority probe" comment above). Only
+                // a level 0 we climbed back into moments ago skips the
+                // probe: that is the bounce a confirmed probe already
+                // explained, and a later over-budget stretch (say Energy
+                // Saver kicking in after a long comfortable run) is a new
+                // question the probe must answer again.
                 probeFromLevel = level;
                 probeBeforeMs = ewmaMs;
                 level = PROBE_LEVEL;

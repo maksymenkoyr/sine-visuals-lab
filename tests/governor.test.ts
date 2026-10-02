@@ -340,6 +340,36 @@ describe("createQualityGovernor", () => {
       expect(levels.length - 1).toBe(2); // 0 -> probe level -> back to 0, nothing more
     });
 
+    it("a throttle after a confirmed probe and a long comfortable stretch still stands down", () => {
+      const quality = baseline();
+      const gov = createQualityGovernor(quality, TARGET_MS);
+      let t = 0;
+      // 30 s GPU-bound at level 0: the probe succeeds and the governor steps down.
+      while (t < 30_000) {
+        t += dtForLevel(gov, 2);
+        gov.recordFrame(t);
+      }
+      expect(gov.level).toBeGreaterThan(0);
+      // Comfortable for a minute: it climbs back to level 0.
+      const comfortEnd = t + 60_000;
+      while (t < comfortEnd) {
+        t += TARGET_MS;
+        gov.recordFrame(t);
+      }
+      expect(gov.level).toBe(0);
+      // A 30 Hz pace that no quality cut can change (Energy Saver).
+      const levels: number[] = [];
+      const throttleEnd = t + 30_000;
+      while (t < throttleEnd) {
+        t += TARGET_MS * 2;
+        gov.recordFrame(t);
+        if (levels[levels.length - 1] !== gov.level) levels.push(gov.level);
+      }
+      expect(gov.standingDown).toBe(true);
+      expect(gov.level).toBe(0);
+      expect(levels).toEqual([0, 4, 0]);
+    });
+
     it("setEnabled(false) then (true) lets the probe run again", () => {
       const quality = baseline();
       const gov = createQualityGovernor(quality, TARGET_MS);
