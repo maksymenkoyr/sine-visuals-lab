@@ -87,8 +87,9 @@ describe("decideJoin on a claimed room", () => {
 
 describe("canSend", () => {
   // Rows are message kinds; columns host / controller / renderer. The
-  // setDevice renderer cell depends on whether the room is keyed.
-  const table: Record<Exclude<SendKind, "setDevice">, [boolean, boolean, boolean]> = {
+  // setDevice renderer cell and the endRoom host cell depend on whether the
+  // room is keyed.
+  const table: Record<Exclude<SendKind, "setDevice" | "endRoom">, [boolean, boolean, boolean]> = {
     binary: [true, false, false],
     ping: [true, true, true],
     hello: [true, true, true],
@@ -114,6 +115,15 @@ describe("canSend", () => {
     expect(canSend(false, "controller", "setDevice")).toBe(true);
     expect(canSend(true, "renderer", "setDevice")).toBe(false);
     expect(canSend(false, "renderer", "setDevice")).toBe(true);
+  });
+
+  it("endRoom: only a claimed room's host", () => {
+    expect(canSend(true, "host", "endRoom")).toBe(true);
+    for (const keyed of [true, false]) {
+      expect(canSend(keyed, "controller", "endRoom")).toBe(false);
+      expect(canSend(keyed, "renderer", "endRoom")).toBe(false);
+    }
+    expect(canSend(false, "host", "endRoom")).toBe(false);
   });
 });
 

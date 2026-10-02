@@ -1134,6 +1134,67 @@ describe("the roster", () => {
   });
 });
 
+describe("endRoom", () => {
+  it("lets the claimed room's host end it: claim, look and alarm wiped, every socket closed as denied", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const phone = await room.controller();
+    const tv = await room.renderer();
+    room.say(phone, { type: "lookPatch", n: 1, set: { "vibe.ok": "1" } });
+    expect(room.host.store.size).toBeGreaterThan(0);
+
+    room.say(host, { type: "endRoom" });
+
+    expect(room.host.removeAlls).toBe(1);
+    expect(room.host.store.size).toBe(0);
+    for (const ws of [host, phone, tv]) {
+      expect(ws.msgs().pop()).toEqual({ type: "ended" });
+      expect(ws.closedWith?.code).toBe(ROOM_CLOSE_DENIED);
+    }
+  });
+
+  it("leaves the code an unclaimed room: the old keys are refused and a new laptop can claim it", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    room.say(host, { type: "endRoom" });
+    room.close(host);
+    expect(room.host.alarmAt).toBeNull();
+
+    expect(await room.connect({ role: "renderer", deviceId: "tv", k: K })).toBeNull();
+    expect(await room.connect({ role: "host", deviceId: "laptop", hk: HK, k: K })).not.toBeNull();
+  });
+
+  it("is refused from a controller, a renderer, and anyone in a legacy room", async () => {
+    const room = new Room();
+    await room.claimed();
+    const phone = await room.controller();
+    const tv = await room.renderer();
+    room.say(phone, { type: "endRoom" });
+    room.say(tv, { type: "endRoom" });
+    expect(room.host.removeAlls).toBe(0);
+    expect(phone.closedWith).toBeNull();
+
+    const legacy = new Room();
+    const legacyHost = await legacy.need({ role: "host", deviceId: "laptop" });
+    const legacyTv = await legacy.need({ role: "renderer", deviceId: "tv" });
+    legacy.say(legacyHost, { type: "endRoom" });
+    expect(legacy.host.removeAlls).toBe(0);
+    expect(legacyTv.closedWith).toBeNull();
+  });
+
+  it("ignores what a socket of the ended room says before its close lands", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const phone = await room.controller();
+    room.say(host, { type: "endRoom" });
+    phone.clear();
+    room.say(phone, { type: "lookPatch", n: 1, set: { "vibe.late": "1" } });
+    room.say(phone, { type: "ping", t0: 1 });
+    expect(room.host.store.size).toBe(0);
+    expect(phone.sent).toEqual([]);
+  });
+});
+
 describe("readAttachment", () => {
   it("reads a well-formed attachment back unchanged", async () => {
     const room = new Room();

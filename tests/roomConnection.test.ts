@@ -318,6 +318,20 @@ describe("a reconnecting connection", () => {
     expect(conn.state).toBe("denied");
   });
 
+  it("takes the room's `ended` as a denial at once, without waiting for the close", async () => {
+    const { RendererConnection } = await loadRoom();
+    const conn = new RendererConnection("ABCD", { auth: { roomKey: KEY }, reconnect: true });
+    const states: string[] = [];
+    conn.onState((s) => states.push(s));
+    last().open();
+    last().receive(JSON.stringify({ type: "ended" }));
+    expect(conn.state).toBe("denied");
+    expect(last().readyState).toBe(FakeSocket.CLOSED);
+    vi.advanceTimersByTime(RECONNECT_MAX_MS * 5);
+    expect(FakeSocket.instances).toHaveLength(1);
+    expect(states).toEqual(["open", "denied"]);
+  });
+
   it("denied also surfaces on a connection without reconnect", async () => {
     const { RendererConnection } = await loadRoom();
     const conn = new RendererConnection("ABCD");

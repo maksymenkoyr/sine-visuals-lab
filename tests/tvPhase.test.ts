@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TV_PHASE_TEXT, WAITING_HINT_AFTER_MS, WAITING_HINT_TEXT, tvPhase, waitingLine } from "../src/net/tvPhase.ts";
+import { TV_PHASE_TEXT, hostInRoster, tvPhase, waitingLine } from "../src/net/tvPhase.ts";
 
 describe("tvPhase", () => {
   it("is pair for any unpaired screen, whatever the socket and frames say", () => {
@@ -36,20 +36,21 @@ describe("TV_PHASE_TEXT", () => {
 });
 
 describe("waitingLine", () => {
-  it("is the plain waiting line at first, so a laptop that is starting up sees no instructions", () => {
-    expect(waitingLine(0)).toBe(TV_PHASE_TEXT.waiting);
-    expect(waitingLine(WAITING_HINT_AFTER_MS - 1)).toBe(TV_PHASE_TEXT.waiting);
+  it("is the plain waiting line until the socket has had a roster", () => {
+    expect(waitingLine(null)).toBe(TV_PHASE_TEXT.waiting);
   });
 
-  it("adds the way out once the wait has lasted, keeping the waiting line", () => {
-    for (const waited of [WAITING_HINT_AFTER_MS, WAITING_HINT_AFTER_MS * 100]) {
-      const line = waitingLine(waited);
-      expect(line.startsWith(TV_PHASE_TEXT.waiting)).toBe(true);
-      expect(line).toContain(WAITING_HINT_TEXT);
-    }
+  it("tells a silent laptop that is in the room from one that is gone", () => {
+    expect(waitingLine(true)).not.toBe(waitingLine(false));
+    expect(waitingLine(true)).not.toBe(TV_PHASE_TEXT.waiting);
+    expect(waitingLine(false)).toMatch(/isn't in this room/);
   });
+});
 
-  it("tells the viewer to press OK twice, which is what tv.ts listens for", () => {
-    expect(WAITING_HINT_TEXT).toMatch(/OK twice/);
+describe("hostInRoster", () => {
+  it("is true only when the roster lists a host", () => {
+    expect(hostInRoster([])).toBe(false);
+    expect(hostInRoster([{ role: "renderer" }, { role: "controller" }])).toBe(false);
+    expect(hostInRoster([{ role: "renderer" }, { role: "host" }])).toBe(true);
   });
 });

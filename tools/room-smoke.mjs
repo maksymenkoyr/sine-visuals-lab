@@ -22,8 +22,9 @@
 //          renderer cannot patch and an oversized patch is refused, that a late
 //          joiner receives the same look, that every wrong credential is closed
 //          with the denial code and told nothing, the TV adopt route (it reaches
-//          only the slot socket that joined with the nonce), and that a keyless
-//          host and renderer still relay frames in an unclaimed room.
+//          only the slot socket that joined with the nonce), that a keyless
+//          host and renderer still relay frames in an unclaimed room, and that
+//          the host's endRoom tells every socket it ended.
 //          Exits non-zero if any check fails.
 //   host   Plays the laptop for a real page: claims a room, prints its code,
 //          keys and the phone (controller) URL, and streams synthetic frames at
@@ -388,6 +389,32 @@ async function runSmoke() {
       body: JSON.stringify({ room: code, k: roomKey, n: newKey(), pad: "x".repeat(LOOK_LIMITS.maxAdoptBodyBytes) }),
     });
     assertEqual(res.status, 413, "adopt with an oversized body");
+  });
+
+  // The laptop's Reset: the host ends its room, every socket is told `ended`,
+  // the host's is closed with the denial code, and the old keys get nobody back
+  // in. Only the host's close is checked: under `wrangler dev` a close the room
+  // starts on another socket leaves that client stuck closing, which is why
+  // `ended` exists (src/net/roomMessages.ts). A room of its own, so the checks
+  // above keep theirs.
+  await step("the host's endRoom tells every socket it ended, and the old keys are dead", async () => {
+    const ended = await newRoomCode();
+    const hk = newKey();
+    const k = newKey();
+    const endHost = connect("ending host", roomUrl(ended, "host", "smoke-end-host", { hk, k }));
+    await endHost.opened;
+    const endTv = connect("tv in the ending room", roomUrl(ended, "renderer", "smoke-end-tv", { k }));
+    await endTv.opened;
+    await endTv.take("look", isType("look"));
+    endHost.send({ type: "endRoom" });
+    await endTv.take("ended", isType("ended"));
+    await endHost.take("ended", isType("ended"));
+    const closed = await Promise.race([
+      endHost.whenClosed,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`host not closed within ${WAIT_MS} ms`)), WAIT_MS)),
+    ]);
+    assertEqual(closed.code, 4003, "host close code after endRoom");
+    await denied("tv back with the ended room's key", roomUrl(ended, "renderer", "smoke-end-tv", { k }));
   });
 
   for (const ws of sockets) ws.close();

@@ -31,7 +31,7 @@ import { newKey, TV_SLOT_ROTATE_MS } from "./net/pairing.ts";
 import { clearSession, readSession, writeSession } from "./net/sessions.ts";
 import { PendingSlot } from "./net/pendingSlot.ts";
 import { reconnectDelayMs } from "./net/reconnect.ts";
-import { tvPhase, waitingLine, TV_PHASE_TEXT, WAITING_HINT_AFTER_MS, type TvPhase } from "./net/tvPhase.ts";
+import { hostInRoster, tvPhase, waitingLine, TV_PHASE_TEXT, type HostInRoom, type TvPhase } from "./net/tvPhase.ts";
 import type { AdoptMessage } from "./net/roomMessages.ts";
 import type { LookDoc, LookServerMsg } from "../server/lookDoc.ts";
 
@@ -47,7 +47,9 @@ import type { LookDoc, LookServerMsg } from "../server/lookDoc.ts";
  * that scans the QR hands it a room to join (`onAdopt`). Once paired it keeps
  * its room and key (net/sessions.ts) so a reload or a power cycle rejoins
  * without anyone scanning again, and the QR never comes back unless the viewer
- * presses OK twice. The nonce in the QR, not anything the server holds, is
+ * asks: the Reset button (`resetBtn`), which has the remote's focus whenever
+ * the room shows nothing so one OK press does it, or OK pressed twice while
+ * the picture is live. The nonce in the QR, not anything the server holds, is
  * what proves an adoption was meant for this screen: the slot socket presents
  * it when it joins, so the room hands the adopt (which carries the room key)
  * to that socket and not to anyone else who sat down in the slot. A laptop
@@ -78,7 +80,11 @@ const STALE_TIMEOUT_MS = 3000;
 const JOINED_PILL_MS = 8000;
 /** The second OK press has to follow the first within this long to re-pair. */
 const REPAIR_WINDOW_MS = 3000;
-const REPAIR_PROMPT = "Press OK again to pair another phone";
+/** How long the room may show nothing before Reset grows and takes the
+ *  remote's focus: a normal join, or the laptop's first frames, never flashes
+ *  it up; a dead room offers it almost at once. */
+const RESET_PROMPT_AFTER_MS = 1500;
+const REPAIR_PROMPT = "Press OK again to reset and show the pairing code";
 const SLOT_RETRY_TEXT = "Couldn't reach the server. Trying again...";
 const TYPED_REFUSED_TEXT = "That room needs its QR, a code alone can't join it";
 const TYPED_REFUSED_PILL_MS = 8000;
@@ -117,6 +123,45 @@ pill.style.cssText = `
   border-radius: 999px;
 `;
 document.body.appendChild(pill);
+
+// Forgets the room and brings the pairing QR back (`repair`). Once the room has
+// shown nothing for RESET_PROMPT_AFTER_MS (joining, waiting) it sits big under
+// the pill and holds the focus, so a remote's single OK press is enough and a
+// pointer remote can click it; otherwise it is a dim corner link, out of focus,
+// so a stray OK doesn't drop a working screen (two presses still do, below).
+const resetBtn = document.createElement("button");
+resetBtn.type = "button";
+const RESET_BIG_STYLE = `
+  position: fixed; bottom: 110px; left: 50%; transform: translateX(-50%); z-index: 31;
+  color: #000; background: #fff; border: 0; cursor: pointer;
+  font: 600 18px/1.4 system-ui, sans-serif; padding: 10px 22px; border-radius: 999px;
+`;
+const RESET_CORNER_STYLE = `
+  position: fixed; bottom: 16px; right: 16px; z-index: 5;
+  color: #fff6; background: #0008; border: 0; cursor: pointer;
+  font: 600 12px/1.4 ui-monospace, monospace; letter-spacing: 0.05em;
+  padding: 4px 10px; border-radius: 999px;
+`;
+resetBtn.style.display = "none";
+// No :focus rule in an inline style, and a TV remote moves focus, not a cursor.
+resetBtn.addEventListener("focus", () => (resetBtn.style.outline = "3px solid #8be9a8"));
+resetBtn.addEventListener("blur", () => (resetBtn.style.outline = "none"));
+resetBtn.addEventListener("click", () => repair());
+document.body.appendChild(resetBtn);
+
+function showResetBtn(how: "big" | "corner" | "hidden"): void {
+  if (how === "hidden") {
+    resetBtn.style.display = "none";
+    resetBtn.blur();
+    return;
+  }
+  const focused = document.activeElement === resetBtn;
+  resetBtn.style.cssText = how === "big" ? RESET_BIG_STYLE : RESET_CORNER_STYLE;
+  resetBtn.style.outline = focused && how === "big" ? "3px solid #8be9a8" : "none";
+  resetBtn.textContent = how === "big" ? "Reset: show the pairing code" : "Reset";
+  if (how === "big") resetBtn.focus({ preventScroll: true });
+  else resetBtn.blur();
+}
 
 // Fetches every pinned asset (src/pinnedAssets.ts — the same registry
 // app.ts's own call warms) after load, at idle, so a TV left open across a
@@ -166,6 +211,9 @@ let slotFailures = 0;
 let slotFailed = false;
 let rotateTimer: ReturnType<typeof setTimeout> | null = null;
 let phase: TvPhase | null = null;
+/** Whether the room's last roster listed the laptop; null until this socket
+ *  has had one (the `waiting` line, net/tvPhase.ts). */
+let hostInRoom: HostInRoom = null;
 
 let replica: LookReplica = createLookReplica();
 /** The scene / palette of the last look document applied. The look re-asserts
@@ -235,7 +283,7 @@ function mountFirstScene(): boolean {
 let pillBase: string | null = null;
 let pillFlash: string | null = null;
 let pillFlashTimer = 0;
-let waitingHintTimer = 0;
+let resetPromptTimer = 0;
 
 function renderPill(): void {
   const text = pillFlash ?? pillBase;
@@ -263,6 +311,7 @@ function clearFlash(): void {
 
 function phaseLine(p: TvPhase): string | null {
   if (p === "pair") return slotFailed ? SLOT_RETRY_TEXT : null;
+  if (p === "waiting") return waitingLine(hostInRoom);
   return p === "live" ? null : TV_PHASE_TEXT[p];
 }
 
@@ -274,20 +323,27 @@ function setPhase(next: TvPhase): void {
     badge.style.display = "none";
   } else {
     join.hide();
-    badge.textContent = roomCode;
+    // "room", so nobody takes it for a pairing code: typed on a laptop, a
+    // room's code finds no screen waiting (only the QR screen's code does).
+    badge.textContent = `room ${roomCode}`;
     badge.style.display = "block";
   }
-  pillBase = phaseLine(next);
-  // A saved room can outlive the laptop's own, and then this screen would wait
-  // for ever with no hint: once the wait has gone on a while, say how to leave.
-  window.clearTimeout(waitingHintTimer);
-  if (next === "waiting") {
-    waitingHintTimer = window.setTimeout(() => {
-      if (phase !== "waiting") return;
-      pillBase = waitingLine(WAITING_HINT_AFTER_MS);
-      renderPill();
-    }, WAITING_HINT_AFTER_MS);
+  window.clearTimeout(resetPromptTimer);
+  showResetBtn(next === "pair" ? "hidden" : "corner");
+  if (next === "joining" || next === "waiting") {
+    resetPromptTimer = window.setTimeout(() => {
+      if (phase === "joining" || phase === "waiting") showResetBtn("big");
+    }, RESET_PROMPT_AFTER_MS);
   }
+  pillBase = phaseLine(next);
+  renderPill();
+}
+
+/** The roster changed: the `waiting` line says whether the laptop is there. */
+function onRoster(roster: ReadonlyArray<{ role: string }>): void {
+  hostInRoom = hostInRoster(roster);
+  if (phase !== "waiting") return;
+  pillBase = phaseLine("waiting");
   renderPill();
 }
 
@@ -383,7 +439,7 @@ function onAdopt(m: AdoptMessage): void {
   flashPill(`Joined ${m.room}`, JOINED_PILL_MS);
 }
 
-/** The viewer asked to pair another phone: forget the room and show the QR. */
+/** The viewer asked to start over (Reset, or OK twice): forget the room and show the QR. */
 function repair(): void {
   clearSession("tv", realStorage);
   clearFlash();
@@ -406,19 +462,26 @@ function joinRoom(room: string, key: string | null): void {
   replica = createLookReplica();
   lastDocScene = "";
   lastDocPalette = "";
+  hostInRoom = null;
 
   const c = new RendererConnection(room, { auth: key ? { roomKey: key } : undefined, reconnect: true });
   conn = c;
   c.onLook(onLook);
   c.onCommand(onCommand);
+  c.onRosterChange((r) => {
+    if (conn === c) onRoster(r);
+  });
   c.onState((s) => {
-    if (s !== "denied" || conn !== c) return;
+    if (conn !== c) return;
+    // A new socket has had no roster yet; the last one's is not news.
+    if (s !== "open") hostInRoom = null;
+    if (s !== "denied") return;
     if (key === null) {
       typedRoomRefused();
       return;
     }
-    // The room no longer accepts this key (it expired, or the laptop started a
-    // new one): the saved session is dead, so pair again.
+    // The room no longer accepts this key (it expired, or the laptop's Reset
+    // ended it): the saved session is dead, so pair again.
     clearSession("tv", realStorage);
     startPairing();
   });
@@ -551,9 +614,10 @@ async function main(): Promise<void> {
   // A second OK press within REPAIR_WINDOW_MS of the first forgets the room
   // and shows the QR again. Deliberate friction: someone who photographed the
   // QR earlier must not be able to take over a screen that is already in use.
+  // OK on the focused Reset button is the button's own click, not a first press.
   let repairUntil = 0;
   document.addEventListener("keydown", (e: KeyboardEvent) => {
-    if ((e.key !== "Enter" && e.keyCode !== 13) || e.repeat || !paired) return;
+    if ((e.key !== "Enter" && e.keyCode !== 13) || e.repeat || !paired || e.target === resetBtn) return;
     const now = performance.now();
     if (now < repairUntil) {
       repairUntil = 0;

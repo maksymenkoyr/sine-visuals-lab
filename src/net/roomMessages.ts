@@ -16,6 +16,10 @@
  * - `lookPatch { n, ...patch }` — a controller edits the look (server/lookDoc.ts
  *   has the patch semantics). Only a controller may; `n` numbers the patch so
  *   the sender can match the reply.
+ * - `endRoom` — the host of a claimed room ends it (the laptop's Reset). The
+ *   room wipes its claim and look, sends every socket `ended`, and closes each
+ *   with the denial code, so every device forgets the room as it would a dead
+ *   one.
  *
  * Room to client:
  * - `pong { t0, tServer }`, `roster { devices }` (a phone controller is never
@@ -32,6 +36,11 @@
  *   sender's patch. `reason` is a `LookRejectReason` (server/lookDoc.ts):
  *   `role` (not a controller), `size` (past the limits in `LOOK_LIMITS`) or
  *   `shape` (not a valid patch).
+ * - `ended` — the host ended the room (`endRoom`). It means what a denial
+ *   close means, and comes just before that close because the close alone is
+ *   not enough: a close the room starts on a socket other than the one whose
+ *   message it is handling can leave that client stuck closing (seen under
+ *   `wrangler dev`), and a TV stuck there would sit in the dead room.
  *
  * Phone-to-TV adoption does not come from a room's own state: `adopt { room,
  * k, n }`. A TV waiting to be paired sits alone in a throwaway room; the phone's
@@ -70,6 +79,7 @@ export type ControlMessage =
   | { type: "pong"; t0: number; tServer: number }
   | { type: "roster"; devices: RosterEntry[] }
   | ({ type: "command" } & DeviceCommand)
+  | { type: "ended" }
   | LookServerMsg;
 
 export interface AdoptMessage {
@@ -152,6 +162,7 @@ export function parseControlMessage(data: unknown): ControlMessage | null {
       viewport: parseViewport(m.viewport),
     };
   }
+  if (m.type === "ended") return { type: "ended" };
 
   if (m.type === "look") {
     if (!isCount(m.rev)) return null;

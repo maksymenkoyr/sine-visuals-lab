@@ -11,7 +11,8 @@
  * bytes, capped in size and nothing more. The JSON it understands is small:
  * clock-sync ping/pong, the device roster, `setDevice` -> `command` routing by
  * the target's device-id tag, the TV adopt relay (delivered by nonce tag, see
- * `adopt`), and, in a claimed room only, the look. The room never interprets a
+ * `adopt`), and, in a claimed room only, the look and the host's `endRoom`
+ * (the laptop's Reset, see `end`). The room never interprets a
  * setting; a look entry is an opaque string it stores and relays. A
  * controller's patches are rationed per socket (LOOK_LIMITS `patchBurst` and
  * `patchesPerSec`) because each accepted one is durable row writes.
@@ -284,9 +285,11 @@ export class RoomCore {
 
   message(ws: CoreSocket, data: string | ArrayBuffer): void {
     const a = ws.attachment;
-    // A keyless socket that was already connected when the room got claimed:
-    // it is being closed, and says nothing in the meantime.
-    if (this.meta !== null && !a.keyed) return;
+    // A keyless socket that was already connected when the room got claimed,
+    // or a keyed one left over from a room the host has just ended: it is
+    // being closed, and says nothing in the meantime (a late patch must not
+    // write a look into a room nobody holds any more).
+    if (this.meta !== null ? !a.keyed : a.keyed) return;
 
     if (typeof data !== "string") {
       this.relayFrame(a, data);
@@ -328,6 +331,9 @@ export class RoomCore {
       case "lookPatch":
         if (a.keyed) this.applyPatch(ws, a, msg);
         return;
+      case "endRoom":
+        if (canSend(a.keyed, a.role, "endRoom")) this.end();
+        return;
     }
   }
 
@@ -353,6 +359,33 @@ export class RoomCore {
     this.meta = null;
     this.rev = 0;
     this.doc = emptyLookDoc();
+  }
+
+  /** The host ended the room (the laptop's Reset): the same wipe as the idle
+   *  alarm's, then every socket, the host's own included, is told `ended` and
+   *  closed as denied. A denial is what makes a device forget a room's keys,
+   *  so a paired TV goes back to its pairing QR and a phone says the room is
+   *  closed, instead of each sitting in a room whose laptop has moved on to a
+   *  new one. The message is the part a client can rely on: a close started
+   *  here on any socket but the host's (whose message this is) has been seen
+   *  to leave its client stuck closing (src/net/roomMessages.ts `ended`). The
+   *  code is an unclaimed room again; the laptop mints a fresh one. */
+  private end(): void {
+    const sockets = this.host.sockets();
+    this.host.removeAll();
+    this.patchBuckets.clear();
+    this.meta = null;
+    this.rev = 0;
+    this.doc = emptyLookDoc();
+    const ended = JSON.stringify({ type: "ended" });
+    for (const ws of sockets) {
+      this.send(ws, ended);
+      try {
+        ws.close(ROOM_CLOSE_DENIED, "ended");
+      } catch {
+        // Already closing.
+      }
+    }
   }
 
   /** The TV adopt request (POST /api/room/{slot}/adopt, relayed here by the

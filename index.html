@@ -132,7 +132,10 @@
         color: #fffc;
         font: 600 13px/1.4 ui-monospace, monospace;
         letter-spacing: 0.05em;
-        z-index: 5;
+        /* Over the gallery (src/ui/gallery.ts, 15) as well as a scene: the
+         * room carries on while browsing, so its way in must too. Under the
+         * room view it opens (src/ui/joinScreen.ts, 20). */
+        z-index: 16;
         background: #0008;
         padding: 4px 10px;
         border-radius: 999px;
@@ -619,6 +622,14 @@
       body.controller #roomCode {
         top: 60px;
         cursor: default;
+      }
+      /* On the gallery (src/app.ts toggles .in-gallery) the badge floats in
+       * the bottom corner instead: on a phone the gallery's own header (the
+       * mark, the source picker) fills the top. */
+      body.in-gallery #roomCode {
+        top: auto;
+        bottom: 16px;
+        right: 16px;
       }
 
       /* The page's h1 and product blurb are for crawlers and screen readers
