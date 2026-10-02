@@ -2011,8 +2011,13 @@ function createPowderScene(): Scene {
       // The detector's baseline is stepped every frame regardless, so turning
       // the cubes back on doesn't fire a stale burst from a cold baseline.
       const hitStrength = bigHit.advance(dt, anim.low, anim.lowPulse, anim.sectionIntensity, lowRose, dropRose);
-      const chunkStrength = drives.value("chunks", hitStrength);
+      // A burst per edge, like the kick above: value() alone stays above 0 for
+      // many frames on a level or a decaying hit pulse, which would relaunch
+      // the whole pool every frame. Called whether or not the cubes are on,
+      // so a grid edge is consumed the same either way.
+      const chunkFire = drives.fired("chunks", hitStrength > 0);
       chunks.tick(anim.timeSec);
+      const chunkStrength = chunkFire ? drives.value("chunks", hitStrength) : 0;
       if (chunksS >= 0.05 && chunkStrength > 0) {
         // Whichever plume fired most recently is the one the cubes belong to.
         let newest = bursts.bursts[0];
