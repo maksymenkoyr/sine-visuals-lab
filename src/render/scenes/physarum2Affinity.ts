@@ -229,6 +229,8 @@ export interface PairWords {
     random: Record<PairLayer, string>;
     nudge: string;
     keepOwn: string;
+    /** The Smell layer's Random lean toggle — see `randomSmell`'s `rivals`. */
+    rivals: string;
     back: string;
     presetsSmell: string;
     presetsTouch: string;
@@ -313,13 +315,15 @@ export const PAIR_WORDS: PairWords = {
     random: { smell: "Random smell", touch: "Random touch" },
     nudge: "Nudge",
     keepOwn: "Keep own trails",
+    rivals: "Rivals",
     back: "Back",
     presetsSmell: "Smell only",
     presetsTouch: "With touch",
     customMix: "Custom mix — not one of the experiments above.",
     padAria: "{A} and {B}",
     mixTitle: "Mix",
-    mixHint: "Random rerolls the table on screen, Nudge jitters it, Back undoes the last change — presets below jump to a named starting point.",
+    mixHint:
+      "Random rerolls the table on screen, Nudge jitters it, Back undoes the last change — presets below jump to a named starting point. With Rivals on, a Smell roll always has every strain follow its own trail and shy from the others', so it splits into territories; off, any mix can come up.",
   },
 };
 
@@ -501,6 +505,14 @@ const CHASE_SMELL: readonly (readonly number[])[] = [
  *  a strain that avoids itself, reading as broken rather than as a variant
  *  worth exploring. */
 export const OWN_TRAIL_RANDOM: readonly [number, number] = [0.2, 1.4];
+/** Random's Rivals lean (the mix row's Rivals toggle): every own-trail cell
+ *  rolled over the first range and every off-diagonal cell over the second,
+ *  so each strain always follows its own trail and avoids everyone else's —
+ *  the territorial split this scene is built around, rerolled in strength
+ *  only. The idea of leaning a random table this way is from Fogleman's
+ *  physarum (the scene record's References); the ranges are our own. */
+export const RIVAL_OWN_RANDOM: readonly [number, number] = [0.6, 1.4];
+export const RIVAL_OTHER_RANDOM: readonly [number, number] = [-1.4, -0.4];
 /** Random's own share of off-diagonal Touch cells left at exactly 0 — the
  *  prototype's own value, so a rolled Touch table still reads mostly as a
  *  Smell-only network with a few real bites/feeds rather than a wall of
@@ -535,15 +547,18 @@ export function quantize(v: number): number {
  *  off-diagonal cell a quantised uniform roll over the full AFFINITY range;
  *  the diagonal (own trail) is either kept exactly as `cur` has it
  *  (`keepOwn`) or rolled over `OWN_TRAIL_RANDOM`, never the full range (see
- *  that constant's own comment). Pure — the caller reads `cur` from the
- *  live settings and writes the result back the same way. */
-export function randomSmell(cur: readonly (readonly number[])[], keepOwn: boolean, rnd: () => number): number[][] {
+ *  that constant's own comment). `rivals` narrows both rolls to
+ *  `RIVAL_OWN_RANDOM`/`RIVAL_OTHER_RANDOM`. Pure — the caller reads `cur`
+ *  from the live settings and writes the result back the same way. */
+export function randomSmell(cur: readonly (readonly number[])[], keepOwn: boolean, rnd: () => number, rivals = false): number[][] {
   const n = cur.length;
+  const own = rivals ? RIVAL_OWN_RANDOM : OWN_TRAIL_RANDOM;
+  const other: readonly [number, number] = rivals ? RIVAL_OTHER_RANDOM : [AFFINITY_MIN, AFFINITY_MAX];
   const out: number[][] = [];
   for (let i = 0; i < n; i++) {
     const row: number[] = [];
     for (let j = 0; j < n; j++) {
-      row.push(i === j ? (keepOwn ? cur[i]![j]! : quantize(uniform(...OWN_TRAIL_RANDOM, rnd))) : quantize(uniform(AFFINITY_MIN, AFFINITY_MAX, rnd)));
+      row.push(i === j ? (keepOwn ? cur[i]![j]! : quantize(uniform(...own, rnd))) : quantize(uniform(...other, rnd)));
     }
     out.push(row);
   }

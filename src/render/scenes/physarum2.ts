@@ -165,6 +165,34 @@ export { ATTRACT_ROWS };
 // Reinhard roll-off — that's what keeps the strains reading as discrete,
 // saturated territories instead of bleeding toward white where they overlap.
 //
+// Fogleman's extras (2026-10-02) — more ideas from studying his repo, each
+// written independently and each its own control (the scene record's
+// Decisions entry has why):
+//
+// - **Auto level** (`level`): his renderer scales each species' grid to its
+//   own brightness range before colouring. Here LEVEL_FRAG max-pools the
+//   trail into LEVEL_SIDE² blocks, read back through the same non-blocking
+//   createPixelReadback as Territory — but on every device while `level` is
+//   above 0, since it changes the picture. levelPeaks/levelGainsFull turn
+//   that into one gain per strain that evens their brightest roads out
+//   around the geometric mean (so Exposure still owns the overall
+//   brightness), glided over LEVEL_TAU and blended in by the setting
+//   (`uLevelGain`, exactly 1 at 0).
+// - **Wander** (`wander`): his alternative, unused turn rule picks among the
+//   directions at random, weighted by how much stronger each reads. A
+//   `uWander` share of agent-steps take SIM_FRAG's weightedTurn instead of
+//   the strongest-wins rule; at 0 the old rule runs exactly.
+// - **Start ink** (`startInk`) and **Fresh dish** (command("fresh")): his
+//   grids start as random noise, not black. ensureTrailTargets fills a new
+//   trail with fillStartInk's uniform roll; Fresh dish reseeds every agent
+//   (seedAgents) and refills the trail on the next render(), phone-local
+//   like Rebalance.
+// - Random leaning to rivals, and random motion/colour, live in the panel
+//   rather than here: physarum2Affinity.ts's `randomSmell` (the Rivals
+//   toggle), and the Strain Console's mix row (MOTION_PRESETS below, its
+//   Random) and colour row (physarum2Synergy.ts's Shuffle/New palette, which
+//   only write the stains).
+//
 // Phase 3 (2026-09-27): probe()/command() (scene.ts) — phone-local, cheap,
 // never reaching the TV — give the device menu's Strains widget three more
 // things without a second settings system:
@@ -211,6 +239,7 @@ export { ATTRACT_ROWS };
 // - **command("rebalance")**: a one-shot SIM pass setting every agent's
 //   species back to its texel index mod SPECIES_COUNT — the exact
 //   distribution seedAgents() starts from.
+// - **command("fresh")**: Fresh dish — see "Fogleman's extras" above.
 const ID = "physarum2";
 
 const TWO_PI = Math.PI * 2;
@@ -484,6 +513,105 @@ const GLOW_MIN = 0.45;
 const GLOW_MAX = 2.2;
 const FLASH_GAIN = 1.2;
 const GAMMA_INV = 1 / 2.2;
+
+// --- Auto level (the `level` setting, 2026-10-02): each strain's brightness
+// scaled to its own range before the colours are summed, after the
+// per-channel auto-levelling in Fogleman's renderer (file header, "Auto
+// level"). LEVEL_FRAG max-pools the trail into LEVEL_SIDE² blocks; levelPeaks
+// takes, per strain, the block peak that LEVEL_TOP_SHARE of blocks reach; and
+// levelGainsFull evens those peaks out around their geometric mean, so the
+// strains match each other while Exposure keeps setting how bright the dish
+// is overall. The setting blends from 1 (off) to that gain in log space. ---
+export const LEVEL_SIDE = 64;
+/** Share of blocks whose peak sets a strain's level — its brightest roads,
+ *  not one hot texel (a reseed burst, a crossing). */
+export const LEVEL_TOP_SHARE = 0.05;
+/** A strain with almost no trail (extinct, or just reseeded) reads its peak
+ *  as at least this, so its gain can't blow the dither floor up into grain. */
+export const LEVEL_PEAK_FLOOR = 0.08;
+export const LEVEL_GAIN_MIN = 0.35;
+export const LEVEL_GAIN_MAX = 3;
+/** Time constant, seconds, of the glide toward a new level — a readback
+ *  lands every LEVEL_INTERVAL_MS, and the picture shouldn't step with it. */
+const LEVEL_TAU = 0.8;
+const LEVEL_INTERVAL_MS = 250;
+/** The `level` setting's default. */
+export const LEVEL_DEFAULT = 0.5;
+
+/** Per strain, the block peak (0..1) that `topShare` of LEVEL_FRAG's blocks
+ *  reach or exceed — a histogram walk over the RGBA8 buffer, no sort. Pure
+ *  and tested on a synthetic buffer. */
+export function levelPeaks(buf: ArrayLike<number>, cellCount: number, count: number, topShare = LEVEL_TOP_SHARE): number[] {
+  const need = Math.max(1, Math.ceil(cellCount * topShare));
+  const peaks: number[] = [];
+  const hist = new Uint32Array(256);
+  for (let k = 0; k < count; k++) {
+    hist.fill(0);
+    for (let i = 0; i < cellCount; i++) hist[buf[i * 4 + k] ?? 0]!++;
+    let seen = 0;
+    let v = 255;
+    for (; v > 0; v--) {
+      seen += hist[v]!;
+      if (seen >= need) break;
+    }
+    peaks.push(v / 255);
+  }
+  return peaks;
+}
+
+/** Per strain, the gain that brings its level peak to the peaks' geometric
+ *  mean — every strain's brightest roads equally bright, the dish as a whole
+ *  no brighter or darker — clamped to [LEVEL_GAIN_MIN, LEVEL_GAIN_MAX]. What
+ *  Auto level 1 applies; the setting blends from 1 toward it (`levelGain`). */
+export function levelGainsFull(peaks: readonly number[]): number[] {
+  const p = peaks.map((v) => Math.max(LEVEL_PEAK_FLOOR, Number.isFinite(v) ? v : 0));
+  const mean = Math.exp(p.reduce((a, v) => a + Math.log(v), 0) / Math.max(1, p.length));
+  return p.map((v) => Math.max(LEVEL_GAIN_MIN, Math.min(LEVEL_GAIN_MAX, mean / v)));
+}
+
+/** A strain's composite gain at Auto level `level`: exactly 1 at 0 (the
+ *  shared Exposure alone), `full` at 1, a log-space blend between. */
+export function levelGain(full: number, level: number): number {
+  const l = clamp01(level);
+  return l === 0 ? 1 : Math.pow(full, l);
+}
+
+// --- Start ink (the `startInk` setting, 2026-10-02): a fresh dish's trail
+// starts as random ink rather than black, as Fogleman's grids do, so a
+// network condenses out of it within the first steps instead of growing
+// from nothing. START_INK_MAX is the top of one channel's uniform roll at
+// startInk 1, in trail units (the record's Measurements has where a busy
+// road's level peak sits). ---
+const START_INK_MAX = 0.25;
+/** The `startInk` setting's default. */
+export const START_INK_DEFAULT = 0.15;
+
+/** Fills an RGBA8 trail buffer with a fresh dish's ink: each live channel an
+ *  independent uniform roll over [0, startInk * START_INK_MAX). All zero at
+ *  startInk 0 — the old black start, exactly. `rnd` is injected so tests can
+ *  seed it. */
+export function fillStartInk(out: Uint8Array, count: number, startInk: number, rnd: () => number): void {
+  out.fill(0);
+  const top = clamp01(startInk) * START_INK_MAX * 255;
+  if (top <= 0) return;
+  for (let i = 0; i < out.length; i += 4) {
+    for (let k = 0; k < count; k++) out[i + k] = Math.floor(rnd() * top);
+  }
+}
+
+/** A fast seeded generator for the start-ink fill — a full-size dish needs
+ *  millions of rolls, too many for Math.random at scene open. */
+function xorshift32(seed: number): () => number {
+  let x = seed >>> 0 || 0x9e3779b9;
+  return () => {
+    x ^= x << 13;
+    x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    x >>>= 0;
+    return x / 4294967296;
+  };
+}
 
 /** Composite smoothing kernel: how much of a channel's read comes from the
  *  centre texel versus each of its four neighbours — physarum.ts's own
@@ -958,6 +1086,29 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
     default: 0.5,
     auto: { dynamics: 0.15 },
   },
+  {
+    key: "wander",
+    label: "Wander",
+    description:
+      "How often an agent picks its turn by chance — weighted toward whichever way smells stronger — instead of always taking the strongest; more grows looser, softer networks",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    // 0 is the old rule exactly: SIM_FRAG's weighted branch is never taken.
+    default: 0,
+  },
+  {
+    key: "startInk",
+    label: "Start ink",
+    description:
+      "How much random ink a fresh dish starts with, so the networks condense out of it at once instead of growing from black — used when the scene opens and on Fresh dish",
+    group: "Form",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: START_INK_DEFAULT,
+  },
   // --- Motion ---
   {
     key: "speed",
@@ -1050,6 +1201,17 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
     auto: { loudness: 0.2 },
   },
   {
+    key: "level",
+    label: "Auto level",
+    description:
+      "Brings every strain's brightest roads to the same brightness, so a sparse or short-lived strain isn't drowned out by a dense one — 0 lights them all by Exposure alone",
+    group: "Look",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: LEVEL_DEFAULT,
+  },
+  {
     key: "synergy",
     label: "Synergy",
     description:
@@ -1100,6 +1262,87 @@ function settingFor(key: string): SceneSetting {
 }
 
 // ---------------------------------------------------------------------
+// Motion presets (2026-10-02): the Strain Console's preset pills — each sets
+// every strain's MOTION_PARAMS at once, like a saved species config in
+// Fogleman's viewer. Our own sets, picked from a headless random search over
+// these same sliders (the scene record's Decisions entry); "Lab" is the
+// shipped default motion.
+// ---------------------------------------------------------------------
+
+/** The per-strain params a motion preset (and the console's Random) sets. */
+export const MOTION_PARAMS = ["sensor", "angle", "turn", "stride"] as const;
+
+export interface MotionPreset {
+  name: string;
+  hint: string;
+  /** Slider values, one per strain, for each of MOTION_PARAMS. */
+  values: Readonly<Record<(typeof MOTION_PARAMS)[number], readonly number[]>>;
+}
+
+export const MOTION_PRESETS: readonly MotionPreset[] = [
+  {
+    name: "Lab",
+    hint: "The shipped motion: highways, a mesh, coarse cells and a fine fuzz.",
+    values: {
+      sensor: LEGACY_MOTION.map((m) => distToSensorSlider(m.sensorDist)),
+      angle: STRAINS.map((s) => Math.round(s.sensorAngleRad / DEG)),
+      turn: LEGACY_MOTION.map((m) => degToTurnSlider(m.turnDeg)),
+      stride: LEGACY_MOTION.map((m) => distToStrideSlider(m.strideDist)),
+    },
+  },
+  {
+    name: "Cells",
+    hint: "Round cells, each walled in by another strain's thin roads.",
+    values: {
+      sensor: [0.8, 0.16, 0.98, 0.38],
+      angle: [17, 62, 84, 61],
+      turn: [0.56, 0.4, 0.3, 0.94],
+      stride: [0.12, 0.94, 0.22, 0.46],
+    },
+  },
+  {
+    name: "Coral",
+    hint: "One strain grows thick branching worms through a dense ground.",
+    values: {
+      sensor: [0.38, 0.96, 0.52, 0.28],
+      angle: [98, 15, 95, 107],
+      turn: [0.56, 0.12, 0.68, 0.1],
+      stride: [0.92, 0.64, 0.1, 0.04],
+    },
+  },
+  {
+    name: "Weave",
+    hint: "Fine crossing fibres over soft pools of colour.",
+    values: {
+      sensor: [0.44, 0.18, 0.66, 0.44],
+      angle: [17, 11, 64, 114],
+      turn: [0.5, 0.06, 0.3, 0.6],
+      stride: [0.92, 0.32, 1, 0.38],
+    },
+  },
+  {
+    name: "Islands",
+    hint: "Big blotchy islands with a lacy sea between.",
+    values: {
+      sensor: [0.7, 0.72, 0.54, 0.84],
+      angle: [79, 6, 82, 35],
+      turn: [0.22, 0.9, 0.26, 0.02],
+      stride: [0.06, 0.48, 0.68, 0.2],
+    },
+  },
+  {
+    name: "Grains",
+    hint: "Short scattered grains, like seeds, on a soft ground.",
+    values: {
+      sensor: [0.02, 0.68, 0.46, 0.2],
+      angle: [19, 30, 85, 119],
+      turn: [0.02, 0.2, 0.28, 0.56],
+      stride: [0.22, 0.62, 0.26, 0.72],
+    },
+  },
+];
+
+// ---------------------------------------------------------------------
 // The panel: one Strains group (specimen boxes + the selected strain's
 // rows + the Pairs pads) — see src/ui/widgets/itemBoxes.ts and, for the
 // pads themselves, src/ui/widgets/pairPads.ts. `options` is typed `unknown`
@@ -1135,6 +1378,11 @@ const PANEL: readonly PanelSection[] = [
         // lane's rail and the Synergy wheel need the base hue (turns).
         hue: { param: "stain", baseHues: STRAINS.map((s) => rgbToHsl(s.color)[0]) },
         synergy: { key: "synergy" },
+        // Random rolls MOTION_PARAMS over their whole ranges, and
+        // the pills are MOTION_PRESETS; Shuffle/New palette rewrite the
+        // stains (strainConsole.ts's header).
+        mix: { random: MOTION_PARAMS, presets: MOTION_PRESETS },
+        colourActions: true,
       },
       // Phase 3's live pure-culture preview — src/ui/widgets/previews.ts's
       // registry id. itemBoxes.ts falls back to the old empty placeholder
@@ -1342,6 +1590,26 @@ vec4 attractRowFor(int k) {
   return uAttractRow[3];
 }
 
+// Wander's turn (file header, "Wander"): rank the three readings, then take
+// the strongest direction or the middle one — the middle with a chance that
+// grows as its reading nears the strongest's, measured against how far both
+// sit above the weakest. A flat reading (all three equal) holds course rather
+// than favouring a side. -1 is left, 0 straight on, +1 right; u is uniform
+// [0, 1).
+float weightedTurn(float c, float l, float r, float u) {
+  vec2 lo = vec2(c, 0.0);
+  vec2 mid = vec2(l, -1.0);
+  vec2 hi = vec2(r, 1.0);
+  vec2 t;
+  if (lo.x > mid.x) { t = lo; lo = mid; mid = t; }
+  if (lo.x > hi.x) { t = lo; lo = hi; hi = t; }
+  if (mid.x > hi.x) { t = mid; mid = hi; hi = t; }
+  float below = mid.x - lo.x;
+  float above = hi.x - mid.x;
+  if (below + above <= 1e-6) return 0.0;
+  return u * (below + above) < below ? mid.y : hi.y;
+}
+
 void main() {
   ivec2 texel = ivec2(gl_FragCoord.xy);
   vec4 cp = texelFetch(uAgentPos, texel, 0);
@@ -1410,8 +1678,12 @@ void main() {
 
   // Centre strongest: hold. Both sides beat the centre: turn at random.
   // Otherwise: turn toward whichever side read stronger. Each strain turns
-  // by its own live Turn angle — the whole point of that setting.
-  if (sC >= sL && sC >= sR) {
+  // by its own live Turn angle — the whole point of that setting. Wander
+  // swaps that rule for weightedTurn's chance pick on a uWander share of
+  // agent-steps; at 0 the branch is never taken.
+  if (uWander > 0.0 && hash21(seed + 21.3) < uWander) {
+    heading += weightedTurn(sC, sL, sR, hash21(seed + 8.41)) * rotationAngle;
+  } else if (sC >= sL && sC >= sR) {
     // hold
   } else if (sL > sC && sR > sC) {
     heading += (hash21(seed + 5.17) < 0.5 ? -1.0 : 1.0) * rotationAngle;
@@ -1585,6 +1857,8 @@ ${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uTrail;
 uniform float uTrailTexel;
 uniform vec3 uStrainColor[${SPECIES_COUNT}];
+// Auto level's per-strain gain (levelGain) — exactly 1 per channel at level 0.
+uniform vec4 uLevelGain;
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
 ${PHYSARUM2_GLSL}
@@ -1612,7 +1886,7 @@ void main() {
   vec4 trail = tC * SMOOTH_CENTER + (tL + tR + tD + tU) * SMOOTH_SIDE;
 
   float exposure = mix(GLOW_MIN, GLOW_MAX, uGlow) * (1.0 + uFlash * flashDrive(uBeatPulse) * FLASH_GAIN);
-  vec4 t = pow(clamp(trail * exposure, 0.0, 1.0), vec4(GAMMA_INV));
+  vec4 t = pow(clamp(trail * exposure * uLevelGain, 0.0, 1.0), vec4(GAMMA_INV));
 
   vec3 col0 = mix(uStrainColor[0], palette(0.1, uPalA, uPalB, uPalC, uPalD), uPaletteMix);
   vec3 col1 = mix(uStrainColor[1], palette(0.35, uPalA, uPalB, uPalC, uPalD), uPaletteMix);
@@ -1656,6 +1930,33 @@ void main() {
     }
   }
   outColor = sum / float(block * block);
+}
+`;
+
+/** Auto level: each output texel is the per-channel *peak* over one block of
+ *  trail texels (a max-pool, where TERRITORY_FRAG averages), read back the
+ *  same non-blocking way — levelPeaks reads the strains' levels off it. The
+ *  block wraps on the torus, so a side that isn't a multiple of LEVEL_SIDE
+ *  just counts a few texels twice, which a max doesn't mind. */
+const LEVEL_FRAG = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uTrail;
+uniform float uTrailSide;
+uniform float uBlock;
+
+void main() {
+  ivec2 outTexel = ivec2(gl_FragCoord.xy);
+  int block = int(uBlock + 0.5);
+  int side = int(uTrailSide);
+  vec4 peak = vec4(0.0);
+  for (int j = 0; j < block; j++) {
+    for (int i = 0; i < block; i++) {
+      ivec2 t = ivec2(mod(vec2(outTexel * block + ivec2(i, j)), vec2(float(side))));
+      peak = max(peak, texelFetch(uTrail, t, 0));
+    }
+  }
+  outColor = peak;
 }
 `;
 
@@ -1931,6 +2232,20 @@ function createPhysarum2Scene(): Scene {
   let popGen = 0;
   let popKickGen = 0;
   const POP_INTERVAL_MS = 250;
+  // Auto level (file header): LEVEL_FRAG's block peaks, read back every
+  // LEVEL_INTERVAL_MS while the `level` setting is above 0 (on every device —
+  // it changes the picture, unlike Territory). levelLog holds each strain's
+  // full-level gain as shown (log, gliding toward levelTargetLog at
+  // LEVEL_TAU); the setting's blend is applied at upload (levelGain).
+  let levelProg: GLProgram | null = null;
+  const levelRb = createPixelReadback(LEVEL_SIDE);
+  let lastLevelKickMs = -Infinity;
+  const levelLog = new Float32Array(SPECIES_COUNT);
+  const levelTargetLog = new Float32Array(SPECIES_COUNT);
+  const levelNow = new Float32Array(SPECIES_COUNT).fill(1);
+  // Fresh dish (command("fresh")): new agents and a new start-ink trail on
+  // the next render().
+  let pendingFresh = false;
   // Stain Synergy — remembers which stain was set last (see physarum2Synergy.ts).
   const synergyTracker = createSynergyTracker(STRAINS.map((s) => rgbToHsl(s.color)[0]));
   const strainLifeMul = new Float32Array(SPECIES_COUNT);
@@ -2033,17 +2348,40 @@ function createPhysarum2Scene(): Scene {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  /** Rebuilds the trail map, and reseeds it to zero, only when its size
-   *  actually changes — physarum.ts's own ensureTrailTargets. */
+  /** A fresh dish's trail — Start ink's random fill (fillStartInk) at the
+   *  setting's current value. */
+  function startInkData(side: number): Uint8Array {
+    const buf = new Uint8Array(side * side * 4);
+    fillStartInk(buf, SPECIES_COUNT, resolveSceneSetting(ID, settingFor("startInk")), xorshift32((Math.random() * 4294967296) >>> 0));
+    return buf;
+  }
+
+  /** Fresh dish: every agent reseeded exactly as init() seeds them (equal
+   *  shares, random place and heading) and the trail refilled with Start ink,
+   *  written over the textures the next step reads. */
+  function freshDish(gl: WebGL2RenderingContext): void {
+    const seed = seedAgents(agentSide);
+    gl.bindTexture(gl.TEXTURE_2D, agentPosTex[agentRead]);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, agentSide, agentSide, gl.RGBA, gl.UNSIGNED_BYTE, seed.pos);
+    gl.bindTexture(gl.TEXTURE_2D, agentDirTex[agentRead]);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, agentSide, agentSide, gl.RGBA, gl.UNSIGNED_BYTE, seed.dir);
+    gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, trailSideCur, trailSideCur, gl.RGBA, gl.UNSIGNED_BYTE, startInkData(trailSideCur));
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    footprintFresh = false;
+  }
+
+  /** Rebuilds the trail map, and refills it with Start ink, only when its
+   *  size actually changes — physarum.ts's own ensureTrailTargets. */
   function ensureTrailTargets(gl: WebGL2RenderingContext): void {
     const maxSide = Math.min(TRAIL_SIDE_CAP, Math.max(gl.drawingBufferWidth, gl.drawingBufferHeight));
     const side = physarum2TrailSide(agentCount, maxSide);
     if (side === trailSideCur && trailFbo[0] && trailFbo[1]) return;
     freeTrailTargets(gl);
     trailSideCur = side;
-    const zero = new Uint8Array(side * side * 4);
+    const ink = startInkData(side);
     for (let i = 0; i < 2; i++) {
-      trailTex[i] = makeTrailTexture(gl, side, zero);
+      trailTex[i] = makeTrailTexture(gl, side, ink);
       const f = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, f);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, trailTex[i], 0);
@@ -2116,6 +2454,39 @@ function createPhysarum2Scene(): Scene {
       gl.uniform1i(samplerLoc(gl, prog, "pop.uAgentDir", "uAgentDir"), 0);
       drawFullscreenQuad(gl, quad);
     });
+  }
+
+  /** Auto level: polls LEVEL_FRAG's readback (never a blocking wait) into
+   *  each strain's target gain, kicks off at most one more every
+   *  LEVEL_INTERVAL_MS while `level` is above 0, and glides the shown gain
+   *  toward the target. levelNow is what the composite uploads — exactly 1
+   *  per strain at level 0. */
+  function updateLevel(gl: WebGL2RenderingContext, nowMs: number, dt: number, level: number): void {
+    const done = levelRb.poll(gl);
+    if (done) {
+      const gains = levelGainsFull(levelPeaks(done, LEVEL_SIDE * LEVEL_SIDE, SPECIES_COUNT));
+      for (let k = 0; k < SPECIES_COUNT; k++) levelTargetLog[k] = Math.log(gains[k]!);
+    }
+    if (level > 0 && !done && !levelRb.busy && nowMs - lastLevelKickMs >= LEVEL_INTERVAL_MS && levelProg && quadVao && trailSideCur > 0) {
+      lastLevelKickMs = nowMs;
+      const block = Math.max(1, Math.ceil(trailSideCur / LEVEL_SIDE));
+      const prog = levelProg;
+      const quad = quadVao;
+      levelRb.begin(gl, () => {
+        prog.use();
+        prog.setF("uTrailSide", trailSideCur);
+        prog.setF("uBlock", block);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, trailTex[trailReadIdx]);
+        gl.uniform1i(samplerLoc(gl, prog, "level.uTrail", "uTrail"), 0);
+        drawFullscreenQuad(gl, quad);
+      });
+    }
+    const a = 1 - Math.exp(-dt / LEVEL_TAU);
+    for (let k = 0; k < SPECIES_COUNT; k++) {
+      levelLog[k] = levelLog[k]! + (levelTargetLog[k]! - levelLog[k]!) * a;
+      levelNow[k] = levelGain(Math.exp(levelLog[k]!), level);
+    }
   }
 
   /** Resolves every per-strain setting for this frame into the scratch
@@ -2205,6 +2576,7 @@ function createPhysarum2Scene(): Scene {
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
       territoryProg = createProgram(gl, TERRITORY_FRAG);
       popProg = createProgram(gl, POP_FRAG);
+      levelProg = createProgram(gl, LEVEL_FRAG);
       samplerLocs.clear();
       quadVao = createFullscreenQuad(gl);
       // No vertex attributes at all — every agent is addressed by
@@ -2255,6 +2627,11 @@ function createPhysarum2Scene(): Scene {
       lastProbeMs = -Infinity;
       lastTerritoryKickMs = -Infinity;
       lastPopKickMs = -Infinity;
+      lastLevelKickMs = -Infinity;
+      levelLog.fill(0);
+      levelTargetLog.fill(0);
+      levelNow.fill(1);
+      pendingFresh = false;
       lastViewport = FULL_VIEWPORT;
       lastResW = gl.drawingBufferWidth || 1;
       lastResH = gl.drawingBufferHeight || 1;
@@ -2265,6 +2642,10 @@ function createPhysarum2Scene(): Scene {
       if (!quadVao || !depositVao || !beatSeeder) return;
       const { gl } = ctx;
       ensureTrailTargets(gl);
+      if (pendingFresh) {
+        pendingFresh = false;
+        freshDish(gl);
+      }
 
       // Cached for command("inject") (screenToFieldUv), which can be called
       // between render()s from a UI click, well outside this function's own
@@ -2444,6 +2825,7 @@ function createPhysarum2Scene(): Scene {
       const nowMs = performance.now();
       pollTerritory(gl, nowMs);
       pollPopulation(gl, nowMs, resolveSceneSetting(ID, settingFor("switching")) > 0);
+      updateLevel(gl, nowMs, dt, resolveSceneSetting(ID, settingFor("level")));
 
       // 4. Composite to the default framebuffer — always, even when this
       //    frame owed zero steps (the picture just doesn't advance).
@@ -2452,6 +2834,7 @@ function createPhysarum2Scene(): Scene {
       compositeProg.use();
       uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
       compositeProg.setF("uTrailTexel", 1 / trailSideCur);
+      compositeProg.setV4("uLevelGain", levelNow[0]!, levelNow[1]!, levelNow[2]!, levelNow[3]!);
       for (let k = 0; k < SPECIES_COUNT; k++) {
         compositeProg.setV3v(`uStrainColor[${k}]`, strainColor.subarray(k * 3, k * 3 + 3));
       }
@@ -2484,6 +2867,7 @@ function createPhysarum2Scene(): Scene {
         out[`pop${k}`] = population[k]!;
         out[`terr${k}`] = territory[k]!;
         out[`vig${k}`] = vigour[k]!;
+        out[`level${k}`] = levelNow[k]!;
         const dr = liveDrive[k]!;
         for (const p of Object.keys(dr) as (keyof StrainDriveValues)[]) out[`drive_${p}${k}`] = dr[p];
       }
@@ -2519,6 +2903,14 @@ function createPhysarum2Scene(): Scene {
         pendingRebalance = true;
         population = equalPopulation(SPECIES_COUNT);
         popGen++;
+      } else if (name === "fresh") {
+        // A fresh dish replaces the agents outright, so any queued one-shot
+        // aimed at the old ones is moot.
+        pendingFresh = true;
+        pendingInject = null;
+        pendingRebalance = false;
+        population = equalPopulation(SPECIES_COUNT);
+        popGen++;
       }
     },
 
@@ -2531,6 +2923,7 @@ function createPhysarum2Scene(): Scene {
       compositeProg?.dispose();
       territoryProg?.dispose();
       popProg?.dispose();
+      levelProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
       if (depositVao) gl.deleteVertexArray(depositVao);
       for (let i = 0; i < 2; i++) {
@@ -2544,6 +2937,7 @@ function createPhysarum2Scene(): Scene {
       freeTrailTargets(gl);
       territoryRb.dispose(gl);
       popRb.dispose(gl);
+      levelRb.dispose(gl);
       samplerLocs.clear();
       diffuseProg = null;
       simProg = null;
@@ -2552,6 +2946,7 @@ function createPhysarum2Scene(): Scene {
       compositeProg = null;
       territoryProg = null;
       popProg = null;
+      levelProg = null;
       quadVao = null;
       depositVao = null;
       lastFrameTime = null;
@@ -2564,6 +2959,7 @@ function createPhysarum2Scene(): Scene {
       pendingSeed = false;
       popGen = 0;
       popKickGen = 0;
+      pendingFresh = false;
     },
   };
 }

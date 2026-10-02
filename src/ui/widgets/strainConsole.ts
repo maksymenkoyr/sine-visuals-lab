@@ -1,5 +1,5 @@
 import type { SceneSetting } from "../../render/sceneSettings.ts";
-import { HARMONIES } from "../../render/scenes/physarum2Synergy.ts";
+import { HARMONIES, paletteStains, shuffledStains, shuffleOrder } from "../../render/scenes/physarum2Synergy.ts";
 import type { WidgetCtx } from "./registry.ts";
 import {
   applyEdit,
@@ -10,7 +10,9 @@ import {
   hueRailGradient,
   knobDelta,
   quantize,
+  randomValue,
   toUnit,
+  valuesMatch,
   wheelPoint,
   type ValueFormat,
 } from "./consoleMath.ts";
@@ -47,8 +49,19 @@ import {
  * the setting, so nothing jumps under the pointer. The wheel draws the set
  * hues hollow and the shown hues filled.
  *
- * Every word a person reads here is a spec label/description or a value; the
- * few fixed strings (Lanes, Knobs, Link) are the layout's own vocabulary.
+ * The mix row (2026-10-02), under the grid: Random rolls the `mix.random`
+ * params for every item over each setting's whole range — Fogleman's random
+ * species configs, whose ranges these sliders already span — a preset pill
+ * writes the values it names (pressed while they still match), and Back
+ * undoes the last Random, preset or colour action. With `colourActions`,
+ * Shuffle hands the hues on screen round the items in a new order and New
+ * palette deals a random harmony (physarum2Synergy.ts) — both write the
+ * stains, nothing else. Back's history lives at module level, keyed by
+ * `stateKey`, so it survives a Look apply or card Reset like pairPads.ts's own.
+ *
+ * Every word a person reads here is a spec label/description, a value or a
+ * preset's own name and hint; the few fixed strings (Lanes, Knobs, Link,
+ * Random, Back, Shuffle, New palette) are the layout's own vocabulary.
  */
 
 export interface ConsoleOptions {
@@ -63,6 +76,19 @@ export interface ConsoleOptions {
   /** A plain setting drawn as a row under the grid with a hue wheel beside it
    *  (Synergy). Needs `hue`. */
   synergy?: { key: string };
+  /** The mix row — see this file's header. `random` names the params Random
+   *  rolls; each preset sets the params its `values` name, one value per item. */
+  mix?: { random: readonly string[]; presets?: readonly ConsolePreset[] };
+  /** Shuffle and New palette under the Synergy wheel. Needs `hue` and
+   *  `synergy`. */
+  colourActions?: boolean;
+}
+
+export interface ConsolePreset {
+  name: string;
+  /** One line shown under the pills while this preset is pressed. */
+  hint: string;
+  values: Readonly<Record<string, readonly number[]>>;
 }
 
 export interface StrainConsoleArgs {
@@ -102,6 +128,11 @@ function writeLayout(key: string, v: Layout): void {
     // Not fatal — the layout just won't survive a reload.
   }
 }
+
+/** Back's undo stack per console (`stateKey`) — module-level so it survives
+ *  a full rebuild; in memory only. */
+const HISTORY_MAX = 20;
+const histories = new Map<string, Record<string, number[]>[]>();
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const KNOB_A0 = (135 * Math.PI) / 180;
@@ -478,6 +509,100 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
   }
   knobsEl.style.setProperty("--n", String(count));
 
+  // ---------------- the mix row: Random, Back, presets ----------------
+
+  let history = histories.get(args.stateKey);
+  if (!history) histories.set(args.stateKey, (history = []));
+  const hist = history;
+
+  /** Writes each item's value for `p` through the slider path, skipping any
+   *  that already match (so a preset doesn't persist untouched settings).
+   *  Snapped to the step, except for Back (`exact`): a snapshot can hold a
+   *  default that sits between steps, and must come back as it was. */
+  function writeValues(p: string, values: readonly number[], exact = false): void {
+    const ss = specs.get(p);
+    if (!ss) return;
+    for (let k = 0; k < count; k++) {
+      const v = values[k];
+      if (typeof v !== "number") continue;
+      const q = exact ? v : quantize(v, ss[k]!);
+      if (q !== ctx.get(ss[k]!)) ctx.set(ss[k]!, q);
+    }
+  }
+
+  const mixEl = el("div", "vc-sc-mix");
+  const mixRow = el("div", "vc-mix-row");
+  const backBtn = el("button", undefined, "Back");
+  backBtn.type = "button";
+  backBtn.title = "Undo the last Random, preset or colour change";
+  const syncBack = (): void => {
+    backBtn.disabled = hist.length === 0;
+  };
+  /** Snapshots every console param before an action writes — Back's entry. */
+  function pushHistory(): void {
+    const snap: Record<string, number[]> = {};
+    for (const p of params) snap[p] = stored(p);
+    hist.push(snap);
+    if (hist.length > HISTORY_MAX) hist.shift();
+    syncBack();
+  }
+  backBtn.addEventListener("click", () => {
+    const snap = hist.pop();
+    if (snap) for (const p of Object.keys(snap)) writeValues(p, snap[p]!, true);
+    syncBack();
+  });
+
+  const randomParams = (opts.mix?.random ?? []).filter((p) => specs.has(p));
+  if (randomParams.length) {
+    const randomBtn = el("button", undefined, "Random");
+    randomBtn.type = "button";
+    randomBtn.title = `Roll ${randomParams.map((p) => specs.get(p)![0]!.label).join(", ")} for every strain`;
+    randomBtn.addEventListener("click", () => {
+      pushHistory();
+      for (const p of randomParams) writeValues(p, specs.get(p)!.map((spec) => randomValue(spec, Math.random)));
+    });
+    mixRow.appendChild(randomBtn);
+  }
+  mixRow.appendChild(backBtn);
+  mixEl.appendChild(mixRow);
+
+  const presets = opts.mix?.presets ?? [];
+  const presetPills: HTMLButtonElement[] = [];
+  const presetHint = el("p", "vc-exp-hyp");
+  if (presets.length) {
+    const pills = el("div", "vc-exp-pills");
+    for (const preset of presets) {
+      const b = el("button", "vc-exp-pill", preset.name);
+      b.type = "button";
+      b.title = preset.hint;
+      b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", () => {
+        pushHistory();
+        for (const p of Object.keys(preset.values)) writeValues(p, preset.values[p]!);
+      });
+      pills.appendChild(b);
+      presetPills.push(b);
+    }
+    mixEl.append(pills, presetHint);
+  }
+  let lastPresetSig = "";
+  /** Presses the pill whose values the stored settings still hold. */
+  function syncPresets(): void {
+    if (!presets.length) return;
+    const sig = params.map((p) => stored(p).join(",")).join("|");
+    if (sig === lastPresetSig) return;
+    lastPresetSig = sig;
+    const active = presets.findIndex((preset) =>
+      Object.keys(preset.values).every((p) => {
+        const ss = specs.get(p);
+        return !ss || valuesMatch(stored(p), preset.values[p]!, ss[0]!);
+      }),
+    );
+    presetPills.forEach((b, i) => b.setAttribute("aria-pressed", String(i === active)));
+    presetHint.textContent = active >= 0 ? presets[active]!.hint : "";
+  }
+  syncBack();
+
   // ---------------- Synergy: the wheel and its real row ----------------
 
   let wheelUpdate: ((probe: Record<string, number> | null) => void) | undefined;
@@ -507,6 +632,32 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
     left.append(wheel, harmony);
     synergyEl.append(left, rowHost);
     ctx.appendRow(rowHost, synergySpec);
+
+    const stainSpecsForActions = specs.get(hue.param);
+    if (opts.colourActions && stainSpecsForActions) {
+      /** The hues on screen now (turns): base + the stain as shown. */
+      const shownHues = (): number[] => {
+        const probe = ctx.probe();
+        return stainSpecsForActions.map((s, k) => (hue.baseHues[k] ?? 0) + (probe?.[`shownStain${k}`] ?? ctx.get(s)));
+      };
+      const colourRow = el("div", "vc-mix-row");
+      const shuffleBtn = el("button", undefined, "Shuffle");
+      shuffleBtn.type = "button";
+      shuffleBtn.title = "Hand the colours on screen round the strains in a new order";
+      shuffleBtn.addEventListener("click", () => {
+        pushHistory();
+        writeValues(hue.param, shuffledStains(shownHues(), hue.baseHues, shuffleOrder(count, Math.random)));
+      });
+      const paletteBtn = el("button", undefined, "New palette");
+      paletteBtn.type = "button";
+      paletteBtn.title = "Deal the strains a fresh set of colours from a random colour harmony";
+      paletteBtn.addEventListener("click", () => {
+        pushHistory();
+        writeValues(hue.param, paletteStains(hue.baseHues.slice(0, count), Math.random));
+      });
+      colourRow.append(shuffleBtn, paletteBtn);
+      synergyEl.appendChild(colourRow);
+    }
 
     const stainSpecs = specs.get(hue.param);
     // What the wheel last drew, so a still frame writes nothing to the DOM.
@@ -549,7 +700,9 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
 
   // ---------------- assemble ----------------
 
-  container.append(tabs, lanesEl, knobsEl, detail);
+  container.append(tabs, lanesEl, knobsEl);
+  if (opts.mix || opts.colourActions) container.appendChild(mixEl);
+  container.appendChild(detail);
   if (synergySpec) container.appendChild(synergyEl);
   syncLayout();
 
@@ -570,6 +723,8 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
         });
       }
       wheelUpdate?.(probe);
+      syncPresets();
+      syncBack();
     },
     dispose() {
       for (const d of disposers) d();

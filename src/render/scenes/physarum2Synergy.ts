@@ -165,3 +165,47 @@ export function createSynergyTracker(baseHue: readonly number[]): SynergyTracker
     },
   };
 }
+
+// ---------------------------------------------------------------------
+// Colour actions (2026-10-02) — the Strain Console's Shuffle and New palette
+// buttons, after the palette keys in Fogleman's viewer (one deals a fresh
+// palette, one reassigns the current colours among the strains). Both only
+// ever write the stain settings, so the TV, a Look and Back see an ordinary
+// stain change. `rnd` is injected (uniform [0, 1)) so tests can seed it.
+// ---------------------------------------------------------------------
+
+/** The stain (a shift over `baseHue`, turns) that shows `hue` — the shortest
+ *  way round, inside the Stain slider's own [-0.5, 0.5). */
+export function stainForHue(hue: number, baseHue: number): number {
+  return wrapTurn(hue - baseHue);
+}
+
+/** A random order of 0..n-1 that moves at least one place (for n > 1), so a
+ *  Shuffle always changes something. */
+export function shuffleOrder(n: number, rnd: () => number): number[] {
+  const order = Array.from({ length: n }, (_, i) => i);
+  if (n < 2) return order;
+  do {
+    for (let i = n - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      [order[i], order[j]] = [order[j]!, order[i]!];
+    }
+  } while (order.every((v, i) => v === i));
+  return order;
+}
+
+/** Shuffle: strain k takes the hue strain `order[k]` shows now (`shownHues`,
+ *  turns). Returns each strain's new stain over its own base hue. */
+export function shuffledStains(shownHues: readonly number[], baseHues: readonly number[], order: readonly number[]): number[] {
+  return baseHues.map((base, k) => stainForHue(shownHues[order[k]!]!, base));
+}
+
+/** New palette: a harmony from HARMONIES, turned to a random rotation, its
+ *  places dealt to the strains in a random order. Returns each strain's new
+ *  stain over its own base hue. */
+export function paletteStains(baseHues: readonly number[], rnd: () => number): number[] {
+  const hm = HARMONIES[Math.min(HARMONIES.length - 1, Math.floor(rnd() * HARMONIES.length))]!;
+  const rot = rnd();
+  const order = shuffleOrder(baseHues.length, rnd);
+  return baseHues.map((base, k) => stainForHue(rot + hm.at[order[k]! % hm.at.length]! / 360, base));
+}

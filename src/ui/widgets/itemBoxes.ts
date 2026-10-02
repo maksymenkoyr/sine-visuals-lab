@@ -44,7 +44,9 @@ import { buildStrainConsole, type ConsoleOptions } from "./strainConsole.ts";
  *     population/territory, `ctx.driveValue()` on the item's own Nutrient
  *     setting for Vigour — no scene involvement for that last one). POP is
  *     the measured headcount — nobody sets it (physarum2.ts's Switching
- *     rule) — so the bar below is a read-only readout with Rebalance;
+ *     rule) — so the bar below is a read-only readout with Rebalance, and
+ *     Fresh dish (`ctx.command("fresh")`, 2026-10-02) beside it, which
+ *     restarts the whole dish;
  *   - adds a Pipette toggle next to Rebalance: while armed, the next
  *     pointerdown on the main visualisation canvas (`#gl` — see index.html)
  *     calls `ctx.command("inject", {x, y, strain})` with the tap converted to
@@ -335,13 +337,18 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     const rebalanceBtn = createChipButton("Rebalance", "Put every strain back to an equal share", () => {
       ctx.command("rebalance", {});
     });
+    const freshBtn = createChipButton(
+      "Fresh dish",
+      "Start the dish over — every strain reseeded at an equal share on a trail of Start ink. This screen only, commands don't reach the TV",
+      () => ctx.command("fresh", {}),
+    );
     pipetteBtn = createChipButton(
       "Pipette",
       "Arm, then tap the visualisation to inject the chosen strain there — tap a box above to choose which. This screen only, settings/commands don't reach the TV",
       () => setPipette(!pipetteArmed),
     );
     syncPipetteVisual();
-    actions.append(rebalanceBtn, pipetteBtn);
+    actions.append(rebalanceBtn, freshBtn, pipetteBtn);
     popWrap.append(popBar, popLabels, actions);
     container.appendChild(popWrap);
     // The one setting that shapes the headcount (Switching), as a real row

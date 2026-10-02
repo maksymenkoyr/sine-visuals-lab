@@ -27,6 +27,8 @@ import {
   pushHistory,
   popHistory,
   OWN_TRAIL_RANDOM,
+  RIVAL_OWN_RANDOM,
+  RIVAL_OTHER_RANDOM,
   NUDGE_MAX,
   MIX_HISTORY_MAX,
   type AffinityTables,
@@ -559,5 +561,34 @@ describe("pushHistory / popHistory", () => {
     const [rest, popped] = popHistory([]);
     expect(popped).toBeUndefined();
     expect(rest).toEqual([]);
+  });
+});
+
+describe("randomSmell's Rivals lean", () => {
+  it("rolls every own trail positive and every other trail negative, on the 0.05 grid", () => {
+    const rnd = mulberry32(31);
+    for (let n = 0; n < 100; n++) {
+      const out = randomSmell(SAMPLE_TABLE, false, rnd, true);
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+          const v = out[i]![j]!;
+          const [lo, hi] = i === j ? RIVAL_OWN_RANDOM : RIVAL_OTHER_RANDOM;
+          expect(v).toBeGreaterThanOrEqual(lo - 1e-9);
+          expect(v).toBeLessThanOrEqual(hi + 1e-9);
+          expect(onQuantumGrid(v)).toBe(true);
+        }
+      }
+    }
+    expect(RIVAL_OWN_RANDOM[0]).toBeGreaterThan(0);
+    expect(RIVAL_OTHER_RANDOM[1]).toBeLessThan(0);
+  });
+
+  it("still keeps the own trails exactly under keepOwn", () => {
+    const out = randomSmell(SAMPLE_TABLE, true, mulberry32(32), true);
+    for (let i = 0; i < 4; i++) expect(out[i]![i]).toBe(SAMPLE_TABLE[i]![i]);
+  });
+
+  it("the Pairs widget has a word for the toggle", () => {
+    expect(PAIR_WORDS.ui.rivals.length).toBeGreaterThan(0);
   });
 });
