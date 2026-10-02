@@ -35,6 +35,10 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 // physically the plate's size), is excited by the band energy under a
 // resonance window at that frequency (Resonance sets the window's
 // sharpness), and rings with a fast attack and a Ring-controlled release.
+// One departure from a real plate: the excitation is that band energy less
+// most of its own running average, because music is always loudest in the
+// bass (and a room mic adds a floor of its own), and a plate that answered
+// absolute energy showed its lowest mode nearly all the time.
 // The strongest few modes by response are summed in the shader, weighted
 // by that response, so mode changes are the plate's own dynamics rather
 // than a scripted crossfade.
@@ -174,6 +178,10 @@ const ATTACK_SEC_MIN = 0.03;
  *  last active set holds, so silence freezes the figure rather than
  *  collapsing it to nothing. */
 const RESPONSE_FLOOR = 1e-9;
+/** Each mode is excited by its band energy minus SURPRISE_SHARE of that
+ *  energy's own running average over BASELINE_SEC — see createPlateResponse. */
+const BASELINE_SEC = 4;
+const SURPRISE_SHARE = 0.8;
 
 export function ringSeconds(ring: number): number {
   return RING_SEC_MIN + Math.max(0, Math.min(1, ring)) * (RING_SEC_MAX - RING_SEC_MIN);
@@ -190,6 +198,7 @@ export interface PlateResponse {
 
 export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): PlateResponse {
   const amplitudes = new Float32Array(table.length);
+  const baseline = new Float32Array(table.length).fill(NaN);
   const sharpened = new Float32Array(table.length);
   const order = table.map((_, i) => i);
   const active: ActiveMode[] = [];
@@ -224,7 +233,16 @@ export function createPlateResponse(table: readonly PlateMode[] = MODE_TABLE): P
           const w = Math.exp(-0.5 * d * d);
           num += w * Math.max(0, bands[i]);
         }
-        const excitation = num / den;
+        const raw = num / den;
+        // Measured against this mode's own running average, so a constant
+        // spectral tilt — the music's bass-heavy balance, or a mic's noise
+        // floor — can't hand one mode the plate for good: what wins is the
+        // mode whose part of the spectrum is busier than usual right now. A
+        // held tone keeps 1 - SURPRISE_SHARE of its level, so it still holds
+        // its figure rather than fading to nothing.
+        if (Number.isNaN(baseline[k])) baseline[k] = raw;
+        baseline[k] += (raw - baseline[k]) * (1 - Math.exp(-dt / BASELINE_SEC));
+        const excitation = Math.max(0, raw - SURPRISE_SHARE * baseline[k]);
         const tau = excitation > amplitudes[k] ? attack : release;
         amplitudes[k] += (excitation - amplitudes[k]) * (1 - Math.exp(-dt / tau));
         sharpened[k] = Math.pow(amplitudes[k], sharpen);
