@@ -4,6 +4,7 @@ import { RESOLUTION_MAX, RESOLUTION_MIN, type PreviewSize } from "../render/outp
 import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
 import { setHintText } from "./hintSwatches.ts";
+import { applyGlassBlur, getGlassBlur, setGlassBlur } from "./glassPref.ts";
 import {
   chipBtnLitStyle,
   chipBtnStyle,
@@ -199,6 +200,56 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
       setHintText(hint, MODE_OPTIONS.find((o) => o.mode === mode)?.title ?? "");
     },
   };
+}
+
+const BLUR_OPTIONS: { on: boolean; text: string; title: string }[] = [
+  { on: false, text: "Off", title: "Flat dark panels — lightest on the GPU" },
+  { on: true, text: "On", title: "Frosted glass: the scene blurs behind the panels. Costs frame rate, most on heavy scenes" },
+];
+
+/** Panel blur (glassPref.ts): the one row here that changes how the panel
+ *  itself looks rather than how the scene renders — it lives in this card
+ *  because what it trades is GPU time, same as Quality and Energy saving. */
+function createBlurRow(accent: string) {
+  const el = document.createElement("div");
+  el.className = "vc-row";
+  el.style.setProperty("--vc-accent", accent);
+
+  const head = document.createElement("div");
+  head.style.cssText = rowHeadStyle;
+  const label = document.createElement("div");
+  label.textContent = "Panel blur";
+  label.className = "vc-label";
+  label.style.cssText = rowLabelStyle;
+  head.appendChild(label);
+
+  const list = document.createElement("div");
+  list.style.cssText = modeListStyle;
+  const buttons = BLUR_OPTIONS.map((opt) => {
+    const btn = document.createElement("button");
+    btn.textContent = opt.text;
+    btn.title = opt.title;
+    btn.style.cssText = modeChipStyle;
+    btn.addEventListener("click", () => {
+      setGlassBlur(opt.on);
+      refresh();
+    });
+    return { on: opt.on, btn };
+  });
+  list.append(...buttons.map((b) => b.btn));
+
+  const hint = document.createElement("div");
+  hint.className = "vc-hint";
+
+  el.append(head, list, hint);
+
+  function refresh(): void {
+    const on = getGlassBlur();
+    for (const b of buttons) b.btn.style.cssText = b.on === on ? modeChipLitStyle : modeChipStyle;
+    setHintText(hint, BLUR_OPTIONS.find((o) => o.on === on)?.title ?? "");
+  }
+  refresh();
+  return { el, refresh };
 }
 
 const SIZE_OPTIONS: { size: PreviewSize; text: string }[] = [
@@ -698,6 +749,10 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
   const detail = createReadoutLine("Detail");
   readouts.append(fps.el, res.el, detail.el);
 
+  // Seed <html>'s glass class from the saved choice before the panel first shows.
+  applyGlassBlur();
+  const blurRow = createBlurRow(POWER_TEAL);
+
   card.body.append(
     statusRow.el,
     hairline,
@@ -706,6 +761,8 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     spacer(),
     sizeRow.el,
     modeRow.el,
+    spacer(),
+    blurRow.el,
     readoutsHeading,
     readouts,
   );

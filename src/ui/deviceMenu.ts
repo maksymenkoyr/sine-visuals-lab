@@ -115,6 +115,7 @@ import {
   FONT_LABEL,
   FONT_MONO,
   GLASS_BG,
+  GLASS_FILTER,
   HOT_RED,
   HOT_YELLOW,
   INPUT_GREEN,
@@ -791,6 +792,7 @@ const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
 const autoMasterBaseStyle = `
   width: 100%; box-sizing: border-box; height: ${FOLDED_BAR_PX}px; flex-shrink: 0;
   cursor: pointer; padding: 0; border-radius: 3px;
+  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
 `;
 const autoMasterStyle = `${autoMasterBaseStyle} background: ${GLASS_BG}; border: 1px solid ${withAlpha(AUTO_SKY, 0.3)};`;
 const autoMasterLitStyle = `${autoMasterBaseStyle} background: linear-gradient(${withAlpha("#1479b0", 0.28)}, ${withAlpha("#1479b0", 0.28)}), ${GLASS_BG}; border: 1px solid ${withAlpha(AUTO_SKY, 0.6)};`;
@@ -810,6 +812,7 @@ const autoMasterSubStyle = (lit: boolean) =>
 const micAutoBaseStyle = `
   font: 500 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.04em; padding: 2.5px 8px;
   border-radius: 4px; cursor: pointer;
+  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
 `;
 const micAutoStyle = `${micAutoBaseStyle} background: ${GLASS_BG}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.35)}; color: rgba(255,255,255,0.55);`;
 const micAutoLitStyle = `${micAutoBaseStyle} background: linear-gradient(${withAlpha(INPUT_GREEN, 0.28)}, ${withAlpha(INPUT_GREEN, 0.28)}), ${GLASS_BG}; border: 1px solid ${withAlpha(INPUT_GREEN, 0.7)}; color: #eafff0;`;
@@ -988,6 +991,7 @@ const SOLO_EYE_PX = 18;
 const footerStyle = `
   display: flex; align-items: center; justify-content: space-between; padding: 7px 12px;
   background: ${GLASS_BG};
+  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
   border: 1px solid rgba(255,255,255,0.13); border-radius: 3px;
   font: 400 9.5px/1.2 ${FONT_MONO}; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.5);
 `;

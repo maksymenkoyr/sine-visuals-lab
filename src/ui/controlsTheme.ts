@@ -103,17 +103,21 @@ export function withAlpha(hex: string, alpha: number): string {
   return `${hex}${a}`;
 }
 
-// Glass: a flat dark tint, so text holds its contrast over bright caustics.
-// Deliberately NOT a backdrop-filter — every filtered card re-reads and
-// re-processes the WebGL canvas behind it each frame (the canvas changes
-// every frame), and with ~20 of them the open panel halved the frame rate on
-// heavy scenes. Measured 2026-09-29: even a tone-only filter (no blur) cost the
-// same as the blur, so it is the filter's existence, not its radius; a flat
-// tint costs nothing. Don't put a backdrop-filter back on anything in the panel.
-export const GLASS_BG = "rgba(8, 11, 10, 0.6)";
+// Glass: the panel's surfaces either blur the scene behind them (lighter tint)
+// or, by default, sit on a darker flat tint with no filter. Both are CSS
+// custom properties set from the `vc-glass-blur` class on <html> (the
+// stylesheet below; the preference is src/ui/glassPref.ts, which also holds
+// why it defaults off): a backdrop-filter re-processes the WebGL canvas
+// behind it every frame, once per filtered layer, so it is a real GPU cost.
+// Every glass surface takes both properties inline — GLASS_BG for the
+// `background`, GLASS_FILTER for the (-webkit-)backdrop-filter — so the
+// switch is one class toggle.
+export const GLASS_BG = "var(--vc-glass-bg)";
+export const GLASS_FILTER = "var(--vc-glass-filter)";
 export const glassCardStyle = `
   position: relative; overflow: hidden;
   background: ${GLASS_BG};
+  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
   border: 1px solid rgba(255, 255, 255, 0.13); border-top-color: rgba(255, 255, 255, 0.22);
   border-radius: 3px;
 `;
@@ -126,6 +130,14 @@ export const scanlineStyle = `
 const STYLE_ID = "vc-controls-styles";
 
 const stylesheet = `
+:root {
+  --vc-glass-bg: rgba(8, 11, 10, 0.82);
+  --vc-glass-filter: none;
+}
+:root.vc-glass-blur {
+  --vc-glass-bg: rgba(8, 11, 10, 0.2);
+  --vc-glass-filter: blur(20px) saturate(.6) brightness(.5) contrast(1.08);
+}
 @font-face {
   font-family: 'DSEG7-Classic';
   src: url(${dseg7Url}) format('woff2');
@@ -421,7 +433,8 @@ body.vc-keys-reveal [data-keycap]::after {
  * depending on whether that's a single action (wireKeysRow). */
 .vc-keys {
   display: none; flex-direction: column; gap: 1px; padding: 8px 6px;
-  background: rgba(8, 11, 10, 0.72);
+  background: var(--vc-glass-bg);
+  -webkit-backdrop-filter: ${GLASS_FILTER}; backdrop-filter: ${GLASS_FILTER};
   border: 1px solid rgba(255, 255, 255, 0.13); border-bottom: none; border-radius: 3px 3px 0 0;
   font: 400 11px/1.3 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.75);
 }
