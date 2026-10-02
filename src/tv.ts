@@ -110,6 +110,28 @@ function switchScene(next: Scene): void {
   conn.sendHello(scene.id, palette.id, viewport);
 }
 
+/** Boot mount: the current scene, else the first of availableScenes() whose
+ *  init() succeeds (a shader this TV's GPU won't compile must not leave the
+ *  screen blank before the room badge ever appears). False if none mounts. */
+function mountFirstScene(): boolean {
+  const candidates = [scene, ...availableScenes().filter((s) => s !== scene)];
+  for (const next of candidates) {
+    try {
+      next.init(sceneCtx);
+      scene = next;
+      return true;
+    } catch (err) {
+      console.error(`TV: "${next.name}" failed to start:`, err);
+      try {
+        next.dispose(sceneCtx);
+      } catch {
+        // Whatever init() half-built; the original error is the one to report.
+      }
+    }
+  }
+  return false;
+}
+
 async function main(): Promise<void> {
   let gl: WebGL2RenderingContext;
   try {
@@ -143,7 +165,11 @@ async function main(): Promise<void> {
   sceneCtx = { gl, quality };
   if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
   governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
-  scene.init(sceneCtx);
+  if (!mountFirstScene()) {
+    badge.textContent = "No scene can run on this TV's GPU";
+    badge.style.display = "block";
+    return;
+  }
 
   // `?room=CODE` is the join screen's typed-code field: render in that room instead of minting a new one.
   // A failed mint (offline, the per-IP throttle, the worker down) retries with
