@@ -1,22 +1,15 @@
 /**
  * Pure time-domain measurements over a sample buffer — no AudioContext
  * involved, so these are unit-testable the same way features.ts's math is:
- * feed a plain Float32Array, assert on the number back. The buffer itself
- * comes from AnalyserNode.getFloatTimeDomainData() via waveformAnalyser.ts, which is
- * the one place in the pipeline that actually reads raw samples — everything
- * else in src/audio/ only ever sees frequency-domain (dB) data.
+ * feed a plain Float32Array, assert on the number back. The buffers come from
+ * AnalyserNode.getFloatTimeDomainData() — waveformAnalyser.ts's scope buffer
+ * and inputHealthTap.ts's per-channel taps are the callers — which are the
+ * only places in the pipeline that read raw samples; everything else in
+ * src/audio/ only ever sees frequency-domain (dB) data.
  *
  * This is what a spectrum analysis fundamentally cannot show: clipping is a
- * time-domain event (a sample pinned at the rails), and "punchy vs.
- * compressed" (crest factor) is a relationship between a signal's peak and
- * its average that a band's energy value alone doesn't carry.
+ * time-domain event, a sample pinned at the rails.
  */
-
-// A silent (or near-silent) buffer has ~zero rms, which would blow crest and
-// zeroCrossingRate up toward +Infinity/NaN. Below this, report the "nothing
-// to measure" value instead — the same reasoning as features.ts's DB_FLOOR
-// guard against poisoning downstream trackers with a non-finite value.
-const SILENCE_RMS = 1e-6;
 
 // Samples at or beyond this fraction of full scale (±1.0) count as clipped.
 // Not exactly 1.0: a true digital clip rides the rail for several consecutive
@@ -37,28 +30,6 @@ export function peak(samples: Float32Array): number {
     if (a > m) m = a;
   }
   return m;
-}
-
-/** Peak / rms — 1.0 for a signal with no dynamic range (a square wave, or a
- *  brick-walled master), ~1.41 (sqrt 2) for a sine, higher for something
- *  peaky and sparse (a single transient in an otherwise quiet buffer). 0 on
- *  a silent buffer rather than a divide-by-zero NaN — see SILENCE_RMS. */
-export function crest(samples: Float32Array): number {
-  const r = rms(samples);
-  if (r < SILENCE_RMS) return 0;
-  return peak(samples) / r;
-}
-
-/** Fraction of adjacent-sample sign changes, [0,1] — cheap noisy-vs-tonal
- *  signal: a low sustained tone crosses zero rarely, hiss or a cymbal wash
- *  crosses constantly. Undefined (returns 0) for fewer than 2 samples. */
-export function zeroCrossingRate(samples: Float32Array): number {
-  if (samples.length < 2) return 0;
-  let crossings = 0;
-  for (let i = 1; i < samples.length; i++) {
-    if ((samples[i] >= 0) !== (samples[i - 1] >= 0)) crossings++;
-  }
-  return crossings / (samples.length - 1);
 }
 
 /** True if any sample rides at or past CLIP_THRESHOLD of full scale — the

@@ -203,8 +203,10 @@ export function defineItemPairs(family: string, count: number, param: PairwisePa
  *  with no groups at all already reads) — see this file's header. */
 export function composeSettings(...lists: readonly (readonly SceneSetting[])[]): SceneSetting[] {
   const rank = (g: SettingGroup | undefined): number => (g === undefined ? -1 : SETTING_GROUPS.indexOf(g));
-  return lists
-    .flat()
+  // concat, not .flat(): this runs at module load (physarum2.ts), and the TV
+  // runtimes the es2017 build target exists for (vite.config.ts) lack .flat().
+  return ([] as SceneSetting[])
+    .concat(...lists)
     .map((spec, order) => ({ spec, order }))
     .sort((a, b) => rank(a.spec.group) - rank(b.spec.group) || a.order - b.order)
     .map((x) => x.spec);

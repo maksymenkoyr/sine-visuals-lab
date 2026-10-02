@@ -1,4 +1,15 @@
 import { DurableObject } from "cloudflare:workers";
+import {
+  cleanName,
+  FULL_VIEWPORT,
+  isValidDeviceId,
+  MAX_BINARY_BYTES,
+  MAX_CONTROL_CHARS,
+  MAX_SOCKETS_PER_ROOM,
+  parseViewport,
+  type RosterEntry,
+  type Viewport,
+} from "./roomWire.ts";
 
 export interface Env {
   ROOM: DurableObjectNamespace;
@@ -9,39 +20,12 @@ export interface Env {
   USAGE?: AnalyticsEngineDataset;
 }
 
-interface Viewport {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-const FULL_VIEWPORT: Viewport = { x: 0, y: 0, w: 1, h: 1 };
-
 interface SocketAttachment {
   role: "host" | "renderer";
   deviceId: string;
   scene: string;
   palette: string;
   viewport: Viewport;
-}
-
-interface RosterEntry {
-  deviceId: string;
-  role: "host" | "renderer";
-  scene: string;
-  palette: string;
-  viewport: Viewport;
-}
-
-function parseViewport(v: unknown): Viewport | undefined {
-  if (!v || typeof v !== "object") return undefined;
-  const o = v as Record<string, unknown>;
-  const { x, y, w, h } = o;
-  if (typeof x === "number" && typeof y === "number" && typeof w === "number" && typeof h === "number") {
-    return { x, y, w, h };
-  }
-  return undefined;
 }
 
 /**
@@ -53,6 +37,9 @@ function parseViewport(v: unknown): Viewport | undefined {
  * so any device's control panel can see and command every other device.
  * Routing "set device X's scene" reuses the deviceId tag every socket is
  * already registered under — no separate lookup table needed.
+ *
+ * server/roomWire.ts holds the limits a peer is held to (sockets per room,
+ * message sizes, id lengths) and why they are not authentication.
  */
 export class Room extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
@@ -60,9 +47,16 @@ export class Room extends DurableObject<Env> {
       return new Response("expected websocket", { status: 426 });
     }
 
+    if (this.ctx.getWebSockets().length >= MAX_SOCKETS_PER_ROOM) {
+      return new Response("room full", { status: 429 });
+    }
+
     const url = new URL(request.url);
     const role: SocketAttachment["role"] = url.searchParams.get("role") === "host" ? "host" : "renderer";
-    const deviceId = url.searchParams.get("deviceId") || crypto.randomUUID();
+    // A malformed id is replaced rather than refused, so an odd client still
+    // pairs; it just can't be commanded by its own id (it never learns this one).
+    const asked = url.searchParams.get("deviceId");
+    const deviceId = asked && isValidDeviceId(asked) ? asked : crypto.randomUUID();
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -81,9 +75,10 @@ export class Room extends DurableObject<Env> {
 
   webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): void {
     if (typeof message === "string") {
-      this.handleControlMessage(ws, message);
+      if (message.length <= MAX_CONTROL_CHARS) this.handleControlMessage(ws, message);
       return;
     }
+    if (message.byteLength > MAX_BINARY_BYTES) return;
 
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (attachment?.role !== "host") return; // only the host may broadcast frames
@@ -126,7 +121,11 @@ export class Room extends DurableObject<Env> {
     // Clock sync: echo the client's send time plus this DO's own wall
     // clock, immediately, so the client can estimate offset + RTT.
     if (m.type === "ping" && typeof m.t0 === "number") {
-      ws.send(JSON.stringify({ type: "pong", t0: m.t0, tServer: Date.now() }));
+      try {
+        ws.send(JSON.stringify({ type: "pong", t0: m.t0, tServer: Date.now() }));
+      } catch {
+        // Mid-close; webSocketClose will clean it up.
+      }
       return;
     }
 
@@ -136,8 +135,8 @@ export class Room extends DurableObject<Env> {
       if (!prev) return;
       ws.serializeAttachment({
         ...prev,
-        scene: typeof m.scene === "string" ? m.scene : prev.scene,
-        palette: typeof m.palette === "string" ? m.palette : prev.palette,
+        scene: cleanName(m.scene) ?? prev.scene,
+        palette: cleanName(m.palette) ?? prev.palette,
         viewport: parseViewport(m.viewport) ?? prev.viewport,
       } satisfies SocketAttachment);
       this.broadcastRoster();
@@ -149,11 +148,19 @@ export class Room extends DurableObject<Env> {
     if (m.type === "setDevice" && typeof m.targetId === "string") {
       const command = JSON.stringify({
         type: "command",
-        scene: m.scene,
-        palette: m.palette,
+        scene: cleanName(m.scene),
+        palette: cleanName(m.palette),
         viewport: parseViewport(m.viewport),
       });
-      for (const target of this.ctx.getWebSockets(m.targetId)) target.send(command);
+      // A reconnecting device can have its old socket still closing under the
+      // same id: one failed send must not skip the live one.
+      for (const target of this.ctx.getWebSockets(m.targetId)) {
+        try {
+          target.send(command);
+        } catch {
+          // Mid-close; webSocketClose will clean it up.
+        }
+      }
     }
   }
 

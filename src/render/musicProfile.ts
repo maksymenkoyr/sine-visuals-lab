@@ -334,13 +334,13 @@ export function createMusicProfile(): MusicProfile {
       // and `signalSec`'s own comment above).
       if (hasSignal) signalSec += dt;
 
-      (state as { pulse: number }).pulse = pulse;
-      (state as { tempo: number }).tempo = tempo;
-      (state as { brightness: number }).brightness = brightness;
-      (state as { density: number }).density = density;
-      (state as { dynamics: number }).dynamics = dynamics;
-      (state as { attack: number }).attack = attack;
-      (state as { loudness: number }).loudness = loudness;
+      state.pulse = pulse;
+      state.tempo = tempo;
+      state.brightness = brightness;
+      state.density = density;
+      state.dynamics = dynamics;
+      state.attack = attack;
+      state.loudness = loudness;
     },
   };
 

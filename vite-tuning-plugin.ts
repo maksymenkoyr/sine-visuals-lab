@@ -30,13 +30,40 @@ function broadcast(server: ViteDevServer): void {
   if (params) server.ws.send({ type: "custom", event: "viz:params", data: params });
 }
 
-function readBody(req: import("node:http").IncomingMessage): Promise<Buffer> {
+// /mark carries base64 PNG clip sheets of a full-resolution canvas tiled up to
+// 3x3, so the cap is generous; it only exists to stop a runaway body.
+const MAX_BODY_BYTES = 200 * 1024 * 1024;
+
+class BodyTooLargeError extends Error {}
+
+function readBody(req: import("node:http").IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let size = 0;
+    let tooLarge = false;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (tooLarge) return; // keep draining without storing, so the 413 can still be sent back
+      if (size > maxBytes) {
+        tooLarge = true;
+        chunks.length = 0;
+        reject(new BodyTooLargeError(`request body over ${maxBytes} bytes`));
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
+}
+
+/** The two writing endpoints only take POSTs that say they are JSON. A page
+ *  on another site can fire a text/plain no-cors POST without any preflight,
+ *  but it cannot send application/json without one — which Vite's default
+ *  CORS config refuses — so this keeps a stray tab from writing to disk. Both
+ *  in-repo clients (debug.ts, bakeDefaults.ts) already send the header. */
+function isJsonPost(req: import("node:http").IncomingMessage): boolean {
+  return req.method === "POST" && String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json");
 }
 
 function collectSceneFiles(dir: string): string[] {
@@ -136,6 +163,11 @@ export function tuningPlugin(): Plugin {
           res.end("method not allowed");
           return;
         }
+        if (!isJsonPost(req)) {
+          res.statusCode = 415;
+          res.end("content-type must be application/json");
+          return;
+        }
         readBody(req)
           .then((raw) => {
             const body = JSON.parse(raw.toString("utf8")) as { png: string; meta: unknown };
@@ -149,7 +181,7 @@ export function tuningPlugin(): Plugin {
           })
           .catch((err) => {
             console.error("[viz-tuning] mark save failed:", err);
-            res.statusCode = 400;
+            res.statusCode = err instanceof BodyTooLargeError ? 413 : 400;
             res.end(String(err));
           });
       });
@@ -158,6 +190,11 @@ export function tuningPlugin(): Plugin {
         if (req.method !== "POST") {
           res.statusCode = 405;
           res.end("method not allowed");
+          return;
+        }
+        if (!isJsonPost(req)) {
+          res.statusCode = 415;
+          res.end("content-type must be application/json");
           return;
         }
         readBody(req)
@@ -193,7 +230,7 @@ export function tuningPlugin(): Plugin {
           })
           .catch((err) => {
             console.error("[viz-tuning] bake failed:", err);
-            res.statusCode = 400;
+            res.statusCode = err instanceof BodyTooLargeError ? 413 : 400;
             res.end(String(err));
           });
       });

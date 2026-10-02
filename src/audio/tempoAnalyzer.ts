@@ -78,6 +78,11 @@ const REFRACTORY_SEC = 0.1;
 const ONSET_WIN_SEC = 6;
 const MAX_PAIR_ONSETS = 64; // hard cap on the onset window this hop's comb searches, mirrors features.ts's MAX_ONSETS
 
+// What drainOnsets() hands back when nothing fired — shared and frozen, so a
+// caller that tried to keep or mutate it would fail loudly instead of
+// corrupting every later empty drain.
+const NO_ONSETS = Object.freeze([]) as unknown as TempoOnset[];
+
 export class TempoAnalyzer {
   readonly sampleRate: number;
   readonly hop: number;
@@ -152,6 +157,10 @@ export class TempoAnalyzer {
   }
 
   drainOnsets(): TempoOnset[] {
+    // process() calls this ~375 times a second and most calls find nothing —
+    // hand back a shared empty array rather than allocating a fresh one.
+    // Callers only read it (tempoWorklet.ts posts the length).
+    if (this.onsetsOut.length === 0) return NO_ONSETS;
     const out = this.onsetsOut;
     this.onsetsOut = [];
     return out;

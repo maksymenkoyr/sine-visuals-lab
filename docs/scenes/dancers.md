@@ -108,6 +108,10 @@ original work built around that data.
   downbeat). It was re-decided every frame from the raw `bpm`, so a wobble
   across `HALF_TIME_RATIO`/`DOUBLE_TIME_RATIO`, or a drop to 0 in a break,
   jumped the clip phase. `clipPhaseAt` stays for the DEV `?clip` path.
+- 2026-10-02: `rig.ts`'s bone-index table `B` is built with a plain loop
+  instead of `Object.fromEntries`. It runs at module load, which the TV
+  bundle evaluates too, and the older TV runtimes the es2017 build target
+  exists for lack `fromEntries`. Same table, same indices — no visual change.
 
 ## Tuning notes
 
