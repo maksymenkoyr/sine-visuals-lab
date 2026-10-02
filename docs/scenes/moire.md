@@ -115,6 +115,14 @@ worked around in this scene.
   so higher already meant smaller clouds. Its `auto` density weight flipped
   to positive, since the old negative sign gave dense music bigger clouds,
   the opposite of the stated intent. Stored values and Looks are unchanged.
+- 2026-10-02, review fix: the elapsed-seconds clock behind `introRamp` lived
+  in the scene module's closure and never reset, and the gallery's preview
+  tile advances the same scene object, so the intro was spent once per page
+  load (usually on the tile) and opening Moiré later started at full depth,
+  contradicting "since this scene mounted". The clock is now module-level and
+  `createFullscreenScene`'s new `onInit` option restarts it on every mount.
+  Only the intro clock resets; the flicker, blackout, curtain and wander
+  state keep their closure lifetime, so the tuned behaviour is unchanged.
 
 ## Tuning notes
 
