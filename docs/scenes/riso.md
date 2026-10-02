@@ -37,6 +37,14 @@ None — original design (a simulated print process, not a studied video).
   on `main` — this is the one scene of the five in this record set that
   `4b8d342`'s quality/tier rename didn't touch (it references neither
   `uQuality` nor `minTier`).
+- 2026-10-02 — review fix: the beat "out of register" shake was
+  `uBeatPulse * 0.006` added to `screenUv`, which is already in halftone-cell
+  units, so it moved the dot grid by 0.006 of a cell (a fraction of a pixel)
+  and the misregistration the header promises never showed. It now shifts
+  each ink's artwork (`shapeField(p + off)`) by 0.012 in `p`, 0.6 % of the
+  short side, which is the 0.006-of-the-short-side the old constant was
+  aiming at, with the dot grids still fixed to the display. Off the beat
+  (`uBeatPulse` = 0) the picture is identical to before.
 
 ## Tuning notes
 

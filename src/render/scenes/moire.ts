@@ -651,11 +651,19 @@ export function advanceWander(st: WanderState, dtSec: number, inputs: WanderInpu
   return { angle: st.angle, stretch: st.stretch, detail: st.detail, tilt: st.tilt };
 }
 
+// Seconds since the scene was last mounted — the clock introRamp reads. Module
+// scope (not inside extraUniforms' closure) so onInit can restart it: the
+// closure lives as long as the page, and a gallery tile's earlier mount would
+// otherwise spend the intro before the scene is ever opened.
+let elapsedSec = 0;
+
 export const moireScene = createFullscreenScene("moire", "Moiré", FRAG, {
   settings: SETTINGS,
   extraUniformDecls: `uniform float uSeed;\nuniform float uSlowT;\nuniform float uDepthEnv;\nuniform float uBlackoutPhase;\nuniform float uCurtainLevel;\nuniform float uStretchNow;\nuniform float uAngle;\nuniform float uDetailMix;\nuniform float uTilt;`,
+  onInit: () => {
+    elapsedSec = 0;
+  },
   extraUniforms: (() => {
-    let elapsedSec = 0;
     let slowT = 0;
     const flicker = createFlickerState();
     const blackout = createBlackoutState();

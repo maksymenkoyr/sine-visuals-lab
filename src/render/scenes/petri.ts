@@ -101,14 +101,19 @@ import { NUM_BANDS } from "../../audio/types.ts";
 // by Reseed and the hit's strength; a regime cut claims most of the budget
 // for a burst of fresh sites; a silent fallback timer (FALLBACK_RESEED_SEC)
 // stamps one regardless of Reseed, silence, or regime state, so the field
-// can never fully decay into a boring fixed point over a long session.
+// can never fully decay into a boring fixed point over a long session. That
+// timer counts sim time (each frame adds dt times the steps it ran), not
+// wall time.
 const ID = "petri";
 
 const GRID_SIDE: Record<QualityPreset, number> = { high: 512, mid: 384, low: 256, floor: 192 };
 
 const DRIFT_DEG_PER_SEC = 6; // at Drift = 1
 const BEADS_TRAVEL_PER_SEC = 0.12; // sim uv per second at Drift = 1, Beads style
-const FALLBACK_RESEED_SEC = 6; // longest silence/no-reseed can go before a stamp anyway
+// Longest silence/no-reseed can go before a stamp anyway — in sim seconds
+// (wall seconds x steps per frame), as tuned, so at the default Growth speed
+// it fires every couple of wall seconds and a few times in the warmup burst.
+const FALLBACK_RESEED_SEC = 6;
 const RESEED_COOLDOWN_SEC = 0.2; // an onset-triggered stamp can't refire faster than this
 const WIPE_COOLDOWN_SEC = 0.25; // an onset-triggered wipe can't refire faster than this
 const REGIME_FALLBACK_SEC = 20; // with cuts on but no beat/drop to place one, cut anyway
@@ -915,20 +920,22 @@ function createPetriScene(): Scene {
       gl.disable(gl.BLEND);
       gl.viewport(0, 0, gridSide, gridSide);
 
+      // Nothing the sim reads changes between its steps, and uniform state
+      // belongs to the program, so it is uploaded once for all of them.
+      simProg.use();
+      uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+      simProg.setF("uTexel", texel);
+      // Regime-effective values override the plain slider readings
+      // uploadCommonUniforms just set — same uniform names (uFeed/uKill),
+      // so the sim shader stays oblivious to regimes existing at all.
+      simProg.setF("uFeed", effFeed);
+      simProg.setF("uKill", effKill);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform1i(simPrevLoc, 0);
       for (let i = 0; i < iterations; i++) {
         const write = 1 - read;
         gl.bindFramebuffer(gl.FRAMEBUFFER, stateFbo[write]);
-        simProg.use();
-        uploadCommonUniforms(simProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
-        simProg.setF("uTexel", texel);
-        // Regime-effective values override the plain slider readings
-        // uploadCommonUniforms just set — same uniform names (uFeed/uKill),
-        // so the sim shader stays oblivious to regimes existing at all.
-        simProg.setF("uFeed", effFeed);
-        simProg.setF("uKill", effKill);
-        gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, stateTex[read]);
-        gl.uniform1i(simPrevLoc, 0);
         drawFullscreenQuad(gl, quadVao);
         read = write;
       }

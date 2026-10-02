@@ -112,6 +112,16 @@ measured from a reference clip.
   already identity at drive 0 (`shake*(0.25+2.4*d)`, the `(0.3+d)` glow
   floor, every other term a pure additive reaction amount), so unplugging a
   jack already just stops the reaction — nothing else changes.
+- 2026-10-02 — Treble-glow cost fix, same picture: a glint's sprite is
+  enlarged by the halo margin, so most of its fragments are halo ring that
+  contributes no grain (the polygon distance `rn` is never smaller than the
+  disc radius `r`, so the grain's coverage is exactly 0 from `r` = 0.5 out),
+  yet each ran the whole grain shader. `POINT_VERT` now computes the grain's
+  colour, brightness and halo tint once per grain (`vCol`, `vHaloCol`) and
+  `POINT_FRAG` returns early outside the grain's radius with only the halo.
+  Checked on a seeded `tools/gpu-bench.mjs` render with Treble glow at 1:
+  at most 1/255 difference on a handful of pixels, and the point pass at
+  3024x1890 about halved.
 
 ## Tuning notes
 

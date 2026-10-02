@@ -90,6 +90,15 @@ shells thrown outward on bass hits. Reference frames were pulled ad hoc with
 - 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
   Loud swell (`breathe`) renamed Quiet gather: it scales how hard quiet
   passages gather and dim the cloud. Label only.
+- 2026-10-02 — review fix: the cube spawn gate was `drives.value("chunks", …)
+  > 0`, which on the default Scene drive is true only on the frame the hit
+  detector fires, but a user patch of Chunk burst onto a level or a decaying
+  hit pulse is above 0 for many frames and relaunched the whole cube pool
+  every frame (cubes strobed at the origin instead of flying out). The gate
+  is now `drives.fired("chunks", hitStrength > 0)`, with the strength still
+  read from `value()`, the same edge rule the kick plume uses. On the
+  default drive both reduce to `hitStrength`, so the default look is
+  untouched.
 
 ## Tuning notes
 

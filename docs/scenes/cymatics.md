@@ -36,6 +36,9 @@ modeling (Chladni plate modes) but no video or image was studied.
 - 2026-08-29 (`4b8d342`, #31) — mechanical rename only: `uQuality` →
   `uDetail` as part of the repo-wide quality/tier renaming; no visual
   change.
+- 2026-10-02 — review fix, no visual change: the wavefield loop bound was a
+  literal band count; it is now `NUM_BANDS` (the `uBands` array was already
+  sized from it), and the header no longer counts bands.
 
 ## Tuning notes
 

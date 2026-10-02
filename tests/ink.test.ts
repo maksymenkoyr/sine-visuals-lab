@@ -129,6 +129,67 @@ describe("ink parameter drift", () => {
     expect(maxStep).toBeLessThan(0.02);
   });
 
+  it("rolls once, not every frame, after a huge dt (a hidden tab)", () => {
+    const drift = createParamDrift(seeded(8));
+    const dt = 1 / 60;
+    drift.advance(dt, 0, 0, 1);
+    const n0 = drift.nodes;
+    let prev = Float32Array.from(drift.advance(NODE_FALLBACK_SEC * 85, 0, 0, 1)); // just past a whole number of timers
+    expect(drift.nodes).toBe(n0 + 1);
+    let maxStep = 0;
+    for (let i = 0; i < 30; i++) {
+      const v = drift.advance(dt, 0, 0, 1);
+      for (let k = 0; k < VORTEX_COUNT * 4; k += 4) maxStep = Math.max(maxStep, Math.abs(v[k] - prev[k]));
+      prev = Float32Array.from(v);
+    }
+    expect(drift.nodes).toBe(n0 + 1);
+    expect(maxStep).toBeLessThan(0.02);
+    // Garbage dt never rolls or jumps either.
+    drift.advance(NaN, 0, 0, 1);
+    drift.advance(-5, 0, 0, 1);
+    expect(drift.nodes).toBe(n0 + 1);
+  });
+
+  it("does not jump when the tempo lock is acquired or lost", () => {
+    const dt = 1 / 60;
+    type Drift = ReturnType<typeof createParamDrift>;
+    // `setup` runs the drift up to the edge and returns its last frame; `step`
+    // is the frame loop after the edge. Returns the largest per-frame move of
+    // any vortex x, from the last frame before the edge onward.
+    const maxJump = (setup: (d: Drift) => Float32Array, step: (d: Drift, i: number) => Float32Array) => {
+      const drift = createParamDrift(seeded(31));
+      let prev = Float32Array.from(setup(drift));
+      let worst = 0;
+      for (let i = 0; i < 120; i++) {
+        const v = step(drift, i);
+        for (let k = 0; k < VORTEX_COUNT * 4; k += 4) worst = Math.max(worst, Math.abs(v[k] - prev[k]));
+        prev = Float32Array.from(v);
+      }
+      return worst;
+    };
+    // Unlocked, partway through an ease (t about 0.5), then lock at barPhase 0.8.
+    const acquire = maxJump(
+      (d) => {
+        let v = d.advance(dt, 0, 0, 1);
+        for (let i = 0; i < 41; i++) v = d.advance(dt, 0, 0, 1);
+        return v;
+      },
+      (d, i) => d.advance(dt, Math.min(0.999, 0.8 + (i * dt) / 2), 1, 1),
+    );
+    // Locked mid-bar, then the lock drops out.
+    let phase = 0.4;
+    const lose = maxJump(
+      (d) => {
+        let v = d.advance(dt, phase, 1, 1);
+        for (let i = 0; i < 20; i++) v = d.advance(dt, (phase += dt / 2), 1, 1);
+        return v;
+      },
+      (d) => d.advance(dt, 0, 0, 1),
+    );
+    expect(acquire).toBeLessThan(0.02);
+    expect(lose).toBeLessThan(0.02);
+  });
+
   it("re-rolls the lifted channel every NODES_PER_PHRASE nodes and on a drop", () => {
     // Seeds are chosen so the phrase re-roll lands on a different channel;
     // with three channels a re-roll can repeat, which is why the check is
