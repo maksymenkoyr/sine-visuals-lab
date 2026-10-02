@@ -56,9 +56,9 @@ meaning is its exact position, so the device-wide Scene master must never
 scale it. `scene.panel` (one `PanelSection` naming the `itemBoxes` widget —
 `src/ui/widgets/itemBoxes.ts`) renders them as specimen boxes + the selected
 strain's rows inside the device menu's Scene card, ahead of the remaining
-flat rows (Network scale, Trail decay, Cross-smell [`rivalry` key, labelled Rivalry,
-then Hostility, now Cross-smell], Crawl speed, Beat seeding, Exposure, Palette tint, Beat
-flash), each of the latter still carrying its own `auto` weights as before;
+flat rows (Network scale, Trail decay, Cross-smell — the `rivalry` key, once
+labelled Rivalry, then Hostility — Crawl speed, Beat seeding, Exposure, Palette
+tint, Beat flash), each of the latter still carrying its own `auto` weights as before;
 and the Pairs block (`src/ui/widgets/pairPads.ts`'s `buildPairPads`: a
 Smell/Touch switch, an own-trail fader strip, one two-strain-culture pad per
 pair (`pairsOf`), a Random/Nudge/Keep own trails/Back mix row and named
@@ -842,7 +842,7 @@ applies there too. Tuned so far only against the synthetic feed at
   Measurements is measured only on the M1 Pro's tile-based GPU via
   ANGLE/Metal; an immediate-mode-renderer GPU (most desktop/laptop dGPUs)
   pays for the second attachment differently and is unmeasured. The pair
-  cultures' own preview (`previews.ts`'s `pair.weights`) reads Hostility
+  cultures' own preview (`previews.ts`'s `pair.weights`) reads Cross-smell
   through `WidgetCtx.get`, i.e. the *stored* `rivalry` value, not its
   Auto-resolved one — the same gap `registry.ts`'s `get` doc already flagged
   before Touch existed, now with one more reader. Touch carries no
