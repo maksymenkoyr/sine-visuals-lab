@@ -18,7 +18,9 @@ different mode takes over. Featured, on main.
 - Pure, tested helpers: `buildModeTable`/`MODE_TABLE` (the (n, m) mode
   lattice up to `MAX_ORDER`), `modeFrequencyHz`/`bandPosition` (mode-to-band
   mapping), `createPlateResponse` (the per-mode resonance/ring/attack model
-  that picks `ACTIVE_MODES` strongest modes each frame), `grainTextureSide`,
+  that picks `ACTIVE_MODES` strongest modes each frame, each mode excited
+  by its band energy less `SURPRISE_SHARE` of that energy's own running
+  average over `BASELINE_SEC`), `grainTextureSide`,
   `grainGain`, `drawnGrainCount` (the fixed-sand-budget logic — see
   "Known issues" for why it exists).
 - Three GLSL programs sharing `CHLADNI_GLSL` (the plate function, its
@@ -49,6 +51,17 @@ measured from a reference clip.
 - 2026-08-30 (#47): after re-anchoring `grainGain` to the high-quality
   tier's grain count and raising its clamp ceiling, `high` and `low`
   quality presets read comparably bright headlessly.
+
+- 2026-10-02: offline probe of the real `FeatureExtractor` into
+  `createPlateResponse` at default settings, on a synthetic bass/chords/lead/
+  drums track. It ran clean, and through `tests/tempoEval/micChain.ts` with
+  auto-gain on Auto (which went fully adaptive for the mic). Share of frames
+  where (1,2) was the strongest mode, before → after: through the mic
+  76% → 32% (distinct figures 10 → 18); through the mic with Resonance and
+  Ring maxed 84% → 40%; clean with auto-gain off 73% → 45%. Mic noise with no
+  music in it already gave (1,2) 98% before. Headless shots 7.5 s apart at
+  `?audio=synthetic&bpm=120`: before held one lattice the whole time, after
+  moved between figures with the lines still crisp.
 
 ## Decisions and pivots
 
@@ -123,6 +136,28 @@ measured from a reference clip.
   at most 1/255 difference on a handful of pixels, and the point pass at
   3024x1890 about halved.
 
+- 2026-10-02: reported as "fixates on one figure, more with the mic, and
+  maxing the settings doesn't help". Cause: `createPlateResponse` picked
+  modes by absolute band energy, and the bands carry a constant bass-heavy
+  tilt that doesn't come from the music. Through a mic, auto-gain goes fully
+  adaptive (`autoGainForSpan` in `src/audio/autoGain.ts`), and that per-band
+  normalization (`FeatureExtractor.update`) reads steady mic hiss high in the
+  one-FFT-bin bass bands and low in the wide treble ones. That's because a
+  one-bin band's dB reading jitters far more on noise, so its window opens
+  wide and its value sits near the top. The lowest mode, (1,2), sat under
+  those bands and won almost every frame. Resonance and Ring only made the
+  winner win harder, and Pattern complexity only changed which low mode sat
+  there. Clean audio with auto-gain off has a milder version of the same
+  lean, from music's real bass-heavy balance. Fixed in the scene: each mode
+  is now excited by how far its energy rises above its own running average,
+  so any constant tilt cancels out, while a held tone keeps
+  `1 - SURPRISE_SHARE` of its level and still holds its figure. Fixing the
+  tilt at its source in `features.ts` (a noise margin over each band's
+  measured jitter) was tried and flattened mic noise across the ladder. But
+  `bandEnergy`'s bass pulse groups and the beat clock read the same bands,
+  and the tempo eval moved in both directions, so it was left for its own
+  tuning pass (see "Known issues").
+
 ## Tuning notes
 
 - Pattern complexity sets the plate's effective size (`FUNDAMENTAL_HZ_SMALL`
@@ -147,6 +182,10 @@ measured from a reference clip.
 - Quality tiers change grain count (`ctx.quality.maxParticles`) only;
   `grainGain` compensates so sparser beds (`floor`/`low`) read about as
   bright as the `high` tier reference count (`REFERENCE_GRAINS`).
+- `BASELINE_SEC`/`SURPRISE_SHARE` decide how strongly a constant spectral
+  tilt is cancelled. Raising the share cancels more of it but trades away how
+  firmly a held tone keeps its figure, and figures change more often. Judge
+  through a room mic with auto-gain on Auto, where the tilt is worst.
 - Sand amount (`sandAmount`) and Grain size both set the bed through
   `drawnGrainCount` — amount scales the budget first, the coverage cap
   (`MAX_BED_COVERAGE`, grown by the amount above 1) binds second — and neither touches `grainGain`, so
@@ -157,6 +196,12 @@ measured from a reference clip.
   `manual` — see PR #38's verification notes.
 
 ## Known issues and next steps
+
+- Under a room mic with full auto-gain, the shared bands still read steady
+  noise as bass-heavy (see the 2026-10-02 decision). This scene now cancels
+  that, but every other scene that reads `bands` still sees it. The fix
+  belongs in `src/audio/features.ts` and needs `npm run eval:tempo` before
+  and after.
 
 - Grains never collide (no notion of grain radius), so `drawnGrainCount`'s
   fixed-sand-budget approach is a workaround for a fixed grain count
@@ -173,7 +218,9 @@ measured from a reference clip.
   the plate physics rather than a reference clip.
 - Working scripts: `docs/scenes/chladni/scripts/` — `sand-amount-shot.mjs`
   (headless before/after shots of the Sand amount setting via
-  `window.__viz.setParams`). Captured screenshots are session output, not
+  `window.__viz.setParams`) and `figure-sequence-shot.mjs` (a timed run of
+  shots, to compare whether the plate moves between figures or sits on one).
+  Captured screenshots are session output, not
   kept in the repo.
 
 ## Resume here

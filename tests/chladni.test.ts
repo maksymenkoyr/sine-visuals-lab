@@ -294,6 +294,30 @@ describe("plate response", () => {
     expect(Math.max(...long.amplitudes)).toBeGreaterThan(Math.max(...short.amplitudes));
   });
 
+  it("a held tone keeps its figure — the running baseline never cancels it out", () => {
+    const r = createPlateResponse();
+    const early = run(r, tone(10), 1);
+    const late = run(r, tone(10), 20);
+    expect(late[0]).toMatchObject({ n: early[0].n, m: early[0].m });
+    expect(Math.max(...r.amplitudes)).toBeGreaterThan(0.05);
+  });
+
+  it("a constant spectral tilt doesn't hold the plate: a lift higher up wins over steadily louder bass", () => {
+    // Bass-heavy and steady (music's usual balance, or a room mic's floor),
+    // then the upper mids get busier than usual. Measured against absolute
+    // energy the bass-side fundamental kept the plate throughout.
+    const tilt = new Float32Array(NUM_BANDS);
+    for (let b = 0; b < NUM_BANDS; b++) tilt[b] = 0.9 - (0.8 * b) / NUM_BANDS;
+    const lifted = Float32Array.from(tilt);
+    for (let b = 15; b <= 17; b++) lifted[b] += 0.3;
+    const r = createPlateResponse();
+    const inp = inputs({ complexity: 0.5 });
+    run(r, tilt, 10, inp);
+    const modes = run(r, lifted, 1, inp);
+    const top = MODE_TABLE.find((m) => m.n === modes[0].n && m.m === modes[0].m)!;
+    expect(bandPosition(modeFrequencyHz(top, 0.5))).toBeGreaterThan(13);
+  });
+
   it("moves to a new figure when the tone moves", () => {
     // Default plate (complexity 0.5) spans roughly 150 Hz .. 4.4 kHz; both
     // tones sit inside that.
