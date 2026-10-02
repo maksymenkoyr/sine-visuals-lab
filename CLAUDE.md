@@ -15,9 +15,7 @@ depends on Claude Code features — slash commands in `.claude/commands/` and
 Anthropic model routing — that no other tool shares.
 
 - Give every subagent and workflow `agent()` its own `model` and `effort`,
-  the cheapest that does the job: Haiku/low for mechanical sweeps,
-  Sonnet/medium for executing a plan, Opus/high for planning, verifying and
-  judging pictures. Holds under Ultracode too.
+  the cheapest that does the job — even under Ultracode.
 - `/exec-cheap plans/<topic>.md` hands a plan to an OpenRouter model in a
   separate Claude Code process (`tools/cheap.sh` owns the setup) and verifies
   the result here. Use it only when the user types `/exec-cheap` themselves;
