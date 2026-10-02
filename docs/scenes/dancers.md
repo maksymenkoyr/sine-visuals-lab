@@ -92,6 +92,22 @@ original work built around that data.
   addition of `fastRenderers.ts`'s two cheap renderers (Capsules, Flat) let
   the raymarcher hand over below `RAYMARCH_MIN_DETAIL`, so the scene now
   registers as runnable on every preset including the TV floor.
+- 2026-10-02: review cleanup. `moves.ts` lost the helpers nothing called
+  (`wristBend`, `lift`, `newPose`, the `lerpPose` re-export), and `rig.ts`
+  now points at `clipFormat.ts` instead of a `clips.ts` that never existed.
+- 2026-10-02: the Skeleton skin's lateral details are reflected per side.
+  `rig.ts`'s `mirror()` keeps the rest rotation, so local +X is world -X on
+  both arms and both legs, and the thumb and the forearm/shin twin bone
+  landed on the same world side of each pair. `skel_map` now reflects `q`
+  for the right hand and forearm and the left shin (thumbs and radius medial
+  on both arms, fibula lateral on both legs). The Stick skin and the Capsules
+  and Flat renderers are unaffected.
+- 2026-10-02: the clip loop length (normal, half- or double-time) is now
+  latched in `createClipPlayer` when a move starts, and re-read only when the
+  picker comes back to it after its hold (restarting the loop on that
+  downbeat). It was re-decided every frame from the raw `bpm`, so a wobble
+  across `HALF_TIME_RATIO`/`DOUBLE_TIME_RATIO`, or a drop to 0 in a break,
+  jumped the clip phase. `clipPhaseAt` stays for the DEV `?clip` path.
 
 ## Tuning notes
 
