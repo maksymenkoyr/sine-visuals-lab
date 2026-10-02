@@ -638,7 +638,8 @@ export function buildGridPositions(cols: number, rows: number = cols): Float32Ar
 
 /** Two CCW triangles per cell over a cols*rows grid, for the surface pass. */
 export function buildGridTriangles(cols: number, rows: number = cols): Uint32Array {
-  const tris: number[] = [];
+  const tris = new Uint32Array(Math.max(0, cols - 1) * Math.max(0, rows - 1) * 6);
+  let k = 0;
   const idx = (row: number, col: number) => row * cols + col;
   for (let row = 0; row < rows - 1; row++) {
     for (let col = 0; col < cols - 1; col++) {
@@ -646,10 +647,15 @@ export function buildGridTriangles(cols: number, rows: number = cols): Uint32Arr
       const b = idx(row, col + 1);
       const c = idx(row + 1, col);
       const d = idx(row + 1, col + 1);
-      tris.push(a, b, c, b, d, c);
+      tris[k++] = a;
+      tris[k++] = b;
+      tris[k++] = c;
+      tris[k++] = b;
+      tris[k++] = d;
+      tris[k++] = c;
     }
   }
-  return new Uint32Array(tris);
+  return tris;
 }
 
 /** A rolling ring buffer of the last `frames` spectrum frames (each `bands`

@@ -70,6 +70,24 @@ describe("meshGrid grid geometry", () => {
       expect(idx).toBeLessThan(cols * rows);
     }
   });
+
+  it("keeps the row-major, two-triangles-per-cell winding and handles degenerate sizes", () => {
+    const cols = 5;
+    const rows = 3;
+    const tris = buildGridTriangles(cols, rows);
+    expect(Array.from(tris.slice(0, 6))).toEqual([0, 1, 5, 1, 6, 5]);
+    // Reference built with the plain push loop the typed-array fill replaced.
+    const ref: number[] = [];
+    for (let row = 0; row < rows - 1; row++) {
+      for (let col = 0; col < cols - 1; col++) {
+        const a = row * cols + col;
+        ref.push(a, a + 1, a + cols, a + 1, a + cols + 1, a + cols);
+      }
+    }
+    expect(Array.from(tris)).toEqual(ref);
+    expect(buildGridTriangles(1, 4).length).toBe(0);
+    expect(buildGridTriangles(4, 1).length).toBe(0);
+  });
 });
 
 describe("meshGrid spectrum mapping", () => {

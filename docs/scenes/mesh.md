@@ -135,6 +135,9 @@ None — original design.
   Circle Squeeze renamed Circle Depth (higher already meant deeper) and
   Noise Scale renamed Noise Detail (it is a frequency, so higher already
   meant finer). Labels only.
+- 2026-10-02: `buildGridTriangles` fills a preallocated `Uint32Array` instead
+  of growing an array and copying it (Grid Density rebuilds the grid on every
+  step). Same indices, same order.
 
 ## Tuning notes
 
