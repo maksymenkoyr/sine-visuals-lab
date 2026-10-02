@@ -184,91 +184,7 @@ export function createJoinScreen(
 
   // ---- The typed-code field ----
   // On every kind, below the QR: a TV can't scan and a desktop has no camera.
-  // It leaves the page for the room the code names (`go`).
-
-  const entry = document.createElement("form");
-  entry.style.cssText = "display: flex; flex-direction: column; align-items: center; gap: 10px;";
-  entry.addEventListener("submit", (e) => e.preventDefault());
-
-  const entryLabel = document.createElement("label");
-  entryLabel.textContent = "Have a code? Type it to join";
-  entryLabel.style.cssText = "opacity: 0.6; font-size: 14px; font-size: clamp(13px, 1.6vw, 18px);";
-
-  const field = document.createElement("input");
-  field.type = "text";
-  field.inputMode = "text";
-  field.maxLength = 8; // a little slack so a spaced paste ("K7 M2") survives until normalized
-  field.autocomplete = "off";
-  field.autocapitalize = "characters";
-  field.spellcheck = false;
-  field.placeholder = "CODE";
-  field.setAttribute("aria-label", "Room code");
-  field.style.cssText = `
-    width: 5.2em; text-align: center; text-transform: uppercase;
-    font-weight: 700; font-family: ui-monospace, monospace; letter-spacing: 0.12em;
-    font-size: 32px; font-size: clamp(26px, 4vw, 44px);
-    color: #fff; background: #1a1a1a; border: 2px solid #fff4; border-radius: 10px;
-    padding: 6px 10px; outline: none;
-  `;
-  field.addEventListener("focus", () => (field.style.borderColor = "#fffc"));
-  field.addEventListener("blur", () => (field.style.borderColor = "#fff4"));
-  // Typing here must never reach the page's single-key shortcuts (F = fullscreen, S = panel, Space = Cue).
-  field.addEventListener("keydown", (e) => {
-    e.stopPropagation();
-    if (e.key === "Escape") {
-      if (dismissible) api.hide();
-      return;
-    }
-    if (e.key === "Enter") go(options.tv ? "renderer" : "host");
-  });
-  field.addEventListener("input", () => {
-    field.value = normalizeRoomCodeInput(field.value);
-    refresh();
-  });
-
-  // The field and its buttons share a row where the screen is wide enough and
-  // wrap under it where it isn't (a phone).
-  const fieldRow = document.createElement("div");
-  fieldRow.style.cssText = "display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: center;";
-
-  const makeButton = (label: string, as: "host" | "renderer", primary: boolean): HTMLButtonElement => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.textContent = label;
-    b.style.cssText = `
-      font: 600 16px system-ui, sans-serif; font-size: clamp(15px, 1.8vw, 20px);
-      padding: 10px 18px; border-radius: 999px; cursor: pointer;
-      border: 2px solid #fff6; color: ${primary ? "#000" : "#fff"}; background: ${primary ? "#fff" : "transparent"};
-    `;
-    b.addEventListener("click", () => go(as));
-    return b;
-  };
-  const buttons = options.tv
-    ? [makeButton("Join", "renderer", true)]
-    : [makeButton("Play music here", "host", true), makeButton("Just watch", "renderer", false)];
-  fieldRow.append(field, ...buttons);
-
-  const problem = document.createElement("div");
-  problem.style.cssText = "min-height: 1.2em; font-size: 14px; color: #ff8a80;";
-
-  function refresh(): void {
-    const ok = isValidRoomCode(field.value);
-    for (const b of buttons) b.style.opacity = ok ? "1" : "0.5";
-    problem.textContent = "";
-  }
-
-  function go(as: "host" | "renderer"): void {
-    const typed = normalizeRoomCodeInput(field.value);
-    if (!isValidRoomCode(typed)) {
-      problem.textContent = typed.length < 4 ? "Codes are 4 characters" : "That isn't a valid code (no 0, O, 1, I or L)";
-      return;
-    }
-    // The TV page re-reads ?room= itself; the main app's entry is the site root.
-    location.assign(options.tv ? `${location.pathname}?room=${typed}` : joinUrlFor(typed, as));
-  }
-  refresh();
-
-  entry.append(entryLabel, fieldRow, problem);
+  const entry = createRoomCodeEntry({ tv: options.tv, onEscape: dismissible ? () => api.hide() : undefined });
   entry.style.marginBottom = "auto";
   root.appendChild(entry);
 
@@ -319,4 +235,109 @@ export function createJoinScreen(
     },
   };
   return api;
+}
+
+export interface RoomCodeEntryOptions {
+  /** The paired display: one plain Join, which reloads tv.html with `?room=`.
+   *  Every other device picks whether it supplies the music or just watches. */
+  tv?: boolean;
+  /** Escape pressed in the field; left out, Escape does nothing there. */
+  onEscape?: () => void;
+  /** Smaller type, for a panel rather than a fullscreen overlay. */
+  compact?: boolean;
+}
+
+/**
+ * The field to type a room's code instead of scanning its QR, with its Join
+ * buttons. A pick leaves the page for the room the code names (`go`). One
+ * builder for every place a device can join a room by code: the pairing
+ * overlay below (TV, laptop, phone) and the Room panel (src/ui/controlPanel.ts).
+ */
+export function createRoomCodeEntry(options: RoomCodeEntryOptions = {}): HTMLFormElement {
+  const compact = options.compact ?? false;
+  const entry = document.createElement("form");
+  entry.style.cssText = "display: flex; flex-direction: column; align-items: center; gap: 10px;";
+  entry.addEventListener("submit", (e) => e.preventDefault());
+
+  const entryLabel = document.createElement("label");
+  entryLabel.textContent = "Have a code? Type it to join";
+  entryLabel.style.cssText = compact
+    ? "opacity: 0.6; font-size: 12px;"
+    : "opacity: 0.6; font-size: 14px; font-size: clamp(13px, 1.6vw, 18px);";
+
+  const field = document.createElement("input");
+  field.type = "text";
+  field.inputMode = "text";
+  field.maxLength = 8; // a little slack so a spaced paste ("K7 M2") survives until normalized
+  field.autocomplete = "off";
+  field.autocapitalize = "characters";
+  field.spellcheck = false;
+  field.placeholder = "CODE";
+  field.setAttribute("aria-label", "Room code");
+  field.style.cssText = `
+    width: 5.2em; text-align: center; text-transform: uppercase;
+    font-weight: 700; font-family: ui-monospace, monospace; letter-spacing: 0.12em;
+    ${compact ? "font-size: 22px;" : "font-size: 32px; font-size: clamp(26px, 4vw, 44px);"}
+    color: #fff; background: #1a1a1a; border: 2px solid #fff4; border-radius: 10px;
+    padding: 6px 10px; outline: none;
+  `;
+  field.addEventListener("focus", () => (field.style.borderColor = "#fffc"));
+  field.addEventListener("blur", () => (field.style.borderColor = "#fff4"));
+  // Typing here must never reach the page's single-key shortcuts (F = fullscreen, S = panel, Space = Cue).
+  field.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      options.onEscape?.();
+      return;
+    }
+    if (e.key === "Enter") go(options.tv ? "renderer" : "host");
+  });
+  field.addEventListener("input", () => {
+    field.value = normalizeRoomCodeInput(field.value);
+    refresh();
+  });
+
+  // The field and its buttons share a row where the screen is wide enough and
+  // wrap under it where it isn't (a phone).
+  const fieldRow = document.createElement("div");
+  fieldRow.style.cssText = "display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: center;";
+
+  const makeButton = (label: string, as: "host" | "renderer", primary: boolean): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.style.cssText = `
+      font: 600 16px system-ui, sans-serif; ${compact ? "font-size: 14px; padding: 8px 14px;" : "font-size: clamp(15px, 1.8vw, 20px); padding: 10px 18px;"} border-radius: 999px; cursor: pointer;
+      border: 2px solid #fff6; color: ${primary ? "#000" : "#fff"}; background: ${primary ? "#fff" : "transparent"};
+    `;
+    b.addEventListener("click", () => go(as));
+    return b;
+  };
+  const buttons = options.tv
+    ? [makeButton("Join", "renderer", true)]
+    : [makeButton("Play music here", "host", true), makeButton("Just watch", "renderer", false)];
+  fieldRow.append(field, ...buttons);
+
+  const problem = document.createElement("div");
+  problem.style.cssText = `min-height: 1.2em; font-size: ${compact ? 12 : 14}px; color: #ff8a80;`;
+
+  function refresh(): void {
+    const ok = isValidRoomCode(field.value);
+    for (const b of buttons) b.style.opacity = ok ? "1" : "0.5";
+    problem.textContent = "";
+  }
+
+  function go(as: "host" | "renderer"): void {
+    const typed = normalizeRoomCodeInput(field.value);
+    if (!isValidRoomCode(typed)) {
+      problem.textContent = typed.length < 4 ? "Codes are 4 characters" : "That isn't a valid code (no 0, O, 1, I or L)";
+      return;
+    }
+    // The TV page re-reads ?room= itself; the main app's entry is the site root.
+    location.assign(options.tv ? `${location.pathname}?room=${typed}` : joinUrlFor(typed, as));
+  }
+  refresh();
+
+  entry.append(entryLabel, fieldRow, problem);
+  return entry;
 }

@@ -1,4 +1,5 @@
 import type { RosterEntry, DeviceCommand } from "../net/room.ts";
+import { createRoomCodeEntry } from "./joinScreen.ts";
 
 export interface MenuItem {
   id: string;
@@ -69,7 +70,9 @@ const SEGMENT_COLORS = ["#3b5bfd", "#e0426b", "#1fb583", "#f2a93b", "#8e5bf2", "
  * Room panel: lists every connected device with its current scene/palette,
  * lets any device set any other device's scene/palette, and offers
  * room-wide bulk actions. Available from any device, not just the host —
- * "control" in this app is a capability, not a role.
+ * "control" in this app is a capability, not a role. It also carries the same
+ * typed-code field as the pairing overlay (joinScreen.ts `createRoomCodeEntry`),
+ * so a device can move to another room (a TV's, say) from here.
  */
 export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
   const root = document.createElement("div");
@@ -153,10 +156,13 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
   layoutStrip.style.cssText =
     "position: relative; display: flex; height: 56px; background: #1a1a1a; border-radius: 8px; overflow: hidden;";
 
+  const joinEntry = createRoomCodeEntry({ compact: true, onEscape: close });
+  joinEntry.style.cssText += "margin-top: 16px; padding-top: 14px; border-top: 1px solid #fff1;";
+
   const closeBtn = makeActionButton("Close", close);
   closeBtn.style.marginTop = "10px";
 
-  panel.append(title, list, actions, layoutHeading, layoutStrip, closeBtn);
+  panel.append(title, list, actions, layoutHeading, layoutStrip, joinEntry, closeBtn);
   root.appendChild(panel);
   root.addEventListener("click", (e) => {
     if (e.target === root) close();
