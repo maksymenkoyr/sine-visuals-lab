@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   CUT,
   CUT_MODE,
+  DOLLY_MAX_FACTOR,
+  GROW_MAX,
   FORM_REBUILD_STEP,
   KIND,
   MAX_SHARDS,
@@ -18,6 +20,7 @@ import {
   packShards,
   pickCut,
   randomCamera,
+  roomAspect,
   shardCounts,
   type AdvanceOptions,
   type ClusterOptions,
@@ -202,6 +205,29 @@ describe("shards cuts", () => {
     expect(state.camera.dist).toBeGreaterThan(dist0);
   });
 
+  it("stops drifting in a long cut-free stretch: growth and recede are capped", () => {
+    const state = createShardState(6, FORM);
+    const cam0 = state.camera.dist0;
+    expect(state.camera.dist).toBe(cam0);
+    const opts = { ...OPTS, dolly: 2, extend: 2 };
+    for (let i = 0; i < 36000; i++) advanceShards(state, DT, QUIET, 1, opts);
+    expect(state.camera.dist).toBeLessThanOrEqual(cam0 * DOLLY_MAX_FACTOR);
+    expect(state.camera.dist).toBeGreaterThan(cam0 * DOLLY_MAX_FACTOR * 0.999);
+    for (const sh of state.shards) expect(sh.grow).toBeLessThanOrEqual(GROW_MAX);
+  });
+
+  it("the caps never touch a normal gap between cuts", () => {
+    const state = createShardState(6, FORM);
+    const fresh = createShardState(6, FORM);
+    const rate = OPTS.extend * (0.3 + 0.2);
+    // One second of between-cut drift is exactly the uncapped increment.
+    for (let i = 0; i < 60; i++) advanceShards(state, DT, QUIET, 0.2, OPTS);
+    expect(state.camera.dist).toBeCloseTo(fresh.camera.dist + fresh.camera.dollyRate * OPTS.dolly * 1, 6);
+    state.shards.forEach((sh, k) => {
+      expect(sh.grow).toBeCloseTo(fresh.shards[k].extend * rate * 1, 6);
+    });
+  });
+
   it("rebuilds in place when a Form slider is dragged, not when auto-tune creeps", () => {
     const state = createShardState(4, FORM);
     const n0 = state.shards.length;
@@ -273,5 +299,17 @@ describe("shards prism indexing", () => {
     expect(a[3]).toBeGreaterThan(s.length);
     const base1 = a[0] - s.ax * a[3] * 0.5;
     expect(base1).toBeCloseTo(base0, 5);
+  });
+});
+
+describe("roomAspect", () => {
+  it("is the buffer's own aspect for the full viewport", () => {
+    expect(roomAspect(1920, 1080, { w: 1, h: 1 })).toBeCloseTo(1920 / 1080, 9);
+  });
+
+  it("is the whole room's aspect for a slice: two side-by-side halves are twice as wide", () => {
+    expect(roomAspect(1920, 1080, { w: 0.5, h: 1 })).toBeCloseTo((2 * 1920) / 1080, 9);
+    // And two stacked halves are half as wide.
+    expect(roomAspect(1920, 1080, { w: 1, h: 0.5 })).toBeCloseTo(1920 / (2 * 1080), 9);
   });
 });
