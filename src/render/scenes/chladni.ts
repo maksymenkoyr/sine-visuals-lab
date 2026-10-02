@@ -1,7 +1,6 @@
 import { NUM_BANDS } from "../../audio/types.ts";
 import { MIN_HZ, MAX_HZ_CAP } from "../../audio/bandScale.ts";
 import { createProgram, createFullscreenQuad, drawFullscreenQuad, type GLProgram } from "../gl.ts";
-import { PALETTE_GLSL } from "../palette.ts";
 import type { SceneSetting } from "../sceneSettings.ts";
 import { resolveSceneSetting } from "../autoTune.ts";
 import type { Scene, SceneContext } from "../scene.ts";
@@ -641,7 +640,6 @@ out vec4 outColor;
 ${COMMON_UNIFORMS_GLSL}
 ${SETTINGS_UNIFORMS_GLSL}
 ${DRIVE_UNIFORMS_GLSL}
-${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
 ${CHLADNI_GLSL}
 
@@ -655,7 +653,9 @@ void main() {
 
   float a = amp(p);
   vec3 plate = vec3(0.030, 0.031, 0.036);
-  vec3 glow = palette(0.55 + 0.2 * a, uPalA, uPalB, uPalC, uPalD) * a * a * uFieldGlow * 0.75 * (0.3 + fieldGlowDrive(uEnergy));
+  // The middle of the room palette's ramp: bright enough to read on the
+  // plate, darker than the grains that sit on top of it.
+  vec3 glow = palRamp(0.35 + 0.3 * a) * a * a * uFieldGlow * 0.75 * (0.3 + fieldGlowDrive(uEnergy));
   // The rim only exists on the square plate; the full-frame plate has no edge to show.
   float rim = (1.0 - smoothstep(0.0, 0.012, 1.0 - border)) * uSquarePlate;
   vec3 col = (plate + glow + rim * 0.10) * inside;
@@ -672,7 +672,6 @@ ${DRIVE_UNIFORMS_GLSL}
 uniform sampler2D uPosTex;
 uniform float uSide;
 uniform float uGrainGain;
-${PALETTE_GLSL}
 ${CHLADNI_GLSL}
 out float vAmp;
 out float vGlow;
@@ -719,8 +718,10 @@ void main() {
   // Everything about a grain's colour is per grain, so it is worked out here
   // once rather than by every fragment of its sprite — a glint's sprite is
   // mostly halo ring, and those fragments need only vHaloCol.
-  // Settled grains sit on the base tone; thrown grains run up the palette.
-  vec3 col = palette(0.1 + 0.4 * vAmp, uPalA, uPalB, uPalC, uPalD);
+  // Grains take the bright half of the room palette's ramp, which every
+  // palette keeps bright (see palette.ts): settled grains sit in its middle,
+  // thrown grains run up to its brightest end.
+  vec3 col = palRamp(0.55 + 0.45 * vAmp);
   // Settled sand is chalkier than the palette; thrown grains keep its full hue.
   col = mix(col, vec3(dot(col, vec3(0.299, 0.587, 0.114))), 0.15 * (1.0 - vAmp));
   float bright = (0.8 + 1.7 * uGrainGlow) * uGrainGain * vShade * (1.0 + uBeatFlash * beatFlashDrive(uBeatPulse) * 0.8);

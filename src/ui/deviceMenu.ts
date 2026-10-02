@@ -137,9 +137,12 @@ import {
   digitsStyle,
   digitsTextStyle,
   groupHeading,
-  paletteChipLitStyle,
-  paletteChipStyle,
-  paletteListStyle,
+  paletteGroupLabelStyle,
+  paletteGroupRowStyle,
+  paletteGroupsStyle,
+  paletteSwatchChipLitStyle,
+  paletteSwatchChipStyle,
+  paletteSwatchStyle,
   readoutStyle,
   rowHeadStyle,
   rowLabelStyle,
@@ -436,8 +439,16 @@ export interface AudioStatus {
   sampleRate: number | null;
 }
 
+/** A palette as the Palette card shows it. */
+export interface PaletteMenuItem extends MenuItem {
+  /** Rows are grouped by this, in the order groups first appear. */
+  group: string;
+  /** The palette's ramp, darkest first, drawn as the chip's swatch. */
+  swatch: readonly string[];
+}
+
 export interface DeviceMenuDeps {
-  getPalettes: () => MenuItem[];
+  getPalettes: () => PaletteMenuItem[];
   currentSceneId: () => string;
   currentPaletteId: () => string;
   onPickPalette: (id: string) => void;
@@ -6225,23 +6236,37 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // Palette: the only picker left in the panel.
   const paletteCard = createCard({ title: "Palette", accent: "rgba(255,255,255,0.7)" });
   const paletteList = document.createElement("div");
-  paletteList.style.cssText = paletteListStyle;
+  paletteList.style.cssText = paletteGroupsStyle;
   paletteCard.body.appendChild(paletteList);
 
   function renderPalettes(): void {
     paletteList.innerHTML = "";
     const currentId = deps.currentPaletteId();
+    const rows = new Map<string, HTMLDivElement>();
     for (const item of deps.getPalettes()) {
+      let row = rows.get(item.group);
+      if (!row) {
+        row = document.createElement("div");
+        row.style.cssText = paletteGroupRowStyle;
+        const label = document.createElement("span");
+        label.textContent = item.group;
+        label.style.cssText = paletteGroupLabelStyle;
+        row.appendChild(label);
+        rows.set(item.group, row);
+        paletteList.appendChild(row);
+      }
       const btn = document.createElement("button");
-      btn.textContent = item.name;
-      btn.style.cssText = item.id === currentId ? paletteChipLitStyle : paletteChipStyle;
+      btn.style.cssText = item.id === currentId ? paletteSwatchChipLitStyle : paletteSwatchChipStyle;
+      const swatch = document.createElement("span");
+      swatch.style.cssText = `${paletteSwatchStyle} background: linear-gradient(90deg, ${item.swatch.join(", ")});`;
+      btn.append(swatch, item.name);
       btn.addEventListener("click", () => {
         deps.onPickPalette(item.id);
         // Stay open — the scene isn't hidden behind a backdrop, so tapping
         // through palettes to watch the scene recolor is the point.
         renderPalettes();
       });
-      paletteList.appendChild(btn);
+      row.appendChild(btn);
     }
   }
 

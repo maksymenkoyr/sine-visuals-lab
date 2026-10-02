@@ -158,6 +158,17 @@ measured from a reference clip.
   and the tempo eval moved in both directions, so it was left for its own
   tuning pass (see "Known issues").
 
+- 2026-10-02 — colour moves to the room palette's ramp role (`palRamp()`,
+  `src/render/palette.ts`). Grains were `palette(0.1 + 0.4 * vAmp)` and the
+  plate glow `palette(0.55 + 0.2 * a)`. Those points on the cosine curve are
+  bright in Neon but dark in others: under Acid the sand came out dark
+  maroon and nearly disappeared into the plate. Grains now take the ramp's
+  bright half (`palRamp(0.55 + 0.45 * vAmp)`: settled sand mid-ramp, thrown
+  grains at its brightest end) and the glow its middle
+  (`palRamp(0.35 + 0.3 * a)`). Every palette's ramp rises in lightness
+  (`tests/palette.test.ts`), so the sand reads in all of them. Under Neon the
+  sand stays pink, running to near-white when thrown instead of to blue.
+
 ## Tuning notes
 
 - Pattern complexity sets the plate's effective size (`FUNDAMENTAL_HZ_SMALL`

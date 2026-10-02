@@ -22,7 +22,10 @@ repo. `src/render/scenes/privateScenes.ts` has the contract.
    just a fragment shader body plus a `settings` array. Look at an existing scene
    in `src/render/scenes/` close in spirit to what you're building before writing
    one from scratch — `sceneCommon.ts` documents what every fullscreen scene gets
-   for free (`COMMON_UNIFORMS_GLSL`, `roomUv()`, `palette()`, band sampling).
+   for free (`COMMON_UNIFORMS_GLSL`, `roomUv()`, band sampling, and the room
+   palette — read it by role, `palRamp()`/`uPalInk`/`uPalGround`/`uPalAccent`,
+   rather than sampling `palette()` at a `t` of your own; `src/render/palette.ts`'s
+   header says what each role promises).
 2. Each entry in `settings: SceneSetting[]` (spec'd in `sceneSettings.ts`) becomes
    a `uniform float u<Key>` in your shader, plus a slider/checkbox in the device
    menu. A setting that is an amount of reaction to the music also declares a

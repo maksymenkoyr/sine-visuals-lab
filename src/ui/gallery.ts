@@ -81,6 +81,10 @@ export interface Gallery {
 }
 
 const STYLE_ID = "gallery-styles";
+/** Tiles rotate through the Classic palettes only: most scenes still read
+ *  the cosine curve (palette.ts's header), which only the Classic group
+ *  carries exactly. */
+const GALLERY_PALETTES = PALETTES.filter((p) => p.group === "Classic");
 const GROUND = "#05070a";
 /** Below this the masthead stacks and the page gutters tighten. */
 const NARROW_BELOW_PX = 820;
@@ -734,7 +738,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
       canvas,
       sink: preview?.attach(canvas) ?? null,
       feed: createSyntheticFeed({ bpm: 116 + i * 4, phaseOffsetSec: i * 0.17 }),
-      palette: PALETTES[i % PALETTES.length],
+      palette: GALLERY_PALETTES[i % GALLERY_PALETTES.length],
       anim: createAnimClock(),
       lastDrawMs: 0,
       enabled: entry.enabled,
