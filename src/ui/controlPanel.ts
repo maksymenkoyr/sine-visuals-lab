@@ -1,5 +1,6 @@
 import type { RosterEntry, DeviceCommand } from "../net/room.ts";
-import { createRoomCodeEntry, type AddScreenOutcome } from "./joinScreen.ts";
+import { createRoomCodeEntry, joinUrlFor, type AddScreenOutcome, type JoinKind, type JoinLinkInfo } from "./joinScreen.ts";
+import { drawQrCode } from "./qr.ts";
 
 export interface MenuItem {
   id: string;
@@ -19,6 +20,19 @@ export interface ControlPanelDeps {
   getSelfLook?: () => SyncLook | null;
   /** The typed-code field's way to hand a waiting TV to this room. */
   adoptTv?: (slot: string) => Promise<AddScreenOutcome>;
+  /** What this device's own invite QR encodes (the same link the pairing
+   *  overlay behind the room-code badge shows). Left out, or returning null,
+   *  the card has no QR: a phone controller is a member of the room, not its
+   *  door. */
+  invite?: () => RoomInvite | null;
+}
+
+/** The room a card's QR opens: the link kind (joinScreen.ts `JoinKind`), the
+ *  room code and, for a keyed room, the key the link carries. */
+export interface RoomInvite {
+  kind: JoinKind;
+  code: string;
+  info?: JoinLinkInfo;
 }
 
 /** The scene and palette "Sync all to me" copies to the other devices. */
@@ -86,6 +100,30 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
   const title = document.createElement("div");
   title.textContent = "Room";
   title.style.cssText = "font-weight: 700; font-size: 16px; margin-bottom: 12px;";
+
+  // The invite: the QR a phone scans to join this room (as controller, for a
+  // laptop's keyed room). Drawn each time the card opens, since the card is
+  // display: none until then and the canvas measures nothing before that.
+  const inviteBox = document.createElement("div");
+  inviteBox.style.cssText =
+    "display: none; flex-direction: column; align-items: center; gap: 8px; padding: 4px 0 14px; margin-bottom: 4px; border-bottom: 1px solid #fff1;";
+  const inviteCanvas = document.createElement("canvas");
+  inviteCanvas.style.cssText = "background: #fff; padding: 10px; border-radius: 8px;";
+  const inviteCaption = document.createElement("div");
+  inviteCaption.style.cssText = "font-size: 12px; opacity: 0.7;";
+  inviteBox.append(inviteCanvas, inviteCaption);
+
+  function renderInvite(): void {
+    const invite = deps.invite?.() ?? null;
+    if (!invite || !invite.code) {
+      inviteBox.style.display = "none";
+      return;
+    }
+    drawQrCode(inviteCanvas, joinUrlFor(invite.code, invite.kind, invite.info), 240);
+    inviteCaption.textContent =
+      invite.kind === "controller" ? "Scan with your phone to control this room" : "Scan with your phone to join this room";
+    inviteBox.style.display = "flex";
+  }
 
   const list = document.createElement("div");
 
@@ -164,7 +202,7 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
   const closeBtn = makeActionButton("Close", close);
   closeBtn.style.marginTop = "10px";
 
-  panel.append(title, list, actions, layoutHeading, layoutStrip, joinEntry, closeBtn);
+  panel.append(title, inviteBox, list, actions, layoutHeading, layoutStrip, joinEntry, closeBtn);
   root.appendChild(panel);
   root.addEventListener("click", (e) => {
     if (e.target === root) close();
@@ -327,6 +365,7 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
   }
 
   function renderAll(): void {
+    renderInvite();
     renderList();
     renderLayout();
   }

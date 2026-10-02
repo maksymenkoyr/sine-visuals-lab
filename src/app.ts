@@ -216,7 +216,7 @@ import { newKey } from "./net/pairing.ts";
 import { createJoinScreen, type AddScreenOutcome } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
-import { createControlPanel } from "./ui/controlPanel.ts";
+import { createControlPanel, type RoomInvite } from "./ui/controlPanel.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
@@ -1638,7 +1638,7 @@ function wireDeviceMenu(): void {
  *  incoming remote commands, and the roster announcement for whichever
  *  connection (host or renderer) is currently active. Works from the
  *  gallery too: room control is a room capability, not a viz capability. */
-function wireRoomControls(conn: AnyConn): void {
+function wireRoomControls(conn: AnyConn, invite: () => RoomInvite | null): void {
   const panel = createControlPanel({
     getRoster: () => conn.currentRoster,
     onRosterChange: (cb) => conn.onRosterChange(cb),
@@ -1650,6 +1650,7 @@ function wireRoomControls(conn: AnyConn): void {
     // copies the look it is showing instead.
     getSelfLook: () => (isController ? { scene: scene.id, palette: palette.id } : null),
     adoptTv: ownRoomKey ? adoptTvByCode : undefined,
+    invite,
   });
   panelBtn.style.display = "block";
   panelBtn.addEventListener("click", () => panel.toggle());
@@ -2264,7 +2265,16 @@ async function boot(): Promise<void> {
 
   wireDeviceMenu();
   const conn = activeConn();
-  if (conn) wireRoomControls(conn);
+  // Same link as the room-code badge's overlay: the controller link for the
+  // laptop's keyed room, the plain/watch link for any other room member.
+  if (conn) {
+    const inviteKey = hostRoomKey ?? (plan.kind === "renderer" ? plan.key : undefined);
+    wireRoomControls(conn, () =>
+      isController || !roomCode
+        ? null
+        : { kind: hostRoomKey ? "controller" : "renderer", code: roomCode, info: inviteKey ? { key: inviteKey } : undefined },
+    );
+  }
 
   immersive = createImmersiveMode({
     button: fsBtn,
