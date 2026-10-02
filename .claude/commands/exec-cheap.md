@@ -11,7 +11,7 @@ on the subscription model; only the cheap process talks to OpenRouter.
 **Refuse and stop, telling the user why, if any of these hold:**
 - `$1` is missing or the file doesn't exist.
 - The current branch is `main`, or the cwd isn't a git worktree branch
-  (AGENTS.md: never edit on `main`).
+  (CLAUDE.md: never edit on `main`).
 - The plan mentions `scenes/private` or a paid scene. Whatever the cheap
   process reads goes to OpenRouter and its providers; paid-scene code never
   leaves the private repo.
@@ -39,7 +39,7 @@ on the subscription model; only the cheap process talks to OpenRouter.
 4. **Don't trust its "done".** Independently: run `npm run typecheck` and
    `npm run test` here; read `git log` and `git diff origin/main...HEAD` against
    the plan step by step; for a visualization/UI change take the before/after
-   headless Playwright screenshots AGENTS.md requires.
+   headless Playwright screenshots CLAUDE.md requires.
 5. Report to the user: steps completed vs the plan, anything the cheap model
    skipped or did differently, gate results, screenshot paths. Fix small gaps
    yourself; for larger ones, say what to re-plan. Do not push or open the PR
