@@ -302,4 +302,63 @@ describe("createQualityGovernor", () => {
     expect(gov.level).toBeGreaterThan(0);
     expect(gov.standingDown).toBe(false);
   });
+
+  // A scene that is over budget at level 0 but fine from level 1 down. The
+  // probe to the bottom rung proves cutting helps; after that, climbing back
+  // to level 0 and failing again must not re-run the deep probe, and the
+  // 0<->1 bounce must back off.
+  describe("a scene that only fits from level 1", () => {
+    function run(seconds: number, dtAt: (level: number) => number) {
+      const quality = baseline();
+      const gov = createQualityGovernor(quality, TARGET_MS);
+      let t = 0;
+      const levels: number[] = [0];
+      while (t < seconds * 1000) {
+        t += dtAt(gov.level);
+        gov.recordFrame(t);
+        if (gov.level !== levels[levels.length - 1]) levels.push(gov.level);
+      }
+      return { gov, levels };
+    }
+
+    it("probes to the floor once, then never returns there", () => {
+      const { levels } = run(120, (level) => (level === 0 ? TARGET_MS * 2 : TARGET_MS));
+      expect(levels[1]).toBe(4); // the probe
+      expect(levels.slice(2).includes(4)).toBe(false);
+    });
+
+    it("backs off the failed 0 <-> 1 step-up so level changes stay bounded", () => {
+      const { levels } = run(120, (level) => (level === 0 ? TARGET_MS * 2 : TARGET_MS));
+      // probe, three rungs back up, then a doubling-interval bounce between 1 and 0.
+      expect(levels.length - 1).toBeLessThanOrEqual(12);
+    });
+
+    it("a failed probe still stands down as before", () => {
+      const { gov, levels } = run(60, () => TARGET_MS * 2);
+      expect(gov.standingDown).toBe(true);
+      expect(gov.level).toBe(0);
+      expect(levels.length - 1).toBe(2); // 0 -> probe level -> back to 0, nothing more
+    });
+
+    it("setEnabled(false) then (true) lets the probe run again", () => {
+      const quality = baseline();
+      const gov = createQualityGovernor(quality, TARGET_MS);
+      const dtAt = (level: number) => (level === 0 ? TARGET_MS * 2 : TARGET_MS);
+      let t = 0;
+      let reachedFloor = false;
+      for (let i = 0; i < 4000; i++) {
+        t += dtAt(gov.level);
+        gov.recordFrame(t);
+      }
+      gov.setEnabled(false);
+      gov.setEnabled(true);
+      expect(gov.level).toBe(0);
+      for (let i = 0; i < 400; i++) {
+        t += dtAt(gov.level);
+        gov.recordFrame(t);
+        if (gov.level === gov.maxLevel) reachedFloor = true;
+      }
+      expect(reachedFloor).toBe(true);
+    });
+  });
 });
