@@ -76,6 +76,12 @@ describe("captureMic context resume", () => {
     ctx.state = "suspended"; // a resume() refused without a gesture
     document.dispatchEvent(new Event("pointerdown"));
     expect(ctx.resume).toHaveBeenCalledTimes(3);
+    // A touch tap grants activation only on pointerup/touchend, not pointerdown.
+    for (const [i, type] of ["pointerup", "touchend", "click"].entries()) {
+      ctx.state = "suspended";
+      document.dispatchEvent(new Event(type));
+      expect(ctx.resume, type).toHaveBeenCalledTimes(4 + i);
+    }
   });
 
   it("leaves a running context alone, and never resumes one that stop() closed", async () => {
@@ -88,7 +94,9 @@ describe("captureMic context resume", () => {
     handle.stop();
     ctx.state = "suspended";
     ctx.dispatchEvent(new Event("statechange"));
-    document.dispatchEvent(new Event("pointerdown"));
+    for (const type of ["pointerdown", "pointerup", "touchend", "click", "keydown"]) {
+      document.dispatchEvent(new Event(type));
+    }
     expect(ctx.resume).not.toHaveBeenCalled();
   });
 });

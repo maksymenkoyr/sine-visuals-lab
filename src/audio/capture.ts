@@ -6,6 +6,12 @@ import { displayAudioProblem } from "./sourcePref.ts";
  * default them on for call quality, and they will pump, duck, and gate a
  * music signal into garbage before it ever reaches the analyser.
  */
+/** Events that carry user activation, for the resume() fallback in
+ *  openHandle. A touch `pointerdown` does not grant activation (only a mouse
+ *  pointerdown, mousedown, a non-mouse pointerup, touchend and keydown do), so
+ *  touch devices — the iOS "interrupted" case — need pointerup/touchend. */
+const KICK_GESTURES = ["pointerdown", "pointerup", "touchend", "click", "keydown"] as const;
+
 const MUSIC_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: false,
   noiseSuppression: false,
@@ -34,8 +40,7 @@ function buildHandle(
   };
   kick();
   context.addEventListener("statechange", kick);
-  document.addEventListener("pointerdown", kick, { passive: true });
-  document.addEventListener("keydown", kick, { passive: true });
+  for (const type of KICK_GESTURES) document.addEventListener(type, kick, { passive: true });
   document.addEventListener("visibilitychange", kick);
   return {
     kind,
@@ -45,8 +50,7 @@ function buildHandle(
     stop: () => {
       // Listeners first, so a closed context is never asked to resume.
       context.removeEventListener("statechange", kick);
-      document.removeEventListener("pointerdown", kick);
-      document.removeEventListener("keydown", kick);
+      for (const type of KICK_GESTURES) document.removeEventListener(type, kick);
       document.removeEventListener("visibilitychange", kick);
       for (const track of stream.getTracks()) track.stop();
       void context.close();
