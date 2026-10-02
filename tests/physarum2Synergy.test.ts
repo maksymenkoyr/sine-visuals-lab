@@ -15,6 +15,15 @@ const BASE = [0, 40, 172, 262].map(deg);
 const distances = (xs: number[]): number[] =>
   xs.flatMap((x, i) => xs.slice(i + 1).map((y) => Math.abs(wrapTurn(x - y)))).sort((a, b) => a - b);
 
+describe("wrapTurn", () => {
+  it("returns the shortest signed distance in [-0.5, 0.5): half a turn comes out negative", () => {
+    expect(wrapTurn(0.75)).toBeCloseTo(-0.25, 9);
+    expect(wrapTurn(-0.75)).toBeCloseTo(0.25, 9);
+    expect(wrapTurn(0.5)).toBe(-0.5);
+    expect(wrapTurn(-0.5)).toBe(-0.5);
+  });
+});
+
 describe("nearestHarmony", () => {
   it("finds an exact square for four hues already 90° apart, at zero cost", () => {
     const fit = nearestHarmony([0, 90, 180, 270].map(deg), -1);

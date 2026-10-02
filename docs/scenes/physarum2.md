@@ -56,8 +56,8 @@ meaning is its exact position, so the device-wide Scene master must never
 scale it. `scene.panel` (one `PanelSection` naming the `itemBoxes` widget —
 `src/ui/widgets/itemBoxes.ts`) renders them as specimen boxes + the selected
 strain's rows inside the device menu's Scene card, ahead of the remaining
-flat rows (Network scale, Trail decay, Hostility [renamed from Rivalry, same
-key `rivalry`], Crawl speed, Beat seeding, Exposure, Palette tint, Beat
+flat rows (Network scale, Trail decay, Cross-smell [`rivalry` key, labelled Rivalry,
+then Hostility, now Cross-smell], Crawl speed, Beat seeding, Exposure, Palette tint, Beat
 flash), each of the latter still carrying its own `auto` weights as before;
 and the Pairs block (`src/ui/widgets/pairPads.ts`'s `buildPairPads`: a
 Smell/Touch switch, an own-trail fader strip, one two-strain-culture pad per
@@ -66,7 +66,7 @@ presets — replacing the old plain-word rows/SVG-web pair,
 `relationRows.ts`/`relationWeb.ts`, both deleted) in its own Affinity card
 right after the Scene card ("The Affinity card" below). `src/render/scenes/
 physarum2Affinity.ts` is the DOM-free home for both tables' shared logic and
-words: `ATTRACT_ROWS`, `smellWeight` (Hostility folded into a raw Smell
+words: `ATTRACT_ROWS`, `smellWeight` (Cross-smell folded into a raw Smell
 value, shared by the GPU packing and the pads), `packTouch` (Touch's GPU
 packing), `PAIR_WORDS` (every word the Pairs widget shows), `AFFINITY_PRESETS`
 and the pad/preset/mix-row pure helpers; `src/render/scenes/
@@ -720,6 +720,29 @@ and `powder.ts`'s curl noise).
   at 60 fps and bounds the other hues' per-frame move. Screenshots of the dish
   at Synergy 0 and 1 render clean; the glide itself is timing and was judged
   from the test, not a frame.
+
+- **2026-10-02: Hostility became Cross-smell; widget and sim review fixes.**
+  The `rivalry` slider read backwards once any off-diagonal Smell cell was
+  positive: under Mob or Symbiosis, dragging "Hostility" right made strains
+  pull *harder* onto each other's trails, against the "right = more" rule.
+  `smellWeight` scales every off-diagonal weight by its size whichever way
+  the sign points, so the label now names what grows: **Cross-smell**, "how
+  strongly each strain reacts to the others' trails". Relabel only: the key
+  stays `rivalry` (saved looks and share codes keep working) and the maths and
+  every tuned picture are unchanged; the name is a placeholder the user may
+  prefer to change. Same review: a beat reseed that landed on a frame owing
+  zero sim steps was swallowed (`pendingSeed` now holds it like the pipette and
+  Rebalance one-shots); a Headcount readback kicked before a pipette tap or
+  Rebalance no longer overwrites the instant value (`popGen`); `POP_SIDE` 32 to
+  128 spreads the population count over many fragments instead of a few long
+  loops (same shares); pair cultures now honour each strain's Trail life
+  (`decayKeep`, shared with the specimen boxes). Panel perf: previews and
+  pads fill one cached `ImageData` per box (`pixelsInto`), the Pairs pads reuse
+  the boxes' per-tick strain readings, `previews.ts` caches the settings
+  lookup, and the Strain Console and the pad status line write the DOM only
+  when something changed. The dead multi-item selection helpers in
+  `itemSelection.ts` went; the linked-row path in `registry.ts`/`deviceMenu.ts`
+  is still there (nothing supplies it) for a later pass.
 
 ## Tuning notes
 
