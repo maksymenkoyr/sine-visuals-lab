@@ -12,7 +12,7 @@ import { bindHint, hideTooltip } from "./tooltip.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
-import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "../render/framePace.ts";
+import { GATE_TOLERANCE_MS, RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "../render/framePace.ts";
 import { getPowerMode } from "../render/powerMode.ts";
 import { selectDueTiles, type ScheduleCandidate } from "../render/previewSchedule.ts";
 import { createPreviewBudgetController, type PreviewBudgetController } from "../render/previewBudget.ts";
@@ -900,7 +900,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
         targetIntervalMs: targetIntervalMsFor(t, t === focused, intervalMs, noContention),
       }));
 
-      const dueIndices = selectDueTiles(candidates, nowMs, budget);
+      const dueIndices = selectDueTiles(candidates, nowMs, budget, GATE_TOLERANCE_MS);
 
       const drawStartMs = performance.now();
       for (const idx of dueIndices) {

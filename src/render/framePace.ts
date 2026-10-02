@@ -29,7 +29,7 @@ export function targetFrameIntervalMs(preset: QualityPreset): number {
 // anything genuinely faster — 2ms admits up to ~68.5fps through the 60fps
 // gate, which only ever matters for the 60Hz-with-jitter case this exists
 // to fix.
-const GATE_TOLERANCE_MS = 2;
+export const GATE_TOLERANCE_MS = 2;
 
 /** Whether enough time has passed since the last *rendered* frame (not
  *  every rAF tick) to render another one. Pure and separately testable so
