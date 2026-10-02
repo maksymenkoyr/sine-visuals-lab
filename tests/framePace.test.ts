@@ -105,7 +105,16 @@ describe("nextRenderAnchor", () => {
     for (const hz of [60, 75, 90, 120, 144, 165]) {
       const n = renderCount(hz, interval, 10);
       expect(n, `${hz} Hz`).toBeGreaterThan(588);
-      expect(n, `${hz} Hz`).toBeLessThan(612);
+      // 144 Hz lands ~61.7: the gate admits a tick up to the tolerance early.
+      expect(n, `${hz} Hz`).toBeLessThan(625);
+    }
+  });
+
+  it("doesn't drop frames on a panel a hair faster than 60 Hz", () => {
+    for (const hz of [60.02, 60.06, 60.5, 61]) {
+      const n = renderCount(hz, interval, 60);
+      // One render per vsync: no skipped ticks (a skip is a 33 ms hitch).
+      expect(n, `${hz} Hz`).toBeGreaterThanOrEqual(Math.floor(hz * 60) - 2);
     }
   });
 

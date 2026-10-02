@@ -47,12 +47,15 @@ export function shouldRenderFrame(nowMs: number, lastRenderMs: number, targetInt
 }
 
 /** What to store as `lastRenderMs` after a tick that passed shouldRenderFrame:
- *  the previous anchor plus one interval, not `nowMs`. The gate then keeps its
- *  own steady grid and an accepted tick that landed a little late doesn't push
- *  the next frame out with it, so a 144 Hz panel really renders ~60 fps rather
- *  than every third vsync. A first frame (`lastRenderMs` 0), a stall or a tab
+ *  the previous anchor plus one interval, not `nowMs` — but never ahead of
+ *  `nowMs`. The gate then keeps its own steady grid and an accepted tick that
+ *  landed a little late doesn't push the next frame out with it, so a 144 Hz
+ *  panel really renders ~60 fps rather than every third vsync. The clamp is
+ *  for a panel a hair faster than the cap (60.06 Hz): an accepted tick that
+ *  arrives early would otherwise leave the anchor in the future and the grid
+ *  would drift until a frame was dropped. A first frame (`lastRenderMs` 0), a stall or a tab
  *  resume (more than two intervals behind) snaps to `nowMs` instead, so the
  *  gate never replays a backlog as a burst of back-to-back renders. */
 export function nextRenderAnchor(nowMs: number, lastRenderMs: number, targetIntervalMs: number): number {
-  return nowMs - lastRenderMs > 2 * targetIntervalMs ? nowMs : lastRenderMs + targetIntervalMs;
+  return nowMs - lastRenderMs > 2 * targetIntervalMs ? nowMs : Math.min(nowMs, lastRenderMs + targetIntervalMs);
 }
