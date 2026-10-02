@@ -24,7 +24,7 @@ featured, registered at `minQuality: "floor"` so it also runs on TV presets.
 - `clipFormat.ts` / `clips.bin` / `player.ts` — the captured-motion pipeline:
   `decodeClipLibrary` reads the binary clip library (mirrors derived on
   load), `createClipPlayer` turns bar-relative phase into a sampled pose
-  with a bar-boundary picker and two handover modes (`BlendMode`:
+  with a bar-boundary picker and the handover modes (`BlendMode`:
   crossfade vs. inertialization). Clip phase is a function of bars elapsed,
   never wall time, so a clip can't drift off the beat.
 - `sdf.ts` — shared raymarch primitives (`SDF_GLSL`) the skins build shapes

@@ -42,8 +42,8 @@ permissions:
   contents: read
 
 env:
-  # The tools/tune-*.mjs scripts are the only playwright consumers and they never
-  # run in CI, so skip its postinstall browser download.
+  # playwright is only used by local dev tools under tools/ (never in CI), so
+  # skip its postinstall browser download.
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
 jobs:
@@ -215,11 +215,6 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
 
-  # Tear the preview Worker down (and its Room namespace with it) once the PR
-  # is merged or closed. `--force` skips wrangler's interactive confirmation and
-  # the "other Workers depend on this" check, which can't apply to a Worker
-  # nothing else binds to. A preview that never deployed (fork PR, or the gates
-  # failed on every push) makes this a harmless "not found".
   # Publishes each Insider build as a GitHub pre-release `vX.Y.Z-beta` on the
   # commit it shipped (creating that tag), and comments the version on the pull
   # request that commit landed through — so the version shows where people
@@ -277,6 +272,11 @@ jobs:
               --body "Shipped to Insider as **$VERSION - beta** — [$TAG](https://github.com/$REPO/releases/tag/$TAG)"
           fi
 
+  # Tear the preview Worker down (and its Room namespace with it) once the PR
+  # is merged or closed. `--force` skips wrangler's interactive confirmation and
+  # the "other Workers depend on this" check, which can't apply to a Worker
+  # nothing else binds to. A preview that never deployed (fork PR, or the gates
+  # failed on every push) makes this a harmless "not found".
   teardown-preview:
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
