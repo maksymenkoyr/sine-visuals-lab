@@ -1,4 +1,5 @@
 import { Room, type Env } from "./room.ts";
+import { createRateLimiter } from "./rateLimit.ts";
 import { isBotUserAgent, parseUsageEvent, usageDataPoint } from "./usage.ts";
 
 export { Room };
@@ -7,6 +8,7 @@ export { Room };
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const APEX_HOST = "sinevisualslab.com";
 const ROOM_PATH_RE = /^\/api\/room\/([A-Z2-9]{4})\/ws$/;
+const ADOPT_PATH_RE = /^\/api\/room\/([A-Z2-9]{4})\/adopt$/;
 
 function randomRoomCode(): string {
   let code = "";
@@ -19,33 +21,20 @@ function randomRoomCode(): string {
 // Permissive CORS: room codes carry no auth/secrets, and in local dev the
 // static site (Vite) and this Worker are necessarily different origins.
 // In prod, when both are deployed same-origin, these headers are no-ops.
+// Room keys are secrets, but they only ever travel in request URLs and bodies,
+// never in a response a cross-origin page could read.
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// Best-effort per-IP throttle on room creation. State is per-isolate, so a
-// determined client can exceed it across edge locations — the real backstop
-// for a public URL is a Cloudflare WAF rate-limiting rule on /api/room. This
-// just keeps a single misbehaving tab from hammering the endpoint for free.
-const ROOM_CREATE_LIMIT = 20;
-const ROOM_CREATE_WINDOW_MS = 60_000;
-const roomCreateHits = new Map<string, number[]>();
-
-function roomCreateAllowed(ip: string, now = Date.now()): boolean {
-  const cutoff = now - ROOM_CREATE_WINDOW_MS;
-  const hits = (roomCreateHits.get(ip) ?? []).filter((t) => t > cutoff);
-  if (hits.length >= ROOM_CREATE_LIMIT) {
-    roomCreateHits.set(ip, hits);
-    return false;
-  }
-  hits.push(now);
-  roomCreateHits.set(ip, hits);
-  // Keep the map from growing without bound on a long-lived isolate.
-  if (roomCreateHits.size > 10_000) roomCreateHits.clear();
-  return true;
-}
+// Best-effort per-IP throttles (server/rateLimit.ts says why they are only
+// best-effort: the real backstop for a public URL is a Cloudflare WAF
+// rate-limiting rule). Room creation and TV adopt each get their own, so a
+// phone retrying an adopt can't use up the laptop's room creation.
+const roomCreateLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 });
+const adoptLimiter = createRateLimiter({ limit: 30, windowMs: 60_000 });
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -64,19 +53,39 @@ export default {
       return env.ASSETS.fetch(request);
     }
 
-    if (url.pathname === "/api/room" && request.method === "OPTIONS") {
+    // The preflight for both POST routes: a JSON content type forces one, and
+    // in dev Vite and `wrangler dev` are different origins.
+    if ((url.pathname === "/api/room" || ADOPT_PATH_RE.test(url.pathname)) && request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
     if (url.pathname === "/api/room" && request.method === "POST") {
       const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-      if (!roomCreateAllowed(ip)) {
+      if (!roomCreateLimiter.allow(ip)) {
         return new Response("too many rooms, slow down", {
           status: 429,
           headers: { ...CORS_HEADERS, "Retry-After": "60" },
         });
       }
       return Response.json({ code: randomRoomCode() }, { headers: CORS_HEADERS });
+    }
+
+    // A phone telling the TV waiting in slot {code} which room to join. The
+    // slot's Durable Object relays it to the TV (server/roomCore.ts `adopt`);
+    // the Worker only throttles it and adds CORS to whatever comes back.
+    const adopt = url.pathname.match(ADOPT_PATH_RE);
+    if (adopt && request.method === "POST") {
+      const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+      if (!adoptLimiter.allow(ip)) {
+        return new Response("too many requests, slow down", {
+          status: 429,
+          headers: { ...CORS_HEADERS, "Retry-After": "60" },
+        });
+      }
+      const res = await env.ROOM.get(env.ROOM.idFromName(adopt[1])).fetch(request);
+      const headers = new Headers(res.headers);
+      for (const [name, value] of Object.entries(CORS_HEADERS)) headers.set(name, value);
+      return new Response(res.body, { status: res.status, headers });
     }
 
     // Fire-and-forget beacon from src/net/usage.ts; always 204 so a bad or

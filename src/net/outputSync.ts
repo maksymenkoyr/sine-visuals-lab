@@ -6,21 +6,24 @@ import type { SilenceGateMarks } from "../audio/silenceGate.ts";
 import { VOLATILE_PREFIXES } from "./syncedStores.ts";
 
 /**
- * The pop-out output window's message layer: what the main window (the
- * controller, src/app.ts) says to the output page (output.html ->
- * src/output.ts) on the same machine, and the pure state machines on each
- * end. No DOM, no transport: src/net/outputBridge.ts rides these messages on
- * a BroadcastChannel today; nothing here knows that, so a later relay of the
- * same `ToOutput`/`ToMain` messages over the room connection (net/room.ts)
- * needs no change to this file.
+ * The pop-out output window's message layer: what the main window
+ * (src/app.ts) says to the output page (output.html -> src/output.ts) on the
+ * same machine, and the pure state machines on each end. No DOM, no
+ * transport: src/net/outputBridge.ts rides these messages on a
+ * BroadcastChannel, and the pop-out still does. The room connection
+ * (net/room.ts) carries a different, narrower thing — the room's look
+ * document, kept in step by net/lookSync.ts — not these messages.
  *
- * Why not tv.ts as-is. The paired TV (src/tv.ts, net/protocol.ts) is fed
- * only a scene id, a palette id and raw feature frames — every setting,
- * Auto choice, drive patch and master dial is read from the TV's OWN
- * localStorage. A same-machine output needs the controller's settings too,
- * and needs them *held* while Cue is on, so the output page is a renderer
- * in tv.ts's mould (same scene/anim/drive pipeline) fed by these messages
- * instead of the room socket. What crosses is:
+ * Why not tv.ts as-is. The paired TV (src/tv.ts) renders the host's raw
+ * feature frames with the room's look (server/lookDoc.ts): a scene id, a
+ * palette id and the storage keys net/syncedStores.ts's `isRoomKey` accepts,
+ * resolved against the TV's OWN anim profile. That look follows its phone
+ * continuously and has no notion of a look being *held*. A same-machine
+ * output also wants the main window's other keys and its resolved
+ * Sensitivity/Expansion/Smoothing, and needs the state held while Cue is on,
+ * so the output page is a renderer in tv.ts's mould (same scene/anim/drive
+ * pipeline) fed by these messages instead of the room socket. What crosses
+ * is:
  *  - `state`: scene + palette + a snapshot of every localStorage key the
  *    app writes (net/syncedStores.ts — wholesale, so no store, present or
  *    future, can be forgotten; Quality, master dials, Looks, drives, gate
