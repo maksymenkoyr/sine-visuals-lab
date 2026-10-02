@@ -38,11 +38,13 @@ const COOLDOWN_MS = 2000;
 // immediate downgrade the moment rendering resumes.
 const MAX_SAMPLE_MULT = 4;
 
-// A render can only land on a display refresh, so the interval it actually
-// achieves is quantized to whole vsyncs — a 144Hz panel capped at 60fps
-// renders every 3rd tick (~20.8ms), a 75Hz one every 2nd (~26.7ms). Neither
-// is the GPU struggling, but both would read as over budget against a flat
-// 16.7ms target (the 144Hz case lands almost exactly on
+// A render can only land on a display refresh, so each interval it achieves is
+// a whole number of vsyncs — a 144Hz panel capped at 60fps renders on a mix
+// of short and long gaps (~13.9 and ~20.8ms) that average out to the cap now
+// that framePace.ts's nextRenderAnchor keeps the gate on a steady grid; a
+// 75Hz one does the same around ~13.3 and ~26.7ms. The long gaps are not the
+// GPU struggling, but a few in a row would read as over budget against a flat
+// 16.7ms target (a 20.8ms interval sits almost exactly on
 // targetFrameMs * OVER_BUDGET_MULT, decided by float noise). Budgeting
 // against the fastest interval this session has actually achieved — instead
 // of the nominal cap — accounts for that quantization without just
