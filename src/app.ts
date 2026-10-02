@@ -204,6 +204,7 @@ import { realStorage } from "./net/realStorage.ts";
 import { captureRoomStorage, applyRoomStorage } from "./net/syncedStores.ts";
 import { createLookSync, LOOK_PUBLISH_MS } from "./net/lookSync.ts";
 import { planBoot } from "./net/bootPlan.ts";
+import { tvRedirectTarget } from "./net/tvRedirect.ts";
 import { clearSession, readSession, writeSession, type HostRoomSession } from "./net/sessions.ts";
 import { planHostRoom } from "./net/hostRoom.ts";
 import { postAdopt } from "./net/adopt.ts";
@@ -1961,6 +1962,13 @@ function applyRoute(route: Route): void {
 }
 
 async function boot(): Promise<void> {
+  // A TV opening the plain site belongs on the paired display page; leave
+  // before anything starts (net/tvRedirect.ts).
+  const tvTarget = tvRedirectTarget(location.search, navigator.userAgent);
+  if (tvTarget !== null) {
+    location.replace(tvTarget);
+    return;
+  }
   // Injects the panel's stylesheet before anything else so its DSEG7
   // @font-face rule (controlsTheme.ts) is already in document.fonts by the
   // time pinEverything()'s sweep runs below — otherwise the font would only
