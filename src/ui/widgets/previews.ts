@@ -80,18 +80,53 @@ const STRAIN_PARAMS = ["nutrient", "excite", "sensor", "turn", "stride", "stain"
 type DrivenParam = Exclude<StrainParam, "angle" | "life">;
 type StrainParam = (typeof STRAIN_PARAMS)[number];
 
-function strainSpecs(ctx: WidgetCtx, k: number): Record<StrainParam, SceneSetting | undefined> {
-  const specs = ctx.specsFor("strain", k);
-  const out = {} as Record<StrainParam, SceneSetting | undefined>;
-  for (const p of STRAIN_PARAMS) out[p] = specs.find((s) => s.item?.param === p);
-  return out;
+/** One strain's settings, found by param, plus its Smell/Touch cells by the
+ *  other strain's index. */
+interface StrainSpecs {
+  byParam: Record<StrainParam, SceneSetting | undefined>;
+  att: (SceneSetting | undefined)[];
+  touch: (SceneSetting | undefined)[];
+}
+
+/** The scene's settings list never changes while its panel is up, but these
+ *  readers run on every panel tick — so each strain's specs are looked up once
+ *  per list (keyed by the `ctx.specs` array itself) instead of re-filtering the
+ *  whole list on every call. Values are still read through `ctx.get` each time:
+ *  only the specs are cached. */
+const strainSpecCache = new WeakMap<readonly SceneSetting[], Map<number, StrainSpecs>>();
+const rivalrySpecCache = new WeakMap<readonly SceneSetting[], SceneSetting | undefined>();
+
+function strainSpecs(ctx: WidgetCtx, k: number): StrainSpecs {
+  let perList = strainSpecCache.get(ctx.specs);
+  if (!perList) strainSpecCache.set(ctx.specs, (perList = new Map()));
+  let hit = perList.get(k);
+  if (!hit) {
+    const specs = ctx.specsFor("strain", k);
+    const byParam = {} as Record<StrainParam, SceneSetting | undefined>;
+    for (const p of STRAIN_PARAMS) byParam[p] = specs.find((s) => s.item?.param === p);
+    hit = { byParam, att: [], touch: [] };
+    for (const s of specs) {
+      const other = s.item?.other;
+      if (other === undefined) continue;
+      // First match wins, like the `find` this replaced.
+      if (s.item!.param === "att") hit.att[other] ??= s;
+      else if (s.item!.param === "touch") hit.touch[other] ??= s;
+    }
+    perList.set(k, hit);
+  }
+  return hit;
+}
+
+function rivalrySpec(ctx: WidgetCtx): SceneSetting | undefined {
+  if (!rivalrySpecCache.has(ctx.specs)) rivalrySpecCache.set(ctx.specs, ctx.specs.find((s) => s.key === "rivalry"));
+  return rivalrySpecCache.get(ctx.specs);
 }
 
 registerPreviewSource("physarum2", {
   size: 96,
   agents: 4500,
   effective(ctx, k): PreviewEffective {
-    const specs = strainSpecs(ctx, k);
+    const specs = strainSpecs(ctx, k).byParam;
     const raw: StrainRawValues = {
       nutrient: specs.nutrient ? ctx.get(specs.nutrient) : 0,
       excite: specs.excite ? ctx.get(specs.excite) : 0,
@@ -149,18 +184,14 @@ registerPreviewSource("physarum2", {
     size: 72,
     agents: 1600,
     weights(ctx, a, b) {
-      const attSpec = (i: number, j: number): SceneSetting | undefined =>
-        ctx.specsFor("strain", i).find((s) => s.item?.param === "att" && s.item.other === j);
-      const touchSpec = (i: number, j: number): SceneSetting | undefined =>
-        ctx.specsFor("strain", i).find((s) => s.item?.param === "touch" && s.item.other === j);
-      const rivalrySpec = ctx.specs.find((s) => s.key === "rivalry");
-      const rivalry = rivalrySpec ? ctx.get(rivalrySpec) : 0.5;
+      const rivalryRow = rivalrySpec(ctx);
+      const rivalry = rivalryRow ? ctx.get(rivalryRow) : 0.5;
       const att = (i: number, j: number): number => {
-        const spec = attSpec(i, j);
+        const spec = strainSpecs(ctx, i).att[j];
         return spec ? smellWeight(ctx.get(spec), i, j, rivalry) : 0;
       };
       const touch = (i: number, j: number): number => {
-        const spec = touchSpec(i, j);
+        const spec = strainSpecs(ctx, i).touch[j];
         return spec ? ctx.get(spec) : 0;
       };
       return {

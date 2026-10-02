@@ -33,17 +33,15 @@ import { setHintText } from "../hintSwatches.ts";
  * switch, an own-trail strip (Smell only) and named presets — the
  * `itemBoxes.ts` `options.relations` block's actual DOM, replacing the old
  * `relationRows.ts`/`relationWeb.ts` pair. `buildPairPads` is a sub-builder
- * called directly by `itemBoxes.ts`, not a second `registerWidget` entry:
- * Affinity has no selection of its own (the approved UX, itemBoxes.ts's own
- * header) — it always follows the box selection — so it has to share
- * `itemBoxes.ts`'s existing selection channel rather than open a second one
- * a registered `PanelSection` would need.
+ * called directly by `itemBoxes.ts`, not a second `registerWidget` entry, so
+ * it shares the boxes' own preview source and per-tick strain readings
+ * instead of opening a second set. Affinity has no selection: the pads cover
+ * every strain pair at once (see "No selection styling" below).
  *
- * Built once per widget mount (`buildPairPads` runs once; itemBoxes.ts never
- * calls it again for a selection change) and updated in place from then on —
- * `tick` only touches text/transforms/canvas pixels — so a pad's own live
- * culture (see below) is never restarted by a click the way a full rebuild
- * would restart it.
+ * Built once per widget mount (`buildPairPads` runs once) and updated in
+ * place from then on — `tick` only touches text/transforms/canvas pixels — so
+ * a pad's own live culture (see below) is never restarted by a click the way
+ * a full rebuild would restart it.
  *
  * Every word a person reads here comes from `PairWords` (physarum2Affinity.ts)
  * — this file has no label/sentence literal of its own for anything other
@@ -539,6 +537,9 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     offscreen: HTMLCanvasElement | undefined;
     culture: PairCulture | undefined;
     imgBuf: Uint8ClampedArray | undefined;
+    /** Owns `imgBuf` (its `data`), made once — `pixelsInto` fills the buffer
+     *  and putImageData reads it back through this, with no per-tick copy. */
+    img: ImageData | undefined;
     headEl: HTMLElement;
     xValEl: HTMLElement;
     yValEl: HTMLElement;
@@ -592,12 +593,14 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
     let offscreen: HTMLCanvasElement | undefined;
     let culture: PairCulture | undefined;
     let imgBuf: Uint8ClampedArray | undefined;
+    let img: ImageData | undefined;
     if (pair) {
       culture = cachedCulture(`${stateKey}:pair:${a}${b}`, pair.size, pair.agents, 2000 + idx * 131);
       offscreen = document.createElement("canvas");
       offscreen.width = pair.size;
       offscreen.height = pair.size;
-      imgBuf = new Uint8ClampedArray(pair.size * pair.size * 4);
+      img = new ImageData(pair.size, pair.size);
+      imgBuf = img.data;
     }
 
     // Placeholder guide/marker elements, detached — `drawPadChrome` (called
@@ -614,6 +617,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
       offscreen,
       culture,
       imgBuf,
+      img,
       headEl,
       xValEl,
       yValEl,
@@ -982,6 +986,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   // is what keeps the scene's own networks being rebuilt.
   let stepDebt = 0;
   let lastTickMs = -1;
+  let lastStatusSig = "";
   let lastSeedEpoch: number | undefined;
   function tick(): void {
     const nowMs = performance.now();
@@ -1015,16 +1020,26 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
       }
     }
 
+    // The status line is an aria-live region: rewrite it only when what it
+    // says changed, not on every tick the pointer rests on a pad.
     if (focusIdx >= 0 && pads[focusIdx]) {
       const { a, b } = pads[focusIdx]!;
-      statusEl.replaceChildren();
-      appendEdgeNumbers(statusEl, a, b, state!.layer);
-      if (hasTouch) {
-        const otherLayer: PairLayer = state!.layer === "smell" ? "touch" : "smell";
-        statusEl.appendChild(document.createTextNode(" · "));
-        appendEdgeNumbers(statusEl, a, b, otherLayer);
+      const layer = state!.layer;
+      const otherLayer: PairLayer = layer === "smell" ? "touch" : "smell";
+      const sig =
+        `${focusIdx}|${layer}|${fmtSigned(getVal(layer, a, b))}|${fmtSigned(getVal(layer, b, a))}` +
+        (hasTouch ? `|${fmtSigned(getVal(otherLayer, a, b))}|${fmtSigned(getVal(otherLayer, b, a))}` : "");
+      if (sig !== lastStatusSig) {
+        lastStatusSig = sig;
+        statusEl.replaceChildren();
+        appendEdgeNumbers(statusEl, a, b, layer);
+        if (hasTouch) {
+          statusEl.appendChild(document.createTextNode(" · "));
+          appendEdgeNumbers(statusEl, a, b, otherLayer);
+        }
       }
-    } else {
+    } else if (lastStatusSig !== "idle") {
+      lastStatusSig = "idle";
       statusEl.textContent = words.ui.statusIdle;
     }
 
@@ -1032,7 +1047,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
 
     if (pair && effective) {
       for (const pad of pads) {
-        if (!pad.culture || !pad.offscreen || !pad.imgBuf || !pad.visible) continue;
+        if (!pad.culture || !pad.offscreen || !pad.imgBuf || !pad.img || !pad.visible) continue;
         if (seedNow) pad.culture.seedColony(probeData?.seedDose ?? 0, probeData?.seedRadius ?? 0);
         if (steps === 0 && !seedNow) continue;
         if (steps > 0) {
@@ -1046,11 +1061,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
         }
         pad.culture.pixelsInto(pad.imgBuf, [colorFor(pad.a), colorFor(pad.b)]);
         const octx = pad.offscreen.getContext("2d");
-        if (octx) {
-          const img = octx.createImageData(pad.culture.size, pad.culture.size);
-          img.data.set(pad.imgBuf);
-          octx.putImageData(img, 0, 0);
-        }
+        if (octx) octx.putImageData(pad.img, 0, 0);
         const w = Math.round(pad.canvas.clientWidth);
         const h = Math.round(pad.canvas.clientHeight);
         if (w > 0 && h > 0) {
@@ -1089,6 +1100,7 @@ export function buildPairPads(spec: PairPadsSpec): PairPadsHandle {
   function refreshAll(): void {
     for (const pad of pads) redrawPad(pad);
     lastSig = "";
+    lastStatusSig = "";
     refreshPresetHighlight();
   }
   refreshAll();
