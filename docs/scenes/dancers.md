@@ -92,6 +92,9 @@ original work built around that data.
   addition of `fastRenderers.ts`'s two cheap renderers (Capsules, Flat) let
   the raymarcher hand over below `RAYMARCH_MIN_DETAIL`, so the scene now
   registers as runnable on every preset including the TV floor.
+- 2026-10-02: review cleanup. `moves.ts` lost the helpers nothing called
+  (`wristBend`, `lift`, `newPose`, the `lerpPose` re-export), and `rig.ts`
+  now points at `clipFormat.ts` instead of a `clips.ts` that never existed.
 
 ## Tuning notes
 

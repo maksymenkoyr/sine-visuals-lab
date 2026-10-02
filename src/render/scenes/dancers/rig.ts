@@ -17,11 +17,11 @@
  * x/z offset, lift above the floor, then a unit quaternion (x,y,z,w) per
  * bone. A bone's rotation is expressed in its parent's frame and applied
  * before its rest rotation:  worldRot(b) = worldRot(parent) · q(b) · rest(b).
- * Quaternions rather than Euler angles because captured motion (clips.ts)
- * swings limbs through angles where Euler channels gimbal and wrap, and
- * because blending two poses (lerpPose) has to be a rotation blend. The
- * Euler-flavoured intent helpers in moves.ts (armSwing, kneeFlex, …) still
- * exist for the procedural sway; they convert on the way in via
+ * Quaternions rather than Euler angles because captured motion (clipFormat.ts,
+ * data in clips.bin) swings limbs through angles where Euler channels gimbal
+ * and wrap, and because blending two poses (lerpPose) has to be a rotation
+ * blend. The Euler-flavoured intent helpers in moves.ts (armSwing, kneeFlex,
+ * …) still exist for the procedural sway; they convert on the way in via
  * mulBoneEuler(). forwardKinematics() normalises each bone's quaternion, so
  * slews and lerps may leave a pose slightly off-unit without harm.
  *
@@ -194,7 +194,7 @@ export function lerpPose(a: Pose, b: Pose, t: number, out: Pose): void {
   for (let bone = 0; bone < BONE_COUNT; bone++) quatNlerp(a, boneChannel(bone), b, boneChannel(bone), t, out, boneChannel(bone));
 }
 
-/** The reference T-pose captured motion is retargeted against (clips.ts,
+/** The reference T-pose captured motion is retargeted against (clipFormat.ts,
  *  tools/clip-convert.mjs): arms straight out sideways at shoulder height,
  *  everything else at rest. */
 export function tPose(out: Pose): Pose {
