@@ -102,6 +102,12 @@ original work built around that data.
   for the right hand and forearm and the left shin (thumbs and radius medial
   on both arms, fibula lateral on both legs). The Stick skin and the Capsules
   and Flat renderers are unaffected.
+- 2026-10-02: the clip loop length (normal, half- or double-time) is now
+  latched in `createClipPlayer` when a move starts, and re-read only when the
+  picker comes back to it after its hold (restarting the loop on that
+  downbeat). It was re-decided every frame from the raw `bpm`, so a wobble
+  across `HALF_TIME_RATIO`/`DOUBLE_TIME_RATIO`, or a drop to 0 in a break,
+  jumped the clip phase. `clipPhaseAt` stays for the DEV `?clip` path.
 
 ## Tuning notes
 

@@ -11,7 +11,8 @@
  * move, so past HALF_TIME_RATIO the clip is spread over twice its bars
  * (every clip beat on every other music beat) and below DOUBLE_TIME_RATIO it
  * is played twice as fast — the same trick a dancer uses when the DJ speeds
- * up.
+ * up. That choice is made when a move starts (or is picked again), not every
+ * frame, so a tempo estimate wobbling across a ratio can't jump the phase.
  *
  * Picker: re-evaluated only on bar boundaries, and only once the current
  * move has been held for HOLD_LOOPS loops (a move you can't watch for a few
@@ -121,6 +122,12 @@ export interface ClipPlayer {
   readonly current: Clip | null;
 }
 
+/** 0..1 loop phase `barsSinceStart` bars into a loop that spans `cycle` bars. */
+const phaseOf = (barsSinceStart: number, cycle: number): number => {
+  const x = barsSinceStart / cycle;
+  return x - Math.floor(x);
+};
+
 const smoothstep = (t: number): number => {
   const x = Math.min(1, Math.max(0, t));
   return x * x * (3 - 2 * x);
@@ -162,9 +169,16 @@ export function createClipPlayer(library: ClipLibrary, seed = 1): ClipPlayer {
   const bars = createBarCounter();
   let current: Clip | null = null;
   let currentStart = 0;
+  // Music bars one loop of the playing clip spans, decided when the clip
+  // starts (or is picked again after its hold) and kept until then: re-reading
+  // clipCycleBars every frame would jump the phase whenever the raw bpm
+  // estimate wobbled across HALF_TIME_RATIO / DOUBLE_TIME_RATIO or dropped to 0
+  // in a break, where the pose should stay where the beat left it.
+  let currentCycle = 1;
   let holdUntil = 0;
   let outgoing: Clip | null = null;
   let outgoingStart = 0;
+  let outgoingCycle = 1;
   let switchBar = 0;
   let lastBar = -1;
   let dropPending = false;
@@ -229,6 +243,7 @@ export function createClipPlayer(library: ClipLibrary, seed = 1): ClipPlayer {
               } else {
                 outgoing = current;
                 outgoingStart = currentStart;
+                outgoingCycle = currentCycle;
                 inertial = false;
               }
               history.push(current.name);
@@ -236,16 +251,25 @@ export function createClipPlayer(library: ClipLibrary, seed = 1): ClipPlayer {
             }
             current = next;
             currentStart = bar;
+            currentCycle = clipCycleBars(next, params.bpm);
+          } else if (current) {
+            // The same move again: re-read the tempo mode, and if it moved
+            // restart the loop on this downbeat rather than jump mid-loop.
+            const cycle = clipCycleBars(current, params.bpm);
+            if (cycle !== currentCycle) {
+              currentCycle = cycle;
+              currentStart = bar;
+            }
           }
-          if (current) holdUntil = bar + Math.max(1, Math.round(clipCycleBars(current, params.bpm) * HOLD_LOOPS));
+          if (current) holdUntil = bar + Math.max(1, Math.round(currentCycle * HOLD_LOOPS));
         }
       }
       if (!current) return null;
 
-      sampleClip(current, clipPhaseAt(current, params.bpm, elapsed - currentStart), inPose);
+      sampleClip(current, phaseOf(elapsed - currentStart, currentCycle), inPose);
       const fade = outgoing || inertial ? (elapsed - switchBar) / FADE_BARS : 1;
       if (outgoing && fade < 1) {
-        sampleClip(outgoing, clipPhaseAt(outgoing, params.bpm, elapsed - outgoingStart), outPose);
+        sampleClip(outgoing, phaseOf(elapsed - outgoingStart, outgoingCycle), outPose);
         lerpPose(outPose, inPose, smoothstep(fade), out);
       } else if (inertial && fade < 1) {
         applyOffset(1 - smoothstep(fade), out);
