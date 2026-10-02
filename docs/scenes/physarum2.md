@@ -841,7 +841,14 @@ configs are used.
   cursor hint (avoids · seeks / eats · feeds recommended; "attracts" reads
   backwards against "A1 → B2"); a controller-only spotlight dimming the other
   strains, hatched flat ends, a Touch "rarely meet" tag, squeezed flat ends
-  (ask). No sim change proposed (`padmodels.mjs`). Awaiting the user's picks.
+  (ask). No sim change proposed (`padmodels.mjs`). The user: "a bit hard to
+  wrap my head around", wants to "experience how a regular user would" → a
+  second page, "Pairs Card Trial" (Materials), with no charts or idea
+  switches: a stand-in dish and three whole versions of the card to try cold
+  (Today; Clearer pads = contact colours, squeezed Smell range, corner
+  pictures for apart/together/who chases whom, settle on release, spotlight,
+  one-sentence hint; Pick a look = per pair, nine live mini-cultures from the
+  three looks each direction really has, tap one). Awaiting the user's pick.
 
 ## Tuning notes
 
@@ -1016,6 +1023,10 @@ applies there too. Tuned so far only against the synthetic feed at
   are `padresponse.mjs`'s 2026-10-02 numbers; the lab runs six pair cultures
   and a four-strain stand-in dish (a K-strain port of `createPairCulture`)
   with every idea as a switch and Today / Proposed presets.
+- Artifact "Pairs Card Trial" (three versions of the card to try cold,
+  private): https://claude.ai/artifact/7tPBxZnEpeDpszPssPcW8x — self-contained
+  source `physarum2/artifacts/pairs-trial.html` (publish it as is; same
+  culture port as `pairs-readable.html`), notes folded under the lab.
 - No `/ref` bundle. Headless shots for tuning:
   `docs/scenes/_shared/scripts/shot.mjs --scene physarum2 --bpm 120
   --settings '{…}'` (the session's scratch variant only differed in taking a
