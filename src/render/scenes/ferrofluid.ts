@@ -1,17 +1,19 @@
+import { NUM_BANDS } from "../../audio/types.ts";
 import { createFullscreenScene } from "../fullscreenScene.ts";
 
-// A raymarched black-chrome blob that grows spikes toward 24 fixed
-// directions (one per band, spread evenly via the golden angle), each
-// spike's height driven by that band's energy. Fresnel + specular give it
-// an oil-slick sheen. Sculptural and glossy; the most expensive of the
-// five, so it leans on uMaxSteps the way tunnel.ts does.
+// A raymarched black-chrome blob that grows spikes toward one fixed
+// direction per band (spread evenly via the golden angle), each spike's
+// height driven by that band's energy. Fresnel + specular give it an
+// oil-slick sheen. Sculptural and glossy; the most expensive of the
+// fullscreen raymarch scenes, so it leans on uMaxSteps the way tunnel.ts
+// does.
 const FRAG = `
 const int MAX_STEPS = 64;
 
 vec3 modeDir(int i) {
   float fi = float(i);
   float golden = 2.399963;
-  float y = 1.0 - 2.0 * (fi + 0.5) / 24.0;
+  float y = 1.0 - 2.0 * (fi + 0.5) / float(${NUM_BANDS});
   float radius = sqrt(max(0.0, 1.0 - y * y));
   float theta = golden * fi;
   return vec3(cos(theta) * radius, y, sin(theta) * radius);
@@ -21,7 +23,7 @@ float sdBlob(vec3 p) {
   float d = length(p) - 1.0;
   vec3 n = normalize(p + 1e-4);
   float bump = 0.0;
-  for (int i = 0; i < 24; i++) {
+  for (int i = 0; i < ${NUM_BANDS}; i++) {
     float band = uBands[i];
     if (band < 0.02) continue;
     vec3 dir = modeDir(i);

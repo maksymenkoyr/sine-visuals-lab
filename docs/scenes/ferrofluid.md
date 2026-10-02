@@ -1,7 +1,7 @@
 # Ferrofluid (`ferrofluid`)
 
-A raymarched black-chrome blob that grows spikes toward 24 fixed directions
-(one per band, spread via the golden angle), each spike's height driven by
+A raymarched black-chrome blob that grows spikes toward one fixed direction
+per band (spread via the golden angle), each spike's height driven by
 that band's energy, lit with Fresnel + specular for an oil-slick sheen.
 Small, original scene; a draft (in `DRAFT_SCENE_IDS`), on `main` since the
 initial commit. Its own header comment calls it out as the most expensive
@@ -12,8 +12,8 @@ of the small fullscreen scenes, gated to `minQuality: "mid"`.
 - `src/render/scenes/ferrofluid.ts` — one fragment shader body (`FRAG`)
   passed to `createFullscreenScene()` with `{ minQuality: "mid" }`. No
   `settings`, no `extraUniforms`, no per-scene helper module.
-- `modeDir(i)` places each of 24 band directions on a sphere via the golden
-  angle. `sdBlob(p)` is the signed-distance field: a unit sphere minus a sum
+- `modeDir(i)` places each band's direction (one per `NUM_BANDS`) on a sphere
+  via the golden angle. `sdBlob(p)` is the signed-distance field: a unit sphere minus a sum
   of per-direction lobes (`pow(dot(n, dir), 3.5) * band`), minus a small
   `uBeatPulse`-driven bulge. `calcNormal` is a standard SDF central-difference
   normal.
@@ -38,6 +38,10 @@ None — original design.
   `minTier: "mid"` (later renamed).
 - 2026-08-29 (`4b8d342`, #31) — mechanical rename only: `minTier` →
   `minQuality`; no visual change.
+- 2026-10-02 — review fix, no visual change: the shader looped over, and
+  `modeDir` divided by, a literal band count; both now use `NUM_BANDS` (the
+  uniform array was already sized from it), and the header no longer counts
+  bands or scenes.
 
 ## Tuning notes
 
