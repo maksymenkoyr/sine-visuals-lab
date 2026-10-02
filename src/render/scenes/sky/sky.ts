@@ -930,6 +930,11 @@ const vec2 STREAK_L_MAX = vec2(0.6, 0.13); // the long, thin reference streak ru
 const float STREAK_SLANT_MIN = 0.12;
 const float STREAK_SLANT_MAX = 0.45; // radians up to the right; the reference rises ~20 degrees
 const float STREAK_RAG = 0.45;
+// Squared cull radius in units of a stamp's own L.x: density is 1 - |e|^2 + rag
+// at best (rag within +-STREAK_RAG/2, the envelope only lowers it), so beyond
+// this a stamp can neither draw nor win (<= CELL_T_FRINGE). The 0.02 is a
+// float margin. Valid because L.x >= L.y, which makes |e|^2 >= |d|^2 / L.x^2.
+const float STREAK_CULL2 = 1.0 + 0.5 * STREAK_RAG - CELL_T_FRINGE + 0.02;
 const float STREAK_HOT_CHANCE = 0.5; // fraction of streaks with a dot hotspot (one reference has one, the other none)
 const vec2 STREAK_DRIFT = vec2(0.09, 0.012); // p-units/s, scaled by Flow speed; quick, since a streak only lives a couple of seconds by default (Floater sustain)
 const int FLOATER_SEGMENTS = 10; // path points per strand (head at index 0), see floaterPath
@@ -1316,14 +1321,19 @@ void main() {
   // dens > CELL_T_FRINGE block) are drawn until the amount comes back.
   float densityAmt = uFloaterDensity * floaterDensityDrive(1.0);
   bool floatersOn = densityAmt > 0.0;
+  // The stamp-independent half of streakDensity's size, hoisted out of the loop.
+  float sizeBase = clamp(uFloaterDensity * 1.3 * floaterDensityDrive(1.0), 0.1, 1.0);
   for (int b = 0; b < MAX_WAVE_BURSTS_C; b++) {
     if (!floatersOn) break;
     float age = uTime - uBurstT0[b];
     float life = uBurstLife[b];
     if (age < 0.0 || age > life) continue;
     vec2 centre = (vec2(uBurstX[b], uBurstY[b]) - 0.5) * vec2(devAspect, 1.0) + wind * age;
-    // Rag can push density past the ellipse by at most ~5%, never further.
-    if (length(cellC - centre) > STREAK_L_MAX.x * 1.1) continue;
+    // Cull against this stamp's own long half-axis, not the largest any stamp
+    // could have: most of the frame is out of reach of a given streak.
+    float stampLx = mix(STREAK_L_MIN.x, STREAK_L_MAX.x, sizeBase * clamp(uBurstAmp[b], 0.0, 1.0));
+    vec2 dc = cellC - centre;
+    if (dot(dc, dc) > stampLx * stampLx * STREAK_CULL2) continue;
     float h;
     float sl;
     float d = streakDensity(cellC, centre, uBurstSeed[b], uBurstAmp[b], age, life, sl, h);

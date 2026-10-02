@@ -336,6 +336,13 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   walk, swarm centre) keep the full count. Bench dumps of frames 30, 75 and
   200 are identical to before: the first period of stamps and sweeps hashes
   exactly as it did.
+- 2026-10-02 — Review pass: the floater stamp loop now culls each stamp
+  against its own long half-axis (`STREAK_CULL2`, derived from `STREAK_RAG`
+  and `CELL_T_FRINGE`) instead of the largest any stamp could have. Beyond it
+  a stamp's density cannot pass `CELL_T_FRINGE`, so the cull is exact: bench
+  dumps of frames 30, 75 and 200 (with floaters on screen) show 0 pixels
+  changed. Most pixels were running the full `streakDensity` for every live
+  stamp; the bench gpu time dropped a little (3.6 to 3.1-3.6 ms, noisy).
 
 ## Tuning notes
 
