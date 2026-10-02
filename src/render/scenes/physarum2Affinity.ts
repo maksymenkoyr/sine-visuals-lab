@@ -6,7 +6,7 @@
  * - `ATTRACT_ROWS`, the default Smell (`att<i><j>`) table — re-exported from
  *   physarum2.ts, since it lives here but the scene's settings still need it
  *   as their default and tests import it from physarum2.ts.
- * - `smellWeight`, the one place Hostility (the `rivalry` setting) folds
+ * - `smellWeight`, the one place Cross-smell (the `rivalry` setting) folds
  *   into a raw `att` value — shared between the GPU's per-step packing
  *   (physarum2.ts's `resolveStrains`) and the pair cultures' own preview
  *   math (`previews.ts`'s `pair.weights`), so both read the exact same
@@ -77,7 +77,7 @@ export const TOUCH_MAX_BITE = 0.9;
  *  trail (itself included) — the `att<i><j>` settings' own default, and the
  *  "Rivals" entry in `AFFINITY_PRESETS` below.
  *  Diagonal near +1 (follow own trail), off-diagonal negative (avoid
- *  everyone else's), scaled live by the Hostility setting through
+ *  everyone else's), scaled live by the Cross-smell setting through
  *  `smellWeight` below. Fixed, hand-picked — not derived from Fogleman's own
  *  published table, which uses different values. Re-exported from
  *  physarum2.ts, which is the module every other file (and every test)
@@ -89,12 +89,16 @@ export const ATTRACT_ROWS: readonly [number, number, number, number][] = [
   [-1.0, -0.65, -1.15, 1.05],
 ];
 
-/** Hostility (`rivalry`) folded into a raw Smell value — the formula
- *  SIM_FRAG used to apply inline (`w = row * (own + (1-own)*(uRivalry*2))`)
- *  before it moved to JS packing in `resolveStrains`. The diagonal (i ===
- *  j, "own trail") is unaffected; every off-diagonal entry scales with
- *  `rivalry` doubled, so rivalry 0.5 (its default/NEUTRAL value) is the
- *  identity and rivalry 0 zeroes every off-diagonal weight. */
+/** Cross-smell (the `rivalry` setting — the key outlives its old "Rivalry" and
+ *  "Hostility" labels, so saved looks stay valid) folded into a raw Smell
+ *  value. It scales the strength of every off-diagonal weight whichever way
+ *  its sign points, so it reads "more" to the right even for attractive
+ *  (positive) cells. It is the formula SIM_FRAG used to apply inline
+ *  (`w = row * (own + (1-own)*(uRivalry*2))`) before it moved to JS packing in
+ *  `resolveStrains`. The diagonal (i === j, "own trail") is unaffected; every
+ *  off-diagonal entry scales with `rivalry` doubled, so rivalry 0.5 (its
+ *  default/NEUTRAL value) is the identity and rivalry 0 zeroes every
+ *  off-diagonal weight. */
 export function smellWeight(att: number, i: number, j: number, rivalry: number): number {
   return i === j ? att : att * rivalry * 2;
 }

@@ -12,7 +12,7 @@ import { bindHint, hideTooltip } from "./tooltip.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
-import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "../render/framePace.ts";
+import { GATE_TOLERANCE_MS, RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "../render/framePace.ts";
 import { getPowerMode } from "../render/powerMode.ts";
 import { selectDueTiles, type ScheduleCandidate } from "../render/previewSchedule.ts";
 import { createPreviewBudgetController, type PreviewBudgetController } from "../render/previewBudget.ts";
@@ -376,6 +376,8 @@ function targetIntervalMsFor(t: Tile, isFocused: boolean, baseIntervalMs: number
 interface Tile {
   scene: Scene;
   canvas: HTMLCanvasElement;
+  /** Where this tile's frames go; set to null if its scene fails to mount,
+   *  which takes the tile out of the draw rotation. */
   sink: ReturnType<PreviewRenderer["attach"]>;
   feed: ReturnType<typeof createSyntheticFeed>;
   palette: Palette;
@@ -580,6 +582,9 @@ export function createGallery(deps: GalleryDeps): Gallery {
   let tiles: Tile[] = [];
   let lastDrawMs = 0;
   let visible = false;
+  // True from show() until the next tick has run: that tick draws only scenes
+  // already mounted — see tick()'s lazy-mount comment.
+  let justShown = false;
   // The device preset last captured in show() — drives both the tick
   // interval (tickIntervalMs()) and the budget controller's ceiling
   // (BUDGET_CEILING_BY_PRESET). Not read from deps.quality() live inside
@@ -607,7 +612,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
   // Bumped by every buildTiles() so an in-flight progressive draft build
   // (see expandDrafts) from a previous cycle notices and stops.
   let draftBuildGen = 0;
-  /** How many draft tiles the in-flight build has mounted so far — drives the
+  /** How many draft tiles the in-flight build has built so far — drives the
    *  toggle's loading label; -1 = no build in flight. */
   let draftsBuiltCount = -1;
 
@@ -718,7 +723,11 @@ export function createGallery(deps: GalleryDeps): Gallery {
     });
     into.appendChild(btn);
     observer.observe(canvas);
-    preview?.host.mount(entry.scene);
+    // No mount here: init() compiles the scene's shaders and seeds its
+    // buffers synchronously, and doing every released scene in the task that
+    // builds the gallery blocked first paint. tick() mounts them lazily, one
+    // per tick, the first time each tile is due (drawTo mounts too, as a
+    // no-op once that has happened).
 
     const tile: Tile = {
       scene: entry.scene,
@@ -751,14 +760,13 @@ export function createGallery(deps: GalleryDeps): Gallery {
       : `${draftsExpanded ? "Hide" : "Show"} ${n} ${n === 1 ? "draft" : "drafts"}`;
   }
 
-  // Draft tiles are built one per animation frame rather than all at once:
-  // each buildTile() compiles that scene's shaders synchronously, and doing
-  // every draft in one click handler froze the page — the button couldn't
-  // even repaint to say it was working. Spreading them out lets the toggle
-  // show its loading label first, then the grid fill in tile by tile while
-  // the page stays responsive. The extra leading frame is deliberate: rAF
-  // callbacks run *before* that frame's paint, so without it the first
-  // compile would still land ahead of the label's first repaint.
+  // Draft tiles are built one per animation frame rather than all at once.
+  // buildTile() only builds DOM now (tick() mounts each scene lazily, one per
+  // tick), so this staging survives mainly for the loading label: it lets the
+  // toggle repaint to say it is working, then the grid fills in tile by tile.
+  // The extra leading frame is deliberate: rAF callbacks run *before* that
+  // frame's paint, so without it the first tile would still land ahead of the
+  // label's first repaint.
   function buildDraftsProgressively(): void {
     const gen = draftBuildGen;
     draftsBuiltCount = 0;
@@ -853,6 +861,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
       buildTiles();
       root.style.display = "block";
       visible = true;
+      justShown = true;
       lastDrawMs = 0;
     },
 
@@ -866,6 +875,12 @@ export function createGallery(deps: GalleryDeps): Gallery {
       // shader recompiled the next time the gallery is shown.
       visible = false;
       root.style.display = "none";
+      // Cancel a draft build still in flight: its steps would keep building
+      // DOM (one tile per frame) under the fullscreen scene's frames, into
+      // tiles the next show() discards anyway — buildTiles() rebuilds
+      // everything and re-expands the section (draftsExpanded survives).
+      draftBuildGen++;
+      draftsBuiltCount = -1;
     },
 
     syncSource(): void {
@@ -875,12 +890,17 @@ export function createGallery(deps: GalleryDeps): Gallery {
     tick(nowMs: number): void {
       if (!visible || !preview || !budgetController) return;
       if (document.visibilityState !== "visible") return;
+      // A lost shared context can neither compile nor draw: a lazy mount now
+      // would throw and permanently drop the tile (t.sink = null) even though
+      // the restore is coming. drawTo's own guard covers already-mounted ones.
+      if (preview.isLost()) return;
       const intervalMs = tickIntervalMs(preset);
       // shouldRenderFrame(), not a raw `<` comparison — see framePace.ts's
       // header for why the naive comparison quantizes against vsync and
-      // silently loses a third of the intended rate.
+      // silently loses a third of the intended rate, and for why the
+      // timestamp it keeps is nextRenderAnchor()'s, not simply `nowMs`.
       if (!shouldRenderFrame(nowMs, lastDrawMs, intervalMs)) return;
-      lastDrawMs = nowMs;
+      lastDrawMs = nextRenderAnchor(nowMs, lastDrawMs, intervalMs);
 
       const timeSec = nowMs / 1000;
       const live = deps.liveFrame();
@@ -900,10 +920,40 @@ export function createGallery(deps: GalleryDeps): Gallery {
         targetIntervalMs: targetIntervalMsFor(t, t === focused, intervalMs, noContention),
       }));
 
-      const dueIndices = selectDueTiles(candidates, nowMs, budget);
+      const dueIndices = selectDueTiles(candidates, nowMs, budget, GATE_TOLERANCE_MS);
+
+      // At most one not-yet-mounted tile per tick (and none on the first tick
+      // after show(), so the gallery paints before any compile): a mount is
+      // a synchronous shader compile, and a skipped tile just stays overdue
+      // for the next tick. Done before the timed loop because a compile is
+      // not a draw cost — the budget controller would read it as an overload
+      // and step the budget down. A scene that migrated to the fullscreen
+      // viz's host while the gallery was hidden comes back the same way.
+      let mountedThisTick = justShown;
+      justShown = false;
+      const toDraw: number[] = [];
+      for (const idx of dueIndices) {
+        const t = eligible[idx];
+        if (!preview.host.isMounted(t.scene)) {
+          if (mountedThisTick) continue;
+          mountedThisTick = true;
+          try {
+            preview.host.mount(t.scene);
+          } catch (err) {
+            // A scene whose init() throws here (a shader this GPU won't
+            // compile) just never draws: no sink drops it from `eligible`,
+            // and the other tiles carry on. Picking it still reaches
+            // app.ts's own mount, which says so.
+            console.error(`Gallery preview of "${t.scene.name}" can't run on this device:`, err);
+            t.sink = null;
+            continue;
+          }
+        }
+        toDraw.push(idx);
+      }
 
       const drawStartMs = performance.now();
-      for (const idx of dueIndices) {
+      for (const idx of toDraw) {
         const t = eligible[idx];
 
         // Each tile's own elapsed-time-since-last-draw, not the shared tick
@@ -916,7 +966,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
         const anim = t.anim.advance(tileDt, frame);
         preview.drawTo(t.sink!, t.scene, frame, t.palette, anim);
       }
-      budgetController.recordTick(performance.now() - drawStartMs, dueIndices.length);
+      budgetController.recordTick(performance.now() - drawStartMs, toDraw.length);
     },
 
     setError(msg: string | null): void {

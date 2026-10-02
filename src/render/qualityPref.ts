@@ -1,4 +1,4 @@
-import type { QualityPreset } from "./quality.ts";
+import { isQualityPreset, type QualityPreset } from "./quality.ts";
 
 /**
  * User override for which quality preset drives rendering, global per device
@@ -33,8 +33,9 @@ export type QualityChoice = "auto" | QualityPreset;
 const STORAGE_KEY = "vibe.quality";
 export const QUALITY_CHOICE_DEFAULT: QualityChoice = "high";
 
-function isQualityChoice(value: string): value is QualityChoice {
-  return value === "auto" || value === "high" || value === "mid" || value === "low" || value === "floor";
+/** Also what outputPower.ts validates its two stored choices with. */
+export function isQualityChoice(value: string): value is QualityChoice {
+  return value === "auto" || isQualityPreset(value);
 }
 
 function loadInitial(): QualityChoice {

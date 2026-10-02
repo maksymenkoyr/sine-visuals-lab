@@ -9,7 +9,7 @@ import {
   type CrystalOpts,
 } from "../src/render/scenes/crystal/index.ts";
 
-// The sequencer is the scene's whole sync story (see crystal.ts's header):
+// The sequencer is the scene's whole sync story (see crystal/driver.ts's header):
 // a wandering camera, a morph clock and light layers that fade up and
 // down — nothing discrete anywhere except the beat/bar/drop triggers of
 // those smooth envelopes. These tests pin the envelope's shape and, above

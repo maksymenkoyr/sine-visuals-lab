@@ -91,8 +91,8 @@ interface VizDebugApi {
    *  scene setting (resolveSceneSetting), which advances the auto-tune slew
    *  map (autoTune.ts) as a side effect on every call. Polling that every
    *  rAF tick would perturb the running scene; this doesn't. Also distinct
-   *  from probe().beat.fired, which is anim.onset (grid-filtered) rather
-   *  than this raw pre-grid flag. */
+   *  from probe().beat.fired, which is the raw anim.onset (renderLatch-latched,
+   *  no grid) rather than this pre-latch FeatureFrame flag. */
   audioProbe(): AudioProbeSnapshot;
   /** The deep waveform buffer behind the tick audioProbe() just reported —
    *  call only on a detected onset edge, not every tick (see
@@ -379,7 +379,13 @@ export function initTuning(deps: TuningDeps): void {
             ui.notice(describeBakeResult(res).lines, false);
             return;
           }
+          // Two quick presses both start a dry run before either resolves, so
+          // an earlier preview may have landed already: cancel its timer
+          // first, and have the timer check it still owns `pending`, so it
+          // can never expire a newer preview.
+          clearPending();
           const timer = setTimeout(() => {
+            if (pending?.timer !== timer) return;
             clearPending();
             ui.notice(["bake preview expired"], true);
           }, BAKE_CONFIRM_MS);

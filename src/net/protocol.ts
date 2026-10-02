@@ -125,6 +125,10 @@ export function decodeFeatureFrame(buf: ArrayBuffer): DecodedFrame | null {
   const level = legacy ? 0.5 : view.getUint8(o) / 255;
   if (!legacy) o += 1;
   const roomTimeMs = view.getFloat64(o, true);
+  // A NaN or infinite timestamp would wedge the jitter buffer (NaN compares
+  // false everywhere, so it is never pruned; Infinity prunes all history).
+  // No honest sender writes one.
+  if (!Number.isFinite(roomTimeMs)) return null;
 
   return { bands, energy, onset, pulseOnset, bpm, onsetPhase, level, roomTimeMs };
 }

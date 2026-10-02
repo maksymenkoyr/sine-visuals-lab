@@ -481,8 +481,9 @@ function clamp01(x: number): number {
  *  (unexported) wrap01, reproduced here rather than imported since it's a
  *  one-line generic helper, not a beat-clock-specific one: `x % 1` alone
  *  wraps negative inputs to (-1, 0], which every-N-beats' own division
- *  (below) never actually hits (anim.beats only grows), but a copy that
- *  doesn't quietly rely on that stays correct if it ever does. */
+ *  (below) practically never hits (anim.beats only grows, bar the beat
+ *  trim's occasional hair-sized nudge back), but a copy that doesn't
+ *  quietly rely on that stays correct if it ever does. */
 function wrap01(x: number): number {
   const w = x % 1;
   return w < 0 ? w + 1 : w;

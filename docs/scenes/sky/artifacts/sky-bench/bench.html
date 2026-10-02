@@ -677,7 +677,7 @@ void main() {
       vao = Sim.createFullscreenQuad(gl);
       const small = Math.min(window.innerWidth, window.innerHeight) < 700;
       simSize = Sim.simResolutionFor(small ? 0.3 : 0.7, 1600, 1000, Sim.MIRROR_OFF);
-      sim = Sim.createFluidSim(gl, vao, simSize, format);
+      sim = Sim.createFluidSim(gl, vao, simSize, format, { splatSlots: Sim.SPLAT_SLOTS, edge: false });
       prog = Sim.createProgram(gl, displayFrag(format));
       dyeLoc = gl.getUniformLocation(prog.program, "uDye");
     } catch (e) {
@@ -691,7 +691,7 @@ void main() {
   function restartClouds() {
     if (!sim) return;
     sim.dispose();
-    sim = Sim.createFluidSim(gl, vao, simSize, format);
+    sim = Sim.createFluidSim(gl, vao, simSize, format, { splatSlots: Sim.SPLAT_SLOTS, edge: false });
     ambientT = 0;
     preroll = 360;
   }

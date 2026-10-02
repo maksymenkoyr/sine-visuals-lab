@@ -135,6 +135,20 @@ None — original design.
   Circle Squeeze renamed Circle Depth (higher already meant deeper) and
   Noise Scale renamed Noise Detail (it is a frequency, so higher already
   meant finer). Labels only.
+- 2026-10-02: `buildGridTriangles` fills a preallocated `Uint32Array` instead
+  of growing an array and copying it (Grid Density rebuilds the grid on every
+  step). Same indices, same order.
+- 2026-10-02: history rows are pushed at a fixed `ROWS_PER_SECOND` (via
+  `rowsToPush`) instead of one per rendered frame, and the noise scroll
+  advances per pushed row. Waterfall depth and noise speed were tied to the
+  render rate (half the seconds of history at the 30 fps floor and Energy
+  saving, other depths on a gated 75 Hz panel). `anim.dtSec` (wall seconds
+  since the last rendered frame) counts the rows; the audio-clock
+  `frame.time` delta stuttered: that clock advances in audio-buffer-sized
+  steps, so a steady 60 fps render pushed 0 or 2 rows on nearly half its
+  frames. A frame covering several rows
+  eases from the last row to its own so 30 fps doesn't stair-step; at a steady
+  60 fps the picture is pixel-identical (`tools/gpu-bench.mjs --compare`).
 
 ## Tuning notes
 

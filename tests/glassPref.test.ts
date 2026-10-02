@@ -5,10 +5,10 @@ describe("glassPref", () => {
     vi.resetModules();
   });
 
-  it("defaults to no blur and round-trips", async () => {
+  it("defaults to blur on and round-trips", async () => {
     const mod = await import("../src/ui/glassPref.ts");
     expect(mod.getGlassBlur()).toBe(mod.GLASS_BLUR_DEFAULT);
-    expect(mod.GLASS_BLUR_DEFAULT).toBe(false);
+    expect(mod.GLASS_BLUR_DEFAULT).toBe(true);
     mod.setGlassBlur(true);
     expect(mod.getGlassBlur()).toBe(true);
     mod.setGlassBlur(false);

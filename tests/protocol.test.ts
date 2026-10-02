@@ -77,6 +77,14 @@ describe("protocol", () => {
     expect(decodeFeatureFrame(corrupted)).toBeNull();
   });
 
+  it("rejects a frame whose room time is NaN or infinite", () => {
+    const frame = { bands: new Float32Array(NUM_BANDS), energy: 0, onset: false, pulseOnset: false, bpm: 0, onsetPhase: 0, level: 0 };
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expect(decodeFeatureFrame(encodeFeatureFrame(frame, bad))).toBeNull();
+    }
+    expect(decodeFeatureFrame(encodeFeatureFrame(frame, 1_755_000_000_000))).not.toBeNull();
+  });
+
   it("decodes a legacy (pre-level) frame, defaulting level to 0.5 instead of rejecting it", () => {
     // Simulates an old sender that never learned about the `level` byte, and
     // — same sender, before pulseOnset (bit1) existed — a flags byte with

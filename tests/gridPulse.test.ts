@@ -87,6 +87,45 @@ describe("beat grid pulse", () => {
     expect(pulse.advance(beats + DT * 2, 1, 8, false)).toBe(false);
   });
 
+  // beatClock's phase only grows, but the beat trim on top of it can ease the
+  // count back (a "later" nudge, a trim reset); crossing the same boundary
+  // again must not pulse twice.
+  it("a small rewind across a boundary does not fire it a second time", () => {
+    const pulse = createGridPulse();
+    pulse.advance(2.5, 1, 1, false); // arms silently
+    expect(pulse.advance(3.01, 1, 1, false)).toBe(true); // boundary 3
+    expect(pulse.advance(2.99, 1, 1, false)).toBe(false); // trim nudge back
+    expect(pulse.advance(3.02, 1, 1, false)).toBe(false); // same boundary again
+    expect(pulse.advance(3.9, 1, 1, false)).toBe(false);
+    expect(pulse.advance(4.01, 1, 1, false)).toBe(true); // a new boundary
+  });
+
+  it("a rewind of most of a beat at 1/8 stays quiet until a new boundary", () => {
+    const pulse = createGridPulse();
+    pulse.advance(5.1, 1, 0.5, false);
+    expect(pulse.advance(5.6, 1, 0.5, false)).toBe(true); // boundary 11
+    expect(pulse.advance(4.85, 1, 0.5, false)).toBe(false); // 0.75-beat trim reset
+    expect(pulse.advance(5.2, 1, 0.5, false)).toBe(false);
+    expect(pulse.advance(5.55, 1, 0.5, false)).toBe(false);
+    expect(pulse.advance(6.05, 1, 0.5, false)).toBe(true); // boundary 12
+  });
+
+  it("a rewind of many bars re-arms silently, then fires normally", () => {
+    const pulse = createGridPulse();
+    pulse.advance(100.1, 1, 1, false);
+    expect(pulse.advance(101.1, 1, 1, false)).toBe(true);
+    expect(pulse.advance(0.5, 1, 1, false)).toBe(false); // resync far back
+    expect(pulse.advance(0.9, 1, 1, false)).toBe(false);
+    expect(pulse.advance(1.1, 1, 1, false)).toBe(true);
+  });
+
+  it("a forward jump still fires exactly once", () => {
+    const pulse = createGridPulse();
+    pulse.advance(1.5, 1, 1, false);
+    expect(pulse.advance(6.5, 1, 1, false)).toBe(true);
+    expect(pulse.advance(6.6, 1, 1, false)).toBe(false);
+  });
+
   it("beatGrid store maps indices to note values and labels", () => {
     expect(beatGridBeats(0)).toBeNull();
     expect(BEAT_GRIDS.map((g) => g.beats)).toEqual([null, 0.5, 1, 2, 4, 8]);

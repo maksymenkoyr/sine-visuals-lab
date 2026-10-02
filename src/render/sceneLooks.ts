@@ -80,6 +80,10 @@ export interface SceneLook {
 
 const STORAGE_KEY = "vibe.looks";
 const CODE_VERSION = 1;
+/** Longest name decodeLook keeps from a share code. Only the name is clipped
+ *  (links in the wild must keep decoding): it becomes the upsert key and is
+ *  saved on page load, so an untrusted code shouldn't set its size. */
+const MAX_SHARED_NAME = 60;
 
 type Store = Record<string, SceneLook[]>;
 
@@ -116,6 +120,23 @@ export function saveLook(look: SceneLook): void {
   if (i >= 0) list[i] = look;
   else list.push(look);
   persist();
+}
+
+/** Saves a look that arrived from a share link, without ever replacing one of
+ *  the visitor's own: a saved look of the same name with different contents
+ *  sends the incoming one to the first free "name (2)", "name (3)", … An
+ *  identical look already saved is left as is. Returns the look as stored.
+ *  (saveLook alone upserts by name — right for the visitor saving their own
+ *  look, wrong for a link that can name itself anything.) */
+export function saveSharedLook(look: SceneLook): SceneLook {
+  const list = listLooks(look.sceneId);
+  const sameName = list.find((l) => l.name === look.name);
+  if (sameName && encodeLook({ ...sameName, name: "" }) === encodeLook({ ...look, name: "" })) return sameName;
+  let name = look.name;
+  for (let n = 2; list.some((l) => l.name === name); n++) name = `${look.name} (${n})`;
+  const saved = name === look.name ? look : { ...look, name };
+  saveLook(saved);
+  return saved;
 }
 
 export function deleteLook(sceneId: string, name: string): void {
@@ -220,7 +241,7 @@ export function decodeLook(code: string): SceneLook | null {
         drives[key] = setting;
       }
     }
-    return { name: parsed.n, sceneId: parsed.s, manual, drives };
+    return { name: parsed.n.trim().slice(0, MAX_SHARED_NAME) || "Shared look", sceneId: parsed.s, manual, drives };
   } catch {
     return null;
   }

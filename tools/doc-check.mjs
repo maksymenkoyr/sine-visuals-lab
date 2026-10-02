@@ -56,6 +56,10 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === "--threshold") {
       args.threshold = Number(argv[++i]);
+      if (!Number.isFinite(args.threshold) || args.threshold < 0 || args.threshold > 1) {
+        console.error("doc-check: --threshold needs a number from 0 to 1");
+        process.exit(2);
+      }
     } else if (a === "--all") {
       args.all = true;
     } else if (a === "--verbose") {
@@ -327,7 +331,7 @@ async function main() {
   const files = changedFiles(base);
 
   if (files.length === 0) {
-    console.log("doc-check: 0 changed files, 0 paragraphs mention them, 0 flagged (≥0.5) — 0 input tokens");
+    console.log(`doc-check: 0 changed files, 0 paragraphs mention them, 0 flagged (≥${args.threshold}) — 0 input tokens`);
     return;
   }
 
@@ -410,7 +414,7 @@ async function main() {
 
   if (!key) {
     console.log(
-      `doc-check: ${files.length} changed files, ${totalCandidates} paragraphs mention them, 0 flagged (≥0.5) — 0 input tokens`,
+      `doc-check: ${files.length} changed files, ${totalCandidates} paragraphs mention them, 0 flagged (≥${args.threshold}) — 0 input tokens`,
     );
     if (totalCandidates === 0) {
       finish();
@@ -428,7 +432,7 @@ async function main() {
   }
 
   if (totalCandidates === 0) {
-    console.log(`doc-check: ${files.length} changed files, 0 paragraphs mention them, 0 flagged (≥0.5) — 0 input tokens`);
+    console.log(`doc-check: ${files.length} changed files, 0 paragraphs mention them, 0 flagged (≥${args.threshold}) — 0 input tokens`);
     finish();
     return;
   }
@@ -470,7 +474,14 @@ async function main() {
 
       req.group.forEach((c, i) => {
         const answer = json.answers?.[`p${i}`];
-        const p = answer?.noul ?? 0;
+        // A 200 reply with a missing answer (error body, changed response
+        // shape, renamed key) must not pass as "fine" — fail loud instead.
+        if (typeof answer?.noul !== "number" || !Number.isFinite(answer.noul)) {
+          throw new Error(
+            `doc-check: no answer p${i} for ${req.file} (response shape changed?) — see ${join(traceDir, `res-${req.n}.json`)}`,
+          );
+        }
+        const p = answer.noul;
         c.p = p;
         c.flagged = p >= args.threshold;
         if (args.verbose) console.error(`  ${p.toFixed(2)}  ${c.doc}:${c.line}  [${c.names.join(", ")}]`);

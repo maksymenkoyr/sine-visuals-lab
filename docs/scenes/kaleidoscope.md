@@ -150,6 +150,11 @@ and had to be re-fetched).
   blue at `t≈0.33`, not where an unbiased guess (something greener) would
   put it — worth checking before hand-tuning a hue-cycle phase in this
   scene's palette usage.
+- 2026-10-02: review cleanup, no look change. `styles.ts`/`glsl.ts` comments
+  still cited a removed lattice zoom and Tiling cell; they now say `index.ts`
+  hands every style the fixed `CELL_LOCAL` and Mandala's `su` rescales to
+  `CELL_MID`. Constants only used inside their own file stopped being
+  exported, and `styles.ts` imports `glsl.ts` once.
 
 ## Tuning notes
 

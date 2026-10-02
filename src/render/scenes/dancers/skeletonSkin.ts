@@ -141,6 +141,12 @@ float skel_foot(vec3 q, float len, float lod) {
 // minimum — everything a part draws must stay inside that bound.
 #define SKEL_PART(boneId, pad, expr) { vec3 q = boneLocal(boneId, p); float len = boneLen(boneId); if (sdCapsuleY(q, len, pad) < d) d = min(d, expr); }
 
+// rig.ts's mirror() flips only a bone's offset and keeps the rest rotation,
+// so R and L local +X are not mirror images (+X is world -X on every limb).
+// The lateral details (a hand's thumb, a forearm or shin's twin bone) are
+// therefore reflected on one side per limb: thumbs and radius twins medial
+// on both arms, fibula lateral on both legs. The bound test keeps the
+// unreflected q (the capsule is symmetric in x).
 float skel_map(vec3 p) {
   float lod = gDetail;
   float fat = mix(1.5, 1.0, lod); // thin shafts survive a half-resolution buffer
@@ -154,12 +160,12 @@ float skel_map(vec3 p) {
   SKEL_PART(B_L_UPPER_ARM, 0.05, skel_longBone(q, len, 0.019 * fat, 0.032, lod))
   SKEL_PART(B_R_UPPER_ARM, 0.05, skel_longBone(q, len, 0.019 * fat, 0.032, lod))
   SKEL_PART(B_L_FOREARM, 0.05, skel_pairBone(q, len, 0.015 * fat, 0.024, lod))
-  SKEL_PART(B_R_FOREARM, 0.05, skel_pairBone(q, len, 0.015 * fat, 0.024, lod))
+  SKEL_PART(B_R_FOREARM, 0.05, skel_pairBone(q * vec3(-1.0, 1.0, 1.0), len, 0.015 * fat, 0.024, lod))
   SKEL_PART(B_L_HAND, 0.07, skel_hand(q, len, lod))
-  SKEL_PART(B_R_HAND, 0.07, skel_hand(q, len, lod))
+  SKEL_PART(B_R_HAND, 0.07, skel_hand(q * vec3(-1.0, 1.0, 1.0), len, lod))
   SKEL_PART(B_L_THIGH, 0.06, skel_longBone(q, len, 0.026 * fat, 0.034, lod))
   SKEL_PART(B_R_THIGH, 0.06, skel_longBone(q, len, 0.026 * fat, 0.034, lod))
-  SKEL_PART(B_L_SHIN, 0.06, skel_pairBone(q, len, 0.021 * fat, 0.034, lod))
+  SKEL_PART(B_L_SHIN, 0.06, skel_pairBone(q * vec3(-1.0, 1.0, 1.0), len, 0.021 * fat, 0.034, lod))
   SKEL_PART(B_R_SHIN, 0.06, skel_pairBone(q, len, 0.021 * fat, 0.034, lod))
   SKEL_PART(B_L_FOOT, 0.07, skel_foot(q, len, lod))
   SKEL_PART(B_R_FOOT, 0.07, skel_foot(q, len, lod))
