@@ -77,3 +77,40 @@ describe("outputBridge status and power", () => {
     expect(bridge.status().open).toBe(false);
   });
 });
+
+describe("outputBridge frames carry the controller's gate marks", () => {
+  const FRAME = { time: 1, bands: new Float32Array(4), energy: 0.5, level: 0.4, onset: false, pulseOnset: false, bpm: 120, onsetPhase: 0 };
+  const PARAMS = { sens: 1, exp: 1, smoothing: 1 };
+  const GATE = { closed: 0.2, open: 0.3 };
+  const frames = (posted: ToOutput[]) => posted.filter((m): m is Extract<ToOutput, { t: "frame" }> => m.t === "frame");
+
+  it("sends gate while the output follows the preview, next to the params", () => {
+    const { bridge, posted, receive } = setup();
+    receive({ t: "hello", haveState: false });
+    posted.length = 0;
+    bridge.pushFrame(FRAME, { beatRatio: null, wavePeak: null, gate: GATE }, PARAMS);
+    const [m] = frames(posted);
+    expect(m.f.gate).toEqual(GATE);
+    expect(m.f.p).toEqual(PARAMS);
+  });
+
+  it("still sends gate while the output holds its own look and p is left off", () => {
+    let scene = "spectrum";
+    const t = fakeTransport();
+    const bridge = createOutputBridge({
+      transport: t.transport,
+      look: () => ({ scene, palette: "neon" }),
+      storage,
+      power: () => POWER,
+    });
+    t.receive({ t: "hello", haveState: false });
+    scene = "mesh"; // the preview moves on; the output keeps what it was sent
+    bridge.update(1000);
+    expect(bridge.status().differs).toBe(true);
+    t.posted.length = 0;
+    bridge.pushFrame(FRAME, { beatRatio: null, wavePeak: null, gate: GATE }, PARAMS);
+    const [m] = frames(t.posted);
+    expect(m.f.p).toBeUndefined();
+    expect(m.f.gate).toEqual(GATE);
+  });
+});

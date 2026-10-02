@@ -2223,7 +2223,7 @@ function tick(): void {
       applyRenderQuality(true);
       applyPreviewBox();
     }
-    if (gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null }, { sens: outputSens, exp: outputExp, smoothing });
+    if (gained) outputBridge.pushFrame(gained, { beatRatio: lastFluxRatio, wavePeak: lastMono ? peak(lastMono) : null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
   }
 
   if (!inViz) {
@@ -2405,7 +2405,7 @@ function idlePreviewActive(): boolean {
 function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): void {
   const frame = idlePreview.feed.frame(nowRafMs / 1000);
   const gained = applyBandGains(frame, getBandGains(scene.id));
-  outputBridge?.pushFrame(gained, { beatRatio: null, wavePeak: null }, { sens: outputSens, exp: outputExp, smoothing });
+  outputBridge?.pushFrame(gained, { beatRatio: null, wavePeak: null, gate: resolveSilenceGate() }, { sens: outputSens, exp: outputExp, smoothing });
   const anim = idlePreview.anim.advance(dtSec, gained, smoothing, resolveSilenceGate(), { shape: getHitShape(), beatRatio: null });
   idlePreview.latch.accumulate(anim);
   const sensitivity = resolveSensitivity(scene.id);

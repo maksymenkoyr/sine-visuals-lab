@@ -311,4 +311,5 @@ async function main(): Promise<void> {
   requestAnimationFrame(loop);
 }
 
+    if (contextLost) return;
 void main();
