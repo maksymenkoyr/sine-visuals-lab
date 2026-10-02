@@ -12,7 +12,7 @@ import { bindHint, hideTooltip } from "./tooltip.ts";
 import { DISPLAY_SHARE_GUIDE, type AudioSourceChoice, type SourceState } from "../audio/sourcePref.ts";
 import { createBrandMark, BRAND_RED } from "./brandMark.ts";
 import { BANDS_AMBER, FONT_LABEL, FONT_MONO, INPUT_GREEN, SCENE_VIOLET, withAlpha } from "./controlsTheme.ts";
-import { GATE_TOLERANCE_MS, RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "../render/framePace.ts";
+import { GATE_TOLERANCE_MS, RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "../render/framePace.ts";
 import { getPowerMode } from "../render/powerMode.ts";
 import { selectDueTiles, type ScheduleCandidate } from "../render/previewSchedule.ts";
 import { createPreviewBudgetController, type PreviewBudgetController } from "../render/previewBudget.ts";
@@ -376,6 +376,8 @@ function targetIntervalMsFor(t: Tile, isFocused: boolean, baseIntervalMs: number
 interface Tile {
   scene: Scene;
   canvas: HTMLCanvasElement;
+  /** Where this tile's frames go; set to null if its scene fails to mount,
+   *  which takes the tile out of the draw rotation. */
   sink: ReturnType<PreviewRenderer["attach"]>;
   feed: ReturnType<typeof createSyntheticFeed>;
   palette: Palette;
@@ -892,9 +894,10 @@ export function createGallery(deps: GalleryDeps): Gallery {
       const intervalMs = tickIntervalMs(preset);
       // shouldRenderFrame(), not a raw `<` comparison — see framePace.ts's
       // header for why the naive comparison quantizes against vsync and
-      // silently loses a third of the intended rate.
+      // silently loses a third of the intended rate, and for why the
+      // timestamp it keeps is nextRenderAnchor()'s, not simply `nowMs`.
       if (!shouldRenderFrame(nowMs, lastDrawMs, intervalMs)) return;
-      lastDrawMs = nowMs;
+      lastDrawMs = nextRenderAnchor(nowMs, lastDrawMs, intervalMs);
 
       const timeSec = nowMs / 1000;
       const live = deps.liveFrame();
@@ -931,7 +934,17 @@ export function createGallery(deps: GalleryDeps): Gallery {
         if (!preview.host.isMounted(t.scene)) {
           if (mountedThisTick) continue;
           mountedThisTick = true;
-          preview.host.mount(t.scene);
+          try {
+            preview.host.mount(t.scene);
+          } catch (err) {
+            // A scene whose init() throws here (a shader this GPU won't
+            // compile) just never draws: no sink drops it from `eligible`,
+            // and the other tiles carry on. Picking it still reaches
+            // app.ts's own mount, which says so.
+            console.error(`Gallery preview of "${t.scene.name}" can't run on this device:`, err);
+            t.sink = null;
+            continue;
+          }
         }
         toDraw.push(idx);
       }

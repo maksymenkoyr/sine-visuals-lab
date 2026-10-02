@@ -38,15 +38,17 @@ import {
   type MicPermission,
   type SourceState,
 } from "./audio/sourcePref.ts";
-import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
+import { createGL, refreshCssSize, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
 import {
   detectQuality,
   parseQualityPreset,
+  presetAllows,
+  presetRank,
   qualitySettings,
   type QualityPreset,
   type QualitySettings,
 } from "./render/quality.ts";
-import { RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type Viewport } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
 import { getPalette, PALETTES, type Palette } from "./render/palette.ts";
@@ -198,6 +200,7 @@ import { createControlPanel } from "./ui/controlPanel.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
+import { requestWakeLock } from "./ui/wakeLock.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
 import { shouldTickInBackground, startBackgroundTick } from "./net/backgroundTick.ts";
 import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
@@ -234,11 +237,8 @@ const audioPromptMicLabel = document.getElementById("audioPromptMicLabel") as HT
 const audioPromptDisplayBtn = document.getElementById("audioPromptDisplayBtn") as HTMLButtonElement;
 const audioPromptGuide = document.getElementById("audioPromptGuide") as HTMLParagraphElement;
 
-const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
 /** No new frame in this long -> the host is gone even if our own socket to the relay is still open. */
 const STALE_TIMEOUT_MS = 3000;
-const presetAllows = (s: Scene, p: QualityPreset): boolean =>
-  !s.minQuality || PRESET_ORDER.indexOf(p) >= PRESET_ORDER.indexOf(s.minQuality);
 
 let mode: Mode = "solo";
 let roomCode: string | null = null;
@@ -339,7 +339,6 @@ let outputPower: OutputPower = {
 /** True while an output window is open and a scene is showing: recomputed
  *  every tick (render loop, right after outputBridge.update). */
 let previewActive = false;
-const presetRank = (p: QualityPreset): number => PRESET_ORDER.indexOf(p);
 /** The preset this window actually renders at. effectivePreset() is the
  *  DEVICE's preset and stays the one every scene-availability check uses, so
  *  the preview's lower quality never hides a scene from the gallery; this is
@@ -360,6 +359,10 @@ function renderScale(): number {
 /** The main fullscreen GL context — created once at boot and kept alive for
  *  the whole session; only which scene is mounted on it changes. */
 let mainHost: SceneHost | null = null;
+/** True from the main canvas's `webglcontextlost` until the page reloads on
+ *  the restore (see boot()): drawScene() draws nothing, and the picture
+ *  readback isn't rebuilt against a dead context. */
+let glLost = false;
 
 /** The Master card's Picture block and tools/master-sweep.mjs share this one
  *  measurement path — see src/render/pictureMeter.ts for what each measure
@@ -554,10 +557,7 @@ function applyRenderQuality(remount = false): void {
   Object.assign(quality, qualitySettings(preset));
   governor = pinned ? null : createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   applyPowerMode(powerMode);
-  if (remount && inViz && mainHost) {
-    mainHost.unmountAll();
-    mainHost.mount(scene);
-  }
+  if (remount && inViz && mainHost) mountOrBail(scene, scene);
 }
 
 /** The preview's box (index.html's `body.output-preview #gl`): on while an
@@ -671,14 +671,6 @@ function wireOutputKeys(controls: OutputControls): void {
   document.addEventListener("visibilitychange", drop);
 }
 
-async function requestWakeLock(): Promise<void> {
-  try {
-    await navigator.wakeLock?.request("screen");
-  } catch {
-    // Not fatal — some browsers/contexts deny it; screen may just dim.
-  }
-}
-
 function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, effectivePreset()));
 }
@@ -731,16 +723,45 @@ function updateSceneVersionLabel(next: Scene): void {
   bindHint(sceneVersion, hintColor, [...sceneVersionHint(next.name, sceneVer), ...versionHint(BUILD_INFO)]);
 }
 
+/** Puts `next` on the main host (clearing whatever was mounted first), or, if
+ *  its init() throws (a shader this GPU won't compile, a float target it
+ *  lacks), says so and leaves it: back to the gallery, or to `prev` when there
+ *  is no gallery (a `?room=` renderer). Returns whether `next` is running.
+ *  Callers keep `scene` pointing at `next` until this answers, and must stop
+ *  when it returns false: `scene` has been put back and the HUD explains. */
+function mountOrBail(next: Scene, prev: Scene): boolean {
+  const host = mainHost!;
+  host.unmountAll();
+  try {
+    host.mount(next);
+    return true;
+  } catch (err) {
+    console.error(`"${next.name}" failed to start:`, err);
+  }
+  showHud(`${next.name} can't run on this device`, true);
+  scene = prev;
+  if (!bypassGallery) {
+    navigate({ kind: "gallery" }, "replace");
+  } else if (prev !== next) {
+    try {
+      host.mount(prev);
+    } catch (err) {
+      console.error(`"${prev.name}" failed to restart:`, err);
+    }
+  }
+  return false;
+}
+
 /** Routes both local picks (device menu) and remote commands (control panel on
  *  another device) through the same path, so the roster always reflects reality. */
 function applyScene(next: Scene): void {
   if (!mainHost) return;
+  const prev = scene;
   scene = next;
   // Before the mount, which sizes geometry from `quality`: the new scene's
   // minQuality may differ from the last one's while previewing.
   if (previewActive) applyRenderQuality();
-  mainHost.unmountAll();
-  mainHost.mount(next);
+  if (!mountOrBail(next, prev)) return;
   updateSceneVersionLabel(next);
   showHud(`scene: ${scene.name}`);
   activeConn()?.sendHello(scene.id, palette.id);
@@ -1584,13 +1605,16 @@ async function enterViz(next: Scene): Promise<void> {
   gallery?.hide();
   inViz = true;
   canvas.style.display = "block";
+  // The resize observer's cache still says 0x0 from while the canvas was
+  // hidden; without this the first frame would be a 1x1 buffer (gl.ts).
+  refreshCssSize(canvas);
 
+  const prev = scene;
   scene = next;
   // Before the mount (see applyScene); previewActive is still false on a
   // fresh entry and turns on at the next tick, which remounts if needed.
   if (previewActive) applyRenderQuality();
-  mainHost!.unmountAll();
-  mainHost!.mount(next);
+  if (!mountOrBail(next, prev)) return;
   updateSceneVersionLabel(next);
 
   showHud(`${mode}${roomCode ? ` (${roomCode})` : ""}  quality: ${quality.preset}  scene: ${scene.name}  palette: ${palette.name}`);
@@ -1698,6 +1722,18 @@ async function boot(): Promise<void> {
     fatalError("WebGL2 unsupported on this device");
     return;
   }
+  // A GPU reset or a backgrounded phone can take the context away. gl.ts's
+  // watchContextLoss() is what lets the browser give it back; every scene's
+  // programs and buffers died with it, so the restore reloads the page (the
+  // route is in the hash, and a granted mic restarts on its own).
+  watchContextLoss(
+    canvas,
+    () => {
+      glLost = true;
+      showHud("graphics reset — reloading", true);
+    },
+    () => location.reload(),
+  );
 
   const params = new URLSearchParams(location.search);
   // Only a code the Worker could have issued (roomCode.ts): a stray '#' or
@@ -2333,13 +2369,15 @@ function drawScene(
   latch: RenderLatch,
   engine: DriveEngine,
 ): void {
-  if (!shouldRenderFrame(nowRafMs, lastRenderMs, renderIntervalMs())) return;
+  if (glLost) return;
+  const intervalMs = renderIntervalMs();
+  if (!shouldRenderFrame(nowRafMs, lastRenderMs, intervalMs)) return;
   if (lastRenderFpsMs > 0) {
     const renderDtMs = nowRafMs - lastRenderFpsMs;
     if (renderDtMs > 0) lastFps = 1000 / renderDtMs;
   }
   lastRenderFpsMs = nowRafMs;
-  lastRenderMs = nowRafMs;
+  lastRenderMs = nextRenderAnchor(nowRafMs, lastRenderMs, intervalMs);
 
   const resized = resizeCanvasToDisplaySize(canvas, renderScale());
   if (resized) mainHost!.ctx.gl.viewport(0, 0, canvas.width, canvas.height);

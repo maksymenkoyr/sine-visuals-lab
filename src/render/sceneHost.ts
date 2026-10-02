@@ -7,7 +7,12 @@ export interface SceneHost {
    *  whichever host currently owns it (if any). Scenes hold their GL program
    *  and VAO in a closure, so a scene may be `init()`-ed on at most one
    *  context at a time — this makes that invariant structural instead of a
-   *  call-ordering convention callers have to get right. */
+   *  call-ordering convention callers have to get right.
+   *
+   *  Throws if the scene's `init()` does (a shader that won't compile on this
+   *  GPU, an unsupported render target). Whatever it half-built is disposed
+   *  first and the scene is not counted as mounted, so a retry starts clean;
+   *  callers catch it and fall back to another scene. */
   mount(scene: Scene): void;
   unmount(scene: Scene): void;
   unmountAll(): void;
@@ -30,15 +35,33 @@ export function createSceneHost(gl: WebGL2RenderingContext, quality: QualitySett
     mount(scene: Scene): void {
       if (owners.get(scene) === host) return;
       owners.get(scene)?.unmount(scene);
-      scene.init(ctx);
+      try {
+        scene.init(ctx);
+      } catch (err) {
+        // init() assigns its programs/FBOs to closure variables as it goes, so
+        // a throw part-way leaves live GL objects only dispose() can free. A
+        // second throw (dispose reaching for a handle init never made) must
+        // not mask the original error.
+        try {
+          scene.dispose(ctx);
+        } catch {
+          // The first failure is the one worth reporting.
+        }
+        throw err;
+      }
       owners.set(scene, host);
       mounted.add(scene);
     },
     unmount(scene: Scene): void {
       if (owners.get(scene) !== host) return;
-      scene.dispose(ctx);
-      owners.delete(scene);
-      mounted.delete(scene);
+      try {
+        scene.dispose(ctx);
+      } finally {
+        // Even if dispose() throws (after a context loss its handles are all
+        // dead), the scene stops counting as mounted here.
+        owners.delete(scene);
+        mounted.delete(scene);
+      }
     },
     isMounted(scene: Scene): boolean {
       return owners.get(scene) === host;

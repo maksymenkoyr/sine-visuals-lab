@@ -21,6 +21,34 @@ export function createGL(
   return gl;
 }
 
+/**
+ * Keeps a page's own canvas alive through a GPU context loss (a driver
+ * reset, a backgrounded phone, a TV running out of GPU memory). Without a
+ * `preventDefault()` on `webglcontextlost` the browser never restores the
+ * context at all, and every GL call after a loss is a silent no-op: the loop
+ * keeps running and the picture just freezes or goes black.
+ *
+ * Scenes hold their programs, VAOs and framebuffers in closures, so the
+ * restore handler's job is to rebuild everything, not just the context. The
+ * three entry points (app.ts, output.ts, tv.ts) do that by reloading the
+ * page: the route lives in the hash and the stores in localStorage, so a
+ * reload lands back on the same scene. `onLost` runs first, for a message or
+ * for pausing the loop while the context is down. Not for the gallery's
+ * shared preview context (previewRenderer.ts remounts its own scenes in
+ * place) or quality.ts's benchmark, which is meant to die.
+ */
+export function watchContextLoss(
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  onLost: () => void,
+  onRestored: () => void,
+): void {
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault();
+    onLost();
+  });
+  canvas.addEventListener("webglcontextrestored", () => onRestored());
+}
+
 function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
   if (!shader) throw new Error("createShader failed");
@@ -132,7 +160,8 @@ interface CssSize {
 // gets called once per render tick. A ResizeObserver reports the CSS box
 // asynchronously (batched by the browser, no forced layout), so we cache the
 // last-reported size per canvas and only touch clientWidth/clientHeight
-// directly as a fallback on runtimes without ResizeObserver.
+// directly as a fallback on runtimes without ResizeObserver (and in
+// refreshCssSize(), below, for a canvas that was just shown again).
 const cssSizes = new WeakMap<HTMLCanvasElement, CssSize>();
 
 function getCssSize(canvas: HTMLCanvasElement): CssSize {
@@ -160,6 +189,23 @@ function getCssSize(canvas: HTMLCanvasElement): CssSize {
     observer.observe(canvas);
   }
   return size;
+}
+
+/**
+ * Re-reads a canvas's CSS size once, synchronously. Call it right after
+ * un-hiding a canvas (`display: none` -> `block`): while hidden the observer
+ * reported a 0x0 box, and its callback for the new box only runs after the
+ * next animation frame's callbacks, so without this the first frame back
+ * would be sized from the stale 0x0 cache (a 1x1 buffer stretched to the
+ * whole screen). It mutates the same object the observer writes to, so the
+ * observer stays valid. Does nothing before the first resize (the first
+ * getCssSize() seeds itself).
+ */
+export function refreshCssSize(canvas: HTMLCanvasElement): void {
+  const size = cssSizes.get(canvas);
+  if (!size) return;
+  size.width = canvas.clientWidth;
+  size.height = canvas.clientHeight;
 }
 
 /**
