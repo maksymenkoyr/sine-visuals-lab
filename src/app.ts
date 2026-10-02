@@ -198,6 +198,7 @@ import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
 import { noteKeyUse } from "./ui/keyHints.ts";
+import { shouldTickInBackground, startBackgroundTick } from "./net/backgroundTick.ts";
 import { createBroadcastTransport, createOutputBridge, type OutputBridge } from "./net/outputBridge.ts";
 import type { OutputPower, ToMain, ToOutput } from "./net/outputSync.ts";
 import { createOutputControls, type OutputControls } from "./ui/outputControls.ts";
@@ -1974,6 +1975,12 @@ async function boot(): Promise<void> {
 
   lastRafMs = performance.now();
   requestAnimationFrame(loop);
+  // A hidden tab gets no animation frames, which would starve the pop-out
+  // output (and a paired TV) of the frames this loop sends — see
+  // net/backgroundTick.ts.
+  startBackgroundTick(() => {
+    if (shouldTickInBackground(document.hidden, (outputBridge?.status().open ?? false) || hostConn !== null)) tick();
+  });
 }
 
 /** Maps this tick's raw dB bands straight to [0,1] via the analyser's fixed
@@ -2175,7 +2182,15 @@ function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
 
 function loop(): void {
   requestAnimationFrame(loop);
+  tick();
+}
 
+/** One pass of the loop: sample the audio, advance the clocks and drives, feed
+ *  the pop-out output and any paired TV, then draw. Run by `loop` on every
+ *  animation frame, and — while this tab is hidden and has no frames of its
+ *  own — by net/backgroundTick.ts's worker clock, with the DOM and GL work
+ *  skipped (`document.hidden` below), so the output keeps getting frames. */
+function tick(): void {
   const nowRafMs = performance.now();
   const dtSec = Math.max(1e-4, (nowRafMs - lastRafMs) / 1000);
   lastRafMs = nowRafMs;
@@ -2208,7 +2223,7 @@ function loop(): void {
   }
 
   if (!inViz) {
-    gallery?.tick(nowRafMs);
+    if (!document.hidden) gallery?.tick(nowRafMs);
     return;
   }
 
@@ -2284,6 +2299,14 @@ function loop(): void {
   // a drive row's live pill/overlay — it only ever reads uniformPair()/
   // excess(), never fired(), so it can't steal a grid setting's pending edge
   // out from under the scene that's about to render it (see drives.ts).
+  // Nobody is looking at this tab, so it has no meters or picture to update
+  // (the only way here without an animation frame is the background clock).
+  // The idle demo still runs, since it is what the output shows with no input.
+  if (document.hidden) {
+    if ((!lastVis || !anim) && idlePreviewActive()) renderIdlePreview(nowRafMs, dtSec, smoothing);
+    return;
+  }
+
   const liveDrives = anim ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
   deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
 
