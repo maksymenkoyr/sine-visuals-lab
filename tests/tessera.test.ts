@@ -59,7 +59,7 @@ describe("tessera lattice layout: constant arc-length spacing", () => {
   it("the slot count grows with ring radius (constant arc-length spacing, not constant slot count)", () => {
     const layout = latticeLayout(0.085, 8);
     // The reference's own measured lattice: angular box count grows with
-    // radius (swift-weaving-parnas.md) -- round 1's bug was a flat count.
+    // radius (docs/scenes/tessera.md, Round 2) -- round 1's bug was a flat count.
     expect(layout.slots[layout.ringCount - 1]).toBeGreaterThan(layout.slots[0] * 3);
     let prevMeaningfullyGrew = false;
     for (let i = 1; i < layout.ringCount; i++) {

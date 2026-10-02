@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
+import { buildSceneFrag } from "../src/render/scenes/coil/glsl.ts";
 import {
   createCoilState,
   stepCoil,
   rollShape,
   createRng,
   coilPaletteRGB,
+  coilTargetSize,
+  newShapeDivisor,
+  COIL_RAMP,
   L_BIG,
   L_SMALL,
   RESET_DURATION_SEC,
@@ -185,5 +189,57 @@ describe("coil palette ramp", () => {
   it("wraps", () => {
     expect(coilPaletteRGB(1)).toEqual(coilPaletteRGB(0));
     expect(coilPaletteRGB(1.5)).toEqual(coilPaletteRGB(0.5));
+  });
+
+  it("is the table the shader is generated from: every colour and breakpoint appears in glsl.ts's output", () => {
+    const frag = buildSceneFrag([], "");
+    for (const name of ["red", "pink", "blue", "lilac", "white"] as const) {
+      expect(frag).toContain(`vec3 ${name} = vec3(${COIL_RAMP[name].map((x) => x.toFixed(3)).join(", ")});`);
+    }
+    for (const stop of COIL_RAMP.stops) expect(frag).toContain(`u < ${stop.toFixed(2)}`);
+    // The generated ramp keeps its flat-run / mix structure.
+    expect(frag).toContain("return mix(red, pink,");
+    expect(frag).toContain("return mix(lilac, white,");
+  });
+});
+
+describe("coilTargetSize", () => {
+  const aspect = (r: { w: number; h: number }) => r.w / r.h;
+
+  it("keeps the canvas aspect when the long side hits the cap", () => {
+    for (const [bw, bh] of [
+      [1920, 1080],
+      [2560, 1440],
+      [3024, 1890],
+      [1080, 1920],
+    ]) {
+      const r = coilTargetSize(bw, bh, 1, 1400);
+      expect(Math.max(r.w, r.h)).toBeLessThanOrEqual(1400);
+      expect(aspect(r)).toBeCloseTo(bw / bh, 2);
+    }
+    expect(coilTargetSize(1920, 1080, 1, 1400)).toEqual({ w: 1400, h: 788 });
+  });
+
+  it("leaves a canvas under the cap at its quality scale", () => {
+    expect(coilTargetSize(1280, 720, 1, 1400)).toEqual({ w: 1280, h: 720 });
+    expect(coilTargetSize(1280, 720, 0.5, 1400)).toEqual({ w: 640, h: 360 });
+  });
+});
+
+describe("newShapeDivisor", () => {
+  it("is the base cadence at the default amount", () => {
+    expect(newShapeDivisor(0.8, 0.8, 4)).toBe(4);
+  });
+
+  it("resets more often as the slider moves right, never below one tick", () => {
+    let prev = Infinity;
+    for (let a = 0.05; a <= 1.0001; a += 0.05) {
+      const n = newShapeDivisor(a, 0.8, 4);
+      expect(n).toBeLessThanOrEqual(prev);
+      expect(n).toBeGreaterThanOrEqual(1);
+      prev = n;
+    }
+    expect(newShapeDivisor(1, 0.8, 4)).toBeLessThan(newShapeDivisor(0.4, 0.8, 4));
+    expect(newShapeDivisor(0.4, 0.8, 4)).toBe(8);
   });
 });

@@ -26,9 +26,9 @@
  *   the extra pair of lobes in/out by scaling them toward zero rather than
  *   popping a lobe count.
  *
- * `coilPaletteRGB` mirrors glsl.ts's PALETTE_GLSL ramp in plain TS purely so
- * tests/coil.test.ts can check the sharp-red/sharp-blue phases without a GL
- * context — keep the two in sync by hand if the ramp ever changes.
+ * `COIL_RAMP` is the one stripe-ramp table: glsl.ts templates its
+ * `paletteRamp` from it and `coilPaletteRGB` evaluates it in plain TS, so
+ * tests/coil.test.ts checks the very colours and breakpoints that ship.
  */
 
 export interface ShapeParams {
@@ -265,11 +265,22 @@ export function stepCoil(state: CoilState, input: CoilInputs): CoilState {
 
 // --- Palette mirror (see this file's header) --------------------------------
 
-const COL_RED: readonly [number, number, number] = [0.769, 0.176, 0.314]; // #c42d50
-const COL_PINK: readonly [number, number, number] = [0.835, 0.482, 0.584]; // #d57b95
-const COL_BLUE: readonly [number, number, number] = [0.365, 0.549, 0.863]; // #5d8cdc
-const COL_LILAC: readonly [number, number, number] = [0.745, 0.729, 0.843]; // #bebad7
-const COL_WHITE: readonly [number, number, number] = [0.91, 0.902, 0.949]; // #e8e6f2
+type RGB = readonly [number, number, number];
+
+/** The measured k-means stripe colours and where one period changes
+ *  between them (index.ts's header). `stops` are the phases u in [0,1) at
+ *  which each run ends: solid red to stops[0], red->pink to stops[1],
+ *  pink->white to stops[2], solid blue to stops[3], blue->lilac to
+ *  stops[4], lilac->white to 1 — a sharp red edge at 0 and a sharp blue
+ *  edge at stops[2]. */
+export const COIL_RAMP = {
+  red: [0.769, 0.176, 0.314] as RGB, // #c42d50
+  pink: [0.835, 0.482, 0.584] as RGB, // #d57b95
+  blue: [0.365, 0.549, 0.863] as RGB, // #5d8cdc
+  lilac: [0.745, 0.729, 0.843] as RGB, // #bebad7
+  white: [0.91, 0.902, 0.949] as RGB, // #e8e6f2
+  stops: [0.15, 0.25, 0.5, 0.65, 0.75] as readonly [number, number, number, number, number],
+};
 
 function mix3(
   a: readonly [number, number, number],
@@ -281,14 +292,34 @@ function mix3(
 
 /** One stripe period: a SHARP red edge at t=0, a solid red run, a fade to white
  *  by t=0.5; the same in blue through pale lilac from t=0.5 to
- *  white by t=1 — glsl.ts's `paletteRamp` GLSL function, kept in sync by
- *  hand. `t` wraps. */
+ *  white by t=1 — evaluated from COIL_RAMP, the same table glsl.ts's
+ *  `paletteRamp` is generated from. `t` wraps. */
 export function coilPaletteRGB(t: number): [number, number, number] {
+  const { red, pink, blue, lilac, white, stops } = COIL_RAMP;
   const u = t - Math.floor(t);
-  if (u < 0.15) return [...COL_RED];
-  if (u < 0.25) return mix3(COL_RED, COL_PINK, (u - 0.15) / 0.1);
-  if (u < 0.5) return mix3(COL_PINK, COL_WHITE, (u - 0.25) / 0.25);
-  if (u < 0.65) return [...COL_BLUE];
-  if (u < 0.75) return mix3(COL_BLUE, COL_LILAC, (u - 0.65) / 0.1);
-  return mix3(COL_LILAC, COL_WHITE, (u - 0.75) / 0.25);
+  if (u < stops[0]) return [...red];
+  if (u < stops[1]) return mix3(red, pink, (u - stops[0]) / (stops[1] - stops[0]));
+  if (u < stops[2]) return mix3(pink, white, (u - stops[1]) / (stops[2] - stops[1]));
+  if (u < stops[3]) return [...blue];
+  if (u < stops[4]) return mix3(blue, lilac, (u - stops[3]) / (stops[4] - stops[3]));
+  return mix3(lilac, white, (u - stops[4]) / (1 - stops[4]));
+}
+
+/** Size of the offscreen ping-pong targets for a drawing buffer bw x bh at
+ *  quality `scale`: ONE factor for both axes, capped so the long side stays
+ *  within `maxDim`. Clamping width and height independently (the first
+ *  version) changed the aspect on any canvas wider than the cap, and the
+ *  blit then stretched the picture. */
+export function coilTargetSize(bw: number, bh: number, scale: number, maxDim: number): { w: number; h: number } {
+  const s = scale * Math.min(1, maxDim / Math.max(bw * scale, bh * scale, 1));
+  return { w: Math.max(1, Math.round(bw * s)), h: Math.max(1, Math.round(bh * s)) };
+}
+
+/** How many New-shape grid pulses make one reset at New shape = `amount`.
+ *  `baseDivisor` is the cadence at the setting's own default
+ *  (`defaultAmount`) — the measured reference spacing — and the count
+ *  scales inversely with the slider, so right = more resets: half the
+ *  default amount waits twice as many ticks. Never below one tick. */
+export function newShapeDivisor(amount: number, defaultAmount: number, baseDivisor: number): number {
+  return Math.max(1, Math.round((baseDivisor * defaultAmount) / Math.max(amount, 0.05)));
 }

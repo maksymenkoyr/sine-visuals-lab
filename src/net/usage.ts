@@ -14,12 +14,9 @@
  * tools/usage.mjs leaves them out of the visitor numbers.
  */
 import type { UsageEvent, UsageSource } from "../../server/usage.ts";
+import { isLocalHost } from "./config.ts";
 
 const ME_KEY = "svl.usageMe";
-
-function isLocalHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith(".local");
-}
 
 const enabled = !import.meta.env.DEV && !isLocalHost(location.hostname) && !navigator.webdriver;
 

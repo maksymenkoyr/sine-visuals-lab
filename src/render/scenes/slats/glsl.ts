@@ -230,7 +230,6 @@ const CENTRE_NOISE_AMP = 0.05;
 const HEIGHT_SCALE_ENERGY_BASE = 0.85;
 const HEIGHT_SCALE_ENERGY_GAIN = 0.35;
 const ONSET_ALPHA_PUNCH = 0.4;
-const ROLL_DEG2RAD_PER_SEC = Math.PI / 180;
 const TINT_PALETTE_T = 0.5;
 const GLOW_WEIGHT = 1.0;
 const HIGHLIGHT_KNEE = 0.75; // linear below this, then a soft roll toward white
@@ -284,6 +283,7 @@ ${settingsUniformsGlsl}
 ${driveUniformsGlsl}
 uniform float uMorphMix; // A->B crossfade progress, eased — see file header for why not uMorph
 uniform float uOnsetEnv; // layout.ts's OnsetEnvelope, fast-decay beat kick
+uniform float uRollAngle; // accumulated Roll, radians — layout.ts's advanceRollPhase
 out float vAlpha;
 ${SLAT_HELPERS_GLSL}
 
@@ -303,7 +303,6 @@ const float HAIR_FLUTTER_GAIN = ${HAIR_FLUTTER_GAIN.toFixed(3)};
 const float CENTRE_NOISE_AMP = ${CENTRE_NOISE_AMP.toFixed(4)};
 const float HEIGHT_SCALE_ENERGY_BASE = ${HEIGHT_SCALE_ENERGY_BASE.toFixed(3)};
 const float HEIGHT_SCALE_ENERGY_GAIN = ${HEIGHT_SCALE_ENERGY_GAIN.toFixed(3)};
-const float ROLL_DEG2RAD_PER_SEC = ${ROLL_DEG2RAD_PER_SEC.toFixed(8)};
 
 void main() {
   vec4 p0 = mix(aSlatA0, aSlatB0, uMorphMix);
@@ -349,10 +348,12 @@ void main() {
   vec2 corner = quadCorner(gl_VertexID);
   vec2 ndc = ndcCenter + vec2(corner.x * halfWidthNdc, corner.y * halfHeightNdc);
 
-  float rollAngle = uRoll * ROLL_DEG2RAD_PER_SEC * uTime;
-  float cr = cos(rollAngle);
-  float sr = sin(rollAngle);
-  vec2 rolled = vec2(ndc.x * cr - ndc.y * sr, ndc.x * sr + ndc.y * cr);
+  // Rotate in square (aspect-corrected) space, not raw NDC, so the wall
+  // turns rigidly instead of squashing as it passes 90 degrees on a wide
+  // canvas. Written out so Roll = 0 is exactly the identity.
+  float cr = cos(uRollAngle);
+  float sr = sin(uRollAngle);
+  vec2 rolled = vec2(ndc.x * cr - ndc.y * sr / aspect, ndc.x * sr * aspect + ndc.y * cr);
 
   vAlpha = slabAlpha;
   gl_Position = vec4(toDevice(rolled), 0.0, 1.0);

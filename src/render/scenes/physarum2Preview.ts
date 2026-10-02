@@ -35,6 +35,14 @@ import { TOUCH_EAT_GAIN, TOUCH_FEED_GAIN, TOUCH_MAX_BITE } from "./physarum2Affi
 
 const TWO_PI = Math.PI * 2;
 
+/** The factor one step's blur+decay multiplies the (3x3-summed) trail by: the
+ *  shared 10% evaporation, scaled by Trail life (`decayMul`, 1 or omitted =
+ *  shared) and divided by the kernel's 9. Shared by both cultures so a pad's
+ *  dish and a box's specimen age their trails alike. */
+function decayKeep(decayMul: number | undefined): number {
+  return (1 - 0.1 * Math.max(0, Math.min(9, decayMul ?? 1))) / 9;
+}
+
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return function rnd(): number {
@@ -76,6 +84,9 @@ export interface StrainPreview {
    *  used), tinted by `rgb` (each 0..1). Pure — no DOM; the caller
    *  (previews.ts) is the one that puts this into an actual canvas. */
   pixels(rgb: readonly [number, number, number]): Uint8ClampedArray;
+  /** `pixels`, written into a caller-owned buffer (`size*size*4` bytes) — no
+   *  per-call allocation, for a box that redraws on every panel tick. */
+  pixelsInto(out: Uint8ClampedArray, rgb: readonly [number, number, number]): void;
 }
 
 // Fraction of agents re-spawned at random each step. A pure culture has no
@@ -172,7 +183,7 @@ export function createStrainPreview(opts: StrainPreviewOptions = {}): StrainPrev
         tmp[r + x] = trail[r + ((x + size - 1) % size)]! + trail[r + x]! + trail[r + ((x + 1) % size)]!;
       }
     }
-    const keep = (1 - 0.1 * Math.max(0, Math.min(9, m.decayMul ?? 1))) / 9;
+    const keep = decayKeep(m.decayMul);
     for (let y = 0; y < size; y++) {
       const r = y * size;
       const up = ((y + size - 1) % size) * size;
@@ -183,8 +194,7 @@ export function createStrainPreview(opts: StrainPreviewOptions = {}): StrainPrev
     }
   }
 
-  function pixels(rgb: readonly [number, number, number]): Uint8ClampedArray {
-    const out = new Uint8ClampedArray(CELLS * 4);
+  function pixelsInto(out: Uint8ClampedArray, rgb: readonly [number, number, number]): void {
     for (let p = 0, q = 0; p < CELLS; p++, q += 4) {
       let t = trail[p]! * EXPOSURE;
       if (t > 1) t = 1;
@@ -194,10 +204,15 @@ export function createStrainPreview(opts: StrainPreviewOptions = {}): StrainPrev
       out[q + 2] = Math.min(255, t * rgb[2]! * 255);
       out[q + 3] = 255;
     }
+  }
+
+  function pixels(rgb: readonly [number, number, number]): Uint8ClampedArray {
+    const out = new Uint8ClampedArray(CELLS * 4);
+    pixelsInto(out, rgb);
     return out;
   }
 
-  return { size, step, pixels };
+  return { size, step, pixels, pixelsInto };
 }
 
 // ---------------------------------------------------------------------
@@ -218,7 +233,7 @@ export interface PairCultureInputs {
   motion: readonly [StrainPreviewMotion, StrainPreviewMotion];
   /** `smell[i][j]` — strain `i`'s sensing weight against strain `j`'s trail,
    *  in this pad's own *local* 0/1 indices (not the scene's strain indices),
-   *  Hostility already folded in (`smellWeight`) for `i !== j`; `i === j` is
+   *  Cross-smell already folded in (`smellWeight`) for `i !== j`; `i === j` is
    *  the (unaffected) own-trail weight. */
   smell: readonly [readonly [number, number], readonly [number, number]];
   /** `touch[i][j]` — what strain `i`'s steps do to strain `j`'s trail, same
@@ -342,9 +357,11 @@ export function createPairCulture(opts: PairCultureOptions = {}): PairCulture {
       else if (v < 0) trail[b]![cell]! *= 1 - Math.min(TOUCH_MAX_BITE, -v * TOUCH_EAT_GAIN);
     }
     // 3x3 box blur (separable, wrapped) + decay, same kernel/decay as
-    // StrainPreview.step, applied to each channel independently.
+    // StrainPreview.step (each strain's own Trail life included), applied to
+    // each channel independently.
     for (let k = 0; k < 2; k++) {
       const t = trail[k]!;
+      const keep = decayKeep(motion[k]!.decayMul);
       for (let y = 0; y < size; y++) {
         const r = y * size;
         for (let x = 0; x < size; x++) {
@@ -356,7 +373,7 @@ export function createPairCulture(opts: PairCultureOptions = {}): PairCulture {
         const up = ((y + size - 1) % size) * size;
         const dn = ((y + 1) % size) * size;
         for (let x = 0; x < size; x++) {
-          t[r + x] = (tmp[up + x]! + tmp[r + x]! + tmp[dn + x]!) * (0.9 / 9);
+          t[r + x] = (tmp[up + x]! + tmp[r + x]! + tmp[dn + x]!) * keep;
         }
       }
     }

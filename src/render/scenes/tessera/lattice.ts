@@ -11,7 +11,7 @@
 // (the sin(theta) azimuthal-pitch factor) and leaves them sparse near the
 // equator; the reference's own angular box count instead GROWS with radius
 // (measured ~24/40/60/84 boxes around rings at screen radii 0.2/0.3/0.45/0.6
-// -- swift-weaving-parnas.md's brief). latticeLayout keeps the azimuthal
+// -- the Round 2 brief in docs/scenes/tessera.md). latticeLayout keeps the azimuthal
 // pitch at each ring close to the fixed *meridional* pitch instead, so the
 // lattice reads as a dense, roughly isotropic field of small boxes at any
 // radius, not radial spokes.
@@ -305,7 +305,7 @@ export function screenBallRadius(dist: number, radius: number, focal: number): n
  *  view gets. Round 2: with the constant-pitch lattice the boxes are small
  *  relative to the sphere (lenBase/lenAudio both shrank), so the near camera
  *  sits close to the ball itself -- a height above the ball surface of
- *  ~0.75 R at FOV 90 deg (swift-weaving-parnas.md's brief), rather than
+ *  ~0.75 R at FOV 90 deg (the Round 2 brief in docs/scenes/tessera.md), rather than
  *  round 1's ~1.15 R margin sized for boxes whose own length used to be the
  *  dominant dimension. Perspective at this height still makes a near-pole
  *  ring's grazing-angle walls trail out toward the frame edge, which is

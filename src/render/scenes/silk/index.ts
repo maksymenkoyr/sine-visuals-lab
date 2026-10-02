@@ -4,7 +4,7 @@ import { resolveSceneSetting } from "../../autoTune.ts";
 import type { Scene, SceneContext } from "../../scene.ts";
 import { COMMON_UNIFORMS_GLSL, ROOM_UV_GLSL, settingUniformName, uploadCommonUniforms } from "../../sceneCommon.ts";
 import { NUM_BANDS } from "../../../audio/types.ts";
-import { SHARP_BODY, TAIL_BODY, BLUR_FRAG, COMPOSITE_BODY } from "./glsl.ts";
+import { SHARP_BODY, BLUR_FRAG, COMPOSITE_BODY } from "./glsl.ts";
 import { advanceSilk, createSilkState, fillEchoFlows, ECHO_FLOW_STRIDE, ECHO_MAX, type SilkState } from "./driver.ts";
 
 // Round 3 (user: "make it more complex, add some more colours") — see the
@@ -64,11 +64,6 @@ const ID = "silk";
  *  high K is the expensive case; the bloom chain downsamples it further
  *  anyway (crystal's MARCH_SCALE reasoning). */
 const SHARP_SCALE = 0.85;
-/** Tail (haze) target: coarse on purpose — it only ever holds a blurry
- *  feedback trail, never the crisp lines (those are the analytic echoes
- *  above). Capped on its long side like physarum's TRAIL_SIDE_CAP. */
-const TAIL_SCALE = 0.35;
-const TAIL_SIDE_CAP = 720;
 const BLUR_STRIDE = 2.2;
 
 /** Echoes actually drawn per quality preset — the loop in SHARP_BODY caps
@@ -327,19 +322,6 @@ ${SHARP_BODY}
 `;
 }
 
-function buildTailFragSource(): string {
-  return `#version 300 es
-precision highp float;
-in vec2 vUv;
-out vec4 outColor;
-${COMMON_UNIFORMS_GLSL}
-${SETTINGS_UNIFORMS_GLSL}
-${DRIVER_UNIFORM_DECLS}
-${ROOM_UV_GLSL}
-${TAIL_BODY}
-`;
-}
-
 const COMPOSITE_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -358,7 +340,6 @@ ${COMPOSITE_BODY}
 
 function createSilkSceneImpl(): Scene {
   let sharpProg: GLProgram | null = null;
-  let tailProg: GLProgram | null = null;
   let blurProg: GLProgram | null = null;
   let compositeProg: GLProgram | null = null;
   let quadVao: WebGLVertexArrayObject | null = null;
@@ -373,11 +354,6 @@ function createSilkSceneImpl(): Scene {
   let sharpFbo: WebGLFramebuffer | null = null;
   let sharpW = 0;
   let sharpH = 0;
-  let tailTex: [WebGLTexture | null, WebGLTexture | null] = [null, null];
-  let tailFbo: [WebGLFramebuffer | null, WebGLFramebuffer | null] = [null, null];
-  let tailW = 0;
-  let tailH = 0;
-  let tailRead = 0;
   let l0ATex: WebGLTexture | null = null;
   let l0BTex: WebGLTexture | null = null;
   let l0AFbo: WebGLFramebuffer | null = null;
@@ -423,22 +399,19 @@ function createSilkSceneImpl(): Scene {
   }
 
   function freeTargets(gl: WebGL2RenderingContext): void {
-    for (const fbo of [sharpFbo, ...tailFbo, l0AFbo, l0BFbo, l1AFbo, l1BFbo]) if (fbo) gl.deleteFramebuffer(fbo);
-    for (const tex of [sharpTex, ...tailTex, l0ATex, l0BTex, l1ATex, l1BTex]) if (tex) gl.deleteTexture(tex);
+    for (const fbo of [sharpFbo, l0AFbo, l0BFbo, l1AFbo, l1BFbo]) if (fbo) gl.deleteFramebuffer(fbo);
+    for (const tex of [sharpTex, l0ATex, l0BTex, l1ATex, l1BTex]) if (tex) gl.deleteTexture(tex);
     sharpFbo = l0AFbo = l0BFbo = l1AFbo = l1BFbo = null;
     sharpTex = l0ATex = l0BTex = l1ATex = l1BTex = null;
-    tailFbo = [null, null];
-    tailTex = [null, null];
-    sharpW = sharpH = l0W = l0H = l1W = l1H = tailW = tailH = 0;
+    sharpW = sharpH = l0W = l0H = l1W = l1H = 0;
     dbW = 0;
     dbH = 0;
   }
 
   /** Rebuilds every target when the drawing buffer changes size (the
    *  quality governor moves renderScale at runtime — crystal's own
-   *  reasoning). The tail is cleared to black on rebuild: a resize mid-
-   *  session loses the haze for a moment rather than showing a stretched
-   *  frame of it, which would read far worse than a brief fade-in. */
+   *  reasoning). Nothing persists between frames (the haze is the sharp
+   *  pass's own `fill` term), so a rebuild loses no picture. */
   function ensureTargets(gl: WebGL2RenderingContext): void {
     const w = Math.max(1, gl.drawingBufferWidth);
     const h = Math.max(1, gl.drawingBufferHeight);
@@ -451,19 +424,6 @@ function createSilkSceneImpl(): Scene {
     sharpH = Math.max(1, Math.round(h * SHARP_SCALE));
     sharpTex = makeTexture(gl, sharpW, sharpH);
     sharpFbo = attachColour(gl, sharpTex);
-
-    const tailScale = Math.min(TAIL_SCALE, TAIL_SIDE_CAP / Math.max(w, h));
-    tailW = Math.max(1, Math.round(w * tailScale));
-    tailH = Math.max(1, Math.round(h * tailScale));
-    for (let i = 0; i < 2; i++) {
-      tailTex[i] = makeTexture(gl, tailW, tailH);
-      tailFbo[i] = attachColour(gl, tailTex[i]);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, tailFbo[i]);
-      gl.viewport(0, 0, tailW, tailH);
-      gl.clearColor(0, 0, 0, 1);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-    }
-    tailRead = 0;
 
     l0W = Math.max(1, w >> 2);
     l0H = Math.max(1, h >> 2);
@@ -507,7 +467,6 @@ function createSilkSceneImpl(): Scene {
     init(ctx: SceneContext) {
       const { gl } = ctx;
       sharpProg = createProgram(gl, buildSharpFragSource());
-      tailProg = createProgram(gl, buildTailFragSource());
       blurProg = createProgram(gl, BLUR_FRAG);
       compositeProg = createProgram(gl, COMPOSITE_FRAG);
       samplerLocs.clear();
@@ -518,7 +477,7 @@ function createSilkSceneImpl(): Scene {
     },
 
     render(ctx, frame, viewport, palette, anim) {
-      if (!sharpProg || !tailProg || !blurProg || !compositeProg || !quadVao || !state) return;
+      if (!sharpProg || !blurProg || !compositeProg || !quadVao || !state) return;
       const { gl } = ctx;
       ensureTargets(gl);
 
@@ -567,25 +526,7 @@ function createSilkSceneImpl(): Scene {
       sharpProg.setFv("uEchoFlow", echoFlowBuf);
       drawFullscreenQuad(gl, quadVao);
 
-      // 2. Tail step: reads this same frame's sharp result (one-frame lag,
-      // invisible on a slow haze) and this scene's own previous tail —
-      // see glsl.ts's TAIL_BODY for the sqrt-encoded decay-with-floor.
-      const tailWrite = 1 - tailRead;
-      gl.bindFramebuffer(gl.FRAMEBUFFER, tailFbo[tailWrite]);
-      gl.viewport(0, 0, tailW, tailH);
-      tailProg.use();
-      uploadCommonUniforms(tailProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf);
-      uploadDriverUniforms(tailProg, out);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, tailTex[tailRead]);
-      gl.uniform1i(samplerLoc(gl, tailProg, "tail.uPrevTail", "uPrevTail"), 0);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, sharpTex);
-      gl.uniform1i(samplerLoc(gl, tailProg, "tail.uSharpTex", "uSharpTex"), 1);
-      drawFullscreenQuad(gl, quadVao);
-      tailRead = tailWrite;
-
-      // 3. Bloom: two levels, each a separable blur of the sharp target —
+      // 2. Bloom: two levels, each a separable blur of the sharp target —
       // same shape as crystal's chain. Skipped at bloomPasses === 0 or
       // Glow ~ 0 (also true of every gallery preview tile).
       if (useBloom) {
@@ -614,7 +555,7 @@ function createSilkSceneImpl(): Scene {
         drawFullscreenQuad(gl, quadVao);
       }
 
-      // 4. Composite to the default framebuffer at the host viewport.
+      // 3. Composite to the default framebuffer at the host viewport.
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
       compositeProg.use();
@@ -647,14 +588,12 @@ function createSilkSceneImpl(): Scene {
     dispose(ctx: SceneContext) {
       const { gl } = ctx;
       sharpProg?.dispose();
-      tailProg?.dispose();
       blurProg?.dispose();
       compositeProg?.dispose();
       if (quadVao) gl.deleteVertexArray(quadVao);
       freeTargets(gl);
       samplerLocs.clear();
       sharpProg = null;
-      tailProg = null;
       blurProg = null;
       compositeProg = null;
       quadVao = null;

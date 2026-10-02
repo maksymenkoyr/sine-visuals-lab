@@ -42,7 +42,7 @@ npm run dev:worker    # Cloudflare Worker backend, for phone/TV room pairing
 deployed channels: pushing to `main` ships the **Insider** channel
 (insider.sinevisualslab.com) automatically, on every push — see
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The **Stable**
-channel (sinevisualslab.com — also what a local `npm run deploy` ships to)
+channel (sinevisualslab.com)
 only updates when `main` is merged into the `production` branch
 (`npm run release` opens that pull request; merge it with a merge commit) —
 see [`.github/workflows/release.yml`](.github/workflows/release.yml) and

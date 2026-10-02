@@ -213,7 +213,7 @@ export interface GateOpts {
 }
 
 /** A look other than `prev`, uniform over the rest. */
-export function pickLook(prev: number, rng: () => number): number {
+function pickLook(prev: number, rng: () => number): number {
   return (prev + 1 + Math.floor(rng() * (LOOK_COUNT - 1))) % LOOK_COUNT;
 }
 
@@ -818,12 +818,24 @@ export const gatesScene: Scene = (() => {
       // empty VAO (ambience.ts's precedent).
       emptyVao = gl.createVertexArray();
       ensureTargets(gl);
-      const initialCount = objectCountFor(st.look, 0.5, ctx.quality.detail);
-      toLayout = buildLook(st.look, st.cutSeed, initialCount, 0.5);
+      // `st` outlives dispose() (look, cutSeed and travel carry over on
+      // purpose), so a morph cut off by leaving the scene is settled here: the
+      // layout below pairs to itself, and a stale morph < 1 would keep
+      // blending fromLook's colours onto this look's shapes for up to a bar.
+      st.morph = 1;
+      st.fromLook = st.look;
+      st.rebuild = false;
+      // Built from the real Density/Shape mix, keyed exactly like render()'s
+      // wantKey, so a saved or Auto-resolved value doesn't open with a
+      // one-bar corrective morph away from a 0.5 layout.
+      const density = get("density");
+      const shapeMix = get("shapeMix");
+      const initialCount = objectCountFor(st.look, density, ctx.quality.detail);
+      toLayout = buildLook(st.look, st.cutSeed, initialCount, shapeMix);
       fromLayout = toLayout;
       pairs = identityPairs(toLayout);
       pairedMorphs = st.morphs;
-      toLayoutKey = `${initialCount}:0.50`;
+      toLayoutKey = `${initialCount}:${shapeMix.toFixed(2)}`;
       arcListener = createBeatListener({ source: "beat" });
     },
 

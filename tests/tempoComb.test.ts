@@ -104,4 +104,103 @@ describe("estimateTempo", () => {
     // by the much larger 120bpm train.
     expect(Math.abs(withRecency! - 150)).toBeLessThan(Math.abs(withoutRecency! - 150));
   });
+
+  // estimateTempo scatters each pair into the few candidate periods it can
+  // score for, instead of scanning every pair per period. It must stay
+  // bit-identical to the plain per-period scan, copied below as the oracle.
+  describe("matches the per-period reference scan exactly", () => {
+    function referenceEstimate(onsets: TempoOnsetVote[], now: number, currentBpm: number, opts: typeof OPTS): number | null {
+      const n = onsets.length;
+      if (n < 3) return null;
+      const gaps: number[] = [];
+      const weights: number[] = [];
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const gap = onsets[j]!.time - onsets[i]!.time;
+          if (gap > 4) break;
+          gaps.push(gap);
+          const recency = opts.recencySec > 0 ? Math.exp(-(now - onsets[j]!.time) / opts.recencySec) : 1;
+          weights.push(Math.min(onsets[i]!.weight, onsets[j]!.weight) * recency);
+        }
+      }
+      const prior = (bpm: number): number => {
+        const octaves = Math.log2(bpm / 120);
+        return Math.exp(-0.5 * octaves * octaves);
+      };
+      const combScore = (period: number): number => {
+        let score = 0;
+        for (let g = 0; g < gaps.length; g++) {
+          const k = Math.round(gaps[g]! / period);
+          if (k < 1) continue;
+          const err = Math.abs(gaps[g]! - k * period);
+          if (err >= opts.tolSec) continue;
+          score += ((1 - err / opts.tolSec) * weights[g]!) / k;
+        }
+        return score * prior(60 / period);
+      };
+      const periodMin = 60 / opts.bpmMax;
+      const periodMax = 60 / opts.bpmMin;
+      let bestPeriod = 0;
+      let bestScore = 0;
+      for (let period = periodMin; period <= periodMax + 1e-9; period += opts.periodStepSec) {
+        const score = combScore(period);
+        if (score > bestScore) {
+          bestScore = score;
+          bestPeriod = period;
+        }
+      }
+      if (bestPeriod === 0) return null;
+      if (currentBpm > 0) {
+        const current = 60 / currentBpm;
+        if (current >= periodMin && current <= periodMax && bestScore < combScore(current) * opts.switchMargin) bestPeriod = current;
+      }
+      let sum = 0;
+      let total = 0;
+      for (let g = 0; g < gaps.length; g++) {
+        const k = Math.round(gaps[g]! / bestPeriod);
+        if (k < 1 || Math.abs(gaps[g]! - k * bestPeriod) >= opts.refineTolSec) continue;
+        sum += (gaps[g]! / k) * weights[g]!;
+        total += weights[g]!;
+      }
+      return total > 0 ? 60 / (sum / total) : null;
+    }
+
+    // features.ts's option set and tempoAnalyzer.ts's — the two real callers.
+    const RENDER_TICK = OPTS;
+    const FIXED_HOP = { ...OPTS, tolSec: 0.03, refineTolSec: 0.015, recencySec: 3 };
+
+    it("returns the same value on seeded random onset sets", () => {
+      let seed = 12345;
+      const rnd = (): number => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed / 0x7fffffff;
+      };
+      for (let trial = 0; trial < 120; trial++) {
+        const count = 3 + Math.floor(rnd() * 62);
+        const onsets: TempoOnsetVote[] = [];
+        let time = rnd();
+        for (let i = 0; i < count; i++) {
+          onsets.push({ time, weight: 1 + rnd() * 3 });
+          time += 0.1 + rnd() * 0.5;
+        }
+        const now = onsets[count - 1]!.time + rnd() * 0.5;
+        for (const base of [RENDER_TICK, FIXED_HOP]) {
+          for (const recencySec of [0, 3]) {
+            for (const currentBpm of [0, 120]) {
+              const opts = { ...base, recencySec };
+              expect(estimateTempo(onsets, now, currentBpm, opts)).toBe(referenceEstimate(onsets, now, currentBpm, opts));
+            }
+          }
+        }
+      }
+    });
+
+    it("returns the same value on a regular train with jitter", () => {
+      for (const bpm of [72, 95, 128, 140, 178]) {
+        const onsets = clickTrain(bpm, 40).map((o, i) => ({ ...o, time: o.time + (i % 3) * 0.004 }));
+        const now = onsets[onsets.length - 1]!.time;
+        expect(estimateTempo(onsets, now, 0, OPTS)).toBe(referenceEstimate(onsets, now, 0, OPTS));
+      }
+    });
+  });
 });

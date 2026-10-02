@@ -60,14 +60,25 @@ import { createProgram, type GLProgram } from "./gl.ts";
  * happened — the canvas context is created with `preserveDrawingBuffer:
  * false` (the default), so the browser is free to clear or reuse the default
  * framebuffer as soon as this task yields. app.ts's drawScene() is the one
- * caller, right after `scene.render(...)`.
+ * caller: capture() right after `scene.render(...)`, but poll() *before* it
+ * — getBufferSubData is a synchronous round trip in Chrome, so asked for
+ * after the scene's draws it waits for the whole frame's GPU work, while
+ * asked for ahead of them it only reads what the previous frame's fence
+ * already covers.
  *
  * The gradient pass draws (drawArrays, not a blit), which touches GL state
  * no blit does — app.ts only calls gl.viewport() on a canvas resize, so
  * anything this pass left dirty would silently corrupt every scene's very
  * next frame, not just this one. saveState()/restoreState() bracket the
  * pass so it can never leak state past its own draw call; see their own
- * comments for exactly what and why. If the pass's program fails to compile
+ * comments for exactly what and why. They never *read* the viewport or the
+ * colour mask back (a getParameter is a sync round trip queued behind the
+ * frame's draws, the same stall poll() avoids): the pass assumes the frame
+ * leaves the full-canvas viewport app.ts sets and an all-true colour mask,
+ * and puts those back by value. A scene that changes either one must
+ * restore it before returning from render() — this repo's public scenes
+ * don't touch the mask, and a scene under src/render/scenes/private/ can't
+ * be checked from here. If the pass's program fails to compile
  * or link — a driver quirk this repo has no way to test for in advance —
  * ensureGradientProgram() warns once and permanently disables capture()
  * (returning early, every call, from then on) rather than ever throwing into
@@ -99,15 +110,16 @@ export interface PictureThumb {
 }
 
 export interface PictureReadback {
-  /** Right after scene.render(): starts one async readback of the default
+  /** Right after scene.render() (and nowhere else — see the file header): starts one async readback of the default
    *  framebuffer, unless one is still in flight (then does nothing — one
    *  outstanding readback at a time, same discipline as physarum2.ts's
    *  pollTerritory), or the gradient pass has been permanently disabled (see
    *  the file header). `atMs` is stamped onto the eventual result. Does
    *  nothing on a 0-size canvas. */
   capture(canvasW: number, canvasH: number, atMs: number): void;
-  /** The finished thumbnail, once the GPU is done; null otherwise. Never
-   *  blocks. Returns a buffer this readback reuses across calls — a caller
+  /** The finished thumbnail, once the GPU is done; null otherwise. Call it
+   *  *before* the next scene.render(), not after (see the file header). Never
+   *  waits on the GPU. Returns a buffer this readback reuses across calls — a caller
    *  must consume it before the next poll(). */
   poll(): PictureThumb | null;
   dispose(): void;
@@ -261,7 +273,6 @@ function setEnabled(gl: WebGL2RenderingContext, cap: number, on: boolean): void 
 }
 
 interface SavedGLState {
-  viewport: Int32Array;
   program: WebGLProgram | null;
   vao: WebGLVertexArrayObject | null;
   activeTexture: number;
@@ -273,7 +284,6 @@ interface SavedGLState {
   stencilTest: boolean;
   scissorTest: boolean;
   rasterizerDiscard: boolean;
-  colorMask: [boolean, boolean, boolean, boolean];
 }
 
 /** Everything runGradientPass()'s own drawArrays call could disturb that a
@@ -289,7 +299,6 @@ function saveState(gl: WebGL2RenderingContext): SavedGLState {
   const texture0 = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
   const sampler0 = gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler | null;
   return {
-    viewport: gl.getParameter(gl.VIEWPORT) as Int32Array,
     program: gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null,
     vao: gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null,
     activeTexture,
@@ -301,15 +310,16 @@ function saveState(gl: WebGL2RenderingContext): SavedGLState {
     stencilTest: gl.isEnabled(gl.STENCIL_TEST),
     scissorTest: gl.isEnabled(gl.SCISSOR_TEST),
     rasterizerDiscard: gl.isEnabled(gl.RASTERIZER_DISCARD),
-    colorMask: gl.getParameter(gl.COLOR_WRITEMASK) as [boolean, boolean, boolean, boolean],
   };
 }
 
-/** Puts back exactly what saveState() captured. Framebuffer bindings are
+/** Puts back exactly what saveState() captured, plus the two things it
+ *  deliberately doesn't read: the viewport (the full canvas, which is all
+ *  app.ts ever sets) and an all-true colour mask. Framebuffer bindings are
  *  deliberately not part of this pair — capture()'s own blit sequence always
  *  ends with both bound to null regardless of this pass, same as before. */
-function restoreState(gl: WebGL2RenderingContext, s: SavedGLState): void {
-  gl.viewport(s.viewport[0]!, s.viewport[1]!, s.viewport[2]!, s.viewport[3]!);
+function restoreState(gl: WebGL2RenderingContext, s: SavedGLState, canvasW: number, canvasH: number): void {
+  gl.viewport(0, 0, canvasW, canvasH);
   gl.useProgram(s.program);
   gl.bindVertexArray(s.vao);
   gl.activeTexture(gl.TEXTURE0);
@@ -322,7 +332,7 @@ function restoreState(gl: WebGL2RenderingContext, s: SavedGLState): void {
   setEnabled(gl, gl.STENCIL_TEST, s.stencilTest);
   setEnabled(gl, gl.SCISSOR_TEST, s.scissorTest);
   setEnabled(gl, gl.RASTERIZER_DISCARD, s.rasterizerDiscard);
-  gl.colorMask(s.colorMask[0], s.colorMask[1], s.colorMask[2], s.colorMask[3]);
+  gl.colorMask(true, true, true, true);
 }
 
 export function createPictureReadback(gl: WebGL2RenderingContext): PictureReadback {
@@ -397,7 +407,7 @@ export function createPictureReadback(gl: WebGL2RenderingContext): PictureReadba
 
   /** ref -> half: the shader pass itself. Brackets its own draw call in
    *  saveState()/restoreState() — see those functions' own comments. */
-  function runGradientPass(ref: Level, half: Level): void {
+  function runGradientPass(ref: Level, half: Level, canvasW: number, canvasH: number): void {
     const saved = saveState(gl);
     setEnabled(gl, gl.BLEND, false);
     setEnabled(gl, gl.DEPTH_TEST, false);
@@ -419,7 +429,7 @@ export function createPictureReadback(gl: WebGL2RenderingContext): PictureReadba
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    restoreState(gl, saved);
+    restoreState(gl, saved, canvasW, canvasH);
   }
 
   /** (Re)allocates the whole blit chain only when the canvas size actually
@@ -487,7 +497,7 @@ export function createPictureReadback(gl: WebGL2RenderingContext): PictureReadba
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 
       // ref -> half: the gradient pass (rgb box mean, alpha packed Detail).
-      runGradientPass(refLevel, halfLevel);
+      runGradientPass(refLevel, halfLevel, canvasW, canvasH);
 
       // half -> thumb: one more exact 2×2 box average, carrying rgb and the
       // packed Detail alpha down together.

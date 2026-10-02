@@ -137,7 +137,12 @@ export interface CableLayer {
 }
 
 const NS = "http://www.w3.org/2000/svg";
-const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+// One MediaQueryList for the file, made on first use (matchMedia() parses the
+// query and allocates a list per call, and tick() asks every frame). `.matches`
+// on a held list is live, so an OS setting change is still picked up; the lazy
+// init keeps `window` untouched at import time.
+let reduceMotionMQ: MediaQueryList | null = null;
+const reduceMotion = () => (reduceMotionMQ ??= window.matchMedia("(prefers-reduced-motion: reduce)")).matches;
 
 /** How far a cable runs straight out of its jack (and straight into its
  *  port) before the bezier bend starts — see this file's header. */
@@ -166,14 +171,18 @@ function powerAvoidBand(): { top: number; bottom: number } | null {
  *   - a jack inside a folded card has no layout box at all
  *     (`.vc-card-body{display:none}`) — same "no client rects" probe
  *     ringElements() (deviceMenu.ts) already uses — so the cable ends at
- *     that card's own header instead;
+ *     that card's own header instead (and, if the header has no box either
+ *     — the column itself is hidden — there is no endpoint and no cable);
  *   - a jack scrolled outside its column's own visible band (`.vc-meters`/
  *     `.vc-controls-col`) — the cable ends at the column's visible edge;
  *   - otherwise, the element's own centre. */
 function endpointFor(el: HTMLElement): { x: number; y: number } | null {
   if (el.getClientRects().length === 0) {
     const header = el.closest<HTMLElement>(".vc-card")?.querySelector<HTMLElement>(".vc-card-head");
-    if (!header) return null;
+    // The header has no box either when the whole column is hidden (M, or
+    // every card folded away) — its rect would be all zeros and the cable
+    // would run to the viewport's top-left corner, so draw nothing instead.
+    if (!header || header.getClientRects().length === 0) return null;
     const r = header.getBoundingClientRect();
     return { x: r.right - 8, y: r.top + r.height / 2 };
   }

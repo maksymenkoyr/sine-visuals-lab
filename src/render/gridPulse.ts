@@ -29,6 +29,11 @@
 export const GRID_LOCK_ON = 0.35;
 export const GRID_LOCK_OFF = 0.2;
 
+// How far back (in beats) the count has to jump before the pulse re-arms at
+// the new position instead of waiting to pass its old high-water mark. A beat
+// trim can only rewind by under a bar; two bars back is a resync.
+const REARM_BACK_BEATS = 8;
+
 export interface GridPulse {
   /** True while a grid stop is selected and the tracker is locked enough
    *  for the grid to be driving — false on Hits or while falling back. */
@@ -58,8 +63,15 @@ export function createGridPulse(): GridPulse {
       const index = Math.floor(beats / gridBeats);
       // Arm silently on entry or after a grid change — no pulse for the
       // boundary we happen to already be past.
-      const fired = lastIndex !== null && lastGridBeats === gridBeats && index !== lastIndex;
-      lastIndex = index;
+      const armed = lastIndex !== null && lastGridBeats === gridBeats;
+      // Only a boundary past the high-water mark fires. beatClock's phase
+      // never runs backwards, but the beat trim on top of it can (a "later"
+      // nudge, a trim reset, a multiplier change with an offset set), and a
+      // rewound count crossing the same boundary again must not pulse twice.
+      const fired = armed && index > (lastIndex as number);
+      if (!armed) lastIndex = index;
+      else if (index < (lastIndex as number) - Math.ceil(REARM_BACK_BEATS / gridBeats)) lastIndex = index; // a resync, not a nudge
+      else lastIndex = Math.max(lastIndex as number, index);
       lastGridBeats = gridBeats;
       return fired;
     },

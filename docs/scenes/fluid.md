@@ -9,7 +9,7 @@ symmetry. Draft, on main.
 
 ## Where the code is
 
-Three files, imported only by each other and not shared with any other
+The files below, imported only by each other and not shared with any other
 scene (`ferrofluid.ts`, despite the similar name, is an unrelated raymarched
 blob scene with no connection to this sim):
 
@@ -20,8 +20,8 @@ blob scene with no connection to this sim):
   ghost-cell reflection on every boundary. Half-float targets with an RGBA8
   codec fallback (`detectSimFormat`). Exports `createFluidSim`,
   `simResolutionFor`, `sameSimSize`, `simIoGlsl`, the `SPLAT_SLOTS`/`Splat`
-  type, and the `MIRROR_*`/`FOLD_WEDGES_*` constants the display shader
-  folds against. Knows nothing about scenes or settings.
+  type, `FluidSimOptions` (Sky's slot count, edge pass off), and the
+  `MIRROR_*`/`FOLD_WEDGES_*` constants the display shader folds against. Knows nothing about scenes or settings.
 - `src/render/scenes/fluidBolts.ts` — the lightning bolt layer
   (`createFluidBolts`), drawn in screen space (not sim space — see
   Decisions) with mirror copies fired explicitly via `boltMirrors`.
@@ -134,6 +134,23 @@ All rounds below landed in the single PR #76 (opened as a draft, merged
 - 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
   Current density renamed Current threshold: higher lights fewer currents.
   Label only.
+- 2026-10-02 — Review pass on the solver, which Sky now shares
+  (`createFluidSim`'s `splatSlots` and `edge` options; the defaults are
+  this scene's own). Per-pass work trimmed with no change to the picture:
+  the dye pass's four-fetch diffusion blend is compiled in only while
+  `DYE_SMOOTH > 0` (it is 0), and the splat arrays are filled once per step
+  and uploaded only to the two programs that read them, instead of 2x slots
+  string-built uniform names on every pass.
+- 2026-10-02 — Review pass on the scene. The bass shockwave ring was
+  centred on the unfolded `uv`, so in Top-bottom it expanded only from the
+  upper plume while the lower mirrored plume got none; it now measures from
+  the same y-folded `uvEmit` the emitter blob uses. Two per-frame costs
+  dropped with no change to the picture: the display shader evaluates only
+  the fold(s) `uFoldMix` actually weighs (a manual pick and Auto outside the
+  warp need one, not two), and `FluidBolts.draw` returns early while the
+  layer is already empty (every non-Lightning style, the gaps between
+  strikes), still doing the one clear and mip rebuild on the frame the last
+  bolt dies.
 
 ## Tuning notes
 

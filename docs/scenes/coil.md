@@ -13,8 +13,9 @@ falls back, and when it resets to a new small shape. Draft scene.
   `tests/coil.test.ts`: `stepCoil`/`createCoilState` (flow phase `F`, outer
   log-size `L` chasing `Ltarget`, the reset morph, global spin),
   `rollShape`/`ShapeParams` (the rolled silhouette), `L_BIG`/`L_SMALL`/
-  `GROW_BASE_PER_SEC`/`RESET_DURATION_SEC`, and `coilPaletteRGB` (the JS
-  mirror of the GLSL ramp, kept in sync by hand).
+  `GROW_BASE_PER_SEC`/`RESET_DURATION_SEC`, and `COIL_RAMP` (the one stripe-ramp
+  table) with `coilPaletteRGB` evaluating it, `coilTargetSize` and
+  `newShapeDivisor`.
 - `src/render/scenes/coil/glsl.ts` — `COIL_MODEL_GLSL` (`coilSdf` = the
   silhouette as a union of lobes, `copySdf` = one copy of the stack,
   `findVisibleCopy` = the per-pixel march + bisection for the smallest copy
@@ -118,6 +119,18 @@ falls back, and when it resets to a new small shape. Draft scene.
      against the ref's 13–19 % (`palette_share.py`); solid red and blue runs
      before each fade now give 12–13 % red and 18 % blue on big frames. The
      stripe period was halved (the first estimate drew half the ref's bands).
+- 2026-10-02 — review fixes. (1) The offscreen targets clamped width and
+  height to `MAX_TARGET_DIM` independently, so any canvas wider than the
+  cap (1920x1080 at high) drew at the wrong aspect and the blit stretched
+  it; `coilTargetSize` now applies one factor to both axes. (2) The
+  per-pixel march is skipped outside a bounding radius (no copy reaches
+  past it; most of the frame just after a reset), and the four lobe
+  directions share one cos/sin of the base angle; same picture to within
+  1/255 on a handful of pixels. (3) New shape only gated on/off above the
+  0.02 floor; `newShapeDivisor` now scales the grid-tick count with the
+  slider (right = more resets, the default amount keeps today's cadence).
+  (4) `glsl.ts`'s `paletteRamp` is generated from `COIL_RAMP`, the table
+  the palette test evaluates, instead of being copied by hand.
 
 ## Tuning notes
 

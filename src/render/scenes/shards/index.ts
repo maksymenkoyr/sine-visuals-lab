@@ -43,6 +43,7 @@ import {
   PRISM_VERTS,
   advanceShards,
   cameraBasis,
+  roomAspect,
   createShardState,
   cutSource,
   packShards,
@@ -301,7 +302,7 @@ export const shardsScene: Scene = (() => {
     sharpTex = makeTexture(gl, w, h);
     depthRb = gl.createRenderbuffer();
     gl.bindRenderbuffer(gl.RENDERBUFFER, depthRb);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
     gl.bindRenderbuffer(gl.RENDERBUFFER, null);
     sharpFbo = attachColour(gl, sharpTex, depthRb);
     const hw = Math.max(1, w >> 1);
@@ -361,7 +362,7 @@ export const shardsScene: Scene = (() => {
       const cam = { ...state.camera, dist: state.camera.dist * distance };
       const basis = cameraBasis(cam);
       const count = packShards(state.shards, shardA, shardB, shardC, shardD);
-      const aspect = (gl.drawingBufferWidth * viewport.w) / Math.max(1e-6, gl.drawingBufferHeight * viewport.h);
+      const aspect = roomAspect(gl.drawingBufferWidth, gl.drawingBufferHeight, viewport);
 
       const bloom = resolveSceneSetting(ID, settingFor("bloom"));
       const useBloom = ctx.quality.bloomPasses > 0 && bloom > 0.01;

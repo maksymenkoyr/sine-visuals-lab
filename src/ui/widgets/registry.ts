@@ -49,13 +49,15 @@ import type { CardSpec } from "../controlsKit.ts";
  * itself (localStorage, try/catch — see itemBoxes.ts) rather than relying on
  * anything here to carry it across.
  *
- * `onTick`/`onDispose` exist for the rarer widget that keeps its own
- * per-frame state or a resource outside the rebuilt DOM subtree (a
- * ResizeObserver on `window`, say): `onTick` callbacks join the device
- * menu's own unthrottled per-tick pass (deviceMenu.ts's `sceneRowHandles`
- * loop), and every registered `onDispose` runs right before the next full
- * Scene-card rebuild. Phase 1/2 widgets (itemBoxes) don't need either —
- * their own rows already tick through the handles `appendRow` registers.
+ * `onTick`/`onDispose` are for a widget that keeps its own per-frame state or
+ * a resource outside the rebuilt DOM subtree (a ResizeObserver on `window`, a
+ * listener on the main canvas): `onTick` callbacks join the device menu's own
+ * unthrottled per-tick pass (deviceMenu.ts's `sceneRowHandles` loop), and
+ * every registered `onDispose` runs right before the next full Scene-card
+ * rebuild. itemBoxes.ts uses both — `onTick` to step and draw its live
+ * previews and refresh its readouts, `onDispose` to remove its canvas and
+ * window listeners — on top of its rows, which tick through the handles
+ * `appendRow` registers.
  */
 
 /** One other selected item's own same-param setting — see `appendRow`'s own
@@ -82,7 +84,7 @@ export interface WidgetCtx {
   specsFor(family: string, index?: number): SceneSetting[];
   /** The setting's current *stored* value (`getSceneSetting` — not
    *  auto-tune-resolved: a widget reading a setting the Scene master or Auto
-   *  can scale, like Hostility, sees the manual number, not what the GPU
+   *  can scale, like Cross-smell, sees the manual number, not what the GPU
    *  actually runs — see physarum2Affinity.ts's pair cultures for a caller
    *  that has to live with this). */
   get(spec: SceneSetting): number;
@@ -123,9 +125,9 @@ export interface WidgetCtx {
    *  short name (e.g. "PP-A1") — needed only to name it in that "Mixed —
    *  …" line alongside `linked`'s own labels; harmless to omit when
    *  `linked` is empty/omitted, which makes this an ordinary single-item
-   *  row exactly as before. See itemSelection.ts for the pure toggle/
-   *  primary/mixed-text rules a caller like itemBoxes.ts builds `opts`
-   *  from. */
+   *  row exactly as before. No widget supplies `linked` today (itemBoxes.ts
+   *  dropped its multi-item selection); itemSelection.ts's
+   *  `formatMixedSummary` is the one rule of that path still in use. */
   appendRow(container: HTMLElement, spec: SceneSetting, opts?: { ownLabel?: string; linked?: readonly LinkedSetting[] }): void;
   /** Mounts several rows (each the same shape `appendRow` takes — a spec
    *  plus its own optional `ownLabel`/`linked`) into `container` as one

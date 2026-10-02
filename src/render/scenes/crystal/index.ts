@@ -237,7 +237,6 @@ const MARCH_FRAG = buildMarchFragSource(
     "uniform float uRed;",
     "uniform float uEdges;",
     "uniform float uBeatSwell;",
-    "uniform float uFlowPos;",
   ].join("\n"),
 );
 
@@ -432,7 +431,6 @@ function createCrystalSceneImpl(): Scene {
       marchProg.setF("uRed", out.red);
       marchProg.setF("uEdges", out.edges);
       marchProg.setF("uBeatSwell", out.swell);
-      marchProg.setF("uFlowPos", out.flowPos);
       drawFullscreenQuad(gl, quadVao);
 
       // 2. Bloom: two levels, each a separable blur — level 0 blurs the
@@ -526,7 +524,6 @@ export {
   advanceCrystal,
   createCrystalState,
   layerEnvelope,
-  hash01,
   ZOOM_MID,
   ZOOM_AMP,
   type CrystalState,

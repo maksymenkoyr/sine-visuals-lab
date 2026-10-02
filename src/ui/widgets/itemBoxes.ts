@@ -169,6 +169,10 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
   const previewCanvases: (HTMLCanvasElement | undefined)[] = [];
   const previewOffscreen: (HTMLCanvasElement | undefined)[] = [];
   const previewVisible: boolean[] = [];
+  // Per box, made once on first draw: the offscreen canvas's 2D context and the
+  // ImageData that `sim.pixelsInto` fills each tick (no per-tick allocation).
+  const previewOffCtx: (CanvasRenderingContext2D | null | undefined)[] = [];
+  const previewImage: (ImageData | undefined)[] = [];
   const readoutEls: ({ pop: HTMLElement; terr: HTMLElement; vig: HTMLElement } | undefined)[] = [];
 
   let pipetteBtn: HTMLButtonElement | undefined;
@@ -274,6 +278,11 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
 
   // Live colours, refreshed once per tick below — the base colour until then.
   let liveColours: string[] = [...opts.colours];
+  // This tick's effective() readings, shared with the Pairs pads below so they
+  // don't re-read (and re-probe) the scene for every pad. Registration order
+  // keeps the boxes' tick ahead of `pads.tick()`; the pads fall back to their
+  // own read until the first tick.
+  let tickEffective: PreviewEffective[] = [];
   let consoleTick: ((colours: readonly string[]) => void) | undefined;
 
   if (previewSource) {
@@ -379,6 +388,7 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
       const probeData = ctx.probe();
       const effective: PreviewEffective[] = [];
       for (let i = 0; i < count; i++) effective.push(previewSource.effective(ctx, i));
+      tickEffective = effective;
       liveColours = effective.map((e) => cssRgb(e.color));
 
       for (let i = 0; i < count; i++) {
@@ -387,12 +397,14 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
         const canvas = previewCanvases[i];
         const off = previewOffscreen[i];
         if (sim && canvas && off && previewVisible[i]) {
-          const octx = off.getContext("2d");
+          if (previewOffCtx[i] === undefined) previewOffCtx[i] = off.getContext("2d");
+          const octx = previewOffCtx[i];
           const eff = effective[i]!;
           if (stepThisTick) sim.step(eff.motion);
           if (octx) {
-            const img = octx.createImageData(sim.size, sim.size);
-            img.data.set(sim.pixels(eff.color));
+            let img = previewImage[i];
+            if (!img || img.width !== sim.size) img = previewImage[i] = octx.createImageData(sim.size, sim.size);
+            sim.pixelsInto(img.data, eff.color);
             octx.putImageData(img, 0, 0);
           }
           // Backing resolution follows the box's own CSS size (smooth,
@@ -499,7 +511,7 @@ registerWidget("itemBoxes", (container: HTMLElement, section, ctx: WidgetCtx) =>
     tables: rel.tables,
     words: rel.words,
     presets: rel.presets ?? [],
-    effective: previewSource ? (k) => previewSource.effective(ctx, k) : undefined,
+    effective: previewSource ? (k) => tickEffective[k] ?? previewSource.effective(ctx, k) : undefined,
     pair: previewSource?.pair,
     stateKey: `${ctx.sceneId}:${family}`,
   });

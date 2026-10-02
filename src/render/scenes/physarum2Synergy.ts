@@ -55,7 +55,8 @@ export const HARMONY_STICK = 1.6;
  *  (a knob drag, a switch of harmony or of places). */
 export const SETTLE_SECONDS = 0.12;
 
-/** The shortest signed distance between two hues, in turns: (-0.5, 0.5]. */
+/** The shortest signed distance between two hues, in turns: [-0.5, 0.5)
+ *  (Math.round rounds a half up, so exactly half a turn comes out as -0.5). */
 export const wrapTurn = (d: number): number => d - Math.round(d);
 export const unitTurn = (h: number): number => ((h % 1) + 1) % 1;
 

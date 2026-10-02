@@ -52,9 +52,3 @@ export function isAutoPinned(): boolean {
 export function setAutoPinned(on: boolean): void {
   autoPinned = on;
 }
-
-/** For the numeric probe — what's actually pinned right now, keyed the same
- *  way as the internal map. */
-export function overrideSnapshot(): Record<string, number> {
-  return Object.fromEntries(overrides);
-}

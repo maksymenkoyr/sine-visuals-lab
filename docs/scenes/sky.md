@@ -27,10 +27,10 @@ registered right after Physarum 2 and absent from `draftIds` in
     `sunElevation`; in the shader `dayWeights` and `dayMix` over the
     `DAY_KEY_E` keys.
   - Haidinger's brush: `advanceBrushPhase`.
-- `src/render/scenes/sky/skyFluidSim.ts` — the stable-fluids solver, a copy of
-  Neon Fluid's `fluidSim.ts` that differs only in `SPLAT_SLOTS` (see Known
-  issues).
-- `tests/sky.test.ts` and `tests/skyFluidSim.test.ts`.
+- `src/render/scenes/fluidSim.ts` — the stable-fluids solver, shared with Neon
+  Fluid. Sky passes `SKY_SPLAT_SLOTS` as its `splatSlots` and `edge: false`.
+- `tests/sky.test.ts`; the solver's pure helpers are tested in
+  `tests/fluid.test.ts`.
 - Shared systems: `beatListener.ts` (one shared `beat` listener — its
   edge feeds both the floater stamp and the light sweep); `sceneCommon.ts`'s common
   uniforms and `ROOM_UV_GLSL` (clouds use room space; the eye illusions use
@@ -311,6 +311,49 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   reading it a second time in the wind formula made every streak jump the
   instant any source was patched in. Floaters and Light waves were left
   alone — real composites, not disguised constants.
+- 2026-10-02 — Review pass: Sky's private copy of the fluid solver is gone.
+  `sky/skyFluidSim.ts` differed from `fluidSim.ts` only in the splat slot
+  count, so the count became `createFluidSim`'s `splatSlots` option
+  (`SKY_SPLAT_SLOTS` here; `sky.test.ts` checks `DRIFTER_SEEDS` fits) and Sky
+  imports the shared module. Sky also passes `edge: false`: it only samples
+  `dyeTexture()`, so the Sobel edge pass and its mip rebuild no longer run
+  every frame. Checked with `tools/gpu-bench.mjs` dumps of frames 30 and 75
+  before and after: 0 pixels changed. The sim solver itself is now shared
+  territory (no scene's version moves when it changes).
+- 2026-10-02 — Review pass: Time of day is exempt from the device-wide
+  Master and Expansion dials (`masterScale: false`). It is a position on a
+  24-hour clock, so at Master 0.6 the early-evening 0.71 used to resolve to
+  a near-noon 0.43 while the slider still read 0.71 (and Day drift started
+  from the wrong hour). Day drift, a rate, stays scaled. Also dropped a stale
+  sentence from the drifter comment that described the old three-source
+  central blob. No change at the default Master and Expansion.
+- 2026-10-02 — Review pass: the seeds the shader hashes are wrapped to
+  `SHADER_SEED_PERIOD` on upload (stamps in `createWavePool`'s `upload`,
+  sweeps where `sweepSeed` is filled). They counted up for the whole session
+  and went straight into `hash21`'s `fract(seed * 123.34)`, so after a few
+  thousand stamps (hours of a gig) fp32 left it a handful of values and every
+  streak came out nearly the same shape and slant. The JS counters (brush
+  walk, swarm centre) keep the full count. Bench dumps of frames 30, 75 and
+  200 are identical to before: the first period of stamps and sweeps hashes
+  exactly as it did.
+- 2026-10-02 — Review pass: the floater stamp loop now culls each stamp
+  against its own long half-axis (`STREAK_CULL2`, derived from `STREAK_RAG`
+  and `CELL_T_FRINGE`) instead of the largest any stamp could have. Beyond it
+  a stamp's density cannot pass `CELL_T_FRINGE`, so the cull is exact: bench
+  dumps of frames 30, 75 and 200 (with floaters on screen) show 0 pixels
+  changed. Most pixels were running the full `streakDensity` for every live
+  stamp; the bench gpu time dropped a little (3.6 to 3.1-3.6 ms, noisy).
+- 2026-10-02 — Review pass: the cloud bump and wisp noise followed the mobile
+  seams rule in `src/render/noiseHash.ts`. They added the raw session time to
+  the noise coordinate and hashed with `fract(p * 123.34)`, the pattern that
+  breaks into cell-aligned seams on phone GPUs within hours (and on desktop
+  later). `vnoise` now hashes the integer cell with `NOISE_HASH_GLSL`, and the
+  drift is a per-octave offset computed in float64 and wrapped on the JS side
+  (`cloudNoiseFlows` -> `uCloudFlow`); the streaks' row fray shares `vnoise`,
+  so it moved to the integer hash too. Same scales, drift speeds and value
+  statistics, so the clouds read the same (checked side by side, bench frames
+  30/75/200 and live shots) but the exact pattern differs, so those frames
+  changed by design. Not checked on a real phone.
 
 ## Tuning notes
 
@@ -357,9 +400,6 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   - With a long Floater sustain, one stamp per beat outruns
     `MAX_WAVE_BURSTS`, and the oldest live streak is cut off mid-life.
 
-- Fold `skyFluidSim.ts` into `fluidSim.ts`, with the splat slot count as a
-  parameter. Sky needs 12, Neon Fluid uses 4; the files are otherwise
-  identical.
 - The brush trail, the Scene count-by-loudness curve and light-wave glint
   brightness haven't been checked on real music yet; Brush move's stride
   scale (`BRUSH_STRIDE_MAX`) and `floaterCountFromEnergy`'s grade are the
@@ -408,7 +448,8 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
 - `npm run dev`, then `/?audio=synthetic&bpm=120#/v/sky`. Use a mic or
   real audio source for Scene-default stamps (or wire Floaters to a Beat
   grid, per Tuning notes).
-- The `tools/.cache/refs/sky-stills/scripts/` scripts:
+- The scripts in `docs/scenes/sky/scripts/` (and
+  `docs/scenes/_shared/scripts/contact.py`):
   - `shot_series.mjs` logs real elapsed time per shot. SwiftShader runs at
     a few fps and each screenshot takes ~2 s, so a "13 s" shot is really
     ~18 s.
@@ -416,7 +457,9 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
     `scene: "sky"`).
   - `contact.py` tiles the shots into one sheet.
   - `floater_cross_section.py` and `grid_measure.py` re-measure the
-    references.
+    references (kept in the same folder, rescued from the `sky-scene`
+    worktree's `tools/.cache/` on 2026-10-02; they read the stills in the
+    `sky-stills` bundle).
 - Gotchas that cost time:
   - A backtick in a GLSL comment ends the shader's template string.
   - Restart the dev server after a rebase or long edit runs, since stale

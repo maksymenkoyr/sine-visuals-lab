@@ -1,6 +1,6 @@
 # Neon Gates (`gates`) — materials
 
-This scene isn't on `main`: its code and its record (`docs/scenes/gates.md`) live in PR #90 (open). What it was built with is kept here so nothing is lost either way.
+What Neon Gates was built with; its record is `docs/scenes/gates.md`.
 
 - `gates/neon-groove/` — measurements kept from the `/ref` bundle `neon-groove`: report, data, and our own shots.
 - Artifact: [Neon Gates Source Data](https://claude.ai/artifact/9jPhBNzXyU6csCwtikan6A). Source saved as `gates/artifacts/neon-gates-source-data.html`, with its reference images replaced by a placeholder.
