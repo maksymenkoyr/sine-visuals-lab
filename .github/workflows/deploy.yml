@@ -250,12 +250,20 @@ jobs:
             exit 0
           fi
           if [ -n "$pr" ]; then
-            title=$(gh api "repos/$REPO/pulls/$pr" -q .title)
-            notes="$title (#$pr)"
+            # The title line in the Stable notes' own shape
+            # (tools/releaseNotesLib.mjs), then the PR description's opening
+            # paragraph — the first one that's prose once any heading above it
+            # is dropped, not a list, table, image or HTML — as the summary.
+            notes=$(gh api "repos/$REPO/pulls/$pr" -q '"**\(.title)** by @\(.user.login) in #\(.number)"')
+            summary=$(gh api "repos/$REPO/pulls/$pr" -q '(.body // "") | gsub("\r"; "") | split("\n\n") | map(sub("^(\\s*#[^\n]*\n)+"; "")) | map(select(test("^\\s*([#<|!*-]|\\d+\\.|$)") | not)) | (.[0] // "")')
+            if [ -n "$summary" ]; then notes="$notes"$'\n\n'"$summary"; fi
           else
             notes="$(gh api "repos/$REPO/commits/$SHA" -q '.commit.message | split("\n")[0]')"
           fi
           notes="$notes"$'\n\n'"Live on Insider: https://insider.sinevisualslab.com — commit $SHA"
+          # Newest earlier Insider build, for a compare link; none is fine.
+          prev=$(gh api "repos/$REPO/releases?per_page=10" -q "[.[] | select(.prerelease and .tag_name != \"$TAG\")][0].tag_name // empty" 2>/dev/null || true)
+          if [ -n "$prev" ]; then notes="$notes"$'\n\n'"**Full Changelog**: https://github.com/$REPO/compare/$prev...$TAG"; fi
           gh release create "$TAG" --repo "$REPO" --target "$SHA" --prerelease \
             --title "$VERSION - beta" --notes "$notes"
           echo "Published $TAG" >> "$GITHUB_STEP_SUMMARY"
