@@ -24,7 +24,8 @@ import {
   DRIFTER_SEEDS,
   SKY_SPLAT_SLOTS,
 } from "../src/render/scenes/sky/sky.ts";
-import { computeAutoTarget } from "../src/render/autoTune.ts";
+import { computeAutoTarget, resolveSceneSetting } from "../src/render/autoTune.ts";
+import { setSceneMaster, setSceneExpansion, SCENE_MASTER_DEFAULT, SCENE_EXPANSION_DEFAULT } from "../src/render/sceneSettings.ts";
 import { NEUTRAL } from "../src/render/musicProfile.ts";
 import { SIGNALS } from "../src/render/signals.ts";
 import type { DriveChoice } from "../src/render/drives.ts";
@@ -189,6 +190,19 @@ describe("day cycle", () => {
     const t = spec!.default;
     expect(t).toBeGreaterThan(0.5); // afternoon/evening, not morning
     expect(sunElevation(t)).toBeCloseTo(0.25, 1); // DAY_KEY_E's early-evening key
+  });
+
+  it("Time of day is a clock position, so the Master and Expansion dials never move it", () => {
+    const spec = (skyScene.settings ?? []).find((s) => s.key === "timeOfDay")!;
+    expect(spec.masterScale).toBe(false);
+    try {
+      setSceneMaster(0.6);
+      setSceneExpansion(1.5);
+      expect(resolveSceneSetting("sky", spec)).toBeCloseTo(spec.default, 9);
+    } finally {
+      setSceneMaster(SCENE_MASTER_DEFAULT);
+      setSceneExpansion(SCENE_EXPANSION_DEFAULT);
+    }
   });
 });
 

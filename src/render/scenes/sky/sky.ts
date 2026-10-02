@@ -191,8 +191,7 @@ const SIM_DT_MAX = 1 / 30; // clamps a slow-frame dt so the sim never destabilis
 // --- Ambient cloud drift (not audio-reactive — see file header). Many small
 // sources, each wandering around its own home spot spread across the whole
 // frame (driftCenter) and puffing on and off (drifterPuff), so the cover
-// reads as separate airy puffs scattered over the sky. Three big sources
-// orbiting the centre, fed continuously, merged into one central blob. ---
+// reads as separate airy puffs scattered over the sky. ---
 export const DRIFTER_SEEDS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 /** Splat slots Sky asks fluidSim.ts for (Neon Fluid's default is 4): one
  *  cloud source per DRIFTER_SEEDS entry, with headroom — every drifter past
@@ -672,6 +671,9 @@ const SETTINGS: SceneSetting[] = [
     max: 1,
     step: 0.01,
     default: 0.71,
+    // A position on a 24-hour clock, not an amount: the Master and Expansion
+    // dials must not move the sun (see SceneSetting.masterScale).
+    masterScale: false,
   },
   {
     key: "cloudBrightness",

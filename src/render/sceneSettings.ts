@@ -210,10 +210,10 @@ export interface SceneSetting {
   };
   /** Set false to exempt this setting from the device-wide scene master
    *  (autoTune.ts's resolveSceneSetting): a signed relation value whose
-   *  meaning is its exact position (Physarum 2's att/touch pair tables),
-   *  where ×0 or a clamped ×2 would change which relation it is, and the
-   *  panel would show the stored value while the scene runs the scaled
-   *  one. */
+   *  meaning is its exact position (Physarum 2's att/touch pair tables, Sky's
+   *  Time of day on its 24-hour clock), where ×0 or a clamped ×2 would change
+   *  which relation or hour it is, and the panel would show the stored value
+   *  while the scene runs the scaled one. */
   masterScale?: false;
   /** Set false for a numeric slider that does real work whenever its value
    *  moves — rebuilds geometry, reseeds a simulation — so the pop-out

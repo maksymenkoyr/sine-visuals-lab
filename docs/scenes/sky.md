@@ -320,6 +320,13 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
   every frame. Checked with `tools/gpu-bench.mjs` dumps of frames 30 and 75
   before and after: 0 pixels changed. The sim solver itself is now shared
   territory (no scene's version moves when it changes).
+- 2026-10-02 — Review pass: Time of day is exempt from the device-wide
+  Master and Expansion dials (`masterScale: false`). It is a position on a
+  24-hour clock, so at Master 0.6 the early-evening 0.71 used to resolve to
+  a near-noon 0.43 while the slider still read 0.71 (and Day drift started
+  from the wrong hour). Day drift, a rate, stays scaled. Also dropped a stale
+  sentence from the drifter comment that described the old three-source
+  central blob. No change at the default Master and Expansion.
 
 ## Tuning notes
 
