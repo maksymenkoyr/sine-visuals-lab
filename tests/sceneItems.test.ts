@@ -147,6 +147,12 @@ describe("composeSettings", () => {
     expect(composeSettings(a, b).map((s) => s.key)).toEqual(["a", "b"]);
   });
 
+  it("puts ungrouped settings first, whichever list they come from, and takes any number of lists", () => {
+    const result = composeSettings([spec("m", "Motion")], [spec("u1")], [spec("f", "Form"), spec("u2")]);
+    expect(result.map((s) => s.key)).toEqual(["u1", "u2", "f", "m"]);
+    expect(composeSettings()).toEqual([]);
+  });
+
   it("stable-sorts by SETTING_GROUPS order, preserving relative order within a group", () => {
     // Deliberately interleaved and out of SETTING_GROUPS order (Post before
     // Form, Motion split across two input lists) — composeSettings must

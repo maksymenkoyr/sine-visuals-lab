@@ -316,9 +316,16 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
         showDetail(p, k);
       });
 
+      // paint() runs every tick; skip it while neither the value nor the
+      // colour moved (NaN never equals, so the first call always paints).
+      let lastV = NaN;
+      let lastC = "";
       laneCells.push({
         spec,
         paint(value, colour) {
+          if (value === lastV && colour === lastC) return;
+          lastV = value;
+          lastC = colour;
           const t = toUnit(value, spec) * 100;
           thumb.style.left = `${t}%`;
           thumb.style.background = colour;
@@ -337,6 +344,7 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
 
   // ---- Knobs ----
   const knobHeads: HTMLElement[] = [];
+  const lastHeadColour: string[] = [];
   knobsEl.appendChild(el("div"));
   for (let k = 0; k < count; k++) {
     const h = el("div", "vc-sc-knob-head", labels[k]);
@@ -441,9 +449,15 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
       });
       knobsEl.appendChild(kn);
 
+      // As the lanes': repaint only when the value or colour changed.
+      let lastV = NaN;
+      let lastC = "";
       knobCells.push({
         spec,
         paint(value, colour) {
+          if (value === lastV && colour === lastC) return;
+          lastV = value;
+          lastC = colour;
           const t = toUnit(value, spec);
           const a = KNOB_A0 + KNOB_ARC * t;
           fg.setAttribute("d", t > 0.002 ? arcPath(17, 17, 13, KNOB_A0, a) : "");
@@ -495,15 +509,30 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
     ctx.appendRow(rowHost, synergySpec);
 
     const stainSpecs = specs.get(hue.param);
+    // What the wheel last drew, so a still frame writes nothing to the DOM.
+    let lastHarmony = "";
+    let lastPoints = "";
+    let lastDots = "";
     wheelUpdate = (probe) => {
       if (!stainSpecs) return;
       const syn = ctx.get(synergySpec);
       const hidx = probe?.harmony;
-      harmony.textContent = syn > 0 && typeof hidx === "number" ? `nearest: ${HARMONIES[hidx]?.name ?? ""}` : "";
+      const harmonyText = syn > 0 && typeof hidx === "number" ? `nearest: ${HARMONIES[hidx]?.name ?? ""}` : "";
+      if (harmonyText !== lastHarmony) {
+        lastHarmony = harmonyText;
+        harmony.textContent = harmonyText;
+      }
       const set = stainSpecs.map((s, k) => (hue.baseHues[k] ?? 0) + ctx.get(s));
       const shown = stainSpecs.map((s, k) => (hue.baseHues[k] ?? 0) + (probe?.[`shownStain${k}`] ?? ctx.get(s)));
       const order = shown.map((_, k) => k).sort((a, b) => (((shown[a]! % 1) + 1) % 1) - (((shown[b]! % 1) + 1) % 1));
-      poly.setAttribute("points", order.map((k) => wheelPoint(shown[k]!, 25).map((x) => x.toFixed(2)).join(",")).join(" "));
+      const points = order.map((k) => wheelPoint(shown[k]!, 25).map((x) => x.toFixed(2)).join(",")).join(" ");
+      if (points !== lastPoints) {
+        lastPoints = points;
+        poly.setAttribute("points", points);
+      }
+      const dotsSig = `${shown.join(",")}|${set.join(",")}|${syn > 0}|${colours.join(",")}`;
+      if (dotsSig === lastDots) return;
+      lastDots = dotsSig;
       for (let k = 0; k < count; k++) {
         const [x, y] = wheelPoint(shown[k]!, 25);
         shownDots[k]!.setAttribute("cx", x.toFixed(2));
@@ -534,7 +563,12 @@ export function buildStrainConsole(args: StrainConsoleArgs): StrainConsole {
         const list = cells.get(`${active}:${p}`)!;
         for (let k = 0; k < count; k++) list[k]!.paint(values[k]!, colours[k] ?? "#fff");
       }
-      if (layout === "knobs") knobHeads.forEach((h, k) => (h.style.color = colours[k] ?? "#fff"));
+      if (layout === "knobs") {
+        knobHeads.forEach((h, k) => {
+          const c = colours[k] ?? "#fff";
+          if (lastHeadColour[k] !== c) h.style.color = lastHeadColour[k] = c;
+        });
+      }
       wheelUpdate?.(probe);
     },
     dispose() {

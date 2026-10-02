@@ -26,7 +26,7 @@ export { ATTRACT_ROWS };
 // channel. Every strain senses *every* strain's trail at once, through a
 // weighted sum (the `att<i><j>` settings, defaulting to ATTRACT_ROWS):
 // strongly its own trail (the diagonal), weakly or negatively everyone
-// else's (the off-diagonal, scaled live by the Hostility setting). A strain
+// else's (the off-diagonal, scaled live by the Cross-smell setting). A strain
 // pulled away from every other strain's ink carves out its own territory
 // instead of merging into one shared network — that's the entire visual
 // difference from physarum.ts, and the one idea taken from Fogleman's model
@@ -114,8 +114,8 @@ export { ATTRACT_ROWS };
 // `uSpecies[4]` (sensor angle, sensor distance, rotation, step — the step
 // already includes Excitability's beat-surge multiplier, so SIM_FRAG never
 // needs a separate per-strain surge uniform), `uAttractRow[4]` (arrives
-// already Hostility-scaled — `smellWeight` in physarum2Affinity.ts folds
-// Hostility in once per strain in `resolveStrains`, so SIM_FRAG just reads
+// already Cross-smell-scaled — `smellWeight` in physarum2Affinity.ts folds
+// Cross-smell in once per strain in `resolveStrains`, so SIM_FRAG just reads
 // the row straight; `uRivalry` itself stays declared, a plain non-item
 // setting still uploaded generically, but SIM_FRAG no longer reads it),
 // `uStrainFeed` (deposit multiplier per strain) and `uStrainColor[4]` (the
@@ -178,7 +178,7 @@ export { ATTRACT_ROWS };
 //   (pure, tested) turns the 256 texels into a share per strain — the cells
 //   where that strain's channel reads largest, above TERRITORY_THRESHOLD.
 // - **Population** per strain (the Headcount): *measured* — POP_FRAG counts
-//   the agents' strain channel into a 32x32 target of block fractions, read
+//   the agents' strain channel into a POP_SIDE-square target of block fractions, read
 //   back through the same non-blocking `createPixelReadback` as Territory
 //   every POP_INTERVAL_MS while the panel is open *or* Switching is on
 //   (recruiting reads the shares every step), and `populationFromBlocks`
@@ -949,8 +949,8 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
   },
   {
     key: "rivalry",
-    label: "Hostility",
-    description: "How hard each strain avoids the others' trails — 0 lets them overlap, 1 keeps them apart",
+    label: "Cross-smell",
+    description: "How strongly each strain reacts to the others' trails, whichever way its Smell pads point — 0 ignores them, 1 doubles them",
     group: "Form",
     min: 0,
     max: 1,
@@ -1393,7 +1393,7 @@ void main() {
   vec2 dirL = vec2(cos(heading - sensorAngle), sin(heading - sensorAngle));
   vec2 dirR = vec2(cos(heading + sensorAngle), sin(heading + sensorAngle));
 
-  // Own channel strongly, everyone else's weakly or negatively — Hostility
+  // Own channel strongly, everyone else's weakly or negatively — Cross-smell
   // is already folded into uAttractRow on the CPU side (smellWeight, in
   // physarum2Affinity.ts, applied once per strain in resolveStrains), so the
   // diagonal (follow-self) never weakens as strains are pushed further
@@ -1896,6 +1896,10 @@ function createPhysarum2Scene(): Scene {
   let lastResH = 1;
   let pendingInject: { fieldX: number; fieldY: number; strain: number } | null = null;
   let pendingRebalance = false;
+  // The beat reseed's one-shot, held the same way (see the `steps > 0` block
+  // in render()): drives.fired() consumes its trigger on read, so a frame that
+  // owes zero sim steps must not be the one that swallows it.
+  let pendingSeed = false;
   // Territory: a 16x16 downsample of the trail, read back through a
   // PIXEL_PACK_BUFFER + fenceSync so the GPU never stalls the CPU (the file
   // header's own paragraph) — kicked off at most every TERRITORY_INTERVAL_MS,
@@ -1912,9 +1916,20 @@ function createPhysarum2Scene(): Scene {
   // fractions, read back every POP_INTERVAL_MS while the panel is open or
   // Switching is on (recruiting needs the shares even with the panel closed).
   let popProg: GLProgram | null = null;
-  const POP_SIDE = 32;
+  // Wide on purpose: each output texel serially sums one block of agent
+  // texels, so a coarse target leaves the GPU nearly idle behind a few long
+  // loops (a multi-ms spike per run). A fine one spreads the same fetches over
+  // many fragments; the shares are the same, since populationFromBlocks
+  // normalises by the total and texels past the agent grid write 0.
+  const POP_SIDE = 128;
   const popRb = createPixelReadback(POP_SIDE);
   let lastPopKickMs = -Infinity;
+  // Bumped by every command() that sets `population` outright (pipette tap,
+  // Rebalance); a readback remembers the value it was kicked under, and one
+  // kicked before the command is stale — it would overwrite the instant,
+  // expected shares with the pre-command agents.
+  let popGen = 0;
+  let popKickGen = 0;
   const POP_INTERVAL_MS = 250;
   // Stain Synergy — remembers which stain was set last (see physarum2Synergy.ts).
   const synergyTracker = createSynergyTracker(STRAINS.map((s) => rgbToHsl(s.color)[0]));
@@ -2075,12 +2090,20 @@ function createPhysarum2Scene(): Scene {
    *  step, panel or not. */
   function pollPopulation(gl: WebGL2RenderingContext, nowMs: number, recruiting: boolean): void {
     const done = popRb.poll(gl);
-    if (done) population = populationFromBlocks(done, POP_SIDE * POP_SIDE, SPECIES_COUNT);
+    if (done) {
+      if (popKickGen === popGen) population = populationFromBlocks(done, POP_SIDE * POP_SIDE, SPECIES_COUNT);
+      // A stale result is dropped; let the next frame kick a fresh read.
+      else lastPopKickMs = -Infinity;
+    }
     if (done || popRb.busy) return;
+    // A command's one-shot hasn't reached the agents yet (a zero-step frame):
+    // reading now would measure the pre-command population.
+    if (pendingInject || pendingRebalance) return;
     if (!recruiting && nowMs - lastProbeMs > PROBE_IDLE_MS) return;
     if (nowMs - lastPopKickMs < POP_INTERVAL_MS) return;
     if (!popProg || !quadVao) return;
     lastPopKickMs = nowMs;
+    popKickGen = popGen;
     const block = Math.max(1, Math.ceil(agentSide / POP_SIDE));
     const prog = popProg;
     const quad = quadVao;
@@ -2226,6 +2249,9 @@ function createPhysarum2Scene(): Scene {
       territory = new Array(SPECIES_COUNT).fill(0);
       pendingInject = null;
       pendingRebalance = false;
+      pendingSeed = false;
+      popGen = 0;
+      popKickGen = 0;
       lastProbeMs = -Infinity;
       lastTerritoryKickMs = -Infinity;
       lastPopKickMs = -Infinity;
@@ -2259,7 +2285,10 @@ function createPhysarum2Scene(): Scene {
       // cluster's centre, so a non-default choice still varies it across
       // repeated fires.
       const seedFresh = drives.fired("seed", beatSeeder.advance(dt, anim.beatPulse, anim.onset));
-      if (seedFresh) seedEpoch++;
+      if (seedFresh) {
+        seedEpoch++;
+        pendingSeed = true;
+      }
 
       resolveStrains(dt, frame, anim, drives);
       // Lazily build the footprint/MRT targets the first time Touch's
@@ -2359,7 +2388,7 @@ function createPhysarum2Scene(): Scene {
         gl.bindFramebuffer(gl.FRAMEBUFFER, agentFbo[agentWrite]);
         gl.viewport(0, 0, agentSide, agentSide);
         simProg.use();
-        simProg.setF("uSeedFresh", step === 0 && seedFresh ? 1 : 0);
+        simProg.setF("uSeedFresh", step === 0 && pendingSeed ? 1 : 0);
         simProg.setF("uInjectFresh", step === 0 && pendingInject ? 1 : 0);
         simProg.setF("uRebalanceFresh", step === 0 && pendingRebalance ? 1 : 0);
         simProg.setF("uNoiseSeed", Math.random() * 100);
@@ -2397,13 +2426,15 @@ function createPhysarum2Scene(): Scene {
         trailReadIdx = trailWrite;
       }
 
-      // A one-shot only actually reaches the GPU on the frame's first SIM
-      // step (above) — if this frame owed zero steps (sim paused, or Crawl
-      // speed very low), keep it pending rather than dropping it silently;
-      // it fires on the first frame that actually runs a step.
+      // A one-shot (pipette dose, Rebalance, beat reseed) only actually
+      // reaches the GPU on the frame's first SIM step (above) — if this frame
+      // owed zero steps (sim paused, or Crawl speed very low), keep it pending
+      // rather than dropping it silently; it fires on the first frame that
+      // actually runs a step.
       if (steps > 0) {
         pendingInject = null;
         pendingRebalance = false;
+        pendingSeed = false;
       }
 
       // Territory (Phase 3): poll any in-flight readback and maybe kick off
@@ -2483,9 +2514,11 @@ function createPhysarum2Scene(): Scene {
         // file header and the "seed" setting's own comment above.
         const dose = resolveSceneSetting(ID, settingFor("seed"));
         population = applyInjection(population, strain, dose);
+        popGen++;
       } else if (name === "rebalance") {
         pendingRebalance = true;
         population = equalPopulation(SPECIES_COUNT);
+        popGen++;
       }
     },
 
@@ -2528,6 +2561,9 @@ function createPhysarum2Scene(): Scene {
       trailSideCur = 0;
       pendingInject = null;
       pendingRebalance = false;
+      pendingSeed = false;
+      popGen = 0;
+      popKickGen = 0;
     },
   };
 }

@@ -13,6 +13,26 @@ import {
   uploadCommonUniforms,
 } from "../sceneCommon.ts";
 import { PASSTHROUGH_DRIVES } from "../drives.ts";
+import {
+  BOLT_RIBBON_VERTS,
+  BOLT_VERT_FLOATS,
+  buildBoltTree as buildSharedBoltTree,
+  createRng,
+  strikeEnvelope,
+} from "../bolt.ts";
+
+// The bolt generator lives in `../bolt.ts` (Fluid's lightning shares it); these
+// are re-exported because tests/storm.test.ts reads them from here.
+export {
+  BOLT_BRANCH_SEGMENTS,
+  BOLT_MAX_BRANCHES,
+  BOLT_PATH_VERTS,
+  BOLT_RIBBON_VERTS,
+  BOLT_SEGMENTS,
+  BOLT_VERT_FLOATS,
+  createRng,
+  strikeEnvelope,
+} from "../bolt.ts";
 
 // A storm cloud lit from the inside by lightning on every beat — the intra-
 // cloud kind, with a hard attack, a couple of return-stroke flickers and an
@@ -187,9 +207,11 @@ import { PASSTHROUGH_DRIVES } from "../drives.ts";
 // lobes eroded by the retained noise volume, over a MESH_RES^3 lattice — so a
 // re-mesh is a lerp between two grids plus buildSurfaceNet, not a re-run of
 // the lobe loop. Re-meshing is throttled to shape-phase moves past
-// MESH_PHASE_STEP, at most one every MESH_MIN_INTERVAL; the slow drift alone
-// trips that about once a second, and between re-meshes MESH_VERT's own churn
-// keeps the lattice breathing.
+// MESH_PHASE_STEP, at most one every MESH_MIN_INTERVAL. At the default Morph
+// speed the drift crosses MESH_PHASE_STEP several times a second, so
+// MESH_MIN_INTERVAL is what paces the lattice, and every beat's morph kick
+// trips one too; between re-meshes MESH_VERT's own churn keeps the lattice
+// breathing.
 //
 // The tangle (Filaments mode): the same seed points, each traced FIL_STEPS
 // Euler steps through a curl-noise flow volume (buildFlowVolume) and drawn as
@@ -340,11 +362,20 @@ const FLOW_NORM = 5;
 // O(FIL_STEPS^2) fetches per strand.
 const FIL_STEPS = 10;
 const FIL_STEP_LEN = 0.06;
+// How fast the tangle's field crawls at the two ends of the `flow` setting, as
+// a multiple of the flow clock — see filamentFlowRate.
+const FIL_FLOW_RATE_MIN = 0.15;
+const FIL_FLOW_RATE_MAX = 1.6;
+// The tangle's slow churn against itself, in radians per second at flow rate 1
+// (the sin() term in flowCoord).
+const FIL_WOBBLE_RATE = 0.2;
+// Radians of cloud turn per unit of flow clock at Swirl = 1.
+const SWIRL_RAD_PER_FLOW = 0.35;
 // Cloud units -> flow texture coordinate. One repeat of the volume every
 // 1/FLOW_FREQ units, with the coarsest lattice (FLOW_VALUE_CELLS[0]) setting
 // the largest swirl in it.
 const FLOW_FREQ = 1.1;
-// One strand costs 2 * FIL_STEPS vertices, so the budget buys a fraction of
+// One strand costs FIL_STEPS + 1 vertices, so the budget buys a fraction of
 // what Points gets particles. The floor is where the tangle stops reading as
 // one mass on the cheap presets, and the ceiling is where adding strands
 // stops making it look any denser and only costs vertex-stage fetches.
@@ -358,53 +389,6 @@ const FIL_IMPULSE_MAX = 0.1;
 // the strands' own flow field — see flowCoord in FILAMENT_VERT.
 const GAS_FREQ_STRANDS = 0.5;
 
-/** Segments in a bolt's main channel; the channel is this many vertices plus
- *  one. */
-export const BOLT_SEGMENTS = 16;
-/** Segments in one branch, main or sub — every branch is the same length in
- *  vertices so a branch slot is a fixed stride into the strike's budget. */
-export const BOLT_BRANCH_SEGMENTS = 6;
-/** Branch slots a strike's tree is allowed. Primary branches and their
- *  sub-branches draw from the one pool, so a bolt with fewer primaries can
- *  spend the difference going a level deeper. */
-export const BOLT_MAX_BRANCHES = 6;
-/** Path vertices one strike's whole tree is packed into: the main channel
- *  plus every branch slot, filled or not. Fixed, so a slot's slice of the
- *  shared vertex buffer never moves. */
-export const BOLT_PATH_VERTS = BOLT_SEGMENTS + 1 + BOLT_MAX_BRANCHES * (BOLT_BRANCH_SEGMENTS + 1);
-/** Ribbon vertices per strike: buildBoltTree writes every path vertex twice,
- *  once per side of the ribbon (see its header). */
-export const BOLT_RIBBON_VERTS = BOLT_PATH_VERTS * 2;
-/** Floats per ribbon vertex: position, tangent, signed half-width, level. */
-export const BOLT_VERT_FLOATS = 8;
-// Sideways displacement of the coarsest midpoint, as a fraction of the
-// polyline's own length — halved at every finer level, so no vertex ends up
-// further than about twice this off the straight line. Branches kink harder
-// for their length than the channel they came off, which is what keeps a
-// short branch from reading as a straight whisker.
-const BOLT_JITTER = 0.22;
-const BOLT_BRANCH_JITTER = 0.34;
-// How many primary branches leave the main channel, and how likely each of
-// them is to fork once more while a branch slot is left.
-const BOLT_BRANCH_MIN = 3;
-const BOLT_BRANCH_MAX = 4;
-const BOLT_SUB_CHANCE = 0.65;
-// A branch's length as a fraction of its parent's, and how far off the
-// parent's own direction it leaves, in radians. Both ends of the angle range
-// stay well short of a right angle: a branch that leaves sideways reads as a
-// separate bolt rather than as part of this one.
-const BOLT_BRANCH_LEN_MIN = 0.22;
-const BOLT_BRANCH_LEN_MAX = 0.5;
-const BOLT_BRANCH_ANGLE_MIN = 0.35;
-const BOLT_BRANCH_ANGLE_MAX = 0.95;
-// A branch's peak width as a fraction of its parent's width where it leaves.
-const BOLT_BRANCH_WIDTH = 0.62;
-// The width profile along a polyline: sin(pi * t) raised to this, so a
-// channel is 0 wide at both tips (which is what lets one triangle strip run
-// through every polyline in the tree — the joins between them collapse) and
-// broad across its middle rather than a lens. Below 1 it plateaus; the lower
-// it goes the more of the channel is at full width.
-const BOLT_TAPER_POW = 0.35;
 // The ribbon's half-width in pixels across the width of its plateau, at the
 // two ends of the `bolt` setting, on a 1080-tall slice. Half-width: the drawn
 // channel is twice this, and the fragment shader's core sits inside it.
@@ -830,32 +814,11 @@ export const GAS_RECIPES: readonly GasRecipe[] = [
   },
 ];
 
-/** mulberry32: a small deterministic PRNG so the cloud (and tests) are
- *  reproducible for a given seed. Returns values in [0, 1). */
-export function createRng(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 /** Standard normal via Box-Muller. */
 function gaussian(rng: () => number): number {
   const u = Math.max(rng(), 1e-12);
   const v = rng();
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-}
-
-/** Deterministic [0,1) hash of a (seed, index) pair — what strikeEnvelope
- *  uses to place return strokes, so a given strike flickers the same way on
- *  every tick rather than jittering. */
-function hash01(seed: number, k: number): number {
-  const x = Math.sin(seed * 12.9898 + k * 78.233) * 43758.5453;
-  return x - Math.floor(x);
 }
 
 export interface Lobe {
@@ -971,7 +934,7 @@ export function particleCountForQuality(maxParticles: number): number {
 }
 
 /** How many strands Filaments mode traces out of the same budget. A strand
- *  costs 2 * FIL_STEPS vertices where a particle costs one, so this is a
+ *  costs FIL_STEPS + 1 vertices where a particle costs one, so this is a
  *  fraction of the particle count — with its own floor, since the cheap
  *  presets' budgets divide down to a handful of hairs. */
 export function filamentStrandCount(maxParticles: number): number {
@@ -979,11 +942,22 @@ export function filamentStrandCount(maxParticles: number): number {
   return Math.max(FIL_MIN_STRANDS, Math.min(FIL_MAX_STRANDS, n));
 }
 
-/** The strand vertex buffers, laid out for one gl.LINES draw: for strand `s`
- *  and step `j`, the pair of vertices (j, j+1). Both carry the strand's seed
- *  point and per-strand random value unchanged — where the vertex actually
- *  lands is the shader's business (it integrates `step` steps along the flow
- *  volume), so nothing here has to be rebuilt when the field moves.
+/** How fast Filaments' flow field crawls, off the `flow` setting: a
+ *  multiple of the flow clock, accumulated by advanceRatePhase into the
+ *  shader's crawl phases. */
+export function filamentFlowRate(flow: number): number {
+  const f = Number.isFinite(flow) ? Math.min(1, Math.max(0, flow)) : 0;
+  return FIL_FLOW_RATE_MIN + (FIL_FLOW_RATE_MAX - FIL_FLOW_RATE_MIN) * f;
+}
+
+/** The strand vertex buffers: for strand `s`, `steps + 1` consecutive
+ *  vertices, one per point along the trace (step index 0..steps). All of a
+ *  strand's vertices carry its seed point and per-strand random value
+ *  unchanged — where the vertex actually lands is the shader's business (it
+ *  integrates `step` steps along the flow volume), so nothing here has to be
+ *  rebuilt when the field moves. buildFilamentIndices pairs them up into the
+ *  gl.LINES segments, so an interior point is shaded once and shared by the
+ *  two segments that meet there.
  *
  *  Strands are taken as a prefix of the point cloud's own samples, which
  *  buildCloud guarantees is a representative subsample — so Cloud density can
@@ -994,7 +968,7 @@ export function buildFilamentVertices(
   strands: number,
   steps = FIL_STEPS,
 ): { positions: Float32Array; seeds: Float32Array; steps: Float32Array } {
-  const verts = strands * steps * 2;
+  const verts = strands * (steps + 1);
   const positions = new Float32Array(verts * 3);
   const seeds = new Float32Array(verts);
   const stepIndex = new Float32Array(verts);
@@ -1004,18 +978,35 @@ export function buildFilamentVertices(
     const y = seedPositions[s * 3 + 1];
     const z = seedPositions[s * 3 + 2];
     const seed = seedValues[s];
-    for (let j = 0; j < steps; j++) {
-      for (let end = 0; end < 2; end++) {
-        positions[o * 3] = x;
-        positions[o * 3 + 1] = y;
-        positions[o * 3 + 2] = z;
-        seeds[o] = seed;
-        stepIndex[o] = j + end;
-        o++;
-      }
+    for (let j = 0; j <= steps; j++) {
+      positions[o * 3] = x;
+      positions[o * 3 + 1] = y;
+      positions[o * 3 + 2] = z;
+      seeds[o] = seed;
+      stepIndex[o] = j;
+      o++;
     }
   }
   return { positions, seeds, steps: stepIndex };
+}
+
+/** The gl.LINES index list over buildFilamentVertices' vertices: for strand
+ *  `s` and step `j`, the pair (j, j + 1) of that strand's own vertices.
+ *  Strand-major, so any prefix of whole strands' worth of indices
+ *  (`strands * steps * 2`) draws exactly that many leading strands — which is
+ *  how Cloud density thins the tangle. 32-bit, since the strand ceiling times
+ *  the vertices per strand is past what 16 bits address. */
+export function buildFilamentIndices(strands: number, steps = FIL_STEPS): Uint32Array {
+  const indices = new Uint32Array(strands * steps * 2);
+  let o = 0;
+  for (let s = 0; s < strands; s++) {
+    const base = s * (steps + 1);
+    for (let j = 0; j < steps; j++) {
+      indices[o++] = base + j;
+      indices[o++] = base + j + 1;
+    }
+  }
+  return indices;
 }
 
 // --- The noise volume -------------------------------------------------------
@@ -1328,6 +1319,27 @@ export function advanceMorphPhase(
   return from + Math.min(MORPH_MAX_STEP, dt * glide + kick);
 }
 
+/** One frame of a phase that a live setting scales: the running total of
+ *  (clock advance) x (rate), so the setting only ever changes how fast the
+ *  phase moves from here on and never where it already is. The direct form,
+ *  `clock * rate`, is the trap flowClock.ts's header describes — `clock` is
+ *  roughly the seconds since the page loaded, so a small change in `rate`
+ *  becomes a jump in the phase that grows with uptime (a Swirl step that
+ *  turns the whole cloud, a Play glide that spins it for several turns).
+ *
+ *  `acc` is the phase so far and `prevClock` the clock it was last advanced
+ *  to; either being null (first frame, after init()) or the clock running
+ *  backwards re-seeds to `clock * rate`, which is exactly what the direct
+ *  form would draw at that moment. At a constant rate the result is that
+ *  same `clock * rate` every frame, so nothing changes unless the setting
+ *  does. Non-finite inputs fall back the way advanceMorphPhase's do. */
+export function advanceRatePhase(acc: number | null, prevClock: number | null, clock: number, rate: number): number {
+  const r = Number.isFinite(rate) ? rate : 0;
+  const c = Number.isFinite(clock) ? clock : 0;
+  if (acc === null || prevClock === null || !Number.isFinite(acc) || !(c >= prevClock)) return c * r;
+  return acc + (c - prevClock) * r;
+}
+
 /** shapeAt sampled over the bounding box as `size`^3 texels of RGBA8,
  *  x-fastest — one silhouette per channel, in lobeSets order. Texel centres
  *  land on ((i + 0.5) / size * 2 - 1) * BOUND, which is exactly what the
@@ -1525,140 +1537,12 @@ export function sampleStrikeSegment(rng: () => number, lobes: Lobe[]): [number, 
   return [a[0], a[1], a[2], b[0], b[1], b[2]];
 }
 
-/** One polyline of a bolt while the tree is being built: its vertices in
- *  cloud space, its straight-line length, the width its middle draws at as a
- *  fraction of the main channel's, and how many forks it is from that
- *  channel. */
-type BoltLine = { pts: Float32Array; len: number; peak: number; level: number };
-
-/** The kink every polyline in a bolt is drawn with: midpoint displacement —
- *  the midpoint of a span is pushed sideways off the line between its own
- *  ends, and each finer level is pushed half as far, which is what gives
- *  lightning its self-similar shape. The endpoints stay exactly on `a` and
- *  `b`, and no vertex strays further than about 2 * `jitter` of the length
- *  off the straight line.
- *
- *  Spans are split by index rather than by halving a power-of-two grid, so
- *  the segment count needn't be a power of two: each recursion sets exactly
- *  its own midpoint, and every interior vertex is some span's midpoint. */
-function jagPolyline(
-  rng: () => number,
-  a: readonly number[],
-  b: readonly number[],
-  segments: number,
-  jitter: number,
-): Float32Array {
-  const out = new Float32Array((segments + 1) * 3);
-  out[0] = a[0];
-  out[1] = a[1];
-  out[2] = a[2];
-  out[segments * 3] = b[0];
-  out[segments * 3 + 1] = b[1];
-  out[segments * 3 + 2] = b[2];
-
-  let ax = b[0] - a[0];
-  let ay = b[1] - a[1];
-  let az = b[2] - a[2];
-  const len = Math.hypot(ax, ay, az) || 1e-6;
-  ax /= len;
-  ay /= len;
-  az /= len;
-
-  const displace = (lo: number, hi: number, amp: number): void => {
-    const mid = (lo + hi) >> 1;
-    if (mid === lo || mid === hi) return;
-    const o0 = lo * 3;
-    const o1 = hi * 3;
-    let mx = (out[o0] + out[o1]) * 0.5;
-    let my = (out[o0 + 1] + out[o1 + 1]) * 0.5;
-    let mz = (out[o0 + 2] + out[o1 + 2]) * 0.5;
-    // A random direction with its along-the-bolt component removed, so the
-    // kink is sideways and the path never doubles back on itself.
-    let dx = rng() * 2 - 1;
-    let dy = rng() * 2 - 1;
-    let dz = rng() * 2 - 1;
-    const along = dx * ax + dy * ay + dz * az;
-    dx -= along * ax;
-    dy -= along * ay;
-    dz -= along * az;
-    const dn = Math.hypot(dx, dy, dz);
-    if (dn > 1e-6) {
-      const m = (amp * (rng() * 2 - 1)) / dn;
-      mx += dx * m;
-      my += dy * m;
-      mz += dz * m;
-    }
-    const om = mid * 3;
-    out[om] = mx;
-    out[om + 1] = my;
-    out[om + 2] = mz;
-    displace(lo, mid, amp * 0.5);
-    displace(mid, hi, amp * 0.5);
-  };
-  displace(0, segments, jitter * len);
-  return out;
-}
-
-/** Width along a polyline at fraction `t` of its length, before the peak it
- *  is scaled by: 0 at both tips and a long plateau between them (see
- *  BOLT_TAPER_POW). Zero tips are load-bearing — they are what lets one
- *  triangle strip run through the whole tree, since the quads that join one
- *  polyline's end to the next one's start collapse to nothing. */
-function boltWidthAt(t: number): number {
-  // The ends are returned rather than computed: sin(pi) is a hair off zero in
-  // floating point, and raising that to a fractional power lifts it back into
-  // a width, which would leave the "collapsed" joins as slivers.
-  if (!(t > 0) || t >= 1) return 0;
-  return Math.pow(Math.sin(Math.PI * t), BOLT_TAPER_POW);
-}
-
-/** Unit tangent at vertex `i` of a polyline — a central difference in the
- *  interior, one-sided at the ends. The vertex shader turns this into the
- *  screen-space normal it offsets the ribbon along, so it has to exist at
- *  every vertex; a polyline that doubled back on itself exactly would get the
- *  fallback, which is only ever a cosmetic wobble of one quad. */
-function polylineTangent(pts: Float32Array, i: number, out: number[]): void {
-  const n = pts.length / 3;
-  const lo = Math.max(0, i - 1) * 3;
-  const hi = Math.min(n - 1, i + 1) * 3;
-  let dx = pts[hi] - pts[lo];
-  let dy = pts[hi + 1] - pts[lo + 1];
-  let dz = pts[hi + 2] - pts[lo + 2];
-  const d = Math.hypot(dx, dy, dz);
-  if (d > 1e-6) {
-    dx /= d;
-    dy /= d;
-    dz /= d;
-  } else {
-    dx = 0;
-    dy = 1;
-    dz = 0;
-  }
-  out[0] = dx;
-  out[1] = dy;
-  out[2] = dz;
-}
-
-/** The bolt's visible geometry: a branched tree of jagged polylines packed
- *  into one strike's fixed slice of the vertex buffer, ready to draw as a
- *  single camera-facing ribbon.
- *
- *  The tree is the main channel from `a` to `b` — the pool's own segment is
- *  what lights the gas, so the drawn bolt has to run between the same two
- *  points — plus primary branches leaving interior vertices of it at an
- *  angle, plus one deeper level of forks off those while branch slots remain
- *  (BOLT_MAX_BRANCHES). Everything is deterministic in `rng`.
- *
- *  Layout: BOLT_PATH_VERTS path vertices, each written *twice* back to back
- *  — once per side of the ribbon — as BOLT_VERT_FLOATS floats: position,
- *  tangent, signed half-width and fork level. The sign of the width is which
- *  side of the ribbon the vertex is; its magnitude is how wide the channel is
- *  there, tapering to 0 at every tip. Every polyline is written end to end
- *  and the leftover slots are padded with zero-width copies of the last
- *  vertex, so one TRIANGLE_STRIP over the whole slice draws the tree and
- *  nothing else: the joins between polylines, and the padding, are quads with
- *  two zero-width corners and no area.
- *
+/** The bolt's visible geometry — `../bolt.ts`'s tree (see its
+ *  `buildBoltTree` for the layout and the packing into one strike's slice of
+ *  the vertex buffer), with each fork's tip pulled back inside the cloud's
+ *  ellipsoid so a branch never leaves the cloud it is lighting. The main
+ *  channel runs between `a` and `b` unchanged: the pool's own segment is what
+ *  lights the gas, so the drawn bolt has to run between the same two points.
  *  Writes into `out` at `offset` when given — the pool keeps every slot's
  *  tree in one flat array — and returns the array written. */
 export function buildBoltTree(
@@ -1668,128 +1552,7 @@ export function buildBoltTree(
   out: Float32Array = new Float32Array(BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS),
   offset = 0,
 ): Float32Array {
-  const mainLen = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) || 1e-6;
-  const main: BoltLine = {
-    pts: jagPolyline(rng, a, b, BOLT_SEGMENTS, BOLT_JITTER),
-    len: mainLen,
-    peak: 1,
-    level: 0,
-  };
-  const lines: BoltLine[] = [main];
-
-  // A fork off an interior vertex of `parent`: the parent's own direction
-  // there, swung off by an angle around a random perpendicular, run out to a
-  // fraction of the parent's length and pulled back inside the cloud if it
-  // would leave. Starting exactly on a parent vertex is what makes the join
-  // invisible — both polylines are zero-width there.
-  const forkFrom = (parent: BoltLine): BoltLine => {
-    const n = parent.pts.length / 3;
-    const i = 1 + Math.floor(rng() * (n - 2));
-    const root = [parent.pts[i * 3], parent.pts[i * 3 + 1], parent.pts[i * 3 + 2]];
-    const tan: number[] = [0, 0, 0];
-    polylineTangent(parent.pts, i, tan);
-    // A random direction with its along-the-parent component removed — the
-    // same idiom the midpoint displacement uses, for the same reason.
-    let px = rng() * 2 - 1;
-    let py = rng() * 2 - 1;
-    let pz = rng() * 2 - 1;
-    const along = px * tan[0] + py * tan[1] + pz * tan[2];
-    px -= along * tan[0];
-    py -= along * tan[1];
-    pz -= along * tan[2];
-    const pn = Math.hypot(px, py, pz);
-    if (pn > 1e-6) {
-      px /= pn;
-      py /= pn;
-      pz /= pn;
-    } else {
-      px = 1;
-      py = 0;
-      pz = 0;
-    }
-    const ang = BOLT_BRANCH_ANGLE_MIN + rng() * (BOLT_BRANCH_ANGLE_MAX - BOLT_BRANCH_ANGLE_MIN);
-    const ca = Math.cos(ang);
-    const sa = Math.sin(ang);
-    const len = parent.len * (BOLT_BRANCH_LEN_MIN + rng() * (BOLT_BRANCH_LEN_MAX - BOLT_BRANCH_LEN_MIN));
-    const tip = clampToEllipsoid([
-      root[0] + (tan[0] * ca + px * sa) * len,
-      root[1] + (tan[1] * ca + py * sa) * len,
-      root[2] + (tan[2] * ca + pz * sa) * len,
-    ]);
-    return {
-      pts: jagPolyline(rng, root, tip, BOLT_BRANCH_SEGMENTS, BOLT_BRANCH_JITTER),
-      len: Math.hypot(tip[0] - root[0], tip[1] - root[1], tip[2] - root[2]) || 1e-6,
-      peak: parent.peak * boltWidthAt(i / (n - 1)) * BOLT_BRANCH_WIDTH,
-      level: parent.level + 1,
-    };
-  };
-
-  const primaries: BoltLine[] = [];
-  const wanted = BOLT_BRANCH_MIN + Math.floor(rng() * (BOLT_BRANCH_MAX - BOLT_BRANCH_MIN + 1));
-  for (let k = 0; k < wanted && lines.length <= BOLT_MAX_BRANCHES; k++) {
-    const br = forkFrom(main);
-    lines.push(br);
-    primaries.push(br);
-  }
-  for (const p of primaries) {
-    if (lines.length > BOLT_MAX_BRANCHES) break;
-    if (rng() >= BOLT_SUB_CHANCE) continue;
-    lines.push(forkFrom(p));
-  }
-
-  let v = 0;
-  const tan: number[] = [0, 0, 0];
-  const put = (x: number, y: number, z: number, w: number, level: number): void => {
-    for (let s = 0; s < 2; s++) {
-      const o = offset + (v * 2 + s) * BOLT_VERT_FLOATS;
-      out[o] = x;
-      out[o + 1] = y;
-      out[o + 2] = z;
-      out[o + 3] = tan[0];
-      out[o + 4] = tan[1];
-      out[o + 5] = tan[2];
-      out[o + 6] = s === 0 ? w : -w;
-      out[o + 7] = level;
-    }
-    v++;
-  };
-  for (const line of lines) {
-    const n = line.pts.length / 3;
-    for (let i = 0; i < n && v < BOLT_PATH_VERTS; i++) {
-      polylineTangent(line.pts, i, tan);
-      put(line.pts[i * 3], line.pts[i * 3 + 1], line.pts[i * 3 + 2], boltWidthAt(i / (n - 1)) * line.peak, line.level);
-    }
-  }
-  // Unfilled branch slots: zero-width copies of the last vertex written, so
-  // the strip runs off the end of the tree without drawing anything.
-  const tailX = out[offset + (v * 2 - 2) * BOLT_VERT_FLOATS];
-  const tailY = out[offset + (v * 2 - 2) * BOLT_VERT_FLOATS + 1];
-  const tailZ = out[offset + (v * 2 - 2) * BOLT_VERT_FLOATS + 2];
-  tan[0] = 0;
-  tan[1] = 1;
-  tan[2] = 0;
-  while (v < BOLT_PATH_VERTS) put(tailX, tailY, tailZ, 0, 0);
-  return out;
-}
-
-/** Brightness of a strike `ageSec` after it fired: 1 at the instant of the
- *  strike, an exponential decay whose rate Afterglow sets, plus a train of
- *  return strokes (re-flashes ~50–90 ms apart, each weaker than the last)
- *  whose count Flicker sets. `seed` fixes where a given strike's strokes
- *  land so the pattern is stable across ticks. */
-export function strikeEnvelope(ageSec: number, seed: number, afterglow: number, flicker: number): number {
-  if (!(ageSec >= 0)) return 0;
-  const glow = Math.min(1, Math.max(0, afterglow));
-  const flick = Math.min(1, Math.max(0, flicker));
-  const decay = 14 - 9 * glow; // mix(14, 5, afterglow) per second
-  let v = Math.exp(-ageSec * decay);
-  const strokes = Math.round(flick * 3);
-  let t = 0;
-  for (let k = 0; k < strokes; k++) {
-    t += 0.05 + 0.04 * hash01(seed, k);
-    if (ageSec >= t) v += (0.3 + 0.4 * flick) * Math.pow(0.75, k) * Math.exp(-(ageSec - t) * decay * 1.3);
-  }
-  return Math.min(v, 1.5);
+  return buildSharedBoltTree(rng, a, b, out, offset, (tip) => clampToEllipsoid(tip));
 }
 
 /** Pool of strikes in flight. Endpoints and per-slot strength are kept in
@@ -2131,7 +1894,7 @@ const AMBIENT_LIFT_GLSL = `
 
 // Reads uAmbient rather than taking it: the floor is how dark the cloud is
 // allowed to rest, which is the setting itself — not something a caller
-// working with a scaled copy of it (Filaments' underlay) should be able to
+// working with a scaled copy of it should be able to
 // pull further down.
 float ambientFloor() {
   return mix(AMB_FLOOR_REST, AMB_FLOOR_FULL, min(1.0, max(uAmbient, 0.0) * AMB_FLOOR_KNEE_INV));
@@ -2340,6 +2103,11 @@ const CAMERA_GLSL = `
 #define FOCAL_Y ${(1 / Math.tan((CAM_FOV_DEG * Math.PI) / 360)).toFixed(5)}
 #define TILT 0.22
 
+// The cloud's turn so far, in radians — an accumulated rate (see
+// advanceRatePhase), not uFlowPhase * uSwirl, so Swirl can move without the
+// cloud jumping.
+uniform float uSwirlAngle;
+
 float swellScale() {
   return 1.0 + 0.25 * uSwell * swellDrive(uLow);
 }
@@ -2354,7 +2122,7 @@ vec3 rotX(vec3 p, float ct, float st) {
 
 vec3 cloudToView(vec3 p) {
   p *= swellScale();
-  float a = uFlowPhase * uSwirl * 0.35;
+  float a = uSwirlAngle;
   p = rotY(p, cos(a), sin(a));
   p = rotX(p, cos(TILT), sin(TILT));
   // Camera on +z looking at the origin.
@@ -2364,7 +2132,7 @@ vec3 cloudToView(vec3 p) {
 // Undoes cloudToView's swirl and tilt. A point additionally divides by
 // swellScale(); a direction doesn't need to, since it gets normalized.
 vec3 unrotate(vec3 q) {
-  float a = uFlowPhase * uSwirl * 0.35;
+  float a = uSwirlAngle;
   q = rotX(q, cos(TILT), -sin(TILT));
   return rotY(q, cos(a), -sin(a));
 }
@@ -3139,11 +2907,11 @@ void main() {
 // volume: the vertex buffer holds nothing but a seed point, a per-strand
 // random value and a step index, and the vertex shader integrates that many
 // Euler steps along the field to find where this vertex actually is. A strand
-// is emitted as FIL_STEPS gl.LINES pairs, so step j appears twice (once
-// ending segment j-1, once starting segment j) and both copies integrate to
-// the same point — O(K^2) fetches per strand, all of it vertex-stage, which
-// buys a tangle that costs nothing on the CPU and re-traces itself every
-// frame as the field crawls.
+// has FIL_STEPS + 1 vertices, drawn as FIL_STEPS indexed gl.LINES pairs
+// (buildFilamentIndices), so step j is shaded once and shared by the segment
+// ending there and the one starting there — O(K^2) fetches per strand, all of
+// it vertex-stage, which buys a tangle that costs nothing on the CPU and
+// re-traces itself every frame as the field crawls.
 //
 // Why the sampler isn't called uFlow: the `flow` setting already owns that
 // name (settingUniformName), and two declarations of one name is a shader
@@ -3188,10 +2956,11 @@ float hash11(float x) {
   return fract(sin(x * 127.1) * 43758.5453);
 }
 
-// How fast the tangle crawls, off the Flow setting.
-float flowRate() {
-  return mix(0.15, 1.6, uFlow);
-}
+// The tangle's two accumulated crawl phases. JS integrates the Flow setting's
+// rate (filamentFlowRate, advanceRatePhase) over the clock, so a Flow change
+// alters the crawl speed rather than re-seating the whole field.
+uniform float uFlowCrawl;   // flowPhase integrated at the flow rate
+uniform float uFlowWobble;  // time * 0.2 integrated at the flow rate
 
 // Where the flow field is read — the same scrolling idea flowSpace() uses for
 // the gas: the whole field drifts downwind and churns against itself, so the
@@ -3204,8 +2973,8 @@ float flowRate() {
 // inside one swirl. Identity at freq 1 whatever the mix.
 vec3 flowCoord(vec3 p) {
   vec3 q = p * FLOW_FREQ * mix(1.0, uGasFreq, GAS_FREQ_STRANDS)
-    + vec3(uFlowPhase * 0.05, 0.0, uFlowPhase * 0.025) * flowRate();
-  return q + 0.03 * sin(q.zxy * 2.0 + uTime * 0.2 * flowRate());
+    + vec3(uFlowCrawl * 0.05, 0.0, uFlowCrawl * 0.025);
+  return q + 0.03 * sin(q.zxy * 2.0 + uFlowWobble);
 }
 
 // textureLod, not texture: a vertex shader has no derivatives to pick a level
@@ -3357,6 +3126,7 @@ export const stormScene: Scene = (() => {
   let filPosBuf: WebGLBuffer | null = null;
   let filSeedBuf: WebGLBuffer | null = null;
   let filStepBuf: WebGLBuffer | null = null;
+  let filIdxBuf: WebGLBuffer | null = null;
   let strandCount = 0;
   let count = 0;
   let meshRes = MESH_RES_HIGH;
@@ -3379,6 +3149,14 @@ export const stormScene: Scene = (() => {
   // The shape morph's own accumulated phase, in variants — see
   // advanceMorphPhase. Wraps through shapePhaseWeights, so it only grows.
   let morphPhase = 0;
+  // The rate-scaled phases (advanceRatePhase) and the clocks they were last
+  // advanced to. null until the first frame so each seeds to what the direct
+  // product would draw.
+  let swirlAngle: number | null = null;
+  let flowCrawl: number | null = null;
+  let flowWobble: number | null = null;
+  let prevFlowPhase: number | null = null;
+  let prevTimeSec: number | null = null;
   const bandsBuf = new Float32Array(NUM_BANDS);
 
   return {
@@ -3497,7 +3275,8 @@ export const stormScene: Scene = (() => {
       gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
       gl.bindVertexArray(null);
 
-      // The strands: static line-pair vertices over a prefix of the same
+      // The strands: static vertices (one per point along a strand) and the
+      // static line-pair indices over them, over a prefix of the same
       // samples, since where a vertex lands is decided in the shader.
       filProg = createProgram(gl, FILAMENT_FRAG, FILAMENT_VERT);
       strandCount = filamentStrandCount(ctx.quality.maxParticles);
@@ -3519,6 +3298,11 @@ export const stormScene: Scene = (() => {
       gl.bufferData(gl.ARRAY_BUFFER, strands.steps, gl.STATIC_DRAW);
       gl.enableVertexAttribArray(2);
       gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+      // The element buffer binding is part of the VAO's state, so it stays
+      // bound to filVao and the draw needs no bind of its own.
+      filIdxBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, filIdxBuf);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, buildFilamentIndices(strandCount), gl.STATIC_DRAW);
       gl.bindVertexArray(null);
       filProg.use();
       gl.uniform1i(gl.getUniformLocation(filProg.program, "uShape"), 1);
@@ -3572,6 +3356,7 @@ export const stormScene: Scene = (() => {
       prevHighPulse = 0;
       lastTimeSec = null;
       morphPhase = 0;
+      swirlAngle = flowCrawl = flowWobble = prevFlowPhase = prevTimeSec = null;
     },
 
     render(ctx, frame, viewport, palette, anim, drives = PASSTHROUGH_DRIVES) {
@@ -3593,6 +3378,18 @@ export const stormScene: Scene = (() => {
       const gas = GAS_RECIPES[
         Math.min(GAS_RECIPES.length - 1, Math.max(0, Math.round(resolveSceneSetting(ID, settingFor("gasType")))))
       ];
+
+      // Swirl and Flow scale a clock that has been running since the page
+      // loaded, so each is integrated as a rate rather than multiplied in
+      // (advanceRatePhase). The shader reads the accumulated results.
+      const swirl = resolveSceneSetting(ID, settingFor("swirl"));
+      const flow = resolveSceneSetting(ID, settingFor("flow"));
+      const flowRate = filamentFlowRate(flow);
+      swirlAngle = advanceRatePhase(swirlAngle, prevFlowPhase, anim.flowPhase, swirl * SWIRL_RAD_PER_FLOW);
+      flowCrawl = advanceRatePhase(flowCrawl, prevFlowPhase, anim.flowPhase, flowRate);
+      flowWobble = advanceRatePhase(flowWobble, prevTimeSec, anim.timeSec, FIL_WOBBLE_RATE * flowRate);
+      prevFlowPhase = anim.flowPhase;
+      prevTimeSec = anim.timeSec;
 
       // Time since this scene last drew — see the file header for why this
       // isn't anim.dtSec. Guards the first frame and any backwards jump.
@@ -3657,6 +3454,7 @@ export const stormScene: Scene = (() => {
       gl.disable(gl.BLEND);
       prog.use();
       uploadCommonUniforms(prog, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+      prog.setF("uSwirlAngle", swirlAngle);
       prog.setV3v("uStrikeA", pool.posA);
       prog.setV3v("uStrikeB", pool.posB);
       prog.setFv("uStrikeStrength", pool.strength);
@@ -3734,6 +3532,7 @@ export const stormScene: Scene = (() => {
         if (meshVertCount > 0) {
           meshProg.use();
           uploadCommonUniforms(meshProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+          meshProg.setF("uSwirlAngle", swirlAngle);
           meshProg.setV3v("uStrikeA", pool.posA);
           meshProg.setV3v("uStrikeB", pool.posB);
           meshProg.setFv("uStrikeStrength", pool.strength);
@@ -3748,6 +3547,7 @@ export const stormScene: Scene = (() => {
       } else if (mode === MODE_POINTS) {
         pointProg.use();
         uploadCommonUniforms(pointProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+        pointProg.setF("uSwirlAngle", swirlAngle);
         pointProg.setV3v("uStrikeA", pool.posA);
         pointProg.setV3v("uStrikeB", pool.posB);
         pointProg.setFv("uStrikeStrength", pool.strength);
@@ -3761,6 +3561,9 @@ export const stormScene: Scene = (() => {
       } else if (mode === MODE_FILAMENTS) {
         filProg.use();
         uploadCommonUniforms(filProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+        filProg.setF("uSwirlAngle", swirlAngle);
+        filProg.setF("uFlowCrawl", flowCrawl);
+        filProg.setF("uFlowWobble", flowWobble);
         filProg.setV3v("uStrikeA", pool.posA);
         filProg.setV3v("uStrikeB", pool.posB);
         filProg.setFv("uStrikeStrength", pool.strength);
@@ -3768,13 +3571,14 @@ export const stormScene: Scene = (() => {
         filProg.setV4("uShapeMix", shapeMix[0], shapeMix[1], shapeMix[2], shapeMix[3]);
         filProg.setF("uCountBoost", Math.min(3, Math.max(1, Math.sqrt(FIL_MAX_STRANDS / strandCount))));
         // The strands take the frequency alone (flowCoord); the rest of the
-        // recipe reaches them through the underlay march they are drawn over.
+        // gas recipe doesn't reach Filaments, since the volume pass draws
+        // only the background in this mode.
         filProg.setF("uGasFreq", gas.freq);
-        // A prefix of the strand buffer is a prefix of the point cloud, so
+        // A prefix of the strand indices is a prefix of the point cloud, so
         // Cloud density thins the tangle here the way it thins the points.
         const strands = Math.floor(strandCount * Math.max(0.05, density));
         gl.bindVertexArray(filVao);
-        gl.drawArrays(gl.LINES, 0, strands * FIL_STEPS * 2);
+        gl.drawElements(gl.LINES, strands * FIL_STEPS * 2, gl.UNSIGNED_INT, 0);
         gl.bindVertexArray(null);
       }
 
@@ -3798,6 +3602,7 @@ export const stormScene: Scene = (() => {
       if (anyLive) {
         boltProg.use();
         uploadCommonUniforms(boltProg, ctx, frame, viewport, palette, anim, ID, SETTINGS, bandsBuf, drives);
+        boltProg.setF("uSwirlAngle", swirlAngle);
         // One strip per live slot: the whole tree — channel, branches and the
         // unused branch slots — is one run of vertices whose joins have no
         // area (see buildBoltTree), so a bolt is one draw however it forked.
@@ -3837,6 +3642,7 @@ export const stormScene: Scene = (() => {
       if (filPosBuf) gl.deleteBuffer(filPosBuf);
       if (filSeedBuf) gl.deleteBuffer(filSeedBuf);
       if (filStepBuf) gl.deleteBuffer(filStepBuf);
+      if (filIdxBuf) gl.deleteBuffer(filIdxBuf);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_3D, null);
       gl.activeTexture(gl.TEXTURE1);
@@ -3867,6 +3673,7 @@ export const stormScene: Scene = (() => {
       filPosBuf = null;
       filSeedBuf = null;
       filStepBuf = null;
+      filIdxBuf = null;
       strandCount = 0;
       count = 0;
       meshVertCount = 0;

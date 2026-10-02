@@ -64,7 +64,9 @@ const LEVEL_RELEASE_PER_SEC = 10; // unchanged from the old single rate
 // A zero or non-finite dtSec (a stalled clock, a test) would otherwise turn
 // a real rise into an infinite rate (division below) or, at the Smoothing
 // row's Off stop, feed Infinity*0 into the level slew's Math.min and yield
-// NaN. Clamped once here rather than per group.
+// NaN. advanceGroup clamps it once, at the top, and every use of the step in
+// that group (level slew, rise, onset timing, pulse decay) reads the clamped
+// value.
 const MIN_DT_SEC = 1e-4;
 
 interface GroupSpec {
@@ -166,9 +168,10 @@ function advanceGroup(
   dimmer: number,
   shape: HitShape | undefined,
 ): void {
+  const dt = Number.isFinite(dtSec) ? Math.max(MIN_DT_SEC, dtSec) : MIN_DT_SEC;
   const raw = meanRange(bands, spec.lo, spec.hi);
   const levelRate = raw > state.level ? LEVEL_ATTACK_PER_SEC : LEVEL_RELEASE_PER_SEC;
-  state.level += (raw - state.level) * Math.min(1, levelRate * rateScale * dtSec);
+  state.level += (raw - state.level) * Math.min(1, levelRate * rateScale * dt);
 
   // Rate of rise, in band-mean per second — normalized by dt (not a raw
   // per-frame delta) so the trigger reads the same at 60Hz and 120Hz. A
@@ -177,7 +180,6 @@ function advanceGroup(
   // this replaces a level-vs-baseline comparison. Detected on raw, not the
   // slewed level: level is display smoothing and is rateScale-dependent, so
   // triggering off it would leak the Smoothing dial into detection.
-  const dt = Number.isFinite(dtSec) ? Math.max(MIN_DT_SEC, dtSec) : MIN_DT_SEC;
   const rise = state.prevRaw === null ? 0 : Math.max(0, (raw - state.prevRaw) / dt);
   state.prevRaw = raw;
 
@@ -203,7 +205,7 @@ function advanceGroup(
   state.diag.sinceOnsetSec = state.sinceOnsetSec;
   if (state.onset) state.sinceOnsetSec = 0;
 
-  state.pulse *= Math.exp(-dtSec * spec.pulseDecayRate * rateScale);
+  state.pulse *= Math.exp(-dt * spec.pulseDecayRate * rateScale);
   if (state.onset) {
     if (shape) {
       const hit = hitStrength(state.diag.ratio, raw, shape, state.hit);

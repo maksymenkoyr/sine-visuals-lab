@@ -474,6 +474,26 @@ describe("populationFromBlocks (Headcount's GPU count)", () => {
   it("falls back to an equal split for an empty buffer", () => {
     expect(populationFromBlocks([0, 0, 0, 0], 1, 4)).toEqual(equalPopulation(4));
   });
+
+  it("gives the same shares from a fine, ragged-edged target as from a coarse one", () => {
+    // The same agent field counted into a coarse and a fine grid of blocks:
+    // strain 0 fills the left half, strain 1 a quarter, strain 2 the rest.
+    // The fine grid's right-hand cells lie past the agent grid and write 0
+    // (POP_FRAG skips texels outside it), like the ragged edge at small counts.
+    const fill = (side: number, usedSide: number): Uint8Array => {
+      const buf = new Uint8Array(side * side * 4);
+      for (let y = 0; y < usedSide; y++)
+        for (let x = 0; x < usedSide; x++) {
+          const k = x < usedSide / 2 ? 0 : y < usedSide / 2 ? 1 : 2;
+          buf[(y * side + x) * 4 + k] = 255;
+        }
+      return buf;
+    };
+    const coarse = populationFromBlocks(fill(32, 32), 32 * 32, 4);
+    const fine = populationFromBlocks(fill(128, 100), 128 * 128, 4);
+    for (let k = 0; k < 4; k++) expect(fine[k]).toBeCloseTo(coarse[k]!, 2);
+    expect(fine[0]).toBeCloseTo(0.5, 2);
+  });
 });
 
 describe("population bookkeeping (equalPopulation/applyInjection)", () => {
