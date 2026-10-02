@@ -191,9 +191,15 @@ function createModeRow(deps: PowerCardDeps, accent: string) {
 
   el.append(head, list, hint);
 
+  // refresh() runs every auto-refresh tick (deviceMenu.ts), and the chips'
+  // cssText and the hint's rebuilt children are the same until the mode
+  // changes — only write when it does.
+  let last: PowerMode | null = null;
   return {
     el,
     refresh(mode: PowerMode): void {
+      if (mode === last) return;
+      last = mode;
       for (const { mode: m, btn } of buttons) {
         btn.style.cssText = m === mode ? modeChipLitStyle : modeChipStyle;
       }
@@ -291,9 +297,13 @@ function createSizeRow(deps: PowerCardDeps, accent: string) {
 
   el.append(head, list, hint);
 
+  // Only write when the size changes — see createModeRow's `last`.
+  let last: PreviewSize | null = null;
   return {
     el,
     refresh(size: PreviewSize): void {
+      if (size === last) return;
+      last = size;
       for (const { size: s, btn } of buttons) {
         btn.style.cssText = s === size ? modeChipLitStyle : modeChipStyle;
       }
@@ -417,9 +427,15 @@ function createQualityRow(deps: PowerCardDeps, accent: string) {
 
   el.append(head, list, hint);
 
+  // Everything below is a function of these two — only write when either
+  // changes (see createModeRow's `last`).
+  let lastKey = "";
   return {
     el,
     refresh(choice: QualityChoice, recommended: QualityPreset): void {
+      const key = `${choice}|${recommended}`;
+      if (key === lastKey) return;
+      lastKey = key;
       for (const { choice: c, btn } of buttons) {
         const selected = c === choice;
         const isRecommended = c === recommended;
@@ -531,14 +547,28 @@ function createStatusRow(accent: string) {
 
   el.append(line, hint);
 
+  // Each write only when its own value moved (see createModeRow's `last`);
+  // the hint rebuilds its child nodes, so it matters most.
+  let lastText: string | null = null;
+  let lastDetail: string | null = null;
+  let lastDot: string | null = null;
   return {
     el,
     refresh(status: PowerStatus): void {
       const described = describeStatus(status, accent);
-      text.textContent = described.text;
-      el.title = described.detail;
-      dot.style.backgroundColor = described.dot;
-      setHintText(hint, described.detail);
+      if (described.text !== lastText) {
+        lastText = described.text;
+        text.textContent = described.text;
+      }
+      if (described.detail !== lastDetail) {
+        lastDetail = described.detail;
+        el.title = described.detail;
+        setHintText(hint, described.detail);
+      }
+      if (described.dot !== lastDot) {
+        lastDot = described.dot;
+        dot.style.backgroundColor = described.dot;
+      }
     },
   };
 }

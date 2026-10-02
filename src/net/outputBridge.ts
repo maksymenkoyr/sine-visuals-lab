@@ -1,3 +1,4 @@
+import type { SilenceGateMarks } from "../audio/silenceGate.ts";
 import type { FeatureFrame } from "../audio/types.ts";
 import {
   createCueController,
@@ -76,7 +77,11 @@ export interface OutputBridge {
    *  instantly). Returns whether a glide was actually asked for. */
   go(glideMs?: number): boolean;
   update(nowMs: number): void;
-  pushFrame(frame: FeatureFrame, extras: { beatRatio: number | null; wavePeak: number | null }, params: OutputParams): void;
+  pushFrame(
+    frame: FeatureFrame,
+    extras: { beatRatio: number | null; wavePeak: number | null; gate: SilenceGateMarks },
+    params: OutputParams,
+  ): void;
   /** Send the output its Quality / Energy saving now (it also gets them on
    *  every heartbeat reply). No-op while no output is open. */
   sendPower(): void;
@@ -101,8 +106,11 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
   const presence = createOutputPresence();
   let outputOpen = false;
   const cue: CueController = createCueController((state, glideMs) => {
-    if (!outputOpen) return;
+    // Not delivered while presence has lapsed: say so, or the controller
+    // would record the look as sent and never offer it again.
+    if (!outputOpen) return false;
     transport.post(glideMs && glideMs > 0 ? { t: "state", state, glideMs } : { t: "state", state });
+    return true;
   });
   const listeners: Array<(s: OutputStatus) => void> = [];
   let win: Window | null = null;
@@ -139,10 +147,13 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
     presence.seen(performance.now());
     outputOpen = true;
     // A window that lost its state (fresh, or reloaded) is sent the current
-    // one; one that still has it keeps its program.
+    // one; one that still has it keeps its program — plus any Play or Cue
+    // pressed while its presence had lapsed, which never reached it.
     if (!m.haveState || cue.held() === null) {
       preview();
       cue.outputOpened();
+    } else {
+      cue.resync();
     }
     transport.post({ t: "power", power: opts.power() });
   });
@@ -214,6 +225,7 @@ export function createOutputBridge(opts: OutputBridgeOptions): OutputBridge {
           onsetPhase: frame.onsetPhase,
           beatRatio: extras.beatRatio,
           wavePeak: extras.wavePeak,
+          gate: extras.gate,
           ...(cue.following() ? { p: params } : {}),
         },
       });

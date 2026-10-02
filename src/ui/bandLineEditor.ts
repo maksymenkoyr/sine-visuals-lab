@@ -1,5 +1,6 @@
 import { NUM_BANDS } from "../audio/types.ts";
 import { STRIP_PLOT_HEIGHT_PX } from "./spectrumStrip.ts";
+import { createCanvasSizer } from "./canvasSizer.ts";
 import { BANDS_AMBER, withAlpha } from "./controlsTheme.ts";
 import { LINE_STRENGTH_DEFAULT, LINE_STRENGTH_MAX, LINE_STRENGTH_MIN, LINE_HEIGHT_DEFAULT } from "../audio/bandLine.ts";
 // Circular with deviceMenu.ts (it imports createBandLineEditor below) — same
@@ -80,23 +81,15 @@ export function createBandLineEditor(opts: BandLineEditorOpts): BandLineEditor {
   const line = new Float32Array(NUM_BANDS);
   let excess: ArrayLike<number> | null = null;
 
-  let cssWidth = 0;
-  function ensureSize(): boolean {
-    const rect = overlay.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    if (w <= 0) return false;
-    if (w === cssWidth) return true;
-    cssWidth = w;
-    const dpr = window.devicePixelRatio || 1;
-    overlay.width = Math.round(w * dpr);
-    overlay.height = Math.round(STRIP_PLOT_HEIGHT_PX * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return true;
-  }
+  // Not observed: this overlay redraws only on its own events (a new line, a
+  // pointer paint), so a skipped first draw while an observer warms up would
+  // stay blank until the next one. It reads its rect instead — see
+  // canvasSizer.ts.
+  const sizer = createCanvasSizer(overlay, ctx, { heightCssPx: STRIP_PLOT_HEIGHT_PX, observe: false });
 
   function redraw(): void {
-    if (!ensureSize()) return;
-    const width = cssWidth;
+    if (!sizer.ensure()) return;
+    const width = sizer.width;
     const plotHeight = STRIP_PLOT_HEIGHT_PX;
     ctx.clearRect(0, 0, width, plotHeight);
 

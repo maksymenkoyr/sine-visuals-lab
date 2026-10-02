@@ -56,8 +56,6 @@ export const STRIP_MID = "#c0a2f5";
 export const STRIP_HIGH = "#f6b15b";
 /** The "audio is flowing" dot in the spectrum card header. */
 export const LIVE_DOT = "#83dc97";
-/** Rule under the spectrum card header. */
-export const HAIRLINE = "#efb062";
 /** The warning ramp: the Input card's level wash as it nears clipping, and
  *  the meters' clip/drop flashes (src/ui/audioMeters.ts). yellow-500 / red-500. */
 export const HOT_YELLOW = "#eab308";
@@ -103,12 +101,12 @@ export function withAlpha(hex: string, alpha: number): string {
   return `${hex}${a}`;
 }
 
-// Glass: the panel's surfaces either blur the scene behind them (lighter tint)
-// or, by default, sit on a darker flat tint with no filter. Both are CSS
+// Glass: the panel's surfaces either blur the scene behind them (lighter tint,
+// the default) or sit on a darker flat tint with no filter. Both are CSS
 // custom properties set from the `vc-glass-blur` class on <html> (the
 // stylesheet below; the preference is src/ui/glassPref.ts, which also holds
-// why it defaults off): a backdrop-filter re-processes the WebGL canvas
-// behind it every frame, once per filtered layer, so it is a real GPU cost.
+// what the blur costs): a backdrop-filter re-processes the WebGL canvas
+// behind it every frame, so it is a real GPU cost.
 // Every glass surface takes both properties inline — GLASS_BG for the
 // `background`, GLASS_FILTER for the (-webkit-)backdrop-filter — so the
 // switch is one class toggle.

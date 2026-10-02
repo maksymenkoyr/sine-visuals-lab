@@ -29,7 +29,14 @@ export function targetFrameIntervalMs(preset: QualityPreset): number {
 // anything genuinely faster — 2ms admits up to ~68.5fps through the 60fps
 // gate, which only ever matters for the 60Hz-with-jitter case this exists
 // to fix.
-const GATE_TOLERANCE_MS = 2;
+//
+// The tolerance only admits ticks; what the gate is measured *from* is
+// nextRenderAnchor()'s job. Stamping "now" on every render would restart the
+// phase at each frame, and on a display faster than the cap (75, 90, 120,
+// 144 Hz) that quantizes the rate to a whole number of vsyncs: at 144 Hz
+// (6.9 ms) a 16.7 ms interval is never reached after two ticks, so every
+// render waited for the third and 60 fps became 48.
+export const GATE_TOLERANCE_MS = 2;
 
 /** Whether enough time has passed since the last *rendered* frame (not
  *  every rAF tick) to render another one. Pure and separately testable so
@@ -37,4 +44,18 @@ const GATE_TOLERANCE_MS = 2;
  *  without a browser. */
 export function shouldRenderFrame(nowMs: number, lastRenderMs: number, targetIntervalMs: number): boolean {
   return nowMs - lastRenderMs >= targetIntervalMs - GATE_TOLERANCE_MS;
+}
+
+/** What to store as `lastRenderMs` after a tick that passed shouldRenderFrame:
+ *  the previous anchor plus one interval, not `nowMs` — but never ahead of
+ *  `nowMs`. The gate then keeps its own steady grid and an accepted tick that
+ *  landed a little late doesn't push the next frame out with it, so a 144 Hz
+ *  panel really renders ~60 fps rather than every third vsync. The clamp is
+ *  for a panel a hair faster than the cap (60.06 Hz): an accepted tick that
+ *  arrives early would otherwise leave the anchor in the future and the grid
+ *  would drift until a frame was dropped. A first frame (`lastRenderMs` 0), a stall or a tab
+ *  resume (more than two intervals behind) snaps to `nowMs` instead, so the
+ *  gate never replays a backlog as a burst of back-to-back renders. */
+export function nextRenderAnchor(nowMs: number, lastRenderMs: number, targetIntervalMs: number): number {
+  return nowMs - lastRenderMs > 2 * targetIntervalMs ? nowMs : Math.min(nowMs, lastRenderMs + targetIntervalMs);
 }

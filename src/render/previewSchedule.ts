@@ -30,6 +30,11 @@ function overdueRatio(c: ScheduleCandidate, nowMs: number): number {
   return (nowMs - c.lastDrawMs) / Math.max(1, c.targetIntervalMs);
 }
 
+/** Due once its own target interval, less `toleranceMs`, has elapsed. */
+function isDue(c: ScheduleCandidate, nowMs: number, toleranceMs: number): boolean {
+  return c.lastDrawMs === 0 || nowMs - c.lastDrawMs >= Math.max(1, c.targetIntervalMs) - toleranceMs;
+}
+
 /**
  * Returns the indices (into `candidates`) of up to `budget` tiles to redraw
  * this tick, most-overdue first. Only tiles that are actually due — elapsed
@@ -40,16 +45,24 @@ function overdueRatio(c: ScheduleCandidate, nowMs: number): number {
  * tick's own gate interval, so all of them come due together) behave
  * exactly as a flat "draw everything, every tick" would.
  *
+ * `toleranceMs` is the slack shouldRenderFrame (framePace.ts) gives the tick
+ * gate, passed by gallery.ts so the two agree: a tick the gate admits at
+ * 16.6 ms on a 60 Hz panel must find the base-band tiles due too, or the
+ * gate's timestamp advances, nothing draws, and the tiles wait for the next
+ * tick (~33 ms) — the half-rate quantization framePace.ts's header describes.
+ * Defaults to 0 (an exact comparison).
+ *
  * Ties keep candidate order (stable sort), so results are deterministic.
  */
 export function selectDueTiles(
   candidates: readonly ScheduleCandidate[],
   nowMs: number,
   budget: number,
+  toleranceMs = 0,
 ): number[] {
   return candidates
     .map((c, index) => ({ index, ratio: overdueRatio(c, nowMs) }))
-    .filter((c) => c.ratio >= 1)
+    .filter((c) => isDue(candidates[c.index], nowMs, toleranceMs))
     .sort((a, b) => b.ratio - a.ratio)
     .slice(0, Math.max(0, budget))
     .map((c) => c.index);
