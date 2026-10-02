@@ -937,11 +937,17 @@ applies there too. Tuned so far only against the synthetic feed at
 ## Crawl speed jack (2026-09-30)
 
 Crawl speed (`speed`) now has a drive jack, like the per-strain Speed: its
-default is Loudness, scaled by `MOTION_JACK_GAIN` and lifted toward the top
+default is Loudness, scaled by `CRAWL_JACK_GAIN` and lifted toward the top
 of the slider with `pushToward1`, so an unplugged jack leaves the pace where
 the slider sits. It is read in JS in `render()` (`drives.value`) before the
 step rate is mapped — the stepper is fixed-rate, not a GLSL uniform. Not
 judged on real music yet.
+
+2026-10-02: the user reported Crawl "doesn't react much to the driver". It
+was sharing `MOTION_JACK_GAIN` (0.15, right for one strain among four), which
+moved the default pace ~6% at full-scale Loudness (75 → 80 steps/s). Crawl now
+has its own `CRAWL_JACK_GAIN` (1): about +40% at a loud peak, ~+15% on a
+typical level. Not yet judged by eye on real music.
 
 ## Resume here
 

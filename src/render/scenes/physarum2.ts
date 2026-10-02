@@ -433,6 +433,12 @@ const PUSH_GAIN = 0.7;
 // the scene's record has the rejected values and what they did.
 const MOTION_JACK_GAIN = 0.15; // Sensor range/Turn angle/Speed
 const STAIN_JACK_GAIN = 0.2; // Stain
+/** Crawl speed's own drive gain. Not MOTION_JACK_GAIN: that nudge is right for
+ *  one strain's Sensor/Turn/Speed among four, but Crawl is the whole sim's
+ *  pace, passed through pushToward1 and then the 30..120 step-rate map — at
+ *  0.15 a full-scale Loudness moved the default pace by only ~6% (75 → 80
+ *  steps/s), too little to see. At 1 the same peak is ~+40%. */
+const CRAWL_JACK_GAIN = 1;
 /** Stain's own drive gain — a patched source shifts hue by up to this many
  *  turns on top of the stored shift. */
 const STAIN_DRIVE_GAIN = 0.18;
@@ -967,7 +973,7 @@ const GLOBAL_SETTINGS: SceneSetting[] = [
     // (pushToward1, identity at drive 0 — an unplugged jack leaves Crawl
     // speed exactly where the slider puts it), same shape and gain as the
     // per-strain Speed jacks.
-    drive: { default: "anim.energy", gain: MOTION_JACK_GAIN },
+    drive: { default: "anim.energy", gain: CRAWL_JACK_GAIN },
   },
   {
     key: "seed",
@@ -2268,7 +2274,7 @@ function createPhysarum2Scene(): Scene {
       const depositActive = mrt ? depositProgMrt : depositProg;
 
       const speedSpec = settingFor("speed");
-      const speedDrive = (drives ?? PASSTHROUGH_DRIVES).value(speedSpec.key, frame.energy * MOTION_JACK_GAIN);
+      const speedDrive = (drives ?? PASSTHROUGH_DRIVES).value(speedSpec.key, frame.energy * CRAWL_JACK_GAIN);
       const speedSetting = clamp01(pushToward1(resolveSceneSetting(ID, speedSpec), speedDrive));
       const stepRate = STEP_RATE_MIN + (STEP_RATE_MAX - STEP_RATE_MIN) * speedSetting;
       const { steps, acc } = stepAccumulator(stepAcc, dt, stepRate);
