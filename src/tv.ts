@@ -9,6 +9,7 @@ import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
 import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createRoomCode, RendererConnection } from "./net/room.ts";
+import { roomCodeFromParam } from "./net/roomCode.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
@@ -113,7 +114,8 @@ async function main(): Promise<void> {
   governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
   scene.init(sceneCtx);
 
-  const code = await createRoomCode();
+  // `?room=CODE` is the join screen's typed-code field: render in that room instead of minting a new one.
+  const code = roomCodeFromParam(new URLSearchParams(location.search).get("room")) ?? (await createRoomCode());
   conn = new RendererConnection(code);
   conn.onCommand((cmd) => {
     if (cmd.scene) {
@@ -124,7 +126,7 @@ async function main(): Promise<void> {
     if (cmd.viewport) viewport = cmd.viewport;
   });
 
-  const join = createJoinScreen("host");
+  const join = createJoinScreen("host", document.body, { tv: true });
   join.setCode(code);
   join.show();
 

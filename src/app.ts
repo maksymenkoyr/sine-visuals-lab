@@ -1737,15 +1737,14 @@ async function boot(): Promise<void> {
     }
   }
 
-  if (mode === "host" && roomCode) {
+  if ((mode === "host" || mode === "renderer") && roomCode) {
     roomCodeEl.textContent = `room: ${roomCode}`;
     roomCodeEl.style.display = "block";
-    const invite = createJoinScreen("renderer");
+    // The room view: this room's QR + code, and the field to type another
+    // room's code. Stays open until dismissed — it holds a text field now.
+    const invite = createJoinScreen("renderer", document.body, { dismissible: true });
     invite.setCode(roomCode);
-    roomCodeEl.addEventListener("click", () => {
-      invite.show();
-      window.setTimeout(() => invite.hide(), 8000);
-    });
+    roomCodeEl.addEventListener("click", () => invite.show());
   }
 
   wireDeviceMenu();
