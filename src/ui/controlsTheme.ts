@@ -56,8 +56,6 @@ export const STRIP_MID = "#c0a2f5";
 export const STRIP_HIGH = "#f6b15b";
 /** The "audio is flowing" dot in the spectrum card header. */
 export const LIVE_DOT = "#83dc97";
-/** Rule under the spectrum card header. */
-export const HAIRLINE = "#efb062";
 /** The warning ramp: the Input card's level wash as it nears clipping, and
  *  the meters' clip/drop flashes (src/ui/audioMeters.ts). yellow-500 / red-500. */
 export const HOT_YELLOW = "#eab308";

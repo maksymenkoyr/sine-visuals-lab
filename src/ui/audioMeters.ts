@@ -61,6 +61,7 @@ import {
 // both modules have finished loading).
 import { createControlRow } from "./deviceMenu.ts";
 import { setHintText } from "./hintSwatches.ts";
+import { createCanvasSizer } from "./canvasSizer.ts";
 
 /**
  * The meters under the spectrum card: everything the audio pipeline already
@@ -560,26 +561,21 @@ function createColumnRing(seriesCount: number, heightPx: number) {
   // A burst's filler once past COLUMN_CARRY_MS — never mutated.
   const blank: number[] = new Array(seriesCount).fill(Number.NaN);
   let colStartMs: number | null = null;
-  let cssWidth = 0;
   // Follows the width so the trace always spans exactly HISTORY_SPAN_SEC.
   let columnMs = 1000;
 
-  function ensureSize(): boolean {
-    const rect = canvas.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    if (w <= 0) return false;
-    if (w === cssWidth) return true;
-    cssWidth = w;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(heightPx * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    bufs = [];
-    for (let i = 0; i < seriesCount; i++) bufs.push(new Float32Array(w).fill(Number.NaN));
-    head = 0;
-    columnMs = (HISTORY_SPAN_SEC * 1000) / w;
-    return true;
-  }
+  // The history is one column per CSS pixel, so a width change rebuilds
+  // (clears) it; a devicePixelRatio-only change keeps it — see canvasSizer.ts.
+  const sizer = createCanvasSizer(canvas, ctx, {
+    heightCssPx: heightPx,
+    onWidthChange(w) {
+      bufs = [];
+      for (let i = 0; i < seriesCount; i++) bufs.push(new Float32Array(w).fill(Number.NaN));
+      head = 0;
+      columnMs = (HISTORY_SPAN_SEC * 1000) / w;
+    },
+  });
+  const ensureSize = sizer.ensure;
 
   function commitColumn(vals: number[]): void {
     for (let i = 0; i < seriesCount; i++) bufs[i][head] = vals[i];
@@ -592,7 +588,7 @@ function createColumnRing(seriesCount: number, heightPx: number) {
     /** CSS pixel width the ring is currently sized to (0 before first
      *  layout). */
     get width(): number {
-      return cssWidth;
+      return sizer.width;
     },
     /** Number of closed columns — equals width, one per CSS pixel. */
     get length(): number {
@@ -1150,13 +1146,24 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
   laneMounts.push({ choice: "feature.flux", glowEl: laneMounts[0]!.glowEl });
 
   // Fire timestamps per lane, for the legend's "N fires in the last span"
-  // note — pruned to HISTORY_SPAN_SEC on read, same window the trace shows.
+  // note — pruned to HISTORY_SPAN_SEC, same window the trace shows. Pruned
+  // when a fire is logged as well as on read: the legend (the only reader)
+  // is skipped while the Shape disclosure is open, and a log that is only
+  // pruned on read would grow for as long as Shape stays open.
   const fireLog: number[][] = HITS_LANES.map(() => []);
-  function firesInSpan(lane: number, nowMs: number): number {
+  function pruneFires(lane: number, nowMs: number): number[] {
     const log = fireLog[lane];
     const cutoff = nowMs - HISTORY_SPAN_SEC * 1000;
-    while (log.length && log[0] < cutoff) log.shift();
-    return log.length;
+    let stale = 0;
+    while (stale < log.length && log[stale] < cutoff) stale++;
+    if (stale > 0) log.splice(0, stale);
+    return log;
+  }
+  function logFire(lane: number, nowMs: number): void {
+    pruneFires(lane, nowMs).push(nowMs);
+  }
+  function firesInSpan(lane: number, nowMs: number): number {
+    return pruneFires(lane, nowMs).length;
   }
 
   function laneTop(laneIdx: number): number {
@@ -1328,10 +1335,10 @@ function createHitsHistory(getSilenceGate: () => SilenceGateMarks, mountJack: Mo
         setLane(3, anim.hits.high.ratio, highVerdict, anim.highOnset, anim.hitStrength.high);
         vals[HITS_GROUND_IDX] = 1 - anim.gateDimmer;
         ring.push(vals, nowMs);
-        if (beatFired) fireLog[0].push(nowMs);
-        if (anim.lowOnset) fireLog[1].push(nowMs);
-        if (anim.midOnset) fireLog[2].push(nowMs);
-        if (anim.highOnset) fireLog[3].push(nowMs);
+        if (beatFired) logFire(0, nowMs);
+        if (anim.lowOnset) logFire(1, nowMs);
+        if (anim.midOnset) logFire(2, nowMs);
+        if (anim.highOnset) logFire(3, nowMs);
       } else {
         ring.push(new Array(HITS_SERIES_COUNT).fill(null), nowMs);
       }
@@ -1524,23 +1531,10 @@ function createHitCurve() {
   const canvas = document.createElement("canvas");
   canvas.style.cssText = `display: block; width: 100%; height: ${HIT_CURVE_HEIGHT_CSS_PX}px; margin-top: 4px;`;
   const ctx = canvas.getContext("2d")!;
-  let cssWidth = 0;
 
-  /** Same "no layout yet" guard as every other canvas in this file
-   *  (createColumnRing's own ensureSize) — a folded/closed panel has a
-   *  zero-size rect. */
-  function ensureSize(): boolean {
-    const rect = canvas.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    if (w <= 0) return false;
-    if (w === cssWidth) return true;
-    cssWidth = w;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(HIT_CURVE_HEIGHT_CSS_PX * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return true;
-  }
+  /** Same "no layout yet" guard as every other canvas in this file (see
+   *  canvasSizer.ts) — a folded/closed panel has no width to draw at. */
+  const sizer = createCanvasSizer(canvas, ctx, { heightCssPx: HIT_CURVE_HEIGHT_CSS_PX });
 
   let lastKey = "";
   const xOf = (ratio: number, w: number) => ((ratio - 1) / (ONSET_METER_MAX - 1)) * (w - 1);
@@ -1555,13 +1549,15 @@ function createHitCurve() {
     draw(knee: number, laneRatios: readonly (number | null)[]): void {
       // The curve only changes when Knee or a lane's last hit does — and
       // both are rare next to the tick rate — so a repeat call is a no-op
-      // rather than a clear+stroke+rect read every frame. The width check
+      // rather than a clear+stroke+rect read every frame. The size check
       // stays first so a panel resize still repaints.
-      if (!ensureSize()) return;
-      const key = `${cssWidth}|${knee}|${laneRatios.join(",")}`;
+      if (!sizer.ensure()) return;
+      // `sizer.version` stands in for the width: resizing the backing store
+      // (a new width, or a new devicePixelRatio) clears the plot.
+      const key = `${sizer.version}|${knee}|${laneRatios.join(",")}`;
       if (key === lastKey) return;
       lastKey = key;
-      const w = cssWidth;
+      const w = sizer.width;
       const h = HIT_CURVE_HEIGHT_CSS_PX;
       ctx.clearRect(0, 0, w, h);
 
@@ -1871,8 +1867,11 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   // Row-level visibility (mono/lufs null on a device with no local
   // analyser) — see update()'s own Signal block for the toggles and the
   // "don't accumulate a column while hidden" behaviour they carry.
-  let waveformShown = false;
-  let lufsShown = false;
+  // null until the first unfolded tick applies the real state: the rows are
+  // built visible, so a mic-less device (where nothing ever shows) must still
+  // get its first setShown(false) rather than compare false !== false.
+  let waveformShown: boolean | null = null;
+  let lufsShown: boolean | null = null;
 
   // ---- Hits ----
   const hitsHistory = createHitsHistory(deps.getSilenceGate, mountJack);
@@ -2101,29 +2100,21 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
   let colStartMs: number | null = null;
 
   // devicePixelRatio-scaled backing store, resized whenever the card's
-  // layout width changes — same as spectrumStrip.ts. The history is one
-  // column per CSS pixel, so it's rebuilt (cleared) with the width.
-  let waveCssWidth = 0;
-  /** False while the canvas has no layout (the card is folded, or the panel
-   *  is closed) — same reasoning as spectrumStrip.ts's ensureSize: sizing to
-   *  a clamped 1px here would rebuild (clear) the wave history the moment
-   *  the card is hidden, then stretch a 1px backing store across it on show. */
-  function ensureWaveSize(): boolean {
-    const rect = waveCanvas.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    if (w <= 0) return false;
-    if (w === waveCssWidth) return true;
-    waveCssWidth = w;
-    const dpr = window.devicePixelRatio || 1;
-    waveCanvas.width = Math.round(w * dpr);
-    waveCanvas.height = Math.round(WAVE_HEIGHT_CSS_PX * dpr);
-    waveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    histMin = new Float32Array(w);
-    histMax = new Float32Array(w);
-    histClip = new Uint8Array(w);
-    head = 0;
-    return true;
-  }
+  // layout width changes — same as spectrumStrip.ts (both via canvasSizer.ts,
+  // which returns false while the canvas has no layout: the card is folded or
+  // the panel is closed, so the wave history isn't rebuilt against a clamped
+  // 1px). The history is one column per CSS pixel, so it's rebuilt (cleared)
+  // with the width; a ratio-only change keeps it.
+  const waveSizer = createCanvasSizer(waveCanvas, waveCtx, {
+    heightCssPx: WAVE_HEIGHT_CSS_PX,
+    onWidthChange(w) {
+      histMin = new Float32Array(w);
+      histMax = new Float32Array(w);
+      histClip = new Uint8Array(w);
+      head = 0;
+    },
+  });
+  const ensureWaveSize = waveSizer.ensure;
 
   function commitColumn(min: number, max: number, clip: boolean): void {
     histMin[head] = min;
@@ -2163,7 +2154,7 @@ export function createAudioMeters(deps: AudioMetersDeps): AudioMeters {
    *  processing, so unlike the rest of the RAW chip it never changes with
    *  it (see file header). */
   function drawWave(): void {
-    const w = waveCssWidth;
+    const w = waveSizer.width;
     const h = WAVE_HEIGHT_CSS_PX;
     const mid = h / 2;
     const len = histMin.length;
