@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   physarum2TrailSide,
   stepAccumulator,
+  advanceCrawlPump,
+  createCrawlPumpState,
+  crawlStepRate,
   physarum2Scene,
   STRAINS,
   SPECIES_COUNT,
@@ -358,7 +361,49 @@ describe("Phase 3 settings: Dose (relabelled seed), Spread, Auto-inject from", (
 
   it("Dose/Switching/Spread/Auto-inject from all sit in one contiguous Motion run with Crawl speed", () => {
     const motionKeys = settings.filter((s) => s.group === "Motion").map((s) => s.key);
-    expect(motionKeys).toEqual(["speed", "seed", "switching", "seedSpread", "seedFrom"]);
+    expect(motionKeys).toEqual(["speed", "speedBoost", "speedPump", "seed", "switching", "seedSpread", "seedFrom"]);
+  });
+});
+
+describe("Crawl speed / Speed boost / Speed pump", () => {
+  it("advanceCrawlPump: a push accelerates, then the extra speed coasts back to zero", () => {
+    const st = createCrawlPumpState();
+    for (let i = 0; i < 12; i++) advanceCrawlPump(st, 1 / 60, 1, 1);
+    const peak = st.vel;
+    expect(peak).toBeGreaterThan(0);
+    for (let i = 0; i < 60 * 15; i++) advanceCrawlPump(st, 1 / 60, 0, 1);
+    expect(st.vel).toBeLessThan(peak * 0.001);
+  });
+
+  it("advanceCrawlPump: no amount or no input never moves it, and a dense run stays capped", () => {
+    const a = createCrawlPumpState();
+    advanceCrawlPump(a, 1 / 60, 1, 0);
+    advanceCrawlPump(a, 1 / 60, 0, 1);
+    expect(a.vel).toBe(0);
+    const b = createCrawlPumpState();
+    for (let i = 0; i < 60 * 60; i++) advanceCrawlPump(b, 1 / 60, 1, 1);
+    expect(b.vel).toBeLessThanOrEqual(60);
+    const bad = createCrawlPumpState();
+    advanceCrawlPump(bad, NaN, NaN, NaN);
+    expect(bad.vel).toBe(0);
+  });
+
+  it("crawlStepRate: the base alone is the old 30..120 map", () => {
+    expect(crawlStepRate({ speed: 0, boost: 0, level: 0, pumpVel: 0 })).toBe(30);
+    expect(crawlStepRate({ speed: 0.5, boost: 0, level: 1, pumpVel: 0 })).toBe(75);
+    expect(crawlStepRate({ speed: 1, boost: 0, level: 0, pumpVel: 0 })).toBe(120);
+  });
+
+  it("crawlStepRate: boost and pump add on top, even with the base at its slowest", () => {
+    const base = crawlStepRate({ speed: 0, boost: 0, level: 0, pumpVel: 0 });
+    expect(crawlStepRate({ speed: 0, boost: 1, level: 1, pumpVel: 0 })).toBeGreaterThan(base);
+    expect(crawlStepRate({ speed: 0, boost: 0, level: 0, pumpVel: 20 })).toBe(base + 20);
+    // an unplugged boost jack (level 0) adds nothing at any slider value
+    expect(crawlStepRate({ speed: 0.5, boost: 1, level: 0, pumpVel: 0 })).toBe(75);
+  });
+
+  it("crawlStepRate: never exceeds the cap", () => {
+    expect(crawlStepRate({ speed: 1, boost: 1, level: 1, pumpVel: 60 })).toBeLessThanOrEqual(150);
   });
 });
 
