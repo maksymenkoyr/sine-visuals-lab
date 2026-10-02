@@ -4778,7 +4778,8 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       },
       // This row is one of the whole-mic Auto button's own members (see
       // micAuto.ts's header) — refreshMicAuto keeps that button's lit state
-      // honest whenever a chip click could have changed it.
+      // honest whenever a chip click could have changed it. It also
+      // refreshes the Auto master bar (refreshMicAutoAndMaster).
       onAutoToggled: refreshMicAutoAndMaster,
       pin: pinConfig(() => deps.currentSceneId(), spec().key, resolveLive),
     });
