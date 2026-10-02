@@ -7,14 +7,25 @@
 row and column pitch; bright-pixel RGB vs the median background gives the
 glyph tint. Also prints single-glyph bitmaps ('#' bright, '+' mid).
 
-    uv run grid_measure.py
+    uv run grid_measure.py [REF_DIR]
+
+REF_DIR is the `ref/` folder of the sky-stills bundle (default
+tools/.cache/refs/sky-stills/ref, relative to the repo root). The stills are
+reference media and are not kept in this repo.
 """
+import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-REF = Path(__file__).resolve().parent.parent / "ref"
+REPO = Path(__file__).resolve().parents[4]
+REF = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO / "tools/.cache/refs/sky-stills/ref"
+if not (REF / "07-text-grid-streak.png").is_file():
+    sys.exit(
+        f"stills not found in {REF}: pass the sky-stills bundle's ref/ directory "
+        "(expected at tools/.cache/refs/sky-stills/ref)"
+    )
 
 
 def pitch(sig, lo, hi):

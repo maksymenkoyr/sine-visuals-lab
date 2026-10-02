@@ -92,8 +92,8 @@ From the bundle's `report.md` and PR #90's verification (2026-09-05/06 and
   a look change now starts `GateState.morph`, eased over exactly `MORPH_BARS`;
   `begin()` is a no-op while a morph runs, which is what makes it
   uninterruptible. The half-bar-cut rule and the Blackouts setting were
-  removed. A Density/Shape mix/quality change while holding morphs in place
-  (`GateState.rebuild`). Per-object brightness jitter moved from a shader hash
+  removed. A Density, Shape mix or quality change also morphs in place
+  instead of cutting (`GateState.rebuild`). Per-object brightness jitter moved from a shader hash
   into `LookLayout.gain`, since morphing re-pairs array slots.
 - **2026-09-23 (same day):** Beat flash became the shared pattern
   (`uBeatPulse` scaled by its setting, as Caustics and Chladni do) in place
