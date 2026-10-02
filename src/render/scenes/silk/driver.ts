@@ -370,8 +370,7 @@ export function advanceSilk(st: SilkState, input: SilkInputs, opts: SilkOpts): S
     st.travelT = 0;
     st.barsSinceChange = 0;
   }
-  // A Fold pin (or going back to Auto's pinned-then-free state) must show
-  // up now, not at the next regime change, which may be 16-32 s away or —
+  // A Fold pin must show up now, not at the next regime change, which may be 16-32 s away or —
   // in silence — never. Once any travel in flight has landed, retarget the
   // fold alone: every other field already sits at its target, so `from`
   // becomes `to` with no visible step and only foldMix glides over

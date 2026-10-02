@@ -374,8 +374,8 @@ void main() {
   vec3 view = vec3(dot(rel, uCamRight), dot(rel, uCamUp), dot(rel, uCamFwd));
   float aspect = roomAspect();
   float NEARZ = 0.08;
-  // Just past anything the scene ever draws (SHELL_RADIUS, lattice.ts, plus
-  // the far camera at CAM_FAR). History: with a 16-bit depth renderbuffer a
+  // Comfortably past anything the scene ever draws (SHELL_RADIUS in
+  // lattice.ts plus the far camera at CAM_FAR sum to well under it). History: with a 16-bit depth renderbuffer a
   // far plane well past the geometry wasted most of the precision on empty
   // space no geometry ever reaches, and at high Fill values hundreds of
   // near-touching, near-coplanar tube walls a few hundredths of a unit apart
