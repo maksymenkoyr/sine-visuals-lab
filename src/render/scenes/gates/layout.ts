@@ -240,7 +240,7 @@ export function objectCountFor(look: number, density: number, detail: number): n
 }
 
 /** A small deterministic generator so a layout is reproducible per seed. */
-export function seededRng(seed: number): () => number {
+function seededRng(seed: number): () => number {
   let s = (seed * 2654435761 + 1013904223) >>> 0;
   return () => {
     s = (s * 1664525 + 1013904223) >>> 0;
@@ -423,7 +423,7 @@ export function shapePresence(shape: ShapeId, i: number): 0 | 1 {
  *  `e`. A slot's presence ramping through low values *is* the morph — its
  *  geometry (from morphSegment) collapses toward the same point at the same
  *  rate, so a fading edge shrinks to nothing rather than popping. */
-export function segPresence(shapeFrom: ShapeId, shapeTo: ShapeId, i: number, e: number): number {
+function segPresence(shapeFrom: ShapeId, shapeTo: ShapeId, i: number, e: number): number {
   const a = shapePresence(shapeFrom, i);
   const b = shapePresence(shapeTo, i);
   return a + (b - a) * e;

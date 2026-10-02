@@ -188,11 +188,16 @@ const TIP_COOLDOWN_MS = 60_000;
 let lastTipMs = 0;
 let onTip: ((text: string) => void) | null = null;
 
-function tip(text: string): void {
+/** True when the tip was actually handed to `onTip` — false inside the
+ *  cooldown, or before installKeyHints has supplied a `onTip`. A caller that
+ *  spends something on showing a tip (noteMouseUse's "never again" mark)
+ *  does so only on true. */
+function tip(text: string): boolean {
   const now = Date.now();
-  if (now - lastTipMs < TIP_COOLDOWN_MS) return;
+  if (now - lastTipMs < TIP_COOLDOWN_MS || !onTip) return false;
   lastTipMs = now;
-  onTip?.(text);
+  onTip(text);
+  return true;
 }
 
 /** Call when `id`'s shortcut key itself was pressed — deviceMenu.ts's
@@ -205,16 +210,20 @@ export function noteKeyUse(id: string): void {
 
 /** Call when `id`'s tagged control was clicked with a mouse.
  *  installKeyHints wires this automatically off every `[data-key]` click
- *  (skipping touch) — exported mainly for symmetry with noteKeyUse. */
+ *  (skipping touch) — exported for symmetry with noteKeyUse and for
+ *  tests/keyHints.test.ts. */
 export function noteMouseUse(id: string): void {
   if (cache.used[id] || cache.tipped[id]) return;
   mouseUses[id] = (mouseUses[id] ?? 0) + 1;
   if (mouseUses[id] < 2) return;
   const s = shortcutFor(id);
   if (!s) return;
+  // Only an id whose tip was actually shown is retired: one swallowed by the
+  // cooldown (or arriving before installKeyHints) keeps its count, so the
+  // next click after the cooldown earns it again.
+  if (!tip(`Tip: press ${s.key} — ${s.label}`)) return;
   cache = { ...cache, tipped: { ...cache.tipped, [id]: true } };
   persist();
-  tip(`Tip: press ${s.key} — ${s.label}`);
 }
 
 /** The first-ever panel open — deviceMenu.ts's open(). Independent of the
