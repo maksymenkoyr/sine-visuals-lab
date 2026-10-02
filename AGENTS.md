@@ -3,7 +3,8 @@
 The working rules for this repo.
 
 A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` →
-`src/app.ts` (controller + gallery) and `tv.html` → `src/tv.ts` (paired display).
+`src/app.ts` (laptop host, phone controller and gallery) and `tv.html` →
+`src/tv.ts` (paired display).
 `docs/index.md` is the map of how the pieces fit.
 
 ## Git
@@ -42,13 +43,14 @@ scene record's "Measurements" and dated "Decisions and pivots".
 | Touching... | Read first |
 |---|---|
 | Any broad question — architecture, adding a scene, tuning, what's in flight | `docs/index.md` |
-| The wire format between phone and TV | `src/net/protocol.ts` header |
+| The binary feature-frame format (host to screens) | `src/net/protocol.ts` header |
+| The room, pairing, the phone controller, or the TV's look | `src/net/roomMessages.ts` header (the JSON message vocabulary) and `server/roomRules.ts` header (who may join and send); `src/net/lookSync.ts` header for how the look stays in step |
 | Why a setting resolves the way it does under Auto | `src/render/autoTune.ts` and `src/render/musicProfile.ts` headers |
 | The settings/uniform system itself | `src/render/sceneSettings.ts` header |
 | A scene's per-item settings or a custom widget in its Scene card | `src/render/sceneItems.ts` header, then `src/ui/widgets/registry.ts` header |
 | Making a setting audio-reactive | `src/render/drives.ts` header — a scene reads `<key>Drive(…)`, never a signal directly |
-| Anything the site records about its visitors, or `PRIVACY.md` | `server/usage.ts` header |
-| The pop-out output window, Cue/Play, or a localStorage store that changes how a scene looks | `src/net/outputSync.ts` header — such a store must register with `src/net/syncedStores.ts` |
+| Anything the site records about its visitors, or `PRIVACY.md` | `server/usage.ts` header; `server/roomRules.ts` and `server/roomCore.ts` headers for what a claimed room keeps |
+| The pop-out output window, Cue/Play, or a localStorage store that changes how a scene looks | `src/net/outputSync.ts` header — such a store must register with `src/net/syncedStores.ts` to reach the output or a room's TV |
 | The Cue/Play keys, or a setting that must not glide (`glide: false`) | `src/ui/outputKeys.ts` header, then `src/net/outputGlide.ts` header |
 | The saved-look share-code format | `src/render/sceneLooks.ts` header — links in the wild outlive the schema |
 | The build target (`es2017`) | `vite.config.ts`, the comment at `target:` |
