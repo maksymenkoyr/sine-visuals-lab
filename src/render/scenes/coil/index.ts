@@ -63,7 +63,7 @@ import { COMMON_UNIFORMS_GLSL, uploadCommonUniforms } from "../../sceneCommon.ts
 import { PASSTHROUGH_DRIVES } from "../../drives.ts";
 import type { QualityPreset } from "../../quality.ts";
 import { buildSceneFrag, BLIT_FRAG, GROUND_RGB } from "./glsl.ts";
-import { createCoilState, stepCoil, type CoilState } from "./coilMotion.ts";
+import { createCoilState, stepCoil, coilTargetSize, newShapeDivisor, type CoilState } from "./coilMotion.ts";
 
 const ID = "coil";
 
@@ -91,7 +91,9 @@ const SPIN_DRIVE_DEG_PER_SEC = 10; // extra at a full-strength drive reading
 // src/audio/beatGrid.ts's coarsest stop is two bars (BEAT_GRIDS' own
 // "twoBars"); New shape's own reference cadence is close to four times
 // that, so this file counts grid pulses itself rather than adding a scene-
-// only grid stop nothing else could reuse.
+// only grid stop nothing else could reuse. This is the count at New shape's
+// default amount; coilMotion.ts's newShapeDivisor scales it with the slider
+// (right = more resets).
 const NEW_SHAPE_GRID_DIVISOR = 4;
 
 const SETTINGS: SceneSetting[] = [
@@ -153,7 +155,7 @@ const SETTINGS: SceneSetting[] = [
   {
     key: "newShape",
     label: "New shape",
-    description: "Resets to a small fresh silhouette every few grid ticks, peeling and spinning down over under a second — 0 turns resets off",
+    description: "Resets to a small fresh silhouette every few grid ticks, peeling and spinning down over under a second — right resets more often, 0 turns resets off",
     group: "Motion",
     min: 0,
     max: 1,
@@ -264,8 +266,7 @@ function createCoilScene(): Scene {
 
   function ensureTargets(gl: WebGL2RenderingContext, preset: QualityPreset): void {
     const scale = TARGET_SCALE[preset];
-    const w = Math.max(1, Math.min(MAX_TARGET_DIM, Math.round(gl.drawingBufferWidth * scale)));
-    const h = Math.max(1, Math.min(MAX_TARGET_DIM, Math.round(gl.drawingBufferHeight * scale)));
+    const { w, h } = coilTargetSize(gl.drawingBufferWidth, gl.drawingBufferHeight, scale, MAX_TARGET_DIM);
     if (w === targetW && h === targetH && targets[0] && targets[1]) return;
     freeTargets(gl);
     targetW = w;
@@ -324,13 +325,15 @@ function createCoilScene(): Scene {
 
       const breatheGridFired = drives.fired("breathe", anim.onset) && breatheAmount > 0.02;
 
-      // New shape's own reference cadence (~4x a two-bar grid tick — see
-      // this file's header) divides the grid pulse itself down in JS,
-      // since beatGrid.ts's own stops top out at two bars.
+      // New shape's own reference cadence (~4x a two-bar grid tick at its
+      // default amount — see this file's header) divides the grid pulse
+      // itself down in JS, since beatGrid.ts's own stops top out at two
+      // bars; a lower amount waits for more ticks, a higher one for fewer.
       let newShapeFired = false;
       if (newShapeAmount > 0.02 && drives.fired("newShape", anim.onset)) {
         newShapePulses++;
-        if (newShapePulses >= NEW_SHAPE_GRID_DIVISOR) {
+        const resetEvery = newShapeDivisor(newShapeAmount, settingFor("newShape").default, NEW_SHAPE_GRID_DIVISOR);
+        if (newShapePulses >= resetEvery) {
           newShapePulses = 0;
           newShapeFired = true;
         }

@@ -72,8 +72,10 @@ void main() {
   float h = hash21(id);
   if (h < uStars * 0.1) {
     vec2 sp = vec2(hash21(id + 7.1), hash21(id + 3.3));
-    // Distance in pixels: p is in half-height units of the viewport slice.
-    float pxPerUnit = uResolution.y * uViewport.w;
+    // Distance in pixels: p is in room-height units, and this device's
+    // uResolution.y pixels cover uViewport.w (the slice's height, GLSL's
+    // .w) of the room's height — so one room-height is that many times more.
+    float pxPerUnit = uResolution.y / max(uViewport.w, 1e-4);
     float dPx = length(f - sp) / CELLS * pxPerUnit;
     float b = 0.35 + 0.65 * hash21(id + 9.9);
     col += b * (1.0 - smoothstep(0.5, 1.4, dPx));
@@ -186,7 +188,13 @@ void main() {
   vKind = D.w;
 
   float zc = (view.z * (FAR + NEAR) - 2.0 * FAR * NEAR) / (FAR - NEAR);
-  gl_Position = vec4(view.x * FOCAL / uAspect, view.y * FOCAL, zc, view.z);
+  vec4 clip = vec4(view.x * FOCAL / uAspect, view.y * FOCAL, zc, view.z);
+  // uAspect is the whole room's, so this projects the room; crop it to this
+  // device's slice (meshGrid.ts's remap). The identity at the full viewport.
+  vec2 uv01 = (clip.xy / clip.w) * 0.5 + 0.5;
+  uv01 = (uv01 - uViewport.xy) / uViewport.zw;
+  clip.xy = (uv01 * 2.0 - 1.0) * clip.w;
+  gl_Position = clip;
 }
 `;
 }

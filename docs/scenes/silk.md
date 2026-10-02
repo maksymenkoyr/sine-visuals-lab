@@ -8,15 +8,14 @@ slow morph and zoom — never a hard cut. Draft scene, merged on main.
 ## Where the code is
 
 - `src/render/scenes/silk/index.ts` — the `Scene` (id `"silk"`, name
-  "Silk"), `SETTINGS`, the sharp/tail/blur/composite render targets, and
+  "Silk"), `SETTINGS`, the sharp/blur/composite render targets, and
   `render()`, which feeds `driver.ts`'s state into `glsl.ts`'s
-  `SHARP_BODY`/`TAIL_BODY`/`BLUR_FRAG`/`COMPOSITE_BODY`.
+  `SHARP_BODY`/`BLUR_FRAG`/`COMPOSITE_BODY`.
 - `src/render/scenes/silk/driver.ts` — pure sequencer: `createSilkState`/
   `advanceSilk`, `fillEchoFlows` (per-echo, per-octave flow offsets via
   `noiseHash.ts`'s `wrapFlow`), the regime travel/hold machinery
   (`REGIME_TRAVEL_SEC`, `MIN_BARS_BETWEEN`, `UNLOCKED_BAR_BEATS` bar-detect
-  idiom copied from `crystal/driver.ts`), and the tail's 8-bit decay-floor
-  math (`stepsToZero`/`tailDecayStep`).
+  idiom copied from `crystal/driver.ts`).
 - `src/render/scenes/silk/glsl.ts` — the K-echo strand field
   (`strandField`, `FIELD_OCTAVES` for the domain-warp octaves), the presence/
   sparsity gate and its wide-fold variant (`foldPointWide`), threads, the
@@ -89,8 +88,9 @@ bpm, 59 beats, 3539 probe samples / 185 reference onsets):
   rather than resampled out of a real feedback texture — repeated
   bilinear resampling would blur the reference's ~3px echo-line spacing
   into mush within roughly 20 steps (the same problem the Tessera scene
-  hit with its own feedback buffer). Only the diffuse haze beyond the
-  crisp echoes is a real one-frame-lagged feedback texture.
+  hit with its own feedback buffer). The haze is not a feedback texture
+  either: it is the sharp pass's own `fill` term (a feedback "tail" pass
+  was built at first and removed on 2026-10-02, below).
 - Two bugs fixed before the first screenshot round: the presence/sparsity
   gate sampled noise through the kaleidoscope fold, which confines every
   pixel to a narrow angular wedge and collapses the noise's realised range
@@ -122,6 +122,20 @@ bpm, 59 beats, 3539 probe samples / 185 reference onsets):
   accumulation (intensity still screen-blends toward 1; colour is a
   running weighted mean that can't exceed any single layer's own
   saturation), and raised the composite's saturation floor to match.
+
+- **2026-10-02, review fixes:** (1) deleted the tail (haze feedback)
+  pass — its texture was written every frame (one extra fullscreen draw,
+  two render targets) but the composite never sampled it, so the picture
+  is pixel-identical without it; Haze still works because `uHaze` scales
+  the sharp pass's `fill` term. Wiring the tail in would have changed the
+  tuned look, so it was removed instead, along with `tailDecayStep`/
+  `stepsToZero` and their tests. (2) `SHARP_BODY` folds the pixel and its
+  two epsilon neighbours once before the echo loop instead of once per
+  echo (the fold only touches angle, so it is echo-invariant); same
+  picture, fewer `foldPoint` calls per pixel. (3) The Fold pin now
+  glides the current regime onto the pinned fold within
+  `REGIME_TRAVEL_SEC` instead of waiting for the next regime change,
+  which in silence never came.
 
 ## Tuning notes
 
@@ -162,8 +176,8 @@ The reference media for these bundles (video, frames, audio, the images built fr
   since the reference is 9:16 portrait against the tool's landscape
   default) — use it to regenerate `compare.png` against the reference's
   own beats.
-- `tests/silk.test.ts` pins the decay-floor and no-cut-jump contracts —
-  check it before touching `driver.ts`'s regime-travel or tail math.
+- `tests/silk.test.ts` pins the no-cut-jump contracts and the Fold pin's
+  glide — check it before touching `driver.ts`'s regime-travel math.
 - Gotcha: backticks inside a GLSL comment inside a `glsl.ts` template
   literal break the TS parser — keep GLSL comments backtick-free.
 

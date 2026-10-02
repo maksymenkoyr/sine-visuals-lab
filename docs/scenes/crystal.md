@@ -27,7 +27,7 @@ Draft scene (in `DRAFT_SCENE_IDS`, `src/render/scenes/index.ts`), shipped on
   names which pieces are carried over from the pre-v4 2D build (`hexLocal`/
   `polar`) versus written fresh for this scene.
 - `src/render/scenes/crystal/driver.ts` — the pure sequencer
-  (`advanceCrystal`, `createCrystalState`, `layerEnvelope`, `hash01`,
+  (`advanceCrystal`, `createCrystalState`, `layerEnvelope`,
   `ZOOM_MID`/`ZOOM_AMP`): a wandering log-zoom/pan camera, a morph clock, a
   slow mood cycle, and four smooth light layers (`blobs`/`fan`/`red`/
   `edges`) that fade up on bar wraps, drops and beats and fade down on their
@@ -171,6 +171,11 @@ are one measurement run each, not standing specs):
 - 2026-09-26: slider-direction audit (AGENTS.md "Sliders: right = more").
   Fog renamed View depth (higher already meant less fog) and Tiling renamed
   Cell size (higher already meant fewer, bigger cells). Labels only.
+- 2026-10-02: review cleanup, no look change. Removed state that nothing
+  read: the `flowPos` accumulator and its `uFlowPos` uniform (Speed is
+  carried by `travel`, `roll`, the pan clock and the morph clock), the
+  `hash01` helper, and the `nearMiss`/`hitMat` locals in the march loop
+  that were written and never used.
 
 ## Tuning notes
 
@@ -218,7 +223,7 @@ are one measurement run each, not standing specs):
 - The reference's panels carry finer surface decoration than the scene's
   slabs, which are plain chamfered boxes.
 - No dedicated `noiseHash.ts`-lattice noise is used here (the corridor's
-  per-cell variation comes from `hash11`/`hash01`, not a hashed noise
+  per-cell variation comes from `hash11`, not a hashed noise
   lattice), so the mobile-seam concerns that header covers don't apply to
   this scene.
 

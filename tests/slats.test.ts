@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   advanceOnsetEnvelope,
+  advanceRollPhase,
+  bakeMorph,
   createOnsetEnvelope,
   createRng,
   buildWall,
@@ -178,5 +180,41 @@ describe("shouldReshuffle", () => {
     expect(shouldReshuffle(0.9, 0.05, 1, 0.3, () => 0.5)).toBe(false);
     expect(shouldReshuffle(0.9, 0.05, 1, 0.3, () => 0.1)).toBe(true);
     expect(shouldReshuffle(0.9, 0.05, 1, 0, always)).toBe(false);
+  });
+});
+
+describe("bakeMorph", () => {
+  const a = new Float32Array([0, 2, -4, 10]);
+  const b = new Float32Array([1, 4, 4, 0]);
+  it("is A at 0, B at 1 and the midpoint at 0.5, without touching its inputs", () => {
+    expect([...bakeMorph(a, b, 0)]).toEqual([...a]);
+    expect([...bakeMorph(a, b, 1)]).toEqual([...b]);
+    expect([...bakeMorph(a, b, 0.5)]).toEqual([0.5, 3, 0, 5]);
+    expect([...a]).toEqual([0, 2, -4, 10]);
+  });
+});
+
+describe("advanceRollPhase", () => {
+  it("accumulates speed over time, so changing the rate never jumps the angle", () => {
+    // 600 s at 5 deg/s, then one frame at 6 deg/s: the angle moves by one
+    // frame's worth, not by (6 - 5) x 600 degrees.
+    let phase = 0;
+    for (let i = 0; i < 600 * 60; i++) phase = advanceRollPhase(phase, 5, 1 / 60);
+    const before = phase;
+    const after = advanceRollPhase(phase, 6, 1 / 60);
+    const step = (((after - before) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    expect(step).toBeCloseTo((6 * Math.PI) / 180 / 60, 6);
+  });
+
+  it("stays put at zero and wraps into [0, 2pi) in both directions", () => {
+    expect(advanceRollPhase(1.25, 0, 1 / 60)).toBe(1.25);
+    for (const rate of [20, -20]) {
+      let phase = 0;
+      for (let i = 0; i < 5000; i++) {
+        phase = advanceRollPhase(phase, rate, 1 / 30);
+        expect(phase).toBeGreaterThanOrEqual(0);
+        expect(phase).toBeLessThan(Math.PI * 2);
+      }
+    }
   });
 });
