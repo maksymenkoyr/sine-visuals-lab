@@ -38,6 +38,7 @@ import {
   strikeEnvelope,
   type Lobe,
 } from "../src/render/scenes/storm.ts";
+import { buildBoltTree as sharedBuildBoltTree, createRng as sharedCreateRng, strikeEnvelope as sharedStrikeEnvelope } from "../src/render/bolt.ts";
 
 describe("storm strike envelope", () => {
   it("is exactly 1 at the instant of the strike", () => {
@@ -199,6 +200,11 @@ describe("storm strike pool", () => {
 });
 
 describe("storm bolt tree", () => {
+  it("shares bolt.ts's rng and strike envelope rather than keeping copies", () => {
+    expect(createRng).toBe(sharedCreateRng);
+    expect(strikeEnvelope).toBe(sharedStrikeEnvelope);
+  });
+
   const ends: [number[], number[]] = [[-0.4, 0.1, 0.2], [0.5, -0.2, -0.1]];
   const STRIDE = BOLT_RIBBON_VERTS * BOLT_VERT_FLOATS;
 
@@ -334,6 +340,28 @@ describe("storm bolt tree", () => {
     const c = Array.from(buildBoltTree(createRng(5), ends[0], ends[1]));
     expect(a).toEqual(b);
     expect(a).not.toEqual(c);
+  });
+
+  it("pins the clamped tree for a fixed seed, so sharing bolt.ts's generator cannot change Storm's bolts", () => {
+    // Long endpoints near the rim, so forks are clamped back into the cloud
+    // and the clamp path itself is what the checksum covers.
+    const a = [-1.3, 0.2, 0.1];
+    const b = [1.3, -0.3, 0.2];
+    const tree = buildBoltTree(createRng(11), a, b);
+    let sum = 0;
+    for (let i = 0; i < tree.length; i++) sum += tree[i] * (1 + (i % 7));
+    expect(sum).toBeCloseTo(1164.3699851385318, 3);
+    // The first branch's opening vertices (the main channel is path vertices
+    // 0..BOLT_SEGMENTS, each written twice).
+    const o = (BOLT_SEGMENTS + 1) * 2 * BOLT_VERT_FLOATS;
+    expect(Array.from(tree.subarray(o, o + 24))).toEqual([
+      -0.32719096541404724, 0.015622271224856377, 0.21007704734802246, 0.9327986240386963, 0.33810946345329285,
+      -0.12477482855319977, 0, 1, -0.32719096541404724, 0.015622271224856377, 0.21007704734802246, 0.9327986240386963,
+      0.33810946345329285, -0.12477482855319977, -0, 1, -0.09174876660108566, 0.10096248984336853, 0.17858336865901947,
+      0.8377426862716675, 0.5221088528633118, 0.15996721386909485, 0.47314751148223877, 1,
+    ]);
+    // ...and it is the clamp that makes this differ from bolt.ts's bare tree.
+    expect(Array.from(sharedBuildBoltTree(createRng(11), a, b))).not.toEqual(Array.from(tree));
   });
 
   it("writes into a shared buffer at the offset it is given, touching nothing else", () => {

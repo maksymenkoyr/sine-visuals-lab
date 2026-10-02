@@ -12,8 +12,8 @@ point cloud). Draft scene, on main.
 
 - `src/render/scenes/storm.ts` — the whole scene (~3800 lines). The file
   header is the primary source: cloud density model (baked lobe silhouettes
-  eroded by tileable perlin-worley 3D noise), the strike pool and bolt-tree
-  geometry, the per-mode geometry passes, `gasType` recipes (`GAS_RECIPES`),
+  eroded by tileable perlin-worley 3D noise), the strike pool and the
+  bolt-tree geometry (the shared generator is `src/render/bolt.ts`), the per-mode geometry passes, `gasType` recipes (`GAS_RECIPES`),
   the Voronoi "dark sections" system (`cellIndexAt`/`sectionGain`), and the
   morph-phase accumulator (`advanceMorphPhase`) that walks the cloud across
   its baked shape variants (`SHAPE_VARIANTS`).
@@ -142,6 +142,13 @@ Studied, not copied, across two look references:
   `dropOnset`-as-level machine-gun bug above is now unreachable from this
   scene. Stored values, auto flags and Look codes carrying the old key are
   ignored by every reader — they iterate live specs — so no migration.
+- 2026-10-02 — the bolt generator is shared instead of copied: `storm.ts`
+  now imports `createRng`, `strikeEnvelope` and the tree builder from
+  `src/render/bolt.ts` (which Fluid's lightning already used) and keeps only
+  its own `buildBoltTree` wrapper, which passes a `clampTip` hook so forks
+  are still pulled back inside the cloud ellipsoid. Bolt shapes are
+  unchanged: a test pins one seeded tree. A change to bolt shape, width or
+  envelope math now lands in `bolt.ts` and reaches both scenes.
 
 ## Tuning notes
 
