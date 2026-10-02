@@ -11,6 +11,8 @@ export interface SceneHost {
   mount(scene: Scene): void;
   unmount(scene: Scene): void;
   unmountAll(): void;
+  /** Whether `scene` is currently init()-ed on THIS host (not on another). */
+  isMounted(scene: Scene): boolean;
 }
 
 // Module-level so ownership is tracked across every SceneHost instance, not
@@ -37,6 +39,9 @@ export function createSceneHost(gl: WebGL2RenderingContext, quality: QualitySett
       scene.dispose(ctx);
       owners.delete(scene);
       mounted.delete(scene);
+    },
+    isMounted(scene: Scene): boolean {
+      return owners.get(scene) === host;
     },
     unmountAll(): void {
       for (const scene of [...mounted]) host.unmount(scene);

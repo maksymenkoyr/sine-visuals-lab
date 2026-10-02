@@ -580,6 +580,9 @@ export function createGallery(deps: GalleryDeps): Gallery {
   let tiles: Tile[] = [];
   let lastDrawMs = 0;
   let visible = false;
+  // True from show() until the next tick has run: that tick draws only scenes
+  // already mounted — see tick()'s lazy-mount comment.
+  let justShown = false;
   // The device preset last captured in show() — drives both the tick
   // interval (tickIntervalMs()) and the budget controller's ceiling
   // (BUDGET_CEILING_BY_PRESET). Not read from deps.quality() live inside
@@ -718,7 +721,11 @@ export function createGallery(deps: GalleryDeps): Gallery {
     });
     into.appendChild(btn);
     observer.observe(canvas);
-    preview?.host.mount(entry.scene);
+    // No mount here: init() compiles the scene's shaders and seeds its
+    // buffers synchronously, and doing every released scene in the task that
+    // builds the gallery blocked first paint. tick() mounts them lazily, one
+    // per tick, the first time each tile is due (drawTo mounts too, as a
+    // no-op once that has happened).
 
     const tile: Tile = {
       scene: entry.scene,
@@ -853,6 +860,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
       buildTiles();
       root.style.display = "block";
       visible = true;
+      justShown = true;
       lastDrawMs = 0;
     },
 
@@ -902,8 +910,28 @@ export function createGallery(deps: GalleryDeps): Gallery {
 
       const dueIndices = selectDueTiles(candidates, nowMs, budget, GATE_TOLERANCE_MS);
 
-      const drawStartMs = performance.now();
+      // At most one not-yet-mounted tile per tick (and none on the first tick
+      // after show(), so the gallery paints before any compile): a mount is
+      // a synchronous shader compile, and a skipped tile just stays overdue
+      // for the next tick. Done before the timed loop because a compile is
+      // not a draw cost — the budget controller would read it as an overload
+      // and step the budget down. A scene that migrated to the fullscreen
+      // viz's host while the gallery was hidden comes back the same way.
+      let mountedThisTick = justShown;
+      justShown = false;
+      const toDraw: number[] = [];
       for (const idx of dueIndices) {
+        const t = eligible[idx];
+        if (!preview.host.isMounted(t.scene)) {
+          if (mountedThisTick) continue;
+          mountedThisTick = true;
+          preview.host.mount(t.scene);
+        }
+        toDraw.push(idx);
+      }
+
+      const drawStartMs = performance.now();
+      for (const idx of toDraw) {
         const t = eligible[idx];
 
         // Each tile's own elapsed-time-since-last-draw, not the shared tick
@@ -916,7 +944,7 @@ export function createGallery(deps: GalleryDeps): Gallery {
         const anim = t.anim.advance(tileDt, frame);
         preview.drawTo(t.sink!, t.scene, frame, t.palette, anim);
       }
-      budgetController.recordTick(performance.now() - drawStartMs, dueIndices.length);
+      budgetController.recordTick(performance.now() - drawStartMs, toDraw.length);
     },
 
     setError(msg: string | null): void {
