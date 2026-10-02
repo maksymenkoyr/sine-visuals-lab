@@ -18,16 +18,59 @@ function buildHandle(
   context: AudioContext,
 ): CaptureHandle {
   const sourceNode = context.createMediaStreamSource(stream);
+  // The context is built after an await on getUserMedia/getDisplayMedia, so
+  // the click that started it may be spent, and an auto-started mic (granted
+  // permission, deep link) never had one: the browser can leave it
+  // "suspended". iOS Safari also sets "interrupted" on a call, Siri or lock
+  // and never resumes by itself. A context that isn't running reads as
+  // permanent silence — every analyser sits at the floor while the stream is
+  // live — so nudge it now, on every state change, and on the next gesture
+  // (a resume() outside one can be refused). Nothing in src/ suspends this
+  // context on purpose, so the statechange loop fights nothing. Compare the
+  // state as a string: the DOM typings' union lacks "interrupted".
+  const kick = (): void => {
+    const state: string = context.state;
+    if (state !== "running" && state !== "closed") void context.resume().catch(() => {});
+  };
+  kick();
+  context.addEventListener("statechange", kick);
+  document.addEventListener("pointerdown", kick, { passive: true });
+  document.addEventListener("keydown", kick, { passive: true });
+  document.addEventListener("visibilitychange", kick);
   return {
     kind,
     context,
     sourceNode,
     stream,
     stop: () => {
+      // Listeners first, so a closed context is never asked to resume.
+      context.removeEventListener("statechange", kick);
+      document.removeEventListener("pointerdown", kick);
+      document.removeEventListener("keydown", kick);
+      document.removeEventListener("visibilitychange", kick);
       for (const track of stream.getTracks()) track.stop();
       void context.close();
     },
   };
+}
+
+/** The AudioContext + source node for a stream that's already granted. If
+ *  either throws (the context limit, a track that ended in between), the
+ *  tracks are stopped here — the caller only sees the rejection and holds no
+ *  handle, so otherwise the OS mic indicator / "sharing" bar would stay on
+ *  with nothing in the UI to release it. */
+function openHandle(kind: CaptureSourceKind, stream: MediaStream): CaptureHandle {
+  let context: AudioContext | undefined;
+  try {
+    // Explicit even though it's the default — states the intent (lowest
+    // achievable input latency) and guards against a future default change.
+    context = new AudioContext({ latencyHint: "interactive" });
+    return buildHandle(kind, stream, context);
+  } catch (err) {
+    for (const track of stream.getTracks()) track.stop();
+    if (context) void context.close();
+    throw err;
+  }
 }
 
 /** Mic capture — the system default input, or exactly `deviceId` (a USB
@@ -42,10 +85,7 @@ export async function captureMic(deviceId?: string): Promise<CaptureHandle> {
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
     },
   });
-  // Explicit even though it's the default — states the intent (lowest
-  // achievable input latency) and guards against a future default change.
-  const context = new AudioContext({ latencyHint: "interactive" });
-  return buildHandle("mic", stream, context);
+  return openHandle("mic", stream);
 }
 
 /**
@@ -72,10 +112,7 @@ export async function captureDisplayAudio(): Promise<CaptureHandle> {
   }
   // We only need the audio; drop the video track immediately.
   for (const track of stream.getVideoTracks()) track.stop();
-  // Explicit even though it's the default — states the intent (lowest
-  // achievable input latency) and guards against a future default change.
-  const context = new AudioContext({ latencyHint: "interactive" });
-  return buildHandle("display", stream, context);
+  return openHandle("display", stream);
 }
 
 /** List available audio input devices (labels only populate after a permission
