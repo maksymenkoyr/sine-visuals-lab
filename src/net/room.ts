@@ -9,7 +9,7 @@ import { reconnectDelayMs, isTerminalClose, isSilent, PROBE_TIMEOUT_MS } from ".
 import { parseControlMessage, type DeviceCommand, type RosterEntry } from "./roomMessages.ts";
 import type { Viewport } from "../render/scene.ts";
 import type { LookClientMsg, LookServerMsg } from "../../server/lookDoc.ts";
-import type { RoomRole } from "../../server/roomRules.ts";
+import { ROOM_CLOSE_DENIED, type RoomRole } from "../../server/roomRules.ts";
 
 // The roster and command shapes live with the rest of the JSON vocabulary
 // (roomMessages.ts); callers that only want the types keep importing them here.
@@ -337,6 +337,8 @@ abstract class RoomConnectionBase {
       for (const cb of this.rosterListeners) cb(this.roster);
     } else if (msg.type === "command") {
       for (const cb of this.commandListeners) cb({ scene: msg.scene, palette: msg.palette, viewport: msg.viewport });
+    } else if (msg.type === "ended") {
+      this.roomEnded();
     } else {
       for (const cb of this.lookListeners) cb(msg);
     }
@@ -427,6 +429,21 @@ abstract class RoomConnectionBase {
     }
     this.setState("closed");
     this.scheduleRetry();
+  }
+
+  /** The room has ended (roomMessages.ts `ended`): a denial, taken now rather
+   *  than from the close that follows, which may never finish arriving. The
+   *  socket is let go of first, like a recycled one, so its late close is
+   *  ignored. */
+  private roomEnded(): void {
+    const ws = this.ws;
+    this.ws = null;
+    try {
+      ws?.close();
+    } catch {
+      // Already going down.
+    }
+    this.socketGone(ROOM_CLOSE_DENIED);
   }
 
   /** Gives up on an open socket that has stopped answering. A socket whose path
@@ -542,6 +559,13 @@ export class HostConnection extends RoomConnectionBase {
     // The latches are cleared even if the socket isn't open, so a stale hit
     // isn't replayed on reconnect.
     this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
+  }
+
+  /** Ends a claimed room for everyone (roomMessages.ts `endRoom`); the room
+   *  closes this socket as denied too. False when the socket isn't open, so
+   *  nothing was sent. */
+  endRoom(): boolean {
+    return this.sendRaw(JSON.stringify({ type: "endRoom" }));
   }
 }
 

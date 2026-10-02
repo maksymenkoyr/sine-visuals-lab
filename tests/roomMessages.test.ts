@@ -34,6 +34,11 @@ describe("parseControlMessage: transport", () => {
 });
 
 describe("parseControlMessage: clock, roster, command", () => {
+  it("accepts the room's `ended`, keeping nothing else from it", () => {
+    expect(parse({ type: "ended" })).toEqual({ type: "ended" });
+    expect(parse({ type: "ended", room: "ABCD" })).toEqual({ type: "ended" });
+  });
+
   it("accepts a pong with numeric times only", () => {
     expect(parse({ type: "pong", t0: 1, tServer: 2 })).toEqual({ type: "pong", t0: 1, tServer: 2 });
     expect(parse({ type: "pong", t0: "1", tServer: 2 })).toBeNull();

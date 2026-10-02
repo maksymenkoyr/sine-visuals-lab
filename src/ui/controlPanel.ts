@@ -1,6 +1,5 @@
 import type { RosterEntry, DeviceCommand } from "../net/room.ts";
-import { createRoomCodeEntry } from "./joinScreen.ts";
-import type { AdoptOutcome } from "../net/adopt.ts";
+import { createRoomCodeEntry, type AddScreenOutcome } from "./joinScreen.ts";
 
 export interface MenuItem {
   id: string;
@@ -19,7 +18,7 @@ export interface ControlPanelDeps {
    *  this "Sync all to me" would have no "me" to copy. */
   getSelfLook?: () => SyncLook | null;
   /** The typed-code field's way to hand a waiting TV to this room. */
-  adoptTv?: (slot: string) => Promise<AdoptOutcome>;
+  adoptTv?: (slot: string) => Promise<AddScreenOutcome>;
 }
 
 /** The scene and palette "Sync all to me" copies to the other devices. */

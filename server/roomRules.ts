@@ -34,7 +34,9 @@
  * also lets nobody probe which rooms exist. Any other close is transient.
  *
  * A claimed room that has been empty for ROOM_IDLE_TTL_MS is wiped and is
- * unclaimed again.
+ * unclaimed again. The host can also end it at once (`endRoom`, the laptop's
+ * Reset): the same wipe, and every socket is closed with ROOM_CLOSE_DENIED, so
+ * each device forgets the room's keys as it would for any dead room.
  *
  * Pairing slot. A TV that has no room yet waits in a throwaway unclaimed room,
  * and the phone's adopt request is delivered there. The slot's code is printed
@@ -183,7 +185,7 @@ export function decideJoin(meta: RoomMeta | null, req: JoinRequest): JoinDecisio
   return DENY;
 }
 
-export type SendKind = "binary" | "ping" | "hello" | "setDevice" | "lookGet" | "lookPatch";
+export type SendKind = "binary" | "ping" | "hello" | "setDevice" | "lookGet" | "lookPatch" | "endRoom";
 
 /** Whether a socket of `role` may send a message of this kind (the messages
  *  are described in src/net/roomMessages.ts). `keyed` only matters for
@@ -205,5 +207,9 @@ export function canSend(keyed: boolean, role: RoomRole, kind: SendKind): boolean
       return role !== "host";
     case "lookPatch":
       return role === "controller";
+    case "endRoom":
+      // Only a claimed room's host: in a legacy room anyone may sit in the
+      // host seat, so nobody there can end it for the others.
+      return keyed && role === "host";
   }
 }

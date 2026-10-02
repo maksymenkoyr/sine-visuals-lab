@@ -197,6 +197,7 @@ import {
   createRoomCode,
   HostConnection,
   RendererConnection,
+  type RosterEntry,
   type VisualSample,
 } from "./net/room.ts";
 import { WORKER_ORIGIN } from "./net/config.ts";
@@ -207,12 +208,12 @@ import { planBoot } from "./net/bootPlan.ts";
 import { tvRedirectTarget } from "./net/tvRedirect.ts";
 import { clearSession, readSession, writeSession, type HostRoomSession } from "./net/sessions.ts";
 import { planHostRoom } from "./net/hostRoom.ts";
-import { postAdopt, type AdoptOutcome } from "./net/adopt.ts";
+import { postAdopt } from "./net/adopt.ts";
 import { createControllerLook, type ControllerLook } from "./net/controllerLook.ts";
 import { controllerBadgeText, controllerPreview } from "./net/controllerPreview.ts";
 import { ROSTER_WAIT_MS, hasNewRenderer, rendererIds, waitForRoster } from "./net/screenJoin.ts";
 import { newKey } from "./net/pairing.ts";
-import { createJoinScreen } from "./ui/joinScreen.ts";
+import { createJoinScreen, type AddScreenOutcome } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
 import { createControlPanel } from "./ui/controlPanel.ts";
@@ -1178,6 +1179,7 @@ function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
     updateMicPrompt(); // nothing started — the prompt is the way in
     return Promise.resolve();
   }
+  stoppedByUser = false;
   const attempt = (async () => {
     attachCapture(await startCapture(choice));
     captureFailed = false;
@@ -1190,6 +1192,24 @@ function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
   });
   audioPromise.then(updateMicPrompt);
   return audioPromise;
+}
+
+/** True from the Stop button until something starts listening again, so a
+ *  screen joining (`feedScreens`) never reopens a mic that was just closed. */
+let stoppedByUser = false;
+/** Boot has read the mic permission and routed the page (`feedScreens`). */
+let screensReady = false;
+
+/** The host's roster changed. A screen in the room shows only what this
+ *  laptop hears, so with a screen there and nothing listening, start the
+ *  source that needs no prompt (the mic, already allowed: autoStartSource),
+ *  on the gallery too: a laptop that reloaded there would otherwise leave its
+ *  TV waiting until somebody opened a scene. Any other source needs a tap,
+ *  which the gallery's source picker and a scene's start prompt already ask
+ *  for (and the TV says so too, net/tvPhase.ts `waitingLine`). */
+function feedScreens(roster: RosterEntry[]): void {
+  if (!screensReady || mode !== "host" || capture || audioPromise || captureFailed || stoppedByUser || syntheticFeed) return;
+  if (roster.some((d) => d.role === "renderer") && autoStartSource() !== null) void ensureAudio();
 }
 
 /** Hot-swaps the live capture to a different source — the panel's Source
@@ -1629,7 +1649,7 @@ function wireRoomControls(conn: AnyConn): void {
     // A phone controller is not in the roster it reads, so "Sync all to me"
     // copies the look it is showing instead.
     getSelfLook: () => (isController ? { scene: scene.id, palette: palette.id } : null),
-    adoptTv: adoptTvByCode,
+    adoptTv: ownRoomKey ? adoptTvByCode : undefined,
   });
   panelBtn.style.display = "block";
   panelBtn.addEventListener("click", () => panel.toggle());
@@ -1768,10 +1788,40 @@ function showScanLaptopNotice(): void {
 let ownRoomKey: string | null = null;
 
 /** A code typed into a Room field, tried as a waiting TV's: the same adopt a
- *  phone sends after scanning, minus the nonce a typed code can't carry. */
-function adoptTvByCode(slot: string): Promise<AdoptOutcome> {
+ *  phone sends after scanning, minus the nonce a typed code can't carry. This
+ *  room's own code (what a TV already in it shows in its corner) never is. */
+function adoptTvByCode(slot: string): Promise<AddScreenOutcome> {
   if (!roomCode || !ownRoomKey) return Promise.resolve("no-screen");
+  if (slot === roomCode) return Promise.resolve("own-room");
   return postAdopt(WORKER_ORIGIN, slot, { room: roomCode, k: ownRoomKey });
+}
+
+/** Set while the laptop's Reset is ending its room, so the room's denial of
+ *  this socket (the end of every room) isn't reported as a refusal. */
+let resettingRoom = false;
+
+/** The room view's Reset room: ends this laptop's room for everyone and starts
+ *  a new one. The room closes every socket as denied (server/roomCore.ts
+ *  `end`), so a paired TV goes back to its pairing QR, ready for this laptop
+ *  to type its code, and a phone says the room is closed. The page reloads
+ *  into the new room (the saved one is forgotten first, so hostRoom.ts
+ *  creates); the route stays, so a scene that was showing comes back. */
+function resetRoom(): void {
+  if (resettingRoom) return;
+  resettingRoom = true;
+  clearSession("host", realStorage);
+  const reload = (): void => location.reload();
+  const conn = hostConn;
+  if (!conn || !conn.endRoom()) {
+    reload();
+    return;
+  }
+  showHud("Resetting the room…");
+  conn.onState((s) => {
+    if (s === "denied" || s === "closed") reload();
+  });
+  // The room's close normally lands at once; a lost one must not strand the page.
+  window.setTimeout(reload, 2000);
 }
 
 /** Hands the TV waiting in `slot` to this phone's room (net/adopt.ts), then
@@ -1905,6 +1955,7 @@ function setLaptopWaiting(waiting: boolean): void {
 
 async function enterViz(next: Scene): Promise<void> {
   gallery?.hide();
+  document.body.classList.remove("in-gallery");
   inViz = true;
   canvas.style.display = "block";
   // The resize observer's cache still says 0x0 from while the canvas was
@@ -1962,6 +2013,7 @@ function applyRoute(route: Route): void {
     // return trip from a viz — exitToGallery() calls gallery.show() itself.
     if (inViz) exitToGallery();
     else gallery?.show();
+    document.body.classList.add("in-gallery"); // index.html: the room badge moves out of the gallery's header
     return;
   }
   if (inViz && route.sceneId === scene.id) return; // our own applyScene() echo
@@ -2154,6 +2206,10 @@ async function boot(): Promise<void> {
       if (plan.kind === "host-join") {
         roomCode = plan.room;
         hostConn = new HostConnection(roomCode);
+        // A code alone opens only an old unclaimed room; a laptop's is keyed.
+        hostConn.onState((s) => {
+          if (s === "denied") showHud(`Room ${plan.room} needs its QR, a code alone can't join it.\nClick the room code to leave it.`, true);
+        });
       } else {
         // The classic flow's room is claimed by this laptop and keyed (openHostRoom).
         const hostRoom = await hostRoomPromise!;
@@ -2165,12 +2221,13 @@ async function boot(): Promise<void> {
           reconnect: true,
         });
         hostConn.onState((s) => {
-          if (s !== "denied") return;
+          if (s !== "denied" || resettingRoom) return;
           clearSession("host", realStorage);
           showHud("The room refused this laptop — reload to start a new one", true);
         });
       }
       mode = "host";
+      hostConn.onRosterChange(feedScreens);
     } catch (err) {
       console.warn("Room server unreachable, running solo:", err);
       mode = "solo";
@@ -2185,15 +2242,21 @@ async function boot(): Promise<void> {
   if ((mode === "host" || mode === "renderer") && roomCode && !isController) {
     roomCodeEl.textContent = `room: ${roomCode}`;
     roomCodeEl.style.display = "block";
-    // The room view: this room's QR + code, and the field to type another
-    // room's code. Stays open until dismissed — it holds a text field now.
+    // The room view: this room's QR + code, and the field to type a code —
+    // a waiting TV's, on a keyed host (joinScreen.ts `createRoomCodeEntry`),
+    // else another room's. Stays open until dismissed — it holds a text field.
     // A keyed host's overlay carries the controller link (and a watch-only
     // toggle); a keyed spectator can pass on the key it was invited with; the
-    // old room a phone hosts for a TV has no key to put in a link.
+    // old room a phone hosts for a TV has no key to put in a link. Its last
+    // button starts over: a keyed host ends its room for everyone and opens a
+    // new one (`resetRoom`); anyone else just leaves for a room of their own.
     const roomKey = hostRoomKey ?? (plan.kind === "renderer" ? plan.key : undefined);
     const invite = createJoinScreen(hostRoomKey ? "controller" : "renderer", document.body, {
       dismissible: true,
-      adoptTv: adoptTvByCode,
+      adoptTv: ownRoomKey ? adoptTvByCode : undefined,
+      reset: hostRoomKey
+        ? { label: "Reset room", confirm: "Click again: every phone and TV pairs again", run: resetRoom }
+        : { label: "Leave this room", run: () => location.assign("/") },
     });
     invite.setCode(roomCode, roomKey ? { key: roomKey } : undefined);
     roomCodeEl.addEventListener("click", () => invite.show());
@@ -2316,7 +2379,9 @@ async function boot(): Promise<void> {
   // start prompt back so listening resumes only on a tap. The room
   // connection is untouched, same as there.
   stopBtn.addEventListener("click", () => {
-    if (capture) onCaptureEnded(capture, false);
+    if (!capture) return;
+    stoppedByUser = true;
+    onCaptureEnded(capture, false);
   });
   refreshAudioPromptButtons(); // support never changes mid-session, so this runs once
   audioPromptMicBtn.addEventListener("click", () => void ensureAudio("mic"));
@@ -2394,6 +2459,10 @@ async function boot(): Promise<void> {
     onRouteChange(applyRoute);
     applyRoute(currentRoute());
   }
+  // The mic permission is known and the page routed: a screen already in the
+  // room (a laptop that reloaded with its TV paired) can be fed now.
+  screensReady = true;
+  if (hostConn) feedScreens(hostConn.currentRoster);
 
   // Dynamic import behind a literal DEV check: Vite replaces
   // import.meta.env.DEV with `false` in a production build, so this branch

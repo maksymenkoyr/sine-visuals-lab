@@ -110,13 +110,17 @@ look and has no panel or audio of its own.
   when packets don't arrive smoothly. `src/net/clock.ts` (`ClockSync`) is what
   lets a renderer interpret a host's `roomTimeMs` as its own local time.
 
-Pairing is done by scanning QR codes, never by typing. The laptop shows one that
-makes a phone its controller (`src/net/hostRoom.ts` keeps the laptop's room across
-reloads); the TV shows its own, and the phone that scans it tells the TV which room
-to join (`src/net/adopt.ts`, `src/net/pendingSlot.ts`, `src/net/tvPhase.ts`) — the
-request is delivered only to the waiting screen that holds the QR's nonce.
-`src/net/bootPlan.ts` decides what a page's URL means, `src/net/sessions.ts` keeps
-the secrets a rejoin needs, and `src/ui/joinScreen.ts` draws the QR.
+Pairing is done by scanning QR codes, or by typing the code a waiting TV shows
+into the laptop's room view. The laptop shows a QR that makes a phone its
+controller (`src/net/hostRoom.ts` keeps the laptop's room across reloads); the TV
+shows its own, and the phone that scans it tells the TV which room to join
+(`src/net/adopt.ts`, `src/net/pendingSlot.ts`, `src/net/tvPhase.ts`) — the request
+is delivered only to the waiting screen that holds the QR's nonce. Either side can
+start over: the TV's Reset forgets its room, and the laptop's Reset room ends the
+room for every device (`endRoom` in `src/net/roomMessages.ts`) before opening a new
+one. `src/net/bootPlan.ts` decides what a page's URL means, `src/net/sessions.ts`
+keeps the secrets a rejoin needs, and `src/ui/joinScreen.ts` draws the QR and the
+code field.
 
 Not everything travels. What stays on the laptop — its audio input and its own
 auto-tracked analysis marks — is named by `PRIVATE_KEYS` and `VOLATILE_PREFIXES`
