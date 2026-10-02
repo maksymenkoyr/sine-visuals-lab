@@ -396,6 +396,27 @@ describe("ambience choreographer", () => {
     expect(c.anim[ANIM.PROGRESS]).toBe(0);
   });
 
+  it("restarts Progress at 0 on the frame a journey moves on to its next leg", () => {
+    // The forms swap inside advance(); a Progress still at 1 would draw the
+    // new leg's finished picture for that one frame (a flash of the dot or
+    // the sheet), and the streak would see the same jump.
+    for (const name of ["unfold", "roll", "stack", "tesseract"]) {
+      const c = settled(6);
+      expect(c.start(name)).toBe(true);
+      let swaps = 0;
+      let guard = 0;
+      while (c.journey() !== null && guard++ < 200_000) {
+        const pair = [c.formA(), c.formB()];
+        c.advance(DT, 0.5, 1, OPTS);
+        if (c.journey() !== null && (c.formA() !== pair[0] || c.formB() !== pair[1])) {
+          swaps++;
+          expect(c.anim[ANIM.PROGRESS]).toBe(0);
+        }
+      }
+      expect(swaps).toBeGreaterThan(0);
+    }
+  });
+
   it("a 4D turn leaves the sheet's plane angle exactly a half-turn on", () => {
     const c = settled(7);
     const before = c.anim[ANIM.ROT_XW];
