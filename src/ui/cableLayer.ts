@@ -32,7 +32,8 @@
  * the source line's own × button takes, so pressing a cable unplugs it.
  * The group also carries the hover lift (controlsTheme.ts's
  * .vc-cable-g:hover rules — a neon-ish bloom in the cable's own colour,
- * a thicker core, a brighter glow) and holds that colour as its CSS
+ * a thicker core, a brighter glow, and the flow beads lightened so the
+ * signal still visibly runs inside it) and holds that colour as its CSS
  * `color` so the bloom's currentColor resolves per cable.
  * deviceMenu.ts only ever sets onPress on the pinned group's real patch
  * sources: a preview cable and a display-only scene mix are decoration,
