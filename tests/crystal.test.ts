@@ -3,7 +3,6 @@ import {
   advanceCrystal,
   createCrystalState,
   layerEnvelope,
-  hash01,
   ZOOM_MID,
   ZOOM_AMP,
   type CrystalInputs,
@@ -15,17 +14,6 @@ import {
 // down — nothing discrete anywhere except the beat/bar/drop triggers of
 // those smooth envelopes. These tests pin the envelope's shape and, above
 // all, that nothing the driver outputs ever jumps like a cut.
-describe("hash01", () => {
-  it("is deterministic and stays in [0, 1)", () => {
-    for (let k = 0; k < 20; k++) {
-      const v = hash01(3, k);
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThan(1);
-      expect(hash01(3, k)).toBe(v);
-    }
-  });
-});
-
 describe("layerEnvelope", () => {
   it("ramps to 1 by the end of the attack, holds, then releases", () => {
     expect(layerEnvelope(0, 0.12, 0.5, 0.3)).toBe(0);
