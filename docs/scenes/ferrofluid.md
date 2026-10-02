@@ -42,6 +42,12 @@ None — original design.
   `modeDir` divided by, a literal band count; both now use `NUM_BANDS` (the
   uniform array was already sized from it), and the header no longer counts
   bands or scenes.
+- 2026-10-02 — review fix, no visual change: `sdBlob` skips a lobe whose
+  direction faces away from the sample (`dot(n, dir) <= 0` adds exactly 0
+  through the old `max(0.0, …)`), so about half the `pow` calls per march
+  step are gone. `pow` itself is kept, so the picture is bit-identical.
+  A tetrahedral `calcNormal` would be cheaper still but changes the shading,
+  so it was left alone.
 
 ## Tuning notes
 

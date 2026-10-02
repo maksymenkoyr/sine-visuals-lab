@@ -26,9 +26,10 @@ float sdBlob(vec3 p) {
   for (int i = 0; i < ${NUM_BANDS}; i++) {
     float band = uBands[i];
     if (band < 0.02) continue;
-    vec3 dir = modeDir(i);
-    float lobe = pow(max(0.0, dot(n, dir)), 3.5);
-    bump += band * lobe * 0.85;
+    float c = dot(n, modeDir(i));
+    // A lobe facing away adds exactly 0, and about half of them do: skip the pow.
+    if (c <= 0.0) continue;
+    bump += band * pow(c, 3.5) * 0.85;
   }
   return d - bump - uBeatPulse * 0.05;
 }
