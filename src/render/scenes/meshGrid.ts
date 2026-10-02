@@ -1519,7 +1519,16 @@ export const meshGridScene: Scene = (() => {
       // so the waterfall doesn't stair-step), and a frame that covers none
       // leaves the history alone. Waterfall depth and the noise scroll below
       // therefore span the same seconds whatever the render rate.
-      const rows = rowsToPush(rowAcc, dt, ROWS_PER_SECOND, HISTORY_FRAMES);
+      //
+      // The row count comes from anim.dtSec (wall seconds since the last
+      // rendered frame, renderLatch.ts), not the frame.time delta above:
+      // frame.time is the audio clock on the controller and the last
+      // arrival's timestamp on the pop-out/TV, and either advances in
+      // buffer-sized steps, so on a 1024-sample buffer a steady 60 fps render
+      // would push 0 or 2 rows on nearly half its frames and the scroll would
+      // stutter. dt keeps driving the envelopes, where that granularity is
+      // harmless.
+      const rows = rowsToPush(rowAcc, Math.min(0.25, Math.max(0, anim.dtSec)), ROWS_PER_SECOND, HISTORY_FRAMES);
       rowAcc = rows.acc;
       if (rows.n > 0) gl.bindTexture(gl.TEXTURE_2D, historyTex);
       for (let k = 1; k <= rows.n; k++) {

@@ -171,6 +171,24 @@ describe("meshGrid history rows per second", () => {
     expect(gated.total).toBeLessThanOrEqual(120);
   });
 
+  it("needs a wall-clock dt: an audio-buffer clock stutters, the render interval does not", () => {
+    // 60 fps renders timed against an AudioContext clock that only moves in
+    // 1024-sample (21.3 ms) steps at 48 kHz, as on many phones and Bluetooth
+    // outputs: the deltas are 0 or two buffers' worth, so rows push unevenly.
+    const buf = 1024 / 48000;
+    const audioDts: number[] = [];
+    let prev = 0;
+    for (let i = 1; i <= 120; i++) {
+      const t = Math.floor((i / 60) / buf) * buf;
+      audioDts.push(t - prev);
+      prev = t;
+    }
+    expect(run(audioDts).per.some((n) => n !== 1)).toBe(true);
+    // The render's own interval (anim.dtSec) is what the scene feeds in.
+    const wall = run(Array(120).fill(1 / 60));
+    expect(wall.per.every((n) => n === 1)).toBe(true);
+  });
+
   it("caps a stall at the ring size, pushes nothing for no time, and keeps the carry", () => {
     expect(rowsToPush(0.5, 0.25, 60, 10).n).toBe(10);
     expect(rowsToPush(0.5, 0.25, 60, 200).n).toBe(15);
