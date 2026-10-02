@@ -55,7 +55,7 @@ import {
 import { RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type Viewport } from "./render/scene.ts";
 import { createSceneHost, type SceneHost } from "./render/sceneHost.ts";
-import { getPalette, PALETTES, type Palette } from "./render/palette.ts";
+import { getPalette, paletteRampHex, PALETTES, type Palette } from "./render/palette.ts";
 import {
   applySensitivity,
   getExpansion,
@@ -1359,7 +1359,7 @@ const micAutoMembers = {
 
 function wireDeviceMenu(): void {
   deviceMenu = createDeviceMenu({
-    getPalettes: () => menuItems(PALETTES),
+    getPalettes: () => PALETTES.map((p) => ({ id: p.id, name: p.name, group: p.group, swatch: paletteRampHex(p, 6) })),
     currentSceneId: () => scene.id,
     currentPaletteId: () => palette.id,
     // What the column head's status line (above the Bands card) reports as

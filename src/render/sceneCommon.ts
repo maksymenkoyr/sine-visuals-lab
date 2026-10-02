@@ -1,6 +1,6 @@
 import { NUM_BANDS, type FeatureFrame } from "../audio/types.ts";
 import type { GLProgram } from "./gl.ts";
-import { paletteVecs, type Palette } from "./palette.ts";
+import { PALETTE_ROLES_GLSL, paletteVecs, type Palette } from "./palette.ts";
 import type { SceneSetting } from "./sceneSettings.ts";
 import { resolveSceneSetting } from "./autoTune.ts";
 import type { SceneContext, Viewport } from "./scene.ts";
@@ -36,6 +36,7 @@ uniform vec3 uPalA;
 uniform vec3 uPalB;
 uniform vec3 uPalC;
 uniform vec3 uPalD;
+${PALETTE_ROLES_GLSL}
 `;
 
 export function settingUniformName(key: string): string {
@@ -139,4 +140,8 @@ export function uploadCommonUniforms(
   prog.setV3v("uPalB", pv.b);
   prog.setV3v("uPalC", pv.c);
   prog.setV3v("uPalD", pv.d);
+  prog.setV3v("uPalGround", pv.ground);
+  prog.setV3v("uPalAccent", pv.accent);
+  prog.setV3v("uPalInk", pv.inks);
+  prog.setV3v("uPalRamp", pv.ramp);
 }

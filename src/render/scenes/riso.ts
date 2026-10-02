@@ -56,8 +56,10 @@ void main() {
   float inkB = halftone(screenUv, vB * 0.75 + 0.12, 75.0, 1.0);
 
   vec3 paper = vec3(0.93, 0.91, 0.85) - grain;
-  vec3 colA = palette(0.15, uPalA, uPalB, uPalC, uPalD);
-  vec3 colB = palette(0.65, uPalA, uPalB, uPalC, uPalD);
+  // The room palette's first two inks: every palette keeps its inks
+  // readable and apart (see palette.ts), so the overprint doesn't turn to mud.
+  vec3 colA = uPalInk[0];
+  vec3 colB = uPalInk[1];
 
   vec3 col = paper;
   col = mix(col, col * colB * 1.4, inkB);

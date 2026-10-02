@@ -5,8 +5,7 @@ laid down as two halftone ink screens (different angles) over paper grain,
 with `uBeatPulse` briefly jolting the two screens out of registration the
 way a poorly-aligned riso print shifts on press. The header comment is
 explicit about the intent: "a printed poster, not a demo." Small, original
-scene; a draft (in `DRAFT_SCENE_IDS`), on `main` since the initial commit
-and unchanged since.
+scene; a draft (in `DRAFT_SCENE_IDS`), on `main` since the initial commit.
 
 ## Where the code is
 
@@ -23,8 +22,9 @@ and unchanged since.
   ink stays physically fixed to the display while the artwork (built from
   `roomUv()`-based `p`) spans the shared room-space canvas. Any edit that
   moves ink registration needs to respect that split.
-- Uses `sampleBands()` for the blobs' sizes and `palette()`
-  (`src/render/palette.ts`) for the two ink colors.
+- Uses `sampleBands()` for the blobs' sizes and the room palette's first
+  two inks (`uPalInk[0]`, `uPalInk[1]` — `src/render/palette.ts`) for the
+  two ink colours.
 - No dedicated test file.
 
 ## References
@@ -45,6 +45,14 @@ None — original design (a simulated print process, not a studied video).
   short side, which is the 0.006-of-the-short-side the old constant was
   aiming at, with the dot grids still fixed to the display. Off the beat
   (`uBeatPulse` = 0) the picture is identical to before.
+- 2026-10-02 — the inks come from the room palette's `inks` role instead of
+  `palette(0.15)` and `palette(0.65)`. Those two points on the cosine curve
+  landed on a dark colour in most palettes (Sunset's 0.65 is a near-black
+  maroon), and the scene multiplies each ink over the paper, so the print
+  went to rust or mud. Every palette now promises inks that are readable and
+  distinct (`tests/palette.test.ts`), so the overprint stays bright. Under
+  Neon the picture changes from a magenta-over-green overprint to pink over
+  blue.
 
 ## Tuning notes
 
