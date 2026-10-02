@@ -95,6 +95,13 @@ original work built around that data.
 - 2026-10-02: review cleanup. `moves.ts` lost the helpers nothing called
   (`wristBend`, `lift`, `newPose`, the `lerpPose` re-export), and `rig.ts`
   now points at `clipFormat.ts` instead of a `clips.ts` that never existed.
+- 2026-10-02: the Skeleton skin's lateral details are reflected per side.
+  `rig.ts`'s `mirror()` keeps the rest rotation, so local +X is world -X on
+  both arms and both legs, and the thumb and the forearm/shin twin bone
+  landed on the same world side of each pair. `skel_map` now reflects `q`
+  for the right hand and forearm and the left shin (thumbs and radius medial
+  on both arms, fibula lateral on both legs). The Stick skin and the Capsules
+  and Flat renderers are unaffected.
 
 ## Tuning notes
 
