@@ -14,7 +14,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b && tsc -b server",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy": "node -e \"console.error('Stable ships only via npm run release (merge main into production; .github/workflows/release.yml). A local build would carry the dev channel and any src/render/scenes/private checkout.'); process.exit(1)\"",
     "release": "gh pr create --base production --head main --title \"Release to Stable\" --body \"Merging this deploys Stable (.github/workflows/release.yml). Merge with **Create a merge commit**, not squash.\"",
     "test": "vitest run",
     "test:watch": "vitest",

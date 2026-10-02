@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { RENDER_FPS_CAP, RENDER_FPS_CAP_FLOOR, shouldRenderFrame, targetFrameIntervalMs } from "../src/render/framePace.ts";
+import { RENDER_FPS_CAP, RENDER_FPS_CAP_FLOOR, nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "../src/render/framePace.ts";
 
 describe("targetFrameIntervalMs", () => {
   it("is 1000/30 on the floor preset", () => {
@@ -76,5 +76,67 @@ describe("shouldRenderFrame", () => {
       const fps = rendered / (totalMs / 1000);
       expect(fps).toBeLessThan(69);
     }
+  });
+});
+
+describe("nextRenderAnchor", () => {
+  const interval = targetFrameIntervalMs("high");
+
+  /** Counts renders over `seconds` of rAF ticks at `hz` with small timing jitter, gating like loop() does. */
+  function renderCount(hz: number, intervalMs: number, seconds: number): number {
+    const vsync = 1000 / hz;
+    let last = 0;
+    let renders = 0;
+    let seed = 12345;
+    const jitter = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return (seed / 0xffffffff - 0.5) * 0.6; // +-0.3 ms
+    };
+    for (let t = vsync; t < seconds * 1000; t += vsync) {
+      const now = t + jitter();
+      if (!shouldRenderFrame(now, last, intervalMs)) continue;
+      last = nextRenderAnchor(now, last, intervalMs);
+      renders++;
+    }
+    return renders;
+  }
+
+  it("renders ~60 fps on every display refresh at or above 60 Hz, not refresh/2 or /3", () => {
+    for (const hz of [60, 75, 90, 120, 144, 165]) {
+      const n = renderCount(hz, interval, 10);
+      expect(n, `${hz} Hz`).toBeGreaterThan(588);
+      // 144 and 165 Hz land ~61.7: the gate admits a tick up to the tolerance early.
+      expect(n, `${hz} Hz`).toBeLessThan(hz === 144 || hz === 165 ? 625 : 612);
+    }
+  });
+
+  it("doesn't drop frames on a panel a hair faster than 60 Hz", () => {
+    for (const hz of [60.02, 60.06, 60.5, 61]) {
+      const n = renderCount(hz, interval, 60);
+      // One render per vsync: no skipped ticks (a skip is a 33 ms hitch).
+      expect(n, `${hz} Hz`).toBeGreaterThanOrEqual(Math.floor(hz * 60) - 2);
+    }
+  });
+
+  it("holds the 30 fps floor interval on 60 and 120 Hz displays", () => {
+    for (const hz of [60, 120]) {
+      const n = renderCount(hz, targetFrameIntervalMs("floor"), 10);
+      expect(n, `${hz} Hz`).toBeGreaterThan(294);
+      expect(n, `${hz} Hz`).toBeLessThan(306);
+    }
+  });
+
+  it("steps by one interval while the gate is on time", () => {
+    expect(nextRenderAnchor(1020, 1000, interval)).toBeCloseTo(1000 + interval, 6);
+  });
+
+  it("snaps to now on the first frame, so it isn't measured from time zero", () => {
+    expect(nextRenderAnchor(5000, 0, interval)).toBe(5000);
+  });
+
+  it("snaps to now after a stall, so no burst of back-to-back renders follows", () => {
+    const anchor = nextRenderAnchor(1500, 1000, interval); // 500 ms stall
+    expect(anchor).toBe(1500);
+    expect(shouldRenderFrame(1500 + 6.9, anchor, interval)).toBe(false);
   });
 });

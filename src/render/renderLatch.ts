@@ -27,11 +27,12 @@ import type { AnimFrame } from "./animClock.ts";
 // until someone consumes it" shape, here local to one device's render loop
 // instead of a network room's playout clock.
 //
-// chladni.ts and meshGrid.ts already sidestep the dtSec half of this by
-// deriving their own dt from frame.time deltas instead of anim.dtSec — see
-// chladni.ts's file header. They predate this latch and don't need it, but
-// a future simplification could fold them onto anim.dtSec now that it's
-// render-accurate too.
+// chladni.ts already sidesteps the dtSec half of this by deriving its own dt
+// from frame.time deltas instead of anim.dtSec — see chladni.ts's file
+// header. It predates this latch and doesn't need it, but a future
+// simplification could fold it onto anim.dtSec now that it's
+// render-accurate too. meshGrid.ts counts its history rows and noise scroll
+// from anim.dtSec; only its envelopes still use the frame.time delta.
 export interface RenderLatch {
   /** Call once per rAF tick, right after animClock.advance(), with that
    *  tick's raw AnimFrame — whether or not this tick will render. */

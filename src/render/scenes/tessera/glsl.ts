@@ -118,7 +118,7 @@ const LATTICE_CONST_GLSL = `
 /** The dim background: sparse hash dots and four faint axis rays, held in
  *  the ball's own rotating frame (rotated by -uRoll before hashing) so they
  *  read as fixed against the spinning lattice rather than swimming past it
- *  -- the same trick shards.ts's star field uses with uRollBg. Covers the
+ *  -- the same trick shards/glsl.ts's star field uses with uRollBg. Covers the
  *  whole frame every tick (previewRenderer.ts: the gallery never clears). */
 export function bgFrag(commonUniforms: string, settingsUniforms: string, roomUv: string): string {
   return `#version 300 es

@@ -1,19 +1,20 @@
 import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
-import { createGL, resizeCanvasToDisplaySize } from "./render/gl.ts";
-import { detectQuality, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
+import { createGL, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
+import { detectQuality, presetAllows, qualitySettings, type QualitySettings } from "./render/quality.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type SceneContext, type Viewport } from "./render/scene.ts";
 import { getPalette, type Palette } from "./render/palette.ts";
 import { createAnimClock } from "./render/animClock.ts";
 import { createRenderLatch } from "./render/renderLatch.ts";
 import { advanceAutoTune } from "./render/autoTune.ts";
 import { createQualityGovernor, type QualityGovernor } from "./render/governor.ts";
-import { shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
+import { nextRenderAnchor, shouldRenderFrame, targetFrameIntervalMs } from "./render/framePace.ts";
 import { createRoomCode, RendererConnection } from "./net/room.ts";
 import { roomCodeFromParam } from "./net/roomCode.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
 import { SOURCE_URL } from "./brand.ts";
 import { BUILD_INFO, versionHint, versionLabel } from "./version.ts";
 import { pinEverything } from "./pinnedAssets.ts";
+import { requestWakeLock } from "./ui/wakeLock.ts";
 import { getSilenceGate } from "./audio/silenceGate.ts";
 import { getHitShape } from "./audio/hitStrength.ts";
 import { createDriveEngine } from "./render/drives.ts";
@@ -49,10 +50,6 @@ document.body.appendChild(sourceLink);
 // (the Dancers clip library, the tempo worklet, a panel font) is needed.
 pinEverything();
 
-const PRESET_ORDER: QualityPreset[] = ["floor", "low", "mid", "high"];
-const presetAllows = (s: Scene, p: QualityPreset): boolean =>
-  !s.minQuality || PRESET_ORDER.indexOf(p) >= PRESET_ORDER.indexOf(s.minQuality);
-
 let scene: Scene = getScene("spectrum")!;
 let palette: Palette = getPalette("neon");
 let viewport: Viewport = FULL_VIEWPORT;
@@ -61,6 +58,12 @@ let sceneCtx: SceneContext;
 
 let conn: RendererConnection;
 let live = false;
+/** True from the canvas's `webglcontextlost` until the page reloads on the
+ *  restore (main()'s watchContextLoss): the loop draws nothing meanwhile. */
+let glLost = false;
+/** The room this TV is showing, once it has one — what a context-loss reload
+ *  rejoins instead of minting a new code the phone has never heard of. */
+let roomCodeNow: string | null = null;
 const animClock = createAnimClock();
 // See renderLatch.ts / app.ts's own instance: turns anim.dtSec into wall
 // time since the last *rendered* frame and keeps a one-shot edge alive
@@ -82,19 +85,51 @@ function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, quality.preset));
 }
 
+/** Swaps the running scene for `next`. If `next`'s init() throws (a shader
+ *  this TV's GPU won't compile) the scene it replaced is brought back, rather
+ *  than leaving a half-built one whose render() throws every frame. */
 function switchScene(next: Scene): void {
-  scene.dispose(sceneCtx);
-  scene = next;
-  scene.init(sceneCtx);
+  const prev = scene;
+  prev.dispose(sceneCtx);
+  try {
+    next.init(sceneCtx);
+    scene = next;
+  } catch (err) {
+    console.error(`TV: "${next.name}" failed to start:`, err);
+    try {
+      next.dispose(sceneCtx);
+    } catch {
+      // Whatever init() half-built; the original error is the one to report.
+    }
+    try {
+      prev.init(sceneCtx);
+    } catch (err2) {
+      console.error(`TV: "${prev.name}" failed to restart:`, err2);
+    }
+  }
   conn.sendHello(scene.id, palette.id, viewport);
 }
 
-async function requestWakeLock(): Promise<void> {
-  try {
-    await navigator.wakeLock?.request("screen");
-  } catch {
-    // Not fatal — some browsers/contexts deny it; screen may just dim.
+/** Boot mount: the current scene, else the first of availableScenes() whose
+ *  init() succeeds (a shader this TV's GPU won't compile must not leave the
+ *  screen blank before the room badge ever appears). False if none mounts. */
+function mountFirstScene(): boolean {
+  const candidates = [scene, ...availableScenes().filter((s) => s !== scene)];
+  for (const next of candidates) {
+    try {
+      next.init(sceneCtx);
+      scene = next;
+      return true;
+    } catch (err) {
+      console.error(`TV: "${next.name}" failed to start:`, err);
+      try {
+        next.dispose(sceneCtx);
+      } catch {
+        // Whatever init() half-built; the original error is the one to report.
+      }
+    }
   }
+  return false;
 }
 
 async function main(): Promise<void> {
@@ -108,14 +143,49 @@ async function main(): Promise<void> {
     return;
   }
 
+  // See gl.ts's watchContextLoss(): a restored context means every scene's GL
+  // objects are dead, so the page reloads, rejoining this TV's own room (the
+  // `?room=` path below) so the paired phone stays connected.
+  watchContextLoss(
+    canvas,
+    () => {
+      glLost = true;
+    },
+    () => {
+      if (roomCodeNow) {
+        const url = new URL(location.href);
+        url.searchParams.set("room", roomCodeNow);
+        history.replaceState(null, "", url.toString());
+      }
+      location.reload();
+    },
+  );
+
   quality = qualitySettings(await detectQuality());
   sceneCtx = { gl, quality };
   if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
   governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
-  scene.init(sceneCtx);
+  if (!mountFirstScene()) {
+    badge.textContent = "No scene can run on this TV's GPU";
+    badge.style.display = "block";
+    return;
+  }
 
   // `?room=CODE` is the join screen's typed-code field: render in that room instead of minting a new one.
-  const code = roomCodeFromParam(new URLSearchParams(location.search).get("room")) ?? (await createRoomCode());
+  // A failed mint (offline, the per-IP throttle, the worker down) retries with
+  // a growing wait and says so on the badge, instead of leaving a blank screen.
+  let code = roomCodeFromParam(new URLSearchParams(location.search).get("room"));
+  for (let waitMs = 2000; !code; waitMs = Math.min(waitMs * 2, 30_000)) {
+    try {
+      code = await createRoomCode();
+    } catch (err) {
+      console.warn("TV: couldn't create a room, retrying:", err);
+      badge.textContent = "Can't reach the server, retrying…";
+      badge.style.display = "block";
+      await new Promise((resolve) => window.setTimeout(resolve, waitMs));
+    }
+  }
+  roomCodeNow = code;
   conn = new RendererConnection(code);
   conn.onCommand((cmd) => {
     if (cmd.scene) {
@@ -142,6 +212,7 @@ async function main(): Promise<void> {
 
   function loop(): void {
     requestAnimationFrame(loop);
+    if (glLost) return;
 
     const nowRafMs = performance.now();
     const dtSec = Math.max(1e-4, (nowRafMs - lastRafMs) / 1000);
@@ -197,8 +268,9 @@ async function main(): Promise<void> {
     // without a shaping step to redo.
     driveEngine.accumulate(dtSec, frame, frame.energy, anim, scene.id, scene.settings ?? []);
 
-    if (!shouldRenderFrame(nowRafMs, lastRenderMs, targetFrameIntervalMs(quality.preset))) return;
-    lastRenderMs = nowRafMs;
+    const intervalMs = targetFrameIntervalMs(quality.preset);
+    if (!shouldRenderFrame(nowRafMs, lastRenderMs, intervalMs)) return;
+    lastRenderMs = nextRenderAnchor(nowRafMs, lastRenderMs, intervalMs);
 
     const resized = resizeCanvasToDisplaySize(canvas, quality.renderScale);
     if (resized) gl.viewport(0, 0, canvas.width, canvas.height);

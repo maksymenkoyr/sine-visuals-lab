@@ -3,6 +3,8 @@ import { encodeFeatureFrame, decodeFeatureFrame, type EncodableFrame } from "./p
 import { ClockSync } from "./clock.ts";
 import { JitterBuffer, type TimedFrame } from "./jitterBuffer.ts";
 import { SlewLimiter } from "./slewLimiter.ts";
+import { WireDecimator } from "./wireDecimator.ts";
+import { parseViewport, type RosterEntry } from "../../server/roomWire.ts";
 import type { Viewport } from "../render/scene.ts";
 
 /** Fallback target: how far behind the room clock a device without exclusive
@@ -48,13 +50,9 @@ export interface VisualSample {
   level: number;
 }
 
-export interface RosterEntry {
-  deviceId: string;
-  role: "host" | "renderer";
-  scene: string;
-  palette: string;
-  viewport: Viewport;
-}
+// The roster shape and the control-message parsing are shared with the Room
+// Durable Object (server/roomWire.ts), so the two ends can't drift apart.
+export type { RosterEntry };
 
 export interface DeviceCommand {
   scene?: string;
@@ -62,43 +60,54 @@ export interface DeviceCommand {
   viewport?: Viewport;
 }
 
+/** Used when storage is blocked (Safari/WebKit private modes, sandboxed
+ *  frames): one id per page load, shared by every connection in the page, so a
+ *  host and a renderer in the same tab still agree on who "this device" is. */
+let sessionDeviceId: string | null = null;
+
 function readDeviceId(): string {
   const KEY = "vibe.deviceId";
-  let id = localStorage.getItem(KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(KEY, id);
+  try {
+    let id = localStorage.getItem(KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(KEY, id);
+    }
+    return id;
+  } catch {
+    return (sessionDeviceId ??= crypto.randomUUID());
   }
-  return id;
 }
 
 function wsUrl(code: string, role: "host" | "renderer", ownDeviceId: string): string {
   const proto = WORKER_ORIGIN.startsWith("https") ? "wss" : "ws";
   const host = WORKER_ORIGIN.replace(/^https?:\/\//, "");
-  return `${proto}://${host}/api/room/${code}/ws?role=${role}&deviceId=${encodeURIComponent(ownDeviceId)}`;
+  return `${proto}://${host}/api/room/${encodeURIComponent(code)}/ws?role=${role}&deviceId=${encodeURIComponent(ownDeviceId)}`;
 }
 
-export async function createRoomCode(): Promise<string> {
-  const res = await fetch(`${WORKER_ORIGIN}/api/room`, { method: "POST" });
-  if (!res.ok) throw new Error(`room create failed: ${res.status}`);
-  const body = (await res.json()) as { code: string };
-  return body.code;
+/** Asks the Worker for a fresh room. Gives up after `timeoutMs`, because the
+ *  callers (boot, the TV page) wait on it before showing anything and a
+ *  stalled request — a captive portal, a cold or black-holed Worker — neither
+ *  resolves nor rejects; a timeout rejects, and boot's catch runs solo.
+ *  AbortController + setTimeout rather than AbortSignal.timeout, which older
+ *  Safari and TV browsers lack. */
+export async function createRoomCode(timeoutMs = 4000): Promise<string> {
+  const ctl = new AbortController();
+  const timer = window.setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${WORKER_ORIGIN}/api/room`, { method: "POST", signal: ctl.signal });
+    if (!res.ok) throw new Error(`room create failed: ${res.status}`);
+    const body = (await res.json()) as { code: string };
+    return body.code;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 type ControlMessage =
   | { type: "pong"; t0: number; tServer: number }
   | { type: "roster"; devices: RosterEntry[] }
   | { type: "command"; scene?: string; palette?: string; viewport?: Viewport };
-
-function parseViewport(v: unknown): Viewport | undefined {
-  if (!v || typeof v !== "object") return undefined;
-  const o = v as Record<string, unknown>;
-  const { x, y, w, h } = o;
-  if (typeof x === "number" && typeof y === "number" && typeof w === "number" && typeof h === "number") {
-    return { x, y, w, h };
-  }
-  return undefined;
-}
 
 function parseControlMessage(data: unknown): ControlMessage | null {
   if (typeof data !== "string") return null;
@@ -262,7 +271,7 @@ abstract class RoomConnectionBase {
 }
 
 export class HostConnection extends RoomConnectionBase {
-  private lastSentMs = -Infinity;
+  private decimator = new WireDecimator(BROADCAST_INTERVAL_MS);
 
   constructor(code: string) {
     super(code, "host");
@@ -277,15 +286,19 @@ export class HostConnection extends RoomConnectionBase {
   }
 
   /** Call every local render tick; internally decimates the wire send to ~30Hz
-   *  while feeding the full-rate local buffer so this device's own visuals stay smooth. */
+   *  while feeding the full-rate local buffer so this device's own visuals stay smooth.
+   *  The one-tick onset flags raised on skipped ticks ride the next send
+   *  (wireDecimator.ts) — the local buffer sees every one directly. */
   sendFrame(frame: EncodableFrame): void {
     const roomTimeMs = this.clock.roomNow();
     this.pushFrame({ ...frame, roomTimeMs });
 
-    if (roomTimeMs - this.lastSentMs < BROADCAST_INTERVAL_MS) return;
-    this.lastSentMs = roomTimeMs;
+    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset);
+    if (!d.send) return;
+    // The latches are cleared even if the socket isn't open, so a stale hit
+    // isn't replayed on reconnect.
     if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(encodeFeatureFrame(frame, roomTimeMs));
+      this.ws.send(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
     }
   }
 }

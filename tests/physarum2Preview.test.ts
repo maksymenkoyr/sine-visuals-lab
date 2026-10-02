@@ -33,6 +33,18 @@ describe("physarum2Preview: createStrainPreview", () => {
     expect(a.pixels([1, 1, 1])).toEqual(b.pixels([1, 1, 1]));
   });
 
+  it("pixelsInto writes exactly what pixels returns, and overwrites a dirty buffer fully", () => {
+    const preview = createStrainPreview({ size: 24, agents: 300, seed: 5 });
+    runSteps(preview, SPOTTY_MOTION, 30);
+    const rgb: [number, number, number] = [0.9, 0.4, 0.2];
+    const buf = new Uint8ClampedArray(24 * 24 * 4).fill(77);
+    preview.pixelsInto(buf, rgb);
+    expect(buf).toEqual(preview.pixels(rgb));
+    runSteps(preview, SPOTTY_MOTION, 5);
+    preview.pixelsInto(buf, rgb);
+    expect(buf).toEqual(preview.pixels(rgb));
+  });
+
   it("a different seed diverges (not a hidden shared/global RNG)", () => {
     const a = createStrainPreview({ size: 32, agents: 300, seed: 1 });
     const b = createStrainPreview({ size: 32, agents: 300, seed: 2 });
@@ -221,6 +233,32 @@ describe("physarum2Preview: createPairCulture", () => {
     const [, fed1] = fed.totals();
 
     expect(fed1).toBeGreaterThan(base1);
+  });
+
+  it("Trail life (decayMul) ages each strain's own channel: a long-lived strain 0 keeps more ink", () => {
+    const withLife = (m0: number | undefined): PairCultureInputs => ({
+      ...inputs(0),
+      motion: [{ ...PAIR_MOTION[0], decayMul: m0 }, PAIR_MOTION[1]],
+    });
+    const total0 = (m0: number | undefined): number => {
+      const c = createPairCulture({ size: 32, agents: 800, seed: 21 });
+      runSteps(c, 40, withLife(m0));
+      return c.totals()[0];
+    };
+    expect(total0(0.35)).toBeGreaterThan(total0(1) * 1.5);
+    expect(total0(2.8)).toBeLessThan(total0(1));
+  });
+
+  it("an omitted decayMul is the shared decay, byte for byte", () => {
+    const run = (m0: number | undefined): Uint8ClampedArray => {
+      const c = createPairCulture({ size: 24, agents: 300, seed: 8 });
+      const inp: PairCultureInputs = { ...inputs(0.4), motion: [{ ...PAIR_MOTION[0], decayMul: m0 }, PAIR_MOTION[1]] };
+      runSteps(c, 30, inp);
+      const out = new Uint8ClampedArray(24 * 24 * 4);
+      c.pixelsInto(out, [[1, 0.5, 0.2], [0.2, 0.5, 1]]);
+      return out;
+    };
+    expect(run(undefined)).toEqual(run(1));
   });
 
   it("a non-zero touch diagonal changes nothing", () => {

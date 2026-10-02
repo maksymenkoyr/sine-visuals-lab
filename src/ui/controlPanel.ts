@@ -259,20 +259,45 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
       segB.style.flex = `${right - boundary} 0 0%`;
     }
 
-    function onUp(ev: PointerEvent): void {
-      handle.releasePointerCapture(ev.pointerId);
+    // The drag ends exactly once, however it ends: a release commits the new
+    // boundary, a cancelled sequence (a touch gesture takeover, a system
+    // gesture) drops it. Without the cancel path `dragging` stayed true and
+    // renderLayout() ignored every roster change from then on. No
+    // lostpointercapture listener: that also fires after every pointerup and
+    // would end the drag twice.
+    let ended = false;
+    function end(commit: boolean): void {
+      if (ended) return;
+      ended = true;
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onUp);
-      const a = order[handleIndex];
-      const b = order[handleIndex + 1];
-      deps.setDevice(a.deviceId, { viewport: { x: left, y: 0, w: boundary - left, h: 1 } });
-      deps.setDevice(b.deviceId, { viewport: { x: boundary, y: 0, w: right - boundary, h: 1 } });
+      handle.removeEventListener("pointercancel", onCancel);
+      if (commit) {
+        const a = order[handleIndex];
+        const b = order[handleIndex + 1];
+        deps.setDevice(a.deviceId, { viewport: { x: left, y: 0, w: boundary - left, h: 1 } });
+        deps.setDevice(b.deviceId, { viewport: { x: boundary, y: 0, w: right - boundary, h: 1 } });
+      }
       dragging = false;
       renderLayout(); // pick up whatever the server has echoed back while frozen
     }
 
+    function onUp(ev: PointerEvent): void {
+      try {
+        handle.releasePointerCapture(ev.pointerId);
+      } catch {
+        // Capture may already be gone — nothing to release.
+      }
+      end(true);
+    }
+
+    function onCancel(): void {
+      end(false);
+    }
+
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onCancel);
   }
 
   function renderAll(): void {

@@ -31,7 +31,8 @@ export type PowerMode = "auto" | "on" | "off";
 const STORAGE_KEY = "vibe.powerMode";
 export const POWER_MODE_DEFAULT: PowerMode = "off";
 
-function isPowerMode(value: string): value is PowerMode {
+/** Also what outputPower.ts validates its stored power mode with. */
+export function isPowerMode(value: string): value is PowerMode {
   return value === "auto" || value === "on" || value === "off";
 }
 

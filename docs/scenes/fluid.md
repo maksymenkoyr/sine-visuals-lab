@@ -9,7 +9,7 @@ symmetry. Draft, on main.
 
 ## Where the code is
 
-Three files, imported only by each other and not shared with any other
+The files below, imported only by each other and not shared with any other
 scene (`ferrofluid.ts`, despite the similar name, is an unrelated raymarched
 blob scene with no connection to this sim):
 

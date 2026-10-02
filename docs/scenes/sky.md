@@ -448,7 +448,8 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
 - `npm run dev`, then `/?audio=synthetic&bpm=120#/v/sky`. Use a mic or
   real audio source for Scene-default stamps (or wire Floaters to a Beat
   grid, per Tuning notes).
-- The `tools/.cache/refs/sky-stills/scripts/` scripts:
+- The scripts in `docs/scenes/sky/scripts/` (and
+  `docs/scenes/_shared/scripts/contact.py`):
   - `shot_series.mjs` logs real elapsed time per shot. SwiftShader runs at
     a few fps and each screenshot takes ~2 s, so a "13 s" shot is really
     ~18 s.
@@ -456,7 +457,9 @@ measurement scripts in the local bundle `tools/.cache/refs/sky-stills/`
     `scene: "sky"`).
   - `contact.py` tiles the shots into one sheet.
   - `floater_cross_section.py` and `grid_measure.py` re-measure the
-    references.
+    references (kept in the same folder, rescued from the `sky-scene`
+    worktree's `tools/.cache/` on 2026-10-02; they read the stills in the
+    `sky-stills` bundle).
 - Gotchas that cost time:
   - A backtick in a GLSL comment ends the shader's template string.
   - Restart the dev server after a rebase or long edit runs, since stale
