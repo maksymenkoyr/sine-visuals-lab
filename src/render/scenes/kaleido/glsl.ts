@@ -7,21 +7,21 @@ import { FLOAT_HASH_GLSL } from "../../noiseHash.ts";
 /** Ink colour for band lines, navy rings and the Burst core: a near-black
  *  navy, not a scaled palette colour (that gave dark-red/dark-green rather
  *  than the reference's ink). */
-export const INK_DARK = "vec3(0.05, 0.04, 0.11)";
+const INK_DARK = "vec3(0.05, 0.04, 0.11)";
 
-/** Cell size at Tiling = 0.5, the size every style's constants are tuned
- *  for (index.ts's lattice zoom hands each style a cell of any size). Lives
- *  here rather than index.ts so styles.ts can import it without a cycle. */
+/** The cell size every style's constants were tuned for; index.ts hands each
+ *  style a cell of CELL_LOCAL and Mandala rescales to this. Lives here rather
+ *  than index.ts so styles.ts can import it without a cycle. */
 export const CELL_MID = 1.8;
 
 /** Octaves in the scale-cycling noise (zfbm below) at full detail; one
  *  fewer on a low tier. */
-export const ZOOM_OCTAVES = 5;
+const ZOOM_OCTAVES = 5;
 /** How much of the room palette the texture styles' rainbow carries: their
  *  references run the whole spectrum, and a cosine room palette on its own
  *  covers a third of it; this keeps the room's tint without losing the
  *  rainbow. */
-export const RAINBOW_ROOM_MIX = 0.35;
+const RAINBOW_ROOM_MIX = 0.35;
 /** Where blue sits on vivid()'s rainbow (t in 0..1) — the phase the texture
  *  styles bias toward, since their references are blue-based. */
 export const RAINBOW_BLUE = 0.33;

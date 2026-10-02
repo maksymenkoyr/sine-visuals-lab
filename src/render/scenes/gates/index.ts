@@ -213,7 +213,7 @@ export interface GateOpts {
 }
 
 /** A look other than `prev`, uniform over the rest. */
-export function pickLook(prev: number, rng: () => number): number {
+function pickLook(prev: number, rng: () => number): number {
   return (prev + 1 + Math.floor(rng() * (LOOK_COUNT - 1))) % LOOK_COUNT;
 }
 
