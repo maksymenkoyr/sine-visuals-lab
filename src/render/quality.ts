@@ -95,10 +95,6 @@ export async function detectQuality(): Promise<QualityPreset> {
     const msPerFrame = elapsedMs / BENCH_FRAMES;
 
     prog.dispose();
-    // Deterministically release the context rather than waiting on GC — the
-    // page is about to open two more (main + gallery preview) and browsers
-    // cap live WebGL contexts fairly low (iOS Safari evicts aggressively).
-    gl.getExtension("WEBGL_lose_context")?.loseContext();
 
     // Thresholds picked so a 2018+ TV SoC lands in "low", a mid phone in
     // "mid", and a discrete/desktop GPU in "high".
@@ -109,3 +105,10 @@ export async function detectQuality(): Promise<QualityPreset> {
     return "floor";
   }
 }
+  } finally {
+    // Deterministically release the context rather than waiting on GC — the
+    // page is about to open two more (main + gallery preview) and browsers
+    // cap live WebGL contexts fairly low (iOS Safari evicts aggressively).
+    // In a `finally` so the failure path (a shader that won't compile, a
+    // throwing GL call) releases it too.
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
