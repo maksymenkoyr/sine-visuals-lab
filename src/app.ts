@@ -1783,7 +1783,11 @@ async function boot(): Promise<void> {
     // pass through untouched instead of driving these — mirrors the guard
     // deviceMenu.ts's own document-level handler already uses.
     if (e.altKey || e.ctrlKey || e.metaKey) return;
-    if (e.key === "f" || e.key === "F") {
+    // F and S are letters, so they must not fire while one is being typed —
+    // a look named "Fast", or a pasted share code, in the Looks card's inputs
+    // (a range slider keeping focus still counts as not typing).
+    const typing = isTypingTarget(e.target);
+    if ((e.key === "f" || e.key === "F") && !typing) {
       noteKeyUse("fullscreen");
       immersive?.toggle();
     }
@@ -1791,7 +1795,7 @@ async function boot(): Promise<void> {
     // (enterViz/exitToGallery below), so the key and the gear it mirrors
     // appear and disappear together. Reuses the same toggle() the gear's
     // click handler calls, rather than reimplementing open/close here.
-    if ((e.key === "s" || e.key === "S") && inViz) {
+    if ((e.key === "s" || e.key === "S") && inViz && !typing) {
       noteKeyUse("panel");
       deviceMenu?.toggle();
     }
@@ -1811,7 +1815,7 @@ async function boot(): Promise<void> {
     // key), not e.key like f/s above, so a Cyrillic or German layout still
     // reaches these; only live in a viz, like S, and skipped while typing
     // somewhere, the same guard deviceMenu.ts's own hotkeys already use.
-    if (inViz && !isTypingTarget(e.target)) {
+    if (inViz && !typing) {
       // Output window: K is Cue (hold it), G plays (an instant send) — plain-
       // letter twins of Space and Option, which wireOutputKeys below owns.
       // No-ops unless an output window is open.
