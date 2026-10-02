@@ -1,7 +1,6 @@
 # AGENTS.md
 
-The working rules for this repo, shared by every coding tool. Older comments
-and docs cite `CLAUDE.md` for these rules — they mean this file.
+The working rules for this repo.
 
 A browser-based, real-time WebGL2 audio visualizer. Entry points: `index.html` →
 `src/app.ts` (controller + gallery) and `tv.html` → `src/tv.ts` (paired display).
