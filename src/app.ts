@@ -2305,7 +2305,9 @@ function tick(): void {
     return;
   }
 
-  const liveDrives = anim ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
+  // Only built while the panel is open: update() returns before it touches
+  // `drives` when closed, and forScene() allocates a Map and a dozen closures.
+  const liveDrives = anim && deviceMenu?.isOpen() ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
   deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
 
   if (!lastVis || !anim) {
