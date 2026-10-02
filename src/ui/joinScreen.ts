@@ -1,5 +1,6 @@
 import { drawQrCode } from "./qr.ts";
 import { isValidRoomCode, normalizeRoomCodeInput } from "../net/roomCode.ts";
+import type { AdoptOutcome } from "../net/adopt.ts";
 
 /**
  * Which pairing screen this is, and so which link its QR encodes (what each
@@ -54,6 +55,9 @@ export interface JoinScreenOptions {
    *  backdrop, or the Close button hides it. Left out, the `controller` and
    *  `renderer` kinds are dismissible and the others are not. */
   dismissible?: boolean;
+  /** Hands a screen waiting under a typed code to this device's room; see
+   *  `RoomCodeEntryOptions.adoptTv`. */
+  adoptTv?: (slot: string) => Promise<AdoptOutcome>;
 }
 
 export interface JoinScreen {
@@ -100,9 +104,12 @@ function hintFor(code: string, kind: JoinKind, origin: string): string {
  * so the old way to invite someone to just watch survives next to the one that
  * gives them the controls.
  *
- * The typed code is a fallback, not the pairing: a code alone proves nothing, so
- * it only gets a device into a room that has no key (the old, unclaimed rooms —
- * server/roomRules.ts `decideJoin`); a laptop's keyed room still needs its QR.
+ * A typed code on its own proves nothing, so joining a room by it only works for
+ * a room that has no key (the old, unclaimed rooms — server/roomRules.ts
+ * `decideJoin`); a laptop's keyed room still needs its QR. The other direction
+ * works: a laptop or phone that holds a keyed room can type a TV's code, and
+ * `adoptTv` hands that waiting screen to its room without the QR's nonce
+ * (server/roomCore.ts `adopt` has when the room refuses that).
  */
 export function createJoinScreen(
   kind: JoinKind,
@@ -184,7 +191,7 @@ export function createJoinScreen(
 
   // ---- The typed-code field ----
   // On every kind, below the QR: a TV can't scan and a desktop has no camera.
-  const entry = createRoomCodeEntry({ tv: options.tv, onEscape: dismissible ? () => api.hide() : undefined });
+  const entry = createRoomCodeEntry({ tv: options.tv, adoptTv: options.adoptTv, onEscape: dismissible ? () => api.hide() : undefined });
   entry.style.marginBottom = "auto";
   root.appendChild(entry);
 
@@ -237,10 +244,18 @@ export function createJoinScreen(
   return api;
 }
 
+const PROBLEM_COLOR = "#ff8a80";
+const OK_COLOR = "#8be9a8";
+
 export interface RoomCodeEntryOptions {
   /** The paired display: one plain Join, which reloads tv.html with `?room=`.
    *  Every other device picks whether it supplies the music or just watches. */
   tv?: boolean;
+  /** A typed code may be a TV's, waiting on its QR screen: this tries to hand
+   *  that screen to this device's room (`postAdopt` with no nonce, since a typed
+   *  code has none). Only `"no-screen"` falls through to joining the code as a
+   *  room, the case this field always had. Left out, the field only joins rooms. */
+  adoptTv?: (slot: string) => Promise<AdoptOutcome>;
   /** Escape pressed in the field; left out, Escape does nothing there. */
   onEscape?: () => void;
   /** Smaller type, for a panel rather than a fullscreen overlay. */
@@ -290,7 +305,7 @@ export function createRoomCodeEntry(options: RoomCodeEntryOptions = {}): HTMLFor
       options.onEscape?.();
       return;
     }
-    if (e.key === "Enter") go(options.tv ? "renderer" : "host");
+    if (e.key === "Enter") void go(options.tv ? "renderer" : "host");
   });
   field.addEventListener("input", () => {
     field.value = normalizeRoomCodeInput(field.value);
@@ -310,7 +325,7 @@ export function createRoomCodeEntry(options: RoomCodeEntryOptions = {}): HTMLFor
       font: 600 16px system-ui, sans-serif; ${compact ? "font-size: 14px; padding: 8px 14px;" : "font-size: clamp(15px, 1.8vw, 20px); padding: 10px 18px;"} border-radius: 999px; cursor: pointer;
       border: 2px solid #fff6; color: ${primary ? "#000" : "#fff"}; background: ${primary ? "#fff" : "transparent"};
     `;
-    b.addEventListener("click", () => go(as));
+    b.addEventListener("click", () => void go(as));
     return b;
   };
   const buttons = options.tv
@@ -319,19 +334,39 @@ export function createRoomCodeEntry(options: RoomCodeEntryOptions = {}): HTMLFor
   fieldRow.append(field, ...buttons);
 
   const problem = document.createElement("div");
-  problem.style.cssText = `min-height: 1.2em; font-size: ${compact ? 12 : 14}px; color: #ff8a80;`;
+  problem.style.cssText = `min-height: 1.2em; font-size: ${compact ? 12 : 14}px; color: ${PROBLEM_COLOR};`;
 
   function refresh(): void {
     const ok = isValidRoomCode(field.value);
     for (const b of buttons) b.style.opacity = ok ? "1" : "0.5";
     problem.textContent = "";
+    problem.style.color = PROBLEM_COLOR;
   }
 
-  function go(as: "host" | "renderer"): void {
+  async function go(as: "host" | "renderer"): Promise<void> {
     const typed = normalizeRoomCodeInput(field.value);
     if (!isValidRoomCode(typed)) {
+      problem.style.color = PROBLEM_COLOR;
       problem.textContent = typed.length < 4 ? "Codes are 4 characters" : "That isn't a valid code (no 0, O, 1, I or L)";
       return;
+    }
+    if (options.adoptTv && !options.tv) {
+      const outcome = await options.adoptTv(typed);
+      if (outcome === "ok") {
+        problem.style.color = OK_COLOR;
+        problem.textContent = "Sent to the screen";
+        return;
+      }
+      if (outcome !== "no-screen") {
+        problem.style.color = PROBLEM_COLOR;
+        problem.textContent =
+          outcome === "throttled"
+            ? "Too many tries, wait a minute"
+            : outcome === "ambiguous"
+              ? "More than one screen answers to that code. Scan its QR instead"
+              : "Couldn't reach the room";
+        return;
+      }
     }
     // The TV page re-reads ?room= itself; the main app's entry is the site root.
     location.assign(options.tv ? `${location.pathname}?room=${typed}` : joinUrlFor(typed, as));

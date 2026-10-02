@@ -1,5 +1,6 @@
 import type { RosterEntry, DeviceCommand } from "../net/room.ts";
 import { createRoomCodeEntry } from "./joinScreen.ts";
+import type { AdoptOutcome } from "../net/adopt.ts";
 
 export interface MenuItem {
   id: string;
@@ -17,6 +18,8 @@ export interface ControlPanelDeps {
    *  phone controller is hidden from it (a phone is not a screen), so without
    *  this "Sync all to me" would have no "me" to copy. */
   getSelfLook?: () => SyncLook | null;
+  /** The typed-code field's way to hand a waiting TV to this room. */
+  adoptTv?: (slot: string) => Promise<AdoptOutcome>;
 }
 
 /** The scene and palette "Sync all to me" copies to the other devices. */
@@ -156,7 +159,7 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
   layoutStrip.style.cssText =
     "position: relative; display: flex; height: 56px; background: #1a1a1a; border-radius: 8px; overflow: hidden;";
 
-  const joinEntry = createRoomCodeEntry({ compact: true, onEscape: close });
+  const joinEntry = createRoomCodeEntry({ compact: true, adoptTv: deps.adoptTv, onEscape: close });
   joinEntry.style.cssText += "margin-top: 16px; padding-top: 14px; border-top: 1px solid #fff1;";
 
   const closeBtn = makeActionButton("Close", close);

@@ -189,6 +189,12 @@ describe("parseAdoptMessage", () => {
     expect(parseAdoptMessage(good)).toEqual(good);
   });
 
+  it("accepts a relay with no nonce (a laptop's typed code), but not a malformed one", () => {
+    const { n: _n, ...noNonce } = good;
+    expect(parseAdoptMessage(noNonce)).toEqual(noNonce);
+    expect(parseAdoptMessage({ ...good, n: "short" })).toBeNull();
+  });
+
   it("keeps only the adopt fields", () => {
     expect(parseAdoptMessage({ ...good, extra: 1 })).toEqual(good);
   });
@@ -205,7 +211,6 @@ describe("parseAdoptMessage", () => {
       expect(parseAdoptMessage({ ...good, n: bad })).toBeNull();
     }
     expect(parseAdoptMessage({ type: "adopt", room: "ABCD", n: KEY_B })).toBeNull();
-    expect(parseAdoptMessage({ type: "adopt", room: "ABCD", k: KEY_A })).toBeNull();
   });
 
   it("rejects another type, bad JSON and non-objects", () => {

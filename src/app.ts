@@ -207,7 +207,7 @@ import { planBoot } from "./net/bootPlan.ts";
 import { tvRedirectTarget } from "./net/tvRedirect.ts";
 import { clearSession, readSession, writeSession, type HostRoomSession } from "./net/sessions.ts";
 import { planHostRoom } from "./net/hostRoom.ts";
-import { postAdopt } from "./net/adopt.ts";
+import { postAdopt, type AdoptOutcome } from "./net/adopt.ts";
 import { createControllerLook, type ControllerLook } from "./net/controllerLook.ts";
 import { controllerBadgeText, controllerPreview } from "./net/controllerPreview.ts";
 import { ROSTER_WAIT_MS, hasNewRenderer, rendererIds, waitForRoster } from "./net/screenJoin.ts";
@@ -1629,6 +1629,7 @@ function wireRoomControls(conn: AnyConn): void {
     // A phone controller is not in the roster it reads, so "Sync all to me"
     // copies the look it is showing instead.
     getSelfLook: () => (isController ? { scene: scene.id, palette: palette.id } : null),
+    adoptTv: adoptTvByCode,
   });
   panelBtn.style.display = "block";
   panelBtn.addEventListener("click", () => panel.toggle());
@@ -1762,6 +1763,17 @@ function showScanLaptopNotice(): void {
   );
 }
 
+/** The key of the room this device hosts or controls, for handing a screen to
+ *  it by a typed code (`adoptTvByCode`). Null where the device has no keyed room. */
+let ownRoomKey: string | null = null;
+
+/** A code typed into a Room field, tried as a waiting TV's: the same adopt a
+ *  phone sends after scanning, minus the nonce a typed code can't carry. */
+function adoptTvByCode(slot: string): Promise<AdoptOutcome> {
+  if (!roomCode || !ownRoomKey) return Promise.resolve("no-screen");
+  return postAdopt(WORKER_ORIGIN, slot, { room: roomCode, k: ownRoomKey });
+}
+
 /** Hands the TV waiting in `slot` to this phone's room (net/adopt.ts), then
  *  reports in plain words: the room's roster is what proves the TV arrived.
  *  The request goes out only once the room has delivered its first roster
@@ -1836,6 +1848,7 @@ function startController(
   mode = "renderer";
   isController = true;
   roomCode = target.room;
+  ownRoomKey = target.key;
   document.body.classList.add("controller"); // index.html: no sound-source picker on the gallery
   const conn = new ControllerConnection(target.room, { auth: { roomKey: target.key }, reconnect: true });
   controllerConn = conn;
@@ -2146,6 +2159,7 @@ async function boot(): Promise<void> {
         const hostRoom = await hostRoomPromise!;
         roomCode = hostRoom.room;
         hostRoomKey = hostRoom.roomKey;
+        ownRoomKey = hostRoom.roomKey;
         hostConn = new HostConnection(roomCode, {
           auth: { hostKey: hostRoom.hostKey, roomKey: hostRoom.roomKey },
           reconnect: true,
@@ -2177,7 +2191,10 @@ async function boot(): Promise<void> {
     // toggle); a keyed spectator can pass on the key it was invited with; the
     // old room a phone hosts for a TV has no key to put in a link.
     const roomKey = hostRoomKey ?? (plan.kind === "renderer" ? plan.key : undefined);
-    const invite = createJoinScreen(hostRoomKey ? "controller" : "renderer", document.body, { dismissible: true });
+    const invite = createJoinScreen(hostRoomKey ? "controller" : "renderer", document.body, {
+      dismissible: true,
+      adoptTv: adoptTvByCode,
+    });
     invite.setCode(roomCode, roomKey ? { key: roomKey } : undefined);
     roomCodeEl.addEventListener("click", () => invite.show());
   }

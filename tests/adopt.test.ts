@@ -43,6 +43,10 @@ describe("postAdopt", () => {
     expect(await postAdopt("https://x.test", "WXYZ", BODY, fakeFetch(404).fetchFn)).toBe("no-screen");
   });
 
+  it("maps 409 to ambiguous", async () => {
+    expect(await postAdopt("https://x.test", "WXYZ", BODY, fakeFetch(409).fetchFn)).toBe("ambiguous");
+  });
+
   it("maps 429 to throttled", async () => {
     expect(await postAdopt("https://x.test", "WXYZ", BODY, fakeFetch(429).fetchFn)).toBe("throttled");
   });

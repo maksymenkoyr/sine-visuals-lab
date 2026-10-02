@@ -38,7 +38,8 @@
  * HTTP request to that room is delivered to the waiting screen that holds the
  * nonce, as this message (server/worker.ts has the route). The TV checks `n`
  * against the nonce in the QR it is showing; parseAdoptMessage only checks the
- * shape.
+ * shape. A laptop has no QR to read, so its request may leave `n` out and the
+ * message then has none.
  *
  * Everything here is untrusted input. A look document or patch is cleaned by
  * the same functions the room uses (server/lookDoc.ts), so what a client holds
@@ -75,7 +76,8 @@ export interface AdoptMessage {
   type: "adopt";
   room: string;
   k: string;
-  n: string;
+  /** Absent when the laptop adopted the screen by its typed code alone. */
+  n?: string;
 }
 
 const FULL_VIEWPORT: Viewport = { x: 0, y: 0, w: 1, h: 1 };
@@ -180,6 +182,8 @@ export function parseAdoptMessage(data: unknown): AdoptMessage | null {
   const m = typeof data === "string" ? parseJson(data) : data;
   if (!isRecord(m) || m.type !== "adopt") return null;
   const { room, k, n } = m;
-  if (typeof room !== "string" || !ROOM_CODE_RE.test(room) || !validKey(k) || !validKey(n)) return null;
+  if (typeof room !== "string" || !ROOM_CODE_RE.test(room) || !validKey(k)) return null;
+  if (n === undefined) return { type: "adopt", room, k };
+  if (!validKey(n)) return null;
   return { type: "adopt", room, k, n };
 }

@@ -43,6 +43,7 @@ import {
   ROOM_CLOSE_DENIED,
   ROOM_CODE_RE,
   ROOM_IDLE_TTL_MS,
+  ADOPT_ANY_TAG,
   adoptTag,
   canSend,
   decideJoin,
@@ -260,7 +261,7 @@ export class RoomCore {
     if (role === "controller" && p.frames) tags.push("frames");
     // A keyless renderer is a TV waiting in a pairing slot (a claimed room's
     // keyed renderers are never adopted into anything).
-    if (role === "renderer" && !decision.keyed && validKey(p.adopt)) tags.push(adoptTag(p.adopt));
+    if (role === "renderer" && !decision.keyed && validKey(p.adopt)) tags.push(adoptTag(p.adopt), ADOPT_ANY_TAG);
     const attachment: Attachment = {
       sid: newSid,
       role,
@@ -361,21 +362,31 @@ export class RoomCore {
    *  renderer. The room checks shape and routes by that tag and nothing else;
    *  the TV checks the nonce again, and the room keeps it only as the tag of the
    *  socket that presented it. A claimed room is never a slot, so it answers 404
-   *  as an empty one does. */
+   *  as an empty one does.
+   *
+   *  A body without `n` is the laptop's: it can only type the slot's code. It
+   *  is delivered only when exactly one screen is waiting in the slot
+   *  (`ADOPT_ANY_TAG`); with a second socket there, which could be a bystander
+   *  who joined with any nonce-shaped value, it is refused (409) and nothing is
+   *  sent, so the room key never goes to a bystander next to the TV. Such a
+   *  message carries no `n` for the TV to check. The nonce stays the stricter
+   *  way in. */
   adopt(body: unknown): { status: number; body: Record<string, unknown> } {
     if (
       !isRecord(body) ||
       typeof body.room !== "string" ||
       !ROOM_CODE_RE.test(body.room) ||
       !validKey(body.k) ||
-      !validKey(body.n)
+      (body.n !== undefined && !validKey(body.n))
     ) {
       return { status: 400, body: { error: "bad-request" } };
     }
     if (this.meta !== null) return { status: 404, body: { delivered: 0 } };
     const payload = JSON.stringify({ type: "adopt", room: body.room, k: body.k, n: body.n });
+    const targets = this.host.sockets(body.n === undefined ? ADOPT_ANY_TAG : adoptTag(body.n));
+    if (body.n === undefined && targets.length > 1) return { status: 409, body: { delivered: 0 } };
     let delivered = 0;
-    for (const ws of this.host.sockets(adoptTag(body.n))) if (this.send(ws, payload)) delivered++;
+    for (const ws of targets) if (this.send(ws, payload)) delivered++;
     return delivered > 0 ? { status: 200, body: { delivered } } : { status: 404, body: { delivered: 0 } };
   }
 
