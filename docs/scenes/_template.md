@@ -53,7 +53,8 @@ real-music vs synthetic findings, quality-tier behaviour.>
   (reference images replaced by a placeholder);
 - the reference media itself (videos, frames, audio, pasted stills): never in
   this repo — the local `/ref` cache and the private archive
-  (`tools/ref-archive.py`).>
+  (`tools/ref-archive.py`); anything used outside `/ref` (a pasted still,
+  frames pulled by hand) goes under `tools/.cache/refs/<name>/`.>
 
 ## Resume here
 
