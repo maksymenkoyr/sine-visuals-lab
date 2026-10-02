@@ -40,12 +40,14 @@
  * stays correct even where localStorage is unavailable (node test env,
  * Safari private mode).
  *
- * TV limitation: same as silenceGate.ts's own. A paired TV runs its own
- * bandEnergy.ts detectors and its own animClock off frames that arrive
- * pre-decoded over src/net/protocol.ts's wire — the phone's HitShape never
- * travels with them, so src/tv.ts reads its own local getHitShape() (device
- * defaults, or whatever a TV-side dev console has poked into its own
- * localStorage) rather than whatever the paired phone's sliders are showing.
+ * The shape rides in a room's look, unlike silenceGate.ts's marks: its keys
+ * are plain `vibe.*` keys that net/syncedStores.ts's `isRoomKey` accepts, and
+ * the hook registered below re-seeds the caches when a look is applied. So a
+ * phone's Hits card reaches a paired TV the way it reaches the pop-out — the
+ * TV applies the look, then reads its own getHitShape(). What the TV does not
+ * get is the host's broadband ratio (`beatRatio` is not on the wire; src/tv.ts
+ * says what it uses instead), so a graded broadband hit there is built from
+ * the TV's own band readings.
  */
 
 export interface HitShape {

@@ -47,10 +47,12 @@ import { SETTING_GROUPS, type SceneSetting, type SettingGroup } from "./sceneSet
  * gets built in the browser, by `src/ui/deviceMenu.ts` and the widget
  * itself. Nothing under `src/render/` ever imports `src/ui/`. This is also
  * why the TV (`src/tv.ts`) and a paid scene under
- * `src/render/scenes/private/` can ignore `panel` outright: no setting of
- * any kind reaches the TV (phone-only already — see `src/net/protocol.ts`),
- * and anywhere the device menu never opens (the TV, a gallery preview, a
- * test), a scene's `settings` array — the same flat list
+ * `src/render/scenes/private/` can ignore `panel` outright: the TV never
+ * opens a device menu, yet an item's controls still reach it — they are
+ * ordinary keyed settings, so they ride in the room's look with every other
+ * (`isRoomKey`, `src/net/syncedStores.ts`) and nothing item-specific crosses
+ * the wire. Anywhere the device menu never opens (the TV, a gallery preview,
+ * a test), a scene's `settings` array — the same flat list
  * `composeSettings` below produces — is all that's ever read; `panel` only
  * matters to the one file that renders it.
  *
