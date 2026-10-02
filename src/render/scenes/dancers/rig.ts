@@ -131,9 +131,16 @@ export type BoneName =
 
 /** Bone index by name — `B.head`, `B.L_shin`. The GLSL side gets the same
  *  numbers as `const int B_HEAD`, `B_L_SHIN` via RIG_GLSL. */
-export const B: Readonly<Record<BoneName, number>> = Object.fromEntries(
-  BONES.map((spec, i) => [spec.name, i]),
-) as Record<BoneName, number>;
+export const B: Readonly<Record<BoneName, number>> = (() => {
+  // A loop, not Object.fromEntries: this runs at module load, in the TV
+  // bundle too, and the older TV runtimes the es2017 build target exists for
+  // (vite.config.ts) lack it.
+  const byName = {} as Record<BoneName, number>;
+  BONES.forEach((spec, i) => {
+    byName[spec.name as BoneName] = i;
+  });
+  return byName;
+})();
 
 // ---- Pose ------------------------------------------------------------------
 

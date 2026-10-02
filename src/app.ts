@@ -117,6 +117,7 @@ import {
   listLooks,
   primeUndo,
   saveLook,
+  saveSharedLook,
   takeUndo,
 } from "./render/sceneLooks.ts";
 import { getPin, setPin, clearPin } from "./tuning/pins.ts";
@@ -171,6 +172,7 @@ import {
 } from "./audio/bandGains.ts";
 import {
   advanceAutoTune,
+  tickAutoTune,
   resolveSceneSetting,
   resolveSensitivity,
   resolveExpansion,
@@ -1921,7 +1923,7 @@ async function boot(): Promise<void> {
       } else if (!targetScene) {
         setTimeout(() => showHud("that look is for an unknown scene", true), 0);
       } else {
-        saveLook(look);
+        saveSharedLook(look);
         const specs = targetScene.settings ?? [];
         primeUndo(look.sceneId, specs);
         applyLook(look, specs);
@@ -2194,10 +2196,9 @@ function tick(): void {
   const dtSec = Math.max(1e-4, (nowRafMs - lastRafMs) / 1000);
   lastRafMs = nowRafMs;
 
-  // Resolved exactly once per tick and reused everywhere below (extractor,
-  // anim clock, the meters) — resolveSmoothing() slews its own auto value
-  // via a mutated module-level map (autoTune.ts's `slewed`), so calling it
-  // a second time this tick would double-apply that slew.
+  // Resolved once per tick and reused everywhere below (extractor, anim
+  // clock, the meters) — a second call would be harmless (autoTune.ts steps
+  // each auto value once per tick, on its own clock), just wasted work.
   const smoothing = resolveSmoothing(scene.id);
   const rateScale = smoothingRateScale(smoothing);
 
@@ -2263,8 +2264,7 @@ function tick(): void {
     : null;
 
   // Reused for displayFrame at render time below instead of re-resolving —
-  // see the comment on `smoothing` above for why a second resolve*() call
-  // this tick would double-apply the auto slew.
+  // see the comment on `smoothing` above.
   let sensitivity = 1;
   let expansion = 1;
 
@@ -2306,7 +2306,9 @@ function tick(): void {
     return;
   }
 
-  const liveDrives = anim ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
+  // Only built while the panel is open: update() returns before it touches
+  // `drives` when closed, and forScene() allocates a Map and a dozen closures.
+  const liveDrives = anim && deviceMenu?.isOpen() ? driveEngine.forScene(scene.id, scene.settings ?? [], anim) : null;
   deviceMenu?.update(gained, lastRawBands, lastVis, pinnedBands(), anim, lastMono, rateScale, lastFixedEnergy, lastLufs, lastBeatDiag, lastGate, liveDrives);
 
   if (!lastVis || !anim) {
@@ -2398,6 +2400,9 @@ function idlePreviewActive(): boolean {
  *  Input card still apply, so tweaking a look before picking a source shows
  *  the result. */
 function renderIdlePreview(nowRafMs: number, dtSec: number, smoothing: number): void {
+  // Clock only — no profile, so the demo still can't train it, but the auto
+  // Sensitivity/Expansion below keep gliding instead of freezing at one step.
+  tickAutoTune(dtSec);
   const frame = idlePreview.feed.frame(nowRafMs / 1000);
   const gained = applyBandGains(frame, getBandGains(scene.id));
   outputBridge?.pushFrame(gained, { beatRatio: null, wavePeak: null }, { sens: outputSens, exp: outputExp, smoothing });

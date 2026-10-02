@@ -12,6 +12,7 @@ import {
   encodeLook,
   listLooks,
   saveLook,
+  saveSharedLook,
   type SceneLook,
 } from "../src/render/sceneLooks.ts";
 
@@ -64,6 +65,19 @@ describe("encodeLook / decodeLook", () => {
       .replace(/\//g, "_")
       .replace(/=+$/, "");
     expect(decodeLook(badCode)).toBeNull();
+  });
+
+  const wire = (payload: unknown): string =>
+    btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+  it("clips a long name to 60 characters, trims it, and names a blank one", () => {
+    expect(decodeLook(wire({ v: 1, n: "x".repeat(500), s: "mesh", m: {} }))!.name).toHaveLength(60);
+    expect(decodeLook(wire({ v: 1, n: "  Warm  ", s: "mesh", m: {} }))!.name).toBe("Warm");
+    expect(decodeLook(wire({ v: 1, n: "   ", s: "mesh", m: {} }))!.name).toBe("Shared look");
+  });
+
+  it("returns null for a drive entry naming an Object.prototype key as its signal", () => {
+    expect(decodeLook(wire({ v: 1, n: "x", s: "caustics", m: {}, d: { flash: "constructor" } }))).toBeNull();
   });
 
   // `d` (SceneSetting.drive settings) is optional and additive — v stays 1.
@@ -224,5 +238,31 @@ describe("saveLook / listLooks / deleteLook", () => {
 
     expect(listLooks(sceneId).map((l) => l.name)).toEqual(["B"]);
     expect(listLooks(otherScene).map((l) => l.name)).toEqual(["A"]);
+  });
+});
+
+describe("saveSharedLook", () => {
+  it("saves a look under its own name when nothing by that name exists", () => {
+    const look: SceneLook = { name: "Shared A", sceneId: "shared-scene-a", manual: { focus: 0.1 } };
+    expect(saveSharedLook(look)).toBe(look);
+    expect(listLooks("shared-scene-a").map((l) => l.name)).toEqual(["Shared A"]);
+  });
+
+  it("never overwrites a different saved look of the same name: takes the first free (2), (3)", () => {
+    const mine: SceneLook = { name: "Default", sceneId: "shared-scene-b", manual: { focus: 0.9 } };
+    saveLook(mine);
+    const theirs: SceneLook = { name: "Default", sceneId: "shared-scene-b", manual: { focus: 0.1 } };
+    expect(saveSharedLook(theirs).name).toBe("Default (2)");
+    expect(saveSharedLook({ ...theirs, manual: { focus: 0.2 } }).name).toBe("Default (3)");
+    const list = listLooks("shared-scene-b");
+    expect(list.map((l) => l.name)).toEqual(["Default", "Default (2)", "Default (3)"]);
+    expect(list[0]).toBe(mine);
+  });
+
+  it("leaves an identical look already saved as it is", () => {
+    const look: SceneLook = { name: "Same", sceneId: "shared-scene-c", manual: { focus: 0.4 } };
+    saveLook(look);
+    saveSharedLook({ ...look });
+    expect(listLooks("shared-scene-c")).toHaveLength(1);
   });
 });

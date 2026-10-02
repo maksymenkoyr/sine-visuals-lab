@@ -235,10 +235,21 @@ function loadAutoStore(): AutoStore {
     const raw = localStorage.getItem(STORAGE_KEY_AUTO_ON);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    // A scope entry that isn't an object (hand-edited or corrupted storage)
+    // would make the migrate/prune passes below throw and the catch discard
+    // every scene's choice — drop just that entry instead.
+    let dropped = false;
+    for (const sceneId of Object.keys(parsed)) {
+      const entry = parsed[sceneId];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        delete parsed[sceneId];
+        dropped = true;
+      }
+    }
     const migrated = migrateLegacyExpansionKeys(parsed);
     const pruned = pruneDefaultEntries(parsed);
-    if (migrated || pruned) localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(parsed));
+    if (dropped || migrated || pruned) localStorage.setItem(STORAGE_KEY_AUTO_ON, JSON.stringify(parsed));
     return parsed;
   } catch {
     return {};
@@ -355,9 +366,15 @@ export function computeMacroTarget(
 // sectionIntensity.ts's INTENSITY_SLEW. ~2s time constant.
 const AUTO_SLEW_RATE = 0.5;
 
-let latestDt = 1 / 60;
 let latestProfile: DialValues = { ...NEUTRAL };
-const slewed = new Map<string, number>();
+// The slew runs on this clock, not on call count: each tick advances it by
+// that tick's dt, and a param steps by the clock time elapsed since it last
+// stepped. So a setting read three times a frame (shader upload, the scene's
+// own JS, the open panel's readout) glides at the same ~2s as one read once,
+// a second read in the same tick returns the cached step, and a scene
+// rendered only every other tick (the render cap) still glides in real time.
+let autoClock = 0;
+const slewed = new Map<string, { value: number; at: number }>();
 
 function slewKey(sceneId: string, key: string): string {
   return `${settingScope(sceneId, key)}/${key}`;
@@ -368,8 +385,16 @@ function slewKey(sceneId: string, key: string): string {
  *  animClock.ts, since gallery preview tiles each run their own AnimClock
  *  and would otherwise slew this singleton N times too fast. */
 export function advanceAutoTune(dtSec: number, profile: DialValues): void {
-  latestDt = Math.max(1e-4, dtSec);
+  tickAutoTune(dtSec);
   latestProfile = profile;
+}
+
+/** Advances only the slew clock, leaving the music profile alone — for the
+ *  start-prompt demo (app.ts's renderIdlePreview), which resolves
+ *  Sensitivity/Expansion each tick but must not train the profile. Without
+ *  a tick its auto values would sit frozen at one step. */
+export function tickAutoTune(dtSec: number): void {
+  autoClock += Math.max(1e-4, dtSec);
 }
 
 function resolve(sceneId: string, spec: SceneSetting, manualValue: number): number {
@@ -391,6 +416,13 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
 
   if ((!spec.auto && !spec.macro) || !isAutoEnabled(sceneId, spec.key)) return manualValue;
 
+  // Already stepped this tick: hand back that step. Checked before the target
+  // is computed, so a repeat read also skips the auto weights and, for a
+  // macro, the driver recursion below.
+  const key = slewKey(sceneId, spec.key);
+  const cur = slewed.get(key);
+  if (cur !== undefined && cur.at === autoClock) return cur.value;
+
   // A macro-driven setting has no auto weights of its own — its target
   // tracks the driver's own resolved value (itself auto/override/manual as
   // usual), not the music profile directly. Drivers don't carry a `macro` of
@@ -410,12 +442,10 @@ function resolve(sceneId: string, spec: SceneSetting, manualValue: number): numb
         settingDefault(sceneId, spec),
         settingDefault(sceneId, spec.macro!.driver),
       );
-  const key = slewKey(sceneId, spec.key);
-  const current = slewed.get(key);
   // First time this param is seen, snap to target rather than gliding from
   // an arbitrary seed — switching scenes shouldn't produce a visible glide-in.
-  const next = current === undefined ? target : current + (target - current) * Math.min(1, AUTO_SLEW_RATE * latestDt);
-  slewed.set(key, next);
+  const next = cur === undefined ? target : cur.value + (target - cur.value) * Math.min(1, AUTO_SLEW_RATE * (autoClock - cur.at));
+  slewed.set(key, { value: next, at: autoClock });
   return next;
 }
 
@@ -499,7 +529,7 @@ export function resolveSmoothing(sceneId: string): number {
 /** Explicitly re-seeds a param's glide, e.g. when handing it back to auto —
  *  so it eases off the current display value instead of jumping. */
 export function seedAuto(sceneId: string, key: string, value: number): void {
-  slewed.set(slewKey(sceneId, key), value);
+  slewed.set(slewKey(sceneId, key), { value, at: autoClock });
 }
 
 export function getSensitivitySpec(): SceneSetting {
