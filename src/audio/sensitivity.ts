@@ -1,4 +1,5 @@
 import { NUM_BANDS, type FeatureFrame } from "./types.ts";
+import { registerSyncedStore } from "../net/syncedStores.ts";
 
 /**
  * Per-scene mic sensitivity, expansion, and smoothing: three visual gain
@@ -49,6 +50,11 @@ export const SMOOTHING_DEFAULT = 1;
 //
 // Exported for src/audio/bandGains.ts, which uses the same per-scene
 // float-in-localStorage shape for each of its fader stores.
+//
+// Each store also registers a net/syncedStores.ts hook, so a snapshot applied
+// from outside (the pop-out's Cue, a room look arriving on a TV) re-seeds the
+// cache in place. That one registration is what makes Sensitivity, Expansion,
+// Smoothing and every band fader live on a second window or screen.
 export function createPerSceneSetting(
   storageKey: string,
   min: number,
@@ -56,13 +62,29 @@ export function createPerSceneSetting(
   defaultValue: number,
   legacyKeys: readonly string[] = [],
 ) {
-  function loadInitial(): Record<string, number> {
+  /** What localStorage holds under `storageKey`, as a plain record of finite
+   *  numbers. Null when nothing is saved there; garbage reads as empty. */
+  function readStored(): Record<string, number> | null {
     try {
       const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === "object" ? parsed : {};
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const out: Record<string, number> = {};
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out;
+      for (const k of Object.keys(parsed)) {
+        const v = parsed[k];
+        if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
       }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  function loadInitial(): Record<string, number> {
+    const stored = readStored();
+    if (stored !== null) return stored;
+    try {
       let migrated: Record<string, number> | null = null;
       for (const legacyKey of legacyKeys) {
         const legacyRaw = localStorage.getItem(legacyKey);
@@ -81,6 +103,15 @@ export function createPerSceneSetting(
   }
 
   const cache: Record<string, number> = loadInitial();
+
+  // Replaces the cache's contents in place. Deliberately not loadInitial: a
+  // snapshot applied from outside must never run the legacy-key migration or
+  // delete anything from the storage it was applied to.
+  registerSyncedStore(storageKey, () => {
+    const stored = readStored() ?? {};
+    for (const k of Object.keys(cache)) delete cache[k];
+    for (const k of Object.keys(stored)) cache[k] = stored[k];
+  });
 
   function persist(): void {
     try {

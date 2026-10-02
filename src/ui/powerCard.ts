@@ -117,6 +117,9 @@ export interface PowerCardDeps {
    *  output (app.ts's previewActive) rather than the device itself: shows the
    *  Preview size row. The three below are only read then. */
   isPreview?: () => boolean;
+  /** False when the preview has no box to resize (a phone controller's preview
+   *  is the whole page), which hides the Size row; absent means it can. */
+  canResizePreview?: () => boolean;
   getPreviewSize?: () => PreviewSize;
   onPreviewSizeChange?: (size: PreviewSize) => void;
   /** The Resolution slider's value, a fraction from RESOLUTION_MIN to
@@ -802,8 +805,9 @@ export function createPowerCard(deps: PowerCardDeps, opts: PowerCardOptions = {}
     statusRow.refresh(status);
     qualityRow.refresh(status.choice, status.recommended);
     const preview = deps.isPreview?.() ?? false;
-    sizeRow.el.style.display = preview ? "" : "none";
-    if (preview && deps.getPreviewSize) sizeRow.refresh(deps.getPreviewSize());
+    const sizeShown = preview && (deps.canResizePreview?.() ?? true);
+    sizeRow.el.style.display = sizeShown ? "" : "none";
+    if (sizeShown && deps.getPreviewSize) sizeRow.refresh(deps.getPreviewSize());
     // The Output card has no isPreview and always shows its row; the main
     // card's follows the preview, like the size row above.
     const resolutionShown = !!deps.getResolution && (deps.isPreview ? preview : true);

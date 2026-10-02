@@ -608,6 +608,19 @@
         color: rgba(255, 255, 255, 0.72);
       }
 
+      /* A phone opened as a room's controller (app.ts's isController) listens to
+       * nothing — the host does — so the gallery's sound-source picker would
+       * offer a microphone it never opens. */
+      body.controller .gal-source {
+        display: none;
+      }
+      /* ...and its "remote · CODE" badge drops under the scene row instead of
+       * sharing it: on a phone's width the row's version label runs into it. */
+      body.controller #roomCode {
+        top: 60px;
+        cursor: default;
+      }
+
       /* The page's h1 and product blurb are for crawlers and screen readers
        * only — the design rule for the gallery is that the mark alone carries
        * the name, with no visible title or blurb (src/ui/gallery.ts). */
