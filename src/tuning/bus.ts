@@ -12,6 +12,9 @@ export interface TuningParams {
    *  settings are ignored (there's nothing to override on a scene that
    *  isn't currently mounted). */
   scene?: string;
+  /** Holds Auto still (see overrides.ts's isAutoPinned). Absent means false,
+   *  the same as a settings key dropped from the file: every push is a full
+   *  snapshot, so a caller that wants the pin passes it every time. */
   autoPin?: boolean;
   settings?: Record<string, number>;
 }
@@ -20,7 +23,7 @@ export interface TuningParams {
  *  same apply logic for a Playwright-driven push as for a file-watch push. */
 export function applyTuningParams(params: TuningParams): void {
   clearAllOverrides();
-  if (typeof params.autoPin === "boolean") setAutoPinned(params.autoPin);
+  setAutoPinned(params.autoPin === true);
   const sceneId = params.scene;
   if (sceneId && params.settings) {
     for (const [key, value] of Object.entries(params.settings)) {
