@@ -4,8 +4,17 @@ import { ClockSync } from "./clock.ts";
 import { JitterBuffer, type TimedFrame } from "./jitterBuffer.ts";
 import { SlewLimiter } from "./slewLimiter.ts";
 import { WireDecimator } from "./wireDecimator.ts";
-import { parseViewport, type RosterEntry } from "../../server/roomWire.ts";
+import { realStorage } from "./realStorage.ts";
+import { reconnectDelayMs, isTerminalClose, isSilent, PROBE_TIMEOUT_MS } from "./reconnect.ts";
+import { parseControlMessage, type DeviceCommand, type RosterEntry } from "./roomMessages.ts";
 import type { Viewport } from "../render/scene.ts";
+import type { LookClientMsg, LookServerMsg } from "../../server/lookDoc.ts";
+import type { RoomRole } from "../../server/roomRules.ts";
+
+// The roster and command shapes live with the rest of the JSON vocabulary
+// (roomMessages.ts); callers that only want the types keep importing them here.
+export type { RosterEntry, DeviceCommand } from "./roomMessages.ts";
+export type { RoomRole };
 
 /** Fallback target: how far behind the room clock a device without exclusive
  *  local capture renders, so a slow/jittery network path never shows up as
@@ -22,6 +31,10 @@ const BROADCAST_INTERVAL_MS = 1000 / 30;
  *  solo host, stepping 0 -> RENDER_DELAY_MS) from visibly rewinding uTime —
  *  instead it drifts, reaching a 120ms swing in ~2.4s. */
 const DELAY_SLEW_RATE = 0.05;
+
+/** How often a reconnecting connection checks whether its pings are going
+ *  unanswered (reconnect.ts isSilent has the limit). */
+const WATCHDOG_CHECK_MS = 1000;
 
 // Kept well below float32's ~7 significant digits so a raw epoch-ms time
 // never has to touch a shader uniform (which would lose all sub-second
@@ -50,14 +63,36 @@ export interface VisualSample {
   level: number;
 }
 
-// The roster shape and the control-message parsing are shared with the Room
-// Durable Object (server/roomWire.ts), so the two ends can't drift apart.
-export type { RosterEntry };
+/** The room's keys, as the laptop minted them. A host presents both; a phone
+ *  or TV presents only the room key. Absent = the old keyless legacy join
+ *  (server/roomRules.ts has what that still allows). */
+export interface RoomAuth {
+  roomKey?: string;
+  hostKey?: string;
+}
 
-export interface DeviceCommand {
-  scene?: string;
-  palette?: string;
-  viewport?: Viewport;
+export interface ConnOptions {
+  auth?: RoomAuth;
+  /** Redial after a drop. Off by default: the legacy phone-as-renderer path
+   *  relies on a dropped socket staying dropped (fallBackToSolo in app.ts). */
+  reconnect?: boolean;
+}
+
+/** `denied` is terminal: the room refused these credentials (reconnect.ts
+ *  isTerminalClose). Every other close is `closed`, then `connecting` again if
+ *  the connection reconnects. */
+export type ConnState = "connecting" | "open" | "closed" | "denied";
+
+/** A random UUID v4. crypto.randomUUID needs a recent Chrome;
+ *  getRandomValues is old enough for any TV browser. */
+function newDeviceId(): string {
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  let hex = "";
+  for (let i = 0; i < b.length; i++) hex += (b[i] + 0x100).toString(16).slice(1);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** Used when storage is blocked (Safari/WebKit private modes, sandboxed
@@ -65,24 +100,32 @@ export interface DeviceCommand {
  *  host and a renderer in the same tab still agree on who "this device" is. */
 let sessionDeviceId: string | null = null;
 
+// Read through the real storage, not `localStorage`: on a paired phone or TV
+// the global is the in-memory overlay (realStorage.ts), and the device id must
+// survive a reload and stay out of the room's look.
 function readDeviceId(): string {
   const KEY = "vibe.deviceId";
   try {
-    let id = localStorage.getItem(KEY);
+    const store = realStorage ?? localStorage;
+    let id = store.getItem(KEY);
     if (!id) {
-      id = crypto.randomUUID();
-      localStorage.setItem(KEY, id);
+      id = newDeviceId();
+      store.setItem(KEY, id);
     }
     return id;
   } catch {
-    return (sessionDeviceId ??= crypto.randomUUID());
+    return (sessionDeviceId ??= newDeviceId());
   }
 }
 
-function wsUrl(code: string, role: "host" | "renderer", ownDeviceId: string): string {
+export function roomWsUrl(code: string, role: RoomRole, deviceId: string, extra?: Record<string, string>): string {
   const proto = WORKER_ORIGIN.startsWith("https") ? "wss" : "ws";
   const host = WORKER_ORIGIN.replace(/^https?:\/\//, "");
-  return `${proto}://${host}/api/room/${encodeURIComponent(code)}/ws?role=${role}&deviceId=${encodeURIComponent(ownDeviceId)}`;
+  let url = `${proto}://${host}/api/room/${encodeURIComponent(code)}/ws?role=${role}&deviceId=${encodeURIComponent(deviceId)}`;
+  if (extra) {
+    for (const name of Object.keys(extra)) url += `&${encodeURIComponent(name)}=${encodeURIComponent(extra[name])}`;
+  }
+  return url;
 }
 
 /** Asks the Worker for a fresh room. Gives up after `timeoutMs`, because the
@@ -104,77 +147,74 @@ export async function createRoomCode(timeoutMs = 4000): Promise<string> {
   }
 }
 
-type ControlMessage =
-  | { type: "pong"; t0: number; tServer: number }
-  | { type: "roster"; devices: RosterEntry[] }
-  | { type: "command"; scene?: string; palette?: string; viewport?: Viewport };
-
-function parseControlMessage(data: unknown): ControlMessage | null {
-  if (typeof data !== "string") return null;
-  let msg: unknown;
-  try {
-    msg = JSON.parse(data);
-  } catch {
-    return null;
-  }
-  if (!msg || typeof msg !== "object") return null;
-  const m = msg as Record<string, unknown>;
-
-  if (m.type === "pong" && typeof m.t0 === "number" && typeof m.tServer === "number") {
-    return { type: "pong", t0: m.t0, tServer: m.tServer };
-  }
-  if (m.type === "roster" && Array.isArray(m.devices)) {
-    return { type: "roster", devices: m.devices as RosterEntry[] };
-  }
-  if (m.type === "command") {
-    return {
-      type: "command",
-      scene: typeof m.scene === "string" ? m.scene : undefined,
-      palette: typeof m.palette === "string" ? m.palette : undefined,
-      viewport: parseViewport(m.viewport),
-    };
-  }
-  return null;
+/** The query parameters a join carries beyond role and device id: the keys it
+ *  holds, and `frames` for a controller (a phone that wants the live frames
+ *  for its own preview, and is otherwise hidden from the room). */
+function joinQuery(role: RoomRole, auth: RoomAuth | undefined): Record<string, string> {
+  const q: Record<string, string> = {};
+  if (role === "host" && auth?.hostKey) q.hk = auth.hostKey;
+  if (auth?.roomKey) q.k = auth.roomKey;
+  if (role === "controller") q.frames = "1";
+  return q;
 }
 
 abstract class RoomConnectionBase {
   readonly deviceId = readDeviceId();
-  protected ws: WebSocket;
+  protected ws: WebSocket | null = null;
   protected clock: ClockSync;
   protected buffer = new JitterBuffer();
   private delaySlew = new SlewLimiter(DELAY_SLEW_RATE);
   private _connected = false;
+  private _state: ConnState = "connecting";
   private lastFrameAt = 0;
   private roster: RosterEntry[] = [];
   private rosterListeners: Array<(r: RosterEntry[]) => void> = [];
   private commandListeners: Array<(c: DeviceCommand) => void> = [];
-  // Announcing a device is a "last write wins" fire-once call made right at
-  // startup, often before the handshake finishes (e.g. while detectQuality()'s
-  // benchmark is still running) — queue it and flush on open rather than
-  // silently dropping it, or the device would never appear in anyone's roster.
-  private pendingHello: { scene: string; palette: string; viewport?: Viewport } | null = null;
+  private stateListeners: Array<(s: ConnState) => void> = [];
+  private lookListeners: Array<(m: LookServerMsg) => void> = [];
+  // Announcing a device is a "last write wins" call made right at startup,
+  // often before the handshake finishes (e.g. while detectQuality()'s
+  // benchmark is still running) — keep it and send it on every open, rather
+  // than silently dropping it, or the device would never appear in anyone's
+  // roster. Kept after sending too: a reconnect is a new socket the room has
+  // never heard from, so it needs the same hello again.
+  private lastHello: { scene: string; palette: string; viewport?: Viewport } | null = null;
 
-  constructor(code: string, role: "host" | "renderer") {
-    this.ws = new WebSocket(wsUrl(code, role, this.deviceId));
-    this.ws.binaryType = "arraybuffer";
+  private readonly code: string;
+  private readonly role: RoomRole;
+  private readonly query: Record<string, string>;
+  private readonly reconnect: boolean;
+  private attempt = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private closedByUser = false;
+  // When the oldest ping with no reply since was sent, 0 when none is
+  // outstanding; any message from the room clears it (reconnect.ts isSilent).
+  private unansweredSince = 0;
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private probeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(code: string, role: RoomRole, opts: ConnOptions = {}) {
+    this.code = code;
+    this.role = role;
+    this.query = joinQuery(role, opts.auth);
+    this.reconnect = opts.reconnect === true;
     this.clock = new ClockSync((t0) => {
-      if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: "ping", t0 }));
+      this.sendPing(t0);
     });
-
-    this.ws.addEventListener("open", () => {
-      this._connected = true;
-      this.clock.start();
-      if (this.pendingHello) this.ws.send(JSON.stringify({ type: "hello", ...this.pendingHello }));
-    });
-    this.ws.addEventListener("close", () => {
-      this._connected = false;
-      this.clock.stop();
-    });
-    this.ws.addEventListener("message", (e: MessageEvent) => this.onMessage(e.data));
+    if (this.reconnect) {
+      document.addEventListener("visibilitychange", this.onVisibility);
+      window.addEventListener("pageshow", this.onWake);
+      window.addEventListener("online", this.onWake);
+    }
+    this.connect();
   }
 
   get connected(): boolean {
     return this._connected;
+  }
+
+  get state(): ConnState {
+    return this._state;
   }
 
   get currentRoster(): RosterEntry[] {
@@ -203,26 +243,83 @@ abstract class RoomConnectionBase {
     };
   }
 
+  /** Fires on every connection state change; `denied` is the last one. Does
+   *  not fire for the current state when you subscribe — read `state`. */
+  onState(cb: (s: ConnState) => void): () => void {
+    this.stateListeners.push(cb);
+    return () => {
+      this.stateListeners = this.stateListeners.filter((f) => f !== cb);
+    };
+  }
+
+  /** The room's look messages: the snapshot, other controllers' patches, and
+   *  the replies to this device's own (src/net/lookSync.ts consumes them). */
+  onLook(cb: (m: LookServerMsg) => void): () => void {
+    this.lookListeners.push(cb);
+    return () => {
+      this.lookListeners = this.lookListeners.filter((f) => f !== cb);
+    };
+  }
+
   /** Announce (or update) this device's own scene/palette(+viewport) so the roster stays current.
    *  `viewport` is optional — omit it to leave the room's idea of this device's slice untouched. */
   sendHello(scene: string, palette: string, viewport?: Viewport): void {
-    this.pendingHello = { scene, palette, viewport };
-    if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: "hello", scene, palette, viewport }));
-      this.pendingHello = null;
-    }
+    // A later hello that omits the viewport must not forget an earlier one
+    // when it is replayed to a fresh socket.
+    this.lastHello = { scene, palette, viewport: viewport ?? this.lastHello?.viewport };
+    this.sendRaw(JSON.stringify({ type: "hello", scene, palette, viewport }));
   }
 
   /** Ask another device (by id, from the roster) to change its scene/palette. */
   sendSetDevice(targetId: string, cmd: DeviceCommand): void {
-    if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: "setDevice", targetId, ...cmd }));
-    }
+    this.sendRaw(JSON.stringify({ type: "setDevice", targetId, ...cmd }));
+  }
+
+  /** Send a look message. False when the socket is not open, so the caller
+   *  can tell a message that went out from one that must be tried again. */
+  sendLook(msg: LookClientMsg): boolean {
+    return this.sendRaw(JSON.stringify(msg));
+  }
+
+  /** Ask the room for the current look; it answers with a `look` message. */
+  requestLook(): void {
+    this.sendLook({ type: "lookGet" });
   }
 
   close(): void {
+    this.closedByUser = true;
+    this.cancelRetry();
+    this.stopLiveness();
+    if (this.reconnect) {
+      document.removeEventListener("visibilitychange", this.onVisibility);
+      window.removeEventListener("pageshow", this.onWake);
+      window.removeEventListener("online", this.onWake);
+    }
     this.clock.stop();
-    this.ws.close();
+    this._connected = false;
+    this.ws?.close();
+    this.setState("closed");
+  }
+
+  /** A clock-sync ping. False when it did not go out; otherwise it starts the
+   *  silence count if none is running. */
+  private sendPing(t0: number): boolean {
+    if (!this.sendRaw(JSON.stringify({ type: "ping", t0 }))) return false;
+    if (this.unansweredSince === 0) this.unansweredSince = Date.now();
+    return true;
+  }
+
+  /** False rather than a throw when the socket is not open: every send here
+   *  is fire-and-forget, and a dropped one is the caller's to resend. */
+  protected sendRaw(data: string | ArrayBuffer): boolean {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      ws.send(data);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   protected pushFrame(frame: TimedFrame): void {
@@ -240,6 +337,8 @@ abstract class RoomConnectionBase {
       for (const cb of this.rosterListeners) cb(this.roster);
     } else if (msg.type === "command") {
       for (const cb of this.commandListeners) cb({ scene: msg.scene, palette: msg.palette, viewport: msg.viewport });
+    } else {
+      for (const cb of this.lookListeners) cb(msg);
     }
   }
 
@@ -268,27 +367,172 @@ abstract class RoomConnectionBase {
       level: s.level,
     };
   }
+
+  private setState(s: ConnState): void {
+    if (this._state === s || this._state === "denied") return;
+    this._state = s;
+    for (const cb of this.stateListeners) cb(s);
+  }
+
+  /** Opens a socket. Every handler ignores a socket that is no longer
+   *  `this.ws`, so a late event from one we gave up on (an immediate retry
+   *  while the old one was still closing) cannot flip the state of its
+   *  replacement. */
+  private connect(): void {
+    if (this.closedByUser || this._state === "denied") return;
+    this.setState("connecting");
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(roomWsUrl(this.code, this.role, this.deviceId, this.query));
+    } catch (e) {
+      if (!this.reconnect) throw e;
+      this.setState("closed");
+      this.scheduleRetry();
+      return;
+    }
+    ws.binaryType = "arraybuffer";
+    this.ws = ws;
+
+    ws.addEventListener("open", () => {
+      if (this.ws !== ws) return;
+      this._connected = true;
+      this.attempt = 0;
+      this.unansweredSince = 0;
+      // start() does not clear the previous burst's timers, so stop first.
+      this.clock.stop();
+      this.clock.start();
+      if (this.reconnect) this.startWatchdog();
+      if (this.lastHello) this.sendRaw(JSON.stringify({ type: "hello", ...this.lastHello }));
+      this.setState("open");
+    });
+    ws.addEventListener("close", (e: CloseEvent) => {
+      if (this.ws !== ws) return;
+      this.socketGone(e.code);
+    });
+    ws.addEventListener("message", (e: MessageEvent) => {
+      if (this.ws !== ws) return;
+      this.unansweredSince = 0;
+      this.onMessage(e.data);
+    });
+  }
+
+  /** The current socket is over, by its own close or because we gave up on it. */
+  private socketGone(code: number): void {
+    this._connected = false;
+    this.stopLiveness();
+    this.clock.stop();
+    if (isTerminalClose(code)) {
+      this.setState("denied");
+      return;
+    }
+    this.setState("closed");
+    this.scheduleRetry();
+  }
+
+  /** Gives up on an open socket that has stopped answering. A socket whose path
+   *  is dead may take a long while to report its own close, so it is dropped
+   *  from `this.ws` first and the close is handled here: whatever the old
+   *  socket says later is ignored, like any other replaced one. */
+  private recycle(): void {
+    const ws = this.ws;
+    if (!ws) return;
+    this.ws = null;
+    try {
+      ws.close();
+    } catch {
+      // Already going down; the retry below is what matters.
+    }
+    this.socketGone(1006);
+  }
+
+  /** Reconnecting connections only: a dead path leaves the socket OPEN, and
+   *  nothing else would ever notice (reconnect.ts says why). */
+  private startWatchdog(): void {
+    this.stopLiveness();
+    this.watchdogTimer = setInterval(() => {
+      if (isSilent(this.unansweredSince, Date.now())) this.recycle();
+    }, WATCHDOG_CHECK_MS);
+  }
+
+  private stopLiveness(): void {
+    if (this.watchdogTimer !== null) clearInterval(this.watchdogTimer);
+    this.watchdogTimer = null;
+    if (this.probeTimer !== null) clearTimeout(this.probeTimer);
+    this.probeTimer = null;
+    this.unansweredSince = 0;
+  }
+
+  /** The page came back and the socket still reads open: ask it something now
+   *  rather than waiting out the watchdog, and give up on it if nothing at all
+   *  comes back in PROBE_TIMEOUT_MS. */
+  private probe(): void {
+    const ws = this.ws;
+    if (!ws || this.probeTimer !== null) return;
+    const sentAt = Date.now();
+    if (!this.sendPing(sentAt)) return;
+    this.probeTimer = setTimeout(() => {
+      this.probeTimer = null;
+      // Still unanswered since before the probe went out: nothing has arrived
+      // in between (a message clears the count, a later ping only restarts it).
+      if (this.ws === ws && this.unansweredSince !== 0 && this.unansweredSince <= sentAt) this.recycle();
+    }, PROBE_TIMEOUT_MS);
+  }
+
+  private scheduleRetry(): void {
+    if (!this.reconnect || this.closedByUser || this._state === "denied" || this.retryTimer !== null) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.connect();
+    }, reconnectDelayMs(this.attempt++));
+  }
+
+  private cancelRetry(): void {
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+  }
+
+  /** The page came back (unlocked, tab shown, network restored): skip the
+   *  rest of the backoff when waiting to retry, or test an open socket that
+   *  may have died while the page was away. An attempt already in flight is
+   *  left alone. `attempt` is not reset, so a room that keeps refusing still
+   *  backs off. */
+  private readonly onWake = (): void => {
+    if (this.closedByUser) return;
+    if (this._state === "open") {
+      this.probe();
+      return;
+    }
+    if (this._state !== "closed") return;
+    this.cancelRetry();
+    this.connect();
+  };
+
+  private readonly onVisibility = (): void => {
+    if (document.visibilityState === "visible") this.onWake();
+  };
 }
 
 export class HostConnection extends RoomConnectionBase {
   private decimator = new WireDecimator(BROADCAST_INTERVAL_MS);
 
-  constructor(code: string) {
-    super(code, "host");
+  constructor(code: string, opts?: ConnOptions) {
+    super(code, "host", opts);
   }
 
   /** Alone in the room (roster is empty pre-hello, or just this device's own
    *  socket) -> render fresh, since there's nobody to desync from and no
    *  network hop in this device's own path. Once anyone else joins, fall
-   *  back to the same delay everyone else uses. */
+   *  back to the same delay everyone else uses. A phone controller doesn't
+   *  count — the room leaves it off the roster already; skipping it here is
+   *  a guard against an older or looser room listing one. */
   protected override targetDelayMs(): number {
-    return this.currentRoster.length <= 1 ? 0 : RENDER_DELAY_MS;
+    let devices = 0;
+    for (const d of this.currentRoster) if (d.role !== "controller") devices++;
+    return devices <= 1 ? 0 : RENDER_DELAY_MS;
   }
 
   /** Call every local render tick; internally decimates the wire send to ~30Hz
-   *  while feeding the full-rate local buffer so this device's own visuals stay smooth.
-   *  The one-tick onset flags raised on skipped ticks ride the next send
-   *  (wireDecimator.ts) — the local buffer sees every one directly. */
+   *  while feeding the full-rate local buffer so this device's own visuals stay smooth. */
   sendFrame(frame: EncodableFrame): void {
     const roomTimeMs = this.clock.roomNow();
     this.pushFrame({ ...frame, roomTimeMs });
@@ -297,15 +541,14 @@ export class HostConnection extends RoomConnectionBase {
     if (!d.send) return;
     // The latches are cleared even if the socket isn't open, so a stale hit
     // isn't replayed on reconnect.
-    if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
-    }
+    this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
   }
 }
 
 export class RendererConnection extends RoomConnectionBase {
-  constructor(code: string) {
-    super(code, "renderer");
+  /** `role` is ControllerConnection's hook; everything else passes (code, opts). */
+  constructor(code: string, opts?: ConnOptions, role: "renderer" | "controller" = "renderer") {
+    super(code, role, opts);
   }
 
   protected override onMessage(data: unknown): void {
@@ -315,5 +558,14 @@ export class RendererConnection extends RoomConnectionBase {
     }
     const decoded = decodeFeatureFrame(data as ArrayBuffer);
     if (decoded) this.pushFrame(decoded);
+  }
+}
+
+/** A phone that edits the room's look. It decodes frames like a renderer (it
+ *  asks the room for them, for its own preview) but the room never lists it,
+ *  so the host and the Room panel don't see a second screen. */
+export class ControllerConnection extends RendererConnection {
+  constructor(code: string, opts?: ConnOptions) {
+    super(code, opts, "controller");
   }
 }
