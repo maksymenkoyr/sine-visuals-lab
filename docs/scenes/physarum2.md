@@ -199,6 +199,23 @@ configs are used.
   mesh. SwiftShader runs far fewer steps per second than a GPU, so the
   presets are worth a look on real hardware.
 
+  - 2026-10-02, `padresponse.mjs` (the pads' own CPU pair culture, shipped
+    default motion, 500 steps, 4 seeds, no beat reseeds, one direction swept
+    with the other at its `ATTRACT_ROWS` default; overlap = Σ min over 6×6-cell
+    blocks of each strain's normalised trail). Smell A1 → B2: 0.19–0.23 for
+    every value from −1.5 to 0, then 0.30 / 0.43 / 0.50 at +0.25 / +0.5 /
+    +0.75, then 0.54–0.56 from +1 to +1.5. A1 → D4: 0.31–0.36 flat below 0,
+    0.43 → 0.66 from +0.25 to +1, flat after. So only 0…+1 of the ±1.5 range
+    changes the picture, and the default table sits wholly below 0. Touch
+    A1 → B2 (B2's trail over A1's): feed 1.04 → 1.22 from +0.25 to +1.5 under
+    any Smell; eat 0.94–0.98 under the default Smell (they never meet) but
+    0.73 → 0.42 from −0.25 to −1.5 when both attract at +0.6. A pad settles on
+    a new value in 60–120 steps (1–2 s at `PAD_STEPS_PER_SEC`). The pad's own
+    pixels (exposure 0.85, clamp) clip the graded half into what reads as a
+    single jump, the first sweep's mistake before raw trails were read
+    (`PairCulture.trails()`). `padmodels.mjs`: neither a probability gate
+    nor a value-scaled smell reach made avoid strength change the overlap.
+
 ## Decisions and pivots
 
 - 2026-09-26: scene added complete in one pass — species/attraction-table
@@ -809,6 +826,22 @@ configs are used.
   - Checks: `npm run typecheck`, `npm run test`, headless screenshots of
     the dish before and after and of the panel, and a scripted click through
     every new button.
+- **2026-10-02: Pairs pads read as noise; ideas page before building.** The
+  user (screenshot of the Smell pads): the monitors are "not very
+  informative", they "barely show any change"; the "− A1 → B2 +" axes are
+  "still very not informative", it's simply attracts / repels ("mb more
+  biological term"), maybe "some kind of hint around mouse cursor"; and
+  adjusting the scene with the pads is "hard and confusing" because "often we
+  don't see any change". Asked for an artifact with all ideas first. Measured
+  before proposing (Measurements, 2026-10-02): the Smell range is flat below 0
+  and above +1, the defaults are all below 0, the pad monitor clips and adds
+  two similar hues, Eat bites only pairs that meet. Ideas page "Readable Pairs
+  pads" (Materials): contact colours, own exposure, an overlap meter, settle on
+  release, hold still while touched, crisp pixels (ask); axis-end words and a
+  cursor hint (avoids · seeks / eats · feeds recommended; "attracts" reads
+  backwards against "A1 → B2"); a controller-only spotlight dimming the other
+  strains, hatched flat ends, a Touch "rarely meet" tag, squeezed flat ends
+  (ask). No sim change proposed (`padmodels.mjs`). Awaiting the user's picks.
 
 ## Tuning notes
 
@@ -977,6 +1010,12 @@ applies there too. Tuned so far only against the synthetic feed at
   built from (v5, with Headcount and Synergy). `node physarum2/artifacts/look-studio.mjs --page
   strain-console.html --out <dir>` (or `--page affinity-studio.html`)
   screenshots either prototype page as the artifact viewer shows it.
+- Artifact "Readable Pairs Pads" (ideas for the Pairs pads, private):
+  https://claude.ai/artifact/GspZfQHpz4ETJDkPjiLsCK — self-contained source
+  `physarum2/artifacts/pairs-readable.html` (publish it as is). The two charts
+  are `padresponse.mjs`'s 2026-10-02 numbers; the lab runs six pair cultures
+  and a four-strain stand-in dish (a K-strain port of `createPairCulture`)
+  with every idea as a switch and Today / Proposed presets.
 - No `/ref` bundle. Headless shots for tuning:
   `docs/scenes/_shared/scripts/shot.mjs --scene physarum2 --bpm 120
   --settings '{…}'` (the session's scratch variant only differed in taking a
@@ -1023,6 +1062,13 @@ applies there too. Tuned so far only against the synthetic feed at
     "open at the boxes, no pads visible" control so the pads' own marginal
     cost isn't confounded with the pre-existing cost of opening the panel at
     all under throttling (see that script's own header, and Measurements).
+  - `padresponse.mjs` — node, no server: sweeps one Smell or Touch
+    direction on the real pair culture and prints overlap / trail ratio per
+    value (`--json` for the ideas page's charts). Needs Node ≥ 22.6 (it
+    imports the `.ts` modules directly).
+  - `padmodels.mjs` — node, no server: the shipped steering against two
+    rejected models (probability gate, value-scaled reach) for avoid
+    strength; see its header.
   - `padmotion.mjs` — how much a pad's live culture changes over 0.5 s vs
     10 s (block means, not agent flicker) plus two crops 3 s apart; the
     probe behind the 2026-09-28 "pads don't move" fix.

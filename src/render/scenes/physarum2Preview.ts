@@ -256,6 +256,10 @@ export interface PairCulture {
   /** Each channel's raw trail sum — for tests only (a pixel-space assertion
    *  would have to redo the same gamma/exposure curve `pixelsInto` applies). */
   totals(): [number, number];
+  /** Both channels' raw trail maps (`size*size`, row-major), live — read
+   *  them, never write. For measuring what a culture is doing (how much of
+   *  their territory two strains share) without `pixelsInto`'s clip. */
+  trails(): readonly [Float32Array, Float32Array];
   /** The scene's automatic beat reseed, at pad scale: each agent, with
    *  probability `share`, jumps into one disc of `radius` (a fraction of the
    *  dish's side, like the scene's field-unit Spread) at a random centre,
@@ -426,5 +430,9 @@ export function createPairCulture(opts: PairCultureOptions = {}): PairCulture {
     }
   }
 
-  return { size, step, pixelsInto, totals, seedColony };
+  function trails(): readonly [Float32Array, Float32Array] {
+    return trail;
+  }
+
+  return { size, step, pixelsInto, totals, trails, seedColony };
 }
