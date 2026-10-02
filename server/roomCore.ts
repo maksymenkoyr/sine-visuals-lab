@@ -1,0 +1,525 @@
+/**
+ * Everything a room does, over injected sockets, storage and clock — so
+ * Vitest can drive a whole room with fakes. server/room.ts is the thin
+ * Cloudflare adapter around this (it owns the WebSocketPair, the hibernation
+ * calls and `ctx.storage`); the rules themselves are server/roomRules.ts (who
+ * may join, who may send what) and server/lookDoc.ts (the look document and its
+ * patch). The messages are described in src/net/roomMessages.ts.
+ *
+ * The room stays a relay. Feature frames go from the host to every renderer —
+ * and to the controllers that asked to watch (tag `frames`) — as unparsed
+ * bytes, capped in size and nothing more. The JSON it understands is small:
+ * clock-sync ping/pong, the device roster, `setDevice` -> `command` routing by
+ * the target's device-id tag, the TV adopt relay (delivered by nonce tag, see
+ * `adopt`), and, in a claimed room only, the look. The room never interprets a
+ * setting; a look entry is an opaque string it stores and relays. A
+ * controller's patches are rationed per socket (LOOK_LIMITS `patchBurst` and
+ * `patchesPerSec`) because each accepted one is durable row writes.
+ *
+ * A Durable Object that hibernates loses every instance field, so what must
+ * outlive that is written as flat rows: the claim (hashed keys), the look's
+ * revision and ids, and one row per look key. The constructor rebuilds the
+ * in-memory state from those rows; every later change writes only the rows it
+ * touched. A claimed room that has no socket left schedules a wipe (the idle
+ * alarm); an accepted socket cancels it. No timer ever runs while a socket is
+ * connected, so hibernation is preserved.
+ *
+ * Plain TS with no Workers or DOM types: the root tsconfig lists this file
+ * (`files`) because the tests import it, the same arrangement as
+ * server/usage.ts.
+ */
+
+import {
+  LOOK_LIMITS,
+  applyLookPatch,
+  emptyLookDoc,
+  sanitizeLookDoc,
+  sanitizeLookPatch,
+  validLookKey,
+  type LookDoc,
+  type LookServerMsg,
+} from "./lookDoc.ts";
+import {
+  ROOM_CLOSE_DENIED,
+  ROOM_CODE_RE,
+  ROOM_IDLE_TTL_MS,
+  adoptTag,
+  canSend,
+  decideJoin,
+  parseRole,
+  validDeviceId,
+  validKey,
+  validTargetTag,
+  type RoomMeta,
+  type RoomRole,
+} from "./roomRules.ts";
+
+export interface Viewport {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export const FULL_VIEWPORT: Viewport = { x: 0, y: 0, w: 1, h: 1 };
+
+/** What a socket carries across hibernation (`serializeAttachment`, which
+ *  caps it small — keep it to ids and short strings). `sid` is unique per
+ *  socket and is what dedupes and excludes senders; `keyed` says the socket
+ *  joined a claimed room, so the stricter send rules and the look apply. */
+export interface Attachment {
+  sid: string;
+  role: RoomRole;
+  deviceId: string;
+  scene: string;
+  palette: string;
+  viewport: Viewport;
+  keyed: boolean;
+}
+
+export interface CoreSocket {
+  /** Decoded fresh on every access by the adapter. */
+  readonly attachment: Attachment;
+  /** May throw (the socket is mid-close); the core catches. */
+  send(data: string | ArrayBuffer): void;
+  close(code: number, reason: string): void;
+  setAttachment(a: Attachment): void;
+}
+
+export interface CoreHost {
+  /** Live sockets, optionally only those registered under `tag`. */
+  sockets(tag?: string): CoreSocket[];
+  now(): number;
+  setAlarm(atMs: number): void;
+  deleteAlarm(): void;
+  /** Fire-and-forget persist; the platform holds outgoing messages until it lands. */
+  put(key: string, value: string): void;
+  remove(key: string): void;
+  /** Wipes every row and the alarm. */
+  removeAll(): void;
+}
+
+export interface JoinParams {
+  role: string | null;
+  deviceId: string | null;
+  frames: boolean;
+  /** The nonce a TV waiting in a pairing slot presents (the `adopt` query
+   *  value); only a keyless renderer gets a tag from it. */
+  adopt?: string | null;
+}
+
+export type JoinResult = { ok: true; attachment: Attachment; tags: string[] } | { ok: false };
+
+/** A socket's patch allowance: tokens left, as of `at`. */
+interface PatchBucket {
+  tokens: number;
+  at: number;
+}
+
+interface RosterEntry {
+  deviceId: string;
+  role: RoomRole;
+  scene: string;
+  palette: string;
+  viewport: Viewport;
+}
+
+const META_ROW = "meta";
+const LOOK_ROW = "look";
+const KEY_ROW_PREFIX = "k:";
+const HASH_RE = /^[0-9a-f]{64}$/;
+const DENIED: JoinResult = { ok: false };
+
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === "object" && x !== null && !Array.isArray(x);
+}
+
+function parseViewport(v: unknown): Viewport | undefined {
+  if (!isRecord(v)) return undefined;
+  const { x, y, w, h } = v;
+  if (
+    typeof x === "number" &&
+    typeof y === "number" &&
+    typeof w === "number" &&
+    typeof h === "number" &&
+    Number.isFinite(x) &&
+    Number.isFinite(y) &&
+    Number.isFinite(w) &&
+    Number.isFinite(h)
+  ) {
+    return { x, y, w, h };
+  }
+  return undefined;
+}
+
+/** A scene or palette string from a `hello` / `setDevice`: length only, no
+ *  charset rule (legacy callers send whatever ids they have), but short enough
+ *  to keep the socket attachment small. */
+function shortString(v: unknown): string | undefined {
+  return typeof v === "string" && v.length <= LOOK_LIMITS.maxIdChars ? v : undefined;
+}
+
+/** An attachment from whatever `deserializeAttachment` returned, including the
+ *  shape written before roles, keys and socket ids existed (a socket that
+ *  hibernated across a deploy): those belong to unclaimed rooms, so `keyed` is
+ *  false and `sid` is derived from the device id. Never throws. */
+export function readAttachment(raw: unknown): Attachment {
+  const o = isRecord(raw) ? raw : {};
+  const role: RoomRole = o.role === "host" || o.role === "controller" ? o.role : "renderer";
+  const deviceId = typeof o.deviceId === "string" ? o.deviceId : "";
+  return {
+    sid: typeof o.sid === "string" && o.sid !== "" ? o.sid : `legacy:${deviceId}`,
+    role,
+    deviceId,
+    scene: typeof o.scene === "string" ? o.scene : "",
+    palette: typeof o.palette === "string" ? o.palette : "",
+    viewport: parseViewport(o.viewport) ?? { ...FULL_VIEWPORT },
+    keyed: o.keyed === true,
+  };
+}
+
+function parseMeta(raw: string | undefined): RoomMeta | null {
+  if (raw === undefined) return null;
+  try {
+    const o: unknown = JSON.parse(raw);
+    if (
+      isRecord(o) &&
+      o.v === 1 &&
+      typeof o.hostKeyHash === "string" &&
+      HASH_RE.test(o.hostKeyHash) &&
+      typeof o.roomKeyHash === "string" &&
+      HASH_RE.test(o.roomKeyHash) &&
+      typeof o.claimedAt === "number"
+    ) {
+      return { v: 1, hostKeyHash: o.hostKeyHash, roomKeyHash: o.roomKeyHash, claimedAt: o.claimedAt };
+    }
+  } catch {
+    // Unreadable claim: treated as unclaimed.
+  }
+  return null;
+}
+
+/** The look from its rows. Revision 0 means no patch ever applied, whatever
+ *  stray key rows say; the `look` row and the key rows of one patch are written
+ *  in the same event, so they land together or not at all. */
+function loadLook(stored: ReadonlyMap<string, string>): { rev: number; doc: LookDoc } {
+  const none = { rev: 0, doc: emptyLookDoc() };
+  const raw = stored.get(LOOK_ROW);
+  if (raw === undefined) return none;
+  let row: unknown;
+  try {
+    row = JSON.parse(raw);
+  } catch {
+    return none;
+  }
+  if (!isRecord(row) || typeof row.rev !== "number" || !Number.isSafeInteger(row.rev) || row.rev < 1) return none;
+
+  const storage: Record<string, string> = {};
+  for (const [key, value] of stored) {
+    if (!key.startsWith(KEY_ROW_PREFIX)) continue;
+    const k = key.slice(KEY_ROW_PREFIX.length);
+    if (validLookKey(k)) storage[k] = value;
+  }
+  const doc = sanitizeLookDoc({ scene: row.scene, palette: row.palette, storage }) ?? emptyLookDoc();
+  return { rev: row.rev, doc };
+}
+
+export class RoomCore {
+  private meta: RoomMeta | null;
+  private rev: number;
+  private doc: LookDoc;
+  /** Per socket id, in memory only: a room that hibernates starts its sockets
+   *  with a full allowance, which a sender that never goes quiet cannot use. */
+  private readonly patchBuckets = new Map<string, PatchBucket>();
+
+  /** `stored` is every row the adapter read from storage on wake-up. */
+  constructor(
+    private readonly host: CoreHost,
+    stored: ReadonlyMap<string, string>,
+  ) {
+    this.meta = parseMeta(stored.get(META_ROW));
+    const look = this.meta === null ? { rev: 0, doc: emptyLookDoc() } : loadLook(stored);
+    this.rev = look.rev;
+    this.doc = look.doc;
+  }
+
+  /** Decides a join and, if it is the claim, writes it — synchronously, so two
+   *  concurrent claimants cannot both win. `hashes` are the SHA-256 hex of the
+   *  presented `k` / `hk` (null when absent), computed by the adapter because
+   *  hashing is async. `newSid` is unique per socket and doubles as the
+   *  replacement for a device id that is missing, malformed or reserved. */
+  join(p: JoinParams, hashes: { k: string | null; hk: string | null }, newSid: string): JoinResult {
+    const role = parseRole(p.role);
+    if (role === null) return DENIED;
+    const decision = decideJoin(this.meta, { role, hostKeyHash: hashes.hk, roomKeyHash: hashes.k });
+    if (!decision.ok) return DENIED;
+    if (decision.claim && hashes.hk !== null && hashes.k !== null) this.claim(hashes.hk, hashes.k);
+
+    const deviceId = validDeviceId(p.deviceId) ? p.deviceId : newSid;
+    const tags: string[] = [role, deviceId];
+    if (role === "controller" && p.frames) tags.push("frames");
+    // A keyless renderer is a TV waiting in a pairing slot (a claimed room's
+    // keyed renderers are never adopted into anything).
+    if (role === "renderer" && !decision.keyed && validKey(p.adopt)) tags.push(adoptTag(p.adopt));
+    const attachment: Attachment = {
+      sid: newSid,
+      role,
+      deviceId,
+      scene: "",
+      palette: "",
+      viewport: { ...FULL_VIEWPORT },
+      keyed: decision.keyed,
+    };
+    return { ok: true, attachment, tags };
+  }
+
+  /** The socket is accepted: a claimed room is not idle any more, and a
+   *  keyed controller or renderer is told the current look at once. */
+  opened(ws: CoreSocket): void {
+    if (this.meta !== null) this.host.deleteAlarm();
+    const a = ws.attachment;
+    if (a.keyed && a.role !== "host") this.send(ws, this.lookSnapshot());
+  }
+
+  message(ws: CoreSocket, data: string | ArrayBuffer): void {
+    const a = ws.attachment;
+    // A keyless socket that was already connected when the room got claimed:
+    // it is being closed, and says nothing in the meantime.
+    if (this.meta !== null && !a.keyed) return;
+
+    if (typeof data !== "string") {
+      this.relayFrame(a, data);
+      return;
+    }
+    if (data.length > LOOK_LIMITS.maxMessageChars) return;
+    let msg: unknown;
+    try {
+      msg = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (!isRecord(msg)) return;
+
+    switch (msg.type) {
+      case "ping":
+        // Clock sync: echo the client's send time plus this clock, at once,
+        // so the client can estimate offset and round trip.
+        if (typeof msg.t0 === "number") {
+          this.send(ws, JSON.stringify({ type: "pong", t0: msg.t0, tServer: this.host.now() }));
+        }
+        return;
+      case "hello":
+        // A device announcing itself, or its updated scene / palette / viewport.
+        ws.setAttachment({
+          ...a,
+          scene: shortString(msg.scene) ?? a.scene,
+          palette: shortString(msg.palette) ?? a.palette,
+          viewport: parseViewport(msg.viewport) ?? a.viewport,
+        });
+        this.broadcastRoster();
+        return;
+      case "setDevice":
+        this.routeCommand(a, msg);
+        return;
+      case "lookGet":
+        if (a.keyed && canSend(a.keyed, a.role, "lookGet")) this.send(ws, this.lookSnapshot());
+        return;
+      case "lookPatch":
+        if (a.keyed) this.applyPatch(ws, a, msg);
+        return;
+    }
+  }
+
+  /** A socket is gone (closed or errored): tell everyone who is left, and
+   *  start the idle countdown if a claimed room has nobody. The closing socket
+   *  is excluded explicitly — the platform may still list it during its own
+   *  close handler. */
+  closed(ws: CoreSocket): void {
+    const gone = ws.attachment.sid;
+    this.patchBuckets.delete(gone);
+    this.broadcastRoster(gone);
+    if (this.meta === null) return;
+    const someoneLeft = this.host.sockets().some((s) => s.attachment.sid !== gone);
+    if (!someoneLeft) this.host.setAlarm(this.host.now() + ROOM_IDLE_TTL_MS);
+  }
+
+  /** The idle alarm fired: wipe a claimed room that is still empty, after
+   *  which the code behaves as an unclaimed room again. */
+  alarm(): void {
+    if (this.meta === null || this.host.sockets().length > 0) return;
+    this.host.removeAll();
+    this.patchBuckets.clear();
+    this.meta = null;
+    this.rev = 0;
+    this.doc = emptyLookDoc();
+  }
+
+  /** The TV adopt request (POST /api/room/{slot}/adopt, relayed here by the
+   *  adapter). The body carries the room key, and the slot's code is printed on
+   *  the TV, so anyone may be sitting in the slot: it goes only to the sockets
+   *  that joined presenting the body's nonce (`adoptTag`), not to every
+   *  renderer. The room checks shape and routes by that tag and nothing else;
+   *  the TV checks the nonce again, and the room keeps it only as the tag of the
+   *  socket that presented it. A claimed room is never a slot, so it answers 404
+   *  as an empty one does. */
+  adopt(body: unknown): { status: number; body: Record<string, unknown> } {
+    if (
+      !isRecord(body) ||
+      typeof body.room !== "string" ||
+      !ROOM_CODE_RE.test(body.room) ||
+      !validKey(body.k) ||
+      !validKey(body.n)
+    ) {
+      return { status: 400, body: { error: "bad-request" } };
+    }
+    if (this.meta !== null) return { status: 404, body: { delivered: 0 } };
+    const payload = JSON.stringify({ type: "adopt", room: body.room, k: body.k, n: body.n });
+    let delivered = 0;
+    for (const ws of this.host.sockets(adoptTag(body.n))) if (this.send(ws, payload)) delivered++;
+    return delivered > 0 ? { status: 200, body: { delivered } } : { status: 404, body: { delivered: 0 } };
+  }
+
+  private claim(hostKeyHash: string, roomKeyHash: string): void {
+    this.meta = { v: 1, hostKeyHash, roomKeyHash, claimedAt: this.host.now() };
+    this.host.put(META_ROW, JSON.stringify(this.meta));
+    // Sockets that got in while the room was unclaimed hold no key and must
+    // not outlive the claim (a keyless renderer could still command devices).
+    for (const ws of this.host.sockets()) {
+      if (ws.attachment.keyed) continue;
+      try {
+        ws.close(ROOM_CLOSE_DENIED, "denied");
+      } catch {
+        // Already closing.
+      }
+    }
+  }
+
+  /** Host bytes to every renderer and every frame-watching controller, once
+   *  each, never back to the sender. The room doesn't parse them. A keyless
+   *  socket left over from before the claim gets none (see `claim`). */
+  private relayFrame(sender: Attachment, data: ArrayBuffer): void {
+    if (!canSend(sender.keyed, sender.role, "binary") || data.byteLength > LOOK_LIMITS.maxBinaryBytes) return;
+    const seen = new Set<string>([sender.sid]);
+    for (const tag of ["renderer", "frames"]) {
+      for (const target of this.host.sockets(tag)) {
+        const a = target.attachment;
+        if (seen.has(a.sid) || a.keyed !== sender.keyed) continue;
+        seen.add(a.sid);
+        this.send(target, data);
+      }
+    }
+  }
+
+  /** One device commanding another (typically from a control panel) to change
+   *  its scene / palette / viewport. Routed to the target's device-id tag. */
+  private routeCommand(sender: Attachment, msg: Record<string, unknown>): void {
+    const target = msg.targetId;
+    if (!canSend(sender.keyed, sender.role, "setDevice") || !validTargetTag(target)) return;
+    const command = JSON.stringify({
+      type: "command",
+      scene: shortString(msg.scene),
+      palette: shortString(msg.palette),
+      viewport: parseViewport(msg.viewport),
+    });
+    for (const ws of this.host.sockets(target)) this.send(ws, command);
+  }
+
+  private applyPatch(ws: CoreSocket, sender: Attachment, msg: Record<string, unknown>): void {
+    const n = typeof msg.n === "number" && Number.isSafeInteger(msg.n) ? msg.n : null;
+    if (!canSend(sender.keyed, sender.role, "lookPatch")) {
+      this.reject(ws, n, "role");
+      return;
+    }
+    if (!this.takePatchToken(sender.sid)) {
+      this.reject(ws, n, "size");
+      return;
+    }
+    if (n === null) {
+      this.reject(ws, null, "shape");
+      return;
+    }
+    const clean = sanitizeLookPatch(msg);
+    if (!clean.ok) {
+      this.reject(ws, n, clean.reason);
+      return;
+    }
+    const applied = applyLookPatch(this.doc, clean.patch);
+    if (!applied.ok) {
+      this.reject(ws, n, applied.reason);
+      return;
+    }
+    const effective = applied.effective;
+    if (effective === null) {
+      // Nothing differs (a resend after a lost ack, say): no new revision, no write, no broadcast.
+      this.send(ws, JSON.stringify({ type: "lookAck", n, rev: this.rev } satisfies LookServerMsg));
+      return;
+    }
+
+    this.doc = applied.doc;
+    this.rev += 1;
+    this.host.put(LOOK_ROW, JSON.stringify({ rev: this.rev, scene: this.doc.scene, palette: this.doc.palette }));
+    if (effective.set) {
+      for (const k of Object.keys(effective.set)) this.host.put(KEY_ROW_PREFIX + k, effective.set[k]);
+    }
+    if (effective.del) {
+      for (const k of effective.del) this.host.remove(KEY_ROW_PREFIX + k);
+    }
+
+    this.send(ws, JSON.stringify({ type: "lookAck", n, rev: this.rev } satisfies LookServerMsg));
+    const relayed = JSON.stringify({ type: "lookPatch", rev: this.rev, ...effective } satisfies LookServerMsg);
+    for (const other of this.host.sockets()) {
+      const o = other.attachment;
+      if (o.sid === sender.sid || !o.keyed || o.role === "host") continue;
+      this.send(other, relayed);
+    }
+  }
+
+  /** Spends one patch from this socket's allowance (a token bucket: LOOK_LIMITS
+   *  `patchBurst`, refilled at `patchesPerSec`); false when it is empty. */
+  private takePatchToken(sid: string): boolean {
+    const now = this.host.now();
+    const b = this.patchBuckets.get(sid) ?? { tokens: LOOK_LIMITS.patchBurst, at: now };
+    const refill = (Math.max(0, now - b.at) * LOOK_LIMITS.patchesPerSec) / 1000;
+    b.tokens = Math.min(LOOK_LIMITS.patchBurst, b.tokens + refill);
+    b.at = now;
+    this.patchBuckets.set(sid, b);
+    if (b.tokens < 1) return false;
+    b.tokens -= 1;
+    return true;
+  }
+
+  private reject(ws: CoreSocket, n: number | null, reason: "role" | "size" | "shape"): void {
+    this.send(ws, JSON.stringify({ type: "lookReject", n, reason } satisfies LookServerMsg));
+  }
+
+  /** The `look` message: revision 0 has no document yet, so `doc` is null. */
+  private lookSnapshot(): string {
+    const msg: LookServerMsg = { type: "look", rev: this.rev, doc: this.rev === 0 ? null : this.doc };
+    return JSON.stringify(msg);
+  }
+
+  /** Every device's scene / palette / viewport to every socket. Controllers
+   *  see the roster but are not in it (a phone is not a screen), and the
+   *  roster of a room nobody has claimed keeps the shape it always had. */
+  private broadcastRoster(exceptSid?: string): void {
+    const live = this.host.sockets().filter((ws) => ws.attachment.sid !== exceptSid);
+    const devices: RosterEntry[] = [];
+    for (const ws of live) {
+      const a = ws.attachment;
+      if (a.role === "controller") continue;
+      devices.push({ deviceId: a.deviceId, role: a.role, scene: a.scene, palette: a.palette, viewport: a.viewport });
+    }
+    const payload = JSON.stringify({ type: "roster", devices });
+    for (const ws of live) this.send(ws, payload);
+  }
+
+  private send(ws: CoreSocket, data: string | ArrayBuffer): boolean {
+    try {
+      ws.send(data);
+      return true;
+    } catch {
+      // Socket is mid-close; its close handler cleans up.
+      return false;
+    }
+  }
+}
