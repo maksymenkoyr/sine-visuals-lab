@@ -141,6 +141,16 @@ All rounds below landed in the single PR #76 (opened as a draft, merged
   `DYE_SMOOTH > 0` (it is 0), and the splat arrays are filled once per step
   and uploaded only to the two programs that read them, instead of 2x slots
   string-built uniform names on every pass.
+- 2026-10-02 — Review pass on the scene. The bass shockwave ring was
+  centred on the unfolded `uv`, so in Top-bottom it expanded only from the
+  upper plume while the lower mirrored plume got none; it now measures from
+  the same y-folded `uvEmit` the emitter blob uses. Two per-frame costs
+  dropped with no change to the picture: the display shader evaluates only
+  the fold(s) `uFoldMix` actually weighs (a manual pick and Auto outside the
+  warp need one, not two), and `FluidBolts.draw` returns early while the
+  layer is already empty (every non-Lightning style, the gaps between
+  strikes), still doing the one clear and mip rebuild on the frame the last
+  bolt dies.
 
 ## Tuning notes
 

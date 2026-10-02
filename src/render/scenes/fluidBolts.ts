@@ -314,6 +314,11 @@ export function createFluidBolts(
 
   const pool = createBoltPool(rng);
   let target = createBoltTarget(gl, w, h, format);
+  // True while the layer holds nothing but zeros with a matching mip chain —
+  // a fresh target does. draw() then has nothing to do on a frame with no
+  // live bolt, instead of clearing and mip-rebuilding an all-zero layer
+  // every frame (every non-Lightning style, and the gaps between strikes).
+  let layerEmpty = true;
 
   const prog = createProgram(gl, BOLT_FRAG, BOLT_VERT);
   const vao = gl.createVertexArray();
@@ -339,6 +344,18 @@ export function createFluidBolts(
     strike: (ax, ay, bx, by, amp, force = false) => pool.strike(ax, ay, bx, by, amp, force),
     tick: (dtSec, afterglow, flicker) => pool.tick(dtSec, afterglow, flicker),
     draw(widthPx: number, aspect: number): void {
+      let anyLive = false;
+      for (let i = 0; i < MAX_BOLTS; i++) {
+        if (pool.strengths[i] > 0) {
+          anyLive = true;
+          break;
+        }
+      }
+      // The frame the last bolt dies still falls through, to clear its
+      // pixels and rebuild the mips once.
+      if (!anyLive && layerEmpty) return;
+      layerEmpty = !anyLive;
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
       gl.viewport(0, 0, target.w, target.h);
       gl.clearColor(0, 0, 0, 0);
@@ -382,6 +399,7 @@ export function createFluidBolts(
       if (nw === target.w && nh === target.h) return;
       deleteBoltTarget(gl, target);
       target = createBoltTarget(gl, nw, nh, format);
+      layerEmpty = true;
     },
     dispose(): void {
       deleteBoltTarget(gl, target);
