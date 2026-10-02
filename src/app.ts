@@ -2037,6 +2037,61 @@ function buildInputMeasure(tap: InputHealthTap, mono: Float32Array, sampleRate: 
   };
 }
 
+/** Nothing local to read this tick (synthetic feed, no capture yet, or a
+ *  renderer with no mic): every reading the meters take from this device's own
+ *  extractor and analysers goes back to null, so a card never keeps showing a
+ *  stale value from the previous mode. One place, so a new reading is added
+ *  here once rather than at each of currentVisual()'s early-out sites. */
+function clearLocalReadings(): void {
+  lastRawBands = null;
+  lastMono = null;
+  lastDeepMono = null;
+  lastLufs = null;
+  lastFixedEnergy = null;
+  lastBeatDiag = null;
+  lastFluxRatio = null;
+  lastGate = null;
+  lastInputHealth = null;
+}
+
+/** One tick's read of this device's own live capture — the bands, scope,
+ *  input health and LUFS readings, the extractor's frame, and the meters'
+ *  diagnostics off it — shared by currentVisual()'s solo and host branches,
+ *  which differ only in what they do with the tempo source and the frame
+ *  afterwards. `now` is the capture's own AudioContext clock. */
+function readLocalCapture(
+  bandAnalyser: BandAnalyser,
+  capture: CaptureHandle,
+  rateScale: number,
+): { f: FeatureFrame; now: number } {
+  const now = capture.context.currentTime;
+  const dbBands = bandAnalyser.readBandsDb();
+  lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
+  lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
+  lastInputHealth =
+    inputHealthTap && lastMono
+      ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
+      : null;
+  lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
+  lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
+  const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+  lastFixedEnergy = extractor.fixedEnergy;
+  lastBeatDiag = extractor.onsetDiag;
+  lastFluxRatio = extractor.fluxRatio;
+  // `fired` is this local extractor's own frame's onset, not the
+  // jitter-buffered visual frame currentVisual() returns for host mode
+  // (sampleToVisual(hostConn.sample())) — so fired and suppressed always
+  // describe the same tick's decision.
+  lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
+  // Feeds next tick's resolveAutoGain(), not this one's — see
+  // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
+  feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
+  // Same one-tick lag, same reason — see feedSilenceGateMeasurement's own
+  // doc comment.
+  feedSilenceGateMeasurement(f.level, extractor.dtSec);
+  return { f, now };
+}
+
 /** @param rateScale sensitivity.ts's smoothingRateScale(resolveSmoothing(scene.id)),
  *  computed once per tick by loop() and reused for animClock.advance() below
  *  — resolveSmoothing() slews its auto value, so calling it a second time
@@ -2049,45 +2104,19 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   // state above for why host/renderer/TV never do.
   lastTempoHits = undefined;
   if (syntheticFeed) {
-    lastRawBands = null;
     // Synthetic frames are generated directly, not sampled from a real
     // signal — there's nothing for the scope to trace, so its card
     // correctly stays hidden here (see audioMeters.ts).
-    lastMono = null;
-    lastDeepMono = null;
-    lastLufs = null;
-    lastFixedEnergy = null;
-    lastBeatDiag = null;
-    lastFluxRatio = null;
-    lastGate = null;
-    lastInputHealth = null;
+    clearLocalReadings();
     return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
   }
 
   if (mode === "solo") {
     if (!bandAnalyser || !capture) {
-      lastRawBands = null;
-      lastMono = null;
-      lastDeepMono = null;
-      lastLufs = null;
-      lastFixedEnergy = null;
-      lastBeatDiag = null;
-      lastFluxRatio = null;
-      lastGate = null;
-      lastInputHealth = null;
+      clearLocalReadings();
       return null;
     }
-    const now = capture.context.currentTime;
-    const dbBands = bandAnalyser.readBandsDb();
-    lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
-    lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    lastInputHealth =
-      inputHealthTap && lastMono
-        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
-        : null;
-    lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
-    lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+    const { f, now } = readLocalCapture(bandAnalyser, capture, rateScale);
     // The fixed-hop tempo source, when live, overrides the render-tick
     // tracker's own bpm — see tempoAnalyzer.ts's header for why its numbers
     // are better — and its drained onsets become this tick's tempoHits for
@@ -2104,47 +2133,15 @@ function currentVisual(rateScale: number): FeatureFrame | null {
         weight: o.strength * (1 + PHASE_BASS * o.bass),
       }));
     }
-    lastFixedEnergy = extractor.fixedEnergy;
-    lastBeatDiag = extractor.onsetDiag;
-    lastFluxRatio = extractor.fluxRatio;
-    // `fired` is this local extractor's own frame's onset, not the
-    // jitter-buffered visual frame currentVisual() returns for host mode
-    // (sampleToVisual(hostConn.sample())) — so fired and suppressed always
-    // describe the same tick's decision.
-    lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
-    // Feeds next tick's resolveAutoGain(), not this one's — see
-    // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
-    feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
-    // Same one-tick lag, same reason — see feedSilenceGateMeasurement's own
-    // doc comment.
-    feedSilenceGateMeasurement(f.level, extractor.dtSec);
     return f;
   }
 
   if (mode === "host") {
     if (!bandAnalyser || !capture || !hostConn) {
-      lastRawBands = null;
-      lastMono = null;
-      lastDeepMono = null;
-      lastLufs = null;
-      lastFixedEnergy = null;
-      lastBeatDiag = null;
-      lastFluxRatio = null;
-      lastGate = null;
-      lastInputHealth = null;
+      clearLocalReadings();
       return null;
     }
-    const now = capture.context.currentTime;
-    const dbBands = bandAnalyser.readBandsDb();
-    lastRawBands = captureRawBands(dbBands, bandAnalyser.dbRange);
-    lastMono = waveformAnalyser ? waveformAnalyser.read() : null;
-    lastInputHealth =
-      inputHealthTap && lastMono
-        ? inputHealth.advance(extractor.dtSec, buildInputMeasure(inputHealthTap, lastMono, capture.context.sampleRate))
-        : null;
-    lastDeepMono = measureAnalyser ? measureAnalyser.read() : null;
-    lastLufs = lufsAnalyser ? lufsAnalyser.read() : null;
-    const f = extractor.update(dbBands, now, resolveAutoGain(), rateScale, resolveSilenceGate());
+    const { f } = readLocalCapture(bandAnalyser, capture, rateScale);
     // Overwritten before hostConn.sendFrame() below, same as solo mode
     // above, so the TV and any renderer get the fixed-hop tempo over the
     // unchanged wire — see currentVisual()'s solo branch for the full
@@ -2156,30 +2153,12 @@ function currentVisual(rateScale: number): FeatureFrame | null {
       f.bpm = tempoSource.bpm;
       tempoSource.drainOnsets(); // unused here (see above); drained so they don't queue
     }
-    lastFixedEnergy = extractor.fixedEnergy;
-    lastBeatDiag = extractor.onsetDiag;
-    lastFluxRatio = extractor.fluxRatio;
-    lastGate = { dimmer: extractor.gateDimmer, fired: f.onset, suppressed: extractor.suppressed };
-    // Feeds next tick's resolveAutoGain(), not this one's — see
-    // feedAutoGainMeasurement's doc comment on why that one-tick lag is fine.
-    feedAutoGainMeasurement(extractor.bandSpanDb, extractor.dtSec);
-    // Same one-tick lag, same reason — see feedSilenceGateMeasurement's own
-    // doc comment.
-    feedSilenceGateMeasurement(f.level, extractor.dtSec);
     hostConn.sendFrame(f);
     return sampleToVisual(hostConn.sample());
   }
 
   // renderer — no local mic, so no raw signal to show.
-  lastRawBands = null;
-  lastMono = null;
-  lastDeepMono = null;
-  lastLufs = null;
-  lastFixedEnergy = null;
-  lastBeatDiag = null;
-  lastFluxRatio = null;
-  lastGate = null;
-  lastInputHealth = null;
+  clearLocalReadings();
   if (rendererConn) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
