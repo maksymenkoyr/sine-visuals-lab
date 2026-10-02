@@ -1,5 +1,45 @@
 import { createFullscreenScene } from "../fullscreenScene.ts";
 
+/** Camera speed (units per second) with no tempo, and the extra per BPM. */
+const BASE_SPEED = 1.2;
+const SPEED_PER_BPM = 0.004;
+/** How fast the speed eases toward the tempo's (per second). */
+const SPEED_EASE_PER_SEC = 2;
+/** The longest clock step that still counts as motion (a hidden tab, or the
+ *  clock swapped for another, must not fling the camera down the tunnel). */
+const MAX_STEP_SEC = 0.1;
+
+export interface TunnelCamera {
+  z: number; // distance travelled down the tunnel
+  speed: number;
+  lastSec: number | null;
+}
+
+export function createTunnelCamera(): TunnelCamera {
+  return { z: 0, speed: 0, lastSec: null };
+}
+
+/** Moves the camera to `timeSec` and returns how far down the tunnel it is.
+ *  The position is an integral of the speed, which eases toward the tempo's:
+ *  the tempo changing (the tracker settling, a lock, silence reading 0 BPM)
+ *  then changes how fast the camera goes, where `time * speed(bpm)` moved it
+ *  by `time * dSpeed` in one frame, a lurch that grew with the session. */
+export function advanceTunnelCamera(cam: TunnelCamera, timeSec: number, bpm: number): number {
+  const target = BASE_SPEED + Math.max(0, bpm) * SPEED_PER_BPM;
+  if (cam.lastSec === null) {
+    // First frame: start at the speed the tempo asks for, and where the old
+    // time-times-speed formula would have been.
+    cam.speed = target;
+    cam.z = timeSec * target;
+  } else {
+    const dt = Math.min(MAX_STEP_SEC, Math.max(0, timeSec - cam.lastSec));
+    cam.speed += (target - cam.speed) * Math.min(1, dt * SPEED_EASE_PER_SEC);
+    cam.z += dt * cam.speed;
+  }
+  cam.lastSec = timeSec;
+  return cam.z;
+}
+
 const FRAG = `
 const int MAX_STEPS = 100;
 const float TWO_PI = 6.28318;
@@ -8,7 +48,7 @@ void main() {
   vec2 uv = roomUv(vUv) - 0.5;
   uv.x *= uResolution.x / uResolution.y;
 
-  vec3 ro = vec3(0.0, 0.0, -uTime * (1.2 + uBpm * 0.004));
+  vec3 ro = vec3(0.0, 0.0, -uTunnelZ);
   vec3 rd = normalize(vec3(uv, 1.0));
 
   int steps = int(min(float(MAX_STEPS), uMaxSteps));
@@ -45,4 +85,11 @@ void main() {
 }
 `;
 
-export const tunnelScene = createFullscreenScene("tunnel", "Tunnel", FRAG, { minQuality: "low" });
+export const tunnelScene = createFullscreenScene("tunnel", "Tunnel", FRAG, {
+  minQuality: "low",
+  extraUniformDecls: "uniform float uTunnelZ;",
+  extraUniforms: (() => {
+    const camera = createTunnelCamera();
+    return (frame, anim) => ({ uTunnelZ: advanceTunnelCamera(camera, anim.timeSec, frame.bpm) });
+  })(),
+});

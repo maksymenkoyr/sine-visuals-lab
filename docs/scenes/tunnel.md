@@ -33,6 +33,13 @@ None — original design.
   `minTier: "low"` (later renamed).
 - 2026-08-29 (`4b8d342`, #31) — mechanical rename only: `minTier` →
   `minQuality`; no visual change.
+- 2026-10-02 — review fix: the camera was at `-uTime * (1.2 + uBpm * 0.004)`,
+  so every BPM update (the tracker settling, a lock or unlock, silence
+  reading 0) moved it by `uTime * dSpeed` in one frame, a lurch that grew
+  with the session. The position is now integrated on the JS side
+  (`advanceTunnelCamera`, passed as `uTunnelZ`) with the speed easing toward
+  the tempo's, so a tempo change only changes how fast the camera goes. At a
+  steady BPM the motion is the same as before.
 
 ## Tuning notes
 
