@@ -2,7 +2,7 @@
 
 A morphing storm cloud struck by lightning on every beat: a jagged branched
 bolt fires on the beat in every mode, and the cloud itself is lit from
-inside by the same strike. Five render modes (`MODES`) share one strike
+inside by the same strike. The render modes in `MODES` share one strike
 pool and one shape — Filaments (hair-thin curl-noise strands, the default),
 Mesh (a wireframe surface-nets lattice), Gas (the raymarched volumetric
 cloud), Voxel (the same march quantized/posterized), Points (a calm additive
