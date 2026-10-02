@@ -3,6 +3,8 @@ import { encodeFeatureFrame, decodeFeatureFrame, type EncodableFrame } from "./p
 import { ClockSync } from "./clock.ts";
 import { JitterBuffer, type TimedFrame } from "./jitterBuffer.ts";
 import { SlewLimiter } from "./slewLimiter.ts";
+import { WireDecimator } from "./wireDecimator.ts";
+import { parseViewport, type RosterEntry } from "../../server/roomWire.ts";
 import type { Viewport } from "../render/scene.ts";
 
 /** Fallback target: how far behind the room clock a device without exclusive
@@ -48,13 +50,9 @@ export interface VisualSample {
   level: number;
 }
 
-export interface RosterEntry {
-  deviceId: string;
-  role: "host" | "renderer";
-  scene: string;
-  palette: string;
-  viewport: Viewport;
-}
+// The roster shape and the control-message parsing are shared with the Room
+// Durable Object (server/roomWire.ts), so the two ends can't drift apart.
+export type { RosterEntry };
 
 export interface DeviceCommand {
   scene?: string;
@@ -62,13 +60,29 @@ export interface DeviceCommand {
   viewport?: Viewport;
 }
 
+/** This page's device id, shared by every connection it opens. Blocked
+ *  storage (cookies off, a sandboxed frame, some private modes) throws on
+ *  both calls, so it only ever makes the id per-page-load instead of
+ *  persistent — never a failure to connect. */
+let cachedDeviceId: string | null = null;
 function readDeviceId(): string {
+  if (cachedDeviceId) return cachedDeviceId;
   const KEY = "vibe.deviceId";
-  let id = localStorage.getItem(KEY);
+  let id: string | null = null;
+  try {
+    id = localStorage.getItem(KEY);
+  } catch {
+    // Unreadable: fall through to a fresh id.
+  }
   if (!id) {
     id = crypto.randomUUID();
-    localStorage.setItem(KEY, id);
+    try {
+      localStorage.setItem(KEY, id);
+    } catch {
+      // Not persisted; the cache below keeps it stable for this page.
+    }
   }
+  cachedDeviceId = id;
   return id;
 }
 
@@ -89,16 +103,6 @@ type ControlMessage =
   | { type: "pong"; t0: number; tServer: number }
   | { type: "roster"; devices: RosterEntry[] }
   | { type: "command"; scene?: string; palette?: string; viewport?: Viewport };
-
-function parseViewport(v: unknown): Viewport | undefined {
-  if (!v || typeof v !== "object") return undefined;
-  const o = v as Record<string, unknown>;
-  const { x, y, w, h } = o;
-  if (typeof x === "number" && typeof y === "number" && typeof w === "number" && typeof h === "number") {
-    return { x, y, w, h };
-  }
-  return undefined;
-}
 
 function parseControlMessage(data: unknown): ControlMessage | null {
   if (typeof data !== "string") return null;
@@ -262,7 +266,7 @@ abstract class RoomConnectionBase {
 }
 
 export class HostConnection extends RoomConnectionBase {
-  private lastSentMs = -Infinity;
+  private decimator = new WireDecimator(BROADCAST_INTERVAL_MS);
 
   constructor(code: string) {
     super(code, "host");
@@ -277,15 +281,19 @@ export class HostConnection extends RoomConnectionBase {
   }
 
   /** Call every local render tick; internally decimates the wire send to ~30Hz
-   *  while feeding the full-rate local buffer so this device's own visuals stay smooth. */
+   *  while feeding the full-rate local buffer so this device's own visuals stay smooth.
+   *  The one-tick onset flags raised on skipped ticks ride the next send
+   *  (wireDecimator.ts) — the local buffer sees every one directly. */
   sendFrame(frame: EncodableFrame): void {
     const roomTimeMs = this.clock.roomNow();
     this.pushFrame({ ...frame, roomTimeMs });
 
-    if (roomTimeMs - this.lastSentMs < BROADCAST_INTERVAL_MS) return;
-    this.lastSentMs = roomTimeMs;
+    const d = this.decimator.offer(roomTimeMs, frame.onset, frame.pulseOnset);
+    if (!d.send) return;
+    // The latches are cleared even if the socket isn't open, so a stale hit
+    // isn't replayed on reconnect.
     if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(encodeFeatureFrame(frame, roomTimeMs));
+      this.ws.send(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
     }
   }
 }
