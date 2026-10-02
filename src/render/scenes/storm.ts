@@ -207,9 +207,11 @@ export {
 // lobes eroded by the retained noise volume, over a MESH_RES^3 lattice — so a
 // re-mesh is a lerp between two grids plus buildSurfaceNet, not a re-run of
 // the lobe loop. Re-meshing is throttled to shape-phase moves past
-// MESH_PHASE_STEP, at most one every MESH_MIN_INTERVAL; the slow drift alone
-// trips that about once a second, and between re-meshes MESH_VERT's own churn
-// keeps the lattice breathing.
+// MESH_PHASE_STEP, at most one every MESH_MIN_INTERVAL. At the default Morph
+// speed the drift crosses MESH_PHASE_STEP several times a second, so
+// MESH_MIN_INTERVAL is what paces the lattice, and every beat's morph kick
+// trips one too; between re-meshes MESH_VERT's own churn keeps the lattice
+// breathing.
 //
 // The tangle (Filaments mode): the same seed points, each traced FIL_STEPS
 // Euler steps through a curl-noise flow volume (buildFlowVolume) and drawn as
@@ -364,7 +366,7 @@ const FIL_STEP_LEN = 0.06;
 // 1/FLOW_FREQ units, with the coarsest lattice (FLOW_VALUE_CELLS[0]) setting
 // the largest swirl in it.
 const FLOW_FREQ = 1.1;
-// One strand costs 2 * FIL_STEPS vertices, so the budget buys a fraction of
+// One strand costs FIL_STEPS + 1 vertices, so the budget buys a fraction of
 // what Points gets particles. The floor is where the tangle stops reading as
 // one mass on the cheap presets, and the ceiling is where adding strands
 // stops making it look any denser and only costs vertex-stage fetches.
@@ -923,7 +925,7 @@ export function particleCountForQuality(maxParticles: number): number {
 }
 
 /** How many strands Filaments mode traces out of the same budget. A strand
- *  costs 2 * FIL_STEPS vertices where a particle costs one, so this is a
+ *  costs FIL_STEPS + 1 vertices where a particle costs one, so this is a
  *  fraction of the particle count — with its own floor, since the cheap
  *  presets' budgets divide down to a handful of hairs. */
 export function filamentStrandCount(maxParticles: number): number {
@@ -931,11 +933,14 @@ export function filamentStrandCount(maxParticles: number): number {
   return Math.max(FIL_MIN_STRANDS, Math.min(FIL_MAX_STRANDS, n));
 }
 
-/** The strand vertex buffers, laid out for one gl.LINES draw: for strand `s`
- *  and step `j`, the pair of vertices (j, j+1). Both carry the strand's seed
- *  point and per-strand random value unchanged — where the vertex actually
- *  lands is the shader's business (it integrates `step` steps along the flow
- *  volume), so nothing here has to be rebuilt when the field moves.
+/** The strand vertex buffers: for strand `s`, `steps + 1` consecutive
+ *  vertices, one per point along the trace (step index 0..steps). All of a
+ *  strand's vertices carry its seed point and per-strand random value
+ *  unchanged — where the vertex actually lands is the shader's business (it
+ *  integrates `step` steps along the flow volume), so nothing here has to be
+ *  rebuilt when the field moves. buildFilamentIndices pairs them up into the
+ *  gl.LINES segments, so an interior point is shaded once and shared by the
+ *  two segments that meet there.
  *
  *  Strands are taken as a prefix of the point cloud's own samples, which
  *  buildCloud guarantees is a representative subsample — so Cloud density can
@@ -946,7 +951,7 @@ export function buildFilamentVertices(
   strands: number,
   steps = FIL_STEPS,
 ): { positions: Float32Array; seeds: Float32Array; steps: Float32Array } {
-  const verts = strands * steps * 2;
+  const verts = strands * (steps + 1);
   const positions = new Float32Array(verts * 3);
   const seeds = new Float32Array(verts);
   const stepIndex = new Float32Array(verts);
@@ -956,18 +961,35 @@ export function buildFilamentVertices(
     const y = seedPositions[s * 3 + 1];
     const z = seedPositions[s * 3 + 2];
     const seed = seedValues[s];
-    for (let j = 0; j < steps; j++) {
-      for (let end = 0; end < 2; end++) {
-        positions[o * 3] = x;
-        positions[o * 3 + 1] = y;
-        positions[o * 3 + 2] = z;
-        seeds[o] = seed;
-        stepIndex[o] = j + end;
-        o++;
-      }
+    for (let j = 0; j <= steps; j++) {
+      positions[o * 3] = x;
+      positions[o * 3 + 1] = y;
+      positions[o * 3 + 2] = z;
+      seeds[o] = seed;
+      stepIndex[o] = j;
+      o++;
     }
   }
   return { positions, seeds, steps: stepIndex };
+}
+
+/** The gl.LINES index list over buildFilamentVertices' vertices: for strand
+ *  `s` and step `j`, the pair (j, j + 1) of that strand's own vertices.
+ *  Strand-major, so any prefix of whole strands' worth of indices
+ *  (`strands * steps * 2`) draws exactly that many leading strands — which is
+ *  how Cloud density thins the tangle. 32-bit, since the strand ceiling times
+ *  the vertices per strand is past what 16 bits address. */
+export function buildFilamentIndices(strands: number, steps = FIL_STEPS): Uint32Array {
+  const indices = new Uint32Array(strands * steps * 2);
+  let o = 0;
+  for (let s = 0; s < strands; s++) {
+    const base = s * (steps + 1);
+    for (let j = 0; j < steps; j++) {
+      indices[o++] = base + j;
+      indices[o++] = base + j + 1;
+    }
+  }
+  return indices;
 }
 
 // --- The noise volume -------------------------------------------------------
@@ -1834,7 +1856,7 @@ const AMBIENT_LIFT_GLSL = `
 
 // Reads uAmbient rather than taking it: the floor is how dark the cloud is
 // allowed to rest, which is the setting itself — not something a caller
-// working with a scaled copy of it (Filaments' underlay) should be able to
+// working with a scaled copy of it should be able to
 // pull further down.
 float ambientFloor() {
   return mix(AMB_FLOOR_REST, AMB_FLOOR_FULL, min(1.0, max(uAmbient, 0.0) * AMB_FLOOR_KNEE_INV));
@@ -2842,11 +2864,11 @@ void main() {
 // volume: the vertex buffer holds nothing but a seed point, a per-strand
 // random value and a step index, and the vertex shader integrates that many
 // Euler steps along the field to find where this vertex actually is. A strand
-// is emitted as FIL_STEPS gl.LINES pairs, so step j appears twice (once
-// ending segment j-1, once starting segment j) and both copies integrate to
-// the same point — O(K^2) fetches per strand, all of it vertex-stage, which
-// buys a tangle that costs nothing on the CPU and re-traces itself every
-// frame as the field crawls.
+// has FIL_STEPS + 1 vertices, drawn as FIL_STEPS indexed gl.LINES pairs
+// (buildFilamentIndices), so step j is shaded once and shared by the segment
+// ending there and the one starting there — O(K^2) fetches per strand, all of
+// it vertex-stage, which buys a tangle that costs nothing on the CPU and
+// re-traces itself every frame as the field crawls.
 //
 // Why the sampler isn't called uFlow: the `flow` setting already owns that
 // name (settingUniformName), and two declarations of one name is a shader
@@ -3060,6 +3082,7 @@ export const stormScene: Scene = (() => {
   let filPosBuf: WebGLBuffer | null = null;
   let filSeedBuf: WebGLBuffer | null = null;
   let filStepBuf: WebGLBuffer | null = null;
+  let filIdxBuf: WebGLBuffer | null = null;
   let strandCount = 0;
   let count = 0;
   let meshRes = MESH_RES_HIGH;
@@ -3200,7 +3223,8 @@ export const stormScene: Scene = (() => {
       gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
       gl.bindVertexArray(null);
 
-      // The strands: static line-pair vertices over a prefix of the same
+      // The strands: static vertices (one per point along a strand) and the
+      // static line-pair indices over them, over a prefix of the same
       // samples, since where a vertex lands is decided in the shader.
       filProg = createProgram(gl, FILAMENT_FRAG, FILAMENT_VERT);
       strandCount = filamentStrandCount(ctx.quality.maxParticles);
@@ -3222,6 +3246,11 @@ export const stormScene: Scene = (() => {
       gl.bufferData(gl.ARRAY_BUFFER, strands.steps, gl.STATIC_DRAW);
       gl.enableVertexAttribArray(2);
       gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+      // The element buffer binding is part of the VAO's state, so it stays
+      // bound to filVao and the draw needs no bind of its own.
+      filIdxBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, filIdxBuf);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, buildFilamentIndices(strandCount), gl.STATIC_DRAW);
       gl.bindVertexArray(null);
       filProg.use();
       gl.uniform1i(gl.getUniformLocation(filProg.program, "uShape"), 1);
@@ -3471,13 +3500,14 @@ export const stormScene: Scene = (() => {
         filProg.setV4("uShapeMix", shapeMix[0], shapeMix[1], shapeMix[2], shapeMix[3]);
         filProg.setF("uCountBoost", Math.min(3, Math.max(1, Math.sqrt(FIL_MAX_STRANDS / strandCount))));
         // The strands take the frequency alone (flowCoord); the rest of the
-        // recipe reaches them through the underlay march they are drawn over.
+        // gas recipe doesn't reach Filaments, since the volume pass draws
+        // only the background in this mode.
         filProg.setF("uGasFreq", gas.freq);
-        // A prefix of the strand buffer is a prefix of the point cloud, so
+        // A prefix of the strand indices is a prefix of the point cloud, so
         // Cloud density thins the tangle here the way it thins the points.
         const strands = Math.floor(strandCount * Math.max(0.05, density));
         gl.bindVertexArray(filVao);
-        gl.drawArrays(gl.LINES, 0, strands * FIL_STEPS * 2);
+        gl.drawElements(gl.LINES, strands * FIL_STEPS * 2, gl.UNSIGNED_INT, 0);
         gl.bindVertexArray(null);
       }
 
@@ -3540,6 +3570,7 @@ export const stormScene: Scene = (() => {
       if (filPosBuf) gl.deleteBuffer(filPosBuf);
       if (filSeedBuf) gl.deleteBuffer(filSeedBuf);
       if (filStepBuf) gl.deleteBuffer(filStepBuf);
+      if (filIdxBuf) gl.deleteBuffer(filIdxBuf);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_3D, null);
       gl.activeTexture(gl.TEXTURE1);
@@ -3570,6 +3601,7 @@ export const stormScene: Scene = (() => {
       filPosBuf = null;
       filSeedBuf = null;
       filStepBuf = null;
+      filIdxBuf = null;
       strandCount = 0;
       count = 0;
       meshVertCount = 0;

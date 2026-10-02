@@ -149,6 +149,16 @@ Studied, not copied, across two look references:
   are still pulled back inside the cloud ellipsoid. Bolt shapes are
   unchanged: a test pins one seeded tree. A change to bolt shape, width or
   envelope math now lands in `bolt.ts` and reaches both scenes.
+- 2026-10-02 — Filaments draws each strand as `FIL_STEPS + 1` shared vertices
+  plus an index list (`buildFilamentIndices`, `drawElements` with 32-bit
+  indices) instead of a duplicated vertex per segment end, so every interior
+  point's flow trace, `sectionGain` and `strikeLight` run once rather than
+  twice. Cloud density still thins by whole strands (the indices are
+  strand-major). Pixel-identical against the old draw on a seeded
+  `tools/gpu-bench` frame. Also corrected two stale comments: the Mesh
+  re-mesh cadence is paced by `MESH_MIN_INTERVAL` (several a second at the
+  default Morph speed, not "about once a second"), and Filaments has no gas
+  march behind it, so only `gas.freq` reaches the strands.
 
 ## Tuning notes
 

@@ -12,6 +12,7 @@ import {
   advanceMorphPhase,
   buildBoltTree,
   buildCloud,
+  buildFilamentIndices,
   buildFilamentVertices,
   buildFlowVolume,
   buildLobeSets,
@@ -655,26 +656,59 @@ describe("storm filament strands", () => {
     expect(filamentStrandCount(50_000)).toBeGreaterThan(filamentStrandCount(12_000));
   });
 
-  it("emits each strand as consecutive line pairs sharing one seed point", () => {
+  it("emits steps + 1 vertices per strand, one per point along the trace, sharing one seed point", () => {
     const strands = 3;
     const steps = 4;
     const cloud = buildCloud(strands);
     const v = buildFilamentVertices(cloud.positions, cloud.seeds, strands, steps);
-    expect(v.positions.length).toBe(strands * steps * 2 * 3);
-    expect(v.seeds.length).toBe(strands * steps * 2);
+    expect(v.positions.length).toBe(strands * (steps + 1) * 3);
+    expect(v.seeds.length).toBe(strands * (steps + 1));
+    expect(v.steps.length).toBe(strands * (steps + 1));
     for (let s = 0; s < strands; s++) {
-      for (let j = 0; j < steps; j++) {
-        const o = (s * steps + j) * 2;
-        // The pair straddles one step of the trace...
+      for (let j = 0; j <= steps; j++) {
+        const o = s * (steps + 1) + j;
+        // The step index runs 0..steps along the strand...
         expect(v.steps[o]).toBe(j);
-        expect(v.steps[o + 1]).toBe(j + 1);
         // ...and every vertex of the strand carries the same seed, since the
         // shader is what turns a step index into a position.
         expect(v.seeds[o]).toBe(cloud.seeds[s]);
         expect(v.positions[o * 3]).toBe(cloud.positions[s * 3]);
-        expect(v.positions[(o + 1) * 3 + 2]).toBe(cloud.positions[s * 3 + 2]);
+        expect(v.positions[o * 3 + 2]).toBe(cloud.positions[s * 3 + 2]);
       }
     }
+  });
+
+  it("indexes each strand as consecutive segments (j, j+1) within its own vertices", () => {
+    const strands = 5;
+    const steps = 4;
+    const idx = buildFilamentIndices(strands, steps);
+    expect(idx.length).toBe(strands * steps * 2);
+    let max = 0;
+    for (let s = 0; s < strands; s++) {
+      for (let j = 0; j < steps; j++) {
+        const o = (s * steps + j) * 2;
+        expect(idx[o]).toBe(s * (steps + 1) + j);
+        expect(idx[o + 1]).toBe(idx[o] + 1);
+        max = Math.max(max, idx[o + 1]);
+      }
+    }
+    expect(max).toBeLessThan(strands * (steps + 1));
+  });
+
+  it("a prefix of whole strands' indices only touches those strands' vertices", () => {
+    const steps = 10;
+    const idx = buildFilamentIndices(40, steps);
+    for (const k of [1, 7, 23]) {
+      const prefix = idx.subarray(0, k * steps * 2);
+      expect(Math.max(...prefix)).toBe(k * (steps + 1) - 1);
+    }
+  });
+
+  it("uses the shipped step count by default, and 32-bit indices reach the strand ceiling", () => {
+    const strands = filamentStrandCount(1e9);
+    const idx = buildFilamentIndices(strands);
+    expect(idx).toBeInstanceOf(Uint32Array);
+    expect(Math.max(...idx.subarray(idx.length - 20))).toBeGreaterThan(65535);
   });
 });
 
