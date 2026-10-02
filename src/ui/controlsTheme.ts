@@ -1243,14 +1243,18 @@ body.vc-keys-reveal [data-keycap]::after {
 }
 .vc-pad-ycap { writing-mode: vertical-rl; transform: rotate(180deg); justify-content: space-between; }
 .vc-pad-xcap { grid-column: 2; justify-content: space-between; }
-.vc-pad-sign { font-size: 12px; line-height: 1; color: rgba(255, 255, 255, 0.55); }
-/* vertical-rl lays a Latin glyph on its side, so the y axis's "−" would read as "|". */
-.vc-pad-ycap .vc-pad-sign { text-orientation: upright; }
+.vc-pad-sign { font-size: 9.5px; line-height: 1; color: rgba(255, 255, 255, 0.55); }
 .vc-pad-sq {
   position: relative; grid-column: 2; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: #000;
   border: 1px solid rgba(255, 255, 255, 0.12); touch-action: none; cursor: crosshair;
 }
 .vc-pad-sq:focus-visible { outline: 2px solid ${SCENE_VIOLET}; outline-offset: 2px; }
+/* Letting go of a drag shows the settled result at once (pairPads.ts's
+ * "Clearer pads" header): a violet ring and soft glow for a moment. */
+.vc-pad-sq.vc-pad-settled { border-color: ${SCENE_VIOLET}; box-shadow: 0 0 0 1px ${SCENE_VIOLET}, 0 0 14px color-mix(in srgb, ${SCENE_VIOLET} 55%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .vc-pad-sq { transition: box-shadow 0.25s ease, border-color 0.25s ease; }
+}
 /* A pointer press focuses the pad/fader for its keys without the ring (pairPads.ts's pointerFocus). */
 .vc-pad-sq.vc-pf:focus-visible, .vc-vfader.vc-pf:focus-visible { outline: none; }
 .vc-pad-canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.85; }
@@ -1262,6 +1266,37 @@ body.vc-keys-reveal [data-keycap]::after {
 .vc-pad-ring { vector-effect: non-scaling-stroke; }
 .vc-pad-ring-white { stroke: rgba(255, 255, 255, 0.9); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
 .vc-pad-beh { color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The four corner pictures on a Smell pad (apart / together / who chases whom),
+ * HTML rather than part of the stretched svg so they keep their proportions.
+ * No z-index: DOM order (canvas, pictures, svg) keeps them over the culture
+ * and under the marker. */
+.vc-pad-ic {
+  position: absolute; display: flex; padding: 2px 3px; border-radius: 4px; background: rgba(0, 0, 0, 0.55);
+  opacity: 0.7; pointer-events: none; transition: opacity 0.15s ease;
+}
+.vc-pad-ic svg { width: 22px; height: 12px; display: block; }
+.vc-pad-sq:hover .vc-pad-ic { opacity: 1; }
+.vc-pad-ic-tl { top: 4px; left: 4px; }
+.vc-pad-ic-tr { top: 4px; right: 4px; }
+.vc-pad-ic-bl { bottom: 4px; left: 4px; }
+.vc-pad-ic-br { bottom: 4px; right: 4px; }
+
+/* The sentence by the cursor while a pad is hovered or dragged (pairPads.ts's
+ * cursor hint): what each direction is set to, and the numbers. Above the
+ * panel and its tooltips (z-index 40). */
+.vc-pad-hint {
+  position: fixed; z-index: 45; pointer-events: none; max-width: 280px;
+  background: rgba(8, 11, 10, 0.94); border: 1px solid rgba(255, 255, 255, 0.24); border-radius: 8px;
+  padding: 7px 9px; font: 400 12px/1.5 ${FONT_MONO}; color: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+.vc-pad-hint[hidden] { display: none; }
+.vc-pad-hint-ln { display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; }
+.vc-pad-hint-v { color: rgba(255, 255, 255, 0.5); }
+.vc-pad-hint-note {
+  margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(255, 255, 255, 0.18);
+  font: 400 11.5px/1.35 ${FONT_LABEL}; color: rgba(255, 255, 255, 0.75); white-space: normal;
+}
 
 /* Random / Nudge / Keep own trails / Back (pairPads.ts's own header, "The mix
  * row"). Back starts disabled (an empty history) via the plain disabled

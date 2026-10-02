@@ -848,7 +848,32 @@ configs are used.
   (Today; Clearer pads = contact colours, squeezed Smell range, corner
   pictures for apart/together/who chases whom, settle on release, spotlight,
   one-sentence hint; Pick a look = per pair, nine live mini-cultures from the
-  three looks each direction really has, tap one). Awaiting the user's pick.
+  three looks each direction really has, tap one). The user picked **Clearer
+  pads** ("clearer pads looks good"; of the corner pictures + cursor hint: "the
+  best indication of axis so far").
+- **2026-10-02: Clearer pads built.** The trial page's version 2, in the app:
+  contact-colour pad pictures with each strain at its own exposure
+  (`pairContactPixelsInto`, `trailQuantile`); Smell pads on the squeezed
+  `SMELL_PAD_KNOTS` map, zero at 29% (Touch and the own-trail faders keep the
+  flat-around-zero curve); corner pictures on Smell pads (apart / together / who
+  chases whom); axis ends "avoids … follows" and "eats … feeds"; a cursor hint
+  with one sentence per direction (`pairSentence` over each layer's `verbs`)
+  and the numbers, which left the pad header; the status line reads the same
+  sentences; a Touch note when the pair rarely meets (`pairOverlap` below
+  `RARELY_MEET_OVERLAP`); no beat reseed on the pad under the pointer;
+  `PAD_SETTLE_STEPS` on release; and `command("spotlight")`, which dims the
+  other two strains in this tab's own dish while a pad is hovered, dragged or
+  keyboard-focused (eased, lapses `SPOT_HOLD_MS` after the last message, never
+  reaches the pop-out output or a TV — they get settings, not commands). The
+  user asked why the pads are 2D and why there is no "flee": the square puts
+  each combination of the two directions at one spot the corners can name, and
+  the steering rule can only avoid (a negative value says "don't step there";
+  nothing turns an agent around or speeds it up). A flee behaviour (turn away
+  and speed up near a fled strain) was offered as a separate experiment, not
+  started. Executed by Sonnet from ~/.claude/plans/physarum2-clearer-pads.md;
+  review caught the corner pictures' own `<svg>` breaking `drawPadChrome`'s
+  `querySelector("svg")` on every redraw after the first (the pads never
+  mounted) and the pictures stacking over the marker.
 
 ## Tuning notes
 
@@ -876,6 +901,12 @@ applies there too. Tuned so far only against the synthetic feed at
   per-strain motion only, like Network scale). Start ink only applies when
   a dish starts (scene open, a Quality change, Fresh dish), not when its
   slider moves.
+- Pressing a pad right after switching the layer moves the pads 55 px under
+  the pointer: focus leaves the Smell/Touch switch, whose row's `.vc-hint`
+  (the layer's `how`) folds up. The panel's rows-unfold-on-focus grammar, not
+  the pads; seen with `padshot.mjs --layer touch` (2026-10-02).
+- "Flee" doesn't exist: no Smell value makes a strain run from another (see
+  Decisions 2026-10-02). Would need a new steering behaviour.
 
 - Switching's default is tuned on the synthetic feed only. With real
   music the split may want another default or `SWITCH_PRESSURE`, and a
@@ -1077,6 +1108,9 @@ applies there too. Tuned so far only against the synthetic feed at
     direction on the real pair culture and prints overlap / trail ratio per
     value (`--json` for the ideas page's charts). Needs Node ≥ 22.6 (it
     imports the `.ts` modules directly).
+  - `padshot.mjs` — the Pairs pads at rest, held mid-drag (cursor hint and
+    spotlight) and 1 s after release, `--layer touch` for the second table;
+    the before/after shots of the Clearer pads build.
   - `padmodels.mjs` — node, no server: the shipped steering against two
     rejected models (probability gate, value-scaled reach) for avoid
     strength; see its header.

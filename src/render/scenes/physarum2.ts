@@ -251,6 +251,14 @@ export { ATTRACT_ROWS };
 //   species back to its texel index mod SPECIES_COUNT — the exact
 //   distribution seedAgents() starts from.
 // - **command("fresh")**: Fresh dish — see "Fogleman's extras" above.
+// - **command("spotlight", {a,b})**: while an Affinity pad is touched, the
+//   pairs widget (pairPads.ts) sends its two strains here every tick and the
+//   composite dims the other strains' trails to SPOT_DIM (eased over
+//   SPOT_EASE_MS by `easeSpot`), so the person sees what that pair is doing.
+//   `a < 0` clears. The spotlight only lasts SPOT_HOLD_MS past the last
+//   message, so a closed panel or a lost pointer can never leave the dish
+//   dimmed. Phone-local like every command: the pop-out output and a TV never
+//   get it (src/net/outputSync.ts carries settings and stores, not commands).
 const ID = "physarum2";
 
 const TWO_PI = Math.PI * 2;
@@ -403,6 +411,25 @@ export function crawlStepRate(s: CrawlRateInputs): number {
   const base = STEP_RATE_MIN + (STEP_RATE_MAX - STEP_RATE_MIN) * clamp01(s.speed);
   const level = CRAWL_LEVEL_GAIN * clamp01(s.boost) * clamp01(s.level);
   return Math.min(base + level + Math.max(0, s.pumpVel), STEP_RATE_CAP);
+}
+
+// --- command("spotlight") — see the file header. ---
+
+/** How long a spotlight outlives the last `command("spotlight")` message. The
+ *  pairs widget re-sends every tick while a pad is active, so this only ever
+ *  matters when messages stop (panel closed, pointer lost). */
+export const SPOT_HOLD_MS = 300;
+/** What a strain outside the spotlit pair is multiplied by in the composite. */
+export const SPOT_DIM = 0.15;
+/** Time constant of the dim/undim glide (exponential). */
+export const SPOT_EASE_MS = 120;
+
+/** One frame of the spotlight glide: `cur` moves toward `target` by the
+ *  exponential share of `dtMs` over `SPOT_EASE_MS` — frame-rate independent,
+ *  never overshooting, unchanged for dt 0. Pure and tested. */
+export function easeSpot(cur: number, target: number, dtMs: number): number {
+  const k = 1 - Math.exp(-Math.max(0, dtMs) / SPOT_EASE_MS);
+  return cur + (target - cur) * k;
 }
 
 // --- "Spread"'s linear map onto the reseed/inject disc's radius (unit-
@@ -1969,6 +1996,9 @@ uniform float uTrailTexel;
 uniform vec3 uStrainColor[${SPECIES_COUNT}];
 // Auto level's per-strain gain (levelGain) — exactly 1 per channel at level 0.
 uniform vec4 uLevelGain;
+// Per-strain spotlight visibility (1 = normal, SPOT_DIM = dimmed) — see
+// command("spotlight") in the file header.
+uniform vec4 uStrainVis;
 ${PALETTE_GLSL}
 ${ROOM_UV_GLSL}
 ${PHYSARUM2_GLSL}
@@ -2008,6 +2038,9 @@ void main() {
   // physarum.ts's softer Reinhard roll-off — the clamp is what keeps
   // overlapping territories reading as discrete colours instead of bleeding
   // toward white.
+  // uStrainVis scales only each strain's own contribution (t is read nowhere
+  // else), so a dimmed strain dims and nothing else shifts.
+  t *= uStrainVis;
   vec3 col = t.r * col0 + t.g * col1 + t.b * col2 + t.a * col3;
   outColor = vec4(min(col, vec3(1.0)), 1.0);
 }
@@ -2310,6 +2343,12 @@ function createPhysarum2Scene(): Scene {
   let lastResH = 1;
   let pendingInject: { fieldX: number; fieldY: number; strain: number } | null = null;
   let pendingRebalance = false;
+  // command("spotlight"): the pair being touched (-1 = none), when the
+  // message expires, and each strain's eased visibility the composite reads.
+  let spotA = -1;
+  let spotB = -1;
+  let spotUntilMs = 0;
+  const spotVis = new Float32Array(SPECIES_COUNT).fill(1);
   // The beat reseed's one-shot, held the same way (see the `steps > 0` block
   // in render()): drives.fired() consumes its trigger on read, so a frame that
   // owes zero sim steps must not be the one that swallows it.
@@ -2973,6 +3012,14 @@ function createPhysarum2Scene(): Scene {
       uploadCommonUniforms(compositeProg, ctx, frame, viewport, palette, anim, ID, NON_ITEM_SETTINGS, bandsBuf, drives);
       compositeProg.setF("uTrailTexel", 1 / trailSideCur);
       compositeProg.setV4("uLevelGain", levelNow[0]!, levelNow[1]!, levelNow[2]!, levelNow[3]!);
+      // Spotlight: ease each strain toward dim or full by the real frame dt,
+      // then hand the composite the four visibilities.
+      const spotLive = spotA >= 0 && nowMs < spotUntilMs;
+      for (let k = 0; k < SPECIES_COUNT; k++) {
+        const target = spotLive && k !== spotA && k !== spotB ? SPOT_DIM : 1;
+        spotVis[k] = easeSpot(spotVis[k]!, target, dt * 1000);
+      }
+      compositeProg.setV4("uStrainVis", spotVis[0]!, spotVis[1]!, spotVis[2]!, spotVis[3]!);
       for (let k = 0; k < SPECIES_COUNT; k++) {
         compositeProg.setV3v(`uStrainColor[${k}]`, strainColor.subarray(k * 3, k * 3 + 3));
       }
@@ -3049,6 +3096,17 @@ function createPhysarum2Scene(): Scene {
         pendingRebalance = false;
         population = equalPopulation(SPECIES_COUNT);
         popGen++;
+      } else if (name === "spotlight") {
+        const a = Math.round(args.a ?? -1);
+        if (a < 0) {
+          spotA = -1;
+          spotB = -1;
+          spotUntilMs = 0;
+        } else {
+          spotA = Math.min(SPECIES_COUNT - 1, a);
+          spotB = Math.max(-1, Math.min(SPECIES_COUNT - 1, Math.round(args.b ?? -1)));
+          spotUntilMs = performance.now() + SPOT_HOLD_MS;
+        }
       }
     },
 
@@ -3096,6 +3154,10 @@ function createPhysarum2Scene(): Scene {
       pendingInject = null;
       pendingRebalance = false;
       pendingSeed = false;
+      spotA = -1;
+      spotB = -1;
+      spotUntilMs = 0;
+      spotVis.fill(1);
       popGen = 0;
       popKickGen = 0;
       pendingFresh = false;
