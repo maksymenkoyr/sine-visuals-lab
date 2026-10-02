@@ -75,14 +75,26 @@ function readDeviceId(): string {
 function wsUrl(code: string, role: "host" | "renderer", ownDeviceId: string): string {
   const proto = WORKER_ORIGIN.startsWith("https") ? "wss" : "ws";
   const host = WORKER_ORIGIN.replace(/^https?:\/\//, "");
-  return `${proto}://${host}/api/room/${code}/ws?role=${role}&deviceId=${encodeURIComponent(ownDeviceId)}`;
+  return `${proto}://${host}/api/room/${encodeURIComponent(code)}/ws?role=${role}&deviceId=${encodeURIComponent(ownDeviceId)}`;
 }
 
-export async function createRoomCode(): Promise<string> {
-  const res = await fetch(`${WORKER_ORIGIN}/api/room`, { method: "POST" });
-  if (!res.ok) throw new Error(`room create failed: ${res.status}`);
-  const body = (await res.json()) as { code: string };
-  return body.code;
+/** Asks the Worker for a fresh room. Gives up after `timeoutMs`, because the
+ *  callers (boot, the TV page) wait on it before showing anything and a
+ *  stalled request — a captive portal, a cold or black-holed Worker — neither
+ *  resolves nor rejects; a timeout rejects, and boot's catch runs solo.
+ *  AbortController + setTimeout rather than AbortSignal.timeout, which older
+ *  Safari and TV browsers lack. */
+export async function createRoomCode(timeoutMs = 4000): Promise<string> {
+  const ctl = new AbortController();
+  const timer = window.setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${WORKER_ORIGIN}/api/room`, { method: "POST", signal: ctl.signal });
+    if (!res.ok) throw new Error(`room create failed: ${res.status}`);
+    const body = (await res.json()) as { code: string };
+    return body.code;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 type ControlMessage =

@@ -192,6 +192,7 @@ import {
 } from "./net/room.ts";
 import { createJoinScreen } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
+import { roomCodeFromParam } from "./net/roomCode.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
 import { createControlPanel } from "./ui/controlPanel.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
@@ -1694,9 +1695,19 @@ async function boot(): Promise<void> {
   }
 
   const params = new URLSearchParams(location.search);
-  const joinCode = params.get("room");
+  // Only a code the Worker could have issued (roomCode.ts): a stray '#' or
+  // other odd character would make `new WebSocket` throw and abort boot, and
+  // a bad link should just load the site normally.
+  const joinCode = roomCodeFromParam(params.get("room"));
+  if (params.get("room") && !joinCode) console.warn("Ignoring a malformed ?room= code:", params.get("room"));
   const wantsHostRole = params.get("role") === "host";
   bypassGallery = !!joinCode && !wantsHostRole;
+  // The fresh-room request goes out now so its round trip overlaps
+  // detectQuality()'s benchmark below instead of following it; it's awaited
+  // (with the solo fallback) where the room is wired. The catch here only
+  // silences the unhandled-rejection warning while nothing awaits it yet.
+  const roomCodePromise = !joinCode ? createRoomCode() : null;
+  roomCodePromise?.catch(() => {});
 
   if (params.get("audio") === "synthetic") {
     const bpm = Number(params.get("bpm"));
@@ -1727,14 +1738,14 @@ async function boot(): Promise<void> {
   if (bypassGallery) {
     // Plain ?room=CODE — join as a mic-less renderer (e.g. a second laptop just watching).
     mode = "renderer";
-    roomCode = joinCode!.toUpperCase();
+    roomCode = joinCode!;
     rendererConn = new RendererConnection(roomCode);
     startRendererDisconnectWatch();
   } else {
     // No code -> create a fresh room and host it (the classic "open the site" flow).
     // ?room=CODE&role=host -> become host of a code someone else (a TV) already created.
     try {
-      roomCode = joinCode ? joinCode.toUpperCase() : await createRoomCode();
+      roomCode = joinCode ?? (await roomCodePromise!);
       hostConn = new HostConnection(roomCode);
       mode = "host";
     } catch (err) {
