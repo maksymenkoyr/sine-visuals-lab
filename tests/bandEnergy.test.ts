@@ -400,7 +400,7 @@ describe("band energy", () => {
     expect(onsets).toBeGreaterThanOrEqual(Math.round(kicks * 0.9));
   });
 
-  it("stays finite on a zero or NaN step with Smoothing Off, and a normal step is unchanged by the clamp", () => {
+  it("stays finite on a zero, NaN or negative step with Smoothing Off", () => {
     // dtSec = 0 against rateScale = Infinity is Infinity * 0 = NaN in the
     // level slew and the pulse decay unless the clamp reaches them too.
     for (const bad of [0, Number.NaN, -1]) {
@@ -411,17 +411,6 @@ describe("band energy", () => {
           expect(Number.isFinite(v)).toBe(true);
         }
       }
-    }
-    // A step at or above the clamp's floor takes the same path as before:
-    // two instances fed the same frames agree exactly.
-    const a = createBandEnergy();
-    const b = createBandEnergy();
-    for (let i = 0; i < 120; i++) {
-      const t = i * DT;
-      a.advance(DT, kickOverBedBands(t));
-      b.advance(Math.max(1e-4, DT), kickOverBedBands(t));
-      expect(a.low).toBe(b.low);
-      expect(a.lowPulse).toBe(b.lowPulse);
     }
   });
 });

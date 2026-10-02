@@ -13,9 +13,10 @@ point cloud). Draft scene, on main.
 - `src/render/scenes/storm.ts` — the whole scene (~3800 lines). The file
   header is the primary source: cloud density model (baked lobe silhouettes
   eroded by tileable perlin-worley 3D noise), the strike pool and the
-  bolt-tree geometry (the shared generator is `src/render/bolt.ts`), the per-mode geometry passes, `gasType` recipes (`GAS_RECIPES`),
-  the Voronoi "dark sections" system (`cellIndexAt`/`sectionGain`), and the
-  morph-phase accumulator (`advanceMorphPhase`) that walks the cloud across
+  bolt-tree geometry (the shared generator is `src/render/bolt.ts`), the
+  per-mode geometry passes, `gasType` recipes (`GAS_RECIPES`), the Voronoi
+  "dark sections" system (`cellIndexAt`/`sectionGain`), and the morph-phase
+  accumulator (`advanceMorphPhase`) that walks the cloud across
   its baked shape variants (`SHAPE_VARIANTS`).
 - Shares `PALETTE_GLSL`, `COMMON_UNIFORMS_GLSL`, `ROOM_UV_GLSL`,
   `SAMPLE_BANDS_GLSL` from `sceneCommon.ts` and `resolveSceneSetting` from
