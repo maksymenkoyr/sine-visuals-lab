@@ -12,7 +12,7 @@
 // only lengths (and the sweeping hue) change frame to frame. Nothing here
 // flows inward, unlike the old draft.
 //
-// Round 2 (swift-weaving-parnas.md): round 1's lattice held a constant slot
+// Round 2 (docs/scenes/tessera.md, Round 2): round 1's lattice held a constant slot
 // count per ring, which shrinks boxes to slivers near the pole (the
 // sin(theta) azimuthal-pitch factor) and leaves the outer rings sparse --
 // "thin wiry radial spokes, a black hole around the pole". The reference's
