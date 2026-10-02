@@ -19,7 +19,10 @@ sets always wins over a pin left over from an earlier by-hand session.
 exactly like the deployed site — the music keeps pushing auto-driven settings
 around, same as production. A tuning run that wants to hold a value still
 while judging it sets `"autoPin": true` in `tuning/params.json` (or passes it
-to `window.__viz.setParams`) to stop the music from pushing it around.
+to `window.__viz.setParams`) to stop the music from pushing it around. Every
+`setParams` or `params.json` push is a full snapshot — a dropped `autoPin`
+means false, like a dropped setting — so a script that wants the pin passes it
+on every call.
 
 ## Reproducibility
 

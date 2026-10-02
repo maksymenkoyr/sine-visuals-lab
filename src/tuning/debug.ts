@@ -379,7 +379,13 @@ export function initTuning(deps: TuningDeps): void {
             ui.notice(describeBakeResult(res).lines, false);
             return;
           }
+          // Two quick presses both start a dry run before either resolves, so
+          // an earlier preview may have landed already: cancel its timer
+          // first, and have the timer check it still owns `pending`, so it
+          // can never expire a newer preview.
+          clearPending();
           const timer = setTimeout(() => {
+            if (pending?.timer !== timer) return;
             clearPending();
             ui.notice(["bake preview expired"], true);
           }, BAKE_CONFIRM_MS);

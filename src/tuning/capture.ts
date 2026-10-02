@@ -95,7 +95,15 @@ export function startClipBuffer(opts: { frames?: number; intervalMs?: number } =
 
   ringTimer = setInterval(() => {
     const slot = ring[ringWriteIndex];
-    slot.canvas.getContext("2d")!.drawImage(getCanvas(), 0, 0);
+    // The live canvas resizes (window, DPR, the governor's render scale), so
+    // follow it; assigning a size also clears the slot, which the draw below
+    // refills straight away.
+    const live = getCanvas();
+    if (slot.canvas.width !== live.width || slot.canvas.height !== live.height) {
+      slot.canvas.width = live.width;
+      slot.canvas.height = live.height;
+    }
+    slot.canvas.getContext("2d")!.drawImage(live, 0, 0);
     slot.filled = true;
     ringWriteIndex = (ringWriteIndex + 1) % ring.length;
   }, intervalMs);
@@ -159,7 +167,9 @@ export async function captureClip(opts: ClipCaptureOpts = {}): Promise<string> {
     const row = Math.floor(i / cols);
     const x = col * tileW;
     const y = row * tileH;
-    ctx.drawImage(frame, x, y);
+    // Scaled into the tile: ring frames keep the size they were grabbed at,
+    // which may differ from the live canvas if it resized since.
+    ctx.drawImage(frame, x, y, tileW, tileH);
     if (i >= before.length) {
       ctx.strokeStyle = "#ff3366";
       ctx.lineWidth = border;
