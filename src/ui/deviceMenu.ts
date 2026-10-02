@@ -768,7 +768,8 @@ export interface DeviceMenu {
 // in controlsKit.ts; everything else per-element is inline here, in the same
 // cssText-constant convention as the rest of src/ui/.
 
-// "A" chip: filled when auto owns the row, outlined when the user does.
+// "A" chip: filled when auto owns the row, outlined when the user does. The
+// "T" chip below shares the outlined style (autoChipManualStyle) unlit.
 const autoChipBaseStyle = `
   width: 17px; height: 16px; display: grid; place-items: center; border-radius: 3px;
   font: 500 9.5px/1 ${FONT_MONO}; cursor: pointer; padding: 0; flex-shrink: 0;
@@ -778,12 +779,10 @@ const autoChipLitStyle = (accent: string) =>
 const autoChipManualStyle = (accent: string) =>
   `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
 // "T" chip: mutes the row to its floor and back (see the header comment).
-// Shares the A chip's geometry, but lit it fills with FADER_OFF — the panel's
+// Shares the A chip's geometry and unlit style, but lit it fills with FADER_OFF — the panel's
 // one "this is off" colour, the band faders' too — rather than the row's
 // accent, so a muted row never reads as a lit A chip at a glance.
 const offChipLitStyle = `${autoChipBaseStyle} background: ${FADER_OFF}; border: 1px solid ${FADER_OFF}; color: #070a09;`;
-const offChipManualStyle = (accent: string) =>
-  `${autoChipBaseStyle} background: transparent; border: 1px solid ${withAlpha(accent, 0.7)}; color: ${accent};`;
 const AUTO_HOLDING_HINT = "Auto is holding this — drag to take over";
 
 // The Auto master bar — its own slim full-width strip at the top of the
@@ -1137,8 +1136,9 @@ export interface ControlRowSpec {
    *  through its own onChange, which flips the flag just the same — the one
    *  hook the Input card's rows use to keep its own Auto button in
    *  sync (deviceMenu.ts's refreshMicAuto) instead of each row sprinkling
-   *  that call individually. Omit for a row nothing else needs to hear
-   *  about (every scene-setting row today). */
+   *  that call individually, and the scene rows use to keep the Auto
+   *  master bar in sync (refreshAutoMaster). Omit for a row nothing else
+   *  needs to hear about. */
   onAutoToggled?: () => void;
   /** Dev-only: makes the readout typable, bound to a scene+key already —
    *  see DeviceMenuDeps.devPin. Omit to leave the readout the plain
@@ -1529,6 +1529,7 @@ export function createControlRow(spec: ControlRowSpec) {
       clearOff();
       commit(value);
     } else {
+      clearOff();
       spec.pin.set(value);
       display(value, false);
     }
@@ -1553,7 +1554,7 @@ export function createControlRow(spec: ControlRowSpec) {
   const offChip = document.createElement("button");
   offChip.textContent = "T";
   offChip.title = `Turn ${spec.label} off (T)`;
-  offChip.style.cssText = offChipManualStyle(spec.accent);
+  offChip.style.cssText = autoChipManualStyle(spec.accent);
   offChip.classList.add("vc-keycap-anchor");
   offChip.dataset.key = "mute";
   offChip.dataset.keycap = "T";
@@ -1795,7 +1796,7 @@ export function createControlRow(spec: ControlRowSpec) {
   }
 
   function refreshOffChip(): void {
-    offChip.style.cssText = offStoredValue !== null ? offChipLitStyle : offChipManualStyle(spec.accent);
+    offChip.style.cssText = offStoredValue !== null ? offChipLitStyle : autoChipManualStyle(spec.accent);
   }
   function clearOff(): void {
     if (offStoredValue === null) return;
@@ -1890,7 +1891,9 @@ export function createControlRow(spec: ControlRowSpec) {
     refreshChip,
     /** Forgets this row's T restore point — for the card-level Reset chips
      *  (Bands, Input), which write straight through setValue() rather than
-     *  this row's own resetBtn. */
+     *  this row's own resetBtn. Call it BEFORE setValue(): display() renders
+     *  the row muted while a restore point is held, and clearOff() itself
+     *  only repaints the T chip. */
     clearOff,
     /** Show whatever's right for the row now: the live auto value if auto
      *  owns it (resolveLive() already reflects a pin ahead of auto — see
@@ -1898,8 +1901,14 @@ export function createControlRow(spec: ControlRowSpec) {
      *  pin ahead of the manual store otherwise. */
     sync(manualValue: () => number): void {
       refreshChip();
-      if (spec.auto && spec.auto.isEnabled()) display(spec.auto.resolveLive(), true);
-      else display(spec.pin?.get() ?? manualValue(), false);
+      if (spec.auto && spec.auto.isEnabled()) {
+        // Auto owns the row, so a T restore point means nothing any more —
+        // drop it, or the T chip stays lit and the next T would write the
+        // stale value and take the row off auto. The manual branch keeps it:
+        // open() syncs every row, and a muted manual row must stay muted.
+        clearOff();
+        display(spec.auto.resolveLive(), true);
+      } else display(spec.pin?.get() ?? manualValue(), false);
     },
     /** Called every rAF tick DeviceMenu.update() runs, unconditionally and
      *  unthrottled — a no-op when this row has no `reads`, otherwise pushes
@@ -1981,7 +1990,7 @@ function createToggleRow(spec: ToggleRowSpec): HTMLElement {
   if (!spec.description) hint.style.display = "none";
 
   el.append(head, toggle, hint);
-  el.addEventListener("click", () => toggle.focus());
+  el.addEventListener("click", () => toggle.focus({ preventScroll: true }));
   wireHoverFocus(el, toggle);
 
   function apply(value: number): void {
@@ -2721,7 +2730,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.textContent = opt.label;
       btn.disabled = disabled;
       setHint(btn, disabled ? "Plug in a second source to gate one against the other." : opt.hint);
-      btn.setAttribute("aria-description", opt.hint);
       btn.setAttribute("aria-pressed", String(patch.mix === opt.mix));
       btn.style.cssText = disabled ? driveSegBtnDisabledStyle : patch.mix === opt.mix ? driveSegBtnLitStyle : driveSegBtnStyle;
       if (!disabled) {
@@ -2747,7 +2755,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.type = "button";
       btn.textContent = opt.label;
       setHint(btn, opt.hint);
-      btn.setAttribute("aria-description", opt.hint);
       btn.setAttribute("aria-pressed", String(current === opt.h));
       btn.style.cssText = current === opt.h ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
       btn.addEventListener("click", () => {
@@ -2783,7 +2790,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.type = "button";
       btn.textContent = String(n);
       setHint(btn, EVERY_HINT);
-      btn.setAttribute("aria-description", EVERY_HINT);
       btn.setAttribute("aria-pressed", String(current === n));
       btn.style.cssText = current === n ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
       btn.addEventListener("click", () => {
@@ -2822,7 +2828,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.textContent = opt.label;
       btn.disabled = disabled;
       setHint(btn, disabled ? ROLE_REFUSE_HINT : opt.hint);
-      btn.setAttribute("aria-description", disabled ? ROLE_REFUSE_HINT : opt.hint);
       btn.setAttribute("aria-pressed", String(pressed));
       btn.style.cssText = disabled ? driveMiniSegBtnDisabledStyle : pressed ? driveMiniSegBtnLitStyle : driveMiniSegBtnStyle;
       if (!disabled) {
@@ -2849,7 +2854,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       btn.textContent = driveGridDivisionLabel(i);
       const hint = GRID_CHIP_HINT[i] ?? "";
       setHint(btn, hint);
-      btn.setAttribute("aria-description", hint);
       btn.setAttribute("aria-pressed", String(current === i));
       btn.style.cssText = current === i ? driveChipLitStyle(DRIVE_WHITE) : driveChipStyle;
       btn.addEventListener("click", () => {
@@ -4775,7 +4779,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // This row is one of the whole-mic Auto button's own members (see
       // micAuto.ts's header) — refreshMicAuto keeps that button's lit state
       // honest whenever a chip click could have changed it.
-      onAutoToggled: refreshMicAuto,
+      onAutoToggled: refreshMicAutoAndMaster,
       pin: pinConfig(() => deps.currentSceneId(), spec().key, resolveLive),
     });
     row.onChange(onChange);
@@ -4982,6 +4986,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
      *  connected" sub-line, never the live row's default-label/loopback text. */
     isMissing: boolean;
     isLive: boolean; // set by refresh(), read by the per-tick meter update
+    /** What updateMeters last painted (live flag + lit segment count, or
+     *  hidden), so a tick where nothing changed skips every style write. */
+    meterKey?: string;
   }
 
   function buildRow(kind: "device" | "screen"): SourceRowHandle {
@@ -5321,9 +5328,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       updateMeters(liveLevel: number | null): void {
         for (const row of rows) {
           const level = row.isLive ? Math.min(1, Math.max(0, liveLevel ?? 0)) : row.deviceId ? deps.getInputLevel(row.deviceId) : null;
+          const lit = level === null ? 0 : Math.round(level * SOURCE_METER_SEGMENTS);
+          // The level is quantised to a few steps and idle rows mostly sit at
+          // zero, so most ticks repeat the last paint — assigning cssText
+          // re-parses and invalidates style even for an identical string.
+          const key = `${row.isLive ? 1 : 0}|${level === null ? "h" : lit}`;
+          if (key === row.meterKey) continue;
+          row.meterKey = key;
           row.meter.style.cssText = sourceMeterStyle(row.isLive);
           row.meter.style.visibility = level === null ? "hidden" : "visible";
-          const lit = level === null ? 0 : Math.round(level * SOURCE_METER_SEGMENTS);
           const onStyle = row.isLive ? sourceMeterSegLiveOnStyle : sourceMeterSegIdleOnStyle;
           const offStyle = row.isLive ? sourceMeterSegLiveOffStyle : sourceMeterSegIdleOffStyle;
           for (let i = 0; i < row.segments.length; i++) row.segments[i].style.cssText = i < lit ? onStyle : offStyle;
@@ -5472,9 +5485,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     createChipButton("Reset", "Reset sensitivity, expansion and smoothing", () => {
       for (const { row, defaultValue, onChange } of inputRows) {
         onChange(defaultValue);
+        // Clear the T restore point first: setValue() renders a row muted
+        // for as long as one is held, so clearing after would leave it
+        // showing "Off" over the restored default.
+        row.clearOff();
         row.setValue(defaultValue);
         row.refreshChip();
-        row.clearOff();
       }
       // onChange above took those rows back to manual without going through
       // a row's own commit(), so its onAutoToggled hook never heard about it.
@@ -5735,9 +5751,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     // HOVER_SELECT_DELAY_MS before actually previewing, canceled by
     // whichever comes first: a newer focusin (any row, cancelPendingPreview
     // at the top of both this and previewDrive) or this row losing focus
-    // before the timer fires (onRowFocusOut below) — together these are
-    // what let a fast sweep across several rows toward the spectrum strip
-    // leave the starting preview alone. Keyboard/click focus (not
+    // before the timer fires (wirePreviewFocus's focusout below) — together
+    // these are what let a fast sweep across several rows toward the spectrum
+    // strip leave the starting preview alone. Keyboard/click focus (not
     // pointer-originated) previews immediately. Never touches `pinned` —
     // only an explicit click (togglePin) does that.
     function onRowFocusIn(): void {
@@ -5753,14 +5769,6 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       }
     }
 
-    /** Cancels this row's own still-pending hover preview if focus leaves
-     *  it for somewhere that never calls onRowFocusIn at all (the spectrum
-     *  strip, the meters, another card) before the dwell fires — a newer
-     *  row's own focusin already cancels via onRowFocusIn's own call, but
-     *  that only fires for focus landing on *another row*, not for focus
-     *  leaving the ring of rows entirely. `el` is the whole row (slider,
-     *  A/T/reset chips and all), so a focus change *within* it (e.g. Tab to
-     *  its own reset chip) isn't a leave. */
     /** Makes this row pinnable (pinRowHandles). A drive row brings its own
      *  handle, and createControlRow wires its card press (onCardPin); any
      *  other row's `main` control is passed so a press on it, or on the card
@@ -5779,6 +5787,15 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       registerPinnableRow(sceneId, spec, accent, rowEl, main);
     }
 
+    /** Wires `el`'s focusin to onRowFocusIn, and a focusout that cancels
+     *  this row's own still-pending hover preview if focus leaves it for
+     *  somewhere that never calls onRowFocusIn at all (the spectrum
+     *  strip, the meters, another card) before the dwell fires — a newer
+     *  row's own focusin already cancels via onRowFocusIn's own call, but
+     *  that only fires for focus landing on *another row*, not for focus
+     *  leaving the ring of rows entirely. `el` is the whole row (slider,
+     *  A/T/reset chips and all), so a focus change *within* it (e.g. Tab to
+     *  its own reset chip) isn't a leave. */
     function wirePreviewFocus(el: HTMLElement): void {
       el.addEventListener("focusin", onRowFocusIn);
       el.addEventListener("focusout", (e) => {
@@ -5883,6 +5900,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
             getManual: () => deps.getSceneSettingValue(sceneId, spec),
           }
         : undefined,
+      // isSceneAuto is true only while EVERY auto-capable row is auto, so any
+      // one row's A chip or a drag off auto flips the master bar's state.
+      onAutoToggled: refreshAutoMaster,
       pin: pinConfig(() => sceneId, spec.key, () => deps.resolveSceneSettingValue(sceneId, spec)),
       reads,
       drivePanel: driveBuild
@@ -6180,6 +6200,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       else {
         pinned = null;
         lastPinnedSetting = null;
+        // The old output graph is detached with its patch panel — stop
+        // update() redrawing it (togglePin clears this the same way).
+        activeOutputTick = null;
       }
     }
     // A jack click with nothing pinned reaches for lastPreview — drop it on
@@ -6426,8 +6449,16 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // on screen than showToast's own default toast duration.
   installKeyHints((text) => showToast(text, 4000));
 
+  // What each button last painted — refreshAutoMaster/refreshMicAuto also run
+  // on the 10 Hz tick, and re-assigning four cssTexts every time is wasteful.
+  // null until the first paint, so that one always writes.
+  let autoMasterLitShown: boolean | null = null;
+  let micAutoLitShown: boolean | null = null;
+
   function refreshAutoMaster(): void {
     const lit = deps.isSceneAuto(deps.currentSceneId());
+    if (lit === autoMasterLitShown) return;
+    autoMasterLitShown = lit;
     autoMasterBtn.style.cssText = lit ? autoMasterLitStyle : autoMasterStyle;
     autoMasterLabel.style.cssText = autoMasterLabelStyle(lit);
     autoMasterSub.style.cssText = autoMasterSubStyle(lit);
@@ -6453,7 +6484,14 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
   // header comment for how it relates to the scene master above.
   function refreshMicAuto(): void {
     const lit = deps.isMicAuto(deps.currentSceneId());
+    if (lit === micAutoLitShown) return;
+    micAutoLitShown = lit;
     micAutoBtn.style.cssText = lit ? micAutoLitStyle : micAutoStyle;
+  }
+  // The Input rows are members of both buttons (see toggleMicAuto below).
+  function refreshMicAutoAndMaster(): void {
+    refreshMicAuto();
+    refreshAutoMaster();
   }
   function toggleMicAuto(): void {
     const sceneId = deps.currentSceneId();
@@ -6863,6 +6901,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       silenceClosedRow.refreshAuto();
       silenceOpenRow.refreshAuto();
       for (const row of sceneRowHandles) row.refreshAuto();
+      // The two Auto buttons follow their rows' auto flags, which an
+      // external change (a paired device, a drag elsewhere) can flip.
+      refreshAutoMaster();
+      refreshMicAuto();
       // The pinned setting's patch panel — re-synced here rather than every
       // tick, same reasoning as every other refreshAuto() above (an
       // external change, e.g. a paired device's own command, could move the
