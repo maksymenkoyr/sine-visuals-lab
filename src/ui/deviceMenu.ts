@@ -3252,7 +3252,12 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       // Read live: a weight drag swaps the stored setting without rebuilding
       // this graph, so the captured `patch` would keep the old top.
       const live = deps.getDriveSetting(sceneId, spec);
-      const top = Math.max(0.05, driveCeiling(live === "scene" ? patch : live, spec.drive?.gain ?? 1));
+      // `sourceValues()` and the generic gate's line are un-gained
+      // (weight·value — drives.ts's header), the combined value and this top
+      // are gained: every trace is scaled by `gain` below so they share one
+      // axis (a 0.15-gain setting drew its source traces 7× off the top).
+      const gain = spec.drive?.gain ?? 1;
+      const top = Math.max(0.05, driveCeiling(live === "scene" ? patch : live, gain));
       const ys = (v: number) => h - 3 - Math.max(0, Math.min(1, v / top)) * (h - 6);
 
       if (isGate) {
@@ -3278,7 +3283,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
         for (let k = RING - n; k < RING; k++) {
           const idx = at(k);
           const x = xs(k);
-          const y = ys(perSource[i]![idx]!);
+          const y = ys(perSource[i]![idx]! * gain);
           if (k === RING - n) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
@@ -3397,7 +3402,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           trace = new Float32Array(RING).fill(NaN);
           markTraces.set(GENERIC_GATE_LINE_LABEL, trace);
         }
-        trace[ringHead] = gateLine;
+        trace[ringHead] = gateLine * (spec.drive?.gain ?? 1);
       }
       reactions[ringHead] = marks?.reaction ?? 0;
       if (key.style.display === "none" && (marks || gateLine !== undefined)) {
@@ -3613,6 +3618,9 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
     let sparkHasMarks = false;
     let sparkHead = 0;
     let sparkFilled = 0;
+    // The most this setting can receive — the same fixed top the panel's
+    // "What it receives" graph uses, so the two read on one scale.
+    let sparkTop = 1;
     let outputCanvas: HTMLCanvasElement | null = null;
     let boundRowEl: HTMLElement | null = null;
 
@@ -3682,9 +3690,10 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
       if (n < 2) return;
       const at = (k: number) => (sparkHead - SPARK_LEN + k + 1 + SPARK_LEN * 2) % SPARK_LEN;
       const xs = (k: number) => (k / (SPARK_LEN - 1)) * w;
-      // Grows to fit (sources added together go past 1) rather than
-      // clipping, which drew a busy input as a flat line along the top.
-      let top = 1;
+      // Starts at the setting's ceiling (sparkTop) and still grows to fit
+      // rather than clipping, which drew a busy input as a flat line along
+      // the top.
+      let top = sparkTop;
       for (let k = SPARK_LEN - n; k < SPARK_LEN; k++) top = Math.max(top, sparkVals[at(k)]!);
       const pad = sparkHasMarks ? 3 : 1;
       const ys = (v: number) => h - pad - Math.max(0, Math.min(1, v / top)) * (h - 2 * pad);
@@ -3784,6 +3793,7 @@ export function createDeviceMenu(deps: DeviceMenuDeps): DeviceMenu {
           col = driveSourceColor(setting.sources[bi]!.choice);
         }
       }
+      sparkTop = setting === "scene" ? 1 : Math.max(0.05, driveCeiling(setting, spec.drive?.gain ?? 1));
       sparkHead = (sparkHead + 1) % SPARK_LEN;
       sparkVals[sparkHead] = v;
       sparkCols[sparkHead] = col;
