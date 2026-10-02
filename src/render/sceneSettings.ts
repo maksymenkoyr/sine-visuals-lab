@@ -13,10 +13,10 @@ import { registerSyncedStore } from "../net/syncedStores.ts";
  * below): the Master card's Scale and Expansion dials over every numeric
  * scene param, each stored as a scalar rather
  * than per scene because it describes this room's taste, not one scene's —
- * the same device-local class of preference as audio/sensitivity.ts's gain
- * stages, so like them it stays out of Looks/share codes and off the
- * phone→TV wire (which only carries scene/palette/viewport — net/room.ts).
- * Storage lives here; the scaling itself happens at the single resolve
+ * the same class of preference as audio/sensitivity.ts's gain stages, so like
+ * them it stays out of Looks/share codes. Their keys do ride in a room's look
+ * (net/syncedStores.ts's `isRoomKey`), so a paired TV draws with the phone's
+ * master dials. Storage lives here; the scaling itself happens at the single resolve
  * choke point, resolveSceneSetting in autoTune.ts, which honours a per-
  * setting `masterScale: false` opt-out (see SceneSetting.masterScale below)
  * for a value the master would otherwise distort past recognition.

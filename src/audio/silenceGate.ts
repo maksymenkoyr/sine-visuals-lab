@@ -60,7 +60,7 @@
  * bandEnergy.ts's band onsets), never tempo tracking. features.ts also
  * reports FeatureFrame.pulseOnset — the same firing comparison without the
  * dimmer, on its own refractory — and that is what the tempo vote and the
- * beat clock read, on the phone and (over the wire's pulse bit) on a paired
+ * beat clock read, on the host and (over the wire's pulse bit) on a paired
  * TV. It used to be the gated onset, and in a room the gate read as quiet
  * that starved tempo tracking of every hit: through a mic, the host/TV path
  * and the no-worklet fallback never started the Metronome at all while the
@@ -72,12 +72,14 @@
  * TV limitation: only the broadband onset flag (FeatureFrame.onset) is
  * computed by a FeatureExtractor and travels pre-gated to a paired TV over
  * src/net/protocol.ts's wire frame. bandEnergy.ts's per-band low/mid/high
- * detectors run independently on both the phone and the TV, each off its own
- * decoded `level` byte and its own locally-stored SilenceGateMarks — the
- * phone's marks never travel, the same way bandSplit.ts's low/mid crossovers
- * don't. So a phone's Silence gate setting doesn't gate what a paired TV's
- * own bandEnergy onsets treat as silence; only the TV's own copy of this
- * setting does that.
+ * detectors run independently on every device that draws (the host, a
+ * phone's preview, the TV), each off its own decoded `level` byte and its own
+ * locally-stored SilenceGateMarks. The marks are not part of a room's look:
+ * their keys are net/syncedStores.ts's VOLATILE_PREFIXES, which the pop-out
+ * still mirrors but `isRoomKey` refuses — unlike bandSplit.ts's low/mid
+ * crossovers, which do ride in the look. So a phone's Silence gate setting
+ * doesn't gate what a paired TV's own bandEnergy onsets treat as silence;
+ * only the TV's own copy of this setting does that.
  *
  * Auto mode: a room-floor tracker (feedSilenceGateMeasurement, gated by
  * STORAGE_KEY_AUTO) that can drive both marks instead of a manual drag. It

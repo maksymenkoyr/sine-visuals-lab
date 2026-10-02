@@ -12,6 +12,23 @@ export interface ControlPanelDeps {
   scenes: MenuItem[];
   palettes: MenuItem[];
   selfDeviceId: string;
+  /** This device's own look, for a device the room's roster does not list: a
+   *  phone controller is hidden from it (a phone is not a screen), so without
+   *  this "Sync all to me" would have no "me" to copy. */
+  getSelfLook?: () => SyncLook | null;
+}
+
+/** The scene and palette "Sync all to me" copies to the other devices. */
+export interface SyncLook {
+  scene: string;
+  palette: string;
+}
+
+/** What "Sync all to me" copies: this device's roster entry when the room lists
+ *  it, else its own look when it has one to give, else nothing. */
+export function syncSource(roster: RosterEntry[], selfDeviceId: string, own: SyncLook | null): SyncLook | null {
+  const self = roster.find((d) => d.deviceId === selfDeviceId);
+  return self ? { scene: self.scene, palette: self.palette } : own;
 }
 
 export interface ControlPanel {
@@ -85,9 +102,10 @@ export function createControlPanel(deps: ControlPanelDeps): ControlPanel {
   });
 
   const syncBtn = makeActionButton("Sync all to me", () => {
-    const self = deps.getRoster().find((d) => d.deviceId === deps.selfDeviceId);
+    const roster = deps.getRoster();
+    const self = syncSource(roster, deps.selfDeviceId, deps.getSelfLook?.() ?? null);
     if (!self) return;
-    for (const d of deps.getRoster()) {
+    for (const d of roster) {
       if (d.deviceId === deps.selfDeviceId) continue;
       deps.setDevice(d.deviceId, { scene: self.scene, palette: self.palette });
     }
