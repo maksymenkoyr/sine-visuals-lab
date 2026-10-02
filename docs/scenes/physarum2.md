@@ -56,9 +56,9 @@ meaning is its exact position, so the device-wide Scene master must never
 scale it. `scene.panel` (one `PanelSection` naming the `itemBoxes` widget —
 `src/ui/widgets/itemBoxes.ts`) renders them as specimen boxes + the selected
 strain's rows inside the device menu's Scene card, ahead of the remaining
-flat rows (Network scale, Trail decay, Hostility [renamed from Rivalry, same
-key `rivalry`], Crawl speed, Beat seeding, Exposure, Palette tint, Beat
-flash), each of the latter still carrying its own `auto` weights as before;
+flat rows (Network scale, Trail decay, Cross-smell — the `rivalry` key, once
+labelled Rivalry, then Hostility — Crawl speed, Beat seeding, Exposure, Palette
+tint, Beat flash), each of the latter still carrying its own `auto` weights as before;
 and the Pairs block (`src/ui/widgets/pairPads.ts`'s `buildPairPads`: a
 Smell/Touch switch, an own-trail fader strip, one two-strain-culture pad per
 pair (`pairsOf`), a Random/Nudge/Keep own trails/Back mix row and named
@@ -66,7 +66,7 @@ presets — replacing the old plain-word rows/SVG-web pair,
 `relationRows.ts`/`relationWeb.ts`, both deleted) in its own Affinity card
 right after the Scene card ("The Affinity card" below). `src/render/scenes/
 physarum2Affinity.ts` is the DOM-free home for both tables' shared logic and
-words: `ATTRACT_ROWS`, `smellWeight` (Hostility folded into a raw Smell
+words: `ATTRACT_ROWS`, `smellWeight` (Cross-smell folded into a raw Smell
 value, shared by the GPU packing and the pads), `packTouch` (Touch's GPU
 packing), `PAIR_WORDS` (every word the Pairs widget shows), `AFFINITY_PRESETS`
 and the pad/preset/mix-row pure helpers; `src/render/scenes/
@@ -729,6 +729,28 @@ and `powder.ts`'s curl noise).
   scene kept the High preset's agents until the next scene switch. The device
   menu's Quality choice now calls `applyRenderQuality(true)` in `src/app.ts`,
   so the culture re-seeds at the new count. The scene file is unchanged.
+- **2026-10-02: Hostility became Cross-smell; widget and sim review fixes.**
+  The `rivalry` slider read backwards once any off-diagonal Smell cell was
+  positive: under Mob or Symbiosis, dragging "Hostility" right made strains
+  pull *harder* onto each other's trails, against the "right = more" rule.
+  `smellWeight` scales every off-diagonal weight by its size whichever way
+  the sign points, so the label now names what grows: **Cross-smell**, "how
+  strongly each strain reacts to the others' trails". Relabel only: the key
+  stays `rivalry` (saved looks and share codes keep working) and the maths and
+  every tuned picture are unchanged; the name is a placeholder the user may
+  prefer to change. Same review: a beat reseed that landed on a frame owing
+  zero sim steps was swallowed (`pendingSeed` now holds it like the pipette and
+  Rebalance one-shots); a Headcount readback kicked before a pipette tap or
+  Rebalance no longer overwrites the instant value (`popGen`); `POP_SIDE` 32 to
+  128 spreads the population count over many fragments instead of a few long
+  loops (same shares); pair cultures now honour each strain's Trail life
+  (`decayKeep`, shared with the specimen boxes). Panel perf: previews and
+  pads fill one cached `ImageData` per box (`pixelsInto`), the Pairs pads reuse
+  the boxes' per-tick strain readings, `previews.ts` caches the settings
+  lookup, and the Strain Console and the pad status line write the DOM only
+  when something changed. The dead multi-item selection helpers in
+  `itemSelection.ts` went; the linked-row path in `registry.ts`/`deviceMenu.ts`
+  is still there (nothing supplies it) for a later pass.
 
 ## Tuning notes
 
@@ -828,7 +850,7 @@ applies there too. Tuned so far only against the synthetic feed at
   Measurements is measured only on the M1 Pro's tile-based GPU via
   ANGLE/Metal; an immediate-mode-renderer GPU (most desktop/laptop dGPUs)
   pays for the second attachment differently and is unmeasured. The pair
-  cultures' own preview (`previews.ts`'s `pair.weights`) reads Hostility
+  cultures' own preview (`previews.ts`'s `pair.weights`) reads Cross-smell
   through `WidgetCtx.get`, i.e. the *stored* `rivalry` value, not its
   Auto-resolved one — the same gap `registry.ts`'s `get` doc already flagged
   before Touch existed, now with one more reader. Touch carries no
