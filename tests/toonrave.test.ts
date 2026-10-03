@@ -421,3 +421,186 @@ describeDraw("toonrave svgDraw helpers", () => {
     expectDraw(boxesOverlap([0, 0, 1, 1], [5, 5, 6, 6])).toBe(false);
   });
 });
+
+// --- step 5: the scene --------------------------------------------------------------------------
+
+import {
+  describe as describeScene,
+  it as itScene,
+  expect as expectScene,
+} from "vitest";
+import {
+  toonraveScene,
+  shapeState,
+  coverView,
+  canvasSize,
+  DROP_CYCLE_BEATS,
+  CAST_RIGS,
+  HERO_C,
+} from "../src/render/scenes/toonrave/index.ts";
+import { buildPostFrag } from "../src/render/scenes/toonrave/glsl.ts";
+import { frameAt as sceneFrameAt } from "../src/render/scenes/toonrave/motion.ts";
+import { SETTING_GROUPS } from "../src/render/sceneSettings.ts";
+
+describeScene("toonrave settings", () => {
+  const settings = toonraveScene.settings ?? [];
+  const byKey = (k: string) => settings.find((s) => s.key === k)!;
+
+  itScene("groups are all set and in SETTING_GROUPS order", () => {
+    const order = settings.map((s) => SETTING_GROUPS.indexOf(s.group as (typeof SETTING_GROUPS)[number]));
+    expectScene(order.every((i) => i >= 0)).toBe(true);
+    expectScene(order).toEqual([...order].sort((a, b) => a - b));
+    expectScene(settings.map((s) => s.group)).toEqual(["Motion", "Motion", "Motion", "Look", "Camera", "Camera", "Post"]);
+  });
+
+  itScene("no setting has auto or macro", () => {
+    for (const s of settings) {
+      expectScene(s.auto, s.key).toBeUndefined();
+      expectScene(s.macro, s.key).toBeUndefined();
+    }
+  });
+
+  itScene("defaults sit inside their ranges", () => {
+    for (const s of settings) {
+      expectScene(s.default, s.key).toBeGreaterThanOrEqual(s.min);
+      expectScene(s.default, s.key).toBeLessThanOrEqual(s.max);
+    }
+    expectScene(byKey("bounce").default).toBe(1);
+    expectScene(byKey("lights").default).toBe(1);
+    expectScene(byKey("shake").default).toBe(1);
+    expectScene(byKey("cuts").default).toBe(2);
+    expectScene(byKey("flash").default).toBe(1);
+    expectScene(byKey("dropHits").default).toBe(1);
+  });
+
+  itScene("the enum and boolean shapes are valid", () => {
+    const drops = byKey("drops");
+    expectScene(drops.type).toBe("enum");
+    expectScene(drops.options).toEqual(["Every 32 bars", "Every 16 bars", "Every 8 bars"]);
+    expectScene([drops.min, drops.max, drops.step]).toEqual([0, drops.options!.length - 1, 1]);
+    expectScene(drops.options![drops.default]).toBe("Every 16 bars");
+    expectScene(DROP_CYCLE_BEATS).toEqual([128, 64, 32]);
+    for (const k of ["dropHits", "flash"]) {
+      const s = byKey(k);
+      expectScene(s.type, k).toBe("boolean");
+      expectScene([s.min, s.max, s.step], k).toEqual([0, 1, 1]);
+    }
+    const cuts = byKey("cuts");
+    expectScene([cuts.min, cuts.max, cuts.step]).toEqual([0, 3, 1]);
+  });
+
+  itScene("the reactive settings have drives, and the trigger reads the drop edge", () => {
+    expectScene(byKey("bounce").drive?.default).toEqual({ source: "beat", grid: 2 });
+    expectScene(byKey("lights").drive).toBeDefined();
+    expectScene(byKey("dropHits").drive?.default).toBe("anim.dropOnset");
+  });
+});
+
+describeScene("toonrave look shaping", () => {
+  const opts = { cycleBeats: 32 as const, cuts: 0 as const, bpm: 128 };
+  const at = (c: number) => sceneFrameAt(c, opts);
+
+  itScene("all amounts at 1 leave the state exactly as frameAt made it", () => {
+    const a = JSON.stringify(at(20.3));
+    const s = shapeState(at(20.3), { bounce: 1, lights: 1, shake: 1 });
+    expectScene(JSON.stringify(s)).toBe(a);
+  });
+
+  itScene("the hero frame is untouched by any Bounce amount", () => {
+    const a = JSON.stringify(at(HERO_C).x);
+    for (const bounce of [0, 0.5, 1.5]) {
+      const s = shapeState(at(HERO_C), { bounce, lights: 1, shake: 1 });
+      expectScene(JSON.stringify(s.x), `bounce ${bounce}`).toBe(a);
+    }
+  });
+
+  itScene("Bounce 0 holds the cast in the rest pose and leaves the lights' rigs alone", () => {
+    const rest = at(HERO_C).x;
+    const moving = at(20.3);
+    const s = shapeState(at(20.3), { bounce: 0, lights: 1, shake: 1 });
+    for (const id of CAST_RIGS) expectScene(s.x[id], id).toEqual(rest[id]);
+    expectScene(s.x.rays).toEqual(moving.x.rays);
+    expectScene(s.x.laser0).toEqual(moving.x.laser0);
+  });
+
+  itScene("Bounce halves the motion away from the rest pose", () => {
+    const rest = at(HERO_C).x;
+    const moving = at(20.3).x.dj;
+    const s = shapeState(at(20.3), { bounce: 0.5, lights: 1, shake: 1 });
+    for (let i = 0; i < 6; i++) expectScene(s.x.dj[i]).toBeCloseTo((rest.dj[i] + moving[i]) / 2, 9);
+  });
+
+  itScene("Lights scales lasers, lamps and rays, capped at fully on, and 0 turns them off", () => {
+    const base = at(20.3);
+    const off = shapeState(at(20.3), { bounce: 1, lights: 0, shake: 1 });
+    expectScene(off.rayOp).toBe(0);
+    for (const id in off.o) {
+      if (id.indexOf("lampGlow") === 0 || id.indexOf("laser") === 0) expectScene(off.o[id], id).toBe(0);
+    }
+    const bright = shapeState(at(20.3), { bounce: 1, lights: 1.5, shake: 1 });
+    for (const id in bright.o) expectScene(bright.o[id], id).toBeLessThanOrEqual(Math.max(1, base.o[id]));
+    expectScene(bright.rayOp).toBeLessThanOrEqual(1);
+    // everything else is left alone
+    expectScene(off.o.btnGlow).toBe(base.o.btnGlow);
+  });
+
+  itScene("Shake scales the camera's shake and nothing else of the camera", () => {
+    const base = at(0.2);
+    const s = shapeState(at(0.2), { bounce: 1, lights: 1, shake: 0 });
+    expectScene(s.camera.shake).toEqual({ x: 0, y: 0, rot: 0 });
+    expectScene(s.camera.src).toEqual(base.camera.src);
+    expectScene(s.camera.shot).toBe(base.camera.shot);
+    const half = shapeState(at(0.2), { bounce: 1, lights: 1, shake: 0.5 });
+    expectScene(half.camera.shake.x).toBeCloseTo(base.camera.shake.x * 0.5, 9);
+    expectScene(half.camera.shake.rot).toBeCloseTo(base.camera.shake.rot * 0.5, 9);
+  });
+});
+
+describeScene("toonrave framing", () => {
+  itScene("a 16:9 canvas on the full viewport draws the art 1:1 scaled", () => {
+    const v = coverView(1600, 900, { x: 0, y: 0, w: 1, h: 1 });
+    expectScene(v.scale).toBeCloseTo(1, 9);
+    expectScene(v.tx).toBeCloseTo(0, 9);
+    expectScene(v.ty).toBeCloseTo(0, 9);
+    const half = coverView(800, 450, { x: 0, y: 0, w: 1, h: 1 });
+    expectScene(half.scale).toBeCloseTo(0.5, 9);
+  });
+
+  itScene("a portrait canvas covers by height and crops the sides, centred", () => {
+    const v = coverView(390, 844, { x: 0, y: 0, w: 1, h: 1 });
+    expectScene(v.scale).toBeCloseTo(844 / 900, 9);
+    expectScene(v.ty).toBeCloseTo(0, 9);
+    expectScene(v.tx).toBeCloseTo(390 / 2 - 800 * v.scale, 9);
+  });
+
+  itScene("a wide canvas covers by width and crops top and bottom, centred", () => {
+    const v = coverView(2000, 600, { x: 0, y: 0, w: 1, h: 1 });
+    expectScene(v.scale).toBeCloseTo(2000 / 1600, 9);
+    expectScene(v.ty).toBeCloseTo(300 - 450 * v.scale, 9);
+  });
+
+  itScene("a Panorama slice fills the canvas with its part of the art", () => {
+    const v = coverView(800, 900, { x: 0.5, y: 0, w: 0.5, h: 1 });
+    expectScene(v.scale).toBeCloseTo(1, 9);
+    // the slice's left edge (art x = 800) lands on canvas x = 0
+    expectScene(800 * v.scale + v.tx).toBeCloseTo(0, 9);
+  });
+
+  itScene("canvasSize caps the width per preset and keeps the aspect", () => {
+    expectScene(canvasSize(1280, 720, "high")).toEqual({ w: 1280, h: 720 });
+    expectScene(canvasSize(3840, 2160, "high")).toEqual({ w: 1920, h: 1080 });
+    expectScene(canvasSize(3840, 2160, "floor")).toEqual({ w: 960, h: 540 });
+    expectScene(canvasSize(0, 0, "high").w).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describeScene("toonrave post shader", () => {
+  itScene("carries the impact filters' luminance rows and both tables", () => {
+    const src = buildPostFrag();
+    expectScene(src).toContain("vec3(0.3, 0.59, 0.11)");
+    expectScene(src).toContain("vec3(0.06, 0.01, 0.05)");
+    expectScene(src).toContain("vec3(1.0, 0.18, 0.64)");
+    expectScene(src).toContain("vec3(1.0, 0.93, 0.97)");
+    expectScene(src.startsWith("#version 300 es")).toBe(true);
+  });
+});
