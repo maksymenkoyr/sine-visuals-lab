@@ -22,7 +22,8 @@ their own uniforms). Registered as `physarum2Scene` via `registerScene` in
 its gallery group), and absent from that file's `draftIds`, so featured.
 
 The Strain Console (2026-09-29): `src/ui/widgets/strainConsole.ts` (Lanes,
-Knobs and the Synergy row — its header is the source for the gestures),
+Knobs, the mix row with Random/Back/the motion presets, and the Synergy row
+with Shuffle/New palette — its header is the source for the gestures),
 `src/ui/widgets/consoleMath.ts` (the pure arithmetic,
 `tests/consoleMath.test.ts`), mounted by `itemBoxes.ts` as its own "Per
 strain" card between the Strains block and the Affinity card. The colour
@@ -126,7 +127,12 @@ own published values — they're this scene's own hand-picked variant (CLAUDE.md
 "just make one of the variants," not randomised). No `/ref` video bundle; no
 code was ported (CLAUDE.md's standing rule — written independently from the
 published description, the same spirit as `physarum.ts`'s own Jones citation
-and `powder.ts`'s curl noise).
+and `powder.ts`'s curl noise). Studied again on 2026-10-02 for more ideas
+(Decisions, "Fogleman's extras"): per-species auto-levelling in his renderer,
+his unused weighted turn rule, grids that start as noise, a random table that
+leans own-positive/others-negative, random species configs and the viewer's
+palette keys. Again ideas only: none of his numbers, palettes or saved
+configs are used.
 
 ## Measurements
 
@@ -181,6 +187,17 @@ and `powder.ts`'s curl noise).
     the pads' own marginal cost on top of that (open-at-the-pads vs
     open-at-the-boxes, both throttled) came out negative and not
     measurable: -0.81 ms mean / -2.80 ms p95.
+- 2026-10-02, Auto level's peaks on the default dish (headless Chromium,
+  SwiftShader, `?quality=low`, synthetic 120 BPM, ~30 s in): PP-A1 0.2,
+  PP-B2 0.39, PP-C3 0.26, PP-D4 0.8 (`levelPeaks`, trail units). The fine
+  fuzz strain reads about four times the highways strain, which is what
+  Auto level evens out: at 1 the gains came to about 1.9 / 0.9 / 1.2 / 0.5.
+- 2026-10-02, motion search (`scripts/motionsearch.mjs`, seeds 11 and 23,
+  nine rolls each, SwiftShader, 25 s hold): the five new `MOTION_PRESETS`
+  are rolls s11-01 (Cells), s11-04 (Coral), s23-05 (Weave), s23-06
+  (Islands) and s11-07 (Grains); the rest read as variations of the default
+  mesh. SwiftShader runs far fewer steps per second than a GPU, so the
+  presets are worth a look on real hardware.
 
 ## Decisions and pivots
 
@@ -752,6 +769,47 @@ and `powder.ts`'s curl noise).
   `itemSelection.ts` went; the linked-row path in `registry.ts`/`deviceMenu.ts`
   is still there (nothing supplies it) for a later pass.
 
+- **2026-10-02: Fogleman's extras.** User, after a review of what else
+  fogleman/physarum had to offer: "lets implement all and expose controls to
+  everything." Each piece is a control:
+  - **Auto level** (`level`, Look). His renderer normalises each species'
+    grid to its own range. A max-pool pass (`LEVEL_FRAG`) and the existing
+    non-blocking readback give each strain's road brightness
+    (`levelPeaks`: the block peak `LEVEL_TOP_SHARE` of blocks reach);
+    `levelGainsFull` evens them around their geometric mean. The first
+    build normalised each strain to a fixed target instead: at full strength
+    it lifted a dim strain's haze and darkened less of the field, so it now
+    only evens the strains and Exposure keeps the overall brightness.
+    Default `LEVEL_DEFAULT`.
+  - **Wander** (`wander`, Form, default 0 = the old rule): his alternative
+    turn rule, unused in his own code, written as `weightedTurn` in
+    `SIM_FRAG`. One change from the description: an all-equal reading holds
+    course instead of always turning one way (that rule turns every agent on
+    an empty patch the same way, into circles).
+  - **Start ink** (`startInk`, Form) and **Fresh dish** (a chip beside
+    Rebalance, `command("fresh")`): a new trail is filled with uniform
+    noise. Half of the first `START_INK_MAX` washed the first frames pink,
+    so the range came down and the default is small (`START_INK_DEFAULT`).
+    Fresh dish is phone-local, like Rebalance and the pipette.
+  - **Rivals** (Affinity mix row, on by default): Random smell rolls own
+    trails positive and every other trail negative (`RIVAL_OWN_RANDOM`/
+    `RIVAL_OTHER_RANDOM`), so a roll always splits into territories. Off is
+    the old any-sign roll.
+  - **Random motion and motion presets** (the Strain Console's new mix row):
+    Random rolls `MOTION_PARAMS` for every strain over the sliders' whole
+    ranges (which already span his random
+    config ranges); Back undoes; the pills are `MOTION_PRESETS`, found by a
+    headless random search (`scripts/motionsearch.mjs`, Materials) and named
+    by what they grow. "Lab" is the shipped motion.
+  - **Shuffle / New palette** (under the Synergy wheel): his viewer's
+    palette keys. Shuffle hands the colours on screen round the strains in a
+    new order; New palette deals a random harmony from `HARMONIES` at a
+    random rotation. Both only write the stains, so Looks, the TV and Back
+    see a plain stain change, and Synergy keeps working on top.
+  - Checks: `npm run typecheck`, `npm run test`, headless screenshots of
+    the dish before and after and of the panel, and a scripted click through
+    every new button.
+
 ## Tuning notes
 
 Judge the look by whether black background still dominates and the four
@@ -769,6 +827,15 @@ applies there too. Tuned so far only against the synthetic feed at
 `bpm=120`; not yet judged against real music through a mic.
 
 ## Known issues and next steps
+
+- Fogleman's extras (2026-10-02) were judged only headlessly on SwiftShader
+  with the synthetic feed: the motion presets, Auto level's default and
+  Wander all want a look on a real GPU with music. Fresh dish is
+  phone-local (the TV keeps its own dish, like Rebalance). The specimen
+  boxes and Pairs pads don't show Wander or Auto level (they show the
+  per-strain motion only, like Network scale). Start ink only applies when
+  a dish starts (scene open, a Quality change, Fresh dish), not when its
+  slider moves.
 
 - Switching's default is tuned on the synthetic feed only. With real
   music the split may want another default or `SWITCH_PRESSURE`, and a
@@ -959,6 +1026,9 @@ applies there too. Tuned so far only against the synthetic feed at
   - `padmotion.mjs` — how much a pad's live culture changes over 0.5 s vs
     10 s (block means, not agent flicker) plus two crops 3 s apart; the
     probe behind the 2026-09-28 "pads don't move" fix.
+  - `motionsearch.mjs` — the random motion search behind `MOTION_PRESETS`
+    (seeded rolls of the `MOTION_PARAMS` sliders, a screenshot each);
+    `--swiftshader` for a GPU-less box.
   - `docs/scenes/_shared/scripts/panelscroll.mjs` (shared) — screenshots
     every panel column top to bottom, for judging cards, gaps and rows as a
     whole.
@@ -1012,8 +1082,11 @@ untouched. Not yet judged on real music; the default line is
 ## Resume here
 
 **The Strain Console is built** (2026-09-29; Decisions and pivots has what
-and why). What's left is Known issues: a real-music listen at Switching's
-default and `SWITCH_PRESSURE`, and per-lane jacks if wanted. The console's
+and why), and Fogleman's extras are in (2026-10-02: Auto level, Wander,
+Start ink and Fresh dish, Rivals, the console's Random/presets and
+Shuffle/New palette). What's left is Known issues: a real-GPU, real-music
+look at those, a real-music listen at Switching's default and
+`SWITCH_PRESSURE`, and per-lane jacks if wanted. The console's
 rows are the existing per-strain settings (`nutrient`/`excite`/`sensor`/
 `angle`/`turn`/`stride`/`life`/`stain` `<k>`), so a change there reads,
 resets and shares through Looks like any slider. The user reviews panel UX
@@ -1024,7 +1097,9 @@ in a prototype first and prefers plain - / + and numbers to outcome words.
 (`physarum2TrailSide`, `stepAccumulator`, `hueRotateRGB`,
 `resolveStrainEffective`, the sensor/turn/stride/seedSpread slider<->physical
 mappings, `equalPopulation`/`applyInjection`, `classifyTerritory`,
-`roomAspectJs`/`coverUvJs`/`uncoverUvJs`/`screenToFieldUv`) and the
+`roomAspectJs`/`coverUvJs`/`uncoverUvJs`/`screenToFieldUv`, Auto level's
+`levelPeaks`/`levelGainsFull`/`levelGain`, `fillStartInk`, the
+`MOTION_PRESETS` shape) and the
 STRAINS/ATTRACT_ROWS shape are exercised by `tests/physarum2.test.ts`,
 including the NEUTRAL auto-tune invariant and the "defaults reproduce the old
 fixed motion" round trip; `physarum2Preview.ts`'s own sim (determinism, the
@@ -1040,8 +1115,11 @@ device-wide master. `tests/physarum2Affinity.test.ts` is
 math, the vocabulary shape (`PAIR_WORDS`, `AFFINITY_PRESETS`), the pad/preset
 pure helpers (`wordBand`/`pairZone`/`pairRelation`/`fillTemplate`/
 `padPos`/`padValue`/`pairsOf`/`tablesMatch`), and the mix row's own pure
-logic (`randomSmell`/`randomTouch`/`nudgeTable`/`pushHistory`/`popHistory`,
-each exercised with a seeded `mulberry32`, never `Math.random`). Every word
+logic (`randomSmell` with and without its Rivals lean/`randomTouch`/
+`nudgeTable`/`pushHistory`/`popHistory`, each exercised with a seeded
+`mulberry32`, never `Math.random`). Shuffle/New palette's pure half is in
+`tests/physarum2Synergy.test.ts`, the console's Random/preset matching in
+`tests/consoleMath.test.ts`. Every word
 the Pairs widget shows lives in `PAIR_WORDS`
 (`src/render/scenes/physarum2Affinity.ts`) — re-word there, never in
 `pairPads.ts`. Both the original lab-controls plan (specimen boxes, Pipette,

@@ -3,6 +3,10 @@ import {
   HARMONIES,
   createSynergyTracker,
   nearestHarmony,
+  paletteStains,
+  shuffledStains,
+  shuffleOrder,
+  stainForHue,
   unitTurn,
   wrapTurn,
 } from "../src/render/scenes/physarum2Synergy.ts";
@@ -113,5 +117,65 @@ describe("createSynergyTracker", () => {
     direct.update([0, 0, 0, 0], 1);
     const want = direct.update([0, 0.3, 0, 0], 1).shift;
     eased.forEach((v, k) => expect(v).toBeCloseTo(want[k]!, 4));
+  });
+});
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return function rnd(): number {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+describe("colour actions (Shuffle / New palette)", () => {
+  it("stainForHue lands on the hue, inside the Stain slider's range", () => {
+    for (const [hue, base] of [[0.9, 0.1], [0.1, 0.9], [0.3, 0.3], [0.55, 0.0]] as const) {
+      const s = stainForHue(hue, base);
+      expect(s).toBeGreaterThanOrEqual(-0.5);
+      expect(s).toBeLessThan(0.5);
+      expect(Math.abs(wrapTurn(base + s - hue))).toBeLessThan(1e-9);
+    }
+  });
+
+  it("shuffleOrder is always a permutation that moves something", () => {
+    const rnd = mulberry32(5);
+    for (let n = 0; n < 200; n++) {
+      const order = shuffleOrder(4, rnd);
+      expect([...order].sort()).toEqual([0, 1, 2, 3]);
+      expect(order.some((v, i) => v !== i)).toBe(true);
+    }
+    expect(shuffleOrder(1, rnd)).toEqual([0]);
+  });
+
+  it("shuffledStains gives strain k the hue strain order[k] showed", () => {
+    const shown = [0.05, 0.3, 0.55, 0.8];
+    const order = [2, 0, 3, 1];
+    const stains = shuffledStains(shown, BASE, order);
+    for (let k = 0; k < 4; k++) expect(Math.abs(wrapTurn(BASE[k]! + stains[k]! - shown[order[k]!]!))).toBeLessThan(1e-9);
+  });
+
+  it("paletteStains always lands the four hues exactly on a harmony", () => {
+    const rnd = mulberry32(9);
+    for (let n = 0; n < 50; n++) {
+      const stains = paletteStains(BASE, rnd);
+      const hues = stains.map((s, k) => BASE[k]! + s);
+      for (const s of stains) {
+        expect(s).toBeGreaterThanOrEqual(-0.5);
+        expect(s).toBeLessThan(0.5);
+      }
+      expect(nearestHarmony(hues, -1).cost).toBeLessThan(1e-12);
+    }
+  });
+
+  it("New palette can deal every harmony", () => {
+    const rnd = mulberry32(10);
+    const seen = new Set<string>();
+    for (let n = 0; n < 300; n++) seen.add(nearestHarmony(paletteStains(BASE, rnd).map((s, k) => BASE[k]! + s), -1).name);
+    // Analogous and Square etc. are distinct shapes; a fit can only name one
+    // that is really there, so every harmony should show up.
+    expect(seen.size).toBe(HARMONIES.length);
   });
 });

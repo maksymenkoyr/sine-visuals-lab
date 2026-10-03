@@ -9,7 +9,9 @@ import {
   hueRailGradient,
   knobDelta,
   quantize,
+  randomValue,
   toUnit,
+  valuesMatch,
   wheelPoint,
 } from "../src/ui/widgets/consoleMath.ts";
 
@@ -103,5 +105,27 @@ describe("hueRailGradient / wheelPoint / arcPath", () => {
   it("an arc past half a turn takes the large-arc flag", () => {
     expect(arcPath(17, 17, 13, 0, Math.PI * 1.5)).toContain(" 0 1 1 ");
     expect(arcPath(17, 17, 13, 0, Math.PI / 2)).toContain(" 0 0 1 ");
+  });
+});
+
+describe("randomValue / valuesMatch (the console's Random and preset pills)", () => {
+  const spec = { min: 5, max: 120, step: 1 };
+  it("rolls inside the range, on the step, reaching both ends", () => {
+    expect(randomValue(spec, () => 0)).toBe(5);
+    expect(randomValue(spec, () => 0.9999999)).toBe(120);
+    let x = 0.123;
+    for (let n = 0; n < 100; n++) {
+      x = (x * 9301 + 0.49297) % 1;
+      const v = randomValue(spec, () => x);
+      expect(v).toBeGreaterThanOrEqual(5);
+      expect(v).toBeLessThanOrEqual(120);
+      expect(Number.isInteger(v)).toBe(true);
+    }
+  });
+  it("matches within half a step, and only at the same length", () => {
+    const s = { min: 0, max: 1, step: 0.02 };
+    expect(valuesMatch([0.46, 0.2], [0.4516, 0.2], s)).toBe(true);
+    expect(valuesMatch([0.48, 0.2], [0.4516, 0.2], s)).toBe(false);
+    expect(valuesMatch([0.46], [0.46, 0.2], s)).toBe(false);
   });
 });

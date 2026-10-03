@@ -1155,6 +1155,12 @@ body.vc-keys-reveal [data-keycap]::after {
 }
 .vc-sc-wheel svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .vc-sc-syn-left { display: grid; justify-items: center; gap: 4px; }
+/* The console's mix row (Random / Back / presets) and its colour row under
+ * the wheel — strainConsole.ts's own header; the buttons reuse the Pairs mix
+ * row's .vc-mix-row and .vc-exp-pill styles below. */
+.vc-sc-mix { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.vc-sc-mix .vc-mix-row { margin-bottom: 8px; }
+.vc-sc-syn > .vc-mix-row { grid-column: 1 / -1; margin-bottom: 0; }
 .vc-sc-harmony { font: 400 9px/1.1 ${FONT_MONO}; color: rgba(255, 255, 255, 0.5); min-height: 10px; text-align: center; }
 @media (prefers-reduced-motion: reduce) {
   .vc-sc-row, .vc-sc-sign, .vc-sc-knob-head { transition: none; }

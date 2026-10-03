@@ -41,6 +41,17 @@ import {
   ANGLE_MAX_DEG,
   SWITCHING_DEFAULT,
   populationFromBlocks,
+  levelPeaks,
+  levelGainsFull,
+  levelGain,
+  LEVEL_GAIN_MIN,
+  LEVEL_GAIN_MAX,
+  LEVEL_PEAK_FLOOR,
+  LEVEL_DEFAULT,
+  fillStartInk,
+  START_INK_DEFAULT,
+  MOTION_PARAMS,
+  MOTION_PRESETS,
   type StrainRawValues,
   type StrainDriveValues,
 } from "../src/render/scenes/physarum2.ts";
@@ -676,5 +687,111 @@ describe("screen -> field mapping (roomAspectJs/coverUvJs/uncoverUvJs)", () => {
     const actual = screenToFieldUv(uv, viewport, 800, 600);
     expect(actual.x).toBeCloseTo(expected.x, 9);
     expect(actual.y).toBeCloseTo(expected.y, 9);
+  });
+});
+
+describe("Auto level (levelPeaks / levelGainsFull / levelGain)", () => {
+  it("levelPeaks reads, per channel, the value the top share of blocks reach", () => {
+    const cells = 100;
+    const buf = new Uint8Array(cells * 4);
+    for (let i = 0; i < cells; i++) {
+      buf[i * 4] = i; // channel 0: 0..99 — top 5% reach 95
+      buf[i * 4 + 1] = i < 3 ? 250 : 10; // channel 1: three hot blocks, the rest 10
+      buf[i * 4 + 2] = 0; // channel 2: empty
+      buf[i * 4 + 3] = 200; // channel 3: flat
+    }
+    const peaks = levelPeaks(buf, cells, 4, 0.05);
+    expect(peaks[0]).toBeCloseTo(95 / 255, 9);
+    // Three hot blocks are fewer than the top 5%: a lone hot spot doesn't set the level.
+    expect(peaks[1]).toBeCloseTo(10 / 255, 9);
+    expect(peaks[2]).toBe(0);
+    expect(peaks[3]).toBeCloseTo(200 / 255, 9);
+  });
+
+  it("levelGainsFull evens equal peaks to exactly 1 and leaves the geometric mean unchanged", () => {
+    for (const v of levelGainsFull([0.4, 0.4, 0.4, 0.4])) expect(v).toBeCloseTo(1, 12);
+    const g = levelGainsFull([0.2, 0.4, 0.4, 0.8]);
+    expect(g[0]).toBeGreaterThan(1);
+    expect(g[3]).toBeLessThan(1);
+    expect(g[0]! * g[1]! * g[2]! * g[3]!).toBeCloseTo(1, 9);
+    // Every strain's peak lands on the same level.
+    const levelled = [0.2, 0.4, 0.4, 0.8].map((p, k) => p * g[k]!);
+    for (const v of levelled) expect(v).toBeCloseTo(levelled[0]!, 9);
+  });
+
+  it("clamps the gain, and floors an empty strain's peak so it can't blow up its grain", () => {
+    const g = levelGainsFull([0, 0.9, 0.9, 0.9]);
+    for (const v of g) {
+      expect(v).toBeGreaterThanOrEqual(LEVEL_GAIN_MIN);
+      expect(v).toBeLessThanOrEqual(LEVEL_GAIN_MAX);
+    }
+    for (const v of levelGainsFull([NaN, LEVEL_PEAK_FLOOR, LEVEL_PEAK_FLOOR, LEVEL_PEAK_FLOOR])) expect(v).toBeCloseTo(1, 12);
+  });
+
+  it("levelGain is exactly 1 at level 0 and the full gain at 1", () => {
+    expect(levelGain(2.7, 0)).toBe(1);
+    expect(levelGain(2.7, 1)).toBeCloseTo(2.7, 12);
+    expect(levelGain(4, 0.5)).toBeCloseTo(2, 12);
+  });
+});
+
+describe("Start ink (fillStartInk)", () => {
+  it("is all zero at 0 — the old black start", () => {
+    const buf = new Uint8Array(64 * 4).fill(7);
+    fillStartInk(buf, 4, 0, () => 0.99);
+    expect(buf.every((v) => v === 0)).toBe(true);
+  });
+  it("fills only the live channels, more at a higher setting", () => {
+    let x = 1;
+    const rnd = () => (x = (x * 16807) % 2147483647) / 2147483647;
+    const lo = new Uint8Array(1024 * 4);
+    const hi = new Uint8Array(1024 * 4);
+    fillStartInk(lo, 3, 0.2, rnd);
+    fillStartInk(hi, 3, 1, rnd);
+    const mean = (b: Uint8Array) => b.reduce((a, v) => a + v, 0) / b.length;
+    expect(mean(hi)).toBeGreaterThan(mean(lo) * 2);
+    for (let i = 3; i < hi.length; i += 4) expect(hi[i]).toBe(0);
+  });
+});
+
+describe("Fogleman's extras: settings and motion presets", () => {
+  const specs = physarum2Scene.settings!;
+  const spec = (key: string) => specs.find((s) => s.key === key)!;
+
+  it("Wander, Start ink and Auto level are plain rows with the documented defaults", () => {
+    expect(spec("wander").default).toBe(0);
+    expect(spec("wander").group).toBe("Form");
+    expect(spec("startInk").default).toBe(START_INK_DEFAULT);
+    expect(spec("level").default).toBe(LEVEL_DEFAULT);
+    expect(spec("level").group).toBe("Look");
+    for (const key of ["wander", "startInk", "level"]) {
+      expect(spec(key).item).toBeUndefined();
+      expect(spec(key).min).toBe(0);
+      expect(spec(key).max).toBe(1);
+    }
+  });
+
+  it("every motion preset sets every motion param for every strain, inside each slider's range", () => {
+    for (const preset of MOTION_PRESETS) {
+      expect(preset.name.length).toBeGreaterThan(0);
+      expect(preset.hint.length).toBeGreaterThan(0);
+      for (const p of MOTION_PARAMS) {
+        const values = preset.values[p];
+        expect(values.length).toBe(SPECIES_COUNT);
+        values.forEach((v, k) => {
+          const s = spec(`${p}${k}`);
+          expect(v).toBeGreaterThanOrEqual(s.min);
+          expect(v).toBeLessThanOrEqual(s.max);
+        });
+      }
+    }
+    expect(new Set(MOTION_PRESETS.map((p) => p.name)).size).toBe(MOTION_PRESETS.length);
+  });
+
+  it("the Lab preset is the shipped default motion", () => {
+    const lab = MOTION_PRESETS.find((p) => p.name === "Lab")!;
+    for (const p of MOTION_PARAMS) {
+      lab.values[p].forEach((v, k) => expect(v).toBeCloseTo(spec(`${p}${k}`).default, 9));
+    }
   });
 });

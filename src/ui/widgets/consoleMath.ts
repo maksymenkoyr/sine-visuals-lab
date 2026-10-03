@@ -105,3 +105,16 @@ export function arcPath(cx: number, cy: number, r: number, a0: number, a1: numbe
   const [x1, y1] = p(a1);
   return `M${x0.toFixed(2)},${y0.toFixed(2)} A${r},${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1.toFixed(2)},${y1.toFixed(2)}`;
 }
+
+/** A uniform roll over the spec's whole range, snapped to its step — the
+ *  console's Random (`rnd` uniform [0, 1), injected so tests can seed it). */
+export function randomValue(spec: RangeSpec, rnd: () => number): number {
+  return quantize(fromUnit(rnd(), spec), spec);
+}
+
+/** Whether `values` sit on `target` to within half a step each — a preset
+ *  pill reads as pressed while the stored values still match it. */
+export function valuesMatch(values: readonly number[], target: readonly number[], spec: RangeSpec): boolean {
+  const tol = (spec.step > 0 ? spec.step : 1e-6) / 2 + 1e-9;
+  return values.length === target.length && values.every((v, i) => Math.abs(v - target[i]!) <= tol);
+}
