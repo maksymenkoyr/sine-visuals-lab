@@ -1,147 +1,97 @@
-import { diffLook, emptyLookDoc, type LookClientMsg, type LookDoc } from "../../server/lookDoc.ts";
-import type { OutputBridge, OutputStatus } from "./outputBridge.ts";
-import { createCueController, DEFAULT_OUTPUT_PARAMS, type CueController } from "./outputSync.ts";
+import { statusKey, type OutputBridge, type OutputStatus } from "./outputBridge.ts";
+import type { MainPlay } from "./mainPlay.ts";
 
 /**
- * Cue and Play for the screens in the laptop's room: the pop-out's controls
- * (net/outputSync.ts's createCueController, ui/outputControls.ts) driving a TV
- * instead of a window. The cue logic is the same state machine; only the
- * delivery differs. Where the pop-out gets a `state` message over a
- * BroadcastChannel, a TV gets the look as a `lookPatch` to the room
- * (server/lookDoc.ts), which stores it and relays it to every screen and phone.
+ * Play to the room's Main screens, from any device, as an `OutputBridge` so the
+ * same bar (ui/outputControls.ts) and keys (ui/outputKeys.ts) drive it as drive
+ * the pop-out window.
  *
- * The laptop is not told the room's look (the room sends hosts no snapshot), so
- * the patch is the difference from what this bridge last sent, `sent`, and a
- * screen's arrival or a reconnect starts `sent` over from nothing: the whole
- * look goes out again, which is harmless (a patch is idempotent) and heals a
- * room that lost it. A key the room still holds from before and the laptop no
- * longer has is not removed by that; it is a stray setting for the next scene
- * change to overwrite, not a wrong picture.
+ * It is only a thin face on a `MainPlay` (net/mainPlay.ts), which owns the
+ * rules. Main lives in the room (server/lookDoc.ts): every member receives it,
+ * and each device's own look is its preview. This bridge turns that into the
+ * bar's words:
  *
- * What a TV does not get that the pop-out does: `params` (the laptop's
- * resolved Sensitivity / Expansion / Smoothing). A TV resolves its own from the
- * stored settings (src/tv.ts's header), so a glide moves the plain sliders and
- * the Master dials but not those three.
+ *  - Play sends this device's look to Main: a tap switches every Main screen at
+ *    once, a hold glides there within a scene (a scene change always switches
+ *    at once). The glide is walked by the TV and the pop-out; a laptop's or an
+ *    iPad's own main window follows a glide with a plain switch (known limit).
+ *  - There is no Cue for the room: `canCue` is false, so the bar hides CUE
+ *    unless the pop-out (which does have one) is open next to it.
+ *  - `differs` is "Main is not what this device shows" (MAIN ≠ YOURS), and only
+ *    while the room is open: a closed room can't be played to, so it must not
+ *    keep a combined bar on "differs" after Play reached only the pop-out.
+ *  - `changedBy` is set while someone else played over a device that had
+ *    unplayed edits (also only while open); `take()` is that device's "Take Main".
  *
- * Presence is the roster: a screen is a `renderer` in it, and Cue and Play are
- * offered while there is at least one. Frames already reach the TV from
- * `HostConnection.sendFrame`, so `pushFrame` has nothing to do here.
+ * Following is MainPlay's job, not this bridge's: it hears the room's look
+ * through its own events (snapshot, patch, ack, reject, disconnect), so there
+ * is nothing to re-send here after a reconnect or a refusal. The only thing the
+ * bridge drives is the clock: `update` ticks MainPlay, which re-reads this
+ * device's look and works out whether it is on air.
  *
- * `combineBridges` lets one Cue/Play bar drive the pop-out and the room's
- * screens together. Each keeps its own program (what Play last put there), as
- * two mixer outputs would.
+ * "Open" means another device of the room is online: with nobody else there,
+ * Play has nobody to reach and the bar stays away.
+ *
+ * `combineBridges` lets one bar drive the pop-out and the room together on the
+ * laptop. Play goes to every open bridge (the pop-out and Main), a held Cue only to
+ * the bridges that can cue (the pop-out).
  */
 
-/** How often the look is re-read to spot a change (the pop-out's LOOK_POLL_MS). */
-const LOOK_POLL_MS = 120;
-
 export interface RoomBridgeOptions {
-  /** Sends a look message to the room; false when the socket is not open. */
-  send: (msg: LookClientMsg) => boolean;
-  /** How many screens (renderers) the room lists right now. */
-  screens: () => number;
-  /** This window's current scene and palette ids. */
-  look: () => { scene: string; palette: string };
-  /** The room-scope settings as they are on this device now
-   *  (syncedStores.ts's captureRoomStorage). */
-  capture: () => Record<string, string>;
-  /** Clicked "OUTPUT": there is nothing to open for a TV, so show the room view. */
+  /** The room's Main, as this device plays to and follows it. */
+  play: MainPlay;
+  /** Another member of the room is online right now. */
+  present: () => boolean;
+  /** Clicked "POP OUT" where there is nothing to open: show the room view. */
   showRoom: () => void;
 }
 
-export interface RoomBridge extends OutputBridge {
-  /** The host's socket (re)connected: the room may have lost what it held, so
-   *  the whole look is sent again as the program. */
-  reconnected(): void;
-  /** The room refused a patch (too fast, too big): the next one carries everything. */
-  refused(): void;
-}
+/** What the app holds: a plain output bridge. */
+export type RoomBridge = OutputBridge;
 
 export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
-  let present = false;
-  let sent: LookDoc = emptyLookDoc();
-  let seq = 0;
-  let lastPollMs = -Infinity;
-  let lastStatusKey = "";
+  const { play } = opts;
   const listeners: Array<(s: OutputStatus) => void> = [];
 
-  const cue: CueController = createCueController((state, glideMs) => {
-    // No screen listening: say so, so the controller keeps what the screen
-    // really has and offers the look again.
-    if (!present) return false;
-    const doc: LookDoc = { scene: state.scene, palette: state.palette, storage: state.storage };
-    const patch = diffLook(sent, doc);
-    if (!patch) return true;
-    const msg: LookClientMsg = { type: "lookPatch", n: ++seq, ...patch, ...(glideMs && glideMs > 0 ? { glideMs } : {}) };
-    if (!opts.send(msg)) return false;
-    sent = doc;
-    return true;
-  });
-
-  function preview(): void {
-    const { scene, palette } = opts.look();
-    cue.preview({ scene, palette, storage: opts.capture(), params: DEFAULT_OUTPUT_PARAMS });
-  }
-
   function status(): OutputStatus {
-    return { open: present, cue: present && cue.cueOn(), differs: present && cue.differs() };
+    const p = play.status();
+    // Before the room has told this device its Main there is nothing to differ from.
+    // A closed room can't be played to, so it never reads as differing or changed
+    // (else a combined bar would stay on OUT ≠ PREVIEW after Play reached only the pop-out).
+    const open = opts.present();
+    return { open, cue: false, differs: open && p.known && !p.onAir, canCue: false, changedBy: open ? p.changedBy : null };
   }
 
   function emitIfChanged(): void {
     const s = status();
-    const key = `${s.open}|${s.cue}|${s.differs}`;
+    const key = statusKey(s);
     if (key === lastStatusKey) return;
     lastStatusKey = key;
     for (const cb of listeners) cb(s);
   }
 
-  /** The roster has a screen where it had none (or lost the last one). */
-  function setPresent(now: boolean): void {
-    if (now === present) return;
-    present = now;
-    if (now) {
-      sent = emptyLookDoc();
-      preview();
-      cue.outputOpened();
-    } else cue.outputClosed();
-  }
+  // The bar reads the status itself when it is built; listeners hear changes from there.
+  let lastStatusKey = statusKey(status());
+  play.onStatus(emitIfChanged);
 
   return {
     open: opts.showRoom,
     status,
-    onStatus: (cb) => listeners.push(cb),
-    setCue(on) {
-      if (present) preview();
-      cue.setCue(on);
-      emitIfChanged();
-    },
+    onStatus: (cb) => void listeners.push(cb),
+    // The room has no Cue: a held key or button does nothing here.
+    setCue() {},
     go(glideMs) {
-      if (!present) return false;
-      preview();
-      // A glide never crosses a scene change: that goes instantly.
-      const held = cue.held();
-      const glide = !!glideMs && glideMs > 0 && !cue.cueOn() && held !== null && held.scene === opts.look().scene;
-      cue.go(glide ? glideMs : undefined);
+      const result = play.play(glideMs);
       emitIfChanged();
-      return glide;
+      return result === "glide";
     },
     update(nowMs) {
-      setPresent(opts.screens() > 0);
-      if (present && nowMs - lastPollMs >= LOOK_POLL_MS) {
-        lastPollMs = nowMs;
-        preview();
-      }
+      play.tick(nowMs);
       emitIfChanged();
     },
-    reconnected() {
-      if (!present) return;
-      sent = emptyLookDoc();
-      preview();
-      cue.outputOpened();
+    take() {
+      play.take();
       emitIfChanged();
-    },
-    refused() {
-      sent = emptyLookDoc();
     },
     // Frames reach a TV from HostConnection.sendFrame, and a TV's quality is its own.
     pushFrame() {},
@@ -151,10 +101,12 @@ export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
 }
 
 /** One bar for several outputs. `open` is the first one's (the pop-out's: it is
- *  the one that can be opened); Cue and Play go to every output that is open;
- *  the status says "open" while any is, "cue" while any is cued and "differs"
- *  while any shows something other than the preview. Frames, power and render
- *  readouts are the first output's, the pop-out's. */
+ *  the one that can be opened); Play goes to every output that is open and Cue
+ *  only to those that can cue. The status says "open" while any is, "cue" while
+ *  any is cued, "differs" while any shows something other than the preview and
+ *  "canCue" while an open one can cue; `changedBy` is the first one set. `take`
+ *  reaches every output that has one. Frames, power and render readouts are
+ *  the first output's, the pop-out's. */
 export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): OutputBridge {
   const [first] = bridges;
   const live = (): OutputBridge[] => bridges.filter((b) => b.status().open);
@@ -162,13 +114,17 @@ export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): Outp
     let open = false;
     let cue = false;
     let differs = false;
+    let canCue = false;
+    let changedBy: string | null = null;
     for (const b of bridges) {
       const s = b.status();
       open = open || s.open;
       cue = cue || s.cue;
       differs = differs || s.differs;
+      canCue = canCue || (s.open && s.canCue);
+      changedBy = changedBy ?? s.changedBy ?? null;
     }
-    return { open, cue, differs };
+    return { open, cue, differs, canCue, changedBy };
   }
   return {
     open: () => first.open(),
@@ -177,7 +133,7 @@ export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): Outp
       let lastKey = "";
       const relay = (): void => {
         const s = status();
-        const key = `${s.open}|${s.cue}|${s.differs}`;
+        const key = statusKey(s);
         if (key === lastKey) return;
         lastKey = key;
         cb(s);
@@ -185,8 +141,13 @@ export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): Outp
       for (const b of bridges) b.onStatus(relay);
     },
     setCue(on) {
-      // Releasing reaches every output, open or not: a Cue can outlive a window.
-      for (const b of on ? live() : bridges) b.setCue(on);
+      // Holding reaches only an open output that can cue. Releasing reaches
+      // every output, open or not (a Cue can outlive a window); the room's
+      // setCue does nothing, so only the pop-out hears it.
+      for (const b of bridges) {
+        const s = b.status();
+        if (!on || (s.open && s.canCue)) b.setCue(on);
+      }
     },
     go(glideMs) {
       let glided = false;
@@ -195,6 +156,9 @@ export function combineBridges(bridges: [OutputBridge, ...OutputBridge[]]): Outp
     },
     update(nowMs) {
       for (const b of bridges) b.update(nowMs);
+    },
+    take() {
+      for (const b of bridges) b.take?.();
     },
     pushFrame: (frame, extras, params) => first.pushFrame(frame, extras, params),
     sendPower: () => first.sendPower(),

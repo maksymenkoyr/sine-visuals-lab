@@ -190,6 +190,10 @@ abstract class RoomConnectionBase {
   private _connected = false;
   private _state: ConnState = "connecting";
   private lastFrameAt = 0;
+  /** False while the page listens to its own input: a feed's frames still on
+   *  their way (the room relays them until it has applied this device's switch)
+   *  are dropped, so they never mix with the device's own in one buffer. */
+  private acceptFrames = true;
   private roster: RosterEntry[] = [];
   // The roster as the records the room's own rules read (feedOf, followersOf,
   // pictureDelayMs); rebuilt whenever a roster arrives, not per frame.
@@ -406,8 +410,26 @@ abstract class RoomConnectionBase {
     this.sendRaw(encodeFeatureFrame({ ...frame, onset: d.onset, pulseOnset: d.pulseOnset }, roomTimeMs));
   }
 
+  /** Forget every frame this device has buffered or is about to send, as if
+   *  none had arrived. Called when the page switches between its own input and
+   *  a feed's frames (src/net/ears.ts): the two carry room times that
+   *  interleave, so they must never share one buffer. Nothing is sent and the
+   *  room hears nothing of it. */
+  resetFrames(): void {
+    this.buffer = new JitterBuffer();
+    this.decimator = new WireDecimator(BROADCAST_INTERVAL_MS);
+    this.lastFrameAt = 0;
+  }
+
+  /** Whether incoming frames are kept (see `acceptFrames`). The page turns them
+   *  off while it listens to its own input and on while it follows a feed. */
+  setAcceptFrames(on: boolean): void {
+    this.acceptFrames = on;
+  }
+
   protected onMessage(data: unknown): void {
     if (typeof data !== "string") {
+      if (!this.acceptFrames) return;
       const decoded = decodeFeatureFrame(data as ArrayBuffer);
       if (decoded) this.pushFrame(decoded);
       return;
@@ -445,6 +467,12 @@ abstract class RoomConnectionBase {
     let devices = 0;
     for (const d of this.roster) if (d.role !== "controller") devices++;
     return devices <= 1 ? 0 : RENDER_DELAY_MS;
+  }
+
+  /** The delay `sample()` is heading for right now, in ms (`targetDelayMs`
+   *  above): what the Room view's Picture delay shows, and what a test reads. */
+  pictureDelayMs(): number {
+    return this.targetDelayMs();
   }
 
   /** The shared visual state every device — host or renderer — renders this instant. */

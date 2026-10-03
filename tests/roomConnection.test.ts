@@ -863,6 +863,23 @@ describe("render delay", () => {
   });
 });
 
+describe("pictureDelayMs", () => {
+  it("reports the delay the connection is heading for", async () => {
+    const { HostConnection, ControllerConnection, RENDER_DELAY_MS } = await loadRoom();
+    const host = new HostConnection("ABCD", { auth: { hostKey: HOST_KEY, roomKey: KEY } });
+    last().open();
+    expect(host.pictureDelayMs()).toBe(0);
+    roster(last(), [
+      member(host.deviceId, { role: "host", kind: "laptop", ears: "own", screen: "main", owner: true }),
+      member("tv", { role: "renderer", kind: "tv", screen: "main" }),
+    ]);
+    expect(host.pictureDelayMs()).toBe(RENDER_DELAY_MS);
+    const ctl = new ControllerConnection("ABCD", { auth: { roomKey: KEY } });
+    last().open();
+    expect(ctl.pictureDelayMs()).toBe(RENDER_DELAY_MS);
+  });
+});
+
 describe("sendFrame", () => {
   it("is on the base: a controller and a renderer have it too", async () => {
     const { ControllerConnection, RendererConnection } = await loadRoom();
@@ -1005,6 +1022,41 @@ describe("binary frames", () => {
       expect(conn.msSinceLastFrame).toBeLessThan(1000);
       conn.close();
     }
+  });
+
+  it("resetFrames forgets the buffered frames and starts the wire pacing over", async () => {
+    const { HostConnection } = await loadRoom();
+    const host = new HostConnection("ABCD");
+    last().open();
+    vi.advanceTimersByTime(100);
+    host.sendFrame(FRAME);
+    expect(binaries(last())).toHaveLength(1);
+    expect(host.msSinceLastFrame).toBeLessThan(1000);
+    expect(host.sample()).not.toBeNull();
+    // Inside the wire interval the next frame would be held back...
+    host.sendFrame(FRAME);
+    expect(binaries(last())).toHaveLength(1);
+
+    host.resetFrames();
+    expect(host.msSinceLastFrame).toBe(Infinity);
+    expect(host.sample()).toBeNull();
+    // ...but a fresh pacer lets the first frame after a switch straight out.
+    host.sendFrame(FRAME);
+    expect(binaries(last())).toHaveLength(2);
+    expect(host.msSinceLastFrame).toBeLessThan(1000);
+  });
+
+  it("drops incoming frames while the page listens to its own input", async () => {
+    const { ControllerConnection } = await loadRoom();
+    const conn = new ControllerConnection("ABCD");
+    last().open();
+    conn.setAcceptFrames(false);
+    last().receive(encodeFeatureFrame({ ...FRAME, energy: 0.4 }, Date.now()));
+    expect(conn.msSinceLastFrame).toBe(Infinity);
+    expect(conn.sample()).toBeNull();
+    conn.setAcceptFrames(true);
+    last().receive(encodeFeatureFrame({ ...FRAME, energy: 0.4 }, Date.now()));
+    expect(conn.msSinceLastFrame).toBeLessThan(1000);
   });
 
   it("ignores a binary message that is not a frame", async () => {

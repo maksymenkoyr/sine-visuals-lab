@@ -39,9 +39,13 @@ import type { LookDoc, LookServerMsg } from "../server/lookDoc.ts";
 
 /**
  * The paired display entry (tv.html). A renderer in the room's mould: the
- * laptop (host) streams feature frames, a phone (controller) edits the room's
- * look document, and this page draws what they say — it has no panel and no
- * audio of its own.
+ * device it follows (the laptop by default; any device the room's Room view
+ * puts on its own input) streams feature frames, any device's Play sets the
+ * room's look document (Main, net/mainPlay.ts), and this page draws what they
+ * say — it has no panel and no audio of its own, so it always follows. Its one
+ * choice is its screen in the Room view: `main` shows Main; `own` freezes the
+ * picture on what it shows now and ignores the room's looks (the replica keeps
+ * following them, so switching back to `main` shows the current Main at once).
  *
  * The page is in one phase at a time (net/tvPhase.ts) and `setPhase` is the one
  * place that decides what is drawn over the picture. Unpaired, it shows the
@@ -69,9 +73,9 @@ import type { LookDoc, LookServerMsg } from "../server/lookDoc.ts";
  * written into this page's localStorage overlay and every store re-seeds from
  * it (`applyRoomStorage`), the same mechanism the pop-out uses. So the TV
  * resolves Sensitivity, Expansion, Smoothing, band gains and drives itself, from
- * its own anim clock on the host's frames, rather than being sent resolved
+ * its own anim clock on its feed's frames, rather than being sent resolved
  * values; its Auto readouts are therefore its own. A patch that carries
- * `glideMs` (the laptop's Play held down) is walked to over that long
+ * `glideMs` (a Play held down on any device) is walked to over that long
  * (`startGlide`, net/outputGlide.ts) instead of applied at once; the three
  * resolved dials above are the TV's own, so they are not part of that walk.
  * What does not travel:
@@ -222,6 +226,16 @@ let phase: TvPhase | null = null;
 let hostInRoom: HostInRoom = null;
 
 let replica: LookReplica = createLookReplica();
+/** This screen's record in the room says `own` (server/roomDevices.ts): it
+ *  keeps showing what it shows and ignores the room's looks, though the replica
+ *  still follows them so a later switch back to `main` is current. */
+let screenOwn = false;
+/** This socket has had a roster that lists this screen. A keyed room sends the
+ *  look before the roster, so until then it is not known whether to show it. */
+let screenKnown = false;
+/** A snapshot arrived while the screen was not following Main, so it has not
+ *  been shown (an empty one included: it means "the defaults"). */
+let lookHeld = false;
 /** The scene / palette of the last look document applied. The look re-asserts
  *  a scene or palette only when the document's differs from this, so a
  *  settings-only patch never fights one a command set. */
@@ -482,6 +496,10 @@ function joinRoom(room: string, key: string | null): void {
   glide = null;
   glideTarget = null;
   hostInRoom = null;
+  screenOwn = false;
+  // A room joined by a typed code has no records, so no screen choice to wait for.
+  screenKnown = key === null;
+  lookHeld = false;
 
   const c = new RendererConnection(room, {
     auth: key ? { roomKey: key } : undefined,
@@ -491,7 +509,9 @@ function joinRoom(room: string, key: string | null): void {
   conn = c;
   c.onLook(onLook);
   c.onRosterChange((r) => {
-    if (conn === c) onRoster(r);
+    if (conn !== c) return;
+    onRoster(r);
+    onScreenChoice(c.self?.screen);
   });
   c.onState((s) => {
     if (conn !== c) return;
@@ -511,11 +531,44 @@ function joinRoom(room: string, key: string | null): void {
   setPhase("joining");
 }
 
-function onLook(m: LookServerMsg): void {
-  if (m.type === "look") {
+/** True while this screen shows the room's Main: its record says `main` (or
+ *  `off`, which only silences it) and the roster has said so. */
+function followsMain(): boolean {
+  return screenKnown && !screenOwn;
+}
+
+/** The roster's word for this screen. Switching to `own` freezes the picture
+ *  where it is (a glide in flight stops); switching back to `main`, or the first
+ *  roster of a socket that held a look back, shows the replica's document. */
+function onScreenChoice(screen: string | undefined): void {
+  const wasShowing = followsMain();
+  screenOwn = screen === "own";
+  if (screen !== undefined) screenKnown = true;
+  if (screenOwn) {
     glide = null;
     glideTarget = null;
+    return;
+  }
+  if (wasShowing || !screenKnown) return;
+  glide = null;
+  glideTarget = null;
+  const doc = replica.doc();
+  if (doc) applyDoc(doc);
+  else if (lookHeld) applyRoomStorage({}, localStorage);
+  lookHeld = false;
+}
+
+function onLook(m: LookServerMsg): void {
+  if (m.type === "look") {
     replica.onSnapshot(m.rev, m.doc);
+    // A screen on its own look (or one not yet told its choice) only keeps the
+    // replica current: onScreenChoice shows it when the screen follows Main.
+    if (!followsMain()) {
+      lookHeld = true;
+      return;
+    }
+    glide = null;
+    glideTarget = null;
     const doc = replica.doc();
     // An empty room (no look yet) is the defaults, not whatever was left from another room.
     if (doc) applyDoc(doc);
@@ -523,6 +576,7 @@ function onLook(m: LookServerMsg): void {
   } else if (m.type === "lookPatch") {
     const r = replica.onPatch(m.rev, m);
     if (r.status === "applied") {
+      if (!followsMain()) return;
       if (!startGlide(r.doc, m.glideMs)) {
         glide = null;
         glideTarget = null;
@@ -566,8 +620,8 @@ function stepGlide(nowMs: number): void {
 /** Makes the page show this look: settings first, so a scene's init() and
  *  first render already see the settings that go with it, then palette, then
  *  scene. The whole storage is applied every time (once per message, and
- *  messages come at the controller's publish cadence, lookSync.ts's
- *  LOOK_PUBLISH_MS), so a store that was edited out of band is re-seeded too. */
+ *  messages come once per Play), so a store that was edited out of band is
+ *  re-seeded too. */
 function applyDoc(doc: LookDoc): void {
   shown = doc;
   applyRoomStorage(doc.storage, localStorage);
@@ -647,6 +701,18 @@ async function main(): Promise<void> {
       },
     };
     (window as unknown as { __tvPairing: typeof debug }).__tvPairing = debug;
+    // e2e read probe (DEV only): what the TV shows and whether frames flow.
+    (window as unknown as { __tv: unknown }).__tv = {
+      get scene() {
+        return scene.id;
+      },
+      get palette() {
+        return palette.id;
+      },
+      get msSinceLastFrame() {
+        return conn ? conn.msSinceLastFrame : Infinity;
+      },
+    };
   }
 
   // The scene is up before any connection exists, so the room's first `look`
@@ -714,7 +780,7 @@ async function main(): Promise<void> {
     };
 
     // The same per-tick chain as app.ts's loop() and drawScene(), minus what
-    // needs a local extractor or a panel. The host sends ungained frames, so
+    // needs a local extractor or a panel. A feed sends ungained frames, so
     // the Bands card's faders (part of the look) are applied here. Smoothing is
     // resolved once per tick, as app.ts's tick() does.
     // The silence gate's marks are this device's own (volatile, not in the

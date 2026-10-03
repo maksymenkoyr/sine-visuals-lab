@@ -1,5 +1,5 @@
 import type { OutputBridge, OutputStatus } from "../net/outputBridge.ts";
-import { glideMsForHold } from "./outputKeys.ts";
+import { createPlayKey, glideMsForHold, PLAY_TAP_MAX_MS } from "./outputKeys.ts";
 
 /**
  * The on-screen half of the pop-out output (index.html's #outBtn in the
@@ -15,6 +15,17 @@ import { glideMsForHold } from "./outputKeys.ts";
  * The state line says which it is (net/outputSync.ts's createCueController).
  * Hidden outside a scene, like the other chrome.
  *
+ * The same bar serves the room's Main (net/roomBridge.ts): with no pop-out
+ * open there is no Cue, so CUE is hidden (`status.canCue`) and the state line
+ * reads MAIN = YOURS / MAIN ≠ YOURS instead of the pop-out's OUT wording. When
+ * someone else played over unplayed edits it reads MAIN CHANGED BY <NAME> and
+ * TAKE MAIN (#takeBtn, optional in the markup) drops the edits and shows Main.
+ *
+ * PLAY also answers a pointer, for a touch screen with no Option key: a tap
+ * sends at once, holding charges the fill and glides on release, exactly as a
+ * held Option does (outputKeys.ts's createPlayKey, glideMsForHold). Sliding
+ * off the button cancels.
+ *
  * Press feedback lives here too: a Play key or click flashes PLAY (`pressed`),
  * CUE stays lit while it's held, a held Option fills PLAY while it charges (`charging`, the
  * `--charge` fill) and a glide in flight fills it back up over its length.
@@ -24,6 +35,9 @@ export interface OutputControlElements {
   popBtn: HTMLButtonElement;
   cueBtn: HTMLButtonElement;
   goBtn: HTMLButtonElement;
+  /** "TAKE MAIN", shown with the state line while Main changed under unplayed
+   *  edits. Optional: the bar works without it. */
+  takeBtn?: HTMLButtonElement | null;
   stateEl: HTMLElement;
   /** Holds cueBtn/goBtn/stateEl; marked `attn` while something needs eyes
    *  even when the rest of the chrome has faded. */
@@ -38,6 +52,8 @@ export interface OutputControls {
   setVisible(visible: boolean): void;
   /** True when the keys mean something: a scene is up and an output is open. */
   active(): boolean;
+  /** True when Cue means something: `active()` and a pop-out is open. */
+  cueActive(): boolean;
   /** Keyboard paths — no-ops (null/false) unless an output window is open.
    *  `glideMs` > 0 asks for a smooth arrival; a scene change ignores it. */
   go(glideMs?: number): PlayResult;
@@ -58,6 +74,7 @@ function fmtSeconds(ms: number): string {
 
 export function createOutputControls(bridge: OutputBridge, els: OutputControlElements): OutputControls {
   const { popBtn, cueBtn, goBtn, stateEl, barEl } = els;
+  const takeBtn = els.takeBtn ?? null;
   let visible = false;
   let status: OutputStatus = bridge.status();
   let holdMs: number | null = null;
@@ -81,18 +98,27 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     }
     if (gliding()) return `GLIDING — ${fmtSeconds(Math.max(0, glideEnd - performance.now()))} LEFT`;
     if (s.cue) return "CUE — PREVIEW ON OUTPUT";
-    return s.differs ? "OUT ≠ PREVIEW — PLAY TO SEND" : "OUT = PREVIEW";
+    if (s.changedBy) return `MAIN CHANGED BY ${s.changedBy.toUpperCase()}`;
+    // With a pop-out open it is the pop-out's program being compared; without
+    // one, the room's Main.
+    if (s.canCue) return s.differs ? "OUT ≠ PREVIEW — PLAY TO SEND" : "OUT = PREVIEW";
+    return s.differs ? "MAIN ≠ YOURS — PLAY TO SEND" : "MAIN = YOURS";
   }
 
   function render(s: OutputStatus): void {
     status = s;
     popBtn.style.display = visible ? "block" : "none";
-    popBtn.textContent = s.open ? "OUTPUT ●" : "POP OUT";
-    popBtn.setAttribute("aria-pressed", String(s.open));
-    popBtn.title = s.open ? "Output window is open — click to bring it to the front" : "Open the scene in its own window for a second screen or projector";
+    // The pop-out's own state, not the bar's: `open` is also true while only
+    // the room's other devices are there, and that is no window to bring up.
+    // A pop-out that is open is the one output that can cue (`canCue`).
+    const popOpen = s.canCue;
+    popBtn.textContent = popOpen ? "OUTPUT ●" : "POP OUT";
+    popBtn.setAttribute("aria-pressed", String(popOpen));
+    popBtn.title = popOpen ? "Output window is open — click to bring it to the front" : "Open the scene in its own window for a second screen or projector";
     const show = visible && s.open;
-    cueBtn.style.display = show ? "block" : "none";
+    cueBtn.style.display = show && s.canCue ? "block" : "none";
     goBtn.style.display = show ? "block" : "none";
+    if (takeBtn) takeBtn.style.display = show && s.changedBy ? "block" : "none";
     stateEl.style.display = show ? "block" : "none";
     cueBtn.setAttribute("aria-pressed", String(s.cue));
     goBtn.classList.toggle("differs", s.differs);
@@ -100,7 +126,7 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     goBtn.classList.toggle("gliding", gliding());
     stateEl.classList.toggle("differs", s.differs);
     stateEl.classList.toggle("charging", holdMs !== null || gliding());
-    barEl.classList.toggle("attn", show && (s.cue || s.differs || holdMs !== null || gliding()));
+    barEl.classList.toggle("attn", show && (s.cue || s.differs || !!s.changedBy || holdMs !== null || gliding()));
     stateEl.textContent = stateText(s);
   }
 
@@ -137,12 +163,16 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
     return glided ? "glide" : "sent";
   }
 
+  function cueActive(): boolean {
+    return active() && bridge.status().canCue;
+  }
+
   function holdCue(on: boolean): boolean {
     if (!on) {
       if (bridge.status().cue) bridge.setCue(false);
       return false;
     }
-    if (!active()) return false;
+    if (!cueActive()) return false;
     if (!bridge.status().cue) bridge.setCue(true);
     return true;
   }
@@ -156,16 +186,70 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
   });
   cueBtn.addEventListener("pointerup", () => holdCue(false));
   cueBtn.addEventListener("pointercancel", () => holdCue(false));
-  goBtn.addEventListener("click", () => go());
+
+  // PLAY under a pointer is Option held: down starts the charge, up decides
+  // tap or glide. The click that follows a handled press is swallowed; a
+  // keyboard activation (Enter on the focused button) has no press and still sends.
+  const pointerKey = createPlayKey();
+  let pointerRaf = 0;
+  let pressHandled = false;
+
+  function pointerCharge(): void {
+    const ms = pointerKey.holdMs(performance.now());
+    if (ms === null) {
+      pointerRaf = 0;
+      return;
+    }
+    // Inside the tap window nothing shows yet: a tap must not flicker a charge.
+    controls.charge(ms >= PLAY_TAP_MAX_MS ? ms : null);
+    pointerRaf = requestAnimationFrame(pointerCharge);
+  }
+
+  function endPointerHold(): number | null {
+    const ms = pointerKey.up(performance.now());
+    if (pointerRaf) cancelAnimationFrame(pointerRaf);
+    pointerRaf = 0;
+    controls.charge(null);
+    return ms;
+  }
+
+  goBtn.addEventListener("pointerdown", (e) => {
+    if (e.button > 0) return;
+    pressHandled = false;
+    pointerKey.down(performance.now());
+    if (!pointerRaf) pointerRaf = requestAnimationFrame(pointerCharge);
+  });
+  goBtn.addEventListener("pointerup", () => {
+    if (pointerKey.holdMs(performance.now()) === null) return;
+    const ms = endPointerHold();
+    pressHandled = true;
+    window.setTimeout(() => (pressHandled = false), 400);
+    if (ms !== null) go(glideMsForHold(ms) ?? undefined);
+  });
+  const cancelPointerHold = (): void => {
+    if (pointerKey.holdMs(performance.now()) === null) return;
+    endPointerHold();
+  };
+  goBtn.addEventListener("pointercancel", cancelPointerHold);
+  goBtn.addEventListener("pointerleave", cancelPointerHold);
+  goBtn.addEventListener("click", () => {
+    if (pressHandled) {
+      pressHandled = false;
+      return;
+    }
+    go();
+  });
+  takeBtn?.addEventListener("click", () => bridge.take?.());
   bridge.onStatus(render);
   render(status);
 
-  return {
+  const controls: OutputControls = {
     setVisible(v) {
       visible = v;
       render(bridge.status());
     },
     active,
+    cueActive,
     go,
     holdCue,
     charge(ms) {
@@ -177,4 +261,5 @@ export function createOutputControls(bridge: OutputBridge, els: OutputControlEle
       render(bridge.status());
     },
   };
+  return controls;
 }

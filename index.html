@@ -400,12 +400,47 @@
         color: rgba(255, 255, 255, 0.55);
         white-space: nowrap;
         text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+        /* The keys' own glass behind the words, so the amber line stays
+         * readable over a bright scene (yellow, lime) as well as a dark one. */
+        padding: 3px 8px;
+        border-radius: 6px;
+        background: rgba(8, 11, 10, 0.6);
       }
       #outState.differs {
         color: #ff9f1c;
       }
       #outState.charging {
         color: #3ddc84;
+      }
+      /* TAKE MAIN: shown under the state line while Main changed under unplayed
+       * edits (src/ui/outputControls.ts). Reads as bar text, but is a button. */
+      #takeBtn {
+        display: none;
+        pointer-events: auto;
+        padding: 3px 8px;
+        border: 0;
+        border-radius: 6px;
+        background: rgba(8, 11, 10, 0.6);
+        font: 400 12px/1.2 "Share Tech Mono", ui-monospace, monospace;
+        letter-spacing: 0.14em;
+        color: #ff9f1c;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+        cursor: pointer;
+      }
+      #takeBtn:hover,
+      #takeBtn:focus-visible {
+        color: #fff;
+      }
+      /* A phone's controller has no pop-out to open, and its bar goes under the
+       * scene row and the room badge: the bar's keys would sit on the row's
+       * buttons at a phone's width. */
+      body.controller #outBtn {
+        display: none !important;
+      }
+      body.controller #outBar {
+        top: 100px;
       }
       body.chrome-idle #outBar:not(.attn) {
         opacity: 0;
@@ -617,14 +652,16 @@
         color: rgba(255, 255, 255, 0.72);
       }
 
-      /* A phone opened as a room's controller (app.ts's isController) listens to
-       * nothing — the host does — so the gallery's sound-source picker would
-       * offer a microphone it never opens. */
-      body.controller .gal-source {
+      /* A page that follows another device (app.ts's syncEars toggles
+       * .follows-room: a phone or TV by default, any device the Room view sets
+       * to Follow) listens to nothing itself, so the gallery's sound-source
+       * picker would offer a microphone it never opens. */
+      body.follows-room .gal-source {
         display: none;
       }
-      /* ...and its "remote · CODE" badge drops under the scene row instead of
-       * sharing it: on a phone's width the row's version label runs into it. */
+      /* A phone opened as a room's controller (app.ts's isController) gets its
+       * "remote · CODE" badge dropped under the scene row instead of sharing
+       * it: on a phone's width the row's version label runs into it. */
       body.controller #roomCode {
         top: 60px;
         cursor: pointer;
@@ -671,14 +708,16 @@
       <button id="outBtn" class="iconBtn" aria-pressed="false">POP OUT</button>
       <span id="sceneVersion" tabindex="0"></span>
     </div>
-    <!-- Pop-out output controls (src/ui/outputControls.ts), top centre: shown
-         only while an output window is open. -->
+    <!-- Output controls (src/ui/outputControls.ts), top centre: shown only
+         while an output window is open or another device is in the room (Play
+         to the Main screens). -->
     <div id="outBar">
       <div id="outKeys">
         <button id="cueBtn" class="outKey" aria-pressed="false" title="Hold to hear the preview on the output — let go and it goes back; PLAY sends it for good (hold Space)" data-key="cue" data-keycap="Space"><b>CUE</b><small>SPACE</small></button>
         <button id="goBtn" class="outKey" title="Send this scene and its settings to the output — tap Option to send at once, hold it to glide there (Option)" data-key="go" data-keycap="⌥"><b>PLAY</b><small>OPTION</small></button>
       </div>
       <span id="outState"></span>
+      <button id="takeBtn" type="button" title="Drop your unplayed changes and show what is on the Main screens now">TAKE MAIN</button>
     </div>
     <button id="fsBtn" class="iconBtn" aria-label="Enter fullscreen" aria-pressed="false" data-key="fullscreen" data-keycap="F">&#9974;</button>
     <button id="menuBtn" class="iconBtn" aria-label="Scene menu" title="Controls (S)" data-key="panel" data-keycap="S">

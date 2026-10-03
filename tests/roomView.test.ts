@@ -7,8 +7,10 @@ import {
   chipsFor,
   currentFeedValue,
   deviceCountText,
+  delayReason,
   diagramHeight,
   feedChoices,
+  followPatch,
   kindLine,
   layoutNodes,
   neededHeight,
@@ -179,5 +181,58 @@ describe("rejectText", () => {
     expect(rejectText("rate")).toMatch(/Too many changes/);
     expect(rejectText("shape")).toBe("The room refused that change.");
     expect(rejectText("anything")).toBe("The room refused that change.");
+  });
+});
+
+describe("followPatch", () => {
+  it("names the first other feed for the owner, whose own follow (null) would name itself", () => {
+    const ipad = entry("ipad-1", { kind: "tablet", name: "iPad", ears: "own" });
+    expect(followPatch(laptop, [laptop, ipad])).toEqual({ follow: "ipad-1" });
+  });
+
+  it("is null when no other device is on its own input", () => {
+    const tv = entry("tv-1", { role: "renderer", kind: "tv", hasMic: false });
+    expect(followPatch(laptop, [laptop, tv])).toBeNull();
+  });
+
+  it("sends only ears when the device's own feed is still one", () => {
+    const ipad = entry("ipad-1", { kind: "tablet", ears: "own", follow: null });
+    expect(followPatch(ipad, [laptop, ipad])).toEqual({ ears: "follow" });
+  });
+
+  it("picks a live feed when the one it names has stopped being one", () => {
+    const owner = entry("laptop-1", { role: "host", kind: "laptop", ears: "follow", follow: "x", owner: true });
+    const ipad = entry("ipad-1", { kind: "tablet", ears: "own" });
+    const phone = entry("phone-1", { ears: "own", follow: null });
+    // The phone names the owner (null), which now follows: the iPad is the feed left.
+    expect(followPatch(phone, [owner, ipad, phone])).toEqual({ follow: "ipad-1" });
+  });
+});
+
+describe("delayReason", () => {
+  const tv = entry("tv-1", { role: "renderer", kind: "tv", name: "Lounge TV", ears: "follow", follow: null, screen: "main" });
+  const pad = entry("pad-1", { kind: "tablet", name: "iPad", ears: "own", screen: "main" });
+
+  it("a follower names the feed whose sound it waits for, the owner when it follows null", () => {
+    expect(delayReason(tv, [laptop, tv])).toBe("Waits for Studio’s sound to arrive over the network.");
+    const onPad = { ...tv, follow: "pad-1" };
+    expect(delayReason(onPad, [laptop, pad, onPad])).toBe("Waits for iPad’s sound to arrive over the network.");
+  });
+
+  it("a follower whose feed is not listed still gets a plain sentence", () => {
+    const lost = { ...tv, follow: "gone" };
+    expect(delayReason(lost, [laptop, lost])).toBe("Waits for the sound to arrive over the network.");
+  });
+
+  it("an own-input device beside following Main screens waits as long as they do", () => {
+    expect(delayReason(laptop, [laptop, tv])).toBe("Waits as long as the screens that follow, so beats land together.");
+  });
+
+  it("an own-input device with nobody to line up with draws at once", () => {
+    expect(delayReason(laptop, [laptop])).toBe("Hears the music itself and draws at once.");
+    // A follower that is offline does not count.
+    expect(delayReason(laptop, [laptop, { ...tv, online: false }])).toBe("Hears the music itself and draws at once.");
+    // Nor does one that does not show Main.
+    expect(delayReason(laptop, [laptop, { ...tv, screen: "own" }])).toBe("Hears the music itself and draws at once.");
   });
 });

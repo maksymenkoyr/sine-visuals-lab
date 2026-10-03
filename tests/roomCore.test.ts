@@ -9,8 +9,12 @@ import {
 } from "../server/roomCore.ts";
 import { LOOK_LIMITS } from "../server/lookDoc.ts";
 import { DEVICE_LIMITS } from "../server/roomDevices.ts";
-import { LOOK_PUBLISH_MS } from "../src/net/lookSync.ts";
 import { ROOM_CLOSE_DENIED, ROOM_IDLE_TTL_MS, ADOPT_ANY_TAG, adoptTag, hashKey } from "../server/roomRules.ts";
+
+/** How often the old live publisher sent a patch while a control was being dragged.
+ *  Nothing sends at that pace any more (a device sends on Play), but the room's
+ *  patch budget is still sized to let it through, and that is what these pin. */
+const LOOK_PUBLISH_MS = 120;
 
 // A fake room: sockets that record what they were sent, a Map for storage and
 // an alarm slot, driven through the same calls server/room.ts makes.

@@ -201,9 +201,12 @@ import {
   type VisualSample,
 } from "./net/room.ts";
 import { WORKER_ORIGIN } from "./net/config.ts";
+import { earsChange, listensOwn } from "./net/ears.ts";
+import { recordsFromRoster } from "./net/roomMessages.ts";
+import { applyDeviceSet, followersOf, ownerId, type Ears } from "../server/roomDevices.ts";
 import { realStorage } from "./net/realStorage.ts";
 import { captureRoomStorage, applyRoomStorage } from "./net/syncedStores.ts";
-import { createLookSync, LOOK_PUBLISH_MS } from "./net/lookSync.ts";
+import { createMainPlay, type MainPlay } from "./net/mainPlay.ts";
 import { planBoot } from "./net/bootPlan.ts";
 import { tvRedirectTarget } from "./net/tvRedirect.ts";
 import { clearSession, readSession, writeSession, type HostRoomSession } from "./net/sessions.ts";
@@ -216,7 +219,7 @@ import { newKey } from "./net/pairing.ts";
 import { createJoinScreen, type AddScreenOutcome } from "./ui/joinScreen.ts";
 import { reportSceneRunning } from "./net/usage.ts";
 import { createDeviceMenu, isTypingTarget, type AudioSource, type DeviceMenu } from "./ui/deviceMenu.ts";
-import { createRoomView, type RoomInvite, type RoomView } from "./ui/roomView.ts";
+import { createRoomView, rejectText, type RoomInvite, type RoomView } from "./ui/roomView.ts";
 import { createGallery, type Gallery } from "./ui/gallery.ts";
 import { navigate, onRouteChange, seedHistory, currentRoute, type Route } from "./router.ts";
 import { createImmersiveMode, type ImmersiveMode } from "./ui/fullscreen.ts";
@@ -251,6 +254,7 @@ const outBtn = document.getElementById("outBtn") as HTMLButtonElement;
 const cueBtn = document.getElementById("cueBtn") as HTMLButtonElement;
 const goBtn = document.getElementById("goBtn") as HTMLButtonElement;
 const outStateEl = document.getElementById("outState") as HTMLSpanElement;
+const takeBtn = document.getElementById("takeBtn") as HTMLButtonElement;
 const outBarEl = document.getElementById("outBar") as HTMLElement;
 const audioPrompt = document.getElementById("audioPrompt") as HTMLDivElement;
 const audioPromptLabel = document.getElementById("audioPromptLabel") as HTMLSpanElement;
@@ -268,20 +272,25 @@ let hostConn: HostConnection | null = null;
 let rendererConn: RendererConnection | null = null;
 let rendererHasData = false;
 let soloFallbackTriggered = false;
-/** A phone that edits the room's look instead of listening (net/lookSync.ts has
+/** A page that joined a room by its QR (a phone or an iPad; net/lookSync.ts has
  *  the protocol, boot() the pairing). It is deliberately still `mode ===
- *  "renderer"` — no capture, no Source row, usage counted as "remote" — because
- *  the many `mode !== "renderer"` checks below default to "open the mic" and a
- *  fourth mode would fall straight into them. What differs is gated on this flag
- *  alone, so a solo, host or legacy-renderer page never takes a controller
- *  branch. */
+ *  "renderer"`, so a fourth mode doesn't fall into checks written for three.
+ *  It says how the page joined, not whether it listens: that is `ownInput()`
+ *  (the room's `ears` record, src/net/ears.ts), and a controller follows the
+ *  laptop until somebody sets it to its own input. What differs for a
+ *  controller is gated on this flag alone, so a solo, host or legacy-renderer
+ *  page never takes a controller branch. */
 let isController = false;
 let controllerConn: ControllerConnection | null = null;
-/** Controller only: the look this phone reads and writes for the room, and the
- *  scene and palette ids the room holds even when this phone cannot show them
- *  (net/controllerLook.ts). Null on every other page, which is what keeps the
- *  notes in applyScene / applyPalette / enterViz inert there. */
+/** The scene and palette ids this device holds for its room's look, even when
+ *  it cannot show them (net/controllerLook.ts: a phone can be handed a scene it
+ *  is too weak for). Set once the page joins a keyed room (`startMainPlay`);
+ *  null in a solo or legacy room, which is what keeps the notes in applyScene /
+ *  applyPalette / enterViz inert there. */
 let controllerLook: ControllerLook | null = null;
+/** This device's side of the room's Main (net/mainPlay.ts); null outside a
+ *  keyed room. The bar's Play and Take Main go through it (net/roomBridge.ts). */
+let mainPlay: MainPlay | null = null;
 /** Controller only: the laptop has stopped sending frames (the room badge says
  *  so). Set by currentVisual() from net/controllerPreview.ts. */
 let laptopWaiting = false;
@@ -343,6 +352,23 @@ let swapPromise: Promise<void> | null = null;
  *  which is what lets tools/tune-*.mjs reproduce an exact moment on demand. */
 let syntheticFeed: SyntheticFeed | null = null;
 let syntheticStartMs = 0;
+
+/** An ears choice this page has just made (the Room view's tap) that the room
+ *  has not echoed back yet: it decides `ownInput()` meanwhile. Cleared by the
+ *  roster that carries it, by a refusal, or after PENDING_EARS_MS. */
+let pendingEars: Ears | null = null;
+let pendingEarsTimer = 0;
+const PENDING_EARS_MS = 5000;
+/** What `ownInput()` answered when the page last acted on it (`syncEars`). */
+let ownWas = true;
+
+/** Whether this page analyses its own input right now, or draws from another
+ *  device's frames: the one answer behind every "does this page open a
+ *  microphone, show the start prompt, send frames" decision. src/net/ears.ts
+ *  has the rule. */
+function ownInput(): boolean {
+  return listensOwn(mode, activeConn()?.self ?? null, pendingEars);
+}
 
 let scene: Scene = getScene("spectrum")!;
 let palette: Palette = getPalette("neon");
@@ -531,8 +557,9 @@ let lastAnim: AnimFrame | null = null;
  *  numbers are this window's last resolved Sensitivity/Expansion, which the
  *  bridge streams along with each frame (net/outputSync.ts's `p`). */
 let outputBridge: OutputBridge | null = null;
-/** The laptop's keyed room as a second output (net/roomBridge.ts): a TV in it
- *  is cued and played like the pop-out. Null for everything but a keyed host. */
+/** A keyed room's Main as an output (net/roomBridge.ts): PLAY sends this
+ *  device's look to every Main screen, like the pop-out's. Null outside a keyed
+ *  room. */
 let roomBridge: RoomBridge | null = null;
 let outputControls: OutputControls | null = null;
 let outputSens = 1;
@@ -631,8 +658,10 @@ function showHud(text: string, persist = false): void {
 
 /** Space = Cue (held), Option = Play (tap sends at once, hold glides) — the why, and
  *  what a glide touches, is src/ui/outputKeys.ts's header. Capture phase, so a
- *  focused button or checkbox never also sees the Space; both are inert unless
- *  an output window is open, leaving Space to the page as before. */
+ *  focused button or checkbox never also sees the Space. Option plays whenever
+ *  the bar is up (a pop-out is open, or another device is in the keyed room);
+ *  Space is Cue and only claimed while a pop-out can cue, leaving Space to the
+ *  page as before everywhere else. */
 function wireOutputKeys(controls: OutputControls): void {
   const playKey = createPlayKey();
   let chargeRaf = 0;
@@ -662,7 +691,7 @@ function wireOutputKeys(controls: OutputControls): void {
         !e.shiftKey &&
         inViz &&
         !isTypingTarget(e.target) &&
-        controls.active()
+        controls.cueActive()
       ) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -962,9 +991,10 @@ let inputPreview: InputPreview | null = null;
 let inputPreviewActive = false;
 
 function syncInputPreview(): void {
-  // A phone controller listens to nothing — opening the panel must not light
-  // its mic indicator by previewing the inputs it once had permission for.
-  if (isController || !inputPreviewActive || !inputPreviewSupported() || inputDevices.length === 0) {
+  // A page that follows another device listens to nothing — opening the panel
+  // must not light its mic indicator by previewing the inputs it once had
+  // permission for.
+  if (!ownInput() || !inputPreviewActive || !inputPreviewSupported() || inputDevices.length === 0) {
     inputPreview?.stop();
     inputPreview = null;
     return;
@@ -1016,7 +1046,7 @@ function chooseInputDevice(deviceId: string): void {
   // unrelated refresh triggers.
   refreshAudioPromptButtons();
   gallery?.syncSource();
-  if (mode === "renderer" || syntheticFeed) return;
+  if (!ownInput() || syntheticFeed) return;
   if (!bandAnalyser) {
     setAudioSourceChoice("mic");
     void ensureAudio("mic");
@@ -1107,7 +1137,7 @@ function attachCapture(handle: CaptureHandle): void {
  *  synthetic feed is automation, so it never counts. */
 function reportUsage(): void {
   if (!inViz) return;
-  if (mode === "renderer") reportSceneRunning(scene.id, "remote");
+  if (!ownInput()) reportSceneRunning(scene.id, "remote");
   else if (capture) reportSceneRunning(scene.id, captureAudioSource(capture.kind) === "display" ? "display" : "mic");
 }
 
@@ -1169,9 +1199,10 @@ function captureErrorMessage(choice: AudioSourceChoice, err: unknown): string {
  *  working while browsing — and is torn down only by an explicit
  *  swapAudioSource() or the capture's own track ending (onCaptureEnded above). */
 function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
-  // A phone controller hears the room through the host's frames; the gallery's
-  // tile taps and source picker reach here too, and must not open its mic.
-  if (syntheticFeed || isController) return Promise.resolve();
+  // A page that follows another device hears through that device's frames; the
+  // gallery's tile taps and source picker reach here too, and must not open
+  // its mic.
+  if (syntheticFeed || !ownInput()) return Promise.resolve();
   if (audioPromise) return audioPromise;
   const choice = explicit ?? autoStartSource();
   if (choice === null) {
@@ -1180,7 +1211,15 @@ function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
   }
   stoppedByUser = false;
   const attempt = (async () => {
-    attachCapture(await startCapture(choice));
+    const handle = await startCapture(choice);
+    // The page switched to a feed's frames while the prompt or the share
+    // picker was open: let this input go instead of listening to it.
+    if (!ownInput()) {
+      handle.stop();
+      audioPromise = null;
+      return;
+    }
+    attachCapture(handle);
     captureFailed = false;
   })();
   audioPromise = attempt.catch((err) => {
@@ -1194,21 +1233,119 @@ function ensureAudio(explicit?: AudioSourceChoice): Promise<void> {
 }
 
 /** True from the Stop button until something starts listening again, so a
- *  screen joining (`feedScreens`) never reopens a mic that was just closed. */
+ *  screen joining (`feedFollowers`) never reopens a mic that was just closed. */
 let stoppedByUser = false;
-/** Boot has read the mic permission and routed the page (`feedScreens`). */
+/** Boot has read the mic permission and routed the page (`feedFollowers`). */
 let screensReady = false;
 
-/** The host's roster changed. A screen in the room shows only what this
- *  laptop hears, so with a screen there and nothing listening, start the
+/** The roster changed. A device that follows this one shows only what this
+ *  page hears, so with a follower there and nothing listening, start the
  *  source that needs no prompt (the mic, already allowed: autoStartSource),
  *  on the gallery too: a laptop that reloaded there would otherwise leave its
  *  TV waiting until somebody opened a scene. Any other source needs a tap,
  *  which the gallery's source picker and a scene's start prompt already ask
- *  for (and the TV says so too, net/tvPhase.ts `waitingLine`). */
-function feedScreens(roster: RosterEntry[]): void {
-  if (!screensReady || mode !== "host" || capture || audioPromise || captureFailed || stoppedByUser || syntheticFeed) return;
-  if (roster.some((d) => d.role === "renderer" && d.online) && autoStartSource() !== null) void ensureAudio();
+ *  for (and the TV says so too, net/tvPhase.ts `waitingLine`). In a claimed
+ *  room a follower is whoever the records say draws from this device and is
+ *  online; in a legacy room, which has no records, any screen there is. */
+function feedFollowers(roster: RosterEntry[]): void {
+  if (!screensReady || !ownInput() || capture || audioPromise || captureFailed || stoppedByUser || syntheticFeed) return;
+  const conn = activeConn();
+  if (!conn) return;
+  const { records, online } = recordsFromRoster(roster);
+  const followed =
+    conn.keyed && records.has(conn.deviceId)
+      ? followersOf(records, conn.deviceId).some((id) => online.has(id))
+      : roster.some((d) => d.role === "renderer" && d.online);
+  if (followed && autoStartSource() !== null) void ensureAudio();
+}
+
+/** Remember an ears choice this page has just made, until the room echoes it
+ *  (or refuses it, or PENDING_EARS_MS passes), and act on whatever changes. */
+function setPendingEars(ears: Ears | null): void {
+  window.clearTimeout(pendingEarsTimer);
+  pendingEars = ears;
+  if (ears !== null) {
+    pendingEarsTimer = window.setTimeout(() => {
+      pendingEars = null;
+      syncEars();
+    }, PENDING_EARS_MS);
+  }
+}
+
+/** The name of the device this page draws from, for the "Listening through"
+ *  line: the one it follows, the owner when it follows `null`. */
+function feedNameFor(conn: AnyConn): string {
+  const roster = conn.currentRoster;
+  const id = conn.self?.follow ?? ownerId(recordsFromRoster(roster).records);
+  return roster.find((d) => d.deviceId === id)?.name ?? "the room";
+}
+
+/** Acts when `ownInput()` has changed since the page last looked (the room
+ *  moved this device between its own input and a feed, or the user just did):
+ *  lets go of the microphone or opens it, starts the connection's frames over
+ *  so a feed's and its own never mix in one buffer, and repaints what depends
+ *  on it. Safe to call at any time; it does nothing when the answer is the
+ *  same. */
+function syncEars(): void {
+  const now = ownInput();
+  // Frames from a feed are dropped while this page is its own feed (net/room.ts).
+  activeConn()?.setAcceptFrames(!now);
+  // The "waiting for laptop" badge is about a feed this page no longer follows.
+  if (now && controllerConn) setLaptopWaiting(false);
+  // index.html: no sound-source picker on the gallery while this page follows.
+  document.body.classList.toggle("follows-room", !now);
+  const change = earsChange(ownWas, now);
+  ownWas = now;
+  if (change === "none") return;
+  const conn = activeConn();
+  conn?.resetFrames();
+  if (change === "stop-own") {
+    // The Stop button's teardown, but not the user's own Stop: a later switch
+    // back to own input may start the source again by itself. A capture that
+    // is still opening lets itself go when it lands (ensureAudio).
+    if (capture) onCaptureEnded(capture, false);
+    updateMicPrompt();
+    gallery?.syncSource();
+    syncInputPreview();
+    showHud(`Listening through ${conn ? feedNameFor(conn) : "the room"}`);
+  } else {
+    // Silent when the mic is already allowed; otherwise the start prompt is
+    // the "tap to use the microphone" (an iPad needs the tap).
+    if (inViz) void ensureAudio();
+    updateMicPrompt();
+    gallery?.syncSource();
+    syncInputPreview();
+    if (conn) feedFollowers(conn.currentRoster);
+    showHud("Listening to this device");
+  }
+}
+
+/** Follows this connection's roster and refusals: the room's record is what
+ *  settles a pending choice, and any change of the answer is acted on. */
+function wireEars(conn: AnyConn): void {
+  conn.onRosterChange((roster) => {
+    if (pendingEars !== null && conn.self?.ears === pendingEars) setPendingEars(null);
+    syncEars();
+    feedFollowers(roster);
+  });
+  conn.onDeviceReject((m) => {
+    if (pendingEars === null) return;
+    if (m.targetId !== null && m.targetId !== conn.deviceId) return;
+    setPendingEars(null);
+    showHud(rejectText(m.reason));
+    syncEars();
+  });
+  // A removed device or a closed room ends this page's own capture: nothing is
+  // left to feed, and the browser's mic indicator must go out.
+  conn.onState((s) => {
+    if (s === "denied" && capture) {
+      stoppedByUser = true;
+      onCaptureEnded(capture, false);
+    }
+  });
+  ownWas = ownInput();
+  conn.setAcceptFrames(!ownWas);
+  document.body.classList.toggle("follows-room", !ownWas);
 }
 
 /** Hot-swaps the live capture to a different source — the panel's Source
@@ -1220,7 +1357,7 @@ function feedScreens(roster: RosterEntry[]): void {
  *  `restart` reopens even the source already live — the mic moving to a
  *  different input device (chooseInputDevice, onInputDevicesChanged). */
 function swapAudioSource(next: AudioSourceChoice, restart = false): Promise<void> {
-  if (!bandAnalyser || syntheticFeed || mode === "renderer") return Promise.resolve();
+  if (!bandAnalyser || syntheticFeed || !ownInput()) return Promise.resolve();
   if (capture?.kind === next && !restart) return Promise.resolve();
   // A restart queues behind a swap in flight rather than dropping: a second
   // device picked mid-swap is the one that has to end up live.
@@ -1228,6 +1365,10 @@ function swapAudioSource(next: AudioSourceChoice, restart = false): Promise<void
   const previous = capture;
   const attempt = (async () => {
     const handle = await startCapture(next);
+    if (!ownInput()) {
+      handle.stop(); // switched to a feed's frames while the picker was open
+      return;
+    }
     previous?.stop();
     attachCapture(handle); // also repaints the stop button, so its label names the new source
     setAudioSourceChoice(next);
@@ -1296,7 +1437,7 @@ function updateMicPrompt(): void {
   // Hidden while a fresh attempt is in flight (audioPromise set but not yet
   // settled) so we don't double-prompt; shown before any attempt or after
   // one has failed.
-  const needsAudio = inViz && mode !== "renderer" && !syntheticFeed && !bandAnalyser && (captureFailed || !audioPromise);
+  const needsAudio = inViz && ownInput() && !syntheticFeed && !bandAnalyser && (captureFailed || !audioPromise);
   audioPrompt.style.display = needsAudio ? "flex" : "none";
   // Nothing is ever live while this prompt is showing (needsAudio above
   // requires !bandAnalyser), so neither button gets emphasis here — both are
@@ -1378,15 +1519,16 @@ function wireDeviceMenu(): void {
     currentSceneId: () => scene.id,
     currentPaletteId: () => palette.id,
     // What the column head's status line (above the Bands card) reports as
-    // the audio source. A
-    // renderer has no local analyser — its bands arrive over the room.
+    // the audio source. A page that follows another device has no local
+    // analyser — its bands arrive over the room.
     getAudioStatus: () => ({
-      source: syntheticFeed ? "synthetic" : mode === "renderer" ? "remote" : capture ? captureAudioSource(capture.kind) : "none",
+      source: !ownInput() ? "remote" : syntheticFeed ? "synthetic" : capture ? captureAudioSource(capture.kind) : "none",
       sampleRate: capture?.context.sampleRate ?? null,
     }),
-    // The Input card's Source row. Null (row hidden) on a renderer or the
-    // synthetic feed — see DeviceMenuDeps.getSourceState's doc comment.
-    getSourceState: () => (mode === "renderer" || syntheticFeed ? null : currentSourceState()),
+    // The Input card's Source row. Null (row hidden) on a page that follows
+    // another device or the synthetic feed — see DeviceMenuDeps.getSourceState's
+    // doc comment.
+    getSourceState: () => (!ownInput() || syntheticFeed ? null : currentSourceState()),
     // No capture yet (e.g. the start prompt is up because autoStartSource()
     // refused to auto-open a display picker) — the chip tap itself IS the
     // explicit gesture, so start fresh rather than hot-swap: swapAudioSource
@@ -1394,7 +1536,7 @@ function wireDeviceMenu(): void {
     // synchronous up to ensureAudio so a display choice keeps the tap's
     // transient activation.
     onAudioSourceChange: (choice) => {
-      if (!bandAnalyser && mode !== "renderer" && !syntheticFeed) {
+      if (!bandAnalyser && ownInput() && !syntheticFeed) {
         setAudioSourceChoice(choice);
         void ensureAudio(choice);
       } else void swapAudioSource(choice);
@@ -1648,6 +1790,21 @@ function wireRoomControls(conn: AnyConn, invite: () => RoomInvite | null, owner:
     setDevice: (targetId, patch) => {
       conn.sendDeviceSet(targetId, patch);
     },
+    // This device's own ears act inside the tap, before the room echoes them:
+    // iPad Safari opens the microphone only inside a gesture.
+    onSelfEars: (patch) => {
+      // A choice the room will refuse (a feed can't follow itself) changes
+      // nothing here: acting early would drop the capture and the room's
+      // refusal would not bring it back. The Room view sends Follow with a
+      // feed it can name (roomView.ts followPatch); a `follow` alone means
+      // following.
+      const { records } = recordsFromRoster(conn.currentRoster);
+      if (!applyDeviceSet(records, conn.deviceId, patch).ok) return;
+      const ears: Ears = patch.ears ?? "follow";
+      setPendingEars(ears);
+      syncEars();
+      if (ears === "own") void ensureAudio("mic");
+    },
     forgetDevice: owner
       ? (targetId) => {
           conn.forgetDevice(targetId);
@@ -1734,12 +1891,22 @@ async function openHostRoom(): Promise<HostRoomSession> {
   return session;
 }
 
-/** The controller's side of the look protocol (net/lookSync.ts): what the
- *  phone's panel changes goes out through tick(), and what the room says
- *  comes back through the connection's look messages. What the phone reads and
- *  writes is net/controllerLook.ts, which remembers the room's scene and palette
- *  even when this phone can't show them. */
-function startControllerLook(conn: ControllerConnection): void {
+/** This device's side of the room's Main (net/mainPlay.ts), for every member
+ *  of a keyed room: the laptop that hosts it, a phone or tablet controller, a
+ *  keyed spectator. What this device's panel changes is its preview and goes
+ *  nowhere until the bar's Play sends it; what the room says comes back through
+ *  the connection's look messages and, when this device follows Main, is
+ *  shown through `apply` below.
+ *
+ *  What the device reads and writes is net/controllerLook.ts, which remembers
+ *  the room's scene and palette ids even when this device can't show them (a
+ *  phone), so Play never sends a fallback over the room's choice. `apply` is
+ *  what following Main means here: the room-scope storage first (on the laptop
+ *  that is the real localStorage), then the palette, then the scene, as the TV's
+ *  `applyDoc` does; the laptop then hands the result on to its pop-out. The
+ *  window itself switches at once even when Main was played with a hold: only a
+ *  TV and the pop-out walk a glide (net/outputGlide.ts). */
+function startMainPlay(conn: AnyConn, isOwner: boolean): MainPlay {
   const look = createControllerLook({
     paletteId: () => palette.id,
     canShowPalette: (id) => PALETTES.some((p) => p.id === id),
@@ -1755,23 +1922,36 @@ function startControllerLook(conn: ControllerConnection): void {
     applyStorage: (storage) => applyRoomStorage(storage, localStorage),
   });
   controllerLook = look;
-  const sync = createLookSync({
-    read: look.io.read,
-    write: look.io.write,
+  const play = createMainPlay({
     send: (msg) => conn.sendLook(msg),
-    onReject: (reason) =>
-      showHud(reason === "size" ? "Settings too large to sync" : "Not allowed to change this room", true),
+    capture: look.io.read,
+    apply(doc, glideMs) {
+      look.io.write(doc);
+      // The pop-out is one more Main screen of the laptop: it follows too, and
+      // walks the glide this window cannot.
+      if (outputBridge?.status().open) outputBridge.go(glideMs);
+    },
+    // Null until the roster has this device: the room sends the snapshot first.
+    screen: () => conn.self?.screen ?? null,
+    isOwner,
+    nameOf: (id) => conn.currentRoster.find((d) => d.deviceId === id)?.name ?? null,
   });
+  play.onNeedSnapshot(() => conn.requestLook());
   conn.onLook((m) => {
-    if (m.type === "look") sync.onSnapshot(m.rev, m.doc);
-    else if (m.type === "lookPatch") sync.onPatch(m.rev, m);
-    else if (m.type === "lookAck") sync.onAck(m.n, m.rev);
-    else sync.onReject(m.n, m.reason);
+    if (m.type === "look") play.onSnapshot(m.rev, m.doc);
+    else if (m.type === "lookPatch") play.onPatch(m.rev, m);
+    else if (m.type === "lookAck") play.onAck(m.n, m.rev);
+    else {
+      play.onReject(m.n, m.reason);
+      showHud(m.reason === "size" ? "Settings too large to send to Main" : "Not allowed to change this room", true);
+    }
   });
   conn.onState((s) => {
-    if (s !== "open") sync.onDisconnect();
+    if (s !== "open") play.onDisconnect();
   });
-  window.setInterval(() => sync.tick(), LOOK_PUBLISH_MS);
+  conn.onRosterChange(() => play.onScreenKnown());
+  mainPlay = play;
+  return play;
 }
 
 /** How long the phone waits for a TV it has just handed to the room to show up
@@ -1902,7 +2082,7 @@ function startController(
   isController = true;
   roomCode = target.room;
   ownRoomKey = target.key;
-  document.body.classList.add("controller"); // index.html: no sound-source picker on the gallery
+  document.body.classList.add("controller"); // index.html: the badge's place and cursor
   const conn = new ControllerConnection(target.room, { auth: { roomKey: target.key }, reconnect: true, device: thisDevice() });
   controllerConn = conn;
 
@@ -1935,7 +2115,7 @@ function startController(
       }
     }
   });
-  startControllerLook(conn);
+  startMainPlay(conn, false);
 
   // A TV scanned before the laptop is waiting in storage; this page's own link,
   // if it has one, is the newer of the two. A link that carries a TV's QR is
@@ -1987,7 +2167,7 @@ async function enterViz(next: Scene): Promise<void> {
   sceneVersion.style.display = "inline";
   outputControls?.setVisible(true);
 
-  if (mode !== "renderer") void ensureAudio();
+  if (ownInput()) void ensureAudio();
   updateMicPrompt();
   reportUsage();
   void requestWakeLock();
@@ -2200,7 +2380,9 @@ async function boot(): Promise<void> {
       roomCode,
       plan.key ? { auth: { roomKey: plan.key }, reconnect: true, device: thisDevice() } : { device: thisDevice() },
     );
-    startRendererDisconnectWatch();
+    // Only the old keyless join falls back to a mic of its own; a keyed
+    // member stays in the room and may be set to its own input there.
+    if (!plan.key) startRendererDisconnectWatch();
   } else if (plan.kind === "solo") {
     // A TV link that didn't parse, on a phone with no controller session:
     // the page on its own, not a new room.
@@ -2235,7 +2417,6 @@ async function boot(): Promise<void> {
         });
       }
       mode = "host";
-      hostConn.onRosterChange(feedScreens);
     } catch (err) {
       console.warn("Room server unreachable, running solo:", err);
       mode = "solo";
@@ -2269,8 +2450,15 @@ async function boot(): Promise<void> {
     }
   }
 
+  // Every member of a keyed room plays to and follows its Main (a controller
+  // started its own in startController). The laptop that claimed the room is
+  // its owner; a keyed spectator joined a room that someone else owns.
+  const joined = activeConn();
+  if (joined && joined.keyed && !isController) startMainPlay(joined, joined === hostConn);
+
   wireDeviceMenu();
   const conn = activeConn();
+  if (conn) wireEars(conn);
   // Same link as the room-code badge's overlay: the controller link for the
   // laptop's keyed room, the plain/watch link for any other room member.
   if (conn) {
@@ -2298,36 +2486,37 @@ async function boot(): Promise<void> {
   });
   fsBtn.addEventListener("click", () => immersive!.toggle());
 
-  // A phone controller has no pop-out: no bridge, no Cue/Play buttons or keys
-  // (every other use of these two is null-safe, and #outBtn/#cueBtn/#goBtn
-  // stay hidden as index.html ships them).
+  // The bar (CUE / PLAY / state line). A laptop has the pop-out window, which
+  // has a Cue and a Play of its own; a keyed room's Main is one more output next
+  // to it (net/roomBridge.ts), and a controller has only that one (its POP OUT
+  // button stays hidden, index.html). A device in no keyed room has only the
+  // pop-out; everything else that touches these is null-safe.
+  const play = mainPlay;
+  const joinedConn = activeConn();
   if (!isController) {
     outputBridge = createOutputBridge({
       transport: createBroadcastTransport<ToOutput, ToMain>(),
       look: () => ({ scene: scene.id, palette: palette.id }),
       power: () => outputPower,
     });
-    let controlsBridge: OutputBridge = outputBridge;
-    // A keyed laptop's screens take Cue and Play too; a legacy room has no
-    // look to publish. The bar drives both outputs, the pop-out and the room.
-    const host = hostConn;
-    if (host && hostRoomKey) {
-      roomBridge = createRoomBridge({
-        send: (m) => host.sendLook(m),
-        screens: () => host.currentRoster.filter((d) => d.role === "renderer" && d.online).length,
-        look: () => ({ scene: scene.id, palette: palette.id }),
-        capture: () => captureRoomStorage(localStorage),
-        showRoom: () => roomCodeEl.click(),
-      });
-      host.onLook((m) => {
-        if (m.type === "lookReject") roomBridge?.refused();
-      });
-      host.onState((s) => {
-        if (s === "open") roomBridge?.reconnected();
-      });
-      controlsBridge = combineBridges([outputBridge, roomBridge]);
-    }
-    outputControls = createOutputControls(controlsBridge, { popBtn: outBtn, cueBtn, goBtn, stateEl: outStateEl, barEl: outBarEl });
+  }
+  if (play && joinedConn) {
+    roomBridge = createRoomBridge({
+      play,
+      present: () => joinedConn.currentRoster.some((d) => d.online && d.deviceId !== joinedConn.deviceId),
+      showRoom: () => roomCodeEl.click(),
+    });
+  }
+  const controlsBridge = outputBridge && roomBridge ? combineBridges([outputBridge, roomBridge]) : (outputBridge ?? roomBridge);
+  if (controlsBridge) {
+    outputControls = createOutputControls(controlsBridge, {
+      popBtn: outBtn,
+      cueBtn,
+      goBtn,
+      takeBtn,
+      stateEl: outStateEl,
+      barEl: outBarEl,
+    });
     outputControls.setVisible(inViz);
     wireOutputKeys(outputControls);
   }
@@ -2508,7 +2697,8 @@ async function boot(): Promise<void> {
   // The mic permission is known and the page routed: a screen already in the
   // room (a laptop that reloaded with its TV paired) can be fed now.
   screensReady = true;
-  if (hostConn) feedScreens(hostConn.currentRoster);
+  const feedConn = activeConn();
+  if (feedConn) feedFollowers(feedConn.currentRoster);
 
   // Dynamic import behind a literal DEV check: Vite replaces
   // import.meta.env.DEV with `false` in a production build, so this branch
@@ -2545,6 +2735,23 @@ async function boot(): Promise<void> {
       scenes: () =>
         listScenes().map((s) => ({ id: s.id, name: s.name, draft: DRAFT_SCENE_IDS.has(s.id), paid: PAID_SCENE_IDS.has(s.id) })),
     });
+    // For headless room tests (tools/ and the e2e runs): what this page is
+    // doing about its ears right now, read live off the connection. Added to
+    // the object initTuning just published, so it exists in dev builds only.
+    const viz = (window as unknown as { __viz?: Record<string, unknown> }).__viz;
+    if (viz) {
+      viz.room = () => {
+        const c = activeConn();
+        return {
+          ownInput: ownInput(),
+          delayMs: c ? c.pictureDelayMs() : 0,
+          msSinceLastFrame: c ? c.msSinceLastFrame : Infinity,
+          hasCapture: capture !== null,
+          selfEars: c?.self?.ears ?? null,
+          deviceId: c ? c.deviceId : null,
+        };
+      };
+    }
   }
 
   lastRafMs = performance.now();
@@ -2553,7 +2760,7 @@ async function boot(): Promise<void> {
   // output (and a paired TV) of the frames this loop sends — see
   // net/backgroundTick.ts.
   startBackgroundTick(() => {
-    if (shouldTickInBackground(document.hidden, (outputBridge?.status().open ?? false) || hostConn !== null)) tick();
+    if (shouldTickInBackground(document.hidden, (outputBridge?.status().open ?? false) || hostConn !== null || (activeConn() !== null && ownInput()))) tick();
   });
 }
 
@@ -2652,16 +2859,19 @@ function currentVisual(rateScale: number): FeatureFrame | null {
   // tempoSource) sets this back — see its own doc comment on the module
   // state above for why host/renderer/TV never do.
   lastTempoHits = undefined;
-  if (syntheticFeed) {
-    // Synthetic frames are generated directly, not sampled from a real
-    // signal — there's nothing for the scope to trace, so its card
-    // correctly stays hidden here (see audioMeters.ts).
-    clearLocalReadings();
-    return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
-  }
+  const conn = activeConn();
 
-  if (mode === "solo") {
-    if (!bandAnalyser || !capture) {
+  if (mode === "solo" || !conn) {
+    // Solo. (A page that has a room mode but no connection is mid-fallback
+    // from a lost room, and has nothing yet.)
+    if (syntheticFeed && mode === "solo") {
+      // Synthetic frames are generated directly, not sampled from a real
+      // signal — there's nothing for the scope to trace, so its card
+      // correctly stays hidden here (see audioMeters.ts).
+      clearLocalReadings();
+      return syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000);
+    }
+    if (mode !== "solo" || !bandAnalyser || !capture) {
       clearLocalReadings();
       return null;
     }
@@ -2685,34 +2895,47 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     return f;
   }
 
-  if (mode === "host") {
-    if (!bandAnalyser || !capture || !hostConn) {
+  // In a room and listening to this device's own input (any role: the
+  // laptop, or an iPad or phone set to its own input): the frame goes through
+  // the connection — onto the wire when someone follows this device — and
+  // what is drawn is the connection's own delayed sample, so this page and
+  // the devices that follow it show the same instant.
+  if (ownInput()) {
+    if (syntheticFeed) {
+      // The synthetic feed stands in for the mic, so a room test can have a
+      // laptop or an iPad feed followers without any audio hardware.
+      clearLocalReadings();
+      conn.sendFrame(syntheticFeed.frame((performance.now() - syntheticStartMs) / 1000));
+      return sampleToVisual(conn.sample());
+    }
+    if (!bandAnalyser || !capture) {
       clearLocalReadings();
       return null;
     }
     const { f } = readLocalCapture(bandAnalyser, capture, rateScale);
-    // Overwritten before hostConn.sendFrame() below, same as solo mode
-    // above, so the TV and any renderer get the fixed-hop tempo over the
-    // unchanged wire — see currentVisual()'s solo branch for the full
-    // comment. No tempoHits here: this device's own visual timeline (what
-    // sampleToVisual(hostConn.sample()) returns below) is the jitter
-    // buffer's room time, which this capture's local AudioContext onset
-    // times wouldn't line up with — see beatClock.ts's file header.
+    // Overwritten before conn.sendFrame() below, same as solo mode above, so
+    // every follower gets the fixed-hop tempo over the unchanged wire — see
+    // currentVisual()'s solo branch for the full comment. No tempoHits here:
+    // this device's own visual timeline (what sampleToVisual(conn.sample())
+    // returns below) is the jitter buffer's room time, which this capture's
+    // local AudioContext onset times wouldn't line up with — see
+    // beatClock.ts's file header.
     if (tempoSource) {
       f.bpm = tempoSource.bpm;
       tempoSource.drainOnsets(); // unused here (see above); drained so they don't queue
     }
-    hostConn.sendFrame(f);
-    return sampleToVisual(hostConn.sample());
+    conn.sendFrame(f);
+    return sampleToVisual(conn.sample());
   }
 
-  // renderer — no local mic, so no raw signal to show.
+  // Following another device — no local input, so no raw signal to show.
   clearLocalReadings();
-  // A phone controller previews the host's frames and has nothing to fall back
-  // to: no solo mic, and its own socket reconnects (net/room.ts). A laptop that
-  // stops sending is a different matter, since the socket stays open; the
-  // preview goes silent and the badge says it is waiting (net/controllerPreview.ts),
-  // never fallBackToSolo as the legacy renderer below does.
+  // A page that joined by the QR keeps its preview path: it has nothing to
+  // fall back to (no solo mic), and its own socket reconnects (net/room.ts). A
+  // feed that stops sending is a different matter, since the socket stays
+  // open; the preview goes silent and the badge says it is waiting
+  // (net/controllerPreview.ts), never fallBackToSolo as the legacy renderer
+  // below does.
   if (controllerConn) {
     const preview = controllerPreview(
       controllerConn.sample(),
@@ -2723,7 +2946,9 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     setLaptopWaiting(preview.waiting);
     return sampleToVisual(preview.sample);
   }
-  if (rendererConn) {
+  // The old keyless spectator: no records, so no feed to switch to — when the
+  // host goes quiet it takes a mic of its own.
+  if (rendererConn && !rendererConn.keyed) {
     const s = rendererConn.sample();
     if (s) rendererHasData = true;
     if (rendererHasData && rendererConn.msSinceLastFrame > STALE_TIMEOUT_MS) {
@@ -2731,7 +2956,8 @@ function currentVisual(rateScale: number): FeatureFrame | null {
     }
     return sampleToVisual(s);
   }
-  return null;
+  // A laptop or a keyed spectator set to follow another device.
+  return sampleToVisual(conn.sample());
 }
 
 function sampleToVisual(s: VisualSample | null): FeatureFrame | null {
@@ -2977,7 +3203,7 @@ function capturePicture(nowRafMs: number): void {
  *  share picker is open, so the demo keeps playing until real audio takes
  *  over rather than blinking to black in between. */
 function idlePreviewActive(): boolean {
-  return inViz && mode !== "renderer" && !syntheticFeed && !bandAnalyser;
+  return inViz && ownInput() && !syntheticFeed && !bandAnalyser;
 }
 
 /** One tick of the demo groove behind the start prompt — the same pipeline
