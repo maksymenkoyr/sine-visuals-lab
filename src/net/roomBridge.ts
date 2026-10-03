@@ -93,7 +93,9 @@ export function createRoomBridge(opts: RoomBridgeOptions): RoomBridge {
       play.take();
       emitIfChanged();
     },
-    // Frames reach a TV from HostConnection.sendFrame, and a TV's quality is its own.
+    // Frames reach a TV from HostConnection.sendFrame. A TV's quality is not the
+    // Power card's output choice: it is the TV's own record in the room, set in
+    // the Room view (server/roomDevices.ts `quality`).
     pushFrame() {},
     sendPower() {},
     outputStatus: () => null,

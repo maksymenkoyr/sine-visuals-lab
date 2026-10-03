@@ -3,7 +3,8 @@
 import "./net/tvStorageBoot.ts";
 import "./render/scenes/index.ts"; // side-effect: registers built-in scenes
 import { createGL, resizeCanvasToDisplaySize, watchContextLoss } from "./render/gl.ts";
-import { detectQuality, presetAllows, qualitySettings, type QualitySettings } from "./render/quality.ts";
+import { detectQuality, presetAllows, qualitySettings, type QualityPreset, type QualitySettings } from "./render/quality.ts";
+import type { QualityChoice } from "./render/qualityPref.ts";
 import { getScene, listScenes, FULL_VIEWPORT, type Scene, type SceneContext, type Viewport } from "./render/scene.ts";
 import { getPalette, type Palette } from "./render/palette.ts";
 import { createAnimClock } from "./render/animClock.ts";
@@ -183,6 +184,13 @@ let scene: Scene = getScene("spectrum")!;
 let palette: Palette = getPalette("neon");
 let viewport: Viewport = FULL_VIEWPORT;
 let quality: QualitySettings = qualitySettings("mid");
+/** What detectQuality() found on this TV: what an `auto` choice renders at,
+ *  and what the hello tells the Room view. Null until the benchmark is done. */
+let detectedPreset: QualityPreset | null = null;
+/** The room's Quality choice for this screen (server/roomDevices.ts
+ *  `quality`): a TV page has no panel, so the Room view sets it. `auto` until
+ *  a roster says otherwise, which is how a TV rendered before the choice. */
+let qualityChoice: QualityChoice = "auto";
 let sceneCtx: SceneContext;
 let join: JoinScreen;
 
@@ -256,9 +264,33 @@ function availableScenes(): Scene[] {
   return listScenes().filter((s) => presetAllows(s, quality.preset));
 }
 
-/** Tells the room what this screen shows, so the roster stays current. */
+/** Tells the room what this screen shows, so the roster stays current, and
+ *  what its own benchmark picks, so the Room view can say what Auto means here. */
 function announce(): void {
-  conn?.sendHello(scene.id, palette.id, viewport);
+  conn?.sendHello(scene.id, palette.id, viewport, detectedPreset ?? undefined);
+}
+
+function resolvePreset(): QualityPreset {
+  return qualityChoice === "auto" ? (detectedPreset ?? quality.preset) : qualityChoice;
+}
+
+/** The roster's Quality for this screen. When the preset it resolves to moves,
+ *  `quality` is changed in place (the scene context and the governor hold it),
+ *  the governor starts again from the new baseline, and the scene is mounted
+ *  again, since geometry is sized at init. A scene whose `minQuality` is above
+ *  the new preset keeps running as it was mounted, as the pop-out output does
+ *  (output.ts's applyQuality); scenes the look picks from then on must allow
+ *  the preset. Before the GL context is up only the choice is kept: main()
+ *  resolves it when it builds `quality`. */
+function onQualityChoice(choice: QualityChoice | undefined): void {
+  if (choice === undefined) return;
+  qualityChoice = choice;
+  if (!governor) return;
+  const preset = resolvePreset();
+  if (preset === quality.preset) return;
+  Object.assign(quality, qualitySettings(preset));
+  governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
+  if (presetAllows(scene, quality.preset)) switchScene(scene);
 }
 
 /** Swaps the running scene for `next`. If `next`'s init() throws (a shader
@@ -512,6 +544,7 @@ function joinRoom(room: string, key: string | null): void {
     if (conn !== c) return;
     onRoster(r);
     onScreenChoice(c.self?.screen);
+    onQualityChoice(c.self?.quality);
   });
   c.onState((s) => {
     if (conn !== c) return;
@@ -670,7 +703,8 @@ async function main(): Promise<void> {
     () => location.reload(),
   );
 
-  quality = qualitySettings(await detectQuality());
+  detectedPreset = await detectQuality();
+  quality = qualitySettings(resolvePreset());
   sceneCtx = { gl, quality };
   if (!presetAllows(scene, quality.preset)) scene = availableScenes()[0] ?? scene;
   governor = createQualityGovernor(quality, targetFrameIntervalMs(quality.preset));
@@ -708,6 +742,10 @@ async function main(): Promise<void> {
       },
       get palette() {
         return palette.id;
+      },
+      /** The preset this TV renders at, and what its benchmark picked. */
+      get quality() {
+        return { preset: quality.preset, detected: detectedPreset, choice: qualityChoice };
       },
       get msSinceLastFrame() {
         return conn ? conn.msSinceLastFrame : Infinity;

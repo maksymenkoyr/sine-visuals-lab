@@ -4,7 +4,7 @@
  * Cloudflare adapter around this (it owns the WebSocketPair, the hibernation
  * calls and `ctx.storage`); the rules themselves are server/roomRules.ts (who
  * may join, who may send what), server/roomDevices.ts (the device records:
- * name, ears, screen) and server/lookDoc.ts (the look document and its
+ * name, ears, screen, quality) and server/lookDoc.ts (the look document and its
  * patch). The messages are described in src/net/roomMessages.ts.
  *
  * The room stays a relay. A claimed room keeps one record per device that ever
@@ -72,10 +72,12 @@ import {
   kindForRole,
   ownerId,
   parseKind,
+  parsePreset,
   parseRecord,
   sanitizeDeviceSet,
   type DeviceKind,
   type DeviceRecord,
+  type ScreenPreset,
 } from "./roomDevices.ts";
 
 export interface Viewport {
@@ -104,6 +106,9 @@ export interface Attachment {
   keyed: boolean;
   kind: DeviceKind;
   hasMic: boolean;
+  /** A TV's hello says which preset its own GPU benchmark picks
+   *  (server/roomDevices.ts `quality`); listed in the roster while it is online. */
+  autoQuality?: ScreenPreset;
   joinName?: string;
 }
 
@@ -214,6 +219,7 @@ export function readAttachment(raw: unknown): Attachment {
     keyed: o.keyed === true,
     kind: parseKind(o.kind) ?? kindForRole(role),
     hasMic: typeof o.hasMic === "boolean" ? o.hasMic : role !== "renderer",
+    autoQuality: parsePreset(o.autoQuality),
     joinName: cleanName(o.joinName),
   };
 }
@@ -533,6 +539,7 @@ export class RoomCore {
       scene: shortString(msg.scene) ?? a.scene,
       palette: shortString(msg.palette) ?? a.palette,
       viewport: parseViewport(msg.viewport) ?? a.viewport,
+      autoQuality: parsePreset(msg.autoQuality) ?? a.autoQuality,
     };
     if (a.keyed) {
       const record = this.records.get(a.deviceId);
@@ -550,7 +557,7 @@ export class RoomCore {
   }
 
   /** `deviceSet`: any member of a claimed room changes one device's name,
-   *  ears or screen (server/roomDevices.ts `applyDeviceSet` has the rules). An
+   *  ears, screen or quality (server/roomDevices.ts `applyDeviceSet` has the rules). An
    *  accepted change is stored and the roster goes to everyone; a refused one
    *  is answered to the sender alone with `deviceReject` and the reason. */
   private deviceSet(ws: CoreSocket, sender: Attachment, msg: Record<string, unknown>): void {
@@ -770,9 +777,9 @@ export class RoomCore {
 
   /** Who is in the room, to every live socket. A claimed room lists every
    *  device record, owner first and then in the order they were added, online
-   *  or not, with its name, ears and screen (the Room view draws from it); the
-   *  scene, palette and viewport come from one of the device's live sockets,
-   *  and are empty / full while it is offline. Only keyed sockets are told: a
+   *  or not, with its name, ears, screen and quality (the Room view draws from
+   *  it); the scene, palette, viewport and a TV's autoQuality come from one of
+   *  the device's live sockets, and are empty / full / null while it is offline. Only keyed sockets are told: a
    *  keyless one left over from before the claim is being closed. A room
    *  nobody has claimed keeps the shape it always had: the live hosts and
    *  renderers (controllers see the roster but are not in it), to everyone. */
@@ -800,6 +807,8 @@ export class RoomCore {
           ears: r.ears,
           follow: r.follow,
           screen: r.screen,
+          quality: r.quality,
+          autoQuality: a?.autoQuality ?? null,
           online: mine !== undefined,
           owner: r.role === "host",
         };

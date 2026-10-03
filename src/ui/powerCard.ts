@@ -1,5 +1,5 @@
 import type { PowerMode } from "../render/powerMode.ts";
-import type { QualityChoice } from "../render/qualityPref.ts";
+import { PRESET_LABEL, QUALITY_OPTIONS, type QualityChoice } from "../render/qualityPref.ts";
 import { RESOLUTION_MAX, RESOLUTION_MIN, type PreviewSize } from "../render/outputPower.ts";
 import type { QualityPreset } from "../render/quality.ts";
 import { AUTO_SKY, FONT_MONO, POWER_SQUARE_PX, POWER_TEAL, STACK_BELOW_PX, withAlpha } from "./controlsTheme.ts";
@@ -395,16 +395,6 @@ const qualityChipLitStyle = `${chipBtnLitStyle} flex: 1 1 auto; text-align: cent
 // visible even when the user has picked something else — and composes with
 // the lit background when it's also the selected chip.
 const recommendedShadow = `inset 0 -2px 0 ${withAlpha(POWER_TEAL, 0.55)}`;
-
-const QUALITY_OPTIONS: { choice: QualityChoice; text: string }[] = [
-  { choice: "auto", text: "Auto" },
-  { choice: "high", text: "High" },
-  { choice: "mid", text: "Mid" },
-  { choice: "low", text: "Low" },
-  { choice: "floor", text: "Floor" },
-];
-
-const PRESET_LABEL: Record<QualityPreset, string> = { high: "High", mid: "Mid", low: "Low", floor: "Floor" };
 
 /** The new editable row: a wrapping chip group covering Auto plus every
  *  QualityPreset. Mirrors createModeRow's shape (label, chips, hint) but

@@ -8,12 +8,14 @@
  *
  * Client to room:
  * - `ping { t0 }` — clock sync, any role; answered with `pong`.
- * - `hello { scene, palette, viewport?, kind?, hasMic? }` — a device announcing
- *   what it shows, and optionally what it is: its `kind` and whether it can
- *   open a microphone, the same two things the join URL carries. The room
- *   answers by broadcasting `roster`. The room never takes a name from a
+ * - `hello { scene, palette, viewport?, kind?, hasMic?, autoQuality? }` — a
+ *   device announcing what it shows, and optionally what it is: its `kind` and
+ *   whether it can open a microphone, the same two things the join URL
+ *   carries. A TV adds `autoQuality`, the preset its GPU benchmark picks (what
+ *   its `quality: "auto"` renders at). The room answers by broadcasting
+ *   `roster`. The room never takes a name from a
  *   hello; a name is chosen with `deviceSet`.
- * - `deviceSet { targetId, name?, ears?, follow?, screen? }` — change one
+ * - `deviceSet { targetId, name?, ears?, follow?, screen?, quality? }` — change one
  *   member's settings (server/roomDevices.ts says what each means and who may
  *   ask). Any member of a claimed room may; the answer is a new `roster`, or
  *   `deviceReject` when the room refused.
@@ -34,8 +36,8 @@
  * - `pong { t0, tServer }`.
  * - `roster { devices }` — every member of a claimed room, online or not, with
  *   what the room stores for it: `kind`, `name`, `hasMic`, `ears`, `follow`,
- *   `screen`, `online`, `owner` (and what it shows now: `scene`, `palette`,
- *   `viewport`). An unclaimed (legacy) room sends only the older fields, and
+ *   `screen`, `quality`, `online`, `owner` (and what it shows now: `scene`,
+ *   `palette`, `viewport`, and a TV's `autoQuality` while it is online). An unclaimed (legacy) room sends only the older fields, and
  *   parseRosterEntry fills the rest with what such a device would have been
  *   given. `recordsFromRoster` turns a roster into the records that
  *   server/roomDevices.ts reads, so the client asks the same `feedOf` and
@@ -87,10 +89,14 @@ import {
   kindForRole,
   parseEars,
   parseKind,
+  parseQuality,
+  parsePreset,
   parseScreen,
   type DeviceKind,
   type DeviceRecord,
   type Ears,
+  type ScreenPreset,
+  type ScreenQuality,
   type ScreenUse,
 } from "../../server/roomDevices.ts";
 
@@ -110,6 +116,12 @@ export interface RosterEntry {
   /** The feed this device listens through (a device id), or null for the owner. */
   follow: string | null;
   screen: ScreenUse;
+  /** The quality a TV renders at (server/roomDevices.ts). */
+  quality: ScreenQuality;
+  /** What `quality: "auto"` resolves to on this device: the preset its own GPU
+   *  benchmark picked, as its hello said. Null until a TV has said it, and for
+   *  every other device. */
+  autoQuality: ScreenPreset | null;
   /** Has a live socket in the room right now. */
   online: boolean;
   owner: boolean;
@@ -202,6 +214,8 @@ function parseRosterEntry(raw: unknown): RosterEntry | null {
     ears: parseEars(raw.ears) ?? (role === "host" ? "own" : "follow"),
     follow: typeof raw.follow === "string" ? raw.follow : null,
     screen: parseScreen(raw.screen) ?? "main",
+    quality: parseQuality(raw.quality) ?? "auto",
+    autoQuality: parsePreset(raw.autoQuality) ?? null,
     online: raw.online !== false,
     owner: raw.owner === true || (raw.owner === undefined && role === "host"),
   };
@@ -221,6 +235,7 @@ export function recordsFromRoster(roster: RosterEntry[]): { records: Map<string,
       ears: e.ears,
       follow: e.follow,
       screen: e.screen,
+      quality: e.quality,
       kind: e.kind,
       hasMic: e.hasMic,
       role: e.role,

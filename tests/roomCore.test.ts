@@ -1178,24 +1178,37 @@ describe("the roster", () => {
     const host = await room.claimed();
     const phone = await room.controller("phone", { name: "Ann's phone", mic: true });
     const tv = await room.renderer();
-    room.say(tv, { type: "hello", scene: "mesh", palette: "ember", viewport: { x: 0, y: 0, w: 0.5, h: 1 } });
-    room.say(phone, { type: "hello", scene: "phone-scene", palette: "ice" });
+    room.say(tv, { type: "hello", scene: "mesh", palette: "ember", viewport: { x: 0, y: 0, w: 0.5, h: 1 }, autoQuality: "mid" });
+    room.say(phone, { type: "hello", scene: "phone-scene", palette: "ice", autoQuality: "ultra" });
 
     const devices = [
       {
         deviceId: "laptop", role: "host", scene: "", palette: "", viewport: { x: 0, y: 0, w: 1, h: 1 },
-        kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main", online: true, owner: true,
+        kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main", quality: "auto", autoQuality: null, online: true, owner: true,
       },
       {
         deviceId: "phone", role: "controller", scene: "phone-scene", palette: "ice", viewport: { x: 0, y: 0, w: 1, h: 1 },
-        kind: "phone", name: "Ann's phone", hasMic: true, ears: "follow", follow: null, screen: "off", online: true, owner: false,
+        kind: "phone", name: "Ann's phone", hasMic: true, ears: "follow", follow: null, screen: "off", quality: "auto", autoQuality: null, online: true, owner: false,
       },
       {
         deviceId: "tv", role: "renderer", scene: "mesh", palette: "ember", viewport: { x: 0, y: 0, w: 0.5, h: 1 },
-        kind: "tv", name: "TV", hasMic: false, ears: "follow", follow: null, screen: "main", online: true, owner: false,
+        kind: "tv", name: "TV", hasMic: false, ears: "follow", follow: null, screen: "main", quality: "auto", autoQuality: "mid", online: true, owner: false,
       },
     ];
     for (const ws of [host, phone, tv]) expect(ws.msgs("roster").pop()).toEqual({ type: "roster", devices });
+  });
+
+  it("stores a TV's quality from any member, and lists what its own benchmark picks only while it is online", async () => {
+    const room = new Room();
+    const host = await room.claimed();
+    const phone = await room.controller("phone");
+    const tv = await room.renderer();
+    room.say(tv, { type: "hello", scene: "mesh", autoQuality: "high" });
+    room.say(phone, { type: "deviceSet", targetId: "tv", quality: "low" });
+    const listed = (ws: typeof host) => roster(ws).find((d) => d.deviceId === "tv");
+    for (const ws of [host, phone, tv]) expect(listed(ws)).toMatchObject({ quality: "low", autoQuality: "high" });
+    room.close(tv);
+    expect(listed(host)).toMatchObject({ quality: "low", autoQuality: null, online: false });
   });
 
   it("is sent to every socket when one opens, and when one leaves, which leaves its device listed but offline", async () => {
@@ -1743,6 +1756,14 @@ describe("readAttachment", () => {
     const room = new Room();
     const tv = await room.need({ role: "renderer", deviceId: "tv" });
     expect(readAttachment(JSON.parse(JSON.stringify(tv.attachment)))).toEqual(tv.attachment);
+  });
+
+  it("keeps what a TV's hello said its own benchmark picks, and drops a preset it doesn't know", async () => {
+    const room = new Room();
+    const tv = await room.need({ role: "renderer", deviceId: "tv" });
+    room.say(tv, { type: "hello", scene: "mesh", autoQuality: "low" });
+    expect(readAttachment(JSON.parse(JSON.stringify(tv.attachment))).autoQuality).toBe("low");
+    expect(readAttachment({ ...tv.attachment, autoQuality: "ultra" }).autoQuality).toBeUndefined();
   });
 
   it("upgrades the shape written before roles, keys and socket ids existed", () => {

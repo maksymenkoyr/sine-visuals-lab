@@ -49,6 +49,8 @@ function entry(over: Partial<RosterEntry> & { deviceId: string }): RosterEntry {
     ears: "follow",
     follow: null,
     screen: "off",
+    quality: "auto",
+    autoQuality: null,
     online: true,
     owner: false,
     ...over,
@@ -88,7 +90,7 @@ describe("parseControlMessage: clock, roster, devices", () => {
     const [h, t, c] = msg.devices;
     expect(h).toEqual({
       deviceId: "h", role: "host", scene: "mesh", palette: "p", viewport: { x: 0, y: 0, w: 1, h: 1 },
-      kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main", online: true, owner: true,
+      kind: "laptop", name: "Laptop", hasMic: true, ears: "own", follow: null, screen: "main", quality: "auto", autoQuality: null, online: true, owner: true,
     });
     expect(t).toMatchObject({ kind: "tv", name: "TV", hasMic: false, ears: "follow", screen: "main", online: true, owner: false });
     expect(c).toMatchObject({ kind: "phone", name: "Phone", hasMic: true, ears: "follow", screen: "main", owner: false });
@@ -184,7 +186,7 @@ describe("recordsFromRoster", () => {
     const { records, online } = recordsFromRoster(roster);
     expect([...records.keys()]).toEqual(["laptop", "tv", "ipad", "phone"]);
     expect(records.get("ipad")).toEqual({
-      name: "iPad", ears: "follow", follow: null, screen: "main", kind: "tablet", hasMic: true, role: "controller", added: 2, seen: 0,
+      name: "iPad", ears: "follow", follow: null, screen: "main", quality: "auto", kind: "tablet", hasMic: true, role: "controller", added: 2, seen: 0,
     });
     expect(records.get("laptop")?.added).toBe(0);
     expect([...online].sort()).toEqual(["laptop", "phone", "tv"]);
